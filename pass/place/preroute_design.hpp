@@ -1,5 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
+#include <algorithm>
 #include <map>
 #include <set>
 #include <string>
@@ -27,13 +28,8 @@ struct Preroute_design {
     if (dont_touch_pins.empty()) {
       return false;
     }
-    for (const auto& pin : net.connections) {
-      const auto label = pin.instance == "PIN" ? pin.pin : pin.instance + ":" + pin.pin;
-      if (dont_touch_pins.contains(label)) {
-        return true;
-      }
-    }
-    return false;
+    return std::ranges::any_of(net.connections,
+                               [&](const auto& pin) { return dont_touch_pins.contains(physical::connection_label(pin)); });
   }
 };
 }  // namespace livehd::placement

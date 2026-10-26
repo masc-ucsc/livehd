@@ -12,6 +12,9 @@
 #include "inou/lefdef/routing_rules.hpp"
 
 namespace livehd::placement::detail {
+static double elapsed_ms(std::chrono::steady_clock::time_point start) {
+  return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+}
 static Repeater_snapshot make_repeater_snapshot(const Result& original, const Repeater_graph& proposal,
                                                   const Preroute_binding& binding, const physical::Technology& tech,
                                                   Layer_rc route_rc,
@@ -329,8 +332,7 @@ Preroute_stage_result preroute_stage(const Result& original, const physical::Tec
   if (std::isfinite(length_limit)) {
     out.repeater_length_limit_um = length_limit;
   }
-  out.timings_ms["repeater_library"]
-      = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - library_start).count();
+  out.timings_ms["repeater_library"] = elapsed_ms(library_start);
   // The host just evaluated this physical snapshot. Ranking can reuse that
   // feedback; repeated Whatif::pin queries needlessly revisit the timer. Pending
   // caller edits require live queries instead. Every trial still rechecks timing
@@ -406,8 +408,7 @@ Preroute_stage_result preroute_stage(const Result& original, const physical::Tec
     return candidate.margin >= 0;
   });
   out.repeater_classification_complete = !expired();
-  out.timings_ms["repeater_classification"]
-      = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+  out.timings_ms["repeater_classification"] = elapsed_ms(start);
   auto prepared_options = options;
   if (!options.deferred_pg && !prepared_options.power_grid_occupancy && !original.floorplan.special_nets.empty()
       && out.repeater_margin_eligible != 0 && !expired()) {
@@ -424,12 +425,10 @@ Preroute_stage_result preroute_stage(const Result& original, const physical::Tec
       for (const auto& b : bindings) {
         out.records.push_back(record_for(b, "stage deadline"));
       }
-      out.timings_ms["power_grid_occupancy"]
-          = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - setup_start).count();
+      out.timings_ms["power_grid_occupancy"] = elapsed_ms(setup_start);
       return out;
     }
-    out.timings_ms["power_grid_occupancy"]
-        = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - setup_start).count();
+    out.timings_ms["power_grid_occupancy"] = elapsed_ms(setup_start);
   }
   const auto mark = timer.mark();
   try {
@@ -466,8 +465,7 @@ Preroute_stage_result preroute_stage(const Result& original, const physical::Tec
         && std::any_of(long_nets.begin(), long_nets.end(), [](const auto& candidate) { return candidate.margin >= 0; })) {
       const auto prepare_start = std::chrono::steady_clock::now();
       proposer.prepare();
-      out.timings_ms["repeater_trial_library"]
-          = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - prepare_start).count();
+      out.timings_ms["repeater_trial_library"] = elapsed_ms(prepare_start);
     }
     // Rejected trials preserve out.placed. Decode its fixed wires once for
     // snapshot validation, and invalidate only after an accepted tree changes
@@ -477,8 +475,7 @@ Preroute_stage_result preroute_stage(const Result& original, const physical::Tec
       if (!snapshot_wire_filter && candidate.margin >= 0 && !expired()) {
         const auto prepare_start = std::chrono::steady_clock::now();
         snapshot_wire_filter.emplace(repeater_wire_filter(tech, out.placed.floorplan));
-        out.timings_ms["repeater_snapshot_wire_filter"]
-            += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - prepare_start).count();
+        out.timings_ms["repeater_snapshot_wire_filter"] += elapsed_ms(prepare_start);
       }
       const auto& b           = candidate.binding;
       auto        record      = record_for(b, {});
@@ -501,7 +498,7 @@ Preroute_stage_result preroute_stage(const Result& original, const physical::Tec
           continue;
         }
         for (const auto& pin : net.connections) {
-          locked.push_back(pin.instance == "PIN" ? pin.pin : pin.instance + ":" + pin.pin);
+          locked.push_back(physical::connection_label(pin));
         }
       }
       // The pre-route proposer retains existing buffers and reads timing only
@@ -536,7 +533,7 @@ Preroute_stage_result preroute_stage(const Result& original, const physical::Tec
       std::optional<Repeater_snapshot> snapshot;
       Preroute_tree_trial              routed;
       const auto record_phase = [&](const char* name, const auto phase_begin) {
-        const auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - phase_begin).count();
+        const auto ms = elapsed_ms(phase_begin);
         record.timings_ms[name] += ms;
         out.timings_ms[name] += ms;
       };
@@ -632,7 +629,7 @@ Preroute_stage_result preroute_stage(const Result& original, const physical::Tec
         out.timings_ms["repeater_route_" + name] += phase_ms;
         record.timings_ms["route_" + name] = phase_ms;
       }
-      const auto ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - trial_start).count();
+      const auto ms = elapsed_ms(trial_start);
       out.timings_ms["repeater_trials"] += ms;
       if (!record.accepted) {
         record.timings_ms["repeater_trial"] = ms;

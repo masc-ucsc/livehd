@@ -87,7 +87,7 @@ std::vector<Preroute_binding> bind_preroute(const physical::Floorplan& frame, co
     pins.reserve(net.connections.size());
     bool tie = false, protected_net = false;
     for (const auto& pin : net.connections) {
-      const auto label = pin.instance == "PIN" ? pin.pin : pin.instance + ":" + pin.pin;
+      const auto label = physical::connection_label(pin);
       if (label.empty()) {
         throw std::invalid_argument("duplicate pre-route physical endpoint");
       }
@@ -176,11 +176,27 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
     result.timings_ms.emplace(name, std::chrono::duration<double, std::milli>(now - phase_start).count());
     phase_start = now;
   };
+  // Every binding yields one record, whether or not routing is attempted.
+  const auto record_for = [&](const Preroute_binding& b, std::string reason) {
+    const auto&     net = frame.nets[b.physical_net];
+    Preroute_record record{net.name, std::move(reason)};
+    record.pin_count           = net.connections.size();
+    record.estimated_length_um = rc.nets[b.rc_net].wire_length_um;
+    return record;
+  };
   phase("snapshot");
   if (options.deferred_pg && options.power_grid_occupancy) {
     throw std::invalid_argument("deferred PG cannot reuse a fixed power-grid occupancy snapshot");
   }
   std::optional<physical::Floorplan> completed_grid;
+  // Deferred PG publishes the last grid that admitted every accepted route.
+  const auto publish_grid = [&] {
+    if (completed_grid) {
+      result.frame.special_nets = std::move(completed_grid->special_nets);
+      result.frame.vias         = std::move(completed_grid->vias);
+      result.frame.terminals    = std::move(completed_grid->terminals);
+    }
+  };
   if (options.deferred_pg) {
     if (!options.straight_only || !frame.special_nets.empty()) {
       throw std::invalid_argument("deferred PG requires straight SAT routing and an unwired PG frame");
@@ -197,11 +213,12 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
   std::optional<physical::Routing_occupancy> occupancy_storage;
   std::unique_ptr<Route_capacity>            capacity;
   std::unique_ptr<Pin_escape_guard>          pin_escapes;
+  const bool has_signal_wires = std::ranges::any_of(frame.nets, [](const auto& net) { return !net.wires.empty(); });
   try {
     checkpoint();
     std::optional<physical::Routing_occupancy> static_occupancy;
     std::vector<physical::Shape>               existing_shapes;
-    if (std::any_of(frame.nets.begin(), frame.nets.end(), [](const auto& net) { return !net.wires.empty(); })) {
+    if (has_signal_wires) {
       for (const auto& net : frame.nets) {
         checkpoint();
         if (std::any_of(net.wires.begin(), net.wires.end(), [](const auto& path_group) { return path_group.type != "FIXED"; })) {
@@ -263,25 +280,15 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
     // Preserve the original routes and return a diagnostic for every net.
     phase("setup_deadline");
     for (const auto& b : bindings) {
-      const auto&     net = frame.nets[b.physical_net];
-      Preroute_record record{net.name,
-                             options.straight_only && !options.straight_routes.contains(net.name)
-                                 ? "no retained two-pin SAT alignment"
-                                 : "stage deadline"};
-      record.pin_count           = net.connections.size();
-      record.estimated_length_um = rc.nets[b.rc_net].wire_length_um;
-      result.records.push_back(std::move(record));
+      const bool unaligned = options.straight_only && !options.straight_routes.contains(frame.nets[b.physical_net].name);
+      result.records.push_back(record_for(b, unaligned ? "no retained two-pin SAT alignment" : "stage deadline"));
     }
-    if (completed_grid) {
-      result.frame.special_nets = std::move(completed_grid->special_nets);
-      result.frame.vias         = std::move(completed_grid->vias);
-      result.frame.terminals    = std::move(completed_grid->terminals);
-    }
+    publish_grid();
     return result;
   }
   auto&               occupancy = *occupancy_storage;
   std::vector<size_t> realized_nets;
-  if (std::any_of(frame.nets.begin(), frame.nets.end(), [](const auto& net) { return !net.wires.empty(); })) {
+  if (has_signal_wires) {
     std::map<std::string, size_t> pin_net;
     for (size_t pin = 0; pin < snapshot.pin_labels.size(); ++pin) {
       if (!pin_net.emplace(snapshot.pin_labels[pin], design.pin2net.at(pin)).second) {
@@ -292,13 +299,10 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
       if (net.wires.empty()) {
         continue;
       }
-      if (std::any_of(net.wires.begin(), net.wires.end(), [](const auto& w) { return w.type != "FIXED"; })) {
-        throw std::invalid_argument("pre-routing requires existing signal wiring to be FIXED");
-      }
       std::set<std::string> pins;
       std::optional<size_t> demand_net;
       for (const auto& pin : net.connections) {
-        const auto label = pin.instance == "PIN" ? pin.pin : pin.instance + ":" + pin.pin;
+        const auto label = physical::connection_label(pin);
         const auto found = pin_net.find(label);
         if (!pins.insert(label).second || found == pin_net.end() || (demand_net && *demand_net != found->second)) {
           throw std::invalid_argument("existing fixed wire endpoints differ from routing demand");
@@ -373,12 +377,7 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
   std::vector<Candidate> candidates;
   for (const auto& b : bindings) {
     const auto& net    = frame.nets[b.physical_net];
-    const auto  reject = [&](const std::string& reason) {
-      Preroute_record record{net.name, reason};
-      record.pin_count           = net.connections.size();
-      record.estimated_length_um = rc.nets[b.rc_net].wire_length_um;
-      result.records.push_back(std::move(record));
-    };
+    const auto  reject = [&](std::string reason) { result.records.push_back(record_for(b, std::move(reason))); };
     if (options.straight_only && !options.straight_routes.contains(net.name)) {
       reject("no retained two-pin SAT alignment");
       continue;
@@ -469,11 +468,7 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
   // impossible, so do not build the whole-frame escape guard or route siblings.
   if (require_all && candidates.size() != bindings.size()) {
     for (const auto& candidate : candidates) {
-      const auto&     net = frame.nets[candidate.binding.physical_net];
-      Preroute_record record{net.name, "tree rollback: ineligible sibling"};
-      record.pin_count           = net.connections.size();
-      record.estimated_length_um = candidate.length;
-      result.records.push_back(std::move(record));
+      result.records.push_back(record_for(candidate.binding, "tree rollback: ineligible sibling"));
     }
     candidates.clear();
   }
@@ -503,11 +498,7 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
     } catch (const Setup_deadline&) {
       phase("setup_deadline");
       for (const auto& candidate : candidates) {
-        const auto&     net = frame.nets[candidate.binding.physical_net];
-        Preroute_record record{net.name, "stage deadline"};
-        record.pin_count           = net.connections.size();
-        record.estimated_length_um = candidate.length;
-        result.records.push_back(std::move(record));
+        result.records.push_back(record_for(candidate.binding, "stage deadline"));
       }
       candidates.clear();
     }
@@ -525,13 +516,11 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
   std::stable_sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
     return a.length != b.length ? a.length < b.length : a.slack > b.slack;
   });
+  // Setup already required all existing signal wiring to be FIXED.
   std::set<std::string> locked;
   for (const auto& net : frame.nets) {
-    if (std::none_of(net.wires.begin(), net.wires.end(), [](const auto& w) { return w.type == "FIXED"; })) {
+    if (net.wires.empty()) {
       continue;
-    }
-    if (std::any_of(net.wires.begin(), net.wires.end(), [](const auto& w) { return w.type != "FIXED"; })) {
-      throw std::invalid_argument("mixed fixed and unfixed signal wiring");
     }
     for (const auto& pin : net.connections) {
       const auto cell = cells.find(pin.instance);
@@ -547,12 +536,10 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
   const auto mark = timer.mark();
   try {
     for (const auto& candidate : candidates) {
-      const auto&     b   = candidate.binding;
-      auto&           net = result.frame.nets[b.physical_net];
-      Preroute_record record{net.name, {}};
-      record.pin_count           = net.connections.size();
-      record.estimated_length_um = candidate.length;
-      const auto attempt         = [&] {
+      const auto& b       = candidate.binding;
+      auto&       net     = result.frame.nets[b.physical_net];
+      auto        record  = record_for(b, {});
+      const auto  attempt = [&] {
         if (expired()) {
           record.reason = "stage deadline";
           return;
@@ -564,6 +551,15 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
           }
           record.reason = "net deadline";
           return true;
+        };
+        // Physical access points of a proposal, in connection order.
+        const auto rc_pins = [&](const Signal_route_geometry& geometry) {
+          std::vector<Route_rc_pin> pins;
+          for (size_t i = 0; i < net.connections.size(); ++i) {
+            const auto& point = geometry.endpoints[i];
+            pins.push_back({net.connections[i].instance + ":" + net.connections[i].pin, point.pin_layer, point.x, point.y});
+          }
+          return pins;
         };
         record.attempted           = true;
         auto       operation_start = std::chrono::steady_clock::now();
@@ -626,12 +622,8 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
             }
             auto trial = net;
             trial.wires.push_back({"FIXED", alternative.geometry.paths});
-            std::vector<Route_rc_pin> pins;
-            for (size_t i = 0; i < net.connections.size(); ++i) {
-              const auto& point = alternative.geometry.endpoints[i];
-              pins.push_back({net.connections[i].instance + ":" + net.connections[i].pin, point.pin_layer, point.x, point.y});
-            }
             try {
+              const auto pins   = rc_pins(alternative.geometry);
               const auto actual = routed_rc(tech, result.frame, trial, rc.nets[b.rc_net].driver, pins, wire, &route_components);
               auto       limits = options.timing;
               limits.deadline   = deadline;
@@ -681,19 +673,13 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
             if (net_expired()) {
               return;
             }
-            std::vector<Route_rc_pin> pins;
-            for (size_t i = 0; i < net.connections.size(); ++i) {
-              const auto& p = net.connections[i];
-              const auto& a = geometry.endpoints[i];
-              pins.push_back({p.instance + ":" + p.pin, a.pin_layer, a.x, a.y});
-            }
             physical::Rc_net actual;
             try {
               actual = routed_rc(tech,
                                  evaluation_frame,
                                  trial_net,
                                  rc.nets[b.rc_net].driver,
-                                 pins,
+                                 rc_pins(geometry),
                                  wire,
                                  rule_frame ? nullptr : &route_components);
             } catch (const std::invalid_argument& e) {
@@ -805,11 +791,7 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
   }
   timer.rollback(mark);
   phase("search_and_timing");
-  if (completed_grid) {
-    result.frame.special_nets = std::move(completed_grid->special_nets);
-    result.frame.vias         = std::move(completed_grid->vias);
-    result.frame.terminals    = std::move(completed_grid->terminals);
-  }
+  publish_grid();
   return result;
 }
 Preroute_result preroute(const physical::Technology& tech, const physical::Floorplan& frame, const physical::Parasitics& rc,
