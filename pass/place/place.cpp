@@ -58,6 +58,7 @@
 #include "resize_engine.hpp"
 #include "routing_tracks.hpp"
 #include "rules_cc/cc/runfiles/runfiles.h"
+#include "track_capacity.hpp"
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
 #endif
@@ -1469,22 +1470,8 @@ void make_arrays(View& v, const ph::Technology& tech) {
     d.node_size_y.push_back(c.place.height);
     d.node_legalize_last.push_back(v.constant_masters.contains(c.macro));
     const bool standard  = tech.macros.at(c.macro).klass.starts_with("CORE");
-    double     blocked_h = 0, blocked_v = 0;
-    if (!standard) {
-      for (const auto& name : tech.macros.at(c.macro).blocked_layers) {
-        const auto layer = tech.layers.find(name);
-        if (layer == tech.layers.end()) {
-          continue;
-        }
-        const auto& l = layer->second;
-        if (l.direction == "HORIZONTAL" && l.pitch_y > 0) {
-          blocked_h += 1 / (l.pitch_y * tech.dbu);
-        }
-        if (l.direction == "VERTICAL" && l.pitch_x > 0) {
-          blocked_v += 1 / (l.pitch_x * tech.dbu);
-        }
-      }
-    }
+    const auto [blocked_h, blocked_v]
+        = standard ? std::pair{0., 0.} : lef_track_capacity(tech, tech.macros.at(c.macro).blocked_layers);
     d.node_blocked_capacity_h.push_back(blocked_h);
     d.node_blocked_capacity_v.push_back(blocked_v);
     const auto mask = ph::placement_mask({c.name, c.macro, c.place}, tech);

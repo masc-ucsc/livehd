@@ -570,6 +570,7 @@ cc_library(
         ":uroute",
         ":region_mesh",
         ":cell_criticality",
+        ":track_capacity",
         "//pass/place/buffering:checkpoint",
         ":filler_budget",
         ":signal_router",
@@ -800,6 +801,13 @@ cc_test(
     srcs = ["magnet_report_test.cpp"],
     copts = COPTS,
     deps = [":place", "@googletest//:gtest_main", "@rapidjson"],
+)
+
+cc_library(
+    name = "track_capacity",
+    hdrs = ["track_capacity.hpp"],
+    visibility = ["//visibility:public"],
+    deps = ["//inou/lefdef:inou_lefdef"],
 )
 
 cc_library(

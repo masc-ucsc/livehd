@@ -80,6 +80,7 @@ cc_binary(
         "//inou/lefdef:inou_lefdef",
         "//pass/opentimer:pass_opentimer",
         "//pass/place",
+        "//pass/place:track_capacity",
         "@rapidjson",
     ],
 )
@@ -121,7 +122,7 @@ cc_binary(
     srcs = ["placement_metrics.cpp"],
     copts = COPTS,
     visibility = ["//tools/uroute:__pkg__"],
-    deps = ["//pass/place:prects_networks", "//inou/lefdef:inou_lefdef", "@rapidjson"],
+    deps = ["//pass/place:prects_networks", "//pass/place:track_capacity", "//inou/lefdef:inou_lefdef", "@rapidjson"],
 )
 
 cc_binary(

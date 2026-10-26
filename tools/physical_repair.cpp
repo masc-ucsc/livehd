@@ -20,6 +20,7 @@
 #include "pass/place/prects_networks.hpp"
 #include "pass/place/repair.hpp"
 #include "pass/place/resize_engine.hpp"
+#include "pass/place/track_capacity.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -91,16 +92,7 @@ void physical_snapshot(const ph::Technology& tech, const ph::Floorplan& fp, cons
   }
   const auto&  row = fp.rows.front();
   const double sw = row.step, rh = std::llround(tech.sites.at(row.site).height * tech.dbu);
-  double       capacity_h = 0, capacity_v = 0;
-  for (const auto& name : tech.routing_layers) {
-    const auto& l = tech.layers.at(name);
-    if (l.direction == "HORIZONTAL" && l.pitch_y > 0) {
-      capacity_h += 1 / (l.pitch_y * tech.dbu);
-    }
-    if (l.direction == "VERTICAL" && l.pitch_x > 0) {
-      capacity_v += 1 / (l.pitch_x * tech.dbu);
-    }
-  }
+  const auto [capacity_h, capacity_v] = pl::lef_track_capacity(tech);
   std::ofstream out(root + "/physical_snapshot.txt"), boxes(root + "/boxes.tsv");
   out << std::setprecision(17) << row.x << ' ' << row.y << ' ' << row.x + row.count * row.step << ' ' << fp.rows.back().y + rh
       << ' ' << sw << ' ' << rh << ' ' << capacity_h << ' ' << capacity_v << " 64\n"
@@ -110,21 +102,7 @@ void physical_snapshot(const ph::Technology& tech, const ph::Floorplan& fp, cons
     const auto& c     = fp.components[i];
     const auto& m     = tech.macros.at(c.macro);
     const bool  macro = !m.klass.starts_with("CORE");
-    double      bh = 0, bv = 0;
-    if (macro) {
-      for (const auto& name : m.blocked_layers) {
-        const auto l = tech.layers.find(name);
-        if (l == tech.layers.end()) {
-          continue;
-        }
-        if (l->second.direction == "HORIZONTAL" && l->second.pitch_y > 0) {
-          bh += 1 / (l->second.pitch_y * tech.dbu);
-        }
-        if (l->second.direction == "VERTICAL" && l->second.pitch_x > 0) {
-          bv += 1 / (l->second.pitch_x * tech.dbu);
-        }
-      }
-    }
+    const auto [bh, bv] = macro ? pl::lef_track_capacity(tech, m.blocked_layers) : std::pair{0., 0.};
     cells.emplace(c.name, i);
     // Placement halos reserve whitespace for access/routing; only the physical
     // macro body is an opaque routing obstacle.

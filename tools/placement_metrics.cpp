@@ -19,6 +19,7 @@
 
 #include "inou/lefdef/physical.hpp"
 #include "pass/place/prects_networks.hpp"
+#include "pass/place/track_capacity.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/ostreamwrapper.h"
 #include "rapidjson/writer.h"
@@ -280,16 +281,8 @@ int main(int argc, char** argv) {
         core_xh          = std::max(core_xh, double(r.x) + double(r.count - 1) * r.step + site.width * fp.dbu);
         core_yh          = std::max(core_yh, double(r.y) + site.height * fp.dbu);
       }
-      double capacity_h = 0, capacity_v = 0;
-      for (const auto& name : tech.routing_layers) {
-        const auto& layer = tech.layers.at(name);
-        if (layer.direction == "HORIZONTAL" && layer.pitch_y > 0) {
-          capacity_h += 1 / (layer.pitch_y * fp.dbu);
-        }
-        if (layer.direction == "VERTICAL" && layer.pitch_x > 0) {
-          capacity_v += 1 / (layer.pitch_x * fp.dbu);
-        }
-      }
+      // LEF and DEF units were checked equal above.
+      const auto [capacity_h, capacity_v] = pl::lef_track_capacity(tech);
       if (!(capacity_h > 0 && capacity_v > 0)) {
         throw std::invalid_argument("routing snapshot needs horizontal and vertical pitches");
       }
@@ -405,21 +398,8 @@ int main(int argc, char** argv) {
           number("y", cell.place.y);
           number("width", width);
           number("height", height);
-          double blocked_h = 0, blocked_v = 0;
-          if (!master.klass.starts_with("CORE")) {
-            for (const auto& name : master.blocked_layers) {
-              const auto layer = tech.layers.find(name);
-              if (layer == tech.layers.end()) {
-                continue;
-              }
-              if (layer->second.direction == "HORIZONTAL" && layer->second.pitch_y > 0) {
-                blocked_h += 1 / (layer->second.pitch_y * fp.dbu);
-              }
-              if (layer->second.direction == "VERTICAL" && layer->second.pitch_x > 0) {
-                blocked_v += 1 / (layer->second.pitch_x * fp.dbu);
-              }
-            }
-          }
+          const auto [blocked_h, blocked_v]
+              = master.klass.starts_with("CORE") ? std::pair{0., 0.} : pl::lef_track_capacity(tech, master.blocked_layers);
           number("blocked_h", blocked_h);
           number("blocked_v", blocked_v);
           json.Key("macro");
@@ -485,22 +465,7 @@ int main(int argc, char** argv) {
         for (const auto& cell : fp.components) {
           const auto& master    = tech.macros.at(cell.macro);
           const bool  macro     = !master.klass.starts_with("CORE");
-          double      blocked_h = 0, blocked_v = 0;
-          if (macro) {
-            for (const auto& name : master.blocked_layers) {
-              const auto it = tech.layers.find(name);
-              if (it == tech.layers.end()) {
-                continue;
-              }
-              const auto& layer = it->second;
-              if (layer.direction == "HORIZONTAL" && layer.pitch_y > 0) {
-                blocked_h += 1 / (layer.pitch_y * fp.dbu);
-              }
-              if (layer.direction == "VERTICAL" && layer.pitch_x > 0) {
-                blocked_v += 1 / (layer.pitch_x * fp.dbu);
-              }
-            }
-          }
+          const auto [blocked_h, blocked_v] = macro ? pl::lef_track_capacity(tech, master.blocked_layers) : std::pair{0., 0.};
           double width = master.width * fp.dbu, height = master.height * fp.dbu;
           if (cell.place.orientation == ph::Orientation::E || cell.place.orientation == ph::Orientation::W
               || cell.place.orientation == ph::Orientation::FE || cell.place.orientation == ph::Orientation::FW) {

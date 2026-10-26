@@ -109,20 +109,6 @@ void shape_io_perimeter_pins(physical::Floorplan& fp) {
   }
 }
 
-std::pair<double, double> lef_track_capacity(const physical::Technology& tech) {
-  double horizontal = 0, vertical = 0;
-  for (const auto& name : tech.routing_layers) {
-    const auto& layer = tech.layers.at(name);
-    if (layer.direction == "HORIZONTAL" && layer.pitch_y > 0) {
-      horizontal += 1 / (layer.pitch_y * tech.dbu);
-    }
-    if (layer.direction == "VERTICAL" && layer.pitch_x > 0) {
-      vertical += 1 / (layer.pitch_x * tech.dbu);
-    }
-  }
-  return {horizontal, vertical};
-}
-
 void apply_routing_tracks(const physical::Technology& tech, physical::Floorplan& fp, std::string_view input) {
   if (fp.dbu <= 0 || fp.dbu != tech.dbu || fp.die.xh <= fp.die.xl || fp.die.yh <= fp.die.yl) {
     throw std::invalid_argument("routing tracks require a finite die with matching technology DBU");
