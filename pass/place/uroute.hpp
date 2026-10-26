@@ -21,7 +21,8 @@ struct Uroute_options {
   int         shots = 5, min_shots = 1;
   std::string fallback  = "nearest";
   double      drc_level = 0;
-  bool        operator==(const Uroute_options&) const = default;
+  // drc_level compares by bit pattern, exactly as the pool identity hashes it.
+  bool        operator==(const Uroute_options&) const;
 };
 struct Uroute_identity {
   std::string top, technology, macro_signature;

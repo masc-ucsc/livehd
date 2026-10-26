@@ -288,6 +288,10 @@ Uroute_pool::Uroute_pool(Uroute_options options) {
     d->samples.clear();
   }
 }
+bool Uroute_options::operator==(const Uroute_options& other) const {
+  return dir == other.dir && export_features == other.export_features && shots == other.shots && min_shots == other.min_shots
+         && fallback == other.fallback && std::bit_cast<std::uint64_t>(drc_level) == std::bit_cast<std::uint64_t>(other.drc_level);
+}
 void Uroute_selection::apply(dp::Options& options) const {
   options.uroute          = context;
   options.uroute_identity = cache_identity;
