@@ -51,7 +51,7 @@ struct Domino_variant_geometry {
 // pin layer, one vertical-layer track slot each, with one rectangle per local
 // row clear of the rail bands; shape 0 lies in the horizontal-access row and
 // is the placement RC point. Slots cover every site x-phase of the vertical
-// track lattice. w_pin = (pins + 1) * slot pitch, the slot pitch being the pin
+// track lattice in all four orientations (N, FS, FN, S). w_pin = (pins + 1) * slot pitch, the slot pitch being the pin
 // pitch, or more when the strip plus spacing needs it. PG pins repeat the
 // inverter's edge rails at 0, H and 2H (bottom polarity at 0 and 2H) over the
 // full width; rail parity is not restricted (provisional model assumption).

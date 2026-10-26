@@ -159,14 +159,19 @@ int64_t pin_clearance(const Geometry_inputs& in) {
   }
   return *clearance;
 }
-// Site x-phases of a vertical lattice: lattice positions relative to a cell
-// origin placed k sites from the lattice origin, k < period.
+// Site x-phases of a vertical lattice: lattice positions in the local frame of
+// a cell placed k sites from the lattice origin, k < period. A mirrored (FN, S)
+// cell is a whole number of sites wide, so its local positions are those of
+// the offset's negation; the two sets differ unless the offset is 0 or half
+// of gcd(site width, pitch).
 std::pair<int64_t, int64_t> phase_range(const Lattice& v, int64_t site_width, int64_t period) {
   int64_t lo = v.pitch, hi = 0;
   for (int64_t k = 0; k < period; ++k) {
-    const auto phase = floor_mod(v.offset - k * site_width, v.pitch);
-    lo               = std::min(lo, phase);
-    hi               = std::max(hi, phase);
+    for (const auto offset : {v.offset, -v.offset}) {  // N/FS, then FN/S
+      const auto phase = floor_mod(offset - k * site_width, v.pitch);
+      lo               = std::min(lo, phase);
+      hi               = std::max(hi, phase);
+    }
   }
   return {lo, hi};
 }

@@ -302,6 +302,23 @@ TEST(DominoGeometry, SyntheticAccessHoldsForBothParitiesFlipsPhasesAndDrives) {
   EXPECT_EQ(wide.width, 22 * 54);
   EXPECT_TRUE(check_domino_access(in, wide.macro, wide.halves).ok);
 }
+TEST(DominoGeometry, MirroredStartsKeepVerticalAccessOnAnUnevenTrackOffset) {
+  // M3 tracks 6 nm off the site grid: neither 0 nor half of gcd(54, 36), so a
+  // mirrored (FN, S) placement sees other track phases than N and FS. The
+  // strips must cover both.
+  auto tech                     = synthetic();
+  tech.layers.at("M3").offset_x = .006;
+  tech.layers.at("M3").offset_y = .006;
+  const auto in                 = geometry_inputs(tech, "INVx1", kSyntheticRoute);
+  const auto g                  = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSyntheticCells, 0, in);
+  const auto c                  = check_domino_access(in, g.macro, g.halves);
+  EXPECT_TRUE(c.failures.empty()) << c.failures.front();
+  EXPECT_TRUE(c.ok);
+  ASSERT_EQ(c.cases.size(), 8u);
+  for (const auto& k : c.cases) {
+    EXPECT_EQ(k.ok, k.compatible) << k.start_row << ph::orientation_name(k.orientation);
+  }
+}
 TEST(DominoGeometry, MissingSymmetryXIsRefused) {
   const auto tech    = synthetic();
   const auto in      = geometry_inputs(tech, "INVx1", kSyntheticRoute);
