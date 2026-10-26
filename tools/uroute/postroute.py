@@ -13,7 +13,7 @@ from pathlib import Path
 import shlex
 import time
 
-from .ingest import ingest
+from .ingest import ingest, ingest_options
 from .pool import _atomic, canonical, sha
 
 
@@ -66,18 +66,19 @@ def combined_liberty(job, inputs):
 
 def postroute(args):
     started = time.monotonic()
+    args = ingest_options(args)  # default the optional ODB/unavailability controls
     job = Path(args.job).resolve()
     environment_path = job / 'environment.json'
     environment = json.loads(environment_path.read_bytes())
     control_path = controls(job, environment, args.controls)
-    if getattr(args, 'odb', None) is not None:
+    if args.odb is not None:
         definition = None
     elif args.definition:
         definition = args.definition.resolve()
     else:
         definition = next((job / 'results' / name for name in ('6_final.def', '6_final.def.gz')
                            if (job / 'results' / name).is_file()), None)
-    if getattr(args, 'odb', None) is None and (definition is None or not definition.is_file()):
+    if args.odb is None and (definition is None or not definition.is_file()):
         raise ValueError('no final routed DEF; provide --def explicitly for an unrouted result')
     status = args.status
     if status == 'auto':
@@ -86,7 +87,7 @@ def postroute(args):
         if state.get('status') != 'completed':
             raise ValueError('job is not complete; assert --status routed or --status unrouted explicitly')
         status = 'routed'
-    if status == 'unrouted' and args.last_global_overflow is None and getattr(args, 'odb', None) is None and getattr(args, 'overflow_unavailable', None) is None:
+    if status == 'unrouted' and args.last_global_overflow is None and args.odb is None and args.overflow_unavailable is None:
         raise ValueError('unrouted result requires --last-global-overflow or an explicit unavailability reason; no zero map is fabricated')
     lefs = args.lef or (paths(environment.get('TECH_LEF', ''), job) + paths(environment.get('SC_LEF', ''), job)
                         + paths(environment.get('ADDITIONAL_LEFS', ''), job))
@@ -110,13 +111,12 @@ def postroute(args):
             raise ValueError('no target utilization in export/environment; provide --utilization') from error
     if utilization is not None and (not math.isfinite(utilization) or not 0 <= utilization <= 1):
         raise ValueError('target utilization must be in 0..1')
-    options = argparse.Namespace(definition=definition, lef=lefs, liberty=liberty, controls=control_path,
-                                 pool=args.pool, placement_metrics=args.placement_metrics, native=args.native, drc=drc,
-                                 livehd_export=livehd_export, last_global_overflow=args.last_global_overflow,
-                                 source=args.source, status=status, utilization=utilization, bins=args.bins,
-                                 wirelength_report=args.wirelength_report, odb=getattr(args, 'odb', None),
-                                 openroad=getattr(args, 'openroad', None), odb_timeout=getattr(args, 'odb_timeout', 300),
-                                 overflow_unavailable=getattr(args, 'overflow_unavailable', None))
+    options = ingest_options(definition=definition, lef=lefs, liberty=liberty, controls=control_path,
+                             pool=args.pool, placement_metrics=args.placement_metrics, native=args.native, drc=drc,
+                             livehd_export=livehd_export, last_global_overflow=args.last_global_overflow,
+                             source=args.source, status=status, utilization=utilization, bins=args.bins,
+                             wirelength_report=args.wirelength_report, odb=args.odb, openroad=args.openroad,
+                             odb_timeout=args.odb_timeout, overflow_unavailable=args.overflow_unavailable)
     sample = ingest(options)
     result = {'status': 'imported', 'sample_id': sample['id'], 'sample_status': sample['status'],
               'pool': str(args.pool.resolve()), 'environment_sha256': sha(environment_path.read_bytes()),

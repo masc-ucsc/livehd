@@ -31,27 +31,36 @@ def feature_gap(before, after):
     return result
 
 
-def ingest(args):
-    unavailable = getattr(args, 'overflow_unavailable', None)
+# Optional controls with their defaults; hand-built namespaces may omit them.
+OPTIONAL = {'odb': None, 'openroad': None, 'odb_timeout': 300, 'overflow_unavailable': None}
+
+
+def ingest_options(args=None, **fields):
+    """A namespace for ingest(): args' attributes and fields over OPTIONAL defaults."""
+    return argparse.Namespace(**{**OPTIONAL, **(vars(args) if args is not None else {}), **fields})
+
+
+def ingest(args, odb_provenance=None):
+    """odb_provenance is set only by the internal ODB-to-DEF conversion."""
+    args = ingest_options(args)
+    unavailable = args.overflow_unavailable
     if unavailable is not None and (not isinstance(unavailable, str) or not unavailable.strip() or len(unavailable) > 4096 or '\0' in unavailable):
         raise ValueError('--overflow-unavailable requires a nonempty reason')
     if unavailable is not None and (args.status != 'unrouted' or args.last_global_overflow is not None):
         raise ValueError('--overflow-unavailable requires --status unrouted and no supplied overflow map')
-    if getattr(args, 'odb', None) is not None:
+    if args.odb is not None:
         from .odb import export_odb
-        if getattr(args, 'openroad', None) is None:
+        if args.openroad is None:
             raise ValueError('--odb requires an explicit --openroad executable')
         with tempfile.TemporaryDirectory(prefix='uroute_odb_') as temporary:
             definition, lengths, overflow, provenance = export_odb(
                 args.odb, args.openroad, temporary, routed=args.status == 'routed',
                 overflow=args.status == 'unrouted' and args.last_global_overflow is None and unavailable is None,
-                timeout=getattr(args, 'odb_timeout', 300))
-            converted = argparse.Namespace(**vars(args))
-            converted.odb, converted.definition = None, definition
-            converted.wirelength_report = args.wirelength_report or lengths
-            converted.last_global_overflow = args.last_global_overflow or overflow
-            converted._odb_provenance = provenance
-            return ingest(converted)
+                timeout=args.odb_timeout)
+            converted = ingest_options(args, odb=None, definition=definition,
+                                       wirelength_report=args.wirelength_report or lengths,
+                                       last_global_overflow=args.last_global_overflow or overflow)
+            return ingest(converted, provenance)
     definition = text_file(args.definition)
     definition_hash = sha(definition.encode())
     with tempfile.TemporaryDirectory(prefix='uroute_ingest_') as scratch:
@@ -65,9 +74,8 @@ def ingest(args):
             command += ['--lef', str(lef.resolve())]
         subprocess.run(command, check=True, timeout=120)
         geometry = json.loads(geometry_path.read_text())
-        odb_metadata = getattr(args, '_odb_provenance', None)
-        if odb_metadata and odb_metadata.get('global_overflow'):
-            frame = odb_metadata['global_overflow']
+        if odb_provenance and odb_provenance.get('global_overflow'):
+            frame = odb_provenance['global_overflow']
             if frame['core'] != geometry['core'] or frame['dbu_per_micron'] != geometry['dbu']:
                 raise ValueError('ODB overflow and physical feature geometry have different core/DBU frames')
         bins = args.bins
@@ -114,9 +122,9 @@ def ingest(args):
                     'liberty_sha256': sha(args.liberty.read_bytes()), 'controls_sha256': sha(args.controls.read_bytes()),
                     'extractor': 'uroute-def-centerlines-v1'}
         files = {'geometry.json': geometry_path.read_bytes(), 'physical.json': metric_path.read_bytes()}
-        if getattr(args, '_odb_provenance', None) is not None:
-            metadata['source_odb_sha256'] = args._odb_provenance['source_odb_sha256']
-            files['odb_export.json'] = canonical(args._odb_provenance)
+        if odb_provenance is not None:
+            metadata['source_odb_sha256'] = odb_provenance['source_odb_sha256']
+            files['odb_export.json'] = canonical(odb_provenance)
         if livehd:
             before = read(args.livehd_export / 'features.bin')
             files['livehd_features.bin'] = encode(before)
