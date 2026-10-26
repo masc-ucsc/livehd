@@ -210,7 +210,17 @@ outputs. A removed bit the reference still reads (`synth.state_sweep` narrows a
 register whose D is a zero-extended narrow value, so the implementation reads a
 zero there) is held at zero in the hypothesis, and each step proves the
 reference's next state keeps it zero: a removed bit that is not constant still
-refutes. A reference initial value that may set such a bit leaves it arbitrary. Duplicate or
+refutes. A reference initial value that may set such a bit leaves it arbitrary.
+
+A reference register with no implementation counterpart that the outputs do
+read (`synth.merge_registers` folded it into an equal twin) is matched to a
+paired reference register by a structural partition refinement over the
+reference's next-state terms (van Eijk's signal correspondence: every member's
+current state is replaced by its class representative until each class
+computes one next-state term; widths, signs and initial values must agree).
+The one-sided register then shares its twin's current state, and every step
+compares its next state with the twin's, so a register that is not the same
+machine still refutes (`tests/lec_merged_state_smoke.sh`). Duplicate or
 out-of-range bit names cannot form a relation. Explicit implementation initial
 values take precedence over a proposed shared initial state. `pass semdiff
 --stats` reports these projected name pairs separately; they cannot justify a

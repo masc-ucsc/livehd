@@ -732,6 +732,14 @@ sh_test(
     tags = ["no-sandbox"],
 )
 
+# A reference register the implementation merged into its twin shares the twin's state.
+sh_test(
+    name = "lec_merged_state_smoke",
+    srcs = ["tests/lec_merged_state_smoke.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
 cc_test(
     name = "cone_expand_test",
     srcs = ["cone_expand_test.cpp"],

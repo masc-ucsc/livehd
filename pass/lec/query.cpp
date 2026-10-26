@@ -7758,6 +7758,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // value). A removed bit of a sparse bit-blast group is tied to zero only
   // where this leaves it zero (see the narrowed-state step after encoding).
   absl::flat_hash_map<std::string, std::vector<bool>> ind_ref_init_ones;
+  // Reference flops' `initial` driver: the constant's serialization, "?" for a
+  // non-constant one (merged-state candidates must agree on it).
+  absl::flat_hash_map<std::string, std::string>       ind_ref_init_text;
   // Input bundles FIRST: one flat symbol per base; the leaves are bound to its
   // extracts, so both sides range over the SAME input space (no extra freedom,
   // no lost bits). add_inputs below keeps any name already present at an
@@ -7874,7 +7877,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       ind_raw[ind_side_ix].try_emplace(key, node.get_hier_name());
       if (ind_side_ix == 0) {
         if (auto init = graph_util::get_driver_of_sink_name(node, "initial"); !init.is_invalid()) {
-          auto& ones = ind_ref_init_ones[key];
+          ind_ref_init_text[key] = init.is_const() ? graph_util::const_of(init).serialize() : "?" + key;
+          auto& ones             = ind_ref_init_ones[key];
           ones.assign(static_cast<size_t>(std::max(w, gu::real_width(q))), true);
           if (init.is_const()) {
             const auto& c = graph_util::const_of(init);
@@ -9210,7 +9214,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // step instead of being assumed. A reference initial value that may set a
   // held bit has no such base, so that bit stays arbitrary.
   absl::flat_hash_map<std::string, std::vector<bool>> ind_zero_holes;  // ref key -> removed bits held at zero
-  Io_name_map<Val>                                    zero_hole_shared;
+  Io_name_map<Val>                                    ref_fix_shared;  // the reference's seeds with both fixes below
+  std::string                                         held_note;
   if (!ind_sparse_bits.empty()) {
     std::vector<std::string> keys(ind_sparse_bits.begin(), ind_sparse_bits.end());
     std::sort(keys.begin(), keys.end());
@@ -9242,31 +9247,192 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       }
     }
     if (!ind_zero_holes.empty()) {
-      zero_hole_shared = *ind_shared[0];
-      for (const auto& [key, holes] : ind_zero_holes) {
-        auto&       v = zero_hole_shared.at(key);
-        std::string mask(static_cast<size_t>(v.width), '1');  // MSB first
-        for (size_t i = 0; i < holes.size(); ++i) {
-          if (holes[i]) {
-            mask[static_cast<size_t>(v.width) - 1 - i] = '0';
-          }
+      held_note = "; narrowed state: " + std::to_string(held) + " removed bit(s) of " + std::to_string(ind_zero_holes.size())
+                  + " register(s) the reference reads held at zero (rechecked each step)";
+    }
+  }
+
+  // ── Merged state: a reference register the implementation folded away ────
+  // synth.merge_registers deletes a register that is the same machine as
+  // another (same clock, enables, reset, initial value and D) and moves its
+  // readers to the survivor, so the reference keeps a register with no
+  // counterpart whose current state the outputs DO read. Left as a free
+  // symbol, every cone reading it diverges and the induction cannot close.
+  // Find, in the reference, which one-sided registers are the same machine as
+  // a paired register: a partition refinement (van Eijk's signal
+  // correspondence, structural) over the next-state terms, where every member
+  // register's current state is replaced by its class's representative, split
+  // until each class's members compute the same next-state term. A one-sided
+  // register whose class holds a paired register then shares that register's
+  // current state (the hypothesis `R == P`), and the step compares R's next
+  // state with P's, so a guess that is not inductive costs only the proof.
+  // Initial values must agree (no inductive base otherwise).
+  absl::flat_hash_map<std::string, std::string> ind_merged;  // one-sided ref key -> paired ref key holding the same value
+  if (opts.assumptions == nullptr) {
+    const std::string        nxt_pfx("\x01nxt:");
+    std::vector<std::string> lonely;
+    for (const auto& [key, w] : ind_side[0]) {
+      if (ind_side[1].contains(key) || ind_bitblast.contains(key) || ind_tied_state.contains("nxt:" + display_name(key))
+          || re.inputs.contains(key + "\x02p0") || !re.outputs.contains(nxt_pfx + key)) {
+        continue;
+      }
+      auto sit = shared.find(key);
+      if (sit != shared.end() && !sit->second.term.isNull() && sit->second.term.getKind() == cvc5::Kind::CONSTANT) {
+        lonely.push_back(key);
+      }
+    }
+    std::sort(lonely.begin(), lonely.end());
+    if (!lonely.empty()) {
+      // Only state some obligation reads needs a partner; the rest is excused
+      // as unobservable one-sided state.
+      const auto demand = state_bit_demand(re, lonely);
+      std::erase_if(lonely, [&](const std::string& k) {
+        auto it = demand.find(k);
+        return it == demand.end() || !it->second.any();
+      });
+    }
+    if (!lonely.empty()) {
+      auto init_text = [&](const std::string& key) {
+        auto it = ind_ref_init_text.find(key);
+        return it == ind_ref_init_text.end() ? std::string("-") : it->second;
+      };
+      auto shape = [&](const std::string& key) {
+        const auto& v = shared.at(key);
+        return std::to_string(v.width) + (v.is_signed ? "s" : "u") + "/" + init_text(key);
+      };
+      absl::flat_hash_set<std::string> lonely_shapes;
+      for (const auto& k : lonely) {
+        lonely_shapes.insert(shape(k));
+      }
+      // Members: the one-sided registers plus every paired register of a shape
+      // one of them has. A paired register qualifies when its reference
+      // current state IS its shared symbol (no window, bridge or hole mask).
+      struct Member {
+        std::string key;
+        cvc5::Term  sym, next;
+        bool        paired;
+        size_t      cls;
+      };
+      std::vector<Member>                      members;
+      absl::flat_hash_map<std::string, size_t> cls_of_shape;
+      auto                                     add_member = [&](const std::string& key, bool paired) {
+        const auto& sv  = shared.at(key);
+        auto        cur = re.inputs.find(key);
+        auto        nxt = re.outputs.find(nxt_pfx + key);
+        if (cur == re.inputs.end() || nxt == re.outputs.end() || cur->second.term != sv.term || nxt->second.width != sv.width
+            || !cur->second.x_mask.isNull()) {
+          return;
         }
-        v.term = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {v.term, tm.mkBitVector(static_cast<uint32_t>(v.width), mask, 2)});
+        const auto [it, added] = cls_of_shape.try_emplace(shape(key), cls_of_shape.size());
+        members.push_back(Member{key, sv.term, nxt->second.term, paired, it->second});
+      };
+      for (const auto& k : lonely) {
+        add_member(k, false);
       }
-      enc.set_x_dontcare(opts.gold_x != "zero");
-      enc.set_box_keys(&ref_box_keys);
-      enc.set_mem_keys(&ref_mem_cut_keys);
-      enc.set_phase_plan(ind_ref_plan.needs_plan() ? &ind_ref_plan : nullptr, -1);
-      Encoded re2 = enc.encode(ref, &zero_hole_shared, "", &shared_mems);
-      enc.set_x_dontcare(false);
-      if (re2.ok) {
-        re             = std::move(re2);
-        ind_shared[0]  = &zero_hole_shared;
-        res.detail    += "; narrowed state: " + std::to_string(held) + " removed bit(s) of " + std::to_string(ind_zero_holes.size())
-                      + " register(s) the reference reads held at zero (rechecked each step)";
-      } else {
-        ind_zero_holes.clear();
+      std::vector<std::string> partners;
+      for (const auto& [key, w] : ind_side[0]) {
+        if (!ind_side[1].contains(key) && !ind_bitblast.contains(key)) {
+          continue;
+        }
+        auto sit = shared.find(key);
+        if (sit == shared.end() || sit->second.term.isNull() || sit->second.term.getKind() != cvc5::Kind::CONSTANT
+            || ind_zero_holes.contains(key) || !lonely_shapes.contains(shape(key))) {
+          continue;
+        }
+        partners.push_back(key);
       }
+      std::sort(partners.begin(), partners.end());
+      for (const auto& k : partners) {
+        add_member(k, true);
+      }
+      constexpr size_t kMaxMembers = 1U << 15;
+      constexpr int    kMaxRounds  = 32;
+      if (members.size() > kMaxMembers) {
+        members.clear();
+      }
+      std::vector<cvc5::Term> syms;
+      syms.reserve(members.size());
+      for (const auto& m : members) {
+        syms.push_back(m.sym);
+      }
+      size_t n_cls = cls_of_shape.size();
+      for (int round = 0; round < kMaxRounds && !members.empty(); ++round) {
+        std::vector<cvc5::Term> reps(n_cls);
+        std::vector<cvc5::Term> subst;
+        subst.reserve(members.size());
+        for (const auto& m : members) {
+          if (reps[m.cls].isNull()) {
+            reps[m.cls] = tm.mkConst(m.sym.getSort(), "\x01merge_cls:" + std::to_string(round) + ":" + std::to_string(m.cls));
+          }
+          subst.push_back(reps[m.cls]);
+        }
+        std::vector<std::unordered_map<cvc5::Term, size_t>> split(n_cls);  // per old class: signature -> new class
+        size_t                                              next_cls = 0;
+        for (auto& m : members) {
+          const auto sig             = m.next.substitute(syms, subst);
+          const auto [it, inserted]  = split[m.cls].try_emplace(sig, next_cls);
+          next_cls                  += inserted ? 1 : 0;
+          m.cls                      = it->second;
+        }
+        const bool stable = next_cls == n_cls;
+        n_cls             = next_cls;
+        if (stable) {
+          break;
+        }
+      }
+      absl::flat_hash_map<size_t, std::string> partner_of_cls;  // first paired member, sorted key order
+      for (const auto& m : members) {
+        if (m.paired) {
+          partner_of_cls.try_emplace(m.cls, m.key);
+        }
+      }
+      for (const auto& m : members) {
+        if (auto it = partner_of_cls.find(m.cls); !m.paired && it != partner_of_cls.end()) {
+          ind_merged.emplace(m.key, it->second);
+        }
+      }
+    }
+  }
+
+  if (!ind_zero_holes.empty() || !ind_merged.empty()) {
+    ref_fix_shared = *ind_shared[0];
+    for (const auto& [key, holes] : ind_zero_holes) {
+      auto&       v = ref_fix_shared.at(key);
+      std::string mask(static_cast<size_t>(v.width), '1');  // MSB first
+      for (size_t i = 0; i < holes.size(); ++i) {
+        if (holes[i]) {
+          mask[static_cast<size_t>(v.width) - 1 - i] = '0';
+        }
+      }
+      v.term = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {v.term, tm.mkBitVector(static_cast<uint32_t>(v.width), mask, 2)});
+    }
+    for (const auto& [key, partner] : ind_merged) {
+      ref_fix_shared[key] = shared.at(partner);
+    }
+    enc.set_x_dontcare(opts.gold_x != "zero");
+    enc.set_box_keys(&ref_box_keys);
+    enc.set_mem_keys(&ref_mem_cut_keys);
+    enc.set_phase_plan(ind_ref_plan.needs_plan() ? &ind_ref_plan : nullptr, -1);
+    Encoded re2 = enc.encode(ref, &ref_fix_shared, "", &shared_mems);
+    enc.set_x_dontcare(false);
+    if (re2.ok) {
+      re             = std::move(re2);
+      ind_shared[0]  = &ref_fix_shared;
+      res.detail    += held_note;
+      if (!ind_merged.empty()) {
+        std::vector<std::string> names;
+        for (const auto& [key, partner] : ind_merged) {
+          names.push_back(display_name(key) + "=" + display_name(partner));
+          ind_tied_state.insert("nxt:" + display_name(key));
+        }
+        std::sort(names.begin(), names.end());
+        res.detail += "; merged state: " + std::to_string(ind_merged.size())
+                      + " one-sided reference register(s) share a paired register's state (rechecked each step) {"
+                      + join_capped(names) + "}";
+      }
+    } else {
+      ind_zero_holes.clear();
+      ind_merged.clear();
     }
   }
 
@@ -9308,10 +9474,17 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         }
       }
     }
+    // A merge partner's current state also seeds a one-sided register, so its
+    // bits stay whole (freeing them would split the two readings).
+    absl::flat_hash_set<std::string> merge_partners;
+    for (const auto& [key, partner] : ind_merged) {
+      merge_partners.insert(partner);
+    }
     std::vector<Obs_candidate> cands;
     const std::string          nxt_pfx("\x01nxt:");
     for (const auto& [key, w] : ind_side[0]) {
-      if (!ind_side[1].contains(key) || ind_bitblast.contains(key) || ind_tied_state.contains("nxt:" + display_name(key))) {
+      if (!ind_side[1].contains(key) || ind_bitblast.contains(key) || ind_tied_state.contains("nxt:" + display_name(key))
+          || merge_partners.contains(key)) {
         continue;
       }
       const auto sit = shared.find(key);
@@ -9524,6 +9697,13 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   for (const auto& t : bridge_diffs) {  // bank<->memory next-state equalities
     bad = bad.isNull() ? t : tm.mkTerm(cvc5::Kind::OR, {bad, t});
     ind_diffs.push_back({"bridge", t});
+  }
+  // A merged one-sided register's next state is compared with its partner's.
+  for (const auto& [key, partner] : ind_merged) {
+    auto pit = re.outputs.find(std::string("\x01nxt:") + partner);
+    if (pit != re.outputs.end() && !ie.outputs.contains(std::string("\x01nxt:") + key)) {
+      ie.outputs[std::string("\x01nxt:") + key] = pit->second;
+    }
   }
   // Recheck the state relation on every retained bit. Holes use the reference
   // next-state bit on both sides of this obligation, imposing no equality on
