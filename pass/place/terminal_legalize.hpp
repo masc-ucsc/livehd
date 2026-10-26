@@ -77,7 +77,9 @@ struct Terminal_legalize_report {
 };
 // The row occupancy controls these options set (shared with the multirow packer).
 Occupancy_controls occupancy_controls(const Terminal_legalize_options&);
-// Bound an inherited routing grid for tiny cores before selecting/locking cells.
+// Bound an inherited routing grid for tiny cores before selecting/locking cells:
+// each bin is at least as wide as the widest movable CORE cell over the cap and
+// at least as tall as the tallest (one row unless a multi-row cell is movable).
 // Explicit caller-supplied terminal grids remain authoritative unless this helper is called.
 void fit_terminal_legalize_grid(const physical::Technology&, const physical::Floorplan&, Terminal_legalize_options&);
 // Atomic: any failure leaves the caller's floorplan unchanged. Candidate-menu

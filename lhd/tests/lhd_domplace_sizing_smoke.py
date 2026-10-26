@@ -177,8 +177,10 @@ assert (root / 'grown_warm/out.def').read_bytes() == (root / 'grown/out.def').re
 assert warm['qor']['place']['domino_sizing']['trials'] == report['trials']
 
 # A dense core cannot pack the wider variant anywhere: the rejected trial
-# leaves the placement exactly as an unsized run places it.
-dense = ['--set', 'synth.place.utilization=0.7']
+# leaves the placement exactly as an unsized run places it. The core is sized
+# by the density target (the bins are two rows tall, so the hard cap averages
+# over the row pair; a utilization above the target alone does not shrink it).
+dense = ['--set', 'synth.place.utilization=0.75', '--set', 'synth.place.density=0.7']
 tight = run('tight', coefficients + sizing + dense)['qor']['place']['domino_sizing']
 assert [(t['move'], t['outcome']) for t in tight['trials']] == [('up', 'rejected_packing')], tight['trials']
 failure = tight['trials'][0]['failure']  # the two-row ECO's refusal, not the widest-row pre-check

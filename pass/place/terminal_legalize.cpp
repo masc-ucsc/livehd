@@ -1759,7 +1759,7 @@ void fit_terminal_legalize_grid(const ph::Technology& tech, const ph::Floorplan&
   if (fp.rows.empty() || fp.dbu <= 0 || !(options.max_density > 0)) {
     return;  // Normal legalization validation reports malformed inputs.
   }
-  double xl = INFINITY, xh = -INFINITY, yl = INFINITY, yh = -INFINITY, height = 0, widest = 0;
+  double xl = INFINITY, xh = -INFINITY, yl = INFINITY, yh = -INFINITY, height = 0, widest = 0, tallest = 0;
   for (const auto& r : fp.rows) {
     const auto site = tech.sites.find(r.site);
     if (site == tech.sites.end()) {
@@ -1775,7 +1775,8 @@ void fit_terminal_legalize_grid(const ph::Technology& tech, const ph::Floorplan&
   for (const auto& c : fp.components) {
     if (auto m = tech.macros.find(c.macro);
         m != tech.macros.end() && m->second.klass.starts_with("CORE") && !fixed_physical_cell(c, m->second)) {
-      widest = std::max(widest, double(c.place.width));
+      widest  = std::max(widest, double(c.place.width));
+      tallest = std::max(tallest, double(c.place.height));
     }
   }
   const auto cap_bins = [](unsigned requested, double extent, double minimum) {
@@ -1784,8 +1785,14 @@ void fit_terminal_legalize_grid(const ph::Technology& tech, const ph::Floorplan&
     }
     return static_cast<unsigned>(std::min(double(requested), std::max(1., std::floor(extent / minimum))));
   };
+  // A bin holds the largest movable cell by itself within the cap: the widest
+  // in x and the tallest in y. A bin one row tall under a two-row cell would
+  // take that cell's full height in each row it spans, so every row of the
+  // bin column could fit only one such cell and the cap would quantize to
+  // cell widths instead of measuring density. Single-row designs keep the
+  // row height.
   options.bins_x = cap_bins(options.bins_x, xh - xl, widest / options.max_density);
-  options.bins_y = cap_bins(options.bins_y, yh - yl, height);
+  options.bins_y = cap_bins(options.bins_y, yh - yl, std::max(height, tallest));
 }
 
 Terminal_legalize_report terminal_legalize(const physical::Technology& tech, physical::Floorplan& fp,

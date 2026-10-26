@@ -338,6 +338,93 @@ TEST(Multirow, TheDensityCapMovesTheAnchorAndTerminalLegalizationAcceptsIt) {
   EXPECT_TRUE(contains(failure(dense), "exceeds the hard bin density cap"));
 }
 
+// The HighTide lfsr area-driven core (ASAP7, utilization 0.55): 104 sites by
+// 21 rows, 31 two-row cells 17 sites wide (89% of the cell area), one padding
+// site, cap 0.8. The fitted grid inherited the one-row bin height, so each
+// bin column held one two-row cell per row and packing failed. Bins at least
+// as tall as the cell average the cap over the row pair.
+TEST(Multirow, TinyCoreBinsAreAtLeastAsTallAsTheTwoRowCells) {
+  // The run's global-placement poses of the two-row cells, in sites and rows.
+  static constexpr double gp[][2] = {
+      { 1.5,  6.5},
+      {65.7,  0.6},
+      { 1.9, 12.1},
+      {27.7,  9.3},
+      {28.0, 15.3},
+      {66.1, 18.5},
+      {27.1, 18.4},
+      { 2.7,  0.8},
+      {60.1,  3.5},
+      {85.6,  0.5},
+      {22.6, 12.3},
+      {23.9,  0.6},
+      {43.9,  6.8},
+      {47.0, 15.1},
+      {85.6, 18.4},
+      {46.5, 18.4},
+      {27.8,  3.5},
+      {81.5,  3.5},
+      {85.3,  7.9},
+      {43.0, 12.0},
+      {62.8, 10.8},
+      {66.5, 15.5},
+      {65.1,  6.3},
+      {84.7, 11.5},
+      { 6.0,  9.3},
+      {22.8,  6.4},
+      { 8.5, 15.2},
+      {85.5, 14.9},
+      { 7.6, 18.4},
+      { 6.4,  3.6},
+      {44.4,  0.6}
+  };
+  const auto frame = [](Fixture& f) {
+    f.two_row("dom17", 17);
+    f.options.occupancy.padding_sites = 1;
+    f.options.occupancy.max_density   = .8;
+    for (const auto& [x, y] : gp) {
+      f.cell(x, y, "dom17");
+    }
+    for (int i = 0; i < 19; ++i) {
+      f.cell((i * 23) % 100, (i * 5) % 21, "cell");
+    }
+  };
+  Fixture f(104, 21);
+  frame(f);
+  Terminal_legalize_options terminal;
+  terminal.bins_x = terminal.bins_y = 64;  // the inherited placement grid
+  terminal.max_density              = f.options.occupancy.max_density;
+  terminal.padding_sites            = f.options.occupancy.padding_sites;
+  fit_terminal_legalize_grid(f.tech, f.fp, terminal);
+  EXPECT_EQ(terminal.bins_x, 4);   // 17 / 0.8 sites wide at least
+  EXPECT_EQ(terminal.bins_y, 10);  // two rows tall at least, not one
+  f.options.occupancy = occupancy_controls(terminal);
+  Multirow_report report;
+  ASSERT_NO_THROW(report = anchor_multirow_cells(f.tech, f.fp, f.options));
+  EXPECT_EQ(report.anchors.size(), 31);
+  ASSERT_NO_THROW(terminal_legalize(f.tech, f.fp, timing::Feedback{}, terminal));
+  release_multirow_anchors(f.fp, report);
+  EXPECT_NO_THROW(check_legality(f.tech, f.fp));
+  EXPECT_EQ(native_violation(f, f.fp), "");
+
+  // The one-row grid the fit used to keep fails on the same frame.
+  Fixture rows(104, 21);
+  frame(rows);
+  rows.options.occupancy        = occupancy_controls(terminal);
+  rows.options.occupancy.bins_y = 21;
+  EXPECT_TRUE(contains(failure(rows), "exceeds the hard bin density cap")) << "one-row bins";
+
+  // Single-row frames keep the one-row bin height.
+  Fixture flat(104, 21);
+  for (int i = 0; i < 40; ++i) {
+    flat.cell((i * 23) % 100, (i * 5) % 21, "cell");
+  }
+  Terminal_legalize_options single;
+  single.bins_x = single.bins_y = 64;
+  fit_terminal_legalize_grid(flat.tech, flat.fp, single);
+  EXPECT_EQ(single.bins_y, 21);
+}
+
 TEST(Multirow, DeliberateInfeasibilityIsAtomic) {
   Fixture f(8, 2);
   f.cell(3, 0, "cell", Status::FIXED);
