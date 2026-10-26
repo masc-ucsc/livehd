@@ -46,7 +46,7 @@ void observation(Writer& json, const late::Result& value) {
   json.Key("achievable_period_ps");
   write(json, value.achievable_period_ps);
   json.Key("clocks");
-  late::json::write_clocks(json, value, false);
+  late::json::write_clocks(json, value, late::json::Clock_detail::compact);
   json.Key("pins");
   json.StartArray();
   for (const auto& pin : value.pins) {

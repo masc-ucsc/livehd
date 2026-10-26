@@ -404,7 +404,7 @@ int main(int argc, char** argv) {
       writer.EndObject();
     }
     writer.Key("clocks");
-    late::json::write_clocks(writer, result, true);
+    late::json::write_clocks(writer, result, late::json::Clock_detail::full);
     writer.Key("launch_domains");
     writer.StartArray();
     for (const auto& domain : result.domains) {

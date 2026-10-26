@@ -77,15 +77,16 @@ void write_transitions(Writer& writer, const Transitions& transitions, const Res
 }
 // Clock summaries keyed by name. The compact form keeps only the period and
 // timed endpoints; the full form adds slack, achievable period and independence.
+enum class Clock_detail { compact, full };
 template <class Writer>
-void write_clocks(Writer& writer, const Result& result, bool full) {
+void write_clocks(Writer& writer, const Result& result, Clock_detail detail) {
   writer.StartObject();
   for (const auto& [name, clock] : result.clocks) {
     writer.Key(name.c_str());
     writer.StartObject();
     writer.Key("period_ps");
     writer.Double(clock.period_ps);
-    if (full) {
+    if (detail == Clock_detail::full) {
       writer.Key("wns_ps");
       write(writer, clock.wns_ps);
       writer.Key("tns_ps");

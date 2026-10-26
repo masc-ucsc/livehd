@@ -21,7 +21,6 @@ namespace b    = livehd::placement::buffering;
 namespace dp   = DreamPlace::native;
 namespace tc   = livehd::placement::timeclosure;
 namespace late = livehd::placement::late;
-namespace m    = livehd::liberty::timing;
 inline const char* fixture_liberty() {
   return R"(library(test){time_unit:"1ps";capacitive_load_unit(1,ff);default_input_pin_cap:0;
 cell(D){pin(A){direction:input;capacitance:1;}pin(Y){direction:output;function:A;max_capacitance:1;
@@ -32,6 +31,8 @@ cell(S){pin(A){direction:input;capacitance:4;}pin(Y){direction:output;function:A
 timing(){related_pin:A;timing_sense:positive_unate;cell_rise(scalar){values("3");}cell_fall(scalar){values("2.5");}rise_transition(scalar){values("1");}fall_transition(scalar){values("1");}}}}})";
 }
 struct Fixture : livehd::placement::test_fixture::Timing_circuit {
+  // Physical pin order of the DREAMPlace design below.
+  static inline const std::vector<std::string>     pin_names = {"a", "u:A", "u:Y", "v:A", "v:Y", "z"};
   tc::Gp_timing_settings                           timing_settings;
   b::Checkpoint_settings                           settings;
   dp::Design                                       physical;
@@ -96,11 +97,10 @@ struct Fixture : livehd::placement::test_fixture::Timing_circuit {
     };
   }
   void refresh(const dp::Design& d) {
-    static const std::vector<std::string> names = {"a", "u:A", "u:Y", "v:A", "v:Y", "z"};
     locations.clear();
-    for (size_t p = 0; p < names.size(); ++p) {
-      const int n         = d.pin2node[p];
-      locations[names[p]] = {d.node_x[n] + d.pin_offset_x[p], d.node_y[n] + d.pin_offset_y[p]};
+    for (size_t p = 0; p < pin_names.size(); ++p) {
+      const int n             = d.pin2node[p];
+      locations[pin_names[p]] = {d.node_x[n] + d.pin_offset_x[p], d.node_y[n] + d.pin_offset_y[p]};
     }
     rc.nets = {
         {  "a",   {{"a", 0}, {"u:A", 0}}, {{0, 1, 0}}},
@@ -171,15 +171,14 @@ struct Fixture : livehd::placement::test_fixture::Timing_circuit {
     b::Gap_force_payload p;
     p.driver.assign(6, -1);
     p.weight.assign(6, 0);
-    const std::vector<std::string>   names   = {"a", "u:A", "u:Y", "v:A", "v:Y", "z"};
     const std::map<std::string, int> drivers = {
         {  "a", 0},
         {"u:Y", 2},
         {"v:Y", 4}
     };
-    for (size_t i = 0; i < names.size(); ++i) {
-      if (fresh.pins.contains(names[i])) {
-        const auto& w = fresh.pins.at(names[i]);
+    for (size_t i = 0; i < pin_names.size(); ++i) {
+      if (fresh.pins.contains(pin_names[i])) {
+        const auto& w = fresh.pins.at(pin_names[i]);
         p.driver[i]   = drivers.at(w.driver);
         p.weight[i]   = w.weight;
       }
