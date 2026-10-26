@@ -153,25 +153,16 @@ Power_grid_plan plan_power_grid(const ph::Technology& tech, const ph::Floorplan&
   }
   for (auto& [key, intervals] : segments) {
     const auto& [layer, net, y, width] = key;
+    // The polarity check below sweeps each key's sorted intervals.
     std::sort(intervals.begin(), intervals.end());
-    auto       current = intervals.front();
-    const auto append  = [&] {
-      const ph::Rect rect{double(current.first), double(y - width / 2), double(current.second), double(y + width / 2)};
+    for (const auto& [lo, hi] : ph::merge_intervals(intervals)) {
+      const ph::Rect rect{double(lo), double(y - width / 2), double(hi), double(y + width / 2)};
       if (rect.yl < fp.die.yl || rect.yh > fp.die.yh) {
         throw std::invalid_argument("PG edge rail extends outside die; provide a core inset before placement");
       }
       plan.metal.push_back({profile.nets[net], layer, rect, true});
       ++plan.rail_count[layer];
-    };
-    for (size_t i = 1; i < intervals.size(); ++i) {
-      if (intervals[i].first <= current.second) {
-        current.second = std::max(current.second, intervals[i].second);
-      } else {
-        append();
-        current = intervals[i];
-      }
     }
-    append();
   }
   // Opposite polarities at a shared row edge would create a short.
   for (const auto& [key, intervals] : segments) {

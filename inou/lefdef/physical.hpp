@@ -39,6 +39,20 @@ struct Rect {
   Rect        translated(double dx, double dy) const { return {xl + dx, yl + dy, xh + dx, yh + dy}; }
   friend bool operator==(const Rect&, const Rect&) = default;
 };
+// Union of closed intervals, ascending and disjoint; touching intervals merge.
+template <class T>
+std::vector<std::pair<T, T>> merge_intervals(std::vector<std::pair<T, T>> intervals) {
+  std::ranges::sort(intervals);
+  std::vector<std::pair<T, T>> merged;
+  for (const auto& interval : intervals) {
+    if (merged.empty() || merged.back().second < interval.first) {
+      merged.push_back(interval);
+    } else {
+      merged.back().second = std::max(merged.back().second, interval.second);
+    }
+  }
+  return merged;
+}
 // Finite integral coordinates within the signed 32-bit DEF/OpenDB range.
 inline bool integral_dbu(const Rect& r) {
   for (auto v : {r.xl, r.yl, r.xh, r.yh}) {

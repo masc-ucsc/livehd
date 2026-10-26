@@ -551,18 +551,9 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
     }
   }
   std::vector<ph::Shape> metal;
-  for (auto& [line, spans] : intervals) {
-    std::sort(spans.begin(), spans.end());
-    std::vector<std::pair<double, double>> merged;
-    for (const auto& span : spans) {
-      if (merged.empty() || merged.back().second < span.first) {
-        merged.push_back(span);
-      } else {
-        merged.back().second = std::max(merged.back().second, span.second);
-      }
-    }
+  for (const auto& [line, spans] : intervals) {
     const auto [l, c] = line;
-    for (const auto& [low, high] : merged) {
+    for (const auto& [low, high] : ph::merge_intervals(spans)) {
       if (expired()) {
         return out;
       }
