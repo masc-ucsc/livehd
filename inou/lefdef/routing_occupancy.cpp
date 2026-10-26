@@ -322,6 +322,11 @@ std::vector<size_t> Routing_occupancy::query(const std::string& name, const Rect
   }
   return candidates;
 }
+bool same_supply_wiring(const std::vector<Net>& a, const std::vector<Net>& b) {
+  return std::ranges::equal(a, b, [](const Net& x, const Net& y) {
+    return x.name == y.name && x.use == y.use && x.wires == y.wires;
+  });
+}
 Routing_power_grid::Routing_power_grid(const Technology& tech, const Floorplan& fp, int64_t size,
                                        const std::function<void()>& checkpoint)
     : technology_(&tech), bucket_size_(size) {
@@ -398,12 +403,8 @@ Routing_occupancy Routing_power_grid::overlay(const Technology& tech, const Floo
       || fp.nondefault_rules != signature_.nondefault_rules || fp.special_nets.size() != signature_.special_nets.size()) {
     throw std::invalid_argument("power-grid occupancy snapshot mismatch");
   }
-  for (size_t i = 0; i < fp.special_nets.size(); ++i) {
-    const auto& net   = fp.special_nets[i];
-    const auto& saved = signature_.special_nets[i];
-    if (net.name != saved.name || net.use != saved.use || net.wires != saved.wires) {
-      throw std::invalid_argument("power-grid occupancy wiring changed");
-    }
+  if (!same_supply_wiring(fp.special_nets, signature_.special_nets)) {
+    throw std::invalid_argument("power-grid occupancy wiring changed");
   }
   return Routing_occupancy(occupancy_);
 }

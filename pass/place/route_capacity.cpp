@@ -216,15 +216,8 @@ std::unique_ptr<Route_capacity> Route_capacity_seed::instantiate(const ph::Techn
   if (&tech != technology_ || grid != capacity_->grid_ || fp.dbu != signature_.dbu || fp.die != signature_.die
       || fp.rows != signature_.rows || fp.tracks != signature_.tracks || fp.terminals != signature_.terminals
       || fp.vias != signature_.vias || fp.nondefault_rules != signature_.nondefault_rules
-      || fp.special_nets.size() != signature_.special_nets.size() || fp.components.size() < signature_.components.size()) {
+      || !ph::same_supply_wiring(fp.special_nets, signature_.special_nets) || fp.components.size() < signature_.components.size()) {
     return nullptr;
-  }
-  for (size_t i = 0; i < signature_.special_nets.size(); ++i) {
-    const auto& a = fp.special_nets[i];
-    const auto& b = signature_.special_nets[i];
-    if (a.name != b.name || a.use != b.use || a.wires != b.wires) {
-      return nullptr;
-    }
   }
   for (size_t i = 0; i < signature_.components.size(); ++i) {
     if (checkpoint && i % 1024 == 0) {

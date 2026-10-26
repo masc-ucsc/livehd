@@ -85,6 +85,8 @@ public:
   Occupied_shape      at(size_t id) const;
   size_t              size() const { return base_size_ + logical_size_; }
 };
+// Same special-net wiring, ignoring connections: new cells may join existing rails.
+bool same_supply_wiring(const std::vector<Net>&, const std::vector<Net>&);
 // Immutable decoded PG geometry for trials that change cells and connectivity,
 // but preserve the supply wiring. Technology must outlive this object and remain
 // unchanged. Reuse checks DBU, via definitions, NDRs and actual supply paths;
