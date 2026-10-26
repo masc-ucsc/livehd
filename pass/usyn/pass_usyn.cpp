@@ -777,6 +777,18 @@ void Pass_usyn::synthesize(Eprp_var& var) {
     livehd::diag::err("pass.usyn", "no-top", "unsupported").msg("source top '{}' not found", requested_top).emit();
     return;
   }
+  // The selected domain is a design-top input (a bus bit as port[i]): any
+  // other name would quietly retain every register as clock-domain.
+  if (options.physical == "domino_provisional") {
+    const std::string_view clock = options.domino.clock;
+    if (!top->get_io() || !top->get_io()->has_input(std::string{clock.substr(0, clock.find('['))})) {
+      livehd::diag::err("pass.usyn", "domino-profile", "syntax")
+          .msg("pass.usyn.domino_clock={} names no input of the design top {}", clock, top->get_name())
+          .hint("name the one constrained clock port of the top module")
+          .emit();
+      return;
+    }
+  }
   uint64_t job_units = 0;
   for ([[maybe_unused]] const auto node : top->body().nodes()) {
     ++job_units;

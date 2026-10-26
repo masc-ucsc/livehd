@@ -654,6 +654,7 @@ TEST_F(PassSynth, DominoProfileRequirementsAreExplicitUsageErrors) {
            std::tuple{ "literal_extract",                "1",   "domino-profile"},
            std::tuple{             "lef",                 "",   "domino-profile"},
            std::tuple{    "domino_clock",                 "",   "domino-profile"},
+           std::tuple{    "domino_clock",            "clock",   "domino-profile"},
            std::tuple{         "library",                 "",   "domino-profile"},
            std::tuple{        "physical",              "bad",  "invalid-options"},
            std::tuple{   "domino_select",              "bad",  "invalid-options"},
