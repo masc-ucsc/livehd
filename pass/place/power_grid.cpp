@@ -308,11 +308,10 @@ Power_grid_plan plan_power_grid(const ph::Technology& tech, const ph::Floorplan&
       continue;
     }
     const auto width = dimension(spec->width, fp.dbu), spacing = dimension(spec->spacing, fp.dbu);
-    const auto grid_dbu = ph::manufacturing_grid_dbu(tech, fp.dbu);
-    if (!grid_dbu) {
+    const auto grid = tech.manufacturing_grid == 0 ? 1 : dimension(tech.manufacturing_grid, fp.dbu);
+    if (grid <= 0) {
       throw std::invalid_argument("invalid PG manufacturing grid");
     }
-    const auto grid = *grid_dbu;
     const auto rail_count = plan.metal.size();
     for (size_t i = 0; i < rail_count; ++i) {
       const auto rail = plan.metal[i];
