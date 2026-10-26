@@ -21,7 +21,7 @@ private:
   std::string             net;
   std::vector<size_t>     blocked;
 };
-// Preserve at least one initially legal M1-to-M2 access for each supported,
+// Preserve at least one initially legal pin-to-escape access for each supported,
 // unrouted standard-cell pin, including CLOCK/POWER/GROUND pins in special
 // nets and unassigned control/supply pins. Partial signal wiring does not retire
 // a pin until full-net connectivity is established. Only the supported access

@@ -68,10 +68,11 @@ struct Signal_route_probe {
 // Geometry proposal stage, not a pre-route acceptance or emission API. The
 // caller still owns reset/tie/dont_touch eligibility, timing, capacity, final
 // complete-net checks and locking. Neither frame nor occupancy is changed by
-// a trial. M2 spans join any number of M1 pins on a common track; multi-pin
-// M2/M3 patterns connect separate tracks through a checked vertical trunk,
-// merging branches and sharing trunk vias for pins on the same M2 track.
-// A bounded M2–M7 maze follows pattern search. Multi-pin nets use a FLUTE
+// a trial. Layers come from the profile (Route_policy): escape-layer spans join
+// any number of pins on a common track; multi-pin escape/branch patterns connect
+// separate tracks through a checked vertical trunk, merging branches and sharing
+// trunk vias for pins on the same escape track. A bounded maze over the signal
+// layers follows pattern search. Multi-pin nets use a FLUTE
 // topology with snapped junctions and shared branch geometry. Timing/capacity
 // acceptance remains a separate stage.
 class Signal_router {
@@ -101,8 +102,8 @@ public:
   // Returns a witness using the requested layer alternatives, without timing ranking.
   Signal_route_probe     probe_route(const physical::Net&, const Signal_route_request&) const;
   // Shares access, work and deadline budgets across all search stages.
-  // Stay inside the retained corridor. An M2 witness may use legal V1 pin
-  // access while retaining one horizontal signal trunk and no detour.
+  // Stay inside the retained corridor. An escape-layer witness may use legal
+  // pin-access vias while retaining one horizontal signal trunk and no detour.
   Signal_route_trial propose_aligned(const physical::Net&, const physical::Shape& corridor, const Signal_route_limits&) const;
   // Lift a checked alignment without moving its endpoint centers. One
   // same-direction trunk plus local endpoint via landings; never a detour.

@@ -1281,7 +1281,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.satlegalize.route.vias",
      "false",
      Synth_set_option::Kind::boolean,
-     "Permit SAT M2 corridors with DRC-checked V1 endpoint access (experimental)."},
+     "Permit SAT escape-layer corridors with DRC-checked pin-access vias from the technology profile (experimental)."},
     {"place.satlegalize.route.critical_fraction",
      "0.10",
      Synth_set_option::Kind::file,

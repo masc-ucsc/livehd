@@ -78,8 +78,9 @@ struct Preroute_result {
 // Caller must publish the result as one placement/cache transaction and then
 // evaluate its RC in the physical session. Changed RC clears its old identity;
 // the host must assign the final cache identity. A finite stage deadline is required.
-// Search uses M2 spans and multi-pin M2/M3 patterns, followed by bounded
-// M2–M7 maze routing over snapped FLUTE branches. Wires follow each layer's
+// Search uses the technology profile's escape-layer spans and multi-pin
+// escape/branch patterns, followed by bounded maze routing on its signal layers
+// over snapped FLUTE branches. Wires follow each layer's
 // preferred direction; turns require vias. Unsupported/unroutable candidates
 // remain unwired.
 Preroute_result preroute(const physical::Technology&, const physical::Floorplan&, const physical::Parasitics&,

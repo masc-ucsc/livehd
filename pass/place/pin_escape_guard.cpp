@@ -314,7 +314,7 @@ Pin_escape_guard::Pin_escape_guard(const ph::Technology& tech, const ph::Floorpl
         const auto  via_cut
             = std::find_if(shapes.begin(), shapes.end(), [&](const auto& shape) { return shape.layer == layers_.cut; });
         if (via_cut == shapes.end()) {
-          throw std::logic_error("pin escape has no V1 cut");
+          throw std::logic_error("pin escape has no " + layers_.cut + " cut");
         }
         auto shape     = *via_cut;
         shape.rect.xl += point.x;
@@ -324,7 +324,7 @@ Pin_escape_guard::Pin_escape_guard(const ph::Technology& tech, const ph::Floorpl
         const auto upper
             = std::find_if(shapes.begin(), shapes.end(), [&](const auto& item) { return item.layer == layers_.escape; });
         if (upper == shapes.end()) {
-          throw std::logic_error("pin escape has no M2 landing");
+          throw std::logic_error("pin escape has no " + layers_.escape + " landing");
         }
         auto landing       = *upper;
         landing.rect.xl   += point.x;
