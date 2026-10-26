@@ -2566,11 +2566,13 @@ internal, part of the environment key) lists same-interface variants of
 custom sequential macros by family and rank; a swap declares the new
 variant as a pin-for-pin clone of the instance's declaration, so every pin,
 edge and pin attribute stays. After final legalization a critical instance
-(negative output slack) steps up, its output is buffered only once its top
+(negative output slack, in period terms: the evaluator divides a slack by its
+capture fraction) steps up, its output is buffered only once its top
 variant is in place or its up move was rejected, and an instance with spare
 slack steps down. Each trial is one edit through `run_resize_trial` (the
 resize engine's clone, ECO re-place and evaluate) with `multirow_eco`, and
-is accepted when the evaluator's period (`Feedback::delay`) is not worse and
+is accepted when the evaluator's period (`Feedback::delay`, compared in ps)
+is shorter and electrical violations are not worse, or is not worse and
 `resize_accepts` holds; a `Multirow_failure` rejects the trial and leaves the
 state untouched. `domino_sizing.json` and `qor.domino_sizing` list every
 trial, the variant counts and the clock-capacitance change.

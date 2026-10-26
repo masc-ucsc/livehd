@@ -11,8 +11,9 @@
 // Every trial is one edit materialized on a clone, re-placed through the
 // two-row ECO (Options::multirow_eco, nearest-whitespace legalization of the
 // cells it displaces) and fully evaluated, so geometry, pins, RC and timing
-// are fresh. A trial is accepted when the period (Feedback::delay) is not
-// worse and resize_accepts holds; a rejected trial or a packing failure
+// are fresh. A trial is accepted when the period (Feedback::delay) is
+// shorter and electrical violations are not worse, or when the period is
+// not worse and resize_accepts holds; a rejected trial or a packing failure
 // (Multirow_failure, or a variant wider than every row, which is rejected
 // without a trial) discards the clone and leaves the state untouched. The
 // netlist is never resynthesized. Writes domino_sizing.json and the
@@ -32,7 +33,8 @@ struct Custom_sizing_options {
 // `legal` is a legal full placement after final legalization
 // (optimization_pending false) whose options carry the custom catalog;
 // `evaluate` gives the period as Feedback::delay, output slack per
-// "instance:pin" and the area basis of acceptance.
+// "instance:pin" in period terms (slack / capture fraction, as the stage
+// timer reports it), which ranks the moves, and the area basis of acceptance.
 Repair_result size_custom_placed(Result legal, const Options& options, const Evaluate& evaluate,
                                  const Custom_sizing_options& sizing);
 }  // namespace livehd::placement

@@ -168,15 +168,18 @@ overrides for sweeps that must not re-place.
 legalization, without rerunning USYN (`pass/place/custom_sizing.hpp`). The
 choices are the sidecar's variant catalog: the variants of one master and
 template, ranked by their register's drive, with the same rails, CLK, Q and
-port order. A domino instance whose Q slack is negative steps up; once its
+port order. A domino instance whose Q slack is negative steps up (slack
+in period terms: the stage timer divides each requirement's slack by its
+capture fraction, so a half-cycle ps counts twice); once its
 top variant is in place, or its up move was rejected, its Q net is buffered
 (the smallest inventory buffer takes every sink but the worst;
 `.buffers=false` never buffers); an instance with spare slack steps down.
 Every trial is one edit re-placed through the two-row ECO (in place, a shift
 of up to 64 sites, displacing up to 16 single-row cells, else a re-anchor,
 with the terminal padding kept) and re-timed with the same stage timer; it
-is accepted when the stage period is not worse and setup WNS/TNS and
-electrical violations are not worse with some gain (LEF footprint area
+is accepted when the stage period is shorter and electrical violations are
+not worse, or when the period is not worse and setup WNS/TNS (period terms)
+and electrical violations are not worse with some gain (LEF footprint area
 counts). A packing failure is a rejected trial. `.trials` (default 64) bounds
 the trials. The netlist is always variant 0 at synthesis, so a down-size
 only follows an up-size. `place/domino_sizing.json` and

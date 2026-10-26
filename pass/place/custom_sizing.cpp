@@ -119,6 +119,13 @@ std::optional<double> clock_ff(const std::map<std::string, Custom_instance>& ins
   }
   return total;
 }
+double period_ps(const Timing_feedback& f) { return f.delay * f.time_unit_ps; }
+// No more electrical violations, and with as many no larger an excess:
+// resize_accepts' electrical gate.
+bool   electrical_holds(const Timing_feedback& before, const Timing_feedback& after) {
+  return after.violations < before.violations
+         || (after.violations == before.violations && after.electrical_excess <= before.electrical_excess + 1e-6);
+}
 void real(Writer& w, const char* key, std::optional<double> value) {
   w.Key(key);
   if (value && std::isfinite(*value)) {
@@ -268,10 +275,14 @@ Repair_result size_custom_placed(Result legal, const Options& requested, const E
           failure = error.what();  // the two-row ECO found no legal pose: rejected
         }
       }
-      // The period compares in ps: Feedback::delay is in timer units.
-      const bool keep = trial
-                        && trial->timing.delay * trial->timing.time_unit_ps <= score.delay * score.time_unit_ps + sizing.epsilon_ps
-                        && resize_accepts(score, trial->timing);
+      // The period (Feedback::delay, compared in ps) is the objective: a
+      // strictly shorter one is kept whenever the electrical checks hold,
+      // whatever WNS/TNS do (a half-cycle ps and a full-cycle ps cost
+      // different period); an equal one needs resize_accepts.
+      const bool keep
+          = trial && electrical_holds(score, trial->timing)
+            && (period_ps(trial->timing) < period_ps(score) - sizing.epsilon_ps
+                || (period_ps(trial->timing) <= period_ps(score) + sizing.epsilon_ps && resize_accepts(score, trial->timing)));
       const auto outcome = keep ? "accepted" : trial ? "rejected_timing" : "rejected_packing";
       ++tally[std::string(move_name(move.kind)) + (keep ? "_accepted" : "")];
       ++tally[outcome];

@@ -15,6 +15,7 @@
 #include "node_util.hpp"
 #include "place_test_fixture.hpp"
 #include "rapidjson/document.h"
+#include "resize_engine.hpp"
 
 namespace livehd::placement {
 namespace {
@@ -369,6 +370,30 @@ TEST(CustomSizing, ThePeriodToleranceIsInPicoseconds) {
   EXPECT_EQ(trial_moves(report), (std::vector<std::string>{"down:rejected_timing"}));
   EXPECT_EQ(report["trials"][0]["timing"]["delay_ps"].GetDouble(), 960.5);
   EXPECT_EQ(at(sized.placed.floorplan, "c5").macro, variant(2));
+}
+
+TEST(CustomSizing, AShorterPeriodIsAcceptedAlthoughTnsWorsens) {
+  // c1's Q (a half-cycle -4 ps raw: -8 in period terms) steps up to -1 (-2),
+  // while two full-cycle endpoints it loads drop from 0 to -4: WNS -8 -> -4,
+  // TNS -8 -> -10, period 1008 -> 1004. The next step gains no period and
+  // loses no TNS, so it is rejected.
+  Domino_chain chain("sizing_period");
+  const auto   cold = place(*chain.graph, chain.flat, chain.options);
+  Table_timing timing{chain.catalog.get(), chain.tech.dbu, {{"c1", {-8, -2, -2, -2}}}};
+  timing.side = {
+      {"c1", {0, -4, -4, -4}}
+  };
+  const auto before = timing(cold);
+  ASSERT_EQ(before.delay, 1008);
+  ASSERT_EQ(before.tns, -8);
+  const auto sized  = size_custom_placed(cold, chain.options, timing, {.buffers = false});
+  const auto report = parse(sized.report);
+  EXPECT_EQ(trial_moves(report), (std::vector<std::string>{"up:accepted", "up:rejected_timing"}));
+  EXPECT_EQ(sized.timing->delay, 1004);
+  EXPECT_EQ(sized.timing->tns, -10);
+  EXPECT_FALSE(resize_accepts(before, *sized.timing));  // the WNS/TNS gate alone would refuse it
+  EXPECT_EQ(at(sized.placed.floorplan, "c1").macro, variant(1));
+  EXPECT_NO_THROW(check_legality(chain.tech, sized.placed.floorplan));
 }
 
 TEST(CustomSizing, UsageErrors) {
