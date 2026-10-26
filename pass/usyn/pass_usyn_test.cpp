@@ -648,23 +648,34 @@ TEST_F(PassSynth, DominoProfileRequirementsAreExplicitUsageErrors) {
   run(var);
   ASSERT_FALSE(livehd::diag::sink().has_halting_errors());
   const auto base = var.dict;
+  // A refused run publishes nothing: the previous report and bundle stay.
+  const auto report_text = [&] {
+    std::ifstream file(root + "/qor.json.usyn.json");
+    return std::string{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+  };
+  const auto published = report_text();
+  ASSERT_FALSE(published.empty());
+  const auto stub = root + "/stub.lef";  // a readable LEF without the reference cells
+  std::ofstream(stub) << "VERSION 5.8 ;\nEND LIBRARY\n";
   for (const auto& [key, value, code] : {
-           std::tuple{    "clock_phases",                "2",   "domino-profile"},
-           std::tuple{           "stack",                "5",   "domino-profile"},
-           std::tuple{ "literal_extract",                "1",   "domino-profile"},
-           std::tuple{             "lef",                 "",   "domino-profile"},
-           std::tuple{    "domino_clock",                 "",   "domino-profile"},
-           std::tuple{    "domino_clock",            "clock",   "domino-profile"},
-           std::tuple{         "library",                 "",   "domino-profile"},
-           std::tuple{        "physical",              "bad",  "invalid-options"},
-           std::tuple{   "domino_select",              "bad",  "invalid-options"},
-           std::tuple{ "domino_identity",            "maybe",  "invalid-options"},
-           std::tuple{      "domino_aux",               "65",  "invalid-options"},
-           std::tuple{ "domino_variants",                "0",  "invalid-options"},
-           std::tuple{ "domino_variants",                "4",  "invalid-options"},
-           std::tuple{ "domino_inverter",             "NOPE", "domino-reference"},
-           std::tuple{ "domino_register",              "INV", "domino-reference"},
-           std::tuple{"domino_selection", "the wrong option",   "domino-profile"}
+           std::tuple{    "clock_phases",                               "2",   "domino-profile"},
+           std::tuple{           "stack",                               "5",   "domino-profile"},
+           std::tuple{ "literal_extract",                               "1",   "domino-profile"},
+           std::tuple{             "lef",                                "",   "domino-profile"},
+           std::tuple{             "lef", "/nonexistent/domino_missing.lef",    "domino-bundle"},
+           std::tuple{             "lef",                      stub.c_str(),    "domino-bundle"},
+           std::tuple{    "domino_clock",                                "",   "domino-profile"},
+           std::tuple{    "domino_clock",                           "clock",   "domino-profile"},
+           std::tuple{         "library",                                "",   "domino-profile"},
+           std::tuple{        "physical",                             "bad",  "invalid-options"},
+           std::tuple{   "domino_select",                             "bad",  "invalid-options"},
+           std::tuple{ "domino_identity",                           "maybe",  "invalid-options"},
+           std::tuple{      "domino_aux",                              "65",  "invalid-options"},
+           std::tuple{ "domino_variants",                               "0",  "invalid-options"},
+           std::tuple{ "domino_variants",                               "4",  "invalid-options"},
+           std::tuple{ "domino_inverter",                            "NOPE", "domino-reference"},
+           std::tuple{ "domino_register",                             "INV", "domino-reference"},
+           std::tuple{"domino_selection",                "the wrong option",   "domino-profile"}
   }) {
     var.dict = base;
     if (std::string_view{key} == "domino_selection") {
@@ -679,6 +690,10 @@ TEST_F(PassSynth, DominoProfileRequirementsAreExplicitUsageErrors) {
     ASSERT_FALSE(livehd::diag::sink().records().empty()) << key;
     EXPECT_EQ(livehd::diag::sink().records().back().code, code) << key;
     EXPECT_FALSE(fs::exists(root + "/invalid")) << key;
+    EXPECT_FALSE(fs::exists(root + "/qor.json.domino.tmp")) << key;
+    EXPECT_FALSE(fs::exists(root + "/qor.json.provenance.tmp")) << key;
+    EXPECT_TRUE(fs::exists(root + "/qor.json.domino/domino_models.json")) << key;
+    EXPECT_EQ(report_text(), published) << key;
     livehd::diag::sink().clear();
   }
   // Without the profile, a domino option spelled at its listed default is

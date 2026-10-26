@@ -174,4 +174,19 @@ TEST(DominoBundle, RefusalsLeaveNoBundle) {
   EXPECT_NE(why.find(std::string(kBundleSidecar)), std::string::npos) << why;
 }
 
+TEST(DominoBundle, AFailedAccessCheckRefusesTheBundle) {
+  // Bottom rails drawn off the row edge: no placement finds its PG rail, so
+  // the access check fails and nothing is written.
+  Fixture f;
+  for (auto& shape : f.inputs.geometry.footprint.rails[0].shapes) {
+    shape.rect = shape.rect.translated(0, 50);
+  }
+  const auto dir     = fs::path(testing::TempDir()) / "bundle_access";
+  const auto refused = generate_domino_bundle(f.design, f.inputs, dir);
+  EXPECT_FALSE(refused.ok);
+  EXPECT_NE(refused.reason.find("pin access check failed"), std::string::npos) << refused.reason;
+  EXPECT_NE(refused.reason.find("PG:"), std::string::npos) << refused.reason;
+  EXPECT_FALSE(fs::exists(dir));
+}
+
 }  // namespace livehd::domplace
