@@ -15,7 +15,6 @@
 #include "emit_dcert.hpp"
 #include "emit_design_cert.hpp"
 #include "lean_format.hpp"
-#include "legacy_model.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "node_util.hpp"
@@ -2681,32 +2680,7 @@ TEST(DesignIoMeta, ArityFromAResetOrdinalWithNoInputSource) {
   EXPECT_TRUE(meta.inputs[1].used_by_model) << "the reset-only ordinal was reported as ignored";
 }
 
-// Graph-out-of-scope coverage for the LEGACY emitter as well. Both emitters are
-// wired to `publish_pair`, so both must hold the property.
-TEST(DesignIoMeta, LegacyEmissionAlsoOutlivesTheGraph) {
-  DesignScan    design;
-  CertificateIR cert;
-  {
-    auto& lib = livehd::Hhds_graph_library::instance("lgdb_io_meta_legacy_life");
-    auto  io  = lib.create_io("legacylife");
-    io->add_input("a", 1);
-    io->set_bits("a", 8);
-    io->add_output("z", 1);
-    io->set_bits("z", 8);
-    auto g  = io->create_graph();
-    auto op = create_typed_node(*g, Ntype_op::Or);
-    set_bits(op.create_driver_pin(0), 8);
-    g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
-    op.create_driver_pin(0).connect_sink(g->get_output_pin("z"));
-    design = scan_design(*g, {});
-    cert   = build_certificate(design, {});
-  }
-  const LegacyEmitOptions options{};  // defaults: emit_cert, Skip WF
-  std::ostringstream      out;
-  emit_legacy_model(design, cert, options, out);
-  EXPECT_NE(out.str().find("legacylife"), std::string::npos);
-  EXPECT_FALSE(io_meta_json(build_io_meta(design, cert)).empty());
-}
+
 
 // WRITE-PORT COLLISION ORDERING, from the real scanner.
 //

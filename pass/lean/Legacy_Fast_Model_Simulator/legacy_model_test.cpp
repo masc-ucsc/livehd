@@ -10,8 +10,14 @@
 #include "emit_legacy_fast_model.hpp"
 #include "gtest/gtest.h"
 #include "lean_format.hpp"
+#include "design_scan.hpp"
+#include "graph_library_singleton.hpp"
+#include "node_util.hpp"
+#include "design_io_meta.hpp"
 namespace lean_export {
 namespace {
+using livehd::graph_util::create_typed_node;
+using livehd::graph_util::set_bits;
 PinRef     input(uint32_t id, uint32_t width) { return {PinKind::Input, id, 0, width, 0, {}}; }
 PinRef     constant(std::string value, uint32_t width) { return {PinKind::Constant, 3, 0, 0, width, std::move(value), width}; }
 DesignScan binary(ScanOp op, uint32_t width) {
@@ -366,5 +372,33 @@ TEST(LegacyModel, ConstantChunksUseSymbolicComposition) {
     }
   }
 }
+
+// Graph-out-of-scope coverage for the LEGACY emitter as well. Both emitters are
+// wired to `publish_pair`, so both must hold the property.
+TEST(DesignIoMeta, LegacyEmissionAlsoOutlivesTheGraph) {
+  DesignScan    design;
+  CertificateIR cert;
+  {
+    auto& lib = livehd::Hhds_graph_library::instance("lgdb_io_meta_legacy_life");
+    auto  io  = lib.create_io("legacylife");
+    io->add_input("a", 1);
+    io->set_bits("a", 8);
+    io->add_output("z", 1);
+    io->set_bits("z", 8);
+    auto g  = io->create_graph();
+    auto op = create_typed_node(*g, Ntype_op::Or);
+    set_bits(op.create_driver_pin(0), 8);
+    g->get_input_pin("a").connect_sink(op.create_sink_pin(0));
+    op.create_driver_pin(0).connect_sink(g->get_output_pin("z"));
+    design = scan_design(*g, {});
+    cert   = build_certificate(design, {});
+  }
+  const LegacyEmitOptions options{};  // defaults: emit_cert, Skip WF
+  std::ostringstream      out;
+  emit_legacy_model(design, cert, options, out);
+  EXPECT_NE(out.str().find("legacylife"), std::string::npos);
+  EXPECT_FALSE(io_meta_json(build_io_meta(design, cert)).empty());
+}
+
 }  // namespace
 }  // namespace lean_export
