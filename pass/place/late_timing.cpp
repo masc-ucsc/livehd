@@ -1039,6 +1039,7 @@ struct Proxy::Impl {
           }
           result.pins[i].endpoint   = true;
           result.pins[i].clock_gate = true;
+          result.pins[i].gate_clock = clock_system.clocks[base_clock(gate.captures[k])].name;
           const auto& clock         = clock_system.clocks[gate.captures[k]].model;
           checks.push_back({
               i,

@@ -270,6 +270,9 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
     out.cls              = instance.domino ? "domino" : all.pins[pin].clock_gate ? "gate" : "flop";
     out.clock            = instance.clock;
     out.fraction         = all.pins[pin].capture_share;  // a half-cycle pair through an inverted clock
+    if (all.pins[pin].gate_clock) {
+      out.clock = all.pins[pin].gate_clock;  // a clock gate's enable: the gate's clock, not the cell's
+    }
     if (instance.domino) {
       if (const auto budget = provisional->capture.find(instance.master); budget != provisional->capture.end()) {
         out.fraction *= budget->second.fraction;

@@ -89,6 +89,7 @@ struct Pin_result {
   bool                       clock_inverted = false;
   // A clock-gate enable: its setup check is the gate's (Proxy below).
   bool                       clock_gate     = false;
+  std::optional<std::string> gate_clock;  // its check\'s clock (base name)
   // The smallest share of the period between a launch and this capture edge
   // (0.5 between the two edges of one clock): the period moves its requirement
   // by share * the change. 1 without an inverted clock.

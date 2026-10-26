@@ -592,6 +592,7 @@ TEST(LateTiming, IdealClockPassesARecognizedClockGate) {
   // settle before the next rising edge (100): slack 30, a half-cycle pair.
   const auto& enable = pin(result, "g:B");
   EXPECT_TRUE(enable.endpoint && enable.clock_gate);
+  EXPECT_EQ(enable.gate_clock, "main");
   EXPECT_EQ(enable.transitions[1].arrival_ps, 70);
   EXPECT_EQ(enable.transitions[1].required_ps, 100);
   // en (10) into the falling-edge storage (setup 5/8): slack 32 of 50.
