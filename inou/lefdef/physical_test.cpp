@@ -1,5 +1,6 @@
 #include "physical.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
