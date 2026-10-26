@@ -99,6 +99,52 @@ TEST(DominoReference, ExplicitNamesStartTheLadderAtTheNamedDrive) {
   EXPECT_EQ(one->registers[0].name, "DFF_X1");
 }
 
+TEST(DominoReference, RegistersRecordPinNamesAndTheirClockLoad) {
+  // capacitive_load_unit defaults to 1 pF: the larger CK edge is 1.8 fF.
+  const auto  lib = write("clocked.lib",
+                         library("c",
+                                 inv("INV", "area : 1;")
+                                     + "  cell(DFF) { area : 20; ff(IQ, IQN) {clocked_on : \"CK\"; next_state : \"DIN\";}\n"
+                                        "    pin(CK) {direction : input; clock : true; rise_capacitance : 0.0015; "
+                                        "fall_capacitance : 0.0018;}\n"
+                                        "    pin(DIN) {direction : input;} pin(QO) {direction : output; function : \"IQ\";} }\n"));
+  std::string why;
+  const auto  reference = resolve_domino_reference(lib, "", "", 4, 1, &why);
+  ASSERT_TRUE(reference) << why;
+  const auto& r = reference->registers.at(0);
+  EXPECT_EQ(r.d_pin, "DIN");
+  EXPECT_EQ(r.clk_pin, "CK");
+  EXPECT_EQ(r.q_pin, "QO");
+  ASSERT_TRUE(r.clock_ff);
+  EXPECT_NEAR(*r.clock_ff, 1.8, 1e-12);
+  // No CK capacitance: absent, never zero.
+  const auto plain = resolve_domino_reference(reference_library(), "", "", 4, 1, &why);
+  ASSERT_TRUE(plain) << why;
+  EXPECT_FALSE(plain->registers.at(0).clock_ff);
+  EXPECT_EQ(plain->registers.at(0).clk_pin, "CLK");
+}
+
+TEST(DominoReference, PairAreaPercentScalesOnlyThePdnTerm) {
+  std::string why;
+  auto        reference = resolve_domino_reference(reference_library(), "", "", 4, 3, &why);
+  ASSERT_TRUE(reference) << why;
+  // The default is exactly the unscaled x * A_NOT + A_register.
+  EXPECT_EQ(reference->pair_area_pct, 100U);
+  EXPECT_EQ(domino_area(devices(4), *reference, 0).a_domino, 4.0 * 1.25 + 20);
+  EXPECT_EQ(domino_area(devices(5), *reference, 2).a_domino, 4.5 * 1.25 + 23.5);
+  for (const auto& [pct, expected] : {
+           std::pair{ 75U, 3.75},
+           {125U, 6.25},
+           {400U, 20.0}
+  }) {
+    reference->pair_area_pct = pct;
+    const auto area          = domino_area(devices(4), *reference, 1);
+    EXPECT_EQ(area.x, 4.0) << pct;
+    EXPECT_EQ(area.a_not, 1.25) << pct;
+    EXPECT_EQ(area.a_domino, expected + 21.25) << pct;  // the register is never scaled
+  }
+}
+
 TEST(DominoReference, MissingCellsAreasAndCornersAreDiagnosedNeverZero) {
   const auto lib = reference_library();
   const auto refused

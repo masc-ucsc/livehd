@@ -371,6 +371,30 @@ TEST(PhysicalSelect, AreaPolicyComparesBothSidesAndATieRetainsCmos) {
   EXPECT_EQ(wins.emission->states[0].decision, usyn::Physical_decision::domino);
 }
 
+TEST(PhysicalSelect, AreaMarginConvertsWithinItsShareAndZeroKeepsTheTie) {
+  Builder    b;
+  const auto a = b.input("a"), c = b.input("c");
+  b.state("q");
+  // a & c is also an output, so only the 12-unit register is saved; the
+  // domino side is (2 + 4) / 2 * 1 + 10 = 13.
+  b.net().outputs.push_back({"y", b.next(0, formula({lit(0), lit(1), series(0, 1)}), {a, c})});
+  Select_options options;
+  for (const auto& [margin, reason] : {
+           std::pair{ 0U,        "area"},
+           { 8U,        "area"}, // 12.96
+           {10U, "domino-area"}  // 13.2
+  }) {
+    options.area_margin_pct = margin;
+    const auto run          = select(b, options, 12);
+    ASSERT_TRUE(run.emission);
+    EXPECT_EQ(run.emission->states[0].reason, reason) << margin;
+    EXPECT_EQ(*run.emission->states[0].a_cmos, 12.0) << margin;  // the reported estimate is unscaled
+  }
+  // The margin is a share of CMOS: a tie at margin 0 still retains CMOS.
+  options.area_margin_pct = 0;
+  EXPECT_EQ(select(b, options, 13).emission->states[0].reason, "area");
+}
+
 TEST(PhysicalSelect, LogicARailProducerStillNeedsIsNotSaved) {
   Builder    b;
   const auto a = b.input("a"), c = b.input("c"), d = b.input("d");

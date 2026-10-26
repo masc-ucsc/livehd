@@ -33,6 +33,7 @@ std::string physical_report(const usyn::Logical_design& design, const Physical_r
   number(w, "stage_model_version", kStageModelVersion);
   text(w, "select", inputs.options->policy == Select_options::Policy::all ? "all" : "area");
   json::flag(w, "identity", inputs.options->identity);
+  number(w, "area_margin_pct", inputs.options->area_margin_pct);
   text(w, "clock", inputs.options->clock);
   w.Key("reference");
   w.StartObject();
@@ -57,6 +58,8 @@ std::string physical_report(const usyn::Logical_design& design, const Physical_r
   }
   w.EndArray();
   number(w, "aux_nonregister", reference.aux_nonregister);
+  number(w, "pair_area_pct", reference.pair_area_pct);
+  number(w, "clock_devices", reference.clock_devices);
   w.EndObject();
   w.Key("cmos_register");
   w.StartObject();

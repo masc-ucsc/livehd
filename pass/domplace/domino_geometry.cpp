@@ -337,15 +337,21 @@ Domino_variant_geometry generate_domino_macro(const usyn::Physical_cell_interfac
   const auto h     = ref.row_height;
   const auto a_reg
       = to_dbu(reg->second.width, dbu, register_cell + " width") * to_dbu(reg->second.height, dbu, register_cell + " height");
-  // 2 * A_domino is integral in DBU^2 (x is a multiple of 1/2), so the site
-  // count is exact: 35.0336 um^2 on sky130 is 14 two-row sites, never 15.
-  const auto   twice = proxy_devices * ref.area + 2 * a_reg;
-  const double dbu2  = double(dbu) * double(dbu);
-  g.x                = proxy_devices / 2.0;
-  g.a_not_um2        = ref.area / dbu2;
-  g.a_register_um2   = a_reg / dbu2;
-  g.a_estimate_um2   = twice / (2 * dbu2);
-  g.w_area           = ceil_div(twice, 2 * (2 * h * sw)) * sw;
+  // 200 * A_domino is integral in DBU^2 (x is a multiple of 1/2 and the
+  // per-pair percent scales x * A_NOT only), so the site count is exact:
+  // 35.0336 um^2 on sky130 is 14 two-row sites, never 15. At 100% this is
+  // 100 * (2 * A_domino), which leaves every default width and area unchanged.
+  const auto pct = int64_t{reference_cells.pair_area_pct};
+  if (pct <= 0) {
+    refuse("the per-pair area percent must be positive");
+  }
+  const auto   twice100 = proxy_devices * ref.area * pct + 200 * a_reg;
+  const double dbu2     = double(dbu) * double(dbu);
+  g.x                   = proxy_devices / 2.0;
+  g.a_not_um2           = ref.area / dbu2;
+  g.a_register_um2      = a_reg / dbu2;
+  g.a_estimate_um2      = double(twice100) / 100 / (2 * dbu2);
+  g.w_area              = ceil_div(twice100, 100 * 2 * (2 * h * sw)) * sw;
   // Pin slots: vertical-layer tracks wide enough for every site x-phase.
   const auto v       = lattice(tech, in.vertical_layer, true, "vertical-access");
   const auto pin     = lattice(tech, in.access.pin, true, "pin");

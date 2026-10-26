@@ -359,7 +359,8 @@ std::optional<usyn::Physical_emission> select_physical(const usyn::Stateful_regi
         continue;
       }
       state.a_cmos = context.cmos_register_area + cone.area;
-      if (!(state.a_domino + state.a_rail_not < *state.a_cmos)) {
+      // The factor is exactly 1 at margin 0, so the default decision is unchanged.
+      if (!(state.a_domino + state.a_rail_not < *state.a_cmos * ((100.0 + options.area_margin_pct) / 100.0))) {
         retain(Reason::area);  // a tie retains CMOS
         continue;
       }

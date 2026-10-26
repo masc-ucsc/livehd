@@ -135,14 +135,30 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
       notes.push_back("fo4_ps: " + inverter.name + " has no Liberty input capacitance or drive resistance");
     }
     auto stage = inputs.stage;
+    // The base variant's; each variant records its own register's setup.
     if (!stage.setup_capture_ps) {
       stage.setup_capture_ps = reference.registers.front().setup_ps;
     }
-    if (inputs.eval_fo4 && fo4) {
-      stage.eval_delay_ps = *inputs.eval_fo4 * *fo4;
+    for (const auto& [multiple, target] : {
+             std::pair{            &inputs.eval_fo4,       &stage.eval_delay_ps},
+             std::pair{       &inputs.precharge_fo4,        &stage.precharge_ps},
+             std::pair{      &inputs.setup_eval_fo4,       &stage.setup_eval_ps},
+             std::pair{&inputs.precharge_margin_fo4, &stage.precharge_margin_ps}
+    }) {
+      if (*multiple && fo4) {
+        *target = **multiple * *fo4;
+      }
     }
-    if (inputs.precharge_fo4 && fo4) {
-      stage.precharge_ps = *inputs.precharge_fo4 * *fo4;
+    // Every variant's CLK load, a labeled estimate: its register's CK input
+    // plus the clocked domino devices (precharge, foot) at half an inverter
+    // input each. Null when either input is unknown.
+    std::vector<std::optional<double>> clock_ff;
+    for (const auto& r : reference.registers) {
+      clock_ff.push_back(r.clock_ff && c_in ? std::optional<double>{*r.clock_ff + reference.clock_devices / 2.0 * *c_in}
+                                            : std::nullopt);
+      if (!clock_ff.back()) {
+        notes.push_back("pin_caps.clock_ff of the " + r.name + " variants is null: no register CK or inverter input capacitance");
+      }
     }
     std::string missing;
     for (const auto& [name, value] : {
@@ -298,6 +314,13 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
       real(w, "setup_ps", r.setup_ps);
       real(w, "hold_ps", r.hold_ps);
       json::flag(w, "q_inverted", r.q_inverted);
+      w.Key("pins");
+      w.StartObject();
+      text(w, "d", r.d_pin);
+      text(w, "clk", r.clk_pin);
+      text(w, "q", r.q_pin);
+      w.EndObject();
+      real(w, "clock_capacitance_ff", r.clock_ff);
       drive(w, r.drive);
       w.EndObject();
     }
@@ -311,11 +334,17 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
     w.Key("coefficients");
     w.StartObject();
     number(w, "aux_nonregister", reference.aux_nonregister);
+    number(w, "pair_area_pct", reference.pair_area_pct);
+    number(w, "area_margin_pct", inputs.area_margin_pct);
+    number(w, "clock_devices", reference.clock_devices);
     real(w, "eval_fo4", inputs.eval_fo4);
     real(w, "precharge_fo4", inputs.precharge_fo4);
+    real(w, "setup_eval_fo4", inputs.setup_eval_fo4);
+    real(w, "precharge_margin_fo4", inputs.precharge_margin_fo4);
     w.EndObject();
-    if (!inputs.eval_fo4 || !inputs.precharge_fo4) {
-      notes.push_back("eval_fo4 and precharge_fo4 are hand-set coefficients; unset ones stay null");
+    if (!inputs.eval_fo4 || !inputs.precharge_fo4 || !inputs.setup_eval_fo4 || !inputs.precharge_margin_fo4) {
+      notes.push_back(
+          "eval_fo4, precharge_fo4, setup_eval_fo4 and precharge_margin_fo4 are hand-set coefficients; unset ones stay null");
     }
 
     w.Key("masters");
@@ -372,9 +401,14 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
         w.Key("pin_caps");
         w.StartObject();
         real(w, "rail_ff", c_in);
-        real(w, "clock_ff", std::nullopt);
-        text(w, "source", "labeled-estimate: one reference-inverter input per rail; the clock load is not characterized");
+        real(w, "clock_ff", clock_ff[v]);
+        text(w,
+             "source",
+             std::format("labeled-estimate: one reference-inverter input per rail; CLK = the register's CK input + {}/2 "
+                         "reference-inverter inputs (clocked precharge and foot devices)",
+                         reference.clock_devices));
         w.EndObject();
+        real(w, "setup_capture_ps", reference.registers[v].setup_ps);
         drive(w, reference.registers[v].drive);
         w.Key("access_check");
         w.StartObject();
@@ -467,14 +501,68 @@ std::optional<Domino_sidecar> read_domino_sidecar(const fs::path& dir, std::stri
   if (!doc.HasMember("masters") || !doc["masters"].IsArray() || !doc.HasMember("instances") || !doc["instances"].IsArray()) {
     return refuse("sidecar has no masters or instances");
   }
+  // A labeled estimate is a number or null; anything else is malformed.
+  bool       malformed = false;
+  const auto estimate  = [&](const rapidjson::Value& object, const char* key) -> std::optional<double> {
+    if (!object.IsObject() || !object.HasMember(key) || !(object[key].IsNumber() || object[key].IsNull())) {
+      malformed = true;
+      return std::nullopt;
+    }
+    return object[key].IsNumber() ? std::optional<double>{object[key].GetDouble()} : std::nullopt;
+  };
+  const auto string = [&](const rapidjson::Value& object, const char* key) {
+    if (!object.IsObject() || !object.HasMember(key) || !object[key].IsString()) {
+      malformed = true;
+      return std::string{};
+    }
+    return std::string{object[key].GetString(), object[key].GetStringLength()};
+  };
   for (const auto& master : doc["masters"].GetArray()) {
-    if (!master.IsObject() || !master.HasMember("variants") || !master["variants"].IsArray()) {
+    if (!master.IsObject() || !master.HasMember("variants") || !master["variants"].IsArray() || !master.HasMember("rails")
+        || !master["rails"].IsArray()) {
       return refuse("malformed master");
     }
+    const auto               base = string(master, "base");
+    std::vector<std::string> rails;
+    for (const auto& rail : master["rails"].GetArray()) {
+      rails.push_back(string(rail, "pin"));
+    }
+    uint32_t rank = 0;
     for (const auto& variant : master["variants"].GetArray()) {
       if (!variant.IsObject() || !variant.HasMember("name") || !variant["name"].IsString() || !variant.HasMember("halves")
-          || !variant["halves"].IsArray() || variant["halves"].Size() != 2) {
+          || !variant["halves"].IsArray() || variant["halves"].Size() != 2 || !variant.HasMember("width_dbu")
+          || !variant["width_dbu"].IsUint64() || !variant.HasMember("pin_caps") || !variant.HasMember("drive")) {
         return refuse("malformed master variant");
+      }
+      Catalog_entry entry;
+      entry.name            = string(variant, "name");
+      entry.register_cell   = string(variant, "register");
+      entry.rank            = rank++;  // the register ladder order
+      entry.rails           = rails;
+      entry.width_dbu       = static_cast<int64_t>(variant["width_dbu"].GetUint64());
+      entry.a_footprint_um2 = estimate(variant, "a_footprint_um2").value_or(0);
+      entry.a_estimate_um2  = estimate(variant, "a_estimate_um2").value_or(0);
+      entry.rail_ff         = estimate(variant["pin_caps"], "rail_ff");
+      entry.clock_ff        = estimate(variant["pin_caps"], "clock_ff");
+      // <base>_v<k>_t<t>: the family keeps the base and the template.
+      const auto tag        = entry.name.rfind("_t");
+      if (base.empty() || !entry.name.starts_with(base + "_v") || tag == std::string::npos) {
+        return refuse("variant " + entry.name + " is not named after its master " + base);
+      }
+      entry.family = base + entry.name.substr(tag);
+      if (const auto& d = variant["drive"]; !d.IsNull()) {
+        liberty::Output_drive model;
+        model.sequential         = true;
+        model.name               = entry.name;
+        model.output             = "Q";
+        model.intrinsic_ps       = estimate(d, "intrinsic_ps").value_or(0);
+        model.resistance_ohm     = estimate(d, "resistance_ohm").value_or(0);
+        model.max_capacitance_ff = estimate(d, "max_capacitance_ff");
+        model.max_transition_ps  = estimate(d, "max_transition_ps");
+        entry.drive              = model;
+      }
+      if (malformed) {
+        return refuse("malformed variant " + entry.name);
       }
       std::array<ph::Row_access, 2> halves{};
       for (rapidjson::SizeType h = 0; h < 2; ++h) {
@@ -492,6 +580,7 @@ std::optional<Domino_sidecar> read_domino_sidecar(const fs::path& dir, std::stri
         }
       }
       sidecar.templates.emplace(variant["name"].GetString(), halves);
+      sidecar.catalog.push_back(std::move(entry));
     }
   }
   sidecar.instances = doc["instances"].Size();

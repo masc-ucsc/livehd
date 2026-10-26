@@ -74,6 +74,9 @@ std::optional<Domino_reference> resolve_domino_reference(const std::string& libe
     }
     Domino_register r;
     r.name        = it->name;
+    r.d_pin       = it->d_pin;
+    r.clk_pin     = it->clk_pin;
+    r.q_pin       = it->q_pin;
     r.area        = it->area;
     r.clk_to_q_ps = sampled(it->clk_to_q_ps);
     r.setup_ps    = sampled(it->setup_ps);
@@ -113,9 +116,18 @@ std::optional<Domino_reference> resolve_domino_reference(const std::string& libe
     return it == library.cells.end() ? std::string{} : it->second.library;
   };
   reference.corner = group(reference.inverter.name);
-  for (const auto& r : reference.registers) {
+  for (auto& r : reference.registers) {
     if (reference.corner.empty() || group(r.name) != reference.corner) {
       return refuse(std::format("reference cells {} and {} are not in one Liberty library group", reference.inverter.name, r.name));
+    }
+    // The clock load a domino stage keeps from its register; absent stays absent.
+    const auto& pins = library.cells.at(r.name).pins;
+    if (const auto clock = pins.find(r.clk_pin); clock != pins.end()) {
+      for (const auto& value : clock->second.capacitance_ff) {
+        if (value && (!r.clock_ff || *value > *r.clock_ff)) {
+          r.clock_ff = value;
+        }
+      }
     }
   }
   return reference;
@@ -126,7 +138,8 @@ Domino_area domino_area(const usyn::Gate_formula::Metrics& metrics, const Domino
   area.x          = static_cast<double>(domino_proxy_devices(metrics, reference)) / 2;
   area.a_not      = reference.inverter.area;
   area.a_register = reference.registers.at(variant).area;
-  area.a_domino   = area.x * area.a_not + area.a_register;
+  // pct / 100.0 is exactly 1 at the default, so the default area is unchanged.
+  area.a_domino   = area.x * area.a_not * (reference.pair_area_pct / 100.0) + area.a_register;
   return area;
 }
 

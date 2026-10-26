@@ -96,7 +96,7 @@ assert logical_report['physical']['totals']['converted'] == 2, logical_report['p
 
 bundle = W / 'synth/qor.json.domino'
 sidecar = json.loads((bundle / 'domino_models.json').read_text())
-assert sidecar['schema'] == 1 and sidecar['units']['time'] == 'ps' and sidecar['units']['dbu'] == 1000, sidecar['units']
+assert sidecar['schema'] == 2 and sidecar['units']['time'] == 'ps' and sidecar['units']['dbu'] == 1000, sidecar['units']
 assert sidecar['stage_model']['clock'] == 'clk' and sidecar['stage_model']['hold_capture_ps'] is None, sidecar['stage_model']
 assert sorted(i['state'] for i in sidecar['instances']) == ['q1', 'q2'], sidecar['instances']
 masters = {v['name'] for m in sidecar['masters'] for v in m['variants']}

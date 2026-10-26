@@ -19,6 +19,9 @@ struct Select_options {
   std::string                  clock;              // the selected domain's design input (port name)
   uint64_t                     work = 50'000'000;  // the selection's own slice of the caller's budget
   usyn::Function_search_limits functions;          // the logical search's limits; the output is forced positive
+  // Policy::area converts when A_domino + A_rails < (100 + margin)% of the
+  // CMOS estimate; 0 is the plain comparison, where a tie retains CMOS.
+  uint32_t                     area_margin_pct = 0;
 };
 
 struct Select_context {
@@ -36,12 +39,11 @@ struct Select_context {
 // formula, polarity-search when it stops at its own limits.
 // Rails follow gate_rails; every complemented rail producer, a converted
 // state's Q included, is charged one A_NOT. Policy::area converts only when
-// A_domino + A_rails < A_register + the Liberty estimate of the D-cone logic
+// A_domino + A_rails < (A_register + the Liberty estimate of the D-cone logic
 // above the rail cut that no other root (output, other state's D) and no rail
-// producer's own cone reaches; a tie retains CMOS. Once the work runs out every remaining candidate retains
-// CMOS with `selection-budget`. Every converted state names a variant-0
-// master interface. nullopt refuses the region: no frozen netlist, a two-phase
-// netlist, a phase-one Domino cell, or an inconsistent frozen cell.
+// producer's own cone reaches) * (100 + area_margin_pct) / 100; a tie retains CMOS. Once the work runs out every remaining
+// candidate retains CMOS with `selection-budget`. Every converted state names a variant-0 master interface. nullopt refuses the
+// region: no frozen netlist, a two-phase netlist, a phase-one Domino cell, or an inconsistent frozen cell.
 std::optional<usyn::Physical_emission> select_physical(const usyn::Stateful_region& region,
                                                        std::span<const std::string> input_names, const Select_options& options,
                                                        const Select_context& context, usyn::Budget& work);

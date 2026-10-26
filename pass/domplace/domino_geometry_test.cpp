@@ -175,6 +175,38 @@ TEST(DominoGeometry, AreaWidthIsExactWholeSitesAndDriveChangesOnlyTheRegister) {
   EXPECT_NEAR(odd.a_estimate_um2, 3.5 * 3.7536 + 20.0192, 1e-9);
   EXPECT_EQ(odd.w_area, 14 * 460);
 }
+TEST(DominoGeometry, PairAreaPercentKeepsExactSitesAndTheDefaultBytes) {
+  const auto in        = geometry_inputs(sky130(), kInv, kSky130Route);
+  const auto baseline  = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSky130Cells, 0, in);
+  auto       scaled    = kSky130Cells;
+  scaled.pair_area_pct = 100;
+  const auto same      = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), scaled, 0, in);
+  EXPECT_EQ(same.w_area, baseline.w_area);
+  EXPECT_EQ(same.width, baseline.width);
+  EXPECT_EQ(same.a_estimate_um2, baseline.a_estimate_um2);  // bit-identical, not merely near
+  EXPECT_EQ(ph::write_lef_macros(
+                {
+                    {same.name, same.macro}
+  },
+                sky130().dbu),
+            ph::write_lef_macros({{baseline.name, baseline.macro}}, sky130().dbu));
+  // 4 * 3.7536 * {0.75, 1.25} + 20.0192 = 31.28 and 38.7872 um^2: exactly 12.5
+  // and 15.5 two-row sites of 2.5024 um^2, so 13 and 16 sites.
+  for (const auto& [pct, estimate, sites] : {
+           std::tuple{ 75U,   31.28, 13},
+           {125U, 38.7872, 16}
+  }) {
+    scaled.pair_area_pct = pct;
+    const auto g         = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), scaled, 0, in);
+    EXPECT_NEAR(g.a_estimate_um2, estimate, 1e-9) << pct;
+    EXPECT_EQ(g.w_area, sites * 460) << pct;
+    EXPECT_EQ(g.width, sites * 460) << pct;
+    EXPECT_EQ(g.x, baseline.x) << pct;
+    EXPECT_EQ(g.a_register_um2, baseline.a_register_um2) << pct;
+  }
+  scaled.pair_area_pct = 0;
+  EXPECT_THROW((void)generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), scaled, 0, in), std::invalid_argument);
+}
 TEST(DominoGeometry, RoutePolicyFallsBackToTheLefStackWithoutAProfile) {
   std::string source;
   const auto  route = domino_route_policy(sky130(), &source);

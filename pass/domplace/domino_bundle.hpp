@@ -23,7 +23,7 @@ namespace livehd::domplace {
 // models, external simulators read the Verilog models; the sidecar records the
 // units, corner, technology, reference cells, coefficients, masters and the
 // original state that owns every instance.
-inline constexpr uint32_t         kBundleSchema      = 1;
+inline constexpr uint32_t         kBundleSchema      = 2;
 inline constexpr std::string_view kBundleLef         = "domino_cells.lef";
 inline constexpr std::string_view kBundleSidecar     = "domino_models.json";
 inline constexpr std::string_view kBundleVerilog     = "domino_models.v";
@@ -53,9 +53,11 @@ struct Bundle_inputs {
   Geometry_inputs                                  geometry;    // its footprint's inverter must be reference->inverter
   std::string                                      technology;  // the route policy's source (domino_route_policy)
   Stage_model                                      stage;       // its clock; coefficients the bundle cannot derive stay null
-  // Hand-set evaluate and precharge delays in FO4 of the reference inverter;
-  // absent values stay null in the sidecar with a diagnostic.
-  std::optional<double>                            eval_fo4, precharge_fo4;
+  // Hand-set evaluate and precharge delays, setup into evaluate and the
+  // precharge margin, in FO4 of the reference inverter; absent values stay
+  // null in the sidecar with a diagnostic.
+  std::optional<double>                            eval_fo4, precharge_fo4, setup_eval_fo4, precharge_margin_fo4;
+  uint32_t                                         area_margin_pct = 0;  // the selection's area margin, recorded
   // Input digests recorded for provenance, e.g. ("lef", "<path> sha256:<hex>").
   std::vector<std::pair<std::string, std::string>> provenance;
 };
@@ -79,14 +81,28 @@ struct Bundle_result {
 Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_inputs& inputs,
                                      const std::filesystem::path& out_dir);
 
+// One drive variant of a master as placement-side sizing sees it. Variants
+// of one family (the master base and its geometry template) share rails, CLK,
+// Q and port order; rank orders them by register drive.
+struct Catalog_entry {
+  std::string                          name, family, register_cell;  // family = <base>_t<template>
+  uint32_t                             rank = 0;
+  std::vector<std::string>             rails;
+  int64_t                              width_dbu       = 0;
+  double                               a_footprint_um2 = 0, a_estimate_um2 = 0;
+  std::optional<double>                rail_ff, clock_ff;  // labeled estimates; null when not derivable
+  std::optional<liberty::Output_drive> drive;              // the register family's Q model
+};
 // The placement view of a published bundle.
 struct Domino_sidecar {
   std::filesystem::path                                      lef;
   physical::Row_access_convention                            row_access;
   std::map<std::string, std::array<physical::Row_access, 2>> templates;  // local row access by LEF macro
   size_t                                                     instances = 0;
+  std::vector<Catalog_entry>                                 catalog;  // every variant, in sidecar order
 };
-// nullopt with the reason in `why` for a missing or malformed bundle.
+// nullopt with the reason in `why` for a missing or malformed bundle, or a
+// sidecar of another schema (bundles are regenerated with their producer).
 std::optional<Domino_sidecar> read_domino_sidecar(const std::filesystem::path& dir, std::string* why);
 
 }  // namespace livehd::domplace
