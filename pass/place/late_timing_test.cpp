@@ -1337,6 +1337,35 @@ TEST(LateTiming, MissingCellDelaysFollowEachClockModel) {
   EXPECT_FALSE(named_cut.certified);
   EXPECT_TRUE(issue(named_cut, "missing cell delay/transition table or input waveform: v:Y"));
 }
+TEST(LateTiming, ACutInputConeDoesNotUncertifyEitherClockModel) {
+  // A cut input feeds complete cells into a cut output: no waveform or
+  // arrival reaches them, so the register loop is the whole measured subset.
+  for (const bool named : {false, true}) {
+    Circuit circuit({"clk", "a"}, {"w"});
+    auto    flop = circuit.cell("ff", "FF"), inv = circuit.cell("inv", "INV");
+    auto    u = circuit.cell("u", "BUF"), v = circuit.cell("v", "INV");
+    flop.create_sink_pin("CLK").connect_driver(circuit.graph->get_input_pin("clk"));
+    inv.create_sink_pin("A").connect_driver(flop.create_driver_pin("Q"));
+    flop.create_sink_pin("D").connect_driver(inv.create_driver_pin("Y"));
+    u.create_sink_pin("A").connect_driver(circuit.graph->get_input_pin("a"));
+    v.create_sink_pin("A").connect_driver(u.create_driver_pin("Y"));
+    circuit.graph->get_output_pin("w").connect_driver(v.create_driver_pin("Y"));
+    late::Constraints       constraints;
+    const late::Ideal_clock clock{.period_ps = 100, .roots = {"clk"}};
+    if (named) {
+      constraints.clocks["main"] = clock;
+    } else {
+      constraints.clock = clock;
+    }
+    constraints.cuts     = {"a", "w"};
+    constraints.complete = true;
+    const auto result    = late::Proxy(*circuit.graph, circuit.library, constraints).evaluate();
+    ASSERT_TRUE(result.certified) << "named clocks: " << named << ": "
+                                  << (result.unsupported.empty() ? "" : result.unsupported.front());
+    EXPECT_EQ(result.achievable_period_ps, 38) << "named clocks: " << named;
+    EXPECT_FALSE(pin(result, "v:Y").transitions[0].arrival_ps);
+  }
+}
 TEST(LateTiming, CharacterizationOfBothClockModelsIsBitExact) {
   Characterization image;
   {

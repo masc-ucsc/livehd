@@ -875,8 +875,11 @@ struct Proxy::Impl {
               usable[id][in][out]  = cell_delays[id][in][out];
               missing[id][in][out] = !cell_delays[id][in][out];
               // Legacy policy: a missing cell delay is reported only when an
-              // arrival reaches it; named clocks report every one up front.
-              if (missing[id][in][out] && !legacy) {
+              // arrival reaches it; named clocks report every missing table
+              // up front. A pin no waveform reaches (a cut or unreachable
+              // cone) can carry no arrival, so its complete arcs miss nothing.
+              const bool tables    = edge.model->delay[out] && edge.model->slew[out];
+              if (missing[id][in][out] && !legacy && (!tables || result.pins[edge.from].transitions[in].slew_ps)) {
                 issue("missing cell delay/transition table or input waveform: " + pins[edge.to].name);
               }
             }
