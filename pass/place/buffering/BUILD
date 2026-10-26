@@ -6,7 +6,15 @@ cc_test(
     size = "small",
     srcs = ["producer_test.cpp"],
     copts = COPTS,
-    deps = [":producer", "//pass/place/forces:gp_timing", "//pass/place:place", "//inou/lefdef:inou_lefdef", "@rapidjson", "@googletest//:gtest_main"],
+    deps = [":checkpoint_fixture", ":producer", "//inou/lefdef:inou_lefdef", "@rapidjson", "@googletest//:gtest_main"],
+)
+
+cc_library(
+    name = "checkpoint_fixture",
+    testonly = True,
+    hdrs = ["checkpoint_fixture.hpp"],
+    copts = COPTS,
+    deps = [":checkpoint", "//pass/place/forces:gp_timing", "//pass/place:place"],
 )
 
 cc_library(
@@ -32,7 +40,7 @@ cc_test(
     size = "small",
     srcs = ["checkpoint_test.cpp"],
     copts = COPTS,
-    deps = [":checkpoint", "//pass/place/forces:gp_timing", "//pass/place:place", "//inou/lefdef:inou_lefdef", "@rapidjson", "@googletest//:gtest_main"],
+    deps = [":checkpoint_fixture", "//inou/lefdef:inou_lefdef", "@rapidjson", "@googletest//:gtest_main"],
 )
 
 cc_library(
