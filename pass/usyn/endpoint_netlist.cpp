@@ -11,15 +11,10 @@ namespace livehd::usyn {
 namespace {
 std::vector<Endpoint_rail> rails(const Frozen_cell& cell) {
   std::vector<Endpoint_rail> result;
-  for (uint32_t i = 0; i < cell.inputs.size(); ++i) {
-    if (cell.metrics.positive & (1U << i)) {
-      result.push_back({i, cell.inputs[i]});
-    }
-    if (cell.metrics.negative & (1U << i)) {
-      auto opposite     = cell.inputs[i];
-      opposite.inverted = !opposite.inverted;
-      result.push_back({i, opposite});
-    }
+  for (const auto rail : gate_rails(cell.metrics, static_cast<uint32_t>(cell.inputs.size()))) {
+    auto producer      = cell.inputs[rail.input];
+    producer.inverted ^= rail.negative;
+    result.push_back({rail.input, producer});
   }
   return result;
 }

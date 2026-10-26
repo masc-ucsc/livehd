@@ -48,6 +48,18 @@ struct Gate_formula {
   std::optional<Truth_table> evaluate_table(uint32_t inputs, Budget& work) const;
 };
 
+// One rail a formula reads: a logical variable and the literal polarity. Both
+// polarities of one variable are separate rails.
+struct Gate_rail {
+  uint32_t input                              = 0;
+  bool     negative                           = false;
+  bool     operator==(const Gate_rail&) const = default;
+};
+// Ordered rail demand over `inputs` variables: per variable, its positive rail
+// then its negative rail when the formula uses that literal. A physical cell's
+// pin order follows it.
+std::vector<Gate_rail> gate_rails(const Gate_formula::Metrics& metrics, uint32_t inputs);
+
 struct Gate_constraints {
   uint32_t logical_inputs = 8;
   uint32_t stack          = 4;

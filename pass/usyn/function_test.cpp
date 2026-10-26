@@ -534,4 +534,19 @@ TEST(Function, PositivePolarityAnd5ExceedsStack) {
   EXPECT_EQ(deep.cost.stack, 5U);
   EXPECT_EQ(deep.cost.transistors, 5U);
 }
+
+TEST(Function, RailsFollowVariableOrderPositiveBeforeNegative) {
+  // (a & !b) | (!a & c): a binate, b negative only, c positive only.
+  const auto f = truth(3, [](auto x) { return ((x & 1) && !(x & 2)) || (!(x & 1) && (x & 4)); });
+  Budget     work{100000};
+  const auto gate = synthesize_gate(f, {}, work);
+  ASSERT_TRUE(gate.formula) << gate.reason;
+  const auto rails = gate_rails(gate.cost, 3);
+  const auto expected
+      = gate.formula->output_inverted
+            ? std::vector<Gate_rail>{{0, false}, {0, true}, {1, false}, {2, true}}
+            : std::vector<Gate_rail>{{0, false}, {0, true}, {1, true}, {2, false}};
+  EXPECT_EQ(rails, expected);
+  EXPECT_TRUE(gate_rails(gate.cost, 0).empty());
+}
 }  // namespace livehd::usyn

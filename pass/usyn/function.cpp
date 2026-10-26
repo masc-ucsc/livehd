@@ -186,6 +186,19 @@ std::optional<Truth_table> Gate_formula::evaluate_table(uint32_t inputs, Budget&
   return table;
 }
 
+std::vector<Gate_rail> gate_rails(const Gate_formula::Metrics& metrics, uint32_t inputs) {
+  std::vector<Gate_rail> result;
+  for (uint32_t i = 0; i < inputs && i < 32; ++i) {
+    if (metrics.positive & (1U << i)) {
+      result.push_back({i, false});
+    }
+    if (metrics.negative & (1U << i)) {
+      result.push_back({i, true});
+    }
+  }
+  return result;
+}
+
 namespace {
 using Kind = Gate_formula::Kind;
 
