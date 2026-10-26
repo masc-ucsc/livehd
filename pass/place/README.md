@@ -3097,14 +3097,15 @@ analysis. No geometry or placement default changes with this policy setting.
 Run `bazel run -c opt //pass/place:channel_ir -- manifest.json --output verdict.json`
 after matched OpenROAD `analyze_power_grid -voltage_file` runs. The manifest has
 `reference` and `candidate` objects, each with `power_grid_report`, a `rails`
-object containing `VDD` and `VSS` CSV paths, and an identical `analysis` object.
+object with one CSV path per supply net recorded in the reports' `supplies`
+(`VDD` and `VSS` for ASAP7), and an identical `analysis` object.
 Paths are relative to the manifest. Record the actual `liberty_sha256`,
 `sdc_sha256`, `corner`, `source_model`, `power_model`, and `voltages_v`
 (`{"VDD": "0.7", "VSS": "0"}`, for example) in that analysis object. The caller
 must establish that these descriptors describe the runs; the checker matches
 recorded context and hashes the input artifacts, but cannot reconstruct how a
 CSV was produced. The reference must have channels disabled, and the candidate
-must carry a finite nonnegative budget and the same profile revision.
+must carry a finite nonnegative budget and the same profile, supplies and revision.
 
 The checker requires matching terminal identities, layers and coordinates,
 rejects missing/duplicate/nonfinite data, and compares decimal CSV voltages

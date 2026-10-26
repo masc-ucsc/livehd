@@ -33,10 +33,26 @@ def finite(value):
     return number
 
 
-def voltages(path, rail):
+def supplies(reports):
+    """Supply nets, power first, mapped to the cell terminals each connects."""
+    recorded = reports[0].get("supplies")
+    if (not reports[0].get("profile") or reports[0]["profile"] != reports[1].get("profile")
+            or not isinstance(recorded, list) or len(recorded) != 2 or recorded != reports[1].get("supplies")):
+        raise ValueError("power-grid profiles or supply nets differ or are missing")
+    result = {}
+    for supply in recorded:
+        net = supply.get("net") if isinstance(supply, dict) else None
+        pins = supply.get("pins") if isinstance(supply, dict) else None
+        if (not isinstance(net, str) or not net or net in result or not isinstance(pins, list) or not pins
+                or not all(isinstance(pin, str) and pin for pin in pins)):
+            raise ValueError("invalid power-grid supply record")
+        result[net] = set(pins)
+    return result
+
+
+def voltages(path, rail, allowed):
     result = {}
     columns = ["Instance", "Terminal", "Layer", "X location", "Y location", "Voltage"]
-    allowed = {"VDD": {"VDD", "VDDPE", "VDDCE"}, "VSS": {"VSS", "VSSE"}}[rail]
     with Path(path).open(newline="") as stream:
         reader = csv.DictReader(stream)
         if reader.fieldnames != columns:
@@ -56,13 +72,13 @@ def voltages(path, rail):
     return result
 
 
-def compare_rail(reference, candidate, rail, nominal, limit):
+def compare_rail(reference, candidate, rail, nominal, limit, power):
     if reference.keys() != candidate.keys():
         raise ValueError(f"{rail} terminal identities or placement differ")
     if not reference:
         raise ValueError(f"empty {rail} comparison")
-    # VDD degradation lowers voltage; VSS degradation raises it.
-    sign = Decimal(1) if rail == "VDD" else Decimal(-1)
+    # Power-rail degradation lowers voltage; ground-rail degradation raises it.
+    sign = Decimal(1) if power else Decimal(-1)
     ref_drop = max(sign * (nominal - value) for value in reference.values())
     new_drop = max(sign * (nominal - value) for value in candidate.values())
     terminal_delta = max(sign * (reference[key] - candidate[key]) for key in reference)
@@ -86,6 +102,8 @@ def check(manifest, directory):
 
     arms = [manifest[key] for key in ("reference", "candidate")]
     contexts = [arm["analysis"] for arm in arms]
+    reports = [json.loads(artifact(arm["power_grid_report"]).read_text()) for arm in arms]
+    nets = supplies(reports)
     required = {"liberty_sha256", "sdc_sha256", "corner", "source_model", "power_model", "voltages_v"}
     for context in contexts:
         if not required.issubset(context) or any(not context[key] for key in required):
@@ -93,15 +111,12 @@ def check(manifest, directory):
         for key in ("liberty_sha256", "sdc_sha256"):
             if not isinstance(context[key], str) or not re.fullmatch(r"[0-9a-f]{64}", context[key]):
                 raise ValueError(f"invalid analysis fingerprint: {key}")
-        if set(context["voltages_v"]) != {"VDD", "VSS"}:
-            raise ValueError("both ASAP7 supply voltages must be recorded")
+        if set(context["voltages_v"]) != set(nets):
+            raise ValueError("both supply voltages must be recorded")
         for value in context["voltages_v"].values():
             finite(value)
     if contexts[0] != contexts[1]:
         raise ValueError("reference and candidate analysis contexts differ")
-    reports = [json.loads(artifact(arm["power_grid_report"]).read_text()) for arm in arms]
-    if any(report.get("profile") != "pg_asap7" for report in reports):
-        raise ValueError("IR channel validator currently supports the ASAP7 profile")
     if not reports[0].get("reference_revision") or reports[0]["reference_revision"] != reports[1].get("reference_revision"):
         raise ValueError("power-grid reference revisions differ or are missing")
     if reports[0].get("channels") != [] or not reports[1].get("channels"):
@@ -110,9 +125,10 @@ def check(manifest, directory):
     if limit < 0:
         raise ValueError("channel IR-drop limit must be nonnegative")
     rails = {}
-    for rail in ("VDD", "VSS"):
-        values = [voltages(artifact(arm["rails"][rail]), rail) for arm in arms]
-        rails[rail] = compare_rail(*values, rail, finite(contexts[0]["voltages_v"][rail]), limit)
+    power = next(iter(nets))
+    for rail, terminals in nets.items():
+        values = [voltages(artifact(arm["rails"][rail]), rail, terminals) for arm in arms]
+        rails[rail] = compare_rail(*values, rail, finite(contexts[0]["voltages_v"][rail]), limit, rail == power)
     for name, expected in hashes.items():
         with Path(name).open("rb") as stream:
             if hashlib.file_digest(stream, "sha256").hexdigest() != expected:

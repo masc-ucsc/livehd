@@ -701,6 +701,22 @@ void write_power_grid_report(const ph::Floorplan& fp, const Pg_profile& profile,
   report.String(profile.name.c_str());
   report.Key("reference_revision");
   report.String(profile.reference_revision.c_str());
+  // Power first, then ground, with the cell pin names each net connects.
+  report.Key("supplies");
+  report.StartArray();
+  for (size_t i = 0; i < profile.nets.size(); ++i) {
+    report.StartObject();
+    report.Key("net");
+    report.String(profile.nets[i].c_str());
+    report.Key("pins");
+    report.StartArray();
+    for (const auto& pin : profile.pin_names[i]) {
+      report.String(pin.c_str());
+    }
+    report.EndArray();
+    report.EndObject();
+  }
+  report.EndArray();
   report.Key("channels");
   report.StartArray();
   for (const auto& channel : profile.channels) {

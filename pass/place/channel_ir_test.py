@@ -19,6 +19,8 @@ class ChannelIrTest(unittest.TestCase):
         self.manifest = {}
         for arm in ("reference", "candidate"):
             report = {"profile": "pg_asap7", "reference_revision": "same-revision",
+                      "supplies": [{"net": "VDD", "pins": ["VDD", "VDDPE", "VDDCE"]},
+                                   {"net": "VSS", "pins": ["VSS", "VSSE"]}],
                       "channels": [] if arm == "reference" else [{"style": "skip"}],
                       "channel_max_ir_drop_v": "0.001"}
             (self.root / (arm + ".json")).write_text(json.dumps(report))
@@ -63,6 +65,22 @@ class ChannelIrTest(unittest.TestCase):
         self.manifest["candidate"]["analysis"] = copy.deepcopy(self.analysis)
         self.csv("candidate_VDD.csv", "VDD", ".699", x="1.1")
         with self.assertRaisesRegex(ValueError, "placement differ"):
+            self.evaluate()
+
+    def test_supplies_come_from_matching_reports(self):
+        paths = [self.root / (arm + ".json") for arm in ("reference", "candidate")]
+        originals = [json.loads(path.read_text()) for path in paths]
+        invalid = [originals[0]["supplies"][0], {"net": "VSS", "pins": []}]
+        for change, arms in (({"profile": "other"}, [1]), ({"supplies": None}, [1]),
+                             ({"supplies": originals[0]["supplies"][::-1]}, [1]), ({"supplies": invalid}, [0, 1])):
+            for arm in arms:
+                paths[arm].write_text(json.dumps({**originals[arm], **change}))
+            with self.assertRaisesRegex(ValueError, "supply"):
+                self.evaluate()
+            for path, original in zip(paths, originals):
+                path.write_text(json.dumps(original))
+        self.csv("candidate_VSS.csv", "VDDPE", ".001")
+        with self.assertRaisesRegex(ValueError, "wrong supply terminal"):
             self.evaluate()
 
     def test_invalid_or_missing_budget(self):

@@ -253,6 +253,11 @@ TEST(PowerGridExport, ChannelSkipRetainsConnectionsAndCrossGridGapRejectsIslands
   EXPECT_DOUBLE_EQ(accounting["removed_planned_stripe_length_um"]["M3"].GetDouble(), stats.removed_planned_length_um.at("M3"));
   EXPECT_TRUE(accounting["freed_signal_tracks_by_layer"].IsNull());
   EXPECT_FALSE(report["channel_ir_drop_verified"].GetBool());
+  ASSERT_EQ(report["supplies"].Size(), 2);
+  for (unsigned i = 0; i < 2; ++i) {
+    EXPECT_EQ(report["supplies"][i]["net"].GetString(), p.nets[i]);
+    EXPECT_EQ(report["supplies"][i]["pins"].Size(), p.pin_names[i].size());
+  }
   EXPECT_DOUBLE_EQ(report["channel_max_ir_drop_v"].GetDouble(), .001);
   EXPECT_EQ(output.components, input.components);
   for (const auto& net : output.special_nets) {
