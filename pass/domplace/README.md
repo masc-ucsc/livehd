@@ -267,26 +267,43 @@ growth a dense core cannot pack, whose DEF equals the unsized run's.
 
 ## Matched commands
 
-All three arms pin the same placement knobs:
+`scripts/domplace/arms.py` runs the three arms with matched settings,
+serialized: arm 1 (ABC CMOS), arm 2 (USYN CMOS) and arm 3 (USYN with this
+profile). Every arm pins the seed, `synth.place.iterations`, `density` and
+`grid.density`, turns off timing-driven placement, resizing, resynthesis,
+`io_resynth` and OpenTimer, and times its final placement with the same
+native stage timer (`synth.place.stage_timing`). Arms 2 and 3 pin
+`pass.usyn.tmap_trials=1`, so the domino arm keeps arm 2's USYN trial instead
+of a different one (domino instances count as gates in `mapped_better`).
 
 ```
-COMMON="--set synth.liberty=L --set synth.lef=T,C --set synth.sdc=S --set synth.place=true
-        --set synth.place.timing_driven=false --set synth.place.resize=false
-        --set synth.place.resynth=false --set synth.place.io_resynth=0 --seed N"
-arm1 (ABC CMOS):  lhd synth top.v --top T --set synth.mapper=abc $COMMON --workdir W1
-arm2 (USYN CMOS): lhd synth top.v --top T --set synth.mapper=usyn --set pass.usyn.clock_phases=1
-                  --set pass.usyn.tmap=abc $COMMON --workdir W2
-arm3 (domino):    arm2 + --set pass.usyn.physical=domino_provisional --set synth.opentimer=false --workdir W3
+scripts/domplace/arms.py --rtl top.v --top T --liberty L --lef T,C --sdc S \
+    --core-mode both --warm [--sta-leg] [--clock-port P] \
+    --arm3-set pass.usyn.domino_eval_fo4=2 --arm3-set pass.usyn.domino_precharge_fo4=2 \
+    --arm3-set pass.usyn.domino_setup_eval_fo4=0.5 --arm3-set pass.usyn.domino_precharge_margin_fo4=0.5 \
+    --arm3-set pass.usyn.domino_uncertainty_first_ps=0 --arm3-set pass.usyn.domino_uncertainty_second_ps=0
 ```
 
-Arms 1 and 2 may keep STA on for report-only timing, and `resize=false` keeps
-STA from enabling repair. `io_resynth=0` explicitly disables the placement
-resynthesis loop. Arm 3 needs `synth.opentimer=false` (the domino cells have no
-Liberty timing) and a Liberty whose register family maps every retained
-register (the 7-cell sky130 test fixture has no reset or negative-edge flop).
-Its converted states are two-row CORE cells, anchored before terminal
-legalization (`pass/place/multirow.hpp`); `qor.place.multirow` reports them.
-`lhd/tests/lhd_domplace_smoke.py` runs arm 3 on the fixture: legal placement,
-2H domino components on whole rows in their start row's orientation, the
-domino LEF in `lefs.json`, sequential LEC of the placed netlist, and a
-deterministic DEF.
+The coefficients above are only an example: none is built in, and arm 3
+without them reports its unmeasured classes and status `incomplete`.
+`--core-mode` reports the area-driven core (`--utilization`) and the fixed
+core (the core and die of the arm-1 area-driven run, as
+`synth.place.core`/`die`) separately. Each leg records wall time, the peak
+RSS of its whole process tree (sampled from `/proc`), LEC against the RTL
+(gensim cell models, plus the bundle models for arm 3), a status class
+(`ok`, `unproven`, `unsupported`, `infeasible` for a packing failure,
+`timeout`, `failed`), coverage, area on both bases (rail inverters are
+netlist cells and are counted once), `qor.place.multirow`/`multirow_eco`,
+the stage period, classes and C_clk, HPWL and sizing counts. `--warm` reruns
+each leg twice in its workdir and records the second. Output goes to the
+ignored `repros/domplace_<date>/`: `manifest.json` (HEAD, dirty-diff hash,
+lhd hash, input hashes, options, commands), `results.json`, `results.tsv` and
+each leg's workdir, DEF/LEF and bundle. `--dry-run` writes only the manifest;
+`scripts/domplace/arms_smoke.py` checks the plan and runs arms 1 and 3 on the
+in-repo fixture. Final RUDY is not reported (plan H3 is not implemented).
+
+Designs must map every retained register with the Liberty's register family
+(the 7-cell sky130 fixture has no reset or negative-edge flop). HighTide
+runs are not integrated: they wait on the decisions to patch `lhdsweep.py`
+(scoring arm 3's OpenSTA timing as unmeasured, U14) and on the fixed-core
+source (U15).
