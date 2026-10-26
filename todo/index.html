@@ -11,6 +11,7 @@
 <main>
 <h1>LiveHD TODO</h1>
 <ul>
+<li><a href="livehd/1f-fixes.html">1f-fixes</a> — <strong>high priority</strong>, plan drafted 2026-10-26, not implemented: placer CPU time and QoR parity with OpenROAD on the HighTide asap7 pre-CTS benchmark (minimax 6 387 s vs 100 s CPU, HPWL +125 %); measured causes: 446 full STA evaluations (88 % of runtime), per-checkpoint Liberty rescans, GP never allowed to converge, cold-restart timing rounds, internal timing target inconsistent with the SDC, bare-GP wirelength gap; ablations show the physical stage without the timing loops costs 10–25 s; tied to 2t-timeclosure (the legacy loop measured here is what 2t replaces; reuses its late_timing / rc_cache / row-adapter foundations)</li>
 <li><a href="livehd/llvm-native-runtime.html">llvm-native-runtime</a> — in progress: direct packed-state objects and a shared runtime without per-design C++ compilation</li>
 <li><a href="livehd/llvm-native-colors.html">llvm-native-colors</a> — independent LLVM simulation objects, memory semantics, and benchmark results</li>
 <li><a href="livehd/synth-unate.html">synth-unate</a> — shared unate pass, interchangeable tmap and the later domino backend; U0 completion gates remain open</li>
