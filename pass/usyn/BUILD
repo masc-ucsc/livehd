@@ -274,6 +274,7 @@ cc_library(
         "literal_stats.hpp",
         "logical_cache.hpp",
         "logical_writer.hpp",
+        "physical_emission.hpp",
         "region_emit.hpp",
         "semantic_region.hpp",
         ":usyn_salt",

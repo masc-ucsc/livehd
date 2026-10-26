@@ -18,7 +18,7 @@ enum class Reason : uint8_t {
   initial_value,      // power-on initial value
   negative_edge,      // negedge capture
   unknown_edge,       // capture edge not established
-  gated_clock,        // ICG-gated clock, or the event signal is not its clock root
+  gated_clock,        // the clock root is a recognized clock gate's output
   derived_clock,      // the clock control is not a direct region input
   multibit_clock,     // clock wider than one bit
   constant_clock,     // constant or absent clock

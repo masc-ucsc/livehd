@@ -62,7 +62,7 @@ reports its reason code (`reason.hpp`).
 | Power-on initial value | retained | `initial-value` |
 | Negative edge | retained | `negative-edge` |
 | Unknown edge | retained | `unknown-edge` |
-| ICG-gated clock, or event signal differs from its clock root | retained | `gated-clock` |
+| ICG-gated clock (the clock root is a recognized clock gate) | retained | `gated-clock` |
 | Clock control is not a direct region input | retained | `derived-clock` |
 | Multibit clock / constant or absent clock | retained | `multibit-clock` / `constant-clock` |
 | Clock port is not `domino_clock` | retained | `clock-domain` |

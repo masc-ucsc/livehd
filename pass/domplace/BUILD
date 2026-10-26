@@ -76,3 +76,29 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+# v1 physical eligibility of frozen state: candidate or a retention reason.
+cc_library(
+    name = "physical_eligibility",
+    srcs = ["physical_eligibility.cpp"],
+    hdrs = ["physical_eligibility.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":contract",
+        "//pass/usyn:usyn_semantic",
+    ],
+)
+
+cc_test(
+    name = "physical_eligibility_test",
+    size = "small",
+    srcs = ["physical_eligibility_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":physical_eligibility",
+        "//pass/usyn:usyn_semantic",
+        "@googletest//:gtest_main",
+    ],
+)
