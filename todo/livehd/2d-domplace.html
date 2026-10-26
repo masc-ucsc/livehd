@@ -658,6 +658,26 @@ still quantize the cap.</li>
 lhd no instance steps down yet; drive injection at the <code>scan_output_drives</code> sites
 is deferred. A larger register's D input now slows its variant's evaluate.</li>
 <li><strong>Final RUDY</strong> (H3) is not reported.</li>
+<li><strong>Gated registers (U21).</strong> Registers clocked through a port of a preserved
+(shared) definition stay <code>definition-clock</code> (NVDLA partition_m's
+<code>NV_NVDLA_CMAC_CORE_mac</code>: every instance's port is the gated clock of its own
+<code>u_slcg_op_*</code> on <code>nvdla_core_clk</code>, so they agree; converting them needs a
+per-instance enable port added to the shared definition before partitioning). Gates that
+sample their enable at the falling edge (NVDLA's <code>CKLNQD12</code> negedge flop + AND)
+fold only with <code>pass.usyn.domino_fall_gates</code>; a two-phase LEC refutes them when an
+input changes at the falling edge, and plain USYN without the profile already refutes a
+small design with the same gate (not investigated). Pre-existing too: plain USYN refutes a register on
+a gated clock that crosses a definition port, and the LEC encoder cannot model a register
+clocked by a body-less Liberty ICG instance. Mapped latch-based gates stay uncertified in
+the native timer (latch borrowing); ICG cells and flop-based gates are timed. Sharing one
+ICG across dominos (or local clock generation) is deferred by the ruling.</li>
+<li><strong>Reset network (U22).</strong> The domino reset nets are buffered before placement
+(<code>synth.place.domino_reset_fanout</code>, 32 loads per buffer, on under the profile); a CMOS
+async-reset net that shares a net with an RST pin is treed with it. Recovery/removal of an
+asynchronous RST is not checked (setup-only timer). High-fanout data rails are not buffered
+by the per-region mapping either (sha3 kept a 1344-pin control rail after U22);
+<code>synth.place.domino_rail_fanout</code> is the same tree for rails, an off-by-default
+experiment.</li>
 <li>Unrelated to this task, <code>//tools/uroute:inference_test</code> fails on the
 branch as before.</li>
 </ul>
