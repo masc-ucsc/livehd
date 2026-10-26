@@ -1081,6 +1081,11 @@ void synth_command(Options& opts, Result& res) {
   // The profile reads the Liberty for logical output (pass.usyn.tmap=none)
   // too: its reference cells and CMOS estimate come from it.
   const std::string usyn_liberty = domino && liberty.empty() ? resolve_liberty(opts) : liberty;
+  if (!domino && synth_set(opts, "place.row_access", "default") != "default") {
+    throw Lhd_error{"usage",
+                    "synth.place.row_access needs pass.usyn.physical=domino_provisional",
+                    "the row-access convention only configures the provisional domino abstracts"};
+  }
   if (domino) {
     if (mapper_method != "pass.usyn") {
       throw Lhd_error{"usage", "pass.usyn.physical=domino_provisional needs synth.mapper=usyn", ""};

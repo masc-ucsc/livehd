@@ -960,6 +960,10 @@ void pass_command(Options& opts, Result& res) {
     labels["library"]        = mapped_output || domino ? resolve_liberty(opts) : std::string{};
     if (domino) {
       domino_profile_labels(opts, synth_set(opts, "lef", ""), labels);
+    } else if (method == "pass.usyn" && synth_set(opts, "place.row_access", "default") != "default") {
+      throw Lhd_error{"usage",
+                      "synth.place.row_access needs pass.usyn.physical=domino_provisional",
+                      "the row-access convention only configures the provisional domino abstracts"};
     }
     if (mapper->timing_files) {
       const auto sdc         = synth_set(opts, "sdc", "");

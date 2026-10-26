@@ -51,6 +51,12 @@ W = root / 'W'
 run('all', base + domino + ['--set', 'pass.usyn.domino_select=all', '--workdir', str(W), '--emit-dir', f'lg:{root}/net',
                             '--emit-dir', f'report:{root}/report'])
 report = json.loads((W / 'synth/qor.json.usyn.json').read_text())
+# The row-access convention only configures the profile: without it the
+# setting is refused, never silently ignored.
+for leg, command in (('row_access_synth', base), ('row_access_pass', [lhd, 'pass', 'usyn', '--top', 'dom', f'lg:{root}/net',
+                                                                      '--set', f'synth.liberty={libdir}/sky130hd.lib'])):
+    stray = run(leg, command + ['--set', f'synth.place.row_access={sdc}', '--workdir', str(root / 'R')], False)
+    assert stray['error']['class'] == 'usage' and 'synth.place.row_access' in stray['error']['message'], (leg, stray['error'])
 assert report['target'] == 'cmos' and report['output'] == 'mapped-mixed', report['output']
 physical = report['physical']
 assert physical['emission'] == 'mixed' and physical['clock'] == 'clk', physical
