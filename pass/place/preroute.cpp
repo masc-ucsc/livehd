@@ -190,7 +190,7 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
   }
   std::optional<physical::Floorplan> completed_grid;
   // Deferred PG publishes the last grid that admitted every accepted route.
-  const auto publish_grid = [&] {
+  const auto                         publish_grid = [&] {
     if (completed_grid) {
       result.frame.special_nets = std::move(completed_grid->special_nets);
       result.frame.vias         = std::move(completed_grid->vias);
@@ -565,7 +565,7 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
         auto       operation_start = std::chrono::steady_clock::now();
         const auto measured        = [&](const char* name) {
           const auto now           = std::chrono::steady_clock::now();
-          record.timings_ms[name] += elapsed_ms(operation_start, now);
+          record.timings_ms[name]  += elapsed_ms(operation_start, now);
           operation_start          = now;
         };
         const auto remaining = demand.without(b.demand_net);

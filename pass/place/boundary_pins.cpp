@@ -73,8 +73,7 @@ void validate_boundary_pin_options(const Boundary_pin_options& o) {
   }
 }
 
-Boundary_pin_model split_boundary_nets(const dp::Design& original, const Region_mesh& mesh,
-                                       const Busorder_route& router) {
+Boundary_pin_model split_boundary_nets(const dp::Design& original, const Region_mesh& mesh, const Busorder_route& router) {
   original.validate();
   if (mesh.rects.empty() || !router) {
     throw std::invalid_argument("boundary pins require a mesh and RSMT router");
@@ -497,7 +496,7 @@ void Boundary_pins::refine(dp::Design& physical, const dp::Options& base) {
     alignment = align_boundary_pins(model, mesh, identities, macros);
   }
   build_seconds            = elapsed(start);
-  auto& work = model.design;
+  auto& work               = model.design;
   limit_displacement(work, node_weight_criticality(physical), options.max_displacement_um * dbu);
   auto control           = base;
   control.max_iterations = control.min_iterations = control.schedule_iterations = options.iterations;

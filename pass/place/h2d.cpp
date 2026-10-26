@@ -280,7 +280,7 @@ void write_macro_report(const Macro_run& run, const dp::Design& d, const std::ve
                                 result.resolved.route_cap_h,
                                 result.resolved.route_cap_v};
   const auto      policy = resolve_route_policy(o, o.macro_route);
-  const auto      active = dp::route_latches(policy) ? run.result.placement.route_model : policy.model;
+  const auto      active   = dp::route_latches(policy) ? run.result.placement.route_model : policy.model;
   route_options.model      = mp::route_score_model(active);
   route_options.degree     = policy.degree;
   route_options.accuracy   = policy.accuracy;

@@ -463,7 +463,8 @@ Rule_check Signal_metal_rules::spacing(const Shape& a, const Shape& b) const {
         if (edge.hi - edge.lo >= rule_dbu(rule.width, dbu_)) {
           continue;
         }
-        const auto region = edge_region(edge, rule_dbu(rule.backward, dbu_), rule_dbu(rule.forward, dbu_), rule_dbu(rule.side, dbu_));
+        const auto region
+            = edge_region(edge, rule_dbu(rule.backward, dbu_), rule_dbu(rule.forward, dbu_), rule_dbu(rule.side, dbu_));
         if (rule.corner_only ? corner_inside(region, target) : region.overlaps(target)) {
           return reject("LEF58 EOL keepout");
         }

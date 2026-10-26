@@ -130,9 +130,9 @@ struct Options {
   // Internal lifecycle state: optimization trials need legal snapshots before
   // the mandatory final legalization. Never exposed as a user option.
   bool                              optimization_pending        = false;
-  bool                              handoff_taps                = false;   // profile fixed taps before terminal legalization
+  bool                                  handoff_taps                = false;   // profile fixed taps before terminal legalization
   std::string                       pg                          = "none";  // opt-in native power-grid profile
-  Region_options                    region;  // detail-final region mesh shared by busorder/boundarypins/pinalign
+  Region_options                        region;  // detail-final region mesh shared by busorder/boundarypins/pinalign
   Busorder_options                  busorder;
   Boundary_pin_options              boundarypins;
   Cell_jump_options                 cell_jump;                            // diagnostic: extend a supplied distance-one seed
@@ -201,8 +201,8 @@ struct Options {
   double      virtual_filler_fraction   = .25;
   double      virtual_filler_cell_scale = 1, virtual_filler_bin_fraction = .25;
   int         bin_max = 512, local_density_bins = 512;
-  int         route_bins    = 0;  // grid.route: 0 inherits the configured density count (also in dynamic mode)
-  int         legalize_bins = 0;  // legalize.bin.grid: 0 uses the routing grid
+  int                        route_bins    = 0;  // grid.route: 0 inherits the configured density count (also in dynamic mode)
+  int                        legalize_bins = 0;  // legalize.bin.grid: 0 uses the routing grid
   double      local_density_weight = 0, local_density_range = 4, local_density_jitter = .01;
   double      local_density_target      = -1;  // -1 inherits the global density target
   double      macro_cell_density_weight = 0;   // standard-cell pressure on macros during macro GP only
@@ -216,8 +216,8 @@ struct Options {
   // resolved controls match so one run hashes the manifest/weights once.
   std::optional<Uroute_pool> uroute_pool;
   // Internal immutable snapshot supplied to the H2D host adapter.
-  Uroute_selection uroute_selection;
-  Uroute_identity  uroute_stage_identity;
+  Uroute_selection           uroute_selection;
+  Uroute_identity            uroute_stage_identity;
   int         route_degree = 40, route_accuracy = 3;
   bool        routability_charge_compensation = true;
   double      routability_macro_weight = 1, routability_macro_range = 2;  // direct channel pressure; range in bins

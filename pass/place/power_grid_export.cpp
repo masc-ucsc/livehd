@@ -121,9 +121,9 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
   // Explicit via-stack connections certify that the grid, including any
   // channel patches, does not leave a separately powered island. Internal shapes of one macro pin are
   // electrically equivalent; input placement is never modified on failure.
-  const bool            verify_grid = !profile.channels.empty() || !profile.stripes.empty();
+  const bool           verify_grid = !profile.channels.empty() || !profile.stripes.empty();
   ph::Index_union_find connected(verify_grid ? plan.metal.size() : 0);
-  const auto            join = [&](size_t a, size_t b) {
+  const auto           join = [&](size_t a, size_t b) {
     if (verify_grid) {
       connected.merge(a, b);
     }
@@ -394,11 +394,13 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
     }
     std::vector<ph::Shape> regions;
     for (const auto& channel : profile.channels) {
-      regions.push_back({channel.layer,
-                         {double(std::llround(channel.region.xl * out.dbu)),
-                          double(std::llround(channel.region.yl * out.dbu)),
-                          double(std::llround(channel.region.xh * out.dbu)),
-                          double(std::llround(channel.region.yh * out.dbu))}});
+      regions.push_back({
+          channel.layer,
+          {double(std::llround(channel.region.xl * out.dbu)),
+                  double(std::llround(channel.region.yl * out.dbu)),
+                  double(std::llround(channel.region.xh * out.dbu)),
+                  double(std::llround(channel.region.yh * out.dbu))}
+      });
     }
     for (const auto& net : out.special_nets) {
       for (const auto& shape : ph::route_geometry(tech, out, net, true)) {
@@ -669,7 +671,7 @@ void write_power_grid_report(const ph::Floorplan& fp, const Pg_profile& profile,
   rapidjson::StringBuffer                    buffer;
   rapidjson::Writer<rapidjson::StringBuffer> report(buffer);
   // A string-keyed map of lengths (double) or counts (uint64_t) as one object.
-  const auto object = [&](const auto& values) {
+  const auto                                 object = [&](const auto& values) {
     report.StartObject();
     for (const auto& [key, value] : values) {
       report.Key(key.c_str());

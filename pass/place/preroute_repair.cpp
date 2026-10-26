@@ -321,7 +321,7 @@ Preroute_stage_result preroute_stage(const Result& original, const physical::Tec
   if (std::isfinite(length_limit)) {
     out.repeater_length_limit_um = length_limit;
   }
-  out.timings_ms["repeater_library"] = elapsed_ms(library_start);
+  out.timings_ms["repeater_library"]         = elapsed_ms(library_start);
   // The host just evaluated this physical snapshot. Ranking can reuse that
   // feedback; repeated Whatif::pin queries needlessly revisit the timer. Pending
   // caller edits require live queries instead. Every trial still rechecks timing
@@ -351,8 +351,8 @@ Preroute_stage_result preroute_stage(const Result& original, const physical::Tec
     // Let the ordinary stage record the same eligibility rejection for these
     // nets. In particular, splitting must never relabel a non-signal net SIGNAL.
     if (b.clock || b.reset || b.tie || b.dont_touch || original.preroute_design->protects(physical_net)
-        || !original.preroute_design->design.net_mask.at(b.demand_net)
-        || net.wire_length_um <= length_limit || !physical::unrouted_signal(physical_net) || !cell_endpoints
+        || !original.preroute_design->design.net_mask.at(b.demand_net) || net.wire_length_um <= length_limit
+        || !physical::unrouted_signal(physical_net) || !cell_endpoints
         || !preroute_span_exclusion(original.preroute_design->design, b.demand_net, options).empty()) {
       short_nets.push_back(b);
       continue;
@@ -520,8 +520,8 @@ Preroute_stage_result preroute_stage(const Result& original, const physical::Tec
       ++out.repeater_attempted;
       std::optional<Repeater_snapshot> snapshot;
       Preroute_tree_trial              routed;
-      const auto record_phase = [&](const char* name, const auto phase_begin) {
-        const auto ms = elapsed_ms(phase_begin);
+      const auto                       record_phase = [&](const char* name, const auto phase_begin) {
+        const auto ms            = elapsed_ms(phase_begin);
         record.timings_ms[name] += ms;
         out.timings_ms[name] += ms;
       };
@@ -617,7 +617,7 @@ Preroute_stage_result preroute_stage(const Result& original, const physical::Tec
         out.timings_ms["repeater_route_" + name] += phase_ms;
         record.timings_ms["route_" + name] = phase_ms;
       }
-      const auto ms = elapsed_ms(trial_start);
+      const auto ms                      = elapsed_ms(trial_start);
       out.timings_ms["repeater_trials"] += ms;
       if (!record.accepted) {
         record.timings_ms["repeater_trial"] = ms;

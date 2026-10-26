@@ -26,13 +26,18 @@ Tech_profile asap7() {
   pg.reference_revision = "fb65d5b487d2afd443fc1892330f622c776a57ac";
   pg.reference_file     = "flow/platforms/asap7/openRoad/pdn/grid_strategy-M1-M2-M5-M6.tcl";
   pg.followpin_layers   = {"M1", "M2"};
-  pg.stripes            = {{"M5", .120, .072, 5.4, .300}, {"M6", .288, .096, 5.4, .513}};
-  pg.connect            = {{{"M1", "M2"}}, {{"M2", "M5"}}, {{"M5", "M6"}}};
-  pg.pin_layer          = "M6";
-  pg.macro_halo         = 2;
-  pg.macro_connect      = {{{"M4", "M5"}}};
-  pg.nets               = {"VDD", "VSS"};
-  pg.pin_names          = {{{"VDD", "VDDPE", "VDDCE"}, {"VSS", "VSSE"}}};
+  pg.stripes            = {
+      {"M5", .120, .072, 5.4, .300},
+      {"M6", .288, .096, 5.4, .513}
+  };
+  pg.connect       = {{{"M1", "M2"}}, {{"M2", "M5"}}, {{"M5", "M6"}}};
+  pg.pin_layer     = "M6";
+  pg.macro_halo    = 2;
+  pg.macro_connect = {{{"M4", "M5"}}};
+  pg.nets          = {"VDD", "VSS"};
+  pg.pin_names     = {
+      {{"VDD", "VDDPE", "VDDCE"}, {"VSS", "VSSE"}}
+  };
   return p;
 }
 const std::vector<Tech_profile>& registry() {
@@ -48,7 +53,7 @@ std::string known_profiles() {
 }
 }  // namespace
 std::span<const Tech_profile> tech_profiles() { return registry(); }
-const Tech_profile& tech_profile(std::string_view name) {
+const Tech_profile&           tech_profile(std::string_view name) {
   for (const auto& p : registry()) {
     if (name == p.name || (!p.pg.name.empty() && name == p.pg.name)) {
       return p;

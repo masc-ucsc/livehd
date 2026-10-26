@@ -564,8 +564,9 @@ TEST(LhdOptions, DeprecatedPartitionSpellingsCanonicalize) {
     SCOPED_TRACE(std::string(r.old_name));
     EXPECT_FALSE(in("synth." + std::string(r.old_name)));
     EXPECT_TRUE(in("synth." + std::string(r.new_name)));
-    const auto spec = std::find_if(std::begin(lhd::kSynthSetOptions), std::end(lhd::kSynthSetOptions),
-                                   [&](const auto& o) { return o.name == r.old_name; });
+    const auto spec = std::find_if(std::begin(lhd::kSynthSetOptions), std::end(lhd::kSynthSetOptions), [&](const auto& o) {
+      return o.name == r.old_name;
+    });
     ASSERT_NE(spec, std::end(lhd::kSynthSetOptions));
     EXPECT_TRUE(std::string_view{spec->help}.starts_with("DEPRECATED"));
     const bool boolean = spec->kind == lhd::Synth_set_option::Kind::boolean;
@@ -594,16 +595,22 @@ TEST(LhdOptions, DeprecatedPartitionSpellingsCanonicalize) {
   EXPECT_NO_THROW(lhd::check_known_set_passes(opts));
   // One density boolean merges into the mode, so both spellings share a cache key.
   for (const auto& [sets, mode] : std::vector<std::pair<std::vector<std::pair<std::string, std::string>>, std::string>>{
-           {                                 {{"synth.place.dynamic_bins", "true"}}, "dynamic"},
+           {                                    {{"synth.place.dynamic_bins", "true"}}, "dynamic"},
            {{{"synth.place.auto_bins", "true"}, {"synth.place.dynamic_bins", "false"}},   "macro"},
-           {                                {{"synth.place.dynamic_bins", "false"}},   "fixed"},
+           {                                   {{"synth.place.dynamic_bins", "false"}},   "fixed"},
   }) {
     opts.sets = sets;
     lhd::canonicalize_synth_sets(opts);
-    EXPECT_EQ(opts.sets, (std::vector<std::pair<std::string, std::string>>{{"synth.place.grid.density_mode", mode}}));
+    EXPECT_EQ(opts.sets,
+              (std::vector<std::pair<std::string, std::string>>{
+                  {"synth.place.grid.density_mode", mode}
+    }));
   }
   // An explicit mode competes: the booleans stay so the driver rejects the mix.
-  opts.sets = {{"synth.place.grid.density_mode", "fixed"}, {"synth.place.dynamic_bins", "true"}};
+  opts.sets = {
+      {"synth.place.grid.density_mode", "fixed"},
+      {     "synth.place.dynamic_bins",  "true"}
+  };
   lhd::canonicalize_synth_sets(opts);
   EXPECT_EQ(value("synth.place.dynamic_bins"), std::vector<std::string>{"true"});
 }

@@ -35,7 +35,13 @@ dp::Design fixture() {
 
 TEST(Region_mesh, MembershipPartitionsMovableCellsUnderTheCap) {
   const auto d    = fixture();
-  const auto mesh = Region_mesh::build(d, {40}, {{"io[0]", 0, 50}, {"io[1]", 0, 60}}, {.max_cells = 6, .merge_um = 1}, 1);
+  const auto mesh = Region_mesh::build(d,
+                                       {
+                                           40
+  },
+                                       {{"io[0]", 0, 50}, {"io[1]", 0, 60}},
+                                       {.max_cells = 6, .merge_um = 1},
+                                       1);
   ASSERT_EQ(mesh.members.size(), mesh.rects.size());
   EXPECT_GE(mesh.initial_rectangles, mesh.rects.size());
   std::set<int> seen;

@@ -27,7 +27,7 @@ std::vector<ph::Terminal> handoff_pins(const ph::Technology& tech, const ph::Flo
   if (!grid_dbu) {
     throw std::invalid_argument("IO handoff requires an integer manufacturing grid");
   }
-  const double grid = *grid_dbu;
+  const double grid       = *grid_dbu;
   const auto adjustable = [](const ph::Terminal& t) {
     return t.status != ph::Status::FIXED && t.status != ph::Status::LOCKED && t.use != "POWER" && t.use != "GROUND";
   };

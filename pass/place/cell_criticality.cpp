@@ -36,11 +36,11 @@ Cell_criticality Cell_criticality::from(const timing::Feedback& feedback, const 
       if (found == cells.end()) {
         continue;
       }
-      const auto  i           = found->second;
-      const auto* pin         = feedback.find_pin(c.instance, c.pin);
-      result.connected[i]     = true;
+      const auto  i             = found->second;
+      const auto* pin           = feedback.find_pin(c.instance, c.pin);
+      result.connected[i]       = true;
       result.clock_connected[i] = result.clock_connected[i] || clock;
-      const double slack      = pin && pin->slack ? *pin->slack * feedback.time_unit_ps : NAN;
+      const double slack        = pin && pin->slack ? *pin->slack * feedback.time_unit_ps : NAN;
       if (!pin || !pin->slack || !std::isfinite(*pin->slack) || !std::isfinite(slack)) {
         result.untimed[i] = true;
         continue;

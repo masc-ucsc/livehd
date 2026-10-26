@@ -32,7 +32,7 @@ struct Boundary_pin_model {
 };
 // Temporary optimization topology only. Each original pin occurs exactly once;
 // connected RSMT pieces in different rectangles share zero-area fixed terminals.
-Boundary_pin_model split_boundary_nets(const DreamPlace::native::Design&, const Region_mesh&, const Busorder_route&);
+Boundary_pin_model       split_boundary_nets(const DreamPlace::native::Design&, const Region_mesh&, const Busorder_route&);
 Boundary_pin_order_stats order_boundary_pins(Boundary_pin_model&, const Region_mesh&, const std::vector<Bus_bit>&,
                                              const std::vector<int>& macros = {});
 struct Pin_align_pair {

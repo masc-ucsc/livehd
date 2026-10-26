@@ -418,8 +418,8 @@ void              check_known_set_passes(const Options& opts);
 // names right after validation, and queue one `deprecated-option` warning
 // each in opts.deprecated_sets. synth emits them with emit_deprecated_sets
 // once its last sink-clearing setup_diag (the compile front end) is done.
-void              canonicalize_synth_sets(Options& opts);
-void              emit_deprecated_sets(const Options& opts);
+void                  canonicalize_synth_sets(Options& opts);
+void                  emit_deprecated_sets(const Options& opts);
 // The `synth.*` command namespace, readable from any command: `synth.liberty`
 // is THE one Liberty spelling (`lhd synth`, `lhd pass abc`, `lhd pass
 // opentimer` all resolve through resolve_liberty), so no two Liberty readers

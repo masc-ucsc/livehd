@@ -9,8 +9,8 @@
 #include "inou/lefdef/index_union_find.hpp"
 
 namespace livehd::placement {
-Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const Region_mesh& mesh,
-                                    const std::vector<Bus_bit>& identities, const std::vector<int>& macros) {
+Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const Region_mesh& mesh, const std::vector<Bus_bit>& identities,
+                                    const std::vector<int>& macros) {
   auto&           d = model.design;
   Pin_align_stats stats;
   const int       nets = d.net_weights.size(), count = model.anchors.size();

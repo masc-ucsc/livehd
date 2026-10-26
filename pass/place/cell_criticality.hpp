@@ -18,7 +18,7 @@ struct Cell_criticality {
   std::vector<bool>                  untimed;              // some own pin has no finite slack
   std::vector<bool>                  connected;            // has at least one considered net connection
   // Every own pin has a finite slack in valid units; then slack_ps is set.
-  bool fully_timed(size_t cell) const { return timed_units && connected[cell] && !untimed[cell]; }
+  bool                               fully_timed(size_t cell) const { return timed_units && connected[cell] && !untimed[cell]; }
   // `ignored` (optional, one flag per net) removes nets, e.g. pre-CTS networks.
   static Cell_criticality from(const timing::Feedback&, const physical::Floorplan&, const std::vector<bool>* ignored = nullptr);
 };

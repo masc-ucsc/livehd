@@ -61,7 +61,12 @@ Busorder    make_order(const dp::Design& d, double weight = 100) {
   };
   return Busorder(d,
                   mesh(d),
-                  {{"bus", 1}, {"bus", 2}, {"bus", 20}, {"bus", 21}},
+                     {
+                      {"bus",  1},
+                      {"bus",  2},
+                      {"bus", 20},
+                      {"bus", 21}
+  },
                   router,
                   1,
                   o);

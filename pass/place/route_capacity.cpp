@@ -30,7 +30,7 @@ Route_capacity::Route_capacity(const ph::Technology& tech, const ph::Floorplan& 
   const double dx = (grid_.bounds.xh - grid_.bounds.xl) / grid_.bins_x, dy = (grid_.bounds.yh - grid_.bounds.yl) / grid_.bins_y;
   // Metal below the lowest modeled routing layer is pin-access metal and uses
   // no modeled tracks; neither do cuts.
-  const auto lowest = std::find_if(tech.routing_layers.begin(), tech.routing_layers.end(), [&](const auto& name) {
+  const auto   lowest = std::find_if(tech.routing_layers.begin(), tech.routing_layers.end(), [&](const auto& name) {
     return std::find(grid_.layers.begin(), grid_.layers.end(), name) != grid_.layers.end();
   });
   if (lowest != tech.routing_layers.end()) {

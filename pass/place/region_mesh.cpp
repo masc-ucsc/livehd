@@ -132,11 +132,11 @@ Region_mesh Region_mesh::build(const dp::Design& d, const std::vector<int>& macr
       throw std::invalid_argument("region mesh requires fixed macros");
     }
   }
-  Region_mesh         result;
-  auto&               mesh    = result.rects;
-  auto&               members = result.members;
-  result.options              = options;
-  const auto&         l       = d.layout;
+  Region_mesh result;
+  auto&       mesh      = result.rects;
+  auto&       members   = result.members;
+  result.options        = options;
+  const auto&         l = d.layout;
   std::vector<double> raw[2];
   for (int i : macros) {
     if (i < d.num_movable || i >= int(d.node_x.size())) {

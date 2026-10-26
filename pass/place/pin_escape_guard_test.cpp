@@ -261,8 +261,7 @@ TEST(PinEscapeGuard, CumulativeBlocksRollbackAndLastAccess) {
   fp.nets.push_back(net);
   auto               occupied = routing_occupancy(tech, fp, fp.dbu);
   Signal_metal_rules rules(tech, fp);
-  auto               access
-      = enumerate_pin_access(tech, fp, fp.components[0], "A", occupied, rules, 1000, net.name, asap7_access());
+  auto access = enumerate_pin_access(tech, fp, fp.components[0], "A", occupied, rules, 1000, net.name, asap7_access());
   std::set<int64_t>  tracks;
   for (const auto& point : access.points) {
     tracks.insert(point.y);
@@ -304,8 +303,7 @@ TEST(PinEscapeGuard, PreserveEitherDirectionalRouterEscape) {
   fp.nets.push_back(net);
   auto               occupied = routing_occupancy(tech, fp, fp.dbu);
   Signal_metal_rules rules(tech, fp);
-  auto               access
-      = enumerate_pin_access(tech, fp, fp.components[0], "A", occupied, rules, 1000, net.name, asap7_access());
+  auto access = enumerate_pin_access(tech, fp, fp.components[0], "A", occupied, rules, 1000, net.name, asap7_access());
   ASSERT_EQ(access.points.size(), 1);
   const auto& point = access.points.front();
   // Short escapes clear both traces. Router probes extend 63 DBU from the
@@ -348,8 +346,7 @@ TEST(PinEscapeGuard, BareLandingEolMustSurviveAlongsideExtendedEscape) {
   fp.nets.push_back(net);
   auto               occupied = routing_occupancy(tech, fp, fp.dbu);
   Signal_metal_rules rules(tech, fp);
-  auto               access
-      = enumerate_pin_access(tech, fp, fp.components[0], "A", occupied, rules, 1000, net.name, asap7_access());
+  auto access = enumerate_pin_access(tech, fp, fp.components[0], "A", occupied, rules, 1000, net.name, asap7_access());
   ASSERT_FALSE(access.points.empty());
   const Shape trace{
       "M2",
@@ -448,8 +445,7 @@ TEST(PinEscapeGuard, CutSpacingAndRetiredNet) {
   fp.nets.push_back(net);
   auto               occupied = routing_occupancy(tech, fp, fp.dbu);
   Signal_metal_rules rules(tech, fp);
-  auto               access
-      = enumerate_pin_access(tech, fp, fp.components[0], "A", occupied, rules, 1000, net.name, asap7_access());
+  auto access = enumerate_pin_access(tech, fp, fp.components[0], "A", occupied, rules, 1000, net.name, asap7_access());
   ASSERT_FALSE(access.points.empty());
   std::vector<Shape> cuts;
   for (const auto& point : access.points) {

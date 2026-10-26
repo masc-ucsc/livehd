@@ -15,9 +15,9 @@
 #include "dreamplace/native/placement.hpp"
 #include "inou/lefdef/route_store.hpp"
 #include "memory_proxy.hpp"
-#include "prects_networks.hpp"
 #include "pass/liberty/liberty_dff.hpp"
 #include "pass/partition/flatten.hpp"
+#include "prects_networks.hpp"
 #include "preroute.hpp"
 #include "preroute_repair.hpp"
 #include "rapidjson/document.h"
@@ -230,7 +230,7 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
   std::map<std::string, uint64_t> rejections;
   std::map<std::string, double>   layer_lengths;
   // A string-keyed map of lengths, times or counts as one JSON object.
-  const auto map_json = [&](const auto& values) {
+  const auto                      map_json = [&](const auto& values) {
     rapidjson::Value object(rapidjson::kObjectType);
     for (const auto& [key, value] : values) {
       object.AddMember(rapidjson::Value(key.c_str(), alloc), rapidjson::Value(value), alloc);

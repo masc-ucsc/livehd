@@ -53,7 +53,7 @@ std::optional<ph::Rect> pin_access_rect(const ph::Macro& macro, const ph::Shape&
   if (layer.width <= 0 || (layer.direction != "HORIZONTAL" && layer.direction != "VERTICAL")) {
     return {};
   }
-  auto         rect  = ph::placed_rect(macro, place, dbu, shape.rect);
+  auto         rect   = ph::placed_rect(macro, place, dbu, shape.rect);
   const double half  = layer.width * dbu / 2;
   rect.xl           += half;
   rect.yl           += half;
@@ -517,7 +517,7 @@ std::vector<bool> spillable(const ph::Technology& tech, const ph::Floorplan& fp,
   }
   return safe;
 }
-std::pair<std::string, std::optional<double>> spill_evidence(const Cell_criticality& criticality,
+std::pair<std::string, std::optional<double>> spill_evidence(const Cell_criticality&    criticality,
                                                              const Satlegalize_options& options, size_t cell,
                                                              bool protected_endpoint) {
   const auto  minimum = criticality.timed_units ? criticality.slack_ps[cell] : std::nullopt;
@@ -786,8 +786,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
              double(std::max(first.place.y + first.place.height, second.place.y + second.place.height)) + options.move_rows * sy};
     }
     const auto window = raw.intersection(fp.die);
-    if (area(window) <= 0
-        || (fixed_region && (!window.contains(bounds(first.place)) || !window.contains(bounds(second.place))))) {
+    if (area(window) <= 0 || (fixed_region && (!window.contains(bounds(first.place)) || !window.contains(bounds(second.place))))) {
       return {};
     }
     return std::pair{raw, window};

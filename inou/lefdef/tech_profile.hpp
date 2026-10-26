@@ -63,8 +63,8 @@ struct Tech_profile {
 // Every registered profile.
 std::span<const Tech_profile> tech_profiles();
 // Registry lookup by profile name or by its power-grid strategy name.
-const Tech_profile& tech_profile(std::string_view name);
+const Tech_profile&           tech_profile(std::string_view name);
 // "auto" detects the profile from the LEF; any other value is an explicit
 // tech_profile() name. Unknown or undetectable technologies throw.
-const Tech_profile& resolve_tech_profile(const Technology&, std::string_view requested = "auto");
+const Tech_profile&           resolve_tech_profile(const Technology&, std::string_view requested = "auto");
 }  // namespace livehd::physical

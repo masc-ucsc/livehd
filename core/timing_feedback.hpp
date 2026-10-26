@@ -26,7 +26,7 @@ struct Feedback {
   std::vector<std::string>   path;
   // Physical connection lookup: a top port (instance "PIN") is keyed by its
   // name; an instance pin by "inst:pin", else the "inst/pin" spelling.
-  const Pin* find_pin(const std::string& instance, const std::string& pin) const {
+  const Pin*                 find_pin(const std::string& instance, const std::string& pin) const {
     auto it = pins.find(instance == "PIN" ? pin : instance + ":" + pin);
     if (it == pins.end() && instance != "PIN") {
       it = pins.find(instance + "/" + pin);

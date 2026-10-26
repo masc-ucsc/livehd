@@ -38,7 +38,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
   std::vector<std::string> layers;
   std::vector<double>      widths, half;
   std::vector<bool>        horizontal;
-  const auto grid_dbu = ph::explicit_manufacturing_grid_dbu(tech_, frame_.dbu);
+  const auto               grid_dbu = ph::explicit_manufacturing_grid_dbu(tech_, frame_.dbu);
   if (!grid_dbu) {
     return stage.fail("unsupported manufacturing grid");
   }
@@ -181,7 +181,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
     if (t.axis != (horizontal[l] ? "Y" : "X")) {
       continue;
     }
-    auto&      coords        = tracks[l];
+    auto& coords             = tracks[l];
     const auto [first, last] = horizontal[l] ? t.index_range(ymin, ymax) : t.index_range(xmin, xmax);
     for (auto n = first; n <= last; ++n) {
       if (stage.expired()) {

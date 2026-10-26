@@ -45,7 +45,7 @@ int main(int argc, char** argv) {
     }
     const auto tech   = ph::read_lef(lefs);
     const auto fp     = ph::read_def(def);
-    const auto& access = ph::resolve_tech_profile(tech).route.access;
+    const auto&           access = ph::resolve_tech_profile(tech).route.access;
     std::set<std::string> requested(instances.begin(), instances.end());
     if (requested.size() != instances.size() || requested.contains("")) {
       throw std::invalid_argument("empty or duplicate instance");
@@ -92,7 +92,7 @@ int main(int argc, char** argv) {
         }
         const auto found = pin_nets.find({instance, name});
         const std::string own_net = found == pin_nets.end() ? std::string{} : found->second;
-        const auto result = ph::enumerate_pin_access(tech, fp, *target, name, occupancy, rules, 10000, own_net, access);
+        const auto        result  = ph::enumerate_pin_access(tech, fp, *target, name, occupancy, rules, 10000, own_net, access);
         w.Key(name.c_str());
         w.StartObject();
         w.Key("examined");

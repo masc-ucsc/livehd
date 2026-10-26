@@ -26,7 +26,7 @@ dp::Design fixture() {
   d.build_maps();
   return d;
 }
-const auto boxes = Region_mesh::from_rects({
+const auto    boxes = Region_mesh::from_rects({
     { 0, 0,  50, 100, 1},
     {50, 0, 100, 100, 1}
 });
@@ -209,7 +209,7 @@ TEST(BoundaryPins, OrdersPinsAlongSharedTJunctionEdges) {
   d.net_weights        = {1, 2, 3};
   d.net_mask.clear();
   d.build_maps();
-  const auto mesh = Region_mesh::from_rects({
+  const auto mesh  = Region_mesh::from_rects({
       { 0,  0,  50, 100},
       {50,  0, 100,  50},
       {50, 50, 100, 100}

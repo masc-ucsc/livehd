@@ -4280,8 +4280,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     tech_profile = &placement_tech_profile(tech, options);
   }
   if (options.handoff_taps && !tech.macros.contains(tech_profile->tap_master)) {
-    throw std::invalid_argument("handoff taps require the " + tech_profile->name + " tap master in the LEF: "
-                                + tech_profile->tap_master);
+    throw std::invalid_argument("handoff taps require the " + tech_profile->name
+                                + " tap master in the LEF: " + tech_profile->tap_master);
   }
   if (!options.pg_channels.empty() && (options.pg == "none" || options.pg == "off")) {
     throw std::invalid_argument("PG channel patches require an enabled native power grid");
@@ -7363,8 +7363,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       const auto first = std::max<int64_t>(1, (int64_t(config.start) + config.interval - 1) / config.interval) * config.interval;
       control.min_iterations = std::max(control.min_iterations, int(std::min<int64_t>(control.max_iterations, first)));
       auto buffering_state   = std::make_shared<std::optional<buffering::Checkpoint_state>>();
-      control.checkpoint     = [&, session, rc_cache, trace, buffering_state, bind_weights](const dp::Design& physical,
-                                                                                        int               iteration) {
+      control.checkpoint = [&, session, rc_cache, trace, buffering_state, bind_weights](const dp::Design& physical, int iteration) {
         auto view       = v;
         view.design     = physical;
         auto rc_options = options;

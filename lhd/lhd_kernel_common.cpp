@@ -1705,7 +1705,7 @@ void apply_log_settings(const Options& opts) {
 }
 
 void canonicalize_synth_sets(Options& opts) {
-  const auto on = [](std::string_view v) { return !v.empty() && v != "false" && v != "0" && v != "off"; };
+  const auto          on = [](std::string_view v) { return !v.empty() && v != "false" && v != "0" && v != "off"; };
   // grid.density_mode replaces two booleans that could be combined. Merge them
   // only when they name one mode and no explicit grid.density_mode competes;
   // otherwise placement_options reads them (and rejects a mix with the mode).
@@ -1732,8 +1732,8 @@ void canonicalize_synth_sets(Options& opts) {
                                         std::format("use --set synth.{}={}", r.new_name, target));
       if (r.new_name == "place.grid.density_mode") {
         if (merge_mode) {
-          value = dynamic.value_or(false) ? "dynamic" : automatic.value_or(false) ? "macro" : "fixed";
-          key   = mode_set ? std::string{} : std::format("synth.{}", r.new_name);  // one entry for both booleans
+          value    = dynamic.value_or(false) ? "dynamic" : automatic.value_or(false) ? "macro" : "fixed";
+          key      = mode_set ? std::string{} : std::format("synth.{}", r.new_name);  // one entry for both booleans
           mode_set = true;
         }
       } else {

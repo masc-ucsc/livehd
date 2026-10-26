@@ -160,8 +160,13 @@ int describe_option(const Options& opts, const std::string& name) {
       if (r.true_value.empty()) {
         std::print(stderr, "lhd describe: '{}' is a deprecated alias of '{}'\n", name, target);
       } else {
-        std::print(stderr, "lhd describe: '{}' is deprecated: true is {}={}, false is {}={}\n", name, target, r.true_value,
-                   target, r.false_value);
+        std::print(stderr,
+                   "lhd describe: '{}' is deprecated: true is {}={}, false is {}={}\n",
+                   name,
+                   target,
+                   r.true_value,
+                   target,
+                   r.false_value);
       }
       return describe_option(opts, target);
     }

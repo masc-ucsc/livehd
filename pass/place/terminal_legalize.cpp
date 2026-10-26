@@ -271,9 +271,9 @@ struct Model {
       route_rules.emplace(tech, fp);
     }
     ph::Rect bounds{std::numeric_limits<double>::infinity(),
-              std::numeric_limits<double>::infinity(),
-              -std::numeric_limits<double>::infinity(),
-              -std::numeric_limits<double>::infinity()};
+                    std::numeric_limits<double>::infinity(),
+                    -std::numeric_limits<double>::infinity(),
+                    -std::numeric_limits<double>::infinity()};
     for (size_t i = 0; i < fp.rows.size(); ++i) {
       const auto& r    = fp.rows[i];
       const auto  site = tech.sites.find(r.site);
@@ -595,7 +595,7 @@ struct Model {
           double outside = std::numeric_limits<double>::infinity();
           grid.each_ring_exterior(cx, cy, ring, max_row_height, [&](const ph::Rect& r) {
             const double x = anchor.x, y = anchor.y;  // signed distance into the half-plane
-            outside        = std::min(outside, std::max({r.xl - x, x - r.xh, r.yl - y, y - r.yh}));
+            outside = std::min(outside, std::max({r.xl - x, x - r.xh, r.yl - y, y - r.yh}));
           });
           if (wire_active) {
             outside = outside_wire_cost(cell, cx, cy, ring);
@@ -1791,7 +1791,7 @@ struct Model {
     const auto saved_obstacles   = obstacles.size();
     const auto restore_remainder = [&] {
       rows        = saved_rows;
-      grid.bins = saved_bins;
+      grid.bins   = saved_bins;
       obstacles.resize(saved_obstacles);
       for (auto& bin : bin_obstacles) {
         bin.clear();

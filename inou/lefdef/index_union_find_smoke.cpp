@@ -1,7 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-#include "index_union_find.hpp"
-
 #include "gtest/gtest.h"
+#include "index_union_find.hpp"
 
 namespace livehd::physical {
 TEST(IndexUnionFind, MergesAndCountsComponents) {

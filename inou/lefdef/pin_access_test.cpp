@@ -61,7 +61,7 @@ TEST(PinAccess, ForeignMetalAndCutsRemoveOnlyAffectedCandidates) {
   const auto               tech      = technology();
   const auto               fp        = frame();
   const std::vector<Shape> obstacles = {{"M2", {1050, 1036, 1100, 1054}}, {"V1", {1018, 1072, 1036, 1090}}};
-  const auto r
+  const auto               r
       = enumerate_pin_access(tech, fp, fp.components[0], "A", obstacles, Signal_metal_rules(tech, fp), 1000, asap7_access());
   ASSERT_EQ(r.points.size(), 4);
   for (const auto& p : r.points) {
@@ -114,8 +114,7 @@ TEST(PinAccess, WidePinUsesTrackCrossingsAndCenter) {
     EXPECT_TRUE(p.x == 1027 || p.x == 1054 || p.x == 1063);
   }
   fp.tracks.back().step = 0;
-  const auto bad
-      = enumerate_pin_access(tech, fp, fp.components[0], "A", {}, Signal_metal_rules(tech, fp), 1000, asap7_access());
+  const auto bad = enumerate_pin_access(tech, fp, fp.components[0], "A", {}, Signal_metal_rules(tech, fp), 1000, asap7_access());
   EXPECT_TRUE(bad.points.empty());
   EXPECT_TRUE(bad.rejected.contains("unsupported M1 tracks"));
 }

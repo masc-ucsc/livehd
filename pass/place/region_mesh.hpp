@@ -49,7 +49,7 @@ struct Region_mesh {
   // All movable nodes must be standard cells; `macros` are fixed node indices.
   // Geometry is in the native design's coordinate units.
   static Region_mesh build(const DreamPlace::native::Design&, const std::vector<int>& macros, const std::vector<Region_io>&,
-                           const Region_options&, double dbu_per_um);
+                           const Region_options&, double                              dbu_per_um);
   // Given rectangles with derived edges and no membership (tests, replays).
   static Region_mesh from_rects(std::vector<Region_rect>);
   // Half-open [xl,xh) x [yl,yh) lookup; empty outside every rectangle.

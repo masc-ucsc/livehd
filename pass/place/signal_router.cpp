@@ -47,7 +47,7 @@ Signal_router::Signal_router(const ph::Technology& tech, const ph::Floorplan& fr
     , pin_escapes_(pin_escapes) {}
 ph::Pin_access_result Signal_router::endpoint_access(const ph::Component& cell, const std::string& pin, const ph::Net& net,
                                                      const Signal_route_limits& limits, Signal_route_trial& trial) const {
-  auto result = ph::enumerate_pin_access(tech_,
+  auto result            = ph::enumerate_pin_access(tech_,
                                          frame_,
                                          cell,
                                          pin,
@@ -78,7 +78,7 @@ void Signal_router::add_wire(Signal_route_geometry& geometry, const ph::Shape& m
   geometry.paths.push_back(ph::flush_wire_path(metal, horizontal, std::move(taper_rule)));
   geometry.layer_wire_length_um[metal.layer] += (horizontal ? r.xh - r.xl : r.yh - r.yl) / frame_.dbu;
   // Total in layer order, so it is exactly the sum the per-layer report shows.
-  geometry.wire_length_um = 0;
+  geometry.wire_length_um                     = 0;
   for (const auto& [layer, length] : geometry.layer_wire_length_um) {
     geometry.wire_length_um += length;
   }
@@ -760,8 +760,7 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
         }
         bool preserves_access = true;
         if (escapes) {
-          const auto access
-              = escapes->check(proposal_shapes(net, trial.paths), net.name, [&] { return stage.expired(); });
+          const auto access = escapes->check(proposal_shapes(net, trial.paths), net.name, [&] { return stage.expired(); });
           preserves_access  = access.legal;
           if (!preserves_access) {
             out.reason = access.reason;
@@ -862,7 +861,7 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
   if (!escape_width || !branch_width) {
     return stage.fail("unsupported signal width");
   }
-  const double width2 = *escape_width, width3 = *branch_width;
+  const double  width2 = *escape_width, width3 = *branch_width;
   ph::Floorplan via_frame;
   via_frame.dbu = frame_.dbu;
   for (const auto& [name, via] : tech_.vias) {

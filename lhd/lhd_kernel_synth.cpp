@@ -236,8 +236,8 @@ livehd::placement::Options placement_options(const Options& opts) {
     }
     livehd::placement::validate_warp_options(policy);
   }
-  out.region.max_cells                 = integer("place.region.max_cells", "10000");
-  out.region.merge_um                  = number("place.region.merge_um", "5");
+  out.region.max_cells = integer("place.region.max_cells", "10000");
+  out.region.merge_um  = number("place.region.merge_um", "5");
   livehd::placement::validate_region_options(out.region);
   out.boundarypins.enabled             = truthy(synth_set(opts, "place.region.boundarypins", "false"));
   out.boundarypins.split               = truthy(synth_set(opts, "place.region.boundarypins.split", "true"));
@@ -258,7 +258,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   terminal.remainder_warp.bins    = integer("place.legalize.warpspace.bins", "16");
   terminal.remainder_warp.seconds = number("place.legalize.warpspace.seconds", "3");
   livehd::placement::validate_warp_options(terminal.remainder_warp);
-  terminal.max_density            = number("place.legalize.bin.max_density", "0.8");
+  terminal.max_density = number("place.legalize.bin.max_density", "0.8");
   if (const auto grid = synth_set(opts, "place.legalize.bin.grid", "route"); grid != "route") {
     out.legalize_bins = integer("place.legalize.bin.grid", grid);
     if (out.legalize_bins < 1 || out.legalize_bins > 1024) {
@@ -438,7 +438,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (sat_grid != "none" && sat_grid != "route") {
     throw Lhd_error{"usage", "invalid synth.place.satlegalize.bin.grid: " + sat_grid, "expected none or route"};
   }
-  sat.route_grid = sat_grid == "route";
+  sat.route_grid           = sat_grid == "route";
   sat.route_guidance       = truthy(synth_set(opts, "place.satlegalize.route_guidance", "true"));
   sat.route_peak_floor     = number("place.satlegalize.route_peak_floor", "0");
   if (!std::isfinite(sat.route_peak_floor) || sat.route_peak_floor < 0 || sat.route_peak_floor > 1) {

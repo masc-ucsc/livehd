@@ -30,12 +30,12 @@ struct Rect {
     return xl > r.xh + distance || xh < r.xl - distance || yl > r.yh + distance || yh < r.yl - distance;
   }
   // Overlap or a shared edge segment; a single shared corner point does not touch.
-  bool        touches(const Rect& r) const {
+  bool touches(const Rect& r) const {
     const auto x = std::min(xh, r.xh) - std::max(xl, r.xl), y = std::min(yh, r.yh) - std::max(yl, r.yl);
     return x >= 0 && y >= 0 && (x > 0 || y > 0);
   }
   // Empty (possibly inverted) when the rectangles do not overlap.
-  Rect        intersection(const Rect& r) const {
+  Rect intersection(const Rect& r) const {
     return {std::max(xl, r.xl), std::max(yl, r.yl), std::min(xh, r.xh), std::min(yh, r.yh)};
   }
   // Smallest rectangle covering both.
@@ -67,7 +67,7 @@ std::optional<Rect>    snapped_dbu(Rect r, double tolerance);
 // Rule distances round up, so a micron spacing or width is never relaxed.
 inline double          rule_dbu(double microns, int64_t dbu) { return std::ceil(microns * dbu - 1e-9); }
 // Finite integral coordinates within the signed 32-bit DEF/OpenDB range.
-inline bool integral_dbu(const Rect& r) {
+inline bool            integral_dbu(const Rect& r) {
   for (auto v : {r.xl, r.yl, r.xh, r.yh}) {
     if (!std::isfinite(v) || v != std::round(v) || std::abs(v) > std::numeric_limits<int32_t>::max()) {
       return false;

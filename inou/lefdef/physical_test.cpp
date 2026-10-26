@@ -417,7 +417,13 @@ TEST(Physical, SharedGeometryHelpers) {
   EXPECT_TRUE(a.intersection(c).empty());
   EXPECT_EQ(a.hull(c), (Rect{0, 0, 20, 20}));
   EXPECT_EQ(orient_rect({1, 2, 3, 6}, 10, 20, Orientation::W), (Rect{14, 1, 18, 3}));
-  EXPECT_EQ(merge_intervals<int>({{8, 9}, {0, 2}, {2, 5}, {1, 3}}), (std::vector<std::pair<int, int>>{{0, 5}, {8, 9}}));
+  EXPECT_EQ(merge_intervals<int>({
+                {8, 9},
+                {0, 2},
+                {2, 5},
+                {1, 3}
+  }),
+            (std::vector<std::pair<int, int>>{{0, 5}, {8, 9}}));
   Macro macro;
   macro.width    = 1;
   macro.height   = 2;

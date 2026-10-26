@@ -63,7 +63,7 @@ struct Capacity_bins {
       }
     }
   }
-  void   deposit(const Ann_place& p, bool after) {
+  void deposit(const Ann_place& p, bool after) {
     each(footprint(p), [&](size_t b, double a) { (after ? bins[b].after : bins[b].before) += a; });
   }
   double total_capacity() const;

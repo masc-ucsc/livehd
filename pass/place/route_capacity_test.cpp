@@ -74,10 +74,13 @@ TEST(RouteCapacity, TrackUnionAndAtomicHeadroom) {
 TEST(RouteCapacity, OnlyMetalBelowTheModeledLayersIsIgnored) {
   Fixture f;
   f.tech.routing_layers = {"M1", "M2", "M3", "M4"};
-  f.tech.layers["M1"]   = f.tech.layers["M4"] = f.tech.layers.at("M3");
+  f.tech.layers["M1"] = f.tech.layers["M4"] = f.tech.layers.at("M3");
   Route_capacity c(f.tech, f.fp, f.obstacles, f.grid);
   auto           shapes = f.wire(10);
-  shapes.push_back({"M1", {0, 0, 10, 20}});
+  shapes.push_back({
+      "M1",
+      {0, 0, 10, 20}
+  });
   EXPECT_TRUE(c.check(shapes, f.demand).legal);
   shapes.back().layer = "M4";
   EXPECT_EQ(c.check(shapes, f.demand).reason, "route uses layer outside capacity model");
