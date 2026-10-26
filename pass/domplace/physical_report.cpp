@@ -3,6 +3,7 @@
 
 #include <format>
 #include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 
@@ -82,6 +83,12 @@ std::string physical_report(const usyn::Logical_design& design, const Physical_r
   uint64_t                        states = 0, eligible = 0, converted = 0;
   std::map<std::string, uint64_t> reasons;
   std::set<std::string>           masters;
+  double                          estimate = 0, rails = 0, footprint = 0;
+  bool                            rounded      = true;  // every converted cell has a bundle footprint
+  const auto                      footprint_of = [&](const std::string& cell) -> std::optional<double> {
+    const auto it = inputs.footprints.find(cell);
+    return it == inputs.footprints.end() ? std::nullopt : std::optional<double>{it->second};
+  };
   for (const auto& region : design.regions) {
     if (!region.physical) {
       continue;
@@ -92,7 +99,13 @@ std::string physical_report(const usyn::Logical_design& design, const Physical_r
       ++reasons[s.reason];
       if (s.decision == usyn::Physical_decision::domino) {
         ++converted;
-        masters.insert(region.physical->cells.at(s.cell).name);
+        const auto& cell = region.physical->cells.at(s.cell).name;
+        masters.insert(cell);
+        estimate        += s.a_domino;
+        rails           += s.a_rail_not;
+        const auto area  = footprint_of(cell);
+        rounded         &= area.has_value();
+        footprint       += area.value_or(0);
       }
     }
   }
@@ -103,6 +116,12 @@ std::string physical_report(const usyn::Logical_design& design, const Physical_r
   number(w, "converted", converted);
   number(w, "retained_cmos", states - converted);
   number(w, "masters", masters.size());
+  // Converted states over the definition regions: the Liberty-basis estimate,
+  // the materialized rail inverters, and the rounded LEF footprint (null
+  // without a bundle footprint for every cell).
+  real(w, "a_domino_estimate", estimate);
+  real(w, "a_rail_not", rails);
+  real(w, "a_footprint_um2", rounded ? std::optional<double>{footprint} : std::nullopt);
   w.Key("reasons");
   w.StartObject();
   for (const auto& [reason, count] : reasons) {
@@ -142,6 +161,9 @@ std::string physical_report(const usyn::Logical_design& design, const Physical_r
         real(w, "a_domino", s.a_domino);
         real(w, "a_rail", s.a_rail_not);
         real(w, "a_cmos", s.a_cmos);
+        if (domino) {
+          real(w, "a_footprint_um2", footprint_of(region.physical->cells.at(s.cell).name));
+        }
         w.Key("rails");
         w.StartArray();
         for (size_t k = 0; k < s.rails.size(); ++k) {

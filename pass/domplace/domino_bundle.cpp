@@ -204,6 +204,7 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
           }
           unsupported.insert(variant.access.unsupported.begin(), variant.access.unsupported.end());
           macros.emplace(variant.cell.name, variant.geometry.macro);
+          result.footprints.emplace(variant.cell.name, variant.geometry.a_footprint_um2);
           emit_domino_model(library, master, variant.cell);
           verilog += domino_verilog_model(master, variant.cell);
         }

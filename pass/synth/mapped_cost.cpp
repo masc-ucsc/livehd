@@ -9,7 +9,8 @@
 #include "node_util.hpp"
 
 namespace livehd::synth {
-std::optional<Mapped_cost> mapped_cost(const Mapped_design& design, const std::function<bool()>& admission) {
+std::optional<Mapped_cost> mapped_cost(const Mapped_design& design, const std::function<bool()>& admission,
+                                       const std::map<std::string, double>& cell_area) {
   if (!design.top) {
     return {};
   }
@@ -106,6 +107,14 @@ std::optional<Mapped_cost> mapped_cost(const Mapped_design& design, const std::f
     if (count && std::isfinite(row.delay) && row.delay > result.maximum_region_delay) {
       result.maximum_region_delay = row.delay;
     }
+  }
+  for (const auto& [cell, area] : cell_area) {
+    const auto count = instances[cell];
+    if (!std::isfinite(area) || area < 0 || count > std::numeric_limits<uint64_t>::max() - result.gates) {
+      return {};
+    }
+    result.gates += count;
+    result.area  += static_cast<double>(count) * area;
   }
   if (!std::isfinite(result.area)) {
     return {};

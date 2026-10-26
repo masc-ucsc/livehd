@@ -68,7 +68,9 @@ std::string native_report(const Logical_design& design, const Design_options& op
   w.Key("scope");
   text(w, "definition-regions");
   w.Key("output");
-  text(w, tmap == "none" ? "logical-cmos" : "mapped-cmos");
+  // The provisional physical profile emits domino cell instances beside the CMOS.
+  const bool mixed = physical_profile != "none";
+  text(w, tmap == "none" ? (mixed ? "logical-mixed" : "logical-cmos") : (mixed ? "mapped-mixed" : "mapped-cmos"));
   w.Key("physical_profile");
   text(w, physical_profile);
   w.Key("mapping_trials");

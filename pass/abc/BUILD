@@ -99,6 +99,7 @@ cc_test(
         ":pass_abc",
         "//core",
         "//graph",
+        "//pass/domplace:physical_select",
         "//pass/partition:flatten",
         "//pass/synth",
         "//pass/usyn:usyn_logic",

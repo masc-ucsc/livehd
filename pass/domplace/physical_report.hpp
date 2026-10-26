@@ -2,6 +2,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -22,13 +23,15 @@ struct Physical_report_inputs {
   std::string              bundle;
   uint64_t                 bundle_macros = 0;
   std::vector<std::string> bundle_diagnostics;
+  std::map<std::string, double> footprints;  // the bundle's rounded footprint (um^2) by cell
 };
 
 // The `physical` object of pass.usyn's report for the domino_provisional
 // profile: the settings and named reference cells, totals (eligible,
 // converted, retained by reason, masters), and one row per frozen state of
 // every region with its decision, reason, master, PDN metrics, x, area terms
-// and rails. Areas are Liberty-basis proxies, not characterized PPA.
+// and rails. Areas are Liberty-basis proxies, not characterized PPA; the
+// rounded footprint is the bundle's LEF basis, reported separately.
 std::string physical_report(const usyn::Logical_design& design, const Physical_report_inputs& inputs);
 
 }  // namespace livehd::domplace

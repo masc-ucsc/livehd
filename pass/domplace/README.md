@@ -126,11 +126,22 @@ as passed.
 `pass.usyn.physical=domino_provisional` runs `physical_select` on every region
 after freeze, a logical cache hit included, through
 `usyn::Design_options::physical` (`usyn/physical_emission.hpp` is the data
-seam). It is currently a dry run: `<qor>.usyn.json` gains `physical_profile`
-and a `physical` block (settings, reference cells, totals by reason, one row
-per state with its master, `n_pdn`, `x` and area terms, and rails) and names
-the published bundle, while the netlist stays CMOS. Emission (D), the LEF and model bundle (C) and
-two-row placement (F) build on it.
+seam), and emits the mixed netlist with `usyn::write_physical_module`: each
+converted state is one body-less `__lhd_domino_*` Sub named after the state,
+whose rails are driven by the frozen producers (a complemented producer
+through an explicit inverter) and whose CLK is the region's clock input; its
+Flop and the D logic only it used are gone, and retained states keep their
+Flops. The technology map (`pass.usyn.tmap=abc`) maps the residual CMOS and
+the retained registers and preserves the domino instances as boundaries
+(`pass/synth/tmap.hpp`). The `tmap_trials=2` comparison charges each domino
+instance its Liberty-basis estimate.
+
+`<qor>.usyn.json` reports `output` as `logical-mixed`/`mapped-mixed`,
+`physical_profile`, and a `physical` block: settings, reference cells, totals
+by reason with both area bases (`a_domino_estimate` on the Liberty basis,
+`a_footprint_um2` from the bundle's rounded LEF footprints), one row per state
+with its master, `n_pdn`, `x`, area terms and rails, and the published bundle.
+Areas are proxies, not characterized PPA.
 
 ## Matched commands
 

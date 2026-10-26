@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <map>
 #include <new>
 #include <print>
 #include <set>
@@ -436,6 +437,23 @@ void write_file(const std::filesystem::path& path, const std::string& contents) 
   }
   std::filesystem::rename(temporary, path);
 }
+// The Liberty-basis area estimate of every emitted domino cell, which the
+// mapping provider leaves unpriced, so the trial comparison charges it.
+std::map<std::string, double> domino_cell_area(const livehd::usyn::Logical_design& design) {
+  std::map<std::string, double> area;
+  for (const auto& region : design.regions) {
+    if (!region.physical) {
+      continue;
+    }
+    for (const auto& state : region.physical->states) {
+      if (state.decision == livehd::usyn::Physical_decision::domino) {
+        area[region.physical->cells.at(state.cell).name] = state.a_domino;
+      }
+    }
+  }
+  return area;
+}
+
 bool mapped_better(const livehd::synth::Mapped_cost& candidate, const livehd::synth::Mapped_cost& incumbent) {
   if (candidate.gates != incumbent.gates) {
     return candidate.gates < incumbent.gates;
@@ -901,7 +919,7 @@ void Pass_usyn::synthesize(Eprp_var& var) {
       return;
     }
     domino_reference = std::make_shared<const livehd::domplace::Domino_reference>(std::move(*reference));
-    domino_report    = {domino_reference.get(), &options.domino, cmos->name, cmos->area, physical_work.consumed, false};
+    domino_report    = {domino_reference.get(), &options.domino, cmos->name, cmos->area, physical_work.consumed, true};
     options.design.physical
         = [reference = domino_reference,
            model     = native_model,
@@ -959,7 +977,7 @@ void Pass_usyn::synthesize(Eprp_var& var) {
     mapped = std::move(result.design);
     if (compare) {
       const auto price_admission = [&] { return work.spend(1024); };
-      auto       first_cost      = livehd::synth::mapped_cost(*mapped, price_admission);
+      auto       first_cost      = livehd::synth::mapped_cost(*mapped, price_admission, domino_cell_area(*selected.design));
       trials.push_back({options.design.logical.pre_optimize,
                         options.design.multi_rep,
                         true,
@@ -995,7 +1013,8 @@ void Pass_usyn::synthesize(Eprp_var& var) {
           auto alternative_mapped = livehd::synth::technology_map(options.tmap, alternative.design->top, alternative_mapping);
           trial.reason            = alternative_mapped.reason;
           if (alternative_mapped.design) {
-            trial.cost = livehd::synth::mapped_cost(*alternative_mapped.design, price_admission);
+            trial.cost
+                = livehd::synth::mapped_cost(*alternative_mapped.design, price_admission, domino_cell_area(*alternative.design));
             if (!trial.cost) {
               trial.reason = "mapped cost unavailable; keep incumbent";
             } else if (mapped_better(*trial.cost, *first_cost)) {
@@ -1120,6 +1139,7 @@ void Pass_usyn::synthesize(Eprp_var& var) {
     domino_report.bundle             = bundle_path.filename().string();
     domino_report.bundle_macros      = bundle.macros;
     domino_report.bundle_diagnostics = std::move(bundle.diagnostics);
+    domino_report.footprints         = std::move(bundle.footprints);
   }
   const auto artifact_path = fs::path(base + ".usyn.artifacts");
   fs::create_directories(artifact_path);
@@ -1257,12 +1277,10 @@ void Pass_usyn::synthesize(Eprp_var& var) {
         converted += state.decision == usyn::Physical_decision::domino;
       }
     }
-    std::print(
-        "[pass.usyn] domino_provisional dry run: {} of {} eligible state(s) would convert; the netlist stays CMOS; bundle {} ({} "
-        "macros)\n",
-        converted,
-        eligible,
-        bundle_path.string(),
-        domino_report.bundle_macros);
+    std::print("[pass.usyn] domino_provisional: {} of {} eligible state(s) are domino cell instances; bundle {} ({} macros)\n",
+               converted,
+               eligible,
+               bundle_path.string(),
+               domino_report.bundle_macros);
   }
 }

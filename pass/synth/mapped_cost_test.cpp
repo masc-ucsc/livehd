@@ -41,6 +41,39 @@ TEST(MappedCost, SharedDefinitionsAreWeightedByPhysicalInstancesAndAbsorbedRowsA
   EXPECT_DOUBLE_EQ(cost->maximum_region_delay, 5);
   EXPECT_FALSE(mapped_cost(design, [] { return false; }));
 }
+TEST(MappedCost, CallerPricedCellsAreWeightedByInstances) {
+  // Two copies of `child`, each holding three body-less domino cells.
+  Mapped_design design;
+  auto          top = design.library.create_io("top"), child = design.library.create_io("child");
+  auto          cell = design.library.create_io("__lhd_domino_0000000000000001_v0_t0");
+  design.top         = top->create_graph();
+  auto body          = child->create_graph();
+  for (unsigned i = 0; i < 2; ++i) {
+    graph_util::create_typed_node(*design.top, Ntype_op::Sub).set_subnode(child);
+  }
+  for (unsigned i = 0; i < 3; ++i) {
+    graph_util::create_typed_node(*body, Ntype_op::Sub).set_subnode(cell);
+  }
+  for (const auto& name : {"top", "child"}) {
+    Region_qor row;
+    row.module = name;
+    row.gates  = 1;
+    row.area   = 1;
+    design.regions.push_back(std::move(row));
+  }
+  const std::map<std::string, double> priced{
+      {std::string(cell->get_name()), 2.5},
+      {                "unused_cell", 100}
+  };
+  const auto cost = mapped_cost(design, {}, priced);
+  ASSERT_TRUE(cost);
+  EXPECT_EQ(cost->gates, 3U + 6U);
+  EXPECT_DOUBLE_EQ(cost->area, 3 + 6 * 2.5);
+  EXPECT_FALSE(mapped_cost(design,
+                           {
+  },
+                           {{std::string(cell->get_name()), -1}}));
+}
 TEST(MappedCost, InstanceCountOverflowNeverProducesAnUnderestimatedGateCount) {
   Mapped_design design;
   auto          child = design.library.create_io("leaf");

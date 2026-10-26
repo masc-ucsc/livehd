@@ -65,6 +65,7 @@ struct Bundle_result {
   std::string              reason;       // why the bundle was refused
   std::vector<std::string> diagnostics;  // labeled estimates, null coefficients, unverified pin access
   size_t                   macros = 0;   // LEF macros: masters x register variants
+  std::map<std::string, double> footprints;   // rounded LEF footprint (um^2) by macro
 };
 
 // Write out_dir/{domino_cells.lef, domino_models.json, domino_models.v,

@@ -651,7 +651,8 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
                                        work,
                                        options.logical.max_nodes,
                                        options.cmos_cleanup || options.sop_tree || options.multi_rep ? &cleanup : nullptr,
-                                       literal_plan);
+                                       literal_plan,
+                                       physical ? &*physical : nullptr);
     search_left                -= std::min(search_left, cmos_search.consumed);
     if (options.literal_extract && !literal_plan.empty()) {
       livehd::diag::info("pass.usyn", "literal-extract", "progress")

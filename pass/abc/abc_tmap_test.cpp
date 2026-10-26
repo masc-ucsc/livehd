@@ -5,6 +5,7 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
+#include <set>
 #include <vector>
 
 #include "design_synth.hpp"
@@ -12,6 +13,8 @@
 #include "gtest/gtest.h"
 #include "hhds/attrs/name.hpp"
 #include "node_util.hpp"
+#include "physical_select.hpp"
+#include "provisional_cell.hpp"
 #include "tmap.hpp"
 namespace livehd::abc {
 namespace {
@@ -173,6 +176,124 @@ TEST_F(AbcTmap, MapsNativeUsynResultAndPreservesItsStateFunction) {
     logical_state += region.selected.state_bits.size();
   }
   EXPECT_EQ(logical_state, 1U);
+}
+
+TEST_F(AbcTmap, DominoCellsArePreservedBoundaries) {
+  // state <= b ? a : state (an enable register), selected in one phase and
+  // converted by the provisional profile: a body-less domino cell whose rails
+  // are a, b, !b (through a mapped inverter) and its own Q.
+  auto io = library.create_io("hold");
+  io->add_input("a", 1);
+  io->add_input("b", 2);
+  io->add_input("clk", 3);
+  io->add_output("q", 4);
+  for (auto name : {"a", "b", "clk", "q"}) {
+    io->set_bits(name, 1);
+    io->set_unsign(name, true);
+  }
+  auto       hold = io->create_graph();
+  const auto gate = [&](Ntype_op op, hhds::Pin_class x, hhds::Pin_class y) {
+    auto node = gu::create_typed_node(*hold, op);
+    x.connect_sink(gu::setup_sink_pid(node, 0));
+    y.connect_sink(gu::setup_sink_pid(node, 0));
+    auto out = node.create_driver_pin(0);
+    gu::set_ubits(out, 1);
+    return out;
+  };
+  auto state = gu::create_typed_node(*hold, Ntype_op::Flop);
+  state.attr(hhds::attrs::name).set("state");
+  auto q = state.create_driver_pin(0);
+  gu::set_ubits(q, 1);
+  gu::set_pin_name(q, "state");
+  const auto enable = hold->get_input_pin("b");
+  const auto nb     = gate(Ntype_op::Xor, enable, gu::create_const(*hold, *Dlop::create_integer(1)));
+  gate(Ntype_op::Or, gate(Ntype_op::And, enable, hold->get_input_pin("a")), gate(Ntype_op::And, nb, q))
+      .connect_sink(gu::setup_sink_by_name(state, "din"));
+  hold->get_input_pin("clk").connect_sink(gu::setup_sink_by_name(state, "clock_pin"));
+  q.connect_sink(hold->get_output_pin("q"));
+
+  domplace::Domino_reference reference;
+  reference.inverter.name = "INVx1";
+  reference.inverter.area = 1;
+  reference.registers.push_back({.name = "DFFx1", .area = 4});
+  domplace::Select_options select;
+  select.policy = domplace::Select_options::Policy::all;
+  select.clock  = "clk";
+  usyn::Design_options design;
+  design.logical.endpoint.clock_phases = 1;
+  design.physical = [&](const usyn::Stateful_region& region, std::span<const std::string> names, usyn::Budget& budget) {
+    return domplace::select_physical(region, names, select, {&reference, nullptr, 0}, budget);
+  };
+  usyn::Budget work{100000000};
+  auto         logical = usyn::synthesize_cmos_design(hold, design, work);
+  ASSERT_TRUE(logical.design) << logical.reason;
+  const auto& emitted = logical.design->regions.front().physical;
+  ASSERT_TRUE(emitted);
+  ASSERT_EQ(emitted->states.size(), 1U);
+  ASSERT_EQ(emitted->states[0].reason, "domino-all");
+  ASSERT_EQ(emitted->cells.size(), 1U);
+  synth::Tmap_options options;
+  options.library = "inou/prp/tests/abc/test.lib";
+  auto mapped     = synth::technology_map("abc", logical.design->top, options);
+  ASSERT_EQ(mapped.status, synth::Tmap_status::mapped) << mapped.reason;
+  hhds::GraphLibrary flat_library;
+  auto               flat = partition::flatten_hierarchy(mapped.design->top.get(), &flat_library, "flat");
+  ASSERT_TRUE(flat);
+  std::vector<hhds::Node_class> cells;
+  unsigned                      registers = 0;
+  for (auto node : flat->body().nodes()) {
+    if (gu::type_op_of(node) != Ntype_op::Sub) {
+      continue;
+    }
+    const auto name  = node.get_subnode_io()->get_name();
+    registers       += name == "DFFx1";
+    if (is_provisional_domino_cell(name)) {
+      cells.push_back(node);
+    }
+  }
+  EXPECT_EQ(registers, 0U);
+  ASSERT_EQ(cells.size(), 1U);
+  const auto cell = cells.front();
+  const auto decl = cell.get_subnode_io();
+  EXPECT_FALSE(decl->has_graph());
+  EXPECT_TRUE(decl->is_loop_break("Q"));
+  EXPECT_NE(gu::node_name_of(cell).find("state"), std::string_view::npos);
+  EXPECT_EQ(decl->get_name(), emitted->cells[0].name);
+  const auto sink_driver = [](hhds::Node_class node, std::string_view name) {
+    return node.get_sink_pin(node.get_subnode_io()->get_input_port_id(name)).get_driver_pin();
+  };
+  // CLK stays native from the region input; Q still drives the output.
+  EXPECT_EQ(sink_driver(cell, "CLK"), flat->get_input_pin("clk"));
+  EXPECT_EQ(flat->get_output_pin("q").get_driver_pin(), cell.get_driver_pin(decl->get_output_port_id("Q")));
+  // The rails, as truth tables over (a, b, Q), through the mapped cells.
+  std::function<bool(hhds::Pin_class, unsigned)> eval = [&](hhds::Pin_class pin, unsigned x) -> bool {
+    if (pin.is_const()) {
+      return gu::const_of(pin).bit_test(0);
+    }
+    if (pin == flat->get_input_pin("a") || pin == flat->get_input_pin("b")) {
+      return x & (pin == flat->get_input_pin("a") ? 1 : 2);
+    }
+    const auto node = pin.get_master_node();
+    if (node == cell) {
+      return x & 4;
+    }
+    const auto name = node.get_subnode_io()->get_name();
+    const bool a    = eval(sink_driver(node, "A"), x);
+    if (name == "INVx1" || name == "BUFx1") {
+      return name == "BUFx1" ? a : !a;
+    }
+    const bool b = eval(sink_driver(node, "B"), x);
+    return name == "NAND2x1" ? !(a && b) : name == "NOR2x1" ? !(a || b) : a != b;
+  };
+  std::set<unsigned> rails;
+  for (const auto& rail : emitted->cells[0].rails) {
+    unsigned table = 0;
+    for (unsigned x = 0; x < 8; ++x) {
+      table |= unsigned(eval(sink_driver(cell, rail), x)) << x;
+    }
+    rails.insert(table);
+  }
+  EXPECT_EQ(rails, (std::set<unsigned>{0xAA, 0xCC, 0x33, 0xF0}));
 }
 
 TEST_F(AbcTmap, MissingLibraryAndResourceRefusalPublishNoMappedDesign) {

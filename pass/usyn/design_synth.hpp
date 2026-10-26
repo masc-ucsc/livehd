@@ -52,6 +52,8 @@ struct Design_options {
   Logical_cache_options                    cache{};
   // Optional post-freeze physical choice (pass.usyn.physical). It runs on every
   // region, a cache hit included, and is never part of the logical identity.
+  // Its converted states are emitted as body-less provisional cell instances
+  // (write_physical_module) instead of Flops.
   Physical_selector                        physical{};
 };
 
@@ -98,7 +100,8 @@ struct Design_result {
 // semantics. Neither SATOPT, ABC nor a prover is invoked. No Liberty needed.
 // Source graphs are immutable; refusal never publishes a partial output.
 // Serial graph access is required. This is the logical design seam, not a
-// physical DominoLatch emitter or technology mapper. Shared private preparation
+// technology mapper; only Design_options::physical makes it emit provisional
+// domino cell instances. Shared private preparation
 // uses source-node/work limits and process checkpoints. Partition collection,
 // naming and reconstruction share work/process admission and stop after failed
 // region builders. Individual bulk helpers/allocations are not yet bounded.

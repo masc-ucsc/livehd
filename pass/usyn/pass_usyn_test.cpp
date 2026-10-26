@@ -414,7 +414,7 @@ END VIA12
   var.dict["domino_clock"] = "clk";
 }
 
-TEST_F(PassSynth, DominoProfileDryRunReportsDecisionsAndKeepsTheCmosNetlist) {
+TEST_F(PassSynth, DominoProfileEmitsCellInstancesAndPublishesTheBundle) {
   hhds::GraphLibrary input;
   Eprp_var           var;
   var.graphs.push_back(design(input));
@@ -441,11 +441,11 @@ TEST_F(PassSynth, DominoProfileDryRunReportsDecisionsAndKeepsTheCmosNetlist) {
     const auto report = read(root + "/qor.json.usyn.json");
     ASSERT_FALSE(report.HasParseError());
     EXPECT_STREQ(report["target"].GetString(), "cmos");
-    EXPECT_STREQ(report["output"].GetString(), "logical-cmos");
+    EXPECT_STREQ(report["output"].GetString(), "logical-mixed");
     EXPECT_STREQ(report["physical_profile"].GetString(), "domino_provisional");
     EXPECT_EQ(report["cache"]["reused"].GetUint64(), std::string_view{select} == "all" ? 0U : 1U);
     const auto& physical = report["physical"];
-    EXPECT_STREQ(physical["emission"].GetString(), "dry-run");
+    EXPECT_STREQ(physical["emission"].GetString(), "mixed");
     // The model bundle is published beside the report: every master in every
     // register variant (DFF is the only rung here).
     ASSERT_TRUE(physical["bundle"].IsObject());
@@ -485,16 +485,28 @@ TEST_F(PassSynth, DominoProfileDryRunReportsDecisionsAndKeepsTheCmosNetlist) {
       EXPECT_STREQ(endpoint["reason"].GetString(), "domino-area");
       EXPECT_DOUBLE_EQ(endpoint["a_cmos"].GetDouble(), 5.0);
     }
-    // A dry run publishes the CMOS netlist: the register is still a Flop.
+    // The converted register is a body-less domino cell instance, not a Flop,
+    // and both area bases are reported.
+    EXPECT_DOUBLE_EQ(physical["totals"]["a_domino_estimate"].GetDouble(), 4.6);
+    EXPECT_GT(physical["totals"]["a_footprint_um2"].GetDouble(), 4.6);
+    EXPECT_EQ(endpoint["a_footprint_um2"].GetDouble(), physical["totals"]["a_footprint_um2"].GetDouble());
     const auto io = Registry::instance(output).find_io("top");
     ASSERT_TRUE(io && io->get_graph());
-    uint32_t flops = 0, subs = 0;
+    uint32_t                      flops = 0;
+    std::vector<hhds::Node_class> cells;
     for (auto node : io->get_graph()->body().nodes()) {
       flops += gu::type_op_of(node) == Ntype_op::Flop;
-      subs  += gu::type_op_of(node) == Ntype_op::Sub;
+      if (gu::type_op_of(node) == Ntype_op::Sub) {
+        cells.push_back(node);
+      }
     }
-    EXPECT_EQ(flops, 1U);
-    EXPECT_EQ(subs, 0U);
+    EXPECT_EQ(flops, 0U);
+    ASSERT_EQ(cells.size(), 1U);
+    EXPECT_EQ(gu::node_name_of(cells[0]), "state");
+    const auto decl = cells[0].get_subnode_io();
+    ASSERT_TRUE(decl);
+    EXPECT_EQ(decl->get_name(), endpoint["master"].GetString());
+    EXPECT_FALSE(decl->has_graph());
   }
   // A run without the profile drops the previous run's bundle.
   for (const auto key : {"physical", "domino_select", "domino_clock", "clock_phases", "lef"}) {

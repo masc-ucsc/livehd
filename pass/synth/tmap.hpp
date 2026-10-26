@@ -60,7 +60,10 @@ struct Tmap_result {
 };
 
 // The graph is the complete behavioral expansion, with original state and
-// declared ordered ports. Proposed DOMINO boundaries are not mapping barriers.
+// declared ordered ports. Body-less `__lhd_domino_*` instances
+// (core/provisional_cell.hpp) are preserved boundaries: the provider must keep
+// each one's instance name, declaration and port connectivity, mapping only
+// the logic around them.
 // The provider must keep source graphs immutable, preserve state/port semantics,
 // and return an owned complete result, or no result on failure. Logical cell
 // formulas/source correspondence stay in the caller's authoritative artifact.
