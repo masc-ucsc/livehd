@@ -245,15 +245,28 @@ def phase_isolation(certs_a: str, certs_b: str) -> bool:
         force_cleanup(mb, [pb])
 
 
+# The corpora live in the livehd-new checkout. Account-name redaction turned
+# these defaults into a literal /HOMEROOT/... that exists nowhere, so the test
+# failed all three phases in 2 s ("no TSV was written") without testing
+# anything. Resolve them the way the other D3 scripts spell it: LIVEHD_NEW_ROOT
+# if set, otherwise the livehd-new checkout beside this one.
+LIVEHD_NEW = pathlib.Path(os.environ.get("LIVEHD_NEW_ROOT", str(ROOT.parent / "livehd-new")))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--certs",
-                    default="/HOMEROOT/projects/livehd-new/generated/vc_sweep2/lean")
-    ap.add_argument("--certs-b",
-                    default="/HOMEROOT/projects/livehd-new/generated/cva6_vc/lean")
+    ap.add_argument("--certs", default=str(LIVEHD_NEW / "generated/vc_sweep2/lean"))
+    ap.add_argument("--certs-b", default=str(LIVEHD_NEW / "generated/cva6_vc/lean"))
     ap.add_argument("--module", default="intpipe_alu",
                     help="a module large enough that 5s is certain to time out")
     a = ap.parse_args()
+    # Every phase needs a real corpus. Say so once, plainly, rather than let
+    # each phase report a different symptom of the same missing directory.
+    missing = [d for d in (a.certs, a.certs_b) if not pathlib.Path(d).is_dir()]
+    if missing:
+        print(f"CANCEL-TEST CANNOT RUN: no certificate directory at {missing}. "
+              f"Set LIVEHD_NEW_ROOT or pass --certs/--certs-b.", flush=True)
+        return 2
     ok = phase_timeout(a.certs, a.module)
     ok = phase_sigterm(a.certs) and ok
     ok = phase_isolation(a.certs, a.certs_b) and ok
