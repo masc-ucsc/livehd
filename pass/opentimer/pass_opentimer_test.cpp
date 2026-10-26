@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "pass_opentimer.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -427,6 +428,63 @@ TEST_F(SdcClock, UnusedCellOutputsStillPresentTheirInputCapacitance) {
   probe.timer.update_timing();
   EXPECT_EQ(probe.timer.num_gates(), 2);
   EXPECT_NEAR(probe.timer.report_load("a", ot::MAX, ot::RISE).value(), 4, 1e-5);
+}
+
+TEST_F(SdcClock, DeclaredOutputWidthsExtendAndTruncateTheirDrivers) {
+  const auto path = directory + "/wires.lib";
+  std::ofstream(path) << "library(wires) { time_unit : \"1ps\"; capacitive_load_unit(1,ff); }\n";
+  var.dict["files"] = path;
+  var.set_stage_labels(var.dict);
+  hhds::GraphLibrary library;
+  auto               io = library.create_io("top");
+  for (const auto& [name, bits] : std::map<std::string, int>{
+           {   "signed_bus", 4},
+           { "unsigned_bus", 4},
+           {"signed_scalar", 1}
+  }) {
+    io->add_input(name, io->get_input_pin_decls().size());
+    io->set_bits(name, bits);
+  }
+  struct Output {
+    const char* name;
+    const char* driver;
+    int         width;
+  };
+  const Output outputs[] = {
+      {  "sign_extended",    "signed_bus", 8},
+      {     "sign_alias",    "signed_bus", 8},
+      {  "zero_extended",  "unsigned_bus", 8},
+      {      "truncated",    "signed_bus", 2},
+      {"scalar_extended", "signed_scalar", 3}
+  };
+  for (const auto& output : outputs) {
+    io->add_output(output.name, io->get_output_pin_decls().size());
+    io->set_bits(output.name, output.width);
+  }
+  auto graph = io->create_graph();
+  livehd::graph_util::set_sbits(graph->get_input_pin("signed_bus"), 4);
+  livehd::graph_util::set_sbits(graph->get_input_pin("signed_scalar"), 1);
+  livehd::graph_util::set_ubits(graph->get_input_pin("unsigned_bus"), 4);
+  for (const auto& output : outputs) {
+    graph->get_output_pin(output.name).connect_driver(graph->get_input_pin(output.driver));
+  }
+  Circuit_probe probe(var);
+  probe.build_circuit(graph);
+  probe.timer.update_timing();
+  EXPECT_EQ(probe.timer.primary_outputs().size(), 29);
+  for (const auto& output : outputs) {
+    for (int bit = 0; bit < output.width; ++bit) {
+      const auto pin = bit ? std::format("{}.{}", output.name, bit) : output.name;
+      ASSERT_TRUE(probe.timer.pins().contains(pin)) << pin;
+      const auto source_bit = std::min(bit, output.driver == std::string("signed_scalar") ? 0 : 3);
+      const auto expected   = std::string(output.name) == "zero_extended" && bit >= 4 ? std::string("__lhd_ot_zero__")
+                              : source_bit ? std::format("{}.{}", output.driver, source_bit)
+                                           : output.driver;
+      ASSERT_NE(probe.timer.pins().at(pin).net(), nullptr) << pin;
+      EXPECT_EQ(probe.timer.pins().at(pin).net()->name(), expected) << pin;
+    }
+    EXPECT_FALSE(probe.timer.primary_outputs().contains(std::format("{}.{}", output.name, output.width)));
+  }
 }
 
 TEST_F(SdcClock, CaseAnalysisPrunesConstantPathsAndRestrictsNonUnateArcs) {

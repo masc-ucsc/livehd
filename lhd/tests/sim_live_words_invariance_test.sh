@@ -46,7 +46,7 @@ work="${TEST_TMPDIR:-/tmp/lhd_sim_live_words_invariance_$$}"
 mkdir -p "$work"
 part="${1:-all}"
 case "$part" in
-  all | 1 | 2 | 1_dirty | 256_dirty) ;;
+  all | clean | dirty | 1 | 2 | 1_dirty | 256_dirty) ;;
   *) echo "FAIL: unknown live-word comparison $part" >&2; exit 1 ;;
 esac
 
@@ -338,16 +338,16 @@ DIRTY_ON=(--set sim.tune.dirty=on --set sim.tune.fence=16)
 FILL=(--set sim.unknown_zero=true --set sim.init_zero=true)
 run lw_all lw256 "${FILL[@]}" --set sim.tune.live_words=256 --set sim.tune.dirty=off
 tags=(lw256)
-if [ "$part" = all ] || [ "$part" = 1 ]; then
+if [ "$part" = all ] || [ "$part" = clean ] || [ "$part" = 1 ]; then
   run lw_all lw1 "${FILL[@]}" --set sim.tune.live_words=1 --set sim.tune.dirty=off
   tags+=(lw1)
   split_guard lw_all lw_icg_top lw1
 fi
-if [ "$part" = all ] || [ "$part" = 2 ]; then
+if [ "$part" = all ] || [ "$part" = clean ] || [ "$part" = 2 ]; then
   run lw_all lw2 "${FILL[@]}" --set sim.tune.live_words=2 --set sim.tune.dirty=off
   tags+=(lw2)
 fi
-if [ "$part" = all ] || [ "$part" = 1_dirty ]; then
+if [ "$part" = all ] || [ "$part" = dirty ] || [ "$part" = 1_dirty ]; then
   run lw_all lw1_dirty "${FILL[@]}" --set sim.tune.live_words=1 "${DIRTY_ON[@]}"
   tags+=(lw1_dirty)
   # Check every fixture, so batching cannot hide a missing cross-color mark.
@@ -357,7 +357,7 @@ if [ "$part" = all ] || [ "$part" = 1_dirty ]; then
       || fail "$root: no cross-color dirty mark in the generated evaluator"
   done
 fi
-if [ "$part" = all ] || [ "$part" = 256_dirty ]; then
+if [ "$part" = all ] || [ "$part" = dirty ] || [ "$part" = 256_dirty ]; then
   run lw_all lw256_dirty "${FILL[@]}" --set sim.tune.live_words=256 "${DIRTY_ON[@]}"
   tags+=(lw256_dirty)
 fi

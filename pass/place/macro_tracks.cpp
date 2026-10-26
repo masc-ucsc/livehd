@@ -146,6 +146,9 @@ Profile profile(const ph::Technology& tech, const ph::Floorplan& fp, const ph::C
       }
     }
     if (p.phases[axis].empty()) {
+      if (m.virtual_proxy) {
+        throw std::runtime_error("memory proxy pins have no common routing-track phase: " + c.macro);
+      }
       std::erase_if(p.pins, [&](const Pin& pin) {
         const auto served = [&](const auto& a) { return accessible(a, best_phase, false).first; };
         return !pin.mixed && pin.access.front().x == (axis == 0) && std::none_of(pin.access.begin(), pin.access.end(), served);
@@ -233,8 +236,7 @@ bool coherent_macro_tracks(const ph::Technology& tech, const ph::Floorplan& layo
   const auto fixed = [&](size_t i) {
     const auto& c = cells[i];
     const auto& m = tech.macros.at(c.macro);
-    return c.place.status == ph::Status::FIXED || c.place.status == ph::Status::LOCKED || m.klass.starts_with("CORE")
-           || m.virtual_proxy;
+    return c.place.status == ph::Status::FIXED || c.place.status == ph::Status::LOCKED || m.klass.starts_with("CORE");
   };
   Box core{std::numeric_limits<int64_t>::max(),
            std::numeric_limits<int64_t>::max(),
@@ -526,13 +528,13 @@ void legalize_macro_tracks_impl(const ph::Technology& tech, const ph::Floorplan&
   };
   const auto checked = [&](const auto& c) {
     const auto& m = tech.macros.at(c.macro);
-    if (m.klass.starts_with("CORE") || m.virtual_proxy || (!move_macros && !fixed(c))) {
+    if (m.klass.starts_with("CORE") || (!move_macros && !fixed(c))) {
       return false;
     }
     return !(profile_of(c).pins.empty() && grid == 1);
   };
-  // Repack ignores later movable blockers only because they are placed after
-  // this macro; proxies and pinless macros never are, so they stay obstacles.
+  // Repack ignores later movable blockers because they are placed after this
+  // macro. Fixed geometry and pinless bodies remain obstacles.
   std::vector<bool> repacked(cells.size(), false);
   for (size_t i = 0; i < cells.size(); ++i) {
     repacked[i] = repack && !fixed(cells[i]) && checked(cells[i]);

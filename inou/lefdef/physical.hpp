@@ -5,6 +5,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ann_place.hpp"
@@ -105,6 +106,17 @@ struct Track {
   bool        same_mask                              = false;
   friend bool operator==(const Track&, const Track&) = default;
 };
+// Read-only routed snapshots retain constraints as provenance. The placement
+// reader still rejects them until its row/obstruction model can enforce them.
+struct Blockage {
+  std::string       layer, component;
+  bool              placement = false, soft = false, slots = false, fills = false, pushdown = false, except_pg = false;
+  double            partial_density = -1;
+  int               spacing = -1, design_rule_width = -1, mask = 0;
+  std::vector<Rect> rectangles;
+  std::vector<std::vector<std::pair<int64_t, int64_t>>> polygons;
+  friend bool                                           operator==(const Blockage&, const Blockage&) = default;
+};
 struct Floorplan {
   std::string            design;
   int64_t                dbu = 1000;
@@ -114,9 +126,11 @@ struct Floorplan {
   std::vector<Component> components;
   std::vector<Terminal>  terminals;
   std::vector<Net>       nets;
+  std::vector<Blockage>  blockages;
 };
 Technology                read_lef(const std::vector<std::string>& paths);
 Floorplan                 read_def(const std::string& path);
+Floorplan                 read_def_snapshot(const std::string& path);
 void                      write_def(const Floorplan& floorplan, const std::string& path);
 std::string               orientation_name(Orientation orientation);
 Orientation               parse_orientation(const std::string& name);

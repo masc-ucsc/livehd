@@ -1720,15 +1720,22 @@ sh_test(
 # with one live lane and a lowered memory with narrow read windows map to fewer cells
 # when the module boundary no longer hides what the parent knows, and the mapped
 # netlists are LEC-equivalent to the source.
-sh_test(
+test_suite(
     name = "lhd_abc_zero_bits_test",
-    size = "large",
+    tests = [":lhd_abc_zero_bits_" + claim for claim in ["shift", "mem", "select", "lanes", "shared"]],
+)
+
+[sh_test(
+    name = "lhd_abc_zero_bits_" + claim,
+    size = "small",
+    timeout = "short",
     srcs = ["lhd_abc_zero_bits_test.sh"],
     data = _FLOW_DATA + [
         "abc_zero_bits.sv",
         "//inou/prp:abc_tests",
     ],
-)
+    env = {"ZERO_BITS_CASE": claim},
+) for claim in ["shift", "mem", "select", "lanes", "shared"]]
 
 # 2i-abc_arith: every selectable adder architecture (rca/cska/cla + block_size)
 # tech-maps the arithmetic fixture and is LEC-equivalent to the original logic
@@ -2619,11 +2626,22 @@ sh_test(
 # live_words=1 the ICG latch and the flop whose commit guard reads its `_din`
 # land in different colors; the latch kept a guarded `_din` store and the flop
 # read it stale (SILENT miscompile, 2026-09-18). Inline fixture: just //lhd.
-sh_test(
+# Each group shares one baseline compilation across two comparisons.
+_LIVE_WORD_COMPARISONS = ["clean", "dirty"]
+
+[
+    sh_test(
+        name = "sim_live_words_invariance_" + part,
+        srcs = ["sim_live_words_invariance_test.sh"],
+        args = [part],
+        data = ["//lhd"],
+    )
+    for part in _LIVE_WORD_COMPARISONS
+]
+
+test_suite(
     name = "sim_live_words_invariance_test",
-    size = "large",
-    srcs = ["sim_live_words_invariance_test.sh"],
-    data = ["//lhd"],
+    tests = [":sim_live_words_invariance_" + part for part in _LIVE_WORD_COMPARISONS],
 )
 
 sh_test(

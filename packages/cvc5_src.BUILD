@@ -14,7 +14,10 @@ cmake(
     name = "build",
     lib_source = ":source",
     generate_args = ["-GNinja"],
-    build_args = ["-j8"],
+    # Honor the standard CMake resource control for bounded cold builds. Keep
+    # the existing eight-job fallback when the caller does not specify one.
+    # Double-dollar escaping survives Bazel Make expansion into the shell.
+    build_args = ["--parallel", '"$${CMAKE_BUILD_PARALLEL_LEVEL:-8}"'],
     cache_entries = {
         "CMAKE_BUILD_TYPE": "Production",
         "CMAKE_POSITION_INDEPENDENT_CODE": "ON",

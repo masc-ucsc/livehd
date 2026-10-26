@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 
 #include "gtest/gtest.h"
 namespace livehd::physical {
@@ -39,6 +40,7 @@ TEST(Physical, DefIdentityRoundtrip) {
   const auto path = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "roundtrip.def";
   write_def(fp, path.string());
   EXPECT_NO_THROW(verify_def_roundtrip(fp, read_def(path.string())));
+  EXPECT_NO_THROW(verify_def_roundtrip(fp, read_def_snapshot(path.string())));
   auto broken = read_def(path.string());
   broken.terminals[0].x++;
   EXPECT_THROW(verify_def_roundtrip(fp, broken), std::runtime_error);
@@ -140,5 +142,67 @@ TEST(Physical, OrientationTransforms) {
   EXPECT_EQ(orient_point(1, 2, 10, 20, Orientation::FS), (std::pair<double, double>{1, 18}));
   EXPECT_EQ(orient_point(1, 2, 10, 20, Orientation::FN), (std::pair<double, double>{9, 2}));
   EXPECT_EQ(orient_point(1, 2, 10, 20, Orientation::W), (std::pair<double, double>{18, 1}));
+}
+TEST(Physical, RoutedSnapshotPreservesBlockagesWithoutPlacementAuthority) {
+  const auto path = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "snapshot_blockages.def";
+  {
+    std::ofstream file(path);
+    file << R"(VERSION 5.8 ; DESIGN routed ; UNITS DISTANCE MICRONS 1000 ;
+DIEAREA ( 0 0 ) ( 10000 10000 ) ;
+BLOCKAGES 6 ;
+- PLACEMENT + SOFT + COMPONENT u + PUSHDOWN RECT ( 10 20 ) ( 30 40 ) ;
+- PLACEMENT + PARTIAL 37.5 RECT ( 100 200 ) ( 300 400 ) ;
+- PLACEMENT RECT ( 500 600 ) ( 700 800 ) RECT ( 900 1000 ) ( 1100 1200 ) ;
+- LAYER met1 + MASK 2 + COMPONENT u + PUSHDOWN + EXCEPTPGNET + SPACING 50
+  POLYGON ( 10 10 ) ( 50 10 ) ( 50 50 ) ( 10 50 ) ;
+- LAYER met2 + DESIGNRULEWIDTH 80 + SLOTS RECT ( 20 30 ) ( 40 50 ) ;
+- LAYER met3 + FILLS RECT ( 60 70 ) ( 80 90 ) ;
+END BLOCKAGES
+END DESIGN
+)";
+  }
+  EXPECT_THROW(read_def(path.string()), std::runtime_error);
+  const auto snapshot = read_def_snapshot(path.string());
+  ASSERT_EQ(snapshot.blockages.size(), 6);
+  const auto& soft = snapshot.blockages[0];
+  EXPECT_TRUE(soft.placement);
+  EXPECT_TRUE(soft.soft);
+  EXPECT_TRUE(soft.pushdown);
+  EXPECT_EQ(soft.component, "u");
+  EXPECT_EQ(soft.rectangles,
+            (std::vector<Rect>{
+                {10, 20, 30, 40}
+  }));
+  EXPECT_DOUBLE_EQ(snapshot.blockages[1].partial_density, 37.5);
+  EXPECT_EQ(snapshot.blockages[2].rectangles.size(), 2);
+  const auto& routing = snapshot.blockages[3];
+  EXPECT_FALSE(routing.placement);
+  EXPECT_EQ(routing.layer, "met1");
+  EXPECT_EQ(routing.component, "u");
+  EXPECT_EQ(routing.mask, 2);
+  EXPECT_EQ(routing.spacing, 50);
+  EXPECT_TRUE(routing.except_pg);
+  EXPECT_TRUE(routing.pushdown);
+  EXPECT_EQ(routing.polygons,
+            (std::vector<std::vector<std::pair<int64_t, int64_t>>>{
+                {{10, 10}, {50, 10}, {50, 50}, {10, 50}}
+  }));
+  EXPECT_EQ(snapshot.blockages[4].design_rule_width, 80);
+  EXPECT_TRUE(snapshot.blockages[4].slots);
+  EXPECT_TRUE(snapshot.blockages[5].fills);
+  EXPECT_NO_THROW(verify_def_roundtrip(snapshot, snapshot));
+  auto altered                   = snapshot;
+  altered.blockages.front().soft = false;
+  EXPECT_THROW(verify_def_roundtrip(snapshot, altered), std::runtime_error);
+  // Reading a snapshot cannot enable unsupported placement on a later call.
+  EXPECT_THROW(read_def(path.string()), std::runtime_error);
+  const auto output = path.parent_path() / "preserved_blockage_destination.def";
+  {
+    std::ofstream file(output);
+    file << "preserve this destination";
+  }
+  EXPECT_THROW(write_def(snapshot, output.string()), std::runtime_error);
+  std::ifstream file(output);
+  EXPECT_EQ(std::string((std::istreambuf_iterator<char>(file)), {}), "preserve this destination");
 }
 }  // namespace livehd::physical

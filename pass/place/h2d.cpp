@@ -183,10 +183,14 @@ Macro_run place_macros(dp::Design& d, const std::vector<mp::NodeInfo>& info, con
         throw std::invalid_argument("cached macro route model missing");
       }
       const std::string model = json["route_model"].GetString();
-      const auto active = model == "rsmt" ? dp::RouteModel::rsmt : model == "rudy" ? dp::RouteModel::rudy : dp::RouteModel::off;
-      const bool latches = policy.model == dp::RouteModel::automatic
-                           || (policy.model == dp::RouteModel::rudy && policy.probe);
-      if ((model != "off" && model != "rudy" && model != "rsmt")
+      const auto        active = model == "uroute" ? dp::RouteModel::uroute
+                                 : model == "rsmt" ? dp::RouteModel::rsmt
+                                 : model == "rudy" ? dp::RouteModel::rudy
+                                                   : dp::RouteModel::off;
+      const bool        latches
+          = policy.model == dp::RouteModel::automatic
+            || (policy.probe && (policy.model == dp::RouteModel::rudy || policy.probe_model == dp::RouteModel::uroute));
+      if ((model != "off" && model != "rudy" && model != "rsmt" && model != "uroute")
           || (latches ? active == dp::RouteModel::off : active != policy.model)) {
         throw std::invalid_argument("cached macro route model inconsistent with policy");
       }
@@ -228,6 +232,16 @@ Macro_run place_macros(dp::Design& d, const std::vector<mp::NodeInfo>& info, con
       out.result.resolved              = p;
       out.result.legal                 = true;
       out.result.placement.route_model = active;
+      out.result.placement.uroute_skipped = o.uroute_context_skipped;
+      if (o.uroute_context) {
+        out.result.placement.uroute_sample_ids = o.uroute_context->sample_ids();
+      }
+      if (json.HasMember("route_probe_overflow") && json["route_probe_overflow"].IsNumber()) {
+        out.result.placement.route_probe_overflow = json["route_probe_overflow"].GetDouble();
+      }
+      if (json.HasMember("route_uroute_switch_iteration") && json["route_uroute_switch_iteration"].IsInt()) {
+        out.result.placement.route_uroute_switch_iteration = json["route_uroute_switch_iteration"].GetInt();
+      }
       d                                = std::move(candidate);
       return out;
     } catch (const std::invalid_argument& e) {  // A stale/malformed cache is never user input.
@@ -242,6 +256,20 @@ Macro_run place_macros(dp::Design& d, const std::vector<mp::NodeInfo>& info, con
   dp::Options cells;
   cells.route            = resolve_route_policy(o, o.macro_route);
   cells.route_initialize = initialize_route_tables;
+  cells.uroute           = o.uroute_context;
+  cells.uroute_identity  = o.uroute_context_identity;
+  cells.uroute_skipped   = o.uroute_context_skipped;
+  if (o.uroute.export_features && cells.route.probe && !o.uroute_stage_identity.top.empty()) {
+    cells.route_probe_observer = [&](const dp::Design& physical, int nx, int ny) {
+      export_uroute(fs::path(o.output_dir) / "uroute_export/macro_probe",
+                    physical,
+                    o.uroute_stage_identity,
+                    nx,
+                    ny,
+                    p.route_cap_h,
+                    p.route_cap_v);
+    };
+  }
   cells.max_iterations   = o.iterations;
   cells.bins_x = cells.bins_y = o.bins;
   cells.num_threads           = o.threads;
@@ -275,9 +303,10 @@ void write_macro_report(const Macro_run& run, const dp::Design& d, const std::ve
                                 result.resolved.route_cap_v};
   const auto      policy   = resolve_route_policy(o, o.macro_route);
   const bool      latches  = policy.model == dp::RouteModel::automatic
-                            || (policy.model == dp::RouteModel::rudy && policy.probe);
+                       || (policy.probe && (policy.model == dp::RouteModel::rudy || policy.probe_model == dp::RouteModel::uroute));
   const auto      active   = latches ? run.result.placement.route_model : policy.model;
-  route_options.model      = active == dp::RouteModel::rsmt ? dp::RudyModel::rsmt : dp::RudyModel::bbox;
+  route_options.model
+      = active == dp::RouteModel::rsmt || active == dp::RouteModel::uroute ? dp::RudyModel::rsmt : dp::RudyModel::bbox;
   route_options.degree     = policy.degree;
   route_options.accuracy   = policy.accuracy;
   route_options.initialize = initialize_route_tables;
@@ -292,9 +321,19 @@ void write_macro_report(const Macro_run& run, const dp::Design& d, const std::ve
   json.AddMember("cache_hit", run.cache_hit, allocator);
   json.AddMember(
       "route_model",
-      rapidjson::Value(policy.model == dp::RouteModel::off ? "off" : (route_options.model == dp::RudyModel::rsmt ? "rsmt" : "rudy"),
-                       allocator),
+      rapidjson::Value(dp::route_model_name(policy.model == dp::RouteModel::off ? dp::RouteModel::off : active), allocator),
       allocator);
+  json.AddMember("route_score_model",
+                 rapidjson::Value(route_options.model == dp::RudyModel::rsmt ? "rsmt" : "rudy", allocator),
+      allocator);
+  json.AddMember("uroute_skipped", rapidjson::Value(result.placement.uroute_skipped.c_str(), allocator), allocator);
+  rapidjson::Value ids(rapidjson::kArrayType);
+  for (const auto& id : result.placement.uroute_sample_ids) {
+    ids.PushBack(rapidjson::Value(id.c_str(), allocator), allocator);
+  }
+  json.AddMember("uroute_sample_ids", ids, allocator);
+  json.AddMember("route_probe_overflow", result.placement.route_probe_overflow, allocator);
+  json.AddMember("route_uroute_switch_iteration", result.placement.route_uroute_switch_iteration, allocator);
   json["units"].AddMember("dbu_per_um", dbu_per_um, allocator);
   rapidjson::StringBuffer                    buffer;
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);

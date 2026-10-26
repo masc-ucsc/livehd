@@ -1234,6 +1234,11 @@ Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::v
     tb.error_hint = "a --lib model must declare every port of the instance by name and width; nothing was compared";
     return tb;
   }
+  // Expanding mapped clock-cone cells can expose a primitive latch + AND
+  // after the first inline recognition pass. Normalize that newly exposed
+  // gate too, before collecting state or choosing the shared time base.
+  pre_ref_cells += inline_gates(ref, ref_defs);
+  pre_impl_cells += inline_gates(impl, impl_defs);
   // CLOCK-GATE CELLS first. A real design instantiates its ICG
   // (`prim_clk_gate u_cg(.clk_i(clk), .en_i(en), .clk_o(gclk));`), so the gate
   // sits one module level away and the flop's clock_pin is an opaque Sub output

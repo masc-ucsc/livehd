@@ -122,6 +122,18 @@ the control-net census and native data HPWL (within 0.001 µm). Explicit control
 overrides lack the required clock-role metadata and are rejected by this tool.
 The tool does not perform STA or modify placement.
 
+For legalization displacement, add `--reference-def before_legalization.def`
+while `--def` names `after_legalization.def` (or `after_detailed.def`). Enable
+`synth.place.snapshots=true` explicitly when collecting those stage files.
+The optional `displacement` object reports instance-origin Manhattan movement in
+microns, separately for standard cells, macros and physical-only cells, plus the
+all-instance total. Each group includes moved counts, total/mean/maximum
+movement, orientation/status changes and movement of previously fixed/locked
+instances. Empty groups have null mean/maximum. Matching design, DBU, instance
+names and masters are required; unplaced or mismatched inputs fail instead of
+silently comparing their intersection. Terminal movement is outside this metric.
+All existing HPWL fields and behavior are unchanged without this option.
+
 GP also waits for timing-weighted HPWL and routability after geometry/density
 settle. `synth.place.post_density_factor=4` allows up to four times the first
 eligible iteration count as **additional** iterations (40 becomes a deadline
@@ -371,6 +383,18 @@ including either clock edge; `dont_use` cells are excluded. Address bits occupy
 the left edge, read/write data the adjacent bottom edge, and control pins the
 right edge. Proxies are deterministically packed and fixed before standard-cell
 placement, preserving the square instead of rounding it to standard-cell rows.
+Proxy edge pins use the first routing layer whose preferred direction escapes
+that edge: horizontal on the left/right and vertical on the bottom when those
+layers exist. After floorplan/track import, pin centers use the actual track
+patterns (including interleaved patterns), or the LEF lattice when none are
+imported. Their widths and the square body formula above are preserved. An edge
+with too few distinct tracks is rejected instead of emitting overlapping pins.
+Newly packed proxy origins are aligned before becoming fixed obstacles; explicit
+FIXED/LOCKED origins remain immutable and are diagnosed if inaccessible.
+For an OpenROAD handoff with platform-specific tracks, pass its literal
+`make_tracks.tcl` through `synth.place.tracks`. Preserve those imported DEF tracks
+in the handoff rather than adding the same patterns a second time.
+
 The generated `memory_proxies.lef` accompanies `out.def`, including `def:` export.
 QoR reports `estimated_macros`; OpenTimer reports
 `memory_timing_model=clock_boundary_zero_internal_delay`. Read data launches at
@@ -1898,6 +1922,13 @@ optimize them. A script that converts every imported pin to `FIXED` prevents
 both stages from moving those pins. Do not infer design-required positions from
 an automatically generated intermediate DEF.
 
+The ordinary automatic IO assignment uses imported routing tracks for its
+die-edge slots when those tracks are available. Left/right pins use a horizontal
+layer; top/bottom pins use the next vertical routing layer. Movable edge-pin
+shapes extend inward to reach the normal-axis track. This avoids off-grid pins
+and wrong-way access stems on technologies with staggered track patterns.
+Fixed imported IO coordinates and shapes remain unchanged.
+
 `fp_placement_colors.json` summarizes physical/reserved/unassigned area and
 merges. `fp_placement_colors.tsv` records each member and its reservation
 recipients. `fp_candidates.json` and `fp_place.json` distinguish member area from
@@ -2715,3 +2746,33 @@ Growth and the existing local-density decay both begin on the following GP
 iteration; the footprint reaches full size at start + growth iterations.
 The setting is diagnostic and requires `vanished_memory` when nondefault.
 It does not move the independent final-placement timing warm-up.
+
+### URoute learned congestion (development)
+
+`--set synth.place.route.model=uroute` selects the learned estimator in final
+cell GP; `auto` enables the one-way `rudy -> rsmt -> uroute` ladder when usable
+weights and support exist in `synth.place.uroute.dir`. Existing RSMT defaults
+remain. Final `uroute_switch=.01` and `uroute_hold=2` gate the second latch.
+FP/macro stages use `S.route.probe=uroute` for a single convergence probe and
+bounded feedback on failure; `true` remains an RSMT probe. Macro channel forces
+and H2D abstract search use RSMT. Learned measurements expand physical macro
+members before extracting features.
+
+The bundled `@pretrained` directory currently records training as pending and
+contains no weights. Empty/incompatible pools report `uroute_skipped` and use
+RSMT. A project directory is read-only to LiveHD; the offline publisher owns
+atomic manifest updates. Final physical features and geometry/grid metadata are
+exported by default to `uroute_export/` under the placement workdir. Disable
+export independently with `synth.place.uroute.export=false`. Weight/manifest
+hashes, selected IDs and switch measurements appear in the resolved options,
+GP history and QoR reports.
+Final legalization preserves the optimizer's routing model, support IDs, skip
+reason and incremental reuse accounting in QoR; its geometry and RC metrics
+describe the final legalized placement. The prior report is also retained as
+`before_final_legalization`.
+
+See [the offline tools and format](../../tools/uroute/README.md) for training,
+data ownership, support selection and validation commands. The implementation
+currently needs the local DREAMPlace override during co-development. Routed-DEF
+ingestion and partial LFSR baselines are implemented; full router evaluation and
+pretrained weights are still pending.

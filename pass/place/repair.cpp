@@ -1977,6 +1977,17 @@ Repair_result finalize_placement(const Result& initial, const Options& requested
   prior.Parse(initial.qor.c_str());
   final.Parse(result.placed.qor.c_str());
   if (prior.IsObject() && final.IsObject()) {
+    // This pass performs no GP iterations and bypasses the placement cache.
+    // Its fresh geometry/RC is authoritative, but its default routing model
+    // and cache counters do not describe the optimization that produced it.
+    for (const auto* key : {"incremental", "route_model", "uroute_skipped", "uroute_sample_ids"}) {
+      if (prior.HasMember(key)) {
+        final.RemoveMember(key);
+        final.AddMember(rapidjson::Value(key, final.GetAllocator()),
+                        rapidjson::Value(prior[key], final.GetAllocator()),
+                        final.GetAllocator());
+      }
+    }
     for (auto it = prior.MemberBegin(); it != prior.MemberEnd(); ++it) {
       if (!final.HasMember(it->name)) {
         final.AddMember(rapidjson::Value(it->name, final.GetAllocator()),

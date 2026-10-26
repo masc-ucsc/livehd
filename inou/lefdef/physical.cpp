@@ -192,6 +192,7 @@ int obstruction_cb(lefrCallbackType_e, lefiObstruction* obs, lefiUserData data) 
 struct DefContext {
   Floorplan   fp;
   std::string error;
+  bool        snapshot = false;
 };
 int def_units_cb(defrCallbackType_e, double units, defiUserData data) {
   static_cast<DefContext*>(data)->fp.dbu = std::llround(units);
@@ -315,9 +316,53 @@ int net_cb(defrCallbackType_e, defiNet* net, defiUserData data) {
   static_cast<DefContext*>(data)->fp.nets.push_back(std::move(n));
   return 0;
 }
-int blockage_cb(defrCallbackType_e, defiBlockage*, defiUserData data) {
-  static_cast<DefContext*>(data)->error = "DEF BLOCKAGES require row-segment support and are not yet supported";
-  return 1;
+int blockage_cb(defrCallbackType_e, defiBlockage* input, defiUserData data) {
+  auto& c = *static_cast<DefContext*>(data);
+  if (!c.snapshot) {
+    c.error = "DEF BLOCKAGES require row-segment support and are not yet supported";
+    return 1;
+  }
+  Blockage b;
+  b.placement = input->hasPlacement();
+  if (bool(input->hasLayer()) == b.placement) {
+    c.error = "DEF blockage must specify exactly one of LAYER or PLACEMENT";
+    return 1;
+  }
+  if (input->hasLayer()) {
+    b.layer = input->layerName();
+  }
+  if (input->hasComponent()) {
+    b.component = b.placement ? input->placementComponentName() : input->layerComponentName();
+  }
+  b.soft      = input->hasSoft();
+  b.slots     = input->hasSlots();
+  b.fills     = input->hasFills();
+  b.pushdown  = input->hasPushdown();
+  b.except_pg = input->hasExceptpgnet();
+  if (input->hasPartial()) {
+    b.partial_density = input->placementMaxDensity();
+  }
+  if (input->hasSpacing()) {
+    b.spacing = input->minSpacing();
+  }
+  if (input->hasDesignRuleWidth()) {
+    b.design_rule_width = input->designRuleWidth();
+  }
+  if (input->hasMask()) {
+    b.mask = input->mask();
+  }
+  for (int i = 0; i < input->numRectangles(); ++i) {
+    b.rectangles.push_back({double(input->xl(i)), double(input->yl(i)), double(input->xh(i)), double(input->yh(i))});
+  }
+  for (int i = 0; i < input->numPolygons(); ++i) {
+    const auto points  = input->getPolygon(i);
+    auto&      polygon = b.polygons.emplace_back();
+    for (int j = 0; j < points.numPoints; ++j) {
+      polygon.emplace_back(points.x[j], points.y[j]);
+    }
+  }
+  c.fp.blockages.push_back(std::move(b));
+  return 0;
 }
 std::string identifier(const std::string& text) {
   // The text is already DEF-escaped (the reader retains escapes): copy `\x` pairs as-is and escape only bare specials.
@@ -398,10 +443,12 @@ Technology read_lef(const std::vector<std::string>& paths) {
   }
   return std::move(c.tech);
 }
-Floorplan read_def(const std::string& path) {
+namespace {
+Floorplan read_def_impl(const std::string& path, bool snapshot) {
   std::scoped_lock lock(reader_mutex);
   auto             file = open_file(path);
   DefContext       c;
+  c.snapshot = snapshot;
   defrInit();
   defrSetUnitsCbk(def_units_cb);
   defrSetDesignCbk(def_design_cb);
@@ -419,7 +466,13 @@ Floorplan read_def(const std::string& path) {
   }
   return std::move(c.fp);
 }
-void write_def(const Floorplan& fp, const std::string& path) {
+}  // namespace
+Floorplan read_def(const std::string& path) { return read_def_impl(path, false); }
+Floorplan read_def_snapshot(const std::string& path) { return read_def_impl(path, true); }
+void      write_def(const Floorplan& fp, const std::string& path) {
+  if (!fp.blockages.empty()) {
+    throw std::runtime_error("placement DEF writer cannot discard snapshot blockages");
+  }
   std::ofstream out(path);
   if (!out) {
     throw std::runtime_error("cannot write DEF: " + path);
@@ -474,7 +527,8 @@ void write_def(const Floorplan& fp, const std::string& path) {
 }
 void verify_def_roundtrip(const Floorplan& a, const Floorplan& b) {
   if (a.design != b.design || a.dbu != b.dbu || a.die != b.die || a.rows != b.rows || a.tracks != b.tracks
-      || a.terminals != b.terminals || a.nets != b.nets || a.components.size() != b.components.size()) {
+      || a.terminals != b.terminals || a.nets != b.nets || a.blockages != b.blockages
+      || a.components.size() != b.components.size()) {
     const auto  field = a.design != b.design         ? "design"
                         : a.dbu != b.dbu             ? "units"
                         : a.die != b.die             ? "die"
@@ -482,6 +536,7 @@ void verify_def_roundtrip(const Floorplan& a, const Floorplan& b) {
                         : a.tracks != b.tracks       ? "tracks"
                         : a.terminals != b.terminals ? "terminals"
                         : a.nets != b.nets           ? "nets"
+                        : a.blockages != b.blockages ? "blockages"
                                                      : "component count";
     std::string detail;
     if (a.nets != b.nets) {

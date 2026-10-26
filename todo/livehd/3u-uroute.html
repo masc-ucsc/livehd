@@ -1,0 +1,1357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 3u-uroute — Few-shot learned congestion prediction as the third routability rung</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">3u-uroute</strong> Few-shot learned congestion prediction as the third routability rung</h1>
+<p>Add a learned congestion estimator, modeled on URoute (Lin, Lin, Liu, Du,
+<em>URoute: Universal Routability Prediction</em>, IEEE TCAD 45(7), July 2026),
+above RSMT-RUDY in the one-way routability ladder of
+<a class="xref" href="3r-route.html">3r-route</a>:
+<code>rudy → rsmt → uroute</code>. The estimator is a small convolutional
+encoder-decoder with a cross-matching block. It takes the four feature maps the
+placer can already compute (RUDY, PinRUDY, macro region, cell density) plus a
+<em>support set</em> of earlier feature/label pairs, and predicts the routed
+track utilization and DRC density map. Adapting it to a design needs no
+training: the support set is the adaptation. LiveHD does inference and data
+export only. An external script, run by the user, reads fully routed OpenROAD
+results, builds the sample pool, trains the universal weights, and writes both
+back into a project data directory that LiveHD reads on its next run.</p>
+<p><span class="status">Implementation in progress — native model, placement integration and trainer tested; rulings U1–U5 decided 2026-10-24</span>
+Drafted 2026-10-24 from the paper and the 3r-route implementation notes. Everything
+here is opt-in. The default <code>route.model</code> does not change until U6 shows
+the learned rung beats RSMT-RUDY on the router reference.</p>
+
+<h2>Current checkpoint (2026-10-25, after upstream pull)</h2>
+<p>Publication was requested after the validation records below. The existing
+DREAMPlace optimization is committed and merged with its latest upstream
+placement work; complete optimized testing is now running. LiveHD and OpenROAD
+changes are snapshotted for commit and merge, with final validation required
+before push. The old isolated runtime and its waiting study were deliberately
+retired because the requested dependency merges supersede their captured source
+snapshot; frozen routing workers continue unchanged. A replacement runtime and
+study must use the final merged pins. No original-design quality gate or model
+promotion is implied by publication.</p>
+<p>The native implementation is published in DREAMPlace commit
+<code>1b0cd1972f9968b49b8b139af5282d3b99fee68a</code> and consumed by LiveHD's
+active dependency pin. The post-pull optimized build passes without a local
+override, with fetched sources matching the validated published implementation.
+The serial, uncached post-pull optimized regression passes <strong>all 3,777
+tests fresh</strong>, maximum <strong>15.5 seconds</strong>, meeting both the
+under-20-second target and the hard 30-second limit. It ran for 3,326.3 seconds,
+peaked at 5,583 MiB process-tree RSS and retained at least 26.74 GiB OS reserve.
+Captured source fingerprints are unchanged. Exact commands, fetched dependency
+identity and results are under
+<code>repros/uroute_post_pull_validation_20261025/</code>. This validates the
+published implementation; the later uncommitted owning-source optimizations
+below have separate focused and numerical evidence.</p>
+<table>
+<tr><th>Remaining gate</th><th>Current evidence and next work</th></tr>
+<tr><td>U0: original routed corpus</td><td>15 admitted samples, seven designs;
+no admitted CNN/Eyeriss samples yet. CNN external reference routing completed,
+but independent ingestion waits for the shared lock. Eyeriss native global
+routing is live. Corrected reference variants and fresh native support pilots
+are queued under the guarded resource policy.</td></tr>
+<tr><td>U6: held-out and in-loop results</td><td>Private seven-design results
+exist, but do not consistently beat RSMT. Original CNN/Eyeriss folds and actual
+learned-versus-RSMT placement/router comparisons remain required. The corpus
+collector verifies sample integrity and refuses incomplete original coverage.
+No model is promoted; public defaults remain unchanged.</td></tr>
+<tr><td>U7: bundled useful weights</td><td>No weights bundled. Reuse the
+complete bounded public-source audit in
+<code>repros/uroute_validation_20261024/public_source_audit/admission_audit.json</code>:
+a complete N14 detailed-route DEF is retained, but matching routing physics,
+control-role collateral and v1-compatible raw DRC evidence are missing from the
+checked subset. Neither public dataset has been admitted.</td></tr>
+</table>
+<p>The strict nine-design follow-up is queued under
+<code>repros/uroute_original_fold_study_20261025/</code>, with frozen Python
+sources, native inference/RSMT bridges, runfiles and explicit training settings.
+It requires all original route producers to finish admission, at least two
+placements per (top, technology), immutable distinct routed pairs, and the new
+six-target host validation plus frozen-manifest smoke. It then takes the shared
+global lock before collecting a private corpus and training serial folds from
+scratch, excluding each test design from gradients and model selection. The
+existing paper-RMS/pre-clamp settings are explicit; the process-tree cap is
+6 GiB, Metal cap 4 GiB, with a 4 GiB OS reserve. Frozen native/RSMT bridges pass
+independent manifest-only FLUTE lookup checks. The dry run correctly refused
+the incomplete corpus; no original-design training has started. Any results
+remain private pending quality review; the queue cannot promote weights.</p>
+
+<p>Export, trainer, native inference and placement integration are implemented
+and tested. Original-design quality and useful weights are unproven, and the
+full-call native inference target below one second is still unmet in retained
+CNN/Eyeriss measurements. The records below are chronological evidence; older
+publication, queue and validation statements describe their own snapshots.</p>
+
+<p>Two further AArch64 optimizations are uncommitted in the owning DREAMPlace
+<code>rudy_uroute.cpp</code>. Matching convolutions reuse the exact query-channel
+prefix across supports before continuing the original support-channel FMA order.
+Interior input tiles use a direct fixed-size copy instead of zero-filling bytes
+that will be overwritten; the boundary path is unchanged. Profiling attributes
+0.199 s to packing before the copy change and 0.121 s afterward, with arithmetic
+remaining at 0.605 s. All five unchanged goldens, signed-zero and ASan/UBSan
+checks pass; all 27 held-out queries retain all 3,538,944 calibrated values
+exactly. The scalar branch syntax check passes, without a different-platform
+execution claim. The updated isolated consumer build passes 37/37 fresh tests,
+maximum 2.1 s, with unchanged owner source fingerprints.</p>
+<p>Three alternating complete-call rounds on retained CNN/Eyeriss geometry give
+median enhanced times of 1.301/1.397 s for the published baseline,
+1.090/1.153 s for prefix reuse alone, and <strong>0.995/1.068 s</strong> with both
+changes. All base/enhanced maps remain byte-identical. These calls include feature
+generation, RSMT, inference and calibration, but use private cross-design
+supports and constant DRC labels with original-design selection bypassed. They
+measure runtime, not original-design prediction quality or in-loop placement.
+CNN is just below one second in this workload; Eyeriss and the general latency
+target remain unproven. Source, binaries, runfiles, guard records and comparison
+artifacts are retained under <code>repros/uroute_weight_lane_probe_20261025/</code>
+and <code>repros/uroute_spatial_mean_probe_20261025/</code>. Rejected weight/tile,
+spatial-mean and zero-tile probes made no production change. The published pin,
+full regression dependency, frozen routing workers, defaults and weights are
+unchanged. No commit or push was performed.</p>
+
+<p>A later private attention-accumulation probe materialized four-lane products
+with the same f32 rounding boundary. Five unchanged goldens and signed-zero
+outputs remained byte-identical, but three alternating network-only rounds
+improved query medians by less than 1% during the live build. It is retained
+only under <code>repros/uroute_attention_accum_probe_20261025/</code>; no owning
+source or runtime input changed, and it does not establish the full-call
+latency target.</p>
+
+<p>The first isolated optimized-runtime build stopped at its 8 GiB process-tree
+guard during Slang's nested CMake/Ninja build (8,569 MiB observed peak; OS reserve
+stayed above 27 GiB). The attempt is preserved under
+<code>repros/uroute_original_in_loop_optimized_20261025/</code>; no original graph
+preflight or synthesis ran. The generated Slang build had no nested job cap, so
+Bazel's two-action limit did not bound Ninja worker count. A separate retry under
+<code>repros/uroute_original_in_loop_optimized_v2_20261025/</code> uses task-local
+<code>CMAKE_BUILD_PARALLEL_LEVEL=2</code>, one Bazel action and a 12 GiB guard.
+Repository defaults and warning options are unchanged. The runtime will freeze
+its executable/runfiles and verify unchanged original graphs, paired settings
+and CLI/H2D integration before use. Recipes remain non-runnable until original
+held-out models and matching support are bound; no original synthesis, STA,
+placement or routing is launched by this build.</p>
+<p>The bounded retry then exposed a separate build-control bug: CVC5's source
+template passed <code>-j8</code> explicitly, overriding the requested standard
+<code>CMAKE_BUILD_PARALLEL_LEVEL=2</code>. Its actual CMake/Ninja processes had
+the value 2 in their environment, but ran more compiler workers. That attempt
+was deliberately stopped before changing source (3,699 MiB peak; at least
+27.4 GiB OS reserve). <code>packages/cvc5_src.BUILD</code> now honors the standard
+control with a quoted shell argument while preserving the existing eight-job
+fallback. Warning options and user-facing defaults are unchanged. The third attempt completed the controlled CVC5 build, then was deliberately
+stopped to increase the outer Bazel limit from one to two actions while keeping
+two nested CMake workers and the 12 GiB guard. Its cached outputs are retained.
+The completed 3,777-test published-pin regression predates this build-control
+fix and subsequent shared source changes. Generated CMake argument checks
+preserve the unset eight-job fallback and honor an explicit value of two.
+</p>
+<p>The fourth attempt under
+<code>repros/uroute_original_in_loop_optimized_v4_20261025/</code> initially
+refused to build because its input hashes no longer matched the prior tested
+snapshot. The exact deltas are preserved and reviewed: placement shares its
+URoute-request predicate, adjusts pretrained runfile fallback handling and
+extends missing-track validation to FP-only routing; native matching derives
+its joined channel count and offset and rejects unsupported seeded spatial
+convolutions. Existing shared edits are preserved. Fresh native tests and
+all seven frozen CPU-Torch numerical comparisons run before building the new
+runtime. Six fresh CLI/H2D/inference/placement/CVC5 link targets and an isolated
+manifest-only frozen-runtime smoke follow a successful build and graph read.
+This validation sequence launches no original-design synthesis or placement;
+its recipes remain non-runnable until original held-out models and matching
+support are bound. Previous validation receipts apply to their recorded source
+hashes. The reviewed native source now passes all 37 focused tests fresh
+(maximum 2.4 s, 1,339 MiB peak process-tree RSS), all five unchanged numerical
+goldens and the signed-zero case byte-for-byte, plus the scalar-branch syntax
+check. All 27 queries across seven frozen folds then passed, with all
+3,538,944 calibrated values byte-identical to CPU Torch and the earlier
+production results. The isolated optimized-runtime build has now started;
+complete runtime preparation and host checks remain pending. These numerical
+results establish conformance, not original-design model quality.</p>
+
+<p>The U7 release check now also has bounded unauthenticated GitHub API evidence
+under <code>repros/uroute_release_provenance_20261025/github_release_search_audit.json</code>.
+Three targeted repository searches returned no match; a broader name inventory
+returned 55 entries without API truncation. The ambiguous nonempty repository
+had only a default-branch README, no tags/releases, and branch names describing
+travel-application features. No author attribution or checkpoint was established.
+This is a bounded repository inventory, not proof of absence elsewhere; no code,
+weights or public training sample was imported or promoted.</p>
+
+<details><summary>Chronological implementation and validation evidence</summary>
+<h2>Implementation checkpoint (2026-10-24)</h2>
+<p>Before the subsequent regression fixes, repository validation on 2026-10-25 completed with the local DREAMPlace
+override: <strong>3756 of 3761 tests pass; five fail</strong>, with a 30-second
+per-test limit and no test timeouts. This continuation executed 1715 tests and
+reused 2046 cached results; it took 1575 seconds. The earlier 1800-second
+guard-stopped attempt was partial and is not added to these totals. Failures
+are Slang reachable-module loop handling, ABC bypass accounting, reset-control
+accounting, USYN placement reuse reporting, and latch-clock-gate LEC refutation.
+The reuse failure reports a hit before final legalization but loses it in the
+final QoR report. No clean-current-HEAD comparison establishes attribution.
+URoute tool and placement unit targets pass; the full suite is not green.
+Commands, guard statistics, failure logs and diagnosis are retained under
+<code>repros/uroute_full_validation_20261025/</code>. CNN global routing and the
+serialized remaining design/arm queue are still running; these test results do
+not complete U0, U6 or U7.</p>
+<p>The five failing targets now pass focused checks. Final legalization retains
+the optimizer's routing model, support IDs, skip reason and cache accounting,
+while refreshing geometry and RC. The false-loop splitter checks dominating
+OR/AND constants before following feedback. Proof preparation recognizes inline
+clock gates exposed by mapped-library expansion. Two stale test assumptions
+were corrected against actual clock-role metadata and mandatory reset
+connectivity; netlist and equivalence checks remain. The slowest regression
+case was split from its independent siblings and reduced from sixteen data
+lanes to four, keeping its full 32-bit selector. Its fresh opt runtime fell
+from 23.2 to 4.9 seconds. Focused evidence is under
+<code>repros/regression_bug_cleanup_20261025/</code>; fresh full-suite validation
+with caching disabled and a 30-second per-test limit subsequently completed:
+<strong>all 3765 targets passed, all executed fresh</strong>, in 3940.8 seconds,
+with no per-test timeouts. The slowest reported target was 29.5 seconds;
+the guarded tree peaked at 5657 MiB. A separate unloaded recheck of the two
+slow memory targets passed in 25.5 and 14.0 seconds. This is local opt validation
+with the DREAMPlace override, not published dependency or remote CI evidence.
+See <code>repros/regression_bug_cleanup_20261025/uncached_validation_summary.json</code>.
+The memory fixture now uses the existing separate-simulation mechanism without
+changing its HDL: both equivalence modes pass in 18.1 seconds and the directed
+simulation in 3.9 seconds; the other slow memory target passes in 13.9 seconds.</p>
+<p>The canonical routed pool now has <strong>15 samples across seven designs</strong>.
+Two repository-owned additions, <code>generate_reverse_tree</code> and
+<code>dynamic_word_select</code>, each have two actual M4/M5 I/O-placement
+variants with zero DRC markers, independent enabled-net wire-length checks,
+native/routed feature gaps and distinct feature/label pairs. Their atomic
+admission receipt is under <code>repros/uroute_additional_designs_20261025/</code>.
+Earlier nine-sample fold results below retain their frozen input scope; they
+are not results for the expanded pool. The third addition, <code>srasll</code>,
+initially stopped on a placement/STA RC endpoint mismatch. STA now honors
+declared output widths, including signed/zero extension and truncation, while
+retaining each output alias as a distinct load. A regression exposes the old
+17-versus-29 port count; all nine focused targets and the exact shifter
+synthesis reproduction pass after the fix. Both new shifter I/O variants
+completed routing with zero DRC markers and independently verified wire lengths
+and were admitted under <code>repros/uroute_sta_output_width_20261025/</code>.
+The 3765-target full run predates this narrow STA correction and the extra
+simulation target. The seven-design unseen-fold cohort completed on frozen
+sources and the fifteen-sample snapshot. All queries were then rescored with the
+corrected native arithmetic and unchanged trained weights: earlier-placement
+support scores 14 of 15 requested queries; zero-shot scores 13 of 15. All scored
+queries verify unseen-design lineage. Equal-design mean utilization hotspot
+overlap is <strong>0.292927 versus RSMT 0.315525</strong> with earlier support,
+and <strong>0.236594 versus 0.311931</strong> zero-shot. Earlier-support NRMS
+improves (0.158049 versus 0.170133), but SSIM is worse (0.249338 versus 0.590800);
+hotspot wins occur on only three of seven designs (two zero-shot). These results
+do not establish a generally better predictor. All DRC labels are zero; memory
+samples remain uncharacterized physical proxies. Weights remain private.
+See <code>repros/uroute_fifteen_sample_unseen_20261025/attention_corrected_study_summary.json</code>.</p>
+<p>The trained adder fold exposed two tiles outside the unchanged mixed tolerance.
+An instrumented native forward pass reproduces the cached prediction byte for
+byte and matches all support/query encoders and attention convolutions. Its first
+difference is the support sum: a native fused multiply-add crosses the separate
+multiply/add rounding boundary used by Torch. Materializing the f32 contribution
+before adding fixes the failure. All seven maximal-support fold queries now pass
+at <code>atol=1e-7, rtol=1e-4</code>; the adder's worst tolerance fraction falls
+from 1.0897 to 0.8338. A new synthetic four-shot golden fails with the old binary
+and passes with the correction. All 15 focused tests pass fresh (longest 5.6s),
+and the production-grid Torch check passes. Evidence, frozen binaries and original
+failures remain under the cohort's <code>support_rounding_fix/</code>.</p>
+<p>Expanded numerical checking of every scored query in both protocols found
+one further failing tile in the adder's second zero-shot query (worst tolerance
+fraction 1.297). Its first difference is sigmoid attention: system
+<code>expf</code> differs from the CPU Torch reference's SLEEF exponential.
+A scalar f32 implementation of that polynomial and explicit FMA order matches
+all <strong>228 traced intermediate tensors byte for byte</strong> and fixes the
+counterexample. The exact Torch-pinned SLEEF revision and Boost license are
+retained with the implementation. A second synthetic four-shot cancellation
+case fails under the former system-expf kernel; all 16 focused targets pass fresh
+after the correction, with tolerance unchanged. The complete scored-query cohort now passes:
+<strong>all 27 scored queries, 3,538,944 calibrated output values, match CPU Torch
+exactly</strong> across both protocols. Both channels are checked; constant DRC
+outputs exercise the calibration bypass and do not prove nonconstant DRC network
+quality. The five hermetic golden cases regenerate byte for byte, and full-grid
+one/five-shot random-weight checks also match Torch exactly. Evidence and original failures remain under
+<code>adder_zeroshot_exp_trace/</code> and <code>final_numerical_validation/</code>.
+No weights are promoted.</p>
+<p>Whole-flow physical-cache replay now fingerprints requested URoute pool
+contents before its lookup, using the same bundled-directory resolution as
+placement. Previously it could replay a learned placement after the pool became
+incompatible because only the unchanged option strings were keyed. The new CLI
+regression reproduces that stale replay before the fix, verifies warm reuse of
+unchanged data, rejects replay for an incompatible manifest, and invalidates a
+valid published weight update. Six focused cache/placement targets pass; the
+extended CLI check takes 2.8 seconds. Evidence is under the cohort's
+<code>physical_pool_identity_fix/</code>.</p>
+<p>After both arithmetic and physical-cache corrections, combined optimized
+validation executes <strong>all 26 focused targets fresh</strong> with a 30-second
+per-test cap: URoute tools, ABC/USYN placement, physical replay, STA, and the split
+memory cases pass. The full run takes 111.9 seconds including rebuilds, peaks at
+2687 MiB, and retains at least 22.6 GiB OS reserve. This is focused validation;
+it does not replace the earlier 3765-target full run. See the cohort's
+<code>final_focused/summary.json</code>.</p>
+<p>The fixed-grid scale check now measures all 15 routed samples and retained
+historical CNN/Eyeriss native core geometry. Small-sample network tiles span
+0.023–0.094 µm, 0.43–1.73 site widths and 0.08–0.34 row heights; some layers have
+less than one nominal preferred-direction track per tile. Historical CNN tiles
+span 7.603×7.602 µm (140.8 sites, 28.2 rows), and Eyeriss tiles 5.535×5.534 µm
+(102.5 sites, 20.5 rows). These are nominal pitch-based counts, not exact track
+intersections. The large scale gap limits what the small-data study establishes;
+it does not prove the cause of its quality deficit. Derived grid measurements
+are linked as 15 immutable provenance observations, preserving all original
+sample records/bytes, weights and the 15 independent support shots. A private
+replay verifies idempotence. The historical original-design frames supply only
+geometry measurements, not routed labels. See
+<code>repros/uroute_grid_resolution_20261025/admission_receipt.json</code>.</p>
+<p>The original-design U6 runtime is refreshed under
+<code>repros/uroute_original_in_loop_current_20261025/</code>, including a private
+copy of its 177 runfiles (315 MB). Both unchanged original graph inputs load;
+physical input hashes, current options and paired settings are rechecked. This
+runtime includes the numerical and cache corrections above. Native OpenTimer
+also executes both pinned SDC files on private retained mapped graphs, reusing
+their saved approximate placement-Flute RC: CNN completes in 26.1 seconds at
+10.5 GiB peak, Eyeriss in 39.6 seconds at 13.8 GiB. WNS/TNS reproduce the retained
+values exactly; original mapped graphs are unchanged. Earlier 8/12 GiB capped
+attempts remain as stopped evidence. Both reports retain
+<code>constraints_complete=false</code>; CNN additionally has two native-state
+clock-boundary timing models. Five external library-template warnings appear
+per run, despite zero CLI diagnostic warnings. This proves bounded retained-STA
+execution, not complete timing coverage, fresh mapping/RC or in-loop quality.
+Recipes remain non-runnable until original-fold models and matching supports
+are bound. These large-design preflights are outside the default regression.
+See <code>retained_sta_validation.json</code> in that directory.</p>
+<p>Upcoming original-design U6 jobs use the user-approved <strong>32 GiB
+process-tree ceiling</strong>, one owned large job at a time, with the shared
+OpenROAD lock and the existing 4 GiB OS-reserve guard. Launch decisions use live
+available memory and expected peak; the ceiling is not a reservation. This policy
+is recorded beside the refreshed runtime in <code>resource_policy.json</code>; it does not alter running drivers,
+frozen routing inputs, test parallelism or the 30-second optimized test cap.</p>
+<p>The fresh full optimized regression completed after all source corrections:
+<strong>all 3766 tests passed, all executed fresh</strong>, with caching disabled,
+one test at a time and <code>--test_timeout=30</code>. The slowest reported test
+took <strong>17.9 seconds</strong>, meeting the under-20-second target as well as
+the hard 30-second cap. The full command took 3591.5 seconds, peaked at 5558 MiB
+and retained at least 21.46 GiB OS reserve; all source fingerprints remained
+unchanged. This remains local validation with the DREAMPlace override. Source
+fingerprints, the exact command and runtime summary are retained under
+<code>repros/uroute_postfix_full_regression_20261025/summary.json</code>.</p>
+<p>A subsequent bounded input-packing optimization is integrated in the owning
+DREAMPlace source: AArch64 uses lane-local f32 FMA, with the original scalar
+implementation retained for other platforms and single-channel heads. A 16-pixel
+tile needs at most 72 KiB of packing scratch. The private real four-shot query
+falls from 2.84 to 1.25 seconds while retaining exact output bytes; all 27
+private-kernel held-out queries retain the validated prediction values exactly.
+All five unchanged goldens retain baseline output bytes and pass the original
+mixed tolerance; a separate signed-zero check also passes. ASan/UBSan fixture checks
+pass. All 21 fresh production-focused CLI/placement/native routing targets pass.
+The final production binary also matches frozen CPU Torch exactly on all 27
+scored held-out queries (3,538,944 calibrated values); the constant DRC channel
+still does not establish nonconstant DRC quality. Unchanged goldens pass, and
+256×256 reused queries take 0.73 seconds with one shot and 1.52 seconds with five
+shots in the final run alongside the regression. Evidence is under
+<code>repros/uroute_fifteen_sample_unseen_20261025/packed_production_validation/</code>.
+<strong>The completed 3766-test full run above predates this performance change</strong>;
+the subsequent packed-kernel full rerun was deliberately stopped after 465.5
+seconds when an additional cache-diagnostic bug was reproduced. Its partial
+artifacts remain under <code>repros/uroute_packed_kernel_full_regression_20261025/</code>.
+The next full attempt was deliberately stopped after 853.7 seconds when the
+generated-proxy support identity mismatch below was reproduced; its partial
+artifacts remain under <code>repros/uroute_packed_cache_full_regression_20261025/</code>.
+The fresh serial full rerun including the packed kernel and both identity
+corrections completes with all 3766 tests passing, all executed fresh, and
+unchanged source fingerprints. The slowest test takes 20.4 seconds, meeting the
+30-second hard cap but slightly exceeding the under-20-second target. The full
+command takes 3568.3 seconds, peaks at 4576 MiB and retains at least 20.98 GiB
+OS reserve. This run predates the pending read-only DEF-ingestion extension.
+Evidence is under <code>repros/uroute_proxy_identity_full_regression_20261025/summary.json</code>.
+Kernel and sanitizer evidence is under
+<code>repros/uroute_register_kernel_20261025/</code>. No weights or public defaults change.</p>
+<p>A weightless pool whose unchanged-manifest support file becomes corrupt
+exposed an outer-cache diagnostic bug: physical replay retained “no trained
+weights” while a fresh run reported the sample digest mismatch. The outer
+physical identity now includes the pool validation reason, matching the inner
+placement cache’s treatment. The original frozen binary reproduces the stale
+reason; the rebuilt binary refreshes it, and all five focused targets pass
+(longest 4.3 seconds), including repair and unchanged-warm-reuse checks. Evidence
+is under <code>repros/uroute_pool_skip_identity_20261025/validation_summary.json</code>.
+This does not change placement defaults or the numerical kernel.</p>
+<p>The packed runtime is also frozen for original U6 under
+<code>repros/uroute_original_in_loop_packed_20261025/</code>: both saved graph
+reads, physical hashes and paired options pass unchanged. It predates the narrow
+cache-diagnostic correction above. Models and matching supports remain unbound. A separate full-call runtime diagnostic on retained
+CNN/Eyeriss geometry includes RSMT, feature construction, network inference and
+calibration: enhanced calls take 1.37/1.42 seconds versus RSMT 0.112/0.210 seconds,
+with 0.75 seconds of one-time four-shot context setup. The guarded processes
+peak below 358 MiB. This deliberately bypasses original-design support selection
+using private small-design supports; it measures cost only, not original-design
+prediction quality or an in-loop result. Inputs remain unchanged. Evidence is
+under <code>repros/uroute_complete_call_runtime_20261025/summary.json</code>.</p>
+<p>Generated native memory proxies exposed a second identity mismatch: routed
+ingestion hashes the emitted proxy LEF, while the native query fingerprint
+previously hashed only input LEFs. A real two-read/one-write memory reproduction
+therefore skipped its own synthetic same-design support with
+<code>fallback=skip</code>. Native inference/export now hashes the exact proxy
+LEF bytes after track alignment and emits those same bytes. The emitted LEF is
+byte-identical to the original reproduction; the corrected next invocation
+selects its support without adding generated outputs as inputs. All 17 focused
+tests pass (slowest 7.4 seconds; extended CLI test 5.5 seconds). No model weights,
+geometry, defaults or tensor versions change. Evidence is under
+<code>repros/uroute_proxy_technology_identity_20261025/validation_summary.json</code>.
+The fixture uses synthetic labels only; it is not an original-design routed sample.</p>
+<p>Fresh RSMT-only original-design support pilots are prepared and queued under
+<code>repros/uroute_original_support_pilots_v2_20261025/</code>. Their immutable
+runtime includes the packed kernel and both identity corrections; current typed
+options, retained physical inputs and both graph copies pass preflight. The
+previous pending worker was deliberately stopped before any pilot ran; its
+original runtime and inputs remain intact. The corrected worker waits for a
+green full regression and every current original/variant routing worker, then
+serializes CNN and Eyeriss synthesis and placement under the shared lock, with a
+32 GiB tree ceiling, 4 GiB OS reserve and a four-hour per-pilot wall guard. It
+verifies unchanged source graphs and records fresh feature/proxy identity and
+placement artifacts. These pilots have not run yet; they generate inputs for
+matching-geometry support routing, not learned in-loop or original-design
+quality evidence. No queued route or canonical pool is changed.</p>
+<p>The Eyeriss CTS overlap is reduced to one buffer at a fixed macro's
+fractional-row top edge. A C++ body-overlap regression fails with the original
+OpenROAD DPL; a companion padding check passes both versions and adds coverage.
+Its source correction derives fixed
+capacity and padding from the actual oriented footprint, instead of a
+snapped-origin approximation. All 12 DPL C++ checks pass (one Bazel target,
+0.3 seconds). After that batch ended, the shared test harness's BSD/GNU
+<code>sed -i</code> incompatibility was corrected using the same filters with
+portable output redirection. Two non-contract golden logs were refreshed only
+after unchanged DEF geometry and strict obstruction-case legality were verified;
+the latter also converges with fewer moves and slightly lower HPWL. All 128 DPL
+tests then pass fresh (slowest 3.2 seconds). A separately frozen v3 router passes
+the original two-instance reproduction, retains the earlier global-routing fix,
+and is queued for a new <code>eyeriss_openroad_unrepaired_dpl_v3</code> recovery
+under the shared lock with a 32 GiB tree cap and 4 GiB OS reserve. The old failed
+attempts remain unchanged; no new Eyeriss route or label is claimed.
+Evidence is under <code>repros/uroute_eyeriss_negotiation_overlap_20261025/validation_summary.json</code>.</p>
+<p>The downstream pilot handoff template is validated separately under
+<code>repros/uroute_original_pilot_handoff_20261025/</code>. A fresh bounded
+16×2 memory synthesis uses the corrected runtime; handoff finishes in 0.87
+seconds below 149 MiB, preserves its fixed macro and all 16 signal-IO frames,
+and an independent checkpoint audit retains all 32 track patterns exactly.
+The exported and routed-input LEF fingerprints match, and input hashes remain
+unchanged. The template keeps native track patterns, uses the existing
+standard-cell PDN policy for unpowered geometric proxies, checks strict placement
+legality after cleanup, and retains labeled uncharacterized memory timing.
+This is small-fixture preparation only: no CNN/Eyeriss pilot handoff, CTS or
+new detailed-route label has been completed by this check.</p>
+<p>The CNN LiveHD global-route attempt reached its 21600-second stage guard
+without a completed route; its failed artifacts remain intact. CNN reference
+CTS, pin access, global and detailed routing, fillcell and density-fill stages
+completed. Detailed routing took 14087.8 seconds including post-processing,
+peaked at 36814 MiB under its original frozen 40 GiB guard and retained at least
+20.87 GiB OS reserve. The final detailed-route DRC report is empty; antenna
+checking reports zero net/pin violations. The final-report stage also completes
+in 380.4 seconds at 13591 MiB peak; its 3,118,668,501-byte final ODB matches the
+completion receipt hash. All six checkpointed stages have passing receipts.
+CNN ingestion subsequently stops after 30.9 seconds at 6092 MiB because the
+physical DEF reader rejects the producer's 65 soft placement blockages;
+independent wire-length validation and canonical-pool admission remain pending.
+The completed route and original failed ingestion artifacts remain intact. Evidence is
+under <code>repros/uroute_cnn_reference_completion_20261025/summary.json</code>.
+Both Eyeriss
+arms stopped before routing: the native recovery compared DEF <code>N</code>
+directly with OpenDB <code>R0</code>, while the reference handoff's initial
+padding check aborted before its existing standard-cell cleanup. Fresh,
+serialized recovery attempts preserve the original failures, normalize
+orientation aliases with genuine mismatches still rejected, and reach cleanup
+before requiring final strict padding legality. The native recovery now passes
+its 16.0-second phase/whole-legality check at 9879 MiB peak: all 1040 macros move
+at most 33 DBU, with zero standard-cell movement; pin access is running. The
+reference handoff passes in 20.0 seconds at 9091 MiB, but CTS stops after 270.0
+seconds at 13331 MiB: negotiation reports convergence while the strict checker
+finds 55 clock-buffer overlaps with fixed macros. These remain explicit timing-unclosed recoveries, and completed
+Eyeriss routing is still unproven. U0/U6 original-design coverage and U7 useful weights remain
+incomplete; no model or public default changed.</p>
+<p>Implemented locally: native feature maps/interchange, mapped weights,
+four-level inference, support calibration, <code>RudyModel::uroute</code>, the
+one-way final-GP ladder and continuation state, bounded model-selectable probes,
+LiveHD options, deterministic project-pool selection, cache/history provenance,
+final/probe feature exports, atomic offline publishing, episodic meta-training,
+weight export and map-scoring metrics, routed-DEF ingestion, independent
+OpenROAD wire-length verification, native bbox/RSMT baseline scoring and
+calibrated dataset evaluation. The evaluator enforces query/support separation,
+chronological and zero-shot protocols, and optional unseen-design lineage checks.
+Training can exclude an evaluation design while validating a separate task.
+The optional offline <code>LHD_UROUTE_POOL</code> hook and ORFS adapter have been
+validated on both completed LFSR arms without rerunning routing. H2D and rigid macro groups expand physical
+bodies/pins before learned measurements. The CPU training smoke covers temporary
+synthetic data; it does not establish learned prediction quality.</p>
+<p>C++/Python feature files match byte-for-byte. Existing native/PyTorch golden
+cases and the trained cancellation diagnostic pass after the interpolation and
+channel-mean arithmetic fix, at the unchanged mixed tolerance. A new synthetic
+cancellation regression catches the old kernel. Focused CLI tests cover explicit/automatic models,
+probe export, version/hash rejection and skip behavior; native tests cover warm
+continuation, physical macro expansion and one-way switches. Architecture and
+format details are in <a href="../../tools/uroute/README.md">the tool README</a>.</p>
+<p>Partial U0 evidence: both frozen LFSR arms ingest with byte-equal routed
+features; all 280 enabled nets match the final ODB detailed-wire-length report
+to floating-point precision. Baseline metrics and a reconstructed pre-CTS
+feature gap are retained under <code>repros/uroute_validation_20261024/routed/</code>.
+The focused implementation suite passes 20 targets, with two additional
+macro/track alignment tests passing. A temporary synthetic
+excluded-design training/evaluation smoke also passes; native calibrated output
+matches PyTorch within 1.05e-7 absolute error. These two clean, macro-free
+layouts do not establish learned prediction quality.</p>
+<p>Supplemental real pretraining coverage now adds one unchanged repository
+36-bit GCD. An explicit-margin, timing-unclosed flow with OpenROAD M4/M5 I/O
+replacement completes final routing with an empty DRC report; all 814 enabled
+net wire lengths match OpenDB to floating-point precision, and features match
+native/Python byte-for-byte. Its detailed route took 43.57 s under a 120 s,
+2 GiB data-generation guard. Full baselines and the native/routed feature gap
+are retained under <code>repros/uroute_real_small_corpus_20261025/</code>.
+The initial real-data training pool had three designs and six samples: two each of LFSR,
+GCD and unchanged 128-bit IWLS adder. Both adder layouts explicitly release fixed
+native I/O before M4/M5 replacement; all 1027 enabled net lengths match OpenDB
+and DRC reports are empty. Distinct I/O constraints produce different actual
+feature/label pairs. Initial real-data candidates now train on GCD/adder with
+LFSR used for model selection; CNN and Eyeriss are excluded. Their validation
+hotspot overlap (.0326/.0623/.0641) is worse than base RSMT (.1507), so they remain
+isolated candidates and are not bundled. Native/PyTorch agreement passes for
+real weights. An opt-in pre-clamp MSE loss restores gradients at negative heads
+while retaining the inference clamp, tensor layout and current defaults. All
+12 offline-tool targets and the gradient/default-training/native smoke pass.
+The longer CPU candidate completed 54 epochs in 1028 s; an explicit isolated
+Metal experiment completed 58 epochs in 86 s under a 4 GiB allocator limit.
+Their validation hotspot overlaps (.07355/.07422) remain below RSMT. Both pass
+native mixed absolute/relative tolerance with 1.79e-7 maximum absolute error,
+but near-zero values exceed the strict 1e-4 relative bound. Neither is promoted;
+public defaults are unchanged. Explicit Metal training is now available through
+both public CLIs with a required positive allocator cap, recorded in provenance.
+All 13 offline-tool targets, the CPU smoke (17.53 s), and a bounded Metal
+train/export/native/fold workflow pass. These LFSR scores use model-selection data.
+Two supplemental folds now exclude GCD or adder from gradients, selection and
+ancestry, and score both queries under each protocol with verified unseen lineage.
+Chronological hotspot overlap .11614/.35651 remains below base RSMT
+.14812/.37899, despite NRMS improvements. Other-design-only overlap is
+.06609/.35450. Full denominators and provenance are retained in
+<code>supplemental_unseen_summary.json</code>. These macro-free, zero-DRC folds
+supply limited unseen-design evidence.
+CNN/Eyeriss coverage and in-loop comparisons remain required.</p>
+<p>Native support pyramids are now encoded once per immutable stage context.
+Cached/fresh outputs match byte-for-byte across changing queries; one/five-shot
+256×256 predictions match PyTorch within 7.92e-7 relative error. Five-shot query
+time is 4.01 s after 2.68 s setup, versus 6.67 s with fresh encoding in the same
+CPU benchmark. The approximate one-second estimate remains unmet; this is
+synthetic numerical/performance evidence, not learned routing-quality evidence.
+All 22 focused targets pass after this change.</p>
+<p>A subsequent portable spatial-tile convolution preserves byte-identical
+complete-estimator maps and reduces the retained CNN timing from 1.99 to 1.43 s
+with one support, and 3.95 to 2.83 s with five map arguments. Fresh PyTorch
+maximum relative error is 7.91e-7 and all 24 focused targets pass. These remain
+synthetic-weight timings with two physical supports repeated in the five-map
+case and a constant DRC branch; the one-second target is still unmet.</p>
+<p><strong>Still required:</strong> U0 coverage of the remaining designs/arms and
+feature gaps, original-design leave-one-design-out scoring,
+U6 CNN/Eyeriss in-loop router comparisons, and U7 trained weights with provenance.
+The bundled manifest explicitly contains an empty pool and no weights while
+training is pending. A pinned, bounded CircuitNet N14 audit recovered real
+detailed-route wire geometry, but its downloaded subset lacks routing-layer
+physics, control roles and v1-compatible DRC evidence. CircuitNet 3.0's complete
+ZIP directory contains no DEF/ODB/LEF/Liberty entries. Neither source has been
+admitted to the pool or used to create weights; audit hashes and license notices
+are retained under <code>repros/uroute_validation_20261024/public_source_audit/</code>.
+DREAMPlace changes remain local; its published commit has
+not been consumed. The default <code>route.model=rsmt</code> is unchanged.
+The offline trainer now preserves separate artifacts for identical recipe
+reruns, fingerprints and retains its local implementation/runtime, and snapshots
+each attempt's input manifest and ancestor checkpoint metadata. Published
+provenance hashes the log and input snapshot. The repeated-attempt CPU/native
+smoke passes in under 18 seconds; isolated three-fold orchestration passes on
+temporary synthetic data, and all 12 offline-tool test targets pass, including
+source/manifest tamper rejection without Torch. This improves training
+provenance; it does not supply real trained weights or prediction-quality data.
+The separate CNN recovery has completed legal CTS and a bounded 33 nm macro
+track-phase correction. In the strict frozen-router attempt, pin access passes
+but global routing stops at
+<code>GRT-0228</code> (initial edge usage 3326 versus congestion guard 3300);
+the failed ODB and timing violations remain recorded. Eyeriss legalization
+also passes with all 1040 fixed macros unchanged; its CTS repair later hit the
+wall-time guard. A bounded track-phase proposal moves those macro origins by at
+most 33 nm; it has not been applied or checked for whole-design legality.
+ODB ingestion, measured global-route overflow extraction,
+explicit unavailable-map failure records and supplemental observations are
+implemented. A separate newer-router congestion-allowed CNN experiment
+reached iteration 8/30 and then its 7200-second wall-time guard. The retained
+Eyeriss legal checkpoint is recorded as unrouted, with no fabricated map or
+labels. CNN pin access passes; the timed-out attempt supplies no routed sample.
+The newer router's zero-capacity crash was fixed in the owning
+OpenROAD source and six focused router targets pass; the original frozen router
+and strict failed attempt remain intact. Detailed routing and verified labels
+are still required. A small LFSR checkpoint test additionally restores all 448
+standard-cell preferred pin accesses and completes global routing in a fresh
+process. All six stages through detailed routing and final reporting pass with
+an empty DRC report; resume skips completed stages and rejects changed
+checkpoint SDCs. This small validation was not added as a training sample.
+This is not a CNN macro-access validation. A one-shot watcher permits a separate
+checkpointed CNN attempt only after the current global-route wall-time guard
+fires, with independent pin-access/global-route budgets and unchanged physical
+inputs. Other failures require diagnosis; a successful current run is not
+restarted. That timeout activated the checkpointed CNN recovery, which now owns
+the OpenROAD lock and is running global routing after completing pin access. The separate two-hour Eyeriss CTS
+repair attempt also timed out, with no saved repaired final frame. A distinct
+unrepaired-CTS experiment waits behind CNN; it must pass bounded phase correction
+and whole-design legality before checkpointed routing. An observed temporary-lock inode replacement briefly
+allowed overlap with the original CNN process; Eyeriss was suspended until that
+queue terminated, and the incident is recorded with its timing. No whole U0–U7
+milestone is declared complete by this checkpoint.</p>
+<p>2026-10-25 follow-up: historical pre-CTS CNN/Eyeriss feature exports are
+reconstructed with source hashes and native/Python byte parity; their gaps to
+the saved unrouted recovery frames are retained as supplemental observations.
+The complete estimator is now measurable through <code>tools/rudy_metrics</code>.
+A four-output convolution block preserves byte-identical maps in the CNN
+performance workload and passes fresh production PyTorch checks. One-support
+complete calls take about 1.99 s; a five-map workload repeating the two available
+LFSR supports takes 3.95 s, with clean-DRC constant calibration and synthetic
+weights. This is performance evidence, not five independent shots or quality
+evidence. The approximate one-second target remains unmet. All 22 focused
+implementation targets pass.</p>
+<p>The serial <code>cross_validate</code> runner now snapshots independent fold
+models, excludes each test design from gradients and early stopping, and runs
+both native protocols with unseen-design lineage checks. The real three-design
+readiness audit rejects the current insufficient routed/chronological coverage;
+it creates no weights. A temporary three-fold structural smoke passes, without
+claiming prediction quality. Intermediate GRT marker reports can also be retained
+as explicitly incomplete lower-bound diagnostics. The live CNN report tagged 5
+reaches the producer's 10000-marker cap per direction, so unlisted cells must not
+be called clean; these maps never become training labels.</p>
+
+<p>Latest routing state: the extended Eyeriss CTS repair also hit its two-hour
+guard without a final repaired checkpoint. A distinct timing-unclosed
+<code>eyeriss_livehd_unrepaired</code> experiment is queued from the last saved
+legal post-CTS pre-repair frame, with explicit timing-repair skips and phase/legality
+checks before routing. The checkpointed CNN completed pin access in 1155.65 s,
+with zero macro pins lacking access, and owns the global routing lock. A fresh
+global-route process restored all 1443250 standard preferred access entries.
+Global routing is running; neither job has supplied final detailed-route labels.</p>
+
+<p>The original CNN OpenROAD arm is now separately queued as
+<code>cnn_openroad_unrepaired</code> from its preserved placement and serialized SDC,
+with unchanged fixed macro frames, explicit full-core standard-cell legalization,
+optional timing repairs skipped and the same checkpointed routing. It verifies
+input hashes after acquiring the global lock and ingests only final routes.
+This timing-unclosed recovery has no labels yet and does not rewrite the original
+stopped attempt. The Eyeriss source SDC is recovered from committed HighTide
+source: a Tcl capture verifies its clock, I/O delays and reset false path against
+the retained serialized SDC over all 59 actual reference DEF ports. Hashes and
+captures are in <code>eyeriss_constraint_recovery/verification.json</code>;
+this proves timing-constraint equivalence on those ports, rather than byte identity
+to the deleted original copy or OpenSTA execution. Its loop-breaking process state
+is preserved explicitly across fresh stages. A separate
+<code>eyeriss_openroad_unrepaired</code> recovery is queued from the saved import
+ODB, retaining its existing power grid and requiring unchanged fixed macro frames
+and whole-design legality. No new reference labels exist yet. Coverage is retained
+in <code>reference_coverage_audit.json</code>.</p>
+
+<p>The bounded memory-proxy reproducer now completes routing after a source fix:
+edge pins use preferred escape layers, their centers follow actual imported
+track patterns, and newly packed proxy origins align before fixation. Square
+body sizes, pin widths and explicit fixed origins are preserved. Imported tracks
+must survive the router handoff without being duplicated. Both distinct I/O
+layouts pass final routing/ingestion with empty DRC reports; all 44 enabled-net
+wire lengths match OpenDB. Their detail routes take 3.41/1.80 s under the existing
+small-corpus guards. A final-source synthesis replay emits byte-identical proxy
+LEF, DEF and features, and all 25 focused targets pass.
+The verified pool now has eight samples across four designs, including two
+physical memory-proxy layouts with nonzero MacroRegion features. The original
+failures remain in <code>macro_coverage_investigation.json</code>; source, replay
+and I/O audits are under <code>memory_proxy_track_fix/</code>. These proxies have
+no physical power pins or characterized SRAM timing, and all DRC labels remain
+zero. Original CNN/Eyeriss and in-loop comparisons remain required. A separate
+<code>pretraining_candidate_eight_mps</code> run completed 35 epochs in 43.06 s
+on this expanded pool. Its LFSR model-selection hotspot overlap .08605 remains
+below base RSMT .15067. Native mixed-tolerance verification passes, but a uniform
+1e-4 relative bound near zero is not met. Full metrics are retained in
+<code>eight_sample_training_comparison.json</code>; prior candidates use the
+initial six-sample snapshot. No weights are bundled.</p>
+
+<p>The frozen eight-sample unseen study completed all three eligible folds:
+GCD/adder/memory chronological hotspot overlap .10276/.20005/.10796 is below
+RSMT .14812/.37899/.26541. Each protocol scores all six queries with verified
+held-out lineage; no weights are promoted. A genuinely new LFSR I/O placement
+now completes final routing with empty DRC and exactly matching OpenDB wire
+lengths for all 136 data nets. The original eight records and timestamps are
+unchanged. The verified pool now has nine samples. All four supplemental folds completed
+in <code>nine_sample_unseen_folds</code>, including an unseen LFSR fold that the
+earlier chronology could not support. Chronological coverage is 8/9 queries;
+other-design-only coverage is 7/9, with explicit historical support skips.
+Chronological hotspot overlap .10070/.14685/.21999/.11517 for LFSR/GCD/adder/memory
+remains below RSMT .12552/.14812/.37899/.26541; every protocol also has lower SSIM.
+No model is promoted. This does not replace original CNN/Eyeriss U6 or in-loop
+evaluation.</p>
+<p>A read-only audit of the frozen live CNN frame identifies 140 of 283 pins in
+each of its two legacy proxies without a preferred M1 track intersection.
+<code>cnn_frozen_proxy_access_risk.json</code> records this risk; it is not an
+observed full-CNN detailed-route failure. The active run remains unchanged.
+Any proxy correction must use a separate copy with fixed-frame/access checks.</p>
+
+<p>A 500-step known-query/support fit reduces normalized MSE .07449 → .01583
+(zero predictor .10633) and reaches seen-query hotspot overlap .52841 versus
+RSMT .14103. This is a capacity diagnostic, not held-out performance, and its
+weights are never published. Its original raw native/PyTorch comparison failed
+at eight tiles after normalization alignment; the native arithmetic correction
+now passes every normalized and calibrated tile at the unchanged tolerance.
+Training label normalization now uses the same double arithmetic followed by an
+f32 cast as native inference. A non-binary-range precision check, CPU training
+smoke (16.71 s) and all 13 offline targets pass. Defaults and tensor ABI remain
+unchanged. The input-precision correction alone did not resolve native arithmetic.
+The separate fix aligns CPU bilinear evaluation order and 16-channel summation
+blocks. <code>numerical_trace/production_comparison.json</code> verifies production
+outputs byte-equal to the diagnosed private candidate. A synthetic odd-grid
+cancellation regression fails one tile before the fix and passes afterward;
+both earlier golden cases are unchanged. Fresh full-grid one/five-support
+checks pass, with reused-query times 1.30/2.78 s. This closes the observed
+numerical failure, not the held-out quality gap. All earlier cohort results
+retain their source snapshots.</p>
+
+<p>The original-fold readiness audit now reports placements and deficits per
+<code>(top, technology)</code> task. The two pending CNN arms have different LEF
+fingerprints and would each remain a singleton even if both routes finish;
+each needs another distinct routed placement. Eyeriss's two pending arms share
+a fingerprint. The read-only
+<code>task_coverage_audit/pending_task_projection.json</code> retains exact input
+hashes; these are conditional counts, not completed samples. A regression
+checks that two arms with different technologies cannot masquerade as one
+query/support pair. The current original-fold check is still
+<code>insufficient-coverage</code>. No pending job or pool record changed.</p>
+<p>Two distinct-I/O CNN follow-ups are prepared and queued in
+<code>repros/uroute_cnn_support_variants_20261025/</code>. One worker waits for
+all four original routing processes to end and requires each source's verified
+final-route receipt before admission. Signal I/O is replaced on a separate
+post-CTS copy; every instance frame/status and the source's LEF fingerprint must
+remain unchanged. Fresh pin access and all routing stages precede ingestion.
+Preparation checks pass on LFSR (186 instances, 11 moved ports) and a fixed
+memory-proxy case (175 instances, one macro, 16 moved ports), each below one
+second and 140 MiB. No large variant has run or become a sample. These retain
+legacy physical-only proxy limitations and do not substitute for final-GP
+CNN/Eyeriss auto-versus-rsmt experiments.</p>
+
+<p>The common physical scorer now accepts an optional
+<code>--reference-def</code> for U6 legalization displacement. It compares complete
+matching instance/master censuses and reports standard-cell, macro and
+physical-only origin movement, plus orientation/status changes and movement
+of previously fixed instances. A real eight-instance placement measures seven
+moved standard cells (9.852 um total, 3.574 um maximum) and an unchanged fixed
+macro. The scorer and three feature/ingestion/evaluation integrations pass;
+<code>repros/uroute_in_loop_validation_20261025/</code> retains the evidence.
+This supplies a measurement primitive, not the still-required CNN/Eyeriss
+in-loop comparison.</p>
+
+<p>A bounded GCD final-GP rsmt/auto workflow completed both detailed routes
+(41.69/41.77 s) and every measurement, but its report correctly records
+<code>no-learned-exposure</code>: 100 GP iterations never crossed the existing
+0.3 density-overflow sampling gate. Equal 2933.556 um enabled-data wirelength
+and zero DRC are not a learned-model comparison. A fresh 1500-iteration attempt
+completed in <code>repros/uroute_gcd_in_loop_density_ready_20261025/</code> with
+identical immutable supports and a separate output pool. It measures URoute 69
+times, first switching at main-GP iteration 761. Both legs are legal but
+GP-unconverged and produce byte-identical placed DEFs, zero DRC and 2514.922 um
+enabled-data wirelength. Both estimators stay below utilization one and apply no
+route inflation, so exposure does not establish a placement-quality effect.
+Synthesis/mapping/placement takes 82.09/173.63 s; detailed route 27.96/28.18 s.
+The corrected admission produces one private sample plus one observation.
+GCD was seen during training; original CNN/Eyeriss U6 remains required and no
+model or switch calibration is promoted.</p>
+<p>The completed pair exposed a provenance-only duplicate-shot bug. Identical
+routed DEF/features/labels now remain one support sample even when control-file
+provenance hashes differ. Full provenance is retained as an observation. A replay
+of the actual artifacts produces one sample plus one observation; the canonical
+nine samples remain distinct and untouched. Pool, ingestion, readiness and
+evaluator tests pass.</p>
+
+<p>Original U6 input preparation is retained in
+<code>repros/uroute_original_in_loop_20261025/</code>. Current tools read isolated
+saved CNN/Eyeriss graph copies without changing their hashes. Retained physical
+inputs, current typed options and corrected adjustable-IO censuses (365/57)
+are verified. Paired settings differ only in the final-GP estimator, with actual
+track import and explicit unchanged switch/hold values. Narrow Tcl capture
+matches clock/IO/reset endpoint constraints; Eyeriss's reference loop-breaking
+policy is recorded separately. This is not fresh synthesis, placement or timing
+validation. Recipes remain explicitly non-runnable pending original held-out
+models and matching support preflight for newly generated proxy geometry.
+No large job or queued input was changed.</p>
+
+<p>2026-10-25 routing recovery update: the original CNN OpenROAD arm completed
+detailed routing with zero DRC and antenna violations; all six route/final-report
+checkpoint receipts pass. The final ODB digest is independently verified in
+<code>repros/uroute_cnn_reference_completion_20261025/summary.json</code>.
+Dataset admission remains pending: ingestion rejected its 65 soft placement DEF
+blockages. A read-only snapshot reader now retains blockage shapes and attributes
+without enabling unsupported placement imports or dropping constraints on write;
+six focused tests pass. A separate ingestion attempt is queued under
+<code>repros/uroute_cnn_snapshot_ingest_recovery_20261025/</code>, with a 32 GiB
+process-tree cap, 4 GiB OS reserve and the shared large-job lock. CNN is not yet
+counted among the 15 verified samples. Native Eyeriss has completed pin access
+and entered global routing. Its reference retry is queued with the independently
+tested OpenROAD fixed-macro edge occupancy repair (128 DPL tests pass).
+The most recent full optimized LiveHD regression passed 3,766 tests with a
+20.4-second maximum; this predates the snapshot-reader extension and the split
+Yosys state-match test groups. Original-design held-out quality, in-loop
+comparisons, trained bundled weights and published dependency consumption remain
+incomplete; no model is promoted.</p>
+
+<p>The pilot route bridge then exposed off-grid automatically generated IOs:
+the original eight-cell memory fixture had eleven terminals without routing-grid
+pins, and detailed route failed. Automatic slot assignment now follows actual
+track patterns and chooses a vertical layer for top/bottom pins. A fresh native
+placement passes handoff, CTS, all six route checkpoints, and private ingestion:
+zero DRC/antenna violations, zero off-grid terminal warnings, and independently
+matching wire lengths for 22 enabled nets. Evidence and the failed intermediate
+attempts are retained in <code>repros/uroute_pilot_route_bridge_20261025/</code>.
+This fixture's GP was iteration-limited; it proves route access and interchange,
+not placement quality or original-design coverage. Three focused optimized
+targets pass (maximum 4.5 seconds). The prior in-progress full regression was
+deliberately stopped before editing source; a fresh 3,775-target run is active in
+<code>repros/uroute_io_tracks_full_regression_20261025/</code>. The old support-pilot
+worker was retired before either synthesis started. Its replacement,
+<code>repros/uroute_original_support_pilots_v3_20261025/</code>, freezes the corrected
+runtime and runfiles and waits for that complete regression plus the existing
+routing/ingestion workers. New large jobs retain the 32 GiB cap, 4 GiB reserve,
+and shared lock.</p>
+
+<p>The downstream support-routing worker is now validated and queued in
+<code>repros/uroute_original_support_routes_20261025/</code>. It waits for the
+completed v3 pilot receipts, verifies native export/DEF/technology identities,
+and routes CNN and Eyeriss plus one distinct-IO variant of each. Its fixture
+checks passed handoff, CTS, all six route checkpoints and independent wire-length
+ingestion for two distinct samples of the same task, with zero final DRC and
+unchanged instance frames. A genuine earlier detailed-route failure was also
+retained privately as <code>status: unrouted</code>, with actual stored OpenDB
+usage/capacity and no fabricated detailed-route labels. The worker freezes 187
+inputs and uses one router thread under the 32 GiB cap and shared lock; prior
+four-thread CNN reference peaks exceeded that new cap. This reduces worker
+parallelism but does not prove the large jobs will fit. Original routes have
+not started: the native pilots still await the full regression and preceding
+large jobs. These fixture samples remain outside the canonical 15-sample corpus;
+the new original-support pool is separate from the learned U6 comparison.</p>
+
+<p>The native DREAMPlace implementation is now published as
+<code>1b0cd1972f9968b49b8b139af5282d3b99fee68a</code>, and LiveHD consumes that
+commit in <code>MODULE.bazel</code>. The rebased implementation passed 51 fresh
+native and focused consumer tests before publication. The normal consumer build
+also passes without a local repository override; fetched dependency hashes match
+the published, validated sources. This publishes implementation and plumbing,
+not trained weights or an empirical quality promotion. Evidence is retained in
+<code>repros/uroute_native_remote_integration_20261025/</code> and
+<code>repros/uroute_published_pin_validation_20261025/dependency_identity.json</code>.</p>
+
+<p>The completed optimized regression for the IO-track repair passed all
+3,775 tests, with a maximum reported runtime of 28.3 seconds. The two slowest
+targets were subsequently split while preserving their original labels as test
+suites; the four replacement tests pass in 5.8–9.8 seconds. The first normal-pin
+full regression was deliberately interrupted for the user-requested pull, with
+exit 143 and unchanged source inputs; it is not a completed regression. After
+fast-forwarding LiveHD to <code>b778ff0a8</code>, the fresh normal-pin build passed, including actual compilation of the incoming
+latch and Lean changes. Dependency hashes again match the published sources.
+The serial full regression is running under
+<code>repros/uroute_post_pull_validation_20261025/</code>, with a 30-second per-test
+limit and 8 GiB process-tree cap. No local commit or push was performed for that
+pull. Original-design data coverage, held-out quality, in-loop comparisons and
+useful bundled weights remain incomplete.</p>
+
+<p>A queue audit found a provenance bug before CNN reference ingestion started:
+the waiting retry used <code>--source livehd</code> for the OpenROAD reference arm.
+That exact waiting process was retired with no ingestion child or published
+sample. The corrected attempt is queued under
+<code>repros/uroute_cnn_external_ingest_recovery_20261025/</code> using
+<code>--source external</code>, consistent with the reference variant plan. The
+old driver and failure evidence are preserved. The replacement retains the
+32 GiB process-tree cap, 4 GiB reserve and shared lock; canonical admission is
+still unproven.</p>
+
+<p>The older CNN support-variant worker was also retired before its external
+variant started: its frozen routing driver would permit 40 GiB and four threads.
+The replacement under <code>repros/uroute_cnn_reference_variant_v2_20261025/</code>
+requires the corrected external source admission, uses one thread and a 32 GiB
+cap, and verifies the original reference task after ingestion. Its wrapper now
+uses the retained environment's actual scripts directory rather than assuming
+the native pilot directory layout. A fresh private fixture passed the IO variant,
+all six route checkpoints and independent wire-length ingestion with zero DRC;
+this validates the wrapper mechanism, not original CNN coverage. Old drivers,
+failed native-source records and earlier attempts remain preserved.</p>
+
+<p>The original Eyeriss reference arm now also has a distinct-IO support worker
+queued in <code>repros/uroute_eyeriss_reference_variant_20261025/</code>. Its
+wrapper was validated through a complete fixture route and independent 22-net
+wire-length check, with unchanged instance frames and zero DRC. It waits for
+completed independent admission of the original reference, verifies its source
+checkpoints, and then runs under the same 32 GiB cap and shared lock. This closes
+a preparation gap for same-task held-out support; it is not completed original
+data coverage.</p>
+
+<p>The original-fold collection handoff is prepared under
+<code>repros/uroute_original_fold_collection_20261025/</code>. Its read-only audit
+verifies immutable sample files, independent enabled-net wire-length evidence,
+physical-sample deduplication and per-technology support counts across the
+canonical, reference-variant and native-pilot pools. Collection refuses to run
+until all original producers and the post-pull regression complete, and creates
+an isolated corpus with source-manifest provenance and nine design folds. The
+current real-data audit verifies 15 samples but has no admitted CNN/Eyeriss
+placements. The refusal gate passes and creates no output pool. The isolated copy path also
+passes against all 15 current real samples and seven folds, with every copied
+file verified and source manifest bytes unchanged; its readiness record remains
+false. Positive full-original collection, training and evaluation remain untested
+and pending.
+No fixture is counted toward original-design coverage.</p>
+
+<p>Release/data provenance was rechecked on 2026-10-25; findings are retained in
+<code>repros/uroute_release_provenance_20261025/findings.json</code>. The checked
+author publication/software pages and indexed searches did not identify an
+author URoute code or checkpoint release; this is a bounded search, not proof
+of absence. Public CircuitNet releases declare licenses, but their precomputed
+cell-count density and early/global resource maps are not LiveHD v1 overlap-area
+features and detailed-wire labels. CircuitNet 3.0's listed archive is primarily
+RTL/netlist/power data, with layout uploads still incremental. No public archive
+was downloaded or admitted, and no weights were promoted; an exact compatible
+raw-data subset and its provenance must be verified before use.</p>
+
+<p>A subsequent bounded release-layout check found that the Hugging Face N14
+repository does expose raw LEF/DEF files, despite the project download page still
+saying raw N14 data is available on request. Repository commit
+<code>df74f33e302f927bf0548dc0d7936ca43b634f2a</code> lists a 3.47 MB LEF and
+raw DEF archives. An HTTP-range request downloaded only the first 8 MiB of
+<code>Vortex-small.tar.gz</code> (4,063,617,897 bytes total), with decompression
+bounded to 64 MiB. Its first regular member is a 205,604,891-byte detailed-route
+DEF; the bounded prefix contains DEF 5.8 components, nets and routed wires.
+This recheck did not verify a complete member or archive. The stronger earlier
+complete-member audit and its retained files were reverified by SHA-256; it
+already identifies missing routing-layer physics, control metadata and raw DRC
+evidence. No public sample is admitted. This identifies a possible raw-data path for U7 rather than making
+incompatible precomputed maps into v1 labels. Exact API metadata, HTTP range,
+commit and prefix hashes are retained under
+<code>repros/uroute_release_provenance_20261025/n14_raw_prefix_audit.json</code>.</p>
+
+</details>
+
+<h2>Depends on</h2>
+<p>The one-way estimator ladder, the per-stage probe and the
+<code>RudyModel</code>/<code>RoutePolicy</code> interface of
+<a class="xref" href="3r-route.html">3r-route</a> (R1–R3 implemented in the
+DREAMPlace sibling). The R0 router reference of 3r-route is the scoring harness
+here too; it is still unfinished and must be completed as U0. The routed-DEF
+flow is the frozen <code>repros/route_compare_20261019</code>
+(<code>handoff.tcl</code>, <code>run.py</code>, ORFS steps through
+<code>6_final.odb</code>). The zero-displacement handoff of
+<a class="xref" href="3x-reroute.html">3x-reroute</a> is not required, but it
+shrinks the gap between the placement LiveHD saw and the layout the router
+labeled (see <em>Feature contract</em>).</p>
+
+<h2>Why</h2>
+<ul>
+  <li><strong>RUDY-family estimators are blind where it matters.</strong> Both
+  bounding-box RUDY and RSMT-RUDY distribute demand geometrically. Neither knows
+  about pin access, via stacks, layer assignment or detours around macros, which
+  is where routers actually fail. The paper's ablation shows RUDY and PinRUDY are
+  useful <em>inputs</em>, not sufficient predictions. A learned map on top of
+  them is the cheapest step toward router fidelity that does not run a router.</li>
+  <li><strong>Our flow is the paper's premise.</strong> URoute was designed for
+  iterative chip design where the same RTL is placed many times with small
+  changes. CNN, Eyeriss and the lhdtrack designs are placed over and over as
+  LiveHD changes. Every routed result is a free labeled sample for the next run
+  of the same or a nearby design. One support sample already matched fully
+  supervised baselines in the paper; five is the default.</li>
+  <li><strong>Cheap at inference.</strong> Tens of milliseconds and well under a
+  gigabyte in the paper on a GPU; roughly a second on CPU for a hand-rolled
+  implementation at 256×256 with 64 channels. The ladder samples once every 20 GP
+  iterations and once at convergence, so a second per call is invisible.</li>
+  <li><strong>The slot exists.</strong> 3r-route R7 reserved a model-agnostic
+  third rung with its own switch level. This fills it with something cheaper than
+  a global router and leaves <code>grt</code> as a possible fourth rung.</li>
+</ul>
+
+<h2>What URoute is (paper facts that bind the design)</h2>
+<ul>
+  <li><strong>Problem.</strong> A task maps a <code>W×H×4</code> feature stack to a
+  <code>W×H</code> label map. A task is a (RTL, technology, chip type, metric)
+  combination. The paper uses 256×256 tiles and min-max normalizes features and
+  labels to [0,1] per sample.</li>
+  <li><strong>Features.</strong> RUDY (bounding-box, eq. 5–6), PinRUDY (per-pin
+  box density, eq. 7–8), MacroRegion (0/1 per tile, eq. 9), CellDensity (overlap
+  area sum, eq. 10). All four are already computable from the placer's
+  <code>Design</code> snapshot; the first is <code>RudyModel::bbox</code>.</li>
+  <li><strong>Network.</strong> Four-level encoder for the query, four-level
+  encoder for each support pair (features and label concatenated on the channel
+  axis), a cross-matching module per level, four-level decoder with fusion, and a
+  1×1 output conv. Residual conv blocks, ReLU, bilinear up/down sampling, 64
+  output features per level. Cross matching (eq. 12–14): <code>z = Conv(x ‖ s)</code>,
+  <code>u = Σ σ(Conv(Avg(z))) · s</code>, <code>y = ReLU(Conv(u))</code>.</li>
+  <li><strong>Training.</strong> Episodic meta-learning with importance sampling
+  over tasks (Algorithm 1): Eq. 15 uses the root mean square of recent task
+  losses and Algorithm 1 mixes in 1% uniform probability. The initial plan's
+  square-root-mean-plus-.01 rule remains the local trainer default; explicit
+  <code>--sampling paper-rms</code> selects the equation/algorithm rule without
+  changing that default. MSE
+  loss; AdamW; rotation/flip/translation augmentation; support size 5. About
+  17,500 samples from 16 designs, roughly seven GPU hours.</li>
+  <li><strong>Inference.</strong> Query features plus N support pairs from the
+  same RTL (or, when none exist, from related designs); no weight update.
+  Robust to which support samples are chosen (std 0.001–0.002 across splits).</li>
+  <li><strong>Reported gains.</strong> Five-shot URoute beats task-specific FCN,
+  RouteNet, CircuitGNN, PROS and CircuitFormer on every held-out task, including
+  an unseen technology node. It is never compared against RUDY <em>as a
+  predictor</em>; that comparison is ours to make (U0/U6).</li>
+</ul>
+
+<h2>Rulings (2026-10-24)</h2>
+<table>
+<thead><tr><th>Id</th><th>Question</th><th>Ruling</th></tr></thead>
+<tbody>
+<tr><td>U1</td><td>Where does training happen?</td>
+<td>Outside LiveHD. LiveHD <em>exports</em> stats (feature maps, grid, placement
+identity) and <em>imports</em> whatever the external update script produced
+(universal weights, sample pool). LiveHD never updates weights.</td></tr>
+<tr><td>U2</td><td>What is the label source?</td>
+<td>The fully routed OpenROAD result (routed DEF/ODB plus the DRC report), read
+by the external script. Per-bin track utilization per direction from the actual
+wires, DRC marker density, and per-net detour. Not the global-route congestion
+report alone.</td></tr>
+<tr><td>U3</td><td>Where does the data live?</td>
+<td>A pretrained starting model ships in the repo. Users point LiveHD at an
+external, per-project data directory (not the workdir) that the update script
+owns. The pool there mixes every routed design the user has; a single design is
+not enough to train the universal weights.</td></tr>
+<tr><td>U4</td><td>Inference runtime?</td>
+<td>Hand-rolled C++ in the DREAMPlace native sibling, next to
+<code>rudy_rsmt.cpp</code>, as <code>RudyModel::uroute</code>. Weights come from a
+flat file the training script exports. Deterministic, serial, no new Bazel
+dependency. The architecture is frozen to the paper's shape plus a version tag;
+a shape change is a coordinated script+C++ change.</td></tr>
+<tr><td>U5</td><td>Where does it act?</td>
+<td>Ladder rung in final cell GP: <code>rudy → rsmt → uroute</code>, same one-way
+latch, same consumers (inflation, convergence test). It activates only after the
+rsmt switch, so inputs resemble converged training data. FP and macro stages get
+a <em>probe</em> only (one evaluation at the convergence candidate, bounded
+feedback on failure), the same shape as the existing rsmt probe. Macro channel
+pressure stays on rsmt.</td></tr>
+</tbody>
+</table>
+
+<h2>Architecture</h2>
+<table>
+<thead><tr><th>Step</th><th>Owner</th><th>Input</th><th>Output</th></tr></thead>
+<tbody>
+<tr><td>1. Placement run</td><td>LiveHD (<code>pass/place</code>)</td>
+<td><code>uroute.dir</code> (weights + pool), final placement</td>
+<td>Normal placement; when the rung is active, URoute drives inflation and the
+convergence test. Always: <code>&lt;workdir&gt;/synth/place/uroute_export/</code>
+with feature maps of the final placement, the bin grid, capacities and the
+placement identity hash</td></tr>
+<tr><td>2. Handoff + route</td><td>User flow (<code>run.py</code>, ORFS)</td>
+<td>LiveHD DEF</td><td><code>6_final.odb</code>/DEF, DRC report, logs</td></tr>
+<tr><td>3. Update script (<code>tools/uroute/</code>)</td><td>User, offline</td>
+<td>Routed DEF/ODB + LEF, LiveHD export, existing pool</td>
+<td>New sample(s) in the pool (features recomputed from the routed DEF, labels
+extracted from wires and DRC), optionally retrained universal weights, a
+<code>manifest.json</code></td></tr>
+<tr><td>4. Next placement run</td><td>LiveHD</td>
+<td><code>uroute.dir</code></td>
+<td>Reads the manifest, selects a support set for this design, activates the
+rung if the pool and weights are usable; otherwise stays on rsmt and reports
+<code>uroute_skipped: &lt;reason&gt;</code></td></tr>
+</tbody>
+</table>
+<p>The repo ships <code>pass/place/uroute/pretrained/</code>: one weight file
+trained by us on the route_compare designs plus whatever public data is usable
+(see U7), and an empty pool. <code>uroute.dir</code> defaults to that location so
+URoute is usable out of the box as a probe; the ruling U5 rung still needs at
+least one support sample.</p>
+
+<h2>Feature contract</h2>
+<p>Features and labels must come from the same geometry, and the in-placer
+features must be computed exactly as the script computes them. This is the one
+place where LiveHD and the script share code by definition rather than by
+library, so it is written down:</p>
+<ul>
+  <li><strong>Grid.</strong> A fixed <code>256×256</code> tile grid over the core
+  box (the paper's size; the network is fully convolutional, so other sizes work
+  but the pretrained weights assume this scale). The placer's own route bins
+  (<code>bins=64</code> default, up to 512) are resampled to it by area-weighted
+  binning for input and back for output. The export records both grids.</li>
+  <li><strong>RUDY</strong> = <code>RudyModel::bbox</code> without the DREAMPlace
+  pin-count weight and without the obstacle path; <strong>PinRUDY</strong> per the
+  paper; <strong>MacroRegion</strong> from physical macro footprints (not halos);
+  <strong>CellDensity</strong> from physical cell boxes (no fillers, no inflation).
+  Each is min-max normalized per sample, as in the paper, with the raw min/max
+  stored next to the map.</li>
+  <li><strong>Geometry gap.</strong> The handoff re-legalizes, CTS adds buffers,
+  repair resizes. The script therefore computes features from the routed DEF
+  (post-CTS placement), not from LiveHD's export, and stores LiveHD's export
+  alongside only for the gap measurement (U0 records the per-sample feature
+  distance). With 3x-reroute's aligned handoff the gap shrinks to CTS buffers.</li>
+  <li><strong>Labels.</strong> Horizontal and vertical utilization per tile per
+  routing layer group (M2–M3, M4–M5, upper), collapsed to one
+  <code>max(h,v)</code> map for the paper-shaped task; DRC marker count per tile;
+  per-net detour ratio (routed length / FLUTE length) aggregated per tile. Labels
+  are stored <em>unnormalized</em> with the normalization constants, because the
+  ladder's switch/target levels are absolute (see <em>Calibration</em>). Failed
+  routes are stored with <code>status: unrouted</code> and the last global-route
+  overflow map; they are never silently dropped.</li>
+  <li><strong>Versioning.</strong> <code>feature_version</code>,
+  <code>label_version</code> and <code>arch_version</code> in the manifest. LiveHD
+  refuses a directory whose versions it does not implement, with a clear
+  diagnostic, and falls back to rsmt.</li>
+</ul>
+
+<h2>Data directory layout</h2>
+<pre>
+&lt;uroute.dir&gt;/
+  manifest.json          versions, weight file name, pool summary, trained_on hash
+  weights.bin            flat little-endian f32 tensors, header lists name/shape
+  pool/
+    &lt;design&gt;__&lt;tech&gt;__&lt;hash&gt;/
+      sample.json        top, technology, die/core box, macro set signature,
+                         utilization, seed, source (livehd|external), status
+      features.npy|.bin  4×256×256 f32 + min/max
+      labels.bin         utilization, drc, detour maps + min/max
+      livehd_export/     optional copy of the LiveHD-side features for gap stats
+  train/
+    log.jsonl            per-epoch loss by task, importance weights
+</pre>
+<p>The directory is user data. LiveHD opens it read-only, memory-maps the
+weights, and tolerates concurrent writes by the script through the manifest's
+atomic rename.</p>
+
+<h2>Support selection</h2>
+<ol>
+  <li>Same <code>top</code> and technology, newest first, up to
+  <code>uroute.shots</code> (default 5). A floorplan signature (die size,
+  macro set, utilization) orders ties; it does not exclude.</li>
+  <li>If fewer than <code>uroute.min_shots</code> (default 1) match, fall back to
+  the nearest samples in the pool by L2 distance over the normalized query
+  features of the current placement, same technology preferred.</li>
+  <li>If the pool is empty or every candidate is version-incompatible, skip the
+  rung for this run and report why. The rsmt behavior is then identical to
+  today's.</li>
+</ol>
+<p>Selection is deterministic given the manifest, and the chosen sample ids are
+written to <code>gp_history.json</code> so a run can be reproduced after the pool
+grows.</p>
+
+<h2>Ladder integration (U5 detail)</h2>
+<ul>
+  <li><code>RudyModel { bbox, rsmt, uroute }</code> and
+  <code>RouteModel { off, rudy, rsmt, uroute, automatic }</code>. In
+  <code>automatic</code>, the final stage latches rudy→rsmt at
+  <code>final.route.switch</code> as today, then rsmt→uroute once
+  <code>final.route.uroute_hold</code> consecutive samples measure an rsmt overflow
+  at or below <code>final.route.uroute_switch</code>. One way; never back.</li>
+  <li>At the uroute switch sample, evaluate rsmt and uroute once each and record
+  both overflows, exactly as the rudy→rsmt switch does, so the scale step is
+  visible.</li>
+  <li>URoute returns the paper-shaped utilization map resampled to the placer's
+  bins as <code>RudyResult::horizontal</code>/<code>vertical</code> (the
+  single-map prediction is split by the rsmt h/v ratio per bin), with
+  <code>pin_utilization</code> from rsmt unchanged. Blocked pins, unroutable nets
+  and <code>detour_wirelength</code> stay from the rsmt measurement; the network
+  does not predict them.</li>
+  <li>Consumers unchanged: inflation (monotone), convergence test on the active
+  model's <code>target</code>. Macro pressure never reads uroute.</li>
+  <li>FP and macro: <code>S.route.probe=uroute</code> extends the existing probe
+  with a model choice. The rsmt probe semantics (one evaluation, bounded
+  continuation on failure) are reused.</li>
+  <li>Cache identity: weights hash, pool manifest hash, selected sample ids,
+  shots, switch level and arch version join the placement cache key next to the
+  route-model key in <code>pass/place/place.cpp</code>.</li>
+</ul>
+
+<h2>Calibration</h2>
+<p>The network predicts normalized utilization; the ladder compares absolute
+overflow. Two steps keep the thresholds meaningful:</p>
+<ul>
+  <li><strong>Denormalize with the support set.</strong> Each support label
+  carries its raw min/max. The prediction is mapped back with the support set's
+  median constants, giving utilization in tracks-per-track units comparable to
+  rsmt's.</li>
+  <li><strong>Overflow definition.</strong> <code>RudyResult::overflow</code> keeps
+  its meaning, mean excess over 1. Because routed utilization saturates below 1
+  where the router detoured, the DRC map is added as a second term:
+  predicted DRC density above <code>uroute.drc_level</code> counts as overflow in
+  that bin. U6 sets the level from the reference data; until then it is 0 and the
+  DRC map is report-only.</li>
+</ul>
+
+<h2>Options</h2>
+<table>
+<thead><tr><th>Option (<code>synth.place.</code> prefix)</th><th>Default</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>uroute.dir</code></td><td>repo pretrained dir</td><td>Project data directory (weights + pool). Empty string disables URoute entirely.</td></tr>
+<tr><td><code>uroute.export</code></td><td><code>true</code></td><td>Write the final-placement feature export under the workdir (needed by the update script).</td></tr>
+<tr><td><code>uroute.shots</code></td><td>5</td><td>Support set size (1..16).</td></tr>
+<tr><td><code>uroute.min_shots</code></td><td>1</td><td>Below this many same-design samples, fall back to nearest-design selection.</td></tr>
+<tr><td><code>uroute.fallback</code></td><td><code>nearest</code></td><td><code>nearest</code> or <code>skip</code> when no same-design support exists.</td></tr>
+<tr><td><code>uroute.drc_level</code></td><td>0 (off)</td><td>Predicted DRC density counted as overflow; set by U6.</td></tr>
+<tr><td><code>route.model</code></td><td><code>rsmt</code> (unchanged)</td><td>Adds <code>uroute</code>; <code>auto</code> becomes the three-rung ladder.</td></tr>
+<tr><td><code>final.route.uroute_switch</code></td><td>0.01</td><td>rsmt overflow at or below which auto latches uroute (must be ≤ <code>final.route.switch</code>).</td></tr>
+<tr><td><code>final.route.uroute_hold</code></td><td>2</td><td>Consecutive qualifying samples before the uroute latch.</td></tr>
+<tr><td><code>S.route.probe</code></td><td><code>false</code></td><td>Existing; now also accepts <code>rsmt</code> or <code>uroute</code> (<code>true</code> = <code>rsmt</code>).</td></tr>
+</tbody>
+</table>
+<p>Rejected early: <code>uroute_switch &gt; switch</code>, a <code>uroute.dir</code>
+whose manifest versions are unknown, <code>shots</code> larger than the pool with
+<code>fallback=skip</code>. All resolved values land in the resolved-options JSON.</p>
+
+<h2>Subtasks</h2>
+<ol>
+  <li><strong>U0 — Router reference and baseline (shared with 3r-route R0).</strong>
+    <ul>
+      <li>Finish the R0 harness: for each route_compare design and arm, extract
+      from <code>6_final.odb</code> the per-tile utilization, DRC density and
+      detour maps (this is the same extractor U2 needs, so write it once in
+      <code>tools/uroute/extract.py</code> using the OpenROAD Python API or a DEF
+      parser).</li>
+      <li>Score bbox RUDY and RSMT-RUDY against it: Pearson/Spearman over tiles,
+      SSIM, NRMS and top-5% hotspot overlap. This is the number URoute has to
+      beat.</li>
+      <li>Record the feature gap: distance between features from LiveHD's final
+      placement and from the routed DEF, per design.</li>
+    </ul></li>
+  <li><strong>U1 — Export from LiveHD.</strong>
+    <ul>
+      <li><code>pass/place</code> writes <code>uroute_export/</code> at the end of
+      the final stage: four feature maps at 256×256 with min/max, the placer bin
+      grid and capacities, the placement identity hash, top, technology and
+      floorplan signature. Also written on FP/macro probes when requested.</li>
+      <li>Feature computation shared with the inference path (one function in the
+      DREAMPlace sibling, unit-tested against the Python reference on a fixed
+      small design: byte-equal maps).</li>
+    </ul></li>
+  <li><strong>U2 — Update script (<code>tools/uroute/</code>, Python + PyTorch).</strong>
+    <ul>
+      <li><code>ingest</code>: routed DEF/ODB + LEF + optional LiveHD export → pool
+      sample (features from the routed DEF, labels from wires and DRC, status).</li>
+      <li><code>train</code>: paper's network and Algorithm 1 (episodic,
+      importance-sampled, augmented), initialized from the current weights, early
+      stopping on a held-out task; writes <code>weights.bin</code> and the manifest
+      atomically. Must run on CPU for small pools, GPU when available.</li>
+      <li><code>export</code>: PyTorch state dict → flat weight file with the
+      header LiveHD reads; round-trip test loads it back and compares outputs.</li>
+      <li><code>score</code>: U0 metrics for any pool sample against rsmt and
+      against URoute with a chosen support set.</li>
+    </ul></li>
+  <li><strong>U3 — Native inference (DREAMPlace sibling).</strong>
+    <ul>
+      <li><code>rudy_uroute.cpp</code>: weight loader, conv3×3/conv1×1, residual
+      block, bilinear resample, average pool, sigmoid, the cross-matching block,
+      encoder/decoder as in Fig. 4. Serial, f32, fixed summation order; a small
+      GEMM-style inner loop is enough.</li>
+      <li>Golden test: the training script dumps inputs and outputs for one
+      sample; the C++ path must match within 1e-4 relative.</li>
+      <li>Hook into <code>rudy()</code> as <code>RudyModel::uroute</code>; the
+      support set and weights are passed through <code>RudyOptions</code> by
+      pointer to an immutable context loaded once per stage (like the FLUTE
+      <code>initialize</code> hook).</li>
+    </ul></li>
+  <li><strong>U4 — Ladder and probe plumbing.</strong> Enum extensions, the
+  second latch with its own switch/hold, both-model measurement at the switch,
+  probe model choice, history fields, cache identity, LiveHD options in
+  <code>lhd/lhd.hpp</code> and <code>pass/place/place.hpp</code>,
+  <code>lhd describe</code> text, README section.</li>
+  <li><strong>U5 — Support selection and skip reporting.</strong> Manifest reader,
+  deterministic selection, version checks, <code>uroute_skipped</code> reasons in
+  the placement JSON and the final report.</li>
+  <li><strong>U6 — Evaluation and defaults.</strong>
+    <ul>
+      <li>Leave-one-design-out on the route_compare set: train on the others,
+      support from the held-out design's earlier placements, score against U0.
+      Also zero-shot (nearest fallback) to see what a new design gets.</li>
+      <li>In-loop: final GP with <code>auto</code> three-rung versus rsmt-only on
+      CNN and Eyeriss; compare routed utilization, DRC count, wirelength, pre-CTS
+      WNS/TNS, HPWL, legalization displacement and runtime. Set
+      <code>uroute_switch</code>, <code>uroute_hold</code> and
+      <code>drc_level</code> from this data.</li>
+      <li>Decide whether <code>auto</code> becomes the default or stays opt-in.</li>
+    </ul></li>
+  <li><strong>U7 — Pretrained weights shipped in the repo.</strong> Train on our
+  routed designs plus any public data whose license permits redistribution of
+  derived weights (CircuitNet is a candidate; confirm the license and whether the
+  authors released URoute code or weights). Document provenance in the manifest.
+  Keep the file small (the paper's network is a few million parameters, tens of
+  MB in f32; f16 storage halves it).</li>
+</ol>
+
+<h2>Facts to confirm first</h2>
+<ul>
+  <li>Whether the authors released code or weights (the paper names none); if
+  yes, U2's network must match it layer for layer so their weights are a valid
+  starting point.</li>
+  <li>Exact block details the paper leaves implicit: residual block depth, where
+  downsampling happens, fusion operator in the decoder, channel count of the
+  cross-matching convs. U2 fixes them and records them under
+  <code>arch_version</code>.</li>
+  <li>How OpenROAD exposes per-GCell utilization after detailed route
+  (<code>odb</code> wire iteration versus <code>report_wire_length</code>
+  versus the <code>5_1_grt</code> congestion map). The extractor should not depend
+  on the global-route report alone (U2 ruling).</li>
+  <li>Whether 256×256 is a sensible tile size for our dies: CNN and Eyeriss on
+  asap7 are far smaller than CircuitNet's designs, so a tile may be a handful of
+  sites. Measure the tile size in sites and tracks and record it in the sample.</li>
+  <li>Thread safety is not an issue (serial by ruling), but FLUTE/rsmt still run
+  at every uroute sample for pin, blocked and detour terms. Measure the combined
+  call time.</li>
+</ul>
+
+<h2>Risks</h2>
+<ul>
+  <li><strong>Distribution shift.</strong> Training on converged routed layouts,
+  inference during GP. U5 limits exposure to the post-rsmt tail; if U6 shows the
+  prediction degrades on unconverged inputs, retreat to probe-only (the option
+  surface already allows it).</li>
+  <li><strong>Few designs.</strong> A user's pool will have a handful of designs
+  for a long time. The nearest-design fallback and the shipped weights are the
+  mitigation; the skip path is the guarantee that nothing gets worse than today.</li>
+  <li><strong>Contract drift.</strong> Feature code exists twice (C++ and Python).
+  The byte-equal unit test in U1 and the golden test in U3 are mandatory, not
+  optional.</li>
+  <li><strong>Small dies.</strong> See the tile-size fact above; a too-coarse or
+  too-fine grid makes the pretrained weights meaningless.</li>
+</ul>
+
+<h2>Cost</h2>
+<ul>
+  <li>Inference: one forward pass per sample, roughly 20–50 GFLOP for five shots
+  at 256×256 with 64 channels; about one second single-threaded with a decent
+  inner loop. Sampling cadence makes this negligible against GP time.</li>
+  <li>Training: minutes on CPU for a pool of tens of samples when fine-tuning
+  from the shipped weights; hours on GPU for a from-scratch universal model.</li>
+  <li>Storage: a sample is 4+3 maps at 256×256 f32, about 1.8 MB; f16 halves it.</li>
+</ul>
+
+<h2>Implementation entry points</h2>
+<ul>
+  <li>DREAMPlace sibling <code>dreamplace/native/rudy.hpp</code>,
+  <code>rudy_rsmt.cpp</code>, <code>placement.hpp</code> (<code>RouteModel</code>,
+  <code>RoutePolicy</code>), <code>placement.cpp</code> (the estimator sample sites
+  and the one-way latch); new <code>rudy_uroute.cpp</code>,
+  <code>uroute_features.cpp</code>, <code>uroute_weights.cpp</code>.</li>
+  <li><a href="../../pass/place/place.cpp">pass/place/place.cpp</a>: control
+  assembly near the route-model cache hash, probe handling, export writer,
+  history JSON; <a href="../../pass/place/place.hpp">place.hpp</a>:
+  <code>Stage_route</code> and new <code>Uroute_options</code>.</li>
+  <li><a href="../../lhd/lhd.hpp">lhd/lhd.hpp</a> around the
+  <code>place.route.*</code> option table and
+  <a href="../../lhd/lhd_kernel_synth.cpp">lhd/lhd_kernel_synth.cpp</a> for the
+  data-directory default.</li>
+  <li>New <code>tools/uroute/</code>: <code>extract.py</code>, <code>ingest.py</code>,
+  <code>train.py</code>, <code>export_weights.py</code>, <code>score.py</code>,
+  <code>model.py</code>; <code>tools/rudy_metrics.cpp</code> gains the U0 metrics.</li>
+  <li><code>repros/route_compare_20261019/run.py</code>: a post-route step that
+  calls <code>ingest</code> into a pool directory given by environment.</li>
+  <li><a href="../../pass/place/README.md">pass/place/README.md</a>: the
+  three-rung ladder, the data directory, the update workflow.</li>
+</ul>
+
+<h2>Reference</h2>
+<p>Z. Lin, Y. Lin, G. Liu, G. Du, "URoute: Universal Routability Prediction,"
+IEEE TCAD vol. 45 no. 7, pp. 3183–3196, July 2026, DOI 10.1109/TCAD.2025.3636449.
+Local copy: <code>URoute_Universal_Routability_Prediction.pdf</code> (repo root,
+untracked).</p>
+</main>
+<footer>LiveHD TODO · 3u-uroute</footer>
+</body>
+</html>
