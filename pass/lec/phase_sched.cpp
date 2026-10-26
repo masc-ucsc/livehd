@@ -463,6 +463,18 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
         interesting = true;
         break;
       }
+      // A posedge register on an INVERTED clock commits at the fall just like a
+      // negedge one (a mapped `DFF(.CLK(INV(CP)))` is NVDLA's CKLNQD12 sampling
+      // flop). Edge normalization rewrites that into a negedge flop only when
+      // it applies; when it declines (a negedge flop inside a retained def on
+      // the other side), rejecting here scheduled the flop at the rise.
+      if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
+        const auto ck = lc::sink_driver_hier(n, "clock_pin");
+        if (!ck.is_invalid() && !ck.is_const() && lc::control_root(ck, /*stop_at_clock_cell=*/true).inverted) {
+          interesting = true;
+          break;
+        }
+      }
     }
     if (!interesting) {
       if (livehd::debug::env<"LHD_LEC_PHASE_PLAN">() != nullptr) {

@@ -3247,7 +3247,12 @@ static livehd::lec::Query_result lec_hierarchical(Result& res, Eprp_var& ref_var
       if (reserve_flat) {
         const int       induction_share = std::max(1, requested_timeout / 2);
         const long long spent_s         = r.wall_killed ? induction_share : (r.solve_ms + 999) / 1000;
-        oflat._bmc_reserved_timeout     = std::max(1, requested_timeout - induction_share);
+        // The reservation hands BMC what the collapsed induction did not use.
+        // A collapsed attempt that gave up early (a box it cannot encode: a
+        // register clocked by a boxed clock gate is refused before any solve)
+        // spent none of the induction share, so the flat retry keeps the whole
+        // portfolio, flat induction included, instead of going to BMC alone.
+        oflat._bmc_reserved_timeout     = spent_s < induction_share ? 0 : std::max(1, requested_timeout - induction_share);
         oflat.timeout                   = static_cast<int>(std::max<long long>(std::max(1, requested_timeout - induction_share),
                                                              static_cast<long long>(requested_timeout) - spent_s));
         if (recovery_wall_ms > 0) {

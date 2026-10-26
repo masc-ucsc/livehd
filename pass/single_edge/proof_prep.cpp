@@ -573,6 +573,85 @@ std::string inline_clock_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Gr
   return {};
 }
 
+// The clock cone of a register can leave its definition: a mapped netlist that
+// keeps NVDLA's clock gate as its own definition (`CKLNQD12`: Q = AND2(CP, qd))
+// drives a register in ANOTHER definition through a port. inline_clock_lib_cells
+// walks each graph alone and stops at that port, so the gate's cells stayed
+// opaque Subs, the clock analysis saw an unrelated "derived" root, and the run
+// was refused. Walk every register's clock cone across instance boundaries from
+// `top` instead, and splice the combinational --lib cells it reaches into the
+// definition that holds each one (a definition shared by several instances is
+// spliced once; splicing preserves its semantics either way).
+std::string inline_hier_clock_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& sub_lib, hhds::Graph* top) {
+  if (top == nullptr || sub_lib.empty()) {
+    return {};
+  }
+  absl::flat_hash_map<hhds::Graph*, bool> pure_memo;
+  auto                                    combinational = [&](const hhds::Node_class& sub) {
+    if (!sub_lib.contains(sub.get_subnode_gid())) {
+      return false;
+    }
+    auto* body = lib_splice_body(sub, sub_lib);
+    if (body == nullptr) {
+      return false;
+    }
+    auto [it, fresh] = pure_memo.try_emplace(body, true);
+    if (fresh) {
+      for (auto node : body->body().nodes()) {
+        const auto op = livehd::graph_util::type_op_of(node);
+        if (livehd::graph_util::is_type_register(node) || op == Ntype_op::Memory || op == Ntype_op::Sub
+            || op == Ntype_op::Clock_cell) {
+          it->second = false;
+          break;
+        }
+      }
+    }
+    return it->second;
+  };
+  std::vector<hhds::Occurrence_pin> pending;
+  for (auto node : top->grouped_hierarchy().nodes()) {
+    const auto op = livehd::graph_util::type_op_of(node);
+    if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
+      pending.push_back(livehd::latch_contract::sink_driver_hier(node, "clock_pin"));
+    }
+  }
+  absl::flat_hash_set<std::pair<hhds::Graph*, uint64_t>> seen;
+  std::vector<std::pair<hhds::Graph*, hhds::Node_class>> cells;
+  while (!pending.empty()) {
+    const auto pin = pending.back();
+    pending.pop_back();
+    if (pin.is_invalid() || pin.is_const() || livehd::graph_util::is_graph_input_pin(pin)) {
+      continue;
+    }
+    auto  node  = pin.get_master_node();
+    auto* graph = node.get_graph();
+    if (graph == nullptr || !seen.emplace(graph, static_cast<uint64_t>(node.base_node().get_class_index().value)).second
+        || livehd::graph_util::is_type_register(node)) {
+      continue;
+    }
+    if (livehd::graph_util::type_op_of(node) == Ntype_op::Sub && sub_lib.contains(node.get_subnode_gid())) {
+      if (!combinational(node.base_node())) {
+        continue;
+      }
+      if (!sub_lib.contains(graph->get_gid()) && !node.is_loop_subnode()) {
+        cells.emplace_back(graph, node.base_node());
+      }
+    }
+    for (auto sink : node.inp_sorted_pins()) {
+      for (const auto& drv : sink.get_driver_pins()) {
+        pending.push_back(drv);
+      }
+    }
+  }
+  for (const auto& [graph, cell] : cells) {
+    const auto src = lib_splice_source(cell, sub_lib);
+    if (!livehd::graph_util::inline_sub_instance(graph, cell, "pass.lec", src.override_def)) {
+      return lib_splice_refusal(cell, src, "clock-cone");
+    }
+  }
+  return {};
+}
+
 // Stateful --lib models must contribute real state before the encoder cuts
 // flops; an opaque instance would otherwise leave unrelated free symbols.
 std::string inline_stateful_lib_cells(const absl::flat_hash_map<hhds::Gid, hhds::Graph*>& sub_lib, hhds::Graph* impl_g) {
@@ -1181,7 +1260,10 @@ Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::v
         }
       }
     }
-    return {};
+    if (stop("--lib cell inlining")) {
+      return {};
+    }
+    return inline_hier_clock_lib_cells(sub_lib, top);
   };
   // A recognized clock-gate CELL (a mapped ICG: latch + gate, match_icg_def)
   // is the one clock operator, not state to expand: recognize it as a
