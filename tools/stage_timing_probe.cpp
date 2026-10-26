@@ -92,26 +92,85 @@ int main(int argc, char** argv) {
     if (std::filesystem::exists(*out)) {
       throw std::invalid_argument("stage timing output exists; use a fresh path");
     }
-    std::string liberty;
+    // The model and constraint inputs: the Liberty, the bundle with any
+    // overrides, the saved SDC or the named clock.
+    stage::Stage_timer_inputs inputs;
     for (const auto& path : strings(config, "liberty")) {
-      liberty += read(path) + "\n";
+      inputs.liberty += read(path) + "\n";
     }
-    if (liberty.empty()) {
+    if (inputs.liberty.empty()) {
       throw std::invalid_argument("liberty must list at least one path");
     }
-    const auto library = std::make_shared<const livehd::liberty::timing::Library>(livehd::liberty::timing::parse(liberty));
+    const auto lefs = strings(config, "lefs");
+    if (!lefs.empty()) {
+      inputs.technology = physical::read_lef(lefs);
+    }
+    if (const auto bundle = text(config, "bundle")) {
+      inputs.bundle = *bundle;
+    }
+    if (config.HasMember("overrides")) {
+      const auto& value = config["overrides"];
+      if (!value.IsObject()) {
+        throw std::invalid_argument("overrides must be an object");
+      }
+      auto& overrides = inputs.overrides;
+      if (value.HasMember("stage_ps")) {
+        if (!value["stage_ps"].IsObject()) {
+          throw std::invalid_argument("overrides.stage_ps must be an object");
+        }
+        for (const auto& entry : value["stage_ps"].GetObject()) {
+          if (!entry.value.IsNumber()) {
+            throw std::invalid_argument("stage coefficient overrides must be numeric");
+          }
+          overrides.stage_ps[entry.name.GetString()] = entry.value.GetDouble();
+        }
+      }
+      overrides.eval_fo4             = number(value, "eval_fo4");
+      overrides.precharge_fo4        = number(value, "precharge_fo4");
+      overrides.setup_eval_fo4       = number(value, "setup_eval_fo4");
+      overrides.precharge_margin_fo4 = number(value, "precharge_margin_fo4");
+    }
+    if (const auto path = text(config, "sdc")) {
+      inputs.sdc = read(*path);
+      if (!config.HasMember("sdc_units") || !config["sdc_units"].IsObject()) {
+        throw std::invalid_argument("sdc requires sdc_units.time_ps and sdc_units.capacitance_ff");
+      }
+      inputs.units
+          = {number(config["sdc_units"], "time_ps").value_or(0), number(config["sdc_units"], "capacitance_ff").value_or(0)};
+    }
+    if (const auto port = text(config, "clock_port")) {
+      if (config.HasMember("clock")) {
+        throw std::invalid_argument("give clock_port and period_ps, or clock, not both");
+      }
+      inputs.clock.emplace();
+      inputs.clock->port      = *port;
+      inputs.clock->period_ps = number(config, "period_ps").value_or(0);
+    } else if (config.HasMember("clock")) {
+      const auto& value = config["clock"];
+      if (!value.IsObject()) {
+        throw std::invalid_argument("clock must be an object");
+      }
+      auto& clock     = inputs.clock.emplace();
+      clock.name      = text(value, "name").value_or("");
+      clock.port      = text(value, "port").value_or("");
+      clock.period_ps = number(value, "period_ps").value_or(0);
+      if (value.HasMember("waveform_ps")) {
+        const auto& edges = value["waveform_ps"];
+        if (!edges.IsArray() || edges.Size() != 2 || !edges[0].IsNumber() || !edges[1].IsNumber()) {
+          throw std::invalid_argument("clock.waveform_ps must hold the rise and fall edges");
+        }
+        clock.waveform_ps = std::array{edges[0].GetDouble(), edges[1].GetDouble()};
+      }
+    }
+    inputs.clock_uncertainty_ps = number(config, "clock_uncertainty_ps").value_or(0);
 
     // The netlist: the placed lg (its placement_rc attribute is the RC), and/or
     // the bit-level DEF import, which a netlist with word-valued ports needs.
     hhds::GraphLibrary                          owner, bits;
     std::shared_ptr<hhds::Graph>                graph;
     std::shared_ptr<const physical::Parasitics> rc;
-    std::string                                 netlist = "mapped netlist", design;
-    const auto                                  lefs    = strings(config, "lefs");
-    std::optional<physical::Technology>         technology;
-    if (!lefs.empty()) {
-      technology = physical::read_lef(lefs);
-    }
+    std::optional<physical::Floorplan>          floorplan;
+    stage::Stage_timing_options                 options;
     if (const auto lg = text(config, "lg_dir")) {
       const auto top = text(config, "top");
       if (!top) {
@@ -122,8 +181,8 @@ int main(int argc, char** argv) {
       if (!io || !io->get_graph()) {
         throw std::invalid_argument("lg_dir has no graph " + *top);
       }
-      graph  = io->get_graph();
-      design = *top;
+      graph         = io->get_graph();
+      inputs.design = *top;
       if (auto stored = graph->get_input_node().attr(livehd::attrs::placement_rc); stored.has()) {
         rc = std::make_shared<const physical::Parasitics>(physical::deserialize_parasitics_exact(stored.get()));
       }
@@ -134,100 +193,23 @@ int main(int argc, char** argv) {
     const auto def   = text(config, "def");
     const bool words = graph && stage::word_valued_ports(*graph);
     if (def || words) {
-      if (!def || !technology) {
+      if (!def || !inputs.technology) {
         throw std::invalid_argument(words ? "the netlist keeps word-valued ports: give def and lefs for its bit-level import"
                                           : "def needs lefs");
       }
-      const auto floorplan = physical::read_def(*def);
-      graph                = physical::mapped_graph(bits, floorplan, *technology);
-      design               = floorplan.design;
-      netlist              = words ? std::string(stage::kWordPortNetlist) : "DEF import";
+      floorplan     = physical::read_def(*def);
+      inputs.design = floorplan->design;
+      if (!words) {  // a word-port netlist is imported by the timer itself
+        graph           = physical::mapped_graph(bits, *floorplan, *inputs.technology);
+        options.netlist = "DEF import";
+      }
     }
     if (!graph) {
       throw std::invalid_argument("give lg_dir and top, or def and lefs");
     }
-
-    // The model: the bundle's provisional cells with any overrides.
-    stage::Stage_timing_options                                       options;
-    std::optional<stage::Domino_timing_view>                          view;
-    std::shared_ptr<const livehd::placement::late::Provisional_cells> cells;
-    if (const auto bundle = text(config, "bundle")) {
-      std::string why;
-      view = stage::read_domino_timing(*bundle, &why);
-      if (!view) {
-        throw std::runtime_error(why);
-      }
-      if (config.HasMember("overrides")) {
-        const auto& value = config["overrides"];
-        if (!value.IsObject()) {
-          throw std::invalid_argument("overrides must be an object");
-        }
-        stage::Model_overrides overrides;
-        if (value.HasMember("stage_ps")) {
-          if (!value["stage_ps"].IsObject()) {
-            throw std::invalid_argument("overrides.stage_ps must be an object");
-          }
-          for (const auto& entry : value["stage_ps"].GetObject()) {
-            if (!entry.value.IsNumber()) {
-              throw std::invalid_argument("stage coefficient overrides must be numeric");
-            }
-            overrides.stage_ps[entry.name.GetString()] = entry.value.GetDouble();
-          }
-        }
-        overrides.eval_fo4             = number(value, "eval_fo4");
-        overrides.precharge_fo4        = number(value, "precharge_fo4");
-        overrides.setup_eval_fo4       = number(value, "setup_eval_fo4");
-        overrides.precharge_margin_fo4 = number(value, "precharge_margin_fo4");
-        stage::apply_overrides(*view, overrides);
-      }
-      cells = stage::domino_timing_cells(*view, *library, &options.model_generation, nullptr);
-    } else if (config.HasMember("overrides")) {
-      throw std::invalid_argument("overrides need a bundle");
-    }
-
-    // Constraints: the saved SDC when it parses, else the named clock.
-    std::optional<std::string>         sdc;
-    livehd::placement::late::Sdc_units units;
-    if (const auto path = text(config, "sdc")) {
-      sdc = read(*path);
-      if (!config.HasMember("sdc_units") || !config["sdc_units"].IsObject()) {
-        throw std::invalid_argument("sdc requires sdc_units.time_ps and sdc_units.capacitance_ff");
-      }
-      units = {number(config["sdc_units"], "time_ps").value_or(0), number(config["sdc_units"], "capacitance_ff").value_or(0)};
-    }
-    std::optional<stage::Clock_spec> clock;
-    if (const auto port = text(config, "clock_port")) {
-      if (config.HasMember("clock")) {
-        throw std::invalid_argument("give clock_port and period_ps, or clock, not both");
-      }
-      clock.emplace();
-      clock->port      = *port;
-      clock->period_ps = number(config, "period_ps").value_or(0);
-    } else if (config.HasMember("clock")) {
-      const auto& value = config["clock"];
-      if (!value.IsObject()) {
-        throw std::invalid_argument("clock must be an object");
-      }
-      clock.emplace();
-      clock->name      = text(value, "name").value_or("");
-      clock->port      = text(value, "port").value_or("");
-      clock->period_ps = number(value, "period_ps").value_or(0);
-      if (value.HasMember("waveform_ps")) {
-        const auto& edges = value["waveform_ps"];
-        if (!edges.IsArray() || edges.Size() != 2 || !edges[0].IsNumber() || !edges[1].IsNumber()) {
-          throw std::invalid_argument("clock.waveform_ps must hold the rise and fall edges");
-        }
-        clock->waveform_ps = std::array{edges[0].GetDouble(), edges[1].GetDouble()};
-      }
-    }
-    auto source = stage::stage_constraints(*graph, sdc, design, units, clock, number(config, "clock_uncertainty_ps").value_or(0));
-    options.classes = flag(config, "classes", true);
-    options.netlist = netlist;
-    if (technology) {
-      options.dbu = technology->dbu;
-    }
-    const auto timing
-        = stage::evaluate_stage_timing(*graph, rc.get(), library, cells, view ? &*view : nullptr, std::move(source), 0, options);
+    const stage::Stage_timer timer(std::move(inputs));
+    options.classes      = flag(config, "classes", true);
+    const auto    timing = timer.evaluate(*graph, rc.get(), floorplan ? &*floorplan : nullptr, options);
     std::ofstream output(*out);
     output << timing.json;
     output.close();

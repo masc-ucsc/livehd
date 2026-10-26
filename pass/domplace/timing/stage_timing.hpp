@@ -3,6 +3,7 @@
 
 #include <array>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string>
@@ -13,6 +14,7 @@
 #include "core/timing_feedback.hpp"
 #include "domino_timing_model.hpp"
 #include "hhds/graph.hpp"
+#include "inou/lefdef/physical.hpp"
 #include "pass/place/sdc_subset.hpp"
 
 // Half-cycle stage timing and the stage report (2d-domplace E): the native
@@ -83,4 +85,41 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
                                    Constraint_source source, uint64_t topology_generation, const Stage_timing_options& options);
 // Throws std::runtime_error naming the status and its reasons unless complete.
 void         require_complete(const Stage_timing& timing);
+
+// One design's timing model and constraint inputs, built once and evaluated
+// on every placed netlist: the lhd report, each domino sizing trial and the
+// offline probe time with the same code.
+struct Stage_timer_inputs {
+  std::string                          liberty;  // Liberty text
+  std::optional<std::filesystem::path> bundle;   // the domino bundle; absent times without provisional cells
+  Model_overrides                      overrides;
+  std::optional<std::string>           sdc;  // saved SDC text
+  std::string                          design;
+  late::Sdc_units                      units;
+  std::optional<Clock_spec>            clock;
+  double                               clock_uncertainty_ps = 0;
+  // The RC cell sizes' DBU and the bit-level import of word-port netlists.
+  std::optional<physical::Technology>  technology;
+};
+class Stage_timer {
+public:
+  // Parses the Liberty, reads the bundle and applies the overrides (which
+  // need a bundle); throws on a malformed input.
+  explicit Stage_timer(Stage_timer_inputs inputs);
+  // Constraints for `graph` (stage_constraints) and one evaluation. A netlist
+  // that keeps word-valued ports is timed on the bit-level import of
+  // `floorplan` instead (same instances, nets and RC pin names), labeled so.
+  Stage_timing evaluate(const hhds::Graph& graph, const physical::Parasitics* parasitics, const physical::Floorplan* floorplan,
+                        Stage_timing_options options) const;
+  const Domino_timing_view*                       view() const { return view_ ? &*view_ : nullptr; }
+  uint64_t                                        generation() const { return generation_; }
+  std::shared_ptr<const liberty::timing::Library> library() const { return library_; }
+
+private:
+  Stage_timer_inputs                              inputs_;
+  std::shared_ptr<const liberty::timing::Library> library_;
+  std::optional<Domino_timing_view>               view_;
+  std::shared_ptr<const late::Provisional_cells>  cells_;
+  uint64_t                                        generation_ = 0;
+};
 }  // namespace livehd::domplace::timing

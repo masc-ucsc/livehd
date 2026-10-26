@@ -407,4 +407,35 @@ TEST(StageTiming, ConstraintSourcesCutUnconstrainedPortsAndRefuseOtherDutyCycles
   ASSERT_EQ(fallback.notes.size(), 1U);
   EXPECT_THROW(stage_constraints(graph, "set x 1\n", "sources", {}, std::nullopt, 0), std::invalid_argument);
 }
+
+TEST(StageTiming, TheStageTimerIsTheDirectEvaluation) {
+  // One timer (Liberty text, bundle directory, clock spec) reproduces the
+  // direct evaluation byte for byte, and applies overrides at construction.
+  Classes            bench("timer");
+  Stage_timer_inputs inputs;
+  inputs.liberty = test::kLiberty;
+  inputs.bundle  = bench.sidecar.write("timer_bundle");
+  inputs.design  = bench.circuit.graph->get_name();
+  inputs.clock   = Clock_spec{"clk", "clk", 100, {}};
+  const Stage_timer timer(inputs);
+  const auto        direct = bench.evaluate();
+  const auto        timed  = timer.evaluate(*bench.circuit.graph, nullptr, nullptr, {});
+  EXPECT_EQ(timed.json, direct.json);
+  EXPECT_EQ(timer.generation(), bench.generation);
+  ASSERT_TRUE(timed.period_ps);
+  EXPECT_EQ(timed.feedback.delay, *timed.period_ps);
+  // eval at 4 FO4 (40 ps): the internal check 2 (40 + 7 + 2) = 98 limits.
+  inputs.overrides.eval_fo4 = 4;
+  const Stage_timer slow(inputs);
+  EXPECT_NE(slow.generation(), timer.generation());
+  EXPECT_EQ(slow.evaluate(*bench.circuit.graph, nullptr, nullptr, {}).period_ps, 98);
+  inputs.bundle.reset();
+  EXPECT_THROW(Stage_timer{inputs}, std::invalid_argument);  // overrides need a bundle
+  // A word-valued port needs the placed floorplan for its bit-level import.
+  Circuit words(test::kLiberty, "words", {"clk"}, {});
+  words.graph->get_io()->add_input("bus", 9);
+  words.graph->get_io()->set_bits("bus", 4);
+  inputs.overrides = {};
+  EXPECT_THROW((void)Stage_timer(inputs).evaluate(*words.graph, nullptr, nullptr, {}), std::invalid_argument);
+}
 }  // namespace livehd::domplace::timing

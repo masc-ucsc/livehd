@@ -59,7 +59,6 @@
 #include "export_file.hpp"
 #include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
-#include "inou/lefdef/mapped_graph.hpp"
 #include "inou/lefdef/route_store.hpp"
 #include "lhd_kernel_internal.hpp"
 #include "liberty_dff.hpp"
@@ -215,21 +214,15 @@ stage::Clock_spec stage_timing_clock(const std::string& port, const Eprp_var::Ep
   }
   return spec;
 }
-struct Stage_timing_inputs {
-  std::shared_ptr<hhds::Graph>                        graph;
-  std::shared_ptr<const livehd::physical::Parasitics> rc;
-  std::string                                         liberty, sdc, top, bundle, def;
-  std::vector<std::string>                            lefs;
-  stage::Clock_spec                                   clock;
-  double                                              clock_uncertainty_ps = 0;
-};
-// Native stage timing of the final placed netlist: the same timer for every
-// arm, with the bundle's provisional cells when the domino profile is on.
-// Writes the stage_timing.json report and returns the timing.
-stage::Stage_timing stage_timing_report(const Stage_timing_inputs& in, const std::string& report_path) {
-  std::string text;
-  std::string first_liberty;
-  for (const auto path : absl::StrSplit(in.liberty, absl::ByAnyChar(", \t\n"), absl::SkipEmpty())) {
+// The stage timer of this run (2d-domplace E): the Liberty, the bundle's
+// provisional cells, the SDC or the clock spec and the placement LEFs, built
+// once for the report and every domino sizing trial.
+std::unique_ptr<stage::Stage_timer> make_stage_timer(const std::string& liberty, const std::string& sdc, const std::string& top,
+                                                     const std::string& bundle, const std::vector<std::string>& lefs,
+                                                     const stage::Clock_spec& clock, double clock_uncertainty_ps) {
+  stage::Stage_timer_inputs inputs;
+  std::string               first_liberty;
+  for (const auto path : absl::StrSplit(liberty, absl::ByAnyChar(", \t\n"), absl::SkipEmpty())) {
     const auto contents = livehd::file_utils::read_file(std::string(path));
     if (!contents) {
       throw Lhd_error{"io", "stage timing cannot read the Liberty", std::string(path)};
@@ -237,41 +230,39 @@ stage::Stage_timing stage_timing_report(const Stage_timing_inputs& in, const std
     if (first_liberty.empty()) {
       first_liberty = std::string(path);
     }
-    text += *contents;
-    text += '\n';
+    inputs.liberty += *contents;
+    inputs.liberty += '\n';
   }
+  if (!bundle.empty()) {
+    inputs.bundle = bundle;
+  }
+  if (!sdc.empty()) {
+    inputs.sdc = livehd::file_utils::read_file(sdc);
+  }
+  inputs.design               = top;
+  inputs.units                = liberty_sdc_units(first_liberty);
+  inputs.clock                = clock;
+  inputs.clock_uncertainty_ps = clock_uncertainty_ps;
   try {
-    const auto library = std::make_shared<const livehd::liberty::timing::Library>(livehd::liberty::timing::parse(text));
-    std::optional<stage::Domino_timing_view>                          view;
-    std::shared_ptr<const livehd::placement::late::Provisional_cells> cells;
-    stage::Stage_timing_options                                       options;
-    if (!in.bundle.empty()) {
-      std::string why;
-      view = stage::read_domino_timing(in.bundle, &why);
-      if (!view) {
-        throw Lhd_error{"internal", "stage timing cannot read the domino bundle", why};
-      }
-      cells = stage::domino_timing_cells(*view, *library, &options.model_generation, nullptr);
+    inputs.technology = livehd::physical::read_lef(lefs);
+    return std::make_unique<stage::Stage_timer>(std::move(inputs));
+  } catch (const std::exception& error) {
+    throw Lhd_error{"unsupported", std::string("stage timing failed: ") + error.what(), ""};
+  }
+}
+// Native stage timing of the final placed netlist: the same timer for every
+// arm, with the bundle's provisional cells when the domino profile is on. A
+// netlist that keeps word-valued ports is timed on its bit-level DEF import.
+// Writes the stage_timing.json report and returns the timing.
+stage::Stage_timing stage_timing_report(const stage::Stage_timer& timer, const hhds::Graph& graph,
+                                        const livehd::physical::Parasitics* rc, const std::string& def,
+                                        const std::string& report_path) {
+  try {
+    std::optional<livehd::physical::Floorplan> floorplan;
+    if (stage::word_valued_ports(graph)) {
+      floorplan = livehd::physical::read_def(def);
     }
-    std::optional<std::string> sdc_text;
-    if (!in.sdc.empty()) {
-      sdc_text = livehd::file_utils::read_file(in.sdc);
-    }
-    const auto technology = livehd::physical::read_lef(in.lefs);
-    options.dbu           = technology.dbu;
-    // The proxy binds one-bit ports. A netlist that keeps word-valued ports
-    // is timed on its bit-level DEF import: the same instances, nets and RC
-    // pin names, one port per bit.
-    hhds::GraphLibrary bits;
-    auto               graph = in.graph;
-    if (stage::word_valued_ports(*graph)) {
-      graph           = livehd::physical::mapped_graph(bits, livehd::physical::read_def(in.def), technology);
-      options.netlist = stage::kWordPortNetlist;
-    }
-    auto source
-        = stage::stage_constraints(*graph, sdc_text, in.top, liberty_sdc_units(first_liberty), in.clock, in.clock_uncertainty_ps);
-    auto timing
-        = stage::evaluate_stage_timing(*graph, in.rc.get(), library, cells, view ? &*view : nullptr, std::move(source), 0, options);
+    auto          timing = timer.evaluate(graph, rc, floorplan ? &*floorplan : nullptr, {});
     std::ofstream report(report_path);
     report << timing.json;
     report.close();
@@ -1293,7 +1284,8 @@ void synth_command(Options& opts, Result& res) {
                     "synth.place.stage_timing=true",
                     ""};
   }
-  std::optional<stage::Clock_spec> stage_clock;
+  std::optional<stage::Clock_spec>    stage_clock;
+  std::unique_ptr<stage::Stage_timer> stage_timer;  // built once the placement LEFs are known
   if (run_stage_timing) {
     if (!run_place || !place_options.full || macro_plan_only) {
       throw Lhd_error{"usage", "synth.place.stage_timing needs a final placement", "set synth.place=true (full placement)"};
@@ -2201,25 +2193,24 @@ void synth_command(Options& opts, Result& res) {
   std::optional<stage::Stage_timing> stage_timing;
   if (run_place) {
     if (run_stage_timing) {
-      Phase_timer         phase(res, "pass.place.stage_timing");
-      Stage_timing_inputs inputs;
-      inputs.graph = net.graphs.front();
-      inputs.rc    = net.physical_rc;
-      if (!inputs.rc) {
-        if (auto stored = inputs.graph->get_input_node().attr(livehd::attrs::placement_rc); stored.has()) {
-          inputs.rc
-              = std::make_shared<const livehd::physical::Parasitics>(livehd::physical::deserialize_parasitics_exact(stored.get()));
+      Phase_timer phase(res, "pass.place.stage_timing");
+      if (!stage_timer) {
+        stage_timer = make_stage_timer(liberty.empty() ? usyn_liberty : liberty,
+                                       sdc,
+                                       top,
+                                       bundle_path,
+                                       place_options.lefs,
+                                       *stage_clock,
+                                       stage_timing_uncertainty);
+      }
+      const auto                                          graph = net.graphs.front();
+      std::shared_ptr<const livehd::physical::Parasitics> rc    = net.physical_rc;
+      if (!rc) {
+        if (auto stored = graph->get_input_node().attr(livehd::attrs::placement_rc); stored.has()) {
+          rc = std::make_shared<const livehd::physical::Parasitics>(livehd::physical::deserialize_parasitics_exact(stored.get()));
         }
       }
-      inputs.liberty              = liberty.empty() ? usyn_liberty : liberty;
-      inputs.sdc                  = sdc;
-      inputs.top                  = top;
-      inputs.bundle               = bundle_path;
-      inputs.def                  = root + "/place/out.def";
-      inputs.lefs                 = place_options.lefs;
-      inputs.clock                = *stage_clock;
-      inputs.clock_uncertainty_ps = stage_timing_uncertainty;
-      stage_timing                = stage_timing_report(inputs, stage_timing_path);
+      stage_timing = stage_timing_report(*stage_timer, *graph, rc.get(), root + "/place/out.def", stage_timing_path);
       res.recipe_steps.emplace_back("pass.place.stage_timing");
       if (user_workdir) {
         res.outputs.push_back(stage_timing_path);

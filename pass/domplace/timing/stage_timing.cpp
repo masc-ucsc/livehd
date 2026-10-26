@@ -9,6 +9,7 @@
 #include <set>
 #include <stdexcept>
 
+#include "inou/lefdef/mapped_graph.hpp"
 #include "json_writer.hpp"
 #include "pass/place/require.hpp"
 
@@ -983,6 +984,43 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
     require_complete(out);
   }
   return out;
+}
+
+Stage_timer::Stage_timer(Stage_timer_inputs inputs) : inputs_(std::move(inputs)) {
+  library_ = std::make_shared<const model::Library>(model::parse(inputs_.liberty));
+  inputs_.liberty.clear();  // parsed; the text is not needed again
+  if (inputs_.bundle) {
+    std::string why;
+    view_ = read_domino_timing(*inputs_.bundle, &why);
+    if (!view_) {
+      throw std::runtime_error(why);
+    }
+    apply_overrides(*view_, inputs_.overrides);
+    cells_ = domino_timing_cells(*view_, *library_, &generation_, nullptr);
+  } else if (!inputs_.overrides.empty()) {
+    throw std::invalid_argument("stage coefficient overrides need a bundle");
+  }
+}
+
+Stage_timing Stage_timer::evaluate(const hhds::Graph& graph, const physical::Parasitics* parasitics,
+                                   const physical::Floorplan* floorplan, Stage_timing_options options) const {
+  hhds::GraphLibrary           bits;
+  std::shared_ptr<hhds::Graph> imported;
+  const hhds::Graph*           timed = &graph;
+  if (word_valued_ports(graph)) {
+    if (!floorplan || !inputs_.technology) {
+      throw std::invalid_argument("the netlist keeps word-valued ports: its bit-level import needs the placed floorplan and LEFs");
+    }
+    imported        = physical::mapped_graph(bits, *floorplan, *inputs_.technology);
+    timed           = imported.get();
+    options.netlist = kWordPortNetlist;
+  }
+  options.model_generation = generation_;
+  if (inputs_.technology) {
+    options.dbu = inputs_.technology->dbu;
+  }
+  auto source = stage_constraints(*timed, inputs_.sdc, inputs_.design, inputs_.units, inputs_.clock, inputs_.clock_uncertainty_ps);
+  return evaluate_stage_timing(*timed, parasitics, library_, cells_, view(), std::move(source), 0, options);
 }
 
 void require_complete(const Stage_timing& timing) {

@@ -32,6 +32,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":domino_timing_model",
+        "//inou/lefdef:inou_lefdef",
         "//pass/domplace:contract",
         "//pass/place:late_timing",
         "//pass/place:require",
