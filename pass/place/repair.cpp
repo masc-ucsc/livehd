@@ -19,6 +19,7 @@
 #include <unordered_map>
 
 #include "attrs.hpp"
+#include "handoff_rows.hpp"
 #include "node_util.hpp"
 #include "pass/liberty/liberty_dff.hpp"
 #include "pass/partition/flatten.hpp"
@@ -430,12 +431,9 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
     const auto   p      = timing.pins.find(physical_label(output(n, *c)));
     const double stress = p == timing.pins.end() ? 0 : drive_stress(*c, p->second, timing.time_unit_ps);
     const double slack  = p == timing.pins.end() ? 0 : -p->second.slack.value_or(0);
-    priorities.emplace(n.get_debug_nid(),
-                       Node_priority{
-                           {stress > 1 ? stress : 0, slack},
-                           critical_nodes.contains(n.get_debug_nid()),
-                           std::string(n.get_name())
-    });
+    priorities.emplace(
+        n.get_debug_nid(),
+        Node_priority{{stress > 1 ? stress : 0, slack}, critical_nodes.contains(n.get_debug_nid()), std::string(n.get_name())});
   }
   std::sort(buffers.begin(), buffers.end(), [&](const auto& a, const auto& b) {
     const auto& pa = priorities.at(a.get_debug_nid());
@@ -796,6 +794,7 @@ void connect_bit(hhds::Graph& graph, const Physical_sink& sink, Pin driver) {
   sink.pin.connect_driver(driver);
 }
 struct Apply_index {
+  std::vector<std::string>                                                            tree_leaves, tree_instances;
   Node_index                                                                          nodes;
   std::set<std::string>                                                               names;
   std::map<std::string, const physical::Rc_net*>                                      nets;
@@ -845,6 +844,10 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
     if (driver.is_const() || gu::bits_of(driver) != 1) {
       throw std::runtime_error("buffer input is not scalar");
     }
+    gu::carry_preroute_exclusion(output(n, *current), driver);
+    if (n.attr(attrs::preroute_exclude).has()) {
+      driver.attr(attrs::preroute_net_exclude).set();
+    }
     for (auto target : sinks(output(n, *current))) {
       gu::drop_drivers(target);
       target.connect_driver(driver);
@@ -891,7 +894,7 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
         // can replace an existing shallow backbone with a long wire-minimal
         // path. Single-load chains remain removable/rebuildable as a unit.
         if (const auto* next = buffer(node, cells);
-            next && !preserve_chains && !fixed(node) && leaf.width == 1 && sinks(output(node, *next)).size() <= 1) {
+            next && !preserve_chains && edit.kind != "preroute" && !fixed(node) && leaf.width == 1 && sinks(output(node, *next)).size() <= 1) {
           removed.push_back(node);
           pending.push_back(physical_label(output(node, *next)));
         } else if (leaf_set.insert(point.pin).second) {
@@ -914,6 +917,20 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
   }
   if (leaves.empty()) {
     throw std::runtime_error("tree leaf count outside repair budget");
+  }
+  bool preroute_excluded = gu::preroute_net_excluded(root) || root.get_master_node().attr(attrs::preroute_exclude).has();
+  for (auto removed_cell : removed) {
+    preroute_excluded |= removed_cell.attr(attrs::preroute_exclude).has()
+                         || gu::preroute_net_excluded(output(removed_cell, *buffer(removed_cell, cells)));
+  }
+  for (const auto& leaf : leaves) {
+    preroute_excluded |= leaf.pin.get_master_node().attr(attrs::preroute_exclude).has();
+  }
+  if (edit.kind == "preroute" && preroute_excluded) {
+    throw std::runtime_error("pre-route repeater tree reaches an excluded net");
+  }
+  if (edit.kind == "preroute") {
+    shared->tree_leaves = leaf_names;
   }
   Node owner = n;
   if (n.is_input_node()) {
@@ -1065,6 +1082,9 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
                         c / tech.dbu);
   }
   if (plan.buffers.empty() && removed.empty()) {
+    if (edit.kind == "preroute") {
+      return plan;
+    }
     throw std::runtime_error("Steiner split is not needed for this drive");
   }
   for (const auto& leaf : leaves) {
@@ -1075,6 +1095,9 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
   if (source && source->width > 1) {
     root = gu::create_get_mask(graph, root, source->bit).get_driver_pin(0);
     gu::set_bits(root, 1);
+  }
+  if (preroute_excluded) {
+    root.attr(attrs::preroute_net_exclude).set();
   }
   // Keep all original wiring aliases well driven while bypassing the identity
   // cells. Physical sinks are then rewired per bit; unrelated packed bits stay.
@@ -1105,6 +1128,9 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
       name = std::format("__place_rebuffer_{}_{}", edit.node, serial++);
     } while (!names.insert(name).second);
     cell.set_name(name);
+    if (edit.kind == "preroute") {
+      shared->tree_instances.push_back(name);
+    }
     shared->nodes.emplace(name, cell);
     shared->origins.emplace(name, owner_name);
     cell.attr(attrs::color).set(owner_color);
@@ -1125,6 +1151,9 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
     cell.attr(attrs::place).set(seed);
     auto out = cell.create_driver_pin(b.output);
     gu::set_bits(out, 1);
+    if (preroute_excluded) {
+      out.attr(attrs::preroute_net_exclude).set();
+    }
     nodes.push_back(cell);
     outputs.push_back(out);
   }
@@ -1197,10 +1226,7 @@ std::vector<Edit> final_buffer_candidates(const Result& state, const Inventory& 
     const auto   a = length(*in->second), b = length(*out->second);
     const double nearby = 2 * tech.macros.at(cell->name).height * tech.dbu;
     if (a && b && std::min(*a, *b) <= nearby) {
-      ranked.push_back({
-          std::min(*a, *b),
-          {"remove", std::string(node.get_name()), {}, 0}
-      });
+      ranked.push_back({std::min(*a, *b), {"remove", std::string(node.get_name()), {}, 0}});
     }
   }
   std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
@@ -1284,6 +1310,155 @@ std::set<std::string> regressed_nodes(const Timing_feedback& before, const Timin
   }
   return nodes;
 }
+Repeater_proposer::Repeater_proposer(const Options& options, const physical::Technology& tech)
+    : options_(options), tech_(tech), cells_(inventory(options, tech)) {}
+void Repeater_proposer::prepare() {
+  if (prepared_) {
+    return;
+  }
+  auto              special = scan_special_pins(options_.liberty, true);
+  decltype(drives_) drives;
+  for (auto drive : liberty::scan_output_drives(options_.liberty)) {
+    drives.emplace(std::pair{drive.name, drive.output}, std::move(drive));
+  }
+  special_  = std::move(special);
+  drives_   = std::move(drives);
+  prepared_ = true;
+}
+double Repeater_proposer::length_limit_um(Layer_rc routing_rc) const {
+  if (!std::isfinite(routing_rc.r) || routing_rc.r <= 0 || !std::isfinite(routing_rc.c) || routing_rc.c <= 0) {
+    throw std::invalid_argument("repeater length limit requires characterized routing RC");
+  }
+  const Buffer* seed = nullptr;
+  for (const auto& [name, cell] : cells_) {
+    if (identity(cell) && !matches_dont_use(name, options_) && (!seed || cell.area < seed->area)) {
+      seed = &cell;
+    }
+  }
+  return seed ? wire_limit(*seed, routing_rc.r, routing_rc.c) : std::numeric_limits<double>::infinity();
+}
+std::optional<Repeater_graph> Repeater_proposer::propose(const Result& state, const Timing_feedback& timing,
+                                                         const std::string& driver, Layer_rc routing_rc,
+                                                         std::chrono::steady_clock::time_point deadline) {
+  if (!state.graph || !state.parasitics || !std::isfinite(routing_rc.r) || routing_rc.r <= 0 || !std::isfinite(routing_rc.c)
+      || routing_rc.c <= 0 || state.floorplan.dbu != tech_.dbu || deadline == std::chrono::steady_clock::time_point::max()) {
+    throw std::invalid_argument("repeater proposal requires final graph/RC, matching DBU, characterized routing RC and deadline");
+  }
+  const auto expired = [&] { return std::chrono::steady_clock::now() >= deadline; };
+  if (expired()) {
+    return {};
+  }
+  const Buffer* seed = nullptr;
+  for (const auto& [name, cell] : cells_) {
+    if (identity(cell) && !matches_dont_use(name, options_) && (!seed || cell.area < seed->area)) {
+      seed = &cell;
+    }
+  }
+  if (!seed) {
+    return {};
+  }
+  prepare();
+  if (expired()) {
+    return {};
+  }
+  const auto protected_names = protected_buffers(*state.graph, cells_, special_, true, options_.control_ports);
+  const auto original        = std::find_if(state.parasitics->nets.begin(), state.parasitics->nets.end(), [&](const auto& net) {
+    return net.driver == driver;
+  });
+  if (original == state.parasitics->nets.end()) {
+    throw std::invalid_argument("missing repeater source RC");
+  }
+  // Never remove/resize existing cells or alter clock/reset cones, ports,
+  // macros or a pin already carrying fixed wiring. A cell locked by another
+  // pre-route can still receive a repeater on an unrelated pin: the proposal
+  // only reconnects this net and leaves the original cell and other nets intact.
+  // The host additionally supplies synthesis dont_touch eligibility.
+  std::set<std::string> routed_cells, routed_pins;
+  for (const auto& net : state.floorplan.nets) {
+    if (net.wires.empty()) {
+      continue;
+    }
+    const bool fixed_wiring = std::all_of(net.wires.begin(), net.wires.end(), [](const auto& wire) {
+      return wire.type == "FIXED";
+    });
+    for (const auto& pin : net.connections) {
+      if (pin.instance != "PIN") {
+        if (fixed_wiring) {
+          routed_cells.insert(pin.instance);
+        }
+        routed_pins.insert(pin.instance + ":" + pin.pin);
+      }
+    }
+  }
+  std::map<std::string, const physical::Component*> components;
+  for (const auto& cell : state.floorplan.components) {
+    components.emplace(cell.name, &cell);
+  }
+  for (const auto& point : original->nodes) {
+    if (point.pin.empty()) {
+      continue;
+    }
+    const auto colon = point.pin.rfind(':');
+    if (colon == std::string::npos) {
+      return {};
+    }
+    const auto name = point.pin.substr(0, colon);
+    const auto cell = components.find(name);
+    if (protected_names.contains(name) || routed_pins.contains(point.pin) || cell == components.end()) {
+      return {};
+    }
+    const auto& master = tech_.macros.at(cell->second->macro);
+    const auto status = cell->second->place.status;
+    const bool prior_route_lock = status == physical::Status::FIXED && routed_cells.contains(name);
+    if (!master.klass.starts_with("CORE") || master.virtual_proxy || (status != physical::Status::PLACED && !prior_route_lock)) {
+      return {};
+    }
+  }
+  if (expired()) {
+    return {};
+  }
+  Repeater_graph proposal;
+  proposal.library = std::make_shared<hhds::GraphLibrary>();
+  proposal.graph   = partition::flatten_hierarchy(state.graph.get(),
+                                                proposal.library.get(),
+                                                state.graph->get_name(),
+                                                nullptr,
+                                                false,
+                                                  {},
+                                                  {},
+                                                true);
+  if (!proposal.graph) {
+    throw std::runtime_error("cannot clone pre-route repeater trial");
+  }
+  Apply_index index(*proposal.graph, state);
+  index.rc            = {routing_rc.r, routing_rc.c};
+  index.output_drives = drives_;
+  const Edit edit{"preroute", driver.substr(0, driver.rfind(':')), seed->name, 32, 0, driver};
+  auto       tree = apply(*proposal.graph, cells_, edit, protected_names, state, timing, options_, tech_, &index);
+  if (!tree || tree->buffers.empty() || expired()) {
+    return {};
+  }
+  std::vector<Repeater_site_request> requests;
+  for (size_t i = 0; i < tree->buffers.size(); ++i) {
+    const auto& name   = index.tree_instances.at(i);
+    const auto  node   = index.nodes.at(name);
+    const auto  master = std::string(node.get_subnode_io()->get_name());
+    const auto& cell   = cells_.at(master);
+    proposal.ports.emplace_back(cell.inputs.front(), cell.output);
+    requests.push_back({name, master, tree->buffers[i].position.first, tree->buffers[i].position.second});
+  }
+  auto sites = reserve_repeater_sites(state.floorplan, tech_, requests, deadline);
+  if (!sites) {
+    return {};
+  }
+  for (const auto& cell : *sites) {
+    index.nodes.at(cell.name).attr(attrs::place).set(cell.place);
+  }
+  proposal.cells = std::move(*sites);
+  proposal.tree  = std::move(*tree);
+  proposal.sinks = std::move(index.tree_leaves);
+  return proposal;
+}
 }  // namespace detail
 using namespace detail;
 bool            timing_improves(const Timing_feedback& before, const Timing_feedback& after) { return retain(before, after); }
@@ -1333,6 +1508,7 @@ Timing_feedback timing_feedback(std::string_view text) {
       p.load_ff           = number("load_ff");
       p.slack             = number("slack");
       p.capacitance_ff    = number("capacitance_ff");
+      p.hold_slack        = number("hold_slack");
       p.clock             = pin["clock"].GetBool();
       p.violations        = pin.HasMember("violations") ? pin["violations"].GetUint() : 0;
       p.electrical_excess = number("electrical_excess").value_or(0);
@@ -1490,7 +1666,7 @@ Floorplan_resize repair_floorplan(Result& state, const Options& options, const T
       if (!graph) {
         throw std::runtime_error("cannot clone FP electrical sweep");
       }
-      const auto            protected_names = protected_buffers(*state.graph, cells, scanned.special, true, options.control_ports);
+      const auto  protected_names = protected_buffers(*state.graph, cells, scanned.special, true, options.control_ports);
       auto        candidates = edits(*state.graph, cells, result.timing, protected_names, state, options, tech, &scanned.drives);
       Apply_index index(*graph, state);
       std::set<std::string> visited;
@@ -2012,13 +2188,13 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
     throw std::invalid_argument("buffer repair requires legal full placement");
   }
   Repair_result result;
-  result.placed                           = std::move(initial);
-  const auto              tech            = physical::read_lef(options.lefs);
-  const auto              cells           = inventory(options, tech);
-  auto                    score           = prior_timing ? std::move(*prior_timing) : evaluate(result.placed);
+  result.placed              = std::move(initial);
+  const auto tech            = physical::read_lef(options.lefs);
+  const auto cells           = inventory(options, tech);
+  auto       score           = prior_timing ? std::move(*prior_timing) : evaluate(result.placed);
   const auto protected_names = protected_buffers(*result.placed.graph, cells, options.liberty, true, options.control_ports);
-  std::set<std::string>   tried;
-  rapidjson::StringBuffer trace;
+  std::set<std::string>                      tried;
+  rapidjson::StringBuffer                    trace;
   rapidjson::Writer<rapidjson::StringBuffer> w(trace);
   w.StartObject();
   w.Key("model");

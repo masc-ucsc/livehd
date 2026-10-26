@@ -1442,10 +1442,13 @@ std::string Slang_context::module_name_of(const slang::ast::InstanceSymbol& symb
 livehd::synth_attr::Policy Slang_context::synth_attributes(std::span<const slang::ast::AttributeSymbol* const> attrs, int rank) {
   livehd::synth_attr::Policy p;
   for (const auto* attr : attrs) {
-    if (!attr->name.starts_with("synth.")) {
+    const bool routing_protection = attr->name == "dont_touch" || attr->name == "DONT_TOUCH";
+    if (!routing_protection && !attr->name.starts_with("synth.")) {
       continue;
     }
-    const std::string key{attr->name.substr(6)};
+    // Import conventional protection into the routing policy. This does not
+    // promise preservation of the original cells through synthesis mapping.
+    const std::string key{routing_protection ? "preroute_exclude" : attr->name.substr(6)};
     const auto&       cv = attr->getValue();
     std::string       value;
     const auto*       syntax = attr->getSyntax();
@@ -1457,13 +1460,22 @@ livehd::synth_attr::Policy Slang_context::synth_attributes(std::span<const slang
     if (cv.isString() || quoted) {
       const auto string_value = cv.convertToStr();
       value                   = livehd::synth_attr::quote(string_value.str());
+      if (routing_protection) {
+        std::string flag{string_value.str()};
+        std::transform(flag.begin(), flag.end(), flag.begin(), [](unsigned char c) { return std::tolower(c); });
+        if (flag == "true" || flag == "yes" || flag == "1") {
+          value = "true";
+        } else if (flag == "false" || flag == "no" || flag == "0") {
+          value = "false";
+        }
+      }
     } else if (cv.isInteger()) {
       auto v = cv.integer().as<int64_t>();
       if (!v) {
         emit_unsupported(attr->location, "synth-value", "synthesis attribute must have a known integer/string value");
         continue;
       }
-      if (key == "grow" || key == "ware") {
+      if (key == "grow" || key == "ware" || key == "preroute_exclude") {
         value = *v ? "true" : "false";
       } else {
         value = std::to_string(*v);

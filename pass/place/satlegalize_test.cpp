@@ -186,6 +186,161 @@ TEST(Satlegalize, IncidentBoundaryNetsCanRejectAlignment) {
   EXPECT_GT(report.boundary_rejected, 0);
   EXPECT_EQ(f.fp.components, original);
 }
+TEST(Satlegalize, LiftedM2WitnessRequiresLegalViasAndClearInstalledCorridor) {
+  physical::Technology tech;
+  tech.dbu                = 1000;
+  tech.manufacturing_grid = .001;
+  tech.routing_layers     = {"M1", "M2"};
+  for (const auto& name : tech.routing_layers) {
+    auto& layer         = tech.layers[name];
+    layer.width         = .018;
+    layer.direction     = name == "M1" ? "VERTICAL" : "HORIZONTAL";
+    layer.rules.loaded  = true;
+    layer.rules.area    = .000666;
+    layer.rules.spacing = {
+        {.018, {}, {}}
+    };
+  }
+  tech.cut_layers["V1"].width   = .018;
+  tech.cut_layers["V1"].spacing = {.018};
+  tech.vias["VIA12"].shapes     = {
+      {"M1", {-.009, -.011, .009, .011}},
+      {"M2", {-.014, -.009, .014, .009}},
+      {"V1", {-.009, -.009, .009, .009}}
+  };
+  auto& cell     = tech.macros["cell"];
+  cell.klass     = "CORE";
+  cell.width     = .162;
+  cell.height    = .270;
+  cell.pins["A"] = {"INPUT", "SIGNAL", {{"M1", {.018, .027, .036, .243}}}};
+  physical::Floorplan fp;
+  fp.dbu    = 1000;
+  fp.die    = {0, 0, 3000, 3000};
+  fp.tracks = {
+      {"Y", "M2", 1045, 6, 36}
+  };
+  Ann_place a(1000, 1000, 162, 270), b(1500, 1000, 162, 270);
+  a.status = b.status = physical::Status::PLACED;
+  fp.components       = {
+      {"a", "cell", a},
+      {"b", "cell", b}
+  };
+  const Satlegalize_alignment        pair{0, 1, "A", "A"};
+  const physical::Signal_metal_rules rules(tech, fp);
+  physical::Shape                    witness;
+  EXPECT_FALSE(satlegalize_aligned(tech, fp, pair, a, b, {0, 1}, &witness, &rules));
+  ASSERT_TRUE(satlegalize_aligned(tech, fp, pair, a, b, {0, 1}, &witness, &rules, true));
+  EXPECT_EQ(witness.layer, "M2");
+  EXPECT_EQ(witness.rect.yl, 1036);
+  EXPECT_TRUE(rules.rectangle(witness).legal);
+  const auto bounds = satlegalize_pin_access_bounds(tech, fp.components.front(), a, "A", fp.dbu, true);
+  EXPECT_TRUE(std::any_of(bounds.begin(), bounds.end(), [](const auto& shape) { return shape.layer == "M2"; }));
+  EXPECT_THROW(satlegalize_aligned(tech, fp, pair, a, b, {0, 1}, &witness, nullptr, true), std::invalid_argument);
+  auto shifted  = b;
+  shifted.y    += 270;
+  EXPECT_FALSE(satlegalize_aligned(tech, fp, pair, a, shifted, {0, 1}, &witness, &rules, true));
+  // Access at y=1045 straddles two pin rectangles. A bounds prefilter must
+  // preserve their union rather than require enclosure in either rectangle.
+  auto split_tech                                  = tech;
+  split_tech.macros.at("cell").pins.at("A").shapes = {
+      {"M1", {.018, .027, .036, .045}},
+      {"M1", {.018, .045, .036, .243}}
+  };
+  const physical::Signal_metal_rules split_rules(split_tech, fp);
+  ASSERT_TRUE(satlegalize_aligned(split_tech, fp, pair, a, b, {0, 1}, &witness, &split_rules, true));
+  EXPECT_EQ(witness.rect.yl, 1036);
+  {
+    auto clock_tech = tech;
+    auto clock_fp   = fp;
+    clock_fp.tracks = {
+        {"Y", "M2", 1045, 1, 36}
+    };
+    clock_tech.macros["cell"].pins["CLK"] = {"INPUT", "SIGNAL", {{"M1", {.072, .027, .090, .063}}}};
+    // Clock semantics can come from the net, not LEF USE CLOCK. Its only
+    // possible via escape must survive the neighboring signal alignment.
+    clock_fp.nets.push_back({"clock", {{"a", "CLK"}}, {}, "CLOCK"});
+    const physical::Signal_metal_rules clock_rules(clock_tech, clock_fp);
+    EXPECT_FALSE(satlegalize_aligned(clock_tech, clock_fp, pair, a, b, {0, 1}, &witness, &clock_rules, true));
+  }
+  auto& block        = tech.macros["block"];
+  block.klass        = "BLOCK";
+  block.width        = .1;
+  block.height       = .3;
+  block.obstructions = {
+      {"M2", {0, 0, .1, .3}}
+  };
+  Ann_place obstacle(1200, 1000, 100, 300);
+  obstacle.status = physical::Status::FIXED;
+  fp.components.push_back({"obstacle", "block", obstacle});
+  EXPECT_FALSE(satlegalize_aligned(tech, fp, pair, a, b, {0, 1, 2}, &witness, &rules, true));
+}
+TEST(Satlegalize, RouteModeChecksSpacingBeforeAcceptingAnAlignment) {
+  Fixture f;
+  f.fp.components[1].place.y = 0;
+  f.tech.manufacturing_grid  = .01;
+  auto& layer                = f.tech.layers.at("M1");
+  layer.rules.loaded         = true;
+  layer.rules.spacing        = {
+      {.1, {}, {}}
+  };
+  physical::Signal_metal_rules rules(f.tech, f.fp);
+  const Satlegalize_alignment  pair{0, 1, "Y", "A"};
+  const auto&                  a = f.fp.components[0].place;
+  const auto&                  b = f.fp.components[1].place;
+  ASSERT_TRUE(satlegalize_aligned(f.tech, f.fp, pair, a, b, {0, 1}, nullptr, &rules));
+  // Positive geometric gap, but only half the required metal spacing.
+  f.tech.macros.at("cell").pins["foreign"] = {"INPUT", "SIGNAL", {{"M1", {1.7, .6, 1.9, .8}}}};
+  EXPECT_TRUE(satlegalize_aligned(f.tech, f.fp, pair, a, b, {0, 1}));
+  EXPECT_FALSE(satlegalize_aligned(f.tech, f.fp, pair, a, b, {0, 1}, nullptr, &rules));
+}
+TEST(Satlegalize, RouteWitnessSelectsTheClearTrackInsteadOfFirstGeometricAlignment) {
+  Fixture f;
+  f.fp.components[1].place.y = 0;
+  f.tech.manufacturing_grid  = .01;
+  auto& layer                = f.tech.layers.at("M1");
+  layer.rules.loaded         = true;
+  layer.rules.spacing        = {
+      {.1, {}, {}}
+  };
+  auto& macro                               = f.tech.macros.at("cell");
+  macro.pins.at("Y").shapes.front().rect.yh = 1.8;
+  macro.pins.at("A").shapes.front().rect.yh = 1.8;
+  macro.pins["foreign"]                     = {"INPUT", "SIGNAL", {{"M1", {1.7, .6, 1.9, .8}}}};
+  const physical::Signal_metal_rules rules(f.tech, f.fp);
+  const Satlegalize_alignment        pair{0, 1, "Y", "A"};
+  const auto&                        a = f.fp.components[0].place;
+  const auto&                        b = f.fp.components[1].place;
+  physical::Shape                    geometric, routed;
+  ASSERT_TRUE(satlegalize_aligned(f.tech, f.fp, pair, a, b, {0, 1}, &geometric));
+  ASSERT_TRUE(satlegalize_aligned(f.tech, f.fp, pair, a, b, {0, 1}, &routed, &rules));
+  EXPECT_EQ(geometric.rect.yl, 45);
+  EXPECT_EQ(routed.rect.yl, 145);
+  EXPECT_TRUE(rules.rectangle(routed).legal);
+}
+TEST(Satlegalize, SupplyPinsBlockCorridorsWithoutObsAndBeyondCellBody) {
+  Fixture f;
+  f.fp.components[1].place.y = 0;
+  const auto report          = satlegalize(f.tech, f.fp, f.timing, {});
+  ASSERT_FALSE(report.accepted.empty());
+  ASSERT_TRUE(satlegalize_preserved(f.tech, f.fp, report));
+  auto& macro = f.tech.macros.at("cell");
+  ASSERT_TRUE(macro.blocked_layers.empty());
+  macro.pins["VSS"] = {"INOUT", "GROUND", {{"M1", {1.7, .4, 1.9, .6}}}};
+  EXPECT_FALSE(satlegalize_preserved(f.tech, f.fp, report));
+  const auto& cell         = f.fp.components.front();
+  macro.pins["VSS"].shapes = {
+      {"M1", {-.5, .4, 0, .6}}
+  };
+  physical::Shape corridor{
+      "M1",
+      {double(cell.place.x - 40), double(cell.place.y + 45), double(cell.place.x - 20), double(cell.place.y + 55)}
+  };
+  EXPECT_TRUE(satlegalize_obstructs(f.tech, cell, cell.place, corridor, f.fp.dbu));
+  macro.pins["VSS"].use = "POWER";
+  EXPECT_TRUE(satlegalize_obstructs(f.tech, cell, cell.place, corridor, f.fp.dbu));
+  macro.pins["VSS"].shapes.front().layer = "M2";
+  EXPECT_FALSE(satlegalize_obstructs(f.tech, cell, cell.place, corridor, f.fp.dbu));
+}
 TEST(Satlegalize, OrientationAndObstructionRevalidation) {
   Fixture f;
   f.fp.components[1].place.y = 0;

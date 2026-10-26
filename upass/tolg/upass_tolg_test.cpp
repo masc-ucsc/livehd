@@ -118,6 +118,31 @@ void register_all(const uPass_tolg::Registry& registry, const std::string& lib_p
   }
 }
 
+TEST(TolgRoutingExclusion, SourceTargetMarksItsConeOnly) {
+  for (bool excluded : {false, true}) {
+    auto ln = module_unit("routing.top", {in("a", 1), in("b", 2), in("unrelated", 3), out("y", 4)});
+    ln->set_lambda_kind("mod");
+    const auto stmts = ln->get_first_child(ln->get_root());
+    const auto attr = ln->add_child(stmts, Lnast_ntype::create_attr_set());
+    ln->add_child(attr, Lnast_node::create_ref("y"));
+    ln->add_child(attr, Lnast_node::create_const("synth.preroute_exclude"));
+    ln->add_child(attr, Lnast_node::create_const(excluded ? "true" : "false"));
+    const auto sum = ln->add_child(stmts, Lnast_ntype::create_plus());
+    ln->add_child(sum, Lnast_node::create_ref("y"));
+    ln->add_child(sum, Lnast_node::create_ref("a"));
+    ln->add_child(sum, Lnast_node::create_ref("b"));
+    const auto path = fresh_lib_dir(excluded ? "route_excluded" : "route_allowed");
+    const uPass_tolg::Registry registry{ln};
+    register_all(registry, path);
+    const auto graph = uPass_tolg::run(ln, path, registry);
+    ASSERT_TRUE(graph);
+    const auto result = graph->get_output_pin("y").get_driver_pin();
+    ASSERT_FALSE(result.is_invalid());
+    EXPECT_EQ(result.get_master_node().attr(livehd::attrs::preroute_exclude).has(), excluded);
+    EXPECT_FALSE(gu::preroute_net_excluded(graph->get_input_pin("unrelated")));
+  }
+}
+
 // What a library that never saw the module declares for `ports`.
 std::vector<Decl> fresh_decls(std::string_view tag, std::string_view name, const Ports& ports) {
   const auto                 path = fresh_lib_dir(std::format("{}_fresh", tag));

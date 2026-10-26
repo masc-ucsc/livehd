@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <sstream>
+#include <string_view>
 #include <unordered_map>
 
 #include "pass/liberty/liberty_dff.hpp"
@@ -74,11 +75,33 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
                                 const timing::Feedback& timing) {
   Prects_networks result;
   result.ignored.resize(fp.nets.size());
-  std::unordered_map<std::string, const physical::Macro*> masters;
+  struct Instance_roles {
+    const physical::Macro*       master   = nullptr;
+    const std::set<std::string>* controls = nullptr;
+    const std::set<std::string>* clocks   = nullptr;
+    const std::set<std::string>* resets   = nullptr;
+  };
+  // All referenced names and role sets remain owned by the immutable inputs.
+  // Resolve each library master once, then use one instance lookup per pin.
+  std::map<std::string_view, Instance_roles>                  master_roles;
+  std::unordered_map<std::string_view, const Instance_roles*> instances;
+  instances.reserve(fp.components.size());
   for (const auto& c : fp.components) {
-    if (auto m = tech.macros.find(c.macro); m != tech.macros.end()) {
-      masters.emplace(c.name, &m->second);
+    auto [it, inserted] = master_roles.try_emplace(c.macro);
+    auto& info          = it->second;
+    if (inserted) {
+      if (auto m = tech.macros.find(c.macro); m != tech.macros.end()) {
+        info.master = &m->second;
+      }
+      const auto lookup = [&](const auto& map) -> const std::set<std::string>* {
+        const auto found = map.find(c.macro);
+        return found == map.end() ? nullptr : &found->second;
+      };
+      info.controls = lookup(roles.controls);
+      info.clocks   = lookup(roles.clocks);
+      info.resets   = lookup(roles.resets);
     }
+    instances.emplace(c.name, &info);
   }
   std::unordered_map<std::string, size_t> pin_net;
   std::vector<std::vector<size_t>>        adjacent(fp.nets.size());
@@ -96,18 +119,6 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
       pending.push_back(n);
     }
   };
-  std::unordered_map<std::string, const std::set<std::string>*> controls, clocks, resets;
-  for (const auto& c : fp.components) {
-    if (auto found = roles.clocks.find(c.macro); found != roles.clocks.end()) {
-      clocks.emplace(c.name, &found->second);
-    }
-    if (auto found = roles.controls.find(c.macro); found != roles.controls.end()) {
-      controls.emplace(c.name, &found->second);
-    }
-    if (auto found = roles.resets.find(c.macro); found != roles.resets.end()) {
-      resets.emplace(c.name, &found->second);
-    }
-  }
   for (size_t n = 0; n < fp.nets.size(); ++n) {
     for (const auto& c : fp.nets[n].connections) {
       const auto label = c.instance == "PIN" ? c.pin : c.instance + ":" + c.pin;
@@ -139,27 +150,29 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
         }
         continue;
       }
-      if (auto p = clocks.find(c.instance);
-          p != clocks.end() && (p->second->contains(c.pin) || p->second->contains(c.pin.substr(0, c.pin.find('['))))) {
+      const auto instance = instances.find(c.instance);
+      if (instance == instances.end()) {
+        continue;
+      }
+      const auto& info    = *instance->second;
+      const auto  matches = [&](const std::set<std::string>* pins) {
+        return pins && (pins->contains(c.pin) || pins->contains(c.pin.substr(0, c.pin.find('['))));
+      };
+      if (matches(info.clocks)) {
         mark_clock(n);
       }
-      if (auto m = masters.find(c.instance); m != masters.end()) {
-        if (auto pin = m->second->pins.find(c.pin); pin != m->second->pins.end() && pin->second.use == "CLOCK") {
-          mark_clock(n);
-        }
-        if (auto pin = m->second->pins.find(c.pin); pin != m->second->pins.end()
-                                                    && ((!roles.override_controls && pin->second.use == "CLOCK")
-                                                        || pin->second.use == "POWER" || pin->second.use == "GROUND")) {
-          mark(n);
+      if (info.master) {
+        if (auto pin = info.master->pins.find(c.pin); pin != info.master->pins.end()) {
+          const auto& use = pin->second.use;
+          if (use == "CLOCK") {
+            mark_clock(n);
+          }
+          if ((!roles.override_controls && use == "CLOCK") || use == "POWER" || use == "GROUND") {
+            mark(n);
+          }
         }
       }
-      if (auto p = controls.find(c.instance);
-          !roles.override_controls && p != controls.end()
-          && (p->second->contains(c.pin) || p->second->contains(c.pin.substr(0, c.pin.find('['))))) {
-        mark(n);
-      }
-      if (auto p = resets.find(c.instance);
-          p != resets.end() && (p->second->contains(c.pin) || p->second->contains(c.pin.substr(0, c.pin.find('['))))) {
+      if ((!roles.override_controls && matches(info.controls)) || matches(info.resets)) {
         mark(n);
       }
     }

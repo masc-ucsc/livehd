@@ -36,6 +36,32 @@ namespace {
 
 namespace gu = livehd::graph_util;
 
+// Logic equivalence does not establish correspondence of physical exclusions.
+// Until the cache has an annotation-aware correspondence proof, refuse reuse
+// when either pre-body carries them (including when an annotation was removed).
+bool has_preroute_exclusions(hhds::Graph& graph) {
+  const auto marked = [](const hhds::Node_class& node) {
+    if (node.attr(livehd::attrs::preroute_exclude).has()) {
+      return true;
+    }
+    for (auto pin : node.out_sorted_pins()) {
+      if (gu::preroute_net_excluded(pin)) {
+        return true;
+      }
+    }
+    return false;
+  };
+  if (marked(graph.get_input_node())) {
+    return true;
+  }
+  for (auto node : graph.body().nodes()) {
+    if (marked(node)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 // LHD_ABC_INCR_DEBUG: print, per region, which compare gate rejected a reuse. A
 // reuse-eligible region that misses on a comment-only edit is a bug or a
 // determinism gap; this makes the gate visible.
@@ -281,6 +307,10 @@ Region_cache::Compare_result Region_cache::lookup_compare(const livehd::partitio
     dbg("pre-body rebuild failed");
     return res;
   }
+  if (has_preroute_exclusions(*pre_body)) {
+    dbg("pre-body routing exclusions need annotation-aware comparison");
+    return res;
+  }
   const auto digest
       = livehd::semdiff::canonical_digest(pre_body, {}, livehd::semdiff::Sub_fold::interface, /*matching_io_names=*/false);
   std::vector<const Row*> candidates;
@@ -322,6 +352,10 @@ Region_cache::Compare_result Region_cache::lookup_compare(const livehd::partitio
     }
     auto cached_pre = pio->get_graph();
     if (!cached_pre) {
+      continue;
+    }
+    if (has_preroute_exclusions(*cached_pre)) {
+      dbg("cached routing exclusions need annotation-aware comparison");
       continue;
     }
     if (!row.stored_this_run && instantiates_refreshed_child(cached_pre.get())) {

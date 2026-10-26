@@ -33,6 +33,7 @@ struct Attr_spec {
   std::string_view scope;   // which cells the key applies to
 };
 inline constexpr Attr_spec kAttributes[] = {
+    {"preroute_exclude", "true", "any cell or scope: exclude its mapped nets from LiveHD pre-routing; not an optimization lock"},
     {     "color",             "\"g\"", "any cell: group membership (a name or an integer)"},
     {      "grow",              "false", "any cell: false keeps an explicit group from absorbing neighbouring cones"},
     {     "adder",              "\"cla\"", "Sum, LT, GT, Mult, Div"},
@@ -142,7 +143,7 @@ inline void validate(std::string_view key, std::string_view value) {
     }
     return;
   }
-  if (key == "grow" || key == "ware" || key == "stop_mux" || key == "stop_arith" || key == "stop_cmp" || key == "stop_shift") {
+  if (key == "grow" || key == "ware" || key == "preroute_exclude" || key == "stop_mux" || key == "stop_arith" || key == "stop_cmp" || key == "stop_shift") {
     if (!d.IsBool()) {
       bad();
     }
@@ -229,7 +230,7 @@ template <class Op>
     // own body, not the callees: only group membership rides on an instance. An
     // explicit call-site attribute is stamped on the instance separately and
     // keeps every key.
-    return key == "color" || key == "grow";
+    return key == "color" || key == "grow" || key == "preroute_exclude";
   }
   if (key == "adder" || key == "block_size") {
     return op == Op::Sum || op == Op::LT || op == Op::GT || op == Op::Mult || op == Op::Div;

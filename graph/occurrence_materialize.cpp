@@ -186,6 +186,9 @@ bool expand_one(hhds::Graph* g, const hhds::Node_class& inst, const hhds::Subnod
       occurrence_name = std::format("{}__li{}", occ_base, r);
     }
     rep.set_name(occurrence_name);
+    if (inst.attr(livehd::attrs::preroute_exclude).has()) {
+      rep.attr(livehd::attrs::preroute_exclude).set();
+    }
     // Carry the compact node's own annotations (srcid, color) so provenance and
     // partitioning survive expansion; the descriptor itself must NOT ride along
     // (each occurrence is an ordinary instance now).

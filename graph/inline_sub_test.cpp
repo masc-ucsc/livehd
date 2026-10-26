@@ -50,6 +50,7 @@ TEST(SubInline, FeedThroughChainRetainsItsExternalDriver) {
         .connect_sink(inst.create_sink_pin(static_cast<hhds::Port_id>(i)));
   }
   inst.create_driver_pin(static_cast<hhds::Port_id>(2 * count - 1)).connect_sink(parent->get_output_pin("result"));
+  inst.attr(livehd::attrs::preroute_exclude).set();
   ASSERT_TRUE(gu::inline_sub_instance(parent.get(), inst, "test"));
   int drivers = 0;
   for (auto edge_drv : parent->get_output_pin("result").get_driver_pins()) {
@@ -57,6 +58,9 @@ TEST(SubInline, FeedThroughChainRetainsItsExternalDriver) {
     ++drivers;
   }
   EXPECT_EQ(drivers, 1);
+  EXPECT_TRUE(gu::preroute_net_excluded(data));
+  EXPECT_FALSE(parent->get_input_node().attr(livehd::attrs::preroute_exclude).has());
+  EXPECT_FALSE(gu::preroute_net_excluded(child->get_input_pin("x0")));
 }
 
 namespace {
@@ -161,6 +165,27 @@ TEST(SubInline, OverrideBindsByPortName) {
 
   auto rz = f.parent->get_output_pin("rz").get_driver_pin();
   EXPECT_EQ(rz, f.parent->get_input_pin("pb")) << "z = b must forward the parent's driver of port b";
+}
+
+TEST(SubInline, PrerouteExclusionFollowsClonedCellsOnly) {
+  for (int scope = 0; scope < 4; ++scope) {
+    Override_fixture f(std::format("preroute_scope_{}", scope));
+    const auto source = f.model->get_output_pin("y").get_driver_pin().get_master_node();
+    if (scope == 1) {
+      f.inst.attr(livehd::attrs::preroute_exclude).set();
+    } else if (scope == 2) {
+      f.model->get_input_node().attr(livehd::attrs::preroute_exclude).set();
+    } else if (scope == 3) {
+      source.attr(livehd::attrs::preroute_exclude).set();
+    }
+    const auto unrelated = gu::create_typed_node(*f.parent, Ntype_op::Not);
+    ASSERT_TRUE(gu::inline_sub_instance(f.parent.get(), f.inst, "test", f.model.get()));
+    const auto cloned = f.parent->get_output_pin("ry").get_driver_pin().get_master_node();
+    EXPECT_EQ(cloned.attr(livehd::attrs::preroute_exclude).has(), scope != 0);
+    EXPECT_FALSE(unrelated.attr(livehd::attrs::preroute_exclude).has());
+    EXPECT_FALSE(f.parent->get_input_node().attr(livehd::attrs::preroute_exclude).has());
+    EXPECT_EQ(source.attr(livehd::attrs::preroute_exclude).has(), scope == 3);
+  }
 }
 
 // A model that does not describe the instance's ports is refused BEFORE any
@@ -382,6 +407,20 @@ TEST(SubInline, FitNodeInheritsTheInstanceColor) {
   ASSERT_EQ(gu::type_op_of(fit), Ntype_op::Get_mask);
   ASSERT_TRUE(gu::has_color(fit));
   EXPECT_EQ(gu::color_of(fit), 7);
+}
+
+TEST(SubInline, BoundaryFitInheritsPrerouteExclusion) {
+  for (bool excluded : {false, true}) {
+    Fit_fixture f(excluded ? "excluded_fit" : "unprotected_fit", 0, true, 8);
+    if (excluded) {
+      f.inst.attr(livehd::attrs::preroute_exclude).set();
+    }
+    ASSERT_TRUE(gu::inline_sub_instance(f.parent.get(), f.inst, "test"));
+    const auto fit = f.result().get_master_node();
+    ASSERT_EQ(gu::type_op_of(fit), Ntype_op::Get_mask);
+    EXPECT_EQ(fit.attr(livehd::attrs::preroute_exclude).has(), excluded);
+    EXPECT_FALSE(f.parent->get_input_node().attr(livehd::attrs::preroute_exclude).has());
+  }
 }
 
 // `y = a` in the child and the parent wiring inst.y back into inst.a is a

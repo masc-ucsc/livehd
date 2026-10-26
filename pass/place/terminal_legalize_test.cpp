@@ -52,10 +52,7 @@ struct Fixture {
     return i;
   }
   void net(size_t a, size_t b, double slack) {
-    fp.nets.push_back({
-        "n" + std::to_string(fp.nets.size()),
-        {{fp.components[a].name, "Y"}, {fp.components[b].name, "A"}}
-    });
+    fp.nets.push_back({"n" + std::to_string(fp.nets.size()), {{fp.components[a].name, "Y"}, {fp.components[b].name, "A"}}});
     timing.pins[fp.components[b].name + ":A"].slack = slack;
     timing.pins[fp.components[a].name + ":Y"].slack = slack;
   }
@@ -315,6 +312,10 @@ TEST(TerminalLegalize, CriticalPairSpansBinsAndRemainsFixedAsCrowdSpills) {
   const auto report = terminal_legalize(f.tech, f.fp, f.timing, f.options);
   f.check(report);
   EXPECT_EQ(report.critical_pairs, 1);
+  ASSERT_EQ(report.alignments.size(), 1);
+  Satlegalize_report exported;
+  exported.accepted = report.alignments;
+  EXPECT_TRUE(satlegalize_preserved(f.tech, f.fp, exported));
   EXPECT_EQ(f.fp.components[a].place.x, 500);
   EXPECT_EQ(f.fp.components[b].place.x, 6500);
   EXPECT_EQ(f.fp.components[a].place.y, 0);
@@ -476,15 +477,9 @@ TEST(TerminalLegalize, FragmentationRetryPreservesCriticalLocks) {
   f.tech.macros["wide"]               = f.tech.macros.at("cell");
   f.tech.macros["wide"].width         = 6;
   const auto locked = f.cell(9, 0), small = f.cell(5, 0), wide = f.cell(0, 0, "wide");
-  for (const auto& [i, slack] : {
-           std::pair{locked, -10.},
-           std::pair{ small,   0.}
-  }) {
+  for (const auto& [i, slack] : {std::pair{locked, -10.}, std::pair{small, 0.}}) {
     const auto& name = f.fp.components[i].name;
-    f.fp.nets.push_back({
-        "n" + name,
-        {{"PIN", "in"}, {name, "A"}}
-    });
+    f.fp.nets.push_back({"n" + name, {{"PIN", "in"}, {name, "A"}}});
     f.timing.pins[name + ":A"].slack = slack;
   }
   const auto report = terminal_legalize(f.tech, f.fp, f.timing, f.options);
@@ -563,14 +558,8 @@ TEST(TerminalLegalize, OptionalUntimedSideInputsProtectAllNetEndpointsButNotCloc
   f.net(a, b, -10);
   f.net(u, v, 0);
   const auto connection = [&](size_t i, const std::string& pin) { return physical::Connection{f.fp.components[i].name, pin}; };
-  f.fp.nets.push_back({
-      "side",
-      {connection(c, "Y"), connection(a, "B"), connection(d, "A")}
-  });
-  f.fp.nets.push_back({
-      "clock",
-      {connection(clock, "Y"), connection(a, "CLK")}
-  });
+  f.fp.nets.push_back({"side", {connection(c, "Y"), connection(a, "B"), connection(d, "A")}});
+  f.fp.nets.push_back({"clock", {connection(clock, "Y"), connection(a, "CLK")}});
   const auto report = terminal_legalize(f.tech, f.fp, f.timing, f.options);
   f.check(report);
   EXPECT_EQ(report.critical_nets, 1);
@@ -860,6 +849,33 @@ TEST(TerminalLegalize, TwoChoiceMenuCanRecoverVerticalAlignmentAcrossSiteOffsets
   EXPECT_EQ(report.joint_menu_recovered, 1);
   EXPECT_EQ(f.fp.components[a].place.x, f.fp.components[b].place.x);
   EXPECT_NE(f.fp.components[a].place.y, f.fp.components[b].place.y);
+}
+TEST(TerminalLegalize, RouteDrcSkipsUnselectedJointEndpoints) {
+  Fixture f(100, 10);
+  f.tech.manufacturing_grid = .01;
+  auto& layer               = f.tech.layers.at("M1");
+  layer.rules.loaded        = true;
+  layer.rules.spacing       = {{.1, {}, {}}};
+  f.tech.macros["driver"]   = f.tech.macros.at("cell");
+  f.tech.macros["driver"].pins.erase("A");
+  f.tech.macros["sink"] = f.tech.macros.at("cell");
+  f.tech.macros["sink"].pins.erase("Y");
+  f.options.route_drc         = true;
+  f.options.padding_sites     = 0;
+  f.options.critical_fraction = 1;
+  f.options.local_pair_limit  = 0;
+  f.options.pair_move_sites = f.options.pair_move_rows = 0;
+  const auto a = f.cell(5, 1, "driver"), b = f.cell(15, 1, "sink");
+  const auto c = f.cell(45, 1, "driver"), d = f.cell(55, 3, "sink");
+  f.net(a, b, -10);
+  f.net(c, d, -5);
+  const auto report = terminal_legalize(f.tech, f.fp, f.timing, f.options);
+  f.check(report);
+  EXPECT_EQ(report.joint_selected, 2);
+  EXPECT_EQ(report.critical_pairs, 1);
+  EXPECT_EQ(report.joint_dropped, 1);
+  EXPECT_EQ(f.fp.components[c].place.y, 100);
+  EXPECT_EQ(f.fp.components[d].place.y, 300);
 }
 TEST(TerminalLegalize, JointCandidatesCannotLeaveTheirOriginalBox) {
   Fixture f(100, 10);

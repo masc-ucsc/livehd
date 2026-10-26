@@ -366,6 +366,15 @@ violations, area, endpoint WNS/TNS and the path used by physical repair.
 No timing JSON is generated, written or read by this interface. Explicit
 standalone timing reports remain output artifacts, separate from feedback.
 
+Coordinate-only updates compare an owned cell-identity snapshot and net
+connectivity before updating RC. They reuse the existing cell and connection
+indexes; resize, cell-order and topology changes use the full delta path.
+
+What-if queries cache physical-to-timer pin-name translations within the session.
+Gate insertion, gate rollback and a new `evaluate` invalidate those translations.
+The cache holds names only: slack, slew, loads and other timing values continue
+to come from the synchronized timer.
+
 Placement passes a third `data_exclusions` argument containing physical pins on
 excluded non-clock nets. The session masks those net timing arcs before propagating
 arrival/required times, so registered reset paths cannot dominate downstream data

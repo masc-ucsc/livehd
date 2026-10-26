@@ -154,6 +154,10 @@ TEST(AbcIncr, StructuralEqualReuse) {
   auto  f1   = make_region("lgdb_p2_s1", out1, "top__c1");
   auto* pre1 = f1.src.get();
   ASSERT_NE(pre1, nullptr);
+  const auto protected_output = f1.mapped->get_output_pin("y").get_driver_pin();
+  protected_output.attr(livehd::attrs::preroute_net_exclude).set();
+  protected_output.get_master_node().attr(livehd::attrs::preroute_exclude).set();
+  f1.mapped->commit();
 
   Region_cache c1("lgdb_p2_cache", 7);
   Region_qor   q;
@@ -181,6 +185,36 @@ TEST(AbcIncr, StructuralEqualReuse) {
   ASSERT_TRUE(c2.reuse_hit(f2.rb, res, &out2));
   EXPECT_EQ(c2.hits(), 1);
   EXPECT_GT(node_count(f2.rb.body), 0) << "reuse fills the region body from the cache";
+  const auto reused_output = f2.rb.body->get_output_pin("y").get_driver_pin();
+  EXPECT_TRUE(livehd::graph_util::preroute_net_excluded(reused_output));
+  EXPECT_TRUE(reused_output.get_master_node().attr(livehd::attrs::preroute_exclude).has());
+  EXPECT_FALSE(livehd::graph_util::preroute_net_excluded(f2.rb.body->get_input_pin("a")));
+}
+
+TEST(AbcIncr, RoutingAnnotationChangesCannotReuseLogicOnlyProof) {
+  for (bool old_marked : {false, true}) {
+    for (bool net_marker : {false, true}) {
+      const auto tag = std::string("lgdb_route_annotation_") + (old_marked ? "remove_" : "add_")
+                       + (net_marker ? "net" : "cell");
+      auto& out1 = livehd::Hhds_graph_library::instance(tag + "_out1");
+      auto& out2 = livehd::Hhds_graph_library::instance(tag + "_out2");
+      auto old = make_region((tag + "_src1").c_str(), out1, "top__c1");
+      auto fresh = make_region((tag + "_src2").c_str(), out2, "top__c1");
+      auto& annotated = old_marked ? old : fresh;
+      const auto driver = annotated.src->get_output_pin("y").get_driver_pin();
+      if (net_marker) {
+        driver.attr(livehd::attrs::preroute_net_exclude).set();
+      } else {
+        driver.get_master_node().attr(livehd::attrs::preroute_exclude).set();
+      }
+      annotated.src->commit();
+      Region_cache writer(tag + "_cache", 7);
+      ASSERT_TRUE(writer.store(old.rb, *old.slib, old.src_name, Region_qor{}, "R", &out1));
+      writer.save();
+      Region_cache reader(tag + "_cache", 7);
+      EXPECT_FALSE(reader.lookup_compare(fresh.rb, fresh.src.get(), "R").hit);
+    }
+  }
 }
 
 // Repeated subblocks can land in different color/module names in one compile.

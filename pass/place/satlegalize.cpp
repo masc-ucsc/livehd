@@ -12,7 +12,9 @@
 #include <stdexcept>
 #include <tuple>
 
+#include "inou/lefdef/routing_geometry.hpp"
 #include "sat_solver.hpp"
+#include "signal_router.hpp"
 
 namespace livehd::placement {
 namespace {
@@ -99,7 +101,8 @@ std::vector<double> tracks(const ph::Floorplan& fp, const ph::Layer& layer, cons
   return result;
 }
 bool aligned(const ph::Technology& tech, const ph::Floorplan& fp, const Satlegalize_alignment& pair, const Ann_place& a,
-             const Ann_place& b, const std::vector<size_t>* obstruction_indexes = nullptr, ph::Shape* witness = nullptr) {
+             const Ann_place& b, const std::vector<size_t>* obstruction_indexes = nullptr, ph::Shape* witness = nullptr,
+             const ph::Signal_metal_rules* route_rules = nullptr) {
   const auto& first  = fp.components.at(pair.first);
   const auto& second = fp.components.at(pair.second);
   const auto& ma     = tech.macros.at(first.macro);
@@ -143,32 +146,25 @@ bool aligned(const ph::Technology& tech, const ph::Floorplan& fp, const Satlegal
                                                   std::min((ra.yl + ra.yh) / 2, (rb.yl + rb.yh) / 2) - half,
                                                   track + half,
                                                   std::max((ra.yl + ra.yh) / 2, (rb.yl + rb.yh) / 2) + half};
-        bool     blocked  = false;
+        if (route_rules && !route_rules->rectangle({sa.layer, corridor}).legal) {
+          continue;
+        }
+        bool blocked = false;
         for (size_t oi = 0; oi < (obstruction_indexes ? obstruction_indexes->size() : fp.components.size()); ++oi) {
           const size_t k         = obstruction_indexes ? (*obstruction_indexes)[oi] : oi;
           const auto&  c         = fp.components[k];
           const auto&  placement = k == pair.first ? a : k == pair.second ? b : c.place;
-          if (!intersects(corridor, bounds(placement))) {
-            continue;
-          }
-          const auto m = tech.macros.find(c.macro);
-          if (m == tech.macros.end() || !m->second.blocked_layers.contains(sa.layer)) {
-            continue;
-          }
-          if (m->second.conservative_obstructions.contains(sa.layer)
-              || std::none_of(m->second.obstructions.begin(), m->second.obstructions.end(), [&](const auto& obstruction) {
-                   return obstruction.layer == sa.layer;
-                 })) {
+          if (tech.macros.contains(c.macro)
+              && satlegalize_obstructs(tech,
+                                       c,
+                                       placement,
+                                       {sa.layer, corridor},
+                                       fp.dbu,
+                                       route_rules,
+                                       k == pair.first    ? pair.first_pin
+                                       : k == pair.second ? pair.second_pin
+                                                          : std::string_view{})) {
             blocked = true;
-            break;
-          }
-          for (const auto& obs : m->second.obstructions) {
-            if (obs.layer == sa.layer && intersects(corridor, pin_rect(m->second, obs, placement, fp.dbu))) {
-              blocked = true;
-              break;
-            }
-          }
-          if (blocked) {
             break;
           }
         }
@@ -1548,7 +1544,8 @@ bool satlegalize_route_preserved(const Satlegalize_route_quality& candidate, con
 }
 
 std::vector<physical::Shape> satlegalize_pin_access_bounds(const physical::Technology& tech, const physical::Component& cell,
-                                                           const Ann_place& place, const std::string& pin, int64_t dbu) {
+                                                           const Ann_place& place, const std::string& pin, int64_t dbu,
+                                                           bool allow_vias) {
   std::vector<physical::Shape> result;
   const auto&                  macro = tech.macros.at(cell.macro);
   const auto                   found = macro.pins.find(pin);
@@ -1562,21 +1559,183 @@ std::vector<physical::Shape> satlegalize_pin_access_bounds(const physical::Techn
         result.push_back({shape.layer, *rect});
       }
     }
+    // A broad-phase bound only: the via oracle verifies full pin enclosure
+    // and literal M2 tracks for every surviving pair of candidate poses.
+    if (allow_vias && shape.layer == "M1" && tech.layers.contains("M2")) {
+      if (auto rect = pin_access_rect(macro, shape, place, dbu, tech.layers.at("M2"))) {
+        result.push_back({"M2", *rect});
+      }
+    }
   }
   return result;
 }
 
 bool satlegalize_aligned(const physical::Technology& tech, const physical::Floorplan& fp, const Satlegalize_alignment& pair,
-                         const Ann_place& a, const Ann_place& b, const std::vector<size_t>& obstacles, physical::Shape* witness) {
-  return aligned(tech, fp, pair, a, b, &obstacles, witness);
+                         const Ann_place& a, const Ann_place& b, const std::vector<size_t>& obstacles, physical::Shape* witness,
+                         const physical::Signal_metal_rules* route_rules, bool allow_vias) {
+  if (allow_vias && !route_rules) {
+    throw std::invalid_argument("SAT via access requires the routing rule oracle");
+  }
+  if (aligned(tech, fp, pair, a, b, &obstacles, witness, route_rules)) {
+    return true;
+  }
+  if (!allow_vias) {
+    return false;
+  }
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(5);
+  // Reject impossible common-track candidates before copying the floorplan
+  // and indexing its obstructions. Use the whole pin union's bounds, without
+  // an enclosure inset: adjacent rectangles can jointly cover a via pad.
+  const auto pin_y_bounds
+      = [&](size_t index, const std::string& name, const Ann_place& place) -> std::optional<std::pair<double, double>> {
+    const auto& macro = tech.macros.at(fp.components.at(index).macro);
+    const auto  pin   = macro.pins.find(name);
+    if (pin == macro.pins.end()) {
+      return {};
+    }
+    std::optional<std::pair<double, double>> result;
+    for (const auto& shape : pin->second.shapes) {
+      if (shape.layer != "M1") {
+        return {};
+      }
+      const auto rect = pin_rect(macro, shape, place, fp.dbu);
+      if (!std::isfinite(rect.yl) || !std::isfinite(rect.yh)) {
+        return {};
+      }
+      // The pin-access oracle rounds representable coordinates to DEF DBU.
+      const auto low = std::round(rect.yl), high = std::round(rect.yh);
+      if (!result) {
+        result = {low, high};
+      } else {
+        result->first  = std::min(result->first, low);
+        result->second = std::max(result->second, high);
+      }
+    }
+    return result;
+  };
+  const auto first_y  = pin_y_bounds(pair.first, pair.first_pin, a);
+  const auto second_y = pin_y_bounds(pair.second, pair.second_pin, b);
+  if (!first_y || !second_y || first_y->first > second_y->second || second_y->first > first_y->second) {
+    return false;
+  }
+  ph::Floorplan probe;
+  probe.dbu              = fp.dbu;
+  probe.die              = fp.die;
+  probe.tracks           = fp.tracks;
+  probe.vias             = fp.vias;
+  probe.special_nets     = fp.special_nets;
+  probe.terminals        = fp.terminals;
+  probe.nondefault_rules = fp.nondefault_rules;
+  std::set<size_t> included;
+  const auto       add = [&](size_t index) {
+    if (included.insert(index).second) {
+      auto cell = fp.components.at(index);
+      if (index == pair.first) {
+        cell.place = a;
+      }
+      if (index == pair.second) {
+        cell.place = b;
+      }
+      probe.components.push_back(std::move(cell));
+    }
+  };
+  add(pair.first);
+  add(pair.second);
+  for (auto index : obstacles) {
+    add(index);
+  }
+  std::set<std::string> names;
+  std::set<std::string> nearby_cells;
+  for (const auto& cell : probe.components) {
+    nearby_cells.insert(cell.name);
+  }
+  for (const auto& net : fp.nets) {
+    names.insert(net.name);
+    if (!net.wires.empty()) {
+      probe.nets.push_back(net);
+      continue;
+    }
+    // Preserve other local pins even when their nets have no wire yet. Clock
+    // inputs often have LEF USE SIGNAL, so inspecting USE alone misses them.
+    ph::Net pending;
+    pending.name = net.name;
+    pending.use  = net.use;
+    for (const auto& connection : net.connections) {
+      if (!nearby_cells.contains(connection.instance)) {
+        continue;
+      }
+      if ((connection.instance == fp.components.at(pair.first).name && connection.pin == pair.first_pin)
+          || (connection.instance == fp.components.at(pair.second).name && connection.pin == pair.second_pin)) {
+        continue;  // The synthetic witness below owns these two endpoints.
+      }
+      pending.connections.push_back(connection);
+    }
+    if (!pending.connections.empty()) {
+      probe.nets.push_back(std::move(pending));
+    }
+  }
+  std::string name = "__livehd_sat_access";
+  while (names.contains(name)) {
+    name += '_';
+  }
+  ph::Net net{
+      name,
+      {{fp.components.at(pair.first).name, pair.first_pin}, {fp.components.at(pair.second).name, pair.second_pin}},
+      {},
+      "SIGNAL"
+  };
+  probe.nets.push_back(net);
+  const auto                occupancy = ph::routing_occupancy(tech, probe, fp.dbu);
+  const Signal_router       router(tech, probe, occupancy, *route_rules);
+  // Bound this optional geometric predicate independently of solver fanout.
+  const Signal_route_limits limits{1024, 256, deadline};
+  const auto                result = router.probe_route(net, {limits, {}, false, true});
+  if (!result.routable || !result.corridor) {
+    return false;
+  }
+  if (witness) {
+    *witness = *result.corridor;
+  }
+  return true;
 }
 
 bool satlegalize_obstructs(const physical::Technology& tech, const physical::Component& cell, const Ann_place& place,
-                           const physical::Shape& corridor, int64_t dbu) {
+                           const physical::Shape& corridor, int64_t dbu, const physical::Signal_metal_rules* route_rules,
+                           std::string_view allowed_pin) {
+  const auto& macro     = tech.macros.at(cell.macro);
+  const auto  conflicts = [&](const ph::Shape& shape) {
+    if (shape.layer != corridor.layer) {
+      return false;
+    }
+    const ph::Shape placed{shape.layer, pin_rect(macro, shape, place, dbu)};
+    return route_rules ? !route_rules->spacing(corridor, placed).legal : intersects(corridor.rect, placed.rect);
+  };
+  // Supply pins are immutable metal, even when LEF does not list them in OBS.
+  // Check them before the body shortcut: abutment rails can extend beyond the
+  // nominal cell boundary. Include candidate endpoints with their trial pose.
+  for (const auto& [name, pin] : macro.pins) {
+    if (name == allowed_pin || (!route_rules && pin.use != "POWER" && pin.use != "GROUND")) {
+      continue;
+    }
+    for (const auto& shape : pin.shapes) {
+      if (conflicts(shape)) {
+        return true;
+      }
+    }
+  }
+  if (route_rules) {
+    if (macro.conservative_obstructions.contains(corridor.layer)
+        || (macro.blocked_layers.contains(corridor.layer)
+            && std::none_of(macro.obstructions.begin(), macro.obstructions.end(), [&](const auto& s) {
+                 return s.layer == corridor.layer;
+               }))) {
+      return !route_rules->spacing(corridor, {corridor.layer, bounds(place)}).legal;
+    }
+    return std::any_of(macro.obstructions.begin(), macro.obstructions.end(), conflicts);
+  }
   if (!intersects(corridor.rect, bounds(place))) {
     return false;
   }
-  const auto& macro = tech.macros.at(cell.macro);
   if (!macro.blocked_layers.contains(corridor.layer)) {
     return false;
   }

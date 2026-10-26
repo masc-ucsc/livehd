@@ -293,11 +293,27 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
       return invalid("CMOS expansion contains an unexpected binary function");
     }
   }
+  std::vector<hhds::Pin_class> preroute_roots, preroute_cuts;
   for (const auto& signal : source.control_signals) {
     if (!work.spend()) {
       return exhausted();
     }
     gu::add_signal_roles(pins[net.outputs()[signal.output].node], signal.roles);
+    if (signal.preroute_excluded) {
+      const auto driver = pins[net.outputs()[signal.output].node];
+      if (!driver.is_const()) {
+        driver.attr(attrs::preroute_net_exclude).set();
+      }
+      if (signal.preroute_root) {
+        preroute_roots.push_back(driver);
+      }
+      if (signal.preroute_cut) {
+        preroute_cuts.push_back(driver);
+      }
+    }
+  }
+  if (!synth::mark_preroute_cones(preroute_roots, preroute_cuts, [&] { return work.spend(); })) {
+    return exhausted();
   }
   // Assemble original-width event controls. A multibit reset is a Boolean
   // condition on the complete value, not merely its least significant bit.

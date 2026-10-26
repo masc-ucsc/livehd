@@ -248,6 +248,13 @@ TEST_F(Resize_engine, LongFailingWireGetsRepeatersSeededOnTheCutEdge) {
   options.capacitance_ff_um = 1;
   period_ns                 = 1.2;
   auto       placed         = long_wires(1, 230000);
+  for (auto node : placed.graph->body().nodes()) {
+    if (node.get_name() == "root") {
+      for (auto pin : node.out_sorted_pins()) {
+        pin.attr(attrs::preroute_net_exclude).set();
+      }
+    }
+  }
   const auto before         = timing(placed);
   ASSERT_LT(ps(before, before.wns), 0);
   auto       result = resize_placed(std::move(placed), options, [&](const Result& r) { return timing(r); });
@@ -256,6 +263,13 @@ TEST_F(Resize_engine, LongFailingWireGetsRepeatersSeededOnTheCutEdge) {
   EXPECT_GT(count(result.placed, "__place_rebuffer"), 0u);
   EXPECT_GT(ps(after, after.wns), ps(before, before.wns));
   EXPECT_GE(ps(after, after.tns), ps(before, before.tns));
+  for (auto node : result.placed.graph->body().nodes()) {
+    if (node.get_name().starts_with("__place_rebuffer")) {
+      for (auto pin : node.out_sorted_pins()) {
+        EXPECT_TRUE(gu::preroute_net_excluded(pin));
+      }
+    }
+  }
   // Seeds land between the endpoints of the wire they cut (legalized nearby).
   for (const auto& c : result.placed.floorplan.components) {
     if (c.name.starts_with("__place_rebuffer")) {

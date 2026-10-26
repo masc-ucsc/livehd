@@ -2,6 +2,7 @@
 #include "technology_rc.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
@@ -15,15 +16,21 @@
 
 namespace livehd::placement {
 namespace {
-struct Rc {
-  double r = -1, c = -1;
-};
+using Rc = Layer_rc;
 std::string text(const std::string& path) {
   std::ifstream in(path);
   if (!in) {
     throw std::runtime_error("cannot read technology RC input: " + path);
   }
-  return {std::istreambuf_iterator<char>(in), {}};
+  std::string result;
+  std::array<char, 65536> buffer;
+  while (in.read(buffer.data(), buffer.size()) || in.gcount()) {
+    result.append(buffer.data(), static_cast<size_t>(in.gcount()));
+  }
+  if (!in.eof()) {
+    throw std::runtime_error("incomplete technology RC input: " + path);
+  }
+  return result;
 }
 std::string unquote(std::string value) {
   while (!value.empty() && (value.front() == '"' || value.front() == '{')) {
@@ -87,29 +94,19 @@ Units liberty_units(const std::string& path) {
   return result;
 }
 bool valid(const Rc& rc) { return rc.r >= 0 && rc.c >= 0 && std::isfinite(rc.r) && std::isfinite(rc.c); }
-}  // namespace
-Wire_rc technology_wire_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file,
-                           double resistance, double capacitance, double rc_pessimism) {
-  if (!std::isfinite(rc_pessimism) || rc_pessimism < 1) {
-    throw std::invalid_argument("rc_pessimism must be finite and at least 1");
-  }
-  const auto pessimize = [factor = std::sqrt(rc_pessimism)](Wire_rc wire) {
-    wire.horizontal_r *= factor;
-    wire.horizontal_c *= factor;
-    wire.vertical_r   *= factor;
-    wire.vertical_c   *= factor;
-    if (!valid({wire.horizontal_r, wire.horizontal_c}) || !valid({wire.vertical_r, wire.vertical_c})) {
-      throw std::invalid_argument("rc_pessimism overflows wire RC coefficients");
+struct Parsed_rc {
+  Route_technology_rc table;
+  std::optional<Rc>   signal;
+};
+Parsed_rc parse_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file, bool detailed) {
+  Parsed_rc parsed;
+  auto&     layers    = parsed.table.layers;
+  parsed.table.source = rc_file.empty() ? "LEF" : rc_file;
+  for (const auto& [name, via] : tech.vias) {
+    if (std::isfinite(via.resistance) && via.resistance > 0) {
+      parsed.table.via_resistance_ohm[name] = via.resistance;
     }
-    return wire;
-  };
-  if (resistance >= 0 && capacitance >= 0) {
-    if (!valid({resistance, capacitance})) {
-      throw std::runtime_error("invalid explicit wire RC");
-    }
-    return pessimize({resistance, capacitance, resistance, capacitance, "explicit wire_rc"});
   }
-  std::map<std::string, Rc> layers;
   for (const auto& [name, l] : tech.layers) {
     if (l.width > 0 && l.resistance > 0 && (l.capacitance > 0 || l.edge_cap > 0)) {
       layers[name] = {l.resistance / l.width, (l.capacitance * l.width + 2 * l.edge_cap) * 1000};
@@ -183,6 +180,20 @@ Wire_rc technology_wire_rc(const physical::Technology& tech, const std::string& 
         continue;
       }
       if (command == "set_layer_rc" && args.contains("-via")) {
+        if (detailed) {
+          if (args.size() != 2 || !args.contains("-resistance") || !tech.cut_layers.contains(args.at("-via"))) {
+            throw std::runtime_error("technology RC requires a known cut layer and its via resistance");
+          }
+          if (!(units.r > 0)) {
+            throw std::runtime_error("technology via RC needs resistance units");
+          }
+          // A via is a lumped resistor; distance units do not scale it.
+          const auto resistance = number(args.at("-resistance")) * units.r;
+          if (!std::isfinite(resistance)) {
+            throw std::runtime_error("unrepresentable via resistance");
+          }
+          parsed.table.cut_resistance_ohm[args.at("-via")] = resistance;
+        }
         continue;
       }
       if (command == "set_wire_rc" && args.contains("-clock") && !args.contains("-signal")) {
@@ -219,9 +230,40 @@ Wire_rc technology_wire_rc(const physical::Technology& tech, const std::string& 
         throw std::runtime_error("technology RC refers to an unknown routing layer");
       }
     }
-    if (signal) {
-      return pessimize({signal->r, signal->c, signal->r, signal->c, rc_file});
+    parsed.signal = signal;
+  }
+  return parsed;
+}
+}  // namespace
+Route_technology_rc technology_route_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file) {
+  return parse_rc(tech, liberty, rc_file, true).table;
+}
+Wire_rc technology_wire_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file,
+                           double resistance, double capacitance, double rc_pessimism) {
+  if (!std::isfinite(rc_pessimism) || rc_pessimism < 1) {
+    throw std::invalid_argument("rc_pessimism must be finite and at least 1");
+  }
+  const auto pessimize = [factor = std::sqrt(rc_pessimism)](Wire_rc wire) {
+    wire.horizontal_r *= factor;
+    wire.horizontal_c *= factor;
+    wire.vertical_r   *= factor;
+    wire.vertical_c   *= factor;
+    if (!valid({wire.horizontal_r, wire.horizontal_c}) || !valid({wire.vertical_r, wire.vertical_c})) {
+      throw std::invalid_argument("rc_pessimism overflows wire RC coefficients");
     }
+    return wire;
+  };
+  if (resistance >= 0 && capacitance >= 0) {
+    if (!valid({resistance, capacitance})) {
+      throw std::runtime_error("invalid explicit wire RC");
+    }
+    return pessimize({resistance, capacitance, resistance, capacitance, "explicit wire_rc"});
+  }
+  const auto  parsed = parse_rc(tech, liberty, rc_file, false);
+  const auto& layers = parsed.table.layers;
+  if (parsed.signal) {
+    const auto& signal = *parsed.signal;
+    return pessimize({signal.r, signal.c, signal.r, signal.c, rc_file});
   }
   std::optional<Rc> horizontal;
   for (const auto& name : tech.routing_layers) {

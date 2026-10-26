@@ -19,7 +19,8 @@ struct Physical_session::Impl : Pass_opentimer {
   Statistics                         stats;
   bool                               initialized = false;
   std::map<std::string, std::string> masters, ports, net_names, connections;
-  size_t                             next_gate = 0, next_net = 0;
+  std::vector<std::pair<std::string, std::string>> cell_identity;
+  size_t                                           next_gate = 0, next_net = 0;
   std::set<std::string>              data_exclusions;
   bool                               exclusions_dirty = true;
 
@@ -100,6 +101,7 @@ struct Physical_session::Impl : Pass_opentimer {
     timing_pin_nodes_.clear();
     timing_net_nodes_.clear();
     overwrite_dpin2net.clear();
+    remember_cells();
     ++stats.builds;
   }
 
@@ -137,7 +139,27 @@ struct Physical_session::Impl : Pass_opentimer {
     return true;
   }
 
+  void remember_cells() {
+    cell_identity.clear();
+    cell_identity.reserve(physical_rc_->cells.size());
+    for (const auto& cell : physical_rc_->cells) {
+      cell_identity.emplace_back(cell.name, cell.master);
+    }
+  }
+
   void update(const std::shared_ptr<hhds::Graph>& graph) {
+    // Keep an owned identity snapshot: callers may reuse a mutable RC object.
+    // Coordinate-only updates need no allocation or sorted-map reconstruction.
+    if (std::equal(
+            cell_identity.begin(),
+            cell_identity.end(),
+            physical_rc_->cells.begin(),
+            physical_rc_->cells.end(),
+            [](const auto& identity, const auto& cell) { return identity.first == cell.name && identity.second == cell.master; })
+        && same_connectivity()) {
+      finish_update(graph, false);
+      return;
+    }
     std::map<std::string, std::string> next_masters;
     for (const auto& cell : physical_rc_->cells) {
       next_masters.emplace(cell.name, cell.master);
@@ -202,6 +224,7 @@ struct Physical_session::Impl : Pass_opentimer {
     // reconstructing a million-pin connection map for those common calls.
     if (!shape_changed && same_connectivity()) {
       masters = std::move(next_masters);
+      remember_cells();
       finish_update(graph, changed);
       return;
     }
@@ -244,6 +267,7 @@ struct Physical_session::Impl : Pass_opentimer {
     masters     = std::move(next_masters);
     net_names   = std::move(next_nets);
     connections = std::move(next_connections);
+    remember_cells();
     finish_update(graph, changed);
   }
 
@@ -312,7 +336,15 @@ struct Physical_session::Impl : Pass_opentimer {
     }
     double      unit_ps() { return s.timer.time_unit() ? s.timer.time_unit()->value() * 1e12 : 1000; }
     double      cap_ff() { return s.timer.capacitance_unit() ? s.timer.capacitance_unit()->value() / 1e-15 : 1; }
-    std::string timer_pin(const std::string& label) const { return s.pin_name(label); }
+    // Physical-to-timer identities are stable across RC edits and timing
+    // queries. Cache names only, never timing values or pointers into the timer.
+    mutable std::unordered_map<std::string, std::string> timer_pin_names;
+    const std::string& timer_pin(const std::string& label) const {
+      if (const auto it = timer_pin_names.find(label); it != timer_pin_names.end()) {
+        return it->second;
+      }
+      return timer_pin_names.emplace(label, s.pin_name(label)).first->second;
+    }
     std::string net_of_pin(const std::string& pin) const {
       if (const auto it = conn.find(pin); it != conn.end()) {
         return it->second;
@@ -400,6 +432,7 @@ struct Physical_session::Impl : Pass_opentimer {
       }
       s.timer.insert_gate(instance, master);
       s.physical_instances_.emplace(instance, instance);
+      timer_pin_names.clear();
       gates.emplace(instance, master);
       log.push_back({Kind::gate, instance, master, {}});
     }
@@ -492,6 +525,7 @@ struct Physical_session::Impl : Pass_opentimer {
           case Kind::gate: {
             s.timer.remove_gate(undo.a);
             s.physical_instances_.erase(undo.a);
+            timer_pin_names.clear();
             gates.erase(undo.a);
             resized.erase(undo.a);
             break;
@@ -654,9 +688,10 @@ struct Physical_session::Impl : Pass_opentimer {
               check(*slew, cp->max_transition);
             }
             if (pin.is_output() && pin.net()) {
-              if (const auto value = s.timer.report_load(pin.net()->name(), split, tran)) {
-                check(*value, cp->max_capacitance);
-              }
+              // update() above has synchronized the what-if state. Reading
+              // this net directly avoids locking and re-entering timing update
+              // for every output/split/transition in the electrical sweep.
+              check(pin.net()->load(split, tran), cp->max_capacitance);
             }
           }
           if (pin.is_output() && pin.net()) {
@@ -683,11 +718,12 @@ struct Physical_session::Impl : Pass_opentimer {
         }
         return best ? std::optional<double>(*best * scale) : std::nullopt;
       };
-      const auto& p   = it->second;
-      result.slack    = extreme([&](ot::Tran t) { return p.slack(ot::MAX, t); }, false);
-      result.arrival  = extreme([&](ot::Tran t) { return p.at(ot::MAX, t); }, true);
-      result.required = extreme([&](ot::Tran t) { return p.rat(ot::MAX, t); }, false);
-      result.slew     = extreme([&](ot::Tran t) { return p.slew(ot::MAX, t); }, true);
+      const auto& p     = it->second;
+      result.slack      = extreme([&](ot::Tran t) { return p.slack(ot::MAX, t); }, false);
+      result.hold_slack = extreme([&](ot::Tran t) { return p.slack(ot::MIN, t); }, false);
+      result.arrival    = extreme([&](ot::Tran t) { return p.at(ot::MAX, t); }, true);
+      result.required   = extreme([&](ot::Tran t) { return p.rat(ot::MAX, t); }, false);
+      result.slew       = extreme([&](ot::Tran t) { return p.slew(ot::MAX, t); }, true);
       return result;
     }
     std::optional<double> load(const std::string& driver) override {
@@ -752,6 +788,7 @@ struct Physical_session::Impl : Pass_opentimer {
     }
     if (whatif_) {
       whatif_->reverse_pins.clear();
+      whatif_->timer_pin_names.clear();
     }
   }
 

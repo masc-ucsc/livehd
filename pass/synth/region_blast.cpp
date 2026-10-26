@@ -2252,24 +2252,54 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
     }
   }
 
-  // Preserve clock/reset identity independently of the chosen state cells and
-  // of reset mux folding. These output indices survive backend rewrites. A
-  // later mapping can also consume roles emitted by an earlier logical pass.
-  std::map<std::pair<uint64_t, uint32_t>, std::pair<hhds::Pin_class, uint8_t>> role_roots;
-  const auto remember_role = [&](hhds::Pin_class pin, uint8_t roles) {
-    if (pin.is_invalid() || pin.is_const() || !roles) {
+  // Preserve clock/reset identity and excluded nets independently of the chosen
+  // state cells and of reset mux folding. These output indices survive backend
+  // rewrites; later mapping can consume metadata from an earlier logical pass.
+  struct Preserved_signal {
+    hhds::Pin_class pin;
+    uint8_t roles = 0;
+    bool preroute_excluded = false;
+    bool preroute_root = false;
+    bool preroute_cut = false;
+  };
+  std::map<std::pair<uint64_t, uint32_t>, Preserved_signal> role_roots;
+  const auto remember_role = [&](hhds::Pin_class pin, uint8_t roles, bool excluded = false, bool root = false, bool cut = false) {
+    if (pin.is_invalid() || pin.is_const()) {
+      return;
+    }
+    excluded |= gu::preroute_net_excluded(pin) || pin.get_master_node().attr(attrs::preroute_exclude).has()
+                || rb.src->get_input_node().attr(attrs::preroute_exclude).has();
+    if (!roles && !excluded) {
       return;
     }
     auto& entry   = role_roots[{pin.get_master_node().get_debug_nid(), pin.get_port_id()}];
-    entry.first   = pin;
-    entry.second |= roles;
+    entry.pin = pin;
+    entry.roles |= roles;
+    entry.preroute_excluded |= excluded;
+    entry.preroute_root |= root;
+    entry.preroute_cut |= cut;
   };
   for (const auto& input : rb.inputs) {
     remember_role(input.src_driver, gu::signal_roles_of(input.src_driver));
   }
+  absl::flat_hash_set<hhds::Node_class> protected_nodes;
+  const bool protected_scope = rb.src->get_input_node().attr(attrs::preroute_exclude).has();
   for (auto node : rb.nodes) {
+    if (protected_scope || node.attr(attrs::preroute_exclude).has()) {
+      protected_nodes.insert(node);
+    }
+  }
+  for (auto node : rb.nodes) {
+    const bool excluded = protected_nodes.contains(node);
     for (auto pin : node.out_sorted_pins()) {
-      remember_role(pin, gu::signal_roles_of(pin));
+      remember_role(pin, gu::signal_roles_of(pin), excluded, excluded);
+    }
+    if (excluded) {
+      for (auto sink : node.inp_sorted_pins()) {
+        for (auto driver : sink.get_driver_pins()) {
+          remember_role(driver, 0, true, false, driver.is_const() || !protected_nodes.contains(driver.get_master_node()));
+        }
+      }
     }
     const auto op = gu::type_op_of(node);
     if (op == Ntype_op::Flop) {
@@ -2281,7 +2311,7 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
   }
   for (const auto& [key, value] : role_roots) {
     (void)key;
-    const auto& [pin, roles] = value;
+    const auto& [pin, roles, excluded, root, cut] = value;
     for (int bit = 0; bit < real_width(pin); ++bit) {
       const auto signal = abc_bit(pin, bit);
       if (options.logical_state && !admit_logical(lnet.size() + lnet.outputs().size() + 1)) {
@@ -2290,7 +2320,7 @@ Region_blast blast_region(const livehd::partition::Region_body& rb, const Blast_
       }
       const auto output = static_cast<uint32_t>(lnet.outputs().size());
       lnet.add_output(signal, std::format("__control_role{}", output));
-      result.control_signals.push_back({output, roles});
+      result.control_signals.push_back({output, roles, excluded, root, cut});
     }
   }
   if (result.source_state) {

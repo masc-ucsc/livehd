@@ -16,6 +16,10 @@ namespace lhd {
 namespace {
 namespace fs    = std::filesystem;
 using Inventory = std::map<std::string, std::string>;
+constexpr std::array kPlaceArtifacts{"out.def", "qor.json", "preroute.json", "power_grid.json", "io_resynth.json",
+                                     "memory_proxies.lef", "magnet.json", "macro_animation.html", "macro/gp_history.json",
+                                     "macro/gp_history.jsonl", "macro/fixed.def", "route_options.json", "sat_route_grid.json",
+                                     "sat_route_guard.json"};
 
 std::string digest(const fs::path& path) {
   std::ifstream input(path, std::ios::binary);
@@ -136,6 +140,13 @@ bool Physical_cache::restore(const fs::path& net, const fs::path& place) {
       return false;
     }
     // Validate the complete generation before replacing any destination file.
+    // Optional reports absent from this generation must not survive from a
+    // different placement in the same workdir (e.g. pre-routing now disabled).
+    for (const auto* name : kPlaceArtifacts) {
+      if (!fs::exists(artifacts / "place" / name)) {
+        fs::remove(place / name);
+      }
+    }
     fs::remove_all(net);
     copy_tree(artifacts / "net", net);
     copy_tree(artifacts / "place", place);
@@ -152,18 +163,7 @@ void Physical_cache::publish(const fs::path& net, const fs::path& place) {
   fs::remove_all(pending);
   fs::create_directories(pending / "artifacts/place");
   copy_tree(net, pending / "artifacts/net");
-  for (const auto* name : {"out.def",
-                           "qor.json",
-                           "io_resynth.json",
-                           "memory_proxies.lef",
-                           "magnet.json",
-                           "macro_animation.html",
-                           "macro/gp_history.json",
-                           "macro/gp_history.jsonl",
-                           "macro/fixed.def",
-                           "route_options.json",
-                           "sat_route_grid.json",
-                           "sat_route_guard.json"}) {
+  for (const auto* name : kPlaceArtifacts) {
     if (fs::is_regular_file(place / name)) {
       fs::create_directories((pending / "artifacts/place" / name).parent_path());
       fs::copy_file(place / name, pending / "artifacts/place" / name);

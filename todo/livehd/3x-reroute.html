@@ -19,11 +19,150 @@ configurable script. On that aligned frame, LiveHD then routes a bounded class o
 nets itself and hands them over as <code>FIXED</code> wiring. OpenROAD keeps
 everything that needs a propagated clock or real wires: CTS, post-CTS repair,
 global/detailed routing of the remaining nets, power-grid checking and signoff.</p>
-<p><span class="status">Plan ruled — not implemented; all rulings Q1–Q11 decided 2026-10-23</span>
+<p><span class="status">Opt-in routing API implemented — comparative tuning is separate follow-up work</span>
 Drafted 2026-10-23. Ruling 2026-10-23: LiveHD builds the power grid from a
 hardcoded generator plus per-technology profiles (see <em>Power grid profiles</em>).
-Everything here is opt-in; default handoff behavior does not change until the
-LiteEth evaluation (X6) passes.</p>
+Everything here is opt-in; changing default handoff behavior requires a
+separate proposal and approval.</p>
+<p><strong>Scope clarification:</strong> the deliverable is a correct, clean
+opt-in routing API and flow, including SAT-legalization routing. It tries routes
+within the supported technology, geometry, access, timing and capacity models;
+unsupported or rejected trials leave the design unchanged. Beating OpenROAD
+timing, wire length or runtime is not a requirement for completing this feature.
+Those comparisons inform tuning and any separate proposal to enable it by default.</p>
+
+<p>Implemented foundations: routed DEF round trips (including generated vias,
+power-pin uses and GCELLGRID), LEF fixed-via/generation-rule ingestion,
+rectangular wire/via decoding, ordinary metal-rule ingestion and conservative
+rectangular width/area/spacing checks with compiled directional ASAP7 LEF58 rules and
+explicit-track membership, bounded M1-to-M2 single-cut pin-access enumeration
+with shared net-aware spatial occupancy, global-halo
+macro row cuts, single-master fixed endcap/tap generation with opt-in final
+terminal-legalizer integration, and an opt-in OpenROAD fixed-path lock helper.
+The native power-grid planner and ASAP7 profile derive followpin rails and
+stripes clipped on macro-obstructed layers. Experimental PG export adds LEF-derived
+via arrays/stacks, enclosure-driven extensions, trimming and PG terminals.
+Opt-in <code>synth.place.pg</code> integrates this export after final legalization,
+with auto-sized die margins and a per-layer/via report. Fixed macro pins now
+connect through profile layer pairs with constrained via landings; missing
+contacts and overlapping power/ground pins fail explicitly. Experimental
+channel skip and gap patches now cut stripes before via generation and reject
+minimum-area/end-spacing failures, disconnected islands, missing supply terminals
+and re-entering wire/via pads. The experimental
+<code>synth.place.pg.channel.patches</code> option carries ordered patch data into
+the placement cache and PG report. Channel accounting compares against an
+unpatched grid on the same input, reporting removed planned stripe length and
+removed/added via stacks by layer pair. Freed-track reporting counts distinct
+centerlines with newly legal full-channel corridors and clearance-inset ends;
+it does not imply via access. An optional channel IR-drop budget is carried in
+the report and cache identity. The independent voltage-CSV checker requires
+matched analysis context and terminal placement, and checks both worst-drop and
+per-terminal degradation on VDD and VSS. Generation leaves IR verification
+false; matched long-net channel routing and IR acceptance remain pending.
+Complete grid acceptance remains pending; the metal planner
+alone is not a usable PDN.
+SAT-aligned routing now compares same-direction upper-metal trunks for a
+configurable worst-setup-slack fraction of eligible alignments (10% by default).
+Endpoint centers remain fixed; only local landings and via stacks are added.
+Actual layer/via RC is evaluated in the incremental timer, with capacity,
+pin-escape, setup/hold and electrical acceptance before publication. The original
+route wins timing ties and remains the fallback. This is bounded candidate
+selection with effective ground capacitance, not coupled extraction or a claim
+of full-design timing improvement.
+The initial <code>preroute</code> stage library now combines bounded M2 spans and
+multi-pin M2/M3 trunk patterns with shared per-track branches, a bounded
+M2–M7 A* detour fallback using snapped FLUTE branches for multi-pin nets, rectangular connectivity checks, characterized per-layer RC,
+remaining-net RSMT demand, per-layer capacity reservations, and incremental
+setup/hold acceptance. Only accepted stage-private results acquire FIXED traces
+and endpoint locks; input state and the caller's timer are preserved. A
+transactional access guard preserves remaining supported standard-cell pin
+escapes, including preferred-direction router continuations, bare via landing clearance and a bounded compatible
+whole-cell landing assignment. Accepted traces consume those choices cumulatively;
+rejected trials leave them unchanged. This is conservative pairwise preservation,
+not a replacement for OpenROAD pin-pattern generation or independent DRC.
+Cells without a verified initial combination remain outside that additional
+guarantee. An opt-in
+internal final-placement snapshot retains physical pin identities, positions and
+demand masks; candidate bindings must match both RC and demand endpoint sets.
+The endpoint-set join is independent of DEF names and order and retains tie and
+host-supplied protected-pin exclusions. Slang imports source
+<code>dont_touch</code>/<code>DONT_TOUCH</code> and explicit
+<code>synth.preroute_exclude</code> into routing protection propagated through
+hierarchy, optimization, mapping and repair to that host pin set. This is routing
+protection, not a synthesis optimization lock. Module-wide and mixed-instance
+CLI checks cover exclusion, incremental reuse and annotation removal; broader
+full-design acceptance remains pending. A two-buffer Liberty delay query is
+available. The opt-in final-flow CLI now resolves ASAP7 HOLD_BUF at fanout-one
+load and configurable nominal slew, evaluates final repaired placement, invokes
+pre-routing and publishes FIXED geometry, graph locks, RC and per-net reports.
+The report includes search-attempt counts, pin-count/length coverage buckets,
+per-layer accepted wire lengths, vias, rejection totals and route-stage runtime.
+Accepted-net records also capture setup/hold slack at admission, separately for
+the candidate net and for the checked set including earlier locked pins. These
+are diagnostic snapshots of the native routed-RC estimate, not post-CTS timing
+guarantees or extracted acceptance.
+Completed physical-cache fingerprints include the pre-route sources/options
+and retain the FIXED DEF, routing report and power-grid report. Replay is
+available with IO resynthesis disabled; restoring an older generation removes
+managed reports absent from that generation. Corruption and policy-switch
+checks cover these artifacts. Full-design routed replay acceptance remains pending.
+Committed signal routes now persist on graph driver-pin attributes, including
+wire geometry, via orientation, patches and width rules. Publication rejects
+duplicate driver bindings; replay checks technology, endpoint placement,
+connectivity and agreement with the DEF. Route identity accounts for DEF's
+LOCKED-to-FIXED normalization and omitted component dimensions. Graph
+reconstruction drops these physical records. Search state and occupancy remain
+transient. Graph save/load, a cold/warm routed CLI fixture and independent
+OpenROAD checks cover this persistence path; full-design acceptance is separate.
+Route requests now screen long same-layer parallel exposure independently for
+each candidate; an explicit try-hard request relaxes only that geometric
+coupling proxy, not DRC or timing acceptance. Requests preserve supported
+unrouted pin escapes, including clock/supply pins and neighboring unwired nets
+in SAT alignment. An exhausted access search cannot silently remove protection.
+Transient occupancy distinguishes decoded wires from pin rectangles without
+increasing its stored shape size, so existing supply attachments are recognized
+without mistaking the pin itself for a connection. Unresolved clock/supply pins
+reserve a conservative local volume across layers. Escape extensions follow the
+escape layer direction, and unused generated via templates do not inflate those
+reservations;
+precise escape enumeration beyond M1-to-M2 remains pending.
+Multi-pin
+Steiner/maze routing has an initial bounded implementation; broader coverage,
+upper-layer enclosure coverage and full independent routed acceptance remain pending.
+Automatic repeater scheduling is now connected to the opt-in host: long-net
+Steiner proposals reserve legal free sites, route every branch transactionally,
+and publish the matching graph, DEF and RC only on success. Rejections retain the
+original net. Host reports refresh the census, signal HPWL and post-pre-route
+timing; end-to-end repeater acceptance remains pending.
+The OpenROAD handoff now includes guarded CTS wrappers: endpoint instance
+protection is temporarily released for clock reconnection while FIRM placement
+and data-net protection remain active, then exact wire/connectivity and instance
+invariants are checked and protection restored. Native final IO legalization
+uses preferred M4/M5 tracks and minimum-area rectangles, checking the power grid
+and other metal before final RC estimation. Fixed and locked IOs are preserved.
+An explicit OpenROAD import validator now reconstructs fixed-net connectivity
+from OpenDB wire, via and transformed pin rectangles, then requires an empty
+independent DRC report. It rejects disconnected wire islands and missing
+endpoint/via connections; polygon/via pins and fixed IO nets fail explicitly.
+The HighTide OpenROAD estimator patch retains nonzero placement-estimated RC
+for all-FIXED signal nets that have no global-route guides, including during
+incremental estimation. This is an interim approximation, not extraction of
+the supplied metal traces; final timing acceptance still requires routed
+extraction. Full-design acceptance must use the patched binary and record its
+identity, rather than inheriting timing claims from earlier runs. Surgical corner repair in the patched OpenROAD build now excludes
+FIXED nets from patch candidates: repairing temporary router geometry on an
+immutable net would otherwise hide a violation that remains in the exported
+wire. Routed timing-repair sizing also checks the proposed transformed master
+footprint against the fixed-cell placement grid before changing the master or
+STA state. This rejects overlaps with locked endpoints and reserved placement
+space while leaving other repair candidates available. Independent full-design
+validation and extracted timing remain required for these integration changes.
+Tests live in <code>inou/lefdef/physical_test.cpp</code> and
+<code>inou/lefdef/routing_geometry_test.cpp</code> and
+<code>pass/place/handoff_rows_test.cpp</code>. These do not yet constitute
+an aligned handoff or a legal pre-router; X0–X6 acceptance remains pending.
+Experiment evidence and unresolved checks stay under ignored
+<code>repros/reroute/</code>.</p>
 
 <h2>Depends on</h2>
 <p>Legal final placement from <a class="xref" href="3p-placement.html">3p-placement</a>
@@ -60,8 +199,12 @@ not be regressed. The measurement harness is the frozen
   (<code>findNetsObstructions</code>); TritonRoute never rips up a
   <code>FIXED</code> net and uses its shapes as fixed obstacles; the resizer honors
   <code>dont_touch</code> on nets and instances; detailed placement skips
-  <code>FIRM</code>/<code>LOCKED</code> instances. No OpenROAD change is required
-  for phase 1.</li>
+  <code>FIRM</code>/<code>LOCKED</code> instances. Integration has exposed paths
+  that need fixes in the pinned HighTide OpenROAD build: fixed-wire preservation
+  through global routing, detailed-router access for fixed pins, and independent
+  fixed-shape checking. Guide-less fixed nets also need the estimator fallback
+  described above. Stock OpenROAD behavior alone is therefore not sufficient
+  evidence for phase-1 acceptance.</li>
 </ul>
 
 <h2>Division of work after this task</h2>
@@ -396,12 +539,14 @@ The profile holds only what cannot be derived.</p>
       Arms: baseline handoff; aligned handoff without pre-routing; aligned handoff
       with pre-routing.</li>
       <li>Accept alignment alone when handoff displacement is zero and all other
-      metrics are within noise. Accept pre-routing when: zero DRC, all nets routed,
-      extracted setup and hold WNS/TNS not worse than the aligned arm, and
-      GRT+DRT wall time or total routed wire length improves. Report pre-routed
-      share, per-layer usage, GRT overflow and runtime of the pre-router itself.
-      A timing loss on any design rejects the default-on proposal, not the
-      opt-in feature.</li>
+      metrics are within noise. Correctness acceptance for opt-in pre-routing
+      requires zero DRC, complete connectivity, preserved committed traces and
+      endpoints, and clean rejection without mutation when the models cannot
+      validate a trial. Report extracted setup/hold WNS/TNS, routed wire length,
+      pre-routed share, per-layer usage, GRT overflow and runtime. Improvement
+      over OpenROAD is not required for feature completion. Timing
+      non-regression and a routing-time or wire-length improvement remain gates
+      for a separate default-on proposal.</li>
     </ul>
   </li>
   <li id="X7"><strong>X7 — Phase 2 (not scheduled).</strong>

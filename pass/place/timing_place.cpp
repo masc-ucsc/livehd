@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <limits>
+#include <optional>
 #include <stdexcept>
 
 #include "rapidjson/document.h"
@@ -56,16 +57,22 @@ std::map<std::string, double> timing_weights(const physical::Parasitics& nets, c
   return target;
 }
 void refresh_timing_weights(Result& state, const Options& options, const Timing_feedback& timing) {
-  auto data = timing;
+  const auto roles = state.floorplan.nets.empty() ? Prects_library{} : prects_library(options.liberty, options.control_ports);
+  refresh_timing_weights(state, options, timing, roles);
+}
+void refresh_timing_weights(Result& state, const Options& options, const Timing_feedback& timing,
+                            const Prects_library& library_roles) {
+  std::optional<Timing_feedback> filtered;
   if (!state.floorplan.nets.empty()) {
     const auto tech  = physical::read_lef(options.lefs);
-    auto       roles = prects_library(options.liberty, options.control_ports);
+    auto       roles = library_roles;
     if (!roles.override_controls) {
       roles.ports.insert(state.prects.ports.begin(), state.prects.ports.end());
       roles.pins.insert(state.prects.pins.begin(), state.prects.pins.end());
     }
-    data = prects_data_timing(timing, prects_networks(tech, state.floorplan, roles, timing));
+    filtered = prects_data_timing(timing, prects_networks(tech, state.floorplan, roles, timing));
   }
+  const auto& data = filtered ? *filtered : timing;
   const auto target
       = timing_weights(*state.parasitics, data, options.timing_fraction, options.timing_max_weight, options.timing_exponent);
   std::map<std::string, double> current;

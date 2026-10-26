@@ -102,6 +102,9 @@ cc_test(
     deps = [
         ":pass_opentimer",
         "//pass/place:place",
+        "//pass/place:preroute_timing",
+        "//pass/place:preroute_repair",
+        "//pass/place:preroute",
         "@googletest//:gtest_main",
     ],
 )

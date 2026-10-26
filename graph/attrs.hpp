@@ -18,8 +18,10 @@
 // init block, mirroring the lnast/lnast.cpp pattern (avoids a registry
 // race on first lazy registration).
 
+#include <array>
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "ann_place.hpp"
 #include "hhds/attr.hpp"
@@ -115,6 +117,20 @@ struct critical_t {
   using storage    = hhds::flat_storage;
 };
 inline constexpr critical_t critical{};
+// Physical routing exclusion, independent of synthesis optimization policy.
+// On a graph input or Sub instance it applies to that occurrence's contents;
+// on a mapped cell it excludes every incident net from pre-routing.
+struct preroute_exclude_t {
+  using value_type = hhds::flag;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr preroute_exclude_t preroute_exclude{};
+// Net-level exclusion on its driver, including aliases without a physical cell.
+struct preroute_net_exclude_t {
+  using value_type = hhds::flag;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr preroute_net_exclude_t preroute_net_exclude{};
 struct sta_t {
   using value_type = std::string;
   using storage    = hhds::flat_storage;
@@ -214,6 +230,22 @@ struct placement_block_t {
   using storage    = hhds::flat_storage;
 };
 inline constexpr placement_block_t placement_block{};
+
+// Committed signal-route payload, keyed by its driver pin. The fixed-width
+// records hold DBU geometry and indexes into the companion string table;
+// inou/lefdef/route_store owns the versioned encoding. Trial/search data never
+// belongs here. Rebuilding connectivity invalidates these two tags.
+struct route_records_v1_t {
+  using value_type = std::vector<std::array<int64_t, 6>>;
+  using storage    = hhds::flat_storage;
+  using layout     = hhds::dense_layout;
+};
+inline constexpr route_records_v1_t route_records_v1{};
+struct route_strings_v1_t {
+  using value_type = std::vector<std::string>;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr route_strings_v1_t route_strings_v1{};
 
 struct pin_place_t {
   using value_type = Ann_place;
@@ -436,6 +468,10 @@ inline constexpr Attr_kind attr_kind<color_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<critical_t> = Attr_kind::node;
 template <>
+inline constexpr Attr_kind attr_kind<preroute_exclude_t> = Attr_kind::node;
+template <>
+inline constexpr Attr_kind attr_kind<preroute_net_exclude_t> = Attr_kind::driver_pin;
+template <>
 inline constexpr Attr_kind attr_kind<sta_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<ctrl_members_t> = Attr_kind::node;
@@ -496,12 +532,28 @@ inline constexpr Attr_kind attr_kind<aggregate_extent_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
 
+template <>
+inline constexpr Attr_kind attr_kind<route_records_v1_t> = Attr_kind::driver_pin;
+template <>
+inline constexpr Attr_kind attr_kind<route_strings_v1_t> = Attr_kind::driver_pin;
+
+// Derived physical routes cannot survive arbitrary connectivity reconstruction.
+// Persistence save/load preserves them; graph-to-graph rebuilds must reroute.
+template <class Tag>
+inline constexpr bool carry_on_rebuild = true;
+template <>
+inline constexpr bool carry_on_rebuild<route_records_v1_t> = false;
+template <>
+inline constexpr bool carry_on_rebuild<route_strings_v1_t> = false;
+
 // EVERY LiveHD attribute tag, in one list. graph/cell.cpp pre-registers from it
-// and graph/attr_carry.hpp carries from it (role from `attr_kind`), so a tag
-// that is registered is carried and a tag that is carried is registered -- the
-// two cannot drift, and a new tag is one row here. `hhds::attrs::name` and
+// and graph/attr_carry.hpp derives carry policy from it (role from `attr_kind`,
+// invalidation from `carry_on_rebuild`). New tags are one row here; physical
+// routes explicitly opt out of carry across connectivity reconstruction. `hhds::attrs::name` and
 // `hhds::attrs::srcid` are hhds-owned and handled by those two files directly.
 #define LIVEHD_FOR_EACH_ATTR_TAG(X) \
+  X(route_records_v1)               \
+  X(route_strings_v1)               \
   X(placement_rc)                   \
   X(placement_block)                \
   X(pin_place)                      \
@@ -514,6 +566,8 @@ inline constexpr Attr_kind attr_kind<lut_t> = Attr_kind::node;
   X(pin_signed)                     \
   X(color)                          \
   X(critical)                       \
+  X(preroute_exclude)               \
+  X(preroute_net_exclude)           \
   X(sta)                            \
   X(synth_policy)                   \
   X(ctrl_members)                   \

@@ -20,6 +20,7 @@
 #include "node_util.hpp"
 #include "pass/liberty/liberty_dff.hpp"
 #include "pass/opentimer/pass_opentimer.hpp"
+#include "preroute.hpp"
 #include "rapidjson/document.h"
 #include "repair.hpp"
 #include "technology_rc.hpp"
@@ -65,10 +66,16 @@ TEST(Placement, ExperimentalBoundaryRefinementsRunOnlyAtTheFinalStage) {
     auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
     node.set_subnode(inv);
     node.set_name(std::format("inv{}", bit));
+    if (bit == 0) {
+      node.attr(livehd::attrs::preroute_exclude).set();
+    }
     auto input = graph->get_input_pin(std::format("a[{}]", bit));
     gu::set_bits(input, 1);
     node.create_sink_pin("A").connect_driver(input);
     auto output = node.create_driver_pin("Y");
+    if (bit == 1) {
+      output.attr(livehd::attrs::preroute_net_exclude).set();
+    }
     gu::set_bits(output, 1);
     graph->get_output_pin(std::format("y[{}]", bit)).connect_driver(output);
   }
@@ -84,6 +91,7 @@ TEST(Placement, ExperimentalBoundaryRefinementsRunOnlyAtTheFinalStage) {
   options.busorder.refresh        = 10;
   options.busorder.max_cells      = 2;
   options.boundarypins.iterations = 20;
+  options.retain_preroute_design  = true;
   for (int mode : {0, 1, 2}) {
     const bool boundary          = mode != 0;
     options.busorder.enabled     = mode == 0;
@@ -98,6 +106,22 @@ TEST(Placement, ExperimentalBoundaryRefinementsRunOnlyAtTheFinalStage) {
         std::filesystem::remove_all(options.output_dir);
         const auto result = place(*graph, placed, options);
         check_legality(physical::read_lef(options.lefs), result.floorplan);
+        ASSERT_EQ(bool(result.preroute_design), stage == Placement_stage::final);
+        if (result.preroute_design) {
+          const auto& snapshot = *result.preroute_design;
+          const auto  bindings = bind_preroute(result.floorplan, *result.parasitics, snapshot);
+          EXPECT_EQ(bindings.size(), result.parasitics->nets.size());
+          EXPECT_EQ(snapshot.dont_touch_pins, (std::set<std::string>{"inv0:A", "inv0:Y", "inv1:Y"}));
+          EXPECT_EQ(std::count_if(bindings.begin(), bindings.end(), [](const auto& binding) { return binding.dont_touch; }), 3);
+          snapshot.design.validate();
+          ASSERT_EQ(snapshot.pin_labels.size(), snapshot.design.pin2node.size());
+          for (size_t p = 0; p < snapshot.pin_labels.size(); ++p) {
+            const auto node = snapshot.design.pin2node[p];
+            const auto pos  = result.pin_locations.at(snapshot.pin_labels[p]);
+            EXPECT_DOUBLE_EQ(pos.first, snapshot.design.node_x[node] + snapshot.design.pin_offset_x[p]);
+            EXPECT_DOUBLE_EQ(pos.second, snapshot.design.node_y[node] + snapshot.design.pin_offset_y[p]);
+          }
+        }
         const auto report_path = options.output_dir + (boundary ? "/boundarypins/report.json" : "/busorder/report.json");
         EXPECT_EQ(result.floorplan.components.size(), 4u);
         EXPECT_EQ(std::filesystem::exists(report_path), stage == Placement_stage::final);
@@ -366,6 +390,27 @@ TEST(Placement, ResynthesisRestartSeedsCoordinatesWithoutLockingCellsOrMacros) {
     });
     ASSERT_NE(now, moved.floorplan.components.end());
     EXPECT_TRUE(now->place.x != old.place.x || now->place.y != old.place.y) << old.name;
+  }
+
+  // Resynthesis can change the automatically sized die. Old edge coordinates
+  // must not become interior IO seeds in the new frame.
+  auto resized_seed = std::make_shared<physical::Floorplan>(*options.restart_seed);
+  for (auto& terminal : resized_seed->terminals) {
+    terminal.x = resized_seed->die.xh;
+    terminal.y = (resized_seed->die.yl + resized_seed->die.yh) / 2;
+  }
+  options.restart_seed = resized_seed;
+  options.iterations   = 0;
+  options.core         = {0, 0, 200, 200};
+  options.output_dir   = (root / "resized").string();
+  hhds::GraphLibrary resized_library;
+  const auto         resized = place(*graph, resized_library, options);
+  ASSERT_NE(resized.floorplan.die, frame.die);
+  ASSERT_FALSE(resized.floorplan.terminals.empty());
+  for (const auto& terminal : resized.floorplan.terminals) {
+    const auto& die = resized.floorplan.die;
+    EXPECT_TRUE(terminal.x == die.xl || terminal.x == die.xh || terminal.y == die.yl || terminal.y == die.yh)
+        << terminal.name << " at " << terminal.x << "," << terminal.y;
   }
 }
 TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegalization) {
@@ -3243,6 +3288,7 @@ TEST(Placement, HierarchicalSteinerRcIsConnectedAcyclicAndChargesOnlyRetainedWir
       }
     }
     EXPECT_NEAR(wire_capacitance, 2 * wire_resistance, 1e-8 * wire_capacitance);
+    EXPECT_NEAR(rc.wire_length_um, wire_capacitance / 2, 1e-8 * wire_capacitance);
   }
 }
 TEST(Placement, HierarchicalSteinerSharedJunctionCycleRegression) {
@@ -5311,4 +5357,134 @@ TEST(Placement, AdaptiveSearchRejectsTopologyChangingGpRepairBeforePlacement) {
   } catch (const std::invalid_argument& error) {
     EXPECT_NE(std::string(error.what()).find("disable gp_resize"), std::string::npos);
   }
+}
+namespace livehd::placement {
+TEST(Placement, CutRowsRequireActualSiteCoverageAndUseSegmentOrientations) {
+  physical::Technology tech;
+  tech.sites["s"] = {.010, .010, true};
+  auto& cell      = tech.macros["cell"];
+  cell.width = cell.height = .010;
+  cell.site                = "s";
+  cell.klass               = "CORE";
+  cell.symmetry_y          = true;
+  physical::Floorplan fp;
+  fp.die  = {0, 0, 100, 20};
+  fp.rows = {{"r0_left", "s", 0, 0, 3, 10, physical::Orientation::N},
+             {"r0_right", "s", 60, 0, 4, 10, physical::Orientation::N},
+             {"r1", "s", 0, 10, 10, 10, physical::Orientation::FS}};
+  Ann_place p(80, 0, 10, 10);
+  p.status = physical::Status::PLACED;
+  fp.components.push_back({"c", "cell", p});
+  EXPECT_NO_THROW(check_legality(tech, fp));
+  fp.components[0].place.x = 40;
+  EXPECT_THROW(check_legality(tech, fp), std::runtime_error);
+  fp.components[0].place.x           = 80;
+  fp.components[0].place.y           = 10;
+  fp.components[0].place.orientation = physical::Orientation::S;
+  EXPECT_NO_THROW(check_legality(tech, fp));
+  fp.components[0].place.orientation = physical::Orientation::N;
+  EXPECT_THROW(check_legality(tech, fp), std::runtime_error);
+  fp.components[0].place.orientation = physical::Orientation::FS;
+  std::reverse(fp.rows.begin(), fp.rows.end());
+  EXPECT_NO_THROW(check_legality(tech, fp));
+  fp.components[0].place.width = fp.components[0].place.height = 0;  // raw DEF, dimensions come from LEF
+  EXPECT_NO_THROW(check_legality(tech, fp));
+  auto duplicate = fp.components[0];
+  duplicate.name = "overlap";
+  fp.components.push_back(duplicate);
+  EXPECT_THROW(check_legality(tech, fp), std::runtime_error);
+}
+TEST(Placement, HandoffTapsAreFixedPhysicalOnlyTerminalObstacles) {
+  const auto dir = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "handoff_taps";
+  std::filesystem::create_directories(dir);
+  // Synthetic profile master on the repository fixture's site. Production uses
+  // the actual ASAP7 master, verified independently against OpenROAD.
+  const auto lef = dir / "tap.lef";
+  std::ofstream(lef) << R"(VERSION 5.8 ;
+MACRO TAPCELL_ASAP7_75t_R
+ CLASS CORE WELLTAP ; ORIGIN 0 0 ; SIZE 0.92 BY 2.72 ;
+ SYMMETRY X Y ; SITE unithd ;
+END TAPCELL_ASAP7_75t_R
+MACRO handoff_ram
+ CLASS BLOCK ; ORIGIN 0 0 ; SIZE 9.2 BY 5.44 ; SYMMETRY X Y ;
+END handoff_ram
+END LIBRARY
+)";
+  hhds::GraphLibrary source, flat;
+  auto               io = source.create_io("handoff_taps");
+  io->add_input("a", 0);
+  io->set_bits("a", 1);
+  io->add_output("y", 0);
+  io->set_bits("y", 1);
+  auto graph  = io->create_graph();
+  auto ram    = source.create_io("handoff_ram");
+  auto memory = gu::create_typed_node(*graph, Ntype_op::Sub);
+  memory.set_subnode(ram);
+  memory.set_name("ram");
+  Ann_place macro_place(20240, 21760, 9200, 5440);
+  macro_place.status = physical::Status::FIXED;
+  memory.attr(attrs::place).set(macro_place);
+  auto inv = source.create_io("sky130_fd_sc_hd__inv_1");
+  inv->add_input("A", 0);
+  inv->add_output("Y", 0);
+  auto signal = graph->get_input_pin("a");
+  gu::set_bits(signal, 1);
+  for (unsigned i = 0; i < 12; ++i) {
+    auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+    node.set_subnode(inv);
+    node.set_name("inv" + std::to_string(i));
+    node.create_sink_pin("A").connect_driver(signal);
+    signal = node.create_driver_pin("Y");
+    gu::set_bits(signal, 1);
+  }
+  graph->get_output_pin("y").connect_driver(signal);
+  auto options        = plain_options();
+  options.lefs        = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", lef.string()};
+  options.core        = {0, 0, 55.2, 54.4};
+  options.die         = options.core;
+  options.output_dir  = (dir / "out").string();
+  options.density     = .5;
+  options.final_cells = true;
+  options.halo_x = options.halo_y = 4;
+  options.iterations              = 0;
+  options.bins                    = 4;
+  options.handoff_taps = options.terminal_legalize = options.snapshots = true;
+  options.terminal_legalize_options.critical_fraction                  = 0;
+  const auto result                                                    = place(*graph, flat, options);
+  const auto tech                                                      = physical::read_lef(options.lefs);
+  EXPECT_NO_THROW(check_legality(tech, result.floorplan, options));
+  size_t taps = 0;
+  for (const auto& c : result.floorplan.components) {
+    if (c.macro == "TAPCELL_ASAP7_75t_R") {
+      EXPECT_EQ(c.place.status, physical::Status::LOCKED);
+      ++taps;
+    }
+  }
+  EXPECT_GT(taps, 40);
+  EXPECT_EQ(result.floorplan.components.size(), 13 + taps);
+  EXPECT_GT(result.floorplan.rows.size(), 20);
+  const auto snapshot = physical::read_def(options.output_dir + "/after_legalization.def");
+  EXPECT_EQ(snapshot.components.size(), result.floorplan.components.size());
+  EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/handoff_taps.json"));
+}
+}  // namespace livehd::placement
+
+TEST(Placement, SteinerRcSharedTopologyPreservesLengthAndCharge) {
+  const std::vector<std::pair<std::string, std::pair<double, double>>> pins{{"driver", {0, 0}},
+                                                                            {"a", {100, 0}},
+                                                                            {"b", {50, 100}},
+                                                                            {"coincident", {0, 0}}};
+  const auto rc = livehd::placement::steiner_rc("driver", pins, {2, 3, 4, 5, "test"}, 1000);
+  ASSERT_EQ(rc.nodes.size(), 8);
+  EXPECT_EQ(rc.edges.size(), 7);
+  EXPECT_NEAR(rc.wire_length_um, .2, 1e-12);
+  double capacitance = 0, resistance = 0;
+  for (const auto& node : rc.nodes) {
+    capacitance += node.capacitance_ff;
+  }
+  for (const auto& edge : rc.edges) {
+    resistance += edge.resistance_ohm;
+  }
+  EXPECT_NEAR(capacitance, .8, 1e-12);
+  EXPECT_NEAR(resistance, .6 + 4e-9, 1e-12);
 }

@@ -2218,9 +2218,22 @@ void apply_resize_edits(hhds::Graph& graph, const Options& options, const std::v
     if (root.is_invalid() || root.is_const()) {
       throw std::runtime_error("resize plan edit has no driver: " + e.driver);
     }
+    bool preroute_excluded = gu::preroute_net_excluded(root) || root.get_master_node().attr(attrs::preroute_exclude).has();
+    for (const auto& name : e.sinks) {
+      const auto sink = physical_pin(graph, name, nodes, false).pin;
+      preroute_excluded |= sink.get_master_node().attr(attrs::preroute_exclude).has();
+      const auto old_driver = sink.get_driver_pin();
+      preroute_excluded |= gu::preroute_net_excluded(old_driver);
+      if (!old_driver.is_invalid() && !old_driver.is_const()) {
+        preroute_excluded |= old_driver.get_master_node().attr(attrs::preroute_exclude).has();
+      }
+    }
     if (source.width > 1) {
       root = gu::create_get_mask(graph, root, source.bit).get_driver_pin(0);
       gu::set_bits(root, 1);
+    }
+    if (preroute_excluded) {
+      root.attr(attrs::preroute_net_exclude).set();
     }
     if (e.kind == Resize_edit::Kind::rewire) {
       for (const auto& s : e.sinks) {
@@ -2254,6 +2267,9 @@ void apply_resize_edits(hhds::Graph& graph, const Options& options, const std::v
     cell.create_sink_pin(b.inputs.front()).connect_driver(root);
     auto out = cell.create_driver_pin(b.output);
     gu::set_bits(out, 1);
+    if (preroute_excluded) {
+      out.attr(attrs::preroute_net_exclude).set();
+    }
     nodes.emplace(e.instance, cell);
     if (weights) {
       const auto original        = roots.contains(e.driver) ? roots.at(e.driver) : e.driver;

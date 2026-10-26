@@ -54,14 +54,13 @@ std::string lib(const std::string& cells) {
 }  // namespace
 
 TEST(LibertyDff, BufferedFilesAndCommentsPreserveCellBoundaries) {
-  const auto first = write_lib("comment-first.lib", std::string(65535, ' ')
-      + "/*" + std::string(65536, 'x') + "*/\n"
-      + lib(q_cell("FIRST", 2)) + "// no final newline");
-  const auto second = write_lib("comment-second.lib",
-      "// ignored cell(BAD) {}\n" + lib(q_cell("SECOND", 3))
-      + "/* unterminated cell(ALSO_BAD) {}");
+  const auto first = write_lib(
+      "comment-first.lib",
+      std::string(65535, ' ') + "/*" + std::string(65536, 'x') + "*/\n" + lib(q_cell("FIRST", 2)) + "// no final newline");
+  const auto second  = write_lib("comment-second.lib",
+                                "// ignored cell(BAD) {}\n" + lib(q_cell("SECOND", 3)) + "/* unterminated cell(ALSO_BAD) {}");
   const auto missing = first + ".missing";
-  const auto cells = livehd::liberty::scan_dff_cells(first + " " + missing + " " + second);
+  const auto cells   = livehd::liberty::scan_dff_cells(first + " " + missing + " " + second);
   ASSERT_EQ(cells.size(), 2U);
   EXPECT_EQ(cells[0].name, "FIRST");
   EXPECT_EQ(cells[1].name, "SECOND");
@@ -1121,4 +1120,36 @@ TEST(LibertyFunction, ClockedMemoryBusDriveKeepsConstantDelayAndElectricalLimits
     library(ram) { cell(RAM) { memory() { type : ram; } } }
   )")
                   .empty());
+}
+
+TEST(LibertyDff, NestedBodiesDoNotHideFollowingScalarAttributes) {
+  std::string padding;
+  for (int i = 0; i < 4096; ++i) {
+    padding += "0.123, ";
+  }
+  const auto text = R"(library(test) {
+    cell(BUF) {
+      pin(A) { direction : input; capacitance : 0.002; }
+      pin(Y) {
+        timing() { related_pin : "A";
+          opaque_table() { values(")"
+                    + padding + R"("); area : 999; }
+        }
+        direction : output; function : "A"; max_capacitance : 0.005;
+      }
+      area : 3; cell_footprint : "BUF { quoted }";
+    }
+    time_unit : "1ps"; capacitive_load_unit(1,ff);
+  })";
+  const auto cells = livehd::liberty::scan_comb_cells_text(text);
+  ASSERT_EQ(cells.size(), 1);
+  EXPECT_EQ(cells[0].name, "BUF");
+  EXPECT_EQ(cells[0].output, "Y");
+  EXPECT_EQ(cells[0].function, "A");
+  EXPECT_EQ(cells[0].footprint, "BUF { quoted }");
+  EXPECT_DOUBLE_EQ(cells[0].area, 3);
+  ASSERT_EQ(cells[0].input_capacitance_ff.size(), 1);
+  EXPECT_DOUBLE_EQ(cells[0].input_capacitance_ff[0], .002);
+  ASSERT_TRUE(cells[0].max_capacitance_ff.has_value());
+  EXPECT_DOUBLE_EQ(*cells[0].max_capacitance_ff, .005);
 }

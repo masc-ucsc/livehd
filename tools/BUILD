@@ -122,6 +122,27 @@ cc_binary(
     deps = ["//pass/place:prects_networks", "//inou/lefdef:inou_lefdef", "@rapidjson"],
 )
 
+cc_binary(
+    name = "routing_geometry",
+    srcs = ["routing_geometry.cpp"],
+    copts = COPTS,
+    deps = ["//inou/lefdef:inou_lefdef", "@rapidjson"],
+)
+
+cc_binary(
+    name = "cut_rows",
+    srcs = ["cut_rows.cpp"],
+    copts = COPTS,
+    deps = ["//pass/place:handoff_rows", "//pass/place:place"],
+)
+
+cc_binary(
+    name = "power_grid",
+    srcs = ["power_grid.cpp"],
+    copts = COPTS,
+    deps = ["//pass/place:power_grid", "@rapidjson"],
+)
+
 py_test(
     name = "placement_metrics_smoke",
     srcs = ["placement_metrics_smoke.py"],
@@ -152,4 +173,25 @@ py_test(
     data = [":buffer_geometry_probe"],
     legacy_create_init = 0,
     timeout = "short",
+)
+
+cc_binary(
+    name = "metal_rules",
+    srcs = ["metal_rules.cpp"],
+    copts = COPTS,
+    deps = ["//inou/lefdef:inou_lefdef", "@rapidjson"],
+)
+
+cc_binary(
+    name = "pin_access",
+    srcs = ["pin_access.cpp"],
+    copts = COPTS,
+    deps = ["//inou/lefdef:inou_lefdef", "@rapidjson"],
+)
+
+cc_binary(
+    name = "signal_route",
+    srcs = ["signal_route.cpp"],
+    copts = COPTS,
+    deps = ["//pass/place:signal_router", "//pass/place:routed_rc", "//pass/place:satlegalize", "//pass/place:place", "//inou/lefdef:inou_lefdef"],
 )

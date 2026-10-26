@@ -30,6 +30,7 @@ public:
 
   struct Pin_timing {
     std::optional<double> slack, arrival, required, slew;
+    std::optional<double> hold_slack{};  // MIN-corner slack in ps
   };
   // Setup (MAX) values; worst over rise/fall.
   virtual double                                      wns() = 0;  // worst endpoint slack (may be positive)

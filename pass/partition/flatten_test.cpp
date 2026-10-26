@@ -58,15 +58,60 @@ protected:
   }
 };
 
+TEST_F(FlattenAdmission, BoundaryAdaptersRetainOccurrenceExclusion) {
+  gu::set_ubits(top->get_input_pin("a"), 8);
+  top->get_io()->set_bits("a", 8);
+  for (auto node : top->body().nodes()) {
+    if (gu::type_op_of(node) == Ntype_op::Sub) {
+      node.attr(attrs::preroute_exclude).set();
+    }
+  }
+  hhds::GraphLibrary destination;
+  auto flat = flatten_hierarchy(top.get(), &destination, "protected_adapters");
+  ASSERT_TRUE(flat);
+  unsigned adapters = 0;
+  for (auto node : flat->body().nodes()) {
+    if (gu::type_op_of(node) == Ntype_op::Get_mask) {
+      ++adapters;
+      EXPECT_TRUE(node.attr(attrs::preroute_exclude).has());
+    }
+  }
+  EXPECT_GT(adapters, 0U);
+  EXPECT_FALSE(flat->get_input_node().attr(attrs::preroute_exclude).has());
+  EXPECT_FALSE(child->get_input_node().attr(attrs::preroute_exclude).has());
+}
+
+TEST_F(FlattenAdmission, ProtectedFeedthroughMarksOnlyItsNet) {
+  auto alias = make_graph(source, "alias");
+  alias->get_input_pin("a").connect_sink(alias->get_output_pin("y"));
+  auto parent = make_graph(source, "alias_parent");
+  parent->get_io()->add_input("unrelated", 3);
+  parent->get_io()->set_bits("unrelated", 1);
+  auto output = instance(*parent, alias->get_io());
+  output.get_master_node().attr(attrs::preroute_exclude).set();
+  output.connect_sink(parent->get_output_pin("y"));
+  hhds::GraphLibrary destination;
+  auto flat = flatten_hierarchy(parent.get(), &destination, "protected_alias");
+  ASSERT_TRUE(flat);
+  EXPECT_TRUE(gu::preroute_net_excluded(flat->get_input_pin("a")));
+  EXPECT_FALSE(gu::preroute_net_excluded(flat->get_input_pin("unrelated")));
+  EXPECT_FALSE(flat->get_input_node().attr(attrs::preroute_exclude).has());
+  EXPECT_FALSE(gu::preroute_net_excluded(alias->get_input_pin("a")));
+  EXPECT_EQ(flat->get_output_pin("y").get_driver_pin(), flat->get_input_pin("a"));
+}
+
 TEST_F(FlattenAdmission, SignalRolesSurviveInternalAndInputHierarchyAliases) {
   gu::add_signal_roles(child->get_input_pin("a"), attrs::signal_clock);
   gu::add_signal_roles(invert.get_driver_pin(0), attrs::signal_reset);
+  invert.get_driver_pin(0).attr(attrs::preroute_net_exclude).set();
   hhds::GraphLibrary destination;
   auto               flat = flatten_hierarchy(top.get(), &destination, "roles");
   ASSERT_TRUE(flat);
   EXPECT_EQ(gu::signal_roles_of(flat->get_input_pin("a")), attrs::signal_clock);
   auto output = flat->get_output_pin("y").get_driver_pin();
   EXPECT_EQ(gu::signal_roles_of(output), attrs::signal_reset);
+  EXPECT_TRUE(gu::preroute_net_excluded(output));
+  EXPECT_FALSE(gu::preroute_net_excluded(flat->get_input_pin("a")));
 }
 
 TEST_F(FlattenAdmission, PhysicalNamesRetainTransparentInstanceScopes) {
@@ -115,6 +160,32 @@ TEST_F(FlattenAdmission, SynthesisColorGroupsAreScopedPerPhysicalInstance) {
   EXPECT_EQ(groups["left.unit:color:1"], 2);
   EXPECT_EQ(groups["right.unit:color:1"], 2);
   EXPECT_EQ(invert.attr(livehd::attrs::synth_color_group).get(), "unit:color:1");
+}
+
+TEST_F(FlattenAdmission, PrerouteExclusionIsScopedToProtectedOccurrences) {
+  invert.set_name("leaf");
+  auto root = make_graph(source, "protected_root");
+  auto left = instance(*root, child->get_io());
+  auto right = instance(*root, child->get_io());
+  left.get_master_node().set_name("left");
+  right.get_master_node().set_name("right");
+  left.connect_sink(root->get_output_pin("y"));
+  left.get_master_node().attr(attrs::preroute_exclude).set();
+  for (const bool definition : {false, true}) {
+    if (definition) { child->get_input_node().attr(attrs::preroute_exclude).set(); }
+    hhds::GraphLibrary destination;
+    const auto flat = flatten_hierarchy(root.get(), &destination, "protected_flat", nullptr, false, {}, {}, true);
+    ASSERT_TRUE(flat);
+    std::map<std::string, bool> leaves;
+    for (auto node : flat->body().nodes()) {
+      if (gu::type_op_of(node) == Ntype_op::Not) {
+        leaves.emplace(std::string(node.get_name()), node.attr(attrs::preroute_exclude).has());
+      }
+    }
+    EXPECT_EQ(leaves, (std::map<std::string, bool>{{"left.leaf", true}, {"right.leaf", definition}}));
+    EXPECT_FALSE(invert.attr(attrs::preroute_exclude).has());
+    EXPECT_FALSE(right.get_master_node().attr(attrs::preroute_exclude).has());
+  }
 }
 
 TEST_F(FlattenAdmission, WideInputsKeepTheirPortsAndInstanceIdentity) {

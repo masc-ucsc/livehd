@@ -1038,6 +1038,7 @@ TEST_F(Buffer_repair, FloorplanDensityGateDefersTimingAndRepairUntilTheCap) {
 }
 TEST_F(Buffer_repair, FloorplanRemovesBuffersAndRollsBackRejectedTopology) {
   auto b = gate("sky130_fd_sc_hd__buf_1", "buffer", graph->get_input_pin("a"));
+  b.attr(attrs::preroute_net_exclude).set();
   graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__inv_1", "macro", b));
   enable_floorplan();
   const auto directory = options.output_dir;
@@ -1060,6 +1061,8 @@ TEST_F(Buffer_repair, FloorplanRemovesBuffersAndRollsBackRejectedTopology) {
       const auto         placed = place(*graph, owner, options);
       EXPECT_EQ(count(placed, "buffer"), accept ? 0U : 1U);
       EXPECT_EQ(placed.fp_repair_edits, accept ? 1U : 0U);
+      EXPECT_EQ(gu::preroute_net_excluded(placed.graph->get_input_pin("a")), accept);
+      EXPECT_FALSE(gu::preroute_net_excluded(graph->get_input_pin("a")));
       equivalent(placed);
       EXPECT_EQ(count(Result{.graph = graph}, "buffer"), 1U);  // source stays read-only
       check_legality(physical::read_lef(options.lefs), placed.floorplan, options.halo_x, options.halo_y);
@@ -1068,6 +1071,7 @@ TEST_F(Buffer_repair, FloorplanRemovesBuffersAndRollsBackRejectedTopology) {
 }
 TEST_F(Buffer_repair, FloorplanRebuildsFanoutWithSteinerSeedsAndOwnerColors) {
   auto root = gate("sky130_fd_sc_hd__buf_1", "root", graph->get_input_pin("a"));
+  root.attr(attrs::preroute_net_exclude).set();
   for (unsigned i = 0; i < 6; ++i) {
     const auto name = i ? "y" + std::to_string(i) : std::string("y");
     if (i) {
@@ -1090,6 +1094,9 @@ TEST_F(Buffer_repair, FloorplanRebuildsFanoutWithSteinerSeedsAndOwnerColors) {
       for (auto n : state.graph->body().nodes()) {
         if (n.get_name().starts_with("__place_rebuffer")) {
           EXPECT_TRUE(n.attr(attrs::place).has());
+          for (auto pin : n.out_sorted_pins()) {
+            EXPECT_TRUE(gu::preroute_net_excluded(pin));
+          }
           EXPECT_TRUE(n.attr(attrs::synth_color_group).has());
           if (n.attr(attrs::synth_color_group).has()) {
             EXPECT_EQ(n.attr(attrs::synth_color_group).get(), "bank:color:1");
@@ -1186,6 +1193,34 @@ TEST(Timing_weights, InheritsReducedPullAcrossEveryTreeEdgeAndRefreshesMembershi
   refresh_timing_weights(state, options, timing);
   EXPECT_DOUBLE_EQ(state.net_weights.at("root"), 5);
   EXPECT_DOUBLE_EQ(state.net_weights.at("new:X"), 1);
+}
+
+TEST_F(Buffer_repair, PreparsedTimingRolesRetainDynamicControlSeeds) {
+  Result state;
+  state.floorplan.nets
+      = {{"control", {{"PIN", "a"}, {"PIN", "x"}}, {}, "SIGNAL"}, {"data", {{"PIN", "d"}, {"PIN", "y"}}, {}, "SIGNAL"}};
+  state.parasitics = std::make_shared<physical::Parasitics>();
+  Timing_feedback feedback;
+  for (const auto* driver : {"a", "d"}) {
+    physical::Rc_net net;
+    net.driver = driver;
+    net.nodes.push_back({});
+    net.nodes.back().pin = driver;
+    state.parasitics->nets.push_back(net);
+    feedback.pins[driver].slack = std::string_view(driver) == "a" ? -100 : -10;
+  }
+  options.timing_smoothing = .5;
+  const auto roles         = prects_library(options.liberty, options.control_ports);
+  auto       reused        = state;
+  for (const auto* control : {"a", "d"}) {
+    state.prects.ports = reused.prects.ports = {control};
+    refresh_timing_weights(state, options, feedback);
+    refresh_timing_weights(reused, options, feedback, roles);
+    EXPECT_EQ(state.net_weights, reused.net_weights);
+    EXPECT_DOUBLE_EQ(reused.net_weights.at(control), 1);
+    EXPECT_DOUBLE_EQ(reused.net_weights.at(std::string_view(control) == "a" ? "d" : "a"), 3);
+  }
+  EXPECT_TRUE(roles.ports.empty());
 }
 
 TEST_F(Buffer_repair, FinalRecoveryCollapsesLegalCellBufferChainsAndRepeatsSafely) {

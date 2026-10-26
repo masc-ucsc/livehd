@@ -105,6 +105,28 @@ hhds::Pin_class binop(const std::shared_ptr<hhds::Graph>& g, Ntype_op op, const 
 
 // ---- no rules: the round trip is the identity --------------------------------
 
+TEST(Aegraph, ForwardingPreservesRoutingExclusionAndSignalRoles) {
+  for (bool cell_marker : {false, true}) {
+    hhds::GraphLibrary library;
+    auto g = io_graph(library, "protected_forward", 2, 1);
+    const auto input = g->get_input_pin("i0");
+    const auto value = binop(g, Ntype_op::Or, input, konst(g, 0));
+    if (cell_marker) {
+      value.get_master_node().attr(livehd::attrs::preroute_exclude).set();
+    } else {
+      value.attr(livehd::attrs::preroute_net_exclude).set();
+    }
+    gu::add_signal_roles(value, livehd::attrs::signal_reset);
+    value.connect_sink(g->get_output_pin("o0"));
+    livehd::aegraph::optimize(g, {}, checked());
+    EXPECT_EQ(out_driver(g, "o0"), input);
+    EXPECT_TRUE(gu::preroute_net_excluded(input));
+    EXPECT_EQ(gu::signal_roles_of(input), livehd::attrs::signal_reset);
+    EXPECT_FALSE(gu::preroute_net_excluded(g->get_input_pin("i1")));
+    EXPECT_FALSE(g->get_input_node().attr(livehd::attrs::preroute_exclude).has());
+  }
+}
+
 // A graph with nothing to share and nothing to fold: every node survives with
 // its nid, name and operands.
 TEST(Aegraph, NoRuleRoundTripIsStructurallyIdentical) {

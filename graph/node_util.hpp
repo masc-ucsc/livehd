@@ -851,6 +851,21 @@ inline void carry_signal_roles(const hhds::Pin_class& from, const hhds::Pin_clas
   add_signal_roles(to, signal_roles_of(from));
 }
 
+inline bool preroute_net_excluded(const hhds::Pin_class& pin) {
+  if (pin.is_invalid() || pin.is_const()) {
+    return false;
+  }
+  assert_pin_attr_role<attrs::preroute_net_exclude_t>(pin);
+  return pin.attr(attrs::preroute_net_exclude).has();
+}
+inline void carry_preroute_exclusion(const hhds::Pin_class& from, const hhds::Pin_class& to) {
+  if (to.is_invalid() || to.is_const() || !preroute_net_excluded(from)) {
+    return;
+  }
+  assert_pin_attr_role<attrs::preroute_net_exclude_t>(to);
+  to.attr(attrs::preroute_net_exclude).set();
+}
+
 // Per-pin bit width (plain int32). Storing 0 leaves the attribute untouched
 // logically. `bits` is a DRIVER-pin property; a sink's width is its driver's,
 // read via `bits_of(driver_of(sink))` (see assert_pin_attr_role above).

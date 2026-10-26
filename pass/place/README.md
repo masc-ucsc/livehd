@@ -19,6 +19,8 @@ State and memory instances remain opaque and retain their interfaces.
 One automatic batch is allowed: either before placement using saved final
 feedback, or after the first completed stage. An accepted batch restarts that
 stage, seeding surviving cells (including SRAMs) and IOs from its placement.
+IO coordinates are reused only when the die is unchanged; a resized frame keeps
+its newly generated perimeter IO seeds. Fixed and locked IOs are preserved.
 These are movable initial coordinates: the restart does not copy fixed status,
 add position bounds, or lock unchanged colors. The normal macro lock happens
 after macro placement. A saved-feedback resynthesis before placement has no
@@ -480,6 +482,172 @@ fresh OpenTimer feedback (`synth.place.macro.timing_interval>0`). It leaves macr
 fixed cells, IOs and cells outside each window unchanged. The existing legalizer
 remains the default and the zero-prefix fallback. Multi-height cells currently
 remain obstacles because the SAT model covers single-height row/site placement.
+
+Native signal routing exposes a non-mutating `Signal_router::try_route(net,
+request)` API. The request supplies shared work/deadline limits and optionally
+an aligned corridor and layer-comparison flag. It returns candidate geometries,
+physical pin-layer identities, work counts and failure/timeout status. Surviving
+candidates retain baseline-first ordering; callers own timing ranking, capacity,
+logical eligibility, escape-reservation commits and atomic publication. A
+proposal never fixes a net itself.
+
+SAT legalization is one consumer of this API, not part of its contract.
+Other callers may probe a net, try alternative routes, or move a cell after a
+rejected trial. Technology policy is supplied separately through the routing
+profile and rule database. Improving SAT legalization's placement decisions or
+outperforming another router is separate from the API's correctness contract.
+
+```cpp
+Signal_router router(tech, frame, occupancy, platform_profile);
+auto proposals = router.try_route(net, {.limits = limits,
+                                       .corridor = retained_alignment,
+                                       .compare_layers = critical});
+```
+
+Omit the corridor and set `compare_layers=false` for general bounded routing.
+All returned candidates share the request's search budget; timeout/work counts
+remain visible even when an earlier baseline candidate succeeded.
+
+`try_route` and `probe_route` preserve initially legal access for supported
+unrouted standard-cell pins, including CLOCK/POWER/GROUND pins in special nets,
+wildcard connections, and unassigned control/supply pins. A partially wired
+signal net remains protected until full-net connectivity is established.
+`try_hard` never bypasses this check. Repeated routing borrows the host's
+`Pin_escape_guard`; standalone requests build a temporary guard against current
+occupancy within the request deadline. Final SAT alignment verification shares
+one index for the completed frame and probes actual two-pin nets, avoiding
+whole-frame setup inside each pair’s search budget. The host still commits the escape trial
+only after all final acceptance gates. Exact escape enumeration currently covers the profile's M1-to-M2 stack.
+Unresolved clock/supply pins conservatively reserve local volume across
+layers, expanded by per-layer spacing and single-cut LEF via-overhang bounds.
+The three-width escape extension applies only along the escape layer’s preferred
+direction; unused generated PG via definitions do not enlarge this reservation. Known
+rectangular supply rails reserve their footprint rather than the entire cell.
+Straight-span search continues to later tracks after an access rejection. This can reject
+feasible nearby routes; it does not claim exact access on unsupported stacks.
+Verified same-net supply metal exempts an already attached supply pin; a LEF pin
+rectangle alone does not count as a connection. Search-budget exhaustion fails
+closed.
+
+`try_route` also screens long parallel exposure to foreign metal on the same
+layer. For elongated shapes within two candidate wire widths, it sums parallel
+overlap divided by edge-to-edge separation. The dimensionless
+`Signal_route_request::max_parallel_exposure` limit defaults to 100; rejected
+candidates report a parallel-exposure reason. This is a conservative geometric
+proxy, not extracted coupling capacitance or a timing guarantee. Occupancy can
+include pin/blockage rectangles as well as wires, so the screen may reject
+conservatively. Upper-layer alternatives are screened independently.
+`try_hard=true` bypasses only this screen; geometric legality and the caller's
+capacity/timing acceptance remain mandatory. Accepted geometry reports its
+`parallel_exposure`, including in try-hard mode. These are C++ request fields,
+not new CLI options. The screen is non-mutating and respects the request deadline.
+
+`probe_route(net, request)` returns a routability witness and work/timeout
+status without publishing geometry or ranking candidates by timing. It honors
+an explicit `compare_layers` request, so a clean upper-layer witness remains
+available when the lower-layer route fails the parallel-metal screen. Set
+`straight_span=true` to discover a common access track without falling back
+to patterns or maze routing. SAT legalization uses this mode for via-assisted
+alignment checks. A negative probe means no witness was found within the
+budget, not that routing is impossible. Moving a cell and probing again is a
+normal caller operation.
+
+Committed physical geometry belongs in persistent graph attributes. Search
+frontiers, trial candidates, occupancy indexes and cached checks are transient
+vectors or maps keyed by graph node/pin identities; they must be rebuilt or
+invalidated after geometry or topology changes. The current router still uses
+the physical floorplan adapter. `inou/lefdef/route_store` provides committed
+route save/load on driver-pin attributes: typed dense geometry records plus a
+companion string table. It preserves points, endpoint extensions, vias and
+orientations, patches, path boundaries and width rules through graph-library
+save/load. Loads check DBU, net connectivity and a caller-supplied context
+identity covering technology and placement. Graph reconstruction invalidates
+these records. Accepted-route publication writes them on the private candidate
+graph before the graph library is saved. Completed-placement cache replay checks
+the saved routes against the restored DEF using the LEF-content identity and
+endpoint poses; a mismatch fails closed. The physical-name index is transient and
+built once at this boundary. The storage API does not perform DRC/timing acceptance,
+and the DEF remains the downstream handoff for the complete frame and power grid.
+Route identity uses the master and LEF contents for body dimensions, which DEF
+does not carry, and treats LOCKED/FIXED status identically across DEF replay.
+Duplicate physical nets resolving to one graph driver are rejected before
+replacing the stored route generation.
+Temporary width rules are passed to geometry/connectivity checks as read-only
+overlays. Maze candidate validation reuses the component index without cloning
+the floorplan; conflicting installed rule definitions still fail validation.
+
+`Signal_route_profile` separates technology policy from route search: pin and
+escape layers, access cut, branch layer/cut, and ordered allowed signal layers.
+`asap7_signal_route_profile(tech)` retains the current M1 access and M2–M7 policy.
+Explicit profiles can use different layer/cut names; LEF supplies geometry and
+DRC, the floorplan supplies tracks, and `Route_technology_rc` supplies electrical
+characterization. `Preroute_options::route_profile` lets a host supply that policy;
+it is also used by the pin-escape guard. The current access/pattern algorithms
+require a horizontal escape and vertical branch, with modeled single-cut vias.
+This API separation is not certification of another PDK: its rules, power-grid
+profile, capacity/RC configuration and independent validation are still required.
+
+`synth.place.satlegalize.route=true`, together with `synth.place.satlegalize=true`,
+enables the experimental straight-metal handoff after final placement. It uses
+only retained SAT alignments whose two pins form an entire signal net, rechecks
+the corridor at the final coordinates, and first proposes one same-layer segment.
+SAT component identities are remapped by name after DEF sorting. Pin-layer
+segments may use M1; their capacity is accounted alongside M2–M7. A coarse track
+already unavailable due to static metal remains unavailable; the route reserves
+any additional usable tracks it consumes. Exact geometry checks still reject
+foreign-metal conflicts. This mode
+selects SAT nets instead of running the general maze/repeater search, even when
+`place.preroute=true` is also supplied.
+`synth.place.satlegalize.route.vias=true` (default false) additionally lets the
+terminal legalizer select M2 corridors from M1 pins with legal V1 endpoint
+access. It requires `synth.place.satlegalize.route=true`. The candidate index
+includes conservative M2 bounds; each surviving pair is checked at its proposed
+poses against installed obstacles using the shared pin-access and metal oracle.
+Each via predicate is bounded to 1024 access examinations, 256 patterns, and
+5 ms, and reuses compiled rules. Final routing rechecks access and keeps one
+horizontal trunk inside the retained corridor: it cannot switch tracks or detour
+around a blocked witness. The original same-layer search supplies the baseline.
+
+`synth.place.satlegalize.route.critical_fraction=0.10` compares metal choices for
+the worst setup-slack fraction of eligible retained alignments (rounded up;
+`0` disables comparison, `1` compares all). Ranking is taken before routing;
+clock/reset/tie/protected and insufficient-margin nets remain excluded. For
+these nets, the router tries same-direction upper trunks through M7 with the
+same endpoint centers. Only local endpoint landings and adjacent single-cut
+via stacks are added; no cell movement, track shift or maze detour is allowed.
+Each candidate must satisfy metal/via/track rules, occupancy, connectivity,
+pin-escape preservation, capacity and setup/hold/electrical checks. Actual
+layer RC and via resistance are evaluated in the incremental timer, including
+driver loading. Candidates are tried in decreasing candidate-net setup slack;
+the original route wins ties. If a faster candidate fails another acceptance
+gate, the next candidate is tried. Search shares the existing per-net budget.
+Unsupported rules/characterization are not approximated. This model includes
+effective ground capacitance, not extracted coupling or via capacitance.
+Reports include `critical_layer_search`, `layer_candidates`, selected per-layer
+wire lengths and `layer_selection` time. The `route.vias` switch controls SAT
+pin-access alignment generation; critical layer comparison can add endpoint
+stacks to an already valid same-layer alignment independently of that switch.
+
+With the default terminal legalizer, routing consumes that legalizer's final
+validated critical/local SAT alignments; it does not rerun the legacy local
+legalization pass. In routing mode, candidate corridors use the signal-metal
+rule oracle during SAT selection, including spacing to installed foreign pins
+and obstructions. Accepted corridors also constrain subsequent cell placement.
+Supply-pin metal is an obstacle even without LEF OBS records, including
+abutment rails extending outside the cell body. Final routing still revalidates
+against the complete exported floorplan and generated power grid. Terminal placement controls (`place.legalize.*`) continue
+to govern their selection and placement. The old local `satlegalize.*` controls
+remain specific to the non-terminal placement flow.
+
+The routing stage requires native PG and taps (`synth.place.pg=auto` and
+`synth.place.handoff.taps=true`), final timing/RC and final cell placement. The
+usual `place.preroute.*` timing margins and budgets apply. Clock/reset/tie nets,
+unsupported rules, foreign-metal conflicts, inadequate capacity or timing margins
+reject the proposal; a SAT alignment alone is not a routing certificate. Accepted
+nets and endpoints become FIXED with updated RC, using the normal pre-route
+OpenROAD protection handoff. `preroute.json` reports `satlegalize_route`,
+`satlegalize_selected_nets`, and per-net acceptance/rejection reasons. Both new
+routing behavior and SAT legalization remain disabled by default.
 
 `synth.place.satlegalize.backend=cadical|cms-cnf|cms-xor` selects incremental
 CaDiCaL CNF, CryptoMiniSat CNF, or CryptoMiniSat native XOR. Candidate encoding
@@ -1078,6 +1246,13 @@ The final `out.def` also contains accepted later sizing/buffer-repair edits.
 both at FP timing checkpoints and after legal placement. `legacy` is the batch
 sizing/forest sweep described above; `new` (`resize_engine.{hpp,cpp}`) plans on the
 persistent incremental timer instead of a fresh evaluation per batch.
+
+The final post-placement resize/repair pass is skipped when
+`synth.place.legalize.terminal=true`: terminal legalization is the last placement
+operation. Setting `resize=true` alone does not enable that final pass in this
+flow. Earlier GP timing checkpoints can still use resizing when configured.
+Native handoff tap insertion requires terminal legalization, so a diagnostic
+run of the non-terminal resize flow must also disable `handoff.taps`.
 
 | Option (`synth.place.` prefix) | Default | Meaning |
 | --- | --- | --- |
@@ -2439,7 +2614,627 @@ and IO frame. FP centroid targets and macro warp pulls end with `macro_plan`;
 they are not saved as final-cell objectives or GP continuation state. Final
 legalizer remainder warping remains an independent option.
 
+### Fixed-wire handoff foundation
+
+`//pass/place:power_grid` contains the native metal-planning stage and the
+`pg_asap7` profile, transcribed from pinned ORFS profile data. `//tools:power_grid`
+reads repeated `--lef` inputs and `--def`, and writes a JSON metal plan with
+`--output`; `--profile` accepts `pg_asap7` or `auto`. It derives followpin widths
+and polarity from standard-cell PG pins and row orientations, merges shared
+rails, and clips stripe spans around macro halos on obstructed layers. Short
+row segments missed by periodic vertical feeders receive supplemental feeders
+using the profile width and spacing, on the manufacturing grid. Feeders must
+fit fully inside the rail and clear macro obstructions; an unserviceable segment
+fails explicitly. These additions precede channel cuts. Export verifies that
+each supply's grid is connected, including when channels are disabled.
+Rows require enough die inset
+for the full edge-rail width. The profile follows ORFS's unsnapped stripe offsets.
+The JSON remains an intermediate metal plan. Experimental `--def-output`
+additionally builds the PG: LEF-derived via arrays,
+stack landing patches, enclosure-driven stripe extensions/trimming, and PG
+terminals are emitted as DEF VIAS/SPECIALNETS. The result requires independent
+OpenROAD placement, connectivity, DRC and IR checks. Fixed macro PG contacts
+are transformed from LEF geometry, connected through the profile's macro layer
+pairs, and kept immutable. Complete via stacks are preflighted before emission.
+A macro-pin crossing that is too small for a supported via is skipped; failed
+fits are cached, while unsupported-rule errors still fail the export. Every
+declared macro PG pin must have a grid
+connection; overlapping opposite-net contacts and virtual proxy masters are
+rejected. Experimental profile channel patches are available through
+`synth.place.pg.channel.patches` (empty by default), `Pg_profile::channels`,
+and the PG audit tool's repeated
+`--channel-skip layer,xl,yl,xh,yh` / `--channel-gap layer,xl,yl,xh,yh` arguments
+(coordinates in microns). A skip covers the full stripe width and extent; a gap
+covers the full width and removes only its specified longitudinal interval.
+Followpin layers cannot be patched. Cuts happen before via generation, and
+export rejects undersized remnants, illegal gap spacing, disconnected grid
+islands, missing supply terminals, or wire/via pads that re-enter a channel.
+Reference profiles retain an empty channel list. The audit JSON reports removed
+planned stripe length; it is not a measurement of freed signal-track capacity.
+
+The placement option accepts semicolon-separated entries:
+`--set 'synth.place.pg.channel.patches=gap,M6,2,6.039,4,6.327'`.
+It requires final full placement, fixed taps and an enabled native grid.
+The physical cache and placement identity include the ordered patches.
+For channel-only comparisons, use separate fresh workdirs (or identical input
+cache snapshots) and verify equal rows, placed components and signal nets before
+routing. With IO resynthesis enabled, a reused workdir carries learned timing
+and wire-load data into mapping even when a changed placement option misses the
+completed-placement cache. Such a miss alone does not give a matched baseline.
+`power_grid.json` schema 2 records each patch and marks channel IR verification
+false; native connectivity checks do not establish an IR bound.
+
+The report's `channel_accounting` object records removed planned stripe length
+per layer and removed/added via stacks by lower:upper layer pair. Stack identity
+includes the supply net and origin: moving a stack counts as a removal and an
+addition. With channels enabled, accounting generates an unpatched reference
+on the same input; no reference grid is rebuilt when channels are disabled.
+Freed signal tracks remain null until measured with signal spacing and occupancy.
+
+Freed-track reporting,
+matched downstream routing and bounded IR-drop acceptance for channels remain
+pending. The profile/audit API does not constitute a validated channel policy.
+Full grid acceptance is still pending.
+`--set synth.place.pg=auto` (or `pg_asap7`) enables the experimental grid
+export in `lhd synth`; the default is `none`. It requires
+`--set synth.place.handoff.taps=true` and emits PG only after final legalization.
+An automatically sized frame adds die margin around the core for edge rails;
+explicit die/core frames must supply sufficient margin themselves.
+`power_grid.json` records per-layer wire length and via counts. Connectivity
+is reported as unverified until checked independently, rather than assuming
+that successful generation proves it.
+
+The PG via builder supports ordinary cut spacing and LEF58 tables whose entries
+all use DEFAULT, plus the enclosure forms required by ASAP7. Unsupported table
+forms fail explicitly. This constructor is not the signal-routing rule oracle.
+
+`inou/lefdef/routing_rules` supplies rectangular signal-metal checks for width,
+area, minimum size, manufacturing-grid alignment, spacing ranges and parallel-run
+tables. `Signal_metal_rules` compiles the supported ASAP7 LEF58 spacing,
+EOL keepout, convex corner spacing, width table, RECTONLY and right-way/on-grid
+forms once. EOL spacing checks short facing edges; keepouts use the LEF's
+backward/side/forward extension order, and convex-corner spacing applies to
+diagonally facing corners. Parallel-edge trigger conditions are conservatively
+assumed active, so missing neighbouring trigger context cannot admit an illegal
+route. FIRSTLASTPITCH and right-way rules require actual DEF tracks; the checker does
+not replace M2's multiple track patterns with a uniform grid. Unknown qualifiers
+and minimum-step contours reject the candidate. These primitives do not certify
+complete nets: same-net route contour unions, general via legality and
+route-search integration still need implementation and independent validation.
+
+`//tools:metal_rules --lef tech.lef --lef cells.lef --def frame.def
+--shape "M2 1000 1026 1200 1044" --shape "M2 1000 1143 1200 1161"`
+audits rectangle legality and different-net pair spacing in DEF DBU. Its JSON
+explicitly distinguishes these primitive checks from complete-net certification.
+
+`inou/lefdef/pin_access` enumerates M1-to-M2 access for placed standard cells
+using supported single-cut LEF vias. The M1 landing must lie inside the existing
+pin rectangle union; no M1 extension is introduced. A minimum-area M2 escape
+rectangle must be on an actual track and clear of the supplied foreign-net
+metal/cut occupancy. Mirroring, manufacturing grid, missing rules and bounded
+candidate enumeration are handled explicitly. The caller must supply the full
+nearby occupancy; an empty list is valid only when the frame has no relevant
+obstacles. This is an access candidate generator, not a complete-route verdict.
+`//tools:pin_access --lef tech.lef --lef cells.lef --def frame.def --instance u0`
+builds diagnostic occupancy from the frame and reports points/rejections per
+signal pin. Repeat `--instance` to audit multiple cells with one shared occupancy
+index. `--signal-wires exclude` removes only signal-wire obstacles for a
+read-only baseline diagnostic; PG, pins and obstructions remain. The JSON
+explicitly labels this exclusion, and it does not authorize route acceptance. It now uses the shared spatial index; wider master/orientation
+checks and complete route-search integration remain pending.
+
+`Pin_escape_guard` preserves an initially legal M1-to-M2 escape for each
+supported unrouted standard-cell pin while accepting signal traces. It indexes
+M2 escape rectangles, bare M2 via landings, directional router probes and V1 cuts, applies the same
+spacing rules as access enumeration, and rejects a trace that consumes a pin's
+last surviving candidate. Bare landings are checked separately because their
+shorter edges can violate EOL rules in downstream whole-cell pattern checks
+even when the extended escape is legal. Directional probes preserve at least
+one preferred-direction continuation matching OpenROAD standard-cell access
+checks (three wire widths plus the outer half-width end cap). Each direction
+is consumed independently; a legal short landing alone is insufficient.
+For cells with an initially verified compatible combination, affected-cell checks
+also preserve a joint assignment of bare via landings, including inter-pin metal
+and cut spacing. A bounded search tries at most 10,000 choices and observes the
+route deadline; exhaustion rejects the trial. Cells without a verified initial
+combination remain outside this additional guarantee. These pairwise checks do
+not replace OpenROAD's full pattern generation or independent DRC.
+Accepted traces consume candidates cumulatively; rejected trials do not mutate
+reservations. A completed net retires its own reservations while its real metal
+remains in routing occupancy. Setup is bounded by the stage deadline and the
+existing access enumeration budget; checks share the per-net deadline. Runtime
+is reported as `pin_escape_setup` and `pin_escape_check`. Pins without a supported
+initial candidate are outside this guard's coverage, so independent OpenROAD
+pin-access and final DRC validation remain required. Rebuild reservations when
+cells or supply geometry change; deferred channel removal uses the complete
+initial grid as a conservative baseline.
+
+`inou/lefdef/routing_occupancy` seeds pins, obstructions, terminals and all
+signal/PG wire and via shapes with net ownership. Queries retain exact DEF
+geometry, return deterministic shape IDs, and use rule-derived clearance.
+Unowned blockages are never skipped as same-net geometry, and cut spacing still
+checks same-net cuts. Long narrow shapes are indexed along their short axis,
+so a local query does not scan every power rail on the layer. Broad shapes and
+wide queries retain bounded-index fallback paths. Candidate nets can be validated
+before insertion, so failed trials do
+not change existing occupancy. Unsupported pin polygons become conservative
+full-cell layer blockages rather than vanishing from the index.
+
+The physical DEF reader/writer preserves Manhattan `FIXED`, `ROUTED` and `COVER`
+paths, explicit endpoint extensions, oriented vias, rectangular and generated
+DEF via definitions, routed SPECIALNETS, and POWER/GROUND pin uses. Unsupported
+route features fail explicitly rather than disappearing on export. This is the
+serialization foundation for `todo/livehd/3x-reroute.html`; the automatic
+pre-router, aligned power-grid generator and their acceptance checks are still
+in development.
+
+`//tools:routing_geometry` is a read-only audit tool: pass repeated `--lef`
+arguments, `--def` and `--output` to dump rectangular signal, special-net and
+via geometry as JSON in the DEF's DBU. It resolves technology vias, expands DEF
+via arrays, applies via orientations and explicit wire-end extensions, and
+rejects geometry it cannot represent. This supports shape comparisons against
+OpenDB; it is not a spacing, pin-access or connectivity verdict. LEF fixed-via
+and generation-rule data are retained separately from DEF-local definitions.
+Unsupported via/cut features are recorded for rejection by the routing oracle.
+DEF GCELLGRID records are also preserved for downstream standalone DRC checks.
+
+The LEF model retains ordinary spacing, range and EOL conditions, parallel-run
+spacing tables, minimum area/width/size and minimum-step rules. LEF58 property
+text is retained without treating an unparsed extension as supported.
+
+`cut_macro_rows` and `//tools:cut_rows` provide the global-halo row-cut stage for
+handoff parity work. The audit tool takes repeated `--lef` arguments, `--def`,
+`--output`, and explicit `--halo-x-dbu`, `--halo-y-dbu`, `--min-row-width-dbu`
+values. It cuts outward to sites, enforces the endcap segment/step requirements,
+and preserves rows containing fixed core cells. Optional `--tracks` applies the
+literal platform `make_tracks` file for a combined row/track parity audit.
+Optional `--endcap-master`
+adds left/right endcaps using `row_endcaps`: a single-height, whole-site master
+on contiguous horizontal rows, with mirrored right edges when supported by
+master symmetry. Joined row segments have no internal endcaps. Unsupported
+row geometry or symmetry and instance-name collisions fail explicitly.
+Endcap names are deterministic LiveHD names; OpenROAD traversal indices are
+not reproduced. This primitive does not choose specialized corner/top/bottom
+masters or check existing component overlaps.
+
+Optional `--tap-master` and `--tap-distance-dbu` insert interior taps with
+`row_taps` after the endcaps. It reproduces the width-quantized staggered pitch,
+denser horizontal boundary rows (including macro holes), fixed-obstacle
+relocation, and the one-site-gap policy. Movable cells are ignored, as in
+OpenROAD; this must run before final legalization. The current tap generator
+accepts a single site with contiguous N/FS rows and fails on unsupported
+geometry. All generated endcap/tap components are locked internally and emitted
+as DEF `FIXED`. The audit tool does not enable the aligned handoff. Tap sites must be reserved before final cell
+legalization: inserting taps afterwards can overlap movable standard cells.
+
+`--set synth.place.handoff.taps=true` enables the ASAP7 tap preparation in a
+fresh final solve with terminal legalization. It uses `TAPCELL_ASAP7_75t_R`,
+25 µm tap distance, and 2 µm row-cut halos. Real fixed physical-only components
+are inserted into the terminal legalizer's frame, so cell legalization accounts
+for their occupied sites. They remain outside the logical graph and signal
+connectivity. Final DEFs and legalization snapshots include the cut rows and
+fixed components; `handoff_taps.json` records the generated counts. Physical taps
+may occupy a macro's larger placement halo, while logical cells still respect
+that halo and all component bodies must be disjoint.
+
+This mode changes the placement environment key and currently disables the
+inner block-reuse cache. Explicit previous-frame/ECO placement is rejected for
+this mode until cut rows and physical-only components can be preserved through
+that path. The option defaults to false. Power-grid generation requires the
+separate `synth.place.pg` option above. Signal pre-routing and complete
+aligned-handoff acceptance remain pending.
+
+For a DEF containing fixed signal paths, source `pass/place/preroute_handoff.tcl`
+in OpenROAD and call `livehd::preroute::protect_fixed_routes` after import and
+before any repair. Use
+`livehd::preroute::has_fixed_taps $::env(TAP_CELL_NAME)` to decide whether to
+skip `TAPCELL_TCL`; it checks the platform master and rejects movable tap
+instances. It does not certify the pattern or replace `check_placement`.
+`protect_fixed_routes` derives protection from encoded path types, rejects mixed
+fixed/non-fixed paths and non-FIRM endpoint instances, then marks the affected
+nets and instances `dont_touch`. Instance protection prevents resizing through
+another attached net. It validates all endpoints before changing protection,
+and sourcing the helper alone does nothing. This lock check does not replace
+the independent pin-connectivity, spacing, grid or timing checks required by
+3x-reroute.
+
+The handoff marks only instance locks it creates with
+`livehd_preroute_buffer_inputs_v1`. The HighTide fixed-endpoint buffering adapter
+uses this permission to buffer ordinary signal inputs while keeping cell masters,
+positions and fixed-net connections protected. It restores instance protection
+before buffer legalization, including on exceptions. Pre-existing user
+`dont_touch` instances do not receive the permission. Use the matching OpenROAD
+patch when consuming this handoff.
+
+The repair wrappers also leave ordinary internal signal nets editable when their
+driver has a handoff-owned lock. Buffering their loads keeps that driver's output
+connected to the original net; the driver's instance remains protected. Nets with
+top-level ports remain excluded because preserving the port net name may require
+reconnecting the driver. Fixed wiring, user-owned locks, clocks and special nets
+retain their protection.
+
+The CTS wrappers also release only handoff-owned instance locks. User-owned
+`dont_touch` remains set during clock edits; an incompatible clock operation
+must fail instead of silently bypassing that constraint. Handoff-owned locks
+are restored on success and failure, and successful clock edits are checked
+for changes to fixed wires, endpoint geometry and fixed-net connectivity.
+
+Native pin-access checks apply to the placement used when routing. Locking the
+routed endpoints does not protect unrelated movable cells: downstream repair
+can move or flip one of those cells beneath an unchanged fixed trace and remove
+its access. A clean pre-CTS pin-access check therefore does not replace the
+post-CTS check. Downstream placement must account for immutable routing when
+moving or resizing cells.
+
+During downstream CTS or repair, an experimental ASAP7 reservation step can
+keep movable cells away from fixed low-layer wires without adding instance locks.
+Source `pass/place/preroute_reserve.tcl` and call
+`livehd::preroute::reserve_fixed_route_space` before that stage's next detailed
+placement. It projects fixed M1/M2 wire and via-landing geometry onto placement
+rows with a four-wire-width margin, rounds outward to sites, and creates hard
+placement blockages except where existing FIRM/LOCKED bodies already occupy
+those rows. It changes neither instance statuses nor positions. Movable cells
+can initially overlap the new blockages: downstream detailed placement must
+clear them before placement validation, pin access or routing. This is not an
+extra legalization step in the aligned pre-CTS import.
+
+The reservation record persists in ODB; repeat calls validate it instead of
+rebuilding it around a changed placement. Missing or changed fixed bodies and
+blockages are errors. On a fresh DEF import, derive the reservations again at
+the same downstream stage. The margin is conservative geometry, not a
+pin-access or DRC proof; full CTS-to-route and extracted timing validation remain
+required. Earlier experimental checkpoints that also locked movable corridor
+occupants do not meet the endpoint-only lock policy in 3x-reroute Q8.
+
+When using reservations, create them before capturing the downstream protected
+state, then call `protect_fixed_routes` again. `_fixed_routes` includes the
+reservation's already-fixed bodies as well as routed endpoints; a reference
+captured before reservation creation omits those bodies. Across checkpoints,
+validate both the original routed endpoints and the recorded reservation bodies;
+do not replace a mismatching reference with the current placement.
+
+For an independent import check, also source `pass/place/preroute_validate.tcl`
+and call `livehd::preroute::check_fixed_routes /path/to/fresh.drc` in OpenROAD.
+It reads OpenDB wire/via geometry and transformed cell pin rectangles directly,
+requires every fixed net's metal and endpoints to be connected, then runs
+`drt::check_drc`. Missing or nonempty DRC reports fail the check. The supplied
+report path is overwritten. Polygon/via pins and fixed IO nets are unsupported
+and fail explicitly. Pins with several rectangular shapes are treated as one
+logical terminal; coincident metal on different layers connects only through
+an explicit via cut, and point-only contact does not connect.
+
+After CTS, also inspect the router's DRC report: the default standalone
+`drt::check_drc` can omit nondefault-rule (NDR) spacing when automatic NDR
+tapering is enabled. HighTide's `openroad-drc-explicit-ndr.patch` adds
+`drt::check_drc -check_ndr -output_file /path/to/ndr.drc` to check that spacing
+explicitly against the current OpenDB geometry. This option changes only the
+temporary checker configuration; it leaves the live router and subsequent
+default checks unchanged. The strict check can additionally flag tapered
+geometry, so its marker set need not match the router's report. Investigate
+those differences; an empty default check does not waive a router NDR marker.
+Post-route acceptance still requires both the router report and the independent
+geometry check to be clean.
+
+Signal `RECT` patches use offsets from the preceding route point and the current
+layer, including layer changes through a via. The native parser, writer,
+geometry decoder and connectivity checker preserve them. OpenDB's path iterator
+omits these patches, so the independent checker also reads them through
+`dbWireDecoder::getRect`. The Tcl binding must return its four offsets; an older
+binding fails explicitly when a patch is encountered. HighTide's
+`openroad-def-rect-bindings.patch` provides that binding. Patch geometry support
+also supports maze via landings selected from the LEF width table. Wider
+landings widen their complete connected straight run, since ASAP7 `RECTONLY`
+forbids the width transitions made by a local patch. The complete widened
+rectangle is checked again against existing and trial metal. Routed RC supports patches
+centered on a preferred-direction centerline, unions overlapping metal and
+splits it at width changes. Relative to the layer's nominal-width RC, resistance
+scales inversely with width and effective ground capacitance scales with width.
+This is an area-equivalent capacitance approximation, not width/coupling
+extraction. Offset patches and patches narrower than nominal metal fail
+explicitly; independent timing comparison remains required.
+
+Use the HighTide pin-access patches for fixed-wire handoffs. An access point
+matching an existing same-net fixed via reuses that via without adding a
+duplicate cut or a hypothetical three-width escape segment. The actual fixed
+connection may already turn onto the next layer through a shorter legal
+landing. New access vias still require directional escape checks. Whole-cell
+patterns retain the imported fixed geometry, and the independent full-design
+DRC check still checks fixed/fixed interactions; pin-access success alone is
+not a geometry or connectivity certificate.
+
+Run this in a separate checker database: when no GCELLGRID exists, it adds an
+ancillary grid with at least 64 bins per axis and at most 10um pitch for the
+DRC engine. This bounds the geometry retained by each checker region on large
+dies; an existing routing grid is preserved. It does not change metal, instance
+placement or protection flags. `check_fixed_connectivity` is also available
+without DRC or grid creation. These checks complement `check_power_grid` and
+the post-route invariance/extracted-timing checks; they do not establish timing
+or IR-drop acceptance. Revalidate the independent engine with known open,
+short and spacing controls when changing the pinned OpenROAD version.
+
+During CTS, use `livehd::preroute::repair_clock_inverters` and
+`livehd::preroute::clock_tree_synthesis` in place of the corresponding OpenROAD
+commands (the latter takes the same arguments). OpenDB instance `dont_touch`
+otherwise forbids reconnecting a protected flop's clock pin. These wrappers
+temporarily release only the derived endpoint instance flags; FIRM placement
+and fixed-net `dont_touch` remain active. They restore instance protection even
+on errors and require unchanged masters, origins, orientations, placement
+statuses, fixed-net connectivity and exact encoded wires after a successful
+clock operation. Referenced layer widths, width rules and via rectangles are checked too:
+unchanged object IDs cannot hide an in-place geometry edit.
+Do not use this release around placement or timing repair.
+Discard a failed CTS database; these wrappers restore protection, not topology.
+
+Use `livehd::preroute::repair_design` for downstream electrical repair and
+`livehd::preroute::repair_timing` for setup/hold repair. Each keeps
+the fixed wires and endpoint instances protected, and temporarily marks their
+other incident signal nets `dont_touch` when they touch a protected output or
+an input without the handoff's buffering permission. Ordinary inputs with that
+permission remain eligible for the scoped buffer-insertion adapter. Previously
+unprotected nets are restored even on errors; existing net protection is retained.
+Continue to check
+design rules and timing after routing; protection does not prove either passes.
+Supply nets remain editable for other cells' PG connections; the protected
+endpoint instances themselves stay locked throughout repair.
+Use the HighTide OpenROAD build with the clone-protection patch: gate cloning
+must reject protected input nets and moved loads before creating the clone.
+Checking only the driver's output net is insufficient, even with the incident-net
+guard, because cloning adds new terminals to the original input nets.
+
+The HighTide incremental-usage patch is also required for mixed fixed-wire and
+global-guide designs. FastRoute reinitialization must restore occupancy for
+guide-only nets while retaining the fixed-wire obstructions. Restored routes
+must use the matching resource-release path when repaired; their newly created
+FastRoute trees are initially empty. A no-op incremental route must preserve
+every edge's usage. Passing that invariant does not establish routability.
+The layer-overflow patch also includes overloaded individual metal layers in
+congestion-neighbor searches when aggregate planar capacity is still available.
+Immutable wires remain excluded from resource release and rerouting.
+The mixed-guide reload patch recognizes existing signal wires when checking a
+saved global-route database: these nets need no guides, while every remaining
+multi-terminal net still requires them. Empty wires and via-only access stacks
+do not satisfy that exemption. The reload check is exercised in a fresh process,
+matching the global-to-detailed-route handoff; it is not a substitute for the
+independent connectivity and DRC checks on fixed traces.
+
+Channel IR acceptance uses an explicit budget:
+`--set synth.place.pg.channel.max_ir_drop=0.001` permits at most 1 mV of
+additional drop on either rail or any matched terminal. The empty default leaves
+the budget unconfigured. The setting is cached with placement and written as
+`channel_max_ir_drop_v` in `power_grid.json`; generation still reports
+`channel_ir_drop_verified=false` because geometry generation does not run IR
+analysis. No geometry or placement default changes with this policy setting.
+
+Run `bazel run -c opt //pass/place:channel_ir -- manifest.json --output verdict.json`
+after matched OpenROAD `analyze_power_grid -voltage_file` runs. The manifest has
+`reference` and `candidate` objects, each with `power_grid_report`, a `rails`
+object containing `VDD` and `VSS` CSV paths, and an identical `analysis` object.
+Paths are relative to the manifest. Record the actual `liberty_sha256`,
+`sdc_sha256`, `corner`, `source_model`, `power_model`, and `voltages_v`
+(`{"VDD": "0.7", "VSS": "0"}`, for example) in that analysis object. The caller
+must establish that these descriptors describe the runs; the checker matches
+recorded context and hashes the input artifacts, but cannot reconstruct how a
+CSV was produced. The reference must have channels disabled, and the candidate
+must carry a finite nonnegative budget and the same profile revision.
+
+The checker requires matching terminal identities, layers and coordinates,
+rejects missing/duplicate/nonfinite data, and compares decimal CSV voltages
+without adding tolerance to the configured budget. It returns nonzero for a
+budget violation or invalid evidence and writes a separate verdict. A passing
+`channel_ir_delta_within_limit` only verifies this IR comparison: connectivity,
+DRC, long-net timing and routed-wire measurements remain separate acceptance
+gates. Keep the generated reports unchanged as provenance.
+
+Run OpenRCX extraction on a disposable copy of the routed database. Its wire
+ordering pass rewrites encoded paths, including FIXED status and patch records;
+that working database must not replace the validated physical handoff. Save the
+original routed ODB/DEF first, extract and write SPEF in the scratch process,
+then read that SPEF into a fresh process containing the original routed database,
+Liberty and SDC. Check exact FIXED wire/endpoint state across SPEF import and
+report setup and hold timing there. Retain the original routed database for
+physical exports and independent DRC; do not weaken the wire-invariance check
+to accommodate extraction's internal re-encoding.
+
+For the native ASAP7 power-grid handoff, final placement legalizes movable IO
+pins before final RC estimation. Left/right pins use preferred M4 tracks and
+top/bottom pins use preferred M5 tracks. Rectangles meet the layer width and
+minimum-area rules, stay inside the die, and are checked against existing metal,
+including the power grid and previously assigned IO pins. Fixed, locked and
+supply pins retain their input geometry. Missing tracks, unsupported rules or
+exhausted legal slots fail the handoff rather than emitting inaccessible pins.
+This legalization is enabled with the native grid; ordinary placement defaults
+are unchanged.
+
 ### Routability evaluation
+
+The internal `Options::retain_preroute_design` handoff retains a
+`Result::preroute_design` only for completed final placement. It carries the
+physical DREAMPlace design and pin-indexed labels, including the existing
+clock/reset demand masks. Ordinary placement does not retain this copy.
+The pre-router checks candidate demand endpoint identities against the DEF
+and RC endpoint sets before it can remove that net from remaining RSMT demand.
+Rebuild the snapshot after netlist or placement changes; it is not a persistent
+cache artifact.
+Repeated exclusions use DREAMPlace's RUDY cursor to replay only affected bins
+in original contribution order, including blocked-pin operations. Trial queries
+leave the cursor unchanged; only accepted routes commit exclusions. If cache
+preparation fails, the pre-router retains the uncached measurement path.
+`bind_preroute` joins DEF, RC and demand nets by complete endpoint sets; array
+order and DEF net names are irrelevant. It rejects stale or ambiguous views,
+retains characterized tie exclusions, and accepts the host's expanded
+`dont_touch` pin set. Clock/reset masks remain in the demand design.
+The internal graph marker `attrs::preroute_exclude` excludes every incident
+net of a marked physical cell. A marker on a graph input applies to its contents;
+a marker on a Sub applies only to that occurrence. Flattening propagates the
+marker without changing other instances of the same definition. Final placement
+expands marked cells into protected endpoint identities in the snapshot. This
+marker is a routing exclusion, not a synthesis optimization lock. The Slang
+reader imports Verilog `dont_touch` and `DONT_TOUCH` attributes into this routing
+policy (integer booleans or case-insensitive strings `true`/`false`, `yes`/`no`,
+and `1`/`0`). This preserves routing exclusion through mapping; it does not
+promise to preserve the original cells or prohibit synthesis optimization.
+Invalid values and duplicate/conflicting aliases are rejected.
+The explicit source attribute
+`synth.preroute_exclude=true` requests routing-only exclusion through the shared
+synthesis-policy path (a variable cone, scope, or instance). It has no run-wide
+`--set` value and does not lock synthesis optimizations. Synthesis preserves excluded
+signals and protected-cone boundaries as stable mapper output positions.
+Readback marks the mapped nets between protected outputs and their external
+input cuts; a collapsed output/input boundary stops the walk. Source-to-route
+validation remains pending.
+`attrs::preroute_net_exclude` marks a driver net without excluding the other
+nets of its cell. Hierarchy alias resolution carries this marker, and final
+placement resolves marked wiring drivers to physical endpoint identities.
+Removing an identity buffer transfers its output-net exclusion to the surviving
+driver. Buffer-tree repair and resize insertion carry exclusions onto the
+surviving driver and inserted outputs; pre-route repeater materialization rejects
+an excluded tree. Source annotations, mapping, and other rewrites still require
+a complete propagation audit before source-level protection can be claimed.
+The synthesis cache currently refuses reuse when either pre-body carries these
+exclusions: its logic-equivalence proof does not compare physical annotations.
+This also prevents stale protection after an annotation is removed. Unchanged
+protected regions consequently miss until annotation-aware correspondence is
+implemented.
+
+Host-resolved protected pin identities can also be stored in the final
+`Preroute_design` snapshot. These exclusions survive speculative repeater
+snapshots and apply independently of caller-supplied binding flags; neither
+ordinary routing nor repeater insertion may override them. Binding rejects
+empty or stale protected labels. The host must still resolve source annotations
+through mapping and final repair; storing this set does not implement that
+source-level propagation.
+The snapshot takes ownership of the completed placement arrays without a
+second full design copy. `preroute_hold_margin` queries the timing session's
+Liberty model for twice the specified HOLD_BUF arc delay at an explicit nominal
+slew/load; a missing or invalid characterization fails instead of yielding zero.
+
+The physical LEF importer rejects unsupported pin and obstruction `PATH`/`VIA`
+geometry (including iterated forms), masked geometry, and geometry-specific
+`SPACING`/`DESIGNRULEWIDTH` constraints. These shapes and rules must not silently
+disappear from the occupancy model, even when the same pin also has supported
+rectangles.
+Polygon pins remain unavailable for access; their bounding boxes are retained
+as unowned obstacles, including portions outside the cell boundary. Polygon
+obstructions retain those bounds too. Iterated pin and obstruction geometry is
+rejected until its complete repetition extent can be modeled.
+
+`synth.place.preroute=true` invokes the initial ASAP7 pre-router after final
+placement and accepted repairs. It requires `synth.place.final=true`, timing,
+`synth.place.handoff.taps=true`, and a native power grid (`synth.place.pg=auto`
+or `asap7`; legacy `pg_asap7` remains accepted). The default remains disabled.
+The current search supports M2 spans and multi-pin M2/M3 trunk patterns,
+then a bounded A* M2–M7 maze. Multi-pin nets use a FLUTE topology with one
+legal access selected per pin and Steiner junctions snapped to nearby legal
+M2/M3 intersections. Up to eight nearby tracks per axis are considered for each
+junction; junction trials and all branch searches share the net budget. The
+current proposal does not backtrack access/junction choices or retry a failed
+merged route. It supports up to 1000 distinct topology locations. Placement RC
+and pre-routing share `steiner_topology` and its one-time FLUTE initialization.
+The maze uses literal preferred
+tracks, minimum-area landings and an endpoint box expanded by one span (at least
+four track pitches), clipped to the die. Each layer retains its preferred track
+set; transitions use supported adjacent-layer LEF vias at intersections of the
+two track sets. Signal and PG vias share cut-class, all-DEFAULT spacing-table
+and enclosure parsing in `inou/lefdef/cut_rules`; signal vias additionally require
+a single-cut class. Signal EOL enclosures apply only below their strict metal-edge
+width threshold; fractional-DBU thresholds are compared without rounding. PG via
+generation explicitly selects the conservative `pdngen` enclosure policy, which
+retains EOL enclosure rules regardless of their width threshold to reproduce the
+reference grid geometry. Unsupported
+upper layers or missing vias stop the reachable
+stack without approximating their rules. Pattern trials and maze expansions share
+the work budget. The dispatcher reserves an equal share of remaining work and
+access enumeration for each remaining strategy, carrying unused allowances
+forward so exhaustive patterns cannot starve the maze. All stages share the
+net deadline. The returned
+path is merged into collinear spans, checked for new same-net metal/cut spacing
+and complete connectivity before the caller evaluates RC, timing and capacity.
+A failed final geometry check rejects the proposal; it does not publish a partial
+route or rip up previously accepted nets.
+Pins sharing an M2 track share one branch and one trunk via; every endpoint
+must be connected, and all new cuts are checked against each other. General
+multi-pin Steiner/maze routing and repeaters remain under development.
+
+`preroute.setup_margin` is 20 ps; `preroute.hold_margin=-1` computes two buffer
+delays. `preroute.hold_buffer=auto` selects ASAP7's `BUFx2_ASAP7_75t_R`, at
+`preroute.nominal_slew=20` ps and the buffer's own input capacitance (fanout one).
+Explicit nonnegative hold margins bypass this characterization. Eligibility
+checks timing on every connected data pin of each endpoint cell:
+committing a route locks the whole cell, so unrelated data pins must retain
+setup/hold margins too. The host's clock/reset masks remain excluded. These
+pins are checked again with the proposed route RC and retained in the protected
+timing set after commitment; rejection leaves the route and cell placement unchanged.
+Search budgets
+are `preroute.budget_ms=10` per net and `preroute.stage_budget_ms=10000` overall;
+`preroute.bins=64` sets both axes of the shared capacity/RSMT grid.
+The stage deadline is checked during occupancy construction, between capacity
+bins, and periodically while scanning their obstacles. If setup expires, its partial indexes are discarded and the original
+placement/wires are retained with `stage deadline` rejections; cleanup, required power-grid generation, and
+physical-frame copies can still add time beyond the search budget.
+`preroute.max_rows=0` and `preroute.max_sites=0` optionally cap the original
+net's physical pin Y/X span in placement row/site units. Zero is unlimited;
+positive bounds include equality. Oversized nets remain for OpenROAD, and
+repeater splitting cannot bypass these caps. Reports record both settings and
+span rejections.
+`preroute.capacity=0.30` limits reservations to that fraction of usable tracks
+in every layer and gcell (range 0..1). Remaining-net RSMT demand must still fit
+alongside those reservations. The report records the effective fraction.
+Capacity setup narrows each obstacle to the sorted track-center interval that
+can intersect its clearance envelope, then applies the same exact spacing check
+to those footprints. A track blocked anywhere in a bin remains unavailable for
+the whole bin; the indexing optimization does not change capacity or margins.
+
+Successful runs emit FIXED traces and endpoint cells in `out.def`, update the
+graph's placement/RC attributes, and write `preroute.json` plus a `preroute` QoR
+member. Report schema 2 includes mapped-net and search-attempt counts, accepted
+fractions by pin count and estimated pre-route length, rejection totals, accepted
+wire length per layer, via count and route-stage runtime.
+The diagnostic `endpoint_locks` array records only changed component statuses
+(and inserted components), with instance name, original/final status and an
+`inserted` flag. Inserted components have a null original status. Matched controls
+can use this provenance to preserve pre-existing fixed cells; production handoff
+protection continues to derive from the DEF without requiring this report.
+Capacity-rejected route entries include `capacity_detail` with the limiting
+bin, layer/direction and track counts; the aggregate rejection reason stays stable.
+Pin-access rejections identify the failing bin and its utilization in the same
+field. This is the remaining macro-pin demand normalized by available bin area;
+a remote macro-pin hotspot can reject a standard-cell-only candidate.
+The report also includes `phase_runtime_ms` for snapshot copying, occupancy,
+capacity, search setup, eligibility and search/timing. Repeater diagnostics report
+`repeater_length_limit_um` (null when no finite threshold was derived),
+`repeater_candidates`, `repeater_margin_eligible`, and `repeater_attempted`.
+Candidates passed the structural and length filters; margin-eligible candidates
+also passed the initial timing screen, while attempted candidates reached the
+proposal search after the live timing recheck. A false
+`repeater_classification_complete` means classification was skipped or its
+deadline expired, so the counts do not establish full-design eligibility.
+Attempted-net entries
+include `runtime_ms` for completed remaining-demand, demand precheck, geometry,
+capacity precheck, RC, capacity and timing checks. The `demand_precheck` rejects
+remaining-demand failures before geometry search, without authorizing any wire
+reservation. A failed geometry `capacity_precheck` avoids RC work; passing both
+prechecks still requires the full remaining-demand and wire-capacity check
+before acceptance. Per-attempt measurements are subdivisions of the search phase,
+not additional runtime. The unchanged stage deadline includes setup. The denominator is the
+mapped multi-terminal nets; physical singleton nets are not included. A net
+rejected by eligibility or initial timing has `attempted=false`; a search with
+no legal result still counts as attempted. Fractions with no attempts are null.
+Per-layer lengths count explicit wire spans, excluding via landing pads. Runtime
+includes capacity/demand construction and admission, but excludes host LEF and
+Liberty preparation, final report serialization and the final timing refresh.
+The completed physical cache fingerprints all pre-route sources and
+options and stores the FIXED DEF, `preroute.json`, and `power_grid.json` with
+the repaired graph. With incremental mode enabled, pre-routing uses this
+completed-state cache even when IO resynthesis is disabled; restoring it does
+not invent an IO-resynthesis report. Independent full-flow
+cache replay and CTS/routing acceptance are still required by 3x-reroute.
+
+For intermediate OpenROAD timing, the pinned HighTide build includes
+`openroad-est-fixed-wire-fallback.patch`: global-route estimation otherwise
+clears parasitics for FIXED nets without guides. The patch restores placement
+estimates for those nets in both full and per-net estimation, while preserving
+global-route estimates for guided nets. This is an intermediate approximation;
+final timing must use OpenRCX extraction of the realized fixed wires.
 
 Keep per-design parameter sweeps, measured QoR, performance profiles and routed
 comparisons under ignored `repros/`, and share selected reports separately.
@@ -3672,3 +4467,198 @@ with a cached or characterized prior. Both choices stay separate from later
 physical-RC calibration and guards. The replacement CNN/litepci on/off matrix
 keeps feedback start at iteration 0 in both variants; the earlier delayed-cadence
 and geometry-based attempts remain separately labeled diagnostics.
+
+The geometry diagnostic `//tools:signal_route` accepts `--patterns N` and
+`--budget-ms N` for explicit larger search experiments. Their defaults remain
+10,000 trials and 1,000 ms; they do not change the placement flow's per-net or
+stage budgets. Diagnostic DEF output is not timing/capacity acceptance.
+
+For an RC diagnostic, also supply `--rc-file`, `--liberty`, `--driver instance:pin`
+and `--diagnostic-rc output.json`. This uses the selected physical pin accesses
+and production routed-RC estimator; the output remains explicitly approximate
+and does not perform setup/hold or capacity acceptance. Widened maze runs use
+width-only DEF `NONDEFAULTRULES` and per-path `TAPERRULE` references so downstream
+path-based extraction sees the actual width. Rule definitions are evaluated in
+a private trial frame and installed only when the route passes acceptance.
+Existing rule names are reused only for identical definitions; otherwise the
+router chooses a distinct name. Ordinary-width routes keep the existing path.
+
+Geometry decoding resolves the rule on each routing layer, including after a
+via, and routed RC unions overlapping widths. Unsupported rule constraints
+are rejected instead of discarded. Width-dependent resistance and effective
+ground capacitance remain approximate; extraction using a table characterized
+only at nominal widths does not validate wider-metal electrical accuracy.
+
+Channel accounting reports `freed_signal_tracks_by_layer` as a conservative
+lower bound on distinct preferred-track centerlines that gain an ordinary-width
+corridor inside a requested channel. Each corridor spans the channel extent
+with both ends inset by the layer's maximum rule clearance. The count checks
+rectangle legality and spacing against all pins, blockages, signal wires, PG
+wires and via metal in both generated grids. Overlapping patches count a
+centerline once per layer. Its obstacle indexes retain only requested channel
+layers, including via landings and conservative blockages on those layers;
+ordinary routing occupancy still indexes every layer by default.
+This measures available corridor geometry, not via
+access or end-to-end routability; short or obstructed gaps may count zero.
+Unsupported rules or tracks leave the value null with an explicit
+`freed_signal_tracks_unmeasured_reason`. No-channel flows avoid the comparison.
+The `//tools:power_grid` audit accepts `--report PATH` with `--def-output` to
+write the same accounting report used by the placement flow.
+
+Accepted signal-net records include `timing_at_acceptance`, with candidate-net
+setup/hold slack and the minimum setup/hold slack including previously locked
+pins, all in ps. These values describe the routed RC at that acceptance step;
+later accepted routes can change them. They are not final-stage timing or
+post-CTS extraction. The diagnostic uses existing admission queries, does not
+change margins, and is transient report data rather than a graph attribute.
+Records without an acceptance timing check omit this object.
+
+The top-level `timing_cut_pins` array records the final candidate's non-clock
+net endpoints excluded by the placement timer. Labels use `instance:pin` for
+cell pins and the port name for top-level ports. Matched timing audits can use
+these exact identities to reproduce the optimization exclusions, including
+internal reset nets. The report does not itself change downstream constraints;
+an audit must distinguish this timing view from unrestricted recovery/removal
+checks and validate endpoint bindings before applying exclusions.
+`livehd::preroute::apply_timing_cuts` in `preroute_handoff.tcl` accepts this
+array as a Tcl list. It resolves all port and cell-pin identities exactly,
+rejects missing, ambiguous, or clock-network bindings before changing constraints, and installs
+an explicit through-pin false-path exception. Apply it consistently to all
+matched arms before CTS/repair, then save the SDC for subsequent stages.
+Sourcing the helper alone leaves timing constraints unchanged.
+
+`preroute_tree` is the internal all-or-nothing routing entry point for a
+privately proposed repeater tree. It requires every branch binding to pass the
+ordinary geometry, capacity and setup/hold gates. A failed branch returns only
+rejection diagnostics, marks successful trial branches as rolled back, and
+publishes no partial frame or RC state. The caller must retain its original
+netlist until the entire trial succeeds. The final-flow host uses the scheduler
+described below to publish an accepted tree with its private graph.
+
+When the native pre-router resumes a frame with fixed signal wires, it builds
+cell and power-grid occupancy once. Capacity uses that static index, and a copy
+receives the existing signal shapes for net-aware route searches. Existing wires
+are then reserved separately in the capacity model, preserving the distinction
+between static blockages and consumed routing capacity. Static construction
+omits signal-wire decoding directly while retaining pin ownership, avoiding a
+full floorplan copy merely to clear its wire lists. This also avoids decoding
+the same static geometry twice. When repeater candidates are eligible, the
+stage first decodes the unchanged special-net wiring into an immutable shared
+index. Each trial rebuilds cell/pin ownership and adds its own geometry in a
+private overlay; rejected trials cannot modify the shared index or another trial.
+Reuse requires the same technology object, DBU, via definitions, width rules and
+special-net wire paths. New supply connections are allowed, since repeaters join
+existing rails, but changed supply geometry fails explicitly. The technology must
+remain immutable while the index is alive. The one-time build is included in the
+stage deadline and reported as `power_grid_occupancy`; per-net budgets and all
+routing/timing gates remain unchanged. Accepted and rejected repeater trials
+both retain routing phase times under `repeater_route_*`; rejected net records
+also carry the corresponding `route_*` breakdown. These are subsets of
+`repeater_trials`, not additional runtime to add to that total. The disjoint
+`repeater_initial`, `repeater_proposal`, `repeater_capacity_seed`,
+`repeater_snapshot` and `repeater_tree`
+phases measure attempted-tree preparation and execution, including rejected
+proposals and exceptions; they are also subsets of `repeater_trials`. The
+`repeater_route_*` phases are nested inside `repeater_tree`. Setup-deadline
+failures retain the work spent before cancellation. Deferred-PG routing does not reuse this
+index because that mode changes the supply geometry.
+
+For nondeferred PG, the first legal repeater proposal also builds a static
+capacity seed. Subsequent rejected proposals reuse that seed only while the
+existing components, tracks, terminals, supply wiring and capacity configuration
+remain unchanged. Each trial clones the seed, subtracts capacity blocked by its
+added cell pins and obstructions, then reserves its current fixed signal wires.
+Reservations and acceptance proofs belong to the individual trial. An accepted
+tree invalidates the seed; incompatible geometry falls back to full construction.
+Seed preparation is lazy, bounded by the trial deadline, and reported under
+`repeater_capacity_seed`. Candidates with no legal repeater placement do not pay
+that preparation cost. This optimization does not relax remaining-net demand,
+DRC, pin-access or timing checks.
+
+The pre-route repeater site reservation helper, `reserve_repeater_sites`, searches
+cut N/FS rows for single-height CORE buffers and leaves every existing component
+in place. It reserves whole sites, respects master flip symmetry and die bounds,
+and returns no partial placement if a tree cannot fit or its deadline expires.
+Requests use desired buffer centers in DEF DBU; the deterministic greedy search
+minimizes Manhattan displacement for each request in order. Existing signal wires
+are indexed once per reservation; blocked candidates are skipped in favor of the
+next nearest site. The shared clearance filter reserves the body and transformed
+pin/OBS overhang on layers occupied by the cell, and caches bounds by master,
+orientation and dimensions. Unsupported clearance rules fail closed. The final
+snapshot repeats this check before routing. Reservations enter a private
+netlist/timing snapshot and are published only after successful routing.
+
+`preroute_repeated_tree` joins the temporary timing edits to that routing
+transaction. Its caller supplies a private frame/RC/demand snapshot with legally
+reserved FIXED repeaters while the timer still holds the original netlist. The
+transaction verifies exact endpoint preservation and a connected, acyclic buffer
+tree, checks margins, temporarily adds the buffers, routes every branch, and
+checks the actual routed RC against the original timing state. Rejection exposes
+only diagnostics; both success and failure restore the caller's timer mark.
+The cached `detail::Repeater_proposer` generates a private graph with the existing
+Steiner repair planner using explicit routing-layer RC. It preserves existing
+buffers and all existing placements, and reserves only new buffers on legal free
+sites. A cell fixed by an earlier pre-route may participate through a different,
+unrouted pin; its master, placement and previously routed pins remain unchanged.
+Already-wired pins and unrelated fixed or locked cells remain ineligible.
+`detail::repeater_snapshot` rebuilds the matching DEF, RC and routing-demand
+views, adds the buffer supply connections, and conservatively rejects sites that
+could invalidate existing signal wiring.
+The stage reuses the fixed-wire site filter across rejected snapshot trials and
+rebuilds it after each accepted tree. Shared filter construction is reported as
+`repeater_snapshot_wire_filter` and counts against the stage deadline; it is
+outside individual `repeater_trials`. Standalone snapshot calls still construct
+and validate their own filter.
+
+`detail::preroute_stage` first routes the short-net batch, then tries long nets
+in length/slack order. The length threshold comes from the permitted Liberty
+buffer and characterized routing RC. Planning, site reservation and routing share
+the per-net deadline; all trials also share the stage deadline. Clock/reset and
+output-drive characterization is loaded once, only if the short-net batch leaves
+time for a long-net trial; this shared setup counts against the stage deadline.
+Rejected trees
+leave the original net untouched. Accepted trees install their RC in the stage's
+temporary timing journal so later trials account for them. Every stage exit
+restores the caller's timing mark; an installation failure aborts the stage.
+The host publishes a private graph with matching FIXED geometry and RC, refreshes
+the cell/net counts and signal HPWL, and records final `preroute_timing` in ps.
+Reports distinguish `source_mapped_nets` from branch records and include
+`repeater_trees` and `repeater_cells`. Full routed acceptance of automatic
+repeaters remains pending.
+
+When pre-routing resumes from a frame with FIXED signal wires, it matches each
+wire's complete endpoint set to the demand snapshot and removes that net's
+estimated RSMT demand. Capacity is rebuilt against static obstacles (pins,
+macros and PG), then the existing signal geometry restores its track reservations.
+This preserves the cumulative pre-route fraction limit across repeater trials;
+restarting a routing transaction does not grant another capacity allowance.
+
+The PG audit tool additionally accepts `--reserve-signals true` (default false).
+It derives whole-stripe skips from existing ordinary-net wire geometry and the
+metal spacing oracle before building the grid. Followpin rails remain fixed;
+a signal conflict with a followpin fails. The resulting grid must pass the
+existing attachment/connectivity checks and a final signal-versus-PG check
+including emitted via landing pads, patches, and cut spacing. The input signal
+wires remain unchanged. The report records the generated channel patches;
+`automatic_channel_count` in the plan distinguishes them from explicit patches.
+This is a reservation experiment, not automatic strap relocation or an IR-drop
+proof. The generator still requires an unwired PG frame. Existing DEF-local signal
+via definitions are preserved; generated PG vias receive distinct names on
+collision. The SAT host can enable it with `synth.place.satlegalize.route.pg_after=true`
+(default false; requires `synth.place.satlegalize.route=true`). It uses the
+final legalized positions and signal IOs, keeps followpin obstacles during
+signal search, and rebuilds PG around each trial before acceptance. Existing signal and clock IO rectangles are checked in placed orientation
+against the rebuilt PG without moving them. Capacity
+is recomputed against the rebuilt grid, including every previously accepted
+signal. A rejected trial preserves prior routes, placement, and timing; an
+empty accepted set returns the reference grid. The report records
+`pg_after_sat_routes` and per-attempt `power_grid` time. Baseline PG is still
+constructed during placement for final IO legalization. This experimental
+mode skips conflicting stripes; it does not relocate them or certify IR drop.
+
+For a non-emitting physical routing diagnostic, `//tools:signal_route` accepts
+`--probe true`, with `--straight true` for common-track span search. Add
+`--clear-routes true` to clear signal/PG wires only in its private in-memory
+frame, retaining pin ownership and the input DEF unchanged. This reproduces
+pre-PG access checks; it is not a flow handoff or a way to bypass legality.
+The result prints the route rejection reason and search/deadline counters.

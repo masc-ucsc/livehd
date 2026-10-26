@@ -17,7 +17,8 @@
 //
 // So this header carries from the ONE tag list, LIVEHD_FOR_EACH_ATTR_TAG in
 // graph/attrs.hpp -- the same list graph/cell.cpp registers from. A tag added
-// there is registered and carried; a tag not on it is neither, and there is no
+// there is registered and considered for carry; physical route tags explicitly
+// invalidate on rebuild through carry_on_rebuild. There is no
 // count to keep in step by hand.
 //
 // ROLE. `livehd::attrs::attr_kind<Tag>` classifies each tag as node /
@@ -67,9 +68,11 @@ namespace attr_carry_detail {
 
 template <class Tag>
 inline constexpr bool is_node_carried
-    = livehd::attrs::attr_kind<Tag> == livehd::attrs::Attr_kind::node && !std::is_same_v<Tag, livehd::attrs::hier_color_t>;
+    = livehd::attrs::carry_on_rebuild<Tag> && livehd::attrs::attr_kind<Tag> == livehd::attrs::Attr_kind::node
+      && !std::is_same_v<Tag, livehd::attrs::hier_color_t>;
 template <class Tag>
-inline constexpr bool is_pin_carried = livehd::attrs::attr_kind<Tag> != livehd::attrs::Attr_kind::node;
+inline constexpr bool is_pin_carried
+    = livehd::attrs::carry_on_rebuild<Tag> && livehd::attrs::attr_kind<Tag> != livehd::attrs::Attr_kind::node;
 
 #define LIVEHD_ATTR_CARRY_COUNT_NODE(tag) +(is_node_carried<livehd::attrs::tag##_t> ? 1 : 0)
 #define LIVEHD_ATTR_CARRY_COUNT_PIN(tag)  +(is_pin_carried<livehd::attrs::tag##_t> ? 1 : 0)
@@ -82,7 +85,7 @@ inline constexpr std::size_t pin_tag_count  = 0 LIVEHD_FOR_EACH_ATTR_TAG(LIVEHD_
 
 // How many attributes each carrier moves (test/diagnostic use): every
 // node-kind tag except hier_color, plus hhds::attrs::name and the NODE overload
-// of `match`; every other tag.
+// of `match`; pin tags eligible for carry. Physical route tags are excluded.
 inline constexpr std::size_t kNodeAttrTagCount = attr_carry_detail::node_tag_count + 2;
 inline constexpr std::size_t kPinAttrTagCount  = attr_carry_detail::pin_tag_count;
 
@@ -102,7 +105,7 @@ inline void carry_node_attrs(const Src& from, const Dst& to) {
 #undef LIVEHD_ATTR_CARRY_NODE
 }
 
-// Every pin attribute. Call with matching ROLES (driver->driver, sink->sink):
+// Every pin attribute eligible for carry. Call with matching ROLES (driver->driver, sink->sink):
 // the per-pin key folds the driver/sink bit, so a crossed call aliases slots.
 template <class Src, class Dst>
 inline void carry_pin_attrs(const Src& from, const Dst& to) {

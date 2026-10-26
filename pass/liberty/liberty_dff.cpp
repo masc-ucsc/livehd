@@ -345,41 +345,41 @@ bool parse_next_state(std::string_view expr, std::string& pin, bool& inverted) {
   return true;
 }
 
-// `body` with every nested `{ ... }` group blanked to spaces, so a scalar
-// attribute lookup sees only the group's OWN attributes. Both PDKs put `area :`
-// before the pin groups, but a `pin` group may carry its own `area`-like keys
-// (`max_capacitance`, ...) and the order is not guaranteed by the format.
+// Keep only this group's own attributes, replacing nested bodies with
+// whitespace. Consumers search attributes in this returned text; none use its
+// offsets in the original body. Do not copy/blank large timing tables just to
+// look up a scalar attribute (a library scope can contain tens of MB of tables).
 std::string top_level_only(const std::string& body) {
-  std::string o = body;
-  int         d = 0;
-  bool        q = false;
-  for (size_t i = 0; i < o.size(); ++i) {
-    char c = o[i];
-    if (q) {
+  std::string out;
+  out.reserve(std::min<size_t>(body.size(), 4096));
+  int  depth = 0;
+  bool quote = false;
+  for (char c : body) {
+    if (quote) {
       if (c == '"') {
-        q = false;
+        quote = false;
       }
-      if (d > 0) {
-        o[i] = ' ';
+      if (depth <= 0) {
+        out += c;
       }
-      continue;
-    }
-    if (c == '"') {
-      q = true;
-      if (d > 0) {
-        o[i] = ' ';
+    } else if (c == '"') {
+      quote = true;
+      if (depth <= 0) {
+        out += c;
       }
     } else if (c == '{') {
-      ++d;
-      o[i] = ' ';
+      if (depth++ <= 0) {
+        out += ' ';
+      }
     } else if (c == '}') {
-      --d;
-      o[i] = ' ';
-    } else if (d > 0) {
-      o[i] = ' ';
+      if (--depth <= 0) {
+        out += ' ';
+      }
+    } else if (depth <= 0) {
+      out += c;
     }
   }
-  return o;
+  return out;
 }
 
 double parse_area(const std::string& body) {
@@ -1031,6 +1031,12 @@ namespace {
 // ladder must never name one either, and pass.abc reports the skipped set
 // once per run.
 bool cell_is_dont_use(const std::string& body) {
+  // Most cells have no such attribute. Avoid copying and scanning their full
+  // timing tables merely to discover that an exact key is absent. A possible
+  // occurrence still goes through the top-level parser (including comments).
+  if (body.find("dont_use") == std::string::npos) {
+    return false;
+  }
   std::string v = scalar_attr(top_level_only(body), "dont_use");
   std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
   return v == "true";
@@ -1327,8 +1333,8 @@ std::vector<Comb_cell> scan_comb_cells_text(const std::string& contents) {
     const auto own         = top_level_only(body);
     cell.footprint         = scalar_attr(own, "cell_footprint");
     cell.physical_barrier  = scalar_attr(own, "is_isolation_cell") == "true" || scalar_attr(own, "is_level_shifter") == "true"
-                             || scalar_attr(own, "always_on") == "true";
-    bool        legal      = cell.area > 0;
+                            || scalar_attr(own, "always_on") == "true";
+    bool        legal = cell.area > 0;
     std::string pins;
     for (size_t pin = find_group(body, "pin", 0, pins); pin != std::string::npos; pin = find_group(body, "pin", pin + 1, pins)) {
       const auto end = match_brace(body, pin);
@@ -1626,13 +1632,13 @@ std::string dff_selection_descriptor(const Dff_selection& sel, std::string_view 
     }
     const auto& c  = sel.areset_ladder[v].front();
     d             += std::format("|areset{}={}:r0={}{}:r1={}{}:b{}",
-                                 v,
-                                 dff_descriptor(c),
-                                 c.reset0_pin,
-                                 c.reset0_low ? "/L" : "",
-                                 c.reset1_pin,
-                                 c.reset1_low ? "/L" : "",
-                                 c.both_value);
+                     v,
+                     dff_descriptor(c),
+                     c.reset0_pin,
+                     c.reset0_low ? "/L" : "",
+                     c.reset1_pin,
+                     c.reset1_low ? "/L" : "",
+                     c.both_value);
   }
   for (size_t i = 0; i < sel.icg_ladder.size(); ++i) {
     d += std::format("{}{}", i == 0 ? "|icg=" : ",", icg_descriptor(sel.icg_ladder[i]));
@@ -1709,8 +1715,8 @@ void emit_icg_model(hhds::GraphLibrary& outlib, const Icg_cell& icg) {
   // Transparent while CLK is low: an active-high enable driven by !CLK (the
   // polarity spelling every reader and match_icg_def agree on).
   const auto nclk = logical_not(*body, clk);
-  auto L  = gu::create_typed_node(*body, Ntype_op::Latch);
-  auto Lq = bit1(L.create_driver_pin(0));
+  auto       L    = gu::create_typed_node(*body, Ntype_op::Latch);
+  auto       Lq   = bit1(L.create_driver_pin(0));
   L.attr(hhds::attrs::name).set("IQ");
   d.connect_sink(gu::setup_sink_by_name(L, "din"));
   bit1(nclk).connect_sink(gu::setup_sink_by_name(L, "enable"));
@@ -2044,9 +2050,9 @@ std::vector<Memory_cell> scan_interface_cells_text(const std::string& contents, 
                 }
                 const auto timing = top_level_only(pin_body.substr(t + 1, timing_end - t - 1));
                 const auto type   = scalar_attr(timing, "timing_type");
-                const bool edge  = (type == "rising_edge" || type == "falling_edge") && !scalar_attr(timing, "related_pin").empty();
-                saw_edge        |= edge;
-                only_edges      &= edge;
+                const bool edge = (type == "rising_edge" || type == "falling_edge") && !scalar_attr(timing, "related_pin").empty();
+                saw_edge   |= edge;
+                only_edges &= edge;
               }
               port.clocked = saw_edge && only_edges;
             }

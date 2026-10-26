@@ -6,6 +6,7 @@
 #include <format>
 
 #include "attrs.hpp"
+#include "absl/container/flat_hash_set.h"
 #include "node_util.hpp"
 #include "region_blast.hpp"
 
@@ -28,6 +29,33 @@ Source_signal snapshot(hhds::Pin_class pin) {
   return out;
 }
 }  // namespace
+
+bool mark_preroute_cones(std::span<const hhds::Pin_class> roots, std::span<const hhds::Pin_class> cuts,
+                        const std::function<bool()>& admit) {
+  absl::flat_hash_set<hhds::Pin_class> boundaries(cuts.begin(), cuts.end());
+  absl::flat_hash_set<hhds::Pin_class> seen;
+  std::vector<hhds::Pin_class> pending(roots.begin(), roots.end());
+  while (!pending.empty()) {
+    if (admit && !admit()) {
+      return false;
+    }
+    const auto pin = pending.back();
+    pending.pop_back();
+    if (pin.is_invalid() || pin.is_const() || !seen.insert(pin).second) {
+      continue;
+    }
+    pin.attr(attrs::preroute_net_exclude).set();
+    if (boundaries.contains(pin) || gu::is_graph_input_pin(pin)) {
+      continue;
+    }
+    for (auto sink : pin.get_master_node().inp_sorted_pins()) {
+      for (auto driver : sink.get_driver_pins()) {
+        pending.push_back(driver);
+      }
+    }
+  }
+  return true;
+}
 
 Source_state_table inspect_source_state(const partition::Region_body& rb, const Clock_gates& clocks, State_scope scope) {
   if (scope == State_scope::logic && rb.src && rb.src->get_input_node().attr(attrs::memory_module).has()) {
@@ -241,7 +269,9 @@ bool bind_source_state(Source_state_table& table, const Region_blast& blast) {
 
 bool validate_state_controls(const Source_state_table& table, const Lnet& net) {
   for (const auto& signal : table.control_signals) {
-    if (signal.output >= net.outputs().size() || !signal.roles || (signal.roles & ~(attrs::signal_clock | attrs::signal_reset))) {
+    if (signal.output >= net.outputs().size() || (!signal.roles && !signal.preroute_excluded)
+        || (signal.roles & ~(attrs::signal_clock | attrs::signal_reset))
+        || ((signal.preroute_root || signal.preroute_cut) && !signal.preroute_excluded)) {
       return false;
     }
   }

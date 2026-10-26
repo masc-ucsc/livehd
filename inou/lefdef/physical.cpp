@@ -57,7 +57,230 @@ int site_cb(lefrCallbackType_e, lefiSite* site, lefiUserData data) {
   c.tech.sites[site->name()] = {site->sizeX(), site->sizeY(), site->hasXSymmetry() != 0};
   return 0;
 }
+int lef_via_cb(lefrCallbackType_e, lefiVia* source, lefiUserData data) {
+  auto&   c = *static_cast<LefContext*>(data);
+  Lef_via via;
+  via.is_default = source->hasDefault();
+  if (source->hasResistance()) {
+    via.resistance = source->resistance();
+  }
+  if (source->hasViaRule()) {
+    via.unsupported.insert("generated LEF VIA");
+  }
+  if (source->hasForeign()) {
+    via.unsupported.insert("FOREIGN");
+  }
+  for (int p = 0; p < source->numProperties(); ++p) {
+    via.unsupported.insert("PROPERTY " + std::string(source->propName(p)));
+  }
+  for (int l = 0; l < source->numLayers(); ++l) {
+    if (source->numPolygons(l)) {
+      via.unsupported.insert("POLYGON");
+    }
+    for (int r = 0; r < source->numRects(l); ++r) {
+      if (source->rectColorMask(l, r)) {
+        via.unsupported.insert("MASK");
+      }
+      via.shapes.push_back({source->layerName(l), {source->xl(l, r), source->yl(l, r), source->xh(l, r), source->yh(l, r)}});
+    }
+  }
+  if (via.shapes.empty()) {
+    via.unsupported.insert("no explicit rectangular geometry");
+  }
+  const auto [it, inserted] = c.tech.vias.emplace(source->name(), via);
+  if (!inserted && it->second != via) {
+    c.error = "conflicting LEF VIA: " + std::string(source->name());
+    return 1;
+  }
+  return 0;
+}
+int via_rule_cb(lefrCallbackType_e, lefiViaRule* source, lefiUserData data) {
+  auto&    c = *static_cast<LefContext*>(data);
+  Via_rule rule;
+  rule.generate   = source->hasGenerate();
+  rule.is_default = source->hasDefault();
+  for (int p = 0; p < source->numProps(); ++p) {
+    rule.unsupported.insert("PROPERTY " + std::string(source->propName(p)));
+  }
+  for (int i = 0; i < source->numVias(); ++i) {
+    rule.vias.emplace_back(source->viaName(i));
+  }
+  for (int i = 0; i < source->numLayers(); ++i) {
+    const auto*    src = source->layer(i);
+    Via_rule_layer layer;
+    layer.name = src->name();
+    if (src->hasDirection()) {
+      layer.direction = src->isHorizontal() ? "HORIZONTAL" : "VERTICAL";
+    }
+    if (src->hasEnclosure()) {
+      layer.enclosure = {src->enclosureOverhang1(), src->enclosureOverhang2()};
+    }
+    if (src->hasWidth()) {
+      layer.width = {src->widthMin(), src->widthMax()};
+    }
+    if (src->hasSpacing()) {
+      // VIARULE spacing is cut pitch; CUT-layer SPACING is edge-to-edge.
+      layer.spacing = {src->spacingStepX(), src->spacingStepY()};
+    }
+    if (src->hasRect()) {
+      layer.cut = {src->xl(), src->yl(), src->xh(), src->yh()};
+    }
+    if (src->hasResistance()) {
+      layer.resistance = src->resistance();
+    }
+    if (src->hasOverhang() || src->hasMetalOverhang()) {
+      rule.unsupported.insert("legacy OVERHANG");
+    }
+    rule.layers.push_back(std::move(layer));
+  }
+  const auto [it, inserted] = c.tech.via_rules.emplace(source->name(), rule);
+  if (!inserted && it->second != rule) {
+    c.error = "conflicting LEF VIARULE: " + std::string(source->name());
+    return 1;
+  }
+  return 0;
+}
+Metal_rules metal_rules(lefiLayer* layer) {
+  Metal_rules rules;
+  rules.loaded = true;
+  if (layer->hasArea()) {
+    rules.area = layer->area();
+  }
+  if (layer->hasMinwidth()) {
+    rules.min_width = layer->minwidth();
+  }
+  if (layer->hasMaxwidth()) {
+    rules.max_width = layer->maxwidth();
+  }
+  for (int i = 0; i < layer->numSpacing(); ++i) {
+    Metal_spacing rule;
+    rule.distance = layer->spacing(i);
+    if (layer->hasSpacingRange(i)) {
+      rule.range = {layer->spacingRangeMin(i), layer->spacingRangeMax(i)};
+    }
+    if (layer->hasSpacingEndOfLine(i)) {
+      Eol_spacing eol;
+      eol.width  = layer->spacingEolWidth(i);
+      eol.within = layer->spacingEolWithin(i);
+      if (layer->hasSpacingParellelEdge(i)) {
+        eol.parallel_edge = {layer->spacingParSpace(i), layer->spacingParWithin(i)};
+      }
+      eol.two_edges = layer->hasSpacingTwoEdges(i);
+      rule.eol      = eol;
+    }
+    if (layer->hasSpacingName(i) || layer->hasSpacingLayerStack(i) || layer->hasSpacingAdjacent(i)
+        || layer->hasSpacingCenterToCenter(i) || layer->hasSpacingRangeUseLengthThreshold(i) || layer->hasSpacingRangeInfluence(i)
+        || layer->hasSpacingRangeInfluenceRange(i) || layer->hasSpacingRangeRange(i) || layer->hasSpacingLengthThreshold(i)
+        || layer->hasSpacingLengthThresholdRange(i) || layer->hasSpacingParallelOverlap(i) || layer->hasSpacingArea(i)
+        || layer->hasSpacingAdjacentExcept(i) || layer->hasSpacingSamenet(i) || layer->hasSpacingSamenetPGonly(i)
+        || layer->hasSpacingNotchLength(i) || layer->hasSpacingEndOfNotchWidth(i)) {
+      rules.unsupported.insert("qualified SPACING");
+    }
+    rules.spacing.push_back(rule);
+  }
+  for (int i = 0; i < layer->numSpacingTable(); ++i) {
+    auto* table = layer->spacingTable(i);
+    if (!table->isParallel()) {
+      rules.unsupported.insert(table->isInfluence() ? "SPACINGTABLE INFLUENCE" : "SPACINGTABLE TWOWIDTHS");
+      continue;
+    }
+    const auto*      source = table->parallel();
+    Parallel_spacing table_rule;
+    for (int j = 0; j < source->numLength(); ++j) {
+      table_rule.lengths.push_back(source->length(j));
+    }
+    for (int j = 0; j < source->numWidth(); ++j) {
+      table_rule.widths.push_back(source->width(j));
+      auto& row = table_rule.spacing.emplace_back();
+      for (int k = 0; k < source->numLength(); ++k) {
+        row.push_back(source->widthSpacing(j, k));
+      }
+    }
+    rules.parallel.push_back(std::move(table_rule));
+  }
+  for (int i = 0; i < layer->numMinSize(); ++i) {
+    rules.min_size.push_back({layer->minSizeWidth(i), layer->minSizeLength(i)});
+  }
+  for (int i = 0; i < layer->numMinstep(); ++i) {
+    Min_step rule;
+    rule.distance = layer->minstep(i);
+    if (layer->hasMinstepType(i)) {
+      rule.type = layer->minstepType(i);
+    }
+    if (layer->hasMinstepLengthsum(i)) {
+      rule.length_sum = layer->minstepLengthsum(i);
+    }
+    if (layer->hasMinstepMaxedges(i)) {
+      rule.max_edges = layer->minstepMaxedges(i);
+    }
+    if (layer->hasMinstepMinAdjLength(i)) {
+      rule.adjacent_length = layer->minstepMinAdjLength(i);
+    }
+    if (layer->hasMinstepMinBetLength(i)) {
+      rule.between_length = layer->minstepMinBetLength(i);
+    }
+    rule.same_corners = layer->hasMinstepXSameCorners(i);
+    rules.min_step.push_back(rule);
+  }
+  for (int i = 0; i < layer->numProps(); ++i) {
+    const std::string name = layer->propName(i);
+    rules.properties[name].emplace_back(layer->propValue(i));
+    rules.unsupported.insert("PROPERTY " + name);
+  }
+  if (layer->hasMask()) {
+    rules.unsupported.insert("MASK");
+  }
+  if (layer->hasDiagPitch() || layer->hasXYDiagPitch() || layer->hasDiagWidth() || layer->hasDiagSpacing()
+      || layer->hasDiagMinEdgeLength()) {
+    rules.unsupported.insert("diagonal routing rules");
+  }
+  if (layer->numMinimumcut()) {
+    rules.unsupported.insert("MINIMUMCUT");
+  }
+  if (layer->numMinenclosedarea()) {
+    rules.unsupported.insert("MINENCLOSEDAREA");
+  }
+  if (layer->hasProtrusion()) {
+    rules.unsupported.insert("PROTRUSIONWIDTH");
+  }
+  return rules;
+}
 int layer_cb(lefrCallbackType_e, lefiLayer* layer, lefiUserData data) {
+  if (layer->hasType() && std::string_view(layer->type()) == "CUT") {
+    Cut_layer cut;
+    if (layer->hasWidth()) {
+      cut.width = layer->width();
+    }
+    for (int i = 0; i < layer->numSpacing(); ++i) {
+      if (layer->hasSpacingName(i) || layer->hasSpacingLayerStack(i) || layer->hasSpacingAdjacent(i)
+          || layer->hasSpacingCenterToCenter(i) || layer->hasSpacingParallelOverlap(i) || layer->hasSpacingArea(i)
+          || layer->hasSpacingAdjacentExcept(i) || layer->hasSpacingSamenet(i) || layer->hasSpacingSamenetPGonly(i)) {
+        cut.unsupported.insert("qualified SPACING");
+      } else {
+        cut.spacing.push_back(layer->spacing(i));
+      }
+    }
+    if (layer->numEnclosure() || layer->numPreferEnclosure()) {
+      cut.unsupported.insert("ENCLOSURE");
+    }
+    if (layer->hasMask()) {
+      cut.unsupported.insert("MASK");
+    }
+    if (layer->hasArea()) {
+      cut.unsupported.insert("AREA");
+    }
+    for (int p = 0; p < layer->numProps(); ++p) {
+      cut.properties[layer->propName(p)].emplace_back(layer->propValue(p));
+      cut.unsupported.insert("PROPERTY " + std::string(layer->propName(p)));
+    }
+    auto& c                   = *static_cast<LefContext*>(data);
+    const auto [it, inserted] = c.tech.cut_layers.emplace(layer->name(), cut);
+    if (!inserted && it->second != cut) {
+      c.error = "conflicting LEF CUT layer: " + std::string(layer->name());
+      return 1;
+    }
+    return 0;
+  }
   if (!layer->hasType() || std::string_view(layer->type()) != "ROUTING") {
     return 0;
   }
@@ -66,6 +289,7 @@ int layer_cb(lefrCallbackType_e, lefiLayer* layer, lefiUserData data) {
     tech.routing_layers.emplace_back(layer->name());
   }
   auto& l = tech.layers[layer->name()];
+  l.rules = metal_rules(layer);
   if (layer->hasWidth()) {
     l.width = layer->width();
   }
@@ -128,6 +352,27 @@ int macro_cb(lefrCallbackType_e, lefiMacro* macro, lefiUserData data) {
   m.symmetry_y = macro->hasYSymmetry();
   return 0;
 }
+Rect polygon_bounds(const lefiGeomPolygon& polygon) {
+  Rect bounds{polygon.x[0], polygon.y[0], polygon.x[0], polygon.y[0]};
+  for (int i = 1; i < polygon.numPoints; ++i) {
+    bounds.xl = std::min(bounds.xl, polygon.x[i]);
+    bounds.yl = std::min(bounds.yl, polygon.y[i]);
+    bounds.xh = std::max(bounds.xh, polygon.x[i]);
+    bounds.yh = std::max(bounds.yh, polygon.y[i]);
+  }
+  return bounds;
+}
+bool unsupported_geometry_rule(const lefiGeometries* geometry, int index) {
+  switch (geometry->itemType(index)) {
+    case lefiGeomLayerMinSpacingE:
+    case lefiGeomLayerRuleWidthE : return true;
+    case lefiGeomRectE           : return geometry->getRect(index)->colorMask != 0;
+    case lefiGeomPolygonE        : return geometry->getPolygon(index)->colorMask != 0;
+    case lefiGeomRectIterE       : return geometry->getRectIter(index)->colorMask != 0;
+    case lefiGeomPolygonIterE    : return geometry->getPolygonIter(index)->colorMask != 0;
+    default                      : return false;
+  }
+}
 int pin_cb(lefrCallbackType_e, lefiPin* pin, lefiUserData data) {
   auto& c = *static_cast<LefContext*>(data);
   auto& p = c.tech.macros.at(c.macro).pins[pin->name()];
@@ -141,26 +386,31 @@ int pin_cb(lefrCallbackType_e, lefiPin* pin, lefiUserData data) {
     auto*       geometry = pin->port(port);
     std::string layer;
     for (int i = 0; i < geometry->numItems(); ++i) {
+      if (unsupported_geometry_rule(geometry, i)) {
+        c.error = "unsupported LEF pin geometry rule: " + c.macro + "/" + pin->name();
+        return 1;
+      }
       if (geometry->itemType(i) == lefiGeomLayerE) {
         layer = geometry->getLayer(i);
       } else if (geometry->itemType(i) == lefiGeomRectE) {
         auto* r = geometry->getRect(i);
-        p.shapes.push_back({
-            layer,
-            {r->xl, r->yl, r->xh, r->yh}
-        });
+        p.shapes.push_back({layer, {r->xl, r->yl, r->xh, r->yh}});
       } else if (geometry->itemType(i) == lefiGeomPolygonE) {
         auto* polygon = geometry->getPolygon(i);
         // Use an interior vertex as the pin access point; retain a zero-size
         // rectangle instead of a bounding box whose center may be outside.
         if (polygon->numPoints > 0) {
-          p.shapes.push_back({
-              layer,
-              {polygon->x[0], polygon->y[0], polygon->x[0], polygon->y[0]}
-          });
+          p.shapes.push_back({layer, {polygon->x[0], polygon->y[0], polygon->x[0], polygon->y[0]}});
+          // This is an obstacle, never an access rectangle: its bounding-box
+          // center can be outside the polygon. Keep extensions beyond SIZE too.
+          c.tech.macros.at(c.macro).obstructions.push_back({layer, polygon_bounds(*polygon)});
         }
       } else if (geometry->itemType(i) == lefiGeomRectIterE || geometry->itemType(i) == lefiGeomPolygonIterE) {
         c.error = "unsupported iterated LEF pin geometry: " + c.macro + "/" + pin->name();
+        return 1;
+      } else if (geometry->itemType(i) == lefiGeomPathE || geometry->itemType(i) == lefiGeomPathIterE
+                 || geometry->itemType(i) == lefiGeomViaE || geometry->itemType(i) == lefiGeomViaIterE) {
+        c.error = "unsupported LEF pin PATH/VIA geometry: " + c.macro + "/" + pin->name();
         return 1;
       }
     }
@@ -172,21 +422,34 @@ int obstruction_cb(lefrCallbackType_e, lefiObstruction* obs, lefiUserData data) 
   auto*       geometry = obs->geometries();
   std::string layer;
   for (int i = 0; i < geometry->numItems(); ++i) {
+    if (unsupported_geometry_rule(geometry, i)) {
+      c.error = "unsupported LEF obstruction geometry rule: " + c.macro;
+      return 1;
+    }
     if (geometry->itemType(i) == lefiGeomLayerE) {
       layer = geometry->getLayer(i);
-    } else if (!layer.empty()
-               && (geometry->itemType(i) == lefiGeomRectE || geometry->itemType(i) == lefiGeomPolygonE
-                   || geometry->itemType(i) == lefiGeomRectIterE || geometry->itemType(i) == lefiGeomPolygonIterE)) {
+    } else if (geometry->itemType(i) == lefiGeomRectIterE || geometry->itemType(i) == lefiGeomPolygonIterE) {
+      c.error = "unsupported iterated LEF obstruction geometry: " + c.macro;
+      return 1;
+    } else if (geometry->itemType(i) == lefiGeomPathE || geometry->itemType(i) == lefiGeomPathIterE
+               || geometry->itemType(i) == lefiGeomViaE || geometry->itemType(i) == lefiGeomViaIterE) {
+      // A via may obstruct several layers, including cuts. Ignoring it or
+      // blocking only the current LAYER would leave unsafe routing space.
+      c.error = "unsupported LEF obstruction PATH/VIA geometry: " + c.macro;
+      return 1;
+    } else if (!layer.empty() && (geometry->itemType(i) == lefiGeomRectE || geometry->itemType(i) == lefiGeomPolygonE)) {
       auto& macro = c.tech.macros.at(c.macro);
       macro.blocked_layers.insert(layer);
       if (geometry->itemType(i) == lefiGeomRectE) {
         const auto* rect = geometry->getRect(i);
-        macro.obstructions.push_back({
-            layer,
-            {rect->xl, rect->yl, rect->xh, rect->yh}
-        });
+        macro.obstructions.push_back({layer, {rect->xl, rect->yl, rect->xh, rect->yh}});
       } else {
-        // Nonrectangular/iterated OBS remain a conservative full-cell block.
+        // The polygon can extend outside SIZE. Retain its bounds as well as
+        // the conservative full-cell block used for nonrectangular abstracts.
+        const auto* polygon = geometry->getPolygon(i);
+        if (polygon->numPoints > 0) {
+          macro.obstructions.push_back({layer, polygon_bounds(*polygon)});
+        }
         macro.conservative_obstructions.insert(layer);
       }
     }
@@ -252,6 +515,15 @@ int track_cb(defrCallbackType_e, defiTrack* track, defiUserData data) {
   }
   return 0;
 }
+int gcell_grid_cb(defrCallbackType_e, defiGcellGrid* grid, defiUserData data) {
+  auto& c = *static_cast<DefContext*>(data);
+  if (grid->xNum() <= 0 || !std::isfinite(grid->xStep()) || grid->xStep() <= 0 || std::round(grid->xStep()) != grid->xStep()) {
+    c.error = "DEF GCELLGRID requires positive integral count/step";
+    return 1;
+  }
+  c.fp.gcell_grid.push_back({grid->macro(), grid->x(), grid->xNum(), std::llround(grid->xStep())});
+  return 0;
+}
 int component_cb(defrCallbackType_e, defiComponent* component, defiUserData data) {
   auto&     c = *static_cast<DefContext*>(data);
   Ann_place p;
@@ -272,6 +544,9 @@ int terminal_cb(defrCallbackType_e, defiPin* pin, defiUserData data) {
   if (pin->hasDirection()) {
     p.direction = pin->direction();
   }
+  if (pin->hasUse()) {
+    p.use = pin->use();
+  }
   const auto placement = [&](const auto* item) {
     if (item->hasPlacement()) {
       p.x           = item->placementX();
@@ -284,10 +559,7 @@ int terminal_cb(defrCallbackType_e, defiPin* pin, defiUserData data) {
     for (int i = 0; i < item->numLayer(); ++i) {
       int xl, yl, xh, yh;
       item->bounds(i, &xl, &yl, &xh, &yh);
-      p.shapes.push_back({
-          item->layer(i),
-          {double(xl), double(yl), double(xh), double(yh)}
-      });
+      p.shapes.push_back({item->layer(i), {double(xl), double(yl), double(xh), double(yh)}});
     }
   };
   placement(pin);
@@ -310,13 +582,141 @@ int terminal_cb(defrCallbackType_e, defiPin* pin, defiUserData data) {
   c.fp.terminals.push_back(std::move(p));
   return 0;
 }
-int net_cb(defrCallbackType_e, defiNet* net, defiUserData data) {
-  Net n;
+int nondefault_cb(defrCallbackType_e, defiNonDefault* source, defiUserData data) {
+  auto& c = *static_cast<DefContext*>(data);
+  if (source->hasHardspacing() || source->numProps() || source->numVias() || source->numViaRules() || source->numMinCuts()
+      || !source->numLayers() || c.fp.nondefault_rules.contains(source->name())) {
+    c.error = "unsupported or duplicate DEF nondefault rule";
+    return 1;
+  }
+  std::map<std::string, int64_t> widths;
+  for (int i = 0; i < source->numLayers(); ++i) {
+    if (source->hasLayerDiagWidth(i) || source->hasLayerSpacing(i) || source->hasLayerWireExt(i) || source->layerWidthVal(i) <= 0
+        || !widths.emplace(source->layerName(i), source->layerWidthVal(i)).second) {
+      c.error = "unsupported DEF nondefault layer rule";
+      return 1;
+    }
+  }
+  c.fp.nondefault_rules.emplace(source->name(), std::move(widths));
+  return 0;
+}
+int net_cb(defrCallbackType_e kind, defiNet* net, defiUserData data) {
+  auto& c = *static_cast<DefContext*>(data);
+  Net   n;
   n.name = net->name();
+  if (net->hasUse()) {
+    n.use = net->use();
+  }
   for (int i = 0; i < net->numConnections(); ++i) {
     n.connections.push_back({net->instance(i), net->pin(i)});
   }
-  static_cast<DefContext*>(data)->fp.nets.push_back(std::move(n));
+  // Never silently drop a route feature: doing so could open a FIXED net or
+  // erase a power-grid obstruction while leaving the handoff apparently valid.
+  if (net->hasSubnets() || net->hasNonDefaultRule() || net->numPolygons() || net->numRectangles() || net->numShields()
+      || net->numNoShields() || net->numPaths()) {
+    c.error = "unsupported DEF routing geometry on net " + n.name;
+    return 1;
+  }
+  for (int i = 0; i < net->numWires(); ++i) {
+    auto* input = net->wire(i);
+    Wire  wire;
+    wire.type = input->wireType();
+    if (wire.type != "FIXED" && wire.type != "ROUTED" && wire.type != "COVER") {
+      c.error = "unsupported DEF wire type on net " + n.name;
+      return 1;
+    }
+    for (int j = 0; j < input->numPaths(); ++j) {
+      auto*      source = input->path(j);
+      Route_path path;
+      source->initTraverse();
+      for (int token = source->next(); token != DEFIPATH_DONE; token = source->next()) {
+        switch (token) {
+          case DEFIPATH_TAPERRULE : path.taper_rule = source->getTaperRule(); break;
+          case DEFIPATH_LAYER     : path.layer = source->getLayer(); break;
+          case DEFIPATH_WIDTH     : path.width = source->getWidth(); break;
+          case DEFIPATH_SHAPE     : path.shape = source->getShape(); break;
+          case DEFIPATH_POINT     :
+          case DEFIPATH_FLUSHPOINT: {
+            int         x, y, extension = 0;
+            Route_point point;
+            if (token == DEFIPATH_FLUSHPOINT) {
+              source->getFlushPoint(&x, &y, &extension);
+              point.extension = extension;
+            } else {
+              source->getPoint(&x, &y);
+            }
+            point.x = x;
+            point.y = y;
+            path.steps.emplace_back(point);
+            break;
+          }
+          case DEFIPATH_RECT: {
+            int xl, yl, xh, yh;
+            source->getViaRect(&xl, &yl, &xh, &yh);
+            path.steps.emplace_back(Route_rect{xl, yl, xh, yh});
+            break;
+          }
+          case DEFIPATH_VIA: path.steps.emplace_back(Route_via{source->getVia()}); break;
+          case DEFIPATH_VIAROTATION:
+            if (path.steps.empty() || !std::holds_alternative<Route_via>(path.steps.back())) {
+              c.error = "DEF via orientation without via on net " + n.name;
+              return 1;
+            }
+            std::get<Route_via>(path.steps.back()).orientation = parse_orientation(source->getViaRotationStr());
+            break;
+          default: c.error = "unsupported DEF path token " + std::to_string(token) + " on net " + n.name; return 1;
+        }
+      }
+      wire.paths.push_back(std::move(path));
+    }
+    n.wires.push_back(std::move(wire));
+  }
+  (kind == defrSNetCbkType ? c.fp.special_nets : c.fp.nets).push_back(std::move(n));
+  return 0;
+}
+int via_cb(defrCallbackType_e, defiVia* source, defiUserData data) {
+  auto& c = *static_cast<DefContext*>(data);
+  Via   via;
+  via.name = source->name();
+  if (source->numPolygons() || source->hasPattern() || source->hasCutPattern()) {
+    c.error = "unsupported DEF via geometry: " + via.name;
+    return 1;
+  }
+  if (source->hasViaRule()) {
+    Generated_via g;
+    char *        rule, *bottom, *cut, *top;
+    int           sx, sy, dx, dy, bx, by, tx, ty;
+    source->viaRule(&rule, &sx, &sy, &bottom, &cut, &top, &dx, &dy, &bx, &by, &tx, &ty);
+    g.rule        = rule;
+    g.layers      = {bottom, cut, top};
+    g.cut_size    = {sx, sy};
+    g.cut_spacing = {dx, dy};
+    g.enclosure   = {bx, by, tx, ty};
+    if (source->hasRowCol()) {
+      source->rowCol(&sx, &sy);
+      g.row_col = {sx, sy};
+    }
+    if (source->hasOrigin()) {
+      source->origin(&sx, &sy);
+      g.origin = {sx, sy};
+    }
+    if (source->hasOffset()) {
+      source->offset(&bx, &by, &tx, &ty);
+      g.offset = {bx, by, tx, ty};
+    }
+    via.generated = std::move(g);
+  }
+  for (int i = 0; i < source->numLayers(); ++i) {
+    if (source->hasRectMask(i)) {
+      c.error = "unsupported DEF masked via: " + via.name;
+      return 1;
+    }
+    char* layer;
+    int   xl, yl, xh, yh;
+    source->layer(i, &layer, &xl, &yl, &xh, &yh);
+    via.shapes.push_back({layer, {double(xl), double(yl), double(xh), double(yh)}});
+  }
+  c.fp.vias.push_back(std::move(via));
   return 0;
 }
 int blockage_cb(defrCallbackType_e, defiBlockage* blockage, defiUserData data) {
@@ -382,6 +782,56 @@ std::string identifier(const std::string& text) {
   return out;
 }
 const char* status_name(Status status) { return status == Status::FIXED || status == Status::LOCKED ? "FIXED" : "PLACED"; }
+void        validate_wires(const Floorplan& fp, const std::vector<Net>& nets, bool special) {
+  for (const auto& net : nets) {
+    for (const auto& wire : net.wires) {
+      if ((wire.type != "FIXED" && wire.type != "ROUTED" && wire.type != "COVER") || wire.paths.empty()) {
+        throw std::runtime_error("invalid DEF wire on net " + net.name);
+      }
+      for (const auto& path : wire.paths) {
+        if (path.layer.empty() || path.steps.empty() || !std::holds_alternative<Route_point>(path.steps.front())
+            || (special && (!path.width || *path.width < 0)) || (!special && path.width)) {
+          throw std::runtime_error("invalid DEF path on net " + net.name);
+        }
+        if (!path.taper_rule.empty()
+            && (special || !fp.nondefault_rules.contains(path.taper_rule)
+                || !fp.nondefault_rules.at(path.taper_rule).contains(path.layer))) {
+          throw std::runtime_error("undefined or invalid DEF path taper rule on net " + net.name);
+        }
+        if (!path.shape.empty()
+            && (!special
+                || (path.shape != "RING" && path.shape != "STRIPE" && path.shape != "FOLLOWPIN" && path.shape != "IOWIRE"
+                    && path.shape != "COREWIRE" && path.shape != "BLOCKWIRE" && path.shape != "BLOCKAGEWIRE"
+                    && path.shape != "FILLWIRE" && path.shape != "FILLWIREOPC" && path.shape != "DRCFILL"))) {
+          throw std::runtime_error("invalid DEF wire shape on net " + net.name);
+        }
+        const Route_point* previous = nullptr;
+        bool               has_via  = false;
+        for (const auto& step : path.steps) {
+          if (const auto* point = std::get_if<Route_point>(&step)) {
+            if ((point->extension && *point->extension < 0) || (previous && previous->x != point->x && previous->y != point->y)
+                || (special && *path.width == 0 && previous)) {
+              throw std::runtime_error("invalid Manhattan DEF segment on net " + net.name);
+            }
+            previous = point;
+          } else if (const auto* rect = std::get_if<Route_rect>(&step)) {
+            if (special || rect->xl >= rect->xh || rect->yl >= rect->yh || rect->xl < INT32_MIN || rect->yl < INT32_MIN
+                || rect->xh > INT32_MAX || rect->yh > INT32_MAX) {
+              throw std::runtime_error("invalid DEF signal patch on net " + net.name);
+            }
+          } else if (std::get<Route_via>(step).name.empty()) {
+            throw std::runtime_error("unnamed DEF route via on net " + net.name);
+          } else {
+            has_via = true;
+          }
+        }
+        if (special && *path.width == 0 && !has_via) {
+          throw std::runtime_error("zero-width special path must contain a via on net " + net.name);
+        }
+      }
+    }
+  }
+}
 }  // namespace
 std::string orientation_name(Orientation o) {
   static constexpr const char* names[] = {"N", "W", "S", "E", "FN", "FW", "FS", "FE"};
@@ -424,6 +874,8 @@ Technology read_lef(const std::vector<std::string>& paths) {
     lefrSetManufacturingCbk(manufacturing_grid_cb);
     lefrSetSiteCbk(site_cb);
     lefrSetLayerCbk(layer_cb);
+    lefrSetViaCbk(lef_via_cb);
+    lefrSetViaRuleCbk(via_rule_cb);
     lefrSetMacroBeginCbk(macro_begin_cb);
     lefrSetMacroCbk(macro_cb);
     lefrSetPinCbk(pin_cb);
@@ -449,9 +901,14 @@ Floorplan read_def(const std::string& path) {
   defrSetDieAreaCbk(die_cb);
   defrSetRowCbk(row_cb);
   defrSetTrackCbk(track_cb);
+  defrSetGcellGridCbk(gcell_grid_cb);
   defrSetComponentCbk(component_cb);
   defrSetPinCbk(terminal_cb);
   defrSetNetCbk(net_cb);
+  defrSetSNetCbk(net_cb);
+  defrSetViaCbk(via_cb);
+  defrSetNonDefaultCbk(nondefault_cb);
+  defrSetAddPathToNet();
   defrSetBlockageCbk(blockage_cb);
   const int rc = defrRead(file.get(), path.c_str(), &c, 1);
   defrClear();
@@ -459,10 +916,34 @@ Floorplan read_def(const std::string& path) {
     throw std::runtime_error("DEF read failed: " + path + ": " + c.error);
   }
   validate_blockages(c.fp);
+  validate_wires(c.fp, c.fp.nets, false);
+  validate_wires(c.fp, c.fp.special_nets, true);
   return std::move(c.fp);
 }
 void write_def(const Floorplan& fp, const std::string& path) {
   validate_blockages(fp);
+  validate_wires(fp, fp.nets, false);
+  validate_wires(fp, fp.special_nets, true);
+  for (const auto& grid : fp.gcell_grid) {
+    if ((grid.axis != "X" && grid.axis != "Y") || grid.count <= 0 || grid.step <= 0) {
+      throw std::runtime_error("invalid DEF GCELLGRID");
+    }
+  }
+  for (const auto& via : fp.vias) {
+    if (via.generated ? !via.shapes.empty() : via.shapes.empty()) {
+      throw std::runtime_error("DEF via must have either generated or explicit geometry: " + via.name);
+    }
+  }
+  for (const auto& [name, widths] : fp.nondefault_rules) {
+    if (name.empty() || widths.empty()) {
+      throw std::runtime_error("invalid DEF nondefault rule");
+    }
+    for (const auto& [layer, width] : widths) {
+      if (layer.empty() || width <= 0 || width > INT32_MAX) {
+        throw std::runtime_error("invalid DEF nondefault width");
+      }
+    }
+  }
   std::ofstream out(path);
   if (!out) {
     throw std::runtime_error("cannot write DEF: " + path);
@@ -481,6 +962,48 @@ void write_def(const Floorplan& fp, const std::string& path) {
     }
     out << " LAYER " << identifier(track.layer) << " ;\n";
   }
+  for (const auto& grid : fp.gcell_grid) {
+    out << "GCELLGRID " << grid.axis << ' ' << grid.start << " DO " << grid.count << " STEP " << grid.step << " ;\n";
+  }
+  if (!fp.vias.empty()) {
+    out << "VIAS " << fp.vias.size() << " ;\n";
+    for (const auto& via : fp.vias) {
+      out << "- " << identifier(via.name);
+      if (via.generated) {
+        const auto& g = *via.generated;
+        out << " + VIARULE " << identifier(g.rule) << " + CUTSIZE " << g.cut_size[0] << ' ' << g.cut_size[1] << " + LAYERS "
+            << identifier(g.layers[0]) << ' ' << identifier(g.layers[1]) << ' ' << identifier(g.layers[2]) << " + CUTSPACING "
+            << g.cut_spacing[0] << ' ' << g.cut_spacing[1] << " + ENCLOSURE " << g.enclosure[0] << ' ' << g.enclosure[1] << ' '
+            << g.enclosure[2] << ' ' << g.enclosure[3];
+        if (g.row_col) {
+          out << " + ROWCOL " << (*g.row_col)[0] << ' ' << (*g.row_col)[1];
+        }
+        if (g.origin) {
+          out << " + ORIGIN " << (*g.origin)[0] << ' ' << (*g.origin)[1];
+        }
+        if (g.offset) {
+          out << " + OFFSET " << (*g.offset)[0] << ' ' << (*g.offset)[1] << ' ' << (*g.offset)[2] << ' ' << (*g.offset)[3];
+        }
+      }
+      for (const auto& shape : via.shapes) {
+        out << " + RECT " << identifier(shape.layer) << " ( " << std::llround(shape.rect.xl) << ' ' << std::llround(shape.rect.yl)
+            << " ) ( " << std::llround(shape.rect.xh) << ' ' << std::llround(shape.rect.yh) << " )";
+      }
+      out << " ;\n";
+    }
+    out << "END VIAS\n";
+  }
+  if (!fp.nondefault_rules.empty()) {
+    out << "NONDEFAULTRULES " << fp.nondefault_rules.size() << " ;\n";
+    for (const auto& [name, widths] : fp.nondefault_rules) {
+      out << "- " << identifier(name);
+      for (const auto& [layer, width] : widths) {
+        out << " + LAYER " << identifier(layer) << " WIDTH " << width;
+      }
+      out << " ;\n";
+    }
+    out << "END NONDEFAULTRULES\n";
+  }
   out << "COMPONENTS " << fp.components.size() << " ;\n";
   for (const auto& c : fp.components) {
     out << "- " << identifier(c.name) << ' ' << identifier(c.macro);
@@ -494,22 +1017,64 @@ void write_def(const Floorplan& fp, const std::string& path) {
   }
   out << "END COMPONENTS\nPINS " << fp.terminals.size() << " ;\n";
   for (const auto& p : fp.terminals) {
-    out << "- " << identifier(p.name) << " + NET " << identifier(p.net) << " + DIRECTION " << p.direction << " + USE SIGNAL";
+    out << "- " << identifier(p.name) << " + NET " << identifier(p.net) << " + DIRECTION " << p.direction << " + USE " << p.use;
     for (const auto& shape : p.shapes) {
       out << " + LAYER " << identifier(shape.layer) << " ( " << std::llround(shape.rect.xl) << ' ' << std::llround(shape.rect.yl)
           << " ) ( " << std::llround(shape.rect.xh) << ' ' << std::llround(shape.rect.yh) << " )";
     }
     out << " + " << status_name(p.status) << " ( " << p.x << ' ' << p.y << " ) " << orientation_name(p.orientation) << " ;\n";
   }
-  out << "END PINS\nNETS " << fp.nets.size() << " ;\n";
-  for (const auto& net : fp.nets) {
-    out << "- " << identifier(net.name);
-    for (const auto& c : net.connections) {
-      out << " ( " << identifier(c.instance) << ' ' << identifier(c.pin) << " )";
+  out << "END PINS\n";
+  const auto write_nets = [&](const std::vector<Net>& nets, const char* section) {
+    out << section << ' ' << nets.size() << " ;\n";
+    for (const auto& net : nets) {
+      out << "- " << identifier(net.name);
+      for (const auto& c : net.connections) {
+        out << " ( " << identifier(c.instance) << ' ' << identifier(c.pin) << " )";
+      }
+      if (!net.use.empty()) {
+        out << " + USE " << net.use;
+      }
+      for (const auto& wire : net.wires) {
+        for (size_t i = 0; i < wire.paths.size(); ++i) {
+          const auto& route = wire.paths[i];
+          out << (i ? " NEW " : " + " + wire.type + " ") << identifier(route.layer);
+          if (!route.taper_rule.empty()) {
+            out << " TAPERRULE " << identifier(route.taper_rule);
+          }
+          if (route.width) {
+            out << ' ' << *route.width;
+          }
+          if (!route.shape.empty()) {
+            out << " + SHAPE " << route.shape;
+          }
+          for (const auto& step : route.steps) {
+            if (const auto* point = std::get_if<Route_point>(&step)) {
+              out << " ( " << point->x << ' ' << point->y;
+              if (point->extension) {
+                out << ' ' << *point->extension;
+              }
+              out << " )";
+            } else if (const auto* rect = std::get_if<Route_rect>(&step)) {
+              out << " RECT ( " << rect->xl << ' ' << rect->yl << ' ' << rect->xh << ' ' << rect->yh << " )";
+            } else {
+              const auto& via = std::get<Route_via>(step);
+              out << ' ' << identifier(via.name);
+              if (via.orientation != Orientation::N) {
+                out << ' ' << orientation_name(via.orientation);
+              }
+            }
+          }
+        }
+      }
+      out << " ;\n";
     }
-    out << " ;\n";
+    out << "END " << section << '\n';
+  };
+  if (!fp.special_nets.empty()) {
+    write_nets(fp.special_nets, "SPECIALNETS");
   }
-  out << "END NETS\n";
+  write_nets(fp.nets, "NETS");
   if (!fp.blockages.empty()) {
     out << "BLOCKAGES " << fp.blockages.size() << " ;\n";
     for (const auto& blockage : fp.blockages) {
@@ -535,6 +1100,15 @@ void write_def(const Floorplan& fp, const std::string& path) {
   }
 }
 void verify_def_roundtrip(const Floorplan& a, const Floorplan& b) {
+  if (a.nondefault_rules != b.nondefault_rules) {
+    throw std::runtime_error("DEF roundtrip changed nondefault rules");
+  }
+  if (a.gcell_grid != b.gcell_grid) {
+    throw std::runtime_error("DEF roundtrip changed gcell grid");
+  }
+  if (a.vias != b.vias || a.special_nets != b.special_nets) {
+    throw std::runtime_error("DEF roundtrip changed vias or special nets");
+  }
   if (a.design != b.design || a.dbu != b.dbu || a.die != b.die || a.rows != b.rows || a.tracks != b.tracks
       || a.terminals != b.terminals || a.nets != b.nets || a.blockages != b.blockages
       || a.components.size() != b.components.size()) {

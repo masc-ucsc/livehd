@@ -387,3 +387,11 @@ sh_test(
     srcs = ["tests/reachable_modules.sh"],
     data = ["//lhd"],
 )
+
+sh_test(
+    name = "slang_routing_protection",
+    size = "small",
+    timeout = "short",
+    srcs = ["tests/routing_protection.sh"],
+    data = ["//lhd"],
+)

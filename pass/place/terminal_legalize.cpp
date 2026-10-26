@@ -78,24 +78,26 @@ struct Packing_failure : std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 struct Model {
-  const ph::Technology&              tech;
-  ph::Floorplan&                     fp;
-  const Terminal_legalize_options&   options;
-  Terminal_legalize_report           report;
-  ph::Rect                           bounds;
-  std::vector<Row>                   rows;
-  std::vector<std::vector<size_t>>   bin_rows;
-  std::vector<Ann_place>             original, preferred;
-  std::vector<bool>                  movable, installed, critical, compact;
-  std::vector<std::optional<double>> slacks;
-  std::vector<unsigned>              stages;
-  std::vector<size_t>                obstacles;
-  std::vector<Satlegalize_alignment> alignments;
-  std::vector<ph::Shape>             corridors;
-  std::vector<std::vector<size_t>>   bin_corridors, bin_obstacles;
-  std::map<std::string, size_t>      names;
-  double                             dx = 0, dy = 0;
-  int64_t                            max_row_height = 0;
+  const ph::Technology&                 tech;
+  ph::Floorplan&                        fp;
+  const Terminal_legalize_options&      options;
+  Terminal_legalize_report              report;
+  std::optional<ph::Signal_metal_rules> route_rules;
+  const ph::Signal_metal_rules*         drc() const { return route_rules ? &*route_rules : nullptr; }
+  ph::Rect                              bounds;
+  std::vector<Row>                      rows;
+  std::vector<std::vector<size_t>>      bin_rows;
+  std::vector<Ann_place>                original, preferred;
+  std::vector<bool>                     movable, installed, critical, compact;
+  std::vector<std::optional<double>>    slacks;
+  std::vector<unsigned>                 stages;
+  std::vector<size_t>                   obstacles;
+  std::vector<Satlegalize_alignment>    alignments;
+  std::vector<ph::Shape>                corridors;
+  std::vector<std::vector<size_t>>      bin_corridors, bin_obstacles;
+  std::map<std::string, size_t>         names;
+  double                                dx = 0, dy = 0;
+  int64_t                               max_row_height = 0;
 
   struct Wire_pin {
     size_t           cell;
@@ -198,9 +200,7 @@ struct Model {
         objective.intervals.push_back({std::min(xa, xb), std::min(ya, yb), std::max(xa, xb), std::max(ya, yb)});
       }
       const auto median = [&](bool horizontal) {
-        std::vector<std::pair<double, double>> points{
-            {horizontal ? double(preferred[cell].x) : double(preferred[cell].y), 1.}
-        };
+        std::vector<std::pair<double, double>> points{{horizontal ? double(preferred[cell].x) : double(preferred[cell].y), 1.}};
         for (const auto& r : objective.intervals) {
           points.emplace_back(horizontal ? r.xl : r.yl, options.remainder_wire_weight / 2);
           points.emplace_back(horizontal ? r.xh : r.yh, options.remainder_wire_weight / 2);
@@ -297,8 +297,14 @@ struct Model {
   }
   Model(const ph::Technology& technology, ph::Floorplan& frame, const Terminal_legalize_options& controls)
       : tech(technology), fp(frame), options(controls) {
+    if (options.route_vias && !options.route_drc) {
+      throw std::invalid_argument("terminal via access requires route DRC");
+    }
     if (fp.dbu <= 0 || fp.dbu != tech.dbu || fp.rows.empty()) {
       throw std::invalid_argument("terminal legalization requires matching positive DBU units and physical rows");
+    }
+    if (options.route_drc) {
+      route_rules.emplace(tech, fp);
     }
     bounds = {std::numeric_limits<double>::infinity(),
               std::numeric_limits<double>::infinity(),
@@ -498,6 +504,11 @@ struct Model {
       return;
     }
     bool blocked = false;
+    if (route_rules) {
+      for (const auto& corridor : corridors) {
+        blocked |= satlegalize_obstructs(tech, fp.components[cell], p, corridor, fp.dbu, drc());
+      }
+    }
     each_bin(box(p), [&](size_t bin, double) {
       for (size_t corridor : bin_corridors[bin]) {
         blocked |= satlegalize_obstructs(tech, fp.components[cell], p, corridors[corridor], fp.dbu);
@@ -837,6 +848,9 @@ struct Model {
     }
     std::set<size_t> fixed_obstacles;
     each_bin(region, [&](size_t bin, double) { fixed_obstacles.insert(bin_obstacles[bin].begin(), bin_obstacles[bin].end()); });
+    if (route_rules) {
+      fixed_obstacles.insert(obstacles.begin(), obstacles.end());
+    }
     fixed_obstacles.insert(pair.first);
     fixed_obstacles.insert(pair.second);
     return std::vector<size_t>(fixed_obstacles.begin(), fixed_obstacles.end());
@@ -844,7 +858,7 @@ struct Model {
   bool alignment_supported(const Satlegalize_alignment& pair, const Candidate& a, const Candidate& b,
                            const std::vector<size_t>& blockers, ph::Shape* corridor) const {
     return !(a.row == b.row && a.start < b.end && b.start < a.end) && capacity(a.place, &b.place)
-           && satlegalize_aligned(tech, fp, pair, a.place, b.place, blockers, corridor);
+           && satlegalize_aligned(tech, fp, pair, a.place, b.place, blockers, corridor, drc(), options.route_vias);
   }
   // This only selects bounded candidate menus. It never installs a cell;
   // all recovered and neighboring pairs remain decisions of the joint solve.
@@ -915,8 +929,12 @@ struct Model {
         const auto access   = [&](size_t ep, const std::string& pin) {
           std::map<std::string, std::vector<Access>> result;
           for (size_t c = 0; c < pools[ep].size(); ++c) {
-            for (const auto& shape :
-                 satlegalize_pin_access_bounds(tech, fp.components[endpoints[ep].cell], pools[ep][c].place, pin, fp.dbu)) {
+            for (const auto& shape : satlegalize_pin_access_bounds(tech,
+                                                                   fp.components[endpoints[ep].cell],
+                                                                   pools[ep][c].place,
+                                                                   pin,
+                                                                   fp.dbu,
+                                                                   options.route_vias)) {
               const bool h = tech.layers.at(shape.layer).direction == "HORIZONTAL";
               result[shape.layer].push_back({h ? shape.rect.yl : shape.rect.xl, h ? shape.rect.yh : shape.rect.xh, c});
             }
@@ -1135,7 +1153,15 @@ struct Model {
             continue;
           }
           ph::Shape corridor;
-          if (satlegalize_aligned(tech, fp, pair, a.choices[i].place, b.choices[j].place, blockers, &corridor)) {
+          if (satlegalize_aligned(tech,
+                                  fp,
+                                  pair,
+                                  a.choices[i].place,
+                                  b.choices[j].place,
+                                  blockers,
+                                  &corridor,
+                                  drc(),
+                                  options.route_vias)) {
             witnesses[e].push_back({i, j, std::move(corridor)});
             first_support[i].push_back(b.literals[j]);
             second_support[j].push_back(a.literals[i]);
@@ -1327,13 +1353,28 @@ struct Model {
             other_paths.insert(path_bins[bin].begin(), path_bins[bin].end());
             path_bins[bin].push_back(e);
           });
+          if (route_rules) {
+            for (size_t ep = 0; ep < endpoints.size(); ++ep) {
+              // Dropped edges may leave their endpoints unselected. Those
+              // cells are installed later, with retained-corridor checks.
+              if (chosen[ep] >= 0) {
+                neighbors.insert(ep);
+              }
+            }
+            for (size_t prior = 0; prior < e; ++prior) {
+              if (!paths[prior].layer.empty()) {
+                other_paths.insert(prior);
+              }
+            }
+          }
           for (size_t ep : neighbors) {
             if (ep != a && ep != b
                 && satlegalize_obstructs(tech,
                                          fp.components[endpoints[ep].cell],
                                          endpoints[ep].choices[chosen[ep]].place,
                                          paths[e],
-                                         fp.dbu)) {
+                                         fp.dbu,
+                                         drc())) {
               auto cut = edge_cut(e);
               cut.push_back(-endpoints[ep].literals[chosen[ep]]);
               ++report.joint_obstruction_cuts;
@@ -1341,7 +1382,9 @@ struct Model {
             }
           }
           for (size_t other : other_paths) {
-            if (paths[e].layer == paths[other].layer && overlap(paths[e].rect, paths[other].rect) > 0) {
+            if (paths[e].layer == paths[other].layer
+                && (route_rules ? !route_rules->spacing(paths[e], paths[other]).legal
+                                            : overlap(paths[e].rect, paths[other].rect) > 0)) {
               auto cut = edge_cut(e), more = edge_cut(other);
               cut.insert(cut.end(), more.begin(), more.end());
               ++report.joint_corridor_cuts;
@@ -1598,6 +1641,9 @@ struct Model {
     each_bin(region, [&](size_t bin, double) {
       pair_obstacles.insert(pair_obstacles.end(), bin_obstacles[bin].begin(), bin_obstacles[bin].end());
     });
+    if (route_rules) {
+      pair_obstacles.insert(pair_obstacles.end(), obstacles.begin(), obstacles.end());
+    }
     std::sort(pair_obstacles.begin(), pair_obstacles.end());
     pair_obstacles.erase(std::unique(pair_obstacles.begin(), pair_obstacles.end()), pair_obstacles.end());
     if (!installed[a]) {
@@ -1616,7 +1662,7 @@ struct Model {
           valid &= capacity(ca[i].place, &cb[j].place, limit);
         }
         if (valid) {
-          valid = satlegalize_aligned(tech, fp, pair, ca[i].place, cb[j].place, pair_obstacles);
+          valid = satlegalize_aligned(tech, fp, pair, ca[i].place, cb[j].place, pair_obstacles, nullptr, drc(), options.route_vias);
         }
         if (valid) {
           const unsigned joint = ca[i].place != anchor_a && cb[j].place != anchor_b;
@@ -1649,7 +1695,7 @@ struct Model {
     install(b, cb[j], stage);
     alignments.push_back(pair);
     ph::Shape corridor;
-    if (!satlegalize_aligned(tech, fp, pair, ca[i].place, cb[j].place, pair_obstacles, &corridor)) {
+    if (!satlegalize_aligned(tech, fp, pair, ca[i].place, cb[j].place, pair_obstacles, &corridor, drc(), options.route_vias)) {
       throw std::logic_error("terminal legalization lost an accepted alignment");
     }
     const auto ci = corridors.size();
@@ -1960,8 +2006,9 @@ Terminal_legalize_report terminal_legalize(const physical::Technology& tech, phy
   auto       proposal = fp;
   Model      model(tech, proposal, options);
   model.run(timing);
-  model.report.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-  fp                   = std::move(proposal);
+  model.report.alignments = std::move(model.alignments);
+  model.report.seconds    = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+  fp                      = std::move(proposal);
   return std::move(model.report);
 }
 

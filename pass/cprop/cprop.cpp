@@ -1229,6 +1229,10 @@ bool Cprop::collapse_forward_for_pin(hhds::Node_class& node, hhds::Pin_class new
   livehd::cprop_value::forwarded(node, new_dpin);
   for (const auto& out : outs) {
     livehd::graph_util::carry_signal_roles(out.driver, new_dpin);
+    livehd::graph_util::carry_preroute_exclusion(out.driver, new_dpin);
+  }
+  if (!new_dpin.is_const() && node.attr(livehd::attrs::preroute_exclude).has()) {
+    new_dpin.attr(livehd::attrs::preroute_net_exclude).set();
   }
   // Redirect every consumer to new_dpin, then bwd_del_node deletes the node in
   // one shot (del_node bulk-drops its edges — no per-edge find).

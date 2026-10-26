@@ -1,10 +1,13 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
+#include <array>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "ann_place.hpp"
@@ -39,21 +42,89 @@ struct Site {
   double width = 0, height = 0;
   bool   symmetry_x = false;
 };
+// LEF dimensions remain in microns. A via may be present for placement/import
+// even when its geometry cannot yet be used by the native routing oracle.
+struct Lef_via {
+  std::vector<Shape>    shapes;
+  double                resistance = 0;
+  bool                  is_default = false;
+  std::set<std::string> unsupported;
+  friend bool           operator==(const Lef_via&, const Lef_via&) = default;
+};
+struct Via_rule_layer {
+  std::string                          name, direction;
+  std::optional<std::array<double, 2>> enclosure, width, spacing;
+  std::optional<Rect>                  cut;
+  std::optional<double>                resistance;
+  friend bool                          operator==(const Via_rule_layer&, const Via_rule_layer&) = default;
+};
+struct Via_rule {
+  bool                        generate = false, is_default = false;
+  std::vector<Via_rule_layer> layers;  // LEF order; identify cut/metal by layer type, not index
+  std::vector<std::string>    vias;
+  std::set<std::string>       unsupported;
+  friend bool                 operator==(const Via_rule&, const Via_rule&) = default;
+};
+struct Cut_layer {
+  double                                          width = 0;
+  std::vector<double>                             spacing;  // unqualified edge-to-edge distances only
+  std::set<std::string>                           unsupported;
+  std::map<std::string, std::vector<std::string>> properties;
+  friend bool                                     operator==(const Cut_layer&, const Cut_layer&) = default;
+};
+struct Eol_spacing {
+  double                               width = 0, within = 0;
+  std::optional<std::array<double, 2>> parallel_edge;  // spacing, within
+  bool                                 two_edges = false;
+};
+struct Metal_spacing {
+  double                               distance = 0;
+  std::optional<std::array<double, 2>> range;
+  std::optional<Eol_spacing>           eol;
+};
+struct Parallel_spacing {
+  std::vector<double>              widths, lengths;
+  std::vector<std::vector<double>> spacing;  // indexed by width, then parallel run length
+};
+struct Min_step {
+  double                distance = 0;
+  std::string           type;
+  std::optional<double> length_sum, adjacent_length, between_length;
+  std::optional<int>    max_edges;
+  bool                  same_corners = false;
+};
+struct Metal_rules {
+  bool                                            loaded = false;  // false for synthetic layers without a technology rule model
+  double                                          area   = 0;
+  std::optional<double>                           min_width, max_width;
+  std::vector<Metal_spacing>                      spacing;
+  std::vector<Parallel_spacing>                   parallel;
+  std::vector<std::array<double, 2>>              min_size;
+  std::vector<Min_step>                           min_step;
+  // Preserve extension text for technology-specific parsing. Until interpreted,
+  // its PROPERTY entry remains unsupported and the routing oracle must reject it.
+  std::map<std::string, std::vector<std::string>> properties;
+  std::set<std::string>                           unsupported;
+};
 struct Layer {
   double      width = 0, resistance = 0, capacitance = 0, edge_cap = 0;
   std::string direction;
   double      pitch_x = 0, pitch_y = 0;
   double      offset_x = 0, offset_y = 0;
   bool        has_offset = false;
+  Metal_rules rules{};
 };
 // LEF geometry is in microns; graph/DEF positions are integer DBU.
 struct Technology {
-  int64_t                      dbu = 1000;
-  std::map<std::string, Site>  sites;
-  std::map<std::string, Macro> macros;
-  std::map<std::string, Layer> layers;
-  std::vector<std::string>     routing_layers;          // LEF routing-stack order
-  double                       manufacturing_grid = 0;  // microns; 0 means unspecified
+  int64_t                          dbu = 1000;
+  std::map<std::string, Site>      sites;
+  std::map<std::string, Macro>     macros;
+  std::map<std::string, Layer>     layers;
+  std::vector<std::string>         routing_layers;          // LEF routing-stack order
+  double                           manufacturing_grid = 0;  // microns; 0 means unspecified
+  std::map<std::string, Lef_via>   vias;
+  std::map<std::string, Via_rule>  via_rules;
+  std::map<std::string, Cut_layer> cut_layers;
 };
 struct Row {
   std::string name, site;
@@ -87,15 +158,65 @@ struct Terminal {
   Orientation        orientation = Orientation::N;
   Status             status      = Status::UNPLACED;
   std::vector<Shape> shapes;  // DEF-local DBU rectangles
+  std::string        use                                          = "SIGNAL";
   friend bool        operator==(const Terminal&, const Terminal&) = default;
 };
 struct Connection {
   std::string instance, pin;
   friend bool operator==(const Connection&, const Connection&) = default;
 };
+// Routing geometry uses integer DEF DBU, including via-local coordinates.
+// Keep extensions explicit: an omitted extension means half the wire width for
+// ordinary nets and zero for special nets. Explicit zero is a flush endpoint.
+struct Route_point {
+  int64_t                x = 0, y = 0;
+  std::optional<int64_t> extension;
+  friend bool            operator==(const Route_point&, const Route_point&) = default;
+};
+struct Route_via {
+  std::string name;
+  Orientation orientation                                    = Orientation::N;
+  friend bool operator==(const Route_via&, const Route_via&) = default;
+};
+// DEF RECT offsets relative to the preceding route point, on the current
+// routing layer (including a layer change through a preceding via).
+struct Route_rect {
+  int64_t     xl = 0, yl = 0, xh = 0, yh = 0;
+  friend bool operator==(const Route_rect&, const Route_rect&) = default;
+};
+struct Route_path {
+  std::string            layer;
+  std::optional<int64_t> width;  // mandatory for special wiring, implicit for ordinary signal wiring
+  std::string            shape;
+  std::vector<std::variant<Route_point, Route_via, Route_rect>> steps;
+  std::string                                                   taper_rule;  // width-only DEF NONDEFAULTRULE applied to this path
+  friend bool                                                   operator==(const Route_path&, const Route_path&) = default;
+};
+struct Wire {
+  std::string             type = "FIXED";
+  std::vector<Route_path> paths;
+  friend bool             operator==(const Wire&, const Wire&) = default;
+};
+struct Generated_via {
+  std::string                           rule;
+  std::array<std::string, 3>            layers;  // bottom metal, cut, top metal
+  std::array<int64_t, 2>                cut_size{}, cut_spacing{};
+  std::array<int64_t, 4>                enclosure{};  // bottom x/y, top x/y
+  std::optional<std::array<int64_t, 2>> row_col, origin;
+  std::optional<std::array<int64_t, 4>> offset;
+  friend bool                           operator==(const Generated_via&, const Generated_via&) = default;
+};
+struct Via {
+  std::string                  name;
+  std::vector<Shape>           shapes;  // explicit rectangular metal and cut shapes, DEF DBU
+  std::optional<Generated_via> generated;
+  friend bool                  operator==(const Via&, const Via&) = default;
+};
 struct Net {
   std::string             name;
   std::vector<Connection> connections;
+  std::vector<Wire>       wires{};
+  std::string             use{};
   friend bool             operator==(const Net&, const Net&) = default;
 };
 struct Track {
@@ -113,6 +234,13 @@ struct Placement_blockage {
   std::vector<Rect> rectangles;
   friend bool       operator==(const Placement_blockage&, const Placement_blockage&) = default;
 };
+struct Gcell_grid {
+  std::string axis;
+  int64_t     start = 0, count = 0, step = 0;
+  friend bool operator==(const Gcell_grid&, const Gcell_grid&) = default;
+};
+// Width-only DEF rules, also used as non-owning trial overlays during routing.
+using Route_width_rules = std::map<std::string, std::map<std::string, int64_t>>;
 struct Placement_exclusion {
   Rect           rect;
   Placement_mask kind = Placement_mask::hard;
@@ -127,6 +255,10 @@ struct Floorplan {
   std::vector<Terminal>           terminals;
   std::vector<Net>                nets;
   std::vector<Placement_blockage> blockages;
+  std::vector<Via> vias;
+  std::vector<Net> special_nets;
+  std::vector<Gcell_grid> gcell_grid;
+  Route_width_rules nondefault_rules;
 };
 Technology                       read_lef(const std::vector<std::string>& paths);
 Floorplan                        read_def(const std::string& path);

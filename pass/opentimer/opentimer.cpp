@@ -2667,10 +2667,11 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
         }
         return best;
       };
-      value.arrival  = extreme([&](ot::Tran t) { return pin.at(ot::MAX, t); }, true);
-      value.required = extreme([&](ot::Tran t) { return pin.rat(ot::MAX, t); }, false);
-      value.slack    = extreme([&](ot::Tran t) { return pin.slack(ot::MAX, t); }, false);
-      value.slew     = extreme([&](ot::Tran t) { return pin.slew(ot::MAX, t); }, true);
+      value.arrival    = extreme([&](ot::Tran t) { return pin.at(ot::MAX, t); }, true);
+      value.required   = extreme([&](ot::Tran t) { return pin.rat(ot::MAX, t); }, false);
+      value.slack      = extreme([&](ot::Tran t) { return pin.slack(ot::MAX, t); }, false);
+      value.hold_slack = extreme([&](ot::Tran t) { return pin.slack(ot::MIN, t); }, false);
+      value.slew       = extreme([&](ot::Tran t) { return pin.slew(ot::MAX, t); }, true);
       if (pin.net() && (pin.is_output() || pin.primary_input())) {
         if (auto load = extreme([&](ot::Tran t) { return timer.report_load(pin.net()->name(), ot::MAX, t); }, true)) {
           value.load_ff = *load * cap_scale;
@@ -2710,6 +2711,7 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
         field("arrival", value.arrival);
         field("required", value.required);
         field("slack", value.slack);
+        field("hold_slack", value.hold_slack);
         field("slew", value.slew);
         field("load_ff", value.load_ff);
         field("capacitance_ff", value.capacitance_ff);

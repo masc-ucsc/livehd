@@ -57,6 +57,7 @@
 #include "diag.hpp"
 #include "export_file.hpp"
 #include "graph_library_singleton.hpp"
+#include "inou/lefdef/route_store.hpp"
 #include "lhd_kernel_internal.hpp"
 #include "liberty_dff.hpp"
 #include "node_util.hpp"
@@ -65,6 +66,7 @@
 #include "pass/opentimer/sta_salt.hpp"
 #include "pass/place/io_timing.hpp"
 #include "pass/place/place.hpp"
+#include "pass/place/preroute_host.hpp"
 #include "pass/place/repair.hpp"
 #include "pass/place/resize_engine.hpp"
 #include "physical_cache.hpp"
@@ -330,14 +332,45 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (!out.floorplan.empty() && (!out.die.empty() || !out.core.empty())) {
     throw Lhd_error{"usage", "synth.place.die/core cannot be combined with synth.place.floorplan", "supply one frame source"};
   }
-  out.density                  = number("place.density", "0.5");
-  out.iterations               = integer("place.iterations", "1500");
-  out.min_iterations           = integer("place.min_iterations", "40");
-  out.post_density_factor      = integer("place.post_density_factor", "4");
-  out.convergence_tolerance    = number("place.convergence_tolerance", "0.01");
-  out.detailed_iterations      = integer("place.detailed_iterations", "2");
-  out.macro_detailed_place     = truthy(synth_set(opts, "place.macro.detailed", "true"));
-  out.macro_legalize_cells     = truthy(synth_set(opts, "place.macro.legalize_cells", "true"));
+  out.density               = number("place.density", "0.5");
+  out.iterations            = integer("place.iterations", "1500");
+  out.min_iterations        = integer("place.min_iterations", "40");
+  out.post_density_factor   = integer("place.post_density_factor", "4");
+  out.convergence_tolerance = number("place.convergence_tolerance", "0.01");
+  out.detailed_iterations   = integer("place.detailed_iterations", "2");
+  out.macro_detailed_place  = truthy(synth_set(opts, "place.macro.detailed", "true"));
+  out.macro_legalize_cells  = truthy(synth_set(opts, "place.macro.legalize_cells", "true"));
+  out.handoff_taps          = truthy(synth_set(opts, "place.handoff.taps", "false"));
+  out.pg                    = synth_set(opts, "place.pg", "none");
+  if (!synth_set(opts, "place.pg.channel.max_ir_drop", "").empty()) {
+    out.pg_channel_max_ir_drop_v = number("place.pg.channel.max_ir_drop", "");
+    if (*out.pg_channel_max_ir_drop_v < 0) {
+      throw Lhd_error{"usage", "synth.place.pg.channel.max_ir_drop must be nonnegative", "units are volts"};
+    }
+  }
+  try {
+    out.pg_channels = livehd::placement::parse_pg_channels(synth_set(opts, "place.pg.channel.patches", ""));
+  } catch (const std::invalid_argument& e) {
+    throw Lhd_error{"usage", std::string("invalid synth.place.pg.channel.patches: ") + e.what(), ""};
+  }
+  out.preroute.enabled         = truthy(synth_set(opts, "place.preroute", "false"));
+  out.retain_preroute_design   = out.preroute.enabled;
+  out.preroute.setup_margin_ps = number("place.preroute.setup_margin", "20");
+  out.preroute.hold_margin_ps  = number("place.preroute.hold_margin", "-1");
+  out.preroute.nominal_slew_ps = number("place.preroute.nominal_slew", "20");
+  out.preroute.hold_buffer     = synth_set(opts, "place.preroute.hold_buffer", "auto");
+  out.preroute.budget_ms       = integer("place.preroute.budget_ms", "10");
+  out.preroute.stage_budget_ms = integer("place.preroute.stage_budget_ms", "10000");
+  out.preroute.bins            = integer("place.preroute.bins", "64");
+  out.preroute.max_rows        = integer("place.preroute.max_rows", "0");
+  out.preroute.max_sites       = integer("place.preroute.max_sites", "0");
+  if (out.preroute.max_rows < 0 || out.preroute.max_sites < 0) {
+    throw Lhd_error{"usage", "invalid pre-route span cap", "max_rows and max_sites must be nonnegative; 0 is unlimited"};
+  }
+  out.preroute.capacity_fraction = number("place.preroute.capacity", "0.30");
+  if (out.preroute.capacity_fraction < 0 || out.preroute.capacity_fraction > 1) {
+    throw Lhd_error{"usage", "invalid synth.place.preroute.capacity", "expected a fraction in 0..1"};
+  }
   out.final_independent_timing = truthy(synth_set(opts, "place.final.independent_timing", "false"));
   out.final_timing_start       = integer("place.final.timing_start", "200");
   out.final_timing_schedule    = synth_set(opts, "place.final.timing_schedule", "fixed");
@@ -347,10 +380,29 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (out.final_timing_start < 0) {
     throw Lhd_error{"usage", "synth.place.final.timing_start must be nonnegative", "use a GP iteration count"};
   }
-  out.satlegalize = truthy(synth_set(opts, "place.satlegalize", "false"));
-  auto& sat       = out.satlegalize_options;
-  sat.backend     = synth_set(opts, "place.satlegalize.backend", "cadical");
-  sat.encoding    = synth_set(opts, "place.satlegalize.encoding", "candidate");
+  out.satlegalize              = truthy(synth_set(opts, "place.satlegalize", "false"));
+  out.satlegalize_route        = truthy(synth_set(opts, "place.satlegalize.route", "false"));
+  if (out.satlegalize_route && !out.satlegalize) {
+    throw Lhd_error{"usage", "synth.place.satlegalize.route requires synth.place.satlegalize", ""};
+  }
+  out.satlegalize_pg_after = truthy(synth_set(opts, "place.satlegalize.route.pg_after", "false"));
+  if (out.satlegalize_pg_after && !out.satlegalize_route) {
+    throw Lhd_error{"usage", "synth.place.satlegalize.route.pg_after requires synth.place.satlegalize.route", ""};
+  }
+  out.satlegalize_route_vias = truthy(synth_set(opts, "place.satlegalize.route.vias", "false"));
+  if (out.satlegalize_route_vias && !out.satlegalize_route) {
+    throw Lhd_error{"usage", "synth.place.satlegalize.route.vias requires synth.place.satlegalize.route", ""};
+  }
+  out.satlegalize_route_critical_fraction = number("place.satlegalize.route.critical_fraction", "0.10");
+  if (!std::isfinite(out.satlegalize_route_critical_fraction) || out.satlegalize_route_critical_fraction < 0
+      || out.satlegalize_route_critical_fraction > 1) {
+    throw Lhd_error{"usage", "invalid synth.place.satlegalize.route.critical_fraction", "expected a fraction in 0..1"};
+  }
+  out.preroute.enabled       |= out.satlegalize_route;
+  out.retain_preroute_design |= out.satlegalize_route;
+  auto& sat                   = out.satlegalize_options;
+  sat.backend                 = synth_set(opts, "place.satlegalize.backend", "cadical");
+  sat.encoding                = synth_set(opts, "place.satlegalize.encoding", "candidate");
   if ((sat.backend != "cadical" && sat.backend != "cms-cnf" && sat.backend != "cms-xor")
       || (sat.encoding != "candidate" && sat.encoding != "binary")) {
     throw Lhd_error{"usage",
@@ -959,7 +1011,17 @@ void synth_command(Options& opts, Result& res) {
   // and GP-only commands do not enter the full-placement refinement loop.
   const bool run_timing_place = truthy(synth_set(opts, "place.timing_driven", run_place && place_options.full ? "true" : "false"));
   const bool macro_plan_only  = run_place && place_options.full && !place_options.final_cells;
-  const int  timing_rounds    = std::stoi(synth_set(opts, "place.timing_rounds", "3"));
+  if ((truthy(synth_set(opts, "place.preroute", "false")) || truthy(synth_set(opts, "place.satlegalize.route", "false")))
+      && (!run_place || !run_sta || !place_options.full || macro_plan_only || !place_options.handoff_taps
+          || place_options.pg == "none" || place_options.pg == "off")) {
+    throw Lhd_error{"usage", "pre-routing requires final full placement, timing, handoff taps and native power grid", ""};
+  }
+  if (synth_set(opts, "place.pg.channel.patches", "").find_first_not_of(" \t\n\r\f\v") != std::string::npos
+      && (!run_place || !place_options.full || macro_plan_only || !place_options.handoff_taps || place_options.pg == "none"
+          || place_options.pg == "off")) {
+    throw Lhd_error{"usage", "PG channels require final full placement, handoff taps and native power grid", ""};
+  }
+  const int timing_rounds = std::stoi(synth_set(opts, "place.timing_rounds", "3"));
   if (timing_rounds < 1 || timing_rounds > 8) {
     throw Lhd_error{"usage", "synth.place.timing_rounds expects 1..8", ""};
   }
@@ -1139,7 +1201,7 @@ void synth_command(Options& opts, Result& res) {
   opts.top = top;
 
   std::unique_ptr<Physical_cache> physical_cache;
-  if (user_workdir && opts.incremental && run_place && place_options.full && io_store) {
+  if (user_workdir && opts.incremental && run_place && place_options.full && (io_store || place_options.preroute.enabled)) {
     auto        dependencies = place_options.lefs;
     std::string libraries    = liberty;
     std::replace(libraries.begin(), libraries.end(), ',', ' ');
@@ -1405,6 +1467,7 @@ void synth_command(Options& opts, Result& res) {
   hhds::GraphLibrary                  placed_library;
   std::unique_ptr<hhds::GraphLibrary> restored_library;
   std::unique_ptr<hhds::GraphLibrary> retry_library;
+  std::shared_ptr<hhds::GraphLibrary> preroute_library;
   livehd::placement::Repair_result    repaired;
   livehd::placement::Repair_result    design_repaired;
   livehd::placement::Repair_result    timed_placement;
@@ -1426,16 +1489,26 @@ void synth_command(Options& opts, Result& res) {
           throw Lhd_error{"internal", "completed placement has no repaired top", restored_net};
         }
         net.graphs = {io->get_graph()};
-        restored_library->save(net_dir);
-        const auto io_path  = root + "/place/io_resynth.json";
-        const auto feedback = restored_io_report(slurp_json(io_path));
-        std::ofstream(io_path) << feedback << '\n';
-        rapidjson::Document q, io_report;
+        rapidjson::Document q;
         q.Parse(slurp_json(place_qor_path).c_str());
-        io_report.Parse(feedback.c_str());
         if (q.HasParseError() || !q.IsObject()) {
           throw Lhd_error{"internal", "completed placement has invalid QoR", place_qor_path};
         }
+        if (place_options.preroute.enabled && q.HasMember("preroute") && q["preroute"].IsObject()
+            && q["preroute"].HasMember("accepted_nets") && q["preroute"]["accepted_nets"].IsUint64()
+            && q["preroute"]["accepted_nets"].GetUint64() != 0) {
+          auto       frame    = livehd::physical::read_def(root + "/place/out.def");
+          const auto fixed    = std::count_if(frame.nets.begin(), frame.nets.end(), [](const auto& n) {
+            return std::any_of(n.wires.begin(), n.wires.end(), [](const auto& w) { return w.type == "FIXED"; });
+          });
+          const auto replayed = livehd::physical::replay_routes(*io->get_graph(),
+                                                                frame,
+                                                                livehd::physical::route_technology_identity(place_options.lefs));
+          if (replayed != static_cast<size_t>(fixed)) {
+            throw Lhd_error{"internal", "completed placement graph/DEF routes disagree", restored_net};
+          }
+        }
+        restored_library->save(net_dir);
         auto& a = q.GetAllocator();
         if (q.HasMember("incremental") && q["incremental"].IsObject()) {
           auto& incremental = q["incremental"];
@@ -1443,15 +1516,22 @@ void synth_command(Options& opts, Result& res) {
             incremental["hit"].SetBool(true);
           }
         }
-        q.RemoveMember("io_resynth");
-        q.AddMember("io_resynth", rapidjson::Value(io_report, a), a);
+        if (io_store) {
+          const auto io_path  = root + "/place/io_resynth.json";
+          const auto feedback = restored_io_report(slurp_json(io_path));
+          std::ofstream(io_path) << feedback << '\n';
+          rapidjson::Document io_report;
+          io_report.Parse(feedback.c_str());
+          q.RemoveMember("io_resynth");
+          q.AddMember("io_resynth", rapidjson::Value(io_report, a), a);
+          res.outputs.push_back(io_path);
+        }
         q.AddMember("reused_final_state", true, a);
         rapidjson::StringBuffer                    buffer;
         rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
         q.Accept(writer);
         place_qor = buffer.GetString();
         res.recipe_steps.emplace_back("pass.place.restore");
-        res.outputs.push_back(io_path);
         res.outputs.push_back(net_dir);
       }
     }
@@ -1463,6 +1543,11 @@ void synth_command(Options& opts, Result& res) {
       }
       place_options.liberty    = liberty;
       place_options.output_dir = root + "/place";
+      // These optional final-stage reports belong to this invocation, not a
+      // prior routing policy in the reused workdir. Cache hits restore their
+      // own reports above; recomputation must only publish newly produced ones.
+      fs::remove(fs::path(place_options.output_dir) / "preroute.json");
+      fs::remove(fs::path(place_options.output_dir) / "power_grid.json");
       if (user_workdir && opts.incremental) {
         place_options.cache_dir = opts.workdir + "/place_cache";
       }
@@ -1697,6 +1782,21 @@ void synth_command(Options& opts, Result& res) {
           placed.qor = buffer.GetString();
         }
         res.outputs.push_back(root + "/place/io_resynth.json");
+      }
+      if (place_options.preroute.enabled) {
+        const auto  previous_owner = placed.fp_library;
+        Phase_timer phase(res, "pass.place.preroute");
+        const auto  preroute_log = next_log_path(opts, "pass.place.preroute");
+        try {
+          Stdout_to_log redirect(preroute_log);
+          livehd::placement::preroute_placed(placed, place_options, evaluate);
+          preroute_library = placed.fp_library;
+          net.graphs       = {placed.graph};
+        } catch (const std::exception& error) {
+          throw Lhd_error{"unsupported", std::string("pre-routing failed: ") + error.what(), "see " + preroute_log};
+        }
+        res.recipe_steps.emplace_back("pass.place.preroute");
+        res.outputs.push_back(root + "/place/preroute.json");
       }
       net.physical_rc = placed.parasitics;
       place_qor       = placed.qor;

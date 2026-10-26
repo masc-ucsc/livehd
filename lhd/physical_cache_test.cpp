@@ -21,6 +21,8 @@ protected:
     write("net/graph/body.bin", "repaired masters, connectivity, positions and RC");
     write("place/out.def", "final DEF");
     write("place/qor.json", "{}");
+    write("place/preroute.json", "{\"accepted_nets\":1,\"vias\":2}");
+    write("place/power_grid.json", "{\"profile\":\"pg_asap7\",\"channels\":[]}");
     write("place/route_options.json", "{\"global_model\":\"auto\"}");
     write("place/sat_route_grid.json", "{\"bins_x\":128,\"horizontal\":[0.5]}");
     write("place/sat_route_guard.json", "{\"accepted\":true}");
@@ -60,8 +62,8 @@ TEST_F(PhysicalCache, RestoresTheCompleteRepairedGenerationAcrossFreshInstances)
     EXPECT_EQ((std::string{std::istreambuf_iterator<char>(guard), {}}), "{\"accepted\":true}");
     std::ifstream timing(root / "restored/place/io_resynth.json");
     EXPECT_EQ((std::string{std::istreambuf_iterator<char>(timing), {}}), "{\"boundary_ps\":213.3134765625}");
-    for (const auto* name :
-         {"magnet.json", "macro_animation.html", "macro/fixed.def", "macro/gp_history.json", "macro/gp_history.jsonl"}) {
+    for (const auto* name : {"preroute.json", "power_grid.json", "magnet.json", "macro_animation.html", "macro/fixed.def",
+                             "macro/gp_history.json", "macro/gp_history.jsonl"}) {
       std::ifstream original(root / "place" / name), restored(root / "restored/place" / name);
       ASSERT_TRUE(restored) << name;
       EXPECT_EQ((std::string{std::istreambuf_iterator<char>(original), {}}),
@@ -81,6 +83,28 @@ TEST_F(PhysicalCache, RejectsEditedDesignAttributesOptionsAndTimingBytes) {
   write("compiled/graph/body.bin", "changed physical/synthesis policy attribute");
   EXPECT_FALSE(cache().restore(root / "restored/net", root / "restored/place"));
   EXPECT_FALSE(fs::exists(root / "restored/net"));
+}
+
+TEST_F(PhysicalCache, RejectsCorruptedPrerouteReportBeforeRestoringGeometry) {
+  cache().publish(root / "net", root / "place");
+  write("cache/artifacts/place/preroute.json", "{\"accepted_nets\":0}");
+  EXPECT_FALSE(cache().restore(root / "restored/net", root / "restored/place"));
+  EXPECT_FALSE(fs::exists(root / "restored/net"));
+  EXPECT_FALSE(fs::exists(root / "restored/place/out.def"));
+}
+
+TEST_F(PhysicalCache, RestoringWithoutPrerouteDropsStaleManagedReports) {
+  fs::remove(root / "place/preroute.json");
+  fs::remove(root / "place/power_grid.json");
+  cache().publish(root / "net", root / "place");
+  write("restored/place/preroute.json", "stale accepted routes");
+  write("restored/place/power_grid.json", "stale grid channels");
+  write("restored/place/notes.txt", "unmanaged caller output");
+  ASSERT_TRUE(cache().restore(root / "restored/net", root / "restored/place"));
+  EXPECT_FALSE(fs::exists(root / "restored/place/preroute.json"));
+  EXPECT_FALSE(fs::exists(root / "restored/place/power_grid.json"));
+  EXPECT_TRUE(fs::exists(root / "restored/place/notes.txt"));
+  EXPECT_TRUE(fs::exists(root / "restored/place/out.def"));
 }
 
 TEST_F(PhysicalCache, RejectsPartialCorruptAndUnexpectedArtifactsBeforeRestore) {

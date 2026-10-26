@@ -79,6 +79,7 @@ struct Ictx {
   std::string                                                  prefix;            // dotted instance path ("" for top)
   std::string                                                  inherited_color_group;
   uint32_t                                                     synth_region_id = 0;
+  bool                                                         preroute_excluded = false;
   std::shared_ptr<const livehd::partition::Flat_instance_path> instance;
 
   absl::flat_hash_map<hhds::Node_class, hhds::Node_class> node_map;   // src node -> flat node (cloned nodes only)
@@ -153,7 +154,7 @@ private:
 
   [[nodiscard]] hhds::Pin_class resolve_driver(Ictx* ctx, const hhds::Pin_class& d);
   [[nodiscard]] hhds::Pin_class resolve_output_of(Ictx* cctx, std::string_view oname);
-  [[nodiscard]] hhds::Pin_class apply_port_shape(const hhds::Pin_class& source, const Port_shape& shape);
+  [[nodiscard]] hhds::Pin_class apply_port_shape(const hhds::Pin_class& source, const Port_shape& shape, bool preroute_excluded);
 
   void carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const hhds::Node_class& neo);
   void carry_driver_attrs(Ictx* ctx, const hhds::Pin_class& orig, const hhds::Pin_class& neo);
@@ -210,6 +211,8 @@ Ictx* Flattener::make_ctx(hhds::Graph* src, Ictx* parent, const hhds::Node_class
     }
   }
   auto input = src->get_input_node();
+  c.preroute_excluded = input.attr(livehd::attrs::preroute_exclude).has()
+                     || (parent && (parent->preroute_excluded || inst.attr(livehd::attrs::preroute_exclude).has()));
   if (auto id = input.attr(livehd::attrs::synth_region_id); id.has()) {
     c.synth_region_id = id.get();
   }
@@ -246,7 +249,7 @@ Ictx* Flattener::make_ctx(hhds::Graph* src, Ictx* parent, const hhds::Node_class
 //     COUNT, see inou/cgen and pass/lec/encode). Get_mask would instead turn a
 //     -1 into 2^bits-1, so a signed narrowing/widening cast through it changes
 //     the value every arithmetic consumer then reads.
-hhds::Pin_class Flattener::apply_port_shape(const hhds::Pin_class& source, const Port_shape& shape) {
+hhds::Pin_class Flattener::apply_port_shape(const hhds::Pin_class& source, const Port_shape& shape, bool preroute_excluded) {
   admit("flatten-apply_port_shape");
   if (source.is_invalid() || shape.bits == 0) {
     return source;
@@ -257,6 +260,9 @@ hhds::Pin_class Flattener::apply_port_shape(const hhds::Pin_class& source, const
 
   if (!shape.unsign) {
     auto adapter = gu::create_typed_node(*flat_, Ntype_op::Sext);
+    if (preroute_excluded) {
+      adapter.attr(livehd::attrs::preroute_exclude).set();
+    }
     source.connect_sink(gu::setup_sink_by_name(adapter, "a"));
     gu::create_const(*flat_, *Dlop::create_integer(static_cast<int64_t>(shape.bits)))
         .connect_sink(gu::setup_sink_by_name(adapter, "b"));
@@ -266,6 +272,9 @@ hhds::Pin_class Flattener::apply_port_shape(const hhds::Pin_class& source, const
   }
 
   auto adapter = gu::create_get_mask(*flat_, source, 0, static_cast<int>(shape.bits));
+  if (preroute_excluded) {
+    adapter.attr(livehd::attrs::preroute_exclude).set();
+  }
   auto result  = adapter.create_driver_pin(0);
   gu::set_ubits(result, static_cast<int32_t>(shape.bits));
   return result;
@@ -273,6 +282,9 @@ hhds::Pin_class Flattener::apply_port_shape(const hhds::Pin_class& source, const
 
 void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const hhds::Node_class& neo) {
   admit("flatten-carry_node_attrs");
+  if (ctx->preroute_excluded || orig.attr(livehd::attrs::preroute_exclude).has()) {
+    neo.attr(livehd::attrs::preroute_exclude).set();
+  }
   if (auto a = orig.attr(livehd::attrs::synth_color_group); a.has()) {
     neo.attr(livehd::attrs::synth_color_group).set(ctx->prefix + std::string(a.get()));
   } else if (!ctx->inherited_color_group.empty()) {
@@ -521,7 +533,7 @@ hhds::Pin_class Flattener::resolve_driver(Ictx* ctx, const hhds::Pin_class& d) {
             res = resolve_driver(ctx->parent, eit->second);
           }
           if (auto sit = ctx->in_name2shape.find(std::string{gu::pin_name_of(d)}); sit != ctx->in_name2shape.end()) {
-            res = apply_port_shape(res, sit->second);
+            res = apply_port_shape(res, sit->second, ctx->preroute_excluded);
           }
         }
       }
@@ -545,7 +557,11 @@ hhds::Pin_class Flattener::resolve_driver(Ictx* ctx, const hhds::Pin_class& d) {
 
   ctx->resolving.erase(d);
   if (!res.is_invalid()) {
+    if (ctx->preroute_excluded && !res.is_const()) {
+      res.attr(livehd::attrs::preroute_net_exclude).set();
+    }
     gu::carry_signal_roles(d, res);
+    gu::carry_preroute_exclusion(d, res);
     ctx->pin_cache[d] = res;
   }
   return res;
@@ -572,7 +588,7 @@ hhds::Pin_class Flattener::resolve_output_of(Ictx* cctx, std::string_view oname)
     source = resolve_driver(cctx, drv);
   }
   if (auto sit = cctx->out_name2shape.find(std::string{oname}); sit != cctx->out_name2shape.end()) {
-    source = apply_port_shape(source, sit->second);
+    source = apply_port_shape(source, sit->second, cctx->preroute_excluded);
   }
   return source;
 }

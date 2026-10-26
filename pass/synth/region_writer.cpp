@@ -1883,6 +1883,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   }
   trace_stage("readback-fanins");
 
+  std::vector<hhds::Pin_class> preroute_roots, preroute_cuts;
   for (const auto& control : blast.control_signals) {
     if (control.output >= mapped.outputs.size()) {
       throw std::runtime_error("mapped control-role output is missing");
@@ -1892,7 +1893,17 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       throw std::runtime_error("mapped control-role output has no driver");
     }
     gu::add_signal_roles(driver, control.roles);
+    if (control.preroute_excluded && !driver.is_const()) {
+      driver.attr(attrs::preroute_net_exclude).set();
+    }
+    if (control.preroute_root) {
+      preroute_roots.push_back(driver);
+    }
+    if (control.preroute_cut) {
+      preroute_cuts.push_back(driver);
+    }
   }
+  mark_preroute_cones(preroute_roots, preroute_cuts);
 
   // pass 3: POs -> reassemble multi-bit outputs (one Concat). Match by
   // creation order (po_order), consistent with the PI readback.

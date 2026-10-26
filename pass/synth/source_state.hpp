@@ -2,6 +2,7 @@
 #pragma once
 
 #include <memory>
+#include <functional>
 #include <span>
 #include <string>
 #include <vector>
@@ -80,11 +81,20 @@ struct State_control {
   std::vector<uint32_t> outputs;
 };
 
-// Role metadata refers to protected output positions, never unstable Lnet IDs.
+// Signal roles and routing exclusions refer to preserved output positions,
+// never unstable Lnet IDs. Routing-only entries have roles == 0.
 struct Control_signal {
   uint32_t output = 0;
   uint8_t  roles  = 0;
+  bool     preroute_excluded = false;
+  bool     preroute_root = false;
+  bool     preroute_cut = false;
 };
+
+// Mark mapped nets between protected logical outputs and their input cuts.
+// Returns false on admission refusal; callers discard the partial graph.
+bool mark_preroute_cones(std::span<const hhds::Pin_class> roots, std::span<const hhds::Pin_class> cuts,
+                        const std::function<bool()>& admit = {});
 
 struct Source_state_table {
   std::string                    source_graph;

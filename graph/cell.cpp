@@ -12,8 +12,9 @@ namespace {
 //
 // The tag list is LIVEHD_FOR_EACH_ATTR_TAG (graph/attrs.hpp): this block and
 // graph/attr_carry.hpp both expand it, so a tag added there is registered here
-// AND carried by every graph->graph rebuild (legalize, flatten, inline_sub,
-// occurrence materialize) with nothing to keep in step by hand. The HHDS
+// AND considered by every graph->graph rebuild (legalize, flatten, inline_sub,
+// occurrence materialize); tags such as physical routes explicitly invalidate
+// through carry_on_rebuild rather than copying stale geometry. The HHDS
 // attribute registry is not thread-safe on first-touch (two threads
 // racing to register the same tag both find the registry empty and try
 // to insert). Pre-registering before main() keeps the lazy attr() path
@@ -127,8 +128,8 @@ Ntype::_init::_init() {
 constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id pid) {
   switch (op) {
     case Ntype_op::Invalid: return "invalid"; break;
-    case Ntype_op::Sum    :
-    case Ntype_op::LT     :
+    case Ntype_op::Sum:
+    case Ntype_op::LT:
     case Ntype_op::GT:
       // a,b are multi-driver sinks (drivers folded: Sum sums, LT/GT reduce) ->
       // 's'-suffixed names. Keep in sync with Ntype::is_sink_single_driver.
@@ -140,10 +141,10 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       return "invalid";
       break;
     case Ntype_op::Mult:
-    case Ntype_op::And :
-    case Ntype_op::Or  :
-    case Ntype_op::Xor :
-    case Ntype_op::Ror :
+    case Ntype_op::And:
+    case Ntype_op::Or:
+    case Ntype_op::Xor:
+    case Ntype_op::Ror:
     case Ntype_op::EQ:
       // single multi-driver sink a -> "as".
       if (pid == 0) {
@@ -157,12 +158,12 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
       }
       return "invalid";
       break;
-    case Ntype_op::Rxor    :
+    case Ntype_op::Rxor:
     case Ntype_op::Popcount:
-    case Ntype_op::Sext    :
-    case Ntype_op::Div     :
-    case Ntype_op::Rem     :
-    case Ntype_op::SRA     :
+    case Ntype_op::Sext:
+    case Ntype_op::Div:
+    case Ntype_op::Rem:
+    case Ntype_op::SRA:
     case Ntype_op::SHL:
       // a,b are single-driver positional operands -> plain names. (SHL no longer
       // folds multiple one-hot shift amounts on b; that runtime form was
@@ -180,9 +181,9 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
         return "s";
       }
       [[fallthrough]];
-    case Ntype_op::IO    :
-    case Ntype_op::LUT   :  // unlimited case: 1,2,3,4,5....
-    case Ntype_op::Sub   :  // unlimited case: 1,2,3,4,5....
+    case Ntype_op::IO:
+    case Ntype_op::LUT:     // unlimited case: 1,2,3,4,5....
+    case Ntype_op::Sub:     // unlimited case: 1,2,3,4,5....
     case Ntype_op::Hotmux:  // (control, value) pairs, optional trailing default
     case Ntype_op::Concat:  // unlimited case: INTERLEAVED (value, width) pairs;
                             // lane i at 2i/2i+1
@@ -225,24 +226,25 @@ constexpr std::string_view Ntype::get_sink_name_slow(Ntype_op op, hhds::Port_id 
         case 3: return "din";        // runtime  x n_ports
         case 4: return "enable";     // runtime  x n_ports
         case 5:
-          return "fwd";             // comptime x 1 -- per-(READ-port,WRITE-port) forwarding
-                                    // MATRIX: bit (r*n_wr + w) set => read port r sees write
-                                    // port w's new data on a same-cycle same-address collision
-                                    // (r/w = read/write ordinals, n_wr = the cell's TOTAL
-                                    // write-port count). A zero row => that read returns the
-                                    // committed contents. A 1-read-port memory encodes
-                                    // bit-identically to the old per-write-port mask. Built
-                                    // from the Pyrope `ordering` attr: "program" => row r is
-                                    // the PREFIX of writes preceding read r in program order;
-                                    // "fwd" => all ones; "none" => all zeros.
-        case 6 : return "posclk";   // comptime x 1
-        case 7 : return "type";     // comptime x 1 (0:async, 1:sync: 2:array)
-        case 8 : return "wensize";  // comptime x 1  -- number of Write Enable bits
-        case 9 : return "size";     // comptime x 1
-        case 10: return "rdport";   // comptime x n_ports: 0 wr, 1 async rd, 2 sync rd
-                                    // (see Ntype::Memory_rdport_*; widened from a
-                                    // boolean so read timing is per PORT, because
-                                    // the cell-global `type` cannot express a mix)
+          return "fwd";            // comptime x 1 -- per-(READ-port,WRITE-port) forwarding
+                                   // MATRIX: bit (r*n_wr + w) set => read port r sees write
+                                   // port w's new data on a same-cycle same-address collision
+                                   // (r/w = read/write ordinals, n_wr = the cell's TOTAL
+                                   // write-port count). A zero row => that read returns the
+                                   // committed contents. A 1-read-port memory encodes
+                                   // bit-identically to the old per-write-port mask. Built
+                                   // from the Pyrope `ordering` attr: "program" => row r is
+                                   // the PREFIX of writes preceding read r in program order;
+                                   // "fwd" => all ones; "none" => all zeros.
+        case 6: return "posclk";   // comptime x 1
+        case 7: return "type";     // comptime x 1 (0:async, 1:sync: 2:array)
+        case 8: return "wensize";  // comptime x 1  -- number of Write Enable bits
+        case 9: return "size";     // comptime x 1
+        case 10:
+          return "rdport";  // comptime x n_ports: 0 wr, 1 async rd, 2 sync rd
+                            // (see Ntype::Memory_rdport_*; widened from a
+                            // boolean so read timing is per PORT, because
+                            // the cell-global `type` cannot express a mix)
         case 11:
           // A string command (hlop::memory_image) instead denotes a startup
           // file preload and externally initialized state, NEVER reset bits.

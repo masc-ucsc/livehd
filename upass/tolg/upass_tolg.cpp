@@ -1041,6 +1041,12 @@ public:
     // JSON's "region_opts" member is what pass.abc reads for per-region ABC
     // options; the node colors themselves were stamped by make_node.
     apply_synth_targets();
+    for (auto node : g_->body().nodes()) {
+      if (const auto policy = node.attr(livehd::attrs::synth_policy); policy.has()
+          && livehd::synth_attr::get(livehd::synth_attr::read(policy.get()), "preroute_exclude") == "true") {
+        node.attr(livehd::attrs::preroute_exclude).set();
+      }
+    }
     write_region_info();
   }
 
@@ -1093,6 +1099,10 @@ private:
   }
 
   void record(std::string_view name_in, const Pin& pin, int32_t mw) {
+    if (!pin.is_invalid() && !pin.is_const() && livehd::graph_util::is_graph_input_pin(pin)
+        && livehd::synth_attr::get(cur_synth_, "preroute_exclude") == "true") {
+      pin.attr(livehd::attrs::preroute_net_exclude).set();
+    }
     std::string_view name = canon_io_name(name_in);
     std::string      key{name};
     if (!branch_writes_.empty()) {
@@ -1917,7 +1927,7 @@ private:
           // Operation pins (adder, ...) stay in cur_synth_ and apply to the
           // spliced cells, which are lexically part of this scope.
           livehd::synth_attr::Policy ambient;
-          for (const auto* key : {"color", "grow", "_path"}) {
+          for (const auto* key : {"color", "grow", "preroute_exclude", "_path"}) {
             if (auto it = cur_synth_.find(key); it != cur_synth_.end()) {
               ambient.emplace(*it);
             }
@@ -2202,6 +2212,10 @@ private:
       size_t                                attributed = 0;
       for (size_t i = 0; i < roots.size(); ++i) {
         auto pin = roots[i];
+        if (!pin.is_invalid() && !pin.is_const() && livehd::graph_util::is_graph_input_pin(pin)
+            && livehd::synth_attr::get(hints, "preroute_exclude") == "true") {
+          pin.attr(livehd::attrs::preroute_net_exclude).set();
+        }
         if (pin.is_invalid() || pin.is_const() || livehd::graph_util::is_graph_input_pin(pin)) {
           continue;
         }

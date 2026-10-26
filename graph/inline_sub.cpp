@@ -235,6 +235,10 @@ private:
 };
 
 void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Node_class& neo) {
+  if (orig.attr(livehd::attrs::preroute_exclude).has() || inst_.attr(livehd::attrs::preroute_exclude).has()
+      || child_->get_input_node().attr(livehd::attrs::preroute_exclude).has()) {
+    neo.attr(livehd::attrs::preroute_exclude).set();
+  }
   const auto op = type_op_of(orig);
   auto policy = orig.attr(livehd::attrs::synth_policy).has() ? synth_attr::read(orig.attr(livehd::attrs::synth_policy).get()) : synth_attr::Policy{};
   if (auto a = inst_.attr(livehd::attrs::synth_policy); a.has()) {auto call=synth_attr::read(a.get()); if(!call.contains("_specialized")) synth_attr::rescope(policy,call);}
@@ -325,6 +329,7 @@ void Sub_inliner::carry_node_attrs(const hhds::Node_class& orig, const hhds::Nod
 
 void Sub_inliner::carry_driver_attrs(const hhds::Pin_class& orig, const hhds::Pin_class& neo) {
   carry_signal_roles(orig, neo);
+  carry_preroute_exclusion(orig, neo);
   if (auto b = bits_of(orig); b != 0) {
     set_bits(neo, b);
   }
@@ -445,6 +450,10 @@ void Sub_inliner::fit_boundary() {
 // One fit node in the parent, colored like a clone of the body would be.
 hhds::Pin_class Sub_inliner::add_fit(const hhds::Pin_class& driver, int bits, bool is_signed) {
   auto fitted = fit_to_port(*parent_, driver, bits, is_signed);
+  if (fitted != driver && (inst_.attr(livehd::attrs::preroute_exclude).has()
+                           || child_->get_input_node().attr(livehd::attrs::preroute_exclude).has())) {
+    fitted.get_master_node().attr(livehd::attrs::preroute_exclude).set();
+  }
   if (inherit_color_ && has_color(inst_)) {
     set_color(fitted.get_master_node(), color_of(inst_));
   }
@@ -671,8 +680,13 @@ hhds::Pin_class Sub_inliner::resolve_driver(const hhds::Pin_class& d) {
     }
   }
   if (!res.is_invalid()) {
+    if (!res.is_const() && (inst_.attr(livehd::attrs::preroute_exclude).has()
+                           || child_->get_input_node().attr(livehd::attrs::preroute_exclude).has())) {
+      res.attr(livehd::attrs::preroute_net_exclude).set();
+    }
     for (const auto& pin : path) {
       carry_signal_roles(pin, res);
+      carry_preroute_exclusion(pin, res);
       pin_cache_[pin] = res;
     }
   }

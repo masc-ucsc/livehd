@@ -21,6 +21,8 @@
 #include "hhds/graph.hpp"
 #include "inou/lefdef/physical.hpp"
 #include "rc_cache.hpp"
+#include "power_grid.hpp"
+#include "preroute_design.hpp"
 #include "satlegalize.hpp"
 #include "terminal_legalize.hpp"
 #include "warpspace.hpp"
@@ -60,6 +62,14 @@ struct Gp_observation {
   std::optional<Rc_reuse_stats> rc_reuse;
   bool                          rc_reuse_verified = false;
 };
+struct Preroute_settings {
+  bool        enabled         = false;
+  double      setup_margin_ps = 20, hold_margin_ps = -1, nominal_slew_ps = 20;
+  double      capacity_fraction = .30;
+  std::string hold_buffer       = "auto";
+  int         budget_ms = 10, stage_budget_ms = 10000, bins = 64;
+  int         max_rows = 0, max_sites = 0;  // Zero leaves original-net pin spans unlimited.
+};
 struct Options {
   // Experimental native fixed-footprint checkpoint binding; absent preserves
   // the existing flow. Requires the native per-pin timing dependency API.
@@ -68,6 +78,11 @@ struct Options {
   // timing and fillers; refreshes source/LR state after all timing gates pass.
   std::shared_ptr<const buffering::Checkpoint_settings>  native_gp_buffering;
 
+  Preroute_settings                                   preroute;
+  std::vector<Pg_channel>                             pg_channels;  // Opt-in patches; reference grid by default.
+  std::optional<double>                               pg_channel_max_ir_drop_v;
+  // Internal host handoff, collected only for a completed final placement.
+  bool                                                retain_preroute_design = false;
   // Diagnostic-only, synchronous observation; never supplies optimizer feedback.
   std::function<void(const Result&, const Gp_observation&)> gp_observer;
   int                                                       gp_observer_interval  = 0;
@@ -113,7 +128,9 @@ struct Options {
   unsigned                          legalize_timing_corrections = 0;
   // Internal lifecycle state: optimization trials need legal snapshots before
   // the mandatory final legalization. Never exposed as a user option.
-  bool                              optimization_pending        = false;
+  bool                                  optimization_pending        = false;
+  bool                              handoff_taps                = false;  // ASAP7 fixed taps before terminal legalization
+  std::string                       pg                          = "none";  // opt-in native power-grid profile
   Busorder_options                  busorder;
   Boundary_pin_options              boundarypins;
   Cell_jump_options                 cell_jump;                            // diagnostic: extend a supplied distance-one seed
@@ -231,8 +248,12 @@ struct Options {
   bool                retain_placement      = false;
   // Try nearest-whitespace placement of edited/new cells before windowed GP.
   bool                legalize_cells        = false;
-  bool                satlegalize           = false;
-  Satlegalize_options satlegalize_options;
+  bool                                 satlegalize           = false;
+  bool                                 satlegalize_route     = false;
+  bool                                 satlegalize_pg_after  = false;
+  bool                                 satlegalize_route_vias              = false;
+  double                               satlegalize_route_critical_fraction = .10;
+  Satlegalize_options                  satlegalize_options;
   // Opt-in: an unknown (X) constant bit that reaches a physical net is a synthesis
   // don't-care (`assign y = 'x`), so any value is a legal refinement; tie it low
   // instead of refusing the placement. Off keeps the refusal.
@@ -249,6 +270,7 @@ struct Macro_gp_timing {
   std::map<std::string, std::pair<double, double>> pin_locations;
 };
 struct Result {
+  std::shared_ptr<const Preroute_design>           preroute_design;
   unsigned                                         fp_resized_cells = 0, fp_repair_edits = 0;
   // Unknown constant bits tied low under Options::unknown_const_zero (zero otherwise).
   size_t                                           unknown_const_tied = 0;

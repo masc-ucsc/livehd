@@ -102,7 +102,7 @@ protected:
     table.control_signals = {
         {2, attrs::signal_clock},
         {3, attrs::signal_reset},
-        {4, attrs::signal_reset}
+        {4, attrs::signal_reset, true, true, true}
     };
   }
   void TearDown() override { diag::sink().clear(); }
@@ -167,6 +167,10 @@ TEST_F(Artifact, RoundTripPreservesFullSourceMetadataFunctionsAndCmosEmission) {
   ASSERT_EQ(copy.source.control_signals.size(), 3);
   EXPECT_EQ(copy.source.control_signals[1].output, 3);
   EXPECT_EQ(copy.source.control_signals[1].roles, attrs::signal_reset);
+  EXPECT_TRUE(copy.source.control_signals[2].preroute_excluded);
+  EXPECT_TRUE(copy.source.control_signals[2].preroute_root);
+  EXPECT_TRUE(copy.source.control_signals[2].preroute_cut);
+  EXPECT_FALSE(copy.source.control_signals[1].preroute_excluded);
   const auto expanded = expand_endpoint_netlist(copy.netlist, work);
   ASSERT_EQ(expanded.status, Status::feasible) << expanded.reason;
   for (uint32_t x = 0; x < 64; ++x) {
@@ -178,6 +182,9 @@ TEST_F(Artifact, RoundTripPreservesFullSourceMetadataFunctionsAndCmosEmission) {
   for (const auto& signal : copy.source.control_signals) {
     auto pin = emitted.module->graph->get_output_pin(emitted.module->outputs.at(signal.output)).get_driver_pin();
     EXPECT_EQ(graph_util::signal_roles_of(pin) & signal.roles, signal.roles);
+    if (signal.preroute_excluded) {
+      EXPECT_TRUE(graph_util::preroute_net_excluded(pin));
+    }
   }
   const auto saved_again = serialize_artifact(copy, work);
   ASSERT_EQ(saved_again.status, Status::feasible) << saved_again.reason;

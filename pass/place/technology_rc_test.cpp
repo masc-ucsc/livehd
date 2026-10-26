@@ -143,9 +143,7 @@ TEST_F(Technology_rc, DistanceUnitsNormalizePerLengthValues) {
 TEST(Steiner_rc, NetsBeyondFluteDegreeAreTreesNotStars) {
   // 1500 sinks on a 1 um pitch line, driver at one end: a Steiner tree has
   // about 1500 um of wire; a star from the driver would have about 1.1 m.
-  std::vector<std::pair<std::string, std::pair<double, double>>> pins{
-      {"drv:Y", {0, 0}}
-  };
+  std::vector<std::pair<std::string, std::pair<double, double>>> pins{{"drv:Y", {0, 0}}};
   for (int i = 1; i <= 1500; ++i) {
     pins.emplace_back("s" + std::to_string(i) + ":A", std::pair{1000.0 * i, 1000.0 * (i % 3)});
   }
@@ -188,4 +186,46 @@ TEST(Steiner_rc, NetsBeyondFluteDegreeAreTreesNotStars) {
   }
 }
 }  // namespace
+TEST_F(Technology_rc, RoutedLayersRetainTheirOwnRcAndLumpedCutResistance) {
+  tech.cut_layers["V2"].width   = .018;
+  tech.vias["VIA23"].resistance = 9;
+  const auto file               = write("routed.tcl", R"(set_cmd_units -resistance kohm -capacitance pf -distance nm
+set_layer_rc -layer M2 -resistance .002 -capacitance .000003
+set_layer_rc -layer M3 -resistance .001 -capacitance .000004
+set_layer_rc -via V2 -resistance .007
+set_wire_rc -signal -resistance .010 -capacitance .000009
+)");
+  const auto table              = technology_route_rc(tech, "", file);
+  EXPECT_DOUBLE_EQ(table.layers.at("M2").r, 2000);
+  EXPECT_DOUBLE_EQ(table.layers.at("M2").c, 3);
+  EXPECT_DOUBLE_EQ(table.layers.at("M3").r, 1000);
+  EXPECT_DOUBLE_EQ(table.layers.at("M3").c, 4);
+  EXPECT_DOUBLE_EQ(table.cut_resistance_ohm.at("V2"), 7);
+  EXPECT_DOUBLE_EQ(table.via_resistance_ohm.at("VIA23"), 9);
+  EXPECT_DOUBLE_EQ(technology_wire_rc(tech, "", file).horizontal_r, 10000);
+}
+TEST_F(Technology_rc, GenericSignalDoesNotInventCharacterizedRouteLayers) {
+  const auto file = write("generic.tcl", R"(set_cmd_units -resistance ohm -capacitance ff
+set_wire_rc -signal -resistance 2 -capacitance 3
+)");
+  EXPECT_TRUE(technology_route_rc(tech, "", file).layers.empty());
+  EXPECT_DOUBLE_EQ(technology_wire_rc(tech, "", file).horizontal_c, 3);
+  const auto bad = write("badcut.tcl", R"(set_cmd_units -resistance ohm -capacitance ff
+set_layer_rc -via UNKNOWN -resistance 2
+)");
+  EXPECT_THROW(technology_route_rc(tech, "", bad), std::runtime_error);
+}
+TEST(Steiner_rc, ReportsGeometricLengthIndependentlyOfRcUnits) {
+  const std::vector<std::pair<std::string, std::pair<double, double>>> pins{{"drv:Y", {1000, 1000}},
+                                                                            {"a:A", {4000, 5000}},
+                                                                            {"b:A", {4000, 5000}}};
+  for (double scale : {0., 1., 100.}) {
+    Wire_rc wire;
+    wire.horizontal_r = wire.vertical_r = scale;
+    wire.horizontal_c = wire.vertical_c = scale;
+    const auto rc                       = steiner_rc("drv:Y", pins, wire, 1000);
+    EXPECT_DOUBLE_EQ(rc.wire_length_um, 7);
+  }
+}
+
 }  // namespace livehd::placement

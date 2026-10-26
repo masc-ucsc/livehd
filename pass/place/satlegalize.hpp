@@ -6,11 +6,13 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include "core/timing_feedback.hpp"
 #include "inou/lefdef/physical.hpp"
+#include "inou/lefdef/routing_rules.hpp"
 #include "prects_networks.hpp"
 
 namespace livehd::placement {
@@ -55,13 +57,16 @@ struct Satlegalize_alignment {
 // bounds conservatively index possible common tracks; aligned() below still
 // verifies actual track phase, endpoint obstructions and the full corridor.
 std::vector<physical::Shape> satlegalize_pin_access_bounds(const physical::Technology&, const physical::Component&,
-                                                           const Ann_place&, const std::string& pin, int64_t dbu);
+                                                           const Ann_place&, const std::string& pin, int64_t dbu,
+                                                           bool allow_vias = false);
 // Shared geometric pin-access predicate for the terminal legalizer. Only the
 // supplied installed obstacles participate; unplaced GP cells are excluded.
 bool satlegalize_aligned(const physical::Technology&, const physical::Floorplan&, const Satlegalize_alignment&, const Ann_place&,
-                         const Ann_place&, const std::vector<size_t>& obstacles, physical::Shape* witness = nullptr);
+                         const Ann_place&, const std::vector<size_t>& obstacles, physical::Shape* witness = nullptr,
+                         const physical::Signal_metal_rules* route_rules = nullptr, bool allow_vias = false);
 bool satlegalize_obstructs(const physical::Technology&, const physical::Component&, const Ann_place&,
-                           const physical::Shape& corridor, int64_t dbu);
+                           const physical::Shape& corridor, int64_t dbu, const physical::Signal_metal_rules* route_rules = nullptr,
+                           std::string_view allowed_pin = {});
 struct Satlegalize_checkpoint {
   std::vector<std::pair<size_t, Ann_place>> positions;
 };

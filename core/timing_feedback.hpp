@@ -14,6 +14,7 @@ struct Feedback {
     unsigned              violations        = 0;
     double                electrical_excess = 0;
     bool                  clock             = false;
+    std::optional<double> hold_slack{};  // MIN-corner slack, in time_unit_ps units
   };
   double                     time_unit_ps = 1000;
   std::map<std::string, Pin> pins;

@@ -9,7 +9,7 @@ namespace livehd::usyn {
 // ABC and mapping libraries. Native barriers/hierarchy are reconnected by the
 // design owner; this records the complete logical region boundary.
 struct Frozen_region {
-  static constexpr uint32_t version = 2;
+  static constexpr uint32_t version = 4;
   std::string               module_name;
   synth::State_target       target = synth::State_target::cmos;
   Endpoint_netlist          netlist;

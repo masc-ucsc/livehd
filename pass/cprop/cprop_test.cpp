@@ -994,11 +994,13 @@ TEST(CpropNot, DoubleNotForwardsTheOperand) {
     auto outer = gu::create_typed_node(*g, Ntype_op::Not, 8);
     gu::setup_sink_by_name(outer, "a").connect_driver(inner.create_driver_pin(0));
     outer.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+    outer.get_driver_pin(0).attr(livehd::attrs::preroute_net_exclude).set();
     if (shared_inner) {
       inner.create_driver_pin(0).connect_sink(g->get_output_pin("r"));
     }
     Cprop{}.do_trans(g);
     EXPECT_TRUE(g->get_output_pin("q").get_driver_pin() == x) << "shared_inner=" << shared_inner;
+    EXPECT_TRUE(gu::preroute_net_excluded(x));
     if (shared_inner) {
       const auto r = g->get_output_pin("r").get_driver_pin();
       ASSERT_FALSE(r.is_invalid());

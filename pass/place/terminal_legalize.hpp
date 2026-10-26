@@ -8,6 +8,7 @@
 #include "core/timing_feedback.hpp"
 #include "inou/lefdef/physical.hpp"
 #include "prects_networks.hpp"
+#include "satlegalize.hpp"
 #include "warpspace.hpp"
 
 namespace livehd::placement {
@@ -17,6 +18,8 @@ struct Terminal_legalize_options {
   Prects_library prects;
   Warp_options   remainder_warp{.weight = 1};
   unsigned       bins_x = 64, bins_y = 64;
+  bool           route_vias  = false;  // Permit checked M1-to-M2 endpoint access.
+  bool           route_drc   = false;  // Full rectangular trace checks for the signal-routing experiment.
   double         max_density = .8, target_density = .5;
   double         remainder_wire_weight = 4;
   double         critical_fraction = .1, local_pair_fraction = .5;
@@ -70,6 +73,8 @@ struct Terminal_legalize_report {
   double                              seconds = 0, max_displacement_dbu = 0, total_displacement_dbu = 0;
   std::vector<Terminal_legalize_bin>  bins;
   std::vector<Terminal_legalize_cell> cells;
+  // Final validated one-edge pin alignments; indices refer to the input frame.
+  std::vector<Satlegalize_alignment>  alignments;
 };
 // Bound an inherited routing grid for tiny cores before selecting/locking cells.
 // Explicit caller-supplied terminal grids remain authoritative unless this helper is called.

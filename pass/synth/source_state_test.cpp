@@ -113,6 +113,68 @@ protected:
   }
 };
 
+TEST_F(SourceState, RoutingExclusionsHaveStableBackendOutputPositions) {
+  auto value = node(Ntype_op::Not, "protected_value", 2);
+  connect(value, "a", in("a"));
+  value.get_driver_pin(0).attr(attrs::preroute_net_exclude).set();
+  ready(value.get_driver_pin(0));
+  for (bool logical : {false, true}) {
+    Blast_options options;
+    options.logical_state = logical;
+    const auto result = blast(options);
+    ASSERT_EQ(result.status, Region_blast::Status::blasted);
+    ASSERT_TRUE(result.source_state);
+    ASSERT_EQ(result.control_signals.size(), 2U);
+    EXPECT_TRUE(validate_state_controls(*result.source_state, result.lnet));
+    for (size_t bit = 0; bit < 2; ++bit) {
+      const auto& signal = result.control_signals[bit];
+      EXPECT_EQ(signal.roles, 0);
+      EXPECT_TRUE(signal.preroute_excluded);
+      EXPECT_EQ(result.lnet.outputs().at(signal.output).node, result.lnet.outputs().at(bit).node);
+    }
+  }
+}
+
+TEST_F(SourceState, ProtectedFeedthroughDefinitionPreservesInputExclusions) {
+  graph->get_input_node().attr(attrs::preroute_exclude).set();
+  ready(in("a"));
+  Blast_options options;
+  options.logical_state = true;
+  const auto result = blast(options);
+  ASSERT_EQ(result.status, Region_blast::Status::blasted);
+  ASSERT_TRUE(result.source_state);
+  // a has two bits; clk, en, and rst each have one. No interior cells exist.
+  ASSERT_EQ(result.control_signals.size(), 5U);
+  EXPECT_TRUE(validate_state_controls(*result.source_state, result.lnet));
+  for (const auto& signal : result.control_signals) {
+    EXPECT_TRUE(signal.preroute_excluded);
+    EXPECT_EQ(signal.roles, 0);
+  }
+}
+
+TEST_F(SourceState, MappedRoutingConeStopsAtPreservedInputs) {
+  const auto upstream = node(Ntype_op::Not, "upstream", 2);
+  connect(upstream, "a", in("a"));
+  const auto internal = node(Ntype_op::Not, "mapped_internal", 2);
+  connect(internal, "a", upstream.get_driver_pin(0));
+  const auto output = node(Ntype_op::Not, "mapped_output", 2);
+  connect(output, "a", internal.get_driver_pin(0));
+  const std::array roots{output.get_driver_pin(0)};
+  const std::array cuts{upstream.get_driver_pin(0)};
+  EXPECT_FALSE(mark_preroute_cones(roots, cuts, [] { return false; }));
+  EXPECT_FALSE(gu::preroute_net_excluded(roots.front()));
+  ASSERT_TRUE(mark_preroute_cones(roots, cuts));
+  EXPECT_TRUE(gu::preroute_net_excluded(output.get_driver_pin(0)));
+  EXPECT_TRUE(gu::preroute_net_excluded(internal.get_driver_pin(0)));
+  EXPECT_TRUE(gu::preroute_net_excluded(upstream.get_driver_pin(0)));
+  EXPECT_FALSE(gu::preroute_net_excluded(in("a")));
+  EXPECT_FALSE(gu::preroute_net_excluded(in("en")));
+  // If mapping collapses a protected output onto its input, the boundary wins.
+  const std::array collapsed{upstream.get_driver_pin(0)};
+  ASSERT_TRUE(mark_preroute_cones(collapsed, collapsed));
+  EXPECT_FALSE(gu::preroute_net_excluded(in("a")));
+}
+
 TEST_F(SourceState, RegisteredSynchronousResetKeepsItsRoleAfterDataMuxLowering) {
   auto root    = flop("unrelated_name");
   auto payload = flop("payload");

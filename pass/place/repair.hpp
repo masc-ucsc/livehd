@@ -13,6 +13,10 @@ std::map<std::string, double> timing_weights(const physical::Parasitics& nets, c
 // Keep only current driver identities; nets outside the current timed critical
 // set return immediately to baseline, while current priorities may be smoothed.
 void                          refresh_timing_weights(Result& state, const Options& options, const Timing_feedback& timing);
+// Reuse the unmodified Liberty/control-port roles parsed for this placement
+// invocation. Graph-specific control seeds still come from state.prects.
+void                          refresh_timing_weights(Result& state, const Options& options, const Timing_feedback& timing,
+                                                     const Prects_library& library_roles);
 // All edges of one newly inserted tree share half the source's excess pull.
 void                          inherit_buffer_weights(std::map<std::string, double>& weights, const std::string& driver,
                                                      const std::vector<std::string>& outputs);

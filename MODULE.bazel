@@ -171,14 +171,10 @@ http_archive(
     ],
 )
 
-# HHDS (plain git repo — see the iassert/hlop note above)
-git_repository(
-    name = "hhds",
-    commit = "b40fc5e1fc6a1afd46dd8f26e7c0a48996bc9316",
-    remote = "https://github.com/masc-ucsc/hhds.git",
-)
-# For local co-development swap the git_repository above for:
-# local_repository(name = "hhds", path = "../hhds")
+# HHDS vector-attribute persistence co-development; publish the sibling changes
+# and restore a git_repository pin before distributing this MODULE.
+local_repository(name = "hhds", path = "../hhds")
+# Previous published pin: b40fc5e1fc6a1afd46dd8f26e7c0a48996bc9316
 
 # emhash — @hhds//hhds:core|graph dep on it. hhds's own MODULE.bazel declares
 # this wrapper, but a plain-repo fetch does not evaluate MODULE.bazel, so the

@@ -2234,6 +2234,11 @@ Engine::Replaced Engine::replace(const Member& member, const hhds::Pin_class& ta
   }
 
   // Redirect every consumer, then delete the node in one shot.
+  gu::carry_signal_roles(source, target);
+  gu::carry_preroute_exclusion(source, target);
+  if (!target.is_const() && node.attr(livehd::attrs::preroute_exclude).has()) {
+    target.attr(livehd::attrs::preroute_net_exclude).set();
+  }
   for (const auto& out : outs) {
     target.connect_sink(out.sink);
   }
