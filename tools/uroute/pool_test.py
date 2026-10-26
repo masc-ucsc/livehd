@@ -12,7 +12,7 @@ from tools.uroute.export_weights import encode_tensors
 from tools.uroute.features import Maps, features
 from tools.uroute.fixture import tensors
 from tools.uroute.maps import encode, write
-from tools.uroute.pool import canonical, publish_sample, publish_weights, read_manifest
+from tools.uroute.pool import canonical, load_sample, publish_sample, publish_weights, read_manifest
 
 BINARY = str(Path(sys.argv.pop(1)).resolve())
 AREA = 256 * 256
@@ -147,6 +147,28 @@ class PoolTest(unittest.TestCase):
             bad["floorplan"]["utilization"] = 2
             with self.assertRaises(ValueError):
                 publish_sample(temporary, bad, feature(0.), labels())
+
+    def test_weights_architecture_and_sample_admission(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            partial = tensors()
+            del partial["output.bias"]
+            with self.assertRaises(ValueError):
+                publish_weights(temporary, encode_tensors(partial), trained_on="t", provenance={})
+            self.assertFalse((Path(temporary) / "manifest.json").exists())
+            entry = publish_sample(temporary, metadata("A", "T", 1), feature(.5), labels())
+            loaded, raw, paths = load_sample(temporary, entry)
+            self.assertEqual((loaded.channels, raw.channels), (4, 3))
+            self.assertEqual([path.name for path in paths], ["features.bin", "labels.bin"])
+            with self.assertRaisesRegex(ValueError, "digest"):
+                load_sample(temporary, dict(entry, labels_sha256="0" * 64))
+            # The placer rejects a negative range on any label channel, not
+            # only on the metric being trained.
+            detour = Maps(3, 256, 256, False, [.5] * AREA + [0.] * AREA + [-1.] * AREA, [(.5, .5), (0., 0.), (-1., -1.)])
+            negative = publish_sample(temporary, metadata("B", "T", 2), feature(.5), detour)
+            with self.assertRaisesRegex(ValueError, "nonnegative"):
+                load_sample(temporary, negative)
+            with self.assertRaises(ValueError):
+                load_sample(temporary, dict(entry, directory="../outside"))
 
 
 if __name__ == "__main__":

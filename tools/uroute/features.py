@@ -11,6 +11,7 @@ import math
 FEATURE_VERSION = 1
 LABEL_VERSION = 1
 ARCH_VERSION = 1
+NETWORK_BINS = 256  # architecture-v1 support/query grid, as native uroute_network_bins
 
 
 @dataclass
@@ -51,7 +52,7 @@ def resample(values, fx, fy, tx, ty):
     return output
 
 
-def features(design, nx, ny, ox=256, oy=256):
+def features(design, nx, ny, ox=NETWORK_BINS, oy=NETWORK_BINS):
     """design: core=[xl,yl,xh,yh], nodes=[dict], nets=[dict(pins, enabled)].
 
     Nodes: x,y,width,height, macro=False, mask=False, pad_x=pad_y=0.

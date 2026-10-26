@@ -13,7 +13,7 @@ import math
 from pathlib import Path
 import re
 
-from .features import Maps, grid, resample
+from .features import NETWORK_BINS, Maps, grid, resample
 from .maps import write
 
 TOKEN = re.compile(r'\\[^\s]+|"(?:\\.|[^"\\])*"|[()+;]|[^\s()+;]+')
@@ -211,7 +211,7 @@ def verify_lengths(report, text, dbu):
             'parsed_total_dbu': total, 'odb_total_dbu': odb_total}
 
 
-def extract(geometry, definition, drc, flute_lengths, nx=64, ny=64, ox=256, oy=256):
+def extract(geometry, definition, drc, flute_lengths, nx=64, ny=64, ox=NETWORK_BINS, oy=NETWORK_BINS):
     """Wire-length/nominal-track-length utilization and length-weighted detour.
 
     Group channels: M2-M3 H,V; M4-M5 H,V; M6+ H,V (LEF stack positions).

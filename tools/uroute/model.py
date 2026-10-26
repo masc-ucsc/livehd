@@ -8,7 +8,6 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-ARCH_VERSION = 1
 CHANNELS = 64
 LEVELS = 4
 

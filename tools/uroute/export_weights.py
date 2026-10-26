@@ -10,9 +10,34 @@ import math
 from pathlib import Path
 import struct
 
+from .features import ARCH_VERSION
+
 MAGIC = b"UROUTEW1"
-ARCH_VERSION = 1
 LIMIT = 256 * 1024 * 1024
+
+
+def architecture_shapes():
+    """Every architecture-v1 tensor name and shape, as UrouteWeights requires."""
+    result = {}
+
+    def conv(name, inputs, outputs, kernel):
+        result[name + ".weight"] = (outputs, inputs, kernel, kernel)
+        result[name + ".bias"] = (outputs,)
+
+    conv("q_embed", 4, 64, 3)
+    conv("s_embed", 5, 64, 3)
+    for level in range(4):
+        for prefix in ("query", "support", "decoder"):
+            inputs = 128 if prefix == "decoder" else 64
+            conv(f"{prefix}.{level}.conv1", inputs, 64, 3)
+            conv(f"{prefix}.{level}.conv2", 64, 64, 3)
+            if inputs != 64:
+                conv(f"{prefix}.{level}.skip", inputs, 64, 1)
+        conv(f"matches.{level}.z", 128, 64, 3)
+        conv(f"matches.{level}.gate", 1, 1, 7)
+        conv(f"matches.{level}.out", 64, 64, 1)
+    conv("output", 64, 1, 1)
+    return result
 
 
 def encode_tensors(tensors):

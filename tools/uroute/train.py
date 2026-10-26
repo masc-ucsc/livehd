@@ -20,16 +20,8 @@ import tempfile
 import time
 
 from .episodes import ImportanceSampler
-from .maps import read
-from .pool import VERSIONS, _atomic, canonical, publish_weights, read_manifest, sha
-
-
-def inside(root, relative):
-    root = Path(root).resolve()
-    path = (root / relative).resolve()
-    if Path(relative).is_absolute() or not path.is_relative_to(root) or path == root:
-        raise ValueError("URoute path escapes the data directory")
-    return path
+from .export_weights import LIMIT
+from .pool import VERSIONS, _atomic, canonical, inside, load_sample, publish_weights, read_manifest, sha
 
 
 def normalized_label_tensor(labels, metric):
@@ -81,19 +73,8 @@ class Dataset:
     @lru_cache(maxsize=16)
     def sample(self, sample_id, metric):
         import torch
-        record = self.records[sample_id]
-        directory = inside(self.root, record["directory"])
-        for filename, key in (("features.bin", "features_sha256"), ("labels.bin", "labels_sha256")):
-            path = inside(directory, filename)
-            if path.stat().st_size > 8 * 1024 * 1024 or sha(path.read_bytes()) != record[key]:
-                raise ValueError(f"sample digest mismatch: {sample_id}/{filename}")
-        features, labels = read(directory / "features.bin"), read(directory / "labels.bin")
-        if (features.channels, features.bins_x, features.bins_y, features.normalized) != (4, 256, 256, True):
-            raise ValueError("training features must be normalized 4x256x256 maps")
-        if (labels.channels, labels.bins_x, labels.bins_y, labels.normalized) != (3, 256, 256, False):
-            raise ValueError("training labels must be raw 3x256x256 maps")
-        if labels.ranges[metric][0] < 0:
-            raise ValueError("training labels must be nonnegative")
+        # Train only on supports the placer can load (all label channels).
+        features, labels, _ = load_sample(self.root, self.records[sample_id])
         x = torch.tensor(features.values, dtype=torch.float32).reshape(4, 256, 256)
         y = normalized_label_tensor(labels, metric)
         return torch.cat((x, y), dim=0)
@@ -239,7 +220,7 @@ def train(args):
             model, initial_hash = URoute(), None
         elif initial:
             path = inside(args.pool, initial["file"])
-            if path.stat().st_size > 256 * 1024 * 1024 or sha(path.read_bytes()) != initial["sha256"]:
+            if path.stat().st_size > LIMIT or sha(path.read_bytes()) != initial["sha256"]:
                 raise ValueError("initial weight digest mismatch")
             model, initial_hash = load_model(path), initial["sha256"]
         else:

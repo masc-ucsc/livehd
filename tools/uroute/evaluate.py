@@ -14,17 +14,10 @@ import subprocess
 import tempfile
 import time
 
+from .export_weights import LIMIT
 from .maps import read
-from .pool import VERSIONS, _atomic, _identity, canonical, read_manifest, sha
+from .pool import VERSIONS, _atomic, _identity, canonical, inside, load_sample, read_manifest, sha
 from .score import absolute_channel, metrics
-
-
-def inside(root, name):
-    root = Path(root).resolve()
-    target = (root / name).resolve()
-    if Path(name).is_absolute() or not target.is_relative_to(root) or target == root:
-        raise ValueError('evaluation path escapes its pool')
-    return target
 
 
 class Pool:
@@ -42,24 +35,13 @@ class Pool:
         if not isinstance(weights, dict):
             raise ValueError('evaluation requires trained weights; this pool has none')
         self.weights = inside(self.root, weights['file'])
-        if self.weights.stat().st_size > 256 * 1024 * 1024 or sha(self.weights.read_bytes()) != weights['sha256']:
+        if self.weights.stat().st_size > LIMIT or sha(self.weights.read_bytes()) != weights['sha256']:
             raise ValueError('evaluation weight digest mismatch')
         self.weights_sha256 = weights['sha256']
 
     @lru_cache(maxsize=16)
     def load(self, key):
-        record = self.compatible[key]
-        directory = inside(self.root, record['directory'])
-        paths = [inside(directory, filename) for filename in ('features.bin', 'labels.bin')]
-        for path, name in zip(paths, ('features_sha256', 'labels_sha256')):
-            if path.stat().st_size > 8 * 1024 * 1024 or sha(path.read_bytes()) != record[name]:
-                raise ValueError(f'evaluation sample digest mismatch: {key}/{path.name}')
-        features, labels = (read(path) for path in paths)
-        if (features.channels, features.bins_x, features.bins_y, features.normalized) != (4, 256, 256, True):
-            raise ValueError('evaluation requires normalized 4x256x256 features')
-        if (labels.channels, labels.bins_x, labels.bins_y, labels.normalized) != (3, 256, 256, False) or any(lo < 0 for lo, hi in labels.ranges):
-            raise ValueError('evaluation requires nonnegative raw 3x256x256 labels')
-        return features, labels, paths
+        return load_sample(self.root, self.compatible[key])
 
     def unseen(self, top):
         provenance = self.manifest.get('provenance', {})

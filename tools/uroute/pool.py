@@ -16,11 +16,21 @@ import shutil
 import tempfile
 import time
 
-from .export_weights import decode_tensors
-from .features import ARCH_VERSION, FEATURE_VERSION, LABEL_VERSION
-from .maps import encode
+from .export_weights import architecture_shapes, decode_tensors
+from .features import ARCH_VERSION, FEATURE_VERSION, LABEL_VERSION, NETWORK_BINS
+from .maps import decode, encode
 
 VERSIONS = {"feature_version": FEATURE_VERSION, "label_version": LABEL_VERSION, "arch_version": ARCH_VERSION}
+MAP_LIMIT = 8 * 1024 * 1024  # per sample features/labels file, as LiveHD admits them
+
+
+def inside(root, relative):
+    """Resolve a pool-relative path. Absolute paths, escapes and root itself fail."""
+    root = Path(root).resolve()
+    path = (root / relative).resolve()
+    if Path(relative).is_absolute() or not path.is_relative_to(root) or path == root:
+        raise ValueError("URoute path escapes its pool directory")
+    return path
 
 
 def canonical(value):
@@ -109,8 +119,30 @@ def _identity(metadata):
 
 
 def _shape(maps, channels, normalized):
-    if (maps.channels, maps.bins_x, maps.bins_y, maps.normalized) != (channels, 256, 256, normalized):
-        raise ValueError(f"expected {channels}x256x256 maps with normalized={normalized}")
+    if (maps.channels, maps.bins_x, maps.bins_y, maps.normalized) != (channels, NETWORK_BINS, NETWORK_BINS, normalized):
+        raise ValueError(f"expected {channels}x{NETWORK_BINS}x{NETWORK_BINS} maps with normalized={normalized}")
+
+
+def load_sample(root, record):
+    """Digest-checked routed support pair, decoded from the bytes that were hashed.
+
+    Admission matches UrouteContext: normalized four-channel features and raw,
+    nonnegative three-channel labels. Returns (features, labels, paths).
+    """
+    directory = inside(root, record["directory"])
+    paths = tuple(inside(directory, name) for name in ("features.bin", "labels.bin"))
+    maps = []
+    for path, key in zip(paths, ("features_sha256", "labels_sha256")):
+        data = path.read_bytes() if path.stat().st_size <= MAP_LIMIT else b""
+        if not data or sha(data) != record[key]:
+            raise ValueError(f"URoute sample digest mismatch: {record['id']}/{path.name}")
+        maps.append(decode(data))
+    features, labels = maps
+    _shape(features, 4, True)
+    _shape(labels, 3, False)
+    if any(lo < 0 for lo, _ in labels.ranges):
+        raise ValueError("URoute sample labels must be nonnegative")
+    return features, labels, paths
 
 
 def _routed_pair_identity(metadata):
@@ -285,7 +317,9 @@ def publish_sample(root, metadata, features, labels=None, *, last_global_overflo
 
 def publish_weights(root, data, *, trained_on, provenance):
     """Publish a validated flat export and retain the exact training provenance."""
-    decode_tensors(data)
+    # LiveHD rejects any other tensor set; fail here rather than as a later skip.
+    if {name: shape for name, (shape, _) in decode_tensors(data).items()} != architecture_shapes():
+        raise ValueError("URoute weight names/shapes do not match architecture v1")
     if not isinstance(trained_on, str) or not trained_on or not isinstance(provenance, dict):
         raise ValueError("weights require a training identity and provenance")
     digest = sha(data)

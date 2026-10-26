@@ -15,8 +15,9 @@ import subprocess
 import tempfile
 import time
 
+from .export_weights import LIMIT
 from .pool import (VERSIONS, _atomic, _identity, _object, _verify_immutable_sample,
-                   canonical, file_sha, read_manifest, sha)
+                   canonical, file_sha, inside, read_manifest, sha)
 from .train import Dataset
 
 
@@ -139,10 +140,8 @@ def clone_pool(source, destination, manifest, from_scratch):
     elif manifest.get('weights'):
         weights = manifest['weights']
         relative = Path(weights['file'])
-        original = (source / relative).resolve()
-        if relative.is_absolute() or not original.is_relative_to(source) or original == source:
-            raise ValueError('initial weight file escapes its source pool')
-        if original.stat().st_size > 256 * 1024 * 1024 or file_sha(original) != weights['sha256']:
+        original = inside(source, relative)
+        if original.stat().st_size > LIMIT or file_sha(original) != weights['sha256']:
             raise ValueError('initial weight digest mismatch')
         install(original, relative)
     _atomic(destination / 'manifest.json', canonical(snapshot))
