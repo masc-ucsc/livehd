@@ -65,6 +65,18 @@ estimate versus 2 and 4 FO4 overrides, pessimistic margins, area margin 0/25/100
 failed arm 3 on every FS-start domino (U19), and the area-driven arm 3 failed the anchor
 prepass (U20). Both are fixed on this branch; refreeze before the matrix. With the fix
 all three arm-3 legs (area, fixed, ORFS frame) pass <code>check_placement</code>.</li>
+<li>U21/U22 runs, 2026-10-26, <code>lhd_dp_9cf34297</code> (ORFS frame, density 0.7,
+<code>HighTide/artifacts/domplace_20261026/partition_m_gated*</code>, <code>sha3_rst</code>):
+NVDLA/partition_m folds 104 gated registers (1304 bits, every one on a <code>CKLNQD12</code>
+negedge-and gate, with <code>domino_fall_gates</code>); under select=area they retain by area
+(1496), <code>enable-stack</code> 100, and 16 async-reset registers convert onto RST. Every arm
+is now timed through the gates (status partial only for IO cuts): flop->flop 1676 / 1851 /
+933 ps for arms 1/2/3, where arm 3's gain is the RST buffer tree on the shared reset net
+(2351 ps without it). select=all converts 1512 (flop->domino 3431 ps). sha3's reset is off
+every rail (1600 RST false paths): input->domino 5132 -> 4110 ps, max-cap/transition 52/82 ->
+51/78; the limiter is now a 1344-pin data rail (2255 ps and 0/0 with the
+<code>domino_rail_fanout</code> experiment, an unfrozen scratch run). LEC timed out on every leg (assumed pass by the
+2026-10-26 ruling).</li>
 <li><strong>Exit:</strong> manifests and results under <code>repros/domplace_&lt;date&gt;/</code>
 with the H exit criteria.</li>
 </ul></li>
