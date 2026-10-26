@@ -337,8 +337,11 @@ Uroute_selection   Uroute_pool::select(const dp::UrouteMaps& query, const Uroute
         double     distance  = 0;
         const auto candidate = dp::read_uroute_maps(d.samples[j].features);
         for (size_t i = 0; i < query.values.size(); ++i) {
-          const double delta  = double(query.values[i]) - candidate.values[i];
-          distance           += delta * delta;
+          // Round each square before accumulating, as the binary64 offline
+          // evaluator does; FMA contraction can reorder near-tied samples.
+          const double          delta   = double(query.values[i]) - candidate.values[i];
+          const volatile double square  = delta * delta;
+          distance                     += square;
         }
         nearest.push_back({j, d.samples[j].identity.technology != id.technology, distance});
       }
