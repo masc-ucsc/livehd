@@ -1,5 +1,5 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-load("@rules_cc//cc:defs.bzl", "cc_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 # Post-freeze provisional domino code (todo/livehd/2d-domplace.html). It lives
@@ -8,7 +8,10 @@ load("//tools:copt_default.bzl", "COPTS")
 filegroup(
     name = "domplace_srcs",
     srcs = glob(
-        ["*.hpp"],
+        [
+            "*.cpp",
+            "*.hpp",
+        ],
         exclude = [
             "domplace_salt.hpp",
             "*_test.cpp",
@@ -45,4 +48,31 @@ cc_library(
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
+)
+
+# The named reference inverter and register family of the area model.
+cc_library(
+    name = "domino_reference",
+    srcs = ["domino_reference.cpp"],
+    hdrs = ["domino_reference.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//core",
+        "//pass/liberty:liberty_dff",
+        "//pass/liberty:timing_model",
+        "//pass/usyn:usyn_logic",
+    ],
+)
+
+cc_test(
+    name = "domino_reference_test",
+    size = "small",
+    srcs = ["domino_reference_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":domino_reference",
+        "@googletest//:gtest_main",
+    ],
 )
