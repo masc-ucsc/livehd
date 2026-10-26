@@ -2959,6 +2959,21 @@ sh_test(
     ],
 )
 
+# 2d-domplace U21: registers on recognized clock gates (inline latch + AND with a
+# test enable, a Liberty ICG, a gate in a wrapped definition) convert on the
+# root clock with the enable as a data input, dropped gates and sequential LEC;
+# the stack, definition-port and inverted cases retain with their reasons.
+sh_test(
+    name = "lhd_domplace_gates_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_domplace_gates_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
 # 2d-domplace H: two-row anchors in an imported pinless floorplan frame that
 # fits one anchor per row pair, and the named atomic failure one site narrower.
 sh_test(
