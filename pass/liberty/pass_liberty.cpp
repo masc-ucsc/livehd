@@ -335,6 +335,17 @@ void Pass_liberty::gensim(Eprp_var& var) {
                  icg.area);
     }
   }
+  // The ladder is what the mapper picks; a design may still instantiate any
+  // other recognized gate by name (`sky130_fd_sc_hd__sdlclkp_1`, with its test
+  // enable, under compile.slang.liberty_cells). Model those too, or the LEC
+  // sees a body-less ICG instance and cannot encode the registers it clocks.
+  for (const auto& icg : livehd::liberty::scan_icg_cells(files)) {
+    if (outlib.find_io(icg.name)) {
+      continue;
+    }
+    livehd::liberty::emit_icg_model(outlib, icg);
+    ++modeled;
+  }
   for (const auto& dff : livehd::liberty::selection_cells(dff_sel)) {
     livehd::liberty::emit_dff_model(outlib, dff);
     ++modeled;

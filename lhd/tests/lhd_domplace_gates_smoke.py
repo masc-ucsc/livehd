@@ -99,12 +99,8 @@ designs = {
 }
 for name, text in designs.items():
     (root / f'{name}.v').write_text(text)
-# The LEC reference of the ICG design models the Liberty cell (latch + AND).
-(root / 'icg_ref.v').write_text(designs['icg'] + 'module sky130_fd_sc_hd__sdlclkp_1(input CLK, GATE, SCE, output GCLK);\n'
-                                '  logic l;\n'
-                                '  always_latch if (!CLK) l = GATE | SCE;\n'
-                                '  assign GCLK = CLK & l;\n'
-                                'endmodule\n')
+# The ICG design's reference reads the Liberty cell through the gensim model
+# (latch + AND, test enable included), like the mapped netlist does.
 
 
 def synth(name, *extra):
@@ -170,15 +166,15 @@ work, physical, endpoints, netlist = synth('icg')
 assert reasons(endpoints) == {'q1': 'domino-all', 'q3': 'domino-all', 'q4': 'identity-endpoint'}, reasons(endpoints)
 assert physical['clock_gates']['folded'] == {'icg-cell': 2}, physical['clock_gates']
 assert 'sdlclkp' not in netlist, netlist
-assert proven(work, 'icg', root / 'icg_ref.v')
+assert proven(work, 'icg', root / 'icg.v')
 # A one-device stack: q3's OR alone would fit, but the enable in series would
 # not, so it retains CMOS on its gated clock (and the ICG stays for it).
 work, physical, endpoints, netlist = synth('icg', '--set', 'pass.usyn.stack=1')
 assert endpoints['q3']['reason'] == 'enable-stack' and endpoints['q1']['reason'] == 'enable-stack', reasons(endpoints)
 assert 'gated_input' in endpoints['q3']['clock_gate'], endpoints['q3']
 assert 'sdlclkp' in netlist, 'the gate stays for its CMOS consumers'
-# (No LEC here: the encoder cannot model a register clocked by a body-less
-# Liberty ICG instance, with or without the profile.)
+# The registers the retained ICG instance clocks prove through its model.
+assert proven(work, 'icg', root / 'icg.v')
 
 # A gate in a definition wrapped twice: each instance's enable is cloned.
 work, physical, endpoints, netlist = synth('hier')
