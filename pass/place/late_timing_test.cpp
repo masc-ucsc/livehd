@@ -781,6 +781,32 @@ TEST(LateTiming, SensitizedConditionOverridesTheUnconditionalDefault) {
   EXPECT_EQ(pin(result, "z").transitions[1].arrival_ps, 20);
 }
 
+TEST(LateTiming, UncompiledSetupConditionCannotCertifyEitherClockModel) {
+  // An unknown `when` variable cannot be evaluated; the check stays
+  // pessimistically active, but neither timing path may certify it.
+  for (const bool named : {false, true}) {
+    Circuit circuit({"clk"}, {});
+    auto    library                                   = std::make_shared<nldm::Library>(*circuit.library);
+    library->cells.at("FF").pins.at("D").arcs[0].when = "SE";
+    circuit.library                                   = library;
+    auto flop = circuit.cell("ff", "FF"), inv = circuit.cell("inv", "INV");
+    flop.create_sink_pin("CLK").connect_driver(circuit.graph->get_input_pin("clk"));
+    inv.create_sink_pin("A").connect_driver(flop.create_driver_pin("Q"));
+    flop.create_sink_pin("D").connect_driver(inv.create_driver_pin("Y"));
+    late::Constraints       constraints;
+    const late::Ideal_clock clock{.period_ps = 100, .roots = {"clk"}};
+    if (named) {
+      constraints.clocks["main"] = clock;
+    } else {
+      constraints.clock = clock;
+    }
+    constraints.complete = true;
+    const auto result    = late::Proxy(*circuit.graph, library, constraints).evaluate();
+    EXPECT_FALSE(result.certified) << "named clocks: " << named;
+    EXPECT_TRUE(issue(result, "unsupported conditional setup expression: ff:D")) << "named clocks: " << named;
+  }
+}
+
 TEST(LateTiming, InputDrivingCellAddsOnlyLoadDependentDelayToTheWire) {
   Circuit circuit({"a"}, {"z"});
   circuit.library = std::make_shared<nldm::Library>(nldm::parse(models + R"(

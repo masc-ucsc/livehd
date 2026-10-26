@@ -743,6 +743,9 @@ struct Proxy::Impl {
           issue("falling-edge setup is unsupported: " + pin.name);
           continue;
         }
+        if (!arc.when.empty() && !logic.at({cells[pin.cell].model, arc.when})) {
+          issue("unsupported conditional setup expression: " + pin.name);
+        }
         if (related == cells[pin.cell].pins.end() || !pins[related->second].clock) {
           issue("unconstrained setup clock: " + pin.name);
           continue;
