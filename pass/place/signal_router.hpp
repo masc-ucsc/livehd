@@ -102,8 +102,9 @@ class Signal_router {
                                                const physical::Route_width_rules* = nullptr) const;
   physical::Route_connectivity connectivity(const physical::Net&, const std::vector<physical::Route_path>&,
                                             const physical::Route_width_rules* = nullptr) const;
-  // Appends a flush centerline path covering metal and accounts its length.
-  void add_wire(Signal_route_geometry&, const physical::Shape& metal, bool horizontal, std::string taper_rule = {}) const;
+  // Appends a flush centerline path covering metal along its layer's preferred
+  // direction and updates the per-layer and total wire lengths.
+  void add_wire(Signal_route_geometry&, const physical::Shape& metal, std::string taper_rule = {}) const;
 
 public:
   // Profile is copied once; the immutable technology/frame and occupancy

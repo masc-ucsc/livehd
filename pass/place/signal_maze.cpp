@@ -604,7 +604,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
         }
         trial.nondefault_rules.emplace(taper_rule, std::move(rule));
       }
-      add_wire(trial, s, horizontal[l], std::move(taper_rule));
+      add_wire(trial, s, std::move(taper_rule));
     }
   }
   ph::Signal_cut_set cuts(tech_, frame_);
@@ -618,9 +618,6 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
     }
   }
   trial.vias = vias.size();
-  for (const auto& [layer, length] : trial.layer_wire_length_um) {
-    trial.wire_length_um += length;
-  }
   const auto connected = connectivity(net, trial.paths, &trial.nondefault_rules);
   if (stage.expired()) {
     return out;

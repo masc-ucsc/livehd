@@ -72,11 +72,16 @@ ph::Route_connectivity Signal_router::connectivity(const ph::Net& net, const std
   routed.wires.push_back({"FIXED", paths});
   return ph::check_route_connectivity(tech_, frame_, routed, &components_, rules);
 }
-void Signal_router::add_wire(Signal_route_geometry& geometry, const ph::Shape& metal, bool horizontal,
-                             std::string taper_rule) const {
-  const auto& r = metal.rect;
+void Signal_router::add_wire(Signal_route_geometry& geometry, const ph::Shape& metal, std::string taper_rule) const {
+  const bool  horizontal = tech_.layers.at(metal.layer).direction == "HORIZONTAL";
+  const auto& r          = metal.rect;
   geometry.paths.push_back(ph::flush_wire_path(metal, horizontal, std::move(taper_rule)));
   geometry.layer_wire_length_um[metal.layer] += (horizontal ? r.xh - r.xl : r.yh - r.yl) / frame_.dbu;
+  // Total in layer order, so it is exactly the sum the per-layer report shows.
+  geometry.wire_length_um = 0;
+  for (const auto& [layer, length] : geometry.layer_wire_length_um) {
+    geometry.wire_length_um += length;
+  }
 }
 bool Signal_router::Stage_trial::expired() const {
   if (std::chrono::steady_clock::now() < deadline) {
@@ -450,7 +455,7 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
         return stage.fail("lift self spacing");
       }
     }
-    add_wire(trial, shape, tech_.layers.at(shape.layer).direction == "HORIZONTAL");
+    add_wire(trial, shape);
   }
   ph::Signal_cut_set cuts(tech_, frame_);
   for (const auto& via : vias) {
@@ -466,10 +471,7 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
   if (stage.expired()) {
     return out;
   }
-  trial.vias = vias.size();
-  for (const auto& [layer, length] : trial.layer_wire_length_um) {
-    trial.wire_length_um += length;
-  }
+  trial.vias   = vias.size();
   out.geometry = std::move(trial);
   return out;
 }
@@ -751,8 +753,7 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
         }
       }
       if (legal) {
-        add_wire(trial, {profile_.access.escape, span}, true);
-        trial.wire_length_um    = trial.layer_wire_length_um[profile_.access.escape];
+        add_wire(trial, {profile_.access.escape, span});
         trial.vias              = unique_vias.size();
         trial.straight_corridor = ph::Shape{profile_.access.escape, span};
         if (stage.expired()) {
@@ -968,11 +969,9 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
             continue;
           }
           for (const auto& [y, landing] : landings) {
-            add_wire(trial, landing, true);
+            add_wire(trial, landing);
           }
-          add_wire(trial, trunk, false);
-          trial.wire_length_um
-              = trial.layer_wire_length_um[profile_.access.escape] + trial.layer_wire_length_um[profile_.branch_layer];
+          add_wire(trial, trunk);
           trial.vias           = vias.size();
           const auto connected = connectivity(net, trial.paths);
           if (stage.expired()) {
