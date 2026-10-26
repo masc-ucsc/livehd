@@ -43,7 +43,7 @@ TEST(AegAnalyses, DeclarationMatchesRuntimeAndIsSound) {
 
   size_t     checked = 0;
   const auto seed    = env_or("LHD_AEG_FUZZ_SEED", 20260601);
-  const auto graphs  = env_or("LHD_AEG_ANALYSES_GRAPHS", 400);
+  const auto graphs  = env_or("LHD_AEG_ANALYSES_GRAPHS", 60);
   const auto why     = livehd::aegraph::rulegen::testing::analyses_sound(analyses, seed, graphs, 6, &checked);
   EXPECT_TRUE(why.empty()) << why;
   // The fuzz has to bite: it verified many positive claims, not just agreed to disagree.

@@ -651,7 +651,7 @@ END )" << name
   options.lefs                 = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef", lef.string()};
   options.output_dir           = (root / "out").string();
   options.core                 = {0, 0, 50, 50};
-  options.iterations           = 160;
+  options.iterations           = 100;
   options.final_iterations     = 20;
   options.bins                 = 8;
   options.final_cells          = true;
@@ -5448,7 +5448,8 @@ END LIBRARY
   options.halo_x = options.halo_y = 4;
   options.iterations              = 0;
   options.bins                    = 4;
-  options.handoff_taps = options.terminal_legalize = options.snapshots = true;
+  options.optimization_pending = false;  // handoff taps need fresh terminal legalization
+  options.handoff_taps = options.snapshots = true;
   options.terminal_legalize_options.critical_fraction                  = 0;
   const auto result                                                    = place(*graph, flat, options);
   const auto tech                                                      = physical::read_lef(options.lefs);

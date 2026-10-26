@@ -609,7 +609,7 @@ void Flattener::wire_edges(Ictx* ctx) {
     // create pins on another node and invalidate HHDS's ordered append cursor.
     // Interleaving that work makes wide sinks repeatedly scan their pin list.
     absl::InlinedVector<std::pair<hhds::Pin_class, hhds::Pin_class>, 4> inputs;
-    for (const auto& in_pin : n.inp_sorted_pins()) {
+    for (const auto& in_pin : n.inp_pins_snapshot()) {
       admit("flatten-wire_edges-step");
       inputs.emplace_back(in_pin, neo.create_sink_pin(in_pin.get_port_id()));
     }

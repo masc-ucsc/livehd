@@ -26,6 +26,10 @@ if [ -z "$MODEL" ]; then
   echo "SKIPPED: mem_multiread_hold_test -- no case executed. NOT acceptance."
   exit 0
 fi
+if [ -z "${LHD_EXTERNAL_SIM:-}" ]; then
+  echo "SKIPPED: mem_multiread_hold_test -- external simulator leg needs LHD_EXTERNAL_SIM=1."
+  exit 0
+fi
 # EITHER simulator will do. The testbench is ordinary event-driven Verilog
 # (`always #5`, `@(negedge clk)`, tasks), which Verilator runs under --timing.
 SIM=""

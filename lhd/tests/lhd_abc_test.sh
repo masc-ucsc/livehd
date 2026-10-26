@@ -333,12 +333,13 @@ run pass partition --top abc_feedthrough.abc_feedthrough lg:"$FT/lg" --emit-dir 
   || fail "pass abc on the feed-through design -> $(cat "$FT/r.json" 2>/dev/null)"
 ft_total=$(grep -o '"total":{[^}]*}' "$FT/r.json" | head -1)
 echo "$ft_total" | grep -q '"gates":1,' || fail "feed-through design must map to exactly one real gate: $ft_total"
-# 8 = the 4-bit register region's own feed-throughs (4 D-side PIs -> CO, 4 Q-side
-# CI -> PO). `out3`/`out4` sharing one XOR is NOT a ninth: the shipped `cones`
+# 9 = the 4-bit register region's own feed-throughs (4 D-side PIs -> CO, 4 Q-side
+# CI -> PO) plus the register's clock, which the logical-state controls expose as
+# a live consumer (`__state<N>_control<K>_b0`, a PI -> CO feed-through). `out3`/`out4` sharing one XOR is NOT a ninth: the shipped `cones`
 # coloring puts that gate in a region of its own with a single output, so the
 # second consumer is a parent-level wire fan-out rather than an in-region CO
 # (`mode=synth` maps the whole def as one region and reports 9).
-echo "$ft_total" | grep -q '"bypassed":8' || fail "expected 8 bypassed identity buffers (the register region's 4 D + 4 Q feed-throughs): $ft_total"
+echo "$ft_total" | grep -q '"bypassed":9' || fail "expected 9 bypassed identity buffers (the register region's 4 D + 4 Q feed-throughs + the clock control): $ft_total"
 run compile lg:"$FT/net" --top abc_feedthrough.abc_feedthrough --emit-dir verilog:"$FT/netv" --workdir "$FT/w5"
 ! grep -hq "^BUFx1 " "$FT/netv/"*.v || fail "a feed-through wire became a BUFx1 buffer cell"
 # One count over the WHOLE netlist: `grep -hc` over several files prints one

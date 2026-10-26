@@ -816,9 +816,14 @@ private:
       default: v = static_cast<int64_t>((h >> 8) & 1); break;  // a mix of booleans keeps the 0/1 rules honest
     }
     // A leaf with a declared width (a graph input, a register output) only takes values of that width.
+    int unsigned_bits = 0;  // an unsigned leaf is a NON-NEGATIVE number: a negative draw becomes its low `bits` bits
     if (const auto it = eg.analysis_cache().seeds.find(c); it != eg.analysis_cache().seeds.end()) {
       const rt::Wide lo = it->second.lo, hi = it->second.hi;
-      if (v < lo || v > hi) {
+      if (lo == 0 && v < 0) {
+        for (rt::Wide t = hi; t != 0; t >>= 1) {
+          ++unsigned_bits;
+        }
+      } else if (v < lo || v > hi) {
         const rt::Wide span = hi - lo + 1;
         rt::Wide       m    = (static_cast<rt::Wide>(v) - lo) % span;
         if (m < 0) {
@@ -827,8 +832,14 @@ private:
         v = static_cast<int64_t>(lo + m);
       }
     }
+    if (const auto it = eg.analysis_cache().wide_seeds.find(c); it != eg.analysis_cache().wide_seeds.end() && v < 0) {
+      unsigned_bits = static_cast<int>(it->second);  // an unsigned leaf wider than the interval facts
+    }
     Dlop d;
     d = Dlop::create_integer(v);
+    if (unsigned_bits > 0 && v < 0) {
+      d = *d.get_mask_op(0, unsigned_bits);
+    }
     return d;
   }
 

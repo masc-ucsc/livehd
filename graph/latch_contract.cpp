@@ -911,7 +911,7 @@ hhds::Pin_class rebuild_bit_select(hhds::Graph& g, const std::vector<hhds::Node_
     const auto& orig  = *it;
     auto        clone = gu::create_typed_node(g, gu::type_op_of(orig));
     bool        value = true;  // ascending pid: the first sink is the value operand
-    for (auto sink : orig.inp_sorted_pins()) {
+    for (auto sink : orig.inp_pins_snapshot()) {
       const auto pid = static_cast<int>(sink.get_port_id());
       for (const auto& drv : sink.get_driver_pins()) {
         (value ? below : drv).connect_sink(gu::setup_sink_pid(clone, pid));

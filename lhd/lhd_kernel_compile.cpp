@@ -2074,6 +2074,31 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
       }
       set_crash_context({}, {});
     };
+    // A reused lg: library whose GraphIO decls drifted from its bodies (two
+    // ports on one port id) leaves a graph-IO pin unnamed: refuse it before any
+    // pass (aegraph, cprop) names a pin, with a config diagnostic, not a crash.
+    for (const auto& g : opts.command == "synth" ? active->graphs : decltype(active->graphs){}) {
+      const auto gio = g ? g->get_io() : nullptr;
+      if (gio == nullptr) {
+        continue;
+      }
+      absl::flat_hash_map<hhds::Port_id, std::string_view> owner;
+      for (const auto* decls : {&gio->get_input_pin_decls(), &gio->get_output_pin_decls()}) {
+        for (const auto& d : *decls) {
+          const auto [it, is_new] = owner.try_emplace(d.port_id, d.name);
+          if (!is_new) {
+            livehd::diag::err("pass.partition", "io-port-clash", "io")
+                .msg("'{}' declares ports '{}' and '{}' on the same port id {}: its GraphIO is out of sync with its body",
+                     g->get_name(),
+                     it->second,
+                     d.name,
+                     d.port_id)
+                .hint("re-create the lg: library from source into a fresh --emit-dir lg: directory")
+                .fatal();
+          }
+        }
+      }
+    }
     const auto graph_passes = compile_graph_passes(opts);
     const auto after_bw     = follows_bitwidth(graph_passes);
     size_t     slot         = 0;

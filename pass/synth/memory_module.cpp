@@ -508,7 +508,7 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
   int64_t                                mem_bits = 0;
   // Lazy over `mem`'s own pins: every mutation in this loop lands in the CHILD
   // graph (`body`, `inner`, `io`), never in the parent body being walked.
-  for (const auto& in_pin : mem.inp_sorted_pins()) {
+  for (const auto& in_pin : mem.inp_pins_snapshot()) {
     const auto in_drv = in_pin.get_driver_pin();
     const int  pid = in_pin.get_port_id(), off = pid % Ntype::Memory_port_stride;
     // Configuration is specialized into the child. init may instead be a

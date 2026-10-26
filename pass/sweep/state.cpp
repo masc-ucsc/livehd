@@ -919,7 +919,7 @@ struct State_sweeper {
     auto src = info.node;
     auto dst = gu::create_typed_node(g, Ntype_op::Flop);
     gu::carry_node_attrs(src, dst);
-    for (const auto& sink : src.inp_sorted_pins()) {
+    for (const auto& sink : src.inp_pins_snapshot()) {
       const auto pid = sink.get_port_id();
       const auto sname = Ntype::get_sink_name(Ntype_op::Flop, pid);
       for (const auto& drv : sink.get_driver_pins()) {
@@ -1384,7 +1384,7 @@ struct State_sweeper {
         continue;
       }
       const auto zero = gu::create_const(g, *Dlop::create_integer(0));
-      for (const auto& port : mem.out_sorted_pins()) {
+      for (const auto& port : mem.out_pins_snapshot()) {
         for (const auto& e : readers_of(port)) {
           if (e.sink.get_master_node() == mem) {
             continue;

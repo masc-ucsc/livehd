@@ -20,9 +20,9 @@
 #include "dreamplace/native/placement.hpp"
 #include "hhds/graph.hpp"
 #include "inou/lefdef/physical.hpp"
-#include "rc_cache.hpp"
 #include "power_grid.hpp"
 #include "preroute_design.hpp"
+#include "rc_cache.hpp"
 #include "satlegalize.hpp"
 #include "terminal_legalize.hpp"
 #include "warpspace.hpp"
@@ -78,11 +78,11 @@ struct Options {
   // timing and fillers; refreshes source/LR state after all timing gates pass.
   std::shared_ptr<const buffering::Checkpoint_settings>  native_gp_buffering;
 
-  Preroute_settings                                   preroute;
-  std::vector<Pg_channel>                             pg_channels;  // Opt-in patches; reference grid by default.
-  std::optional<double>                               pg_channel_max_ir_drop_v;
+  Preroute_settings                                         preroute;
+  std::vector<Pg_channel>                                   pg_channels;  // Opt-in patches; reference grid by default.
+  std::optional<double>                                     pg_channel_max_ir_drop_v;
   // Internal host handoff, collected only for a completed final placement.
-  bool                                                retain_preroute_design = false;
+  bool                                                      retain_preroute_design = false;
   // Diagnostic-only, synchronous observation; never supplies optimizer feedback.
   std::function<void(const Result&, const Gp_observation&)> gp_observer;
   int                                                       gp_observer_interval  = 0;
@@ -128,8 +128,8 @@ struct Options {
   unsigned                          legalize_timing_corrections = 0;
   // Internal lifecycle state: optimization trials need legal snapshots before
   // the mandatory final legalization. Never exposed as a user option.
-  bool                                  optimization_pending        = false;
-  bool                              handoff_taps                = false;  // ASAP7 fixed taps before terminal legalization
+  bool                              optimization_pending        = false;
+  bool                              handoff_taps                = false;   // ASAP7 fixed taps before terminal legalization
   std::string                       pg                          = "none";  // opt-in native power-grid profile
   Busorder_options                  busorder;
   Boundary_pin_options              boundarypins;
@@ -233,27 +233,27 @@ struct Options {
   bool                                 exact_cell_density         = false;
   bool                                 density_upper_bound        = false;  // experimental filler-free upper-bound penalty
   int                                  min_iterations             = 40;
-  int                 post_density_factor   = 4;  // bounded continuation after geometry/density settle; zero disables
-  double              convergence_tolerance = .01;
-  bool                full                  = true;
-  bool                final_cells           = true;
-  int                 final_iterations      = 0;  // zero inherits iterations; only after fp in full mode
+  int                 post_density_factor                 = 4;  // bounded continuation after geometry/density settle; zero disables
+  double              convergence_tolerance               = .01;
+  bool                full                                = true;
+  bool                final_cells                         = true;
+  int                 final_iterations                    = 0;  // zero inherits iterations; only after fp in full mode
   // Diagnostic physical GP coordinates, before macro/cell legalization.
-  bool                snapshots             = false;
+  bool                snapshots                           = false;
   // Internal post-synthesis STA snapshot: mapped pins and zero wire RC, no GP
   // or legalization, and no placement-cache publication.
-  bool                timing_seed           = false;
+  bool                timing_seed                         = false;
   // Timing-only import of a complete saved placement. Preserve every location;
   // do not legalize, optimize or certify the imported placement's legality.
-  bool                retain_placement      = false;
+  bool                retain_placement                    = false;
   // Try nearest-whitespace placement of edited/new cells before windowed GP.
-  bool                legalize_cells        = false;
-  bool                                 satlegalize           = false;
-  bool                                 satlegalize_route     = false;
-  bool                                 satlegalize_pg_after  = false;
-  bool                                 satlegalize_route_vias              = false;
-  double                               satlegalize_route_critical_fraction = .10;
-  Satlegalize_options                  satlegalize_options;
+  bool                legalize_cells                      = false;
+  bool                satlegalize                         = false;
+  bool                satlegalize_route                   = false;
+  bool                satlegalize_pg_after                = false;
+  bool                satlegalize_route_vias              = false;
+  double              satlegalize_route_critical_fraction = .10;
+  Satlegalize_options satlegalize_options;
   // Opt-in: an unknown (X) constant bit that reaches a physical net is a synthesis
   // don't-care (`assign y = 'x`), so any value is a legal refinement; tie it low
   // instead of refusing the placement. Off keeps the refusal.

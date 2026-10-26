@@ -255,10 +255,10 @@ struct Floorplan {
   std::vector<Terminal>           terminals;
   std::vector<Net>                nets;
   std::vector<Placement_blockage> blockages;
-  std::vector<Via> vias;
-  std::vector<Net> special_nets;
-  std::vector<Gcell_grid> gcell_grid;
-  Route_width_rules nondefault_rules;
+  std::vector<Via>                vias;
+  std::vector<Net>                special_nets;
+  std::vector<Gcell_grid>         gcell_grid;
+  Route_width_rules               nondefault_rules;
 };
 Technology                       read_lef(const std::vector<std::string>& paths);
 Floorplan                        read_def(const std::string& path);

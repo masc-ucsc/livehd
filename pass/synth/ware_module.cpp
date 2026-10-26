@@ -310,7 +310,7 @@ std::shared_ptr<hhds::Graph> enclose(hhds::Graph& parent, const hhds::Node_class
           auto dst = gu::create_typed_node(*body, gu::type_op_of(src));
           gu::carry_node_attrs(src, dst);
           gu::set_color(dst, color);
-          for (const auto& in : src.inp_sorted_pins()) {
+          for (const auto& in : src.inp_pins_snapshot()) {
             const auto      drv = in.get_driver_pin();
             hhds::Pin_class from;
             if (drv.is_const()) {

@@ -26,15 +26,15 @@
 #include <unordered_set>
 #include <utility>
 
+#include "attrs.hpp"
 #include "buffering/checkpoint.hpp"
 #include "color_centroids.hpp"
+#include "dreamplace/native/placement.hpp"
+#include "dreamplace/native/rudy.hpp"
 #include "filler_budget.hpp"
 #include "forces/gp_rejection.hpp"
 #include "forces/gp_timing.hpp"
 #include "forces/legalization.hpp"
-#include "attrs.hpp"
-#include "dreamplace/native/placement.hpp"
-#include "dreamplace/native/rudy.hpp"
 #include "h2d.hpp"
 #include "handoff_pins.hpp"
 #include "handoff_rows.hpp"
@@ -3606,7 +3606,7 @@ void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, double 
     check_legality(tech, padded);
     return;
   }
-  const auto exclusions = ph::placement_exclusions(fp, {double(xl), double(yl), double(xh), double(yh)});
+  const auto                       exclusions = ph::placement_exclusions(fp, {double(xl), double(yl), double(xh), double(yh)});
   std::vector<std::vector<size_t>> by_row((yh - yl + rh - 1) / rh);
   struct Hard_interval {
     ph::Rect rect;

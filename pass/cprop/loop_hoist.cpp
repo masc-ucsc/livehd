@@ -227,7 +227,7 @@ hhds::Pin_class Hoister::clone(const hhds::Pin_class& pin, const Instance& inst,
   gu::carry_pin_attrs(n.create_driver_pin(0), neo.create_driver_pin(0));
   // A LUT's function is a node attribute: without it the clone computes nothing.
   gu::carry_attr<livehd::attrs::lut_t>(n, neo);
-  for (auto spin : n.inp_sorted_pins()) {
+  for (auto spin : n.inp_pins_snapshot()) {
     for (auto drv : spin.get_driver_pins()) {
       neo.create_sink_pin(spin.get_port_id()).connect_driver(clone(drv, inst, memo));
     }

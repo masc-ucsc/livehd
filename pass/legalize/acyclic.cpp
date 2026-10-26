@@ -1444,7 +1444,7 @@ bool break_false_cycle(hhds::Graph* g, const std::vector<hhds::Pin_class>& membe
       const auto& h   = (*cyc)[k];
       const auto  n   = h.sink.get_master_node();
       auto        neo = gu::create_typed_node(*g, gu::type_op_of(n));
-      for (auto sink : n.inp_sorted_pins()) {
+      for (auto sink : n.inp_pins_snapshot()) {
         const auto pid = static_cast<int>(sink.get_port_id());
         for (const auto& drv : sink.get_driver_pins()) {
           (sink.get_class_index() == h.sink.get_class_index() ? prev : drv)
@@ -1494,6 +1494,57 @@ void report_cycles(const std::string& name, const std::vector<std::vector<hhds::
 }
 
 }  // namespace
+
+// A cycle member `Get_mask(Or(.., c), lo, hi)` whose constant `c` sets every window bit (or
+// `Get_mask(And(.., c), ..)` whose `c` clears them) is a constant whatever the other operands
+// are, including the member that closes the loop: `r = (r | 1) & 1` is 1. Replace the window by
+// that constant; returns true when one was folded.
+bool fold_decided_window(hhds::Graph* g, const std::vector<hhds::Pin_class>& members) {
+  for (const auto& p : members) {
+    const auto m = p.get_master_node();
+    if (m.is_invalid() || gu::type_op_of(m) != Ntype_op::Get_mask) {
+      continue;
+    }
+    const auto rng = gu::bit_range(m);
+    const auto a   = gu::get_driver_of_sink_name(m, "a");
+    if (!rng || a.is_invalid() || a.is_const() || gu::is_graph_input_pin(a) || rng->first < 0 || rng->second > 62
+        || rng->second <= rng->first) {
+      continue;
+    }
+    const auto an = a.get_master_node();
+    const auto op = gu::type_op_of(an);
+    if (op != Ntype_op::Or && op != Ntype_op::And) {
+      continue;
+    }
+    const uint64_t win = (uint64_t{1} << rng->second) - (uint64_t{1} << rng->first);
+    bool           decided = false;
+    for (auto sink : an.inp_sorted_pins()) {
+      for (const auto& drv : sink.get_driver_pins()) {
+        if (!drv.is_const()) {
+          continue;
+        }
+        const auto& c = gu::const_of(drv);
+        if (c.has_unknowns() || !c.is_just_i64()) {
+          continue;
+        }
+        const uint64_t bits = static_cast<uint64_t>(c.to_just_i64()) & win;
+        decided |= op == Ntype_op::Or ? bits == win : bits == 0;
+      }
+    }
+    if (!decided) {
+      continue;
+    }
+    const int64_t value = op == Ntype_op::Or ? static_cast<int64_t>(win >> rng->first) : 0;
+    const auto    konst = gu::create_const(*g, *Dlop::create_integer(value));
+    const gu::Edge_vec readers(p.out_edges().begin(), p.out_edges().end());
+    for (const auto& edge : readers) {
+      edge.sink.del_sink(p);
+      konst.connect_sink(edge.sink);
+    }
+    return true;
+  }
+  return false;
+}
 
 Acyclic_result make_acyclic(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, Split_state& state, bool defer_inlined_loops,
                             const std::vector<std::shared_ptr<hhds::Graph>>& roots) {
@@ -1644,6 +1695,8 @@ Acyclic_result make_acyclic(const std::vector<std::shared_ptr<hhds::Graph>>& gra
       for (const auto& members : found.cycles) {
         if (break_false_cycle(g, members)) {
           ++result.false_cycles;
+          broke = true;
+        } else if (fold_decided_window(g, members)) {
           broke = true;
         }
       }

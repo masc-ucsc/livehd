@@ -75,7 +75,11 @@ TEST(Physical, LefViaGeometryAndGenerationRules) {
   EXPECT_TRUE(via.is_default);
   EXPECT_DOUBLE_EQ(via.resistance, 5);
   ASSERT_EQ(via.shapes.size(), 3);
-  EXPECT_EQ(via.shapes[0], (Shape{"M1", {-.009, -.011, .009, .011}}));
+  EXPECT_EQ(via.shapes[0],
+            (Shape{
+                "M1",
+                {-.009, -.011, .009, .011}
+  }));
   EXPECT_TRUE(via.unsupported.empty());
   const auto& rule = tech.via_rules.at("M2_M1");
   EXPECT_TRUE(rule.generate);
@@ -163,7 +167,11 @@ TEST(Physical, PolygonExtensionsOutsideCellRemainBlocked) {
     const auto  tech  = read_lef({path.string()});
     const auto& macro = tech.macros.at("inv");
     ASSERT_EQ(macro.obstructions.size(), 1);
-    EXPECT_EQ(macro.obstructions.front(), (Shape{"M1", {-0.05, 0.02, 0.16, 0.10}}));
+    EXPECT_EQ(macro.obstructions.front(),
+              (Shape{
+                  "M1",
+                  {-0.05, 0.02, 0.16, 0.10}
+    }));
     if (pin) {
       const auto& access = macro.pins.at("A").shapes;
       ASSERT_EQ(access.size(), 1);
@@ -222,8 +230,15 @@ TEST(Physical, LefMetalRulesRetainConditionsAndUnknownExtensions) {
   ASSERT_EQ(r.parallel.size(), 1);
   EXPECT_EQ(r.parallel[0].widths, (std::vector<double>{.018, .1}));
   EXPECT_EQ(r.parallel[0].lengths, (std::vector<double>{0, .2}));
-  EXPECT_EQ(r.parallel[0].spacing, (std::vector<std::vector<double>>{{.018, .020}, {.030, .040}}));
-  EXPECT_EQ(r.min_size, (std::vector<std::array<double, 2>>{{.037, .018}}));
+  EXPECT_EQ(r.parallel[0].spacing,
+            (std::vector<std::vector<double>>{
+                {.018, .020},
+                {.030, .040}
+  }));
+  EXPECT_EQ(r.min_size,
+            (std::vector<std::array<double, 2>>{
+                {.037, .018}
+  }));
   ASSERT_EQ(r.min_step.size(), 1);
   EXPECT_DOUBLE_EQ(r.min_step[0].distance, .01);
   EXPECT_EQ(r.min_step[0].max_edges, 2);
@@ -258,7 +273,10 @@ TEST(Physical, DefIdentityRoundtrip) {
   place.status      = Status::FIXED;
   fp.components.push_back({"block.gate[0]", "sky130_fd_sc_hd__inv_1", place});
   fp.terminals.push_back({"a[0]", "wire0", "INPUT", 0, 1360, Orientation::N, Status::FIXED, {{"met1", {0, -10, 10, 10}}}});
-  fp.nets.push_back({"wire0", {{"PIN", "a[0]"}, {"block.gate[0]", "A"}}});
+  fp.nets.push_back({
+      "wire0",
+      {{"PIN", "a[0]"}, {"block.gate[0]", "A"}}
+  });
   const auto path = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "roundtrip.def";
   write_def(fp, path.string());
   EXPECT_NO_THROW(verify_def_roundtrip(fp, read_def(path.string())));
@@ -268,9 +286,12 @@ TEST(Physical, DefIdentityRoundtrip) {
 }
 TEST(Physical, DefTracksAndMasksRoundtrip) {
   Floorplan fp;
-  fp.design       = "tracks";
-  fp.die          = {0, 0, 10000, 10000};
-  fp.tracks       = {{"X", "met2", 230, 20, 460}, {"Y", "met1", 170, 30, 340, 1, true}};
+  fp.design = "tracks";
+  fp.die    = {0, 0, 10000, 10000};
+  fp.tracks = {
+      {"X", "met2", 230, 20, 460},
+      {"Y", "met1", 170, 30, 340, 1, true}
+  };
   const auto path = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "tracks.def";
   write_def(fp, path.string());
   const auto restored = read_def(path.string());
@@ -282,9 +303,13 @@ TEST(Physical, DefTracksAndMasksRoundtrip) {
 }
 TEST(Physical, DefNonuniformGcellGridRoundtrip) {
   Floorplan fp;
-  fp.design       = "gcells";
-  fp.die          = {0, 0, 10300, 12000};
-  fp.gcell_grid   = {{"X", 0, 11, 1000}, {"X", 10000, 2, 300}, {"Y", 0, 7, 2000}};
+  fp.design     = "gcells";
+  fp.die        = {0, 0, 10300, 12000};
+  fp.gcell_grid = {
+      {"X",     0, 11, 1000},
+      {"X", 10000,  2,  300},
+      {"Y",     0,  7, 2000}
+  };
   const auto path = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "gcells.def";
   write_def(fp, path.string());
   auto actual = read_def(path.string());
@@ -735,7 +760,10 @@ TEST(Physical, DefRejectsMalformedCustomWiresBeforeOpeningOutput) {
   Wire       wire;
   Route_path route;
   route.layer = "M2";
-  route.steps = {Route_point{0, 0, {}}, Route_point{100, 100, {}}};
+  route.steps = {
+      Route_point{  0,   0, {}},
+      Route_point{100, 100, {}}
+  };
   wire.paths.push_back(route);
   net.wires.push_back(wire);
   fp.nets.push_back(net);
@@ -754,8 +782,11 @@ TEST(Physical, DefRejectsMalformedCustomWiresBeforeOpeningOutput) {
   fp.nets[0].wires[0].paths.clear();
   EXPECT_THROW(write_def(fp, output.string()), std::runtime_error);
   fp.nets[0].wires[0]                = wire;
-  fp.nets[0].wires[0].paths[0].steps = {Route_point{0, 0, {}}, Route_point{100, 0, {}}};
-  fp.special_nets                    = std::move(fp.nets);
+  fp.nets[0].wires[0].paths[0].steps = {
+      Route_point{  0, 0, {}},
+      Route_point{100, 0, {}}
+  };
+  fp.special_nets = std::move(fp.nets);
   EXPECT_THROW(write_def(fp, output.string()), std::runtime_error);  // special wires need explicit width
 }
 TEST(Physical, ViaOnlySpecialPathHasZeroWidth) {
@@ -764,13 +795,20 @@ TEST(Physical, ViaOnlySpecialPathHasZeroWidth) {
   fp.die    = {0, 0, 1000, 1000};
   Via via;
   via.name   = "v12";
-  via.shapes = {{"M1", {-10, -10, 10, 10}}, {"V1", {-5, -5, 5, 5}}, {"M2", {-10, -10, 10, 10}}};
+  via.shapes = {
+      {"M1", {-10, -10, 10, 10}},
+      {"V1",     {-5, -5, 5, 5}},
+      {"M2", {-10, -10, 10, 10}}
+  };
   fp.vias.push_back(via);
   Route_path path;
   path.layer = "M1";
   path.width = 0;
   path.shape = "STRIPE";
-  path.steps = {Route_point{100, 100, {}}, Route_via{"v12"}};
+  path.steps = {
+      Route_point{100, 100, {}},
+      Route_via{"v12"}
+  };
   Net net;
   net.name = "VDD";
   net.use  = "POWER";
@@ -786,7 +824,10 @@ TEST(Physical, PathTaperRuleRoundtripAndRejection) {
   Floorplan fp;
   fp.design                   = "wide";
   fp.die                      = {0, 0, 1000, 1000};
-  fp.nondefault_rules["wide"] = {{"M1", 40}, {"M2", 80}};
+  fp.nondefault_rules["wide"] = {
+      {"M1", 40},
+      {"M2", 80}
+  };
   Net net;
   net.name = "n";
   net.wires.push_back({"FIXED", {{"M1", {}, {}, {Route_point{100, 100, 0}, Route_point{500, 100, 0}}, "wide"}}});

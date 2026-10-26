@@ -679,7 +679,7 @@ void State_optimizer::canonicalize_flop_enable(const hhds::Node_class& flop) {
       std::vector<Operand>               operands;
       absl::flat_hash_map<Index, size_t> multiplicity;
       absl::flat_hash_set<Index>         introduced;
-      for (auto edge : node.inp_sorted_pins()) {
+      for (auto edge : node.inp_pins_snapshot()) {
         const auto driver    = edge.get_driver_pin();
         auto       condition = driver.is_const() ? std::nullopt : decode_bool_condition(driver);
         operands.push_back({edge, condition});

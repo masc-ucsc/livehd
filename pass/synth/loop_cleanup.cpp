@@ -139,7 +139,7 @@ std::shared_ptr<hhds::Graph> extract_parallel_data(const std::shared_ptr<hhds::G
     // one of those lands in `shared` (the new graph `copies`/`pins` live in),
     // never in `body`, which is the graph being walked. The two bodies have
     // separate mutation epochs, so the iterator is not invalidated here.
-    for (const auto& in_pin : node.inp_sorted_pins()) {
+    for (const auto& in_pin : node.inp_pins_snapshot()) {
       const auto in_drv = in_pin.get_driver_pin();
       auto       sink   = copies.at(node).create_sink_pin(in_pin.get_port_id());
       gu::carry_pin_attrs(in_pin, sink);

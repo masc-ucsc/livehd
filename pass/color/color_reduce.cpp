@@ -715,7 +715,7 @@ struct Match {
 // slot enumeration see one deterministic sequence.
 bool operands_of(const Cone& K, const absl::flat_hash_map<Pin, Sig>& tok, const Node& n,
                  absl::flat_hash_map<int, std::vector<Opnd>>& by_port, std::vector<int>& ports) {
-  for (auto e_sink : n.inp_sorted_pins()) {
+  for (auto e_sink : n.inp_pins_snapshot()) {
     for (auto e_drv : e_sink.get_driver_pins()) {
       const auto& d = e_drv;
       if (d.is_invalid()) {
@@ -1090,7 +1090,7 @@ std::shared_ptr<hhds::GraphIO> build_pattern_def(hhds::GraphLibrary* lib, const 
   // authority.
   for (const auto& n : rep.members) {
     auto neo = node_map.at(n);
-    for (auto e_sink : n.inp_sorted_pins()) {
+    for (auto e_sink : n.inp_pins_snapshot()) {
       for (auto e_drv : e_sink.get_driver_pins()) {
         const auto& d = e_drv;
         if (d.is_invalid() || d.is_const()) {

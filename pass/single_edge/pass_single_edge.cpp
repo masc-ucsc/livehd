@@ -1711,13 +1711,13 @@ int apply_reader_forwards(hhds::Graph& g, const std::vector<std::pair<hhds::Node
         // the one semantic node attribute.
         livehd::graph_util::carry_attr<livehd::attrs::lut_t>(n, neo);
         clone_of.emplace(n.get_class_index(), neo);
-        for (auto sink : n.inp_sorted_pins()) {
+        for (auto sink : n.inp_pins_snapshot()) {
           const auto pid = static_cast<int>(sink.get_port_id());
           for (const auto& drv : sink.get_driver_pins()) {
             rebuild(drv).connect_sink(livehd::graph_util::setup_sink_pid(neo, pid));
           }
         }
-        for (auto dp : n.out_sorted_pins()) {
+        for (auto dp : n.out_pins_snapshot()) {
           copy_width_sign(dp, neo.create_driver_pin(dp.get_port_id()));
         }
       }

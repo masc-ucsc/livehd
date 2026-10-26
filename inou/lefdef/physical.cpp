@@ -81,7 +81,10 @@ int lef_via_cb(lefrCallbackType_e, lefiVia* source, lefiUserData data) {
       if (source->rectColorMask(l, r)) {
         via.unsupported.insert("MASK");
       }
-      via.shapes.push_back({source->layerName(l), {source->xl(l, r), source->yl(l, r), source->xh(l, r), source->yh(l, r)}});
+      via.shapes.push_back({
+          source->layerName(l),
+          {source->xl(l, r), source->yl(l, r), source->xh(l, r), source->yh(l, r)}
+      });
     }
   }
   if (via.shapes.empty()) {
@@ -394,13 +397,19 @@ int pin_cb(lefrCallbackType_e, lefiPin* pin, lefiUserData data) {
         layer = geometry->getLayer(i);
       } else if (geometry->itemType(i) == lefiGeomRectE) {
         auto* r = geometry->getRect(i);
-        p.shapes.push_back({layer, {r->xl, r->yl, r->xh, r->yh}});
+        p.shapes.push_back({
+            layer,
+            {r->xl, r->yl, r->xh, r->yh}
+        });
       } else if (geometry->itemType(i) == lefiGeomPolygonE) {
         auto* polygon = geometry->getPolygon(i);
         // Use an interior vertex as the pin access point; retain a zero-size
         // rectangle instead of a bounding box whose center may be outside.
         if (polygon->numPoints > 0) {
-          p.shapes.push_back({layer, {polygon->x[0], polygon->y[0], polygon->x[0], polygon->y[0]}});
+          p.shapes.push_back({
+              layer,
+              {polygon->x[0], polygon->y[0], polygon->x[0], polygon->y[0]}
+          });
           // This is an obstacle, never an access rectangle: its bounding-box
           // center can be outside the polygon. Keep extensions beyond SIZE too.
           c.tech.macros.at(c.macro).obstructions.push_back({layer, polygon_bounds(*polygon)});
@@ -442,7 +451,10 @@ int obstruction_cb(lefrCallbackType_e, lefiObstruction* obs, lefiUserData data) 
       macro.blocked_layers.insert(layer);
       if (geometry->itemType(i) == lefiGeomRectE) {
         const auto* rect = geometry->getRect(i);
-        macro.obstructions.push_back({layer, {rect->xl, rect->yl, rect->xh, rect->yh}});
+        macro.obstructions.push_back({
+            layer,
+            {rect->xl, rect->yl, rect->xh, rect->yh}
+        });
       } else {
         // The polygon can extend outside SIZE. Retain its bounds as well as
         // the conservative full-cell block used for nonrectangular abstracts.
@@ -559,7 +571,10 @@ int terminal_cb(defrCallbackType_e, defiPin* pin, defiUserData data) {
     for (int i = 0; i < item->numLayer(); ++i) {
       int xl, yl, xh, yh;
       item->bounds(i, &xl, &yl, &xh, &yh);
-      p.shapes.push_back({item->layer(i), {double(xl), double(yl), double(xh), double(yh)}});
+      p.shapes.push_back({
+          item->layer(i),
+          {double(xl), double(yl), double(xh), double(yh)}
+      });
     }
   };
   placement(pin);
@@ -714,7 +729,10 @@ int via_cb(defrCallbackType_e, defiVia* source, defiUserData data) {
     char* layer;
     int   xl, yl, xh, yh;
     source->layer(i, &layer, &xl, &yl, &xh, &yh);
-    via.shapes.push_back({layer, {double(xl), double(yl), double(xh), double(yh)}});
+    via.shapes.push_back({
+        layer,
+        {double(xl), double(yl), double(xh), double(yh)}
+    });
   }
   c.fp.vias.push_back(std::move(via));
   return 0;
