@@ -31,7 +31,7 @@ cc_binary(
     name = "rudy_metrics",
     srcs = ["rudy_metrics.cpp"],
     visibility = ["//visibility:public"],
-    deps = ["@dreamplace//dreamplace/native:placer", "@dreamplace//thirdparty/flute", "@bazel_tools//tools/cpp/runfiles"],
+    deps = ["//pass/place:steiner_topology", "@dreamplace//dreamplace/native:placer"],
 )
 
 cc_binary(

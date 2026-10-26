@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
@@ -16,9 +15,8 @@
 #include "dreamplace/native/rudy_tree.hpp"
 #include "dreamplace/native/uroute.hpp"
 #include "dreamplace/native/uroute_weights.hpp"
+#include "pass/place/steiner_topology.hpp"
 #include "rapidjson/document.h"
-#include "thirdparty/flute/flute.hpp"
-#include "tools/cpp/runfiles/runfiles.h"
 
 namespace dp = DreamPlace::native;
 namespace {
@@ -254,25 +252,7 @@ int main(int argc, char** argv) {
       }
       dp::RudyOptions options;
       options.degree     = 4096;
-      bool initialized   = false;
-      options.initialize = [&] {
-        if (initialized) {
-          return;
-        }
-        std::string                                            error;
-        std::unique_ptr<bazel::tools::cpp::runfiles::Runfiles> files(
-            bazel::tools::cpp::runfiles::Runfiles::Create(argv[0], BAZEL_CURRENT_REPOSITORY, &error));
-        if (!files) {
-          throw std::runtime_error("cannot locate FLUTE runfiles: " + error);
-        }
-        const auto powv = files->Rlocation("dreamplace/thirdparty/flute/lut.ICCAD2015/POWV9.dat");
-        const auto post = files->Rlocation("dreamplace/thirdparty/flute/lut.ICCAD2015/POST9.dat");
-        if (!std::filesystem::is_regular_file(powv) || !std::filesystem::is_regular_file(post)) {
-          throw std::runtime_error("FLUTE lookup tables missing from runfiles");
-        }
-        flute::readLUT(powv.c_str(), post.c_str());
-        initialized = true;
-      };
+      options.initialize = livehd::placement::initialize_flute_tables;
       std::ofstream output(argv[3]);
       output << std::setprecision(17) << '[';
       bool first = true;

@@ -8,9 +8,8 @@ cc_binary(
     srcs = ["native.cpp"],
     copts = COPTS,
     deps = [
-        "@bazel_tools//tools/cpp/runfiles",
+        "//pass/place:steiner_topology",
         "@dreamplace//dreamplace/native:placer",
-        "@dreamplace//thirdparty/flute",
         "@rapidjson",
     ],
 )

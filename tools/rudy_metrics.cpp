@@ -5,12 +5,10 @@
 // net_count, then pin_count followed by node_id absolute_x absolute_y per pin.
 #include <algorithm>
 #include <chrono>
-#include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <map>
-#include <mutex>
 #include <numeric>
 #include <stdexcept>
 #include <string>
@@ -18,8 +16,7 @@
 #include "dreamplace/native/placement.hpp"
 #include "dreamplace/native/rudy.hpp"
 #include "dreamplace/native/uroute_weights.hpp"
-#include "thirdparty/flute/flute.hpp"
-#include "tools/cpp/runfiles/runfiles.h"
+#include "pass/place/steiner_topology.hpp"
 
 namespace dp = DreamPlace::native;
 
@@ -43,23 +40,7 @@ int main(int argc, char** argv) {
         options.model = dp::RudyModel::rsmt;
       }
     }
-    options.initialize = [exe = std::string(argv[0])] {
-      static std::once_flag once;
-      std::call_once(once, [&] {
-        std::string                                            error;
-        std::unique_ptr<bazel::tools::cpp::runfiles::Runfiles> files(
-            bazel::tools::cpp::runfiles::Runfiles::Create(exe, BAZEL_CURRENT_REPOSITORY, &error));
-        if (!files) {
-          throw std::runtime_error("cannot locate FLUTE runfiles: " + error);
-        }
-        const auto powv = files->Rlocation("dreamplace/thirdparty/flute/lut.ICCAD2015/POWV9.dat");
-        const auto post = files->Rlocation("dreamplace/thirdparty/flute/lut.ICCAD2015/POST9.dat");
-        if (!std::filesystem::is_regular_file(powv) || !std::filesystem::is_regular_file(post)) {
-          throw std::runtime_error("FLUTE lookup tables missing from runfiles");
-        }
-        flute::readLUT(powv.c_str(), post.c_str());
-      });
-    };
+    options.initialize = livehd::placement::initialize_flute_tables;
     input >> d.layout.xl >> d.layout.yl >> d.layout.xh >> d.layout.yh >> d.layout.site_width >> d.layout.row_height
         >> options.horizontal_capacity >> options.vertical_capacity >> options.bins_x;
     options.bins_y = options.bins_x;
