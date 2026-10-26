@@ -427,6 +427,12 @@ void                  emit_deprecated_sets(const Options& opts);
 std::string       synth_set(const Options& opts, std::string_view flag, std::string_view def);
 std::string       resolve_liberty(const Options& opts);
 std::optional<double> sdc_min_clock_period_ps(const std::string& sdc_path, const std::string& liberty_path);
+// The provisional domino profile (pass.usyn.physical=domino_provisional, see
+// pass/domplace): whether the merged pass.usyn labels request it, and its
+// INTERNAL labels -- the comma-joined LEFs, synth.place.row_access, and, when
+// pass.usyn.domino_clock is unset, the port of the SDC's one clock.
+bool                  domino_profile(const Eprp_var::Eprp_dict& usyn_labels);
+void                  domino_profile_labels(const Options& opts, const std::string& lefs, Eprp_var::Eprp_dict& labels);
 bool                  lnastfmt_enabled(const Options& opts);
 // `compile.verify_frozen`: freeze every legalized def and re-check it after the
 // emits (pass/legalize). A full structural digest per graph twice, so on by

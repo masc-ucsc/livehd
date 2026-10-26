@@ -29,6 +29,7 @@
 #include "pass_opentimer.hpp"
 #include "pass_partition.hpp"
 #include "pin_tracker.hpp"
+#include "provisional_cell.hpp"
 #include "semdiff.hpp"
 #include "sta_salt.hpp"
 #include "str_tools.hpp"
@@ -1938,6 +1939,13 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
     // otherwise log-and-skip, yielding silent garbage. The celllib is loaded.
     const auto& lib = timer.celllib(ot::MAX);
     if (!lib || lib->cell(type_name) == nullptr) {
+      if (livehd::is_provisional_domino_cell(type_name)) {
+        livehd::diag::err("pass.opentimer", "netlist-unsupported", "unsupported")
+            .msg("'{}' (instance {}) is a provisional domino cell with no Liberty timing model", type_name, instance_name)
+            .hint("time domino designs with the provisional stage model (pass/domplace); run them with synth.opentimer=false")
+            .fatal();
+        return;
+      }
       if (hier_setting_ != "false") {
         if (node.get_subnode_graph() != nullptr) {
           continue;  // design-module body already flattened in via the hier walk

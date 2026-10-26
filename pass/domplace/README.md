@@ -143,6 +143,31 @@ by reason with both area bases (`a_domino_estimate` on the Liberty basis,
 with its master, `n_pdn`, `x`, area terms and rails, and the published bundle.
 Areas are proxies, not characterized PPA.
 
+## lhd
+
+`lhd synth` (and `lhd pass usyn`) plumb the profile's INTERNAL labels:
+`pass.usyn.lef` from `synth.lef` (the placement LEFs) and `pass.usyn.row_access`
+from `synth.place.row_access` (`default`, the stand-in, or a schema-1 JSON
+path); setting either directly is a usage error. An unset
+`pass.usyn.domino_clock` is taken from an SDC whose only clock is
+`create_clock ... [get_ports P]`; otherwise it must be named.
+
+The profile never moves a default; what it cannot support is a usage error:
+another mapper, STA (`synth.opentimer=false` is required: the cells have no
+Liberty timing), timing-driven placement, resize and resynthesis,
+`synth.place.pg`, and the detail-final region consumers (busorder,
+boundarypins). OpenTimer and the cgen simulator refuse a `__lhd_domino_*`
+instance by name (`core/provisional_cell.hpp`).
+
+After the mapper, lhd reads the bundle (`read_domino_sidecar`), appends
+`domino_cells.lef` to the placement LEFs (so the DEF export's `lefs.json` and
+every LEF reader see it), adds the LEF and sidecar to the physical cache
+dependencies, and exports the bundle with `--emit-dir report:`.
+`//lhd:physical_salt` hashes `usyn_salt` and `domplace_salt`.
+`lhd/tests/lhd_domplace_smoke.py` checks the refusals, the report and sidecar,
+and sequential LEC: proven with `--lib lg:<qor>.domino/models` beside the
+gensim cell models, not proven without them.
+
 ## Matched commands
 
 All three arms pin the same placement knobs:

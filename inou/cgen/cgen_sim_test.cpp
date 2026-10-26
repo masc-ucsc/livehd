@@ -14,6 +14,7 @@
 #include <set>
 #include <string>
 
+#include "diag.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "node_util.hpp"
@@ -713,6 +714,41 @@ std::string walker_text(const std::string& dir, const std::string& mod) {
 // The walkers are emitted for every module whatever the build flavour: a lean
 // build (sim.checkpoint=false -> no runtime support) has no dump_state, and
 // still has them.
+TEST(CgenSim, ProvisionalDominoCellsAreRefusedNotSkipped) {
+  // A body-less __lhd_domino_* instance has its model in a separate bundle;
+  // the simulator must not treat it like a black box that computes nothing.
+  const std::string name    = "domino_cell_refusal";
+  auto&             library = livehd::Hhds_graph_library::instance("lgdb_" + name);
+  auto              cell    = library.create_io("__lhd_domino_0000000000000001_v0_t0");
+  cell->add_input("R0", 1);
+  cell->add_input("CLK", 2);
+  cell->add_output("Q", 3, true);
+  auto io = library.create_io(name);
+  io->add_input("a", 1);
+  io->add_input("clk", 2);
+  io->add_output("q", 3);
+  for (const char* port : {"a", "clk", "q"}) {
+    io->set_bits(port, 1);
+    io->set_unsign(port, true);
+  }
+  auto graph = io->create_graph();
+  auto sub   = gu::create_typed_node(*graph, Ntype_op::Sub);
+  sub.set_subnode(cell);
+  graph->get_input_pin("a").connect_sink(sub.create_sink_pin(1));
+  graph->get_input_pin("clk").connect_sink(sub.create_sink_pin(2));
+  sub.create_driver_pin(3).connect_sink(graph->get_output_pin("q"));
+  livehd::diag::sink().clear();
+  std::filesystem::create_directories(name);
+  Cgen_sim emitter(name, "", name, "false");
+  EXPECT_FALSE(emitter.prepare_graph(graph));
+  bool refused = false;
+  for (const auto& record : livehd::diag::sink().records()) {
+    refused |= record.code == "provisional-domino-cell";
+  }
+  EXPECT_TRUE(refused);
+  livehd::diag::sink().clear();
+}
+
 TEST(CgenSim, TuneWalkersEmittedWithoutRuntimeSupport) {
   const std::string tag = "tune_lean";
   const auto        h   = make_tune_hierarchy(tag);

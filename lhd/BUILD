@@ -162,6 +162,9 @@ genrule(
         "//pass/place:preroute_srcs",
         "//inou/lefdef:physical_srcs",
         "//pass/opentimer:pass_opentimer",
+        # The mapper emits the placed netlist and the domino bundle placement reads.
+        "//pass/usyn:usyn_salt",
+        "//pass/domplace:domplace_salt",
     ],
     outs = ["physical_salt.hpp"],
     cmd = "h=$$(cat $(SRCS) | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16); " +
@@ -245,6 +248,7 @@ cc_library(
         "//lnast",
         "//pass/satopt",
         "//pass/usyn:pass_usyn",
+        "//pass/domplace:domino_bundle",
         "//pass/bitfuzz:pass_bitfuzz",
         "//pass/bitwidth:pass_bitwidth",
         "//pass/aegraph:pass_aegraph",

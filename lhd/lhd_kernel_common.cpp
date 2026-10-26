@@ -929,6 +929,48 @@ std::optional<double> sdc_min_clock_period_ps(const std::string& sdc_path, const
   return best;
 }
 
+bool domino_profile(const Eprp_var::Eprp_dict& usyn_labels) {
+  const auto it = usyn_labels.find("physical");
+  return it != usyn_labels.end() && it->second == "domino_provisional";
+}
+
+void domino_profile_labels(const Options& opts, const std::string& lefs, Eprp_var::Eprp_dict& labels) {
+  labels["lef"]        = lefs;
+  labels["row_access"] = synth_set(opts, "place.row_access", "default");
+  if (labels.contains("domino_clock") && !labels["domino_clock"].empty()) {
+    return;
+  }
+  // The one constrained domain: an SDC whose only clock (create_clock or
+  // create_generated_clock) is defined on one port. Anything else leaves
+  // domino_clock unset, which pass.usyn refuses with a hint to name it.
+  const auto sdc = synth_set(opts, "sdc", "");
+  if (sdc.empty()) {
+    return;
+  }
+  static const std::regex  port_re(R"(\[\s*get_ports\s+\{?\s*([^\s\{\}\[\]]+)\s*\}?\s*\])");
+  std::ifstream            in(sdc);
+  std::vector<std::string> ports;
+  size_t                   clocks = 0;
+  for (std::string line; std::getline(in, line);) {
+    const auto first   = line.find_first_not_of(" \t");
+    const auto command = [&](std::string_view name) {
+      return line.compare(first, name.size(), name) == 0 && first + name.size() < line.size()
+             && (line[first + name.size()] == ' ' || line[first + name.size()] == '\t');
+    };
+    if (first == std::string::npos || !(command("create_clock") || command("create_generated_clock"))) {
+      continue;
+    }
+    ++clocks;
+    std::smatch match;
+    if (std::regex_search(line, match, port_re)) {
+      ports.push_back(match[1].str());
+    }
+  }
+  if (clocks == 1 && ports.size() == 1) {
+    labels["domino_clock"] = ports.front();
+  }
+}
+
 void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::Eprp_dict& labels) {
   // synth.delay / synth.memory are the run-wide spellings of source attributes;
   // the pass's own namespace (merged below) wins over them.
@@ -1187,9 +1229,12 @@ void check_known_set_passes(const Options& opts) {
                                   "pass.usyn, pass.opentimer and `lhd synth`)",
                                   value)};
     }
-    if (pass == "pass.usyn" && (flag == "timing_files" || flag == "invocation_context" || flag == "cache_dir")) {
+    if (pass == "pass.usyn"
+        && (flag == "timing_files" || flag == "invocation_context" || flag == "cache_dir" || flag == "lef"
+            || flag == "row_access")) {
       // INTERNAL kernel-plumbed labels (synth.liberty/sdc/spef, the lhd
-      // invocation record and the persistent cache root). A user --set either
+      // invocation record, the persistent cache root, and synth.lef /
+      // synth.place.row_access for the domino profile). A user --set either
       // did nothing or bypassed the one lhd.incremental switch; refuse it and
       // name the real spelling.
       throw Lhd_error{"usage",
@@ -1197,7 +1242,9 @@ void check_known_set_passes(const Options& opts) {
                       flag == "timing_files" ? "the timing environment comes from --set synth.liberty / synth.sdc / synth.spef"
                       : flag == "cache_dir"
                           ? "the logical/tmap cache lives under a named --workdir and follows --set lhd.incremental=true|false"
-                          : "the invocation record is captured by the lhd kernel, not by a --set"};
+                      : flag == "lef"        ? "the LEFs come from --set synth.lef"
+                      : flag == "row_access" ? "the row-access convention comes from --set synth.place.row_access"
+                                             : "the invocation record is captured by the lhd kernel, not by a --set"};
     }
     if (pass == "compile.yosys" && flag == "liberty") {
       // The yosys front-end's Liberty tech-map knob was dead code (the label was

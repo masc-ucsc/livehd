@@ -2944,6 +2944,20 @@ sh_test(
     ],
 )
 
+# 2d-domplace: the opt-in provisional domino profile through lhd synth -- the
+# mixed netlist, the model bundle, usage refusals and sequential LEC with the
+# bundle's models (and not without them).
+sh_test(
+    name = "lhd_domplace_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_domplace_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
 sh_test(
     name = "lhd_placement_smoke_usyn",
     size = "small",

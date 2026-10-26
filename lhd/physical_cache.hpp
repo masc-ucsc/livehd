@@ -15,6 +15,9 @@ class Physical_cache {
 public:
   Physical_cache(std::filesystem::path directory, std::filesystem::path compiled, std::string descriptor,
                  std::vector<std::string> dependencies);
+  // A dependency known only after construction (a generated input such as the
+  // domino LEF the mapper writes); add it before restore and publish.
+  void               add_dependency(std::string path) { dependencies_.push_back(std::move(path)); }
   bool               restore(const std::filesystem::path& net, const std::filesystem::path& place);
   void               publish(const std::filesystem::path& net, const std::filesystem::path& place);
   const std::string& reason() const { return reason_; }

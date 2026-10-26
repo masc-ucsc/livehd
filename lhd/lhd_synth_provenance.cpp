@@ -83,7 +83,12 @@ std::string synth_invocation_context(const Options& opts, const Result& res, con
     }
   }
   input(opts.config);
-  for (const auto key : {"library", "timing_files"}) {
+  // The domino profile's abstracts are generated from the LEFs and the
+  // row-access convention file (pass.usyn.lef / row_access, kernel-plumbed).
+  if (auto it = labels.find("row_access"); it != labels.end() && it->second != "default") {
+    input(it->second);
+  }
+  for (const auto key : {"library", "timing_files", "lef"}) {
     if (auto it = labels.find(key); it != labels.end()) {
       std::string_view files = it->second;
       while (!files.empty()) {

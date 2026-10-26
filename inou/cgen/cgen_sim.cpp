@@ -81,6 +81,7 @@
 #include "latch_contract.hpp"  // //graph — clock_op_of (the ONE shared ICG recognizer)
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"  // //graph — realize native loop groups in the private simulator library
+#include "provisional_cell.hpp"        // //core — refuse provisional domino cells
 #include "sim_color_plan.hpp"
 #include "sim_compile_workers.hpp"
 #include "sim_llvm_memory_rt.hpp"
@@ -4557,6 +4558,23 @@ bool Cgen_sim::prepare_graph(const std::shared_ptr<hhds::Graph>& graph) {
   static absl::flat_hash_map<const hhds::Graph*, std::pair<std::shared_ptr<hhds::Graph>, bool>> prepared;
   if (auto [pit, fresh] = prepared.try_emplace(g, graph, false); !fresh) {
     return pit->second.second;
+  }
+  // A provisional domino cell (pass/domplace) is a body-less declaration whose
+  // model lives in its bundle: skipping it like other black boxes would
+  // simulate a register as nothing.
+  for (auto n : g->body().nodes()) {
+    if (type_op_of(n) != Ntype_op::Sub || n.get_subnode_graph()) {
+      continue;
+    }
+    if (const auto io = n.get_subnode_io(); io && livehd::is_provisional_domino_cell(io->get_name())) {
+      livehd::diag::err("inou.cgen.sim", "provisional-domino-cell", "unsupported")
+          .msg("`{}` instantiates the provisional domino cell `{}`, which has no model in the netlist", gname, io->get_name())
+          .hint(
+              "use the bundle's models: <qor>.domino/domino_models.v in an external simulator, or `lhd lec --lib "
+              "lg:<qor>.domino/models`")
+          .emit();
+      return false;
+    }
   }
   // Registers that share an enable (or a conjunct of one) get ONE clock gate; the step below folds the gate into a commit guard,
   // and the color scheduler runs a gated register's cone only while the gate is open. Default on (LHD_SIM_NOCLOCKGATE=1 opts

@@ -72,6 +72,24 @@ TEST_F(PhysicalCache, RestoresTheCompleteRepairedGenerationAcrossFreshInstances)
   }
 }
 
+TEST_F(PhysicalCache, LateDependenciesKeyTheGeneration) {
+  // The domino LEF exists only after the mapper ran: it is added after
+  // construction and must still key the generation.
+  write("domino_cells.lef", "two-row abstracts");
+  auto first = cache();
+  first.add_dependency((root / "domino_cells.lef").string());
+  first.publish(root / "net", root / "place");
+  auto same = cache();
+  same.add_dependency((root / "domino_cells.lef").string());
+  EXPECT_TRUE(same.restore(root / "restored/net", root / "restored/place")) << same.reason();
+  EXPECT_FALSE(cache().restore(root / "restored/net", root / "restored/place"));
+  write("domino_cells.lef", "regenerated abstracts");
+  auto changed = cache();
+  changed.add_dependency((root / "domino_cells.lef").string());
+  EXPECT_FALSE(changed.restore(root / "restored/net", root / "restored/place"));
+  EXPECT_EQ(changed.reason(), "technology or timing inputs changed");
+}
+
 TEST_F(PhysicalCache, RejectsEditedDesignAttributesOptionsAndTimingBytes) {
   cache().publish(root / "net", root / "place");
   EXPECT_FALSE(cache("different physical options").restore(root / "restored/net", root / "restored/place"));

@@ -1070,6 +1070,12 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "",
      Synth_set_option::Kind::file,
      "routing grid file: literal make_tracks data; overrides DEF/LEF track grids"},
+    {"place.row_access",
+     "default",
+     Synth_set_option::Kind::file,
+     "odd/even placement-row access convention the provisional domino abstracts are generated and placed for "
+     "(pass.usyn.physical=domino_provisional): default is the stand-in (bottom core row even = horizontal access, odd = "
+     "vertical), else a schema-1 JSON path"},
     {"place.iterations",
      "1500",
      Synth_set_option::Kind::integer,

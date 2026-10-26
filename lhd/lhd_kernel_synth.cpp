@@ -55,6 +55,7 @@
 #include "attrs.hpp"
 #include "debug_env.hpp"
 #include "diag.hpp"
+#include "domino_bundle.hpp"
 #include "export_file.hpp"
 #include "graph_library_singleton.hpp"
 #include "inou/lefdef/route_store.hpp"
@@ -1071,6 +1072,38 @@ void synth_command(Options& opts, Result& res) {
   // and GP-only commands do not enter the full-placement refinement loop.
   const bool run_timing_place = truthy(synth_set(opts, "place.timing_driven", run_place && place_options.full ? "true" : "false"));
   const bool macro_plan_only  = run_place && place_options.full && !place_options.final_cells;
+  // The provisional domino profile (pass.usyn.physical=domino_provisional,
+  // pass/domplace) is opt-in, and every consumer it does not support is an
+  // explicit usage error here: no default moves for it.
+  Eprp_var::Eprp_dict usyn_sets;
+  merge_sets(opts, "pass.usyn", usyn_sets);
+  const bool domino = domino_profile(usyn_sets);
+  if (domino) {
+    if (mapper_method != "pass.usyn") {
+      throw Lhd_error{"usage", "pass.usyn.physical=domino_provisional needs synth.mapper=usyn", ""};
+    }
+    if (run_sta) {
+      throw Lhd_error{"usage",
+                      "provisional domino cells have no Liberty timing model (pass.usyn.physical=domino_provisional)",
+                      "set synth.opentimer=false; domino stage timing is not measured by OpenTimer"};
+    }
+    if (run_place && (run_timing_place || run_resize || run_resynth)) {
+      throw Lhd_error{"usage",
+                      "timing-driven placement, resizing and resynthesis need OpenTimer, which the domino profile refuses",
+                      "set synth.place.timing_driven=false (and leave synth.place.resize/resynth off)"};
+    }
+    if (run_place && place_options.pg != "none") {
+      throw Lhd_error{"usage",
+                      "synth.place.pg is not supported with provisional domino cells",
+                      "their two-row abstracts repeat one rail polarity at both edges; use synth.place.pg=none"};
+    }
+    if (run_place && (place_options.busorder.enabled || place_options.boundarypins.enabled || place_options.boundarypins.align)) {
+      throw Lhd_error{"usage",
+                      "detail-final region placement (busorder, boundarypins) needs single-row cells; the domino profile places "
+                      "two-row cells",
+                      "leave synth.place.region.busorder and synth.place.region.boundarypins off"};
+    }
+  }
   if ((truthy(synth_set(opts, "place.preroute", "false")) || truthy(synth_set(opts, "place.satlegalize.route", "false")))
       && (!run_place || !run_sta || !place_options.full || macro_plan_only || !place_options.handoff_taps
           || place_options.pg == "none" || place_options.pg == "off")) {
@@ -1480,6 +1513,15 @@ void synth_command(Options& opts, Result& res) {
     // ABC optimization settings; standalone dispatch uses the same rule.
     merge_mapper_sets(opts, mapper_method, labels);
     labels["library"] = liberty;  // synth.liberty is the one spelling (pass.abc.library is refused)
+    if (domino) {
+      // The abstracts use the placement LEFs (synth.lef, or the sky130 default
+      // placement resolves); a synthesis-only run takes synth.lef as given.
+      std::string lefs = run_place ? std::string{} : synth_set(opts, "lef", "");
+      for (const auto& lef : place_options.lefs) {
+        lefs += (lefs.empty() ? "" : ",") + lef;
+      }
+      domino_profile_labels(opts, lefs, labels);
+    }
     if (mapper->timing_files) {
       labels["timing_files"] = liberty + (sdc.empty() ? "" : "," + sdc) + (spef.empty() ? "" : "," + spef);
     }
@@ -1511,11 +1553,32 @@ void synth_command(Options& opts, Result& res) {
   const std::string provenance_path = qor_path + ".provenance";
   const std::string artifact_path   = mapper_method == "pass.usyn" ? qor_path + ".usyn.artifacts" : std::string{};
   const std::string mapper_qor      = has_report ? slurp_json(report_path) : std::string{};
+  // The domino model bundle pass.usyn published beside its report.
+  const std::string bundle_path     = domino ? qor_path + ".domino" : std::string{};
   if (user_workdir && !mapper_qor.empty()) {
     res.outputs.push_back(report_path);
     res.outputs.push_back(provenance_path);
     if (!artifact_path.empty()) {
       res.outputs.push_back(artifact_path);
+    }
+    if (!bundle_path.empty()) {
+      res.outputs.push_back(bundle_path);
+    }
+  }
+  if (domino) {
+    std::string why;
+    const auto  sidecar = livehd::domplace::read_domino_sidecar(bundle_path, &why);
+    if (!sidecar) {
+      throw Lhd_error{"internal", "pass.usyn published no usable domino bundle", why};
+    }
+    if (run_place) {
+      // Every LEF reader (placement, routing identity, DEF export) sees the
+      // generated abstracts as one more cell LEF, and so does the cache.
+      place_options.lefs.push_back(sidecar->lef.string());
+      if (physical_cache) {
+        physical_cache->add_dependency(sidecar->lef.string());
+        physical_cache->add_dependency((fs::path(bundle_path) / livehd::domplace::kBundleSidecar).string());
+      }
     }
   }
 
@@ -2047,7 +2110,7 @@ void synth_command(Options& opts, Result& res) {
       }
       res.outputs.push_back(dst);
     }
-    for (const auto& archive : {provenance_path, artifact_path}) {
+    for (const auto& archive : {provenance_path, artifact_path, bundle_path}) {
       if (!has_report || archive.empty() || !fs::exists(archive)) {
         continue;
       }

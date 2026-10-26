@@ -955,6 +955,9 @@ void pass_command(Options& opts, Result& res) {
     // (check_known_set_passes refuses it and names synth.liberty).
     const bool mapped_output = mapper_maps_cells(opts, method);
     labels["library"] = mapped_output ? resolve_liberty(opts) : std::string{};
+    if (method == "pass.usyn" && domino_profile(labels)) {
+      domino_profile_labels(opts, synth_set(opts, "lef", ""), labels);
+    }
     if (mapper->timing_files) {
       const auto sdc         = synth_set(opts, "sdc", "");
       const auto spef        = synth_set(opts, "spef", "");
@@ -983,7 +986,8 @@ void pass_command(Options& opts, Result& res) {
       // declares them. Only what the mapper actually wrote is listed.
       const std::vector<std::string> sidecars{labels["qor"] + ".provenance",
                                               labels["qor"] + "." + std::string{mapper->report} + ".json",
-                                              labels["qor"] + "." + std::string{mapper->report} + ".artifacts"};
+                                              labels["qor"] + "." + std::string{mapper->report} + ".artifacts",
+                                              labels["qor"] + ".domino"};
       for (const auto& sidecar : sidecars) {
         if (fs::exists(sidecar)) {
           res.outputs.push_back(sidecar);
