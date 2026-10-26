@@ -44,7 +44,12 @@ ROOT = pathlib.Path(__file__).resolve().parents[3]
 DEFAULT_COREET = "${LIVEHD_NEW_ROOT:-../livehd-new}/generated/vc_sweep2/lean"
 DEFAULT_CVA6 = "${LIVEHD_NEW_ROOT:-../livehd-new}/generated/cva6_vc/lean"
 CVA6_BLOCKS = ROOT / "pass" / "lean" / "tests" / "d4" / "cva6_78.list"
-COREET_SWEEP = ROOT / "pass" / "lean" / "SWEEP_b1-b2.tsv"
+# The CORE-ET sweep record lives with the IR-semantics stream's evidence since
+# 0e245b04e moved it (a pure rename). That directory is a deliberate shared
+# boundary, so the path points into it rather than the file moving back.
+#   <ROOT>/pass/lean/Lgraph_IR_Semantics_Simulator/evidence/SWEEP_b1-b2.tsv
+COREET_SWEEP = (ROOT / "pass" / "lean" / "Lgraph_IR_Semantics_Simulator"
+                / "evidence" / "SWEEP_b1-b2.tsv")
 
 EXPECT_COREET = 122
 EXPECT_CVA6_BLOCKS = 78

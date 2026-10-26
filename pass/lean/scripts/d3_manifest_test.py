@@ -89,6 +89,19 @@ def main() -> int:
     failures = []
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="d3_manifest_test_", dir=str(ROOT / "temp")))
     try:
+        # --- the DEFAULT inputs exist ------------------------------------------
+        # Every case below passes its own sweep and plan, so none of them ever
+        # reads the module's defaults. That is how COREET_SWEEP kept pointing at
+        # pass/lean/SWEEP_b1-b2.tsv for days after 0e245b04e moved the file, with
+        # this test green throughout. Check the defaults directly.
+        for name in ("COREET_SWEEP", "CVA6_BLOCKS"):
+            path = getattr(dm, name)
+            if path.is_file():
+                print(f"ok   default_{name.lower():<14} {path.relative_to(ROOT)} exists")
+            else:
+                print(f"FAIL default_{name.lower():<14} {path} does not exist")
+                failures.append(f"default_{name.lower()}")
+
         blocks = [f"b{i:02d}" for i in range(dm.EXPECT_CVA6_BLOCKS)]
         mods = [f"m{i:03d}" for i in range(dm.EXPECT_COREET)]
 
