@@ -9,17 +9,23 @@
 
 namespace livehd::physical {
 std::shared_ptr<hhds::Graph> mapped_graph(hhds::GraphLibrary& library, const Floorplan& fp, const Technology& tech) {
+  // One-bit signal pins; other LEF/DEF directions are not imported.
+  const auto declare = [](const auto& io, const std::string& name, const std::string& direction) {
+    if (direction == "INPUT") {
+      io->add_input(name, io->get_input_pin_decls().size());
+    } else if (direction == "OUTPUT") {
+      io->add_output(name, io->get_output_pin_decls().size());
+    } else {
+      return false;
+    }
+    io->set_bits(name, 1);
+    return true;
+  };
   auto                        io = library.create_io(fp.design);
   std::map<std::string, bool> input_ports;
   for (const auto& port : fp.terminals) {
-    if (port.direction == "INPUT") {
-      io->add_input(port.name, io->get_input_pin_decls().size());
-      io->set_bits(port.name, 1);
-      input_ports.emplace(port.name, true);
-    } else if (port.direction == "OUTPUT") {
-      io->add_output(port.name, io->get_output_pin_decls().size());
-      io->set_bits(port.name, 1);
-      input_ports.emplace(port.name, false);
+    if (declare(io, port.name, port.direction)) {
+      input_ports.emplace(port.name, port.direction == "INPUT");
     }
   }
   auto                                    graph = io->create_graph();
@@ -29,13 +35,7 @@ std::shared_ptr<hhds::Graph> mapped_graph(hhds::GraphLibrary& library, const Flo
     if (!master) {
       master = library.create_io(cell.macro);
       for (const auto& [name, pin] : tech.macros.at(cell.macro).pins) {
-        if (pin.direction == "INPUT") {
-          master->add_input(name, master->get_input_pin_decls().size());
-          master->set_bits(name, 1);
-        } else if (pin.direction == "OUTPUT") {
-          master->add_output(name, master->get_output_pin_decls().size());
-          master->set_bits(name, 1);
-        }
+        declare(master, name, pin.direction);
       }
     }
     auto node = livehd::graph_util::create_typed_node(*graph, Ntype_op::Sub);
