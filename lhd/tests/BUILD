@@ -2945,8 +2945,8 @@ sh_test(
 )
 
 # 2d-domplace: the opt-in provisional domino profile through lhd synth -- the
-# mixed netlist, the model bundle, usage refusals and sequential LEC with the
-# bundle's models (and not without them).
+# mixed netlist, the model bundle, usage refusals, sequential LEC with the
+# bundle's models (and not without them), and two-row placement to DEF/LEF.
 sh_test(
     name = "lhd_domplace_smoke",
     size = "small",

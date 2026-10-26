@@ -182,7 +182,14 @@ arm2 (USYN CMOS): lhd synth top.v --top T --set synth.mapper=usyn --set pass.usy
 arm3 (domino):    arm2 + --set pass.usyn.physical=domino_provisional --set synth.opentimer=false --workdir W3
 ```
 
-Arms 1 and 2 run today; they may keep STA on for report-only timing, and
-`resize=false` keeps STA from enabling repair. `io_resynth=0` explicitly
-disables the placement resynthesis loop. Arm 3 becomes available after
-emission (D) and two-row legalization (F) land.
+Arms 1 and 2 may keep STA on for report-only timing, and `resize=false` keeps
+STA from enabling repair. `io_resynth=0` explicitly disables the placement
+resynthesis loop. Arm 3 needs `synth.opentimer=false` (the domino cells have no
+Liberty timing) and a Liberty whose register family maps every retained
+register (the 7-cell sky130 test fixture has no reset or negative-edge flop).
+Its converted states are two-row CORE cells, anchored before terminal
+legalization (`pass/place/multirow.hpp`); `qor.place.multirow` reports them.
+`lhd/tests/lhd_domplace_smoke.py` runs arm 3 on the fixture: legal placement,
+2H domino components on whole rows in their start row's orientation, the
+domino LEF in `lefs.json`, sequential LEC of the placed netlist, and a
+deterministic DEF.

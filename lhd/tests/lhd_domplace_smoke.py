@@ -98,4 +98,63 @@ for leg in ('area', 'area_again'):
     area.append([(e['name'], e['decision'], e['reason']) for r in data['regions'] for e in r['endpoints']])
 assert area[0] == area[1], area
 assert dict((n, r) for n, _, r in area[0])['q1'] in ('domino-area', 'area'), area[0]
+
+# Placement (H): the 7-cell sky130 fixture maps only plain positive-edge
+# registers, so this leg keeps q1..q3. The two converted states are movable
+# two-row CORE cells, anchored before terminal legalization.
+placed_source = root / 'domp.v'
+placed_source.write_text('module domp(input clk, input a, b, c, d, en, x, y, output reg q1, q2, q3);\n'
+                         'always @(posedge clk) q1 <= (a & b) | (c & d);\n'
+                         'always @(posedge clk) if (en) q2 <= x ^ y;\n'
+                         'always @(posedge clk) q3 <= a;\n'
+                         'endmodule\n')
+place_args = [a if a != str(source) else str(placed_source) for a in base]
+place_args[place_args.index('dom')] = 'domp'
+place_args += domino + ['--set', 'pass.usyn.domino_select=all', '--set', 'synth.place=true',
+                        '--set', 'synth.place.timing_driven=false', '--set', 'synth.place.iterations=80',
+                        '--set', 'synth.place.grid.density=8']
+P = root / 'P'
+placed = run('place', place_args + ['--workdir', str(P), '--emit-dir', f'def:{root}/def'])
+place = placed['qor']['place']
+assert place['legal'] and place['mode'] == 'full', place
+multirow = place['multirow']
+assert multirow['cells'] == 2 and multirow['even_starts'] + multirow['odd_starts'] == 2, multirow
+assert multirow['row_access'] == 'stand-in' and multirow['templates'] >= 2, multirow
+manifest = json.loads((root / 'def/lefs.json').read_text())
+assert manifest[-1].endswith('domino_cells.lef') and len(manifest) == 3, manifest
+heights = {}
+macro = None
+for line in (root / 'def' / manifest[-1]).read_text().splitlines():
+    words = line.split()
+    if words[:1] == ['MACRO']:
+        macro = words[1]
+    elif words[:1] == ['SIZE']:
+        heights[macro] = float(words[3])
+rows = {}
+domino_cells = []
+for line in (root / 'def/out.def').read_text().splitlines():
+    words = line.split()
+    if words[:1] == ['ROW']:
+        rows[int(words[4])] = words[5]
+    elif len(words) > 8 and words[0] == '-' and words[2].startswith('__lhd_domino_'):
+        domino_cells.append((words[1], words[2], int(words[7]), words[9]))
+assert len(domino_cells) == 2, domino_cells
+row_height = 2720
+for name, master, ylo, orientation in domino_cells:
+    assert abs(heights[master] - 5.44) < 1e-9, (master, heights)
+    assert ylo % row_height == 0 and ylo + row_height in rows, (name, ylo)
+    assert orientation == rows[ylo], (name, orientation, rows[ylo])
+assert sorted(n.rsplit('.', 1)[-1] for n, _, _, _ in domino_cells) == ['q1', 'q2'], domino_cells
+
+# The placed netlist is still sequentially equivalent with the bundle models.
+placed_proof = run('lec_placed', [lhd, 'lec', '--impl', f'lg:{P}/synth/net', '--ref', f'verilog:{placed_source}',
+                                  '--lib', f'lg:{root}/cells', '--lib', f'lg:{P}/synth/qor.json.domino/models',
+                                  '--top', 'domp', '--set', 'formal.effort=proof', '--set', 'formal.timeout=10',
+                                  '--workdir', str(root / 'lec_placed')])['lec']
+assert placed_proof['verdict'] == 'proven-full', placed_proof
+
+# Placement is deterministic: a second run in a fresh workdir gives the same DEF.
+first_def = (root / 'def/out.def').read_bytes()
+run('place_again', place_args + ['--workdir', str(root / 'P2'), '--emit-dir', f'def:{root}/def2'])
+assert (root / 'def2/out.def').read_bytes() == first_def
 print('lhd_domplace_smoke: ok')
