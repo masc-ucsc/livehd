@@ -485,6 +485,18 @@ TEST(Multirow, ReleaseIsAtomicAndRequiresFixedAnchors) {
   EXPECT_EQ(f.fp.components[report.anchors.front().component].place.status, Status::FIXED);
 }
 
+TEST(Multirow, OnlyAdmittedMastersAreAnchored) {
+  Fixture    f;
+  const auto dom = f.cell(1, 0), wide = f.cell(6, 0, "wide");
+  f.options.admits  = [](std::string_view master) { return master == "dom"; };
+  const auto before = f.at(wide);
+  const auto report = anchor_multirow_cells(f.tech, f.fp, f.options);
+  ASSERT_EQ(report.anchors.size(), 1);
+  EXPECT_EQ(report.anchors[0].component, dom);
+  EXPECT_EQ(f.at(dom).status, Status::FIXED);
+  EXPECT_EQ(f.at(wide), before);
+}
+
 TEST(Multirow, FramesWithoutMovableMultirowCellsAreUntouched) {
   Fixture f;
   f.cell(0, 0, "cell");

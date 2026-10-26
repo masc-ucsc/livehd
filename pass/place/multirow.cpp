@@ -334,7 +334,7 @@ Multirow_report anchor_multirow_cells(const ph::Technology& tech, ph::Floorplan&
     const auto  master = tech.macros.find(c.macro);
     require(master != tech.macros.end() && c.place.is_valid(), "multirow packing requires known masters and seeded cells");
     const auto k = multirow_rows(tech, master->second);
-    if (!k || frame_role(tech, c) != Frame_role::movable) {
+    if (!k || (options.admits && !options.admits(c.macro)) || frame_role(tech, c) != Frame_role::movable) {
       continue;
     }
     if (c.place.height != int64_t(k) * std::llround(tech.sites.at(master->second.site).height * tech.dbu)

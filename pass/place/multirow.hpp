@@ -6,6 +6,7 @@
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "inou/lefdef/physical.hpp"
@@ -48,6 +49,10 @@ struct Multirow_options {
   // removed bottom row does not flip every start's parity; a site absent here
   // counts from its lowest row in the frame.
   std::map<std::string, int64_t>                  core_origins;
+  // Anchor only the masters this admits; null admits every multi-row CORE
+  // master. Placement admits the provisional domino abstracts only, so a
+  // library multi-row cell still fails terminal legalization loudly.
+  bool (*admits)(std::string_view master) = nullptr;
 };
 struct Multirow_anchor {
   size_t    component;  // index into Floorplan::components
@@ -79,7 +84,8 @@ std::map<std::string, int64_t> first_core_rows(const physical::Floorplan&);
 // availability is not checked.
 bool multirow_start_allowed(const physical::Technology&, const physical::Floorplan&, size_t start_row, const std::string& master,
                             const Multirow_options&);
-// Anchor every movable multi-row CORE cell, widest first, then by name. Each
+// Anchor every movable multi-row CORE cell the options admit, widest first,
+// then by name. Each
 // takes the legal pose nearest its current one (Manhattan distance), within
 // the window or else anywhere in the core. Atomic: on failure throws
 // Multirow_failure and leaves fp unchanged.

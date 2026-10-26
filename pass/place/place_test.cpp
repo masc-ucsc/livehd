@@ -350,65 +350,77 @@ TEST(Placement, TerminalLegalizerIsLastAndPreservesItsExactOutput) {
   }
 }
 
+// A chain of 12 sky130 cells in which c1, c5 and c9 are a two-row copy of
+// inv_1 named `master`, given in its own LEF, for full placement through the
+// terminal legalizer.
+constexpr const char* kDominoTwoRow = "__lhd_domino_two_row";
+struct Two_row_chain {
+  std::vector<std::string>     lefs{"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  hhds::GraphLibrary           source, flat;
+  std::shared_ptr<hhds::Graph> graph;
+  Options                      options = plain_options();
+  explicit Two_row_chain(const std::string& master) {
+    const auto tech  = physical::read_lef(lefs);
+    auto       tall  = tech.macros.at("sky130_fd_sc_hd__inv_1");
+    tall.height     *= 2;
+    const auto dir   = std::string(std::getenv("TEST_TMPDIR")) + "/" + master;
+    std::filesystem::create_directories(dir);
+    std::ofstream(dir + "/two_row.lef") << physical::write_lef_macros(
+        {
+            {master, tall}
+    },
+        tech.dbu);
+    auto io = source.create_io("two_rows");
+    io->add_input("a", 0);
+    io->set_bits("a", 1);
+    io->add_output("y", 0);
+    io->set_bits("y", 1);
+    graph    = io->create_graph();
+    auto inv = source.create_io("sky130_fd_sc_hd__inv_1");
+    auto two = source.create_io(master);
+    for (const auto& cell : {inv, two}) {
+      cell->add_input("A", 0);
+      cell->add_output("Y", 0);
+    }
+    auto signal = graph->get_input_pin("a");
+    gu::set_bits(signal, 1);
+    for (unsigned i = 0; i < 12; ++i) {
+      auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+      node.set_subnode(i % 4 == 1 ? two : inv);
+      node.set_name("c" + std::to_string(i));
+      node.create_sink_pin("A").connect_driver(signal);
+      signal = node.create_driver_pin("Y");
+      gu::set_bits(signal, 1);
+    }
+    graph->get_output_pin("y").connect_driver(signal);
+    options.lefs                                        = {lefs[0], lefs[1], dir + "/two_row.lef"};
+    options.output_dir                                  = dir + "/out";
+    options.iterations                                  = 0;
+    options.bins                                        = 4;
+    options.density                                     = .5;
+    options.utilization                                 = .15;
+    options.optimization_pending                        = false;
+    options.terminal_legalize_options.critical_fraction = 0;
+  }
+};
+
 TEST(Placement, TwoRowCellsAreAnchoredBeforeTerminalLegalization) {
   // Movable two-row CORE cells (domino abstracts) go through the anchor
   // prepass, the unchanged terminal legalizer and release; the other final
   // legalizers refuse them.
-  const std::vector<std::string> lefs{"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
-  const auto                     tech  = physical::read_lef(lefs);
-  auto                           tall  = tech.macros.at("sky130_fd_sc_hd__inv_1");
-  tall.height                         *= 2;
-  const auto dir                       = std::string(std::getenv("TEST_TMPDIR")) + "/two_rows";
-  std::filesystem::create_directories(dir);
-  std::ofstream(dir + "/two_row.lef") << physical::write_lef_macros(
-      {
-          {"two_row", tall}
-  },
-      tech.dbu);
-  hhds::GraphLibrary source, flat;
-  auto               io = source.create_io("two_rows");
-  io->add_input("a", 0);
-  io->set_bits("a", 1);
-  io->add_output("y", 0);
-  io->set_bits("y", 1);
-  auto graph = io->create_graph();
-  auto inv   = source.create_io("sky130_fd_sc_hd__inv_1");
-  auto two   = source.create_io("two_row");
-  for (const auto& cell : {inv, two}) {
-    cell->add_input("A", 0);
-    cell->add_output("Y", 0);
-  }
-  auto signal = graph->get_input_pin("a");
-  gu::set_bits(signal, 1);
-  for (unsigned i = 0; i < 12; ++i) {
-    auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
-    node.set_subnode(i % 4 == 1 ? two : inv);
-    node.set_name("c" + std::to_string(i));
-    node.create_sink_pin("A").connect_driver(signal);
-    signal = node.create_driver_pin("Y");
-    gu::set_bits(signal, 1);
-  }
-  graph->get_output_pin("y").connect_driver(signal);
-  auto options                                        = plain_options();
-  options.lefs                                        = {lefs[0], lefs[1], dir + "/two_row.lef"};
-  options.output_dir                                  = dir + "/out";
-  options.iterations                                  = 0;
-  options.bins                                        = 4;
-  options.density                                     = .5;
-  options.utilization                                 = .15;
-  options.optimization_pending                        = false;
-  options.terminal_legalize_options.critical_fraction = 0;
-  options.row_access                                  = physical::Row_access_convention{};
-  options.multirow_templates["two_row"]               = {
+  Two_row_chain chain(kDominoTwoRow);
+  auto&         options                     = chain.options;
+  options.row_access                        = physical::Row_access_convention{};
+  options.multirow_templates[kDominoTwoRow] = {
       {physical::Row_access::horizontal, physical::Row_access::vertical}
   };
-  const auto result = place(*graph, flat, options);
+  const auto result = place(*chain.graph, chain.flat, options);
   const auto all    = physical::read_lef(options.lefs);
   EXPECT_NO_THROW(check_legality(all, result.floorplan));
   const auto rh      = std::llround(all.sites.at("unithd").height * all.dbu);
   size_t     two_row = 0;
   for (const auto& c : result.floorplan.components) {
-    if (c.macro != "two_row") {
+    if (c.macro != kDominoTwoRow) {
       continue;
     }
     ++two_row;
@@ -428,10 +440,25 @@ TEST(Placement, TwoRowCellsAreAnchoredBeforeTerminalLegalization) {
   EXPECT_STREQ(qor["multirow"]["row_access"].GetString(), "stand-in");
   options.busorder.enabled = true;
   try {
-    (void)place(*graph, flat, options);
+    (void)place(*chain.graph, chain.flat, options);
     ADD_FAILURE() << "the region mesh accepted two-row cells";
   } catch (const std::invalid_argument& error) {
     EXPECT_NE(std::string(error.what()).find("two-row"), std::string::npos) << error.what();
+  }
+}
+
+TEST(Placement, LibraryTwoRowCellsKeepTheSingleRowPaths) {
+  // Only the reserved domino masters opt into the anchor prepass: a library
+  // two-row cell still reaches the single-row terminal legalizer, which
+  // refuses it as before, and draws no two-row refusal.
+  Two_row_chain chain("lib_two_row");
+  try {
+    (void)place(*chain.graph, chain.flat, chain.options);
+    ADD_FAILURE() << "a library two-row cell was placed";
+  } catch (const std::exception& error) {
+    const std::string what = error.what();
+    EXPECT_NE(what.find("terminal legalization"), std::string::npos) << what;
+    EXPECT_EQ(what.find("two-row"), std::string::npos) << what;
   }
 }
 

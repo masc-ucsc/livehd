@@ -51,6 +51,7 @@
 #include "pin_adjust.hpp"
 #include "pin_escape_guard.hpp"
 #include "power_grid.hpp"
+#include "provisional_cell.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -5696,11 +5697,14 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   // Movable two-row CORE cells (provisional domino masters) are packed only by
   // the anchor prepass of final terminal legalization (multirow.hpp). The macro
   // stage, native and SAT legalization, the region refinements and ECO
-  // re-placement assume single-row cells, so they refuse them.
+  // re-placement assume single-row cells, so they refuse them. Only the
+  // reserved domino masters opt in: a library multi-row cell keeps the
+  // single-row paths (and their failures) unchanged.
   size_t multirow_cells = 0;
   for (const auto& cell : v.cells) {
     multirow_cells += !cell.locked && cell.place.status != Ann_place::Status::FIXED
-                      && cell.place.status != Ann_place::Status::LOCKED && is_multirow_core(tech, tech.macros.at(cell.macro));
+                      && cell.place.status != Ann_place::Status::LOCKED && livehd::is_provisional_domino_cell(cell.macro)
+                      && is_multirow_core(tech, tech.macros.at(cell.macro));
   }
   if (multirow_cells) {
     const auto refuse = [&](std::string_view what) {
@@ -8110,6 +8114,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         anchors.macro_halo_x_dbu = terminal_options.macro_halo_x_dbu;
         anchors.macro_halo_y_dbu = terminal_options.macro_halo_y_dbu;
         anchors.core_origins     = core_origins;
+        anchors.admits           = livehd::is_provisional_domino_cell;
         multirow_report          = anchor_multirow_cells(tech, frame, anchors);
       }
       terminal_report = terminal_legalize(tech, frame, final_gp_timing, terminal_options);
