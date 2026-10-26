@@ -22,6 +22,7 @@ from .maps import decode, encode
 
 VERSIONS = {"feature_version": FEATURE_VERSION, "label_version": LABEL_VERSION, "arch_version": ARCH_VERSION}
 MAP_LIMIT = 8 * 1024 * 1024  # per sample features/labels file, as LiveHD admits them
+MANIFEST_LIMIT = 64 * 1024 * 1024
 
 
 def inside(root, relative):
@@ -63,7 +64,7 @@ def read_manifest(root):
     path = Path(root) / "manifest.json"
     if not path.exists():
         return dict(VERSIONS, weights=None, trained_on="", samples=[])
-    if path.stat().st_size > 64 * 1024 * 1024:
+    if path.stat().st_size > MANIFEST_LIMIT:
         raise ValueError("oversized URoute manifest")
     doc = json.loads(path.read_bytes(), object_pairs_hook=_object)
     if any(type(doc.get(key)) is not int or doc[key] != value for key, value in VERSIONS.items()):
@@ -135,8 +136,9 @@ def _shape(maps, channels, normalized):
 def load_sample(root, record):
     """Digest-checked routed support pair, decoded from the bytes that were hashed.
 
-    Admission matches UrouteContext: normalized four-channel features and raw,
-    nonnegative three-channel labels. Returns (features, labels, paths).
+    Shapes and label ranges follow UrouteContext admission: normalized
+    four-channel features and raw, nonnegative three-channel labels on the
+    network grid. Returns (features, labels, paths).
     """
     directory = inside(root, record["directory"])
     paths = tuple(inside(directory, name) for name in ("features.bin", "labels.bin"))
@@ -173,22 +175,23 @@ def _routed_pair_identity(metadata):
     return result
 
 
+def _stored_path(base, relative, what):
+    """A path named by a stored record. Stricter than inside() about lexical '..'
+    components, but base itself is admitted."""
+    path = Path(relative)
+    resolved = (Path(base) / path).resolve()
+    if path.is_absolute() or ".." in path.parts or not resolved.is_relative_to(Path(base).resolve()):
+        raise ValueError(f"immutable sample {what} escapes the pool")
+    return resolved
+
+
 def _verify_immutable_sample(root, record):
-    directory = Path(record["directory"])
-    if directory.is_absolute() or ".." in directory.parts:
-        raise ValueError("immutable sample directory escapes the pool")
-    directory = (root / directory).resolve()
-    if not directory.is_relative_to(root.resolve()):
-        raise ValueError("immutable sample directory escapes the pool")
+    directory = _stored_path(root, record["directory"], "directory")
     saved = json.loads((directory / "sample.json").read_bytes(), object_pairs_hook=_object)
     if saved != record:
         raise ValueError("immutable URoute sample metadata was modified")
     for name, digest in record["files"].items():
-        relative = Path(name)
-        path = (directory / relative).resolve()
-        if relative.is_absolute() or ".." in relative.parts or not path.is_relative_to(directory):
-            raise ValueError("immutable sample file escapes the pool")
-        if file_sha(path) != digest:
+        if file_sha(_stored_path(directory, name, "file")) != digest:
             raise ValueError("immutable URoute sample was modified")
     return directory
 
