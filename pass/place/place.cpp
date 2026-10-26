@@ -4634,6 +4634,15 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                            options.utilization,
                            double(tech.dbu)};
   };
+  // A skipped pool reports its reason without building features. view()
+  // yields the physical View whose features and identity form the query.
+  const auto select_uroute = [&](const auto& view, int bins) {
+    if (!uroute_data->skipped().empty()) {
+      return uroute_data->select({}, {});
+    }
+    const View& physical = view();
+    return uroute_data->select(dp::uroute_features(physical.design, bins, bins), uroute_id(physical));
+  };
   auto env = environment_key(options, tech);
   if (uroute_data) {
     env += ":uroute:" + uroute_data->cache_identity();
@@ -5286,13 +5295,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
     resolved.uroute_stage_identity = uroute_id(v);
     if (uroute_data && options.macro_route.policy.probe && options.macro_route.policy.probe_model == dp::RouteModel::uroute) {
-      if (uroute_data->skipped().empty()) {
-        macro_uroute
-            = uroute_data->select(dp::uroute_features(v.design, resolved.macro_parameters.bins, resolved.macro_parameters.bins),
-                                  resolved.uroute_stage_identity);
-      } else {
-        macro_uroute = uroute_data->select({}, {});
-      }
+      macro_uroute                = select_uroute([&]() -> const View& { return v; }, resolved.macro_parameters.bins);
       resolved.uroute_selection  = macro_uroute;
       identity                  += ":uroute-selection:" + macro_uroute.cache_identity + ":" + macro_uroute.skipped;
     }
@@ -5398,14 +5401,13 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (uroute_data) {
     // Select from a physical pre-cache snapshot. Both the immutable pool digest
     // and the actual selected IDs are part of the placement cache identity.
-    if (uroute_data->skipped().empty()) {
-      auto snapshot = v;
-      make_arrays(snapshot, tech);
-      const int route_bins = route_grid_bins(auxiliary_route_bins(options), options.bins);
-      selected_uroute      = uroute_data->select(dp::uroute_features(snapshot.design, route_bins, route_bins), uroute_id(snapshot));
-    } else {
-      selected_uroute = uroute_data->select({}, {});
-    }
+    selected_uroute = select_uroute(
+        [&] {
+          auto snapshot = v;
+          make_arrays(snapshot, tech);
+          return snapshot;
+        },
+        route_grid_bins(auxiliary_route_bins(options), options.bins));
     env += ":uroute-selection:" + selected_uroute.cache_identity + ":" + selected_uroute.skipped;
   }
   const auto hashes = block_hashes(v);
