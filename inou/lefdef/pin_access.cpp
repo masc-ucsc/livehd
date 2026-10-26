@@ -96,17 +96,14 @@ static Pin_access_result enumerate_pin_access_impl(const Technology& tech, const
     if (shape.layer != layers.pin) {
       return fail("pin is not entirely " + layers.pin);
     }
-    auto rect = placed_rect(master, cell.place, fp.dbu, shape.rect);
-    for (auto* coordinate : {&rect.xl, &rect.yl, &rect.xh, &rect.yh}) {
-      if (!std::isfinite(*coordinate) || std::abs(*coordinate - std::round(*coordinate)) > 1e-6) {
-        return fail("pin geometry is not representable in DEF DBU");
-      }
-      *coordinate = std::round(*coordinate);
+    const auto rect = snapped_dbu(placed_rect(master, cell.place, fp.dbu, shape.rect), 1e-6);
+    if (!rect) {
+      return fail("pin geometry is not representable in DEF DBU");
     }
-    if (!valid(rect) || !fp.die.contains(rect)) {
+    if (!valid(*rect) || !fp.die.contains(*rect)) {
       return fail("invalid transformed pin");
     }
-    pin.push_back(rect);
+    pin.push_back(*rect);
   }
   if (pin.empty()) {
     return fail("empty pin geometry");

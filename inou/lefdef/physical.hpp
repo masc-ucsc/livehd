@@ -57,6 +57,9 @@ std::vector<std::pair<T, T>> merge_intervals(std::vector<std::pair<T, T>> interv
 // value is finite, within tolerance of it (floating-point noise; infinity
 // accepts plain rounding) and inside the signed 32-bit DEF/OpenDB range.
 std::optional<int64_t> rounded_dbu(double value, double tolerance);
+// Each coordinate rounded to integral DBU; empty when one is not finite or lies
+// farther than tolerance from an integer. The DEF range remains the caller's check.
+std::optional<Rect>    snapped_dbu(Rect r, double tolerance);
 // Rule distances round up, so a micron spacing or width is never relaxed.
 inline double          rule_dbu(double microns, int64_t dbu) { return std::ceil(microns * dbu - 1e-9); }
 // Finite integral coordinates within the signed 32-bit DEF/OpenDB range.

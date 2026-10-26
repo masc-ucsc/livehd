@@ -133,14 +133,11 @@ Route_connectivity check_route_connectivity(const Technology& tech, const Floorp
         if (!tech.layers.contains(s.layer) || s.rect.empty()) {
           throw std::runtime_error("unsupported endpoint pin shape");
         }
-        auto r = placed_rect(master, cell.place, fp.dbu, s.rect);
-        for (auto* v : {&r.xl, &r.yl, &r.xh, &r.yh}) {
-          if (!std::isfinite(*v) || std::abs(*v - std::round(*v)) > 1e-6) {
-            throw std::runtime_error("fractional endpoint geometry");
-          }
-          *v = std::round(*v);
+        const auto r = snapped_dbu(placed_rect(master, cell.place, fp.dbu, s.rect), 1e-6);
+        if (!r) {
+          throw std::runtime_error("fractional endpoint geometry");
         }
-        graph.merge(pin_node, append({s.layer, r}));
+        graph.merge(pin_node, append({s.layer, *r}));
       }
     }
     std::set<size_t> roots;

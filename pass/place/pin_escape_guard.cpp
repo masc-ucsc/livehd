@@ -229,21 +229,16 @@ Pin_escape_guard::Pin_escape_guard(const ph::Technology& tech, const ph::Floorpl
             if (!tech.layers.contains(shape.layer)) {
               continue;
             }
-            auto box           = ph::placed_rect(m, place, frame.dbu, shape.rect);
-            bool representable = true;
-            for (auto* v : {&box.xl, &box.yl, &box.xh, &box.yh}) {
-              representable &= std::isfinite(*v) && std::abs(*v) <= INT32_MAX && std::abs(*v - std::round(*v)) <= 1e-6;
-              *v             = std::round(*v);
-            }
-            if (!representable || box.empty()) {
+            const auto box = ph::snapped_dbu(ph::placed_rect(m, place, frame.dbu, shape.rect), 1e-6);
+            if (!box || !ph::integral_dbu(*box) || box->empty()) {
               continue;
             }
-            for (auto id : occupancy.query(shape.layer, box, 0)) {
+            for (auto id : occupancy.query(shape.layer, *box, 0)) {
               if (checkpoint) {
                 checkpoint();
               }
               const auto wire = occupancy.at(id);
-              if (wire.routed && wire.net == net.name && box.overlaps(wire.shape.rect)) {
+              if (wire.routed && wire.net == net.name && box->overlaps(wire.shape.rect)) {
                 supply_attached = true;
                 break;
               }

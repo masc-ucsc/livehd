@@ -948,6 +948,15 @@ std::optional<int64_t> rounded_dbu(double value, double tolerance) {
   }
   return static_cast<int64_t>(rounded);
 }
+std::optional<Rect> snapped_dbu(Rect r, double tolerance) {
+  for (auto* v : {&r.xl, &r.yl, &r.xh, &r.yh}) {
+    if (!std::isfinite(*v) || std::abs(*v - std::round(*v)) > tolerance) {
+      return {};
+    }
+    *v = std::round(*v);
+  }
+  return r;
+}
 std::optional<int64_t> wire_width_dbu(const Layer& layer, int64_t dbu) {
   const auto width = rounded_dbu(layer.width * dbu, 0);
   if (!width || *width <= 0 || *width % 2) {
