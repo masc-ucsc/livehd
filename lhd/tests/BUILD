@@ -2988,6 +2988,22 @@ sh_test(
     ],
 )
 
+# 2d-domplace G: synth.place.domino_sizing on a fixture with a second register
+# rung written to TEST_TMPDIR -- an up-size that displaces a neighbour, a
+# growth a dense core cannot pack (the DEF of the unsized run), legality,
+# placed-netlist LEC and a warm replay.
+sh_test(
+    name = "lhd_domplace_sizing_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_domplace_sizing_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+        "//scripts/domplace:domplace_view.py",
+    ],
+)
+
 # 2d-domplace E: synth.place.stage_timing on the final placement -- the
 # domino arm's partial coverage and its explicit failures, and the CMOS arm's
 # native flop-to-flop slack against OpenTimer on the same placement.

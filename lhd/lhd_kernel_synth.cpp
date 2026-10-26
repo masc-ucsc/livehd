@@ -36,6 +36,7 @@
 // seeded and deterministic).
 
 #include <algorithm>
+#include <charconv>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -65,8 +66,10 @@
 #include "node_util.hpp"
 #include "pass.hpp"
 #include "pass/domplace/timing/stage_timing.hpp"
+#include "pass/domplace/timing/stage_timing_salt.hpp"
 #include "pass/opentimer/pass_opentimer.hpp"
 #include "pass/opentimer/sta_salt.hpp"
+#include "pass/place/custom_sizing.hpp"
 #include "pass/place/io_timing.hpp"
 #include "pass/place/place.hpp"
 #include "pass/place/preroute_host.hpp"
@@ -94,10 +97,15 @@ std::string physical_descriptor(const Options& opts, const livehd::placement::Op
   w.String(opts.top.c_str());
   w.String(opts.seed.c_str());
   w.Uint(opts.jobs);
+  // Report-only stage timing reruns on every restore and never changes the
+  // placement, so it is not placement identity -- unless domino sizing
+  // optimizes against it: then its settings and its code salt are.
+  const bool sizing = truthy(synth_set(opts, "place.domino_sizing", "false"));
+  if (sizing) {
+    w.Uint64(livehd::domplace::timing::kStageTimingSalt);
+  }
   for (const auto& [key, value] : opts.sets) {
-    // Report-only stage timing reruns on every restore and never changes the
-    // placement, so it is not placement identity.
-    if (key == "synth.place.stage_timing" || key.starts_with("synth.place.stage_timing.")) {
+    if (!sizing && (key == "synth.place.stage_timing" || key.starts_with("synth.place.stage_timing."))) {
       continue;
     }
     w.StartArray();
@@ -1292,6 +1300,27 @@ void synth_command(Options& opts, Result& res) {
     }
     stage_clock = stage_timing_clock(stage_timing_port, usyn_sets, sdc, liberty.empty() ? usyn_liberty : liberty);
   }
+  // Post-legal domino sizing (2d-domplace G): opt-in, against stage timing.
+  const bool                               run_domino_sizing = truthy(synth_set(opts, "place.domino_sizing", "false"));
+  livehd::placement::Custom_sizing_options domino_sizing;
+  domino_sizing.buffers = truthy(synth_set(opts, "place.domino_sizing.buffers", "true"));
+  {
+    const auto text         = synth_set(opts, "place.domino_sizing.trials", "64");
+    unsigned   value        = 0;
+    const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
+    if (error != std::errc{} || end != text.data() + text.size() || value < 1 || value > 4096) {
+      throw Lhd_error{"usage", "synth.place.domino_sizing.trials expects an integer in [1,4096]", ""};
+    }
+    domino_sizing.max_trials = value;
+  }
+  if (!run_domino_sizing && (!domino_sizing.buffers || domino_sizing.max_trials != 64)) {
+    throw Lhd_error{"usage", "synth.place.domino_sizing.buffers and trials need synth.place.domino_sizing=true", ""};
+  }
+  if (run_domino_sizing && (!domino || !run_stage_timing)) {
+    throw Lhd_error{"usage",
+                    "synth.place.domino_sizing needs pass.usyn.physical=domino_provisional and synth.place.stage_timing=true",
+                    "domino sizing accepts its trials on native stage timing"};
+  }
   {
     std::vector<std::string> extra;
     if (!sdc.empty()) {
@@ -1732,6 +1761,32 @@ void synth_command(Options& opts, Result& res) {
       for (const auto& [macro, halves] : sidecar->templates) {
         place_options.multirow_templates[macro] = {halves};
       }
+      if (run_domino_sizing) {
+        // The drive variants domino sizing may swap, from the sidecar catalog.
+        std::vector<livehd::placement::Custom_variant> variants;
+        for (const auto& entry : sidecar->catalog) {
+          livehd::placement::Custom_variant v;
+          v.name          = entry.name;
+          v.family        = entry.family;
+          v.register_cell = entry.register_cell;
+          v.rank          = entry.rank;
+          v.rails         = entry.rails;
+          v.clock         = stage::kDominoPins.clock;
+          v.output        = stage::kDominoPins.output;
+          v.area_um2      = entry.a_footprint_um2;
+          v.estimate_um2  = entry.a_estimate_um2;
+          v.width_dbu     = entry.width_dbu;
+          v.rail_ff       = entry.rail_ff;
+          v.clock_ff      = entry.clock_ff;
+          v.drive         = entry.drive;
+          variants.push_back(std::move(v));
+        }
+        try {
+          place_options.custom_cells = livehd::placement::custom_catalog(std::move(variants));
+        } catch (const std::exception& error) {
+          throw Lhd_error{"internal", std::string("the domino bundle has no usable variant catalog: ") + error.what(), ""};
+        }
+      }
       if (physical_cache) {
         physical_cache->add_dependency(sidecar->lef.string());
         physical_cache->add_dependency((fs::path(bundle_path) / livehd::domplace::kBundleSidecar).string());
@@ -1756,6 +1811,7 @@ void synth_command(Options& opts, Result& res) {
   livehd::placement::Repair_result    timed_placement;
   livehd::placement::Repair_result    resynthesized;
   livehd::placement::Repair_result    finalized;
+  livehd::placement::Repair_result    domino_sized;
   std::string                         place_qor;
   const std::string                   place_qor_path = root + "/place/qor.json";
   if (run_place) {
@@ -2048,6 +2104,46 @@ void synth_command(Options& opts, Result& res) {
         finalized = livehd::placement::finalize_placement(placed, place_options, evaluate);
         placed    = std::move(finalized.placed);
         res.recipe_steps.emplace_back("pass.place.final_legalize");
+      }
+      if (run_domino_sizing) {
+        // Post-legal domino sizing on native stage timing: every trial is
+        // re-placed through the two-row ECO and re-timed with this timer.
+        if (!stage_timer) {
+          stage_timer = make_stage_timer(liberty.empty() ? usyn_liberty : liberty,
+                                         sdc,
+                                         top,
+                                         bundle_path,
+                                         place_options.lefs,
+                                         *stage_clock,
+                                         stage_timing_uncertainty);
+        }
+        const livehd::placement::Evaluate stage_evaluate = [&](const livehd::placement::Result& state) {
+          const auto timing = stage_timer->evaluate(*state.graph, state.parasitics.get(), &state.floorplan, {.classes = false});
+          if (!timing.period_ps) {
+            std::string why = "stage timing is " + timing.status;
+            for (const auto& reason : timing.reasons) {
+              why += "; " + reason;
+            }
+            throw std::runtime_error("domino sizing needs a measured stage period: " + why);
+          }
+          return timing.feedback;
+        };
+        phase_step = "pass.place.domino_sizing";
+        phase_log  = next_log_path(opts, phase_step);
+        set_crash_context(phase_step, phase_log);
+        try {
+          Phase_timer   phase(res, "pass.place.domino_sizing");
+          Stdout_to_log redirect(phase_log);
+          domino_sized = livehd::placement::size_custom_placed(std::move(placed), place_options, stage_evaluate, domino_sizing);
+          placed       = std::move(domino_sized.placed);
+        } catch (const std::exception& e) {
+          throw Lhd_error{"unsupported", std::string("domino sizing failed: ") + e.what(), "see " + phase_log};
+        }
+        phase_step.clear();
+        phase_log.clear();
+        set_crash_context({}, {});
+        res.recipe_steps.emplace_back("pass.place.domino_sizing");
+        res.outputs.push_back(root + "/place/domino_sizing.json");
       }
       net.graphs = {placed.graph};
       if (io_flow) {

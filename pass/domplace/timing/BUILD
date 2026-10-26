@@ -23,11 +23,27 @@ cc_library(
     ],
 )
 
+# The code identity of stage timing: part of the physical cache key only when
+# domino sizing optimizes against it (report-only timing never re-places).
+genrule(
+    name = "stage_timing_salt",
+    srcs = glob(
+        ["*.cpp", "*.hpp"],
+        exclude = ["*_test.cpp", "*_fixture.hpp"],
+    ),
+    outs = ["stage_timing_salt.hpp"],
+    cmd = "h=$$(cat $(SRCS) | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16); " +
+          "printf '#pragma once\\n#include <cstdint>\\nnamespace livehd::domplace::timing { inline constexpr uint64_t kStageTimingSalt = 0x%sULL; }\\n' \"$$h\" > $@",
+)
+
 # Constraints, half-cycle stage timing and the stage_timing.json report.
 cc_library(
     name = "stage_timing",
     srcs = ["stage_timing.cpp"],
-    hdrs = ["stage_timing.hpp"],
+    hdrs = [
+        "stage_timing.hpp",
+        ":stage_timing_salt",
+    ],
     copts = COPTS,
     visibility = ["//visibility:public"],
     deps = [

@@ -2560,6 +2560,21 @@ nothing committed; the two-row ECO never falls back to windowed
 re-placement. `qor.multirow_eco` reports outcomes, released and grown sites
 (over both rows), displaced cells and the largest displacement.
 
+Those transactions come from `custom_sizing.hpp` (`size_custom_placed`,
+lhd `synth.place.domino_sizing`). `Options::custom_cells` (`custom_cells.hpp`,
+internal, part of the environment key) lists same-interface variants of
+custom sequential macros by family and rank; a swap declares the new
+variant as a pin-for-pin clone of the instance's declaration, so every pin,
+edge and pin attribute stays. After final legalization a critical instance
+(negative output slack) steps up, its output is buffered only once its top
+variant is in place or its up move was rejected, and an instance with spare
+slack steps down. Each trial is one edit through `run_resize_trial` (the
+resize engine's clone, ECO re-place and evaluate) with `multirow_eco`, and
+is accepted when the evaluator's period (`Feedback::delay`) is not worse and
+`resize_accepts` holds; a `Multirow_failure` rejects the trial and leaves the
+state untouched. `domino_sizing.json` and `qor.domino_sizing` list every
+trial, the variant counts and the clock-capacitance change.
+
 `terminal_legalize.json` records settings, bin capacities/areas, stage counts,
 SAT outcomes, retries and displacement. `terminal_legalize_cells.tsv` records
 critical membership, stage, slack and before/after coordinates. Normal placement

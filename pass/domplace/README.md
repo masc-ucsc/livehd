@@ -159,6 +159,29 @@ word-valued ports is timed on its bit-level DEF import. `//tools:stage_timing_pr
 reruns the same report offline on a saved placement, with coefficient
 overrides for sweeps that must not re-place.
 
+## Sizing
+
+`lhd synth --set synth.place.domino_sizing=true` (with the profile and
+`synth.place.stage_timing=true`) sizes the placed domino cells after final
+legalization, without rerunning USYN (`pass/place/custom_sizing.hpp`). The
+choices are the sidecar's variant catalog: the variants of one master and
+template, ranked by their register's drive, with the same rails, CLK, Q and
+port order. A domino instance whose Q slack is negative steps up; once its
+top variant is in place, or its up move was rejected, its Q net is buffered
+(the smallest inventory buffer takes every sink but the worst;
+`.buffers=false` never buffers); an instance with spare slack steps down.
+Every trial is one edit re-placed through the two-row ECO (in place, a shift
+of up to 64 sites, displacing up to 16 single-row cells, else a re-anchor,
+with the terminal padding kept) and re-timed with the same stage timer; it
+is accepted when the stage period is not worse and setup WNS/TNS and
+electrical violations are not worse with some gain (LEF footprint area
+counts). A packing failure is a rejected trial. `.trials` (default 64) bounds
+the trials. The netlist is always variant 0 at synthesis, so a down-size
+only follows an up-size. `place/domino_sizing.json` and
+`qor.place.domino_sizing` list each trial, the variant counts and the C_clk
+change from the catalog's labeled `clock_ff`. With sizing on, the stage
+timing settings and the stage-timing code salt join the physical cache key.
+
 ## Code
 
 | Target | Contents |
@@ -176,8 +199,8 @@ The bundle holds `domino_cells.lef` (macros only: no UNITS or SITE, read after
 the technology and cell LEFs), `domino_models.json` (the sidecar),
 `domino_models.v` and `models/` (an lg library for `lhd lec --lib lg:`), and
 `row_access.json` (the convention it was generated for). Every master is
-written in every register-ladder variant; sizing is disabled, so the netlist
-instantiates variant 0. An abstract that fails the pin-access check refuses
+written in every register-ladder variant; the netlist instantiates variant 0,
+and only `synth.place.domino_sizing` swaps variants after placement. An abstract that fails the pin-access check refuses
 the bundle and pass.usyn publishes nothing; a technology rule the access
 engine cannot check (sky130's mcon enclosure) is reported as unverified, never
 as passed.
@@ -237,7 +260,10 @@ profile. `lhd_domplace_floorplan_smoke.py` places into an imported pinless
 frame narrow enough to fit only one anchor per row pair. One site narrower,
 it checks the named atomic packing failure. Imported DEF placement blockages
 cannot fragment rows here yet, because terminal legalization does not consult
-them.
+them. `lhd_domplace_sizing_smoke.py` writes a second register rung (a
+stronger, wider `dfxtp_2`) to its temporary directory and sizes: an up-size
+that displaces a neighbour, LEC with the bundle models, a warm replay, and a
+growth a dense core cannot pack, whose DEF equals the unsized run's.
 
 ## Matched commands
 
