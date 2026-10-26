@@ -404,9 +404,7 @@ Rule_check Signal_metal_rules::rectangle(const Shape& shape) const {
       if (track.axis != axis) {
         continue;
       }
-      if (track.count <= 0 || track.count > std::numeric_limits<int32_t>::max() || track.step <= 0
-          || track.step > std::numeric_limits<int32_t>::max() || track.start < std::numeric_limits<int32_t>::min()
-          || track.start > std::numeric_limits<int32_t>::max() || track.mask || track.same_mask) {
+      if (!track.supported()) {
         return reject("invalid or masked routing tracks");
       }
       const auto delta   = center_twice - 2 * track.start;
