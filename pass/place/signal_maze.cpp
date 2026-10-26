@@ -6,7 +6,6 @@
 #include <set>
 #include <tuple>
 
-#include "inou/lefdef/cut_rules.hpp"
 #include "inou/lefdef/routing_connectivity.hpp"
 #include "inou/lefdef/routing_geometry.hpp"
 #include "inou/lefdef/signal_via.hpp"
@@ -50,23 +49,26 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
   std::vector<std::string> layers;
   std::vector<double>      widths, half;
   std::vector<bool>        horizontal;
-  const double             grid = tech_.manufacturing_grid * frame_.dbu;
-  if (!std::isfinite(grid) || grid < 1 || grid != std::round(grid)) {
+  // Maze landings require an explicit LEF manufacturing grid.
+  const auto grid_dbu = tech_.manufacturing_grid > 0 ? ph::manufacturing_grid_dbu(tech_, frame_.dbu) : std::nullopt;
+  if (!grid_dbu) {
     return fail("unsupported manufacturing grid");
   }
+  const double grid = *grid_dbu;
   // Only layers with modeled rules are usable. An unsupported upper layer
   // cannot invalidate a legal lower-layer route, and is never approximated.
   for (const auto& name : profile_.signal_layers) {
     if (!rules_.clearance(name)) {
       break;
     }
-    const auto&  layer = tech_.layers.at(name);
-    const double width = layer.width * frame_.dbu, area = layer.rules.area * frame_.dbu * frame_.dbu;
-    if (!std::isfinite(width) || width <= 0 || width > INT32_MAX || width != std::round(width) || int64_t(width) % 2
-        || !std::isfinite(area) || area < 0 || (layer.direction != "HORIZONTAL" && layer.direction != "VERTICAL")) {
+    const auto&  layer   = tech_.layers.at(name);
+    const auto   nominal = ph::wire_width_dbu(layer, frame_.dbu);
+    const double area    = layer.rules.area * frame_.dbu * frame_.dbu;
+    if (!nominal || !std::isfinite(area) || area < 0 || (layer.direction != "HORIZONTAL" && layer.direction != "VERTICAL")) {
       break;
     }
-    const bool is_horizontal = layer.direction == "HORIZONTAL";
+    const double width         = *nominal;
+    const bool   is_horizontal = layer.direction == "HORIZONTAL";
     if ((!horizontal.empty() && horizontal.back() == is_horizontal) || (horizontal.empty() && !is_horizontal)) {
       break;
     }
@@ -145,16 +147,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
     if (out.access_examined >= limits.access_candidates) {
       return fail("pin-access budget");
     }
-    access[i]            = ph::enumerate_pin_access(tech_,
-                                         frame_,
-                                         *cell->second,
-                                         net.connections[i].pin,
-                                         occupancy_,
-                                         rules_,
-                                         limits.access_candidates - out.access_examined,
-                                         net.name,
-                                         profile_.access);
-    out.access_examined += access[i].examined;
+    access[i] = endpoint_access(*cell->second, net.connections[i].pin, net, limits, out);
     if (expired()) {
       return out;
     }
@@ -177,8 +170,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
     if (std::find(layers.begin(), layers.end(), t.layer) == layers.end()) {
       continue;
     }
-    if (t.mask || t.same_mask || t.step <= 0 || t.count <= 0 || t.step > INT32_MAX || t.count > INT32_MAX || t.start < INT32_MIN
-        || t.start > INT32_MAX) {
+    if (!t.supported()) {
       return fail("unsupported maze tracks");
     }
     pitch = std::max(pitch, double(t.step));
@@ -201,10 +193,8 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
     if (t.axis != (horizontal[l] ? "Y" : "X")) {
       continue;
     }
-    auto&        coords = tracks[l];
-    const double low = horizontal[l] ? ymin : xmin, high = horizontal[l] ? ymax : xmax;
-    const auto   first = std::max<int64_t>(0, std::ceil((low - t.start) / t.step));
-    const auto   last  = std::min<int64_t>(t.count - 1, std::floor((high - t.start) / t.step));
+    auto&      coords        = tracks[l];
+    const auto [first, last] = horizontal[l] ? t.index_range(ymin, ymax) : t.index_range(xmin, xmax);
     for (auto n = first; n <= last; ++n) {
       if (expired()) {
         return out;
@@ -245,8 +235,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
     };
   };
   const auto legal = [&](const ph::Shape& s) {
-    if (!rules_.rectangle(s).legal || s.rect.xl < frame_.die.xl || s.rect.yl < frame_.die.yl || s.rect.xh > frame_.die.xh
-        || s.rect.yh > frame_.die.yh) {
+    if (!rules_.rectangle(s).legal || !frame_.die.contains(s.rect)) {
       return false;
     }
     for (auto id : occupancy_.query(s.layer, s.rect, *rules_.clearance(s.layer), net.name)) {
@@ -257,12 +246,8 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
     return true;
   };
   const auto segment = [&](const Key& a, const Key& b) {
-    auto       s = pad(a);
-    const auto t = pad(b);
-    s.rect       = {std::min(s.rect.xl, t.rect.xl),
-                    std::min(s.rect.yl, t.rect.yl),
-                    std::max(s.rect.xh, t.rect.xh),
-                    std::max(s.rect.yh, t.rect.yh)};
+    auto s = pad(a);
+    s.rect = s.rect.hull(pad(b).rect);
     return s;
   };
   using Via_site = std::tuple<int64_t, int64_t, size_t>;
@@ -565,7 +550,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
       }
     }
   }
-  std::vector<ph::Shape> metal, cuts;
+  std::vector<ph::Shape> metal;
   for (auto& [line, spans] : intervals) {
     std::sort(spans.begin(), spans.end());
     std::vector<std::pair<double, double>> merged;
@@ -639,59 +624,24 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
         }
         trial.nondefault_rules.emplace(taper_rule, std::move(rule));
       }
-      trial.paths.push_back({
-          layers[l],
-          {},
-          {},
-          {ph::Route_point{horizontal[l] ? std::llround(low) : c, horizontal[l] ? c : std::llround(low), 0},
-               ph::Route_point{horizontal[l] ? std::llround(high) : c, horizontal[l] ? c : std::llround(high), 0}},
-          std::move(taper_rule)
-      });
-      trial.layer_wire_length_um[layers[l]] += (high - low) / frame_.dbu;
+      add_wire(trial, s, horizontal[l], std::move(taper_rule));
     }
   }
+  ph::Signal_cut_set cuts(tech_, frame_);
   for (const auto& [name, x, y] : vias) {
     if (expired()) {
       return out;
     }
-    trial.paths.push_back({
-        via_layers.contains(name) ? via_layers.at(name) : profile_.access.pin,
-        {},
-        {},
-        {ph::Route_point{x, y, {}}, ph::Route_via{name}}
-    });
-    for (auto s : ph::via_geometry(tech_, frame_, {name})) {
-      if (!tech_.cut_layers.contains(s.layer)) {
-        continue;
-      }
-      s.rect.xl          += x;
-      s.rect.xh          += x;
-      s.rect.yl          += y;
-      s.rect.yh          += y;
-      const auto spacing  = ph::signal_cut_spacing(tech_.cut_layers.at(s.layer), frame_.dbu);
-      for (const auto& old : cuts) {
-        if (expired()) {
-          return out;
-        }
-        if (old.layer != s.layer) {
-          continue;
-        }
-        const auto dx = std::max({old.rect.xl - s.rect.xh, s.rect.xl - old.rect.xh, 0.});
-        const auto dy = std::max({old.rect.yl - s.rect.yh, s.rect.yl - old.rect.yh, 0.});
-        if ((dx == 0 && dy == 0) || (dx < spacing && dy < spacing)) {
-          return fail("maze self cut spacing");
-        }
-      }
-      cuts.push_back(s);
+    trial.paths.push_back(ph::via_path(via_layers.contains(name) ? via_layers.at(name) : profile_.access.pin, x, y, name));
+    if (!cuts.add({name}, x, y)) {
+      return fail("maze self cut spacing");
     }
   }
   trial.vias = vias.size();
   for (const auto& [layer, length] : trial.layer_wire_length_um) {
     trial.wire_length_um += length;
   }
-  auto routed = net;
-  routed.wires.push_back({"FIXED", trial.paths});
-  const auto connected = ph::check_route_connectivity(tech_, frame_, routed, &components_, &trial.nondefault_rules);
+  const auto connected = connectivity(net, trial.paths, &trial.nondefault_rules);
   if (expired()) {
     return out;
   }

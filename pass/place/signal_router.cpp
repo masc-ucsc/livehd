@@ -45,6 +45,39 @@ Signal_router::Signal_router(const ph::Technology& tech, const ph::Floorplan& fr
     , rules_(rules)
     , components_(frame)
     , pin_escapes_(pin_escapes) {}
+ph::Pin_access_result Signal_router::endpoint_access(const ph::Component& cell, const std::string& pin, const ph::Net& net,
+                                                     const Signal_route_limits& limits, Signal_route_trial& trial) const {
+  auto result = ph::enumerate_pin_access(tech_,
+                                         frame_,
+                                         cell,
+                                         pin,
+                                         occupancy_,
+                                         rules_,
+                                         limits.access_candidates - trial.access_examined,
+                                         net.name,
+                                         profile_.access);
+  trial.access_examined += result.examined;
+  return result;
+}
+std::vector<ph::Shape> Signal_router::proposal_shapes(const ph::Net& net, const std::vector<ph::Route_path>& paths,
+                                                      const ph::Route_width_rules* rules) const {
+  ph::Net proposed;
+  proposed.name = net.name;
+  proposed.wires.push_back({"FIXED", paths});
+  return ph::route_geometry(tech_, frame_, proposed, false, rules);
+}
+ph::Route_connectivity Signal_router::connectivity(const ph::Net& net, const std::vector<ph::Route_path>& paths,
+                                                   const ph::Route_width_rules* rules) const {
+  auto routed = net;
+  routed.wires.push_back({"FIXED", paths});
+  return ph::check_route_connectivity(tech_, frame_, routed, &components_, rules);
+}
+void Signal_router::add_wire(Signal_route_geometry& geometry, const ph::Shape& metal, bool horizontal,
+                             std::string taper_rule) const {
+  const auto& r = metal.rect;
+  geometry.paths.push_back(ph::flush_wire_path(metal, horizontal, std::move(taper_rule)));
+  geometry.layer_wire_length_um[metal.layer] += (horizontal ? r.xh - r.xl : r.yh - r.yl) / frame_.dbu;
+}
 Signal_route_proposals Signal_router::try_route(const ph::Net& net, const Signal_route_request& request) const {
   Signal_route_proposals result;
   if (!std::isfinite(request.max_parallel_exposure) || request.max_parallel_exposure < 0) {
@@ -132,10 +165,7 @@ Signal_route_proposals Signal_router::try_route(const ph::Net& net, const Signal
       result.timed_out = true;
       return true;
     }
-    ph::Net proposed;
-    proposed.name = net.name;
-    proposed.wires.push_back({"FIXED", candidate.paths});
-    const auto shapes = ph::route_geometry(tech_, frame_, proposed, false, &candidate.nondefault_rules);
+    const auto shapes = proposal_shapes(net, candidate.paths, &candidate.nondefault_rules);
     const auto access = escapes->check(shapes, net.name, expired);
     if (!access.legal) {
       result.timed_out |= expired();
@@ -202,9 +232,7 @@ Signal_route_probe Signal_router::probe_route(const ph::Net& net, const Signal_r
   // Span construction validates its vias/trunk incrementally. A predicate
   // must also certify the complete net before reporting a routing witness.
   if (request.straight_span && !request.corridor) {
-    auto routed = net;
-    routed.wires.push_back({"FIXED", candidate.paths});
-    const auto connected = ph::check_route_connectivity(tech_, frame_, routed, &components_);
+    const auto connected = connectivity(net, candidate.paths);
     if (!connected.connected) {
       result.reason = connected.reason;
       return result;
@@ -283,13 +311,15 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
       || tech_.layers.at(target).direction != (horizontal ? "HORIZONTAL" : "VERTICAL")) {
     return fail("lift must preserve trunk direction");
   }
-  const double grid = tech_.manufacturing_grid * frame_.dbu;
-  if (!std::isfinite(grid) || grid < 1 || grid != std::round(grid)) {
+  // Lifting requires an explicit LEF manufacturing grid.
+  const auto grid_dbu = tech_.manufacturing_grid > 0 ? ph::manufacturing_grid_dbu(tech_, frame_.dbu) : std::nullopt;
+  if (!grid_dbu) {
     return fail("unsupported manufacturing grid");
   }
+  const double          grid = *grid_dbu;
   Signal_route_geometry trial;
   trial.endpoints = aligned.endpoints;
-  std::vector<ph::Shape> metal, cuts;
+  std::vector<ph::Shape> metal;
   struct Via {
     std::string name, lower;
     int64_t     x, y;
@@ -309,14 +339,15 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
       return fail("unsupported lift rules");
     }
     const auto&  definition = tech_.layers.at(*layer);
-    const double width      = definition.width * frame_.dbu;
+    const auto   nominal    = ph::wire_width_dbu(definition, frame_.dbu);
     const double area       = definition.rules.area * frame_.dbu * frame_.dbu;
-    if (!std::isfinite(width) || width <= 0 || width > INT32_MAX || width != std::round(width) || int64_t(width) % int64_t(2 * grid)
-        || !std::isfinite(area) || area < 0 || (definition.direction != "HORIZONTAL" && definition.direction != "VERTICAL")) {
+    if (!nominal || *nominal % (2 * *grid_dbu) || !std::isfinite(area) || area < 0
+        || (definition.direction != "HORIZONTAL" && definition.direction != "VERTICAL")) {
       return fail("unsupported lift dimensions");
     }
-    const bool h    = definition.direction == "HORIZONTAL";
-    double     half = std::ceil(std::max(width, area / width) / (2 * grid)) * grid;
+    const double width = *nominal;
+    const bool   h     = definition.direction == "HORIZONTAL";
+    double       half  = std::ceil(std::max(width, area / width) / (2 * grid)) * grid;
     for (const auto& size : definition.rules.min_size) {
       half = std::max(half, std::ceil(std::max(size[0], size[1]) * frame_.dbu / (2 * grid)) * grid);
     }
@@ -328,10 +359,7 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
               : ph::Rect{point.x - width / 2,      point.y - half, point.x + width / 2,      point.y + half}
       };
       if (layer == start && !point.via.empty()) {
-        shape.rect.xl = std::min(shape.rect.xl, point.escape.rect.xl);
-        shape.rect.xh = std::max(shape.rect.xh, point.escape.rect.xh);
-        shape.rect.yl = std::min(shape.rect.yl, point.escape.rect.yl);
-        shape.rect.yh = std::max(shape.rect.yh, point.escape.rect.yh);
+        shape.rect = shape.rect.hull(point.escape.rect);
       }
       if (layer == end) {
         if (h) {
@@ -342,8 +370,7 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
           shape.rect.yh = std::max(a.y, b.y) + half;
         }
       }
-      if (!rules_.rectangle(shape).legal || shape.rect.xl < frame_.die.xl || shape.rect.yl < frame_.die.yl
-          || shape.rect.xh > frame_.die.xh || shape.rect.yh > frame_.die.yh) {
+      if (!rules_.rectangle(shape).legal || !frame_.die.contains(shape.rect)) {
         return fail("illegal lift landing");
       }
       for (auto id : occupancy_.query(*layer, shape.rect, *rules_.clearance(*layer), net.name)) {
@@ -410,49 +437,16 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
         return fail("lift self spacing");
       }
     }
-    const bool  h = tech_.layers.at(shape.layer).direction == "HORIZONTAL";
-    const auto& r = shape.rect;
-    trial.paths.push_back({
-        shape.layer,
-        {},
-        {},
-        {ph::Route_point{std::llround(h ? r.xl : (r.xl + r.xh) / 2), std::llround(h ? (r.yl + r.yh) / 2 : r.yl), 0},
-                ph::Route_point{std::llround(h ? r.xh : (r.xl + r.xh) / 2), std::llround(h ? (r.yl + r.yh) / 2 : r.yh), 0}}
-    });
-    trial.layer_wire_length_um[shape.layer] += (h ? r.xh - r.xl : r.yh - r.yl) / frame_.dbu;
+    add_wire(trial, shape, tech_.layers.at(shape.layer).direction == "HORIZONTAL");
   }
+  ph::Signal_cut_set cuts(tech_, frame_);
   for (const auto& via : vias) {
-    trial.paths.push_back({
-        via.lower,
-        {},
-        {},
-        {ph::Route_point{via.x, via.y, {}}, ph::Route_via{via.name}}
-    });
-    for (auto shape : ph::via_geometry(tech_, frame_, {via.name})) {
-      if (!tech_.cut_layers.contains(shape.layer)) {
-        continue;
-      }
-      shape.rect.xl      += via.x;
-      shape.rect.xh      += via.x;
-      shape.rect.yl      += via.y;
-      shape.rect.yh      += via.y;
-      const auto spacing  = ph::signal_cut_spacing(tech_.cut_layers.at(shape.layer), frame_.dbu);
-      for (const auto& old : cuts) {
-        if (old.layer != shape.layer) {
-          continue;
-        }
-        const auto dx = std::max({old.rect.xl - shape.rect.xh, shape.rect.xl - old.rect.xh, 0.});
-        const auto dy = std::max({old.rect.yl - shape.rect.yh, shape.rect.yl - old.rect.yh, 0.});
-        if ((dx == 0 && dy == 0) || (dx < spacing && dy < spacing)) {
-          return fail("lift cut spacing");
-        }
-      }
-      cuts.push_back(shape);
+    trial.paths.push_back(ph::via_path(via.lower, via.x, via.y, via.name));
+    if (!cuts.add({via.name}, via.x, via.y)) {
+      return fail("lift cut spacing");
     }
   }
-  auto routed = net;
-  routed.wires.push_back({"FIXED", trial.paths});
-  const auto connected = ph::check_route_connectivity(tech_, frame_, routed, &components_);
+  const auto connected = connectivity(net, trial.paths);
   if (!connected.connected) {
     return fail(connected.reason);
   }
@@ -561,14 +555,9 @@ Signal_route_trial Signal_router::propose_straight(const ph::Net& net, const ph:
         if (shape.layer != corridor.layer) {
           continue;
         }
-        const auto a
-            = ph::orient_point(shape.rect.xl + m.origin_x, shape.rect.yl + m.origin_y, m.width, m.height, c.place.orientation);
-        const auto b
-            = ph::orient_point(shape.rect.xh + m.origin_x, shape.rect.yh + m.origin_y, m.width, m.height, c.place.orientation);
-        const auto [x, y] = points[i];
-        if (x < c.place.x + std::min(a.first, b.first) * frame_.dbu || x > c.place.x + std::max(a.first, b.first) * frame_.dbu
-            || y < c.place.y + std::min(a.second, b.second) * frame_.dbu
-            || y > c.place.y + std::max(a.second, b.second) * frame_.dbu) {
+        const auto pin_rect = ph::placed_rect(m, c.place, frame_.dbu, shape.rect);
+        const auto [x, y]   = points[i];
+        if (x < pin_rect.xl || x > pin_rect.xh || y < pin_rect.yl || y > pin_rect.yh) {
           continue;
         }
         geometry.endpoints.push_back({std::llround(x), std::llround(y), {}, corridor, corridor.layer});
@@ -628,11 +617,11 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
   if (tech_.layers.at(profile_.access.escape).direction != "HORIZONTAL") {
     return fail(profile_.access.escape + " span requires a horizontal layer");
   }
-  const auto wire_width = tech_.layers.at(profile_.access.escape).width * frame_.dbu;
-  if (!std::isfinite(wire_width) || wire_width <= 0 || wire_width > std::numeric_limits<int32_t>::max()
-      || wire_width != std::round(wire_width) || int64_t(wire_width) % 2) {
+  const auto escape_width = ph::wire_width_dbu(tech_.layers.at(profile_.access.escape), frame_.dbu);
+  if (!escape_width) {
     return fail("unsupported signal width");
   }
+  const double wire_width = *escape_width;
   if (corridor
       && (corridor->layer != profile_.access.escape || !rules_.rectangle(*corridor).legal
           || corridor->rect.yh - corridor->rect.yl != wire_width)) {
@@ -652,16 +641,7 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
     if (out.access_examined >= limits.access_candidates) {
       return fail("pin-access budget");
     }
-    auto result          = ph::enumerate_pin_access(tech_,
-                                           frame_,
-                                           *cell->second,
-                                           connection.pin,
-                                           occupancy_,
-                                           rules_,
-                                           limits.access_candidates - out.access_examined,
-                                           net.name,
-                                           profile_.access);
-    out.access_examined += result.examined;
+    auto result = endpoint_access(*cell->second, connection.pin, net, limits, out);
     if (expired()) {
       return out;
     }
@@ -731,18 +711,13 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
         if (!unique_vias.emplace(p.x, p.y, p.via).second) {
           continue;
         }
-        trial.paths.push_back({
-            profile_.access.pin,
-            {},
-            {},
-            {ph::Route_point{p.x, p.y, {}}, ph::Route_via{p.via}}
-        });
+        trial.paths.push_back(ph::via_path(profile_.access.pin, p.x, p.y, p.via));
         if (!via_shapes.contains(p.via)) {
           via_shapes[p.via] = ph::via_geometry(tech_, via_frame, {p.via});
         }
         for (const auto& shape : via_shapes.at(p.via)) {
           if (shape.layer == profile_.access.cut) {
-            cuts.push_back({shape.rect.xl + p.x, shape.rect.yl + p.y, shape.rect.xh + p.x, shape.rect.yh + p.y});
+            cuts.push_back(shape.rect.translated(p.x, p.y));
           }
         }
       }
@@ -769,9 +744,7 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
           }
           std::erase_if(active, [&](const auto& old) { return old.xh + cut_spacing < cut.xl; });
           for (const auto& old : active) {
-            const auto dx = std::max({old.xl - cut.xh, cut.xl - old.xh, 0.});
-            const auto dy = std::max({old.yl - cut.yh, cut.yl - old.yh, 0.});
-            if ((dx == 0 && dy == 0) || (dx < cut_spacing && dy < cut_spacing)) {
+            if (ph::violates_cut_spacing(old, cut, cut_spacing)) {
               legal = false;
               break;
             }
@@ -783,25 +756,16 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
         }
       }
       if (legal) {
-        trial.paths.push_back({
-            profile_.access.escape,
-            {},
-            {},
-            {ph::Route_point{std::llround(span.xl), y, 0}, ph::Route_point{std::llround(span.xh), y, 0}}
-        });
-        trial.wire_length_um                               = (span.xh - span.xl) / frame_.dbu;
-        trial.layer_wire_length_um[profile_.access.escape] = trial.wire_length_um;
-        trial.vias                                         = unique_vias.size();
-        trial.straight_corridor                            = ph::Shape{profile_.access.escape, span};
+        add_wire(trial, {profile_.access.escape, span}, true);
+        trial.wire_length_um    = trial.layer_wire_length_um[profile_.access.escape];
+        trial.vias              = unique_vias.size();
+        trial.straight_corridor = ph::Shape{profile_.access.escape, span};
         if (expired()) {
           return out;
         }
         bool preserves_access = true;
         if (escapes) {
-          ph::Net proposed;
-          proposed.name = net.name;
-          proposed.wires.push_back({"FIXED", trial.paths});
-          const auto access = escapes->check(ph::route_geometry(tech_, frame_, proposed), net.name, expired);
+          const auto access = escapes->check(proposal_shapes(net, trial.paths), net.name, expired);
           preserves_access  = access.legal;
           if (!preserves_access) {
             out.reason = access.reason;
@@ -872,16 +836,7 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
     if (out.access_examined >= limits.access_candidates) {
       return fail("pin-access budget");
     }
-    accesses[i]          = ph::enumerate_pin_access(tech_,
-                                           frame_,
-                                           *cell->second,
-                                           net.connections[i].pin,
-                                           occupancy_,
-                                           rules_,
-                                           limits.access_candidates - out.access_examined,
-                                           net.name,
-                                           profile_.access);
-    out.access_examined += accesses[i].examined;
+    accesses[i] = endpoint_access(*cell->second, net.connections[i].pin, net, limits, out);
     if (expired()) {
       return out;
     }
@@ -903,12 +858,10 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
     if (t.layer != profile_.branch_layer || t.axis != "X") {
       continue;
     }
-    if (t.mask || t.same_mask || t.step <= 0 || t.count <= 0 || t.step > INT32_MAX || t.count > INT32_MAX || t.start < INT32_MIN
-        || t.start > INT32_MAX) {
+    if (!t.supported()) {
       return fail("unsupported " + profile_.branch_layer + " tracks");
     }
-    const auto first = std::max<int64_t>(0, std::ceil(double(xmin - t.start) / t.step));
-    const auto last  = std::min<int64_t>(t.count - 1, std::floor(double(xmax - t.start) / t.step));
+    const auto [first, last] = t.index_range(double(xmin), double(xmax));
     for (auto i = first; i <= last; ++i) {
       if (expired()) {
         return out;
@@ -919,13 +872,12 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
       xs.insert(t.start + i * t.step);
     }
   }
-  const auto width2 = tech_.layers.at(profile_.access.escape).width * frame_.dbu;
-  const auto width3 = tech_.layers.at(profile_.branch_layer).width * frame_.dbu;
-  for (auto w : {width2, width3}) {
-    if (!std::isfinite(w) || w <= 0 || w > INT32_MAX || w != std::round(w) || int64_t(w) % 2) {
-      return fail("unsupported signal width");
-    }
+  const auto escape_width = ph::wire_width_dbu(tech_.layers.at(profile_.access.escape), frame_.dbu);
+  const auto branch_width = ph::wire_width_dbu(tech_.layers.at(profile_.branch_layer), frame_.dbu);
+  if (!escape_width || !branch_width) {
+    return fail("unsupported signal width");
   }
+  const double width2 = *escape_width, width3 = *branch_width;
   ph::Floorplan via_frame;
   via_frame.dbu = frame_.dbu;
   for (const auto& [name, via] : tech_.vias) {
@@ -1019,73 +971,25 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
           for (const auto& [y, landing] : landings) {
             vias.emplace(name, x, y);
           }
-          std::vector<ph::Shape> cuts;
+          ph::Signal_cut_set cuts(tech_, frame_);
           for (const auto& [vname, vx, vy] : vias) {
             if (expired()) {
               return out;
             }
-            trial.paths.push_back({
-                vname == name ? profile_.access.escape : profile_.access.pin,
-                {},
-                {},
-                {ph::Route_point{vx, vy, {}}, ph::Route_via{vname}}
-            });
-            for (auto shape : ph::via_geometry(tech_, via_frame, {vname})) {
-              if (tech_.cut_layers.contains(shape.layer)) {
-                shape.rect.xl += vx;
-                shape.rect.xh += vx;
-                shape.rect.yl += vy;
-                shape.rect.yh += vy;
-                cuts.push_back(shape);
-              }
-            }
-          }
-          // Access and landing checks cover existing metal. All newly added
-          // cuts must also obey spacing against each other, even on one net.
-          for (size_t i = 0; legal && i < cuts.size(); ++i) {
-            for (size_t j = 0; j < i; ++j) {
-              if (expired()) {
-                return out;
-              }
-              if (cuts[i].layer != cuts[j].layer) {
-                continue;
-              }
-              const auto  spacing = ph::signal_cut_spacing(tech_.cut_layers.at(cuts[i].layer), frame_.dbu);
-              const auto& u       = cuts[i].rect;
-              const auto& v       = cuts[j].rect;
-              const auto  dx      = std::max({u.xl - v.xh, v.xl - u.xh, 0.});
-              const auto  dy      = std::max({u.yl - v.yh, v.yl - u.yh, 0.});
-              if ((dx == 0 && dy == 0) || (dx < spacing && dy < spacing)) {
-                legal = false;
-                break;
-              }
-            }
+            trial.paths.push_back(ph::via_path(vname == name ? profile_.access.escape : profile_.access.pin, vx, vy, vname));
+            legal = legal && cuts.add({vname}, vx, vy);
           }
           if (!legal) {
             continue;
           }
           for (const auto& [y, landing] : landings) {
-            trial.paths.push_back({
-                profile_.access.escape,
-                {},
-                {},
-                {ph::Route_point{std::llround(landing.rect.xl), y, 0}, ph::Route_point{std::llround(landing.rect.xh), y, 0}}
-            });
-            trial.layer_wire_length_um[profile_.access.escape] += (landing.rect.xh - landing.rect.xl) / frame_.dbu;
+            add_wire(trial, landing, true);
           }
-          trial.paths.push_back({
-              profile_.branch_layer,
-              {},
-              {},
-              {ph::Route_point{x, std::llround(trunk.rect.yl), 0}, ph::Route_point{x, std::llround(trunk.rect.yh), 0}}
-          });
-          trial.layer_wire_length_um[profile_.branch_layer] = (trunk.rect.yh - trunk.rect.yl) / frame_.dbu;
+          add_wire(trial, trunk, false);
           trial.wire_length_um
               = trial.layer_wire_length_um[profile_.access.escape] + trial.layer_wire_length_um[profile_.branch_layer];
-          trial.vias  = vias.size();
-          auto routed = net;
-          routed.wires.push_back({"FIXED", trial.paths});
-          const auto connected = ph::check_route_connectivity(tech_, frame_, routed, &components_);
+          trial.vias           = vias.size();
+          const auto connected = connectivity(net, trial.paths);
           if (expired()) {
             return out;
           }

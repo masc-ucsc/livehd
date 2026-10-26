@@ -87,6 +87,15 @@ class Signal_router {
 
   Signal_route_trial propose_span_impl(const physical::Net&, const Signal_route_limits&, const physical::Shape*,
                                        const Pin_escape_guard* = nullptr) const;
+  // Shared proposal plumbing. Access enumeration charges the trial's budget.
+  physical::Pin_access_result  endpoint_access(const physical::Component&, const std::string& pin, const physical::Net&,
+                                               const Signal_route_limits&, Signal_route_trial&) const;
+  std::vector<physical::Shape> proposal_shapes(const physical::Net&, const std::vector<physical::Route_path>&,
+                                               const physical::Route_width_rules* = nullptr) const;
+  physical::Route_connectivity connectivity(const physical::Net&, const std::vector<physical::Route_path>&,
+                                            const physical::Route_width_rules* = nullptr) const;
+  // Appends a flush centerline path covering metal and accounts its length.
+  void add_wire(Signal_route_geometry&, const physical::Shape& metal, bool horizontal, std::string taper_rule = {}) const;
 
 public:
   // Profile is copied once; the immutable technology/frame and occupancy

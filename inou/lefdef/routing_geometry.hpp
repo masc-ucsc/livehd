@@ -18,4 +18,8 @@ void               visit_route_geometry(const Technology&, const Floorplan&, con
                                         bool special = false, const Route_width_rules* trial_rules = nullptr);
 std::vector<Shape> route_geometry(const Technology& tech, const Floorplan& fp, const Net& net, bool special = false,
                                   const Route_width_rules* trial_rules = nullptr);
+// Ordinary-net path inverses of route_geometry: a flush (zero-extension) wire on
+// the centerline of an integral rectangle, and one via placed from a lower layer.
+Route_path         flush_wire_path(const Shape& metal, bool horizontal, std::string taper_rule = {});
+Route_path         via_path(const std::string& lower_layer, int64_t x, int64_t y, const std::string& via);
 }  // namespace livehd::physical

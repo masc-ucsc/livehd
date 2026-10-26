@@ -136,4 +136,24 @@ Rule_check check_signal_via(const Technology& tech, const Floorplan& fp, const S
   }
   return {true, {}};
 }
+bool Signal_cut_set::add(const Route_via& via, int64_t x, int64_t y) {
+  for (const auto& shape : via_geometry(tech_, frame_, via)) {
+    const auto rule = tech_.cut_layers.find(shape.layer);
+    if (rule == tech_.cut_layers.end()) {
+      continue;
+    }
+    auto spacing = spacing_.find(shape.layer);
+    if (spacing == spacing_.end()) {
+      spacing = spacing_.emplace(shape.layer, signal_cut_spacing(rule->second, frame_.dbu)).first;
+    }
+    const Shape cut{shape.layer, shape.rect.translated(x, y)};
+    for (const auto& old : cuts_) {
+      if (old.layer == cut.layer && violates_cut_spacing(old.rect, cut.rect, spacing->second)) {
+        return false;
+      }
+    }
+    cuts_.push_back(cut);
+  }
+  return true;
+}
 }  // namespace livehd::physical

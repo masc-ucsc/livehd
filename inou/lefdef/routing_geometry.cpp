@@ -217,4 +217,18 @@ std::vector<Shape> route_geometry(const Technology& tech, const Floorplan& fp, c
   visit_route_geometry(tech, fp, net, [&](const Shape& shape) { shapes.push_back(shape); }, special, trial_rules);
   return shapes;
 }
+Route_path flush_wire_path(const Shape& metal, bool horizontal, std::string taper_rule) {
+  const auto& r      = metal.rect;
+  const auto  center = std::llround(horizontal ? (r.yl + r.yh) / 2 : (r.xl + r.xh) / 2);
+  const auto  lo = std::llround(horizontal ? r.xl : r.yl), hi = std::llround(horizontal ? r.xh : r.yh);
+  return {metal.layer,
+          {},
+          {},
+          {Route_point{horizontal ? lo : center, horizontal ? center : lo, 0},
+           Route_point{horizontal ? hi : center, horizontal ? center : hi, 0}},
+          std::move(taper_rule)};
+}
+Route_path via_path(const std::string& lower_layer, int64_t x, int64_t y, const std::string& via) {
+  return {lower_layer, {}, {}, {Route_point{x, y, {}}, Route_via{via}}};
+}
 }  // namespace livehd::physical
