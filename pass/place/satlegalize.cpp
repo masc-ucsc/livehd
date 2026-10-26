@@ -1508,9 +1508,9 @@ std::vector<physical::Shape> satlegalize_pin_access_bounds(const physical::Techn
     }
     // A broad-phase bound only: the via oracle verifies full pin enclosure
     // and literal escape tracks for every surviving pair of candidate poses.
-    if (via_profile && shape.layer == via_profile->access.pin && tech.layers.contains(via_profile->access.escape)) {
-      if (auto rect = pin_access_rect(macro, shape, place, dbu, tech.layers.at(via_profile->access.escape))) {
-        result.push_back({via_profile->access.escape, *rect});
+    if (via_profile && shape.layer == via_profile->route.access.pin && tech.layers.contains(via_profile->route.access.escape)) {
+      if (auto rect = pin_access_rect(macro, shape, place, dbu, tech.layers.at(via_profile->route.access.escape))) {
+        result.push_back({via_profile->route.access.escape, *rect});
       }
     }
   }
@@ -1542,7 +1542,7 @@ bool satlegalize_aligned(const physical::Technology& tech, const physical::Floor
     }
     std::optional<std::pair<double, double>> result;
     for (const auto& shape : pin->second.shapes) {
-      if (shape.layer != via_profile->access.pin) {
+      if (shape.layer != via_profile->route.access.pin) {
         return {};
       }
       const auto rect = pin_rect(macro, shape, place, fp.dbu);

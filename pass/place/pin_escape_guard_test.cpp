@@ -53,7 +53,7 @@ Floorplan frame() {
   f.components.push_back({"u0", "cell", place});
   return f;
 }
-const Pin_access_layers& asap7_access() { return tech_profile("asap7").access; }
+const Pin_access_layers& asap7_access() { return tech_profile("asap7").route.access; }
 
 TEST(PinEscapeGuard, ProtectClockAndSupplyPinsIncludingUnassignedAndWildcardPins) {
   for (const auto* use : {"CLOCK", "POWER", "GROUND"}) {

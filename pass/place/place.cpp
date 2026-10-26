@@ -10262,7 +10262,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                                                          *route_occupancy,
                                                          1024,
                                                          std::function<void()>{},
-                                                         tech_profile->access,
+                                                         tech_profile->route.access,
                                                          &route_rules);
         router      = std::make_unique<Signal_router>(tech,
                                                  v.fp,

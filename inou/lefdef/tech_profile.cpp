@@ -12,10 +12,10 @@ Tech_profile asap7() {
   p.name                = "asap7";
   p.detect_sites        = {"asap7sc7p5t"};
   p.detect_macros       = {"TAPCELL_ASAP7_75t_R"};
-  p.access              = {"M1", "M2", "V1"};
-  p.branch_layer        = "M3";
-  p.branch_cut          = "V2";
-  p.signal_layers       = {"M2", "M3", "M4", "M5", "M6", "M7"};
+  p.route.access        = {"M1", "M2", "V1"};
+  p.route.branch_layer  = "M3";
+  p.route.branch_cut    = "V2";
+  p.route.signal_layers = {"M2", "M3", "M4", "M5", "M6", "M7"};
   p.io_pin_layers       = {"M4", "M5"};
   p.tap_master          = "TAPCELL_ASAP7_75t_R";
   p.tap_distance        = 25;

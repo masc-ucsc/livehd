@@ -45,7 +45,7 @@ int main(int argc, char** argv) {
     }
     const auto tech   = ph::read_lef(lefs);
     const auto fp     = ph::read_def(def);
-    const auto& access = ph::resolve_tech_profile(tech).access;
+    const auto& access = ph::resolve_tech_profile(tech).route.access;
     std::set<std::string> requested(instances.begin(), instances.end());
     if (requested.size() != instances.size() || requested.contains("")) {
       throw std::invalid_argument("empty or duplicate instance");

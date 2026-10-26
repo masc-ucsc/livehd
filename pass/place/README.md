@@ -651,11 +651,11 @@ Temporary width rules are passed to geometry/connectivity checks as read-only
 overlays. Maze candidate validation reuses the component index without cloning
 the floorplan; conflicting installed rule definitions still fail validation.
 
-`Signal_route_profile` separates technology policy from route search: pin and
-escape layers, access cut, branch layer/cut, and ordered allowed signal layers.
-`signal_route_profile(tech_profile, tech)` builds it from the technology profile
-(`physical::Tech_profile`, `inou/lefdef/tech_profile.hpp`; ASAP7 uses M1 access
-and M2–M7), stopping the signal layers at the first one the LEF lacks.
+`Signal_route_profile` (an alias of `physical::Route_policy`) separates technology
+policy from route search: pin and escape layers, access cut, branch layer/cut, and
+ordered allowed signal layers. `signal_route_profile(tech_profile, tech)` copies
+`Tech_profile::route` (`inou/lefdef/tech_profile.hpp`; ASAP7 uses M1 access and
+M2–M7), stopping the signal layers at the first one the LEF lacks.
 Explicit profiles can use different layer/cut names; LEF supplies geometry and
 DRC, the floorplan supplies tracks, and `Route_technology_rc` supplies electrical
 characterization. `Preroute_options::tech_profile` selects the technology profile
