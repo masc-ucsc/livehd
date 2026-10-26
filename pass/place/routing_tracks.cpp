@@ -109,6 +109,25 @@ void shape_io_perimeter_pins(physical::Floorplan& fp) {
   }
 }
 
+Track_lattice imported_tracks(const physical::Floorplan& fp, std::string_view layer, bool x) {
+  Track_lattice result;
+  for (const auto& track : fp.tracks) {
+    if (track.layer == layer && track.axis == (x ? "X" : "Y")) {
+      result.imported = true;
+      if (track.step > 0 && track.count > 0) {
+        result.patterns.push_back({track.start, track.step, track.count});
+      }
+    }
+  }
+  return result;
+}
+
+Track_pattern lef_track_pattern(const physical::Technology& tech, const physical::Layer& layer, bool x) {
+  return {std::llround((x ? layer.offset_x : layer.offset_y) * tech.dbu),
+          std::llround((x ? layer.pitch_x : layer.pitch_y) * tech.dbu),
+          std::numeric_limits<int32_t>::max()};
+}
+
 void apply_routing_tracks(const physical::Technology& tech, physical::Floorplan& fp, std::string_view input) {
   if (fp.dbu <= 0 || fp.dbu != tech.dbu || fp.die.xh <= fp.die.xl || fp.die.yh <= fp.die.yl) {
     throw std::invalid_argument("routing tracks require a finite die with matching technology DBU");

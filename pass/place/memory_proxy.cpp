@@ -11,6 +11,7 @@
 #include "hash_util.hpp"
 #include "node_util.hpp"
 #include "pass/liberty/liberty_dff.hpp"
+#include "routing_tracks.hpp"
 
 namespace livehd::placement {
 bool memory_runtime_pin(hhds::Port_id pid) {
@@ -135,17 +136,11 @@ void align_memory_proxy_pins(physical::Technology& tech, const physical::Floorpl
     for (auto& [key, rectangles] : edges) {
       const bool                               x     = key.second == 1;
       const auto&                              layer = tech.layers.at(key.first);
-      std::vector<std::pair<int64_t, int64_t>> patterns;
-      for (const auto& track : floorplan.tracks) {
-        if (track.layer == key.first && track.axis == (x ? "X" : "Y") && track.step > 0 && track.count > 0) {
-          patterns.emplace_back(track.start, track.step);
-        }
-      }
-      if (patterns.empty()) {
-        const auto pitch = std::llround((x ? layer.pitch_x : layer.pitch_y) * tech.dbu);
-        if (pitch > 0) {
-          patterns.emplace_back(std::llround((x ? layer.offset_x : layer.offset_y) * tech.dbu), pitch);
-        }
+      auto                                     patterns = imported_tracks(floorplan, key.first, x).patterns;
+      // Unlike macro-track legalization, a LEF pitch without OFFSET still
+      // supplies a phase-zero lattice here.
+      if (const auto lef = lef_track_pattern(tech, layer, x); patterns.empty() && lef.step > 0) {
+        patterns.push_back(lef);
       }
       if (patterns.empty()) {
         continue;  // No known lattice; do not invent a technology pitch.
@@ -162,7 +157,8 @@ void align_memory_proxy_pins(physical::Technology& tech, const physical::Floorpl
           candidates.insert(point);
         }
       };
-      for (const auto& [start, pitch] : patterns) {
+      for (const auto& pattern : patterns) {
+        const auto start = pattern.start, pitch = pattern.step;
         auto phase = start % pitch;
         if (phase < 0) {
           phase += pitch;

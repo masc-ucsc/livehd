@@ -11,6 +11,8 @@
 #include <stdexcept>
 #include <tuple>
 
+#include "routing_tracks.hpp"
+
 namespace livehd::placement {
 namespace {
 namespace ph = physical;
@@ -78,8 +80,7 @@ Profile profile(const ph::Technology& tech, const ph::Floorplan& fp, const ph::C
       if (high <= low) {
         continue;
       }
-      bool       imported = false;
-      const auto add      = [&](int64_t start, int64_t pitch, int64_t count) {
+      const auto add = [&](int64_t start, int64_t pitch, int64_t count) {
         if (pitch <= 0 || count <= 0) {
           return;
         }
@@ -91,16 +92,14 @@ Profile profile(const ph::Technology& tech, const ph::Floorplan& fp, const ph::C
         }
         period *= factor;
       };
-      for (const auto& track : fp.tracks) {
-        if (track.layer == shape.layer && track.axis == (x ? "X" : "Y")) {
-          imported = true;
-          add(track.start, track.step, track.count);
-        }
+      const auto tracks = imported_tracks(fp, shape.layer, x);
+      for (const auto& track : tracks.patterns) {
+        add(track.start, track.step, track.count);
       }
-      if (!imported && layer.has_offset) {
-        add(std::llround((x ? layer.offset_x : layer.offset_y) * tech.dbu),
-            std::llround((x ? layer.pitch_x : layer.pitch_y) * tech.dbu),
-            std::numeric_limits<int32_t>::max());
+      // Without imported tracks only an explicit LEF OFFSET defines a phase.
+      if (!tracks.imported && layer.has_offset) {
+        const auto lef = lef_track_pattern(tech, layer, x);
+        add(lef.start, lef.step, lef.count);
       }
     }
     if (!candidate.access.empty()) {
