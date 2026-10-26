@@ -64,6 +64,11 @@ struct Preroute_record {
   // Scratch/report data only; never persisted as a graph attribute.
   std::optional<Preroute_timing_trial> timing_at_acceptance;
 };
+// Diagnostic wall time between two steady-clock points, in milliseconds.
+inline double elapsed_ms(std::chrono::steady_clock::time_point start,
+                         std::chrono::steady_clock::time_point end = std::chrono::steady_clock::now()) {
+  return std::chrono::duration<double, std::milli>(end - start).count();
+}
 // Diagnostic record of one bound net before, or instead of, a routing attempt.
 Preroute_record preroute_record(const physical::Floorplan&, const physical::Parasitics&, const Preroute_binding&,
                                 std::string reason);

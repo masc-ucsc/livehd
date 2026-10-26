@@ -12,9 +12,6 @@
 #include "inou/lefdef/routing_rules.hpp"
 
 namespace livehd::placement::detail {
-static double elapsed_ms(std::chrono::steady_clock::time_point start) {
-  return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-}
 static Repeater_snapshot make_repeater_snapshot(const Result& original, const Repeater_graph& proposal,
                                                   const Preroute_binding& binding, const physical::Technology& tech,
                                                   Layer_rc route_rc,

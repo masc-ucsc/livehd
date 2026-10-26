@@ -184,7 +184,7 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
                          *candidate.parasitics,
                          std::move(stage.records),
                          std::move(stage.timings_ms)};
-  const double        route_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - route_start).count();
+  const double        route_ms = elapsed_ms(route_start);
   rapidjson::Document report(rapidjson::kObjectType);
   auto&               alloc = report.GetAllocator();
   report.AddMember("schema_version", 2, alloc);

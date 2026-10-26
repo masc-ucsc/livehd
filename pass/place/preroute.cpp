@@ -181,7 +181,7 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
   Preroute_result result{frame, rc, {}, {}};
   const auto      phase = [&](const char* name) {
     const auto now = std::chrono::steady_clock::now();
-    result.timings_ms.emplace(name, std::chrono::duration<double, std::milli>(now - phase_start).count());
+    result.timings_ms.emplace(name, elapsed_ms(phase_start, now));
     phase_start = now;
   };
   phase("snapshot");
@@ -565,7 +565,7 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
         auto       operation_start = std::chrono::steady_clock::now();
         const auto measured        = [&](const char* name) {
           const auto now           = std::chrono::steady_clock::now();
-          record.timings_ms[name] += std::chrono::duration<double, std::milli>(now - operation_start).count();
+          record.timings_ms[name] += elapsed_ms(operation_start, now);
           operation_start          = now;
         };
         const auto remaining = demand.without(b.demand_net);
