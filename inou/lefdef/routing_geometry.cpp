@@ -100,10 +100,7 @@ std::vector<Shape> via_geometry(const Technology& tech, const Floorplan& fp, con
     if (!tech.layers.contains(shape.layer) && !tech.cut_layers.contains(shape.layer)) {
       throw std::runtime_error("unknown via layer: " + shape.layer);
     }
-    const auto a = orient_point(shape.rect.xl, shape.rect.yl, 0, 0, via.orientation);
-    const auto b = orient_point(shape.rect.xh, shape.rect.yh, 0, 0, via.orientation);
-    shape.rect
-        = {std::min(a.first, b.first), std::min(a.second, b.second), std::max(a.first, b.first), std::max(a.second, b.second)};
+    shape.rect = orient_rect(shape.rect, 0, 0, via.orientation);
   }
   return shapes;
 }
@@ -202,12 +199,7 @@ void visit_route_geometry(const Technology& tech, const Floorplan& fp, const Net
             it = vias.emplace(key, std::move(decoded)).first;
           }
           for (const auto& shape : it->second.shapes) {
-            auto r  = shape.rect;
-            r.xl   += previous->x;
-            r.xh   += previous->x;
-            r.yl   += previous->y;
-            r.yh   += previous->y;
-            visit({shape.layer, scaled(r, 1)});
+            visit({shape.layer, scaled(shape.rect.translated(previous->x, previous->y), 1)});
           }
           const auto& metals = it->second.metals;
           if (metals.size() != 2 || !metals.contains(layer)) {

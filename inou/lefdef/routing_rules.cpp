@@ -4,22 +4,15 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <sstream>
 #include <stdexcept>
+
+#include "cut_rules.hpp"
 
 namespace livehd::physical {
 namespace {
 Rule_check reject(std::string reason) { return {false, std::move(reason)}; }
-bool       valid(const Rect& r) {
-  for (auto v : {r.xl, r.yl, r.xh, r.yh}) {
-    if (!std::isfinite(v) || v != std::trunc(v) || std::abs(v) > std::numeric_limits<int32_t>::max()) {
-      return false;
-    }
-  }
-  return r.xl < r.xh && r.yl < r.yh;
-}
 Rule_check supported(const Technology& tech, int64_t dbu, const Shape& shape) {
-  if (dbu <= 0 || dbu > std::numeric_limits<int32_t>::max() || !valid(shape.rect)) {
+  if (dbu <= 0 || dbu > std::numeric_limits<int32_t>::max() || !integral_dbu(shape.rect) || shape.rect.empty()) {
     return reject("invalid metal rectangle or DBU");
   }
   const auto it = tech.layers.find(shape.layer);
@@ -82,15 +75,13 @@ Rule_check check_metal_rectangle(const Technology& tech, int64_t dbu, const Shap
   if (!number(tech.manufacturing_grid)) {
     return reject("invalid manufacturing grid");
   }
-  if (tech.manufacturing_grid > 0) {
-    const auto grid = tech.manufacturing_grid * dbu;
-    if (!std::isfinite(grid) || grid < 1 || std::abs(grid - std::round(grid)) > 1e-9) {
-      return reject("unrepresentable manufacturing grid");
-    }
-    for (auto v : {shape.rect.xl, shape.rect.yl, shape.rect.xh, shape.rect.yh}) {
-      if (std::fmod(v, std::round(grid)) != 0) {
-        return reject("off manufacturing grid");
-      }
+  const auto grid = manufacturing_grid_dbu(tech, dbu);
+  if (!grid) {
+    return reject("unrepresentable manufacturing grid");
+  }
+  for (auto v : {shape.rect.xl, shape.rect.yl, shape.rect.xh, shape.rect.yh}) {
+    if (std::fmod(v, double(*grid)) != 0) {
+      return reject("off manufacturing grid");
     }
   }
   return {true, {}};
@@ -197,7 +188,6 @@ Rect edge_region(const Rect_edge& e, double backward, double forward, double sid
   const auto hi = e.coordinate + (e.positive ? forward : backward);
   return e.vertical ? Rect{lo, e.lo - side, hi, e.hi + side} : Rect{e.lo - side, lo, e.hi + side, hi};
 }
-bool positive_overlap(const Rect& a, const Rect& b) { return a.xl < b.xh && a.xh > b.xl && a.yl < b.yh && a.yh > b.yl; }
 bool corner_inside(const Rect& bounds, const Rect& shape) {
   for (auto x : {shape.xl, shape.xh}) {
     for (auto y : {shape.yl, shape.yh}) {
@@ -213,20 +203,7 @@ class Property_tokens {
   size_t                   at_ = 0;
 
 public:
-  explicit Property_tokens(const std::string& text) {
-    std::string separated;
-    for (char c : text) {
-      if (c == ';') {
-        separated += " ; ";
-      } else {
-        separated += c;
-      }
-    }
-    std::istringstream stream(separated);
-    for (std::string word; stream >> word;) {
-      words_.push_back(std::move(word));
-    }
-  }
+  explicit Property_tokens(const std::string& text) : words_(lef58_tokens(text)) {}
   bool take(const std::string& word) {
     if (at_ < words_.size() && words_[at_] == word) {
       ++at_;
@@ -490,7 +467,7 @@ Rule_check Signal_metal_rules::spacing(const Shape& a, const Shape& b) const {
           continue;
         }
         const auto region = edge_region(edge, units(rule.backward, dbu_), units(rule.forward, dbu_), units(rule.side, dbu_));
-        if (rule.corner_only ? corner_inside(region, target) : positive_overlap(region, target)) {
+        if (rule.corner_only ? corner_inside(region, target) : region.overlaps(target)) {
           return reject("LEF58 EOL keepout");
         }
       }

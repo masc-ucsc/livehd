@@ -7,15 +7,14 @@
 #include <sstream>
 #include <stdexcept>
 namespace livehd::physical {
-namespace {
-int64_t units(double um, int64_t dbu) {
+int64_t exact_units(double um, int64_t dbu) {
   const double v = um * dbu;
   if (!std::isfinite(v) || v < 0 || v > std::numeric_limits<int32_t>::max() || std::abs(v - std::round(v)) > 1e-7) {
     throw std::invalid_argument("via dimension is not representable in integer DBU");
   }
   return std::llround(v);
 }
-std::vector<std::string> tokens(const std::string& text) {
+std::vector<std::string> lef58_tokens(const std::string& text) {
   std::string spaced;
   for (auto c : text) {
     if (c == ';') {
@@ -31,6 +30,7 @@ std::vector<std::string> tokens(const std::string& text) {
   }
   return out;
 }
+namespace {
 double number(const std::string& s) {
   size_t     n = 0;
   const auto v = std::stod(s, &n);
@@ -46,7 +46,7 @@ std::map<std::string, std::array<int64_t, 2>> cut_classes(const Cut_layer& cut, 
     return result;
   }
   for (const auto& text : cut.properties.at("LEF58_CUTCLASS")) {
-    const auto words = tokens(text);
+    const auto words = lef58_tokens(text);
     size_t     i     = 0;
     while (i < words.size()) {
       if (i + 4 >= words.size() || words[i++] != "CUTCLASS") {
@@ -56,11 +56,11 @@ std::map<std::string, std::array<int64_t, 2>> cut_classes(const Cut_layer& cut, 
       if (words[i++] != "WIDTH") {
         throw std::invalid_argument("unsupported CUTCLASS width");
       }
-      const auto width  = units(number(words[i++]), dbu);
+      const auto width  = exact_units(number(words[i++]), dbu);
       auto       height = width;
       if (i + 1 < words.size() && words[i] == "LENGTH") {
         ++i;
-        height = units(number(words[i++]), dbu);
+        height = exact_units(number(words[i++]), dbu);
       }
       double count = 1;
       if (i + 1 < words.size() && words[i] == "CUTS") {
@@ -90,11 +90,11 @@ std::optional<int64_t> cut_table_spacing(const Cut_layer& cut, int64_t dbu,
   }
   int64_t maximum = 0;
   for (const auto& text : cut.properties.at("LEF58_SPACINGTABLE")) {
-    const auto w = tokens(text);
+    const auto w = lef58_tokens(text);
     if (w.size() < 8 || w[0] != "SPACINGTABLE" || w[1] != "DEFAULT" || w[3] != "CUTCLASS") {
       throw std::invalid_argument("unsupported cut spacing table header");
     }
-    const auto               spacing = units(number(w[2]), dbu);
+    const auto               spacing = exact_units(number(w[2]), dbu);
     size_t                   i       = 4;
     std::vector<std::string> names;
     while (i < w.size() && classes.contains(w[i]) && std::find(names.begin(), names.end(), w[i]) == names.end()) {
@@ -129,7 +129,7 @@ std::vector<std::array<int64_t, 2>> cut_enclosures(const Cut_layer& cut, int64_t
     return {{0, 0}};
   }
   for (const auto& text : cut.properties.at("LEF58_ENCLOSURE")) {
-    const auto w = tokens(text);
+    const auto w = lef58_tokens(text);
     size_t     i = 0;
     while (i < w.size()) {
       const auto begin = i;
@@ -163,8 +163,8 @@ std::vector<std::array<int64_t, 2>> cut_enclosures(const Cut_layer& cut, int64_t
         // 24.25 nm); rounding one would change the strict boundary test.
         const auto eol_width = number(w[++j]) * dbu;
         ++j;
-        x = units(number(w[j++]), dbu);
-        y = units(number(w[j++]), dbu);
+        x = exact_units(number(w[j++]), dbu);
+        y = exact_units(number(w[j++]), dbu);
         if (policy == Cut_enclosure_policy::lef && std::min(extent[0], extent[1]) >= eol_width) {
           continue;
         }
@@ -177,8 +177,8 @@ std::vector<std::array<int64_t, 2>> cut_enclosures(const Cut_layer& cut, int64_t
         if (end - j != 4 || w[j + 2] != "SIDE") {
           throw std::invalid_argument("unsupported END/SIDE enclosure");
         }
-        x = units(number(w[j + 1]), dbu);
-        y = units(number(w[j + 3]), dbu);
+        x = exact_units(number(w[j + 1]), dbu);
+        y = exact_units(number(w[j + 3]), dbu);
         j = end;
         if (cut_size[0] < cut_size[1]) {
           std::swap(x, y);
@@ -187,8 +187,8 @@ std::vector<std::array<int64_t, 2>> cut_enclosures(const Cut_layer& cut, int64_t
         if (end - j != 2) {
           throw std::invalid_argument("unsupported enclosure modifiers");
         }
-        x = units(number(w[j++]), dbu);
-        y = units(number(w[j++]), dbu);
+        x = exact_units(number(w[j++]), dbu);
+        y = exact_units(number(w[j++]), dbu);
         if ((metal.direction == "VERTICAL" && x > y) || (metal.direction == "HORIZONTAL" && x < y)) {
           std::swap(x, y);
         }
@@ -219,7 +219,7 @@ int64_t signal_cut_spacing(const Cut_layer& cut, int64_t dbu) {
   }
   int64_t spacing = 0;
   for (auto value : cut.spacing) {
-    spacing = std::max(spacing, units(value, dbu));
+    spacing = std::max(spacing, exact_units(value, dbu));
   }
   const auto classes = cut_classes(cut, dbu);
   if (const auto table = cut_table_spacing(cut, dbu, classes)) {

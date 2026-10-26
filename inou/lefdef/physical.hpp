@@ -1,7 +1,10 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
+#include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -18,8 +21,32 @@ using Orientation = Ann_place::Orientation;
 using Status      = Ann_place::Status;
 struct Rect {
   double      xl = 0, yl = 0, xh = 0, yh = 0;
+  bool        empty() const { return xl >= xh || yl >= yh; }
+  bool        contains(const Rect& r) const { return xl <= r.xl && yl <= r.yl && xh >= r.xh && yh >= r.yh; }
+  // Positive-area overlap; rectangles sharing only an edge do not overlap.
+  bool        overlaps(const Rect& r) const { return xl < r.xh && r.xl < xh && yl < r.yh && r.yl < yh; }
+  // Empty (possibly inverted) when the rectangles do not overlap.
+  Rect        intersection(const Rect& r) const {
+    return {std::max(xl, r.xl), std::max(yl, r.yl), std::min(xh, r.xh), std::min(yh, r.yh)};
+  }
+  // Smallest rectangle covering both.
+  Rect        hull(const Rect& r) const { return {std::min(xl, r.xl), std::min(yl, r.yl), std::max(xh, r.xh), std::max(yh, r.yh)}; }
+  Rect        translated(double dx, double dy) const { return {xl + dx, yl + dy, xh + dx, yh + dy}; }
   friend bool operator==(const Rect&, const Rect&) = default;
 };
+// Finite integral coordinates within the signed 32-bit DEF/OpenDB range.
+inline bool integral_dbu(const Rect& r) {
+  for (auto v : {r.xl, r.yl, r.xh, r.yh}) {
+    if (!std::isfinite(v) || v != std::round(v) || std::abs(v) > std::numeric_limits<int32_t>::max()) {
+      return false;
+    }
+  }
+  return true;
+}
+// W/E/FW/FE place a cell with its width and height exchanged.
+inline bool swaps_axes(Orientation o) {
+  return o == Orientation::W || o == Orientation::E || o == Orientation::FW || o == Orientation::FE;
+}
 struct Shape {
   std::string layer;
   Rect        rect;
@@ -115,6 +142,9 @@ struct Layer {
   bool        has_offset = false;
   Metal_rules rules{};
 };
+// Nominal wire width in DBU when it is a positive even integer within the
+// signed 32-bit range, so that centerline paths have integral edges.
+std::optional<int64_t> wire_width_dbu(const Layer&, int64_t dbu);
 // LEF geometry is in microns; graph/DEF positions are integer DBU.
 struct Technology {
   int64_t                          dbu = 1000;
@@ -127,6 +157,9 @@ struct Technology {
   std::map<std::string, Via_rule>  via_rules;
   std::map<std::string, Cut_layer> cut_layers;
 };
+// Manufacturing grid in DBU: 1 when LEF leaves it unspecified, empty when it
+// is not a positive integral DBU within the signed 32-bit range.
+std::optional<int64_t> manufacturing_grid_dbu(const Technology&, int64_t dbu);
 struct Row {
   std::string name, site;
   int64_t     x = 0, y = 0, count = 0, step = 0;
@@ -166,6 +199,8 @@ struct Connection {
   std::string instance, pin;
   friend bool operator==(const Connection&, const Connection&) = default;
 };
+// Timing/demand endpoint identity: "instance:pin", or the bare DEF PIN name.
+inline std::string connection_label(const Connection& c) { return c.instance == "PIN" ? c.pin : c.instance + ":" + c.pin; }
 // Routing geometry uses integer DEF DBU, including via-local coordinates.
 // Keep extensions explicit: an omitted extension means half the wire width for
 // ordinary nets and zero for special nets. Explicit zero is a flush endpoint.
@@ -223,8 +258,19 @@ struct Net {
 struct Track {
   std::string axis, layer;
   int64_t     start = 0, count = 0, step = 0;
-  int         mask                                   = 0;
-  bool        same_mask                              = false;
+  int         mask      = 0;
+  bool        same_mask = false;
+  // Unmasked, nonempty pattern whose start/step/count fit the signed 32-bit range.
+  bool        supported() const {
+    return !mask && !same_mask && step > 0 && count > 0 && step <= std::numeric_limits<int32_t>::max()
+           && count <= std::numeric_limits<int32_t>::max() && start >= std::numeric_limits<int32_t>::min()
+           && start <= std::numeric_limits<int32_t>::max();
+  }
+  // Inclusive index range of the track coordinates within [lo, hi]; empty when
+  // first > last. Requires supported().
+  std::pair<int64_t, int64_t> index_range(double lo, double hi) const {
+    return {std::max<int64_t>(0, std::ceil((lo - start) / step)), std::min<int64_t>(count - 1, std::floor((hi - start) / step))};
+  }
   friend bool operator==(const Track&, const Track&) = default;
 };
 // Read-only routed snapshots retain all constraints as provenance. Placement
@@ -280,6 +326,10 @@ void                             write_def(const Floorplan& floorplan, const std
 std::string                      orientation_name(Orientation orientation);
 Orientation                      parse_orientation(const std::string& name);
 std::pair<double, double>        orient_point(double x, double y, double width, double height, Orientation orientation);
+// Both corners oriented within a width x height frame, normalized.
+Rect                             orient_rect(const Rect& r, double width, double height, Orientation orientation);
+// Macro-local LEF rectangle (microns) of a placed instance, in unrounded DBU.
+Rect                             placed_rect(const Macro&, const Ann_place&, int64_t dbu, const Rect& local);
 void                             verify_def_roundtrip(const Floorplan& expected, const Floorplan& actual);
 // Disjoint hard-first geometry, clipped to the solver domain. Existing fixed
 // occupancy is subtracted so overlapping macro bodies are not charged twice.

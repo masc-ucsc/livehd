@@ -2,6 +2,17 @@
 #pragma once
 #include "physical.hpp"
 namespace livehd::physical {
+// LEF58 property text as whitespace-separated words; ';' is always its own word.
+std::vector<std::string> lef58_tokens(const std::string& text);
+// Exact nonnegative LEF dimension in DBU within the signed 32-bit range; throws otherwise.
+int64_t     exact_units(double um, int64_t dbu);
+// Cuts that touch, overlap, or lie closer than spacing on both axes (a
+// conservative square keepout around each cut).
+inline bool violates_cut_spacing(const Rect& a, const Rect& b, double spacing) {
+  const auto dx = std::max({a.xl - b.xh, b.xl - a.xh, 0.});
+  const auto dy = std::max({a.yl - b.yh, b.yl - a.yh, 0.});
+  return (dx == 0 && dy == 0) || (dx < spacing && dy < spacing);
+}
 // Supported LEF58 subset: cut classes, all-DEFAULT pair tables and ASAP7
 // enclosure forms. Unknown syntax fails explicitly. All dimensions are DBU.
 std::map<std::string, std::array<int64_t, 2>> cut_classes(const Cut_layer&, int64_t dbu,

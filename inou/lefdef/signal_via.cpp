@@ -9,9 +9,6 @@
 #include "routing_geometry.hpp"
 
 namespace livehd::physical {
-namespace {
-bool contains(const Rect& a, const Rect& b) { return a.xl <= b.xl && a.yl <= b.yl && a.xh >= b.xh && a.yh >= b.yh; }
-}  // namespace
 Rule_check check_signal_via(const Technology& tech, const Floorplan& fp, const Signal_metal_rules& rules,
                             const Routing_occupancy& occupancy, const Route_via& via, int64_t x, int64_t y,
                             const std::array<Shape, 2>& landings, const std::string& own_net) {
@@ -30,11 +27,11 @@ Rule_check check_signal_via(const Technology& tech, const Floorplan& fp, const S
   if (std::any_of(fp.vias.begin(), fp.vias.end(), [&](const auto& local) { return local.name == via.name; })) {
     return fail("DEF overrides LEF signal via");
   }
-  const auto grid = tech.manufacturing_grid == 0 ? 1. : tech.manufacturing_grid * fp.dbu;
-  if (!std::isfinite(grid) || grid < 1 || grid > INT32_MAX || std::abs(grid - std::round(grid)) > 1e-9) {
+  const auto grid = manufacturing_grid_dbu(tech, fp.dbu);
+  if (!grid) {
     return fail("invalid manufacturing grid");
   }
-  if (x % std::llround(grid) || y % std::llround(grid)) {
+  if (x % *grid || y % *grid) {
     return fail("off-grid via origin");
   }
   try {
@@ -45,16 +42,13 @@ Rule_check check_signal_via(const Technology& tech, const Floorplan& fp, const S
     const Shape*        cut = nullptr;
     std::array<bool, 2> covered{};
     for (auto& s : shapes) {
-      s.rect.xl += x;
-      s.rect.xh += x;
-      s.rect.yl += y;
-      s.rect.yh += y;
+      s.rect = s.rect.translated(x, y);
       for (auto v : {s.rect.xl, s.rect.yl, s.rect.xh, s.rect.yh}) {
-        if (v < INT32_MIN || v > INT32_MAX || std::llround(v) % std::llround(grid)) {
+        if (v < INT32_MIN || v > INT32_MAX || std::llround(v) % *grid) {
           return fail("off-grid via geometry");
         }
       }
-      if (!contains(fp.die, s.rect)) {
+      if (!fp.die.contains(s.rect)) {
         return fail("via outside die");
       }
       if (tech.cut_layers.contains(s.layer)) {
@@ -65,7 +59,7 @@ Rule_check check_signal_via(const Technology& tech, const Floorplan& fp, const S
       } else {
         bool matched = false;
         for (size_t i = 0; i < 2; ++i) {
-          if (landings[i].layer == s.layer && !covered[i] && contains(landings[i].rect, s.rect)) {
+          if (landings[i].layer == s.layer && !covered[i] && landings[i].rect.contains(s.rect)) {
             covered[i] = matched = true;
             break;
           }
@@ -79,7 +73,7 @@ Rule_check check_signal_via(const Technology& tech, const Floorplan& fp, const S
       return fail("missing via cut or metal");
     }
     for (const auto& s : shapes) {
-      if (s.layer != cut->layer && !contains(s.rect, cut->rect)) {
+      if (s.layer != cut->layer && !s.rect.contains(cut->rect)) {
         return fail("cut not enclosed by via metal");
       }
     }
@@ -113,11 +107,8 @@ Rule_check check_signal_via(const Technology& tech, const Floorplan& fp, const S
     }
     // Same-net cuts still need spacing. A trial cannot reuse an existing cut
     // implicitly; shared via reuse is an explicit routing-graph operation.
-    for (auto id : occupancy.query(cut->layer, cut->rect, static_cast<int64_t>(spacing))) {
-      const auto& r  = occupancy.at(id).shape.rect;
-      const auto  dx = std::max({r.xl - cut->rect.xh, cut->rect.xl - r.xh, 0.});
-      const auto  dy = std::max({r.yl - cut->rect.yh, cut->rect.yl - r.yh, 0.});
-      if ((dx == 0 && dy == 0) || (dx < spacing && dy < spacing)) {
+    for (auto id : occupancy.query(cut->layer, cut->rect, spacing)) {
+      if (violates_cut_spacing(occupancy.at(id).shape.rect, cut->rect, spacing)) {
         return fail("signal cut spacing");
       }
     }
@@ -126,7 +117,7 @@ Rule_check check_signal_via(const Technology& tech, const Floorplan& fp, const S
       if (!valid.legal) {
         return valid;
       }
-      if (!contains(fp.die, landing.rect)) {
+      if (!fp.die.contains(landing.rect)) {
         return fail("landing outside die");
       }
       const auto clearance = rules.clearance(landing.layer);

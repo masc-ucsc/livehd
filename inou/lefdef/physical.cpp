@@ -930,6 +930,33 @@ std::pair<double, double> orient_point(double x, double y, double w, double h, O
   }
   throw std::runtime_error("invalid orientation");
 }
+Rect orient_rect(const Rect& r, double w, double h, Orientation o) {
+  const auto [x0, y0] = orient_point(r.xl, r.yl, w, h, o);
+  const auto [x1, y1] = orient_point(r.xh, r.yh, w, h, o);
+  return {std::min(x0, x1), std::min(y0, y1), std::max(x0, x1), std::max(y0, y1)};
+}
+Rect placed_rect(const Macro& m, const Ann_place& place, int64_t dbu, const Rect& local) {
+  const auto r = orient_rect(local.translated(m.origin_x, m.origin_y), m.width, m.height, place.orientation);
+  return {place.x + r.xl * dbu, place.y + r.yl * dbu, place.x + r.xh * dbu, place.y + r.yh * dbu};
+}
+std::optional<int64_t> wire_width_dbu(const Layer& layer, int64_t dbu) {
+  const double width = layer.width * dbu;
+  if (!std::isfinite(width) || width <= 0 || width > std::numeric_limits<int32_t>::max() || width != std::round(width)
+      || std::llround(width) % 2) {
+    return {};
+  }
+  return std::llround(width);
+}
+std::optional<int64_t> manufacturing_grid_dbu(const Technology& tech, int64_t dbu) {
+  if (tech.manufacturing_grid == 0) {
+    return 1;
+  }
+  const double grid = tech.manufacturing_grid * dbu;
+  if (!std::isfinite(grid) || grid < 1 || grid > std::numeric_limits<int32_t>::max() || std::abs(grid - std::round(grid)) > 1e-9) {
+    return {};
+  }
+  return std::llround(grid);
+}
 Technology read_lef(const std::vector<std::string>& paths) {
   std::scoped_lock lock(reader_mutex);
   LefContext       c;
@@ -1245,8 +1272,8 @@ std::vector<Placement_exclusion> sweep_exclusions(const Floorplan& fp, const Rec
   std::vector<Event>  events;
   std::vector<double> xs;
   const auto          add = [&](const Rect& r, size_t kind) {
-    const Rect c{std::max(r.xl, domain.xl), std::max(r.yl, domain.yl), std::min(r.xh, domain.xh), std::min(r.yh, domain.yh)};
-    if (c.xl < c.xh && c.yl < c.yh) {
+    const auto c = r.intersection(domain);
+    if (!c.empty()) {
       events.push_back({c.yl, c.xl, c.xh, kind, 1});
       events.push_back({c.yh, c.xl, c.xh, kind, -1});
       xs.push_back(c.xl);
@@ -1369,17 +1396,13 @@ std::vector<Placement_exclusion> placement_exclusions(const Floorplan& fp, const
       || domain.xh <= domain.xl || domain.yh <= domain.yl) {
     throw std::invalid_argument("invalid placement exclusion domain");
   }
-  const auto clip = [&](const Rect& r) {
-    return Rect{std::max(r.xl, domain.xl), std::max(r.yl, domain.yl), std::min(r.xh, domain.xh), std::min(r.yh, domain.yh)};
-  };
   std::vector<Rect> occupied;
   for (const auto& r : fixed_occupancy) {
     if (!std::isfinite(r.xl) || !std::isfinite(r.yl) || !std::isfinite(r.xh) || !std::isfinite(r.yh) || r.xh < r.xl
         || r.yh < r.yl) {
       throw std::invalid_argument("invalid fixed placement occupancy");
     }
-    const auto c = clip(r);
-    if (c.xh > c.xl && c.yh > c.yl) {
+    if (const auto c = r.intersection(domain); !c.empty()) {
       occupied.push_back(c);
     }
   }
@@ -1408,19 +1431,16 @@ std::vector<Placement_exclusion> placement_exclusions(const Floorplan& fp, const
         continue;
       }
       for (const auto& original : blockage.rectangles) {
-        const auto        clipped = clip(original);
+        const auto        clipped = original.intersection(domain);
         std::vector<Rect> pieces;
-        if (clipped.xh > clipped.xl && clipped.yh > clipped.yl) {
+        if (!clipped.empty()) {
           pieces.push_back(clipped);
         }
         for (const auto& obstacle : occupied) {
           std::vector<Rect> next;
           for (const auto& r : pieces) {
-            const Rect overlap{std::max(r.xl, obstacle.xl),
-                               std::max(r.yl, obstacle.yl),
-                               std::min(r.xh, obstacle.xh),
-                               std::min(r.yh, obstacle.yh)};
-            if (overlap.xh <= overlap.xl || overlap.yh <= overlap.yl) {
+            const auto overlap = r.intersection(obstacle);
+            if (overlap.empty()) {
               next.push_back(r);
               continue;
             }
@@ -1430,7 +1450,7 @@ std::vector<Placement_exclusion> placement_exclusions(const Floorplan& fp, const
                      Rect{overlap.xl,       r.yl, overlap.xh, overlap.yl},
                      Rect{overlap.xl, overlap.yh, overlap.xh,       r.yh}
             }) {
-              if (piece.xh > piece.xl && piece.yh > piece.yl) {
+              if (!piece.empty()) {
                 next.push_back(piece);
               }
             }

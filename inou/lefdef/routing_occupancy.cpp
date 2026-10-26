@@ -13,12 +13,10 @@
 namespace livehd::physical {
 namespace {
 void validate(const Rect& r) {
-  for (auto v : {r.xl, r.yl, r.xh, r.yh}) {
-    if (!std::isfinite(v) || v != std::round(v) || std::abs(v) > std::numeric_limits<int32_t>::max()) {
-      throw std::invalid_argument("routing occupancy requires integer DEF coordinates");
-    }
+  if (!integral_dbu(r)) {
+    throw std::invalid_argument("routing occupancy requires integer DEF coordinates");
   }
-  if (r.xl >= r.xh || r.yl >= r.yh) {
+  if (r.empty()) {
     throw std::invalid_argument("empty routing obstacle");
   }
 }
@@ -186,10 +184,10 @@ size_t Routing_occupancy::insert_run(Occupied_shape first, int64_t dx, int64_t d
   }
   const auto tx = dx == 0 ? 0 : dx * int64_t(count - 1);
   const auto ty = dy == 0 ? 0 : dy * int64_t(count - 1);
-  const auto r  = first.shape.rect;
-  const Rect last{r.xl + tx, r.yl + ty, r.xh + tx, r.yh + ty};
+  const auto r    = first.shape.rect;
+  const auto last = r.translated(tx, ty);
   validate(last);
-  first.shape.rect = {std::min(r.xl, last.xl), std::min(r.yl, last.yl), std::max(r.xh, last.xh), std::max(r.yh, last.yh)};
+  first.shape.rect = r.hull(last);
   if (starts_.empty()) {
     starts_.reserve(local_size() + 1);
     for (size_t i = 0; i < local_size(); ++i) {
@@ -350,9 +348,8 @@ Routing_power_grid::Routing_power_grid(const Technology& tech, const Floorplan& 
         // Short progressions cost less as ordinary records and avoid indexing
         // a large empty hull between two unrelated same-sized rectangles.
         for (size_t i = 0; i < count; ++i) {
-          const auto& r = first.rect;
           occupied.insert({
-              {first.layer, {r.xl + double(i) * dx, r.yl + double(i) * dy, r.xh + double(i) * dx, r.yh + double(i) * dy}},
+              {first.layer, first.rect.translated(double(i) * dx, double(i) * dy)},
               net.name,
               true
           });
@@ -461,19 +458,11 @@ Routing_occupancy routing_occupancy(const Technology& tech, const Floorplan& fp,
       throw std::invalid_argument("unplaced cell in routing occupancy");
     }
     const auto transform = [&](const Shape& s) {
-      const auto point = [&](double x, double y) {
-        const auto [px, py] = orient_point(x + m.origin_x, y + m.origin_y, m.width, m.height, cell.place.orientation);
-        return std::pair{cell.place.x + px * fp.dbu, cell.place.y + py * fp.dbu};
-      };
-      const auto [x0, y0] = point(s.rect.xl, s.rect.yl);
-      const auto [x1, y1] = point(s.rect.xh, s.rect.yh);
+      const auto r = placed_rect(m, cell.place, fp.dbu, s.rect);
       // Occupancy rounds outwards, never shrinking a physical obstacle.
       return Shape{
           s.layer,
-          {std::floor(std::min(x0, x1) + 1e-9),
-                  std::floor(std::min(y0, y1) + 1e-9),
-                  std::ceil(std::max(x0, x1) - 1e-9),
-                  std::ceil(std::max(y0, y1) - 1e-9)}
+          {std::floor(r.xl + 1e-9), std::floor(r.yl + 1e-9), std::ceil(r.xh - 1e-9), std::ceil(r.yh - 1e-9)}
       };
     };
     const auto body = [&](const std::string& layer) {
@@ -504,7 +493,7 @@ Routing_occupancy routing_occupancy(const Technology& tech, const Floorplan& fp,
         throw std::invalid_argument("wildcard conflicts with physical pin ownership");
       }
       for (const auto& s : pin.shapes) {
-        if (s.rect.xl >= s.rect.xh || s.rect.yl >= s.rect.yh) {
+        if (s.rect.empty()) {
           body(s.layer);
         } else {
           append(transform(s), net);
@@ -529,17 +518,7 @@ Routing_occupancy routing_occupancy(const Technology& tech, const Floorplan& fp,
       throw std::invalid_argument("unplaced terminal in routing occupancy");
     }
     for (const auto& s : terminal.shapes) {
-      const auto [x0, y0] = orient_point(s.rect.xl, s.rect.yl, 0, 0, terminal.orientation);
-      const auto [x1, y1] = orient_point(s.rect.xh, s.rect.yh, 0, 0, terminal.orientation);
-      append(
-          {
-              s.layer,
-              {terminal.x + std::min(x0, x1),
-                      terminal.y + std::min(y0, y1),
-                      terminal.x + std::max(x0, x1),
-                      terminal.y + std::max(y0, y1)}
-      },
-          terminal.net);
+      append({s.layer, orient_rect(s.rect, 0, 0, terminal.orientation).translated(terminal.x, terminal.y)}, terminal.net);
     }
   }
   if (signal_wires == Signal_wires::include) {

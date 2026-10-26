@@ -152,17 +152,10 @@ Route_connectivity check_route_connectivity(const Technology& tech, const Floorp
       }
       const auto pin_node = graph.add();
       for (const auto& s : pin.shapes) {
-        if (!tech.layers.contains(s.layer) || s.rect.xl >= s.rect.xh || s.rect.yl >= s.rect.yh) {
+        if (!tech.layers.contains(s.layer) || s.rect.empty()) {
           throw std::runtime_error("unsupported endpoint pin shape");
         }
-        const auto transform = [&](double x, double y) {
-          auto [ox, oy]
-              = orient_point(x + master.origin_x, y + master.origin_y, master.width, master.height, cell.place.orientation);
-          return std::pair{cell.place.x + ox * fp.dbu, cell.place.y + oy * fp.dbu};
-        };
-        const auto [x0, y0] = transform(s.rect.xl, s.rect.yl);
-        const auto [x1, y1] = transform(s.rect.xh, s.rect.yh);
-        Rect r{std::min(x0, x1), std::min(y0, y1), std::max(x0, x1), std::max(y0, y1)};
+        auto r = placed_rect(master, cell.place, fp.dbu, s.rect);
         for (auto* v : {&r.xl, &r.yl, &r.xh, &r.yh}) {
           if (!std::isfinite(*v) || std::abs(*v - std::round(*v)) > 1e-6) {
             throw std::runtime_error("fractional endpoint geometry");

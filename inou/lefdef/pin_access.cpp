@@ -6,21 +6,13 @@
 #include <limits>
 #include <set>
 
+#include "cut_rules.hpp"
 #include "routing_geometry.hpp"
 #include "routing_occupancy.hpp"
 
 namespace livehd::physical {
 namespace {
-bool contains(const Rect& a, const Rect& b) { return a.xl <= b.xl && a.yl <= b.yl && a.xh >= b.xh && a.yh >= b.yh; }
-bool valid(const Rect& r) {
-  for (auto v : {r.xl, r.yl, r.xh, r.yh}) {
-    if (!std::isfinite(v) || std::abs(v) > std::numeric_limits<int32_t>::max() || v != std::round(v)) {
-      return false;
-    }
-  }
-  return r.xl < r.xh && r.yl < r.yh;
-}
-Rect shifted(Rect r, int64_t x, int64_t y) { return {r.xl + x, r.yl + y, r.xh + x, r.yh + y}; }
+bool valid(const Rect& r) { return integral_dbu(r) && !r.empty(); }
 bool covered(const Rect& r, const std::vector<Rect>& pin) {
   std::vector<double> xs{r.xl, r.xh};
   for (const auto& s : pin) {
@@ -108,23 +100,14 @@ static Pin_access_result enumerate_pin_access_impl(const Technology& tech, const
     if (shape.layer != layers.pin) {
       return fail("pin is not entirely " + layers.pin);
     }
-    const auto transform = [&](double x, double y) {
-      const auto [ox, oy]
-          = orient_point(x + master.origin_x, y + master.origin_y, master.width, master.height, cell.place.orientation);
-      return std::pair{cell.place.x + ox * fp.dbu, cell.place.y + oy * fp.dbu};
-    };
-    const auto [x0, y0] = transform(shape.rect.xl, shape.rect.yl);
-    const auto [x1, y1] = transform(shape.rect.xh, shape.rect.yh);
-    for (auto coordinate : {x0, y0, x1, y1}) {
-      if (!std::isfinite(coordinate) || std::abs(coordinate - std::round(coordinate)) > 1e-6) {
+    auto rect = placed_rect(master, cell.place, fp.dbu, shape.rect);
+    for (auto* coordinate : {&rect.xl, &rect.yl, &rect.xh, &rect.yh}) {
+      if (!std::isfinite(*coordinate) || std::abs(*coordinate - std::round(*coordinate)) > 1e-6) {
         return fail("pin geometry is not representable in DEF DBU");
       }
+      *coordinate = std::round(*coordinate);
     }
-    Rect rect{std::round(std::min(x0, x1)),
-              std::round(std::min(y0, y1)),
-              std::round(std::max(x0, x1)),
-              std::round(std::max(y0, y1))};
-    if (!valid(rect) || !contains(fp.die, rect)) {
+    if (!valid(rect) || !fp.die.contains(rect)) {
       return fail("invalid transformed pin");
     }
     pin.push_back(rect);
@@ -139,19 +122,17 @@ static Pin_access_result enumerate_pin_access_impl(const Technology& tech, const
   }
   Rect bounds = pin.front();
   for (const auto& r : pin) {
-    bounds = {std::min(bounds.xl, r.xl), std::min(bounds.yl, r.yl), std::max(bounds.xh, r.xh), std::max(bounds.yh, r.yh)};
+    bounds = bounds.hull(r);
   }
   std::set<int64_t> ys;
   for (const auto& track : fp.tracks) {
     if (track.layer != layers.escape || track.axis != "Y") {
       continue;
     }
-    if (track.mask || track.same_mask || track.step <= 0 || track.count <= 0 || track.step > INT32_MAX || track.count > INT32_MAX
-        || track.start < INT32_MIN || track.start > INT32_MAX) {
+    if (!track.supported()) {
       return fail("unsupported " + layers.escape + " tracks");
     }
-    const auto first = std::max<int64_t>(0, std::ceil((bounds.yl - track.start) / track.step));
-    const auto last  = std::min<int64_t>(track.count - 1, std::floor((bounds.yh - track.start) / track.step));
+    const auto [first, last] = track.index_range(bounds.yl, bounds.yh);
     if (last >= first && uint64_t(last - first) >= budget) {
       out.exhausted = true;
       return fail("track enumeration budget");
@@ -167,12 +148,11 @@ static Pin_access_result enumerate_pin_access_impl(const Technology& tech, const
   if (ys.empty()) {
     return fail("no " + layers.escape + " track crosses pin");
   }
-  const auto grid_value = tech.manufacturing_grid == 0 ? 1. : tech.manufacturing_grid * fp.dbu;
-  if (!std::isfinite(grid_value) || grid_value < 1 || grid_value > INT32_MAX
-      || std::abs(grid_value - std::round(grid_value)) > 1e-9) {
+  const auto grid_value = manufacturing_grid_dbu(tech, fp.dbu);
+  if (!grid_value) {
     return fail("unsupported manufacturing grid");
   }
-  const int64_t     grid = std::llround(grid_value);
+  const int64_t     grid = *grid_value;
   // Candidate positions are track crossings and pin-rectangle centers, not
   // every manufacturing-grid coordinate across a wide pin. Besides bounding
   // work, this avoids inventing a dense set of redundant access points that
@@ -189,12 +169,10 @@ static Pin_access_result enumerate_pin_access_impl(const Technology& tech, const
     if (track.layer != layers.pin || track.axis != "X") {
       continue;
     }
-    if (track.mask || track.same_mask || track.step <= 0 || track.count <= 0 || track.step > INT32_MAX || track.count > INT32_MAX
-        || track.start < INT32_MIN || track.start > INT32_MAX) {
+    if (!track.supported()) {
       return fail("unsupported " + layers.pin + " tracks");
     }
-    const auto first = std::max<int64_t>(0, std::ceil((bounds.xl - track.start) / track.step));
-    const auto last  = std::min<int64_t>(track.count - 1, std::floor((bounds.xh - track.start) / track.step));
+    const auto [first, last] = track.index_range(bounds.xl, bounds.xh);
     if (last >= first && uint64_t(last - first) >= budget) {
       out.exhausted = true;
       return fail("track enumeration budget");
@@ -237,7 +215,7 @@ static Pin_access_result enumerate_pin_access_impl(const Technology& tech, const
       }
     }
     if (!lower || !upper || !cut || !valid(lower->rect) || !valid(upper->rect) || !valid(cut->rect)
-        || !contains(lower->rect, cut->rect) || !contains(upper->rect, cut->rect)) {
+        || !lower->rect.contains(cut->rect) || !upper->rect.contains(cut->rect)) {
       continue;
     }
     if (!std::isfinite(cut_rule.width) || cut_rule.width < 0
@@ -270,7 +248,7 @@ static Pin_access_result enumerate_pin_access_impl(const Technology& tech, const
           return out;
         }
         ++out.examined;
-        if (!covered(shifted(lower->rect, x, y), pin)) {
+        if (!covered(lower->rect.translated(x, y), pin)) {
           ++out.rejected["lower landing outside pin union"];
           continue;
         }
@@ -278,7 +256,7 @@ static Pin_access_result enumerate_pin_access_impl(const Technology& tech, const
             layers.escape,
             {double(x - half), upper->rect.yl + y, double(x + half), upper->rect.yh + y}
         };
-        if (!contains(escape.rect, shifted(upper->rect, x, y)) || !contains(fp.die, escape.rect)) {
+        if (!escape.rect.contains(upper->rect.translated(x, y)) || !fp.die.contains(escape.rect)) {
           ++out.rejected["escape outside available geometry"];
           continue;
         }
@@ -287,16 +265,14 @@ static Pin_access_result enumerate_pin_access_impl(const Technology& tech, const
           ++out.rejected[check.reason];
           continue;
         }
-        const auto cut_rect = shifted(cut->rect, x, y);
+        const auto cut_rect = cut->rect.translated(x, y);
         bool       clear    = true;
         const auto blocked  = [&](const Shape& obstacle) {
           if (obstacle.layer == layers.escape) {
             return !rules.spacing(escape, obstacle).legal;
           }
           if (obstacle.layer == layers.cut) {
-            const auto dx = std::max({obstacle.rect.xl - cut_rect.xh, cut_rect.xl - obstacle.rect.xh, 0.});
-            const auto dy = std::max({obstacle.rect.yl - cut_rect.yh, cut_rect.yl - obstacle.rect.yh, 0.});
-            return (dx == 0 && dy == 0) || (dx < cut_spacing && dy < cut_spacing);
+            return violates_cut_spacing(obstacle.rect, cut_rect, cut_spacing);
           }
           return false;
         };
