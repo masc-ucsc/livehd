@@ -19,7 +19,7 @@ from .export_weights import LIMIT
 from .pool import (VERSIONS, _atomic, _identity, _object, _verify_immutable_sample,
                    canonical, file_sha, inside, lineage_status, read_manifest, sha)
 from .score import METRICS, defined_mean
-from .train import Dataset
+from .train import Dataset, add_training_arguments, training_options
 
 
 def configuration(path):
@@ -193,13 +193,8 @@ def cross_validate(args):
             result = dict(fold, directory=str(directory), status='training', evaluations={})
             report['folds'].append(result)
             save()
-            training = argparse.Namespace(pool=pool, holdout=None, validation_task=tuple(fold['validation_task']),
-                                          exclude_design=[fold['test_top']], from_scratch=args.from_scratch,
-                                          shots=args.shots, epochs=args.epochs, episodes=args.episodes, patience=args.patience,
-                                          learning_rate=args.learning_rate, seed=args.seed, threads=args.threads, device=args.device)
-            training.sampling = getattr(args, 'sampling', 'sqrt-mean-floor')
-            training.linear_head_loss = getattr(args, 'linear_head_loss', False)
-            training.mps_memory_limit_gib = getattr(args, 'mps_memory_limit_gib', None)
+            training = training_options(args, pool=pool, holdout=None, validation_task=tuple(fold['validation_task']),
+                                        exclude_design=[fold['test_top']], from_scratch=args.from_scratch)
             result['training'] = train(training)
             for mode in ('earlier', 'zero-shot'):
                 result['status'] = 'evaluating-' + mode
@@ -234,18 +229,7 @@ def main():
     parser.add_argument('--from-scratch', action='store_true')
     parser.add_argument('--native', type=Path, default=Path('bazel-bin/tools/uroute/native'))
     parser.add_argument('--rudy-metrics', type=Path)
-    parser.add_argument('--shots', type=int, default=5)
-    parser.add_argument('--sampling', choices=('sqrt-mean-floor', 'paper-rms'), default='sqrt-mean-floor')
-    parser.add_argument('--linear-head-loss', action='store_true')
-    parser.add_argument('--epochs', type=int, default=100)
-    parser.add_argument('--episodes', type=int, default=0)
-    parser.add_argument('--patience', type=int, default=10)
-    parser.add_argument('--learning-rate', type=float, default=.0003)
-    parser.add_argument('--seed', type=int, default=1)
-    parser.add_argument('--threads', type=int, default=1)
-    parser.add_argument('--device', choices=('auto', 'cpu', 'cuda', 'mps'), default='auto')
-    parser.add_argument('--mps-memory-limit-gib', type=float,
-                        help='required positive Metal allocator cap for --device mps')
+    add_training_arguments(parser)
     parser.add_argument('--timeout', type=float, default=120)
     args = parser.parse_args()
     if not 1 <= args.shots <= 16 or not math.isfinite(args.timeout) or args.timeout <= 0:

@@ -316,14 +316,13 @@ def parse_task(value):
         raise argparse.ArgumentTypeError("validation task must be JSON [top,technology,0|1]") from error
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--pool", required=True, type=Path)
-    validation = parser.add_mutually_exclusive_group(required=True)
-    validation.add_argument("--holdout", help="validation design used for early stopping; this is not an unseen test design")
-    validation.add_argument("--validation-task", type=parse_task, help='held-out [top,technology,metric] JSON task; metric 0=utilization, 1=DRC')
-    parser.add_argument("--exclude-design", action="append", default=[], help="exclude this evaluation design from both gradients and model selection")
-    parser.add_argument("--from-scratch", action="store_true")
+# Training controls shared with cross_validate. Callers that build their own
+# namespaces (tests) may omit the newer opt-in controls.
+TRAINING_DEFAULTS = {"sampling": "sqrt-mean-floor", "linear_head_loss": False, "mps_memory_limit_gib": None}
+TRAINING_CONTROLS = ("shots", "epochs", "episodes", "patience", "learning_rate", "seed", "threads", "device", *TRAINING_DEFAULTS)
+
+
+def add_training_arguments(parser):
     parser.add_argument("--shots", type=int, default=5)
     parser.add_argument("--sampling", choices=('sqrt-mean-floor', 'paper-rms'), default='sqrt-mean-floor',
                         help='task probability rule; default preserves the original plan, paper-rms follows Eq. 15 and Algorithm 1')
@@ -339,6 +338,24 @@ def main():
                         help='auto preserves CUDA-if-available, otherwise CPU; Metal requires explicit mps')
     parser.add_argument('--mps-memory-limit-gib', type=float,
                         help='required positive Metal allocator cap for --device mps; recorded in provenance')
+
+
+def training_options(args, **fields):
+    """A train() namespace: fields, then the shared training controls of args."""
+    controls = {name: getattr(args, name, TRAINING_DEFAULTS[name]) if name in TRAINING_DEFAULTS else getattr(args, name)
+                for name in TRAINING_CONTROLS}
+    return argparse.Namespace(**fields, **controls)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--pool", required=True, type=Path)
+    validation = parser.add_mutually_exclusive_group(required=True)
+    validation.add_argument("--holdout", help="validation design used for early stopping; this is not an unseen test design")
+    validation.add_argument("--validation-task", type=parse_task, help='held-out [top,technology,metric] JSON task; metric 0=utilization, 1=DRC')
+    parser.add_argument("--exclude-design", action="append", default=[], help="exclude this evaluation design from both gradients and model selection")
+    parser.add_argument("--from-scratch", action="store_true")
+    add_training_arguments(parser)
     args = parser.parse_args()
     try:
         output = train(args)
