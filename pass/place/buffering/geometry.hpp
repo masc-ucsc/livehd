@@ -1,7 +1,9 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <algorithm>
 #include <memory>
+#include <vector>
 
 #include "tree_search.hpp"
 
@@ -76,6 +78,23 @@ Point        physical_point(Route_point, double dbu_per_um);
 // vertical R/C per micron). Lossy unit conversion throws.
 Tree_segment visibility_segment(Route_point parent, Route_point child, uint64_t length_dbu, size_t parent_vertex,
                                 size_t child_vertex, double dbu_per_um, const std::array<double, 4>& directional_rc);
+
+// Whether the X-then-Y path a -> (b.x, a.y) -> b avoids every CLOSED mask.
+// Mask coordinates are divided by scale to reach the points' units.
+template <class P, class R>
+bool rectilinear_clear(P a, P b, const std::vector<R>& masks, double scale = 1) {
+  const auto clear = [&](P from, P to) {
+    for (const auto& r : masks) {
+      if (std::max(from.x, to.x) >= r.xl / scale && std::min(from.x, to.x) <= r.xh / scale && std::max(from.y, to.y) >= r.yl / scale
+          && std::min(from.y, to.y) <= r.yh / scale) {
+        return false;
+      }
+    }
+    return true;
+  };
+  const P bend{b.x, a.y};
+  return clear(a, bend) && clear(bend, b);
+}
 
 enum class Route_status { connected, disconnected, budget_exhausted };
 struct Route_limits {

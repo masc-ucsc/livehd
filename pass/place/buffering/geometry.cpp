@@ -11,13 +11,13 @@
 #include <stdexcept>
 #include <tuple>
 
+#include "budget.hpp"
 #include "checks.hpp"
 
 namespace livehd::placement::buffering {
 namespace {
 using detail::Clock;
 using detail::elapsed;
-using detail::require;
 constexpr auto missing = std::numeric_limits<size_t>::max();
 uint64_t       distance(int64_t a, int64_t b) { return a >= b ? uint64_t(a) - uint64_t(b) : uint64_t(b) - uint64_t(a); }
 bool           inside(Route_point p, Site_rect r) { return p.x >= r.xl && p.x <= r.xh && p.y >= r.yl && p.y <= r.yh; }

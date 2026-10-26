@@ -7,13 +7,13 @@
 #include <numeric>
 #include <stdexcept>
 
+#include "budget.hpp"
 #include "checks.hpp"
 
 namespace livehd::placement::buffering {
 namespace {
 using detail::Clock;
 using detail::elapsed;
-using detail::require;
 void add(uint64_t& total, uint64_t units) {
   require(total <= UINT64_MAX - units, "negotiation resource count overflow");
   total += units;
@@ -171,10 +171,7 @@ void finalize(Allocation_result& result, const Allocation_state& original, const
       for (size_t buffer_index = 0; buffer_index < alternative.candidate.buffers.size(); ++buffer_index) {
         const auto&                   gap  = it->buffer_gaps[buffer_index];
         const auto                    body = site_body(original.sites.geometry(), {gap.row, gap.first, gap.count});
-        const Rect                    box{double(body.xl) / settings.dbu_per_um,
-                       double(body.yl) / settings.dbu_per_um,
-                       double(body.xh) / settings.dbu_per_um,
-                       double(body.yh) / settings.dbu_per_um};
+        const auto                    box  = micron_rect(body, settings.dbu_per_um);
         std::optional<Gap_entry_pull> pull;
         for (const auto& tree : alternative.candidate.trees) {
           for (const auto& terminal : tree.terminals) {

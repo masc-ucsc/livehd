@@ -5,13 +5,13 @@
 #include <cmath>
 #include <limits>
 
+#include "budget.hpp"
 #include "checks.hpp"
 
 namespace livehd::placement::buffering {
 namespace {
 using detail::Clock;
 using detail::elapsed;
-using detail::require;
 Route_point lattice(Point p, double units) {
   const double x = p.x * units, y = p.y * units;
   require(std::isfinite(x) && std::isfinite(y) && std::abs(x) < double(int64_t(1) << 52) && std::abs(y) < double(int64_t(1) << 52),
@@ -34,7 +34,7 @@ void terminals(Routing_tree& tree, const Context& c, const std::vector<Site_rect
                              dx * tree.attachment_rc[0] + dy * tree.attachment_rc[2],
                              dx * tree.attachment_rc[1] + dy * tree.attachment_rc[3],
                              dx + dy,
-                             detail::rectilinear_clear(a, z, masks, units)});
+                             rectilinear_clear(a, z, masks, units)});
   };
   append(0, 1);
   const auto size = tree.vertices.size();

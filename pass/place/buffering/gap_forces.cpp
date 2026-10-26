@@ -6,9 +6,6 @@
 #include "checks.hpp"
 
 namespace livehd::placement::buffering {
-namespace {
-using detail::require;
-}  // namespace
 Gap_force_result bind_gap_forces(const DreamPlace::native::Design& design, const Gap_force_payload& base,
                                  const std::map<std::string, int>& drivers, const std::vector<Gap_entry_pull>& pulls, double units,
                                  double maximum_fraction) {

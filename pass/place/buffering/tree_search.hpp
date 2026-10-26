@@ -72,6 +72,8 @@ struct Tree_search_result {
   std::optional<Tree_solution> best;
 };
 
+// A DBU rectangle in microns.
+Rect                  micron_rect(const Site_rect& dbu_rect, double dbu_per_um);
 // Whether a buffer body (microns) lies within a whole-site footprint (DBU).
 // Footprints beyond the exact double DBU range throw.
 bool                  body_within_sites(const Rect& body_um, const Site_rect& sites_dbu, double dbu_per_um);

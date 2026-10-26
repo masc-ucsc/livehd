@@ -6,12 +6,12 @@
 #include <functional>
 #include <limits>
 
+#include "budget.hpp"
 #include "checks.hpp"
 
 namespace livehd::placement::buffering {
 namespace {
 using detail::finite;
-using detail::require;
 double distance(Point a, Point b) { return std::abs(a.x - b.x) + std::abs(a.y - b.y); }
 using Children = std::vector<std::vector<size_t>>;
 Children validate(const Context& context, const Routing_tree& tree) {
@@ -239,12 +239,15 @@ bool replaces_best_tree_solution(const Tree_solution& candidate, const Tree_solu
          || (!(old_dominates && !new_dominates) && prefer_tree_solution(candidate, best, selection));
 }
 
+Rect micron_rect(const Site_rect& r, double dbu_per_um) {
+  return {double(r.xl) / dbu_per_um, double(r.yl) / dbu_per_um, double(r.xh) / dbu_per_um, double(r.yh) / dbu_per_um};
+}
 bool body_within_sites(const Rect& b, const Site_rect& sites, double dbu_per_um) {
   constexpr auto limit = detail::exact_dbu_limit;
   require(sites.xl >= -limit && sites.xh <= limit && sites.yl >= -limit && sites.yh <= limit,
           "site footprint exceeds exact double DBU range");
-  return b.xl >= double(sites.xl) / dbu_per_um && b.xh <= double(sites.xh) / dbu_per_um && b.yl >= double(sites.yl) / dbu_per_um
-         && b.yh <= double(sites.yh) / dbu_per_um;
+  const auto s = micron_rect(sites, dbu_per_um);
+  return b.xl >= s.xl && b.xh <= s.xh && b.yl >= s.yl && b.yh <= s.yh;
 }
 std::optional<double> worst_input_margin(const Evaluation& timing, const Driver& driver) {
   std::optional<double> worst;

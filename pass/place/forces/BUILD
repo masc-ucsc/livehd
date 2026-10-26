@@ -87,6 +87,6 @@ cc_test(
 
 filegroup(
     name = "timing_sources",
-    srcs = glob(["*.cpp", "*.hpp"], exclude = ["*_test.cpp"]),
+    srcs = glob(["*.cpp", "*.hpp"], exclude = ["*_test.cpp", "*_fixture.hpp"]),
     visibility = ["//visibility:public"],
 )

@@ -14,7 +14,6 @@ namespace {
 namespace model         = liberty::timing;
 constexpr size_t absent = std::numeric_limits<size_t>::max();
 using detail::finite;
-using detail::require;
 bool        valid(Rect r) { return finite(Point{r.xl, r.yl}) && finite(Point{r.xh, r.yh}) && r.xl < r.xh && r.yl < r.yh; }
 bool        contains(Rect r, Point p) { return p.x >= r.xl && p.y >= r.yl && p.x <= r.xh && p.y <= r.yh; }
 bool        overlaps(Rect a, Rect b) { return a.xl < b.xh && b.xl < a.xh && a.yl < b.yh && b.yl < a.yh; }

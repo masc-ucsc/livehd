@@ -6,6 +6,7 @@
 #include <limits>
 #include <set>
 
+#include "budget.hpp"
 #include "checks.hpp"
 
 namespace livehd::placement::buffering {
@@ -13,7 +14,6 @@ namespace {
 using detail::Clock;
 using detail::elapsed;
 using detail::finite;
-using detail::require;
 constexpr int64_t exact_limit = detail::exact_dbu_limit;
 double            manhattan(Point lhs, Point rhs) { return std::abs(lhs.x - rhs.x) + std::abs(lhs.y - rhs.y); }
 Point             pin_position(int64_t x, int64_t y, Point offset) {
@@ -327,7 +327,7 @@ Site_option_result physical_site_options(const Physical_sites& physical, const S
               const auto  a = pin_position(x, y, input), b = pin_position(x, y, output);
               const Point at{double(anchor.x), double(anchor.y)};
               if (manhattan(at, a) <= settings.max_attachment_dbu && manhattan(at, b) <= settings.max_attachment_dbu) {
-                if (!detail::rectilinear_clear(at, a, routing) || !detail::rectilinear_clear(b, at, routing)) {
+                if (!rectilinear_clear(at, a, routing) || !rectilinear_clear(b, at, routing)) {
                   ++result.routing_rejected;
                 } else {
                   if (result.options[vertex].size() >= settings.max_options_per_vertex) {
@@ -335,15 +335,13 @@ Site_option_result physical_site_options(const Physical_sites& physical, const S
                     return true;
                   }
                   const double dbu = double(physical.dbu);
-                  Buffer       buffer{
-                      owner + "__vb_" + std::to_string(vertex),
-                      model.ports,
-                      microns(a, physical.dbu),
-                      microns(b, physical.dbu),
-                            {double(x) / dbu, double(y) / dbu, double(x + model.width_dbu) / dbu, double(y + model.height_dbu) / dbu},
-                      true,
-                            {{"sites:" + name, width}}
-                  };
+                  Buffer       buffer{owner + "__vb_" + std::to_string(vertex),
+                                model.ports,
+                                microns(a, physical.dbu),
+                                microns(b, physical.dbu),
+                                micron_rect({x, y, x + model.width_dbu, y + model.height_dbu}, dbu),
+                                true,
+                                      {{"sites:" + name, width}}};
                   result.options[vertex].push_back({
                       std::move(buffer),
                       {name, column, width},

@@ -10,7 +10,6 @@
 
 namespace livehd::placement::buffering {
 namespace {
-using detail::require;
 bool     valid(Site_rect r) { return r.xl < r.xh && r.yl < r.yh; }
 uint64_t checked_end(const Site_span& s) {
   require(!s.row.empty() && s.count && s.first <= std::numeric_limits<uint64_t>::max() - s.count, "invalid site span");

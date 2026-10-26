@@ -10,7 +10,6 @@
 
 namespace livehd::placement::buffering {
 namespace {
-using detail::require;
 #if DREAMPLACE_NATIVE_DENSITY_RESERVATION_API >= 1
 std::vector<Site_span> canonical(std::vector<Site_span> spans) {
   std::sort(spans.begin(), spans.end(), [](const auto& a, const auto& b) {

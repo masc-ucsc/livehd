@@ -23,7 +23,7 @@ cc_library(
     hdrs = ["producer.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":checkpoint", ":checks", ":physical_sites"],
+    deps = [":checkpoint", ":internal", ":physical_sites"],
 )
 
 cc_library(
@@ -32,7 +32,7 @@ cc_library(
     hdrs = ["checkpoint.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":checks", ":density", ":gap_forces", "//pass/place/forces:pin_weights"],
+    deps = [":internal", ":density", ":gap_forces", "//pass/place/forces:pin_weights"],
 )
 
 cc_test(
@@ -49,7 +49,7 @@ cc_library(
     hdrs = ["density.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":checks", ":negotiation", "@dreamplace//dreamplace/native:placer"],
+    deps = [":internal", ":negotiation", "@dreamplace//dreamplace/native:placer"],
 )
 
 cc_test(
@@ -66,7 +66,7 @@ cc_library(
     hdrs = ["gap_forces.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":checks", ":negotiation", "@dreamplace//dreamplace/native:placer"],
+    deps = [":internal", ":negotiation", "@dreamplace//dreamplace/native:placer"],
 )
 
 cc_test(
@@ -83,7 +83,7 @@ cc_library(
     hdrs = ["negotiation.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":checks", ":tree_search"],
+    deps = [":internal", ":tree_search"],
 )
 
 cc_test(
@@ -100,7 +100,7 @@ cc_library(
     hdrs = ["physical_sites.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":checks", ":geometry", "//inou/lefdef:inou_lefdef"],
+    deps = [":internal", ":geometry", "//inou/lefdef:inou_lefdef"],
 )
 
 cc_test(
@@ -117,7 +117,7 @@ cc_library(
     hdrs = ["graph_search.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":checks", ":geometry"],
+    deps = [":internal", ":geometry"],
 )
 
 cc_test(
@@ -134,7 +134,7 @@ cc_library(
     hdrs = ["geometry.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":checks", ":tree_search"],
+    deps = [":internal", ":tree_search"],
 )
 
 cc_test(
@@ -151,7 +151,7 @@ cc_library(
     hdrs = ["tree_search.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":candidate", ":checks", ":sites"],
+    deps = [":candidate", ":internal", ":sites"],
 )
 
 cc_test(
@@ -168,7 +168,7 @@ cc_library(
     hdrs = ["sites.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":checks"],
+    deps = [":internal"],
 )
 
 cc_test(
@@ -185,7 +185,7 @@ cc_library(
     hdrs = ["candidate.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":checks", "//pass/place:late_timing"],
+    deps = [":internal", "//pass/place:late_timing"],
 )
 
 cc_library(
@@ -196,10 +196,13 @@ cc_library(
     deps = ["//pass/liberty:timing_model"],
 )
 
-# Header-only validation/bound helpers private to this package.
+# Header-only validation and time-budget helpers private to this package.
 cc_library(
-    name = "checks",
-    hdrs = ["checks.hpp"],
+    name = "internal",
+    hdrs = [
+        "budget.hpp",
+        "checks.hpp",
+    ],
     copts = COPTS,
     deps = ["//pass/place:require"],
 )

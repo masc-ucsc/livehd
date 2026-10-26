@@ -8,13 +8,13 @@
 #include <map>
 #include <set>
 
+#include "budget.hpp"
 #include "checks.hpp"
 
 namespace livehd::placement::buffering {
 namespace {
 using detail::Clock;
 using detail::elapsed;
-using detail::require;
 constexpr auto absent = std::numeric_limits<size_t>::max();
 struct State {
   size_t              root  = 0;

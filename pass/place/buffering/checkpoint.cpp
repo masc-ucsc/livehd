@@ -10,7 +10,6 @@
 
 namespace livehd::placement::buffering {
 namespace {
-using detail::require;
 #if DREAMPLACE_NATIVE_DENSITY_RESERVATION_API >= 1 && DREAMPLACE_NATIVE_PIN_TIMING_API >= 3
 std::set<std::string> worst_drivers(const late::Result& timing, const timeclosure::Period_objective& objective) {
   const auto&           g        = *timing.feasible_graph;
