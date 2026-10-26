@@ -30,8 +30,8 @@ std::optional<size_t> clock_input(const usyn::Stateful_region& region, uint32_t 
 }
 }  // namespace
 
-std::vector<std::pair<uint32_t, Reason>> physical_eligibility(const usyn::Stateful_region& region,
-                                                              std::span<const std::string> input_names, std::string_view clock) {
+std::vector<Eligibility> physical_eligibility(const usyn::Stateful_region& region, std::span<const std::string> input_names,
+                                              std::string_view clock, std::span<const usyn::Physical_gating> gating) {
   if (!region.frozen || region.state_bits.size() != region.frozen->state.size()) {
     return {};
   }
@@ -41,11 +41,19 @@ std::vector<std::pair<uint32_t, Reason>> physical_eligibility(const usyn::Statef
       return {};
     }
   }
-  std::vector<std::pair<uint32_t, Reason>> rows;
+  std::vector<Eligibility> rows;
   for (uint32_t i = 0; i < region.state_bits.size(); ++i) {
     const auto  owner  = source.bits[region.state_bits[i]].source;
     const auto& s      = source.sources[owner];
-    const auto  reason = [&] {
+    auto&       row    = rows.emplace_back();
+    row.state          = i;
+    // A folded register keeps its original gated clock if it stays CMOS,
+    // whatever retains it.
+    const bool folded  = owner < gating.size() && gating[owner].code == "fold";
+    if (folded && gating[owner].gclk_input >= 0) {
+      row.gated_clock = static_cast<uint32_t>(gating[owner].gclk_input);
+    }
+    row.reason = [&] {
       // Barriers first: their clock fields are not register semantics.
       if (source.scope == State_scope::memory || s.role == State_role::memory) {
         return Reason::memory;
@@ -77,6 +85,24 @@ std::vector<std::pair<uint32_t, Reason>> physical_eligibility(const usyn::Statef
       if (s.clock.bits != 1) {
         return Reason::multibit_clock;
       }
+      if (owner < gating.size() && !gating[owner].code.empty()) {
+        const auto& gate = gating[owner];
+        if (gate.code != "fold") {
+          return reason_from_code(gate.code, Reason::derived_clock);
+        }
+        const auto root = gate.root_input;
+        if (root < 0 || static_cast<size_t>(root) >= input_names.size()) {
+          return input_names.empty() ? Reason::definition_clock : Reason::derived_clock;
+        }
+        if (input_names[root] != clock) {
+          return Reason::clock_domain;
+        }
+        row.clock_root = static_cast<uint32_t>(root);
+        if (gate.enable_input >= 0) {
+          row.gate_enable = static_cast<uint32_t>(gate.enable_input);
+        }
+        return Reason::candidate;
+      }
       if (s.icg >= 0) {
         return Reason::gated_clock;
       }
@@ -89,7 +115,6 @@ std::vector<std::pair<uint32_t, Reason>> physical_eligibility(const usyn::Statef
       }
       return input_names[*input] == clock ? Reason::candidate : Reason::clock_domain;
     }();
-    rows.emplace_back(i, reason);
   }
   return rows;
 }

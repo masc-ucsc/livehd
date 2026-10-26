@@ -64,8 +64,8 @@ struct Fixture {
     std::vector<Reason> result;
     const auto          rows = physical_eligibility(region, input_names, clock);
     for (uint32_t i = 0; i < rows.size(); ++i) {
-      EXPECT_EQ(rows[i].first, i);
-      result.push_back(rows[i].second);
+      EXPECT_EQ(rows[i].state, i);
+      result.push_back(rows[i].reason);
     }
     return result;
   }

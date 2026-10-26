@@ -67,6 +67,7 @@ struct Options {
   std::optional<double>            domino_eval_fo4, domino_precharge_fo4, domino_setup_eval_fo4, domino_precharge_margin_fo4;
   std::optional<double>            domino_uncertainty_first_ps, domino_uncertainty_second_ps;
   uint32_t                         domino_clock_devices = 2, domino_pair_area_pct = 100;
+  bool                             domino_fall_gates = false;
 };
 
 bool read_options(const Eprp_var& var, Options& options) {
@@ -328,6 +329,9 @@ bool read_options(const Eprp_var& var, Options& options) {
   if (!flag("domino_identity", options.domino.identity, "false")) {
     return invalid_option("domino_identity", "true|false");
   }
+  if (!flag("domino_fall_gates", options.domino_fall_gates, "false")) {
+    return invalid_option("domino_fall_gates", "true|false");
+  }
   options.domino.functions = endpoint.functions;
   options.domino.clock    = std::string(var.get_stage("domino_clock", ""));
   options.domino_inverter = std::string(var.get_stage("domino_inverter", ""));
@@ -389,6 +393,7 @@ bool read_options(const Eprp_var& var, Options& options) {
     const std::pair<std::string_view, bool> moved[] = {
         {               "domino_select",                   options.domino.policy != defaults.domino.policy},
         {             "domino_identity",               options.domino.identity != defaults.domino.identity},
+        {           "domino_fall_gates",           options.domino_fall_gates != defaults.domino_fall_gates},
         {                "domino_clock",                                     !options.domino.clock.empty()},
         {             "domino_inverter",                                  !options.domino_inverter.empty()},
         {             "domino_register",                                  !options.domino_register.empty()},
@@ -554,6 +559,12 @@ void Pass_usyn::setup() {
                        "keeps CMOS) or all (every legal candidate)",
                        "area");
   m.add_label_optional("domino_identity", "domino_provisional: also convert one-literal endpoints", "false");
+  m.add_label_optional("domino_fall_gates",
+                       "domino_provisional: also fold clock gates whose enable storage samples at the falling edge (a "
+                       "negative-edge flop ANDed with the clock, a latch transparent while it is high ORed with it); exact "
+                       "only while the enable holds from the falling to the rising edge, the half-cycle contract of the "
+                       "domino stage, so a two-phase LEC can refute them",
+                       "false");
   m.add_label_optional("domino_clock", "domino_provisional: the one constrained clock port whose registers may convert", "");
   m.add_label_optional("domino_inverter", "domino_provisional reference NOT cell (empty: the smallest-area Liberty NOT cell)", "");
   m.add_label_optional("domino_register",
@@ -1003,13 +1014,24 @@ void Pass_usyn::synthesize(Eprp_var& var) {
     reference->clock_devices = options.domino_clock_devices;
     domino_reference         = std::make_shared<const livehd::domplace::Domino_reference>(std::move(*reference));
     domino_report    = {domino_reference.get(), &options.domino, cmos->name, cmos->area, physical_work.consumed};
-    options.design.physical
-        = [reference = domino_reference,
-           model     = native_model,
-           select    = options.domino,
-           area      = cmos->area](const usyn::Stateful_region& region, std::span<const std::string> names, usyn::Budget& budget) {
-            return livehd::domplace::select_physical(region, names, select, {reference.get(), model.get(), area}, budget);
-          };
+    options.design.physical  = [reference = domino_reference, model = native_model, select = options.domino, area = cmos->area](
+                                  const usyn::Stateful_region& region,
+                                  std::span<const std::string>
+                                      names,
+                                  std::span<const usyn::Physical_gating>
+                                                gating,
+                                  usyn::Budget& budget) {
+      return livehd::domplace::select_physical(region, names, select, {reference.get(), model.get(), area}, budget, gating);
+    };
+    // U21: registers on recognized clock gates of the domain become enable
+    // registers on the root clock (their gate stays for the CMOS ones).
+    livehd::synth::Gated_fold_options fold;
+    fold.domain_clock = options.domino.clock;
+    fold.fall_sample  = options.domino_fall_gates;
+    for (const auto& icg : livehd::liberty::scan_icg_cells(options.mapping.library)) {
+      fold.icg_cells.push_back({icg.name, icg.clk_pin, icg.en_pin, icg.test_pin, icg.out_pin});
+    }
+    options.design.gated_fold = std::move(fold);
   }
   options.design.tune_context = options.tmap + "/delay-" + std::to_string(options.mapping.delay_ps);
   if (!options.mapping.library.empty()) {

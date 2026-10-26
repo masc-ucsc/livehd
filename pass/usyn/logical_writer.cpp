@@ -411,10 +411,18 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
     const auto  node = module->state[i];
     const auto& bit  = source.bits[state_bits[i]];
     const auto& row  = source.sources[bit.source];
+    // A folded clock gate (U21): the converted stage clocks on the root, a
+    // retained register on the original gated clock.
+    const auto  frozen_input = [&](const std::optional<uint32_t>& index) {
+      return index && *index < net.inputs().size() ? pins[net.inputs()[*index].node] : hhds::Pin_class{};
+    };
     if (!converted.empty() && converted[i]) {
       // Physical eligibility admits only a plain positive-edge clock.
       const auto& cell  = physical->cells[converted[i]->cell];
-      const auto  clock = controls[bit.source][static_cast<size_t>(synth::State_control_kind::clock)];
+      auto        clock = controls[bit.source][static_cast<size_t>(synth::State_control_kind::clock)];
+      if (converted[i]->clock_root) {
+        clock = frozen_input(converted[i]->clock_root);
+      }
       if (row.neg_clock || row.async_reset || row.power_on || !row.clock.present || row.clock.constant || clock.is_invalid()
           || !work.spend(cell.rails.size())) {
         return invalid("a converted physical state needs a plain positive-edge clock control");
@@ -434,7 +442,11 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
                 signal.constant ? gu::create_const(graph, signal.value) : controls[bit.source][static_cast<size_t>(kind)]);
       }
     };
-    attach("clock_pin", row.clock, synth::State_control_kind::clock);
+    if (const auto gated = physical ? frozen_input(physical->states[i].gated_clock) : hhds::Pin_class{}; !gated.is_invalid()) {
+      connect(node, "clock_pin", gated);
+    } else {
+      attach("clock_pin", row.clock, synth::State_control_kind::clock);
+    }
     if (row.neg_clock) {
       connect(node, "posclk", constant(0));
     }

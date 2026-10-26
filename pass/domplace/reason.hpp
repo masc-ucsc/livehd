@@ -35,7 +35,19 @@ enum class Reason : uint8_t {
   selection_budget,   // physical selection work exhausted before this state
   definition_clock,   // the clock is a port of a preserved definition, not traced to the design clock root
   polarity_search,    // the positive-output search stopped at its own limits: no illegality proof
+  // U21 clock gates (synth::fold_gated_clocks): a folded register converts on
+  // its root clock with the gate's enable as a data input; these retain it.
+  enable_stack,        // the gate's hold (Q under its enable) did not fit the domino formula's stack/input caps
+  gated_chain,         // a gate on an already gated clock
+  gated_unsafe,        // an AND/OR clock without a phase-safe enable storage (glitch safety not provable)
+  gated_mixed,         // the gate's enable storage is sampled by another clock
+  inverted_clock,      // the clock (or the gate's clock operand) is inverted
+  divided_clock,       // a register output or a divided/inverted clock cell drives the clock
+  gated_enable_state,  // the gate's enable cone holds state or hierarchy (or exceeds the clone limit)
+  gated_fall_sample,   // the gate samples its enable at the falling edge (pass.usyn.domino_fall_gates folds it)
 };
+
+inline constexpr Reason kLastReason = Reason::gated_fall_sample;  // keep at the last enumerator
 
 constexpr std::string_view reason_code(Reason reason) {
   switch (reason) {
@@ -63,8 +75,26 @@ constexpr std::string_view reason_code(Reason reason) {
     case Reason::selection_budget : return "selection-budget";
     case Reason::definition_clock : return "definition-clock";
     case Reason::polarity_search  : return "polarity-search";
+    case Reason::enable_stack      : return "enable-stack";
+    case Reason::gated_chain       : return "gated-chain";
+    case Reason::gated_unsafe      : return "gated-unsafe";
+    case Reason::gated_mixed       : return "gated-mixed";
+    case Reason::inverted_clock    : return "inverted-clock";
+    case Reason::divided_clock     : return "divided-clock";
+    case Reason::gated_enable_state: return "gated-enable-state";
+    case Reason::gated_fall_sample : return "gated-fall-sample";
   }
   return "invalid";
+}
+
+// The reason a spelling names (the inverse of reason_code), or `fallback`.
+constexpr Reason reason_from_code(std::string_view code, Reason fallback) {
+  for (uint8_t r = 0; r <= static_cast<uint8_t>(kLastReason); ++r) {
+    if (reason_code(static_cast<Reason>(r)) == code) {
+      return static_cast<Reason>(r);
+    }
+  }
+  return fallback;
 }
 
 // The codes a converted (domino) state carries; every other final code retains CMOS.

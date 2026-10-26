@@ -2,6 +2,7 @@
 #pragma once
 
 #include "arith.hpp"
+#include "gated_fold.hpp"
 #include "logical_cache.hpp"
 #include "physical_emission.hpp"
 #include "region_emit.hpp"
@@ -55,6 +56,10 @@ struct Design_options {
   // Its converted states are emitted as body-less provisional cell instances
   // (write_physical_module) instead of Flops.
   Physical_selector                        physical{};
+  // 2d-domplace U21: fold registers on recognized clock gates of this domain
+  // (synth::fold_gated_clocks) on the flat design top right before it is
+  // partitioned. Only the domino profile sets it.
+  std::optional<synth::Gated_fold_options> gated_fold{};
 };
 
 struct Design_region {
@@ -87,6 +92,10 @@ struct Logical_design {
   std::shared_ptr<hhds::Graph>       top;
   std::vector<Design_region>         regions;
   Logical_cache_stats                cache{};
+  // Design_options::gated_fold: folded registers by gate kind, and the gated
+  // registers left alone by reason code.
+  std::map<std::string, uint64_t>    gated_folded, gated_refused;
+  uint64_t                           gated_dropped = 0;  // gate boundaries dropped with no reader left
 };
 
 struct Design_result {

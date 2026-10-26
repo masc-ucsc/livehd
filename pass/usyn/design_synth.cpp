@@ -143,6 +143,65 @@ std::vector<std::string> region_input_names(const partition::Region_body& rb, co
   }
   return names;
 }
+
+// The frozen input carrying source-graph pin `pin` in this region: a region
+// input (its external driver) or a black-box output. -1 when the region
+// computes it.
+int32_t frozen_input_of(const partition::Region_body& rb, const synth::Region_blast& blast, const hhds::Pin_class& pin) {
+  if (pin.is_invalid()) {
+    return -1;
+  }
+  for (size_t i = 0; i < blast.all_pi_order.size() && i < blast.lnet.inputs().size(); ++i) {
+    const auto& origin = blast.all_pi_order[i];
+    if (origin.kind == synth::Pi_kind::region_input && origin.index < blast.pi_order.size()) {
+      const auto [port, lane] = blast.pi_order[origin.index];
+      if (lane == 0 && port < rb.inputs.size() && rb.inputs[port].src_driver == pin) {
+        return static_cast<int32_t>(i);
+      }
+    } else if (origin.kind == synth::Pi_kind::bbox_output && origin.index < blast.bbox_pi.size()) {
+      const auto [bx, out, bit] = blast.bbox_pi[origin.index];
+      if (bit == 0 && bx >= 0 && static_cast<size_t>(bx) < blast.bboxes.size() && out >= 0
+          && static_cast<size_t>(out) < blast.bboxes[bx].outs.size() && blast.bboxes[bx].outs[out].src_pin == pin) {
+        return static_cast<int32_t>(i);
+      }
+    }
+  }
+  return -1;
+}
+
+// The clock-gate fold of every source row of the region (Physical_gating).
+std::vector<Physical_gating> region_gating(const partition::Region_body& rb, const synth::Region_blast& blast,
+                                           const absl::flat_hash_map<hhds::Node_class, synth::Gated_fold_hint>& hints) {
+  std::vector<Physical_gating> gating;
+  if (hints.empty() || !blast.source_state) {
+    return gating;
+  }
+  absl::flat_hash_map<uint64_t, hhds::Node_class> flops;
+  for (const auto& n : rb.nodes) {
+    if (gu::type_op_of(n) == Ntype_op::Flop) {
+      flops.emplace(n.get_debug_nid(), n);
+    }
+  }
+  const auto& rows = blast.source_state->sources;
+  gating.resize(rows.size());
+  for (size_t r = 0; r < rows.size(); ++r) {
+    const auto node = flops.find(rows[r].node);
+    if (node == flops.end()) {
+      continue;
+    }
+    const auto hint = hints.find(node->second);
+    if (hint == hints.end()) {
+      continue;
+    }
+    gating[r].code = hint->second.code;
+    if (hint->second.code == "fold") {
+      gating[r].root_input   = frozen_input_of(rb, blast, hint->second.root);
+      gating[r].gclk_input   = frozen_input_of(rb, blast, hint->second.gclk);
+      gating[r].enable_input = frozen_input_of(rb, blast, hint->second.enable);
+    }
+  }
+  return gating;
+}
 }  // namespace
 
 Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, const Design_options& options, Budget& work) {
@@ -220,6 +279,27 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
     result.status = status;
     result.reason = std::move(reason);
   };
+  // U21: the folded registers of the flat design top, by flat source node.
+  absl::flat_hash_map<hhds::Node_class, synth::Gated_fold_hint> fold_hints;
+  std::function<void(hhds::Graph*)>                             prepare_src;
+  if (options.gated_fold) {
+    prepare_src = [&](hhds::Graph* source) {
+      const auto name = source->get_name();
+      if (name != top->get_name() && name != partition::flatten_scratch_name(top->get_name())) {
+        return;  // a preserved definition: its clock ports are not design inputs
+      }
+      auto folded = synth::fold_gated_clocks(source, *options.gated_fold);
+      for (auto& [node, hint] : folded.registers) {
+        fold_hints.insert_or_assign(node, std::move(hint));
+      }
+      for (const auto& [kind, count] : folded.gates) {
+        output->gated_folded[kind] += count;
+      }
+      for (const auto& [code, count] : folded.refused) {
+        output->gated_refused[code] += count;
+      }
+    };
+  }
   const auto build = [&](const partition::Region_body& rb) {
     if (failed) {
       return;
@@ -635,7 +715,8 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
     // a cold search decide alike; it charges the structural allowance.
     std::optional<Physical_emission> physical;
     if (options.physical) {
-      physical = options.physical(*selected.region, region_input_names(rb, blast, top->get_name()), work);
+      const auto gating = region_gating(rb, blast, fold_hints);
+      physical          = options.physical(*selected.region, region_input_names(rb, blast, top->get_name()), gating, work);
       if (work.resource_exhausted) {
         fail(Status::search_exhausted, rb.module_name + ": physical selection process admission");
         return;
@@ -644,6 +725,14 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
         fail(Status::invalid, rb.module_name + ": physical selection refused the frozen netlist");
         return;
       }
+      for (const auto& node : rb.nodes) {
+        if (const auto hint = fold_hints.find(node); hint != fold_hints.end() && !hint->second.gate.is_invalid()) {
+          physical->gate_boundaries.push_back(hint->second.gate.get_debug_nid());
+        }
+      }
+      std::sort(physical->gate_boundaries.begin(), physical->gate_boundaries.end());
+      physical->gate_boundaries.erase(std::unique(physical->gate_boundaries.begin(), physical->gate_boundaries.end()),
+                                      physical->gate_boundaries.end());
     }
     Budget cmos_search{search_left};
     cmos_search.admission          = work.admission;
@@ -676,6 +765,7 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
       fail(emitted.status, rb.module_name + ": " + emitted.reason);
       return;
     }
+    output->gated_dropped += emitted.dropped_gates;
     if (!mapping_policy.empty()) {
       for (auto node : rb.body->body().nodes()) {
         node.attr(attrs::synth_policy).set(synth_attr::write(mapping_policy));
@@ -739,7 +829,7 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
                                                                {},
                                                                1,
                                                                prepared->loops.preserved_defs,
-                                                               {},
+                                                               prepare_src,
                                                                partition_admission);
   if (failed) {
     return result;

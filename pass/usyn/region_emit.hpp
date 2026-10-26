@@ -11,6 +11,7 @@ struct Region_emission {
   std::string     reason;
   Residual_report cmos_cleanup{};
   Choice_report   choices{};
+  uint32_t        dropped_gates = 0;  // Physical_emission::gate_boundaries dropped with no reader
 };
 
 // Fill a fresh partition body with the independent CMOS expansion and its

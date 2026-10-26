@@ -2,6 +2,7 @@
 #include "region_emit.hpp"
 
 #include <algorithm>
+#include <functional>
 #include <tuple>
 
 #include "attr_carry.hpp"
@@ -388,7 +389,54 @@ Region_emission emit_logical_region(const partition::Region_body& rb, const synt
     }
     value.connect_sink(body.get_output_pin(port.name));
   }
-  return {Status::feasible, {}, std::move(logical.cmos_cleanup), std::move(logical.choices)};
+  // A folded clock gate stays only for the CMOS registers still on its gated
+  // clock: once every consumer converted, nothing reads its boundary.
+  uint32_t dropped = 0;
+  if (physical && !physical->gate_boundaries.empty()) {
+    for (size_t b = 0; b < blast.bboxes.size(); ++b) {
+      const auto& box = blast.bboxes[b];
+      if ((box.op != Ntype_op::Latch && box.op != Ntype_op::Sub)
+          || !std::binary_search(physical->gate_boundaries.begin(), physical->gate_boundaries.end(), box.node.get_debug_nid())) {
+        continue;
+      }
+      // Unread: every reader is combinational logic that is itself unread
+      // (bit selects the input mapping created but the logic never used).
+      std::vector<hhds::Node_class>              dead;
+      absl::flat_hash_set<hhds::Node_class>      seen;
+      std::function<bool(hhds::Node_class, int)> unread = [&](hhds::Node_class n, int depth) {
+        if (depth > 8 || !work.spend()) {
+          return false;
+        }
+        for (const auto& pin : n.out_sorted_pins()) {
+          for (const auto& edge : pin.out_edges()) {
+            const auto reader = edge.sink.get_master_node();
+            const auto op     = gu::type_op_of(reader);
+            if (op == Ntype_op::IO || op == Ntype_op::Sub || op == Ntype_op::Flop || op == Ntype_op::Latch || op == Ntype_op::Memory
+                || reader == n) {
+              return false;
+            }
+            if (seen.insert(reader).second) {
+              if (!unread(reader, depth + 1)) {
+                return false;
+              }
+              dead.push_back(reader);
+            }
+          }
+        }
+        return true;
+      };
+      if (unread(boundaries[b], 0)) {
+        for (auto it = dead.rbegin(); it != dead.rend(); ++it) {
+          it->del_node();
+        }
+        boundaries[b].del_node();
+        ++dropped;
+      }
+    }
+  }
+  Region_emission done{Status::feasible, {}, std::move(logical.cmos_cleanup), std::move(logical.choices)};
+  done.dropped_gates = dropped;
+  return done;
 }
 
 }  // namespace livehd::usyn
