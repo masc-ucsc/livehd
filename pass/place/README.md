@@ -3796,6 +3796,13 @@ Divided or gated generated clocks, latch borrowing and general Tcl/SDC execution
 remain unsupported. Timing forces and the opt-in production policy remain
 unfinished. A separate read-only GP observation driver is available below.
 
+The legacy single clock and named clocks share one timing implementation; their
+published differences are explicit "Legacy policy" branches in `time_setup()`.
+`late_timing_test` pins both models bit-exactly against
+`tests/late_timing_characterization.txt`. After an intended timing change,
+regenerate that image with
+`bazel test -c opt //pass/place:late_timing_test; cp bazel-testlogs/pass/place/late_timing_test/test.outputs/late_timing_characterization.txt pass/place/tests/`.
+
 An offline exact-netlist observation uses:
 
 ```

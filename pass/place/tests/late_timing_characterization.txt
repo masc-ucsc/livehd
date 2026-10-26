@@ -8,16 +8,6 @@ pin 2 ff:D clock false endpoint true constant - port 1 | 1.ep+4 1.7p+6 1.7ffffff
 pin 3 ff:Q clock false endpoint false constant - port 0 | 1.4p+3 1.14p+6 1p+1 1p+1 p- | 1.4p+4 1.48p+6 1.8p+1 1.8p+1 p-
 pin 4 inv:A clock false endpoint false constant - port 0 | 1.4p+3 1.14p+6 1p+1 0p+0 p3.0 | 1.4p+4 1.48p+6 1.8p+1 0p+0 p3.1
 pin 5 inv:Y clock false endpoint false constant - port 0 | 1.ep+4 1.7p+6 1.8p+1 1p+0 p4.1 | 1.ep+4 1.64p+6 1p+2 1p+0 p4.0
-### register_loop legacy capture
-certified true wns 1.d8p+5 tns 0p+0 period 1.48p+5
-generation 0 0 policy false false
-counts 6 8 6 6 6 0 | 4 0 0 0 0 0 0
-pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 1p+0 p- | - - 1p+2 1p+0 p-
-pin 1 ff:CLK clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
-pin 2 ff:D clock false endpoint true constant - port 1 | 1.ep+4 1.7p+6 1.7ffffffffffffp+1 0p+0 p5.0 | 1.ep+4 1.64p+6 1p+2 0p+0 p5.1
-pin 3 ff:Q clock false endpoint false constant - port 0 | 1.4p+3 1.14p+6 1p+1 1p+1 p- | 1.4p+4 1.48p+6 1.8p+1 1.8p+1 p-
-pin 4 inv:A clock false endpoint false constant - port 0 | 1.4p+3 1.14p+6 1p+1 0p+0 p3.0 | 1.4p+4 1.48p+6 1.8p+1 0p+0 p3.1
-pin 5 inv:Y clock false endpoint false constant - port 0 | 1.ep+4 1.7p+6 1.8p+1 1p+0 p4.1 | 1.ep+4 1.64p+6 1p+2 1p+0 p4.0
 graph reference 1.9p+6 domains -
   v 2 0 0 - 1.7p+6
   v 2 0 1 - 1.64p+6
@@ -51,24 +41,6 @@ domain 0 main
   3 | 1.4p+3 1.14p+6 p- | 1.4p+4 1.48p+6 p-
   4 | 1.4p+3 1.14p+6 p3.0 | 1.4p+4 1.48p+6 p3.1
   5 | 1.ep+4 1.7p+6 p4.1 | 1.ep+4 1.64p+6 p4.0
-### register_loop named capture
-certified true wns 1.d8p+5 tns 0p+0 period 1.48p+5
-generation 0 0 policy false false
-counts 6 8 6 6 6 0 | 4 0 0 0 0 0 0
-clock main 1.9p+6 wns 1.d8p+5 tns 0p+0 period 1.48p+5 endpoints 1 independent true
-pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 1p+0 p- | - - 1p+2 1p+0 p-
-pin 1 ff:CLK clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
-pin 2 ff:D clock false endpoint true constant - port 1 | 1.ep+4 1.7p+6 1.7ffffffffffffp+1 0p+0 p5.0 | 1.ep+4 1.64p+6 1p+2 0p+0 p5.1
-pin 3 ff:Q clock false endpoint false constant - port 0 | 1.4p+3 1.14p+6 1p+1 1p+1 p- | 1.4p+4 1.48p+6 1.8p+1 1.8p+1 p-
-pin 4 inv:A clock false endpoint false constant - port 0 | 1.4p+3 1.14p+6 1p+1 0p+0 p3.0 | 1.4p+4 1.48p+6 1.8p+1 0p+0 p3.1
-pin 5 inv:Y clock false endpoint false constant - port 0 | 1.ep+4 1.7p+6 1.8p+1 1p+0 p4.1 | 1.ep+4 1.64p+6 1p+2 1p+0 p4.0
-domain 0 main
-  0 | - - p- | - - p-
-  1 | - - p- | - - p-
-  2 | 1.ep+4 1.7p+6 p5.0 | 1.ep+4 1.64p+6 p5.1
-  3 | 1.4p+3 1.14p+6 p- | 1.4p+4 1.48p+6 p-
-  4 | 1.4p+3 1.14p+6 p3.0 | 1.4p+4 1.48p+6 p3.1
-  5 | 1.ep+4 1.7p+6 p4.1 | 1.ep+4 1.64p+6 p4.0
 graph reference 1.9p+6 domains main
   v 2 0 0 - 1.7p+6
   v 2 0 1 - 1.64p+6
@@ -85,21 +57,6 @@ graph reference 1.9p+6 domains main
   a 4 7 2 1.4p+4 false
   a 5 6 2 1.4p+3 false
 ### pipeline_absolute legacy
-certified true wns 0p+0 tns 0p+0 period 1.9p+6
-generation 0 0 policy false false
-counts 11 16 11 14 11 0 | 6 0 0 0 0 0 0
-pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 1p+0 p- | - - 1p+2 1p+0 p-
-pin 1 a clock false endpoint false constant - port 1 | 1.cp+2 1.48p+5 1p+0 1p+1 p- | 1.2p+3 1.9p+5 1p+1 1.8p+1 p-
-pin 2 z clock false endpoint true constant - port 0 | 1.ep+3 1.9p+4 1p+0 0p+0 p10.0 | 1.bp+4 1.bp+4 1p+1 0p+0 p10.1
-pin 3 w clock false endpoint true constant - port 1 | 1.3p+4 1.ep+5 1.7ffffffffffffp+1 0p+0 p5.0 | 1.bp+4 1.e8p+5 1p+2 0p+0 p5.1
-pin 4 inv:A clock false endpoint false constant - port 0 | 1.cp+2 1.48p+5 1p+0 0p+0 p1.0 | 1.2p+3 1.9p+5 1p+1 0p+0 p1.1
-pin 5 inv:Y clock false endpoint false constant - port 0 | 1.3p+4 1.ep+5 1.8p+1 1p+2 p4.1 | 1.bp+4 1.e8p+5 1p+2 1p+2 p4.0
-pin 6 ff:CLK clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
-pin 7 ff:D clock false endpoint true constant - port 1 | 1.3p+4 1.7p+6 1.7ffffffffffffp+1 0p+0 p5.0 | 1.bp+4 1.64p+6 1p+2 0p+0 p5.1
-pin 8 ff:Q clock false endpoint false constant - port 0 | 1.4p+3 1.4p+4 1p+1 1p+0 p- | 1.4p+4 1.4p+4 1.8p+1 1p+0 p-
-pin 9 buf:A clock false endpoint false constant - port 0 | 1.4p+3 1.4p+4 1p+1 0p+0 p8.0 | 1.4p+4 1.4p+4 1.8p+1 0p+0 p8.1
-pin 10 buf:Y clock false endpoint false constant - port 0 | 1.ep+3 1.9p+4 1p+0 1p+0 p9.0 | 1.bp+4 1.bp+4 1p+1 1p+1 p9.1
-### pipeline_absolute legacy capture
 certified true wns 0p+0 tns 0p+0 period 1.9p+6
 generation 0 0 policy false false
 counts 11 16 11 14 11 0 | 6 0 0 0 0 0 0
@@ -187,46 +144,6 @@ domain 1 -
   8 | - - p- | - - p-
   9 | - - p- | - - p-
   10 | - - p- | - - p-
-### pipeline_absolute named capture
-certified true wns 0p+0 tns 0p+0 period -
-generation 0 0 policy false false
-counts 22 16 11 14 22 0 | 6 0 0 0 0 0 0
-clock main 1.9p+6 wns 1.fp+5 tns 0p+0 period 1.3p+5 endpoints 1 independent true
-pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 1p+0 p- | - - 1p+2 1p+0 p-
-pin 1 a clock false endpoint false constant - port 1 | 1.cp+2 1.48p+5 1p+0 1p+1 p- | 1.2p+3 1.9p+5 1p+1 1.8p+1 p-
-pin 2 z clock false endpoint true constant - port 0 | 1.ep+3 1.9p+4 1p+0 0p+0 p10.0 | 1.bp+4 1.bp+4 1p+1 0p+0 p10.1
-pin 3 w clock false endpoint true constant - port 1 | 1.3p+4 1.ep+5 1.7ffffffffffffp+1 0p+0 p5.0 | 1.bp+4 1.e8p+5 1p+2 0p+0 p5.1
-pin 4 inv:A clock false endpoint false constant - port 0 | 1.cp+2 1.48p+5 1p+0 0p+0 p1.0 | 1.2p+3 1.9p+5 1p+1 0p+0 p1.1
-pin 5 inv:Y clock false endpoint false constant - port 0 | 1.3p+4 1.ep+5 1.8p+1 1p+2 p4.1 | 1.bp+4 1.e8p+5 1p+2 1p+2 p4.0
-pin 6 ff:CLK clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
-pin 7 ff:D clock false endpoint true constant - port 1 | 1.3p+4 1.7p+6 1.7ffffffffffffp+1 0p+0 p5.0 | 1.bp+4 1.64p+6 1p+2 0p+0 p5.1
-pin 8 ff:Q clock false endpoint false constant - port 0 | 1.4p+3 1.4p+4 1p+1 1p+0 p- | 1.4p+4 1.4p+4 1.8p+1 1p+0 p-
-pin 9 buf:A clock false endpoint false constant - port 0 | 1.4p+3 1.4p+4 1p+1 0p+0 p8.0 | 1.4p+4 1.4p+4 1.8p+1 0p+0 p8.1
-pin 10 buf:Y clock false endpoint false constant - port 0 | 1.ep+3 1.9p+4 1p+0 1p+0 p9.0 | 1.bp+4 1.bp+4 1p+1 1p+1 p9.1
-domain 0 main
-  0 | - - p- | - - p-
-  1 | - - p- | - - p-
-  2 | 1.ep+3 1.9p+4 p10.0 | 1.bp+4 1.bp+4 p10.1
-  3 | - - p- | - - p-
-  4 | - - p- | - - p-
-  5 | - - p- | - - p-
-  6 | - - p- | - - p-
-  7 | - - p- | - - p-
-  8 | 1.4p+3 1.4p+4 p- | 1.4p+4 1.4p+4 p-
-  9 | 1.4p+3 1.4p+4 p8.0 | 1.4p+4 1.4p+4 p8.1
-  10 | 1.ep+3 1.9p+4 p9.0 | 1.bp+4 1.bp+4 p9.1
-domain 1 -
-  0 | - - p- | - - p-
-  1 | 1.cp+2 1.48p+5 p- | 1.2p+3 1.9p+5 p-
-  2 | - - p- | - - p-
-  3 | 1.3p+4 1.ep+5 p5.0 | 1.bp+4 1.e8p+5 p5.1
-  4 | 1.cp+2 1.48p+5 p1.0 | 1.2p+3 1.9p+5 p1.1
-  5 | 1.3p+4 1.ep+5 p4.1 | 1.bp+4 1.e8p+5 p4.0
-  6 | - - p- | - - p-
-  7 | 1.3p+4 1.7p+6 p5.0 | 1.bp+4 1.64p+6 p5.1
-  8 | - - p- | - - p-
-  9 | - - p- | - - p-
-  10 | - - p- | - - p-
 graph reference - domains main -
   v 2 0 0 - 1.9p+4
   v 2 0 1 - 1.bp+4
@@ -261,21 +178,6 @@ graph reference - domains main -
   a 12 15 5 1.4p+4 false
   a 13 14 5 1.4p+3 false
 ### pipeline_clocked legacy
-certified true wns 0p+0 tns 0p+0 period 1.9p+6
-generation 0 0 policy false false
-counts 11 16 11 14 11 0 | 6 0 0 0 0 0 0
-pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 1p+0 p- | - - 1p+2 1p+0 p-
-pin 1 a clock false endpoint false constant - port 1 | 1.cp+2 1.48p+5 1p+0 1p+1 p- | 1.2p+3 1.9p+5 1p+1 1.8p+1 p-
-pin 2 z clock false endpoint true constant - port 0 | 1.ep+3 1.9p+4 1p+0 0p+0 p10.0 | 1.bp+4 1.bp+4 1p+1 0p+0 p10.1
-pin 3 w clock false endpoint true constant - port 1 | 1.3p+4 1.ep+5 1.7ffffffffffffp+1 0p+0 p5.0 | 1.bp+4 1.e8p+5 1p+2 0p+0 p5.1
-pin 4 inv:A clock false endpoint false constant - port 0 | 1.cp+2 1.48p+5 1p+0 0p+0 p1.0 | 1.2p+3 1.9p+5 1p+1 0p+0 p1.1
-pin 5 inv:Y clock false endpoint false constant - port 0 | 1.3p+4 1.ep+5 1.8p+1 1p+2 p4.1 | 1.bp+4 1.e8p+5 1p+2 1p+2 p4.0
-pin 6 ff:CLK clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
-pin 7 ff:D clock false endpoint true constant - port 1 | 1.3p+4 1.7p+6 1.7ffffffffffffp+1 0p+0 p5.0 | 1.bp+4 1.64p+6 1p+2 0p+0 p5.1
-pin 8 ff:Q clock false endpoint false constant - port 0 | 1.4p+3 1.4p+4 1p+1 1p+0 p- | 1.4p+4 1.4p+4 1.8p+1 1p+0 p-
-pin 9 buf:A clock false endpoint false constant - port 0 | 1.4p+3 1.4p+4 1p+1 0p+0 p8.0 | 1.4p+4 1.4p+4 1.8p+1 0p+0 p8.1
-pin 10 buf:Y clock false endpoint false constant - port 0 | 1.ep+3 1.9p+4 1p+0 1p+0 p9.0 | 1.bp+4 1.bp+4 1p+1 1p+1 p9.1
-### pipeline_clocked legacy capture
 certified true wns 0p+0 tns 0p+0 period 1.9p+6
 generation 0 0 policy false false
 counts 11 16 11 14 11 0 | 6 0 0 0 0 0 0
@@ -351,34 +253,6 @@ domain 0 main
   8 | 1.4p+3 1.4p+4 p- | 1.4p+4 1.4p+4 p-
   9 | 1.4p+3 1.4p+4 p8.0 | 1.4p+4 1.4p+4 p8.1
   10 | 1.ep+3 1.9p+4 p9.0 | 1.bp+4 1.bp+4 p9.1
-### pipeline_clocked named capture
-certified true wns 0p+0 tns 0p+0 period 1.9p+6
-generation 0 0 policy false false
-counts 11 16 11 14 11 0 | 6 0 0 0 0 0 0
-clock main 1.9p+6 wns 0p+0 tns 0p+0 period 1.9p+6 endpoints 3 independent true
-pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 1p+0 p- | - - 1p+2 1p+0 p-
-pin 1 a clock false endpoint false constant - port 1 | 1.cp+2 1.48p+5 1p+0 1p+1 p- | 1.2p+3 1.9p+5 1p+1 1.8p+1 p-
-pin 2 z clock false endpoint true constant - port 0 | 1.ep+3 1.9p+4 1p+0 0p+0 p10.0 | 1.bp+4 1.bp+4 1p+1 0p+0 p10.1
-pin 3 w clock false endpoint true constant - port 1 | 1.3p+4 1.ep+5 1.7ffffffffffffp+1 0p+0 p5.0 | 1.bp+4 1.e8p+5 1p+2 0p+0 p5.1
-pin 4 inv:A clock false endpoint false constant - port 0 | 1.cp+2 1.48p+5 1p+0 0p+0 p1.0 | 1.2p+3 1.9p+5 1p+1 0p+0 p1.1
-pin 5 inv:Y clock false endpoint false constant - port 0 | 1.3p+4 1.ep+5 1.8p+1 1p+2 p4.1 | 1.bp+4 1.e8p+5 1p+2 1p+2 p4.0
-pin 6 ff:CLK clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
-pin 7 ff:D clock false endpoint true constant - port 1 | 1.3p+4 1.7p+6 1.7ffffffffffffp+1 0p+0 p5.0 | 1.bp+4 1.64p+6 1p+2 0p+0 p5.1
-pin 8 ff:Q clock false endpoint false constant - port 0 | 1.4p+3 1.4p+4 1p+1 1p+0 p- | 1.4p+4 1.4p+4 1.8p+1 1p+0 p-
-pin 9 buf:A clock false endpoint false constant - port 0 | 1.4p+3 1.4p+4 1p+1 0p+0 p8.0 | 1.4p+4 1.4p+4 1.8p+1 0p+0 p8.1
-pin 10 buf:Y clock false endpoint false constant - port 0 | 1.ep+3 1.9p+4 1p+0 1p+0 p9.0 | 1.bp+4 1.bp+4 1p+1 1p+1 p9.1
-domain 0 main
-  0 | - - p- | - - p-
-  1 | 1.cp+2 1.48p+5 p- | 1.2p+3 1.9p+5 p-
-  2 | 1.ep+3 1.9p+4 p10.0 | 1.bp+4 1.bp+4 p10.1
-  3 | 1.3p+4 1.ep+5 p5.0 | 1.bp+4 1.e8p+5 p5.1
-  4 | 1.cp+2 1.48p+5 p1.0 | 1.2p+3 1.9p+5 p1.1
-  5 | 1.3p+4 1.ep+5 p4.1 | 1.bp+4 1.e8p+5 p4.0
-  6 | - - p- | - - p-
-  7 | 1.3p+4 1.7p+6 p5.0 | 1.bp+4 1.64p+6 p5.1
-  8 | 1.4p+3 1.4p+4 p- | 1.4p+4 1.4p+4 p-
-  9 | 1.4p+3 1.4p+4 p8.0 | 1.4p+4 1.4p+4 p8.1
-  10 | 1.ep+3 1.9p+4 p9.0 | 1.bp+4 1.bp+4 p9.1
 graph reference 1.9p+6 domains main
   v 1 0 0 1.cp+2 -
   v 1 0 1 1.2p+3 -
@@ -413,21 +287,6 @@ graph reference 1.9p+6 domains main
   a 14 16 6 1.4p+2 false
   a 15 17 6 1.cp+2 false
 ### pipeline_mixed legacy
-certified true wns 0p+0 tns 0p+0 period 1.9p+6
-generation 0 0 policy false false
-counts 11 16 11 14 11 0 | 6 0 0 0 0 0 0
-pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 1p+0 p- | - - 1p+2 1p+0 p-
-pin 1 a clock false endpoint false constant - port 1 | 1.cp+2 1.48p+5 1p+0 1p+1 p- | 1.2p+3 1.9p+5 1p+1 1.8p+1 p-
-pin 2 z clock false endpoint true constant - port 0 | 1.ep+3 1.9p+4 1p+0 0p+0 p10.0 | 1.bp+4 1.bp+4 1p+1 0p+0 p10.1
-pin 3 w clock false endpoint true constant - port 1 | 1.3p+4 1.ep+5 1.7ffffffffffffp+1 0p+0 p5.0 | 1.bp+4 1.e8p+5 1p+2 0p+0 p5.1
-pin 4 inv:A clock false endpoint false constant - port 0 | 1.cp+2 1.48p+5 1p+0 0p+0 p1.0 | 1.2p+3 1.9p+5 1p+1 0p+0 p1.1
-pin 5 inv:Y clock false endpoint false constant - port 0 | 1.3p+4 1.ep+5 1.8p+1 1p+2 p4.1 | 1.bp+4 1.e8p+5 1p+2 1p+2 p4.0
-pin 6 ff:CLK clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
-pin 7 ff:D clock false endpoint true constant - port 1 | 1.3p+4 1.7p+6 1.7ffffffffffffp+1 0p+0 p5.0 | 1.bp+4 1.64p+6 1p+2 0p+0 p5.1
-pin 8 ff:Q clock false endpoint false constant - port 0 | 1.4p+3 1.4p+4 1p+1 1p+0 p- | 1.4p+4 1.4p+4 1.8p+1 1p+0 p-
-pin 9 buf:A clock false endpoint false constant - port 0 | 1.4p+3 1.4p+4 1p+1 0p+0 p8.0 | 1.4p+4 1.4p+4 1.8p+1 0p+0 p8.1
-pin 10 buf:Y clock false endpoint false constant - port 0 | 1.ep+3 1.9p+4 1p+0 1p+0 p9.0 | 1.bp+4 1.bp+4 1p+1 1p+1 p9.1
-### pipeline_mixed legacy capture
 certified true wns 0p+0 tns 0p+0 period 1.9p+6
 generation 0 0 policy false false
 counts 11 16 11 14 11 0 | 6 0 0 0 0 0 0
@@ -503,34 +362,6 @@ domain 0 main
   8 | 1.4p+3 1.4p+4 p- | 1.4p+4 1.4p+4 p-
   9 | 1.4p+3 1.4p+4 p8.0 | 1.4p+4 1.4p+4 p8.1
   10 | 1.ep+3 1.9p+4 p9.0 | 1.bp+4 1.bp+4 p9.1
-### pipeline_mixed named capture
-certified true wns 0p+0 tns 0p+0 period -
-generation 0 0 policy false false
-counts 11 16 11 14 11 0 | 6 0 0 0 0 0 0
-clock main 1.9p+6 wns 0p+0 tns 0p+0 period 1.9p+6 endpoints 2 independent true
-pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 1p+0 p- | - - 1p+2 1p+0 p-
-pin 1 a clock false endpoint false constant - port 1 | 1.cp+2 1.48p+5 1p+0 1p+1 p- | 1.2p+3 1.9p+5 1p+1 1.8p+1 p-
-pin 2 z clock false endpoint true constant - port 0 | 1.ep+3 1.9p+4 1p+0 0p+0 p10.0 | 1.bp+4 1.bp+4 1p+1 0p+0 p10.1
-pin 3 w clock false endpoint true constant - port 1 | 1.3p+4 1.ep+5 1.7ffffffffffffp+1 0p+0 p5.0 | 1.bp+4 1.e8p+5 1p+2 0p+0 p5.1
-pin 4 inv:A clock false endpoint false constant - port 0 | 1.cp+2 1.48p+5 1p+0 0p+0 p1.0 | 1.2p+3 1.9p+5 1p+1 0p+0 p1.1
-pin 5 inv:Y clock false endpoint false constant - port 0 | 1.3p+4 1.ep+5 1.8p+1 1p+2 p4.1 | 1.bp+4 1.e8p+5 1p+2 1p+2 p4.0
-pin 6 ff:CLK clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
-pin 7 ff:D clock false endpoint true constant - port 1 | 1.3p+4 1.7p+6 1.7ffffffffffffp+1 0p+0 p5.0 | 1.bp+4 1.64p+6 1p+2 0p+0 p5.1
-pin 8 ff:Q clock false endpoint false constant - port 0 | 1.4p+3 1.4p+4 1p+1 1p+0 p- | 1.4p+4 1.4p+4 1.8p+1 1p+0 p-
-pin 9 buf:A clock false endpoint false constant - port 0 | 1.4p+3 1.4p+4 1p+1 0p+0 p8.0 | 1.4p+4 1.4p+4 1.8p+1 0p+0 p8.1
-pin 10 buf:Y clock false endpoint false constant - port 0 | 1.ep+3 1.9p+4 1p+0 1p+0 p9.0 | 1.bp+4 1.bp+4 1p+1 1p+1 p9.1
-domain 0 main
-  0 | - - p- | - - p-
-  1 | 1.cp+2 1.48p+5 p- | 1.2p+3 1.9p+5 p-
-  2 | 1.ep+3 1.9p+4 p10.0 | 1.bp+4 1.bp+4 p10.1
-  3 | 1.3p+4 1.ep+5 p5.0 | 1.bp+4 1.e8p+5 p5.1
-  4 | 1.cp+2 1.48p+5 p1.0 | 1.2p+3 1.9p+5 p1.1
-  5 | 1.3p+4 1.ep+5 p4.1 | 1.bp+4 1.e8p+5 p4.0
-  6 | - - p- | - - p-
-  7 | 1.3p+4 1.7p+6 p5.0 | 1.bp+4 1.64p+6 p5.1
-  8 | 1.4p+3 1.4p+4 p- | 1.4p+4 1.4p+4 p-
-  9 | 1.4p+3 1.4p+4 p8.0 | 1.4p+4 1.4p+4 p8.1
-  10 | 1.ep+3 1.9p+4 p9.0 | 1.bp+4 1.bp+4 p9.1
 graph reference - domains main
   v 1 0 0 1.cp+2 -
   v 1 0 1 1.2p+3 -
@@ -565,22 +396,6 @@ graph reference - domains main
   a 14 16 6 1.4p+2 false
   a 15 17 6 1.cp+2 false
 ### pipeline_unconstrained_output legacy
-certified false wns 0p+0 tns 0p+0 period -
-generation 0 0 policy false false
-counts 11 16 11 14 11 0 | 6 0 0 0 0 0 0
-unsupported unconstrained output requirement: w
-pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 1p+0 p- | - - 1p+2 1p+0 p-
-pin 1 a clock false endpoint false constant - port 1 | 1.cp+2 1.14p+6 1p+0 1p+1 p- | 1.2p+3 1.48p+6 1p+1 1.8p+1 p-
-pin 2 z clock false endpoint true constant - port 0 | 1.ep+3 1.9p+4 1p+0 0p+0 p10.0 | 1.bp+4 1.bp+4 1p+1 0p+0 p10.1
-pin 3 w clock false endpoint false constant - port 1 | 1.3p+4 - 1.7ffffffffffffp+1 0p+0 p5.0 | 1.bp+4 - 1p+2 0p+0 p5.1
-pin 4 inv:A clock false endpoint false constant - port 0 | 1.cp+2 1.14p+6 1p+0 0p+0 p1.0 | 1.2p+3 1.48p+6 1p+1 0p+0 p1.1
-pin 5 inv:Y clock false endpoint false constant - port 0 | 1.3p+4 1.7p+6 1.8p+1 1p+0 p4.1 | 1.bp+4 1.64p+6 1p+2 1p+0 p4.0
-pin 6 ff:CLK clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
-pin 7 ff:D clock false endpoint true constant - port 1 | 1.3p+4 1.7p+6 1.7ffffffffffffp+1 0p+0 p5.0 | 1.bp+4 1.64p+6 1p+2 0p+0 p5.1
-pin 8 ff:Q clock false endpoint false constant - port 0 | 1.4p+3 1.4p+4 1p+1 1p+0 p- | 1.4p+4 1.4p+4 1.8p+1 1p+0 p-
-pin 9 buf:A clock false endpoint false constant - port 0 | 1.4p+3 1.4p+4 1p+1 0p+0 p8.0 | 1.4p+4 1.4p+4 1.8p+1 0p+0 p8.1
-pin 10 buf:Y clock false endpoint false constant - port 0 | 1.ep+3 1.9p+4 1p+0 1p+0 p9.0 | 1.bp+4 1.bp+4 1p+1 1p+1 p9.1
-### pipeline_unconstrained_output legacy capture
 certified false wns 0p+0 tns 0p+0 period -
 generation 0 0 policy false false
 counts 11 16 11 14 11 0 | 6 0 0 0 0 0 0
@@ -658,35 +473,6 @@ domain 0 main
   8 | 1.4p+3 1.4p+4 p- | 1.4p+4 1.4p+4 p-
   9 | 1.4p+3 1.4p+4 p8.0 | 1.4p+4 1.4p+4 p8.1
   10 | 1.ep+3 1.9p+4 p9.0 | 1.bp+4 1.bp+4 p9.1
-### pipeline_unconstrained_output named capture
-certified false wns 0p+0 tns 0p+0 period -
-generation 0 0 policy false false
-counts 11 16 11 14 11 0 | 6 0 0 0 0 0 0
-unsupported unconstrained output requirement: w
-clock main 1.9p+6 wns 0p+0 tns 0p+0 period - endpoints 2 independent true
-pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 1p+0 p- | - - 1p+2 1p+0 p-
-pin 1 a clock false endpoint false constant - port 1 | 1.cp+2 1.14p+6 1p+0 1p+1 p- | 1.2p+3 1.48p+6 1p+1 1.8p+1 p-
-pin 2 z clock false endpoint true constant - port 0 | 1.ep+3 1.9p+4 1p+0 0p+0 p10.0 | 1.bp+4 1.bp+4 1p+1 0p+0 p10.1
-pin 3 w clock false endpoint true constant - port 1 | 1.3p+4 - 1.7ffffffffffffp+1 0p+0 p5.0 | 1.bp+4 - 1p+2 0p+0 p5.1
-pin 4 inv:A clock false endpoint false constant - port 0 | 1.cp+2 1.14p+6 1p+0 0p+0 p1.0 | 1.2p+3 1.48p+6 1p+1 0p+0 p1.1
-pin 5 inv:Y clock false endpoint false constant - port 0 | 1.3p+4 1.7p+6 1.8p+1 1p+0 p4.1 | 1.bp+4 1.64p+6 1p+2 1p+0 p4.0
-pin 6 ff:CLK clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
-pin 7 ff:D clock false endpoint true constant - port 1 | 1.3p+4 1.7p+6 1.7ffffffffffffp+1 0p+0 p5.0 | 1.bp+4 1.64p+6 1p+2 0p+0 p5.1
-pin 8 ff:Q clock false endpoint false constant - port 0 | 1.4p+3 1.4p+4 1p+1 1p+0 p- | 1.4p+4 1.4p+4 1.8p+1 1p+0 p-
-pin 9 buf:A clock false endpoint false constant - port 0 | 1.4p+3 1.4p+4 1p+1 0p+0 p8.0 | 1.4p+4 1.4p+4 1.8p+1 0p+0 p8.1
-pin 10 buf:Y clock false endpoint false constant - port 0 | 1.ep+3 1.9p+4 1p+0 1p+0 p9.0 | 1.bp+4 1.bp+4 1p+1 1p+1 p9.1
-domain 0 main
-  0 | - - p- | - - p-
-  1 | 1.cp+2 1.14p+6 p- | 1.2p+3 1.48p+6 p-
-  2 | 1.ep+3 1.9p+4 p10.0 | 1.bp+4 1.bp+4 p10.1
-  3 | 1.3p+4 - p5.0 | 1.bp+4 - p5.1
-  4 | 1.cp+2 1.14p+6 p1.0 | 1.2p+3 1.48p+6 p1.1
-  5 | 1.3p+4 1.7p+6 p4.1 | 1.bp+4 1.64p+6 p4.0
-  6 | - - p- | - - p-
-  7 | 1.3p+4 1.7p+6 p5.0 | 1.bp+4 1.64p+6 p5.1
-  8 | 1.4p+3 1.4p+4 p- | 1.4p+4 1.4p+4 p-
-  9 | 1.4p+3 1.4p+4 p8.0 | 1.4p+4 1.4p+4 p8.1
-  10 | 1.ep+3 1.9p+4 p9.0 | 1.bp+4 1.bp+4 p9.1
 graph reference - domains main
   v 1 0 0 1.cp+2 -
   v 1 0 1 1.2p+3 -
@@ -721,20 +507,6 @@ graph reference - domains main
   a 14 16 6 1.4p+2 false
   a 15 17 6 1.cp+2 false
 ### reconvergent legacy
-certified true wns 1.b8p+5 tns 0p+0 period 1.68p+5
-generation 0 0 policy false false
-counts 10 22 10 20 10 0 | 12 0 0 0 0 0 0
-pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 1p+0 p- | - - 1p+2 1p+0 p-
-pin 1 z clock false endpoint true constant - port 0 | 1p+5 1.9p+6 1p+0 0p+0 p9.0 | 1.1p+5 1.9p+6 1p+1 0p+0 p9.1
-pin 2 ff:CLK clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
-pin 3 ff:D clock false endpoint true constant - port 1 | 1p+5 1.7p+6 1p+0 0p+0 p9.0 | 1.1p+5 1.64p+6 1p+1 0p+0 p9.1
-pin 4 ff:Q clock false endpoint false constant - port 0 | 1.4p+3 1.34p+6 1p+1 1p+1 p- | 1.4p+4 1.2cp+6 1.8p+1 1p+1 p-
-pin 5 b:A clock false endpoint false constant - port 0 | 1.4p+3 1.34p+6 1p+1 0p+0 p4.0 | 1.4p+4 1.2cp+6 1.8p+1 0p+0 p4.1
-pin 6 b:Y clock false endpoint false constant - port 0 | 1.ep+3 1.48p+6 1p+0 1p+0 p5.0 | 1.bp+4 1.48p+6 1p+1 1p+0 p5.1
-pin 7 x:A clock false endpoint false constant - port 0 | 1.4p+3 1.48p+6 1p+1 0p+0 p4.0 | 1.4p+4 1.48p+6 1.8p+1 0p+0 p4.1
-pin 8 x:B clock false endpoint false constant - port 1 | 1.ep+3 1.48p+6 1p+0 0p+0 p6.0 | 1.bp+4 1.48p+6 1p+1 0p+0 p6.1
-pin 9 x:Y clock false endpoint false constant - port 0 | 1p+5 1.7p+6 1p+0 1p+0 p8.1 | 1.1p+5 1.64p+6 1p+1 1p+0 p8.1
-### reconvergent legacy capture
 certified true wns 1.b8p+5 tns 0p+0 period 1.68p+5
 generation 0 0 policy false false
 counts 10 22 10 20 10 0 | 12 0 0 0 0 0 0
@@ -811,32 +583,6 @@ domain 0 main
   7 | 1.4p+3 1.48p+6 p4.0 | 1.4p+4 1.48p+6 p4.1
   8 | 1.ep+3 1.48p+6 p6.0 | 1.bp+4 1.48p+6 p6.1
   9 | 1p+5 1.7p+6 p8.1 | 1.1p+5 1.64p+6 p8.1
-### reconvergent named capture
-certified true wns 1.b8p+5 tns 0p+0 period 1.68p+5
-generation 0 0 policy false false
-counts 10 22 10 20 10 0 | 12 0 0 0 0 0 0
-clock main 1.9p+6 wns 1.b8p+5 tns 0p+0 period 1.68p+5 endpoints 2 independent true
-pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 1p+0 p- | - - 1p+2 1p+0 p-
-pin 1 z clock false endpoint true constant - port 0 | 1p+5 1.9p+6 1p+0 0p+0 p9.0 | 1.1p+5 1.9p+6 1p+1 0p+0 p9.1
-pin 2 ff:CLK clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
-pin 3 ff:D clock false endpoint true constant - port 1 | 1p+5 1.7p+6 1p+0 0p+0 p9.0 | 1.1p+5 1.64p+6 1p+1 0p+0 p9.1
-pin 4 ff:Q clock false endpoint false constant - port 0 | 1.4p+3 1.34p+6 1p+1 1p+1 p- | 1.4p+4 1.2cp+6 1.8p+1 1p+1 p-
-pin 5 b:A clock false endpoint false constant - port 0 | 1.4p+3 1.34p+6 1p+1 0p+0 p4.0 | 1.4p+4 1.2cp+6 1.8p+1 0p+0 p4.1
-pin 6 b:Y clock false endpoint false constant - port 0 | 1.ep+3 1.48p+6 1p+0 1p+0 p5.0 | 1.bp+4 1.48p+6 1p+1 1p+0 p5.1
-pin 7 x:A clock false endpoint false constant - port 0 | 1.4p+3 1.48p+6 1p+1 0p+0 p4.0 | 1.4p+4 1.48p+6 1.8p+1 0p+0 p4.1
-pin 8 x:B clock false endpoint false constant - port 1 | 1.ep+3 1.48p+6 1p+0 0p+0 p6.0 | 1.bp+4 1.48p+6 1p+1 0p+0 p6.1
-pin 9 x:Y clock false endpoint false constant - port 0 | 1p+5 1.7p+6 1p+0 1p+0 p8.1 | 1.1p+5 1.64p+6 1p+1 1p+0 p8.1
-domain 0 main
-  0 | - - p- | - - p-
-  1 | 1p+5 1.9p+6 p9.0 | 1.1p+5 1.9p+6 p9.1
-  2 | - - p- | - - p-
-  3 | 1p+5 1.7p+6 p9.0 | 1.1p+5 1.64p+6 p9.1
-  4 | 1.4p+3 1.34p+6 p- | 1.4p+4 1.2cp+6 p-
-  5 | 1.4p+3 1.34p+6 p4.0 | 1.4p+4 1.2cp+6 p4.1
-  6 | 1.ep+3 1.48p+6 p5.0 | 1.bp+4 1.48p+6 p5.1
-  7 | 1.4p+3 1.48p+6 p4.0 | 1.4p+4 1.48p+6 p4.1
-  8 | 1.ep+3 1.48p+6 p6.0 | 1.bp+4 1.48p+6 p6.1
-  9 | 1p+5 1.7p+6 p8.1 | 1.1p+5 1.64p+6 p8.1
 graph reference 1.9p+6 domains main
   v 1 0 0 - 1.9p+6
   v 1 0 1 - 1.9p+6
@@ -875,18 +621,6 @@ graph reference 1.9p+6 domains main
   a 13 14 7 1.4p+2 false
   a 13 15 7 1.cp+2 false
 ### rc_chain legacy
-certified true wns 1.4e2256e15df95p+5 tns 0p+0 period 1.d1dda91ea206bp+5
-generation 0 0 policy false false
-counts 7 10 7 10 7 2 | 4 0 4 0 0 0 0
-warning load-independent delay tables: RC uses Elmore delay with unchanged driver waveform on 2 drivers
-pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
-pin 1 a clock false endpoint false constant - port 1 | 1.8p+1 1.662256e15df95p+5 1.4p+2 1.4cccccccccccdp+1 p- | 1p+2 1.8f52a4b92a442p+5 1.8p+2 1.ccccccccccccdp+1 p-
-pin 2 z clock false endpoint true constant - port 0 | 1.81dda91ea206bp+5 1.68p+6 1.8p+1 0p+0 p6.0 | 1.88ad5b46d5bbep+5 1.7cp+6 1p+2 0p+0 p6.1
-pin 3 u:A clock false endpoint false constant - port 0 | 1.4eed48f51035ap+2 1.78p+5 1.67cce4f83fbdp+2 0p+0 p1.0 | 1.c56ada36addf3p+2 1.a8p+5 1.c81a060d5954dp+2 0p+0 p1.1
-pin 4 u:Y clock false endpoint false constant - port 0 | 1.115ab68dab77dp+4 1.f8p+5 1.8p+1 1p+2 p3.1 | 1.93bb523d440d6p+4 1.0cp+6 1p+2 1.4p+2 p3.0
-pin 5 v:A clock false endpoint false constant - port 0 | 1.815ab68dab77dp+4 1.18p+6 1.8p+1 0p+0 p4.0 | 1.11dda91ea206bp+5 1.3p+6 1p+2 0p+0 p4.1
-pin 6 v:Y clock false endpoint false constant - port 0 | 1.61dda91ea206bp+5 1.58p+6 1.8p+1 1p+3 p5.1 | 1.60ad5b46d5bbep+5 1.68p+6 1p+2 1.4p+3 p5.0
-### rc_chain legacy capture
 certified true wns 1.4e2256e15df95p+5 tns 0p+0 period 1.d1dda91ea206bp+5
 generation 0 0 policy false false
 counts 7 10 7 10 7 2 | 4 0 4 0 0 0 0
@@ -942,27 +676,6 @@ domain 0 main
   4 | 1.115ab68dab77dp+4 1.f8p+5 p3.1 | 1.93bb523d440d6p+4 1.0cp+6 p3.0
   5 | 1.815ab68dab77dp+4 1.18p+6 p4.0 | 1.11dda91ea206bp+5 1.3p+6 p4.1
   6 | 1.61dda91ea206bp+5 1.58p+6 p5.1 | 1.60ad5b46d5bbep+5 1.68p+6 p5.0
-### rc_chain named capture
-certified true wns 1.4e2256e15df95p+5 tns 0p+0 period 1.d1dda91ea206bp+5
-generation 0 0 policy false false
-counts 7 10 7 10 7 2 | 4 0 4 0 0 0 0
-warning load-independent delay tables: RC uses Elmore delay with unchanged driver waveform on 2 drivers
-clock main 1.9p+6 wns 1.4e2256e15df95p+5 tns 0p+0 period 1.d1dda91ea206bp+5 endpoints 1 independent true
-pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
-pin 1 a clock false endpoint false constant - port 1 | 1.8p+1 1.662256e15df95p+5 1.4p+2 1.4cccccccccccdp+1 p- | 1p+2 1.8f52a4b92a442p+5 1.8p+2 1.ccccccccccccdp+1 p-
-pin 2 z clock false endpoint true constant - port 0 | 1.81dda91ea206bp+5 1.68p+6 1.8p+1 0p+0 p6.0 | 1.88ad5b46d5bbep+5 1.7cp+6 1p+2 0p+0 p6.1
-pin 3 u:A clock false endpoint false constant - port 0 | 1.4eed48f51035ap+2 1.78p+5 1.67cce4f83fbdp+2 0p+0 p1.0 | 1.c56ada36addf3p+2 1.a8p+5 1.c81a060d5954dp+2 0p+0 p1.1
-pin 4 u:Y clock false endpoint false constant - port 0 | 1.115ab68dab77dp+4 1.f8p+5 1.8p+1 1p+2 p3.1 | 1.93bb523d440d6p+4 1.0cp+6 1p+2 1.4p+2 p3.0
-pin 5 v:A clock false endpoint false constant - port 0 | 1.815ab68dab77dp+4 1.18p+6 1.8p+1 0p+0 p4.0 | 1.11dda91ea206bp+5 1.3p+6 1p+2 0p+0 p4.1
-pin 6 v:Y clock false endpoint false constant - port 0 | 1.61dda91ea206bp+5 1.58p+6 1.8p+1 1p+3 p5.1 | 1.60ad5b46d5bbep+5 1.68p+6 1p+2 1.4p+3 p5.0
-domain 0 main
-  0 | - - p- | - - p-
-  1 | 1.8p+1 1.662256e15df95p+5 p- | 1p+2 1.8f52a4b92a442p+5 p-
-  2 | 1.81dda91ea206bp+5 1.68p+6 p6.0 | 1.88ad5b46d5bbep+5 1.7cp+6 p6.1
-  3 | 1.4eed48f51035ap+2 1.78p+5 p1.0 | 1.c56ada36addf3p+2 1.a8p+5 p1.1
-  4 | 1.115ab68dab77dp+4 1.f8p+5 p3.1 | 1.93bb523d440d6p+4 1.0cp+6 p3.0
-  5 | 1.815ab68dab77dp+4 1.18p+6 p4.0 | 1.11dda91ea206bp+5 1.3p+6 p4.1
-  6 | 1.61dda91ea206bp+5 1.58p+6 p5.1 | 1.60ad5b46d5bbep+5 1.68p+6 p5.0
 graph reference 1.9p+6 domains main
   v 1 0 0 1.8p+1 -
   v 1 0 1 1p+2 -
@@ -987,19 +700,6 @@ graph reference 1.9p+6 domains main
   a 8 11 4 1.4p+4 false
   a 9 10 4 1.4p+3 false
 ### rc_chain_star legacy
-certified true wns 1.4e2256e15df95p+5 tns 0p+0 period 1.d1dda91ea206bp+5
-generation 0 0 policy false false
-counts 7 10 7 10 7 2 | 4 0 4 0 0 0 0
-warning load-independent delay tables: RC uses Elmore delay with unchanged driver waveform on 2 drivers
-warning continuous calibrated star wire model; input-admittance and timing fidelity require separate acceptance
-pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
-pin 1 a clock false endpoint false constant - port 1 | 1.8p+1 1.662256e15df95p+5 1.4p+2 1.4ccccccccccccp+1 p- | 1p+2 1.8f52a4b92a442p+5 1.8p+2 1.cccccccccccccp+1 p-
-pin 2 z clock false endpoint true constant - port 0 | 1.81dda91ea206bp+5 1.68p+6 1.8p+1 0p+0 p6.0 | 1.88ad5b46d5bbep+5 1.7cp+6 1p+2 0p+0 p6.1
-pin 3 u:A clock false endpoint false constant - port 0 | 1.4eed48f51035ap+2 1.78p+5 1.67cce4f83fbdp+2 0p+0 p1.0 | 1.c56ada36addf3p+2 1.a8p+5 1.c81a060d5954dp+2 0p+0 p1.1
-pin 4 u:Y clock false endpoint false constant - port 0 | 1.115ab68dab77dp+4 1.f8p+5 1.8p+1 1p+2 p3.1 | 1.93bb523d440d6p+4 1.0cp+6 1p+2 1.4p+2 p3.0
-pin 5 v:A clock false endpoint false constant - port 0 | 1.815ab68dab77dp+4 1.18p+6 1.8p+1 0p+0 p4.0 | 1.11dda91ea206bp+5 1.3p+6 1p+2 0p+0 p4.1
-pin 6 v:Y clock false endpoint false constant - port 0 | 1.61dda91ea206bp+5 1.58p+6 1.8p+1 1p+3 p5.1 | 1.60ad5b46d5bbep+5 1.68p+6 1p+2 1.4p+3 p5.0
-### rc_chain_star legacy capture
 certified true wns 1.4e2256e15df95p+5 tns 0p+0 period 1.d1dda91ea206bp+5
 generation 0 0 policy false false
 counts 7 10 7 10 7 2 | 4 0 4 0 0 0 0
@@ -1057,28 +757,6 @@ domain 0 main
   4 | 1.115ab68dab77dp+4 1.f8p+5 p3.1 | 1.93bb523d440d6p+4 1.0cp+6 p3.0
   5 | 1.815ab68dab77dp+4 1.18p+6 p4.0 | 1.11dda91ea206bp+5 1.3p+6 p4.1
   6 | 1.61dda91ea206bp+5 1.58p+6 p5.1 | 1.60ad5b46d5bbep+5 1.68p+6 p5.0
-### rc_chain_star named capture
-certified true wns 1.4e2256e15df95p+5 tns 0p+0 period 1.d1dda91ea206bp+5
-generation 0 0 policy false false
-counts 7 10 7 10 7 2 | 4 0 4 0 0 0 0
-warning load-independent delay tables: RC uses Elmore delay with unchanged driver waveform on 2 drivers
-warning continuous calibrated star wire model; input-admittance and timing fidelity require separate acceptance
-clock main 1.9p+6 wns 1.4e2256e15df95p+5 tns 0p+0 period 1.d1dda91ea206bp+5 endpoints 1 independent true
-pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
-pin 1 a clock false endpoint false constant - port 1 | 1.8p+1 1.662256e15df95p+5 1.4p+2 1.4ccccccccccccp+1 p- | 1p+2 1.8f52a4b92a442p+5 1.8p+2 1.cccccccccccccp+1 p-
-pin 2 z clock false endpoint true constant - port 0 | 1.81dda91ea206bp+5 1.68p+6 1.8p+1 0p+0 p6.0 | 1.88ad5b46d5bbep+5 1.7cp+6 1p+2 0p+0 p6.1
-pin 3 u:A clock false endpoint false constant - port 0 | 1.4eed48f51035ap+2 1.78p+5 1.67cce4f83fbdp+2 0p+0 p1.0 | 1.c56ada36addf3p+2 1.a8p+5 1.c81a060d5954dp+2 0p+0 p1.1
-pin 4 u:Y clock false endpoint false constant - port 0 | 1.115ab68dab77dp+4 1.f8p+5 1.8p+1 1p+2 p3.1 | 1.93bb523d440d6p+4 1.0cp+6 1p+2 1.4p+2 p3.0
-pin 5 v:A clock false endpoint false constant - port 0 | 1.815ab68dab77dp+4 1.18p+6 1.8p+1 0p+0 p4.0 | 1.11dda91ea206bp+5 1.3p+6 1p+2 0p+0 p4.1
-pin 6 v:Y clock false endpoint false constant - port 0 | 1.61dda91ea206bp+5 1.58p+6 1.8p+1 1p+3 p5.1 | 1.60ad5b46d5bbep+5 1.68p+6 1p+2 1.4p+3 p5.0
-domain 0 main
-  0 | - - p- | - - p-
-  1 | 1.8p+1 1.662256e15df95p+5 p- | 1p+2 1.8f52a4b92a442p+5 p-
-  2 | 1.81dda91ea206bp+5 1.68p+6 p6.0 | 1.88ad5b46d5bbep+5 1.7cp+6 p6.1
-  3 | 1.4eed48f51035ap+2 1.78p+5 p1.0 | 1.c56ada36addf3p+2 1.a8p+5 p1.1
-  4 | 1.115ab68dab77dp+4 1.f8p+5 p3.1 | 1.93bb523d440d6p+4 1.0cp+6 p3.0
-  5 | 1.815ab68dab77dp+4 1.18p+6 p4.0 | 1.11dda91ea206bp+5 1.3p+6 p4.1
-  6 | 1.61dda91ea206bp+5 1.58p+6 p5.1 | 1.60ad5b46d5bbep+5 1.68p+6 p5.0
 graph reference 1.9p+6 domains main
   v 1 0 0 1.8p+1 -
   v 1 0 1 1p+2 -
@@ -1103,21 +781,6 @@ graph reference 1.9p+6 domains main
   a 8 11 4 1.4p+4 false
   a 9 10 4 1.4p+3 false
 ### constant_xor_condition legacy
-certified false wns 1.ep+4 tns 0p+0 period -
-generation 0 0 policy false false
-counts 10 10 10 16 10 0 | 10 0 0 0 0 0 0
-unsupported unsupported conditional setup expression: ff:D
-pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 1p+0 p- | - - 1p+2 1p+0 p-
-pin 1 a clock false endpoint false constant - port 1 | 0p+0 1.48p+6 0p+0 1p+0 p- | 0p+0 1.5cp+6 0p+0 1p+0 p-
-pin 2 en clock false endpoint false constant 1 port 2 | - - 0p+0 1p+0 p- | - - 0p+0 1p+0 p-
-pin 3 z clock false endpoint true constant - port 0 | 1.4p+3 1.9p+5 1p+1 0p+0 p9.0 | 1.4p+4 1.9p+5 1.8p+1 0p+0 p9.1
-pin 4 x:A clock false endpoint false constant - port 0 | 0p+0 1.48p+6 0p+0 0p+0 p1.0 | 0p+0 1.5cp+6 0p+0 0p+0 p1.1
-pin 5 x:B clock false endpoint false constant 1 port 1 | - - 0p+0 0p+0 p- | - - 0p+0 0p+0 p-
-pin 6 x:Y clock false endpoint false constant - port 0 | 1.4p+2 1.7p+6 1p+0 1p+0 p4.1 | 1.cp+2 1.64p+6 1p+1 1p+0 p4.0
-pin 7 ff:CLK clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
-pin 8 ff:D clock false endpoint true constant - port 1 | 1.4p+2 1.7p+6 1p+0 0p+0 p6.0 | 1.cp+2 1.64p+6 1p+1 0p+0 p6.1
-pin 9 ff:Q clock false endpoint false constant - port 0 | 1.4p+3 1.9p+5 1p+1 0p+0 p- | 1.4p+4 1.9p+5 1.8p+1 0p+0 p-
-### constant_xor_condition legacy capture
 certified false wns 1.ep+4 tns 0p+0 period -
 generation 0 0 policy false false
 counts 10 10 10 16 10 0 | 10 0 0 0 0 0 0
@@ -1191,44 +854,6 @@ domain 1 -
   7 | - - p- | - - p-
   8 | 1.4p+2 1.7p+6 p6.0 | 1.cp+2 1.64p+6 p6.1
   9 | - - p- | - - p-
-### constant_xor_condition named capture
-certified false wns 1.ep+4 tns 0p+0 period -
-generation 0 0 policy false false
-counts 20 10 10 16 20 0 | 10 0 0 0 0 0 0
-unsupported unsupported conditional setup expression: ff:D
-clock main 1.9p+6 wns 1.ep+4 tns 0p+0 period - endpoints 2 independent true
-pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 1p+0 p- | - - 1p+2 1p+0 p-
-pin 1 a clock false endpoint false constant - port 1 | 0p+0 1.48p+6 0p+0 1p+0 p- | 0p+0 1.5cp+6 0p+0 1p+0 p-
-pin 2 en clock false endpoint false constant 1 port 2 | - - 0p+0 1p+0 p- | - - 0p+0 1p+0 p-
-pin 3 z clock false endpoint true constant - port 0 | 1.4p+3 1.9p+5 1p+1 0p+0 p9.0 | 1.4p+4 1.9p+5 1.8p+1 0p+0 p9.1
-pin 4 x:A clock false endpoint false constant - port 0 | 0p+0 1.48p+6 0p+0 0p+0 p1.0 | 0p+0 1.5cp+6 0p+0 0p+0 p1.1
-pin 5 x:B clock false endpoint false constant 1 port 1 | - - 0p+0 0p+0 p- | - - 0p+0 0p+0 p-
-pin 6 x:Y clock false endpoint false constant - port 0 | 1.4p+2 1.7p+6 1p+0 1p+0 p4.1 | 1.cp+2 1.64p+6 1p+1 1p+0 p4.0
-pin 7 ff:CLK clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
-pin 8 ff:D clock false endpoint true constant - port 1 | 1.4p+2 1.7p+6 1p+0 0p+0 p6.0 | 1.cp+2 1.64p+6 1p+1 0p+0 p6.1
-pin 9 ff:Q clock false endpoint false constant - port 0 | 1.4p+3 1.9p+5 1p+1 0p+0 p- | 1.4p+4 1.9p+5 1.8p+1 0p+0 p-
-domain 0 main
-  0 | - - p- | - - p-
-  1 | - - p- | - - p-
-  2 | - - p- | - - p-
-  3 | 1.4p+3 1.9p+5 p9.0 | 1.4p+4 1.9p+5 p9.1
-  4 | - - p- | - - p-
-  5 | - - p- | - - p-
-  6 | - - p- | - - p-
-  7 | - - p- | - - p-
-  8 | - - p- | - - p-
-  9 | 1.4p+3 1.9p+5 p- | 1.4p+4 1.9p+5 p-
-domain 1 -
-  0 | - - p- | - - p-
-  1 | 0p+0 1.48p+6 p- | 0p+0 1.5cp+6 p-
-  2 | - - p- | - - p-
-  3 | - - p- | - - p-
-  4 | 0p+0 1.48p+6 p1.0 | 0p+0 1.5cp+6 p1.1
-  5 | - - p- | - - p-
-  6 | 1.4p+2 1.7p+6 p4.1 | 1.cp+2 1.64p+6 p4.0
-  7 | - - p- | - - p-
-  8 | 1.4p+2 1.7p+6 p6.0 | 1.cp+2 1.64p+6 p6.1
-  9 | - - p- | - - p-
 graph reference - domains main -
   v 3 0 0 - 1.9p+5
   v 3 0 1 - 1.9p+5
@@ -1258,14 +883,6 @@ pin 0 a clock false endpoint false constant - port 0 | 1.4p+2 1.74p+6 1p+1 1p+0 
 pin 1 z clock false endpoint true constant - port 0 | 1.8p+3 1.9p+6 1p+0 0p+0 p3.0 | 1p+4 1.9p+6 1p+1 0p+0 p3.1
 pin 2 u:A clock false endpoint false constant - port 0 | 1.cp+2 1.7cp+6 1p+1 0p+0 p0.0 | 1.2p+3 1.74p+6 1p+2 0p+0 p0.1
 pin 3 u:Y clock false endpoint false constant - port 0 | 1.8p+3 1.9p+6 1p+0 0p+0 p2.0 | 1p+4 1.9p+6 1p+1 0p+0 p2.1
-### driving_cell_unclocked legacy capture
-certified true wns 1.5p+6 tns 0p+0 period -
-generation 0 0 policy false false
-counts 4 6 4 6 4 0 | 4 0 0 0 0 0 0
-pin 0 a clock false endpoint false constant - port 0 | 1.4p+2 1.74p+6 1p+1 1p+0 p- | 1.8p+2 1.68p+6 1p+2 1p+0 p-
-pin 1 z clock false endpoint true constant - port 0 | 1.8p+3 1.9p+6 1p+0 0p+0 p3.0 | 1p+4 1.9p+6 1p+1 0p+0 p3.1
-pin 2 u:A clock false endpoint false constant - port 0 | 1.cp+2 1.7cp+6 1p+1 0p+0 p0.0 | 1.2p+3 1.74p+6 1p+2 0p+0 p0.1
-pin 3 u:Y clock false endpoint false constant - port 0 | 1.8p+3 1.9p+6 1p+0 0p+0 p2.0 | 1p+4 1.9p+6 1p+1 0p+0 p2.1
 graph reference - domains -
   v 0 0 0 1.4p+2 -
   v 0 0 1 1.8p+2 -
@@ -1277,6 +894,140 @@ graph reference - domains -
   v 3 0 1 - -
   a 0 4 0 1p+1 true
   a 1 5 0 1.8p+1 true
+  a 6 2 1 0p+0 true
+  a 7 3 1 0p+0 true
+  a 4 6 2 1.4p+2 false
+  a 5 7 2 1.cp+2 false
+### missing_delay_reached_and_cut legacy
+certified false wns 1.5p+5 tns 0p+0 period -
+generation 0 0 policy false false
+counts 9 4 9 4 9 0 | 1 0 0 0 0 0 0
+unsupported missing cell delay/transition table: u:Y
+unsupported uncovered endpoint transition: w
+unsupported uncovered endpoint transition: z
+pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
+pin 1 a clock false endpoint false constant - port 1 | 1.8p+1 1.68p+5 1p+0 1p+0 p- | 1p+2 - 1p+0 1p+0 p-
+pin 2 b clock false endpoint false constant - port 2 | - - 0p+0 1p+0 p- | - - 0p+0 1p+0 p-
+pin 3 z clock false endpoint true constant - port 0 | 1p+3 1.9p+5 1p+0 0p+0 p6.0 | - 1.9p+5 - 0p+0 p-
+pin 4 w clock false endpoint true constant - port 1 | - 1.9p+5 - 0p+0 p- | - 1.9p+5 - 0p+0 p-
+pin 5 u:A clock false endpoint false constant - port 0 | 1.8p+1 1.68p+5 1p+0 0p+0 p1.0 | 1p+2 - 1p+0 0p+0 p1.1
+pin 6 u:Y clock false endpoint false constant - port 0 | 1p+3 1.9p+5 1p+0 0p+0 p5.0 | - - - 0p+0 p-
+pin 7 v:A clock false endpoint false constant - port 0 | - - - 0p+0 p- | - - - 0p+0 p-
+pin 8 v:Y clock false endpoint false constant - port 0 | - - - 0p+0 p- | - - - 0p+0 p-
+graph reference 1.9p+6 domains -
+  v 1 0 0 1.8p+1 -
+  v 1 0 1 1p+2 -
+  v 3 0 0 - 1.9p+5
+  v 5 0 0 - -
+  v 5 0 1 - -
+  v 6 0 0 - -
+  a 0 3 0 0p+0 true
+  a 1 4 0 0p+0 true
+  a 5 2 1 0p+0 true
+  a 3 5 3 1.4p+2 false
+### missing_delay_reached_and_cut named
+certified false wns 1.5p+5 tns 0p+0 period -
+generation 0 0 policy false false
+counts 9 4 9 4 9 0 | 1 0 0 0 0 0 0
+unsupported missing cell delay/transition table or input waveform: u:Y
+unsupported missing cell delay/transition table or input waveform: v:Y
+unsupported uncovered endpoint transition: w
+unsupported uncovered endpoint transition: z
+clock main 1.9p+6 wns 1.5p+5 tns 0p+0 period - endpoints 1 independent true
+pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
+pin 1 a clock false endpoint false constant - port 1 | 1.8p+1 1.68p+5 1p+0 1p+0 p- | 1p+2 - 1p+0 1p+0 p-
+pin 2 b clock false endpoint false constant - port 2 | - - 0p+0 1p+0 p- | - - 0p+0 1p+0 p-
+pin 3 z clock false endpoint true constant - port 0 | 1p+3 1.9p+5 1p+0 0p+0 p6.0 | - - - 0p+0 p-
+pin 4 w clock false endpoint true constant - port 1 | - - - 0p+0 p- | - - - 0p+0 p-
+pin 5 u:A clock false endpoint false constant - port 0 | 1.8p+1 1.68p+5 1p+0 0p+0 p1.0 | 1p+2 - 1p+0 0p+0 p1.1
+pin 6 u:Y clock false endpoint false constant - port 0 | 1p+3 1.9p+5 1p+0 0p+0 p5.0 | - - - 0p+0 p-
+pin 7 v:A clock false endpoint false constant - port 0 | - - - 0p+0 p- | - - - 0p+0 p-
+pin 8 v:Y clock false endpoint false constant - port 0 | - - - 0p+0 p- | - - - 0p+0 p-
+domain 0 main
+  0 | - - p- | - - p-
+  1 | 1.8p+1 1.68p+5 p- | 1p+2 - p-
+  2 | - - p- | - - p-
+  3 | 1p+3 1.9p+5 p6.0 | - - p-
+  4 | - - p- | - - p-
+  5 | 1.8p+1 1.68p+5 p1.0 | 1p+2 - p1.1
+  6 | 1p+3 1.9p+5 p5.0 | - - p-
+  7 | - - p- | - - p-
+  8 | - - p- | - - p-
+graph reference - domains main
+  v 1 0 0 1.8p+1 -
+  v 1 0 1 1p+2 -
+  v 3 0 0 - 1.9p+5
+  v 5 0 0 - -
+  v 5 0 1 - -
+  v 6 0 0 - -
+  a 0 3 0 0p+0 true
+  a 1 4 0 0p+0 true
+  a 5 2 1 0p+0 true
+  a 3 5 3 1.4p+2 false
+### missing_delay_cut_cone_only legacy
+certified true wns 1.38p+5 tns 0p+0 period 1.e8p+5
+generation 0 0 policy false false
+counts 9 6 9 6 9 0 | 2 0 0 0 0 0 0
+pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
+pin 1 a clock false endpoint false constant - port 1 | 1.8p+1 1.68p+5 1p+0 1p+0 p- | 1p+2 1.58p+5 1p+0 1p+0 p-
+pin 2 b clock false endpoint false constant - port 2 | - - 0p+0 1p+0 p- | - - 0p+0 1p+0 p-
+pin 3 z clock false endpoint true constant - port 0 | 1p+3 1.9p+5 1p+0 0p+0 p6.0 | 1.6p+3 1.9p+5 1p+1 0p+0 p6.1
+pin 4 w clock false endpoint false constant - port 1 | - - - 0p+0 p- | - - - 0p+0 p-
+pin 5 u:A clock false endpoint false constant - port 0 | 1.8p+1 1.68p+5 1p+0 0p+0 p1.0 | 1p+2 1.58p+5 1p+0 0p+0 p1.1
+pin 6 u:Y clock false endpoint false constant - port 0 | 1p+3 1.9p+5 1p+0 0p+0 p5.0 | 1.6p+3 1.9p+5 1p+1 0p+0 p5.1
+pin 7 v:A clock false endpoint false constant - port 0 | - - - 0p+0 p- | - - - 0p+0 p-
+pin 8 v:Y clock false endpoint false constant - port 0 | - - - 0p+0 p- | - - - 0p+0 p-
+graph reference 1.9p+6 domains -
+  v 1 0 0 1.8p+1 -
+  v 1 0 1 1p+2 -
+  v 3 0 0 - 1.9p+5
+  v 3 0 1 - 1.9p+5
+  v 5 0 0 - -
+  v 5 0 1 - -
+  v 6 0 0 - -
+  v 6 0 1 - -
+  a 0 4 0 0p+0 true
+  a 1 5 0 0p+0 true
+  a 6 2 1 0p+0 true
+  a 7 3 1 0p+0 true
+  a 4 6 2 1.4p+2 false
+  a 5 7 2 1.cp+2 false
+### missing_delay_cut_cone_only named
+certified false wns 1.38p+5 tns 0p+0 period -
+generation 0 0 policy false false
+counts 9 6 9 6 9 0 | 2 0 0 0 0 0 0
+unsupported missing cell delay/transition table or input waveform: v:Y
+clock main 1.9p+6 wns 1.38p+5 tns 0p+0 period - endpoints 1 independent true
+pin 0 clk clock true endpoint false constant - port 0 | - - 1p+1 0p+0 p- | - - 1p+2 0p+0 p-
+pin 1 a clock false endpoint false constant - port 1 | 1.8p+1 1.68p+5 1p+0 1p+0 p- | 1p+2 1.58p+5 1p+0 1p+0 p-
+pin 2 b clock false endpoint false constant - port 2 | - - 0p+0 1p+0 p- | - - 0p+0 1p+0 p-
+pin 3 z clock false endpoint true constant - port 0 | 1p+3 1.9p+5 1p+0 0p+0 p6.0 | 1.6p+3 1.9p+5 1p+1 0p+0 p6.1
+pin 4 w clock false endpoint false constant - port 1 | - - - 0p+0 p- | - - - 0p+0 p-
+pin 5 u:A clock false endpoint false constant - port 0 | 1.8p+1 1.68p+5 1p+0 0p+0 p1.0 | 1p+2 1.58p+5 1p+0 0p+0 p1.1
+pin 6 u:Y clock false endpoint false constant - port 0 | 1p+3 1.9p+5 1p+0 0p+0 p5.0 | 1.6p+3 1.9p+5 1p+1 0p+0 p5.1
+pin 7 v:A clock false endpoint false constant - port 0 | - - - 0p+0 p- | - - - 0p+0 p-
+pin 8 v:Y clock false endpoint false constant - port 0 | - - - 0p+0 p- | - - - 0p+0 p-
+domain 0 main
+  0 | - - p- | - - p-
+  1 | 1.8p+1 1.68p+5 p- | 1p+2 1.58p+5 p-
+  2 | - - p- | - - p-
+  3 | 1p+3 1.9p+5 p6.0 | 1.6p+3 1.9p+5 p6.1
+  4 | - - p- | - - p-
+  5 | 1.8p+1 1.68p+5 p1.0 | 1p+2 1.58p+5 p1.1
+  6 | 1p+3 1.9p+5 p5.0 | 1.6p+3 1.9p+5 p5.1
+  7 | - - p- | - - p-
+  8 | - - p- | - - p-
+graph reference - domains main
+  v 1 0 0 1.8p+1 -
+  v 1 0 1 1p+2 -
+  v 3 0 0 - 1.9p+5
+  v 3 0 1 - 1.9p+5
+  v 5 0 0 - -
+  v 5 0 1 - -
+  v 6 0 0 - -
+  v 6 0 1 - -
+  a 0 4 0 0p+0 true
+  a 1 5 0 0p+0 true
   a 6 2 1 0p+0 true
   a 7 3 1 0p+0 true
   a 4 6 2 1.4p+2 false

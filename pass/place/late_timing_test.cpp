@@ -942,7 +942,10 @@ namespace {
 // Bit-exact characterization of both clock models: every scenario runs with
 // the legacy single clock and with the same clock named, so a shared timing
 // implementation cannot silently change either model's observable Result.
-// On a mismatch the actual image is written to TEST_UNDECLARED_OUTPUTS_DIR.
+// Graph capture must only append the graph section, so the golden image keeps
+// the capture run. After an intended timing change, regenerate it with:
+//   bazel test -c opt //pass/place:late_timing_test; cp
+//   bazel-testlogs/pass/place/late_timing_test/test.outputs/late_timing_characterization.txt pass/place/tests/
 struct Characterization {
   std::string text;
   void        add(const std::string& name, const hhds::Graph& graph, std::shared_ptr<const nldm::Library> library,
@@ -966,16 +969,21 @@ struct Characterization {
       }
     }
     for (const late::Constraints* constraints : std::array<const late::Constraints*, 2>{&legacy, &named}) {
-      for (const bool capture : {false, true}) {
-        text += "### " + name + (constraints == &legacy ? " legacy" : " named") + (capture ? " capture" : "") + "\n";
+      const auto run = [&](bool capture) -> std::string {
         try {
-          auto copy  = star ? std::optional<late::Star_context>(*star) : std::nullopt;
-          text      += livehd::placement::test_fixture::late_timing_dump(
+          auto copy = star ? std::optional<late::Star_context>(*star) : std::nullopt;
+          return livehd::placement::test_fixture::late_timing_dump(
               late::Proxy(graph, library, *constraints).evaluate(rc, copy ? &*copy : nullptr, {.capture_feasible_graph = capture}));
         } catch (const std::exception& error) {
-          text += std::string("throws ") + error.what() + "\n";
+          return std::string("throws ") + error.what() + "\n";
         }
-      }
+      };
+      const auto label    = name + (constraints == &legacy ? " legacy" : " named");
+      const auto captured = run(true);
+      const auto graph_at = captured.find("\ngraph reference ");
+      EXPECT_EQ(graph_at == std::string::npos ? captured : captured.substr(0, graph_at + 1), run(false))
+          << label << ": graph capture changed more than the graph section";
+      text += "### " + label + "\n" + captured;
       if (!legacy.clock) {
         break;
       }
@@ -993,7 +1001,80 @@ late::Constraints clocked() {
   c.complete = true;
   return c;
 }
+// Two cones through a HALF cell characterized for rising outputs only. Cone
+// a -> u -> z is timed; input b is cut, so cone b -> v -> w is never reached.
+// With reached=false, u is a complete BUF and the cut cone also ends at a
+// cut output, so only the unreached HALF lacks a fall delay.
+struct Half_circuit {
+  Circuit circuit{
+      {"clk", "a", "b"},
+      {"z", "w"}
+  };
+  late::Constraints constraints = clocked();
+  explicit Half_circuit(bool reached) {
+    circuit.library = std::make_shared<nldm::Library>(nldm::parse(models + R"(
+      library(half){time_unit:"1ps";capacitive_load_unit(1,ff);default_input_pin_cap:1;
+        cell(HALF){pin(A){direction:input;}pin(Y){direction:output;function:A;timing(){related_pin:A;timing_sense:positive_unate;
+          cell_rise(scalar){values("5");}rise_transition(scalar){values("1");}}}}
+      })"));
+    auto u = circuit.cell("u", reached ? "HALF" : "BUF"), v = circuit.cell("v", "HALF");
+    u.create_sink_pin("A").connect_driver(circuit.graph->get_input_pin("a"));
+    v.create_sink_pin("A").connect_driver(circuit.graph->get_input_pin("b"));
+    circuit.graph->get_output_pin("z").connect_driver(u.create_driver_pin("Y"));
+    circuit.graph->get_output_pin("w").connect_driver(v.create_driver_pin("Y"));
+    constraints.inputs["a"] = {
+        {3, 4},
+        {1, 1},
+        std::nullopt,
+        "default"
+    };
+    constraints.outputs["z"] = {
+        {50, 50},
+        {},
+        "default"
+    };
+    constraints.cuts.insert("b");
+    if (reached) {
+      constraints.outputs["w"] = {
+          {50, 50},
+          {},
+          "default"
+      };
+    } else {
+      constraints.cuts.insert("w");
+    }
+  }
+};
 }  // namespace
+TEST(LateTiming, MissingCellDelaysFollowEachClockModel) {
+  const auto evaluate = [](const Half_circuit& half, bool named) {
+    auto constraints = half.constraints;
+    if (named) {
+      constraints.clocks["main"] = *constraints.clock;
+      constraints.clock.reset();
+      constraints.inputs["a"].clock  = "main";
+      constraints.outputs["z"].clock = "main";
+      if (constraints.outputs.contains("w")) {
+        constraints.outputs["w"].clock = "main";
+      }
+    }
+    return late::Proxy(*half.circuit.graph, half.circuit.library, constraints).evaluate();
+  };
+  // Legacy reports a missing delay only where an arrival reaches it; named
+  // clocks report every sensitized arc that lacks one.
+  const Half_circuit both(true);
+  const auto         legacy = evaluate(both, false), named = evaluate(both, true);
+  EXPECT_TRUE(issue(legacy, "missing cell delay/transition table: u:Y"));
+  EXPECT_FALSE(issue(legacy, "v:Y"));
+  EXPECT_TRUE(issue(named, "missing cell delay/transition table or input waveform: u:Y"));
+  EXPECT_TRUE(issue(named, "missing cell delay/transition table or input waveform: v:Y"));
+  // So an unreached incomplete cell keeps only the legacy result certified.
+  const Half_circuit cut_only(false);
+  const auto         legacy_cut = evaluate(cut_only, false), named_cut = evaluate(cut_only, true);
+  EXPECT_TRUE(legacy_cut.certified) << (legacy_cut.unsupported.empty() ? "" : legacy_cut.unsupported.front());
+  EXPECT_FALSE(named_cut.certified);
+  EXPECT_TRUE(issue(named_cut, "missing cell delay/transition table or input waveform: v:Y"));
+}
 TEST(LateTiming, CharacterizationOfBothClockModelsIsBitExact) {
   Characterization image;
   {
@@ -1150,8 +1231,16 @@ TEST(LateTiming, CharacterizationOfBothClockModelsIsBitExact) {
     c.complete = true;
     image.add("driving_cell_unclocked", *circuit.graph, circuit.library, c);
   }
+  for (const bool reached : {true, false}) {
+    Half_circuit half(reached);
+    image.add(reached ? "missing_delay_reached_and_cut" : "missing_delay_cut_cone_only",
+              *half.circuit.graph,
+              half.circuit.library,
+              half.constraints);
+  }
   const std::string golden_path = "pass/place/tests/late_timing_characterization.txt";
   std::ifstream     golden(golden_path);
+  ASSERT_TRUE(golden) << "missing characterization golden " << golden_path;
   const std::string expected((std::istreambuf_iterator<char>(golden)), {});
   if (expected != image.text) {
     if (const char* dir = std::getenv("TEST_UNDECLARED_OUTPUTS_DIR")) {
