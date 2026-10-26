@@ -11,6 +11,7 @@
 
 #include "inou/lefdef/physical.hpp"
 #include "inou/lefdef/row_access.hpp"
+#include "row_occupancy.hpp"
 
 namespace livehd::placement {
 // Anchor prepass for movable multi-row CORE cells (two-row domino masters).
@@ -20,9 +21,11 @@ namespace livehd::placement {
 // consecutive rows, takes the start row's orientation (as check_legality
 // requires) and marks it FIXED. Terminal legalization then packs the
 // single-row cells around these anchors; release_multirow_anchors restores
-// PLACED for the handoff. Free sites, obstacles and the bin capacity follow
-// terminal legalization's row occupancy model, so the anchors never exceed a
-// bin cap that terminal legalization checks for its fixed input cells.
+// PLACED for the handoff. Free sites, obstacles and the bin capacity come from
+// the row occupancy model terminal legalization builds (row_occupancy), so the
+// anchors never exceed a bin cap that terminal legalization checks for its
+// fixed input cells. The packer also keeps anchors off hard DEF placement
+// blockages, which terminal legalization does not consult.
 
 // Row-access classes of a master's local row halves, bottom half first.
 struct Multirow_template {
@@ -31,18 +34,15 @@ struct Multirow_template {
 struct Multirow_options {
   // With both set, a master with a template starts only where each local half
   // lands on a row of its class; otherwise only LEF SYMMETRY filters starts.
-  const physical::Row_access_convention*          access        = nullptr;
-  const std::map<std::string, Multirow_template>* templates     = nullptr;  // by master
-  // Free sites kept on both sides of an anchor and of a fixed logic cell, in
-  // every row they span.
-  unsigned                                        padding_sites = 0;
+  const physical::Row_access_convention*          access    = nullptr;
+  const std::map<std::string, Multirow_template>* templates = nullptr;  // by master
+  // Terminal legalization's controls (occupancy_controls of its options). Its
+  // padding_sites are kept free on both sides of an anchor and of a fixed
+  // logic cell, in every row they span.
+  Occupancy_controls                              occupancy;
   // Start rows and sites searched on each side of the global-placement pose;
   // a cell without a legal pose there searches the whole core.
   unsigned                                        window_rows = 8, window_sites = 256;
-  // Copy these from the terminal legalization options.
-  unsigned                                        bins_x = 64, bins_y = 64;
-  double                                          max_density      = .8;
-  int64_t                                         macro_halo_x_dbu = 0, macro_halo_y_dbu = 0;
   uint64_t                                        work = 4'000'000;  // start rows and poses examined across all cells
   // The row-access origin by SITE: y of the first core row. Record it with
   // first_core_rows before rows are cut (macro halos, handoff taps), so a

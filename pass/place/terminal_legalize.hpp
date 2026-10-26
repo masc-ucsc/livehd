@@ -9,6 +9,7 @@
 #include "core/timing_feedback.hpp"
 #include "inou/lefdef/physical.hpp"
 #include "prects_networks.hpp"
+#include "row_occupancy.hpp"
 #include "satlegalize.hpp"
 #include "warpspace.hpp"
 
@@ -74,6 +75,8 @@ struct Terminal_legalize_report {
   // Final validated one-edge pin alignments; indices refer to the input frame.
   std::vector<Satlegalize_alignment>  alignments;
 };
+// The row occupancy controls these options set (shared with the multirow packer).
+Occupancy_controls occupancy_controls(const Terminal_legalize_options&);
 // Bound an inherited routing grid for tiny cores before selecting/locking cells.
 // Explicit caller-supplied terminal grids remain authoritative unless this helper is called.
 void fit_terminal_legalize_grid(const physical::Technology&, const physical::Floorplan&, Terminal_legalize_options&);

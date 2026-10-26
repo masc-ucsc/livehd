@@ -2,15 +2,18 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <string_view>
 #include <vector>
 
+#include "capacity_bins.hpp"
 #include "inou/lefdef/physical.hpp"
 
 namespace livehd::placement {
 // Row occupancy model shared by terminal legalization and the multi-row
-// anchor packer.
+// anchor packer: both build it with row_occupancy, so an obstacle or control
+// rule cannot reach only one of them.
 
 // Free sites of one placement row segment. `free` maps the first site of each
 // free gap to one past its last; sites count `step` DBU from x.
@@ -49,4 +52,27 @@ physical::Rect obstacle_rect(const physical::Technology&, const physical::Compon
 // Sites a fixed CORE cell reserves: its footprint widened on both sides by
 // padding sites of its master's SITE. Throws std::invalid_argument without one.
 physical::Rect padded_rect(const physical::Technology&, const physical::Component&, unsigned padding_sites);
+
+// Controls both passes share (synth.place.legalize.*): the bin grid and its
+// hard density cap, the padding beside a fixed logic cell, the macro halos.
+struct Occupancy_controls {
+  unsigned bins_x = 64, bins_y = 64;
+  double   max_density      = .8;
+  unsigned padding_sites    = 1;
+  int64_t  macro_halo_x_dbu = 0, macro_halo_y_dbu = 0;
+};
+// The occupancy model of a frame.
+struct Row_occupancy {
+  std::vector<Row_gaps>   rows;
+  Capacity_bins           grid;   // capacity: the free row area after obstacles; fixed logic deposited (after)
+  std::vector<Frame_role> roles;  // by component
+};
+// row_gaps; obstacle_rect reserved for every obstacle; bin capacity summed
+// from the free gaps (on_capacity(bin, row index, area) sees each piece);
+// every fixed logic cell deposited and its padded_rect reserved; then, with
+// hard_exclusions, the hard placement_exclusions reserved (they take sites,
+// not capacity). Components must have known masters.
+Row_occupancy row_occupancy(const physical::Technology&, const physical::Floorplan&, const Occupancy_controls&,
+                            std::string_view owner, bool hard_exclusions,
+                            const std::function<void(size_t bin, size_t row, double area)>& on_capacity = {});
 }  // namespace livehd::placement

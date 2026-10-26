@@ -7,8 +7,6 @@
 #include <string>
 #include <tuple>
 
-#include "capacity_bins.hpp"
-
 namespace livehd::placement {
 namespace {
 namespace ph = physical;
@@ -136,5 +134,48 @@ ph::Rect padded_rect(const ph::Technology& tech, const ph::Component& c, unsigne
   b.xl             -= pad;
   b.xh             += pad;
   return b;
+}
+
+Row_occupancy row_occupancy(const ph::Technology& tech, const ph::Floorplan& fp, const Occupancy_controls& controls,
+                            std::string_view owner, bool hard_exclusions,
+                            const std::function<void(size_t bin, size_t row, double area)>& on_capacity) {
+  Row_occupancy occupancy;
+  auto&         rows = occupancy.rows;
+  auto&         grid = occupancy.grid;
+  rows               = row_gaps(tech, fp, owner);
+  grid               = Capacity_bins(gaps_extent(rows), controls.bins_x, controls.bins_y);
+  occupancy.roles.reserve(fp.components.size());
+  for (const auto& c : fp.components) {
+    occupancy.roles.push_back(frame_role(tech, c));
+    if (occupancy.roles.back() == Frame_role::obstacle) {
+      reserve_gaps(rows, obstacle_rect(tech, c, controls.macro_halo_x_dbu, controls.macro_halo_y_dbu));
+    }
+  }
+  // Obstacles remove row capacity; fixed logic, blockages and later anchors
+  // only occupy sites.
+  for (size_t r = 0; r < rows.size(); ++r) {
+    for (const auto& [a, b] : rows[r].free) {
+      grid.each(gap_rect(rows[r], a, b), [&](size_t bin, double area) {
+        grid.bins[bin].capacity += area;
+        if (on_capacity) {
+          on_capacity(bin, r, area);
+        }
+      });
+    }
+  }
+  for (size_t i = 0; i < fp.components.size(); ++i) {
+    if (occupancy.roles[i] == Frame_role::fixed_logic) {
+      grid.deposit(fp.components[i].place, true);
+      reserve_gaps(rows, padded_rect(tech, fp.components[i], controls.padding_sites));
+    }
+  }
+  if (hard_exclusions) {
+    for (const auto& exclusion : ph::placement_exclusions(fp, grid.bounds)) {
+      if (exclusion.kind == ph::Placement_mask::hard) {
+        reserve_gaps(rows, exclusion.rect);
+      }
+    }
+  }
+  return occupancy;
 }
 }  // namespace livehd::placement

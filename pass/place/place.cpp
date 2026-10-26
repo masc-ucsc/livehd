@@ -8107,12 +8107,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         Multirow_options anchors;
         anchors.access           = options.row_access ? &*options.row_access : nullptr;
         anchors.templates        = &options.multirow_templates;
-        anchors.padding_sites    = terminal_options.padding_sites;
-        anchors.bins_x           = terminal_options.bins_x;
-        anchors.bins_y           = terminal_options.bins_y;
-        anchors.max_density      = terminal_options.max_density;
-        anchors.macro_halo_x_dbu = terminal_options.macro_halo_x_dbu;
-        anchors.macro_halo_y_dbu = terminal_options.macro_halo_y_dbu;
+        anchors.occupancy        = occupancy_controls(terminal_options);
         anchors.core_origins     = core_origins;
         anchors.admits           = livehd::is_provisional_domino_cell;
         multirow_report          = anchor_multirow_cells(tech, frame, anchors);

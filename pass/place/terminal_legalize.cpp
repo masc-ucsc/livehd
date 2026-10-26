@@ -212,7 +212,6 @@ struct Model {
     return best;
   }
 
-  void reserve(const ph::Rect& b) { reserve_gaps(rows, b); }
   Model(const ph::Technology& technology, ph::Floorplan& frame, const Terminal_legalize_options& controls)
       : tech(technology), fp(frame), options(controls) {
     if (options.route_vias && !options.route_drc) {
@@ -224,17 +223,8 @@ struct Model {
     if (options.route_drc) {
       route_rules.emplace(tech, fp);
     }
-    rows              = row_gaps(tech, fp, "terminal legalization");
-    const auto bounds = gaps_extent(rows);
-    for (const auto& r : rows) {
-      max_row_height = std::max<int64_t>(max_row_height, r.height);
-    }
-    report.bins_x = options.bins_x;
-    report.bins_y = options.bins_y;
-    grid          = Capacity_bins(bounds, options.bins_x, options.bins_y);
-    bin_rows.resize(grid.bins.size());
-    bin_corridors.resize(grid.bins.size());
-    bin_obstacles.resize(grid.bins.size());
+    report.bins_x      = options.bins_x;
+    report.bins_y      = options.bins_y;
     const size_t count = fp.components.size();
     movable.resize(count);
     installed.resize(count);
@@ -254,29 +244,31 @@ struct Model {
       }
       original.push_back(c.place);
       preferred.push_back(c.place);
-      const auto role = frame_role(tech, c);
-      if (role == Frame_role::ignored) {
-        installed[i] = true;
-        continue;
-      }
-      movable[i] = role == Frame_role::movable;
-      if (role == Frame_role::obstacle) {
-        reserve(obstacle_rect(tech, c, options.macro_halo_x_dbu, options.macro_halo_y_dbu));
-        obstacles.push_back(i);
-        installed[i] = true;
-      }
     }
     // Macro halos and immutable physical infrastructure reduce usable row
     // capacity. Fixed logic cells still consume density, just like critical
     // cells fixed later by this transaction. Taps/spacers need no sizing pad;
     // neighboring movable cells retain their own required padding.
-    for (size_t i = 0; i < rows.size(); ++i) {
-      const auto& r = rows[i];
-      for (const auto& [a, b] : r.free) {
-        grid.each(gap_rect(r, a, b), [&](size_t bin, double area) {
-          grid.bins[bin].capacity += area;
-          bin_rows[bin].push_back(i);
-        });
+    bin_rows.resize(size_t(options.bins_x) * options.bins_y);
+    auto occupancy = row_occupancy(tech,
+                                   fp,
+                                   occupancy_controls(options),
+                                   "terminal legalization",
+                                   /*hard_exclusions=*/false,
+                                   [&](size_t bin, size_t row, double) { bin_rows[bin].push_back(row); });
+    rows           = std::move(occupancy.rows);
+    grid           = std::move(occupancy.grid);
+    for (const auto& r : rows) {
+      max_row_height = std::max<int64_t>(max_row_height, r.height);
+    }
+    bin_corridors.resize(grid.bins.size());
+    bin_obstacles.resize(grid.bins.size());
+    for (size_t i = 0; i < count; ++i) {
+      const auto role = occupancy.roles[i];
+      movable[i]      = role == Frame_role::movable;
+      installed[i]    = !movable[i];
+      if (role == Frame_role::obstacle) {
+        obstacles.push_back(i);
       }
     }
     for (auto& list : bin_rows) {
@@ -294,10 +286,7 @@ struct Model {
       total_area += double(c.place.width) * c.place.height;
       grid.deposit(c.place, false);
       if (!movable[i]) {
-        grid.deposit(c.place, true);
-        reserve(padded_rect(tech, c, options.padding_sites));
-        installed[i] = true;
-        obstacles.push_back(i);
+        obstacles.push_back(i);  // fixed logic: deposited and reserved with its padding above
       }
     }
     if (total_area > options.max_density * total_capacity + epsilon) {
@@ -1761,6 +1750,10 @@ struct Model {
   }
 };
 }  // namespace
+
+Occupancy_controls occupancy_controls(const Terminal_legalize_options& o) {
+  return {o.bins_x, o.bins_y, o.max_density, o.padding_sites, o.macro_halo_x_dbu, o.macro_halo_y_dbu};
+}
 
 void fit_terminal_legalize_grid(const ph::Technology& tech, const ph::Floorplan& fp, Terminal_legalize_options& options) {
   if (fp.rows.empty() || fp.dbu <= 0 || !(options.max_density > 0)) {

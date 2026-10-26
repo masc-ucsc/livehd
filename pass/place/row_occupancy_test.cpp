@@ -131,4 +131,35 @@ TEST(RowOccupancy, FrameRolesAndReservedRectangles) {
   tech.macros["CORE"].site = "missing";
   EXPECT_THROW(padded_rect(tech, fixed, 1), std::invalid_argument);
 }
+
+TEST(RowOccupancy, ObstaclesTakeCapacityWhileFixedLogicAndBlockagesTakeSites) {
+  const auto    tech = technology();
+  ph::Floorplan fp;
+  fp.dbu = 100;
+  fp.die = {0, 0, 1000, 300};
+  for (int y = 0; y < 3; ++y) {
+    fp.rows.push_back({"r" + std::to_string(y), "site", 0, y * 100, 10, 100, ph::Orientation::N});
+  }
+  fp.components            = {component("m", "BLOCK", ph::Status::FIXED),
+                              component("f", "CORE", ph::Status::FIXED),
+                              component("p", "CORE", ph::Status::PLACED)};
+  fp.components[1].place.x = 700;
+  fp.blockages.push_back({false, "", {{0, 0, 200, 100}}});
+  Occupancy_controls controls;
+  controls.bins_x = controls.bins_y = 1;
+  double     seen                   = 0;
+  const auto occupancy              = row_occupancy(tech, fp, controls, "owner", true, [&](size_t bin, size_t row, double area) {
+    EXPECT_EQ(bin, 0U);
+    EXPECT_LT(row, 3U);
+    seen += area;
+  });
+  EXPECT_EQ(occupancy.roles, (std::vector{Frame_role::obstacle, Frame_role::fixed_logic, Frame_role::movable}));
+  EXPECT_DOUBLE_EQ(occupancy.grid.bins[0].capacity, 300000 - 40000);  // the macro only
+  EXPECT_DOUBLE_EQ(seen, occupancy.grid.bins[0].capacity);
+  EXPECT_DOUBLE_EQ(occupancy.grid.bins[0].after, 40000);  // the fixed logic cell
+  EXPECT_EQ(text(occupancy.rows[0].free), "2-10");        // the hard blockage
+  EXPECT_EQ(text(occupancy.rows[1].free), "0-3 5-6");     // macro, then the padded fixed cell
+  EXPECT_EQ(text(occupancy.rows[2].free), "0-3 5-6");
+  EXPECT_EQ(text(row_occupancy(tech, fp, controls, "owner", false).rows[0].free), "0-10");
+}
 }  // namespace livehd::placement

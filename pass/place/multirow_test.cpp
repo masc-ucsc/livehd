@@ -43,9 +43,10 @@ struct Fixture {
     templates["dom"] = templates["wide"] = t0;
     options.access                       = &access;
     options.templates                    = &templates;
-    options.bins_x                       = 1;
-    options.bins_y                       = 1;
-    options.max_density                  = 1;
+    options.occupancy.bins_x             = 1;
+    options.occupancy.bins_y             = 1;
+    options.occupancy.max_density        = 1;
+    options.occupancy.padding_sites      = 0;  // the padding cases set their own
   }
   Fixture(const Fixture&) = delete;  // options point into the fixture
   void macro(const std::string& name, const std::string& klass, double width, double height, bool symmetry_y = false) {
@@ -298,7 +299,7 @@ TEST(Multirow, CutRowsKeepEachSegmentsSiteGrid) {
 TEST(Multirow, MacroHalosAreReservedInEveryRow) {
   for (const int64_t halo : {0, 100}) {
     Fixture f(12, 4);
-    f.options.macro_halo_x_dbu = f.options.macro_halo_y_dbu = halo;
+    f.options.occupancy.macro_halo_x_dbu = f.options.occupancy.macro_halo_y_dbu = halo;
     f.cell(4, 0, "block", Status::FIXED);
     const auto c      = f.cell(4, 0);
     const auto report = anchor_multirow_cells(f.tech, f.fp, f.options);
@@ -311,7 +312,7 @@ TEST(Multirow, MacroHalosAreReservedInEveryRow) {
 TEST(Multirow, PaddingHoldsOnEveryRowTheAnchorSpans) {
   for (const unsigned padding : {0u, 1u}) {
     Fixture f(14, 2);
-    f.options.padding_sites = padding;
+    f.options.occupancy.padding_sites = padding;
     f.cell(6, 1, "cell", Status::FIXED);
     const auto a = f.cell(3, 0), b = f.cell(9, 0);
     const auto report = anchor_multirow_cells(f.tech, f.fp, f.options);
@@ -323,26 +324,26 @@ TEST(Multirow, PaddingHoldsOnEveryRowTheAnchorSpans) {
     expect_legal(f, report);
   }
   Fixture pair(14, 2);
-  pair.options.padding_sites = 1;
+  pair.options.occupancy.padding_sites = 1;
   const auto first = pair.cell(2, 0), second = pair.cell(2, 0);
   expect_legal(pair, anchor_multirow_cells(pair.tech, pair.fp, pair.options));
   EXPECT_EQ(pair.at(first).x, 200);
   EXPECT_EQ(pair.at(second).x, 700);  // each anchor keeps its own padding site
   Fixture edge(12, 2);
-  edge.options.padding_sites = 1;
+  edge.options.occupancy.padding_sites = 1;
   const auto last            = edge.cell(9, 0);
   expect_legal(edge, anchor_multirow_cells(edge.tech, edge.fp, edge.options));
   EXPECT_EQ(edge.at(last).x, 800);  // its padding stays inside the row
   Fixture narrow(4, 2);
-  narrow.options.padding_sites = 1;
+  narrow.options.occupancy.padding_sites = 1;
   narrow.cell(0, 0);
   EXPECT_TRUE(contains(failure(narrow), "plus 1 padding sites per side"));
 }
 
 TEST(Multirow, TheDensityCapMovesTheAnchorAndTerminalLegalizationAcceptsIt) {
   Fixture f(20, 2);
-  f.options.bins_x      = 2;
-  f.options.max_density = .6;
+  f.options.occupancy.bins_x      = 2;
+  f.options.occupancy.max_density = .6;
   for (int y = 0; y < 2; ++y) {
     for (int x = 0; x < 4; ++x) {
       f.cell(x, y, "cell", Status::FIXED);
@@ -356,13 +357,13 @@ TEST(Multirow, TheDensityCapMovesTheAnchorAndTerminalLegalizationAcceptsIt) {
   expect_legal(f, report);
 
   Terminal_legalize_options terminal;
-  terminal.bins_x      = f.options.bins_x;
-  terminal.bins_y      = f.options.bins_y;
-  terminal.max_density = f.options.max_density;
+  terminal.bins_x      = f.options.occupancy.bins_x;
+  terminal.bins_y      = f.options.occupancy.bins_y;
+  terminal.max_density = f.options.occupancy.max_density;
   EXPECT_NO_THROW(terminal_legalize(f.tech, f.fp, timing::Feedback{}, terminal));
 
   Fixture dense(20, 2);
-  dense.options.max_density = .1;
+  dense.options.occupancy.max_density = .1;
   dense.cell(5, 0);
   EXPECT_TRUE(contains(failure(dense), "exceeds the hard bin density cap"));
 }
@@ -447,8 +448,8 @@ TEST(Multirow, AnEmptyWindowFallsBackToTheWholeCore) {
 
 TEST(Multirow, AnchorsSurviveTerminalLegalizationAndReleaseLegally) {
   Fixture f(16, 4);
-  f.options.bins_x = f.options.bins_y = 2;
-  f.options.max_density               = .9;
+  f.options.occupancy.bins_x = f.options.occupancy.bins_y = 2;
+  f.options.occupancy.max_density                         = .9;
   const auto a = f.cell(2, .4), b = f.cell(9, 1.2);
   const int  xs[] = {2, 3, 9, 10, 5, 2}, ys[] = {0, 1, 1, 2, 0, 1};
   for (int i = 0; i < 6; ++i) {
@@ -461,9 +462,9 @@ TEST(Multirow, AnchorsSurviveTerminalLegalizationAndReleaseLegally) {
   EXPECT_EQ(f.at(b).orientation, Orientation::FS);
 
   Terminal_legalize_options terminal;
-  terminal.bins_x      = f.options.bins_x;
-  terminal.bins_y      = f.options.bins_y;
-  terminal.max_density = f.options.max_density;
+  terminal.bins_x      = f.options.occupancy.bins_x;
+  terminal.bins_y      = f.options.occupancy.bins_y;
+  terminal.max_density = f.options.occupancy.max_density;
   ASSERT_NO_THROW(terminal_legalize(f.tech, f.fp, timing::Feedback{}, terminal));
   for (const auto& anchor : report.anchors) {
     EXPECT_EQ(f.fp.components[anchor.component], anchors.components[anchor.component]);
@@ -506,7 +507,7 @@ TEST(Multirow, FramesWithoutMovableMultirowCellsAreUntouched) {
   const auto report = anchor_multirow_cells(f.tech, f.fp, f.options);
   EXPECT_TRUE(report.anchors.empty());
   expect_unchanged(before, f.fp);
-  f.options.bins_x = 0;
+  f.options.occupancy.bins_x = 0;
   EXPECT_THROW(anchor_multirow_cells(f.tech, f.fp, f.options), std::invalid_argument);
 }
 }  // namespace livehd::placement
