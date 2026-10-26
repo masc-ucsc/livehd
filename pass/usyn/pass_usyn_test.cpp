@@ -714,6 +714,92 @@ TEST_F(PassSynth, DominoProfileRequirementsAreExplicitUsageErrors) {
       << (livehd::diag::sink().records().empty() ? "" : livehd::diag::sink().records().back().message);
 }
 
+TEST_F(PassSynth, DominoStageAndExperimentOptionsNeedTheProfileAndReachTheBundle) {
+  hhds::GraphLibrary input;
+  Eprp_var           var;
+  var.graphs.push_back(design(input));
+  var.dict["qor"] = root + "/qor.json";
+  domino_profile(var, root);
+  const std::pair<std::string, std::string> knobs[] = {
+      {       "domino_setup_eval_fo4",  "0.5"},
+      { "domino_precharge_margin_fo4", "0.25"},
+      { "domino_uncertainty_first_ps",    "0"},
+      {"domino_uncertainty_second_ps",    "2"},
+      {        "domino_clock_devices",    "3"},
+      {        "domino_pair_area_pct",   "75"},
+      {      "domino_area_margin_pct",   "25"},
+  };
+  const auto base = var.dict;
+  for (const auto& [key, value] : knobs) {
+    var.dict[key] = value;
+  }
+  run(var);
+  ASSERT_FALSE(livehd::diag::sink().has_halting_errors())
+      << (livehd::diag::sink().records().empty() ? "" : livehd::diag::sink().records().back().message);
+  const auto sidecar = read(root + "/qor.json.domino/domino_models.json");
+  ASSERT_FALSE(sidecar.HasParseError());
+  const auto& coefficients = sidecar["coefficients"];
+  EXPECT_EQ(coefficients["setup_eval_fo4"].GetDouble(), .5);
+  EXPECT_EQ(coefficients["precharge_margin_fo4"].GetDouble(), .25);
+  EXPECT_EQ(coefficients["clock_devices"].GetUint(), 3U);
+  EXPECT_EQ(coefficients["pair_area_pct"].GetUint(), 75U);
+  EXPECT_EQ(coefficients["area_margin_pct"].GetUint(), 25U);
+  EXPECT_TRUE(coefficients["eval_fo4"].IsNull());  // never defaulted
+  const auto& stage = sidecar["stage_model"];
+  EXPECT_EQ(stage["uncertainty_first_ps"].GetDouble(), 0);
+  EXPECT_EQ(stage["uncertainty_second_ps"].GetDouble(), 2);
+  EXPECT_TRUE(stage["setup_eval_ps"].IsNull());  // this Liberty has no FO4 data
+  const auto report = read(root + "/qor.json.usyn.json");
+  EXPECT_EQ(report["physical"]["area_margin_pct"].GetUint(), 25U);
+  EXPECT_EQ(report["physical"]["reference"]["pair_area_pct"].GetUint(), 75U);
+  EXPECT_EQ(report["physical"]["reference"]["clock_devices"].GetUint(), 3U);
+  for (const auto& [key, value] : {
+           std::pair{       "domino_setup_eval_fo4",    "0"},
+           { "domino_precharge_margin_fo4",   "-1"},
+           { "domino_uncertainty_first_ps",   "-1"},
+           {"domino_uncertainty_second_ps",    "x"},
+           {        "domino_clock_devices",   "17"},
+           {        "domino_pair_area_pct",   "24"},
+           {        "domino_pair_area_pct",  "401"},
+           {      "domino_area_margin_pct", "1001"}
+  }) {
+    var.dict      = base;
+    var.dict[key] = value;
+    run(var);
+    EXPECT_TRUE(livehd::diag::sink().has_halting_errors()) << key << "=" << value;
+    ASSERT_FALSE(livehd::diag::sink().records().empty()) << key;
+    EXPECT_EQ(livehd::diag::sink().records().back().code, "invalid-options") << key << "=" << value;
+    livehd::diag::sink().clear();
+  }
+  // Without the profile each one is refused by name, and a listed default is
+  // the implicit default.
+  for (const auto& [key, value] : knobs) {
+    var.dict             = base;
+    var.dict["physical"] = "none";
+    var.dict.erase("domino_clock");
+    var.dict[key] = value;
+    run(var);
+    EXPECT_TRUE(livehd::diag::sink().has_halting_errors()) << key;
+    ASSERT_FALSE(livehd::diag::sink().records().empty()) << key;
+    EXPECT_EQ(livehd::diag::sink().records().back().code, "domino-profile") << key;
+    EXPECT_NE(livehd::diag::sink().records().back().message.find(key), std::string::npos) << key;
+    livehd::diag::sink().clear();
+  }
+  var.dict             = base;
+  var.dict["physical"] = "none";
+  var.dict.erase("domino_clock");
+  for (const auto& [key, value] : {
+           std::pair{  "domino_clock_devices",   "2"},
+           {  "domino_pair_area_pct", "100"},
+           {"domino_area_margin_pct",   "0"}
+  }) {
+    var.dict[key] = value;
+  }
+  run(var);
+  EXPECT_FALSE(livehd::diag::sink().has_halting_errors())
+      << (livehd::diag::sink().records().empty() ? "" : livehd::diag::sink().records().back().message);
+}
+
 TEST_F(PassSynth, FailedRunKeepsPreviousReportProvenance) {
   hhds::GraphLibrary input;
   Eprp_var           var;

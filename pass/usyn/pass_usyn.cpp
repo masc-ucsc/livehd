@@ -62,7 +62,11 @@ struct Options {
   livehd::domplace::Select_options domino;
   std::string                      domino_inverter, domino_register, lef, row_access;
   uint32_t                         domino_aux = 4, domino_variants = 3;
-  std::optional<double>            domino_eval_fo4, domino_precharge_fo4;  // unset: null in the bundle sidecar
+  // Stage and experiment knobs. Unset coefficients stay null in the bundle
+  // sidecar: the stage timing reports that class unmeasured.
+  std::optional<double>            domino_eval_fo4, domino_precharge_fo4, domino_setup_eval_fo4, domino_precharge_margin_fo4;
+  std::optional<double>            domino_uncertainty_first_ps, domino_uncertainty_second_ps;
+  uint32_t                         domino_clock_devices = 2, domino_pair_area_pct = 100;
 };
 
 bool read_options(const Eprp_var& var, Options& options) {
@@ -335,9 +339,21 @@ bool read_options(const Eprp_var& var, Options& options) {
   if (!read("domino_variants", "3", options.domino_variants) || options.domino_variants < 1 || options.domino_variants > 3) {
     return invalid_option("domino_variants", "1..3 drive variants from the register ladder");
   }
+  if (!read("domino_clock_devices", "2", options.domino_clock_devices) || options.domino_clock_devices > 16) {
+    return invalid_option("domino_clock_devices", "0..16 clocked domino devices (precharge, foot) on CLK");
+  }
+  if (!read("domino_pair_area_pct", "100", options.domino_pair_area_pct) || options.domino_pair_area_pct < 25
+      || options.domino_pair_area_pct > 400) {
+    return invalid_option("domino_pair_area_pct", "25..400 percent of the x * A_NOT pull-down term");
+  }
+  if (!read("domino_area_margin_pct", "0", options.domino.area_margin_pct) || options.domino.area_margin_pct > 1000) {
+    return invalid_option("domino_area_margin_pct", "0..1000 percent of the CMOS estimate a domino stage may exceed");
+  }
   for (auto [key, value] : {
-           std::pair{     "domino_eval_fo4",      &options.domino_eval_fo4},
-           std::pair{"domino_precharge_fo4", &options.domino_precharge_fo4}
+           std::pair{            "domino_eval_fo4",             &options.domino_eval_fo4},
+           std::pair{       "domino_precharge_fo4",        &options.domino_precharge_fo4},
+           std::pair{      "domino_setup_eval_fo4",       &options.domino_setup_eval_fo4},
+           std::pair{"domino_precharge_margin_fo4", &options.domino_precharge_margin_fo4}
   }) {
     const auto text = var.get_stage(key, "");
     double     fo4  = 0;
@@ -346,6 +362,19 @@ bool read_options(const Eprp_var& var, Options& options) {
     }
     if (!text.empty()) {
       *value = fo4;
+    }
+  }
+  for (auto [key, value] : {
+           std::pair{ "domino_uncertainty_first_ps",  &options.domino_uncertainty_first_ps},
+           std::pair{"domino_uncertainty_second_ps", &options.domino_uncertainty_second_ps}
+  }) {
+    const auto text = var.get_stage(key, "");
+    double     ps   = 0;
+    if (!text.empty() && (!parse(text, ps) || !std::isfinite(ps) || ps < 0)) {
+      return invalid_option(key, "a non-negative stage uncertainty in ps");
+    }
+    if (!text.empty()) {
+      *value = ps;
     }
   }
   options.row_access       = std::string(var.get_stage("row_access", "default"));
@@ -358,15 +387,22 @@ bool read_options(const Eprp_var& var, Options& options) {
     // it) configures nothing; any other value needs the profile.
     const Options                           defaults;
     const std::pair<std::string_view, bool> moved[] = {
-        {       "domino_select",     options.domino.policy != defaults.domino.policy},
-        {     "domino_identity", options.domino.identity != defaults.domino.identity},
-        {        "domino_clock",                       !options.domino.clock.empty()},
-        {     "domino_inverter",                    !options.domino_inverter.empty()},
-        {     "domino_register",                    !options.domino_register.empty()},
-        {          "domino_aux",           options.domino_aux != defaults.domino_aux},
-        {     "domino_variants", options.domino_variants != defaults.domino_variants},
-        {     "domino_eval_fo4",                 options.domino_eval_fo4.has_value()},
-        {"domino_precharge_fo4",            options.domino_precharge_fo4.has_value()},
+        {               "domino_select",                   options.domino.policy != defaults.domino.policy},
+        {             "domino_identity",               options.domino.identity != defaults.domino.identity},
+        {                "domino_clock",                                     !options.domino.clock.empty()},
+        {             "domino_inverter",                                  !options.domino_inverter.empty()},
+        {             "domino_register",                                  !options.domino_register.empty()},
+        {                  "domino_aux",                         options.domino_aux != defaults.domino_aux},
+        {             "domino_variants",               options.domino_variants != defaults.domino_variants},
+        {             "domino_eval_fo4",                               options.domino_eval_fo4.has_value()},
+        {        "domino_precharge_fo4",                          options.domino_precharge_fo4.has_value()},
+        {       "domino_setup_eval_fo4",                         options.domino_setup_eval_fo4.has_value()},
+        { "domino_precharge_margin_fo4",                   options.domino_precharge_margin_fo4.has_value()},
+        { "domino_uncertainty_first_ps",                   options.domino_uncertainty_first_ps.has_value()},
+        {"domino_uncertainty_second_ps",                  options.domino_uncertainty_second_ps.has_value()},
+        {        "domino_clock_devices",     options.domino_clock_devices != defaults.domino_clock_devices},
+        {        "domino_pair_area_pct",     options.domino_pair_area_pct != defaults.domino_pair_area_pct},
+        {      "domino_area_margin_pct", options.domino.area_margin_pct != defaults.domino.area_margin_pct},
     };
     for (const auto& [key, differs] : moved) {
       if (differs) {
@@ -536,6 +572,33 @@ void Pass_usyn::setup() {
                        "domino_provisional hand-set precharge delay in FO4 of the reference inverter (unset: null in the "
                        "bundle sidecar)",
                        "");
+  m.add_label_optional("domino_setup_eval_fo4",
+                       "domino_provisional hand-set rail setup before evaluate in FO4 of the reference inverter (unset: null; "
+                       "the stage timing reports flop/domino-to-domino capture unmeasured)",
+                       "");
+  m.add_label_optional("domino_precharge_margin_fo4",
+                       "domino_provisional hand-set precharge margin in FO4 of the reference inverter (unset: null; the "
+                       "precharge check is unmeasured)",
+                       "");
+  m.add_label_optional("domino_uncertainty_first_ps",
+                       "domino_provisional clock uncertainty at the T/2 rail capture in ps; replaces the clock uncertainty "
+                       "there (unset: null, unmeasured)",
+                       "");
+  m.add_label_optional("domino_uncertainty_second_ps",
+                       "domino_provisional clock uncertainty of the evaluate-to-storage check in ps (unset: null, unmeasured)",
+                       "");
+  m.add_label_optional("domino_clock_devices",
+                       "domino_provisional clocked devices (precharge, foot) in the labeled CLK load estimate, at half a "
+                       "reference-inverter input each, 0..16",
+                       "2");
+  m.add_label_optional("domino_pair_area_pct",
+                       "domino_provisional experiment knob: percent applied to the x * A_NOT pull-down term of the area model "
+                       "(register and rail inverters unscaled), 25..400",
+                       "100");
+  m.add_label_optional("domino_area_margin_pct",
+                       "domino_provisional select=area experiment knob: convert while A_domino + A_rails < (100 + margin)% of "
+                       "the CMOS+DFF estimate, 0..1000 (0: a tie keeps CMOS)",
+                       "0");
   m.add_label_optional("lef", "INTERNAL technology and cell LEFs from synth.lef; required by physical=domino_provisional", "");
   m.add_label_optional("row_access",
                        "INTERNAL odd/even placement-row access convention from synth.place.row_access: default (the "
@@ -936,7 +999,9 @@ void Pass_usyn::synthesize(Eprp_var& var) {
           .emit();
       return;
     }
-    domino_reference = std::make_shared<const livehd::domplace::Domino_reference>(std::move(*reference));
+    reference->pair_area_pct = options.domino_pair_area_pct;
+    reference->clock_devices = options.domino_clock_devices;
+    domino_reference         = std::make_shared<const livehd::domplace::Domino_reference>(std::move(*reference));
     domino_report    = {domino_reference.get(), &options.domino, cmos->name, cmos->area, physical_work.consumed};
     options.design.physical
         = [reference = domino_reference,
@@ -1146,8 +1211,13 @@ void Pass_usyn::synthesize(Eprp_var& var) {
     }
     inputs.reference     = domino_reference.get();
     inputs.stage.clock   = options.domino.clock;
-    inputs.eval_fo4      = options.domino_eval_fo4;
-    inputs.precharge_fo4 = options.domino_precharge_fo4;
+    inputs.eval_fo4                    = options.domino_eval_fo4;
+    inputs.precharge_fo4               = options.domino_precharge_fo4;
+    inputs.setup_eval_fo4              = options.domino_setup_eval_fo4;
+    inputs.precharge_margin_fo4        = options.domino_precharge_margin_fo4;
+    inputs.stage.uncertainty_first_ps  = options.domino_uncertainty_first_ps;
+    inputs.stage.uncertainty_second_ps = options.domino_uncertainty_second_ps;
+    inputs.area_margin_pct             = options.domino.area_margin_pct;
     bundle_staging.path  = fs::path(base + ".domino.tmp");
     auto bundle          = livehd::domplace::generate_domino_bundle(*design, inputs, bundle_staging.path);
     if (!bundle.ok) {
