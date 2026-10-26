@@ -64,6 +64,9 @@ struct Preroute_record {
   // Scratch/report data only; never persisted as a graph attribute.
   std::optional<Preroute_timing_trial> timing_at_acceptance;
 };
+// Diagnostic record of one bound net before, or instead of, a routing attempt.
+Preroute_record preroute_record(const physical::Floorplan&, const physical::Parasitics&, const Preroute_binding&,
+                                std::string reason);
 struct Preroute_result {
   physical::Floorplan           frame;
   physical::Parasitics          parasitics;

@@ -137,6 +137,14 @@ std::string preroute_span_exclusion(const DreamPlace::native::Design& design, si
   return {};
 }
 
+Preroute_record preroute_record(const physical::Floorplan& frame, const physical::Parasitics& rc, const Preroute_binding& b,
+                                std::string reason) {
+  const auto&     net = frame.nets.at(b.physical_net);
+  Preroute_record record{net.name, std::move(reason)};
+  record.pin_count           = net.connections.size();
+  record.estimated_length_um = rc.nets.at(b.rc_net).wire_length_um;
+  return record;
+}
 static Preroute_result preroute_impl(const physical::Technology& tech, const physical::Floorplan& frame,
                                      const physical::Parasitics& rc, const Preroute_design& snapshot,
                                      const std::vector<Preroute_binding>& bindings, const Route_technology_rc& wire,
@@ -175,14 +183,6 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
     const auto now = std::chrono::steady_clock::now();
     result.timings_ms.emplace(name, std::chrono::duration<double, std::milli>(now - phase_start).count());
     phase_start = now;
-  };
-  // Every binding yields one record, whether or not routing is attempted.
-  const auto record_for = [&](const Preroute_binding& b, std::string reason) {
-    const auto&     net = frame.nets[b.physical_net];
-    Preroute_record record{net.name, std::move(reason)};
-    record.pin_count           = net.connections.size();
-    record.estimated_length_um = rc.nets[b.rc_net].wire_length_um;
-    return record;
   };
   phase("snapshot");
   if (options.deferred_pg && options.power_grid_occupancy) {
@@ -281,7 +281,7 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
     phase("setup_deadline");
     for (const auto& b : bindings) {
       const bool unaligned = options.straight_only && !options.straight_routes.contains(frame.nets[b.physical_net].name);
-      result.records.push_back(record_for(b, unaligned ? "no retained two-pin SAT alignment" : "stage deadline"));
+      result.records.push_back(preroute_record(frame, rc, b, unaligned ? "no retained two-pin SAT alignment" : "stage deadline"));
     }
     publish_grid();
     return result;
@@ -377,7 +377,7 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
   std::vector<Candidate> candidates;
   for (const auto& b : bindings) {
     const auto& net    = frame.nets[b.physical_net];
-    const auto  reject = [&](std::string reason) { result.records.push_back(record_for(b, std::move(reason))); };
+    const auto  reject = [&](std::string reason) { result.records.push_back(preroute_record(frame, rc, b, std::move(reason))); };
     if (options.straight_only && !options.straight_routes.contains(net.name)) {
       reject("no retained two-pin SAT alignment");
       continue;
@@ -468,7 +468,7 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
   // impossible, so do not build the whole-frame escape guard or route siblings.
   if (require_all && candidates.size() != bindings.size()) {
     for (const auto& candidate : candidates) {
-      result.records.push_back(record_for(candidate.binding, "tree rollback: ineligible sibling"));
+      result.records.push_back(preroute_record(frame, rc, candidate.binding, "tree rollback: ineligible sibling"));
     }
     candidates.clear();
   }
@@ -498,7 +498,7 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
     } catch (const Setup_deadline&) {
       phase("setup_deadline");
       for (const auto& candidate : candidates) {
-        result.records.push_back(record_for(candidate.binding, "stage deadline"));
+        result.records.push_back(preroute_record(frame, rc, candidate.binding, "stage deadline"));
       }
       candidates.clear();
     }
@@ -538,7 +538,7 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
     for (const auto& candidate : candidates) {
       const auto& b       = candidate.binding;
       auto&       net     = result.frame.nets[b.physical_net];
-      auto        record  = record_for(b, {});
+      auto        record  = preroute_record(frame, rc, b, {});
       const auto  attempt = [&] {
         if (expired()) {
           record.reason = "stage deadline";

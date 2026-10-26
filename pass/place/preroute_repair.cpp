@@ -292,11 +292,9 @@ Preroute_stage_result preroute_stage(const Result& original, const physical::Tec
   Preroute_stage_result out;
   out.placed            = original;
   const auto expired    = [&] { return std::chrono::steady_clock::now() >= options.timing.deadline; };
-  const auto record_for = [&](const Preroute_binding& b, const std::string& reason) {
-    Preroute_record record{original.floorplan.nets.at(b.physical_net).name, reason};
-    record.pin_count           = original.floorplan.nets.at(b.physical_net).connections.size();
-    record.estimated_length_um = original.parasitics->nets.at(b.rc_net).wire_length_um;
-    return record;
+  // Records always describe the stage input, also after accepted trees.
+  const auto record_for = [&](const Preroute_binding& b, std::string reason) {
+    return preroute_record(original.floorplan, *original.parasitics, b, std::move(reason));
   };
   const auto                         mapping = bind_preroute(original.floorplan, *original.parasitics, *original.preroute_design);
   std::map<size_t, Preroute_binding> matched;
