@@ -133,6 +133,13 @@ off = run('arm3_off', synth(domp, 'domp', slow) + domino + coefficients + ['--wo
 assert off['qor']['place'].get('reused_final_state') and 'stage_timing' not in off['qor']['place'], off['qor']['place']
 assert not (P / 'synth/place/stage_timing.json').exists()
 
+# A fresh run that fails the coverage check still keeps its placement.
+F = root / 'F'
+fresh = run('arm3_fresh_strict', arm3 + ['--set', 'synth.place.stage_timing.require_complete=true', '--workdir', str(F)], False)
+assert 'coverage is partial' in fresh['error']['message'], fresh['error']
+again = run('arm3_fresh_again', arm3 + ['--workdir', str(F)])
+assert again['qor']['place'].get('reused_final_state'), again['qor']['place']
+
 # Without coefficients the domino classes are unmeasured: incomplete, never a
 # zero delay.
 bare = run('arm3_bare', synth(domp, 'domp', slow) + domino + stage_timing + ['--workdir', str(root / 'B')])

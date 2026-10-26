@@ -2298,13 +2298,6 @@ void synth_command(Options& opts, Result& res) {
         res.outputs.push_back(report.string());
       }
     }
-    if (stage_timing && stage_timing_complete) {
-      try {
-        stage::require_complete(*stage_timing);
-      } catch (const std::exception& error) {
-        throw Lhd_error{"unsupported", error.what(), "see " + stage_timing_path};
-      }
-    }
   }
 
   // ---- reports ----------------------------------------------------------------
@@ -2377,6 +2370,15 @@ void synth_command(Options& opts, Result& res) {
       physical_cache->publish(net_dir, root + "/place");
     } catch (const std::exception& error) {
       livehd::diag::warn("synth", "physical-cache-save", "io").msg("cannot retain completed placement: {}", error.what()).emit();
+    }
+  }
+  // Coverage is checked last: the placement and its reports are kept, so a
+  // rerun restores them instead of placing again.
+  if (stage_timing && stage_timing_complete) {
+    try {
+      stage::require_complete(*stage_timing);
+    } catch (const std::exception& error) {
+      throw Lhd_error{"unsupported", error.what(), "see " + stage_timing_path};
     }
   }
 }
