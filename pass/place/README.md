@@ -2527,17 +2527,23 @@ menu before a fragmentation retry. Exhausting the current packing still does not
 prove infeasibility, even when aggregate area fits.
 
 Movable two-row CORE cells (the provisional domino abstracts of
-`pass/domplace`) are packed first by the anchor prepass in `multirow.hpp`:
+`pass/domplace`, recognized by their reserved `__lhd_domino_` names; a library
+multi-row cell keeps the single-row paths) are packed first by the anchor
+prepass in `multirow.hpp`:
 widest first, each takes the nearest site-aligned x interval free in both of
 its rows (one row segment and site grid, never a split footprint), the start
 row's orientation, and a pose the legalization bins can hold. Under
 `Options::row_access` and `multirow_templates` a master starts only where each
-local row lands on a row of its access class. The anchors are FIXED while
-terminal legalization packs the single-row cells around them, then released.
+local row lands on a row of its access class, counting rows from the first
+core row recorded before the handoff taps cut any. Free sites and bin
+capacity come from the occupancy model terminal legalization builds
+(`row_occupancy`). The anchors are FIXED while terminal legalization packs
+the single-row cells around them, then released.
 The prepass is atomic and reports `qor.multirow` (cells, even/odd starts,
 displacement). With movable two-row cells present the macro stage, native
 legalization outside the final stage, the detail-final region mesh and ECO
-re-placement refuse explicitly; there is no DREAMPlace change.
+re-placement refuse explicitly, and a changed design places cold instead of
+re-placing around a cached reference; there is no DREAMPlace change.
 
 `terminal_legalize.json` records settings, bin capacities/areas, stage counts,
 SAT outcomes, retries and displacement. `terminal_legalize_cells.tsv` records
