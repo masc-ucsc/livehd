@@ -64,7 +64,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
     layers.push_back(name);
     widths.push_back(width);
     horizontal.push_back(is_horizontal);
-    half.push_back(std::ceil(std::max(width, area / width) / (2 * grid)) * grid);
+    half.push_back(ph::min_area_half_length(width, area, grid));
   }
   if (layers.size() < 2) {
     return stage.fail("unsupported maze layers");

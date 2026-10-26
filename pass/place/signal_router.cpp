@@ -361,7 +361,7 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
     }
     const double width = *nominal;
     const bool   h     = definition.direction == "HORIZONTAL";
-    double       half  = std::ceil(std::max(width, area / width) / (2 * grid)) * grid;
+    double       half  = ph::min_area_half_length(width, area, grid);
     for (const auto& size : definition.rules.min_size) {
       half = std::max(half, std::ceil(std::max(size[0], size[1]) * frame_.dbu / (2 * grid)) * grid);
     }

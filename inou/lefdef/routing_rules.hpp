@@ -7,6 +7,11 @@ struct Rule_check {
   bool        legal = false;
   std::string reason;
 };
+// Half-length of the shortest grid-centered wire of this width (at least a
+// square) that meets the minimum area, rounded up to the manufacturing grid.
+inline double min_area_half_length(double width, double area, double grid) {
+  return std::ceil(std::max(width, area / width) / (2 * grid)) * grid;
+}
 // Rectangular metal primitives for the signal-routing oracle. Coordinates are
 // integer DEF DBU. These checks do not certify a net: connectivity, vias, track
 // access and the union of touching same-net shapes are separate obligations.

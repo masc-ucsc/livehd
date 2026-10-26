@@ -61,7 +61,7 @@ std::vector<ph::Terminal> handoff_pins(const ph::Technology& tech, const ph::Flo
       throw std::invalid_argument("invalid IO width/area rule");
     }
     l.width  = std::ceil(width / (2 * grid)) * 2 * grid;
-    l.length = std::ceil(std::max(l.width, area / l.width) / (2 * grid)) * 2 * grid;
+    l.length = 2 * ph::min_area_half_length(l.width, area, grid);
     for (const auto& track : fp.tracks) {
       if (track.layer != l.name || track.axis != (i == 0 ? "Y" : "X")) {
         continue;
