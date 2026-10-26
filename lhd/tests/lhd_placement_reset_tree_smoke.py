@@ -154,7 +154,10 @@ warm = run('registered_auto', [])['qor']['place']['prects_controls']
 assert warm == auto, (warm, auto)
 override = run('registered_override', ['--set', 'synth.place.control_ports=trigger'])['qor']['place']['prects_controls']
 assert override['override'] and override['ports'] == ['trigger'] and override['pins'] == [], override
-assert override['ignored_nets'] < auto['ignored_nets'], (override, auto)
+# Overrides replace optional clock/control roots, while recognized reset
+# networks stay excluded. Here trigger replaces clk, retaining the same count.
+assert override['reset_pins'] == auto['reset_pins'], (override, auto)
+assert override['ignored_nets'] == auto['ignored_nets'], (override, auto)
 
 # Independent reset conditionals in a shared clocked block retain the same
 # semantic reset role as separate always blocks (common in generated RTL).

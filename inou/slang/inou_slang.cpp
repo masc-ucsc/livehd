@@ -341,7 +341,7 @@ void Inou_slang::work(Eprp_var& var) {
     } else if (value == "one") {
       opts.unconnected_input = '1';
     } else if (!value.empty() && value != "x") {
-      livehd::diag::err("inou.slang", "bad-unconnected-input", "usage")
+      livehd::diag::err("inou.slang", "bad-unconnected-input", "io")
           .msg("compile.slang.unconnected_input must be zero|one|x, got '{}'", value)
           .fatal();
     }

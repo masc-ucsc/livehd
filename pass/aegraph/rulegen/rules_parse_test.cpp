@@ -29,8 +29,8 @@ tst::Parsed parse_text(const std::string& text) { return tst::parse_all("t/group
 
 // The diagnostics of parsing + linting `text` (errors and warnings, as printed).
 Diags lint_text(const std::string& text) {
-  auto p = parse_text(text);
-  Diags diags = p.diags;
+  auto  p               = parse_text(text);
+  Diags diags           = p.diags;
   // bool01 is implemented in the runtime; the other inline declarations are declared only.
   p.analyses.impl       = {"bool01"};
   p.analyses.impl_known = true;
@@ -193,8 +193,8 @@ TEST(RulegenLint, NamesGuardsAndAnalyses) {
   EXPECT_TRUE(mentions(lint_text("(alt a (Not x) => (Xor x -1) :example (Not $x))\n"
                                  "(alt a (Not y) => (Xor y -1) :example (Not $x))"),
                        "already used"));
-  EXPECT_TRUE(mentions(lint_text("(simplify a (Mult (as x (k c))) :when (frobnicate c) => x :example (Mult $x 1))"),
-                       "unknown builtin"));
+  EXPECT_TRUE(
+      mentions(lint_text("(simplify a (Mult (as x (k c))) :when (frobnicate c) => x :example (Mult $x 1))"), "unknown builtin"));
   EXPECT_TRUE(mentions(lint_text("(simplify a (Mult (as x (k c))) :when (+ c 1) => x :example (Mult $x 1))"), "truth value"));
   EXPECT_TRUE(mentions(lint_text("(simplify a (Mult (as x (k c))) :when (nonneg x) => x :example (Mult $x 1))"),
                        "no runtime implementation"));
@@ -215,6 +215,8 @@ TEST(RulegenEmit, RestOnlyBankDoesNotEmitUnsignedComparisonWithZero) {
   const auto cpp = emit_rules_cpp(p.file, p.analyses);
   EXPECT_EQ(cpp.find(" < 0)"), std::string::npos);
   EXPECT_NE(cpp.find(" < 2)"), std::string::npos);
+  EXPECT_EQ(cpp.find("bank_count(root.ops, 1) < 0"), std::string::npos);
+  EXPECT_NE(cpp.find("bank_count(root.ops, 0) < 2"), std::string::npos);
 }
 
 TEST(RulegenEmit, DeterministicAndLineMapped) {
@@ -223,8 +225,8 @@ TEST(RulegenEmit, DeterministicAndLineMapped) {
 (simplify mult_pow2_shl 30 (Mult (as x (k c))) :when (pow2? c) (> c 1) => (SHL x (k (log2 c))) :example (Mult $x 8))
 (choice mult_unknown (Mult (as x ?q)) => 0 [?q := 0] | x [?q := 1] :example (Mult $x 3))
 )";
-  const auto a = tst::parse_all("pass/aegraph/rules/g.rules", text, kAnalyses);
-  const auto b = tst::parse_all("pass/aegraph/rules/g.rules", text, kAnalyses);
+  const auto  a    = tst::parse_all("pass/aegraph/rules/g.rules", text, kAnalyses);
+  const auto  b    = tst::parse_all("pass/aegraph/rules/g.rules", text, kAnalyses);
   ASSERT_TRUE(a.diags.empty());
   EXPECT_EQ(emit_rules_cpp(a.file, a.analyses), emit_rules_cpp(b.file, b.analyses));
   EXPECT_EQ(emit_fuzz_test(a.file, a.analyses), emit_fuzz_test(b.file, b.analyses));
@@ -261,7 +263,7 @@ TEST(RulegenEmit, ScansHandWrittenRules) {
   EXPECT_TRUE(found[0].native);
   EXPECT_FALSE(found[1].native);
   // a name that a pattern rule also uses is a lint error
-  auto p = parse_text("(alt annihilate (Not x) => (Xor x -1) :example (Not $x))");
+  auto  p = parse_text("(alt annihilate (Not x) => (Xor x -1) :example (Not $x))");
   Diags diags;
   lint({p.file}, p.analyses, found, diags);
   EXPECT_TRUE(mentions(diags, "already used"));

@@ -730,6 +730,53 @@ TEST(AegUnion, EveryHandRuleHasAnExampleThatFiresIt) {
   }
 }
 
+TEST(AegUnion, CheckerSamplesWideUnsignedLeavesInsideTheirDeclaredDomain) {
+  for (int width : {1, 8, 63, 64, 65, 96, 98, 99, 128, 1024}) {
+    SCOPED_TRACE(width);
+    hhds::GraphLibrary lib;
+    auto               io = lib.create_io("unsigned_window_" + std::to_string(width));
+    io->add_input("a", 0);
+    io->set_bits("a", width);
+    io->set_unsign("a", true);
+    io->add_output("y", 1);
+    io->set_bits("y", width);
+    io->set_unsign("y", true);
+    auto g   = io->create_graph();
+    auto cat = gu::create_typed_node(*g, Ntype_op::Concat);
+    g->get_input_pin("a").connect_sink(cat.create_sink_pin(0));
+    konst(g, width).connect_sink(cat.create_sink_pin(1));
+    gu::set_ubits(cat.create_driver_pin(0), width);
+    auto window = gu::create_get_mask(*g, cat.get_driver_pin(0), 0, width);
+    gu::set_ubits(window.create_driver_pin(0), width);
+    window.get_driver_pin(0).connect_sink(g->get_output_pin("y"));
+    Options o;
+    o.check          = Options::Check::full;
+    o.rules_only     = "getmask_lane";
+    // The lane is exactly the declared input. The old checker fed it negative
+    // samples above 63 bits, falsely rejecting this valid identity.
+    const auto stats = optimize(g, {}, o);
+    EXPECT_GT(stats.checks, 0u);
+    EXPECT_EQ(out_driver(g, "y"), g->get_input_pin("a"));
+  }
+}
+
+TEST(AegUnion, CheckerStillRejectsWrongRewritesOnWideUnsignedLeaves) {
+  hhds::GraphLibrary lib;
+  auto               io = lib.create_io("bad_wide_rewrite");
+  io->add_input("a", 0);
+  io->set_bits("a", 128);
+  io->set_unsign("a", true);
+  io->add_output("y", 1);
+  io->set_bits("y", 8);
+  auto g   = io->create_graph();
+  auto rem = posop(g, Ntype_op::Rem, g->get_input_pin("a"), konst(g, 3));
+  rem.connect_sink(g->get_output_pin("y"));
+  Options o;
+  o.check      = Options::Check::full;
+  o.rules_only = "ut_wrong_rem";
+  EXPECT_THROW(optimize(g, {}, o), std::logic_error);
+}
+
 // ---- determinism and the production rules ----------------------------------------
 
 TEST(AegUnion, TheEngineIsDeterministicWithRulesOn) {

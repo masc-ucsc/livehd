@@ -232,6 +232,41 @@ hhds::Pin_class zext_source(const hhds::Pin_class& p) {
   return a;
 }
 
+// Mapped clock logic can spell the held enable as (q == 1), or two
+// comparisons with zero. Peel only identities of an unsigned one-bit value;
+// an inverted enable or a comparison of a wider value must stay intact.
+hhds::Pin_class identity_enable_source(const hhds::Pin_class& p) {
+  auto value    = p;
+  bool inverted = false;
+  for (int depth = 0; depth < 16; ++depth) {
+    if (value.is_invalid() || value.is_const() || gu::is_graph_input_pin(value)) {
+      break;
+    }
+    if (const auto next = zext_source(value); !next.is_invalid()) {
+      value = next;
+      continue;
+    }
+    const auto node = value.get_master_node();
+    if (gu::type_op_of(node) != Ntype_op::EQ) {
+      break;
+    }
+    const auto inputs = gu::inp_sink_drivers(node);
+    if (inputs.size() != 2 || inputs[0].driver.is_const() == inputs[1].driver.is_const()) {
+      break;
+    }
+    const auto  constant = inputs[0].driver.is_const() ? inputs[0].driver : inputs[1].driver;
+    const auto  next     = inputs[0].driver.is_const() ? inputs[1].driver : inputs[0].driver;
+    const auto& literal  = gu::const_of(constant);
+    if (gu::bits_of(next) != 1 || !gu::is_unsign(next) || !literal.is_just_i64()
+        || (literal.to_just_i64() != 0 && literal.to_just_i64() != 1)) {
+      break;
+    }
+    inverted ^= literal.to_just_i64() == 0;
+    value     = next;
+  }
+  return !inverted && value != p ? value : hhds::Pin_class{};
+}
+
 // ---------------------------------------------------------------------------
 // Memory ports under a phase divider.
 //
@@ -821,7 +856,7 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_cloc
           if (gu::type_op_of(dn) != Ntype_op::Latch) {
             auto under = en;
             for (int depth = 0; depth < 4; ++depth) {
-              under = zext_source(under);
+              under = identity_enable_source(under);
               if (under.is_invalid()) {
                 break;
               }
@@ -1711,13 +1746,14 @@ int apply_reader_forwards(hhds::Graph& g, const std::vector<std::pair<hhds::Node
         // the one semantic node attribute.
         livehd::graph_util::carry_attr<livehd::attrs::lut_t>(n, neo);
         clone_of.emplace(n.get_class_index(), neo);
-        for (auto sink : n.inp_sorted_pins()) {
+        // Recursion and wiring the clone mutate the original's graph body.
+        for (auto sink : n.inp_pins_snapshot()) {
           const auto pid = static_cast<int>(sink.get_port_id());
           for (const auto& drv : sink.get_driver_pins()) {
             rebuild(drv).connect_sink(livehd::graph_util::setup_sink_pid(neo, pid));
           }
         }
-        for (auto dp : n.out_sorted_pins()) {
+        for (auto dp : n.out_pins_snapshot()) {
           copy_width_sign(dp, neo.create_driver_pin(dp.get_port_id()));
         }
       }

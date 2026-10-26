@@ -2,6 +2,7 @@
 #include "aegraph.hpp"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cstdint>
 #include <cstdio>
@@ -17,8 +18,8 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
 #include "aegraph_profile.hpp"
-#include "diag.hpp"
 #include "cprop_muxctx.hpp"
+#include "diag.hpp"
 #include "mask_eval.hpp"
 #include "node_util.hpp"
 #include "runtime/analyses.hpp"
@@ -689,22 +690,27 @@ namespace {
 // like a vector whose result carries '?' bits.
 class Checker {
 public:
-  Checker(const Egraph& eg, const std::vector<Class_id>* best) : eg_(eg), best_(best) {}
+  Checker(const Egraph& eg, const std::vector<Class_id>* best, bool memoize = false) : eg_(eg), best_(best), memoize_(memoize) {}
 
   // The cone below `roots`, ascending by class id (operands are always older than
   // their reader, so that is a topological order). false when it holds more than
   // `fuel` classes.
   bool gather(std::span<const Class_id> roots, size_t fuel) {
     cone_.clear();
-    absl::flat_hash_set<Class_id> seen;
+    seen_.resize(eg_.num_classes());
+    if (++epoch_ == 0) {
+      std::ranges::fill(seen_, 0);
+      ++epoch_;
+    }
     std::vector<Class_id>         stack(roots.begin(), roots.end());
     while (!stack.empty()) {
       const auto c = stack.back();
       stack.pop_back();
-      if (!seen.insert(c).second) {
+      if (seen_[c] == epoch_) {
         continue;
       }
-      if (seen.size() > fuel) {
+      seen_[c] = epoch_;
+      if (cone_.size() == fuel) {
         return false;
       }
       cone_.push_back(c);
@@ -722,8 +728,30 @@ public:
   }
 
   void evaluate(uint64_t vec) {
-    vals_.clear();
+    if (memoize_) {
+      I(vec >= 1 && vec <= cached_vals_.size() && best_ == nullptr);
+      if (vec != cached_vec_) {
+        if (cached_vec_ != 0) {
+          vals_.swap(cached_vals_[cached_vec_ - 1]);
+          ready_.swap(cached_ready_[cached_vec_ - 1]);
+        }
+        vals_.swap(cached_vals_[vec - 1]);
+        ready_.swap(cached_ready_[vec - 1]);
+        cached_vec_ = vec;
+      }
+    } else {
+      vals_.clear();
+      ready_.clear();
+    }
+    vals_.resize(eg_.num_classes());
+    ready_.resize(eg_.num_classes());
     for (const auto c : cone_) {
+      // E-node operands and union alt_a never change. Leaf seeds are attached
+      // before a class is exposed to rewrites; aliases are not followed here.
+      // Reuse values only for this fixed-member checker, never across extraction.
+      if (memoize_ && ready_[c]) {
+        continue;
+      }
       const auto& cls = eg_.cls(c);
       switch (cls.kind) {
         case Egraph::Kind::konst  : vals_[c] = *eg_.value_of(c); break;
@@ -740,14 +768,12 @@ public:
           break;
         }
       }
+      ready_[c] = true;
     }
   }
 
   // The value of a gathered class under the last assignment (null: none).
-  [[nodiscard]] const Dlop* value(Class_id c) const {
-    const auto it = vals_.find(c);
-    return it == vals_.end() || !it->second ? nullptr : &*it->second;
-  }
+  [[nodiscard]] const Dlop* value(Class_id c) const { return c >= vals_.size() || !vals_[c] ? nullptr : &*vals_[c]; }
 
   // `op` applied to the (gathered) operand classes.
   [[nodiscard]] std::optional<Dlop> eval_node(Ntype_op op, std::span<const Operand> ops) const {
@@ -816,9 +842,21 @@ private:
       default: v = static_cast<int64_t>((h >> 8) & 1); break;  // a mix of booleans keeps the 0/1 rules honest
     }
     // A leaf with a declared width (a graph input, a register output) only takes values of that width.
+    // A declared unsigned leaf must stay unsigned even above 63 bits. Mapping
+    // into a Wide interval and then narrowing back to int64_t turned its upper
+    // values negative. Widths above the interval analysis's range have their
+    // own seed and need the same normalization.
+    int unsigned_width = 0;
+    if (const auto it = eg.analysis_cache().wide_seeds.find(c); it != eg.analysis_cache().wide_seeds.end()) {
+      unsigned_width = static_cast<int>(it->second);
+    }
     if (const auto it = eg.analysis_cache().seeds.find(c); it != eg.analysis_cache().seeds.end()) {
       const rt::Wide lo = it->second.lo, hi = it->second.hi;
-      if (v < lo || v > hi) {
+      if (lo == 0) {
+        for (auto bound = hi; bound > 0; bound >>= 1) {
+          ++unsigned_width;
+        }
+      } else if (v < lo || v > hi) {
         const rt::Wide span = hi - lo + 1;
         rt::Wide       m    = (static_cast<rt::Wide>(v) - lo) % span;
         if (m < 0) {
@@ -829,6 +867,9 @@ private:
     }
     Dlop d;
     d = Dlop::create_integer(v);
+    if (unsigned_width > 0) {
+      return *d.get_mask_op_opt(0, unsigned_width);
+    }
     return d;
   }
 
@@ -856,7 +897,14 @@ private:
   const Egraph&                                          eg_;
   const std::vector<Class_id>*                           best_;
   std::vector<Class_id>                                  cone_;
-  absl::flat_hash_map<Class_id, std::optional<Dlop>>     vals_;
+  std::vector<std::optional<Dlop>>                       vals_;
+  std::vector<uint8_t>                                   ready_;
+  std::vector<uint32_t>                                  seen_;
+  uint32_t                                               epoch_      = 0;
+  bool                                                   memoize_    = false;
+  uint64_t                                               cached_vec_ = 0;
+  std::array<std::vector<std::optional<Dlop>>, 8>        cached_vals_;
+  std::array<std::vector<uint8_t>, 8>                    cached_ready_;
 };
 
 // ---------------------------------------------------------------------------
@@ -954,6 +1002,7 @@ private:
   Options              opt_;
   std::string          name_;
   Egraph               eg_;
+  std::unique_ptr<Checker> union_checker_;
   Stats        stats_;
 
   std::vector<hhds::Node_class>                      nodes_;
@@ -1621,7 +1670,10 @@ Class_id Engine::rewrite(Class_id cls, uint32_t depth) {
 // 8 random assignments.
 void Engine::check_pair(Class_id a, Class_id b, rt::Rule_id rule) {
   constexpr size_t kConeFuel = 4096;
-  Checker          ck(eg_, nullptr);
+  if (!union_checker_) {
+    union_checker_ = std::make_unique<Checker>(eg_, nullptr, true);
+  }
+  auto&            ck       = *union_checker_;
   const Class_id   roots[2] = {a, b};
   if (!ck.gather(roots, kConeFuel)) {
     ++stats_.check_skipped;

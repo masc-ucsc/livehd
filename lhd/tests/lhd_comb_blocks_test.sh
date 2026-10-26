@@ -12,7 +12,9 @@ w=Path(sys.argv[1])
 ports=', '.join(f'output [7:0] y{i}' for i in range(600))
 s='module chain(input [7:0] a,b, '+ports+');\n'
 for i in range(600):
- previous='a' if i==0 else f'y{i-1}'
+ # Keep enough operations/outputs to force process splitting, with bounded
+ # dependency depth so the exhaustive equivalence leg stays a unit test.
+ previous='a' if i%50==0 else f'y{i-1}'
  s+=f'assign y{i} = ({previous} + b) ^ (a >> {i%8});\n'
 s+='endmodule\n'
 (w/'source.v').write_text(s)

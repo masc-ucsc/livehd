@@ -1444,7 +1444,8 @@ bool break_false_cycle(hhds::Graph* g, const std::vector<hhds::Pin_class>& membe
       const auto& h   = (*cyc)[k];
       const auto  n   = h.sink.get_master_node();
       auto        neo = gu::create_typed_node(*g, gu::type_op_of(n));
-      for (auto sink : n.inp_sorted_pins()) {
+      // Wiring the clone mutates this same graph body.
+      for (auto sink : n.inp_pins_snapshot()) {
         const auto pid = static_cast<int>(sink.get_port_id());
         for (const auto& drv : sink.get_driver_pins()) {
           (sink.get_class_index() == h.sink.get_class_index() ? prev : drv)
@@ -1493,6 +1494,45 @@ void report_cycles(const std::string& name, const std::vector<std::vector<hhds::
   }
 }
 
+// A literal setting every bit of an explicit OR slice makes that slice
+// constant, even when another operand feeds back through it. The explicit
+// range matters: wider feedback still has a dependency on its other bits.
+bool fold_constant_windows(hhds::Graph* graph) {
+  std::vector<hhds::Node_class> windows;
+  for (auto node : graph->body().nodes()) {
+    if (gu::type_op_of(node) == Ntype_op::Get_mask) {
+      windows.push_back(node);
+    }
+  }
+  bool changed = false;
+  for (const auto& node : windows) {
+    const auto range = gu::bit_range(node);
+    const auto input = gu::get_driver_of_sink_name(node, "a");
+    if (!range || range->first < 0 || range->second <= range->first || range->second > 62 || input.is_invalid() || input.is_const()
+        || gu::is_graph_input_pin(input) || gu::type_op_of(input.get_master_node()) != Ntype_op::Or) {
+      continue;
+    }
+    const uint64_t mask = (uint64_t{1} << (range->second - range->first)) - 1;
+    for (const auto& operand : gu::inp_sink_drivers(input.get_master_node())) {
+      const auto value = small_const(operand.driver);
+      if (!value || ((static_cast<uint64_t>(*value) >> range->first) & mask) != mask) {
+        continue;
+      }
+      const auto         output = node.get_driver_pin(0);
+      const gu::Edge_vec consumers(output.out_edges().begin(), output.out_edges().end());
+      const auto         constant = gu::create_const(*graph, *Dlop::create_integer(static_cast<int64_t>(mask)));
+      for (const auto& edge : consumers) {
+        edge.sink.del_sink(output);
+        constant.connect_sink(edge.sink);
+      }
+      node.del_node();
+      changed = true;
+      break;
+    }
+  }
+  return changed;
+}
+
 }  // namespace
 
 Acyclic_result make_acyclic(const std::vector<std::shared_ptr<hhds::Graph>>& graphs, Split_state& state, bool defer_inlined_loops,
@@ -1522,8 +1562,8 @@ Acyclic_result make_acyclic(const std::vector<std::shared_ptr<hhds::Graph>>& gra
     const auto            name = std::string{g->get_name()};
     auto&                 done = result.inlined[g];
     std::set<std::string> through_module;
+    bool                  changed = fold_constant_windows(g);
     auto                  found   = scan(g, ctx);
-    bool                  changed = false;
     for (int round = 0; round < 64; ++round) {
       std::vector<hhds::Node_class>         subs = found.state_free;
       absl::flat_hash_set<hhds::Node_class> seen(subs.begin(), subs.end());
