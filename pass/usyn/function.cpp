@@ -447,6 +447,9 @@ Gate_candidate synthesize_gate(const Truth_table& table, const Gate_constraints&
       for (uint32_t dual = 0; dual < 2; ++dual) {
         auto candidate            = f.formula;
         candidate.output_inverted = (polarity != 0) != (dual != 0);
+        if (limits.output == Output_polarity::positive && candidate.output_inverted) {
+          continue;
+        }
         if (dual) {
           for (auto& n : candidate.nodes) {
             if (n.kind == Kind::series) {

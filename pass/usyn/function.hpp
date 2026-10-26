@@ -54,13 +54,20 @@ struct Gate_constraints {
   uint32_t branches       = 10;
 };
 
+// Which cell output may carry the function. `positive` admits only formulas
+// whose network computes the function itself (output_inverted == false), as a
+// single-output physical macro has no free complementary port. Logical endpoint
+// search always uses `any` (valid_endpoint_options rejects `positive`).
+enum class Output_polarity : uint8_t { any, positive };
+
 // Resource admission, deliberately separate from technology legality. There
 // is no maximum-transistor constraint. The caller supplies work/time/process
 // admission through Budget, and bounds live covers/formulas here.
 struct Function_search_limits {
-  uint32_t max_cubes         = 4096;
-  uint32_t max_formula_nodes = 16384;
-  uint32_t factoring_choices = 8;
+  uint32_t        max_cubes         = 4096;
+  uint32_t        max_formula_nodes = 16384;
+  uint32_t        factoring_choices = 8;
+  Output_polarity output            = Output_polarity::any;
 };
 
 struct Gate_candidate {
@@ -74,6 +81,7 @@ struct Gate_candidate {
 // Exact minimal-true-point cover when unate. Signed covers and SP factoring
 // are bounded heuristics; inability to find a formula is not an infeasibility
 // certificate. Every returned formula is checked on logical assignments.
+// limits.output filters the realizations; it adds no second factorer.
 Gate_candidate synthesize_gate(const Truth_table& table, const Gate_constraints& constraints, Budget& work,
                                const Function_search_limits& limits = {});
 

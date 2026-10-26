@@ -18,7 +18,7 @@ bool valid_endpoint_options(const Endpoint_options& o) {
   return (o.clock_phases == 1 || o.clock_phases == 2) && o.boundaries > 0 && o.boundaries <= 4096 && o.window.inputs > 0
          && o.window.inputs <= max_logical_inputs && o.window.nodes > 0 && o.gates.logical_inputs > 0
          && o.gates.logical_inputs <= max_logical_inputs && o.gates.stack > 0 && o.gates.branches > 0 && o.functions.max_cubes > 0
-         && o.functions.max_formula_nodes > 0 && o.functions.factoring_choices > 0
+         && o.functions.max_formula_nodes > 0 && o.functions.factoring_choices > 0 && o.functions.output == Output_polarity::any
          && o.functions.factoring_choices <= 2 * max_logical_inputs + 1 && o.cost.static_and > 0 && o.cost.static_xor > 0
          && o.cost.static_not > 0 && o.cost.domino > 0 && o.cost.domino_latch > 0 && o.cost_nodes > 0 && o.candidate_work > 0
          && o.boundary_bytes > 0 && o.tier_work > 0 && o.divisor_partitions <= 4096 && o.care_phases <= max_completion_phases

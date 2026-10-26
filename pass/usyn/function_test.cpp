@@ -7,6 +7,7 @@
 #include <functional>
 #include <stdexcept>
 
+#include "endpoint.hpp"
 #include "gtest/gtest.h"
 
 namespace livehd::usyn {
@@ -467,5 +468,70 @@ TEST(Function, SignedCompletionAlternativesExposeInputsHiddenByZeroAndOneFills) 
   EXPECT_EQ(bounded.status, Status::feasible);
   EXPECT_EQ(bounded.phases, 1U);
   EXPECT_TRUE(bounded.search_exhausted);
+}
+
+TEST(Function, PositivePolarityNeverReturnsOutputInverted) {
+  Function_search_limits positive;
+  positive.output = Output_polarity::positive;
+  // A two-device stack makes the !Q realization the only legal one for some
+  // functions (AND3), so the filter is not vacuous on this family.
+  for (const auto stack : {4U, 2U}) {
+    const Gate_constraints constraints{8, stack, 10};
+    uint32_t               inverted = 0, refused = 0;
+    for (uint32_t bits = 0; bits < 256; ++bits) {
+      const auto t = truth(3, [bits](auto x) { return (bits >> x) & 1; });
+      Budget     work{200000};
+      const auto logical = synthesize_gate(t, constraints, work);
+      const auto gate    = synthesize_gate(t, constraints, work, positive);
+      if (!logical.formula) {
+        EXPECT_FALSE(gate.formula) << bits;  // the filter never widens the legal set
+        continue;
+      }
+      inverted += logical.formula->output_inverted;
+      if (!gate.formula) {
+        ++refused;
+        continue;
+      }
+      EXPECT_FALSE(gate.formula->output_inverted) << bits;
+      EXPECT_EQ(gate.formula->metrics(), gate.cost);
+      EXPECT_GE(gate.cost.transistors, logical.cost.transistors);
+      for (uint32_t x = 0; x < 8; ++x) {
+        ASSERT_EQ(eval(*gate.formula, x), ((bits >> x) & 1) != 0) << bits << ':' << x;
+      }
+    }
+    if (constraints.stack == 4) {
+      EXPECT_EQ(refused, 0U);
+    } else {
+      EXPECT_GT(inverted, 0U);
+      EXPECT_GT(refused, 0U);
+    }
+  }
+  // The logical endpoint search never asks for a physical output polarity.
+  Endpoint_options options;
+  EXPECT_TRUE(valid_endpoint_options(options));
+  options.functions.output = Output_polarity::positive;
+  EXPECT_FALSE(valid_endpoint_options(options));
+}
+
+TEST(Function, PositivePolarityAnd5ExceedsStack) {
+  // AND5 is logically legal through the parallel !Q realization, but a
+  // positive-output network needs a series stack of five devices.
+  const auto and5 = truth(5, [](auto x) { return x == 31; });
+  Budget     work{1000000};
+  const auto logical = synthesize_gate(and5, {}, work);
+  ASSERT_TRUE(logical.formula) << logical.reason;
+  EXPECT_TRUE(logical.formula->output_inverted);
+  EXPECT_EQ(logical.cost.stack, 1U);
+  Function_search_limits positive;
+  positive.output     = Output_polarity::positive;
+  const auto physical = synthesize_gate(and5, {}, work, positive);
+  EXPECT_FALSE(physical.formula);
+  EXPECT_FALSE(work.exhausted);
+  EXPECT_EQ(physical.reason, "no legal formula found");
+  const auto deep = synthesize_gate(and5, {8, 5, 10}, work, positive);
+  ASSERT_TRUE(deep.formula) << deep.reason;
+  EXPECT_FALSE(deep.formula->output_inverted);
+  EXPECT_EQ(deep.cost.stack, 5U);
+  EXPECT_EQ(deep.cost.transistors, 5U);
 }
 }  // namespace livehd::usyn
