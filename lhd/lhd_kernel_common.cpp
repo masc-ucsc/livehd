@@ -1704,9 +1704,20 @@ void apply_log_settings(const Options& opts) {
   }
 }
 
-// Fold the `lhd.*` kernel namespace (shared, cross-pass settings) into Options.
-// `lhd.seed` is the one RNG seed shared by every pass that wants determinism;
 void canonicalize_synth_sets(Options& opts) {
+  const auto on = [](std::string_view v) { return !v.empty() && v != "false" && v != "0" && v != "off"; };
+  // grid.density_mode replaces two booleans that could be combined. Merge them
+  // only when they name one mode and no explicit grid.density_mode competes;
+  // otherwise placement_options reads them (and rejects a mix with the mode).
+  std::optional<bool> dynamic, automatic;
+  bool                explicit_mode = false;
+  for (const auto& [key, value] : opts.sets) {
+    dynamic       = key == "synth.place.dynamic_bins" ? std::optional<bool>{on(value)} : dynamic;
+    automatic     = key == "synth.place.auto_bins" ? std::optional<bool>{on(value)} : automatic;
+    explicit_mode = explicit_mode || key == "synth.place.grid.density_mode";
+  }
+  const bool merge_mode = !explicit_mode && !(dynamic.value_or(false) && automatic.value_or(false));
+  bool       mode_set   = false;
   for (auto& [key, value] : opts.sets) {
     if (!key.starts_with("synth.")) {
       continue;
@@ -1716,22 +1727,33 @@ void canonicalize_synth_sets(Options& opts) {
       if (r.old_name != flag) {
         continue;
       }
-      const bool on = !value.empty() && value != "false" && value != "0" && value != "off";
-      livehd::diag::warn("lhd", "deprecated-option", "io")
-          .msg("synth.{} is deprecated", r.old_name)
-          .hint(std::format("use --set synth.{}={}", r.new_name, r.true_value.empty() ? value : on ? r.true_value : r.false_value))
-          .emit();
-      if (r.rewrite) {
-        if (!r.true_value.empty()) {
-          value = std::string{on ? r.true_value : r.false_value};
+      const auto target = std::string{r.true_value.empty() ? std::string_view{value} : on(value) ? r.true_value : r.false_value};
+      opts.deprecated_sets.emplace_back(std::format("synth.{} is deprecated", r.old_name),
+                                        std::format("use --set synth.{}={}", r.new_name, target));
+      if (r.new_name == "place.grid.density_mode") {
+        if (merge_mode) {
+          value = dynamic.value_or(false) ? "dynamic" : automatic.value_or(false) ? "macro" : "fixed";
+          key   = mode_set ? std::string{} : std::format("synth.{}", r.new_name);  // one entry for both booleans
+          mode_set = true;
         }
-        key = std::format("synth.{}", r.new_name);
+      } else {
+        value = target;
+        key   = std::format("synth.{}", r.new_name);
       }
       break;
     }
   }
+  std::erase_if(opts.sets, [](const auto& set) { return set.first.empty(); });
 }
 
+void emit_deprecated_sets(const Options& opts) {
+  for (const auto& [msg, hint] : opts.deprecated_sets) {
+    livehd::diag::warn("lhd", "deprecated-option", "io").msg("{}", msg).hint(hint).emit();
+  }
+}
+
+// Fold the `lhd.*` kernel namespace (shared, cross-pass settings) into Options.
+// `lhd.seed` is the one RNG seed shared by every pass that wants determinism;
 // `lhd.top` is an alias for the `--top` flag (the dedicated flag wins when both
 // are given). Validated by check_known_set_passes; the keys stay in opts.sets
 // (so they still hash into run_id) and merge_sets never copies them into a

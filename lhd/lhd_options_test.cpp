@@ -586,8 +586,24 @@ TEST(LhdOptions, DeprecatedPartitionSpellingsCanonicalize) {
   EXPECT_EQ(value("synth.place.region.max_cells"), std::vector<std::string>{"7"});
   EXPECT_EQ(value("synth.place.satlegalize.bin.grid"), std::vector<std::string>{"route"});
   EXPECT_TRUE(value("synth.place.bins").empty());
-  // Combinable booleans are read by the placement driver, not rewritten.
+  // Both density booleans true is a combination grid.density_mode cannot
+  // spell: they stay for the placement driver to read.
   EXPECT_EQ(value("synth.place.dynamic_bins"), std::vector<std::string>{"true"});
   EXPECT_EQ(value("synth.place.auto_bins"), std::vector<std::string>{"true"});
+  EXPECT_EQ(opts.deprecated_sets.size(), std::size(lhd::kSynthSetRenames));
   EXPECT_NO_THROW(lhd::check_known_set_passes(opts));
+  // One density boolean merges into the mode, so both spellings share a cache key.
+  for (const auto& [sets, mode] : std::vector<std::pair<std::vector<std::pair<std::string, std::string>>, std::string>>{
+           {                                 {{"synth.place.dynamic_bins", "true"}}, "dynamic"},
+           {{{"synth.place.auto_bins", "true"}, {"synth.place.dynamic_bins", "false"}},   "macro"},
+           {                                {{"synth.place.dynamic_bins", "false"}},   "fixed"},
+  }) {
+    opts.sets = sets;
+    lhd::canonicalize_synth_sets(opts);
+    EXPECT_EQ(opts.sets, (std::vector<std::pair<std::string, std::string>>{{"synth.place.grid.density_mode", mode}}));
+  }
+  // An explicit mode competes: the booleans stay so the driver rejects the mix.
+  opts.sets = {{"synth.place.grid.density_mode", "fixed"}, {"synth.place.dynamic_bins", "true"}};
+  lhd::canonicalize_synth_sets(opts);
+  EXPECT_EQ(value("synth.place.dynamic_bins"), std::vector<std::string>{"true"});
 }

@@ -248,4 +248,24 @@ assert 'cell_halo' not in inherited['qor']['place'] and 'macro_halo' not in inhe
 for value in ['-1', '1,-2', 'nan', '28', '1,28']:
     run('bad_cell_halo_' + value.replace(',', '_'), ['--set', 'synth.place=true',
         '--set', 'synth.place.cell_halo=' + value], False)
+# 3g-partitions: the new partition options reject bad values and conflicts.
+for name, settings in [('bad_density_mode', ['synth.place.grid.density_mode=auto']),
+                       ('bad_density_conflict', ['synth.place.grid.density_mode=fixed', 'synth.place.dynamic_bins=true']),
+                       ('bad_grid_route', ['synth.place.grid.route=1']),
+                       ('bad_legalize_bin_grid', ['synth.place.legalize.bin.grid=0']),
+                       ('bad_sat_bin_grid', ['synth.place.satlegalize.bin.grid=size'])]:
+    run(name, ['--set', 'synth.place=true'] + [v for s in settings for v in ('--set', s)], False)
+# Old and new spellings are one option: the same placement, and the second
+# spelling reuses the first one's placement. The old spelling warns.
+diagnostics = root / 'deprecated.jsonl'
+old_names = run('old_names', ['--set', 'synth.place=true', '--set', 'synth.place.legalize.max_density=0.85',
+                              '--set', 'synth.place.busorder.max_cells=64', '--set', 'synth.place.dynamic_bins=false',
+                              '--emit', f'diagnostics:{diagnostics}'])
+assert old_names['diagnostics_count']['warnings'] >= 3, old_names['diagnostics_count']
+warned = [json.loads(line) for line in diagnostics.read_text().splitlines() if line.strip()]
+assert sum(d.get('code') == 'deprecated-option' for d in warned) == 3, warned
+new_names = run('new_names', ['--set', 'synth.place=true', '--set', 'synth.place.legalize.bin.max_density=0.85',
+                              '--set', 'synth.place.region.max_cells=64', '--set', 'synth.place.grid.density_mode=fixed'])
+assert new_names['qor']['place']['incremental']['hit'], new_names['qor']['place']['incremental']
+assert old_names['qor']['place']['hpwl_um'] == new_names['qor']['place']['hpwl_um'], (old_names, new_names)
 print('placement: legal DEF, bus connectivity, RC timing, warm/cold reuse, GP/default controls passed')

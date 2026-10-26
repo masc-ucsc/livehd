@@ -172,6 +172,9 @@ struct Options {
   bool        workdir_scratch = false;
 
   std::vector<std::string> raw_args;  // after `--` (elaborate verilog: raw slang args)
+  // (message, hint) of each deprecated synth.* spelling canonicalize_synth_sets
+  // rewrote; emitted after the command's setup_diag. Not an input: never hashed.
+  std::vector<std::pair<std::string, std::string>> deprecated_sets;
 
   bool quiet   = false;
   bool verbose = false;
@@ -1084,8 +1087,8 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.grid.route",
      "inherit",
      Synth_set_option::Kind::file,
-     "routing grid per axis for RUDY/RSMT/URoute, macro channel pressure, terminal and SAT route-grid bins: inherit = "
-     "grid.density (also in dynamic mode), or 2..1024"},
+     "routing grid per axis for RUDY/RSMT/URoute, macro channel pressure, native legalization/detailed placement, terminal "
+     "and SAT route-grid bins: inherit follows the density grid (the configured grid.density in dynamic mode), or 2..1024"},
     {"place.bins", "64", Synth_set_option::Kind::integer, "DEPRECATED: use synth.place.grid.density"},
     {"place.dynamic_bins", "false", Synth_set_option::Kind::boolean, "DEPRECATED: use synth.place.grid.density_mode=dynamic"},
     {"place.bin_max", "512", Synth_set_option::Kind::integer, "DEPRECATED: use synth.place.grid.density_max"},
@@ -1161,7 +1164,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.region.max_cells",
      "10000",
      Synth_set_option::Kind::integer,
-     "movable-cell cap per detail-final region rectangle (shared by busorder, boundarypins, pinalign)"},
+     "movable-cell cap per detail-final region rectangle (shared by region.busorder, region.boundarypins, region.pinalign)"},
     {"place.region.merge_um",
      "5",
      Synth_set_option::Kind::file,
@@ -1298,7 +1301,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.satlegalize.route_guidance",
      "true",
      Synth_set_option::Kind::boolean,
-     "prioritize congested regions and lower-congestion spill destinations with route_grid"},
+     "prioritize congested bins and lower-congestion spill destinations with bin.grid=route"},
     {"place.satlegalize.route_peak_floor",
      "0",
      Synth_set_option::Kind::file,
@@ -1311,7 +1314,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.satlegalize.spill_neighbors",
      "false",
      Synth_set_option::Kind::boolean,
-     "allow noncritical cells to move into less-dense adjacent fixed regions"},
+     "allow noncritical cells to move into less-dense adjacent fixed SAT bins (bin.size_um or bin.grid=route)"},
     {"place.satlegalize.spill_slack_margin_ps",
      "0",
      Synth_set_option::Kind::file,
@@ -1817,19 +1820,19 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
 // canonicalize_synth_sets warns and rewrites it to the new name before
 // anything reads it, so every consumer and cache key sees one spelling. A
 // boolean that became an enum value maps through true_value/false_value.
-// `rewrite=false` only warns: dynamic_bins and auto_bins combine, so
-// placement_options reads them when grid.density_mode is not given.
+// dynamic_bins and auto_bins both map to grid.density_mode; they merge into
+// one mode unless both are true or grid.density_mode is also given, and then
+// placement_options reads them (rejecting a mix with the mode).
 struct Synth_set_rename {
   std::string_view old_name, new_name;
   std::string_view true_value = {}, false_value = {};
-  bool             rewrite    = true;
 };
 inline constexpr Synth_set_rename kSynthSetRenames[] = {
     {                                "place.bins",                         "place.grid.density"},
     {                             "place.bin_max",                     "place.grid.density_max"},
     {                  "place.local_density_bins",                           "place.grid.local"},
-    {                        "place.dynamic_bins",                   "place.grid.density_mode", "dynamic", "fixed", false},
-    {                           "place.auto_bins",                   "place.grid.density_mode",   "macro", "fixed", false},
+    {                        "place.dynamic_bins",                   "place.grid.density_mode", "dynamic", "fixed"},
+    {                           "place.auto_bins",                   "place.grid.density_mode",   "macro", "fixed"},
     {                  "place.busorder.max_cells",                     "place.region.max_cells"},
     {                   "place.busorder.merge_um",                      "place.region.merge_um"},
     {                            "place.busorder",                      "place.region.busorder"},

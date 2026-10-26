@@ -1238,6 +1238,7 @@ void synth_command(Options& opts, Result& res) {
     return;
   }
   livehd::diag::sink().set_step("synth");
+  emit_deprecated_sets(opts);  // after compile_command, whose setup_diag clears the sink
 
   Eprp_var var;
   load_lg_into_var(lg_dir, var);

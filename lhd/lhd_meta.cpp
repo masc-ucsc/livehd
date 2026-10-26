@@ -150,6 +150,22 @@ int list_options(const Options& opts) {
 // Returns -1 when `name` is not in the option vocabulary (caller falls
 // through to the unknown-name error).
 int describe_option(const Options& opts, const std::string& name) {
+  // A deprecated synth.* spelling is not listed; describe its canonical name.
+  if (name.starts_with("synth.")) {
+    for (const auto& r : kSynthSetRenames) {
+      if (r.old_name != std::string_view{name}.substr(6)) {
+        continue;
+      }
+      const auto target = std::format("synth.{}", r.new_name);
+      if (r.true_value.empty()) {
+        std::print(stderr, "lhd describe: '{}' is a deprecated alias of '{}'\n", name, target);
+      } else {
+        std::print(stderr, "lhd describe: '{}' is deprecated: true is {}={}, false is {}={}\n", name, target, r.true_value,
+                   target, r.false_value);
+      }
+      return describe_option(opts, target);
+    }
+  }
   const auto all = list_set_options();
   for (const auto& o : all) {
     if (o.name != name) {

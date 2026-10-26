@@ -189,6 +189,48 @@ int main(int argc, char** argv) {
     if (config.HasParseError() || !config.IsObject()) {
       throw std::invalid_argument("invalid repair config");
     }
+    // Partition keys follow the lhd grid/region/bin names (synth.place.grid.density
+    // is grid_density). Pre-3g keys stay accepted; giving both spellings is an error.
+    const std::pair<const char*, const char*> renamed_keys[] = {
+        {                            "bins",                         "grid_density"},
+        {                         "bin_max",                     "grid_density_max"},
+        {              "local_density_bins",                            "grid_local"},
+        {                        "busorder",                      "region_busorder"},
+        {                 "busorder_weight",               "region_busorder_weight"},
+        {             "busorder_iterations",           "region_busorder_iterations"},
+        {                "busorder_refresh",              "region_busorder_refresh"},
+        {    "busorder_max_displacement_um",  "region_busorder_max_displacement_um"},
+        {              "busorder_max_cells",                     "region_max_cells"},
+        {               "busorder_merge_um",                      "region_merge_um"},
+        {                    "boundarypins",                  "region_boundarypins"},
+        {              "boundarypins_split",            "region_boundarypins_split"},
+        {              "boundarypins_order",            "region_boundarypins_order"},
+        {         "boundarypins_iterations",       "region_boundarypins_iterations"},
+        {"boundarypins_max_displacement_um", "region_boundarypins_max_displacement_um"},
+        {                        "pinalign",                      "region_pinalign"},
+        {            "legalize_max_density",             "legalize_bin_max_density"},
+        {         "satlegalize_bin_size_um",              "satlegalize_bin_size_um"},
+    };
+    auto& allocator = config.GetAllocator();
+    for (const auto& [old_key, new_key] : renamed_keys) {
+      if (!config.HasMember(old_key)) {
+        continue;
+      }
+      if (config.HasMember(new_key)) {
+        throw std::invalid_argument(std::format("{} conflicts with its deprecated spelling {}", new_key, old_key));
+      }
+      rapidjson::Value value(config[old_key], allocator);
+      config.RemoveMember(old_key);
+      config.AddMember(rapidjson::Value(new_key, allocator), value, allocator);
+    }
+    if (config.HasMember("satlegalize_route_grid")) {
+      if (!config["satlegalize_route_grid"].IsBool() || config.HasMember("satlegalize_bin_grid")) {
+        throw std::invalid_argument("deprecated satlegalize_route_grid requires a boolean and no satlegalize_bin_grid");
+      }
+      rapidjson::Value grid(config["satlegalize_route_grid"].GetBool() ? "route" : "none", allocator);
+      config.RemoveMember("satlegalize_route_grid");
+      config.AddMember("satlegalize_bin_grid", grid, allocator);
+    }
     const auto text = [&](const char* key) -> std::string {
       if (!config.HasMember(key) || !config[key].IsString()) {
         throw std::invalid_argument(std::string("missing string: ") + key);
@@ -271,16 +313,27 @@ int main(int argc, char** argv) {
     }
     number_option("density", options.density);
     number_option("rc_pessimism", options.rc_pessimism);
-    integer_option("bins", options.bins);
+    integer_option("grid_density", options.bins);
     integer_option("threads", options.threads);
     integer_option("final_iterations", options.final_iterations);
-    boolean_option("dynamic_bins", options.dynamic_bins);
+    boolean_option("dynamic_bins", options.dynamic_bins);  // deprecated: grid_density_mode
     boolean_option("preserve_imported_ties", options.preserve_imported_ties);
-    integer_option("bin_max", options.bin_max);
-    boolean_option("auto_bins", options.automatic_bins);
+    integer_option("grid_density_max", options.bin_max);
+    boolean_option("auto_bins", options.automatic_bins);  // deprecated: grid_density_mode
+    if (config.HasMember("grid_density_mode")) {
+      const auto mode = text("grid_density_mode");
+      if ((mode != "fixed" && mode != "dynamic" && mode != "macro") || config.HasMember("dynamic_bins")
+          || config.HasMember("auto_bins")) {
+        throw std::invalid_argument("grid_density_mode requires fixed, dynamic or macro, without dynamic_bins/auto_bins");
+      }
+      options.dynamic_bins   = mode == "dynamic";
+      options.automatic_bins = mode == "macro";
+    }
+    integer_option("grid_route", options.route_bins);
+    integer_option("legalize_bin_grid", options.legalize_bins);
     number_option("local_density_weight", options.local_density_weight);
     number_option("local_density_target", options.local_density_target);
-    integer_option("local_density_bins", options.local_density_bins);
+    integer_option("grid_local", options.local_density_bins);
     boolean_option("gp_ab", options.gp_search.enabled);
     integer_option("gp_ab_start", options.gp_search.start);
     integer_option("gp_ab_interval", options.gp_search.interval);
@@ -344,20 +397,19 @@ int main(int argc, char** argv) {
     if (config.HasMember("terminal_legalize")) {
       throw std::invalid_argument("terminal_legalize was removed; final legalization is mandatory and resize is independent");
     }
-    boolean_option("boundarypins", options.boundarypins.enabled);
-    boolean_option("boundarypins_split", options.boundarypins.split);
-    boolean_option("boundarypins_order", options.boundarypins.order);
-    boolean_option("pinalign", options.boundarypins.align);
-    number_option("boundarypins_max_displacement_um", options.boundarypins.max_displacement_um);
-    boolean_option("busorder", options.busorder.enabled);
-    number_option("busorder_weight", options.busorder.weight);
+    boolean_option("region_boundarypins", options.boundarypins.enabled);
+    boolean_option("region_boundarypins_split", options.boundarypins.split);
+    boolean_option("region_boundarypins_order", options.boundarypins.order);
+    boolean_option("region_pinalign", options.boundarypins.align);
+    number_option("region_boundarypins_max_displacement_um", options.boundarypins.max_displacement_um);
+    boolean_option("region_busorder", options.busorder.enabled);
+    number_option("region_busorder_weight", options.busorder.weight);
     number_option("region_merge_um", options.region.merge_um);
-    number_option("busorder_merge_um", options.region.merge_um);  // deprecated spelling
-    number_option("busorder_max_displacement_um", options.busorder.max_displacement_um);
+    number_option("region_busorder_max_displacement_um", options.busorder.max_displacement_um);
     auto& terminal_options = options.terminal_legalize_options;
     boolean_option("legalize_joint_minimize_total", terminal_options.joint_minimize_total);
     number_option("legalize_remainder_wire_weight", terminal_options.remainder_wire_weight);
-    number_option("legalize_max_density", terminal_options.max_density);
+    number_option("legalize_bin_max_density", terminal_options.max_density);
     number_option("legalize_critical_fraction", terminal_options.critical_fraction);
     number_option("legalize_local_pair_fraction", terminal_options.local_pair_fraction);
     if (config.HasMember("satlegalize_backend")) {
@@ -376,7 +428,7 @@ int main(int argc, char** argv) {
       value = config[key].GetUint();
     };
     auto& sat_options = options.satlegalize_options;
-    sat_limit("boundarypins_iterations", options.boundarypins.iterations);
+    sat_limit("region_boundarypins_iterations", options.boundarypins.iterations);
     sat_limit("cell_jump", options.cell_jump.depth);
     sat_limit("cell_jump_settle", options.cell_jump.settle);
     sat_limit("cell_jump_interval", options.cell_jump.interval);
@@ -390,10 +442,9 @@ int main(int argc, char** argv) {
       throw std::invalid_argument(
           "experimental cell_jump propagation requires final cell_place and a distance-one restart_seed_def");
     }
-    sat_limit("busorder_iterations", options.busorder.iterations);
-    sat_limit("busorder_refresh", options.busorder.refresh);
+    sat_limit("region_busorder_iterations", options.busorder.iterations);
+    sat_limit("region_busorder_refresh", options.busorder.refresh);
     sat_limit("region_max_cells", options.region.max_cells);
-    sat_limit("busorder_max_cells", options.region.max_cells);  // deprecated spelling
     sat_limit("legalize_padding_sites", terminal_options.padding_sites);
     sat_limit("legalize_padding_max_extra_rows", terminal_options.padding_max_extra_rows);
     sat_limit("legalize_critical_padding_sites", terminal_options.critical_padding_sites);
@@ -405,7 +456,13 @@ int main(int argc, char** argv) {
     sat_limit("legalize_pair_move_rows", terminal_options.pair_move_rows);
     sat_limit("legalize_critical_pair_limit", terminal_options.critical_pair_limit);
     sat_limit("legalize_local_pair_limit", terminal_options.local_pair_limit);
-    boolean_option("satlegalize_route_grid", sat_options.route_grid);
+    if (config.HasMember("satlegalize_bin_grid")) {
+      const auto grid = text("satlegalize_bin_grid");
+      if (grid != "none" && grid != "route") {
+        throw std::invalid_argument("satlegalize_bin_grid requires none or route");
+      }
+      sat_options.route_grid = grid == "route";
+    }
     boolean_option("satlegalize_route_guidance", sat_options.route_guidance);
     if (config.HasMember("satlegalize_route_peak_floor")) {
       if (!config["satlegalize_route_peak_floor"].IsNumber()) {
@@ -428,26 +485,26 @@ int main(int argc, char** argv) {
       }
       sat_options.spill_neighbors = config["satlegalize_spill_neighbors"].GetBool();
     }
-    if (config.HasMember("satlegalize_region_size")) {
-      const auto& region = config["satlegalize_region_size"];
+    if (config.HasMember("satlegalize_bin_size_um")) {
+      const auto& region = config["satlegalize_bin_size_um"];
       if (region.IsNumber()) {
         sat_options.region_width_um = sat_options.region_height_um = region.GetDouble();
       } else if (region.IsArray() && region.Size() == 2 && region[0].IsNumber() && region[1].IsNumber()) {
         sat_options.region_width_um  = region[0].GetDouble();
         sat_options.region_height_um = region[1].GetDouble();
       } else {
-        throw std::invalid_argument("satlegalize_region_size requires positive microns: number or [width,height]");
+        throw std::invalid_argument("satlegalize_bin_size_um requires positive microns: number or [width,height]");
       }
       if (!std::isfinite(sat_options.region_width_um) || !std::isfinite(sat_options.region_height_um)
           || sat_options.region_width_um <= 0 || sat_options.region_height_um <= 0) {
-        throw std::invalid_argument("satlegalize_region_size requires finite positive microns");
+        throw std::invalid_argument("satlegalize_bin_size_um requires finite positive microns");
       }
     }
-    if (sat_options.route_grid && config.HasMember("satlegalize_region_size")) {
-      throw std::invalid_argument("satlegalize_route_grid cannot be combined with satlegalize_region_size");
+    if (sat_options.route_grid && config.HasMember("satlegalize_bin_size_um")) {
+      throw std::invalid_argument("satlegalize_bin_grid=route cannot be combined with satlegalize_bin_size_um");
     }
-    if (sat_options.spill_neighbors && !config.HasMember("satlegalize_region_size") && !sat_options.route_grid) {
-      throw std::invalid_argument("satlegalize_spill_neighbors requires satlegalize_region_size or satlegalize_route_grid");
+    if (sat_options.spill_neighbors && !config.HasMember("satlegalize_bin_size_um") && !sat_options.route_grid) {
+      throw std::invalid_argument("satlegalize_spill_neighbors requires satlegalize_bin_size_um or satlegalize_bin_grid=route");
     }
     number_option("satlegalize_spill_slack_margin_ps", sat_options.spill_slack_margin_ps);
     sat_limit("satlegalize_conflicts", sat_options.conflicts);

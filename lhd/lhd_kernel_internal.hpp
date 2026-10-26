@@ -415,8 +415,11 @@ bool              mapper_maps_cells(const Options& opts, std::string_view method
 void              merge_color_sets(const Options& opts, Eprp_var::Eprp_dict& labels);
 void              check_known_set_passes(const Options& opts);
 // Rewrite deprecated synth.* spellings (kSynthSetRenames) to their canonical
-// names, with one `deprecated-option` warning each. Runs after validation.
+// names right after validation, and queue one `deprecated-option` warning
+// each in opts.deprecated_sets. synth emits them with emit_deprecated_sets
+// once its last sink-clearing setup_diag (the compile front end) is done.
 void              canonicalize_synth_sets(Options& opts);
+void              emit_deprecated_sets(const Options& opts);
 // The `synth.*` command namespace, readable from any command: `synth.liberty`
 // is THE one Liberty spelling (`lhd synth`, `lhd pass abc`, `lhd pass
 // opentimer` all resolve through resolve_liberty), so no two Liberty readers
