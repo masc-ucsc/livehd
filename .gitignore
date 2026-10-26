@@ -100,6 +100,13 @@ generated/master_port/
 /temp/
 /formal/lean/LeanSemanticPrimitives/Gen/
 
+# The D3 scaling benches' timing tables. d3_bench.sh and d3_bench2.sh default
+# OUT into pass/lean/, and these were tracked until the measurements left the
+# repository; the scripts still write them there, so unignored they would dirty
+# the tree for the same reason as the three rules above.
+/pass/lean/d3_scaling.tsv
+/pass/lean/d3_scaling2.tsv
+
 # Lean build OUTPUT for the projection probes. `.build-proj.sh` writes the
 # oleans into .olean-dev and `run_cert.sh` reads them back through LEAN_PATH;
 # `build-native.sh` writes .native-dev and calls itself a diagnostic that
