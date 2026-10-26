@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 #include "design_synth.hpp"
 #include "domino_reference.hpp"
@@ -17,6 +18,10 @@ struct Physical_report_inputs {
   double                  cmos_register_area = 0;
   uint64_t                model_work         = 0;      // Liberty cost-model read charged to the profile
   bool                    emitted            = false;  // false: a dry run, the netlist is still CMOS
+  // The published model bundle (directory name beside the report), if any.
+  std::string              bundle;
+  uint64_t                 bundle_macros = 0;
+  std::vector<std::string> bundle_diagnostics;
 };
 
 // The `physical` object of pass.usyn's report for the domino_provisional

@@ -110,14 +110,26 @@ owns. Unset coefficients are `null` with a diagnostic.
 | `domino_cell` | exact master identity, `__lhd_domino_*` declarations (Q is a loop break) and behavioral lg/Verilog models |
 | `physical_select` | the per-state choice: recheck, cofactor/merge inputs, positive-output resynthesis, rail ledger, area comparison, bounded and deterministic |
 | `physical_report` | the `physical` block of pass.usyn's report |
+| `domino_geometry` | two-row `CLASS CORE` abstracts on the reference inverter's site (`SIZE w BY 2H`, `SYMMETRY X Y`, PG at 0/H/2H), the exact site quantization, row-aware pin access checks, and the route policy (Tech_profile, else the LEF routing stack) |
+| `domino_bundle` | the `<qor>.domino/` bundle and the placement-side sidecar reader |
+
+The bundle holds `domino_cells.lef` (macros only: no UNITS or SITE, read after
+the technology and cell LEFs), `domino_models.json` (the sidecar),
+`domino_models.v` and `models/` (an lg library for `lhd lec --lib lg:`), and
+`row_access.json` (the convention it was generated for). Every master is
+written in every register-ladder variant; sizing is disabled, so the netlist
+instantiates variant 0. An abstract that fails the pin-access check refuses
+the bundle and pass.usyn publishes nothing; a technology rule the access
+engine cannot check (sky130's mcon enclosure) is reported as unverified, never
+as passed.
 
 `pass.usyn.physical=domino_provisional` runs `physical_select` on every region
 after freeze, a logical cache hit included, through
 `usyn::Design_options::physical` (`usyn/physical_emission.hpp` is the data
 seam). It is currently a dry run: `<qor>.usyn.json` gains `physical_profile`
 and a `physical` block (settings, reference cells, totals by reason, one row
-per state with its master, `n_pdn`, `x` and area terms, and rails), while the
-published netlist stays CMOS. Emission (D), the LEF and model bundle (C) and
+per state with its master, `n_pdn`, `x` and area terms, and rails) and names
+the published bundle, while the netlist stays CMOS. Emission (D), the LEF and model bundle (C) and
 two-row placement (F) build on it.
 
 ## Matched commands

@@ -37,10 +37,12 @@ genrule(
     visibility = ["//visibility:public"],
 )
 
-# The stage schedule and the stable reason codes: data only, no dependencies.
+# The stage schedule, the stable reason codes and the JSON writers the report
+# and the bundle sidecar share.
 cc_library(
     name = "contract",
     hdrs = [
+        "json_writer.hpp",
         "reason.hpp",
         "stage_model.hpp",
         ":domplace_salt",
@@ -48,6 +50,7 @@ cc_library(
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
+    deps = ["@rapidjson"],
 )
 
 # The named reference inverter and register family of the area model.
@@ -209,5 +212,39 @@ cc_test(
     deps = [
         ":domino_geometry",
         "@googletest//:gtest_main",
+    ],
+)
+
+# The <qor>.domino/ bundle: LEF abstracts, sidecar, lg and Verilog models.
+cc_library(
+    name = "domino_bundle",
+    srcs = ["domino_bundle.cpp"],
+    hdrs = ["domino_bundle.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":contract",
+        ":domino_cell",
+        ":domino_geometry",
+        ":domino_reference",
+        "//graph",
+        "//inou/lefdef:inou_lefdef",
+        "//pass/usyn:usyn_semantic",
+        "@rapidjson",
+    ],
+)
+
+cc_test(
+    name = "domino_bundle_test",
+    size = "small",
+    srcs = ["domino_bundle_test.cpp"],
+    copts = COPTS,
+    data = ["//inou/lefdef:test_data"],
+    deps = [
+        ":domino_bundle",
+        "//graph",
+        "@googletest//:gtest_main",
+        "@rapidjson",
     ],
 )

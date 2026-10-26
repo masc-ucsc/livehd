@@ -3,6 +3,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iterator>
 
@@ -363,7 +364,48 @@ void domino_profile(Eprp_var& var, const std::string& root) {
     cell(DFF) {area:4; ff(IQ, IQN) {clocked_on:"CLK"; next_state:"D";}
       pin(CLK) {direction:input; clock:true;} pin(D) {direction:input;} pin(Q) {direction:output; function:"IQ";} }
   })LIB";
-  std::ofstream(root + "/cells.lef") << "VERSION 5.8 ;\nEND LIBRARY\n";
+  // A one-file technology and cell LEF for the provisional abstracts: one
+  // site, vertical M1 pins, a horizontal M2 escape, vertical M3, and the
+  // Liberty cells with matching footprints and edge PG rails.
+  std::string lef = R"LEF(VERSION 5.8 ;
+BUSBITCHARS "[]" ;
+DIVIDERCHAR "/" ;
+UNITS DATABASE MICRONS 1000 ; END UNITS
+MANUFACTURINGGRID 0.005 ;
+SITE core CLASS CORE ; SYMMETRY Y ; SIZE 0.2 BY 1 ; END core
+LAYER M1 TYPE ROUTING ; DIRECTION VERTICAL ; PITCH 0.2 ; OFFSET 0.1 ; WIDTH 0.06 ; SPACING 0.06 ; END M1
+LAYER V1 TYPE CUT ; WIDTH 0.06 ; SPACING 0.06 ; END V1
+LAYER M2 TYPE ROUTING ; DIRECTION HORIZONTAL ; PITCH 0.2 ; OFFSET 0.1 ; WIDTH 0.06 ; SPACING 0.06 ; END M2
+LAYER V2 TYPE CUT ; WIDTH 0.06 ; SPACING 0.06 ; END V2
+LAYER M3 TYPE ROUTING ; DIRECTION VERTICAL ; PITCH 0.2 ; OFFSET 0.1 ; WIDTH 0.06 ; SPACING 0.06 ; END M3
+VIA VIA12 DEFAULT
+  LAYER V1 ; RECT -0.03 -0.03 0.03 0.03 ;
+  LAYER M1 ; RECT -0.03 -0.05 0.03 0.05 ;
+  LAYER M2 ; RECT -0.05 -0.03 0.05 0.03 ;
+END VIA12
+)LEF";
+  for (const auto& [cell, width, pins] : {
+           std::tuple{ "INV", "0.2", std::vector<std::string>{"A", "Y"}},
+           {"NAND", "0.8",                    {"A", "B", "Y"}},
+           { "DFF",   "4",                  {"CLK", "D", "Q"}}
+  }) {
+    lef += std::format("MACRO {0}\n  CLASS CORE ;\n  ORIGIN 0 0 ;\n  SIZE {1} BY 1 ;\n  SYMMETRY X Y ;\n  SITE core ;\n",
+                       cell,
+                       width);
+    for (size_t i = 0; i < pins.size(); ++i) {
+      lef += std::format("  PIN {0} DIRECTION {1} ; USE SIGNAL ; PORT LAYER M1 ; RECT {2:.2f} 0.2 {3:.2f} 0.8 ; END END {0}\n",
+                         pins[i],
+                         i + 1 == pins.size() ? "OUTPUT" : "INPUT",
+                         0.07 + 0.2 * double(i % 2),
+                         0.13 + 0.2 * double(i % 2));
+    }
+    lef += std::format(
+        "  PIN VDD DIRECTION INOUT ; USE POWER ; PORT LAYER M1 ; RECT 0 0.97 {1} 1.03 ; END END VDD\n"
+        "  PIN VSS DIRECTION INOUT ; USE GROUND ; PORT LAYER M1 ; RECT 0 -0.03 {1} 0.03 ; END END VSS\nEND {0}\n",
+        cell,
+        width);
+  }
+  std::ofstream(root + "/cells.lef") << lef << "END LIBRARY\n";
   var.dict["tmap"]         = "none";
   var.dict["library"]      = library;
   var.dict["lef"]          = root + "/cells.lef";
@@ -404,6 +446,19 @@ TEST_F(PassSynth, DominoProfileDryRunReportsDecisionsAndKeepsTheCmosNetlist) {
     EXPECT_EQ(report["cache"]["reused"].GetUint64(), std::string_view{select} == "all" ? 0U : 1U);
     const auto& physical = report["physical"];
     EXPECT_STREQ(physical["emission"].GetString(), "dry-run");
+    // The model bundle is published beside the report: every master in every
+    // register variant (DFF is the only rung here).
+    ASSERT_TRUE(physical["bundle"].IsObject());
+    EXPECT_STREQ(physical["bundle"]["directory"].GetString(), "qor.json.domino");
+    EXPECT_EQ(physical["bundle"]["macros"].GetUint64(), 1U);
+    for (const auto file : {"domino_cells.lef", "domino_models.json", "domino_models.v", "row_access.json"}) {
+      EXPECT_TRUE(fs::exists(fs::path(root) / "qor.json.domino" / file)) << file;
+    }
+    EXPECT_FALSE(fs::exists(root + "/qor.json.domino.tmp"));
+    const auto sidecar = read(root + "/qor.json.domino/domino_models.json");
+    ASSERT_FALSE(sidecar.HasParseError());
+    EXPECT_TRUE(sidecar["masters"][0]["variants"][0]["access_check"]["ok"].GetBool());
+    EXPECT_STREQ(sidecar["instances"][0]["state"].GetString(), "state");
     EXPECT_STREQ(physical["select"].GetString(), select);
     EXPECT_STREQ(physical["clock"].GetString(), "clk");
     EXPECT_STREQ(physical["reference"]["inverter"]["name"].GetString(), "INV");
@@ -441,6 +496,13 @@ TEST_F(PassSynth, DominoProfileDryRunReportsDecisionsAndKeepsTheCmosNetlist) {
     EXPECT_EQ(flops, 1U);
     EXPECT_EQ(subs, 0U);
   }
+  // A run without the profile drops the previous run's bundle.
+  for (const auto key : {"physical", "domino_select", "domino_clock", "clock_phases", "lef"}) {
+    var.dict.erase(key);
+  }
+  run(var);
+  ASSERT_FALSE(livehd::diag::sink().has_halting_errors());
+  EXPECT_FALSE(fs::exists(root + "/qor.json.domino"));
 }
 
 TEST_F(PassSynth, DominoProfileRequirementsAreExplicitUsageErrors) {

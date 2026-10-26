@@ -15,6 +15,7 @@
 
 #include "artifact.hpp"
 #include "design_synth.hpp"
+#include "domino_bundle.hpp"
 #include "domino_reference.hpp"
 #include "fold_engine.hpp"
 #include "graph_library_singleton.hpp"
@@ -58,12 +59,20 @@ struct Options {
   // target stays cmos; `none` changes nothing.
   std::string                      physical    = "none";
   livehd::domplace::Select_options domino;
-  std::string                      domino_inverter, domino_register, lef;
+  std::string                      domino_inverter, domino_register, lef, row_access;
   uint32_t                         domino_aux = 4, domino_variants = 3;
+  std::optional<double>            domino_eval_fo4, domino_precharge_fo4;  // unset: null in the bundle sidecar
 };
 
-constexpr std::string_view domino_options[]
-    = {"domino_select", "domino_identity", "domino_clock", "domino_inverter", "domino_register", "domino_aux", "domino_variants"};
+constexpr std::string_view domino_options[] = {"domino_select",
+                                               "domino_identity",
+                                               "domino_clock",
+                                               "domino_inverter",
+                                               "domino_register",
+                                               "domino_aux",
+                                               "domino_variants",
+                                               "domino_eval_fo4",
+                                               "domino_precharge_fo4"};
 
 bool read_options(const Eprp_var& var, Options& options) {
   for (const auto key : obsolete) {
@@ -334,6 +343,20 @@ bool read_options(const Eprp_var& var, Options& options) {
   if (!read("domino_variants", "3", options.domino_variants) || options.domino_variants < 1 || options.domino_variants > 3) {
     return invalid_option("domino_variants", "1..3 drive variants from the register ladder");
   }
+  for (auto [key, value] : {
+           std::pair{     "domino_eval_fo4",      &options.domino_eval_fo4},
+           std::pair{"domino_precharge_fo4", &options.domino_precharge_fo4}
+  }) {
+    const auto text = var.get_stage(key, "");
+    double     fo4  = 0;
+    if (!text.empty() && (!parse(text, fo4) || !std::isfinite(fo4) || fo4 <= 0)) {
+      return invalid_option(key, "a positive multiple of the reference inverter's FO4 delay");
+    }
+    if (!text.empty()) {
+      *value = fo4;
+    }
+  }
+  options.row_access       = std::string(var.get_stage("row_access", "default"));
   const auto profile_error = [&](std::string_view message, std::string_view hint) {
     livehd::diag::err("pass.usyn", "domino-profile", "syntax").msg("{}", message).hint(hint).emit();
     return false;
@@ -373,6 +396,32 @@ bool read_options(const Eprp_var& var, Options& options) {
                          "name the one constrained clock port; only its registers may convert");
   }
   return true;
+}
+
+// Lowercase hex of a finished SHA-256.
+std::string hex_digest(llvm::SHA256& hash) {
+  std::string    digest;
+  constexpr char hex[] = "0123456789abcdef";
+  for (const auto byte : hash.final()) {
+    digest += hex[byte >> 4];
+    digest += hex[byte & 15];
+  }
+  return digest;
+}
+
+// SHA-256 of a file's bytes; nullopt when it cannot be read.
+std::optional<std::string> file_digest(const std::string& path) {
+  std::ifstream           file(path, std::ios::binary);
+  llvm::SHA256            hash;
+  std::array<char, 65536> bytes;
+  while (file) {
+    file.read(bytes.data(), bytes.size());
+    hash.update(llvm::StringRef(bytes.data(), file.gcount()));
+  }
+  if (!file.eof()) {
+    return std::nullopt;
+  }
+  return hex_digest(hash);
 }
 
 void write_file(const std::filesystem::path& path, const std::string& contents) {
@@ -455,7 +504,19 @@ void Pass_usyn::setup() {
                        "domino_provisional domino-only devices outside the register (precharge, keeper, foot), 0..64",
                        "4");
   m.add_label_optional("domino_variants", "domino_provisional drive variants from the register ladder, 1..3", "3");
+  m.add_label_optional("domino_eval_fo4",
+                       "domino_provisional hand-set evaluate delay in FO4 of the reference inverter (unset: null in the "
+                       "bundle sidecar)",
+                       "");
+  m.add_label_optional("domino_precharge_fo4",
+                       "domino_provisional hand-set precharge delay in FO4 of the reference inverter (unset: null in the "
+                       "bundle sidecar)",
+                       "");
   m.add_label_optional("lef", "INTERNAL technology and cell LEFs from synth.lef; required by physical=domino_provisional", "");
+  m.add_label_optional("row_access",
+                       "INTERNAL odd/even placement-row access convention from synth.place.row_access: default (the "
+                       "stand-in) or a JSON path",
+                       "default");
   m.add_label_optional("unroll_carry",
                        "true|false: expand carry-dependent compact loops per ordinal before synthesis (default true, as "
                        "pass.abc). False maps one generic body and stitches the carry afterwards: the body keeps its "
@@ -779,12 +840,7 @@ void Pass_usyn::synthesize(Eprp_var& var) {
       livehd::diag::err("pass.usyn", "native-cost-library", "io").msg("cannot read Liberty contents").emit();
       return std::nullopt;
     }
-    std::string    identity;
-    constexpr char hex[] = "0123456789abcdef";
-    for (const auto byte : hash.final()) {
-      identity += hex[byte >> 4];
-      identity += hex[byte & 15];
-    }
+    auto identity   = hex_digest(hash);
     auto model_work = budget.slice(100000000, 1, 4096);
     auto model      = usyn::read_native_cost_text_model(library_contents, model_work);
     budget.absorb(model_work);
@@ -856,22 +912,12 @@ void Pass_usyn::synthesize(Eprp_var& var) {
   }
   options.design.tune_context = options.tmap + "/delay-" + std::to_string(options.mapping.delay_ps);
   if (!options.mapping.library.empty()) {
-    std::ifstream           library(options.mapping.library, std::ios::binary);
-    llvm::SHA256            hash;
-    std::array<char, 65536> bytes;
-    while (library) {
-      library.read(bytes.data(), bytes.size());
-      hash.update(llvm::StringRef(bytes.data(), library.gcount()));
-    }
-    if (!library.eof()) {
+    const auto digest = file_digest(options.mapping.library);
+    if (!digest) {
       livehd::diag::err("pass.usyn", "tune-library", "io").msg("cannot hash synthesis Liberty").emit();
       return;
     }
-    constexpr char hex[] = "0123456789abcdef";
-    for (const auto byte : hash.final()) {
-      options.design.tune_context += hex[byte >> 4];
-      options.design.tune_context += hex[byte & 15];
-    }
+    options.design.tune_context += *digest;
   }
   // A bounded alternative has a fixed share, independent of the first trial's
   // cache hits or search consumption. Reserve publication work in the parent.
@@ -1018,6 +1064,63 @@ void Pass_usyn::synthesize(Eprp_var& var) {
     }
   }
   options.design.tune_store->save();
+  // The provisional model bundle: written to a staging directory now and
+  // published with the report, so a refused bundle publishes nothing.
+  const auto bundle_path = fs::path(base + ".domino");
+  Scratch    bundle_staging;
+  if (domino_reference) {
+    const auto refuse_bundle = [](std::string_view reason) {
+      livehd::diag::err("pass.usyn", "domino-bundle", "unsupported").msg("domino_provisional bundle: {}", reason).emit();
+    };
+    auto design = livehd::domplace::collect_domino_design(*selected.design, work);
+    if (!design) {
+      refuse_bundle("work budget");
+      return;
+    }
+    livehd::domplace::Bundle_inputs inputs;
+    std::vector<std::string>        lefs;
+    for (std::string_view rest = options.lef; !rest.empty();) {
+      const auto comma = rest.find(',');
+      lefs.emplace_back(rest.substr(0, comma));
+      rest = comma == std::string_view::npos ? std::string_view{} : rest.substr(comma + 1);
+    }
+    for (const auto& lef : lefs) {
+      const auto digest = file_digest(lef);
+      if (lef.empty() || !digest) {
+        refuse_bundle("cannot read LEF '" + lef + "'");
+        return;
+      }
+      inputs.provenance.emplace_back("lef", lef + " sha256:" + *digest);
+    }
+    inputs.provenance.emplace_back("liberty",
+                                   options.mapping.library + " sha256:" + file_digest(options.mapping.library).value_or("?"));
+    inputs.provenance.emplace_back("row_access", options.row_access);
+    livehd::physical::Technology tech;
+    try {
+      tech             = livehd::physical::read_lef(lefs);
+      const auto route = livehd::domplace::domino_route_policy(tech, &inputs.technology);
+      inputs.geometry  = livehd::domplace::geometry_inputs(tech,
+                                                          domino_reference->inverter.name,
+                                                          route,
+                                                          livehd::physical::resolve_row_access(options.row_access));
+    } catch (const std::exception& error) {
+      refuse_bundle(error.what());
+      return;
+    }
+    inputs.reference     = domino_reference.get();
+    inputs.stage.clock   = options.domino.clock;
+    inputs.eval_fo4      = options.domino_eval_fo4;
+    inputs.precharge_fo4 = options.domino_precharge_fo4;
+    bundle_staging.path  = fs::path(base + ".domino.tmp");
+    auto bundle          = livehd::domplace::generate_domino_bundle(*design, inputs, bundle_staging.path);
+    if (!bundle.ok) {
+      refuse_bundle(bundle.reason);
+      return;
+    }
+    domino_report.bundle             = bundle_path.filename().string();
+    domino_report.bundle_macros      = bundle.macros;
+    domino_report.bundle_diagnostics = std::move(bundle.diagnostics);
+  }
   const auto artifact_path = fs::path(base + ".usyn.artifacts");
   fs::create_directories(artifact_path);
   std::vector<std::string> artifact_paths;
@@ -1040,12 +1143,7 @@ void Pass_usyn::synthesize(Eprp_var& var) {
     }
     llvm::SHA256 hash;
     hash.update(llvm::StringRef(artifact.bytes));
-    std::string    digest;
-    constexpr char hex[] = "0123456789abcdef";
-    for (const auto byte : hash.final()) {
-      digest += hex[byte >> 4];
-      digest += hex[byte & 15];
-    }
+    const auto    digest    = hex_digest(hash);
     const auto    path      = artifact_path / (digest + ".usyn");
     const auto    temporary = fs::path(path.string() + ".tmp");
     std::ofstream file(temporary, std::ios::binary | std::ios::trunc);
@@ -1099,6 +1197,17 @@ void Pass_usyn::synthesize(Eprp_var& var) {
     }
     fs::remove_all(previous, ec);
     provenance_staging.path.clear();
+    // The bundle belongs to this report; a run without the profile drops a
+    // previous run's bundle.
+    fs::remove_all(bundle_path, ec);
+    if (!bundle_staging.path.empty()) {
+      ec.clear();
+      fs::rename(bundle_staging.path, bundle_path, ec);
+      if (ec) {
+        livehd::diag::err("pass.usyn", "domino-bundle", "io").msg("cannot publish {}", bundle_path.string()).fatal();
+      }
+      bundle_staging.path.clear();
+    }
   }
   write_file(base + ".usyn.json", report);
   write_file(base, mapped ? usyn::mapping_report(*mapped, options.tmap, options.mapping) : report);
@@ -1148,8 +1257,12 @@ void Pass_usyn::synthesize(Eprp_var& var) {
         converted += state.decision == usyn::Physical_decision::domino;
       }
     }
-    std::print("[pass.usyn] domino_provisional dry run: {} of {} eligible state(s) would convert; the netlist stays CMOS\n",
-               converted,
-               eligible);
+    std::print(
+        "[pass.usyn] domino_provisional dry run: {} of {} eligible state(s) would convert; the netlist stays CMOS; bundle {} ({} "
+        "macros)\n",
+        converted,
+        eligible,
+        bundle_path.string(),
+        domino_report.bundle_macros);
   }
 }

@@ -48,6 +48,10 @@ std::shared_ptr<hhds::GraphIO> declare_domino_cell(hhds::GraphLibrary& library, 
 // converts no initialized state). No-op when the model already exists.
 void emit_domino_model(hhds::GraphLibrary& models, const Domino_master& master, const usyn::Physical_cell_interface& cell);
 
+// The next-state function as a Verilog expression over the rail pins, in the
+// formula's series (&) / parallel (|) structure.
+std::string domino_expression(const Domino_master& master, const usyn::Physical_cell_interface& cell);
+
 // The same model as a Verilog module, for external simulators.
 std::string domino_verilog_model(const Domino_master& master, const usyn::Physical_cell_interface& cell);
 

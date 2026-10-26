@@ -6,29 +6,15 @@
 #include <set>
 #include <stdexcept>
 
-#include "rapidjson/stringbuffer.h"
-#include "rapidjson/writer.h"
+#include "json_writer.hpp"
 #include "stage_model.hpp"
 
 namespace livehd::domplace {
 namespace {
-using Writer = rapidjson::Writer<rapidjson::StringBuffer>;
-void text(Writer& w, const char* key, std::string_view value) {
-  w.Key(key);
-  w.String(value.data(), static_cast<rapidjson::SizeType>(value.size()));
-}
-void number(Writer& w, const char* key, uint64_t value) {
-  w.Key(key);
-  w.Uint64(value);
-}
-void real(Writer& w, const char* key, std::optional<double> value) {
-  w.Key(key);
-  if (value) {
-    w.Double(*value);
-  } else {
-    w.Null();  // missing data is reported as such, never as zero
-  }
-}
+using json::number;
+using json::real;
+using json::text;
+using json::Writer;
 }  // namespace
 
 std::string physical_report(const usyn::Logical_design& design, const Physical_report_inputs& inputs) {
@@ -45,8 +31,7 @@ std::string physical_report(const usyn::Logical_design& design, const Physical_r
   text(w, "estimate", "liberty-area-proxy; not characterized PPA");
   number(w, "stage_model_version", kStageModelVersion);
   text(w, "select", inputs.options->policy == Select_options::Policy::all ? "all" : "area");
-  w.Key("identity");
-  w.Bool(inputs.options->identity);
+  json::flag(w, "identity", inputs.options->identity);
   text(w, "clock", inputs.options->clock);
   w.Key("reference");
   w.StartObject();
@@ -78,6 +63,21 @@ std::string physical_report(const usyn::Logical_design& design, const Physical_r
   real(w, "area", inputs.cmos_register_area);
   w.EndObject();
   number(w, "model_work", inputs.model_work);
+  w.Key("bundle");
+  if (inputs.bundle.empty()) {
+    w.Null();
+  } else {
+    w.StartObject();
+    text(w, "directory", inputs.bundle);
+    number(w, "macros", inputs.bundle_macros);
+    w.Key("diagnostics");
+    w.StartArray();
+    for (const auto& note : inputs.bundle_diagnostics) {
+      json::string(w, note);
+    }
+    w.EndArray();
+    w.EndObject();
+  }
 
   uint64_t                        states = 0, eligible = 0, converted = 0;
   std::map<std::string, uint64_t> reasons;
@@ -130,8 +130,7 @@ std::string physical_report(const usyn::Logical_design& design, const Physical_r
       text(w, "reason", s.reason);
       w.Key("master");
       if (domino) {
-        const auto& name = region.physical->cells.at(s.cell).name;
-        w.String(name.data(), static_cast<rapidjson::SizeType>(name.size()));
+        json::string(w, region.physical->cells.at(s.cell).name);
       } else {
         w.Null();
       }
@@ -151,8 +150,7 @@ std::string physical_report(const usyn::Logical_design& design, const Physical_r
           number(w, "input", s.rails[k].input);
           text(w, "polarity", s.rails[k].negative ? "negative" : "positive");
           number(w, "signal", s.rails[k].producer.id);
-          w.Key("inverted");
-          w.Bool(s.rails[k].producer.inverted);
+          json::flag(w, "inverted", s.rails[k].producer.inverted);
           w.EndObject();
         }
         w.EndArray();

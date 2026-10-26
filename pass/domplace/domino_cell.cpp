@@ -124,7 +124,7 @@ void emit_domino_model(hhds::GraphLibrary& models, const Domino_master& master, 
   body->commit();
 }
 
-std::string domino_verilog_model(const Domino_master& master, const usyn::Physical_cell_interface& cell) {
+std::string domino_expression(const Domino_master& master, const usyn::Physical_cell_interface& cell) {
   check_interface(master, cell);
   std::vector<std::string> values;
   for (const auto& node : master.formula.nodes) {
@@ -135,6 +135,11 @@ std::string domino_verilog_model(const Domino_master& master, const usyn::Physic
       case Kind::parallel: values.push_back(std::format("({} | {})", values[node.left], values[node.right])); break;
     }
   }
+  return values.back();
+}
+
+std::string domino_verilog_model(const Domino_master& master, const usyn::Physical_cell_interface& cell) {
+  const auto  next = domino_expression(master, cell);
   std::string ports, inputs;
   for (const auto& rail : cell.rails) {
     ports  += rail + ", ";
@@ -154,7 +159,7 @@ std::string domino_verilog_model(const Domino_master& master, const usyn::Physic
       cell.output,
       cell.clock,
       cell.output,
-      values.back());
+      next);
 }
 
 }  // namespace livehd::domplace

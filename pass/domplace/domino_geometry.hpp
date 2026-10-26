@@ -23,6 +23,12 @@ struct Geometry_inputs {
   std::string                     vertical_layer;  // stand-in vertical-access check layer
   physical::Row_access_convention row_access;
 };
+// The route policy of the Tech_profile the LEF identifies. A technology
+// without a registered profile uses the bottom of its LEF routing stack: pin
+// metal = routing layer 0, escape = layer 1, their cut = the cut layer of a LEF
+// via joining the two, branch = layer 2. `source` records the choice
+// ("tech-profile:<name>" or "lef-stack"). A stack too short to derive throws.
+physical::Route_policy              domino_route_policy(const physical::Technology&, std::string* source);
 // From a Tech_profile route policy: access and branch_layer (the stand-in
 // vertical-access layer). Technologies without a profile pass a Route_policy.
 Geometry_inputs geometry_inputs(const physical::Technology&, std::string inverter, const physical::Route_policy&,

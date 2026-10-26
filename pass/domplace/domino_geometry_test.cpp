@@ -170,6 +170,18 @@ TEST(DominoGeometry, AreaWidthIsExactWholeSitesAndDriveChangesOnlyTheRegister) {
   EXPECT_NEAR(odd.a_estimate_um2, 3.5 * 3.7536 + 20.0192, 1e-9);
   EXPECT_EQ(odd.w_area, 14 * 460);
 }
+TEST(DominoGeometry, RoutePolicyFallsBackToTheLefStackWithoutAProfile) {
+  std::string source;
+  const auto  route = domino_route_policy(sky130(), &source);
+  EXPECT_EQ(source, "lef-stack");
+  EXPECT_EQ(route.access.pin, kSky130Route.access.pin);
+  EXPECT_EQ(route.access.escape, kSky130Route.access.escape);
+  EXPECT_EQ(route.access.cut, kSky130Route.access.cut);
+  EXPECT_EQ(route.branch_layer, kSky130Route.branch_layer);
+  auto short_stack = synthetic();
+  short_stack.routing_layers.pop_back();
+  EXPECT_THROW(domino_route_policy(short_stack, &source), std::invalid_argument);
+}
 TEST(DominoGeometry, PinTermWidensWideInputMasters) {
   const auto in = geometry_inputs(sky130(), kInv, kSky130Route);
   const auto g  = generate_domino_macro(pins("__lhd_domino_wide", 14), pdn(4), kSky130Cells, 0, in);

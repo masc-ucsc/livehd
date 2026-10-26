@@ -274,6 +274,43 @@ std::optional<std::string> horizontal_refusal(const ph::Pin_access_result& acces
   return reasons.empty() ? "no candidate" : reasons;
 }
 }  // namespace
+ph::Route_policy domino_route_policy(const ph::Technology& tech, std::string* source) {
+  try {
+    const auto& profile = ph::resolve_tech_profile(tech);
+    if (source) {
+      *source = "tech-profile:" + profile.name;
+    }
+    return profile.route;
+  } catch (const std::invalid_argument&) {
+    // No registered profile: derive the policy from the LEF stack order below.
+  }
+  const auto& stack = tech.routing_layers;
+  if (stack.size() < 3) {
+    refuse("a LEF routing stack of at least three layers is needed without a technology profile");
+  }
+  ph::Route_policy route;
+  route.access.pin    = stack[0];
+  route.access.escape = stack[1];
+  route.branch_layer  = stack[2];
+  for (const auto& [name, via] : tech.vias) {
+    (void)name;
+    std::set<std::string> metals, cuts;
+    for (const auto& shape : via.shapes) {
+      (tech.cut_layers.contains(shape.layer) ? cuts : metals).insert(shape.layer);
+    }
+    if (cuts.size() == 1 && metals == std::set<std::string>{stack[0], stack[1]}) {
+      route.access.cut = *cuts.begin();
+      break;
+    }
+  }
+  if (route.access.cut.empty()) {
+    refuse(std::format("no LEF via joins {} and {}", stack[0], stack[1]));
+  }
+  if (source) {
+    *source = "lef-stack";
+  }
+  return route;
+}
 Geometry_inputs geometry_inputs(const ph::Technology& tech, std::string inverter, const ph::Route_policy& route,
                                 ph::Row_access_convention convention) {
   return {&tech, std::move(inverter), route.access, route.branch_layer, std::move(convention)};
