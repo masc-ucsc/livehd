@@ -2974,6 +2974,20 @@ sh_test(
     ],
 )
 
+# 2d-domplace U22: a converted register's synchronous or asynchronous reset
+# drives its storage RST pin (never a PDN rail), the stage timer counts it as
+# a false path, and the placed netlist is LEC-proven with the bundle models.
+sh_test(
+    name = "lhd_domplace_reset_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_domplace_reset_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
 # 2d-domplace H: two-row anchors in an imported pinless floorplan frame that
 # fits one anchor per row pair, and the named atomic failure one site narrower.
 sh_test(

@@ -99,7 +99,11 @@ std::optional<Bundle_design> collect_domino_design(const usyn::Logical_design& d
       if (!s.formula || !region.selected.frozen) {
         throw std::invalid_argument("converted domino state without a formula: " + cell.name);
       }
-      auto master = make_domino_master(*s.formula, static_cast<uint32_t>(std::bit_width(s.metrics.support)), work);
+      auto master = make_domino_master(*s.formula,
+                                       static_cast<uint32_t>(std::bit_width(s.metrics.support)),
+                                       work,
+                                       s.reset ? std::optional<Domino_reset>{{s.reset->async, s.reset->active_low, s.reset->value}}
+                                               : std::nullopt);
       if (!master) {
         return std::nullopt;
       }
@@ -375,6 +379,14 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
     }
     w.EndArray();
     w.EndObject();
+    // U22: what a reset adds to a stage's storage (Liberty basis; the variant
+    // footprints charge the LEF difference of the same cells).
+    w.Key("reset_storage");
+    w.StartObject();
+    text(w, "register", reference.reset_register);
+    real(w, "liberty_area", reference.reset_area);
+    text(w, "source", reference.reset_source);
+    w.EndObject();
     w.Key("fo4_ps");
     w.StartObject();
     real(w, "value", fo4);
@@ -460,6 +472,19 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
       }
       w.EndArray();
       text(w, "next_state", domino_expression(master, variants[m].front().cell));
+      // U22: the storage's reset on RST (null: none). It is never a PDN rail.
+      w.Key("reset");
+      if (master.reset) {
+        w.StartObject();
+        text(w, "pin", variants[m].front().cell.reset);
+        text(w, "kind", master.reset->async ? "async" : "sync");
+        text(w, "active", master.reset->active_low ? "low" : "high");
+        number(w, "value", master.reset->value ? 1 : 0);
+        text(w, "timing", "false path: no stage-timing check");
+        w.EndObject();
+      } else {
+        w.Null();
+      }
       w.Key("rails");
       w.StartArray();
       for (size_t k = 0; k < master.rails.size(); ++k) {
@@ -496,6 +521,7 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
         real(w, "x", g.x);
         real(w, "a_not_um2", g.a_not_um2);
         real(w, "a_register_um2", g.a_register_um2);
+        real(w, "a_reset_um2", g.a_reset_um2);
         real(w, "a_estimate_um2", g.a_estimate_um2);
         real(w, "a_footprint_um2", g.a_footprint_um2);
         number(w, "w_area_dbu", static_cast<uint64_t>(g.w_area));
@@ -698,6 +724,11 @@ std::optional<Domino_sidecar> read_domino_sidecar(const rapidjson::Document& doc
     for (const auto& rail : master["rails"].GetArray()) {
       rails.push_back(string(rail, "pin"));
     }
+    // U22: the storage reset pin, when the master has one.
+    std::string reset;
+    if (master.HasMember("reset") && master["reset"].IsObject()) {
+      reset = string(master["reset"], "pin");
+    }
     std::map<std::string, uint32_t> ranks;  // by family: the register ladder order
     for (const auto& variant : master["variants"].GetArray()) {
       if (!variant.IsObject() || !variant.HasMember("name") || !variant["name"].IsString() || !variant.HasMember("halves")
@@ -710,6 +741,7 @@ std::optional<Domino_sidecar> read_domino_sidecar(const rapidjson::Document& doc
       entry.name             = string(variant, "name");
       entry.register_cell    = string(variant, "register");
       entry.rails            = rails;
+      entry.reset_pin        = reset;
       entry.width_dbu        = static_cast<int64_t>(variant["width_dbu"].GetUint64());
       entry.a_footprint_um2  = estimate(variant, "a_footprint_um2").value_or(0);
       entry.a_estimate_um2   = estimate(variant, "a_estimate_um2").value_or(0);

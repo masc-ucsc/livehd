@@ -14,7 +14,7 @@ enum class Reason : uint8_t {
   candidate,          // eligible; the physical choice is still open
   domino_area,        // converted: estimated domino area below the CMOS+DFF estimate
   domino_all,         // converted by select=all
-  async_reset,        // asynchronous clear/preset
+  async_reset,        // asynchronous clear/preset (now only a constant one; U22 moves the rest to RST)
   initial_value,      // power-on initial value
   negative_edge,      // negedge capture
   unknown_edge,       // capture edge not established
@@ -45,9 +45,15 @@ enum class Reason : uint8_t {
   divided_clock,       // a register output or a divided/inverted clock cell drives the clock
   gated_enable_state,  // the gate's enable cone holds state or hierarchy (or exceeds the clone limit)
   gated_fall_sample,   // the gate samples its enable at the falling edge (pass.usyn.domino_fall_gates folds it)
+  // U22 storage resets: a converted stage's reset drives its RST pin, never
+  // the PDN; these retain a register whose reset cannot be moved there.
+  reset_value,     // the reset value is not a known constant bit
+  reset_internal,  // a synchronous reset computed inside the region (no input or register to wire RST to)
+  reset_absorbed,  // the selection cut folded the reset into upstream CMOS: no reset rail to strip
+  reset_shape,     // the next-state function does not load the reset value while the reset is asserted
 };
 
-inline constexpr Reason kLastReason = Reason::gated_fall_sample;  // keep at the last enumerator
+inline constexpr Reason kLastReason = Reason::reset_shape;  // keep at the last enumerator
 
 constexpr std::string_view reason_code(Reason reason) {
   switch (reason) {
@@ -83,6 +89,10 @@ constexpr std::string_view reason_code(Reason reason) {
     case Reason::divided_clock     : return "divided-clock";
     case Reason::gated_enable_state: return "gated-enable-state";
     case Reason::gated_fall_sample : return "gated-fall-sample";
+    case Reason::reset_value       : return "reset-value";
+    case Reason::reset_internal    : return "reset-internal";
+    case Reason::reset_absorbed    : return "reset-absorbed";
+    case Reason::reset_shape       : return "reset-shape";
   }
   return "invalid";
 }

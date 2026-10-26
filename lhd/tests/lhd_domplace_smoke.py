@@ -14,7 +14,8 @@ root.mkdir()
 source = root / 'dom.v'
 # One register per eligibility class: q1 and q2 convert (q2 is binate in en
 # and reads its own Q), q3 is a one-literal endpoint, q4 has an asynchronous
-# reset and q5 captures on the negative edge.
+# reset (it would take the storage RST pin, U22, but is a one-literal
+# endpoint too) and q5 captures on the negative edge.
 source.write_text('module dom(input clk, input a, b, c, d, en, x, y, rst, output reg q1, q2, q3, q4, q5);\n'
                   'always @(posedge clk) q1 <= (a & b) | (c & d);\n'
                   'always @(posedge clk) if (en) q2 <= x ^ y;\n'
@@ -81,10 +82,10 @@ assert report['target'] == 'cmos' and report['output'] == 'mapped-mixed', report
 physical = report['physical']
 assert physical['emission'] == 'mixed' and physical['clock'] == 'clk', physical
 reasons = {e['name']: e['reason'] for r in physical['regions'] for e in r['endpoints']}
-assert reasons == {'q1': 'domino-all', 'q2': 'domino-all', 'q3': 'identity-endpoint', 'q4': 'async-reset',
+assert reasons == {'q1': 'domino-all', 'q2': 'domino-all', 'q3': 'identity-endpoint', 'q4': 'identity-endpoint',
                    'q5': 'negative-edge'}, reasons
 totals = physical['totals']
-assert totals['converted'] == 2 and totals['eligible'] == 3, totals
+assert totals['converted'] == 2 and totals['eligible'] == 4, totals
 q1 = next(e for r in physical['regions'] for e in r['endpoints'] if e['name'] == 'q1')
 # (a&b)|(c&d) with four domino-only devices: x = 4, 4 * A(inv_1) + A(dfxtp_1)
 # = 35.0336 um^2, exactly 14 two-row sites of 0.46 x 5.44 um.
@@ -99,7 +100,7 @@ assert logical_report['physical']['totals']['converted'] == 2, logical_report['p
 
 bundle = W / 'synth/qor.json.domino'
 sidecar = json.loads((bundle / 'domino_models.json').read_text())
-assert sidecar['schema'] == 4 and sidecar['units']['time'] == 'ps' and sidecar['units']['dbu'] == 1000, sidecar['units']
+assert sidecar['schema'] == 5 and sidecar['units']['time'] == 'ps' and sidecar['units']['dbu'] == 1000, sidecar['units']
 assert sidecar['stage_model']['clock'] == 'clk' and sidecar['stage_model']['hold_capture_ps'] is None, sidecar['stage_model']
 # The built-in stage delays: the logical-effort estimate with its provenance,
 # per variant for evaluate and precharge.

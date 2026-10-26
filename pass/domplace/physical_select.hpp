@@ -53,6 +53,6 @@ struct Select_context {
 std::optional<usyn::Physical_emission> select_physical(const usyn::Stateful_region& region,
                                                        std::span<const std::string> input_names, const Select_options& options,
                                                        const Select_context& context, usyn::Budget& work,
-                                                       std::span<const usyn::Physical_gating> gating = {});
+                                                       std::span<const usyn::Physical_hint> gating = {});
 
 }  // namespace livehd::domplace

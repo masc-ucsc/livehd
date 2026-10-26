@@ -21,20 +21,24 @@ namespace livehd::domplace {
 // `input_names`, indexed like frozen.inputs; "" when the input is not a design
 // input bit) must equal `clock`. An empty `input_names` marks a region other
 // than the design top: its clock ports are not traced to the design clock
-// root, so a state clocked by one is retained as definition-clock. Enables and
-// synchronous resets are already folded into D, so they stay candidates.
+// root, so a state clocked by one is retained as definition-clock. Enables are
+// already folded into D, so they stay candidates.
 // Requires region.frozen; returns no rows without it.
 //
 // `gating` (indexed by source row, may be empty) carries the clock-gate fold
 // (U21): a folded register whose root clock is the design input `clock` is a
 // candidate with clock_root/gated_clock set (usyn::Physical_state); a
-// refused gate retains the register with the fold's reason code.
+// refused gate retains the register with the fold's reason code. A candidate
+// with a synchronous or asynchronous reset (U22) carries its storage reset:
+// the RST net, polarity and value; one whose reset cannot reach RST retains
+// with a reset-* code.
 struct Eligibility {
   uint32_t                state  = 0;
   Reason                  reason = Reason::candidate;
-  std::optional<uint32_t> clock_root, gated_clock, gate_enable;
+  std::optional<uint32_t>             clock_root, gated_clock, gate_enable;  // gate_enable: any folded register
+  std::optional<usyn::Physical_reset> reset;                                 // a candidate's storage reset (U22)
 };
 std::vector<Eligibility> physical_eligibility(const usyn::Stateful_region& region, std::span<const std::string> input_names,
-                                              std::string_view clock, std::span<const usyn::Physical_gating> gating = {});
+                                              std::string_view clock, std::span<const usyn::Physical_hint> gating = {});
 
 }  // namespace livehd::domplace

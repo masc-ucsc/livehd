@@ -22,8 +22,23 @@ enum class Physical_decision : uint8_t { domino, retained_cmos };
 struct Physical_cell_interface {
   std::string              name;   // __lhd_domino_<h16>_v<k>_t<t>
   std::vector<std::string> rails;  // "R0".."R{k-1}"
+  std::string              reset;  // "RST" when the storage has a reset (U22), declared after the rails
   std::string              clock  = "CLK";
   std::string              output = "Q";
+};
+
+// The output storage's reset of a converted stage (2d-domplace U22): the
+// source register's reset reaches the stage's RST pin, never the PDN. The RST
+// net is a frozen input, a frozen state's Q, or the source's asynchronous
+// reset control.
+struct Physical_reset {
+  enum class Source : uint8_t { input, state, control };
+  bool     async                                   = false;
+  bool     active_low                              = false;  // RST asserts at 0
+  bool     value                                   = false;  // the storage's reset value
+  Source   source                                  = Source::input;
+  uint32_t index                                   = 0;  // frozen input, state or (control) output index
+  bool     operator==(const Physical_reset&) const = default;
 };
 
 // One pin of a converted state: the formula variable, the literal polarity, and
@@ -56,6 +71,9 @@ struct Physical_state {
   // the redundant enable the fold added (D with it at 1), as its gated clock
   // already holds it.
   std::optional<uint32_t>     gate_enable;
+  // A converted stage's storage reset (U22): its formula is the data function
+  // with the reset term stripped.
+  std::optional<Physical_reset> reset;
 };
 
 struct Physical_emission {
@@ -68,15 +86,21 @@ struct Physical_emission {
   std::vector<uint64_t>                gate_boundaries;
 };
 
-// The clock-gate fold of one source row (Source_state_table::sources index):
-// code is empty (no gate), "fold" (the register was folded onto its root
-// clock with the gate's enable, synth::fold_gated_clocks), or a pass/domplace
-// reason code that retains it. The indices are frozen input positions.
-struct Physical_gating {
+// What the region's source graph tells physical selection about one source row
+// (Source_state_table::sources index). The clock-gate fold: code is empty (no
+// gate), "fold" (the register was folded onto its root clock with the gate's
+// enable, synth::fold_gated_clocks), or a pass/domplace reason code that
+// retains it. The indices are frozen input (or state) positions.
+struct Physical_hint {
   std::string code;
   int32_t     root_input   = -1;  // folded: the root clock, a design input
   int32_t     gclk_input   = -1;  // folded: the original gated clock, -1 when the region computes it
   int32_t     enable_input = -1;  // folded: the gate's enable, -1 when the region computes it
+  // A synchronous reset's net (U22): the frozen input or state its reset pin
+  // reads, and whether the pin reads it inverted. Both -1 when the region
+  // computes it.
+  int32_t     reset_input = -1, reset_state = -1;
+  bool        reset_inverted = false;
 };
 
 // Runs after freeze on every region, a logical cache hit included. Input names
@@ -85,6 +109,6 @@ struct Physical_gating {
 // gets none (an empty span). Gating is indexed by source row (empty: no
 // gates). nullopt refuses the design.
 using Physical_selector = std::function<std::optional<Physical_emission>(
-    const Stateful_region&, std::span<const std::string> input_names, std::span<const Physical_gating> gating, Budget&)>;
+    const Stateful_region&, std::span<const std::string> input_names, std::span<const Physical_hint> gating, Budget&)>;
 
 }  // namespace livehd::usyn

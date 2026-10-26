@@ -137,16 +137,37 @@ std::optional<Domino_reference> resolve_domino_reference(const std::string& libe
     }
   }
   reference.inverter_timing = library.cells.at(reference.inverter.name);
+  // The reset storage term: the smallest asynchronous-reset register of the
+  // same library group, else one reference inverter (labeled).
+  const liberty::Dff_cell* reset = nullptr;
+  const auto               sel   = liberty::resolve_dff_cells(liberty_files);
+  for (const auto& resets : sel.areset_ladder) {
+    for (const auto& cell : resets) {
+      if (cell.area > 0 && group(cell.name) == reference.corner
+          && (!reset || std::tie(cell.area, cell.name) < std::tie(reset->area, reset->name))) {
+        reset = &cell;
+      }
+    }
+  }
+  if (reset) {
+    reference.reset_register = reset->name;
+    reference.reset_area     = std::max(0.0, reset->area - reference.registers.front().area);
+    reference.reset_source   = std::format("liberty: {} minus {}", reset->name, reference.registers.front().name);
+  } else {
+    reference.reset_area   = reference.inverter.area;
+    reference.reset_source = "estimate: one reference inverter (the reset pull device pair); the Liberty has no reset register";
+  }
   return reference;
 }
 
-Domino_area domino_area(const usyn::Gate_formula::Metrics& metrics, const Domino_reference& reference, size_t variant) {
+Domino_area domino_area(const usyn::Gate_formula::Metrics& metrics, const Domino_reference& reference, size_t variant, bool reset) {
   Domino_area area;
   area.x          = static_cast<double>(domino_proxy_devices(metrics, reference)) / 2;
   area.a_not      = reference.inverter.area;
   area.a_register = reference.registers.at(variant).area;
+  area.a_reset    = reset ? reference.reset_area : 0;
   // pct / 100.0 is exactly 1 at the default, so the default area is unchanged.
-  area.a_domino   = area.x * area.a_not * (reference.pair_area_pct / 100.0) + area.a_register;
+  area.a_domino   = area.x * area.a_not * (reference.pair_area_pct / 100.0) + area.a_register + area.a_reset;
   return area;
 }
 

@@ -31,7 +31,7 @@ std::optional<size_t> clock_input(const usyn::Stateful_region& region, uint32_t 
 }  // namespace
 
 std::vector<Eligibility> physical_eligibility(const usyn::Stateful_region& region, std::span<const std::string> input_names,
-                                              std::string_view clock, std::span<const usyn::Physical_gating> gating) {
+                                              std::string_view clock, std::span<const usyn::Physical_hint> gating) {
   if (!region.frozen || region.state_bits.size() != region.frozen->state.size()) {
     return {};
   }
@@ -76,8 +76,8 @@ std::vector<Eligibility> physical_eligibility(const usyn::Stateful_region& regio
       if (s.neg_clock) {
         return Reason::negative_edge;
       }
-      if (s.async_reset) {
-        return Reason::async_reset;
+      if (s.async_reset && s.reset.constant) {
+        return Reason::async_reset;  // a tied asynchronous reset has no RST net
       }
       if (s.power_on || region.frozen->state[i].init != 'x') {
         return Reason::initial_value;
@@ -115,6 +115,43 @@ std::vector<Eligibility> physical_eligibility(const usyn::Stateful_region& regio
       }
       return input_names[*input] == clock ? Reason::candidate : Reason::clock_domain;
     }();
+    // U22: the reset leaves D for the storage's RST pin. Its net is the async
+    // reset control, or the region input or register a synchronous one reads.
+    if (row.reason != Reason::candidate || !s.reset.present || s.reset.constant) {
+      continue;
+    }
+    const auto bit = source.bits[region.state_bits[i]].bit;
+    if (s.reset.bits != 1
+        || (s.initial.present && (!s.initial.constant || s.initial.value.unknown_bit_test(static_cast<int>(bit))))) {
+      row.reason = s.reset.bits != 1 ? Reason::reset_internal : Reason::reset_value;
+      continue;
+    }
+    usyn::Physical_reset reset;
+    reset.async = s.async_reset;
+    reset.value = s.initial.present && s.initial.value.bit_test(static_cast<int>(bit));
+    if (s.async_reset) {
+      const auto control = std::find_if(source.controls.begin(), source.controls.end(), [&](const auto& c) {
+        return c.source == owner && c.kind == synth::State_control_kind::async_reset && c.outputs.size() == 1;
+      });
+      if (control == source.controls.end()) {
+        row.reason = Reason::reset_internal;
+        continue;
+      }
+      reset.source     = usyn::Physical_reset::Source::control;
+      reset.index      = control->outputs[0];  // the control's frozen output
+      reset.active_low = s.neg_reset;
+    } else {
+      const auto* hint = owner < gating.size() ? &gating[owner] : nullptr;
+      if (!hint || (hint->reset_input < 0 && hint->reset_state < 0)) {
+        row.reason = Reason::reset_internal;
+        continue;
+      }
+      // The net level that asserts the reset pin, through its inversions.
+      reset.active_low = s.neg_reset != hint->reset_inverted;
+      reset.source     = hint->reset_input >= 0 ? usyn::Physical_reset::Source::input : usyn::Physical_reset::Source::state;
+      reset.index      = static_cast<uint32_t>(hint->reset_input >= 0 ? hint->reset_input : hint->reset_state);
+    }
+    row.reset = reset;
   }
   return rows;
 }

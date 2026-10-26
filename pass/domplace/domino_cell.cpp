@@ -33,7 +33,8 @@ void check_interface(const Domino_master& master, const usyn::Physical_cell_inte
 }
 }  // namespace
 
-std::optional<Domino_master> make_domino_master(const usyn::Gate_formula& formula, uint32_t inputs, usyn::Budget& work) {
+std::optional<Domino_master> make_domino_master(const usyn::Gate_formula& formula, uint32_t inputs, usyn::Budget& work,
+                                                std::optional<Domino_reset> reset) {
   const auto metrics = formula.metrics();
   if (!metrics || formula.output_inverted || inputs == 0 || inputs > usyn::max_logical_inputs
       || metrics->support != (1U << inputs) - 1) {
@@ -65,6 +66,13 @@ std::optional<Domino_master> make_domino_master(const usyn::Gate_formula& formul
   for (const auto word : master.function.words) {
     key += std::format(":{:016x}", word);
   }
+  if (reset) {
+    key += std::format("|reset={}{}{}",
+                       reset->async ? "async" : "sync",
+                       reset->active_low ? "-low" : "-high",
+                       reset->value ? 1 : 0);
+  }
+  master.reset    = reset;
   master.identity = hash_util::fnv1a64(key);
   master.base     = std::format("{}{:016x}", kProvisionalDominoPrefix, master.identity);
   return master;
@@ -75,6 +83,9 @@ usyn::Physical_cell_interface domino_interface(const Domino_master& master, size
   cell.name = std::format("{}_v{}_t{}", master.base, variant, geometry_template);
   for (size_t k = 0; k < master.rails.size(); ++k) {
     cell.rails.push_back(std::format("R{}", k));
+  }
+  if (master.reset) {
+    cell.reset = "RST";
   }
   return cell;
 }
@@ -106,6 +117,17 @@ void emit_domino_model(hhds::GraphLibrary& models, const Domino_master& master, 
   auto flop = gu::create_typed_node(*body, Ntype_op::Flop);
   values.back().connect_sink(gu::setup_sink_by_name(flop, "din"));
   body->get_input_pin(cell.clock).connect_sink(gu::setup_sink_by_name(flop, "clock_pin"));
+  if (master.reset) {
+    const auto& reset = *master.reset;
+    body->get_input_pin(cell.reset).connect_sink(gu::setup_sink_by_name(flop, "reset_pin"));
+    gu::create_const(*body, *Dlop::create_integer(reset.value ? 1 : 0)).connect_sink(gu::setup_sink_by_name(flop, "initial"));
+    if (reset.async) {
+      gu::create_const(*body, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_by_name(flop, "async"));
+    }
+    if (reset.active_low) {
+      gu::create_const(*body, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_by_name(flop, "negreset"));
+    }
+  }
   one_bit(flop.create_driver_pin(0)).connect_sink(body->get_output_pin(cell.output));
   body->commit();
 }
@@ -130,6 +152,35 @@ std::string domino_verilog_model(const Domino_master& master, const usyn::Physic
   for (const auto& rail : cell.rails) {
     ports  += rail + ", ";
     inputs += std::format("  input {};\n", rail);
+  }
+  if (master.reset) {
+    const auto& reset  = *master.reset;
+    const auto  active = std::format("{}{}", reset.active_low ? "!" : "", cell.reset);
+    const auto  event  = reset.async ? std::format(" or {} {}", reset.active_low ? "negedge" : "posedge", cell.reset) : "";
+    return std::format(
+        "// Provisional domino master {} (model v{}): cycle-level next state only, {} reset to {}.\n"
+        "module {}({}{}, {}, {});\n{}  input {};\n  input {};\n  output reg {};\n"
+        "  always @(posedge {}{})\n    if ({}) {} <= 1'b{};\n    else {} <= {};\nendmodule\n",
+        master.base,
+        kDominoModelVersion,
+        reset.async ? "asynchronous" : "synchronous",
+        reset.value ? 1 : 0,
+        cell.name,
+        ports,
+        cell.reset,
+        cell.clock,
+        cell.output,
+        inputs,
+        cell.reset,
+        cell.clock,
+        cell.output,
+        cell.clock,
+        event,
+        active,
+        cell.output,
+        reset.value ? 1 : 0,
+        cell.output,
+        next);
   }
   return std::format(
       "// Provisional domino master {} (model v{}): cycle-level next state only.\n"

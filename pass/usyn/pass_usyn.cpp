@@ -1018,7 +1018,7 @@ void Pass_usyn::synthesize(Eprp_var& var) {
                                   const usyn::Stateful_region& region,
                                   std::span<const std::string>
                                       names,
-                                  std::span<const usyn::Physical_gating>
+                                  std::span<const usyn::Physical_hint>
                                                 gating,
                                   usyn::Budget& budget) {
       return livehd::domplace::select_physical(region, names, select, {reference.get(), model.get(), area}, budget, gating);

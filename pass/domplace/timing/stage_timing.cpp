@@ -405,13 +405,17 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
   std::set<std::string> unmeasured;
   std::optional<double> internal_ps, precharge_ps;
   std::string           internal_at, precharge_at;
-  size_t                domino_instances = 0;
+  size_t                domino_instances = 0, reset_false_paths = 0;
   for (const auto& [name, instance] : instances) {
     if (!instance.domino) {
       continue;
     }
     ++domino_instances;
     const auto* variant = variant_of(instance.master);
+    // U22: a connected storage reset is a false path, never a capture.
+    if (variant && !variant->reset_pin.empty() && instance.pins.contains(variant->reset_pin)) {
+      ++reset_false_paths;
+    }
     const auto  need    = [&](const char* coefficient, std::optional<double> value) {
       if (!value) {
         unmeasured.insert(coefficient);
@@ -749,6 +753,12 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
   w.StartObject();
   flag(w, "certified", all.certified);
   number(w, "excluded", source.excluded.size());
+  // Paths the stage model excludes by construction, by class, with counts:
+  // a domino storage reset (RST) has no check (U22).
+  w.Key("false_paths");
+  w.StartObject();
+  number(w, "reset->domino", reset_false_paths);
+  w.EndObject();
   number(w, "fractional_endpoints", all.fractional_endpoints);
   w.Key("unsupported");
   w.StartArray();

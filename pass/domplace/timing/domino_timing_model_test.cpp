@@ -33,7 +33,7 @@ TEST(DominoTimingModel, ReadsTheTimingViewOfASchemaThreeBundle) {
       {"q1", test::kDomino}
   };
   const auto v = view(sidecar, "model_view");
-  EXPECT_EQ(v.bundle_schema, 4U);
+  EXPECT_EQ(v.bundle_schema, 5U);
   EXPECT_EQ(v.stage_version, 1U);
   EXPECT_EQ(v.model_version, 1U);
   EXPECT_EQ(v.clock, "clk");
@@ -69,13 +69,13 @@ TEST(DominoTimingModel, ReadsTheTimingViewOfASchemaThreeBundle) {
   {
     std::ifstream     in(old_dir / kBundleSidecar);
     std::string       text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-    const std::string key = "\"schema\":4";
+    const std::string key = "\"schema\":5";
     ASSERT_NE(text.find(key), std::string::npos);
-    text.replace(text.find(key), key.size(), "\"schema\":3");
+    text.replace(text.find(key), key.size(), "\"schema\":4");
     std::ofstream(old_dir / kBundleSidecar) << text;
   }
   EXPECT_FALSE(read_domino_timing(old_dir, &why));
-  EXPECT_NE(why.find("is schema 3; this build reads schema 4 only"), std::string::npos) << why;
+  EXPECT_NE(why.find("is schema 4; this build reads schema 5 only"), std::string::npos) << why;
   EXPECT_FALSE(read_domino_timing(std::filesystem::path(std::getenv("TEST_TMPDIR")) / "missing", &why));
   EXPECT_NE(why.find("missing"), std::string::npos) << why;
 }

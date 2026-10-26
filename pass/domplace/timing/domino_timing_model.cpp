@@ -281,6 +281,17 @@ std::shared_ptr<const late::Provisional_cells> domino_timing_cells(const Domino_
       pin.arcs.push_back(std::move(setup));
       cell.pins.emplace(rail, std::move(pin));
     }
+    // U22: the storage reset pin loads its net like a rail and has no check:
+    // reset to RST is a false path of the stage model.
+    if (!variant.reset_pin.empty()) {
+      model::Pin reset;
+      reset.name      = variant.reset_pin;
+      reset.direction = "input";
+      if (variant.rail_ff) {
+        reset.capacitance_ff = {variant.rail_ff, variant.rail_ff};
+      }
+      cell.pins.emplace(variant.reset_pin, std::move(reset));
+    }
     model::Pin clock;
     clock.name      = interface.clock;
     clock.direction = "input";

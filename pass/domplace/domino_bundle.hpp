@@ -25,7 +25,7 @@ namespace livehd::domplace {
 // models, external simulators read the Verilog models; the sidecar records the
 // units, corner, technology, reference cells, coefficients, masters and the
 // original state that owns every instance.
-inline constexpr uint32_t         kBundleSchema      = 4;
+inline constexpr uint32_t         kBundleSchema      = 5;
 inline constexpr std::string_view kBundleLef         = "domino_cells.lef";
 inline constexpr std::string_view kBundleSidecar     = "domino_models.json";
 inline constexpr std::string_view kBundleVerilog     = "domino_models.v";
@@ -100,6 +100,7 @@ struct Catalog_entry {
   std::string                          clk_pin, q_pin;               // the register's own pin names (reference.registers)
   uint32_t                             rank = 0;
   std::vector<std::string>             rails;
+  std::string                          reset_pin;  // the storage reset (U22), empty without one
   int64_t                              width_dbu       = 0;
   double                               a_footprint_um2 = 0, a_estimate_um2 = 0;
   std::optional<double>                rail_ff, clock_ff;  // labeled estimates; null when not derivable

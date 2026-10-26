@@ -113,6 +113,78 @@ Physical_function physical_function(const usyn::Frozen_cell& cell, Budget& work)
   return result;
 }
 
+// f with variable v fixed at `value`, then restricted to its support. The
+// variables keep their order; `rewritten` is set.
+Physical_function fix_variable(const Physical_function& f, uint32_t v, bool value, Budget& work) {
+  Physical_function result;
+  const auto        m = static_cast<uint32_t>(f.inputs.size());
+  if (!work.spend(uint64_t{1} << m)) {
+    result.status = Status::search_exhausted;
+    return result;
+  }
+  Truth_table          fixed(m - 1);
+  std::vector<Xsignal> inputs;
+  for (uint32_t k = 0; k < m; ++k) {
+    if (k != v) {
+      inputs.push_back(f.inputs[k]);
+    }
+  }
+  for (uint32_t y = 0; y < (1U << (m - 1)); ++y) {
+    const auto low  = y & ((1U << v) - 1);
+    const auto high = (y >> v) << (v + 1);
+    fixed.set(y, f.table.get(low | high | (uint32_t{value} << v)));
+  }
+  const auto analysis = usyn::analyze_function(fixed, work);
+  if (analysis.status != Status::feasible) {
+    result.status = work.exhausted ? Status::search_exhausted : Status::invalid;
+    return result;
+  }
+  result.status    = Status::feasible;
+  result.rewritten = true;
+  std::vector<uint32_t> kept;
+  for (uint32_t k = 0; k + 1 < m; ++k) {
+    if (analysis.support & (1U << k)) {
+      kept.push_back(k);
+      result.inputs.push_back(inputs[k]);
+    }
+  }
+  result.table = Truth_table(static_cast<uint32_t>(kept.size()));
+  for (uint32_t z = 0; z < (1U << kept.size()); ++z) {
+    uint32_t y = 0;
+    for (uint32_t j = 0; j < kept.size(); ++j) {
+      y |= ((z >> j) & 1U) << kept[j];
+    }
+    result.table.set(z, fixed.get(y));
+  }
+  return result;
+}
+
+// U22: the data function without the storage's reset. A synchronous reset's
+// net must be a direct input (else reset-absorbed) and load `value` while
+// asserted (else reset-shape); an asynchronous one (no value) is stripped when
+// present. The result is the function while it is not asserted. nullopt with
+// the retention reason in `why`.
+std::optional<Physical_function> strip_reset(const Physical_function& f, Xsignal net, bool asserted, std::optional<bool> value,
+                                             Reason* why, Budget& work) {
+  const auto it = std::find_if(f.inputs.begin(), f.inputs.end(), [&](Xsignal s) { return s.id == net.id; });
+  if (it == f.inputs.end()) {
+    if (!value) {
+      return f;  // an asynchronous reset outside D: nothing to strip
+    }
+    *why = Reason::reset_absorbed;
+    return std::nullopt;
+  }
+  const auto v      = static_cast<uint32_t>(it - f.inputs.begin());
+  const bool active = asserted != (it->inverted != net.inverted);  // the variable's value while asserted
+  for (uint32_t y = 0; value && y < (1U << f.inputs.size()); ++y) {
+    if ((((y >> v) & 1U) != 0) == active && f.table.get(y) != *value) {
+      *why = Reason::reset_shape;
+      return std::nullopt;
+    }
+  }
+  return fix_variable(f, v, !active, work);
+}
+
 // Whether the hold stays inside the PDN under one enable rail: Q is a direct
 // input and some other input (the gate's enable, or its conjunction with the
 // register's own enable) makes the function Q itself (next = en ? f : Q).
@@ -263,7 +335,7 @@ usyn::Native_estimate exclusive_cone(const usyn::Endpoint_netlist& net, const us
 std::optional<usyn::Physical_emission> select_physical(const usyn::Stateful_region& region,
                                                        std::span<const std::string> input_names, const Select_options& options,
                                                        const Select_context& context, usyn::Budget& work,
-                                                       std::span<const usyn::Physical_gating> gating) {
+                                                       std::span<const usyn::Physical_hint> gating) {
   if (!region.frozen) {
     return std::nullopt;
   }
@@ -343,6 +415,31 @@ std::optional<usyn::Physical_emission> select_physical(const usyn::Stateful_regi
     if (function.status != Status::feasible) {
       return std::nullopt;
     }
+    // U22: the reset leaves the PDN for the storage's RST pin. A synchronous
+    // one must load its value while asserted; an asynchronous one is outside
+    // D, and any reset term left in it is a don't-care the storage overrides.
+    if (row.reset) {
+      const auto& reset = *row.reset;
+      const auto  rst   = reset.source == usyn::Physical_reset::Source::input   ? net.inputs.at(reset.index)
+                          : reset.source == usyn::Physical_reset::Source::state ? net.state.at(reset.index).q
+                                                                                : net.outputs.at(reset.index).signal;
+      Reason      why   = Reason::reset_shape;
+      auto        data  = strip_reset(function,
+                              rst,
+                              !reset.active_low,
+                              reset.async ? std::nullopt : std::optional<bool>{reset.value},
+                              &why,
+                              budget);
+      if (budget.exhausted) {
+        out_of_work();
+        continue;
+      }
+      if (!data || data->status != Status::feasible) {
+        retain(why);
+        continue;
+      }
+      function = std::move(*data);
+    }
     if (function.inputs.empty()) {
       retain(Reason::constant_endpoint);
       continue;
@@ -382,7 +479,7 @@ std::optional<usyn::Physical_emission> select_physical(const usyn::Stateful_regi
       // No free complement in the physical ledger, a converted Q included.
       state.a_rail_not += producer.inverted ? reference.inverter.area : 0.0;
     }
-    state.a_domino = domino_area(state.metrics, reference, 0).a_domino;
+    state.a_domino = domino_area(state.metrics, reference, 0, row.reset.has_value()).a_domino;
     if (state.metrics.transistors <= 1 && !options.identity) {
       retain(Reason::identity_endpoint);
       continue;
@@ -406,7 +503,8 @@ std::optional<usyn::Physical_emission> select_physical(const usyn::Stateful_regi
         retain(Reason::cmos_estimate);
         continue;
       }
-      state.a_cmos = context.cmos_register_area + cone.area;
+      // An asynchronous reset needs a reset register in CMOS too.
+      state.a_cmos = context.cmos_register_area + (row.reset && row.reset->async ? reference.reset_area : 0.0) + cone.area;
       // The factor is exactly 1 at margin 0, so the default decision is unchanged.
       if (!(state.a_domino + state.a_rail_not < *state.a_cmos * ((100.0 + options.area_margin_pct) / 100.0))) {
         retain(Reason::area);  // a tie retains CMOS
@@ -414,7 +512,13 @@ std::optional<usyn::Physical_emission> select_physical(const usyn::Stateful_regi
       }
       decision = Reason::domino_area;
     }
-    const auto master = make_domino_master(*state.formula, support, budget);
+    const auto master = make_domino_master(*state.formula,
+                                           support,
+                                           budget,
+                                           row.reset ? std::optional<Domino_reset>{{row.reset->async,
+                                                                                    row.reset->active_low,
+                                                                                    row.reset->value}}
+                                                     : std::nullopt);
     if (!master) {
       out_of_work();
       continue;
@@ -427,6 +531,7 @@ std::optional<usyn::Physical_emission> select_physical(const usyn::Stateful_regi
     state.cell       = it->second;
     state.decision   = usyn::Physical_decision::domino;
     state.clock_root = row.clock_root;
+    state.reset      = row.reset;
     retain(decision);
   }
   return emission;

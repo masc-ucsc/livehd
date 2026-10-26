@@ -4,6 +4,7 @@
 #include <functional>
 #include <span>
 
+#include "dlop.hpp"
 #include "gtest/gtest.h"
 
 namespace livehd::domplace {
@@ -75,11 +76,8 @@ struct Fixture {
 TEST(PhysicalEligibility, EveryRetentionCodeHasItsOwnRow) {
   Fixture f;
   f.add(Fixture::direct);
-  f.add(Fixture::direct, [](auto& s) {  // enable and sync reset are folded into D
-    s.enable.present = true;
-    s.reset.present  = true;
-  });
-  f.add(Fixture::direct, [](auto& s) {
+  f.add(Fixture::direct, [](auto& s) { s.enable.present = true; });  // an enable is folded into D
+  f.add(Fixture::direct, [](auto& s) {                               // an async reset whose control the region does not expose
     s.reset.present = true;
     s.async_reset   = true;
   });
@@ -106,7 +104,7 @@ TEST(PhysicalEligibility, EveryRetentionCodeHasItsOwnRow) {
   f.add(Fixture::direct, [](auto& s) { s.role = State_role::hierarchy; });
   const std::vector<Reason> expected{Reason::candidate,
                                      Reason::candidate,
-                                     Reason::async_reset,
+                                     Reason::reset_internal,
                                      Reason::initial_value,
                                      Reason::initial_value,
                                      Reason::negative_edge,
@@ -147,11 +145,63 @@ TEST(PhysicalEligibility, DefinitionRegionClocksAreNotTracedToTheDesignRoot) {
                                      Reason::definition_clock,
                                      Reason::derived_clock,
                                      Reason::gated_clock,
-                                     Reason::async_reset};
+                                     Reason::definition_clock};
   EXPECT_EQ(f.reasons_of({}, "clk"), expected);
   // A top-region input that is not a design input (a crossing) has no name.
   f.names[0].clear();
   EXPECT_EQ(f.reasons()[0], Reason::derived_clock);
+}
+
+TEST(PhysicalEligibility, ResetsMoveToTheStorageResetPin) {
+  // U22: a reset leaves D for the stage's RST pin. A synchronous one needs the
+  // net its reset pin reads (a hint: a region input or register); an
+  // asynchronous one rides its control output; the value must be a known bit.
+  Fixture f;
+  f.add(Fixture::direct, [](auto& s) {
+    s.reset.present = true;
+    s.reset.bits    = 1;
+  });                                   // sync, hinted below
+  f.add(Fixture::direct, [](auto& s) {  // sync, active low, inverted pin
+    s.reset.present    = true;
+    s.reset.bits       = 1;
+    s.neg_reset        = true;
+    s.initial.present  = true;
+    s.initial.constant = true;
+    s.initial.value    = *Dlop::create_integer(1);
+  });
+  f.add(Fixture::direct, [](auto& s) {
+    s.reset.present = true;
+    s.reset.bits    = 1;
+  });                                   // sync, no hint
+  f.add(Fixture::direct, [](auto& s) {  // async with its control
+    s.reset.present = true;
+    s.reset.bits    = 1;
+    s.async_reset   = true;
+  });
+  f.add(Fixture::direct, [](auto& s) {  // a reset value that is not a constant
+    s.reset.present   = true;
+    s.reset.bits      = 1;
+    s.initial.present = true;
+  });
+  f.region.source.controls.push_back({3, synth::State_control_kind::async_reset, {4}});
+  std::vector<usyn::Physical_hint> hints(5);
+  hints[0].reset_input    = 3;
+  hints[1].reset_input    = 3;
+  hints[1].reset_inverted = true;
+  hints[4].reset_input    = 3;
+  const auto rows         = physical_eligibility(f.region, f.names, "clk", hints);
+  ASSERT_EQ(rows.size(), 5);
+  EXPECT_EQ(rows[0].reason, Reason::candidate);
+  ASSERT_TRUE(rows[0].reset);
+  EXPECT_EQ(*rows[0].reset, (usyn::Physical_reset{false, false, false, usyn::Physical_reset::Source::input, 3}));
+  // negreset on a pin that reads the net inverted asserts at net 1.
+  ASSERT_TRUE(rows[1].reset);
+  EXPECT_EQ(*rows[1].reset, (usyn::Physical_reset{false, false, true, usyn::Physical_reset::Source::input, 3}));
+  EXPECT_EQ(rows[2].reason, Reason::reset_internal);
+  EXPECT_FALSE(rows[2].reset);
+  ASSERT_TRUE(rows[3].reset);
+  EXPECT_EQ(*rows[3].reset, (usyn::Physical_reset{true, false, false, usyn::Physical_reset::Source::control, 4}));
+  EXPECT_EQ(rows[4].reason, Reason::reset_value);
 }
 
 TEST(PhysicalEligibility, ScopeBarriersAndMalformedCorrespondence) {

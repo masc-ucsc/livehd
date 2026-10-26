@@ -357,11 +357,27 @@ Domino_variant_geometry generate_domino_macro(const usyn::Physical_cell_interfac
   if (pct <= 0) {
     refuse("the per-pair area percent must be positive");
   }
-  const auto   twice100 = proxy_devices * ref.area * pct + 200 * a_reg;
+  // U22: a storage with RST adds the reset register's footprint over the
+  // base register's (both LEF), else the labeled one-inverter estimate.
+  int64_t a_reset = 0;
+  if (!pins.reset.empty()) {
+    a_reset         = ref.area;
+    const auto rst  = tech.macros.find(reference_cells.reset_register);
+    const auto base = tech.macros.find(reference_cells.registers.front().name);
+    if (!reference_cells.reset_register.empty() && rst != tech.macros.end() && base != tech.macros.end()) {
+      const auto area = [&](const auto& macro, const std::string& name) {
+        return to_dbu(macro->second.width, dbu, name + " width") * to_dbu(macro->second.height, dbu, name + " height");
+      };
+      a_reset
+          = std::max<int64_t>(0, area(rst, reference_cells.reset_register) - area(base, reference_cells.registers.front().name));
+    }
+  }
+  const auto   twice100 = proxy_devices * ref.area * pct + 200 * (a_reg + a_reset);
   const double dbu2     = double(dbu) * double(dbu);
   g.x                   = proxy_devices / 2.0;
   g.a_not_um2           = ref.area / dbu2;
   g.a_register_um2      = a_reg / dbu2;
+  g.a_reset_um2         = a_reset / dbu2;
   g.a_estimate_um2      = double(twice100) / 100 / (2 * dbu2);
   g.w_area              = ceil_div(twice100, 100 * 2 * (2 * h * sw)) * sw;
   // Pin slots: vertical-layer tracks wide enough for every site x-phase.
@@ -375,7 +391,7 @@ Domino_variant_geometry generate_domino_macro(const usyn::Physical_cell_interfac
   const auto lo = phases.first, hi = phases.second;
   const auto clearance = pin_clearance(in);
   const auto slot      = v.pitch * ceil_div(std::max(pin.pitch, hi - lo + pin.width + clearance), v.pitch);
-  const auto count     = int64_t(pins.rails.size()) + 2;
+  const auto count     = int64_t(pins.rails.size()) + (pins.reset.empty() ? 2 : 3);
   g.w_pin              = (count + 1) * slot;
   g.width              = width_override ? *width_override : ceil_div(std::max(g.w_area, g.w_pin), sw) * sw;
   g.height             = 2 * h;
@@ -407,6 +423,9 @@ Domino_variant_geometry generate_domino_macro(const usyn::Physical_cell_interfac
   std::vector<std::pair<std::string, std::string>> signals;
   for (const auto& rail : pins.rails) {
     signals.emplace_back(rail, "INPUT");
+  }
+  if (!pins.reset.empty()) {
+    signals.emplace_back(pins.reset, "INPUT");
   }
   signals.emplace_back(pins.clock, "INPUT");
   signals.emplace_back(pins.output, "OUTPUT");

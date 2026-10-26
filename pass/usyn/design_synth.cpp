@@ -14,6 +14,7 @@
 #include "diag.hpp"
 #include "fold_engine.hpp"
 #include "hash_util.hpp"
+#include "latch_contract.hpp"
 #include "literal_stats.hpp"
 #include "node_util.hpp"
 #include "synth_policy.hpp"
@@ -169,12 +170,15 @@ int32_t frozen_input_of(const partition::Region_body& rb, const synth::Region_bl
   return -1;
 }
 
-// The clock-gate fold of every source row of the region (Physical_gating).
-std::vector<Physical_gating> region_gating(const partition::Region_body& rb, const synth::Region_blast& blast,
-                                           const absl::flat_hash_map<hhds::Node_class, synth::Gated_fold_hint>& hints) {
-  std::vector<Physical_gating> gating;
-  if (hints.empty() || !blast.source_state) {
-    return gating;
+// The source graph's hints for every source row of the region (Physical_hint):
+// the clock-gate fold and, for a synchronous reset, the frozen input or state
+// its reset pin reads.
+std::vector<Physical_hint> region_hints(const partition::Region_body& rb, const synth::Region_blast& blast,
+                                        const Stateful_region&                                               region,
+                                        const absl::flat_hash_map<hhds::Node_class, synth::Gated_fold_hint>& fold) {
+  std::vector<Physical_hint> hints;
+  if (!blast.source_state) {
+    return hints;
   }
   absl::flat_hash_map<uint64_t, hhds::Node_class> flops;
   for (const auto& n : rb.nodes) {
@@ -183,24 +187,44 @@ std::vector<Physical_gating> region_gating(const partition::Region_body& rb, con
     }
   }
   const auto& rows = blast.source_state->sources;
-  gating.resize(rows.size());
+  hints.resize(rows.size());
   for (size_t r = 0; r < rows.size(); ++r) {
     const auto node = flops.find(rows[r].node);
     if (node == flops.end()) {
       continue;
     }
-    const auto hint = hints.find(node->second);
-    if (hint == hints.end()) {
+    if (const auto hint = fold.find(node->second); hint != fold.end()) {
+      hints[r].code = hint->second.code;
+      if (hint->second.code == "fold") {
+        hints[r].root_input   = frozen_input_of(rb, blast, hint->second.root);
+        hints[r].gclk_input   = frozen_input_of(rb, blast, hint->second.gclk);
+        hints[r].enable_input = frozen_input_of(rb, blast, hint->second.enable);
+      }
+    }
+    if (!rows[r].reset.present || rows[r].async_reset || rows[r].reset.constant) {
       continue;
     }
-    gating[r].code = hint->second.code;
-    if (hint->second.code == "fold") {
-      gating[r].root_input   = frozen_input_of(rb, blast, hint->second.root);
-      gating[r].gclk_input   = frozen_input_of(rb, blast, hint->second.gclk);
-      gating[r].enable_input = frozen_input_of(rb, blast, hint->second.enable);
+    // The synchronous reset's net through identities and inversions: a
+    // region input, a black-box output or a register of this region.
+    const auto root = latch_contract::control_root(gu::get_driver_of_sink_name(node->second, "reset_pin"));
+    if (root.net.is_invalid() || root.net.is_const()) {
+      continue;
+    }
+    hints[r].reset_inverted = root.inverted;
+    hints[r].reset_input    = frozen_input_of(rb, blast, root.net);
+    if (hints[r].reset_input >= 0 || root.net.get_port_id() != 0 || !region.frozen) {
+      continue;
+    }
+    const auto owner = root.net.get_master_node().get_debug_nid();
+    for (size_t k = 0; k < region.state_bits.size(); ++k) {
+      const auto& bit = region.source.bits[region.state_bits[k]];
+      const auto& row = region.source.sources[bit.source];
+      if (row.node == owner && row.bits == 1 && bit.stage + 1 == row.stages) {
+        hints[r].reset_state = static_cast<int32_t>(k);
+      }
     }
   }
-  return gating;
+  return hints;
 }
 }  // namespace
 
@@ -715,7 +739,7 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
     // a cold search decide alike; it charges the structural allowance.
     std::optional<Physical_emission> physical;
     if (options.physical) {
-      const auto gating = region_gating(rb, blast, fold_hints);
+      const auto gating = region_hints(rb, blast, *selected.region, fold_hints);
       physical          = options.physical(*selected.region, region_input_names(rb, blast, top->get_name()), gating, work);
       if (work.resource_exhausted) {
         fail(Status::search_exhausted, rb.module_name + ": physical selection process admission");

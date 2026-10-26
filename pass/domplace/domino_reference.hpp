@@ -42,6 +42,13 @@ struct Domino_reference {
   // only (100 leaves every area unchanged), and the clocked domino devices
   // (precharge and foot) that load CLK, in reference-inverter inputs.
   uint32_t                     pair_area_pct = 100, clock_devices = 2;
+  // U22: what a reset adds to a stage's output storage. From the Liberty's
+  // smallest asynchronous-reset register (its area minus the base register's)
+  // when it has one, else a labeled estimate of one reference inverter (the
+  // reset's pull device pair). Charged once per stage whose storage has RST.
+  std::string                          reset_register;  // empty: the estimate
+  double                               reset_area = 0;
+  std::string                          reset_source;
 };
 
 // Resolve the reference inverter and register family from the
@@ -63,11 +70,13 @@ inline int64_t domino_proxy_devices(const usyn::Gate_formula::Metrics& metrics, 
 }
 
 struct Domino_area {
-  double x = 0, a_not = 0, a_register = 0, a_domino = 0;
+  double x = 0, a_not = 0, a_register = 0, a_reset = 0, a_domino = 0;
 };
 // A_domino = x * A_NOT * pair_area_pct / 100 + A_register(variant),
 // x = domino_proxy_devices / 2, on the Liberty basis. The PDN term is shared
 // by every variant; the drive changes only the register area.
-Domino_area domino_area(const usyn::Gate_formula::Metrics& metrics, const Domino_reference& reference, size_t variant);
+// A stage whose storage has a reset (U22) adds reference.reset_area.
+Domino_area domino_area(const usyn::Gate_formula::Metrics& metrics, const Domino_reference& reference, size_t variant,
+                        bool reset = false);
 
 }  // namespace livehd::domplace

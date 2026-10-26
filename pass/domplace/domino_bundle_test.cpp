@@ -237,7 +237,7 @@ TEST(DominoBundle, SchemaFourRecordsRegisterPinsClockLoadsCoefficientsTemplatesA
   const auto          text = read(dir / kBundleSidecar);
   doc.Parse(text.c_str());
   ASSERT_FALSE(doc.HasParseError());
-  EXPECT_EQ(doc["schema"].GetUint(), 4U);
+  EXPECT_EQ(doc["schema"].GetUint(), 5U);
   EXPECT_STREQ(doc["technology"]["row_rails"]["bottom"].GetString(), "VGND");
   EXPECT_STREQ(doc["technology"]["row_rails"]["top"].GetString(), "VPWR");
   const double fo4   = doc["fo4_ps"]["value"].GetDouble();
@@ -342,13 +342,13 @@ TEST(DominoBundle, SchemaFourRecordsRegisterPinsClockLoadsCoefficientsTemplatesA
   EXPECT_FALSE(read_domino_sidecar(dir, &why));
   EXPECT_NE(why.find("names an unlisted register test_dfxtp_2"), std::string::npos) << why;
 
-  // Only schema 4 is read; an older sidecar (schema 3 had no t1 rail
-  // templates) asks for regeneration.
+  // Only schema 5 is read; an older sidecar (schema 4 had no storage reset
+  // pin) asks for regeneration.
   auto older = text;
-  older.replace(older.find("\"schema\":4"), 10, "\"schema\":3");
+  older.replace(older.find("\"schema\":5"), 10, "\"schema\":4");
   std::ofstream(dir / kBundleSidecar, std::ios::trunc) << older;
   EXPECT_FALSE(read_domino_sidecar(dir, &why));
-  EXPECT_NE(why.find("is schema 3; this build reads schema 4 only (regenerate the bundle"), std::string::npos) << why;
+  EXPECT_NE(why.find("is schema 4; this build reads schema 5 only (regenerate the bundle"), std::string::npos) << why;
 }
 
 TEST(DominoBundle, MissingDelayDataIsNamedAndNeverZero) {

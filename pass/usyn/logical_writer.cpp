@@ -471,13 +471,31 @@ Logical_module_result write_module(const synth::Source_state_table& source, std:
       if (converted[i]->clock_root) {
         clock = frozen_input(converted[i]->clock_root);
       }
-      if (row.neg_clock || row.async_reset || row.power_on || !row.clock.present || row.clock.constant || clock.is_invalid()
-          || !work.spend(cell.rails.size())) {
+      const auto& reset = converted[i]->reset;
+      if (row.neg_clock || (row.async_reset && !(reset && reset->async)) || row.power_on || !row.clock.present || row.clock.constant
+          || clock.is_invalid() || reset.has_value() == cell.reset.empty() || !work.spend(cell.rails.size())) {
         return invalid("a converted physical state needs a plain positive-edge clock control");
       }
       const auto decl = node.get_subnode_io();
       for (size_t k = 0; k < cell.rails.size(); ++k) {
         pins[net.outputs()[rail_begin[i] + k].node].connect_sink(node.create_sink_pin(decl->get_input_port_id(cell.rails[k])));
+      }
+      // U22: the storage reset reads the source's reset net on RST.
+      if (reset) {
+        hhds::Pin_class rst;
+        switch (reset->source) {
+          case Physical_reset::Source::control:
+            rst = controls[bit.source][static_cast<size_t>(synth::State_control_kind::async_reset)];
+            break;
+          case Physical_reset::Source::input: rst = frozen_input(reset->index); break;
+          case Physical_reset::Source::state:
+            rst = reset->index < net.latches().size() ? pins[net.latch(reset->index).q] : hhds::Pin_class{};
+            break;
+        }
+        if (rst.is_invalid()) {
+          return invalid("a converted physical state's reset net is missing");
+        }
+        rst.connect_sink(node.create_sink_pin(decl->get_input_port_id(cell.reset)));
       }
       clock.connect_sink(node.create_sink_pin(decl->get_input_port_id(cell.clock)));
       continue;
@@ -565,6 +583,9 @@ std::shared_ptr<hhds::GraphIO> declare_physical_cell(hhds::GraphLibrary& library
   decl.name = cell.name;
   for (const auto& rail : cell.rails) {
     decl.pins.push_back({.name = rail, .direction = "input"});
+  }
+  if (!cell.reset.empty()) {
+    decl.pins.push_back({.name = cell.reset, .direction = "input"});
   }
   decl.pins.push_back({.name = cell.clock, .direction = "input", .clock_input = true});
   decl.pins.push_back({.name = cell.output, .direction = "output", .clocked = true});

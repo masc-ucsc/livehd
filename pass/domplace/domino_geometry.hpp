@@ -67,6 +67,7 @@ std::array<std::string, 3>          template_rails(const Domino_footprint&, uint
 struct Domino_variant_geometry {
   std::string                         name;
   double                              x = 0, a_not_um2 = 0, a_register_um2 = 0;
+  double                              a_reset_um2     = 0;  // U22: the storage reset's footprint term (0 without RST)
   double                              a_estimate_um2  = 0;  // A_domino(s)
   double                              a_footprint_um2 = 0;  // width * height
   // DBU. width = site_round_up(max(w_area, w_pin)); w_area is already whole sites.
