@@ -201,6 +201,7 @@ cc_library(
     name = "checks",
     hdrs = ["checks.hpp"],
     copts = COPTS,
+    deps = ["//pass/place:require"],
 )
 
 cc_test(

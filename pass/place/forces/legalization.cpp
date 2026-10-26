@@ -6,13 +6,10 @@
 #include <map>
 #include <stdexcept>
 
+#include "pass/place/require.hpp"
+
 namespace livehd::placement::timeclosure {
 namespace {
-void require(bool value, const char* message) {
-  if (!value) {
-    throw std::invalid_argument(message);
-  }
-}
 void costs(const std::vector<double>& values, size_t count, double minimum) {
   require(values.empty() || values.size() == count, "legalization priority cost count differs from physical binding");
   for (double value : values) {

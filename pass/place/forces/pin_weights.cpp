@@ -9,15 +9,12 @@
 #include <tuple>
 #include <vector>
 
+#include "pass/place/require.hpp"
+
 namespace livehd::placement::timeclosure {
 namespace {
 constexpr size_t absent = std::numeric_limits<size_t>::max();
-void             require(bool ok, const char* message) {
-  if (!ok) {
-    throw std::invalid_argument(message);
-  }
-}
-bool same_cell(const hhds::Node_class& a, const hhds::Node_class& b) {
+bool             same_cell(const hhds::Node_class& a, const hhds::Node_class& b) {
   // Node_class equality compares numeric node ids only. Include the graph and
   // occurrence context so another graph/instance can never satisfy ownership.
   return a.is_valid() && b.is_valid() && a.get_graph() == b.get_graph() && a == b && a.get_context() == b.get_context()

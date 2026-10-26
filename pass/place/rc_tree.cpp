@@ -7,13 +7,11 @@
 #include <stdexcept>
 #include <utility>
 
+#include "require.hpp"
+
 namespace livehd::placement::late {
 namespace {
-void nonnegative(double value) {
-  if (!std::isfinite(value) || value < 0) {
-    throw std::invalid_argument("RC tree requires finite nonnegative capacitance/resistance");
-  }
-}
+void nonnegative(double value) { require_nonnegative(value, "RC tree requires finite nonnegative capacitance/resistance"); }
 }  // namespace
 
 Rc_tree_state analyze_rc_tree(const physical::Rc_net& net, unsigned driver, const std::vector<std::array<double, 2>>& node_cap_ff) {

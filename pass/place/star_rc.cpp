@@ -6,14 +6,12 @@
 #include <set>
 #include <stdexcept>
 
+#include "require.hpp"
+
 namespace livehd::placement::late {
 namespace {
 using Pair = std::array<double, 2>;
-void nonnegative(double value) {
-  if (!std::isfinite(value) || value < 0) {
-    throw std::invalid_argument("continuous star requires finite nonnegative RC/loads");
-  }
-}
+void nonnegative(double value) { require_nonnegative(value, "continuous star requires finite nonnegative RC/loads"); }
 void validate(const std::vector<Star_pin>& pins) {
   if (pins.size() < 2 || pins.front().load_ff != Pair{}) {
     throw std::invalid_argument("continuous star requires a driver and sinks; driver load must be zero");

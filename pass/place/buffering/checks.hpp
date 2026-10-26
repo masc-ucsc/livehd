@@ -8,17 +8,15 @@
 #include <stdexcept>
 #include <vector>
 
+#include "pass/place/require.hpp"
+
 // Validation and bound helpers shared by the buffering implementation files.
 namespace livehd::placement::buffering::detail {
 using Clock                              = std::chrono::steady_clock;
 // Integer DBU magnitudes up to 2^53 convert to double without rounding.
 inline constexpr int64_t exact_dbu_limit = int64_t{1} << 53;
 
-inline void require(bool ok, const char* message) {
-  if (!ok) {
-    throw std::invalid_argument(message);
-  }
-}
+using placement::require;
 inline double elapsed(Clock::time_point start) { return std::chrono::duration<double>(Clock::now() - start).count(); }
 template <class P>
 bool finite(const P& p) {

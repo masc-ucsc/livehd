@@ -7,13 +7,11 @@
 #include <stdexcept>
 #include <utility>
 
+#include "require.hpp"
+
 namespace livehd::placement::late {
 namespace {
-void nonnegative(double value) {
-  if (!std::isfinite(value) || value < 0) {
-    throw std::invalid_argument("invalid native driver waveform input");
-  }
-}
+void nonnegative(double value) { require_nonnegative(value, "invalid native driver waveform input"); }
 struct Value {
   double voltage = 0, derivative = 0;
 };

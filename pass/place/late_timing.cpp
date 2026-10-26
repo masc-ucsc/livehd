@@ -15,6 +15,7 @@
 #include "node_util.hpp"
 #include "pass/liberty/liberty_dff.hpp"
 #include "rc_tree.hpp"
+#include "require.hpp"
 #include "wire_waveform.hpp"
 
 namespace livehd::placement::late {
@@ -42,11 +43,6 @@ std::string label(const hhds::Pin_class& pin) {
     return name;
   }
   return std::string(pin.get_master_node().get_name()) + ":" + name;
-}
-void require_nonnegative(double value, const char* what) {
-  if (!std::isfinite(value) || value < 0) {
-    throw std::invalid_argument(what);
-  }
 }
 void maximum(std::optional<double>& target, double value) {
   if (!target || value > *target) {

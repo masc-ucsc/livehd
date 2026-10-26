@@ -7,7 +7,7 @@ cc_library(
     hdrs = ["pin_weights.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = ["//pass/place/objective:proxy_bridge"],
+    deps = ["//pass/place:require", "//pass/place/objective:proxy_bridge"],
 )
 
 cc_test(
@@ -49,7 +49,7 @@ cc_library(
     hdrs = ["legalization.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":pin_weights"],
+    deps = [":pin_weights", "//pass/place:require"],
 )
 
 cc_test(

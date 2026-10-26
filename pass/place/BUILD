@@ -121,7 +121,15 @@ cc_library(
     hdrs = ["clock_constraints.hpp", "gate_waveform.hpp", "late_timing.hpp", "late_timing_json.hpp", "rc_tree.hpp", "sdc_subset.hpp", "star_rc.hpp", "wire_waveform.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":rc_cache", "//core", "//graph", "//pass/liberty:timing_model", "//pass/liberty:liberty_dff"],
+    deps = [":rc_cache", ":require", "//core", "//graph", "//pass/liberty:timing_model", "//pass/liberty:liberty_dff"],
+)
+
+# Header-only input validation shared across placement and timing code.
+cc_library(
+    name = "require",
+    hdrs = ["require.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
 )
 
 cc_test(
@@ -412,6 +420,7 @@ filegroup(
         "late_timing.cpp",
         "late_timing.hpp",
         "late_timing_json.hpp",
+        "require.hpp",
         "rc_tree.cpp",
         "rc_tree.hpp",
         "sdc_subset.cpp",
