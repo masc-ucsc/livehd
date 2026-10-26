@@ -7,28 +7,11 @@
 #include <stdexcept>
 #include <unordered_map>
 
+#include "index_union_find.hpp"
 #include "routing_geometry.hpp"
 #include "routing_occupancy.hpp"
 
 namespace livehd::physical {
-namespace {
-struct Connections {
-  std::vector<size_t> parent;
-  size_t              add() {
-    auto n = parent.size();
-    parent.push_back(n);
-    return n;
-  }
-  size_t root(size_t n) {
-    while (parent[n] != n) {
-      parent[n] = parent[parent[n]];
-      n         = parent[n];
-    }
-    return n;
-  }
-  void join(size_t a, size_t b) { parent[root(a)] = root(b); }
-};
-}  // namespace
 Route_components::Route_components(const Floorplan& fp) : frame_(&fp), data_(fp.components.data()), size_(fp.components.size()) {
   cells_.reserve(size_);
   for (const auto& c : fp.components) {
@@ -48,14 +31,14 @@ Route_connectivity check_route_connectivity(const Technology& tech, const Floorp
       throw std::runtime_error("missing endpoints or route");
     }
     Routing_occupancy   index(fp.dbu);
-    Connections         graph;
+    Index_union_find    graph;
     std::vector<size_t> nodes;
     const auto          append = [&](const Shape& s) {
       const auto node = graph.add();
       if (tech.layers.contains(s.layer)) {
         for (auto id : index.query(s.layer, s.rect, 0)) {
           if (s.rect.touches(index.at(id).shape.rect)) {
-            graph.join(node, nodes[id]);
+            graph.merge(node, nodes[id]);
           }
         }
         const auto id = index.insert({s, {}});
@@ -102,7 +85,7 @@ Route_connectivity check_route_connectivity(const Technology& tech, const Floorp
               for (size_t j = 0; j < shapes.size(); ++j) {
                 if (tech.layers.contains(shapes[j].layer) && shapes[i].rect.overlaps(shapes[j].rect)) {
                   reached.insert(shapes[j].layer);
-                  graph.join(piece_nodes[i], piece_nodes[j]);
+                  graph.merge(piece_nodes[i], piece_nodes[j]);
                 }
               }
               if (reached.size() != 2) {
@@ -119,7 +102,7 @@ Route_connectivity check_route_connectivity(const Technology& tech, const Floorp
         }
       }
     }
-    if (graph.parent.empty()) {
+    if (!graph.size()) {
       throw std::runtime_error("route has no metal");
     }
     std::optional<Route_components> local;
@@ -157,12 +140,12 @@ Route_connectivity check_route_connectivity(const Technology& tech, const Floorp
           }
           *v = std::round(*v);
         }
-        graph.join(pin_node, append({s.layer, r}));
+        graph.merge(pin_node, append({s.layer, r}));
       }
     }
     std::set<size_t> roots;
-    for (size_t i = 0; i < graph.parent.size(); ++i) {
-      roots.insert(graph.root(i));
+    for (size_t i = 0; i < graph.size(); ++i) {
+      roots.insert(graph.find(i));
     }
     out.components = roots.size();
     out.connected  = roots.size() == 1;

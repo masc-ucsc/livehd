@@ -8,12 +8,12 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <numeric>
 #include <stdexcept>
 #include <string>
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
 #endif
+#include "inou/lefdef/index_union_find.hpp"
 #include "rules_cc/cc/runfiles/runfiles.h"
 #include "thirdparty/flute/flute.hpp"
 namespace livehd::placement {
@@ -119,23 +119,9 @@ Steiner_topology steiner_topology(const std::vector<Steiner_location>& pins) {
   }
   std::sort(out.edges.begin(), out.edges.end());
   out.edges.erase(std::unique(out.edges.begin(), out.edges.end()), out.edges.end());
-  std::vector<size_t> parent(out.locations.size());
-  std::iota(parent.begin(), parent.end(), 0);
-  const auto root = [&](size_t i) {
-    while (parent[i] != i) {
-      i = parent[i] = parent[parent[i]];
-    }
-    return i;
-  };
   // Zero-length branch coalescing must leave a tree for RC traversal.
-  std::erase_if(out.edges, [&](const auto& edge) {
-    auto a = root(edge.first), b = root(edge.second);
-    if (a == b) {
-      return true;
-    }
-    parent[b] = a;
-    return false;
-  });
+  physical::Index_union_find connected(out.locations.size());
+  std::erase_if(out.edges, [&](const auto& edge) { return !connected.merge(edge.first, edge.second); });
   if (out.edges.size() + 1 != out.locations.size()) {
     throw std::runtime_error("disconnected FLUTE topology");
   }

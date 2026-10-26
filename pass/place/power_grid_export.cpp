@@ -2,13 +2,13 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
-#include <numeric>
 #include <set>
 #include <stdexcept>
 #include <tuple>
 #include <type_traits>
 
 #include "inou/lefdef/cut_rules.hpp"
+#include "inou/lefdef/index_union_find.hpp"
 #include "inou/lefdef/routing_geometry.hpp"
 #include "inou/lefdef/routing_occupancy.hpp"
 #include "inou/lefdef/routing_rules.hpp"
@@ -121,19 +121,11 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
   // Explicit via-stack connections certify that the grid, including any
   // channel patches, does not leave a separately powered island. Internal shapes of one macro pin are
   // electrically equivalent; input placement is never modified on failure.
-  const bool          verify_grid = !profile.channels.empty() || !profile.stripes.empty();
-  std::vector<size_t> parent(verify_grid ? plan.metal.size() : 0);
-  std::iota(parent.begin(), parent.end(), 0);
-  const auto root = [&](size_t i) {
-    while (parent[i] != i) {
-      parent[i] = parent[parent[i]];
-      i         = parent[i];
-    }
-    return i;
-  };
-  const auto join = [&](size_t a, size_t b) {
-    if (!parent.empty()) {
-      parent[root(b)] = root(a);
+  const bool            verify_grid = !profile.channels.empty() || !profile.stripes.empty();
+  ph::Index_union_find connected(verify_grid ? plan.metal.size() : 0);
+  const auto            join = [&](size_t a, size_t b) {
+    if (verify_grid) {
+      connected.merge(a, b);
     }
   };
   for (const auto& [pin, ids] : macro_pins) {
@@ -334,8 +326,8 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
   if (verify_grid) {
     std::map<std::string, size_t> roots;
     for (size_t i = 0; i < plan.metal.size(); ++i) {
-      const auto [it, added] = roots.emplace(plan.metal[i].net, root(i));
-      if (!added && it->second != root(i)) {
+      const auto [it, added] = roots.emplace(plan.metal[i].net, connected.find(i));
+      if (!added && it->second != connected.find(i)) {
         throw std::invalid_argument("disconnected power-grid metal");
       }
     }

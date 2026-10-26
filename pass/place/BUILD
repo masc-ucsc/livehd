@@ -280,7 +280,7 @@ cc_library(
     hdrs = ["power_grid.hpp", "power_grid_vias.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = ["//inou/lefdef:inou_lefdef", "@rapidjson"],
+    deps = ["//inou/lefdef:index_union_find", "//inou/lefdef:inou_lefdef", "@rapidjson"],
 )
 
 cc_test(
@@ -856,7 +856,7 @@ cc_library(
     hdrs = ["steiner_topology.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = ["@dreamplace//thirdparty/flute", "@rules_cc//cc/runfiles"],
+    deps = ["//inou/lefdef:index_union_find", "@dreamplace//thirdparty/flute", "@rules_cc//cc/runfiles"],
 )
 cc_test(
     name = "steiner_topology_test",

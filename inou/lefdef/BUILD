@@ -6,7 +6,19 @@ cc_library(
     hdrs = ["route_store.hpp", "physical.hpp", "mapped_graph.hpp", "routing_geometry.hpp", "routing_rules.hpp", "pin_access.hpp", "routing_occupancy.hpp", "routing_connectivity.hpp", "signal_via.hpp", "cut_rules.hpp", "tech_profile.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = ["//core", "//graph", "//third_party/misc/lef/lef", "//third_party/misc/def/def"],
+    deps = [":index_union_find", "//core", "//graph", "//third_party/misc/lef/lef", "//third_party/misc/def/def"],
+)
+cc_library(
+    name = "index_union_find",
+    hdrs = ["index_union_find.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+)
+cc_test(
+    name = "index_union_find_smoke",
+    srcs = ["index_union_find_smoke.cpp"],
+    copts = COPTS,
+    deps = [":index_union_find", "@googletest//:gtest_main"],
 )
 filegroup(
     name = "test_data",
