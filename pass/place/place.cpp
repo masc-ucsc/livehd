@@ -9301,10 +9301,6 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.String(selected_uroute.weights_sha256.c_str());
     json.Key("uroute_skipped");
     json.String(metrics.uroute_skipped.c_str());
-    json.Key("uroute_manifest_sha256");
-    json.String(selected_uroute.manifest_sha256.c_str());
-    json.Key("uroute_weights_sha256");
-    json.String(selected_uroute.weights_sha256.c_str());
     json.Key("sample_ids");
     write_uroute_sample_ids(json, metrics.uroute_sample_ids);
     json.EndObject();
