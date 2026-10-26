@@ -940,6 +940,9 @@ Rect placed_rect(const Macro& m, const Ann_place& place, int64_t dbu, const Rect
   const auto r = orient_rect(local.translated(m.origin_x, m.origin_y), m.width, m.height, place.orientation);
   return {place.x + r.xl * dbu, place.y + r.yl * dbu, place.x + r.xh * dbu, place.y + r.yh * dbu};
 }
+std::pair<double, double> oriented_center(const Macro& m, const Rect& local, Orientation o) {
+  return orient_point((local.xl + local.xh) / 2 + m.origin_x, (local.yl + local.yh) / 2 + m.origin_y, m.width, m.height, o);
+}
 std::optional<int64_t> rounded_dbu(double value, double tolerance) {
   const auto rounded = std::round(value);
   if (!std::isfinite(value) || std::abs(value - rounded) > tolerance || rounded < std::numeric_limits<int32_t>::min()

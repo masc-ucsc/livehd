@@ -70,13 +70,10 @@ Profile profile(const ph::Technology& tech, const ph::Floorplan& fp, const ph::C
       if (layer.direction != "VERTICAL" && layer.direction != "HORIZONTAL") {
         continue;
       }
-      const bool x = layer.direction == "VERTICAL";
-      const auto a
-          = ph::orient_point(shape.rect.xl + m.origin_x, shape.rect.yl + m.origin_y, m.width, m.height, c.place.orientation);
-      const auto b
-          = ph::orient_point(shape.rect.xh + m.origin_x, shape.rect.yh + m.origin_y, m.width, m.height, c.place.orientation);
-      const double low  = std::min(x ? a.first : a.second, x ? b.first : b.second) * tech.dbu;
-      const double high = std::max(x ? a.first : a.second, x ? b.first : b.second) * tech.dbu;
+      const bool   x    = layer.direction == "VERTICAL";
+      const auto   r    = ph::orient_rect(shape.rect.translated(m.origin_x, m.origin_y), m.width, m.height, c.place.orientation);
+      const double low  = (x ? r.xl : r.yl) * tech.dbu;
+      const double high = (x ? r.xh : r.yh) * tech.dbu;
       if (high <= low) {
         continue;
       }
@@ -716,16 +713,10 @@ void legalize_rigid_macro_tracks(const ph::Technology& tech, const ph::Floorplan
         }
         auto transformed = pin;
         for (auto& shape : transformed.shapes) {
-          const auto a
-              = ph::orient_point(shape.rect.xl + m.origin_x, shape.rect.yl + m.origin_y, m.width, m.height, c.place.orientation);
-          const auto b
-              = ph::orient_point(shape.rect.xh + m.origin_x, shape.rect.yh + m.origin_y, m.width, m.height, c.place.orientation);
           const double dx = double(c.place.x - xl) / tech.dbu;
           const double dy = double(c.place.y - yl) / tech.dbu;
-          shape.rect      = {dx + std::min(a.first, b.first),
-                             dy + std::min(a.second, b.second),
-                             dx + std::max(a.first, b.first),
-                             dy + std::max(a.second, b.second)};
+          const auto   r  = ph::orient_rect(shape.rect.translated(m.origin_x, m.origin_y), m.width, m.height, c.place.orientation);
+          shape.rect      = r.translated(dx, dy);
         }
         master.pins.emplace(std::to_string(i) + ":" + name, std::move(transformed));
       }

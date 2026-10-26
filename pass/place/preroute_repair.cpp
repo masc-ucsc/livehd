@@ -153,12 +153,7 @@ static Repeater_snapshot make_repeater_snapshot(const Result& original, const Re
       if (pin.shapes.empty()) {
         throw std::invalid_argument("repeater lacks physical pin geometry");
       }
-      const auto& rect  = pin.shapes.front().rect;
-      const auto [x, y] = physical::orient_point((rect.xl + rect.xh) / 2 + master.origin_x,
-                                                 (rect.yl + rect.yh) / 2 + master.origin_y,
-                                                 master.width,
-                                                 master.height,
-                                                 cell.place.orientation);
+      const auto [x, y] = physical::oriented_center(master, pin.shapes.front().rect, cell.place.orientation);
       const auto name   = cell.name + ":" + port;
       if (!pin_ids.emplace(name, int(design.pin2node.size())).second) {
         throw std::invalid_argument("duplicate repeater pin");

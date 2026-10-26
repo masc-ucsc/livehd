@@ -1272,9 +1272,7 @@ std::pair<double, double> offset(const ph::Macro& macro, const std::string& name
   if (it == macro.pins.end() || it->second.shapes.empty()) {
     throw std::runtime_error("missing LEF pin geometry: " + name);
   }
-  const auto& r = it->second.shapes.front().rect;
-  auto [x, y]
-      = ph::orient_point((r.xl + r.xh) / 2 + macro.origin_x, (r.yl + r.yh) / 2 + macro.origin_y, macro.width, macro.height, o);
+  const auto [x, y] = ph::oriented_center(macro, it->second.shapes.front().rect, o);
   return {x * dbu, y * dbu};
 }
 color::Floorplan_coloring analyze_floorplan_colors(const View& v, const ph::Technology& tech, const std::vector<int>& scopes) {

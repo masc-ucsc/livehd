@@ -425,6 +425,7 @@ TEST(Physical, SharedGeometryHelpers) {
   Ann_place place(100, 200, 0, 0);
   place.orientation = Orientation::FN;
   EXPECT_EQ(placed_rect(macro, place, 1000, {0, 0, 0.25, 1}), (Rect{350, 200, 600, 1200}));
+  EXPECT_EQ(oriented_center(macro, {0, 0, 0.25, 1}, Orientation::FN), (std::pair<double, double>{0.375, 0.5}));
   const Track track{"Y", "M2", 5, 4, 10};  // 5, 15, 25, 35
   EXPECT_TRUE(track.supported());
   EXPECT_EQ(track.index_range(6, 30), (std::pair<int64_t, int64_t>{1, 2}));

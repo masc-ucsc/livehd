@@ -217,15 +217,10 @@ int main(int argc, char** argv) {
           if (shapes.empty()) {
             throw std::runtime_error("missing LEF pin geometry: " + label);
           }
-          const auto& rect  = shapes.front().rect;
-          const auto  point = ph::orient_point((rect.xl + rect.xh) / 2 + master.origin_x,
-                                               (rect.yl + rect.yh) / 2 + master.origin_y,
-                                               master.width,
-                                               master.height,
-                                               cell.place.orientation);
-          x                 = cell.place.x + point.first * fp.dbu;
-          y                 = cell.place.y + point.second * fp.dbu;
-          node              = &cell - fp.components.data();
+          const auto point = ph::oriented_center(master, shapes.front().rect, cell.place.orientation);
+          x                = cell.place.x + point.first * fp.dbu;
+          y                = cell.place.y + point.second * fp.dbu;
+          node             = &cell - fp.components.data();
         }
         if (!snapshot_path.empty() || !uroute_path.empty()) {
           pins.push_back({node, x, y});

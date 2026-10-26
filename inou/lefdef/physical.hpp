@@ -371,6 +371,8 @@ std::pair<double, double>        orient_point(double x, double y, double width, 
 Rect                             orient_rect(const Rect& r, double width, double height, Orientation orientation);
 // Macro-local LEF rectangle (microns) of a placed instance, in unrounded DBU.
 Rect                             placed_rect(const Macro&, const Ann_place&, int64_t dbu, const Rect& local);
+// Center of a macro-local LEF rectangle in the oriented macro frame, in microns.
+std::pair<double, double>        oriented_center(const Macro&, const Rect& local, Orientation orientation);
 void                             verify_def_roundtrip(const Floorplan& expected, const Floorplan& actual);
 // Disjoint hard-first geometry, clipped to the solver domain. Existing fixed
 // occupancy is subtracted so overlapping macro bodies are not charged twice.

@@ -49,21 +49,12 @@ bool     movable(const ph::Technology& tech, const ph::Component& cell) {
   // Multi-height cells need a row-stack model; leave them immutable obstacles.
   return site != tech.sites.end() && std::abs(found->second.height - site->second.height) < 1e-9;
 }
-ph::Rect pin_rect(const ph::Macro& m, const ph::Shape& shape, const Ann_place& place, int64_t dbu) {
-  const auto& r = shape.rect;
-  auto        a = ph::orient_point(r.xl + m.origin_x, r.yl + m.origin_y, m.width, m.height, place.orientation);
-  auto        b = ph::orient_point(r.xh + m.origin_x, r.yh + m.origin_y, m.width, m.height, place.orientation);
-  return {place.x + std::min(a.first, b.first) * dbu,
-          place.y + std::min(a.second, b.second) * dbu,
-          place.x + std::max(a.first, b.first) * dbu,
-          place.y + std::max(a.second, b.second) * dbu};
-}
 std::optional<ph::Rect> pin_access_rect(const ph::Macro& macro, const ph::Shape& shape, const Ann_place& place, int64_t dbu,
                                         const ph::Layer& layer) {
   if (layer.width <= 0 || (layer.direction != "HORIZONTAL" && layer.direction != "VERTICAL")) {
     return {};
   }
-  auto         rect  = pin_rect(macro, shape, place, dbu);
+  auto         rect  = ph::placed_rect(macro, place, dbu, shape.rect);
   const double half  = layer.width * dbu / 2;
   rect.xl           += half;
   rect.yl           += half;
@@ -1545,7 +1536,7 @@ bool satlegalize_aligned(const physical::Technology& tech, const physical::Floor
       if (shape.layer != via_profile->route.access.pin) {
         return {};
       }
-      const auto rect = pin_rect(macro, shape, place, fp.dbu);
+      const auto rect = ph::placed_rect(macro, place, fp.dbu, shape.rect);
       if (!std::isfinite(rect.yl) || !std::isfinite(rect.yh)) {
         return {};
       }
@@ -1654,7 +1645,7 @@ bool satlegalize_obstructs(const physical::Technology& tech, const physical::Com
     if (shape.layer != corridor.layer) {
       return false;
     }
-    const ph::Shape placed{shape.layer, pin_rect(macro, shape, place, dbu)};
+    const ph::Shape placed{shape.layer, ph::placed_rect(macro, place, dbu, shape.rect)};
     return route_rules ? !route_rules->spacing(corridor, placed).legal : intersects(corridor.rect, placed.rect);
   };
   // Supply pins are immutable metal, even when LEF does not list them in OBS.
@@ -1693,7 +1684,7 @@ bool satlegalize_obstructs(const physical::Technology& tech, const physical::Com
     return true;
   }
   return std::any_of(macro.obstructions.begin(), macro.obstructions.end(), [&](const auto& obstruction) {
-    return obstruction.layer == corridor.layer && intersects(corridor.rect, pin_rect(macro, obstruction, place, dbu));
+    return obstruction.layer == corridor.layer && corridor.rect.overlaps(ph::placed_rect(macro, place, dbu, obstruction.rect));
   });
 }
 

@@ -141,12 +141,7 @@ void physical_snapshot(const ph::Technology& tech, const ph::Floorplan& fp, cons
         if (pin.shapes.empty()) {
           throw std::runtime_error("physical snapshot pin has no LEF geometry");
         }
-        const auto& rect  = pin.shapes.front().rect;
-        const auto [x, y] = ph::orient_point((rect.xl + rect.xh) / 2 + m.origin_x,
-                                             (rect.yl + rect.yh) / 2 + m.origin_y,
-                                             m.width,
-                                             m.height,
-                                             c.place.orientation);
+        const auto [x, y] = ph::oriented_center(m, pin.shapes.front().rect, c.place.orientation);
         out << ' ' << i << ' ' << c.place.x + x * tech.dbu << ' ' << c.place.y + y * tech.dbu;
       }
     }
