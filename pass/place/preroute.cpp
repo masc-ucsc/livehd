@@ -89,7 +89,7 @@ std::vector<Preroute_binding> bind_preroute(const physical::Floorplan& frame, co
     for (const auto& pin : net.connections) {
       const auto label = physical::connection_label(pin);
       if (label.empty()) {
-        throw std::invalid_argument("duplicate pre-route physical endpoint");
+        throw std::invalid_argument("invalid pre-route physical endpoint identity");
       }
       pins.push_back(label);
       tie           |= snapshot.tie_pins.contains(label);
