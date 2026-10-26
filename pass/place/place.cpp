@@ -3880,7 +3880,9 @@ void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, double 
         if (!containing) {
           throw std::runtime_error("cell outside row segments/off site: " + a.name);
         }
-        spanned.push_back(containing->orientation);
+        if (p.height > rh) {
+          spanned.push_back(containing->orientation);
+        }
         if (y != p.y) {
           continue;
         }
