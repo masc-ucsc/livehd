@@ -1078,6 +1078,9 @@ void synth_command(Options& opts, Result& res) {
   Eprp_var::Eprp_dict usyn_sets;
   merge_sets(opts, "pass.usyn", usyn_sets);
   const bool domino = domino_profile(usyn_sets);
+  // The profile reads the Liberty for logical output (pass.usyn.tmap=none)
+  // too: its reference cells and CMOS estimate come from it.
+  const std::string usyn_liberty = domino && liberty.empty() ? resolve_liberty(opts) : liberty;
   if (domino) {
     if (mapper_method != "pass.usyn") {
       throw Lhd_error{"usage", "pass.usyn.physical=domino_provisional needs synth.mapper=usyn", ""};
@@ -1148,8 +1151,8 @@ void synth_command(Options& opts, Result& res) {
       extra.push_back(spef);
     }
     check_inputs_exist(extra);
-    if (!liberty.empty()) {
-      res.inputs.push_back(liberty);
+    if (!usyn_liberty.empty()) {
+      res.inputs.push_back(usyn_liberty);
     }
     for (const auto& f : extra) {
       res.inputs.push_back(f);
@@ -1512,7 +1515,7 @@ void synth_command(Options& opts, Result& res) {
     // Each mapper receives its own labels. Native USYN does not inherit
     // ABC optimization settings; standalone dispatch uses the same rule.
     merge_mapper_sets(opts, mapper_method, labels);
-    labels["library"] = liberty;  // synth.liberty is the one spelling (pass.abc.library is refused)
+    labels["library"] = usyn_liberty;  // synth.liberty is the one spelling (pass.abc.library is refused)
     if (domino) {
       // The abstracts use the placement LEFs (synth.lef, or the sky130 default
       // placement resolves); a synthesis-only run takes synth.lef as given.

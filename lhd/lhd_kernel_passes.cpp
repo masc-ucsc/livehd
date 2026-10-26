@@ -953,9 +953,12 @@ void pass_command(Options& opts, Result& res) {
     // `lhd pass opentimer` on the same netlist can never be handed different
     // cells. Set AFTER merge_sets because `pass.abc.library` is not a user knob
     // (check_known_set_passes refuses it and names synth.liberty).
+    // The domino profile reads it for logical output too (its reference
+    // cells and CMOS estimate).
     const bool mapped_output = mapper_maps_cells(opts, method);
-    labels["library"] = mapped_output ? resolve_liberty(opts) : std::string{};
-    if (method == "pass.usyn" && domino_profile(labels)) {
+    const bool domino        = method == "pass.usyn" && domino_profile(labels);
+    labels["library"]        = mapped_output || domino ? resolve_liberty(opts) : std::string{};
+    if (domino) {
       domino_profile_labels(opts, synth_set(opts, "lef", ""), labels);
     }
     if (mapper->timing_files) {
@@ -964,7 +967,7 @@ void pass_command(Options& opts, Result& res) {
       labels["timing_files"] = labels["library"] + (sdc.empty() ? "" : "," + sdc) + (spef.empty() ? "" : "," + spef);
     }
     if (!labels.contains("threads")) { labels["threads"] = "0"; }
-    if (mapped_output) {
+    if (!labels["library"].empty()) {
       res.inputs.push_back(labels["library"]);
     }
     if (opts.stats) {

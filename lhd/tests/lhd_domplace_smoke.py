@@ -64,6 +64,13 @@ q1 = next(e for r in physical['regions'] for e in r['endpoints'] if e['name'] ==
 # = 35.0336 um^2, exactly 14 two-row sites of 0.46 x 5.44 um.
 assert abs(q1['a_domino'] - 35.0336) < 1e-9 and abs(q1['a_footprint_um2'] - 6.44 * 5.44) < 1e-9, q1
 
+# Logical output (tmap=none) still hands the profile its Liberty.
+logical = [a if a != 'pass.usyn.tmap=abc' else 'pass.usyn.tmap=none' for a in base]
+run('logical', logical + domino + ['--set', 'pass.usyn.domino_select=all', '--workdir', str(root / 'L')])
+logical_report = json.loads((root / 'L/synth/qor.json.usyn.json').read_text())
+assert logical_report['output'] == 'logical-mixed', logical_report['output']
+assert logical_report['physical']['totals']['converted'] == 2, logical_report['physical']['totals']
+
 bundle = W / 'synth/qor.json.domino'
 sidecar = json.loads((bundle / 'domino_models.json').read_text())
 assert sidecar['schema'] == 1 and sidecar['units']['time'] == 'ps' and sidecar['units']['dbu'] == 1000, sidecar['units']
