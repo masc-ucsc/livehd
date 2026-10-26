@@ -237,6 +237,18 @@ struct Proxy::Impl {
     return {positive, negative};
   }
 
+  // Rise/fall load a sink presents: its Liberty input capacitance (a missing
+  // value contributes zero) or an output port's boundary load, if any.
+  std::optional<Pair> sink_load(size_t sink) const {
+    const auto& pin = pins[sink];
+    if (pin.model) {
+      return Pair{pin.model->capacitance_ff[0].value_or(0), pin.model->capacitance_ff[1].value_or(0)};
+    }
+    if (const auto boundary = constraints.outputs.find(pin.name); boundary != constraints.outputs.end()) {
+      return boundary->second.load_ff;
+    }
+    return std::nullopt;
+  }
   size_t add(const hhds::Pin_class& pin, const model::Pin* timing, size_t owner, bool input = false, bool output = false) {
     const auto name  = label(pin);
     const auto index = pins.size();
@@ -706,39 +718,55 @@ struct Proxy::Impl {
     }
   }
 
-  Result evaluate_domains(Result result, const std::vector<Launch>& launches, const std::vector<Delays>& cell_delays,
-                          const std::vector<Pair>&                                 wire_delay,
-                          const std::vector<std::array<std::optional<double>, 2>>& driving_delay) const {
-    const auto issue = [&](std::string text) { result.unsupported.push_back(std::move(text)); };
+  // Setup timing for both clock models. Named clocks time one launch domain
+  // per clock, plus unclocked inputs, and aggregate them; the legacy single
+  // clock (or no clock) is the one-domain case whose states are result.pins
+  // themselves. Each place where the two models' published results differ is
+  // an explicit "Legacy policy" below; everything else is shared.
+  Result time_setup(Result result, const std::vector<Launch>& launches, const std::vector<Delays>& cell_delays,
+                    const std::vector<Pair>&                                 wire_delay,
+                    const std::vector<std::array<std::optional<double>, 2>>& driving_delay) const {
+    const bool legacy = constraints.clocks.empty();
+    const auto issue  = [&](std::string text) { result.unsupported.push_back(std::move(text)); };
     struct Check {
-      size_t                               pin, clock;
+      size_t                               pin, clock;  // absent clock: absolute requirement
       std::array<std::optional<double>, 2> required;
     };
-    std::vector<Check> checks;
-    for (size_t id = 0; id < clock_system.clocks.size(); ++id) {
-      const auto& clock                   = clock_system.clocks[id];
-      result.clocks[clock.name].period_ps = clock.model.period_ps;
-    }
-    for (size_t i = 0; i < pins.size(); ++i) {
-      for (auto& state : result.pins[i].transitions) {
-        state.arrival_ps.reset();
-        state.required_ps.reset();
-        state.predecessor.reset();
+    if (!legacy) {
+      for (size_t id = 0; id < clock_system.clocks.size(); ++id) {
+        const auto& clock                   = clock_system.clocks[id];
+        result.clocks[clock.name].period_ps = clock.model.period_ps;
       }
+      // Domain timing below rebuilds the aggregate arrivals/requirements.
+      for (auto& pin : result.pins) {
+        for (auto& state : pin.transitions) {
+          state.arrival_ps.reset();
+          state.required_ps.reset();
+          state.predecessor.reset();
+        }
+      }
+    }
+    std::vector<Check> checks;
+    for (size_t i = 0; i < pins.size(); ++i) {
       const auto& pin = pins[i];
       if (constants[i] || pin.clock || constraints.cuts.contains(pin.name)) {
         continue;
       }
       if (pin.output_port) {
-        result.pins[i].endpoint = true;
+        // Legacy policy: only a constrained output is an endpoint.
+        result.pins[i].endpoint = !legacy;
         const auto boundary     = constraints.outputs.find(pin.name);
         if (boundary == constraints.outputs.end()) {
           issue("unconstrained output requirement: " + pin.name);
         } else {
-          const auto& output = boundary->second;
+          const auto& output      = boundary->second;
+          result.pins[i].endpoint = true;
+          // Legacy policy: every output requirement belongs to the single
+          // clock (Output::clock is not consulted). Named clocks treat an
+          // output without a clock as an absolute requirement.
           checks.push_back({
               i,
-              output.clock.empty() ? absent : clock_system.find(output.clock),
+              legacy || output.clock.empty() ? absent : clock_system.find(output.clock),
               {output.required_ps[0], output.required_ps[1]}
           });
         }
@@ -751,7 +779,6 @@ struct Proxy::Impl {
           continue;
         }
         result.pins[i].endpoint = true;
-        const auto related      = cells[pin.cell].pins.find(arc.related_pin);
         if (arc.type != "setup_rising") {
           issue("falling-edge setup is unsupported: " + pin.name);
           continue;
@@ -759,6 +786,7 @@ struct Proxy::Impl {
         if (!arc.when.empty() && !logic.at({cells[pin.cell].model, arc.when})) {
           issue("unsupported conditional setup expression: " + pin.name);
         }
+        const auto related = cells[pin.cell].pins.find(arc.related_pin);
         if (related == cells[pin.cell].pins.end() || !pins[related->second].clock) {
           issue("unconstrained setup clock: " + pin.name);
           continue;
@@ -778,7 +806,10 @@ struct Proxy::Impl {
         checks.push_back(check);
       }
     }
-    std::vector<Delays> arc_delays(edges.size());
+    // Transition delays of every enabled, sensitized arc; a sensitized cell
+    // arc without a characterized delay is missing rather than usable.
+    std::vector<Delays>                             usable(edges.size());
+    std::vector<std::array<std::array<bool, 2>, 2>> missing(edges.size());
     for (size_t id = 0; id < edges.size(); ++id) {
       const auto& edge = edges[id];
       if (constants[edge.from] || constants[edge.to]
@@ -790,79 +821,58 @@ struct Proxy::Impl {
       for (unsigned in = 0; in < 2; ++in) {
         for (unsigned out = 0; out < 2; ++out) {
           if (edge.model) {
-            if (!sensitized_transition(*edge.model, sense, in, out)) {
-              continue;
-            }
-            arc_delays[id][in][out] = cell_delays[id][in][out];
-            if (!arc_delays[id][in][out]) {
-              issue("missing cell delay/transition table or input waveform: " + pins[edge.to].name);
+            if (sensitized_transition(*edge.model, sense, in, out)) {
+              usable[id][in][out]  = cell_delays[id][in][out];
+              missing[id][in][out] = !cell_delays[id][in][out];
+              // Legacy policy: a missing cell delay is reported only when an
+              // arrival reaches it; named clocks report every one up front.
+              if (missing[id][in][out] && !legacy) {
+                issue("missing cell delay/transition table or input waveform: " + pins[edge.to].name);
+              }
             }
           } else if (in == out && driving_delay[edge.from][out]) {
-            arc_delays[id][in][out] = *driving_delay[edge.from][out] + wire_delay[edge.to][out];
+            usable[id][in][out] = *driving_delay[edge.from][out] + wire_delay[edge.to][out];
           }
         }
-      }
-    }
-    const size_t     unclocked = clock_system.clocks.size();
-    std::set<size_t> active_domains;
-    for (const auto& launch : launches) {
-      active_domains.insert(launch.clock);
-    }
-    for (const auto& [name, input] : constraints.inputs) {
-      const auto index = identities.at(name);
-      if (!pins[index].clock && !constants[index] && !constraints.cuts.contains(name)) {
-        active_domains.insert(input.clock.empty() ? unclocked : clock_system.find(input.clock));
       }
     }
     std::vector<std::optional<double>>          endpoint_slack(pins.size());
     std::map<std::pair<size_t, size_t>, double> clock_endpoint_slack;
     bool                                        absolute_output = false;
-    for (size_t source_clock : active_domains) {
-      Result::Domain domain;
-      if (source_clock != unclocked) {
-        domain.launch_clock = clock_system.clocks[source_clock].name;
-      }
-      domain.pins.resize(pins.size());
-      for (const auto& launch : launches) {
-        if (launch.clock == source_clock) {
-          maximum(domain.pins[launch.pin][launch.transition].arrival_ps, launch.arrival);
-        }
-      }
-      for (const auto& [name, input] : constraints.inputs) {
-        const auto index = identities.at(name);
-        const auto id    = input.clock.empty() ? unclocked : clock_system.find(input.clock);
-        if (id != source_clock || pins[index].clock || constants[index] || constraints.cuts.contains(name)) {
-          continue;
-        }
-        const double phase = id == unclocked ? 0 : clock_system.clocks[id].model.phase_ps;
-        for (unsigned t = 0; t < 2; ++t) {
-          domain.pins[index][t].arrival_ps = phase + input.arrival_ps[t];
-        }
-      }
+    const size_t                                unclocked       = clock_system.clocks.size();
+    // Time one launch domain in place: forward arrivals, endpoint checks,
+    // graph capture and backward requirements.
+    const auto time_domain = [&](auto&& state, size_t source_clock, const std::optional<std::string>& launch_clock) {
       Boundaries boundaries;
       if (result.feasible_graph) {
         boundaries.resize(pins.size());
         for (size_t i = 0; i < pins.size(); ++i) {
           for (unsigned t = 0; t < 2; ++t) {
-            boundaries[i][t] = domain.pins[i][t].arrival_ps;
+            boundaries[i][t] = state(i, t).arrival_ps;
           }
         }
       }
+      std::vector<Delays> reached(edges.size());
       for (auto from : order) {
         ++result.visited_pins;
         for (auto id : outgoing[from]) {
           const auto& edge = edges[id];
           for (unsigned in = 0; in < 2; ++in) {
-            const auto arrival = domain.pins[from][in].arrival_ps;
-            if (!arrival) {
+            const auto arrival = state(from, in).arrival_ps;
+            // Legacy policy: a source transition also needs its waveform slew.
+            if (!arrival || (legacy && !result.pins[from].transitions[in].slew_ps)) {
               continue;
             }
             for (unsigned out = 0; out < 2; ++out) {
-              const auto delay = arc_delays[id][in][out];
+              const auto delay = usable[id][in][out];
               if (!delay) {
+                if (legacy && missing[id][in][out]) {
+                  issue("missing cell delay/transition table: " + pins[edge.to].name);
+                }
                 continue;
               }
-              auto& target = domain.pins[edge.to][out];
+              reached[id][in][out] = delay;
+              auto& target         = state(edge.to, out);
               if (!target.arrival_ps || *arrival + *delay > *target.arrival_ps) {
                 target.arrival_ps  = *arrival + *delay;
                 target.predecessor = Predecessor{from, in};
@@ -873,6 +883,16 @@ struct Proxy::Impl {
         }
       }
       for (const auto& check : checks) {
+        // Legacy policy: requirements apply unaligned to every endpoint
+        // transition, reached or not; slack is taken after backward timing.
+        if (legacy) {
+          for (unsigned t = 0; t < 2; ++t) {
+            if (check.required[t]) {
+              minimum(state(check.pin, t).required_ps, *check.required[t]);
+            }
+          }
+          continue;
+        }
         double adjustment = 0;
         if (check.clock != absent) {
           const auto& capture = clock_system.clocks[check.clock].model;
@@ -887,13 +907,13 @@ struct Proxy::Impl {
           }
         }
         for (unsigned t = 0; t < 2; ++t) {
-          auto& state = domain.pins[check.pin][t];
-          if (!state.arrival_ps || !check.required[t]) {
+          auto& target = state(check.pin, t);
+          if (!target.arrival_ps || !check.required[t]) {
             continue;
           }
           const double required = *check.required[t] + adjustment;
-          minimum(state.required_ps, required);
-          const double slack = required - *state.arrival_ps;
+          minimum(target.required_ps, required);
+          const double slack = required - *target.arrival_ps;
           minimum(endpoint_slack[check.pin], slack);
           if (check.clock == absent) {
             absolute_output = true;
@@ -911,70 +931,141 @@ struct Proxy::Impl {
         }
       }
       if (result.feasible_graph) {
-        capture_graph(result, domain.launch_clock, boundaries, arc_delays, [&](size_t i, unsigned t) -> const auto& {
-          return domain.pins[i][t];
-        });
+        capture_graph(result, launch_clock, boundaries, reached, state);
       }
+      // Legacy policy: requirements propagate only through arcs an arrival
+      // reached; named domains propagate through every usable arc.
+      const auto& backward = legacy ? reached : usable;
       for (auto it = order.rbegin(); it != order.rend(); ++it) {
         ++result.required_pins;
         for (auto id : outgoing[*it]) {
           const auto& edge = edges[id];
           for (unsigned in = 0; in < 2; ++in) {
             for (unsigned out = 0; out < 2; ++out) {
-              const auto required = domain.pins[edge.to][out].required_ps;
-              if (required && arc_delays[id][in][out]) {
-                minimum(domain.pins[*it][in].required_ps, *required - *arc_delays[id][in][out]);
+              const auto required = state(edge.to, out).required_ps;
+              if (required && backward[id][in][out]) {
+                minimum(state(*it, in).required_ps, *required - *backward[id][in][out]);
               }
             }
           }
         }
       }
+    };
+    if (legacy) {
+      // The single domain is result.pins, seeded with every input arrival
+      // and clock-to-Q launch by evaluate().
+      time_domain([&](size_t i, unsigned t) -> auto& { return result.pins[i].transitions[t]; }, unclocked, std::nullopt);
+      if (result.feasible_graph && constraints.clock) {
+        result.feasible_graph->reference_period_ps = constraints.clock->period_ps;
+      }
+      for (const auto& pin : result.pins) {
+        if (pin.endpoint) {
+          std::optional<double> slack;
+          for (const auto& state : pin.transitions) {
+            if (state.arrival_ps && state.required_ps) {
+              minimum(slack, *state.required_ps - *state.arrival_ps);
+            } else {
+              issue("uncovered endpoint transition: " + pin.name);
+            }
+          }
+          if (slack) {
+            minimum(result.wns_ps, *slack);
+            result.tns_ps = result.tns_ps.value_or(0) + std::min(0., *slack);
+          }
+        }
+      }
+    } else {
+      std::set<size_t> active_domains;
+      for (const auto& launch : launches) {
+        active_domains.insert(launch.clock);
+      }
+      for (const auto& [name, input] : constraints.inputs) {
+        const auto index = identities.at(name);
+        if (!pins[index].clock && !constants[index] && !constraints.cuts.contains(name)) {
+          active_domains.insert(input.clock.empty() ? unclocked : clock_system.find(input.clock));
+        }
+      }
+      for (size_t source_clock : active_domains) {
+        Result::Domain domain;
+        if (source_clock != unclocked) {
+          domain.launch_clock = clock_system.clocks[source_clock].name;
+        }
+        domain.pins.resize(pins.size());
+        for (const auto& launch : launches) {
+          if (launch.clock == source_clock) {
+            maximum(domain.pins[launch.pin][launch.transition].arrival_ps, launch.arrival);
+          }
+        }
+        for (const auto& [name, input] : constraints.inputs) {
+          const auto index = identities.at(name);
+          const auto id    = input.clock.empty() ? unclocked : clock_system.find(input.clock);
+          if (id != source_clock || pins[index].clock || constants[index] || constraints.cuts.contains(name)) {
+            continue;
+          }
+          const double phase = id == unclocked ? 0 : clock_system.clocks[id].model.phase_ps;
+          for (unsigned t = 0; t < 2; ++t) {
+            domain.pins[index][t].arrival_ps = phase + input.arrival_ps[t];
+          }
+        }
+        time_domain([&](size_t i, unsigned t) -> auto& { return domain.pins[i][t]; }, source_clock, domain.launch_clock);
+        for (size_t i = 0; i < pins.size(); ++i) {
+          for (unsigned t = 0; t < 2; ++t) {
+            const auto& source    = domain.pins[i][t];
+            auto&       aggregate = result.pins[i].transitions[t];
+            if (source.arrival_ps && (!aggregate.arrival_ps || *source.arrival_ps > *aggregate.arrival_ps)) {
+              aggregate.arrival_ps  = source.arrival_ps;
+              aggregate.predecessor = source.predecessor;
+            }
+          }
+        }
+        result.domains.push_back(std::move(domain));
+      }
+      // Aggregate required=maximum arrival+worst eligible slack, matching the
+      // reference-style scalar report. Optimization retains each launch domain's
+      // actual required times and predecessor records above.
       for (size_t i = 0; i < pins.size(); ++i) {
         for (unsigned t = 0; t < 2; ++t) {
-          const auto& source    = domain.pins[i][t];
-          auto&       aggregate = result.pins[i].transitions[t];
-          if (source.arrival_ps && (!aggregate.arrival_ps || *source.arrival_ps > *aggregate.arrival_ps)) {
-            aggregate.arrival_ps  = source.arrival_ps;
-            aggregate.predecessor = source.predecessor;
+          std::optional<double> slack;
+          for (const auto& domain : result.domains) {
+            const auto& state = domain.pins[i][t];
+            if (state.arrival_ps && state.required_ps) {
+              minimum(slack, *state.required_ps - *state.arrival_ps);
+            }
+          }
+          auto& aggregate = result.pins[i].transitions[t];
+          if (slack && aggregate.arrival_ps) {
+            aggregate.required_ps = *aggregate.arrival_ps + *slack;
+          }
+          if (result.pins[i].endpoint && !aggregate.arrival_ps) {
+            issue("uncovered endpoint transition: " + pins[i].name);
           }
         }
-      }
-      result.domains.push_back(std::move(domain));
-    }
-    // Aggregate required=maximum arrival+worst eligible slack, matching the
-    // reference-style scalar report. Optimization retains each launch domain's
-    // actual required times and predecessor records above.
-    for (size_t i = 0; i < pins.size(); ++i) {
-      for (unsigned t = 0; t < 2; ++t) {
-        std::optional<double> slack;
-        for (const auto& domain : result.domains) {
-          const auto& state = domain.pins[i][t];
-          if (state.arrival_ps && state.required_ps) {
-            minimum(slack, *state.required_ps - *state.arrival_ps);
-          }
-        }
-        auto& aggregate = result.pins[i].transitions[t];
-        if (slack && aggregate.arrival_ps) {
-          aggregate.required_ps = *aggregate.arrival_ps + *slack;
-        }
-        if (result.pins[i].endpoint && !aggregate.arrival_ps) {
-          issue("uncovered endpoint transition: " + pins[i].name);
+        if (endpoint_slack[i]) {
+          minimum(result.wns_ps, *endpoint_slack[i]);
+          result.tns_ps = result.tns_ps.value_or(0) + std::min(0., *endpoint_slack[i]);
         }
       }
-      if (endpoint_slack[i]) {
-        minimum(result.wns_ps, *endpoint_slack[i]);
-        result.tns_ps = result.tns_ps.value_or(0) + std::min(0., *endpoint_slack[i]);
+      for (const auto& [key, slack] : clock_endpoint_slack) {
+        auto& clock = result.clocks.at(clock_system.clocks[key.first].name);
+        minimum(clock.wns_ps, slack);
+        clock.tns_ps = clock.tns_ps.value_or(0) + std::min(0., slack);
+        ++clock.timed_endpoints;
       }
-    }
-    for (const auto& [key, slack] : clock_endpoint_slack) {
-      auto& clock = result.clocks.at(clock_system.clocks[key.first].name);
-      minimum(clock.wns_ps, slack);
-      clock.tns_ps = clock.tns_ps.value_or(0) + std::min(0., slack);
-      ++clock.timed_endpoints;
     }
     std::sort(result.unsupported.begin(), result.unsupported.end());
     result.unsupported.erase(std::unique(result.unsupported.begin(), result.unsupported.end()), result.unsupported.end());
-    result.certified     = constraints.complete && result.unsupported.empty() && result.wns_ps.has_value();
+    result.certified = constraints.complete && result.unsupported.empty() && result.wns_ps.has_value();
+    if (legacy) {
+      // Legacy policy: every requirement, outputs included, follows the
+      // single clock, so the achievable period is its period minus WNS.
+      if (result.certified && constraints.clock) {
+        result.achievable_period_ps = std::max(0., constraints.clock->period_ps - *result.wns_ps);
+      }
+      return result;
+    }
+    // Named clocks: a per-clock period needs independent captures, and a
+    // design period additionally needs one active clock and no absolute
+    // output requirement (which a period change cannot move).
     size_t active_clocks = 0;
     for (auto& [name, clock] : result.clocks) {
       (void)name;
@@ -1042,16 +1133,13 @@ struct Proxy::Impl {
     }
     for (const auto& [driver, sinks] : nets) {
       for (auto sink : sinks) {
+        const auto pin_load = sink_load(sink);
         for (unsigned t = 0; t < 2; ++t) {
-          const auto& pin = pins[sink];
-          if (pin.model) {
-            if (pin.model->capacitance_ff[t]) {
-              load[driver][t] += *pin.model->capacitance_ff[t];
-            } else {
-              issue("missing Liberty input capacitance: " + pin.name);
-            }
-          } else if (const auto boundary = constraints.outputs.find(pin.name); boundary != constraints.outputs.end()) {
-            load[driver][t] += boundary->second.load_ff[t];
+          if (pins[sink].model && !pins[sink].model->capacitance_ff[t]) {
+            issue("missing Liberty input capacitance: " + pins[sink].name);
+          }
+          if (pin_load) {
+            load[driver][t] += (*pin_load)[t];
           }
         }
       }
@@ -1097,12 +1185,9 @@ struct Proxy::Impl {
           if (pin == identities.end() || std::find(sinks.begin(), sinks.end(), pin->second) == sinks.end()) {
             throw std::invalid_argument("physical RC sink differs from mapped connectivity: " + node.pin);
           }
-          for (unsigned t = 0; t < 2; ++t) {
-            const auto& bound = pins[pin->second];
-            if (bound.model) {
-              cap[i][t] += bound.model->capacitance_ff[t].value_or(0);
-            } else if (const auto output = constraints.outputs.find(bound.name); output != constraints.outputs.end()) {
-              cap[i][t] += output->second.load_ff[t];
+          if (const auto pin_load = sink_load(pin->second)) {
+            for (unsigned t = 0; t < 2; ++t) {
+              cap[i][t] += (*pin_load)[t];
             }
           }
         }
@@ -1126,16 +1211,7 @@ struct Proxy::Impl {
           };
           add(driver, {});
           for (auto sink : sinks) {
-            Pair        pin_cap{};
-            const auto& bound = pins[sink];
-            if (bound.model) {
-              for (unsigned t = 0; t < 2; ++t) {
-                pin_cap[t] = bound.model->capacitance_ff[t].value_or(0);
-              }
-            } else if (const auto output = constraints.outputs.find(bound.name); output != constraints.outputs.end()) {
-              pin_cap = output->second.load_ff;
-            }
-            add(sink, pin_cap);
+            add(sink, sink_load(sink).value_or(Pair{}));
           }
           star_nets.push_back(std::move(input));
         } else {
@@ -1352,11 +1428,10 @@ struct Proxy::Impl {
               }
               std::optional<double> worst_delay, worst_slew;
               if (driver_shapes[from][out].empty()) {
-                Driver_waveform ideal;
-                ideal.slew_ps       = *source.slew_ps;
-                const auto response = ideal.wire(elmore[edge.to][out], *pins[from].thresholds, *pins[edge.to].thresholds, out);
-                worst_delay         = response.delay_ps;
-                worst_slew          = response.slew_ps;
+                const auto response
+                    = ramp_wire(*source.slew_ps, elmore[edge.to][out], *pins[from].thresholds, *pins[edge.to].thresholds, out);
+                worst_delay = response.delay_ps;
+                worst_slew  = response.slew_ps;
               } else {
                 for (const auto& shape : driver_shapes[from][out]) {
                   const auto response = shape.wire(elmore[edge.to][out], *pins[from].thresholds, *pins[edge.to].thresholds, out);
@@ -1378,169 +1453,7 @@ struct Proxy::Impl {
         std::vector<Driver_waveform>().swap(shapes);
       }
     }
-    if (!constraints.clocks.empty()) {
-      return evaluate_domains(std::move(result), launches, cell_delays, wire_delay, driving_delay);
-    }
-    Boundaries boundaries;
-    if (result.feasible_graph) {
-      boundaries.resize(pins.size());
-      for (size_t i = 0; i < pins.size(); ++i) {
-        for (unsigned t = 0; t < 2; ++t) {
-          boundaries[i][t] = result.pins[i].transitions[t].arrival_ps;
-        }
-      }
-    }
-    std::vector<Delays> delays(edges.size());
-    for (auto from : order) {
-      ++result.visited_pins;
-      if (constants[from]) {
-        continue;
-      }
-      for (auto edge_id : outgoing[from]) {
-        const auto& edge = edges[edge_id];
-        if (constants[edge.to] || (edge.model && !active(cells[pins[edge.to].cell], *pins[edge.to].model, *edge.model))) {
-          continue;
-        }
-        const auto sense = edge.model ? sensitivity(cells[pins[edge.to].cell], *pins[edge.to].model, edge.model->related_pin)
-                                      : std::pair{true, true};
-        for (unsigned in = 0; in < 2; ++in) {
-          const auto& source = result.pins[from].transitions[in];
-          if (!source.arrival_ps || !source.slew_ps) {
-            continue;
-          }
-          for (unsigned out = 0; out < 2; ++out) {
-            double delay = 0, slew = 0;
-            if (edge.model) {
-              if (!sensitized_transition(*edge.model, sense, in, out)) {
-                continue;
-              }
-              const auto value = cell_delays[edge_id][in][out];
-              if (!value) {
-                issue("missing cell delay/transition table: " + pins[edge.to].name);
-                continue;
-              }
-              delay = *value;
-              slew  = result.pins[edge.to].transitions[out].slew_ps.value_or(0);
-            } else {
-              if (in != out) {
-                continue;
-              }
-              if (!driving_delay[from][out]) {
-                continue;
-              }
-              delay = *driving_delay[from][out] + wire_delay[edge.to][out];
-              slew  = result.pins[edge.to].transitions[out].slew_ps.value_or(0);
-            }
-            delays[edge_id][in][out] = delay;
-            auto&        target      = result.pins[edge.to].transitions[out];
-            const double arrival     = *source.arrival_ps + delay;
-            if (!target.arrival_ps || arrival > *target.arrival_ps) {
-              target.arrival_ps  = arrival;
-              target.predecessor = Predecessor{from, in};
-            }
-            maximum(target.slew_ps, slew);
-            ++result.evaluated_arcs;
-          }
-        }
-      }
-    }
-    for (size_t i = 0; i < pins.size(); ++i) {
-      const auto& pin = pins[i];
-      if (constants[i]) {
-        continue;
-      }
-      if (pin.output_port && !pin.clock && !constraints.cuts.contains(pin.name)) {
-        const auto boundary = constraints.outputs.find(pin.name);
-        if (boundary == constraints.outputs.end()) {
-          issue("unconstrained output requirement: " + pin.name);
-          continue;
-        }
-        result.pins[i].endpoint = true;
-        for (unsigned t = 0; t < 2; ++t) {
-          result.pins[i].transitions[t].required_ps = boundary->second.required_ps[t];
-        }
-      }
-      if (!pin.model || pin.model->direction != "input" || pin.clock || constraints.cuts.contains(pin.name)) {
-        continue;
-      }
-      for (const auto& arc : pin.model->arcs) {
-        if (!active(cells[pin.cell], *pin.model, arc)) {
-          continue;
-        }
-        if (!arc.type.starts_with("setup_")) {
-          continue;
-        }
-        result.pins[i].endpoint = true;
-        if (arc.type != "setup_rising") {
-          issue("falling-edge setup is unsupported: " + pin.name);
-          continue;
-        }
-        if (!arc.when.empty() && !logic.at({cells[pin.cell].model, arc.when})) {
-          issue("unsupported conditional setup expression: " + pin.name);
-        }
-        const auto clock = cells[pin.cell].pins.find(arc.related_pin);
-        if (!constraints.clock || clock == cells[pin.cell].pins.end() || !pins[clock->second].clock) {
-          issue("unconstrained setup clock: " + pin.name);
-          continue;
-        }
-        for (unsigned t = 0; t < 2; ++t) {
-          const auto& slew = result.pins[i].transitions[t].slew_ps;
-          if (!arc.constraint[t] || !slew) {
-            issue("missing setup table or data slew: " + pin.name);
-            continue;
-          }
-          const auto setup
-              = arc.constraint[t]->lookup({.related_slew_ps = constraints.clock->slew_ps[0], .constrained_slew_ps = *slew});
-          minimum(result.pins[i].transitions[t].required_ps,
-                  constraints.clock->period_ps - constraints.clock->uncertainty_ps - setup);
-        }
-      }
-    }
-    if (result.feasible_graph) {
-      capture_graph(result, std::nullopt, boundaries, delays, [&](size_t i, unsigned t) -> const auto& {
-        return result.pins[i].transitions[t];
-      });
-      if (constraints.clock) {
-        result.feasible_graph->reference_period_ps = constraints.clock->period_ps;
-      }
-    }
-    result.required_pins = order.size();
-    for (auto it = order.rbegin(); it != order.rend(); ++it) {
-      for (auto edge_id : outgoing[*it]) {
-        const auto& edge = edges[edge_id];
-        for (unsigned in = 0; in < 2; ++in) {
-          for (unsigned out = 0; out < 2; ++out) {
-            const auto& target = result.pins[edge.to].transitions[out];
-            if (target.required_ps && delays[edge_id][in][out]) {
-              minimum(result.pins[edge.from].transitions[in].required_ps, *target.required_ps - *delays[edge_id][in][out]);
-            }
-          }
-        }
-      }
-    }
-    for (const auto& pin : result.pins) {
-      if (pin.endpoint) {
-        std::optional<double> slack;
-        for (const auto& state : pin.transitions) {
-          if (state.arrival_ps && state.required_ps) {
-            minimum(slack, *state.required_ps - *state.arrival_ps);
-          } else {
-            issue("uncovered endpoint transition: " + pin.name);
-          }
-        }
-        if (slack) {
-          minimum(result.wns_ps, *slack);
-          result.tns_ps = result.tns_ps.value_or(0) + std::min(0., *slack);
-        }
-      }
-    }
-    std::sort(result.unsupported.begin(), result.unsupported.end());
-    result.unsupported.erase(std::unique(result.unsupported.begin(), result.unsupported.end()), result.unsupported.end());
-    result.certified = constraints.complete && result.unsupported.empty() && result.wns_ps.has_value();
-    if (result.certified && constraints.clock) {
-      result.achievable_period_ps = std::max(0., constraints.clock->period_ps - *result.wns_ps);
-    }
-    return result;
+    return time_setup(std::move(result), launches, cell_delays, wire_delay, driving_delay);
   }
 };
 
