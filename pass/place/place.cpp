@@ -946,6 +946,7 @@ struct Endpoint {
   friend bool operator<(const Endpoint& a, const Endpoint& b) {
     return std::tie(a.constant, a.instance, a.pin) < std::tie(b.constant, b.instance, b.pin);
   }
+  std::string label() const { return ph::connection_label(instance, pin); }
 };
 // Lower wiring by demand. The placed graph retains its bus interfaces and pure
 // wiring nodes; only physical endpoints enter the placer's array model.
@@ -1185,7 +1186,7 @@ void collect_control_roles(hhds::Graph& graph, Resolver& resolve, Prects_library
           continue;
         }
         const bool port  = endpoint.instance == "PIN";
-        const auto label = port ? endpoint.pin : endpoint.instance + ":" + endpoint.pin;
+        const auto label = endpoint.label();
         if (!roles.override_controls) {
           (port ? roles.ports : roles.pins).insert(label);
         }
@@ -1630,7 +1631,7 @@ void make_arrays(View& v, const ph::Technology& tech) {
       append(sink);
     }
     d.flat_net2pin_start.push_back(d.pin2node.size());
-    const auto key    = driver.instance == "PIN" ? driver.pin : driver.instance + ":" + driver.pin;
+    const auto key    = driver.label();
     const auto weight = v.weights.contains(key) ? v.weights.at(key) : 1;
     if (!std::isfinite(weight) || weight < 1 || weight > max_net_weight) {
       throw std::invalid_argument("invalid physical net weight");
@@ -1993,7 +1994,7 @@ void localize_tie_sites(View& v, const ph::Technology& tech, const std::string& 
   std::map<size_t, std::vector<Endpoint>>    targets;
   std::map<size_t, std::vector<std::string>> outputs;
   for (const auto& [driver, sinks] : v.nets) {
-    const auto label = driver.instance == "PIN" ? driver.pin : driver.instance + ":" + driver.pin;
+    const auto label = driver.label();
     if (v.ignored.pins.contains(label)) {
       continue;
     }
@@ -2801,8 +2802,7 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology&
   std::vector<Rc_geometry>                                       geometries;
   std::vector<std::pair<std::string, std::pair<double, double>>> pins;
   for (size_t net = 0; net < v.drivers.size(); ++net) {
-    const auto endpoint = [](const Endpoint& e) { return e.instance == "PIN" ? e.pin : e.instance + ":" + e.pin; };
-    const int  begin = v.design.flat_net2pin_start[net], end = v.design.flat_net2pin_start[net + 1];
+    const int begin = v.design.flat_net2pin_start[net], end = v.design.flat_net2pin_start[net + 1];
     if (end - begin < 2) {
       continue;
     }
@@ -2811,7 +2811,7 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology&
     for (int p = begin; p < end; ++p) {
       const auto   node = v.design.pin2node[p];
       const double x = v.design.node_x[node] + v.design.pin_offset_x[p], y = v.design.node_y[node] + v.design.pin_offset_y[p];
-      pins.emplace_back(endpoint(v.pins[p]), std::pair{x, y});
+      pins.emplace_back(v.pins[p].label(), std::pair{x, y});
       pin_locations.emplace(pins.back().first, std::pair{x, y});
       if (!cache) {
         hash_format("{}:{}:{};", pins.back().first, std::llround(x), std::llround(y));
@@ -2830,11 +2830,11 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology&
       }
     }
     if (cache) {
-      geometries.push_back({endpoint(v.drivers[net]), pins, std::format("{:016x}", load_hash)});
+      geometries.push_back({v.drivers[net].label(), pins, std::format("{:016x}", load_hash)});
       continue;
     }
     bool approximate = false;
-    auto rc          = steiner_rc(endpoint(v.drivers[net]), pins, wire, tech.dbu, &approximate);
+    auto rc          = steiner_rc(v.drivers[net].label(), pins, wire, tech.dbu, &approximate);
     append(std::move(rc), approximate);
   }
   if (cache) {
@@ -6585,7 +6585,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         v.weights           = checkpoint.net_weights;
         dp::GpUpdate update = std::move(topology_update);
         for (const auto& driver : v.drivers) {
-          const auto name = driver.instance == "PIN" ? driver.pin : driver.instance + ":" + driver.pin;
+          const auto name = driver.label();
           update.net_weights.push_back(v.weights.contains(name) ? v.weights.at(name) : 1.);
         }
         if (timing.wns) {
@@ -7276,24 +7276,23 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           = std::make_shared<timeclosure::Gp_timing_session>(*result.graph,
                                                              config,
                                                              Rc_policy{per_um(wire), double(tech.dbu), wire.source});
-      // Native timing names physical pins as a top port or instance:pin.
-      const auto label        = [](const Endpoint& pin) { return pin.instance == "PIN" ? pin.pin : pin.instance + ":" + pin.pin; };
-      // Bind every weighted timing sink to its physical pin and net driver.
-      const auto bind_weights = [label](const std::vector<Endpoint>&                          pins,
-                                        const dp::Design&                                     physical,
-                                        const std::map<std::string, timeclosure::Pin_weight>& weights,
-                                        dp::PinTiming&                                        timing,
-                                        const std::string&                                    what) {
+      // Bind every weighted timing sink to its physical pin and net driver;
+      // native timing names physical pins as a top port or instance:pin.
+      const auto bind_weights = [](const std::vector<Endpoint>&                          pins,
+                                   const dp::Design&                                     physical,
+                                   const std::map<std::string, timeclosure::Pin_weight>& weights,
+                                   dp::PinTiming&                                        timing,
+                                   const std::string&                                    what) {
         timing.driver.assign(physical.pin2node.size(), -1);
         timing.weight.assign(physical.pin2node.size(), 0);
         size_t matched = 0;
         for (size_t p = 0; p < pins.size(); ++p) {
-          const auto found = weights.find(label(pins[p]));
+          const auto found = weights.find(pins[p].label());
           if (found == weights.end()) {
             continue;
           }
           const int net = physical.pin2net[p], driver = physical.flat_net2pin[physical.flat_net2pin_start[net]];
-          if (found->second.driver != label(pins[driver])) {
+          if (found->second.driver != pins[driver].label()) {
             throw std::invalid_argument(what + " driver differs from physical net");
           }
           timing.driver[p] = driver;
@@ -7412,8 +7411,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       const auto first = std::max<int64_t>(1, (int64_t(config.start) + config.interval - 1) / config.interval) * config.interval;
       control.min_iterations = std::max(control.min_iterations, int(std::min<int64_t>(control.max_iterations, first)));
       auto buffering_state   = std::make_shared<std::optional<buffering::Checkpoint_state>>();
-      control.checkpoint     = [&, session, rc_cache, trace, buffering_state, label, bind_weights](const dp::Design& physical,
-                                                                                               int               iteration) {
+      control.checkpoint     = [&, session, rc_cache, trace, buffering_state, bind_weights](const dp::Design& physical,
+                                                                                        int               iteration) {
         auto view       = v;
         view.design     = physical;
         auto rc_options = options;
@@ -7464,7 +7463,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
               if (physical.flat_net2pin_start[n] == physical.flat_net2pin_start[n + 1])
                 continue;
               const int p = physical.flat_net2pin[physical.flat_net2pin_start[n]];
-              drivers.emplace(label(view.pins[p]), p);
+              drivers.emplace(view.pins[p].label(), p);
             }
             const buffering::Checkpoint_input input{physical,
                                                     fresh_timing,
@@ -7673,7 +7672,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         const auto prior        = control.before_legalize;
         const auto strength     = config.legalization;
         const auto driver       = config.driver;
-        control.before_legalize = [&, session, prior, strength, driver, label](dp::Design& physical) {
+        control.before_legalize = [&, session, prior, strength, driver](dp::Design& physical) {
           if (prior) {
             prior(physical);
           }
@@ -7694,7 +7693,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             throw std::invalid_argument("native legalization physical pin census differs");
           }
           for (size_t pin = 0; pin < view.pins.size(); ++pin) {
-            binding.pins.push_back({label(view.pins[pin]), size_t(physical.pin2node[pin]), size_t(physical.pin2net[pin])});
+            binding.pins.push_back({view.pins[pin].label(), size_t(physical.pin2node[pin]), size_t(physical.pin2net[pin])});
           }
           for (size_t net = 0; net + 1 < physical.flat_net2pin_start.size(); ++net) {
             const auto begin = physical.flat_net2pin_start.at(net);
@@ -10076,7 +10075,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
   }
   for (const auto& driver : v.drivers) {
-    const auto name = driver.instance == "PIN" ? driver.pin : driver.instance + ":" + driver.pin;
+    const auto name = driver.label();
     if (v.weights.contains(name)) {
       result.net_weights.emplace(name, v.weights.at(name));
     }
@@ -10097,7 +10096,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         for (int bit = 0; bit < std::max(1, gu::bits_of(pin)); ++bit) {
           const auto endpoint = exclusion_resolver.bit(pin, bit);
           if (endpoint.constant < 0) {
-            excluded_drivers.insert(endpoint.instance == "PIN" ? endpoint.pin : endpoint.instance + ":" + endpoint.pin);
+            excluded_drivers.insert(endpoint.label());
           }
         }
       }
@@ -10107,7 +10106,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       collect_exclusions(node);
     }
     for (const auto& pin : v.pins) {
-      snapshot->pin_labels.push_back(pin.instance == "PIN" ? pin.pin : pin.instance + ":" + pin.pin);
+      snapshot->pin_labels.push_back(pin.label());
       const auto cell = v.cell.find(pin.instance);
       if (excluded_drivers.contains(snapshot->pin_labels.back())
           || (cell != v.cell.end() && v.cells.at(cell->second).node.attr(livehd::attrs::preroute_exclude).has())) {

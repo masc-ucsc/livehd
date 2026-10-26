@@ -121,7 +121,7 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
   };
   for (size_t n = 0; n < fp.nets.size(); ++n) {
     for (const auto& c : fp.nets[n].connections) {
-      const auto label = c.instance == "PIN" ? c.pin : c.instance + ":" + c.pin;
+      const auto label = physical::connection_label(c);
       pin_net.emplace(label, n);
       if ((c.instance == "PIN" && roles.reset_ports.contains(c.pin))
           || (c.instance != "PIN" && (roles.reset_pins.contains(label) || roles.reset_pins.contains(c.instance + "/" + c.pin)))) {
@@ -200,7 +200,7 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
   }
   for (size_t n : pending) {
     for (const auto& c : fp.nets[n].connections) {
-      const auto label = c.instance == "PIN" ? c.pin : c.instance + ":" + c.pin;
+      const auto label = physical::connection_label(c);
       result.pins.insert(label);
       if (!clock_nets[n]) {
         result.timing_cuts.insert(label);

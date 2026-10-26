@@ -201,7 +201,7 @@ int main(int argc, char** argv) {
       double                    xl = std::numeric_limits<double>::infinity(), yl = xl, xh = -xl, yh = -xl;
       std::vector<Snapshot_pin> pins;
       for (const auto& pin : net.connections) {
-        const auto label  = pin.instance == "PIN" ? pin.pin : pin.instance + ":" + pin.pin;
+        const auto label  = ph::connection_label(pin);
         reset            |= policy.timing_cuts.contains(label);
         double x, y;
         size_t node;

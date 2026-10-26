@@ -234,7 +234,10 @@ struct Connection {
   friend bool operator==(const Connection&, const Connection&) = default;
 };
 // Timing/demand endpoint identity: "instance:pin", or the bare DEF PIN name.
-inline std::string connection_label(const Connection& c) { return c.instance == "PIN" ? c.pin : c.instance + ":" + c.pin; }
+inline std::string connection_label(const std::string& instance, const std::string& pin) {
+  return instance == "PIN" ? pin : instance + ":" + pin;
+}
+inline std::string connection_label(const Connection& c) { return connection_label(c.instance, c.pin); }
 // Routing geometry uses integer DEF DBU, including via-local coordinates.
 // Keep extensions explicit: an omitted extension means half the wire width for
 // ordinary nets and zero for special nets. Explicit zero is a flush endpoint.

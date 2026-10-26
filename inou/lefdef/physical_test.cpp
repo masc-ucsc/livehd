@@ -404,6 +404,11 @@ TEST(Physical, OrientationTransforms) {
   EXPECT_EQ(orient_point(1, 2, 10, 20, Orientation::FN), (std::pair<double, double>{9, 2}));
   EXPECT_EQ(orient_point(1, 2, 10, 20, Orientation::W), (std::pair<double, double>{18, 1}));
 }
+TEST(Physical, ConnectionLabel) {
+  EXPECT_EQ(connection_label(Connection{"PIN", "clk"}), "clk");
+  EXPECT_EQ(connection_label(Connection{"u1", "A"}), "u1:A");
+  EXPECT_EQ(connection_label("u1", "A"), connection_label(Connection{"u1", "A"}));
+}
 TEST(Physical, SharedGeometryHelpers) {
   const Rect a{0, 0, 10, 10}, b{10, 0, 20, 10}, c{10, 10, 20, 20};
   EXPECT_TRUE(a.touches(b));
