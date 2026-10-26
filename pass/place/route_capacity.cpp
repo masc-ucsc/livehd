@@ -9,12 +9,6 @@
 
 namespace livehd::placement {
 namespace ph = physical;
-namespace {
-// True when a lies farther than d from b along either axis.
-bool apart(const ph::Rect& a, const ph::Rect& b, double d) {
-  return a.xl > b.xh + d || a.xh < b.xl - d || a.yl > b.yh + d || a.yh < b.yl - d;
-}
-}  // namespace
 Route_capacity::Route_capacity(const ph::Technology& tech, const ph::Floorplan& fp, const ph::Routing_occupancy& obstacles,
                                Route_capacity_grid grid, const std::function<void()>& checkpoint)
     : grid_(std::move(grid)), rules_(tech, fp) {
@@ -137,7 +131,7 @@ Route_capacity::Route_capacity(const ph::Technology& tech, const ph::Floorplan& 
               continue;
             }
             const auto& footprint = track->footprint;
-            if (apart(obstacle.rect, footprint.rect, *clearance)) {
+            if (obstacle.rect.farther_than(footprint.rect, *clearance)) {
               continue;
             }
             if (!rules_.spacing(footprint, obstacle).legal) {
@@ -180,12 +174,12 @@ void Route_capacity::add_obstructions(const ph::Routing_occupancy& added, const 
         checkpoint();
       }
       auto& cell = cells_[index];
-      if (!cell.report.usable_tracks || apart(obstacle.rect, cell.bounds, reach)) {
+      if (!cell.report.usable_tracks || obstacle.rect.farther_than(cell.bounds, reach)) {
         continue;
       }
       for (auto& track : cell.tracks) {
         const auto& r = track.footprint.rect;
-        if (!track.usable || apart(obstacle.rect, r, clearance)) {
+        if (!track.usable || obstacle.rect.farther_than(r, clearance)) {
           continue;
         }
         if (!rules_.spacing(track.footprint, obstacle).legal) {
@@ -356,7 +350,7 @@ Route_capacity_trial Route_capacity::check_impl(const std::vector<ph::Shape>& sh
           const auto& track = cell.tracks[t];
           // The layer reach bounds every supported spacing rule. Coarse bins
           // contain many tracks too far away to interact with this wire.
-          if (apart(s.rect, track.footprint.rect, layer.reach)) {
+          if (s.rect.farther_than(track.footprint.rect, layer.reach)) {
             continue;
           }
           if (rules_.spacing(track.footprint, s).legal) {

@@ -25,6 +25,10 @@ struct Rect {
   bool        contains(const Rect& r) const { return xl <= r.xl && yl <= r.yl && xh >= r.xh && yh >= r.yh; }
   // Positive-area overlap; rectangles sharing only an edge do not overlap.
   bool        overlaps(const Rect& r) const { return xl < r.xh && r.xl < xh && yl < r.yh && r.yl < yh; }
+  // Farther than distance from r along either axis.
+  bool        farther_than(const Rect& r, double distance) const {
+    return xl > r.xh + distance || xh < r.xl - distance || yl > r.yh + distance || yh < r.yl - distance;
+  }
   // Overlap or a shared edge segment; a single shared corner point does not touch.
   bool        touches(const Rect& r) const {
     const auto x = std::min(xh, r.xh) - std::max(xl, r.xl), y = std::min(yh, r.yh) - std::max(yl, r.yl);
