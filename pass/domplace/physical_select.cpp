@@ -239,15 +239,17 @@ std::optional<usyn::Physical_emission> select_physical(const usyn::Stateful_regi
     const auto retain      = [&](Reason reason) { state.reason = reason_code(reason); };
     // Exhaustion is sticky: this and every later candidate keeps CMOS.
     const auto out_of_work = [&] {
-      state       = {};
-      state.state = i;
-      exhausted   = true;
+      state          = {};
+      state.state    = i;
+      state.eligible = true;
+      exhausted      = true;
       retain(Reason::selection_budget);
     };
     if (eligibility != Reason::candidate) {
       retain(eligibility);
       continue;
     }
+    state.eligible = true;
     if (exhausted) {
       out_of_work();
       continue;

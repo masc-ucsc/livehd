@@ -167,3 +167,20 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+# The `physical` block of pass.usyn's report.
+cc_library(
+    name = "physical_report",
+    srcs = ["physical_report.cpp"],
+    hdrs = ["physical_report.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":contract",
+        ":domino_reference",
+        ":physical_select",
+        "//pass/usyn:usyn_semantic",
+        "@rapidjson",
+    ],
+)

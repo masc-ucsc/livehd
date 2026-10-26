@@ -15,13 +15,17 @@
 
 #include "artifact.hpp"
 #include "design_synth.hpp"
+#include "domino_reference.hpp"
 #include "fold_engine.hpp"
 #include "graph_library_singleton.hpp"
 #include "host_mem.hpp"
 #include "job_manager.hpp"
+#include "liberty_dff.hpp"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SHA256.h"
 #include "native_report.hpp"
+#include "physical_report.hpp"
+#include "physical_select.hpp"
 #include "property_types.hpp"
 #include "provenance.hpp"
 #include "query.hpp"
@@ -50,7 +54,16 @@ struct Options {
   std::string                  tmap        = "abc";
   uint64_t                     work        = 4000000000;
   uint32_t                     tmap_trials = 2;
+  // The opt-in provisional physical profile (pass/domplace). The logical
+  // target stays cmos; `none` changes nothing.
+  std::string                      physical    = "none";
+  livehd::domplace::Select_options domino;
+  std::string                      domino_inverter, domino_register, lef;
+  uint32_t                         domino_aux = 4, domino_variants = 3;
 };
+
+constexpr std::string_view domino_options[]
+    = {"domino_select", "domino_identity", "domino_clock", "domino_inverter", "domino_register", "domino_aux", "domino_variants"};
 
 bool read_options(const Eprp_var& var, Options& options) {
   for (const auto key : obsolete) {
@@ -297,6 +310,68 @@ bool read_options(const Eprp_var& var, Options& options) {
                                  + (options.design.unroll_carry ? "1" : "0");
   endpoint.cost_nodes          = logical.max_nodes;
   residual.max_nodes           = logical.max_nodes;
+
+  options.physical = std::string(var.get_stage("physical", "none"));
+  if (options.physical != "none" && options.physical != "domino_provisional") {
+    return invalid_option("physical", "none|domino_provisional");
+  }
+  const auto select = var.get_stage("domino_select", "area");
+  if (select != "area" && select != "all") {
+    return invalid_option("domino_select", "area (convert when the domino estimate is smaller) or all");
+  }
+  options.domino.policy
+      = select == "all" ? livehd::domplace::Select_options::Policy::all : livehd::domplace::Select_options::Policy::area;
+  if (!flag("domino_identity", options.domino.identity, "false")) {
+    return invalid_option("domino_identity", "true|false");
+  }
+  options.domino.clock    = std::string(var.get_stage("domino_clock", ""));
+  options.domino_inverter = std::string(var.get_stage("domino_inverter", ""));
+  options.domino_register = std::string(var.get_stage("domino_register", ""));
+  options.lef             = std::string(var.get_stage("lef", ""));
+  if (!read("domino_aux", "4", options.domino_aux) || options.domino_aux > 64) {
+    return invalid_option("domino_aux", "0..64 domino-only devices outside the register");
+  }
+  if (!read("domino_variants", "3", options.domino_variants) || options.domino_variants < 1 || options.domino_variants > 3) {
+    return invalid_option("domino_variants", "1..3 drive variants from the register ladder");
+  }
+  const auto profile_error = [&](std::string_view message, std::string_view hint) {
+    livehd::diag::err("pass.usyn", "domino-profile", "syntax").msg("{}", message).hint(hint).emit();
+    return false;
+  };
+  if (options.physical == "none") {
+    for (const auto key : domino_options) {
+      if (!var.get_stage(key, "").empty()) {
+        return profile_error(std::format("pass.usyn.{} needs pass.usyn.physical=domino_provisional", key),
+                             "the domino options only configure the provisional physical profile");
+      }
+    }
+    return true;
+  }
+  // Every requirement is explicit: no existing default moves for the profile.
+  if (endpoint.clock_phases != 1) {
+    return profile_error("pass.usyn.physical=domino_provisional needs pass.usyn.clock_phases=1",
+                         "the provisional profile has one domino evaluation phase per stage");
+  }
+  if (endpoint.gates.stack > 4) {
+    return profile_error("pass.usyn.physical=domino_provisional caps pass.usyn.stack at 4 devices",
+                         "use stack=1..4; excess logic stays in upstream CMOS");
+  }
+  if (!options.design.literal_stats.empty() || options.design.literal_extract) {
+    return profile_error("pass.usyn.literal_stats and literal_extract are not supported with physical=domino_provisional",
+                         "run the literal-network experiments without the physical profile");
+  }
+  if (options.mapping.library.empty()) {
+    return profile_error("pass.usyn.physical=domino_provisional needs a Liberty (synth.liberty)",
+                         "the reference inverter, register family and CMOS estimate come from it");
+  }
+  if (options.lef.empty()) {
+    return profile_error("pass.usyn.physical=domino_provisional needs the technology and cell LEFs (synth.lef)",
+                         "the provisional abstracts use the reference cells' LEF site and footprints");
+  }
+  if (options.domino.clock.empty()) {
+    return profile_error("pass.usyn.physical=domino_provisional needs pass.usyn.domino_clock",
+                         "name the one constrained clock port; only its registers may convert");
+  }
   return true;
 }
 
@@ -360,6 +435,27 @@ void Pass_usyn::setup() {
                        "shares native work and process/time limits; tmap=none runs one network",
                        "2");
   m.add_label_optional("target", "Output target; currently cmos retains original state", "cmos");
+  m.add_label_optional("physical",
+                       "Opt-in provisional physical profile: none, or domino_provisional (one-phase domino stages beside "
+                       "retained CMOS+DFF, with reason codes; the logical target stays cmos). Needs clock_phases=1, a "
+                       "Liberty, the LEFs and domino_clock; currently a dry run that reports the decisions and emits CMOS",
+                       "none");
+  m.add_label_optional("domino_select",
+                       "domino_provisional choice: area (convert when the domino area estimate is below CMOS+DFF; a tie "
+                       "keeps CMOS) or all (every legal candidate)",
+                       "area");
+  m.add_label_optional("domino_identity", "domino_provisional: also convert one-literal endpoints", "false");
+  m.add_label_optional("domino_clock", "domino_provisional: the one constrained clock port whose registers may convert", "");
+  m.add_label_optional("domino_inverter", "domino_provisional reference NOT cell (empty: the smallest-area Liberty NOT cell)", "");
+  m.add_label_optional("domino_register",
+                       "domino_provisional reference register (empty: the register-mapping pick); its drive ladder gives "
+                       "the variants",
+                       "");
+  m.add_label_optional("domino_aux",
+                       "domino_provisional domino-only devices outside the register (precharge, keeper, foot), 0..64",
+                       "4");
+  m.add_label_optional("domino_variants", "domino_provisional drive variants from the register ladder, 1..3", "3");
+  m.add_label_optional("lef", "INTERNAL technology and cell LEFs from synth.lef; required by physical=domino_provisional", "");
   m.add_label_optional("unroll_carry",
                        "true|false: expand carry-dependent compact loops per ordinal before synthesis (default true, as "
                        "pass.abc). False maps one generic body and stitches the carry afterwards: the body keeps its "
@@ -652,12 +748,13 @@ void Pass_usyn::synthesize(Eprp_var& var) {
   resources.time_limit_ms       = options.mapping.time_budget_ms;
   usyn::Budget work{options.work};
   work.admission = [&] { return resources.admit(elapsed(), livehd::cost::process_footprint_bytes()); };
-  if (options.design.cost_policy != "proxy") {
-    const auto    model_work_before = work.consumed;
+  // One Liberty content snapshot prices native cells. cost_mode ranks logical
+  // choices with it; the domino profile prices CMOS cones with it.
+  const auto read_cost_model = [&](usyn::Budget& budget) -> std::optional<std::pair<usyn::Native_cost_model, std::string>> {
     std::ifstream library(options.mapping.library, std::ios::binary);
     if (!library) {
-      livehd::diag::err("pass.usyn", "native-cost-library", "io").msg("native cost_mode requires a readable Liberty file").emit();
-      return;
+      livehd::diag::err("pass.usyn", "native-cost-library", "io").msg("native cell costs require a readable Liberty file").emit();
+      return std::nullopt;
     }
     llvm::SHA256            hash;
     std::string             library_contents;
@@ -669,18 +766,18 @@ void Pass_usyn::synthesize(Eprp_var& var) {
         livehd::diag::err("pass.usyn", "native-cost-library-limit", "unsupported")
             .msg("Liberty content snapshot exceeds 64 MiB")
             .emit();
-        return;
+        return std::nullopt;
       }
-      if (!work.spend(length)) {
+      if (!budget.spend(length)) {
         livehd::diag::err("pass.usyn", "native-cost-budget", "unsupported").msg("Liberty content hashing budget").emit();
-        return;
+        return std::nullopt;
       }
       hash.update(llvm::StringRef(buffer.data(), length));
       library_contents.append(buffer.data(), length);
     }
     if (!library.eof()) {
       livehd::diag::err("pass.usyn", "native-cost-library", "io").msg("cannot read Liberty contents").emit();
-      return;
+      return std::nullopt;
     }
     std::string    identity;
     constexpr char hex[] = "0123456789abcdef";
@@ -688,19 +785,74 @@ void Pass_usyn::synthesize(Eprp_var& var) {
       identity += hex[byte >> 4];
       identity += hex[byte & 15];
     }
-    auto model_work = work.slice(100000000, 1, 4096);
+    auto model_work = budget.slice(100000000, 1, 4096);
     auto model      = usyn::read_native_cost_text_model(library_contents, model_work);
-    work.absorb(model_work);
-    options.design.cost_model_work = work.consumed - model_work_before;
+    budget.absorb(model_work);
     if (!model) {
       livehd::diag::err("pass.usyn", "native-cost-refused", "unsupported")
           .msg("native legal-cell cost table unavailable or over budget")
           .emit();
+      return std::nullopt;
+    }
+    return std::pair{std::move(*model), std::move(identity)};
+  };
+  std::shared_ptr<const usyn::Native_cost_model> native_model;
+  if (options.design.cost_policy != "proxy") {
+    const auto model_work_before   = work.consumed;
+    auto       read                = read_cost_model(work);
+    options.design.cost_model_work = work.consumed - model_work_before;
+    if (!read) {
       return;
     }
-    options.design.cost_model = std::make_shared<usyn::Native_cost_model>(std::move(*model));
-    options.design.cache.context
-        += "/native-cost-v1/" + options.design.cost_policy + "/" + identity + "/delay-" + std::to_string(options.mapping.delay_ps);
+    native_model                  = std::make_shared<const usyn::Native_cost_model>(std::move(read->first));
+    options.design.cost_model     = native_model;
+    options.design.cache.context += "/native-cost-v1/" + options.design.cost_policy + "/" + read->second + "/delay-"
+                                    + std::to_string(options.mapping.delay_ps);
+  }
+  // The domino profile's setup has its own allowance (sharing process/time
+  // admission), so the logical run and its work accounting are unchanged.
+  std::shared_ptr<const livehd::domplace::Domino_reference> domino_reference;
+  livehd::domplace::Physical_report_inputs                  domino_report;
+  if (options.physical == "domino_provisional") {
+    usyn::Budget physical_work{options.work};
+    physical_work.admission = work.admission;
+    if (!native_model) {
+      auto read = read_cost_model(physical_work);
+      if (!read) {
+        return;
+      }
+      native_model = std::make_shared<const usyn::Native_cost_model>(std::move(read->first));
+    }
+    std::string why;
+    auto        reference = livehd::domplace::resolve_domino_reference(options.mapping.library,
+                                                                options.domino_inverter,
+                                                                options.domino_register,
+                                                                options.domino_aux,
+                                                                options.domino_variants,
+                                                                &why);
+    if (!reference) {
+      livehd::diag::err("pass.usyn", "domino-reference", "unsupported")
+          .msg("domino_provisional reference cells: {}", why)
+          .hint("name them with pass.usyn.domino_inverter and pass.usyn.domino_register")
+          .emit();
+      return;
+    }
+    const auto cmos = livehd::liberty::find_dff_cell(options.mapping.library);
+    if (!cmos || !(cmos->area > 0)) {
+      livehd::diag::err("pass.usyn", "domino-reference", "unsupported")
+          .msg("domino_provisional: no CMOS register with a Liberty area to compare against")
+          .emit();
+      return;
+    }
+    domino_reference = std::make_shared<const livehd::domplace::Domino_reference>(std::move(*reference));
+    domino_report    = {domino_reference.get(), &options.domino, cmos->name, cmos->area, physical_work.consumed, false};
+    options.design.physical
+        = [reference = domino_reference,
+           model     = native_model,
+           select    = options.domino,
+           area      = cmos->area](const usyn::Stateful_region& region, std::span<const std::string> names, usyn::Budget& budget) {
+            return livehd::domplace::select_physical(region, names, select, {reference.get(), model.get(), area}, budget);
+          };
   }
   options.design.tune_context = options.tmap + "/delay-" + std::to_string(options.mapping.delay_ps);
   if (!options.mapping.library.empty()) {
@@ -913,15 +1065,18 @@ void Pass_usyn::synthesize(Eprp_var& var) {
         .emit();
     return;
   }
-  const auto report = usyn::native_report(*selected.design,
-                                          options.design,
-                                          options.tmap,
-                                          elapsed(),
-                                          resources.peak_bytes,
-                                          provenance_path.filename().string(),
-                                          provenance,
-                                          artifact_paths,
-                                          trials);
+  const auto report
+      = usyn::native_report(*selected.design,
+                            options.design,
+                            options.tmap,
+                            elapsed(),
+                            resources.peak_bytes,
+                            provenance_path.filename().string(),
+                            provenance,
+                            artifact_paths,
+                            trials,
+                            options.physical,
+                            domino_reference ? livehd::domplace::physical_report(*selected.design, domino_report) : std::string{});
   {
     // rename() cannot replace a non-empty directory: move the old capture
     // aside (restored if the swap fails), then drop it once the new one is in.
@@ -985,4 +1140,16 @@ void Pass_usyn::synthesize(Eprp_var& var) {
              selected.design->regions.size(),
              options.tmap,
              elapsed());
+  if (domino_reference) {
+    uint64_t eligible = 0, converted = 0;
+    for (const auto& region : selected.design->regions) {
+      for (const auto& state : region.physical->states) {
+        eligible  += state.eligible;
+        converted += state.decision == usyn::Physical_decision::domino;
+      }
+    }
+    std::print("[pass.usyn] domino_provisional dry run: {} of {} eligible state(s) would convert; the netlist stays CMOS\n",
+               converted,
+               eligible);
+  }
 }

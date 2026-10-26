@@ -388,6 +388,8 @@ TEST(PhysicalSelect, TwoPhaseResultsAndPhaseOneCellsAreRefused) {
   const auto run = select(other, all());
   ASSERT_TRUE(run.emission);
   EXPECT_EQ(run.emission->states[0].reason, "clock-domain");
+  EXPECT_FALSE(run.emission->states[0].eligible);
+  EXPECT_TRUE(select(b, all()).emission->states[0].eligible);
 }
 
 }  // namespace livehd::domplace

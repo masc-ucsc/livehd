@@ -353,6 +353,139 @@ TEST_F(PassSynth, ExhaustionRetainsSourceAndCannotFallBackToAbc) {
   EXPECT_FALSE(fs::exists(root + "/net"));
 }
 
+// The opt-in domino profile with its explicit requirements: one phase, the
+// clock port, a Liberty and the LEFs (the abstracts consume them later).
+void domino_profile(Eprp_var& var, const std::string& root) {
+  const auto library = root + "/domino.lib";
+  std::ofstream(library) << R"LIB(library(t) {
+    cell(INV) {area:0.2; pin(A) {direction:input;} pin(Y) {direction:output; function:"!A";} }
+    cell(NAND) {area:0.8; pin(A) {direction:input;} pin(B) {direction:input;} pin(Y) {direction:output; function:"!(A B)";} }
+    cell(DFF) {area:4; ff(IQ, IQN) {clocked_on:"CLK"; next_state:"D";}
+      pin(CLK) {direction:input; clock:true;} pin(D) {direction:input;} pin(Q) {direction:output; function:"IQ";} }
+  })LIB";
+  std::ofstream(root + "/cells.lef") << "VERSION 5.8 ;\nEND LIBRARY\n";
+  var.dict["tmap"]         = "none";
+  var.dict["library"]      = library;
+  var.dict["lef"]          = root + "/cells.lef";
+  var.dict["physical"]     = "domino_provisional";
+  var.dict["clock_phases"] = "1";
+  var.dict["domino_clock"] = "clk";
+}
+
+TEST_F(PassSynth, DominoProfileDryRunReportsDecisionsAndKeepsTheCmosNetlist) {
+  hhds::GraphLibrary input;
+  Eprp_var           var;
+  var.graphs.push_back(design(input));
+  var.dict["tmap"] = "none";
+  var.dict["qor"]  = root + "/qor.json";
+  run(var);
+  ASSERT_FALSE(livehd::diag::sink().has_halting_errors());
+  auto plain = read(root + "/qor.json.usyn.json");
+  EXPECT_STREQ(plain["physical_profile"].GetString(), "none");
+  EXPECT_FALSE(plain.HasMember("physical"));
+
+  const auto                output = root + "/domino-net";
+  Registry::Scoped_instance scope(output);
+  domino_profile(var, root);
+  var.dict["out"]       = output;
+  var.dict["cache_dir"] = root + "/domino-cache";
+  // The domino options are not logical identity: the second run is a logical
+  // cache hit, and the physical choice is recomputed on it.
+  for (const auto select : {"all", "area"}) {
+    var.dict["domino_select"] = select;
+    run(var);
+    const auto& diagnostics = livehd::diag::sink().records();
+    ASSERT_FALSE(livehd::diag::sink().has_halting_errors()) << (diagnostics.empty() ? "" : diagnostics.back().message);
+    const auto report = read(root + "/qor.json.usyn.json");
+    ASSERT_FALSE(report.HasParseError());
+    EXPECT_STREQ(report["target"].GetString(), "cmos");
+    EXPECT_STREQ(report["output"].GetString(), "logical-cmos");
+    EXPECT_STREQ(report["physical_profile"].GetString(), "domino_provisional");
+    EXPECT_EQ(report["cache"]["reused"].GetUint64(), std::string_view{select} == "all" ? 0U : 1U);
+    const auto& physical = report["physical"];
+    EXPECT_STREQ(physical["emission"].GetString(), "dry-run");
+    EXPECT_STREQ(physical["select"].GetString(), select);
+    EXPECT_STREQ(physical["clock"].GetString(), "clk");
+    EXPECT_STREQ(physical["reference"]["inverter"]["name"].GetString(), "INV");
+    EXPECT_STREQ(physical["reference"]["inverter"]["source"].GetString(), "liberty-function");
+    EXPECT_STREQ(physical["reference"]["registers"][0]["name"].GetString(), "DFF");
+    EXPECT_TRUE(physical["reference"]["registers"][0]["hold_ps"].IsNull());
+    EXPECT_EQ(physical["totals"]["states"].GetUint64(), 1U);
+    EXPECT_EQ(physical["totals"]["eligible"].GetUint64(), 1U);
+    EXPECT_EQ(physical["totals"]["converted"].GetUint64(), 1U);
+    EXPECT_EQ(physical["totals"]["masters"].GetUint64(), 1U);
+    const auto& endpoint = physical["regions"][0]["endpoints"][0];
+    EXPECT_STREQ(endpoint["name"].GetString(), "state");
+    EXPECT_STREQ(endpoint["decision"].GetString(), "domino");
+    EXPECT_TRUE(std::string_view{endpoint["master"].GetString()}.starts_with("__lhd_domino_"));
+    EXPECT_EQ(endpoint["n_pdn"].GetUint(), 2U);
+    EXPECT_EQ(endpoint["rails"].Size(), 2U);
+    // a & b: x = (2 + 4) / 2 inverters of 0.2 plus the 4.0 register, against
+    // the register plus a NAND+INV for the exclusive AND.
+    EXPECT_DOUBLE_EQ(endpoint["a_domino"].GetDouble(), 4.6);
+    if (std::string_view{select} == "all") {
+      EXPECT_STREQ(endpoint["reason"].GetString(), "domino-all");
+      EXPECT_TRUE(endpoint["a_cmos"].IsNull());
+    } else {
+      EXPECT_STREQ(endpoint["reason"].GetString(), "domino-area");
+      EXPECT_DOUBLE_EQ(endpoint["a_cmos"].GetDouble(), 5.0);
+    }
+    // A dry run publishes the CMOS netlist: the register is still a Flop.
+    const auto io = Registry::instance(output).find_io("top");
+    ASSERT_TRUE(io && io->get_graph());
+    uint32_t flops = 0, subs = 0;
+    for (auto node : io->get_graph()->body().nodes()) {
+      flops += gu::type_op_of(node) == Ntype_op::Flop;
+      subs  += gu::type_op_of(node) == Ntype_op::Sub;
+    }
+    EXPECT_EQ(flops, 1U);
+    EXPECT_EQ(subs, 0U);
+  }
+}
+
+TEST_F(PassSynth, DominoProfileRequirementsAreExplicitUsageErrors) {
+  hhds::GraphLibrary input;
+  Eprp_var           var;
+  var.graphs.push_back(design(input));
+  var.dict["qor"] = root + "/qor.json";
+  domino_profile(var, root);
+  run(var);
+  ASSERT_FALSE(livehd::diag::sink().has_halting_errors());
+  const auto base = var.dict;
+  for (const auto& [key, value, code] : {
+           std::tuple{    "clock_phases",                "2",   "domino-profile"},
+           std::tuple{           "stack",                "5",   "domino-profile"},
+           std::tuple{ "literal_extract",                "1",   "domino-profile"},
+           std::tuple{             "lef",                 "",   "domino-profile"},
+           std::tuple{    "domino_clock",                 "",   "domino-profile"},
+           std::tuple{         "library",                 "",   "domino-profile"},
+           std::tuple{        "physical",              "bad",  "invalid-options"},
+           std::tuple{   "domino_select",              "bad",  "invalid-options"},
+           std::tuple{ "domino_identity",            "maybe",  "invalid-options"},
+           std::tuple{      "domino_aux",               "65",  "invalid-options"},
+           std::tuple{ "domino_variants",                "0",  "invalid-options"},
+           std::tuple{ "domino_variants",                "4",  "invalid-options"},
+           std::tuple{ "domino_inverter",             "NOPE", "domino-reference"},
+           std::tuple{ "domino_register",              "INV", "domino-reference"},
+           std::tuple{"domino_selection", "the wrong option",   "domino-profile"}
+  }) {
+    var.dict = base;
+    if (std::string_view{key} == "domino_selection") {
+      var.dict["physical"]      = "none";  // a domino option without the profile
+      var.dict["domino_select"] = "all";
+    } else {
+      var.dict[key] = value;
+    }
+    var.dict["out"] = root + "/invalid";
+    run(var);
+    EXPECT_TRUE(livehd::diag::sink().has_halting_errors()) << key;
+    ASSERT_FALSE(livehd::diag::sink().records().empty()) << key;
+    EXPECT_EQ(livehd::diag::sink().records().back().code, code) << key;
+    EXPECT_FALSE(fs::exists(root + "/invalid")) << key;
+    livehd::diag::sink().clear();
+  }
+}
+
 TEST_F(PassSynth, FailedRunKeepsPreviousReportProvenance) {
   hhds::GraphLibrary input;
   Eprp_var           var;

@@ -452,6 +452,10 @@ cc_library(
         "//pass/common:pass",
         "//pass/cost:host_mem",
         "//pass/cprop:pass_cprop",
+        "//pass/domplace:domino_reference",
+        "//pass/domplace:physical_report",
+        "//pass/domplace:physical_select",
+        "//pass/liberty:liberty_dff",
         "//pass/synth",
         "@llvm-project//llvm:Support",  # provenance: SHA-256 of the archived inputs
         "@rapidjson",

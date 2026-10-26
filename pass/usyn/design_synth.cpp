@@ -115,6 +115,25 @@ Identity_names identity_names(const partition::Region_body& rb, const synth::Reg
   }
   return names;
 }
+
+// The region port bit behind each Lnet input, indexed like the frozen inputs:
+// `port` for a one-bit port, `port[lane]` otherwise, and "" for a black-box or
+// clock-gate output.
+std::vector<std::string> region_input_names(const partition::Region_body& rb, const synth::Region_blast& blast) {
+  std::vector<std::string> names(blast.lnet.inputs().size());
+  for (size_t i = 0; i < blast.all_pi_order.size() && i < names.size(); ++i) {
+    const auto& origin = blast.all_pi_order[i];
+    if (origin.kind != synth::Pi_kind::region_input || origin.index >= blast.pi_order.size()) {
+      continue;
+    }
+    const auto [port, lane] = blast.pi_order[origin.index];
+    if (port < rb.inputs.size()) {
+      const auto& p = rb.inputs[port];
+      names[i]      = p.bits > 1 ? std::format("{}[{}]", p.name, lane) : p.name;
+    }
+  }
+  return names;
+}
 }  // namespace
 
 Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, const Design_options& options, Budget& work) {
@@ -603,6 +622,20 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
         stats << line << "\n";
       }
     }
+    // The physical choice reads the frozen selection only, so a cache hit and
+    // a cold search decide alike; it charges the structural allowance.
+    std::optional<Physical_emission> physical;
+    if (options.physical) {
+      physical = options.physical(*selected.region, region_input_names(rb, blast), work);
+      if (work.resource_exhausted) {
+        fail(Status::search_exhausted, rb.module_name + ": physical selection process admission");
+        return;
+      }
+      if (!physical) {
+        fail(Status::invalid, rb.module_name + ": physical selection refused the frozen netlist");
+        return;
+      }
+    }
     Budget cmos_search{search_left};
     cmos_search.admission          = work.admission;
     cmos_search.admission_interval = work.admission_interval;
@@ -670,7 +703,8 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
                                structural,
                                std::move(emitted.cmos_cleanup),
                                cmos_search.credit_floor(),
-                               std::move(emitted.choices)});
+                               std::move(emitted.choices),
+                               std::move(physical)});
   };
   const auto partition_admission = [&](std::string_view, uint64_t amount) {
     if (failed) {

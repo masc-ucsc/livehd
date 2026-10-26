@@ -3,6 +3,7 @@
 
 #include "arith.hpp"
 #include "logical_cache.hpp"
+#include "physical_emission.hpp"
 #include "region_emit.hpp"
 #include "region_qor.hpp"
 #include "tmap.hpp"
@@ -49,6 +50,9 @@ struct Design_options {
   bool                                     unroll_carry     = true;  // expand carry-dependent compact loops per ordinal
   partition::Flatten_mode                  flatten          = partition::Flatten_mode::automatic;
   Logical_cache_options                    cache{};
+  // Optional post-freeze physical choice (pass.usyn.physical). It runs on every
+  // region, a cache hit included, and is never part of the logical identity.
+  Physical_selector                        physical{};
 };
 
 struct Design_region {
@@ -67,6 +71,9 @@ struct Design_region {
   Residual_report cmos_cleanup{};
   Credit_floor    cmos_search{};
   Choice_report   choices{};
+
+  // Present when Design_options::physical is set; recomputed on a cache hit.
+  std::optional<Physical_emission> physical{};
 };
 
 struct Logical_design {

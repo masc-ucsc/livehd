@@ -15,9 +15,12 @@ struct Mapping_trial {
   uint64_t                          search_used = 0;
 };
 // Decision report, not a serialized cache artifact or physical-area prediction.
+// `physical` is the opt-in physical profile's own JSON object (pass/domplace),
+// embedded as written; empty when the profile is off.
 std::string native_report(const Logical_design& design, const Design_options& options, std::string_view tmap, double elapsed_ms,
                           uint64_t peak_bytes, std::string_view provenance_directory, std::string_view provenance,
-                          std::span<const std::string> artifact_paths = {}, std::span<const Mapping_trial> trials = {});
+                          std::span<const std::string> artifact_paths = {}, std::span<const Mapping_trial> trials = {},
+                          std::string_view physical_profile = "none", std::string_view physical = {});
 // Region `delay` is emitted only when the provider reports picoseconds; an
 // untimed map reports `logic_depth` levels and `"delay": null`.
 std::string mapping_report(const synth::Mapped_design& design, std::string_view provider, const synth::Tmap_options& options);

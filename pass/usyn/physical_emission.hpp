@@ -37,8 +37,9 @@ struct Physical_rail {
 struct Physical_state {
   uint32_t                    state    = 0;  // frozen.state index == state_bits index
   Physical_decision           decision = Physical_decision::retained_cmos;
-  std::string                 reason;   // a pass/domplace reason code
-  std::optional<Gate_formula> formula;  // positive output, rechecked; absent for early refusals
+  bool                        eligible = false;  // passed physical eligibility (then a selection decided)
+  std::string                 reason;            // a pass/domplace reason code
+  std::optional<Gate_formula> formula;           // positive output, rechecked; absent for early refusals
   Gate_formula::Metrics       metrics{};
   std::vector<Physical_rail>  rails;         // pin order: gate_rails(metrics) over the cofactored inputs
   uint32_t                    cell     = 0;  // index into Physical_emission::cells (domino only)

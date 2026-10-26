@@ -100,6 +100,26 @@ every master (formula, rails, metrics, variants with estimated and rounded
 areas, pin caps, access checks) and every instance with the original state it
 owns. Unset coefficients are `null` with a diagnostic.
 
+## Code
+
+| Target | Contents |
+|---|---|
+| `contract` | `stage_model.hpp` (versioned schedule), `reason.hpp` (stable reason codes) and the salt |
+| `domino_reference` | the named reference inverter and register ladder, and `domino_area` |
+| `physical_eligibility` | the eligibility table above over a frozen `Stateful_region` |
+| `domino_cell` | exact master identity, `__lhd_domino_*` declarations (Q is a loop break) and behavioral lg/Verilog models |
+| `physical_select` | the per-state choice: recheck, cofactor/merge inputs, positive-output resynthesis, rail ledger, area comparison, bounded and deterministic |
+| `physical_report` | the `physical` block of pass.usyn's report |
+
+`pass.usyn.physical=domino_provisional` runs `physical_select` on every region
+after freeze, a logical cache hit included, through
+`usyn::Design_options::physical` (`usyn/physical_emission.hpp` is the data
+seam). It is currently a dry run: `<qor>.usyn.json` gains `physical_profile`
+and a `physical` block (settings, reference cells, totals by reason, one row
+per state with its master, `n_pdn`, `x` and area terms, and rails), while the
+published netlist stays CMOS. Emission (D), the LEF and model bundle (C) and
+two-row placement (F) build on it.
+
 ## Matched commands
 
 All three arms pin the same placement knobs:

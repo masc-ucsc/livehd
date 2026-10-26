@@ -49,7 +49,8 @@ void cost(Writer& w, const char* key, const Logical_cost& c) {
 }  // namespace
 std::string native_report(const Logical_design& design, const Design_options& options, std::string_view tmap, double elapsed_ms,
                           uint64_t peak_bytes, std::string_view provenance_directory, std::string_view provenance,
-                          std::span<const std::string> artifact_paths, std::span<const Mapping_trial> trials) {
+                          std::span<const std::string> artifact_paths, std::span<const Mapping_trial> trials,
+                          std::string_view physical_profile, std::string_view physical) {
   rapidjson::StringBuffer buffer;
   Writer                  w(buffer);
   w.StartObject();
@@ -68,6 +69,8 @@ std::string native_report(const Logical_design& design, const Design_options& op
   text(w, "definition-regions");
   w.Key("output");
   text(w, tmap == "none" ? "logical-cmos" : "mapped-cmos");
+  w.Key("physical_profile");
+  text(w, physical_profile);
   w.Key("mapping_trials");
   w.StartArray();
   for (const auto& trial : trials) {
@@ -506,6 +509,10 @@ std::string native_report(const Logical_design& design, const Design_options& op
     w.EndObject();
   }
   w.EndArray();
+  if (!physical.empty()) {
+    w.Key("physical");
+    w.RawValue(physical.data(), physical.size(), rapidjson::kObjectType);
+  }
   w.Key("provenance");
   w.StartObject();
   w.Key("directory");
