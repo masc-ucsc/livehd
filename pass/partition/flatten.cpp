@@ -106,6 +106,20 @@ struct Ictx {
   absl::flat_hash_map<std::string, Port_shape> out_name2shape;
 };
 
+// The physical scope of an instance flattened with physical_names. A named
+// instance keeps its name. An anonymous one (a pass.partition region wrapper)
+// still needs a unique scope -- region-local cell names collide across separately
+// mapped regions -- but it is not source hierarchy: spell it as a reserved
+// transparent component (`__flat___sub_<nid>`), so logical_hier_name drops it and
+// a flattened netlist's register, memory and domino-cell names stay exactly the
+// source state names that pass.lec pairs by name.
+std::string physical_instance_prefix(const hhds::Node_class& n) {
+  if (gu::has_name(n)) {
+    return gu::default_instance_name(n) + ".";
+  }
+  return std::string{gu::transparent_instance_prefix} + gu::default_instance_name(n) + ".";
+}
+
 class Flattener {
 public:
   Flattener(hhds::Graph* top, hhds::GraphLibrary* lib, livehd::partition::Flat_origin_map* origin, bool preserve_modules,
@@ -425,7 +439,7 @@ void Flattener::create_nodes(Ictx* ctx) {
         failed_ = true;
         return;
       }
-      const auto prefix = physical_names_ ? gu::default_instance_name(n) + "." : gu::logical_instance_prefix(n);
+      const auto prefix = physical_names_ ? physical_instance_prefix(n) : gu::logical_instance_prefix(n);
       auto*      child  = make_ctx(n.get_subnode_graph().get(), ctx, n, ctx->prefix + prefix);
       ctx->child_ctx[n] = child;
       create_nodes(child);

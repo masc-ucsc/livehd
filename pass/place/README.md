@@ -120,7 +120,14 @@ LEFs; its sky130HD fallback is next to the Liberty directory in
 
 `place.cpp` flattens into a separate library without editing the input, resolves
 mapped physical pins, generates/imports a floorplan, runs GP, assigns IO slots,
-and runs GP plus legalization/detail. Integer DBU positions and orientation live
+and runs GP plus legalization/detail. Flattened names keep every instance scope
+so they stay unique across separately mapped regions. A named instance keeps
+its name. An anonymous one (a `pass.partition` region wrapper) is spelled
+`__flat___sub_<id>`: a reserved transparent component that `logical_hier_name`
+drops, so a placed register, memory or domino cell carries exactly its source
+state name and `lhd lec` pairs it by name. Netlists placed before this used
+`sub_<id>`, which hid the source names from the state pairing (NVDLA
+partition_m: 2074 unpaired states). Integer DBU positions and orientation live
 on the flat graph. Its input node persists placement RC and per-bit IO positions;
 standalone `pass opentimer` recovers this data and rejects changed cell positions,
 orientations, masters or sizes before cache replay.
@@ -1648,8 +1655,8 @@ The index links an animation only after the producer has finished writing it.
 `synth.place.macro.snap=true` enables macro snapping before cell legalization.
 `synth.place.macro.snap_mode` selects `alignment` (default) or `symmetry`.
 Both use the same eligibility: movable macros of identical physical width and
-height in the same original hierarchy scope. Synthesis-only `sub_<number>`
-containers are ignored. A wrapper containing a single macro inherits its nearest
+height in the same original hierarchy scope. Synthesis-only region scopes
+(`__flat___sub_<number>`, or `sub_<number>` in older netlists) are ignored. A wrapper containing a single macro inherits its nearest
 enclosing scope containing multiple macros; separate branching scopes never
 share snap constraints. Flat designs use the top scope. Fixed macros and standard
 cells do not participate. This grouping is independent of synthesis colors.

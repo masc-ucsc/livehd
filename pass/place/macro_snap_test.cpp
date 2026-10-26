@@ -26,6 +26,7 @@ TEST(MacroSnap, ScopeAndSizeSurviveFlattening) {
   EXPECT_EQ(classes[5], -1);
   EXPECT_EQ(classes[6], -1);
   EXPECT_EQ(original_hierarchy_path("sub_42.top.sub_real.sub_8.ram"), "top.sub_real.ram");
+  EXPECT_EQ(original_hierarchy_path("__flat___sub_42.top.__flat___sub_8.ram"), "top.ram");
 }
 TEST(MacroSnap, FlatWrapperSiblingsAndNestedBanks) {
   auto classes = hierarchy_macro_classes(

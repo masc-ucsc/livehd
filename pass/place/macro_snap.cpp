@@ -7,13 +7,18 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "node_util.hpp"
+
 namespace livehd::placement {
 std::string original_hierarchy_path(const std::string& name) {
   std::istringstream input(name);
   std::string        path, part;
   while (std::getline(input, part, '.')) {
-    const bool generated = part.starts_with("sub_") && part.size() > 4
-                           && std::all_of(part.begin() + 4, part.end(), [](unsigned char c) { return c >= '0' && c <= '9'; });
+    // A region wrapper flattened with physical names is `__flat___sub_<nid>`
+    // (pass/partition/flatten.cpp); older netlists spell it `sub_<nid>`.
+    const bool generated = livehd::graph_util::is_transparent_instance_name(part)
+                           || (part.starts_with("sub_") && part.size() > 4
+                               && std::all_of(part.begin() + 4, part.end(), [](unsigned char c) { return c >= '0' && c <= '9'; }));
     if (!generated) {
       if (!path.empty()) {
         path += '.';
