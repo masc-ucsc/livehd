@@ -98,12 +98,64 @@ counts never make two functions interchangeable. A master is named
 geometry template) with pins `R0..R{n-1}` (physical rail order: per logical
 input, positive rail then negative rail), `CLK` and `Q`.
 
-The bundle sidecar (`domino_models.json`, schema 1) records the stage model,
+The bundle sidecar (`domino_models.json`, schema 2) records the stage model,
 units (`ps`, `fF`, `um`, DBU), the corner, technology and row-access identity,
-the named reference inverter and register family, FO4 as a labeled estimate,
-every master (formula, rails, metrics, variants with estimated and rounded
-areas, pin caps, access checks) and every instance with the original state it
-owns. Unset coefficients are `null` with a diagnostic.
+the named reference inverter and register family (with each register's pin
+names and CK capacitance), FO4 as a labeled estimate, the coefficients and
+experiment knobs, every master (formula, rails, metrics, variants with
+estimated and rounded areas, pin caps, per-variant capture setup, access
+checks) and every instance with the original state it owns. Unset
+coefficients are `null` with a diagnostic; `read_domino_sidecar` reads
+schema 2 only and returns the variant catalog for placement-side sizing.
+
+The stage coefficients have no built-in values: `pass.usyn.domino_eval_fo4`,
+`domino_precharge_fo4`, `domino_setup_eval_fo4` and
+`domino_precharge_margin_fo4` (FO4 multiples) and
+`domino_uncertainty_first_ps` / `domino_uncertainty_second_ps` set them, and
+an unset one leaves its timing class unmeasured. The CLK load is a labeled
+estimate: the register's CK input plus `domino_clock_devices` (default 2)
+clocked devices at half a reference-inverter input each. Two experiment knobs
+keep every default unchanged: `domino_pair_area_pct` (default 100) scales only
+the `x * A_NOT` term on both area bases, and `domino_area_margin_pct`
+(default 0) converts under `select=area` while `A_domino + A_rails <
+(100 + margin)%` of the CMOS estimate.
+
+## Stage timing
+
+`timing/` (outside the `domplace_salt` glob) times the placed mixed netlist
+with the native late proxy (`pass/place/late_timing.hpp`). One provisional
+cell per bundle variant (`domino_timing_cells`): rails with a `setup_eval`
+setup arc to CLK, CLK with the labeled capacitance, and Q with the variant
+register's own clock-to-Q arcs; rails capture at `T/2 - uncertainty_first -
+setup_eval`, so a rail's period estimate is `T - slack / 0.5`. Each instance
+adds two constant checks that moving cells cannot fix: internal
+`2 (eval + setup_capture + uncertainty_second)` and precharge
+`2 (precharge + precharge_margin)`. A null coefficient is reported, never
+read as zero.
+
+Constraints come from the saved SDC when it parses, else one ideal clock on
+the named port (a non-50% waveform is refused: the schedule is a fixed T/2).
+Unconstrained ports, and endpoints with no constrained launch in their
+fan-in, are cut and listed with their reasons. The status is `complete`,
+`partial` (something cut) or `incomplete` (uncertified, or a needed
+coefficient null). `stage_timing.json` (schema 1) reports the model
+provenance, clocks, constraints, the period by class (flop, domino and input
+launches into flop, domino and output captures, from launch-filtered
+evaluations), coverage with `early: unknown` (setup only), every stage with
+its source state and path split, the endpoints, clock accounting (clock-pin
+and wire capacitance by domain and master), electrical limits and area on
+both bases.
+
+`lhd synth --set synth.place.stage_timing=true` runs it after placement,
+fresh or restored, with or without the profile, so every arm has the same
+timer: the clock is `pass.usyn.domino_clock` or the SDC's one clock port at
+its period; `synth.place.stage_timing.require_complete` fails short of
+complete coverage and `.clock_uncertainty_ps` sets the full-cycle
+uncertainty. It writes `place/stage_timing.json` and `qor.place.stage_timing`
+and is never part of the placement cache identity. A netlist that keeps
+word-valued ports is timed on its bit-level DEF import. `//tools:stage_timing_probe`
+reruns the same report offline on a saved placement, with coefficient
+overrides for sweeps that must not re-place.
 
 ## Code
 
