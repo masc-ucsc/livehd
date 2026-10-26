@@ -538,19 +538,19 @@ std::vector<bool> spillable(const ph::Technology& tech, const ph::Floorplan& fp,
                             const Satlegalize_options& options) {
   std::vector<bool> safe(fp.components.size());
   for (size_t i = 0; i < safe.size(); ++i) {
-    safe[i] = criticality.timed_units && criticality.connected[i] && !criticality.clock_connected[i] && !criticality.untimed[i]
+    safe[i] = criticality.fully_timed(i) && !criticality.clock_connected[i]
               && *criticality.slack_ps[i] > options.spill_slack_margin_ps && movable(tech, fp.components[i]);
   }
   return safe;
 }
-std::pair<std::string, std::optional<double>> spill_evidence(const Cell_criticality& criticality, const Satlegalize_options& options,
-                                                             size_t cell, bool protected_endpoint) {
+std::pair<std::string, std::optional<double>> spill_evidence(const Cell_criticality& criticality,
+                                                             const Satlegalize_options& options, size_t cell,
+                                                             bool protected_endpoint) {
   const auto  minimum = criticality.timed_units ? criticality.slack_ps[cell] : std::nullopt;
-  const bool  missing = !criticality.timed_units || criticality.untimed[cell] || !criticality.connected[cell];
   std::string reason  = !options.spill_neighbors                               ? "disabled"
                         : protected_endpoint                                   ? "protected alignment endpoint"
                         : criticality.clock_connected[cell]                    ? "clock"
-                        : missing                                              ? "missing-or-nonfinite timing"
+                        : !criticality.fully_timed(cell)                       ? "missing-or-nonfinite timing"
                         : minimum && *minimum <= options.spill_slack_margin_ps ? "slack margin"
                                                                                : "eligible";
   return {reason, minimum};
