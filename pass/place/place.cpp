@@ -58,14 +58,11 @@
 #include "resize_engine.hpp"
 #include "routing_tracks.hpp"
 #include "rules_cc/cc/runfiles/runfiles.h"
-#include "track_capacity.hpp"
-#if defined(__APPLE__)
-#include <mach-o/dyld.h>
-#endif
 #include "signal_router.hpp"
 #include "steiner_topology.hpp"
 #include "technology_rc.hpp"
 #include "thirdparty/flute/flute.hpp"
+#include "track_capacity.hpp"
 
 namespace livehd::placement {
 namespace {
@@ -2400,32 +2397,6 @@ void assign_io(View& v, const ph::Technology& tech) {
       t.status = Status::PLACED;
     }
   }
-}
-std::unique_ptr<rules_cc::cc::runfiles::Runfiles> runfiles() {
-  using rules_cc::cc::runfiles::Runfiles;
-  std::string               error;
-  std::unique_ptr<Runfiles> result(Runfiles::CreateForTest(BAZEL_CURRENT_REPOSITORY, &error));
-  if (result) {
-    return result;
-  }
-  // Standard executable-adjacent Bazel runfiles. /proc is available on Linux;
-  // macOS supplies _NSGetExecutablePath through the platform branch below.
-  std::string executable;
-#if defined(__APPLE__)
-  uint32_t size = 0;
-  _NSGetExecutablePath(nullptr, &size);
-  executable.resize(size);
-  _NSGetExecutablePath(executable.data(), &size);
-  executable.resize(std::char_traits<char>::length(executable.c_str()));
-#else
-  std::error_code ec;
-  executable = fs::read_symlink("/proc/self/exe", ec).string();
-#endif
-  result.reset(Runfiles::Create(executable, BAZEL_CURRENT_REPOSITORY, &error));
-  if (!result) {
-    throw std::runtime_error("cannot locate FLUTE runfiles: " + error);
-  }
-  return result;
 }
 Uroute_options resolve_uroute_options(Uroute_options resolved_uroute) {
   if (resolved_uroute.dir == "@pretrained") {

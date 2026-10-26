@@ -2,8 +2,11 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <utility>
 #include <vector>
+
+#include "rules_cc/cc/runfiles/runfiles.h"
 namespace livehd::placement {
 using Steiner_location = std::pair<int64_t, int64_t>;
 struct Steiner_topology {
@@ -11,6 +14,9 @@ struct Steiner_topology {
   std::vector<size_t>                    terminals;  // Input order, including coincident pins.
   std::vector<std::pair<size_t, size_t>> edges;
 };
+// Bazel runfiles of the running test, else of this executable; throws when absent.
+std::unique_ptr<rules_cc::cc::runfiles::Runfiles> runfiles();
+
 void             initialize_flute_tables();
 // Geometric FLUTE topology in integer DBU, before track snapping/obstacle
 // avoidance. Edges can require a bend. Does not constitute legal metal.

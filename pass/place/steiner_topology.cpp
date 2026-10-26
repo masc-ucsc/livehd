@@ -14,10 +14,8 @@
 #include <mach-o/dyld.h>
 #endif
 #include "inou/lefdef/index_union_find.hpp"
-#include "rules_cc/cc/runfiles/runfiles.h"
 #include "thirdparty/flute/flute.hpp"
 namespace livehd::placement {
-namespace {
 namespace fs = std::filesystem;
 std::unique_ptr<rules_cc::cc::runfiles::Runfiles> runfiles() {
   using rules_cc::cc::runfiles::Runfiles;
@@ -45,7 +43,6 @@ std::unique_ptr<rules_cc::cc::runfiles::Runfiles> runfiles() {
   }
   return result;
 }
-}  // namespace
 void initialize_flute_tables() {
   static std::once_flag once;
   std::call_once(once, [] {
