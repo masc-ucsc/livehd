@@ -373,9 +373,22 @@ def main() -> int:
         # The hazard this pins: if the executable probe and the proof probe could
         # pick different reifiers, the row would credit a theorem about a
         # function other than the one that ran.
-        for mode, simtok, provetok in (("legacy", "reify_design ", "prove_reified "),
-                                       ("named", "reify_design_named ",
-                                        "prove_reified_incr ")):
+        #
+        # These checks never run Lean, but make_probe/make_proof_probe READ the
+        # certificate to splice its body into the probe, so they need the fixture
+        # too. Unguarded, a checkout without it crashed here with
+        # FileNotFoundError, before the CERT-independent Lean refusal checks in
+        # section 4 could run -- the opposite of the SKIP contract above.
+        mode_checks = ([f"mode_{m}_{k}" for m in ("legacy", "named")
+                        for k in ("sim_stage", "proof_stage", "stages_agree")]
+                       + ["marker_theorem_is_exact"])
+        if not CERT.is_file():
+            for name in mode_checks:
+                skip(name, f"no fixture certificate at {CERT} (set D3_PROOF_TEST_CERT)")
+        for mode, simtok, provetok in ((("legacy", "reify_design ", "prove_reified "),
+                                        ("named", "reify_design_named ",
+                                         "prove_reified_incr "))
+                                       if CERT.is_file() else ()):
             simp = sweep.make_probe(CERT, "tima_adder", 32, reifier=mode,
                                     phase_file=str(tmp / f"{mode}.phase"))
             prvp = sweep.make_proof_probe(CERT, "tima_adder", reifier=mode)
@@ -392,19 +405,25 @@ def main() -> int:
                   f"and both stages emit the same model kind "
                   f"(sim named={sim_named}, proof named={prv_named})")
         # the marker the runner credits names exactly the generated theorem
-        check("marker_theorem_is_exact",
-              sweep.PROOF_THEOREM == "d3_fast.correct"
-              and "d3_proof_gate d3_fast.correct" in
-                  sweep.make_proof_probe(CERT, "tima_adder", reifier="named"),
-              "the gate in the named proof probe names exactly the theorem the "
-              "runner credits")
+        if CERT.is_file():
+          check("marker_theorem_is_exact",
+                sweep.PROOF_THEOREM == "d3_fast.correct"
+                and "d3_proof_gate d3_fast.correct" in
+                    sweep.make_proof_probe(CERT, "tima_adder", reifier="named"),
+                "the gate in the named proof probe names exactly the theorem the "
+                "runner credits")
 
         # Both reifiers must report in the SAME line shape, or the gate parser
         # reads a named run as "the reifier never ran" and zeroes compile/reify.
         # That is exactly what the first guarded named run did.
         import re as _re
         _pat = r"^reify_design(?:_named)?: \S+ emitted, \d+ sources, (\d+) bindings$"
-        for mode in ("legacy", "named"):
+        # The probe text comes from the certificate, so these two need the
+        # fixture; the regex check after them does not and always runs.
+        if not CERT.is_file():
+            for mode in ("legacy", "named"):
+                skip(f"gate_line_shape_{mode}", "no fixture certificate")
+        for mode in (("legacy", "named") if CERT.is_file() else ()):
             probe = sweep.make_probe(CERT, "tima_adder", 32, reifier=mode,
                                     phase_file=str(tmp / f"{mode}.phase"))
             tok = "reify_design_named" if mode == "named" else "reify_design"
@@ -418,9 +437,10 @@ def main() -> int:
               "and the gate parser accepts either reifier's emitted line")
 
         # ---- 4. Lean: the audit must REFUSE sorryAx and ofReduceBool ----------
-        if not CERT.is_file():
-            check("lean_cases", False, f"certificate not found at {CERT}")
-            return 1 if fails else 0
+        # Synthetic theorems only, no certificate: these run whether or not the
+        # fixture exists. An early return here used to discard them whenever it
+        # was absent, which removed the suite's proof that the axiom gate
+        # refuses at all. Section 5, which does need the fixture, skips itself.
 
         env = dict(os.environ)
         env["PATH"] = "/WORKROOT/.elan/bin:" + env.get("PATH", "")
