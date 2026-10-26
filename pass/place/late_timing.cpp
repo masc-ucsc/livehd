@@ -58,6 +58,21 @@ void minimum(std::optional<double>& target, double value) {
     target = value;
   }
 }
+bool combinational_arc(const model::Arc& arc) {
+  return arc.type == "combinational" || arc.type == "combinational_rise" || arc.type == "combinational_fall";
+}
+bool launch_arc(const model::Arc& arc) { return arc.type == "rising_edge" || arc.type == "falling_edge"; }
+// Whether a combinational arc's declared unateness and rise/fall-only type
+// permit input transition in to produce output transition out.
+bool arc_transition(const model::Arc& arc, unsigned in, unsigned out) {
+  return !((arc.sense == model::Sense::positive && in != out) || (arc.sense == model::Sense::negative && in == out)
+           || (arc.type == "combinational_rise" && out != 0) || (arc.type == "combinational_fall" && out != 1));
+}
+// arc_transition() restricted by the output function's constant-sensitized
+// (positive, negative) unateness.
+bool sensitized_transition(const model::Arc& arc, std::pair<bool, bool> sense, unsigned in, unsigned out) {
+  return (in == out ? sense.first : sense.second) && arc_transition(arc, in, out);
+}
 bool depends_on_load(const model::Table& table) {
   const size_t rows = std::max(size_t{1}, table.x.size()), columns = std::max(size_t{1}, table.y.size());
   for (size_t x = 0; x < rows; ++x) {
@@ -476,8 +491,7 @@ struct Proxy::Impl {
           if (!drive.related_pin.empty() && arc.related_pin != drive.related_pin) {
             continue;
           }
-          if (arc.type == "combinational" || arc.type == "combinational_rise" || arc.type == "combinational_fall"
-              || arc.type == "rising_edge" || arc.type == "falling_edge") {
+          if (combinational_arc(arc) || launch_arc(arc)) {
             related.insert(arc.related_pin);
           }
         }
@@ -491,8 +505,7 @@ struct Proxy::Impl {
           if (arc.related_pin != *related.begin()) {
             continue;
           }
-          if (arc.type != "combinational" && arc.type != "combinational_rise" && arc.type != "combinational_fall"
-              && arc.type != "rising_edge" && arc.type != "falling_edge") {
+          if (!combinational_arc(arc) && !launch_arc(arc)) {
             continue;
           }
           if (!arc.when.empty() || !arc.unsupported.empty()) {
@@ -543,8 +556,8 @@ struct Proxy::Impl {
         }
         bool any = false;
         for (const auto& arc : pin.arcs) {
-          const bool clocked = arc.type == "rising_edge" || arc.type == "falling_edge";
-          if (arc.type != "combinational" && arc.type != "combinational_rise" && arc.type != "combinational_fall" && !clocked) {
+          const bool clocked = launch_arc(arc);
+          if (!combinational_arc(arc) && !clocked) {
             continue;
           }
           const auto related = cell.model->pins.find(arc.related_pin);
@@ -772,14 +785,12 @@ struct Proxy::Impl {
           || (edge.model && !active(cells[pins[edge.to].cell], *pins[edge.to].model, *edge.model))) {
         continue;
       }
+      const auto sense = edge.model ? sensitivity(cells[pins[edge.to].cell], *pins[edge.to].model, edge.model->related_pin)
+                                    : std::pair{true, true};
       for (unsigned in = 0; in < 2; ++in) {
         for (unsigned out = 0; out < 2; ++out) {
           if (edge.model) {
-            const auto& arc                 = *edge.model;
-            const auto [positive, negative] = sensitivity(cells[pins[edge.to].cell], *pins[edge.to].model, arc.related_pin);
-            if ((in == out && !positive) || (in != out && !negative) || (arc.sense == model::Sense::positive && in != out)
-                || (arc.sense == model::Sense::negative && in == out) || (arc.type == "combinational_rise" && out != 0)
-                || (arc.type == "combinational_fall" && out != 1)) {
+            if (!sensitized_transition(*edge.model, sense, in, out)) {
               continue;
             }
             arc_delays[id][in][out] = cell_delays[id][in][out];
@@ -1219,12 +1230,8 @@ struct Proxy::Impl {
               if ((arc->type == "rising_edge" && in != 0) || (arc->type == "falling_edge" && in != 1)) {
                 continue;
               }
-              const bool clocked = arc->type == "rising_edge" || arc->type == "falling_edge";
-              if (!clocked
-                  && ((arc->sense == model::Sense::positive && in != out) || (arc->sense == model::Sense::negative && in == out))) {
-                continue;
-              }
-              if ((arc->type == "combinational_rise" && out != 0) || (arc->type == "combinational_fall" && out != 1)) {
+              // Edge launch arcs are non-unate; only their launching edge applies.
+              if (!launch_arc(*arc) && !arc_transition(*arc, in, out)) {
                 continue;
               }
               if (!arc->delay[out] || !arc->slew[out]) {
@@ -1326,11 +1333,7 @@ struct Proxy::Impl {
             double slew = 0;
             if (edge.model) {
               const auto& arc = *edge.model;
-              if ((arc.sense == model::Sense::positive && in != out) || (arc.sense == model::Sense::negative && in == out)) {
-                continue;
-              }
-              if ((arc.type == "combinational_rise" && out != 0) || (arc.type == "combinational_fall" && out != 1)
-                  || !arc.slew[out]) {
+              if (!arc_transition(arc, in, out) || !arc.slew[out]) {
                 continue;
               }
               if (const auto fitted = evaluate_arc(arc, out, *source.slew_ps, edge.to)) {
@@ -1398,6 +1401,8 @@ struct Proxy::Impl {
         if (constants[edge.to] || (edge.model && !active(cells[pins[edge.to].cell], *pins[edge.to].model, *edge.model))) {
           continue;
         }
+        const auto sense = edge.model ? sensitivity(cells[pins[edge.to].cell], *pins[edge.to].model, edge.model->related_pin)
+                                      : std::pair{true, true};
         for (unsigned in = 0; in < 2; ++in) {
           const auto& source = result.pins[from].transitions[in];
           if (!source.arrival_ps || !source.slew_ps) {
@@ -1406,15 +1411,7 @@ struct Proxy::Impl {
           for (unsigned out = 0; out < 2; ++out) {
             double delay = 0, slew = 0;
             if (edge.model) {
-              const auto& arc                 = *edge.model;
-              const auto [positive, negative] = sensitivity(cells[pins[edge.to].cell], *pins[edge.to].model, arc.related_pin);
-              if ((in == out && !positive) || (in != out && !negative)) {
-                continue;
-              }
-              if ((arc.sense == model::Sense::positive && in != out) || (arc.sense == model::Sense::negative && in == out)) {
-                continue;
-              }
-              if ((arc.type == "combinational_rise" && out != 0) || (arc.type == "combinational_fall" && out != 1)) {
+              if (!sensitized_transition(*edge.model, sense, in, out)) {
                 continue;
               }
               const auto value = cell_delays[edge_id][in][out];
