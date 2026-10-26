@@ -452,6 +452,8 @@ filegroup(
         "repair_internal.hpp",
         "reset_tree.cpp",
         "reset_tree.hpp",
+        "custom_sizing.cpp",
+        "custom_sizing.hpp",
         "resize_engine.cpp",
         "resize_engine.hpp",
         "satlegalize.cpp",
@@ -651,6 +653,7 @@ cc_library(
         "place.cpp",
         "repair.cpp",
         "reset_tree.cpp",
+        "custom_sizing.cpp",
         "resize_engine.cpp",
         "resynthesize.cpp",
         "steiner_repair.cpp",
@@ -674,6 +677,7 @@ cc_library(
         "repair.hpp",
         "repair_internal.hpp",
         "reset_tree.hpp",
+        "custom_sizing.hpp",
         "resize_engine.hpp",
         "steiner_repair.hpp",
         "routing_tracks.hpp",
@@ -759,7 +763,10 @@ cc_test(
 
 cc_test(
     name = "place_test",
-    srcs = ["place_test.cpp"],
+    srcs = [
+        "place_test.cpp",
+        "place_test_fixture.hpp",
+    ],
     copts = COPTS,
     data = ["//inou/lefdef:test_data"],
     deps = [
@@ -848,6 +855,23 @@ cc_test(
     deps = [
         ":place",
         "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "custom_sizing_test",
+    size = "small",
+    srcs = [
+        "custom_sizing_test.cpp",
+        "place_test_fixture.hpp",
+    ],
+    copts = COPTS,
+    data = ["//inou/lefdef:test_data"],
+    deps = [
+        ":place",
+        "//inou/lefdef:inou_lefdef",
+        "@googletest//:gtest_main",
+        "@rapidjson",
     ],
 )
 
