@@ -325,10 +325,6 @@ std::vector<Pair> pairs(const ph::Technology& tech, const ph::Floorplan& fp, con
   });
   return result;
 }
-bool orientation_allowed(const ph::Macro& macro, Orientation o) {
-  return o == Orientation::N || (o == Orientation::FS && macro.symmetry_x) || (o == Orientation::FN && macro.symmetry_y)
-         || (o == Orientation::S && macro.symmetry_x && macro.symmetry_y);
-}
 using Interval = std::pair<double, double>;
 double                area(const ph::Rect& r) { return std::max(0., r.xh - r.xl) * std::max(0., r.yh - r.yl); }
 // Nonempty intervals only; touching intervals merge.
@@ -976,7 +972,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
       if (!advanced) {
         // Deliberately retain the legacy enumeration and truncation ordering.
         for (const auto& row : fp.rows) {
-          if (row.site != macro.site || row.step <= 0 || row.count <= 0 || !orientation_allowed(macro, row.orientation)
+          if (row.site != macro.site || row.step <= 0 || row.count <= 0 || !ph::orientation_allowed(macro, row.orientation)
               || std::abs(row.y - original.place.y) > options.move_rows * sy + sy / 2 || row.y < window.yl
               || row.y + original.place.height > window.yh) {
             continue;
@@ -1035,7 +1031,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
         const bool may_spill = options.spill_neighbors && safe_spill[cell.index] && !protected_cells.contains(cell.index);
         for (const auto& space : spaces) {
           const auto& row = *space.row;
-          if (row.site != macro.site || !orientation_allowed(macro, row.orientation)) {
+          if (row.site != macro.site || !ph::orientation_allowed(macro, row.orientation)) {
             continue;
           }
           const bool local_row = std::abs(row.y - original.place.y) <= options.move_rows * sy + sy / 2;
@@ -1123,7 +1119,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
           }
           for (const auto& space : spaces) {
             const auto& row = *space.row;
-            if (row.site != macro.site || !orientation_allowed(macro, row.orientation) || row.y < window.yl
+            if (row.site != macro.site || !ph::orientation_allowed(macro, row.orientation) || row.y < window.yl
                 || row.y + original.place.height > window.yh) {
               continue;
             }

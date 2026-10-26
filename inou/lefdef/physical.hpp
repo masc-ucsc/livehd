@@ -98,6 +98,12 @@ struct Macro {
   std::set<std::string>      conservative_obstructions;
   std::set<std::string>      blocked_layers;  // OBS layers; routability uses conservative full-footprint blocking
 };
+// A row orientation the master's LEF SYMMETRY permits: N always, FS with X,
+// FN with Y and S with both.
+inline bool orientation_allowed(const Macro& m, Orientation o) {
+  return o == Orientation::N || (o == Orientation::FS && m.symmetry_x) || (o == Orientation::FN && m.symmetry_y)
+         || (o == Orientation::S && m.symmetry_x && m.symmetry_y);
+}
 struct Site {
   double width = 0, height = 0;
   bool   symmetry_x = false;

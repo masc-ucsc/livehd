@@ -185,10 +185,7 @@ std::vector<ph::Component> row_endcaps(const ph::Floorplan& frame, const ph::Tec
             default                 : break;
           }
         }
-        const bool supported = orient == ph::Orientation::N || (orient == ph::Orientation::FS && master.symmetry_x)
-                               || (orient == ph::Orientation::FN && master.symmetry_y)
-                               || (orient == ph::Orientation::S && master.symmetry_x && master.symmetry_y);
-        if (!supported) {
+        if (!ph::orientation_allowed(master, orient)) {
           throw std::invalid_argument("endcap master symmetry does not support row orientation");
         }
         const auto        x    = is_right ? right - width : row.x;

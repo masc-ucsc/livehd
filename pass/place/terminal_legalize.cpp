@@ -31,10 +31,6 @@ bool fixed(const Ann_place& p) { return p.status == ph::Status::FIXED || p.statu
 bool fixed_physical_cell(const ph::Component& c, const ph::Macro& m) {
   return fixed(c.place) && (m.klass == "CORE WELLTAP" || m.klass == "CORE SPACER");
 }
-bool orientation_allowed(const ph::Macro& m, ph::Orientation o) {
-  return o == ph::Orientation::N || (o == ph::Orientation::FS && m.symmetry_x) || (o == ph::Orientation::FN && m.symmetry_y)
-         || (o == ph::Orientation::S && m.symmetry_x && m.symmetry_y);
-}
 double distance(const Ann_place& a, const Ann_place& b) { return std::abs(double(a.x) - b.x) + std::abs(double(a.y) - b.y); }
 void   subtract(std::map<int64_t, int64_t>& gaps, int64_t lo, int64_t hi) {
   auto it = gaps.upper_bound(lo);
@@ -412,7 +408,8 @@ struct Model {
     const auto& c = fp.components[cell];
     const auto& m = tech.macros.at(c.macro);
     const auto& r = rows[row];
-    return m.site == fp.rows[r.source].site && c.place.height == r.height && orientation_allowed(m, fp.rows[r.source].orientation);
+    return m.site == fp.rows[r.source].site && c.place.height == r.height
+           && ph::orientation_allowed(m, fp.rows[r.source].orientation);
   }
   unsigned padding(size_t cell) const {
     return critical[cell] ? options.critical_padding_sites : (compact[cell] ? 0 : options.padding_sites);
