@@ -2153,8 +2153,7 @@ private:
 };
 
 double      scaled(const Timing_feedback& f, std::optional<double> v) { return v ? *v * f.time_unit_ps : 0; }
-}  // namespace
-std::string resize_feedback_json(const Timing_feedback& f) {
+std::string feedback_json(const Timing_feedback& f) {
   return std::format(
       R"({{"wns_ps":{:.4f},"tns_ps":{:.4f},"hold_wns_ps":{},"violations":{},"electrical_excess":{:.6f},"area":{:.6f}}})",
       scaled(f, f.wns),
@@ -2164,7 +2163,6 @@ std::string resize_feedback_json(const Timing_feedback& f) {
       f.electrical_excess,
       f.area);
 }
-namespace {
 // Group-prefix of a plan; prefixes are closed under the dependence of later
 // edits on buffers created earlier.
 std::vector<Resize_edit> prefix(const std::vector<Resize_edit>& edits, unsigned groups) {
@@ -2442,7 +2440,7 @@ Repair_result resize_placed(Result initial, const Options& requested, const Eval
                             trials.empty() ? "" : ",",
                             groups,
                             edits.size(),
-                            resize_feedback_json(next),
+                            feedback_json(next),
                             keep,
                             elapsed(t));
       if (keep) {
@@ -2483,8 +2481,8 @@ Repair_result resize_placed(Result initial, const Options& requested, const Eval
   evaluate(result.placed);  // leave the timer on the accepted state
   result.report = std::format(
       R"({{"engine":"new","model":"placement_rc_path_sizing_buffering","before":{},"after":{},"rounds":[{}],"seconds":{:.3f}}})",
-      resize_feedback_json(first),
-      resize_feedback_json(score),
+      feedback_json(first),
+      feedback_json(score),
       rounds,
       elapsed(start));
   physical::write_def(result.placed.floorplan, options.output_dir + "/out.def");
@@ -2561,7 +2559,7 @@ Floorplan_resize resize_floorplan_engine(Result& state, const Options& options, 
                           trials.empty() ? "" : ",",
                           groups,
                           edits.size(),
-                          resize_feedback_json(next),
+                          feedback_json(next),
                           keep);
     if (keep) {
       const auto previous_owner = state.fp_library;  // outlive the assignment that drops the old graph

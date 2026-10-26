@@ -54,8 +54,6 @@ Resize_trial     run_resize_trial(const Result& state, const Options& options, c
                                   const Evaluate& evaluate, const std::string& output_dir, const std::string& floorplan);
 // The engine's smallest repeater buffer (its inventory order); empty without one.
 std::string      smallest_buffer(const Options& options);
-// The feedback summary the engines report per trial (ps).
-std::string      resize_feedback_json(const Timing_feedback& feedback);
 // Full-evaluation acceptance: setup WNS/TNS and electrical violations never worse
 // (hold is reported, not gated, as pre-CTS), and some improvement (timing,
 // electrical or area).
