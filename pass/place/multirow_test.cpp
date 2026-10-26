@@ -219,6 +219,30 @@ TEST(Multirow, StartsNeedTheTemplateAndSymmetry) {
   EXPECT_TRUE(contains(failure(flipless), "orientations lack LEF SYMMETRY"));
 }
 
+TEST(Multirow, ACutBottomRowKeepsTheRowAccessOrigin) {
+  // A generated N/FS frame whose bottom row a full-width macro removed, as
+  // cut_macro_rows does: parity must still count from the original first row.
+  Fixture f(12, 6);
+  f.fp.rows.erase(f.fp.rows.begin());
+  const auto c       = f.cell(5, 3);
+  // Counting from the lowest remaining (FS) row reads it as even: every start misses t0.
+  const auto message = failure(f);
+  EXPECT_TRUE(contains(message, "starts miss the row-access template")) << message;
+  f.options.core_origins = first_core_rows(Fixture(12, 6).fp);
+  ASSERT_EQ(f.options.core_origins.at("core"), 0);
+  for (size_t row = 0; row < f.fp.rows.size(); ++row) {
+    EXPECT_TRUE(multirow_start_allowed(f.tech, f.fp, row, "dom", f.options)) << row;
+  }
+  const auto report = anchor_multirow_cells(f.tech, f.fp, f.options);
+  EXPECT_EQ(f.at(c).y, 300);
+  EXPECT_EQ(f.at(c).orientation, Orientation::FS);
+  EXPECT_EQ(report.odd_starts, 1);
+  auto frame = f.fp;
+  release_multirow_anchors(frame, report);
+  EXPECT_NO_THROW(check_legality(f.tech, frame));
+  EXPECT_EQ(native_violation(f, frame), "");
+}
+
 TEST(Multirow, AGapInTheUpperRowOnlyNeverSplitsTheFootprint) {
   Fixture f;
   f.cell(5, 1, "cell", Status::FIXED);

@@ -8064,6 +8064,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         write_legalize_timing("global_placement");
       }
       auto frame = sat_frame(v.design, false);
+      // The two-row cells' row-access origin: the first core row before the
+      // handoff taps cut rows under macros.
+      const auto core_origins = multirow_cells ? first_core_rows(frame) : std::map<std::string, int64_t>{};
       if (options.handoff_taps) {
         const auto&    tap_master     = tech_profile->tap_master;
         const auto&    master         = tech.macros.at(tap_master);
@@ -8106,6 +8109,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         anchors.max_density      = terminal_options.max_density;
         anchors.macro_halo_x_dbu = terminal_options.macro_halo_x_dbu;
         anchors.macro_halo_y_dbu = terminal_options.macro_halo_y_dbu;
+        anchors.core_origins     = core_origins;
         multirow_report          = anchor_multirow_cells(tech, frame, anchors);
       }
       terminal_report = terminal_legalize(tech, frame, final_gp_timing, terminal_options);

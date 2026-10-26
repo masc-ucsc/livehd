@@ -16,9 +16,15 @@ namespace {
 namespace ph   = physical;
 using Interval = std::pair<int64_t, int64_t>;  // [first, last) sites
 
-// Row-access origin: the first (lowest) core row. Requires rows.
-int64_t first_core_y(const ph::Floorplan& fp) {
-  return std::min_element(fp.rows.begin(), fp.rows.end(), [](const auto& a, const auto& b) { return a.y < b.y; })->y;
+// Row-access origin of a site: the recorded first core row, else its lowest row here.
+int64_t first_core_y(const ph::Floorplan& fp, const Multirow_options& options, const std::string& site) {
+  if (const auto it = options.core_origins.find(site); it != options.core_origins.end()) {
+    return it->second;
+  }
+  const auto origins = first_core_rows(fp);
+  const auto it      = origins.find(site);
+  require(it != origins.end(), "multirow packing found no row of the master's site");
+  return it->second;
 }
 enum class Refusal : uint8_t { none, symmetry, access };
 // Why a k-row master may not start on core row `band` with orientation o.
@@ -78,18 +84,20 @@ struct Packer {
     int64_t   band, step;
     double    cost;
   };
-  const ph::Technology&                                         tech;
-  ph::Floorplan&                                                fp;
-  const Multirow_options&                                       options;
-  Multirow_report                                               report;
-  std::vector<Row_gaps>                                         rows;
-  Capacity_bins                                                 grid;
-  int64_t                                                       first_y;
-  // Rows of each site on the core row grid, by core row index.
-  std::map<std::string, std::map<int64_t, std::vector<size_t>>> bands;
+  struct Site_rows {
+    int64_t                                origin = 0;  // y of the first core row
+    std::map<int64_t, std::vector<size_t>> bands;       // rows on the core row grid, by core row index
+  };
+  const ph::Technology&            tech;
+  ph::Floorplan&                   fp;
+  const Multirow_options&          options;
+  Multirow_report                  report;
+  std::vector<Row_gaps>            rows;
+  Capacity_bins                    grid;
+  std::map<std::string, Site_rows> by_site;
 
   Packer(const ph::Technology& technology, ph::Floorplan& frame, const Multirow_options& controls)
-      : tech(technology), fp(frame), options(controls), rows(row_gaps(tech, fp, "multirow packing")), first_y(first_core_y(fp)) {
+      : tech(technology), fp(frame), options(controls), rows(row_gaps(tech, fp, "multirow packing")) {
     // Terminal legalization's model: obstacles remove row capacity; fixed
     // logic, hard placement blockages and anchors only occupy sites.
     grid = Capacity_bins(gaps_extent(rows), options.bins_x, options.bins_y);
@@ -117,13 +125,15 @@ struct Packer {
       }
     }
   }
-  const std::map<int64_t, std::vector<size_t>>& site_bands(const std::string& site, int64_t row_height) {
-    const auto [it, added] = bands.try_emplace(site);
+  const Site_rows& site_rows(const std::string& site, int64_t row_height) {
+    const auto [it, added] = by_site.try_emplace(site);
     if (added) {
+      auto& s  = it->second;
+      s.origin = first_core_y(fp, options, site);
       for (size_t r = 0; r < rows.size(); ++r) {
         const auto& row = rows[r];
-        if (fp.rows[row.source].site == site && row.height == row_height && (row.y - first_y) % row_height == 0) {
-          it->second[(row.y - first_y) / row_height].push_back(r);  // ascending x within a core row
+        if (fp.rows[row.source].site == site && row.height == row_height && (row.y - s.origin) % row_height == 0) {
+          s.bands[(row.y - s.origin) / row_height].push_back(r);  // ascending x within a core row
         }
       }
     }
@@ -140,7 +150,9 @@ struct Packer {
     const auto&          m          = tech.macros.at(c.macro);
     const auto&          gp         = c.place;
     const auto           row_height = gp.height / int64_t(k);
-    const auto&          by_band    = site_bands(m.site, row_height);
+    const auto&          site       = site_rows(m.site, row_height);
+    const auto&          by_band    = site.bands;
+    const auto           first_y    = site.origin;
     const auto           dy         = [&](int64_t band) { return std::abs(double(first_y + band * row_height - gp.y)); };
     const auto           nearest    = std::llround(double(gp.y - first_y) / row_height);
     std::vector<int64_t> order;
@@ -289,6 +301,15 @@ size_t multirow_rows(const ph::Technology& tech, const ph::Macro& m) {
   return row > 0 && height % row == 0 && height / row >= 2 ? size_t(height / row) : 0;
 }
 
+std::map<std::string, int64_t> first_core_rows(const ph::Floorplan& fp) {
+  std::map<std::string, int64_t> origins;
+  for (const auto& row : fp.rows) {
+    const auto [it, added] = origins.try_emplace(row.site, row.y);
+    it->second             = std::min(it->second, row.y);
+  }
+  return origins;
+}
+
 bool multirow_start_allowed(const ph::Technology& tech, const ph::Floorplan& fp, size_t start_row, const std::string& master,
                             const Multirow_options& options) {
   const auto& row = fp.rows.at(start_row);
@@ -296,7 +317,7 @@ bool multirow_start_allowed(const ph::Technology& tech, const ph::Floorplan& fp,
   const auto  k   = multirow_rows(tech, m);
   require(k != 0, "multirow start check needs a multi-row CORE master");
   const auto row_height = std::llround(tech.sites.at(m.site).height * tech.dbu);
-  const auto offset     = row.y - first_core_y(fp);
+  const auto offset     = row.y - first_core_y(fp, options, m.site);
   return row.site == m.site && offset % row_height == 0
          && start_refusal(m, master, k, offset / row_height, row.orientation, options) == Refusal::none;
 }
