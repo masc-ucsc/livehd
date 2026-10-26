@@ -12,7 +12,7 @@ import subprocess
 import tempfile
 
 from .extract import extract, text_file, verify_lengths
-from .features import features
+from .features import NETWORK_BINS, features
 from .maps import encode, read
 from .pool import VERSIONS, canonical, publish_sample, sha
 
@@ -98,7 +98,7 @@ def ingest(args, odb_provenance=None):
         # Native reference also validates actual routed feature interchange.
         native_features = scratch / 'features.bin'
         subprocess.run([str(args.native.resolve()), 'features', str(geometry_path), str(native_features),
-                        str(bins), str(route_y), '256', '256'], check=True, timeout=120)
+                        str(bins), str(route_y), str(NETWORK_BINS), str(NETWORK_BINS)], check=True, timeout=120)
         if encode(computed) != native_features.read_bytes():
             raise ValueError('routed Python/native feature mismatch')
         lefs = sorted(sha(path.read_bytes()) for path in args.lef)
@@ -118,7 +118,7 @@ def ingest(args, odb_provenance=None):
                                   'die_height': (die[3] - die[1]) / geometry['dbu'],
                                   'utilization': utilization, 'macro_signature': sha(macros.encode())},
                     'routed_def_sha256': definition_hash, 'dbu_per_micron': geometry['dbu'],
-                    'core': core, 'route_grid': [bins, route_y], 'network_grid': [256, 256],
+                    'core': core, 'route_grid': [bins, route_y], 'network_grid': [NETWORK_BINS, NETWORK_BINS],
                     'liberty_sha256': sha(args.liberty.read_bytes()), 'controls_sha256': sha(args.controls.read_bytes()),
                     'extractor': 'uroute-def-centerlines-v1'}
         files = {'geometry.json': geometry_path.read_bytes(), 'physical.json': metric_path.read_bytes()}

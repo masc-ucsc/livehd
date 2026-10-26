@@ -15,6 +15,7 @@ import tempfile
 import time
 
 from .export_weights import LIMIT
+from .features import NETWORK_BINS
 from .maps import read
 from .pool import VERSIONS, _atomic, _identity, canonical, inside, lineage_status, load_sample, read_manifest, sha
 from .score import METRICS, absolute_channel, defined_mean, metrics
@@ -173,9 +174,9 @@ def evaluate(args):
         subprocess.run(command, check=True, timeout=args.timeout)
         result['native_seconds'] = time.monotonic() - start
         prediction = read(prediction_path)
-        if (prediction.channels, prediction.bins_x, prediction.bins_y, prediction.normalized) != (2, 256, 256, False):
+        if (prediction.channels, prediction.bins_x, prediction.bins_y, prediction.normalized) != (2, NETWORK_BINS, NETWORK_BINS, False):
             raise ValueError('native evaluation prediction shape mismatch')
-        result['metrics'] = {name: metrics(absolute_channel(labels, metric), absolute_channel(prediction, metric), 256, 256)
+        result['metrics'] = {name: metrics(absolute_channel(labels, metric), absolute_channel(prediction, metric), NETWORK_BINS, NETWORK_BINS)
                              for metric, name in enumerate(('utilization', 'drc'))}
         result.update(status='scored', reason='', prediction=str(prediction_path.relative_to(args.output)),
                       prediction_sha256=sha(prediction_path.read_bytes()),

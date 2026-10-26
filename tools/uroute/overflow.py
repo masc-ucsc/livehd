@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 import time
 
-from .features import grid
+from .features import NETWORK_BINS, grid
 from .maps import raw, write
 from .pool import canonical, sha
 
@@ -21,7 +21,7 @@ BOX = re.compile(rf'bbox\s*=\s*\(({NUMBER}),\s*({NUMBER})\)\s*-\s*\(({NUMBER}),\
 COUNTS = re.compile(r'comment:\s*capacity:(\d+)\s+usage:(\d+)\s+congestion:(\d+)')
 
 
-def marker_map(text, core, dbu, bins=256):
+def marker_map(text, core, dbu, bins=NETWORK_BINS):
     grid(bins, bins)
     if (len(core) != 4 or not all(math.isfinite(v) for v in core) or
             not math.isfinite(dbu) or dbu <= 0):

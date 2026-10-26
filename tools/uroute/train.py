@@ -21,6 +21,7 @@ import time
 
 from .episodes import ImportanceSampler
 from .export_weights import LIMIT
+from .features import NETWORK_BINS
 from .pool import VERSIONS, _atomic, canonical, inside, load_sample, publish_weights, read_manifest, sha
 
 
@@ -75,7 +76,7 @@ class Dataset:
         import torch
         # Train only on supports the placer can load (all label channels).
         features, labels, _ = load_sample(self.root, self.records[sample_id])
-        x = torch.tensor(features.values, dtype=torch.float32).reshape(4, 256, 256)
+        x = torch.tensor(features.values, dtype=torch.float32).reshape(4, NETWORK_BINS, NETWORK_BINS)
         y = normalized_label_tensor(labels, metric)
         return torch.cat((x, y), dim=0)
 
