@@ -219,7 +219,10 @@ cc_library(
     testonly = True,
     hdrs = ["timing_circuit_fixture.hpp"],
     copts = COPTS,
-    visibility = ["//pass/place:__subpackages__"],
+    visibility = [
+        "//pass/domplace/timing:__pkg__",
+        "//pass/place:__subpackages__",
+    ],
     deps = ["//graph", "//pass/liberty:timing_model"],
 )
 

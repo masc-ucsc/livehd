@@ -88,17 +88,9 @@ std::shared_ptr<late::Provisional_cells> provisional(const nldm::Library&       
   }
   return cells;
 }
-// An instance of a provisional master: the circuit declares masters from its
-// Liberty, so the declaration briefly sees the merged library.
 hhds::Node_class instance(Circuit& circuit, const late::Provisional_cells& cells, const std::string& name,
                           const std::string& master) {
-  const auto liberty = circuit.library;
-  auto       merged  = std::make_shared<nldm::Library>(*liberty);
-  merged->cells.insert(cells.library.cells.begin(), cells.library.cells.end());
-  circuit.library = merged;
-  auto node       = circuit.cell(name, master);
-  circuit.library = liberty;
-  return node;
+  return circuit.cell(name, master, &cells.library);
 }
 }  // namespace
 

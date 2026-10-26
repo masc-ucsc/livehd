@@ -31,11 +31,13 @@ struct Timing_circuit {
     }
     graph = io->create_graph();
   }
-  hhds::Node_class cell(const std::string& instance, const std::string& master) {
+  // `declarations` names masters outside `library` (provisional cells).
+  hhds::Node_class cell(const std::string& instance, const std::string& master,
+                        const liberty::timing::Library* declarations = nullptr) {
     auto io = owner.find_io(master);
     if (!io) {
       io = owner.create_io(master);
-      for (const auto& [name, pin] : library->cells.at(master).pins) {
+      for (const auto& [name, pin] : (declarations ? *declarations : *library).cells.at(master).pins) {
         if (pin.direction == "input") {
           io->add_input(name, io->get_input_pin_decls().size());
         } else {
