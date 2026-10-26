@@ -67,7 +67,6 @@ for leg, args, needle in (
         ('timing_place', base + domino + ['--set', 'synth.place=true'], 'need OpenTimer'),  # timing-driven by default
         ('resize', base + domino + place_on + ['--set', 'synth.place.resize=true'], 'need OpenTimer'),
         ('resynth', base + domino + place_on + ['--set', 'synth.place.resynth=true'], 'need OpenTimer'),
-        ('pg', base + domino + place_on + ['--set', 'synth.place.pg=asap7'], 'synth.place.pg'),
         ('busorder', base + domino + place_on + ['--set', 'synth.place.region.busorder=true'], 'single-row cells'),
         ('boundarypins', base + domino + place_on + ['--set', 'synth.place.region.boundarypins=true'], 'single-row cells')):
     error = run(f'refused_{leg}', args + ['--workdir', str(root / 'R')], False)['error']

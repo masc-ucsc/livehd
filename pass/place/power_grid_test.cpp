@@ -1,6 +1,7 @@
 #include "power_grid.hpp"
 
 #include <algorithm>
+#include <tuple>
 
 #include "gtest/gtest.h"
 
@@ -51,6 +52,42 @@ TEST(PowerGrid, Asap7RailAndStripePlanningBeforeVias) {
   EXPECT_TRUE(contains("VSS", "M5", {2940, 2691, 3060, 15669}));
   EXPECT_TRUE(contains("VDD", "M5", {3132, 2691, 3252, 15669}));
   EXPECT_TRUE(contains("VDD", "M6", {2700, 3453, 15552, 3741}));
+}
+TEST(PowerGrid, TwoRowMastersDoNotDefineTheRowRails) {
+  // Two-row domino abstracts on the core site repeat one polarity on their
+  // outer edges (t0 VSS-VDD-VSS, t1 VDD-VSS-VDD). Only one-row cells define
+  // a row's rails, so the plan is that of the one-row library alone.
+  const auto reference = technology();
+  auto       t         = reference;
+  for (const auto& [name, outer, inner] : {
+           std::tuple{"dom_t0", "VSS", "VDD"},
+           {"dom_t1", "VDD", "VSS"}
+  }) {
+    auto& m        = t.macros[name];
+    m.klass        = "CORE";
+    m.site         = "site";
+    m.width        = .486;
+    m.height       = .540;
+    const auto use = [](const char* net) { return std::string(net) == "VDD" ? "POWER" : "GROUND"; };
+    m.pins[outer]  = {
+        "INOUT",
+        use(outer),
+        {{"M1", {0, -.009, .486, .009}}, {"M1", {0, .531, .486, .549}}}
+    };
+    m.pins[inner] = {"INOUT", use(inner), {{"M1", {0, .261, .486, .279}}}};
+  }
+  const auto plan     = plan_power_grid(t, frame(), power_grid_profile("pg_asap7", t));
+  const auto expected = plan_power_grid(reference, frame(), power_grid_profile("pg_asap7", reference));
+  EXPECT_EQ(plan.rail_count, expected.rail_count);
+  EXPECT_EQ(plan.metal.size(), expected.metal.size());
+  // A one-row cell with one polarity on both edges is still refused.
+  auto shorted = reference;
+  shorted.macros.at("cell").pins.at("VDD").shapes.push_back({
+      "M1",
+      {0, -.009, .108, .009}
+  });
+  shorted.macros.at("cell").pins.erase("VSS");
+  EXPECT_THROW(plan_power_grid(shorted, frame(), power_grid_profile("pg_asap7", shorted)), std::invalid_argument);
 }
 TEST(PowerGrid, ShortRowsReceiveSupplementalFeeders) {
   const auto tech = technology();

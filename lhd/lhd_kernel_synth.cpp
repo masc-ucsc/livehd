@@ -1246,11 +1246,6 @@ void synth_command(Options& opts, Result& res) {
                       "timing-driven placement, resizing and resynthesis need OpenTimer, which the domino profile refuses",
                       "set synth.place.timing_driven=false (and leave synth.place.resize/resynth off)"};
     }
-    if (run_place && place_options.pg != "none") {
-      throw Lhd_error{"usage",
-                      "synth.place.pg is not supported with provisional domino cells",
-                      "their two-row abstracts repeat one rail polarity at both edges; use synth.place.pg=none"};
-    }
     if (run_place && (place_options.busorder.enabled || place_options.boundarypins.enabled || place_options.boundarypins.align)) {
       throw Lhd_error{"usage",
                       "detail-final region placement (busorder, boundarypins) needs single-row cells; the domino profile places "

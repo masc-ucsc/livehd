@@ -35,10 +35,15 @@ struct Rails {
 // Read the physical lower/upper rails from ordinary standard-cell PG pins.
 // A second followpin layer may have no PG pins (ASAP7 M2); it uses the same rail
 // width. Conflicting masters are unsupported instead of arbitrarily choosing one.
+// Only one-row masters define a row's rails: a multi-row master (a two-row
+// domino abstract) spans several rows, and its PG rail parity is a placement
+// legality check (pg_rails.hpp), not a property of the site.
 Rails site_rails(const ph::Technology& tech, const Pg_profile& p, const std::string& site, int64_t dbu) {
-  Rails result;
+  Rails      result;
+  const auto row = tech.sites.find(site);
   for (const auto& [name, master] : tech.macros) {
-    if (master.site != site || master.klass != "CORE" || master.virtual_proxy) {
+    if (master.site != site || master.klass != "CORE" || master.virtual_proxy
+        || (row != tech.sites.end() && dimension(master.height, dbu) != dimension(row->second.height, dbu))) {
       continue;
     }
     Rails found;
