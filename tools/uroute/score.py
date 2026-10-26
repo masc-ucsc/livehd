@@ -13,6 +13,15 @@ from pathlib import Path
 from .features import grid, resample
 from .maps import read
 
+# Every tile score metrics() reports; correlations may be undefined (None).
+METRICS = ('pearson', 'spearman', 'ssim', 'nrms', 'rmse', 'hotspot_top5_overlap')
+
+
+def defined_mean(values):
+    """(fsum mean of the defined values or None, defined count, undefined count)."""
+    defined = [v for v in values if v is not None]
+    return (math.fsum(defined) / len(defined) if defined else None), len(defined), len(values) - len(defined)
+
 
 def pearson(a, b):
     ma, mb = math.fsum(a) / len(a), math.fsum(b) / len(b)

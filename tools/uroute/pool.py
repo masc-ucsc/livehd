@@ -118,6 +118,15 @@ def _identity(metadata):
         raise ValueError("source must be livehd or external")
 
 
+def lineage_status(provenance, top):
+    """'incomplete', 'seen', or None when complete checkpoint lineage excludes top."""
+    seen = provenance.get("seen_designs") if isinstance(provenance, dict) else None
+    if (not isinstance(provenance, dict) or provenance.get("lineage_complete") is not True or not isinstance(seen, list)
+            or not seen or not all(isinstance(s, str) and s for s in seen)):
+        return "incomplete"
+    return "seen" if top in seen else None
+
+
 def _shape(maps, channels, normalized):
     if (maps.channels, maps.bins_x, maps.bins_y, maps.normalized) != (channels, NETWORK_BINS, NETWORK_BINS, normalized):
         raise ValueError(f"expected {channels}x{NETWORK_BINS}x{NETWORK_BINS} maps with normalized={normalized}")

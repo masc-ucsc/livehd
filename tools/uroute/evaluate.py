@@ -16,8 +16,8 @@ import time
 
 from .export_weights import LIMIT
 from .maps import read
-from .pool import VERSIONS, _atomic, _identity, canonical, inside, load_sample, read_manifest, sha
-from .score import absolute_channel, metrics
+from .pool import VERSIONS, _atomic, _identity, canonical, inside, lineage_status, load_sample, read_manifest, sha
+from .score import METRICS, absolute_channel, defined_mean, metrics
 
 
 class Pool:
@@ -45,14 +45,12 @@ class Pool:
 
     def unseen(self, top):
         provenance = self.manifest.get('provenance', {})
-        if not isinstance(provenance, dict):
+        status = lineage_status(provenance, top)
+        if status == 'incomplete':
             return {'verified': False, 'reason': 'checkpoint training/model-selection lineage is incomplete'}
-        seen = provenance.get('seen_designs')
-        if provenance.get('lineage_complete') is not True or not isinstance(seen, list) or not seen or not all(isinstance(s, str) and s for s in seen):
-            return {'verified': False, 'reason': 'checkpoint training/model-selection lineage is incomplete'}
-        if top in seen:
+        if status == 'seen':
             return {'verified': False, 'reason': 'query design participated in gradients, model selection or an ancestor checkpoint'}
-        return {'verified': True, 'reason': '', 'seen_designs': sorted(set(seen))}
+        return {'verified': True, 'reason': '', 'seen_designs': sorted(set(provenance['seen_designs']))}
 
     def select(self, key, mode, shots, minimum, fallback, chosen=()):
         if not 1 <= minimum <= shots <= 16 or fallback not in ('nearest', 'skip'):
@@ -102,10 +100,9 @@ class Pool:
 
 def metric_average(values):
     result = {}
-    for name in ('pearson', 'spearman', 'ssim', 'nrms', 'rmse', 'hotspot_top5_overlap'):
-        defined = [r[name] for r in values if r[name] is not None]
-        result[name] = {'mean': math.fsum(defined) / len(defined) if defined else None,
-                        'defined': len(defined), 'undefined': len(values) - len(defined)}
+    for name in METRICS:
+        mean, defined, undefined = defined_mean([r[name] for r in values])
+        result[name] = {'mean': mean, 'defined': defined, 'undefined': undefined}
     return result
 
 

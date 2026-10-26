@@ -17,7 +17,8 @@ import time
 
 from .export_weights import LIMIT
 from .pool import (VERSIONS, _atomic, _identity, _object, _verify_immutable_sample,
-                   canonical, file_sha, inside, read_manifest, sha)
+                   canonical, file_sha, inside, lineage_status, read_manifest, sha)
+from .score import METRICS, defined_mean
 from .train import Dataset
 
 
@@ -89,14 +90,12 @@ def readiness(root, manifest, config, from_scratch):
             except ValueError as error:
                 result['errors'].append(str(error))
             if not from_scratch:
-                provenance = manifest.get('provenance', {})
-                seen = provenance.get('seen_designs') if isinstance(provenance, dict) else None
+                lineage = lineage_status(manifest.get('provenance', {}), top)
                 if not manifest.get('weights'):
                     result['errors'].append('no initial weights; explicitly choose --from-scratch')
-                elif (not isinstance(provenance, dict) or provenance.get('lineage_complete') is not True or
-                      not isinstance(seen, list) or not seen or not all(isinstance(s, str) and s for s in seen)):
+                elif lineage == 'incomplete':
                     result['errors'].append('initial checkpoint has incomplete training/model-selection lineage')
-                elif top in seen:
+                elif lineage == 'seen':
                     result['errors'].append('initial checkpoint has already seen the test design')
             folds.append(result)
     return {'ready': all(not f['errors'] for f in folds), 'data_bytes_verified': False,
@@ -154,11 +153,10 @@ def design_averages(folds):
         result[mode] = {}
         for metric in ('utilization', 'drc'):
             result[mode][metric] = {}
-            for name in ('pearson', 'spearman', 'ssim', 'nrms', 'rmse', 'hotspot_top5_overlap'):
-                values = [f['evaluations'][mode]['by_design'][f['test_top']][metric][name]['mean'] for f in folds]
-                defined = [v for v in values if v is not None]
-                result[mode][metric][name] = {'mean': math.fsum(defined) / len(defined) if defined else None,
-                                             'defined_designs': len(defined), 'undefined_designs': len(values) - len(defined)}
+            for name in METRICS:
+                mean, defined, undefined = defined_mean(
+                    [f['evaluations'][mode]['by_design'][f['test_top']][metric][name]['mean'] for f in folds])
+                result[mode][metric][name] = {'mean': mean, 'defined_designs': defined, 'undefined_designs': undefined}
     return result
 
 
