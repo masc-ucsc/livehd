@@ -18,7 +18,7 @@ class ChannelIrTest(unittest.TestCase):
                          "voltages_v": {"VDD": "0.7", "VSS": "0"}}
         self.manifest = {}
         for arm in ("reference", "candidate"):
-            report = {"profile": "pg_asap7", "reference_revision": "same-revision",
+            report = {"schema_version": 3, "profile": "pg_asap7", "reference_revision": "same-revision",
                       "supplies": [{"net": "VDD", "pins": ["VDD", "VDDPE", "VDDCE"]},
                                    {"net": "VSS", "pins": ["VSS", "VSSE"]}],
                       "channels": [] if arm == "reference" else [{"style": "skip"}],
@@ -82,6 +82,17 @@ class ChannelIrTest(unittest.TestCase):
         self.csv("candidate_VSS.csv", "VDDPE", ".001")
         with self.assertRaisesRegex(ValueError, "wrong supply terminal"):
             self.evaluate()
+
+    def test_reports_before_schema_3_must_be_regenerated(self):
+        path = self.root / "reference.json"
+        report = json.loads(path.read_text())
+        for version in (None, 2, "3", True):
+            stale = {key: value for key, value in report.items() if key != "schema_version"}
+            if version is not None:
+                stale["schema_version"] = version
+            path.write_text(json.dumps(stale))
+            with self.assertRaisesRegex(ValueError, "predates schema 3"):
+                self.evaluate()
 
     def test_invalid_or_missing_budget(self):
         path = self.root / "candidate.json"

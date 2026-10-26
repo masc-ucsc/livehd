@@ -2748,7 +2748,8 @@ cache snapshots) and verify equal rows, placed components and signal nets before
 routing. With IO resynthesis enabled, a reused workdir carries learned timing
 and wire-load data into mapping even when a changed placement option misses the
 completed-placement cache. Such a miss alone does not give a matched baseline.
-`power_grid.json` schema 2 records each patch and marks channel IR verification
+`power_grid.json` schema 3 records each patch, the profile's supply nets with
+their cell pin names (`supplies`, power first), and marks channel IR verification
 false; native connectivity checks do not establish an IR bound.
 
 The report's `channel_accounting` object records removed planned stripe length
@@ -3107,6 +3108,8 @@ must establish that these descriptors describe the runs; the checker matches
 recorded context and hashes the input artifacts, but cannot reconstruct how a
 CSV was produced. The reference must have channels disabled, and the candidate
 must carry a finite nonnegative budget and the same profile, supplies and revision.
+Both reports must be schema 3 or later; older reports lack the supply records
+and must be regenerated.
 
 The checker requires matching terminal identities, layers and coordinates,
 rejects missing/duplicate/nonfinite data, and compares decimal CSV voltages

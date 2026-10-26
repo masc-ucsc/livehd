@@ -35,6 +35,10 @@ def finite(value):
 
 def supplies(reports):
     """Supply nets, power first, mapped to the cell terminals each connects."""
+    for report in reports:
+        version = report.get("schema_version")
+        if not isinstance(version, int) or isinstance(version, bool) or version < 3:
+            raise ValueError("power-grid report predates schema 3 supply records; regenerate it")
     recorded = reports[0].get("supplies")
     if (not reports[0].get("profile") or reports[0]["profile"] != reports[1].get("profile")
             or not isinstance(recorded, list) or len(recorded) != 2 or recorded != reports[1].get("supplies")):

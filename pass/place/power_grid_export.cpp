@@ -696,7 +696,7 @@ void write_power_grid_report(const ph::Floorplan& fp, const Pg_profile& profile,
   rapidjson::Writer<rapidjson::StringBuffer> report(buffer);
   report.StartObject();
   report.Key("schema_version");
-  report.Int(2);
+  report.Int(3);
   report.Key("profile");
   report.String(profile.name.c_str());
   report.Key("reference_revision");
