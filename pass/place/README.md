@@ -2553,7 +2553,9 @@ one takes the nearest x of its own start row within `shift_sites` free of
 single-row cells, else the nearest one overlapping at most `max_displaced`
 single-row cells, else the packer's nearest pose for it alone, free of every
 cell. Poses keep the terminal `padding_sites` free, pass the row-access start
-check and the hard bin cap. The posed cells are then locked, padded
+check and the hard bin cap, on the terminal grid the reference was legalized
+on (GP bins as `dp::place` resolves them, so `automatic_bins` uses the
+design's automatic grid; reported as `bins_x`/`bins_y`). The posed cells are then locked, padded
 obstacles while nearest-whitespace ECO legalization re-places the displaced
 and other edited single-row cells. Any failure throws `Multirow_failure` with
 nothing committed; the two-row ECO never falls back to windowed

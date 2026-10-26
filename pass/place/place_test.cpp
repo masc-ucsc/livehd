@@ -718,6 +718,34 @@ TEST(Placement, TwoRowEcoSwapsVariantsAroundTheirNeighbors) {
   } catch (const Multirow_failure& error) {
     EXPECT_NE(std::string(error.what()).find("two-row ECO cannot place c1"), std::string::npos) << error.what();
   }
+
+  // The ECO checks the hard bin cap on the terminal grid the reference was
+  // legalized on: with automatic bins, the GP's resolved grid, never the
+  // requested one (2 here).
+  Two_row_chain automatic(kDominoTwoRow);
+  setup(automatic.options, "automatic");
+  automatic.options.automatic_bins   = true;
+  automatic.options.bins             = 2;
+  const auto          automatic_cold = place(*automatic.graph, automatic.flat, automatic.options);
+  std::ifstream       grid_in(automatic.options.output_dir + "/terminal_legalize.json");
+  rapidjson::Document grid;
+  grid.Parse(std::string{std::istreambuf_iterator<char>(grid_in), {}}.c_str());
+  ASSERT_TRUE(grid.IsObject() && grid.HasMember("bins_y"));
+  EXPECT_GT(grid["bins_y"].GetUint64(), 2U);
+  Two_row_chain again(kDominoTwoRow);
+  setup(again.options, "automatic_eco");
+  again.options.automatic_bins     = true;
+  again.options.bins               = 2;
+  again.options.previous           = std::make_shared<const physical::Floorplan>(automatic_cold.floorplan);
+  again.options.changed_cells      = {"c1"};
+  again.options.legalize_cells     = true;
+  again.options.multirow_eco       = Multirow_eco_bounds{};
+  const auto          again_result = place(*again.graph, again.flat, again.options);
+  rapidjson::Document again_qor;
+  again_qor.Parse(again_result.qor.c_str());
+  ASSERT_TRUE(again_qor.HasMember("multirow_eco"));
+  EXPECT_EQ(again_qor["multirow_eco"]["bins_x"].GetUint64(), grid["bins_x"].GetUint64());
+  EXPECT_EQ(again_qor["multirow_eco"]["bins_y"].GetUint64(), grid["bins_y"].GetUint64());
 }
 
 TEST(Placement, LibraryTwoRowCellsKeepTheSingleRowPaths) {

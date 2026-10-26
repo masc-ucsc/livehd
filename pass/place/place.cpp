@@ -5886,6 +5886,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   std::optional<Terminal_legalize_report> terminal_report;
   std::optional<Multirow_report>          multirow_report;
   std::optional<Multirow_eco_report>      multirow_eco_report;
+  std::pair<unsigned, unsigned>           multirow_eco_grid;  // its terminal bin grid
   std::vector<ph::Component>              handoff_cells;
   std::vector<ph::Row>                    handoff_rows;
   const bool macro_pin_adjust = options.macro_pin_adjust && movable_macros && !options.previous && !options.timing_seed;
@@ -6063,12 +6064,20 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       auto terminal             = options.terminal_legalize_options;
       terminal.macro_halo_x_dbu = v.halo_x;
       terminal.macro_halo_y_dbu = v.halo_y;
+      // The hard bin cap is checked on the grid the reference's terminal
+      // legalization used: GP bins as dp::place resolves them (automatic
+      // bins from the design; dynamic bins always have an auxiliary grid).
+      auto eco_bins             = std::pair{control.bins_x, control.bins_y};
+      if (control.automatic_bins) {
+        eco_bins = dp::detail::automatic_bins(v.design);
+      }
       set_terminal_grid(tech,
                         frame,
                         options,
-                        route_grid_bins(control.auxiliary_bins, control.bins_x),
-                        route_grid_bins(control.auxiliary_bins, control.bins_y),
+                        route_grid_bins(control.auxiliary_bins, eco_bins.first),
+                        route_grid_bins(control.auxiliary_bins, eco_bins.second),
                         terminal);
+      multirow_eco_grid   = {terminal.bins_x, terminal.bins_y};
       // No row is cut (handoff taps refuse a previous frame), so the frame's
       // first core rows are the row-access origins.
       multirow_eco_report = legalize_multirow_edits(tech,
@@ -10187,6 +10196,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       block.AddMember("max_displacement_um", max_displacement, allocator);
       block.AddMember("shift_sites", options.multirow_eco->shift_sites, allocator);
       block.AddMember("max_displaced", options.multirow_eco->max_displaced, allocator);
+      block.AddMember("bins_x", multirow_eco_grid.first, allocator);
+      block.AddMember("bins_y", multirow_eco_grid.second, allocator);
       json.AddMember("multirow_eco", block, allocator);
     }
     if (sat_report) {
