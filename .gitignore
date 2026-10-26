@@ -77,6 +77,7 @@ generated/master_port/
 # A real design's certificate literal is megabytes of array elements; the
 # generator is tracked, its output is not.
 /formal/lean/Sims/
+/formal/lean/LegacySims/
 
 # Locally provisioned validation tools (pinned Icarus Verilog, built from
 # source into the project). The FINGERPRINT.txt that records the pinned tag,
@@ -91,7 +92,8 @@ generated/master_port/
 # corpora (whose identity is pinned per certificate by the sha256 column of
 # pass/lean/Lgraph_IR_Semantics_Simulator/manifests/*.tsv, not by git); `temp/` is the scratch root the tests
 # and drivers create under the project; `Gen/` is the per-design Lean models the
-# D3 reifier emits, for the same reason /formal/lean/Sims/ is ignored above.
+# D3 reifier emits, for the same reason /formal/lean/Sims/
+/formal/lean/LegacySims/ is ignored above.
 # Nothing under any of the three has ever been tracked. The four narrower
 # generated/ rules above are subsumed and kept only for their rationale -- a
 # canonical manifest run refuses a dirty worktree, and that refusal should mean
