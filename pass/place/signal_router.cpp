@@ -158,9 +158,11 @@ Signal_route_proposals Signal_router::try_route(const ph::Net& net, const Signal
   }
   // Filter after constructing layer alternatives: a congested baseline must
   // not prevent trying a cleaner upper layer with the same endpoint centers.
+  // The screen records each candidate's exposure, so it must not run as a
+  // (non-mutating) erase_if predicate.
   std::string access_rejection;
   bool        rejected_parallel = false;
-  std::erase_if(result.candidates, [&](Signal_route_geometry& candidate) {
+  const auto  rejected          = [&](Signal_route_geometry& candidate) {
     if (std::chrono::steady_clock::now() >= request.limits.deadline) {
       result.timed_out = true;
       return true;
@@ -205,7 +207,14 @@ Signal_route_proposals Signal_router::try_route(const ph::Net& net, const Signal
     const bool reject  = !request.try_hard && candidate.parallel_exposure > request.max_parallel_exposure;
     rejected_parallel |= reject;
     return reject;
-  });
+  };
+  std::vector<Signal_route_geometry> accepted;
+  for (auto& candidate : result.candidates) {
+    if (!rejected(candidate)) {
+      accepted.push_back(std::move(candidate));
+    }
+  }
+  result.candidates = std::move(accepted);
   if (result.candidates.empty()) {
     if (result.timed_out) {
       result.reason = "route acceptance check deadline";
