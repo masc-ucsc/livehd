@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <format>
+#include <functional>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -375,6 +376,22 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
     }
   }
 
+  // The view indexed once: variants by name, sidecar owners by state name.
+  std::map<std::string, const Domino_timing_view::Variant*, std::less<>>               variants;
+  std::map<std::string, std::vector<const Domino_timing_view::Instance*>, std::less<>> owners;
+  if (view) {
+    for (const auto& variant : view->variants) {
+      variants.emplace(variant.name, &variant);
+    }
+    for (const auto& instance : view->instances) {
+      owners[instance.state].push_back(&instance);
+    }
+  }
+  const auto variant_of = [&](std::string_view master) -> const Domino_timing_view::Variant* {
+    const auto found = variants.find(master);
+    return found == variants.end() ? nullptr : found->second;
+  };
+
   // Domino stages: internal and precharge checks per instance.
   const Stage_values    stage = view ? view->stage : Stage_values{};
   std::set<std::string> unmeasured;
@@ -386,7 +403,7 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
       continue;
     }
     ++domino_instances;
-    const auto* variant = view ? view->find(instance.master) : nullptr;
+    const auto* variant = variant_of(instance.master);
     const auto  need    = [&](const char* coefficient, std::optional<double> value) {
       if (!value) {
         unmeasured.insert(coefficient);
@@ -525,7 +542,7 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
   double domino_footprint = 0, liberty_area = 0;
   for (const auto& [name, instance] : instances) {
     (void)name;
-    const auto* variant  = instance.domino && view ? view->find(instance.master) : nullptr;
+    const auto* variant  = instance.domino ? variant_of(instance.master) : nullptr;
     domino_footprint    += variant ? variant->a_footprint_um2 : 0;
     liberty_area        += variant ? variant->a_estimate_um2 : instance.cell ? instance.cell->area : 0;
   }
@@ -735,7 +752,7 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
     if (!slack) {
       w.Key("arrival_ps");
       w.Null();
-      text(w, "timing", constraints.cuts.contains(result.name) ? "excluded" : "unreached");
+      text(w, "timing", "untimed: see coverage");
       w.EndObject();
       return;
     }
@@ -769,12 +786,12 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
   const auto source_state = [&](const std::string& name, const std::string& master) {
     const auto leaf = name.substr(name.rfind('.') == std::string::npos ? 0 : name.rfind('.') + 1);
     std::vector<const Domino_timing_view::Instance*> found;
-    if (view) {
-      const auto* variant = view->find(master);
-      for (const auto& instance : view->instances) {
-        const auto* owned = view->find(instance.master);
-        if (instance.state == leaf && (!variant || !owned || owned->family == variant->family)) {
-          found.push_back(&instance);
+    if (const auto candidates = owners.find(leaf); candidates != owners.end()) {
+      const auto* variant = variant_of(master);
+      for (const auto* instance : candidates->second) {
+        const auto* owned = variant_of(instance->master);
+        if (!variant || !owned || owned->family == variant->family) {
+          found.push_back(instance);
         }
       }
     }
@@ -794,13 +811,14 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
                            : std::format("{} sidecar instances own state {}", found.size(), leaf));
     }
   };
+  std::map<std::string, std::string> excluded(source.excluded.begin(), source.excluded.end());
   w.Key("stages");
   w.StartArray();
   for (const auto& [name, instance] : instances) {
     if (!instance.domino) {
       continue;
     }
-    const auto* variant = view ? view->find(instance.master) : nullptr;
+    const auto* variant = variant_of(instance.master);
     const auto  period  = clock_period(instance.clock);
     w.StartObject();
     text(w, "stage_id", name);
@@ -822,12 +840,11 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
       if (found != instance.pins.end() && all.pins[found->second].endpoint) {
         endpoint(found->second);
       } else {
-        const auto label = name + ":" + rail;
-        const auto exclude
-            = std::find_if(source.excluded.begin(), source.excluded.end(), [&](const auto& e) { return e.first == label; });
+        const auto label   = name + ":" + rail;
+        const auto exclude = excluded.find(label);
         w.StartObject();
         text(w, "pin", label);
-        text(w, "timing", exclude == source.excluded.end() ? "unbound" : "excluded: " + exclude->second);
+        text(w, "timing", exclude == excluded.end() ? "unbound" : "excluded: " + exclude->second);
         w.EndObject();
       }
     }
