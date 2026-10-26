@@ -9,7 +9,7 @@
 #include "boundary_pins.hpp"
 
 namespace livehd::placement {
-Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const std::vector<Region_rect>& mesh,
+Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const Region_mesh& mesh,
                                     const std::vector<Bus_bit>& identities, const std::vector<int>& macros) {
   auto&           d = model.design;
   Pin_align_stats stats;
@@ -17,7 +17,7 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const std::vector
   if (model.piece_region.size() != size_t(nets) || model.pin_is_driver.size() != d.pin2node.size()) {
     throw std::invalid_argument("pinalign requires directed split-net metadata");
   }
-  model.edges = region_edges(mesh);
+  model.edges = mesh.edges;
   std::vector<int>              node_anchor(d.node_x.size(), -1);
   std::vector<std::vector<int>> edge_pins(model.edges.size()), incident(count), terminals(nets), real(nets);
   for (int i = 0; i < count; ++i) {
@@ -79,7 +79,7 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const std::vector
   const auto opposite = [&](int input, int output, int box) {
     const auto& a = model.anchors[input];
     const auto& b = model.anchors[output];
-    if (a.edge < 0 || b.edge < 0 || box < 0 || box >= int(mesh.size())) {
+    if (a.edge < 0 || b.edge < 0 || box < 0 || box >= int(mesh.rects.size())) {
       return false;
     }
     const auto& ea = model.edges[a.edge];
@@ -87,7 +87,7 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const std::vector
     if (ea.axis != eb.axis) {
       return false;
     }
-    const auto&  r  = mesh[box];
+    const auto&  r  = mesh.rects[box];
     const double lo = ea.axis == 0 ? r.xl : r.yl, hi = ea.axis == 0 ? r.xh : r.yh;
     return (ea.position == lo && eb.position == hi) || (ea.position == hi && eb.position == lo);
   };
@@ -98,7 +98,7 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const std::vector
   std::map<std::pair<int, int>, Cell_paths> cells;
   for (int n = 0; n < nets; ++n) {
     const int box = model.piece_region[n];
-    if (distance[n] < 0 || box < 0 || box >= int(mesh.size())) {
+    if (distance[n] < 0 || box < 0 || box >= int(mesh.rects.size())) {
       continue;
     }
     std::vector<int> inputs, outputs;
@@ -130,7 +130,7 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const std::vector
     if (node >= d.num_movable || (!d.node_macro.empty() && d.node_macro[node])) {
       continue;
     }
-    const auto&  r = mesh[box];
+    const auto&  r = mesh.rects[box];
     const double x = d.node_x[node] + d.node_size_x[node] / 2, y = d.node_y[node] + d.node_size_y[node] / 2;
     if (!(r.xl <= x && x < r.xh && r.yl <= y && y < r.yh)) {
       continue;

@@ -38,8 +38,6 @@ struct Region_edge {
 };
 // Split shared collinear boundaries at every endpoint, including T junctions.
 std::vector<Region_edge> region_edges(const std::vector<Region_rect>&);
-// Half-open [xl,xh) x [yl,yh) lookup; -1 is the exterior.
-int region_of(const std::vector<Region_rect>&, double x, double y);
 
 struct Region_mesh {
   std::vector<Region_rect>      rects;
@@ -52,6 +50,9 @@ struct Region_mesh {
   // Geometry is in the native design's coordinate units.
   static Region_mesh build(const DreamPlace::native::Design&, const std::vector<int>& macros, const std::vector<Region_io>&,
                            const Region_options&, double dbu_per_um);
+  // Given rectangles with derived edges and no membership (tests, replays).
+  static Region_mesh from_rects(std::vector<Region_rect>);
+  // Half-open [xl,xh) x [yl,yh) lookup; empty outside every rectangle.
   std::optional<int> rect_of(double x, double y) const;
   // <dir>/region_mesh.json: the one mesh description every consumer report references.
   void               write(const std::string& dir) const;

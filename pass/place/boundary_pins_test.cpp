@@ -26,10 +26,10 @@ dp::Design fixture() {
   d.build_maps();
   return d;
 }
-const std::vector<Region_rect> boxes = {
+const auto boxes = Region_mesh::from_rects({
     { 0, 0,  50, 100, 1},
     {50, 0, 100, 100, 1}
-};
+});
 Busorder_tree rsmt(const std::vector<Busorder_point>& points) {
   const auto    tree = steiner_tree(points);
   Busorder_tree edges;
@@ -110,7 +110,7 @@ TEST(BoundaryPins, OnlyRealCellCoordinatesLeaveTheTemporaryModel) {
   policy.enabled             = true;
   policy.iterations          = 20;
   policy.max_displacement_um = 5;
-  Boundary_pins phase(Region_mesh{.rects = boxes}, rsmt, 1, policy);
+  Boundary_pins phase(boxes, rsmt, 1, policy);
   dp::Options   options;
   options.bins_x = options.bins_y = 4;
   options.add_fillers             = false;
@@ -209,11 +209,11 @@ TEST(BoundaryPins, OrdersPinsAlongSharedTJunctionEdges) {
   d.net_weights        = {1, 2, 3};
   d.net_mask.clear();
   d.build_maps();
-  const std::vector<Region_rect> mesh = {
+  const auto mesh = Region_mesh::from_rects({
       { 0,  0,  50, 100},
       {50,  0, 100,  50},
       {50, 50, 100, 100}
-  };
+  });
   auto model = split_boundary_nets(d, mesh, rsmt);
   ASSERT_EQ(model.anchors.size(), 3u);
   const auto stats = order_boundary_pins(model,

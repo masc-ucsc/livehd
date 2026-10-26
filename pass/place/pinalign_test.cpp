@@ -63,7 +63,9 @@ struct Fixture {
     m.parent_net.push_back(original);
     m.piece_region.push_back(box);
   }
-  Pin_align_stats run(const std::vector<int>& macros = {}) { return align_boundary_pins(m, mesh, bits, macros); }
+  Pin_align_stats run(const std::vector<int>& macros = {}) {
+    return align_boundary_pins(m, Region_mesh::from_rects(mesh), bits, macros);
+  }
 };
 }  // namespace
 TEST(Pinalign, DirectWireKeepsInputWhileOneCellMovesBothVirtualPins) {
@@ -293,7 +295,7 @@ TEST(Pinalign, SplitMetadataRetainsOriginalDriverAndLocalRegions) {
   d.net_weights        = {1};
   d.build_maps();
   Fixture f;
-  f.m = split_boundary_nets(d, f.mesh, [](const std::vector<Busorder_point>&) {
+  f.m = split_boundary_nets(d, Region_mesh::from_rects(f.mesh), [](const std::vector<Busorder_point>&) {
     return Busorder_tree{
         {{10, 20}, {50, 20}},
         {{50, 20}, {50, 60}},

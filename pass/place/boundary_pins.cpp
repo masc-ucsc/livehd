@@ -72,10 +72,10 @@ void validate_boundary_pin_options(const Boundary_pin_options& o) {
   }
 }
 
-Boundary_pin_model split_boundary_nets(const dp::Design& original, const std::vector<Region_rect>& mesh,
+Boundary_pin_model split_boundary_nets(const dp::Design& original, const Region_mesh& mesh,
                                        const Busorder_route& router) {
   original.validate();
-  if (mesh.empty() || !router) {
+  if (mesh.rects.empty() || !router) {
     throw std::invalid_argument("boundary pins require a mesh and RSMT router");
   }
   Boundary_pin_model result;
@@ -92,12 +92,12 @@ Boundary_pin_model split_boundary_nets(const dp::Design& original, const std::ve
   d.net_weights.clear();
   d.net_mask.clear();
   std::set<double> cuts[2];
-  for (const auto& r : mesh) {
+  for (const auto& r : mesh.rects) {
     cuts[0].insert({r.xl, r.xh});
     cuts[1].insert({r.yl, r.yh});
   }
   // Exterior (-1) pieces retain original fixed IO terminals.
-  const auto region  = [&](Point p) { return region_of(mesh, p.first, p.second); };
+  const auto region  = [&](Point p) { return mesh.rect_of(p.first, p.second).value_or(-1); };
   const auto enabled = [&](int net) { return original.net_mask.empty() || original.net_mask[net]; };
   const auto real_pin
       = [&](int pin) { return Pin{original.pin2node[pin], original.pin_offset_x[pin], original.pin_offset_y[pin], pin}; };
@@ -246,7 +246,7 @@ Boundary_pin_model split_boundary_nets(const dp::Design& original, const std::ve
   return result;
 }
 
-Boundary_pin_order_stats order_boundary_pins(Boundary_pin_model& model, const std::vector<Region_rect>& mesh,
+Boundary_pin_order_stats order_boundary_pins(Boundary_pin_model& model, const Region_mesh& mesh,
                                              const std::vector<Bus_bit>& identities, const std::vector<int>& macros) {
   const auto               start = Clock::now();
   auto&                    d     = model.design;
@@ -265,7 +265,7 @@ Boundary_pin_order_stats order_boundary_pins(Boundary_pin_model& model, const st
     stats.macro_pins_before += inside_macro(pin.x, pin.y);
   }
   stats.before = dp::hpwl(d);
-  model.edges  = region_edges(mesh);
+  model.edges  = mesh.edges;
   std::map<int, std::vector<int>> by_edge;
   for (size_t i = 0; i < model.anchors.size(); ++i) {
     auto& pin = model.anchors[i];
@@ -471,7 +471,7 @@ Boundary_pin_order_stats order_boundary_pins(Boundary_pin_model& model, const st
 Boundary_pins::Boundary_pins(const Region_mesh& regions, Busorder_route router, double units, Boundary_pin_options policy,
                              std::string directory, std::vector<Bus_bit> bus_bits, std::vector<int> macro_nodes)
     : options(policy)
-    , mesh(regions.rects)
+    , mesh(regions)
     , route(std::move(router))
     , dbu(units)
     , output(std::move(directory))
@@ -698,7 +698,7 @@ void Boundary_pins::write() const {
                : "Fixed transparent RSMT boundary pins; connected per-rectangle placement nets; no reordering");
   j.Key("rectangles");
   j.StartArray();
-  for (const auto& r : mesh) {
+  for (const auto& r : mesh.rects) {
     j.StartArray();
     for (double v : {r.xl, r.yl, r.xh, r.yh}) {
       j.Double(v);

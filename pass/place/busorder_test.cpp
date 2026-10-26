@@ -43,7 +43,8 @@ dp::Design fixture(const std::vector<double>& lanes = {10, 20, 40, 30}) {
   d.build_maps();
   return d;
 }
-Busorder make_order(const dp::Design& d, double weight = 100) {
+Region_mesh mesh(const dp::Design& d) { return Region_mesh::build(d, {}, {}, {.max_cells = 4, .merge_um = 0}, 1); }
+Busorder    make_order(const dp::Design& d, double weight = 100) {
   Busorder_options o;
   o.enabled             = true;
   o.weight              = weight;
@@ -59,7 +60,7 @@ Busorder make_order(const dp::Design& d, double weight = 100) {
     return edges;
   };
   return Busorder(d,
-                  Region_mesh::build(d, {}, {}, {.max_cells = 4, .merge_um = 0}, 1),
+                  mesh(d),
                   {{"bus", 1}, {"bus", 2}, {"bus", 20}, {"bus", 21}},
                   router,
                   1,
@@ -85,7 +86,7 @@ TEST(Busorder, AcceptsBothDirectionsAndExcludesMaskedNets) {
     order.observe(d, "before");
     ASSERT_GT(order.samples().back().groups, 0u);
     EXPECT_EQ(order.samples().back().unordered, 0u);
-    for (const auto& r : order.rectangles()) {
+    for (const auto& r : mesh(d).rects) {
       EXPECT_LE(r.cells, 4u);
     }
   }

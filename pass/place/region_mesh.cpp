@@ -101,19 +101,21 @@ std::vector<Region_edge> region_edges(const std::vector<Region_rect>& mesh) {
   return edges;
 }
 
-int region_of(const std::vector<Region_rect>& mesh, double x, double y) {
-  for (size_t i = 0; i < mesh.size(); ++i) {
-    const auto& r = mesh[i];
+std::optional<int> Region_mesh::rect_of(double x, double y) const {
+  for (size_t i = 0; i < rects.size(); ++i) {
+    const auto& r = rects[i];
     if (r.xl <= x && x < r.xh && r.yl <= y && y < r.yh) {
       return int(i);
     }
   }
-  return -1;
+  return std::nullopt;
 }
 
-std::optional<int> Region_mesh::rect_of(double x, double y) const {
-  const int i = region_of(rects, x, y);
-  return i < 0 ? std::nullopt : std::optional<int>(i);
+Region_mesh Region_mesh::from_rects(std::vector<Region_rect> rects) {
+  Region_mesh mesh;
+  mesh.rects = std::move(rects);
+  mesh.edges = region_edges(mesh.rects);
+  return mesh;
 }
 
 Region_mesh Region_mesh::build(const dp::Design& d, const std::vector<int>& macros, const std::vector<Region_io>& ios,

@@ -60,7 +60,6 @@ public:
            Busorder_options, std::string output_dir = {});
   void                                           refine(DreamPlace::native::Design&, const DreamPlace::native::Options&);
   void                                           observe(const DreamPlace::native::Design&, const std::string& stage);
-  const std::vector<Region_rect>&                rectangles() const { return regions.rects; }
   const std::vector<Busorder_sample>&            samples() const { return history; }
   std::vector<DreamPlace::native::RelativeOrder> constraints(const DreamPlace::native::Design&);
 };
