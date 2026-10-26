@@ -15,6 +15,14 @@ proc livehd::preroute::_merge_intervals {values} {
   }
   return $out
 }
+# Placement rows whose pitch-high Y bands intersect [yl, yh).
+proc livehd::preroute::_rows_in_band {bins pitch yl yh} {
+  set rows {}
+  for {set k [expr {int(floor(double($yl)/$pitch))}]} {$k <= int(floor(double($yh-1)/$pitch))} {incr k} {
+    if {[dict exists $bins $k]} {foreach id [dict get $bins $k] {dict set rows $id 1}}
+  }
+  return $rows
+}
 proc livehd::preroute::_plan_route_space {} {
   set block [ord::get_db_block]
   set scope [_fixed_routes]
@@ -44,12 +52,7 @@ proc livehd::preroute::_plan_route_space {} {
   set intervals {}
   foreach net [dict get $scope nets] {
     set shapes {};set joins {}
-    set iter [odb::dbWirePathItr];set path [odb::dbWirePath];set item [odb::dbWirePathShape]
-    try {
-      $iter begin [$net getWire]
-      while {[$iter getNextPath $path]} {while {[$iter getNextShape $item]} {_append_shape [$item cget -shape] shapes joins}}
-      _append_wire_patches [$net getWire] shapes
-    } finally {rename $item {};rename $path {};rename $iter {}}
+    _append_wire_shapes $net shapes joins
     foreach shape $shapes {
       lassign $shape layer xl yl xh yh
       if {$layer ni $low_layers} {continue}
@@ -57,11 +60,7 @@ proc livehd::preroute::_plan_route_space {} {
       set margin [expr {4*[$tech_layer getWidth]}]
       set xl [expr {$xl-$margin}];set yl [expr {$yl-$margin}]
       set xh [expr {$xh+$margin}];set yh [expr {$yh+$margin}]
-      set candidates {}
-      for {set k [expr {int(floor(double($yl)/$pitch))}]} {$k <= int(floor(double($yh-1)/$pitch))} {incr k} {
-        if {[dict exists $bins $k]} {foreach id [dict get $bins $k] {dict set candidates $id 1}}
-      }
-      dict for {id unused} $candidates {
+      dict for {id unused} [_rows_in_band $bins $pitch $yl $yh] {
         lassign [dict get $rows $id] rx ry rxh ryh step
         if {$yl >= $ryh || $yh <= $ry || $xl >= $rxh || $xh <= $rx} {continue}
         set lo [expr {max($rx,$rx+int(floor(double($xl-$rx)/$step))*$step)}]
@@ -79,11 +78,8 @@ proc livehd::preroute::_plan_route_space {} {
     if {[$inst getPlacementStatus] ni {FIRM LOCKED}} {continue}
     set box [$inst getBBox]
     lassign [list [$box xMin] [$box yMin] [$box xMax] [$box yMax]] xl yl xh yh
-    set candidates {}
-    for {set k [expr {int(floor(double($yl)/$pitch))}]} {$k <= int(floor(double($yh-1)/$pitch))} {incr k} {
-      if {[dict exists $bins $k]} {foreach id [dict get $bins $k] {if {[dict exists $intervals $id]} {dict set candidates $id 1}}}
-    }
-    dict for {id unused} $candidates {
+    dict for {id unused} [_rows_in_band $bins $pitch $yl $yh] {
+      if {![dict exists $intervals $id]} {continue}
       lassign [dict get $rows $id] rx ry rxh ryh step
       if {$yl >= $ryh || $yh <= $ry} {continue}
       foreach segment [dict get $intervals $id] {
@@ -125,12 +121,10 @@ proc livehd::preroute::_plan_route_space {} {
 proc livehd::preroute::reserve_fixed_route_space {} {
   set block [ord::get_db_block]
   set property [odb::dbStringProperty_find $block livehd_preroute_space_v1]
+  # _fixed_routes also rejects a recorded legacy lock policy.
   set scope [_fixed_routes]
   if {$property ne "NULL"} {
     set record [$property getValue]
-    if {![dict exists $record policy] || [dict get $record policy] ne "endpoint_only"} {
-      error "legacy corridor locks do not satisfy endpoint-only policy; reload the unreserved checkpoint"
-    }
     set current {}
     foreach net [dict get $scope nets] {dict set current [$net getName] [_wire_state $net]}
     if {$current ne [dict get $record wires]} {error "fixed routes changed after placement reservation"}

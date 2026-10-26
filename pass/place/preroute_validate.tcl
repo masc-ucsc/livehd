@@ -100,26 +100,32 @@ proc livehd::preroute::_append_wire_patches {wire shapes_var} {
     }
   } finally {rename $decoder {}}
 }
+# Append a net's decoded wire and via landings, including RECT patches. Via
+# cuts record the landing indices they connect in joins_var.
+proc livehd::preroute::_append_wire_shapes {net shapes_var joins_var} {
+  upvar 1 $shapes_var shapes $joins_var joins
+  set iter [odb::dbWirePathItr]
+  set path [odb::dbWirePath]
+  set path_shape [odb::dbWirePathShape]
+  try {
+    $iter begin [$net getWire]
+    while {[$iter getNextPath $path]} {
+      while {[$iter getNextShape $path_shape]} {
+        _append_shape [$path_shape cget -shape] shapes joins
+      }
+    }
+  } finally {
+    rename $path_shape {}; rename $path {}; rename $iter {}
+  }
+  _append_wire_patches [$net getWire] shapes
+}
 proc livehd::preroute::check_fixed_connectivity {} {
   set scope [_fixed_routes]
   set checked 0; set total_shapes 0; set total_pins 0
   foreach net [dict get $scope nets] {
     if {[llength [$net getBTerms]]} {error "phase-1 fixed net [$net getName] has IO terminals"}
     set shapes {}; set joins {}; set pin_groups {}
-    set iter [odb::dbWirePathItr]
-    set path [odb::dbWirePath]
-    set path_shape [odb::dbWirePathShape]
-    try {
-      $iter begin [$net getWire]
-      while {[$iter getNextPath $path]} {
-        while {[$iter getNextShape $path_shape]} {
-          _append_shape [$path_shape cget -shape] shapes joins
-        }
-      }
-    } finally {
-      rename $path_shape {}; rename $path {}; rename $iter {}
-    }
-    _append_wire_patches [$net getWire] shapes
+    _append_wire_shapes $net shapes joins
     set wire_count [llength $shapes]
     if {!$wire_count} {error "fixed net [$net getName] has no metal"}
     foreach pin [$net getITerms] {
