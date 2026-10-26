@@ -141,4 +141,233 @@ TEST(Physical, OrientationTransforms) {
   EXPECT_EQ(orient_point(1, 2, 10, 20, Orientation::FN), (std::pair<double, double>{9, 2}));
   EXPECT_EQ(orient_point(1, 2, 10, 20, Orientation::W), (std::pair<double, double>{18, 1}));
 }
+TEST(Physical, PlacementBlockagesPreserveAssociationsAndRoundtrip) {
+  Floorplan fp;
+  fp.design = "blocked";
+  fp.die    = {0, 0, 10000, 10000};
+  Ann_place fixed(1000, 1000, 1000, 1000);
+  fixed.status = Status::FIXED;
+  fp.components.push_back({"ram\\[0\\]", "RAM", fixed});
+  fp.blockages = {
+      { true, "ram\\[0\\]", {{900, 900, 2100, 2100}, {3000, 3000, 4000, 4000}}},
+      {false,           {},                           {{0, 5000, 10000, 6000}}}
+  };
+  const auto path = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "blockages.def";
+  write_def(fp, path.string());
+  const auto restored = read_def(path.string());
+  EXPECT_EQ(restored.blockages, fp.blockages);
+  EXPECT_EQ(restored.components.size(), 1);
+  EXPECT_NO_THROW(verify_def_roundtrip(fp, restored));
+  auto changed              = restored;
+  changed.blockages[0].soft = false;
+  EXPECT_THROW(verify_def_roundtrip(fp, changed), std::runtime_error);
+  changed                        = restored;
+  changed.blockages[0].component = "missing";
+  EXPECT_THROW(write_def(changed, path.string()), std::invalid_argument);
+  changed                               = restored;
+  changed.blockages[0].rectangles[0].xl = .5;
+  EXPECT_THROW(write_def(changed, path.string()), std::invalid_argument);
+  changed                            = restored;
+  changed.components[0].place.status = Status::PLACED;
+  EXPECT_THROW(placement_exclusions(changed, fp.die), std::invalid_argument);
+}
+TEST(Physical, PlacementExclusionsClipUnionAndSubtractFixedOccupancy) {
+  Floorplan fp;
+  fp.blockages = {
+      { true, {}, {{-5, -5, 15, 15}, {0, 0, 10, 10}}},
+      {false, {},                    {{0, 0, 6, 10}}}
+  };
+  const auto pieces = placement_exclusions(fp,
+                                           {
+                                               0,
+                                               0,
+                                               10,
+                                               10
+  },
+                                           {{2, 2, 8, 8}});
+  double     hard = 0, soft = 0;
+  for (size_t i = 0; i < pieces.size(); ++i) {
+    const auto& r = pieces[i].rect;
+    EXPECT_GE(r.xl, 0);
+    EXPECT_GE(r.yl, 0);
+    EXPECT_LE(r.xh, 10);
+    EXPECT_LE(r.yh, 10);
+    const auto area                                         = (r.xh - r.xl) * (r.yh - r.yl);
+    (pieces[i].kind == Placement_mask::hard ? hard : soft) += area;
+    EXPECT_FALSE(r.xl < 8 && r.xh > 2 && r.yl < 8 && r.yh > 2);
+    for (size_t j = 0; j < i; ++j) {
+      const auto& q = pieces[j].rect;
+      EXPECT_FALSE(r.xl < q.xh && r.xh > q.xl && r.yl < q.yh && r.yh > q.yl);
+    }
+  }
+  EXPECT_DOUBLE_EQ(hard, 36);  // 60 minus the 24-DBU² fixed overlap.
+  EXPECT_DOUBLE_EQ(soft, 28);
+  EXPECT_TRUE(placement_exclusions(fp, {20, 20, 30, 30}).empty());
+}
+TEST(Physical, LargeExclusionSweepMatchesIndependentRaster) {
+  Floorplan fp;
+  fp.blockages = {
+      {false, {}, std::vector<Rect>(1100, {0, 0, 1, 1})},
+      {true, {}, {}}
+  };
+  for (int i = 0; i < 120; ++i) {
+    const double x = (i * 17) % 37 - 3, y = (i * 11) % 29 - 2;
+    fp.blockages[i % 2].rectangles.push_back({x, y, x + 1 + i % 5, y + 1 + i % 4});
+  }
+  std::vector<Rect> fixed;
+  for (int i = 0; i < 17; ++i) {
+    const double x = (i * 7) % 32, y = (i * 13) % 24;
+    fixed.push_back({x, y, x + 3, y + 2});
+  }
+  const auto pieces        = placement_exclusions(fp, {0, 0, 32, 24}, fixed);
+  const auto contains      = [](const Rect& r, double x, double y) { return r.xl <= x && x < r.xh && r.yl <= y && y < r.yh; };
+  size_t     expected_area = 0;
+  for (double y = .5; y < 24; y += 1) {
+    for (double x = .5; x < 32; x += 1) {
+      auto expected = Placement_mask::none;
+      for (const auto& b : fp.blockages) {
+        for (const auto& r : b.rectangles) {
+          if (contains(r, x, y) && (expected == Placement_mask::none || !b.soft)) {
+            expected = b.soft ? Placement_mask::soft : Placement_mask::hard;
+          }
+        }
+      }
+      for (const auto& r : fixed) {
+        if (contains(r, x, y)) {
+          expected = Placement_mask::none;
+        }
+      }
+      expected_area  += expected != Placement_mask::none;
+      size_t matches  = 0;
+      for (const auto& p : pieces) {
+        if (contains(p.rect, x, y)) {
+          ++matches;
+          EXPECT_EQ(p.kind, expected);
+        }
+      }
+      EXPECT_EQ(matches, expected == Placement_mask::none ? 0 : 1) << x << ',' << y;
+    }
+  }
+  double area      = 0;
+  bool   seen_soft = false;
+  for (const auto& p : pieces) {
+    EXPECT_GE(p.rect.xl, 0);
+    EXPECT_GE(p.rect.yl, 0);
+    EXPECT_LE(p.rect.xh, 32);
+    EXPECT_LE(p.rect.yh, 24);
+    if (p.kind == Placement_mask::soft) {
+      seen_soft = true;
+    } else {
+      EXPECT_FALSE(seen_soft);
+    }
+    area += (p.rect.xh - p.rect.xl) * (p.rect.yh - p.rect.yl);
+  }
+  EXPECT_DOUBLE_EQ(area, expected_area);
+}
+TEST(Physical, LargeSparseFixedOccupancyDoesNotFillWhitespace) {
+  Floorplan fp;
+  fp.blockages = {
+      {false, {}, {}}
+  };
+  for (int y = 0; y < 64; ++y) {
+    for (int x = 0; x < 64; ++x) {
+      fp.blockages.front().rectangles.push_back({double(2 * x), double(2 * y), double(2 * x + 1), double(2 * y + 1)});
+    }
+  }
+  const auto pieces = placement_exclusions(fp, {0, 0, 128, 128});
+  ASSERT_EQ(pieces.size(), 4096);
+  for (const auto& p : pieces) {
+    EXPECT_EQ(p.kind, Placement_mask::hard);
+    EXPECT_DOUBLE_EQ(p.rect.xh - p.rect.xl, 1);
+    EXPECT_DOUBLE_EQ(p.rect.yh - p.rect.yl, 1);
+    EXPECT_EQ(static_cast<int>(p.rect.xl) % 2, 0);
+    EXPECT_EQ(static_cast<int>(p.rect.yl) % 2, 0);
+  }
+}
+TEST(Physical, UnsupportedBlockagesFailBeforeTheyCanBeDropped) {
+  const auto path = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "unsupported_blockage.def";
+  for (const std::string body : {"PLACEMENT + PARTIAL 50 RECT ( 0 0 ) ( 100 100 )",
+                                 "LAYER met1 RECT ( 0 0 ) ( 100 100 )",
+                                 "PLACEMENT POLYGON ( 0 0 ) ( 100 0 ) ( 100 100 )",
+                                 "PLACEMENT + COMPONENT absent RECT ( 0 0 ) ( 100 100 )"}) {
+    {
+      std::ofstream out(path);
+      out << "VERSION 5.8 ;\nDESIGN top ;\nUNITS DISTANCE MICRONS 1000 ;\n"
+             "DIEAREA ( 0 0 ) ( 1000 1000 ) ;\nBLOCKAGES 1 ;\n- "
+          << body << " ;\nEND BLOCKAGES\nEND DESIGN\n";
+    }
+    EXPECT_ANY_THROW(read_def(path.string())) << body;
+  }
+}
+TEST(Physical, SegmentedRowAdapterPreservesEveryAvailableSiteAndOrientation) {
+  Technology tech;
+  tech.sites["core"] = {1, 1, true};
+  Floorplan fp;
+  fp.design = "segmented";
+  fp.die    = {0, 0, 10000, 4000};
+  fp.rows   = {
+      {"r0a", "core",    0,    0,  6, 1000,  Orientation::N},
+      {"r0b", "core", 8000,    0,  2, 1000,  Orientation::N},
+      {"r1a", "core",    0, 1000,  6, 1000, Orientation::FS},
+      {"r1b", "core", 8000, 1000,  2, 1000, Orientation::FS},
+      { "r3", "core",    0, 3000, 10, 1000, Orientation::FS}
+  };
+  fp.blockages = {
+      {true, {}, {{9000, 0, 10000, 1000}}}
+  };
+  const auto adapted = rectangular_placement_frame(fp, tech);
+  ASSERT_EQ(adapted.rows.size(), 4);
+  ASSERT_EQ(adapted.blockages.size(), 2);
+  EXPECT_EQ(adapted.blockages.front(), fp.blockages.front());
+  EXPECT_FALSE(adapted.blockages.back().soft);
+  ASSERT_EQ(adapted.blockages.back().rectangles.size(), 2);
+  for (int row = 0; row < 4; ++row) {
+    EXPECT_EQ(adapted.rows[row].x, 0);
+    EXPECT_EQ(adapted.rows[row].y, row * 1000);
+    EXPECT_EQ(adapted.rows[row].count, 10);
+    if (row != 2) {
+      EXPECT_EQ(adapted.rows[row].orientation, row % 2 ? Orientation::FS : Orientation::N);
+    }
+    for (int site = 0; site < 10; ++site) {
+      const bool original = std::any_of(fp.rows.begin(), fp.rows.end(), [&](const auto& r) {
+        return r.y == row * 1000 && site * 1000 >= r.x && site * 1000 < r.x + r.count * r.step;
+      });
+      const bool masked
+          = std::any_of(adapted.blockages.back().rectangles.begin(), adapted.blockages.back().rectangles.end(), [&](const auto& r) {
+              return site * 1000 >= r.xl && site * 1000 < r.xh && row * 1000 >= r.yl && row * 1000 < r.yh;
+            });
+      EXPECT_EQ(original, !masked) << row << ':' << site;
+    }
+  }
+  const auto path = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "segmented_stage.def";
+  write_def(adapted, path.string());
+  EXPECT_NO_THROW(verify_def_roundtrip(adapted, read_def(path.string())));
+  EXPECT_EQ(fp.rows.size(), 5);  // original input was never rewritten
+}
+TEST(Physical, SegmentedRowAdapterRejectsAmbiguousOrOffGridFrames) {
+  Technology tech;
+  tech.sites["core"] = {1, 1, true};
+  Floorplan fp;
+  fp.die  = {0, 0, 10000, 4000};
+  fp.rows = {
+      {"r0", "core", 0,    0, 10, 1000,  Orientation::N},
+      {"r1", "core", 0, 1000, 10, 1000, Orientation::FS}
+  };
+  for (int mode = 0; mode < 4; ++mode) {
+    auto changed = fp;
+    if (mode == 0) {
+      changed.rows[1].y = 500;
+    }
+    if (mode == 1) {
+      changed.rows[1].step = 500;
+    }
+    if (mode == 2) {
+      changed.rows[1].orientation = Orientation::E;
+    }
+    if (mode == 3) {
+      changed.rows.push_back({"overlap", "core", 1000, 0, 2, 1000, Orientation::N});
+    }
+    EXPECT_THROW(rectangular_placement_frame(changed, tech), std::invalid_argument) << mode;
+  }
+}
 }  // namespace livehd::physical

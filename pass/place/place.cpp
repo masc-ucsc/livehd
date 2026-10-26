@@ -24,7 +24,12 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "buffering/checkpoint.hpp"
 #include "color_centroids.hpp"
+#include "filler_budget.hpp"
+#include "forces/gp_rejection.hpp"
+#include "forces/gp_timing.hpp"
+#include "forces/legalization.hpp"
 #include "h2d.hpp"
 #include "macro_snap.hpp"
 #include "macro_tracks.hpp"
@@ -1139,6 +1144,7 @@ struct View {
   std::vector<std::string>                      io_buses;
   std::vector<int>                              io_bits;
   std::vector<Cell>                             cells;
+  size_t                                        terminal_begin = 0;  // after cells and placement-only mask geometry
   std::set<std::string>                         constant_masters;
   std::vector<Endpoint>                         pins;
   std::vector<Endpoint>                         drivers;
@@ -1149,7 +1155,26 @@ struct View {
   std::map<std::string, std::string>            cohesion_owners;
 };
 using CentroidSample = dp::CentroidSample;
-auto                      summarize_centroids(const dp::Design& d) { return dp::detail::centroid_summary(d); }
+auto          summarize_centroids(const dp::Design& d) { return dp::detail::centroid_summary(d); }
+ph::Floorplan blockage_frame(const View& v) {
+  // v.fp is a frame, with signal components deliberately removed. Bind only
+  // the associated fixed components from the authoritative current cell view.
+  ph::Floorplan result;
+  result.blockages = v.fp.blockages;
+  std::set<std::string> bound;
+  for (const auto& blockage : result.blockages) {
+    if (blockage.component.empty() || !bound.insert(blockage.component).second) {
+      continue;
+    }
+    const auto it = v.cell.find(blockage.component);
+    if (it == v.cell.end()) {
+      throw std::runtime_error("placement blockage associated component absent from current graph: " + blockage.component);
+    }
+    const auto& c = v.cells.at(it->second);
+    result.components.push_back({c.name, c.macro, c.place});
+  }
+  return result;
+}
 std::pair<double, double> offset(const ph::Macro& macro, const std::string& name, Orientation o, int64_t dbu) {
   auto it = macro.pins.find(name);
   if (it == macro.pins.end() || it->second.shapes.empty()) {
@@ -1191,8 +1216,9 @@ color::Floorplan_coloring analyze_floorplan_colors(const View& v, const ph::Tech
   std::vector<std::vector<int>>                 backward(nodes.size()), forward(nodes.size());
   std::vector<int>                              controls;
   const auto                                    pin_base = [](const std::string& pin) { return pin.substr(0, pin.find('[')); };
-  const auto                                    index
-      = [&](const Endpoint& p) { return int(p.instance == "PIN" ? v.cells.size() + v.terminal.at(p.pin) : v.cell.at(p.instance)); };
+  const auto                                    index    = [&](const Endpoint& p) {
+    return int(p.instance == "PIN" ? v.terminal_begin + v.terminal.at(p.pin) : v.cell.at(p.instance));
+  };
   for (const auto& [driver, sinks] : v.nets) {
     if (v.ignored.ignored[net_id++]) {
       continue;
@@ -1386,6 +1412,36 @@ void make_arrays(View& v, const ph::Technology& tech) {
       ++d.num_movable;
     }
   }
+  std::vector<ph::Rect> fixed_occupancy;
+  for (size_t i = 0; i < v.cells.size(); ++i) {
+    const auto& c = v.cells[i];
+    if ((c.place.status == Status::FIXED || c.place.status == Status::LOCKED) && d.placement_mask(i) != dp::PlacementMask::soft) {
+      fixed_occupancy.push_back({d.node_x[i] - d.node_halo_x[i],
+                                 d.node_y[i] - d.node_halo_y[i],
+                                 d.node_x[i] + d.node_size_x[i] + d.node_halo_x[i],
+                                 d.node_y[i] + d.node_size_y[i] + d.node_halo_y[i]});
+    }
+  }
+  const ph::Rect domain{d.layout.xl, d.layout.yl, d.layout.xh, d.layout.yh};
+  for (const auto& exclusion : ph::placement_exclusions(blockage_frame(v), domain, fixed_occupancy)) {
+    const auto& r = exclusion.rect;
+    d.node_x.push_back(r.xl);
+    d.node_y.push_back(r.yl);
+    d.node_size_x.push_back(r.xh - r.xl);
+    d.node_size_y.push_back(r.yh - r.yl);
+    d.node_legalize_last.push_back(0);
+    d.node_blocked_capacity_h.push_back(0);
+    d.node_blocked_capacity_v.push_back(0);
+    d.node_macro.push_back(1);
+    d.node_placement_mask.push_back(exclusion.kind == ph::Placement_mask::soft ? dp::PlacementMask::soft : dp::PlacementMask::hard);
+    d.node_inflatable.push_back(0);
+    d.node_halo_x.push_back(0);
+    d.node_halo_y.push_back(0);
+    if (oriented) {
+      d.node_orientation.push_back(dp::Orientation::N);
+    }
+  }
+  v.terminal_begin = d.node_x.size();
   for (size_t i = 0; i < v.fp.terminals.size(); ++i) {
     const auto& p      = v.fp.terminals[i];
     v.terminal[p.name] = i;
@@ -1470,7 +1526,7 @@ void make_arrays(View& v, const ph::Technology& tech) {
       v.pins.push_back(e);
       d.flat_net2pin.push_back(d.pin2node.size());
       if (e.instance == "PIN") {
-        d.pin2node.push_back(v.cells.size() + v.terminal.at(e.pin));
+        d.pin2node.push_back(v.terminal_begin + v.terminal.at(e.pin));
         d.pin_offset_x.push_back(0);
         d.pin_offset_y.push_back(0);
       } else {
@@ -1574,6 +1630,25 @@ void make_arrays(View& v, const ph::Technology& tech) {
     }
   }
   d.validate();
+}
+void append_previous_boundary(std::vector<int>& previous, const View& current, const View& baseline) {
+  if (current.terminal_begin - current.cells.size() != baseline.terminal_begin - baseline.cells.size()
+      || current.fp.terminals.size() != baseline.fp.terminals.size()) {
+    throw std::runtime_error("GP replacement changed fixed placement exclusions or IO boundary");
+  }
+  for (size_t i = current.cells.size(); i < current.terminal_begin; ++i) {
+    const auto  old = baseline.cells.size() + i - current.cells.size();
+    const auto& a   = current.design;
+    const auto& b   = baseline.design;
+    if (a.node_x[i] != b.node_x[old] || a.node_y[i] != b.node_y[old] || a.node_size_x[i] != b.node_size_x[old]
+        || a.node_size_y[i] != b.node_size_y[old] || a.placement_mask(i) != b.placement_mask(old)) {
+      throw std::runtime_error("GP replacement changed fixed placement exclusion geometry");
+    }
+    previous.push_back(old);
+  }
+  for (size_t i = 0; i < current.fp.terminals.size(); ++i) {
+    previous.push_back(baseline.terminal_begin + i);
+  }
 }
 // Rebuild a topology trial at the current overlapping GP coordinates. Stable
 // names carry all surviving positions; inserted buffers have Steiner seeds.
@@ -1879,6 +1954,18 @@ void localize_tie_sites(View& v, const ph::Technology& tech, const std::string& 
       mark(v.cells[i]);
     }
   }
+  const ph::Rect domain{v.design.layout.xl, v.design.layout.yl, v.design.layout.xh, v.design.layout.yh};
+  for (const auto& exclusion : ph::placement_exclusions(blockage_frame(v), domain)) {
+    if (exclusion.kind != ph::Placement_mask::hard) {
+      continue;
+    }
+    const auto& r = exclusion.rect;
+    auto        row
+        = std::lower_bound(v.fp.rows.begin(), v.fp.rows.end(), r.yl, [&](const auto& item, double y) { return item.y + rh <= y; });
+    for (; row != v.fp.rows.end() && row->y < r.yh; ++row) {
+      occupied[row - v.fp.rows.begin()].emplace_back(std::llround(r.xl), std::llround(r.xh));
+    }
+  }
   for (auto& row : occupied) {
     std::sort(row.begin(), row.end());
   }
@@ -2156,8 +2243,8 @@ void assign_io(View& v) {
     }
     for (int p = begin; p < end; ++p) {
       const int node = v.design.pin2node[p];
-      if (node >= static_cast<int>(v.cells.size())) {
-        auto& [sx, sy, sc]  = sums[node - v.cells.size()];
+      if (node >= static_cast<int>(v.terminal_begin)) {
+        auto& [sx, sy, sc]  = sums[node - v.terminal_begin];
         sx                 += x;
         sy                 += y;
         sc                 += count;
@@ -2508,7 +2595,8 @@ ph::Rc_net steiner_rc(std::string driver, const std::vector<std::pair<std::strin
 }
 namespace {
 std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology& tech, const Options& options,
-                                            std::map<std::string, std::pair<double, double>>& pin_locations) {
+                                            std::map<std::string, std::pair<double, double>>& pin_locations,
+                                            Rc_cache* cache = nullptr, Rc_reuse_stats* reuse = nullptr, bool provenance = true) {
   auto result               = std::make_shared<ph::Parasitics>();
   result->approximate       = !options.full;
   const auto   wire         = technology_wire_rc(tech,
@@ -2519,7 +2607,7 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology&
                                        options.rc_pessimism);
   const double horizontal_r = wire.horizontal_r, horizontal_c = wire.horizontal_c;
   const double vertical_r = wire.vertical_r, vertical_c = wire.vertical_c;
-  {
+  if (provenance) {
     rapidjson::StringBuffer                    buffer;
     rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
     json.StartObject();
@@ -2553,6 +2641,18 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology&
   init_flute();
   uint64_t hash
       = hash_text(std::format("{}:{}:{}:{}:{}:{}", horizontal_r, horizontal_c, vertical_r, vertical_c, options.full, tech.dbu));
+  const auto append = [&](ph::Rc_net rc, bool approximate) {
+    result->approximate |= approximate;
+    for (const auto& node : rc.nodes) {
+      hash = hash_text(std::format("{}:{:.17g};", node.pin, node.capacitance_ff), hash);
+    }
+    for (const auto& edge : rc.edges) {
+      hash = hash_text(std::format("{}:{}:{:.17g};", edge.from, edge.to, edge.resistance_ohm), hash);
+    }
+    result->nets.push_back(std::move(rc));
+  };
+  // Keep identity hashing in its historical per-net order under either path.
+  std::vector<Rc_geometry>                                       geometries;
   std::vector<std::pair<std::string, std::pair<double, double>>> pins;
   for (size_t net = 0; net < v.drivers.size(); ++net) {
     const auto endpoint = [](const Endpoint& e) { return e.instance == "PIN" ? e.pin : e.instance + ":" + e.pin; };
@@ -2561,26 +2661,57 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology&
       continue;
     }
     pins.clear();
+    uint64_t load_hash = hash_util::kFnv1a64_offset;
     for (int p = begin; p < end; ++p) {
       const auto   node = v.design.pin2node[p];
       const double x = v.design.node_x[node] + v.design.pin_offset_x[p], y = v.design.node_y[node] + v.design.pin_offset_y[p];
       pins.emplace_back(endpoint(v.pins[p]), std::pair{x, y});
       pin_locations.emplace(pins.back().first, std::pair{x, y});
-      hash = hash_text(std::format("{}:{}:{};", pins.back().first, std::llround(x), std::llround(y)), hash);
+      if (!cache) {
+        hash = hash_text(std::format("{}:{}:{};", pins.back().first, std::llround(x), std::llround(y)), hash);
+      }
+      if (cache && size_t(node) < v.cells.size()) {
+        const auto& cell = v.cells[node];
+        load_hash        = hash_text(std::format("{}:{}:{}:{}:{}:{:.17g}:{:.17g};",
+                                          cell.macro,
+                                          cell.place.width,
+                                          cell.place.height,
+                                          static_cast<unsigned>(cell.place.orientation),
+                                          v.pins[p].pin,
+                                          v.design.pin_offset_x[p],
+                                          v.design.pin_offset_y[p]),
+                              load_hash);
+      }
+    }
+    if (cache) {
+      geometries.push_back({endpoint(v.drivers[net]), pins, std::format("{:016x}", load_hash)});
+      continue;
     }
     bool approximate = false;
     auto rc          = steiner_rc(endpoint(v.drivers[net]), pins, wire, tech.dbu, &approximate);
-    if (approximate) {
-      // Larger-net trees use the shared estimator's bounded approximation.
-      result->approximate = true;
+    append(std::move(rc), approximate);
+  }
+  if (cache) {
+    const Rc_policy policy{
+        {horizontal_r, horizontal_c, vertical_r, vertical_c},
+        double(tech.dbu),
+        wire.source
+    };
+    const auto snapshot = cache->update(std::move(geometries), policy, [&](const Rc_geometry& net, const Rc_policy&) {
+      Rc_cache::Built built;
+      built.rc = steiner_rc(net.driver, net.pins, wire, tech.dbu, &built.approximate);
+      return built;
+    });
+    if (reuse) {
+      *reuse = snapshot.stats;
     }
-    for (const auto& node : rc.nodes) {
-      hash = hash_text(std::format("{}:{:.17g};", node.pin, node.capacitance_ff), hash);
+    hash = hash_text(std::format("{}:{}:{}:{}:{}:{}", horizontal_r, horizontal_c, vertical_r, vertical_c, options.full, tech.dbu));
+    for (const auto& entry : snapshot.nets) {
+      for (const auto& [name, xy] : entry->geometry.pins) {
+        hash = hash_text(std::format("{}:{}:{};", name, std::llround(xy.first), std::llround(xy.second)), hash);
+      }
+      append(entry->built->rc, entry->built->approximate);
     }
-    for (const auto& edge : rc.edges) {
-      hash = hash_text(std::format("{}:{}:{:.17g};", edge.from, edge.to, edge.resistance_ohm), hash);
-    }
-    result->nets.push_back(std::move(rc));
   }
   result->identity = std::format("{:016x}", hash);
   return result;
@@ -2997,6 +3128,13 @@ bool legalize_edits(View& v, const ph::Technology& tech, const ph::Floorplan& re
   for (const auto& p : obstacles) {
     add_obstacle(p, false);
   }
+  const ph::Rect domain{double(first.x), double(first.y), double(first.x + first.count * sw), double(v.fp.rows.back().y + rh)};
+  for (const auto& exclusion : ph::placement_exclusions(blockage_frame(v), domain)) {
+    if (exclusion.kind == ph::Placement_mask::hard) {
+      const auto& r = exclusion.rect;
+      add_obstacle(Ann_place(std::llround(r.xl), std::llround(r.yl), std::llround(r.xh - r.xl), std::llround(r.yh - r.yl)), false);
+    }
+  }
   for (auto& intervals : occupied_rows) {
     std::sort(intervals.begin(), intervals.end());
   }
@@ -3406,7 +3544,28 @@ void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, double 
   const auto&                      site  = tech.sites.at(first.site);
   const int64_t                    rh = std::llround(site.height * tech.dbu), sw = std::llround(site.width * tech.dbu);
   const int64_t                    xl = first.x, yl = first.y, xh = xl + first.count * sw, yh = fp.rows.back().y + rh;
+  const auto                       exclusions = ph::placement_exclusions(fp, {double(xl), double(yl), double(xh), double(yh)});
   std::vector<std::vector<size_t>> by_row((yh - yl + rh - 1) / rh);
+  struct Hard_interval {
+    ph::Rect rect;
+    double   prefix_xh;
+  };
+  std::vector<std::vector<Hard_interval>> hard_by_row(by_row.size());
+  for (const auto& exclusion : exclusions) {
+    if (exclusion.kind != ph::Placement_mask::hard) {
+      continue;
+    }
+    const auto& r = exclusion.rect;
+    for (size_t row = (r.yl - yl) / rh; row < hard_by_row.size() && yl + static_cast<int64_t>(row) * rh < r.yh; ++row) {
+      hard_by_row[row].push_back({r, r.xh});
+    }
+  }
+  for (auto& intervals : hard_by_row) {
+    std::sort(intervals.begin(), intervals.end(), [](const auto& a, const auto& b) { return a.rect.xl < b.rect.xl; });
+    for (size_t i = 1; i < intervals.size(); ++i) {
+      intervals[i].prefix_xh = std::max(intervals[i].rect.xh, intervals[i - 1].prefix_xh);
+    }
+  }
   for (size_t i = 0; i < fp.components.size(); ++i) {
     const auto& a = fp.components[i];
     if (a.place.status == Status::UNPLACED || a.place.x < xl || a.place.y < yl || a.place.x + a.place.width > xh
@@ -3433,6 +3592,27 @@ void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, double 
     }
     if (ph::placement_mask(a, tech) == ph::Placement_mask::soft) {
       continue;
+    }
+    if (a.place.status != Status::FIXED && a.place.status != Status::LOCKED) {
+      for (size_t row = (a.place.y - yl) / rh;
+           row < hard_by_row.size() && yl + static_cast<int64_t>(row) * rh < a.place.y + a.place.height;
+           ++row) {
+        const auto& intervals = hard_by_row[row];
+        auto        it        = std::lower_bound(intervals.begin(),
+                                   intervals.end(),
+                                   double(a.place.x + a.place.width),
+                                   [](const auto& interval, double x) { return interval.rect.xl < x; });
+        while (it != intervals.begin()) {
+          --it;
+          if (it->prefix_xh <= a.place.x) {
+            break;
+          }
+          const auto& r = it->rect;
+          if (a.place.x < r.xh && a.place.y < r.yh && a.place.y + a.place.height > r.yl) {
+            throw std::runtime_error("cell overlaps hard placement blockage: " + a.name);
+          }
+        }
+      }
     }
     // Rows below are bucket indices only; macros need not be row-aligned.
     for (int64_t row = (a.place.y - yl) / rh; row * rh + yl < a.place.y + a.place.height; ++row) {
@@ -3632,10 +3812,90 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       automatic_options->fp_evaluate = [&requested](const Result& state) { return requested.fp_evaluate(state); };
     }
   }
-  const auto& options = automatic_options ? *automatic_options : requested;
+  const auto&                                     options = automatic_options ? *automatic_options : requested;
+  std::shared_ptr<timeclosure::Gp_timing_session> native_session;
+  const auto write_legal_acceptance = [&](const timeclosure::Legal_timing_check& check, bool final, bool reference_legal) {
+    fs::create_directories(options.output_dir);
+    rapidjson::StringBuffer                    buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
+    json.StartObject();
+    json.Key("reference_legal");
+    json.Bool(reference_legal);
+    json.Key("final_evaluated");
+    json.Bool(final);
+    json.Key("characterized_driver_boundary");
+    json.Bool(options.native_gp_timing && options.native_gp_timing->driver.characterized_boundary);
+    json.Key("bounded_driver_boundary");
+    json.Bool(options.native_gp_timing && options.native_gp_timing->driver.bounded_boundary);
+    json.Key("native_legalize_displacement_strength");
+    json.Double(options.native_gp_timing ? options.native_gp_timing->legalization.displacement : 0);
+    json.Key("native_legalize_net_strength");
+    json.Double(options.native_gp_timing ? options.native_gp_timing->legalization.net : 0);
+    json.Key("native_legalize_timing");
+    json.Bool(options.native_gp_timing && options.native_gp_timing->legalize_timing_enabled());
+    json.Key("native_timing_recalibrate_on_mismatch");
+    json.Bool(options.native_gp_timing && options.native_gp_timing->recalibrate_on_mismatch);
+    json.Key("supported_gp_updates");
+    json.Uint64(check.supported_gp_updates);
+    json.Key("response_interval_complete");
+    json.Bool(check.response_interval_complete);
+    json.Key("native_nonregression_pass");
+    json.Bool(final && check.passed());
+    const auto period = [&](const char* key, std::optional<double> value) {
+      json.Key(key);
+      if (value) {
+        json.Double(*value);
+      } else {
+        json.Null();
+      }
+    };
+    period("reference_period_ps", check.reference_period_ps);
+    period("candidate_period_ps", check.candidate_period_ps);
+    json.Key("reason");
+    json.String(check.reason.c_str());
+    json.Key("accepted_for_optimization");
+    json.Bool(false);
+    json.EndObject();
+    std::ofstream report(options.output_dir + "/native_legal_timing.json");
+    report << buffer.GetString() << '\n';
+    if (!report) {
+      throw std::runtime_error("cannot write native legal timing acceptance report");
+    }
+  };
+  if (options.native_gp_buffering) {
+    options.native_gp_buffering->validate();
+    if (!options.native_gp_timing || !options.virtual_fillers) {
+      throw std::invalid_argument("joint native buffering requires native timing and enabled virtual fillers");
+    }
+#if DREAMPLACE_NATIVE_DENSITY_RESERVATION_API < 2 || DREAMPLACE_NATIVE_PIN_TIMING_API < 3
+    throw std::invalid_argument("joint native buffering requires native gap-force and density reservation APIs");
+#endif
+  }
+  if (options.native_gp_timing) {
+    options.native_gp_timing->validate();
+    if (options.native_gp_timing->legal_output_guard && (!options.full || options.floorplan.empty())) {
+      throw std::invalid_argument("native legal output guard requires a complete imported legal floorplan and full legalization");
+    }
+#if !defined(DREAMPLACE_NATIVE_PIN_TIMING_API)
+    throw std::invalid_argument("native GP pin timing requires the DREAMPlace pin-timing API; published dependency lacks it");
+#endif
+    if (options.threads != 1 || options.fp_evaluate || options.whatif || options.after_stage || options.gp_resize
+        || options.fp_resize || options.gp_search.enabled || options.vanished_memory || options.macro_transparency.enabled()
+        || options.routability || options.fp_place || options.macro_mode != "none" || !options.cache_dir.empty()
+        || options.retain_placement || options.timing_seed || options.cell_jump.depth > 1 || options.iterations <= 0
+        || options.output_dir.empty() || !options.optimization_pending || !options.preserve_imported_ties
+        || options.legalize_timing_strength > 0 || options.satlegalize) {
+      throw std::invalid_argument(
+          "native GP pin timing experiment requires single-thread fixed-footprint final GP without legacy timing/repair, cache, "
+          "graph/stage callbacks or resynthesis");
+    }
+  }
   validate_cell_halo(options);
   if (options.gp_observer_interval < 0 || (options.gp_observer && options.gp_observer_interval == 0)) {
     throw std::invalid_argument("GP observation requires a positive interval");
+  }
+  if (options.gp_observer_rc_verify && !options.gp_observer_rc_reuse) {
+    throw std::invalid_argument("RC reuse verification requires checkpoint RC reuse");
   }
   if (options.final_timing_start < 0) {
     throw std::invalid_argument("final placement timing start must be nonnegative");
@@ -3714,7 +3974,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       || !std::isfinite(options.virtual_filler_cell_scale) || options.virtual_filler_cell_scale <= 0
       || !std::isfinite(options.virtual_filler_bin_fraction) || options.virtual_filler_bin_fraction <= 0
       || options.virtual_filler_bin_fraction > 1 || !std::isfinite(options.virtual_filler_fraction)
-      || options.virtual_filler_fraction <= 0 || options.virtual_filler_fraction > 1) {
+      || options.virtual_filler_fraction <= 0 || options.virtual_filler_fraction > 2) {
     throw std::invalid_argument("invalid virtual filler budget");
   }
   if (!std::isfinite(options.macro_density_pull_weight) || options.macro_density_pull_weight < 0
@@ -4199,6 +4459,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
   }
   validate_rows(tech, v.fp);
+  if ((options.macro_transparency.enabled() || options.vanished_memory)
+      && std::any_of(v.fp.blockages.begin(), v.fp.blockages.end(), [](const auto& b) { return !b.soft; })) {
+    throw std::invalid_argument("hard DEF placement blockages require opaque fixed macros until mask opacity is independent");
+  }
   if (previous) {
     std::map<std::string, const ph::Component*> old;
     for (const auto& c : previous->components) {
@@ -4953,7 +5217,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (options.snapshots) {
     fs::create_directories(options.output_dir);
     progress                  = std::make_shared<std::ofstream>(options.output_dir + "/gp_history.jsonl");
-    control.progress_observer = [progress, dbu = tech.dbu](const dp::GpSample& s) {
+    control.progress_observer = [progress, dbu = tech.dbu](const auto& s) {
       auto line = std::format(
           "{{\"iteration\":{},\"overflow\":{},\"raw_overflow\":{},\"hpwl_um\":{},\"density_weight\":{},\"route_overflow\":{},"
           "\"inflation_area_ratio\":{},\"model_density\":{},\"filler_charge_scale\":{},\"macro_overlap_pairs\":{},\"macro_stack_"
@@ -4972,6 +5236,27 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           s.align_pairs,
           s.align_residual,
           s.align_ramp);
+      if constexpr (requires {
+                      s.filler_count;
+                      s.filler_area;
+                      s.filler_size_x;
+                      s.filler_size_y;
+                    }) {
+        line += std::format(
+            ",\"filler_count\":{},\"filler_area_um2\":{},\"filler_effective_area_um2\":{},\"filler_size_x_um\":{},\"filler_size_y_"
+            "um\":{}",
+            s.filler_count,
+            s.filler_area / dbu / dbu,
+            s.filler_area * s.filler_charge_scale / dbu / dbu,
+            s.filler_size_x / dbu,
+            s.filler_size_y / dbu);
+      } else {
+        // Older pinned placers do not expose per-sample filler statistics.
+        // Keep absent measurements distinct from measured zero, while sibling
+        // co-development retains all of its richer diagnostic fields.
+        line += ",\"filler_count\":null,\"filler_area_um2\":null,\"filler_effective_area_um2\":null,\"filler_size_x_um\":null,"
+                "\"filler_size_y_um\":null";
+      }
       line += std::format(",\"route_peak_utilization\":{},\"macro_routing_force\":{},\"macro_routing_channels\":{}",
                           s.route_peak_utilization,
                           s.macro_routing_force,
@@ -5231,7 +5516,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       auto adjusted = snapshot;
       adjust_pins(adjusted, iteration, false, macro);
       std::vector<dp::TerminalPosition> updates;
-      for (size_t i = v.cells.size(); i < snapshot.node_x.size(); ++i) {
+      for (size_t i = v.terminal_begin; i < snapshot.node_x.size(); ++i) {
         if (adjusted.node_x[i] != snapshot.node_x[i] || adjusted.node_y[i] != snapshot.node_y[i]) {
           updates.push_back({static_cast<int>(i), adjusted.node_x[i], adjusted.node_y[i]});
         }
@@ -5395,8 +5680,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           }
           std::set<std::string> net_names;
           for (size_t i = 0; i < frame.terminals.size(); ++i) {
-            frame.terminals[i].x = std::llround(snapshot.node_x[v.cells.size() + i]);
-            frame.terminals[i].y = std::llround(snapshot.node_y[v.cells.size() + i]);
+            frame.terminals[i].x = std::llround(snapshot.node_x[v.terminal_begin + i]);
+            frame.terminals[i].y = std::llround(snapshot.node_y[v.terminal_begin + i]);
             // The imported DEF name is not evidence of current connectivity.
             // Rebuild every terminal alias and reserve all port identities,
             // including unused ports, before choosing internal net names.
@@ -5449,6 +5734,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         for (const auto& c : v.cells) {
           info.push_back({c.name});
         }
+        info.resize(v.terminal_begin);  // placement-only masks have no signal identity
         for (const auto& t : v.fp.terminals) {
           info.push_back({"@io:" + t.name, {}, {}, false, false, true});
         }
@@ -5521,6 +5807,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         for (const auto& c : v.cells) {
           info.push_back({c.name});
         }
+        info.resize(v.terminal_begin);
         for (const auto& t : v.fp.terminals) {
           info.push_back({"@io:" + t.name, {}, {}, false, false, true});
         }
@@ -5679,9 +5966,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             const auto old = baseline.cell.find(c.name);
             update.previous_node.push_back(old == baseline.cell.end() ? -1 : int(old->second));
           }
-          for (size_t i = 0; i < v.fp.terminals.size(); ++i) {
-            update.previous_node.push_back(baseline.cells.size() + i);
-          }
+          append_previous_boundary(update.previous_node, v, baseline);
           return update;
         };
       }
@@ -5803,7 +6088,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       control.terminal_interval = options.macro_pin_interval;
       control.terminal_update   = pin_updater(true);
     }
-    const bool        final_timing = !defer_macro_cells && !movable_macros && !options.fp_place;
+    const bool final_timing = !defer_macro_cells && !movable_macros && !options.fp_place;
+    if (options.native_gp_timing && !final_timing) {
+      throw std::invalid_argument("native GP pin timing requires fixed-macro final cell placement");
+    }
     Timing_feedback   final_gp_timing, trial_gp_timing;
     Gp_buffer_history gp_buffer_history;
     const bool        gp_repair                   = final_timing && options.gp_resize && control.max_iterations > 0;
@@ -5926,9 +6214,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
               const auto old = baseline.cell.find(c.name);
               topology_update.previous_node.push_back(old == baseline.cell.end() ? -1 : int(old->second));
             }
-            for (size_t i = 0; i < view.fp.terminals.size(); ++i) {
-              topology_update.previous_node.push_back(baseline.cells.size() + i);
-            }
+            append_previous_boundary(topology_update.previous_node, view, baseline);
             v                           = view;
             topology_update.replacement = v.design;
           }
@@ -6444,14 +6730,14 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     control.filler_macro_fraction = movable_macros ? options.macro_filler_fraction : 0;
     control.filler_cell_space     = movable_macros && options.macro_fill_cell_space;
     if (final_timing && (options.macro_transparency.enabled() || options.vanished_memory)) {
-      control.vanished_memory             = options.vanished_memory;
-      control.vanished_memory_local_floor = options.vanished_memory_local_floor;
+      control.vanished_memory                   = options.vanished_memory;
+      control.vanished_memory_local_floor       = options.vanished_memory_local_floor;
       control.vanished_memory_initial_scale     = options.vanished_memory_initial_scale;
       control.vanished_memory_growth_iterations = options.vanished_memory_growth_iterations;
       control.vanished_memory_start             = options.vanished_memory_start;
-      control.macro_transparency          = options.macro_transparency;
-      const auto prior_observer           = control.observer;
-      const int  prior_interval           = control.observer_interval;
+      control.macro_transparency                = options.macro_transparency;
+      const auto prior_observer                 = control.observer;
+      const int  prior_interval                 = control.observer_interval;
       const int  snapshot_start
           = (options.macro_transparency.always || options.vanished_memory) ? 0 : options.macro_transparency.warmup;
       const auto cycle_end = (options.macro_transparency.always || options.vanished_memory)
@@ -6504,9 +6790,13 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       control.observer_interval = std::gcd(prior_interval, options.gp_observer_interval);
       int last_observed         = -1;
       // Keep duplicate-suppression state alive with the callback itself.
-      control.observer          = [&, prior, prior_interval, last_observed](const dp::Design&  physical,
-                                                                   dp::PlacementStage stage,
-                                                                   int                iteration) mutable {
+      control.observer          = [&,
+                          prior,
+                          prior_interval,
+                          last_observed,
+                          rc_cache = options.gp_observer_rc_reuse
+                                                  ? std::make_shared<Rc_cache>()
+                                                  : nullptr](const dp::Design& physical, dp::PlacementStage stage, int iteration) mutable {
         if (prior
             && (stage != dp::PlacementStage::global_placement || iteration % prior_interval == 0
                 || iteration == control.max_iterations)) {
@@ -6550,9 +6840,18 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         checkpoint.floorplan   = view.fp;
         snapshot_nets(checkpoint.floorplan, view);
         checkpoint.floorplan.components.clear();
-        auto rc_options       = options;
-        rc_options.full       = false;
-        checkpoint.parasitics = estimate_rc(view, tech, rc_options, checkpoint.pin_locations);
+        auto rc_options = options;
+        rc_options.full = false;
+        Rc_reuse_stats reuse;
+        checkpoint.parasitics = estimate_rc(view, tech, rc_options, checkpoint.pin_locations, rc_cache.get(), &reuse);
+        if (options.gp_observer_rc_verify) {
+          std::map<std::string, std::pair<double, double>> fresh_locations;
+          const auto                                       fresh = estimate_rc(view, tech, rc_options, fresh_locations);
+          if (fresh->nets != checkpoint.parasitics->nets || fresh->identity != checkpoint.parasitics->identity
+              || fresh->approximate != checkpoint.parasitics->approximate || fresh_locations != checkpoint.pin_locations) {
+            throw std::runtime_error("reused checkpoint RC differs from fresh full construction");
+          }
+        }
         for (const auto& c : view.cells) {
           checkpoint.floorplan.components.push_back({c.name, c.macro, c.place});
           checkpoint.parasitics->cells.push_back(
@@ -6562,13 +6861,18 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           checkpoint.parasitics->terminals.push_back({t.name, t.x, t.y});
         }
         Gp_observation sample;
-        sample.iteration   = iteration;
-        sample.hpwl_um     = dp::hpwl(physical) / tech.dbu;
-        sample.macro_scale = options.vanished_memory ? dp::vanished_memory_scale(iteration,
+        if (rc_cache) {
+          sample.rc_reuse          = reuse;
+          sample.rc_reuse_verified = options.gp_observer_rc_verify;
+        }
+        sample.iteration        = iteration;
+        sample.hpwl_um          = dp::hpwl(physical) / tech.dbu;
+        sample.density_overflow = dp::density_overflow(physical, options.bins, options.bins, options.density);
+        sample.macro_scale      = options.vanished_memory ? dp::vanished_memory_scale(iteration,
                                                                                  options.vanished_memory_initial_scale,
                                                                                  options.vanished_memory_growth_iterations,
                                                                                  options.vanished_memory_start)
-                                                              : (dp::macro_transparent(options.macro_transparency, iteration - 1) ? 0 : 1);
+                                                                   : (dp::macro_transparent(options.macro_transparency, iteration - 1) ? 0 : 1);
         dp::RudyOptions routing;
         routing.bins_x = routing.bins_y = control.auxiliary_bins ? control.auxiliary_bins : options.bins;
         routing.horizontal_capacity     = control.route_capacity_h;
@@ -6592,6 +6896,598 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         options.gp_observer(checkpoint, sample);
       };
     }
+#if defined(DREAMPLACE_NATIVE_PIN_TIMING_API)
+    if (final_timing && options.native_gp_timing) {
+      fs::create_directories(options.output_dir);
+      if (control.checkpoint) {
+        throw std::invalid_argument("native GP timing cannot share a legacy checkpoint");
+      }
+      const auto& config = *options.native_gp_timing;
+      if (options.native_gp_buffering
+          && (options.native_gp_buffering->native_units_per_um != double(tech.dbu)
+              || options.native_gp_buffering->site_dbu_per_um != double(tech.dbu))) {
+        throw std::invalid_argument("joint native checkpoint units differ from technology DBU");
+      }
+      if (config.start >= control.max_iterations) {
+        throw std::invalid_argument("native GP timing start exceeds the fixed GP budget");
+      }
+      if (options.native_gp_buffering && options.native_gp_buffering->start >= control.max_iterations) {
+        throw std::invalid_argument("joint native buffering starts beyond the fixed GP budget");
+      }
+      const auto wire    = technology_wire_rc(tech,
+                                           options.liberty,
+                                           options.tech_rc_file,
+                                           options.resistance_ohm_um,
+                                           options.capacitance_ff_um,
+                                           options.rc_pessimism);
+      auto       session = native_session = std::make_shared<timeclosure::Gp_timing_session>(
+          *result.graph,
+          config,
+          Rc_policy{
+                    {wire.horizontal_r, wire.horizontal_c, wire.vertical_r, wire.vertical_c},
+              double(tech.dbu),
+              wire.source
+      });
+      if (config.legal_output_guard) {
+        bool legal = false;
+        try {
+          auto reference = v;
+          reference.fp   = *imported_frame;
+          std::map<std::string, const ph::Component*> original;
+          for (const auto& cell : imported_frame->components) {
+            original.emplace(cell.name, &cell);
+          }
+          reference.fp.components.clear();
+          reference.terminal.clear();
+          for (auto& cell : reference.cells) {
+            const auto old = original.find(cell.name);
+            if (old == original.end() || old->second->macro != cell.macro) {
+              throw std::invalid_argument("native legal reference must preserve every signal instance/master: " + cell.name);
+            }
+            const auto width = cell.place.width, height = cell.place.height;
+            cell.place        = old->second->place;
+            cell.place.width  = width;
+            cell.place.height = height;
+            reference.fp.components.push_back({cell.name, cell.macro, cell.place});
+          }
+          check_legality(tech, reference.fp, options);
+          legal = true;
+          make_arrays(reference, tech);
+          auto reference_options = options;
+          reference_options.full = false;
+          std::map<std::string, std::pair<double, double>> locations;
+          const auto   rc     = estimate_rc(reference, tech, reference_options, locations, nullptr, nullptr, false);
+          const double period = session->set_legal_reference(*rc, true);
+          write_legal_acceptance({.reference_period_ps = period, .reason = "final output not evaluated"}, false, true);
+        } catch (const std::exception& error) {
+          write_legal_acceptance({.reason = error.what()}, false, legal);
+          throw;
+        }
+      }
+      if (config.startup_coefficient > 0) {
+        const auto                                       begin = std::chrono::steady_clock::now();
+        std::map<std::string, std::pair<double, double>> locations;
+        auto                                             rc_options = options;
+        rc_options.full                                             = false;
+        const auto    rc      = estimate_rc(v, tech, rc_options, locations, nullptr, nullptr, false);
+        const auto    initial = session->startup_weights(*rc);
+        dp::PinTiming bias;
+        bias.coefficient = config.startup_coefficient;
+        bias.driver.assign(v.design.pin2node.size(), -1);
+        bias.weight.assign(v.design.pin2node.size(), 0);
+        const auto pin_name = [](const Endpoint& pin) { return pin.instance == "PIN" ? pin.pin : pin.instance + ":" + pin.pin; };
+        size_t     matched  = 0;
+        for (size_t p = 0; p < v.pins.size(); ++p) {
+          const auto found = initial.weights.pins.find(pin_name(v.pins[p]));
+          if (found == initial.weights.pins.end()) {
+            continue;
+          }
+          const int net = v.design.pin2net[p], driver = v.design.flat_net2pin[v.design.flat_net2pin_start[net]];
+          if (found->second.driver != pin_name(v.pins[driver])) {
+            throw std::invalid_argument("startup timing driver differs from physical net");
+          }
+          bias.driver[p] = driver;
+          bias.weight[p] = found->second.weight;
+          ++matched;
+        }
+        if (matched != initial.weights.pins.size()) {
+          throw std::invalid_argument("startup timing pins lack exact physical binding");
+        }
+        if (initial.supported) {
+          v.design.pin_timing = std::move(bias);
+        }
+        std::ofstream                              report(options.output_dir + "/native_gp_startup.json");
+        rapidjson::StringBuffer                    startup_json;
+        rapidjson::Writer<rapidjson::StringBuffer> startup_writer(startup_json);
+        startup_writer.StartObject();
+        startup_writer.Key("coefficient");
+        startup_writer.Double(config.startup_coefficient);
+        startup_writer.Key("path_fraction");
+        startup_writer.Double(config.startup_path_fraction);
+        startup_writer.Key("supported");
+        startup_writer.Bool(initial.supported);
+        startup_writer.Key("reason");
+        startup_writer.String(initial.reason.c_str());
+        startup_writer.Key("driver_fit_failures");
+        startup_writer.Uint64(initial.driver_fit_failures);
+        startup_writer.Key("endpoints");
+        startup_writer.Uint64(initial.endpoints);
+        startup_writer.Key("selected_paths");
+        startup_writer.Uint64(initial.selected);
+        startup_writer.Key("weighted_pins");
+        startup_writer.Uint64(matched);
+        startup_writer.Key("seconds");
+        startup_writer.Double(std::chrono::duration<double>(std::chrono::steady_clock::now() - begin).count());
+        startup_writer.Key("rc_model");
+        startup_writer.String("mean_wire_technology_prior");
+        startup_writer.Key("mean_source");
+        startup_writer.String(config.startup_average_wire_um ? "explicit_prior" : "current_wire_average");
+        startup_writer.Key("mean_branch_length_um");
+        if (initial.mean_branch_length_um) {
+          startup_writer.Double(*initial.mean_branch_length_um);
+        } else {
+          startup_writer.Null();
+        }
+        startup_writer.Key("fixed_until_native_feedback");
+        startup_writer.Bool(true);
+        startup_writer.EndObject();
+        report << startup_json.GetString() << '\n';
+        if (!report) {
+          throw std::runtime_error("cannot write native startup timing report");
+        }
+      }
+      auto rc_cache = std::make_shared<Rc_cache>();
+      auto trace    = std::make_shared<std::ofstream>(options.output_dir + "/native_gp_timing.jsonl");
+      if (!*trace) {
+        throw std::runtime_error("cannot create native GP timing trace");
+      }
+#if DREAMPLACE_NATIVE_PIN_TIMING_API >= 2
+      control.checkpoint_rollback = config.continuing_rollback;
+#else
+      if (config.continuing_rollback || config.maximum_density_overflow) {
+        throw std::invalid_argument("native GP rollback/density guards require the typed checkpoint transaction API");
+      }
+#endif
+      control.checkpoint_interval = config.interval;
+      control.checkpoint_start    = config.start;
+      control.checkpoint_final    = true;
+      const auto first = std::max<int64_t>(1, (int64_t(config.start) + config.interval - 1) / config.interval) * config.interval;
+      control.min_iterations = std::max(control.min_iterations, int(std::min<int64_t>(control.max_iterations, first)));
+      auto buffering_state   = std::make_shared<std::optional<buffering::Checkpoint_state>>();
+      control.checkpoint     = [&, session, rc_cache, trace, buffering_state](const dp::Design& physical, int iteration) {
+        auto view       = v;
+        view.design     = physical;
+        auto rc_options = options;
+        rc_options.full = false;
+        std::map<std::string, std::pair<double, double>> locations;
+        const auto rc = estimate_rc(view, tech, rc_options, locations, rc_cache.get(), nullptr, false);
+        if (options.native_gp_buffering) {
+          for (size_t i = 0; i < view.cells.size(); ++i) {
+            auto& cell        = view.cells[i];
+            cell.place.x      = std::llround(physical.node_x[i]);
+            cell.place.y      = std::llround(physical.node_y[i]);
+            cell.place.width  = std::llround(physical.node_size_x[i]);
+            cell.place.height = std::llround(physical.node_size_y[i]);
+            rc->cells.push_back({cell.name,
+                                 cell.place.x,
+                                 cell.place.y,
+                                 static_cast<unsigned>(cell.place.orientation),
+                                 cell.macro,
+                                 cell.place.width,
+                                 cell.place.height});
+          }
+          for (const auto& t : view.fp.terminals) {
+            const auto p = locations.find(t.name);
+            rc->terminals.push_back({t.name,
+                                     p == locations.end() ? t.x : std::llround(p->second.first),
+                                     p == locations.end() ? t.y : std::llround(p->second.second)});
+          }
+        }
+        double density = dp::density_overflow(physical, options.bins, options.bins, options.density);
+#if DREAMPLACE_NATIVE_DENSITY_RESERVATION_API >= 2
+        if (options.native_gp_buffering && !physical.density_reservations.empty())
+          density = dp::reservation_density_overflow(physical, options.bins, options.bins, options.density);
+#endif
+        dp::PinTiming                               weights;
+        size_t                                      matched = 0;
+        std::optional<buffering::Checkpoint_result> combined;
+        const auto prepare = [&](const late::Result& fresh_timing, const timeclosure::Pin_weights& fresh_weights) {
+          weights.coefficient = options.native_gp_timing->coefficient;
+          weights.driver.assign(physical.pin2node.size(), -1);
+          weights.weight.assign(physical.pin2node.size(), 0);
+          matched         = 0;
+          const auto name = [](const Endpoint& pin) { return pin.instance == "PIN" ? pin.pin : pin.instance + ":" + pin.pin; };
+          for (size_t p = 0; p < view.pins.size(); ++p) {
+            const auto found = fresh_weights.pins.find(name(view.pins[p]));
+            if (found == fresh_weights.pins.end()) {
+              continue;
+            }
+            ++matched;
+            const int net    = physical.pin2net[p];
+            const int driver = physical.flat_net2pin[physical.flat_net2pin_start[net]];
+            if (found->second.driver != name(view.pins[driver])) {
+              throw std::invalid_argument("native timing driver differs from physical pin binding");
+            }
+            weights.driver[p] = driver;
+            weights.weight[p] = found->second.weight;
+          }
+          if (matched != fresh_weights.pins.size()) {
+            throw std::invalid_argument("native timing pin absent from physical binding");
+          }
+
+#if DREAMPLACE_NATIVE_DENSITY_RESERVATION_API >= 1 && DREAMPLACE_NATIVE_PIN_TIMING_API >= 3
+          if (options.native_gp_buffering && iteration >= options.native_gp_buffering->start) {
+            if (control.vanished_memory && iteration < control.vanished_memory_start + control.vanished_memory_growth_iterations) {
+              throw std::invalid_argument("joint reservation refresh requires full macro exclusion");
+            }
+            std::map<std::string, int> drivers;
+            const auto                 pin_name
+                = [](const Endpoint& pin) { return pin.instance == "PIN" ? pin.pin : pin.instance + ":" + pin.pin; };
+            for (size_t n = 0; n < physical.net_weights.size(); ++n) {
+              if (physical.flat_net2pin_start[n] == physical.flat_net2pin_start[n + 1])
+                continue;
+              const int p = physical.flat_net2pin[physical.flat_net2pin_start[n]];
+              drivers.emplace(pin_name(view.pins[p]), p);
+            }
+            const buffering::Checkpoint_input input{physical,
+                                                    fresh_timing,
+                                                    fresh_weights,
+                                                    *rc,
+                                                    locations,
+                                                    iteration,
+                                                    buffering_state->has_value() ? &buffering_state->value() : nullptr};
+            const auto                        problem = options.native_gp_buffering->generate(input);
+            for (const auto& [instance_name, node] : problem.materialized) {
+              if (node < 0 || size_t(node) >= view.cells.size() || view.cells[node].name != instance_name)
+                throw std::invalid_argument("materialized checkpoint binding differs from actual physical instance identity");
+            }
+            combined = buffering::prepare_checkpoint(input,
+                                                     problem,
+                                                     *buffering_state,
+                                                     *config.models,
+                                                     weights,
+                                                     drivers,
+                                                     config.driver,
+                                                     *options.native_gp_buffering);
+            if (!combined->supported_api)
+              throw std::invalid_argument("joint checkpoint unavailable on this native runtime");
+            weights = combined->forces.timing;
+          }
+#else
+          (void)fresh_timing;
+#endif
+        };
+        try {
+          const auto feedback = session->update(
+              *rc,
+              locations,
+              iteration,
+              density,
+              [&](const auto& rejected) {
+                const auto suffix = rejected.attempt ? "_attempt_" + std::to_string(rejected.attempt) : "";
+                timeclosure::write_gp_timing_rejection(
+                    options.output_dir + "/native_gp_rejected_" + std::to_string(iteration) + suffix,
+                    rejected,
+                    *rc,
+                    locations,
+                    iteration,
+                    density);
+              },
+              prepare);
+          if (feedback.recalibrated_after_mismatch) {
+            rapidjson::StringBuffer                    buffer;
+            rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
+            json.StartObject();
+            json.Key("iteration");
+            json.Int(iteration);
+            json.Key("extra_native_evaluations");
+            json.Uint(1);
+            json.Key("comparison_gates_pass");
+            json.Bool(true);
+            json.Key("supported_coverage_pass");
+            json.Bool(true);
+            json.Key("calibrated_nets");
+            json.Uint64(feedback.calibration.calibrated);
+            json.Key("reused_nets");
+            json.Uint64(feedback.calibration.reused);
+            json.Key("hard_period_rollback");
+            json.Bool(feedback.rollback);
+            json.Key("calibration_committed");
+            json.Bool(!feedback.rollback);
+            json.Key("reference_period_ps");
+            json.Double(feedback.reference_period_ps.value());
+            json.Key("continuous_period_ps");
+            json.Double(feedback.continuous_period_ps.value());
+            json.Key("accepted_for_optimization");
+            json.Bool(false);
+            json.EndObject();
+            std::ofstream report(options.output_dir + "/native_gp_recalibration.jsonl", std::ios::app);
+            report << buffer.GetString() << '\n';
+            if (!report) {
+              throw std::runtime_error("cannot write native GP recalibration trace");
+            }
+          }
+#if DREAMPLACE_NATIVE_PIN_TIMING_API >= 2
+          if (feedback.rollback || feedback.deferred) {
+            rapidjson::StringBuffer                    buffer;
+            rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
+            json.StartObject();
+            json.Key("iteration");
+            json.Int(iteration);
+            json.Key("rollback");
+            json.Bool(feedback.rollback);
+            json.Key("deferred");
+            json.Bool(feedback.deferred);
+            json.Key("reason");
+            json.String(feedback.reason.c_str());
+            json.Key("reference_period_ps");
+            if (feedback.reference_period_ps)
+              json.Double(*feedback.reference_period_ps);
+            else
+              json.Null();
+            json.Key("retained_period_ps");
+            if (feedback.rollback)
+              json.Double(feedback.retained_period_ps);
+            else
+              json.Null();
+            json.Key("temperature_fraction");
+            json.Double(feedback.temperature_fraction);
+            json.Key("density_overflow");
+            json.Double(density);
+            json.Key("accepted_for_optimization");
+            json.Bool(false);
+            json.EndObject();
+            *trace << buffer.GetString() << '\n';
+            trace->flush();
+            if (!*trace)
+              throw std::runtime_error("cannot write native GP transaction trace");
+            dp::GpUpdate update;
+            if (feedback.rollback)
+              update.action = dp::GpCheckpointAction::restore;
+            return update;
+          }
+#endif
+          *trace << std::format(
+              R"({{"iteration":{},"reference_period_ps":{},"continuous_period_ps":{},"retained_period_ps":{},"temperature_fraction":{},"weighted_pins":{},"removed_pins":{},"related_output_path_arcs":{},"density_overflow":{},"calibrated_nets":{},"reused_nets":{},"prior_force_active":{},"accepted_for_optimization":false}})",
+              iteration,
+              feedback.reference_period_ps.value(),
+              feedback.continuous_period_ps.value(),
+              feedback.retained_period_ps,
+              feedback.temperature_fraction,
+              matched,
+              feedback.weights.removed,
+              feedback.weights.related_output_path_arcs,
+              density,
+              feedback.calibration.calibrated,
+              feedback.calibration.reused,
+              physical.pin_timing && physical.pin_timing->enabled())
+                 << '\n';
+          trace->flush();
+          if (!*trace) {
+            throw std::runtime_error("cannot write native GP timing trace");
+          }
+          dp::GpUpdate update;
+          update.pin_timing = std::move(weights);
+#if DREAMPLACE_NATIVE_DENSITY_RESERVATION_API >= 1 && DREAMPLACE_NATIVE_PIN_TIMING_API >= 3
+          if (combined) {
+            update.density_reservations = combined->density.proposal.footprints;
+            rapidjson::StringBuffer                    buffer;
+            rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
+            json.StartObject();
+            json.Key("iteration");
+            json.Int(iteration);
+            json.Key("critical_nets");
+            json.Uint64(combined->critical_nets);
+            json.Key("window_nets");
+            json.Uint64(combined->window_nets);
+            json.Key("outside_nets");
+            json.Uint64(combined->outside_nets);
+            json.Key("missing_contexts");
+            json.Uint64(combined->missing_contexts);
+            json.Key("virtual_buffers");
+            json.Uint64(combined->density.virtual_buffers);
+            json.Key("reserved_area_um2");
+            json.Double(combined->density.virtual_area / tech.dbu / tech.dbu);
+            json.Key("gap_pulls");
+            json.Uint64(combined->forces.applied);
+            json.Key("unbound_pulls");
+            json.Uint64(combined->forces.unbound_driver);
+            json.Key("virtual_driver_pulls");
+            json.Uint64(combined->forces.virtual_driver);
+            json.Key("input_search_complete");
+            json.Bool(combined->negotiation->input_search_complete);
+            json.Key("graph_edits");
+            json.Bool(false);
+            json.Key("accepted_for_optimization");
+            json.Bool(false);
+            json.EndObject();
+            std::ofstream journal(options.output_dir + "/native_gp_buffering.jsonl", std::ios::app);
+            journal << buffer.GetString() << '\n';
+            if (!journal)
+              throw std::runtime_error("cannot write joint native checkpoint trace");
+            *buffering_state = std::move(combined->proposal);
+          }
+#endif
+#if DREAMPLACE_NATIVE_PIN_TIMING_API >= 2
+          if (options.native_gp_timing->continuing_rollback) {
+            update.action = dp::GpCheckpointAction::retain;
+          }
+#endif
+          return update;
+        } catch (const std::exception& error) {
+          rapidjson::StringBuffer                    buffer;
+          rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
+          json.StartObject();
+          json.Key("iteration");
+          json.Int(iteration);
+          json.Key("rejected");
+          json.Bool(true);
+          json.Key("reason");
+          json.String(error.what());
+          json.Key("accepted_for_optimization");
+          json.Bool(false);
+          json.EndObject();
+          *trace << buffer.GetString() << '\n';
+          trace->flush();
+          throw;
+        }
+      };
+      if (config.legalize_timing_enabled()) {
+        const auto prior        = control.before_legalize;
+        const auto strength     = config.legalization;
+        const auto driver       = config.driver;
+        control.before_legalize = [&, session, prior, strength, driver](dp::Design& physical) {
+          if (prior) {
+            prior(physical);
+          }
+          const auto started = std::chrono::steady_clock::now();
+          auto       view    = v;
+          view.design        = physical;
+          auto rc_options    = options;
+          rc_options.full    = false;
+          std::map<std::string, std::pair<double, double>> locations;
+          const auto                                       rc    = estimate_rc(view, tech, rc_options, locations);
+          const auto                                       fresh = session->legalization_weights(*rc);
+          timeclosure::Legalization_binding                binding;
+          binding.nodes        = physical.node_x.size();
+          binding.movable      = physical.num_movable;
+          binding.node_weights = physical.node_legalize_weights;
+          binding.net_weights  = physical.net_weights;
+          if (view.pins.size() != physical.pin2node.size()) {
+            throw std::invalid_argument("native legalization physical pin census differs");
+          }
+          for (size_t pin = 0; pin < view.pins.size(); ++pin) {
+            const auto& p = view.pins[pin];
+            binding.pins.push_back({p.instance == "PIN" ? p.pin : p.instance + ":" + p.pin,
+                                    size_t(physical.pin2node[pin]),
+                                    size_t(physical.pin2net[pin])});
+          }
+          for (size_t net = 0; net + 1 < physical.flat_net2pin_start.size(); ++net) {
+            const auto begin = physical.flat_net2pin_start.at(net);
+            if (begin == physical.flat_net2pin_start.at(net + 1)) {
+              throw std::invalid_argument("native legalization net has no physical driver");
+            }
+            binding.drivers.push_back(physical.flat_net2pin.at(begin));
+          }
+          auto          priorities = timeclosure::legalization_priorities(binding, fresh.weights, strength);
+          std::ofstream cells(options.output_dir + "/native_legalize_cells.tsv");
+          cells << "node\tcell\tcriticality\tweight\tgp_x_dbu\tgp_y_dbu\n" << std::setprecision(17);
+          for (size_t i = 0; i < v.cells.size(); ++i) {
+            const double weight = priorities.node_weights.empty() ? 1 : priorities.node_weights.at(i);
+            cells << i << '\t' << v.cells[i].name << '\t' << priorities.node_criticality.at(i) << '\t' << weight << '\t'
+                  << physical.node_x.at(i) << '\t' << physical.node_y.at(i) << '\n';
+          }
+          std::ofstream nets(options.output_dir + "/native_legalize_nets.tsv");
+          nets << "net\tdriver\tcriticality\tbase_weight\tweight\n" << std::setprecision(17);
+          for (size_t i = 0; i < binding.drivers.size(); ++i) {
+            const double base_weight = binding.net_weights.empty() ? 1 : binding.net_weights[i];
+            const double weight      = priorities.net_weights.empty() ? 1 : priorities.net_weights[i];
+            nets << i << '\t' << binding.pins[binding.drivers[i]].name << '\t' << priorities.net_criticality[i] << '\t'
+                 << base_weight << '\t' << weight << '\n';
+          }
+          rapidjson::StringBuffer                    buffer;
+          rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
+          json.StartObject();
+          json.Key("stage");
+          json.String("fresh_retained_gp_before_legalization");
+          json.Key("period_ps");
+          json.Double(fresh.period_ps);
+          json.Key("weighted_pins");
+          json.Uint64(priorities.weighted_pins);
+          json.Key("protected_movable");
+          json.Uint64(priorities.protected_movable);
+          json.Key("protected_nets");
+          json.Uint64(priorities.protected_nets);
+          json.Key("displacement_strength");
+          json.Double(strength.displacement);
+          json.Key("net_strength");
+          json.Double(strength.net);
+          json.Key("gp_history_updated");
+          json.Bool(false);
+          json.Key("extra_gp_iterations");
+          json.Int(0);
+          json.Key("characterized_driver_boundary");
+          json.Bool(driver.characterized_boundary);
+          json.Key("bounded_driver_boundary");
+          json.Bool(driver.bounded_boundary);
+          json.Key("timing_seconds");
+          json.Double(std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count());
+          json.Key("accepted_for_optimization");
+          json.Bool(false);
+          json.EndObject();
+          std::ofstream report(options.output_dir + "/native_legalize_timing.json");
+          report << buffer.GetString() << '\n';
+          if (!cells || !nets || !report) {
+            throw std::runtime_error("cannot write native legalization priorities");
+          }
+          physical.node_legalize_weights = std::move(priorities.node_weights);
+          physical.net_weights           = std::move(priorities.net_weights);
+          if (strength.displacement > 0) {
+            physical.node_legalize_anchor_x = physical.node_x;
+            physical.node_legalize_anchor_y = physical.node_y;
+          }
+        };
+        const auto previous_observer = control.observer;
+        control.observer = [&, session, previous_observer](const dp::Design& physical, dp::PlacementStage stage, int iteration) {
+          if (previous_observer) {
+            previous_observer(physical, stage, iteration);
+          }
+          if (stage != dp::PlacementStage::legalization && stage != dp::PlacementStage::detailed_placement) {
+            return;
+          }
+          const auto started = std::chrono::steady_clock::now();
+          auto       view    = v;
+          view.design        = physical;
+          auto rc_options    = options;
+          rc_options.full    = false;
+          std::map<std::string, std::pair<double, double>> locations;
+          const auto                                       rc       = estimate_rc(view, tech, rc_options, locations);
+          const bool                                       legal    = dp::is_legal(physical);
+          const auto                                       observed = session->check_legal_output(*rc, legal);
+          rapidjson::StringBuffer                          buffer;
+          rapidjson::Writer<rapidjson::StringBuffer>       json(buffer);
+          json.StartObject();
+          json.Key("stage");
+          json.String(stage == dp::PlacementStage::legalization ? "legalization" : "detail");
+          json.Key("iteration");
+          json.Int(iteration);
+          json.Key("legal");
+          json.Bool(legal);
+          json.Key("period_ps");
+          if (observed.candidate_period_ps) {
+            json.Double(*observed.candidate_period_ps);
+          } else {
+            json.Null();
+          }
+          json.Key("reference_period_ps");
+          json.Double(observed.reference_period_ps.value());
+          json.Key("native_nonregression_pass");
+          json.Bool(observed.passed());
+          json.Key("reason");
+          json.String(observed.reason.c_str());
+          json.Key("supported_gp_updates");
+          json.Uint64(observed.supported_gp_updates);
+          json.Key("response_interval_complete");
+          json.Bool(observed.response_interval_complete);
+          json.Key("gp_history_updated");
+          json.Bool(false);
+          json.Key("extra_gp_iterations");
+          json.Int(0);
+          json.Key("timing_seconds");
+          json.Double(std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count());
+          json.Key("accepted_for_optimization");
+          json.Bool(false);
+          json.EndObject();
+          std::ofstream report(options.output_dir + "/native_legalize_stages.jsonl",
+                               stage == dp::PlacementStage::legalization ? std::ios::trunc : std::ios::app);
+          report << buffer.GetString() << '\n';
+          if (!report) {
+            throw std::runtime_error("cannot write native legalization stage timing");
+          }
+        };
+      }
+    }
+#endif
     std::optional<Cell_jump> cell_jump;
     if (final_timing && options.cell_jump.depth > 1) {
       std::vector<int> jump_macros;
@@ -6766,6 +7662,20 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         macro_replay->events.push_back({iteration, dp::MagnetEvent::snap});
       };
     }
+    const auto filler_budget = relative_filler_budget(v.design, control);
+    fs::create_directories(options.output_dir);
+    {
+      std::ofstream report(options.output_dir + "/virtual_filler_budget.json");
+      report << std::format(
+          R"({{"policy":"relative_whitespace_charge","fraction":{},"available_charge_area_um2":{},"requested_charge_area_um2":{},"nonmacro_area_um2":{}}})",
+          filler_budget.fraction,
+          filler_budget.available_area / tech.dbu / tech.dbu,
+          filler_budget.requested_area / tech.dbu / tech.dbu,
+          filler_budget.nonmacro_area / tech.dbu / tech.dbu);
+      if (!report) {
+        throw std::runtime_error("cannot write relative filler budget");
+      }
+    }
     try {
       metrics = dp::place(v.design, control);
     } catch (const std::runtime_error&) {
@@ -6794,6 +7704,24 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         metrics = dp::place(v.design, control);
       }
     }
+#if defined(DREAMPLACE_NATIVE_PIN_TIMING_API) && DREAMPLACE_NATIVE_PIN_TIMING_API >= 2
+    if (options.native_gp_timing && options.native_gp_timing->continuing_rollback) {
+      std::ofstream report(options.output_dir + "/native_gp_transactions.json");
+      report << std::format(R"({{"iterations":{},"selected_iteration":{},"rollback_history":[)",
+                            metrics.iterations,
+                            metrics.selected_iteration);
+      bool first = true;
+      for (const auto& event : metrics.rollback_history) {
+        report << (first ? "" : ",")
+               << std::format(R"({{"iteration":{},"restored_iteration":{}}})", event.iteration, event.restored_iteration);
+        first = false;
+      }
+      report << "]}";
+      if (!report) {
+        throw std::runtime_error("cannot write native GP transaction report");
+      }
+    }
+#endif
     if (macro_warp) {
       macro_warp->finish(metrics.iterations);
     }
@@ -7209,6 +8137,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Bool(false);
     json.Key("fp_iterations");
     json.Int(fp_metrics.iterations);
+    json.Key("fp_virtual_filler_count");
+    json.Int(fp_metrics.filler_count);
+    json.Key("fp_virtual_filler_area_um2");
+    json.Double(fp_metrics.filler_area / tech.dbu / tech.dbu);
     json.Key("fp_gp_seconds");
     json.Double(fp_metrics.global_placement_seconds);
     json.Key("fp_poisson_seconds");
@@ -7822,6 +8754,15 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     rc_options.capacitance_ff_um = 0;
   }
   result.parasitics = estimate_rc(v, tech, rc_options, result.pin_locations);
+  if (native_session && options.native_gp_timing->legal_output_guard) {
+    // This follows actual final-frame legality and fresh final RC construction.
+    // The independently frozen legal baseline is never replaced by GP timing.
+    const auto acceptance = native_session->check_legal_output(*result.parasitics, true);
+    write_legal_acceptance(acceptance, true, true);
+    if (!acceptance.passed()) {
+      throw std::invalid_argument("native final legal timing rejected output: " + acceptance.reason);
+    }
+  }
   for (const auto& c : v.cells) {
     result.parasitics->cells.push_back(
         {c.name, c.place.x, c.place.y, static_cast<unsigned>(c.place.orientation), c.macro, c.place.width, c.place.height});

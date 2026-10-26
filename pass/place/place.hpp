@@ -20,11 +20,18 @@
 #include "dreamplace/native/placement.hpp"
 #include "hhds/graph.hpp"
 #include "inou/lefdef/physical.hpp"
+#include "rc_cache.hpp"
 #include "satlegalize.hpp"
 #include "terminal_legalize.hpp"
 #include "warpspace.hpp"
 
 namespace livehd::placement {
+namespace timeclosure {
+struct Gp_timing_settings;
+}
+namespace buffering {
+struct Checkpoint_settings;
+}
 inline constexpr double max_net_weight = 100;  // physical net weight ceiling shared by option checks and the placement database
 struct Result;
 enum class Placement_stage { floorplan, macro, final };
@@ -43,26 +50,38 @@ struct Stage_route {
 // Read-only diagnostic sample. Both routing measurements use the same pins;
 // opaque_* uses full physical macro bodies even during memory growth.
 struct Gp_observation {
-  int    iteration   = 0;
-  double macro_scale = 1, hpwl_um = 0;
-  double route_overflow = 0, opaque_route_overflow = 0;
-  double route_peak = 0, opaque_route_peak = 0;
-  int    unroutable_nets = 0, opaque_unroutable_nets = 0;
-  int    blocked_pins = 0, opaque_blocked_pins = 0;
+  int                           iteration   = 0;
+  double                        macro_scale = 1, hpwl_um = 0;
+  double                        density_overflow = 0;
+  double                        route_overflow = 0, opaque_route_overflow = 0;
+  double                        route_peak = 0, opaque_route_peak = 0;
+  int                           unroutable_nets = 0, opaque_unroutable_nets = 0;
+  int                           blocked_pins = 0, opaque_blocked_pins = 0;
+  std::optional<Rc_reuse_stats> rc_reuse;
+  bool                          rc_reuse_verified = false;
 };
 struct Options {
+  // Experimental native fixed-footprint checkpoint binding; absent preserves
+  // the existing flow. Requires the native per-pin timing dependency API.
+  std::shared_ptr<const timeclosure::Gp_timing_settings> native_gp_timing;
+  // Experimental joint native checkpoint, absent by default. Requires native
+  // timing and fillers; refreshes source/LR state after all timing gates pass.
+  std::shared_ptr<const buffering::Checkpoint_settings>  native_gp_buffering;
+
   // Diagnostic-only, synchronous observation; never supplies optimizer feedback.
   std::function<void(const Result&, const Gp_observation&)> gp_observer;
-  int                                                       gp_observer_interval = 0;
+  int                                                       gp_observer_interval  = 0;
+  bool                                                      gp_observer_rc_reuse  = false;
+  bool                                                      gp_observer_rc_verify = false;
   // Internal staged-flow freeze: restore user pin constraints before persistence.
-  std::map<std::string, physical::Status>             stage_pin_status;
-  std::function<bool(Placement_stage, const Result&)> after_stage;
-  std::shared_ptr<const physical::Floorplan>          restart_seed;
-  Placement_stage                                     completed_stage = Placement_stage::final;
-  std::vector<std::string>                            lefs;
-  std::string                                         floorplan, output_dir, cache_dir;
-  std::string                                         liberty, tech_rc_file, tracks_file;
-  std::string                                         macro_mode = "none";
+  std::map<std::string, physical::Status>                   stage_pin_status;
+  std::function<bool(Placement_stage, const Result&)>       after_stage;
+  std::shared_ptr<const physical::Floorplan>                restart_seed;
+  Placement_stage                                           completed_stage = Placement_stage::final;
+  std::vector<std::string>                                  lefs;
+  std::string                                               floorplan, output_dir, cache_dir;
+  std::string                                               liberty, tech_rc_file, tracks_file;
+  std::string                                               macro_mode = "none";
   Warp_options                      fp_warp{.weight = 1}, macro_warp{.weight = .7, .start_stability = .2, .refresh_interval = 25};
   DreamPlace::native::MagnetOptions macro_magnet;
   bool                              fp_place = false, fp_snap_enabled = true;
@@ -86,24 +105,24 @@ struct Options {
   double                            timing_exponent             = 1;  // convex criticality curve; 1 preserves linear weights
   double                            timing_spread_weight        = 0;  // [0,1] protection from extra routing/local spreading
   int                               macro_timing_interval       = 50;
-  int                                   final_timing_start          = 200;      // GP warm-up before placement STA
-  std::string                           final_timing_schedule       = "fixed";  // fixed | late (4x, 2x, 1x cadence)
+  int                               final_timing_start          = 200;      // GP warm-up before placement STA
+  std::string                       final_timing_schedule       = "fixed";  // fixed | late (4x, 2x, 1x cadence)
   // Opt-in fresh timing displacement protection, bounded to 100x.
   double                            legalize_timing_strength    = 0;
   double                            legalize_timing_threshold   = 0;
   unsigned                          legalize_timing_corrections = 0;
   // Internal lifecycle state: optimization trials need legal snapshots before
   // the mandatory final legalization. Never exposed as a user option.
-  bool                                  optimization_pending        = false;
+  bool                              optimization_pending        = false;
   Busorder_options                  busorder;
   Boundary_pin_options              boundarypins;
-  Cell_jump_options                     cell_jump;                // diagnostic: extend a supplied distance-one seed
-  bool                                  vanished_memory = false;  // final-GP centered memory growth and local-pressure ramp
-  double                                vanished_memory_local_floor = 0;
-  double                                vanished_memory_initial_scale     = .6;
-  int                                   vanished_memory_growth_iterations = 25;
-  int                                   vanished_memory_start             = 70;
-  DreamPlace::native::GpSearch          gp_search;           // opt-in final-GP A/B trials
+  Cell_jump_options                 cell_jump;                            // diagnostic: extend a supplied distance-one seed
+  bool                              vanished_memory             = false;  // final-GP centered memory growth and local-pressure ramp
+  double                            vanished_memory_local_floor = 0;
+  double                            vanished_memory_initial_scale     = .6;
+  int                               vanished_memory_growth_iterations = 25;
+  int                               vanished_memory_start             = 70;
+  DreamPlace::native::GpSearch      gp_search;               // opt-in final-GP A/B trials
   DreamPlace::native::MacroTransparency macro_transparency;  // diagnostic final-GP barrier schedule
   Terminal_legalize_options             terminal_legalize_options;
   int                                   fp_timing_max_updates = 10;
@@ -160,7 +179,7 @@ struct Options {
   double      macro_filler_fraction     = 0;      // macro GP only; physical macro dimensions
   bool        virtual_fillers           = true;
   int         virtual_filler_max_count  = 0;
-  double      virtual_filler_fraction   = 1;
+  double      virtual_filler_fraction   = .25;
   double      virtual_filler_cell_scale = 1, virtual_filler_bin_fraction = .25;
   int         bin_max = 512, local_density_bins = 512;
   double      local_density_weight = 0, local_density_range = 4, local_density_jitter = .01;

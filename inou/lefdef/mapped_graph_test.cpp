@@ -1,0 +1,72 @@
+// This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include "mapped_graph.hpp"
+
+#include <set>
+#include <stdexcept>
+
+#include "gtest/gtest.h"
+
+namespace livehd::physical {
+TEST(MappedGraph, ImportPreservesSignalConnectivityAndUnusedCells) {
+  Technology tech;
+  tech.macros["INV"].pins["A"].direction = "INPUT";
+  tech.macros["INV"].pins["Y"].direction = "OUTPUT";
+  Floorplan fp;
+  fp.design = "exact";
+  fp.components.push_back({"inv", "INV", {}});
+  fp.components.push_back({"unused", "INV", {}});
+  Terminal input, output;
+  input.name       = "a";
+  input.direction  = "INPUT";
+  output.name      = "y";
+  output.direction = "OUTPUT";
+  fp.terminals     = {input, output};
+  fp.nets          = {
+      { "in", {{"PIN", "a"}, {"inv", "A"}}},
+      {"out", {{"inv", "Y"}, {"PIN", "y"}}}
+  };
+  hhds::GraphLibrary    library;
+  const auto            graph = mapped_graph(library, fp, tech);
+  std::set<std::string> cells;
+  for (auto node : graph->body().nodes()) {
+    if (node.get_debug_nid() != hhds::Graph::INPUT_NODE && node.get_debug_nid() != hhds::Graph::OUTPUT_NODE) {
+      cells.emplace(node.get_name());
+    }
+  }
+  EXPECT_EQ(cells, (std::set<std::string>{"inv", "unused"}));
+  const auto drivers = graph->get_output_pin("y").get_driver_pins();
+  ASSERT_EQ(drivers.size(), 1);
+  EXPECT_EQ(drivers.front().get_master_node().get_name(), "inv");
+  const auto source = drivers.front().get_master_node().get_sink_pin("A").get_driver_pins();
+  ASSERT_EQ(source.size(), 1);
+  EXPECT_EQ(source.front(), graph->get_input_pin("a"));
+}
+TEST(MappedGraph, UndrivenSignalNetIsRejectedInsteadOfDropped) {
+  Floorplan fp;
+  fp.design = "undriven";
+  Terminal output;
+  output.name      = "y";
+  output.direction = "OUTPUT";
+  fp.terminals     = {output};
+  fp.nets          = {
+      {"missing_driver", {{"PIN", "y"}}}
+  };
+  hhds::GraphLibrary library;
+  EXPECT_THROW(mapped_graph(library, fp, {}), std::runtime_error);
+}
+TEST(MappedGraph, MultiplePhysicalDriversAreRejected) {
+  Floorplan fp;
+  fp.design = "multiple";
+  for (const auto* name : {"a", "b"}) {
+    Terminal input;
+    input.name      = name;
+    input.direction = "INPUT";
+    fp.terminals.push_back(input);
+  }
+  fp.nets = {
+      {"shorted_inputs", {{"PIN", "a"}, {"PIN", "b"}}}
+  };
+  hhds::GraphLibrary library;
+  EXPECT_THROW(mapped_graph(library, fp, {}), std::runtime_error);
+}
+}  // namespace livehd::physical

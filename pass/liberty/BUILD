@@ -3,6 +3,22 @@
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
+cc_library(
+    name = "timing_model",
+    srcs = ["timing_model.cpp"],
+    hdrs = ["timing_model.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+)
+
+cc_test(
+    name = "timing_model_test",
+    size = "small",
+    srcs = ["timing_model_test.cpp"],
+    copts = COPTS,
+    deps = [":timing_model", "@googletest//:gtest_main"],
+)
+
 # The DFF-cell picker's sources, hashed into //pass/synth:synth_salt: the pick
 # (cell name, QN-as-Q polarity, drive ladder) is baked into every cached mapped
 # body, so a change here must invalidate the incremental cache like a mapper
@@ -51,11 +67,12 @@ cc_library(
         exclude = [
             "*test*.cpp",
             "liberty_dff.cpp",
+            "timing_model.cpp",
         ],
     ),
     hdrs = glob(
         ["*.hpp"],
-        exclude = ["liberty_dff.hpp"],
+        exclude = ["liberty_dff.hpp", "timing_model.hpp"],
     ),
     copts = COPTS,
     includes = ["."],
@@ -67,4 +84,10 @@ cc_library(
         "@abc",
     ],
     alwayslink = True,  # static Pass_plugin registration
+)
+
+filegroup(
+    name = "timing_model_sources",
+    srcs = ["timing_model.cpp", "timing_model.hpp"],
+    visibility = ["//visibility:public"],
 )

@@ -13,12 +13,17 @@
 <p>Implement a single-threaded, non-ML timing loop in native DREAMPlace GP:
 optimize achievable period with a LiveHD timing proxy, model buffering and reserve
 its space early, then materialize buffers and resize cells in phase 7.</p>
-<p><span class="status">Implementation plan — reviewed 2026-10-24; not implemented</span>
+<p><span class="status">In progress — native late proxy and observation controller foundations implemented; GP integration pending</span>
 The design rationale and algorithm references are in
 <a href="timing_closure_plan.md">timing_closure_plan.md</a>.
 This page translates that proposal into ordered deliverables, integration points,
 review resolutions and acceptance checks. Constants are initial experiment values,
 not validated settings or approval to change existing defaults.</p>
+<p><strong>Current evaluation scope:</strong> CNN and litepci, starting from the
+exact signal netlist in OpenROAD's saved preCTS database. No resynthesis is used.
+OpenSTA compares both placements before CTS, then matched CTS/routing establishes
+post-route results. LiveHD synthesis/resynthesis comparisons are deferred until
+this shared-netlist flow works. Earlier Eyeriss traces remain useful for replay.</p>
 <p><strong>First delivery:</strong> complete <a href="#A">A</a>–<a href="#C">C</a>
 and the observation/replay part of <a href="#H">H</a>. Establish trustworthy proxy
 timing and gate decisions before enabling forces or graph edits. The core loop
@@ -47,7 +52,7 @@ once-per-run policy remains the legacy policy.</li>
 <ul class="subtasks">
 <li id="A"><strong>A — Freeze the integration contract and reference runs.</strong>
 <ul>
-<li>Capture current CNN and Eyeriss inputs, exact source/dependency revisions,
+<li>Capture current CNN and litepci inputs, exact source/dependency revisions,
 Liberty/LEF/SDC/RC, macro and IO positions, options, thread count, netlist and timing
 coverage. Save current GP histories, final legal placement, repair counts and
 timing/runtime as the control. Use matched saved inputs for subsequent ablations.</li>
@@ -313,30 +318,6 @@ Show convergence/runtime and worst-period behavior against buffering-only and
 sizing-only ablations.</li>
 </ul></li>
 
-<li id="K"><strong>K — Optional cumulative resynthesis in phases 4–5.</strong>
-<ul>
-<li>Keep this independently disabled during core-loop bring-up. Select persistent
-window-critical colors using the buffered phase-3 environment; reuse
-<code>io_timing.cpp</code> and the existing ABC provider/equivalence path. Carry
-virtual estimates as boundary constraints, without materializing those buffers.</li>
-<li>The new multi-round scheduler is a separate opt-in policy from the existing
-once-per-run <code>io_resynth</code> behavior. Define interaction with stage restarts
-and saved feedback explicitly. Admission includes remap cost, dwell, stabilization
-and the reserved phase-7 interval; serialize synthesis jobs and monitor memory.</li>
-<li>Accept a replacement only after equivalence and same-environment timing checks;
-inconclusive proof is not acceptance. Accepted subblocks remain cumulative as in
-the source proposal. Each acceptance begins a new topology epoch: invalidate
-proxy/maps/calibration/pool mappings and start a new best-WNS snapshot within that
-epoch. A later rollback cannot restore an obsolete pre-resynthesis netlist.</li>
-<li>Retain cross-epoch measurements for reporting, stop further rounds when settled
-improvement is within noise, and never claim a cross-epoch global-best rollback
-that the cumulative policy does not support. Preserve surviving placement seeds
-without accidentally locking movable cells.</li>
-<li><strong>Exit:</strong> disabled/no-options/budget-denied/proof-inconclusive paths,
-two cumulative rounds, topology-safe rollback and phase-7 operation both with and
-without resynthesis. Reuse/cache records identify the proxy/model generation.</li>
-</ul></li>
-
 <li id="L"><strong>L — Preserve improvements through legalization, routing and hold ECO.</strong>
 <ul>
 <li>After GP, legalize the retained real netlist with fresh timing priorities;
@@ -369,7 +350,7 @@ tests that reach into sibling benchmark repositories. Contract files stay immuta
 per-style Kendall τ, set overlap, bias and electrical-limit coverage. Separate
 zero-wire model checks, identical-RC engine checks and placed-to-routed prediction.
 Freeze calibration on training designs and score held-out designs/setup combinations.</li>
-<li>Run matched CNN and Eyeriss controls and incremental ablations: current loop;
+<li>Run matched CNN and litepci controls and incremental ablations: current loop;
 proxy-only observation; pin weighting; virtual buffering/gap reservations;
 phase-7 buffers; sizing/recovery; optional resynthesis. Match starting netlists,
 macro/IO frames, technology and total GP budget. Compare phase-7 absence as a
@@ -392,8 +373,414 @@ here. Do not promote the new mode to a default without explicit approval.</li>
 </ul>
 
 <h2>Subtasks — landed</h2>
-<p>None yet. Existing placement and timing infrastructure is a starting point,
-not evidence that this new loop has been implemented or validated.</p>
+<ul>
+<li><strong>B, native late-proxy foundation:</strong>
+<code>pass/liberty/timing_model.{hpp,cpp}</code> supplies independent NLDM parsing,
+units/thresholds, scalar and multidimensional tables, conditional metadata and
+bus-member inheritance. <code>pass/place/late_timing.{hpp,cpp}</code> binds the
+mapped flat LGraph without synthesis, validates state cuts, and propagates
+rise/fall slew, arrival, required time, setup/clock-to-Q and worst predecessors.
+Constants, case-dependent timing sense, conditional defaults, internal
+output-to-output timing and SDC driving-cell boundaries are modeled explicitly.
+Output-related warnings are retained with their characterized arcs, as OpenSTA
+does; unconnected related outputs use instance/IO declarations without graph edits.
+<code>//tools:late_timing_probe</code> imports the exact DEF signal netlist through
+the shared mapped-graph importer and records timing/coverage/runtime. Missing
+coverage cannot enter scalar optimization feedback as zero delay. Tiny regressions
+and independent zero-wire OpenSTA comparisons accompany this foundation.
+The finite common CNN/litepci zero-wire endpoint transitions pass the declared
+tolerances (maximum arrival difference below 0.00026 ps). Identical serialized
+placement-RC comparisons have also run. A native charge-matched effective-C/pi
+driver, analytic load waveforms, moment reduction and explicit characterization
+boundaries now replace the initial total-load wire approximation. Prepared NLDM
+load slices and a safeguarded charge solve reduce repeated work. Analytic
+regressions cover crossing/charge constraints, repeated poles, degenerate limits,
+unit changes and explicit numerical failures. Numerical failures block certification.
+The reproducible matrix retains every failed attempt and coverage gap; constraint
+coverage and common-cohort numerical acceptance remain distinct. Named ideal
+clocks now retain separate launch domains, phase-aware related edge pairs,
+validated same-waveform aliases and asynchronous capture cuts. The strict native
+saved-SDC reader covers both original benchmark constraint files, with explicit
+units and rejection of unsupported commands or transforms. Independent tiny
+OpenSTA comparisons check these clock cases. General Tcl/SDC execution, divided
+or gated clocks, complete numerical acceptance, incremental/calibrated
+timing, GP feedback and matched post-route results remain unfinished.</li>
+<li><strong>A, reference input foundation:</strong> saved CNN/litepci OpenROAD
+preCTS signal netlists, original constraints and technology provenance under
+<code>repros/timeclosure_20261024/</code>. Independent OpenDB inventories preserve
+instances/masters, connectivity, geometry and fixed-placement semantics through
+DEF reload. Restoring the database's signal/clock routing bounds gives exactly
+matching reported OpenSTA setup/hold WNS and TNS. The initial mismatched
+LEF/DEF scores and failed attempts are retained. Original hard/soft rectangular
+DEF placement blockages now round-trip and enter native placement as disjoint
+pinless constraint geometry, without adding signal instances. Hard masks
+constrain legalization/ECO; soft masks permit final packing/repair. Unsupported
+blockage forms and moving component associations fail explicitly; hard masks
+with temporary macro opacity changes remain rejected. Bounded unweighted
+CNN/litepci cell-GP controls now export legal DEFs and pass independent OpenDB
+signal/master/fixed-geometry audits. Original-SDC preCTS OpenSTA scores and
+same-SPEF endpoint comparisons are saved. Complete convergence controls, the
+opt-in production policy and complete native proxy acceptance remain pending. Litepci's
+saved multiple clocks, forwarded clock and asynchronous groups are now covered
+by the supported native subset; a scalar period is reported only when one active
+capture clock has an independently variable period. Numerical model failures
+still block shared-RC certification.</li>
+<li><strong>H, observation foundation:</strong>
+<code>pass/place/timeclosure.{hpp,cpp}</code> implements the no-resynthesis gate
+sequence, Theil–Sen/MAD stability, two distinct passing evaluations, independent
+memory/RUDY latches, dwells, monotonic budget, epoch invalidation, and separate
+density-overflow/maximum-age correction decisions.
+<code>//tools:timeclosure_replay</code> replays JSONL observations without running
+a timer or modifying placement. Missing period/window metrics remain missing;
+fixed-SDC TNS is never substituted. Sixteen analytic controller tests and an
+end-to-end replay regression pass with a 30-second test cap. This is an offline
+observer; it does not enable GP forces, graph edits or optional resynthesis.
+<code>//tools:timeclosure_gp_probe</code> separately connects read-only native
+timing to actual fixed-macro cell-GP checkpoints, with original saved SDCs and
+explicit wire units. It verifies instance/master inventory, connected signal
+partition, fixed geometry and blockages, then exports a legal original-net-name
+DEF and RC. A hermetic end-to-end case checks native timing, redundant cells,
+isolated nets and missing-feedback semantics. A segmented-row stage adapter
+preserves every available site and row orientation using hard masks for missing
+sites; final export restores the original row segments. Positioned IOs are
+temporarily frozen without changing their geometry or final status.
+An explicit <code>min_iterations</code> below the observation probe's iteration
+cap now permits native convergence stopping; the default remains a fixed-budget
+control. Actual early stopping is checked on a feasible continuous-row fixture.
+Capture-only retains equal bounds and its guaranteed final observation.
+Controller-driven optimization and
+matched benchmark/routed acceptance remain pending.
+Live replay and A–C remain necessary before enabling it in the placer.</li>
+<li><strong>C, wire-tree reuse foundation:</strong>
+<code>pass/place/rc_cache.{hpp,cpp}</code> retains wire-only trees across atomic
+geometry snapshots, checking individual physical pins and membership, RC policy,
+DBU/provenance and geometry revisions. Electrical revisions mark timing dirty
+without rebuilding unchanged wire geometry. Removal and failed-update rollback
+are covered. The read-only GP probe can opt into reuse and compare every tree,
+identity and pin position with fresh FLUTE construction at each checkpoint.
+Inspection/rebuild/reuse counts are separate. Geometry inspection and timing
+walks remain full walks; these caches alone do not supply continuous wires or
+incremental arrival, slew and required-time propagation.</li>
+<li><strong>C, continuous-wire foundation:</strong>
+<code>star_rc.{hpp,cpp}</code> now supplies a continuous driver-to-sink star with
+wire-only capacitance calibration and per-sink rise/fall Elmore compensation.
+Actual pin loads are added once; electrical changes rebind compensation against
+cached anchor geometry. Coincident anchors and atomic failed updates are covered.
+The native timer can consume the model, and the read-only GP diagnostic can
+compare it with native Steiner timing on each checkpoint, refreshing after a
+0.1 decrease in physical density overflow. The star's input-admittance pi remains
+an approximation; anchor Elmore agreement does not establish timing acceptance.
+Phase-3 integration, virtual trees, calibrated per-style prediction, incremental
+propagation and optimization feedback remain pending.</li>
+<li><strong>C, admittance and displacement experiments:</strong> explicit v2
+admittance correction matches anchor pi values and retains nonnegative predicted
+R/C. An optional individual-pin displacement limit refreshes dirty nets even
+when bounding-box extrema do not move. Exact GP checkpoint capture/replay keeps
+wire-only RC, physical pin coordinates, signal frames and normalized policies;
+capture-only stops before legalization and never claims a legal output. These
+experiments preserve v1/default selection. Prediction acceptance, phase-3
+integration and actual incremental timing remain unfinished.</li>
+<li><strong>C, measured comparison gates:</strong>
+<code>timing_comparison.{hpp,cpp}</code> scores all common physical pin
+transitions against the declared arrival/required/slew tolerances and endpoint
+critical-set Jaccard/tau-b gates. Coverage disagreements and failed examples are
+retained; tied/absent ranks and unsupported active-period comparisons do not pass.
+Model coverage remains separate from numerical/ranking agreement. The shared
+diagnostic is checked against an independent pairwise rank oracle with ties and
+is used by exact checkpoint replay. Passing it alone does not establish production
+optimization or routed acceptance.</li>
+<li><strong>A/M, full physical-frame audit:</strong> cached OpenROAD post-route
+scores now use extracted SPEF and propagated clocks. The unchanged preCTS
+databases contain 213,570 CNN and 39,288 litepci locked welltaps omitted from the
+signal export. Restoring native r7 poses into the full databases fails placement
+overlap checks. The earlier legality claims cover the signal-only frame; native
+fixed physical occupancy and a full-frame handoff were therefore required before
+matched candidate routing. The implementation and new checks are below. No routed native result,
+DRC or hold acceptance is claimed.</li>
+<li><strong>A/M, physical occupancy implementation:</strong> the native GP probe
+accepts an explicit <code>fixed_occupancy_def</code> with a matching design/DBU/die
+and unassociated hard rectangles only. It preserves the exact signal graph,
+uses physical-only masks in density/legalization and retains those masks in the
+final DEF. Large inventories use an exact hard/soft/fixed-priority union sweep;
+final legality uses row interval indices with exact vertical overlap. Independent
+geometry and GP regressions cover sparse obstacles, overlapping masks, nested
+intervals, unaligned macros and invalid frames. Benchmark handoff audits apply
+native signal poses to private original full OpenDBs without external placement
+or repair. Both r14 CNN/litepci controls pass with all 213,570/39,288 locked
+welltaps retained and unchanged signal/master/connectivity/fixed-macro/IO
+inventories. These bounded, unconverged unweighted controls remain unaccepted;
+litepci regresses setup and violates hold. Convergence, optimization and
+CTS/routed acceptance remain separate.</li>
+<li><strong>M, matched downstream foundation:</strong> private full OpenDB seeds
+pass exact signal-connectivity, IO and expected-pose audits. Cached per-stage
+exports and ORFS defaults are captured with hashes; reference/native environments
+match after normalizing private output paths, with equal thread counts and
+libraries. Actual CNN/litepci controls invoke CTS/GRT/route/extraction directly
+from the unchanged preCTS signal graphs. Errors remain failures even when ORFS
+writes failure artifacts. Litepci stock live CTS reports INF/no paths, while a
+fresh original-SDC STA read reports real setup/hold violations. A fresh process
+before unchanged CTS repair recovers those values and performs real repair;
+arrival invalidation alone does not. The failed split and its corrected
+post-repair checkpoint continuation are retained. Recovered CTS has finite
+in-flow/independent timing and legal placement, with violations remaining.
+Matched routing, independent DRC/unrouted/extracted timing and hold acceptance
+remain pending. These are unconverged unweighted native controls; production
+controller/forces/buffering/sizing and the full acceptance matrix remain unfinished.</li>
+<li><strong>M, extracted routed audit:</strong> a streaming SPEF auditor compares
+final-ODB net/pin identities and resistor-connected terminal components, with
+explicit abutment evidence. Coupling capacitor endpoint order is arbitrary and
+never creates a conductive edge. Nine hermetic tests cover identity, missing
+extraction, coupling, zero-ohm edges, malformed data and orphan components.
+Cached litepci passes all 73,886 net / 240,071 terminal checks, wire presence,
+and zero final detailed-router markers. Fresh original-SDC extracted timing
+still fails hold (-271.403 ps); sys_clk minimum period including port paths is
+2,557.461 ps. This reference does not establish native routed acceptance,
+geometric connectivity signoff or MCMM coverage.</li>
+<li><strong>M, cached CNN routed reference:</strong> the same extracted audit
+passes 260,578 nets / 738,466 terminals, wire presence and zero final router
+markers. Original-SDC extracted setup / hold WNS remain -7,356.805 / -1,358.767 ps;
+the setup-derived clock limit is 119.663 MHz. It does not pass timing closure.</li>
+<li><strong>M, native routing rejection:</strong> the recovered litepci r14
+native control fails global routing after all 30 extra iterations (GRT-0116,
+reported total congestion 5,183). Failure artifacts and a zero process exit code
+do not pass the stage. The failed attempt is retained without changing matched
+settings or proceeding to detailed routing.</li>
+<li><strong>D, shared period objective:</strong>
+<code>pass/place/objective/period.{hpp,cpp}</code> computes hard achievable
+period, a near-critical endpoint window, stable log-sum-exp and normalized
+backward arc multipliers on an explicit feasible transition/domain DAG.
+Required/launch offsets, internal boundaries and reconvergence are explicit;
+endpoint mass sums to one and every vertex conserves multiplier flow. Times
+scaled between ps/ns preserve weights. A separate hard-period guard rejects a
+smooth-objective improvement that worsens T*, retains the best across noise,
+shrinks bounded temperature and rejects unsupported/incomparable observations.
+Twelve hermetic checks include an enumerated path/gradient oracle, 1 ns versus
+6 ns timing, rank swaps, signed delays, zero delay and extreme numeric offsets.
+Opt-in proxy-to-DAG capture now retains every feasible cell/wire transition arc,
+separate launch domains and endpoint seeds before backward propagation. The
+bridge verifies every reconstructed hard arrival and T*; six tests cover real
+reconvergence, constants, named/legacy clocks, asynchronous cuts and serialized
+RC. The offline probe exposes <code>period_objective:true</code>. Original
+CNN/litepci zero-RC objectives reconstruct 954.921 / 1,164.961 ps over
+2,412,384 / 792,772 arcs. Default-off and capture-on pin states are exact against
+the previous observations. Shared-RC coverage failures still withhold weights.
+Production forces/rollback and buffering/sizing consumers remain unfinished;
+these offline observations do not establish optimization or routed success.</li>
+<li><strong>G, pin weights and native force prototype:</strong>
+<code>forces/pin_weights</code> combines normalized physical wire-arc LR mass
+with ranked worst-path <code>max(delay,0)/k²</code> contributions, attributed to
+the sink/input influencing pin. Per-pin adaptive blending is bounded; leaving
+the window, changed drivers and topology/model epochs clear obsolete state.
+Eight hermetic tests cover rank swaps, attribution, units, domains and failure
+atomicity. The owned DREAMPlace checkout adds typed per-pin driver/weight
+checkpoint data and the specified two-pin weighted-average distance objective.
+Eight focused native checks plus the existing placement suite pass through an
+explicit local override, including gradients, selective attraction, clearing,
+fixed geometry, continuation and topology invalidation. Existing sibling filler
+edits are preserved. The published dependency pin is unchanged; co-development
+tests do not waive its existing filler-budget failure. An opt-in native
+fixed-footprint callback now installs these weights during real GP. It uses
+exact current pin coordinates, checks native continuous/Steiner coverage and
+ranking/numerical agreement, and guards stationary Steiner hard period.
+A regression or unsupported model aborts the trial atomically. Three session
+checks and a hermetic two-checkpoint weighted GP/legal-output smoke pass.
+The probe exposes <code>native_pin_timing:true</code> with an explicit owned
+repository override; the published pin rejects unsupported activation.
+An additional <code>native_timing_rollback:true</code> now enables continuing
+fixed-footprint transactions: accepted physical/filler coordinates, weights,
+momentum, old gradients, density normalization and convergence state are
+retained and restored after a hard-period regression. Spent iterations and
+smoothing schedules remain monotonic; accepted native wire/multiplier history
+is preserved and bounded temperature shrinks. Applied restore events are
+reported separately from requests. Four owned trajectory/objective/budget/
+atomicity checks and four timing-session cases pass. A real RC smoke improves
+through iteration 20, rejects 30/40, restores exact pin coordinates and reaches
+legal output at the 40-step cap. Unsupported timing coverage still aborts;
+mutable auxiliary policies, topology and footprint changes fail explicitly.
+Seven-phase control, full mutable-policy rollback, reservations, buffering,
+sizing and incremental timing remain unfinished.</li>
+<li><strong>G/M, bounded weighted experiment:</strong> a frozen same-binary,
+20-step CNN pair preserves exact cached signal connectivity and original full
+physical occupancy. Independent full-frame legality, masters, fixed geometry
+and IO audits pass. Fresh original-SDC OpenSTA setup WNS is -3,868.750 ps for
+control versus -3,178.469 ps for weighted (+690.281 ps); hold WNS is
++1.945 versus +13.021 ps. Weighted HPWL rises 18.61%, from 5,194,423.091 to
+6,161,221.463 um. Native GP iteration-20 WNS was 15.145 ps worse than control;
+this is a different frame from the final legalized output. The weighted callback
+installs 746 pins at iteration 10, then replaces them with 419 weights and removes
+704 stale entries at iteration 20. Litepci aborts at iteration 10 on unsupported
+distributed-driver fit coverage and emits no weighted candidate. Both controls
+and failed trials are retained in
+<code>repros/timeclosure_20261024/gp_force_progress_r1.json</code>. The local
+DREAMPlace HEAD includes unrelated RUDY changes, so only each identical-binary
+pair is matched. These are bounded preCTS experiments; setup closure,
+converged optimization and matched routed acceptance remain unproven.</li>
+<li><strong>E/F, expanded candidate evaluation:</strong>
+<code>buffering/candidate</code> supplies the common buffer/tree interface and
+native GaTe/pi evaluation with actual NLDM input-slew dependence at each stage.
+Every affected sink is recomputed, pin loads are added once, and physical
+required times propagate backward independently of normalized multiplier cost.
+Explicit integer capacities, body/routing exclusions and electrical limits
+remain hard constraints; unsupported models and work exhaustion remain distinct.
+Twelve tests include all 120 fanout 1–4 assignments to direct connections or two
+buffer types, cascades, critical isolation, units, polarity, electrical limits,
+numerical failure and malformed topology/geometry. Search frontiers, Hanan/BEN
+geometry, global gap negotiation, virtual density and materialization remain
+unfinished; local candidate evaluation does not certify a whole graph.</li>
+<li><strong>G/M, longer weighted result and legalization diagnostic:</strong>
+the exact-netlist CNN 40-step pair completes legal full-frame output and passes
+independent master/connectivity/fixed-geometry/IO audits. Fresh original-SDC
+OpenSTA setup WNS is -3,497.242 ps for control versus -3,632.367 ps for weighted
+(a 135.125 ps regression); hold WNS is +8.635 / +6.190 ps and HPWL is
+4,155,859.730 / 4,844,521.433 um. TNS improves, but both runs hit the cap without
+GP convergence. Native weighted hard period improves at all checkpoints, so
+no benchmark rollback is exercised. A matched frozen-native-timer/reader
+before/after diagnostic finds legalization WNS losses of 2,262.228 / 1,852.605 ps;
+final native coverage is supported with zero driver-fit failures. This uses each
+candidate's own native RC and is not identical-SPEF OpenSTA fidelity. The result
+motivates density/legality-compatible acceptance and final timing guards; the
+earlier 20-step improvement does not establish a reliable optimization win.</li>
+<li><strong>D/H/L, density-compatible and final legal acceptance:</strong>
+opt-in <code>native_timing_max_overflow</code> bounds retained GP points. Initial
+over-bound checkpoints defer without invented timing or weights; later crossings
+restore the accepted optimizer state or abort, with spent time remaining
+monotonic. <code>native_timing_final_guard:true</code> independently validates an
+imported legal reference before GP, freezes its native Steiner period, and
+compares the actual final legal frame after fresh RC construction. The overlapping
+GP guard is not a legal reference. Model coverage and a supported feedback
+response interval are required; illegal reference, missing response or final
+regression prevents final DEF export. Eight session cases and an expanded
+hermetic placement smoke cover real RC legalization damage and illegal-reference
+rejection. Strict CNN and litepci references pass geometric legality but fail
+native distributed-driver coverage (conditional SN arc / heavily loaded inverter),
+so no strict legal reference period or final output is accepted. A separate
+same-binary CNN density-bound comparison is running; these admission checks are
+not optimization wins. Production phase control, displacement repair and routed
+acceptance remain unfinished.</li>
+<li><strong>D/H/L, completed density-bound experiment and driver diagnosis:</strong>
+CNN r4 restores iteration 20 at steps 30/40; final saved GP coordinates and
+exported DEF exactly retain the earlier accepted point. Independent full-frame
+and exact-netlist audits pass. Fresh original-SDC setup WNS is -3,497.242 ps for
+control versus -3,178.469 ps for weighted (+318.773 ps), with hold WNS
++8.635 / +13.021 ps and HPWL 4,155,859.730 / 6,161,221.463 um (+48.25%).
+The weighted result improves original cached OpenROAD preCTS setup WNS
+(-7,525.285 ps) by 4,346.816 ps, but setup remains negative and strict native
+original-reference admission fails. Isolated exact-arc scans prove no
+positive-ramp solution in the current fixed-resistance equivalent-C model;
+CNN fails even inside characterized axes. A synthetic exact-pi OpenSTA probe
+observes DMP failure and total-load table fallback on these contexts, including
+negative-slew clipping for litepci. Production waveform/certification policy is
+unchanged. Boundary-model validation, full phase/repair integration, certified
+frequency and routed acceptance remain unfinished.</li>
+<li><strong>B/C/D/G/L, explicit characterized driver boundary:</strong>
+An opt-in <code>characterized_driver_boundary</code> policy selects a distinct
+model only after positive-ramp infeasibility is proved at both effective-load
+bounds and every interior slew-table knot. Defaults, successful fits and other
+failure rejection remain unchanged; the original cause and a separate policy
+epoch/counter are retained. Ten waveform and nine native session cases pass,
+including unit scaling, mixed-policy rejection and consistent reference/star/legal
+checks. Frozen production-source exact-Pi reproductions match the independently
+observed OpenSTA table fallback. Original-design paired zero/shared-RC replay
+preserves selected arrival/required/slew and WNS/TNS exactly while providing the
+previously absent modeled periods under the selected boundary policy. CNN still
+fails one arrival and seven slew tolerances; litepci passes the finite numerical
+and ranking cohort with its existing unavailable reference fields retained.
+Both original legal references now admit modeled periods. Litepci's 0.1 bound
+defers GP10/20; its final legal candidate still fails a residual fit. A separate
+0.4 density regime admits GP10/232 pin weights, then rejects GP20 for a weighted
+pin without a physical data-net driver. Rejected trials export no final DEF.
+CNN remains a one-step admission diagnostic with no subsequent GP displacement
+consuming feedback. Full-design/electrical fidelity, force-binding coverage,
+production phases, repair and routed acceptance remain unfinished.</li>
+<li><strong>D/G/L, output-related physical attribution and live GP20:</strong>
+Valid Liberty output-to-output path contributions now follow the same ranked path
+through the same real cell to its declared influencing physical input. Graph and
+occurrence ownership, direction/name/port, unresolved boundaries and atomic
+rejection remain checked; unused output pins are never materialized. Eleven
+weight cases pass. A saved real-graph comparison preserves the original 232
+weights exactly and admits 143,740 weights under a separate diagnostic window.
+The same-binary litepci r1 pair reaches GP20 with 629 weights and four related-output
+contributions; modeled period improves 2,101.556 to 1,892.887 ps. Final legal
+coverage still rejects a half-adder residual fit, so no weighted final DEF is
+accepted. A rejected-position diagnostic on an independently verified exact-original
+OpenDB scores setup +1,297.909 versus control +1,270.086 ps, hold -0.744 versus
+-0.353 ps, and HPWL 1,673,675.870 versus 1,745,801.909 um. Raw internal debug DEF
+net/IO identity fails and is not used as the authoritative netlist. The component
+poses are applied exactly while preserving original connectivity/IO/fixed bodies;
+this is diagnostic evidence only. Setup remains 332.009 ps worse than original
+OpenROAD preCTS and hold worsens. Private residual refinement still fails the
+independent slew tolerance, so waveform guards and thresholds are unchanged.
+Production phases, incremental timing, buffering/sizing, electrical/repair and
+routed acceptance remain unfinished.</li>
+<li><strong>M, completed original litepci routed reference r2:</strong>
+Fresh extracted-SPEF/original-SDC timing with propagated clocks reports setup
+WNS +1,067.783 ps and hold WNS -209.868 ps. All 87,004 extracted nets / 266,308
+terminals pass exact connectivity and wire-presence checks; final router markers
+are zero. Setup passes, hold fails, and the paired native control failed global
+routing. This separate completed control establishes no native routed win.
+CNN's one-step boundary-model admission diagnostic also completes: final legal
+period 9,967.636 ps regresses against immutable reference 8,518.849 ps; no final
+DEF is exported, and no supported response interval is complete.</li>
+<li><strong>M, completed matched routed control:</strong> recovered litepci
+reference r4 completes CTS, global/detailed routing, filling and final
+extraction. Fresh original-SDC timing reports setup / hold WNS
+-429.945 / -44.147 ps and a setup-derived sys_clk limit of 248.142 MHz.
+All 104,516 extracted nets / 301,332 terminals pass connectivity and wire
+presence checks; final detailed-router markers are zero. Timing closure fails,
+and the paired native control failed global routing, so this is a completed
+control rather than accepted native optimization.</li>
+<li><strong>B/C/M, longer convergence control:</strong> unweighted litepci r15
+reports GP convergence at iteration 1,420 and legal output while preserving the
+exact original signal graph, fixed macro/IO geometry and locked physical
+occupancy. Fresh full-frame original-SDC OpenSTA passes placement checks but
+reports setup WNS -3,388.686 ps (5,018.604 ps worse than the reference) and hold
+WNS +4.617 ps. It remains unaccepted. Timing remains uncertified: the last sampled
+frame has 221 driver-fit failures. An isolated checkpoint-400 inverter fit has an analytically infeasible
+bounded-Thevenin crossing target over the entire allowed capacitance interval,
+beyond the NLDM load table. Its known constant output has no feasible setup
+arrival, but reference physical waveform semantics include constant logic;
+there is no fit-failure waiver. Production feedback, model coverage, independent
+OpenSTA fidelity and routed acceptance remain required.</li>
+</ul>
+<p>Partial historical CNN/Eyeriss observation replays are deterministic across two
+runs. Those histories lack period, window TNS and explicitly full-footprint RUDY;
+they exercise missing-data/deadline behavior and are not live gate validation.</p>
+<p>The numerical/fidelity/QoR gates are recorded in
+<a href="../../pass/place/README.md#timing-closure-observation-controller">the
+placement README</a>. Benchmark controls and provenance are retained under
+ignored <code>repros/timeclosure_20261024/</code>; incomplete attempts stay visible.</p>
+
+<h2>Future work — synthesis/resynthesis</h2>
+<p>The current implementation milestone covers A–J and L–M on the unchanged
+OpenROAD-generated signal netlists. K remains future work after that flow is
+implemented and evaluated. Its optional phase-4/5 and resynthesis budget rules
+do not authorize synthesis or resynthesis in the current evaluation.</p>
+<ul class="subtasks">
+<li id="K"><strong>K — Optional cumulative resynthesis in phases 4–5.</strong>
+<ul>
+<li>Keep this independently disabled during core-loop bring-up. Select persistent
+window-critical colors using the buffered phase-3 environment; reuse
+<code>io_timing.cpp</code> and the existing ABC provider/equivalence path. Carry
+virtual estimates as boundary constraints, without materializing those buffers.</li>
+<li>The new multi-round scheduler is a separate opt-in policy from the existing
+once-per-run <code>io_resynth</code> behavior. Define interaction with stage restarts
+and saved feedback explicitly. Admission includes remap cost, dwell, stabilization
+and the reserved phase-7 interval; serialize synthesis jobs and monitor memory.</li>
+<li>Accept a replacement only after equivalence and same-environment timing checks;
+inconclusive proof is not acceptance. Accepted subblocks remain cumulative as in
+the source proposal. Each acceptance begins a new topology epoch: invalidate
+proxy/maps/calibration/pool mappings and start a new best-WNS snapshot within that
+epoch. A later rollback cannot restore an obsolete pre-resynthesis netlist.</li>
+<li>Retain cross-epoch measurements for reporting, stop further rounds when settled
+improvement is within noise, and never claim a cross-epoch global-best rollback
+that the cumulative policy does not support. Preserve surviving placement seeds
+without accidentally locking movable cells.</li>
+<li><strong>Exit:</strong> disabled/no-options/budget-denied/proof-inconclusive paths,
+two cumulative rounds, topology-safe rollback and phase-7 operation both with and
+without resynthesis. Reuse/cache records identify the proxy/model generation.</li>
+</ul></li>
+
+</ul>
 
 <h2>Design notes</h2>
 <h3 id="sequence">Implementation order and ownership</h3>
@@ -526,8 +913,361 @@ before using it. Remaining buffering/LR/hold bibliography entries, especially th
 marked unverified in the Markdown, require primary-source verification during
 their implementation milestones; no optimality or signoff claim follows from
 their inclusion in the proposal.</p>
+<h2>Bounded driver model integration</h2>
+<p>The diagnostic probes now expose an independently disabled
+<code>bounded_driver_boundary</code> option. Only Pi wire resistance at most 1% of
+driver resistance can use its distinct full-load or upper-crossing-window table
+boundaries. Each reports its cause and count. Native comparison, pin-weight and
+retained-period epochs include the policy, and reference/continuous/final-legal
+evaluations use the same choice. Strict defaults and the earlier whole-load-range
+infeasibility proof remain unchanged; other numerical failures stay explicit.</p>
+<p>Private development retained the exact cached signal netlists and original
+constraints. An unscoped crossing rule was rejected after 98 new CNN slew
+failures. The restricted rule adds no failures to the complete development
+cohorts (4,250 CNN and 766 moved litepci pins), while existing internal errors
+remain. A separately predeclared unweighted litepci control pose passes finite
+arrival, required-time and slew tolerances across 16,853 original endpoint and
+affected-driver/source/sink pins using identical native wire RC in OpenSTA.
+This does not establish entire-design fidelity, an accepted weighted final output,
+frequency improvement or routed closure. A–M retain their outstanding work,
+including production phases, true incremental timing, buffer search/pool,
+sizing, electrical/displacement repair and post-route hold work.</p>
+<h2>Native timing at legalization</h2>
+<p>The experimental native GP path now has a fresh timing handoff at its retained
+physical frame. Independently disabled displacement and net strengths multiply
+existing legalization and detailed-placement costs using normalized raw timing
+criticalities. Both movable driver and sink owners receive displacement
+priorities; fixed cells and zero-cost disabled nets retain their costs. Anchors
+use actual retained coordinates. Observation-only trials use the same additional
+timing evaluations as priority trials. The handoff does not update GP history or
+extend the GP budget, and requires the immutable imported-legal final timing
+guard. Per-stage timing and legality reports distinguish legalization loss from
+detailed-placement loss. This component does not complete L: production phase
+control, maximum-displacement/electrical repair, canonical accepted export and
+independent native routed/hold acceptance remain open.</p>
+<h2>Rejected-comparison diagnostics and native recalibration</h2>
+<p>The native GP comparison now saves the actual rejected wire RC, precise pin
+positions, full pooled timing observations and individual numerical/ranking gates
+before committing any update. A replay of the longer litepci trajectory preserves
+every checkpoint and its iteration-100 pin coordinates exactly. At iteration 110,
+only two slew observations at one SRAM input fail; arrival, required-time,
+coverage and critical ranking pass. Fresh calibration at the same frame clears
+all comparison gates without changing their tolerances.</p>
+<p>An independently disabled recalibration option retries a supported inaccurate
+continuous model once at the same frame. Every comparison and the stationary
+hard-period guard remain mandatory. Failed retries abort; calibration from a
+hard-period rollback is not committed. Initial failures and successful refreshes
+are reported separately. This is a calibration kernel, not completion of C or H:
+true incremental propagation, held-out routed calibration and production phase
+integration remain pending. The current milestone is A–J and L–M; K is future
+synthesis/resynthesis work.</p>
+<h2>Exact row sites and shared buffer reservations</h2>
+<p><code>pass/place/buffering/sites</code> builds compressed integer row-site
+gaps after the union of explicitly supplied exclusions, halo and legalization
+margin. Overlapping masks count once. Shared multi-site reservations reject
+competing demand atomically, release stale demand and support complete copied
+rollback snapshots. Free-gap queries can reuse one owner's prior footprint
+without borrowing another net's sites. Equal-width capacity counts nonoverlapping
+footprints rather than all possible starting positions.</p>
+<p>Eleven hermetic checks include independent random rectangle and ownership
+oracles, nonmonotone row heights, zero-slot/multi-site cases, overflow and
+compressed trillion-site rows. Read-only original full-OpenDB measurements cover
+36,734 CNN rows with 445,609 occupied/blockage masks and 15,035 litepci rows with
+108,752 masks. The kernel builds these occupied-site inventories in about
+0.118 s and 0.031 s respectively, excluding export and parsing. Those measurements
+use explicit zero halo/margin and conservatively exclude soft/partial blockages;
+they describe hypothetical single-height site footprints, not characterized
+buffer-library or routing capacity. Original databases remain unchanged. F is
+still partial: floorplan integration, priced negotiation, virtual density and
+actual buffer selection/materialization remain pending.</p>
+<h2>Finite discrete buffer-tree producer and selection</h2>
+<p><code>pass/place/buffering/tree_search</code> now creates complete electrical
+stages from explicit routing segments and alternative physical buffer sites.
+It preserves wire capacitance and every original sink, adds directional
+input/output attachment RC and evaluates actual incoming slew at each stage.
+The common evaluator carries the same explicit driver policy as native timing,
+with policy/model/cause counters and strict defaults preserved.</p>
+<p>Eleven checks compare all 120 fanout 1–4 alternatives and their complete root
+frontier with independent stage equations and exhaustive enumeration. Selection
+checks shared multi-site ownership without committing demand; timing ties prefer
+strictly smaller reservations. Critical-sink isolation verifies the new input
+load and every other sink. Short length never bypasses electrical limits, and
+off-window area selection requires physical window feasibility. Separate
+unsupported, infeasible, deliberate-unbuffered and budget-exhausted results avoid
+an invented optimum. E remains partial: this bounded finite producer/reference
+does not yet supply scalable van Ginneken, extended-Hanan/Chen–Pedram–Buch, BEN,
+early-estimate fitting or graph materialization.</p>
+<h2>Completed longer feedback diagnostic</h2>
+<p>The opt-in one-retry litepci experiment completes its full 800-step GP budget.
+All pre-110 checkpoints match the prior trajectory; the fresh 110 comparison
+passes and the separate hard-period guard rolls back the regression. Final
+legal timing still rejects 2307.372 ps against the immutable 2222.808 ps imported
+reference, so no accepted final DEF is exported. Independent original-SDC
+OpenSTA scoring of poses in a private exact-original full OpenDB gives setup
+WNS +1288.397 ps and hold −0.542 ps, with original signal/master/connectivity/IO,
+fixed-frame and pose identity checks passing. This is worse than the earlier
+net19 pose's +1349.373 ps setup. Pre-route remains a proxy; both weighted matched
+route jobs continue separately and hold repair remains deferred for those
+diagnostics.</p>
+<p>The 800-step run costs 47.690 CPU minutes and 47.694 wall minutes, including
+in-process timing and legalization/detail but excluding independent OpenSTA.
+The cached OpenROAD litepci main placement stages cost 118.177 CPU minutes and
+9.870 wall minutes. Threading, resizing and convergence differ; neither the
+earlier 20-step ratio nor this cost comparison is a matched-work speedup.</p>
+<h2>Obstacle geometry and real dirty-net measurements</h2>
+<p><code>pass/place/buffering/geometry</code> adds bounded integer-DBU orthogonal
+visibility geometry, a normalized LRU cache and root shortest-path tree conversion
+into the existing native buffer evaluator/search. Routing exclusions remain
+separate from placement masks. Closed obstacle unions, explicit clearance and
+outer corner lines prevent zero-width seam passages; blocked endpoints stay
+explicit. Directional technology RC and all sink identities are preserved.
+Twelve cases pass, including 200 independent unit-grid comparisons and actual
+native library/shared-site selection; all 48 buffering cases pass.</p>
+<p>The explicit-input geometry probe measures two separate 32-net cohorts per
+design, with fanout 1–4 and original saved GP20 pin/RC provenance. In the stress
+cohort, 18 CNN and all 32 litepci nets have a pin inside an opaque macro and
+remain disconnected. These failures are retained. The separately declared
+endpoint-clear cohorts each connect all 32 nets: construction totals about
+0.267 s CNN and 0.051 s litepci; immediate cache-query totals are 0.000063 s and
+0.000020 s. Root shortest-path union costs about 0.00375 s and 0.00274 s.
+These are geometry measurements, excluding parsing and electrical search, on
+integer-rounded diagnostic pin positions; no original DEF/netlist is changed.</p>
+<p>E remains partial: this supplies one obstacle-avoiding topology, not the
+required complete Chen–Pedram–Buch topology frontier, scalable multi-library
+van Ginneken, BEN or calibrated early estimates. Routing-layer capacity, virtual
+reservations, production phases, materialization, sizing and independent routed
+acceptance remain pending. Synthesis/resynthesis K remains future work.</p>
+<h2>Joint finite-graph topology and native electrical selection</h2>
+<p><code>buffering/graph_search</code> now extends sink-subset/reachable-set
+states across graph edges and merges branches at a shared root, rejecting cycles
+and reconvergent/duplicated sink branches. Every complete topology enters the
+same discrete-library/native-waveform search and full electrical/resource
+frontier. A shortest-path seed retains early feasible evidence. State/storage,
+transition, topology, assignment, fit and elapsed-time limits span the search;
+model failure and incomplete work cannot establish infeasibility or an optimum.</p>
+<p>Twelve new graph cases pass against an independent exhaustive edge-subset
+oracle and native frontier for fanout 1–4. Other checks cover real incoming-slew
+cell-choice reversal, shared sites, duplicated physical terminals and hard work
+limits. A joint fixture saves wire and improves physical required time versus
+the shortest-path seed. All 60 buffering cases pass.</p>
+<p>Actual saved GP20 native source input arrival/slew and sink requirements feed
+128 declared CNN/litepci graph profiles. The probe preserves the earlier stress
+and endpoint-clear cohorts and uses the explicitly recorded driver policies.
+It examines 805 complete topologies; all 77 connected/context-supported cases
+hit the 10,000-state limit. Endpoint-clear alternate topology improves the local
+required-time margin on 2 CNN and 12 litepci cases, with maxima about 0.186 ps
+and 0.399 ps; one additional CNN case gains an electrically feasible candidate.
+Blocked endpoints, ten missing source contexts and electrical rejections remain
+explicit. These profiles have no physical buffer choices and are not whole-graph
+or post-route timing improvements.</p>
+<p>E remains partial: this exact bounded topology reference avoids unproven
+cap/Q or sampled-slew pruning, but can grow exponentially. Scalable native
+NLDM-aware CPB/VG, BEN, calibrated early estimates, actual buffer-site integration
+and production materialization remain pending. A–J/L–M remain the milestone;
+synthesis/resynthesis K remains future work.</p>
+<h2>Original-row physical buffer alternatives</h2>
+<p><code>buffering/physical_sites</code> now adapts original rows, current cell
+poses, placement blockages and explicit physical-only masks into the shared
+whole-site inventory. Actual noninverting NLDM buffers use LEF dimensions,
+SITE/height, N/FS symmetry and physical pin centroids/origins. Both attachment
+paths receive independent routing-mask checks. Fixed-only virtual occupancy is
+separate from all-placed materialization snapshots. Whole-site rounding is
+conservative and can omit clear fractional-site gaps. No upper-layer RC or
+routing capacity is inferred.</p>
+<p>Fifteen checks pass, including 100 independent dense site/routing comparisons,
+shared owners, invalid/stale geometry, pin mirroring, fractional-width demand,
+bounds and precision. Real native selection rejects the overloaded direct option
+and picks an electrically feasible physical buffer. All 75 buffering cases pass.</p>
+<p>The real GP20 diagnostic now includes BUFx2 and BUFx4 alternatives from original
+CNN/litepci rows, every current signal-cell pose and captured physical-only
+occupancy. Original row counts are 36,734 and 15,035. The explicitly bounded
+choice domain uses up to eight seed-tree vertices, two alternatives per type
+and four total per vertex within 2 µm attachment reach. Both types are generated
+and selected. A separate audit against original OpenROAD rows/fixed masks,
+current component boxes and raw LEF dimensions passes all 25 prospective CNN
+buffers across 19 case alternatives and all nine litepci buffers across nine
+alternatives. These are independently evaluated nets/cohorts, not a simultaneous
+allocation or materialized design; source-context and work-limit failures remain.</p>
+<p>The stale-executable second profile is retained as rejected: a compiler warning
+stopped its rebuild and that shell ran the old binary. The balanced third profile
+uses a verified successful build. E/F remain partial: global gap pricing and
+negotiation, production checkpoint integration, full graph timing/rank checks,
+virtual density, inactive buffer-pool transactions, sizing and routed acceptance
+remain pending. A–J/L–M remain active; synthesis/resynthesis K remains future.</p>
+<h2>Bounded shared-site negotiation and original-net diagnostics</h2>
+<p><code>buffering/negotiation</code> now reevaluates supplied alternatives with
+the native model and allocates their exact whole-site spans and explicit shared
+integer resources against one ledger. Critical/window priority, mandatory and
+unmet-net promotion, current-demand/history prices and geometry-epoch resets
+are implemented. Electrical/routing constraints and zero capacity remain hard;
+prices never offset physical required time. Protected owners and unsupported
+old reservations remain intact; explicitly retired or successfully replaced
+owners release old demand. Candidate/fit/round/time bounds report unfinished work.</p>
+<p>The returned proposal includes bounded gap-entry pulls along actual
+rectilinear RC paths. Sixteen hermetic checks cover shared-slot competition,
+alternate-slot recovery, window promotion, hard electrical/resource constraints,
+protected/released ownership, atomicity and bounds, actual gap crossings and
+coincident source/input geometry. The optional real-net probe uses one explicit
+cohort per design, distinct prospective cell names and an unbuffered seed;
+missing source models remain explicit. These are all-critical diagnostic
+classifications, not production whole-graph window or LR state.</p>
+<p>Independent simultaneous proposal auditing checks original OpenROAD rows,
+fixed masks, all current signal-cell boxes and raw LEF dimensions, cross-net
+span overlap, unique prospective identities, containing legal gaps and per-net
+pull bounds. Results and source/input/binary provenance are recorded in
+<code>repros/timeclosure_20261024/buffer_negotiation_progress_r1.json</code>.
+F/G remain partial: production checkpoint refresh, routing-layer/crossing
+characterization, density/pseudo-net activation, full graph timing/rank checks
+and graph/pool transactions are not yet connected. A–J/L–M remain active;
+synthesis/resynthesis K stays future work. Pre-route remains a proxy and actual
+matched weighted route jobs continue separately.</p>
+<h2>Native gap-entry objective and checkpoint payload</h2>
+<p>The owning DREAMPlace API 3 now evaluates bounded physical driver-to-gap
+weighted-average distance and analytic gradients through the existing per-pin
+timing objective. <code>buffering/gap_forces</code> binds negotiated stage-zero
+pulls to actual physical pins, converts units and freezes suppression of
+conflicting straight pairs for critical/window targets. Outside-window targets
+retain straight pairs. Unbound, virtual-stage, fixed and inactive drivers remain
+explicit; fixed sources cannot suppress useful movable-sink forces. Every
+payload rebuild clears obsolete targets.</p>
+<p>Atomic GP updates, continuation, topology replacement and full-state rollback
+carry the same typed payload. Native finite differences, an independent two-pin
+oracle, translation/units, invalid/stale identities, priority, actual GP movement,
+clear/continuation and exact restored trajectories are checked. CNN/litepci
+original-net cohort diagnostics use exact component poses/ownership and uniform
+per-net sink weights to test real gradients; these are not production LR/window
+classification or accepted placement/timing improvements. Source/input/runtime
+and native-test evidence is retained under
+<code>repros/timeclosure_20261024/native_gap_force_progress_r1.json</code>.</p>
+<p>The published DREAMPlace pin remains unchanged; owned development uses an
+explicit local repository override, while the older published API reports missing
+gap support. G remains partial: production phase/checkpoint refresh, reservation
+charge and filler reconciliation, inactive buffer activation/removal and full
+graph timing/rank validation remain pending. A–J/L–M and matched post-route
+acceptance remain active. Synthesis/resynthesis K remains future work.</p>
+<h2>Native reservation density and filler reconciliation</h2>
+<p>The owning native reservation API now deposits frozen virtual buffer bodies
+through the existing cell-density kernel. It does not also subtract capacity.
+Explicit materialized-node bindings contribute only through real occupancy;
+managed virtual and physical charge displace equal filler charge independently
+of the filler-budget fraction. Native routability inflation enters this accounting;
+critical-buffer inflation policy is not yet integrated. Insufficient filler
+charge rejects the update explicitly. Physical overflow remains distinct from
+the solver metric that includes virtual reservations.</p>
+<p>Checkpoint updates, continuation and rollback carry reservation identities and
+full density shape/ratio normalization. Nine native checks cover charge and
+bin-deposition oracles, actual GP effects, atomic/final checkpoint updates,
+exhaustion, continuation, restored trajectories and physical occupancy cycles.
+<code>buffering/density</code> binds freshly negotiated bodies after checking exact
+site ownership, units and physical coverage. Unmet/unmanaged owners stay protected;
+replacements and explicit retirements release old footprints. Eight owned binding
+cases pass; the unchanged published pin explicitly reports missing reservation
+support. Its diagnostic path applies no charge.</p>
+<p>This completes a native density-accounting path, not production G/I acceptance.
+Production phase/LR/checkpoint refresh, critical inflation policy, bounded inactive
+pool and atomic logical graph/pool edits, full timing/rank/electrical validation,
+sizing and matched post-route acceptance remain pending. The explicit real-net
+probe measures charge deposition without moving or materializing cells.
+A–J/L–M remain active; synthesis/resynthesis K remains future work.</p>
+<h2>Joint native timing, gap and density checkpoints</h2>
+<p><code>buffering/checkpoint</code> now refreshes physical source timing,
+original sink requirements, LR mass and critical/window classification from one
+native feasible result. Exact sink/master/position and epoch/iteration checks
+precede finite negotiation. Protected unmet demand retains both gap pulls and
+density; successful replacements and explicit retirements release both.</p>
+<p>The opt-in C++ <code>Options.native_gp_buffering</code> runs this transaction
+inside the actual final-cell callback. Physical payload preparation occurs after
+native comparison/hard-period gates and before calibration/LR/period/response
+state commits. The public placement regression verifies three nonempty updates;
+the owning reservation API 2 exposes a solver-compatible density guard while
+preserving the separate physical-only metric. Published defaults and dependency
+pin remain unchanged. Initial ranking and missing-master failures are retained.</p>
+<p>The fresh native GP20 replay finds no current critical/window nets in the old
+CNN 32-net clear-endpoint cohort; litepci has one window net and no critical nets.
+Fresh classification/source requirements retain four CNN buffers and no litepci
+buffers in those finite cohorts. Earlier all-critical 13/9 counts are separate
+diagnostics, not current demand. The next geometry producer must select actual
+critical/window nets; global demand and incomplete searches remain unresolved.</p>
+<p>Seven owned checkpoint cases and two new timing-session cases cover the live
+path and transaction failures. Explicit original-graph/saved-RC joint replays
+refresh native timing and LR state, with declared rounded endpoint geometry and
+empty history; they do not authorize optimization or replace fidelity checks.
+Production phase-policy actions, scalable native candidate generation, full
+graph buffered timing, inactive pool and graph transactions, critical inflation
+caps, sizing and matched routed acceptance remain pending. A–J/L–M stay active;
+synthesis/resynthesis K stays future.</p>
+<h2>Matched CNN extracted setup result</h2>
+<p>The earlier weighted CNN placement now has independently audited extracted
+OpenSTA timing under the original SDC and matched downstream environment:
+setup WNS improves from −7356.805 ps to −2252.353 ps, and the setup-derived
+minimum period improves from 8356.805 ps to 3252.353 ps (119.663 to 307.470 MHz).
+Extracted connectivity, wire presence and zero final router DRC pass. Detailed
+routing wall time is 22026.738 s versus 27714.138 s for the stock reference.
+Hold remains −1359.809 ps, deferred for later repair. Final reporting/IR has
+finished; the stable extracted snapshot was independently audited.</p>
+<p>This is the earlier weighted experiment, not the newly implemented joint
+checkpoint mode; full proxy/phase/pool/sizing and overall acceptance work remains.
+The matched comparison and source/input/resource audits are in
+<a href="../../repros/timeclosure_20261024/weighted_postroute_comparison_r1.html">the extracted routed comparison</a>.
+Litepci's original weighted GRT/repair process remains live. A–J/L–M stay active;
+synthesis/resynthesis remains future work.</p>
 </main>
 <footer>Plan reviewed 2026-10-24. Move completed subtasks to “landed” with their
 original letters; keep measurements and generated artifacts under repros/.</footer>
+<h2>Dependency publication</h2>
+<p>DREAMPlace timing/gap API 3, reservation API 2 and fixed-footprint rollback
+are published in commit <code>7023afcffe8480a71053703a9d2b975ce84109ed</code>,
+after merging the latest upstream routing implementation.
+<code>MODULE.bazel</code> consumes that commit and latest OpenTimer
+<code>3869ea4fedf83dfd419d9f21bda39b111ca6e980</code>. Local overrides are no
+longer needed for these APIs. Earlier unchanged-pin/unsupported statements
+below describe the historical co-development checkpoints, not the current pin.
+The old filler-fraction compatibility failure is resolved. The native pin-force
+smoke is now part of the default test selection. Full production buffering,
+sizing and routed acceptance remain pending; synthesis/resynthesis remains future.</p>
+<h2>Filler and startup timing decisions</h2>
+<p>The filler default is one quarter of available target-density whitespace
+charge, relative to core area, utilization and macro/fixed occupancy. There is
+no absolute particle target. Particle sizes remain cell-derived. CNN naturally
+uses about 1.25M particles under this policy; litepci uses 87,044. The earlier
+1M/500K experiments are historical tuning measurements, not cross-design defaults.
+CNN's quarter/full comparison reduced GP wall time by 3.68%, total time by 2.80%
+and peak RSS by 15.30%, with effectively unchanged WNS and 1.47% worse TNS
+magnitude. The area-relative policy applies to preliminary and final GP.</p>
+<p>The startup hint is implemented and remains opt-in (coefficient zero by
+default). A single mean-wire technology timing evaluation ranks constrained
+endpoint-transition/domain paths, weakly weights the top 30% (.025 versus normal
+.25), then freezes those physical pin weights until regular RC feedback.
+It advances no LR/calibration/hard-period history and bypasses no later gates.</p>
+<table><thead><tr><th>Design</th><th>Variant</th><th>Setup WNS ps</th><th>Setup TNS ps</th><th>Wall s</th></tr></thead><tbody><tr><td>cnn</td><td>baseline</td><td>-3178.413545</td><td>-5796901.883030</td><td>965.94</td></tr><tr><td>cnn</td><td>startup</td><td>-3178.413545</td><td>-5796897.790304</td><td>997.55</td></tr><tr><td>litepci</td><td>baseline</td><td>1333.137828</td><td>0.000000</td><td>228.77</td></tr><tr><td>litepci</td><td>startup</td><td>1333.325677</td><td>0.000000</td><td>237.25</td></tr></tbody></table>
+<p>CNN WNS is unchanged; TNS improves only 4.09 ps out of roughly 5.8 million
+ps, with 3.3% more total time. Litepci gains only 0.188 ps of setup margin,
+unchanged setup TNS, and costs 3.7% more time. These gains do not justify a global
+default change. The code remains available for further convergence experiments.</p>
+<p>CNN's automatic initial-placement mean (29.85 µm) lacked driver-model
+coverage and emitted no hint. That exact inapplicable trial was stopped with
+its diagnostics retained. The applicable CNN trial uses the saved GP20 mean
+14.105 µm with zero fit failures. Litepci uses its automatic 9.672 µm mean.
+Its primary feedback-start-0 control and hint both failed the existing
+iteration-30 slew gate; the completed secondary pair uses start 20 in both.
+CNN's pair preserves start 0. No feedback-cadence default changed.</p>
+<p>After review and upstream integration, all 410 XML cases across 48 targets pass
+with the published DREAMPlace/OpenTimer pins and no local overrides. The old
+published-pin filler-fraction failure is resolved by the native range extension;
+its earlier failing evidence remains archived. The matched placement experiments
+are forty-iteration single-thread diagnostics with independent
+original-SDC OpenSTA in the original full physical frame, unchanged signal
+netlists/masters/IO/macros, and no synthesis/resynthesis. Pre-route remains a
+proxy; full convergence and routed validation of these suggestions remain pending.
+Hold repair remains deferred.</p>
+<p>A bounded in-memory buffering producer discovers actual critical/window
+net demand and regenerates finite legal site/cell candidates with continuous
+terminal RC attachments. Five hermetic cases pass, including three nonempty
+updates through public placement. Actual saved-RC replay footprints pass an
+independent physical audit (one CNN buffer, none on litepci). Its single routing
+topology is explicitly incomplete. Production phase actions, full virtual-graph
+timing, inactive pool/graph transactions, scalable search, sizing, and the
+remaining A–J/L–M acceptance work are unfinished. Synthesis/resynthesis stays future.</p>
+<p><a href="../../repros/timeclosure_20261024/suggestions_comparison_r5.html">Detailed comparisons, failures, CPU/wall breakdowns and evidence</a></p>
 </body>
 </html>

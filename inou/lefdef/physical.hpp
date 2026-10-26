@@ -105,21 +105,44 @@ struct Track {
   bool        same_mask                              = false;
   friend bool operator==(const Track&, const Track&) = default;
 };
-struct Floorplan {
-  std::string            design;
-  int64_t                dbu = 1000;
-  Rect                   die;
-  std::vector<Row>       rows;
-  std::vector<Track>     tracks;
-  std::vector<Component> components;
-  std::vector<Terminal>  terminals;
-  std::vector<Net>       nets;
+// DEF placement-only rectangles in absolute DBU. Component association is
+// retained for export; moving associated components needs a separate update.
+struct Placement_blockage {
+  bool              soft = false;
+  std::string       component;
+  std::vector<Rect> rectangles;
+  friend bool       operator==(const Placement_blockage&, const Placement_blockage&) = default;
 };
-Technology                read_lef(const std::vector<std::string>& paths);
-Floorplan                 read_def(const std::string& path);
-void                      write_def(const Floorplan& floorplan, const std::string& path);
-std::string               orientation_name(Orientation orientation);
-Orientation               parse_orientation(const std::string& name);
-std::pair<double, double> orient_point(double x, double y, double width, double height, Orientation orientation);
-void                      verify_def_roundtrip(const Floorplan& expected, const Floorplan& actual);
+struct Placement_exclusion {
+  Rect           rect;
+  Placement_mask kind = Placement_mask::hard;
+};
+struct Floorplan {
+  std::string                     design;
+  int64_t                         dbu = 1000;
+  Rect                            die;
+  std::vector<Row>                rows;
+  std::vector<Track>              tracks;
+  std::vector<Component>          components;
+  std::vector<Terminal>           terminals;
+  std::vector<Net>                nets;
+  std::vector<Placement_blockage> blockages;
+};
+Technology                       read_lef(const std::vector<std::string>& paths);
+Floorplan                        read_def(const std::string& path);
+void                             write_def(const Floorplan& floorplan, const std::string& path);
+std::string                      orientation_name(Orientation orientation);
+Orientation                      parse_orientation(const std::string& name);
+std::pair<double, double>        orient_point(double x, double y, double width, double height, Orientation orientation);
+void                             verify_def_roundtrip(const Floorplan& expected, const Floorplan& actual);
+// Disjoint hard-first geometry, clipped to the solver domain. Existing fixed
+// occupancy is subtracted so overlapping macro bodies are not charged twice.
+// Associated components must be fixed: their rectangles cannot silently stay
+// behind during macro movement. The original Floorplan remains unchanged.
+std::vector<Placement_exclusion> placement_exclusions(const Floorplan& floorplan, const Rect& domain,
+                                                      const std::vector<Rect>& fixed_occupancy = {});
+// Stage adapter preserving available sites and orientations on a rectangular
+// row grid. Missing sites become hard placement rectangles. Restore original
+// rows/blockages on final DEF export.
+Floorplan                        rectangular_placement_frame(const Floorplan& original, const Technology& technology);
 }  // namespace livehd::physical

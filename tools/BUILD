@@ -40,6 +40,38 @@ cc_binary(
 )
 
 cc_binary(
+    name = "timeclosure_replay",
+    srcs = ["timeclosure_replay.cpp"],
+    copts = COPTS,
+    deps = ["//pass/place:timeclosure", "@rapidjson"],
+)
+
+cc_binary(
+    name = "late_timing_probe",
+    srcs = ["late_timing_probe.cpp"],
+    copts = COPTS,
+    deps = ["//inou/lefdef:inou_lefdef", "//pass/place:late_timing", "//pass/place/objective:proxy_bridge", "@rapidjson", "@zlib//:zlib"],
+)
+
+py_test(
+    name = "late_timing_probe_smoke",
+    srcs = ["late_timing_probe_smoke.py"],
+    args = ["$(location :late_timing_probe)"],
+    data = [":late_timing_probe"],
+    legacy_create_init = 0,
+    timeout = "short",
+)
+
+py_test(
+    name = "timeclosure_replay_smoke",
+    srcs = ["timeclosure_replay_smoke.py"],
+    args = ["$(location :timeclosure_replay)"],
+    data = [":timeclosure_replay"],
+    legacy_create_init = 0,
+    timeout = "short",
+)
+
+cc_binary(
     name = "physical_repair",
     srcs = ["physical_repair.cpp"],
     deps = [
@@ -49,6 +81,32 @@ cc_binary(
         "//pass/place",
         "@rapidjson",
     ],
+)
+
+cc_binary(
+    name = "timeclosure_gp_probe",
+    srcs = ["timeclosure_gp_probe.cpp"],
+    copts = COPTS,
+    deps = ["//inou/lefdef:inou_lefdef", "//pass/place", "//pass/place:late_timing", "//pass/place:timing_comparison", "//pass/place/forces:gp_timing", "@rapidjson", "@zlib//:zlib"],
+)
+
+py_test(
+    name = "timeclosure_gp_probe_smoke",
+    srcs = ["timeclosure_gp_probe_smoke.py"],
+    args = ["$(location :timeclosure_gp_probe)"],
+    data = [":timeclosure_gp_probe"],
+    legacy_create_init = 0,
+    timeout = "short",
+)
+
+# Exercises the native pin timing API supplied by the published dependency.
+py_test(
+    name = "timeclosure_gp_force_smoke",
+    srcs = ["timeclosure_gp_force_smoke.py"],
+    args = ["$(location :timeclosure_gp_probe)"],
+    data = [":timeclosure_gp_probe"],
+    legacy_create_init = 0,
+    timeout = "short",
 )
 
 cc_binary(
@@ -78,4 +136,20 @@ py_test(
 xcode_config(
     name = "command_line_tools",
     visibility = ["//visibility:public"],
+)
+
+cc_binary(
+    name = "buffer_geometry_probe",
+    srcs = ["buffer_geometry_probe.cpp"],
+    copts = COPTS,
+    deps = ["//pass/place/buffering:producer", "//pass/place/buffering:checkpoint", "//pass/place:late_timing", "//inou/lefdef:inou_lefdef", "//pass/place/buffering:density", "//pass/place/buffering:gap_forces", "//pass/place/buffering:graph_search", "//pass/place/buffering:negotiation", "//pass/place/buffering:physical_sites", "@rapidjson", "@zlib//:zlib"],
+)
+
+py_test(
+    name = "buffer_geometry_probe_smoke",
+    srcs = ["buffer_geometry_probe_smoke.py"],
+    args = ["$(location :buffer_geometry_probe)"],
+    data = [":buffer_geometry_probe"],
+    legacy_create_init = 0,
+    timeout = "short",
 )
