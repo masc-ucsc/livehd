@@ -9,6 +9,9 @@
 #include <optional>
 #include <stdexcept>
 #include <tuple>
+#include <utility>
+
+#include "inou/lefdef/physical.hpp"
 
 namespace livehd::placement {
 namespace dp = DreamPlace::native;
@@ -43,20 +46,8 @@ struct Rows {
       }
     }
     for (auto& row : blocked) {
-      merge(row);
+      row = physical::merge_intervals(std::move(row));
     }
-  }
-  static void merge(std::vector<Gap>& v) {
-    std::sort(v.begin(), v.end());
-    size_t end = 0;
-    for (const auto& p : v) {
-      if (end && p.first <= v[end - 1].second) {
-        v[end - 1].second = std::max(v[end - 1].second, p.second);
-      } else {
-        v[end++] = p;
-      }
-    }
-    v.resize(end);
   }
   void reserve(int i, double x, double y) {
     if (d.node_size_x[i] <= 0 || d.node_size_y[i] <= 0) {
@@ -99,7 +90,7 @@ struct Rows {
       for (int k = r; k < r + height; ++k) {
         occupied.insert(occupied.end(), blocked[k].begin(), blocked[k].end());
       }
-      merge(occupied);
+      occupied       = physical::merge_intervals(std::move(occupied));
       const auto gap = [&](double a, double b) {
         const double first = std::ceil((std::max(a, xl) - l.xl) / l.site_width - 1e-9);
         const double last  = std::floor((std::min(b - w, xh) - l.xl) / l.site_width + 1e-9);
