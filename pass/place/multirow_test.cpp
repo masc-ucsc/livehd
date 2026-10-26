@@ -510,4 +510,35 @@ TEST(Multirow, FramesWithoutMovableMultirowCellsAreUntouched) {
   f.options.occupancy.bins_x = 0;
   EXPECT_THROW(anchor_multirow_cells(f.tech, f.fp, f.options), std::invalid_argument);
 }
+
+TEST(Multirow, GreedyPackerLimitIsAtomicAndNamed) {
+  // The known limit: each cell takes its nearest legal pose in packing order,
+  // with no pairing or backtracking, so a first anchor can fragment the only
+  // space a second cell needs. The failure is atomic and names that cell,
+  // although another assignment holds both.
+  // Across rows: the middle row pair of four rows leaves two single rows.
+  Fixture across(5, 4);
+  across.cell(0, 1, "wide");
+  across.cell(0, 1.2, "wide");
+  const auto split_rows = failure(across);
+  EXPECT_TRUE(contains(split_rows, "cannot anchor c1 (wide): no free interval of 500 DBU")) << split_rows;
+  // Along a row pair: a mid-gap anchor leaves two short gaps.
+  Fixture along(10, 2);
+  along.cell(2, 0, "wide");
+  along.cell(2, 0, "wide");
+  const auto split_sites = failure(along);
+  EXPECT_TRUE(contains(split_sites, "cannot anchor c1 (wide): no free interval of 500 DBU")) << split_sites;
+
+  // From other global-placement poses the same frames hold both cells.
+  Fixture    stacked(5, 4);
+  const auto low = stacked.cell(0, 0, "wide"), high = stacked.cell(0, 2, "wide");
+  expect_legal(stacked, anchor_multirow_cells(stacked.tech, stacked.fp, stacked.options));
+  EXPECT_EQ(stacked.at(low).y, 0);
+  EXPECT_EQ(stacked.at(high).y, 200);
+  Fixture    side(10, 2);
+  const auto left = side.cell(0, 0, "wide"), right = side.cell(5, 0, "wide");
+  expect_legal(side, anchor_multirow_cells(side.tech, side.fp, side.options));
+  EXPECT_EQ(side.at(left).x, 0);
+  EXPECT_EQ(side.at(right).x, 500);
+}
 }  // namespace livehd::placement
