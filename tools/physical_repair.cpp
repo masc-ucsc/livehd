@@ -14,8 +14,8 @@
 
 #include "attrs.hpp"
 #include "graph_library_singleton.hpp"
-#include "node_util.hpp"
 #include "inou/lefdef/mapped_graph.hpp"
+#include "node_util.hpp"
 #include "pass/opentimer/pass_opentimer.hpp"
 #include "pass/place/prects_networks.hpp"
 #include "pass/place/repair.hpp"

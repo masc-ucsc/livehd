@@ -154,11 +154,14 @@ warm = run('registered_auto', [])['qor']['place']['prects_controls']
 assert warm == auto, (warm, auto)
 override = run('registered_override', ['--set', 'synth.place.control_ports=trigger'])['qor']['place']['prects_controls']
 assert override['override'] and override['ports'] == ['trigger'] and override['pins'] == [], override
-# Recognized reset networks stay excluded even under an explicit override
-# (prects_networks_test ExplicitPortsCannotDisableRecognizedResetFalsePaths), so the
-# override can only drop the synthesized control ports/pins, never add exclusions.
-assert override['reset_pins'] == auto['reset_pins'], (override, auto)
-assert override['ignored_nets'] <= auto['ignored_nets'], (override, auto)
+assert override['reset_ports'] == auto['reset_ports'] and override['reset_pins'] == auto['reset_pins'], (override, auto)
+# The override replaces optional clock roots, while mandatory reset roots
+# remain excluded. Replacing one clock net with one trigger net need not reduce
+# the count; verify the actual excluded connectivity instead.
+override_def = (root / 'registered_override_def' / 'out.def').read_text()
+override_net_text = re.search(r'^NETS \d+ ;(.*?)^END NETS', override_def, re.S | re.M).group(1)
+override_nets = [set(re.findall(r'\(\s*(\S+)\s+(\S+)\s*\)', net)) for net in override_net_text.split(';')]
+assert override['ignored_nets'] == sum(bool(net & reached) or ('PIN', 'trigger') in net for net in override_nets), (override, reached)
 
 # Independent reset conditionals in a shared clocked block retain the same
 # semantic reset role as separate always blocks (common in generated RTL).

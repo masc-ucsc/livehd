@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2d-domplace — Provisional domino placement</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2d-domplace</strong> Provisional domino placement</h1>
+<p>Turn USYN's selected endpoint functions into a mixed CMOS/domino physical
+netlist, place two-row domino cells, and measure stage timing with an explicit
+provisional model. Deliver reproducible placement experiments before a real
+domino cell builder and characterized LEF/Liberty exist.</p>
+<p><span class="status">Reviewed plan — 2026-10-25; implementation pending</span>
+Based on <a href="usyn_domino_placement_plan.md">the supplied pre-plan</a> and
+the current working-tree interfaces. One domino evaluation phase is confirmed
+for v1: one terminal domino gate plus its output latch per converted stage,
+with earlier logic in CMOS. Two domino phases are future work. The estimates
+cover this scope and distinct variant widths derived from the confirmed
+inverter-plus-register area model below. The externally owned odd/even
+placement-row convention is an input to domino pin geometry. This task generates
+compatible pin locations and handles placement, legalization and resizing of
+double-height domino cells; routing-policy implementation remains with its owner.
+Assumptions inherited from the pre-plan and new recommendations are distinguished
+below. This page does not approve changes to existing user-visible defaults.</p>
+
+<h2>Depends on</h2>
+<ul>
+<li><a class="xref" href="2u-usyn.html">2u-usyn</a> supplies the implemented
+<code>Gate_formula</code>, endpoint selection, frozen netlist and source-state
+correspondence. Physical emission and the restricted selection policy belong
+here; the rest of the USYN roadmap is not a prerequisite.</li>
+<li><a class="xref" href="3p-placement.html">3p-placement</a> supplies physical
+netlist import, native DREAMPlace GP, legalization, RC and DEF export. Reuse
+these interfaces and extend their two-row handling.</li>
+<li><a class="xref" href="2t-timeclosure.html#B">2t-timeclosure B–C</a> supplies
+the proposed standalone timing proxy and wire model. These are still planned,
+not an existing topological timer. Implement/reuse the minimum supported proxy
+before E; geometry bring-up can proceed without it. The full seven-phase
+controller, virtual-buffer optimization and resynthesis are not prerequisites.</li>
+</ul>
+
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li id="A"><strong>A — Freeze the stage contract and a reproducible baseline. 1–2 engineer-days.</strong>
+<ul>
+<li>Implement the confirmed one-phase scope in Q1 below. Specify clock
+edges, evaluate/precharge windows, capture, source stability, setup/hold and
+initialization in one versioned model. Preserve the original cycle latency and
+state correspondence; no retiming or extra pipeline registers.</li>
+<li>Start with one explicitly constrained clock domain and supported ordinary
+edge state. Define an eligibility table for enables, synchronous/asynchronous
+reset, initial values, negative edges, gated/generated clocks, memories and IO.
+Keep unsupported state in its original CMOS implementation with a reason code;
+do not erase controls to make it eligible. Coverage outside the proxy's supported
+constraint subset remains explicitly unmeasured.</li>
+<li>Capture source/dependency revisions, dirty-patch identity, technology,
+Liberty/LEF/SDC/RC, seed, density, options and clock target. Define the physical
+profile as opt-in; retain current CMOS defaults. Use typed options, not new
+environment variables. Explicitly disable the placement resynthesis loop for
+these runs, including any default-enabled legacy callback.</li>
+<li><strong>Exit:</strong> stage diagrams, eligibility/fallback table, model
+schema, matched baseline commands and agreed scope. No placeholder command is
+advertised as an already implemented CLI.</li>
+</ul></li>
+
+<li id="B"><strong>B — Adapt USYN selection to the physical profile. 2–4 engineer-days.</strong>
+<ul>
+<li>Consume <code>pass/usyn/function.hpp</code> and
+<code>endpoint_netlist.hpp</code>. USYN already carries a checked factored
+series/parallel formula, transistor/stack/branch metrics and ordered rail
+demands. Recompute and validate those metrics; do not create a second cover
+factorer or substitute the older eight-variable domino study backend.</li>
+<li>For the confirmed one-terminal-gate profile, explicitly select
+<code>pass.usyn.clock_phases=1</code> at this invocation. Keep the existing <code>clock_phases=2</code>
+default unchanged. Re-select from the logical source if a saved artifact contains
+phase-one producers; never silently relabel a two-phase result.</li>
+<li>Keep the stack cap at the pre-plan's four devices. If a candidate exceeds
+the cap, move the excess function into upstream static logic and validate the
+new composition, or retain the CMOS+DFF implementation. Splitting into another
+dynamic gate would change the stage contract. Enumerate area/delay candidates
+within bounded work; “fill the domino half” is a preference subject to legality
+and timing, not permission to maximize absorption blindly.</li>
+<li>Materialize every demanded rail and charge its cost. Static input inversions
+are real CMOS cells unless a physical complementary output is available. For
+the agreed single-output macro model, a demanded complementary domino output
+uses its own checked formula and macro; copying the positive PDN's metrics is
+invalid. Both input polarities may be needed by one PDN, and their pin count and
+loads must be retained. Preserve outside consumers and shared static logic.</li>
+<li>The current logical selector retains a mandatory DominoLatch, including an
+identity endpoint. Add an explicit physical choice between that candidate and
+CMOS+DFF; do not mistake the logical identity endpoint for evidence that physical
+conversion is worthwhile. Report selected, retained-CMOS and refused counts.</li>
+<li><strong>Exit:</strong> exact small-function composition checks, state/rail
+accounting and deterministic bounded refusal. Every chosen physical candidate
+has a legal formula and an explicit original-state owner.</li>
+</ul></li>
+
+<li id="C"><strong>C — Generate provisional physical and timing models. 3–5 engineer-days.</strong>
+<ul>
+<li>Generate real parseable LEF abstracts plus a versioned timing/model sidecar
+from B. Record formula hash, ordered physical pins, rail polarity, row/site/DBU
+units, allowed orientations, technology and model provenance. Use the area and
+pin-access rules below; include PG shapes and clock/input/output pin geometry.</li>
+<li>Make pin generation aware of the supplied row-access convention: odd
+placement rows provide vertical access and even rows horizontal access. A
+double-height domino cell spans one of each. Define each pin's access shapes,
+offsets and compatible approach direction in the cell's two local row halves,
+then map them to the floorplan rows under the candidate origin and orientation.
+Use actual technology layers, pitches, widths and obstructions to choose valid
+access locations. Keep CLK and PG access available alongside the data pins.</li>
+<li>Check the pin layout for both starting-row parities and allowed vertical
+flips. Do not assume the cell's lower half always lands on an odd row. Reuse a
+compatible orientation/layout where possible; if distinct pin-layout templates
+are needed, give them explicit geometry identities with the same Boolean
+function, drive and logical pin interface. Record the supplied row-access
+profile in model provenance. This is abstract generation and access checking;
+the other task owns row-direction assignment and long-wire routing policy.</li>
+<li>Provide X1/X2/X4 variants with their own estimated widths. Use the confirmed
+model <code>A_domino(s) = x * A_NOT + A_register(s)</code>, where
+<code>x = N_domino_proxy / 2</code> because an inverter represents two
+transistors. The technology register cell supplies the drive-dependent area;
+the domino transistor proxy excludes that register. This replaces the pre-plan's
+seven-inverter overhead formula. Generate geometry and pin offsets per variant,
+retaining the same logical pin names/order and two-row height.</li>
+<li>Store evaluation and precharge delay, capture setup/hold, clock-to-Q,
+per-rail input capacitance, output resistance/slew/load limits and clock
+capacitance, with explicit time/capacitance units and model corner. Record a named
+technology inverter and a matching register family for the drive variants;
+use the register family's output timing/drive data as the provisional registered
+output model. Do not assume an X4 name means four times the area. Derive the
+remaining coefficients from reference FO4 data where available and record the
+hand-set coefficients. Missing data must
+produce a diagnostic or a labeled estimate, never an implicit zero.</li>
+<li>Share geometry/electrical templates by shape bins if useful, but keep exact
+Boolean identity separate. Equal input count, transistor count and stack do not
+make two functions interchangeable. Master identity includes function/rail order,
+pin geometry, drive and model version. Each real-cell replacement must satisfy
+the same logical and physical interface, or trigger regeneration/replacement.</li>
+<li><strong>Exit:</strong> deterministic model regeneration, LEF round trip,
+orientation/pin checks and unit checks on several factored functions, complements
+and drive variants. Verify the full register area is charged exactly once and
+that increasing drive does not scale the PDN area. Cover both row parities,
+flips and all drive widths with transformed pin-access checks, including CLK/PG
+access and a deliberately too-narrow layout. Quantization and minimum
+pin-access width are included.</li>
+</ul></li>
+
+<li id="D"><strong>D — Emit and verify the mixed physical netlist. 4–6 engineer-days.</strong>
+<ul>
+<li>Add a physical emitter beside the current CMOS writer, preserving the frozen
+netlist as the logical authority. Prefer existing cell/module instances plus
+typed metadata over a new graph primitive unless an actual consumer requires
+one. Replace the original DFF with the domino+latch realization; do not leave an
+extra DFF behind it. Keep one logical source-state owner. If both output rails
+require separate macros, record their redundant physical storage and verify the
+complement relation, including initialization/reset and the first capture.</li>
+<li>Technology-map the residual CMOS and retained DFFs through the existing
+optional mapping provider, treating domino instances as preserved boundaries.
+USYN's logical core stays ABC-free. Preserve port order, rail nets, clock/reset
+roles, hierarchy/source names and shared consumers through flattening and stitch.</li>
+<li>Supply behavioral models with original cycle-level next-state semantics for
+simulation and LEC, plus independent model checks for the timing schedule.
+Unknown/reset/enable behavior must match admitted source semantics; two independent
+unknown initial bits cannot stand in for a correlated Q/!Q pair. Combinational
+or sequential equivalence alone does not establish dynamic electrical correctness.</li>
+<li>Thread model registration through the fused synthesis/placement path; audit
+Liberty-only cell lookup, area accounting, export, simulation and formal
+expansion. Every consumer either understands the provisional instance or refuses
+it explicitly. Export the mixed netlist, generated LEF, behavioral models and
+sidecar together; no unresolved black boxes in a successful logical check.</li>
+<li>Include formulas, rail policy, stage schedule, coefficients/corner, variants,
+pin layout, supplied row-access convention and profile in cache identity. Restore the complete matching bundle
+or rebuild it. Keep invalid/incomplete results out of reusable generations.</li>
+<li><strong>Exit:</strong> a tiny mixed design runs from synthesis to physical
+import, passes sequential equivalence, and round-trips with its state and
+connectivity intact. Unsupported cases retain CMOS or fail with a specific reason.</li>
+</ul></li>
+
+<li id="E"><strong>E — Add half-cycle timing and stage reports. 3–5 engineer-days after the base proxy.</strong>
+<ul>
+<li>Use the shared 2t-timeclosure proxy with a provisional-cell model provider;
+do not hide OpenTimer calls inside a supposedly standalone proxy. Existing
+<code>core/timing_feedback.hpp</code> and <code>timing_whatif.hpp</code> provide
+feedback/edit seams, while <code>Physical_session::Proxy</code> is currently an
+OpenTimer what-if wrapper, not the proposed topological implementation.</li>
+<li>Implement the two endpoint budgets and separate internal/precharge checks
+below. Include launch clock-to-Q, capture/setup uncertainty and wire/load delay
+once each. Traverse through mapped static logic and stop at each original state
+boundary. Propagate constraints through hierarchy/IO explicitly.</li>
+<li>Emit stable stage/source-state IDs, launch/capture clock identity, endpoint
+class, arrivals, required times, wire/internal contributions, slack, early-check
+coverage and model version. Derive estimated period only over the measured
+constraint subset; list excluded endpoints and reasons.</li>
+<li>Refresh timing after orientation, variant, load, buffer or topology changes.
+An internal evaluation failure needs a different model/variant or a future
+synthesis run; moving cells cannot shorten an intrinsic PDN delay. Output load
+and driver changes can still affect the separately modeled output timing.</li>
+<li><strong>Exit:</strong> hand-computable flop→domino, domino→domino,
+domino→flop and flop→flop fixtures, shared fanout, polarity and unit checks;
+comparison of the CMOS subset against an independent timer; explicit failure
+for incomplete coverage. Hold checks are estimates until early models and clock
+assumptions are supplied.</li>
+</ul></li>
+
+<li id="F"><strong>F — Integrate GP, two-row legalization and anchored detail. 4–7 engineer-days.</strong>
+<ul>
+<li>Pass actual two-row rectangles and oriented physical pins through
+<code>pass/place/place.cpp</code> to native DREAMPlace. Treat domino instances as
+movable multi-row standard cells, not SRAM/block macros with macro halos,
+vanishing-memory policies or macro-stage locking. Charge the selected variant's footprint
+consistently to density and available sites.</li>
+<li>Audit the native legalization path before choosing an algorithm. A bounded
+two-row packing pass followed by existing single-row packing is acceptable for
+v1 if it provides atomic fallback and useful displacement. Full mixed-height
+Abacus is an alternative, not automatically a prerequisite. A domino cell must
+occupy the same x interval in both adjacent rows; two independently placed
+one-row halves are not legal.</li>
+<li>Check both row intervals, site alignment, cut rows, blockages, fixed cells,
+orientation, core bounds and technology pin access using C's row-aware abstracts. Preserve the
+pre-plan's absence of a power-rail-parity restriction for these provisional
+abstracts; any future real PG/row restriction must come from the library. Check
+both possible starting-row parities and allowed vertical orientations, including
+the transformed pin shapes' compatibility with the supplied row-access convention.
+Update actual pin positions before computing wirelength/RC. Row-pair occupancy
+and pin compatibility are handled here; routing-direction policy is owned elsewhere.</li>
+<li>After legalization, hold domino positions fixed during ordinary detailed
+placement and allow CMOS moves around their full footprints. Explicit sizing/ECO
+transactions may resize and re-legalize those anchors. Add a later two-row
+move/swap optimizer only if measured displacement or QoR justifies J.</li>
+<li><strong>Exit:</strong> independent legality checks after GP handoff,
+legalization, detail, repair and DEF reload; zero split/overlapping domino
+footprints. Sweep row fragmentation and domino area fraction, including the
+all-CMOS control and deliberate infeasibility.</li>
+</ul></li>
+
+<li id="G"><strong>G — Integrate sizing, buffering and clock accounting. 5–8 engineer-days.</strong>
+<ul>
+<li>Extend <code>resize_engine</code>/repair's cell catalog and what-if model
+provider so domino variants are explicit same-function, same-interface choices.
+Do not assume Liberty-based combinational resizing already handles a sequential
+custom macro. Never replace its storage with an ordinary buffer.</li>
+<li>Switching X1/X2/X4 changes registered-output drive/timing, capacitances,
+estimated area, width and potentially pin offsets. The selected PDN/function
+stays unchanged. During GP, refresh geometry, density charge, pin maps and RC
+before continuing; complete legalization at the required checkpoint. After legal
+placement, use bounded two-row ECO legalization for each sizing transaction.
+Check free intervals in both rows, all displaced neighbors, row-aware pin access and fresh
+timing before accepting. Roll back the complete geometry/netlist/timing edit if
+packing or timing fails. Down-sizing releases only the actual rounded site area.</li>
+<li>Try output buffers when the largest variant is insufficient, honoring the
+pre-plan's policy; include area, electrical limits and early timing in the
+acceptance decision. Refresh all affected nets and roll back rejected edits.</li>
+<li>Model clock capacitance per instance/variant and per clock domain. Report
+sink counts and total C_clk separately from data-net HPWL. Existing ideal-clock
+net exclusion is not a physical clock-tree model; any clock-aware weighting is
+explicitly labeled. Do not infer CTS power or skew from sink count alone.</li>
+<li><strong>Exit:</strong> variant selection and output buffering preserve
+equivalence and legality, including a resize that needs neighbor displacement,
+a rejected growth and a down-size that releases sites. Geometry/pins/density,
+timing/model/cache state agree after accepted edits and rollback. There is no
+USYN rerun in the placement loop.</li>
+</ul></li>
+
+<li id="H"><strong>H — Validate the complete flow and run matched experiments. 3–5 engineer-days.</strong>
+<ul>
+<li>Use tiny in-repository fixtures for the required cases from B–G, including
+unsupported state, complementary rails, shared consumers, fragmented rows,
+oversized input pin counts, cold/warm model replay and one rejected repair.
+Do not modify contract tests. Run optimized tests with
+<code>--test_timeout=30</code>, aiming below 20 seconds each.</li>
+<li>Compare three arms: existing all-CMOS baseline; USYN CMOS realization; and
+USYN with the provisional physical domino profile. Match RTL, clock target,
+technology, seed, density and stopping budgets. Report fixed-core comparison and
+area-driven core sizing separately. The second arm helps distinguish USYN logic
+changes from the estimated benefit of replacing endpoints.</li>
+<li>Report logical equivalence status, eligible/converted coverage, both area
+definitions, two-row legality/displacement, estimated period and per-class
+slack, HPWL/RUDY, clock sink counts/C_clk, buffers/variants, runtime and peak
+process-tree RSS. Keep unproven, unsupported and timeout results separate.</li>
+<li>Sweep the domino-only auxiliary transistor estimate and per-pair area
+conversion independently ±25%, keeping the documented drive-specific register
+areas explicit; compare nominal versus at
+least 4-FO4 evaluation delay, output loads, pulse/skew margins, and domino
+fraction. Re-run placement for area changes. Show whether the conclusion changes
+under pessimistic coefficients; a nominal proxy win is not characterized PPA.</li>
+<li>Serialize synthesis-bearing experiments and monitor whole-tree memory.
+Store manifests, logs, DEF/LEF/model bundles, JSON/TSV and images under ignored
+<code>repros/domplace_&lt;date&gt;/</code>. Keep synthetic regressions independent
+of sibling benchmark repositories. Longer external benchmarks stay out of the
+default regression. Measure cache reuse on the second warm run after rebuilding.</li>
+<li><strong>Exit:</strong> a reproducible, legal, logically verified mixed
+placement with complete model provenance and honest timing coverage. A speedup
+is an experimental outcome, not a prerequisite for reporting the implementation
+working. This milestone makes no routed, silicon, noise-margin or CTS claim.</li>
+</ul></li>
+
+<li id="J"><strong>J — Add two-row detailed moves if needed. 3–5 additional engineer-days.</strong>
+<ul>
+<li>Use H's displacement/quality evidence to justify two-row shifts and swaps.
+Preserve the two-row occupancy and pin/orientation rules during every move;
+re-evaluate local wiring and stage timing.</li>
+<li><strong>Exit:</strong> matched comparison against the anchored v1, with
+independent legality, bounded runtime and preserved logical behavior.</li>
+</ul></li>
+</ul>
+
+<h2>Subtasks — landed</h2>
+<p>None yet. Existing USYN and placement infrastructure is reused; it does not
+constitute an implemented physical domino flow.</p>
+
+<h2>Design notes</h2>
+<h3>Confirmed decisions and scope</h3>
+<p><strong>Q1 — confirmed 2026-10-25:</strong> only one domino evaluation phase
+for v1. Each converted stage ends in one domino gate plus its output latch;
+earlier logic remains CMOS. Ordinary CMOS+DFF stages remain supported. Two
+domino phases are future work and are excluded from the implementation steps
+and estimates here. Precharge/evaluate windows within the one-phase macro do
+not introduce a second cascaded domino logic phase.</p>
+<p><strong>Q2 — confirmed 2026-10-25:</strong> drive variants have their own
+estimated widths. Area is <code>x * A_NOT + A_register(strength)</code>, where
+<code>x</code> is the domino transistor proxy expressed in two-transistor
+inverter units. Use the full drive-specific technology register area for the
+registered output, not an incremental register-area difference or a multiplier
+on the entire domino gate. This supersedes the pre-plan's fixed-width assumption
+and seven-inverter overhead. Geometry is fixed between explicit sizing edits;
+post-placement resizing requires two-row ECO legalization. One-shot USYN remains.</p>
+<p><strong>Q3 — clarified scope, 2026-10-25:</strong> odd/even refers to placement
+rows: odd = vertical, even = horizontal. Another task owns that routing work;
+this task must account for the convention when generating domino pin locations.
+C consumes the row-access convention and technology geometry, and F/G preserve
+compatible pin access through placement, flips, legalization and width-changing
+sizing. The routing implementation and its enforcement policy remain external.</p>
+<table>
+<thead><tr><th>Status</th><th>Decision</th></tr></thead>
+<tbody>
+<tr><td>Inherited from pre-plan</td><td>One-shot USYN before placement;
+edge-mode output storage with no borrowing; single-output macros, duplicating
+demanded output polarities; two-row geometry with vertical flip and no rail-parity
+restriction in the provisional model; X1/X2/X4; no placement-time USYN loop.</td></tr>
+<tr><td>Confirmed Q2</td><td>Distinct variant widths from
+<code>(N_domino_proxy / 2) * A_NOT + A_register(strength)</code>.
+Use actual technology-cell areas; update geometry and re-legalize after
+post-placement sizing. The old seven-inverter overhead is superseded.</td></tr>
+<tr><td>Confirmed Q3 scope</td><td>Consume odd/even placement-row access when
+creating domino pins and checking placed/flipped/resized cells. Double-height
+placement/legalization and resizing remain in scope. The routing-policy
+implementation and long-wire constraints are owned elsewhere.</td></tr>
+<tr><td>Model details to specify in A/C</td><td>Reference technology/inverter/register family,
+non-register auxiliary transistor count,
+FO4 coefficients, precharge time, pulse/skew margins, exact supported state,
+pin-access rules and fallback reporting. These are provisional parameters, not
+measured cell characteristics.</td></tr>
+</tbody>
+</table>
+
+<h3 id="I">I — Row-access interface; routing implementation owned elsewhere</h3>
+<p>The routing implementation from the pre-plan's “pre-task 0” is outside this
+task: another owner handles odd/even assignment, long-wire occupancy and SAT
+routing enforcement. Its row-access convention still informs where C creates
+domino pins. Consume the supplied row-class mapping and technology track/layer
+geometry; keep their origin/parity explicit rather than inventing a competing
+row-numbering policy. Verify compatibility after orientation and size changes
+in F/G. These checks do not require completion of the separate routing optimizer.</p>
+<p>Retain I as the interface/scope reference, not a separate implementation
+subtask. The pin-generation work is included in C and placement/repair checks
+in F/G; no routing cost model or long-wire capacity solver is added here.</p>
+
+<h3>Corrections to the pre-plan</h3>
+<ul>
+<li><strong>PDN construction is largely available.</strong> Reuse
+<a href="../../pass/usyn/function.hpp">Gate_formula</a> and
+<a href="../../pass/usyn/endpoint_netlist.hpp">Endpoint_netlist</a>;
+the new work is physical selection, rails, modeling and emission.</li>
+<li><strong>Logical dual-rail assumptions must be removed from physical cost.</strong>
+The frozen representation currently aliases Q/!Q and can share phase-one
+implementations. Two output macros need independently legal formulas, clock
+loads and storage correspondence; shape binning must not merge their functions.</li>
+<li><strong>The proposed timing proxy is not landed.</strong>
+<a href="../../pass/opentimer/physical_session.cpp">Physical_session</a> backs
+the current what-if interface with OpenTimer. Include the base-proxy dependency
+in estimates instead of describing E as only an endpoint annotation change.</li>
+<li><strong>Q2 resolves widths and sizing.</strong> Charge the domino transistor
+proxy plus a full drive-specific register, generate each variant's own width,
+and include two-row ECO legalization in sizing. Keep the PDN fixed across drive
+variants and report site/pin-access rounding separately from estimated area.</li>
+<li><strong>Clock/load/setup terms belong in the period equation.</strong>
+The two raw maximum segment delays omit margins, launch delays and full-cycle
+paths unless their definitions explicitly include them. Hold and precharge
+also need separate checks.</li>
+<li><strong>Custom-cell integration is more than a new node type.</strong>
+Mapping, graph emission, proof/simulation models, timing, repair, library lookup,
+export and cache replay all need the same registered identity.</li>
+</ul>
+
+<h3>Proposed single-terminal timing convention</h3>
+<pre><code>time             nT                     nT + T/2                 (n+1)T
+source Q         launch ─── CMOS + wire ─── inputs stable ────────────┐
+domino network   precharge                evaluate                  │
+output storage   holds previous Q ─────────────────────────────── capture
+next stage Q                                                     + t_cq
+
+ordinary stage   launch ───────────── CMOS + wire ───────────────── capture</code></pre>
+<p>This is a specification to implement under Q1's confirmed scope, not a
+claim that pulse-latch electronics already satisfy it. Macro inputs settle before
+evaluation starts and remain stable through the declared evaluation/capture hold
+window. This is stricter than ordinary edge-register setup alone. Treat storage
+as an edge element in the functional model while retaining pulse-width/skew
+requirements in early timing.</p>
+<ul>
+<li>Let <code>a</code> be latest arrival relative to launch, including source
+clock-to-Q, static-cell delays, physical rail generation and wire delay.
+Into domino: <code>a + setup_eval + uncertainty_first ≤ T/2</code>.</li>
+<li>Inside domino: <code>evaluate_delay + setup_capture + uncertainty_second
+≤ T/2</code>. Evaluation delay excludes the subsequent output clock-to-Q;
+the latter is charged to the next stage exactly once.</li>
+<li>Into an ordinary DFF: <code>a + setup_DFF + uncertainty_full ≤ T</code>.
+Independently require <code>precharge_delay + precharge_margin ≤ T/2</code>.</li>
+<li>The estimated setup/precharge period is the maximum of twice the worst
+first-half requirement, twice the worst internal requirement, the worst
+full-cycle DFF requirement, and twice the worst precharge requirement. Include
+only present, constrained classes; report absent and unsupported classes.</li>
+<li>Check the earliest next data transition against the stability window and
+capture hold requirement, using source minimum clock-to-Q, minimum cell/wire
+delay, pulse width and relative clock skew with an explicit sign convention.
+Increasing T does not automatically repair a hold violation. An unavailable
+early model means hold coverage is unknown, not passed.</li>
+</ul>
+
+<h3>Area, geometry and model identity</h3>
+<pre><code>N_domino_proxy  = N_PDN + N_aux_nonregister
+x               = N_domino_proxy / 2
+A_domino(s)     = x * A_NOT + A_register(s)
+H_domino        = 2 * H_row
+W_area(s)       = ceil(A_domino(s) / (2 * H_row * W_site)) * W_site
+W_domino(s)     = site_round_up(max(W_area(s), W_pin_access(s)))
+A_footprint(s)  = W_domino(s) * H_domino</code></pre>
+<p><code>N_PDN</code> counts literal devices in the checked factored network,
+including repeated physical occurrences. Define and report
+<code>N_aux_nonregister</code> for precharge, keeper, foot and other domino-only
+devices actually included in the proxy; exclude anything already represented by
+the output register. Their counts remain provisional model parameters to specify
+in C. Do not retain the old seven-inverter lump sum or add another latch term.
+The confirmed formula charges the full register exactly once.</p>
+<p><code>A_NOT</code> and <code>A_register(s)</code> are areas of named cells in
+the selected technology, with all register strengths taken from the same
+compatible family/corner. Use a consistent physical-area basis and units across
+the cell references; document LEF/Liberty normalization if their areas differ.
+The register family supplies strength scaling while the same PDN proxy is shared
+by all variants. Fractional inverter equivalents are allowed; round geometry to
+sites only after computing total area. Independent variant estimates can round
+to equal widths when site pitch or pin access dominates; retain and report their
+distinct electrical identities rather than inventing an area increment.</p>
+<p>Report estimated area, rounded physical footprint, quantization/pin-access
+overhead and separately materialized rail-generation area. Placement uses the
+selected variant's actual footprint, not a reservation for the largest drive.</p>
+<p>Use the supplied row-access convention, actual track/layer geometry and explicit master/site symmetries for
+orientation legality; the LEF/DEF reference gives specific double-height cell
+and row-site examples. The provisional absence of a power-rail-parity restriction
+remains an explicit model assumption, separate from the externally owned row routing policy and
+to be rechecked when real cells arrive.
+<a href="https://coriolis.lip6.fr/doc/lefdef/lefdefref/lefdefref.pdf">LEF/DEF 5.8
+Language Reference, “Double-Height Cells” and SITE/SYMMETRY</a>.</p>
+
+<h3>Sequence and rough schedule</h3>
+<p>Estimates are focused implementation effort for one engineer familiar with
+LiveHD and native DREAMPlace, including focused checks. They are planning ranges,
+not measured runtimes or commitments; waiting for reviews, technology data and
+long external runs adds elapsed time.</p>
+<table>
+<thead><tr><th>Delivery</th><th>Order / prerequisites</th><th>Effort</th></tr></thead>
+<tbody>
+<tr><td>Model + mixed netlist</td><td>A → B → C → D</td><td>10–17 days</td></tr>
+<tr><td>First legal double-height placement with model bundle and logical checks</td><td>A–D,
+F and the small geometry smoke from H; sizing disabled</td><td>About 15–26
+days cumulative (3–5 working weeks)</td></tr>
+<tr><td>Base timing proxy, if 2t B–C is unavailable</td><td>Minimum supported
+single-clock implementation, shared with 2t; needed before E</td><td>6–10
+additional days; re-estimate after its coverage contract is frozen</td></tr>
+<tr><td>Complete v1: timed, sized, buffered and evaluated</td><td>A–H;
+E needs the base proxy, G needs D/E/F, including variable-width ECO</td><td>25–42 days with the base proxy;
+31–52 days from the reviewed starting point (roughly 6–11 working weeks)</td></tr>
+<tr><td>Two-row detailed moves/swaps</td><td>J, after H demonstrates a need</td><td>+3–5 days</td></tr>
+</tbody>
+</table>
+<p>Q2 adds approximately 2–3 days to G for width-changing sizing and two-row ECO
+acceptance/rollback; the sizing-disabled bring-up is unaffected by that change.
+Row-aware pin generation and compatibility checks are included in C/F/G's
+existing estimates. The separate routing-policy implementation contributes no
+effort or completion dependency. With multiple implementers, the base proxy can proceed alongside B–D and
+native legalization can proceed once C's geometry is frozen; the table does not
+assume parallel staffing. Budget another 20–30% contingency for custom-cell
+consumer gaps, fragmented-row behavior and model calibration. Re-estimate at
+the mixed-netlist and first-legal-placement checkpoints. DREAMPlace changes
+belong in <code>../DREAMPlace/dreamplace/native/</code>, developed through a local
+override and ultimately consumed by a published pin; never patch fetched
+external sources. The same ownership rule applies to OpenTimer if required.</p>
+
+<h3>Deferred beyond this task</h3>
+<p>Two cascaded domino phases (requiring a separate timing/rail-stability contract
+and estimate), real transistor layout and characterized Liberty/LEF,
+shared-overhead dual-rail macros, phase-overlap/borrowing, duty-cycle exploration, retiming, placement-driven
+USYN reruns, and routed CTS/hold/noise/signoff closure. A future cell-builder
+handoff replaces the provisional model only after validating geometry, pin order,
+rail availability, clock/capture semantics and units; equal filenames alone are
+not interface compatibility.</p>
+</main>
+<footer>LiveHD TODO · reviewed plan, no implementation or QoR claim</footer>
+</body>
+</html>

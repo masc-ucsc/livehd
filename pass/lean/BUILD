@@ -1,6 +1,22 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("@rules_python//python:defs.bzl", "py_test")
 load("//tools:copt_default.bzl", "COPTS")
+
+py_test(
+    name = "coreet_sweep_freshness_smoke",
+    srcs = ["coreet_sweep_freshness_smoke.py"],
+    args = [
+        "$(location Lgraph_IR_Semantics_Simulator/scripts/coreet_sweep_freshness_controls.sh)",
+        "$(location Lgraph_IR_Semantics_Simulator/scripts/coreet_full_flow.sh)",
+    ],
+    data = [
+        "Lgraph_IR_Semantics_Simulator/scripts/coreet_sweep_freshness_controls.sh",
+        "Lgraph_IR_Semantics_Simulator/scripts/coreet_full_flow.sh",
+    ],
+    legacy_create_init = 0,
+    timeout = "short",
+)
 
 cc_library(
     name = "lean_graph_scan",

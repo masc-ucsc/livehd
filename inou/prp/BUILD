@@ -820,18 +820,26 @@ sh_test(
 # and the --bitfuzz leg never reruns a simulation it does not change.
 _EQUIV_SIM = [
     "matched_filter",
+    "mem_partial_write_lanes",
 ]
+
+# Keep the two independent proofs below the per-test runtime budget. The
+# original target remains a suite so requesting it retains both legs.
+_EQUIV_SPLIT_BITFUZZ = ["mem_partial_write_lanes"]
 
 [
     sh_test(
-        name = "prp-equiv-%s" % prp_file.split("/")[-1].split(".")[0],
+        name = "prp-equiv-%s%s" % (
+            prp_file.split("/")[-1].split(".")[0],
+            "-plain" if prp_file.split("/")[-1].split(".")[0] in _EQUIV_SPLIT_BITFUZZ else "",
+        ),
         srcs = ["tests/pyrope_test.py"],
         args = [
             "-i",
             "$(location //inou/prp:%s)" % prp_file,
-            # The plain run, then the same pair again under --bitfuzz.
-            "--with-bitfuzz",
         ] + (
+            [] if prp_file.split("/")[-1].split(".")[0] in _EQUIV_SPLIT_BITFUZZ else ["--with-bitfuzz"]
+        ) + (
             ["--mode", "equiv"] if prp_file.split("/")[-1].split(".")[0] in _EQUIV_SIM else []
         ),
         data = [
@@ -939,6 +947,33 @@ _EQUIV_SIM = [
             # same default native Slang LEC path as every other pair.
         ] + _PRPLEC_SKIP,
     )
+]
+
+[
+    sh_test(
+        name = "prp-equiv-%s-bitfuzz" % stem,
+        srcs = ["tests/pyrope_test.py"],
+        args = ["-i", "$(location tests/equiv/%s.prp)" % stem, "--mode", "equiv", "--bitfuzz"],
+        data = [
+            "tests/prplib.py",
+            "tests/lec.py",
+            "tests/prpsim.py",
+            "tests/pyrope_test.py",
+            "tests/equiv/%s.prp" % stem,
+            "tests/equiv/%s.v" % stem,
+            "//lhd",
+        ],
+        deps = ["//inou/yosys:scripts"],
+    )
+    for stem in _EQUIV_SPLIT_BITFUZZ
+]
+
+[
+    test_suite(
+        name = "prp-equiv-%s" % stem,
+        tests = [":prp-equiv-%s-plain" % stem, ":prp-equiv-%s-bitfuzz" % stem],
+    )
+    for stem in _EQUIV_SPLIT_BITFUZZ
 ]
 
 # The simulation leg of each _EQUIV_SIM pair (see above).

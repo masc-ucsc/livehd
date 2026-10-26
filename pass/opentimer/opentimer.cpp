@@ -1113,10 +1113,9 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       }
 
       std::string driver_name{d.name};
-      auto        bits = bits_of(driver_dpin);
-      if (bits == 0) {
-        bits = static_cast<int32_t>(d.bits);
-      }
+      // The interface can extend or truncate its driver. Every declared bit
+      // is a distinct load, including sign-extension aliases on one net.
+      const auto  bits = d.bits ? static_cast<int32_t>(d.bits) : std::max(1, bits_of(driver_dpin));
 
       timer.insert_primary_output(driver_name);
       timer.insert_net(driver_name);
@@ -2065,25 +2064,28 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
       if (driver.is_invalid()) {
         continue;
       }
-      const auto drv = g->occurrences().lift(driver);
-      bits           = bits_of(drv);
-      if (bits == 0) {
-        bits = static_cast<int32_t>(d.bits);
-      }
+      const auto drv         = g->occurrences().lift(driver);
+      const auto driver_bits = tracked_bits_of(drv);
+      bits                   = d.bits ? static_cast<int32_t>(d.bits) : std::max(1, driver_bits);
       // A wiring node can redirect its driver after phase 2 named the output
       // net. Attach the PO to the resolved physical net, just like a gate
       // input. Each alias remains a separate load on their common producer.
-      const auto& values = pin_tracker.get_pin_vector(trk_id(drv));
+      const auto& values     = pin_tracker.get_pin_vector(trk_id(drv));
       for (int32_t bit = 0; bit < std::max(bits, 1); ++bit) {
         std::string wire{kZeroNet};
-        if (!is_resolved_const(drv)) {
-          if (bits <= 1) {
+        auto        source_bit = bit;
+        if (driver_bits > 0 && bit >= driver_bits) {
+          source_bit = livehd::graph_util::is_unsign(drv) ? -1 : driver_bits - 1;
+        }
+        if (!is_resolved_const(drv) && source_bit >= 0) {
+          if (driver_bits == 1) {
             wire = get_driver_net_name(drv);
-          } else if (static_cast<size_t>(bit) < values.size() && values[bit].pos >= 0) {
-            wire = values[bit].pos == 0 ? values[bit].id() : std::format("{}.{}", values[bit].id(), values[bit].pos);
+          } else if (static_cast<size_t>(source_bit) < values.size() && values[source_bit].pos >= 0) {
+            wire = values[source_bit].pos == 0 ? values[source_bit].id()
+                                               : std::format("{}.{}", values[source_bit].id(), values[source_bit].pos);
           } else if (values.empty()) {
             const auto base = get_driver_net_name(drv);
-            wire            = bit == 0 ? base : std::format("{}.{}", base, bit);
+            wire            = source_bit == 0 ? base : std::format("{}.{}", base, source_bit);
           }
         }
         const auto output_pin = bit == 0 ? pname : std::format("{}.{}", pname, bit);

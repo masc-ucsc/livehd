@@ -30,6 +30,7 @@ exports_files([
 cc_binary(
     name = "rudy_metrics",
     srcs = ["rudy_metrics.cpp"],
+    visibility = ["//visibility:public"],
     deps = ["@dreamplace//dreamplace/native:placer", "@dreamplace//thirdparty/flute", "@bazel_tools//tools/cpp/runfiles"],
 )
 
@@ -119,6 +120,7 @@ cc_binary(
     name = "placement_metrics",
     srcs = ["placement_metrics.cpp"],
     copts = COPTS,
+    visibility = ["//tools/uroute:__pkg__"],
     deps = ["//pass/place:prects_networks", "//inou/lefdef:inou_lefdef", "@rapidjson"],
 )
 
@@ -157,6 +159,16 @@ py_test(
 xcode_config(
     name = "command_line_tools",
     visibility = ["//visibility:public"],
+)
+
+cc_binary(
+    name = "macro_track_align",
+    srcs = ["macro_track_align.cpp"],
+    copts = COPTS,
+    deps = [
+        "//inou/lefdef:inou_lefdef",
+        "//pass/place",
+    ],
 )
 
 cc_binary(

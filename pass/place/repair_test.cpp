@@ -173,6 +173,66 @@ protected:
     }
   }
 };
+TEST_F(Buffer_repair, FinalLegalizationPreservesOptimizerProvenanceAndRefreshesGeometry) {
+  graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__inv_1", "sink", graph->get_input_pin("a")));
+  options.density = .5;
+  auto initial = place(*graph, flat, options);
+  // Exercise the report boundary without loading a learned model: inference
+  // and support selection are tested independently of final legalization.
+  for (bool learned : {false, true}) {
+    rapidjson::Document prior;
+    prior.Parse(initial.qor.c_str());
+    ASSERT_TRUE(prior.IsObject());
+    auto& allocator = prior.GetAllocator();
+    prior["route_model"].SetString(learned ? "uroute" : "rsmt", allocator);
+    prior["uroute_skipped"].SetString(learned ? "" : "insufficient-support", allocator);
+    prior["uroute_sample_ids"].SetArray();
+    if (learned) {
+      prior["uroute_sample_ids"].PushBack(rapidjson::Value("earlier-placement", allocator), allocator);
+    }
+    prior["incremental"]["enabled"].SetBool(true);
+    prior["incremental"]["hit"].SetBool(true);
+    prior["incremental"]["reused_blocks"].SetUint(1);
+    prior["incremental"]["changed_blocks"].SetUint(0);
+    prior["gp_converged"].SetBool(true);
+    prior["gp_overflow"].SetDouble(.125);
+    prior["initial_hpwl_um"].SetDouble(123);
+    prior["virtual_filler_count"].SetUint(7);
+    prior["virtual_filler_area_um2"].SetDouble(8);
+    prior["virtual_filler_size_x_um"].SetDouble(2);
+    prior["virtual_filler_size_y_um"].SetDouble(4);
+    prior["virtual_filler_count_limited"].SetBool(true);
+    prior["hpwl_um"].SetDouble(-1);
+    prior["rc_identity"].SetString("stale", allocator);
+    rapidjson::StringBuffer                    buffer;
+    rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+    prior.Accept(writer);
+    initial.qor                = buffer.GetString();
+    const auto          result = finalize_placement(initial, options, [](const Result&) { return Timing_feedback{}; });
+    rapidjson::Document final;
+    final.Parse(result.placed.qor.c_str());
+    ASSERT_TRUE(final.IsObject());
+    for (const auto* key : {"incremental",
+                            "gp_converged",
+                            "gp_overflow",
+                            "initial_hpwl_um",
+                            "virtual_filler_count",
+                            "virtual_filler_area_um2",
+                            "virtual_filler_size_x_um",
+                            "virtual_filler_size_y_um",
+                            "virtual_filler_count_limited",
+                            "route_model",
+                            "uroute_skipped",
+                            "uroute_sample_ids"}) {
+      EXPECT_EQ(final[key], prior[key]) << key;
+      EXPECT_EQ(final["before_final_legalization"][key], prior[key]) << key;
+    }
+    EXPECT_GE(final["hpwl_um"].GetDouble(), 0);
+    EXPECT_STRNE(final["rc_identity"].GetString(), "stale");
+    EXPECT_EQ(final["before_final_legalization"]["hpwl_um"].GetDouble(), -1);
+    check_legality(physical::read_lef(options.lefs), result.placed.floorplan);
+  }
+}
 TEST_F(Buffer_repair, LateTimingScheduleKeepsWarmupAndIncreasesFrequencyNearEnd) {
   auto root = gate("sky130_fd_sc_hd__buf_1", "root", graph->get_input_pin("a"));
   graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__inv_1", "sink", root));

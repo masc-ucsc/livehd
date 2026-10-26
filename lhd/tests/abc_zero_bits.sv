@@ -42,14 +42,14 @@ module zb_lanes (
   input  logic        clk,
   input  logic        we0,
   input  logic        we1,
-  input  logic [2:0]  waddr0,
-  input  logic [2:0]  waddr1,
+  input  logic [1:0]  waddr0,
+  input  logic [1:0]  waddr1,
   input  logic [5:0]  wdata0,
   input  logic [3:0]  wdata1,
-  input  logic [2:0]  raddr,
+  input  logic [1:0]  raddr,
   output logic [15:0] r
 );
-  logic [15:0] mem[8];
+  logic [15:0] mem[4];
   always_ff @(posedge clk) begin
     if (we0) mem[waddr0][6:1] <= wdata0;
     if (we1) mem[waddr1][14:11] <= wdata1;
@@ -74,14 +74,14 @@ endmodule
 module zb_shared (
   input  logic        clk,
   input  logic        we,
-  input  logic [2:0]  waddr0,
-  input  logic [2:0]  waddr1,
+  input  logic [1:0]  waddr0,
+  input  logic [1:0]  waddr1,
   input  logic [5:0]  wdata0,
   input  logic [5:0]  wdata1,
-  input  logic [2:0]  raddr,
+  input  logic [1:0]  raddr,
   output logic [15:0] r
 );
-  logic [15:0] mem[8];
+  logic [15:0] mem[4];
   always_ff @(posedge clk) begin
     if (we) begin
       mem[waddr0][6:1] <= wdata0;

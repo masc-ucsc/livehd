@@ -2,6 +2,7 @@
 #include "aegraph.hpp"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cstdint>
 #include <cstdio>
@@ -17,8 +18,8 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/inlined_vector.h"
 #include "aegraph_profile.hpp"
-#include "diag.hpp"
 #include "cprop_muxctx.hpp"
+#include "diag.hpp"
 #include "mask_eval.hpp"
 #include "node_util.hpp"
 #include "runtime/analyses.hpp"
@@ -190,9 +191,9 @@ Class_id Egraph::intern(Ntype_op op, const Enode_attrs& attrs, std::span<const O
   Eclass cls;
   cls.kind = Kind::node;
   classes_.push_back(cls);
-  node.cls                    = static_cast<Class_id>(classes_.size() - 1);
-  const auto id               = static_cast<Enode_id>(enodes_.size());
-  classes_[node.cls].first    = id;
+  node.cls                 = static_cast<Class_id>(classes_.size() - 1);
+  const auto id            = static_cast<Enode_id>(enodes_.size());
+  classes_[node.cls].first = id;
   if (raw != nullptr) {
     *raw = node.cls;
   }
@@ -214,18 +215,18 @@ size_t Egraph::bytes() const {
   // Bytes in use (sizes, not capacities: a reserve or a doubling that was never
   // touched is not resident). The tables only grow, so the value after the
   // build is the peak.
-  size_t n = classes_.size() * sizeof(Eclass) + enodes_.size() * sizeof(Enode) + pool_.size() * sizeof(Operand);
-  n += values_.size() * sizeof(Dlop) + table_.size() * sizeof(Enode_id) + attrs_.size() * sizeof(Enode_attrs);
-  n += consts_.size() * (sizeof(decltype(consts_)::value_type) + 1);
-  n += policies_.size() * sizeof(std::string) + policy_ids_.size() * (sizeof(decltype(policy_ids_)::value_type) + 1);
+  size_t n  = classes_.size() * sizeof(Eclass) + enodes_.size() * sizeof(Enode) + pool_.size() * sizeof(Operand);
+  n        += values_.size() * sizeof(Dlop) + table_.size() * sizeof(Enode_id) + attrs_.size() * sizeof(Enode_attrs);
+  n        += consts_.size() * (sizeof(decltype(consts_)::value_type) + 1);
+  n        += policies_.size() * sizeof(std::string) + policy_ids_.size() * (sizeof(decltype(policy_ids_)::value_type) + 1);
   return n;
 }
 
 size_t Egraph::capacity_bytes() const {
-  size_t n = classes_.capacity() * sizeof(Eclass) + enodes_.capacity() * sizeof(Enode) + pool_.capacity() * sizeof(Operand);
-  n += values_.capacity() * sizeof(Dlop) + table_.capacity() * sizeof(Enode_id) + attrs_.capacity() * sizeof(Enode_attrs);
-  n += consts_.capacity() * (sizeof(decltype(consts_)::value_type) + 1);
-  n += policies_.capacity() * sizeof(std::string) + policy_ids_.capacity() * (sizeof(decltype(policy_ids_)::value_type) + 1);
+  size_t n  = classes_.capacity() * sizeof(Eclass) + enodes_.capacity() * sizeof(Enode) + pool_.capacity() * sizeof(Operand);
+  n        += values_.capacity() * sizeof(Dlop) + table_.capacity() * sizeof(Enode_id) + attrs_.capacity() * sizeof(Enode_attrs);
+  n        += consts_.capacity() * (sizeof(decltype(consts_)::value_type) + 1);
+  n        += policies_.capacity() * sizeof(std::string) + policy_ids_.capacity() * (sizeof(decltype(policy_ids_)::value_type) + 1);
   return n;
 }
 
@@ -364,7 +365,7 @@ Fold fold_node(Ntype_op op, std::span<const Eval_operand> ops, const Egraph& eg)
         return none;
       }
     }
-    const size_t pairs   = ops.size() / 2;
+    const size_t pairs       = ops.size() / 2;
     const bool   default_arm = ops.size() % 2 == 1;
     if (pairs == 0) {
       return none;
@@ -689,22 +690,27 @@ namespace {
 // like a vector whose result carries '?' bits.
 class Checker {
 public:
-  Checker(const Egraph& eg, const std::vector<Class_id>* best) : eg_(eg), best_(best) {}
+  Checker(const Egraph& eg, const std::vector<Class_id>* best, bool memoize = false) : eg_(eg), best_(best), memoize_(memoize) {}
 
   // The cone below `roots`, ascending by class id (operands are always older than
   // their reader, so that is a topological order). false when it holds more than
   // `fuel` classes.
   bool gather(std::span<const Class_id> roots, size_t fuel) {
     cone_.clear();
-    absl::flat_hash_set<Class_id> seen;
-    std::vector<Class_id>         stack(roots.begin(), roots.end());
+    seen_.resize(eg_.num_classes());
+    if (++epoch_ == 0) {
+      std::ranges::fill(seen_, 0);
+      ++epoch_;
+    }
+    std::vector<Class_id> stack(roots.begin(), roots.end());
     while (!stack.empty()) {
       const auto c = stack.back();
       stack.pop_back();
-      if (!seen.insert(c).second) {
+      if (seen_[c] == epoch_) {
         continue;
       }
-      if (seen.size() > fuel) {
+      seen_[c] = epoch_;
+      if (cone_.size() == fuel) {
         return false;
       }
       cone_.push_back(c);
@@ -724,8 +730,30 @@ public:
   [[nodiscard]] size_t cone_size() const { return cone_.size(); }
 
   void evaluate(uint64_t vec) {
-    vals_.clear();
+    if (memoize_) {
+      I(vec >= 1 && vec <= cached_vals_.size() && best_ == nullptr);
+      if (vec != cached_vec_) {
+        if (cached_vec_ != 0) {
+          vals_.swap(cached_vals_[cached_vec_ - 1]);
+          ready_.swap(cached_ready_[cached_vec_ - 1]);
+        }
+        vals_.swap(cached_vals_[vec - 1]);
+        ready_.swap(cached_ready_[vec - 1]);
+        cached_vec_ = vec;
+      }
+    } else {
+      vals_.clear();
+      ready_.clear();
+    }
+    vals_.resize(eg_.num_classes());
+    ready_.resize(eg_.num_classes());
     for (const auto c : cone_) {
+      // E-node operands and union alt_a never change. Leaf seeds are attached
+      // before a class is exposed to rewrites; aliases are not followed here.
+      // Reuse values only for this fixed-member checker, never across extraction.
+      if (memoize_ && ready_[c]) {
+        continue;
+      }
       const auto& cls = eg_.cls(c);
       switch (cls.kind) {
         case Egraph::Kind::konst  : vals_[c] = *eg_.value_of(c); break;
@@ -736,20 +764,18 @@ public:
           vals_[c] = std::move(v);
           break;
         }
-        case Egraph::Kind::node   : {
+        case Egraph::Kind::node: {
           const auto& n = eg_.enode(cls.first);
           vals_[c]      = eval_node(n.op, eg_.operands(n));
           break;
         }
       }
+      ready_[c] = true;
     }
   }
 
   // The value of a gathered class under the last assignment (null: none).
-  [[nodiscard]] const Dlop* value(Class_id c) const {
-    const auto it = vals_.find(c);
-    return it == vals_.end() || !it->second ? nullptr : &*it->second;
-  }
+  [[nodiscard]] const Dlop* value(Class_id c) const { return c >= vals_.size() || !vals_[c] ? nullptr : &*vals_[c]; }
 
   // `op` applied to the (gathered) operand classes.
   [[nodiscard]] std::optional<Dlop> eval_node(Ntype_op op, std::span<const Operand> ops) const {
@@ -803,14 +829,14 @@ private:
   }
 
   [[nodiscard]] static Dlop leaf_value(const Egraph& eg, uint64_t vec, Class_id c) {
-    uint64_t h = vec * 0x9e3779b97f4a7c15ULL + c * 0xbf58476d1ce4e5b9ULL + 0x1234567ULL;
-    h ^= h >> 30;
-    h *= 0xbf58476d1ce4e5b9ULL;
-    h ^= h >> 27;
-    h *= 0x94d049bb133111ebULL;
-    h ^= h >> 31;
-    static constexpr int64_t kSpecial[] = {0, 1, -1, 2, 3, -2, 7, 8, 15, 16, 255, -256};
-    int64_t                  v          = 0;
+    uint64_t h                           = vec * 0x9e3779b97f4a7c15ULL + c * 0xbf58476d1ce4e5b9ULL + 0x1234567ULL;
+    h                                   ^= h >> 30;
+    h                                   *= 0xbf58476d1ce4e5b9ULL;
+    h                                   ^= h >> 27;
+    h                                   *= 0x94d049bb133111ebULL;
+    h                                   ^= h >> 31;
+    static constexpr int64_t kSpecial[]  = {0, 1, -1, 2, 3, -2, 7, 8, 15, 16, 255, -256};
+    int64_t                  v           = 0;
     switch (h & 3) {
       case 0 : v = kSpecial[(h >> 8) % std::size(kSpecial)]; break;
       case 1 : v = static_cast<int64_t>((h >> 8) % 64) - 32; break;
@@ -818,12 +844,19 @@ private:
       default: v = static_cast<int64_t>((h >> 8) & 1); break;  // a mix of booleans keeps the 0/1 rules honest
     }
     // A leaf with a declared width (a graph input, a register output) only takes values of that width.
-    int unsigned_bits = 0;  // an unsigned leaf is a NON-NEGATIVE number: a negative draw becomes its low `bits` bits
+    // A declared unsigned leaf must stay unsigned even above 63 bits. Mapping
+    // into a Wide interval and then narrowing back to int64_t turned its upper
+    // values negative. Widths above the interval analysis's range have their
+    // own seed and need the same normalization.
+    int unsigned_width = 0;
+    if (const auto it = eg.analysis_cache().wide_seeds.find(c); it != eg.analysis_cache().wide_seeds.end()) {
+      unsigned_width = static_cast<int>(it->second);
+    }
     if (const auto it = eg.analysis_cache().seeds.find(c); it != eg.analysis_cache().seeds.end()) {
       const rt::Wide lo = it->second.lo, hi = it->second.hi;
-      if (lo == 0 && v < 0) {
-        for (rt::Wide t = hi; t != 0; t >>= 1) {
-          ++unsigned_bits;
+      if (lo == 0) {
+        for (auto bound = hi; bound > 0; bound >>= 1) {
+          ++unsigned_width;
         }
       } else if (v < lo || v > hi) {
         const rt::Wide span = hi - lo + 1;
@@ -834,13 +867,10 @@ private:
         v = static_cast<int64_t>(lo + m);
       }
     }
-    if (const auto it = eg.analysis_cache().wide_seeds.find(c); it != eg.analysis_cache().wide_seeds.end() && v < 0) {
-      unsigned_bits = static_cast<int>(it->second);  // an unsigned leaf wider than the interval facts
-    }
     Dlop d;
     d = Dlop::create_integer(v);
-    if (unsigned_bits > 0 && v < 0) {
-      d = *d.get_mask_op(0, unsigned_bits);
+    if (unsigned_width > 0) {
+      return *d.get_mask_op_opt(0, unsigned_width);
     }
     return d;
   }
@@ -866,10 +896,17 @@ private:
     return true;
   }
 
-  const Egraph&                                          eg_;
-  const std::vector<Class_id>*                           best_;
-  std::vector<Class_id>                                  cone_;
-  absl::flat_hash_map<Class_id, std::optional<Dlop>>     vals_;
+  const Egraph&                                   eg_;
+  const std::vector<Class_id>*                    best_;
+  std::vector<Class_id>                           cone_;
+  std::vector<std::optional<Dlop>>                vals_;
+  std::vector<uint8_t>                            ready_;
+  std::vector<uint32_t>                           seen_;
+  uint32_t                                        epoch_      = 0;
+  bool                                            memoize_    = false;
+  uint64_t                                        cached_vec_ = 0;
+  std::array<std::vector<std::optional<Dlop>>, 8> cached_vals_;
+  std::array<std::vector<uint8_t>, 8>             cached_ready_;
 };
 
 // ---------------------------------------------------------------------------
@@ -896,8 +933,8 @@ public:
   Stats run();
 
   // ---- rt::Builder: what the rules may do ----
-  Class_id make(Ntype_op op, std::span<const Operand> ops) override;
-  Class_id konst(const Dlop& value) override { return eg_.add_const(value); }
+  Class_id           make(Ntype_op op, std::span<const Operand> ops) override;
+  Class_id           konst(const Dlop& value) override { return eg_.add_const(value); }
   [[nodiscard]] bool single_use(Class_id cls) const override { return cls < readers_.size() && readers_[cls] == 1; }
   [[nodiscard]] bool chain_inner(Class_id cls) const override { return cls < chain_inner_.size() && chain_inner_[cls] != 0; }
   [[nodiscard]] bool guard_scope() const override { return opt_.guard_scope && opt_.unstamped_ok && !opt_.preflight; }
@@ -910,101 +947,102 @@ private:
     How      how = How::created;
   };
   struct Member {
-    hhds::Node_class      node;
-    Class_id              cls;
-    How                   how;
-    Ntype_op              spec_op = Ntype_op::Invalid;  // check=full: the node as the graph had it,
-    std::vector<Operand>  spec_ops;                     // over the final operand classes
+    hhds::Node_class     node;
+    Class_id             cls;
+    How                  how;
+    Ntype_op             spec_op = Ntype_op::Invalid;  // check=full: the node as the graph had it,
+    std::vector<Operand> spec_ops;                     // over the final operand classes
   };
   enum class Replaced : uint8_t { done, dead, declined };
 
-  void             collect_nodes();
+  void collect_nodes();
   struct Component {
     std::vector<hhds::Node_class> nodes;
     bool                          cyclic = false;
   };
-  [[nodiscard]] std::vector<Component> components(const std::vector<hhds::Node_class>& subset) const;
-  [[nodiscard]] const Dlop*            known_value(const hhds::Pin_class& pin) const;
+  [[nodiscard]] std::vector<Component>              components(const std::vector<hhds::Node_class>& subset) const;
+  [[nodiscard]] const Dlop*                         known_value(const hhds::Pin_class& pin) const;
   // The declared physical width of a graph input or a register output: (bits, unsigned).
   [[nodiscard]] std::optional<std::pair<int, bool>> declared_bits(const hhds::Pin_class& pin);
   // The one data port a Mux with a known selector reads, if any.
-  [[nodiscard]] std::optional<hhds::Port_id> live_mux_port(const hhds::Node_class& mux) const;
-  void                                 build_all(const std::vector<hhds::Node_class>& producers_first);
-  void                                 resolve_false_cycles();
-  void                                 precount_twins(const std::vector<hhds::Node_class>& producers_first);
-  void                                 pin_latch_holds();
-  void                                 mark_dead(const std::vector<hhds::Node_class>& producers_first);
-  [[nodiscard]] size_t                 live_readers(const hhds::Node_class& node) const;
-  [[nodiscard]] bool is_pure_candidate(const hhds::Node_class& node) const;
-  Class_id         class_of(const hhds::Pin_class& pin);
-  void             ensure(Class_id cls);
-  std::optional<Built> build(const hhds::Node_class& node);
+  [[nodiscard]] std::optional<hhds::Port_id>        live_mux_port(const hhds::Node_class& mux) const;
+  void                                              build_all(const std::vector<hhds::Node_class>& producers_first);
+  void                                              resolve_false_cycles();
+  void                                              precount_twins(const std::vector<hhds::Node_class>& producers_first);
+  void                                              pin_latch_holds();
+  void                                              mark_dead(const std::vector<hhds::Node_class>& producers_first);
+  [[nodiscard]] size_t                              live_readers(const hhds::Node_class& node) const;
+  [[nodiscard]] bool                                is_pure_candidate(const hhds::Node_class& node) const;
+  Class_id                                          class_of(const hhds::Pin_class& pin);
+  void                                              ensure(Class_id cls);
+  std::optional<Built>                              build(const hhds::Node_class& node);
   // The rewrite rules of one new e-node (depth = rule-built nesting, 0 for an
   // original node). Returns the class that stands for the node afterwards.
-  Class_id         rewrite(Class_id cls, uint32_t depth);
-  void             check_pair(Class_id a, Class_id b, rt::Rule_id rule);
-  uint64_t         check_work_ = 0;  // class evaluations spent by check_pair on this graph (bounded: kCheckWorkBudget)
-  void             check_full();
-  void             compute_best();
+  Class_id                                          rewrite(Class_id cls, uint32_t depth);
+  void                                              check_pair(Class_id a, Class_id b, rt::Rule_id rule);
+  uint64_t               check_work_ = 0;  // class evaluations spent by check_pair on this graph (bounded: kCheckWorkBudget)
+  void                   check_full();
+  void                   compute_best();
   // The expression cost of a class's cheapest realization (compute_best), and the width its price is taken at.
-  uint32_t         class_cost(Class_id root);
+  uint32_t               class_cost(Class_id root);
   [[nodiscard]] uint32_t readers_under_selection(Class_id cls) const;
-  [[nodiscard]] int64_t price_width(Class_id cls) const;
-  hhds::Pin_class  realize(Class_id cls);
+  [[nodiscard]] int64_t  price_width(Class_id cls) const;
+  hhds::Pin_class        realize(Class_id cls);
   // preflight: the width stamp a new cell of `cls` gets (unsigned?, bits), from the range analysis.
   [[nodiscard]] std::optional<std::pair<bool, int>> stamp_for(Class_id cls) const;
   // preflight: true when every cell elaborate() would create can be stamped.
-  [[nodiscard]] bool preflight_ok();
-  [[nodiscard]] bool adopt(const Member& member, Class_id target);
-  void             create_node(Class_id cls);
-  void             rewire(const hhds::Node_class& node, Ntype_op op, std::span<const Operand> ops);
-  void             elaborate();
-  Replaced         replace(const Member& member, const hhds::Pin_class& target);
-  void             sweep_dead();
-  [[nodiscard]] std::string describe(Class_id cls) const;
+  [[nodiscard]] bool                                preflight_ok();
+  [[nodiscard]] bool                                adopt(const Member& member, Class_id target);
+  void                                              create_node(Class_id cls);
+  void                                              rewire(const hhds::Node_class& node, Ntype_op op, std::span<const Operand> ops);
+  void                                              elaborate();
+  Replaced                                          replace(const Member& member, const hhds::Pin_class& target);
+  void                                              sweep_dead();
+  [[nodiscard]] std::string                         describe(Class_id cls) const;
 
-  hhds::Graph&         g_;
-  const Cycle_cutter&  cut_cycles_;
-  Options              opt_;
-  std::string          name_;
-  Egraph               eg_;
-  Stats        stats_;
+  hhds::Graph&             g_;
+  const Cycle_cutter&      cut_cycles_;
+  Options                  opt_;
+  std::string              name_;
+  Egraph                   eg_;
+  std::unique_ptr<Checker> union_checker_;
+  Stats                    stats_;
 
-  std::vector<hhds::Node_class>                      nodes_;
-  std::vector<hhds::Node_class>                      cyclic_nodes_;  // members of the remaining cyclic components
-  absl::flat_hash_set<hhds::Class_index>             cyclic_;        // the same, by node
-  absl::flat_hash_map<hhds::Class_index, Class_id>   pin_class_;
-  std::vector<hhds::Pin_class>                       rep_pin_;  // class -> the pin that realizes it (invalid until known)
-  std::vector<Member>                                members_;
+  std::vector<hhds::Node_class>                    nodes_;
+  std::vector<hhds::Node_class>                    cyclic_nodes_;  // members of the remaining cyclic components
+  absl::flat_hash_set<hhds::Class_index>           cyclic_;        // the same, by node
+  absl::flat_hash_map<hhds::Class_index, Class_id> pin_class_;
+  std::vector<hhds::Pin_class>                     rep_pin_;  // class -> the pin that realizes it (invalid until known)
+  std::vector<Member>                              members_;
 
   // ---- rewrite rules ----
-  std::vector<uint8_t>   enabled_;       // per Rule_id
-  bool                   rules_active_ = false;
-  rt::Rule_id            current_rule_ = rt::kNoRule;  // the rule whose body is running
-  Enode_attrs            cur_attrs_;     // attrs the rule's new e-nodes inherit
-  uint32_t               depth_        = 0;
-  uint64_t               rewrites_     = 0;
-  bool                   cutoff_       = false;  // max_rewrites reached
-  uint64_t               work_used_    = 0;
-  uint64_t               work_budget_  = 0;
-  bool                   budget_hit_   = false;
-  std::vector<uint32_t>  readers_;       // per class: readers in the graph being built
-  std::vector<uint32_t>  rule_readers_;  // per class: the part of readers_ that are rule-built e-nodes (an alt may lose)
-  std::vector<uint32_t>  sel_readers_;   // compute_best: readers under the current selection (empty = readers_)
-  absl::flat_hash_set<hhds::Class_index>           dead_;          // mark_dead: pure nodes nothing live reads
-  absl::flat_hash_set<hhds::Class_index>           latch_holds_;   // pin_latch_holds: Mux nodes that are a latch's own hold mux
+  std::vector<uint8_t>  enabled_;  // per Rule_id
+  bool                  rules_active_ = false;
+  rt::Rule_id           current_rule_ = rt::kNoRule;  // the rule whose body is running
+  Enode_attrs           cur_attrs_;                   // attrs the rule's new e-nodes inherit
+  uint32_t              depth_       = 0;
+  uint64_t              rewrites_    = 0;
+  bool                  cutoff_      = false;  // max_rewrites reached
+  uint64_t              work_used_   = 0;
+  uint64_t              work_budget_ = 0;
+  bool                  budget_hit_  = false;
+  std::vector<uint32_t> readers_;       // per class: readers in the graph being built
+  std::vector<uint32_t> rule_readers_;  // per class: the part of readers_ that are rule-built e-nodes (an alt may lose)
+  std::vector<uint32_t> sel_readers_;   // compute_best: readers under the current selection (empty = readers_)
+  absl::flat_hash_set<hhds::Class_index>           dead_;         // mark_dead: pure nodes nothing live reads
+  absl::flat_hash_set<hhds::Class_index>           latch_holds_;  // pin_latch_holds: Mux nodes that are a latch's own hold mux
   // precount_twins: node -> readers of its whole twin group (0 for a later twin)
   absl::flat_hash_map<hhds::Class_index, uint32_t> twin_readers_;
-  std::vector<uint8_t>   chain_inner_;   // per class: its one reader is a same-op, same-attrs cell (absorbs it)
-  std::vector<Operand>   spec_ops_;      // check=full: the operands build() last saw (final classes)
-  std::vector<Class_id>  best_;          // per class: the non-union class that realizes it (once unions exist)
-  std::vector<uint32_t>  cost_;          // per class: the cost of its cheapest realization (compute_best, lazy)
-  const cost::Profile*   profile_ = nullptr;  // the extraction cost profile (opt_.cost)
+  std::vector<uint8_t>      chain_inner_;          // per class: its one reader is a same-op, same-attrs cell (absorbs it)
+  std::vector<Operand>      spec_ops_;             // check=full: the operands build() last saw (final classes)
+  std::vector<Class_id>     best_;                 // per class: the non-union class that realizes it (once unions exist)
+  std::vector<uint32_t>     cost_;                 // per class: the cost of its cheapest realization (compute_best, lazy)
+  const cost::Profile*      profile_   = nullptr;  // the extraction cost profile (opt_.cost)
   static constexpr uint32_t kCostUnset = UINT32_MAX;
   absl::flat_hash_map<std::string, std::pair<int, bool>> input_decls_;  // declared input widths (declared_bits)
-  Class_id               owner_cls_ = kNoClass;  // preflight: the class being realized for a member (its stamp is the member's)
-  hhds::Pin_class        owner_pin_;             // preflight: that member's output pin
-  bool                   has_best_     = false;
+  Class_id        owner_cls_ = kNoClass;  // preflight: the class being realized for a member (its stamp is the member's)
+  hhds::Pin_class owner_pin_;             // preflight: that member's output pin
+  bool            has_best_ = false;
 };
 
 void Engine::collect_nodes() {
@@ -1077,7 +1115,7 @@ std::optional<hhds::Port_id> Engine::live_mux_port(const hhds::Node_class& mux) 
 // data edges: a feedback ring closed through constant-selected routers is not
 // a cycle. Iterative: a design's cone can be deeper than any stack.
 std::vector<Engine::Component> Engine::components(const std::vector<hhds::Node_class>& subset) const {
-  const auto n = static_cast<uint32_t>(subset.size());
+  const auto                                       n = static_cast<uint32_t>(subset.size());
   absl::flat_hash_map<hhds::Class_index, uint32_t> index_of;
   index_of.reserve(n);
   const auto transparent = [](const hhds::Node_class& node) {
@@ -1086,8 +1124,8 @@ std::vector<Engine::Component> Engine::components(const std::vector<hhds::Node_c
   for (uint32_t i = 0; i < n; ++i) {
     index_of.emplace(subset[i].get_class_index(), i);
   }
-  std::vector<absl::InlinedVector<uint32_t, 4>> adj(n);
-  std::vector<bool>                             self(n, false);
+  std::vector<absl::InlinedVector<uint32_t, 4>>                        adj(n);
+  std::vector<bool>                                                    self(n, false);
   absl::flat_hash_map<hhds::Class_index, std::optional<hhds::Port_id>> live;
   for (uint32_t i = 0; i < n; ++i) {
     if (!transparent(subset[i])) {
@@ -1242,7 +1280,7 @@ Class_id Engine::class_of(const hhds::Pin_class& pin) {
     const auto& value = gu::const_of(pin);
     // A '?'-bearing constant is a literal: one const node, never merged by
     // value. Everything else interns by value.
-    cls = value.has_unknowns() ? eg_.add_literal(value) : eg_.add_const(value);
+    cls               = value.has_unknowns() ? eg_.add_literal(value) : eg_.add_const(value);
   } else {
     cls = eg_.add_leaf();
     if (!gu::is_graph_input_pin(pin) && !pin.get_master_node().is_invalid()
@@ -1385,8 +1423,8 @@ std::optional<Engine::Built> Engine::build(const hhds::Node_class& node) {
   }
 
   Enode_attrs attrs;
-  attrs.has_color = gu::has_color(node);
-  attrs.color     = attrs.has_color ? gu::color_of(node) : 0;
+  attrs.has_color  = gu::has_color(node);
+  attrs.color      = attrs.has_color ? gu::color_of(node) : 0;
   attrs.has_proven = gu::has_proven(node);
   attrs.proven     = attrs.has_proven ? gu::proven_of(node) : 0;
   if (const auto policy = node.attr(livehd::attrs::synth_policy); policy.has()) {
@@ -1485,8 +1523,8 @@ std::string Engine::describe(Class_id cls) const {
       }
       s += "(";
       for (size_t i = 0; i < n.n_operands; ++i) {
-        const auto& o = eg_.operands(n)[i];
-        s += std::format("{}{}:c{}", i == 0 ? "" : ",", o.bank, o.cls);
+        const auto& o  = eg_.operands(n)[i];
+        s             += std::format("{}{}:c{}", i == 0 ? "" : ",", o.bank, o.cls);
       }
       return s + ")";
     }
@@ -1516,11 +1554,11 @@ Class_id Engine::rewrite(Class_id cls, uint32_t depth) {
   if (depth == 0) {
     timer.emplace(livehd::aegraph_profile::rules);
   }
-  const auto saved_rule  = current_rule_;
-  const auto saved_attrs = cur_attrs_;
-  const auto saved_depth = depth_;
-  Class_id   current     = cls;
-  uint32_t   alts        = 0;
+  const auto     saved_rule  = current_rule_;
+  const auto     saved_attrs = cur_attrs_;
+  const auto     saved_depth = depth_;
+  Class_id       current     = cls;
+  uint32_t       alts        = 0;
   const rt::Root root{node.op, attrs, std::span<const Operand>(ops.data(), ops.size()), cls};
 
   for (const auto id : ids) {
@@ -1538,8 +1576,8 @@ Class_id Engine::rewrite(Class_id cls, uint32_t depth) {
       }
       break;
     }
-    work_used_ += ops.size() + 1;
-    auto& counters = stats_.rule_counts[id];
+    work_used_     += ops.size() + 1;
+    auto& counters  = stats_.rule_counts[id];
     ++counters.tried;
 
     rt::Results results;
@@ -1624,7 +1662,7 @@ Class_id Engine::rewrite(Class_id cls, uint32_t depth) {
   depth_        = saved_depth;
   if (current != cls) {
     ensure(current);
-    readers_[current] += readers_[cls];
+    readers_[current]      += readers_[cls];
     rule_readers_[current] += rule_readers_[cls];
     eg_.set_alias(cls, current);
   }
@@ -1643,7 +1681,10 @@ void Engine::check_pair(Class_id a, Class_id b, rt::Rule_id rule) {
     ++stats_.check_skipped;
     return;
   }
-  Checker        ck(eg_, nullptr);
+  if (!union_checker_) {
+    union_checker_ = std::make_unique<Checker>(eg_, nullptr, true);
+  }
+  auto&          ck       = *union_checker_;
   const Class_id roots[2] = {a, b};
   if (!ck.gather(roots, kConeFuel)) {
     ++stats_.check_skipped;
@@ -1660,17 +1701,18 @@ void Engine::check_pair(Class_id a, Class_id b, rt::Rule_id rule) {
     ++stats_.checks;
     if (!*same) {
       const auto& info = rt::Registry::instance().rule(rule);
-      throw std::logic_error(std::format("aegraph check: rule '{}' ({}:{}) is not value-preserving in graph '{}' on vector {}: "
-                                         "{} = {} but {} = {}",
-                                         info.name,
-                                         info.file,
-                                         info.line,
-                                         name_,
-                                         vec,
-                                         describe(a),
-                                         ck.value(a)->to_pyrope(),
-                                         describe(b),
-                                         ck.value(b)->to_pyrope()));
+      throw std::logic_error(
+          std::format("aegraph check: rule '{}' ({}:{}) is not value-preserving in graph '{}' on vector {}: "
+                      "{} = {} but {} = {}",
+                      info.name,
+                      info.file,
+                      info.line,
+                      name_,
+                      vec,
+                      describe(a),
+                      ck.value(a)->to_pyrope(),
+                      describe(b),
+                      ck.value(b)->to_pyrope()));
     }
   }
 }
@@ -1705,16 +1747,17 @@ void Engine::check_full() {
       if (!*same) {
         const auto* n    = eg_.cls(m.cls).kind == Egraph::Kind::node ? &eg_.enode(eg_.cls(m.cls).first) : nullptr;
         const char* rule = n != nullptr && n->rule != rt::kNoRule ? rt::Registry::instance().rule(n->rule).name : "(none)";
-        throw std::logic_error(std::format("aegraph check=full: graph '{}' node {} ({}) is {} but its class {} is {} on vector {} "
-                                           "(creating rule {})",
-                                           name_,
-                                           gu::debug_name(m.node),
-                                           Ntype::get_name(m.spec_op),
-                                           spec->to_pyrope(),
-                                           describe(m.cls),
-                                           ck.value(m.cls)->to_pyrope(),
-                                           vec,
-                                           rule));
+        throw std::logic_error(
+            std::format("aegraph check=full: graph '{}' node {} ({}) is {} but its class {} is {} on vector {} "
+                        "(creating rule {})",
+                        name_,
+                        gu::debug_name(m.node),
+                        Ntype::get_name(m.spec_op),
+                        spec->to_pyrope(),
+                        describe(m.cls),
+                        ck.value(m.cls)->to_pyrope(),
+                        vec,
+                        rule));
       }
     }
   }
@@ -1755,8 +1798,8 @@ int64_t Engine::price_width(Class_id cls) const {
 }
 
 uint32_t Engine::class_cost(Class_id root) {
-  const uint64_t fuel = std::max<uint32_t>(1, opt_.extractor_fuel);
-  const auto     cap  = static_cast<uint32_t>(std::min<uint64_t>(fuel * 1024U, kCostUnset - 1));
+  const uint64_t        fuel = std::max<uint32_t>(1, opt_.extractor_fuel);
+  const auto            cap  = static_cast<uint32_t>(std::min<uint64_t>(fuel * 1024U, kCostUnset - 1));
   std::vector<Class_id> stack{root};
   while (!stack.empty()) {
     const Class_id c = stack.back();
@@ -1800,7 +1843,7 @@ uint32_t Engine::class_cost(Class_id root) {
       continue;
     }
     absl::InlinedVector<cost::Operand, 8> ops;
-    uint64_t                               sum = 0;
+    uint64_t                              sum = 0;
     for (const auto& o : eg_.operands(n)) {
       cost::Operand operand;
       operand.bank  = o.bank;
@@ -1814,8 +1857,8 @@ uint32_t Engine::class_cost(Class_id root) {
         sum += cost_[o.cls];
       }
     }
-    sum += static_cast<uint64_t>(cost::price(*profile_, n.op, price_width(c), ops));
-    cost_[c] = static_cast<uint32_t>(std::min<uint64_t>(sum, cap));
+    sum      += static_cast<uint64_t>(cost::price(*profile_, n.op, price_width(c), ops));
+    cost_[c]  = static_cast<uint32_t>(std::min<uint64_t>(sum, cap));
     stack.pop_back();
   }
   return cost_[root];
@@ -1985,8 +2028,10 @@ void Engine::rewire(const hhds::Node_class& node, Ntype_op op, std::span<const O
       if (pin.is_const()) {
         return std::tuple<uint32_t, bool, uint64_t, uint32_t>{x.bank, true, 0, 0};
       }
-      return std::tuple<uint32_t, bool, uint64_t, uint32_t>{
-          x.bank, false, static_cast<uint64_t>(pin.get_master_node().get_debug_nid()), static_cast<uint32_t>(pin.get_port_id())};
+      return std::tuple<uint32_t, bool, uint64_t, uint32_t>{x.bank,
+                                                            false,
+                                                            static_cast<uint64_t>(pin.get_master_node().get_debug_nid()),
+                                                            static_cast<uint32_t>(pin.get_port_id())};
     };
     // Classic flattens a nested And/Or by putting the outer operand in front of the inner chain (so a chain reads
     // newest first) and a nested Xor/Sum/Mult the other way round (oldest first); match both.
@@ -2131,7 +2176,7 @@ std::optional<std::pair<bool, int>> Engine::stamp_for(Class_id cls) const {
 // Walk what elaborate() is about to realize and check every cell it would create can carry a stamp: a member's
 // own top class takes the member's stamp (if the member has one), every other new cell needs a bounded range.
 bool Engine::preflight_ok() {
-  absl::flat_hash_set<Class_id> seen;
+  absl::flat_hash_set<Class_id>                   seen;
   std::vector<std::pair<Class_id, const Member*>> stack;  // (class, the member it is the top of; null = interior)
   for (const auto& member : members_) {
     Class_id kept = member.cls;
@@ -2185,8 +2230,8 @@ bool Engine::adopt(const Member& member, Class_id target) {
       return false;
     }
   }
-  const Enode  n = eg_.enode(k.first);  // realize() may not grow the e-graph, but copy anyway
-  const auto   ops = eg_.operands(n);
+  const Enode n   = eg_.enode(k.first);  // realize() may not grow the e-graph, but copy anyway
+  const auto  ops = eg_.operands(n);
   rewire(member.node, n.op, ops);
   rep_pin_[target] = member.node.get_driver_pin(0);
   ++stats_.rule_counts[n.rule].extracted;
@@ -2202,7 +2247,7 @@ Engine::Replaced Engine::replace(const Member& member, const hhds::Pin_class& ta
     return Replaced::dead;  // the sweep deletes it
   }
 
-  const auto out_view = node.out_edges();
+  const auto   out_view = node.out_edges();
   gu::Edge_vec outs(out_view.begin(), out_view.end());
 
   if (!target.is_const()) {
@@ -2444,12 +2489,12 @@ void Engine::pin_latch_holds() {
 void Engine::precount_twins(const std::vector<hhds::Node_class>& producers_first) {
   // The key is a 64-bit mix of (op, attrs, sorted (bank, operand group)): two distinct nodes sharing a key would only
   // make a reader total too high for one of them, which blocks a flatten and never allows a wrong one.
-  absl::flat_hash_map<hhds::Class_index, uint64_t>       group_of_pin;  // driver pin -> group (pure nodes only)
-  absl::flat_hash_map<uint64_t, uint32_t>                groups;        // key -> group id
-  std::vector<hhds::Class_index>                         first;         // per group: the first node (it carries the total)
-  std::vector<uint32_t>                                  total;         // per group: readers of all its nodes
-  std::vector<std::pair<hhds::Class_index, uint32_t>>    node_group;
-  absl::InlinedVector<std::pair<uint64_t, uint64_t>, 8>  ops;
+  absl::flat_hash_map<hhds::Class_index, uint64_t>      group_of_pin;  // driver pin -> group (pure nodes only)
+  absl::flat_hash_map<uint64_t, uint32_t>               groups;        // key -> group id
+  std::vector<hhds::Class_index>                        first;         // per group: the first node (it carries the total)
+  std::vector<uint32_t>                                 total;         // per group: readers of all its nodes
+  std::vector<std::pair<hhds::Class_index, uint32_t>>   node_group;
+  absl::InlinedVector<std::pair<uint64_t, uint64_t>, 8> ops;
   for (const auto& node : producers_first) {
     if (node.is_invalid() || gu::is_builtin_node(node) || !is_pure_candidate(node) || !node.has_out_edges()
         || dead_.contains(node.get_class_index())) {
@@ -2631,11 +2676,11 @@ Stats Engine::run() {
   precount_twins(producers_first);
   build_all(producers_first);
   resolve_false_cycles();
-  stats_.opaque = cyclic_nodes_.size();
-  stats_.skeleton += cyclic_nodes_.size();
-  stats_.classes   = eg_.num_classes();
-  stats_.aeg_bytes     = eg_.bytes();
-  stats_.aeg_cap_bytes = eg_.capacity_bytes();
+  stats_.opaque         = cyclic_nodes_.size();
+  stats_.skeleton      += cyclic_nodes_.size();
+  stats_.classes        = eg_.num_classes();
+  stats_.aeg_bytes      = eg_.bytes();
+  stats_.aeg_cap_bytes  = eg_.capacity_bytes();
 
   // Extract: a class without unions is its first member (the original node), a
   // constant class its constant, a forward the operand class; a union keeps its
@@ -2684,7 +2729,7 @@ Options make_options(std::string_view rules_disable, std::string_view rules_only
     if (text.empty()) {
       return keep;
     }
-    uint64_t v   = 0;
+    uint64_t   v = 0;
     const auto r = std::from_chars(text.data(), text.data() + text.size(), v);
     if (r.ec != std::errc{} || r.ptr != text.data() + text.size() || v < lo || v > hi) {
       bad(label, text, std::format("an integer in [{}..{}]", lo, hi));

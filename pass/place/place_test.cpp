@@ -16,6 +16,7 @@
 
 #include "attrs.hpp"
 #include "gtest/gtest.h"
+#include "macro_tracks.hpp"
 #include "memory_proxy.hpp"
 #include "node_util.hpp"
 #include "pass/liberty/liberty_dff.hpp"
@@ -455,16 +456,16 @@ TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegaliza
            std::tuple{false,  true, false,  true, false},
            std::tuple{false,  true, false,  true,  true}
   }) {
-    auto options       = plain_options();
-    options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", lef_path};
-    options.output_dir = (root
-                          / (fp            ? "fp_macro_only_terminal"
-                             : terminal    ? "macro_only_terminal"
-                             : !legalize   ? "macro_only"
-                             : detail      ? "enabled"
-                             : independent ? "independent"
-                                           : "disabled"))
-                             .string();
+    auto options                  = plain_options();
+    options.lefs                  = {"inou/lefdef/tests/data/sky130hd.tlef", lef_path};
+    options.output_dir            = (root
+                                     / (fp            ? "fp_macro_only_terminal"
+                                        : terminal    ? "macro_only_terminal"
+                                        : !legalize   ? "macro_only"
+                                        : detail      ? "enabled"
+                                        : independent ? "independent"
+                                                      : "disabled"))
+                                        .string();
     options.core                  = {0, 0, 30, 30};
     options.density               = .5;
     options.macro_filler_fraction = .125;
@@ -1388,8 +1389,8 @@ TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
   const auto         constrained = place(*graph, with_floorplan, imported);
   const auto&        original    = fixed.components.front();
   const auto         found       = std::find_if(constrained.floorplan.components.begin(),
-                                  constrained.floorplan.components.end(),
-                                  [&](const auto& c) { return c.name == original.name; });
+                                                constrained.floorplan.components.end(),
+                                                [&](const auto& c) { return c.name == original.name; });
   ASSERT_NE(found, constrained.floorplan.components.end());
   EXPECT_EQ(found->place, original.place);
   EXPECT_EQ(constrained.floorplan.terminals, fixed.terminals);
@@ -1583,12 +1584,12 @@ TEST(Placement, ConstantDriversUseLibertyPolarityAndPhysicalCandidates) {
   const auto         graph   = both_constants(source);
   const auto         options = tie_options("separate",
                                            {
-                                       {"disabled", {{"p", true}}, 0.46, true, true},
-                                       {"absent_lef", {{"p", true}}, 0.46, false},
-                                       {"absent_geometry", {{"p", true}}, 0.46, true, false, false},
-                                       {"z_high", {{"p", true}}},
-                                       {"a_high", {{"upper", true}}},
-                                       {"low_driver", {{"lower", false}}},
+                                               {"disabled", {{"p", true}}, 0.46, true, true},
+                                               {"absent_lef", {{"p", true}}, 0.46, false},
+                                               {"absent_geometry", {{"p", true}}, 0.46, true, false, false},
+                                               {"z_high", {{"p", true}}},
+                                               {"a_high", {{"upper", true}}},
+                                               {"low_driver", {{"lower", false}}},
   });
   const auto         placed  = place(*graph, flat, options);
   for (const auto& c : placed.floorplan.components) {
@@ -1668,8 +1669,8 @@ TEST(Placement, PreserveImportedSharedTieMastersAndGraphPhysicalEndpoints) {
   const auto         graph       = shared_imported_ties(source);
   auto               options     = tie_options("preserve_imported",
                                                {
-                                 {"TIEHI",  {{"H", true}}},
-                                 {"TIELO", {{"L", false}}}
+                                                   {"TIEHI",  {{"H", true}}},
+                                                   {"TIELO", {{"L", false}}}
   });
   options.preserve_imported_ties = true;
   options.cache_dir              = options.output_dir + "/cache";
@@ -1788,7 +1789,7 @@ TEST(Placement, PreserveSharedTieDoesNotLocalizeItsOtherSingleLoadOutput) {
   graph->get_output_pin("low").connect_driver(low);
   auto options                   = tie_options("preserve_dual",
                                                {
-                                 {"DUAL_TIE", {{"H", true}, {"L", false}}}
+                                                   {"DUAL_TIE", {{"H", true}, {"L", false}}}
   });
   options.preserve_imported_ties = true;
   options.snapshots              = true;
@@ -1807,8 +1808,8 @@ TEST(Placement, PreserveImportedTiesStillMaterializesLogicalConstantsPerLoad) {
   hhds::GraphLibrary source, flat;
   auto               options     = tie_options("preserve_logical",
                                                {
-                                 {"TIEHI",  {{"H", true}}},
-                                 {"TIELO", {{"L", false}}}
+                                                   {"TIEHI",  {{"H", true}}},
+                                                   {"TIELO", {{"L", false}}}
   });
   options.preserve_imported_ties = true;
   const auto placed              = place(*both_constants(source), flat, options);
@@ -1834,8 +1835,8 @@ TEST(Placement, RetainedOriginalNetlistRecreatesSavedTieCells) {
   const auto         graph   = both_constants(source);
   auto               options = tie_options("retain_ties",
                                            {
-                                 {"tie_lo", {{"lo", false}}},
-                                 {"tie_hi",  {{"hi", true}}}
+                                               {"tie_lo", {{"lo", false}}},
+                                               {"tie_hi",  {{"hi", true}}}
   });
   const auto         placed  = place(*graph, flat, options);
   options.previous           = std::make_shared<physical::Floorplan>(placed.floorplan);
@@ -1941,7 +1942,7 @@ TEST(Placement, DualConstantDriverDeclaresAndPreservesAllLibraryOutputs) {
   const auto         graph   = both_constants(source);
   const auto         options = tie_options("dual",
                                            {
-                                       {"supply_pair", {{"plus", true}, {"minus", false}}}
+                                               {"supply_pair", {{"plus", true}, {"minus", false}}}
   });
   const auto         placed  = place(*graph, flat, options);
   ASSERT_EQ(flat.find_io("supply_pair")->get_output_pin_decls().size(), 2);
@@ -1965,7 +1966,7 @@ TEST(Placement, MissingConstantModelNeverGuessesFromLefOrPinName) {
     const auto         graph   = both_constants(source);
     auto               options = tie_options("missing_" + std::to_string(empty_library),
                                              {
-                                   {"only_high", {{"not_a_conventional_pin", true}}}
+                                                 {"only_high", {{"not_a_conventional_pin", true}}}
     });
     if (empty_library) {
       options.liberty.clear();
@@ -1989,7 +1990,7 @@ TEST(Placement, ConstantDriverWithoutSymmetryXAvoidsFlippedRows) {
     const auto         graph   = tie_graph(source);
     const auto         options = tie_options("flipless_only",
                                              {
-                                         {"flipless_high", {{"p", true}}, 0.46, true, false, true, false}
+                                                 {"flipless_high", {{"p", true}}, 0.46, true, false, true, false}
     });
     const auto         placed  = place(*graph, flat, options);
     EXPECT_TRUE(all_n(placed.floorplan));
@@ -2001,8 +2002,8 @@ TEST(Placement, ConstantDriverWithoutSymmetryXAvoidsFlippedRows) {
   const auto         sym_graph   = tie_graph(sym_source);
   const auto         sym_options = tie_options("flipless_smaller",
                                                {
-                                           {"flipless_high", {{"p", true}}, 0.46, true, false, true, false},
-                                           {"flippable_high", {{"p", true}}},
+                                                   {"flipless_high", {{"p", true}}, 0.46, true, false, true, false},
+                                                   {"flippable_high", {{"p", true}}},
   });
   {  // A larger X-symmetric tie outranks a smaller non-flippable one; rows still alternate.
     const auto placed = place(*sym_graph, sym_flat, sym_options);
@@ -2023,7 +2024,7 @@ TEST(Placement, ConstantDriverWithoutSymmetryXAvoidsFlippedRows) {
     const auto         graph   = tie_graph(source);
     auto               options = tie_options("flipless_def",
                                              {
-                                   {"flipless_high", {{"p", true}}, 0.46, true, false, true, false}
+                                                 {"flipless_high", {{"p", true}}, 0.46, true, false, true, false}
     });
     options.floorplan          = def.string();
     try {
@@ -2037,7 +2038,7 @@ TEST(Placement, ConstantDriverWithoutSymmetryXAvoidsFlippedRows) {
      // now needs the non-flippable tie falls back to all-N, exactly as cold.
     auto options      = tie_options("flipless_cached",
                                     {
-                                   {"flipless_high", {{"p", true}}, 0.46, true, false, true, false}
+                                        {"flipless_high", {{"p", true}}, 0.46, true, false, true, false}
     });
     options.cache_dir = options.output_dir + "/cache";
     hhds::GraphLibrary first_source, first_flat;
@@ -3387,6 +3388,87 @@ TEST(Placement, HighFanoutRcFallbackRemainsATreeAndIsMarkedApproximate) {
   }
   EXPECT_TRUE(high_fanout);
 }
+TEST(Placement, MemoryProxyPinsReachImportedTracksWithoutWidening) {
+  physical::Technology tech;
+  tech.dbu                   = 1000;
+  tech.sites["core"]         = {0.054, 0.270, true};
+  tech.layers["V"].direction = "VERTICAL";
+  tech.layers["V"].width     = 0.018;
+  tech.layers["V"].pitch_x = tech.layers["V"].pitch_y = 0.036;
+  tech.layers["H"].direction                          = "HORIZONTAL";
+  tech.layers["H"].width                              = 0.018;
+  tech.layers["H"].pitch_x = tech.layers["H"].pitch_y = 0.036;
+  auto& macro                                         = tech.macros["memory"];
+  macro.klass                                         = "BLOCK";
+  macro.virtual_proxy                                 = true;
+  macro.width = macro.height = 3.361;
+  for (int i = 0; i < 4; ++i) {
+    const double center           = macro.width * (i + 1) / 5;
+    macro.pins[std::to_string(i)] = {"OUTPUT", "SIGNAL", {{"V", {center - .009, 0, center + .009, .018}}}};
+  }
+  macro.pins["left"]  = {"INPUT", "SIGNAL", {{"H", {0, .364, .018, .382}}}};
+  macro.pins["left2"] = {"INPUT", "SIGNAL", {{"H", {0, 1.364, .018, 1.382}}}};
+  macro.pins["left3"] = {"INPUT", "SIGNAL", {{"H", {0, 2.364, .018, 2.382}}}};
+  macro.pins["right"] = {"INPUT", "SIGNAL", {{"H", {3.343, .831, 3.361, .849}}}};
+  physical::Floorplan fp;
+  fp.dbu = tech.dbu;
+  fp.die = {0, 0, 10800, 8100};
+  for (int i = 0; i < 30; ++i) {
+    fp.rows.push_back({std::to_string(i), "core", 0, i * 270, 200, 54, physical::Orientation::N});
+  }
+  // Imported pitches intentionally differ from the LEF defaults.
+  fp.tracks = {
+      {"X", "V",    9, 270,   40},
+      {"Y", "H",  200,   5, 2000},
+      {"Y", "H", 1000,   5, 2000}
+  };
+  align_memory_proxy_pins(tech, fp);
+  Ann_place p(0, 0, 3361, 3361);
+  p.status = Ann_place::Status::PLACED;
+  std::vector<physical::Component> cells{
+      {"ram", "memory", p}
+  };
+  ASSERT_NO_THROW(legalize_macro_tracks(tech, fp, cells, 0, 0, true));
+  EXPECT_DOUBLE_EQ(macro.width, 3.361);
+  std::vector<double> data_centers;
+  for (const auto& [name, pin] : macro.pins) {
+    const auto& shape = pin.shapes.front();
+    const auto& r     = shape.rect;
+    EXPECT_NEAR(r.xh - r.xl, .018, 1e-12);
+    EXPECT_NEAR(r.yh - r.yl, .018, 1e-12);
+    EXPECT_GE(r.xl, 0);
+    EXPECT_GE(r.yl, 0);
+    EXPECT_LE(r.xh, macro.width);
+    EXPECT_LE(r.yh, macro.height);
+    const bool   x          = shape.layer == "V";
+    const auto   origin     = x ? cells.front().place.x : cells.front().place.y;
+    const double low        = origin + (x ? r.xl : r.yl) * tech.dbu;
+    const double high       = origin + (x ? r.xh : r.yh) * tech.dbu;
+    bool         accessible = false;
+    for (const auto& pattern : fp.tracks) {
+      if (pattern.layer != shape.layer || pattern.axis != (x ? "X" : "Y")) {
+        continue;
+      }
+      const auto index  = std::llround(((low + high) / 2 - pattern.start) / pattern.step);
+      const auto track  = pattern.start + index * pattern.step;
+      accessible       |= index >= 0 && index < pattern.count && track > low && track < high;
+    }
+    EXPECT_TRUE(accessible) << name;
+    if (x) {
+      data_centers.push_back((r.xl + r.xh) / 2 * tech.dbu);
+    }
+  }
+  std::sort(data_centers.begin(), data_centers.end());
+  for (size_t i = 1; i < data_centers.size(); ++i) {
+    EXPECT_GE(data_centers[i] - data_centers[i - 1], 40);
+  }
+  cells.front().place.status = Ann_place::Status::FIXED;
+  EXPECT_NO_THROW(legalize_macro_tracks(tech, fp, cells, 0, 0, false));
+  fp.tracks.front().step  = std::numeric_limits<int64_t>::max();
+  fp.tracks.front().start = 1;
+  EXPECT_THROW(align_memory_proxy_pins(tech, fp), std::runtime_error);
+}
+
 TEST(Placement, ThreePortMemorySquareGeometryAndClockBoundaryTiming) {
   hhds::GraphLibrary source;
   auto               io        = source.create_io("memory_top");
@@ -4247,8 +4329,8 @@ TEST(Placement, SharedCharacterizedTiesSplitEveryPhysicalBitAndPersist) {
   graph->get_output_pin("k").connect_driver(gu::create_const(*graph, *Dlop::from_pyrope("0ub11")));
   auto options      = tie_options("local_shared_bits",
                                   {
-                                 {"source_cell",   {{"power", true}}},
-                                 {"ground_cell", {{"ground", false}}}
+                                      {"source_cell",   {{"power", true}}},
+                                      {"ground_cell", {{"ground", false}}}
   });
   options.cache_dir = options.output_dir + "/cache";
   const auto first  = place(*graph, flat, options);
@@ -4653,7 +4735,7 @@ TEST(Placement, RemovingFirstConstantUserKeepsOtherTieIdentities) {
   auto               graph   = tie_graph(source);
   auto               options = tie_options("stable_removed_user",
                                            {
-                                 {"high_cell", {{"high", true}}}
+                                               {"high_cell", {{"high", true}}}
   });
   options.cache_dir          = options.output_dir + "/cache";
   const auto first           = place(*graph, flat, options);

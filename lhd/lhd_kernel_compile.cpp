@@ -1804,6 +1804,32 @@ void lower_lnasts(Options& opts, Result& res, Eprp_var& var, const std::string& 
 // no graphs, e.g. a pure-LNAST run).
 void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const std::string& lib_path, bool already_final) {
   check_known_set_passes(opts);
+  // Restored libraries can contain stale declarations from older readers.
+  // Reject ambiguous ports before optimization resolves any graph-IO pin name.
+  for (const auto& graph : var.graphs) {
+    const auto io = graph->get_io();
+    if (!io) {
+      continue;
+    }
+    absl::flat_hash_map<hhds::Port_id, std::string_view> owner;
+    const auto                                           check = [&](const auto& decls) {
+      for (const auto& decl : decls) {
+        const auto [it, fresh] = owner.try_emplace(decl.port_id, decl.name);
+        if (!fresh) {
+          throw Lhd_error{
+              "config",
+              std::format("'{}' declares ports '{}' and '{}' on the same port id {}: its GraphIO is out of sync with its body",
+                          graph->get_name(),
+                          it->second,
+                          decl.name,
+                          decl.port_id),
+              "re-create the lg: library from source into a fresh --emit-dir lg: directory"};
+        }
+      }
+    };
+    check(io->get_input_pin_decls());
+    check(io->get_output_pin_decls());
+  }
   const auto                       redo_begin = std::chrono::steady_clock::now();
   Eprp_var                         fresh;
   Eprp_var*                        active = &var;

@@ -3289,13 +3289,25 @@ struct Yosys2lg_Pass : public Yosys::Pass {
       auto gio = lib.find_io(mod_name);
       if (!gio) {
         gio = lib.create_io(mod_name);
-      } else if (design->selected_module(it.first) && gio->has_graph()) {
+      } else if (design->selected_module(it.first)) {
         // Re-elaboration into a saved lgdb: drop the stale loaded body BEFORE
         // reconciling IO decls below. A loaded body's IO pins are connected,
         // and delete_input/add_input (the port_id-reorder dance) forbids
         // deleting a connected pin. The second pass rebuilds the body fresh.
         // delete_graph keeps the GraphIO, its IO decls, and the stable gid.
-        lib.delete_graph(gio->get_gid());
+        if (gio->has_graph()) {
+          lib.delete_graph(gio->get_gid());
+        }
+        // Replace the interface too: renamed or removed ports must not survive
+        // next to the new declarations on the same positional port id.
+        while (!gio->get_input_pin_decls().empty()) {
+          const auto name = gio->get_input_pin_decls().back().name;
+          gio->delete_input(name);
+        }
+        while (!gio->get_output_pin_decls().empty()) {
+          const auto name = gio->get_output_pin_decls().back().name;
+          gio->delete_output(name);
+        }
       }
 
       for (const auto& port : mod->ports) {

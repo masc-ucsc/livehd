@@ -919,6 +919,7 @@ struct State_sweeper {
     auto src = info.node;
     auto dst = gu::create_typed_node(g, Ntype_op::Flop);
     gu::carry_node_attrs(src, dst);
+    // Cloning inputs creates pins/edges in the same body as src.
     for (const auto& sink : src.inp_pins_snapshot()) {
       const auto pid = sink.get_port_id();
       const auto sname = Ntype::get_sink_name(Ntype_op::Flop, pid);

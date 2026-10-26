@@ -27,7 +27,9 @@ def main():
                 lef.append(f"PIN {pin} DIRECTION {direction} ; USE {use} ; "
                            f"PORT LAYER M1 ; RECT {x-.1} 0.9 {x+.1} 1.1 ; END END {pin}")
             lef.append(f"END {name}")
-        lef.append("END LIBRARY")
+        lef.extend(["MACRO BLOCK CLASS BLOCK ; ORIGIN 0 0 ; SIZE 4 BY 4 ; END BLOCK",
+                    "MACRO FILL CLASS CORE SPACER ; ORIGIN 0 0 ; SIZE 1 BY 2 ; SITE core ; END FILL",
+                    "END LIBRARY"])
         (root / "tech.lef").write_text("\n".join(lef))
         (root / "model.lib").write_text('''library(test) {
           cell(BUF) { area: 4;
@@ -73,14 +75,62 @@ def main():
         command = [binary, "--lef", str(root / "tech.lef"), "--def", str(root / "placed.def"),
                    "--liberty", str(root / "model.lib"), "--controls", str(root / "controls.json"),
                    "--output", str(root / "metrics.json"), "--check-native",
-                   "--snapshot", str(root / "snapshot.txt")]
+                   "--snapshot", str(root / "snapshot.txt"), "--uroute-geometry", str(root / "geometry.json")]
         subprocess.run(command, check=True)
         result = json.loads((root / "metrics.json").read_text())
         for name, expected in [("all_hpwl_um", 150), ("clock_excluded_hpwl_um", 119),
                                ("data_hpwl_um", 78), ("native_data_hpwl_difference_um", 0)]:
             assert abs(result[name] - expected) < 1e-9, (name, result[name], expected)
         assert set(result["clock_nets"]) == {"c0", "c1"}
+        geometry = json.loads((root / "geometry.json").read_text())
+        assert geometry["core"] == [0, 0, 50000, 30000], geometry
+        assert {n["name"] for n in geometry["nets"] if n["enabled"]} == {"d0", "d1", "d2"}
+        assert geometry["nets"][0]["pins"] == [[0, 0], [10500, 1000]], geometry["nets"][0]
         assert set(result["reset_cut_nets"]) == {"r0", "r1"}
+        assert "displacement" not in result
+        # Compare legalization snapshots using origins, independently of net
+        # names and clock/reset HPWL cuts. Include a fixed macro and a filler.
+        after = "\n".join(definition).replace("COMPONENTS 4 ;", "COMPONENTS 6 ;").replace(
+            "END COMPONENTS", "- mem BLOCK + FIXED ( 44000 24000 ) N ;\n"
+            "- fill FILL + PLACED ( 1000 2000 ) N ;\nEND COMPONENTS")
+        before = after.replace("clkbuf BUF + PLACED ( 10000 0 ) N", "clkbuf BUF + FIXED ( 7000 -4000 ) N").replace(
+            "reg REG + PLACED ( 30000 0 ) N", "reg REG + PLACED ( 30000 0 ) S").replace(
+            "mem BLOCK + FIXED ( 44000 24000 ) N", "mem BLOCK + FIXED ( 45000 25000 ) N").replace(
+            "fill FILL + PLACED ( 1000 2000 ) N", "fill FILL + PLACED ( 0 0 ) N")
+        (root / "after.def").write_text(after)
+        (root / "before.def").write_text(before)
+        comparison = command.copy()
+        comparison[comparison.index("--def") + 1] = str(root / "after.def")
+        comparison += ["--reference-def", str(root / "before.def")]
+        subprocess.run(comparison, check=True)
+        movement = json.loads((root / "metrics.json").read_text())["displacement"]
+        expected = {"all_instances": (6, 3, 12., 2., 7., 2),
+                    "standard_cells": (4, 1, 7., 1.75, 7., 1),
+                    "macros": (1, 1, 2., 2., 2., 1),
+                    "physical_only": (1, 1, 3., 3., 3., 0)}
+        for category, values in expected.items():
+            observed = movement[category]
+            assert tuple(observed[k] for k in ("instances", "moved", "total_um", "mean_um", "maximum_um",
+                                               "fixed_instances_moved")) == values, observed
+        assert movement["all_instances"]["orientation_changes"] == 1
+        assert movement["all_instances"]["status_changes"] == 1
+        subprocess.run(command + ["--reference-def", str(root / "placed.def")], check=True)
+        identical = json.loads((root / "metrics.json").read_text())["displacement"]
+        assert identical["all_instances"]["moved"] == identical["all_instances"]["total_um"] == 0
+        assert identical["macros"]["instances"] == 0 and identical["macros"]["mean_um"] is None
+        assert identical["physical_only"]["maximum_um"] is None
+        for changed, message in [
+                (before.replace("DISTANCE MICRONS 1000", "DISTANCE MICRONS 2000"), "matching DEF design and units"),
+                (before.replace("DESIGN check", "DESIGN other"), "matching DEF design and units"),
+                (before.replace("- mem BLOCK", "- missing BLOCK"), "instance/master differs"),
+                (before.replace("- fill FILL", "- mem FILL"), "instance/master differs"),
+                (before.replace("clkbuf BUF", "clkbuf REG"), "instance/master differs"),
+                (before.replace("- fill FILL + PLACED ( 0 0 ) N ;", "").replace("COMPONENTS 6", "COMPONENTS 5"),
+                 "instance census differs"),
+                (before.replace("clkbuf BUF + FIXED ( 7000 -4000 ) N", "clkbuf BUF + UNPLACED"), "placed instances")]:
+            (root / "before.def").write_text(changed)
+            failed = subprocess.run(comparison, capture_output=True, text=True)
+            assert failed.returncode == 1 and message in failed.stderr, failed.stderr
         # DEF row order does not define the core bounds. In particular, a
         # reversed row list must produce the same physical routing domain.
         rows = [line for line in definition if line.startswith("ROW ")]

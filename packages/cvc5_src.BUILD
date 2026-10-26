@@ -1,11 +1,12 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 # Offline source build: dependency archives are pinned by cvc5_repo.bzl.
-load("@LIVEHD_INPUTS@", "cvc5_header", "cvc5_python")
+load("@LIVEHD_INPUTS@", "cvc5_header", "cvc5_platform_variables", "cvc5_python")
 load("@rules_cc//cc:defs.bzl", "cc_import", "cc_library")
 load("@rules_foreign_cc//foreign_cc:defs.bzl", "cmake")
 cvc5_header(name = "gmp_header", library = "@gmp//:gmp", basename = "gmp.h")
 cvc5_header(name = "gmpxx_header", library = "@gmp//:gmpxx", basename = "gmpxx.h")
 cvc5_python(name = "python_runtime")
+cvc5_platform_variables(name = "platform_variables")
 filegroup(name = "python_executable", srcs = [":python_runtime"], output_group = "interpreter")
 filegroup(name = "source", srcs = glob(["**"], exclude = ["BUILD.bazel", "livehd_sat_bridge.cpp", "satheaders/**"]))
 filegroup(name = "gmp_archive", srcs = ["@gmp//:gmp"], output_group = "archive")
@@ -14,7 +15,10 @@ cmake(
     name = "build",
     lib_source = ":source",
     generate_args = ["-GNinja"],
-    build_args = ["-j8"],
+    # Honor the standard CMake resource control for bounded cold builds. Keep
+    # the existing eight-job fallback when the caller does not specify one.
+    # Double-dollar escaping survives Bazel Make expansion into the shell.
+    build_args = ["--parallel", '"$${CMAKE_BUILD_PARALLEL_LEVEL:-8}"'],
     cache_entries = {
         "CMAKE_BUILD_TYPE": "Production",
         "CMAKE_POSITION_INDEPENDENT_CODE": "ON",
@@ -45,7 +49,13 @@ cmake(
         "Python_EXECUTABLE": "$$EXT_BUILD_ROOT$$/$(execpath :python_executable)",
         "CMAKE_INSTALL_LIBDIR": "lib",
     },
-    env = {"CCACHE_DISABLE": "1"},
+    # Clang also honors this in nested configure/make subprocesses whose
+    # build systems do not forward the parent's CMAKE_C/CXX_FLAGS.
+    env = select({
+        "@platforms//os:macos": {"CCACHE_DISABLE": "1", "MACOSX_DEPLOYMENT_TARGET": "$(CVC5_MACOS_MINIMUM_OS)"},
+        "//conditions:default": {"CCACHE_DISABLE": "1"},
+    }),
+    toolchains = [":platform_variables"],
     data = [":gmp_archive", ":gmpxx_archive", ":gmp_header", ":gmpxx_header", ":python_runtime", ":python_executable"],
     out_static_libs = ['libcvc5.a', 'libcadical.a', 'libpicpoly.a', 'libpicpolyxx.a', 'libkissat.a', 'libcryptominisat5.a'],
 )
@@ -58,7 +68,7 @@ filegroup(name = "libcryptominisat5.a", srcs = [":build"], output_group = "libcr
 filegroup(name = "installed_headers", srcs = [":build"], output_group = "include")
 cc_library(name = "sat_bridge", srcs = ["livehd_sat_bridge.cpp"], hdrs = glob(["satheaders/cadical/src/*.hpp", "satheaders/cms/src/*.h"]))
 filegroup(name = "sat_bridge_archive", srcs = [":sat_bridge"], output_group = "archive")
-genrule(name = "combined", srcs = [':sat_bridge_archive', ':libcvc5.a', ':libcadical.a', ':libpicpoly.a', ':libpicpolyxx.a', ':libkissat.a', ':libcryptominisat5.a'], outs = ["libcvc5_combined.a"],
+genrule(name = "combined", toolchains = [":platform_variables"], srcs = [':sat_bridge_archive', ':libcvc5.a', ':libcadical.a', ':libpicpoly.a', ':libpicpolyxx.a', ':libkissat.a', ':libcryptominisat5.a'], outs = ["libcvc5_combined.a"],
     cmd = """
 set -e
 work=$$(mktemp -d "$(@D)/cvc5-XXXXXX")
@@ -66,7 +76,7 @@ trap 'rm -rf "$$work"' EXIT
 if [ "$$(uname)" = "Darwin" ]; then
   # Mach-O C symbols include a leading underscore. The C++ wildcards below
   # match their mangled names, but bare C API patterns must name that prefix.
-  clang -nostdlib -Wl,-r -Wl,-all_load \
+  clang -nostdlib -mmacosx-version-min=$(CVC5_MACOS_MINIMUM_OS) -Wl,-r -Wl,-all_load \
     -Wl,-unexported_symbol,'*CaDiCaL*' \
     -Wl,-unexported_symbol,'*ccadical*' \
     -Wl,-unexported_symbol,'*Reap*' \
@@ -150,12 +160,13 @@ genrule(
     name = "sat_standalone_combined",
     srcs = [":sat_bridge_archive", ":libcadical.a", ":libcryptominisat5.a"],
     outs = ["liblivehd_sat.a"],
+    toolchains = [":platform_variables"],
     cmd = """
 set -e
 work=$$(mktemp -d "$(@D)/sat-XXXXXX")
 trap 'rm -rf "$$work"' EXIT
 if [ "$$(uname)" = "Darwin" ]; then
-  clang -nostdlib -Wl,-r -Wl,-all_load \
+  clang -nostdlib -mmacosx-version-min=$(CVC5_MACOS_MINIMUM_OS) -Wl,-r -Wl,-all_load \
     -Wl,-unexported_symbol,'*CaDiCaL*' \
     -Wl,-unexported_symbol,'*ccadical*' \
     -Wl,-unexported_symbol,'*Reap*' \

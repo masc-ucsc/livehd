@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 3g-partitions — One vocabulary and shared code for placement grids, regions and bins</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">3g-partitions</strong> One vocabulary and shared code for placement grids, regions and bins</h1>
+<p><span class="status">Plan drafted 2026-10-25, not implemented; names pending review against in-flight patches</span></p>
+
+<p><strong>Pending patches warning.</strong> Several placement patches are in flight that are
+<em>not</em> in the local tree (they live in other sessions/branches and have not been merged).
+They may add or rename partition-related options and types. Before starting step 1 below,
+re-survey <code>pass/place/place.hpp</code>, <code>pass/place/README.md</code> and the DREAMPlace
+sibling (<code>../DREAMPlace/dreamplace/native/placement.hpp</code>) and update the name tables
+in this page. The proposed names are a starting point, not a ruling. When the work lands,
+update <a href="../../docs/placer.html">docs/placer.html</a> so its option list, phase table
+and glossary use exactly these names and this three-role structure; the README option tables
+in <code>pass/place/README.md</code> follow the same vocabulary.</p>
+
+<h2>Why</h2>
+<p>Placement currently carries at least seven spatial partitions, each introduced by the
+algorithm that needed it, each with its own option names and its own idea of which cells are
+allowed to move:</p>
+<table>
+<thead><tr><th>Partition</th><th>Shape</th><th>Sized by</th><th>Used by</th><th>Options today</th></tr></thead>
+<tbody>
+<tr><td>Density grid</td><td>uniform <code>bins×bins</code> (64 default)</td><td><code>bins</code>, or <code>dynamic_bins</code>/<code>auto_bins</code></td><td>Poisson/FFT density force, virtual fillers, macro channel pressure reach</td><td><code>bins</code>, <code>dynamic_bins</code>, <code>bin_max</code>, <code>auto_bins</code></td></tr>
+<tr><td>Local density field</td><td>uniform 512×512</td><td><code>local_density_bins</code></td><td>local spreading (off by default)</td><td><code>local_density_*</code></td></tr>
+<tr><td>Routing (aux) grid</td><td>uniform, <code>= bins</code> unless <code>dynamic_bins</code></td><td><code>auxiliary_bins</code> (internal)</td><td>RUDY, RSMT, URoute (resampled through a fixed 256×256 model), macro channel pressure, terminal legalizer bins, SAT <code>route_grid</code></td><td>none directly; derived in <code>place.cpp</code></td></tr>
+<tr><td>Warp solve grid</td><td>uniform 16×16, 32-bin filter</td><td><code>*.warpspace.bins</code></td><td>FP/macro density-warp targets, terminal remainder warp</td><td><code>fp.warpspace.*</code>, <code>macro.warpspace.*</code>, <code>legalize.warpspace.*</code></td></tr>
+<tr><td>Busorder mesh</td><td>irregular, macro/IO-aligned, ≤10 000 movable cells per rectangle</td><td><code>busorder.max_cells</code>, <code>busorder.merge_um</code></td><td>busorder, boundarypins, pinalign (builds a throwaway <code>Busorder</code> only to read <code>rectangles()</code>, <code>place.cpp:5279</code>)</td><td><code>busorder.*</code>, <code>boundarypins.*</code>, <code>pinalign</code></td></tr>
+<tr><td>Terminal legalizer bins</td><td>uniform, = routing grid</td><td>inherited</td><td>mandatory final legalization: critical locks, capacity cap, remainder redistribution</td><td><code>legalize.max_density</code> etc.</td></tr>
+<tr><td>SAT legalize regions</td><td>uniform <code>W×H</code> µm anchored at die origin, or = routing grid</td><td><code>satlegalize.region_size</code> or <code>route_grid</code></td><td>opt-in track alignment and noncritical neighbor spill</td><td><code>satlegalize.region_size</code>, <code>route_grid</code>, <code>route_guidance</code>, <code>spill_*</code></td></tr>
+</tbody></table>
+<p>Only two of these share a definition (terminal bins and SAT <code>route_grid</code> both
+read the routing grid). Busorder's mesh is private to it even though two other features
+depend on it. Terminal and SAT both compute "usable capacity minus halos and taps, occupancy
+before/after, density" with separate code. And four places decide which cells are movable
+with four different rules. New detail-final features (density-triggered region IO pins,
+per-region critical-cell pre-legalization) would add a fifth of each unless the shared parts
+are extracted first.</p>
+
+<h2>Three roles, three names</h2>
+<p>Partitions are named by their <strong>role in the flow</strong>, not by the algorithm that
+first needed them. Each role has one option prefix and one C++ type.</p>
+<table>
+<thead><tr><th>Role</th><th>Name</th><th>Stage</th><th>Semantics</th><th>Option prefix</th><th>C++ type</th></tr></thead>
+<tbody>
+<tr><td>Continuous force fields</td><td><strong>grid</strong></td><td>global GP (FP, macro, final)</td><td>Uniform tiles over the core. No cell membership; cells deposit area/demand and read forces. Never gates movement.</td><td><code>synth.place.grid.*</code></td><td>native <code>Options::bins_x/bins_y/auxiliary_bins</code> (DREAMPlace); no new type</td></tr>
+<tr><td>Discrete refinement blocks</td><td><strong>region</strong></td><td>detail final: after final GP converges, before legalization</td><td>Irregular rectangles aligned to macro edges and IO bus spans, each holding at most <code>max_cells</code> movable cells. Explicit cell membership. Crossings, virtual pins and bus order live on region <em>edges</em>. Fixed for the whole detail-final phase.</td><td><code>synth.place.region.*</code></td><td><code>Region_mesh</code> (new, extracted from <code>Busorder</code>)</td></tr>
+<tr><td>Capacity cells</td><td><strong>bin</strong></td><td>legalization</td><td>Uniform tiles with usable capacity (macro halos, WELLTAP/SPACER footprints removed), before/after occupancy and a hard density cap. Explicit membership by apportioned area.</td><td><code>synth.place.legalize.bin.*</code></td><td><code>Capacity_bins</code> (new, extracted from <code>Terminal_legalize_bin</code>)</td></tr>
+</tbody></table>
+<p>Consequence: <code>satlegalize.region_size</code> is misnamed under this vocabulary. It
+defines <em>bins</em> (uniform, capacity-checked), not regions. URoute's 256×256 is a model
+constant resampled from and back to the routing grid; it is never a user option and never
+appears in the glossary as a partition.</p>
+
+<h2>Proposed option names (review against pending patches before applying)</h2>
+<table>
+<thead><tr><th>Role</th><th>New name</th><th>Default</th><th>Replaces</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td>grid</td><td><code>grid.density</code></td><td>64</td><td><code>bins</code></td><td>Square count per axis.</td></tr>
+<tr><td>grid</td><td><code>grid.density_mode</code></td><td><code>fixed</code></td><td><code>dynamic_bins</code>, <code>auto_bins</code></td><td><code>fixed | dynamic | macro</code>; <code>dynamic</code> keeps <code>grid.density_max</code> (= <code>bin_max</code>, 512).</td></tr>
+<tr><td>grid</td><td><code>grid.route</code></td><td><code>inherit</code></td><td>internal <code>auxiliary_bins</code></td><td><code>inherit</code> = the configured density count even when density mode is dynamic (today's rule). An explicit N makes the routing grid independent of the density grid. This is the <strong>one</strong> grid consumed by RUDY/RSMT/URoute, macro channel pressure, terminal bins and SAT route-grid bins.</td></tr>
+<tr><td>grid</td><td><code>grid.local</code></td><td>512</td><td><code>local_density_bins</code></td><td>Other <code>local_density_*</code> keep their names; only the grid count moves.</td></tr>
+<tr><td>grid</td><td><code>&lt;stage&gt;.warpspace.bins</code></td><td>16</td><td>unchanged</td><td>Already stage-scoped; leave as is.</td></tr>
+<tr><td>region</td><td><code>region.max_cells</code></td><td>10000</td><td><code>busorder.max_cells</code></td><td>Cap per rectangle; split along the longest side until met, then merge neighbors back under the cap.</td></tr>
+<tr><td>region</td><td><code>region.merge_um</code></td><td>5</td><td><code>busorder.merge_um</code></td><td>Cut lines from macro edges and IO bus spans closer than this merge.</td></tr>
+<tr><td>region</td><td><code>region.busorder</code>, <code>region.boundarypins</code>, <code>region.pinalign</code></td><td>false</td><td><code>busorder</code>, <code>boundarypins</code>, <code>pinalign</code></td><td>Consumers of the mesh. Sub-options (<code>busorder.iterations</code>, <code>boundarypins.split</code>, …) move under the same prefix unchanged.</td></tr>
+<tr><td>bin</td><td><code>legalize.bin.grid</code></td><td><code>route</code></td><td>inherited routing grid</td><td><code>route</code> or an explicit N; terminal legalizer and SAT route-grid mode both read it.</td></tr>
+<tr><td>bin</td><td><code>legalize.bin.max_density</code></td><td>0.8</td><td><code>legalize.max_density</code></td><td>Hard cap; must exceed GP target.</td></tr>
+<tr><td>bin</td><td><code>satlegalize.bin.size_um</code></td><td>empty</td><td><code>satlegalize.region_size</code></td><td>Mutually exclusive with <code>satlegalize.bin.grid=route</code> (= today's <code>route_grid=true</code>).</td></tr>
+</tbody></table>
+<p>Old names stay accepted as deprecated aliases for one release with a warning in the
+resolved-options JSON. Diagnostic JSON keys change in the same patch as the option they
+mirror, never separately.</p>
+
+<h2>Shared types</h2>
+<h3><code>Region_mesh</code> (<code>pass/place/region_mesh.{hpp,cpp}</code>)</h3>
+<pre><code>struct Region_mesh {
+  std::vector&lt;Busorder_rect&gt;   rects;    // renamed Region_rect; xl,yl,xh,yh, cells
+  std::vector&lt;Busorder_edge&gt;   edges;    // renamed Region_edge; split at every endpoint incl. T junctions
+  std::vector&lt;std::vector&lt;int&gt;&gt; members; // movable cell indices per rect
+  unsigned initial_rectangles, removed_h, removed_v; double build_seconds;
+  static Region_mesh build(const dp::Design&amp;, std::span&lt;const int&gt; macros,
+                           std::span&lt;const Busorder_io&gt; ios, const Region_options&amp;, double dbu);
+  std::optional&lt;int&gt; rect_of(double x, double y) const;
+};</code></pre>
+<p>Built once per detail-final phase in <code>place.cpp</code>, passed by const reference to
+<code>Busorder</code>, <code>Boundary_pins</code> and <code>align_boundary_pins</code>. The
+mesh construction code is today's <code>Busorder::Busorder</code> lines 150–262 moved verbatim.
+The <code>busorder/report.json</code> mesh block becomes <code>region_mesh.json</code> written
+by the mesh itself, so every consumer's report references the same file.</p>
+
+<h3><code>Capacity_bins</code> (<code>pass/place/capacity_bins.{hpp,cpp}</code>)</h3>
+<pre><code>struct Capacity_bin { physical::Rect bounds; double capacity, before, after; };
+struct Capacity_bins {
+  unsigned nx, ny; std::vector&lt;Capacity_bin&gt; bins;
+  static Capacity_bins build(const physical::Technology&amp;, const physical::Floorplan&amp;,
+                             unsigned nx, unsigned ny, int64_t halo_x, int64_t halo_y);
+  // usable capacity = row sites inside the bin − macro/halo-covered sites − fixed WELLTAP/SPACER
+  void deposit(const Ann_place&amp;, double area, bool after); // apportioned across overlapped bins
+  double density(size_t i, bool after) const;
+  std::vector&lt;size_t&gt; neighbors(size_t i) const;
+};</code></pre>
+<p>Terminal legalization keeps its report format; it fills <code>Terminal_legalize_report::bins</code>
+from <code>Capacity_bins</code>. SAT legalize's fixed-region path (<code>satlegalize.cpp</code> ≈ lines
+805–900 and the spill acceptance checks) replaces its private capacity/density computation with
+the same type, so "receiving bin may not exceed usable capacity or the donor's previous density"
+is evaluated by one function in both legalizers.</p>
+
+<h3><code>Cell_criticality</code> (<code>pass/place/cell_criticality.{hpp,cpp}</code>)</h3>
+<pre><code>struct Cell_criticality {
+  std::vector&lt;double&gt; slack_ps;        // min data-pin slack, NaN when untimed
+  std::vector&lt;bool&gt;   clock_connected; // clock/reset/supply endpoint
+  std::vector&lt;bool&gt;   protected_cell;  // never spilled/redistributed: critical lock, alignment endpoint, …
+  std::vector&lt;double&gt; mobility;        // 0..1, today's timing_spread_weight response
+  static Cell_criticality from(const timing::Feedback&amp;, const dp::Design&amp;, const Criticality_options&amp;);
+};</code></pre>
+<p>Computed once at the final-GP timing refresh and passed to every region and bin consumer.
+Today the same question is answered four ways: GP <code>timing_spread_weight</code> (mobility),
+busorder's timing-reduced <code>max_displacement_um</code>, SAT <code>spill_slack_margin_ps</code>
++ clock-connected exclusion + "no reliable positive slack", terminal <code>critical_fraction</code>
+top-10% selection. These are not identical (SAT requires <em>strictly</em> positive slack; terminal
+takes a fraction regardless of sign), so unifying them is the only step in this plan with QoR risk
+and needs the ruling below.</p>
+
+<h2>Rulings needed</h2>
+<ol>
+<li><strong>R1 names.</strong> Accept the three role names grid/region/bin and the option table
+above, or amend after the pending-patch re-survey.</li>
+<li><strong>R2 criticality definition.</strong> One rule for "movable by region/bin refinement":
+proposal — <em>not clock-connected, not protected, slack ≥ margin</em> with a per-consumer margin
+(terminal keeps its fraction as a <em>selection</em> of what to protect, not as a movability rule).
+Alternative: keep per-consumer rules but compute inputs from one <code>Cell_criticality</code>.</li>
+<li><strong>R3 region mesh ownership.</strong> Build the mesh unconditionally in detail-final when any
+consumer is enabled (today), or always when fixed macros exist so reports include it. Proposal:
+only when a consumer is enabled; building is cheap but the report noise is not free.</li>
+<li><strong>R4 route grid independence.</strong> Allow <code>grid.route=N</code> ≠ density count without
+<code>dynamic</code> mode. Today they can only differ through <code>dynamic_bins</code>. Proposal: allow it;
+it is already what <code>auxiliary_bins</code> encodes natively.</li>
+</ol>
+
+<h2>Subtasks</h2>
+<ol>
+<li><strong>Re-survey after pending patches merge.</strong> Diff <code>place.hpp</code>, README option
+tables and native <code>Options</code> against the tables on this page; amend names. No code.</li>
+<li><strong>Extract <code>Region_mesh</code>.</strong> Move mesh construction out of <code>Busorder</code>;
+<code>Busorder</code>, <code>Boundary_pins</code>, <code>align_boundary_pins</code> take <code>const Region_mesh&amp;</code>.
+Delete the throwaway <code>Busorder partition(...)</code> in <code>place.cpp</code>. Acceptance:
+<code>busorder_test</code>, <code>boundary_pins_test</code>, <code>pinalign_test</code> pass unchanged and
+<code>busorder/report.json</code> mesh block is byte-identical on the existing fixtures.</li>
+<li><strong>Option renames with aliases.</strong> Add <code>grid.*</code>, <code>region.*</code>,
+<code>legalize.bin.*</code>, <code>satlegalize.bin.*</code>; old names map to the same fields and emit a
+deprecation note in resolved options. Update README tables. Acceptance: existing tests and
+<code>lhd/tests/lhd_placement_*</code> scripts run with old names and with new names, identical output.</li>
+<li><strong>Extract <code>Capacity_bins</code>.</strong> Terminal first (report unchanged), then port the
+SAT fixed-region path. Acceptance: <code>terminal_legalize_test</code> incl. the maze tests, and
+<code>satlegalize</code> tests pass; <code>terminal_legalize.json</code> byte-identical on fixtures.</li>
+<li><strong>Add <code>Cell_criticality</code></strong> per R2; replace the four local rules. Acceptance:
+QoR check on the <code>3s</code> designs (SHA3, Minimax at minimum) — routed setup/hold, wire and vias
+within noise of the current defaults; any regression means R2 is revisited, not papered over.</li>
+<li><strong>Update <a href="../../docs/placer.html">docs/placer.html</a></strong>: phase table rows for
+grid/region/bin, the complete option list with the new names, and a short glossary paragraph
+defining the three roles. This is the user-facing contract; the README stays the implementation
+guide.</li>
+<li>Only then: new detail-final features (density-triggered region IO pins, per-region critical-cell
+pre-legalization with virtual pins) built on <code>Region_mesh</code> + <code>Cell_criticality</code>.</li>
+</ol>
+
+<h2>Non-goals</h2>
+<ul>
+<li>Changing any default grid count, cap or budget. Steps 2–4 are no-behavior-change refactors.</li>
+<li>Merging the density grid and the region mesh. They answer different questions (force vs membership).</li>
+<li>Exposing URoute's model resolution.</li>
+</ul>
+
+<h2>Implementation entry points</h2>
+<ul>
+<li><code>pass/place/busorder.cpp:150–262</code> mesh build (→ <code>Region_mesh::build</code>); <code>busorder_edges</code> already free-standing.</li>
+<li><code>pass/place/place.cpp:5206–5310</code> detail-final wiring: <code>bus_active</code>, <code>boundary_active</code>, throwaway partition.</li>
+<li><code>pass/place/place.cpp:4966–4970</code> density/aux grid resolution; native <code>placement.cpp:1119</code> <code>aux_x/aux_y</code>.</li>
+<li><code>pass/place/terminal_legalize.hpp</code> <code>Terminal_legalize_bin</code> (→ <code>Capacity_bin</code>); <code>fit_terminal_legalize_grid</code>.</li>
+<li><code>pass/place/satlegalize.cpp:805–900</code> window/region geometry and spill capacity checks.</li>
+<li><code>pass/place/place.cpp:6371–6520</code> SAT route-grid snapshot (<code>sat_route_grid.json</code>).</li>
+<li><code>docs/placer.html</code> sections <code>#features</code>, <code>#parameters</code>.</li>
+</ul>
+
+<h2>Related</h2>
+<ul>
+<li><a href="3s-terminal-legalize.html">3s-terminal-legalize</a> — owner of the bin role today.</li>
+<li><a href="3r-route.html">3r-route</a>, <a href="3u-uroute.html">3u-uroute</a> — consumers of the route grid.</li>
+<li><a href="3x-reroute.html">3x-reroute</a> — pre-route of region-local nets would consume region edges.</li>
+</ul>
+</main>
+</body>
+</html>

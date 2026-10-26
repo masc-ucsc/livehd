@@ -28,7 +28,7 @@ printf 'mod_one\nmod_two\n' > "$T/list.txt"
 # sibling scripts/ holds the stub. Production admission is untouched: the real
 # script is not modified, and the copy differs only in where it lives.
 PROJ="$T/proj"
-mkdir -p "$PROJ/scripts"
+mkdir -p "$PROJ/pass/lean/Lgraph_IR_Semantics_Simulator/scripts"
 cp "$SWEEP" "$PROJ/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/coreet_full_flow.sh"
 cat > "$PROJ/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/run_coreet_module_lean.sh" <<'STUB'
 #!/usr/bin/env bash
