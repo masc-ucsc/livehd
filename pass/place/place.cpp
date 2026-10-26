@@ -1459,8 +1459,12 @@ void snapshot_frame(ph::Floorplan& frame, const View& v) {
 }
 void make_arrays(View& v, const ph::Technology& tech) {
   v.design             = {};
-  const bool  oriented = v.native_orientations || std::any_of(v.cells.begin(), v.cells.end(), [&](const auto& c) {
-                          return !tech.macros.at(c.macro).klass.starts_with("CORE") && c.place.orientation != Orientation::N;
+  // Pin offsets below are built in each cell's current orientation, and the
+  // native set_orientation() composes from node_orientation (empty means N).
+  // Record every non-N cell, CORE row flips included, so a later orientation
+  // install (sat_install, H2D fixed poses) never flips an offset twice.
+  const bool  oriented = v.native_orientations || std::any_of(v.cells.begin(), v.cells.end(), [](const auto& c) {
+                          return c.place.orientation != Orientation::N;
                         });
   auto&       d        = v.design;
   const auto& rows     = v.fp.rows;

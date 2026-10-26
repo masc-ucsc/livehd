@@ -5845,6 +5845,110 @@ TEST(Placement, RouteGridUsesFreshTimingAndSamePhysicalSnapshotWithSatOffOrOn) {
     }
   }
 }
+// A user DEF may import a FIXED CORE cell already flipped on an FS row. Its
+// native pin offsets are built in FS, so installing the unchanged SAT frame
+// (which re-applies every cell orientation) must not flip them a second time:
+// with nothing accepted, detailed placement must see exactly the SAT-off pins.
+TEST(Placement, SatInstallKeepsImportedFlippedCorePins) {
+  const auto root = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "fs_import";
+  std::filesystem::create_directories(root);
+  const std::vector<std::string> lefs{"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  const auto                     tech = physical::read_lef(lefs);
+  hhds::GraphLibrary             source;
+  auto                           io = source.create_io("fs_import");
+  io->add_input("a", 0);
+  io->set_bits("a", 1);
+  io->add_output("y", 0);
+  io->set_bits("y", 1);
+  auto graph = io->create_graph();
+  auto inv   = source.create_io("sky130_fd_sc_hd__inv_1");
+  inv->add_input("A", 0);
+  inv->add_output("Y", 0);
+  auto signal = graph->get_input_pin("a");
+  gu::set_bits(signal, 1);
+  for (const char* name : {"fixed", "m0", "m1", "m2"}) {
+    auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+    node.set_subnode(inv);
+    node.set_name(name);
+    node.create_sink_pin("A").connect_driver(signal);
+    signal = node.create_driver_pin("Y");
+    gu::set_bits(signal, 1);
+  }
+  graph->get_output_pin("y").connect_driver(signal);
+  const int64_t       sw = 460, rh = 2720;
+  physical::Floorplan fp;
+  fp.design = "fs_import";
+  fp.dbu    = tech.dbu;
+  fp.die    = {0, 0, 20 * sw, 4 * rh};
+  for (int row = 0; row < 4; ++row) {
+    const auto orientation = row % 2 ? Ann_place::Orientation::FS : Ann_place::Orientation::N;
+    fp.rows.push_back({"row" + std::to_string(row), "unithd", 0, row * rh, 20, sw, orientation});
+  }
+  Ann_place fixed(2 * sw, 3 * rh, 3 * sw, rh);
+  fixed.status      = Ann_place::Status::FIXED;
+  fixed.orientation = Ann_place::Orientation::FS;
+  fp.components.push_back({"fixed", "sky130_fd_sc_hd__inv_1", fixed});
+  fp.terminals.push_back({"a", "a", "INPUT", 0, 3 * rh + rh / 2, Ann_place::Orientation::N, Ann_place::Status::FIXED, {}});
+  fp.terminals.push_back({"y", "y", "OUTPUT", 20 * sw, rh / 2, Ann_place::Orientation::N, Ann_place::Status::FIXED, {}});
+  physical::write_def(fp, (root / "input.def").string());
+  const auto& master  = tech.macros.at("sky130_fd_sc_hd__inv_1");
+  const auto  lef_pin = [&](const std::string& pin) {
+    const auto [x, y] = physical::oriented_center(master, master.pins.at(pin).shapes.front().rect, Ann_place::Orientation::FS);
+    return std::pair{fixed.x + x * tech.dbu, fixed.y + y * tech.dbu};
+  };
+  std::vector<double>              kernels[2];
+  std::vector<physical::Component> components[2];
+  for (bool sat : {false, true}) {
+    auto options                  = plain_options();
+    options.lefs                  = lefs;
+    options.liberty               = "inou/lefdef/tests/data/sky130hd.lib";
+    options.floorplan             = (root / "input.def").string();
+    options.output_dir            = (root / (sat ? "sat" : "plain")).string();
+    options.iterations            = 20;
+    options.bins                  = 4;
+    options.macro_timing_interval = 1;
+    options.final_timing_start    = 0;
+    options.satlegalize           = sat;
+    options.fp_evaluate           = [&](const Result& r) {
+      for (const char* pin : {"A", "Y"}) {
+        if (const auto found = r.pin_locations.find(std::string("fixed:") + pin); found != r.pin_locations.end()) {
+          EXPECT_NEAR(found->second.first, lef_pin(pin).first, 1e-6) << pin;
+          EXPECT_NEAR(found->second.second, lef_pin(pin).second, 1e-6) << pin;
+        }
+      }
+      Timing_feedback timing;
+      timing.wns = timing.tns = 0;
+      return timing;
+    };
+    hhds::GraphLibrary placed;
+    const auto         result = place(*graph, placed, options);
+    EXPECT_NO_THROW(check_legality(tech, result.floorplan));
+    components[sat] = result.floorplan.components;
+    const auto read = [&](const char* name) {
+      std::ifstream       file(options.output_dir + "/" + name);
+      const std::string   text{std::istreambuf_iterator<char>(file), {}};
+      rapidjson::Document json;
+      json.Parse(text.c_str());
+      EXPECT_FALSE(json.HasParseError()) << name;
+      return json;
+    };
+    if (sat) {
+      EXPECT_EQ(read("satlegalize.json")["accepted"].GetUint(), 0u);
+    }
+    const auto history = read("gp_history.json");
+    ASSERT_FALSE(history["detailed_kernels"].Empty());
+    for (const auto& kernel : history["detailed_kernels"].GetArray()) {
+      kernels[sat].push_back(kernel["weighted_hpwl_before"].GetDouble());
+      kernels[sat].push_back(kernel["weighted_hpwl_after"].GetDouble());
+    }
+  }
+  EXPECT_EQ(kernels[1], kernels[0]);
+  EXPECT_EQ(components[1], components[0]);
+  const auto imported = std::find_if(components[1].begin(), components[1].end(), [](const auto& c) { return c.name == "fixed"; });
+  ASSERT_NE(imported, components[1].end());
+  EXPECT_EQ(imported->place.orientation, Ann_place::Orientation::FS);
+  EXPECT_EQ(imported->place.status, Ann_place::Status::FIXED);
+}
 TEST(Placement, RelativeFillerChargeScalesInPreliminaryAndFinalGp) {
   hhds::GraphLibrary source;
   const auto         graph   = tie_graph(source, false);
