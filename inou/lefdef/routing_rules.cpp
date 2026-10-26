@@ -34,8 +34,6 @@ Rule_check supported(const Technology& tech, int64_t dbu, const Shape& shape) {
   return {true, {}};
 }
 double width(const Rect& r) { return std::min(r.xh - r.xl, r.yh - r.yl); }
-// Ceil distances, floor geometric overlap: never round a rule down to a DBU.
-double units(double um, int64_t dbu) { return std::ceil(um * dbu - 1e-9); }
 bool   number(double x) { return std::isfinite(x) && x >= 0; }
 }  // namespace
 Rule_check check_metal_rectangle(const Technology& tech, int64_t dbu, const Shape& shape) {
@@ -51,7 +49,7 @@ Rule_check check_metal_rectangle(const Technology& tech, int64_t dbu, const Shap
   if (!number(minimum) || !number(r.area) || (r.max_width && !number(*r.max_width))) {
     return reject("invalid metal width/area rule");
   }
-  if (w < units(minimum, dbu)) {
+  if (w < rule_dbu(minimum, dbu)) {
     return reject("minimum width");
   }
   if (r.max_width && w > std::floor(*r.max_width * dbu + 1e-9)) {
@@ -66,7 +64,7 @@ Rule_check check_metal_rectangle(const Technology& tech, int64_t dbu, const Shap
       if (!number(size[0]) || !number(size[1])) {
         return reject("invalid minimum size rule");
       }
-      fits |= w >= units(std::min(size[0], size[1]), dbu) && h >= units(std::max(size[0], size[1]), dbu);
+      fits |= w >= rule_dbu(std::min(size[0], size[1]), dbu) && h >= rule_dbu(std::max(size[0], size[1]), dbu);
     }
     if (!fits) {
       return reject("minimum size");
@@ -116,25 +114,25 @@ Rule_check check_metal_spacing(const Technology& tech, int64_t dbu, const Shape&
         return reject("invalid spacing range");
       }
       const auto matches
-          = [&](const Rect& rect) { return width(rect) >= units(range[0], dbu) && width(rect) <= range[1] * dbu + 1e-9; };
+          = [&](const Rect& rect) { return width(rect) >= rule_dbu(range[0], dbu) && width(rect) <= range[1] * dbu + 1e-9; };
       if (!matches(a.rect) && !matches(b.rect)) {
         continue;
       }
     }
     // Applying EOL spacing to the whole pair is a conservative superset of
     // its conditional keepout. Exact directional EOL checks can relax this.
-    required = std::max(required, units(rule.distance, dbu));
+    required = std::max(required, rule_dbu(rule.distance, dbu));
     if (rule.eol) {
       if (!number(rule.eol->width) || !number(rule.eol->within)) {
         return reject("invalid EOL rule");
       }
-      required = std::max(required, units(rule.eol->within, dbu));
+      required = std::max(required, rule_dbu(rule.eol->within, dbu));
       if (rule.eol->parallel_edge) {
         for (auto distance : *rule.eol->parallel_edge) {
           if (!number(distance)) {
             return reject("invalid EOL parallel-edge rule");
           }
-          required = std::max(required, units(distance, dbu));
+          required = std::max(required, rule_dbu(distance, dbu));
         }
       }
     }
@@ -155,8 +153,8 @@ Rule_check check_metal_spacing(const Technology& tech, int64_t dbu, const Shape&
         }
         // Include the first entry even below its threshold; higher entries
         // apply at their threshold (conservative at strict LEF boundaries).
-        if ((i == 0 || max_width >= units(table.widths[i], dbu)) && (j == 0 || run >= units(table.lengths[j], dbu))) {
-          required = std::max(required, units(table.spacing[i][j], dbu));
+        if ((i == 0 || max_width >= rule_dbu(table.widths[i], dbu)) && (j == 0 || run >= rule_dbu(table.lengths[j], dbu))) {
+          required = std::max(required, rule_dbu(table.spacing[i][j], dbu));
         }
       }
     }
@@ -359,10 +357,11 @@ std::vector<int64_t> Signal_metal_rules::candidate_widths(const std::string& nam
   std::vector<int64_t> result;
   for (const auto w : widths) {
     const auto value = w * dbu_;
-    if (!std::isfinite(value) || value <= 0 || value > INT32_MAX || std::abs(value - std::round(value)) > 1e-9) {
+    const auto dbu   = rounded_dbu(value, 1e-9);
+    if (!dbu || value <= 0) {
       return {};
     }
-    result.push_back(std::llround(value));
+    result.push_back(*dbu);
   }
   return result;
 }
@@ -439,7 +438,7 @@ Rule_check Signal_metal_rules::spacing(const Shape& a, const Shape& b) const {
     const auto source_edges = edges(source), target_edges = edges(target);
     for (const auto& rule : extension.eol) {
       for (const auto& edge : source_edges) {
-        if (edge.hi - edge.lo >= units(rule.width, dbu_)) {
+        if (edge.hi - edge.lo >= rule_dbu(rule.width, dbu_)) {
           continue;
         }
         for (const auto& other : target_edges) {
@@ -450,12 +449,12 @@ Rule_check Signal_metal_rules::spacing(const Shape& a, const Shape& b) const {
           if (distance < 0) {
             continue;
           }
-          const bool both_eol = other.hi - other.lo < units(rule.width, dbu_);
-          const auto within   = both_eol ? 0. : units(rule.within, dbu_);
+          const bool both_eol = other.hi - other.lo < rule_dbu(rule.width, dbu_);
+          const auto within   = both_eol ? 0. : rule_dbu(rule.within, dbu_);
           if (std::min(edge.hi + within, other.hi) <= std::max(edge.lo - within, other.lo)) {
             continue;
           }
-          if (distance < units(both_eol ? rule.end_to_end : rule.spacing, dbu_)) {
+          if (distance < rule_dbu(both_eol ? rule.end_to_end : rule.spacing, dbu_)) {
             return reject("LEF58 facing EOL spacing");
           }
         }
@@ -463,10 +462,10 @@ Rule_check Signal_metal_rules::spacing(const Shape& a, const Shape& b) const {
     }
     for (const auto& rule : extension.keepouts) {
       for (const auto& edge : source_edges) {
-        if (edge.hi - edge.lo >= units(rule.width, dbu_)) {
+        if (edge.hi - edge.lo >= rule_dbu(rule.width, dbu_)) {
           continue;
         }
-        const auto region = edge_region(edge, units(rule.backward, dbu_), units(rule.forward, dbu_), units(rule.side, dbu_));
+        const auto region = edge_region(edge, rule_dbu(rule.backward, dbu_), rule_dbu(rule.forward, dbu_), rule_dbu(rule.side, dbu_));
         if (rule.corner_only ? corner_inside(region, target) : region.overlaps(target)) {
           return reject("LEF58 EOL keepout");
         }
@@ -492,7 +491,7 @@ Rule_check Signal_metal_rules::spacing(const Shape& a, const Shape& b) const {
     for (auto spacing : extension.corner_spacing) {
       // The supported one-row WIDTH table is conservatively applied to all
       // widths; CORNERTOCORNER/Euclidean and multi-row forms remain rejected.
-      if (dx < units(spacing, dbu_) && dy < units(spacing, dbu_)) {
+      if (dx < rule_dbu(spacing, dbu_) && dy < rule_dbu(spacing, dbu_)) {
         return reject("LEF58 convex corner spacing");
       }
     }
@@ -511,7 +510,7 @@ std::optional<int64_t> Signal_metal_rules::clearance(const std::string& name) co
     if (!number(v) || v * dbu_ > std::numeric_limits<int32_t>::max()) {
       valid = false;
     } else {
-      bound = std::max(bound, units(v, dbu_));
+      bound = std::max(bound, rule_dbu(v, dbu_));
     }
   };
   add(extension->second.query_radius);

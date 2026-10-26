@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <limits>
 
 #include "gtest/gtest.h"
 #include "routing_occupancy.hpp"
@@ -423,6 +424,12 @@ TEST(Physical, SharedGeometryHelpers) {
   EXPECT_TRUE(track.supported());
   EXPECT_EQ(track.index_range(6, 30), (std::pair<int64_t, int64_t>{1, 2}));
   EXPECT_FALSE((Track{"Y", "M2", 5, 4, 10, 1}).supported());
+  EXPECT_EQ(rounded_dbu(17.9999999, 1e-6), 18);
+  EXPECT_FALSE(rounded_dbu(17.9999, 1e-6));
+  EXPECT_EQ(rounded_dbu(17.6, std::numeric_limits<double>::infinity()), 18);
+  EXPECT_FALSE(rounded_dbu(4e9, 1e-6));
+  EXPECT_EQ(rule_dbu(0.018, 1000), 18);
+  EXPECT_EQ(rule_dbu(0.0181, 1000), 19);
   Technology tech;
   EXPECT_EQ(manufacturing_grid_dbu(tech, 1000), 1);
   tech.manufacturing_grid = 0.005;

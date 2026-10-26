@@ -8,11 +8,12 @@
 #include <stdexcept>
 namespace livehd::physical {
 int64_t exact_units(double um, int64_t dbu) {
-  const double v = um * dbu;
-  if (!std::isfinite(v) || v < 0 || v > std::numeric_limits<int32_t>::max() || std::abs(v - std::round(v)) > 1e-7) {
+  const double v       = um * dbu;
+  const auto   rounded = rounded_dbu(v, 1e-7);
+  if (!rounded || v < 0) {
     throw std::invalid_argument("via dimension is not representable in integer DBU");
   }
-  return std::llround(v);
+  return *rounded;
 }
 std::vector<std::string> lef58_tokens(const std::string& text) {
   std::string spaced;

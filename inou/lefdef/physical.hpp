@@ -53,6 +53,12 @@ std::vector<std::pair<T, T>> merge_intervals(std::vector<std::pair<T, T>> interv
   }
   return merged;
 }
+// DBU conversions. Geometry lands on integral DBU: the nearest integer when
+// value is finite, within tolerance of it (floating-point noise; infinity
+// accepts plain rounding) and inside the signed 32-bit DEF/OpenDB range.
+std::optional<int64_t> rounded_dbu(double value, double tolerance);
+// Rule distances round up, so a micron spacing or width is never relaxed.
+inline double          rule_dbu(double microns, int64_t dbu) { return std::ceil(microns * dbu - 1e-9); }
 // Finite integral coordinates within the signed 32-bit DEF/OpenDB range.
 inline bool integral_dbu(const Rect& r) {
   for (auto v : {r.xl, r.yl, r.xh, r.yh}) {

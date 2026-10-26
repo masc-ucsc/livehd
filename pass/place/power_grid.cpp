@@ -13,11 +13,10 @@ namespace livehd::placement {
 namespace {
 namespace ph = physical;
 int64_t integer(double value) {
-  if (!std::isfinite(value) || std::abs(value) > std::numeric_limits<int32_t>::max()
-      || std::abs(value - std::round(value)) > 1e-7) {
-    throw std::invalid_argument("power grid requires exact integral DBU within the OpenDB coordinate range");
+  if (const auto dbu = ph::rounded_dbu(value, 1e-7)) {
+    return *dbu;
   }
-  return std::llround(value);
+  throw std::invalid_argument("power grid requires exact integral DBU within the OpenDB coordinate range");
 }
 int64_t dimension(double um, int64_t dbu) { return integer(um * dbu); }
 void    require_rect(const ph::Rect& r) {

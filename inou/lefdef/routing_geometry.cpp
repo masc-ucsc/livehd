@@ -11,12 +11,10 @@ namespace {
 // DEF coordinates are signed 32-bit in the reader and in OpenDB. Check before
 // conversion; neither fractional DBU nor arithmetic overflow may shrink metal.
 int64_t coordinate(double value) {
-  const auto rounded = std::round(value);
-  if (!std::isfinite(value) || std::abs(value - rounded) > 1e-6 || rounded < std::numeric_limits<int32_t>::min()
-      || rounded > std::numeric_limits<int32_t>::max()) {
-    throw std::runtime_error("routing geometry cannot be represented in integer DEF DBU");
+  if (const auto dbu = rounded_dbu(value, 1e-6)) {
+    return *dbu;
   }
-  return static_cast<int64_t>(rounded);
+  throw std::runtime_error("routing geometry cannot be represented in integer DEF DBU");
 }
 Rect scaled(Rect r, double scale) {
   r = {double(coordinate(r.xl * scale)),

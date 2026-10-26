@@ -940,23 +940,27 @@ Rect placed_rect(const Macro& m, const Ann_place& place, int64_t dbu, const Rect
   const auto r = orient_rect(local.translated(m.origin_x, m.origin_y), m.width, m.height, place.orientation);
   return {place.x + r.xl * dbu, place.y + r.yl * dbu, place.x + r.xh * dbu, place.y + r.yh * dbu};
 }
-std::optional<int64_t> wire_width_dbu(const Layer& layer, int64_t dbu) {
-  const double width = layer.width * dbu;
-  if (!std::isfinite(width) || width <= 0 || width > std::numeric_limits<int32_t>::max() || width != std::round(width)
-      || std::llround(width) % 2) {
+std::optional<int64_t> rounded_dbu(double value, double tolerance) {
+  const auto rounded = std::round(value);
+  if (!std::isfinite(value) || std::abs(value - rounded) > tolerance || rounded < std::numeric_limits<int32_t>::min()
+      || rounded > std::numeric_limits<int32_t>::max()) {
     return {};
   }
-  return std::llround(width);
+  return static_cast<int64_t>(rounded);
+}
+std::optional<int64_t> wire_width_dbu(const Layer& layer, int64_t dbu) {
+  const auto width = rounded_dbu(layer.width * dbu, 0);
+  if (!width || *width <= 0 || *width % 2) {
+    return {};
+  }
+  return width;
 }
 std::optional<int64_t> manufacturing_grid_dbu(const Technology& tech, int64_t dbu) {
   if (tech.manufacturing_grid == 0) {
     return 1;
   }
   const double grid = tech.manufacturing_grid * dbu;
-  if (!std::isfinite(grid) || grid < 1 || grid > std::numeric_limits<int32_t>::max() || std::abs(grid - std::round(grid)) > 1e-9) {
-    return {};
-  }
-  return std::llround(grid);
+  return grid < 1 ? std::nullopt : rounded_dbu(grid, 1e-9);
 }
 Technology read_lef(const std::vector<std::string>& paths) {
   std::scoped_lock lock(reader_mutex);

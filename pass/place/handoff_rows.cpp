@@ -14,11 +14,12 @@
 namespace livehd::placement {
 namespace {
 namespace ph = physical;
+// Plain rounding: LEF cell and site sizes need not land exactly on DBU here.
 int64_t dbu(double value) {
-  if (!std::isfinite(value) || value < std::numeric_limits<int32_t>::min() || value > std::numeric_limits<int32_t>::max()) {
-    throw std::runtime_error("row-cut dimension exceeds DEF range");
+  if (const auto rounded = ph::rounded_dbu(value, std::numeric_limits<double>::infinity())) {
+    return *rounded;
   }
-  return std::llround(value);
+  throw std::runtime_error("row-cut dimension exceeds DEF range");
 }
 int64_t align(int64_t x, int64_t width, int64_t origin, bool left) {
   const double site = double(x - origin) / width;
