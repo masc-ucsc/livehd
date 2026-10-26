@@ -9,26 +9,29 @@ macro-centroid diagnostic have been removed.
 
 ## Spatial partitions: grid, region, bin
 
-Placement partitions the core in three roles. Each role has one option prefix
-and one C++ type; options and docs use exactly these names.
+Placement partitions the core in three roles. Each role has one name, and
+options and docs use exactly these names. `grid` and `region` each have one
+option prefix and one C++ type. `bin` has two prefixes (terminal
+`legalize.bin.*`, SAT `satlegalize.bin.*`) and, until SAT is ported (ruling R5
+in todo 3g-partitions), two capacity models.
 
 | Role | Stage | Semantics | Options | C++ |
 |---|---|---|---|---|
 | `grid` | global GP (FP, macro, final) | Uniform tiles; cells deposit area/demand and read forces. No membership, never gates movement. | `synth.place.grid.*` | native `Options::bins_x/bins_y/auxiliary_bins` |
 | `region` | detail final, after final GP and before legalization | Irregular rectangles cut at fixed macro edges and IO bus spans, at most `region.max_cells` movable cells each. Explicit membership; crossings, virtual pins and bus order live on region edges. | `synth.place.region.*` | `Region_mesh` (`region_mesh.hpp`) |
-| `bin` | legalization | Uniform tiles with usable capacity (row sites minus macro halos and fixed WELLTAP/SPACER), before/after occupancy and a hard density cap. Membership by apportioned area. | `synth.place.legalize.bin.*`, `synth.place.satlegalize.bin.*` | `Capacity_bins` (`capacity_bins.hpp`) |
+| `bin` | legalization | Uniform tiles with usable capacity, before/after occupancy and a hard density cap. Membership by apportioned area. Terminal: row sites minus macro halos and fixed WELLTAP/SPACER, fixed logic counted as occupancy. SAT: exact row area minus every non-movable component, fixed logic included. | `synth.place.legalize.bin.*`, `synth.place.satlegalize.bin.*` | terminal: `Capacity_bins` (`capacity_bins.hpp`; the legalizer fills capacity from its free row strips); SAT: private `Density_model` in `satlegalize.cpp` |
 
 | Option | Default | Meaning |
 |---|---|---|
 | `grid.density` | `64` | density-grid bins per axis |
 | `grid.density_mode` | `fixed` | `fixed`, `dynamic` (movable-area grid up to `grid.density_max`), or `macro` (32..64 from the macro size) |
 | `grid.density_max` | `512` | dynamic-grid cap per axis |
-| `grid.route` | `inherit` | the one routing grid for RUDY/RSMT/URoute, macro channel pressure, terminal bins and SAT route-grid bins; `inherit` = `grid.density` even in dynamic mode, or an explicit 2..1024 |
+| `grid.route` | `inherit` | the one routing grid for RUDY/RSMT/URoute, macro channel pressure, native legalization/detailed placement, terminal bins and SAT route-grid bins; `inherit` follows the density grid in use (`grid.density`, the chosen count in macro mode, and the configured `grid.density` in dynamic mode), or an explicit 2..1024 |
 | `grid.local` | `512` | local spreading grid per axis |
 | `region.max_cells` | `10000` | movable-cell cap per region rectangle |
 | `region.merge_um` | `5` | merge macro-edge/IO-span cut lines closer than this |
 | `region.busorder`, `region.boundarypins`, `region.pinalign` | `false` | the mesh consumers; their sub-options keep their names under the same prefix |
-| `legalize.bin.grid` | `route` | terminal legalization bins: the routing grid (bounded for tiny cores) or an explicit 1..1024 |
+| `legalize.bin.grid` | `route` | terminal legalization bins only: the routing grid (bounded for tiny cores) or an explicit 1..1024 used as given. SAT route-grid bins keep `grid.route` |
 | `legalize.bin.max_density` | `0.8` | hard terminal bin cap; must exceed the GP target |
 | `satlegalize.bin.size_um` | empty | fixed SAT bins `W,H` µm anchored at the die origin |
 | `satlegalize.bin.grid` | `none` | `route` uses the routing grid for SAT bins; excludes `bin.size_um` |
@@ -36,16 +39,24 @@ and one C++ type; options and docs use exactly these names.
 Stage-scoped grids keep their names: `<stage>.warpspace.bins` (16) and
 `preroute.bins` (64). URoute resamples the routing grid through its fixed model
 resolution; that is not a partition option. The pre-3g spellings (`bins`,
-`dynamic_bins`, `auto_bins`, `bin_max`, `local_density_bins`, `busorder*`,
-`boundarypins*`, `pinalign`, `legalize.max_density`, `satlegalize.region_size`,
-`satlegalize.route_grid`) are accepted for one release: lhd rewrites them to the
-names above and emits a `deprecated-option` warning. Report JSON keys are
-unchanged until the aliases are removed.
+`bin_max`, `local_density_bins`, `busorder*`, `boundarypins*`, `pinalign`,
+`legalize.max_density`, `satlegalize.region_size`, `satlegalize.route_grid`) are
+accepted for one release: lhd rewrites them to the names above before anything
+reads them and emits a `deprecated-option` warning. `dynamic_bins` and
+`auto_bins` merge into one `grid.density_mode` the same way. When both are true,
+or when one of them is given together with `grid.density_mode`, they stay as
+they are and the placement driver reads them. Setting either one to true with
+`grid.density_mode` is a usage error. `lhd describe` redirects an old name to
+its new name. `physical_repair` JSON keys follow the same names
+(`grid_density`, `region_*`, `legalize_bin_*`, `satlegalize_bin_*`); its old
+keys are still accepted, and giving both spellings is an error. Report JSON
+keys stay unchanged until the aliases are removed.
 
-`Cell_criticality` (`cell_criticality.hpp`) computes the per-cell timing inputs
-the region and bin consumers share (min own-pin slack, clock contact, untimed
-pins); each consumer keeps its own movability rule. Bus order and boundary
-pins share `node_weight_criticality()`/`limit_displacement()`.
+`Cell_criticality` (`cell_criticality.hpp`) computes per-cell timing inputs
+(min own-pin slack, clock contact, untimed pins) for SAT spill eligibility and
+its diagnostics, and for the terminal legalizer's per-cell slacks. Each
+consumer keeps its own movability rule. Bus order and boundary pins share
+`node_weight_criticality()`/`limit_displacement()` instead.
 
 `synth.place.io_resynth=5` enables placement-aware whole-color ABC resynthesis.
 At each completed stage, OpenTimer's in-memory pin arrivals/required times are
@@ -1210,14 +1221,14 @@ The native flow has two independent opt-in spreading controls:
   Local spreading uses the native solver and can run alongside virtual density
   particles. It does not support external `GpState` continuation yet; in-process
   timing checkpoints work.
-- `synth.place.grid.density_mode=fixed` retains the configured density grid.
-  When enabled, the ideal bin area is average movable-instance area divided by
+- `synth.place.grid.density_mode=fixed` (the default) keeps the configured density
+  grid. With `grid.density_mode=dynamic`, the ideal bin area is average movable-instance area divided by
   target density, following OpenROAD's rule. Power-of-two counts account for
   core aspect ratio and are capped by `synth.place.grid.density_max=512` per axis
   (32..1024, power of two). This differs from `grid.density_mode=macro`, which
-  uses macro pitch and is limited to 32..64. The configured `place.grid.density` grid
-  remains in use for routing feedback, macro channel pressure, legalization
-  and detailed placement, isolating the density-resolution experiment.
+  uses macro pitch and is limited to 32..64. Unless `grid.route` is set, the routing grid
+  keeps the configured `grid.density` count for routing feedback, macro channel pressure,
+  legalization and detailed placement, isolating the density-resolution experiment.
 
 Adaptive density grids and the local field use the native radix-2 FFT-based
 DCT Poisson path, with no external numerical package. The existing fixed-grid
@@ -1987,9 +1998,9 @@ analysis as `final_timing.json`; the last numbered trial can be a rejected state
 For a controlled replay, `physical_repair` accepts `source_def=true` and
 `cell_place=true` to import the exact mapped DEF and recompute standard-cell
 placement while checking fixed macro geometry and cell masters. The JSON can
-set `density`, `bins`, `threads`, `dynamic_bins`, `bin_max`, `virtual_fillers`,
-`virtual_filler_max_count`, `virtual_filler_fraction`, `local_density_weight`,
-`local_density_bins`, `local_density_range`, `local_density_jitter`,
+set `density`, `grid_density`, `threads`, `grid_density_mode`, `grid_density_max`, `grid_route`,
+`virtual_fillers`, `virtual_filler_max_count`, `virtual_filler_fraction`, `local_density_weight`,
+`grid_local`, `local_density_range`, `local_density_jitter`,
 `adaptive_density`, `routability` and `route_model`. These select the same
 production controls described above. Omitted fields retain the diagnostic's
 existing values (`density=0.5`, `bins=64`). Keep the supplied core and macro
@@ -3323,7 +3334,7 @@ macro IO bus adjustment default on.
 ### Experimental final-placement bus ordering
 
 `place.region.busorder=false` is the default. Opt in with
-`--set synth.place.region.busorder=true` (or `"busorder": true` in a
+`--set synth.place.region.busorder=true` (or `"region_busorder": true` in a
 `physical_repair` configuration). Only the final cell stage uses it, between
 ordinary GP and legalization; macro and IO positions stay fixed.
 
@@ -3344,7 +3355,7 @@ Clock/reset masks apply. Ambiguous branched crossings are measured but do not
 receive single-lane constraints. RSMT uses a deterministic HV realization where
 its branch is diagonal; these are placement estimates, not routed wires.
 
-Controls under `place.region.busorder.` (diagnostic JSON uses `busorder_` followed by the field):
+Controls under `place.region.busorder.` (`physical_repair` JSON uses `region_busorder_` followed by the field):
 
 | Option | Experimental default | Meaning |
 |---|---:|---|
@@ -3396,8 +3407,8 @@ and does not use the bus-order candidate selector.
 HPWL and density overflow before/after refinement and after legalization.
 Temporary split-net HPWL is labeled separately and is not comparable to real-net
 HPWL. `boundarypins/pins.tsv` gives the immutable boundary-pin locations for PNG
-overlays. Diagnostic JSON uses `boundarypins`, `boundarypins_split`,
-`boundarypins_iterations` and `boundarypins_max_displacement_um`.
+overlays. `physical_repair` JSON uses `region_boundarypins`, `region_boundarypins_split`,
+`region_boundarypins_iterations` and `region_boundarypins_max_displacement_um`.
 
 `place.region.boundarypins.order=true` uses the same prefix-minimum slot-assignment
 solver as top-level IO initialization to order bus lanes and minimize weighted
@@ -3425,7 +3436,7 @@ timing weights; the main QoR HPWL remains the unweighted physical-net metric.
 final cell placement stage only (default false). It requires
 `place.region.boundarypins.split=true` and can be combined with
 `place.region.boundarypins.order=true`. It does not run during floorplan or macro
-placement. Diagnostic JSON uses `pinalign`.
+placement. `physical_repair` JSON uses `region_pinalign`.
 
 After optional bus ordering, the pass follows each split net from its original
 driver. It considers opposite-side boundary pins connected directly inside a
