@@ -221,8 +221,13 @@ TEST_F(AbcTmap, DominoCellsArePreservedBoundaries) {
   select.clock  = "clk";
   usyn::Design_options design;
   design.logical.endpoint.clock_phases = 1;
-  design.physical = [&](const usyn::Stateful_region& region, std::span<const std::string> names, usyn::Budget& budget) {
-    return domplace::select_physical(region, names, select, {&reference, nullptr, 0}, budget);
+  design.physical                      = [&](const usyn::Stateful_region& region,
+                        std::span<const std::string>
+                            names,
+                        std::span<const usyn::Physical_hint>
+                                      hints,
+                        usyn::Budget& budget) {
+    return domplace::select_physical(region, names, select, {&reference, nullptr, 0}, budget, hints);
   };
   usyn::Budget work{100000000};
   auto         logical = usyn::synthesize_cmos_design(hold, design, work);
