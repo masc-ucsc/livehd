@@ -12,9 +12,6 @@ namespace livehd::placement::buffering {
 namespace {
 using detail::require;
 #if DREAMPLACE_NATIVE_DENSITY_RESERVATION_API >= 1 && DREAMPLACE_NATIVE_PIN_TIMING_API >= 3
-bool close(double a, double b) {
-  return std::isfinite(a) && std::isfinite(b) && std::abs(a - b) <= std::max(1e-9, 1e-12 * std::max(std::abs(a), std::abs(b)));
-}
 std::set<std::string> worst_drivers(const late::Result& timing, const timeclosure::Period_objective& objective) {
   const auto&           g        = *timing.feasible_graph;
   const auto            incoming = timeclosure::incoming_arcs(g);
@@ -23,22 +20,14 @@ std::set<std::string> worst_drivers(const late::Result& timing, const timeclosur
     if (!g.vertices[v].endpoint_required_ps) {
       continue;
     }
-    const double cost = objective.arrivals[v] + *g.reference_period_ps - *g.vertices[v].endpoint_required_ps;
-    if (!close(cost, objective.achievable_period)) {
+    if (!timeclosure::times_match(timeclosure::endpoint_cost(g, objective, v), objective.achievable_period)) {
       continue;
     }
-    size_t at = v, steps = 0;
-    while (true) {
-      require(++steps <= g.vertices.size(), "cycle in checkpoint critical path");
-      const auto chosen = timeclosure::worst_predecessor_arc(timing, objective, incoming, at);
-      if (!chosen) {
-        break;
-      }
-      const auto& arc = g.arcs[*chosen];
+    for (const auto id : timeclosure::worst_path_arcs(timing, objective, incoming, v)) {
+      const auto& arc = g.arcs[id];
       if (arc.wire) {
         result.insert(timing.pins[g.vertices[arc.from].pin].name);
       }
-      at = arc.from;
     }
   }
   return result;

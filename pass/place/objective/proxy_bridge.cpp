@@ -41,15 +41,13 @@ Objective_network objective_network(const late::Result& timing) {
   return network;
 }
 
-namespace {
-bool close(double a, double b) {
+bool times_match(double a, double b) {
   return std::isfinite(a) && std::isfinite(b) && std::abs(a - b) <= std::max(1e-9, std::max(std::abs(a), std::abs(b)) * 1e-12);
 }
-}  // namespace
 
 Period_objective proxy_objective(const late::Result& timing, Objective_settings settings) {
   const auto objective = period_objective(objective_network(timing), settings);
-  if (!close(objective.achievable_period, *timing.achievable_period_ps)) {
+  if (!times_match(objective.achievable_period, *timing.achievable_period_ps)) {
     throw std::invalid_argument("captured objective period disagrees with native timing");
   }
   const auto& graph = *timing.feasible_graph;
@@ -65,7 +63,7 @@ Period_objective proxy_objective(const late::Result& timing, Objective_settings 
       }
       arrival = domain.pins[vertex.pin][vertex.transition].arrival_ps;
     }
-    if (!arrival || !close(objective.arrivals[i], *arrival)) {
+    if (!arrival || !times_match(objective.arrivals[i], *arrival)) {
       throw std::invalid_argument("captured objective arrival disagrees with native timing");
     }
   }
@@ -80,6 +78,7 @@ std::vector<std::vector<size_t>> incoming_arcs(const late::Feasible_timing_graph
   return incoming;
 }
 
+namespace {
 std::optional<size_t> worst_predecessor_arc(const late::Result& timing, const Period_objective& objective,
                                             const std::vector<std::vector<size_t>>& incoming, size_t vertex) {
   const auto& g    = *timing.feasible_graph;
@@ -97,7 +96,7 @@ std::optional<size_t> worst_predecessor_arc(const late::Result& timing, const Pe
     const auto& arc  = g.arcs[id];
     const auto& from = g.vertices[arc.from];
     if (from.pin == pred->pin && from.transition == pred->transition && from.domain == v.domain
-        && close(objective.arrivals[arc.from] + arc.delay_ps, objective.arrivals[vertex])
+        && times_match(objective.arrivals[arc.from] + arc.delay_ps, objective.arrivals[vertex])
         && (!chosen || arc.delay_ps > g.arcs[*chosen].delay_ps)) {
       chosen = id;
     }
@@ -106,6 +105,28 @@ std::optional<size_t> worst_predecessor_arc(const late::Result& timing, const Pe
     throw std::invalid_argument("native worst predecessor has no matching feasible arc");
   }
   return chosen;
+}
+}  // namespace
+
+std::vector<size_t> worst_path_arcs(const late::Result& timing, const Period_objective& objective,
+                                    const std::vector<std::vector<size_t>>& incoming, size_t endpoint) {
+  const auto&         g = *timing.feasible_graph;
+  std::vector<size_t> arcs;
+  for (size_t at = endpoint, steps = 0;;) {
+    if (++steps > g.vertices.size()) {
+      throw std::invalid_argument("cycle in native worst predecessor path");
+    }
+    const auto chosen = worst_predecessor_arc(timing, objective, incoming, at);
+    if (!chosen) {
+      return arcs;
+    }
+    arcs.push_back(*chosen);
+    at = g.arcs[*chosen].from;
+  }
+}
+
+double endpoint_cost(const late::Feasible_timing_graph& graph, const Period_objective& objective, size_t vertex) {
+  return objective.arrivals[vertex] + (*graph.reference_period_ps - *graph.vertices[vertex].endpoint_required_ps);
 }
 
 Objective_epoch timing_epoch(const late::Result& timing) {

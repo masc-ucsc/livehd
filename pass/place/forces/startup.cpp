@@ -123,7 +123,7 @@ Startup_weights startup_path_weights(const late::Result& timing, double fraction
   std::vector<std::pair<double, size_t>> endpoints;
   for (size_t i = 0; i < g.vertices.size(); ++i) {
     if (g.vertices[i].endpoint_required_ps) {
-      endpoints.emplace_back(objective.arrivals[i] + *g.reference_period_ps - *g.vertices[i].endpoint_required_ps, i);
+      endpoints.emplace_back(endpoint_cost(g, objective, i), i);
     }
   }
   std::sort(endpoints.begin(), endpoints.end(), [](const auto& a, const auto& b) {
@@ -135,20 +135,11 @@ Startup_weights startup_path_weights(const late::Result& timing, double fraction
   result.selected  = std::min(endpoints.size(), size_t(std::ceil(fraction * endpoints.size())));
   for (size_t i = 0; i < result.selected; ++i) {
     std::vector<size_t> wires;
-    size_t              at = endpoints[i].second, steps = 0;
-    while (true) {
-      if (++steps > g.vertices.size()) {
-        throw std::invalid_argument("cycle in startup timing path");
-      }
-      const auto chosen = worst_predecessor_arc(timing, objective, incoming, at);
-      if (!chosen) {
-        break;
-      }
-      const auto& arc = g.arcs[*chosen];
+    for (const auto id : worst_path_arcs(timing, objective, incoming, endpoints[i].second)) {
+      const auto& arc = g.arcs[id];
       if (arc.wire && !timing.pins[g.vertices[arc.from].pin].clock && !timing.pins[g.vertices[arc.to].pin].clock) {
-        wires.push_back(*chosen);
+        wires.push_back(id);
       }
-      at = arc.from;
     }
     for (auto id : wires) {
       const auto& arc    = g.arcs[id];

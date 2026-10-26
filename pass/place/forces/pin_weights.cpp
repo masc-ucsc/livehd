@@ -101,8 +101,7 @@ Pin_weights Pin_weight_bank::update(const late::Result& timing) {
       }
     }
   }
-  const auto cost
-      = [&](size_t v) { return objective.arrivals[v] + (*g.reference_period_ps - *g.vertices[v].endpoint_required_ps); };
+  const auto cost = [&](size_t v) { return endpoint_cost(g, objective, v); };
   std::sort(endpoints.begin(), endpoints.end(), [&](size_t a, size_t b) {
     if (cost(a) != cost(b)) {
       return cost(a) > cost(b);
@@ -112,19 +111,12 @@ Pin_weights Pin_weight_bank::update(const late::Result& timing) {
     return std::tie(timing.pins[x.pin].name, x.transition, x.domain) < std::tie(timing.pins[y.pin].name, y.transition, y.domain);
   });
   for (size_t rank = 0; rank < endpoints.size(); ++rank) {
-    const double                    reciprocal = 1. / double(rank + 1);
-    size_t                          vertex = endpoints[rank], steps = 0;
+    const double                    reciprocal         = 1. / double(rank + 1);
     double                          pending_cell_delay = 0;
     std::optional<hhds::Node_class> pending_owner;
-    while (true) {
-      require(++steps <= g.vertices.size(), "cycle in native worst predecessor path");
-      const auto& v      = g.vertices[vertex];
-      const auto  chosen = worst_predecessor_arc(timing, objective, incoming, vertex);
-      if (!chosen) {
-        require(!pending_owner, "related-output path contribution has no influencing physical input before launch boundary");
-        break;
-      }
-      const auto&  arc          = g.arcs[*chosen];
+    for (const auto id : worst_path_arcs(timing, objective, incoming, endpoints[rank])) {
+      const auto&  arc          = g.arcs[id];
+      const auto&  v            = g.vertices[arc.to];
       const auto   source       = g.vertices[arc.from].pin;
       const double contribution = std::max(arc.delay_ps, 0.) * reciprocal * reciprocal;
       if (arc.wire) {
@@ -158,8 +150,8 @@ Pin_weights Pin_weight_bank::update(const late::Result& timing) {
           require(std::isfinite(pending_cell_delay), "nonfinite related-output path contribution");
         }
       }
-      vertex = arc.from;
     }
+    require(!pending_owner, "related-output path contribution has no influencing physical input before launch boundary");
   }
   const double graph_max     = *std::max_element(graph.begin(), graph.end());
   const double path_max      = *std::max_element(path.begin(), path.end());
