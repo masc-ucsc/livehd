@@ -6,6 +6,7 @@
 #include <climits>
 #include <cmath>
 #include <cstdio>
+#include <format>
 #include <fstream>
 #include <map>
 #include <memory>
@@ -1054,9 +1055,11 @@ void      write_def(const Floorplan& fp, const std::string& path) {
   if (!out) {
     throw std::runtime_error("cannot write DEF: " + path);
   }
+  const auto corners = [](const Rect& r) {
+    return std::format("( {} {} ) ( {} {} )", std::llround(r.xl), std::llround(r.yl), std::llround(r.xh), std::llround(r.yh));
+  };
   out << "VERSION 5.8 ;\nDIVIDERCHAR \".\" ;\nBUSBITCHARS \"[]\" ;\nDESIGN " << identifier(fp.design)
-      << " ;\nUNITS DISTANCE MICRONS " << fp.dbu << " ;\nDIEAREA ( " << std::llround(fp.die.xl) << ' ' << std::llround(fp.die.yl)
-      << " ) ( " << std::llround(fp.die.xh) << ' ' << std::llround(fp.die.yh) << " ) ;\n";
+      << " ;\nUNITS DISTANCE MICRONS " << fp.dbu << " ;\nDIEAREA " << corners(fp.die) << " ;\n";
   for (const auto& row : fp.rows) {
     out << "ROW " << identifier(row.name) << ' ' << identifier(row.site) << ' ' << row.x << ' ' << row.y << ' '
         << orientation_name(row.orientation) << " DO " << row.count << " BY 1 STEP " << row.step << " 0 ;\n";
@@ -1092,8 +1095,7 @@ void      write_def(const Floorplan& fp, const std::string& path) {
         }
       }
       for (const auto& shape : via.shapes) {
-        out << " + RECT " << identifier(shape.layer) << " ( " << std::llround(shape.rect.xl) << ' ' << std::llround(shape.rect.yl)
-            << " ) ( " << std::llround(shape.rect.xh) << ' ' << std::llround(shape.rect.yh) << " )";
+        out << " + RECT " << identifier(shape.layer) << ' ' << corners(shape.rect);
       }
       out << " ;\n";
     }
@@ -1125,8 +1127,7 @@ void      write_def(const Floorplan& fp, const std::string& path) {
   for (const auto& p : fp.terminals) {
     out << "- " << identifier(p.name) << " + NET " << identifier(p.net) << " + DIRECTION " << p.direction << " + USE " << p.use;
     for (const auto& shape : p.shapes) {
-      out << " + LAYER " << identifier(shape.layer) << " ( " << std::llround(shape.rect.xl) << ' ' << std::llround(shape.rect.yl)
-          << " ) ( " << std::llround(shape.rect.xh) << ' ' << std::llround(shape.rect.yh) << " )";
+      out << " + LAYER " << identifier(shape.layer) << ' ' << corners(shape.rect);
     }
     out << " + " << status_name(p.status) << " ( " << p.x << ' ' << p.y << " ) " << orientation_name(p.orientation) << " ;\n";
   }
@@ -1192,8 +1193,7 @@ void      write_def(const Floorplan& fp, const std::string& path) {
         out << " + COMPONENT " << identifier(blockage.component);
       }
       for (const auto& r : blockage.rectangles) {
-        out << " RECT ( " << std::llround(r.xl) << ' ' << std::llround(r.yl) << " ) ( " << std::llround(r.xh) << ' '
-            << std::llround(r.yh) << " )";
+        out << " RECT " << corners(r);
       }
       out << " ;\n";
     }
