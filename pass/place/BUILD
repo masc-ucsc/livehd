@@ -379,6 +379,8 @@ filegroup(
         "region_mesh.hpp",
         "capacity_bins.cpp",
         "capacity_bins.hpp",
+        "row_occupancy.cpp",
+        "row_occupancy.hpp",
         "cell_criticality.cpp",
         "cell_criticality.hpp",
         "cell_jump.cpp",
@@ -536,6 +538,22 @@ cc_test(
     srcs = ["capacity_bins_test.cpp"],
     copts = COPTS,
     deps = [":capacity_bins", "@googletest//:gtest_main"],
+)
+
+cc_library(
+    name = "row_occupancy",
+    srcs = ["row_occupancy.cpp"],
+    hdrs = ["row_occupancy.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = [":capacity_bins", "//inou/lefdef:inou_lefdef"],
+)
+cc_test(
+    name = "row_occupancy_test",
+    size = "small",
+    srcs = ["row_occupancy_test.cpp"],
+    copts = COPTS,
+    deps = [":row_occupancy", "@googletest//:gtest_main"],
 )
 
 cc_library(
@@ -789,7 +807,7 @@ cc_library(
     hdrs = ["terminal_legalize.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":capacity_bins", ":cell_criticality", ":warpspace", ":prects_networks", ":satlegalize", ":sat_solver", "//core", "//inou/lefdef:inou_lefdef", "@dreamplace//dreamplace/native:placer", "@rapidjson"],
+    deps = [":capacity_bins", ":cell_criticality", ":row_occupancy", ":warpspace", ":prects_networks", ":satlegalize", ":sat_solver", "//core", "//inou/lefdef:inou_lefdef", "@dreamplace//dreamplace/native:placer", "@rapidjson"],
 )
 cc_test(
     name = "terminal_legalize_test",

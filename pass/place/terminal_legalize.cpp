@@ -17,6 +17,7 @@
 #include "cell_criticality.hpp"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
+#include "row_occupancy.hpp"
 #include "sat_solver.hpp"
 #include "satlegalize.hpp"
 
@@ -27,37 +28,8 @@ using Interval           = std::pair<int64_t, int64_t>;
 constexpr double epsilon = 1e-6;
 ph::Rect         box(const Ann_place& p) { return Capacity_bins::footprint(p); }
 double           overlap(const ph::Rect& a, const ph::Rect& b) { return Capacity_bins::overlap(a, b); }
-bool fixed(const Ann_place& p) { return p.status == ph::Status::FIXED || p.status == ph::Status::LOCKED; }
-bool fixed_physical_cell(const ph::Component& c, const ph::Macro& m) {
-  return fixed(c.place) && (m.klass == "CORE WELLTAP" || m.klass == "CORE SPACER");
-}
 double distance(const Ann_place& a, const Ann_place& b) { return std::abs(double(a.x) - b.x) + std::abs(double(a.y) - b.y); }
-void   subtract(std::map<int64_t, int64_t>& gaps, int64_t lo, int64_t hi) {
-  auto it = gaps.upper_bound(lo);
-  if (it != gaps.begin()) {
-    --it;
-  }
-  while (it != gaps.end() && it->first < hi) {
-    const auto [a, b] = *it;
-    if (b <= lo) {
-      ++it;
-      continue;
-    }
-    it = gaps.erase(it);
-    if (a < lo) {
-      gaps.emplace(a, lo);
-    }
-    if (b > hi) {
-      gaps.emplace(hi, b);
-      break;
-    }
-  }
-}
-struct Row {
-  size_t                     source;
-  int64_t                    x, y, step, height, count;
-  std::map<int64_t, int64_t> free;
-};
+using Row = Row_gaps;
 struct Candidate {
   Ann_place place;
   size_t    row;
@@ -240,21 +212,7 @@ struct Model {
     return best;
   }
 
-  void reserve(const ph::Rect& b) {
-    for (auto& row : rows) {
-      if (row.y >= b.yh) {
-        break;
-      }
-      if (row.y + row.height <= b.yl) {
-        continue;
-      }
-      const auto lo = std::clamp<int64_t>(std::floor((b.xl - row.x) / row.step), 0, row.count);
-      const auto hi = std::clamp<int64_t>(std::ceil((b.xh - row.x) / row.step), 0, row.count);
-      if (hi > lo) {
-        subtract(row.free, lo, hi);
-      }
-    }
-  }
+  void reserve(const ph::Rect& b) { reserve_gaps(rows, b); }
   Model(const ph::Technology& technology, ph::Floorplan& frame, const Terminal_legalize_options& controls)
       : tech(technology), fp(frame), options(controls) {
     if (options.route_vias && !options.route_drc) {
@@ -266,42 +224,10 @@ struct Model {
     if (options.route_drc) {
       route_rules.emplace(tech, fp);
     }
-    ph::Rect bounds{std::numeric_limits<double>::infinity(),
-                    std::numeric_limits<double>::infinity(),
-                    -std::numeric_limits<double>::infinity(),
-                    -std::numeric_limits<double>::infinity()};
-    for (size_t i = 0; i < fp.rows.size(); ++i) {
-      const auto& r    = fp.rows[i];
-      const auto  site = tech.sites.find(r.site);
-      if (site == tech.sites.end() || r.count <= 0 || r.step <= 0) {
-        throw std::invalid_argument("terminal legalization requires valid row sites");
-      }
-      const auto h = std::llround(site->second.height * fp.dbu);
-      if (h <= 0 || std::abs(site->second.width * fp.dbu - r.step) > epsilon) {
-        throw std::invalid_argument("terminal legalization requires contiguous row sites");
-      }
-      // Ignore sites outside the die, rounding inward to complete sites.
-      const int64_t lo = std::max<int64_t>(0, std::ceil((fp.die.xl - r.x) / r.step));
-      const int64_t hi = std::min<int64_t>(r.count, std::floor((fp.die.xh - r.x) / r.step));
-      if (hi <= lo || r.y < fp.die.yl || r.y + h > fp.die.yh) {
-        continue;
-      }
-      rows.push_back({i, r.x, r.y, r.step, h, r.count, {{lo, hi}}});
-      max_row_height = std::max<int64_t>(max_row_height, h);
-      bounds         = bounds.hull({double(r.x + lo * r.step), double(r.y), double(r.x + hi * r.step), double(r.y + h)});
-    }
-    if (rows.empty()) {
-      throw std::invalid_argument("terminal legalization has no usable rows");
-    }
-    std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return std::tie(a.y, a.x) < std::tie(b.y, b.x); });
-    for (size_t i = 0; i < rows.size(); ++i) {
-      const auto& a = rows[i];
-      for (size_t j = i + 1; j < rows.size() && rows[j].y < a.y + a.height; ++j) {
-        const auto& b = rows[j];
-        if (std::max(a.x, b.x) < std::min(a.x + a.count * a.step, b.x + b.count * b.step)) {
-          throw std::invalid_argument("terminal legalization does not accept overlapping row definitions");
-        }
-      }
+    rows              = row_gaps(tech, fp, "terminal legalization");
+    const auto bounds = gaps_extent(rows);
+    for (const auto& r : rows) {
+      max_row_height = std::max<int64_t>(max_row_height, r.height);
     }
     report.bins_x = options.bins_x;
     report.bins_y = options.bins_y;
@@ -328,22 +254,14 @@ struct Model {
       }
       original.push_back(c.place);
       preferred.push_back(c.place);
-      const auto mask = ph::placement_mask(c, tech);
-      if (mask == ph::Placement_mask::soft) {
+      const auto role = frame_role(tech, c);
+      if (role == Frame_role::ignored) {
         installed[i] = true;
         continue;
       }
-      const bool core = master->second.klass.starts_with("CORE");
-      movable[i]      = core && !fixed(c.place);
-      if (!core || fixed_physical_cell(c, master->second)) {
-        auto b = box(c.place);
-        if (!core && mask == ph::Placement_mask::none) {
-          b.xl -= options.macro_halo_x_dbu;
-          b.xh += options.macro_halo_x_dbu;
-          b.yl -= options.macro_halo_y_dbu;
-          b.yh += options.macro_halo_y_dbu;
-        }
-        reserve(b);
+      movable[i] = role == Frame_role::movable;
+      if (role == Frame_role::obstacle) {
+        reserve(obstacle_rect(tech, c, options.macro_halo_x_dbu, options.macro_halo_y_dbu));
         obstacles.push_back(i);
         installed[i] = true;
       }
@@ -355,8 +273,7 @@ struct Model {
     for (size_t i = 0; i < rows.size(); ++i) {
       const auto& r = rows[i];
       for (const auto& [a, b] : r.free) {
-        const ph::Rect strip{double(r.x + a * r.step), double(r.y), double(r.x + b * r.step), double(r.y + r.height)};
-        grid.each(strip, [&](size_t bin, double area) {
+        grid.each(gap_rect(r, a, b), [&](size_t bin, double area) {
           grid.bins[bin].capacity += area;
           bin_rows[bin].push_back(i);
         });
@@ -378,15 +295,7 @@ struct Model {
       grid.deposit(c.place, false);
       if (!movable[i]) {
         grid.deposit(c.place, true);
-        auto       b    = box(c.place);
-        const auto site = tech.sites.find(tech.macros.at(c.macro).site);
-        if (site == tech.sites.end()) {
-          throw std::invalid_argument("fixed CORE cell has no site");
-        }
-        const double pad  = options.padding_sites * site->second.width * fp.dbu;
-        b.xl             -= pad;
-        b.xh             += pad;
-        reserve(b);
+        reserve(padded_rect(tech, c, options.padding_sites));
         installed[i] = true;
         obstacles.push_back(i);
       }
@@ -617,7 +526,7 @@ struct Model {
       return;
     }
     fp.components[cell].place = candidate.place;
-    subtract(rows[candidate.row].free, candidate.start, candidate.end);
+    subtract_gaps(rows[candidate.row].free, candidate.start, candidate.end);
     grid.deposit(candidate.place, true);
     installed[cell] = true;
     stages[cell]    = stage;
