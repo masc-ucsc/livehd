@@ -396,6 +396,35 @@ TEST(CustomSizing, AShorterPeriodIsAcceptedAlthoughTnsWorsens) {
   EXPECT_NO_THROW(check_legality(chain.tech, sized.placed.floorplan));
 }
 
+TEST(CustomSizing, AnUnmeasuredTrialIsRejectedNotFatal) {
+  // Rank 1 has no measurable period (as a variant whose register lacks a
+  // setup arc): its trial is rejected with the reason, the state stays, and
+  // the buffer is tried next. Only an unmeasured initial state throws.
+  Domino_chain       chain("sizing_unmeasured");
+  const auto         cold = place(*chain.graph, chain.flat, chain.options);
+  const Table_timing table{chain.catalog.get(), chain.tech.dbu, {{"c1", {-30, -20, -10, -5}}}};
+  const auto         rank = [&](const Result& state, unsigned r) {
+    return std::any_of(state.floorplan.components.begin(), state.floorplan.components.end(), [&](const auto& c) {
+      return c.macro == variant(r);
+    });
+  };
+  const Evaluate evaluate = [&](const Result& state) {
+    if (rank(state, 1)) {
+      throw std::runtime_error("domino sizing needs a measured stage period: unmeasured setup_capture_ps");
+    }
+    return table(state);
+  };
+  const auto sized  = size_custom_placed(cold, chain.options, evaluate, {});
+  const auto report = parse(sized.report);
+  EXPECT_EQ(trial_moves(report), (std::vector<std::string>{"up:rejected_failed", "buffer:accepted"}));
+  EXPECT_NE(std::string(report["trials"][0]["failure"].GetString()).find("unmeasured setup_capture_ps"), std::string::npos);
+  EXPECT_EQ(report["counts"]["rejected_failed"].GetUint(), 1U);
+  EXPECT_EQ(at(sized.placed.floorplan, "c1").macro, variant(0));
+  EXPECT_NO_THROW(check_legality(chain.tech, sized.placed.floorplan));
+  const Evaluate never = [](const Result&) -> Timing_feedback { throw std::runtime_error("unmeasured"); };
+  EXPECT_THROW(size_custom_placed(cold, chain.options, never, {}), std::runtime_error);
+}
+
 TEST(CustomSizing, UsageErrors) {
   Domino_chain chain("sizing_usage");
   const auto   cold = place(*chain.graph, chain.flat, chain.options);

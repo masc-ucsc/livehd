@@ -255,9 +255,10 @@ Repair_result size_custom_placed(Result legal, const Options& requested, const E
       const auto                  t = Clock::now();
       std::optional<Resize_trial> trial;
       std::string                 failure;
+      const char*                 failed_as = "rejected_packing";
       // A variant wider than every row can never be packed (placement would
       // refuse it before the two-row ECO): rejected without a trial.
-      const auto*                 to = move.kind == Move_kind::buffer ? nullptr : catalog.find(move.edit.master);
+      const auto*                 to        = move.kind == Move_kind::buffer ? nullptr : catalog.find(move.edit.master);
       if (to && to->width_dbu > widest_row) {
         failure = std::format("custom variant {} ({} DBU) is wider than every row ({} DBU); no output committed",
                               to->name,
@@ -273,6 +274,12 @@ Repair_result size_custom_placed(Result legal, const Options& requested, const E
                                    dir + "/floorplan.def");
         } catch (const Multirow_failure& error) {
           failure = error.what();  // the two-row ECO found no legal pose: rejected
+        } catch (const std::runtime_error& error) {
+          // Any other failure of one trial (an unmeasured period, say a
+          // variant without a characterized register, or a failed legality
+          // check) rejects that trial: the clone is dropped, the state stays.
+          failure   = error.what();
+          failed_as = "rejected_failed";
         }
       }
       // The period (Feedback::delay, compared in ps) is the objective: a
@@ -283,7 +290,7 @@ Repair_result size_custom_placed(Result legal, const Options& requested, const E
           = trial && electrical_holds(score, trial->timing)
             && (period_ps(trial->timing) < period_ps(score) - sizing.epsilon_ps
                 || (period_ps(trial->timing) <= period_ps(score) + sizing.epsilon_ps && resize_accepts(score, trial->timing)));
-      const auto outcome = keep ? "accepted" : trial ? "rejected_timing" : "rejected_packing";
+      const auto outcome = keep ? "accepted" : trial ? "rejected_timing" : failed_as;
       ++tally[std::string(move_name(move.kind)) + (keep ? "_accepted" : "")];
       ++tally[outcome];
       w.StartObject();
@@ -359,7 +366,8 @@ Repair_result size_custom_placed(Result legal, const Options& requested, const E
   r.StartObject();
   r.Key("trials");
   r.Uint(trials);
-  for (const auto* key : {"up_accepted", "down_accepted", "buffer_accepted", "rejected_timing", "rejected_packing"}) {
+  for (const auto* key :
+       {"up_accepted", "down_accepted", "buffer_accepted", "rejected_timing", "rejected_packing", "rejected_failed"}) {
     r.Key(key);
     r.Uint(tally[key]);
   }

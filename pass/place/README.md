@@ -2573,8 +2573,10 @@ slack steps down. Each trial is one edit through `run_resize_trial` (the
 resize engine's clone, ECO re-place and evaluate) with `multirow_eco`, and
 is accepted when the evaluator's period (`Feedback::delay`, compared in ps)
 is shorter and electrical violations are not worse, or is not worse and
-`resize_accepts` holds; a `Multirow_failure` rejects the trial and leaves the
-state untouched. `domino_sizing.json` and `qor.domino_sizing` list every
+`resize_accepts` holds; a `Multirow_failure` (`rejected_packing`) or any
+other runtime error of the trial, such as an unmeasured period
+(`rejected_failed`), rejects the trial and leaves the state untouched; only
+a failure of the initial evaluation aborts sizing. `domino_sizing.json` and `qor.domino_sizing` list every
 trial, the variant counts and the clock-capacitance change.
 
 `terminal_legalize.json` records settings, bin capacities/areas, stage counts,

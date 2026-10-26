@@ -180,7 +180,9 @@ with the terminal padding kept) and re-timed with the same stage timer; it
 is accepted when the stage period is shorter and electrical violations are
 not worse, or when the period is not worse and setup WNS/TNS (period terms)
 and electrical violations are not worse with some gain (LEF footprint area
-counts). A packing failure is a rejected trial. `.trials` (default 64) bounds
+counts). A packing failure is a rejected trial, and so is any other trial
+failure, such as a variant whose register leaves the stage period
+unmeasured (`rejected_failed`, with its reason). `.trials` (default 64) bounds
 the trials. The netlist is always variant 0 at synthesis, so a down-size
 only follows an up-size. `place/domino_sizing.json` and
 `qor.place.domino_sizing` list each trial, the variant counts and the C_clk
