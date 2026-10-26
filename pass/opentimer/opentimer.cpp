@@ -321,7 +321,7 @@ void Pass_opentimer::time_work(Eprp_var& var) {
     return;
   }
   if (selected.size() > 1) {
-    livehd::diag::err("pass.opentimer", "bad-option", "usage")
+    livehd::diag::err("pass.opentimer", "bad-option", "io")
         .msg("pass.opentimer times one module per run ({} defs in the library): pass --top <module> to pick one", selected.size())
         .fatal();
     return;

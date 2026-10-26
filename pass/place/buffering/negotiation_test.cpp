@@ -108,9 +108,11 @@ struct Fixture {
         {"r", first, width},
         true
     });
-    return {b::expand_tree(*net.context, tree, {0, buffered ? 1u : 0u, 0}),
-            buffered ? std::vector<b::Site_span>{{"r", first, width}} : std::vector<b::Site_span>{},
-            {}};
+    std::vector<b::Site_span> spans;
+    if (buffered) {
+      spans.push_back({"r", first, width});
+    }
+    return {b::expand_tree(*net.context, tree, {0, buffered ? 1u : 0u, 0}), std::move(spans), {}};
   }
 };
 size_t allocated(const b::Allocation_result& result) {

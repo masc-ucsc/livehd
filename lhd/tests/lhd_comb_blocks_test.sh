@@ -9,11 +9,17 @@ python3 - "$W" <<'PY'
 from pathlib import Path
 import sys
 w=Path(sys.argv[1])
-ports=', '.join(f'output [7:0] y{i}' for i in range(600))
+# Several independent chains rather than one deep one: the aegraph value-preservation check
+# (default in dbg builds) and the LEC encoder both grow with chain DEPTH, while the block
+# splitter only needs enough cells in total.
+chains, depth = 12, 25
+names=[f'y{c}_{i}' for c in range(chains) for i in range(depth)]
+ports=', '.join(f'output [7:0] {n}' for n in names)
 s='module chain(input [7:0] a,b, '+ports+');\n'
-for i in range(600):
- previous='a' if i==0 else f'y{i-1}'
- s+=f'assign y{i} = ({previous} + b) ^ (a >> {i%8});\n'
+for c in range(chains):
+ for i in range(depth):
+  previous='a' if i==0 else f'y{c}_{i-1}'
+  s+=f'assign y{c}_{i} = ({previous} + b) ^ (a >> {(i+c)%8});\n'
 s+='endmodule\n'
 (w/'source.v').write_text(s)
 

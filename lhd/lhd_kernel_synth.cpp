@@ -1201,7 +1201,7 @@ void synth_command(Options& opts, Result& res) {
   opts.top = top;
 
   std::unique_ptr<Physical_cache> physical_cache;
-  if (user_workdir && opts.incremental && run_place && place_options.full && (io_store || place_options.preroute.enabled)) {
+  if (user_workdir && opts.incremental && run_place && place_options.full) {
     auto        dependencies = place_options.lefs;
     std::string libraries    = liberty;
     std::replace(libraries.begin(), libraries.end(), ',', ' ');

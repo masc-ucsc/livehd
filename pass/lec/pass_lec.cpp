@@ -386,7 +386,7 @@ void Pass_lec::lec(Eprp_var& var) {
   auto mod  = std::string{impl->get_name()};
 
   if (auto error = lec::match_names_error(ref.get(), impl.get(), o.match); !error.empty()) {
-    livehd::diag::err("pass.lec", "unresolved-match", "usage").msg("{}", error).fatal();
+    livehd::diag::err("pass.lec", "unresolved-match", "io").msg("{}", error).fatal();
     return;
   }
   if (o.timeout > 0) {

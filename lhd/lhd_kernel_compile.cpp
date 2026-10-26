@@ -2077,24 +2077,39 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
     // A reused lg: library whose GraphIO decls drifted from its bodies (two
     // ports on one port id) leaves a graph-IO pin unnamed: refuse it before any
     // pass (aegraph, cprop) names a pin, with a config diagnostic, not a crash.
+    // An instantiated child is reported the way the flattener words it.
+    absl::flat_hash_map<const hhds::GraphIO*, std::string> instantiated;
+    if (opts.command == "synth") {
+      for (const auto& g : active->graphs) {
+        for (auto node : g->body().nodes()) {
+          if (livehd::graph_util::type_op_of(node) == Ntype_op::Sub) {
+            if (auto child = node.get_subnode_io()) {
+              instantiated.try_emplace(child.get(), std::string{livehd::graph_util::node_name_of(node)});
+            }
+          }
+        }
+      }
+    }
     for (const auto& g : opts.command == "synth" ? active->graphs : decltype(active->graphs){}) {
       const auto gio = g ? g->get_io() : nullptr;
       if (gio == nullptr) {
         continue;
       }
+      const auto inst = instantiated.find(gio.get());
       absl::flat_hash_map<hhds::Port_id, std::string_view> owner;
       for (const auto* decls : {&gio->get_input_pin_decls(), &gio->get_output_pin_decls()}) {
         for (const auto& d : *decls) {
           const auto [it, is_new] = owner.try_emplace(d.port_id, d.name);
           if (!is_new) {
-            livehd::diag::err("pass.partition", "io-port-clash", "io")
-                .msg("'{}' declares ports '{}' and '{}' on the same port id {}: its GraphIO is out of sync with its body",
-                     g->get_name(),
-                     it->second,
-                     d.name,
-                     d.port_id)
-                .hint("re-create the lg: library from source into a fresh --emit-dir lg: directory")
-                .fatal();
+            throw Lhd_error{"config",
+                            std::format("{}'{}'{} declares ports '{}' and '{}' on the same port id {}: its GraphIO is out of sync with its body",
+                                        inst == instantiated.end() ? "" : "flatten: ",
+                                        g->get_name(),
+                                        inst == instantiated.end() ? std::string{} : std::format(" (instance '{}')", inst->second),
+                                        it->second,
+                                        d.name,
+                                        d.port_id),
+                            "re-create the lg: library from source into a fresh --emit-dir lg: directory"};
           }
         }
       }

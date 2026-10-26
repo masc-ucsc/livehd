@@ -50,9 +50,10 @@ fail() {
 # compile_design <dir> <slang -G...>: slang -> lg:<dir>/lg (the LEC reference).
 compile_design() {
   local d="$1" gparam="$2"
+  shift 2
   mkdir -p "$d"
   "$LHD" compile "$SRC" --reader slang --top membank --emit-dir lg:"$d/lg" --workdir "$d/w1" \
-      -q --result-json "$d/r.json" -- "$gparam" || fail "compile $gparam -> $(cat "$d/r.json" 2>/dev/null)"
+      -q --result-json "$d/r.json" -- "$gparam" "$@" || fail "compile $gparam -> $(cat "$d/r.json" 2>/dev/null)"
 }
 # map_design <dir> <lib> [extra pass.abc --set ...]: color + pass.abc (memory=true
 # enabled) -> lg:<dir>/net, plus the gensim models of <lib> -> lg:<dir>/models.
@@ -72,7 +73,7 @@ map_design() {
 # mem_lower's refinements are sound in), compiled design as REF, cell models.
 lec_cvc5() {
   local nd="$1" rd="$2" out="$3"
-  "$LHD" lec --set formal.effort=proof --impl lg:"$nd/net" --ref lg:"$rd/lg" --lib lg:"$nd/models" --top membank.membank \
+  "$LHD" lec --set formal.effort=proof --set formal.simfail_run=false --impl lg:"$nd/net" --ref lg:"$rd/lg" --lib lg:"$nd/models" --top membank.membank \
       --workdir "$nd/wc5" -q --result-json "$out" > "$out.log" 2>&1
   echo $?
 }
@@ -154,22 +155,29 @@ echo "PASS: whole native storage flops mem._mem[i] are PROVEN (unbounded) agains
 # ---------------------------------------------------------------------------
 # 4. negative control: a corrupted write address in the SAME bank shape refutes
 # ---------------------------------------------------------------------------
+# The refutation is a bounded search (cost grows with the bank), so the control
+# uses a 4 x 4 bank of the same shape: the good 4 x 4 twin is the reference.
 BAD="$W/bad"
-compile_design "$BAD" -GBAD=1
+SMALL="$W/small"
+compile_design "$SMALL" -GBAD=0 -GN=4 -GW=4
+compile_design "$BAD" -GBAD=1 -GN=4 -GW=4
 map_design "$BAD" "$LIB"
-[ "$(ncell "$BAD" DFFx1)" -eq 64 ] || fail "bad: expected 64 DFFx1 storage cells, got $(ncell "$BAD" DFFx1)"
-rc=$(lec_cvc5 "$BAD" "$GOOD" "$BAD/lec.json")
+[ "$(ncell "$BAD" DFFx1)" -eq 16 ] || fail "bad: expected 16 DFFx1 storage cells (4 x 4), got $(ncell "$BAD" DFFx1)"
+rc=$(lec_cvc5 "$BAD" "$SMALL" "$BAD/lec.json")
 [ "$rc" -eq 10 ] || fail "bad: cvc5 lec exited $rc (want the counterexample class 10) on a netlist that writes the wrong entry: $(verdict "$BAD/lec.json")"
 grep -q '"verdict":"refuted-cex"' "$BAD/lec.json" || fail "bad: expected REFUTED for the corrupted write address, got $(verdict "$BAD/lec.json")"
 grep -q '"class":"equiv_fail"' "$BAD/lec.json" || fail "bad: refutation is not an equiv_fail: $(cat "$BAD/lec.json")"
 echo "PASS: a netlist with a corrupted write address in the same bank shape is REFUTED (the tie hides nothing)"
 
+run() { "$LHD" "$@" -q --result-json "$BAD/r.json" || fail "$* -> $(cat "$BAD/r.json" 2>/dev/null)"; }
+run compile lg:"$SMALL/lg" --top membank.membank --emit-dir verilog:"$BAD/refv" --workdir "$BAD/w8"
+cat "$BAD/refv/"*.v > "$BAD/ref.v"
 cat "$BAD/netv/"*.v "$W/q/modelsv/"*.v > "$BAD/impl.v"
 # The verdict is what this control checks. Replaying its counterexample in
 # `lhd sim` (formal.simfail_run) would build a 333-instance gate-level host
 # simulator -- 16 s of the test under bazel's 2-CPU cap -- and that replay has
 # its own tests (lec_witness_replay_test, lec_witness_prpfail_test).
-"$LHD" lec --set formal.effort=proof --set formal.simfail_run=false --impl verilog:"$BAD/impl.v" --ref verilog:"$W/q/ref.v" \
+"$LHD" lec --set formal.effort=proof --set formal.simfail_run=false --impl verilog:"$BAD/impl.v" --ref verilog:"$BAD/ref.v" \
     --top membank --workdir "$BAD/wv5" -q --result-json "$BAD/lec_verilog.json" > "$BAD/lec_verilog.log" 2>&1
 rc=$?
 [ "$rc" -eq 10 ] || fail "bad: Verilog correspondence hid the corrupted write address (rc=$rc)"

@@ -190,6 +190,41 @@ void comb_state_reach(const hhds::Pin_class& start, absl::flat_hash_set<hhds::Cl
 
 hhds::Pin_class sink_driver(const hhds::Node_class& n, std::string_view pin) { return gu::get_driver_of_sink_name(n, pin); }
 
+// The SOURCE of a double Boolean negation `!!x` of a one-bit value (a mapped netlist spells a
+// buffer as two inverter cells, each `EQ(x, 0)`), or an invalid pin. Exact: for a one-bit x,
+// !!x == x.
+hhds::Pin_class double_not_source(const hhds::Pin_class& p) {
+  const auto negated = [](const hhds::Pin_class& q) -> hhds::Pin_class {
+    if (q.is_invalid() || q.is_const() || gu::is_graph_input_pin(q)) {
+      return {};
+    }
+    const auto n = q.get_master_node();
+    if (gu::type_op_of(n) != Ntype_op::EQ) {
+      return {};
+    }
+    hhds::Pin_class value;
+    int             values = 0;
+    bool            zero   = false;
+    for (auto sink : n.inp_sorted_pins()) {
+      for (const auto& drv : sink.get_driver_pins()) {
+        if (drv.is_const()) {
+          const auto& c = gu::const_of(drv);
+          zero          = c.is_just_i64() && !c.has_unknowns() && c.to_just_i64() == 0;
+        } else {
+          value = drv;
+          ++values;
+        }
+      }
+    }
+    if (!zero || values != 1 || gu::bits_of(value) != 1) {
+      return {};
+    }
+    return value;
+  };
+  const auto once = negated(p);
+  return once.is_invalid() ? hhds::Pin_class{} : negated(once);
+}
+
 // The SOURCE of a zero-extend wrapper, or an invalid pin.
 //
 // An ICG's enable often reaches the gate through a width adapter rather than
@@ -821,7 +856,8 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_cloc
           if (gu::type_op_of(dn) != Ntype_op::Latch) {
             auto under = en;
             for (int depth = 0; depth < 4; ++depth) {
-              under = zext_source(under);
+              auto widened = zext_source(under);
+              under        = widened.is_invalid() ? double_not_source(under) : widened;
               if (under.is_invalid()) {
                 break;
               }

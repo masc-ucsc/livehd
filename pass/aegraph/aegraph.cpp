@@ -721,6 +721,8 @@ public:
     return true;
   }
 
+  [[nodiscard]] size_t cone_size() const { return cone_.size(); }
+
   void evaluate(uint64_t vec) {
     vals_.clear();
     for (const auto c : cone_) {
@@ -941,6 +943,7 @@ private:
   // original node). Returns the class that stands for the node afterwards.
   Class_id         rewrite(Class_id cls, uint32_t depth);
   void             check_pair(Class_id a, Class_id b, rt::Rule_id rule);
+  uint64_t         check_work_ = 0;  // class evaluations spent by check_pair on this graph (bounded: kCheckWorkBudget)
   void             check_full();
   void             compute_best();
   // The expression cost of a class's cheapest realization (compute_best), and the width its price is taken at.
@@ -1631,13 +1634,22 @@ Class_id Engine::rewrite(Class_id cls, uint32_t depth) {
 // check=unions (and check=full for each rewrite): the two classes must agree on
 // 8 random assignments.
 void Engine::check_pair(Class_id a, Class_id b, rt::Rule_id rule) {
-  constexpr size_t kConeFuel = 4096;
-  Checker          ck(eg_, nullptr);
-  const Class_id   roots[2] = {a, b};
+  constexpr size_t   kConeFuel        = 4096;
+  // The check is a debug-build sanity net, and every union evaluates its whole cone: on a large flat netlist
+  // (a 128-bit gate-level adder) that is quadratic and took minutes. A per-graph budget keeps the early unions
+  // (where a bad rule shows up first) fully checked and skips the rest.
+  constexpr uint64_t kCheckWorkBudget = 300'000;
+  if (check_work_ >= kCheckWorkBudget) {
+    ++stats_.check_skipped;
+    return;
+  }
+  Checker        ck(eg_, nullptr);
+  const Class_id roots[2] = {a, b};
   if (!ck.gather(roots, kConeFuel)) {
     ++stats_.check_skipped;
     return;
   }
+  check_work_ += 8 * ck.cone_size();
   for (uint64_t vec = 1; vec <= 8; ++vec) {
     ck.evaluate(vec);
     const auto same = Checker::same(ck.value(a), ck.value(b));
