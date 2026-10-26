@@ -214,7 +214,7 @@ struct Options {
   Uroute_options uroute;
   // Internal: a pool snapshot preloaded by load_uroute_pool(), reused when its
   // resolved controls match so one run hashes the manifest/weights once.
-  std::shared_ptr<const Uroute_pool> uroute_pool;
+  std::optional<Uroute_pool> uroute_pool;
   // Internal immutable snapshot supplied to the H2D host adapter.
   Uroute_selection uroute_selection;
   Uroute_identity  uroute_stage_identity;
@@ -277,9 +277,9 @@ DreamPlace::native::RoutePolicy resolve_route_policy(const Options&, const Stage
 void                            initialize_route_tables();
 // The learned-routing pool snapshot requested by any stage, or nullptr. Store it
 // in Options::uroute_pool to reuse one snapshot for replay identity and placement.
-std::shared_ptr<const Uroute_pool> load_uroute_pool(const Options&);
+std::optional<Uroute_pool>      load_uroute_pool(const Options&);
 // Content identity of requested learned routing inputs for whole-flow replay.
-std::string                        uroute_cache_identity(const Options&);
+std::string                     uroute_cache_identity(const Options&);
 struct Macro_gp_timing {
   Timing_feedback                                  timing;
   std::shared_ptr<physical::Parasitics>            parasitics;

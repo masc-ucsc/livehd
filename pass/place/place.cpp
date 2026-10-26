@@ -2495,15 +2495,23 @@ static bool uroute_requested_by(const Options& options) {
 }
 // The preloaded snapshot when it was built from these resolved controls, else a
 // fresh load of the manifest and weights.
-static std::shared_ptr<const Uroute_pool> uroute_pool_for(const Options& options) {
+static Uroute_pool uroute_pool_for(const Options& options) {
   auto resolved = resolve_uroute_options(options.uroute);
   if (options.uroute_pool && options.uroute_pool->options() == resolved) {
-    return options.uroute_pool;
+    return *options.uroute_pool;  // shares the immutable snapshot
   }
-  return std::make_shared<const Uroute_pool>(std::move(resolved));
+  return Uroute_pool(std::move(resolved));
 }
-std::shared_ptr<const Uroute_pool> load_uroute_pool(const Options& options) {
-  return uroute_requested_by(options) ? uroute_pool_for(options) : nullptr;
+std::optional<Uroute_pool> load_uroute_pool(const Options& options) {
+  if (!uroute_requested_by(options)) {
+    return std::nullopt;
+  }
+  return uroute_pool_for(options);
+}
+// place_single() consults the pool only for a fresh routability solve.
+static bool uroute_pool_used(const Options& options) {
+  return (options.routability || (options.macro_mode == "h2d" && options.macro_parameters.routability)) && !options.timing_seed
+         && !options.retain_placement;
 }
 std::string uroute_cache_identity(const Options& options) {
   // Whole-flow replay can bypass place() entirely. Validate and fingerprint
@@ -4596,12 +4604,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           += double(c.place.width + 2 * v.halo_x) * (c.place.height + 2 * v.halo_y) - double(c.place.width) * c.place.height;
     }
   }
-  auto                               resolved_uroute  = resolve_uroute_options(options.uroute);
-  const bool                         uroute_requested = uroute_requested_by(options);
-  std::shared_ptr<const Uroute_pool> uroute_data;
-  Uroute_selection                   selected_uroute, macro_uroute;
-  if (uroute_requested && (options.routability || (options.macro_mode == "h2d" && options.macro_parameters.routability))
-      && !options.timing_seed && !options.retain_placement) {
+  auto                       resolved_uroute  = resolve_uroute_options(options.uroute);
+  const bool                 uroute_requested = uroute_requested_by(options);
+  std::optional<Uroute_pool> uroute_data;
+  Uroute_selection           selected_uroute;
+  if (uroute_requested && uroute_pool_used(options)) {
     uroute_data = uroute_pool_for(options);
   }
   std::string uroute_tech;
@@ -5282,9 +5289,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
     resolved.uroute_stage_identity = uroute_id(v);
     if (uroute_data && options.macro_route.policy.probe && options.macro_route.policy.probe_model == dp::RouteModel::uroute) {
-      macro_uroute                = select_uroute([&]() -> const View& { return v; }, resolved.macro_parameters.bins);
-      resolved.uroute_selection  = macro_uroute;
-      identity                  += ":uroute-selection:" + macro_uroute.cache_identity + ":" + macro_uroute.skipped;
+      resolved.uroute_selection  = select_uroute([&]() -> const View& { return v; }, resolved.macro_parameters.bins);
+      const auto& selected       = resolved.uroute_selection;
+      identity                  += ":uroute-selection:" + selected.cache_identity + ":" + selected.skipped;
     }
     macro_run              = place_macros(v.design, macro_report_info, *hierarchy, resolved, identity);
     macro_solved           = !macro_run->cache_hit;
@@ -10378,6 +10385,11 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
   macro_options.completed_stage    = Placement_stage::macro;
   macro_options.cache_dir.clear();
   macro_options.output_dir  += "/macro";
+  // Both staged passes select from one pool snapshot, reusing a matching host
+  // preload, so the manifest and weights are hashed once.
+  if (uroute_pool_used(options)) {
+    macro_options.uroute_pool = load_uroute_pool(options);
+  }
   const auto start           = std::chrono::steady_clock::now();
   auto       macro           = place_single(source, macro_library, macro_options);
   const auto macro_end       = std::chrono::steady_clock::now();
@@ -10406,6 +10418,7 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
   const auto frame = macro_options.output_dir + "/fixed.def";
   ph::write_def(macro.floorplan, frame);
   auto cell_options             = final_cell_options(staged_options);
+  cell_options.uroute_pool      = macro_options.uroute_pool;
   cell_options.stage_pin_status = std::move(pin_status);
   if (!options.final_independent_timing) {
     cell_options.net_weights = macro.net_weights;
