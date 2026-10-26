@@ -225,6 +225,18 @@ dependencies, and exports the bundle with `--emit-dir report:`.
 `lhd/tests/lhd_domplace_smoke.py` checks the refusals, the report and sidecar,
 and sequential LEC: proven with `--lib lg:<qor>.domino/models` beside the
 gensim cell models, not proven without them.
+`lhd_domplace_cases_smoke.py` places the H cases: retained `clock-domain` and
+`identity-endpoint` states, a complemented converted-Q rail (a real
+inverter), a converted Q shared by its output port and another domino's rail,
+and a 12-literal endpoint whose excess moves into upstream CMOS. It checks
+placed-netlist LEC and three replays in one workdir: warm (logical and mapped
+hits, byte-identical bundle, restored placement), `domino_aux=5` (logical and
+mapped hits, new bundle, fresh placement), and an all-CMOS control under the
+profile. `lhd_domplace_floorplan_smoke.py` places into an imported pinless
+frame narrow enough to fit only one anchor per row pair. One site narrower,
+it checks the named atomic packing failure. Imported DEF placement blockages
+cannot fragment rows here yet, because terminal legalization does not consult
+them.
 
 ## Matched commands
 
