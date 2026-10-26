@@ -425,6 +425,7 @@ filegroup(
         "technology_rc.cpp",
         "routing_tracks.hpp",
         "technology_rc.hpp",
+        "track_capacity.hpp",
         "timing_place.cpp",
         "terminal_legalize.cpp",
         "terminal_legalize.hpp",
