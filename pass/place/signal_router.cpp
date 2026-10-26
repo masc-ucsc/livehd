@@ -306,8 +306,7 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
   if (stage.expired()) {
     return out;
   }
-  if (net.connections.size() != 2 || !net.wires.empty() || aligned.endpoints.size() != 2
-      || (!net.use.empty() && net.use != "SIGNAL")) {
+  if (!ph::unrouted_signal(net) || net.connections.size() != 2 || aligned.endpoints.size() != 2) {
     return stage.fail("layer lift requires an unwired aligned two-pin signal");
   }
   const auto& a          = aligned.endpoints[0];
@@ -484,7 +483,7 @@ Signal_route_trial Signal_router::propose_straight(const ph::Net& net, const ph:
   if (!limits.patterns) {
     return stage.fail("pattern budget");
   }
-  if (!net.wires.empty() || net.connections.size() != 2 || (!net.use.empty() && net.use != "SIGNAL")) {
+  if (!ph::unrouted_signal(net) || net.connections.size() != 2) {
     return stage.fail("straight route requires an unwired two-pin signal net");
   }
   const auto layer     = tech_.layers.find(corridor.layer);
@@ -518,9 +517,7 @@ Signal_route_trial Signal_router::propose_straight(const ph::Net& net, const ph:
       {},
       {ph::Route_point{std::llround(x1), std::llround(y1), {}}, ph::Route_point{std::llround(x2), std::llround(y2), {}}}
   });
-  auto trial = net;
-  trial.wires.push_back({"FIXED", geometry.paths});
-  const auto shapes = ph::route_geometry(tech_, frame_, trial);
+  const auto shapes = proposal_shapes(net, geometry.paths);
   if (shapes.size() != 1) {
     return stage.fail("straight route must have one metal rectangle");
   }
@@ -579,7 +576,7 @@ Signal_route_trial Signal_router::propose_straight(const ph::Net& net, const ph:
       return stage.fail("straight-route endpoint misses its pin");
     }
   }
-  const auto connected = ph::check_route_connectivity(tech_, frame_, trial, &components_);
+  const auto connected = connectivity(net, geometry.paths);
   if (!connected.connected) {
     return stage.fail(connected.reason);
   }
@@ -602,7 +599,7 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
   if (!net.wires.empty()) {
     return stage.fail("net already has wiring");
   }
-  if ((!net.use.empty() && net.use != "SIGNAL") || net.connections.size() < 2) {
+  if (!ph::unrouted_signal(net)) {
     return stage.fail("not a multi-terminal signal net");
   }
   if (!profile_.allows(profile_.access.escape)) {
