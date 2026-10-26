@@ -45,6 +45,19 @@ still requires nonincreasing whole-network cost/depth before acceptance.
 
 `synth.mapper=usyn` selects the register-to-register USYN coloring profile.
 Configure the pass with `pass.usyn.*`; ABC options are not inherited.
+
+Memories stay native blocks. USYN never lowers a Memory into registers and
+decode (`memory_module.cpp` is pass.abc's), whatever its size or port count, so
+`synth.memory` and `pass.abc.memory`/`memory_max_bits` do not apply to it (the
+HighTide harness passes `synth.memory=flops` to every arm; only pass.abc reads
+it). A memory is a native barrier of its region: it never enters the logical
+state, the endpoint search, the selection cache identity beyond its name, or
+the domino profile, which reports it as a `memory` barrier. `region_emit`
+reconnects it unchanged, the technology map preserves it, placement models it
+as a proxy macro, and `lhd lec` pairs it with the reference Memory directly
+(no per-entry flop bank to search). `lhd_usyn_memory_lec_smoke.py` checks the
+placed netlist: one native memory, no `_mem[` flops, PROVEN-full with no
+unpaired state.
 Equivalence is checked separately with `lhd lec`; synthesis invokes no prover.
 
 ## Register-rooted redesign in progress

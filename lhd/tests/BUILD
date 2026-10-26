@@ -2974,6 +2974,21 @@ sh_test(
     ],
 )
 
+# USYN keeps a memory one native block (also under the domino profile, as a
+# `memory` barrier), native stage timing runs through its proxy macro, and the
+# placed netlist names every register and domino cell after its source state:
+# lhd lec pairs them by name (no unpaired state) and proves them PROVEN-full.
+sh_test(
+    name = "lhd_usyn_memory_lec_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_usyn_memory_lec_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
 # 2d-domplace U22: a converted register's synchronous or asynchronous reset
 # drives its storage RST pin (never a PDN rail), the stage timer counts it as
 # a false path, and the placed netlist is LEC-proven with the bundle models.
