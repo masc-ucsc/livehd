@@ -233,6 +233,37 @@ TEST(LateTiming, ForwardedClockAliasesRequireAValidatedPositiveClockPath) {
   EXPECT_TRUE(issue(unsupported, "forwarded-clock root is not reached"));
 }
 
+TEST(LateTiming, AnUnconnectedGateInputDoesNotMakeAClockBuffer) {
+  // The library AND2 has two inputs; leaving B unconnected must not let the
+  // ideal clock pass it as if it were a single-input buffer.
+  Circuit circuit({"clk", "d"}, {"q"});
+  circuit.library = std::make_shared<nldm::Library>(nldm::parse(models + R"(
+    library(gates){time_unit:"1ps";capacitive_load_unit(1,ff);default_input_pin_cap:1;
+      cell(AND2){pin(A){direction:input;}pin(B){direction:input;}pin(Y){direction:output;function:"A&B";
+        timing(){related_pin:A;timing_sense:positive_unate;cell_rise(scalar){values("5");}cell_fall(scalar){values("5");}
+          rise_transition(scalar){values("1");}fall_transition(scalar){values("1");}}
+        timing(){related_pin:B;timing_sense:positive_unate;cell_rise(scalar){values("5");}cell_fall(scalar){values("5");}
+          rise_transition(scalar){values("1");}fall_transition(scalar){values("1");}}}}
+    })"));
+  auto gate = circuit.cell("g", "AND2"), flop = circuit.cell("ff", "FF");
+  gate.create_sink_pin("A").connect_driver(circuit.graph->get_input_pin("clk"));
+  flop.create_sink_pin("CLK").connect_driver(gate.create_driver_pin("Y"));
+  flop.create_sink_pin("D").connect_driver(circuit.graph->get_input_pin("d"));
+  circuit.graph->get_output_pin("q").connect_driver(flop.create_driver_pin("Q"));
+  late::Constraints constraints;
+  constraints.clock                  = late::Ideal_clock{.period_ps = 100, .roots = {"clk"}};
+  constraints.inputs["d"].arrival_ps = {10, 10};
+  constraints.outputs["q"]           = {
+      {100, 100},
+      {}
+  };
+  constraints.complete = true;
+  const auto result    = late::Proxy(*circuit.graph, circuit.library, constraints).evaluate();
+  EXPECT_FALSE(result.certified);
+  EXPECT_TRUE(issue(result, "ideal clock through unsupported inversion/gating: g:Y"));
+  EXPECT_FALSE(pin(result, "ff:CLK").clock);
+}
+
 TEST(LateTiming, InversionTracksTransitionsAndBackwardRequirements) {
   Circuit circuit({"a"}, {"z"});
   auto    inv = circuit.cell("u", "INV");

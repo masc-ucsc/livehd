@@ -451,8 +451,10 @@ struct Proxy::Impl {
             if (arc.related_pin != pins[pin].model->name) {
               continue;
             }
-            const auto inputs = std::count_if(cell.pins.begin(), cell.pins.end(), [&](const auto& item) {
-              return pins[item.second].model->direction == "input";
+            // Count the library's inputs: an unconnected gate input does not
+            // turn a gate into a buffer.
+            const auto inputs = std::count_if(cell.model->pins.begin(), cell.model->pins.end(), [](const auto& item) {
+              return item.second.direction == "input";
             });
             if (inputs == 1 && arc.sense == model::Sense::positive && arc.when.empty() && arc.type == "combinational") {
               visit(output);
