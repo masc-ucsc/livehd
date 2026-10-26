@@ -43,7 +43,8 @@ struct Geometry_inputs {
 // without a registered profile uses the bottom of its LEF routing stack: pin
 // metal = routing layer 0, escape = layer 1, their cut = the cut layer of a LEF
 // via joining the two, branch = layer 2. `source` records the choice
-// ("tech-profile:<name>" or "lef-stack"). A stack too short to derive throws.
+// ("tech-profile:<name>" or "lef-stack"). A LEF matching two profiles or a
+// stack too short to derive throws.
 physical::Route_policy              domino_route_policy(const physical::Technology&, std::string* source);
 // The named reference inverter's footprint (it must be a one-row CORE cell
 // on a LEF SITE with distinct PG rails on both row edges, else this throws),

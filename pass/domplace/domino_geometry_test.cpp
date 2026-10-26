@@ -186,6 +186,16 @@ TEST(DominoGeometry, RoutePolicyFallsBackToTheLefStackWithoutAProfile) {
   auto short_stack = synthetic();
   short_stack.routing_layers.pop_back();
   EXPECT_THROW(domino_route_policy(short_stack, &source), std::invalid_argument);
+  // A registered profile's LEF takes that profile's route policy.
+  ASSERT_FALSE(ph::tech_profiles().empty());
+  const auto& profile = ph::tech_profiles().front();
+  ASSERT_FALSE(profile.detect_sites.empty());
+  auto known = synthetic();
+  known.sites[profile.detect_sites.front()];
+  const auto profiled = domino_route_policy(known, &source);
+  EXPECT_EQ(source, "tech-profile:" + profile.name);
+  EXPECT_EQ(profiled.access.pin, profile.route.access.pin);
+  EXPECT_EQ(profiled.branch_layer, profile.route.branch_layer);
 }
 TEST(DominoGeometry, PinTermWidensWideInputMasters) {
   const auto in = geometry_inputs(sky130(), kInv, kSky130Route);

@@ -265,14 +265,12 @@ std::optional<std::string> horizontal_refusal(const ph::Pin_access_result& acces
 }
 }  // namespace
 ph::Route_policy domino_route_policy(const ph::Technology& tech, std::string* source) {
-  try {
-    const auto& profile = ph::resolve_tech_profile(tech);
+  // An ambiguous LEF throws; only a LEF no profile matches falls back to its stack order.
+  if (const auto* profile = ph::detect_tech_profile(tech)) {
     if (source) {
-      *source = "tech-profile:" + profile.name;
+      *source = "tech-profile:" + profile->name;
     }
-    return profile.route;
-  } catch (const std::invalid_argument&) {
-    // No registered profile: derive the policy from the LEF stack order below.
+    return profile->route;
   }
   const auto& stack = tech.routing_layers;
   if (stack.size() < 3) {
