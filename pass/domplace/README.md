@@ -182,6 +182,17 @@ stays CMOS: it gets the reset buffer tree of every mapper before placement
 check and counts `reset->domino` under `coverage.false_paths`; it never enters
 the period or the input->domino class.
 
+## Rail buffering (U24)
+
+Ruled 2026-10-26 ("yes if it improves timing"): under the profile, a net on
+domino data rails with more than `synth.place.domino_rail_fanout` (default
+32, 0 off) cell loads gets the pre-placement buffer tree of the reset nets
+(pass/place `reset_tree.hpp`, buffers `__place_railtree*`). The per-region
+mapping never buffers a rail, and a 1344-pin rail limited sha3. The sweep on
+HighTide (ORFS frame, arm 3): sha3 3967 -> 2226 ps with 0/0 max-cap/max-transition
+violations (16: 2210 ps for 2.6x the buffers; 64: 2661 ps, 69/62 violations);
+lfsr unchanged (no rail above 32 loads).
+
 ## Model schema
 
 `stage_model.hpp` holds `Stage_model` version 1: the clock domain, the

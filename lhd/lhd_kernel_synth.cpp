@@ -854,7 +854,7 @@ livehd::placement::Options placement_options(const Options& opts) {
                       "expected 0 (off) or an integer >= 2: loads per reset buffer"};
     }
     out.reset_fanout = static_cast<unsigned>(fanout);
-    const auto rails = integer("place.domino_rail_fanout", "0");
+    const auto rails = integer("place.domino_rail_fanout", "32");
     if (rails < 0 || rails == 1) {
       throw Lhd_error{"usage",
                       std::format("invalid synth.place.domino_rail_fanout: {}", rails),

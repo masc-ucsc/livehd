@@ -1097,10 +1097,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "stage timing clock port at the SDC clock period; empty: pass.usyn.domino_clock, else the SDC's one clock port"},
     {"place.domino_rail_fanout",
-     "0",
+     "32",
      Synth_set_option::Kind::integer,
-     "experiment, pass.usyn.physical=domino_provisional: the same pre-placement buffer tree for nets on domino data rails "
-     "(at most this many loads per buffer); 0 (default) leaves rails as the mapping emitted them"},
+     "pass.usyn.physical=domino_provisional: a net on domino data rails with more cell loads is dealt through the "
+     "pre-placement buffer tree of synth.place.reset_fanout, at most this many loads per buffer (the per-region mapping "
+     "never buffers a rail); 0 leaves rails as the mapping emitted them. No effect without domino cells"},
     {"place.domino_sizing",
      "false",
      Synth_set_option::Kind::boolean,

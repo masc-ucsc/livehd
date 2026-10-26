@@ -1068,9 +1068,13 @@ value is part of the placement cache identity. The tree is not reset repair:
 `synth.place.repair.reset=true` (sizing reset cones) stays rejected, and the tree's nets
 keep the pre-CTS exclusion below (the buffers are reset-network cells).
 
-`synth.place.domino_rail_fanout` applies the same tree to nets on domino data rails under
-`pass.usyn.physical=domino_provisional` (the per-region mapping never buffers a rail), with
-buffers named `__place_railtree*`; `qor.place.domino_rail_tree` reports it.
+`synth.place.domino_rail_fanout` (default 32 since 2d-domplace U24, 0 off) applies the same tree
+to nets on domino data rails under `pass.usyn.physical=domino_provisional` (the per-region
+mapping never buffers a rail), with buffers named `__place_railtree*`;
+`qor.place.domino_rail_tree` reports it. Without domino cells it does nothing. On HighTide sha3
+(ORFS frame, arm 3) it took the stage period from 3967 to 2226 ps and max-cap/max-transition
+violations from 51/78 to 0/0 for 170 buffers (16 loads: 2210 ps, 444 buffers; 64: 2661 ps,
+69/62); lfsr has no rail above 32 loads, so it is unchanged.
 
 Clock/reset nets are excluded from GP wirelength, RUDY demand, connectivity-driven
 movement, IO attraction and legalization criticality/alignment. Synthesis preserves
