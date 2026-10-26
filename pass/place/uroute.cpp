@@ -389,6 +389,16 @@ std::function<void(const dp::Design&, int, int)> uroute_probe_exporter(fs::path 
   };
 }
 
+void add_uroute_status(rapidjson::Value& object, rapidjson::Document::AllocatorType& allocator, const std::string& skipped,
+                       const std::vector<std::string>& sample_ids) {
+  object.AddMember("uroute_skipped", rapidjson::Value(skipped.c_str(), allocator), allocator);
+  rapidjson::Value ids(rapidjson::kArrayType);
+  for (const auto& id : sample_ids) {
+    ids.PushBack(rapidjson::Value(id.c_str(), allocator), allocator);
+  }
+  object.AddMember("uroute_sample_ids", ids, allocator);
+}
+
 void export_uroute(const fs::path& directory, const dp::Design& design, const Uroute_identity& id, int nx, int ny,
                    double capacity_h, double capacity_v) {
   if (!std::isfinite(capacity_h) || !std::isfinite(capacity_v) || capacity_h < 0 || capacity_v < 0

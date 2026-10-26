@@ -310,12 +310,7 @@ void write_macro_report(const Macro_run& run, const dp::Design& d, const std::ve
   json.AddMember("route_score_model",
                  rapidjson::Value(route_options.model == dp::RudyModel::rsmt ? "rsmt" : "rudy", allocator),
                  allocator);
-  json.AddMember("uroute_skipped", rapidjson::Value(result.placement.uroute_skipped.c_str(), allocator), allocator);
-  rapidjson::Value ids(rapidjson::kArrayType);
-  for (const auto& id : result.placement.uroute_sample_ids) {
-    ids.PushBack(rapidjson::Value(id.c_str(), allocator), allocator);
-  }
-  json.AddMember("uroute_sample_ids", ids, allocator);
+  add_uroute_status(json, allocator, result.placement.uroute_skipped, result.placement.uroute_sample_ids);
   json.AddMember("route_probe_overflow", result.placement.route_probe_overflow, allocator);
   json.AddMember("route_uroute_switch_iteration", result.placement.route_uroute_switch_iteration, allocator);
   json["units"].AddMember("dbu_per_um", dbu_per_um, allocator);

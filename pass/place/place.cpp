@@ -9306,11 +9306,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Key("uroute_weights_sha256");
     json.String(selected_uroute.weights_sha256.c_str());
     json.Key("sample_ids");
-    json.StartArray();
-    for (const auto& id : metrics.uroute_sample_ids) {
-      json.String(id.c_str());
-    }
-    json.EndArray();
+    write_uroute_sample_ids(json, metrics.uroute_sample_ids);
     json.EndObject();
     json.Key("global_model");
     json.String(options.route_model.c_str());
@@ -9381,11 +9377,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Key("uroute_weights_sha256");
     json.String(selected_uroute.weights_sha256.c_str());
     json.Key("uroute_sample_ids");
-    json.StartArray();
-    for (const auto& id : metrics.uroute_sample_ids) {
-      json.String(id.c_str());
-    }
-    json.EndArray();
+    write_uroute_sample_ids(json, metrics.uroute_sample_ids);
     json.Key("route_never_switched");
     json.Bool(control.route.model == dp::RouteModel::automatic && metrics.route_switch_iteration < 0);
     json.Key("route_switch_iteration");
@@ -9939,12 +9931,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     rapidjson::Document json;
     json.Parse(result.qor.c_str());
     auto& allocator = json.GetAllocator();
-    json.AddMember("uroute_skipped", rapidjson::Value(metrics.uroute_skipped.c_str(), allocator), allocator);
-    rapidjson::Value uroute_ids(rapidjson::kArrayType);
-    for (const auto& id : metrics.uroute_sample_ids) {
-      uroute_ids.PushBack(rapidjson::Value(id.c_str(), allocator), allocator);
-    }
-    json.AddMember("uroute_sample_ids", uroute_ids, allocator);
+    add_uroute_status(json, allocator, metrics.uroute_skipped, metrics.uroute_sample_ids);
     json.AddMember(
         "route_model",
         cache.hit ? rapidjson::Value(rapidjson::kNullType) : rapidjson::Value(dp::route_model_name(metrics.route_model), allocator),

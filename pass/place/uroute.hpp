@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "dreamplace/native/uroute_weights.hpp"
+#include "rapidjson/document.h"
 
 namespace DreamPlace::native {
 struct Options;
@@ -62,4 +63,16 @@ void export_uroute(const std::filesystem::path&, const DreamPlace::native::Desig
 std::function<void(const DreamPlace::native::Design&, int, int)> uroute_probe_exporter(std::filesystem::path            directory,
                                                                                        std::function<Uroute_identity()> identity,
                                                                                        double capacity_h, double capacity_v);
+// Selected support IDs as a JSON array, for streamed placement reports.
+template <class Writer>
+void write_uroute_sample_ids(Writer& json, const std::vector<std::string>& sample_ids) {
+  json.StartArray();
+  for (const auto& id : sample_ids) {
+    json.String(id.c_str());
+  }
+  json.EndArray();
+}
+// DOM placement reports: add "uroute_skipped" and "uroute_sample_ids".
+void add_uroute_status(rapidjson::Value& object, rapidjson::Document::AllocatorType& allocator, const std::string& skipped,
+                       const std::vector<std::string>& sample_ids);
 }  // namespace livehd::placement
