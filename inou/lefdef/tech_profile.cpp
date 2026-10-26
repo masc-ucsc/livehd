@@ -61,10 +61,7 @@ const Tech_profile&           tech_profile(std::string_view name) {
   }
   throw std::invalid_argument("unknown technology profile: " + std::string(name) + " (known: " + known_profiles() + ")");
 }
-const Tech_profile& resolve_tech_profile(const Technology& tech, std::string_view requested) {
-  if (requested != "auto") {
-    return tech_profile(requested);
-  }
+const Tech_profile* detect_tech_profile(const Technology& tech) {
   const Tech_profile* found = nullptr;
   for (const auto& p : registry()) {
     const auto site  = [&](const auto& name) { return tech.sites.contains(name); };
@@ -78,9 +75,15 @@ const Tech_profile& resolve_tech_profile(const Technology& tech, std::string_vie
     }
     found = &p;
   }
-  if (!found) {
-    throw std::invalid_argument("cannot detect a supported technology profile from the LEF (known: " + known_profiles() + ")");
+  return found;
+}
+const Tech_profile& resolve_tech_profile(const Technology& tech, std::string_view requested) {
+  if (requested != "auto") {
+    return tech_profile(requested);
   }
-  return *found;
+  if (const auto* found = detect_tech_profile(tech)) {
+    return *found;
+  }
+  throw std::invalid_argument("cannot detect a supported technology profile from the LEF (known: " + known_profiles() + ")");
 }
 }  // namespace livehd::physical

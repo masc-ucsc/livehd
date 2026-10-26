@@ -64,6 +64,9 @@ struct Tech_profile {
 std::span<const Tech_profile> tech_profiles();
 // Registry lookup by profile name or by its power-grid strategy name.
 const Tech_profile&           tech_profile(std::string_view name);
+// The profile whose detect sites or macros the LEF has; nullptr when none
+// does. A LEF that matches more than one profile throws std::invalid_argument.
+const Tech_profile*           detect_tech_profile(const Technology&);
 // "auto" detects the profile from the LEF; any other value is an explicit
 // tech_profile() name. Unknown or undetectable technologies throw.
 const Tech_profile&           resolve_tech_profile(const Technology&, std::string_view requested = "auto");

@@ -20,6 +20,7 @@ TEST(TechProfile, ExplicitNamesAndStrategyAliasesSelectOneEntry) {
 }
 TEST(TechProfile, AutoDetectionRequiresAProfileSiteOrMacro) {
   Technology tech;
+  EXPECT_EQ(detect_tech_profile(tech), nullptr);
   EXPECT_THROW(resolve_tech_profile(tech), std::invalid_argument);
   tech.sites["unithd"];
   tech.macros["INVx1"];
@@ -29,6 +30,7 @@ TEST(TechProfile, AutoDetectionRequiresAProfileSiteOrMacro) {
       auto with_site = tech;
       with_site.sites[site];
       EXPECT_EQ(&resolve_tech_profile(with_site), &profile) << site;
+      EXPECT_EQ(detect_tech_profile(with_site), &profile) << site;
     }
     for (const auto& macro : profile.detect_macros) {
       auto with_macro = tech;
