@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <map>
 #include <numeric>
@@ -438,12 +439,34 @@ TEST(Placement, TwoRowCellsAreAnchoredBeforeTerminalLegalization) {
   EXPECT_EQ(qor["multirow"]["cells"].GetUint64(), 3U);
   EXPECT_EQ(qor["multirow"]["even_starts"].GetUint64() + qor["multirow"]["odd_starts"].GetUint64(), 3U);
   EXPECT_STREQ(qor["multirow"]["row_access"].GetString(), "stand-in");
-  options.busorder.enabled = true;
-  try {
-    (void)place(*chain.graph, chain.flat, options);
-    ADD_FAILURE() << "the region mesh accepted two-row cells";
-  } catch (const std::invalid_argument& error) {
-    EXPECT_NE(std::string(error.what()).find("two-row"), std::string::npos) << error.what();
+  // Every single-row path refuses them by name, each with its own reason.
+  const auto previous = std::make_shared<const physical::Floorplan>(result.floorplan);
+  const auto h2d      = [](Options& o) {
+    o.macro_mode           = "h2d";
+    o.macro_legalize_cells = true;
+  };
+  const std::vector<std::pair<std::function<void(Options&)>, std::string>> refusals{
+      {                 [](Options& o) { o.busorder.enabled = true; },                                 "region mesh"},
+      {             [](Options& o) { o.boundarypins.enabled = true; },                                 "region mesh"},
+      {               [](Options& o) { o.boundarypins.align = true; },                                 "region mesh"},
+      {             [](Options& o) { o.optimization_pending = true; }, "native legalization outside the final stage"},
+      {[](Options& o) { o.satlegalize = o.satlegalize_route = true; },             "satlegalize treats multi-height"},
+      {                   [](Options& o) { o.legalize_cells = true; },              "ECO legalization is single-row"},
+      {                  [](Options& o) { o.changed_cells = {"c1"}; },              "ECO legalization is single-row"},
+      {                    [&](Options& o) { o.previous = previous; },              "ECO legalization is single-row"},
+      {                                                           h2d,                       "macro placement stage"},
+  };
+  for (const auto& [mutate, expected] : refusals) {
+    auto o = options;
+    mutate(o);
+    try {
+      (void)place(*chain.graph, chain.flat, o);
+      ADD_FAILURE() << "accepted two-row cells: " << expected;
+    } catch (const std::invalid_argument& error) {
+      const std::string what = error.what();
+      EXPECT_NE(what.find("two-row"), std::string::npos) << what;
+      EXPECT_NE(what.find(expected), std::string::npos) << what;
+    }
   }
 }
 
