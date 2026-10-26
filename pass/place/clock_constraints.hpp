@@ -15,6 +15,9 @@ struct Ideal_clock {
   std::array<double, 2> slew_ps{};
   std::set<std::string> roots;
   double                phase_ps = 0;
+  // The declared falling edge (an SDC -waveform), data only: timing uses the
+  // rising edge. A consumer with a duty-cycle assumption checks it.
+  std::optional<double> falling_ps;
 };
 // Same-waveform forwarded clock. Its roots must be reached by the source's
 // supported positive-buffer clock network; arbitrary dividers/gates are not

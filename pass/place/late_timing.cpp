@@ -114,13 +114,15 @@ struct Proxy::Impl {
     const model::Cell*            model = nullptr;
     std::map<std::string, size_t> pins;
     hhds::Node_class              node;
+    const Capture_budget*         capture = nullptr;  // absent: full cycle, clock uncertainty
   };
   struct Edge {
     size_t            from = 0, to = 0;
     const model::Arc* model = nullptr;  // null denotes a wire
   };
-  std::shared_ptr<const model::Library> library;
-  Constraints                           constraints;
+  std::shared_ptr<const model::Library>    library;
+  std::shared_ptr<const Provisional_cells> provisional;
+  Constraints                              constraints;
   Clock_system                          clock_system;
   uint64_t                              topology_generation, model_generation;
   std::vector<Bound_pin>                pins;
@@ -273,15 +275,48 @@ struct Proxy::Impl {
     pins.back().declaration_port = pin.get_port_id();
     return index;
   }
+  // The characterized model of a declaration: Liberty first, then the
+  // provisional cells, whose names never collide with Liberty's.
+  const model::Cell* characterized(const std::string& name) const {
+    if (const auto found = library->cells.find(name); found != library->cells.end()) {
+      return &found->second;
+    }
+    if (provisional) {
+      if (const auto found = provisional->library.cells.find(name); found != provisional->library.cells.end()) {
+        return &found->second;
+      }
+    }
+    return nullptr;
+  }
   Impl(const hhds::Graph& graph, std::shared_ptr<const model::Library> models, Constraints limits, uint64_t topology,
-       uint64_t generation)
+       uint64_t generation, std::shared_ptr<const Provisional_cells> extra)
       : library(std::move(models))
+      , provisional(std::move(extra))
       , constraints(std::move(limits))
       , clock_system(constraints.clock, constraints.clocks, constraints.clock_aliases, constraints.asynchronous)
       , topology_generation(topology)
       , model_generation(generation) {
     if (!library) {
       throw std::invalid_argument("native late timing needs a Liberty model");
+    }
+    if (provisional) {
+      for (const auto& [name, cell] : provisional->library.cells) {
+        (void)cell;
+        if (library->cells.contains(name)) {
+          throw std::invalid_argument("provisional cell collides with a Liberty cell: " + name);
+        }
+      }
+      for (const auto& [name, budget] : provisional->capture) {
+        if (!std::isfinite(budget.fraction) || !(budget.fraction > 0 && budget.fraction <= 1)) {
+          throw std::invalid_argument("capture fraction outside (0,1]: " + name);
+        }
+        if (budget.uncertainty_ps) {
+          require_nonnegative(*budget.uncertainty_ps, "invalid capture uncertainty");
+        }
+        if (!characterized(name)) {
+          throw std::invalid_argument("capture budget names no characterized cell: " + name);
+        }
+      }
     }
     unsupported = constraints.unsupported;
     if (constraints.clock && constraints.clock->phase_ps != 0) {
@@ -323,26 +358,31 @@ struct Proxy::Impl {
         unsupported.push_back("native late timing requires mapped, flat cell instances: " + std::string(node.get_name()));
         continue;
       }
-      const auto found = library->cells.find(std::string(declaration->get_name()));
-      if (found == library->cells.end()) {
-        unsupported.push_back("uncharacterized cell: " + std::string(node.get_name()) + " (" + std::string(declaration->get_name())
-                              + ")");
+      const std::string master(declaration->get_name());
+      const auto* const found = characterized(master);
+      if (!found) {
+        unsupported.push_back("uncharacterized cell: " + std::string(node.get_name()) + " (" + master + ")");
         continue;
       }
       const size_t cell = cells.size();
-      cells.push_back({std::string(node.get_name()), &found->second});
+      cells.push_back({std::string(node.get_name()), found});
       cells.back().node = node;
-      for (const auto& issue : found->second.unsupported) {
+      if (provisional) {
+        if (const auto budget = provisional->capture.find(master); budget != provisional->capture.end()) {
+          cells.back().capture = &budget->second;
+        }
+      }
+      for (const auto& issue : found->unsupported) {
         unsupported.push_back(cells.back().name + ": " + issue);
       }
-      if (found->second.latch) {
+      if (found->latch) {
         unsupported.push_back("latch borrowing is unsupported: " + cells.back().name);
       }
       const auto bind = [&](const auto& physical_pins) {
         for (auto pin : physical_pins) {
           const auto name   = declared_pin_name(pin);
-          const auto timing = found->second.pins.find(name);
-          if (timing == found->second.pins.end()) {
+          const auto timing = found->pins.find(name);
+          if (timing == found->pins.end()) {
             unsupported.push_back("missing Liberty pin: " + cells[cell].name + ":" + name);
             continue;
           }
@@ -366,10 +406,10 @@ struct Proxy::Impl {
         }
       }
       for (size_t i = 0; i < timing_outputs.size(); ++i) {
-        for (const auto& arc : found->second.pins.at(timing_outputs[i]).arcs) {
-          const auto source = found->second.pins.find(arc.related_pin);
-          if (source != found->second.pins.end() && source->second.direction == "output"
-              && !cells[cell].pins.contains(source->first) && related_outputs.insert(source->first).second) {
+        for (const auto& arc : found->pins.at(timing_outputs[i]).arcs) {
+          const auto source = found->pins.find(arc.related_pin);
+          if (source != found->pins.end() && source->second.direction == "output" && !cells[cell].pins.contains(source->first)
+              && related_outputs.insert(source->first).second) {
             timing_outputs.push_back(source->first);
           }
         }
@@ -382,8 +422,8 @@ struct Proxy::Impl {
         Bound_pin  internal;
         internal.name             = cells[cell].name + ":" + output.name;
         internal.graph_pin        = node.try_get_driver_pin(output.port_id);
-        internal.model            = &found->second.pins.at(output.name);
-        internal.thresholds       = &found->second.thresholds;
+        internal.model            = &found->pins.at(output.name);
+        internal.thresholds       = &found->thresholds;
         internal.cell             = cell;
         internal.declaration_port = output.port_id;
         if (!identities.emplace(internal.name, index).second) {
@@ -734,14 +774,15 @@ struct Proxy::Impl {
   // themselves. Each place where the two models' published results differ is
   // an explicit "Legacy policy" below; everything else is shared.
   Result time_setup(Result result, const std::vector<Launch>& launches, const std::vector<Delays>& cell_delays,
-                    const std::vector<Pair>&                                 wire_delay,
-                    const std::vector<std::array<std::optional<double>, 2>>& driving_delay) const {
+                    const std::vector<Pair>& wire_delay, const std::vector<std::array<std::optional<double>, 2>>& driving_delay,
+                    const Evaluation_options& options) const {
     const bool   legacy    = constraints.clocks.empty();
     const size_t unclocked = clock_system.clocks.size();
     const auto   issue     = [&](std::string text) { result.unsupported.push_back(std::move(text)); };
     struct Check {
       size_t                               pin, clock;  // absent clock: absolute requirement
       std::array<std::optional<double>, 2> required;
+      double                               fraction = 1;  // the capture budget's share of the period
     };
     if (!legacy) {
       for (size_t id = 0; id < clock_system.clocks.size(); ++id) {
@@ -796,7 +837,13 @@ struct Proxy::Impl {
         }
         const auto  clock_id = pins[related->second].ideal_clock;
         const auto& clock    = clock_system.clocks[clock_id].model;
-        Check       check{i, clock_id, {}};
+        const auto* budget   = cells[pin.cell].capture;
+        Check       check{i, clock_id, {}, budget ? budget->fraction : 1.};
+        if (legacy && check.fraction != 1) {
+          issue("half-cycle capture requires a named clock: " + pin.name);
+          continue;
+        }
+        const double uncertainty = budget ? budget->uncertainty_ps.value_or(clock.uncertainty_ps) : clock.uncertainty_ps;
         for (unsigned t = 0; t < 2; ++t) {
           const auto slew = result.pins[i].transitions[t].slew_ps;
           if (!arc.constraint[t] || !slew) {
@@ -804,7 +851,7 @@ struct Proxy::Impl {
             continue;
           }
           const double setup = arc.constraint[t]->lookup({.related_slew_ps = clock.slew_ps[0], .constrained_slew_ps = *slew});
-          check.required[t]  = clock.period_ps - clock.uncertainty_ps - setup;
+          check.required[t]  = check.fraction * clock.period_ps - uncertainty - setup;
         }
         checks.push_back(check);
       }
@@ -841,20 +888,26 @@ struct Proxy::Impl {
     }
     std::vector<std::optional<double>>          endpoint_slack(pins.size());
     std::map<std::pair<size_t, size_t>, double> clock_endpoint_slack;
+    // slack / fraction per (clock, endpoint): equal to the slack at fraction 1.
+    std::map<std::pair<size_t, size_t>, double> clock_endpoint_scaled;
+    std::set<size_t>                            fractional;
     bool                                        absolute_output = false;
+    const auto                                  seeded          = [&](const Launch& launch) {
+      return !options.launch_filter || options.launch_filter(cells[pins[launch.pin].cell].model->name);
+    };
     // Seed a domain with its clock-to-Q launches and timed input arrivals.
     // Legacy policy: the single domain (no source clock) takes every launch
     // and every input at its raw arrival, without a clock phase.
-    const auto                                  seed            = [&](auto&& state, std::optional<size_t> source_clock) {
+    const auto seed = [&](auto&& state, std::optional<size_t> source_clock) {
       for (const auto& launch : launches) {
-        if (!source_clock || launch.clock == *source_clock) {
+        if ((!source_clock || launch.clock == *source_clock) && seeded(launch)) {
           maximum(state(launch.pin, launch.transition).arrival_ps, launch.arrival);
         }
       }
       for (const auto& [name, input] : constraints.inputs) {
         const auto index = identities.at(name);
         const auto id    = input.clock.empty() ? unclocked : clock_system.find(input.clock);
-        if (!timed_input(index) || (source_clock && id != *source_clock)) {
+        if (!options.seed_inputs || !timed_input(index) || (source_clock && id != *source_clock)) {
           continue;
         }
         const double phase = id == unclocked ? 0 : clock_system.clocks[id].model.phase_ps;
@@ -934,6 +987,12 @@ struct Proxy::Impl {
           if (!target.arrival_ps || !check.required[t]) {
             continue;
           }
+          // A fractional budget is a share of its own clock's cycle, which
+          // another launch domain's edge pair does not preserve.
+          if (check.fraction != 1 && source_clock != check.clock) {
+            issue("half-cycle capture across launch domains is unsupported: " + pins[check.pin].name);
+            continue;
+          }
           const double required = *check.required[t] + adjustment;
           minimum(target.required_ps, required);
           const double slack = required - *target.arrival_ps;
@@ -946,6 +1005,15 @@ struct Proxy::Impl {
               old->second = std::min(old->second, slack);
             } else {
               clock_endpoint_slack.emplace(key, slack);
+            }
+            const double scaled = slack / check.fraction;
+            if (const auto old = clock_endpoint_scaled.find(key); old != clock_endpoint_scaled.end()) {
+              old->second = std::min(old->second, scaled);
+            } else {
+              clock_endpoint_scaled.emplace(key, scaled);
+            }
+            if (check.fraction != 1) {
+              fractional.insert(check.pin);
             }
             if (source_clock != unclocked && source_clock != check.clock) {
               result.clocks.at(clock_system.clocks[check.clock].name).independent_period = false;
@@ -1062,6 +1130,10 @@ struct Proxy::Impl {
         ++clock.timed_endpoints;
       }
     }
+    result.fractional_endpoints = fractional.size();
+    if (options.capture_feasible_graph && result.fractional_endpoints) {
+      issue("feasible graph objective does not support fractional capture");
+    }
     std::sort(result.unsupported.begin(), result.unsupported.end());
     result.unsupported.erase(std::unique(result.unsupported.begin(), result.unsupported.end()), result.unsupported.end());
     result.certified = constraints.complete && result.unsupported.empty() && result.wns_ps.has_value();
@@ -1075,14 +1147,22 @@ struct Proxy::Impl {
     }
     // Named clocks: a per-clock period needs independent captures, and a
     // design period additionally needs one active clock and no absolute
-    // output requirement (which a period change cannot move).
+    // output requirement (which a period change cannot move). Each endpoint
+    // contributes period - slack / fraction, which is period - WNS when every
+    // capture is full-cycle.
+    std::map<size_t, double> period_slack;
+    for (const auto& [key, scaled] : clock_endpoint_scaled) {
+      const auto [old, added] = period_slack.emplace(key.first, scaled);
+      if (!added) {
+        old->second = std::min(old->second, scaled);
+      }
+    }
     size_t active_clocks = 0;
     for (auto& [name, clock] : result.clocks) {
-      (void)name;
       if (clock.wns_ps) {
         ++active_clocks;
         if (result.certified && clock.independent_period) {
-          clock.achievable_period_ps = std::max(0., clock.period_ps - *clock.wns_ps);
+          clock.achievable_period_ps = std::max(0., clock.period_ps - period_slack.at(clock_system.find(name)));
         }
       }
     }
@@ -1122,6 +1202,9 @@ struct Proxy::Impl {
       bound.graph_node       = pin.cell == absent ? pin.graph_pin.get_master_node() : cells[pin.cell].node;
       bound.declaration_port = pin.declaration_port;
       bound.clock            = pin.clock;
+      if (pin.clock) {
+        bound.clock_name = clock_system.clocks[pin.ideal_clock].name;
+      }
       result.pins.push_back(std::move(bound));
     }
     for (size_t i = 0; i < pins.size(); ++i) {
@@ -1459,13 +1542,14 @@ struct Proxy::Impl {
         std::vector<Driver_waveform>().swap(shapes);
       }
     }
-    return time_setup(std::move(result), launches, cell_delays, wire_delay, driving_delay);
+    return time_setup(std::move(result), launches, cell_delays, wire_delay, driving_delay, options);
   }
 };
 
 Proxy::Proxy(const hhds::Graph& graph, std::shared_ptr<const model::Library> models, Constraints constraints, uint64_t topology,
-             uint64_t generation)
-    : impl(std::make_unique<Impl>(graph, std::move(models), std::move(constraints), topology, generation)) {}
+             uint64_t generation, std::shared_ptr<const Provisional_cells> provisional)
+    : impl(std::make_unique<Impl>(graph, std::move(models), std::move(constraints), topology, generation, std::move(provisional))) {
+}
 Proxy::~Proxy()                           = default;
 Proxy::Proxy(Proxy&&) noexcept            = default;
 Proxy& Proxy::operator=(Proxy&&) noexcept = default;

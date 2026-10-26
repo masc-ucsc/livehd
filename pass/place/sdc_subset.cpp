@@ -343,6 +343,7 @@ Constraints read_saved_sdc(std::string_view text, std::string_view design, Sdc_u
         if (!(falling > clock.phase_ps && falling < clock.phase_ps + clock.period_ps)) {
           fail("invalid clock waveform");
         }
+        clock.falling_ps = falling;
       }
       if (!result.clocks.emplace(literal(value("-name")), clock).second) {
         fail("duplicate clock");

@@ -7,8 +7,9 @@
 
 namespace livehd::placement::timeclosure {
 Objective_network objective_network(const late::Result& timing) {
+  // The feasible graph has full-cycle endpoint requirements only.
   if (!timing.certified || !timing.unsupported.empty() || !timing.achievable_period_ps || !timing.feasible_graph
-      || !timing.feasible_graph->reference_period_ps) {
+      || !timing.feasible_graph->reference_period_ps || timing.fractional_endpoints) {
     throw std::invalid_argument("period objective requires captured feasible graph and supported native period coverage");
   }
   const auto& graph = *timing.feasible_graph;

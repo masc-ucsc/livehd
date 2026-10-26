@@ -10,8 +10,8 @@ Gp_timing_settings checked(Gp_timing_settings value) {
   value.validate();
   return value;
 }
-// Native timing is usable only with certified period coverage.
-bool            covered(const late::Result& timing) { return timing.certified && timing.achievable_period_ps; }
+// Native timing is usable only with certified full-cycle period coverage.
+bool covered(const late::Result& timing) { return timing.certified && timing.achievable_period_ps && !timing.fractional_endpoints; }
 // Legal-frame comparisons use their own density stage, never the GP epoch.
 Objective_epoch legal_epoch(const late::Result& timing) {
   auto epoch          = timing_epoch(timing);

@@ -251,6 +251,11 @@ TEST(ProxyObjective, UnsupportedUncapturedOrInconsistentTimingCannotBecomeWeight
   r                                    = saved;
   r.feasible_graph->vertices[0].domain = 99;
   EXPECT_THROW(tc::proxy_objective(r), std::invalid_argument);
+  // Fractional (half-cycle) captures have no feasible-graph form yet.
+  r                      = saved;
+  r.fractional_endpoints = 1;
+  EXPECT_THROW(tc::proxy_objective(r), std::invalid_argument);
+  EXPECT_NO_THROW(tc::proxy_objective(saved));
 }
 TEST(ProxyObjective, SerializedWireDelaysAndPinLoadsRemainInTheObjectiveGraph) {
   Circuit c({"clk", "a"}, {"z"});

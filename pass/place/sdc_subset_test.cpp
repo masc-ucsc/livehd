@@ -48,6 +48,7 @@ TEST(SdcSubset, LiteralListsNegativeIoDelaysAndIdealOffsetsRemainDistinct) {
                                            {1, 1});
   EXPECT_EQ(result.clocks.at("main").roots.size(), 2);
   EXPECT_EQ(result.clocks.at("main").phase_ps, 25);
+  EXPECT_EQ(result.clocks.at("main").falling_ps, 75);
   EXPECT_EQ(result.inputs.at("a[1]").arrival_ps[0], -10);
   EXPECT_EQ(result.outputs.at("z").required_ps[0], 105);
 }

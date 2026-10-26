@@ -64,7 +64,277 @@ bool issue(const late::Result& result, const std::string& text) {
     return value.find(text) != value.npos;
   });
 }
+// Provisional cells: a renamed FF and P, a register whose data pin R0 has a
+// 3 ps setup; neither is in the Liberty library.
+std::shared_ptr<late::Provisional_cells> provisional(const nldm::Library&                liberty,
+                                                     std::optional<late::Capture_budget> budget = {}) {
+  auto cells   = std::make_shared<late::Provisional_cells>();
+  cells->label = "test";
+  auto copy    = liberty.cells.at("FF");
+  copy.name    = "PFF";
+  cells->library.cells.emplace("PFF", copy);
+  auto half = liberty.cells.at("FF");
+  half.name = "P";
+  auto rail = half.pins.at("D");
+  half.pins.erase("D");
+  rail.name = "R0";
+  for (auto& table : rail.arcs.at(0).constraint) {
+    table->values = {3};
+  }
+  half.pins.emplace("R0", rail);
+  cells->library.cells.emplace("P", half);
+  if (budget) {
+    cells->capture["P"] = *budget;
+  }
+  return cells;
+}
+// An instance of a provisional master: the circuit declares masters from its
+// Liberty, so the declaration briefly sees the merged library.
+hhds::Node_class instance(Circuit& circuit, const late::Provisional_cells& cells, const std::string& name,
+                          const std::string& master) {
+  const auto liberty = circuit.library;
+  auto       merged  = std::make_shared<nldm::Library>(*liberty);
+  merged->cells.insert(cells.library.cells.begin(), cells.library.cells.end());
+  circuit.library = merged;
+  auto node       = circuit.cell(name, master);
+  circuit.library = liberty;
+  return node;
+}
 }  // namespace
+
+TEST(LateTiming, ProvisionalCellBindsLaunchesAndCutsLikeItsRegister) {
+  Circuit    circuit({"clk"}, {});
+  const auto cells = provisional(*circuit.library);
+  auto       flop = instance(circuit, *cells, "ff", "PFF"), inv = circuit.cell("inv", "INV");
+  flop.create_sink_pin("CLK").connect_driver(circuit.graph->get_input_pin("clk"));
+  inv.create_sink_pin("A").connect_driver(flop.create_driver_pin("Q"));
+  flop.create_sink_pin("D").connect_driver(inv.create_driver_pin("Y"));
+  late::Constraints constraints;
+  constraints.clocks["main"] = {.period_ps = 100, .roots = {"clk"}};
+  constraints.complete       = true;
+  const auto unknown         = late::Proxy(*circuit.graph, circuit.library, constraints).evaluate();
+  EXPECT_FALSE(unknown.certified);
+  EXPECT_TRUE(issue(unknown, "uncharacterized cell: ff (PFF)"));
+  const auto result = late::Proxy(*circuit.graph, circuit.library, constraints, 0, 0, cells).evaluate();
+  ASSERT_TRUE(result.certified) << (result.unsupported.empty() ? "" : result.unsupported.front());
+  EXPECT_EQ(pin(result, "ff:CLK").clock_name, "main");
+  EXPECT_FALSE(pin(result, "ff:D").clock_name);
+  EXPECT_EQ(pin(result, "ff:D").transitions[0].arrival_ps, 30);
+  EXPECT_EQ(pin(result, "ff:D").transitions[1].required_ps, 92);
+  EXPECT_EQ(result.wns_ps, 62);
+  EXPECT_EQ(result.achievable_period_ps, 38);
+  EXPECT_EQ(result.fractional_endpoints, 0);
+}
+
+TEST(LateTiming, HalfCycleCaptureScalesRequirementAndPeriod) {
+  // ff -> BUF -> p.R0 captured at T/2 with its own 1 ps uncertainty (the
+  // clock's 5 ps is replaced): required 0.5*100 - 1 - 3 = 46 against
+  // arrivals 15 (rise) and 27 (fall), slack 19, period 2*(27+3+1) = 62.
+  Circuit    circuit({"clk"}, {});
+  const auto cells = provisional(*circuit.library, late::Capture_budget{.fraction = .5, .uncertainty_ps = 1});
+  auto       flop = circuit.cell("ff", "FF"), buffer = circuit.cell("b", "BUF");
+  auto       half = instance(circuit, *cells, "p", "P");
+  flop.create_sink_pin("CLK").connect_driver(circuit.graph->get_input_pin("clk"));
+  half.create_sink_pin("CLK").connect_driver(circuit.graph->get_input_pin("clk"));
+  buffer.create_sink_pin("A").connect_driver(flop.create_driver_pin("Q"));
+  half.create_sink_pin("R0").connect_driver(buffer.create_driver_pin("Y"));
+  flop.create_sink_pin("D").connect_driver(half.create_driver_pin("Q"));
+  late::Constraints constraints;
+  constraints.clocks["main"] = {.period_ps = 100, .uncertainty_ps = 5, .roots = {"clk"}};
+  constraints.complete       = true;
+  const auto result          = late::Proxy(*circuit.graph, circuit.library, constraints, 0, 0, cells).evaluate();
+  ASSERT_TRUE(result.certified) << (result.unsupported.empty() ? "" : result.unsupported.front());
+  EXPECT_EQ(pin(result, "p:R0").transitions[0].arrival_ps, 15);
+  EXPECT_EQ(pin(result, "p:R0").transitions[1].arrival_ps, 27);
+  EXPECT_EQ(pin(result, "p:R0").transitions[0].required_ps, 46);
+  EXPECT_EQ(pin(result, "p:R0").transitions[1].required_ps, 46);
+  // The full-cycle D check keeps the clock uncertainty: 100 - 5 - 8 = 87.
+  EXPECT_EQ(pin(result, "ff:D").transitions[1].required_ps, 87);
+  EXPECT_EQ(result.wns_ps, 19);
+  EXPECT_EQ(result.clocks.at("main").wns_ps, 19);
+  EXPECT_EQ(result.clocks.at("main").achievable_period_ps, 62);
+  EXPECT_EQ(result.achievable_period_ps, 62);
+  EXPECT_EQ(result.feedback().delay, 62);
+  EXPECT_EQ(result.fractional_endpoints, 1);
+}
+
+TEST(LateTiming, MixedFullAndHalfEndpointsTakeTheLargerPeriod) {
+  // Half: ff.Q -> p.R0, slack 50-1-3-20 = 26, period 100-26/0.5 = 48.
+  // Full: p.Q -> three INV -> ff.D at 60, slack 92-60 = 32, period 68. WNS is
+  // the half-cycle slack, but the full-cycle path limits the period.
+  Circuit    circuit({"clk"}, {});
+  const auto cells = provisional(*circuit.library, late::Capture_budget{.fraction = .5, .uncertainty_ps = 1});
+  auto       flop  = circuit.cell("ff", "FF");
+  auto       half  = instance(circuit, *cells, "p", "P");
+  flop.create_sink_pin("CLK").connect_driver(circuit.graph->get_input_pin("clk"));
+  half.create_sink_pin("CLK").connect_driver(circuit.graph->get_input_pin("clk"));
+  half.create_sink_pin("R0").connect_driver(flop.create_driver_pin("Q"));
+  auto driver = half.create_driver_pin("Q");
+  for (const auto* name : {"i1", "i2", "i3"}) {
+    auto inv = circuit.cell(name, "INV");
+    inv.create_sink_pin("A").connect_driver(driver);
+    driver = inv.create_driver_pin("Y");
+  }
+  flop.create_sink_pin("D").connect_driver(driver);
+  late::Constraints constraints;
+  constraints.clocks["main"] = {.period_ps = 100, .roots = {"clk"}};
+  constraints.complete       = true;
+  const auto result          = late::Proxy(*circuit.graph, circuit.library, constraints, 0, 0, cells).evaluate();
+  ASSERT_TRUE(result.certified) << (result.unsupported.empty() ? "" : result.unsupported.front());
+  EXPECT_EQ(pin(result, "ff:D").transitions[0].arrival_ps, 60);
+  EXPECT_EQ(pin(result, "ff:D").transitions[1].arrival_ps, 60);
+  EXPECT_EQ(result.wns_ps, 26);
+  EXPECT_EQ(result.tns_ps, 0);
+  EXPECT_EQ(result.achievable_period_ps, 68);
+  EXPECT_EQ(result.fractional_endpoints, 1);
+}
+
+TEST(LateTiming, HalfCycleAcrossClocksIsUnsupported) {
+  Circuit    circuit({"ca", "cb"}, {});
+  const auto cells = provisional(*circuit.library, late::Capture_budget{.fraction = .5});
+  auto       flop  = circuit.cell("ff", "FF");
+  auto       half  = instance(circuit, *cells, "p", "P");
+  flop.create_sink_pin("CLK").connect_driver(circuit.graph->get_input_pin("ca"));
+  half.create_sink_pin("CLK").connect_driver(circuit.graph->get_input_pin("cb"));
+  half.create_sink_pin("R0").connect_driver(flop.create_driver_pin("Q"));
+  late::Constraints constraints;
+  constraints.clocks["a"] = {.period_ps = 100, .roots = {"ca"}};
+  constraints.clocks["b"] = {.period_ps = 100, .roots = {"cb"}};
+  constraints.complete    = true;
+  const auto across       = late::Proxy(*circuit.graph, circuit.library, constraints, 0, 0, cells).evaluate();
+  EXPECT_FALSE(across.certified);
+  EXPECT_TRUE(issue(across, "half-cycle capture across launch domains is unsupported: p:R0"));
+  EXPECT_EQ(across.fractional_endpoints, 0);
+  // The legacy single clock has no named capture identity for a fraction.
+  late::Constraints legacy;
+  legacy.clock = late::Ideal_clock{
+      .period_ps = 100,
+      .roots     = {"ca", "cb"}
+  };
+  legacy.complete = true;
+  const auto old  = late::Proxy(*circuit.graph, circuit.library, legacy, 0, 0, cells).evaluate();
+  EXPECT_FALSE(old.certified);
+  EXPECT_TRUE(issue(old, "half-cycle capture requires a named clock: p:R0"));
+}
+
+TEST(LateTiming, FractionalEndpointsRefuseTheFeasibleGraph) {
+  Circuit    circuit({"clk"}, {});
+  const auto cells = provisional(*circuit.library, late::Capture_budget{.fraction = .5});
+  auto       flop  = circuit.cell("ff", "FF");
+  auto       half  = instance(circuit, *cells, "p", "P");
+  flop.create_sink_pin("CLK").connect_driver(circuit.graph->get_input_pin("clk"));
+  half.create_sink_pin("CLK").connect_driver(circuit.graph->get_input_pin("clk"));
+  half.create_sink_pin("R0").connect_driver(flop.create_driver_pin("Q"));
+  flop.create_sink_pin("D").connect_driver(half.create_driver_pin("Q"));
+  late::Constraints constraints;
+  constraints.clocks["main"] = {.period_ps = 100, .roots = {"clk"}};
+  constraints.complete       = true;
+  const late::Proxy proxy(*circuit.graph, circuit.library, constraints, 0, 0, cells);
+  EXPECT_TRUE(proxy.evaluate().certified);
+  const auto captured = proxy.evaluate(nullptr, nullptr, {.capture_feasible_graph = true});
+  EXPECT_FALSE(captured.certified);
+  EXPECT_FALSE(captured.achievable_period_ps);
+  EXPECT_TRUE(issue(captured, "feasible graph objective does not support fractional capture"));
+}
+
+TEST(LateTiming, ProvisionalNameCollisionThrows) {
+  Circuit circuit({"clk"}, {});
+  auto    cells = provisional(*circuit.library);
+  auto    clash = *cells;
+  clash.library.cells.emplace("FF", circuit.library->cells.at("FF"));
+  const auto build = [&](const late::Provisional_cells& set) {
+    return late::Proxy(*circuit.graph, circuit.library, {}, 0, 0, std::make_shared<late::Provisional_cells>(set));
+  };
+  EXPECT_THROW(build(clash), std::invalid_argument);
+  for (const double fraction : {0., 1.5, -.5, std::nan("")}) {
+    auto bad         = *cells;
+    bad.capture["P"] = {.fraction = fraction};
+    EXPECT_THROW(build(bad), std::invalid_argument) << fraction;
+  }
+  auto negative         = *cells;
+  negative.capture["P"] = {.fraction = .5, .uncertainty_ps = -1};
+  EXPECT_THROW(build(negative), std::invalid_argument);
+  auto unknown            = *cells;
+  unknown.capture["NOPE"] = {.fraction = .5};
+  EXPECT_THROW(build(unknown), std::invalid_argument);
+  EXPECT_NO_THROW(build(*cells));
+}
+
+TEST(LateTiming, LaunchFilterSeparatesLaunchClasses) {
+  // ff.Q and p.Q (through a BUF) meet at an XOR into ff.D; input a feeds p.R0.
+  Circuit    circuit({"clk", "a"}, {});
+  const auto cells = provisional(*circuit.library, late::Capture_budget{.fraction = .5});
+  auto       flop = circuit.cell("ff", "FF"), buffer = circuit.cell("b", "BUF"), gate = circuit.cell("x", "XOR");
+  auto       half = instance(circuit, *cells, "p", "P");
+  flop.create_sink_pin("CLK").connect_driver(circuit.graph->get_input_pin("clk"));
+  half.create_sink_pin("CLK").connect_driver(circuit.graph->get_input_pin("clk"));
+  half.create_sink_pin("R0").connect_driver(circuit.graph->get_input_pin("a"));
+  buffer.create_sink_pin("A").connect_driver(half.create_driver_pin("Q"));
+  gate.create_sink_pin("A").connect_driver(flop.create_driver_pin("Q"));
+  gate.create_sink_pin("B").connect_driver(buffer.create_driver_pin("Y"));
+  flop.create_sink_pin("D").connect_driver(gate.create_driver_pin("Y"));
+  late::Constraints constraints;
+  constraints.clocks["main"]         = {.period_ps = 100, .roots = {"clk"}};
+  constraints.inputs["a"].arrival_ps = {3, 4};
+  constraints.inputs["a"].clock      = "main";
+  constraints.complete               = true;
+  const late::Proxy proxy(*circuit.graph, circuit.library, constraints, 0, 0, cells);
+  const auto        all = proxy.evaluate();
+  ASSERT_TRUE(all.certified) << (all.unsupported.empty() ? "" : all.unsupported.front());
+  const auto flops  = proxy.evaluate(nullptr,
+                                    nullptr,
+                                     {.launch_filter = [](std::string_view cell) { return cell == "FF"; }, .seed_inputs = false});
+  const auto halves = proxy.evaluate(nullptr,
+                                     nullptr,
+                                     {.launch_filter = [](std::string_view cell) { return cell == "P"; }, .seed_inputs = false});
+  const auto inputs = proxy.evaluate(nullptr, nullptr, {.launch_filter = [](std::string_view) { return false; }});
+  // XOR (5 rise, 7 fall) after Q at 10/20, or after BUF(Q) at 15/27.
+  EXPECT_EQ(pin(flops, "ff:D").transitions[0].arrival_ps, 25);
+  EXPECT_EQ(pin(flops, "ff:D").transitions[1].arrival_ps, 27);
+  EXPECT_EQ(pin(halves, "ff:D").transitions[0].arrival_ps, 32);
+  EXPECT_EQ(pin(halves, "ff:D").transitions[1].arrival_ps, 34);
+  EXPECT_EQ(pin(all, "ff:D").transitions[1].arrival_ps, 34);
+  EXPECT_FALSE(pin(flops, "p:R0").transitions[0].arrival_ps);
+  EXPECT_TRUE(issue(flops, "uncovered endpoint transition: p:R0"));
+  EXPECT_EQ(pin(inputs, "p:R0").transitions[1].arrival_ps, 4);
+  EXPECT_FALSE(pin(inputs, "ff:D").transitions[0].arrival_ps);
+  // Requirements are those of the unfiltered evaluation.
+  EXPECT_EQ(*pin(flops, "ff:D").transitions[1].required_ps - *pin(flops, "ff:D").transitions[1].arrival_ps, 92 - 27);
+  EXPECT_EQ(pin(inputs, "p:R0").transitions[1].required_ps, pin(all, "p:R0").transitions[1].required_ps);
+}
+
+TEST(LateTiming, EmptyProvisionalIsBitExact) {
+  const auto compare = [](const Circuit& circuit, const late::Constraints& constraints) {
+    const auto empty = std::make_shared<late::Provisional_cells>();
+    for (const bool capture : {false, true}) {
+      const auto plain
+          = livehd::placement::test_fixture::late_timing_dump(late::Proxy(*circuit.graph, circuit.library, constraints)
+                                                                  .evaluate(nullptr, nullptr, {.capture_feasible_graph = capture}));
+      const auto extended
+          = livehd::placement::test_fixture::late_timing_dump(late::Proxy(*circuit.graph, circuit.library, constraints, 0, 0, empty)
+                                                                  .evaluate(nullptr, nullptr, {.capture_feasible_graph = capture}));
+      EXPECT_EQ(plain, extended) << capture;
+    }
+  };
+  Circuit loop({"clk"}, {});
+  auto    flop = loop.cell("ff", "FF"), inv = loop.cell("inv", "INV");
+  flop.create_sink_pin("CLK").connect_driver(loop.graph->get_input_pin("clk"));
+  inv.create_sink_pin("A").connect_driver(flop.create_driver_pin("Q"));
+  flop.create_sink_pin("D").connect_driver(inv.create_driver_pin("Y"));
+  late::Constraints legacy;
+  legacy.clock = late::Ideal_clock{
+      .period_ps      = 100,
+      .uncertainty_ps = 3,
+      .slew_ps        = {2, 4},
+      .roots          = {"clk"}
+  };
+  legacy.complete = true;
+  compare(loop, legacy);
+  late::Constraints named;
+  named.clocks["main"] = *legacy.clock;
+  named.complete       = true;
+  compare(loop, named);
+}
 
 TEST(LateTiming, NamedClockMatchesLegacyTimingOnTheSameRegisterLoop) {
   Circuit circuit({"clk"}, {});

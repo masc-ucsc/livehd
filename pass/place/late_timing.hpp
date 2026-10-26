@@ -3,11 +3,13 @@
 
 #include <array>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "clock_constraints.hpp"
@@ -47,6 +49,22 @@ struct Constraints {
   bool                                          complete = false;
   std::vector<std::string>                      unsupported;
 };
+// A capture endpoint's share of its clock period: the setup requirement is
+// fraction * period - uncertainty - setup, and the endpoint's period estimate
+// is period - slack / fraction. Fraction 1 with the clock uncertainty is the
+// ordinary full-cycle check.
+struct Capture_budget {
+  double                fraction = 1;    // (0,1]
+  std::optional<double> uncertainty_ps;  // replaces the clock uncertainty for this cell's setup checks
+};
+// Characterized cells outside the Liberty library, looked up by declaration
+// name after it. A name must not collide with a Liberty cell. Capture budgets
+// are keyed by cell name; an absent entry is {1, clock uncertainty}.
+struct Provisional_cells {
+  liberty::timing::Library              library;
+  std::map<std::string, Capture_budget> capture;
+  std::string                           label;
+};
 struct Predecessor {
   size_t   pin        = 0;
   unsigned transition = 0;
@@ -65,6 +83,8 @@ struct Pin_result {
   std::array<State, 2> transitions;
   bool                 clock = false, endpoint = false;
   std::optional<bool>  constant;
+  // The ideal clock waveform reaching a clock pin, by name.
+  std::optional<std::string> clock_name;
 };
 struct Feasible_timing_graph {
   struct Vertex {
@@ -87,6 +107,12 @@ struct Evaluation_options {
   // Graph vertices reference Result::pins and retain separate launch domains.
   bool           capture_feasible_graph = false;
   Driver_options driver;
+  // Seed only the clock-to-Q launches of cells (by declaration name) the
+  // filter accepts, and timed inputs only with seed_inputs, so endpoint
+  // slack can be split by launch class. Requirements are unchanged; an
+  // endpoint no seeded launch reaches is reported uncovered.
+  std::function<bool(std::string_view cell)> launch_filter;
+  bool                                       seed_inputs = true;
 };
 struct Result {
   struct Domain_state {
@@ -122,6 +148,10 @@ struct Result {
   size_t           driver_fits = 0, distributed_driver_fits = 0, lumped_driver_fits = 0, driver_fit_failures = 0;
   size_t           table_boundary_driver_fits     = 0;
   size_t           full_load_boundary_driver_fits = 0, crossing_boundary_driver_fits = 0;
+  // Timed endpoints with a capture fraction below 1. Their period estimate is
+  // period - slack / fraction; WNS/TNS keep the raw slack. The feasible-graph
+  // objective and GP timing do not support them.
+  size_t                               fractional_endpoints = 0;
   // Optimization consumers require certified period coverage; an incomplete
   // observation must never become a zero-delay scalar feedback result.
   timing::Feedback feedback() const;
@@ -135,13 +165,16 @@ struct Result {
 // Unsupported clocks, latches, conditions or library coverage are
 // reported and cannot produce certified Fmax. RC uses charge-matched pi driver
 // and Elmore load waveforms with explicit characterized boundary approximations.
+// Provisional cells extend the Liberty lookup; without them (or with an empty
+// set) every result is unchanged.
 class Proxy {
   struct Impl;
   std::unique_ptr<Impl> impl;
 
 public:
   Proxy(const hhds::Graph& graph, std::shared_ptr<const liberty::timing::Library> models, Constraints constraints,
-        uint64_t topology_generation = 0, uint64_t model_generation = 0);
+        uint64_t topology_generation = 0, uint64_t model_generation = 0,
+        std::shared_ptr<const Provisional_cells> provisional = nullptr);
   ~Proxy();
   Proxy(Proxy&&) noexcept;
   Proxy& operator=(Proxy&&) noexcept;
