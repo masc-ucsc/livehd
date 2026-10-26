@@ -78,6 +78,18 @@ void Signal_router::add_wire(Signal_route_geometry& geometry, const ph::Shape& m
   geometry.paths.push_back(ph::flush_wire_path(metal, horizontal, std::move(taper_rule)));
   geometry.layer_wire_length_um[metal.layer] += (horizontal ? r.xh - r.xl : r.yh - r.yl) / frame_.dbu;
 }
+bool Signal_router::Stage_trial::expired() const {
+  if (std::chrono::steady_clock::now() < deadline) {
+    return false;
+  }
+  out.timed_out = true;
+  out.reason    = "route deadline";
+  return true;
+}
+Signal_route_trial Signal_router::Stage_trial::fail(std::string reason) const {
+  out.reason = std::move(reason);
+  return out;
+}
 Signal_route_proposals Signal_router::try_route(const ph::Net& net, const Signal_route_request& request) const {
   Signal_route_proposals result;
   if (!std::isfinite(request.max_parallel_exposure) || request.max_parallel_exposure < 0) {
@@ -290,40 +302,33 @@ Signal_route_trial Signal_router::propose_aligned(const ph::Net& net, const ph::
 Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, const Signal_route_geometry& aligned,
                                                         const std::string& target, const Signal_route_limits& limits) const {
   Signal_route_trial out;
-  const auto         fail = [&](const std::string& reason) {
-    out.reason = reason;
+  const Stage_trial  stage{out, limits.deadline};
+  if (stage.expired()) {
     return out;
-  };
-  const auto expired = [&] {
-    out.timed_out = std::chrono::steady_clock::now() >= limits.deadline;
-    return out.timed_out;
-  };
-  if (expired()) {
-    return fail("route deadline");
   }
   if (net.connections.size() != 2 || !net.wires.empty() || aligned.endpoints.size() != 2
       || (!net.use.empty() && net.use != "SIGNAL")) {
-    return fail("layer lift requires an unwired aligned two-pin signal");
+    return stage.fail("layer lift requires an unwired aligned two-pin signal");
   }
   const auto& a          = aligned.endpoints[0];
   const auto& b          = aligned.endpoints[1];
   const bool  horizontal = a.y == b.y;
   if ((a.x == b.x) == horizontal) {
-    return fail("layer lift requires distinct aligned endpoints");
+    return stage.fail("layer lift requires distinct aligned endpoints");
   }
   const auto end = std::find(tech_.routing_layers.begin(), tech_.routing_layers.end(), target);
   if (end == tech_.routing_layers.end() || !profile_.allows(target)) {
-    return fail("unsupported lift layer");
+    return stage.fail("unsupported lift layer");
   }
   const auto start = std::find(tech_.routing_layers.begin(), tech_.routing_layers.end(), a.escape.layer);
   if (start >= end || b.escape.layer != a.escape.layer
       || tech_.layers.at(target).direction != (horizontal ? "HORIZONTAL" : "VERTICAL")) {
-    return fail("lift must preserve trunk direction");
+    return stage.fail("lift must preserve trunk direction");
   }
   // Lifting requires an explicit LEF manufacturing grid.
   const auto grid_dbu = tech_.manufacturing_grid > 0 ? ph::manufacturing_grid_dbu(tech_, frame_.dbu) : std::nullopt;
   if (!grid_dbu) {
-    return fail("unsupported manufacturing grid");
+    return stage.fail("unsupported manufacturing grid");
   }
   const double          grid = *grid_dbu;
   Signal_route_geometry trial;
@@ -341,18 +346,18 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
   }
   std::array<std::vector<ph::Shape>, 2> landings;
   for (auto layer = start; layer <= end; ++layer) {
-    if (expired()) {
-      return fail("route deadline");
+    if (stage.expired()) {
+      return out;
     }
     if (!rules_.clearance(*layer)) {
-      return fail("unsupported lift rules");
+      return stage.fail("unsupported lift rules");
     }
     const auto&  definition = tech_.layers.at(*layer);
     const auto   nominal    = ph::wire_width_dbu(definition, frame_.dbu);
     const double area       = definition.rules.area * frame_.dbu * frame_.dbu;
     if (!nominal || *nominal % (2 * *grid_dbu) || !std::isfinite(area) || area < 0
         || (definition.direction != "HORIZONTAL" && definition.direction != "VERTICAL")) {
-      return fail("unsupported lift dimensions");
+      return stage.fail("unsupported lift dimensions");
     }
     const double width = *nominal;
     const bool   h     = definition.direction == "HORIZONTAL";
@@ -380,14 +385,14 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
         }
       }
       if (!rules_.rectangle(shape).legal || !frame_.die.contains(shape.rect)) {
-        return fail("illegal lift landing");
+        return stage.fail("illegal lift landing");
       }
       for (auto id : occupancy_.query(*layer, shape.rect, *rules_.clearance(*layer), net.name)) {
-        if (expired()) {
-          return fail("route deadline");
+        if (stage.expired()) {
+          return out;
         }
         if (!rules_.spacing(shape, occupancy_.at(id).shape).legal) {
-          return fail("blocked lift landing");
+          return stage.fail("blocked lift landing");
         }
       }
       landings[i].push_back(shape);
@@ -400,8 +405,8 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
     for (size_t l = 0; l + 1 < landings[i].size(); ++l) {
       bool found = false;
       for (const auto& [name, definition] : tech_.vias) {
-        if (expired()) {
-          return fail("route deadline");
+        if (stage.expired()) {
+          return out;
         }
         if (!definition.unsupported.empty() || definition.shapes.size() != 3) {
           continue;
@@ -415,7 +420,7 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
           continue;
         }
         if (out.patterns_examined >= limits.patterns) {
-          return fail("lift pattern budget");
+          return stage.fail("lift pattern budget");
         }
         ++out.patterns_examined;
         const auto& point = trial.endpoints[i];
@@ -435,7 +440,7 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
         }
       }
       if (!found) {
-        return fail("no legal endpoint via stack");
+        return stage.fail("no legal endpoint via stack");
       }
     }
   }
@@ -443,7 +448,7 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
     const auto& shape = metal[i];
     for (size_t j = 0; j < i; ++j) {
       if (metal[j].layer == shape.layer && !rules_.spacing(shape, metal[j]).legal) {
-        return fail("lift self spacing");
+        return stage.fail("lift self spacing");
       }
     }
     add_wire(trial, shape, tech_.layers.at(shape.layer).direction == "HORIZONTAL");
@@ -452,15 +457,15 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
   for (const auto& via : vias) {
     trial.paths.push_back(ph::via_path(via.lower, via.x, via.y, via.name));
     if (!cuts.add({via.name}, via.x, via.y)) {
-      return fail("lift cut spacing");
+      return stage.fail("lift cut spacing");
     }
   }
   const auto connected = connectivity(net, trial.paths);
   if (!connected.connected) {
-    return fail(connected.reason);
+    return stage.fail(connected.reason);
   }
-  if (expired()) {
-    return fail("route deadline");
+  if (stage.expired()) {
+    return out;
   }
   trial.vias = vias.size();
   for (const auto& [layer, length] : trial.layer_wire_length_um) {
@@ -472,28 +477,24 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
 Signal_route_trial Signal_router::propose_straight(const ph::Net& net, const ph::Shape& corridor,
                                                    const Signal_route_limits& limits) const {
   Signal_route_trial out;
-  const auto         fail = [&](const std::string& reason) {
-    out.reason = reason;
+  const Stage_trial  stage{out, limits.deadline};
+  if (stage.expired()) {
     return out;
-  };
-  if (std::chrono::steady_clock::now() >= limits.deadline) {
-    out.timed_out = true;
-    return fail("route deadline");
   }
   if (!limits.patterns) {
-    return fail("pattern budget");
+    return stage.fail("pattern budget");
   }
   if (!net.wires.empty() || net.connections.size() != 2 || (!net.use.empty() && net.use != "SIGNAL")) {
-    return fail("straight route requires an unwired two-pin signal net");
+    return stage.fail("straight route requires an unwired two-pin signal net");
   }
   const auto layer     = tech_.layers.find(corridor.layer);
   const auto clearance = rules_.clearance(corridor.layer);
   if (layer == tech_.layers.end() || !clearance) {
-    return fail("unsupported straight-route layer");
+    return stage.fail("unsupported straight-route layer");
   }
   const bool horizontal = layer->second.direction == "HORIZONTAL";
   if (!horizontal && layer->second.direction != "VERTICAL") {
-    return fail("missing route direction");
+    return stage.fail("missing route direction");
   }
   const double half = layer->second.width * frame_.dbu / 2;
   const auto&  r    = corridor.rect;
@@ -503,11 +504,11 @@ Signal_route_trial Signal_router::propose_straight(const ph::Net& net, const ph:
   const double y2   = horizontal ? y1 : r.yh - half;
   for (double v : {x1, y1, x2, y2}) {
     if (!std::isfinite(v) || std::abs(v) > double(std::numeric_limits<int32_t>::max()) || std::abs(v - std::round(v)) > 1e-6) {
-      return fail("straight-route endpoint is not integral DBU");
+      return stage.fail("straight-route endpoint is not integral DBU");
     }
   }
   if (x2 < x1 || y2 < y1 || (x1 == x2 && y1 == y2)) {
-    return fail("empty straight route");
+    return stage.fail("empty straight route");
   }
   Signal_route_geometry geometry;
   geometry.straight_corridor = corridor;
@@ -521,21 +522,20 @@ Signal_route_trial Signal_router::propose_straight(const ph::Net& net, const ph:
   trial.wires.push_back({"FIXED", geometry.paths});
   const auto shapes = ph::route_geometry(tech_, frame_, trial);
   if (shapes.size() != 1) {
-    return fail("straight route must have one metal rectangle");
+    return stage.fail("straight route must have one metal rectangle");
   }
   ++out.patterns_examined;
   const auto rule = rules_.rectangle(shapes.front());
   if (!rule.legal) {
-    return fail(rule.reason);
+    return stage.fail(rule.reason);
   }
   for (auto id : occupancy_.query(corridor.layer, shapes.front().rect, *clearance, net.name)) {
-    if (std::chrono::steady_clock::now() >= limits.deadline) {
-      out.timed_out = true;
-      return fail("route deadline");
+    if (stage.expired()) {
+      return out;
     }
     const auto check = rules_.spacing(shapes.front(), occupancy_.at(id).shape);
     if (!check.legal) {
-      return fail(check.reason);
+      return stage.fail(check.reason);
     }
   }
   // Associate each endpoint with its actual transformed LEF pin, independent
@@ -547,13 +547,13 @@ Signal_route_trial Signal_router::propose_straight(const ph::Net& net, const ph:
   for (const auto& pin : net.connections) {
     const auto cell = components_.find(pin.instance);
     if (pin.instance == "PIN" || cell == components_.end()) {
-      return fail("non-cell straight-route endpoint");
+      return stage.fail("non-cell straight-route endpoint");
     }
     const auto& c     = *cell->second;
     const auto& m     = tech_.macros.at(c.macro);
     const auto  found = m.pins.find(pin.pin);
     if (found == m.pins.end()) {
-      return fail("unknown straight-route pin");
+      return stage.fail("unknown straight-route pin");
     }
     bool matched = false;
     for (size_t i = 0; i < points.size() && !matched; ++i) {
@@ -576,12 +576,12 @@ Signal_route_trial Signal_router::propose_straight(const ph::Net& net, const ph:
       }
     }
     if (!matched) {
-      return fail("straight-route endpoint misses its pin");
+      return stage.fail("straight-route endpoint misses its pin");
     }
   }
   const auto connected = ph::check_route_connectivity(tech_, frame_, trial, &components_);
   if (!connected.connected) {
-    return fail(connected.reason);
+    return stage.fail(connected.reason);
   }
   geometry.wire_length_um                       = (x2 - x1 + y2 - y1) / frame_.dbu;
   geometry.layer_wire_length_um[corridor.layer] = geometry.wire_length_um;
@@ -595,67 +595,56 @@ Signal_route_trial Signal_router::propose_span(const ph::Net& net, const Signal_
 Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Signal_route_limits& limits,
                                                     const ph::Shape* corridor, const Pin_escape_guard* escapes) const {
   Signal_route_trial out;
-  const auto         expired = [&]() {
-    if (std::chrono::steady_clock::now() < limits.deadline) {
-      return false;
-    }
-    out.timed_out = true;
-    out.reason    = "route deadline";
-    return true;
-  };
-  if (expired()) {
+  const Stage_trial  stage{out, limits.deadline};
+  if (stage.expired()) {
     return out;
   }
-  const auto fail = [&](const std::string& reason) {
-    out.reason = reason;
-    return out;
-  };
   if (!net.wires.empty()) {
-    return fail("net already has wiring");
+    return stage.fail("net already has wiring");
   }
   if ((!net.use.empty() && net.use != "SIGNAL") || net.connections.size() < 2) {
-    return fail("not a multi-terminal signal net");
+    return stage.fail("not a multi-terminal signal net");
   }
   if (!profile_.allows(profile_.access.escape)) {
-    return fail("access layer excluded by routing profile");
+    return stage.fail("access layer excluded by routing profile");
   }
   const auto clearance = rules_.clearance(profile_.access.escape);
   if (!clearance || !tech_.layers.contains(profile_.access.escape) || !tech_.cut_layers.contains(profile_.access.cut)) {
-    return fail("unsupported " + profile_.access.escape + "/" + profile_.access.cut + " rules");
+    return stage.fail("unsupported " + profile_.access.escape + "/" + profile_.access.cut + " rules");
   }
   if (tech_.layers.at(profile_.access.escape).direction != "HORIZONTAL") {
-    return fail(profile_.access.escape + " span requires a horizontal layer");
+    return stage.fail(profile_.access.escape + " span requires a horizontal layer");
   }
   const auto escape_width = ph::wire_width_dbu(tech_.layers.at(profile_.access.escape), frame_.dbu);
   if (!escape_width) {
-    return fail("unsupported signal width");
+    return stage.fail("unsupported signal width");
   }
   const double wire_width = *escape_width;
   if (corridor
       && (corridor->layer != profile_.access.escape || !rules_.rectangle(*corridor).legal
           || corridor->rect.yh - corridor->rect.yl != wire_width)) {
-    return fail("invalid aligned " + profile_.access.escape + " corridor");
+    return stage.fail("invalid aligned " + profile_.access.escape + " corridor");
   }
   std::set<std::pair<std::string, std::string>>  pins;
   std::vector<std::vector<ph::Pin_access_point>> accesses;
   std::set<int64_t>                              common_tracks;
   for (const auto& connection : net.connections) {
-    if (expired()) {
+    if (stage.expired()) {
       return out;
     }
     const auto cell = components_.find(connection.instance);
     if (cell == components_.end() || !pins.emplace(connection.instance, connection.pin).second) {
-      return fail("non-cell or duplicate endpoint");
+      return stage.fail("non-cell or duplicate endpoint");
     }
     if (out.access_examined >= limits.access_candidates) {
-      return fail("pin-access budget");
+      return stage.fail("pin-access budget");
     }
     auto result = endpoint_access(*cell->second, connection.pin, net, limits, out);
-    if (expired()) {
+    if (stage.expired()) {
       return out;
     }
     if (result.points.empty()) {
-      return fail(result.exhausted ? "pin-access budget" : "pin has no legal access");
+      return stage.fail(result.exhausted ? "pin-access budget" : "pin has no legal access");
     }
     std::set<int64_t> tracks;
     std::erase_if(result.points, [&](const auto& p) {
@@ -675,7 +664,7 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
       std::erase_if(common_tracks, [&](int64_t y) { return !tracks.contains(y); });
     }
     if (common_tracks.empty()) {
-      return fail("no common " + profile_.access.escape + " track");
+      return stage.fail("no common " + profile_.access.escape + " track");
     }
     accesses.push_back(std::move(result.points));
   }
@@ -683,7 +672,7 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
   try {
     cut_spacing = ph::signal_cut_spacing(tech_.cut_layers.at(profile_.access.cut), frame_.dbu);
   } catch (const std::invalid_argument& error) {
-    return fail(error.what());
+    return stage.fail(error.what());
   }
   std::map<std::string, std::vector<ph::Shape>> via_shapes;
   ph::Floorplan                                 via_frame;
@@ -701,11 +690,11 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
     std::vector<size_t> choice(options.size(), 0);
     bool                more = true;
     while (more) {
-      if (expired()) {
+      if (stage.expired()) {
         return out;
       }
       if (out.patterns_examined >= limits.patterns) {
-        return fail("pattern budget");
+        return stage.fail("pattern budget");
       }
       ++out.patterns_examined;
       Signal_route_geometry                               trial;
@@ -733,7 +722,7 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
       bool legal = rules_.rectangle({profile_.access.escape, span}).legal;
       if (legal) {
         for (auto id : occupancy_.query(profile_.access.escape, span, *clearance, net.name)) {
-          if (expired()) {
+          if (stage.expired()) {
             return out;
           }
           if (!rules_.spacing({profile_.access.escape, span}, occupancy_.at(id).shape).legal) {
@@ -748,7 +737,7 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
       std::vector<ph::Rect> active;
       if (legal) {
         for (const auto& cut : cuts) {
-          if (expired()) {
+          if (stage.expired()) {
             return out;
           }
           std::erase_if(active, [&](const auto& old) { return old.xh + cut_spacing < cut.xl; });
@@ -769,12 +758,13 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
         trial.wire_length_um    = trial.layer_wire_length_um[profile_.access.escape];
         trial.vias              = unique_vias.size();
         trial.straight_corridor = ph::Shape{profile_.access.escape, span};
-        if (expired()) {
+        if (stage.expired()) {
           return out;
         }
         bool preserves_access = true;
         if (escapes) {
-          const auto access = escapes->check(proposal_shapes(net, trial.paths), net.name, expired);
+          const auto access
+              = escapes->check(proposal_shapes(net, trial.paths), net.name, [&] { return stage.expired(); });
           preserves_access  = access.legal;
           if (!preserves_access) {
             out.reason = access.reason;
@@ -797,60 +787,49 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
       }
     }
   }
-  return out.reason.empty() ? fail(profile_.access.escape + " span blocked") : out;
+  return out.reason.empty() ? stage.fail(profile_.access.escape + " span blocked") : out;
 }
 
 Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Signal_route_limits& limits) const {
   Signal_route_trial out;
-  const auto         expired = [&]() {
-    if (std::chrono::steady_clock::now() < limits.deadline) {
-      return false;
-    }
-    out.timed_out = true;
-    out.reason    = "route deadline";
-    return true;
-  };
-  const auto fail = [&](const std::string& reason) {
-    out.reason = reason;
-    return out;
-  };
-  if (expired()) {
+  const Stage_trial  stage{out, limits.deadline};
+  if (stage.expired()) {
     return out;
   }
   if (!ph::unrouted_signal(net)) {
-    return fail("not an unwired multi-pin signal net");
+    return stage.fail("not an unwired multi-pin signal net");
   }
   std::set<std::pair<std::string, std::string>> pins;
   for (const auto& pin : net.connections) {
     if (!pins.emplace(pin.instance, pin.pin).second) {
-      return fail("duplicate endpoint");
+      return stage.fail("duplicate endpoint");
     }
   }
   if (!profile_.allows(profile_.access.escape) || !profile_.allows(profile_.branch_layer)) {
-    return fail("pattern layers excluded by routing profile");
+    return stage.fail("pattern layers excluded by routing profile");
   }
   if (!rules_.clearance(profile_.access.escape) || !rules_.clearance(profile_.branch_layer)) {
-    return fail("unsupported " + profile_.access.escape + "/" + profile_.branch_layer + " rules");
+    return stage.fail("unsupported " + profile_.access.escape + "/" + profile_.branch_layer + " rules");
   }
   if (tech_.layers.at(profile_.access.escape).direction != "HORIZONTAL"
       || tech_.layers.at(profile_.branch_layer).direction != "VERTICAL") {
-    return fail(profile_.access.escape + "/" + profile_.branch_layer + " pattern requires horizontal/vertical layers");
+    return stage.fail(profile_.access.escape + "/" + profile_.branch_layer + " pattern requires horizontal/vertical layers");
   }
   std::vector<ph::Pin_access_result> accesses(net.connections.size());
   for (size_t i = 0; i < accesses.size(); ++i) {
     const auto cell = components_.find(net.connections[i].instance);
     if (cell == components_.end()) {
-      return fail("non-cell endpoint");
+      return stage.fail("non-cell endpoint");
     }
     if (out.access_examined >= limits.access_candidates) {
-      return fail("pin-access budget");
+      return stage.fail("pin-access budget");
     }
     accesses[i] = endpoint_access(*cell->second, net.connections[i].pin, net, limits, out);
-    if (expired()) {
+    if (stage.expired()) {
       return out;
     }
     if (accesses[i].points.empty()) {
-      return fail("pin has no legal access");
+      return stage.fail("pin has no legal access");
     }
   }
   // Only real branch-layer track locations are enumerated. Trunks stay within the
@@ -868,11 +847,11 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
       continue;
     }
     if (!t.supported()) {
-      return fail("unsupported " + profile_.branch_layer + " tracks");
+      return stage.fail("unsupported " + profile_.branch_layer + " tracks");
     }
     const auto [first, last] = t.index_range(double(xmin), double(xmax));
     for (auto i = first; i <= last; ++i) {
-      if (expired()) {
+      if (stage.expired()) {
         return out;
       }
       if (xs.size() >= limits.patterns) {
@@ -884,13 +863,13 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
   const auto escape_width = ph::wire_width_dbu(tech_.layers.at(profile_.access.escape), frame_.dbu);
   const auto branch_width = ph::wire_width_dbu(tech_.layers.at(profile_.branch_layer), frame_.dbu);
   if (!escape_width || !branch_width) {
-    return fail("unsupported signal width");
+    return stage.fail("unsupported signal width");
   }
   const double width2 = *escape_width, width3 = *branch_width;
   ph::Floorplan via_frame;
   via_frame.dbu = frame_.dbu;
   for (const auto& [name, via] : tech_.vias) {
-    if (expired()) {
+    if (stage.expired()) {
       return out;
     }
     if (!via.unsupported.empty() || via.shapes.size() != 3) {
@@ -917,7 +896,7 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
     std::vector<size_t> choice(accesses.size(), 0);
     bool                more = true;
     while (more) {
-      if (expired()) {
+      if (stage.expired()) {
         return out;
       }
       std::map<int64_t, ph::Shape> branches;
@@ -933,11 +912,11 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
       }
       if (branches.size() > 1) {
         for (auto x : xs) {
-          if (expired()) {
+          if (stage.expired()) {
             return out;
           }
           if (out.patterns_examined >= limits.patterns) {
-            return fail("pattern budget");
+            return stage.fail("pattern budget");
           }
           ++out.patterns_examined;
           auto      landings = branches;
@@ -947,7 +926,7 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
           };
           bool legal = true;
           for (auto& [y, landing] : landings) {
-            if (expired()) {
+            if (stage.expired()) {
               return out;
             }
             landing.rect.xl = std::min(landing.rect.xl, x + m2->rect.xl);
@@ -960,7 +939,7 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
           }
           for (auto i = landings.begin(); legal && i != landings.end(); ++i) {
             for (auto j = landings.begin(); j != i; ++j) {
-              if (expired()) {
+              if (stage.expired()) {
                 return out;
               }
               if (!rules_.spacing(i->second, j->second).legal) {
@@ -982,7 +961,7 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
           }
           ph::Signal_cut_set cuts(tech_, frame_);
           for (const auto& [vname, vx, vy] : vias) {
-            if (expired()) {
+            if (stage.expired()) {
               return out;
             }
             trial.paths.push_back(ph::via_path(vname == name ? profile_.access.escape : profile_.access.pin, vx, vy, vname));
@@ -999,7 +978,7 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
               = trial.layer_wire_length_um[profile_.access.escape] + trial.layer_wire_length_um[profile_.branch_layer];
           trial.vias           = vias.size();
           const auto connected = connectivity(net, trial.paths);
-          if (expired()) {
+          if (stage.expired()) {
             return out;
           }
           if (connected.connected) {
@@ -1018,6 +997,6 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
       }
     }
   }
-  return fail("no legal " + profile_.access.escape + "/" + profile_.branch_layer + " pattern");
+  return stage.fail("no legal " + profile_.access.escape + "/" + profile_.branch_layer + " pattern");
 }
 }  // namespace livehd::placement

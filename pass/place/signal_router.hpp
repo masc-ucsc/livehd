@@ -87,6 +87,14 @@ class Signal_router {
 
   Signal_route_trial propose_span_impl(const physical::Net&, const Signal_route_limits&, const physical::Shape*,
                                        const Pin_escape_guard* = nullptr) const;
+  // One search stage's result. Past the deadline, expired() marks it timed
+  // out with the "route deadline" reason; fail() records any other reason.
+  struct Stage_trial {
+    Signal_route_trial&                   out;
+    std::chrono::steady_clock::time_point deadline;
+    bool                                  expired() const;
+    Signal_route_trial                    fail(std::string reason) const;
+  };
   // Shared proposal plumbing. Access enumeration charges the trial's budget.
   physical::Pin_access_result  endpoint_access(const physical::Component&, const std::string& pin, const physical::Net&,
                                                const Signal_route_limits&, Signal_route_trial&) const;

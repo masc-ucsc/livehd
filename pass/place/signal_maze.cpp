@@ -16,35 +16,24 @@ namespace livehd::placement {
 namespace ph = physical;
 Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_route_limits& limits) const {
   Signal_route_trial out;
-  const auto         expired = [&] {
-    if (std::chrono::steady_clock::now() < limits.deadline) {
-      return false;
-    }
-    out.timed_out = true;
-    out.reason    = "route deadline";
-    return true;
-  };
-  const auto fail = [&](const std::string& reason) {
-    out.reason = reason;
-    return out;
-  };
-  if (expired()) {
+  const Stage_trial  stage{out, limits.deadline};
+  if (stage.expired()) {
     return out;
   }
   if (!ph::unrouted_signal(net)) {
-    return fail("maze requires an unwired multi-pin signal net");
+    return stage.fail("maze requires an unwired multi-pin signal net");
   }
   std::set<std::pair<std::string, std::string>> endpoint_ids;
   for (const auto& pin : net.connections) {
     if (!endpoint_ids.emplace(pin.instance, pin.pin).second) {
-      return fail("duplicate endpoint");
+      return stage.fail("duplicate endpoint");
     }
   }
   if (!limits.patterns) {
-    return fail("maze budget");
+    return stage.fail("maze budget");
   }
   if (profile_.signal_layers.empty() || profile_.signal_layers.front() != profile_.access.escape) {
-    return fail("maze profile must start at the access escape layer");
+    return stage.fail("maze profile must start at the access escape layer");
   }
   std::vector<std::string> layers;
   std::vector<double>      widths, half;
@@ -52,7 +41,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
   // Maze landings require an explicit LEF manufacturing grid.
   const auto grid_dbu = tech_.manufacturing_grid > 0 ? ph::manufacturing_grid_dbu(tech_, frame_.dbu) : std::nullopt;
   if (!grid_dbu) {
-    return fail("unsupported manufacturing grid");
+    return stage.fail("unsupported manufacturing grid");
   }
   const double grid = *grid_dbu;
   // Only layers with modeled rules are usable. An unsupported upper layer
@@ -78,14 +67,14 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
     half.push_back(std::ceil(std::max(width, area / width) / (2 * grid)) * grid);
   }
   if (layers.size() < 2) {
-    return fail("unsupported maze layers");
+    return stage.fail("unsupported maze layers");
   }
   std::vector<std::string>           connecting_vias;
   std::map<std::string, std::string> via_layers;
   for (size_t lower = 0; lower + 1 < layers.size(); ++lower) {
     std::string selected;
     for (const auto& [name, definition] : tech_.vias) {
-      if (expired()) {
+      if (stage.expired()) {
         return out;
       }
       if (!definition.unsupported.empty() || definition.shapes.size() != 3) {
@@ -135,27 +124,27 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
   half.resize(layers.size());
   horizontal.resize(layers.size());
   if (layers.size() < 2) {
-    return fail("no supported maze via");
+    return stage.fail("no supported maze via");
   }
   std::vector<ph::Pin_access_result> access(net.connections.size());
   double                             xmin = frame_.die.xh, xmax = frame_.die.xl, ymin = frame_.die.yh, ymax = frame_.die.yl;
   for (size_t i = 0; i < access.size(); ++i) {
     const auto cell = components_.find(net.connections[i].instance);
     if (cell == components_.end()) {
-      return fail("non-cell endpoint");
+      return stage.fail("non-cell endpoint");
     }
     if (out.access_examined >= limits.access_candidates) {
-      return fail("pin-access budget");
+      return stage.fail("pin-access budget");
     }
     access[i] = endpoint_access(*cell->second, net.connections[i].pin, net, limits, out);
-    if (expired()) {
+    if (stage.expired()) {
       return out;
     }
     std::erase_if(access[i].points, [&](const auto& p) {
       return p.escape.layer != profile_.access.escape || p.escape.rect.yh - p.escape.rect.yl != widths[0];
     });
     if (access[i].points.empty()) {
-      return fail("pin has no legal access");
+      return stage.fail("pin has no legal access");
     }
     for (const auto& p : access[i].points) {
       xmin    = std::min(xmin, double(p.x));
@@ -171,7 +160,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
       continue;
     }
     if (!t.supported()) {
-      return fail("unsupported maze tracks");
+      return stage.fail("unsupported maze tracks");
     }
     pitch = std::max(pitch, double(t.step));
   }
@@ -196,22 +185,22 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
     auto&      coords        = tracks[l];
     const auto [first, last] = horizontal[l] ? t.index_range(ymin, ymax) : t.index_range(xmin, xmax);
     for (auto n = first; n <= last; ++n) {
-      if (expired()) {
+      if (stage.expired()) {
         return out;
       }
       coords.insert(t.start + n * t.step);
       if (coords.size() > limits.patterns) {
-        return fail("maze coordinate budget");
+        return stage.fail("maze coordinate budget");
       }
     }
     auto& all = horizontal[l] ? ycoords : xcoords;
     all.insert(coords.begin(), coords.end());
     if (all.size() > limits.patterns) {
-      return fail("maze coordinate budget");
+      return stage.fail("maze coordinate budget");
     }
   }
   if (tracks[0].empty() || tracks[1].empty()) {
-    return fail("missing maze tracks");
+    return stage.fail("missing maze tracks");
   }
   for (const auto& a : access) {
     for (const auto& p : a.points) {
@@ -239,7 +228,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
       return false;
     }
     for (auto id : occupancy_.query(s.layer, s.rect, *rules_.clearance(s.layer), net.name)) {
-      if (expired() || !rules_.spacing(s, occupancy_.at(id).shape).legal) {
+      if (stage.expired() || !rules_.spacing(s, occupancy_.at(id).shape).legal) {
         return false;
       }
     }
@@ -266,7 +255,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
     auto& selected = via_landings[site];
     for (const auto wa : landing_widths[lower]) {
       for (const auto wb : landing_widths[lower + 1]) {
-        if (expired()) {
+        if (stage.expired()) {
           return false;
         }
         if (wa < widths[lower] || wb < widths[lower + 1] || wa % int64_t(2 * grid) || wb % int64_t(2 * grid)) {
@@ -325,9 +314,9 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
     try {
       topology = steiner_topology(pins);
     } catch (const std::exception& e) {
-      return fail(e.what());
+      return stage.fail(e.what());
     }
-    if (expired()) {
+    if (stage.expired()) {
       return out;
     }
     std::vector<std::optional<Key>> vertices(topology.locations.size());
@@ -365,11 +354,11 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
       }
       std::sort(candidates.begin(), candidates.end());
       for (const auto& [distance, xx, yy] : candidates) {
-        if (expired()) {
+        if (stage.expired()) {
           return out;
         }
         if (out.patterns_examined >= limits.patterns) {
-          return fail("maze junction budget");
+          return stage.fail("maze junction budget");
         }
         ++out.patterns_examined;
         Key k{std::lower_bound(xs.begin(), xs.end(), xx) - xs.begin(), std::lower_bound(ys.begin(), ys.end(), yy) - ys.begin(), 0};
@@ -379,7 +368,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
         }
       }
       if (!vertices[i]) {
-        return fail("maze Steiner junction blocked");
+        return stage.fail("maze Steiner junction blocked");
       }
     }
     for (const auto& [a, b] : topology.edges) {
@@ -419,7 +408,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
         continue;
       }
       if (reached.size() >= limits.patterns) {
-        return fail("maze node budget");
+        return stage.fail("maze node budget");
       }
       if (reached.emplace(k, Record{0, {}, i}).second) {
         queue.emplace(heuristic(k), 0, k);
@@ -427,7 +416,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
     }
     std::optional<Key> end;
     while (!queue.empty()) {
-      if (expired()) {
+      if (stage.expired()) {
         return out;
       }
       const auto [estimate, cost, k] = queue.top();
@@ -436,7 +425,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
         continue;
       }
       if (out.patterns_examined >= limits.patterns) {
-        return fail("maze node budget");
+        return stage.fail("maze node budget");
       }
       ++out.patterns_examined;
       if (targets.contains(k)) {
@@ -469,7 +458,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
         }
       }
       for (const auto& next : neighbors) {
-        if (expired()) {
+        if (stage.expired()) {
           return out;
         }
         const auto   next_layer = std::get<2>(next);
@@ -493,7 +482,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
       }
     }
     if (!end) {
-      return fail("maze exhausted");
+      return stage.fail("maze exhausted");
     }
     if (access.size() == 2) {
       trial.endpoints = {access[0].points[reached.at(*end).source], access[1].points[targets.at(*end)]};
@@ -514,7 +503,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
   }
   for (const auto& path : paths) {
     for (size_t i = 0; i < path.size(); ++i) {
-      if (expired()) {
+      if (stage.expired()) {
         return out;
       }
       const auto [ix, iy, l] = path[i];
@@ -534,7 +523,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
     const auto lower = std::find(layers.begin(), layers.end(), via_layers.at(name)) - layers.begin();
     const auto found = via_landings.find({x, y, size_t(lower)});
     if (found == via_landings.end() || !found->second) {
-      return fail("missing checked maze via landings");
+      return stage.fail("missing checked maze via landings");
     }
     for (size_t side = 0; side < 2; ++side) {
       const auto  l     = lower + side;
@@ -554,7 +543,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
   for (const auto& [line, spans] : intervals) {
     const auto [l, c] = line;
     for (const auto& [low, high] : ph::merge_intervals(spans)) {
-      if (expired()) {
+      if (stage.expired()) {
         return out;
       }
       // ASAP7 RECTONLY applies to the connected metal polygon, not each
@@ -577,11 +566,11 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
             : ph::Rect{c - width / 2,           low, c + width / 2,          high}
       };
       if (!legal(s)) {
-        return fail("maze merged metal blocked");
+        return stage.fail("maze merged metal blocked");
       }
       for (const auto& old : metal) {
         if (old.layer == s.layer && !rules_.spacing(old, s).legal) {
-          return fail("maze self spacing");
+          return stage.fail("maze self spacing");
         }
       }
       metal.push_back(s);
@@ -594,7 +583,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
         for (const auto& [name, layer] : tech_.layers) {
           const auto nominal = layer.width * frame_.dbu;
           if (!std::isfinite(nominal) || nominal <= 0 || nominal > INT32_MAX || std::abs(nominal - std::round(nominal)) > 1e-6) {
-            return fail("unrepresentable nondefault rule width");
+            return stage.fail("unrepresentable nondefault rule width");
           }
           rule.emplace(name, std::llround(nominal));
         }
@@ -608,7 +597,7 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
               && (pending == trial.nondefault_rules.end() || pending->second == rule)) {
             break;
           }
-          if (expired()) {
+          if (stage.expired()) {
             return out;
           }
           taper_rule = base + "_" + std::to_string(suffix + 1);
@@ -620,12 +609,12 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
   }
   ph::Signal_cut_set cuts(tech_, frame_);
   for (const auto& [name, x, y] : vias) {
-    if (expired()) {
+    if (stage.expired()) {
       return out;
     }
     trial.paths.push_back(ph::via_path(via_layers.contains(name) ? via_layers.at(name) : profile_.access.pin, x, y, name));
     if (!cuts.add({name}, x, y)) {
-      return fail("maze self cut spacing");
+      return stage.fail("maze self cut spacing");
     }
   }
   trial.vias = vias.size();
@@ -633,11 +622,11 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
     trial.wire_length_um += length;
   }
   const auto connected = connectivity(net, trial.paths, &trial.nondefault_rules);
-  if (expired()) {
+  if (stage.expired()) {
     return out;
   }
   if (!connected.connected) {
-    return fail(connected.reason);
+    return stage.fail(connected.reason);
   }
   out.geometry = std::move(trial);
   return out;
