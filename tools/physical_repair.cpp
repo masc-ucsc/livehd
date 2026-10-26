@@ -351,7 +351,8 @@ int main(int argc, char** argv) {
     number_option("boundarypins_max_displacement_um", options.boundarypins.max_displacement_um);
     boolean_option("busorder", options.busorder.enabled);
     number_option("busorder_weight", options.busorder.weight);
-    number_option("busorder_merge_um", options.busorder.merge_um);
+    number_option("region_merge_um", options.region.merge_um);
+    number_option("busorder_merge_um", options.region.merge_um);  // deprecated spelling
     number_option("busorder_max_displacement_um", options.busorder.max_displacement_um);
     auto& terminal_options = options.terminal_legalize_options;
     boolean_option("legalize_joint_minimize_total", terminal_options.joint_minimize_total);
@@ -391,7 +392,8 @@ int main(int argc, char** argv) {
     }
     sat_limit("busorder_iterations", options.busorder.iterations);
     sat_limit("busorder_refresh", options.busorder.refresh);
-    sat_limit("busorder_max_cells", options.busorder.max_cells);
+    sat_limit("region_max_cells", options.region.max_cells);
+    sat_limit("busorder_max_cells", options.region.max_cells);  // deprecated spelling
     sat_limit("legalize_padding_sites", terminal_options.padding_sites);
     sat_limit("legalize_padding_max_extra_rows", terminal_options.padding_max_extra_rows);
     sat_limit("legalize_critical_padding_sites", terminal_options.critical_padding_sites);

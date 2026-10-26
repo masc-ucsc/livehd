@@ -27,13 +27,13 @@ struct Boundary_pin_model {
   std::vector<int>           piece_region;
   // Original nets are driver-first (the LiveHD native design convention).
   std::vector<bool>          pin_is_driver;
-  std::vector<Busorder_edge> edges;
+  std::vector<Region_edge>   edges;
   unsigned                   split_nets = 0, skipped_high_degree = 0;
 };
 // Temporary optimization topology only. Each original pin occurs exactly once;
 // connected RSMT pieces in different rectangles share zero-area fixed terminals.
-Boundary_pin_model split_boundary_nets(const DreamPlace::native::Design&, const std::vector<Busorder_rect>&, const Busorder_route&);
-Boundary_pin_order_stats order_boundary_pins(Boundary_pin_model&, const std::vector<Busorder_rect>&, const std::vector<Bus_bit>&,
+Boundary_pin_model split_boundary_nets(const DreamPlace::native::Design&, const std::vector<Region_rect>&, const Busorder_route&);
+Boundary_pin_order_stats order_boundary_pins(Boundary_pin_model&, const std::vector<Region_rect>&, const std::vector<Bus_bit>&,
                                              const std::vector<int>& macros = {});
 struct Pin_align_pair {
   int         input = -1, output = -1, rectangle = -1, cell = -1;
@@ -46,7 +46,7 @@ struct Pin_align_stats {
   unsigned                    ambiguous = 0, order_conflicts = 0, spacing_conflicts = 0, range_conflicts = 0, macro_conflicts = 0;
   std::vector<Pin_align_pair> pairs;
 };
-Pin_align_stats align_boundary_pins(Boundary_pin_model&, const std::vector<Busorder_rect>&, const std::vector<Bus_bit>&,
+Pin_align_stats align_boundary_pins(Boundary_pin_model&, const std::vector<Region_rect>&, const std::vector<Bus_bit>&,
                                     const std::vector<int>& macros = {});
 struct Boundary_pin_sample {
   std::string stage;
@@ -55,7 +55,7 @@ struct Boundary_pin_sample {
 };
 class Boundary_pins {
   Boundary_pin_options             options;
-  std::vector<Busorder_rect>       mesh;
+  std::vector<Region_rect>         mesh;
   Busorder_route                   route;
   double                           dbu;
   std::string                      output;
@@ -72,7 +72,7 @@ class Boundary_pins {
   void                             write() const;
 
 public:
-  Boundary_pins(std::vector<Busorder_rect>, Busorder_route, double, Boundary_pin_options, std::string output_dir = {},
+  Boundary_pins(const Region_mesh&, Busorder_route, double, Boundary_pin_options, std::string output_dir = {},
                 std::vector<Bus_bit> bus_bits = {}, std::vector<int> macro_nodes = {});
   void                                    refine(DreamPlace::native::Design&, const DreamPlace::native::Options&);
   void                                    observe(const DreamPlace::native::Design&, const std::string& stage);

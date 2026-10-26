@@ -24,5 +24,14 @@ struct Feedback {
   std::string                source_report;  // optional external-report provenance only
   std::optional<double>      wns, tns, hold_wns;
   std::vector<std::string>   path;
+  // Physical connection lookup: a top port (instance "PIN") is keyed by its
+  // name; an instance pin by "inst:pin", else the "inst/pin" spelling.
+  const Pin* find_pin(const std::string& instance, const std::string& pin) const {
+    auto it = pins.find(instance == "PIN" ? pin : instance + ":" + pin);
+    if (it == pins.end() && instance != "PIN") {
+      it = pins.find(instance + "/" + pin);
+    }
+    return it == pins.end() ? nullptr : &it->second;
+  }
 };
 }  // namespace livehd::timing

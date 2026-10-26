@@ -26,7 +26,7 @@ dp::Design fixture() {
   d.build_maps();
   return d;
 }
-const std::vector<Busorder_rect> boxes = {
+const std::vector<Region_rect> boxes = {
     { 0, 0,  50, 100, 1},
     {50, 0, 100, 100, 1}
 };
@@ -110,7 +110,7 @@ TEST(BoundaryPins, OnlyRealCellCoordinatesLeaveTheTemporaryModel) {
   policy.enabled             = true;
   policy.iterations          = 20;
   policy.max_displacement_um = 5;
-  Boundary_pins phase(boxes, rsmt, 1, policy);
+  Boundary_pins phase(Region_mesh{.rects = boxes}, rsmt, 1, policy);
   dp::Options   options;
   options.bins_x = options.bins_y = 4;
   options.add_fillers             = false;
@@ -209,7 +209,7 @@ TEST(BoundaryPins, OrdersPinsAlongSharedTJunctionEdges) {
   d.net_weights        = {1, 2, 3};
   d.net_mask.clear();
   d.build_maps();
-  const std::vector<Busorder_rect> mesh = {
+  const std::vector<Region_rect> mesh = {
       { 0,  0,  50, 100},
       {50,  0, 100,  50},
       {50, 50, 100, 100}

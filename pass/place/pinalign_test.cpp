@@ -8,7 +8,7 @@ namespace {
 // A middle cell optionally replaces the direct local wire with two nets.
 struct Fixture {
   Boundary_pin_model         m;
-  std::vector<Busorder_rect> mesh{
+  std::vector<Region_rect> mesh{
       { 0, 0,  30, 100, 0},
       {30, 0,  70, 100, 0},
       {70, 0, 100, 100, 0}

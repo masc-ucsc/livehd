@@ -349,6 +349,10 @@ filegroup(
         "busorder.cpp",
         "boundary_pins.hpp",
         "busorder.hpp",
+        "region_mesh.cpp",
+        "region_mesh.hpp",
+        "cell_criticality.cpp",
+        "cell_criticality.hpp",
         "cell_jump.cpp",
         "cell_jump.hpp",
         "density_warp.cpp",
@@ -470,6 +474,31 @@ cc_test(
 )
 
 cc_library(
+    name = "region_mesh",
+    srcs = ["region_mesh.cpp"],
+    hdrs = ["region_mesh.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = ["@dreamplace//dreamplace/native:placer", "@rapidjson"],
+)
+cc_test(
+    name = "region_mesh_test",
+    size = "small",
+    srcs = ["region_mesh_test.cpp"],
+    copts = COPTS,
+    deps = [":region_mesh", "@googletest//:gtest_main"],
+)
+
+cc_library(
+    name = "cell_criticality",
+    srcs = ["cell_criticality.cpp"],
+    hdrs = ["cell_criticality.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = ["//core", "//inou/lefdef:inou_lefdef", "@dreamplace//dreamplace/native:placer"],
+)
+
+cc_library(
     name = "place",
     srcs = [
         "cell_jump.cpp",
@@ -521,6 +550,8 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":uroute",
+        ":region_mesh",
+        ":cell_criticality",
         "//pass/place/buffering:checkpoint",
         ":filler_budget",
         ":signal_router",

@@ -9,7 +9,7 @@
 #include "boundary_pins.hpp"
 
 namespace livehd::placement {
-Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const std::vector<Busorder_rect>& mesh,
+Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const std::vector<Region_rect>& mesh,
                                     const std::vector<Bus_bit>& identities, const std::vector<int>& macros) {
   auto&           d = model.design;
   Pin_align_stats stats;
@@ -17,7 +17,7 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const std::vector
   if (model.piece_region.size() != size_t(nets) || model.pin_is_driver.size() != d.pin2node.size()) {
     throw std::invalid_argument("pinalign requires directed split-net metadata");
   }
-  model.edges = busorder_edges(mesh);
+  model.edges = region_edges(mesh);
   std::vector<int>              node_anchor(d.node_x.size(), -1);
   std::vector<std::vector<int>> edge_pins(model.edges.size()), incident(count), terminals(nets), real(nets);
   for (int i = 0; i < count; ++i) {

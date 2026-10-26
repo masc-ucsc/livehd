@@ -246,11 +246,12 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.busorder.enabled             = truthy(synth_set(opts, "place.busorder", "false"));
   out.busorder.iterations          = integer("place.busorder.iterations", "100");
   out.busorder.refresh             = integer("place.busorder.refresh", "20");
-  out.busorder.max_cells           = integer("place.busorder.max_cells", "10000");
+  out.region.max_cells             = integer("place.busorder.max_cells", "10000");
   out.busorder.weight              = number("place.busorder.weight", "4");
-  out.busorder.merge_um            = number("place.busorder.merge_um", "5");
+  out.region.merge_um              = number("place.busorder.merge_um", "5");
   out.busorder.max_displacement_um = number("place.busorder.max_displacement_um", "20");
   livehd::placement::validate_busorder_options(out.busorder);
+  livehd::placement::validate_region_options(out.region);
   auto& terminal                  = out.terminal_legalize_options;
   terminal.remainder_warp.enabled = truthy(synth_set(opts, "place.legalize.warpspace", "false"));
   terminal.remainder_warp.weight  = number("place.legalize.warpspace.weight", "1");

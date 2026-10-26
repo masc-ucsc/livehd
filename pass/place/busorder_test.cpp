@@ -46,8 +46,6 @@ dp::Design fixture(const std::vector<double>& lanes = {10, 20, 40, 30}) {
 Busorder make_order(const dp::Design& d, double weight = 100) {
   Busorder_options o;
   o.enabled             = true;
-  o.max_cells           = 4;
-  o.merge_um            = 0;
   o.weight              = weight;
   o.iterations          = 40;
   o.refresh             = 20;
@@ -61,9 +59,7 @@ Busorder make_order(const dp::Design& d, double weight = 100) {
     return edges;
   };
   return Busorder(d,
-                  {
-  },
-                  {},
+                  Region_mesh::build(d, {}, {}, {.max_cells = 4, .merge_um = 0}, 1),
                   {{"bus", 1}, {"bus", 2}, {"bus", 20}, {"bus", 21}},
                   router,
                   1,

@@ -90,7 +90,7 @@ TEST(Placement, ExperimentalBoundaryRefinementsRunOnlyAtTheFinalStage) {
   options.busorder.enabled        = true;
   options.busorder.iterations     = 20;
   options.busorder.refresh        = 10;
-  options.busorder.max_cells      = 2;
+  options.region.max_cells        = 2;
   options.boundarypins.iterations = 20;
   options.retain_preroute_design  = true;
   for (int mode : {0, 1, 2}) {

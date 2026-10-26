@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <tuple>
 
+#include "cell_criticality.hpp"
 #include "pin_adjust.hpp"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -71,7 +72,7 @@ void validate_boundary_pin_options(const Boundary_pin_options& o) {
   }
 }
 
-Boundary_pin_model split_boundary_nets(const dp::Design& original, const std::vector<Busorder_rect>& mesh,
+Boundary_pin_model split_boundary_nets(const dp::Design& original, const std::vector<Region_rect>& mesh,
                                        const Busorder_route& router) {
   original.validate();
   if (mesh.empty() || !router) {
@@ -95,15 +96,8 @@ Boundary_pin_model split_boundary_nets(const dp::Design& original, const std::ve
     cuts[0].insert({r.xl, r.xh});
     cuts[1].insert({r.yl, r.yh});
   }
-  const auto region = [&](Point p) {
-    for (size_t i = 0; i < mesh.size(); ++i) {
-      const auto& r = mesh[i];
-      if (r.xl <= p.first && p.first < r.xh && r.yl <= p.second && p.second < r.yh) {
-        return int(i);
-      }
-    }
-    return -1;  // Exterior pieces retain original fixed IO terminals.
-  };
+  // Exterior (-1) pieces retain original fixed IO terminals.
+  const auto region  = [&](Point p) { return region_of(mesh, p.first, p.second); };
   const auto enabled = [&](int net) { return original.net_mask.empty() || original.net_mask[net]; };
   const auto real_pin
       = [&](int pin) { return Pin{original.pin2node[pin], original.pin_offset_x[pin], original.pin_offset_y[pin], pin}; };
@@ -252,7 +246,7 @@ Boundary_pin_model split_boundary_nets(const dp::Design& original, const std::ve
   return result;
 }
 
-Boundary_pin_order_stats order_boundary_pins(Boundary_pin_model& model, const std::vector<Busorder_rect>& mesh,
+Boundary_pin_order_stats order_boundary_pins(Boundary_pin_model& model, const std::vector<Region_rect>& mesh,
                                              const std::vector<Bus_bit>& identities, const std::vector<int>& macros) {
   const auto               start = Clock::now();
   auto&                    d     = model.design;
@@ -271,7 +265,7 @@ Boundary_pin_order_stats order_boundary_pins(Boundary_pin_model& model, const st
     stats.macro_pins_before += inside_macro(pin.x, pin.y);
   }
   stats.before = dp::hpwl(d);
-  model.edges  = busorder_edges(mesh);
+  model.edges  = region_edges(mesh);
   std::map<int, std::vector<int>> by_edge;
   for (size_t i = 0; i < model.anchors.size(); ++i) {
     auto& pin = model.anchors[i];
@@ -474,10 +468,10 @@ Boundary_pin_order_stats order_boundary_pins(Boundary_pin_model& model, const st
   return stats;
 }
 
-Boundary_pins::Boundary_pins(std::vector<Busorder_rect> boxes, Busorder_route router, double units, Boundary_pin_options policy,
+Boundary_pins::Boundary_pins(const Region_mesh& regions, Busorder_route router, double units, Boundary_pin_options policy,
                              std::string directory, std::vector<Bus_bit> bus_bits, std::vector<int> macro_nodes)
     : options(policy)
-    , mesh(std::move(boxes))
+    , mesh(regions.rects)
     , route(std::move(router))
     , dbu(units)
     , output(std::move(directory))
@@ -509,27 +503,8 @@ void Boundary_pins::refine(dp::Design& physical, const dp::Options& base) {
     alignment = align_boundary_pins(model, mesh, identities, macros);
   }
   build_seconds            = elapsed(start);
-  auto&               work = model.design;
-  std::vector<double> criticality(original_nodes, 1);
-  for (size_t net = 0; net < physical.net_weights.size(); ++net) {
-    if (physical.net_mask.empty() || physical.net_mask[net]) {
-      for (int k = physical.flat_net2pin_start[net]; k < physical.flat_net2pin_start[net + 1]; ++k) {
-        const int node    = physical.pin2node[physical.flat_net2pin[k]];
-        criticality[node] = std::max(criticality[node], physical.net_weights[net]);
-      }
-    }
-  }
-  if (work.node_boxes.empty()) {
-    work.node_boxes.assign(work.node_x.size(), {work.layout.xl, work.layout.yl, work.layout.xh, work.layout.yh});
-  }
-  for (int i = 0; i < work.num_movable; ++i) {
-    const double reach = options.max_displacement_um * dbu / std::sqrt(criticality[i]);
-    auto&        box   = work.node_boxes[i];
-    box.xl             = std::max(box.xl, work.node_x[i] - reach);
-    box.xh             = std::min(box.xh, work.node_x[i] + reach);
-    box.yl             = std::max(box.yl, work.node_y[i] - reach);
-    box.yh             = std::min(box.yh, work.node_y[i] + reach);
-  }
+  auto& work = model.design;
+  limit_displacement(work, node_weight_criticality(physical), options.max_displacement_um * dbu);
   auto control           = base;
   control.max_iterations = control.min_iterations = control.schedule_iterations = options.iterations;
   control.post_density_factor                                                   = 0;

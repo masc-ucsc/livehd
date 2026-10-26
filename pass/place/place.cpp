@@ -631,8 +631,8 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               o.boundarypins.align,
                               o.boundarypins.iterations,
                               o.boundarypins.max_displacement_um,
-                              o.busorder.merge_um,
-                              o.busorder.max_cells),
+                              o.region.merge_um,
+                              o.region.max_cells),
                   h);
   }
   if (o.busorder.enabled) {
@@ -640,9 +640,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     h             = hash_text(std::format("busorder:{}:{}:{}:{}:{}:{}",
                               b.iterations,
                               b.refresh,
-                              b.max_cells,
+                              o.region.max_cells,
                               b.weight,
-                              b.merge_um,
+                              o.region.merge_um,
                               b.max_displacement_um),
                   h);
   }
@@ -5729,7 +5729,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         bus_macros.push_back(i);
       }
     }
-    std::vector<Busorder_io> ios;
+    std::vector<Region_io> ios;
     for (const auto& t : v.fp.terminals) {
       ios.push_back({t.name, double(t.x), double(t.y)});
     }
@@ -5782,18 +5782,18 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
       return segments;
     };
+    const auto regions = Region_mesh::build(physical, bus_macros, ios, options.region, tech.dbu);
+    regions.write(options.output_dir);
     if (boundary_active) {
-      const Busorder partition(physical, bus_macros, ios, identities, router, tech.dbu, options.busorder);
       bus_order.emplace(physical,
-                        bus_macros,
-                        ios,
+                        regions,
                         identities,
                         router,
                         tech.dbu,
                         options.busorder,
                         options.output_dir.empty() ? "" : options.output_dir + "/boundarypins/rsmt_order");
       bus_order->observe(physical, "before");
-      boundary_pins.emplace(partition.rectangles(),
+      boundary_pins.emplace(regions,
                             router,
                             tech.dbu,
                             options.boundarypins,
@@ -5804,8 +5804,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       bus_order->observe(physical, "after_gp");
     } else {
       bus_order.emplace(physical,
-                        bus_macros,
-                        ios,
+                        regions,
                         identities,
                         router,
                         tech.dbu,

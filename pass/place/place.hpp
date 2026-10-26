@@ -132,6 +132,7 @@ struct Options {
   bool                              optimization_pending        = false;
   bool                              handoff_taps                = false;   // ASAP7 fixed taps before terminal legalization
   std::string                       pg                          = "none";  // opt-in native power-grid profile
+  Region_options                    region;  // detail-final region mesh shared by busorder/boundarypins/pinalign
   Busorder_options                  busorder;
   Boundary_pin_options              boundarypins;
   Cell_jump_options                 cell_jump;                            // diagnostic: extend a supplied distance-one seed
