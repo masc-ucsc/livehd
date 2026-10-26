@@ -196,7 +196,14 @@ int main(int argc, char** argv) {
       units = {number(config["sdc_units"], "time_ps").value_or(0), number(config["sdc_units"], "capacitance_ff").value_or(0)};
     }
     std::optional<stage::Clock_spec> clock;
-    if (config.HasMember("clock")) {
+    if (const auto port = text(config, "clock_port")) {
+      if (config.HasMember("clock")) {
+        throw std::invalid_argument("give clock_port and period_ps, or clock, not both");
+      }
+      clock.emplace();
+      clock->port      = *port;
+      clock->period_ps = number(config, "period_ps").value_or(0);
+    } else if (config.HasMember("clock")) {
       const auto& value = config["clock"];
       if (!value.IsObject()) {
         throw std::invalid_argument("clock must be an object");

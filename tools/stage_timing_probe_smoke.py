@@ -69,6 +69,11 @@ imported, _ = run('def', dict(base, lefs=lefs, **{'def': str(W / 'synth/place/ou
 assert imported['model']['netlist'] == 'DEF import', imported['model']
 assert imported['period'] == lg['period'] and imported['classes'] == lg['classes'], (imported['period'], lg['period'])
 
+# The plain clock spelling: a port at a period in ps.
+plain, _ = run('plain', dict({k: v for k, v in base.items() if k not in ('clock', 'sdc', 'sdc_units')},
+                             clock_port='clk', period_ps=10000))
+assert plain['period'] == lg['period'] and plain['constraints']['notes'] == [], plain['constraints']
+
 # Coverage short of complete fails on request, with the report written.
 strict, completed = run('strict', dict(base, require_complete=True), False)
 assert strict['status'] == 'partial' and 'coverage is partial' in completed.stderr, completed.stderr
