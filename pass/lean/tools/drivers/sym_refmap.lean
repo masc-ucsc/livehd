@@ -840,7 +840,11 @@ def refmapMain (path : String) (rest : List String) (facts : Bool) : IO UInt32 :
               let inLine (i : RuntimeInput) : String := " ".intercalate ((List.range i.size).filterMap fun k =>
                 let v := bv_uint i[k]!
                 if v == 0 then none else some s!"{(B.implNames.inW.getD k (s!"in{k}", 0)).1}={v}")
-              let f := work / s!"cti_{safeName tname}.txt"
+              -- a group's name lists its registers: keep the file name within the usual
+              -- 255-byte limit, the target's index keeping it unique
+              let base := safeName tname
+              let base := if base.length ≤ 120 then base else s!"{base.take 80}__target{ti}"
+              let f := work / s!"cti_{base}.txt"
               IO.FS.writeFile f s!"counterexample for {tag}\nslots that fire at cycle n: {fired}\n\
 nonzero inputs, cycle n: {inLine ins[0]!}\nnonzero inputs, cycle n+1: {inLine ins[1]!}\n\
 spec registers where the spec after the cycle differs from the map at n+1:\n{"\n".intercalate diff}\n\
