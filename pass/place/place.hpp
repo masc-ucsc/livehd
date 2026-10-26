@@ -163,15 +163,14 @@ struct Options {
   std::vector<std::string>              resize_dont_use;         // glob patterns never chosen as a new master
   // What-if handle of the timer behind fp_evaluate/evaluate (required by engine=new).
   livehd::timing::Whatif*               whatif       = nullptr;
-  // Legacy reset-tree control retained for a clear diagnostic on nonzero values.
-  unsigned                              reset_fanout = 0;  // retired: pre-CTS control nets are never buffered
-  // 2d-domplace U22: a net on domino storage reset (RST) pins, by LEF macro,
-  // is dealt through buffers of at most this many loads before placement, as
-  // mapped CMOS nets are (0: off). CMOS-only reset nets stay untreed.
-  unsigned                                        domino_reset_fanout = 0;
-  std::map<std::string, std::vector<std::string>> domino_reset_pins;
-  // Experiment (default 0, off): the same pre-placement fanout tree for nets on
-  // domino data rails, which the per-region mapping never buffers either.
+  // synth.place.reset_fanout: the pre-placement reset buffer tree of every mapper
+  // (reset_tree.hpp): a reset net with more loads is dealt through buffers of at
+  // most this many loads (0: off). `reset_pins`, by LEF macro, adds reset pins the
+  // Liberty does not describe: the domino storage resets (RST) of 2d-domplace U22.
+  unsigned                                        reset_fanout = 0;
+  std::map<std::string, std::vector<std::string>> reset_pins;
+  // synth.place.domino_rail_fanout: the same pre-placement fanout tree for nets
+  // on domino data rails, which the per-region mapping never buffers (0: off).
   unsigned                                        domino_rail_fanout = 0;
   std::map<std::string, std::vector<std::string>> domino_rail_pins;
   std::string                           control_ports;     // override optional roots; recognized resets stay excluded

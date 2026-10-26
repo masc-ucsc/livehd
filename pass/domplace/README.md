@@ -177,8 +177,8 @@ with that reset, asynchronous when the source's is) and the Verilog model, the
 LEF pin and the footprint carry the reset. A reset adds the area of the
 Liberty's smallest asynchronous-reset register over the base register, else a
 labeled one-inverter estimate (`reset_storage` in the sidecar). The reset net
-stays CMOS: it is buffered before placement like a mapped net
-(`synth.place.domino_reset_fanout`, pass/place). The stage timer gives `RST` no
+stays CMOS: it gets the reset buffer tree of every mapper before placement
+(`synth.place.reset_fanout`, default 32, pass/place; U23). The stage timer gives `RST` no
 check and counts `reset->domino` under `coverage.false_paths`; it never enters
 the period or the input->domino class.
 

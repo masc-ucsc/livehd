@@ -72,8 +72,8 @@ std::vector<Pin> sinks(Pin driver) {
   return result;
 }
 Inventory inventory(const Options& options, const physical::Technology& tech) {
-  if (options.repair_reset || options.reset_fanout) {
-    throw std::invalid_argument("pre-CTS clock/reset sizing and buffering are disabled");
+  if (options.repair_reset) {
+    throw std::invalid_argument("pre-CTS clock/reset sizing is disabled");
   }
   Inventory result;
   for (auto cell : liberty::scan_comb_cells(options.liberty)) {

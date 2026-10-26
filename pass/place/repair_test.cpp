@@ -1647,8 +1647,10 @@ TEST_F(Buffer_repair, ResetLogicIsProtectedAndRepairOverrideIsRejected) {
   options.repair_reset = true;
   EXPECT_THROW((void)place(*graph, flat, options), std::invalid_argument);
   options.repair_reset = false;
-  options.reset_fanout = 32;
-  EXPECT_THROW((void)place(*graph, flat, options), std::invalid_argument);
+  options.reset_fanout = 32;  // the reset tree (reset_tree.hpp) is not reset repair: a small net stays as it is
+  hhds::GraphLibrary treed_flat;
+  const auto         treed = repair_buffers(place(*graph, treed_flat, options), options, evaluate);
+  EXPECT_EQ(count(treed.placed, "reset_buffer"), 1);
 }
 TEST_F(Buffer_repair, RejectsWorseTrialsAndRebuildsEveryFanoutBranch) {
   auto root = gate("sky130_fd_sc_hd__buf_1", "root", graph->get_input_pin("a"));

@@ -437,11 +437,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
 
   h = hash_text("prects-controls:" + o.control_ports, h);
   if (o.reset_fanout) {
-    h = hash_text(std::format("reset-fanout:{}", o.reset_fanout), h);
-  }
-  if (o.domino_reset_fanout && !o.domino_reset_pins.empty()) {
-    h = hash_text(std::format("domino-reset-fanout:{}", o.domino_reset_fanout), h);
-    for (const auto& [macro, names] : o.domino_reset_pins) {
+    // v2: every reset net (Liberty clear/preset pins, `reset_pins`, synthesis reset roles).
+    h = hash_text(std::format("reset-fanout-v2:{}", o.reset_fanout), h);
+    for (const auto& [macro, names] : o.reset_pins) {
       for (const auto& name : names) {
         h = hash_text(macro + ":" + name, h);
       }
@@ -4505,7 +4503,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   Resolver   resolver(tech, memories, options.unknown_const_zero);
   collect_control_roles(graph, resolver, v.prects);
   result.prects          = v.prects;
-  // Opt-in: the flat reset nets are bounded before the first cell is read, so the buffers place like any cell.
+  // The flat reset nets are bounded before the first cell is read, so the buffers place like any cell.
   // A driver that resolves to a constant (the tied inactive pin of a clear+preset flop) is not a reset net.
   const auto reset_constant = [&](const Pin& driver) {
     try {
@@ -4514,21 +4512,19 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       return true;  // unknown constant: left to the tie logic
     }
   };
-  auto reset_tree = options.reset_fanout ? buffer_reset_nets(graph, tech, options.liberty, options.reset_fanout, reset_constant)
-                                         : Reset_tree_stats{};
-  // U22: the reset nets of domino storage resets are buffered like mapped CMOS nets.
-  const auto domino_tree = options.domino_reset_fanout && !options.domino_reset_pins.empty()
-                               ? buffer_reset_nets(graph,
-                                                   tech,
-                                                   options.liberty,
-                                                   options.domino_reset_fanout,
-                                                   reset_constant,
-                                                   &options.domino_reset_pins)
-                               : Reset_tree_stats{};
-  const auto rail_tree
-      = options.domino_rail_fanout && !options.domino_rail_pins.empty()
-            ? buffer_reset_nets(graph, tech, options.liberty, options.domino_rail_fanout, reset_constant, &options.domino_rail_pins)
+  const auto reset_tree
+      = options.reset_fanout
+            ? buffer_reset_nets(graph, tech, options.liberty, options.reset_fanout, reset_constant, options.reset_pins)
             : Reset_tree_stats{};
+  const auto  rail_tree  = options.domino_rail_fanout && !options.domino_rail_pins.empty()
+                               ? buffer_pin_nets(graph,
+                                               tech,
+                                               options.liberty,
+                                               options.domino_rail_fanout,
+                                               options.domino_rail_pins,
+                                               "railtree",
+                                               reset_constant)
+                               : Reset_tree_stats{};
   double      area       = 0;
   int64_t     max_width = 0, max_height = 0;
   std::string site_name;
@@ -10230,16 +10226,6 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       tree.AddMember("skipped", reset_tree.skipped, allocator);
       json.AddMember("reset_tree", tree, allocator);
     }
-    if (options.domino_reset_fanout && !options.domino_reset_pins.empty()) {
-      rapidjson::Value tree(rapidjson::kObjectType);
-      tree.AddMember("fanout", options.domino_reset_fanout, allocator);
-      tree.AddMember("nets", domino_tree.nets, allocator);
-      tree.AddMember("sinks", domino_tree.sinks, allocator);
-      tree.AddMember("added", domino_tree.buffers, allocator);
-      tree.AddMember("levels", domino_tree.levels, allocator);
-      tree.AddMember("skipped", domino_tree.skipped, allocator);
-      json.AddMember("domino_reset_tree", tree, allocator);
-    }
     if (options.domino_rail_fanout && !options.domino_rail_pins.empty()) {
       rapidjson::Value tree(rapidjson::kObjectType);
       tree.AddMember("fanout", options.domino_rail_fanout, allocator);
@@ -10247,6 +10233,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       tree.AddMember("sinks", rail_tree.sinks, allocator);
       tree.AddMember("added", rail_tree.buffers, allocator);
       tree.AddMember("levels", rail_tree.levels, allocator);
+      tree.AddMember(
+          "buffers",
+          static_cast<uint64_t>(std::count_if(v.cells.begin(),
+                                              v.cells.end(),
+                                              [](const Cell& c) { return c.name.find("__place_railtree") != std::string::npos; })),
+          allocator);
       json.AddMember("domino_rail_tree", tree, allocator);
     }
     if (macro_run) {
@@ -10549,9 +10541,9 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
     throw std::invalid_argument(
         "vanished_memory_local_floor requires vanished_memory and a value from zero to local_density_weight");
   }
-  if (requested.reset_fanout || requested.repair_reset) {
+  if (requested.repair_reset) {
     throw std::invalid_argument(
-        "pre-CTS clock/reset sizing and buffering are disabled; reset_fanout must be 0 and repair_reset false");
+        "pre-CTS clock/reset sizing is disabled; repair_reset must be false (reset_fanout builds the reset tree)");
   }
   validate_busorder_options(requested.busorder);
   validate_region_options(requested.region);

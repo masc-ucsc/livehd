@@ -842,11 +842,13 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.repair.reset",
      "false",
      Synth_set_option::Kind::boolean,
-     "retired control; must be false because pre-CTS clock/reset networks are not sized or buffered"},
+     "retired control; must be false because pre-CTS clock/reset networks are not sized (synth.place.reset_fanout builds the reset tree)"},
     {"place.reset_fanout",
-     "0",
+     "32",
      Synth_set_option::Kind::integer,
-     "retired control; must be 0 because pre-CTS reset buffering is disabled"},
+     "before placement, every flat reset net (asynchronous clear/preset pins, domino storage RST pins, synthesis reset "
+     "roles such as a synchronous reset) with more cell loads is dealt through a tree of the library's smallest buffer, "
+     "at most this many loads per buffer, for every mapper (abc, usyn, domino profile); 0 = off, else >= 2"},
     {"place.fp.warpspace", "false", Synth_set_option::Kind::boolean, "enable density warp for this placement stage"},
     {"place.fp.warpspace.weight",
      "1",
@@ -1094,12 +1096,6 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "",
      Synth_set_option::Kind::file,
      "stage timing clock port at the SDC clock period; empty: pass.usyn.domino_clock, else the SDC's one clock port"},
-    {"place.domino_reset_fanout",
-     "32",
-     Synth_set_option::Kind::integer,
-     "pass.usyn.physical=domino_provisional: a reset net that reaches a domino storage reset pin (RST) is dealt through "
-     "buffers of at most this many loads before placement, as the mapped CMOS nets are (pass.abc.max_fanout); 0 keeps it "
-     "unbuffered. Reset nets without a domino stay unbuffered (pre-CTS policy)"},
     {"place.domino_rail_fanout",
      "0",
      Synth_set_option::Kind::integer,

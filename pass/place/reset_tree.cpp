@@ -7,6 +7,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "attrs.hpp"
@@ -60,27 +61,13 @@ bool is_core_cell(Node n, const physical::Technology& tech) {
   const auto macro = tech.macros.find(std::string(io->get_name()));
   return macro != tech.macros.end() && macro->second.klass.starts_with("CORE");
 }
-}  // namespace
 
-Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technology& tech, const std::string& liberty, unsigned cap,
-                                   const Constant_test& is_constant, const Reset_pins* triggers) {
+// Every driver of a trigger pin (and, with `roles`, every driver carrying the synthesis reset role) in
+// graph order (the minted names follow it), then the tree under each one with more than `cap` loads.
+Reset_tree_stats buffer_nets(hhds::Graph& graph, const physical::Technology& tech, const std::string& liberty, unsigned cap,
+                             const Constant_test& is_constant, const Reset_pins& trigger_pins, bool roles, std::string_view tag) {
   Reset_tree_stats stats;
-  if (cap < 2) {
-    return stats;
-  }
-  std::map<std::string, std::vector<std::string>> reset_pins;
-  if (triggers) {
-    reset_pins = *triggers;
-  }
-  for (const auto& cell : triggers ? std::vector<liberty::Dff_cell>{} : liberty::scan_async_dff_cells(liberty)) {
-    auto& pins = reset_pins[cell.name];
-    for (const auto* pin : {&cell.reset0_pin, &cell.reset1_pin}) {
-      if (!pin->empty() && std::find(pins.begin(), pins.end(), *pin) == pins.end()) {
-        pins.push_back(*pin);
-      }
-    }
-  }
-  if (reset_pins.empty()) {
+  if (cap < 2 || (trigger_pins.empty() && !roles)) {
     return stats;
   }
   const auto buffer = smallest_buffer(liberty, tech);
@@ -88,16 +75,35 @@ Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technolog
     return stats;
   }
 
-  // Every driver of an asynchronous clear/preset pin, in graph order (the minted names follow it).
-  std::vector<Pin> drivers;
+  std::vector<Pin>                        drivers;
   std::set<std::pair<uint64_t, uint64_t>> seen;
+  const auto                              add_driver = [&](const Pin& driver, bool count_skip) {
+    if (driver.is_invalid() || driver.is_const()) {
+      return;
+    }
+    if (gu::bits_of(driver) != 1) {
+      stats.skipped += count_skip;  // a packed-bus alias: not a net this pass can move pin by pin
+      return;
+    }
+    if (is_constant && is_constant(driver)) {
+      return;  // the tied inactive pin of a clear+preset flop
+    }
+    // A second place() over a placed graph sees that tie as the cell it became: an input-less library cell is a
+    // constant source, and a tree behind it would only add cells.
+    if (const auto driver_io = driver.get_master_node().get_subnode_io(); driver_io && driver_io->get_input_pin_decls().empty()) {
+      return;
+    }
+    if (seen.insert({driver.get_master_node().get_debug_nid(), driver.get_port_id()}).second) {
+      drivers.push_back(driver);
+    }
+  };
   for (auto n : graph.body().nodes()) {
     const auto io = n.get_subnode_io();
     if (!io) {
       continue;
     }
-    const auto it = reset_pins.find(std::string(io->get_name()));
-    if (it == reset_pins.end()) {
+    const auto it = trigger_pins.find(std::string(io->get_name()));
+    if (it == trigger_pins.end()) {
       continue;
     }
     for (const auto& name : it->second) {
@@ -109,26 +115,32 @@ Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technolog
       if (drv.empty() || drv.front().is_invalid() || drv.front().is_const()) {
         continue;
       }
-      if (drv.size() != 1 || gu::bits_of(drv.front()) != 1) {
-        ++stats.skipped;  // a packed-bus alias: not a net this pass can move pin by pin
+      if (drv.size() != 1) {
+        ++stats.skipped;  // a multi-driver bus alias
         continue;
       }
-      if (is_constant && is_constant(drv.front())) {
-        continue;  // the tied inactive pin of a clear+preset flop
+      add_driver(drv.front(), true);
+    }
+  }
+  if (roles) {
+    // A reset net that reaches no reset pin: a synchronous reset folded into data logic keeps the
+    // synthesis reset role on its driver (collect_control_roles reads the same metadata).
+    const auto role_drivers = [&](const hhds::Node_class& node) {
+      for (auto pin : node.out_sorted_pins()) {
+        const auto r = gu::signal_roles_of(pin);
+        if ((r & attrs::signal_reset) && !(r & attrs::signal_clock)) {
+          add_driver(pin, false);  // a multi-bit bus alias is not the net; its 1-bit source is
+        }
       }
-      // A second place() over a placed graph sees that tie as the cell it became: an input-less library cell is a
-      // constant source, and a tree behind it would only add cells.
-      if (const auto driver_io = drv.front().get_master_node().get_subnode_io(); driver_io && driver_io->get_input_pin_decls().empty()) {
-        continue;
-      }
-      const auto key = std::make_pair<uint64_t, uint64_t>(drv.front().get_master_node().get_debug_nid(), drv.front().get_port_id());
-      if (seen.insert(key).second) {
-        drivers.push_back(drv.front());
-      }
+    };
+    role_drivers(graph.get_input_node());
+    for (auto n : graph.body().nodes()) {
+      role_drivers(n);
     }
   }
 
-  const auto            io = buffer_io(graph, *buffer);
+  const auto            prefix = std::format("__place_{}", tag);
+  const auto            io     = buffer_io(graph, *buffer);
   std::set<std::string> names;  // a rerun over a graph that already holds trees must not reuse a minted name
   bool                  names_read = false;
   unsigned              serial     = 0;
@@ -161,7 +173,7 @@ Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technolog
     if (!names_read) {
       names_read = true;
       for (auto n : graph.body().nodes()) {
-        if (const auto name = std::string(n.get_name()); name.find("__place_rsttree") != std::string::npos) {
+        if (const auto name = std::string(n.get_name()); name.find(prefix) != std::string::npos) {
           names.insert(name);
         }
       }
@@ -184,7 +196,10 @@ Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technolog
         const auto  dot       = load_name.rfind('.');
         std::string name;
         do {
-          name = std::format("{}__place_rsttree{}_{}", dot == std::string::npos ? std::string{} : load_name.substr(0, dot + 1), level,
+          name = std::format("{}{}{}_{}",
+                             dot == std::string::npos ? std::string{} : load_name.substr(0, dot + 1),
+                             prefix,
+                             level,
                              serial++);
         } while (!names.insert(name).second);
         ++stats.buffers;
@@ -215,5 +230,28 @@ Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technolog
     stats.levels = std::max(stats.levels, level);
   }
   return stats;
+}
+}  // namespace
+
+Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technology& tech, const std::string& liberty, unsigned cap,
+                                   const Constant_test& is_constant, const Reset_pins& extra_reset_pins) {
+  if (cap < 2) {
+    return {};
+  }
+  Reset_pins reset_pins = extra_reset_pins;
+  for (const auto& cell : liberty::scan_async_dff_cells(liberty)) {
+    auto& pins = reset_pins[cell.name];
+    for (const auto* pin : {&cell.reset0_pin, &cell.reset1_pin}) {
+      if (!pin->empty() && std::find(pins.begin(), pins.end(), *pin) == pins.end()) {
+        pins.push_back(*pin);
+      }
+    }
+  }
+  return buffer_nets(graph, tech, liberty, cap, is_constant, reset_pins, true, "rsttree");
+}
+
+Reset_tree_stats buffer_pin_nets(hhds::Graph& graph, const physical::Technology& tech, const std::string& liberty, unsigned cap,
+                                 const Reset_pins& pins, std::string_view tag, const Constant_test& is_constant) {
+  return buffer_nets(graph, tech, liberty, cap, is_constant, pins, false, tag);
 }
 }  // namespace livehd::placement

@@ -2927,8 +2927,8 @@ sh_test(
     ],
 )
 
-# synth.place.reset_fanout: a flat net that drives many asynchronous reset pins is dealt out through a
-# buffer tree before placement; bounded, LEC-proven on the placed netlist, off by default.
+# synth.place.reset_fanout: every flat reset net with many loads is dealt out through a buffer tree
+# before placement; bounded, LEC-proven on the placed netlist, on by default (32), 0 turns it off.
 sh_test(
     name = "lhd_placement_reset_tree_smoke",
     size = "small",

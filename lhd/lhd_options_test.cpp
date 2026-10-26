@@ -515,7 +515,7 @@ TEST(LhdOptions, RecommendedSharedDefaults) {
            {                       "pass.abc.max_fanout",     "32"},
            {                          "synth.delay_frac",    "0.4"},
            {                           "synth.partition", "coarse"},
-           {                  "synth.place.reset_fanout",      "0"},
+           {                  "synth.place.reset_fanout",     "32"},
            {                        "synth.place.resize",   "true"},
            {                          "synth.place.halo",   "auto"},
            {                 "synth.place.fp.pin_adjust",   "true"},

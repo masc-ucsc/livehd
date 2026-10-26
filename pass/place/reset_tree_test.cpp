@@ -241,5 +241,82 @@ TEST_F(Reset_tree, NeedsAPlaceableBuffer) {
   EXPECT_EQ(buffer_reset_nets(*graph, tech, liberty, 4).buffers, 0u);
   EXPECT_EQ(fanout(reset), 40u);
 }
+
+TEST_F(Reset_tree, TreesASynchronousResetByItsRole) {
+  // A synchronous reset folded into data logic reaches no reset pin: the synthesis reset role names it.
+  for (int i = 0; i < 40; ++i) {
+    inverter("core.s" + std::to_string(i), reset);
+  }
+  EXPECT_EQ(buffer_reset_nets(*graph, tech, liberty, 8).nets, 0u);  // no role: a data net
+  gu::add_signal_roles(reset, attrs::signal_reset);
+  const auto stats = buffer_reset_nets(*graph, tech, liberty, 8);
+  EXPECT_EQ(stats.nets, 1u);
+  EXPECT_EQ(stats.sinks, 40u);
+  EXPECT_LE(fanout(reset), 8u);
+  // A clock is never a reset net, whatever else it carries.
+  for (int i = 0; i < 40; ++i) {
+    inverter("core.c" + std::to_string(i), clock);
+  }
+  gu::add_signal_roles(clock, attrs::signal_reset | attrs::signal_clock);
+  EXPECT_EQ(buffer_reset_nets(*graph, tech, liberty, 8).nets, 0u);
+  EXPECT_EQ(fanout(clock), 40u);
+}
+
+TEST_F(Reset_tree, ExtraResetPinsJoinTheLibraryResets) {
+  // A domino storage reset (RST) is not a Liberty clear/preset pin: the caller names it, and the
+  // Liberty registers' reset nets are still treed in the same call.
+  tech.macros["DOM"] = core_macro({"R0", "RST", "Q"});
+  for (int i = 0; i < 20; ++i) {
+    auto n = gu::create_typed_node(*graph, Ntype_op::Sub);
+    n.set_subnode(io_of("DOM", {"R0", "RST"}, "Q"));
+    n.set_name("d" + std::to_string(i));
+    n.create_sink_pin("R0").connect_driver(clock);
+    n.create_sink_pin("RST").connect_driver(tie);
+    gu::set_bits(n.create_driver_pin("Q"), 1);
+    flop("r" + std::to_string(i), reset);
+  }
+  EXPECT_EQ(buffer_reset_nets(*graph, tech, liberty, 8).nets, 1u);  // the flops only
+  EXPECT_EQ(fanout(tie), 20u);
+  const auto stats = buffer_reset_nets(*graph,
+                                       tech,
+                                       liberty,
+                                       8,
+                                       {
+  },
+                                       {{"DOM", {"RST"}}});
+  EXPECT_EQ(stats.nets, 1u);
+  EXPECT_LE(fanout(tie), 8u);
+  EXPECT_LE(fanout(reset), 8u);
+}
+
+TEST_F(Reset_tree, PinNetsTreeOnlyTheNamedPinsUnderTheirTag) {
+  // The domino rail tree: the named pins only (no Liberty reset, no role), buffers under their own tag.
+  tech.macros["DOM"] = core_macro({"R0", "Q"});
+  for (int i = 0; i < 20; ++i) {
+    auto n = gu::create_typed_node(*graph, Ntype_op::Sub);
+    n.set_subnode(io_of("DOM", {"R0"}, "Q"));
+    n.set_name("d" + std::to_string(i));
+    n.create_sink_pin("R0").connect_driver(tie);
+    gu::set_bits(n.create_driver_pin("Q"), 1);
+    flop("r" + std::to_string(i), reset);
+  }
+  gu::add_signal_roles(reset, attrs::signal_reset);
+  const auto stats = buffer_pin_nets(*graph,
+                                     tech,
+                                     liberty,
+                                     8,
+                                     {
+                                         {"DOM", {"R0"}}
+  },
+                                     "railtree");
+  EXPECT_EQ(stats.nets, 1u);
+  EXPECT_LE(fanout(tie), 8u);
+  EXPECT_EQ(fanout(reset), 40u);
+  for (auto n : graph->body().nodes()) {
+    if (const auto io = n.get_subnode_io(); io && io->get_name() == "BUFx1") {
+      EXPECT_NE(std::string(n.get_name()).find("__place_railtree"), std::string::npos) << n.get_name();
+    }
+  }
+}
 }  // namespace
 }  // namespace livehd::placement

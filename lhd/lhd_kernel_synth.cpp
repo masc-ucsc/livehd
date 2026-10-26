@@ -846,28 +846,25 @@ livehd::placement::Options placement_options(const Options& opts) {
   for (const auto& pattern : absl::StrSplit(synth_set(opts, "place.resize.dont_use", ""), ',', absl::SkipWhitespace())) {
     out.resize_dont_use.emplace_back(pattern);
   }
-  out.reset_fanout  = static_cast<unsigned>(integer("place.reset_fanout", "0"));
   {
-    const auto fanout = integer("place.domino_reset_fanout", "32");
+    const auto fanout = integer("place.reset_fanout", "32");
     if (fanout < 0 || fanout == 1) {
       throw Lhd_error{"usage",
-                      std::format("invalid synth.place.domino_reset_fanout: {}", fanout),
-                      "expected 0 (off) or an integer >= 2: loads per buffer"};
+                      std::format("invalid synth.place.reset_fanout: {}", fanout),
+                      "expected 0 (off) or an integer >= 2: loads per reset buffer"};
     }
-    out.domino_reset_fanout = static_cast<unsigned>(fanout);
-    const auto rails        = integer("place.domino_rail_fanout", "0");
-    if (rails == 1) {
+    out.reset_fanout = static_cast<unsigned>(fanout);
+    const auto rails = integer("place.domino_rail_fanout", "0");
+    if (rails < 0 || rails == 1) {
       throw Lhd_error{"usage",
-                      "invalid synth.place.domino_rail_fanout: 1",
+                      std::format("invalid synth.place.domino_rail_fanout: {}", rails),
                       "expected 0 (off) or an integer >= 2: loads per buffer"};
     }
     out.domino_rail_fanout = static_cast<unsigned>(rails);
   }
   out.control_ports = synth_set(opts, "place.control_ports", "");
-  if (out.reset_fanout != 0 || out.repair_reset) {
-    throw Lhd_error{"usage",
-                    "pre-CTS clock/reset optimization is disabled",
-                    "use place.reset_fanout=0 and place.repair.reset=false"};
+  if (out.repair_reset) {
+    throw Lhd_error{"usage", "pre-CTS clock/reset sizing is disabled", "use place.repair.reset=false"};
   }
   out.fp_iterations   = integer("place.fp.iterations", "1500");
   out.fp_minimum      = number("place.fp.minimum", "3000");
@@ -1803,10 +1800,10 @@ void synth_command(Options& opts, Result& res) {
         const auto twin                         = sidecar->rail_twins.find(macro);
         place_options.multirow_templates[macro] = {halves, twin == sidecar->rail_twins.end() ? std::string{} : twin->second};
       }
-      // U22: storage reset pins, whose reset nets are buffered like CMOS nets.
+      // U22: storage reset pins are reset pins of the one reset tree (synth.place.reset_fanout).
       for (const auto& entry : sidecar->catalog) {
         if (!entry.reset_pin.empty()) {
-          place_options.domino_reset_pins[entry.name] = {entry.reset_pin};
+          place_options.reset_pins[entry.name] = {entry.reset_pin};
         }
         place_options.domino_rail_pins[entry.name] = entry.rails;
       }

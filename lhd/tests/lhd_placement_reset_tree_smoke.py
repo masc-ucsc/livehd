@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Pre-CTS placement preserves reset connectivity and rejects reset optimization."""
+"""synth.place.reset_fanout: every flat reset net gets a buffer tree before placement (default 32, 0 off); reset repair stays
+rejected, and reset nets keep their pre-CTS placement exclusion."""
 import json
 import os
 from pathlib import Path
@@ -56,25 +57,46 @@ def reset_loads(name, pins=('RESET_B',)):
     return worst, len(re.findall(r'^\s*- \S*__place_rsttree\S* ', components, re.M))
 
 
-off = run('off', [])  # default must not create a reset tree
+# Default synth.place.reset_fanout=32 (2d-domplace U23): the 48-pin reset net is dealt through buffers.
+default = run('default', [])
+info = default['qor']['place']['reset_tree']
+# nets/sinks/added describe the last placement call; a flow that places twice built the tree in the first one.
+assert info['fanout'] == 32 and info['buffers'] == 2, info
+loads, buffers = reset_loads('default')
+assert loads <= 32 and buffers == 2, (loads, buffers)
+
+off = run('off', ['--set', 'synth.place.reset_fanout=0'])
 assert 'reset_tree' not in off['qor']['place'], off['qor']['place']
 loads, buffers = reset_loads('off')
 assert loads >= 48 and buffers == 0, (loads, buffers)
 
-for name, setting in [('tree', 'synth.place.reset_fanout=8'), ('repair', 'synth.place.repair.reset=true')]:
-    refused = run(name, ['--set', setting], False)
-    assert 'pre-CTS' in json.dumps(refused['error']), refused['error']
+tree = run('tree', ['--set', 'synth.place.reset_fanout=8'])
+info = tree['qor']['place']['reset_tree']
+assert info['fanout'] == 8 and info['buffers'] >= 6, info
+loads, buffers = reset_loads('tree')
+assert loads <= 8 and buffers == info['buffers'], (loads, buffers, info)
 
-# The unchanged reset connectivity must still implement the source function.
+# Reset repair (sizing reset cones) stays retired.
+refused = run('repair', ['--set', 'synth.place.repair.reset=true'], False)
+assert 'pre-CTS' in json.dumps(refused['error']), refused['error']
+
+# The buffered netlist that was actually placed and saved is the source function.
 subprocess.run(['lhd/lhd', 'pass', 'liberty', 'gensim', str(root / 'arst.lib'), '--emit-dir', f'lg:{root}/models',
                 '--workdir', str(root / 'gensim'), '-q'], check=True, capture_output=True, timeout=30)
 proof = root / 'proof.json'
-subprocess.run(['lhd/lhd', 'lec', '--impl', f'lg:{root}/off/synth/net', '--ref', f'verilog:{source}', '--lib', f'lg:{root}/models',
+subprocess.run(['lhd/lhd', 'lec', '--impl', f'lg:{root}/tree/synth/net', '--ref', f'verilog:{source}', '--lib', f'lg:{root}/models',
                 '--top', 'dut', '--set', 'formal.effort=proof', '--set', 'formal.timeout=10', '--workdir', str(root / 'lec'),
                 '--result-json', str(proof), '-q'], check=True, capture_output=True, timeout=60)
 verdict = json.loads(proof.read_text())['lec']['verdict']
 assert verdict in ('proven-full', 'timeout-time', 'timeout-memory'), verdict
 
+# A deeper tree, and the mapper's own region tree composed with it.
+deep = run('deep', ['--set', 'synth.place.reset_fanout=2'])
+assert deep['qor']['place']['reset_tree']['buffers'] >= 40, deep['qor']['place']['reset_tree']  # five levels or more
+assert reset_loads('deep')[0] <= 2
+mapper = os.environ.get('MAPPER', 'abc')
+both = run('both', ['--set', 'synth.place.reset_fanout=8', '--set', f'pass.{mapper}.reset_fanout=8'])
+assert both['qor']['place']['reset_tree']['nets'] == 0, both['qor']['place']['reset_tree']  # the mapper's tree already bounds it
 # A flop with a clear AND a preset (ASAP7 DFFASRHQN-shaped) ties one pin inactive: the tie is not a reset net, in the seed
 # placement or in the final one that re-reads the placed graph (timing_driven=true places twice).
 dual_lib = (libdir / 'sky130hd.lib').read_text()
@@ -108,13 +130,16 @@ def tie_fanout(name):
                for net in nets.split(';') if '__place_tie' in net)
 
 
-plain = run_dual('dual_off', ['--set', 'synth.place.timing_driven=true'])
+plain = run_dual('dual_off', ['--set', 'synth.place.timing_driven=true', '--set', 'synth.place.reset_fanout=0'])
 tied = tie_fanout('dual_off')
 assert tied >= 48, tied  # 24 + 24 inactive pins, each on a local tie
+treed = run_dual('dual_tree', ['--set', 'synth.place.timing_driven=true', '--set', 'synth.place.reset_fanout=8'])
+assert tie_fanout('dual_tree') == tied, (tie_fanout('dual_tree'), tied)
+assert treed['qor']['place']['reset_tree']['buffers'] > 0 and reset_loads('dual_tree', ('RESET_B', 'SET_B'))[0] <= 8
 for bad in ['1', '-4', 'x', '2.5', '']:
     refused = run('bad_' + (bad or 'empty').replace('.', '_'), ['--set', 'synth.place.reset_fanout=' + bad], False)
     assert 'reset_fanout' in json.dumps(refused['error']), refused['error']
-print('placement: reset networks preserved by default; tree construction and reset repair refused')
+print('placement: reset_fanout tree bounds the flat reset net by default (32), LEC-proven, 0 turns it off, reset repair refused')
 
 # A registered synchronous reset loses its reset-pin connection during mapping.
 # Synthesis role metadata must keep its Q network excluded automatically, even
@@ -188,3 +213,15 @@ endmodule
 """)
 overwritten = run('overwritten_reset', [])['qor']['place']['prects_controls']
 assert overwritten['ports'] == ['clk'] and not overwritten['pins'], overwritten
+
+# A synchronous reset reaches no reset pin; the synthesis reset role makes it a reset net of the same tree.
+source.write_text("""module dut(input clk, input rst, input [47:0] d, output reg [47:0] q);
+  always @(posedge clk) if (rst) q <= 48'h0; else q <= d;
+endmodule
+""")
+sync = run('sync_tree', ['--set', 'synth.place.reset_fanout=2'])['qor']['place']
+assert sync['prects_controls']['reset_ports'] == ['rst'] and sync['reset_tree']['buffers'] > 0, sync
+sync_def = (root / 'sync_tree_def' / 'out.def').read_text()
+sync_nets = re.search(r'^NETS \d+ ;(.*?)^END NETS', sync_def, re.S | re.M).group(1).split(';')
+rst_net = [re.findall(r'\(\s*(\S+)\s+(\S+)\s*\)', n) for n in sync_nets if re.search(r'\(\s*PIN\s+rst\s*\)', n)]
+assert len(rst_net) == 1 and len(rst_net[0]) - 1 <= 2, rst_net

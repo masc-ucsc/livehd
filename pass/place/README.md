@@ -1045,18 +1045,32 @@ branches and inserts repeaters along long edges. It uses Liberty input caps,
 available slew/cap/fanout limits and placement wire RC to plan candidates. Resolved
 physical pins preserve individual packed-bus bits through wiring aliases.
 
-Pre-CTS placement does not construct reset trees. `synth.place.reset_fanout` defaults
-to 0; nonzero values are rejected. Existing mapped control cells remain physical
-objects for density, overlap, site and row legality. One exception follows the
-2d-domplace U22 ruling (the reset network of a domino storage reset stays
-ordinary CMOS, buffered like any mapped net): under
-`pass.usyn.physical=domino_provisional`, a flat net that reaches a domino `RST`
-pin is dealt through the smallest buffer, at most
-`synth.place.domino_reset_fanout` (default 32, 0 off) loads per buffer, every
-other load of the net included, with `reset_tree.hpp`'s tree before the first
-cell is read; `qor.place.domino_reset_tree` reports it. Reset nets without a
-domino stay untreed. `synth.place.domino_rail_fanout` (default 0) applies the
-same tree to nets on domino data rails, an experiment.
+**Reset buffer tree (`synth.place.reset_fanout`, default 32; 2d-domplace U23).** One
+mechanism for every mapper (`abc`, `usyn`, the `domino_provisional` profile): right after
+the mapped hierarchy is flattened, before the first cell is read, every reset net with more
+than N cell loads is dealt out through the library's smallest placeable buffer
+(`reset_tree.hpp`), N pins per buffer, level by level until the driver carries at most N
+loads. A reset net is a net that drives an asynchronous clear/preset pin of a Liberty
+register, a domino storage reset `RST` pin (U22: the reset stays CMOS), or whose driver
+carries the synthesis reset role (a synchronous reset folded into data logic); every other
+load of that net (the synchronous-reset logic of the same signal) moves behind the tree too.
+Pins are grouped in instance-name order, which follows the source hierarchy; graph outputs,
+bus-wiring aliases, macros and constant (tie) drivers keep their direct connection. It is
+pure fanout restructuring (a chain of identity buffers per pin, LEC-proven in
+`lhd_placement_reset_tree_smoke`), idempotent (a timing-driven run builds it in the seed
+placement), and it composes with the mapper's region trees (`pass.abc.reset_fanout`,
+`pass.usyn.reset_fanout`, default 0), which bound a reset inside one region; this one bounds
+the sum across regions. `synth.place.reset_fanout=0` turns it off (the pre-U23 behaviour for
+the CMOS flows); 1 is refused. `qor.place.reset_tree` records `fanout`, `nets`, `sinks`,
+`added`, `levels`, `skipped` (pins left alone behind a multi-bit or multi-driver bus alias)
+of that placement call and `buffers`, the `__place_rsttree*` cells in the placed netlist; the
+value is part of the placement cache identity. The tree is not reset repair:
+`synth.place.repair.reset=true` (sizing reset cones) stays rejected, and the tree's nets
+keep the pre-CTS exclusion below (the buffers are reset-network cells).
+
+`synth.place.domino_rail_fanout` applies the same tree to nets on domino data rails under
+`pass.usyn.physical=domino_provisional` (the per-region mapping never buffers a rail), with
+buffers named `__place_railtree*`; `qor.place.domino_rail_tree` reports it.
 
 Clock/reset nets are excluded from GP wirelength, RUDY demand, connectivity-driven
 movement, IO attraction and legalization criticality/alignment. Synthesis preserves
