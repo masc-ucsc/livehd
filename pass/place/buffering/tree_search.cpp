@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
 
 #include "checks.hpp"
@@ -174,7 +175,9 @@ bool subset(const std::vector<Site_span>& a, const std::vector<Site_span>& b) {
   }
   return true;
 }
-bool dominates(const Tree_solution& a, const Tree_solution& b, const Context& c) {
+}  // namespace
+
+bool dominates_tree_solution(const Tree_solution& a, const Tree_solution& b, const Context& c) {
   const auto& x = a.timing;
   const auto& y = b.timing;
   if (x.area_um2 > y.area_um2 || x.wire_length_um > y.wire_length_um || x.multiplier_cost > y.multiplier_cost
@@ -206,7 +209,7 @@ bool dominates(const Tree_solution& a, const Tree_solution& b, const Context& c)
   }
   return true;
 }
-bool better(const Tree_solution& a, const Tree_solution& b, Tree_selection selection) {
+bool prefer_tree_solution(const Tree_solution& a, const Tree_solution& b, Tree_selection selection) {
   const auto& x = a.timing;
   const auto& y = b.timing;
   if (selection == Tree_selection::critical) {
@@ -228,7 +231,13 @@ bool better(const Tree_solution& a, const Tree_solution& b, Tree_selection selec
   }
   return a.choices < b.choices;
 }
-}  // namespace
+bool replaces_best_tree_solution(const Tree_solution& candidate, const Tree_solution& best, const Context& c,
+                                 Tree_selection selection) {
+  const bool old_dominates = dominates_tree_solution(best, candidate, c);
+  const bool new_dominates = dominates_tree_solution(candidate, best, c);
+  return (new_dominates && !old_dominates)
+         || (!(old_dominates && !new_dominates) && prefer_tree_solution(candidate, best, selection));
+}
 
 bool body_within_sites(const Rect& b, const Site_rect& sites, double dbu_per_um) {
   constexpr auto limit = detail::exact_dbu_limit;
@@ -246,10 +255,6 @@ std::optional<double> worst_input_margin(const Evaluation& timing, const Driver&
     }
   }
   return worst;
-}
-bool dominates_tree_solution(const Tree_solution& a, const Tree_solution& b, const Context& c) { return dominates(a, b, c); }
-bool prefer_tree_solution(const Tree_solution& a, const Tree_solution& b, Tree_selection selection) {
-  return better(a, b, selection);
 }
 
 Candidate expand_tree(const Context& c, const Routing_tree& route, const std::vector<size_t>& choices) {
@@ -334,21 +339,14 @@ Tree_search_result search_tree(const liberty::timing::Library& lib, const Contex
         if (timing.feasible() && !required) {
           const auto    margin = worst_input_margin(timing, c.driver);
           Tree_solution solution{choices, std::move(candidate), std::move(timing), std::move(spans), margin};
-          if (!result.best || (dominates(solution, *result.best, c) && !dominates(*result.best, solution, c))
-              || better(solution, *result.best, settings.selection)) {
+          if (!result.best || replaces_best_tree_solution(solution, *result.best, c, settings.selection)) {
             result.best = solution;
           }
-          if (std::none_of(result.frontier.begin(), result.frontier.end(), [&](const auto& old) {
-                return dominates(old, solution, c);
-              })) {
-            std::erase_if(result.frontier, [&](const auto& old) { return dominates(solution, old, c); });
-            if (result.frontier.size() >= settings.max_frontier) {
-              result.status = Tree_search_status::budget_exhausted;
-              return result;
-            }
-            result.frontier.push_back(std::move(solution));
-            result.peak_frontier = std::max(result.peak_frontier, result.frontier.size());
+          if (!admit_tree_frontier(result.frontier, std::move(solution), settings.max_frontier, c, std::identity{})) {
+            result.status = Tree_search_status::budget_exhausted;
+            return result;
           }
+          result.peak_frontier = std::max(result.peak_frontier, result.frontier.size());
           if (settings.prefer_unbuffered_if_feasible && result.assignments == 1) {
             result.status = Tree_search_status::unbuffered_retained;
             return result;

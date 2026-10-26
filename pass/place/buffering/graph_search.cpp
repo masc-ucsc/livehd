@@ -119,26 +119,16 @@ Graph_search_result search_graph(const liberty::timing::Library& lib, const Cont
   std::set<std::vector<size_t>> topologies;
   bool                          incomplete_models = false;
   const auto                    admit             = [&](Graph_solution solution) {
-    const auto& candidate = solution.solution;
-    const bool  old_dominates = result.best && dominates_tree_solution(result.best->solution, candidate, context);
-    const bool  new_dominates = result.best && dominates_tree_solution(candidate, result.best->solution, context);
-    if (!result.best || (new_dominates && !old_dominates)
-        || (!(old_dominates && !new_dominates)
-            && prefer_tree_solution(candidate, result.best->solution, settings.tree.selection))) {
+    if (!result.best || replaces_best_tree_solution(solution.solution, result.best->solution, context, settings.tree.selection)) {
       result.best = solution;
     }
-    if (std::any_of(result.frontier.begin(), result.frontier.end(), [&](const auto& old) {
-          return dominates_tree_solution(old.solution, candidate, context);
-        })) {
-      return true;
-    }
-    std::erase_if(result.frontier, [&](const auto& old) { return dominates_tree_solution(candidate, old.solution, context); });
-    if (result.frontier.size() >= settings.tree.max_frontier) {
-      return false;
-    }
-    result.frontier.push_back(std::move(solution));
+    const bool admitted  = admit_tree_frontier(result.frontier,
+                                              std::move(solution),
+                                              settings.tree.max_frontier,
+                                              context,
+                                              [](const Graph_solution& g) -> const Tree_solution& { return g.solution; });
     result.peak_frontier = std::max(result.peak_frontier, result.frontier.size());
-    return true;
+    return admitted;
   };
   std::optional<Graph_search_status> stop;
   const auto                         evaluate_topology = [&](const std::vector<size_t>& edges) {

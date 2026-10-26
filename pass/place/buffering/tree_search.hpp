@@ -1,7 +1,9 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <algorithm>
 #include <optional>
+#include <vector>
 
 #include "candidate.hpp"
 #include "sites.hpp"
@@ -80,6 +82,26 @@ std::optional<double> worst_input_margin(const Evaluation&, const Driver&);
 // partial subtrees whose actual upstream slew/load context is still unknown.
 bool                  dominates_tree_solution(const Tree_solution&, const Tree_solution&, const Context&);
 bool                  prefer_tree_solution(const Tree_solution&, const Tree_solution&, Tree_selection);
+// A new solution replaces the retained best when it strictly dominates it, or
+// when it is preferred and the best does not strictly dominate it.
+bool replaces_best_tree_solution(const Tree_solution& candidate, const Tree_solution& best, const Context&, Tree_selection);
+// Admit item to a nondominated root frontier, dropping entries it dominates.
+// Returns false, without inserting, when the frontier is already full.
+template <class T, class Solution_of>
+bool admit_tree_frontier(std::vector<T>& frontier, T item, size_t max_frontier, const Context& c, Solution_of solution_of) {
+  const auto& solution = solution_of(item);
+  if (std::any_of(frontier.begin(), frontier.end(), [&](const T& old) {
+        return dominates_tree_solution(solution_of(old), solution, c);
+      })) {
+    return true;
+  }
+  std::erase_if(frontier, [&](const T& old) { return dominates_tree_solution(solution, solution_of(old), c); });
+  if (frontier.size() >= max_frontier) {
+    return false;
+  }
+  frontier.push_back(std::move(item));
+  return true;
+}
 
 // Bounded exact expansion of the finite supplied site/cell assignments. Native
 // NLDM/GaTe and per-sink waveforms use ACTUAL upstream slew at each full trial.
