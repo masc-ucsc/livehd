@@ -2955,6 +2955,7 @@ sh_test(
     data = [
         "//inou/lefdef:test_data",
         "//lhd",
+        "//scripts/domplace:domplace_view.py",
     ],
 )
 
@@ -2968,6 +2969,7 @@ sh_test(
     data = [
         "//inou/lefdef:test_data",
         "//lhd",
+        "//scripts/domplace:domplace_view.py",
     ],
 )
 
@@ -2982,6 +2984,7 @@ sh_test(
     data = [
         "//inou/lefdef:test_data",
         "//lhd",
+        "//scripts/domplace:domplace_view.py",
     ],
 )
 

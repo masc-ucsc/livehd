@@ -4,6 +4,10 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
+
+sys.path.insert(0, 'scripts/domplace')
+import domplace_view  # noqa: E402
 
 root = Path(os.environ['TEST_TMPDIR']) / 'domplace'
 root.mkdir()
@@ -183,22 +187,11 @@ assert multirow['cells'] == 2 and multirow['even_starts'] + multirow['odd_starts
 assert multirow['row_access'] == 'stand-in' and multirow['templates'] >= 2, multirow
 manifest = json.loads((root / 'def/lefs.json').read_text())
 assert manifest[-1].endswith('domino_cells.lef') and len(manifest) == 3, manifest
-heights = {}
-macro = None
-for line in (root / 'def' / manifest[-1]).read_text().splitlines():
-    words = line.split()
-    if words[:1] == ['MACRO']:
-        macro = words[1]
-    elif words[:1] == ['SIZE']:
-        heights[macro] = float(words[3])
-rows = {}
-domino_cells = []
-for line in (root / 'def/out.def').read_text().splitlines():
-    words = line.split()
-    if words[:1] == ['ROW']:
-        rows[int(words[4])] = words[5]
-    elif len(words) > 8 and words[0] == '-' and words[2].startswith('__lhd_domino_'):
-        domino_cells.append((words[1], words[2], int(words[7]), words[9]))
+heights = {macro: size[1] for macro, size in domplace_view.lef_sizes([root / 'def' / manifest[-1]]).items()}
+placed_def = domplace_view.read_def(root / 'def/out.def')
+rows = placed_def.rows
+domino_cells = [(n, c.macro, c.y, c.orientation) for n, c in placed_def.components.items()
+                if c.macro.startswith(domplace_view.DOMINO_PREFIX)]
 assert len(domino_cells) == 2, domino_cells
 row_height = 2720
 for name, master, ylo, orientation in domino_cells:

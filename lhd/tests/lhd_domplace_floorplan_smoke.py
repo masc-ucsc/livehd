@@ -7,6 +7,10 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
+
+sys.path.insert(0, 'scripts/domplace')
+import domplace_view  # noqa: E402
 
 root = Path(os.environ['TEST_TMPDIR']) / 'domfloor'
 root.mkdir()
@@ -75,13 +79,9 @@ placed = run('fits', ['--set', 'synth.place=true', '--set', f'synth.place.floorp
 assert placed['usyn']['cache']['misses'] == 0, placed['usyn']['cache']
 place = placed['place']
 assert place['legal'] and place['multirow']['cells'] == 3, place
-rows, anchors = {}, {}
-for line in (root / 'fits/out.def').read_text().splitlines():
-    words = line.split()
-    if words[:1] == ['ROW']:
-        rows[int(words[4])] = words[5]
-    elif len(words) > 9 and words[0] == '-' and words[2].startswith('__lhd_domino_'):
-        anchors[words[1].rsplit('.', 1)[-1]] = (words[2], int(words[6]), int(words[7]), words[9])
+fits = domplace_view.read_def(root / 'fits/out.def')
+rows = fits.rows
+anchors = {domplace_view.leaf(n): c[:4] for n, c in fits.components.items() if c.macro.startswith(domplace_view.DOMINO_PREFIX)}
 assert sorted(anchors) == sorted(instances), anchors
 for state, (master, x, y, orientation) in anchors.items():
     assert master == instances[state] and y % row_height == 0 and y + row_height in rows, (state, anchors[state])

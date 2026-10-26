@@ -6,6 +6,11 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
+
+sys.path.insert(0, 'scripts/domplace')
+import domplace_view  # noqa: E402
+from domplace_view import leaf  # noqa: E402
 
 root = Path(os.environ['TEST_TMPDIR']) / 'domcases'
 root.mkdir()
@@ -50,25 +55,8 @@ def run(name, extra):
 
 def def_view(name):
     """Rows by y, components by name and nets by name of a written DEF."""
-    rows, components, nets = {}, {}, {}
-    section = None
-    for line in (root / name / 'out.def').read_text().splitlines():
-        words = line.split()
-        if words[:1] in (['COMPONENTS'], ['NETS']):
-            section = words[0]
-        elif words[:1] == ['END']:
-            section = None
-        elif words[:1] == ['ROW']:
-            rows[int(words[4])] = words[5]
-        elif section == 'COMPONENTS' and words[:1] == ['-']:
-            components[words[1]] = (words[2], int(words[6]), int(words[7]), words[9])
-        elif section == 'NETS' and words[:1] == ['-']:
-            nets[words[1]] = [(words[n + 1], words[n + 2]) for n, word in enumerate(words) if word == '(']
-    return rows, components, nets
-
-
-def leaf(instance):
-    return instance.rsplit('.', 1)[-1]
+    view = domplace_view.read_def(root / name / 'out.def')
+    return view.rows, {n: c[:4] for n, c in view.components.items()}, view.nets
 
 
 # Cold, select=all: four converted states and two unsupported ones.
