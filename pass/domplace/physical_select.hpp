@@ -34,8 +34,8 @@ struct Select_context {
 // Rails follow gate_rails; every complemented rail producer, a converted
 // state's Q included, is charged one A_NOT. Policy::area converts only when
 // A_domino + A_rails < A_register + the Liberty estimate of the D-cone logic
-// above the rail cut that no other root (output, other state's D) reaches; a
-// tie retains CMOS. Once the work runs out every remaining candidate retains
+// above the rail cut that no other root (output, other state's D) and no rail
+// producer's own cone reaches; a tie retains CMOS. Once the work runs out every remaining candidate retains
 // CMOS with `selection-budget`. Every converted state names a variant-0
 // master interface. nullopt refuses the region: no frozen netlist, a two-phase
 // netlist, a phase-one Domino cell, or an inconsistent frozen cell.

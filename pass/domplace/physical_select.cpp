@@ -5,6 +5,7 @@
 #include <array>
 #include <limits>
 #include <map>
+#include <span>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -154,14 +155,22 @@ std::optional<std::vector<uint32_t>> ownership(const usyn::Endpoint_netlist& net
 
 // The Liberty estimate of the logic that only state `i` keeps alive above its
 // rail cut: what the CMOS implementation spends on D that a domino stage
-// replaces. Copied into a small XAG whose leaves are the cut and shared nodes.
-usyn::Native_estimate exclusive_cone(const usyn::Endpoint_netlist& net, const usyn::Frozen_cell& cell, uint32_t i,
-                                     const std::vector<uint32_t>& owner, const usyn::Native_cost_model& model, Budget& work) {
+// replaces. The rail producers stay alive after conversion, so a node in their
+// cones (structural hashing can share one with D above the cut) is not saved.
+// Copied into a small XAG whose leaves are the cut, kept and shared nodes.
+usyn::Native_estimate exclusive_cone(const usyn::Endpoint_netlist& net, const usyn::Frozen_cell& cell,
+                                     std::span<const Xsignal> producers, uint32_t i, const std::vector<uint32_t>& owner,
+                                     const usyn::Native_cost_model& model, Budget& work) {
   usyn::Native_estimate        result;
-  std::unordered_set<usyn::Id> cut, seen;
-  std::vector<usyn::Id>        stack{net.state[i].reference_d.id}, nodes;
+  std::unordered_set<usyn::Id> cut, kept, seen;
+  std::vector<usyn::Id>        stack, nodes;
   for (const auto& input : cell.inputs) {
     cut.insert(input.index);
+  }
+  // Another root's node is never counted, nor is anything below it, so the
+  // marking stops there and stays linear.
+  for (const auto producer : producers) {
+    stack.push_back(producer.id);
   }
   while (!stack.empty()) {
     const auto id = stack.back();
@@ -170,8 +179,25 @@ usyn::Native_estimate exclusive_cone(const usyn::Endpoint_netlist& net, const us
       result.status = Status::search_exhausted;
       return result;
     }
+    if (owner.at(id) != i || !kept.insert(id).second) {
+      continue;
+    }
     const auto& node = net.native.node(id);
-    if (cut.contains(id) || owner.at(id) != i || !seen.insert(id).second
+    if (node.kind == Xag::Kind::and_gate || node.kind == Xag::Kind::xor_gate) {
+      stack.push_back(node.inputs[0].id);
+      stack.push_back(node.inputs[1].id);
+    }
+  }
+  stack.push_back(net.state[i].reference_d.id);
+  while (!stack.empty()) {
+    const auto id = stack.back();
+    stack.pop_back();
+    if (!work.spend()) {
+      result.status = Status::search_exhausted;
+      return result;
+    }
+    const auto& node = net.native.node(id);
+    if (cut.contains(id) || kept.contains(id) || owner.at(id) != i || !seen.insert(id).second
         || (node.kind != Xag::Kind::and_gate && node.kind != Xag::Kind::xor_gate)) {
       continue;
     }
@@ -320,7 +346,8 @@ std::optional<usyn::Physical_emission> select_physical(const usyn::Stateful_regi
       if (!owner) {
         owner = ownership(net, budget);
       }
-      const auto cone = owner ? exclusive_cone(net, cell, i, *owner, *context.cmos, budget) : usyn::Native_estimate{};
+      const auto cone
+          = owner ? exclusive_cone(net, cell, function.inputs, i, *owner, *context.cmos, budget) : usyn::Native_estimate{};
       if (!owner || cone.status == Status::search_exhausted || budget.exhausted) {
         out_of_work();
         continue;

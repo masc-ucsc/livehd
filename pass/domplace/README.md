@@ -79,7 +79,7 @@ A converted state carries `domino-area` or `domino-all`. Under `select=area`
 the comparison is an area proxy: the domino side is `x * A_NOT + A_register`
 plus one `A_NOT` for every complemented rail, and the CMOS side is the
 register plus the Liberty estimate of the D-cone logic that only this state
-uses. A tie retains CMOS.
+uses and that its rail producers do not also need. A tie retains CMOS.
 
 ## Model schema
 

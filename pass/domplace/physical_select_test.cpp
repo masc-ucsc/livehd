@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "physical_select.hpp"
 
+#include <array>
 #include <functional>
 
 #include "gtest/gtest.h"
@@ -333,6 +334,27 @@ TEST(PhysicalSelect, AreaPolicyComparesBothSidesAndATieRetainsCmos) {
   ASSERT_TRUE(wins.emission);
   EXPECT_EQ(wins.emission->states[0].reason, "domino-area");
   EXPECT_EQ(wins.emission->states[0].decision, usyn::Physical_decision::domino);
+}
+
+TEST(PhysicalSelect, LogicARailProducerStillNeedsIsNotSaved) {
+  Builder    b;
+  const auto a = b.input("a"), c = b.input("c"), d = b.input("d");
+  b.state("q");
+  // D = (a & c) | n with the rail n = (a & c) ^ d: structural hashing shares
+  // a & c between D and n's cone, so the domino stage saves only the OR.
+  const auto n = b.net().native.lxor(b.net().native.land(a, c), d);
+  b.next(0, formula({lit(0), lit(1), series(0, 1), lit(2), parallel(2, 3)}), {a, c, n});
+  const auto run = select(b, Select_options{});
+  ASSERT_TRUE(run.emission);
+  const auto& s = run.emission->states[0];
+  ASSERT_TRUE(s.a_cmos);
+  usyn::Xag    alone;
+  const auto   x = alone.input("x"), y = alone.input("y");
+  const auto   outputs = std::array{alone.lor(x, y)};
+  usyn::Budget work{1000000};
+  const auto   price = usyn::estimate_native_cost(alone, outputs, cmos_model(), work, false);
+  ASSERT_EQ(price.status, usyn::Status::feasible);
+  EXPECT_EQ(*s.a_cmos, 10 + price.area);
 }
 
 TEST(PhysicalSelect, BudgetExhaustionIsDeterministicAndSticky) {
