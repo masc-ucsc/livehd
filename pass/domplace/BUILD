@@ -43,6 +43,7 @@ genrule(
 cc_library(
     name = "contract",
     hdrs = [
+        "json_reader.hpp",
         "json_writer.hpp",
         "reason.hpp",
         "stage_model.hpp",

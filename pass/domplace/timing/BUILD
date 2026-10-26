@@ -15,6 +15,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         "//core",
+        "//pass/domplace:contract",
         "//pass/domplace:domino_bundle",
         "//pass/liberty:timing_model",
         "//pass/place:late_timing",

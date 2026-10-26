@@ -13,6 +13,7 @@
 #include "domplace_salt.hpp"
 #include "graph_library_singleton.hpp"
 #include "inou/lefdef/lef_writer.hpp"
+#include "json_reader.hpp"
 #include "json_writer.hpp"
 #include "rapidjson/document.h"
 
@@ -501,22 +502,10 @@ std::optional<Domino_sidecar> read_domino_sidecar(const fs::path& dir, std::stri
   if (!doc.HasMember("masters") || !doc["masters"].IsArray() || !doc.HasMember("instances") || !doc["instances"].IsArray()) {
     return refuse("sidecar has no masters or instances");
   }
-  // A labeled estimate is a number or null; anything else is malformed.
   bool       malformed = false;
-  const auto estimate  = [&](const rapidjson::Value& object, const char* key) -> std::optional<double> {
-    if (!object.IsObject() || !object.HasMember(key) || !(object[key].IsNumber() || object[key].IsNull())) {
-      malformed = true;
-      return std::nullopt;
-    }
-    return object[key].IsNumber() ? std::optional<double>{object[key].GetDouble()} : std::nullopt;
-  };
-  const auto string = [&](const rapidjson::Value& object, const char* key) {
-    if (!object.IsObject() || !object.HasMember(key) || !object[key].IsString()) {
-      malformed = true;
-      return std::string{};
-    }
-    return std::string{object[key].GetString(), object[key].GetStringLength()};
-  };
+  const auto estimate
+      = [&](const rapidjson::Value& object, const char* key) { return json::read_estimate(object, key, malformed); };
+  const auto string = [&](const rapidjson::Value& object, const char* key) { return json::read_text(object, key, malformed); };
   for (const auto& master : doc["masters"].GetArray()) {
     if (!master.IsObject() || !master.HasMember("variants") || !master["variants"].IsArray() || !master.HasMember("rails")
         || !master["rails"].IsArray()) {

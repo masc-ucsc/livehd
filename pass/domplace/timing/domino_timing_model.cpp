@@ -11,6 +11,7 @@
 
 #include "domino_bundle.hpp"
 #include "hash_util.hpp"
+#include "json_reader.hpp"
 #include "rapidjson/document.h"
 
 namespace livehd::domplace::timing {
@@ -37,21 +38,8 @@ Coefficient coefficient(std::string_view name) {
   }
   return nullptr;
 }
-// A sidecar estimate: a number, or null for an unmeasured value.
-std::optional<double> estimate(const rapidjson::Value& object, const char* key, bool& malformed) {
-  if (!object.IsObject() || !object.HasMember(key) || !(object[key].IsNumber() || object[key].IsNull())) {
-    malformed = true;
-    return std::nullopt;
-  }
-  return object[key].IsNumber() ? std::optional<double>{object[key].GetDouble()} : std::nullopt;
-}
-std::string text(const rapidjson::Value& object, const char* key, bool& malformed) {
-  if (!object.IsObject() || !object.HasMember(key) || !object[key].IsString()) {
-    malformed = true;
-    return {};
-  }
-  return {object[key].GetString(), object[key].GetStringLength()};
-}
+using json::read_estimate;
+using json::read_text;
 model::Table scalar(double value) { return {model::Variable::none, model::Variable::none, {}, {}, {value}}; }
 // A canonical text image of the generated cells for the model generation.
 void         image(std::string& out, const model::Table& table) {
@@ -128,7 +116,7 @@ std::optional<Domino_timing_view> read_domino_timing(const fs::path& bundle, std
   Domino_timing_view view;
   view.bundle_schema = kBundleSchema;
   view.digest        = std::format("{:016x}", hash_util::fnv1a64(contents));
-  view.producer_salt = text(doc, "producer_salt", malformed);
+  view.producer_salt = read_text(doc, "producer_salt", malformed);
   if (!doc.HasMember("model_version") || !doc["model_version"].IsUint() || !doc.HasMember("stage_model")
       || !doc["stage_model"].IsObject() || !doc["stage_model"].HasMember("version") || !doc["stage_model"]["version"].IsUint()) {
     return refuse("sidecar has no model or stage-model version");
@@ -136,16 +124,16 @@ std::optional<Domino_timing_view> read_domino_timing(const fs::path& bundle, std
   view.model_version = doc["model_version"].GetUint();
   const auto& stage  = doc["stage_model"];
   view.stage_version = stage["version"].GetUint();
-  view.clock         = text(stage, "clock", malformed);
+  view.clock         = read_text(stage, "clock", malformed);
   for (const auto& [name, member] : kCoefficients) {
-    view.stage.*member = estimate(stage, std::string(name).c_str(), malformed);
+    view.stage.*member = read_estimate(stage, std::string(name).c_str(), malformed);
     view.sources.emplace(name, "bundle");
   }
   if (doc.HasMember("corner")) {
-    view.corner = text(doc["corner"], "library", malformed);
+    view.corner = read_text(doc["corner"], "library", malformed);
   }
   if (doc.HasMember("fo4_ps")) {
-    view.fo4_ps = estimate(doc["fo4_ps"], "value", malformed);
+    view.fo4_ps = read_estimate(doc["fo4_ps"], "value", malformed);
   }
   if (doc.HasMember("units") && doc["units"].IsObject() && doc["units"].HasMember("dbu") && doc["units"]["dbu"].IsInt64()) {
     view.dbu = doc["units"]["dbu"].GetInt64();
@@ -159,7 +147,7 @@ std::optional<Domino_timing_view> read_domino_timing(const fs::path& bundle, std
     if (!r.IsObject() || !r.HasMember("pins")) {
       return refuse("reference register without pin names");
     }
-    register_pins[text(r, "name", malformed)] = {text(r["pins"], "clk", malformed), text(r["pins"], "q", malformed)};
+    register_pins[read_text(r, "name", malformed)] = {read_text(r["pins"], "clk", malformed), read_text(r["pins"], "q", malformed)};
   }
   size_t entry = 0;
   for (const auto& master : doc["masters"].GetArray()) {
@@ -174,7 +162,7 @@ std::optional<Domino_timing_view> read_domino_timing(const fs::path& bundle, std
       variant.a_footprint_um2  = catalog.a_footprint_um2;
       variant.a_estimate_um2   = catalog.a_estimate_um2;
       variant.register_cell    = catalog.register_cell;
-      variant.setup_capture_ps = estimate(item, "setup_capture_ps", malformed);
+      variant.setup_capture_ps = read_estimate(item, "setup_capture_ps", malformed);
       const auto pins          = register_pins.find(catalog.register_cell);
       if (pins == register_pins.end()) {
         return refuse("variant " + catalog.name + " names an unlisted register " + catalog.register_cell);
@@ -184,9 +172,9 @@ std::optional<Domino_timing_view> read_domino_timing(const fs::path& bundle, std
   }
   for (const auto& instance : doc["instances"].GetArray()) {
     auto& owner  = view.instances.emplace_back();
-    owner.region = text(instance, "region", malformed);
-    owner.state  = text(instance, "state", malformed);
-    owner.master = text(instance, "master", malformed);
+    owner.region = read_text(instance, "region", malformed);
+    owner.state  = read_text(instance, "state", malformed);
+    owner.master = read_text(instance, "master", malformed);
     if (!instance.IsObject() || !instance.HasMember("state_index") || !instance["state_index"].IsUint()) {
       malformed = true;
     } else {
