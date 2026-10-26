@@ -139,10 +139,10 @@ struct Domino_chain {
     catalog              = custom_catalog(variants);
     options.custom_cells = catalog;
   }
-  // The top variant one site narrower than a row of `fp`: it fits the core,
-  // but no row pair holds it with a padding site on both sides.
-  void widen_top(const physical::Floorplan& fp) {
-    sites.back() = static_cast<unsigned>(fp.rows.front().count) - 1;
+  // The top variant `over` sites wider than a row of `fp`. At -1 it fits the
+  // core, but no row pair holds it with a padding site on both sides.
+  void widen_top(const physical::Floorplan& fp, int over = -1) {
+    sites.back() = static_cast<unsigned>(fp.rows.front().count + over);
     write_variants();
     tech = physical::read_lef(options.lefs);
   }
@@ -327,6 +327,12 @@ TEST(CustomSizing, DownSizesReleaseSitesAndARejectedGrowthChangesNothing) {
   const std::string after{std::istreambuf_iterator<char>(def_out), {}};
   EXPECT_EQ(after, def);
   EXPECT_EQ(rejected.timing->delay, tight(start).delay);
+  // Wider than every row: rejected before any placement would refuse it.
+  grow.widen_top(start.floorplan, 3);
+  tight.catalog       = grow.catalog.get();  // the catalog was rebuilt
+  const auto too_wide = parse(size_custom_placed(start, grow.options, tight, {.buffers = false}).report);
+  ASSERT_EQ(trial_moves(too_wide), (std::vector<std::string>{"up:rejected_packing"}));
+  EXPECT_NE(std::string(too_wide["trials"][0]["failure"].GetString()).find("wider than every row"), std::string::npos);
 }
 
 TEST(CustomSizing, UsageErrors) {

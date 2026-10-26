@@ -13,7 +13,8 @@
 // cells it displaces) and fully evaluated, so geometry, pins, RC and timing
 // are fresh. A trial is accepted when the period (Feedback::delay) is not
 // worse and resize_accepts holds; a rejected trial or a packing failure
-// (Multirow_failure) discards the clone and leaves the state untouched. The
+// (Multirow_failure, or a variant wider than every row, which is rejected
+// without a trial) discards the clone and leaves the state untouched. The
 // netlist is never resynthesized. Writes domino_sizing.json and the
 // qor.domino_sizing block in options.output_dir.
 #include <cstdint>

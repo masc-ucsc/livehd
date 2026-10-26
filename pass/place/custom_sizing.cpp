@@ -167,9 +167,13 @@ Repair_result size_custom_placed(Result legal, const Options& requested, const E
   if (!(score.delay > 0)) {
     throw std::invalid_argument("custom variant sizing needs a measured period");
   }
-  const auto first   = score;
-  const auto initial = custom_instances(result.placed, catalog);
-  const auto buffer  = sizing.buffers ? smallest_buffer(options) : std::string{};
+  const auto first      = score;
+  const auto initial    = custom_instances(result.placed, catalog);
+  int64_t    widest_row = 0;  // the frame's rows never change in an ECO
+  for (const auto& row : result.placed.floorplan.rows) {
+    widest_row = std::max(widest_row, row.count * row.step);
+  }
+  const auto buffer = sizing.buffers ? smallest_buffer(options) : std::string{};
 
   // Per instance: the moves tried or taken, so no move repeats or undoes another.
   std::set<std::string>           up_rejected, down_rejected, buffered, moved_up, moved_down;
@@ -244,15 +248,25 @@ Repair_result size_custom_placed(Result legal, const Options& requested, const E
       const auto                  t = Clock::now();
       std::optional<Resize_trial> trial;
       std::string                 failure;
-      try {
-        trial = run_resize_trial(result.placed,
-                                 options,
-                                 {move.edit},
-                                 evaluate,
-                                 std::format("{}/trial_{}", dir, trials),
-                                 dir + "/floorplan.def");
-      } catch (const Multirow_failure& error) {
-        failure = error.what();  // the two-row ECO found no legal pose: rejected
+      // A variant wider than every row can never be packed (placement would
+      // refuse it before the two-row ECO): rejected without a trial.
+      const auto*                 to = move.kind == Move_kind::buffer ? nullptr : catalog.find(move.edit.master);
+      if (to && to->width_dbu > widest_row) {
+        failure = std::format("custom variant {} ({} DBU) is wider than every row ({} DBU); no output committed",
+                              to->name,
+                              to->width_dbu,
+                              widest_row);
+      } else {
+        try {
+          trial = run_resize_trial(result.placed,
+                                   options,
+                                   {move.edit},
+                                   evaluate,
+                                   std::format("{}/trial_{}", dir, trials),
+                                   dir + "/floorplan.def");
+        } catch (const Multirow_failure& error) {
+          failure = error.what();  // the two-row ECO found no legal pose: rejected
+        }
       }
       const bool keep    = trial && trial->timing.delay <= score.delay + sizing.epsilon_ps && resize_accepts(score, trial->timing);
       const auto outcome = keep ? "accepted" : trial ? "rejected_timing" : "rejected_packing";
