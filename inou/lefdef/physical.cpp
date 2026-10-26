@@ -2,12 +2,16 @@
 #include "physical.hpp"
 
 #include <algorithm>
+#include <array>
+#include <climits>
 #include <cmath>
 #include <cstdio>
 #include <fstream>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <tuple>
 
 #include "third_party/misc/def/def/defrReader.hpp"
 #include "third_party/misc/lef/lef/lefrReader.hpp"
@@ -316,12 +320,8 @@ int net_cb(defrCallbackType_e, defiNet* net, defiUserData data) {
   static_cast<DefContext*>(data)->fp.nets.push_back(std::move(n));
   return 0;
 }
-int blockage_cb(defrCallbackType_e, defiBlockage* input, defiUserData data) {
-  auto& c = *static_cast<DefContext*>(data);
-  if (!c.snapshot) {
-    c.error = "DEF BLOCKAGES require row-segment support and are not yet supported";
-    return 1;
-  }
+int blockage_snapshot_cb(defrCallbackType_e, defiBlockage* input, defiUserData data) {
+  auto&    c = *static_cast<DefContext*>(data);
   Blockage b;
   b.placement = input->hasPlacement();
   if (bool(input->hasLayer()) == b.placement) {
@@ -361,8 +361,55 @@ int blockage_cb(defrCallbackType_e, defiBlockage* input, defiUserData data) {
       polygon.emplace_back(points.x[j], points.y[j]);
     }
   }
-  c.fp.blockages.push_back(std::move(b));
+  c.fp.snapshot_blockages.push_back(std::move(b));
   return 0;
+}
+int blockage_cb(defrCallbackType_e, defiBlockage* blockage, defiUserData data) {
+  auto& c = *static_cast<DefContext*>(data);
+  if (c.snapshot) {
+    return blockage_snapshot_cb(defrBlockageCbkType, blockage, data);
+  }
+  if (!blockage->hasPlacement() || blockage->hasLayer() || blockage->hasPartial() || blockage->hasPushdown() || blockage->hasSlots()
+      || blockage->hasFills() || blockage->hasExceptpgnet() || blockage->hasSpacing() || blockage->hasDesignRuleWidth()
+      || blockage->hasMask() || blockage->numPolygons() || !blockage->numRectangles()) {
+    c.error = "DEF BLOCKAGES support only hard/soft rectangular PLACEMENT constraints";
+    return 1;
+  }
+  Placement_blockage item;
+  item.soft = blockage->hasSoft();
+  if (blockage->hasComponent()) {
+    item.component = blockage->placementComponentName();
+  }
+  for (int i = 0; i < blockage->numRectangles(); ++i) {
+    const Rect rect{double(blockage->xl(i)), double(blockage->yl(i)), double(blockage->xh(i)), double(blockage->yh(i))};
+    if (rect.xh <= rect.xl || rect.yh <= rect.yl) {
+      c.error = "DEF placement blockage needs positive rectangular area";
+      return 1;
+    }
+    item.rectangles.push_back(rect);
+  }
+  c.fp.blockages.push_back(std::move(item));
+  return 0;
+}
+void validate_blockages(const Floorplan& fp) {
+  if (!fp.snapshot_blockages.empty()) {
+    throw std::invalid_argument("placement cannot consume read-only DEF snapshot blockages");
+  }
+  for (const auto& blockage : fp.blockages) {
+    if (blockage.rectangles.empty()) {
+      throw std::invalid_argument("placement blockage needs rectangles");
+    }
+    if (!blockage.component.empty()
+        && std::none_of(fp.components.begin(), fp.components.end(), [&](const auto& c) { return c.name == blockage.component; })) {
+      throw std::invalid_argument("placement blockage references absent component: " + blockage.component);
+    }
+    for (const auto& r : blockage.rectangles) {
+      const auto coordinate = [](double x) { return std::isfinite(x) && x >= INT_MIN && x <= INT_MAX && std::trunc(x) == x; };
+      if (!coordinate(r.xl) || !coordinate(r.yl) || !coordinate(r.xh) || !coordinate(r.yh) || r.xh <= r.xl || r.yh <= r.yl) {
+        throw std::invalid_argument("placement blockage needs positive integer-DBU rectangles");
+      }
+    }
+  }
 }
 std::string identifier(const std::string& text) {
   // The text is already DEF-escaped (the reader retains escapes): copy `\x` pairs as-is and escape only bare specials.
@@ -464,15 +511,19 @@ Floorplan read_def_impl(const std::string& path, bool snapshot) {
   if (rc || !c.error.empty()) {
     throw std::runtime_error("DEF read failed: " + path + ": " + c.error);
   }
+  if (!snapshot) {
+    validate_blockages(c.fp);
+  }
   return std::move(c.fp);
 }
 }  // namespace
 Floorplan read_def(const std::string& path) { return read_def_impl(path, false); }
 Floorplan read_def_snapshot(const std::string& path) { return read_def_impl(path, true); }
 void      write_def(const Floorplan& fp, const std::string& path) {
-  if (!fp.blockages.empty()) {
+  if (!fp.snapshot_blockages.empty()) {
     throw std::runtime_error("placement DEF writer cannot discard snapshot blockages");
   }
+  validate_blockages(fp);
   std::ofstream out(path);
   if (!out) {
     throw std::runtime_error("cannot write DEF: " + path);
@@ -519,7 +570,26 @@ void      write_def(const Floorplan& fp, const std::string& path) {
     }
     out << " ;\n";
   }
-  out << "END NETS\nEND DESIGN\n";
+  out << "END NETS\n";
+  if (!fp.blockages.empty()) {
+    out << "BLOCKAGES " << fp.blockages.size() << " ;\n";
+    for (const auto& blockage : fp.blockages) {
+      out << "- PLACEMENT";
+      if (blockage.soft) {
+        out << " + SOFT";
+      }
+      if (!blockage.component.empty()) {
+        out << " + COMPONENT " << identifier(blockage.component);
+      }
+      for (const auto& r : blockage.rectangles) {
+        out << " RECT ( " << std::llround(r.xl) << ' ' << std::llround(r.yl) << " ) ( " << std::llround(r.xh) << ' '
+            << std::llround(r.yh) << " )";
+      }
+      out << " ;\n";
+    }
+    out << "END BLOCKAGES\n";
+  }
+  out << "END DESIGN\n";
   out.close();
   if (!out) {
     throw std::runtime_error("failed writing DEF: " + path);
@@ -528,16 +598,17 @@ void      write_def(const Floorplan& fp, const std::string& path) {
 void verify_def_roundtrip(const Floorplan& a, const Floorplan& b) {
   if (a.design != b.design || a.dbu != b.dbu || a.die != b.die || a.rows != b.rows || a.tracks != b.tracks
       || a.terminals != b.terminals || a.nets != b.nets || a.blockages != b.blockages
-      || a.components.size() != b.components.size()) {
-    const auto  field = a.design != b.design         ? "design"
-                        : a.dbu != b.dbu             ? "units"
-                        : a.die != b.die             ? "die"
-                        : a.rows != b.rows           ? "rows"
-                        : a.tracks != b.tracks       ? "tracks"
-                        : a.terminals != b.terminals ? "terminals"
-                        : a.nets != b.nets           ? "nets"
-                        : a.blockages != b.blockages ? "blockages"
-                                                     : "component count";
+      || a.snapshot_blockages != b.snapshot_blockages || a.components.size() != b.components.size()) {
+    const auto  field = a.design != b.design                           ? "design"
+                        : a.dbu != b.dbu                               ? "units"
+                        : a.die != b.die                               ? "die"
+                        : a.rows != b.rows                             ? "rows"
+                        : a.tracks != b.tracks                         ? "tracks"
+                        : a.terminals != b.terminals                   ? "terminals"
+                        : a.nets != b.nets                             ? "nets"
+                        : a.blockages != b.blockages                   ? "blockages"
+                        : a.snapshot_blockages != b.snapshot_blockages ? "snapshot blockages"
+                                                                       : "component count";
     std::string detail;
     if (a.nets != b.nets) {
       detail = " (nets " + std::to_string(a.nets.size()) + " -> " + std::to_string(b.nets.size()) + ")";
@@ -568,5 +639,305 @@ void verify_def_roundtrip(const Floorplan& a, const Floorplan& b) {
       throw std::runtime_error("DEF roundtrip changed component: " + c.name);
     }
   }
+}
+namespace {
+// Sweep large physical-only obstacle inventories without subtracting every
+// previously accepted rectangle. Fixed bodies own overlap, then hard masks,
+// then soft masks. The small-input path below retains its historical partition.
+std::vector<Placement_exclusion> sweep_exclusions(const Floorplan& fp, const Rect& domain, const std::vector<Rect>& occupied) {
+  struct Event {
+    double y, xl, xh;
+    size_t kind;
+    int    delta;
+  };
+  std::vector<Event>  events;
+  std::vector<double> xs;
+  const auto          add = [&](const Rect& r, size_t kind) {
+    const Rect c{std::max(r.xl, domain.xl), std::max(r.yl, domain.yl), std::min(r.xh, domain.xh), std::min(r.yh, domain.yh)};
+    if (c.xl < c.xh && c.yl < c.yh) {
+      events.push_back({c.yl, c.xl, c.xh, kind, 1});
+      events.push_back({c.yh, c.xl, c.xh, kind, -1});
+      xs.push_back(c.xl);
+      xs.push_back(c.xh);
+    }
+  };
+  for (const auto& b : fp.blockages) {
+    for (const auto& r : b.rectangles) {
+      add(r, b.soft ? 1 : 0);
+    }
+  }
+  for (const auto& r : occupied) {
+    add(r, 2);
+  }
+  if (events.empty()) {
+    return {};
+  }
+  std::sort(xs.begin(), xs.end());
+  xs.erase(std::unique(xs.begin(), xs.end()), xs.end());
+  std::sort(events.begin(), events.end(), [](const auto& a, const auto& b) { return a.y < b.y; });
+  struct Node {
+    std::array<int, 3> cover{};
+    unsigned           any = 0;
+  };
+  std::vector<Node> tree(4 * xs.size());
+  const auto        update = [&](auto&& self, size_t n, size_t l, size_t h, size_t ql, size_t qh, size_t kind, int delta) -> void {
+    if (qh <= l || h <= ql) {
+      return;
+    }
+    auto& t = tree[n];
+    if (ql <= l && h <= qh) {
+      t.cover[kind] += delta;
+    } else {
+      const auto mid = (l + h) / 2;
+      self(self, 2 * n, l, mid, ql, qh, kind, delta);
+      self(self, 2 * n + 1, mid, h, ql, qh, kind, delta);
+    }
+    t.any = h - l > 1 ? tree[2 * n].any | tree[2 * n + 1].any : 0;
+    for (size_t k = 0; k < 3; ++k) {
+      if (t.cover[k] > 0) {
+        t.any |= 1U << k;
+      }
+    }
+  };
+  struct Span {
+    double         xl, xh;
+    Placement_mask kind;
+  };
+  std::vector<Span> spans;
+  const auto        emit = [&](size_t l, size_t h, Placement_mask kind) {
+    if (!spans.empty() && spans.back().xh == xs[l] && spans.back().kind == kind) {
+      spans.back().xh = xs[h];
+    } else {
+      spans.push_back({xs[l], xs[h], kind});
+    }
+  };
+  const auto collect = [&](auto&& self, size_t n, size_t l, size_t h, std::array<int, 3> cover) -> void {
+    const auto& t = tree[n];
+    for (size_t k = 0; k < 3; ++k) {
+      cover[k] += t.cover[k];
+    }
+    if (cover[2] || (!(cover[0] || cover[1]) && !(t.any & 3))) {
+      return;
+    }
+    if (cover[0] && !(t.any & 4)) {
+      emit(l, h, Placement_mask::hard);
+      return;
+    }
+    if (cover[1] && !(t.any & 5)) {
+      emit(l, h, Placement_mask::soft);
+      return;
+    }
+    if (h - l > 1) {
+      const auto mid = (l + h) / 2;
+      self(self, 2 * n, l, mid, cover);
+      self(self, 2 * n + 1, mid, h, cover);
+    }
+  };
+  using Key = std::tuple<double, double, Placement_mask>;
+  std::map<Key, size_t>            previous;
+  std::vector<Placement_exclusion> result;
+  for (size_t i = 0; i < events.size();) {
+    const double y = events[i].y;
+    do {
+      const auto& e = events[i++];
+      const auto  l = std::lower_bound(xs.begin(), xs.end(), e.xl) - xs.begin();
+      const auto  h = std::lower_bound(xs.begin(), xs.end(), e.xh) - xs.begin();
+      update(update, 1, 0, xs.size() - 1, l, h, e.kind, e.delta);
+    } while (i < events.size() && events[i].y == y);
+    if (i == events.size()) {
+      break;
+    }
+    spans.clear();
+    collect(collect, 1, 0, xs.size() - 1, {});
+    std::map<Key, size_t> next;
+    for (const auto& s : spans) {
+      const Key  key{s.xl, s.xh, s.kind};
+      const auto it = previous.find(key);
+      if (it != previous.end() && result[it->second].rect.yh == y) {
+        result[it->second].rect.yh = events[i].y;
+        next.emplace(key, it->second);
+      } else {
+        next.emplace(key, result.size());
+        result.push_back({
+            {s.xl, y, s.xh, events[i].y},
+            s.kind
+        });
+      }
+    }
+    previous = std::move(next);
+  }
+  std::stable_partition(result.begin(), result.end(), [](const auto& e) { return e.kind == Placement_mask::hard; });
+  return result;
+}
+}  // namespace
+std::vector<Placement_exclusion> placement_exclusions(const Floorplan& fp, const Rect& domain,
+                                                      const std::vector<Rect>& fixed_occupancy) {
+  validate_blockages(fp);
+  if (!std::isfinite(domain.xl) || !std::isfinite(domain.yl) || !std::isfinite(domain.xh) || !std::isfinite(domain.yh)
+      || domain.xh <= domain.xl || domain.yh <= domain.yl) {
+    throw std::invalid_argument("invalid placement exclusion domain");
+  }
+  const auto clip = [&](const Rect& r) {
+    return Rect{std::max(r.xl, domain.xl), std::max(r.yl, domain.yl), std::min(r.xh, domain.xh), std::min(r.yh, domain.yh)};
+  };
+  std::vector<Rect> occupied;
+  for (const auto& r : fixed_occupancy) {
+    if (!std::isfinite(r.xl) || !std::isfinite(r.yl) || !std::isfinite(r.xh) || !std::isfinite(r.yh) || r.xh < r.xl
+        || r.yh < r.yl) {
+      throw std::invalid_argument("invalid fixed placement occupancy");
+    }
+    const auto c = clip(r);
+    if (c.xh > c.xl && c.yh > c.yl) {
+      occupied.push_back(c);
+    }
+  }
+  for (const auto& blockage : fp.blockages) {
+    if (!blockage.component.empty()) {
+      const auto component
+          = std::find_if(fp.components.begin(), fp.components.end(), [&](const auto& c) { return c.name == blockage.component; });
+      if (component->place.status != Status::FIXED && component->place.status != Status::LOCKED) {
+        throw std::invalid_argument("placement blockage associated with movable component: " + blockage.component);
+      }
+    }
+  }
+  size_t rectangles = occupied.size();
+  for (const auto& blockage : fp.blockages) {
+    rectangles += blockage.rectangles.size();
+  }
+  if (rectangles > 1024) {
+    return sweep_exclusions(fp, domain, occupied);
+  }
+  std::vector<Placement_exclusion> result;
+  // Hard geometry owns overlap with soft geometry. Each accepted piece is
+  // subtracted from subsequent rectangles, so density sees a union once.
+  for (bool soft : {false, true}) {
+    for (const auto& blockage : fp.blockages) {
+      if (blockage.soft != soft) {
+        continue;
+      }
+      for (const auto& original : blockage.rectangles) {
+        const auto        clipped = clip(original);
+        std::vector<Rect> pieces;
+        if (clipped.xh > clipped.xl && clipped.yh > clipped.yl) {
+          pieces.push_back(clipped);
+        }
+        for (const auto& obstacle : occupied) {
+          std::vector<Rect> next;
+          for (const auto& r : pieces) {
+            const Rect overlap{std::max(r.xl, obstacle.xl),
+                               std::max(r.yl, obstacle.yl),
+                               std::min(r.xh, obstacle.xh),
+                               std::min(r.yh, obstacle.yh)};
+            if (overlap.xh <= overlap.xl || overlap.yh <= overlap.yl) {
+              next.push_back(r);
+              continue;
+            }
+            for (const Rect piece : {
+                     Rect{      r.xl,       r.yl, overlap.xl,       r.yh},
+                     Rect{overlap.xh,       r.yl,       r.xh,       r.yh},
+                     Rect{overlap.xl,       r.yl, overlap.xh, overlap.yl},
+                     Rect{overlap.xl, overlap.yh, overlap.xh,       r.yh}
+            }) {
+              if (piece.xh > piece.xl && piece.yh > piece.yl) {
+                next.push_back(piece);
+              }
+            }
+          }
+          pieces = std::move(next);
+          if (pieces.empty()) {
+            break;
+          }
+        }
+        for (const auto& r : pieces) {
+          result.push_back({r, soft ? Placement_mask::soft : Placement_mask::hard});
+          occupied.push_back(r);
+        }
+      }
+    }
+  }
+  return result;
+}
+Floorplan rectangular_placement_frame(const Floorplan& original, const Technology& technology) {
+  validate_blockages(original);
+  if (original.rows.empty() || original.dbu != technology.dbu) {
+    throw std::invalid_argument("placement frame needs original rows and matching LEF/DEF units");
+  }
+  const auto& first = original.rows.front();
+  const auto  site  = technology.sites.find(first.site);
+  if (site == technology.sites.end()) {
+    throw std::invalid_argument("placement frame SITE missing from LEF: " + first.site);
+  }
+  const auto width = site->second.width * technology.dbu, height = site->second.height * technology.dbu;
+  if (!std::isfinite(width) || !std::isfinite(height) || width <= 0 || height <= 0 || width > INT_MAX || height > INT_MAX) {
+    throw std::invalid_argument("placement frame needs finite positive site dimensions in DEF range");
+  }
+  const int64_t sw = std::llround(width);
+  const int64_t rh = std::llround(height);
+  if (sw <= 0 || rh <= 0) {
+    throw std::invalid_argument("placement frame needs positive site dimensions");
+  }
+  int64_t                                    xl = first.x, yl = first.y, xh = first.x, yh = first.y;
+  std::map<int64_t, std::vector<const Row*>> levels;
+  for (const auto& row : original.rows) {
+    if (row.site != first.site || row.step != sw || row.count <= 0 || row.count > INT_MAX / sw
+        || (row.orientation != Orientation::N && row.orientation != Orientation::FS) || row.x < original.die.xl
+        || row.y < original.die.yl || row.x + row.count * sw > original.die.xh || row.y + rh > original.die.yh) {
+      throw std::invalid_argument("placement frame requires positive on-grid N/FS row segments within DIEAREA");
+    }
+    xl = std::min(xl, row.x);
+    yl = std::min(yl, row.y);
+    xh = std::max(xh, row.x + row.count * sw);
+    yh = std::max(yh, row.y + rh);
+    levels[row.y].push_back(&row);
+  }
+  if ((xh - xl) % sw || (yh - yl) % rh || (yh - yl) / rh > 1000000) {
+    throw std::invalid_argument("placement frame row bounds are off-grid or exceed the supported row count");
+  }
+  for (const auto& row : original.rows) {
+    if ((row.x - xl) % sw || (row.y - yl) % rh) {
+      throw std::invalid_argument("placement frame row segments are off the common site lattice");
+    }
+  }
+  Floorplan result = original;
+  result.rows.clear();
+  Placement_blockage                            missing;
+  std::map<std::pair<int64_t, int64_t>, size_t> previous;
+  for (int64_t y = yl; y < yh; y += rh) {
+    auto& segments = levels[y];
+    std::sort(segments.begin(), segments.end(), [](const auto* a, const auto* b) { return a->x < b->x; });
+    const auto                               orientation = segments.empty() ? Orientation::N : segments.front()->orientation;
+    int64_t                                  cursor      = xl;
+    std::vector<std::pair<int64_t, int64_t>> gaps;
+    for (const auto* row : segments) {
+      if (row->orientation != orientation || row->x < cursor) {
+        throw std::invalid_argument("placement frame has overlapping or differently oriented row segments");
+      }
+      if (row->x > cursor) {
+        gaps.emplace_back(cursor, row->x);
+      }
+      cursor = row->x + row->count * sw;
+    }
+    if (cursor < xh) {
+      gaps.emplace_back(cursor, xh);
+    }
+    std::map<std::pair<int64_t, int64_t>, size_t> current;
+    for (const auto& gap : gaps) {
+      const auto   found = previous.find(gap);
+      const size_t index = found == previous.end() ? missing.rectangles.size() : found->second;
+      if (found == previous.end()) {
+        missing.rectangles.push_back({double(gap.first), double(y), double(gap.second), double(y + rh)});
+      } else {
+        missing.rectangles[index].yh = y + rh;
+      }
+      current.emplace(gap, index);
+    }
+    previous = std::move(current);
+    result.rows.push_back(
+        {"__lhd_rect_row_" + std::to_string(result.rows.size()), first.site, xl, y, (xh - xl) / sw, sw, orientation});
+  }
+  if (!missing.rectangles.empty()) {
+    result.blockages.push_back(std::move(missing));
+  }
+  return result;
 }
 }  // namespace livehd::physical

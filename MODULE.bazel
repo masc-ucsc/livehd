@@ -96,7 +96,7 @@ http_archive(
 # Native CPU placement; the repository uses LiveHD's HHDS/HLOP repositories.
 git_repository(
     name = "dreamplace",
-    commit = "1b0cd1972f9968b49b8b139af5282d3b99fee68a",
+    commit = "5ddd24ed57e3b0a6e8e090d85e496bbab85431b9",
     remote = "https://github.com/masc-ucsc/DREAMPlace.git",
 )
 # For local co-development swap the git_repository above for:
@@ -266,7 +266,7 @@ http_archive(
 # OpenTimer: the masc-ucsc fork provides its own BUILD.bazel.
 git_repository(
     name = "opentimer",
-    commit = "7718c2866429f1caafe10d765302ad81c544d5f6",
+    commit = "3869ea4fedf83dfd419d9f21bda39b111ca6e980",
     remote = "https://github.com/masc-ucsc/OpenTimer.git",
 )
 # For local co-development swap the git_repository above for:

@@ -152,6 +152,15 @@ sh_test(
     ],
 )
 
+# Exact serialized physical RC checkpoint round trips.
+cc_test(
+    name = "physical_rc_test",
+    size = "small",
+    srcs = ["physical_rc_test.cpp"],
+    copts = COPTS,
+    deps = [":core", "@googletest//:gtest_main"],
+)
+
 # Stateless pure-function unit tests in one binary (disjoint gtest suites):
 #   - worker_pool_test: livehd::run_workers
 #   - util_smoke:       str_tools / json_util / hash_util / canonical_entity_name

@@ -1,6 +1,121 @@
 load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
+cc_library(
+    name = "rc_cache",
+    srcs = ["rc_cache.cpp"],
+    hdrs = ["rc_cache.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = ["//core"],
+)
+
+cc_test(
+    name = "rc_cache_test",
+    size = "small",
+    srcs = ["rc_cache_test.cpp"],
+    copts = COPTS,
+    deps = [":rc_cache", "@googletest//:gtest_main"],
+)
+
+cc_library(
+    name = "late_timing",
+    srcs = ["clock_constraints.cpp", "gate_waveform.cpp", "late_timing.cpp", "rc_tree.cpp", "sdc_subset.cpp", "star_rc.cpp", "wire_waveform.cpp"],
+    hdrs = ["clock_constraints.hpp", "gate_waveform.hpp", "late_timing.hpp", "rc_tree.hpp", "sdc_subset.hpp", "star_rc.hpp", "wire_waveform.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = [":rc_cache", "//core", "//graph", "//pass/liberty:timing_model", "//pass/liberty:liberty_dff"],
+)
+
+cc_test(
+    name = "star_rc_test",
+    size = "small",
+    srcs = ["star_rc_test.cpp"],
+    copts = COPTS,
+    deps = [":late_timing", "@googletest//:gtest_main"],
+)
+
+cc_library(
+    name = "timing_comparison",
+    srcs = ["timing_comparison.cpp"],
+    hdrs = ["timing_comparison.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = [":late_timing"],
+)
+
+cc_test(
+    name = "timing_comparison_test",
+    size = "small",
+    srcs = ["timing_comparison_test.cpp"],
+    copts = COPTS,
+    deps = [":timing_comparison", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "sdc_subset_test",
+    size = "small",
+    srcs = ["sdc_subset_test.cpp"],
+    copts = COPTS,
+    deps = [":late_timing", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "clock_constraints_test",
+    size = "small",
+    srcs = ["clock_constraints_test.cpp"],
+    copts = COPTS,
+    deps = [":late_timing", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "gate_waveform_test",
+    size = "small",
+    srcs = ["gate_waveform_test.cpp"],
+    copts = COPTS,
+    deps = [":late_timing", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "rc_tree_test",
+    size = "small",
+    srcs = ["rc_tree_test.cpp"],
+    copts = COPTS,
+    deps = [":late_timing", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "wire_waveform_test",
+    size = "small",
+    srcs = ["wire_waveform_test.cpp"],
+    copts = COPTS,
+    deps = [":late_timing", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "late_timing_test",
+    size = "small",
+    srcs = ["late_timing_test.cpp"],
+    copts = COPTS,
+    deps = [":late_timing", "@googletest//:gtest_main"],
+)
+
+cc_library(
+    name = "timeclosure",
+    srcs = ["timeclosure.cpp"],
+    hdrs = ["timeclosure.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+)
+
+cc_test(
+    name = "timeclosure_test",
+    size = "small",
+    srcs = ["timeclosure_test.cpp"],
+    copts = COPTS,
+    deps = [":timeclosure", "@googletest//:gtest_main"],
+)
+
 filegroup(
     name = "place_srcs",
     srcs = [
@@ -37,6 +152,30 @@ filegroup(
         "place.hpp",
         "uroute.cpp",
         "uroute.hpp",
+        "rc_cache.cpp",
+        "rc_cache.hpp",
+        "clock_constraints.cpp",
+        "clock_constraints.hpp",
+        "filler_budget.cpp",
+        "filler_budget.hpp",
+        "gate_waveform.cpp",
+        "gate_waveform.hpp",
+        "late_timing.cpp",
+        "late_timing.hpp",
+        "rc_tree.cpp",
+        "rc_tree.hpp",
+        "sdc_subset.cpp",
+        "sdc_subset.hpp",
+        "star_rc.cpp",
+        "star_rc.hpp",
+        "timing_comparison.cpp",
+        "timing_comparison.hpp",
+        "wire_waveform.cpp",
+        "wire_waveform.hpp",
+        "//pass/place/forces:timing_sources",
+        "//pass/place/buffering:timing_sources",
+        "//pass/place/objective:timing_sources",
+        "//pass/liberty:timing_model_sources",
         "repair.cpp",
         "repair.hpp",
         "repair_internal.hpp",
@@ -87,6 +226,22 @@ genrule(
     outs = ["place_salt.hpp"],
     cmd = "h=$$(cat $(SRCS) | (shasum -a 256 2>/dev/null || sha256sum) | cut -c1-16); " +
           "printf '#pragma once\\n#include <cstdint>\\nnamespace livehd::placement { inline constexpr uint64_t kPlaceSalt = 0x%sULL; }\\n' \"$$h\" > $@",
+)
+
+cc_library(
+    name = "filler_budget",
+    srcs = ["filler_budget.cpp"],
+    hdrs = ["filler_budget.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = ["@dreamplace//dreamplace/native:placer"],
+)
+cc_test(
+    name = "filler_budget_test",
+    size = "small",
+    srcs = ["filler_budget_test.cpp"],
+    copts = COPTS,
+    deps = [":filler_budget", "@googletest//:gtest_main"],
 )
 
 cc_library(
@@ -141,7 +296,10 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":uroute",
+        "//pass/place/buffering:checkpoint",
+        ":filler_budget",
         ":warpspace",
+        ":rc_cache",
         ":prects_networks",
         ":satlegalize",
         ":terminal_legalize",
@@ -149,6 +307,9 @@ cc_library(
         "//graph",
         "//inou/lefdef:inou_lefdef",
         "//pass/color:floorplan_color",
+        "//pass/place/forces:gp_timing",
+        "//pass/place/forces:gp_rejection",
+        "//pass/place/forces:legalization",
         "//pass/liberty:liberty_dff",
         "//pass/partition:flatten",
         "//pass/synth",

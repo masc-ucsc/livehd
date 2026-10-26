@@ -1,5 +1,16 @@
 # pass/liberty — Liberty cell behavioral models (task 2a-abc companion)
 
+`//pass/liberty:timing_model` also supplies an independent native NLDM reader for
+the timing-closure proxy. It preserves per-library units and slew thresholds,
+supports scalar/one-/two-dimensional delay, transition and setup tables with
+template/local axes, and retains conditional/unateness/clock metadata. Bus members
+inherit bus attributes and can override their own capacitance, function or timing
+groups; explicitly listed members do not manufacture unused bits from a wider
+shared bus type. Tables interpolate/extrapolate in ps/fF without a timer or
+external process. Invalid syntax/data throws; unsupported table models remain
+explicitly unavailable on the affected arc. Duplicate cell names across corners
+are rejected. Behavioral model generation and its defaults remain unchanged.
+
 `lhd pass liberty gensim <file.lib> --emit-dir lg:models` reads a Liberty file
 (via ABC's `read_lib`) and emits one **LGraph behavioral model per combinational
 cell**. Each model is a `Graph` named exactly after the Mio cell, with input pins

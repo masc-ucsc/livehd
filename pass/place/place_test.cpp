@@ -1240,7 +1240,7 @@ TEST(Placement, MappedBusGraphLegalityRcAndReuse) {
     // physical cells or exceeding a bounded particle count.
     soft.virtual_fillers          = true;
     soft.virtual_filler_max_count = 64;
-    soft.virtual_filler_fraction  = .5;
+    soft.virtual_filler_fraction  = 1.5;
     soft.output_dir               = (root / "bounded_virtual_fillers").string();
     hhds::GraphLibrary virtual_library;
     const auto         virtual_result = place(*graph, virtual_library, soft);
@@ -3011,6 +3011,35 @@ TEST(Placement, LegalityRejectsOverlapAndOffGrid) {
   EXPECT_THROW(check_legality(tech, fp), std::runtime_error);
 }
 
+TEST(Placement, HardBlockageRowIndexKeepsExactVerticalGeometryAndNestedIntervals) {
+  physical::Technology tech;
+  tech.dbu               = 1;
+  tech.sites["s"]        = {1, 10, true};
+  tech.macros["m"].klass = "BLOCK";
+  physical::Floorplan fp;
+  fp.rows.push_back({"row", "s", -20, -10, 40, 1});
+  Ann_place pose(-5, -9, 2, 2);
+  pose.status = Ann_place::Status::PLACED;
+  fp.components.push_back({"a", "m", pose});
+  // A common row band does not imply overlap for an unaligned macro body.
+  fp.blockages = {
+      {false, {}, {{-5, -5, -3, -1}}}
+  };
+  EXPECT_NO_THROW(check_legality(tech, fp));
+  // The nearest interval ends before the cell; an earlier enclosing interval
+  // must still be found by the prefix maximum of all preceding right edges.
+  fp.blockages.front().rectangles = {
+      {-15, -10, -4, -8},
+      {-10, -10, -9, -8}
+  };
+  EXPECT_THROW(check_legality(tech, fp), std::runtime_error);
+  fp.blockages.front().soft = true;
+  EXPECT_NO_THROW(check_legality(tech, fp));
+  fp.blockages.front().soft          = false;
+  fp.components.front().place.status = Ann_place::Status::FIXED;
+  EXPECT_NO_THROW(check_legality(tech, fp));
+}
+
 TEST(Placement, IncrementalWindowKeepsDistantBlocksAndSeedsNewCells) {
   hhds::GraphLibrary source;
   auto               io = source.create_io("eco");
@@ -4434,6 +4463,142 @@ TEST(Placement, ObservationalGpSamplingPreservesPlacementAndTimingSchedule) {
   EXPECT_EQ(iterations, (std::vector<int>{10, 20}));
 }
 
+TEST(Placement, OriginalDefBlockagesRemainPhysicalConstraintsWithoutSignalInstances) {
+  hhds::GraphLibrary source, initial_library, placed_library;
+  auto               graph   = tie_graph(source, false);
+  auto               options = plain_options();
+  options.lefs               = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.output_dir         = std::string(std::getenv("TEST_TMPDIR")) + "/original_blockages_seed";
+  options.iterations         = 0;
+  options.bins               = 4;
+  options.core = options.die = {0, 0, 18.4, 10.88};
+  auto seed                  = place(*graph, initial_library, options);
+  ASSERT_EQ(seed.floorplan.components.size(), 2);
+  const auto   tech   = physical::read_lef(options.lefs);
+  const double middle = 9200, top = 10880, row_height = 2720;
+  for (auto& c : seed.floorplan.components) {
+    if (c.name == "nand") {
+      c.place.x           = middle;
+      c.place.y           = 0;
+      c.place.orientation = physical::Orientation::N;
+      c.place.status      = physical::Status::FIXED;
+    }
+  }
+  seed.floorplan.blockages = {
+      {false,     {},                    {{0, 0, middle, top}}},
+      { true, "nand", {{middle, top - row_height, 18400, top}}}
+  };
+  const auto path = std::string(std::getenv("TEST_TMPDIR")) + "/original_blockages.def";
+  physical::write_def(seed.floorplan, path);
+  options.floorplan   = path;
+  options.output_dir += "_gp";
+  options.snapshots   = true;
+  options.iterations = options.min_iterations = 20;
+  options.gp_observer_interval                = 10;
+  options.fp_pin_adjust = options.macro_pin_adjust = true;
+  unsigned observations                            = 0;
+  options.gp_observer                              = [&](const Result& snapshot, const Gp_observation&) {
+    ++observations;
+    EXPECT_EQ(snapshot.floorplan.blockages, seed.floorplan.blockages);
+    EXPECT_EQ(snapshot.floorplan.components.size(), 2);
+    EXPECT_EQ(snapshot.floorplan.terminals.size(), seed.floorplan.terminals.size());
+    EXPECT_EQ(snapshot.parasitics->cells.size(), 2);
+    for (const auto& c : snapshot.floorplan.components) {
+      EXPECT_TRUE(c.name == "inv" || c.name == "nand");
+    }
+  };
+  const auto placed = place(*graph, placed_library, options);
+  EXPECT_EQ(observations, 2);
+  rapidjson::Document gp;
+  const auto          gp_path = options.output_dir + "/gp.json";
+  std::ifstream       gp_file(gp_path);
+  const std::string   gp_text((std::istreambuf_iterator<char>(gp_file)), {});
+  gp.Parse(gp_text.c_str());
+  ASSERT_FALSE(gp.HasParseError());
+  ASSERT_EQ(gp["nodes"].Size(), 2);
+  EXPECT_EQ(placed.floorplan.blockages, seed.floorplan.blockages);
+  ASSERT_EQ(placed.floorplan.components.size(), 2);
+  EXPECT_NO_THROW(check_legality(tech, placed.floorplan));
+  for (const auto& c : placed.floorplan.components) {
+    EXPECT_GE(c.place.x, middle);
+  }
+  auto       changed = placed.floorplan;
+  const auto moving
+      = std::find_if(changed.components.begin(), changed.components.end(), [](const auto& c) { return c.name == "inv"; });
+  ASSERT_NE(moving, changed.components.end());
+  moving->place.x           = 0;
+  moving->place.y           = 0;
+  moving->place.orientation = physical::Orientation::N;
+  EXPECT_THROW(check_legality(tech, changed), std::runtime_error);
+  moving->place.x           = middle;
+  moving->place.y           = top - row_height;
+  moving->place.orientation = physical::Orientation::FS;
+  EXPECT_NO_THROW(check_legality(tech, changed));  // Soft restrictions allow final row packing/repair.
+  auto       eco      = options;
+  auto       previous = std::make_shared<physical::Floorplan>(placed.floorplan);
+  const auto edited
+      = std::find_if(previous->components.begin(), previous->components.end(), [](const auto& c) { return c.name == "inv"; });
+  ASSERT_NE(edited, previous->components.end());
+  edited->place.x = edited->place.y  = 0;
+  edited->place.orientation          = physical::Orientation::N;
+  eco.previous                       = previous;
+  eco.changed_cells                  = {"inv"};
+  eco.legalize_cells                 = true;
+  eco.gp_observer                    = {};
+  eco.output_dir                    += "_eco";
+  hhds::GraphLibrary eco_library;
+  const auto         repaired = place(*graph, eco_library, eco);
+  EXPECT_NO_THROW(check_legality(tech, repaired.floorplan));
+  EXPECT_EQ(repaired.floorplan.blockages, placed.floorplan.blockages);
+  for (const auto& c : repaired.floorplan.components) {
+    EXPECT_GE(c.place.x, middle);
+  }
+  options.macro_transparency.always = true;
+  hhds::GraphLibrary transparent_library;
+  EXPECT_THROW(place(*graph, transparent_library, options), std::invalid_argument);
+}
+
+TEST(Placement, TieLocalizationRespectsHardDefExclusionsAfterNativeLegalization) {
+  hhds::GraphLibrary source, seed_library, placed_library;
+  auto               graph = tie_graph(source);
+  for (auto node : graph->body().nodes()) {
+    if (node.get_name() == "nand") {
+      Ann_place fixed(9200, 0, 1840, 2720);
+      fixed.status = physical::Status::FIXED;
+      node.attr(attrs::place).set(fixed);
+    }
+  }
+  auto options       = plain_options();
+  options.liberty    = "inou/lefdef/tests/data/sky130hd.lib";
+  options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/tie_hard_mask_seed";
+  options.core = options.die = {0, 0, 55.2, 5.44};
+  options.iterations         = 0;
+  options.bins               = 4;
+  auto seed                  = place(*graph, seed_library, options);
+  seed.floorplan.blockages   = {
+      {false, {}, {{0, 0, 36800, 2720}}}
+  };
+  for (auto& port : seed.floorplan.terminals) {
+    port.status = physical::Status::FIXED;
+  }
+  const auto path = std::string(std::getenv("TEST_TMPDIR")) + "/tie_hard_mask.def";
+  physical::write_def(seed.floorplan, path);
+  options.floorplan   = path;
+  options.output_dir += "_blocked";
+  const auto placed   = place(*graph, placed_library, options);
+  const auto tech     = physical::read_lef(options.lefs);
+  EXPECT_NO_THROW(check_legality(tech, placed.floorplan));
+  unsigned ties = 0;
+  for (const auto& cell : placed.floorplan.components) {
+    if (cell.macro == "sky130_fd_sc_hd__conb_1") {
+      ++ties;
+      EXPECT_TRUE(cell.place.y >= 2720 || cell.place.x >= 36800);
+    }
+  }
+  EXPECT_GT(ties, 0);
+}
+
 TEST(Placement, FreshLegalizationTimingRanksPositiveSlackPaths) {
   hhds::GraphLibrary source, flat;
   auto               graph          = tie_graph(source, false);
@@ -5162,6 +5327,48 @@ TEST(Placement, RouteGridUsesFreshTimingAndSamePhysicalSnapshotWithSatOffOrOn) {
     }
   }
 }
+TEST(Placement, RelativeFillerChargeScalesInPreliminaryAndFinalGp) {
+  hhds::GraphLibrary source;
+  const auto         graph   = tie_graph(source, false);
+  auto               options = plain_options();
+  options.lefs               = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.fp_place = options.fp_pin_adjust = true;
+  options.io_iterations                    = 2;
+  options.fp_pin_interval                  = 1;
+  options.fp_iterations = options.iterations = 2;
+  options.bins                               = 4;
+  options.density                            = .5;
+  std::array<double, 2> previous_area{};
+  for (int scale : {1, 2}) {
+    hhds::GraphLibrary placed;
+    options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/relative_fp_fillers_" + std::to_string(scale);
+    options.core       = {0, 0, scale * 55.2, 54.4};
+    options.die        = options.core;
+    const auto result  = place(*graph, placed, options);
+    EXPECT_NO_THROW(check_legality(physical::read_lef(options.lefs), result.floorplan));
+    const auto read = [&](const char* name) {
+      std::ifstream       file(options.output_dir + "/" + name);
+      const std::string   text((std::istreambuf_iterator<char>(file)), {});
+      rapidjson::Document json;
+      json.Parse(text.c_str());
+      return json;
+    };
+    auto fp = read("fp_place.json"), gp = read("gp_history.json"), budget = read("virtual_filler_budget.json");
+    ASSERT_FALSE(fp.HasParseError());
+    ASSERT_FALSE(gp.HasParseError());
+    ASSERT_FALSE(budget.HasParseError());
+    EXPECT_DOUBLE_EQ(budget["fraction"].GetDouble(), .25);
+    EXPECT_DOUBLE_EQ(budget["requested_charge_area_um2"].GetDouble(), .25 * budget["available_charge_area_um2"].GetDouble());
+    EXPECT_GT(fp["fp_virtual_filler_count"].GetInt(), 0);
+    EXPECT_GT(gp["virtual_filler_count"].GetInt(), 0);
+    const std::array<double, 2> areas{fp["fp_virtual_filler_area_um2"].GetDouble(), gp["virtual_filler_area_um2"].GetDouble()};
+    for (size_t stage = 0; stage < areas.size(); ++stage) {
+      EXPECT_GT(areas[stage], previous_area[stage]);
+    }
+    previous_area = areas;
+  }
+}
+
 }  // namespace livehd::placement
 
 TEST(Placement, MacroWarpDefaultsUseConstantStrengthAndStabilityStart) {

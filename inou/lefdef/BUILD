@@ -2,8 +2,8 @@ load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 cc_library(
     name = "inou_lefdef",
-    srcs = ["physical.cpp"],
-    hdrs = ["physical.hpp"],
+    srcs = ["physical.cpp", "mapped_graph.cpp"],
+    hdrs = ["physical.hpp", "mapped_graph.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
     deps = ["//graph", "//third_party/misc/lef/lef", "//third_party/misc/def/def"],
@@ -19,4 +19,11 @@ cc_test(
     copts = COPTS,
     data = [":test_data"],
     deps = [":inou_lefdef", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "mapped_graph_test",
+    srcs = ["mapped_graph_test.cpp"],
+    copts = COPTS,
+    deps = [":inou_lefdef", "//graph", "@googletest//:gtest_main"],
 )

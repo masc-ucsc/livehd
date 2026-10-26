@@ -325,7 +325,7 @@ int main(int argc, char** argv) {
         // or cell density. Keep them without changing the four feature maps.
         json.Key("blockages");
         json.StartArray();
-        for (const auto& b : fp.blockages) {
+        for (const auto& b : fp.snapshot_blockages) {
           json.StartObject();
           json.Key("kind");
           json.String(b.placement ? "placement" : "routing");

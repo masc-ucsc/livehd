@@ -110,14 +110,18 @@ std::string serialize_parasitics(const Parasitics& rc) {
   w.EndObject();
   return buffer.GetString();
 }
-Parasitics deserialize_parasitics(std::string_view text) {
+static Parasitics parse_parasitics(std::string_view text, bool full_precision) {
   const auto require = [](bool ok) {
     if (!ok) {
       throw std::runtime_error("invalid persisted placement parasitics");
     }
   };
   rapidjson::Document json;
-  json.Parse(text.data(), text.size());
+  if (full_precision) {
+    json.Parse<rapidjson::kParseFullPrecisionFlag>(text.data(), text.size());
+  } else {
+    json.Parse(text.data(), text.size());
+  }
   require(!json.HasParseError() && json.IsObject());
   require(json.HasMember("version") && json["version"].IsInt() && (json["version"].GetInt() == 1 || json["version"].GetInt() == 2));
   require(json.HasMember("identity") && json["identity"].IsString() && json.HasMember("approximate")
@@ -172,4 +176,6 @@ Parasitics deserialize_parasitics(std::string_view text) {
   }
   return result;
 }
+Parasitics deserialize_parasitics(std::string_view text) { return parse_parasitics(text, false); }
+Parasitics deserialize_parasitics_exact(std::string_view text) { return parse_parasitics(text, true); }
 }  // namespace livehd::physical
