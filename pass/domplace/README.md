@@ -183,8 +183,9 @@ and electrical violations are not worse with some gain (LEF footprint area
 counts). A packing failure is a rejected trial, and so is any other trial
 failure, such as a variant whose register leaves the stage period
 unmeasured (`rejected_failed`, with its reason). `.trials` (default 64) bounds
-the trials. The netlist is always variant 0 at synthesis, so a down-size
-only follows an up-size. `place/domino_sizing.json` and
+the trials. The netlist is always variant 0 at synthesis and an instance
+that stepped up never steps back down, so through lhd no instance steps down
+yet (the engine's down path is tested on its own). `place/domino_sizing.json` and
 `qor.place.domino_sizing` list each trial (with its two-row ECO block), the
 variant counts, the C_clk change from the catalog's labeled `clock_ff`, and
 `eco`, the two-row ECO summed over the accepted trials

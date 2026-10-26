@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """Post-legal domino sizing (2d-domplace G): synth.place.domino_sizing on a
 sky130 fixture given a second register rung, so each domino master has two
-drive variants: an up-size that displaces a neighbour, a growth a dense core
-cannot pack, legality, placed-netlist LEC and a warm replay."""
+drive variants: an up-size that displaces a neighbour, an output buffer once
+the top variant is in place, a growth a dense core cannot pack, legality,
+placed-netlist LEC and a warm replay. A down-size cannot happen through lhd
+(synthesis instantiates variant 0 and an instance that stepped up never steps
+back down); custom_sizing_test covers it."""
 import json
 import os
 from pathlib import Path
@@ -81,6 +84,17 @@ coefficients = ['--set', 'pass.usyn.domino_eval_fo4=2', '--set', 'pass.usyn.domi
 sizing = ['--set', 'synth.place.domino_sizing=true']
 
 
+def lec(net, reference, top, name):
+    """Placed-netlist LEC with the gensim cell models and the bundle's models."""
+    lec_json = root / f'{name}_lec.json'
+    subprocess.run([lhd, 'lec', '--impl', f'lg:{net}', '--ref', f'verilog:{reference}', '--lib', f'lg:{root}/cells',
+                    '--lib', f'lg:{net.parent}/qor.json.domino/models', '--top', top, '--set', 'formal.effort=proof',
+                    '--set', 'formal.timeout=10', '--workdir', str(root / f'{name}_lec'), '--result-json', str(lec_json)],
+                   capture_output=True, timeout=20)
+    proof = json.loads(lec_json.read_text())['lec']
+    assert proof['verdict'] == 'proven-full' and not proof['bounded'], (name, proof)
+
+
 def run(name, extra, success=True, command=None):
     """One lhd synth; its workdir is shared by legs named <workdir>_<leg>."""
     result = root / f'{name}.json'
@@ -150,12 +164,7 @@ assert round(sizes[v1][0] * after.dbu) == variants[v1]['width_dbu'], (sizes[v1],
 # The sized netlist is sequentially equivalent with the bundle's models.
 subprocess.run([lhd, 'pass', 'liberty', 'gensim', str(two_rung_lib), '--emit-dir', f'lg:{root}/cells',
                 '--workdir', str(root / 'gensim'), '-q'], check=True, capture_output=True, timeout=20)
-lec_json = root / 'lec.json'
-subprocess.run([lhd, 'lec', '--impl', f'lg:{root}/W/grown/synth/net', '--ref', f'verilog:{source}', '--lib', f'lg:{root}/cells',
-                '--lib', f'lg:{bundle}/models', '--top', 'doms', '--set', 'formal.effort=proof', '--set', 'formal.timeout=10',
-                '--workdir', str(root / 'lec'), '--result-json', str(lec_json)], capture_output=True, timeout=20)
-proof = json.loads(lec_json.read_text())['lec']
-assert proof['verdict'] == 'proven-full' and not proof['bounded'], proof
+lec(root / 'W/grown/synth/net', source, 'doms', 'grown')
 
 # A warm rerun restores the sized placement: the same DEF and report.
 warm = run('grown_warm', coefficients + sizing + ['--set', 'synth.place.utilization=0.4'])
@@ -168,8 +177,38 @@ assert warm['qor']['place']['domino_sizing']['trials'] == report['trials']
 dense = ['--set', 'synth.place.utilization=0.7']
 tight = run('tight', coefficients + sizing + dense)['qor']['place']['domino_sizing']
 assert [(t['move'], t['outcome']) for t in tight['trials']] == [('up', 'rejected_packing')], tight['trials']
-assert 'no output committed' in tight['trials'][0]['failure'], tight['trials'][0]
+failure = tight['trials'][0]['failure']  # the two-row ECO's refusal, not the widest-row pre-check
+assert failure.startswith('two-row ECO cannot place') and 'wider than every row' not in failure, failure
+assert 'no output committed' in failure and tight['eco']['accepted_trials'] == 0, tight
 assert tight['variants']['after'] == tight['variants']['before'] and tight['clock']['delta_ff'] == 0, tight
 run('dense', coefficients + dense)
 assert (root / 'tight/out.def').read_bytes() == (root / 'dense/out.def').read_bytes()
+# Buffering: q1 (internal) loads sixteen flops. Its up-size is accepted,
+# then, its top variant in place and still critical, its Q net is buffered:
+# the buffer is legal on a row, the period improves, and the buffered netlist
+# is sequentially equivalent. The ECO total covers both accepted trials,
+# while qor.place.multirow_eco is the buffer trial's alone.
+fanout = root / 'dobuf.v'
+fanout.write_text('module dobuf(input clk, a, b, c, d, ' + ', '.join(f'x{i}' for i in range(16)) + ', output reg '
+                  + ', '.join(f'r{i}' for i in range(16)) + ');\n'
+                  'reg q1;\nalways @(posedge clk) q1 <= (a & b) | (c & d);\n'
+                  + ''.join(f'always @(posedge clk) r{i} <= q1 & x{i};\n' for i in range(16)) + 'endmodule\n')
+buffered_base = [fanout if word == str(source) else 'dobuf' if word == 'doms' else word for word in base]
+buffered = run('buffered', coefficients + sizing + ['--set', 'synth.place.utilization=0.3'],
+               command=buffered_base)['qor']['place']
+sized = buffered['domino_sizing']
+assert [(t['move'], t['outcome']) for t in sized['trials']] == [('up', 'accepted'), ('buffer', 'accepted')], sized['trials']
+assert sized['trials'][1]['buffer'] == 'q1_obuf0' and sized['trials'][1]['moved_sinks'] > 0, sized['trials'][1]
+assert sized['trials'][1]['timing']['delay_ps'] < sized['trials'][0]['timing']['delay_ps'], sized['trials']
+assert buffered['legal'] and buffered['stage_timing']['period_ps'] == sized['after']['delay_ps'], buffered
+assert sized['eco']['accepted_trials'] == 2 and sized['eco']['cells'] == 1, sized['eco']
+assert sized['eco']['displaced_cells'] >= buffered['multirow_eco']['displaced_cells'], (sized['eco'], buffered['multirow_eco'])
+assert buffered['multirow_eco']['cells'] == 0, buffered['multirow_eco']
+view = domplace_view.read_def(root / 'buffered/out.def')
+obuf = next(c for n, c in view.components.items() if domplace_view.leaf(n) == 'q1_obuf0')
+assert obuf.macro == 'sky130_fd_sc_hd__buf_1' and obuf.status == 'PLACED' and obuf.y in view.rows, obuf
+net = subprocess.run([lhd, 'tool', 'grep', 'q1_obuf0', f'lg:{root}/W/buffered/synth/net'], capture_output=True, text=True,
+                     timeout=20).stdout
+assert '"to":"sub_' in net and 'q1_obuf0' in net, net  # LEC below sees the buffered netlist
+lec(root / 'W/buffered/synth/net', fanout, 'dobuf', 'buffered')
 print('lhd_domplace_sizing_smoke: ok')
