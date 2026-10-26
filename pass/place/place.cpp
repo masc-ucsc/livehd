@@ -77,6 +77,12 @@ using Node        = hhds::Node_class;
 using Pin         = hhds::Pin_class;
 using Orientation = ph::Orientation;
 using Status      = ph::Status;
+// The routing grid (synth.place.grid.route) consumed by RUDY/RSMT/URoute,
+// terminal bins and SAT route-grid bins: the native auxiliary grid when set,
+// else the density grid in use.
+int route_grid_bins(const dp::Options& control, int density_bins) {
+  return control.auxiliary_bins ? control.auxiliary_bins : density_bins;
+}
 
 std::string memory_proxy_lef(const std::map<uint64_t, std::string>& memories, const ph::Technology& tech) {
   if (memories.empty()) {
@@ -659,6 +665,12 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               o.virtual_filler_cell_scale,
                               o.virtual_filler_bin_fraction),
                   h);
+  }
+  if (o.route_bins) {
+    h = hash_text(std::format("route-grid:{}", o.route_bins), h);
+  }
+  if (o.legalize_bins) {
+    h = hash_text(std::format("legalize-bin-grid:{}", o.legalize_bins), h);
   }
   if (o.dynamic_bins || o.local_density_weight > 0 || o.macro_cell_density_weight > 0 || o.macro_density_pull_weight > 0) {
     h = hash_text(std::format("local-spread:{}:{}:{}:{}:{}:{}:{}",
@@ -4136,7 +4148,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     throw std::invalid_argument("timing snapshot requires an explicit previous placement and no placement stages");
   }
   if (!(options.utilization > 0 && options.utilization < 1) || !(options.aspect > 0 && std::isfinite(options.aspect))
-      || !(options.density > 0 && options.density <= 1) || options.iterations < 0 || options.bins < 2 || options.threads < 1) {
+      || !(options.density > 0 && options.density <= 1) || options.iterations < 0 || options.bins < 2 || options.threads < 1
+      || (options.route_bins && (options.route_bins < 2 || options.route_bins > 1024)) || options.legalize_bins < 0
+      || options.legalize_bins > 1024) {
     throw std::invalid_argument("invalid placement utilization/aspect/density/iteration/bin/thread settings");
   }
   if (!std::isfinite(options.halo_x) || !std::isfinite(options.halo_y) || (options.halo_x < 0 && options.halo_x != -1)
@@ -5367,7 +5381,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     if (uroute_data->skipped().empty()) {
       auto snapshot = v;
       make_arrays(snapshot, tech);
-      selected_uroute = uroute_data->select(dp::uroute_features(snapshot.design, options.bins, options.bins), uroute_id(snapshot));
+      const int route_bins = options.route_bins ? options.route_bins : options.bins;
+      selected_uroute      = uroute_data->select(dp::uroute_features(snapshot.design, route_bins, route_bins), uroute_id(snapshot));
     } else {
       selected_uroute = uroute_data->select({}, {});
     }
@@ -5442,7 +5457,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   control.num_threads                = options.threads;
   control.dynamic_bins               = options.dynamic_bins;
   control.bin_max                    = options.bin_max;
-  control.auxiliary_bins             = options.dynamic_bins ? options.bins : 0;
+  control.auxiliary_bins             = options.route_bins ? options.route_bins : options.dynamic_bins ? options.bins : 0;
   control.local_density_weight       = options.local_density_weight;
   control.local_density_target       = options.local_density_target;
   control.timing_spread_weight       = options.timing_spread_weight;
@@ -6891,8 +6906,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             "satlegalize route_grid requires timing feedback, explicit rsmt, routability, fixed bin counts and no region_size");
       }
       dp::RudyOptions routing;
-      routing.bins_x              = control.auxiliary_bins ? control.auxiliary_bins : control.bins_x;
-      routing.bins_y              = control.auxiliary_bins ? control.auxiliary_bins : control.bins_y;
+      routing.bins_x              = route_grid_bins(control, control.bins_x);
+      routing.bins_y              = route_grid_bins(control, control.bins_y);
       routing.horizontal_capacity = control.route_capacity_h;
       routing.vertical_capacity   = control.route_capacity_v;
       routing.macro_blockages = routing.pin_access = true;
@@ -7271,7 +7286,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                                                                                  options.vanished_memory_start)
                                                                    : (dp::macro_transparent(options.macro_transparency, iteration - 1) ? 0 : 1);
         dp::RudyOptions routing;
-        routing.bins_x = routing.bins_y = control.auxiliary_bins ? control.auxiliary_bins : options.bins;
+        routing.bins_x = routing.bins_y = route_grid_bins(control, options.bins);
         routing.horizontal_capacity     = control.route_capacity_h;
         routing.vertical_capacity       = control.route_capacity_v;
         routing.macro_blockages = routing.pin_access = true;
@@ -8159,12 +8174,14 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       terminal_options.prects           = v.prects;
       terminal_options.route_drc        = options.satlegalize_route;
       terminal_options.route_vias       = options.satlegalize_route_vias;
-      terminal_options.bins_x           = control.auxiliary_bins ? control.auxiliary_bins : metrics.bins_x;
-      terminal_options.bins_y           = control.auxiliary_bins ? control.auxiliary_bins : metrics.bins_y;
+      terminal_options.bins_x           = options.legalize_bins ? options.legalize_bins : route_grid_bins(control, metrics.bins_x);
+      terminal_options.bins_y           = options.legalize_bins ? options.legalize_bins : route_grid_bins(control, metrics.bins_y);
       terminal_options.target_density   = options.density;
       terminal_options.macro_halo_x_dbu = v.halo_x;
       terminal_options.macro_halo_y_dbu = v.halo_y;
-      fit_terminal_legalize_grid(tech, frame, terminal_options);
+      if (!options.legalize_bins) {  // an explicit legalize.bin.grid stays authoritative
+        fit_terminal_legalize_grid(tech, frame, terminal_options);
+      }
       terminal_report = terminal_legalize(tech, frame, final_gp_timing, terminal_options);
       sat_install(v.design, frame);
       metrics.legal                               = dp::is_legal(v.design);
@@ -9227,8 +9244,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       && options.completed_stage == Placement_stage::final) {
     auto snapshot = v;
     make_arrays(snapshot, tech);
-    const int nx = control.auxiliary_bins ? control.auxiliary_bins : (metrics.bins_x ? metrics.bins_x : options.bins);
-    const int ny = control.auxiliary_bins ? control.auxiliary_bins : (metrics.bins_y ? metrics.bins_y : options.bins);
+    const int nx = route_grid_bins(control, metrics.bins_x ? metrics.bins_x : options.bins);
+    const int ny = route_grid_bins(control, metrics.bins_y ? metrics.bins_y : options.bins);
     export_uroute(fs::path(options.output_dir) / "uroute_export",
                   snapshot.design,
                   uroute_id(snapshot),

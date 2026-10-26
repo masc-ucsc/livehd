@@ -236,29 +236,35 @@ livehd::placement::Options placement_options(const Options& opts) {
     }
     livehd::placement::validate_warp_options(policy);
   }
-  out.boundarypins.enabled             = truthy(synth_set(opts, "place.boundarypins", "false"));
-  out.boundarypins.split               = truthy(synth_set(opts, "place.boundarypins.split", "true"));
-  out.boundarypins.order               = truthy(synth_set(opts, "place.boundarypins.order", "false"));
-  out.boundarypins.iterations          = integer("place.boundarypins.iterations", "50");
-  out.boundarypins.max_displacement_um = number("place.boundarypins.max_displacement_um", "20");
-  out.boundarypins.align               = truthy(synth_set(opts, "place.pinalign", "false"));
-  livehd::placement::validate_boundary_pin_options(out.boundarypins);
-  out.busorder.enabled             = truthy(synth_set(opts, "place.busorder", "false"));
-  out.busorder.iterations          = integer("place.busorder.iterations", "100");
-  out.busorder.refresh             = integer("place.busorder.refresh", "20");
-  out.region.max_cells             = integer("place.busorder.max_cells", "10000");
-  out.busorder.weight              = number("place.busorder.weight", "4");
-  out.region.merge_um              = number("place.busorder.merge_um", "5");
-  out.busorder.max_displacement_um = number("place.busorder.max_displacement_um", "20");
-  livehd::placement::validate_busorder_options(out.busorder);
+  out.region.max_cells                 = integer("place.region.max_cells", "10000");
+  out.region.merge_um                  = number("place.region.merge_um", "5");
   livehd::placement::validate_region_options(out.region);
+  out.boundarypins.enabled             = truthy(synth_set(opts, "place.region.boundarypins", "false"));
+  out.boundarypins.split               = truthy(synth_set(opts, "place.region.boundarypins.split", "true"));
+  out.boundarypins.order               = truthy(synth_set(opts, "place.region.boundarypins.order", "false"));
+  out.boundarypins.iterations          = integer("place.region.boundarypins.iterations", "50");
+  out.boundarypins.max_displacement_um = number("place.region.boundarypins.max_displacement_um", "20");
+  out.boundarypins.align               = truthy(synth_set(opts, "place.region.pinalign", "false"));
+  livehd::placement::validate_boundary_pin_options(out.boundarypins);
+  out.busorder.enabled             = truthy(synth_set(opts, "place.region.busorder", "false"));
+  out.busorder.iterations          = integer("place.region.busorder.iterations", "100");
+  out.busorder.refresh             = integer("place.region.busorder.refresh", "20");
+  out.busorder.weight              = number("place.region.busorder.weight", "4");
+  out.busorder.max_displacement_um = number("place.region.busorder.max_displacement_um", "20");
+  livehd::placement::validate_busorder_options(out.busorder);
   auto& terminal                  = out.terminal_legalize_options;
   terminal.remainder_warp.enabled = truthy(synth_set(opts, "place.legalize.warpspace", "false"));
   terminal.remainder_warp.weight  = number("place.legalize.warpspace.weight", "1");
   terminal.remainder_warp.bins    = integer("place.legalize.warpspace.bins", "16");
   terminal.remainder_warp.seconds = number("place.legalize.warpspace.seconds", "3");
   livehd::placement::validate_warp_options(terminal.remainder_warp);
-  terminal.max_density            = number("place.legalize.max_density", "0.8");
+  terminal.max_density            = number("place.legalize.bin.max_density", "0.8");
+  if (const auto grid = synth_set(opts, "place.legalize.bin.grid", "route"); grid != "route") {
+    out.legalize_bins = integer("place.legalize.bin.grid", grid);
+    if (out.legalize_bins < 1 || out.legalize_bins > 1024) {
+      throw Lhd_error{"usage", "invalid synth.place.legalize.bin.grid", "expected route or 1..1024 bins per axis"};
+    }
+  }
   terminal.critical_fraction      = number("place.legalize.critical_fraction", "0.1");
   terminal.local_pair_fraction    = number("place.legalize.local_pair_fraction", "0.5");
   terminal.padding_sites          = integer("place.legalize.padding_sites", "1");
@@ -428,7 +434,11 @@ livehd::placement::Options placement_options(const Options& opts) {
   sat.max_moved_cells      = sat_limit("place.satlegalize.max_moved_cells", "0", 128, true);
   sat.move_sites           = sat_limit("place.satlegalize.move_sites", "4", 128, true);
   sat.move_rows            = sat_limit("place.satlegalize.move_rows", "1", 16, true);
-  sat.route_grid           = truthy(synth_set(opts, "place.satlegalize.route_grid", "false"));
+  const auto sat_grid      = synth_set(opts, "place.satlegalize.bin.grid", "none");
+  if (sat_grid != "none" && sat_grid != "route") {
+    throw Lhd_error{"usage", "invalid synth.place.satlegalize.bin.grid: " + sat_grid, "expected none or route"};
+  }
+  sat.route_grid = sat_grid == "route";
   sat.route_guidance       = truthy(synth_set(opts, "place.satlegalize.route_guidance", "true"));
   sat.route_peak_floor     = number("place.satlegalize.route_peak_floor", "0");
   if (!std::isfinite(sat.route_peak_floor) || sat.route_peak_floor < 0 || sat.route_peak_floor > 1) {
@@ -454,8 +464,30 @@ livehd::placement::Options placement_options(const Options& opts) {
       || out.fixed_macro_overlap_weight < 0) {
     throw Lhd_error{"usage", "invalid synth.place cell-placement controls", ""};
   }
-  out.bins                        = integer("place.bins", "64");
+  out.bins                        = integer("place.grid.density", "64");
+  // grid.density_mode is one choice; the deprecated booleans it replaces could
+  // be combined, so they are still read when it is absent.
+  const auto density_mode         = synth_set(opts, "place.grid.density_mode", "");
   out.dynamic_bins                = truthy(synth_set(opts, "place.dynamic_bins", "false"));
+  out.automatic_bins              = truthy(synth_set(opts, "place.auto_bins", "false"));
+  if (!density_mode.empty()) {
+    if (density_mode != "fixed" && density_mode != "dynamic" && density_mode != "macro") {
+      throw Lhd_error{"usage", "invalid synth.place.grid.density_mode: " + density_mode, "expected fixed, dynamic or macro"};
+    }
+    if (out.dynamic_bins || out.automatic_bins) {
+      throw Lhd_error{"usage",
+                      "synth.place.grid.density_mode conflicts with deprecated synth.place.dynamic_bins/auto_bins",
+                      "set only synth.place.grid.density_mode"};
+    }
+    out.dynamic_bins   = density_mode == "dynamic";
+    out.automatic_bins = density_mode == "macro";
+  }
+  if (const auto route = synth_set(opts, "place.grid.route", "inherit"); route != "inherit") {
+    out.route_bins = integer("place.grid.route", route);
+    if (out.route_bins < 2 || out.route_bins > 1024) {
+      throw Lhd_error{"usage", "invalid synth.place.grid.route", "expected inherit or 2..1024 bins per axis"};
+    }
+  }
   out.macro_fill_cell_space       = truthy(synth_set(opts, "place.macro.fill_cell_space", "false"));
   out.macro_filler_fraction       = number("place.macro.filler_fraction", "0");
   out.virtual_fillers             = truthy(synth_set(opts, "place.virtual_fillers", "true"));
@@ -463,10 +495,10 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.virtual_filler_fraction     = number("place.virtual_filler_fraction", "0.25");
   out.virtual_filler_cell_scale   = number("place.virtual_filler_cell_scale", "1");
   out.virtual_filler_bin_fraction = number("place.virtual_filler_bin_fraction", "0.25");
-  out.bin_max                     = integer("place.bin_max", "512");
+  out.bin_max                     = integer("place.grid.density_max", "512");
   out.local_density_weight        = number("place.local_density_weight", "0");
   out.local_density_target        = number("place.local_density_target", "-1");
-  out.local_density_bins          = integer("place.local_density_bins", "512");
+  out.local_density_bins          = integer("place.grid.local", "512");
   out.local_density_range         = number("place.local_density_range", "4");
   out.local_density_jitter        = number("place.local_density_jitter", "0.01");
   out.macro_cell_density_weight   = number("place.macro.cell_density_weight", "0");
@@ -474,7 +506,6 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.macro_density_pull_weight   = number("place.macro.density_pull_weight", "0");
   out.macro_density_pull_range    = number("place.macro.density_pull_range", "4");
   out.scale_macro_density         = truthy(synth_set(opts, "place.scale_macro_density", "true"));
-  out.automatic_bins              = truthy(synth_set(opts, "place.auto_bins", "false"));
   out.exact_macro_density         = truthy(synth_set(opts, "place.exact_macro_density", "true"));
   out.adaptive_density            = truthy(synth_set(opts, "place.adaptive_density", "true"));
   const auto unknown_const        = synth_set(opts, "place.unknown_const", "error");
@@ -595,24 +626,26 @@ livehd::placement::Options placement_options(const Options& opts) {
       throw Lhd_error{"usage", "invalid synth.place.cell_halo", "each axis must not exceed synth.place.halo"};
     }
   }
-  const auto sat_region = synth_set(opts, "place.satlegalize.region_size", "");
+  const auto sat_region = synth_set(opts, "place.satlegalize.bin.size_um", "");
   if (!sat_region.empty()) {
-    const auto dimensions = parse_halo(sat_region, "place.satlegalize.region_size");
+    const auto dimensions = parse_halo(sat_region, "place.satlegalize.bin.size_um");
     sat.region_width_um   = dimensions.first;
     sat.region_height_um  = dimensions.second;
     if (sat.region_width_um <= 0 || sat.region_height_um <= 0) {
-      throw Lhd_error{"usage", "invalid synth.place.satlegalize.region_size", "expected positive width,height in microns"};
+      throw Lhd_error{"usage", "invalid synth.place.satlegalize.bin.size_um", "expected positive width,height in microns"};
     }
   }
   if (sat.route_grid
       && (!sat_region.empty() || !out.routability || out.automatic_bins
           || livehd::placement::resolve_route_policy(out, out.final_route).model != DreamPlace::native::RouteModel::rsmt)) {
     throw Lhd_error{"usage",
-                    "invalid synth.place.satlegalize.route_grid",
-                    "requires explicit final rsmt, routability, fixed bins and no region_size"};
+                    "invalid synth.place.satlegalize.bin.grid=route",
+                    "requires explicit final rsmt, routability, a non-macro density grid and no bin.size_um"};
   }
   if (sat.spill_neighbors && sat_region.empty() && !sat.route_grid) {
-    throw Lhd_error{"usage", "synth.place.satlegalize.spill_neighbors requires region_size or route_grid", "select fixed regions"};
+    throw Lhd_error{"usage",
+                    "synth.place.satlegalize.spill_neighbors requires fixed SAT bins",
+                    "set synth.place.satlegalize.bin.size_um or synth.place.satlegalize.bin.grid=route"};
   }
   out.final_cells           = truthy(synth_set(opts, "place.final", "true"));
   out.final_iterations      = integer("place.final.iterations", "0");

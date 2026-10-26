@@ -275,6 +275,9 @@ std::vector<Set_option> list_set_options() {
   }
   // The `synth.*` command namespace (synth_command), same single-source rule.
   for (const auto& s : kSynthSetOptions) {
+    if (std::string_view{s.help}.starts_with("DEPRECATED")) {
+      continue;  // accepted spelling, canonical name listed instead
+    }
     auto help = std::string{s.help};
     // Options that are also source attributes say so, so `lhd describe` is the
     // one place that documents both spellings (the registry is the same list
@@ -334,6 +337,7 @@ void run_engine_command(Options& opts, Result& res) {
   validate_emits(opts);
   validate_dumps(opts);
   check_known_set_passes(opts);  // --set AND --config table names: a typo'd pass must error, not no-op
+  canonicalize_synth_sets(opts);  // deprecated synth.* spellings -> canonical names (with a warning)
   apply_log_settings(opts);      // --set <channel>.log=<level> -> livehd::log (developer logging)
   apply_lhd_settings(opts);      // --set lhd.seed / lhd.top -> the shared kernel Options fields
 

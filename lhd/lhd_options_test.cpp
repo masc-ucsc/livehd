@@ -550,3 +550,44 @@ TEST(LhdOptions, WarpspaceStagesAreIndependentAndOptIn) {
     EXPECT_EQ(found->default_value, "false");
   }
 }
+
+// 3g-partitions: the old grid/region/bin spellings stay accepted, rewrite to
+// the canonical names before anything reads them, and stay out of the listing.
+TEST(LhdOptions, DeprecatedPartitionSpellingsCanonicalize) {
+  const auto listed = lhd::list_set_options();
+  const auto in     = [&](const std::string& name) {
+    return std::any_of(listed.begin(), listed.end(), [&](const auto& option) { return option.name == name; });
+  };
+  lhd::Options opts;
+  opts.command = "synth";
+  for (const auto& r : lhd::kSynthSetRenames) {
+    SCOPED_TRACE(std::string(r.old_name));
+    EXPECT_FALSE(in("synth." + std::string(r.old_name)));
+    EXPECT_TRUE(in("synth." + std::string(r.new_name)));
+    const auto spec = std::find_if(std::begin(lhd::kSynthSetOptions), std::end(lhd::kSynthSetOptions),
+                                   [&](const auto& o) { return o.name == r.old_name; });
+    ASSERT_NE(spec, std::end(lhd::kSynthSetOptions));
+    EXPECT_TRUE(std::string_view{spec->help}.starts_with("DEPRECATED"));
+    const bool boolean = spec->kind == lhd::Synth_set_option::Kind::boolean;
+    opts.sets.emplace_back("synth." + std::string(r.old_name), boolean ? "true" : "7");
+  }
+  EXPECT_NO_THROW(lhd::check_known_set_passes(opts));
+  lhd::canonicalize_synth_sets(opts);
+  const auto value = [&](std::string_view key) {
+    std::vector<std::string> values;
+    for (const auto& [k, v] : opts.sets) {
+      if (k == key) {
+        values.push_back(v);
+      }
+    }
+    return values;
+  };
+  EXPECT_EQ(value("synth.place.grid.density"), std::vector<std::string>{"7"});
+  EXPECT_EQ(value("synth.place.region.max_cells"), std::vector<std::string>{"7"});
+  EXPECT_EQ(value("synth.place.satlegalize.bin.grid"), std::vector<std::string>{"route"});
+  EXPECT_TRUE(value("synth.place.bins").empty());
+  // Combinable booleans are read by the placement driver, not rewritten.
+  EXPECT_EQ(value("synth.place.dynamic_bins"), std::vector<std::string>{"true"});
+  EXPECT_EQ(value("synth.place.auto_bins"), std::vector<std::string>{"true"});
+  EXPECT_NO_THROW(lhd::check_known_set_passes(opts));
+}

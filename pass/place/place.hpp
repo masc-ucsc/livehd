@@ -201,6 +201,8 @@ struct Options {
   double      virtual_filler_fraction   = .25;
   double      virtual_filler_cell_scale = 1, virtual_filler_bin_fraction = .25;
   int         bin_max = 512, local_density_bins = 512;
+  int         route_bins    = 0;  // grid.route: 0 inherits the configured density count (also in dynamic mode)
+  int         legalize_bins = 0;  // legalize.bin.grid: 0 uses the routing grid
   double      local_density_weight = 0, local_density_range = 4, local_density_jitter = .01;
   double      local_density_target      = -1;  // -1 inherits the global density target
   double      macro_cell_density_weight = 0;   // standard-cell pressure on macros during macro GP only

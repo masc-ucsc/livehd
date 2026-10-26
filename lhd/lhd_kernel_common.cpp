@@ -1261,6 +1261,9 @@ void check_known_set_passes(const Options& opts) {
       if (opt == nullptr) {
         std::string known;
         for (const auto& s : kSynthSetOptions) {
+          if (std::string_view{s.help}.starts_with("DEPRECATED")) {
+            continue;
+          }
           known += known.empty() ? "" : ", ";
           known += s.name;
         }
@@ -1703,6 +1706,32 @@ void apply_log_settings(const Options& opts) {
 
 // Fold the `lhd.*` kernel namespace (shared, cross-pass settings) into Options.
 // `lhd.seed` is the one RNG seed shared by every pass that wants determinism;
+void canonicalize_synth_sets(Options& opts) {
+  for (auto& [key, value] : opts.sets) {
+    if (!key.starts_with("synth.")) {
+      continue;
+    }
+    const auto flag = std::string_view{key}.substr(6);
+    for (const auto& r : kSynthSetRenames) {
+      if (r.old_name != flag) {
+        continue;
+      }
+      const bool on = !value.empty() && value != "false" && value != "0" && value != "off";
+      livehd::diag::warn("lhd", "deprecated-option", "io")
+          .msg("synth.{} is deprecated", r.old_name)
+          .hint(std::format("use --set synth.{}={}", r.new_name, r.true_value.empty() ? value : on ? r.true_value : r.false_value))
+          .emit();
+      if (r.rewrite) {
+        if (!r.true_value.empty()) {
+          value = std::string{on ? r.true_value : r.false_value};
+        }
+        key = std::format("synth.{}", r.new_name);
+      }
+      break;
+    }
+  }
+}
+
 // `lhd.top` is an alias for the `--top` flag (the dedicated flag wins when both
 // are given). Validated by check_known_set_passes; the keys stay in opts.sets
 // (so they still hash into run_id) and merge_sets never copies them into a

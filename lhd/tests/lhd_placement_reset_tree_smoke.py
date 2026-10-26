@@ -29,7 +29,7 @@ sdc.write_text('create_clock -name clk -period 10 [get_ports clk]\n'
                'set_output_delay -clock clk 0 [all_outputs]\n')
 base = ['lhd/lhd', 'synth', str(source), '--top', 'dut', '--set', f'synth.liberty={root}/arst.lib',
         '--set', f'synth.lef={libdir}/sky130hd.tlef,{root}/arst.lef', '--set', f'synth.sdc={sdc}', '--set', 'synth.place=true',
-        '--set', 'synth.place.iterations=80', '--set', 'synth.place.bins=8', '--set', 'synth.place.timing_driven=false',
+        '--set', 'synth.place.iterations=80', '--set', 'synth.place.grid.density=8', '--set', 'synth.place.timing_driven=false',
         '--set', f'synth.mapper={os.environ.get("MAPPER", "abc")}', '-q']
 
 

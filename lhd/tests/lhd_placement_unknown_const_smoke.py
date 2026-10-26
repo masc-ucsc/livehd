@@ -26,7 +26,7 @@ base = ['lhd/lhd', 'synth', f'lg:{root}/lg', '--top', 'dut',
         '--set', f'synth.liberty={libdir}/sky130hd.lib',
         '--set', f'synth.lef={libdir}/sky130hd.tlef,{libdir}/sky130hd.lef',
         '--set', f'synth.sdc={sdc}', '--set', 'synth.place=true', '--set', 'synth.place.iterations=80',
-        '--set', 'synth.place.bins=8', '--set', 'synth.place.timing_driven=false', '-q']
+        '--set', 'synth.place.grid.density=8', '--set', 'synth.place.timing_driven=false', '-q']
 
 
 def run(name, extra):

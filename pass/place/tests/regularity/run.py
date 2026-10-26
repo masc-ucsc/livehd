@@ -50,7 +50,7 @@ def run(case, args, output):
         'synth.place.fp.minimum': 100, 'synth.place.fp.colors': 'true', 'synth.place.snapshots': 'true',
         'pass.abc.flow': 'strash; &get -n; &nf; &put',
         'synth.place.iterations': args.iterations, 'synth.place.fp.iterations': args.iterations,
-        'synth.place.final.iterations': args.iterations, 'synth.place.bins': 16,
+        'synth.place.final.iterations': args.iterations, 'synth.place.grid.density': 16,
         'lhd.incremental': 'false', 'lhd.jobs': 1,
     }
     settings.update({entry.split('=', 1)[0]: entry.split('=', 1)[1] for entry in args.set})

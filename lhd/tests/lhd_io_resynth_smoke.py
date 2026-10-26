@@ -17,7 +17,7 @@ sdc.write_text('create_clock -name virtual -period 10\n'
 base = ['lhd/lhd', 'synth', str(source), '--top', 'dut', '-q',
         '--set', f'synth.liberty={data}/sky130hd.lib',
         '--set', f'synth.sdc={sdc}', '--set', 'synth.place=true',
-        '--set', 'synth.place.iterations=20', '--set', 'synth.place.bins=8',
+        '--set', 'synth.place.iterations=20', '--set', 'synth.place.grid.density=8',
         '--set', 'synth.place.timing_driven=false', '--set', 'synth.place.resize=false',
         '--set', 'synth.place.macro.align_weight=0', '--set', 'synth.place.halo=0']
 

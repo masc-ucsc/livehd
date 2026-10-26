@@ -414,6 +414,9 @@ bool              mapper_maps_cells(const Options& opts, std::string_view method
 // coloring's own (`pass.color.synth.*`) both feed the one pass.color method.
 void              merge_color_sets(const Options& opts, Eprp_var::Eprp_dict& labels);
 void              check_known_set_passes(const Options& opts);
+// Rewrite deprecated synth.* spellings (kSynthSetRenames) to their canonical
+// names, with one `deprecated-option` warning each. Runs after validation.
+void              canonicalize_synth_sets(Options& opts);
 // The `synth.*` command namespace, readable from any command: `synth.liberty`
 // is THE one Liberty spelling (`lhd synth`, `lhd pass abc`, `lhd pass
 // opentimer` all resolve through resolve_liberty), so no two Liberty readers

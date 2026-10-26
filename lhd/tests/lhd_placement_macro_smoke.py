@@ -45,7 +45,7 @@ module top(input clk,we,input [2:0] a,input [4:0] d,output [4:0] q);
  bank u1(.clk(clk),.we(we),.a(a),.d(mid),.q(q));
 endmodule
 """)
-base=['lhd/lhd','synth',str(source),'--top','top','--workdir',str(root/'W'),'--set',f'synth.liberty={library}','--set',f'synth.lef={data}/sky130hd.tlef,{data}/sky130hd.lef,{lef}','--set','synth.opentimer=false','--set','synth.place.timing_driven=false','--set','compile.specialize_modules=true','--set','synth.place=true','--set','synth.place.macro=h2d','--set','synth.place.utilization=0.1','--set','synth.place.density=0.5','--set','synth.place.halo=0.5','--set','synth.place.iterations=10','--set','synth.place.bins=8','--set','synth.place.macro.K=2','--set','synth.place.macro.iters_per_outer=5','--set','synth.place.macro.evals=4','--set','synth.place.macro.seed_sa_evals=4','-q']
+base=['lhd/lhd','synth',str(source),'--top','top','--workdir',str(root/'W'),'--set',f'synth.liberty={library}','--set',f'synth.lef={data}/sky130hd.tlef,{data}/sky130hd.lef,{lef}','--set','synth.opentimer=false','--set','synth.place.timing_driven=false','--set','compile.specialize_modules=true','--set','synth.place=true','--set','synth.place.macro=h2d','--set','synth.place.utilization=0.1','--set','synth.place.density=0.5','--set','synth.place.halo=0.5','--set','synth.place.iterations=10','--set','synth.place.grid.density=8','--set','synth.place.macro.K=2','--set','synth.place.macro.iters_per_outer=5','--set','synth.place.macro.evals=4','--set','synth.place.macro.seed_sa_evals=4','-q']
 # H2D and the older isolated-stage checks pin the old plain controls.
 base += [x for key,value in {'fp':'false','fp.pin_adjust':'false','macro.pin_adjust':'false','final':'false','macro.snap':'false','macro.align_weight':'0','scale_macro_density':'false','exact_macro_density':'false','adaptive_density':'false','routability':'false','macro_overlap':'0','macro_jitter':'0','schedule_iterations':'0','io_iterations':'0'}.items() for x in ['--set','synth.place.'+key+'='+value]]
 def run(name,extra=(),success=True):
@@ -131,7 +131,7 @@ module top(input clk,we,input [2:0] a,input [4:0] d,output [9:0] q);
  bank u1(.clk(clk),.we(we),.a(a),.d(d),.q(q[9:5]));
 endmodule
 """)
-common=['--set','synth.place.fp.iterations=20','--set','synth.place.fp.minimum=1000','--set','synth.place.fp.min_copies=2','--set','lhd.incremental=false','--set','synth.place.iterations=20','--set','synth.place.bins=32','--set','synth.place.io_iterations=10','--set','synth.place.snapshots=true']
+common=['--set','synth.place.fp.iterations=20','--set','synth.place.fp.minimum=1000','--set','synth.place.fp.min_copies=2','--set','lhd.incremental=false','--set','synth.place.iterations=20','--set','synth.place.grid.density=32','--set','synth.place.io_iterations=10','--set','synth.place.snapshots=true']
 run('centroid_baseline',common+['--set','synth.place.macro=none'])
 baseline_frame=json.loads((root/'W/synth/place/gp.json').read_text())
 # Floorplan GP and snap are independent of the legacy macro experiment mode.

@@ -25,7 +25,7 @@ base = ['lhd/lhd', 'synth', str(source), '--top', 'ram', '--workdir', str(root/'
         '--set', f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef',
         '--set', f'synth.sdc={sdc}', '--set', 'synth.memory=macro',
         '--set', 'synth.place=true', '--set', 'synth.place.iterations=30',
-        '--set', 'synth.place.bins=8', '--emit-dir', f'def:{root}/physical', '-q']
+        '--set', 'synth.place.grid.density=8', '--emit-dir', f'def:{root}/physical', '-q']
 def synth(name, extra=()):
     report = root / f'{name}.json'
     # geometric/cache control by default; the timed leg opts in

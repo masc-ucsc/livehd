@@ -19,7 +19,7 @@ base = ['lhd/lhd', 'synth', str(source), '--top', 'dut',
         '--set', f'synth.liberty={lib}/sky130hd.lib',
         '--set', f'synth.lef={lib}/sky130hd.tlef,{lib}/sky130hd.lef',
         '--set', f'synth.sdc={sdc}',
-        '--set', 'synth.place.bins=8', '--set', 'synth.place.timing_rounds=1', '-q']
+        '--set', 'synth.place.grid.density=8', '--set', 'synth.place.timing_rounds=1', '-q']
 
 def run(name, extra, success=True, expect=None, iterations=30):
     report = root / (name + '.json')

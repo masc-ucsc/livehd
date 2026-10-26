@@ -80,7 +80,7 @@ def main():
                 'synth.place.macro.legalize_cells': 'false', 'synth.place.macro.detailed': 'false',
                 'synth.place.final.independent_timing': 'true',
                 'synth.place.iterations': args.iterations, 'synth.place.final.iterations': args.iterations,
-                'synth.place.bins': 16, 'lhd.incremental': 'true', 'lhd.jobs': 1,
+                'synth.place.grid.density': 16, 'lhd.incremental': 'true', 'lhd.jobs': 1,
                 'pass.abc.flow': 'strash; &get -n; &nf; &put',
             }
             command = [args.lhd, 'synth', rtl, f'lg:{macro_lg}', '--top', case['name'] + '.top', '--seed', '1',

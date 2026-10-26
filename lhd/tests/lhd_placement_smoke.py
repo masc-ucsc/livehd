@@ -19,7 +19,7 @@ base = ['lhd/lhd', 'synth', str(source), '--top', 'dut',
         '--set', f'synth.liberty={libdir}/sky130hd.lib',
         '--set', f'synth.lef={libdir}/sky130hd.tlef,{libdir}/sky130hd.lef',
         '--set', f'synth.sdc={sdc}', '--set', 'synth.place.iterations=80',
-        '--set', 'synth.place.bins=8', '--set', f'synth.mapper={os.environ.get("MAPPER", "abc")}', '--workdir', str(root/'W'), '-q']
+        '--set', 'synth.place.grid.density=8', '--set', f'synth.mapper={os.environ.get("MAPPER", "abc")}', '--workdir', str(root/'W'), '-q']
 
 def run(name, extra, success=True):
     result = root / f'{name}.json'
@@ -135,7 +135,7 @@ sat_region_options = ['--set', 'synth.place=true', '--set', 'synth.place.timing_
                       '--set', 'synth.place.satlegalize.max_cells=65536',
                       '--set', 'synth.place.satlegalize.max_pairs_per_window=2',
                       '--set', 'synth.place.satlegalize.check_packing=true',
-                      '--set', 'synth.place.satlegalize.region_size=40,40',
+                      '--set', 'synth.place.satlegalize.bin.size_um=40,40',
                       '--set', 'synth.place.satlegalize.spill_neighbors=true',
                       '--set', 'synth.place.satlegalize.spill_slack_margin_ps=20']
 sat_regions = run('sat_fixed_regions', sat_region_options)
@@ -150,13 +150,13 @@ assert sat_regions['qor']['place']['satlegalize']['check_packing'], sat_regions
 if os.environ.get('MAPPER', 'abc') == 'abc':
     sat_regions_warm = run('sat_fixed_regions_warm', sat_region_options)
     assert sat_regions_warm['qor']['place']['reused_final_state'], sat_regions_warm
-    sat_regions_changed = run('sat_fixed_regions_changed', [v.replace('region_size=40,40', 'region_size=40,20')
+    sat_regions_changed = run('sat_fixed_regions_changed', [v.replace('bin.size_um=40,40', 'bin.size_um=40,20')
                                                            for v in sat_region_options])
     assert not sat_regions_changed['qor']['place'].get('reused_final_state', False), sat_regions_changed
 # The shared RSMT map is exported even for the no-SAT matched control.
 route_grid_options = ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=true',
                       '--set', 'synth.place.route.model=rsmt',
-                      '--set', 'synth.place.satlegalize.route_grid=true',
+                      '--set', 'synth.place.satlegalize.bin.grid=route',
                       '--set', 'synth.place.satlegalize.route_peak_floor=1',
                       '--set', 'synth.place.satlegalize.max_moved_cells=8',
                       '--set', 'synth.place.satlegalize.max_cells=65536',
@@ -173,10 +173,10 @@ assert route_guided['qor']['place']['satlegalize']['fixed_regions']['routing_gri
 assert route_guided['qor']['place']['satlegalize']['route_peak_floor'] == 1, route_guided
 assert route_guided['qor']['place']['satlegalize']['max_moved_cells'] == 8, route_guided
 run('bad_route_grid_model', ['--set', 'synth.place=true', '--set', 'synth.place.route.model=rudy',
-                             '--set', 'synth.place.satlegalize.route_grid=true'], False)
-run('bad_route_grid_region', route_grid_options + ['--set', 'synth.place.satlegalize.region_size=40'], False)
+                             '--set', 'synth.place.satlegalize.bin.grid=route'], False)
+run('bad_route_grid_region', route_grid_options + ['--set', 'synth.place.satlegalize.bin.size_um=40'], False)
 
-for setting in ['region_size=0,40', 'region_size=nan,40', 'spill_slack_margin_ps=-1', 'max_cells=65537',
+for setting in ['bin.size_um=0,40', 'bin.size_um=nan,40', 'spill_slack_margin_ps=-1', 'max_cells=65537',
                 'max_pairs_per_window=1025', 'max_pairs_per_window=-1',
                 'route_peak_floor=-0.1', 'route_peak_floor=1.1', 'route_peak_floor=nan', 'max_moved_cells=129']:
     run('bad_sat_' + setting.replace('=', '_').replace(',', '_'),
