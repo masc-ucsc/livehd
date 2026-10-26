@@ -6,7 +6,10 @@ with provisional cell models. Everything here is opt-in. The logical
 selection, its artifacts and the logical region cache are unchanged: the
 logical target stays `cmos`, and this package sits outside `//pass/usyn:usyn_salt`
 so that editing it never misses a logical cache entry. `//pass/domplace:domplace_salt`
-keys its products instead.
+keys its products instead: it hashes this package, `inou/lefdef` (LEF writer,
+row access, pin access, routing rules, technology profiles), the Liberty
+timing model and `usyn_salt`, which folds in `liberty_dff` (the reference
+cell picks) through `synth_salt`.
 
 The profile is a provisional model, not characterized PPA. Areas, widths and
 timing coefficients are labeled estimates until a real cell builder replaces
