@@ -405,6 +405,46 @@ struct Two_row_chain {
   }
 };
 
+// HPWL in microns from LEF pin geometry in each component's final
+// orientation (pin shape 0's center, the point the placer reads), independent
+// of the placer's own pin offsets.
+double lef_hpwl_um(const physical::Technology& tech, const physical::Floorplan& fp) {
+  std::map<std::string, const physical::Component*> components;
+  std::map<std::string, const physical::Terminal*>  terminals;
+  for (const auto& c : fp.components) {
+    components.emplace(c.name, &c);
+  }
+  for (const auto& t : fp.terminals) {
+    terminals.emplace(t.name, &t);
+  }
+  double total = 0;
+  for (const auto& net : fp.nets) {
+    if (net.connections.size() < 2) {
+      continue;
+    }
+    double xl = INFINITY, yl = INFINITY, xh = -INFINITY, yh = -INFINITY;
+    for (const auto& [instance, pin] : net.connections) {
+      double x = 0, y = 0;
+      if (instance == "PIN") {
+        x = terminals.at(pin)->x;
+        y = terminals.at(pin)->y;
+      } else {
+        const auto& c       = *components.at(instance);
+        const auto& m       = tech.macros.at(c.macro);
+        const auto [ox, oy] = physical::oriented_center(m, m.pins.at(pin).shapes.front().rect, c.place.orientation);
+        x                   = c.place.x + ox * tech.dbu;
+        y                   = c.place.y + oy * tech.dbu;
+      }
+      xl = std::min(xl, x);
+      xh = std::max(xh, x);
+      yl = std::min(yl, y);
+      yh = std::max(yh, y);
+    }
+    total += xh - xl + yh - yl;
+  }
+  return total / tech.dbu;
+}
+
 TEST(Placement, TwoRowCellsAreAnchoredBeforeTerminalLegalization) {
   // Movable two-row CORE cells (domino abstracts) go through the anchor
   // prepass, the unchanged terminal legalizer and release; the other final
@@ -439,6 +479,33 @@ TEST(Placement, TwoRowCellsAreAnchoredBeforeTerminalLegalization) {
   EXPECT_EQ(qor["multirow"]["cells"].GetUint64(), 3U);
   EXPECT_EQ(qor["multirow"]["even_starts"].GetUint64() + qor["multirow"]["odd_starts"].GetUint64(), 3U);
   EXPECT_STREQ(qor["multirow"]["row_access"].GetString(), "stand-in");
+  EXPECT_NEAR(lef_hpwl_um(all, result.floorplan), qor["hpwl_um"].GetDouble(), 1e-6);
+
+  // An odd start: reseed the two-row cells on core row 1. With zero GP
+  // iterations the seed reaches the anchor prepass, which keeps them there in
+  // the row's FS orientation; their pins follow the flip.
+  const auto bottom
+      = std::min_element(result.floorplan.rows.begin(), result.floorplan.rows.end(), [](const auto& a, const auto& b) {
+          return a.y < b.y;
+        })->y;
+  auto seed = result.floorplan;
+  for (auto& c : seed.components) {
+    if (c.macro == kDominoTwoRow) {
+      c.place.y = bottom + rh;
+    }
+  }
+  auto odd_options          = options;
+  odd_options.restart_seed  = std::make_shared<const physical::Floorplan>(seed);
+  odd_options.output_dir   += "/odd";
+  const auto odd            = place(*chain.graph, chain.flat, odd_options);
+  EXPECT_NO_THROW(check_legality(all, odd.floorplan));
+  rapidjson::Document odd_qor;
+  odd_qor.Parse(odd.qor.c_str());
+  EXPECT_GE(odd_qor["multirow"]["odd_starts"].GetUint64(), 1U);
+  EXPECT_TRUE(std::any_of(odd.floorplan.components.begin(), odd.floorplan.components.end(), [](const auto& c) {
+    return c.macro == kDominoTwoRow && c.place.orientation == physical::Orientation::FS;
+  }));
+  EXPECT_NEAR(lef_hpwl_um(all, odd.floorplan), odd_qor["hpwl_um"].GetDouble(), 1e-6);
   // Every single-row path refuses them by name, each with its own reason.
   const auto previous = std::make_shared<const physical::Floorplan>(result.floorplan);
   const auto h2d      = [](Options& o) {
