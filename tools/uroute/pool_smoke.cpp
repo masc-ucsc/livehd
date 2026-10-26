@@ -31,7 +31,7 @@ int main(int argc, char** argv) {
       return 0;
     }
     if (argc != 9) {
-      throw std::invalid_argument("usage: pool_smoke query.bin directory top tech shots min_shots fallback");
+      throw std::invalid_argument("usage: pool_smoke query.bin directory top tech shots min_shots fallback macro_signature");
     }
     up::Uroute_options o;
     o.dir       = argv[2];

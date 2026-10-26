@@ -76,8 +76,10 @@ def export_odb(source, executable, output, *, routed=True, overflow=False, timeo
     with log.open('wb') as stream:
         result = subprocess.run([str(executable), '-no_init', '-exit', '-threads', '1', str(Path(__file__).with_name('odb.tcl').resolve())],
                                 env=environment, stdout=stream, stderr=subprocess.STDOUT, timeout=timeout)
-    if result.returncode != 0 or not definition.is_file() or 'UROUTE_ODB_EXPORT_OK' not in log.read_text():
-        detail = '\n'.join(log.read_text(errors='replace').splitlines()[-16:])
+    # Tool logs are not guaranteed UTF-8; a stray byte must not fail a good run.
+    text = log.read_text(errors='replace')
+    if result.returncode != 0 or not definition.is_file() or 'UROUTE_ODB_EXPORT_OK' not in text:
+        detail = '\n'.join(text.splitlines()[-16:])
         raise ValueError(f'OpenROAD ODB export failed: {detail}')
     metadata = {'source_odb': source.name, 'source_odb_sha256': file_sha(source),
                 'openroad_binary_sha256': file_sha(executable), 'adapter_version': 1,
