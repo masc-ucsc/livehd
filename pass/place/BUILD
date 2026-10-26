@@ -381,6 +381,8 @@ filegroup(
         "capacity_bins.hpp",
         "row_occupancy.cpp",
         "row_occupancy.hpp",
+        "multirow.cpp",
+        "multirow.hpp",
         "cell_criticality.cpp",
         "cell_criticality.hpp",
         "cell_jump.cpp",
@@ -554,6 +556,22 @@ cc_test(
     srcs = ["row_occupancy_test.cpp"],
     copts = COPTS,
     deps = [":row_occupancy", "@googletest//:gtest_main"],
+)
+
+cc_library(
+    name = "multirow",
+    srcs = ["multirow.cpp"],
+    hdrs = ["multirow.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = [":capacity_bins", ":require", ":row_occupancy", "//inou/lefdef:inou_lefdef"],
+)
+cc_test(
+    name = "multirow_test",
+    size = "small",
+    srcs = ["multirow_test.cpp"],
+    copts = COPTS,
+    deps = [":multirow", ":place", ":terminal_legalize", "@googletest//:gtest_main"],
 )
 
 cc_library(
