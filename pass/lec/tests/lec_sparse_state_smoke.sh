@@ -96,6 +96,54 @@ sed 's/<= d\[3\]/<= ~d[3]/' "$WORK/renamed_good.v" > "$WORK/renamed_bad.v"
 check renamed renamed_ref renamed_good auto proven-full
 check renamed_transition renamed_ref renamed_bad auto refuted-cex
 check renamed_initialization init_ref renamed_good auto refuted-cex
+# A register narrowed because its upper bits only ever hold zero (synth.state_sweep
+# narrows a register whose D is a zero-extended narrow value) keeps fewer bit cells
+# than the reference, which still READS those bits. LEC holds them at zero and
+# rechecks that every step; a removed bit that is not constant must still refute.
+cat > "$WORK/narrow_ref.v" <<'VERILOG'
+module dut(input clk, input rst, input [3:0] d, input [7:0] x, output [7:0] y);
+  reg [7:0] imm;
+  always @(posedge clk) if (rst) imm <= 0; else imm <= {4'b0000, d};
+  assign y = imm + x;
+endmodule
+VERILOG
+cat > "$WORK/narrow_good.v" <<'VERILOG'
+module dut(input clk, input rst, input [3:0] d, input [7:0] x, output [7:0] y);
+  reg \imm[0].flop_16 , \imm[1].flop_16 , \imm[2].flop_16 , \imm[3].flop_16 ;
+  always @(posedge clk) begin
+    \imm[0].flop_16 <= rst ? 1'b0 : d[0];
+    \imm[1].flop_16 <= rst ? 1'b0 : d[1];
+    \imm[2].flop_16 <= rst ? 1'b0 : d[2];
+    \imm[3].flop_16 <= rst ? 1'b0 : d[3];
+  end
+  assign y = {4'b0000, \imm[3].flop_16 , \imm[2].flop_16 , \imm[1].flop_16 , \imm[0].flop_16 } + x;
+endmodule
+VERILOG
+sed "s/{4'b0000, d}/{d, d}/" "$WORK/narrow_ref.v" > "$WORK/narrow_bad_ref.v"
+sed "s/{4'b0000, d}/{d[0], 3'b000, d}/" "$WORK/narrow_ref.v" > "$WORK/narrow_bad1_ref.v"
+check narrow narrow_ref narrow_good ind proven-full
+check narrow_auto narrow_ref narrow_good auto proven-full
+check narrow_bug narrow_bad_ref narrow_good ind refuted-unchecked
+check narrow_bug_auto narrow_bad_ref narrow_good auto refuted-cex
+check narrow_bug1_auto narrow_bad1_ref narrow_good auto refuted-cex
+# Reset-less: an init-less reference starts at the zero the implementation reads,
+# but a reference power-on value that sets a removed bit has no such base.
+sed 's/ if (rst) imm <= 0; else imm/ imm/' "$WORK/narrow_ref.v" > "$WORK/narrow_nr_ref.v"
+sed "s/rst ? 1'b0 : //" "$WORK/narrow_good.v" > "$WORK/narrow_nr_good.v"
+sed "/reg \[7:0\] imm;/a\\
+  initial imm = 8'h80;" "$WORK/narrow_nr_ref.v" > "$WORK/narrow_init_ref.v"
+check narrow_noreset narrow_nr_ref narrow_nr_good ind proven-full
+check narrow_init narrow_init_ref narrow_nr_good ind refuted-unchecked
+check narrow_init_auto narrow_init_ref narrow_nr_good auto refuted-cex
+# Removed bits nothing reads stay arbitrary next to removed bits held at zero.
+cat > "$WORK/narrow_mixed_ref.v" <<'VERILOG'
+module dut(input clk, input [3:0] d, input [7:0] x, output [7:0] y);
+  reg [9:0] imm;
+  always @(posedge clk) imm <= {d[1:0], 4'b0000, d};
+  assign y = imm[7:0] + x;
+endmodule
+VERILOG
+check narrow_mixed narrow_mixed_ref narrow_nr_good ind proven-full
 # Raw cell-model read-back adds a model state segment to each memory bit.
 # Both semdiff and the LEC encoder must recover the same total bank relation.
 cat > "$WORK/memory_ref.v" <<'VERILOG'

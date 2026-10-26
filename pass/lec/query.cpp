@@ -7753,6 +7753,11 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   Io_name_map<int>         ind_side[2];
   Io_name_map<std::string> ind_raw[2];  // key -> hierarchical name (see fw_raw)
   int                      ind_side_ix = 0;
+  // Reference flops whose `initial` (reset or power-on value) may set a bit:
+  // key -> the positions that may be 1 (every position for a non-constant
+  // value). A removed bit of a sparse bit-blast group is tied to zero only
+  // where this leaves it zero (see the narrowed-state step after encoding).
+  absl::flat_hash_map<std::string, std::vector<bool>> ind_ref_init_ones;
   // Input bundles FIRST: one flat symbol per base; the leaves are bound to its
   // extracts, so both sides range over the SAME input space (no extra freedom,
   // no lost bits). add_inputs below keeps any name already present at an
@@ -7867,6 +7872,18 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         ind_side[ind_side_ix][key] = w;  // min-wins, exactly like `shared` below
       }
       ind_raw[ind_side_ix].try_emplace(key, node.get_hier_name());
+      if (ind_side_ix == 0) {
+        if (auto init = graph_util::get_driver_of_sink_name(node, "initial"); !init.is_invalid()) {
+          auto& ones = ind_ref_init_ones[key];
+          ones.assign(static_cast<size_t>(std::max(w, gu::real_width(q))), true);
+          if (init.is_const()) {
+            const auto& c = graph_util::const_of(init);
+            for (size_t i = 0; i < ones.size(); ++i) {
+              ones[i] = c.bit_test(static_cast<int>(i)) && !c.unknown_bit_test(static_cast<int>(i));
+            }
+          }
+        }
+      }
       if (auto it = shared.find(key); it != shared.end() && it->second.width <= w) {
         continue;
       }
@@ -7891,6 +7908,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // which is exactly the "inconclusive in milliseconds" post-synthesis LEC. Bind
   // the impl's bit i to bit i of the ref's one symbol.
   absl::flat_hash_map<std::string, std::vector<std::string>> ind_bitblast;  // ref key -> impl bit keys, LSB first
+  absl::flat_hash_set<std::string> ind_sparse_bits;  // bus-group keys of `ind_bitblast` with removed (empty) bits
   const auto ind_bus_groups = bus_bit_groups(ind_side[1], ind_side[0], ind_raw[1], /*allow_sparse=*/true);
   for (const auto& [key, w] : ind_side[0]) {
     if (w < 1 || ind_side[1].count(key) != 0) {
@@ -7931,6 +7949,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         t = parent.is_signed ? tm.mkTerm(sign_op, {parent.term}) : tm.mkBitVector(1, 0);
       }
       shared[bits[i]] = Val{t, 1, false};
+    }
+    if (std::any_of(bits.begin(), bits.end(), [](const std::string& b) { return b.empty(); })) {
+      ind_sparse_bits.insert(key);
     }
     ind_bitblast.emplace(key, bits);
   }
@@ -8536,9 +8557,14 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // nullopt unless every bit is present at the width its shared symbol has.
   // `impl_next(key)` returns the impl's next state for `key`, or nullptr.
   // Empty slots use the reference next-state bit on both sides, so eliminated
-  // bits are never constrained by the correspondence hypothesis or its step.
-  auto concat_bit_next
-      = [&](const std::vector<std::string>& bits, const auto& impl_next, const Val& reference) -> std::optional<Val> {
+  // bits are never constrained by the correspondence hypothesis or its step --
+  // except the slots `zero_holes` marks: the hypothesis held those reference
+  // bits at zero, so the implementation's side of the compare is a zero and
+  // the step re-proves that the reference keeps them zero.
+  auto concat_bit_next = [&](const std::vector<std::string>& bits,
+                             const auto&                     impl_next,
+                             const Val&                      reference,
+                             const std::vector<bool>*        zero_holes = nullptr) -> std::optional<Val> {
     std::vector<cvc5::Term> bt;
     int                     total_width = 0;
     for (size_t i = bits.size(); i-- > 0;) {
@@ -8547,7 +8573,11 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           return std::nullopt;
         }
         const auto b = static_cast<uint32_t>(i);
-        bt.push_back(tm.mkTerm(tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {b, b}), {reference.term}));
+        if (zero_holes != nullptr && i < zero_holes->size() && (*zero_holes)[i]) {
+          bt.push_back(tm.mkBitVector(1, 0));
+        } else {
+          bt.push_back(tm.mkTerm(tm.mkOp(cvc5::Kind::BITVECTOR_EXTRACT, {b, b}), {reference.term}));
+        }
         ++total_width;
         continue;
       }
@@ -9164,6 +9194,82 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     return res;
   }
 
+  // ── Narrowed state: removed bits the reference still reads ───────────────
+  // A sparse bit-blast group leaves the reference bits the implementation has
+  // no cell for arbitrary: right for a bit nothing reads (the state sweep
+  // dropped it as unobserved), wrong for a bit the reference DOES read but the
+  // implementation dropped because it can only ever hold zero (the sweep
+  // narrows a register whose D is a zero-extended narrow value, and the
+  // readers then see a zero there). Left arbitrary, the reference reads a
+  // value the implementation can never produce and the step fails from an
+  // unreachable state (minimax: `aluA_imm[31:10]` -> a spurious `nxt:addr`).
+  // So hold every removed bit the reference's own obligations demand at zero:
+  // the hypothesis becomes `ref[kept] == impl bits && ref[held] == 0`, and the
+  // step compares the reference's next state of each held bit against zero,
+  // so a removed bit that is not constant (a real narrowing bug) refutes the
+  // step instead of being assumed. A reference initial value that may set a
+  // held bit has no such base, so that bit stays arbitrary.
+  absl::flat_hash_map<std::string, std::vector<bool>> ind_zero_holes;  // ref key -> removed bits held at zero
+  Io_name_map<Val>                                    zero_hole_shared;
+  if (!ind_sparse_bits.empty()) {
+    std::vector<std::string> keys(ind_sparse_bits.begin(), ind_sparse_bits.end());
+    std::sort(keys.begin(), keys.end());
+    const auto demand = state_bit_demand(re, keys);
+    int        held   = 0;
+    for (const auto& key : keys) {
+      auto dit = demand.find(key);
+      auto sit = shared.find(key);
+      if (dit == demand.end() || sit == shared.end()) {
+        continue;
+      }
+      const auto&       bits = ind_bitblast.at(key);
+      const auto        iit  = ind_ref_init_ones.find(key);
+      std::vector<bool> holes(bits.size(), false);
+      bool              any = false;
+      for (size_t i = 0; i < bits.size() && static_cast<int>(i) < sit->second.width; ++i) {
+        if (!bits[i].empty() || !dit->second.test(static_cast<int>(i))) {
+          continue;
+        }
+        if (iit != ind_ref_init_ones.end() && (i >= iit->second.size() || iit->second[i])) {
+          continue;
+        }
+        holes[i] = true;
+        any      = true;
+        ++held;
+      }
+      if (any) {
+        ind_zero_holes.emplace(key, std::move(holes));
+      }
+    }
+    if (!ind_zero_holes.empty()) {
+      zero_hole_shared = *ind_shared[0];
+      for (const auto& [key, holes] : ind_zero_holes) {
+        auto&       v = zero_hole_shared.at(key);
+        std::string mask(static_cast<size_t>(v.width), '1');  // MSB first
+        for (size_t i = 0; i < holes.size(); ++i) {
+          if (holes[i]) {
+            mask[static_cast<size_t>(v.width) - 1 - i] = '0';
+          }
+        }
+        v.term = tm.mkTerm(cvc5::Kind::BITVECTOR_AND, {v.term, tm.mkBitVector(static_cast<uint32_t>(v.width), mask, 2)});
+      }
+      enc.set_x_dontcare(opts.gold_x != "zero");
+      enc.set_box_keys(&ref_box_keys);
+      enc.set_mem_keys(&ref_mem_cut_keys);
+      enc.set_phase_plan(ind_ref_plan.needs_plan() ? &ind_ref_plan : nullptr, -1);
+      Encoded re2 = enc.encode(ref, &zero_hole_shared, "", &shared_mems);
+      enc.set_x_dontcare(false);
+      if (re2.ok) {
+        re             = std::move(re2);
+        ind_shared[0]  = &zero_hole_shared;
+        res.detail    += "; narrowed state: " + std::to_string(held) + " removed bit(s) of " + std::to_string(ind_zero_holes.size())
+                      + " register(s) the reference reads held at zero (rechecked each step)";
+      } else {
+        ind_zero_holes.clear();
+      }
+    }
+  }
+
   // ── Observability (bit-level cone-of-influence) of the flop cuts ─────────
   // A cut bit that reaches no compared obligation -- not a primary output, a
   // box input, a property or a memory port, directly or through other
@@ -9422,19 +9528,22 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // Recheck the state relation on every retained bit. Holes use the reference
   // next-state bit on both sides of this obligation, imposing no equality on
   // eliminated state. Outputs still read the entire arbitrary reference state.
+  // A hole held at zero (narrowed state above) compares against zero instead.
   for (const auto& [pkey, bits] : ind_bitblast) {
     const std::string rkey = std::string("\x01nxt:") + pkey;
     auto              rit  = re.outputs.find(rkey);
     if (rit == re.outputs.end() || ie.outputs.contains(rkey)) {
       continue;
     }
-    auto cat = concat_bit_next(
+    const auto zit = ind_zero_holes.find(pkey);
+    auto       cat = concat_bit_next(
         bits,
         [&](const std::string& bit) -> const Val* {
           auto it = ie.outputs.find(std::string("\x01nxt:") + bit);
           return it == ie.outputs.end() ? nullptr : &it->second;
         },
-        rit->second);
+        rit->second,
+        zit == ind_zero_holes.end() ? nullptr : &zit->second);
     if (!cat || cat->width != rit->second.width) {
       continue;
     }

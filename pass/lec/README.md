@@ -204,8 +204,13 @@ existing accelerator and its differential tests.
 Mapped registers keep the source hierarchy in their bit names (`lane.state[3]`,
 or `lane.state[3].flop_16` after cell-model inlining). When mapping removes some
 bits, LEC relates only the retained bits to the corresponding slices of the
-source register. It leaves the removed source bits arbitrary, proves every
-retained next-state slice equal, and checks all outputs. Duplicate or
+source register. It leaves the removed source bits that nothing reads
+arbitrary, proves every retained next-state slice equal, and checks all
+outputs. A removed bit the reference still reads (`synth.state_sweep` narrows a
+register whose D is a zero-extended narrow value, so the implementation reads a
+zero there) is held at zero in the hypothesis, and each step proves the
+reference's next state keeps it zero: a removed bit that is not constant still
+refutes. A reference initial value that may set such a bit leaves it arbitrary. Duplicate or
 out-of-range bit names cannot form a relation. Explicit implementation initial
 values take precedence over a proposed shared initial state. `pass semdiff
 --stats` reports these projected name pairs separately; they cannot justify a
