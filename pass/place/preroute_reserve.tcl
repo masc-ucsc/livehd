@@ -1,5 +1,6 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-# Explicit ASAP7 placement reservations; sourcing only defines procedures.
+# Explicit placement reservations around fixed wires on the two lowest routing
+# layers (pin access and escape); sourcing only defines procedures.
 source [file join [file dirname [info script]] preroute_handoff.tcl]
 source [file join [file dirname [info script]] preroute_validate.tcl]
 namespace eval livehd::preroute {}
@@ -17,6 +18,13 @@ proc livehd::preroute::_merge_intervals {values} {
 proc livehd::preroute::_plan_route_space {} {
   set block [ord::get_db_block]
   set scope [_fixed_routes]
+  set tech [[ord::get_db] getTech]
+  set low_layers {}
+  foreach level {1 2} {
+    set routing_layer [$tech findRoutingLayer $level]
+    if {$routing_layer eq "NULL"} {error "fewer than two routing layers"}
+    lappend low_layers [$routing_layer getName]
+  }
   set rows {};set pitch 0
   foreach row [$block getRows] {
     if {[$row getDirection] ne "HORIZONTAL"} {error "unsupported vertical placement row"}
@@ -44,8 +52,8 @@ proc livehd::preroute::_plan_route_space {} {
     } finally {rename $item {};rename $path {};rename $iter {}}
     foreach shape $shapes {
       lassign $shape layer xl yl xh yh
-      if {$layer ni {M1 M2}} {continue}
-      set tech_layer [[[ord::get_db] getTech] findLayer $layer]
+      if {$layer ni $low_layers} {continue}
+      set tech_layer [$tech findLayer $layer]
       set margin [expr {4*[$tech_layer getWidth]}]
       set xl [expr {$xl-$margin}];set yl [expr {$yl-$margin}]
       set xh [expr {$xh+$margin}];set yh [expr {$yh+$margin}]

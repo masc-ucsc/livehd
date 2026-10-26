@@ -2955,11 +2955,12 @@ its access. A clean pre-CTS pin-access check therefore does not replace the
 post-CTS check. Downstream placement must account for immutable routing when
 moving or resizing cells.
 
-During downstream CTS or repair, an experimental ASAP7 reservation step can
+During downstream CTS or repair, an experimental reservation step can
 keep movable cells away from fixed low-layer wires without adding instance locks.
 Source `pass/place/preroute_reserve.tcl` and call
 `livehd::preroute::reserve_fixed_route_space` before that stage's next detailed
-placement. It projects fixed M1/M2 wire and via-landing geometry onto placement
+placement. It projects fixed wire and via-landing geometry on the two lowest
+routing layers (M1/M2 on ASAP7) onto placement
 rows with a four-wire-width margin, rounds outward to sites, and creates hard
 placement blockages except where existing FIRM/LOCKED bodies already occupy
 those rows. It changes neither instance statuses nor positions. Movable cells
