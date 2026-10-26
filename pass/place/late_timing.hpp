@@ -83,8 +83,16 @@ struct Pin_result {
   std::array<State, 2> transitions;
   bool                 clock = false, endpoint = false;
   std::optional<bool>  constant;
-  // The ideal clock waveform reaching a clock pin, by name.
+  // The ideal clock waveform reaching a clock pin, by name; inverted when it
+  // arrives through an inversion (its falling edge).
   std::optional<std::string> clock_name;
+  bool                       clock_inverted = false;
+  // A clock-gate enable: its setup check is the gate's (Proxy below).
+  bool                       clock_gate     = false;
+  // The smallest share of the period between a launch and this capture edge
+  // (0.5 between the two edges of one clock): the period moves its requirement
+  // by share * the change. 1 without an inverted clock.
+  double                     capture_share  = 1;
 };
 struct Feasible_timing_graph {
   struct Vertex {
@@ -166,6 +174,12 @@ struct Result {
 // lifetimes must cover the session. Geometry/RC can change between evaluations.
 // Constraints support named ideal positive-edge clocks, phase-aware related
 // edge pairs, validated same-waveform aliases and asynchronous capture cuts.
+// With named clocks the ideal clock also passes inverters (the opposite edge
+// of its waveform), integrated clock-gate cells, and recognized clock gates:
+// a cell whose other inputs are enables driven, through single-input cells,
+// by state on the same clock, masked while the clock rests at one level. Each
+// such enable gets a clock-gating setup check against the edge that leaves
+// that level (zero setup); a design without them times as before.
 // Unsupported clocks, latches, conditions or library coverage are
 // reported and cannot produce certified Fmax. RC uses charge-matched pi driver
 // and Elmore load waveforms with explicit characterized boundary approximations.

@@ -538,6 +538,100 @@ TEST(LateTiming, AnUnconnectedGateInputDoesNotMakeAClockBuffer) {
   EXPECT_FALSE(pin(result, "ff:CLK").clock);
 }
 
+const std::string gates = R"(
+  cell(AND2){pin(A){direction:input;}pin(B){direction:input;}pin(Y){direction:output;function:"A&B";
+    timing(){related_pin:A;timing_sense:positive_unate;cell_rise(scalar){values("5");}cell_fall(scalar){values("5");}
+      rise_transition(scalar){values("1");}fall_transition(scalar){values("1");}}
+    timing(){related_pin:B;timing_sense:positive_unate;cell_rise(scalar){values("5");}cell_fall(scalar){values("5");}
+      rise_transition(scalar){values("1");}fall_transition(scalar){values("1");}}}}
+  cell(ICG){clock_gating_integrated_cell:"latch_posedge";latch(IQ,IQN){enable:"!CLK";data_in:GATE;}
+    pin(CLK){direction:input;clock:true;clock_gate_clock_pin:true;}
+    pin(GATE){direction:input;clock_gate_enable_pin:true;timing(){related_pin:CLK;timing_type:setup_rising;
+      rise_constraint(scalar){values("4");}fall_constraint(scalar){values("4");}}}
+    pin(GCLK){direction:output;clock_gate_out_pin:true;state_function:"CLK&IQ";
+      timing(){related_pin:CLK;timing_sense:positive_unate;cell_rise(scalar){values("6");}cell_fall(scalar){values("6");}
+        rise_transition(scalar){values("1");}fall_transition(scalar){values("1");}}}}
+})";
+
+TEST(LateTiming, IdealClockPassesARecognizedClockGate) {
+  // A negative-edge enable flop (a flop on the inverted clock) ANDed with the
+  // clock, as a mapped behavioral clock gate: the gated register is timed, the
+  // enable storage launches on the falling edge, and the gate's enable gets a
+  // clock-gating setup check against the rising edge.
+  Circuit circuit({"clk", "en", "d"}, {"q"});
+  circuit.library = std::make_shared<nldm::Library>(nldm::parse(models.substr(0, models.rfind('}')) + gates));
+  auto inv = circuit.cell("i", "INV"), storage = circuit.cell("s", "FF"), gate = circuit.cell("g", "AND2"),
+       flop = circuit.cell("r", "FF");
+  inv.create_sink_pin("A").connect_driver(circuit.graph->get_input_pin("clk"));
+  storage.create_sink_pin("CLK").connect_driver(inv.create_driver_pin("Y"));
+  storage.create_sink_pin("D").connect_driver(circuit.graph->get_input_pin("en"));
+  gate.create_sink_pin("A").connect_driver(circuit.graph->get_input_pin("clk"));
+  gate.create_sink_pin("B").connect_driver(storage.create_driver_pin("Q"));
+  flop.create_sink_pin("CLK").connect_driver(gate.create_driver_pin("Y"));
+  flop.create_sink_pin("D").connect_driver(circuit.graph->get_input_pin("d"));
+  circuit.graph->get_output_pin("q").connect_driver(flop.create_driver_pin("Q"));
+  late::Constraints constraints;
+  constraints.clocks["main"]          = {.period_ps = 100, .roots = {"clk"}};
+  constraints.inputs["en"].arrival_ps = {10, 10};
+  constraints.inputs["en"].clock      = "main";
+  constraints.inputs["d"].arrival_ps  = {10, 10};
+  constraints.inputs["d"].clock       = "main";
+  constraints.outputs["q"]            = {
+      {100, 100},
+      {},
+      "main"
+  };
+  constraints.complete = true;
+  const auto result    = late::Proxy(*circuit.graph, circuit.library, constraints).evaluate();
+  ASSERT_TRUE(result.certified) << (result.unsupported.empty() ? "" : result.unsupported.front());
+  EXPECT_EQ(pin(result, "r:CLK").clock_name, "main");
+  EXPECT_FALSE(pin(result, "r:CLK").clock_inverted);
+  EXPECT_EQ(pin(result, "s:CLK").clock_name, "main");
+  EXPECT_TRUE(pin(result, "s:CLK").clock_inverted);
+  // The enable launches at the falling edge (50 + 10/20 clock-to-Q) and must
+  // settle before the next rising edge (100): slack 30, a half-cycle pair.
+  const auto& enable = pin(result, "g:B");
+  EXPECT_TRUE(enable.endpoint && enable.clock_gate);
+  EXPECT_EQ(enable.transitions[1].arrival_ps, 70);
+  EXPECT_EQ(enable.transitions[1].required_ps, 100);
+  // en (10) into the falling-edge storage (setup 5/8): slack 32 of 50.
+  EXPECT_EQ(pin(result, "s:D").transitions[1].required_ps, 42);
+  EXPECT_EQ(result.wns_ps, 30);
+  ASSERT_EQ(result.clocks.size(), 1);
+  EXPECT_EQ(result.achievable_period_ps, 40);  // 100 - 30 / 0.5
+}
+
+TEST(LateTiming, IdealClockPassesAnIntegratedClockGate) {
+  Circuit circuit({"clk", "en", "d"}, {"q"});
+  circuit.library = std::make_shared<nldm::Library>(nldm::parse(models.substr(0, models.rfind('}')) + gates));
+  auto icg = circuit.cell("g", "ICG"), flop = circuit.cell("r", "FF");
+  icg.create_sink_pin("CLK").connect_driver(circuit.graph->get_input_pin("clk"));
+  icg.create_sink_pin("GATE").connect_driver(circuit.graph->get_input_pin("en"));
+  flop.create_sink_pin("CLK").connect_driver(icg.create_driver_pin("GCLK"));
+  flop.create_sink_pin("D").connect_driver(circuit.graph->get_input_pin("d"));
+  circuit.graph->get_output_pin("q").connect_driver(flop.create_driver_pin("Q"));
+  late::Constraints constraints;
+  constraints.clocks["main"]          = {.period_ps = 100, .roots = {"clk"}};
+  constraints.inputs["en"].arrival_ps = {30, 30};
+  constraints.inputs["en"].clock      = "main";
+  constraints.inputs["d"].arrival_ps  = {10, 10};
+  constraints.inputs["d"].clock       = "main";
+  constraints.outputs["q"]            = {
+      {100, 100},
+      {},
+      "main"
+  };
+  constraints.complete = true;
+  const auto result    = late::Proxy(*circuit.graph, circuit.library, constraints).evaluate();
+  ASSERT_TRUE(result.certified) << (result.unsupported.empty() ? "" : result.unsupported.front());
+  EXPECT_EQ(pin(result, "r:CLK").clock_name, "main");
+  EXPECT_TRUE(pin(result, "g:GCLK").clock);
+  // The cell's own clock-gating setup (4 ps) times the enable.
+  EXPECT_TRUE(pin(result, "g:GATE").endpoint);
+  EXPECT_EQ(pin(result, "g:GATE").transitions[0].required_ps, 96);
+  EXPECT_EQ(result.wns_ps, 66);
+}
+
 TEST(LateTiming, InversionTracksTransitionsAndBackwardRequirements) {
   Circuit circuit({"a"}, {"z"});
   auto    inv = circuit.cell("u", "INV");

@@ -267,11 +267,12 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
       return out;
     }
     const auto& instance = instances.at(owner[pin]);
-    out.cls              = instance.domino ? "domino" : "flop";
+    out.cls              = instance.domino ? "domino" : all.pins[pin].clock_gate ? "gate" : "flop";
     out.clock            = instance.clock;
+    out.fraction         = all.pins[pin].capture_share;  // a half-cycle pair through an inverted clock
     if (instance.domino) {
       if (const auto budget = provisional->capture.find(instance.master); budget != provisional->capture.end()) {
-        out.fraction = budget->second.fraction;
+        out.fraction *= budget->second.fraction;
       }
     }
     return out;

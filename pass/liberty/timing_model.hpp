@@ -50,6 +50,9 @@ struct Cell {
   double                     area = 0;
   Thresholds                 thresholds;
   bool                       sequential = false, latch = false, memory = false;
+  // An integrated clock gate (`clock_gating_integrated_cell`): its gated-clock
+  // output follows the clock pin through a combinational arc.
+  bool                       clock_gate = false;
   std::map<std::string, Pin> pins;
   std::vector<std::string>   unsupported;
 };

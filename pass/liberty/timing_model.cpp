@@ -585,6 +585,7 @@ Library parse(std::string_view text) {
       cell.library    = library_name;
       cell.thresholds = levels;
       cell.area       = number(group, "area").value_or(0);
+      cell.clock_gate = !attr(group, "clock_gating_integrated_cell").empty();
       if (attr(library, "delay_model", "table_lookup") != "table_lookup") {
         cell.unsupported.push_back("library delay_model is not table_lookup");
       }

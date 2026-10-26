@@ -141,6 +141,126 @@ struct Proxy::Impl {
   std::map<std::pair<const model::Cell*, std::string>, std::optional<Logic>> logic;
   std::vector<std::optional<bool>>                                           constants;
   std::vector<size_t>                                                        uncharacterized_outputs;
+  // Ideal-clock propagation through recognized clock gates (named clocks only).
+  // An inversion reaches the opposite edge of the same waveform: an inverted
+  // twin clock, phase-shifted to the declared falling edge (else half the
+  // period). Twins never exist without an inversion on a clock path.
+  std::vector<size_t>                                                        driver_of;
+  std::vector<size_t>                                                        twin_of, base_of;  // by clock id; absent when none
+  struct Gate {
+    size_t              cell = absent, clock_pin = absent, clock = absent;
+    std::vector<size_t> enables, captures, storages;  // captures: the enable's capture waveform, by enable
+  };
+  std::vector<Gate> gates;
+
+  size_t base_clock(size_t id) const { return id < base_of.size() && base_of[id] != absent ? base_of[id] : id; }
+  size_t inverted(size_t id) {
+    twin_of.resize(clock_system.clocks.size(), absent);
+    base_of.resize(clock_system.clocks.size(), absent);
+    if (twin_of[id] != absent) {
+      return twin_of[id];
+    }
+    const auto base   = clock_system.clocks[id];
+    auto       model  = base.model;
+    const auto period = model.period_ps;
+    model.phase_ps    = std::fmod(model.falling_ps ? *model.falling_ps : model.phase_ps + period / 2, period);
+    model.roots.clear();
+    const auto twin = clock_system.clocks.size();
+    clock_system.clocks.push_back({base.name + "~fall", model});
+    clock_system.identities.emplace(base.name + "~fall", twin);
+    twin_of.push_back(id);
+    base_of.push_back(id);
+    twin_of[id] = twin;
+    return twin;
+  }
+  // A cell the ideal clock enters on `clock_pin` whose every other input is a
+  // clock-gate enable: driven, through single-input cells, by a state cell (a
+  // latch or flop, checked afterwards to run on the gate's clock), and able to
+  // change without disturbing the output while the clock input rests at one
+  // level. Records each enable's capture edge: the one that leaves that level.
+  bool gate_cell(size_t owner, size_t clock_pin, size_t output, size_t clock) {
+    for (const auto& gate : gates) {
+      if (gate.cell == owner && gate.clock_pin == clock_pin) {
+        return true;
+      }
+    }
+    const auto& cell = cells[owner];
+    compile_logic(*cell.model, pins[output].model->function);
+    const auto found = logic.find({cell.model, pins[output].model->function});
+    if (found == logic.end() || !found->second) {
+      return false;
+    }
+    const auto& function = *found->second;
+    const auto  variable = [&](const std::string& name) {
+      const auto it = std::find(function.variables.begin(), function.variables.end(), name);
+      return it == function.variables.end() ? -1 : static_cast<int>(it - function.variables.begin());
+    };
+    const int clock_var = variable(pins[clock_pin].model->name);
+    if (clock_var < 0 || function.variables.size() > 6) {
+      return false;
+    }
+    Gate gate{owner, clock_pin, clock, {}, {}, {}};
+    for (const auto& [name, input] : cell.pins) {
+      if (input == clock_pin || pins[input].model->direction != "input") {
+        continue;
+      }
+      if (pins[input].clock || variable(name) < 0) {
+        return false;
+      }
+      // The enable storage behind single-input cells.
+      size_t driver = driver_of[input], storage = absent;
+      for (int hop = 0; hop < 8 && driver != absent && storage == absent; ++hop) {
+        const auto from = pins[driver].cell;
+        if (pins[driver].input_port || from == absent) {
+          return false;
+        }
+        if (cells[from].model->sequential) {
+          storage = from;
+          break;
+        }
+        size_t next = absent, count = 0;
+        for (const auto& [n, i] : cells[from].pins) {
+          (void)n;
+          if (pins[i].model->direction == "input") {
+            next = driver_of[i];
+            ++count;
+          }
+        }
+        if (count != 1) {
+          return false;
+        }
+        driver = next;
+      }
+      if (storage == absent) {
+        return false;
+      }
+      // The clock level at which this enable does not reach the output.
+      const auto e    = variable(name);
+      const auto free = [&](unsigned level) {
+        for (uint64_t bit = 0; bit < (uint64_t{1} << function.variables.size()); ++bit) {
+          if (((bit >> clock_var) & 1U) != level || ((bit >> e) & 1U)) {
+            continue;
+          }
+          if (((function.truth >> bit) & 1U) != ((function.truth >> (bit | (uint64_t{1} << e))) & 1U)) {
+            return false;
+          }
+        }
+        return true;
+      };
+      const bool low = free(0), high = free(1);
+      if (low == high) {
+        return false;  // the enable passes at both levels (not a gate) or at neither (it is the clock's mask)
+      }
+      gate.enables.push_back(input);
+      gate.captures.push_back(low ? clock : inverted(clock));
+      gate.storages.push_back(storage);
+    }
+    if (gate.enables.empty()) {
+      return false;
+    }
+    gates.push_back(std::move(gate));
+    return true;
+  }
 
   void compile_logic(const model::Cell& cell, const std::string& expression) {
     const auto key = std::pair{&cell, expression};
@@ -375,7 +495,7 @@ struct Proxy::Impl {
       for (const auto& issue : found->unsupported) {
         unsupported.push_back(cells.back().name + ": " + issue);
       }
-      if (found->latch) {
+      if (found->latch && !found->clock_gate) {  // an integrated clock gate's latch drives only its gated clock
         unsupported.push_back("latch borrowing is unsupported: " + cells.back().name);
       }
       const auto bind = [&](const auto& physical_pins) {
@@ -453,7 +573,16 @@ struct Proxy::Impl {
       }
       nets[found->second].push_back(sink);
     }
-    for (size_t clock_id = 0; clock_id < clock_system.clocks.size(); ++clock_id) {
+    // Driver of every bound sink, for the clock-gate enable walk below.
+    const bool named = !constraints.clocks.empty();
+    driver_of.assign(pins.size(), absent);
+    for (const auto& [driver, sinks] : nets) {
+      for (auto sink : sinks) {
+        driver_of[sink] = driver;
+      }
+    }
+    const size_t roots_end = clock_system.clocks.size();
+    for (size_t clock_id = 0; clock_id < roots_end; ++clock_id) {
       std::queue<size_t> pending;
       for (const auto& name : clock_system.clocks[clock_id].model.roots) {
         const auto found = identities.find(name);
@@ -468,28 +597,46 @@ struct Proxy::Impl {
         pending.push(found->second);
       }
       while (!pending.empty()) {
-        const auto pin = pending.front();
+        const auto pin   = pending.front();
+        const auto clock = pins[pin].ideal_clock;  // clock_id or its inverted twin
         pending.pop();
-        const auto visit = [&](size_t next) {
-          if (pins[next].clock && pins[next].ideal_clock != clock_id) {
+        const auto visit = [&](size_t next, size_t waveform) {
+          if (pins[next].clock && pins[next].ideal_clock != waveform) {
             throw std::invalid_argument("multiple ideal clock waveforms reach pin: " + pins[next].name);
           }
           if (!pins[next].clock) {
             pins[next].clock       = true;
-            pins[next].ideal_clock = clock_id;
+            pins[next].ideal_clock = waveform;
             pending.push(next);
           }
         };
         if (const auto net = nets.find(pin); net != nets.end()) {
           for (auto sink : net->second) {
-            visit(sink);
+            visit(sink, clock);
           }
         }
         const auto owner = pins[pin].cell;
-        if (owner == absent || !pins[pin].model || pins[pin].model->direction != "input" || cells[owner].model->sequential) {
+        if (owner == absent || !pins[pin].model || pins[pin].model->direction != "input") {
           continue;
         }
         const auto& cell = cells[owner];
+        // An integrated clock gate: its gated clock follows the clock pin; the
+        // enable keeps the cell's own (Liberty) clock-gating setup check.
+        if (cell.model->clock_gate) {
+          for (const auto& [name, output] : cell.pins) {
+            (void)name;
+            for (const auto& arc : pins[output].model->arcs) {
+              if (pins[output].model->direction == "output" && arc.related_pin == pins[pin].model->name && combinational_arc(arc)
+                  && arc.when.empty() && arc.sense == model::Sense::positive) {
+                visit(output, clock);
+              }
+            }
+          }
+          continue;
+        }
+        if (cell.model->sequential) {
+          continue;
+        }
         for (const auto& [name, output] : cell.pins) {
           (void)name;
           if (pins[output].model->direction != "output") {
@@ -504,12 +651,33 @@ struct Proxy::Impl {
             const auto inputs = std::count_if(cell.model->pins.begin(), cell.model->pins.end(), [](const auto& item) {
               return item.second.direction == "input";
             });
-            if (inputs == 1 && arc.sense == model::Sense::positive && arc.when.empty() && arc.type == "combinational") {
-              visit(output);
+            const bool plain  = arc.when.empty() && arc.type == "combinational";
+            if (inputs == 1 && arc.sense == model::Sense::positive && plain) {
+              visit(output, clock);
+            } else if (named && inputs == 1 && arc.sense == model::Sense::negative && plain) {
+              visit(output, inverted(clock));  // an inverter: the opposite edge of the same waveform
+            } else if (named && plain && arc.sense != model::Sense::unknown && arc.sense != model::Sense::non_unate
+                       && gate_cell(owner, pin, output, clock)) {
+              visit(output, arc.sense == model::Sense::negative ? inverted(clock) : clock);
             } else {
               unsupported.push_back("ideal clock through unsupported inversion/gating: " + pins[output].name);
             }
           }
+        }
+      }
+    }
+    // A recognized gate's enable storage must run on the gate's own clock.
+    for (const auto& gate : gates) {
+      for (auto storage : gate.storages) {
+        bool same = false;
+        for (const auto& [name, index] : cells[storage].pins) {
+          (void)name;
+          if (pins[index].model->clock && pins[index].clock) {
+            same = same || base_clock(pins[index].ideal_clock) == base_clock(gate.clock);
+          }
+        }
+        if (!same) {
+          unsupported.push_back("clock gate enable storage outside the gate's clock: " + cells[storage].name);
         }
       }
     }
@@ -786,6 +954,9 @@ struct Proxy::Impl {
     };
     if (!legacy) {
       for (size_t id = 0; id < clock_system.clocks.size(); ++id) {
+        if (base_clock(id) != id) {
+          continue;  // an inverted twin reports under its source clock
+        }
         const auto& clock                   = clock_system.clocks[id];
         result.clocks[clock.name].period_ps = clock.model.period_ps;
       }
@@ -854,6 +1025,27 @@ struct Proxy::Impl {
           check.required[t]  = check.fraction * clock.period_ps - uncertainty - setup;
         }
         checks.push_back(check);
+      }
+    }
+    // Clock-gating setup checks: a recognized gate's enable settles before the
+    // clock edge that leaves the level at which the enable is masked (the
+    // rising edge for an AND gate), with no Liberty setup of its own.
+    if (!legacy) {
+      for (const auto& gate : gates) {
+        for (size_t k = 0; k < gate.enables.size(); ++k) {
+          const auto i = gate.enables[k];
+          if (constants[i] || constraints.cuts.contains(pins[i].name)) {
+            continue;
+          }
+          result.pins[i].endpoint   = true;
+          result.pins[i].clock_gate = true;
+          const auto& clock         = clock_system.clocks[gate.captures[k]].model;
+          checks.push_back({
+              i,
+              gate.captures[k],
+              {clock.period_ps - clock.uncertainty_ps, clock.period_ps - clock.uncertainty_ps}
+          });
+        }
       }
     }
     // Transition delays of every enabled, sensitized arc; a sensitized cell
@@ -1006,13 +1198,22 @@ struct Proxy::Impl {
           if (check.clock == absent) {
             absolute_output = true;
           } else {
-            const auto key = std::pair{check.clock, check.pin};
+            // An inverted twin reports under its source clock; its half-cycle
+            // pairs scale the period by their edge separation.
+            const auto key = std::pair{base_clock(check.clock), check.pin};
             if (const auto old = clock_endpoint_slack.find(key); old != clock_endpoint_slack.end()) {
               old->second = std::min(old->second, slack);
             } else {
               clock_endpoint_slack.emplace(key, slack);
             }
-            const double scaled = slack / check.fraction;
+            double share = 1;
+            if (source_clock != unclocked && source_clock != check.clock && base_clock(source_clock) == base_clock(check.clock)) {
+              share = *clock_system.separation(source_clock, check.clock) / clock_system.clocks[check.clock].model.period_ps;
+            }
+            const double scaled = slack / (check.fraction * share);
+            if (share != 1) {
+              result.pins[check.pin].capture_share = std::min(result.pins[check.pin].capture_share, share);
+            }
             if (const auto old = clock_endpoint_scaled.find(key); old != clock_endpoint_scaled.end()) {
               old->second = std::min(old->second, scaled);
             } else {
@@ -1021,8 +1222,8 @@ struct Proxy::Impl {
             if (check.fraction != 1) {
               fractional.insert(check.pin);
             }
-            if (source_clock != unclocked && source_clock != check.clock) {
-              result.clocks.at(clock_system.clocks[check.clock].name).independent_period = false;
+            if (source_clock != unclocked && base_clock(source_clock) != base_clock(check.clock)) {
+              result.clocks.at(clock_system.clocks[base_clock(check.clock)].name).independent_period = false;
             }
           }
         }
@@ -1209,7 +1410,8 @@ struct Proxy::Impl {
       bound.declaration_port = pin.declaration_port;
       bound.clock            = pin.clock;
       if (pin.clock) {
-        bound.clock_name = clock_system.clocks[pin.ideal_clock].name;
+        bound.clock_name     = clock_system.clocks[base_clock(pin.ideal_clock)].name;
+        bound.clock_inverted = base_clock(pin.ideal_clock) != pin.ideal_clock;
       }
       result.pins.push_back(std::move(bound));
     }
