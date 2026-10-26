@@ -17,6 +17,36 @@ from .maps import read
 METRICS = ('pearson', 'spearman', 'ssim', 'nrms', 'rmse', 'hotspot_top5_overlap')
 
 
+def read_rudy_tsv(path, shape=None):
+    """(bins_x, bins_y, x-major max(horizontal, vertical)) from a rudy_metrics TSV.
+
+    Routing-wire labels do not contain the separate pin-access term. With shape,
+    the rows must be exactly that grid in x-major order (a native census);
+    otherwise the grid is inferred from unique, complete tile coordinates.
+    """
+    with Path(path).open() as stream:
+        rows = list(csv.DictReader(stream, delimiter="\t"))
+    if shape is not None:
+        nx, ny = shape
+        if len(rows) != nx * ny or [(int(r["x"]), int(r["y"])) for r in rows] != [(x, y) for x in range(nx) for y in range(ny)]:
+            raise ValueError("native baseline emitted an invalid tile census")
+        return nx, ny, [max(float(r["horizontal"]), float(r["vertical"])) for r in rows]
+    if not rows:
+        raise ValueError("empty RUDY TSV grid")
+    nx, ny = max(int(r["x"]) for r in rows) + 1, max(int(r["y"]) for r in rows) + 1
+    grid(nx, ny)
+    data, seen = [0.] * (nx * ny), set()
+    for row in rows:
+        x, y = int(row["x"]), int(row["y"])
+        if not (0 <= x < nx and 0 <= y < ny) or (x, y) in seen:
+            raise ValueError("invalid/duplicate RUDY TSV tile")
+        seen.add((x, y))
+        data[x * ny + y] = max(float(row["horizontal"]), float(row["vertical"]))
+    if len(seen) != nx * ny:
+        raise ValueError("incomplete RUDY TSV grid")
+    return nx, ny, data
+
+
 def defined_mean(values):
     """(fsum mean of the defined values or None, defined count, undefined count)."""
     defined = [v for v in values if v is not None]
@@ -125,22 +155,7 @@ def main():
         pred = read(args.prediction)
         values = resample(absolute_channel(pred, args.channel), pred.bins_x, pred.bins_y, ref.bins_x, ref.bins_y)
     else:
-        with args.prediction_tsv.open() as stream:
-            rows = list(csv.DictReader(stream, delimiter="\t"))
-        if not rows:
-            raise ValueError("empty RUDY TSV grid")
-        nx, ny = max(int(r["x"]) for r in rows) + 1, max(int(r["y"]) for r in rows) + 1
-        grid(nx, ny)
-        data, seen = [0.] * (nx * ny), set()
-        for row in rows:
-            x, y = int(row["x"]), int(row["y"])
-            if not (0 <= x < nx and 0 <= y < ny) or (x, y) in seen:
-                raise ValueError("invalid/duplicate RUDY TSV tile")
-            seen.add((x, y))
-            # Routing-wire labels do not contain the separate pin-access term.
-            data[x * ny + y] = max(float(row["horizontal"]), float(row["vertical"]))
-        if len(seen) != nx * ny:
-            raise ValueError("incomplete RUDY TSV grid")
+        nx, ny, data = read_rudy_tsv(args.prediction_tsv)
         values = resample(data, nx, ny, ref.bins_x, ref.bins_y)
     print(json.dumps(metrics(absolute_channel(ref, args.channel), values, ref.bins_x, ref.bins_y), indent=2, allow_nan=False))
 

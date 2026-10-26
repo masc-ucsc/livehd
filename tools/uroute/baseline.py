@@ -1,14 +1,13 @@
 # SPDX-License-Identifier: BSD-3-Clause
 """Score native bbox/RSMT RUDY against one routed pool sample's wire labels."""
 import argparse
-import csv
 import json
 from pathlib import Path
 import subprocess
 
 from .features import resample
 from .maps import read
-from .score import absolute_channel, metrics
+from .score import absolute_channel, metrics, read_rudy_tsv
 
 
 def snapshot(geometry, bins):
@@ -54,11 +53,7 @@ def baseline(sample, output, binary):
         subprocess.run([str(Path(binary).resolve()), str(physical.resolve()), str(prefix.resolve()), model], check=True, timeout=120)
         variants = {}
         for mode in ('base', 'enhanced'):
-            with (output / f'{model}_{mode}.tsv').open() as stream:
-                rows = list(csv.DictReader(stream, delimiter='\t'))
-            values = [max(float(r['horizontal']), float(r['vertical'])) for r in rows]
-            if len(values) != nx * ny or [(int(r['x']), int(r['y'])) for r in rows] != [(x, y) for x in range(nx) for y in range(ny)]:
-                raise ValueError('native baseline emitted an invalid tile census')
+            _, _, values = read_rudy_tsv(output / f'{model}_{mode}.tsv', (nx, ny))
             values = resample(values, nx, ny, reference.bins_x, reference.bins_y)
             variants[mode] = metrics(absolute_channel(reference, 0), values, reference.bins_x, reference.bins_y)
         report['models'][model] = variants
