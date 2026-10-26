@@ -11,11 +11,13 @@ namespace livehd::placement::buffering {
 // placement sites, not routing capacity. Touching rectangle edges are legal.
 struct Site_rect {
   int64_t xl = 0, yl = 0, xh = 0, yh = 0;
+  bool    operator==(const Site_rect&) const = default;
 };
 struct Site_row {
   std::string name;
   Site_rect   body;
-  int64_t     pitch = 0;
+  int64_t     pitch                             = 0;
+  bool        operator==(const Site_row&) const = default;
 };
 struct Site_span {
   std::string row;
@@ -25,6 +27,7 @@ struct Site_span {
 struct Row_sites {
   Site_row               row;
   std::vector<Site_span> gaps;
+  bool                   operator==(const Row_sites&) const = default;
 };
 using Legal_sites = std::map<std::string, Row_sites>;
 
@@ -38,6 +41,8 @@ Site_rect   site_body(const Legal_sites&, const Site_span&);
 // Maximum nonoverlapping equal-width single-row footprints, rather than the
 // number of possible starts (which overstates narrow-gap capacity).
 uint64_t    buffer_slots(const Legal_sites&, uint64_t width_in_sites);
+// Whether two spans share at least one site of the same row.
+bool        spans_overlap(const Site_span&, const Site_span&);
 
 enum class Reservation_status { reserved, unavailable, conflict };
 struct Reservation_result {
@@ -52,10 +57,13 @@ struct Reservation_result {
 class Site_reservations {
   Legal_sites                                   sites;
   std::map<std::string, std::vector<Site_span>> owners;
+  Reservation_result                            conflict(const std::string& owner, const std::vector<Site_span>& sorted) const;
 
 public:
   explicit Site_reservations(Legal_sites legal_sites);
   Reservation_result replace(const std::string& owner, std::vector<Site_span> proposal);
+  // The status replace() would return, without changing any reservation.
+  Reservation_result check(const std::string& owner, std::vector<Site_span> proposal) const;
   void               release(const std::string& owner);
   // Passing the current owner permits reuse of its prior footprints during a
   // replacement. Other owners' reserved sites remain unavailable.

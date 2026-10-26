@@ -2,36 +2,21 @@
 #include "producer.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <limits>
-#include <stdexcept>
+
+#include "checks.hpp"
 
 namespace livehd::placement::buffering {
 namespace {
-using Clock = std::chrono::steady_clock;
-void require(bool ok, const char* why) {
-  if (!ok) {
-    throw std::invalid_argument(why);
-  }
-}
-double      elapsed(Clock::time_point from) { return std::chrono::duration<double>(Clock::now() - from).count(); }
+using detail::Clock;
+using detail::elapsed;
+using detail::require;
 Route_point lattice(Point p, double units) {
   const double x = p.x * units, y = p.y * units;
   require(std::isfinite(x) && std::isfinite(y) && std::abs(x) < double(int64_t(1) << 52) && std::abs(y) < double(int64_t(1) << 52),
           "producer terminal exceeds exact DBU range");
   return {std::llround(x), std::llround(y)};
-}
-bool clear(Point a, Point z, const std::vector<Site_rect>& masks, double units) {
-  const Point corner{z.x, a.y};
-  for (auto r : masks) {
-    const double xl = r.xl / units, xh = r.xh / units, yl = r.yl / units, yh = r.yh / units;
-    if ((a.y >= yl && a.y <= yh && std::max(a.x, corner.x) >= xl && std::min(a.x, corner.x) <= xh)
-        || (z.x >= xl && z.x <= xh && std::max(corner.y, z.y) >= yl && std::min(corner.y, z.y) <= yh)) {
-      return false;
-    }
-  }
-  return true;
 }
 // Add exact source/sink leaves outside the lattice topology. Zero-length
 // attachments remain valid identity-preserving tree edges.
@@ -49,7 +34,7 @@ void terminals(Routing_tree& tree, const Context& c, const std::vector<Site_rect
                              dx * tree.attachment_rc[0] + dy * tree.attachment_rc[2],
                              dx * tree.attachment_rc[1] + dy * tree.attachment_rc[3],
                              dx + dy,
-                             clear(a, z, masks, units)});
+                             detail::rectilinear_clear(a, z, masks, units)});
   };
   append(0, 1);
   const auto size = tree.vertices.size();
@@ -130,24 +115,9 @@ Producer_result generate_checkpoint(const Checkpoint_input& input, const liberty
   const auto sites              = build_physical_sites(tech, current, extra_masks, site_settings);
   result.problem.sites          = sites.legal;
   result.problem.geometry_epoch = input.previous ? input.previous->allocation.history.geometry_epoch : 0;
-  if (input.previous) {
-    const auto& old  = input.previous->allocation.sites.geometry();
-    bool        same = old.size() == sites.legal.size();
-    for (const auto& [name, row] : sites.legal) {
-      if (!same || !old.contains(name)) {
-        same = false;
-        break;
-      }
-      const auto& before = old.at(name);
-      const auto& a      = row.row;
-      const auto& z      = before.row;
-      same = a.name == z.name && a.pitch == z.pitch && a.body.xl == z.body.xl && a.body.yl == z.body.yl && a.body.xh == z.body.xh
-             && a.body.yh == z.body.yh && row.gaps == before.gaps;
-    }
-    if (!same) {
-      require(result.problem.geometry_epoch < std::numeric_limits<uint64_t>::max(), "producer geometry epoch exhausted");
-      ++result.problem.geometry_epoch;
-    }
+  if (input.previous && input.previous->allocation.sites.geometry() != sites.legal) {
+    require(result.problem.geometry_epoch < std::numeric_limits<uint64_t>::max(), "producer geometry epoch exhausted");
+    ++result.problem.geometry_epoch;
   }
 
   Site_reservations ledger(sites.legal);

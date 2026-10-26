@@ -4,16 +4,13 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <stdexcept>
 #include <tuple>
+
+#include "checks.hpp"
 
 namespace livehd::placement::buffering {
 namespace {
-void require(bool ok, const char* why) {
-  if (!ok) {
-    throw std::invalid_argument(why);
-  }
-}
+using detail::require;
 #if DREAMPLACE_NATIVE_DENSITY_RESERVATION_API >= 1
 std::vector<Site_span> canonical(std::vector<Site_span> spans) {
   std::sort(spans.begin(), spans.end(), [](const auto& a, const auto& b) {

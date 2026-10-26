@@ -2,25 +2,22 @@
 #include "negotiation.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <limits>
 #include <numeric>
 #include <stdexcept>
 
+#include "checks.hpp"
+
 namespace livehd::placement::buffering {
 namespace {
-using Clock = std::chrono::steady_clock;
-void require(bool ok, const char* message) {
-  if (!ok) {
-    throw std::invalid_argument(message);
-  }
-}
+using detail::Clock;
+using detail::elapsed;
+using detail::require;
 void add(uint64_t& total, uint64_t units) {
   require(total <= UINT64_MAX - units, "negotiation resource count overflow");
   total += units;
 }
-double  elapsed(Clock::time_point start) { return std::chrono::duration<double>(Clock::now() - start).count(); }
 Gap_key gap_for(const Legal_sites& geometry, const Site_span& span) {
   const auto& row = geometry.at(span.row);
   for (const auto& gap : row.gaps) {
@@ -172,12 +169,12 @@ void finalize(Allocation_result& result, const Allocation_state& original, const
       const auto& alternative   = nets[index].candidates[selected];
       double      fraction_left = settings.maximum_pull_fraction;
       for (size_t buffer_index = 0; buffer_index < alternative.candidate.buffers.size(); ++buffer_index) {
-        const auto&                   gap = it->buffer_gaps[buffer_index];
-        const auto&                   row = original.sites.geometry().at(gap.row).row;
-        const Rect                    box{double(row.body.xl + int64_t(gap.first) * row.pitch) / settings.dbu_per_um,
-                       double(row.body.yl) / settings.dbu_per_um,
-                       double(row.body.xl + int64_t(gap.first + gap.count) * row.pitch) / settings.dbu_per_um,
-                       double(row.body.yh) / settings.dbu_per_um};
+        const auto&                   gap  = it->buffer_gaps[buffer_index];
+        const auto                    body = site_body(original.sites.geometry(), {gap.row, gap.first, gap.count});
+        const Rect                    box{double(body.xl) / settings.dbu_per_um,
+                       double(body.yl) / settings.dbu_per_um,
+                       double(body.xh) / settings.dbu_per_um,
+                       double(body.yh) / settings.dbu_per_um};
         std::optional<Gap_entry_pull> pull;
         for (const auto& tree : alternative.candidate.trees) {
           for (const auto& terminal : tree.terminals) {
@@ -334,11 +331,10 @@ Allocation_result negotiate(const liberty::timing::Library& library, const Alloc
         ++result.rejected;
         continue;
       }
-      if (geometry_only.replace(net.owner, alternative.sites).status != Reservation_status::reserved) {
+      if (geometry_only.check(net.owner, alternative.sites).status != Reservation_status::reserved) {
         ++result.rejected;
         continue;
       }
-      geometry_only.release(net.owner);
       Prepared choice;
       choice.index  = candidate_index;
       choice.timing = std::move(timing);
@@ -347,13 +343,9 @@ Allocation_result negotiate(const liberty::timing::Library& library, const Alloc
       for (const auto& buffer : alternative.candidate.buffers) {
         size_t found = alternative.sites.size();
         for (size_t span_index = 0; span_index < alternative.sites.size(); ++span_index) {
-          auto              body  = site_body(original.sites.geometry(), alternative.sites[span_index]);
-          constexpr int64_t exact = int64_t{1} << 53;
-          require(body.xl >= -exact && body.yl >= -exact && body.xh <= exact && body.yh <= exact,
-                  "allocation footprint exceeds exact physical DBU range");
-          const auto& box = buffer.body;
-          if (box.xl >= double(body.xl) / settings.dbu_per_um && box.yl >= double(body.yl) / settings.dbu_per_um
-              && box.xh <= double(body.xh) / settings.dbu_per_um && box.yh <= double(body.yh) / settings.dbu_per_um) {
+          if (body_within_sites(buffer.body,
+                                site_body(original.sites.geometry(), alternative.sites[span_index]),
+                                settings.dbu_per_um)) {
             found = span_index;
           }
         }
@@ -404,13 +396,8 @@ Allocation_result negotiate(const liberty::timing::Library& library, const Alloc
         ++result.rejected;
         continue;
       }
-      for (unsigned t = 0; t < 2; ++t) {
-        if (choice.timing.root_required_ps[t]) {
-          const double margin = *choice.timing.root_required_ps[t] - context.driver.input_arrival_ps[t];
-          choice.margin       = std::min(choice.margin.value_or(margin), margin);
-        }
-      }
-      unbuffered = unbuffered || alternative.candidate.buffers.empty();
+      choice.margin = worst_input_margin(choice.timing, context.driver);
+      unbuffered    = unbuffered || alternative.candidate.buffers.empty();
       prepared[index].push_back(std::move(choice));
     }
     result.nets[index].mandatory = !unbuffered;

@@ -70,10 +70,16 @@ struct Tree_search_result {
   std::optional<Tree_solution> best;
 };
 
+// Whether a buffer body (microns) lies within a whole-site footprint (DBU).
+// Footprints beyond the exact double DBU range throw.
+bool                  body_within_sites(const Rect& body_um, const Site_rect& sites_dbu, double dbu_per_um);
+// Worst root required time minus source input arrival over constrained input
+// transitions; nullopt when no transition is constrained.
+std::optional<double> worst_input_margin(const Evaluation&, const Driver&);
 // Shared comparison of fully evaluated root solutions; never valid for
 // partial subtrees whose actual upstream slew/load context is still unknown.
-bool dominates_tree_solution(const Tree_solution&, const Tree_solution&, const Context&);
-bool prefer_tree_solution(const Tree_solution&, const Tree_solution&, Tree_selection);
+bool                  dominates_tree_solution(const Tree_solution&, const Tree_solution&, const Context&);
+bool                  prefer_tree_solution(const Tree_solution&, const Tree_solution&, Tree_selection);
 
 // Bounded exact expansion of the finite supplied site/cell assignments. Native
 // NLDM/GaTe and per-sink waveforms use ACTUAL upstream slew at each full trial.

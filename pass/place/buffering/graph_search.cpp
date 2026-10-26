@@ -2,24 +2,20 @@
 #include "graph_search.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <iterator>
 #include <limits>
 #include <map>
 #include <set>
-#include <stdexcept>
+
+#include "checks.hpp"
 
 namespace livehd::placement::buffering {
 namespace {
-using Clock           = std::chrono::steady_clock;
+using detail::Clock;
+using detail::elapsed;
+using detail::require;
 constexpr auto absent = std::numeric_limits<size_t>::max();
-void           require(bool ok, const char* message) {
-  if (!ok) {
-    throw std::invalid_argument(message);
-  }
-}
-double elapsed(Clock::time_point started) { return std::chrono::duration<double>(Clock::now() - started).count(); }
 struct State {
   size_t              root  = 0;
   uint64_t            sinks = 0;
@@ -41,28 +37,16 @@ Routing_tree produce(const Visibility_graph& graph, const std::vector<size_t>& e
   Routing_tree tree;
   tree.attachment_rc = rc;
   for (size_t at = 0; at < order.size(); ++at) {
-    const auto  v = order[at];
-    const auto  p = graph.vertices[v];
-    const Point xy{double(p.x) / dbu, double(p.y) / dbu};
-    require(std::isfinite(xy.x) && std::isfinite(xy.y), "graph-tree physical coordinate conversion overflow");
-    tree.vertices.push_back({xy, {}, options[v]});
+    const auto v = order[at];
+    const auto p = graph.vertices[v];
+    tree.vertices.push_back({physical_point(p, dbu), {}, options[v]});
     for (auto [next, id] : adjacent[v]) {
       if (index[next] != absent) {
         continue;
       }
       index[next] = order.size();
       order.push_back(next);
-      const auto   q = graph.vertices[next];
-      const Point  to{double(q.x) / dbu, double(q.y) / dbu};
-      const auto   e          = graph.edges[id];
-      const auto   horizontal = p.y == q.y;
-      const double length     = double(e.length_dbu) / dbu;
-      const double physical   = std::abs(xy.x - to.x) + std::abs(xy.y - to.y);
-      const double r = length * rc[horizontal ? 0 : 2], c = length * rc[horizontal ? 1 : 3];
-      require(std::isfinite(length) && std::isfinite(r) && std::isfinite(c) && std::isfinite(physical) && physical > 0
-                  && std::abs(physical - length) <= 1e-9 * std::max(1., length),
-              "graph-tree RC/unit conversion loses geometry");
-      tree.segments.push_back({at, index[next], r, c, length, true});
+      tree.segments.push_back(visibility_segment(p, graph.vertices[next], graph.edges[id].length_dbu, at, index[next], dbu, rc));
     }
   }
   require(tree.vertices.size() == edges.size() + 1, "graph-tree edges are not a connected tree");
@@ -110,10 +94,7 @@ Graph_search_result search_graph(const liberty::timing::Library& lib, const Cont
     result.topology_space_exhausted = true;
     return finish(Graph_search_status::complete);
   }
-  const auto physical = [&](size_t id) {
-    const auto p = graph.vertices[id];
-    return Point{double(p.x) / settings.tree.dbu_per_um, double(p.y) / settings.tree.dbu_per_um};
-  };
+  const auto physical = [&](size_t id) { return physical_point(graph.vertices[id], settings.tree.dbu_per_um); };
   require(physical(graph.terminals[0]) == context.driver.output, "graph root differs from actual physical driver");
   for (size_t s = 0; s < context.sinks.size(); ++s) {
     require(physical(graph.terminals[s + 1]) == context.sinks[s].position, "graph terminal differs from actual physical sink");

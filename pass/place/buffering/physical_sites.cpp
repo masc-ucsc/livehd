@@ -2,24 +2,21 @@
 #include "physical_sites.hpp"
 
 #include <algorithm>
-#include <cctype>
-#include <chrono>
 #include <cmath>
 #include <limits>
 #include <set>
-#include <stdexcept>
+
+#include "checks.hpp"
 
 namespace livehd::placement::buffering {
 namespace {
-constexpr int64_t exact_limit = int64_t{1} << 53;
-void              require(bool ok, const char* message) {
-  if (!ok) {
-    throw std::invalid_argument(message);
-  }
-}
-bool   finite(Point p) { return std::isfinite(p.x) && std::isfinite(p.y); }
-double manhattan(Point lhs, Point rhs) { return std::abs(lhs.x - rhs.x) + std::abs(lhs.y - rhs.y); }
-Point  pin_position(int64_t x, int64_t y, Point offset) {
+using detail::Clock;
+using detail::elapsed;
+using detail::finite;
+using detail::require;
+constexpr int64_t exact_limit = detail::exact_dbu_limit;
+double            manhattan(Point lhs, Point rhs) { return std::abs(lhs.x - rhs.x) + std::abs(lhs.y - rhs.y); }
+Point             pin_position(int64_t x, int64_t y, Point offset) {
   const long double px = static_cast<long double>(x) + offset.x, py = static_cast<long double>(y) + offset.y;
   const Point       result{double(px), double(py)};
   require(std::isfinite(result.x) && std::isfinite(result.y) && std::abs(static_cast<long double>(result.x) - px) <= 1e-6
@@ -62,22 +59,6 @@ Site_rect mask(physical::Rect rect) {
               && rect.xh <= double(exact_limit) && rect.yh <= double(exact_limit),
           "invalid physical blockage rectangle");
   return {int64_t(std::floor(rect.xl)), int64_t(std::floor(rect.yl)), int64_t(std::ceil(rect.xh)), int64_t(std::ceil(rect.yh))};
-}
-bool same(const Site_row& a, const Site_row& b) {
-  return a.name == b.name && a.pitch == b.pitch && a.body.xl == b.body.xl && a.body.yl == b.body.yl && a.body.xh == b.body.xh
-         && a.body.yh == b.body.yh;
-}
-bool clear(Point a, Point b, const std::vector<Site_rect>& masks) {
-  for (auto r : masks) {
-    if (std::max(a.x, b.x) >= r.xl && std::min(a.x, b.x) <= r.xh && std::max(a.y, b.y) >= r.yl && std::min(a.y, b.y) <= r.yh) {
-      return false;
-    }
-  }
-  return true;
-}
-bool attachment(Point a, Point b, const std::vector<Site_rect>& masks) {
-  Point bend{b.x, a.y};
-  return clear(a, bend, masks) && clear(bend, b, masks);
 }
 }  // namespace
 Physical_sites build_physical_sites(const physical::Technology& tech, const physical::Floorplan& frame,
@@ -173,47 +154,17 @@ Physical_model_result physical_buffer_model(const physical::Technology& tech, co
     return fail("buffer has no real CORE LEF master");
   }
   const auto& macro = lm->second;
-  const auto  model = library.cells.find(ports.cell);
-  if (model == library.cells.end()) {
-    return fail("buffer has no timing library cell");
+  // The evaluator's stage model, plus no other output arc and a finite load.
+  std::string why;
+  const auto  stage = stage_model(library, ports, true, &why);
+  if (!stage) {
+    return fail("buffer: " + why);
   }
-  const auto& cell = model->second;
-  if (cell.sequential || cell.latch || cell.memory || !cell.unsupported.empty()) {
-    return fail("unsupported buffer timing cell");
-  }
-  if (!cell.pins.contains(ports.input) || !cell.pins.contains(ports.output)) {
-    return fail("buffer timing pin missing");
-  }
-  const auto& in  = cell.pins.at(ports.input);
-  const auto& out = cell.pins.at(ports.output);
-  if (in.direction != "input" || out.direction != "output" || in.clock || out.three_state) {
-    return fail("invalid buffer timing directions");
-  }
-  for (const auto& [name, pin] : cell.pins) {
-    if ((pin.direction == "input" && name != ports.input) || (pin.direction == "output" && name != ports.output)) {
-      return fail("buffer is not single-input/single-output");
-    }
-  }
-  std::string function;
-  for (unsigned char ch : out.function) {
-    if (!std::isspace(ch) && ch != '(' && ch != ')') {
-      function += char(ch);
-    }
-  }
-  if (function != ports.input) {
-    return fail("buffer is not noninverting");
-  }
-  if (out.arcs.size() != 1) {
+  if (stage->output->arcs.size() != 1) {
     return fail("buffer needs one unconditional timing arc");
   }
-  const auto& arc = out.arcs[0];
-  if (arc.related_pin != ports.input || arc.sense != liberty::timing::Sense::positive || !arc.when.empty()
-      || !arc.unsupported.empty() || (!arc.type.empty() && arc.type != "combinational")) {
-    return fail("unsupported buffer timing arc");
-  }
-  for (unsigned t = 0; t < 2; ++t) {
-    if (!in.capacitance_ff[t] || !std::isfinite(*in.capacitance_ff[t]) || *in.capacitance_ff[t] < 0 || !arc.delay[t]
-        || !arc.slew[t]) {
+  for (const auto& cap : stage->input->capacitance_ff) {
+    if (!std::isfinite(*cap) || *cap < 0) {
       return fail("buffer lacks capacitance/NLDM tables");
     }
   }
@@ -260,17 +211,11 @@ Site_option_result physical_site_options(const Physical_sites& physical, const S
                                          const std::string& owner, const std::vector<Route_point>& vertices,
                                          const std::vector<Physical_buffer_model>& models, const std::vector<Site_rect>& routing,
                                          const Site_option_settings& settings) {
-  using Clock      = std::chrono::steady_clock;
   const auto start = Clock::now();
   require(physical.dbu > 0 && !owner.empty() && settings.max_attachment_dbu >= 0 && settings.max_attachment_dbu <= exact_limit
               && std::isfinite(settings.max_seconds) && settings.max_seconds > 0,
           "invalid physical site option settings");
-  require(physical.legal.size() == reservations.geometry().size(), "reservation geometry differs from physical snapshot");
-  for (const auto& [name, row] : physical.legal) {
-    const auto it = reservations.geometry().find(name);
-    require(it != reservations.geometry().end() && same(row.row, it->second.row) && row.gaps == it->second.gaps,
-            "reservation geometry differs from physical snapshot");
-  }
+  require(physical.legal == reservations.geometry(), "reservation geometry differs from physical snapshot");
   for (auto r : routing) {
     grow(r, 0);
   }
@@ -291,7 +236,7 @@ Site_option_result physical_site_options(const Physical_sites& physical, const S
   result.options.resize(vertices.size());
   const auto finish = [&](Site_option_status status) {
     result.status  = status;
-    result.seconds = std::chrono::duration<double>(Clock::now() - start).count();
+    result.seconds = elapsed(start);
     return result;
   };
   for (const auto& [name, row] : available) {
@@ -310,7 +255,7 @@ Site_option_result physical_site_options(const Physical_sites& physical, const S
     auto row               = physical.rows_by_y.lower_bound(low <= -exact_limit ? -exact_limit : int64_t(std::floor(low)));
     for (; row != physical.rows_by_y.end() && row->first <= high; ++row) {
       for (const auto& name : row->second) {
-        if (std::chrono::duration<double>(Clock::now() - start).count() >= settings.max_seconds) {
+        if (elapsed(start) >= settings.max_seconds) {
           return false;
         }
         const auto& meta     = physical.rows.at(name);
@@ -373,8 +318,7 @@ Site_option_result physical_site_options(const Physical_sites& physical, const S
                 result.status = Site_option_status::budget_exhausted;
                 break;
               }
-              if (result.candidate_checks >= settings.max_candidate_checks
-                  || std::chrono::duration<double>(Clock::now() - start).count() >= settings.max_seconds) {
+              if (result.candidate_checks >= settings.max_candidate_checks || elapsed(start) >= settings.max_seconds) {
                 return false;
               }
               ++result.candidate_checks;
@@ -383,7 +327,7 @@ Site_option_result physical_site_options(const Physical_sites& physical, const S
               const auto  a = pin_position(x, y, input), b = pin_position(x, y, output);
               const Point at{double(anchor.x), double(anchor.y)};
               if (manhattan(at, a) <= settings.max_attachment_dbu && manhattan(at, b) <= settings.max_attachment_dbu) {
-                if (!attachment(at, a, routing) || !attachment(b, at, routing)) {
+                if (!detail::rectilinear_clear(at, a, routing) || !detail::rectilinear_clear(b, at, routing)) {
                   ++result.routing_rejected;
                 } else {
                   if (result.options[vertex].size() >= settings.max_options_per_vertex) {

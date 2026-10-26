@@ -2,7 +2,6 @@
 #include "geometry.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <limits>
 #include <list>
@@ -12,18 +11,16 @@
 #include <stdexcept>
 #include <tuple>
 
+#include "checks.hpp"
+
 namespace livehd::placement::buffering {
 namespace {
-using Clock            = std::chrono::steady_clock;
+using detail::Clock;
+using detail::elapsed;
+using detail::require;
 constexpr auto missing = std::numeric_limits<size_t>::max();
-void           require(bool condition, const char* message) {
-  if (!condition) {
-    throw std::invalid_argument(message);
-  }
-}
-double   elapsed(Clock::time_point start) { return std::chrono::duration<double>(Clock::now() - start).count(); }
-uint64_t distance(int64_t a, int64_t b) { return a >= b ? uint64_t(a) - uint64_t(b) : uint64_t(b) - uint64_t(a); }
-bool     inside(Route_point p, Site_rect r) { return p.x >= r.xl && p.x <= r.xh && p.y >= r.yl && p.y <= r.yh; }
+uint64_t       distance(int64_t a, int64_t b) { return a >= b ? uint64_t(a) - uint64_t(b) : uint64_t(b) - uint64_t(a); }
+bool           inside(Route_point p, Site_rect r) { return p.x >= r.xl && p.x <= r.xh && p.y >= r.yl && p.y <= r.yh; }
 struct Key {
   std::array<int64_t, 4>              core;
   std::vector<Route_point>            terminals, sites;
@@ -256,6 +253,23 @@ Geometry_result Geometry_cache::get(const Geometry_request& request, const Geome
   impl->weight += weight;
   return result;
 }
+Point physical_point(Route_point p, double dbu_per_um) {
+  const Point position{double(p.x) / dbu_per_um, double(p.y) / dbu_per_um};
+  require(std::isfinite(position.x) && std::isfinite(position.y), "routing physical coordinate conversion overflow");
+  return position;
+}
+Tree_segment visibility_segment(Route_point parent, Route_point child, uint64_t length_dbu, size_t parent_vertex,
+                                size_t child_vertex, double dbu_per_um, const std::array<double, 4>& rc) {
+  const bool   horizontal = parent.y == child.y;
+  const double um         = double(length_dbu) / dbu_per_um;
+  const double r = um * rc[horizontal ? 0 : 2], c = um * rc[horizontal ? 1 : 3];
+  const auto   a = physical_point(parent, dbu_per_um), b = physical_point(child, dbu_per_um);
+  const double physical_length = std::abs(a.x - b.x) + std::abs(a.y - b.y);
+  require(std::isfinite(um) && std::isfinite(r) && std::isfinite(c) && std::isfinite(physical_length) && physical_length > 0
+              && std::abs(physical_length - um) <= 1e-9 * std::max(1., um),
+          "routing RC/unit conversion loses physical edge geometry");
+  return {parent_vertex, child_vertex, r, c, um, true};
+}
 Route_result shortest_path_tree(const Visibility_graph& graph, double dbu_per_um, const std::array<double, 4>& rc,
                                 const Route_limits& limits) {
   const auto start = Clock::now();
@@ -276,7 +290,7 @@ Route_result shortest_path_tree(const Visibility_graph& graph, double dbu_per_um
   }
   // Conversion into the physical producer uses double coordinates. Reject
   // unsupported DBU magnitudes instead of silently merging distinct vertices.
-  constexpr int64_t exact_limit = int64_t{1} << 53;
+  constexpr auto exact_limit = detail::exact_dbu_limit;
   for (auto p : graph.vertices) {
     require(p.x >= -exact_limit && p.x <= exact_limit && p.y >= -exact_limit && p.y <= exact_limit,
             "routing DBU exceeds exact physical coordinate range");
@@ -366,33 +380,23 @@ Route_result shortest_path_tree(const Visibility_graph& graph, double dbu_per_um
     }
   }
   for (size_t i = 0; i < order.size(); ++i) {
-    const auto v  = order[i];
-    indices[v]    = i;
-    const auto  p = graph.vertices[v];
-    const Point position{double(p.x) / dbu_per_um, double(p.y) / dbu_per_um};
-    require(std::isfinite(position.x) && std::isfinite(position.y), "routing physical coordinate conversion overflow");
-    tree.vertices.push_back({position, {}, {}});
+    const auto v = order[i];
+    indices[v]   = i;
+    const auto p = graph.vertices[v];
+    tree.vertices.push_back({physical_point(p, dbu_per_um), {}, {}});
     for (auto child : children[v]) {
       order.push_back(child);
     }
     if (v == root) {
       continue;
     }
-    const auto q          = graph.vertices[parent[v]];
-    const bool horizontal = p.y == q.y;
-    const auto length     = horizontal ? distance(p.x, q.x) : distance(p.y, q.y);
+    const auto q      = graph.vertices[parent[v]];
+    const auto length = p.y == q.y ? distance(p.x, q.x) : distance(p.y, q.y);
     if (result.length_dbu > std::numeric_limits<uint64_t>::max() - length) {
       throw std::overflow_error("routing total length overflow");
     }
     result.length_dbu += length;
-    const double um    = double(length) / dbu_per_um;
-    const double r = um * rc[horizontal ? 0 : 2], c = um * rc[horizontal ? 1 : 3];
-    require(std::isfinite(um) && std::isfinite(r) && std::isfinite(c), "routing RC/unit conversion overflow");
-    const auto   parent_position = tree.vertices[indices[parent[v]]].position;
-    const double physical_length = std::abs(position.x - parent_position.x) + std::abs(position.y - parent_position.y);
-    require(physical_length > 0 && std::abs(physical_length - um) <= 1e-9 * std::max(1., um),
-            "routing unit conversion loses physical edge geometry");
-    tree.segments.push_back({indices[parent[v]], i, r, c, um, true});
+    tree.segments.push_back(visibility_segment(q, p, length, indices[parent[v]], i, dbu_per_um, rc));
   }
   for (size_t s = 1; s < graph.terminals.size(); ++s) {
     tree.vertices[indices[graph.terminals[s]]].sinks.push_back(s - 1);

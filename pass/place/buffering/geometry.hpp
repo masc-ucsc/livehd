@@ -69,6 +69,14 @@ public:
   size_t          weight() const;
 };
 
+// Physical micron position of an integer visibility vertex.
+Point        physical_point(Route_point, double dbu_per_um);
+// Wire-only segment between the routing-tree vertices of one axis-aligned
+// visibility edge, with its directional technology RC (horizontal R/C,
+// vertical R/C per micron). Lossy unit conversion throws.
+Tree_segment visibility_segment(Route_point parent, Route_point child, uint64_t length_dbu, size_t parent_vertex,
+                                size_t child_vertex, double dbu_per_um, const std::array<double, 4>& directional_rc);
+
 enum class Route_status { connected, disconnected, budget_exhausted };
 struct Route_limits {
   size_t max_vertices = 100000, max_edges = 200000, max_relaxations = 1000000;

@@ -4,20 +4,14 @@
 #include <algorithm>
 #include <iterator>
 #include <limits>
-#include <stdexcept>
 #include <utility>
+
+#include "checks.hpp"
 
 namespace livehd::placement::buffering {
 namespace {
-void require(bool condition, const char* reason) {
-  if (!condition) {
-    throw std::invalid_argument(reason);
-  }
-}
-bool valid(Site_rect r) { return r.xl < r.xh && r.yl < r.yh; }
-bool overlap(const Site_span& a, const Site_span& b) {
-  return a.row == b.row && a.first < b.first + b.count && b.first < a.first + a.count;
-}
+using detail::require;
+bool     valid(Site_rect r) { return r.xl < r.xh && r.yl < r.yh; }
 uint64_t checked_end(const Site_span& s) {
   require(!s.row.empty() && s.count && s.first <= std::numeric_limits<uint64_t>::max() - s.count, "invalid site span");
   return s.first + s.count;
@@ -37,7 +31,23 @@ bool available(const Legal_sites& sites, const Site_span& s) {
   --it;
   return s.first >= it->first && end <= it->first + it->count;
 }
+// Validates and orders one reservation proposal; overlapping footprints throw.
+void normalize(std::vector<Site_span>& proposal) {
+  for (const auto& s : proposal) {
+    checked_end(s);
+  }
+  std::sort(proposal.begin(), proposal.end(), [](const auto& a, const auto& b) {
+    return a.row == b.row ? a.first < b.first : a.row < b.row;
+  });
+  for (size_t i = 1; i < proposal.size(); ++i) {
+    require(!spans_overlap(proposal[i - 1], proposal[i]), "overlapping footprints in one reservation");
+  }
+}
 }  // namespace
+
+bool spans_overlap(const Site_span& a, const Site_span& b) {
+  return a.row == b.row && a.first < b.first + b.count && b.first < a.first + a.count;
+}
 
 Legal_sites build_legal_sites(const std::vector<Site_row>& rows, const std::vector<Site_rect>& exclusions, int64_t halo,
                               int64_t legalization_margin) {
@@ -171,19 +181,8 @@ Site_reservations::Site_reservations(Legal_sites legal_sites) : sites(std::move(
   }
 }
 
-Reservation_result Site_reservations::replace(const std::string& owner, std::vector<Site_span> proposal) {
-  require(!owner.empty(), "empty reservation owner");
-  // Validate the complete proposal before inspecting/altering existing state.
-  for (const auto& s : proposal) {
-    checked_end(s);
-  }
-  std::sort(proposal.begin(), proposal.end(), [](const auto& a, const auto& b) {
-    return a.row == b.row ? a.first < b.first : a.row < b.row;
-  });
-  for (size_t i = 1; i < proposal.size(); ++i) {
-    require(!overlap(proposal[i - 1], proposal[i]), "overlapping footprints in one reservation");
-  }
-  for (const auto& s : proposal) {
+Reservation_result Site_reservations::conflict(const std::string& owner, const std::vector<Site_span>& sorted) const {
+  for (const auto& s : sorted) {
     if (!available(sites, s)) {
       return {Reservation_status::unavailable, {}};
     }
@@ -192,11 +191,25 @@ Reservation_result Site_reservations::replace(const std::string& owner, std::vec
         continue;
       }
       for (const auto& used : spans) {
-        if (overlap(s, used)) {
+        if (spans_overlap(s, used)) {
           return {Reservation_status::conflict, other};
         }
       }
     }
+  }
+  return {};
+}
+Reservation_result Site_reservations::check(const std::string& owner, std::vector<Site_span> proposal) const {
+  require(!owner.empty(), "empty reservation owner");
+  normalize(proposal);
+  return conflict(owner, proposal);
+}
+Reservation_result Site_reservations::replace(const std::string& owner, std::vector<Site_span> proposal) {
+  require(!owner.empty(), "empty reservation owner");
+  // Validate the complete proposal before inspecting/altering existing state.
+  normalize(proposal);
+  if (const auto result = conflict(owner, proposal); result.status != Reservation_status::reserved) {
+    return result;
   }
   if (proposal.empty()) {
     owners.erase(owner);

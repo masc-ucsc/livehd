@@ -2,15 +2,12 @@
 #include "gap_forces.hpp"
 
 #include <cmath>
-#include <stdexcept>
+
+#include "checks.hpp"
 
 namespace livehd::placement::buffering {
 namespace {
-void require(bool ok, const char* message) {
-  if (!ok) {
-    throw std::invalid_argument(message);
-  }
-}
+using detail::require;
 }  // namespace
 Gap_force_result bind_gap_forces(const DreamPlace::native::Design& design, const Gap_force_payload& base,
                                  const std::map<std::string, int>& drivers, const std::vector<Gap_entry_pull>& pulls, double units,

@@ -6,41 +6,53 @@
 #include <cmath>
 #include <limits>
 #include <set>
-#include <stdexcept>
+
+#include "checks.hpp"
 
 namespace livehd::placement::buffering {
 namespace {
 namespace model         = liberty::timing;
 constexpr size_t absent = std::numeric_limits<size_t>::max();
-void             require(bool condition, const char* reason) {
-  if (!condition) {
-    throw std::invalid_argument(reason);
-  }
+using detail::finite;
+using detail::require;
+bool        valid(Rect r) { return finite(Point{r.xl, r.yl}) && finite(Point{r.xh, r.yh}) && r.xl < r.xh && r.yl < r.yh; }
+bool        contains(Rect r, Point p) { return p.x >= r.xl && p.y >= r.yl && p.x <= r.xh && p.y <= r.yh; }
+bool        overlaps(Rect a, Rect b) { return a.xl < b.xh && b.xl < a.xh && a.yl < b.yh && b.yl < a.yh; }
+std::string pin_name(const Context& c, const Candidate& candidate, size_t index, bool output) {
+  const auto& ports = index ? candidate.buffers[index - 1].model : c.driver.model;
+  const auto& name  = index ? candidate.buffers[index - 1].name : c.driver.name;
+  return name + ":" + (output ? ports.output : ports.input);
 }
-bool finite(Point p) { return std::isfinite(p.x) && std::isfinite(p.y); }
-bool valid(Rect r) { return finite({r.xl, r.yl}) && finite({r.xh, r.yh}) && r.xl < r.xh && r.yl < r.yh; }
-bool contains(Rect r, Point p) { return p.x >= r.xl && p.y >= r.yl && p.x <= r.xh && p.y <= r.yh; }
-bool overlaps(Rect a, Rect b) { return a.xl < b.xh && b.xl < a.xh && a.yl < b.yh && b.yl < a.yh; }
-struct Stage {
-  const model::Cell* cell   = nullptr;
-  const model::Pin*  input  = nullptr;
-  const model::Pin*  output = nullptr;
-  const model::Arc*  arc    = nullptr;
-};
-std::optional<Stage> stage(const model::Library& lib, const Cell_ports& ports, bool buffer) {
+}  // namespace
+
+std::optional<Stage_model> stage_model(const model::Library& lib, const Cell_ports& ports, bool buffer, std::string* reason) {
+  const auto fail = [&](const char* why) -> std::optional<Stage_model> {
+    if (reason) {
+      *reason = why;
+    }
+    return std::nullopt;
+  };
   const auto found = lib.cells.find(ports.cell);
   if (found == lib.cells.end()) {
-    return {};
+    return fail("no timing library cell");
   }
-  const auto& c  = found->second;
-  const auto  in = c.pins.find(ports.input), out = c.pins.find(ports.output);
-  if (c.sequential || c.latch || c.memory || !c.unsupported.empty() || in == c.pins.end() || out == c.pins.end()) {
-    return {};
+  const auto& c = found->second;
+  if (c.sequential || c.latch || c.memory || !c.unsupported.empty()) {
+    return fail("unsupported timing cell");
+  }
+  const auto in = c.pins.find(ports.input), out = c.pins.find(ports.output);
+  if (in == c.pins.end() || out == c.pins.end()) {
+    return fail("timing pin missing");
   }
   if (in->second.direction != "input" || out->second.direction != "output" || in->second.clock || out->second.three_state) {
-    return {};
+    return fail("invalid timing pin directions");
   }
   if (buffer) {
+    for (const auto& [name, pin] : c.pins) {
+      if ((pin.direction == "input" && name != ports.input) || (pin.direction == "output" && name != ports.output)) {
+        return fail("buffer is not single-input/single-output");
+      }
+    }
     std::string function;
     for (unsigned char ch : out->second.function) {
       if (!std::isspace(ch) && ch != '(' && ch != ')') {
@@ -48,15 +60,7 @@ std::optional<Stage> stage(const model::Library& lib, const Cell_ports& ports, b
       }
     }
     if (function != ports.input) {
-      return {};
-    }
-    for (const auto& [name, pin] : c.pins) {
-      if (pin.direction == "input" && name != ports.input) {
-        return {};
-      }
-      if (pin.direction == "output" && name != ports.output) {
-        return {};
-      }
+      return fail("buffer is not noninverting");
     }
   }
   const model::Arc* arc = nullptr;
@@ -66,26 +70,20 @@ std::optional<Stage> stage(const model::Library& lib, const Cell_ports& ports, b
     }
     if (arc || !a.when.empty() || !a.unsupported.empty()
         || (a.sense != model::Sense::positive && a.sense != model::Sense::negative)) {
-      return {};
+      return fail("unsupported timing arc");
     }
     arc = &a;
   }
   if (!arc || (buffer && arc->sense != model::Sense::positive)) {
-    return {};
+    return fail("unsupported timing arc");
   }
   for (unsigned t = 0; t < 2; ++t) {
     if (!arc->delay[t] || !arc->slew[t] || !in->second.capacitance_ff[t]) {
-      return {};
+      return fail("missing capacitance/NLDM tables");
     }
   }
-  return Stage{&c, &in->second, &out->second, arc};
+  return Stage_model{&c, &in->second, &out->second, arc};
 }
-std::string pin_name(const Context& c, const Candidate& candidate, size_t index, bool output) {
-  const auto& ports = index ? candidate.buffers[index - 1].model : c.driver.model;
-  const auto& name  = index ? candidate.buffers[index - 1].name : c.driver.name;
-  return name + ":" + (output ? ports.output : ports.input);
-}
-}  // namespace
 
 Evaluation evaluate(const model::Library& lib, const Context& c, const Candidate& candidate) {
   require(valid(c.core) && finite(c.driver.output), "invalid buffering context geometry");
@@ -112,9 +110,9 @@ Evaluation evaluate(const model::Library& lib, const Context& c, const Candidate
   if (c.clock_net) {
     return unsupported("clock distribution is outside signal buffering");
   }
-  std::vector<Stage> stages;
+  std::vector<Stage_model> stages;
   for (size_t i = 0; i < count; ++i) {
-    const auto s = stage(lib, i ? candidate.buffers[i - 1].model : c.driver.model, i != 0);
+    const auto s = stage_model(lib, i ? candidate.buffers[i - 1].model : c.driver.model, i != 0);
     if (!s) {
       return unsupported("missing, ambiguous or unsupported stage model: " + pin_name(c, candidate, i, true));
     }

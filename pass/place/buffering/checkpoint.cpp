@@ -4,16 +4,13 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
-#include <stdexcept>
 #include <tuple>
+
+#include "checks.hpp"
 
 namespace livehd::placement::buffering {
 namespace {
-void require(bool ok, const char* why) {
-  if (!ok) {
-    throw std::invalid_argument(why);
-  }
-}
+using detail::require;
 #if DREAMPLACE_NATIVE_DENSITY_RESERVATION_API >= 1 && DREAMPLACE_NATIVE_PIN_TIMING_API >= 3
 bool close(double a, double b) {
   return std::isfinite(a) && std::isfinite(b) && std::abs(a - b) <= std::max(1e-9, 1e-12 * std::max(std::abs(a), std::abs(b)));

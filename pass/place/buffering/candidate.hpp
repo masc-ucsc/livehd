@@ -106,6 +106,19 @@ struct Evaluation {
   std::map<late::Driver_failure, size_t> driver_failures;
   bool feasible() const { return status == Status::evaluated && electrically_feasible && resources_feasible; }
 };
+// Library view of one electrical stage: a combinational cell with exactly one
+// unconditional unate input->output arc and rise/fall NLDM delay/slew and input
+// capacitance. An inserted buffer must also be single-input/single-output,
+// noninverting and positive unate. Unsupported models return nullopt and the
+// first failed requirement in *reason.
+struct Stage_model {
+  const liberty::timing::Cell* cell   = nullptr;
+  const liberty::timing::Pin*  input  = nullptr;
+  const liberty::timing::Pin*  output = nullptr;
+  const liberty::timing::Arc*  arc    = nullptr;
+};
+std::optional<Stage_model> stage_model(const liberty::timing::Library&, const Cell_ports&, bool buffer,
+                                       std::string* reason = nullptr);
 // Common evaluator for fully expanded candidates, before either search pruning
 // or materialization. Uses the existing native GaTe/pi and per-receiver waveform
 // kernels, with fresh loads on EVERY affected segment. Exact on the supplied RC
@@ -114,5 +127,5 @@ struct Evaluation {
 // No netlist edit, search optimum, routing-capacity inference or whole-design
 // timing certification is implied. Malformed topology/identity throws; missing
 // models, numerical fit failure and bounded work exhaustion remain distinct.
-Evaluation evaluate(const liberty::timing::Library&, const Context&, const Candidate&);
+Evaluation                 evaluate(const liberty::timing::Library&, const Context&, const Candidate&);
 }  // namespace livehd::placement::buffering

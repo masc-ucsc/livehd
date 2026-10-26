@@ -2,19 +2,15 @@
 #include "tree_search.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <cmath>
 #include <limits>
-#include <stdexcept>
+
+#include "checks.hpp"
 
 namespace livehd::placement::buffering {
 namespace {
-void require(bool condition, const char* message) {
-  if (!condition) {
-    throw std::invalid_argument(message);
-  }
-}
-bool   finite(Point p) { return std::isfinite(p.x) && std::isfinite(p.y); }
+using detail::finite;
+using detail::require;
 double distance(Point a, Point b) { return std::abs(a.x - b.x) + std::abs(a.y - b.y); }
 using Children = std::vector<std::vector<size_t>>;
 Children validate(const Context& context, const Routing_tree& tree) {
@@ -41,7 +37,7 @@ Children validate(const Context& context, const Routing_tree& tree) {
       const auto [found, inserted] = names.emplace(b.name, i);
       require(!b.name.empty() && (inserted || found->second == i) && b.name != context.driver.name,
               "routing-tree buffer identity is shared by different vertices");
-      require(finite(b.input) && finite(b.output) && finite({b.body.xl, b.body.yl}) && finite({b.body.xh, b.body.yh})
+      require(finite(b.input) && finite(b.output) && finite(Point{b.body.xl, b.body.yl}) && finite(Point{b.body.xh, b.body.yh})
                   && b.body.xl < b.body.xh && b.body.yl < b.body.yh && b.input.x >= b.body.xl && b.input.x <= b.body.xh
                   && b.input.y >= b.body.yl && b.input.y <= b.body.yh && b.output.x >= b.body.xl && b.output.x <= b.body.xh
                   && b.output.y >= b.body.yl && b.output.y <= b.body.yh,
@@ -160,9 +156,6 @@ Candidate expand(const Context& c, const Routing_tree& route, const Children& ch
   }
   return result;
 }
-bool spans_overlap(const Site_span& a, const Site_span& b) {
-  return a.row == b.row && a.first < b.first + b.count && b.first < a.first + a.count;
-}
 bool subset(const std::vector<Site_span>& a, const std::vector<Site_span>& b) {
   for (const auto& s : a) {
     auto cursor = s.first;
@@ -237,6 +230,23 @@ bool better(const Tree_solution& a, const Tree_solution& b, Tree_selection selec
 }
 }  // namespace
 
+bool body_within_sites(const Rect& b, const Site_rect& sites, double dbu_per_um) {
+  constexpr auto limit = detail::exact_dbu_limit;
+  require(sites.xl >= -limit && sites.xh <= limit && sites.yl >= -limit && sites.yh <= limit,
+          "site footprint exceeds exact double DBU range");
+  return b.xl >= double(sites.xl) / dbu_per_um && b.xh <= double(sites.xh) / dbu_per_um && b.yl >= double(sites.yl) / dbu_per_um
+         && b.yh <= double(sites.yh) / dbu_per_um;
+}
+std::optional<double> worst_input_margin(const Evaluation& timing, const Driver& driver) {
+  std::optional<double> worst;
+  for (unsigned t = 0; t < 2; ++t) {
+    if (timing.root_required_ps[t]) {
+      const double margin = *timing.root_required_ps[t] - driver.input_arrival_ps[t];
+      worst               = std::min(worst.value_or(margin), margin);
+    }
+  }
+  return worst;
+}
 bool dominates_tree_solution(const Tree_solution& a, const Tree_solution& b, const Context& c) { return dominates(a, b, c); }
 bool prefer_tree_solution(const Tree_solution& a, const Tree_solution& b, Tree_selection selection) {
   return better(a, b, selection);
@@ -259,7 +269,7 @@ Tree_search_result search_tree(const liberty::timing::Library& lib, const Contex
     result.status = Tree_search_status::budget_exhausted;
     return result;
   }
-  const auto            start    = std::chrono::steady_clock::now();
+  const auto            start    = detail::Clock::now();
   const auto            children = validate(c, route);
   std::vector<Site_row> rows;
   for (const auto& [name, row] : reservations.geometry()) {
@@ -268,20 +278,13 @@ Tree_search_result search_tree(const liberty::timing::Library& lib, const Contex
   const auto full = build_legal_sites(rows, {});
   for (const auto& vertex : route.vertices) {
     for (const auto& option : vertex.options) {
-      const auto        body        = site_body(full, option.site);
-      constexpr int64_t exact_limit = int64_t(1) << 53;
-      require(body.xl >= -exact_limit && body.xh <= exact_limit && body.yl >= -exact_limit && body.yh <= exact_limit,
-              "site coordinates exceed exact double integer range");
-      const auto& b = option.buffer.body;
-      require(b.xl >= double(body.xl) / settings.dbu_per_um && b.xh <= double(body.xh) / settings.dbu_per_um
-                  && b.yl >= double(body.yl) / settings.dbu_per_um && b.yh <= double(body.yh) / settings.dbu_per_um,
+      require(body_within_sites(option.buffer.body, site_body(full, option.site), settings.dbu_per_um),
               "buffer footprint exceeds its reserved site span");
     }
   }
   std::vector<size_t> choices(route.vertices.size());
   for (;;) {
-    if (result.assignments >= settings.max_assignments
-        || std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count() >= settings.max_seconds) {
+    if (result.assignments >= settings.max_assignments || detail::elapsed(start) >= settings.max_seconds) {
       result.status = Tree_search_status::budget_exhausted;
       return result;
     }
@@ -299,8 +302,7 @@ Tree_search_result search_tree(const liberty::timing::Library& lib, const Contex
     for (size_t i = 1; i < spans.size(); ++i) {
       overlap = overlap || spans_overlap(spans[i - 1], spans[i]);
     }
-    auto trial = reservations;
-    if (overlap || trial.replace(owner, spans).status != Reservation_status::reserved) {
+    if (overlap || reservations.check(owner, spans).status != Reservation_status::reserved) {
       ++result.site_rejected;
     } else {
       auto candidate             = expand(c, route, children, choices);
@@ -330,13 +332,8 @@ Tree_search_result search_tree(const liberty::timing::Library& lib, const Contex
           ++result.required_rejected;
         }
         if (timing.feasible() && !required) {
-          Tree_solution solution{choices, std::move(candidate), std::move(timing), std::move(spans), {}};
-          for (unsigned t = 0; t < 2; ++t) {
-            if (solution.timing.root_required_ps[t]) {
-              const auto margin              = *solution.timing.root_required_ps[t] - c.driver.input_arrival_ps[t];
-              solution.worst_input_margin_ps = std::min(solution.worst_input_margin_ps.value_or(margin), margin);
-            }
-          }
+          const auto    margin = worst_input_margin(timing, c.driver);
+          Tree_solution solution{choices, std::move(candidate), std::move(timing), std::move(spans), margin};
           if (!result.best || (dominates(solution, *result.best, c) && !dominates(*result.best, solution, c))
               || better(solution, *result.best, settings.selection)) {
             result.best = solution;
