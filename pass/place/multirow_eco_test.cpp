@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "gtest/gtest.h"
+#include "multirow_test_frame.hpp"
 #include "place.hpp"
 #include "row_occupancy.hpp"
 
@@ -15,24 +16,15 @@ namespace livehd::placement {
 namespace {
 namespace ph = physical;
 using ph::Orientation;
-using ph::Row_access;
 using ph::Status;
 using Outcome = Multirow_eco_cell::Outcome;
 
-// 100 DBU per micron; one-micron sites and rows, N/FS rows by default. "dom",
-// "dom_b" (an equal-width variant), "dom5", "dom_2p5" (rounded up to three
-// sites) and "dom6" are two-row CORE variants with the row-access template t0.
-struct Fixture {
-  ph::Technology                           tech;
-  ph::Floorplan                            fp;
-  ph::Row_access_convention                access;
-  std::map<std::string, Multirow_template> templates;
-  Multirow_eco_options                     options;
-  explicit Fixture(int width = 12, int height = 2, bool flip = true) {
-    tech.dbu = fp.dbu  = 100;
-    tech.sites["core"] = {1, 1, true};
-    macro("cell", "CORE", 1, 1);
-    macro("tap", "CORE WELLTAP", 1, 1);
+// The shared frame; "dom", "dom_b" (an equal-width variant), "dom5",
+// "dom_2p5" (rounded up to three sites) and "dom6" are two-row CORE variants
+// with the row-access template t0.
+struct Fixture : test::Multirow_frame {
+  Multirow_eco_options options;
+  explicit Fixture(int width = 12, int height = 2, bool flip = true) : Multirow_frame(width, height, flip) {
     for (const auto& [name, sites] : std::map<std::string, double>{
              {    "dom",   3},
              {  "dom_b",   3},
@@ -40,30 +32,9 @@ struct Fixture {
              {"dom_2p5", 2.5},
              {   "dom6",   6}
     }) {
-      macro(name, "CORE", sites, 2, true);
-      templates[name] = {Row_access::horizontal, Row_access::vertical};
+      two_row(name, sites);
     }
-    fp.die = {0, 0, width * 100., height * 100.};
-    for (int y = 0; y < height; ++y) {
-      fp.rows.push_back(
-          {"r" + std::to_string(y), "core", 0, y * 100, width, 100, flip && y % 2 ? Orientation::FS : Orientation::N});
-    }
-    options.anchor.access                  = &access;
-    options.anchor.templates               = &templates;
-    options.anchor.occupancy.bins_x        = 1;
-    options.anchor.occupancy.bins_y        = 1;
-    options.anchor.occupancy.max_density   = 1;
-    options.anchor.occupancy.padding_sites = 0;  // the padding cases set their own
-  }
-  Fixture(const Fixture&) = delete;  // options point into the fixture
-  void macro(const std::string& name, const std::string& klass, double width, double height, bool symmetry_y = false) {
-    auto& m      = tech.macros[name];
-    m.width      = width;
-    m.height     = height;
-    m.klass      = klass;
-    m.site       = "core";
-    m.symmetry_x = true;
-    m.symmetry_y = symmetry_y;
+    controls(options.anchor);
   }
   // x and y in sites and rows; a cell takes its row's orientation.
   std::string cell(double x, double y, const std::string& master = "cell", Status status = Status::PLACED) {

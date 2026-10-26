@@ -582,14 +582,20 @@ cc_library(
 cc_test(
     name = "multirow_test",
     size = "small",
-    srcs = ["multirow_test.cpp"],
+    srcs = [
+        "multirow_test.cpp",
+        "multirow_test_frame.hpp",
+    ],
     copts = COPTS,
     deps = [":multirow", ":place", ":terminal_legalize", "@googletest//:gtest_main"],
 )
 cc_test(
     name = "multirow_eco_test",
     size = "small",
-    srcs = ["multirow_eco_test.cpp"],
+    srcs = [
+        "multirow_eco_test.cpp",
+        "multirow_test_frame.hpp",
+    ],
     copts = COPTS,
     deps = [":multirow", ":place", "@googletest//:gtest_main"],
 )

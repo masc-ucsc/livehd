@@ -7,6 +7,7 @@
 
 #include "capacity_bins.hpp"
 #include "gtest/gtest.h"
+#include "multirow_test_frame.hpp"
 #include "place.hpp"
 #include "terminal_legalize.hpp"
 
@@ -15,48 +16,17 @@ namespace {
 namespace ph = physical;
 namespace dp = DreamPlace::native;
 using ph::Orientation;
-using ph::Row_access;
 using ph::Status;
 
-// 100 DBU per micron; one-micron sites and rows. "dom" and "wide" are two-row
-// CORE masters with the row-access template t0 (bottom half horizontal).
-struct Fixture {
-  ph::Technology                           tech;
-  ph::Floorplan                            fp;
-  ph::Row_access_convention                access;
-  std::map<std::string, Multirow_template> templates;
-  Multirow_options                         options;
-  explicit Fixture(int width = 12, int height = 2, bool flip = true) {
-    tech.dbu = fp.dbu  = 100;
-    tech.sites["core"] = {1, 1, true};
-    macro("cell", "CORE", 1, 1);
-    macro("dom", "CORE", 3, 2, true);
-    macro("wide", "CORE", 5, 2, true);
-    macro("tap", "CORE WELLTAP", 1, 1);
+// The shared frame; "dom" and "wide" are two-row CORE masters with the
+// row-access template t0 (bottom half horizontal).
+struct Fixture : test::Multirow_frame {
+  Multirow_options options;
+  explicit Fixture(int width = 12, int height = 2, bool flip = true) : Multirow_frame(width, height, flip) {
+    two_row("dom", 3);
+    two_row("wide", 5);
     macro("block", "BLOCK", 2, 2);
-    fp.die = {0, 0, width * 100., height * 100.};
-    for (int y = 0; y < height; ++y) {
-      fp.rows.push_back(
-          {"r" + std::to_string(y), "core", 0, y * 100, width, 100, flip && y % 2 ? Orientation::FS : Orientation::N});
-    }
-    const Multirow_template t0{Row_access::horizontal, Row_access::vertical};
-    templates["dom"] = templates["wide"] = t0;
-    options.access                       = &access;
-    options.templates                    = &templates;
-    options.occupancy.bins_x             = 1;
-    options.occupancy.bins_y             = 1;
-    options.occupancy.max_density        = 1;
-    options.occupancy.padding_sites      = 0;  // the padding cases set their own
-  }
-  Fixture(const Fixture&) = delete;  // options point into the fixture
-  void macro(const std::string& name, const std::string& klass, double width, double height, bool symmetry_y = false) {
-    auto& m      = tech.macros[name];
-    m.width      = width;
-    m.height     = height;
-    m.klass      = klass;
-    m.site       = "core";
-    m.symmetry_x = true;
-    m.symmetry_y = symmetry_y;
+    controls(options);
   }
   // x and y in sites and rows; a fixed cell takes its row's orientation.
   size_t cell(double x, double y, const std::string& master = "dom", Status status = Status::PLACED) {
