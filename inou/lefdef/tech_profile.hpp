@@ -2,6 +2,7 @@
 #pragma once
 #include <algorithm>
 #include <array>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -59,6 +60,8 @@ struct Tech_profile {
   std::string                hold_buffer;       // default Liberty HOLD_BUF cell
   Pg_strategy                pg;
 };
+// Every registered profile.
+std::span<const Tech_profile> tech_profiles();
 // Registry lookup by profile name or by its power-grid strategy name.
 const Tech_profile& tech_profile(std::string_view name);
 // "auto" detects the profile from the LEF; any other value is an explicit

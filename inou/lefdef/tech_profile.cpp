@@ -47,6 +47,7 @@ std::string known_profiles() {
   return names;
 }
 }  // namespace
+std::span<const Tech_profile> tech_profiles() { return registry(); }
 const Tech_profile& tech_profile(std::string_view name) {
   for (const auto& p : registry()) {
     if (name == p.name || (!p.pg.name.empty() && name == p.pg.name)) {
