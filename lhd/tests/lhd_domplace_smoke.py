@@ -51,6 +51,18 @@ W = root / 'W'
 run('all', base + domino + ['--set', 'pass.usyn.domino_select=all', '--workdir', str(W), '--emit-dir', f'lg:{root}/net',
                             '--emit-dir', f'report:{root}/report'])
 report = json.loads((W / 'synth/qor.json.usyn.json').read_text())
+# The SDC clock port may come through a Tcl variable, and statements may share
+# a line.
+for name, text in (('var', 'set clk_port clk\ncreate_clock -name c -period 10 [get_ports $clk_port]\n'),
+                   ('braced_var', 'set p {clk}; create_clock -name c -period 10 [get_ports ${p}]\n')):
+    (root / f'{name}.sdc').write_text(text)
+    args = [a if not a.startswith('synth.sdc=') else f'synth.sdc={root}/{name}.sdc' for a in base]
+    run(f'sdc_{name}', args + domino + ['--workdir', str(root / f'S_{name}')])
+    assert json.loads((root / f'S_{name}/synth/qor.json.usyn.json').read_text())['physical']['clock'] == 'clk', name
+(root / 'joined.sdc').write_text('create_clock -name a -period 10 [get_ports clk]; create_clock -name b -period 5 [get_ports en]\n')
+joined = run('sdc_joined', [a if not a.startswith('synth.sdc=') else f'synth.sdc={root}/joined.sdc' for a in base] + domino
+             + ['--workdir', str(root / 'S_joined')], False)
+assert 'domino_clock' in joined['error']['message'], joined['error']
 # The row-access convention only configures the profile: without it the
 # setting is refused, never silently ignored.
 for leg, command in (('row_access_synth', base), ('row_access_pass', [lhd, 'pass', 'usyn', '--top', 'dom', f'lg:{root}/net',

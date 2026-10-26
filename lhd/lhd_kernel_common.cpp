@@ -858,14 +858,65 @@ void merge_color_sets(const Options& opts, Eprp_var::Eprp_dict& labels) {
   merge_sets(opts, "pass.color.synth", labels);
 }
 
+namespace {
+// The SDC subset the readers below share: statements split on newlines and
+// ';', whitespace tokens, and `set NAME VALUE` variables substituted as
+// `$NAME` / `${NAME}`. A Tcl expression or a nested command is never
+// evaluated.
+class Sdc_statements {
+public:
+  explicit Sdc_statements(const std::string& path) {
+    std::ifstream in(path);
+    text_.assign(std::istreambuf_iterator<char>(in), {});
+  }
+  bool empty() const { return text_.empty(); }
+  // f(statement, tokens) for every statement but a variable `set`, in file
+  // order; value() resolves the variables set before it.
+  template <typename F>
+  void each(F f) {
+    vars_.clear();
+    for (const auto line : absl::StrSplit(text_, absl::ByAnyChar("\n;"))) {
+      const auto                     statement = absl::StripAsciiWhitespace(line);
+      const std::vector<std::string> tok       = absl::StrSplit(statement, absl::ByAnyChar(" \t"), absl::SkipEmpty());
+      if (tok.size() == 3 && tok[0] == "set") {
+        if (auto v = value(tok[2])) {
+          vars_[tok[1]] = std::move(*v);
+        }
+      } else if (!tok.empty()) {
+        f(statement, tok);
+      }
+    }
+  }
+  // A token without quotes or braces, a variable reference substituted;
+  // nullopt for an unknown variable.
+  std::optional<std::string> value(std::string_view tok) const {
+    while (!tok.empty() && (tok.front() == '"' || tok.front() == '{')) {
+      tok.remove_prefix(1);
+    }
+    while (!tok.empty() && (tok.back() == '"' || tok.back() == '}' || tok.back() == ';')) {
+      tok.remove_suffix(1);
+    }
+    if (tok.empty() || tok.front() != '$') {
+      return std::string{tok};
+    }
+    tok.remove_prefix(tok.size() > 1 && tok[1] == '{' ? 2 : 1);
+    const auto it = vars_.find(tok);
+    return it == vars_.end() ? std::nullopt : std::optional<std::string>{it->second};
+  }
+
+private:
+  std::string                                   text_;
+  absl::flat_hash_map<std::string, std::string> vars_;
+};
+}  // namespace
+
 // The smallest `create_clock -period` of an SDC in picoseconds, or nullopt when no
 // period can be resolved. Handles `set VAR number` and `$VAR` / `${VAR}` periods
 // (the usual HighTide/ORFS spelling); a Tcl expression is not guessed. The SDC
 // time unit is the Liberty time unit, read from the first `time_unit` attribute.
 std::optional<double> sdc_min_clock_period_ps(const std::string& sdc_path, const std::string& liberty_path) {
-  std::ifstream     in(sdc_path);
-  const std::string text{std::istreambuf_iterator<char>(in), {}};
-  if (text.empty()) {
+  Sdc_statements sdc(sdc_path);
+  if (sdc.empty()) {
     return std::nullopt;
   }
   double to_ps = 1.0;
@@ -881,48 +932,28 @@ std::optional<double> sdc_min_clock_period_ps(const std::string& sdc_path, const
       to_ps              = scale * (u == "fs" ? 1e-3 : u == "ps" ? 1.0 : u == "ns" ? 1e3 : 1e6);
     }
   }
-  absl::flat_hash_map<std::string, double> vars;
-  const auto                               number = [&](std::string tok, double& out) {
-    while (!tok.empty() && (tok.front() == '"' || tok.front() == '{')) {
-      tok.erase(0, 1);
-    }
-    while (!tok.empty() && (tok.back() == '"' || tok.back() == '}' || tok.back() == ';')) {
-      tok.pop_back();
-    }
-    if (!tok.empty() && tok.front() == '$') {
-      tok.erase(0, 1);
-      if (!tok.empty() && tok.front() == '{') {
-        tok.erase(0, 1);
-      }
-      const auto it = vars.find(tok);
-      if (it == vars.end()) {
-        return false;
-      }
-      out = it->second;
-      return true;
+  const auto number = [&](const std::string& tok, double& out) {
+    const auto text = sdc.value(tok);
+    if (!text) {
+      return false;
     }
     char* end = nullptr;
-    out       = std::strtod(tok.c_str(), &end);
-    return end != tok.c_str() && *end == '\0';
+    out       = std::strtod(text->c_str(), &end);
+    return end != text->c_str() && *end == '\0';
   };
   std::optional<double> best;
-  for (const auto line_sv : absl::StrSplit(text, absl::ByAnyChar("\n;"))) {
-    const std::vector<std::string> tok
-        = absl::StrSplit(absl::StripAsciiWhitespace(line_sv), absl::ByAnyChar(" \t"), absl::SkipEmpty());
-    if (tok.size() >= 3 && tok[0] == "set") {
-      if (double v = 0; number(tok[2], v) && tok.size() == 3) {
-        vars[tok[1]] = v;
-      }
-    } else if (!tok.empty() && tok[0] == "create_clock") {
-      for (size_t i = 1; i + 1 < tok.size(); ++i) {
-        if (tok[i] == "-period") {
-          if (double v = 0; number(tok[i + 1], v) && v > 0 && (!best || v < *best)) {
-            best = v;
-          }
+  sdc.each([&](std::string_view, const std::vector<std::string>& tok) {
+    if (tok[0] != "create_clock") {
+      return;
+    }
+    for (size_t i = 1; i + 1 < tok.size(); ++i) {
+      if (tok[i] == "-period") {
+        if (double v = 0; number(tok[i + 1], v) && v > 0 && (!best || v < *best)) {
+          best = v;
         }
       }
     }
-  }
+  });
   if (best) {
     *best *= to_ps;
   }
@@ -941,32 +972,31 @@ void domino_profile_labels(const Options& opts, const std::string& lefs, Eprp_va
     return;
   }
   // The one constrained domain: an SDC whose only clock (create_clock or
-  // create_generated_clock) is defined on one port. Anything else leaves
-  // domino_clock unset, which pass.usyn refuses with a hint to name it.
+  // create_generated_clock) is defined on one port, spelled directly or
+  // through a variable. Anything else leaves domino_clock unset, which
+  // pass.usyn refuses with a hint to name it.
   const auto sdc = synth_set(opts, "sdc", "");
   if (sdc.empty()) {
     return;
   }
-  static const std::regex  port_re(R"(\[\s*get_ports\s+\{?\s*([^\s\{\}\[\]]+)\s*\}?\s*\])");
-  std::ifstream            in(sdc);
+  static const std::regex  port_re(R"(\[\s*get_ports\s+\{?\s*(\$\{[^\s\{\}\[\]]+\}|[^\s\{\}\[\]]+)\s*\}?\s*\])");
+  Sdc_statements           statements(sdc);
   std::vector<std::string> ports;
   size_t                   clocks = 0;
-  for (std::string line; std::getline(in, line);) {
-    const auto first   = line.find_first_not_of(" \t");
-    const auto command = [&](std::string_view name) {
-      return line.compare(first, name.size(), name) == 0 && first + name.size() < line.size()
-             && (line[first + name.size()] == ' ' || line[first + name.size()] == '\t');
-    };
-    if (first == std::string::npos || !(command("create_clock") || command("create_generated_clock"))) {
-      continue;
+  bool                     known  = true;
+  statements.each([&](std::string_view statement, const std::vector<std::string>& tok) {
+    if (tok[0] != "create_clock" && tok[0] != "create_generated_clock") {
+      return;
     }
     ++clocks;
-    std::smatch match;
-    if (std::regex_search(line, match, port_re)) {
-      ports.push_back(match[1].str());
+    const std::string text{statement};
+    if (std::smatch match; std::regex_search(text, match, port_re)) {
+      const auto port = statements.value(match[1].str());
+      known           = known && port && !port->empty() && port->front() != '$';
+      ports.push_back(port.value_or(""));
     }
-  }
-  if (clocks == 1 && ports.size() == 1) {
+  });
+  if (clocks == 1 && ports.size() == 1 && known) {
     labels["domino_clock"] = ports.front();
   }
 }
