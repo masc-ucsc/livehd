@@ -38,6 +38,13 @@ def run(name, args, success=True):
     return data
 
 
+def with_sdc(name, text):
+    """base with synth.sdc replaced by a new file holding `text`."""
+    path = root / f'{name}.sdc'
+    path.write_text(text)
+    return [a if not a.startswith('synth.sdc=') else f'synth.sdc={path}' for a in base]
+
+
 # The profile is opt-in and never moves a default: STA stays on unless the
 # run turns it off, so the profile is an explicit usage error, and the LEFs
 # and row access are kernel-plumbed (INTERNAL) labels.
@@ -67,24 +74,6 @@ W = root / 'W'
 run('all', base + domino + ['--set', 'pass.usyn.domino_select=all', '--workdir', str(W), '--emit-dir', f'lg:{root}/net',
                             '--emit-dir', f'report:{root}/report'])
 report = json.loads((W / 'synth/qor.json.usyn.json').read_text())
-# The SDC clock port may come through a Tcl variable, and statements may share
-# a line.
-for name, text in (('var', 'set clk_port clk\ncreate_clock -name c -period 10 [get_ports $clk_port]\n'),
-                   ('braced_var', 'set p {clk}; create_clock -name c -period 10 [get_ports ${p}]\n')):
-    (root / f'{name}.sdc').write_text(text)
-    args = [a if not a.startswith('synth.sdc=') else f'synth.sdc={root}/{name}.sdc' for a in base]
-    run(f'sdc_{name}', args + domino + ['--workdir', str(root / f'S_{name}')])
-    assert json.loads((root / f'S_{name}/synth/qor.json.usyn.json').read_text())['physical']['clock'] == 'clk', name
-(root / 'joined.sdc').write_text('create_clock -name a -period 10 [get_ports clk]; create_clock -name b -period 5 [get_ports en]\n')
-joined = run('sdc_joined', [a if not a.startswith('synth.sdc=') else f'synth.sdc={root}/joined.sdc' for a in base] + domino
-             + ['--workdir', str(root / 'S_joined')], False)
-assert 'domino_clock' in joined['error']['message'], joined['error']
-# The row-access convention only configures the profile: without it the
-# setting is refused, never silently ignored.
-for leg, command in (('row_access_synth', base), ('row_access_pass', [lhd, 'pass', 'usyn', '--top', 'dom', f'lg:{root}/net',
-                                                                      '--set', f'synth.liberty={libdir}/sky130hd.lib'])):
-    stray = run(leg, command + ['--set', f'synth.place.row_access={sdc}', '--workdir', str(root / 'R')], False)
-    assert stray['error']['class'] == 'usage' and 'synth.place.row_access' in stray['error']['message'], (leg, stray['error'])
 assert report['target'] == 'cmos' and report['output'] == 'mapped-mixed', report['output']
 physical = report['physical']
 assert physical['emission'] == 'mixed' and physical['clock'] == 'clk', physical
@@ -114,6 +103,37 @@ masters = {v['name'] for m in sidecar['masters'] for v in m['variants']}
 assert {i['master'] for i in sidecar['instances']} <= masters, (sidecar['instances'], masters)
 for name in ('domino_cells.lef', 'domino_models.v', 'row_access.json', 'models'):
     assert (bundle / name).exists() and (root / 'report/qor.json.domino' / name).exists(), name
+
+# domino_clock comes from the SDC only when it has exactly one clock, on one
+# port, spelled directly, braced or through a Tcl variable; statements may
+# share a line. Anything else leaves it unset and pass.usyn asks for it, and
+# an explicit domino_clock always wins.
+for name, text, extra in (
+        ('var', 'set clk_port clk\ncreate_clock -name c -period 10 [get_ports $clk_port]\n', []),
+        ('braced_var', 'set p {clk}; create_clock -name c -period 10 [get_ports ${p}]\n', []),
+        ('braced', 'create_clock -name c -period 10 [get_ports {clk}]\n', []),
+        ('named', 'create_clock -name a -period 10 [get_ports clk]\ncreate_clock -name b -period 10 [get_ports en]\n',
+         ['--set', 'pass.usyn.domino_clock=clk'])):
+    run(f'sdc_{name}', with_sdc(name, text) + domino + extra + ['--workdir', str(root / f'S_{name}')])
+    clock = json.loads((root / f'S_{name}/synth/qor.json.usyn.json').read_text())['physical']['clock']
+    assert clock == 'clk', (name, clock)
+for name, text in (
+        ('two', 'create_clock -name a -period 10 [get_ports clk]\ncreate_clock -name b -period 10 [get_ports en]\n'),
+        ('joined', 'create_clock -name a -period 10 [get_ports clk]; create_clock -name b -period 5 [get_ports en]\n'),
+        ('generated', 'create_clock -name a -period 10 [get_ports clk]\n'
+                      'create_generated_clock -name g -source [get_ports clk] -divide_by 2 [get_pins x/Q]\n'),
+        ('virtual', 'create_clock -name v -period 10\n'),
+        ('ports', 'create_clock -name a -period 10 [get_ports {clk en}]\n'),
+        ('unset_var', 'create_clock -name a -period 10 [get_ports $nope]\n')):
+    error = run(f'sdc_{name}', with_sdc(name, text) + domino + ['--workdir', str(root / f'S_{name}')], False)['error']
+    assert 'domino_clock' in error['message'], (name, error)
+
+# The row-access convention only configures the profile: without it the
+# setting is refused, never silently ignored.
+for leg, command in (('row_access_synth', base), ('row_access_pass', [lhd, 'pass', 'usyn', '--top', 'dom', f'lg:{root}/net',
+                                                                      '--set', f'synth.liberty={libdir}/sky130hd.lib'])):
+    stray = run(leg, command + ['--set', f'synth.place.row_access={sdc}', '--workdir', str(root / 'R')], False)
+    assert stray['error']['class'] == 'usage' and 'synth.place.row_access' in stray['error']['message'], (leg, stray['error'])
 
 # Sequential equivalence: proven with the bundle's models, never without.
 subprocess.run([lhd, 'pass', 'liberty', 'gensim', str(libdir / 'sky130hd.lib'),
