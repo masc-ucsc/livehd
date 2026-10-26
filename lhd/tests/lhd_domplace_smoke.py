@@ -214,8 +214,29 @@ placed_proof = run('lec_placed', [lhd, 'lec', '--impl', f'lg:{P}/synth/net', '--
                                   '--workdir', str(root / 'lec_placed')])['lec']
 assert placed_proof['verdict'] == 'proven-full', placed_proof
 
-# Placement is deterministic: a second run in a fresh workdir gives the same DEF.
+# Placement is deterministic: a warm rerun restores the cached placement and
+# a second run in a fresh workdir gives the same DEF.
 first_def = (root / 'def/out.def').read_bytes()
+warm = run('place_warm', place_args + ['--workdir', str(P), '--emit-dir', f'def:{root}/def_warm'])
+assert warm['qor']['place'].get('reused_final_state'), warm['qor']['place']
+assert (root / 'def_warm/out.def').read_bytes() == first_def
 run('place_again', place_args + ['--workdir', str(root / 'P2'), '--emit-dir', f'def:{root}/def2'])
 assert (root / 'def2/out.def').read_bytes() == first_def
+
+# An owner's row-access convention in the same workdir is a new identity:
+# nothing is reused, the bundle and placement follow it, and the provenance
+# records the convention file and the LEFs.
+owner = root / 'owner.json'
+owner.write_text('{"schema": 1, "name": "owner", "version": "1", "even": "vertical", "odd": "horizontal"}')
+owned = run('place_owner', place_args + ['--set', f'synth.place.row_access={owner}', '--workdir', str(P)])['qor']['place']
+assert owned['legal'] and not owned.get('reused_final_state'), owned
+assert owned['multirow']['row_access'] == 'owner' and owned['multirow']['cells'] == 2, owned['multirow']
+owned_bundle = P / 'synth/qor.json.domino'
+assert json.loads((owned_bundle / 'row_access.json').read_text())['name'] == 'owner'
+assert json.loads((owned_bundle / 'domino_models.json').read_text())['row_access']['even'] == 'vertical'
+paths = {f['path'] for f in json.loads((P / 'synth/qor.json.provenance/manifest.json').read_text())['files']}
+assert str(owner) in paths and any(p.endswith('sky130hd.lef') for p in paths), paths
+missing = run('row_access_missing', base + domino + ['--set', f'synth.place.row_access={root}/nope.json',
+                                                     '--workdir', str(root / 'RA')], False)['error']
+assert 'bundle' in missing['message'] and 'nope.json' in missing['message'], missing
 print('lhd_domplace_smoke: ok')
