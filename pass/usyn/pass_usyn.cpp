@@ -334,6 +334,7 @@ bool read_options(const Eprp_var& var, Options& options) {
   if (!flag("domino_identity", options.domino.identity, "false")) {
     return invalid_option("domino_identity", "true|false");
   }
+  options.domino.functions = endpoint.functions;
   options.domino.clock    = std::string(var.get_stage("domino_clock", ""));
   options.domino_inverter = std::string(var.get_stage("domino_inverter", ""));
   options.domino_register = std::string(var.get_stage("domino_register", ""));

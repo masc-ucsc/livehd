@@ -220,6 +220,25 @@ TEST(PhysicalSelect, And5IsPolarityIllegal) {
   EXPECT_TRUE(run.emission->cells.empty());
 }
 
+TEST(PhysicalSelect, ACappedPositiveSearchIsNotAnIllegalityProof) {
+  Builder    b;
+  const auto a = b.input("a"), c = b.input("c"), d = b.input("d"), e = b.input("e");
+  b.state("q");
+  // (a & c) | (d & e) through the logical !Q port: (!a | !c) & (!d | !e) with
+  // output_inverted, so the physical choice resynthesizes it positive.
+  b.next(0,
+         formula({lit(0, true), lit(1, true), parallel(0, 1), lit(2, true), lit(3, true), parallel(3, 4), series(2, 5)}, true),
+         {a, c, d, e});
+  EXPECT_EQ(select(b, all()).reasons(), std::vector<std::string>{"domino-all"});
+  // One cube covers neither polarity: the search stops at its own cap.
+  auto capped                = all();
+  capped.functions.max_cubes = 1;
+  const auto run             = select(b, capped);
+  ASSERT_TRUE(run.emission);
+  EXPECT_EQ(run.reasons(), std::vector<std::string>{"polarity-search"});
+  EXPECT_EQ(run.emission->states[0].decision, usyn::Physical_decision::retained_cmos);
+}
+
 TEST(PhysicalSelect, IdentityAndConstantEndpointsAreRetained) {
   Builder    b;
   const auto a = b.input("a"), c = b.input("c");

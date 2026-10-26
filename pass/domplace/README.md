@@ -71,6 +71,7 @@ reports its reason code (`reason.hpp`).
 | One-literal endpoint | retained unless `domino_identity=true` | `identity-endpoint` |
 | No support after cofactoring | always retained | `constant-endpoint` |
 | No positive-output formula within stack, branches and inputs | retained | `polarity-illegal` |
+| Positive-output search stopped at its own limits (cubes, formula nodes, factoring) | retained | `polarity-search` |
 | CMOS+DFF estimate not larger (`domino_select=area`) | retained | `area` |
 | CMOS cone could not be priced | retained | `cmos-estimate` |
 | Physical selection work exhausted | retained | `selection-budget` |

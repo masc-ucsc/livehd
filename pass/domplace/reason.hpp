@@ -34,6 +34,7 @@ enum class Reason : uint8_t {
   cmos_estimate,      // the CMOS cone could not be priced, so no area claim is made
   selection_budget,   // physical selection work exhausted before this state
   definition_clock,   // the clock is a port of a preserved definition, not traced to the design clock root
+  polarity_search,    // the positive-output search stopped at its own limits: no illegality proof
 };
 
 constexpr std::string_view reason_code(Reason reason) {
@@ -61,6 +62,7 @@ constexpr std::string_view reason_code(Reason reason) {
     case Reason::cmos_estimate    : return "cmos-estimate";
     case Reason::selection_budget : return "selection-budget";
     case Reason::definition_clock : return "definition-clock";
+    case Reason::polarity_search  : return "polarity-search";
   }
   return "invalid";
 }

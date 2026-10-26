@@ -314,14 +314,16 @@ std::optional<usyn::Physical_emission> select_physical(const usyn::Stateful_regi
     if (!function.rewritten && !cell.formula.output_inverted) {
       state.formula = cell.formula;
     } else {
-      usyn::Function_search_limits limits;
+      auto limits     = options.functions;
       limits.output   = usyn::Output_polarity::positive;
       const auto gate = usyn::synthesize_gate(function.table, net.gates, budget, limits);
       if (!gate.formula) {
         if (budget.exhausted) {
           out_of_work();
         } else {
-          retain(Reason::polarity_illegal);
+          // A cap of this one search (cubes, formula nodes, irredundancy) is
+          // no illegality proof, and says nothing about later states.
+          retain(gate.search_exhausted ? Reason::polarity_search : Reason::polarity_illegal);
         }
         continue;
       }

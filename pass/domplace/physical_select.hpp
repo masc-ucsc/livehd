@@ -14,10 +14,11 @@ namespace livehd::domplace {
 
 struct Select_options {
   enum class Policy : uint8_t { area, all };
-  Policy      policy   = Policy::area;
-  bool        identity = false;   // also convert one-literal endpoints
-  std::string clock;              // the selected domain's region input (port name)
-  uint64_t    work = 50'000'000;  // the selection's own slice of the caller's budget
+  Policy                       policy   = Policy::area;
+  bool                         identity = false;   // also convert one-literal endpoints
+  std::string                  clock;              // the selected domain's design input (port name)
+  uint64_t                     work = 50'000'000;  // the selection's own slice of the caller's budget
+  usyn::Function_search_limits functions;          // the logical search's limits; the output is forced positive
 };
 
 struct Select_context {
@@ -30,7 +31,9 @@ struct Select_context {
 // and its original CMOS+DFF, in frozen order, deterministic and bounded by
 // options.work. A candidate's DominoLatch formula and table are rechecked;
 // constant and duplicate inputs are cofactored away, and a complemented output
-// is resynthesized with a positive output under the frozen Gate_constraints.
+// is resynthesized with a positive output under the frozen Gate_constraints
+// and options.functions: polarity-illegal when that search finishes without a
+// formula, polarity-search when it stops at its own limits.
 // Rails follow gate_rails; every complemented rail producer, a converted
 // state's Q included, is charged one A_NOT. Policy::area converts only when
 // A_domino + A_rails < A_register + the Liberty estimate of the D-cone logic

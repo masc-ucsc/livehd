@@ -181,7 +181,8 @@ TEST(ReasonCodes, SpellingsAreStableAndOnlyDominoCodesConvert) {
   EXPECT_EQ(reason_code(Reason::selection_budget), "selection-budget");
   EXPECT_EQ(reason_code(Reason::domino_area), "domino-area");
   EXPECT_EQ(reason_code(Reason::definition_clock), "definition-clock");
-  for (uint8_t r = 0; r <= static_cast<uint8_t>(Reason::definition_clock); ++r) {
+  EXPECT_EQ(reason_code(Reason::polarity_search), "polarity-search");
+  for (uint8_t r = 0; r <= static_cast<uint8_t>(Reason::polarity_search); ++r) {
     const auto reason = static_cast<Reason>(r);
     EXPECT_NE(reason_code(reason), "invalid");
     EXPECT_EQ(converts(reason), reason == Reason::domino_area || reason == Reason::domino_all);
