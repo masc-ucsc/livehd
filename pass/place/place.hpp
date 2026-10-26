@@ -15,6 +15,7 @@
 #include "core/physical_rc.hpp"
 #include "core/timing_feedback.hpp"
 #include "core/timing_whatif.hpp"
+#include "custom_cells.hpp"
 #include "dreamplace/native/floorplan.hpp"
 #include "dreamplace/native/macro/topology.hpp"
 #include "dreamplace/native/placement.hpp"
@@ -190,6 +191,9 @@ struct Options {
   // instead of the refusal; nearest-whitespace legalization then re-places the
   // single-row cells they displaced, and any failure throws Multirow_failure.
   std::optional<Multirow_eco_bounds>                         multirow_eco;
+  // Internal: same-interface variants of custom sequential macros (the domino
+  // masters) that domino sizing may swap; part of the environment key.
+  std::shared_ptr<const Custom_catalog>                      custom_cells;
   // Opt-in incident-net wirelength cost during nearest-whitespace ECO legalization (0..100).
   double                                                     eco_connectivity_weight = 0;
   // Diagnostic only: exact edited-cell names whose successful ECO seeds/sites are recorded in qor.eco.trace.

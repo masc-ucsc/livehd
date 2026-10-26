@@ -604,8 +604,17 @@ TEST(Placement, TwoRowPlacementsKeyTheCacheAndReuseItLegally) {
       {physical::Row_access::vertical, physical::Row_access::horizontal}
   };
   expect_placed(place(*chain.graph, chain.flat, templated), "another template");
+  const auto templated_key = environment();
+  EXPECT_NE(templated_key, key);
+  EXPECT_NE(templated_key, renamed_key);
+  // So is the custom variant catalog domino sizing swaps within.
+  auto cataloged         = chain.options;
+  cataloged.custom_cells = custom_catalog({
+      Custom_variant{.name = "__lhd_domino_other_v0_t0", .family = "__lhd_domino_other_t0"}
+  });
+  expect_placed(place(*chain.graph, chain.flat, cataloged), "custom catalog");
   EXPECT_NE(environment(), key);
-  EXPECT_NE(environment(), renamed_key);
+  EXPECT_NE(environment(), templated_key);
 }
 
 TEST(Placement, TwoRowEcoSwapsVariantsAroundTheirNeighbors) {

@@ -384,6 +384,8 @@ filegroup(
         "capacity_bins.hpp",
         "row_occupancy.cpp",
         "row_occupancy.hpp",
+        "custom_cells.cpp",
+        "custom_cells.hpp",
         "multirow.cpp",
         "multirow.hpp",
         "multirow_eco.cpp",
@@ -564,6 +566,28 @@ cc_test(
     deps = [":row_occupancy", "@googletest//:gtest_main"],
 )
 
+# Same-interface custom cell variants (2d-domplace G1): data and the swap.
+cc_library(
+    name = "custom_cells",
+    srcs = ["custom_cells.cpp"],
+    hdrs = ["custom_cells.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = ["//core", "//pass/liberty:liberty_dff", "@hhds//hhds:core"],
+)
+cc_test(
+    name = "custom_cells_test",
+    size = "small",
+    srcs = ["custom_cells_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":custom_cells",
+        "//graph",
+        "//pass/usyn:usyn_semantic",  # the generator's declaration, for comparison only
+        "@googletest//:gtest_main",
+    ],
+)
+
 cc_library(
     name = "multirow",
     srcs = [
@@ -662,6 +686,7 @@ cc_library(
     deps = [
         ":uroute",
         ":region_mesh",
+        ":custom_cells",
         ":multirow",
         ":cell_criticality",
         ":track_capacity",

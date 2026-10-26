@@ -614,6 +614,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.multirow_eco) {
     h = hash_text(std::format("multirow-eco-v1:{}:{}", o.multirow_eco->shift_sites, o.multirow_eco->max_displaced), h);
   }
+  if (o.custom_cells) {
+    h = hash_text("custom-cells:" + o.custom_cells->identity, h);
+  }
   if (o.pg != "none") {
     h = hash_text("native-pg-v1:" + o.pg, h);
   }
