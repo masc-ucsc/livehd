@@ -392,6 +392,27 @@ TEST(PhysicalSelect, LogicARailProducerStillNeedsIsNotSaved) {
   EXPECT_EQ(*s.a_cmos, 10 + price.area);
 }
 
+TEST(PhysicalSelect, AnUnpricedConeRetainsCmosWithoutAnAreaClaim) {
+  Builder    b;
+  const auto a = b.input("a"), c = b.input("c"), d = b.input("d"), e = b.input("e");
+  b.state("cone");
+  // (a & c) | (d & e): three AND nodes only this state reaches.
+  b.next(0, formula({lit(0), lit(1), series(0, 1), lit(2), lit(3), series(3, 4), parallel(2, 5)}), {a, c, d, e});
+  Select_options area;
+  area.clock = "clk";
+  const usyn::Native_cost_model unpriced;  // no inverter area: the estimate is invalid
+  const auto                    ref = reference();
+  usyn::Budget                  work{100000000};
+  const auto                    run = select_physical(b.region, b.names, area, {&ref, &unpriced, 10}, work);
+  ASSERT_TRUE(run);
+  const auto& s = run->states[0];
+  EXPECT_TRUE(s.eligible);
+  EXPECT_EQ(s.reason, "cmos-estimate");
+  EXPECT_EQ(s.decision, usyn::Physical_decision::retained_cmos);
+  EXPECT_FALSE(s.a_cmos);
+  EXPECT_FALSE(work.exhausted);
+}
+
 TEST(PhysicalSelect, BudgetExhaustionIsDeterministicAndSticky) {
   Builder    b;
   const auto a = b.input("a"), c = b.input("c"), d = b.input("d");
