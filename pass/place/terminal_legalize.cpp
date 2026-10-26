@@ -25,6 +25,8 @@ namespace {
 namespace ph             = physical;
 using Interval           = std::pair<int64_t, int64_t>;
 constexpr double epsilon = 1e-6;
+ph::Rect         box(const Ann_place& p) { return Capacity_bins::footprint(p); }
+double           overlap(const ph::Rect& a, const ph::Rect& b) { return Capacity_bins::overlap(a, b); }
 bool fixed(const Ann_place& p) { return p.status == ph::Status::FIXED || p.status == ph::Status::LOCKED; }
 bool fixed_physical_cell(const ph::Component& c, const ph::Macro& m) {
   return fixed(c.place) && (m.klass == "CORE WELLTAP" || m.klass == "CORE SPACER");
@@ -238,18 +240,7 @@ struct Model {
                                        orientation));
       }
     };
-    if (cx - ring > 0) {
-      consider({-INFINITY, -INFINITY, grid.bounds.xl + (cx - ring) * grid.dx, INFINITY});
-    }
-    if (cx + ring + 1 < int(grid.nx)) {
-      consider({grid.bounds.xl + (cx + ring + 1) * grid.dx, -INFINITY, INFINITY, INFINITY});
-    }
-    if (cy - ring > 0) {
-      consider({-INFINITY, -INFINITY, INFINITY, grid.bounds.yl + (cy - ring) * grid.dy});
-    }
-    if (cy + ring + 1 < int(grid.ny)) {
-      consider({-INFINITY, grid.bounds.yl + (cy + ring + 1) * grid.dy - max_row_height, INFINITY, INFINITY});
-    }
+    grid.each_ring_exterior(cx, cy, ring, max_row_height, consider);
     return best;
   }
 
@@ -352,7 +343,7 @@ struct Model {
       const bool core = master->second.klass.starts_with("CORE");
       movable[i]      = core && !fixed(c.place);
       if (!core || fixed_physical_cell(c, master->second)) {
-        auto b = place_rect(c.place);
+        auto b = box(c.place);
         if (!core && mask == ph::Placement_mask::none) {
           b.xl -= options.macro_halo_x_dbu;
           b.xh += options.macro_halo_x_dbu;
@@ -394,7 +385,7 @@ struct Model {
       grid.deposit(c.place, false);
       if (!movable[i]) {
         grid.deposit(c.place, true);
-        auto       b    = place_rect(c.place);
+        auto       b    = box(c.place);
         const auto site = tech.sites.find(tech.macros.at(c.macro).site);
         if (site == tech.sites.end()) {
           throw std::invalid_argument("fixed CORE cell has no site");
@@ -410,13 +401,11 @@ struct Model {
     if (total_area > options.max_density * total_capacity + epsilon) {
       throw std::runtime_error("terminal legalization: total CORE area exceeds the hard density capacity");
     }
-    for (const auto& b : grid.bins) {
-      if (b.after > options.max_density * b.capacity + epsilon) {
-        throw std::runtime_error("terminal legalization: input fixed cells exceed a bin's hard density capacity");
-      }
+    if (!grid.within_cap(options.max_density)) {
+      throw std::runtime_error("terminal legalization: input fixed cells exceed a bin's hard density capacity");
     }
     for (size_t i : obstacles) {
-      grid.each(place_rect(fp.components[i].place), [&](size_t b, double) { bin_obstacles[b].push_back(i); });
+      grid.each(box(fp.components[i].place), [&](size_t b, double) { bin_obstacles[b].push_back(i); });
     }
   }
   bool capacity(const Ann_place& a, const Ann_place* b = nullptr, double limit = -1) const {
@@ -444,7 +433,7 @@ struct Model {
     }
     // SAT endpoints retain their original bin membership; a common strip is
     // a selection criterion, not permission to slide along the whole strip.
-    if (!nearest_only && grid.cell_of(p) != grid.cell_of(original[cell])) {
+    if (!nearest_only && grid.bin_xy(p) != grid.bin_xy(original[cell])) {
       return;
     }
     ++report.candidate_checks;
@@ -457,7 +446,7 @@ struct Model {
         blocked |= satlegalize_obstructs(tech, fp.components[cell], p, corridor, fp.dbu, drc());
       }
     }
-    grid.each(place_rect(p), [&](size_t bin, double) {
+    grid.each(box(p), [&](size_t bin, double) {
       for (size_t corridor : bin_corridors[bin]) {
         blocked |= satlegalize_obstructs(tech, fp.components[cell], p, corridors[corridor], fp.dbu);
       }
@@ -589,7 +578,7 @@ struct Model {
                        complete_local);
       }
     } else {
-      const auto [cx, cy] = grid.cell_of(anchor);
+      const auto [cx, cy] = grid.bin_xy(anchor);
       // A direct destination search avoids repeated pushes. Rings have no
       // fixed radius: the last ring covers every bin in the core.
       const int reach     = std::max(grid.nx, grid.ny);
@@ -607,18 +596,10 @@ struct Model {
           // A neighboring bin can contain a nearer site than the first bin
           // with space. Stop only when all unvisited bins are farther away.
           double outside = std::numeric_limits<double>::infinity();
-          if (cx - ring > 0) {
-            outside = std::min(outside, double(anchor.x) - (grid.bounds.xl + (cx - ring) * grid.dx));
-          }
-          if (cx + ring + 1 < int(grid.nx)) {
-            outside = std::min(outside, grid.bounds.xl + (cx + ring + 1) * grid.dx - anchor.x);
-          }
-          if (cy - ring > 0) {
-            outside = std::min(outside, double(anchor.y) - (grid.bounds.yl + (cy - ring) * grid.dy));
-          }
-          if (cy + ring + 1 < int(grid.ny)) {
-            outside = std::min(outside, grid.bounds.yl + (cy + ring + 1) * grid.dy - max_row_height - anchor.y);
-          }
+          grid.each_ring_exterior(cx, cy, ring, max_row_height, [&](const ph::Rect& r) {
+            const double x = anchor.x, y = anchor.y;  // signed distance into the half-plane
+            outside        = std::min(outside, std::max({r.xl - x, x - r.xh, r.yl - y, y - r.yh}));
+          });
           if (wire_active) {
             outside = outside_wire_cost(cell, cx, cy, ring);
           }
@@ -647,7 +628,7 @@ struct Model {
     installed[cell] = true;
     stages[cell]    = stage;
     obstacles.push_back(cell);
-    grid.each(place_rect(candidate.place), [&](size_t bin, double) { bin_obstacles[bin].push_back(cell); });
+    grid.each(box(candidate.place), [&](size_t bin, double) { bin_obstacles[bin].push_back(cell); });
   }
   void warp_remainder(const std::vector<size_t>& remaining) {
     const auto& policy = options.remainder_warp;
@@ -778,10 +759,10 @@ struct Model {
   };
   std::vector<size_t> alignment_blockers(const Satlegalize_alignment& pair, const std::vector<Candidate>& a,
                                          const std::vector<Candidate>& b) const {
-    ph::Rect region = place_rect(original[pair.first]);
+    ph::Rect region = box(original[pair.first]);
     for (const auto* choices : {&a, &b}) {
       for (const auto& choice : *choices) {
-        const auto r = place_rect(choice.place);
+        const auto r = box(choice.place);
         region.xl    = std::min(region.xl, r.xl);
         region.yl    = std::min(region.yl, r.yl);
         region.xh    = std::max(region.xh, r.xh);
@@ -1168,7 +1149,7 @@ struct Model {
     std::vector<std::vector<std::pair<size_t, size_t>>> pose_bins(grid.bins.size());
     for (size_t ep = 0; ep < endpoints.size(); ++ep) {
       for (size_t c = 0; c < endpoints[ep].choices.size(); ++c) {
-        grid.each(place_rect(endpoints[ep].choices[c].place), [&](size_t bin, double) { pose_bins[bin].emplace_back(ep, c); });
+        grid.each(box(endpoints[ep].choices[c].place), [&](size_t bin, double) { pose_bins[bin].emplace_back(ep, c); });
       }
     }
     std::vector<std::vector<size_t>> track_bins(grid.bins.size());
@@ -1199,7 +1180,7 @@ struct Model {
       }
       for (size_t other : neighbors) {
         const auto& prior = track_uses[other];
-        if (use.edge != prior.edge && use.common.layer == prior.common.layer && rect_overlap(use.common.rect, prior.common.rect) > 0) {
+        if (use.edge != prior.edge && use.common.layer == prior.common.layer && overlap(use.common.rect, prior.common.rect) > 0) {
           solver.clause({-use.literal, -prior.literal});
         }
       }
@@ -1252,7 +1233,7 @@ struct Model {
             continue;
           }
           const auto& cell = endpoints[ep];
-          grid.each(place_rect(cell.choices[chosen[ep]].place), [&](size_t bin, double area) {
+          grid.each(box(cell.choices[chosen[ep]].place), [&](size_t bin, double area) {
             bins[bin].emplace_back(cell.literals[chosen[ep]], area);
             occupied[bin].push_back(ep);
           });
@@ -1326,7 +1307,7 @@ struct Model {
           for (size_t other : other_paths) {
             if (paths[e].layer == paths[other].layer
                 && (route_rules ? !route_rules->spacing(paths[e], paths[other]).legal
-                                            : rect_overlap(paths[e].rect, paths[other].rect) > 0)) {
+                                            : overlap(paths[e].rect, paths[other].rect) > 0)) {
               auto cut = edge_cut(e), more = edge_cut(other);
               cut.insert(cut.end(), more.begin(), more.end());
               ++report.joint_corridor_cuts;
@@ -1516,8 +1497,8 @@ struct Model {
     // The first candidate is the closest legal pose to this endpoint's GP
     // location. Prefer holding either of these anchors over moving both.
     const auto anchor_a = ca.front().place, anchor_b = cb.front().place;
-    const auto [ax, ay] = grid.cell_of(original[a]);
-    const auto [bx, by] = grid.cell_of(original[b]);
+    const auto [ax, ay] = grid.bin_xy(original[a]);
+    const auto [bx, by] = grid.bin_xy(original[b]);
     // Include a common row/column anchor, even when endpoints lie in different
     // physical rows within the same routing corridor.
     auto aa = original[a], bb = original[b];
@@ -1596,7 +1577,7 @@ struct Model {
     }
     for (size_t i = 0; i < ca.size(); ++i) {
       for (size_t j = 0; j < cb.size(); ++j) {
-        bool valid = rect_overlap(place_rect(ca[i].place), place_rect(cb[j].place)) == 0;
+        bool valid = overlap(box(ca[i].place), box(cb[j].place)) == 0;
         if (!installed[a] && !installed[b] && ca[i].row == cb[j].row) {
           valid &= ca[i].end <= cb[j].start || cb[j].end <= ca[i].start;
         }
@@ -1777,7 +1758,7 @@ struct Model {
         continue;
       }
       const auto& p = nets[n].pairs.front();
-      const auto  a = grid.cell_of(original[p.first]), b = grid.cell_of(original[p.second]);
+      const auto  a = grid.bin_xy(original[p.first]), b = grid.bin_xy(original[p.second]);
       if (a.first == b.first || a.second == b.second) {
         proposals.push_back(p);
       }
@@ -1792,7 +1773,7 @@ struct Model {
         if (attempts >= options.local_pair_limit) {
           break;
         }
-        if (grid.cell_of(original[p.first]) == grid.cell_of(original[p.second]) && !(installed[p.first] && installed[p.second])) {
+        if (grid.bin_xy(original[p.first]) == grid.bin_xy(original[p.second]) && !(installed[p.first] && installed[p.second])) {
           ++attempts;
           report.local_pairs += pair(p, 3);
         }
@@ -1829,7 +1810,7 @@ struct Model {
         bin.clear();
       }
       for (size_t i : obstacles) {
-        grid.each(place_rect(fp.components[i].place), [&](size_t b, double) { bin_obstacles[b].push_back(i); });
+        grid.each(box(fp.components[i].place), [&](size_t b, double) { bin_obstacles[b].push_back(i); });
       }
       for (size_t i : remaining) {
         fp.components[i].place = original[i];
@@ -1860,10 +1841,8 @@ struct Model {
         pack_from_gaps = attempt == 1;
       }
     }
-    for (const auto& b : grid.bins) {
-      if (b.after > options.max_density * b.capacity + epsilon) {
-        throw std::logic_error("terminal legalization violated its hard density cap");
-      }
+    if (!grid.within_cap(options.max_density)) {
+      throw std::logic_error("terminal legalization violated its hard density cap");
     }
     for (size_t i = 0; i < movable.size(); ++i) {
       if (!movable[i]) {
@@ -1874,7 +1853,7 @@ struct Model {
       }
       const auto&    p     = fp.components[i].place;
       const double   moved = distance(p, original[i]);
-      const auto     a = grid.cell_of(original[i]), b = grid.cell_of(p);
+      const auto     a = grid.bin_xy(original[i]), b = grid.bin_xy(p);
       const unsigned hops            = std::abs(a.first - b.first) + std::abs(a.second - b.second);
       report.moved_cells            += moved > 0;
       report.crossed_cells          += hops > 0;
@@ -2035,8 +2014,8 @@ void write_terminal_legalize_report(const Terminal_legalize_report& r, const phy
     number("capacity_dbu2", b.capacity);
     number("before_area_dbu2", b.before);
     number("after_area_dbu2", b.after);
-    number("before_density", b.capacity > 0 ? b.before / b.capacity : 0);
-    number("after_density", b.capacity > 0 ? b.after / b.capacity : 0);
+    number("before_density", b.density(false));
+    number("after_density", b.density(true));
     w.EndObject();
   }
   w.EndArray();

@@ -351,6 +351,7 @@ filegroup(
         "busorder.hpp",
         "region_mesh.cpp",
         "region_mesh.hpp",
+        "capacity_bins.cpp",
         "capacity_bins.hpp",
         "cell_criticality.cpp",
         "cell_criticality.hpp",
@@ -492,10 +493,18 @@ cc_test(
 
 cc_library(
     name = "capacity_bins",
+    srcs = ["capacity_bins.cpp"],
     hdrs = ["capacity_bins.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
     deps = ["//inou/lefdef:inou_lefdef"],
+)
+cc_test(
+    name = "capacity_bins_test",
+    size = "small",
+    srcs = ["capacity_bins_test.cpp"],
+    copts = COPTS,
+    deps = [":capacity_bins", "@googletest//:gtest_main"],
 )
 
 cc_library(
