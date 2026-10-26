@@ -268,7 +268,10 @@ Repair_result size_custom_placed(Result legal, const Options& requested, const E
           failure = error.what();  // the two-row ECO found no legal pose: rejected
         }
       }
-      const bool keep    = trial && trial->timing.delay <= score.delay + sizing.epsilon_ps && resize_accepts(score, trial->timing);
+      // The period compares in ps: Feedback::delay is in timer units.
+      const bool keep = trial
+                        && trial->timing.delay * trial->timing.time_unit_ps <= score.delay * score.time_unit_ps + sizing.epsilon_ps
+                        && resize_accepts(score, trial->timing);
       const auto outcome = keep ? "accepted" : trial ? "rejected_timing" : "rejected_packing";
       ++tally[std::string(move_name(move.kind)) + (keep ? "_accepted" : "")];
       ++tally[outcome];

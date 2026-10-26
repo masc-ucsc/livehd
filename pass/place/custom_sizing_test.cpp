@@ -149,18 +149,27 @@ struct Domino_chain {
 };
 
 // The variant table: each custom instance's output slack by rank (+50 when
-// not listed), plus `buffer_gain` once its output is buffered. The period is
-// 1000 - WNS; the area is the LEF footprint of every placed cell.
+// not listed), plus `buffer_gain` once its output is buffered; `side` gives,
+// by an instance's rank, the slack of two other endpoints it loads. Slack is
+// in period terms, as the stage timer reports it. The period is 1000 - WNS,
+// or by rank an `internal` period outside WNS when larger; the area is the
+// LEF footprint of every placed cell. Values are ps, reported in `unit` ps.
 struct Table_timing {
   const Custom_catalog*                      catalog = nullptr;
   int64_t                                    dbu     = 1000;
   std::map<std::string, std::vector<double>> slack;
   double                                     buffer_gain = 20;
+  std::map<std::string, std::vector<double>> side, internal;
+  double                                     unit = 1;
   Timing_feedback                            operator()(const Result& state) const {
     Timing_feedback f;
-    f.time_unit_ps = 1;
-    f.wns          = 50;
-    f.tns          = 0;
+    f.time_unit_ps = unit;
+    double     wns = 50, tns = 0, floor = 0;
+    const auto endpoint = [&](const std::string& pin, double q) {
+      f.pins[pin].slack  = q / unit;
+      wns                = std::min(wns, q);
+      tns               += std::min(0., q);
+    };
     for (const auto& c : state.floorplan.components) {
       f.area        += double(c.place.width) * double(c.place.height) / double(dbu * dbu);
       const auto* v  = catalog->find(c.macro);
@@ -174,11 +183,18 @@ struct Table_timing {
           })) {
         q += buffer_gain;
       }
-      f.pins[c.name + ":Q"].slack  = q;
-      f.wns                        = std::min(*f.wns, q);
-      *f.tns                      += std::min(0., q);
+      endpoint(c.name + ":Q", q);
+      if (const auto loads = side.find(c.name); loads != side.end()) {
+        endpoint(c.name + "_side0:D", loads->second.at(v->rank));
+        endpoint(c.name + "_side1:D", loads->second.at(v->rank));
+      }
+      if (const auto period = internal.find(c.name); period != internal.end()) {
+        floor = std::max(floor, period->second.at(v->rank));
+      }
     }
-    f.delay = 1000 - *f.wns;
+    f.wns   = wns / unit;
+    f.tns   = tns / unit;
+    f.delay = std::max(1000 - wns, floor) / unit;
     return f;
   }
 };
@@ -333,6 +349,26 @@ TEST(CustomSizing, DownSizesReleaseSitesAndARejectedGrowthChangesNothing) {
   const auto too_wide = parse(size_custom_placed(start, grow.options, tight, {.buffers = false}).report);
   ASSERT_EQ(trial_moves(too_wide), (std::vector<std::string>{"up:rejected_packing"}));
   EXPECT_NE(std::string(too_wide["trials"][0]["failure"].GetString()).find("wider than every row"), std::string::npos);
+}
+
+TEST(CustomSizing, ThePeriodToleranceIsInPicoseconds) {
+  // Feedback in ns: a down-size that costs 0.5 ps of internal period is
+  // rejected although it is within epsilon_ps (1e-3) in timer units.
+  Domino_chain chain("sizing_units",
+                     {
+                         {5, 2}
+  });
+  const auto   cold = place(*chain.graph, chain.flat, chain.options);
+  Table_timing ns{chain.catalog.get(), chain.tech.dbu, {{"c5", {40, 40, 40, 40}}}};
+  ns.internal = {
+      {"c5", {960, 960.5, 960, 960}}
+  };
+  ns.unit           = 1000;
+  const auto sized  = size_custom_placed(cold, chain.options, ns, {});
+  const auto report = parse(sized.report);
+  EXPECT_EQ(trial_moves(report), (std::vector<std::string>{"down:rejected_timing"}));
+  EXPECT_EQ(report["trials"][0]["timing"]["delay_ps"].GetDouble(), 960.5);
+  EXPECT_EQ(at(sized.placed.floorplan, "c5").macro, variant(2));
 }
 
 TEST(CustomSizing, UsageErrors) {
