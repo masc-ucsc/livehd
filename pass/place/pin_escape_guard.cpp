@@ -26,14 +26,12 @@ Pin_escape_guard::Pin_escape_guard(const ph::Technology& tech, const ph::Floorpl
     incomplete_reason_ = "unsupported pin escape stack";
     return;
   }
-  metal_clearance_ = *clearance;
-  for (double spacing : cut->second.spacing) {
-    const auto value = std::ceil(spacing * frame.dbu - 1e-9);
-    if (!std::isfinite(value) || value < 0 || value > INT32_MAX) {
-      throw std::invalid_argument("invalid pin escape cut clearance");
-    }
-    cut_clearance_ = std::max(cut_clearance_, int64_t(value));
+  metal_clearance_       = *clearance;
+  const auto cut_spacing = ph::unqualified_cut_spacing(cut->second, frame.dbu);
+  if (!cut_spacing) {
+    throw std::invalid_argument("invalid pin escape cut clearance");
   }
+  cut_clearance_ = *cut_spacing;
   // Unknown control/supply access reserves a conservative local volume rather
   // than disappearing. Include via overhang and directional escape distance.
   std::map<std::string, double> via_reach;

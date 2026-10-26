@@ -204,6 +204,25 @@ std::vector<std::array<int64_t, 2>> cut_enclosures(const Cut_layer& cut, int64_t
   }
   return result;
 }
+std::optional<int64_t> unqualified_cut_spacing(const Cut_layer& cut, int64_t dbu, std::string* error) {
+  const auto reject = [&](const char* reason) -> std::optional<int64_t> {
+    if (error) {
+      *error = reason;
+    }
+    return {};
+  };
+  double spacing = 0;
+  for (auto value : cut.spacing) {
+    if (!std::isfinite(value) || value < 0) {
+      return reject("invalid cut spacing");
+    }
+    spacing = std::max(spacing, rule_dbu(value, dbu));
+  }
+  if (!std::isfinite(spacing) || spacing > std::numeric_limits<int32_t>::max()) {
+    return reject("unrepresentable cut spacing");
+  }
+  return int64_t(spacing);
+}
 int64_t signal_cut_spacing(const Cut_layer& cut, int64_t dbu) {
   const auto supported = [](const std::string& property) {
     return property == "LEF58_CUTCLASS" || property == "LEF58_SPACINGTABLE" || property == "LEF58_ENCLOSURE";

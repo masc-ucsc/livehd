@@ -26,6 +26,10 @@ std::vector<std::array<int64_t, 2>> cut_enclosures(const Cut_layer&, int64_t dbu
                                                    const std::array<int64_t, 2>& cut_size, bool above, const Layer&,
                                                    const std::array<int64_t, 2>& metal_extent,
                                                    Cut_enclosure_policy policy = Cut_enclosure_policy::lef);
+// Largest unqualified cut SPACING as a DBU rule distance (0 without any). Empty,
+// with *error set when given, for a negative or non-finite spacing ("invalid cut
+// spacing") or a result beyond the signed 32-bit range ("unrepresentable cut spacing").
+std::optional<int64_t> unqualified_cut_spacing(const Cut_layer&, int64_t dbu, std::string* error = nullptr);
 // Maximum ordinary/default-table edge spacing, rejecting unsupported cut features.
 int64_t                             signal_cut_spacing(const Cut_layer&, int64_t dbu);
 }  // namespace livehd::physical

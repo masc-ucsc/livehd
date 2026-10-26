@@ -81,16 +81,12 @@ static Pin_access_result enumerate_pin_access_impl(const Technology& tech, const
   if (!cut_rule.unsupported.empty() || !cut_rule.properties.empty() || cut_rule.spacing.empty()) {
     return fail("unsupported " + layers.cut + " cut rules");
   }
-  double cut_spacing = 0;
-  for (auto spacing : cut_rule.spacing) {
-    if (!std::isfinite(spacing) || spacing < 0) {
-      return fail("invalid cut spacing");
-    }
-    cut_spacing = std::max(cut_spacing, std::ceil(spacing * fp.dbu - 1e-9));
+  std::string spacing_error;
+  const auto  cut_spacing_dbu = unqualified_cut_spacing(cut_rule, fp.dbu, &spacing_error);
+  if (!cut_spacing_dbu) {
+    return fail(spacing_error);
   }
-  if (!std::isfinite(cut_spacing) || cut_spacing > INT32_MAX) {
-    return fail("unrepresentable cut spacing");
-  }
+  const double cut_spacing = *cut_spacing_dbu;
   const auto clearance = rules.clearance(layers.escape);
   if (occupancy && !clearance) {
     return fail("unsupported " + layers.escape + " query clearance");
@@ -219,7 +215,7 @@ static Pin_access_result enumerate_pin_access_impl(const Technology& tech, const
       continue;
     }
     if (!std::isfinite(cut_rule.width) || cut_rule.width < 0
-        || std::min(cut->rect.xh - cut->rect.xl, cut->rect.yh - cut->rect.yl) < std::ceil(cut_rule.width * fp.dbu - 1e-9)) {
+        || std::min(cut->rect.xh - cut->rect.xl, cut->rect.yh - cut->rect.yl) < rule_dbu(cut_rule.width, fp.dbu)) {
       continue;
     }
     const auto width = upper->rect.yh - upper->rect.yl;
