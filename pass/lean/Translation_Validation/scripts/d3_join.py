@@ -39,7 +39,8 @@ import os
 import pathlib
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parents[3]
+# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+ROOT = pathlib.Path(__file__).resolve().parents[4]
 GATES = ["cert", "compile", "reify", "typecheck", "sim", "checker", "agree", "proof"]
 CREDITABLE = ["cert", "compile", "reify", "typecheck", "sim", "checker", "agree"]
 

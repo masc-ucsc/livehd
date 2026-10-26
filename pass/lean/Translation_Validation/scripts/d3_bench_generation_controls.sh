@@ -17,9 +17,10 @@
 # No Lean semantics are involved; this is harness evidence only.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$HERE/../../.." && pwd)"
-BENCH="$ROOT/pass/lean/scripts/d3_bench2.sh"
-GEN="$ROOT/pass/lean/scripts/d3_gen.py"
+# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+ROOT="$(cd "$HERE/../../../.." && pwd)"
+BENCH="$ROOT/pass/lean/Translation_Validation/scripts/d3_bench2.sh"
+GEN="$ROOT/pass/lean/Translation_Validation/scripts/d3_gen.py"
 
 fails=0
 ok()  { printf '  ok   %s\n' "$1"; }
@@ -35,8 +36,8 @@ rm -rf "$W"; mkdir -p "$W/bin"
 # Two legs swap a failing stub in for `d3_gen.py`. A timeout or an interrupt
 # between the swap and the copy-back would leave the tracked generator broken,
 # so the restore is a trap and not a line at the end.
-cp "$ROOT/pass/lean/scripts/d3_gen.py" "$W/gen_real.py"
-restore_gen() { cp -f "$W/gen_real.py" "$ROOT/pass/lean/scripts/d3_gen.py" 2>/dev/null; }
+cp "$ROOT/pass/lean/Translation_Validation/scripts/d3_gen.py" "$W/gen_real.py"
+restore_gen() { cp -f "$W/gen_real.py" "$ROOT/pass/lean/Translation_Validation/scripts/d3_gen.py" 2>/dev/null; }
 trap restore_gen EXIT INT TERM
 PROBE="$ROOT/formal/lean/probes/d3c2_pruned_chain_4.lean"
 GEN_SHA_BEFORE="$(sha256sum < "$GEN")"
@@ -117,7 +118,7 @@ fi
 # points are set to the SMALLEST generated case so the baseline is reached
 # quickly; the published defaults are untouched in the script.
 # ---------------------------------------------------------------------------
-BENCH1="$ROOT/pass/lean/scripts/d3_bench.sh"
+BENCH1="$ROOT/pass/lean/Translation_Validation/scripts/d3_bench.sh"
 b1=(D3_ROOT="$ROOT" SCRATCH="$W/b1scratch" TMO=600
     N_NAIVE_CHAIN=4 N_COMPOSED_CHAIN=4 N_COMPOSED_FAR=4)
 

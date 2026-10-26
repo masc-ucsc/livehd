@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Controls for pass/lean/scripts/d3_master_corpus.py, on real fixtures.
+# Controls for pass/lean/Translation_Validation/scripts/d3_master_corpus.py, on real fixtures.
 #
 # WHY.  This script decides which certificates become a CORPUS, and a corpus is
 # what a manifest pins and a sweep measures.  Two ways it can be wrong and look
@@ -16,7 +16,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../../../.." && pwd)"
-TOOL="$ROOT/pass/lean/scripts/d3_master_corpus.py"
+TOOL="$ROOT/pass/lean/Translation_Validation/scripts/d3_master_corpus.py"
 [[ -r "$TOOL" ]] || { echo "FATAL: missing $TOOL" >&2; exit 2; }
 
 fails=0

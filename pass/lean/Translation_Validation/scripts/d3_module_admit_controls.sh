@@ -44,7 +44,8 @@
 # No Lean proof runs here; no leg says anything about a theorem.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$HERE/../../.." && pwd)"
+# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+ROOT="$(cd "$HERE/../../../.." && pwd)"
 SRC_CERT="${D3_CONTROL_CERT:-$ROOT/generated/master_port/d3_pilot/certs/tiny_sync_ram_Lgraph.lean}"
 
 [[ -r "$HERE/d3_sweep.py" ]] || { echo "FATAL: missing d3_sweep.py" >&2; exit 2; }

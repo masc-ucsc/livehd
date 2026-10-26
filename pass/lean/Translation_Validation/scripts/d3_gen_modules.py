@@ -42,7 +42,7 @@ _spec.loader.exec_module(sweep)
 # generated-module caches, the Lake workspace and the composition. The default
 # is the live tree, so nothing changes for an ordinary invocation.
 GEN_ROOT = pathlib.Path(os.environ.get(
-    "D3_LEAN_ROOT", str(HERE.parent.parent.parent / "formal/lean")
+    "D3_LEAN_ROOT", str(HERE.parents[3] / "formal/lean")  # HERE = <ROOT>/pass/lean/Translation_Validation/scripts
 )).resolve() / "LeanSemanticPrimitives" / "Gen"
 
 

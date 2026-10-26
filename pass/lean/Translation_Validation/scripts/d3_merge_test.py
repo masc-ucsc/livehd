@@ -12,7 +12,7 @@ at all would otherwise satisfy most of this file while doing nothing -- the same
 vacuity that let an earlier timeout suite pass 6 of 9 assertions against code
 that had none of the fix.
 
-Run: python3 pass/lean/scripts/d3_merge_test.py
+Run: python3 pass/lean/Translation_Validation/scripts/d3_merge_test.py
 """
 
 import copy
@@ -27,7 +27,8 @@ import sys
 import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
-ROOT = HERE.parents[2]
+# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+ROOT = HERE.parents[3]
 MERGE = HERE / "d3_merge.py"
 JOIN = HERE / "d3_join.py"
 

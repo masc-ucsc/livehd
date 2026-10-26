@@ -20,7 +20,7 @@ The assertions are therefore on the machine, and per run id:
   phase 3  SIGTERM to ONE of two concurrent drivers kills only its own workers,
            and the survivor is still running
 
-Run: python3 pass/lean/scripts/d3_sweep_cancel_test.py
+Run: python3 pass/lean/Translation_Validation/scripts/d3_sweep_cancel_test.py
 Exit 0 iff all three phases hold.
 """
 
@@ -33,8 +33,9 @@ import subprocess
 import sys
 import time
 
-ROOT = pathlib.Path(__file__).resolve().parents[3]
-SWEEP = ROOT / "pass" / "lean" / "scripts" / "d3_sweep.py"
+# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+ROOT = pathlib.Path(__file__).resolve().parents[4]
+SWEEP = ROOT / "pass" / "lean" / "Translation_Validation" / "scripts" / "d3_sweep.py"
 
 
 def mark_for(run_id: str) -> str:

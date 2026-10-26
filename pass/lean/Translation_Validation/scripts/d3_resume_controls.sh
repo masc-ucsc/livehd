@@ -14,8 +14,9 @@
 #   4. a malformed certificate does not reach `agree`.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$HERE/../../.." && pwd)"
-SWEEP="$ROOT/pass/lean/scripts/d3_sweep.py"
+# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+ROOT="$(cd "$HERE/../../../.." && pwd)"
+SWEEP="$ROOT/pass/lean/Translation_Validation/scripts/d3_sweep.py"
 SRC="${D3_CONTROL_CERT:-$ROOT/generated/master_port/d3_pilot/certs/tiny_sync_ram_Lgraph.lean}"
 
 fails=0

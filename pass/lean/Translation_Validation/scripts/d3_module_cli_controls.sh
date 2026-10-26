@@ -23,7 +23,8 @@
 # another build in the same tree.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$HERE/../../.." && pwd)"
+# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+ROOT="$(cd "$HERE/../../../.." && pwd)"
 SRC_CERT="${D3_CONTROL_CERT:-$ROOT/generated/master_port/d3_pilot/certs/tiny_sync_ram_Lgraph.lean}"
 LEAN_ROOT="${D3_LEAN_ROOT:-$ROOT/formal/lean}"
 

@@ -26,7 +26,8 @@ Exit status is the command's, or 137 if the cgroup OOM-killed it.
 import argparse, importlib.util, os, pathlib, shutil, subprocess, sys, tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
-ROOT = HERE.parents[2]
+# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+ROOT = HERE.parents[3]
 _spec = importlib.util.spec_from_file_location("d3_sweep_mod", HERE / "d3_sweep.py")
 sweep = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(sweep)

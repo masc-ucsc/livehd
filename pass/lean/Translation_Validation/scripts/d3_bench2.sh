@@ -62,7 +62,7 @@ run() {
   rowdir="$SCRATCH/${v}_${sh}_${n}"
   rm -rf "$rowdir"; mkdir -p "$rowdir"
   rm -f "$f"
-  python3 "$R/pass/lean/scripts/d3_gen.py" "$n" --variant "$v" --shape "$sh" --out "$f" \
+  python3 "$R/pass/lean/Translation_Validation/scripts/d3_gen.py" "$n" --variant "$v" --shape "$sh" --out "$f" \
     > "$rowdir/gen.log" 2>&1
   gen_rc=$?
   printf '%s\n' "$gen_rc" > "$rowdir/gen.exit"

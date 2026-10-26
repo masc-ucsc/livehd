@@ -12,7 +12,7 @@ stay deterministic. Parser behaviour on malformed logs is covered by
 `d3_sweep_parser_test.py`, the checker itself by `probes/d3_harness_test.lean`,
 and process teardown by `d3_sweep_cancel_test.py`.
 
-Run: python3 pass/lean/scripts/d3_runner_test.py
+Run: python3 pass/lean/Translation_Validation/scripts/d3_runner_test.py
 """
 
 import csv
@@ -28,7 +28,8 @@ import tempfile
 import time
 
 HERE = pathlib.Path(__file__).resolve().parent
-ROOT = HERE.parents[2]
+# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+ROOT = HERE.parents[3]
 SWEEP = HERE / "d3_sweep.py"
 JOIN = HERE / "d3_join.py"
 

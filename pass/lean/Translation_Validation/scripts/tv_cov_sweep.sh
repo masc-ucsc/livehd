@@ -42,7 +42,7 @@ case "$KILL" in ''|*[!0-9]*) echo "REFUSING: kill_rss_kib $KILL is not a number"
 [ "$TMO"  -gt 0 ] || { echo "REFUSING: timeout must be positive"; exit 2; }
 [ "$KILL" -gt 0 ] || { echo "REFUSING: --enforce cgroup needs a POSITIVE kill_rss_kib"; exit 2; }
 
-D3=$P/pass/lean/scripts/d3_sweep.py
+D3=$P/pass/lean/Translation_Validation/scripts/d3_sweep.py
 [ -f "$D3" ] || { echo "REFUSING: no d3_sweep.py at $D3"; exit 2; }
 [ -d "$CERTS" ] || { echo "REFUSING: certs dir $CERTS does not exist"; exit 2; }
 [ -f "$MAN" ] || { echo "REFUSING: manifest $MAN does not exist"; exit 2; }

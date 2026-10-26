@@ -19,7 +19,7 @@ were allowed to change the experiment:
 Lean is stubbed through `d3_runner_test`'s fixtures; a real probe costs minutes
 and nothing here depends on one.
 
-Run: python3 pass/lean/scripts/d3_scheduler_test.py
+Run: python3 pass/lean/Translation_Validation/scripts/d3_scheduler_test.py
 """
 
 import csv
@@ -34,7 +34,8 @@ import sys
 import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
-ROOT = HERE.parents[2]
+# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+ROOT = HERE.parents[3]
 SWEEP = HERE / "d3_sweep.py"
 JOIN = HERE / "d3_join.py"
 

@@ -18,7 +18,7 @@ Two layers, because the hazards live in different places:
 
 The Lean cases import Mathlib (~6.9 GB each) and run serially, one at a time.
 
-Run: python3 pass/lean/scripts/d3_proof_test.py
+Run: python3 pass/lean/Translation_Validation/scripts/d3_proof_test.py
 """
 
 import importlib.util
@@ -31,7 +31,8 @@ import tempfile
 import time
 
 HERE = pathlib.Path(__file__).resolve().parent
-ROOT = HERE.parents[2]
+# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+ROOT = HERE.parents[3]
 SWEEP = HERE / "d3_sweep.py"
 LEAN_DIR = ROOT / "formal/lean"
 # THE FIXTURE CERTIFICATE IS AN EXPLICIT INPUT.

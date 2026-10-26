@@ -33,7 +33,8 @@ RC_TIMEOUT = 124
 GATE_RE = re.compile(r"^D3GATE proof=1 thm=(d3_fast\.correct) axioms=\[([^\]]*)\]$")
 
 HERE = pathlib.Path(__file__).resolve().parent
-ROOT = HERE.parent.parent.parent
+# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+ROOT = HERE.parents[3]
 
 # WHERE `lake build` RUNS, AND THEREFORE WHAT IT WRITES.
 #

@@ -29,7 +29,7 @@ import sys
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parents[4]
-JOIN = ROOT / "pass" / "lean" / "scripts" / "d3_join.py"
+JOIN = ROOT / "pass" / "lean" / "Translation_Validation" / "scripts" / "d3_join.py"
 
 RESULT_COLS = ["target_key", "module", "verdict", "cert", "compile", "reify",
                "typecheck", "sim", "checker", "agree", "proof", "run_status",

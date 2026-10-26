@@ -40,7 +40,8 @@ import subprocess
 import sys
 import time
 
-ROOT = pathlib.Path(__file__).resolve().parents[3]
+# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+ROOT = pathlib.Path(__file__).resolve().parents[4]
 DEFAULT_COREET = "${LIVEHD_NEW_ROOT:-../livehd-new}/generated/vc_sweep2/lean"
 DEFAULT_CVA6 = "${LIVEHD_NEW_ROOT:-../livehd-new}/generated/cva6_vc/lean"
 CVA6_BLOCKS = ROOT / "pass" / "lean" / "tests" / "d4" / "cva6_78.list"

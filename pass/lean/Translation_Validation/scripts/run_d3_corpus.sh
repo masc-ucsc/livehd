@@ -52,15 +52,16 @@
 #      status alone does not separate them.
 #
 # Usage:
-#   pass/lean/scripts/run_d3_corpus.sh coreet [extra d3_sweep args...]
-#   pass/lean/scripts/run_d3_corpus.sh cva6   [extra d3_sweep args...]
+#   pass/lean/Translation_Validation/scripts/run_d3_corpus.sh coreet [extra d3_sweep args...]
+#   pass/lean/Translation_Validation/scripts/run_d3_corpus.sh cva6   [extra d3_sweep args...]
 #
 # Extra arguments are appended to the sweep command (e.g. --resume, --prove,
 # --limit).  They are recorded in the run log so no run is ambiguous about what
 # produced it.
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 cd "$ROOT"
 
 CORPUS="${1:-}"
@@ -78,11 +79,11 @@ case "$CORPUS" in
   coreet-master)
     MANIFEST="pass/lean/Lgraph_IR_Semantics_Simulator/manifests/master/coreet_122.tsv"
     CERTS="$ROOT/generated/master_port/d3_corpus/master_coreet/lean"
-    WHERE="built by pass/lean/scripts/d3_master_corpus.py; see pass/lean/Lgraph_IR_Semantics_Simulator/manifests/master/README.md for the command" ;;
+    WHERE="built by pass/lean/Translation_Validation/scripts/d3_master_corpus.py; see pass/lean/Lgraph_IR_Semantics_Simulator/manifests/master/README.md for the command" ;;
   cva6-master)
     MANIFEST="pass/lean/Lgraph_IR_Semantics_Simulator/manifests/master/cva6_30.tsv"
     CERTS="$ROOT/generated/master_port/d3_corpus/master_cva6/lean"
-    WHERE="built by pass/lean/scripts/d3_master_corpus.py; see pass/lean/Lgraph_IR_Semantics_Simulator/manifests/master/README.md for the command" ;;
+    WHERE="built by pass/lean/Translation_Validation/scripts/d3_master_corpus.py; see pass/lean/Lgraph_IR_Semantics_Simulator/manifests/master/README.md for the command" ;;
   *) echo "usage: $0 <coreet|cva6|coreet-master|cva6-master> [extra d3_sweep args...]" >&2; exit 2 ;;
 esac
 
@@ -126,7 +127,7 @@ set +e
 nice -n 19 ionice -c3 \
 systemd-run --user --scope --quiet --property=Delegate=yes \
   env LEAN_NUM_THREADS="$THREADS" \
-  python3 -I pass/lean/scripts/d3_sweep.py \
+  python3 -I pass/lean/Translation_Validation/scripts/d3_sweep.py \
     --manifest "$MANIFEST" \
     --certs "$CERTS" \
     --out "$RESULTS" \
@@ -145,7 +146,7 @@ echo "sweep_rc=$SWEEP_RC" | tee -a "$LOG"
 # an incomplete run reports as incomplete instead of not reporting at all.
 if [ -f "$RESULTS" ]; then
   set +e
-  python3 -I pass/lean/scripts/d3_join.py \
+  python3 -I pass/lean/Translation_Validation/scripts/d3_join.py \
     --manifest "$MANIFEST" --results "$RESULTS" --out "$JOINED" \
     --meta "$RESULTS.meta.json" 2>&1 | tee -a "$LOG"
   JOIN_RC=${PIPESTATUS[0]}

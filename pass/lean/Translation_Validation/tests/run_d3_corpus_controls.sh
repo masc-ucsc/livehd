@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Controls for pass/lean/scripts/run_d3_corpus.sh, invoked as the REAL
+# Controls for pass/lean/Translation_Validation/scripts/run_d3_corpus.sh, invoked as the REAL
 # entrypoint with real arguments.
 #
 # WHY.  The driver's product is a joined table plus an exit status, and the
@@ -28,7 +28,7 @@
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../../../.." && pwd)"
-DRIVER="$ROOT/pass/lean/scripts/run_d3_corpus.sh"
+DRIVER="$ROOT/pass/lean/Translation_Validation/scripts/run_d3_corpus.sh"
 [[ -x "$DRIVER" ]] || { echo "FATAL: $DRIVER is not executable" >&2; exit 2; }
 
 fails=0

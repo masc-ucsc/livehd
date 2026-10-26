@@ -74,7 +74,8 @@ import sys
 import threading
 import time
 
-ROOT = pathlib.Path(__file__).resolve().parents[3]
+# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+ROOT = pathlib.Path(__file__).resolve().parents[4]
 # D3_LEAN_ROOT -- ONE ROOT, HONOURED EVERYWHERE.
 #
 # A seam that binds only *some* of the paths is not isolation. Measured with a
