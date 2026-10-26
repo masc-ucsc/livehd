@@ -21,3 +21,21 @@ def _python_impl(ctx):
     return [DefaultInfo(files = depset([out], transitive = [runtime.files])), OutputGroupInfo(interpreter = depset([out]))]
 
 cvc5_python = rule(implementation = _python_impl, toolchains = ["@bazel_tools//tools/python:toolchain_type"])
+
+# Keep nested solver builds and the Mach-O isolation link on the same minimum
+# deployment target as Bazel's C++ toolchain, including exec configurations.
+def _platform_variables_impl(ctx):
+    minimum = ""
+    if ctx.target_platform_has_constraint(ctx.attr._macos[platform_common.ConstraintValueInfo]):
+        config = ctx.attr._xcode_config[apple_common.XcodeVersionConfig]
+        minimum = str(config.minimum_os_for_platform_type(apple_common.platform_type.macos))
+    return [platform_common.TemplateVariableInfo({"CVC5_MACOS_MINIMUM_OS": minimum})]
+
+cvc5_platform_variables = rule(
+    implementation = _platform_variables_impl,
+    attrs = {
+        "_macos": attr.label(default = Label("@platforms//os:macos")),
+        "_xcode_config": attr.label(default = configuration_field(fragment = "apple", name = "xcode_config_label")),
+    },
+    fragments = ["apple"],
+)
