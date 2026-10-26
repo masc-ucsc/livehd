@@ -17,7 +17,8 @@ domino cell builder and characterized LEF/Liberty exist.</p>
 <p><span class="status">Checkpoints 1–2 landed — 2026-10-26 (branch <code>domplace-integ</code>);
 H5 HighTide runs pending; J deferred</span> A–G and the in-repository parts of H
 are implemented and tested; the subtask texts below are the reviewed plan they
-were built against, each with a <em>Landed</em> note. The code reference is
+were built against, each with a <em>Landed</em> note. The first HighTide lfsr
+run found two bugs, both fixed (U19 PG rail parity, U20 tiny-core packing). The code reference is
 <a href="../../pass/domplace/README.md">pass/domplace/README.md</a>. Based on <a href="usyn_domino_placement_plan.md">the supplied pre-plan</a> and
 the current working-tree interfaces. One domino evaluation phase is confirmed
 for v1: one terminal domino gate plus its output latch per converted stage,
@@ -59,6 +60,11 @@ status classes.</li>
 then the matrix: nominal (the U1 estimate), aux 3/5, pair 75/125%, evaluate at the
 estimate versus 2 and 4 FO4 overrides, pessimistic margins, area margin 0/25/100 and
 <code>select=all</code>, fixed-core versus area-driven, three seeds.</li>
+<li>First run, 2026-10-26: lfsr on <code>lhd_dp_477d0555</code>
+(<code>HighTide/artifacts/domplace_20261026</code>). OpenROAD <code>check_placement</code>
+failed arm 3 on every FS-start domino (U19), and the area-driven arm 3 failed the anchor
+prepass (U20). Both are fixed on this branch; refreeze before the matrix. With the fix
+all three arm-3 legs (area, fixed, ORFS frame) pass <code>check_placement</code>.</li>
 <li><strong>Exit:</strong> manifests and results under <code>repros/domplace_&lt;date&gt;/</code>
 with the H exit criteria.</li>
 </ul></li>
@@ -279,7 +285,11 @@ assumptions are supplied.</li>
 <p><span class="status landed">landed</span> Two-row rectangles through native
 GP, an anchor packer before terminal legalization, two-row refusals on every
 single-row path, FS anchors with their pin offsets, safe placement-cache reuse,
-and an imported-floorplan smoke. Known limits are listed under open issues.</p>
+and an imported-floorplan smoke. PG rail parity (U19): every start takes the
+rail template its rows need (<code>t0</code> on N rows, <code>t1</code> on FS rows), in the
+anchor prepass, the two-row ECO and a restored placement, and
+<code>check_legality</code> rejects a wrong parity. Legalization bins are at least as
+tall as the tallest movable cell (U20). Known limits are listed under open issues.</p>
 <ul>
 <li>Pass actual two-row rectangles and oriented physical pins through
 <code>pass/place/place.cpp</code> to native DREAMPlace. Treat domino instances as
@@ -295,7 +305,9 @@ one-row halves are not legal.</li>
 <li>Check both row intervals, site alignment, cut rows, blockages, fixed cells,
 orientation, core bounds and technology pin access using C's row-aware abstracts. Preserve the
 pre-plan's absence of a power-rail-parity restriction for these provisional
-abstracts; any future real PG/row restriction must come from the library. Check
+abstracts; any future real PG/row restriction must come from the library
+(superseded by U19: the rows' rails come from the technology, so the abstracts
+carry them in two templates). Check
 both possible starting-row parities and allowed vertical orientations, including
 the transformed pin shapes' compatibility with the supplied row-access convention.
 Update actual pin positions before computing wirelength/RC. Row-pair occupancy
@@ -412,7 +424,7 @@ sizing. The routing implementation and its enforcement policy remain external.</
 <tr><td>Inherited from pre-plan</td><td>One-shot USYN before placement;
 edge-mode output storage with no borrowing; single-output macros, duplicating
 demanded output polarities; two-row geometry with vertical flip and no rail-parity
-restriction in the provisional model; X1/X2/X4; no placement-time USYN loop.</td></tr>
+restriction in the provisional model (superseded by U19); X1/X2/X4; no placement-time USYN loop.</td></tr>
 <tr><td>Confirmed Q2</td><td>Distinct variant widths from
 <code>(N_domino_proxy / 2) * A_NOT + A_register(strength)</code>.
 Use actual technology-cell areas; update geometry and re-legalize after
@@ -469,6 +481,8 @@ characterization.</p>
 <tr><td>U14 HighTide</td><td>Approved: edit <code>lhdsweep.py</code> in the HighTide repository; arm-3 OpenSTA is marked unmeasured and the native stage period is used for all arms. The edit itself (H5) is pending.</td></tr>
 <tr><td>U15 fixed core</td><td>Approved: <code>core</code>/<code>die</code> from the arm-1 area-driven run. The <code>make_arrays</code> FS-import fix it needed has landed: CORE row flips are recorded in the native node orientations, so a pinned or cache-locked FS cell is no longer flipped twice.</td></tr>
 <tr><td>U16–U18</td><td>OpenTimer off in arms 1–2 plus one STA-on comparison; power-on-initialized registers stay retained in the USYN arms; J only on the trigger under J.</td></tr>
+<tr><td>U19 PG rail parity</td><td>Found by the lfsr H5 run (OpenROAD DPL-0004 on exactly the FS-start dominoes; LiveHD's check did not model rails). Rows alternate N/FS, so a two-row cell's outer rail alternates with its start row. Every variant is written in rail templates <code>t0</code> (the reference inverter's bottom rail outside: N starts) and <code>t1</code> (its top rail outside: FS starts), with the same function, pins, drive and footprint; the rails derive from the inverter's PG pins and the row orientation. Placement swaps to the twin at anchoring, in the two-row ECO and on restore; <code>check_legality</code> checks the parity (<code>pass/place/pg_rails.hpp</code>). Templates were chosen over restricting starts to N rows: restriction halves the row pairs a tiny core offers. Sidecar schema 4. <code>synth.place.pg</code> is now allowed under the profile (one-row cells define the row rails).</td></tr>
+<tr><td>U20 tiny-core packing</td><td>The lfsr area-driven core (utilization 0.55, 104 sites by 21 rows, two-row cells 89% of the cell area) failed the anchor prepass on the bin density cap. Root cause: the fitted legalization grid kept one-row bins (4 x 21), so a two-row cell filled the full height of both bins it touched and each bin row held one cell; the cap quantized to cell widths. Neither the greedy pose order nor the core sizing was at fault (any start is usable with U19 templates, and 4 x 10 bins pack the same poses). Bins are now at least as tall as the tallest movable cell; single-row designs are unchanged.</td></tr>
 </tbody>
 </table>
 <p>U2–U13 and U16–U18 are the plan defaults in effect; they were not ruled
@@ -576,9 +590,10 @@ overhead and separately materialized rail-generation area. Placement uses the
 selected variant's actual footprint, not a reservation for the largest drive.</p>
 <p>Use the supplied row-access convention, actual track/layer geometry and explicit master/site symmetries for
 orientation legality; the LEF/DEF reference gives specific double-height cell
-and row-site examples. The provisional absence of a power-rail-parity restriction
-remains an explicit model assumption, separate from the externally owned row routing policy and
-to be rechecked when real cells arrive.
+and row-site examples. PG rail parity is not an assumption any more (U19): the
+rows' rails come from the technology's one-row cells and orientation, and each
+variant has a template per start parity; a real cell builder must supply both
+(or one, restricting starts), separate from the externally owned row routing policy.
 <a href="https://coriolis.lip6.fr/doc/lefdef/lefdefref/lefdefref.pdf">LEF/DEF 5.8
 Language Reference, “Double-Height Cells” and SITE/SYMMETRY</a>.</p>
 
@@ -618,8 +633,9 @@ external sources. The same ownership rule applies to OpenTimer if required.</p>
 
 <h3 id="open">Open issues</h3>
 <ul>
-<li><strong>HighTide (H5)</strong> is not run: the <code>lhdsweep.py</code> patch, a frozen
-binary and the matrix are pending. Arm-3 OpenSTA numbers are not comparable until it lands.</li>
+<li><strong>HighTide (H5)</strong>: only the first lfsr run exists; it found U19 and U20.
+The matrix on a refrozen binary is pending. Arm-3 OpenSTA numbers are not comparable until the
+<code>lhdsweep.py</code> scoring lands.</li>
 <li><strong>Delay estimate limits.</strong> The U1 estimate is uncharacterized: no charge
 sharing, keeper contention, noise margin, input-slope or wire load inside the gate; the
 output-inverter load (k = 1) and internal-node weight are assumptions; the HighTide ASAP7
@@ -627,10 +643,13 @@ Liberty is the FF corner. The H5 matrix keeps 2 and 4 FO4 overrides as the pessi
 <li><strong>Hold, pulse width and skew</strong> are unknown (U4); SDC
 <code>set_clock_uncertainty</code> is outside the saved-SDC subset.</li>
 <li><strong>Pin access.</strong> sky130's mcon enclosure is reported unverified; ASAP7 needs
-real abstracts. Row-access and PG parity remain the owners' stand-ins.</li>
+real abstracts. Row access remains the owner's stand-in; PG rail parity is derived from
+the technology (U19) and checked by LiveHD and OpenROAD.</li>
 <li><strong>Floorplans.</strong> Imported DEF placement blockages do not fragment rows yet
 (terminal legalization does not consult them); the greedy two-row packer has a pinned
-fragmentation limit (pairing/backtracking is F follow-up, not J).</li>
+fragmentation limit (pairing/backtracking is F follow-up, not J). Tiny cores need bins two
+rows tall (U20); an explicit <code>synth.place.legalize.bin.grid</code> is not fitted and can
+still quantize the cap.</li>
 <li><strong>Sizing reach.</strong> The netlist is always variant 0 at synthesis, so through
 lhd no instance steps down yet; drive injection at the <code>scan_output_drives</code> sites
 is deferred. A larger register's D input now slows its variant's evaluate.</li>

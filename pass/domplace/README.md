@@ -27,7 +27,7 @@ lhd synth top.v --set synth.mapper=usyn --set pass.usyn.clock_phases=1 --set pas
             bundle:   <qor>.domino/{domino_cells.lef, domino_models.json, models/, domino_models.v}
             tmap:     residual CMOS + retained DFFs; domino Subs are preserved boundaries
  lhd:       domino LEF appended to the placement LEFs; bundle hashed into the physical cache
- place:     GP with 2H rectangles -> anchor two-row cells -> terminal legalize -> release
+ place:     GP with 2H rectangles -> anchor two-row cells (rail template per start) -> terminal legalize -> release
 ```
 
 One evaluation phase per converted stage (Q1). Each stage ends in one domino
@@ -100,7 +100,32 @@ counts never make two functions interchangeable. A master is named
 geometry template) with pins `R0..R{n-1}` (physical rail order: per logical
 input, positive rail then negative rail), `CLK` and `Q`.
 
-The bundle sidecar (`domino_models.json`, schema 3) records the stage model
+## PG rail templates
+
+A two-row cell spans three row edges: outer, inner, outer. Rows alternate
+N/FS, so the rail on a row edge alternates between the reference inverter's
+bottom and top PG rail, and one rail stack fits only every other start. An
+OpenROAD `check_placement` of the HighTide lfsr run rejected exactly the
+dominoes on FS starts (DPL-0004). Every variant is therefore written in two
+geometry templates with the same function, signal pins, drive and footprint:
+
+| Template | Rails at 0, H, 2H | Fits starts on | ASAP7 | sky130 |
+|---|---|---|---|---|
+| `t0` | inverter bottom, top, bottom | N (and FN) rows | VSS VDD VSS | VGND VPWR VGND |
+| `t1` | inverter top, bottom, top | FS (and S) rows | VDD VSS VDD | VPWR VGND VPWR |
+
+The rails derive from the reference inverter's PG pins and the row
+orientation (`template_rails`); nothing is technology-specific. Synthesis
+instantiates `v0_t0`. Placement takes the template each start row needs: the
+anchor prepass and the two-row ECO swap to the rail twin (`pass/place`
+`Multirow_template::rail_twin`), moving the netlist instance with the
+floorplan, and a restored placement re-derives it from its rows. Templates
+rather than restricted starts keep every row pair usable, which tiny cores
+need; a master without a twin (a schema-4 sidecar may omit `rail_twin`) is
+restricted to its own parity. `check_legality` checks the parity of every
+multi-row cell (`pass/place/pg_rails.hpp`), so a wrong template never passes.
+
+The bundle sidecar (`domino_models.json`, schema 4) records the stage model
 with each coefficient's source (`stage_model.sources`), units (`ps`, `fF`,
 `um`, DBU), the corner, technology and row-access identity, the named
 reference inverter and register family (with each register's pin names and CK
@@ -109,11 +134,14 @@ formula, parameters, tau and the FO4 derivation), the coefficients and
 experiment knobs, every master (formula, rails, metrics, variants with
 estimated and rounded areas, pin caps, per-variant capture setup, per-variant
 `timing` with the evaluate and precharge delays and their logical-effort
-terms, access checks) and every instance with the original state it owns. A
-coefficient that cannot be derived is `null` with a diagnostic;
-`read_domino_sidecar` reads schema 3 only, refuses another schema by number
-(regenerate the bundle), and returns the variant catalog for placement-side
-sizing.
+terms, access checks; each variant in both rail templates with its
+`template`, `pg_rails`, `start_orientations` and `rail_twin`), the row rails
+it derived them from (`technology.row_rails`) and every instance with the
+original state it owns. A coefficient that cannot be derived is `null` with a
+diagnostic; `read_domino_sidecar` reads schema 4 only, refuses another schema
+by number (regenerate the bundle), and returns the variant catalog (one
+family per master and template), the row-access templates and the rail
+twins for placement.
 
 Every stage coefficient has a built-in, labeled value under the profile (the
 U1 ruling; see Stage delay estimate). `pass.usyn.domino_eval_fo4`, `domino_precharge_fo4`,
@@ -266,16 +294,18 @@ timing settings and the stage-timing code salt join the physical cache key.
 | `domino_cell` | exact master identity, `__lhd_domino_*` declarations (Q is a loop break) and behavioral lg/Verilog models |
 | `physical_select` | the per-state choice: recheck, cofactor/merge inputs, positive-output resynthesis, rail ledger, area comparison, bounded and deterministic |
 | `physical_report` | the `physical` block of pass.usyn's report |
-| `domino_geometry` | two-row `CLASS CORE` abstracts on the reference inverter's site (`SIZE w BY 2H`, `SYMMETRY X Y`, PG at 0/H/2H), the exact site quantization, row-aware pin access checks, and the route policy (Tech_profile, else the LEF routing stack) |
+| `domino_geometry` | two-row `CLASS CORE` abstracts on the reference inverter's site (`SIZE w BY 2H`, `SYMMETRY X Y`, PG at 0/H/2H in rail template t0 or t1), the exact site quantization, row-aware pin access checks on the starts each template's rails fit, and the route policy (Tech_profile, else the LEF routing stack) |
 | `domino_bundle` | the `<qor>.domino/` bundle and the placement-side sidecar reader |
 
 The bundle holds `domino_cells.lef` (macros only: no UNITS or SITE, read after
 the technology and cell LEFs), `domino_models.json` (the sidecar),
 `domino_models.v` and `models/` (an lg library for `lhd lec --lib lg:`), and
 `row_access.json` (the convention it was generated for). Every master is
-written in every register-ladder variant; the netlist instantiates variant 0,
-and only `synth.place.domino_sizing` swaps variants after placement. An abstract that fails the pin-access check refuses
-the bundle and pass.usyn publishes nothing; a technology rule the access
+written in every register-ladder variant, each in both rail templates; the
+netlist instantiates `v0_t0`, placement picks the template and only
+`synth.place.domino_sizing` swaps variants after placement. An abstract that
+fails the pin-access check, or a rung whose two templates do not together fit
+both start parities, refuses the bundle and pass.usyn publishes nothing; a technology rule the access
 engine cannot check (sky130's mcon enclosure) is reported as unverified, never
 as passed.
 
@@ -310,9 +340,12 @@ path); setting either directly is a usage error. An unset
 
 The profile never moves a default; what it cannot support is a usage error:
 another mapper, STA (`synth.opentimer=false` is required: the cells have no
-Liberty timing), timing-driven placement, resize and resynthesis,
-`synth.place.pg`, and the detail-final region consumers (busorder,
-boundarypins). OpenTimer and the cgen simulator refuse a `__lhd_domino_*`
+Liberty timing), timing-driven placement, resize and resynthesis, and the
+detail-final region consumers (busorder, boundarypins). `synth.place.pg` is
+allowed: the native grid derives row rails from one-row cells only, and the
+rail templates match them (checked on the lfsr ORFS frame with handoff taps:
+OpenROAD `check_placement` passes). It needs what any PG run needs (handoff
+taps, a core inset, DEF tracks). OpenTimer and the cgen simulator refuse a `__lhd_domino_*`
 instance by name (`core/provisional_cell.hpp`).
 
 After the mapper, lhd reads the bundle (`read_domino_sidecar`), appends
@@ -332,7 +365,12 @@ hits, byte-identical bundle, restored placement), `domino_aux=5` (logical and
 mapped hits, new bundle, fresh placement), and an all-CMOS control under the
 profile. `lhd_domplace_floorplan_smoke.py` places into an imported pinless
 frame narrow enough to fit only one anchor per row pair. One site narrower,
-it checks the named atomic packing failure. Imported DEF placement blockages
+it checks the named atomic packing failure. The smokes check that each
+anchor carries the rail template of its start row
+(`domplace_view.rail_template`). Tiny area-driven cores: the legalization
+bins are at least two rows tall when a two-row cell is movable (the lfsr
+core at utilization 0.55 failed the anchor prepass on one-row bins; see
+`pass/place/README.md`). Imported DEF placement blockages
 cannot fragment rows here yet, because terminal legalization does not consult
 them. `lhd_domplace_sizing_smoke.py` writes a second register rung (a
 stronger, wider `dfxtp_2`) to its temporary directory and sizes: an up-size

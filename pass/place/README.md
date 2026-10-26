@@ -2539,8 +2539,29 @@ core row recorded before the handoff taps cut any. Free sites and bin
 capacity come from the occupancy model terminal legalization builds
 (`row_occupancy`). The anchors are FIXED while terminal legalization packs
 the single-row cells around them, then released.
+
+Every start also passes the PG rail parity rule of OpenROAD's
+`check_placement` (`pg_rails.hpp`): a row has the edge rails of its site's
+one-row CORE cells (USE POWER/GROUND of routing-layer PG shapes centered on
+the row edges), swapped on FS/S rows, and each PG rail on a local row edge of
+a multi-row master must land on a row edge of its polarity. With rows
+alternating N/FS a two-row master fits every other start, so a
+`Multirow_template` may name a `rail_twin`: the same function, pins and
+footprint with the other rail stack (the domino `_t0`/`_t1` templates). A
+start that needs the twin takes it, in the floorplan and in the netlist
+instance (`change_custom_declaration`); without a twin the start is refused.
+A restored placement re-derives the template from its rows. `check_legality`
+rejects a multi-row cell on rails of the wrong polarity and refuses one with
+rails whose row rails it cannot derive.
+
+The legalization bins are fitted (`fit_terminal_legalize_grid`) at least as
+wide as the widest movable CORE cell over the cap and as tall as the tallest:
+two rows when a two-row cell is movable. Bins one row tall would charge a
+two-row cell's full height to every row of a bin column, so the hard cap
+quantized to cell widths; the HighTide lfsr area-driven core failed the
+prepass that way (`multirow_test`, `TinyCoreBinsAreAtLeastAsTallAsTheTwoRowCells`).
 The prepass is atomic and reports `qor.multirow` (cells, even/odd starts,
-displacement). With movable two-row cells present the macro stage, native
+`rail_twins`, displacement). With movable two-row cells present the macro stage, native
 legalization outside the final stage, the detail-final region mesh and ECO
 re-placement refuse explicitly, and a changed design places cold instead of
 re-placing around a cached reference; there is no DREAMPlace change.
@@ -2552,8 +2573,9 @@ two-row cell, widest first: a cell that is not wider keeps its pose; a wider
 one takes the nearest x of its own start row within `shift_sites` free of
 single-row cells, else the nearest one overlapping at most `max_displaced`
 single-row cells, else the packer's nearest pose for it alone, free of every
-cell. Poses keep the terminal `padding_sites` free, pass the row-access start
-check and the hard bin cap, on the terminal grid the reference was legalized
+cell. Poses keep the terminal `padding_sites` free, pass the row-access and
+rail-parity start check (taking the rail twin where the start needs it,
+counted as `rail_twins`) and the hard bin cap, on the terminal grid the reference was legalized
 on (GP bins as `dp::place` resolves them, so `automatic_bins` uses the
 design's automatic grid; reported as `bins_x`/`bins_y`). The posed cells are then locked, padded
 obstacles while nearest-whitespace ECO legalization re-places the displaced
@@ -2764,7 +2786,9 @@ legalizer remainder warping remains an independent option.
 transcribed from pinned ORFS profile data. `//tools:power_grid`
 reads repeated `--lef` inputs and `--def`, and writes a JSON metal plan with
 `--output`; `--profile` accepts `pg_asap7` or `auto`. It derives followpin widths
-and polarity from standard-cell PG pins and row orientations, merges shared
+and polarity from one-row standard-cell PG pins and row orientations (a
+multi-row master, such as a two-row domino abstract, never defines a row's
+rails; its parity is the legality check of `pg_rails.hpp`), merges shared
 rails, and clips stripe spans around macro halos on obstructed layers. Short
 row segments missed by periodic vertical feeders receive supplemental feeders
 using the profile width and spacing, on the manufacturing grid. Feeders must
