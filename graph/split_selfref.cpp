@@ -416,6 +416,27 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
         operands.push_back(sink.get_driver_pin());
       }
       bool usable = !has_sub && !operands.empty();
+      // A dominating constant makes this slice independent of every other
+      // operand, including a feedback operand. Check it before descending:
+      // resolving that feedback first would reject even one-bit `r = r | 1`.
+      if (usable && (op == Ntype_op::Or || op == Ntype_op::And)) {
+        for (const auto& d : operands) {
+          if (!d.is_const()) {
+            continue;
+          }
+          const auto& value = gu::const_of(d);
+          if (!value.is_integer() || value.has_unknowns()) {
+            continue;
+          }
+          const auto window = gu::mask_window_const(lo, hi);
+          const auto bits   = value.and_op(window);
+          if ((op == Ntype_op::Or && bits->eq_op(window)->is_known_true()) || (op == Ntype_op::And && bits->is_known_zero())) {
+            res    = gu::create_const(*g, op == Ntype_op::Or ? gu::mask_window_const(0, w) : *Dlop::create_integer(0));
+            usable = false;
+            break;
+          }
+        }
+      }
       // A Sum is only a pack when NO carry can occur: every operand bounded
       // and pairwise disjoint (then Sum == Or, e.g. `low + (a << 2)`). An Or
       // gets the same analysis for the cheap unique-cover descent; And/Xor

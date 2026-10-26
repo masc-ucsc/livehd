@@ -5,6 +5,7 @@
 #include <set>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ann_place.hpp"
@@ -105,6 +106,17 @@ struct Track {
   bool        same_mask                              = false;
   friend bool operator==(const Track&, const Track&) = default;
 };
+// Read-only routed snapshots retain all constraints as provenance. Placement
+// consumes only the supported rectangular subset through Placement_blockage.
+struct Blockage {
+  std::string       layer, component;
+  bool              placement = false, soft = false, slots = false, fills = false, pushdown = false, except_pg = false;
+  double            partial_density = -1;
+  int               spacing = -1, design_rule_width = -1, mask = 0;
+  std::vector<Rect> rectangles;
+  std::vector<std::vector<std::pair<int64_t, int64_t>>> polygons;
+  friend bool                                           operator==(const Blockage&, const Blockage&) = default;
+};
 // DEF placement-only rectangles in absolute DBU. Component association is
 // retained for export; moving associated components needs a separate update.
 struct Placement_blockage {
@@ -127,9 +139,11 @@ struct Floorplan {
   std::vector<Terminal>           terminals;
   std::vector<Net>                nets;
   std::vector<Placement_blockage> blockages;
+  std::vector<Blockage>           snapshot_blockages;  // Read-only routed provenance; never placement authority.
 };
 Technology                       read_lef(const std::vector<std::string>& paths);
 Floorplan                        read_def(const std::string& path);
+Floorplan                        read_def_snapshot(const std::string& path);
 void                             write_def(const Floorplan& floorplan, const std::string& path);
 std::string                      orientation_name(Orientation orientation);
 Orientation                      parse_orientation(const std::string& name);

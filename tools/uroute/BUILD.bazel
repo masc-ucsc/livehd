@@ -1,0 +1,207 @@
+# SPDX-License-Identifier: BSD-3-Clause
+load("@rules_cc//cc:defs.bzl", "cc_binary")
+load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//tools:copt_default.bzl", "COPTS")
+
+cc_binary(
+    name = "native",
+    srcs = ["native.cpp"],
+    copts = COPTS,
+    deps = [
+        "@bazel_tools//tools/cpp/runfiles",
+        "@dreamplace//dreamplace/native:placer",
+        "@dreamplace//thirdparty/flute",
+        "@rapidjson",
+    ],
+)
+
+py_library(
+    name = "data",
+    srcs = [
+        "__init__.py",
+        "baseline.py",
+        "cross_validate.py",
+        "episodes.py",
+        "evaluate.py",
+        "export_weights.py",
+        "extract.py",
+        "features.py",
+        "fixture.py",
+        "ingest.py",
+        "maps.py",
+        "odb.py",
+        "overflow.py",
+        "pool.py",
+        "postroute.py",
+        "score.py",
+        "train.py",
+    ],
+    data = [
+        "model.py",  # Fingerprinted as data; Torch remains offline-only.
+        "odb.tcl",
+    ],
+    visibility = ["//visibility:public"],
+)
+
+py_test(
+    name = "overflow_test",
+    timeout = "short",
+    srcs = ["overflow_test.py"],
+    legacy_create_init = 0,
+    deps = [":data"],
+)
+
+py_test(
+    name = "cross_validate_test",
+    timeout = "short",
+    srcs = ["cross_validate_test.py"],
+    legacy_create_init = 0,
+    deps = [":data"],
+)
+
+py_test(
+    name = "evaluate_test",
+    timeout = "short",
+    srcs = ["evaluate_test.py"],
+    args = [
+        "$(location :native)",
+        "$(location :pool_smoke)",
+    ],
+    data = [
+        ":native",
+        ":pool_smoke",
+    ],
+    legacy_create_init = 0,
+    deps = [":data"],
+)
+
+py_test(
+    name = "extract_test",
+    timeout = "short",
+    srcs = ["extract_test.py"],
+    args = ["$(location :native)"],
+    data = [":native"],
+    legacy_create_init = 0,
+    deps = [":data"],
+)
+
+py_test(
+    name = "ingest_smoke",
+    timeout = "short",
+    srcs = ["ingest_smoke.py"],
+    args = [
+        "$(location :native)",
+        "$(location //tools:placement_metrics)",
+    ],
+    data = [
+        ":native",
+        "//tools:placement_metrics",
+    ],
+    legacy_create_init = 0,
+    deps = [":data"],
+)
+
+py_test(
+    name = "features_test",
+    timeout = "short",
+    srcs = ["features_test.py"],
+    args = ["$(location :native)"],
+    data = [":native"],
+    legacy_create_init = 0,
+    deps = [":data"],
+)
+
+py_test(
+    name = "score_test",
+    timeout = "short",
+    srcs = ["score_test.py"],
+    legacy_create_init = 0,
+    deps = [":data"],
+)
+
+py_test(
+    name = "inference_test",
+    timeout = "short",
+    srcs = ["inference_test.py"],
+    args = [
+        "$(location :native)",
+        "$(location inference_golden.json)",
+        "$(location :h2d_smoke)",
+        "$(location //tools:rudy_metrics)",
+    ],
+    data = [
+        "inference_golden.json",
+        ":h2d_smoke",
+        ":native",
+        "//tools:rudy_metrics",
+    ],
+    legacy_create_init = 0,
+    deps = [":data"],
+)
+
+cc_binary(
+    name = "pool_smoke",
+    srcs = ["pool_smoke.cpp"],
+    copts = COPTS,
+    deps = [
+        "//pass/place:uroute",
+        "@dreamplace//dreamplace/native:placer",
+        "@rapidjson",
+    ],
+)
+
+py_test(
+    name = "pool_test",
+    timeout = "short",
+    srcs = ["pool_test.py"],
+    args = ["$(location :pool_smoke)"],
+    data = [":pool_smoke"],
+    legacy_create_init = 0,
+    deps = [":data"],
+)
+
+py_test(
+    name = "lhd_smoke",
+    timeout = "short",
+    srcs = ["lhd_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+    legacy_create_init = 0,
+    deps = [":data"],
+)
+
+py_test(
+    name = "episodes_test",
+    timeout = "short",
+    srcs = ["episodes_test.py"],
+    legacy_create_init = 0,
+    deps = [":data"],
+)
+
+py_test(
+    name = "train_test",
+    timeout = "short",
+    srcs = ["train_test.py"],
+    legacy_create_init = 0,
+    deps = [":data"],
+)
+
+cc_binary(
+    name = "h2d_smoke",
+    srcs = ["h2d_smoke.cpp"],
+    copts = COPTS,
+    deps = [
+        "@dreamplace//dreamplace/native:placer",
+        "@dreamplace//dreamplace/native/macro:h2d",
+    ],
+)
+
+py_test(
+    name = "odb_test",
+    timeout = "short",
+    srcs = ["odb_test.py"],
+    legacy_create_init = 0,
+    deps = [":data"],
+)

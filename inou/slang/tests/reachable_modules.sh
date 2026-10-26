@@ -139,10 +139,38 @@ module wide(output [1:0] y);
  assign r = r | 2'd1;
  assign y = r;
 endmodule
+module all_ones(output [1:0] y);
+ wire [1:0] r;
+ assign r = r | 2'd3;
+ assign y = r;
+endmodule
+module all_zero(output [1:0] y);
+ wire [1:0] r;
+ assign r = r & 2'd0;
+ assign y = r;
+endmodule
+module partial_and(output [1:0] y);
+ wire [1:0] r;
+ assign r = r & 2'd1;
+ assign y = r;
+endmodule
+module unknown_or(output y);
+ wire r;
+ assign r = r | 1'bx;
+ assign y = r;
+endmodule
 EOF
-"$LHD" compile "$W/ready.v" --top ready --workdir "$W/ready" \
-  --set compile.specialize_modules=true --emit-dir verilog:"$W/ready-net" -q -- --ignore-uninstantiated-modules
-if "$LHD" compile "$W/ready.v" --top wide --workdir "$W/wide" \
-  --set compile.specialize_modules=true -q -- --ignore-uninstantiated-modules; then
-  echo 'FAIL: a wide integer OR was treated as Boolean'; exit 1
-fi
+for engine in aegraph classic; do
+ for top in ready all_ones all_zero; do
+  "$LHD" compile "$W/ready.v" --top "$top" --workdir "$W/$top-$engine" \
+   --set compile.cprop.engine="$engine" --set compile.specialize_modules=true \
+   --emit-dir verilog:"$W/$top-$engine-net" -q -- --ignore-uninstantiated-modules
+ done
+ for top in wide partial_and unknown_or; do
+  if "$LHD" compile "$W/ready.v" --top "$top" --workdir "$W/$top-$engine" \
+   --set compile.cprop.engine="$engine" --set compile.specialize_modules=true \
+   --emit-dir verilog:"$W/$top-$engine-net" -q -- --ignore-uninstantiated-modules; then
+   echo "FAIL: unresolved feedback in $top was accepted by $engine"; exit 1
+  fi
+ done
+done

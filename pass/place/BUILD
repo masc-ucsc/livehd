@@ -150,6 +150,8 @@ filegroup(
         "prects_networks.hpp",
         "place.cpp",
         "place.hpp",
+        "uroute.cpp",
+        "uroute.hpp",
         "rc_cache.cpp",
         "rc_cache.hpp",
         "clock_constraints.cpp",
@@ -290,8 +292,10 @@ cc_library(
         ":place_salt",
     ],
     copts = COPTS,
+    data = [":uroute_pretrained"],
     visibility = ["//visibility:public"],
     deps = [
+        ":uroute",
         "//pass/place/buffering:checkpoint",
         ":filler_budget",
         ":warpspace",
@@ -562,4 +566,19 @@ cc_test(
     srcs = ["warpspace_test.cpp"],
     copts = COPTS,
     deps = [":warpspace", "@googletest//:gtest_main"],
+)
+
+cc_library(
+    name = "uroute",
+    srcs = ["uroute.cpp"],
+    hdrs = ["uroute.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = ["@dreamplace//dreamplace/native:placer", "@rapidjson", "@llvm-project//llvm:Support"],
+)
+
+filegroup(
+    name = "uroute_pretrained",
+    srcs = glob(["uroute/pretrained/*"]),
+    visibility = ["//visibility:public"],
 )

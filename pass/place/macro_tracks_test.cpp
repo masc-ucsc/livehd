@@ -73,6 +73,22 @@ TEST(Placement, MacroTrackAlignmentUsesOrientedPinsAndImportedTrackPhase) {
     EXPECT_GE(p.y, 2);
   }
 }
+
+TEST(Placement, VirtualMemoryTrackAlignmentPreservesExplicitFixedOrigins) {
+  auto [tech, fp]                     = track_fixture();
+  tech.macros.at("ram").virtual_proxy = true;
+  std::vector<physical::Component> cells{track_macro()};
+  cells.front().place.status = Ann_place::Status::FIXED;
+  EXPECT_THROW(legalize_macro_tracks(tech, fp, cells, 0, 0, true), std::runtime_error);
+  EXPECT_EQ(cells.front().place.x, 30);
+  EXPECT_EQ(cells.front().place.y, 30);
+  cells.front().place.status = Ann_place::Status::PLACED;
+  ASSERT_NO_THROW(legalize_macro_tracks(tech, fp, cells, 0, 0, true));
+  EXPECT_NE(cells.front().place.x, 30);
+  EXPECT_NE(cells.front().place.y, 30);
+  cells.front().place.status = Ann_place::Status::FIXED;
+  EXPECT_NO_THROW(legalize_macro_tracks(tech, fp, cells, 0, 0, false));
+}
 TEST(Placement, RigidMacroTrackAlignmentUsesOneTranslationAcrossMastersAndOrientations) {
   auto [tech, fp]             = track_fixture();
   tech.macros.at("ram").width = 12;

@@ -79,45 +79,36 @@ lec_both() {
   ! grep -q '"verdict":"refuted-' "$d/lec_verilog.json" || fail "$top: Verilog LEC REFUTED the mapped netlist"
 }
 
-map_design "$W/shift_off" zb_shift
-map_design "$W/shift_on" zb_shift --set pass.abc.ware_zero_bits=true
-map_design "$W/mem_off" zb_mem --set pass.abc.memory=true
-map_design "$W/mem_on" zb_mem --set pass.abc.memory=true --set pass.abc.memory_prune_reads=true
-map_design "$W/select_off" zb_select
-map_design "$W/select_on" zb_select --set pass.abc.ware_zero_bits=true
-map_design "$W/lanes_off" zb_lanes --set pass.abc.memory=true
-map_design "$W/lanes_on" zb_lanes --set pass.abc.memory=true --set pass.abc.memory_prune_reads=true
-map_design "$W/shared_on" zb_shared --set pass.abc.memory=true --set pass.abc.memory_prune_reads=true
-
-off=$(cells "$W/shift_off/netv")
-on=$(cells "$W/shift_on/netv")
-[ "$off" -gt 0 ] && [ "$on" -gt 0 ] || fail "zb_shift: no mapped cells (off=$off on=$on)"
-[ "$on" -lt $((off / 2)) ] || fail "zb_shift: ware_zero_bits did not halve the cells (off=$off on=$on)"
-lec_both "$W/shift_on" zb_shift
-echo "PASS: ware_zero_bits maps the one-live-lane word select to $on cells instead of $off, LEC-equivalent"
-
-off=$(cells "$W/mem_off/netv")
-on=$(cells "$W/mem_on/netv")
-[ "$off" -gt 0 ] && [ "$on" -gt 0 ] || fail "zb_mem: no mapped cells (off=$off on=$on)"
-[ "$on" -lt "$off" ] || fail "zb_mem: memory_prune_reads did not reduce the cells (off=$off on=$on)"
-lec_both "$W/mem_on" zb_mem
-echo "PASS: memory_prune_reads maps the narrow-window memory reads to $on cells instead of $off, LEC-equivalent"
-
-off=$(cells "$W/lanes_off/netv")
-on=$(cells "$W/lanes_on/netv")
-[ "$off" -gt 0 ] && [ "$on" -gt 0 ] || fail "zb_lanes: no mapped cells (off=$off on=$on)"
-[ "$on" -lt "$off" ] || fail "zb_lanes: memory_prune_reads did not reduce the cells (off=$off on=$on)"
-lec_both "$W/lanes_on" zb_lanes
-echo "PASS: memory_prune_reads maps the write-masked memory to $on cells (default $off), LEC-equivalent"
-
-off=$(cells "$W/select_off/netv")
-on=$(cells "$W/select_on/netv")
-[ "$off" -gt 0 ] && [ "$on" -gt 0 ] || fail "zb_select: no mapped cells (off=$off on=$on)"
-[ "$on" -lt "$off" ] || fail "zb_select: ware_zero_bits did not reduce the cells (off=$off on=$on)"
-lec_both "$W/select_on" zb_select
-echo "PASS: ware_zero_bits maps the 32-bit-index word select to $on cells instead of $off, LEC-equivalent"
-
-on=$(cells "$W/shared_on/netv")
-[ "$on" -gt 0 ] || fail "zb_shared: no mapped cells"
-lec_both "$W/shared_on" zb_shared
-echo "PASS: memory_prune_reads maps two write ports that share one enable cell to $on cells, LEC-equivalent"
+# Each regression target owns one independent optimization claim. A direct
+# invocation still checks all cases, with synthesis serialized as before.
+selected="${ZERO_BITS_CASE:-all}"
+case "$selected" in all|shift|mem|select|lanes|shared) ;; *) fail "unknown ZERO_BITS_CASE: $selected" ;; esac
+for claim in shift mem select lanes shared; do
+  [ "$selected" = all ] || [ "$selected" = "$claim" ] || continue
+  top="zb_$claim"
+  case "$claim" in
+    shift|select)
+      map_design "$W/${claim}_off" "$top"
+      map_design "$W/${claim}_on" "$top" --set pass.abc.ware_zero_bits=true
+      ;;
+    mem|lanes)
+      map_design "$W/${claim}_off" "$top" --set pass.abc.memory=true
+      map_design "$W/${claim}_on" "$top" --set pass.abc.memory=true --set pass.abc.memory_prune_reads=true
+      ;;
+    shared)
+      map_design "$W/shared_on" "$top" --set pass.abc.memory=true --set pass.abc.memory_prune_reads=true
+      ;;
+  esac
+  on=$(cells "$W/${claim}_on/netv")
+  [ "$on" -gt 0 ] || fail "$top: no mapped cells"
+  if [ "$claim" != shared ]; then
+    off=$(cells "$W/${claim}_off/netv")
+    [ "$off" -gt 0 ] || fail "$top: no default mapped cells"
+    [ "$on" -lt "$off" ] || fail "$top: optimization did not reduce the cells (off=$off on=$on)"
+    if [ "$claim" = shift ]; then
+      [ "$on" -lt $((off / 2)) ] || fail "$top: ware_zero_bits did not halve the cells (off=$off on=$on)"
+    fi
+  fi
+  lec_both "$W/${claim}_on" "$top"
+  echo "PASS: $top maps to $on cells, graph/Verilog LEC-equivalent"
+done

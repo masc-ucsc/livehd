@@ -154,10 +154,21 @@ filegroup(
 
 # State-name recovery and budget scheduling belong to the external solver;
 # the lhd CLI equivalence test covers the default CVC5 driver separately.
-sh_test(
+_STATE_MATCH_GROUPS = ["temporary", "packed", "encoding", "memory", "rtl", "bank", "loop", "init_names", "poweron", "budget"]
+
+[
+    sh_test(
+        name = "lgcheck_state_" + group,
+        srcs = ["tests/yosys_state_match_test.sh"],
+        args = [group],
+        data = [":scripts"],
+    )
+    for group in _STATE_MATCH_GROUPS
+]
+
+test_suite(
     name = "lgcheck_state_test",
-    srcs = ["tests/yosys_state_match_test.sh"],
-    data = [":scripts"],
+    tests = [":lgcheck_state_" + group for group in _STATE_MATCH_GROUPS],
 )
 
 sh_test(

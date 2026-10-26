@@ -1977,9 +1977,10 @@ Repair_result finalize_placement(const Result& initial, const Options& requested
   prior.Parse(initial.qor.c_str());
   final.Parse(result.placed.qor.c_str());
   if (prior.IsObject() && final.IsObject()) {
-    // This stage runs no GP and deliberately disables its own cache. Its
-    // placeholder counters must not replace the solve's optimization history.
-    for (const char* key : {"incremental",
+    // This pass performs no GP iterations and bypasses the placement cache.
+    // Preserve optimization history and routing metadata while keeping the
+    // final geometry/RC metrics from this legalization pass.
+    for (const auto* key : {"incremental",
                             "gp_converged",
                             "gp_overflow",
                             "initial_hpwl_um",
@@ -1987,9 +1988,15 @@ Repair_result finalize_placement(const Result& initial, const Options& requested
                             "virtual_filler_area_um2",
                             "virtual_filler_size_x_um",
                             "virtual_filler_size_y_um",
-                            "virtual_filler_count_limited"}) {
-      if (prior.HasMember(key) && final.HasMember(key)) {
-        final[key].CopyFrom(prior[key], final.GetAllocator());
+                            "virtual_filler_count_limited",
+                            "route_model",
+                            "uroute_skipped",
+                            "uroute_sample_ids"}) {
+      if (prior.HasMember(key)) {
+        final.RemoveMember(key);
+        final.AddMember(rapidjson::Value(key, final.GetAllocator()),
+                        rapidjson::Value(prior[key], final.GetAllocator()),
+                        final.GetAllocator());
       }
     }
     for (auto it = prior.MemberBegin(); it != prior.MemberEnd(); ++it) {

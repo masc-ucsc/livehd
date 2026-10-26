@@ -87,9 +87,15 @@ std::map<uint64_t, std::string> memory_proxies(hhds::Graph& graph, physical::Tec
     if (tech.routing_layers.empty()) {
       throw std::runtime_error("memory proxy needs a routing layer");
     }
-    const auto&  layer = tech.routing_layers.front();
-    const double half  = std::min(macro.width / 100, std::max(1.0 / tech.dbu, tech.layers.at(layer).width / 2));
-    const auto   pins  = [&](const std::vector<std::string>& names, int edge) {
+    const auto pins = [&](const std::vector<std::string>& names, int edge) {
+      // Route away from the edge on the layer's preferred direction. Putting
+      // every edge on the first layer can leave only off-grid planar access.
+      const auto   preferred = edge == 1 ? "VERTICAL" : "HORIZONTAL";
+      const auto   found     = std::find_if(tech.routing_layers.begin(), tech.routing_layers.end(), [&](const auto& name) {
+        return tech.layers.at(name).direction == preferred;
+      });
+      const auto&  layer     = found == tech.routing_layers.end() ? tech.routing_layers.front() : *found;
+      const double half      = std::min(macro.width / 100, std::max(1.0 / tech.dbu, tech.layers.at(layer).width / 2));
       for (size_t i = 0; i < names.size(); ++i) {
         const double   pos  = macro.width * (i + 1) / (names.size() + 1);
         physical::Rect rect = edge == 0   ? physical::Rect{0, pos - half, 2 * half, pos + half}
@@ -106,5 +112,119 @@ std::map<uint64_t, std::string> memory_proxies(hhds::Graph& graph, physical::Tec
     result.emplace(node.get_debug_nid(), master);
   }
   return result;
+}
+
+void align_memory_proxy_pins(physical::Technology& tech, const physical::Floorplan& floorplan) {
+  for (auto& [name, macro] : tech.macros) {
+    if (!macro.virtual_proxy) {
+      continue;
+    }
+    // Each edge uses a preferred escape layer; varying pin coordinates must
+    // share one phase so a rigid origin correction can serve every pin.
+    std::map<std::pair<std::string, int>, std::vector<physical::Rect*>> edges;
+    for (auto& [label, pin] : macro.pins) {
+      (void)label;
+      for (auto& shape : pin.shapes) {
+        const auto& layer = tech.layers.at(shape.layer);
+        const int   edge  = shape.rect.yl == 0 ? 1 : shape.rect.xl == 0 ? 0 : 2;
+        if ((edge == 1 && layer.direction == "VERTICAL") || (edge != 1 && layer.direction == "HORIZONTAL")) {
+          edges[{shape.layer, edge}].push_back(&shape.rect);
+        }
+      }
+    }
+    for (auto& [key, rectangles] : edges) {
+      const bool                               x     = key.second == 1;
+      const auto&                              layer = tech.layers.at(key.first);
+      std::vector<std::pair<int64_t, int64_t>> patterns;
+      for (const auto& track : floorplan.tracks) {
+        if (track.layer == key.first && track.axis == (x ? "X" : "Y") && track.step > 0 && track.count > 0) {
+          patterns.emplace_back(track.start, track.step);
+        }
+      }
+      if (patterns.empty()) {
+        const auto pitch = std::llround((x ? layer.pitch_x : layer.pitch_y) * tech.dbu);
+        if (pitch > 0) {
+          patterns.emplace_back(std::llround((x ? layer.offset_x : layer.offset_y) * tech.dbu), pitch);
+        }
+      }
+      if (patterns.empty()) {
+        continue;  // No known lattice; do not invent a technology pitch.
+      }
+      std::sort(rectangles.begin(), rectangles.end(), [&](const auto* a, const auto* b) {
+        return x ? a->xl < b->xl : a->yl < b->yl;
+      });
+      const auto&       first = *rectangles.front();
+      const double      half  = (x ? first.xh - first.xl : first.yh - first.yl) * tech.dbu / 2;
+      const int64_t     low = std::ceil(half - 1e-7), high = std::floor(macro.width * tech.dbu - half + 1e-7);
+      std::set<int64_t> candidates;
+      const auto        add = [&](int64_t point) {
+        if (point >= low && point <= high) {
+          candidates.insert(point);
+        }
+      };
+      for (const auto& [start, pitch] : patterns) {
+        auto phase = start % pitch;
+        if (phase < 0) {
+          phase += pitch;
+        }
+        if (phase > high) {
+          continue;
+        }
+        const auto steps = phase < low ? 1 + (low - phase - 1) / pitch : 0;
+        if (steps > (high - phase) / pitch) {
+          continue;
+        }
+        const auto first_track = phase + steps * pitch;
+        // Bound storage by pin count, not macro size. Include enough early
+        // tracks to fit every pin, plus neighbors of the desired even spacing.
+        // All interleaved patterns participate, including ASAP7's M2 rows.
+        auto       point       = first_track;
+        for (size_t i = 0; i < rectangles.size(); ++i) {
+          add(point);
+          if (pitch > high - point) {
+            break;
+          }
+          point += pitch;
+        }
+        for (size_t i = 0; i < rectangles.size(); ++i) {
+          const auto wanted = std::llround(macro.width * tech.dbu * (i + 1) / (rectangles.size() + 1));
+          if (wanted < phase) {
+            add(phase);
+            continue;
+          }
+          const auto before = phase + (wanted - phase) / pitch * pitch;
+          add(before);
+          if (pitch <= high - before) {
+            add(before + pitch);
+          }
+        }
+      }
+      if (candidates.size() < rectangles.size()) {
+        throw std::runtime_error("memory proxy edge has too few routing tracks for its pins: " + name);
+      }
+      const std::vector<int64_t> positions(candidates.begin(), candidates.end());
+      size_t                     next = 0;
+      for (size_t i = 0; i < rectangles.size(); ++i) {
+        auto&        rect   = *rectangles[i];
+        const double wanted = macro.width * tech.dbu * (i + 1) / (rectangles.size() + 1);
+        const auto   last   = positions.size() - (rectangles.size() - i);
+        auto         chosen = static_cast<size_t>(std::lower_bound(positions.begin(), positions.end(), wanted) - positions.begin());
+        chosen              = std::clamp(chosen, next, last);
+        if (chosen > next && std::abs(positions[chosen - 1] - wanted) < std::abs(positions[chosen] - wanted)) {
+          --chosen;
+        }
+        next                = chosen + 1;
+        const double center = double(positions[chosen]) / tech.dbu;
+        const double radius = half / tech.dbu;
+        if (x) {
+          rect.xl = center - radius;
+          rect.xh = center + radius;
+        } else {
+          rect.yl = center - radius;
+          rect.yh = center + radius;
+        }
+      }
+    }
+  }
 }
 }  // namespace livehd::placement

@@ -12,7 +12,9 @@
 - **Build**: `bazel build -c dbg //...`
 - **Test**: `bazel test //...`
 - **Test runtime**: Keep each test under 20 seconds with `-c opt` and under
-  60 seconds with `-c dbg`. Simplify oversized fixtures and avoid repeated
+  60 seconds with `-c dbg`; 30 seconds is the hard per-test limit for the
+  optimized regression on this machine (run with `--test_timeout=30`).
+  Simplify oversized fixtures and avoid repeated
   compilation; keep large design benchmarks in their own repositories.
 - **Independent tests**: LiveHD scripts and BUILD rules must not access sibling
   benchmark repositories. Test inputs must be provided by this repository or
