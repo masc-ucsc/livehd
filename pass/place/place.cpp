@@ -2853,12 +2853,8 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology&
     append(std::move(rc), approximate);
   }
   if (cache) {
-    const Rc_policy policy{
-        {horizontal_r, horizontal_c, vertical_r, vertical_c},
-        double(tech.dbu),
-        wire.source
-    };
-    const auto snapshot = cache->update(std::move(geometries), policy, [&](const Rc_geometry& net, const Rc_policy&) {
+    const Rc_policy policy{per_um(wire), double(tech.dbu), wire.source};
+    const auto      snapshot = cache->update(std::move(geometries), policy, [&](const Rc_geometry& net, const Rc_policy&) {
       Rc_cache::Built built;
       built.rc = steiner_rc(net.driver, net.pins, wire, tech.dbu, &built.approximate);
       return built;
@@ -7309,14 +7305,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                                            options.resistance_ohm_um,
                                            options.capacitance_ff_um,
                                            options.rc_pessimism);
-      auto       session = native_session = std::make_shared<timeclosure::Gp_timing_session>(
-          *result.graph,
-          config,
-          Rc_policy{
-                    {wire.horizontal_r, wire.horizontal_c, wire.vertical_r, wire.vertical_c},
-              double(tech.dbu),
-              wire.source
-      });
+      auto       session = native_session
+          = std::make_shared<timeclosure::Gp_timing_session>(*result.graph,
+                                                             config,
+                                                             Rc_policy{per_um(wire), double(tech.dbu), wire.source});
       // Native timing names physical pins as a top port or instance:pin.
       const auto label        = [](const Endpoint& pin) { return pin.instance == "PIN" ? pin.pin : pin.instance + ":" + pin.pin; };
       // Bind every weighted timing sink to its physical pin and net driver.

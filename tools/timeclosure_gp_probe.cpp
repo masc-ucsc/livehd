@@ -514,11 +514,7 @@ int main(int argc, char** argv) {
                                                options.resistance_ohm_um,
                                                options.capacitance_ff_um,
                                                options.rc_pessimism);
-      star.policy     = {
-          {wire.horizontal_r, wire.horizontal_c, wire.vertical_r, wire.vertical_c},
-          double(technology.dbu),
-          wire.source
-      };
+      star.policy     = {livehd::placement::per_um(wire), double(technology.dbu), wire.source};
     }
     if (native_forces) {
       auto settings                     = std::make_shared<pl::timeclosure::Gp_timing_settings>();

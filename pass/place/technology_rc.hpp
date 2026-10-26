@@ -1,5 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
+#include <array>
 #include <map>
 #include <string>
 #include <utility>
@@ -13,6 +14,11 @@ struct Wire_rc {
   double      horizontal_r = 0, horizontal_c = 0, vertical_r = 0, vertical_c = 0;
   std::string source;
 };
+// Horizontal R, horizontal C, vertical R, vertical C per micron: the layout of
+// Rc_policy::per_um and the buffering producer's directional_rc.
+inline std::array<double, 4> per_um(const Wire_rc& wire) {
+  return {wire.horizontal_r, wire.horizontal_c, wire.vertical_r, wire.vertical_c};
+}
 struct Layer_rc {
   double r = -1, c = -1;  // ohm/um and fF/um; negative means uncharacterized
 };
