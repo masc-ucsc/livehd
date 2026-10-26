@@ -23,6 +23,8 @@ namespace {
 namespace dp = DreamPlace::native;
 namespace fs = std::filesystem;
 using Json   = rapidjson::Value;
+// Input size limits, mirrored by the offline tools.
+constexpr std::uintmax_t map_limit = 8ULL << 20, manifest_limit = 64ULL << 20, weights_limit = 256ULL << 20, lef_limit = 1ULL << 30;
 std::string digest(llvm::SHA256& hash) {
   constexpr char hex[] = "0123456789abcdef";
   std::string    out;
@@ -165,7 +167,7 @@ std::string uroute_digest(std::string_view value) { return sha(value); }
 std::string uroute_technology(const std::vector<std::string>& lefs, std::string_view generated_lef) {
   std::vector<std::string> hashes;
   for (const auto& path : lefs) {
-    hashes.push_back(file_sha(path, 1024ULL * 1024 * 1024));
+    hashes.push_back(file_sha(path, lef_limit));
   }
   if (!generated_lef.empty()) {
     hashes.push_back(sha(generated_lef));
@@ -204,7 +206,7 @@ Uroute_pool::Uroute_pool(Uroute_options options) {
       d->skipped = "manifest.json is missing";
       return;
     }
-    if (fs::file_size(manifest) > 64 * 1024 * 1024) {
+    if (fs::file_size(manifest) > manifest_limit) {
       throw std::runtime_error("oversized URoute manifest");
     }
     std::ifstream     in(manifest, std::ios::binary);
@@ -246,7 +248,7 @@ Uroute_pool::Uroute_pool(Uroute_options options) {
       sample.created       = created.GetUint64();
       const auto directory = inside(root, text(record, "directory"));
       const auto features = inside(directory, "features.bin"), labels = inside(directory, "labels.bin");
-      const auto fh = file_sha(features, 8 * 1024 * 1024), lh = file_sha(labels, 8 * 1024 * 1024);
+      const auto fh = file_sha(features, map_limit), lh = file_sha(labels, map_limit);
       if (fh != text(record, "features_sha256") || lh != text(record, "labels_sha256")) {
         throw std::runtime_error("URoute sample digest mismatch: " + id);
       }
@@ -273,7 +275,7 @@ Uroute_pool::Uroute_pool(Uroute_options options) {
       return;
     }
     const auto path   = inside(root, text(weights, "file"));
-    const auto hash   = file_sha(path, 256 * 1024 * 1024);
+    const auto hash   = file_sha(path, weights_limit);
     d->weights_sha256 = hash;
     d->identity       = sha(d->identity + ":" + hash);
     if (hash != text(weights, "sha256")) {
@@ -426,7 +428,7 @@ void export_uroute(const fs::path& directory, const dp::Design& design, const Ur
   out.Key("placement_identity");
   out.String(digest(placement).c_str());
   out.Key("features_sha256");
-  out.String(file_sha(map_path, 8 * 1024 * 1024).c_str());
+  out.String(file_sha(map_path, map_limit).c_str());
   out.Key("core");
   out.StartArray();
   for (double v : {design.layout.xl, design.layout.yl, design.layout.xh, design.layout.yh}) {
