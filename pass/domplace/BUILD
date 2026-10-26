@@ -102,3 +102,35 @@ cc_test(
         "@googletest//:gtest_main",
     ],
 )
+
+# Master identity, body-less declarations and behavioral models of domino cells.
+cc_library(
+    name = "domino_cell",
+    srcs = ["domino_cell.cpp"],
+    hdrs = ["domino_cell.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        "//core",
+        "//graph",
+        "//pass/liberty:liberty_dff",
+        "//pass/usyn:usyn_logic",
+        "//pass/usyn:usyn_semantic",
+        "@hhds//hhds:core",
+    ],
+)
+
+cc_test(
+    name = "domino_cell_test",
+    size = "small",
+    srcs = ["domino_cell_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":domino_cell",
+        "//core",
+        "//graph",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:core",
+    ],
+)
