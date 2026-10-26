@@ -225,6 +225,34 @@ TEST(TerminalLegalize, OptionalPaddingBudgetStillEnforcesHardDensity) {
   EXPECT_LE(report.bins.front().after, .8 * report.bins.front().capacity);
 }
 
+TEST(TerminalLegalize, TwoRowCellsAreFixedObstaclesNeverMovableCells) {
+  // The v1 contract of the domino anchor prepass (multirow.hpp): terminal
+  // legalization packs only single-row cells. A FIXED two-row CORE cell is an
+  // obstacle in both of its rows; a movable one has no candidate row.
+  Fixture f(12, 2);
+  auto    tall                         = f.tech.macros.at("cell");
+  tall.width                           = 2;
+  tall.height                          = 2;
+  f.tech.macros["tall"]                = tall;
+  f.options.bins_x                     = 1;
+  f.options.bins_y                     = 1;
+  f.options.local_pair_limit           = 0;
+  auto       movable                   = f;
+  const auto anchor                    = f.cell(5, 0, "tall");
+  f.fp.components[anchor].place.status = physical::Status::FIXED;
+  for (int i = 0; i < 4; ++i) {
+    f.cell(5, i % 2);  // seeded on top of the anchor, in both of its rows
+  }
+  const auto               before = f.fp.components[anchor].place;
+  Terminal_legalize_report report;
+  ASSERT_NO_THROW(report = terminal_legalize(f.tech, f.fp, f.timing, f.options));
+  f.check(report);
+  EXPECT_EQ(f.fp.components[anchor].place, before);
+  movable.cell(5, 0, "tall");
+  movable.cell(1, 0);
+  EXPECT_THROW(terminal_legalize(movable.tech, movable.fp, movable.timing, movable.options), std::runtime_error);
+}
+
 TEST(TerminalLegalize, WireCostChoosesConnectedSideAndDoesNotPullLegalCells) {
   Fixture f(60, 1);
   f.options.bins_y            = 1;

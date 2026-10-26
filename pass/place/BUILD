@@ -636,6 +636,7 @@ cc_library(
     deps = [
         ":uroute",
         ":region_mesh",
+        ":multirow",
         ":cell_criticality",
         ":track_capacity",
         "//pass/place/buffering:checkpoint",

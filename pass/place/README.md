@@ -2526,6 +2526,19 @@ supports compatible single-height CORE cells. An exhaustive site scan catches fe
 menu before a fragmentation retry. Exhausting the current packing still does not
 prove infeasibility, even when aggregate area fits.
 
+Movable two-row CORE cells (the provisional domino abstracts of
+`pass/domplace`) are packed first by the anchor prepass in `multirow.hpp`:
+widest first, each takes the nearest site-aligned x interval free in both of
+its rows (one row segment and site grid, never a split footprint), the start
+row's orientation, and a pose the legalization bins can hold. Under
+`Options::row_access` and `multirow_templates` a master starts only where each
+local row lands on a row of its access class. The anchors are FIXED while
+terminal legalization packs the single-row cells around them, then released.
+The prepass is atomic and reports `qor.multirow` (cells, even/odd starts,
+displacement). With movable two-row cells present the macro stage, native
+legalization outside the final stage, the detail-final region mesh and ECO
+re-placement refuse explicitly; there is no DREAMPlace change.
+
 `terminal_legalize.json` records settings, bin capacities/areas, stage counts,
 SAT outcomes, retries and displacement. `terminal_legalize_cells.tsv` records
 critical membership, stage, slack and before/after coordinates. Normal placement

@@ -603,6 +603,13 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.handoff_taps) {
     h = hash_text("handoff-taps-v1:" + placement_tech_profile(tech, o).name, h);
   }
+  if (o.row_access) {
+    h = hash_text("row-access:" + o.row_access->identity(), h);
+  }
+  for (const auto& [master, t] : o.multirow_templates) {
+    h = hash_text(std::format("multirow-template:{}:{}:{}", master, ph::row_access_name(t.half[0]), ph::row_access_name(t.half[1])),
+                  h);
+  }
   if (o.pg != "none") {
     h = hash_text("native-pg-v1:" + o.pg, h);
   }
@@ -5686,6 +5693,36 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (refinement_active && movable_macros) {
     throw std::invalid_argument("final boundary refinement requires fixed macros");
   }
+  // Movable two-row CORE cells (provisional domino masters) are packed only by
+  // the anchor prepass of final terminal legalization (multirow.hpp). The macro
+  // stage, native and SAT legalization, the region refinements and ECO
+  // re-placement assume single-row cells, so they refuse them.
+  size_t multirow_cells = 0;
+  for (const auto& cell : v.cells) {
+    multirow_cells += !cell.locked && cell.place.status != Ann_place::Status::FIXED
+                      && cell.place.status != Ann_place::Status::LOCKED && is_multirow_core(tech, tech.macros.at(cell.macro));
+  }
+  if (multirow_cells) {
+    const auto refuse = [&](std::string_view what) {
+      throw std::invalid_argument(
+          std::format("{} movable two-row cell(s) need final terminal legalization: {}", multirow_cells, what));
+    };
+    if (macro_active) {
+      refuse("the macro placement stage is not supported");
+    }
+    if (options.full && !terminal_active && !options.timing_seed && !options.analyze_colors_only) {
+      refuse("native legalization outside the final stage is not supported");
+    }
+    if (options.satlegalize) {
+      refuse("satlegalize treats multi-height cells as immutable");
+    }
+    if (options.busorder.enabled || options.boundarypins.enabled || options.boundarypins.align) {
+      refuse("the detail-final region mesh (busorder, boundarypins) needs single-row cells");
+    }
+    if (options.previous || !options.changed_cells.empty() || options.legalize_cells) {
+      refuse("ECO legalization is single-row");
+    }
+  }
   std::optional<Busorder>      bus_order;
   std::optional<Boundary_pins> boundary_pins;
   const auto                   refine_final_boundaries = [&](dp::Design& physical) {
@@ -5783,6 +5820,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
   };
   std::optional<Terminal_legalize_report> terminal_report;
+  std::optional<Multirow_report>          multirow_report;
   std::vector<ph::Component>              handoff_cells;
   std::vector<ph::Row>                    handoff_rows;
   const bool macro_pin_adjust = options.macro_pin_adjust && movable_macros && !options.previous && !options.timing_seed;
@@ -8056,7 +8094,24 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       } else {
         fit_terminal_legalize_grid(tech, frame, terminal_options);
       }
+      // Anchor the two-row cells first; terminal legalization packs the
+      // single-row cells around them as fixed obstacles, then they are released.
+      if (multirow_cells) {
+        Multirow_options anchors;
+        anchors.access           = options.row_access ? &*options.row_access : nullptr;
+        anchors.templates        = &options.multirow_templates;
+        anchors.padding_sites    = terminal_options.padding_sites;
+        anchors.bins_x           = terminal_options.bins_x;
+        anchors.bins_y           = terminal_options.bins_y;
+        anchors.max_density      = terminal_options.max_density;
+        anchors.macro_halo_x_dbu = terminal_options.macro_halo_x_dbu;
+        anchors.macro_halo_y_dbu = terminal_options.macro_halo_y_dbu;
+        multirow_report          = anchor_multirow_cells(tech, frame, anchors);
+      }
       terminal_report = terminal_legalize(tech, frame, final_gp_timing, terminal_options);
+      if (multirow_report) {
+        release_multirow_anchors(frame, *multirow_report);
+      }
       sat_install(v.design, frame);
       metrics.legal                               = dp::is_legal(v.design);
       metrics.hpwl                                = dp::hpwl(v.design);
@@ -10006,6 +10061,25 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
       sat.AddMember("relations", relations, allocator);
       json.AddMember("satlegalize", sat, allocator);
+    }
+    if (multirow_report) {
+      // The anchor prepass of the two-row cells; start parity counts from the
+      // first core row, as the row-access convention does.
+      rapidjson::Value multirow(rapidjson::kObjectType);
+      multirow.AddMember("cells", static_cast<uint64_t>(multirow_report->anchors.size()), allocator);
+      multirow.AddMember("even_starts", static_cast<uint64_t>(multirow_report->even_starts), allocator);
+      multirow.AddMember("odd_starts", static_cast<uint64_t>(multirow_report->odd_starts), allocator);
+      multirow.AddMember("candidates", static_cast<uint64_t>(multirow_report->candidates), allocator);
+      multirow.AddMember("full_core_scans", static_cast<uint64_t>(multirow_report->full_core_scans), allocator);
+      multirow.AddMember("work", multirow_report->work, allocator);
+      multirow.AddMember("total_displacement_um", multirow_report->total_displacement_um, allocator);
+      multirow.AddMember("max_displacement_um", multirow_report->max_displacement_um, allocator);
+      multirow.AddMember("templates", static_cast<uint64_t>(options.multirow_templates.size()), allocator);
+      multirow.AddMember("row_access",
+                         options.row_access ? rapidjson::Value(options.row_access->name.c_str(), allocator)
+                                            : rapidjson::Value(rapidjson::kNullType),
+                         allocator);
+      json.AddMember("multirow", multirow, allocator);
     }
     rapidjson::StringBuffer                    buffer;
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);

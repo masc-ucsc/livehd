@@ -16,6 +16,7 @@
 
 #include "attrs.hpp"
 #include "gtest/gtest.h"
+#include "inou/lefdef/lef_writer.hpp"
 #include "macro_tracks.hpp"
 #include "memory_proxy.hpp"
 #include "node_util.hpp"
@@ -166,6 +167,49 @@ TEST(Placement, RowLegalityAcceptsOnlyTechnologyPermittedHorizontalMirrors) {
   fp.components[0].place.orientation = Ann_place::Orientation::W;
   EXPECT_THROW(check_legality(tech, fp), std::runtime_error);
 }
+TEST(Placement, RowLegalityChecksEveryBandOfTwoRowCells) {
+  // A two-row CORE cell (a domino abstract) on the single-height core site is
+  // legal at both start parities with the start row's orientation, and every
+  // row band it spans is checked.
+  auto       tech            = physical::read_lef({"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"});
+  const auto sw              = std::llround(tech.sites.at("unithd").width * tech.dbu);
+  const auto rh              = std::llround(tech.sites.at("unithd").height * tech.dbu);
+  auto       tall            = tech.macros.at("sky130_fd_sc_hd__inv_1");
+  tall.height               *= 2;
+  tech.macros["two_row"]     = tall;
+  const auto          width  = std::llround(tall.width * tech.dbu);
+  physical::Floorplan fp;
+  for (int r = 0; r < 4; ++r) {
+    fp.rows.push_back(
+        {"r" + std::to_string(r), "unithd", 0, r * rh, 20, sw, r % 2 ? Ann_place::Orientation::FS : Ann_place::Orientation::N});
+  }
+  const auto add = [&](const char* master, int64_t x, int64_t y, Ann_place::Orientation o) {
+    physical::Component c;
+    c.name              = "c" + std::to_string(fp.components.size());
+    c.macro             = master;
+    c.place             = Ann_place(x, y, width, std::llround(tech.macros.at(master).height * tech.dbu));
+    c.place.status      = Ann_place::Status::PLACED;
+    c.place.orientation = o;
+    fp.components.push_back(c);
+    return fp.components.size() - 1;
+  };
+  const auto even = add("two_row", 0, 0, Ann_place::Orientation::N);
+  add("two_row", 4 * sw, rh, Ann_place::Orientation::FS);
+  EXPECT_NO_THROW(check_legality(tech, fp));
+  // A single-row cell in the upper band of the even-start cell overlaps it.
+  const auto upper = add("sky130_fd_sc_hd__inv_1", 0, rh, Ann_place::Orientation::FS);
+  EXPECT_THROW(check_legality(tech, fp), std::runtime_error);
+  fp.components[upper].place.x = 10 * sw;
+  EXPECT_NO_THROW(check_legality(tech, fp));
+  // The orientation must be the start row's: FS on an N start is rejected.
+  fp.components[even].place.orientation = Ann_place::Orientation::FS;
+  EXPECT_THROW(check_legality(tech, fp), std::runtime_error);
+  fp.components[even].place.orientation = Ann_place::Orientation::N;
+  // The top band must exist: a start on the last row leaves the core.
+  fp.components[even].place.y           = 3 * rh;
+  fp.components[even].place.orientation = Ann_place::Orientation::FS;
+  EXPECT_THROW(check_legality(tech, fp), std::runtime_error);
+}
 TEST(Placement, LegalStageSnapshotsUsePhysicalRowsAndPreserveFixedMirrors) {
   hhds::GraphLibrary source, flat;
   auto               io = source.create_io("snapshot_rows");
@@ -303,6 +347,91 @@ TEST(Placement, TerminalLegalizerIsLastAndPreservesItsExactOutput) {
   ASSERT_FALSE(report.HasParseError());
   for (const auto& bin : report["bins"].GetArray()) {
     EXPECT_LE(bin["after_density"].GetDouble(), .8 + 1e-8);
+  }
+}
+
+TEST(Placement, TwoRowCellsAreAnchoredBeforeTerminalLegalization) {
+  // Movable two-row CORE cells (domino abstracts) go through the anchor
+  // prepass, the unchanged terminal legalizer and release; the other final
+  // legalizers refuse them.
+  const std::vector<std::string> lefs{"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  const auto                     tech  = physical::read_lef(lefs);
+  auto                           tall  = tech.macros.at("sky130_fd_sc_hd__inv_1");
+  tall.height                         *= 2;
+  const auto dir                       = std::string(std::getenv("TEST_TMPDIR")) + "/two_rows";
+  std::filesystem::create_directories(dir);
+  std::ofstream(dir + "/two_row.lef") << physical::write_lef_macros(
+      {
+          {"two_row", tall}
+  },
+      tech.dbu);
+  hhds::GraphLibrary source, flat;
+  auto               io = source.create_io("two_rows");
+  io->add_input("a", 0);
+  io->set_bits("a", 1);
+  io->add_output("y", 0);
+  io->set_bits("y", 1);
+  auto graph = io->create_graph();
+  auto inv   = source.create_io("sky130_fd_sc_hd__inv_1");
+  auto two   = source.create_io("two_row");
+  for (const auto& cell : {inv, two}) {
+    cell->add_input("A", 0);
+    cell->add_output("Y", 0);
+  }
+  auto signal = graph->get_input_pin("a");
+  gu::set_bits(signal, 1);
+  for (unsigned i = 0; i < 12; ++i) {
+    auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+    node.set_subnode(i % 4 == 1 ? two : inv);
+    node.set_name("c" + std::to_string(i));
+    node.create_sink_pin("A").connect_driver(signal);
+    signal = node.create_driver_pin("Y");
+    gu::set_bits(signal, 1);
+  }
+  graph->get_output_pin("y").connect_driver(signal);
+  auto options                                        = plain_options();
+  options.lefs                                        = {lefs[0], lefs[1], dir + "/two_row.lef"};
+  options.output_dir                                  = dir + "/out";
+  options.iterations                                  = 0;
+  options.bins                                        = 4;
+  options.density                                     = .5;
+  options.utilization                                 = .15;
+  options.optimization_pending                        = false;
+  options.terminal_legalize_options.critical_fraction = 0;
+  options.row_access                                  = physical::Row_access_convention{};
+  options.multirow_templates["two_row"]               = {
+      {physical::Row_access::horizontal, physical::Row_access::vertical}
+  };
+  const auto result = place(*graph, flat, options);
+  const auto all    = physical::read_lef(options.lefs);
+  EXPECT_NO_THROW(check_legality(all, result.floorplan));
+  const auto rh      = std::llround(all.sites.at("unithd").height * all.dbu);
+  size_t     two_row = 0;
+  for (const auto& c : result.floorplan.components) {
+    if (c.macro != "two_row") {
+      continue;
+    }
+    ++two_row;
+    EXPECT_EQ(c.place.height, 2 * rh);
+    EXPECT_EQ(c.place.status, physical::Status::PLACED);
+    const auto row
+        = std::find_if(result.floorplan.rows.begin(), result.floorplan.rows.end(), [&](const auto& r) { return r.y == c.place.y; });
+    ASSERT_NE(row, result.floorplan.rows.end()) << c.name;
+    EXPECT_EQ(c.place.orientation, row->orientation) << c.name;
+  }
+  EXPECT_EQ(two_row, 3U);
+  rapidjson::Document qor;
+  qor.Parse(result.qor.c_str());
+  ASSERT_TRUE(qor.HasMember("multirow"));
+  EXPECT_EQ(qor["multirow"]["cells"].GetUint64(), 3U);
+  EXPECT_EQ(qor["multirow"]["even_starts"].GetUint64() + qor["multirow"]["odd_starts"].GetUint64(), 3U);
+  EXPECT_STREQ(qor["multirow"]["row_access"].GetString(), "stand-in");
+  options.busorder.enabled = true;
+  try {
+    (void)place(*graph, flat, options);
+    ADD_FAILURE() << "the region mesh accepted two-row cells";
+  } catch (const std::invalid_argument& error) {
+    EXPECT_NE(std::string(error.what()).find("two-row"), std::string::npos) << error.what();
   }
 }
 

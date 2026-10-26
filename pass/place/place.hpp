@@ -20,6 +20,8 @@
 #include "dreamplace/native/placement.hpp"
 #include "hhds/graph.hpp"
 #include "inou/lefdef/physical.hpp"
+#include "inou/lefdef/row_access.hpp"
+#include "multirow.hpp"
 #include "power_grid.hpp"
 #include "preroute_design.hpp"
 #include "rc_cache.hpp"
@@ -176,6 +178,12 @@ struct Options {
   // In-process ECO reference; independent of persistent-cache admission.
   std::shared_ptr<const physical::Floorplan>                 previous;
   std::vector<std::string>                                   changed_cells;
+  // Two-row CORE cells (pass/domplace provisional domino masters) are anchored
+  // before terminal legalization (multirow.hpp). With a convention, a master
+  // with a template starts only where each local row lands on a row of its
+  // access class; without one, only LEF SYMMETRY filters starts.
+  std::optional<physical::Row_access_convention>             row_access;
+  std::map<std::string, Multirow_template>                   multirow_templates;  // by LEF macro
   // Opt-in incident-net wirelength cost during nearest-whitespace ECO legalization (0..100).
   double                                                     eco_connectivity_weight = 0;
   // Diagnostic only: exact edited-cell names whose successful ECO seeds/sites are recorded in qor.eco.trace.

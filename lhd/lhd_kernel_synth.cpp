@@ -1575,6 +1575,10 @@ void synth_command(Options& opts, Result& res) {
       // Every LEF reader (placement, routing identity, DEF export) sees the
       // generated abstracts as one more cell LEF, and so does the cache.
       place_options.lefs.push_back(sidecar->lef.string());
+      place_options.row_access = sidecar->row_access;
+      for (const auto& [macro, halves] : sidecar->templates) {
+        place_options.multirow_templates[macro] = {halves};
+      }
       if (physical_cache) {
         physical_cache->add_dependency(sidecar->lef.string());
         physical_cache->add_dependency((fs::path(bundle_path) / livehd::domplace::kBundleSidecar).string());
