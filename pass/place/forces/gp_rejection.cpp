@@ -5,19 +5,14 @@
 #include <fstream>
 #include <stdexcept>
 
+#include "pass/place/late_timing_json.hpp"
 #include "rapidjson/ostreamwrapper.h"
 #include "rapidjson/writer.h"
 
 namespace livehd::placement::timeclosure {
 namespace {
 using Writer = rapidjson::Writer<rapidjson::OStreamWrapper>;
-void optional(Writer& json, std::optional<double> value) {
-  if (value) {
-    json.Double(*value);
-  } else {
-    json.Null();
-  }
-}
+using late::json::write;
 void difference(Writer& json, const late::Timing_difference& value) {
   json.StartObject();
   json.Key("pin");
@@ -47,21 +42,11 @@ void observation(Writer& json, const late::Result& value) {
   json.Key("bounded_driver_boundary");
   json.Bool(value.bounded_boundary_policy);
   json.Key("wns_ps");
-  optional(json, value.wns_ps);
+  write(json, value.wns_ps);
   json.Key("achievable_period_ps");
-  optional(json, value.achievable_period_ps);
+  write(json, value.achievable_period_ps);
   json.Key("clocks");
-  json.StartObject();
-  for (const auto& [name, clock] : value.clocks) {
-    json.Key(name.c_str());
-    json.StartObject();
-    json.Key("period_ps");
-    json.Double(clock.period_ps);
-    json.Key("timed_endpoints");
-    json.Uint64(clock.timed_endpoints);
-    json.EndObject();
-  }
-  json.EndObject();
+  late::json::write_clocks(json, value, false);
   json.Key("pins");
   json.StartArray();
   for (const auto& pin : value.pins) {
@@ -73,30 +58,7 @@ void observation(Writer& json, const late::Result& value) {
     json.Key("clock");
     json.Bool(pin.clock);
     json.Key("transitions");
-    json.StartArray();
-    for (const auto& state : pin.transitions) {
-      json.StartObject();
-      for (const auto& [name, quantity] : {
-               std::pair{ "arrival_ps",  state.arrival_ps},
-               {"required_ps", state.required_ps},
-               {    "slew_ps",     state.slew_ps},
-               {    "load_ff",     state.load_ff}
-      }) {
-        json.Key(name);
-        optional(json, quantity);
-      }
-      json.Key("predecessor");
-      if (state.predecessor) {
-        json.StartArray();
-        json.Uint64(state.predecessor->pin);
-        json.Uint(state.predecessor->transition);
-        json.EndArray();
-      } else {
-        json.Null();
-      }
-      json.EndObject();
-    }
-    json.EndArray();
+    late::json::write_transitions(json, pin.transitions, value, late::json::Predecessor_style::index);
     json.EndObject();
   }
   json.EndArray();
@@ -182,7 +144,7 @@ void write_gp_timing_rejection(const std::string& prefix, const Gp_timing_reject
     json.Key("maximum");
     json.Double(field.maximum);
     json.Key("mean");
-    optional(json, field.mean);
+    write(json, field.mean);
     json.Key("worst");
     if (field.worst) {
       difference(json, *field.worst);
@@ -212,11 +174,11 @@ void write_gp_timing_rejection(const std::string& prefix, const Gp_timing_reject
     json.Uint64(count);
   }
   json.Key("period_ps");
-  optional(json, rank.period_ps);
+  write(json, rank.period_ps);
   json.Key("jaccard");
-  optional(json, rank.jaccard);
+  write(json, rank.jaccard);
   json.Key("tau_b");
-  optional(json, rank.tau_b);
+  write(json, rank.tau_b);
   json.Key("unavailable");
   json.String(rank.unavailable.c_str());
   json.EndObject();

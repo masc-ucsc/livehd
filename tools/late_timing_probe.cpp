@@ -12,6 +12,7 @@
 
 #include "inou/lefdef/mapped_graph.hpp"
 #include "pass/place/late_timing.hpp"
+#include "pass/place/late_timing_json.hpp"
 #include "pass/place/objective/proxy_bridge.hpp"
 #include "pass/place/sdc_subset.hpp"
 #include "rapidjson/document.h"
@@ -335,13 +336,6 @@ int main(int argc, char** argv) {
     }
     rapidjson::OStreamWrapper                    stream(output);
     rapidjson::Writer<rapidjson::OStreamWrapper> writer(stream);
-    const auto                                   optional = [&](std::optional<double> value) {
-      if (value) {
-        writer.Double(*value);
-      } else {
-        writer.Null();
-      }
-    };
     writer.StartObject();
     writer.Key("model");
     writer.String("native_late_nldm_charge_matched_pi_elmore");
@@ -352,11 +346,11 @@ int main(int argc, char** argv) {
     writer.Key("certified");
     writer.Bool(result.certified);
     writer.Key("wns_ps");
-    optional(result.wns_ps);
+    late::json::write(writer, result.wns_ps);
     writer.Key("tns_ps");
-    optional(result.tns_ps);
+    late::json::write(writer, result.tns_ps);
     writer.Key("achievable_period_ps");
-    optional(result.achievable_period_ps);
+    late::json::write(writer, result.achievable_period_ps);
     if (observe_objective) {
       writer.Key("period_objective");
       writer.StartObject();
@@ -410,25 +404,7 @@ int main(int argc, char** argv) {
       writer.EndObject();
     }
     writer.Key("clocks");
-    writer.StartObject();
-    for (const auto& [name, summary] : result.clocks) {
-      writer.Key(name.c_str());
-      writer.StartObject();
-      writer.Key("period_ps");
-      writer.Double(summary.period_ps);
-      writer.Key("wns_ps");
-      optional(summary.wns_ps);
-      writer.Key("tns_ps");
-      optional(summary.tns_ps);
-      writer.Key("achievable_period_ps");
-      optional(summary.achievable_period_ps);
-      writer.Key("independent_period");
-      writer.Bool(summary.independent_period);
-      writer.Key("timed_endpoints");
-      writer.Uint64(summary.timed_endpoints);
-      writer.EndObject();
-    }
-    writer.EndObject();
+    late::json::write_clocks(writer, result, true);
     writer.Key("launch_domains");
     writer.StartArray();
     for (const auto& domain : result.domains) {
@@ -457,27 +433,7 @@ int main(int argc, char** argv) {
             continue;
           }
           writer.Key(result.pins[i].name.c_str());
-          writer.StartArray();
-          for (const auto& state : domain.pins[i]) {
-            writer.StartObject();
-            writer.Key("arrival_ps");
-            optional(state.arrival_ps);
-            writer.Key("required_ps");
-            optional(state.required_ps);
-            writer.Key("predecessor");
-            if (state.predecessor) {
-              writer.StartObject();
-              writer.Key("pin");
-              writer.String(result.pins[state.predecessor->pin].name.c_str());
-              writer.Key("transition");
-              writer.Uint(state.predecessor->transition);
-              writer.EndObject();
-            } else {
-              writer.Null();
-            }
-            writer.EndObject();
-          }
-          writer.EndArray();
+          late::json::write_transitions(writer, domain.pins[i], result, late::json::Predecessor_style::name);
         }
         writer.EndObject();
         writer.EndObject();
@@ -569,31 +525,7 @@ int main(int argc, char** argv) {
         writer.Null();
       }
       writer.Key("transitions");
-      writer.StartArray();
-      for (const auto& state : pin.transitions) {
-        writer.StartObject();
-        writer.Key("arrival_ps");
-        optional(state.arrival_ps);
-        writer.Key("required_ps");
-        optional(state.required_ps);
-        writer.Key("slew_ps");
-        optional(state.slew_ps);
-        writer.Key("load_ff");
-        optional(state.load_ff);
-        writer.Key("predecessor");
-        if (state.predecessor) {
-          writer.StartObject();
-          writer.Key("pin");
-          writer.String(result.pins[state.predecessor->pin].name.c_str());
-          writer.Key("transition");
-          writer.Uint(state.predecessor->transition);
-          writer.EndObject();
-        } else {
-          writer.Null();
-        }
-        writer.EndObject();
-      }
-      writer.EndArray();
+      late::json::write_transitions(writer, pin.transitions, result, late::json::Predecessor_style::name);
       writer.EndObject();
     }
     writer.EndObject();

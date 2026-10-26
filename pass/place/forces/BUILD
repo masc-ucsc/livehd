@@ -74,7 +74,7 @@ cc_library(
     hdrs = ["gp_rejection.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":gp_timing", "//core", "@rapidjson"],
+    deps = [":gp_timing", "//core", "//pass/place:late_timing", "@rapidjson"],
 )
 
 cc_test(

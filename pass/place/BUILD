@@ -118,7 +118,7 @@ cc_test(
 cc_library(
     name = "late_timing",
     srcs = ["clock_constraints.cpp", "gate_waveform.cpp", "late_timing.cpp", "rc_tree.cpp", "sdc_subset.cpp", "star_rc.cpp", "wire_waveform.cpp"],
-    hdrs = ["clock_constraints.hpp", "gate_waveform.hpp", "late_timing.hpp", "rc_tree.hpp", "sdc_subset.hpp", "star_rc.hpp", "wire_waveform.hpp"],
+    hdrs = ["clock_constraints.hpp", "gate_waveform.hpp", "late_timing.hpp", "late_timing_json.hpp", "rc_tree.hpp", "sdc_subset.hpp", "star_rc.hpp", "wire_waveform.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
     deps = [":rc_cache", "//core", "//graph", "//pass/liberty:timing_model", "//pass/liberty:liberty_dff"],
@@ -411,6 +411,7 @@ filegroup(
         "gate_waveform.hpp",
         "late_timing.cpp",
         "late_timing.hpp",
+        "late_timing_json.hpp",
         "rc_tree.cpp",
         "rc_tree.hpp",
         "sdc_subset.cpp",
