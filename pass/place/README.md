@@ -1040,7 +1040,16 @@ physical pins preserve individual packed-bus bits through wiring aliases.
 
 Pre-CTS placement does not construct reset trees. `synth.place.reset_fanout` defaults
 to 0; nonzero values are rejected. Existing mapped control cells remain physical
-objects for density, overlap, site and row legality.
+objects for density, overlap, site and row legality. One exception follows the
+2d-domplace U22 ruling (the reset network of a domino storage reset stays
+ordinary CMOS, buffered like any mapped net): under
+`pass.usyn.physical=domino_provisional`, a flat net that reaches a domino `RST`
+pin is dealt through the smallest buffer, at most
+`synth.place.domino_reset_fanout` (default 32, 0 off) loads per buffer, every
+other load of the net included, with `reset_tree.hpp`'s tree before the first
+cell is read; `qor.place.domino_reset_tree` reports it. Reset nets without a
+domino stay untreed. `synth.place.domino_rail_fanout` (default 0) applies the
+same tree to nets on domino data rails, an experiment.
 
 Clock/reset nets are excluded from GP wirelength, RUDY demand, connectivity-driven
 movement, IO attraction and legalization criticality/alignment. Synthesis preserves
@@ -3873,8 +3882,22 @@ certified achievable period, so legacy scalar consumers cannot mistake missing
 coverage for zero delay. This certification describes supported constraint/model
 coverage; it does not assert measured agreement with a reference timer. The
 separate numerical and ranking acceptance gates must pass before GP use.
-Divided or gated generated clocks, latch borrowing and general Tcl/SDC execution
-remain unsupported. Timing forces and the opt-in production policy remain
+With named clocks the ideal clock also passes inverters, integrated clock-gate
+cells (`clock_gating_integrated_cell`) and recognized clock gates: a cell the
+clock enters on one input whose other inputs are enables driven, through
+single-input cells, by state that runs on the same clock (checked after
+propagation), and that mask the output while the clock rests at one level
+(an AND gate at 0, an OR gate at 1; read from the cell's truth table). An
+inversion reaches the opposite edge of the same waveform as an inverted twin
+clock (phase on the declared falling edge, else half the period) that reports
+under its source clock; half-cycle pairs scale the period by their edge
+separation (`Pin_result::capture_share`), and a clock pin reports
+`clock_inverted`. Each gate enable gets a clock-gating setup check against the
+edge that leaves its masking level, with zero setup (`Pin_result::clock_gate`,
+`gate_clock`); an ICG keeps its Liberty setup on the enable, and its latch is
+not a borrowing latch. A design without these structures times exactly as
+before (the characterization golden is unchanged). Divided generated clocks,
+other gating, latch borrowing and general Tcl/SDC execution remain unsupported. Timing forces and the opt-in production policy remain
 unfinished. A separate read-only GP observation driver is available below.
 
 The legacy single clock and named clocks share one timing implementation; their

@@ -61,13 +61,23 @@ reports its reason code (`reason.hpp`).
 | Source state | v1 decision | Reason code |
 |---|---|---|
 | Positive edge, one-bit clock driven directly by a design-top input in the selected domain | candidate | — |
-| Enable or synchronous reset (already folded into D) | candidate | — |
-| Asynchronous reset | retained | `async-reset` |
+| Enable (already folded into D) | candidate | — |
+| Positive edge on a recognized clock gate of the domain (folded, U21: below) | candidate: CLK on the root, the gate enable a data input | — |
+| Synchronous or asynchronous reset to a known constant (U22: below) | candidate: the reset drives the storage RST pin | — |
+| Reset value not a known constant bit | retained | `reset-value` |
+| Synchronous reset computed inside the region (no input or register to wire RST to) | retained | `reset-internal` |
+| The selection cut folded the reset into upstream CMOS / the function does not load the value while asserted | retained | `reset-absorbed` / `reset-shape` |
+| Tied (constant) asynchronous reset | retained | `async-reset` |
 | Power-on initial value | retained | `initial-value` |
 | Negative edge | retained | `negative-edge` |
 | Unknown edge | retained | `unknown-edge` |
-| ICG-gated clock (the clock root is a recognized clock gate) | retained | `gated-clock` |
-| Clock control is not a direct design input (logic, an inverter, a divider or a crossing) | retained | `derived-clock` |
+| A folded gate's hold does not fit the PDN (no direct Q under one enable rail) | retained | `enable-stack` |
+| A gate on a gated clock / without a phase-safe enable storage / sampled by another clock | retained | `gated-chain` / `gated-unsafe` / `gated-mixed` |
+| An inverted clock / a register output or divider as the clock | retained | `inverted-clock` / `divided-clock` |
+| The gate's enable cone holds state or hierarchy | retained | `gated-enable-state` |
+| A gate sampling its enable at the falling edge without `domino_fall_gates` | retained | `gated-fall-sample` |
+| A recognized in-region ICG the fold left alone (another domain, say) | retained | `gated-clock` |
+| Clock control is not a direct design input (logic or a crossing) | retained | `derived-clock` |
 | Multibit clock / constant or absent clock | retained | `multibit-clock` / `constant-clock` |
 | Clock port is not `domino_clock` | retained | `clock-domain` |
 | Clock is a port of a preserved definition (each instance may clock it from a different root) | retained | `definition-clock` |
@@ -80,11 +90,91 @@ reports its reason code (`reason.hpp`).
 | CMOS cone could not be priced | retained | `cmos-estimate` |
 | Physical selection work exhausted | retained | `selection-budget` |
 
+Gate and reset retention codes appear only for registers the earlier rows
+admit; the fold's own refusals carry a gated register's code even when another
+row would also retain it.
+
 A converted state carries `domino-area` or `domino-all`. Under `select=area`
 the comparison is an area proxy: the domino side is `x * A_NOT + A_register`
 plus one `A_NOT` for every complemented rail, and the CMOS side is the
 register plus the Liberty estimate of the D-cone logic that only this state
 uses and that its rail producers do not also need. A tie retains CMOS.
+
+## Clock gates (U21)
+
+Ruled 2026-10-26: a register on a recognized clock gate converts with the gate's
+enable delivered to the domino gate as a data input and the original, ungated
+clock on CLK, so the stage is an enable register, next = en ? f : Q, through the
+plain enable path. The gate stays for the CMOS consumers it still has and is
+dropped only when none is left. Sharing one ICG across dominos, or generating
+local clocks next to them, is future work.
+
+`synth::fold_gated_clocks` (`pass/synth/gated_fold.hpp`) runs under the profile
+on the flat source of the design top right before partitioning (the
+`Pass_partition` `prepare_src` seam), so a gate inside preserved definitions is
+seen with its consumers (NVDLA's `slcg` -> `NV_CLK_gate_power` -> `CKLNQD12`).
+A positive-edge register on a recognized gate of `domino_clock` becomes
+
+```
+clock_pin := root & gclk        (== gclk: the gate ANDs root with its latched enable)
+enable    := enable & en        (redundant on the gated clock)
+```
+
+with both ANDs in the register's color, and the gate's enable cone (test enables
+included) cloned once, across instance boundaries, into a color of its own so
+it reaches every consumer region as one input. Recognized gates, structurally:
+`latch-and` (`clk & L`, L transparent while clk is low, en = its D) and
+`icg-cell` (a Liberty `clock_gating_integrated_cell` instantiated by name, en =
+enable | test enable); with `pass.usyn.domino_fall_gates` also `negedge-and`
+(`clk & F`, F a negative-edge flop on clk) and `latch-or` (`clk | ~L`, L
+transparent while clk is high). Those two sample their enable at the falling
+edge, so they equal the cycle-level enable only while it holds from the falling
+to the rising edge (the stage's own half-cycle contract); a two-phase LEC can
+refute them, and they retain as `gated-fall-sample` by default. Anything else is
+reported, never folded (the codes above).
+
+Physical selection treats a folded register as an enable register: its stage
+converts only when the PDN keeps the hold (Q a direct input under one enable
+rail), `enable-stack` otherwise; the selection cut keeps en * f + !en * Q within
+the stack and input caps by moving excess f upstream, as for any register, so
+enable-stack is the case where not even the hold fits. A converted stage's CLK
+reads the root clock; a retained folded register keeps its original gated clock
+and drops the redundant enable (D with en at 1), and select=area prices that
+cone. Region emission drops a folded gate's instance or enable latch once nothing
+reads it. The usyn report's `physical.clock_gates` lists the folded registers by
+gate kind, the refusals by reason and the dropped gates; each folded state lists
+its root and gated clock inputs.
+
+A register clocked through a port of a preserved definition stays
+`definition-clock`: the shared definition is synthesized once before its
+instances' parents, so its registers can take the enable only through a new
+input port wired by every instance (each its own enable), with every instance's
+clock port on a recognized gate of the same root. That is a pre-partition
+interface change of the shared definition, outside the flat-source seam.
+
+## Storage reset (U22)
+
+Ruled 2026-10-26: the reset network is not converted to domino. A converted
+register's reset leaves the PDN for a dedicated `RST` pin on the stage's output
+storage, with the source's kind (synchronous or asynchronous), polarity and
+value; the formula realizes only the data function (and a folded gate's
+enable). Selection strips a synchronous reset by fixing its net at the inactive
+level once it has checked that the function loads the reset value while it is
+asserted; an asynchronous reset is outside D already (a leftover term is a
+don't-care the storage overrides). The writer rebuilds each rail producer with
+the reset net held inactive, so no rail reads the reset even through logic the
+selection cut shares with it. `RST` reads the async-reset control, or the region
+input or register a synchronous reset pin reads.
+
+Master identity, the declaration (`RST` after the rails), the lg model (a flop
+with that reset, asynchronous when the source's is) and the Verilog model, the
+LEF pin and the footprint carry the reset. A reset adds the area of the
+Liberty's smallest asynchronous-reset register over the base register, else a
+labeled one-inverter estimate (`reset_storage` in the sidecar). The reset net
+stays CMOS: it is buffered before placement like a mapped net
+(`synth.place.domino_reset_fanout`, pass/place). The stage timer gives `RST` no
+check and counts `reset->domino` under `coverage.false_paths`; it never enters
+the period or the input->domino class.
 
 ## Model schema
 
@@ -121,27 +211,28 @@ anchor prepass and the two-row ECO swap to the rail twin (`pass/place`
 `Multirow_template::rail_twin`), moving the netlist instance with the
 floorplan, and a restored placement re-derives it from its rows. Templates
 rather than restricted starts keep every row pair usable, which tiny cores
-need; a master without a twin (a schema-4 sidecar may omit `rail_twin`) is
+need; a master without a twin (a sidecar may omit `rail_twin`) is
 restricted to its own parity. `check_legality` checks the parity of every
 multi-row cell (`pass/place/pg_rails.hpp`), so a wrong template never passes.
 
-The bundle sidecar (`domino_models.json`, schema 4) records the stage model
+The bundle sidecar (`domino_models.json`, schema 5) records the stage model
 with each coefficient's source (`stage_model.sources`), units (`ps`, `fF`,
 `um`, DBU), the corner, technology and row-access identity, the named
 reference inverter and register family (with each register's pin names and CK
 capacitance), FO4 and the delay model (`delay_model`: source, citation,
 formula, parameters, tau and the FO4 derivation), the coefficients and
-experiment knobs, every master (formula, rails, metrics, variants with
+experiment knobs, the reset storage term (`reset_storage`), every master
+(formula, rails, storage `reset` with its pin, kind, polarity and value, metrics, variants with
 estimated and rounded areas, pin caps, per-variant capture setup, per-variant
 `timing` with the evaluate and precharge delays and their logical-effort
 terms, access checks; each variant in both rail templates with its
 `template`, `pg_rails`, `start_orientations` and `rail_twin`), the row rails
 it derived them from (`technology.row_rails`) and every instance with the
 original state it owns. A coefficient that cannot be derived is `null` with a
-diagnostic; `read_domino_sidecar` reads schema 4 only, refuses another schema
+diagnostic; `read_domino_sidecar` reads schema 5 only, refuses another schema
 by number (regenerate the bundle), and returns the variant catalog (one
 family per master and template), the row-access templates and the rail
-twins for placement.
+twins for placement. Schema 5 added the storage reset pin (U22).
 
 Every stage coefficient has a built-in, labeled value under the profile (the
 U1 ruling; see Stage delay estimate). `pass.usyn.domino_eval_fo4`, `domino_precharge_fo4`,
@@ -222,7 +313,12 @@ adds two constant checks that moving cells cannot fix: internal
 `2 (eval + setup_capture + uncertainty_second)` and precharge
 `2 (precharge + precharge_margin)`, with the evaluate and precharge delays of
 the instance's own variant (a stage-wide override wins). A null coefficient is
-reported, never read as zero.
+reported, never read as zero. A storage reset pin (`RST`, U22) has no check:
+reset to RST is a false path, counted under `coverage.false_paths`
+(`reset->domino`). The native proxy carries the ideal clock through inverters,
+ICG cells and recognized clock gates (`pass/place/README.md`), so registers on
+gated clocks are timed in every arm, and each gate enable's clock-gating setup
+check is the `gate` capture class.
 
 Constraints come from the saved SDC when it parses, else one ideal clock on
 the named port (a non-50% waveform is refused: the schedule is a fixed T/2).
@@ -376,6 +472,15 @@ them. `lhd_domplace_sizing_smoke.py` writes a second register rung (a
 stronger, wider `dfxtp_2`) to its temporary directory and sizes: an up-size
 that displaces a neighbour, LEC with the bundle models, a warm replay, and a
 growth a dense core cannot pack, whose DEF equals the unsized run's.
+`lhd_domplace_gates_smoke.py` (U21) appends the sequential fixture fragment
+(`inou/lefdef/tests/data/sky130hd_seq.*.fragment`: ICGs, latches, a reset
+flop) and covers an inline latch + AND gate with a test enable, a Liberty ICG
+with its test enable, a gate inside a definition wrapped twice (all three
+LEC-proven, gates dropped), enable-stack on a one-device stack, the
+definition-port case and the inverted ones. `lhd_domplace_reset_smoke.py`
+(U22) converts synchronous, enabled-synchronous, asynchronous and active-low
+resets onto RST, checks that no rail reads a reset, the false-path count,
+the buffered reset net and placed-netlist LEC.
 
 ## Matched commands
 
