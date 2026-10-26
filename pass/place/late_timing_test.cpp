@@ -3,10 +3,15 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
 #include <string_view>
+#include <tuple>
 
 #include "gtest/gtest.h"
+#include "late_timing_dump_fixture.hpp"
 #include "timing_circuit_fixture.hpp"
 
 namespace late = livehd::placement::late;
@@ -900,4 +905,231 @@ TEST(LateTiming, BoundedDriverPolicyCountsItsModelsAndPreservesDefaultObservatio
   EXPECT_GT(*pin(original, "z").transitions[0].slew_ps, 20.6);
   EXPECT_EQ(proxy.evaluate(&rc).wns_ps, original.wns_ps);
   EXPECT_EQ(proxy.evaluate(&rc).crossing_boundary_driver_fits, 0);
+}
+
+namespace {
+// Bit-exact characterization of both clock models: every scenario runs with
+// the legacy single clock and with the same clock named, so a shared timing
+// implementation cannot silently change either model's observable Result.
+// On a mismatch the actual image is written to TEST_UNDECLARED_OUTPUTS_DIR.
+struct Characterization {
+  std::string text;
+  void        add(const std::string& name, const hhds::Graph& graph, std::shared_ptr<const nldm::Library> library,
+                  const late::Constraints& legacy, const livehd::physical::Parasitics* rc = nullptr,
+                  const late::Star_context* star = nullptr) {
+    auto named = legacy;
+    if (legacy.clock) {
+      named.clocks["main"] = *legacy.clock;
+      named.clock.reset();
+      for (auto& [port, input] : named.inputs) {
+        (void)port;
+        if (input.clock == "default") {
+          input.clock = "main";
+        }
+      }
+      for (auto& [port, output] : named.outputs) {
+        (void)port;
+        if (output.clock == "default") {
+          output.clock = "main";
+        }
+      }
+    }
+    for (const late::Constraints* constraints : std::array<const late::Constraints*, 2>{&legacy, &named}) {
+      for (const bool capture : {false, true}) {
+        text += "### " + name + (constraints == &legacy ? " legacy" : " named") + (capture ? " capture" : "") + "\n";
+        try {
+          auto copy  = star ? std::optional<late::Star_context>(*star) : std::nullopt;
+          text      += livehd::placement::test_fixture::late_timing_dump(
+              late::Proxy(graph, library, *constraints).evaluate(rc, copy ? &*copy : nullptr, {.capture_feasible_graph = capture}));
+        } catch (const std::exception& error) {
+          text += std::string("throws ") + error.what() + "\n";
+        }
+      }
+      if (!legacy.clock) {
+        break;
+      }
+    }
+  }
+};
+late::Constraints clocked() {
+  late::Constraints c;
+  c.clock = late::Ideal_clock{
+      .period_ps      = 100,
+      .uncertainty_ps = 3,
+      .slew_ps        = {2, 4},
+      .roots          = {"clk"}
+  };
+  c.complete = true;
+  return c;
+}
+}  // namespace
+TEST(LateTiming, CharacterizationOfBothClockModelsIsBitExact) {
+  Characterization image;
+  {
+    // Register feedback loop.
+    Circuit circuit({"clk"}, {});
+    auto    flop = circuit.cell("ff", "FF"), inv = circuit.cell("inv", "INV");
+    flop.create_sink_pin("CLK").connect_driver(circuit.graph->get_input_pin("clk"));
+    inv.create_sink_pin("A").connect_driver(flop.create_driver_pin("Q"));
+    flop.create_sink_pin("D").connect_driver(inv.create_driver_pin("Y"));
+    image.add("register_loop", *circuit.graph, circuit.library, clocked());
+  }
+  for (const auto& [label, input_clock, z_clock, w_clock] :
+       std::vector<std::tuple<std::string, std::string, std::string, std::optional<std::string>>>{
+           {            "pipeline_absolute",        "",        "",           ""},
+           {             "pipeline_clocked", "default", "default",    "default"},
+           {               "pipeline_mixed", "default", "default",           ""},
+           {"pipeline_unconstrained_output", "default", "default", std::nullopt}
+  }) {
+    // Input -> flop -> output with absolute, clocked and missing requirements.
+    Circuit circuit({"clk", "a"}, {"z", "w"});
+    auto    inv = circuit.cell("inv", "INV"), flop = circuit.cell("ff", "FF"), buf = circuit.cell("buf", "BUF");
+    inv.create_sink_pin("A").connect_driver(circuit.graph->get_input_pin("a"));
+    flop.create_sink_pin("D").connect_driver(inv.create_driver_pin("Y"));
+    flop.create_sink_pin("CLK").connect_driver(circuit.graph->get_input_pin("clk"));
+    buf.create_sink_pin("A").connect_driver(flop.create_driver_pin("Q"));
+    circuit.graph->get_output_pin("z").connect_driver(buf.create_driver_pin("Y"));
+    circuit.graph->get_output_pin("w").connect_driver(inv.create_driver_pin("Y"));
+    auto c                   = clocked();
+    c.inputs["a"].arrival_ps = {7, 9};
+    c.inputs["a"].slew_ps    = {1, 2};
+    c.inputs["a"].clock      = input_clock;
+    c.outputs["z"]           = {
+        {25, 27},
+        { 1,  2},
+        z_clock
+    };
+    if (w_clock) {
+      c.outputs["w"] = {
+          {60, 61},
+          { 3,  3},
+          *w_clock
+      };
+    }
+    image.add(label, *circuit.graph, circuit.library, c);
+  }
+  {
+    // Reconvergent non-unate paths around a register (objective fixture).
+    Circuit circuit({"clk"}, {"z"});
+    auto    ff = circuit.cell("ff", "FF"), b = circuit.cell("b", "BUF"), x = circuit.cell("x", "XOR");
+    ff.create_sink_pin("CLK").connect_driver(circuit.graph->get_input_pin("clk"));
+    b.create_sink_pin("A").connect_driver(ff.create_driver_pin("Q"));
+    x.create_sink_pin("A").connect_driver(ff.create_driver_pin("Q"));
+    x.create_sink_pin("B").connect_driver(b.create_driver_pin("Y"));
+    ff.create_sink_pin("D").connect_driver(x.create_driver_pin("Y"));
+    circuit.graph->get_output_pin("z").connect_driver(x.create_driver_pin("Y"));
+    auto c         = clocked();
+    c.outputs["z"] = {
+        {100, 100},
+        {},
+        "default"
+    };
+    image.add("reconvergent", *circuit.graph, circuit.library, c);
+  }
+  {
+    // Inverter chain with RC parasitics, a calibrated star and an unused clock root.
+    Circuit circuit({"clk", "a"}, {"z"});
+    auto    u = circuit.cell("u", "INV"), v = circuit.cell("v", "INV");
+    u.create_sink_pin("A").connect_driver(circuit.graph->get_input_pin("a"));
+    v.create_sink_pin("A").connect_driver(u.create_driver_pin("Y"));
+    circuit.graph->get_output_pin("z").connect_driver(v.create_driver_pin("Y"));
+    auto c        = clocked();
+    c.inputs["a"] = {
+        {3, 4},
+        {5, 6},
+        std::nullopt,
+        "default"
+    };
+    c.outputs["z"] = {
+        {90, 95},
+        { 5,  7},
+        "default"
+    };
+    livehd::physical::Parasitics rc;
+    rc.nets = {
+        {  "a",    {{"a", .2}, {"u:A", .4}}, {{0, 1, 1000}}},
+        {"u:Y", {{"u:Y", .5}, {"v:A", 1.5}}, {{0, 1, 2000}}},
+        {"v:Y",      {{"v:Y", 0}, {"z", 3}},  {{0, 1, 500}}}
+    };
+    image.add("rc_chain", *circuit.graph, circuit.library, c, &rc);
+    late::Star_context star;
+    star.policy = {
+        {100, 1, 100, 1},
+        1,
+        "test"
+    };
+    star.locations = {
+        {  "a",  {0, 0}},
+        {"u:A",  {1, 0}},
+        {"u:Y",  {2, 0}},
+        {"v:A",  {6, 0}},
+        {"v:Y",  {7, 0}},
+        {  "z", {10, 0}}
+    };
+    image.add("rc_chain_star", *circuit.graph, circuit.library, c, &rc, &star);
+  }
+  {
+    // Case analysis, sensitization and an uncompiled setup condition.
+    Circuit circuit({"clk", "a", "en"}, {"z"});
+    auto    library                                   = std::make_shared<nldm::Library>(*circuit.library);
+    library->cells.at("FF").pins.at("D").arcs[0].when = "SE";
+    circuit.library                                   = library;
+    auto x = circuit.cell("x", "XOR"), flop = circuit.cell("ff", "FF");
+    x.create_sink_pin("A").connect_driver(circuit.graph->get_input_pin("a"));
+    x.create_sink_pin("B").connect_driver(circuit.graph->get_input_pin("en"));
+    flop.create_sink_pin("D").connect_driver(x.create_driver_pin("Y"));
+    flop.create_sink_pin("CLK").connect_driver(circuit.graph->get_input_pin("clk"));
+    circuit.graph->get_output_pin("z").connect_driver(flop.create_driver_pin("Q"));
+    auto c            = clocked();
+    c.inputs["a"]     = {};
+    c.constants["en"] = true;
+    c.outputs["z"]    = {
+        {50, 50},
+        {},
+        "default"
+    };
+    image.add("constant_xor_condition", *circuit.graph, library, c);
+  }
+  {
+    // Input driving cell in an unclocked environment.
+    Circuit circuit({"a"}, {"z"});
+    circuit.library = std::make_shared<nldm::Library>(nldm::parse(models + R"(
+      library(drive){time_unit:"1ps";capacitive_load_unit(1,ff);
+        lu_table_template(load){variable_1:total_output_net_capacitance;index_1("0,10");}
+        cell(EXTERNAL){pin(A){direction:input;capacitance:1;}
+          pin(Y){direction:output;function:A;timing(){related_pin:A;timing_sense:positive_unate;
+            cell_rise(load){values("10,30");}cell_fall(load){values("20,50");}
+            rise_transition(load){values("1,11");}fall_transition(load){values("2,22");}
+          }}
+        }
+      })"));
+    auto buffer     = circuit.cell("u", "BUF");
+    buffer.create_sink_pin("A").connect_driver(circuit.graph->get_input_pin("a"));
+    circuit.graph->get_output_pin("z").connect_driver(buffer.create_driver_pin("Y"));
+    late::Constraints c;
+    c.inputs["a"] = {
+        {5, 6},
+        {0, 0},
+        late::Driving_cell{"EXTERNAL", "Y", "A", {0, 0}}
+    };
+    c.outputs["z"] = {
+        {100, 100},
+        {  0,   0}
+    };
+    c.complete = true;
+    image.add("driving_cell_unclocked", *circuit.graph, circuit.library, c);
+  }
+  const std::string golden_path = "pass/place/tests/late_timing_characterization.txt";
+  std::ifstream     golden(golden_path);
+  const std::string expected((std::istreambuf_iterator<char>(golden)), {});
+  if (expected != image.text) {
+    if (const char* dir = std::getenv("TEST_UNDECLARED_OUTPUTS_DIR")) {
+      std::ofstream(std::string(dir) + "/late_timing_characterization.txt") << image.text;
+    }
+    size_t line = 1, at = 0;
+    while (at < expected.size() && at < image.text.size() && expected[at] == image.text[at]) {
+      line += expected[at++] == '\n';
+    }
+    FAIL() << "late timing characterization differs from " << golden_path << " at line " << line;
+  }
 }

@@ -194,7 +194,16 @@ cc_test(
     size = "small",
     srcs = ["late_timing_test.cpp"],
     copts = COPTS,
-    deps = [":late_timing", ":timing_circuit_fixture", "@googletest//:gtest_main"],
+    data = ["tests/late_timing_characterization.txt"],
+    deps = [":late_timing", ":late_timing_dump_fixture", ":timing_circuit_fixture", "@googletest//:gtest_main"],
+)
+
+cc_library(
+    name = "late_timing_dump_fixture",
+    testonly = True,
+    hdrs = ["late_timing_dump_fixture.hpp"],
+    copts = COPTS,
+    deps = [":late_timing"],
 )
 
 cc_library(
