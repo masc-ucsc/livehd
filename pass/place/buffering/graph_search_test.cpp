@@ -5,6 +5,7 @@
 #include <numeric>
 #include <set>
 
+#include "buffer_cell_fixture.hpp"
 #include "gtest/gtest.h"
 
 namespace b = livehd::placement::buffering;
@@ -20,29 +21,12 @@ m::Table table(double base, double slew, double cap) {
   };
 }
 void cell(m::Library& lib, std::string name, double cin, double d, double cap, double slew) {
-  m::Cell c;
-  c.name                 = name;
-  auto& in               = c.pins["A"];
-  in.name                = "A";
-  in.direction           = "input";
-  in.capacitance_ff      = {cin, cin + 1};
-  in.max_transition_ps   = 1000;
-  auto& out              = c.pins["Y"];
-  out.name               = "Y";
-  out.direction          = "output";
-  out.function           = "A";
-  out.max_capacitance_ff = 100;
-  out.max_transition_ps  = 1000;
-  m::Arc arc;
-  arc.related_pin = "A";
-  arc.type        = "combinational";
-  arc.sense       = m::Sense::positive;
-  for (unsigned t = 0; t < 2; ++t) {
-    arc.delay[t] = table(d + t, .125, cap);
-    arc.slew[t]  = table(slew + t, .0625, cap);
-  }
-  out.arcs.push_back(arc);
-  lib.cells.emplace(name, std::move(c));
+  lib.cells.emplace(name,
+                    b::test_fixture::buffer_cell(name,
+                                                 {cin, cin + 1},
+                                                 100,
+                                                 {table(d, .125, cap), table(d + 1, .125, cap)},
+                                                 {table(slew, .0625, cap), table(slew + 1, .0625, cap)}));
 }
 struct Fixture {
   m::Library                               lib;

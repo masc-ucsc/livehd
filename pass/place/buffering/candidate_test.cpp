@@ -7,6 +7,7 @@
 #include <set>
 #include <stdexcept>
 
+#include "buffer_cell_fixture.hpp"
 #include "gtest/gtest.h"
 
 namespace b = livehd::placement::buffering;
@@ -26,29 +27,12 @@ struct Fixture {
   b::Context context;
   Fixture(size_t fanout = 1) {
     const auto cell = [&](std::string name, double cin, double delay, double ds, double dc, double slew, double ss, double sc) {
-      m::Cell c;
-      c.name                 = name;
-      auto& in               = c.pins["A"];
-      in.name                = "A";
-      in.direction           = "input";
-      in.capacitance_ff      = {cin, cin + 1};
-      in.max_transition_ps   = 1000;
-      auto& out              = c.pins["Y"];
-      out.name               = "Y";
-      out.direction          = "output";
-      out.function           = "A";
-      out.max_transition_ps  = 1000;
-      out.max_capacitance_ff = 100;
-      m::Arc arc;
-      arc.related_pin = "A";
-      arc.type        = "combinational";
-      arc.sense       = m::Sense::positive;
-      for (unsigned t = 0; t < 2; ++t) {
-        arc.delay[t] = table(delay + t, ds, dc);
-        arc.slew[t]  = table(slew + t, ss, sc);
-      }
-      out.arcs.push_back(arc);
-      lib.cells.emplace(name, std::move(c));
+      lib.cells.emplace(name,
+                        b::test_fixture::buffer_cell(name,
+                                                     {cin, cin + 1},
+                                                     100,
+                                                     {table(delay, ds, dc), table(delay + 1, ds, dc)},
+                                                     {table(slew, ss, sc), table(slew + 1, ss, sc)}));
     };
     cell("D", 1, 5, .5, 1, 2, .2, 2);
     cell("B1", 1, 2, .3, .2, 1, .1, .5);

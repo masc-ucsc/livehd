@@ -6,6 +6,7 @@
 #include <set>
 #include <tuple>
 
+#include "buffer_cell_fixture.hpp"
 #include "graph_search.hpp"
 #include "gtest/gtest.h"
 
@@ -41,29 +42,9 @@ struct Fixture {
              {"B2", 2},
              { "S", 4}
     }) {
-      m::Cell cell;
-      cell.name              = name;
-      auto& in               = cell.pins["A"];
-      in.name                = "A";
-      in.direction           = "input";
-      in.capacitance_ff      = {cap, cap};
-      in.max_transition_ps   = 1000;
-      auto& out              = cell.pins["Y"];
-      out.name               = "Y";
-      out.direction          = "output";
-      out.function           = "A";
-      out.max_capacitance_ff = 100;
-      out.max_transition_ps  = 1000;
-      m::Arc arc;
-      arc.related_pin = "A";
-      arc.type        = "combinational";
-      arc.sense       = m::Sense::positive;
-      for (unsigned t = 0; t < 2; ++t) {
-        arc.delay[t] = table(1, .1);
-        arc.slew[t]  = table(1, .2);
-      }
-      out.arcs.push_back(arc);
-      lib.cells.emplace(name, std::move(cell));
+      lib.cells.emplace(
+          name,
+          b::test_fixture::buffer_cell(name, {cap, cap}, 100, {table(1, .1), table(1, .1)}, {table(1, .2), table(1, .2)}));
       p::Macro macro;
       macro.width       = 2;
       macro.height      = 2;

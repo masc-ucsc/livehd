@@ -8,6 +8,7 @@
 #include <set>
 #include <stdexcept>
 
+#include "buffer_cell_fixture.hpp"
 #include "gtest/gtest.h"
 
 namespace b = livehd::placement::buffering;
@@ -40,29 +41,12 @@ struct Fixture {
   };
   explicit Fixture(size_t n = 1) {
     const auto add_cell = [&](std::string name, double cin, double d, double ds, double dc, double s, double ss, double sc) {
-      m::Cell cell;
-      cell.name              = name;
-      auto& in               = cell.pins["A"];
-      in.name                = "A";
-      in.direction           = "input";
-      in.capacitance_ff      = {cin, cin + 1};
-      in.max_transition_ps   = 1000;
-      auto& out              = cell.pins["Y"];
-      out.name               = "Y";
-      out.direction          = "output";
-      out.function           = "A";
-      out.max_capacitance_ff = 100;
-      out.max_transition_ps  = 1000;
-      m::Arc arc;
-      arc.related_pin = "A";
-      arc.type        = "combinational";
-      arc.sense       = m::Sense::positive;
-      for (unsigned t = 0; t < 2; ++t) {
-        arc.delay[t] = table(d + t, ds, dc);
-        arc.slew[t]  = table(s + t, ss, sc);
-      }
-      out.arcs.push_back(arc);
-      lib.cells.emplace(name, std::move(cell));
+      lib.cells.emplace(name,
+                        b::test_fixture::buffer_cell(name,
+                                                     {cin, cin + 1},
+                                                     100,
+                                                     {table(d, ds, dc), table(d + 1, ds, dc)},
+                                                     {table(s, ss, sc), table(s + 1, ss, sc)}));
     };
     add_cell("D", 1, 5, .5, 1, 2, .25, 2);
     add_cell("B1", 1, 2, .25, .25, 1, .125, .5);

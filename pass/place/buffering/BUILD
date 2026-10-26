@@ -91,7 +91,7 @@ cc_test(
     size = "small",
     srcs = ["negotiation_test.cpp"],
     copts = COPTS,
-    deps = [":negotiation", "@googletest//:gtest_main"],
+    deps = [":buffer_cell_fixture", ":negotiation", "@googletest//:gtest_main"],
 )
 
 cc_library(
@@ -108,7 +108,7 @@ cc_test(
     size = "small",
     srcs = ["physical_sites_test.cpp"],
     copts = COPTS,
-    deps = [":physical_sites", ":graph_search", "@googletest//:gtest_main"],
+    deps = [":buffer_cell_fixture", ":physical_sites", ":graph_search", "@googletest//:gtest_main"],
 )
 
 cc_library(
@@ -125,7 +125,7 @@ cc_test(
     size = "small",
     srcs = ["graph_search_test.cpp"],
     copts = COPTS,
-    deps = [":graph_search", "@googletest//:gtest_main"],
+    deps = [":buffer_cell_fixture", ":graph_search", "@googletest//:gtest_main"],
 )
 
 cc_library(
@@ -142,7 +142,7 @@ cc_test(
     size = "small",
     srcs = ["geometry_test.cpp"],
     copts = COPTS,
-    deps = [":geometry", "@googletest//:gtest_main"],
+    deps = [":buffer_cell_fixture", ":geometry", "@googletest//:gtest_main"],
 )
 
 cc_library(
@@ -159,7 +159,7 @@ cc_test(
     size = "small",
     srcs = ["tree_search_test.cpp"],
     copts = COPTS,
-    deps = [":tree_search", "@googletest//:gtest_main"],
+    deps = [":buffer_cell_fixture", ":tree_search", "@googletest//:gtest_main"],
 )
 
 cc_library(
@@ -188,6 +188,14 @@ cc_library(
     deps = [":checks", "//pass/place:late_timing"],
 )
 
+cc_library(
+    name = "buffer_cell_fixture",
+    testonly = True,
+    hdrs = ["buffer_cell_fixture.hpp"],
+    copts = COPTS,
+    deps = ["//pass/liberty:timing_model"],
+)
+
 # Header-only validation/bound helpers private to this package.
 cc_library(
     name = "checks",
@@ -200,7 +208,7 @@ cc_test(
     size = "small",
     srcs = ["candidate_test.cpp"],
     copts = COPTS,
-    deps = [":candidate", "@googletest//:gtest_main"],
+    deps = [":buffer_cell_fixture", ":candidate", "@googletest//:gtest_main"],
 )
 
 filegroup(

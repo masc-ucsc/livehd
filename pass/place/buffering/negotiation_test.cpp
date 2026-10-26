@@ -5,6 +5,7 @@
 #include <cmath>
 #include <limits>
 
+#include "buffer_cell_fixture.hpp"
 #include "gtest/gtest.h"
 
 namespace b = livehd::placement::buffering;
@@ -33,29 +34,12 @@ struct Fixture {
              {"B", 1, 1, .1},
              {"S", 4, 0,  0}
     }) {
-      m::Cell cell;
-      cell.name                 = name;
-      auto& input               = cell.pins["A"];
-      input.name                = "A";
-      input.direction           = "input";
-      input.capacitance_ff      = {cin, cin};
-      input.max_transition_ps   = 1000;
-      auto& output              = cell.pins["Y"];
-      output.name               = "Y";
-      output.direction          = "output";
-      output.function           = "A";
-      output.max_capacitance_ff = name == "D" ? 1 : 100;
-      output.max_transition_ps  = 1000;
-      m::Arc arc;
-      arc.related_pin = "A";
-      arc.type        = "combinational";
-      arc.sense       = m::Sense::positive;
-      for (unsigned t = 0; t < 2; ++t) {
-        arc.delay[t] = table(delay, dc);
-        arc.slew[t]  = table(1, .1);
-      }
-      output.arcs.push_back(arc);
-      lib.cells.emplace(name, std::move(cell));
+      lib.cells.emplace(name,
+                        b::test_fixture::buffer_cell(name,
+                                                     {cin, cin},
+                                                     name == "D" ? 1 : 100,
+                                                     {table(delay, dc), table(delay, dc)},
+                                                     {table(1, .1), table(1, .1)}));
     }
     settings.dbu_per_um  = 1;
     settings.max_seconds = 10;
