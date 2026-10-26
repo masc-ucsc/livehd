@@ -28,6 +28,9 @@ struct Clock_spec {
   double                               period_ps = 0;
   std::optional<std::array<double, 2>> waveform_ps;  // rise, fall
 };
+// A positive finite period and, when given, a 50% waveform: the stage
+// schedule is a fixed T/2. Throws std::invalid_argument otherwise.
+void check_clock_spec(const Clock_spec& clock);
 struct Constraint_source {
   late::Constraints                                constraints;
   std::string                                      kind;      // "saved-sdc" | "clock-scan"
@@ -43,10 +46,17 @@ struct Constraint_source {
 Constraint_source stage_constraints(const hhds::Graph& graph, const std::optional<std::string>& sdc_text, std::string_view design,
                                     late::Sdc_units units, const std::optional<Clock_spec>& clock, double clock_uncertainty_ps);
 
+// The native proxy binds one-bit ports, so a netlist that keeps word-valued
+// ports is timed on its bit-level DEF import (same instances, nets and RC pin
+// names), labeled so in the report.
+bool                              word_valued_ports(const hhds::Graph& graph);
+inline constexpr std::string_view kWordPortNetlist = "DEF import: the netlist keeps word-valued ports";
+
 struct Stage_timing_options {
   bool                   classes = true, require_complete = false;
   uint64_t               model_generation = 0;
-  std::optional<int64_t> dbu;  // LEF units per micron of the RC cell sizes; the bundle's when absent
+  std::optional<int64_t> dbu;                         // LEF units per micron of the RC cell sizes; the bundle's when absent
+  std::string            netlist = "mapped netlist";  // what the graph is, for the report
 };
 struct Stage_timing {
   std::string              status;     // complete | partial (IO cut) | incomplete

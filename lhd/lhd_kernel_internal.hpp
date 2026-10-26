@@ -1,10 +1,12 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -16,6 +18,10 @@
 
 void setup_inou_yosys();
 class Lnast;
+
+namespace livehd::placement::late {
+struct Sdc_units;
+}
 
 namespace lhd {
 
@@ -427,6 +433,20 @@ void                  emit_deprecated_sets(const Options& opts);
 std::string       synth_set(const Options& opts, std::string_view flag, std::string_view def);
 std::string       resolve_liberty(const Options& opts);
 std::optional<double> sdc_min_clock_period_ps(const std::string& sdc_path, const std::string& liberty_path);
+// The SDC time and load units: the Liberty's first `time_unit` (ps when
+// absent, as sdc_min_clock_period_ps reads it) and `capacitive_load_unit`
+// (fF when absent).
+livehd::placement::late::Sdc_units liberty_sdc_units(const std::string& liberty_path);
+// The SDC's one clock: exactly one create_clock or create_generated_clock,
+// on one port spelled directly, braced or through a variable; nullopt
+// otherwise. Period and waveform are in SDC time units.
+struct Sdc_clock {
+  std::string                          name, port;
+  std::optional<double>                period;
+  std::optional<std::array<double, 2>> waveform;  // rise, fall
+  bool                                 waveform_unparsed = false;
+};
+std::optional<Sdc_clock> sdc_single_clock(const std::string& sdc_path);
 // The provisional domino profile (pass.usyn.physical=domino_provisional, see
 // pass/domplace): whether the merged pass.usyn labels request it, and its
 // INTERNAL labels -- the comma-joined LEFs, synth.place.row_access, and, when

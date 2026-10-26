@@ -57,12 +57,15 @@
 #include "diag.hpp"
 #include "domino_bundle.hpp"
 #include "export_file.hpp"
+#include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
+#include "inou/lefdef/mapped_graph.hpp"
 #include "inou/lefdef/route_store.hpp"
 #include "lhd_kernel_internal.hpp"
 #include "liberty_dff.hpp"
 #include "node_util.hpp"
 #include "pass.hpp"
+#include "pass/domplace/timing/stage_timing.hpp"
 #include "pass/opentimer/pass_opentimer.hpp"
 #include "pass/opentimer/sta_salt.hpp"
 #include "pass/place/io_timing.hpp"
@@ -93,6 +96,11 @@ std::string physical_descriptor(const Options& opts, const livehd::placement::Op
   w.String(opts.seed.c_str());
   w.Uint(opts.jobs);
   for (const auto& [key, value] : opts.sets) {
+    // Report-only stage timing reruns on every restore and never changes the
+    // placement, so it is not placement identity.
+    if (key == "synth.place.stage_timing" || key.starts_with("synth.place.stage_timing.")) {
+      continue;
+    }
     w.StartArray();
     w.String(key.c_str());
     w.String(value.c_str());
@@ -159,6 +167,121 @@ std::string restored_io_report(const std::string& text) {
   rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
   out.Accept(writer);
   return buffer.GetString();
+}
+
+namespace stage = livehd::domplace::timing;
+// The stage-timing clock (2d-domplace E): pass.usyn.domino_clock, else the
+// SDC's one clock port, at the SDC's smallest clock period. The domino
+// schedule is a fixed T/2, so a waveform it cannot read or a non-50% one is
+// a usage error before synthesis.
+stage::Clock_spec stage_timing_clock(const Eprp_var::Eprp_dict& usyn_sets, const std::string& sdc, const std::string& liberty) {
+  const auto        scanned = sdc.empty() ? std::nullopt : sdc_single_clock(sdc);
+  stage::Clock_spec spec;
+  if (const auto it = usyn_sets.find("domino_clock"); it != usyn_sets.end() && !it->second.empty()) {
+    spec.port = it->second;
+  } else if (scanned) {
+    spec.port = scanned->port;
+  }
+  if (spec.port.empty()) {
+    throw Lhd_error{"usage",
+                    "synth.place.stage_timing needs one resolvable clock port",
+                    "give synth.sdc one create_clock on one port, or set pass.usyn.domino_clock with the domino profile"};
+  }
+  const auto period = sdc.empty() ? std::nullopt : sdc_min_clock_period_ps(sdc, liberty);
+  if (!period) {
+    throw Lhd_error{"usage",
+                    "synth.place.stage_timing needs a resolvable SDC clock period",
+                    "set synth.sdc with create_clock -period"};
+  }
+  spec.period_ps = *period;
+  if (scanned && scanned->port == spec.port) {
+    spec.name = scanned->name;
+    if (scanned->waveform_unparsed) {
+      throw Lhd_error{"usage",
+                      "synth.place.stage_timing cannot read the SDC clock waveform",
+                      "the domino stage schedule is a fixed T/2; spell -waveform {rise fall} with numbers"};
+    }
+    if (scanned->waveform && scanned->period && *scanned->period > 0) {
+      const double scale = *period / *scanned->period;
+      spec.waveform_ps   = std::array{(*scanned->waveform)[0] * scale, (*scanned->waveform)[1] * scale};
+    }
+  }
+  try {
+    stage::check_clock_spec(spec);
+  } catch (const std::exception& error) {
+    throw Lhd_error{"usage", std::string("synth.place.stage_timing: ") + error.what(), ""};
+  }
+  return spec;
+}
+struct Stage_timing_inputs {
+  std::shared_ptr<hhds::Graph>                        graph;
+  std::shared_ptr<const livehd::physical::Parasitics> rc;
+  std::string                                         liberty, sdc, top, bundle, def;
+  std::vector<std::string>                            lefs;
+  stage::Clock_spec                                   clock;
+  double                                              clock_uncertainty_ps = 0;
+};
+// Native stage timing of the final placed netlist: the same timer for every
+// arm, with the bundle's provisional cells when the domino profile is on.
+// Writes the stage_timing.json report and returns the timing.
+stage::Stage_timing stage_timing_report(const Stage_timing_inputs& in, const std::string& report_path) {
+  std::string text;
+  std::string first_liberty;
+  for (const auto path : absl::StrSplit(in.liberty, absl::ByAnyChar(", \t\n"), absl::SkipEmpty())) {
+    const auto contents = livehd::file_utils::read_file(std::string(path));
+    if (!contents) {
+      throw Lhd_error{"io", "stage timing cannot read the Liberty", std::string(path)};
+    }
+    if (first_liberty.empty()) {
+      first_liberty = std::string(path);
+    }
+    text += *contents;
+    text += '\n';
+  }
+  try {
+    const auto library = std::make_shared<const livehd::liberty::timing::Library>(livehd::liberty::timing::parse(text));
+    std::optional<stage::Domino_timing_view>                          view;
+    std::shared_ptr<const livehd::placement::late::Provisional_cells> cells;
+    stage::Stage_timing_options                                       options;
+    if (!in.bundle.empty()) {
+      std::string why;
+      view = stage::read_domino_timing(in.bundle, &why);
+      if (!view) {
+        throw Lhd_error{"internal", "stage timing cannot read the domino bundle", why};
+      }
+      cells = stage::domino_timing_cells(*view, *library, &options.model_generation, nullptr);
+    }
+    std::optional<std::string> sdc_text;
+    if (!in.sdc.empty()) {
+      sdc_text = livehd::file_utils::read_file(in.sdc);
+    }
+    const auto technology = livehd::physical::read_lef(in.lefs);
+    options.dbu           = technology.dbu;
+    // The proxy binds one-bit ports. A netlist that keeps word-valued ports
+    // is timed on its bit-level DEF import: the same instances, nets and RC
+    // pin names, one port per bit.
+    hhds::GraphLibrary bits;
+    auto               graph = in.graph;
+    if (stage::word_valued_ports(*graph)) {
+      graph           = livehd::physical::mapped_graph(bits, livehd::physical::read_def(in.def), technology);
+      options.netlist = stage::kWordPortNetlist;
+    }
+    auto source
+        = stage::stage_constraints(*graph, sdc_text, in.top, liberty_sdc_units(first_liberty), in.clock, in.clock_uncertainty_ps);
+    auto timing
+        = stage::evaluate_stage_timing(*graph, in.rc.get(), library, cells, view ? &*view : nullptr, std::move(source), 0, options);
+    std::ofstream report(report_path);
+    report << timing.json;
+    report.close();
+    if (!report) {
+      throw Lhd_error{"io", "cannot write the stage timing report", report_path};
+    }
+    return timing;
+  } catch (const Lhd_error&) {
+    throw;
+  } catch (const std::exception& error) {
+    throw Lhd_error{"unsupported", std::string("stage timing failed: ") + error.what(), ""};
+  }
 }
 
 livehd::placement::Options placement_options(const Options& opts) {
@@ -1147,6 +1270,32 @@ void synth_command(Options& opts, Result& res) {
   if (run_place && !spef.empty()) {
     throw Lhd_error{"usage", "synth.spef cannot be combined with generated placement RC", ""};
   }
+  // Native stage timing of the final placement (2d-domplace E): opt-in and
+  // report-only, with or without the domino profile, never cached.
+  const bool run_stage_timing         = truthy(synth_set(opts, "place.stage_timing", "false"));
+  const bool stage_timing_complete    = truthy(synth_set(opts, "place.stage_timing.require_complete", "false"));
+  double     stage_timing_uncertainty = 0;
+  {
+    const auto text          = synth_set(opts, "place.stage_timing.clock_uncertainty_ps", "0");
+    char*      end           = nullptr;
+    stage_timing_uncertainty = std::strtod(text.c_str(), &end);
+    if (end == text.c_str() || end != text.c_str() + text.size() || !std::isfinite(stage_timing_uncertainty)
+        || stage_timing_uncertainty < 0) {
+      throw Lhd_error{"usage", "synth.place.stage_timing.clock_uncertainty_ps expects a non-negative number of ps", ""};
+    }
+  }
+  if (!run_stage_timing && (stage_timing_complete || stage_timing_uncertainty != 0)) {
+    throw Lhd_error{"usage",
+                    "synth.place.stage_timing.require_complete and clock_uncertainty_ps need synth.place.stage_timing=true",
+                    ""};
+  }
+  std::optional<stage::Clock_spec> stage_clock;
+  if (run_stage_timing) {
+    if (!run_place || macro_plan_only) {
+      throw Lhd_error{"usage", "synth.place.stage_timing needs a final placement", "set synth.place=true"};
+    }
+    stage_clock = stage_timing_clock(usyn_sets, sdc, liberty.empty() ? usyn_liberty : liberty);
+  }
   {
     std::vector<std::string> extra;
     if (!sdc.empty()) {
@@ -2042,11 +2191,70 @@ void synth_command(Options& opts, Result& res) {
     }
   }
 
+  // Stage timing reruns on fresh and restored placement alike; a restored
+  // QoR or report from an earlier run never stands in for it.
+  const std::string                  stage_timing_path = root + "/place/stage_timing.json";
+  std::optional<stage::Stage_timing> stage_timing;
+  if (run_place) {
+    if (run_stage_timing) {
+      Phase_timer         phase(res, "pass.place.stage_timing");
+      Stage_timing_inputs inputs;
+      inputs.graph = net.graphs.front();
+      inputs.rc    = net.physical_rc;
+      if (!inputs.rc) {
+        if (auto stored = inputs.graph->get_input_node().attr(livehd::attrs::placement_rc); stored.has()) {
+          inputs.rc
+              = std::make_shared<const livehd::physical::Parasitics>(livehd::physical::deserialize_parasitics_exact(stored.get()));
+        }
+      }
+      inputs.liberty              = liberty.empty() ? usyn_liberty : liberty;
+      inputs.sdc                  = sdc;
+      inputs.top                  = top;
+      inputs.bundle               = bundle_path;
+      inputs.def                  = root + "/place/out.def";
+      inputs.lefs                 = place_options.lefs;
+      inputs.clock                = *stage_clock;
+      inputs.clock_uncertainty_ps = stage_timing_uncertainty;
+      stage_timing                = stage_timing_report(inputs, stage_timing_path);
+      res.recipe_steps.emplace_back("pass.place.stage_timing");
+      if (user_workdir) {
+        res.outputs.push_back(stage_timing_path);
+      }
+    } else {
+      std::error_code ec;
+      fs::remove(stage_timing_path, ec);
+    }
+  }
   if (run_place) {
     rapidjson::Document placement, timing;
     placement.Parse(place_qor.c_str());
     timing.Parse(sta_qor.c_str());
     auto& allocator = placement.GetAllocator();
+    if (placement.IsObject()) {
+      placement.RemoveMember("stage_timing");
+    }
+    if (stage_timing && placement.IsObject()) {
+      rapidjson::Value summary(rapidjson::kObjectType);
+      const auto       optional_number = [&](std::optional<double> value) {
+        rapidjson::Value v;
+        if (value) {
+          v.SetDouble(*value);
+        }
+        return v;
+      };
+      summary.AddMember("status", rapidjson::Value(stage_timing->status.c_str(), allocator), allocator);
+      summary.AddMember("period_ps", optional_number(stage_timing->period_ps), allocator);
+      summary.AddMember("limiting", rapidjson::Value(stage_timing->limiting.c_str(), allocator), allocator);
+      summary.AddMember("excluded", static_cast<uint64_t>(stage_timing->excluded), allocator);
+      rapidjson::Value unmeasured(rapidjson::kArrayType);
+      for (const auto& name : stage_timing->unmeasured) {
+        unmeasured.PushBack(rapidjson::Value(name.c_str(), allocator), allocator);
+      }
+      summary.AddMember("unmeasured", unmeasured, allocator);
+      summary.AddMember("c_clk_ff", optional_number(stage_timing->c_clk_ff), allocator);
+      summary.AddMember("report", "place/stage_timing.json", allocator);
+      placement.AddMember("stage_timing", summary, allocator);
+    }
     if (!timing.HasParseError() && timing.IsObject() && timing.HasMember("designs") && timing["designs"].IsArray()
         && !timing["designs"].Empty()) {
       const auto& design = timing["designs"][0];
@@ -2078,6 +2286,20 @@ void synth_command(Options& opts, Result& res) {
         copy_export_file(place_qor_path, destination);
       }
       res.outputs.push_back(destination.string());
+      if (stage_timing) {
+        const auto report = fs::path(report_emit->path) / "stage_timing.json";
+        if (canon(report.string()) != canon(stage_timing_path)) {
+          copy_export_file(stage_timing_path, report);
+        }
+        res.outputs.push_back(report.string());
+      }
+    }
+    if (stage_timing && stage_timing_complete) {
+      try {
+        stage::require_complete(*stage_timing);
+      } catch (const std::exception& error) {
+        throw Lhd_error{"unsupported", error.what(), "see " + stage_timing_path};
+      }
     }
   }
 

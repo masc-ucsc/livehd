@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -44,6 +45,7 @@
 #include "node_util.hpp"
 #include "fold_engine.hpp"
 #include "pass.hpp"
+#include "pass/place/sdc_subset.hpp"
 #include "perf_tracing.hpp"
 #include "rapidjson/document.h"
 #include "satopt_stages.hpp"
@@ -910,6 +912,30 @@ private:
 };
 }  // namespace
 
+livehd::placement::late::Sdc_units liberty_sdc_units(const std::string& liberty_path) {
+  livehd::placement::late::Sdc_units units;
+  if (liberty_path.empty()) {
+    return units;
+  }
+  std::ifstream lib(liberty_path);
+  std::string   head(1 << 16, '\0');
+  lib.read(head.data(), static_cast<std::streamsize>(head.size()));
+  head.resize(static_cast<size_t>(lib.gcount()));
+  static const std::regex unit_re(R"(time_unit\s*:\s*"?\s*([0-9.]+)\s*(fs|ps|ns|us)\s*"?)");
+  if (std::smatch m; std::regex_search(head, m, unit_re)) {
+    const double scale = std::strtod(m[1].str().c_str(), nullptr);
+    const auto   u     = m[2].str();
+    units.time_ps      = scale * (u == "fs" ? 1e-3 : u == "ps" ? 1.0 : u == "ns" ? 1e3 : 1e6);
+  }
+  static const std::regex cap_re(R"(capacitive_load_unit\s*\(\s*([0-9.]+)\s*,\s*"?\s*(af|ff|pf|nf)\s*"?\s*\))");
+  if (std::smatch m; std::regex_search(head, m, cap_re)) {
+    const double scale   = std::strtod(m[1].str().c_str(), nullptr);
+    const auto   u       = m[2].str();
+    units.capacitance_ff = scale * (u == "af" ? 1e-3 : u == "ff" ? 1.0 : u == "pf" ? 1e3 : 1e6);
+  }
+  return units;
+}
+
 // The smallest `create_clock -period` of an SDC in picoseconds, or nullopt when no
 // period can be resolved. Handles `set VAR number` and `$VAR` / `${VAR}` periods
 // (the usual HighTide/ORFS spelling); a Tcl expression is not guessed. The SDC
@@ -919,20 +945,8 @@ std::optional<double> sdc_min_clock_period_ps(const std::string& sdc_path, const
   if (sdc.empty()) {
     return std::nullopt;
   }
-  double to_ps = 1.0;
-  if (!liberty_path.empty()) {
-    std::ifstream lib(liberty_path);
-    std::string   head(1 << 16, '\0');
-    lib.read(head.data(), static_cast<std::streamsize>(head.size()));
-    head.resize(static_cast<size_t>(lib.gcount()));
-    static const std::regex unit_re(R"(time_unit\s*:\s*"?\s*([0-9.]+)\s*(fs|ps|ns|us)\s*"?)");
-    if (std::smatch m; std::regex_search(head, m, unit_re)) {
-      const double scale = std::strtod(m[1].str().c_str(), nullptr);
-      const auto   u     = m[2].str();
-      to_ps              = scale * (u == "fs" ? 1e-3 : u == "ps" ? 1.0 : u == "ns" ? 1e3 : 1e6);
-    }
-  }
-  const auto number = [&](const std::string& tok, double& out) {
+  const double to_ps  = liberty_sdc_units(liberty_path).time_ps;
+  const auto   number = [&](const std::string& tok, double& out) {
     const auto text = sdc.value(tok);
     if (!text) {
       return false;
@@ -971,19 +985,30 @@ void domino_profile_labels(const Options& opts, const std::string& lefs, Eprp_va
   if (labels.contains("domino_clock") && !labels["domino_clock"].empty()) {
     return;
   }
-  // The one constrained domain: an SDC whose only clock (create_clock or
-  // create_generated_clock) is defined on one port, spelled directly or
-  // through a variable. Anything else leaves domino_clock unset, which
-  // pass.usyn refuses with a hint to name it.
+  // The one constrained domain: an SDC whose only clock is defined on one
+  // port. Anything else leaves domino_clock unset, which pass.usyn refuses
+  // with a hint to name it.
   const auto sdc = synth_set(opts, "sdc", "");
   if (sdc.empty()) {
     return;
   }
+  if (const auto clock = sdc_single_clock(sdc)) {
+    labels["domino_clock"] = clock->port;
+  }
+}
+
+std::optional<Sdc_clock> sdc_single_clock(const std::string& sdc_path) {
   static const std::regex  port_re(R"(\[\s*get_ports\s+\{?\s*(\$\{[^\s\{\}\[\]]+\}|[^\s\{\}\[\]]+)\s*\}?\s*\])");
-  Sdc_statements           statements(sdc);
-  std::vector<std::string> ports;
+  Sdc_statements           statements(sdc_path);
+  std::vector<Sdc_clock>   found;
   size_t                   clocks = 0;
   bool                     known  = true;
+  const auto               number = [&](std::string_view tok) -> std::optional<double> {
+    const auto text = statements.value(tok);
+    char*      end  = nullptr;
+    const auto v    = text ? std::strtod(text->c_str(), &end) : 0.;
+    return text && end != text->c_str() && *end == '\0' && std::isfinite(v) ? std::optional<double>{v} : std::nullopt;
+  };
   statements.each([&](std::string_view statement, const std::vector<std::string>& tok) {
     if (tok[0] != "create_clock" && tok[0] != "create_generated_clock") {
       return;
@@ -993,12 +1018,28 @@ void domino_profile_labels(const Options& opts, const std::string& lefs, Eprp_va
     if (std::smatch match; std::regex_search(text, match, port_re)) {
       const auto port = statements.value(match[1].str());
       known           = known && port && !port->empty() && port->front() != '$';
-      ports.push_back(port.value_or(""));
+      auto& clock     = found.emplace_back();
+      clock.port      = port.value_or("");
+      for (size_t i = 1; i + 1 < tok.size(); ++i) {
+        if (tok[i] == "-name") {
+          clock.name = statements.value(tok[i + 1]).value_or("");
+        } else if (tok[i] == "-period") {
+          clock.period = number(tok[i + 1]);
+        } else if (tok[i] == "-waveform") {
+          // -waveform {rise fall}: two tokens once the braces are stripped.
+          const auto rise = number(tok[i + 1]), fall = i + 2 < tok.size() ? number(tok[i + 2]) : std::nullopt;
+          clock.waveform_unparsed = !rise || !fall;
+          if (rise && fall) {
+            clock.waveform = std::array{*rise, *fall};
+          }
+        }
+      }
     }
   });
-  if (clocks == 1 && ports.size() == 1 && known) {
-    labels["domino_clock"] = ports.front();
+  if (clocks == 1 && found.size() == 1 && known) {
+    return found.front();
   }
+  return std::nullopt;
 }
 
 void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::Eprp_dict& labels) {

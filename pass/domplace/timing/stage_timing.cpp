@@ -72,6 +72,25 @@ struct Class_summary {
 };
 }  // namespace
 
+bool word_valued_ports(const hhds::Graph& graph) {
+  const auto word = [](const auto& declarations) {
+    return std::any_of(declarations.begin(), declarations.end(), [](const auto& d) { return d.bits > 1; });
+  };
+  return word(graph.get_io()->get_input_pin_decls()) || word(graph.get_io()->get_output_pin_decls());
+}
+
+void check_clock_spec(const Clock_spec& clock) {
+  if (!std::isfinite(clock.period_ps) || !(clock.period_ps > 0)) {
+    throw std::invalid_argument("stage-timing clock period must be positive");
+  }
+  if (clock.waveform_ps) {
+    require_half_duty(clock.name.empty() ? clock.port : clock.name,
+                      clock.period_ps,
+                      (*clock.waveform_ps)[0],
+                      (*clock.waveform_ps)[1]);
+  }
+}
+
 Constraint_source stage_constraints(const hhds::Graph& graph, const std::optional<std::string>& sdc_text, std::string_view design,
                                     late::Sdc_units units, const std::optional<Clock_spec>& clock, double clock_uncertainty_ps) {
   placement::require_nonnegative(clock_uncertainty_ps, "invalid stage-timing clock uncertainty");
@@ -92,16 +111,13 @@ Constraint_source stage_constraints(const hhds::Graph& graph, const std::optiona
       throw std::invalid_argument(sdc_text ? "the SDC is outside the saved-SDC subset (" + refused + ") and no clock port is named"
                                            : std::string("stage timing needs an SDC or a clock port"));
     }
-    if (!std::isfinite(clock->period_ps) || !(clock->period_ps > 0)) {
-      throw std::invalid_argument("stage-timing clock period must be positive");
-    }
+    check_clock_spec(*clock);
     if (std::find(inputs.begin(), inputs.end(), clock->port) == inputs.end()) {
       throw std::invalid_argument("stage-timing clock port is not a design input: " + clock->port);
     }
     const auto        name = clock->name.empty() ? clock->port : clock->name;
     late::Ideal_clock ideal{.period_ps = clock->period_ps, .uncertainty_ps = clock_uncertainty_ps, .roots = {clock->port}};
     if (clock->waveform_ps) {
-      require_half_duty(name, clock->period_ps, (*clock->waveform_ps)[0], (*clock->waveform_ps)[1]);
       ideal.phase_ps   = (*clock->waveform_ps)[0];
       ideal.falling_ps = (*clock->waveform_ps)[1];
     }
@@ -548,6 +564,7 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
   w.Key("model");
   w.StartObject();
   text(w, "timer", "native_late_proxy");
+  text(w, "netlist", options.netlist);
   text(w, "generation", std::format("{:016x}", options.model_generation));
   w.Key("units");
   w.StartObject();

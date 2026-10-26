@@ -1076,6 +1076,20 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "odd/even placement-row access convention the provisional domino abstracts are generated and placed for "
      "(pass.usyn.physical=domino_provisional): default is the stand-in (bottom core row even = horizontal access, odd = "
      "vertical), else a schema-1 JSON path"},
+    {"place.stage_timing",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "report-only native stage timing of the final placement (place/stage_timing.json, qor.place.stage_timing): one ideal "
+     "clock, T/2 domino captures with the provisional cells of pass.usyn.physical=domino_provisional, unconstrained IO cut "
+     "with listed reasons, setup only (hold unknown)"},
+    {"place.stage_timing.require_complete",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "fail unless stage timing coverage is complete (no excluded endpoint, no unmeasured coefficient)"},
+    {"place.stage_timing.clock_uncertainty_ps",
+     "0",
+     Synth_set_option::Kind::file,
+     "full-cycle clock uncertainty of stage timing in ps (labeled; domino captures use pass.usyn.domino_uncertainty_*)"},
     {"place.iterations",
      "1500",
      Synth_set_option::Kind::integer,
