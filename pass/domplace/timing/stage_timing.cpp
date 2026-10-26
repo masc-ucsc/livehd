@@ -82,6 +82,9 @@ bool word_valued_ports(const hhds::Graph& graph) {
 }
 
 void check_clock_spec(const Clock_spec& clock) {
+  if (!clock.unresolved.empty()) {
+    throw std::invalid_argument(clock.unresolved);
+  }
   if (!std::isfinite(clock.period_ps) || !(clock.period_ps > 0)) {
     throw std::invalid_argument("stage-timing clock period must be positive");
   }
@@ -112,6 +115,9 @@ Constraint_source stage_constraints(const hhds::Graph& graph, const std::optiona
     if (!clock) {
       throw std::invalid_argument(sdc_text ? "the SDC is outside the saved-SDC subset (" + refused + ") and no clock port is named"
                                            : std::string("stage timing needs an SDC or a clock port"));
+    }
+    if (!clock->unresolved.empty() && sdc_text) {
+      throw std::invalid_argument(clock->unresolved + "; the saved-SDC subset refused it (" + refused + ")");
     }
     check_clock_spec(*clock);
     if (std::find(inputs.begin(), inputs.end(), clock->port) == inputs.end()) {

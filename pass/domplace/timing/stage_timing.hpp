@@ -29,9 +29,11 @@ struct Clock_spec {
   std::string                          name, port;  // an empty name is the port's
   double                               period_ps = 0;
   std::optional<std::array<double, 2>> waveform_ps;  // rise, fall
+  std::string                          unresolved;   // why no period is known for `port`; the spec is then refused
 };
 // A positive finite period and, when given, a 50% waveform: the stage
-// schedule is a fixed T/2. Throws std::invalid_argument otherwise.
+// schedule is a fixed T/2. Throws std::invalid_argument otherwise, and with
+// the `unresolved` reason when there is one.
 void check_clock_spec(const Clock_spec& clock);
 struct Constraint_source {
   late::Constraints                                constraints;

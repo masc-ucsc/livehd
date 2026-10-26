@@ -72,22 +72,37 @@ def report(workdir):
 no_place = [a if a != 'synth.place=true' else 'synth.place=false' for a in synth(domp, 'domp', slow)]
 two = sdc('two', 'create_clock -name a -period 10 [get_ports clk]\ncreate_clock -name b -period 10 [get_ports en]\n')
 skewed = sdc('skewed', 'create_clock -name clk -period 10 -waveform {0 3} [get_ports clk]\n')
+# The period and waveform are those of the clock on the stage port, never the
+# SDC's smallest period: the skewed 2 ns domino clock is refused although a
+# 1 ns 50% clock comes first.
+mixed = sdc('mixed', 'create_clock -name clk_fast -period 1 [get_ports en]\n'
+            'create_clock -name clk_dom -period 2 -waveform {0 1.4} [get_ports clk]\n')
 for leg, args, needle in (
         ('no_place', no_place + stage_timing, 'final placement'),
         ('two_clocks', synth(domp, 'domp', two) + stage_timing, 'one resolvable clock'),
         ('skewed', synth(domp, 'domp', skewed) + stage_timing, 'non-50%'),
+        ('mixed', synth(domp, 'domp', mixed) + stage_timing + ['--set', 'synth.place.stage_timing.clock_port=clk'],
+         'non-50%'),
         ('orphan_option', synth(domp, 'domp', slow) + ['--set', 'synth.place.stage_timing.require_complete=true'],
          'need synth.place.stage_timing=true'),
         ('negative_uncertainty', synth(domp, 'domp', slow) + stage_timing
          + ['--set', 'synth.place.stage_timing.clock_uncertainty_ps=-1'], 'non-negative')):
     error = run(leg, args + ['--workdir', str(root / 'U')], False)['error']
     assert error['class'] == 'usage' and needle in error['message'], (leg, error)
-# A clock the SDC scan cannot resolve can be named.
+# A clock the SDC scan cannot resolve can be named; it is timed as the SDC
+# clock on that port.
 named = run('named_port', synth(domp, 'domp', two) + stage_timing + ['--set', 'synth.place.stage_timing.clock_port=clk',
                                                                      '--set', 'synth.opentimer=false',
                                                                      '--workdir', str(root / 'N')])
 named_timing = report(root / 'N')
-assert list(named_timing['clocks']) == ['clk'] and named_timing['clocks']['clk']['roots'] == ['clk'], named_timing['clocks']
+assert list(named_timing['clocks']) == ['a'] and named_timing['clocks']['a']['roots'] == ['clk'], named_timing['clocks']
+assert named_timing['clocks']['a']['period_ps'] == 10000, named_timing['clocks']
+# Several clocks and none on the named port: no period is borrowed from
+# another clock, and the SDC outside the saved subset is refused.
+unresolved = run('unresolved_port', synth(domp, 'domp', two) + stage_timing
+                 + ['--set', 'synth.place.stage_timing.clock_port=x', '--set', 'synth.opentimer=false',
+                    '--workdir', str(root / 'N')], False)['error']
+assert 'the SDC has 2 clocks and none resolves on port x' in unresolved['message'], unresolved
 assert named['qor']['place']['stage_timing']['status'] == 'partial', named['qor']['place']['stage_timing']
 
 # Arm 3: the domino profile with explicit coefficients. Unconstrained IO is

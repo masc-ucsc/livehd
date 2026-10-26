@@ -997,13 +997,11 @@ void domino_profile_labels(const Options& opts, const std::string& lefs, Eprp_va
   }
 }
 
-std::optional<Sdc_clock> sdc_single_clock(const std::string& sdc_path) {
-  static const std::regex  port_re(R"(\[\s*get_ports\s+\{?\s*(\$\{[^\s\{\}\[\]]+\}|[^\s\{\}\[\]]+)\s*\}?\s*\])");
-  Sdc_statements           statements(sdc_path);
-  std::vector<Sdc_clock>   found;
-  size_t                   clocks = 0;
-  bool                     known  = true;
-  const auto               number = [&](std::string_view tok) -> std::optional<double> {
+std::vector<Sdc_clock> sdc_clocks(const std::string& sdc_path) {
+  static const std::regex port_re(R"(\[\s*get_ports\s+\{?\s*(\$\{[^\s\{\}\[\]]+\}|[^\s\{\}\[\]]+)\s*\}?\s*\])");
+  Sdc_statements          statements(sdc_path);
+  std::vector<Sdc_clock>  found;
+  const auto              number = [&](std::string_view tok) -> std::optional<double> {
     const auto text = statements.value(tok);
     char*      end  = nullptr;
     const auto v    = text ? std::strtod(text->c_str(), &end) : 0.;
@@ -1013,31 +1011,35 @@ std::optional<Sdc_clock> sdc_single_clock(const std::string& sdc_path) {
     if (tok[0] != "create_clock" && tok[0] != "create_generated_clock") {
       return;
     }
-    ++clocks;
+    auto&             clock = found.emplace_back();
     const std::string text{statement};
     if (std::smatch match; std::regex_search(text, match, port_re)) {
-      const auto port = statements.value(match[1].str());
-      known           = known && port && !port->empty() && port->front() != '$';
-      auto& clock     = found.emplace_back();
-      clock.port      = port.value_or("");
-      for (size_t i = 1; i + 1 < tok.size(); ++i) {
-        if (tok[i] == "-name") {
-          clock.name = statements.value(tok[i + 1]).value_or("");
-        } else if (tok[i] == "-period") {
-          clock.period = number(tok[i + 1]);
-        } else if (tok[i] == "-waveform") {
-          // -waveform {rise fall}: two tokens once the braces are stripped.
-          const auto rise = number(tok[i + 1]), fall = i + 2 < tok.size() ? number(tok[i + 2]) : std::nullopt;
-          clock.waveform_unparsed = !rise || !fall;
-          if (rise && fall) {
-            clock.waveform = std::array{*rise, *fall};
-          }
+      const auto port     = statements.value(match[1].str());
+      clock.port          = port.value_or("");
+      clock.port_resolved = port && !port->empty() && port->front() != '$';
+    }
+    for (size_t i = 1; i + 1 < tok.size(); ++i) {
+      if (tok[i] == "-name") {
+        clock.name = statements.value(tok[i + 1]).value_or("");
+      } else if (tok[i] == "-period") {
+        clock.period = number(tok[i + 1]);
+      } else if (tok[i] == "-waveform") {
+        // -waveform {rise fall}: two tokens once the braces are stripped.
+        const auto rise = number(tok[i + 1]), fall = i + 2 < tok.size() ? number(tok[i + 2]) : std::nullopt;
+        clock.waveform_unparsed = !rise || !fall;
+        if (rise && fall) {
+          clock.waveform = std::array{*rise, *fall};
         }
       }
     }
   });
-  if (clocks == 1 && found.size() == 1 && known) {
-    return found.front();
+  return found;
+}
+
+std::optional<Sdc_clock> sdc_single_clock(const std::string& sdc_path) {
+  auto clocks = sdc_clocks(sdc_path);
+  if (clocks.size() == 1 && clocks.front().port_resolved) {
+    return std::move(clocks.front());
   }
   return std::nullopt;
 }

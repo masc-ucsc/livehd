@@ -437,15 +437,20 @@ std::optional<double> sdc_min_clock_period_ps(const std::string& sdc_path, const
 // absent, as sdc_min_clock_period_ps reads it) and `capacitive_load_unit`
 // (fF when absent).
 livehd::placement::late::Sdc_units liberty_sdc_units(const std::string& liberty_path);
-// The SDC's one clock: exactly one create_clock or create_generated_clock,
-// on one port spelled directly, braced or through a variable; nullopt
-// otherwise. Period and waveform are in SDC time units.
+// The SDC's clocks: one entry per create_clock or create_generated_clock, in
+// order. `port` is resolved when it is spelled directly, braced or through a
+// known variable; otherwise port_resolved is false. Period and waveform are in
+// SDC time units.
 struct Sdc_clock {
   std::string                          name, port;
+  bool                                 port_resolved = false;
   std::optional<double>                period;
   std::optional<std::array<double, 2>> waveform;  // rise, fall
   bool                                 waveform_unparsed = false;
 };
+std::vector<Sdc_clock>   sdc_clocks(const std::string& sdc_path);
+// The SDC's one clock: exactly one clock, on one resolved port; nullopt
+// otherwise.
 std::optional<Sdc_clock> sdc_single_clock(const std::string& sdc_path);
 // The provisional domino profile (pass.usyn.physical=domino_provisional, see
 // pass/domplace): whether the merged pass.usyn labels request it, and its

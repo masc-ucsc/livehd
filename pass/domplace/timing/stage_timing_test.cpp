@@ -419,6 +419,18 @@ TEST(StageTiming, ConstraintSourcesCutUnconstrainedPortsAndRefuseOtherDutyCycles
   EXPECT_EQ(fallback.kind, "clock-scan");
   ASSERT_EQ(fallback.notes.size(), 1U);
   EXPECT_THROW(stage_constraints(graph, "set x 1\n", "sources", {}, std::nullopt, 0), std::invalid_argument);
+  // A spec with no known period for its port: the saved SDC still times, the
+  // fallback is refused with the reason.
+  Clock_spec unresolved{"", "clk", 0, {}, "the SDC has 2 clocks and none resolves on port clk"};
+  EXPECT_EQ(stage_constraints(graph, sdc, "sources", {}, unresolved, 0).kind, "saved-sdc");
+  try {
+    (void)stage_constraints(graph, "set x 1\n", "sources", {}, unresolved, 0);
+    ADD_FAILURE() << "an unresolved clock spec was timed";
+  } catch (const std::invalid_argument& error) {
+    EXPECT_NE(std::string(error.what()).find("none resolves on port clk; the saved-SDC subset refused it"), std::string::npos)
+        << error.what();
+  }
+  EXPECT_THROW(check_clock_spec(unresolved), std::invalid_argument);
 }
 
 TEST(StageTiming, TheStageTimerIsTheDirectEvaluation) {

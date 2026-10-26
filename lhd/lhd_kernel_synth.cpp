@@ -178,42 +178,64 @@ std::string restored_io_report(const std::string& text) {
 
 namespace stage = livehd::domplace::timing;
 // The stage-timing clock (2d-domplace E): synth.place.stage_timing.clock_port,
-// else pass.usyn.domino_clock, else the SDC's one clock port, at the SDC's
-// smallest clock period. The domino schedule is a fixed T/2, so a waveform
-// it cannot read or a non-50% one is a usage error before synthesis.
+// else pass.usyn.domino_clock, else the SDC's one clock port. Period, name and
+// waveform are those of the SDC clock on that port; an SDC with one clock
+// whose port cannot be resolved lends its period. With several clocks and
+// none (or more than one) on the port, the spec is left unresolved: a
+// saved-SDC-subset SDC still times, anything else is refused at timing. The
+// domino schedule is a fixed T/2, so a waveform it cannot read or a non-50%
+// one is a usage error before synthesis.
 stage::Clock_spec stage_timing_clock(const std::string& port, const Eprp_var::Eprp_dict& usyn_sets, const std::string& sdc,
                                      const std::string& liberty) {
-  const auto        scanned = sdc.empty() ? std::nullopt : sdc_single_clock(sdc);
+  const auto        clocks = sdc.empty() ? std::vector<Sdc_clock>{} : sdc_clocks(sdc);
   stage::Clock_spec spec;
   spec.port = port;
   if (const auto it = usyn_sets.find("domino_clock"); spec.port.empty() && it != usyn_sets.end() && !it->second.empty()) {
     spec.port = it->second;
-  } else if (spec.port.empty() && scanned) {
-    spec.port = scanned->port;
+  } else if (spec.port.empty() && clocks.size() == 1 && clocks.front().port_resolved) {
+    spec.port = clocks.front().port;
   }
   if (spec.port.empty()) {
     throw Lhd_error{"usage",
                     "synth.place.stage_timing needs one resolvable clock port",
                     "set synth.place.stage_timing.clock_port, or give synth.sdc one create_clock on one port"};
   }
-  const auto period = sdc.empty() ? std::nullopt : sdc_min_clock_period_ps(sdc, liberty);
-  if (!period) {
+  const Sdc_clock* match   = nullptr;
+  size_t           on_port = 0;
+  for (const auto& clock : clocks) {
+    if (clock.port_resolved && clock.port == spec.port) {
+      match = &clock;
+      ++on_port;
+    }
+  }
+  if (on_port != 1) {
+    // The one clock of the SDC, on a port the scan cannot resolve, is taken
+    // as the clock on `port`.
+    match = clocks.size() == 1 && !clocks.front().port_resolved ? &clocks.front() : nullptr;
+  }
+  if (clocks.empty() || (match && !match->period)) {
     throw Lhd_error{"usage",
                     "synth.place.stage_timing needs a resolvable SDC clock period",
                     "set synth.sdc with create_clock -period"};
   }
-  spec.period_ps = *period;
-  if (scanned && scanned->port == spec.port) {
-    spec.name = scanned->name;
-    if (scanned->waveform_unparsed) {
-      throw Lhd_error{"usage",
-                      "synth.place.stage_timing cannot read the SDC clock waveform",
-                      "the domino stage schedule is a fixed T/2; spell -waveform {rise fall} with numbers"};
-    }
-    if (scanned->waveform && scanned->period && *scanned->period > 0) {
-      const double scale = *period / *scanned->period;
-      spec.waveform_ps   = std::array{(*scanned->waveform)[0] * scale, (*scanned->waveform)[1] * scale};
-    }
+  if (!match) {
+    spec.unresolved = std::format("the SDC has {} clock{} and {} on port {}",
+                                  clocks.size(),
+                                  clocks.size() == 1 ? "" : "s",
+                                  on_port == 0 ? "none resolves" : "several resolve",
+                                  spec.port);
+    return spec;
+  }
+  const double to_ps = liberty_sdc_units(liberty).time_ps;
+  spec.name          = match->name;
+  spec.period_ps     = *match->period * to_ps;
+  if (match->waveform_unparsed) {
+    throw Lhd_error{"usage",
+                    "synth.place.stage_timing cannot read the SDC clock waveform",
+                    "the domino stage schedule is a fixed T/2; spell -waveform {rise fall} with numbers"};
+  }
+  if (match->waveform) {
+    spec.waveform_ps = std::array{(*match->waveform)[0] * to_ps, (*match->waveform)[1] * to_ps};
   }
   try {
     stage::check_clock_spec(spec);
