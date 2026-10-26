@@ -100,20 +100,22 @@ std::optional<Domino_timing_view> read_domino_timing(const fs::path& bundle, std
     }
     return std::nullopt;
   };
-  // The placement view validates the schema, files, masters and variants.
-  const auto sidecar = read_domino_sidecar(bundle, why);
-  if (!sidecar) {
-    return std::nullopt;
+  // One read and one parse: the placement view validates the schema, files,
+  // masters and variants (with their register pins and capture setup).
+  std::ifstream file(bundle / kBundleSidecar, std::ios::binary);
+  if (!file) {
+    return refuse(std::format("cannot open {}", kBundleSidecar));
   }
-  std::ifstream       file(bundle / kBundleSidecar, std::ios::binary);
   const std::string   contents{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
   rapidjson::Document doc;
   doc.Parse(contents.c_str(), contents.size());
-  if (doc.HasParseError() || !doc.IsObject()) {
-    return refuse("unreadable sidecar");
+  const auto sidecar = read_domino_sidecar(doc, bundle, why);
+  if (!sidecar) {
+    return std::nullopt;
   }
   bool               malformed = false;
   Domino_timing_view view;
+  view.variants      = sidecar->catalog;
   view.bundle_schema = kBundleSchema;
   view.digest        = std::format("{:016x}", hash_util::fnv1a64(contents));
   view.producer_salt = read_text(doc, "producer_salt", malformed);
@@ -137,38 +139,6 @@ std::optional<Domino_timing_view> read_domino_timing(const fs::path& bundle, std
   }
   if (doc.HasMember("units") && doc["units"].IsObject() && doc["units"].HasMember("dbu") && doc["units"]["dbu"].IsInt64()) {
     view.dbu = doc["units"]["dbu"].GetInt64();
-  }
-  std::map<std::string, std::pair<std::string, std::string>> register_pins;  // name -> (clk, q)
-  if (!doc.HasMember("reference") || !doc["reference"].IsObject() || !doc["reference"].HasMember("registers")
-      || !doc["reference"]["registers"].IsArray()) {
-    return refuse("sidecar has no reference registers");
-  }
-  for (const auto& r : doc["reference"]["registers"].GetArray()) {
-    if (!r.IsObject() || !r.HasMember("pins")) {
-      return refuse("reference register without pin names");
-    }
-    register_pins[read_text(r, "name", malformed)] = {read_text(r["pins"], "clk", malformed), read_text(r["pins"], "q", malformed)};
-  }
-  size_t entry = 0;
-  for (const auto& master : doc["masters"].GetArray()) {
-    for (const auto& item : master["variants"].GetArray()) {
-      const auto& catalog      = sidecar->catalog.at(entry++);
-      auto&       variant      = view.variants.emplace_back();
-      variant.name             = catalog.name;
-      variant.family           = catalog.family;
-      variant.rails            = catalog.rails;
-      variant.rail_ff          = catalog.rail_ff;
-      variant.clock_ff         = catalog.clock_ff;
-      variant.a_footprint_um2  = catalog.a_footprint_um2;
-      variant.a_estimate_um2   = catalog.a_estimate_um2;
-      variant.register_cell    = catalog.register_cell;
-      variant.setup_capture_ps = read_estimate(item, "setup_capture_ps", malformed);
-      const auto pins          = register_pins.find(catalog.register_cell);
-      if (pins == register_pins.end()) {
-        return refuse("variant " + catalog.name + " names an unlisted register " + catalog.register_cell);
-      }
-      std::tie(variant.clk_pin, variant.q_pin) = pins->second;
-    }
   }
   for (const auto& instance : doc["instances"].GetArray()) {
     auto& owner  = view.instances.emplace_back();

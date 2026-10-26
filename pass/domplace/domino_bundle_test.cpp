@@ -247,12 +247,23 @@ TEST(DominoBundle, SchemaTwoRecordsRegisterPinsClockLoadsCoefficientsAndTheCatal
     EXPECT_DOUBLE_EQ(*entry.rail_ff, c_in);
     EXPECT_EQ(entry.clock_ff.has_value(), i % 2 == 0);
     EXPECT_EQ(entry.drive.has_value(), i % 2 == 0);
+    EXPECT_EQ(entry.clk_pin, "CLK");  // the register's own pins
+    EXPECT_EQ(entry.q_pin, "Q");
+    EXPECT_EQ(entry.setup_capture_ps,
+              i % 2 ? std::optional<double>{42} : std::optional<double>{registers[0]["setup_ps"].GetDouble()});
   }
   EXPECT_GT(sidecar->catalog[1].width_dbu, sidecar->catalog[0].width_dbu);
   ASSERT_TRUE(sidecar->catalog[0].drive);
   EXPECT_TRUE(sidecar->catalog[0].drive->sequential);
   EXPECT_EQ(sidecar->catalog[0].drive->name, sidecar->catalog[0].name);
   EXPECT_EQ(sidecar->catalog[0].drive->output, "Q");
+
+  // A variant whose register is not a listed reference register is refused.
+  auto unlisted = text;
+  unlisted.replace(unlisted.find("\"name\":\"test_dfxtp_2\""), 21, "\"name\":\"test_dfxtp_9\"");
+  std::ofstream(dir / kBundleSidecar, std::ios::trunc) << unlisted;
+  EXPECT_FALSE(read_domino_sidecar(dir, &why));
+  EXPECT_NE(why.find("names an unlisted register test_dfxtp_2"), std::string::npos) << why;
 
   // Only schema 2 is read; an older sidecar asks for regeneration.
   auto older = text;

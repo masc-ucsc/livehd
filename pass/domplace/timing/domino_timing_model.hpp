@@ -10,6 +10,7 @@
 #include <string_view>
 #include <vector>
 
+#include "domino_bundle.hpp"
 #include "pass/liberty/timing_model.hpp"
 #include "pass/place/late_timing.hpp"
 #include "physical_emission.hpp"
@@ -37,12 +38,7 @@ struct Domino_timing_view {
   std::optional<int64_t>             dbu;
   Stage_values                       stage;
   std::map<std::string, std::string> sources;  // coefficient -> "bundle" | "override"
-  struct Variant {
-    std::string              name, family, register_cell, clk_pin, q_pin;  // the register's own pin names
-    std::vector<std::string> rails;
-    std::optional<double>    rail_ff, clock_ff, setup_capture_ps;
-    double                   a_footprint_um2 = 0, a_estimate_um2 = 0;
-  };
+  using Variant = Catalog_entry;               // the sidecar's own variant record
   std::vector<Variant> variants;
   struct Instance {
     std::string region, state, master;

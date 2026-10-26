@@ -14,6 +14,7 @@
 #include "domino_cell.hpp"
 #include "domino_geometry.hpp"
 #include "domino_reference.hpp"
+#include "rapidjson/document.h"
 #include "stage_model.hpp"
 
 namespace livehd::domplace {
@@ -86,11 +87,13 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
 // Q and port order; rank orders them by register drive.
 struct Catalog_entry {
   std::string                          name, family, register_cell;  // family = <base>_t<template>
+  std::string                          clk_pin, q_pin;               // the register's own pin names (reference.registers)
   uint32_t                             rank = 0;
   std::vector<std::string>             rails;
   int64_t                              width_dbu       = 0;
   double                               a_footprint_um2 = 0, a_estimate_um2 = 0;
   std::optional<double>                rail_ff, clock_ff;  // labeled estimates; null when not derivable
+  std::optional<double>                setup_capture_ps;   // the register's setup at its capture; null when unknown
   std::optional<liberty::Output_drive> drive;              // the register family's Q model
 };
 // The placement view of a published bundle.
@@ -104,5 +107,8 @@ struct Domino_sidecar {
 // nullopt with the reason in `why` for a missing or malformed bundle, or a
 // sidecar of another schema (bundles are regenerated with their producer).
 std::optional<Domino_sidecar> read_domino_sidecar(const std::filesystem::path& dir, std::string* why);
+// The same from the sidecar document already parsed from dir's sidecar file.
+std::optional<Domino_sidecar> read_domino_sidecar(const rapidjson::Document& doc, const std::filesystem::path& dir,
+                                                  std::string* why);
 
 }  // namespace livehd::domplace

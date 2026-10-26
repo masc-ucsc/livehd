@@ -9,6 +9,7 @@
 #include <iterator>
 #include <set>
 #include <stdexcept>
+#include <tuple>
 
 #include "domplace_salt.hpp"
 #include "graph_library_singleton.hpp"
@@ -472,19 +473,26 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
 }
 
 std::optional<Domino_sidecar> read_domino_sidecar(const fs::path& dir, std::string* why) {
+  std::ifstream file(dir / kBundleSidecar);
+  if (!file) {
+    if (why) {
+      *why = std::format("domino bundle {}: cannot open {}", dir.string(), kBundleSidecar);
+    }
+    return std::nullopt;
+  }
+  const std::string   contents{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+  rapidjson::Document doc;
+  doc.Parse(contents.c_str(), contents.size());
+  return read_domino_sidecar(doc, dir, why);
+}
+
+std::optional<Domino_sidecar> read_domino_sidecar(const rapidjson::Document& doc, const fs::path& dir, std::string* why) {
   const auto refuse = [&](std::string reason) -> std::optional<Domino_sidecar> {
     if (why) {
       *why = "domino bundle " + dir.string() + ": " + reason;
     }
     return std::nullopt;
   };
-  std::ifstream file(dir / kBundleSidecar);
-  if (!file) {
-    return refuse(std::format("cannot open {}", kBundleSidecar));
-  }
-  const std::string   contents{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
-  rapidjson::Document doc;
-  doc.Parse(contents.c_str(), contents.size());
   if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("schema") || !doc["schema"].IsUint()
       || doc["schema"].GetUint() != kBundleSchema) {
     return refuse(std::format("{} is not a schema-{} sidecar", kBundleSidecar, kBundleSchema));
@@ -506,6 +514,18 @@ std::optional<Domino_sidecar> read_domino_sidecar(const fs::path& dir, std::stri
   const auto estimate
       = [&](const rapidjson::Value& object, const char* key) { return json::read_estimate(object, key, malformed); };
   const auto string = [&](const rapidjson::Value& object, const char* key) { return json::read_text(object, key, malformed); };
+  // Each variant's register resolves to its clock and output pin names.
+  std::map<std::string, std::pair<std::string, std::string>> register_pins;  // name -> (clk, q)
+  if (!doc.HasMember("reference") || !doc["reference"].IsObject() || !doc["reference"].HasMember("registers")
+      || !doc["reference"]["registers"].IsArray()) {
+    return refuse("sidecar has no reference registers");
+  }
+  for (const auto& r : doc["reference"]["registers"].GetArray()) {
+    if (!r.IsObject() || !r.HasMember("pins")) {
+      return refuse("reference register without pin names");
+    }
+    register_pins[string(r, "name")] = {string(r["pins"], "clk"), string(r["pins"], "q")};
+  }
   for (const auto& master : doc["masters"].GetArray()) {
     if (!master.IsObject() || !master.HasMember("variants") || !master["variants"].IsArray() || !master.HasMember("rails")
         || !master["rails"].IsArray()) {
@@ -524,17 +544,23 @@ std::optional<Domino_sidecar> read_domino_sidecar(const fs::path& dir, std::stri
         return refuse("malformed master variant");
       }
       Catalog_entry entry;
-      entry.name            = string(variant, "name");
-      entry.register_cell   = string(variant, "register");
-      entry.rank            = rank++;  // the register ladder order
-      entry.rails           = rails;
-      entry.width_dbu       = static_cast<int64_t>(variant["width_dbu"].GetUint64());
-      entry.a_footprint_um2 = estimate(variant, "a_footprint_um2").value_or(0);
-      entry.a_estimate_um2  = estimate(variant, "a_estimate_um2").value_or(0);
-      entry.rail_ff         = estimate(variant["pin_caps"], "rail_ff");
-      entry.clock_ff        = estimate(variant["pin_caps"], "clock_ff");
+      entry.name             = string(variant, "name");
+      entry.register_cell    = string(variant, "register");
+      entry.rank             = rank++;  // the register ladder order
+      entry.rails            = rails;
+      entry.width_dbu        = static_cast<int64_t>(variant["width_dbu"].GetUint64());
+      entry.a_footprint_um2  = estimate(variant, "a_footprint_um2").value_or(0);
+      entry.a_estimate_um2   = estimate(variant, "a_estimate_um2").value_or(0);
+      entry.rail_ff          = estimate(variant["pin_caps"], "rail_ff");
+      entry.clock_ff         = estimate(variant["pin_caps"], "clock_ff");
+      entry.setup_capture_ps = estimate(variant, "setup_capture_ps");
+      if (const auto pins = register_pins.find(entry.register_cell); pins != register_pins.end()) {
+        std::tie(entry.clk_pin, entry.q_pin) = pins->second;
+      } else {
+        return refuse("variant " + entry.name + " names an unlisted register " + entry.register_cell);
+      }
       // <base>_v<k>_t<t>: the family keeps the base and the template.
-      const auto tag        = entry.name.rfind("_t");
+      const auto tag = entry.name.rfind("_t");
       if (base.empty() || !entry.name.starts_with(base + "_v") || tag == std::string::npos) {
         return refuse("variant " + entry.name + " is not named after its master " + base);
       }
