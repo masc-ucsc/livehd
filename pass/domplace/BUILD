@@ -193,7 +193,11 @@ cc_library(
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
-    deps = ["//inou/lefdef:inou_lefdef"],
+    deps = [
+        ":domino_reference",
+        "//inou/lefdef:inou_lefdef",
+        "//pass/usyn:usyn_semantic",
+    ],
 )
 
 cc_test(

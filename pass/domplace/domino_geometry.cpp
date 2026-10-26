@@ -281,16 +281,25 @@ Geometry_inputs geometry_inputs(const ph::Technology& tech, std::string inverter
 std::array<Row_access, 2> template_halves(const ph::Row_access_convention& convention) {
   return {convention.at(0), convention.at(1)};
 }
-Domino_variant_geometry generate_domino_macro(const Domino_pins& pins, const Domino_area_terms& area, const Geometry_inputs& in,
+Domino_variant_geometry generate_domino_macro(const usyn::Physical_cell_interface& pins, const usyn::Gate_formula::Metrics& pdn,
+                                              const Domino_reference& reference_cells, size_t variant, const Geometry_inputs& in,
                                               std::optional<int64_t> width_override) {
   const auto  ref  = reference(in);
   const auto& tech = *in.tech;
   const auto  dbu  = tech.dbu;
-  const auto  reg  = tech.macros.find(area.register_cell);
-  if (reg == tech.macros.end()) {
-    refuse("register is absent from LEF: " + area.register_cell);
+  if (reference_cells.inverter.name != in.inverter) {
+    refuse("the reference inverter " + reference_cells.inverter.name + " is not the geometry inverter " + in.inverter);
   }
-  if (area.proxy_devices == 0 || pins.name.empty() || pins.rails.empty()) {
+  if (variant >= reference_cells.registers.size()) {
+    refuse(std::format("no register for drive variant {} of {}", variant, pins.name));
+  }
+  const auto& register_cell = reference_cells.registers[variant].name;
+  const auto  reg           = tech.macros.find(register_cell);
+  if (reg == tech.macros.end()) {
+    refuse("register is absent from LEF: " + register_cell);
+  }
+  const auto proxy_devices = int64_t(pdn.transistors) + reference_cells.aux_nonregister;
+  if (proxy_devices == 0 || pins.name.empty() || pins.rails.empty()) {
     refuse("a domino master needs a name, rails and proxy devices: " + pins.name);
   }
   Domino_variant_geometry g;
@@ -298,13 +307,13 @@ Domino_variant_geometry generate_domino_macro(const Domino_pins& pins, const Dom
   g.halves         = template_halves(in.row_access);
   const auto sw    = ref.site_width;
   const auto h     = ref.row_height;
-  const auto a_reg = to_dbu(reg->second.width, dbu, area.register_cell + " width")
-                     * to_dbu(reg->second.height, dbu, area.register_cell + " height");
+  const auto a_reg
+      = to_dbu(reg->second.width, dbu, register_cell + " width") * to_dbu(reg->second.height, dbu, register_cell + " height");
   // 2 * A_domino is integral in DBU^2 (x is a multiple of 1/2), so the site
   // count is exact: 35.0336 um^2 on sky130 is 14 two-row sites, never 15.
-  const auto   twice = int64_t(area.proxy_devices) * ref.area + 2 * a_reg;
+  const auto   twice = proxy_devices * ref.area + 2 * a_reg;
   const double dbu2  = double(dbu) * double(dbu);
-  g.x                = area.proxy_devices / 2.0;
+  g.x                = proxy_devices / 2.0;
   g.a_not_um2        = ref.area / dbu2;
   g.a_register_um2   = a_reg / dbu2;
   g.a_estimate_um2   = twice / (2 * dbu2);

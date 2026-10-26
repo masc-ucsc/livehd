@@ -90,12 +90,30 @@ const ph::Route_policy kSyntheticRoute{
     {"M1", "M2", "V1"},
     "M3", "V2", {}
 };
-Domino_pins pins(const std::string& base, size_t rails, int variant = 0) {
-  Domino_pins p{base + "_v" + std::to_string(variant) + "_t0", {}};
+usyn::Physical_cell_interface pins(const std::string& base, size_t rails, int variant = 0) {
+  usyn::Physical_cell_interface p{base + "_v" + std::to_string(variant) + "_t0", {}};
   for (size_t i = 0; i < rails; ++i) {
     p.rails.push_back("R" + std::to_string(i));
   }
   return p;
+}
+constexpr uint32_t kAux = 4;
+// The named cells: the inverter and the register ladder, by LEF macro name.
+Domino_reference   cells(const char* inverter, std::vector<std::string> registers, uint32_t aux = kAux) {
+  Domino_reference r;
+  r.inverter.name = inverter;
+  for (auto& name : registers) {
+    r.registers.push_back({std::move(name)});
+  }
+  r.aux_nonregister = aux;
+  return r;
+}
+const Domino_reference      kSky130Cells    = cells(kInv, {kDff1, kDff2, kDff4});
+const Domino_reference      kSyntheticCells = cells("INVx1", {"DFFx1", "DFFx2", "DFFx4"});
+usyn::Gate_formula::Metrics pdn(uint32_t transistors) {
+  usyn::Gate_formula::Metrics m;
+  m.transistors = transistors;
+  return m;
 }
 // Master shapes by (rails, N_PDN): (a&b)|(c&d), its complement realized as its
 // own positive formula over the complemented rails, a binate XOR with both
@@ -111,8 +129,7 @@ constexpr std::array kMasters{
     Master{"__lhd_domino_000000000000x0r2", 4, 4},
     Master{"__lhd_domino_00000000000a0nd3", 3, 3},
 };
-constexpr uint32_t kAux = 4;
-std::string        temp_lef(const std::string& name, const std::string& text) {
+std::string temp_lef(const std::string& name, const std::string& text) {
   const auto path = std::filesystem::path(testing::TempDir()) / name;
   std::ofstream(path) << text;
   return path.string();
@@ -125,9 +142,9 @@ bool has_failure(const Access_check& c, const std::string& prefix, const std::st
 }  // namespace
 TEST(DominoGeometry, AreaWidthIsExactWholeSitesAndDriveChangesOnlyTheRegister) {
   const auto in = geometry_inputs(sky130(), kInv, kSky130Route);
-  const auto x1 = generate_domino_macro(pins("__lhd_domino_ab", 4), {4 + kAux, kDff1}, in);
-  const auto x2 = generate_domino_macro(pins("__lhd_domino_ab", 4, 1), {4 + kAux, kDff2}, in);
-  const auto x4 = generate_domino_macro(pins("__lhd_domino_ab", 4, 2), {4 + kAux, kDff4}, in);
+  const auto x1 = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSky130Cells, 0, in);
+  const auto x2 = generate_domino_macro(pins("__lhd_domino_ab", 4, 1), pdn(4), kSky130Cells, 1, in);
+  const auto x4 = generate_domino_macro(pins("__lhd_domino_ab", 4, 2), pdn(4), kSky130Cells, 2, in);
   // x = 4: 4 * 3.7536 + 20.0192 = 35.0336 um^2 = exactly 14 two-row sites.
   EXPECT_DOUBLE_EQ(x1.x, 4);
   EXPECT_NEAR(x1.a_not_um2, 1.38 * 2.72, 1e-12);
@@ -148,14 +165,14 @@ TEST(DominoGeometry, AreaWidthIsExactWholeSitesAndDriveChangesOnlyTheRegister) {
     EXPECT_EQ(v->w_pin, x1.w_pin);
   }
   // Fractional inverter equivalents round only the total: 13.25 -> 14 sites.
-  const auto odd = generate_domino_macro(pins("__lhd_domino_odd", 3), {3 + kAux, kDff1}, in);
+  const auto odd = generate_domino_macro(pins("__lhd_domino_odd", 3), pdn(3), kSky130Cells, 0, in);
   EXPECT_DOUBLE_EQ(odd.x, 3.5);
   EXPECT_NEAR(odd.a_estimate_um2, 3.5 * 3.7536 + 20.0192, 1e-9);
   EXPECT_EQ(odd.w_area, 14 * 460);
 }
 TEST(DominoGeometry, PinTermWidensWideInputMasters) {
   const auto in = geometry_inputs(sky130(), kInv, kSky130Route);
-  const auto g  = generate_domino_macro(pins("__lhd_domino_wide", 14), {4 + kAux, kDff1}, in);
+  const auto g  = generate_domino_macro(pins("__lhd_domino_wide", 14), pdn(4), kSky130Cells, 0, in);
   EXPECT_EQ(g.w_area, 14 * 460);
   EXPECT_EQ(g.w_pin, 17 * 460);
   EXPECT_EQ(g.width, 17 * 460);
@@ -163,7 +180,7 @@ TEST(DominoGeometry, PinTermWidensWideInputMasters) {
 }
 TEST(DominoGeometry, TwoRowCoreAbstractWithEdgeRailsAndTrackStrips) {
   const auto  in = geometry_inputs(sky130(), kInv, kSky130Route);
-  const auto  g  = generate_domino_macro(pins("__lhd_domino_ab", 4), {4 + kAux, kDff1}, in);
+  const auto  g  = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSky130Cells, 0, in);
   const auto& m  = g.macro;
   EXPECT_EQ(m.klass, "CORE");
   EXPECT_EQ(m.site, "unithd");
@@ -216,12 +233,8 @@ TEST(DominoGeometry, RegenerationIsByteIdenticalAndRoundTripsThroughTheLefReader
   const auto generate = [&] {
     std::map<std::string, ph::Macro> macros;
     for (const auto& master : kMasters) {
-      for (const auto& [variant, reg] : {
-               std::pair{0, kDff1},
-               {1, kDff2},
-               {2, kDff4}
-      }) {
-        auto g = generate_domino_macro(pins(master.base, master.rails, variant), {master.n_pdn + kAux, reg}, in);
+      for (int variant = 0; variant < 3; ++variant) {
+        auto g = generate_domino_macro(pins(master.base, master.rails, variant), pdn(master.n_pdn), kSky130Cells, variant, in);
         macros.emplace(g.name, std::move(g.macro));
       }
     }
@@ -250,12 +263,9 @@ TEST(DominoGeometry, SyntheticAccessHoldsForBothParitiesFlipsPhasesAndDrives) {
   const auto tech = synthetic();
   const auto in   = geometry_inputs(tech, "INVx1", kSyntheticRoute);
   for (const auto& master : kMasters) {
-    for (const auto& [variant, reg] : {
-             std::pair{0, "DFFx1"},
-             {1, "DFFx2"},
-             {2, "DFFx4"}
-    }) {
-      const auto g = generate_domino_macro(pins(master.base, master.rails, variant), {master.n_pdn + kAux, reg}, in);
+    for (int variant = 0; variant < 3; ++variant) {
+      const auto g
+          = generate_domino_macro(pins(master.base, master.rails, variant), pdn(master.n_pdn), kSyntheticCells, variant, in);
       SCOPED_TRACE(g.name);
       const auto c = check_domino_access(in, g.macro, g.halves);
       EXPECT_TRUE(c.ok);
@@ -274,7 +284,7 @@ TEST(DominoGeometry, SyntheticAccessHoldsForBothParitiesFlipsPhasesAndDrives) {
     }
   }
   // A wide master is pin-limited, still accessible.
-  const auto wide = generate_domino_macro(pins("__lhd_domino_wide", 13), {13 + kAux, "DFFx1"}, in);
+  const auto wide = generate_domino_macro(pins("__lhd_domino_wide", 13), pdn(13), kSyntheticCells, 0, in);
   EXPECT_EQ(wide.w_area, 21 * 54);
   EXPECT_EQ(wide.w_pin, 16 * 72);
   EXPECT_EQ(wide.width, 22 * 54);
@@ -283,7 +293,7 @@ TEST(DominoGeometry, SyntheticAccessHoldsForBothParitiesFlipsPhasesAndDrives) {
 TEST(DominoGeometry, MissingSymmetryXIsRefused) {
   const auto tech    = synthetic();
   const auto in      = geometry_inputs(tech, "INVx1", kSyntheticRoute);
-  auto       g       = generate_domino_macro(pins("__lhd_domino_ab", 4), {4 + kAux, "DFFx1"}, in);
+  auto       g       = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSyntheticCells, 0, in);
   g.macro.symmetry_x = false;
   const auto c       = check_domino_access(in, g.macro, g.halves);
   EXPECT_FALSE(c.ok);
@@ -292,20 +302,20 @@ TEST(DominoGeometry, MissingSymmetryXIsRefused) {
 TEST(DominoGeometry, TooNarrowLayoutIsRefusedNamingThePin) {
   const auto tech = synthetic();
   const auto in   = geometry_inputs(tech, "INVx1", kSyntheticRoute);
-  const auto fit  = generate_domino_macro(pins("__lhd_domino_ab", 4), {4 + kAux, "DFFx1"}, in);
+  const auto fit  = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSyntheticCells, 0, in);
   EXPECT_EQ(fit.width, 14 * 54);
-  const auto narrow = generate_domino_macro(pins("__lhd_domino_ab", 4), {4 + kAux, "DFFx1"}, in, 6 * 54);
+  const auto narrow = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSyntheticCells, 0, in, 6 * 54);
   EXPECT_EQ(narrow.width, 6 * 54);
   const auto c = check_domino_access(in, narrow.macro, narrow.halves);
   EXPECT_FALSE(c.ok);
   EXPECT_TRUE(has_failure(c, "Q:", "outside"));
   EXPECT_FALSE(has_failure(c, "R0:", "outside"));
-  EXPECT_THROW(generate_domino_macro(pins("__lhd_domino_ab", 4), {4 + kAux, "DFFx1"}, in, 100), std::invalid_argument);
+  EXPECT_THROW(generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSyntheticCells, 0, in, 100), std::invalid_argument);
 }
 TEST(DominoGeometry, AccessFailuresNameThePinRowOrientationAndPhase) {
   const auto tech = synthetic();
   const auto in   = geometry_inputs(tech, "INVx1", kSyntheticRoute);
-  const auto g    = generate_domino_macro(pins("__lhd_domino_ab", 4), {4 + kAux, "DFFx1"}, in);
+  const auto g    = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSyntheticCells, 0, in);
   {
     // Off one x-phase's vertical track in the vertical-access row.
     auto m                         = g.macro;
@@ -349,7 +359,7 @@ TEST(DominoGeometry, OwnerConventionSelectsTheTemplateRows) {
   owner.even    = ph::Row_access::vertical;
   owner.odd     = ph::Row_access::horizontal;
   const auto in = geometry_inputs(tech, "INVx1", kSyntheticRoute, owner);
-  const auto g  = generate_domino_macro(pins("__lhd_domino_ab", 4), {4 + kAux, "DFFx1"}, in);
+  const auto g  = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSyntheticCells, 0, in);
   EXPECT_EQ(g.halves, (std::array{ph::Row_access::vertical, ph::Row_access::horizontal}));
   // Shape 0 (the RC point) moves to the horizontal-access local row 1.
   EXPECT_GE(g.macro.pins.at("R0").shapes[0].rect.yl, .27);
@@ -359,7 +369,7 @@ TEST(DominoGeometry, Sky130EngineRefusalIsUnverifiedNotPassed) {
   // The pin-access engine fails closed on sky130 mcon ENCLOSURE rules; the
   // vertical rule, outline and PG checks still run and pass.
   const auto in = geometry_inputs(sky130(), kInv, kSky130Route);
-  const auto g  = generate_domino_macro(pins("__lhd_domino_ab", 4), {4 + kAux, kDff1}, in);
+  const auto g  = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSky130Cells, 0, in);
   const auto c  = check_domino_access(in, g.macro, g.halves);
   EXPECT_FALSE(c.ok);
   EXPECT_TRUE(c.failures.empty()) << c.failures.front();
@@ -370,17 +380,19 @@ TEST(DominoGeometry, Sky130EngineRefusalIsUnverifiedNotPassed) {
 TEST(DominoGeometry, InvalidInputsThrow) {
   const auto tech = synthetic();
   const auto in   = geometry_inputs(tech, "INVx1", kSyntheticRoute);
-  EXPECT_THROW(generate_domino_macro(pins("m", 2), {6, "DFFx9"}, in), std::invalid_argument);
-  EXPECT_THROW(generate_domino_macro(pins("m", 2), {0, "DFFx1"}, in), std::invalid_argument);
-  EXPECT_THROW(generate_domino_macro(pins("m", 0), {6, "DFFx1"}, in), std::invalid_argument);
+  EXPECT_THROW(generate_domino_macro(pins("m", 2), pdn(2), cells("INVx1", {"DFFx9"}), 0, in), std::invalid_argument);
+  EXPECT_THROW(generate_domino_macro(pins("m", 2), pdn(0), cells("INVx1", {"DFFx1"}, 0), 0, in), std::invalid_argument);
+  EXPECT_THROW(generate_domino_macro(pins("m", 0), pdn(2), kSyntheticCells, 0, in), std::invalid_argument);
+  EXPECT_THROW(generate_domino_macro(pins("m", 2), pdn(2), kSyntheticCells, 3, in), std::invalid_argument);
+  EXPECT_THROW(generate_domino_macro(pins("m", 2), pdn(2), cells("INVx2", {"DFFx1"}), 0, in), std::invalid_argument);
   auto bad     = in;
   bad.inverter = "DFFx9";
-  EXPECT_THROW(generate_domino_macro(pins("m", 2), {6, "DFFx1"}, bad), std::invalid_argument);
+  EXPECT_THROW(generate_domino_macro(pins("m", 2), pdn(2), cells("DFFx9", {"DFFx1"}), 0, bad), std::invalid_argument);
   bad                = in;
   bad.vertical_layer = "M9";
-  EXPECT_THROW(generate_domino_macro(pins("m", 2), {6, "DFFx1"}, bad), std::invalid_argument);
+  EXPECT_THROW(generate_domino_macro(pins("m", 2), pdn(2), kSyntheticCells, 0, bad), std::invalid_argument);
   auto clash     = pins("m", 2);
   clash.rails[1] = "VDD";
-  EXPECT_THROW(generate_domino_macro(clash, {6, "DFFx1"}, in), std::invalid_argument);
+  EXPECT_THROW(generate_domino_macro(clash, pdn(2), kSyntheticCells, 0, in), std::invalid_argument);
 }
 }  // namespace livehd::domplace

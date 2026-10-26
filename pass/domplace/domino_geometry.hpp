@@ -6,29 +6,16 @@
 #include <string>
 #include <vector>
 
+#include "domino_reference.hpp"
 #include "inou/lefdef/physical.hpp"
 #include "inou/lefdef/row_access.hpp"
 #include "inou/lefdef/tech_profile.hpp"
+#include "physical_emission.hpp"
 
 namespace livehd::domplace {
 // Provisional two-row LEF abstracts for domino masters (2d-domplace C) and the
 // transformed pin-access check that F repeats on placed frames.
 //
-// Logical pins of one domino variant. Integration: C3a's domino_interface
-// (usyn::Physical_cell_interface) carries the same name, rails, clock, output.
-struct Domino_pins {
-  std::string              name;   // LEF macro = netlist decl, __lhd_domino_<h16>_v<k>_t0
-  std::vector<std::string> rails;  // R0..R{k-1} in physical rail order
-  std::string              clock = "CLK", output = "Q";
-};
-// A_domino(s) = x * A_NOT + A_register(s) with x = proxy_devices / 2, on the
-// LEF footprint (placement) basis: A_NOT is the reference inverter's footprint
-// and A_register(s) the drive variant's register footprint, charged once. Drive
-// variants share proxy_devices and differ only in register_cell.
-struct Domino_area_terms {
-  uint32_t    proxy_devices = 0;  // N_PDN + N_aux_nonregister
-  std::string register_cell;      // LEF macro of the variant's register
-};
 struct Geometry_inputs {
   const physical::Technology*     tech = nullptr;
   std::string                     inverter;        // named reference inverter: A_NOT, core SITE, PG rail pattern
@@ -62,9 +49,15 @@ struct Domino_variant_geometry {
 // pitch, or more when the strip plus spacing needs it. PG pins repeat the
 // inverter's edge rails at 0, H and 2H (bottom polarity at 0 and 2H) over the
 // full width; rail parity is not restricted (provisional model assumption).
+// A_domino(s) = x * A_NOT + A_register(s) with x = (N_PDN + aux) / 2 as in
+// domino_area, here on the LEF footprint (placement) basis: A_NOT is the
+// reference inverter's footprint and A_register(s) the footprint of
+// reference.registers[variant], charged once. Variants share the PDN term.
 // width_override (DBU, whole sites) keeps the layout unchanged so a narrow
-// width can be refused by check_domino_access. Invalid inputs throw.
-Domino_variant_geometry generate_domino_macro(const Domino_pins&, const Domino_area_terms&, const Geometry_inputs&,
+// width can be refused by check_domino_access. Invalid inputs, including a
+// reference inverter other than in.inverter, throw.
+Domino_variant_geometry generate_domino_macro(const usyn::Physical_cell_interface& cell, const usyn::Gate_formula::Metrics& pdn,
+                                              const Domino_reference& reference, size_t variant, const Geometry_inputs& in,
                                               std::optional<int64_t> width_override = {});
 struct Access_case {
   size_t                start_row     = 0;  // core row offset; parity per the convention
