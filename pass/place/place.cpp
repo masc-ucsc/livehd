@@ -596,7 +596,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     h = hash_text("macro-detail:false", h);
   }
   if (o.handoff_taps) {
-    h = hash_text("handoff-taps-asap7-v1", h);
+    h = hash_text("handoff-taps-v1", h);
   }
   if (o.pg != "none") {
     h = hash_text("native-pg-v1:" + o.pg, h);
@@ -3899,9 +3899,10 @@ void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, const O
   if (requested.handoff_taps) {
     // Physical-only well taps may occupy the macro placement halo; the standard
     // cells must still respect it. Every body is checked for real overlap below.
-    auto logical = fp;
-    std::erase_if(logical.components, [](const auto& c) {
-      return c.macro == "TAPCELL_ASAP7_75t_R" && (c.place.status == Status::FIXED || c.place.status == Status::LOCKED);
+    const auto& tap_master = placement_tech_profile(tech, requested).tap_master;
+    auto        logical    = fp;
+    std::erase_if(logical.components, [&](const auto& c) {
+      return c.macro == tap_master && (c.place.status == Status::FIXED || c.place.status == Status::LOCKED);
     });
     check_legality(tech, logical, x, y);
     check_legality(tech, fp, 0, 0);
@@ -4331,8 +4332,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (options.handoff_taps || options.satlegalize_route_vias || (options.pg != "none" && options.pg != "off")) {
     tech_profile = &placement_tech_profile(tech, options);
   }
-  if (options.handoff_taps && !tech.macros.contains("TAPCELL_ASAP7_75t_R")) {
-    throw std::invalid_argument("handoff taps currently require the ASAP7 TAPCELL_ASAP7_75t_R LEF master");
+  if (options.handoff_taps && !tech.macros.contains(tech_profile->tap_master)) {
+    throw std::invalid_argument("handoff taps require the " + tech_profile->name + " tap master in the LEF: "
+                                + tech_profile->tap_master);
   }
   if (!options.pg_channels.empty() && (options.pg == "none" || options.pg == "off")) {
     throw std::invalid_argument("PG channel patches require an enabled native power grid");
@@ -8168,17 +8170,17 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
       auto frame = sat_frame(v.design, false);
       if (options.handoff_taps) {
-        constexpr auto tap_master     = "TAPCELL_ASAP7_75t_R";
+        const auto&    tap_master     = tech_profile->tap_master;
         const auto&    master         = tech.macros.at(tap_master);
         const auto     original_count = frame.components.size();
         frame.rows                    = cut_macro_rows(frame,
                                     tech,
-                                    std::llround(2 * frame.dbu),
-                                    std::llround(2 * frame.dbu),
+                                    std::llround(tech_profile->tap_row_halo * frame.dbu),
+                                    std::llround(tech_profile->tap_row_halo * frame.dbu),
                                     std::llround(2 * master.width * frame.dbu));
         auto caps                     = row_endcaps(frame, tech, tap_master);
         frame.components.insert(frame.components.end(), caps.begin(), caps.end());
-        auto taps = row_taps(frame, tech, tap_master, std::llround(25 * frame.dbu));
+        auto taps = row_taps(frame, tech, tap_master, std::llround(tech_profile->tap_distance * frame.dbu));
         frame.components.insert(frame.components.end(), taps.begin(), taps.end());
         handoff_cells.assign(frame.components.begin() + original_count, frame.components.end());
         handoff_rows = frame.rows;
@@ -8209,9 +8211,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       if (options.handoff_taps) {
         std::ofstream report(options.output_dir + "/handoff_taps.json");
         report << std::format(
-            R"({{"schema_version":1,"profile":"asap7","rows":{},"fixed_components":{},"row_halo_um":2,"distance_um":25,"stage":"terminal_legalization","inner_block_cache":false}})",
+            R"({{"schema_version":1,"profile":"{}","rows":{},"fixed_components":{},"row_halo_um":{},"distance_um":{},"stage":"terminal_legalization","inner_block_cache":false}})",
+            tech_profile->name,
             handoff_rows.size(),
-            handoff_cells.size())
+            handoff_cells.size(),
+            tech_profile->tap_row_halo,
+            tech_profile->tap_distance)
                << '\n';
         if (!report) {
           throw std::runtime_error("cannot write handoff tap report");
@@ -9188,7 +9193,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       v.fp.rows = handoff_rows;
     }
     handoff_grid            = make_power_grid(tech, v.fp, *pg_profile, &handoff_channel_stats);
-    handoff_grid->terminals = handoff_pins(tech, *handoff_grid, "M4", "M5");
+    handoff_grid->terminals = handoff_pins(tech, *handoff_grid, tech_profile->io_pin_layers[0], tech_profile->io_pin_layers[1]);
     // Power terminals are appended only to the exported frame. The placement
     // and RC arrays continue to contain the original signal IO suffix.
     for (size_t i = 0; i < v.fp.terminals.size(); ++i) {

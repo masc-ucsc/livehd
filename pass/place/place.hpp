@@ -130,7 +130,7 @@ struct Options {
   // Internal lifecycle state: optimization trials need legal snapshots before
   // the mandatory final legalization. Never exposed as a user option.
   bool                              optimization_pending        = false;
-  bool                              handoff_taps                = false;   // ASAP7 fixed taps before terminal legalization
+  bool                              handoff_taps                = false;   // profile fixed taps before terminal legalization
   std::string                       pg                          = "none";  // opt-in native power-grid profile
   Region_options                    region;  // detail-final region mesh shared by busorder/boundarypins/pinalign
   Busorder_options                  busorder;

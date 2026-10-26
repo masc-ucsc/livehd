@@ -10,13 +10,14 @@ namespace livehd::placement {
 std::vector<physical::Row>       cut_macro_rows(const physical::Floorplan& frame, const physical::Technology& tech, int64_t halo_x,
                                                 int64_t halo_y, int64_t min_row_width);
 // Generate fixed left/right endcaps for single-height horizontal rows, using
-// one master for both edges (ASAP7 profile). Returned components are reservations
-// to insert BEFORE cell legalization. No top/bottom/corner master selection.
+// one master for both edges (Tech_profile::tap_master). Returned components are
+// reservations to insert BEFORE cell legalization. No top/bottom/corner master selection.
 // Names are deterministic LiveHD names, not OpenROAD's traversal-order indices.
 std::vector<physical::Component> row_endcaps(const physical::Floorplan& frame, const physical::Technology& tech,
                                              const std::string& master_name, const std::string& prefix = "LHD_ENDCAP_");
 // Insert interior taps after row cuts and endcap reservations. distance is the
-// OpenROAD tapcell distance in DBU (25um for ASAP7), not the staggered row pitch.
+// OpenROAD tapcell distance in DBU (Tech_profile::tap_distance), not the
+// staggered row pitch.
 // Supports a single site with N/FS rows; movable cells do not obstruct taps.
 std::vector<physical::Component> row_taps(const physical::Floorplan& frame, const physical::Technology& tech,
                                           const std::string& master_name, int64_t distance, const std::string& prefix = "LHD_TAP_");

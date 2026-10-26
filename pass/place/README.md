@@ -2703,7 +2703,8 @@ legalizer remainder warping remains an independent option.
 ### Fixed-wire handoff foundation
 
 `//pass/place:power_grid` contains the native metal-planning stage and the
-`pg_asap7` profile, transcribed from pinned ORFS profile data. `//tools:power_grid`
+`pg_asap7` strategy of the ASAP7 technology profile (`inou/lefdef/tech_profile.cpp`),
+transcribed from pinned ORFS profile data. `//tools:power_grid`
 reads repeated `--lef` inputs and `--def`, and writes a JSON metal plan with
 `--output`; `--profile` accepts `pg_asap7` or `auto`. It derives followpin widths
 and polarity from standard-cell PG pins and row orientations, merges shared
@@ -2893,9 +2894,11 @@ geometry. All generated endcap/tap components are locked internally and emitted
 as DEF `FIXED`. The audit tool does not enable the aligned handoff. Tap sites must be reserved before final cell
 legalization: inserting taps afterwards can overlap movable standard cells.
 
-`--set synth.place.handoff.taps=true` enables the ASAP7 tap preparation in a
-fresh final solve with terminal legalization. It uses `TAPCELL_ASAP7_75t_R`,
-25 µm tap distance, and 2 µm row-cut halos. Real fixed physical-only components
+`--set synth.place.handoff.taps=true` enables the technology profile's tap
+preparation in a fresh final solve with terminal legalization. The profile
+(`physical::Tech_profile`, detected from the LEF or named by `synth.place.pg`)
+supplies the tap master, tap distance and row-cut halo; ASAP7 uses
+`TAPCELL_ASAP7_75t_R`, 25 µm and 2 µm. Real fixed physical-only components
 are inserted into the terminal legalizer's frame, so cell legalization accounts
 for their occupied sites. They remain outside the logical graph and signal
 connectivity. Final DEFs and legalization snapshots include the cut rows and
@@ -3204,7 +3207,7 @@ as unowned obstacles, including portions outside the cell boundary. Polygon
 obstructions retain those bounds too. Iterated pin and obstruction geometry is
 rejected until its complete repetition extent can be modeled.
 
-`synth.place.preroute=true` invokes the initial ASAP7 pre-router after final
+`synth.place.preroute=true` invokes the initial pre-router after final
 placement and accepted repairs. It requires `synth.place.final=true`, timing,
 `synth.place.handoff.taps=true`, and a native power grid (`synth.place.pg=auto`
 or `asap7`; legacy `pg_asap7` remains accepted). The default remains disabled.
@@ -3242,7 +3245,8 @@ must be connected, and all new cuts are checked against each other. General
 multi-pin Steiner/maze routing and repeaters remain under development.
 
 `preroute.setup_margin` is 20 ps; `preroute.hold_margin=-1` computes two buffer
-delays. `preroute.hold_buffer=auto` selects ASAP7's `BUFx2_ASAP7_75t_R`, at
+delays. `preroute.hold_buffer=auto` selects the technology profile's hold
+buffer (ASAP7: `BUFx2_ASAP7_75t_R`), at
 `preroute.nominal_slew=20` ps and the buffer's own input capacitance (fanout one).
 Explicit nonnegative hold margins bypass this characterization. Eligibility
 checks timing on every connected data pin of each endpoint cell:

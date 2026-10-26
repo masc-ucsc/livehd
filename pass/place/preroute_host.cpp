@@ -75,7 +75,7 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
   std::string buffer_name;
   double      nominal_load = 0;
   if (cfg.hold_margin_ps < 0) {
-    buffer_name = cfg.hold_buffer == "auto" ? "BUFx2_ASAP7_75t_R" : cfg.hold_buffer;
+    buffer_name = cfg.hold_buffer == "auto" ? tech_profile.hold_buffer : cfg.hold_buffer;
     bool found  = false;
     for (const auto& cell : liberty::scan_comb_cells(options.liberty)) {
       if (cell.name != buffer_name) {
