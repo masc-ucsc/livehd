@@ -680,6 +680,22 @@ TEST_F(PassSynth, DominoProfileRequirementsAreExplicitUsageErrors) {
     EXPECT_FALSE(fs::exists(root + "/invalid")) << key;
     livehd::diag::sink().clear();
   }
+  // Without the profile, a domino option spelled at its listed default is
+  // the implicit default, not an error.
+  var.dict             = base;
+  var.dict["physical"] = "none";
+  for (const auto& [key, value] : {
+           std::pair{  "domino_select",  "area"},
+           std::pair{"domino_identity", "false"},
+           std::pair{     "domino_aux",     "4"},
+           std::pair{"domino_variants",     "3"}
+  }) {
+    var.dict[key] = value;
+  }
+  var.dict.erase("domino_clock");
+  run(var);
+  EXPECT_FALSE(livehd::diag::sink().has_halting_errors())
+      << (livehd::diag::sink().records().empty() ? "" : livehd::diag::sink().records().back().message);
 }
 
 TEST_F(PassSynth, FailedRunKeepsPreviousReportProvenance) {

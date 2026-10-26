@@ -65,16 +65,6 @@ struct Options {
   std::optional<double>            domino_eval_fo4, domino_precharge_fo4;  // unset: null in the bundle sidecar
 };
 
-constexpr std::string_view domino_options[] = {"domino_select",
-                                               "domino_identity",
-                                               "domino_clock",
-                                               "domino_inverter",
-                                               "domino_register",
-                                               "domino_aux",
-                                               "domino_variants",
-                                               "domino_eval_fo4",
-                                               "domino_precharge_fo4"};
-
 bool read_options(const Eprp_var& var, Options& options) {
   for (const auto key : obsolete) {
     if (!var.get_stage(key, "").empty()) {
@@ -364,8 +354,22 @@ bool read_options(const Eprp_var& var, Options& options) {
     return false;
   };
   if (options.physical == "none") {
-    for (const auto key : domino_options) {
-      if (!var.get_stage(key, "").empty()) {
+    // A domino option spelled at its listed default (as `lhd options` prints
+    // it) configures nothing; any other value needs the profile.
+    const Options                           defaults;
+    const std::pair<std::string_view, bool> moved[] = {
+        {       "domino_select",     options.domino.policy != defaults.domino.policy},
+        {     "domino_identity", options.domino.identity != defaults.domino.identity},
+        {        "domino_clock",                       !options.domino.clock.empty()},
+        {     "domino_inverter",                    !options.domino_inverter.empty()},
+        {     "domino_register",                    !options.domino_register.empty()},
+        {          "domino_aux",           options.domino_aux != defaults.domino_aux},
+        {     "domino_variants", options.domino_variants != defaults.domino_variants},
+        {     "domino_eval_fo4",                 options.domino_eval_fo4.has_value()},
+        {"domino_precharge_fo4",            options.domino_precharge_fo4.has_value()},
+    };
+    for (const auto& [key, differs] : moved) {
+      if (differs) {
         return profile_error(std::format("pass.usyn.{} needs pass.usyn.physical=domino_provisional", key),
                              "the domino options only configure the provisional physical profile");
       }
