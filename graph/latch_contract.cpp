@@ -2984,10 +2984,142 @@ int materialize_clock_cells(hhds::Graph* g, std::string_view from_pass, const st
   return done;
 }
 
+namespace {
+
+// The operand of a one-bit inversion, `EQ(x, 0)` (how a Liberty model spells
+// `!x`) or `Not(x)` on a one-bit x; invalid for anything else.
+hhds::Pin_class inverted_operand(const hhds::Pin_class& p) {
+  if (p.is_invalid() || p.is_const() || gu::is_graph_input_pin(p)) {
+    return {};
+  }
+  const auto n  = p.get_master_node();
+  const auto op = gu::type_op_of(n);
+  if (op != Ntype_op::EQ && op != Ntype_op::Not) {
+    return {};
+  }
+  hhds::Pin_class x;
+  int             values = 0;
+  bool            zero   = false;
+  for (auto sink : n.inp_sorted_pins()) {  // read-only walk
+    for (const auto& d : sink.get_driver_pins()) {
+      if (op == Ntype_op::EQ && d.is_const() && !zero) {
+        const auto& c = gu::const_of(d);
+        if (!c.has_unknowns() && c.is_just_i64() && c.to_just_i64() == 0) {
+          zero = true;
+          continue;
+        }
+      }
+      x = d;
+      ++values;
+    }
+  }
+  if (values != 1 || (op == Ntype_op::EQ && !zero) || x.is_const() || gu::bits_of(x) != 1) {
+    return {};
+  }
+  return x;
+}
+
+// A mapped clock gate reaches a clock sink spelled in inversions once its cells
+// are spliced: NAND2 + INV is `EQ(Or(EQ(clk,0), EQ(en_l,0)), 0)` in the gensim
+// models. That is `clk & en_l`, but the inline-gate matcher below only knows
+// the And form, so the gate stayed a derived clock on the netlist side while
+// the source side's gate became a Clock_cell (a false REFUTED on a gated clock
+// that crosses a definition port). Re-point each clock sink at the canonical
+// form: a double inversion is dropped, and an inverted Or of inversions becomes
+// the And of their operands (De Morgan). Semantics-preserving; the old cells
+// stay for any other reader.
+int canonicalize_inverted_clock_gates(hhds::Graph* g) {
+  std::vector<hhds::Pin_class> sinks;
+  for (auto n : g->body().nodes()) {
+    const auto op = gu::type_op_of(n);
+    if (op == Ntype_op::Flop || op == Ntype_op::Fflop) {
+      for (auto sink : n.inp_sorted_pins()) {  // read-only walk
+        if (static_cast<int>(sink.get_port_id()) == static_cast<int>(Ntype::get_sink_pid(op, "clock_pin"))) {
+          sinks.push_back(sink);
+        }
+      }
+      continue;
+    }
+    if (op != Ntype_op::Sub) {
+      continue;
+    }
+    auto def = n.get_subnode_graph();
+    auto sio = n.get_subnode_io();
+    if (!def || !sio) {
+      continue;
+    }
+    const auto cnames = clock_port_names(def.get(), 0);
+    if (cnames.empty()) {
+      continue;
+    }
+    absl::flat_hash_set<uint32_t> clk_pids;
+    for (const auto& d : sio->get_input_pin_decls()) {
+      if (cnames.contains(d.name)) {
+        clk_pids.insert(static_cast<uint32_t>(d.port_id));
+      }
+    }
+    for (auto sink : n.inp_sorted_pins()) {  // read-only walk
+      if (clk_pids.contains(static_cast<uint32_t>(sink.get_port_id()))) {
+        sinks.push_back(sink);
+      }
+    }
+  }
+  int done = 0;
+  for (const auto& sink : sinks) {
+    const auto      old = sink.get_driver_pin();
+    hhds::Pin_class d   = old;
+    for (int hops = 0; hops < 8; ++hops) {
+      const auto x = inverted_operand(d);
+      if (x.is_invalid()) {
+        break;
+      }
+      if (const auto y = inverted_operand(x); !y.is_invalid()) {
+        d = y;  // !!y
+        continue;
+      }
+      if (x.is_const() || gu::is_graph_input_pin(x) || gu::type_op_of(x.get_master_node()) != Ntype_op::Or) {
+        break;
+      }
+      std::vector<hhds::Pin_class> operands;
+      bool                         all_inverted = true;
+      for (auto osink : x.get_master_node().inp_sorted_pins()) {  // read-only walk
+        for (const auto& od : osink.get_driver_pins()) {
+          const auto y = inverted_operand(od);
+          if (y.is_invalid()) {
+            all_inverted = false;
+          }
+          operands.push_back(y);
+        }
+      }
+      if (!all_inverted || operands.size() < 2) {
+        break;
+      }
+      auto band = gu::create_typed_node(*g, Ntype_op::And);
+      for (const auto& y : operands) {
+        y.connect_sink(gu::setup_sink_pid(band, 0));
+      }
+      d = band.create_driver_pin(0);
+      gu::set_bits(d, 1);
+      gu::set_unsign(d);
+      break;
+    }
+    if (d == old) {
+      continue;
+    }
+    sink.del_sink(old);
+    d.connect_sink(sink);
+    ++done;
+  }
+  return done;
+}
+
+}  // namespace
+
 int materialize_inline_clock_gates(hhds::Graph* g, std::string_view from_pass) {
   if (g == nullptr) {
     return 0;
   }
+  canonicalize_inverted_clock_gates(g);
   // 1. Every clock SINK (a register's clock_pin, a child's clock port) whose
   //    driver, through 1-bit identity wrappers, is a recognized inline gate.
   //    Collected first: the rewrite below mutates edges.

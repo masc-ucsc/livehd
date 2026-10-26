@@ -2963,6 +2963,20 @@ sh_test(
 # test enable, a Liberty ICG, a gate in a wrapped definition) convert on the
 # root clock with the enable as a data input, dropped gates and sequential LEC;
 # the stack, definition-port and inverted cases retain with their reasons.
+# Plain USYN on gated clocks whose gate and registers sit in different
+# definitions (NVDLA's negedge-flop CKLNQD12, a latch gate through a port): the
+# mapped netlists prove and a gate moved to the other phase refutes.
+sh_test(
+    name = "lhd_lec_gated_clock_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_lec_gated_clock_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
 sh_test(
     name = "lhd_domplace_gates_smoke",
     size = "small",
