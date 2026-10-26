@@ -9,6 +9,9 @@
 
 #include "dreamplace/native/uroute_weights.hpp"
 
+namespace DreamPlace::native {
+struct Options;
+}
 namespace livehd::placement {
 struct Uroute_options {
   std::string dir             = "@pretrained";
@@ -27,6 +30,8 @@ struct Uroute_selection {
   std::string                                              skipped, cache_identity;
   std::string                                              manifest_sha256, weights_sha256;
   std::vector<std::string>                                 sample_ids;
+  // Hand the selected context, its identity and any skip reason to a solve.
+  void                                                     apply(DreamPlace::native::Options&) const;
 };
 // Read-only immutable manifest/weight snapshot. Unknown or unusable data is
 // reported through select(). Invalid option ranges are configuration errors.

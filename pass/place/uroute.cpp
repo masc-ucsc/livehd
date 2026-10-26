@@ -286,6 +286,11 @@ Uroute_pool::Uroute_pool(Uroute_options options) {
     d->samples.clear();
   }
 }
+void Uroute_selection::apply(dp::Options& options) const {
+  options.uroute          = context;
+  options.uroute_identity = cache_identity;
+  options.uroute_skipped  = skipped;
+}
 const std::string& Uroute_pool::cache_identity() const { return data_->identity; }
 const std::string& Uroute_pool::skipped() const { return data_->skipped; }
 Uroute_selection   Uroute_pool::select(const dp::UrouteMaps& query, const Uroute_identity& id) const {

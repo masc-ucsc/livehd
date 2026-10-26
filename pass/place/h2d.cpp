@@ -232,10 +232,8 @@ Macro_run place_macros(dp::Design& d, const std::vector<mp::NodeInfo>& info, con
       out.result.resolved                 = p;
       out.result.legal                    = true;
       out.result.placement.route_model    = active;
-      out.result.placement.uroute_skipped = o.uroute_context_skipped;
-      if (o.uroute_context) {
-        out.result.placement.uroute_sample_ids = o.uroute_context->sample_ids();
-      }
+      out.result.placement.uroute_skipped    = o.uroute_selection.skipped;
+      out.result.placement.uroute_sample_ids = o.uroute_selection.sample_ids;
       if (json.HasMember("route_probe_overflow") && json["route_probe_overflow"].IsNumber()) {
         out.result.placement.route_probe_overflow = json["route_probe_overflow"].GetDouble();
       }
@@ -256,9 +254,7 @@ Macro_run place_macros(dp::Design& d, const std::vector<mp::NodeInfo>& info, con
   dp::Options cells;
   cells.route            = resolve_route_policy(o, o.macro_route);
   cells.route_initialize = initialize_route_tables;
-  cells.uroute           = o.uroute_context;
-  cells.uroute_identity  = o.uroute_context_identity;
-  cells.uroute_skipped   = o.uroute_context_skipped;
+  o.uroute_selection.apply(cells);
   if (o.uroute.export_features && cells.route.probe && !o.uroute_stage_identity.top.empty()) {
     cells.route_probe_observer = [&](const dp::Design& physical, int nx, int ny) {
       export_uroute(fs::path(o.output_dir) / "uroute_export/macro_probe",

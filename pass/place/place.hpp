@@ -213,9 +213,8 @@ struct Options {
   Stage_route fp_route, macro_route, final_route;
   Uroute_options uroute;
   // Internal immutable snapshot supplied to the H2D host adapter.
-  std::shared_ptr<const DreamPlace::native::UrouteContext> uroute_context;
-  std::string                                              uroute_context_identity, uroute_context_skipped;
-  Uroute_identity                                          uroute_stage_identity;
+  Uroute_selection uroute_selection;
+  Uroute_identity  uroute_stage_identity;
   int         route_degree = 40, route_accuracy = 3;
   bool        routability_charge_compensation = true;
   double      routability_macro_weight = 1, routability_macro_range = 2;  // direct channel pressure; range in bins

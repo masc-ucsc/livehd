@@ -5281,10 +5281,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       } else {
         macro_uroute = uroute_data->select({}, {});
       }
-      resolved.uroute_context           = macro_uroute.context;
-      resolved.uroute_context_identity  = macro_uroute.cache_identity;
-      resolved.uroute_context_skipped   = macro_uroute.skipped;
-      identity                         += ":uroute-selection:" + macro_uroute.cache_identity + ":" + macro_uroute.skipped;
+      resolved.uroute_selection  = macro_uroute;
+      identity                  += ":uroute-selection:" + macro_uroute.cache_identity + ":" + macro_uroute.skipped;
     }
     macro_run              = place_macros(v.design, macro_report_info, *hierarchy, resolved, identity);
     macro_solved           = !macro_run->cache_hit;
@@ -5558,9 +5556,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   control.route
       = route_policy(options, options.completed_stage == Placement_stage::macro ? options.macro_route : options.final_route);
   control.route_initialize = initialize_flute_tables;
-  control.uroute           = selected_uroute.context;
-  control.uroute_identity  = selected_uroute.cache_identity;
-  control.uroute_skipped   = selected_uroute.skipped;
+  selected_uroute.apply(control);
   if (resolved_uroute.export_features && control.route.probe) {
     const auto stage             = options.completed_stage == Placement_stage::macro ? "macro_probe" : "final_probe";
     control.route_probe_observer = [&, stage](const dp::Design& physical, int nx, int ny) {
@@ -9879,11 +9875,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     // Net and pin CSR order is invariant under cell-array permutation.
     macro_report_design.pin_offset_x       = v.design.pin_offset_x;
     macro_report_design.pin_offset_y       = v.design.pin_offset_y;
-    auto report_options                    = options;
-    report_options.uroute_context          = macro_uroute.context;
-    report_options.uroute_context_identity = macro_uroute.cache_identity;
-    report_options.uroute_context_skipped  = macro_uroute.skipped;
-    write_macro_report(*macro_run, macro_report_design, macro_report_info, report_options, tech.dbu);
+    write_macro_report(*macro_run, macro_report_design, macro_report_info, options, tech.dbu);
   } else if (!options.timing_seed) {
     std::error_code error;
     fs::remove(options.output_dir + "/macro_topology.json", error);
