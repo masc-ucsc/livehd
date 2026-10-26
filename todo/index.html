@@ -13,44 +13,23 @@
 <ul>
 <li><a href="livehd/1f-fixes.html">1f-fixes</a> — <strong>high priority</strong>, plan drafted 2026-10-26, not implemented: placer CPU time and QoR parity with OpenROAD on the HighTide asap7 pre-CTS benchmark (minimax 6 387 s vs 100 s CPU, HPWL +125 %); measured causes: 446 full STA evaluations (88 % of runtime), per-checkpoint Liberty rescans, GP never allowed to converge, cold-restart timing rounds, internal timing target inconsistent with the SDC, bare-GP wirelength gap; ablations show the physical stage without the timing loops costs 10–25 s; tied to 2t-timeclosure (the legacy loop measured here is what 2t replaces; reuses its late_timing / rc_cache / row-adapter foundations)</li>
 <li><a href="livehd/llvm-native-runtime.html">llvm-native-runtime</a> — in progress: direct packed-state objects and a shared runtime without per-design C++ compilation</li>
-<li><a href="livehd/llvm-native-colors.html">llvm-native-colors</a> — independent LLVM simulation objects, memory semantics, and benchmark results</li>
 <li><a href="livehd/synth-unate.html">synth-unate</a> — shared unate pass, interchangeable tmap and the later domino backend; U0 completion gates remain open</li>
-<li><a href="livehd/test-consolidation.html">test-consolidation</a> — fixture migration, shared LEC budgets, restored runtime checks, and coverage evidence</li>
-<li><a href="livehd/2a-aegraph.html">2a-aegraph</a> — acyclic e-graph cprop alternative behind <code>compile.cprop.engine</code>: A/B harness vs classic, declarative <code>.rules</code> DSL with generated tests/proofs, synth/sim cost profiles, per-literal <code>?</code> choices with an LEC certificate (plan draft; rulings Q1–Q5 decided 2026-10-15)</li>
-<li><a href="livehd/2b-boundary.html">2b-boundary</a> — partition-boundary loads/drivers/budgets for pass.abc (landed; SDC at the top, re-map on miss, DFF rung, QoR sweep open)</li>
-<li><a href="livehd/2c-color-synthcones.html">2c-color-synthcones</a></li>
-<li><a href="livehd/2c-cvc5.html">2c-cvc5</a> — M0–M5 implemented: source-built cvc5, fresh LEC profiles and shared job admission; platform validation and broader tuning pending</li>
-<li><a href="livehd/2c-fpcolor.html">2c-fpcolor</a> — implemented and evaluated locally: post-synthesis macro-centered placement colors, pipeline-local area reservation, hierarchy centroid leaves and ordered IO adjustment during FP</li>
-<li><a href="livehd/2d-cones-qor.html">2d-cones-qor</a> — synthesis QoR optimization with control cones retained; full ASAP7/Sky130 refresh pending</li>
 <li><a href="livehd/2d-domplace.html">2d-domplace</a> — reviewed plan: one domino phase, inverter-proxy plus drive-specific register area, variant-specific widths, row-aware pin geometry, half-cycle timing and double-height placement/legalization/ECO with staged estimates; routing policy owned elsewhere, two-phase support deferred</li>
-<li><a href="livehd/2f-latch.html">2f-latch</a></li>
 <li><a href="livehd/2f-simqa.html">2f-simqa</a></li>
-<li><a href="livehd/2i-import.html">2i-import</a></li>
-<li><a href="livehd/2is-incsynth.html">2is-incsynth</a> — future plan: placement-aware incremental color resynthesis; per-color IO delays and wire_load saved by each placement stage, criticality-triggered whole-color remap from the mapped netlist, once per run then user-driven iterations (rulings decided 2026-10-19)</li>
+<li><a href="livehd/2is-incsynth.html">2is-incsynth</a> — placement-stage timing feedback, remap and single-restart orchestration implemented; end-to-end QoR evaluation and architecture reselection pending</li>
 <li><a href="livehd/2m-multiport_mem.html">2m-multiport_mem</a></li>
-<li><a href="livehd/2m-magnet.html">2m-magnet</a> — planned opt-in iterative macro magnetization during macro_plan: settle-gated rounds merge equal-shape macro pairs with sparse gaps into rigid single-node groups; two-halo internal spacing; coexists with alignment force and snap</li>
+<li><a href="livehd/2m-magnet.html">2m-magnet</a> — rigid macro-group contraction, expansion and motion tracking implemented; evaluation and deferred grouping extensions remain</li>
 <li><a href="livehd/2p-piper.html">2p-piper</a></li>
-<li><a href="livehd/2p-plan.html">2p-plan</a> — placement issues found through OpenROAD inspection; pending: local ties, IO/clock-pin placement, buffer recovery and weight refresh, timing-aware final legalization, and opt-in satlegalize with incremental CryptoMiniSat/CaDiCaL evaluation on CNN and Eyeriss</li>
-<li><a href="livehd/2s-satopt.html">2s-satopt</a> — standalone graph simplification, signature-guided constant/equivalence sweeping, and shallow ODC constants with observable checks preserved</li>
+<li><a href="livehd/2p-plan.html">2p-plan</a> — placement and legalization changes implemented and evaluated; large-design routing and timing acceptance follow-ups remain</li>
 <li><a href="livehd/2t-timeclosure.html">2t-timeclosure</a> — implementation plan for a single-threaded GP timing proxy, early virtual buffering and gap reservations, stability gates, and phase-7 buffering/sizing; optional resynthesis and post-route hold milestones</li>
-<li><a href="livehd/2u-usyn.html">2u-usyn</a> — register-rooted USYN redesign: endpoint DominoLatch selection, bounded XAG analysis, local/shared optimization and typed netlist handoff; N = ASAP7 vs ABC evaluation in ../lhdtrack (plan draft)</li>
-<li><a href="livehd/2w-warpspace.html">2w-warpspace</a> — standalone density-warp prototype landed; planned opt-in FP centroid shifts before snap and periodically refreshed per-memory pull anchors during macro placement</li>
-<li><a href="livehd/3f-parallel_comp.html">3f-parallel_comp</a></li>
+<li><a href="livehd/2w-warpspace.html">2w-warpspace</a> — shared density-warp engine and opt-in FP/macro hooks implemented; integrated QoR validation and follow-up experiments remain</li>
 <li><a href="livehd/3g-partitions.html">3g-partitions</a> — implemented 2026-10-25 except the SAT Capacity_bins port (ruling R5) and step 7: one vocabulary for placement partitions — <strong>grid</strong> (GP force fields: density/route/local), <strong>region</strong> (detail-final macro/IO-aligned blocks ≤10K cells, shared by busorder/boundarypins/pinalign), <strong>bin</strong> (legalization capacity cells; terminal on Capacity_bins, SAT pending R5); extract Region_mesh, Capacity_bins, Cell_criticality; option renames with deprecated aliases; docs/placer.html updated</li>
-<li><a href="tuneup.html">tuneup</a> — recommended LiveHD options and pre-CTS WNS/TNS/cells/HPWL against OpenROAD for each HighTide asap7 benchmark</li>
-<li><a href="livehd/3p-placement.html">3p-placement</a> — pending: independent QoR/scaling validation, Steiner repair quality, broader floorplans and RC, optimizer/incremental reuse, cone extensions and macro placement; soft color macros unscheduled</li>
-<li><a href="livehd/3r-route.html">3r-route</a> — future plan: RSMT-RUDY (FLUTE) congestion estimator selectable per placement stage; Rudy first, one-way switch to RSMT-RUDY at a congestion level, optional fast global router later</li>
-<li><a href="livehd/3s-terminal-legalize.html">3s-terminal-legalize</a> — opt-in final legalization: critical locks, SAT pin alignment, hard bin capacity and whitespace; four-design routing evaluation</li>
-<li><a href="livehd/3u-uroute.html">3u-uroute</a> — plan ruled 2026-10-24, not implemented: few-shot learned congestion prediction (URoute, TCAD 2026) as the third routability rung rudy→rsmt→uroute in final GP, probe-only in FP/macro; LiveHD exports features and reads a per-project data directory, an external PyTorch script ingests fully routed OpenROAD results and trains; hand-rolled C++ inference in the DREAMPlace sibling</li>
-<li><a href="livehd/3x-reroute.html">3x-reroute</a> — plan ruled 2026-10-23, not implemented: LiveHD emits cut rows, taps/endcaps and the power grid (hardcoded generator + per-technology pg_asap7/pg_sky130 profiles, ruled 2026-10-23) with optional signal channels through upper power metal, so the handoff needs no re-legalization, then pre-routes standard-cell nets as FIXED wiring; OpenROAD keeps CTS, repair, routing of the rest and grid checks</li>
-<li><a href="livehd/4c.html">4c</a></li>
-<li><a href="livehd/4f-fluid-lec.html">4f-fluid-lec</a></li>
-<li><a href="livehd/domino.html">domino</a> — the gate model and rail model for pass.usyn, then the domino backend; P0..P2 landed, P3..P6 pending</li>
-<li><a href="pyrope/3f-bitpack.html">3f-bitpack</a></li>
+<li><a href="livehd/3r-route.html">3r-route</a> — opt-in RSMT-RUDY feedback implemented; full routed evaluation and settled-placement timing follow-up remain</li>
+<li><a href="livehd/3s-terminal-legalize.html">3s-terminal-legalize</a> — final terminal legalization enabled by default; tuning and acceptance under the intended routing-platform constraints remain</li>
+<li><a href="livehd/3u-uroute.html">3u-uroute</a> — native model, placement integration and trainer implemented; dataset admission, general latency targets and routed quality validation remain</li>
+<li><a href="livehd/3x-reroute.html">3x-reroute</a> — opt-in handoff and pre-routing APIs implemented; power-grid, broader routing coverage and independent full-design acceptance remain</li>
 <li><a href="pyrope/3f-fluid.html">3f-fluid</a></li>
-<li><a href="pyrope/3f-macro.html">3f-macro</a></li>
-<li><a href="pyrope/3f-temporal.html">3f-temporal</a></li>
-<li><a href="pyrope/4b.html">4b</a></li>
+<li><a href="livehd/legalize_acyclic.md">legalize_acyclic</a> — acyclic repair landed; consumer cleanup and cross-boundary propagation follow-ups remain</li>
 </ul>
 </main>
 <footer>LiveHD TODO</footer>

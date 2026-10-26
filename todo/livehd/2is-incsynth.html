@@ -34,12 +34,12 @@ ABC is the only mapper in scope; usyn is a follow-on (I8).</p>
 
 <h2>Depends on</h2>
 <p>Nothing outstanding must finish first. It builds on three landed pieces:
-<a class="xref" href="2b-boundary.html">2b-boundary</a> (the per-region
+<a href="../../pass/abc/README.md">ABC partition-boundary support</a> (the per-region
 <code>SC_Bnd</code> environment: per-PI driver/arrival, per-PO load/virtual delay;
 <code>pass/abc/abc_boundary.hpp</code>), the incremental region cache
 (<code>pass/synth/region_cache.hpp</code>, one row per region module
 <code>&lt;top&gt;__c&lt;color&gt;</code> under <code>&lt;workdir&gt;/abc_cache</code>) and
-the staged native placement of <a class="xref" href="3p-placement.html">3p-placement</a>
+the staged native placement of <a href="../../pass/place/README.md">native placement</a>
 (<code>placement::place()</code> runs FP+macro as one <code>place_single</code> and the
 final cells as a second one). The placed-cone resynthesis
 (<code>synth.place.resynth</code>, <code>resynthesize_cones</code>) stays as is: it

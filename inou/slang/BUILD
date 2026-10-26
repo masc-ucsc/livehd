@@ -124,6 +124,20 @@ sh_test(
     data = glob(["tests/filelist/*"]) + ["//lhd"],
 )
 
+# Unpacked aggregate layout is checked against independent scalar RTL.
+sh_test(
+    name = "slang_unpacked_struct_layout",
+    srcs = ["tests/unpacked_struct_layout.sh"],
+    data = ["tests/sv/unpacked_struct_nested.sv", "tests/sv/unpacked_struct_oob.sv", "//lhd"],
+)
+
+# Behavioral RAMs retain Memory nodes through module instantiation.
+sh_test(
+    name = "slang_null_port_memory_structure",
+    srcs = ["tests/null_port_memory.sh"],
+    data = ["tests/sv/null_port_memory.v", "//lhd"],
+)
+
 # Unknown-module (blackbox) policy: without a user --ignore-unknown-modules
 # the compile fails cleanly; with it, unknown instances become blackbox
 # sub-instances the pyrope emission imports, and supplying their .prp
@@ -370,7 +384,7 @@ test_suite(
     tests = [":slang_" + src.split("/")[-1].rsplit(".", 1)[0] for src in _SV_SOURCES] + [":" + name for name in _SV_REJECT_SETS],
 )
 
-# Opt-in vendor-bundle compatibility labels: `compile.slang.translate_off` and
+# Vendor-bundle compatibility labels: `compile.slang.translate_off` (default true) and
 # `compile.slang.ignore_uninstantiated_modules` (NVDLA's generated vmod tree).
 sh_test(
     name = "slang_vendor_bundle_options",

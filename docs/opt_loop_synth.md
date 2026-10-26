@@ -456,7 +456,7 @@ is a hard cut point. Minion at 9 regions is a coarse partition of a whole core.
   than a size-triggered rewrite, and `min_ge` no longer doubles as an inline
   threshold.)
 - **W1.4 `mode=pipe` vs `synth` vs `cones`.** Measure; it is a one-flag
-  experiment. `cones` (todo/livehd/2c-color-synthcones.html) decides region SIZE
+  experiment. `cones` (see [synthesis coloring](../pass/color/README.md)) decides region SIZE
   while it decides region SHAPE: one backward cone per register `din` and per
   register `enable`, ranked and merged by how much logic the cones share, capped
   by `max_gate` in *predicted generic-AIG size* rather than in synthesis GE.

@@ -1,7 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 // CONE-SEEDED synthesis coloring -- `pass.color synth --set pass.color.synth.mode=cones`
-// (todo/livehd/2c-color-synthcones.html).
+// (see pass/color/README.md).
 //
 // The shape, in one paragraph. Seed one BACKWARD cone per register data input
 // and one per register enable (plus one per memory port, per stateful instance,
@@ -96,7 +96,7 @@ constexpr uint32_t kPidUpdateEn = 13;
 [[nodiscard]] constexpr bool is_mem_port_off(uint32_t off) { return off == kPidAddr || off == kPidDin || off == kPidEnable; }
 [[nodiscard]] constexpr bool is_mem_whole_array_off(uint32_t off) { return off == kPidUpdate || off == kPidUpdateEn; }
 
-// Phase-2 forward merge (todo/livehd/2c-color-synthcones.html, forward option).
+// Phase-2 forward merge (pass.color.synth.forward).
 // `pair` ranks one (register color, ONE consumer color) candidate at a time;
 // `all` ranks the register against the WHOLE qualifying Q fanout at once and
 // fires only if every one of those colors fits. Which is better is an open

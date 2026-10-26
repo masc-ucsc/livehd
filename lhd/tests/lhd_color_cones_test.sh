@@ -2,7 +2,7 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # End-to-end test for `pass.color synth --set pass.color.synth.mode=cones`
-# (todo/livehd/2c-color-synthcones.html): the cone-seeded coloring reaches
+# (see pass/color/README.md): the cone-seeded coloring reaches
 # pass.partition and pass.abc through the real CLI, and what comes out the far
 # end still computes the same function.
 #

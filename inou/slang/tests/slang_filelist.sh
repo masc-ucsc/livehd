@@ -54,5 +54,28 @@ ${LHD} lec --set formal.effort=proof --impl verilog:"$WD"/all.v --ref verilog:"$
   exit 1
 }
 
+# Bazel canonical repository directories contain literal plus signs. Both
+# nested command files and raw arguments must retain those directory names.
+SPECIAL="$PWD/$WD/space dir/+_repo_rules+cells"
+mkdir -p "$SPECIAL" "$WD/inc_a" "$WD/inc_b"
+printf "%s\n" "\`define VALUE_A 8'h35" > "$SPECIAL/value.svh"
+printf "%s\n" "\`define VALUE_B 8'hCA" > "$WD/inc_b/other.svh"
+cat > "$WD/plus.sv" <<'SV'
+`include "value.svh"
+`include "other.svh"
+module plus(output [7:0] y);
+assign y = `VALUE_A ^ `VALUE_B;
+endmodule
+SV
+printf '"+incdir+%s"\n+incdir+%s+%s\n%s\n' "$SPECIAL" "$PWD/$WD/inc_a" "$PWD/$WD/inc_b" "$PWD/$WD/plus.sv" > "$WD/inner.f"
+printf -- '-f "%s"\n' "$PWD/$WD/inner.f" > "$WD/outer.f"
+${LHD} compile --top plus --workdir "$WD/plus_work" --emit verilog:"$WD/plus.v" \
+  -- -f "$WD/outer.f" > "$WD/plus.log" 2>&1 || { cat "$WD/plus.log"; exit 1; }
+cat > "$WD/plus_gold.v" <<'SV'
+module plus(output [7:0] y); assign y = 8'hff; endmodule
+SV
+${LHD} lec --impl "$WD/plus.v" --ref "$WD/plus_gold.v" --top plus \
+  --set formal.effort=proof --workdir "$WD/plus_lec" -q > "$WD/plus_lec.log" 2>&1 \
+  || { cat "$WD/plus_lec.log"; exit 1; }
 echo "PASS(filelist)"
 exit 0

@@ -556,6 +556,25 @@ private:
   std::vector<std::shared_ptr<Lnast>>                                                ordered_lnasts_;
   absl::flat_hash_set<const slang::ast::ValueSymbol*>                                simulation_only_vars_;
 
+  // --ignore-unknown-modules: ONE typed, body-less stub per missing module.
+  // The interface is the UNION over every instance of its connected ports
+  // (an unconnected `.p()` in one instance is not a different module) at the
+  // widest connected width; only a port inferred both input and output is a
+  // conflict. pick_lnast writes the merged ports into each stub's io.
+  struct Unknown_port {
+    bool is_out    = false;
+    int  bits      = 0;
+    bool is_signed = false;
+  };
+  struct Unknown_interface {
+    std::shared_ptr<Lnast>                         stub;
+    std::vector<std::string>                       order;  // first-seen port order
+    absl::flat_hash_map<std::string, Unknown_port> ports;
+    bool                                           single_out_bound = false;  // some call bound its lone output directly
+  };
+  absl::flat_hash_map<std::string, Unknown_interface> unknown_interfaces_;
+  void                                                fill_unknown_stubs();
+
   // ── per-module state ───────────────────────────────────────────────────────
   // Lives in Slang_module_state (the private base) so lower_module can swap it
   // as ONE unit around a recursive submodule lowering.
@@ -1161,11 +1180,12 @@ private:
     int  bits      = 0;
     bool is_signed = false;
   };
+  static bool        bit_layout_type(const slang::ast::Type& t);
+  static int64_t     field_bit_offset(const slang::ast::Type& t, const slang::ast::FieldSymbol& field);
+  // Width/sign of a type. A fixed hardware aggregate (unpacked array/struct of
+  // integral leaves) reports its FLAT bitstream width, unsigned -- the packed
+  // bus an unpacked-array port or unpacked struct lowers to.
   static Tinfo       tinfo(const slang::ast::Type& t);
-  // Like tinfo, but a fixed-size unpacked array of integral elements reports
-  // its FLAT packed width (elem_bits * count, unsigned) — the representation an
-  // unpacked-array port lowers to. Other types fall through to tinfo.
-  static Tinfo       flat_or_tinfo(const slang::ast::Type& t);
   void               emit_prim_type_int(const Lnast_nid& parent, int bits, bool is_signed);
   // Pyrope literals for the max/min value of a `bits`-wide integer of the given
   // sign: 2^(bits-1)-1 / -2^(bits-1) signed, 2^bits-1 / 0 unsigned.

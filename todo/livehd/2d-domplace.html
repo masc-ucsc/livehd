@@ -15,8 +15,8 @@ netlist, place two-row domino cells, and measure stage timing with an explicit
 provisional model. Deliver reproducible placement experiments before a real
 domino cell builder and characterized LEF/Liberty exist.</p>
 <p><span class="status">Reviewed plan — 2026-10-25; implementation pending</span>
-Based on <a href="usyn_domino_placement_plan.md">the supplied pre-plan</a> and
-the current working-tree interfaces. One domino evaluation phase is confirmed
+This page incorporates and supersedes the supplied pre-plan, using the
+current interfaces. One domino evaluation phase is confirmed
 for v1: one terminal domino gate plus its output latch per converted stage,
 with earlier logic in CMOS. Two domino phases are future work. The estimates
 cover this scope and distinct variant widths derived from the confirmed
@@ -29,11 +29,11 @@ below. This page does not approve changes to existing user-visible defaults.</p>
 
 <h2>Depends on</h2>
 <ul>
-<li><a class="xref" href="2u-usyn.html">2u-usyn</a> supplies the implemented
+<li><a href="../../pass/usyn/README.md">USYN</a> supplies the implemented
 <code>Gate_formula</code>, endpoint selection, frozen netlist and source-state
 correspondence. Physical emission and the restricted selection policy belong
 here; the rest of the USYN roadmap is not a prerequisite.</li>
-<li><a class="xref" href="3p-placement.html">3p-placement</a> supplies physical
+<li><a href="../../pass/place/README.md">native placement</a> supplies physical
 netlist import, native DREAMPlace GP, legalization, RC and DEF export. Reuse
 these interfaces and extend their two-row handling.</li>
 <li><a class="xref" href="2t-timeclosure.html#B">2t-timeclosure B–C</a> supplies

@@ -99,8 +99,25 @@ The sources may come entirely from the file list, so a positional
 `verilog:`/`*.v` input is optional in that case (`files` and the raw flags are
 both accepted; at least one must supply sources). lhd hands the args to
 `inou.slang` as the `slang_flags` label (`\x1f`-separated so shell tokens like
-`+incdir+a,b` survive). Covered by `tests/slang_filelist.sh`
+`+incdir+a,b` survive). An existing `+incdir+PATH` directory is treated literally,
+including `+` characters in Bazel canonical repository names. Otherwise the
+standard `+incdir+dir1+dir2` list syntax applies; `-I PATH` is unambiguous. Covered by `tests/slang_filelist.sh`
 (`bazel test //inou/slang:slang_filelist`).
+
+Fixed unpacked structs with integral leaves lower to a deterministic bitstream
+layout (declaration order, most significant field first). Nested structs, fixed
+arrays inside them, whole copies, field writes, and typed module connections
+share that layout. Dynamic array selectors retain bounds checks and signed
+fields retain their signed interpretation. Dynamic containers and non-hardware
+leaves such as strings still require a diagnostic.
+
+`--ignore-unknown-modules` retains missing definitions as typed, opaque graph
+interfaces using the existing port-direction inference. The interface is the
+union of every instance's connected ports at the widest connected width; a port
+inferred as both input and output, or a lone connected output on one instance
+while another connects more, is rejected. This does **not** infer memory behavior from SRAM
+names: include the behavioral SRAM `.v` models in the file list to obtain
+LGraph `Memory` nodes. A Liberty-only macro remains an opaque physical cell.
 
 ## File map (CIRCT ImportVerilog-shaped split)
 
@@ -389,12 +406,12 @@ pass `-- --ignore-uninstantiated-modules` or `--set compile.slang.ignore_uninsta
 (the form a flow that cannot append raw slang arguments uses). This opts into Slang's existing
 `IgnoreUninstantiatedModules` policy; syntax errors and semantic errors within the
 selected hierarchy remain errors. Vendor RTL that hides simulation-only code between
-`// synopsys translate_off` and `// synopsys translate_on` (the `synthesis` spelling too,
-with or without a space after `//`) needs `--set compile.slang.translate_off=true`, which
-enables slang's `--translate-off-format` for both spellings; an unclosed region is still an
-error. Both are covered by `//inou/slang:slang_vendor_bundle_options`. The separate upstream argument
-`--allow-use-before-declare` supports legacy declaration ordering. Both are explicit
-compatibility choices; the frontend's strict defaults are unchanged.
+`// synopsys translate_off` and `// synopsys translate_on` (the `synthesis` and `pragma` spellings too,
+with or without a space after `//`) is excluded by default, matching synthesis semantics.
+`--set compile.slang.translate_off=false` keeps that text for parsing and lowering instead.
+The default enables slang's `--translate-off-format` for all three spellings; an unclosed
+region is still an error. Explicit raw `--translate-off-format` arguments replace this list. Both are covered by `//inou/slang:slang_vendor_bundle_options`. The separate upstream argument
+`--allow-use-before-declare` supports legacy declaration ordering. Ignoring uninstantiated modules and allowing use before declaration remain opt-in.
 Unfinished reference RTL that must not even be parsed belongs inside a Verilog
 `` `ifndef SYNTHESIS `` guard. Define it explicitly with `-- -DSYNTHESIS=1`.
 The HighTide run uses both that define and `--ignore-uninstantiated-modules`.

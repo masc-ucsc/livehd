@@ -1538,6 +1538,9 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
   for (const auto& p : body.getPortList()) {
     if (p->kind == SymbolKind::Port) {
       const auto& port = p->as<slang::ast::PortSymbol>();
+      if (port.isNullPort) {
+        continue;  // A trailing comma is an empty port, not a hardware signal.
+      }
       if (!port.name.empty() && !seen_port_names.insert(port.name).second) {
         continue;
       }
@@ -1561,7 +1564,7 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
       int      io_bits       = 0;
       bool     io_signed     = false;
       Mem_info flat_mi;
-      if (!type.isIntegral()) {
+      if (!type.isIntegral() && !(type.isStruct() && bit_layout_type(type))) {
         const auto& ct = type.getCanonicalType();
         if (ct.kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
           const auto& arr  = ct.as<slang::ast::FixedSizeUnpackedArrayType>();
@@ -3484,7 +3487,7 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
       return;
     }
   }
-  if (!type.isIntegral()) {
+  if (!type.isIntegral() && !(type.isStruct() && bit_layout_type(type))) {
     emit_unsupported(sym.location,
                      "unsupported-var-type",
                      std::string("variable '") + std::string(sym.name) + "' has a non-integral type");
@@ -3569,7 +3572,7 @@ void Slang_context::declare_value_symbol(const slang::ast::ValueSymbol& sym, boo
     declare_struct_leaves(sym);
     return;
   }
-  if (!type.isIntegral()) {
+  if (!type.isIntegral() && !(type.isStruct() && bit_layout_type(type))) {
     emit_unsupported(sym.location,
                      "unsupported-var-type",
                      std::string("variable '") + std::string(sym.name) + "' has a non-integral type");
@@ -3686,6 +3689,12 @@ bool Slang_context::is_scalar_struct_var(const slang::ast::ValueSymbol& sym) con
 }
 
 bool Slang_context::classify_scalar_struct_var(const slang::ast::ValueSymbol& sym) const {
+  // A procedural block-local struct has one lifetime inside its branch. Keep
+  // its packed value together: dotted leaf declarations/poison stores escape
+  // the branch merge as dynamic tuple stores instead of scalar hardware.
+  if (const auto* scope = sym.getParentScope(); scope && scope->asSymbol().kind == SymbolKind::StatementBlock) {
+    return false;
+  }
   // Ports are already flat (CIRCT/firtool flattens struct ports to scalars), and
   // a clocked struct keeps the existing flat-reg-bus path; only a comb/wire/mut
   // scalar packed struct becomes a per-field bundle.
@@ -8018,21 +8027,6 @@ void Slang_context::lower_ff_process(const slang::ast::SignalEventControl& clock
   proc_kind_ = Proc_kind::none;
 }
 
-Slang_context::Tinfo Slang_context::flat_or_tinfo(const slang::ast::Type& t) {
-  const auto& ct = t.getCanonicalType();
-  if (!ct.isIntegral() && ct.kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
-    const auto& arr  = ct.as<slang::ast::FixedSizeUnpackedArrayType>();
-    const auto& elem = arr.elementType.getCanonicalType();
-    if (elem.isIntegral() && !elem.isUnpackedArray()) {
-      Tinfo r;
-      r.bits      = tinfo(elem).bits * static_cast<int>(arr.range.width());
-      r.is_signed = false;
-      return r;
-    }
-  }
-  return tinfo(t);
-}
-
 // The source spelling of ONE element of an arrayed instantiation.
 //
 // slang expands `foo u[3:0](...)` into four NAMELESS InstanceSymbols inside an
@@ -8255,7 +8249,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
       // A peeled Conversion may change the flat WIDTH (packed casts are
       // bit-pattern-preserving, so equal width means offsets line up); the
       // leaf routing below is offset-based, so gate on width equality.
-      if (pe->kind == ExpressionKind::NamedValue && flat_or_tinfo(*pe->type).bits == flat_or_tinfo(bport.getType()).bits) {
+      if (pe->kind == ExpressionKind::NamedValue && tinfo(*pe->type).bits == tinfo(bport.getType()).bits) {
         const auto& asym     = pe->as<slang::ast::NamedValueExpression>().symbol;
         auto        emit_arg = [&](const Struct_info::Field& tf, const std::string& v) {
           in_args.emplace_back(absl::StrCat(bport.name, ".", tf.name), v);
@@ -8289,8 +8283,8 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
     }
     if (!done) {  // (c) generic: lower the actual flat, slice per field (always correct)
       auto v  = to_int_value(lower_rvalue(*aexpr));
-      auto pi = flat_or_tinfo(bport.getType());
-      auto ei = flat_or_tinfo(*aexpr->type);
+      auto pi = tinfo(bport.getType());
+      auto ei = tinfo(*aexpr->type);
       v       = materialize_conversion(v, ei.bits, ei.is_signed, pi.bits, pi.is_signed, value_width(*aexpr));
       auto p  = to_pattern(v, pi.bits, pi.is_signed);
       for (const auto& f : pfields) {
@@ -8333,7 +8327,10 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
                        std::string("instance '") + std::string(inst.name) + "' connects an unsupported port kind");
       return;
     }
-    const auto& port   = conn->port.as<slang::ast::PortSymbol>();
+    const auto& port = conn->port.as<slang::ast::PortSymbol>();
+    if (port.isNullPort) {
+      continue;
+    }
     if (!port.name.empty() && !seen_port_names.insert(port.name).second) {
       continue;
     }
@@ -8344,8 +8341,8 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
       while (actual->kind == ExpressionKind::Conversion && actual->as<slang::ast::ConversionExpression>().isImplicit()) {
         actual = &actual->as<slang::ast::ConversionExpression>().operand();
       }
-      const auto width = flat_or_tinfo(port.getType()).bits;
-      if (flat_or_tinfo(*actual->type).bits > width && value_width(*actual).value_or(width + 1) > width) {
+      const auto width = tinfo(port.getType()).bits;
+      if (tinfo(*actual->type).bits > width && value_width(*actual).value_or(width + 1) > width) {
         if (!options_.liberty_allow_truncation) {
           emit_unsupported(inst.location,
                            "liberty-memory-port-truncation",
@@ -8387,7 +8384,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
           build_bundle_actual(port, nullptr);  // appends one named arg per leaf
           clear_pending_loc();
         } else {
-          auto        ti = flat_or_tinfo(port.getType());
+          auto        ti = tinfo(port.getType());
           // unconnected input reads x (compile.slang.unconnected_input=zero|one: that constant)
           std::string qmarks(static_cast<size_t>(ti.bits), options_.unconnected_input == 'x' ? '?' : options_.unconnected_input);
           // A Verilog escaped identifier may contain dots (`\\io_in.field `).
@@ -8413,8 +8410,8 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
     } else {
       set_pending_loc(expr->sourceRange);
       auto v  = to_int_value(lower_rvalue(*expr));
-      auto pi = flat_or_tinfo(port.getType());
-      auto ei = flat_or_tinfo(*expr->type);
+      auto pi = tinfo(port.getType());
+      auto ei = tinfo(*expr->type);
       v       = materialize_conversion(v, ei.bits, ei.is_signed, pi.bits, pi.is_signed, value_width(*expr));
       clear_pending_loc();
       in_args.emplace_back(ref_name_of_raw(port.name), v);
@@ -8499,7 +8496,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
           pe = &pe->as<slang::ast::ConversionExpression>().operand();
         }
         bool routed = false;
-        if (pe->kind == ExpressionKind::NamedValue && flat_or_tinfo(*pe->type).bits == flat_or_tinfo(oc.port->getType()).bits) {
+        if (pe->kind == ExpressionKind::NamedValue && tinfo(*pe->type).bits == tinfo(oc.port->getType()).bits) {
           const auto& asym      = pe->as<slang::ast::NamedValueExpression>().symbol;
           bool        noted     = false;
           auto        note_once = [&]() {
@@ -8551,8 +8548,8 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
         }
         acc = acc.empty() ? placed : builder_.create_bit_or_stmts({acc, placed});
       }
-      auto pi = flat_or_tinfo(oc.port->getType());
-      auto ei = flat_or_tinfo(*oc.expr->type);
+      auto pi = tinfo(oc.port->getType());
+      auto ei = tinfo(*oc.expr->type);
       assign_to(*oc.expr,
                 materialize_conversion(acc.empty() ? std::string{"0"} : acc, pi.bits, pi.is_signed, ei.bits, ei.is_signed));
       continue;
@@ -8568,8 +8565,8 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
       ln.add_child(tg, Lnast_node::create_const(oc.port->name));
       v = t;
     }
-    auto pi = flat_or_tinfo(oc.port->getType());
-    auto ei = flat_or_tinfo(*oc.expr->type);
+    auto pi = tinfo(oc.port->getType());
+    auto ei = tinfo(*oc.expr->type);
     // An output port bound to a bundle-declared struct var (ExeUnitImp_4/
     // VSetRiWvf `_vsetModule_io_out`) is split onto the per-field leaves
     // inside assign_to (assign_struct_whole_value) — a flat store would be
@@ -8642,6 +8639,56 @@ void Slang_context::lower_unknown_instance(const slang::ast::UninstantiatedDefSy
       clear_pending_loc();
       in_args.emplace_back(std::string(pname), v);
     }
+  }
+
+  // Keep the same inferred interface in the graph flow. An external import
+  // alone is enough for source export, but tolg needs a typed, body-less unit.
+  // The stub is queued now (callee before caller) and its io is written at
+  // pick_lnast, once every instance has contributed its connected ports.
+  auto [itf_it, inserted] = unknown_interfaces_.try_emplace(callee);
+  auto& itf               = itf_it->second;
+  if (inserted) {
+    itf.stub = std::make_shared<Lnast>(callee);
+    itf.stub->set_lambda_kind("mod");
+    itf.stub->set_verilog_origin(true);
+    itf.stub->set_blackbox(true);
+    ordered_lnasts_.push_back(itf.stub);
+  }
+  for (size_t i = 0; i < conns.size(); ++i) {
+    const auto* expr = unknown_conn_expr(conns[i]);
+    if (!expr) {
+      continue;  // unconnected here; another instance may still connect it
+    }
+    const bool        is_out = i < conn_is_out.size() && conn_is_out[i];
+    const auto        ti     = tinfo(*expr->type);
+    const std::string name(names[i]);
+    auto [port_it, fresh] = itf.ports.try_emplace(name, Unknown_port{is_out, ti.bits, ti.is_signed});
+    if (fresh) {
+      itf.order.push_back(name);
+      continue;
+    }
+    auto& p = port_it->second;
+    if (p.is_out != is_out) {
+      emit_unsupported(inst.location,
+                       "unknown-module-interface",
+                       "inconsistent inferred direction for port '" + name + "' of unknown module '" + callee + "'",
+                       "provide a module declaration with explicit port directions and widths");
+      return;
+    }
+    p.bits      = std::max(p.bits, ti.bits);
+    p.is_signed = p.is_signed && ti.is_signed;
+  }
+  // A lone connected output binds the call result itself (single_out below),
+  // which is only right while the stub has exactly one output.
+  itf.single_out_bound = itf.single_out_bound || outs.size() == 1;
+  const auto n_outs    = std::count_if(itf.ports.begin(), itf.ports.end(), [](const auto& kv) { return kv.second.is_out; });
+  if (itf.single_out_bound && n_outs > 1) {
+    emit_unsupported(inst.location,
+                     "unknown-module-interface",
+                     "unknown module '" + callee
+                         + "' is instantiated with a single connected output and, elsewhere, with more outputs",
+                     "connect the same outputs on every instance, or provide a module declaration");
+    return;
   }
 
   auto& ln = *builder_.lnast;

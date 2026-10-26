@@ -1,7 +1,7 @@
 //  This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
 // The cone-seeded synthesis coloring, `pass.color synth --set pass.color.synth.mode=cones`
-// (todo/livehd/2c-color-synthcones.html). Every test below pins one of the
+// (see pass/color/README.md). Every test below pins one of the
 // rulings the algorithm is built on, so a change that breaks one is a change to
 // the design and not to an implementation detail.
 //

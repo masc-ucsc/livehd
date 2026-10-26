@@ -28,7 +28,7 @@
 // per-def coloring.
 //
 // The DEFAULT mode, `cones`, lives behind the same class and the same --set
-// (todo/livehd/2c-color-synthcones.html). It inverts the walk: instead of
+// (see pass/color/README.md). It inverts the walk: instead of
 // propagating an id forward from every comb node, it seeds one BACKWARD cone per
 // register data input (and one per enable), lets cones record how much logic
 // they share, and merges the most-sharing pairs while the union stays under a

@@ -95,3 +95,21 @@ diff --git source/ast/Expression.cpp source/ast/Expression.cpp
                  break;
  
              for (auto op : concat.operands()) {
+
+diff --git source/util/CommandLine.cpp source/util/CommandLine.cpp
+--- source/util/CommandLine.cpp
++++ source/util/CommandLine.cpp
+@@ -611,3 +611,13 @@
++    // An existing include directory can itself contain '+' (Bazel canonical
++    // repository names do). Prefer that literal directory to the legacy list
++    // interpretation. Missing paths and ordinary +dir1+dir2 lists retain the
++    // standard parser behavior; -I remains the unambiguous spelling.
++    std::error_code pathError;
++    if (arg == "+incdir" && fs::is_directory(fs::path(value), pathError)) {
++        option->set(arg, value, options.ignoreDuplicates, loc);
++        return;
++    }
++
+     do {
+         std::string_view curr = value;
+         idx = value.find_first_of('+');

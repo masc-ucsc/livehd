@@ -12,9 +12,47 @@
 #include "slang/ast/types/AllTypes.h"
 #include "slang_context.hpp"
 
+// Fixed hardware aggregates have a deterministic internal bitstream layout:
+// declaration order from MSB to LSB, including unpacked array elements.
+// Reject dynamic and non-hardware leaves rather than inventing a width.
+bool Slang_context::bit_layout_type(const slang::ast::Type& t) {
+  const auto& ct = t.getCanonicalType();
+  if (ct.isIntegral()) {
+    return true;
+  }
+  if (ct.kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
+    return bit_layout_type(ct.as<slang::ast::FixedSizeUnpackedArrayType>().elementType);
+  }
+  if (ct.kind == slang::ast::SymbolKind::UnpackedStructType) {
+    for (const auto& f : ct.as<slang::ast::UnpackedStructType>().membersOfType<slang::ast::FieldSymbol>()) {
+      if (!bit_layout_type(f.getType())) {
+        return false;
+      }
+    }
+    return ct.getBitstreamWidth() > 0;
+  }
+  return false;
+}
+
+int64_t Slang_context::field_bit_offset(const slang::ast::Type& t, const slang::ast::FieldSymbol& field) {
+  const auto& ct = t.getCanonicalType();
+  if (ct.isIntegral()) {
+    return static_cast<int64_t>(field.bitOffset);
+  }
+  int64_t off = static_cast<int64_t>(ct.getBitstreamWidth());
+  for (const auto& f : ct.as<slang::ast::UnpackedStructType>().membersOfType<slang::ast::FieldSymbol>()) {
+    off -= tinfo(f.getType()).bits;
+    if (&f == &field) {
+      return off;
+    }
+  }
+  I(false);
+  return 0;
+}
+
 Slang_context::Tinfo Slang_context::tinfo(const slang::ast::Type& t) {
   Tinfo ti;
-  ti.bits      = static_cast<int>(t.getBitWidth());
+  ti.bits      = static_cast<int>(bit_layout_type(t) ? t.getBitstreamWidth() : t.getBitWidth());
   ti.is_signed = t.isSigned();
   if (ti.bits <= 0) {
     ti.bits = 1;  // non-numeric types reach here only on already-diagnosed paths
