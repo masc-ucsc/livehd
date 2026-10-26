@@ -43,7 +43,9 @@ struct Physical_state {
   std::vector<Physical_rail>  rails;         // pin order: gate_rails(metrics) over the cofactored inputs
   uint32_t                    cell     = 0;  // index into Physical_emission::cells (domino only)
   // Liberty-basis area estimates for the report, not placement footprints.
-  double                      a_domino = 0, a_rail_not = 0, a_cmos = 0;
+  // a_cmos is priced only under select=area; absent means not computed.
+  double                      a_domino = 0, a_rail_not = 0;
+  std::optional<double>       a_cmos;
 };
 
 struct Physical_emission {

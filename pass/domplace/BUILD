@@ -134,3 +134,36 @@ cc_test(
         "@hhds//hhds:core",
     ],
 )
+
+# Post-freeze physical choice: domino stage or retained CMOS+DFF per state.
+cc_library(
+    name = "physical_select",
+    srcs = ["physical_select.cpp"],
+    hdrs = ["physical_select.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":contract",
+        ":domino_cell",
+        ":domino_reference",
+        ":physical_eligibility",
+        "//pass/usyn:native_cost",
+        "//pass/usyn:usyn_logic",
+        "//pass/usyn:usyn_semantic",
+    ],
+)
+
+cc_test(
+    name = "physical_select_test",
+    size = "small",
+    srcs = ["physical_select_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":physical_select",
+        "//pass/usyn:native_cost",
+        "//pass/usyn:usyn_logic",
+        "//pass/usyn:usyn_semantic",
+        "@googletest//:gtest_main",
+    ],
+)
