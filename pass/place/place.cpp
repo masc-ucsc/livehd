@@ -358,6 +358,12 @@ int64_t macro_halo(double microns, int64_t dbu, int64_t pitch) {
   }
   return static_cast<int64_t>(value);
 }
+// Process policy for these options: an enabled native power grid names the
+// technology profile explicitly; otherwise it is detected from the LEF.
+static const ph::Tech_profile& placement_tech_profile(const ph::Technology& tech, const Options& options) {
+  const bool pg = options.pg != "none" && options.pg != "off";
+  return ph::resolve_tech_profile(tech, pg ? std::string_view(options.pg) : std::string_view("auto"));
+}
 std::string environment_key(const Options& o, const ph::Technology& tech) {
   uint64_t h = kPlaceSalt;
   for (const auto& path : o.lefs) {
@@ -596,7 +602,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     h = hash_text("macro-detail:false", h);
   }
   if (o.handoff_taps) {
-    h = hash_text("handoff-taps-v1", h);
+    h = hash_text("handoff-taps-v1:" + placement_tech_profile(tech, o).name, h);
   }
   if (o.pg != "none") {
     h = hash_text("native-pg-v1:" + o.pg, h);
@@ -3885,12 +3891,6 @@ void check_placed_legality(const Result& result, const Options& options) {
     align_memory_proxy_pins(tech, result.floorplan);
   }
   check_legality(tech, result.floorplan, final_cell_options(options));
-}
-// Process policy for these options: an enabled native power grid names the
-// technology profile explicitly; otherwise it is detected from the LEF.
-static const ph::Tech_profile& placement_tech_profile(const ph::Technology& tech, const Options& options) {
-  const bool pg = options.pg != "none" && options.pg != "off";
-  return ph::resolve_tech_profile(tech, pg ? std::string_view(options.pg) : std::string_view("auto"));
 }
 void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, const Options& requested) {
   const auto options = resolve_macro_halo(requested, fp.rows.empty() ? 0 : tech.sites.at(fp.rows.front().site).height);
