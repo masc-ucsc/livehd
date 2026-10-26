@@ -340,7 +340,7 @@ Domino_variant_geometry generate_domino_macro(const usyn::Physical_cell_interfac
   if (reg == tech.macros.end()) {
     refuse("register is absent from LEF: " + register_cell);
   }
-  const auto proxy_devices = int64_t(pdn.transistors) + reference_cells.aux_nonregister;
+  const auto proxy_devices = domino_proxy_devices(pdn, reference_cells);
   if (proxy_devices == 0 || pins.name.empty() || pins.rails.empty()) {
     refuse("a domino master needs a name, rails and proxy devices: " + pins.name);
   }

@@ -123,7 +123,7 @@ std::optional<Domino_reference> resolve_domino_reference(const std::string& libe
 
 Domino_area domino_area(const usyn::Gate_formula::Metrics& metrics, const Domino_reference& reference, size_t variant) {
   Domino_area area;
-  area.x          = (static_cast<double>(metrics.transistors) + reference.aux_nonregister) / 2;
+  area.x          = static_cast<double>(domino_proxy_devices(metrics, reference)) / 2;
   area.a_not      = reference.inverter.area;
   area.a_register = reference.registers.at(variant).area;
   area.a_domino   = area.x * area.a_not + area.a_register;

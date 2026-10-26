@@ -43,13 +43,20 @@ struct Domino_reference {
 std::optional<Domino_reference> resolve_domino_reference(const std::string& liberty_files, std::string_view inverter,
                                                          std::string_view reg, uint32_t aux, uint32_t variants, std::string* why);
 
+// 2x = N_PDN + aux, the one rule behind the inverter-equivalent count x: the
+// literal devices of the formula (metrics.transistors, repeats included) and
+// the domino-only devices outside the register. Integral, so a basis area times
+// it stays exact.
+inline int64_t domino_proxy_devices(const usyn::Gate_formula::Metrics& metrics, const Domino_reference& reference) {
+  return int64_t{metrics.transistors} + reference.aux_nonregister;
+}
+
 struct Domino_area {
   double x = 0, a_not = 0, a_register = 0, a_domino = 0;
 };
-// A_domino = x * A_NOT + A_register(variant), x = (N_PDN + aux) / 2 where
-// N_PDN = metrics.transistors (literal devices, repeated occurrences included)
-// and aux counts the domino-only devices outside the register. The PDN term is
-// shared by every variant; the drive changes only the register area.
+// A_domino = x * A_NOT + A_register(variant), x = domino_proxy_devices / 2, on
+// the Liberty basis. The PDN term is shared by every variant; the drive
+// changes only the register area.
 Domino_area domino_area(const usyn::Gate_formula::Metrics& metrics, const Domino_reference& reference, size_t variant);
 
 }  // namespace livehd::domplace

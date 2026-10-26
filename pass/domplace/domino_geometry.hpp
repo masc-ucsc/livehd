@@ -55,8 +55,8 @@ struct Domino_variant_geometry {
 // pitch, or more when the strip plus spacing needs it. PG pins repeat the
 // inverter's edge rails at 0, H and 2H (bottom polarity at 0 and 2H) over the
 // full width; rail parity is not restricted (provisional model assumption).
-// A_domino(s) = x * A_NOT + A_register(s) with x = (N_PDN + aux) / 2 as in
-// domino_area, here on the LEF footprint (placement) basis: A_NOT is the
+// A_domino(s) = x * A_NOT + A_register(s) with 2x = domino_proxy_devices, as
+// in domino_area, here on the LEF footprint (placement) basis: A_NOT is the
 // reference inverter's footprint and A_register(s) the footprint of
 // reference.registers[variant], charged once. Variants share the PDN term.
 // width_override (DBU, whole sites) keeps the layout unchanged so a narrow
