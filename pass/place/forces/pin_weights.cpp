@@ -53,19 +53,18 @@ void Pin_weight_bank::clear() {
   epoch.reset();
 }
 Pin_weights Pin_weight_bank::update(const late::Result& timing) {
-  const auto                       objective = proxy_objective(timing, settings.objective);
-  const auto&                      g         = *timing.feasible_graph;
-  std::vector<double>              graph(timing.pins.size()), path(timing.pins.size());
-  std::vector<size_t>              driver(timing.pins.size(), absent);
-  std::vector<char>                declaration_direction(timing.pins.size(), 3);
-  std::vector<std::vector<size_t>> incoming(g.vertices.size());
-  size_t                           related_output_path_arcs = 0;
+  const auto          objective = proxy_objective(timing, settings.objective);
+  const auto&         g         = *timing.feasible_graph;
+  std::vector<double> graph(timing.pins.size()), path(timing.pins.size());
+  std::vector<size_t> driver(timing.pins.size(), absent);
+  std::vector<char>   declaration_direction(timing.pins.size(), 3);
+  const auto          incoming                 = incoming_arcs(g);
+  size_t              related_output_path_arcs = 0;
   for (size_t i = 0; i < g.arcs.size(); ++i) {
     const auto& arc  = g.arcs[i];
     const auto& from = g.vertices[arc.from];
     const auto& to   = g.vertices[arc.to];
     require(from.domain == to.domain, "timing arc crosses launch domains");
-    incoming[arc.to].push_back(i);
     if (arc.wire) {
       require(driver[to.pin] == absent || driver[to.pin] == from.pin, "multiple physical timing drivers");
       driver[to.pin]  = from.pin;
@@ -122,35 +121,13 @@ Pin_weights Pin_weight_bank::update(const late::Result& timing) {
     std::optional<hhds::Node_class> pending_owner;
     while (true) {
       require(++steps <= g.vertices.size(), "cycle in native worst predecessor path");
-      const auto&                      v = g.vertices[vertex];
-      std::optional<late::Predecessor> pred;
-      if (timing.domains.empty()) {
-        pred = timing.pins[v.pin].transitions[v.transition].predecessor;
-      } else {
-        pred = timing.domains[v.domain].pins[v.pin][v.transition].predecessor;
-      }
-      if (!pred) {
-        require(v.boundary_arrival_ps.has_value(), "native worst path has no launch boundary");
+      const auto& v      = g.vertices[vertex];
+      const auto  chosen = worst_predecessor_arc(timing, objective, incoming, vertex);
+      if (!chosen) {
         require(!pending_owner, "related-output path contribution has no influencing physical input before launch boundary");
         break;
       }
-      size_t chosen = absent;
-      for (size_t i : incoming[vertex]) {
-        const auto& arc  = g.arcs[i];
-        const auto& from = g.vertices[arc.from];
-        if (from.pin != pred->pin || from.transition != pred->transition) {
-          continue;
-        }
-        const double expected = objective.arrivals[arc.from] + arc.delay_ps;
-        if (std::abs(expected - objective.arrivals[vertex]) > std::max(1e-9, std::abs(expected) * 1e-12)) {
-          continue;
-        }
-        if (chosen == absent || arc.delay_ps > g.arcs[chosen].delay_ps) {
-          chosen = i;
-        }
-      }
-      require(chosen != absent, "native worst predecessor has no matching feasible arc");
-      const auto&  arc          = g.arcs[chosen];
+      const auto&  arc          = g.arcs[*chosen];
       const auto   source       = g.vertices[arc.from].pin;
       const double contribution = std::max(arc.delay_ps, 0.) * reciprocal * reciprocal;
       if (arc.wire) {
@@ -189,10 +166,7 @@ Pin_weights Pin_weight_bank::update(const late::Result& timing) {
   }
   const double graph_max     = *std::max_element(graph.begin(), graph.end());
   const double path_max      = *std::max_element(path.begin(), path.end());
-  const auto   current_epoch = std::tuple{timing.topology_generation,
-                                        timing.model_generation,
-                                        timing.characterized_boundary_policy,
-                                        timing.bounded_boundary_policy};
+  const auto   current_epoch = timing_epoch(timing);
   const bool   reset         = epoch && *epoch != current_epoch;
   Pin_weights  result;
   result.objective                = settings.objective;

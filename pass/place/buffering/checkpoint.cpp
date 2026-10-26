@@ -3,7 +3,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <limits>
 #include <tuple>
 
 #include "checks.hpp"
@@ -16,11 +15,8 @@ bool close(double a, double b) {
   return std::isfinite(a) && std::isfinite(b) && std::abs(a - b) <= std::max(1e-9, 1e-12 * std::max(std::abs(a), std::abs(b)));
 }
 std::set<std::string> worst_drivers(const late::Result& timing, const timeclosure::Period_objective& objective) {
-  const auto&                      g = *timing.feasible_graph;
-  std::vector<std::vector<size_t>> incoming(g.vertices.size());
-  for (size_t i = 0; i < g.arcs.size(); ++i) {
-    incoming[g.arcs[i].to].push_back(i);
-  }
+  const auto&           g        = *timing.feasible_graph;
+  const auto            incoming = timeclosure::incoming_arcs(g);
   std::set<std::string> result;
   for (size_t v = 0; v < g.vertices.size(); ++v) {
     if (!g.vertices[v].endpoint_required_ps) {
@@ -33,25 +29,11 @@ std::set<std::string> worst_drivers(const late::Result& timing, const timeclosur
     size_t at = v, steps = 0;
     while (true) {
       require(++steps <= g.vertices.size(), "cycle in checkpoint critical path");
-      const auto& vertex = g.vertices[at];
-      const auto  pred   = timing.domains.empty() ? timing.pins[vertex.pin].transitions[vertex.transition].predecessor
-                                                  : timing.domains[vertex.domain].pins[vertex.pin][vertex.transition].predecessor;
-      if (!pred) {
-        require(vertex.boundary_arrival_ps.has_value(), "critical path has no launch boundary");
+      const auto chosen = timeclosure::worst_predecessor_arc(timing, objective, incoming, at);
+      if (!chosen) {
         break;
       }
-      size_t chosen = std::numeric_limits<size_t>::max();
-      for (size_t arc : incoming[at]) {
-        const auto& edge = g.arcs[arc];
-        const auto& from = g.vertices[edge.from];
-        if (from.pin == pred->pin && from.transition == pred->transition && from.domain == vertex.domain
-            && close(objective.arrivals[edge.from] + edge.delay_ps, objective.arrivals[at])
-            && (chosen == std::numeric_limits<size_t>::max() || edge.delay_ps > g.arcs[chosen].delay_ps)) {
-          chosen = arc;
-        }
-      }
-      require(chosen != std::numeric_limits<size_t>::max(), "critical path lacks current feasible predecessor");
-      const auto& arc = g.arcs[chosen];
+      const auto& arc = g.arcs[*chosen];
       if (arc.wire) {
         result.insert(timing.pins[g.vertices[arc.from].pin].name);
       }
@@ -317,10 +299,7 @@ Checkpoint_result prepare_checkpoint(const Checkpoint_input& input, const Checkp
   result.outside_nets     = demand.outside_nets;
   result.missing_contexts = demand.missing_contexts;
   Checkpoint_state next{Site_reservations(problem.sites)};
-  next.epoch     = {.topology                      = input.timing.topology_generation,
-                    .timing_model                  = input.timing.model_generation,
-                    .characterized_boundary_policy = input.timing.characterized_boundary_policy,
-                    .bounded_boundary_policy       = input.timing.bounded_boundary_policy};
+  next.epoch     = timeclosure::timing_epoch(input.timing);
   next.iteration = input.iteration;
   if (original) {
     require(original->iteration < input.iteration && original->epoch == next.epoch,

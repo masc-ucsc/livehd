@@ -4,7 +4,6 @@
 #include <map>
 #include <optional>
 #include <string>
-#include <tuple>
 #include <utility>
 
 #include "pass/place/objective/proxy_bridge.hpp"
@@ -41,9 +40,9 @@ struct Pin_weights {
 // Missing/inconsistent worst predecessors and unsupported timing are errors.
 // Copy the bank with a retained placement to snapshot/rollback multiplier state.
 class Pin_weight_bank {
-  Pin_weight_settings                                       settings;
-  std::optional<std::tuple<uint64_t, uint64_t, bool, bool>> epoch;
-  std::map<std::string, Pin_weight>                         previous;
+  Pin_weight_settings               settings;
+  std::optional<Objective_epoch>    epoch;
+  std::map<std::string, Pin_weight> previous;
 
 public:
   explicit Pin_weight_bank(Pin_weight_settings settings = {});

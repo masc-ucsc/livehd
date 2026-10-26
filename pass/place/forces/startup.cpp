@@ -119,11 +119,8 @@ Startup_weights startup_path_weights(const late::Result& timing, double fraction
   }
   const auto                             objective = proxy_objective(timing);
   const auto&                            g         = *timing.feasible_graph;
+  const auto                             incoming  = incoming_arcs(g);
   std::vector<std::pair<double, size_t>> endpoints;
-  std::vector<std::vector<size_t>>       incoming(g.vertices.size());
-  for (size_t i = 0; i < g.arcs.size(); ++i) {
-    incoming[g.arcs[i].to].push_back(i);
-  }
   for (size_t i = 0; i < g.vertices.size(); ++i) {
     if (g.vertices[i].endpoint_required_ps) {
       endpoints.emplace_back(objective.arrivals[i] + *g.reference_period_ps - *g.vertices[i].endpoint_required_ps, i);
@@ -136,8 +133,6 @@ Startup_weights startup_path_weights(const late::Result& timing, double fraction
   result.supported = true;
   result.endpoints = endpoints.size();
   result.selected  = std::min(endpoints.size(), size_t(std::ceil(fraction * endpoints.size())));
-  const auto close
-      = [](double a, double b) { return std::abs(a - b) <= std::max(1e-9, 1e-12 * std::max(std::abs(a), std::abs(b))); };
   for (size_t i = 0; i < result.selected; ++i) {
     std::vector<size_t> wires;
     size_t              at = endpoints[i].second, steps = 0;
@@ -145,31 +140,13 @@ Startup_weights startup_path_weights(const late::Result& timing, double fraction
       if (++steps > g.vertices.size()) {
         throw std::invalid_argument("cycle in startup timing path");
       }
-      const auto& v    = g.vertices[at];
-      const auto  pred = timing.domains.empty() ? timing.pins[v.pin].transitions[v.transition].predecessor
-                                                : timing.domains.at(v.domain).pins.at(v.pin)[v.transition].predecessor;
-      if (!pred) {
-        if (!v.boundary_arrival_ps) {
-          throw std::invalid_argument("startup timing path lacks launch boundary");
-        }
+      const auto chosen = worst_predecessor_arc(timing, objective, incoming, at);
+      if (!chosen) {
         break;
       }
-      size_t chosen = std::numeric_limits<size_t>::max();
-      for (size_t id : incoming[at]) {
-        const auto& arc  = g.arcs[id];
-        const auto& from = g.vertices[arc.from];
-        if (from.pin == pred->pin && from.transition == pred->transition && from.domain == v.domain
-            && close(objective.arrivals[arc.from] + arc.delay_ps, objective.arrivals[at])
-            && (chosen == std::numeric_limits<size_t>::max() || arc.delay_ps > g.arcs[chosen].delay_ps)) {
-          chosen = id;
-        }
-      }
-      if (chosen == std::numeric_limits<size_t>::max()) {
-        throw std::invalid_argument("startup timing path lacks a current feasible predecessor");
-      }
-      const auto& arc = g.arcs[chosen];
+      const auto& arc = g.arcs[*chosen];
       if (arc.wire && !timing.pins[g.vertices[arc.from].pin].clock && !timing.pins[g.vertices[arc.to].pin].clock) {
-        wires.push_back(chosen);
+        wires.push_back(*chosen);
       }
       at = arc.from;
     }

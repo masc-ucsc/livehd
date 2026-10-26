@@ -10,6 +10,19 @@ Gp_timing_settings checked(Gp_timing_settings value) {
   value.validate();
   return value;
 }
+// Native timing is usable only with certified period coverage.
+bool            covered(const late::Result& timing) { return timing.certified && timing.achievable_period_ps; }
+// Legal-frame comparisons use their own density stage, never the GP epoch.
+Objective_epoch legal_epoch(const late::Result& timing) {
+  auto epoch          = timing_epoch(timing);
+  epoch.density_stage = 1;
+  epoch.legal         = true;
+  return epoch;
+}
+// The diagnostic, extended by the first unsupported timing construct.
+std::string uncovered(const char* message, const late::Result& timing) {
+  return message + (timing.unsupported.empty() ? std::string{} : ": " + timing.unsupported.front());
+}
 }  // namespace
 void Gp_timing_settings::validate() const {
   weights.validate();
@@ -57,12 +70,11 @@ Startup_weights Gp_timing_session::startup_weights(const physical::Parasitics& r
       = settings.startup_average_wire_um ? *settings.startup_average_wire_um : startup_mean_branch_length(rc, star.policy.per_um);
   const auto prior  = startup_average_parasitics(rc, star.policy.per_um, mean);
   const auto timing = proxy.evaluate(&prior, nullptr, {.capture_feasible_graph = true, .driver = settings.driver});
-  if (!timing.certified || !timing.achievable_period_ps || !timing.feasible_graph) {
+  if (!covered(timing) || !timing.feasible_graph) {
     Startup_weights result;
     result.driver_fit_failures   = timing.driver_fit_failures;
     result.mean_branch_length_um = mean;
-    result.reason                = "startup prior lacks certified period coverage"
-                    + (timing.unsupported.empty() ? std::string{} : ": " + timing.unsupported.front());
+    result.reason                = uncovered("startup prior lacks certified period coverage", timing);
     return result;
   }
   auto result                  = startup_path_weights(timing, settings.startup_path_fraction);
@@ -72,9 +84,8 @@ Startup_weights Gp_timing_session::startup_weights(const physical::Parasitics& r
 }
 Gp_legalization_update Gp_timing_session::legalization_weights(const physical::Parasitics& rc) const {
   const auto timing = proxy.evaluate(&rc, nullptr, {.capture_feasible_graph = true, .driver = settings.driver});
-  if (!timing.certified || !timing.achievable_period_ps) {
-    throw std::invalid_argument("native legalization timing lacks supported period coverage"
-                                + (timing.unsupported.empty() ? std::string{} : ": " + timing.unsupported.front()));
+  if (!covered(timing)) {
+    throw std::invalid_argument(uncovered("native legalization timing lacks supported period coverage", timing));
   }
   auto config                           = settings.weights;
   config.objective.temperature_fraction = guard.temperature_fraction();
@@ -105,9 +116,8 @@ Gp_timing_update Gp_timing_session::update(const physical::Parasitics&          
     return result;
   }
   const auto supported = [](const late::Result& value) {
-    if (!value.certified || !value.achievable_period_ps) {
-      throw std::invalid_argument("native GP timing lacks supported period coverage"
-                                  + (value.unsupported.empty() ? std::string{} : ": " + value.unsupported.front()));
+    if (!covered(value)) {
+      throw std::invalid_argument(uncovered("native GP timing lacks supported period coverage", value));
     }
   };
   const auto reference = proxy.evaluate(&rc, nullptr, {.driver = settings.driver});
@@ -142,12 +152,9 @@ Gp_timing_update Gp_timing_session::update(const physical::Parasitics&          
       throw std::invalid_argument("native GP continuous/Steiner numerical, ranking or coverage gate failed");
     }
   }
-  auto                  next_guard = guard;
-  const Objective_epoch epoch{.topology                      = reference.topology_generation,
-                              .timing_model                  = reference.model_generation,
-                              .characterized_boundary_policy = reference.characterized_boundary_policy,
-                              .bounded_boundary_policy       = reference.bounded_boundary_policy};
-  Period_decision       decision = Period_decision::improve;
+  auto            next_guard = guard;
+  const auto      epoch      = timing_epoch(reference);
+  Period_decision decision   = Period_decision::improve;
   if (!next_guard.best_period()) {
     next_guard.rebase(*reference.achievable_period_ps, epoch, true);
   } else {
@@ -202,17 +209,11 @@ double Gp_timing_session::set_legal_reference(const physical::Parasitics& rc, bo
     throw std::invalid_argument("native legal timing reference requires one proven legal frame before GP");
   }
   const auto timing = proxy.evaluate(&rc, nullptr, {.driver = settings.driver});
-  if (!timing.certified || !timing.achievable_period_ps) {
-    throw std::invalid_argument("native legal reference lacks supported period coverage"
-                                + (timing.unsupported.empty() ? std::string{} : ": " + timing.unsupported.front()));
+  if (!covered(timing)) {
+    throw std::invalid_argument(uncovered("native legal reference lacks supported period coverage", timing));
   }
   legal_reference_period = *timing.achievable_period_ps;
-  legal_reference_epoch  = {.topology                      = timing.topology_generation,
-                            .timing_model                  = timing.model_generation,
-                            .density_stage                 = 1,
-                            .legal                         = true,
-                            .characterized_boundary_policy = timing.characterized_boundary_policy,
-                            .bounded_boundary_policy       = timing.bounded_boundary_policy};
+  legal_reference_epoch  = legal_epoch(timing);
   return *legal_reference_period;
 }
 Legal_timing_check Gp_timing_session::check_legal_output(const physical::Parasitics& rc, bool legal) const {
@@ -227,22 +228,14 @@ Legal_timing_check Gp_timing_session::check_legal_output(const physical::Parasit
   }
   const auto timing          = proxy.evaluate(&rc, nullptr, {.driver = settings.driver});
   result.candidate_period_ps = timing.achievable_period_ps;
-  if (!timing.certified || !timing.achievable_period_ps) {
-    result.reason = "native legal output lacks supported period coverage"
-                    + (timing.unsupported.empty() ? std::string{} : ": " + timing.unsupported.front());
+  if (!covered(timing)) {
+    result.reason = uncovered("native legal output lacks supported period coverage", timing);
     return result;
   }
   Period_guard legal_guard(
       {.repeatability_noise = settings.repeatability_noise_ps, .regression_tolerance = settings.regression_tolerance_ps});
   legal_guard.rebase(*legal_reference_period, legal_reference_epoch, true);
-  result.decision = legal_guard.consider(*timing.achievable_period_ps,
-                                         {.topology                      = timing.topology_generation,
-                                          .timing_model                  = timing.model_generation,
-                                          .density_stage                 = 1,
-                                          .legal                         = true,
-                                          .characterized_boundary_policy = timing.characterized_boundary_policy,
-                                          .bounded_boundary_policy       = timing.bounded_boundary_policy},
-                                         true);
+  result.decision = legal_guard.consider(*timing.achievable_period_ps, legal_epoch(timing), true);
   if (!result.passed()) {
     result.reason = "final legal hard period regresses against the imported legal reference";
   }
