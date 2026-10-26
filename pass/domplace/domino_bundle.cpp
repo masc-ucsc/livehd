@@ -356,7 +356,8 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
     text(w, "model", kDelayModel);
     text(w,
          "citation",
-         "I. Sutherland, R. Sproull, D. Harris, Logical Effort: Designing Fast CMOS Circuits (1999), ch. 10 (domino)");
+         "I. Sutherland, R. Sproull, D. Harris, Logical Effort: Designing Fast CMOS Circuits (1999), circuit families: "
+         "domino gates");
     text(w, "formula", kDelayFormula);
     w.Key("parameters");
     w.StartObject();
