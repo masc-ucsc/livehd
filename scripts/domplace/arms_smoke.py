@@ -19,7 +19,7 @@ source.write_text('module domp(input clk, input a, b, c, d, en, x, y, output reg
                   'endmodule\n')
 sdc = root / 'domp.sdc'
 sdc.write_text('create_clock -name clk -period 10 [get_ports clk]\n')
-# Explicit test coefficients for arm 3: none is built in.
+# Explicit test coefficients for arm 3: they override the built-in estimate.
 arm3 = ['pass.usyn.domino_select=all', 'pass.usyn.domino_eval_fo4=2', 'pass.usyn.domino_precharge_fo4=2',
         'pass.usyn.domino_setup_eval_fo4=0.5', 'pass.usyn.domino_precharge_margin_fo4=0.5',
         'pass.usyn.domino_uncertainty_first_ps=0', 'pass.usyn.domino_uncertainty_second_ps=0']

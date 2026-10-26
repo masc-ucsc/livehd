@@ -76,9 +76,11 @@ base = [lhd, 'synth', str(source), '--top', 'doms', '-q',
         '--set', 'pass.usyn.domino_area_margin_pct=13',
         '--set', 'synth.place=true', '--set', 'synth.place.timing_driven=false', '--set', 'synth.place.iterations=80',
         '--set', 'synth.place.grid.density=8', '--set', 'synth.place.stage_timing=true']
-# Explicit test coefficients: none are built in, and an unset one leaves its
-# class unmeasured, so sizing would have no period to accept against.
-coefficients = ['--set', 'pass.usyn.domino_eval_fo4=2', '--set', 'pass.usyn.domino_precharge_fo4=2',
+# Explicit test coefficients (they override the built-in logical-effort
+# estimate), so the trials below do not move with the estimate. One FO4 of
+# evaluate keeps the constant internal check (2 (eval + dfxtp setup)) below
+# the graph period, which is what sizing can shorten.
+coefficients = ['--set', 'pass.usyn.domino_eval_fo4=1', '--set', 'pass.usyn.domino_precharge_fo4=1',
                 '--set', 'pass.usyn.domino_setup_eval_fo4=0.5', '--set', 'pass.usyn.domino_precharge_margin_fo4=0.5',
                 '--set', 'pass.usyn.domino_uncertainty_first_ps=0', '--set', 'pass.usyn.domino_uncertainty_second_ps=0']
 sizing = ['--set', 'synth.place.domino_sizing=true']
@@ -128,9 +130,11 @@ for name, command, extra, needle in (
         ('trials', base, coefficients + sizing + ['--set', 'synth.place.domino_sizing.trials=0'], '[1,4096]')):
     error = run(name, extra, False, command)['error']
     assert error['class'] == 'usage' and needle in error['message'], (name, error)
-# Without coefficients the stage period is unmeasured: sizing refuses to guess.
-unmeasured = run('unmeasured', sizing, False)['error']
-assert 'needs a measured stage period' in unmeasured['message'] and 'unmeasured' in unmeasured['message'], unmeasured
+# Without options the built-in estimate measures the stage period, so sizing
+# has a period to accept against (an unmeasured one is refused: custom_sizing_test).
+estimated = run('estimated', sizing + ['--set', 'synth.place.domino_sizing.trials=1'])['qor']['place']
+assert estimated['stage_timing']['unmeasured'] == [] and estimated['stage_timing']['period_ps'] > 0, estimated['stage_timing']
+assert estimated['domino_sizing']['before']['delay_ps'] > 0, estimated['domino_sizing']
 
 # Up-size: q1 steps to its dfxtp_2 variant in place and displaces the
 # single-row cell its wider footprint covers; the period improves.

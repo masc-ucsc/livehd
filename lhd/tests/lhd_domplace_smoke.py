@@ -100,8 +100,14 @@ assert logical_report['physical']['totals']['converted'] == 2, logical_report['p
 
 bundle = W / 'synth/qor.json.domino'
 sidecar = json.loads((bundle / 'domino_models.json').read_text())
-assert sidecar['schema'] == 2 and sidecar['units']['time'] == 'ps' and sidecar['units']['dbu'] == 1000, sidecar['units']
+assert sidecar['schema'] == 3 and sidecar['units']['time'] == 'ps' and sidecar['units']['dbu'] == 1000, sidecar['units']
 assert sidecar['stage_model']['clock'] == 'clk' and sidecar['stage_model']['hold_capture_ps'] is None, sidecar['stage_model']
+# The built-in stage delays: the logical-effort estimate with its provenance,
+# per variant for evaluate and precharge.
+assert sidecar['delay_model']['source'] == 'logical-effort-estimate' and sidecar['delay_model']['fo4'], sidecar['delay_model']
+assert sidecar['stage_model']['sources']['eval_delay_ps'] == 'logical-effort-estimate', sidecar['stage_model']
+assert all(v['timing']['eval_delay_ps'] > 0 and v['timing']['precharge_ps'] > 0
+           for m in sidecar['masters'] for v in m['variants']), sidecar['masters']
 assert sorted(i['state'] for i in sidecar['instances']) == ['q1', 'q2'], sidecar['instances']
 masters = {v['name'] for m in sidecar['masters'] for v in m['variants']}
 assert {i['master'] for i in sidecar['instances']} <= masters, (sidecar['instances'], masters)

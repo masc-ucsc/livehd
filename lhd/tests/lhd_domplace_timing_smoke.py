@@ -46,8 +46,8 @@ def synth(source, top, constraints):
 
 domino = ['--set', 'pass.usyn.physical=domino_provisional', '--set', 'synth.opentimer=false',
           '--set', 'pass.usyn.domino_select=all']
-# Explicit test coefficients: there are no built-in defaults, and unset ones
-# leave their class unmeasured.
+# Explicit coefficients: each option overrides its built-in logical-effort
+# estimate (pass/domplace/domino_delay.hpp).
 coefficients = ['--set', 'pass.usyn.domino_eval_fo4=2', '--set', 'pass.usyn.domino_precharge_fo4=2',
                 '--set', 'pass.usyn.domino_setup_eval_fo4=0.5', '--set', 'pass.usyn.domino_precharge_margin_fo4=0.5',
                 '--set', 'pass.usyn.domino_uncertainty_first_ps=0', '--set', 'pass.usyn.domino_uncertainty_second_ps=0']
@@ -124,7 +124,7 @@ assert len(reasons) == summary['excluded'], (reasons, summary)
 classes = {(c['launch'], c['capture']): c for c in timing['classes']}
 assert ('domino', 'domino') in classes, classes  # q2.Q into its own rail
 model = timing['model']['provisional']
-assert model['bundle_schema'] == 2 and model['coefficients']['eval_delay_ps']['source'] == 'bundle', model
+assert model['bundle_schema'] == 3 and model['coefficients']['eval_delay_ps']['source'] == 'option', model
 stages = {s['stage_id'].rsplit('.', 1)[-1]: s for s in timing['stages']}
 assert sorted(stages) == ['q1', 'q2'], stages.keys()
 for leaf, stage in stages.items():
@@ -155,12 +155,29 @@ assert 'coverage is partial' in fresh['error']['message'], fresh['error']
 again = run('arm3_fresh_again', arm3 + ['--workdir', str(F)])
 assert again['qor']['place'].get('reused_final_state'), again['qor']['place']
 
-# Without coefficients the domino classes are unmeasured: incomplete, never a
-# zero delay.
+# Without options every coefficient is the labeled built-in estimate: the
+# profile is measured (partial only for the IO cuts), each stage with its own
+# master's evaluate and precharge delays.
 bare = run('arm3_bare', synth(domp, 'domp', slow) + domino + stage_timing + ['--workdir', str(root / 'B')])
 bare_summary = bare['qor']['place']['stage_timing']
-assert bare_summary['status'] == 'incomplete' and bare_summary['period_ps'] is None, bare_summary
-assert {'eval_delay_ps', 'setup_eval_ps', 'precharge_ps'} <= set(bare_summary['unmeasured']), bare_summary
+assert bare_summary['status'] == 'partial' and bare_summary['unmeasured'] == [], bare_summary
+assert bare_summary['period_ps'] > 0, bare_summary
+bare_timing = report(root / 'B')
+assert all(r.startswith('excluded') for r in bare_timing['reasons']), bare_timing['reasons']
+bare_model = bare_timing['model']['provisional']
+for name, coefficient in bare_model['coefficients'].items():
+    expected = 'estimate: ideal clock (0 ps)' if name.startswith('uncertainty') else 'logical-effort-estimate'
+    assert coefficient['source'] == expected, (name, coefficient)
+assert bare_model['coefficients']['eval_delay_ps']['scope'] == 'per-variant', bare_model
+fo4 = bare_model['fo4_ps']
+assert abs(fo4 - 82.91234659320048) < 1e-6, fo4  # sky130 inv_1 on its NLDM (domino_delay_test)
+assert abs(bare_model['coefficients']['setup_eval_ps']['value'] - fo4 / 2) < 1e-9, bare_model
+bare_stages = {s['stage_id'].rsplit('.', 1)[-1]: s for s in bare_timing['stages']}
+for leaf, stage in bare_stages.items():
+    assert stage['internal']['status'] == 'measured' and stage['precharge']['status'] == 'measured', stage
+    assert 0 < stage['internal']['eval_delay_ps'] < 4 * fo4 and 0 < stage['precharge']['precharge_ps'] < 4 * fo4, stage
+# q1 = (a & b) | (c & d): two branches of two in series into dfxtp_1's D.
+assert abs(bare_stages['q1']['internal']['eval_delay_ps'] - 105.63056083546012) < 1e-6, bare_stages['q1']['internal']
 
 # Arm 2 against OpenTimer: the same placement timed by both. OpenTimer also
 # times the unconstrained outputs (required 0), which the native subset cuts,

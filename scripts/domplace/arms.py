@@ -21,9 +21,10 @@ manifest.json (HEAD, dirty-diff hash, lhd hash, input hashes, options,
 commands), results.json, results.tsv, and per leg its workdir, DEF/LEF and
 reports. --dry-run writes only the manifest.
 
-Stage coefficients have no built-in values: pass them to arm 3 explicitly
-(--arm3-set pass.usyn.domino_eval_fo4=2 ...), or its stage timing reports
-the unmeasured classes and status incomplete.
+Arm 3's stage coefficients default to the built-in, labeled logical-effort
+estimate (pass/domplace/domino_delay.hpp: per-master evaluate and precharge
+delays in the reference inverter's NLDM FO4). Explicit options override it
+(--arm3-set pass.usyn.domino_eval_fo4=2 ...).
 """
 import argparse
 import datetime
