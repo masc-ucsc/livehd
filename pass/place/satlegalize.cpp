@@ -38,7 +38,6 @@ struct Pair {
   double                slack, distance;
 };
 ph::Rect bounds(const Ann_place& p) { return {double(p.x), double(p.y), double(p.x + p.width), double(p.y + p.height)}; }
-bool     intersects(const ph::Rect& a, const ph::Rect& b) { return a.xl < b.xh && b.xl < a.xh && a.yl < b.yh && b.yl < a.yh; }
 bool     movable(const ph::Technology& tech, const ph::Component& cell) {
   const auto found = tech.macros.find(cell.macro);
   if (cell.place.status == Status::FIXED || cell.place.status == Status::LOCKED || !cell.place.is_valid()
@@ -331,27 +330,11 @@ bool orientation_allowed(const ph::Macro& macro, Orientation o) {
          || (o == Orientation::S && macro.symmetry_x && macro.symmetry_y);
 }
 using Interval = std::pair<double, double>;
-bool contains(const ph::Rect& outer, const ph::Rect& inner) {
-  return inner.xl >= outer.xl && inner.xh <= outer.xh && inner.yl >= outer.yl && inner.yh <= outer.yh;
-}
-ph::Rect clipped(const ph::Rect& a, const ph::Rect& b) {
-  return {std::max(a.xl, b.xl), std::max(a.yl, b.yl), std::min(a.xh, b.xh), std::min(a.yh, b.yh)};
-}
 double                area(const ph::Rect& r) { return std::max(0., r.xh - r.xl) * std::max(0., r.yh - r.yl); }
+// Nonempty intervals only; touching intervals merge.
 std::vector<Interval> merged(std::vector<Interval> intervals) {
-  std::sort(intervals.begin(), intervals.end());
-  std::vector<Interval> result;
-  for (const auto& interval : intervals) {
-    if (interval.second <= interval.first) {
-      continue;
-    }
-    if (result.empty() || interval.first > result.back().second) {
-      result.push_back(interval);
-    } else {
-      result.back().second = std::max(result.back().second, interval.second);
-    }
-  }
-  return result;
+  std::erase_if(intervals, [](const Interval& interval) { return interval.second <= interval.first; });
+  return ph::merge_intervals(std::move(intervals));
 }
 std::vector<Interval> subtract(const std::vector<Interval>& available, const std::vector<Interval>& blocked) {
   std::vector<Interval> result;
@@ -421,7 +404,7 @@ struct Route_grid_view {
     };
     x = boundaries(b.xl, b.xh, grid.bins_x);
     y = boundaries(b.yl, b.yh, grid.bins_y);
-    if (!contains(die, {x.front(), y.front(), x.back(), y.back()})) {
+    if (!die.contains({x.front(), y.front(), x.back(), y.back()})) {
       throw std::invalid_argument("satlegalize route grid lies outside the die");
     }
   }
@@ -479,15 +462,15 @@ struct Density_model {
     std::vector<ph::Rect> available, blocked;
     std::vector<double>   boundaries;
     for (const auto& row : rows) {
-      if (intersects(row, tile)) {
-        available.push_back(clipped(row, tile));
+      if (row.overlaps(tile)) {
+        available.push_back(row.intersection(tile));
         boundaries.push_back(available.back().yl);
         boundaries.push_back(available.back().yh);
       }
     }
     for (const auto& obstacle : obstacles) {
-      if (intersects(obstacle, tile)) {
-        blocked.push_back(clipped(obstacle, tile));
+      if (obstacle.overlaps(tile)) {
+        blocked.push_back(obstacle.intersection(tile));
         boundaries.push_back(blocked.back().yl);
         boundaries.push_back(blocked.back().yh);
       }
@@ -518,7 +501,7 @@ struct Density_model {
   double load(const ph::Rect& tile) const {
     double result = 0;
     for (size_t i : movable_cells) {
-      result += area(clipped(bounds(fp.components[i].place), tile));
+      result += area(bounds(fp.components[i].place).intersection(tile));
     }
     return result;
   }
@@ -562,7 +545,7 @@ std::vector<Row_space> row_spaces(const ph::Technology& tech, const ph::Floorpla
       continue;
     }
     const double height = site->second.height * fp.dbu;
-    if (height > 0 && intersects({double(row.x), double(row.y), double(row.x + row.count * row.step), row.y + height}, domain)) {
+    if (height > 0 && domain.overlaps({double(row.x), double(row.y), double(row.x + row.count * row.step), row.y + height})) {
       result.push_back({&row, height, {}});
       max_height = std::max(max_height, height);
     }
@@ -619,7 +602,7 @@ void overlap_clauses(Sat_solver& solver, const std::vector<Cell>& cells) {
     for (auto previous = active.lower_bound(choice.candidate->place.y - max_height);
          previous != active.end() && previous->first < box.yh;
          ++previous) {
-      if (choice.cell != previous->second.cell && intersects(box, bounds(previous->second.candidate->place))) {
+      if (choice.cell != previous->second.cell && box.overlaps(bounds(previous->second.candidate->place))) {
         solver.clause({-choice.candidate->literal, -previous->second.candidate->literal});
       }
     }
@@ -802,9 +785,9 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
              double(std::max(first.place.x + first.place.width, second.place.x + second.place.width)) + options.move_sites * sx,
              double(std::max(first.place.y + first.place.height, second.place.y + second.place.height)) + options.move_rows * sy};
     }
-    const auto window = clipped(raw, fp.die);
+    const auto window = raw.intersection(fp.die);
     if (area(window) <= 0
-        || (fixed_region && (!contains(window, bounds(first.place)) || !contains(window, bounds(second.place))))) {
+        || (fixed_region && (!window.contains(bounds(first.place)) || !window.contains(bounds(second.place))))) {
       return {};
     }
     return std::pair{raw, window};
@@ -883,7 +866,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
     std::vector<Cell> cells;
     std::set<size_t>  selected, source_contained;
     for (size_t i = 0; i < fp.components.size(); ++i) {
-      if (movable(tech, fp.components[i]) && intersects(bounds(fp.components[i].place), window)) {
+      if (movable(tech, fp.components[i]) && bounds(fp.components[i].place).overlaps(window)) {
         ++window_stats.movable_cells;
         if (options.spill_neighbors && safe_spill[i] && !protected_cells.contains(i)) {
           ++window_stats.spill_eligible_cells;
@@ -891,7 +874,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
         if (cells.size() <= options.max_cells) {
           cells.push_back({i, {}, fp.components[i].place});
           selected.insert(i);
-          if (options.route_grid && contains(window, bounds(fp.components[i].place))) {
+          if (options.route_grid && window.contains(bounds(fp.components[i].place))) {
             source_contained.insert(i);
           }
         }
@@ -916,8 +899,8 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
             const auto at       = routing->index(raw.xl, raw.yl);
             tiles[tile_count++] = routing->tile(at->first + dx, at->second + dy);
           } else {
-            tiles[tile_count++]
-                = clipped({raw.xl + dx * width, raw.yl + dy * height, raw.xh + dx * width, raw.yh + dy * height}, fp.die);
+            const ph::Rect shifted{raw.xl + dx * width, raw.yl + dy * height, raw.xh + dx * width, raw.yh + dy * height};
+            tiles[tile_count++] = shifted.intersection(fp.die);
           }
         }
       }
@@ -934,7 +917,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
         neighbor.movable_area_before = neighbor.movable_area_after = initial_loads[i];
         neighbor.density_before = neighbor.density_after = capacities[i] > 0 ? initial_loads[i] / capacities[i] : 0;
         for (size_t c : density->movable_cells) {
-          neighbor.movable_cells += intersects(bounds(fp.components[c].place), tiles[i]);
+          neighbor.movable_cells += bounds(fp.components[c].place).overlaps(tiles[i]);
         }
         window_stats.neighbors.push_back(neighbor);
       }
@@ -954,7 +937,8 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
       }
     }
     // Every outside cell is immutable throughout the enlarged search domain.
-    auto domain = advanced ? clipped({raw.xl - width, raw.yl - height, raw.xh + width, raw.yh + height}, fp.die) : window;
+    auto domain
+        = advanced ? ph::Rect{raw.xl - width, raw.yl - height, raw.xh + width, raw.yh + height}.intersection(fp.die) : window;
     if (routing) {
       domain = window;
       for (const auto& tile : tiles) {
@@ -973,7 +957,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
         continue;
       }
       const auto box = advanced ? obstacle_bounds(tech, fp.components[i], options) : bounds(fp.components[i].place);
-      if (!intersects(box, domain)) {
+      if (!box.overlaps(domain)) {
         continue;
       }
       if (!advanced || !selected.contains(i)) {
@@ -1018,7 +1002,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
               continue;
             }
             const auto box = bounds(place);
-            if (std::any_of(obstacles.begin(), obstacles.end(), [&](const auto& obstacle) { return intersects(box, obstacle); })) {
+            if (std::any_of(obstacles.begin(), obstacles.end(), [&](const auto& obstacle) { return box.overlaps(obstacle); })) {
               continue;
             }
             cell.candidates.push_back({place, 0});
@@ -1051,7 +1035,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
         };
         const size_t original_owner
             = owner(original.place.x + original.place.width / 2., original.place.y + original.place.height / 2.);
-        const bool straddles = !contains(window, bounds(original.place));
+        const bool straddles = !window.contains(bounds(original.place));
         const bool may_spill = options.spill_neighbors && safe_spill[cell.index] && !protected_cells.contains(cell.index);
         for (const auto& space : spaces) {
           const auto& row = *space.row;
@@ -1072,7 +1056,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
               const auto box        = bounds(place);
               const bool same_owner = straddles && original_owner < tiles.size()
                                       && owner(place.x + place.width / 2., place.y + place.height / 2.) == original_owner;
-              if (slot < 0 || slot >= row.count || !contains(fp.die, box) || (!contains(window, box) && !same_owner)
+              if (slot < 0 || slot >= row.count || !fp.die.contains(box) || (!window.contains(box) && !same_owner)
                   || std::abs(place.x - original.place.x) > (options.move_sites + .5) * sx
                   || !std::any_of(space.gaps.begin(), space.gaps.end(), [&](const auto& gap) {
                        return box.xl >= gap.first && box.xh <= gap.second;
@@ -1288,7 +1272,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
         for (size_t b = a + 1; b < cells.size(); ++b) {
           for (const auto& ca : cells[a].candidates) {
             for (const auto& cb : cells[b].candidates) {
-              if (intersects(bounds(ca.place), bounds(cb.place))) {
+              if (bounds(ca.place).overlaps(bounds(cb.place))) {
                 solver.clause({-ca.literal, -cb.literal});
               }
             }
@@ -1331,7 +1315,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
       const int  activation = solver.new_variable();
       for (const auto* cell : {&*ia, &*ib}) {
         for (const auto& candidate : cell->candidates) {
-          if (candidate.recipient || (options.route_grid && !contains(window, bounds(candidate.place)))) {
+          if (candidate.recipient || (options.route_grid && !window.contains(bounds(candidate.place)))) {
             solver.clause({-activation, -candidate.literal});
           }
         }
@@ -1394,7 +1378,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
         unsigned                                  transfers = 0;
         for (const auto& [i, place] : checkpoint.positions) {
           saved.emplace_back(i, fp.components[i].place);
-          if (intersects(bounds(fp.components[i].place), window) && !intersects(bounds(place), window)) {
+          if (bounds(fp.components[i].place).overlaps(window) && !bounds(place).overlaps(window)) {
             ++transfers;
           }
           fp.components[i].place = place;
@@ -1464,7 +1448,7 @@ Satlegalize_report satlegalize(const ph::Technology& tech, ph::Floorplan& fp, co
         window_stats.displacement_dbu     += distance;
         window_stats.max_displacement_dbu  = std::max(window_stats.max_displacement_dbu, distance);
       }
-      if (!intersects(bounds(fp.components[cell.index].place), window)) {
+      if (!bounds(fp.components[cell.index].place).overlaps(window)) {
         ++window_stats.spilled_cells;
       }
     }
@@ -1646,7 +1630,7 @@ bool satlegalize_obstructs(const physical::Technology& tech, const physical::Com
       return false;
     }
     const ph::Shape placed{shape.layer, ph::placed_rect(macro, place, dbu, shape.rect)};
-    return route_rules ? !route_rules->spacing(corridor, placed).legal : intersects(corridor.rect, placed.rect);
+    return route_rules ? !route_rules->spacing(corridor, placed).legal : corridor.rect.overlaps(placed.rect);
   };
   // Supply pins are immutable metal, even when LEF does not list them in OBS.
   // Check them before the body shortcut: abutment rails can extend beyond the
@@ -1671,7 +1655,7 @@ bool satlegalize_obstructs(const physical::Technology& tech, const physical::Com
     }
     return std::any_of(macro.obstructions.begin(), macro.obstructions.end(), conflicts);
   }
-  if (!intersects(corridor.rect, bounds(place))) {
+  if (!corridor.rect.overlaps(bounds(place))) {
     return false;
   }
   if (!macro.blocked_layers.contains(corridor.layer)) {
