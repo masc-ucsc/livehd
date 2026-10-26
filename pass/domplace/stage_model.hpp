@@ -18,10 +18,11 @@ struct Stage_model {
   uint32_t              version = kStageModelVersion;
   std::string           clock;  // the one constrained domain (a port name) in v1
   // Coefficients in ps. std::nullopt is a missing value that must be reported,
-  // never an implicit zero.
+  // never an implicit zero. The evaluate and precharge delays depend on the
+  // gate, so they are per master variant (domino_delay.hpp), not stage-wide.
   std::optional<double> setup_eval_ps, setup_capture_ps, hold_capture_ps;
-  std::optional<double> precharge_ps, precharge_margin_ps;
-  std::optional<double> uncertainty_first_ps, uncertainty_second_ps, eval_delay_ps;
+  std::optional<double> precharge_margin_ps;
+  std::optional<double> uncertainty_first_ps, uncertainty_second_ps;
   char                  storage_init = 'x';  // v1 converts no initialized state
 };
 

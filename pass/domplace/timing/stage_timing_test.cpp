@@ -208,7 +208,9 @@ TEST(StageTiming, EveryLaunchCaptureClassIsHandComputable) {
     excluded.emplace_back(item["pin"].GetString());
   }
   EXPECT_EQ(excluded, (std::vector<std::string>{"a", "z", "d2:R1"}));
-  EXPECT_STREQ(doc["model"]["provisional"]["coefficients"]["eval_delay_ps"]["source"].GetString(), "bundle");
+  EXPECT_STREQ(doc["model"]["provisional"]["coefficients"]["eval_delay_ps"]["source"].GetString(), "logical-effort-estimate");
+  EXPECT_STREQ(doc["model"]["provisional"]["coefficients"]["eval_delay_ps"]["scope"].GetString(), "per-variant");
+  EXPECT_TRUE(doc["model"]["provisional"]["coefficients"]["eval_delay_ps"]["value"].IsNull());
   EXPECT_EQ(doc["model"]["generation"].GetString(), std::format("{:016x}", bench.generation));
 }
 
@@ -223,6 +225,18 @@ TEST(StageTiming, InternalAndPrechargeChecksCanLimitThePeriod) {
   timing = bench.evaluate();
   EXPECT_EQ(timing.period_ps, 90);  // 2 * (40 + 5)
   EXPECT_EQ(timing.limiting, "precharge d1");
+}
+
+TEST(StageTiming, EachInstanceTakesItsOwnVariantsEvaluateDelay) {
+  test::Sidecar sidecar;
+  sidecar.eval_variant = {std::nullopt, 35};
+  Classes    bench("per_variant", sidecar);
+  const auto timing = bench.evaluate();
+  EXPECT_EQ(timing.period_ps, 88);  // 2 * (35 + 7 + 2) on the FFQN variant only
+  EXPECT_EQ(timing.limiting, "internal d2");
+  const auto doc = parse(timing);
+  EXPECT_EQ((*find(doc["stages"], "stage_id", "d1"))["internal"]["eval_delay_ps"].GetDouble(), 20);
+  EXPECT_EQ((*find(doc["stages"], "stage_id", "d2"))["internal"]["eval_delay_ps"].GetDouble(), 35);
 }
 
 TEST(StageTiming, SharedFanoutTakesTheLargerOfTheFullAndTwiceTheHalfCycle) {

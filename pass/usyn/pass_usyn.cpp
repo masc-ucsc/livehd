@@ -565,27 +565,27 @@ void Pass_usyn::setup() {
                        "4");
   m.add_label_optional("domino_variants", "domino_provisional drive variants from the register ladder, 1..3", "3");
   m.add_label_optional("domino_eval_fo4",
-                       "domino_provisional hand-set evaluate delay in FO4 of the reference inverter (unset: null in the "
-                       "bundle sidecar)",
+                       "domino_provisional evaluate delay of every master in FO4 of the reference inverter (unset: the "
+                       "per-master logical-effort estimate)",
                        "");
   m.add_label_optional("domino_precharge_fo4",
-                       "domino_provisional hand-set precharge delay in FO4 of the reference inverter (unset: null in the "
-                       "bundle sidecar)",
+                       "domino_provisional precharge delay of every master in FO4 of the reference inverter (unset: the "
+                       "per-master logical-effort estimate)",
                        "");
   m.add_label_optional("domino_setup_eval_fo4",
-                       "domino_provisional hand-set rail setup before evaluate in FO4 of the reference inverter (unset: null; "
-                       "the stage timing reports flop/domino-to-domino capture unmeasured)",
+                       "domino_provisional rail setup before evaluate in FO4 of the reference inverter (unset: the estimate, "
+                       "0.5 FO4)",
                        "");
   m.add_label_optional("domino_precharge_margin_fo4",
-                       "domino_provisional hand-set precharge margin in FO4 of the reference inverter (unset: null; the "
-                       "precharge check is unmeasured)",
+                       "domino_provisional precharge margin in FO4 of the reference inverter (unset: the estimate, 0.5 FO4)",
                        "");
   m.add_label_optional("domino_uncertainty_first_ps",
                        "domino_provisional clock uncertainty at the T/2 rail capture in ps; replaces the clock uncertainty "
-                       "there (unset: null, unmeasured)",
+                       "there (unset: 0, the labeled ideal-clock estimate)",
                        "");
   m.add_label_optional("domino_uncertainty_second_ps",
-                       "domino_provisional clock uncertainty of the evaluate-to-storage check in ps (unset: null, unmeasured)",
+                       "domino_provisional clock uncertainty of the evaluate-to-storage check in ps (unset: 0, the labeled "
+                       "ideal-clock estimate)",
                        "");
   m.add_label_optional("domino_clock_devices",
                        "domino_provisional clocked devices (precharge, foot) in the labeled CLK load estimate, at half a "
@@ -1223,6 +1223,14 @@ void Pass_usyn::synthesize(Eprp_var& var) {
     if (!bundle.ok) {
       refuse_bundle(bundle.reason);
       return;
+    }
+    if (!bundle.delay_issue.empty()) {
+      livehd::diag::warn("pass.usyn", "domino-delay", "unsupported")
+          .msg("domino_provisional stage delay: {}", bundle.delay_issue)
+          .hint(
+              "the stage timing reports the class unmeasured; set pass.usyn.domino_eval_fo4/domino_precharge_fo4 or "
+              "use a Liberty with NLDM tables for the reference inverter and register")
+          .emit();
     }
     domino_report.bundle             = bundle_path.filename().string();
     domino_report.bundle_macros      = bundle.macros;

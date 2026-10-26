@@ -103,8 +103,36 @@ TEST(DominoBundle, WritesARoundTrippingDeterministicBundle) {
   EXPECT_STREQ(doc["stage_model"]["clock"].GetString(), "clk");
   // Missing data is an explicit null, never zero.
   EXPECT_TRUE(doc["stage_model"]["hold_capture_ps"].IsNull());
-  EXPECT_TRUE(doc["stage_model"]["eval_delay_ps"].IsNull());
   EXPECT_TRUE(doc["coefficients"]["eval_fo4"].IsNull());
+  // No option: every stage coefficient is the labeled logical-effort
+  // estimate (domino_delay_test has the hand computation), recorded with its
+  // FO4 derivation and parameters. Evaluate and precharge are per variant.
+  const auto& stage   = doc["stage_model"];
+  const auto& sources = stage["sources"];
+  EXPECT_FALSE(stage.HasMember("eval_delay_ps"));
+  EXPECT_FALSE(stage.HasMember("precharge_ps"));
+  for (const auto* name : {"eval_delay_ps", "precharge_ps", "setup_eval_ps", "precharge_margin_ps"}) {
+    EXPECT_STREQ(sources[name].GetString(), "logical-effort-estimate") << name;
+  }
+  EXPECT_STREQ(sources["uncertainty_first_ps"].GetString(), "estimate: ideal clock (0 ps)");
+  EXPECT_EQ(stage["uncertainty_first_ps"].GetDouble(), 0);
+  EXPECT_EQ(stage["uncertainty_second_ps"].GetDouble(), 0);
+  const double fo4 = doc["fo4_ps"]["value"].GetDouble();
+  const double tau = fo4 / 5;
+  EXPECT_NEAR(fo4, 82.91234659320048, 1e-6);
+  EXPECT_DOUBLE_EQ(stage["setup_eval_ps"].GetDouble(), .5 * fo4);
+  EXPECT_DOUBLE_EQ(stage["precharge_margin_ps"].GetDouble(), .5 * fo4);
+  const auto& model = doc["delay_model"];
+  EXPECT_STREQ(model["source"].GetString(), "logical-effort-estimate");
+  EXPECT_NE(std::string(model["citation"].GetString()).find("Sutherland, R. Sproull, D. Harris, Logical Effort"),
+            std::string::npos);
+  EXPECT_NE(std::string(model["formula"].GetString()).find("(s+1)/3"), std::string::npos);
+  EXPECT_EQ(model["parameters"]["p_inv"].GetDouble(), 1);
+  EXPECT_EQ(model["parameters"]["internal_node_weight"].GetDouble(), .5);
+  EXPECT_DOUBLE_EQ(model["tau_ps"].GetDouble(), tau);
+  EXPECT_STREQ(model["fo4"]["inverter"].GetString(), "sky130_fd_sc_hd__inv_1");
+  EXPECT_DOUBLE_EQ(model["fo4"]["load_ff"].GetDouble(), 4 * 2.39);
+  EXPECT_FALSE(model.HasMember("issue"));
   EXPECT_TRUE(doc["reference"]["registers"][0]["hold_ps"].IsNull());
   EXPECT_EQ(doc["coefficients"]["aux_nonregister"].GetUint(), 4U);
   EXPECT_STREQ(doc["reference"]["inverter"]["name"].GetString(), "sky130_fd_sc_hd__inv_1");
@@ -126,6 +154,12 @@ TEST(DominoBundle, WritesARoundTrippingDeterministicBundle) {
                      doc["reference"]["registers"][0]["clock_capacitance_ff"].GetDouble()
                          + doc["reference"]["inverter"]["input_capacitance_ff"].GetDouble());
     EXPECT_EQ(v["setup_capture_ps"], doc["reference"]["registers"][0]["setup_ps"]);
+    // Both masters are two branches of two in series (s=2, b=2, n=4) into
+    // dfxtp_1's 1.681 fF D input: 6.370014 tau and 11/3 tau.
+    EXPECT_NEAR(v["timing"]["eval_delay_ps"].GetDouble(), 105.63056083546012, 1e-6);
+    EXPECT_NEAR(v["timing"]["precharge_ps"].GetDouble(), 11.0 / 3 * tau, 1e-6);
+    EXPECT_DOUBLE_EQ(v["timing"]["register_d_ff"].GetDouble(), 1.681);
+    EXPECT_DOUBLE_EQ(v["timing"]["estimate"]["g_dynamic"].GetDouble(), 1);
     if (m["n_pdn"].GetUint() == 4 && m["inputs"].GetUint() == 4) {
       found = true;
       EXPECT_EQ(v["width_dbu"].GetUint(), 14U * 460U);
@@ -151,6 +185,11 @@ TEST(DominoBundle, WritesARoundTrippingDeterministicBundle) {
   EXPECT_EQ(sidecar->templates.size(), a.macros);
   EXPECT_EQ(sidecar->instances, 2U);
   EXPECT_EQ(sidecar->templates.at(f.design.instances[0].cell), (std::array{ph::Row_access::horizontal, ph::Row_access::vertical}));
+  for (const auto& entry : sidecar->catalog) {
+    EXPECT_NEAR(entry.eval_delay_ps.value_or(0), 105.63056083546012, 1e-6) << entry.name;
+    EXPECT_NEAR(entry.precharge_ps.value_or(0), 11.0 / 3 * tau, 1e-6) << entry.name;
+  }
+  EXPECT_TRUE(a.delay_issue.empty()) << a.delay_issue;
   {
     const auto                          models = (first / kBundleModels).string();
     Hhds_graph_library::Scoped_instance scope(models);
@@ -163,7 +202,7 @@ TEST(DominoBundle, WritesARoundTrippingDeterministicBundle) {
   EXPECT_NE(read(first / kBundleVerilog).find("module " + f.design.instances[0].cell), std::string::npos);
 }
 
-TEST(DominoBundle, SchemaTwoRecordsRegisterPinsClockLoadsCoefficientsAndTheCatalog) {
+TEST(DominoBundle, SchemaThreeRecordsRegisterPinsClockLoadsCoefficientsAndTheCatalog) {
   Fixture    f;
   // A second rung: the fixture's register widened in LEF, with its own setup
   // and no CK capacitance or drive sample.
@@ -184,18 +223,27 @@ TEST(DominoBundle, SchemaTwoRecordsRegisterPinsClockLoadsCoefficientsAndTheCatal
   f.inputs.area_margin_pct             = 25;
   f.inputs.stage.uncertainty_first_ps  = 0;
   f.inputs.stage.uncertainty_second_ps = 3;
-  const auto dir                       = fs::path(testing::TempDir()) / "bundle_schema2";
+  const auto dir                       = fs::path(testing::TempDir()) / "bundle_schema3";
   const auto result                    = generate_domino_bundle(f.design, f.inputs, dir);
   ASSERT_TRUE(result.ok) << result.reason;
   rapidjson::Document doc;
   const auto          text = read(dir / kBundleSidecar);
   doc.Parse(text.c_str());
   ASSERT_FALSE(doc.HasParseError());
-  EXPECT_EQ(doc["schema"].GetUint(), 2U);
+  EXPECT_EQ(doc["schema"].GetUint(), 3U);
   const double fo4   = doc["fo4_ps"]["value"].GetDouble();
   const auto&  stage = doc["stage_model"];
-  EXPECT_DOUBLE_EQ(stage["eval_delay_ps"].GetDouble(), 2 * fo4);
-  EXPECT_DOUBLE_EQ(stage["precharge_ps"].GetDouble(), 2 * fo4);
+  // Explicit FO4 options win over the estimate, coefficient by coefficient.
+  for (const auto& m : doc["masters"].GetArray()) {
+    for (const auto& v : m["variants"].GetArray()) {
+      EXPECT_DOUBLE_EQ(v["timing"]["eval_delay_ps"].GetDouble(), 2 * fo4);
+      EXPECT_DOUBLE_EQ(v["timing"]["precharge_ps"].GetDouble(), 2 * fo4);
+      EXPECT_TRUE(v["timing"]["estimate"].IsObject());  // still recorded beside the option
+    }
+  }
+  for (const auto* name : {"eval_delay_ps", "precharge_ps", "setup_eval_ps", "precharge_margin_ps", "uncertainty_first_ps"}) {
+    EXPECT_STREQ(stage["sources"][name].GetString(), "option") << name;
+  }
   EXPECT_DOUBLE_EQ(stage["setup_eval_ps"].GetDouble(), .5 * fo4);
   EXPECT_DOUBLE_EQ(stage["precharge_margin_ps"].GetDouble(), .25 * fo4);
   EXPECT_EQ(stage["uncertainty_first_ps"].GetDouble(), 0);  // an explicit zero, not null
@@ -265,12 +313,51 @@ TEST(DominoBundle, SchemaTwoRecordsRegisterPinsClockLoadsCoefficientsAndTheCatal
   EXPECT_FALSE(read_domino_sidecar(dir, &why));
   EXPECT_NE(why.find("names an unlisted register test_dfxtp_2"), std::string::npos) << why;
 
-  // Only schema 2 is read; an older sidecar asks for regeneration.
+  // Only schema 3 is read; an older sidecar asks for regeneration.
   auto older = text;
-  older.replace(older.find("\"schema\":2"), 10, "\"schema\":1");
+  older.replace(older.find("\"schema\":3"), 10, "\"schema\":2");
   std::ofstream(dir / kBundleSidecar, std::ios::trunc) << older;
   EXPECT_FALSE(read_domino_sidecar(dir, &why));
-  EXPECT_NE(why.find("schema-2"), std::string::npos) << why;
+  EXPECT_NE(why.find("is schema 2; this build reads schema 3 only (regenerate the bundle"), std::string::npos) << why;
+}
+
+TEST(DominoBundle, MissingDelayDataIsNamedAndNeverZero) {
+  // No D capacitance on the register: FO4 and the stage-wide fractions stand,
+  // the per-variant delays are null with a diagnostic.
+  Fixture f;
+  f.reference.registers.front().d_ff.reset();
+  const auto no_load = generate_domino_bundle(f.design, f.inputs, fs::path(testing::TempDir()) / "bundle_no_load");
+  ASSERT_TRUE(no_load.ok) << no_load.reason;
+  EXPECT_NE(no_load.delay_issue.find("estimate is null for the sky130_fd_sc_hd__dfxtp_1: the register has no D input"),
+            std::string::npos)
+      << no_load.delay_issue;
+  rapidjson::Document doc;
+  auto                text = read(fs::path(testing::TempDir()) / "bundle_no_load" / kBundleSidecar);
+  doc.Parse(text.c_str());
+  ASSERT_FALSE(doc.HasParseError());
+  EXPECT_TRUE(doc["masters"][0]["variants"][0]["timing"]["eval_delay_ps"].IsNull());
+  EXPECT_TRUE(doc["masters"][0]["variants"][0]["timing"]["estimate"].IsNull());
+  EXPECT_TRUE(doc["stage_model"]["setup_eval_ps"].IsNumber());
+
+  // No NLDM model for the inverter: no FO4, so nothing it scales.
+  Fixture g;
+  g.reference.inverter_timing.reset();
+  const auto no_fo4 = generate_domino_bundle(g.design, g.inputs, fs::path(testing::TempDir()) / "bundle_no_fo4");
+  ASSERT_TRUE(no_fo4.ok) << no_fo4.reason;
+  EXPECT_NE(no_fo4.delay_issue.find("fo4_ps is null: sky130_fd_sc_hd__inv_1 has no Liberty NLDM timing model"), std::string::npos)
+      << no_fo4.delay_issue;
+  text = read(fs::path(testing::TempDir()) / "bundle_no_fo4" / kBundleSidecar);
+  doc.Parse(text.c_str());
+  ASSERT_FALSE(doc.HasParseError());
+  EXPECT_TRUE(doc["fo4_ps"]["value"].IsNull());
+  EXPECT_TRUE(doc["delay_model"]["fo4"].IsNull());
+  EXPECT_NE(std::string(doc["delay_model"]["issue"].GetString()).find("NLDM"), std::string::npos);
+  EXPECT_TRUE(doc["stage_model"]["setup_eval_ps"].IsNull());
+  EXPECT_TRUE(doc["masters"][0]["variants"][0]["timing"]["precharge_ps"].IsNull());
+  std::string why;
+  const auto  sidecar = read_domino_sidecar(fs::path(testing::TempDir()) / "bundle_no_fo4", &why);
+  ASSERT_TRUE(sidecar) << why;
+  EXPECT_FALSE(sidecar->catalog.front().eval_delay_ps);
 }
 
 TEST(DominoBundle, EqualMastersAreCollectedOnceWithEveryOwner) {

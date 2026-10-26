@@ -24,7 +24,9 @@ namespace late = placement::late;
 inline const usyn::Physical_cell_interface kDominoPins{};
 
 // The schedule coefficients of stage_model.hpp, in ps. nullopt is unmeasured
-// and is never read as zero.
+// and is never read as zero. eval_delay_ps and precharge_ps are per master
+// variant in the bundle (Catalog_entry); here they are only a stage-wide
+// override, absent unless apply_overrides set one.
 struct Stage_values {
   std::optional<double> setup_eval_ps, uncertainty_first_ps, uncertainty_second_ps;
   std::optional<double> eval_delay_ps, precharge_ps, precharge_margin_ps;
@@ -37,7 +39,9 @@ struct Domino_timing_view {
   std::optional<double>              fo4_ps;
   std::optional<int64_t>             dbu;
   Stage_values                       stage;
-  std::map<std::string, std::string> sources;  // coefficient -> "bundle" | "override"
+  // coefficient -> the sidecar's source ("logical-effort-estimate", "option",
+  // ...) or "override"
+  std::map<std::string, std::string> sources;
   using Variant = Catalog_entry;               // the sidecar's own variant record
   std::vector<Variant> variants;
   struct Instance {
@@ -81,4 +85,12 @@ std::shared_ptr<const late::Provisional_cells> domino_timing_cells(const Domino_
 
 // The coefficient names in report order with their effective values.
 std::vector<std::pair<std::string, std::optional<double>>> stage_coefficients(const Stage_values& stage);
+// The coefficients the bundle records per master variant.
+inline bool per_variant_coefficient(std::string_view name) { return name == "eval_delay_ps" || name == "precharge_ps"; }
+// One variant's evaluate and precharge delays: the stage-wide override when
+// set, else the variant's own; null without a variant.
+struct Variant_delays {
+  std::optional<double> eval_delay_ps, precharge_ps;
+};
+Variant_delays variant_delays(const Stage_values& stage, const Domino_timing_view::Variant* variant);
 }  // namespace livehd::domplace::timing

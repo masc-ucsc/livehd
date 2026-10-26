@@ -419,10 +419,11 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
     };
     need("setup_eval_ps", stage.setup_eval_ps);
     need("uncertainty_first_ps", stage.uncertainty_first_ps);
-    const auto eval   = need("eval_delay_ps", stage.eval_delay_ps);
+    const auto delays = variant_delays(stage, variant);
+    const auto eval   = need("eval_delay_ps", delays.eval_delay_ps);
     const auto setup  = need("setup_capture_ps", variant ? variant->setup_capture_ps : std::nullopt);
     const auto u2     = need("uncertainty_second_ps", stage.uncertainty_second_ps);
-    const auto pre    = need("precharge_ps", stage.precharge_ps);
+    const auto pre    = need("precharge_ps", delays.precharge_ps);
     const auto margin = need("precharge_margin_ps", stage.precharge_margin_ps);
     if (eval && setup && u2 && (!internal_ps || 2 * (*eval + *setup + *u2) > *internal_ps)) {
       internal_ps = 2 * (*eval + *setup + *u2);
@@ -653,6 +654,8 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
       w.StartObject();
       real(w, "value", value);
       text(w, "source", view->sources.contains(name) ? view->sources.at(name) : std::string("bundle"));
+      // A per-variant coefficient without an override: stages[] has each value.
+      text(w, "scope", per_variant_coefficient(name) && !value ? "per-variant" : "stage");
       w.EndObject();
     }
     w.EndObject();
@@ -916,15 +919,16 @@ Stage_timing evaluate_stage_timing(const hhds::Graph& graph, const physical::Par
       text(w, "status", sum ? "measured" : "unmeasured");
       w.EndObject();
     };
+    const auto delays = variant_delays(stage, variant);
     check("internal",
           {
-              {        "eval_delay_ps",                                stage.eval_delay_ps},
+              {        "eval_delay_ps",                               delays.eval_delay_ps},
               {     "setup_capture_ps", variant ? variant->setup_capture_ps : std::nullopt},
               {"uncertainty_second_ps",                        stage.uncertainty_second_ps}
     });
     check("precharge",
           {
-              {       "precharge_ps",        stage.precharge_ps},
+              {       "precharge_ps",       delays.precharge_ps},
               {"precharge_margin_ps", stage.precharge_margin_ps}
     });
     w.Key("output");

@@ -127,9 +127,17 @@ std::optional<Domino_timing_view> read_domino_timing(const fs::path& bundle, std
   const auto& stage  = doc["stage_model"];
   view.stage_version = stage["version"].GetUint();
   view.clock         = read_text(stage, "clock", malformed);
+  if (!stage.HasMember("sources") || !stage["sources"].IsObject()) {
+    return refuse("sidecar stage model has no coefficient sources");
+  }
   for (const auto& [name, member] : kCoefficients) {
-    view.stage.*member = read_estimate(stage, std::string(name).c_str(), malformed);
-    view.sources.emplace(name, "bundle");
+    const std::string key(name);
+    // Per-variant coefficients are read with each variant; the stage-wide
+    // slot stays empty for an override.
+    if (!per_variant_coefficient(name)) {
+      view.stage.*member = read_estimate(stage, key.c_str(), malformed);
+    }
+    view.sources.emplace(key, read_text(stage["sources"], key.c_str(), malformed));
   }
   if (doc.HasMember("corner")) {
     view.corner = read_text(doc["corner"], "library", malformed);
@@ -195,6 +203,17 @@ void apply_overrides(Domino_timing_view& view, const Model_overrides& overrides)
     view.stage.*coefficient(name) = value;
     view.sources[name]            = "override";
   }
+}
+
+Variant_delays variant_delays(const Stage_values& stage, const Domino_timing_view::Variant* variant) {
+  return {
+      .eval_delay_ps = stage.eval_delay_ps ? stage.eval_delay_ps
+                       : variant           ? variant->eval_delay_ps
+                                           : std::nullopt,
+      .precharge_ps  = stage.precharge_ps ? stage.precharge_ps
+                       : variant          ? variant->precharge_ps
+                                          : std::nullopt,
+  };
 }
 
 std::vector<std::pair<std::string, std::optional<double>>> stage_coefficients(const Stage_values& stage) {

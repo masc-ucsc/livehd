@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "pass_usyn.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <format>
@@ -749,6 +750,14 @@ TEST_F(PassSynth, DominoStageAndExperimentOptionsNeedTheProfileAndReachTheBundle
   EXPECT_EQ(stage["uncertainty_first_ps"].GetDouble(), 0);
   EXPECT_EQ(stage["uncertainty_second_ps"].GetDouble(), 2);
   EXPECT_TRUE(stage["setup_eval_ps"].IsNull());  // this Liberty has no FO4 data
+  EXPECT_STREQ(stage["sources"]["setup_eval_ps"].GetString(), "option");
+  EXPECT_STREQ(stage["sources"]["eval_delay_ps"].GetString(), "logical-effort-estimate");
+  EXPECT_TRUE(sidecar["delay_model"]["fo4"].IsNull());
+  // No NLDM for the inverter: a named warning, never a silent zero.
+  const auto& records = livehd::diag::sink().records();
+  EXPECT_TRUE(std::any_of(records.begin(), records.end(), [](const auto& r) {
+    return r.code == "domino-delay" && r.message.find("fo4_ps is null") != std::string::npos;
+  }));
   const auto report = read(root + "/qor.json.usyn.json");
   EXPECT_EQ(report["physical"]["area_margin_pct"].GetUint(), 25U);
   EXPECT_EQ(report["physical"]["reference"]["pair_area_pct"].GetUint(), 75U);

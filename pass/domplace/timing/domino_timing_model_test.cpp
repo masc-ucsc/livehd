@@ -2,6 +2,8 @@
 #include "domino_timing_model.hpp"
 
 #include <algorithm>
+#include <fstream>
+#include <iterator>
 #include <stdexcept>
 
 #include "domino_timing_fixture.hpp"
@@ -25,21 +27,30 @@ bool contains(const std::vector<std::string>& issues, std::string_view text) {
 }
 }  // namespace
 
-TEST(DominoTimingModel, ReadsTheTimingViewOfASchemaTwoBundle) {
+TEST(DominoTimingModel, ReadsTheTimingViewOfASchemaThreeBundle) {
   test::Sidecar sidecar;
   sidecar.instances = {
       {"q1", test::kDomino}
   };
   const auto v = view(sidecar, "model_view");
-  EXPECT_EQ(v.bundle_schema, 2U);
+  EXPECT_EQ(v.bundle_schema, 3U);
   EXPECT_EQ(v.stage_version, 1U);
   EXPECT_EQ(v.model_version, 1U);
   EXPECT_EQ(v.clock, "clk");
   EXPECT_EQ(v.corner, "test");
   EXPECT_EQ(v.fo4_ps, 10);
   EXPECT_EQ(v.dbu, 1000);
-  EXPECT_EQ(v.stage.eval_delay_ps, 20);
-  EXPECT_EQ(v.sources.at("eval_delay_ps"), "bundle");
+  // Evaluate and precharge are per variant; the stage-wide slot is only an
+  // override.
+  EXPECT_FALSE(v.stage.eval_delay_ps);
+  EXPECT_FALSE(v.stage.precharge_ps);
+  EXPECT_EQ(v.stage.precharge_margin_ps, 5);
+  EXPECT_EQ(v.sources.at("eval_delay_ps"), "logical-effort-estimate");
+  ASSERT_TRUE(v.find(test::kDomino));
+  EXPECT_EQ(v.find(test::kDomino)->eval_delay_ps, 20);
+  EXPECT_EQ(v.find(test::kDomino)->precharge_ps, 20);
+  EXPECT_EQ(variant_delays(v.stage, v.find(test::kDomino)).eval_delay_ps, 20);
+  EXPECT_FALSE(variant_delays(v.stage, nullptr).eval_delay_ps);
   ASSERT_EQ(v.variants.size(), 2U);
   const auto* qn = v.find(test::kQn);
   ASSERT_TRUE(qn);
@@ -53,6 +64,18 @@ TEST(DominoTimingModel, ReadsTheTimingViewOfASchemaTwoBundle) {
   EXPECT_EQ(v.instances[0].state, "q1");
   EXPECT_EQ(v.digest.size(), 16U);
   std::string why;
+  // A sidecar of the previous schema is refused by name, not misread.
+  const auto  old_dir = sidecar.write("model_schema2");
+  {
+    std::ifstream     in(old_dir / kBundleSidecar);
+    std::string       text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+    const std::string key = "\"schema\":3";
+    ASSERT_NE(text.find(key), std::string::npos);
+    text.replace(text.find(key), key.size(), "\"schema\":2");
+    std::ofstream(old_dir / kBundleSidecar) << text;
+  }
+  EXPECT_FALSE(read_domino_timing(old_dir, &why));
+  EXPECT_NE(why.find("is schema 2; this build reads schema 3 only"), std::string::npos) << why;
   EXPECT_FALSE(read_domino_timing(std::filesystem::path(std::getenv("TEST_TMPDIR")) / "missing", &why));
   EXPECT_NE(why.find("missing"), std::string::npos) << why;
 }
@@ -186,7 +209,10 @@ TEST(DominoTimingModel, OverridesAreRecordedAndMoveTheGeneration) {
   EXPECT_EQ(v.stage.setup_eval_ps, 5);  // 0.5 * FO4 10
   EXPECT_EQ(v.sources.at("eval_delay_ps"), "override");
   EXPECT_EQ(v.sources.at("setup_eval_ps"), "override");
-  EXPECT_EQ(v.sources.at("precharge_ps"), "bundle");
+  EXPECT_EQ(v.sources.at("precharge_ps"), "logical-effort-estimate");
+  // The override wins over every variant's own estimate.
+  EXPECT_EQ(variant_delays(v.stage, v.find(test::kDomino)).eval_delay_ps, 33);
+  EXPECT_EQ(variant_delays(v.stage, v.find(test::kDomino)).precharge_ps, 20);
   const auto cells = domino_timing_cells(v, base(), &moved, nullptr);
   EXPECT_NE(moved, initial);
   EXPECT_EQ(cells->library.cells.at(test::kDomino).pins.at("R1").arcs.at(0).constraint[0]->lookup({}), 5);

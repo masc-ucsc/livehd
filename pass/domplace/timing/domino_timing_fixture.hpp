@@ -18,7 +18,7 @@
 #include "rapidjson/writer.h"
 
 // Hand-computable fixtures for the provisional domino timing model: an inline
-// Liberty (scalar tables, 1 ps / 1 fF units) and a schema-2 bundle written to
+// Liberty (scalar tables, 1 ps / 1 fF units) and a schema-3 bundle written to
 // TEST_TMPDIR with chosen coefficients.
 namespace livehd::domplace::timing::test {
 // FF: clk-to-Q 10 rise / 20 fall, setup 5 rise / 8 fall, CLK 3 fF.
@@ -64,8 +64,13 @@ struct Sidecar {
       {         "precharge_ps", 20},
       {  "precharge_margin_ps",  5}
   };
+  // eval_delay_ps and precharge_ps are written into every variant's timing
+  // record (per-variant in schema 3); the rest into the stage model. Every
+  // coefficient's recorded source is `source`.
+  std::string                                      source  = "logical-effort-estimate";
   std::optional<double>                            rail_ff = 2, clock_ff = 4, fo4 = 10;
   std::array<std::optional<double>, 2>             setup_capture{5, 7};
+  std::array<std::optional<double>, 2>             eval_variant;  // when set, this variant's eval_delay_ps
   std::vector<std::pair<std::string, std::string>> instances;  // (state, master)
 
   // Write a bundle directory: the sidecar, an empty LEF and the stand-in
@@ -96,8 +101,17 @@ struct Sidecar {
     w.Key("clock");
     w.String("clk");
     for (const auto& [key, value] : stage) {
-      real(key.c_str(), value);
+      if (key != "eval_delay_ps" && key != "precharge_ps") {
+        real(key.c_str(), value);
+      }
     }
+    w.Key("sources");
+    w.StartObject();
+    for (const auto& [key, value] : stage) {
+      w.Key(key.c_str());
+      w.String(source.c_str());
+    }
+    w.EndObject();
     w.EndObject();
     w.Key("units");
     w.StartObject();
@@ -176,6 +190,11 @@ struct Sidecar {
       real("clock_ff", clock_ff);
       w.EndObject();
       real("setup_capture_ps", setup_capture[v]);
+      w.Key("timing");
+      w.StartObject();
+      real("eval_delay_ps", eval_variant[v] ? eval_variant[v] : stage.at("eval_delay_ps"));
+      real("precharge_ps", stage.at("precharge_ps"));
+      w.EndObject();
       w.Key("drive");
       w.Null();
       w.EndObject();

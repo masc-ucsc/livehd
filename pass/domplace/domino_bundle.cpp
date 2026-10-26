@@ -124,33 +124,45 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
     const auto& site      = inputs.geometry.footprint.site;  // checked when the footprint was resolved
     fs::create_directories(out_dir);
 
-    // FO4 of the reference inverter, a labeled estimate: its first-slew
-    // intrinsic delay plus its drive resistance into four of its own inputs.
+    // FO4 and tau of the reference inverter on its NLDM tables, and the
+    // logical-effort estimate of every coefficient no option sets
+    // (domino_delay.hpp). Without FO4 they stay null with a diagnostic.
     const auto&           inverter = reference.inverter;
-    std::optional<double> c_in, fo4;
-    if (!inverter.input_capacitance_ff.empty()) {
-      c_in = positive(inverter.input_capacitance_ff.front());
-    }
-    if (c_in && inverter.resistance_ohm > 0) {
-      fo4 = inverter.intrinsic_ps + inverter.resistance_ohm * 4 * *c_in * 1e-3;  // ohm * fF = 1e-3 ps
+    const auto            delay    = domino_delay_model(reference, inputs.delay);
+    const auto            c_in     = delay.c_in_ff;
+    std::optional<double> fo4;
+    if (delay.fo4) {
+      fo4 = delay.fo4->fo4_ps;
     } else {
-      notes.push_back("fo4_ps: " + inverter.name + " has no Liberty input capacitance or drive resistance");
+      result.delay_issue = "fo4_ps is null: " + delay.issue + "; the stage delays it scales are null (unmeasured)";
+      notes.push_back(result.delay_issue);
     }
-    auto stage = inputs.stage;
+    auto                               stage = inputs.stage;
+    std::map<std::string, std::string> sources;
     // The base variant's; each variant records its own register's setup.
     if (!stage.setup_capture_ps) {
       stage.setup_capture_ps = reference.registers.front().setup_ps;
     }
-    for (const auto& [multiple, target] : {
-             std::pair{            &inputs.eval_fo4,       &stage.eval_delay_ps},
-             std::pair{       &inputs.precharge_fo4,        &stage.precharge_ps},
-             std::pair{      &inputs.setup_eval_fo4,       &stage.setup_eval_ps},
-             std::pair{&inputs.precharge_margin_fo4, &stage.precharge_margin_ps}
+    sources["setup_capture_ps"] = "register-liberty: the base variant's register setup; each variant records its own";
+    sources["hold_capture_ps"]  = "unknown: setup-only model";
+    const auto fraction
+        = [&](const std::optional<double>& option, double fallback, const char* name, std::optional<double>& target) {
+            target        = fo4 ? std::optional<double>{option.value_or(fallback) * *fo4} : std::nullopt;
+            sources[name] = option ? "option" : std::string(kDelaySource);
+          };
+    fraction(inputs.setup_eval_fo4, inputs.delay.setup_eval_fo4, "setup_eval_ps", stage.setup_eval_ps);
+    fraction(inputs.precharge_margin_fo4, inputs.delay.precharge_margin_fo4, "precharge_margin_ps", stage.precharge_margin_ps);
+    // An unset uncertainty is the ideal clock, as the full-cycle
+    // synth.place.stage_timing.clock_uncertainty_ps defaults to 0.
+    for (const auto& [name, target] : {
+             std::pair{ "uncertainty_first_ps",  &stage.uncertainty_first_ps},
+             std::pair{"uncertainty_second_ps", &stage.uncertainty_second_ps}
     }) {
-      if (*multiple && fo4) {
-        *target = **multiple * *fo4;
-      }
+      sources[name] = *target ? "option" : "estimate: ideal clock (0 ps)";
+      *target       = target->value_or(0);
     }
+    sources["eval_delay_ps"] = inputs.eval_fo4 ? "option" : std::string(kDelaySource);
+    sources["precharge_ps"]  = inputs.precharge_fo4 ? "option" : std::string(kDelaySource);
     // Every variant's CLK load, a labeled estimate: its register's CK input
     // plus the clocked domino devices (precharge, foot) at half an inverter
     // input each. Null when either input is unknown.
@@ -167,11 +179,9 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
              std::pair{        "setup_eval_ps",         stage.setup_eval_ps},
              {     "setup_capture_ps",      stage.setup_capture_ps},
              {      "hold_capture_ps",       stage.hold_capture_ps},
-             {         "precharge_ps",          stage.precharge_ps},
              {  "precharge_margin_ps",   stage.precharge_margin_ps},
              { "uncertainty_first_ps",  stage.uncertainty_first_ps},
-             {"uncertainty_second_ps", stage.uncertainty_second_ps},
-             {        "eval_delay_ps",         stage.eval_delay_ps}
+             {"uncertainty_second_ps", stage.uncertainty_second_ps}
     }) {
       if (!value) {
         missing += std::string(missing.empty() ? "" : ", ") + name;
@@ -255,12 +265,17 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
     real(w, "setup_eval_ps", stage.setup_eval_ps);
     real(w, "setup_capture_ps", stage.setup_capture_ps);
     real(w, "hold_capture_ps", stage.hold_capture_ps);
-    real(w, "precharge_ps", stage.precharge_ps);
     real(w, "precharge_margin_ps", stage.precharge_margin_ps);
     real(w, "uncertainty_first_ps", stage.uncertainty_first_ps);
     real(w, "uncertainty_second_ps", stage.uncertainty_second_ps);
-    real(w, "eval_delay_ps", stage.eval_delay_ps);
     text(w, "storage_init", std::string(1, stage.storage_init));
+    text(w, "per_variant", "eval_delay_ps and precharge_ps: masters[].variants[].timing");
+    w.Key("sources");
+    w.StartObject();
+    for (const auto& [name, source] : sources) {
+      text(w, name.c_str(), source);
+    }
+    w.EndObject();
     w.EndObject();
 
     w.Key("units");
@@ -331,7 +346,52 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
     w.Key("fo4_ps");
     w.StartObject();
     real(w, "value", fo4);
-    text(w, "source", "labeled-estimate: intrinsic + R * 4 * C_in of " + inverter.name);
+    text(w,
+         "source",
+         "liberty-nldm: " + inverter.name + " driving 4 x its input capacitance at a self-consistent input slew (delay_model.fo4)");
+    w.EndObject();
+    w.Key("delay_model");
+    w.StartObject();
+    text(w, "source", kDelaySource);
+    text(w, "model", kDelayModel);
+    text(w,
+         "citation",
+         "I. Sutherland, R. Sproull, D. Harris, Logical Effort: Designing Fast CMOS Circuits (1999), ch. 10 (domino)");
+    text(w, "formula", kDelayFormula);
+    w.Key("parameters");
+    w.StartObject();
+    real(w, "p_inv", inputs.delay.p_inv);
+    real(w, "precharge_width", inputs.delay.precharge_width);
+    real(w, "internal_load", inputs.delay.internal_load);
+    real(w, "internal_node_weight", inputs.delay.internal_node_weight);
+    real(w, "setup_eval_fo4", inputs.delay.setup_eval_fo4);
+    real(w, "precharge_margin_fo4", inputs.delay.precharge_margin_fo4);
+    w.EndObject();
+    real(w, "tau_ps", delay.tau_ps);
+    real(w, "c_in_ff", c_in);
+    w.Key("fo4");
+    if (delay.fo4) {
+      const auto& f = *delay.fo4;
+      w.StartObject();
+      text(w, "inverter", f.inverter);
+      text(w, "arc", f.input_pin + "->" + f.output_pin);
+      real(w, "load_ff", f.load_ff);
+      real(w, "slew_rise_ps", f.slew_rise_ps);
+      real(w, "slew_fall_ps", f.slew_fall_ps);
+      real(w, "delay_rise_ps", f.delay_rise_ps);
+      real(w, "delay_fall_ps", f.delay_fall_ps);
+      real(w, "fo4_ps", f.fo4_ps);
+      number(w, "iterations", f.iterations);
+      text(w,
+           "method",
+           "each edge's input slew is the opposite output transition at 4 x C_in (fixed point); FO4 is the mean of rise and fall");
+      w.EndObject();
+    } else {
+      w.Null();
+    }
+    if (!delay.fo4) {
+      text(w, "issue", delay.issue);
+    }
     w.EndObject();
     w.Key("coefficients");
     w.StartObject();
@@ -346,8 +406,10 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
     w.EndObject();
     if (!inputs.eval_fo4 || !inputs.precharge_fo4 || !inputs.setup_eval_fo4 || !inputs.precharge_margin_fo4) {
       notes.push_back(
-          "eval_fo4, precharge_fo4, setup_eval_fo4 and precharge_margin_fo4 are hand-set coefficients; unset ones stay null");
+          "stage delays not set by an FO4 option are the logical-effort estimate (delay_model), a labeled estimate, not "
+          "characterized");
     }
+    std::set<std::string> delay_issues;
 
     w.Key("masters");
     w.StartArray();
@@ -411,6 +473,43 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
                          reference.clock_devices));
         w.EndObject();
         real(w, "setup_capture_ps", reference.registers[v].setup_ps);
+        {
+          // eval_delay_ps and precharge_ps: an FO4 option, else the estimate.
+          std::string why;
+          const auto  estimate = estimate_stage_delay(delay, metrics, reference.registers[v].d_ff, &why);
+          if (!estimate && (!inputs.eval_fo4 || !inputs.precharge_fo4)) {
+            delay_issues.insert(reference.registers[v].name + ": " + why);
+          }
+          const auto pick = [&](const std::optional<double>& option, double Stage_delay::* value) -> std::optional<double> {
+            if (option) {
+              return fo4 ? std::optional<double>{*option * *fo4} : std::nullopt;
+            }
+            return estimate ? std::optional<double>{*estimate.*value} : std::nullopt;
+          };
+          w.Key("timing");
+          w.StartObject();
+          real(w, "eval_delay_ps", pick(inputs.eval_fo4, &Stage_delay::eval_ps));
+          real(w, "precharge_ps", pick(inputs.precharge_fo4, &Stage_delay::precharge_ps));
+          real(w, "register_d_ff", reference.registers[v].d_ff);
+          w.Key("estimate");
+          if (estimate) {
+            w.StartObject();
+            real(w, "g_dynamic", estimate->g_dynamic);
+            real(w, "h_dynamic", estimate->h_dynamic);
+            real(w, "p_dynamic", estimate->p_dynamic);
+            real(w, "h_output", estimate->h_output);
+            real(w, "p_output", estimate->p_output);
+            real(w, "c_dynamic", estimate->c_dynamic);
+            real(w, "eval_tau", estimate->eval_tau);
+            real(w, "precharge_tau", estimate->precharge_tau);
+            real(w, "eval_ps", estimate->eval_ps);
+            real(w, "precharge_ps", estimate->precharge_ps);
+            w.EndObject();
+          } else {
+            w.Null();
+          }
+          w.EndObject();
+        }
         drive(w, reference.registers[v].drive);
         w.Key("access_check");
         w.StartObject();
@@ -434,6 +533,14 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
       w.EndObject();
     }
     w.EndArray();
+
+    for (const auto& issue : delay_issues) {
+      const auto text = "eval_delay_ps/precharge_ps estimate is null for the " + issue;
+      notes.push_back(text);
+      if (result.delay_issue.empty()) {
+        result.delay_issue = text;
+      }
+    }
 
     w.Key("instances");
     w.StartArray();
@@ -493,9 +600,16 @@ std::optional<Domino_sidecar> read_domino_sidecar(const rapidjson::Document& doc
     }
     return std::nullopt;
   };
-  if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("schema") || !doc["schema"].IsUint()
-      || doc["schema"].GetUint() != kBundleSchema) {
+  if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("schema") || !doc["schema"].IsUint()) {
     return refuse(std::format("{} is not a schema-{} sidecar", kBundleSidecar, kBundleSchema));
+  }
+  if (const auto schema = doc["schema"].GetUint(); schema != kBundleSchema) {
+    return refuse(
+        std::format("{} is schema {}; this build reads schema {} only (regenerate the bundle with pass.usyn "
+                    "physical=domino_provisional)",
+                    kBundleSidecar,
+                    schema,
+                    kBundleSchema));
   }
   Domino_sidecar sidecar;
   sidecar.lef = dir / kBundleLef;
@@ -540,7 +654,8 @@ std::optional<Domino_sidecar> read_domino_sidecar(const rapidjson::Document& doc
     for (const auto& variant : master["variants"].GetArray()) {
       if (!variant.IsObject() || !variant.HasMember("name") || !variant["name"].IsString() || !variant.HasMember("halves")
           || !variant["halves"].IsArray() || variant["halves"].Size() != 2 || !variant.HasMember("width_dbu")
-          || !variant["width_dbu"].IsUint64() || !variant.HasMember("pin_caps") || !variant.HasMember("drive")) {
+          || !variant["width_dbu"].IsUint64() || !variant.HasMember("pin_caps") || !variant.HasMember("drive")
+          || !variant.HasMember("timing") || !variant["timing"].IsObject()) {
         return refuse("malformed master variant");
       }
       Catalog_entry entry;
@@ -554,6 +669,8 @@ std::optional<Domino_sidecar> read_domino_sidecar(const rapidjson::Document& doc
       entry.rail_ff          = estimate(variant["pin_caps"], "rail_ff");
       entry.clock_ff         = estimate(variant["pin_caps"], "clock_ff");
       entry.setup_capture_ps = estimate(variant, "setup_capture_ps");
+      entry.eval_delay_ps    = estimate(variant["timing"], "eval_delay_ps");
+      entry.precharge_ps     = estimate(variant["timing"], "precharge_ps");
       if (const auto pins = register_pins.find(entry.register_cell); pins != register_pins.end()) {
         std::tie(entry.clk_pin, entry.q_pin) = pins->second;
       } else {

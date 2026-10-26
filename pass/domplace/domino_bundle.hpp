@@ -12,6 +12,7 @@
 
 #include "design_synth.hpp"
 #include "domino_cell.hpp"
+#include "domino_delay.hpp"
 #include "domino_geometry.hpp"
 #include "domino_reference.hpp"
 #include "rapidjson/document.h"
@@ -24,7 +25,7 @@ namespace livehd::domplace {
 // models, external simulators read the Verilog models; the sidecar records the
 // units, corner, technology, reference cells, coefficients, masters and the
 // original state that owns every instance.
-inline constexpr uint32_t         kBundleSchema      = 2;
+inline constexpr uint32_t         kBundleSchema      = 3;
 inline constexpr std::string_view kBundleLef         = "domino_cells.lef";
 inline constexpr std::string_view kBundleSidecar     = "domino_models.json";
 inline constexpr std::string_view kBundleVerilog     = "domino_models.v";
@@ -53,11 +54,15 @@ struct Bundle_inputs {
   const Domino_reference*                          reference = nullptr;
   Geometry_inputs                                  geometry;    // its footprint's inverter must be reference->inverter
   std::string                                      technology;  // the route policy's source (domino_route_policy)
-  Stage_model                                      stage;       // its clock; coefficients the bundle cannot derive stay null
-  // Hand-set evaluate and precharge delays, setup into evaluate and the
-  // precharge margin, in FO4 of the reference inverter; absent values stay
+  // Its clock and the explicit uncertainties; an absent uncertainty is the
+  // labeled ideal-clock estimate (0 ps).
+  Stage_model                                      stage;
+  // Explicit evaluate and precharge delays, setup into evaluate and the
+  // precharge margin, in FO4 of the reference inverter. Each absent one takes
+  // the logical-effort estimate (domino_delay.hpp); with no FO4 both stay
   // null in the sidecar with a diagnostic.
   std::optional<double>                            eval_fo4, precharge_fo4, setup_eval_fo4, precharge_margin_fo4;
+  Delay_parameters                                 delay;
   uint32_t                                         area_margin_pct = 0;  // the selection's area margin, recorded
   // Input digests recorded for provenance, e.g. ("lef", "<path> sha256:<hex>").
   std::vector<std::pair<std::string, std::string>> provenance;
@@ -67,6 +72,7 @@ struct Bundle_result {
   bool                     ok = false;
   std::string              reason;       // why the bundle was refused
   std::vector<std::string> diagnostics;  // labeled estimates, null coefficients, unverified pin access
+  std::string                   delay_issue;  // why a stage-delay estimate is null (also in diagnostics); empty when none
   size_t                   macros = 0;   // LEF macros: masters x register variants
   std::map<std::string, double> footprints;   // rounded LEF footprint (um^2) by macro
 };
@@ -94,6 +100,7 @@ struct Catalog_entry {
   double                               a_footprint_um2 = 0, a_estimate_um2 = 0;
   std::optional<double>                rail_ff, clock_ff;  // labeled estimates; null when not derivable
   std::optional<double>                setup_capture_ps;   // the register's setup at its capture; null when unknown
+  std::optional<double>                eval_delay_ps, precharge_ps;  // this variant's; null when not derivable
   std::optional<liberty::Output_drive> drive;              // the register family's Q model
 };
 // The placement view of a published bundle.
@@ -105,7 +112,8 @@ struct Domino_sidecar {
   std::vector<Catalog_entry>                                 catalog;  // every variant, in sidecar order
 };
 // nullopt with the reason in `why` for a missing or malformed bundle, or a
-// sidecar of another schema (bundles are regenerated with their producer).
+// sidecar of another schema, named in the reason (bundles are regenerated
+// with their producer).
 std::optional<Domino_sidecar> read_domino_sidecar(const std::filesystem::path& dir, std::string* why);
 // The same from the sidecar document already parsed from dir's sidecar file.
 std::optional<Domino_sidecar> read_domino_sidecar(const rapidjson::Document& doc, const std::filesystem::path& dir,
