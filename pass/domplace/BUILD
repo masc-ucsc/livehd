@@ -82,6 +82,35 @@ cc_test(
     ],
 )
 
+# The logical-effort stage-delay estimate (U1): FO4 from the reference
+# inverter's NLDM, eval and precharge per master variant.
+cc_library(
+    name = "domino_delay",
+    srcs = ["domino_delay.cpp"],
+    hdrs = ["domino_delay.hpp"],
+    copts = COPTS,
+    includes = ["."],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":domino_reference",
+        "//pass/liberty:timing_model",
+        "//pass/usyn:usyn_logic",
+    ],
+)
+
+cc_test(
+    name = "domino_delay_test",
+    size = "small",
+    srcs = ["domino_delay_test.cpp"],
+    copts = COPTS,
+    data = ["//inou/lefdef:test_data"],
+    deps = [
+        ":domino_delay",
+        ":domino_reference",
+        "@googletest//:gtest_main",
+    ],
+)
+
 # v1 physical eligibility of frozen state: candidate or a retention reason.
 cc_library(
     name = "physical_eligibility",
@@ -228,6 +257,7 @@ cc_library(
     deps = [
         ":contract",
         ":domino_cell",
+        ":domino_delay",
         ":domino_geometry",
         ":domino_reference",
         "//graph",

@@ -9,6 +9,7 @@
 
 #include "function.hpp"
 #include "liberty_dff.hpp"
+#include "pass/liberty/timing_model.hpp"
 
 namespace livehd::domplace {
 
@@ -20,6 +21,7 @@ struct Domino_register {
   double                               area = 0;               // the full register, charged once per variant
   std::optional<double>                clk_to_q_ps, setup_ps, hold_ps;
   std::optional<double>                clock_ff;  // CK input capacitance, the larger of rise and fall
+  std::optional<double>                d_ff;      // D input capacitance, the larger of rise and fall
   std::optional<liberty::Output_drive> drive;
   bool                                 q_inverted = false;
 };
@@ -30,6 +32,9 @@ struct Domino_register {
 struct Domino_reference {
   std::string                  inverter_source, register_source;
   liberty::Comb_cell           inverter;
+  // The inverter's NLDM model (FO4, domino_delay.hpp); absent when the
+  // Liberty has none for it.
+  std::optional<liberty::timing::Cell> inverter_timing;
   std::vector<Domino_register> registers;  // the drive ladder from the base register up, area order
   std::string                  corner;     // the Liberty library group holding every reference cell
   uint32_t                     aux_nonregister = 4;

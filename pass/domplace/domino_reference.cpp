@@ -120,16 +120,23 @@ std::optional<Domino_reference> resolve_domino_reference(const std::string& libe
     if (reference.corner.empty() || group(r.name) != reference.corner) {
       return refuse(std::format("reference cells {} and {} are not in one Liberty library group", reference.inverter.name, r.name));
     }
-    // The clock load a domino stage keeps from its register; absent stays absent.
+    // The clock load a domino stage keeps from its register, and the D load
+    // its output inverter drives; absent stays absent.
     const auto& pins = library.cells.at(r.name).pins;
-    if (const auto clock = pins.find(r.clk_pin); clock != pins.end()) {
-      for (const auto& value : clock->second.capacitance_ff) {
-        if (value && (!r.clock_ff || *value > *r.clock_ff)) {
-          r.clock_ff = value;
+    for (auto [pin, target] : {
+             std::pair{r.clk_pin, &r.clock_ff},
+             std::pair{  r.d_pin,     &r.d_ff}
+    }) {
+      if (const auto found = pins.find(pin); found != pins.end()) {
+        for (const auto& value : found->second.capacitance_ff) {
+          if (value && (!*target || *value > **target)) {
+            *target = value;
+          }
         }
       }
     }
   }
+  reference.inverter_timing = library.cells.at(reference.inverter.name);
   return reference;
 }
 
