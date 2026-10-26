@@ -390,7 +390,7 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
       reject("logical exclusion");
       continue;
     }
-    if (!net.wires.empty() || net.connections.size() < 2 || (!net.use.empty() && net.use != "SIGNAL")) {
+    if (!physical::unrouted_signal(net)) {
       reject("not an unwired signal net");
       continue;
     }

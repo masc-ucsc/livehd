@@ -808,7 +808,7 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
   if (expired()) {
     return out;
   }
-  if (net.connections.size() < 2 || !net.wires.empty() || (!net.use.empty() && net.use != "SIGNAL")) {
+  if (!ph::unrouted_signal(net)) {
     return fail("not an unwired multi-pin signal net");
   }
   std::set<std::pair<std::string, std::string>> pins;

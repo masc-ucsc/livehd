@@ -44,8 +44,7 @@ static Repeater_snapshot make_repeater_snapshot(const Result& original, const Re
   if (original.preroute_design->protects(old_net)) {
     throw std::invalid_argument("cannot split a protected pre-route net");
   }
-  if (!old_net.wires.empty() || !old_design.net_mask.at(binding.demand_net) || old_net.connections.size() < 2
-      || (!old_net.use.empty() && old_net.use != "SIGNAL")) {
+  if (!physical::unrouted_signal(old_net) || !old_design.net_mask.at(binding.demand_net)) {
     throw std::invalid_argument("cannot split an already routed, non-signal or excluded net");
   }
   const auto label = [](const physical::Connection& connection) {
@@ -363,8 +362,7 @@ Preroute_stage_result preroute_stage(const Result& original, const physical::Tec
     // nets. In particular, splitting must never relabel a non-signal net SIGNAL.
     if (b.clock || b.reset || b.tie || b.dont_touch || original.preroute_design->protects(physical_net)
         || !original.preroute_design->design.net_mask.at(b.demand_net)
-        || net.wire_length_um <= length_limit || !physical_net.wires.empty() || physical_net.connections.size() < 2
-        || (!physical_net.use.empty() && physical_net.use != "SIGNAL") || !cell_endpoints
+        || net.wire_length_um <= length_limit || !physical::unrouted_signal(physical_net) || !cell_endpoints
         || !preroute_span_exclusion(original.preroute_design->design, b.demand_net, options).empty()) {
       short_nets.push_back(b);
       continue;

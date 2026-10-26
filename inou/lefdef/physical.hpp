@@ -260,6 +260,10 @@ struct Net {
   std::string             use{};
   friend bool             operator==(const Net&, const Net&) = default;
 };
+// Unwired ordinary net with at least two endpoints: a signal-routing candidate.
+inline bool unrouted_signal(const Net& net) {
+  return net.wires.empty() && net.connections.size() >= 2 && (net.use.empty() || net.use == "SIGNAL");
+}
 struct Track {
   std::string axis, layer;
   int64_t     start = 0, count = 0, step = 0;
