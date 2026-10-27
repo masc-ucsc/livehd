@@ -2054,10 +2054,18 @@ void synth_command(Options& opts, Result& res) {
         }
       };
       place_options.optimization_pending = !macro_plan_only && (run_resize || run_timing_place || run_resynth);
+      // The cleanup leaves the buffering to the post-placement repair: only
+      // synth.place.resize rebuilds it (timing-driven placement and resynthesis
+      // do not), so by default it runs only when that phase will.
+      const auto buffer_cleanup          = synth_set(opts, "place.buffer_cleanup", "auto");
+      if (buffer_cleanup != "auto" && buffer_cleanup != "true" && buffer_cleanup != "false") {
+        throw Lhd_error{"usage", "invalid synth.place.buffer_cleanup: " + buffer_cleanup, "expected auto, true or false"};
+      }
+      const bool run_buffer_cleanup = buffer_cleanup == "auto" ? run_resize && !macro_plan_only : buffer_cleanup == "true";
       hhds::GraphLibrary                               seed_library;
       std::vector<std::unique_ptr<hhds::GraphLibrary>> prepared_libraries;
       const auto                                       prepare_input = [&]() {
-        if (!place_options.full) {
+        if (!place_options.full || !run_buffer_cleanup) {
           return *found;
         }
         Phase_timer phase(res, "pass.place.buffer_cleanup");

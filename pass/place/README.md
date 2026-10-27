@@ -164,9 +164,13 @@ non-FP flow. Explicit positive values require a workdir, ABC, full placement,
 OpenTimer, and a resolvable SDC clock. No IO timing JSON is exchanged during GP
 timing callbacks; the two state files are stage-boundary snapshots.
 
-Before a fresh full synthesis placement, `remove_synthesis_buffers` makes a
-private physical copy and bypasses internal, scalar, non-inverting Liberty
-buffers. Input/output binding cells, fixed cells and clock/reset distribution
+Before a fresh full synthesis placement whose later `synth.place.resize`
+phase rebuilds the buffering, `remove_synthesis_buffers` makes a private
+physical copy and bypasses internal, scalar, non-inverting Liberty buffers.
+`synth.place.buffer_cleanup` (`auto`, the default) runs it only then: timing-
+driven placement and resynthesis do not re-buffer, so without resize (for
+example `synth.opentimer=false`) the synthesis buffers stay; `true` forces the
+cleanup and `false` never runs it. Input/output binding cells, fixed cells and clock/reset distribution
 cones remain, including controls crossing region boundaries. Logical mapped
 definitions and their resynthesis identities/history are unchanged. The cleanup
 also runs on the new physical copy after an accepted color restart, but never

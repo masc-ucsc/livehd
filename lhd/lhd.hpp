@@ -1715,6 +1715,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "4",
      Synth_set_option::Kind::integer,
      "legacy GP buffer trial budget retained for compatibility; range [1,16]"},
+    {"place.buffer_cleanup",
+     "auto",
+     Synth_set_option::Kind::file,
+     "auto|true|false: bypass internal non-inverting synthesis buffers on the physical copy before full placement; auto "
+     "only when synth.place.resize will rebuild the buffering in the same run (else the synthesis buffers stay)"},
     {"place.resize.engine",
      "legacy",
      Synth_set_option::Kind::file,
