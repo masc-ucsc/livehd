@@ -183,17 +183,24 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
       topologies.push_back(topology);
     }
   }
-  // Include the original direct connection. Buffer-specific repeater spacing
-  // must not force a tree when the actual source can drive the loads faster.
-  for (size_t candidate = 0; candidate <= topologies.size(); ++candidate) {
+  // Include both the original connection and a single source repeater. A
+  // source can satisfy electrical limits yet benefit from isolating its load;
+  // requiring an electrical violation would omit this compact alternative.
+  for (size_t candidate = 0; candidate < topologies.size() + 2; ++candidate) {
     Buffer_tree plan;
     try {
-      if (candidate == 0) {
+      if (candidate < 2) {
         for (unsigned i = 0; i < loads.size(); ++i) {
           plan.root.push_back({false, i});
         }
+        if (candidate == 1) {
+          plan.buffers.push_back({root, std::move(plan.root), 0});
+          plan.root = {
+              {true, 0}
+          };
+        }
       } else {
-        const auto& topology = topologies[candidate - 1];
+        const auto& topology = topologies[candidate - 2];
         plan                 = plan_buffers(root,
                                             loads,
                                             capacitances,
@@ -257,13 +264,17 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
       }
       auto& branch                 = plan.buffers[i];
       const auto [packet, longest] = aggregate(branch.position, branch.loads);
+      (void)longest;
       double   best_input_required = -std::numeric_limits<double>::infinity();
       unsigned choice              = 0;
       bool     selected            = false;
       for (unsigned j = 0; j < drives.size(); ++j) {
         const auto& b = drives[j];
+        // Repeater spacing generates alternatives; it is not an electrical
+        // wire-length limit. Judge a longer branch using its RC delay, load
+        // and fanout, just as for the original source.
         if (packet.cap > b.max_cap_ff * (1 + 1e-9) + (2 * branch.loads.size() + 2) * wire_c_ff_dbu
-            || branch.loads.size() > b.max_fanout || longest > b.max_distance_dbu + 2) {
+            || branch.loads.size() > b.max_fanout) {
           continue;
         }
         const double input_required = packet.required - b.intrinsic_ps - b.resistance_ohm * packet.cap * 1e-3;

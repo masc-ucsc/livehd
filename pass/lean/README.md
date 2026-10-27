@@ -419,7 +419,7 @@ The `pass.lean` knobs are `--set formal.lean.<label>=<value>` (e.g.
 | `strict` | `true` | Reject invalid dependency widths and undersized constants |
 | `emit_cert` | `true` | Emit graph certificate and cert-model definitions; `false` = model-only |
 | `emit_fast_bridge` | `false` | Emit the step-5 fast-view bridge (`_comb = _comb_cert`, ...) |
-| `max_width` | `1024` | Cap on node bit width; `0` or `unlimited` = no cap (see below) |
+| `max_width` | no cap | Cap on node bit width; `0` or `unlimited` = no cap (see below) |
 | `max_nodes` | `0` | Cap on the combinational cone's node count; `0` or `unlimited` = no cap |
 | `cert_wf` | `skip` | Certificate well-formedness proof mode: `skip`, `eval`, `sorry`, `chunked` |
 | `cert_wf_fallback` | `fail` | `fail`, `sorry` or `eval` for chunk shapes `cert_wf=chunked` does not support |
@@ -433,17 +433,24 @@ The `pass.lean` knobs are `--set formal.lean.<label>=<value>` (e.g.
 ### Node bit-width cap (`max_width`)
 
 The pass emits the typed fast model as `BitVec w` at each node's real (finite)
-width `w`.  `--set formal.lean.max_width=N` caps `w`; the **default is 1024**.  That
-default is a pass-level *proof-tractability* guard, **not** a LiveHD limit
-(LiveHD's `bits` attribute is a finite `int32`, i.e. widths up to ~2^31), and it
-exists only because `native_decide` / `by eval` blow up on very wide words.
+width `w`.  **There is no cap by default**: the pass accepts whatever finite
+width a node carries, matching LiveHD's own widths (`bits` is a finite `int32`,
+i.e. up to ~2^31).
 
-To accept whatever finite width a node carries — matching LiveHD's own
-finite-but-unbounded widths — pass `0` or `unlimited`:
+`--set formal.lean.max_width=N` imposes a cap, as a *proof-tractability* guard
+for the oracle backends: `native_decide` / `by eval` blow up on very wide words,
+so a backend that relies on them may want to refuse early rather than emit a
+file it cannot discharge.  It was never a LiveHD limit, and it is opt-in.
 
 ```bash
---set formal.lean.max_width=0            # or: unlimited / inf / none
+--set formal.lean.max_width=4096         # impose a cap
+--set formal.lean.max_width=0            # back to no cap: 0 / unlimited / inf / none
 ```
+
+> A cap is reported as `node n_<id> (node) has width <w> > max_width=<N>` and
+> aborts the emit.  Before 2026-10-26 the default was `1024`, which made that
+> message the first thing most CVA6-scale designs hit; it is not a capability
+> limit of the emitter.
 
 Notes:
 - Constant *value* arbitrary precision is independent of this knob and always on

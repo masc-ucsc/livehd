@@ -3906,7 +3906,38 @@ TEST(Placement, IncrementalNewMemoryUnlocksCachedCellsUnderItsProxy) {
   }));
   EXPECT_EQ(updated.floorplan.components.size(), initial.floorplan.components.size() + 2);  // ram + its enable tie
 }
-TEST(Placement, HierarchicalSteinerRcIsConnectedAcyclicAndChargesOnlyRetainedWire) {
+TEST(Placement, ZeroWireTimingIsIndependentOfPinGeometry) {
+  std::vector<std::pair<std::string, std::pair<double, double>>> pins;
+  for (int i = 0; i < 1600; ++i) {
+    pins.push_back({
+        "pin" + std::to_string(i),
+        {double(i), double(i % 7)}
+    });
+  }
+  bool       approximate = false;
+  const auto before      = steiner_rc("pin700", pins, Wire_rc{0, 0, 0, 0, "ideal"}, 1, &approximate);
+  for (auto& pin : pins) {
+    pin.second = {0, 0};
+  }
+  const auto after = steiner_rc("pin700", pins, Wire_rc{0, 0, 0, 0, "ideal"}, 1, &approximate);
+  EXPECT_FALSE(approximate);
+  ASSERT_EQ(before.nodes.size(), pins.size() + 1);
+  ASSERT_EQ(before.nodes.size(), after.nodes.size());
+  ASSERT_EQ(before.edges.size(), pins.size());
+  ASSERT_EQ(before.edges.size(), after.edges.size());
+  EXPECT_EQ(before.wire_length_um, 0);
+  for (size_t i = 0; i < before.nodes.size(); ++i) {
+    EXPECT_EQ(before.nodes[i].pin, after.nodes[i].pin);
+    EXPECT_EQ(before.nodes[i].capacitance_ff, 0);
+  }
+  for (size_t i = 0; i < before.edges.size(); ++i) {
+    EXPECT_EQ(before.edges[i].from, after.edges[i].from);
+    EXPECT_EQ(before.edges[i].to, after.edges[i].to);
+    EXPECT_EQ(before.edges[i].resistance_ohm, 0);
+    EXPECT_EQ(after.edges[i].resistance_ohm, 0);
+  }
+}
+TEST(Placement, HighFanoutSteinerRcIsConnectedAcyclicAndChargesOnlyRetainedWire) {
   // Independent graph invariants: spatial FLUTE groups and their connector
   // can share several geometric junctions, so deduplicating edges is not
   // sufficient to make their union a tree.
@@ -3914,21 +3945,24 @@ TEST(Placement, HierarchicalSteinerRcIsConnectedAcyclicAndChargesOnlyRetainedWir
            std::pair{  32, 40},
            std::pair{  61, 18},
            std::pair{ 400,  4},
-           std::pair{1201,  1}
+           std::pair{1201,  1},
+           std::pair{ 512,  2}
   }) {
+    const bool dense_visibility = width == 512;
     SCOPED_TRACE(std::format("{}x{}", width, height));
     std::vector<std::pair<std::string, std::pair<double, double>>> pins;
     for (int y = 0; y < height; ++y) {
       for (int x = 0; x < width; ++x) {
         pins.push_back({
             "pin" + std::to_string(pins.size()),
-            {double(x * 10), double(y * 10)}
+            {double((x + (dense_visibility && y == 0 ? 512 : 0)) * 10), double(y * 10)}
         });
       }
     }
     bool       approximate = false;
     const auto rc          = steiner_rc(pins.front().first, pins, Wire_rc{1, 2, 1, 2, "test"}, 1, &approximate);
-    EXPECT_TRUE(approximate);
+    // A very wide, shallow grid also exposes many peers across its rows.
+    EXPECT_EQ(approximate, dense_visibility || width == 400);
     ASSERT_EQ(rc.edges.size() + 1, rc.nodes.size());
     std::vector<unsigned> parent(rc.nodes.size()), degree(rc.nodes.size());
     std::iota(parent.begin(), parent.end(), 0);
@@ -3982,10 +4016,10 @@ TEST(Placement, HierarchicalSteinerSharedJunctionCycleRegression) {
   ASSERT_EQ(pins.size(), 2771);
   bool       approximate = false;
   const auto rc          = steiner_rc("pin0", pins, Wire_rc{1, 2, 1, 2, "test"}, 1000, &approximate);
-  EXPECT_TRUE(approximate);
-  // The unfiltered group union had 6390 nodes and 6390 edges: one cycle.
-  ASSERT_EQ(rc.nodes.size(), 6390);
-  ASSERT_EQ(rc.edges.size(), 6389);
+  EXPECT_FALSE(approximate);
+  // This placement formerly produced a cycle in the spatial group union.
+  // The driver-aware tree must retain connectivity and charge accounting.
+  ASSERT_EQ(rc.edges.size() + 1, rc.nodes.size());
   std::vector<unsigned> parents(rc.nodes.size()), degree(rc.nodes.size());
   std::iota(parents.begin(), parents.end(), 0);
   const auto root = [&](unsigned n) {
@@ -4015,7 +4049,7 @@ TEST(Placement, HierarchicalSteinerSharedJunctionCycleRegression) {
   }
   EXPECT_NEAR(capacitance, 2 * resistance, 1e-8 * capacitance);
 }
-TEST(Placement, HighFanoutRcFallbackRemainsATreeAndIsMarkedApproximate) {
+TEST(Placement, HighFanoutDriverAwareRcRemainsATree) {
   hhds::GraphLibrary source, flat;
   auto               io = source.create_io("top");
   io->add_input("a", 0);
@@ -4052,7 +4086,7 @@ TEST(Placement, HighFanoutRcFallbackRemainsATreeAndIsMarkedApproximate) {
   options.bins       = 8;
   options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/fanout";
   const auto result  = place(*graph, flat, options);
-  EXPECT_TRUE(result.parasitics->approximate);
+  EXPECT_FALSE(result.parasitics->approximate);
   bool high_fanout = false;
   for (const auto& net : result.parasitics->nets) {
     EXPECT_EQ(net.edges.size() + 1, net.nodes.size());
@@ -5321,6 +5355,85 @@ TEST(Placement, OriginalDefBlockagesRemainPhysicalConstraintsWithoutSignalInstan
   EXPECT_THROW(place(*graph, transparent_library, options), std::invalid_argument);
 }
 
+TEST(Placement, SegmentedImportedRowsConstrainPlacementSnapshotsAndEco) {
+  hhds::GraphLibrary source, seed_library;
+  auto               graph   = tie_graph(source, false);
+  auto               options = plain_options();
+  options.lefs               = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  const auto root            = std::string(std::getenv("TEST_TMPDIR")) + "/segmented_import";
+  options.density            = .5;
+  options.output_dir         = root + "/seed";
+  options.iterations         = 0;
+  options.bins               = 4;
+  options.core = options.die = {0, 0, 18.4, 10.88};
+  auto       seed            = place(*graph, seed_library, options);
+  const auto tech            = physical::read_lef(options.lefs);
+  auto       frame           = seed.floorplan;
+  const auto first           = frame.rows.front();
+  auto       left = first, right = first;
+  left.name        = "left";
+  left.count       = 10;
+  right.name       = "right";
+  right.x         += 30 * first.step;
+  right.count      = 10;
+  // A hole within one row and a completely missing row both remain forbidden.
+  frame.rows       = {right, frame.rows[3], left, frame.rows[2]};
+  frame.blockages  = {
+      {false, {}, {{13800, 8160, 18400, 10880}}}
+  };
+  for (auto& terminal : frame.terminals) {
+    terminal.status = physical::Status::FIXED;
+  }
+  options.floorplan = root + "/segments.def";
+  physical::write_def(frame, options.floorplan);
+  options.iterations = options.min_iterations = 20;
+  options.snapshots                           = true;
+  options.gp_observer_interval                = 10;
+  unsigned observed                           = 0;
+  options.gp_observer                         = [&](const Result& snapshot, const Gp_observation&) {
+    ++observed;
+    EXPECT_EQ(snapshot.floorplan.rows, frame.rows);
+    EXPECT_EQ(snapshot.floorplan.blockages, frame.blockages);
+    EXPECT_EQ(snapshot.floorplan.components.size(), 2);
+    EXPECT_EQ(snapshot.parasitics->cells.size(), 2);
+  };
+  for (bool terminal : {false, true}) {
+    hhds::GraphLibrary placed_library;
+    options.optimization_pending = !terminal;
+    options.output_dir           = root + (terminal ? "/terminal" : "/native");
+    auto placed                  = place(*graph, placed_library, options);
+    EXPECT_NO_THROW(check_legality(tech, placed.floorplan));
+    EXPECT_EQ(placed.floorplan.rows, frame.rows);
+    EXPECT_EQ(placed.floorplan.blockages, frame.blockages);
+    EXPECT_EQ(placed.floorplan.components.size(), 2);
+    for (const auto& file : {"out.def", "before_legalization.def", "after_legalization.def"}) {
+      auto exported = physical::read_def(options.output_dir + "/" + file);
+      EXPECT_EQ(exported.rows, frame.rows);
+      EXPECT_EQ(exported.blockages, frame.blockages);
+    }
+    if (terminal) {
+      auto previous = std::make_shared<physical::Floorplan>(placed.floorplan);
+      for (auto& cell : previous->components) {
+        cell.place.x = 9200;
+        cell.place.y = 2720;
+      }
+      auto eco     = options;
+      eco.previous = previous;
+      eco.floorplan.clear();
+      eco.gp_observer    = {};
+      eco.changed_cells  = {"inv", "nand"};
+      eco.legalize_cells = true;
+      eco.output_dir     = root + "/eco";
+      hhds::GraphLibrary eco_library;
+      const auto         repaired = place(*graph, eco_library, eco);
+      EXPECT_NO_THROW(check_legality(tech, repaired.floorplan));
+      EXPECT_EQ(repaired.floorplan.rows, frame.rows);
+      EXPECT_EQ(repaired.floorplan.blockages, frame.blockages);
+    }
+  }
+  EXPECT_GT(observed, 0);
+}
+
 TEST(Placement, TieLocalizationRespectsHardDefExclusionsAfterNativeLegalization) {
   hhds::GraphLibrary source, seed_library, placed_library;
   auto               graph = tie_graph(source);
@@ -6369,6 +6482,22 @@ END LIBRARY
   EXPECT_GT(taps, 40);
   EXPECT_EQ(result.floorplan.components.size(), 13 + taps);
   EXPECT_GT(result.floorplan.rows.size(), 20);
+  auto imported_options         = options;
+  imported_options.handoff_taps = false;
+  EXPECT_NO_THROW(check_legality(tech, result.floorplan, imported_options));
+  auto overlapping = result.floorplan;
+  auto tap         = std::find_if(overlapping.components.begin(), overlapping.components.end(), [](const auto& c) {
+    return c.macro == "TAPCELL_ASAP7_75t_R";
+  });
+  ASSERT_NE(tap, overlapping.components.end());
+  auto second_tap
+      = std::find_if(std::next(tap), overlapping.components.end(), [](const auto& c) { return c.macro == "TAPCELL_ASAP7_75t_R"; });
+  ASSERT_NE(second_tap, overlapping.components.end());
+  second_tap->place = tap->place;
+  EXPECT_THROW(check_legality(tech, overlapping, imported_options), std::runtime_error);
+  tap->place.x = macro_place.x;
+  tap->place.y = macro_place.y;
+  EXPECT_THROW(check_legality(tech, overlapping, imported_options), std::runtime_error);
   const auto snapshot = physical::read_def(options.output_dir + "/after_legalization.def");
   EXPECT_EQ(snapshot.components.size(), result.floorplan.components.size());
   EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/handoff_taps.json"));

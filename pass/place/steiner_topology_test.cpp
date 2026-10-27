@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "steiner_topology.hpp"
 
+#include <algorithm>
 #include <limits>
 #include <numeric>
 #include <random>
@@ -57,6 +58,46 @@ TEST(SteinerTopology, DegeneratePinsAndInputBounds) {
 }
 
 namespace {
+// Preserve the original quadratic sweep as an independent ordering oracle.
+std::vector<std::vector<size_t>> reference_neighbors(const std::vector<Steiner_location>& locations) {
+  const size_t        count = locations.size();
+  std::vector<size_t> order(count);
+  std::iota(order.begin(), order.end(), 0);
+  std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+    return std::pair{locations[a].second, locations[a].first} < std::pair{locations[b].second, locations[b].first};
+  });
+  std::vector<std::vector<size_t>> neighbors(count);
+  std::vector<int64_t>             upper_right(count, std::numeric_limits<int64_t>::max());
+  std::vector<int64_t>             upper_left(count, std::numeric_limits<int64_t>::min());
+  for (size_t idx = 0; idx < count; ++idx) {
+    const auto n = order[idx];
+    const auto x = locations[n].first;
+    for (size_t i = 0; i < idx; ++i) {
+      const auto below = order[i];
+      const auto bx    = locations[below].first;
+      if (bx <= x && x < upper_right[below]) {
+        neighbors[below].push_back(n);
+        upper_right[below] = x;
+      } else if (upper_left[below] < x && x < bx) {
+        neighbors[below].push_back(n);
+        upper_left[below] = x;
+      }
+    }
+    int64_t right = std::numeric_limits<int64_t>::max(), left = std::numeric_limits<int64_t>::min();
+    for (size_t i = idx; i > 0; --i) {
+      const auto below = order[i - 1];
+      const auto bx    = locations[below].first;
+      if (x <= bx && bx < right) {
+        neighbors[n].push_back(below);
+        right = bx;
+      } else if (left < bx && bx < x) {
+        neighbors[n].push_back(below);
+        left = bx;
+      }
+    }
+  }
+  return neighbors;
+}
 std::vector<int64_t> path_lengths(const Steiner_topology& tree, size_t driver) {
   std::vector<std::vector<size_t>> adjacent(tree.locations.size());
   for (const auto& [a, b] : tree.edges) {
@@ -81,6 +122,43 @@ std::vector<int64_t> path_lengths(const Steiner_topology& tree, size_t driver) {
   return lengths;
 }
 }  // namespace
+TEST(SteinerTopology, IndexedNeighborsPreserveQuadraticSweepOrder) {
+  std::mt19937 random(271828);
+  EXPECT_TRUE(detail::timing_neighbors({}).empty());
+  for (int sample = 0; sample < 120; ++sample) {
+    std::vector<Steiner_location> points;
+    for (int i = 0; i < (sample < 60 ? 100 + sample : 600 + sample); ++i) {
+      // Dense grids and narrow stripes exercise equal coordinates and ties;
+      // sparse clouds exercise both quadrants and long query ranges.
+      const int     scale = sample % 3 == 0 ? 9 : 10000;
+      const int64_t x     = int(random() % scale) - scale / 2;
+      const int64_t y     = int(random() % (sample % 3 == 1 ? 3 : scale)) - scale / 2;
+      points.emplace_back(x, y);
+    }
+    std::sort(points.begin(), points.end());
+    points.erase(std::unique(points.begin(), points.end()), points.end());
+    std::shuffle(points.begin(), points.end(), random);
+    EXPECT_EQ(detail::timing_neighbors(points), reference_neighbors(points)) << "sample " << sample;
+  }
+  for (int geometry = 0; geometry < 4; ++geometry) {
+    std::vector<Steiner_location> points;
+    for (int i = 0; i < 1000; ++i) {
+      if (geometry == 0) {
+        points.emplace_back(i, 0);
+      }
+      if (geometry == 1) {
+        points.emplace_back(0, i);
+      }
+      if (geometry == 2) {
+        points.emplace_back(i, 2 * i);
+      }
+      if (geometry == 3) {
+        points.emplace_back(i, i < 500 ? 1 : 0);
+      }
+    }
+    EXPECT_EQ(detail::timing_neighbors(points), reference_neighbors(points)) << "geometry " << geometry;
+  }
+}
 TEST(SteinerTopology, TimingTreeSharesWireAndRetainsCoincidentTerminals) {
   const std::vector<Steiner_location> pins{
       {  0,   0},
@@ -147,7 +225,7 @@ TEST(SteinerTopology, TimingTreeAccountsForDriverAndAvoidsLongDetours) {
 }
 TEST(SteinerTopology, TimingTreeHandlesCollinearAndLargeCoincidentInputs) {
   std::vector<Steiner_location> pins;
-  for (int i = 0; i < 1000; ++i) {
+  for (int i = 0; i < 5000; ++i) {
     pins.emplace_back(i, 2 * i);
     pins.emplace_back(i, 2 * i);
   }
@@ -156,7 +234,14 @@ TEST(SteinerTopology, TimingTreeHandlesCollinearAndLargeCoincidentInputs) {
   for (size_t i = 0; i < pins.size(); ++i) {
     EXPECT_EQ(lengths[tree.terminals[i]], std::abs(pins[i].first - pins[999].first) + std::abs(pins[i].second - pins[999].second));
   }
-  pins.emplace_back(1000, 2000);
-  EXPECT_THROW(timing_steiner_topology(pins, 0), std::invalid_argument);
+}
+TEST(SteinerTopology, LargeDenseVisibilityStopsAtWorkBound) {
+  std::vector<Steiner_location> pins;
+  // Every point in the lower right row sees the entire upper left row.
+  for (int i = 0; i < 512; ++i) {
+    pins.emplace_back(i + 512, 0);
+    pins.emplace_back(i, 1);
+  }
+  EXPECT_THROW(timing_steiner_topology(pins, 0), std::length_error);
 }
 }  // namespace livehd::placement

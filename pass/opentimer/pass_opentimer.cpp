@@ -143,6 +143,30 @@ Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var
   }
 }
 
+bool Pass_opentimer::configure_session_report(const Eprp_var& var) {
+  const Pass_opentimer requested(var);
+  // Reporting/cache policy may change, but timing semantics must match. The
+  // physical session already owns a flat design; legacy stitching/annotations
+  // still take the standalone path. Nonzero margin annotates graph colors.
+  if (requested.critical_ || requested.margin != 0 || requested.hier_setting_ == "stitch"
+      || requested.timing_file_list != timing_file_list || requested.top_filter != top_filter
+      || requested.io_load_ff_ != io_load_ff_ || requested.targets_text_ != targets_text_ || requested.qor_path.empty()) {
+    return false;
+  }
+  margin                = requested.margin;
+  critical_percent_     = requested.critical_percent_;
+  qor_path              = requested.qor_path;
+  cache_dir_            = requested.cache_dir_;
+  stats_                = requested.stats_;
+  hier_setting_         = requested.hier_setting_;
+  physical_timing_cuts_ = requested.physical_timing_cuts_;
+  if (var.physical_rc) {
+    physical_timing_cuts_.insert(var.physical_rc->timing_cuts.begin(), var.physical_rc->timing_cuts.end());
+  }
+  session_report_ = true;
+  return true;
+}
+
 void Pass_opentimer::ensure_libs() {
   if (libs_loaded_) {
     return;

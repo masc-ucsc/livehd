@@ -15,6 +15,9 @@
 #include "lnast.hpp"
 #include "str_tools.hpp"
 
+namespace livehd::opentimer {
+class Physical_session;
+}
 namespace livehd::physical {
 struct Parasitics;
 }
@@ -37,15 +40,17 @@ public:
   using Eprp_graphs = std::vector<std::shared_ptr<hhds::Graph>>;
   using Eprp_lnasts = std::vector<std::shared_ptr<Lnast>>;
 
-  Eprp_dict                                           dict;
-  Eprp_dict                                           stage_dict;
-  Eprp_graphs                                         graphs;
-  Eprp_lnasts                                         lnasts;
+  Eprp_dict                                            dict;
+  Eprp_dict                                            stage_dict;
+  Eprp_graphs                                          graphs;
+  Eprp_lnasts                                          lnasts;
   // Typed in-memory placement RC, consumed by pass.opentimer. No file round trip.
-  std::shared_ptr<const livehd::physical::Parasitics> physical_rc;
+  std::shared_ptr<const livehd::physical::Parasitics>  physical_rc;
+  // Ephemeral final-report handoff; consumed by pass.opentimer, never persisted.
+  std::shared_ptr<livehd::opentimer::Physical_session> physical_timing_session;
   // Physical net launch cuts (e.g. reset distribution), shared with placement STA.
-  std::set<std::string>                               physical_timing_cuts;
-  std::shared_ptr<livehd::synth::Io_store>            synthesis_feedback;
+  std::set<std::string>                                physical_timing_cuts;
+  std::shared_ptr<livehd::synth::Io_store>             synthesis_feedback;
 
   // Optional stable ordering for a mixed forest reconstructed from persisted
   // and freshly parsed units. pass.upass applies it after lambda extraction,
@@ -64,6 +69,7 @@ public:
     graphs.clear();
     lnasts.clear();
     physical_rc.reset();
+    physical_timing_session.reset();
     lnast_order_hint.clear();
   }
 
@@ -80,6 +86,7 @@ public:
   [[nodiscard]] std::string_view get(std::string_view name, std::string_view default_value = "") const;
 
   void clear() {
+    physical_timing_session.reset();
     dict.clear();
     stage_dict.clear();
     graphs.clear();

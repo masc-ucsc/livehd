@@ -22,6 +22,254 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Buffer-tree search now considers a single repeater at the source even when
+that source already satisfies electrical limits. Optimal repeater spacing
+still generates tree alternatives, but does not reject a branch whose RC delay,
+load and fanout are acceptable. Detailed timing of the legalized candidate and
+the existing cell/area budgets still govern retention. Six optimized suites pass
+on merged upstream <code>88832abdf</code>; public defaults are unchanged.</p>
+<table><thead><tr><th>Design</th><th>Independent WNS (ps)</th><th>HPWL (µm)</th><th>Placement (s)</th></tr></thead><tbody>
+<tr><td>lfsr</td><td>-61.992 → -61.992</td><td>211.974 → 211.974</td><td>2.622 → 2.617</td></tr>
+<tr><td>minimax</td><td>-991.355 → -950.289</td><td>51140.215 → 46924.026</td><td>43.925 → 41.397</td></tr>
+<tr><td>NVDLA/partition_m</td><td>-914.371 → -914.371</td><td>100823.601 → 100823.601</td><td>35.531 → 35.654</td></tr>
+<tr><td>coralnpu</td><td>-13961.971 → -13961.971</td><td>3671251.142 → 3671251.142</td><td>536.009 → 520.035</td></tr>
+</tbody></table>
+<p>All four use common production defaults, 100 ps clocks and reset false paths,
+and satisfy the 1.5× placement-time and 3% cell/area bounds. Lfsr, partition_m
+and coralnpu retain byte-identical DEFs. Minimax improves WNS by 41.066 ps and
+reduces HPWL by 8.24%. Its fresh control and candidate
+run on CPU 13; the other controls are earlier v37 measurements. Coralnpu takes
+667.53 s wall / 667.47 s CPU and
+9843.0 MiB peak RSS. Exact provenance, scores and tests are in
+<code>runs.compact_source_repeater_v38</code>.</p>
+<p>Publication validation rebuilds after upstream proof-tooling changes and passes
+all six optimized suites. A fresh minimax run with that executable preserves the
+exact DEF, weights, HPWL and independent WNS; placement takes
+47.817 s and total CPU 71.92 s. This is 1.089× the fresh control placement
+time, within the 1.5× budget, but does not demonstrate a post-merge speedup.
+No blocking code-review findings remain for this change.</p>
+<p>The diagnostic with timing-driven GP disabled but normal repair retained
+worsens minimax WNS to −1,312.774 ps and still has 50,587.761 µm HPWL. Stage
+reports locate most wirelength growth in buffer insertion, not the warm timing
+rounds. The retained candidate lowers minimax's excess over pure GP from 21.70%
+to 11.66%; <strong>F's 3% bound remains unmet.</strong></p>
+<p>The refreshed imported minimax pure-GP check fails D/E: default density 0.5
+cannot fit the supplied core (movable cells alone occupy 65.4%), reaching
+1,500 iterations with overflow 0.267 and
+701,412.516 µm HPWL. A density-only diagnostic at 0.7 converges in 500 iterations
+and takes 11.84 s CPU, but still has 111,796.250 µm HPWL versus the 50,317.3 µm
+acceptance limit. That override is not a production setting. The full A–J goal,
+including total STA share and the larger-design/import census, remains open.</p>
+
+<p>GP timing feedback now uses dense slack/clock arrays with a shared immutable
+pin/net index. Coordinate-only samples reuse bound timer pins; topology and
+what-if changes invalidate the bindings. Net weighting uses numeric indices for
+the sampled RC snapshot, with label lookup for other snapshots. Reset filtering,
+cell priorities, SAT legalization and terminal legalization preserve their
+previous behavior. Detailed timing and public defaults are unchanged. Ten
+optimized suites pass, including topology/rollback, old-snapshot lifetime,
+reordered nets, partial-net filtering and legalization equivalence.</p>
+<table>
+<thead><tr><th>Design</th><th>GP ranking after initialization, total seconds</th><th>Placement, seconds</th></tr></thead>
+<tbody>
+<tr><td>lfsr</td><td>0.012 → 0.013</td><td>2.643 → 2.622</td></tr>
+<tr><td>minimax</td><td>3.101 → 2.815</td><td>43.443 → 44.208</td></tr>
+<tr><td>NVDLA/partition_m</td><td>5.235 → 4.550</td><td>37.635 → 35.531</td></tr>
+<tr><td>coralnpu</td><td>63.017 → 56.560</td><td>575.361 → 536.009</td></tr>
+</tbody>
+</table>
+<p>All four default-option runs have byte-identical DEFs and final net weights,
+identical full native timing reports (738,108 physical-pin rows), and unchanged
+independent WNS. The first three are sequential control/candidate pairs on CPU 13.
+Minimax ranking improves 9.2% and partition_m 13.1%; lfsr is effectively unchanged.
+Minimax whole-flow CPU rises 65.03 → 65.91 s, while partition_m falls
+102.53 → 100.25 s. Coralnpu ranking improves 10.2%; its candidate takes
+686.57 s wall / 686.42 s CPU and 9,648.9 MiB peak RSS, but the control is an earlier
+CPU-14 run, so the whole-flow delta is not a contemporaneous speedup measurement.
+All four remain within the 1.5× placement-time and 3% cell/area bounds.
+Evidence and exact binary provenance: <code>runs.indexed_ranking_v37</code>.</p>
+<p>The refreshed pure-GP diagnostic uses the same disabled timing/resize/resynthesis
+settings on lfsr and minimax, with other production options retained. The cores
+match their full-flow counterparts. Lfsr's HPWL is 209.968 → 211.974 µm
+(+0.96%), satisfying F. Minimax is 42,022.308 → 51,140.215 µm (+21.70%), so F
+remains open; its full flow improves WNS from −8,195.403 to −991.355 ps.
+Pure minimax placement takes 6.140 s and fits D's stated own-floorplan numeric
+limits, while the imported flow-C comparison remains open. Total STA still
+exceeds 10% of placement; RC conversion, physical validation and detailed
+feedback still use named identities. This is progress on B, not completion of
+B or the broader A–J requirements.</p>
+
+<p>Final STA reporting now reuses the persistent placement timer instead of
+building a second timer for the same final state. The handoff reconciles RC,
+cell changes and reset cuts, rolls back pending what-if edits, preserves
+per-color statistics, and fills the normal STA result cache. Incompatible timing
+options, changed timing-file contents and criticality/margin annotation retain the standalone path. Eight
+optimized suites pass; a warm CLI invocation restores placement and hits the
+STA cache. No public defaults changed. Evidence is in
+<code>runs.final_session_report_v36</code>.</p>
+<table>
+<thead><tr><th>Design</th><th>Final STA report, prior → reuse (s)</th><th>Independent WNS, unchanged (ps)</th></tr></thead>
+<tbody>
+<tr><td>lfsr</td><td>0.730 → 0.195</td><td>−61.992</td></tr>
+<tr><td>minimax</td><td>3.874 → 1.443</td><td>−991.355</td></tr>
+<tr><td>NVDLA/partition_m</td><td>4.918 → 1.876</td><td>−914.371</td></tr>
+<tr><td>coralnpu</td><td>42.428 → 19.469</td><td>−13,961.971</td></tr>
+</tbody>
+</table>
+<p>All four use the same defaults, 100 ps clocks and reset false paths. Their
+DEF files are byte-identical; all 738,108 physical-pin timing records match
+after excluding internal timer identifiers. Native WNS/TNS, electrical and
+constraint metadata match; native area differs by less than 4 ppm because the
+timer sums float cell areas in a different order. All runs satisfy the 1.5×
+placement-time and 3% cell/area limits. A contemporaneous minimax pair on CPU 13
+measures final reporting at 3.706 → 1.225 s and total CPU at 68.27 → 67.01 s,
+with identical independent WNS. The first sweep's total CPU is higher on the
+three larger designs under concurrent host load, so no across-design whole-flow
+speedup is claimed. Coralnpu takes 575.36 s placement and 739.42 s end to end.</p>
+<p>The three-second minimax final-report target is met. Total STA still exceeds
+10% of placement, and initial timer construction, pin/net identity costs,
+HPWL parity and the broader A–J acceptance remain open. The earlier coralnpu WNS
+regression remains; this reporting change neither improves nor worsens it.</p>
+<p>Publication review added content checks for Liberty/SDC inputs at session
+initialization and final reporting, with no iterative file reads. Changed files
+force standalone timing before cache insertion, including edits that preserve
+file size and timestamp. All eight optimized suites pass with this guard. The
+four-design table above was measured before this final guard. The reviewed
+binary's minimax rerun takes 1.237 s for final reporting and 64.23 s total CPU,
+with identical DEF, native pin timing and independent WNS. Its binary and run
+provenance are recorded separately in the measurement artifact.</p>
+
+<p>Publication review retains the high-fanout RC correction and geometry-independent
+zero-wire timing seeds. Driver-aware trees now extend beyond 1,000 distinct
+locations, with bounded visibility and branch-sharing work; pathological cases
+fall back to the existing spatial tree before modifying the RC graph. Zero-wire
+seeds use an ideal junction so arbitrary seed coordinates cannot perturb the
+initial criticality ranking. Public defaults are unchanged. Eight optimized
+regression suites pass. Evidence is in <code>runs.timing_tree_review</code>.</p>
+<p>The review rejected a proposed short-refinement gate: DREAMPlace's
+<code>route_sampled</code> flag records any measurement during the history interval,
+not necessarily the selected geometry. That gate is excluded. The topology-only
+and seed-only ablations also expose WNS regressions and are recorded separately.</p>
+<table>
+<thead><tr><th>Design</th><th>Independent WNS, baseline → correction (ps)</th><th>Placement, baseline → correction (s)</th></tr></thead>
+<tbody>
+<tr><td>lfsr</td><td>−61.992 → −61.992</td><td>2.613 → 2.596</td></tr>
+<tr><td>minimax</td><td>−996.517 → −991.355</td><td>45.165 → 44.217</td></tr>
+<tr><td>NVDLA/partition_m</td><td>−916.549 → −914.371</td><td>37.977 → 37.501</td></tr>
+<tr><td>coralnpu</td><td>−13,439.206 → −13,961.971</td><td>570.426 → 549.971</td></tr>
+</tbody>
+</table>
+<p>All four use the same production defaults, 100 ps clock and reset false paths,
+and remain within 1.5× placement time and 3% cell/area growth. Coralnpu takes
+727.05 s end to end. Its candidate runs on CPU 14 versus baseline CPU 12, so
+these are not exact same-core speed measurements. <strong>Coralnpu WNS worsens
+by 522.765 ps (3.89%); the WNS improvement pass remains incomplete.</strong>
+This change is retained for RC correctness under the speed-first priorities,
+not presented as a uniform WNS improvement. On the saved coral placement,
+substituting the corrected 1,599-sink net's RC into OpenSTA brings its WNS
+within 20 ps of OpenSTA's own RC; the previous topology differed by about
+1,357 ps. Native final WNS on the new coral flow is −14,714.293 ps versus
+independent −13,961.971 ps (5.39% difference). Full decision-checkpoint agreement
+and the broader A–J acceptance criteria remain open.</p>
+
+<p>RC timing-tree neighbor discovery now uses indexed quadrant queries above
+512 distinct locations and retains the cheaper scan for smaller nets. At that earlier stage, the
+1000-location timing-tree limit and spatial fallback remained unchanged; the
+subsequent bounded high-fanout correction is described above. Exact neighbor
+ordering agrees with the original scan on 120 randomized inputs and four
+1000-location geometries, including coordinate ties and dense visibility.
+All four targeted optimized placement/timing suites pass. A standalone sparse
+1000-pin neighbor microbenchmark takes 0.198 s versus 0.400 s across 200 repeats;
+this is not a full-placement speedup claim. Re-evaluating saved lfsr, minimax,
+partition_m and coralnpu placements produces byte-identical parasitics JSON and
+identical timing JSON values, including WNS, against the previous precise
+evaluator. Evidence is in <code>1f-measurements.json</code> under
+<code>runs.neighbors_review</code>.</p>
+
+<p>Detailed OpenTimer capacitance fitting now samples both bounds and alternates
+bracketed interpolation with bisection. It retains the same waveform model and
+tightens the charge-residual convergence target from 1e-5 to 1e-7. A 980-case load sweep preserves
+all fit/fallback outcomes while reducing mean Liberty queries from 13.32 to
+6.89. Against a finer bisection reference, worst relative delay error falls from
+0.0958% to 0.000219%. Circuit, charge-conservation, unavailable-endpoint and
+placement regressions pass; public defaults are unchanged. All 12 targeted
+optimized suites pass on merged upstream <code>9b5203ff6</code> with published
+OpenTimer <code>3197d53</code> and no local overrides.</p>
+<p>On unchanged v30 placements, detailed timing takes 4.302 → 3.210 s on minimax,
+6.088 → 4.127 s on partition_m and 54.318 → 36.848 s on coralnpu. The largest
+native WNS change is 0.067 ps. Fresh full flows use the same 100 ps clock, reset
+false paths and common defaults, with independent OpenSTA scores:</p>
+<table>
+<thead><tr><th>Design</th><th>WNS, unchanged (ps)</th><th>Placement, control → faster fit (s)</th><th>Final STA, control → faster fit (s)</th></tr></thead>
+<tbody>
+<tr><td>lfsr</td><td>−61.992</td><td>2.588 → 2.613</td><td>0.716 → 0.719</td></tr>
+<tr><td>minimax</td><td>−996.517</td><td>46.138 → 45.165</td><td>4.796 → 3.719</td></tr>
+<tr><td>NVDLA/partition_m</td><td>−916.549</td><td>44.471 → 37.977</td><td>6.650 → 4.697</td></tr>
+<tr><td>coralnpu</td><td>−13,439.206</td><td>642.009 → 570.426</td><td>59.566 → 41.933</td></tr>
+</tbody>
+</table>
+<p>All four retain identical independent WNS and satisfy the 1.5× placement-time
+and 3% cell/area limits. Partition_m uses a fresh control/candidate pair on CPU 13
+after CPU 4 contention distorted the first candidate's elapsed time; both raw
+runs are retained. Coralnpu's complete flow takes 746.48 s wall / 746.34 s CPU,
+versus 835.87 / 835.71 s. B remains open: final minimax STA still exceeds 3 s,
+and the total-STA share is not yet within 10%.</p>
+<p>The newer coralnpu placement exposes an additional G gap: native setup WNS is
+−16,154.859 ps versus OpenSTA's −13,439.206 ps. Its critical path starts on a
+1,599-sink net, above the 1,000-location driver-aware tree limit. Substituting
+only that net's native RC into OpenSTA gives −14,795.901 ps; substituting the
+next heavily loaded net too gives −14,787.060 ps. The first topology therefore
+explains roughly half the gap; the remainder still needs isolation. The faster
+solver is not presented as a fix for that timing-model discrepancy.</p>
+
+<p>Static cell GP now hands off to legalization when density is feasible and a
+sustained routing plateau persists: six samples over at least 100 iterations,
+HPWL and inflation within 1%, and less than 1% route-overflow improvement.
+The window must follow the last objective update. Minimum iteration counts,
+moving macros, continuation and scheduled objectives retain their safeguards.
+The report says <code>route_stalled</code>, never claims GP convergence, and all
+public defaults remain unchanged. All 11 targeted optimized suites pass with
+published DREAMPlace <code>4a006e9</code> and no local overrides, including
+minimum-budget, macro and timing-weight-window regressions.</p>
+<p>The matched v30 sweep uses fresh workdirs, the merged Slang 12.1 frontend,
+the same production defaults on all four designs, a 100 ps clock and reset false
+paths. Independent OpenSTA scores and placement times are:</p>
+<table>
+<thead><tr><th>Design</th><th>WNS, control → handoff (ps)</th><th>Placement, control → handoff (s)</th><th>Time ratio</th></tr></thead>
+<tbody>
+<tr><td>lfsr</td><td>−61.992 → −61.992</td><td>2.598 → 2.588</td><td>0.996×</td></tr>
+<tr><td>minimax</td><td>−996.517 → −996.517</td><td>45.991 → 46.138</td><td>1.003×</td></tr>
+<tr><td>NVDLA/partition_m</td><td>−916.549 → −916.549</td><td>42.071 → 41.537</td><td>0.987×</td></tr>
+<tr><td>coralnpu</td><td>−13,880.574 → −13,439.206</td><td>661.763 → 642.009</td><td>0.970×</td></tr>
+</tbody>
+</table>
+<p>Coralnpu gains 441.368 ps WNS with 3% less placement time; its complete flow
+takes 835.87 s wall / 835.71 s CPU. All four satisfy the 1.5× placement-time and
+3% cell/area limits. These fresh controls include upstream changes and must not
+be confused with the older pre-merge v28 baseline.</p>
+<p>On the separate segmented coralnpu input, GP hands off at 620 instead of
+1,500 iterations. Independent WNS improves from −4,449.090 to −4,435.123 ps and
+HPWL falls 1.13%. CPU falls from 332.66 to 282.17 s; wall time is 344.31 →
+355.22 s under concurrent host load (96% versus 79% CPU utilization), so this is
+not a wall-speedup claim. Both runs preserve all 1,962 row segments, 198,300
+masters and 10,059 fixed poses, with identical geometry history through the
+handoff. Final legality passes. A–J acceptance remains in progress.</p>
+
+<p>The production placer now adapts imported segmented N/FS rows to a rectangular
+solver frame with hard exclusions for absent sites. Exports, timing snapshots,
+terminal legalization and ECO repair retain the original segments. Fixed imported
+WELLTAP/SPACER cells may occupy macro spacing halos, consistently with terminal
+legalization; actual body overlaps remain errors. Seven targeted optimized suites
+pass, including a split-row/missing-row/ECO regression and physical-overlap checks. The same seven suites also pass after merging upstream <code>1a8c39613</code> (Slang 12.1); the benchmark below remains tied to its frozen pre-pull binary.</p>
+<p>On the saved coralnpu flow-C floorplan, the old frozen v28 binary fails the
+contiguous-row check. The updated cell-placement path completes in 329.47 s wall /
+329.29 s CPU, with peak RSS 9,573,720 KiB. All 1,962 row segments across 1,261 row
+levels, all 198,300 component masters, and 10,059 fixed-component positions are
+preserved. This is an import/legality result, not a comparative QoR claim. GP still
+hits its 1,500-iteration cap at overflow 0.08544 and final endpoint STA takes
+56.48 s; E and B remain open. Other segmented benchmark imports and the frontend
+failures in J still need validation.</p>
+
 <p>Publication review: pulled LiveHD upstream through <code>ae53a9243</code>
 without conflicts. Published DREAMPlace <code>ba64ec8</code> and OpenTimer
 <code>57e4f9e</code>, and updated the LiveHD dependency pins. All 26 targeted
@@ -444,9 +692,9 @@ recovery.</td></tr>
 handoff. The imported-floorplan ablation here (3.3× HPWL) should be repeated through that full-frame path before the
 GP core is blamed. Initial placement, bin sizing and the density schedule are not covered by 2t.</td></tr>
 <tr><td><a href="#J">J</a> row-import failure</td><td>2t landed H, segmented-row stage adapter</td>
-<td><code>//tools:timeclosure_gp_probe</code> already preserves cut rows with hard masks and restores the original
-segments on export; <code>physical_repair</code> and <code>lhd synth</code> still reject them. Expose the adapter on the
-default import path.</td></tr>
+<td><code>//tools:timeclosure_gp_probe</code> preserves cut rows with hard masks and restores the original
+segments on export. The shared production import path now uses that adapter;
+coralnpu is validated, while the other named macro designs still need checks.</td></tr>
 <tr><td><a href="#C">C</a> Liberty rescans</td><td>2t B (<code>pass/liberty/timing_model</code> parses NLDM once)</td>
 <td>Not addressed by 2t. The one-parse technology object asked for in C should be the same object the proxy's NLDM
 parser feeds, so there is one Liberty read per run for both loops.</td></tr>
@@ -737,7 +985,7 @@ SB</code> once <a href="#A">A</a>–<a href="#E">E</a> land.</li>
 yosys-slang); NyuziProcessor and bp_uno <code>unmapped physical object: flop</code> after ABC.</li>
 <li><code>physical_repair</code>: <code>floorplan requires contiguous equal-width N/FS rows</code> for every design whose
 rows OpenROAD cut around macros — the flow-C comparison is impossible on cnn, partition_c, NyuziProcessor, bp_uno,
-eyeriss until imported row fragments are supported. The segmented-row adapter landed for the <a class="xref" href="2t-timeclosure.html#H">2t H</a> GP probe already handles such rows; it is not on the <code>physical_repair</code> / <code>lhd synth</code> import path.</li>
+eyeriss until imported row fragments are supported. The segmented-row adapter first landed for the <a class="xref" href="2t-timeclosure.html#H">2t H</a> GP probe. It is now integrated into the shared production placement import path, with a completed coralnpu flow-C import check; the other named designs remain to be checked.</li>
 </ul></li>
 </ul>
 

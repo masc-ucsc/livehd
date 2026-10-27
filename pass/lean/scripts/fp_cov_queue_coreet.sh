@@ -59,7 +59,7 @@ printf '// Empty anchor. Real CORE-ET sources arrive via yosys.filelist_file.\n'
   echo "filelist=$FL sha256=$(sha256sum "$FL" | cut -d' ' -f1) files=$n"
   echo "lhd=$LOPT sha256=$(sha256sum "$LOPT" | cut -d' ' -f1)"
   echo "coreet_root=$COREET_ROOT rev=$(git -C $COREET_ROOT rev-parse HEAD)"
-  echo "max_width=1048576 (default 1024 refusal preserved)"
+  echo "max_width=1048576 (set explicitly -- the pass default is no cap)"
   echo "adapter_filelist=${FP_FILELIST:-none} include=${INC:-none}"
   echo "single_edge_set=${FP_SINGLE_EDGE_SET:-none}"; } > "$B/BINDING.txt"
 

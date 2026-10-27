@@ -68,9 +68,20 @@ cc_library(
 )
 
 cc_library(
+    name = "lean_options",
+    srcs = ["lean_options.cpp"],
+    hdrs = ["lean_options.hpp"],
+    includes = ["."],
+    copts = COPTS,
+    deps = ["//pass/common:pass"],
+    visibility = ["//visibility:public"],
+)
+
+cc_library(
     name = "lean_legacy_schema",
-    srcs = ["emit_legacy_schema.cpp"],
-    hdrs = ["emit_legacy_schema.hpp"],
+    includes = ["Legacy_Fast_Model_Simulator"],
+    srcs = ["Legacy_Fast_Model_Simulator/emit_legacy_schema.cpp"],
+    hdrs = ["Legacy_Fast_Model_Simulator/emit_legacy_schema.hpp"],
     copts = COPTS,
     deps = [":lean_format"],
     visibility = ["//visibility:public"],
@@ -78,8 +89,9 @@ cc_library(
 
 cc_library(
     name = "lean_legacy_fast_model",
-    srcs = ["emit_legacy_fast_model.cpp"],
-    hdrs = ["emit_legacy_fast_model.hpp"],
+    includes = ["Legacy_Fast_Model_Simulator"],
+    srcs = ["Legacy_Fast_Model_Simulator/emit_legacy_fast_model.cpp"],
+    hdrs = ["Legacy_Fast_Model_Simulator/emit_legacy_fast_model.hpp"],
     copts = COPTS,
     deps = [":lean_legacy_schema"],
     visibility = ["//visibility:public"],
@@ -87,8 +99,9 @@ cc_library(
 
 cc_library(
     name = "lean_legacy_graph_cert",
-    srcs = ["emit_legacy_graph_cert.cpp"],
-    hdrs = ["emit_legacy_graph_cert.hpp"],
+    includes = ["Legacy_Fast_Model_Simulator"],
+    srcs = ["Legacy_Fast_Model_Simulator/emit_legacy_graph_cert.cpp"],
+    hdrs = ["Legacy_Fast_Model_Simulator/emit_legacy_graph_cert.hpp"],
     copts = COPTS,
     deps = [":lean_legacy_fast_model"],
     visibility = ["//visibility:public"],
@@ -96,17 +109,19 @@ cc_library(
 
 cc_library(
     name = "lean_legacy_cert_wf",
-    srcs = ["emit_legacy_cert_wf.cpp"],
-    hdrs = ["emit_legacy_cert_wf.hpp", "lean_options.hpp", "legacy_model.hpp"],
+    includes = ["Legacy_Fast_Model_Simulator"],
+    srcs = ["Legacy_Fast_Model_Simulator/emit_legacy_cert_wf.cpp"],
+    hdrs = ["Legacy_Fast_Model_Simulator/emit_legacy_cert_wf.hpp", "Legacy_Fast_Model_Simulator/legacy_emit_options.hpp"],
     copts = COPTS,
-    deps = [":lean_legacy_graph_cert"],
+    deps = [":lean_options", ":lean_legacy_graph_cert"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "lean_legacy_bridge",
-    srcs = ["emit_legacy_fast_bridge.cpp"],
-    hdrs = ["emit_legacy_fast_bridge.hpp"],
+    includes = ["Legacy_Fast_Model_Simulator"],
+    srcs = ["Legacy_Fast_Model_Simulator/emit_legacy_fast_bridge.cpp"],
+    hdrs = ["Legacy_Fast_Model_Simulator/emit_legacy_fast_bridge.hpp"],
     copts = COPTS,
     deps = [":lean_legacy_fast_model", ":lean_legacy_graph_cert"],
     visibility = ["//visibility:public"],
@@ -114,21 +129,22 @@ cc_library(
 
 cc_library(
     name = "lean_legacy_emitter",
-    srcs = ["legacy_model.cpp"],
-    hdrs = ["legacy_model.hpp"],
+    includes = ["Legacy_Fast_Model_Simulator"],
+    srcs = ["Legacy_Fast_Model_Simulator/legacy_model.cpp"],
+    hdrs = ["Legacy_Fast_Model_Simulator/legacy_model.hpp", "Legacy_Fast_Model_Simulator/legacy_emit_options.hpp"],
     copts = COPTS,
-    deps = [":lean_legacy_schema", ":lean_legacy_fast_model", ":lean_legacy_graph_cert", ":lean_legacy_cert_wf", ":lean_legacy_bridge"],
+    deps = [":lean_options", ":lean_legacy_schema", ":lean_legacy_fast_model", ":lean_legacy_graph_cert", ":lean_legacy_cert_wf", ":lean_legacy_bridge"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "pass_lean",
-    srcs = ["pass_lean.cpp", "lean_options.cpp"],
-    hdrs = ["pass_lean.hpp", "lean_options.hpp"],
+    srcs = ["pass_lean.cpp"],
+    hdrs = ["pass_lean.hpp"],
     copts = COPTS,
     includes = ["."],
     visibility = ["//visibility:public"],
-    deps = [
+    deps = [":lean_options", 
         ":lean_legacy_emitter",
         ":lean_graph_scan",
         ":lean_dcert",
@@ -177,14 +193,14 @@ cc_test(
     # and is not the configured runtime area.
     local_defines = ['LIVEHD_TEST_RUNTIME_DIR=\\"generated/pass_lean_runtime_tmp\\"'],
     copts = COPTS,
-    deps = [":lean_graph_scan", ":lean_dcert", ":lean_emitters", ":lean_legacy_emitter", "//graph", "@googletest//:gtest_main"],
+    deps = [":lean_graph_scan", ":lean_dcert", ":lean_emitters", "//graph", "@googletest//:gtest_main"],
 )
 
 cc_test(
     name = "legacy_model_test",
-    srcs = ["legacy_model_test.cpp"],
+    srcs = ["Legacy_Fast_Model_Simulator/legacy_model_test.cpp"],
     copts = COPTS,
-    deps = [":lean_legacy_emitter", ":lean_emitters", "@googletest//:gtest_main"],
+    deps = ["//graph", ":lean_graph_scan", ":lean_legacy_emitter", ":lean_emitters", "@googletest//:gtest_main"],
 )
 
 cc_test(

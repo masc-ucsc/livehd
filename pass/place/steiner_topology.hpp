@@ -25,6 +25,13 @@ Steiner_topology steiner_topology(const std::vector<Steiner_location>& pins);
 // Driver-aware placement RC tree. Prim-Dijkstra trades shared wire length for
 // source-to-sink distance (alpha 0.3), then shares overlapping adjacent edges.
 // The geometric router above remains independent of this timing estimate.
-// Same input bounds as steiner_topology; driver indexes the input pins.
+// Same coordinate bounds as steiner_topology; driver indexes the input pins.
+// Large pathological inputs throw length_error at a work bound, allowing the
+// caller to use a spatially partitioned approximation.
 Steiner_topology timing_steiner_topology(const std::vector<Steiner_location>& pins, size_t driver);
+namespace detail {
+// Internal empty-rectangle visibility graph, in deterministic sweep order.
+// Locations must be distinct; used by the timing tree and its regression checks.
+std::vector<std::vector<size_t>> timing_neighbors(const std::vector<Steiner_location>& locations);
+}  // namespace detail
 }  // namespace livehd::placement

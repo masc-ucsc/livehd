@@ -27,14 +27,30 @@ std::map<std::string, double> timing_weights(const physical::Parasitics& nets, c
   }
   std::vector<std::pair<double, std::string_view>> ranked;
   ranked.reserve(nets.nets.size());
-  for (const auto& net : nets.nets) {
-    double slack = std::numeric_limits<double>::infinity();
-    bool   clock = false;
-    for (const auto& node : net.nodes) {
-      if (const auto it = timing.pins.find(node.pin); it != timing.pins.end()) {
-        clock |= it->second.clock;
-        if (it->second.slack) {
-          slack = std::min(slack, *it->second.slack);
+  const auto* indexed = timing.ranking && timing.ranking->parasitics.get() == &nets ? &*timing.ranking : nullptr;
+  for (size_t net_index = 0; net_index < nets.nets.size(); ++net_index) {
+    const auto& net   = nets.nets[net_index];
+    double      slack = std::numeric_limits<double>::infinity();
+    bool        clock = false;
+    if (indexed) {
+      const auto& layout = *indexed->layout;
+      for (size_t i = layout.net_offsets.at(net_index); i < layout.net_offsets.at(net_index + 1); ++i) {
+        const auto& pin  = indexed->pins.at(layout.net_pins[i]);
+        clock           |= pin.clock;
+        slack            = std::min(slack, pin.slack);
+      }
+    } else {
+      for (const auto& node : net.nodes) {
+        if (timing.ranking) {
+          if (const auto* pin = timing.ranking->find(node.pin)) {
+            clock |= pin->clock;
+            slack  = std::min(slack, pin->slack);
+          }
+        } else if (const auto it = timing.pins.find(node.pin); it != timing.pins.end()) {
+          clock |= it->second.clock;
+          if (it->second.slack) {
+            slack = std::min(slack, *it->second.slack);
+          }
         }
       }
     }

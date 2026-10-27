@@ -696,6 +696,29 @@ TEST(SteinerRepair, DriveChoiceRespectsRootAndLargeSinkCapacitance) {
                    .001),
                std::runtime_error);
 }
+TEST(SteinerRepair, LegalWeakSourceCanUseOneRepeaterBeyondSpacingHint) {
+  const Buffer_drive       repeater{.1, 100, 20, 32, 1, 10, 1};
+  const Buffer_drive       source{.1, 100, 1000, 32, 1, 10000, 1};
+  const std::vector<Point> loads{
+      {100,   0},
+      {  0, 100}
+  };
+  const auto plan = plan_buffer_choices({0, 0}, loads, {10, 10}, {1000, 1000}, {repeater}, source, .01, .001);
+  // The source's load is electrically legal. One strong repeater isolates it
+  // without multiplying branches merely to satisfy the spacing heuristic.
+  ASSERT_EQ(plan.buffers.size(), 1U);
+  EXPECT_EQ(plan.buffers.front().position, Point(0, 0));
+  ASSERT_EQ(plan.buffers.front().loads.size(), loads.size());
+  for (unsigned i = 0; i < loads.size(); ++i) {
+    EXPECT_FALSE(plan.buffers.front().loads[i].buffer);
+    EXPECT_EQ(plan.buffers.front().loads[i].index, i);
+  }
+  ASSERT_EQ(plan.root.size(), 1U);
+  EXPECT_TRUE(plan.root.front().buffer);
+  EXPECT_EQ(plan.root.front().index, 0U);
+  const auto no_growth = plan_buffer_choices({0, 0}, loads, {10, 10}, {1000, 1000}, {repeater}, source, .01, .001, {0, 0});
+  EXPECT_TRUE(no_growth.buffers.empty());
+}
 TEST(SteinerRepair, SelectsAnAffordableAlternativeInsteadOfRejectingTheFastestTree) {
   const Buffer_drive        small{.1, 8, 1000, 4, .1, 1, 1};
   const Buffer_drive        large{.2, 100, 1000, 32, 100, 1, 3};

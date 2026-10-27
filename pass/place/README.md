@@ -274,10 +274,11 @@ eligible iteration count as **additional** iterations (40 becomes a deadline
 of 200); the configured iteration cap still applies. Set it to zero to replay
 the previous density-only stop. Two consecutive 20-iteration samples must have
 relative weighted-HPWL and inflation changes at most
-`synth.place.convergence_tolerance=0.01`, and current RUDY overflow must be zero
-when routability is enabled. FP's measured OpenTimer setup violation, when
-available, must also be zero. Other phases use weighted HPWL as a timing proxy;
-they do not claim measured timing closure. New net weights or topology reset
+`synth.place.convergence_tolerance=0.01`, and the active routing estimate must
+meet its overflow target when routability is enabled. Measured OpenTimer setup
+violation is reported when available; unmet timing does not veto geometric
+convergence. Weighted HPWL serves as a timing proxy, not a claim of measured
+timing closure. New net weights or topology reset
 the stability window but never extend the continuation deadline. Satisfied
 density does not keep increasing the density penalty during this continuation.
 The GP/FP JSON records the deadline, budget exhaustion, and whether timing was
@@ -291,6 +292,14 @@ and waits out the last checkpoint. Moving macros, continuation and scheduled
 objectives retain their own stopping policies. The report records
 `gp_stop_reason="density_stalled"`; legalization still runs, and this stop never
 claims GP convergence.
+With feasible density, a static cell solve can similarly hand off on a routing
+plateau. Six samples spanning at least 100 iterations must keep HPWL and
+inflated area within 1%, with less than 1% improvement between the best routing
+overflow in each half of the window. All samples must use the same routing
+model, follow the last checkpoint, and meet the density target. The same
+minimum-iteration and scheduled-objective restrictions apply; dynamic grids and
+explicit routing probes retain their own policies. This stop records
+`gp_stop_reason="route_stalled"` and does not certify routing or GP convergence.
 For the small full-sky130 trial, `synth.place.grid.density=16` and
 `synth.place.iterations=1500` reached the overflow target; the earlier 32-bin/500-iteration
 trial legalized but did not converge in GP. This is fixture evidence, not a
@@ -358,11 +367,17 @@ the replaced root's `placement_block`, color and synthesis-region provenance.
 Displacement is bounded by the chosen window; there is no separate per-cell
 radius constraint, and solver momentum is not reused across calls.
 
-Floorplan input currently requires the same DBU as LEF and contiguous equal-width
-N/FS rows. Imported IO pins must be FIXED unless IO adjustment is enabled;
+Floorplan input requires the same DBU as LEF and N/FS rows on a common site
+lattice. Segmented rows and missing row bands are supported: the solver uses
+a rectangular frame with hard exclusions for absent sites. Exported DEFs,
+timing snapshots and repair handoffs retain the original row segments and
+blockages. Overlapping segments, inconsistent orientations within a row band,
+off-grid segments and rotated rows are refused.
+Fixed physical-only WELLTAP/SPACER cells may occupy macro spacing halos, as in
+terminal legalization; their actual bodies still must not overlap any cell.
+Imported IO pins must be FIXED unless IO adjustment is enabled;
 PLACED pins then supply movable initial positions, and UNPLACED pins receive
-generated perimeter seeds. Explicit FIXED pins remain fixed. Row gaps/blockages
-and rotated rows are refused.
+generated perimeter seeds. Explicit FIXED pins remain fixed.
 Mapped standard cells need matching LEF and Liberty models. Explicit hard macros
 remain movable and retain exact LEF dimensions, even when their widths/heights
 are not integral standard-cell sites/rows. DREAMPlace uses its existing macro
@@ -1136,6 +1151,14 @@ followed by a separate design-repair pass that splits fanout on FLUTE Steiner
 branches and inserts repeaters along long edges. It uses Liberty input caps,
 available slew/cap/fanout limits and placement wire RC to plan candidates. Resolved
 physical pins preserve individual packed-bus bits through wiring aliases.
+
+The forest search includes the direct source connection and one repeater at the
+source, even when that source meets its electrical limits. A weak but legal
+driver may benefit from isolating its load without a larger distribution tree.
+Optimal repeater spacing generates spatial alternatives; branch selection uses
+RC delay, capacitance and fanout rather than treating that spacing as a hard
+wire-length limit. Cell/area budgets and fresh timing of the legalized candidate
+still decide whether an edit is retained.
 
 **Reset buffer tree (`synth.place.reset_fanout`, default 32; 2d-domplace U23).** One
 mechanism for every mapper (`abc`, `usyn`, the `domino_provisional` profile): right after
@@ -2132,6 +2155,18 @@ Final legalization can accept this feedback too. It reuses detailed timing only
 when the rebuilt RC nets, cell identities/poses, terminals and reset cuts match
 exactly; `final_legalization.reused_timing` records the decision. Changed physical
 states and approximate rankings still require detailed evaluation.
+The final STA report can reuse the persistent placement timer after reconciling
+the final physical state and reset cuts. This is distinct from reusing the prior
+feedback above: the report still checks the requested state, and can propagate
+changes, but avoids rebuilding a second timer and refitting unchanged drivers.
+Its `physical_session_reused` flag and ordinary STA cache counters identify the
+reporting path.
+GP rank feedback carries a compact pin array and an immutable pin/net index.
+Net weighting uses indices for the sampled RC snapshot; a different or reordered
+snapshot uses physical labels. Clock/reset filtering and timing-aware legalizers
+accept this representation as well as detailed feedback. This preserves rank
+selection and legalization priorities without copying full pin maps at each GP
+checkpoint. Detailed repair still requires detailed feedback.
 With pin-level electrical feedback, ordinary sizing selects gates with negative
 slack, electrical violations or drive stress. Healthy neighbors do not consume
 detailed timing trials for optional area recovery, even when an unrelated path

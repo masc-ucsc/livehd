@@ -28,20 +28,19 @@ Cell_criticality Cell_criticality::from(const timing::Feedback& feedback, const 
     }
     const auto& net   = fp.nets[n];
     const bool  clock = std::any_of(net.connections.begin(), net.connections.end(), [&](const auto& c) {
-      const auto* pin = feedback.find_pin(c.instance, c.pin);
-      return pin && pin->clock;
+      return feedback.is_clock_pin(c.instance, c.pin);
     });
     for (const auto& c : net.connections) {
       const auto found = cells.find(c.instance);
       if (found == cells.end()) {
         continue;
       }
-      const auto  i             = found->second;
-      const auto* pin           = feedback.find_pin(c.instance, c.pin);
+      const auto i              = found->second;
+      const auto pin            = feedback.pin_rank(c.instance, c.pin);
       result.connected[i]       = true;
       result.clock_connected[i] = result.clock_connected[i] || clock;
-      const double slack        = pin && pin->slack ? *pin->slack * feedback.time_unit_ps : NAN;
-      if (!pin || !pin->slack || !std::isfinite(*pin->slack) || !std::isfinite(slack)) {
+      const double slack        = pin.slack * feedback.time_unit_ps;
+      if (!std::isfinite(pin.slack) || !std::isfinite(slack)) {
         result.untimed[i] = true;
         continue;
       }

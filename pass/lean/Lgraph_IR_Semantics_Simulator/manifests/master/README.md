@@ -30,7 +30,7 @@ target can be credited from it.
 ## What these manifests pin
 
 The certificates THIS worktree emitted, collected by
-`pass/lean/scripts/d3_master_corpus.py` from the D4 emission runs under
+`pass/lean/Translation_Validation/scripts/d3_master_corpus.py` from the D4 emission runs under
 `generated/master_port/`. A certificate is collected only when both hold:
 
 * its block's row in the emission run's `rows.tsv` says `emit_status=EMITTED` —
@@ -54,11 +54,11 @@ certificate in this corpus, and they stay on the list saying so.
 ## Regenerating
 
 ```sh
-python3 -I pass/lean/scripts/d3_master_corpus.py \
+python3 -I pass/lean/Translation_Validation/scripts/d3_master_corpus.py \
   --from generated/master_port/d4_coreet_122 --out generated/master_port/d3_corpus/master_coreet
-python3 -I pass/lean/scripts/d3_master_corpus.py \
+python3 -I pass/lean/Translation_Validation/scripts/d3_master_corpus.py \
   --from generated/master_port/d4_cva6_30   --out generated/master_port/d3_corpus/master_cva6
-python3 -I pass/lean/scripts/d3_manifest.py \
+python3 -I pass/lean/Translation_Validation/scripts/d3_manifest.py \
   --coreet-certs generated/master_port/d3_corpus/master_coreet/lean \
   --cva6-certs   generated/master_port/d3_corpus/master_cva6/lean \
   --out pass/lean/Lgraph_IR_Semantics_Simulator/manifests/master

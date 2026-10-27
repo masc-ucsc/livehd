@@ -42,9 +42,10 @@ Wire_rc             technology_wire_rc(const physical::Technology& tech, const s
                                        double resistance = -1, double capacitance = -1, double rc_pessimism = 1,
                                        std::optional<std::string_view> liberty_text = std::nullopt);
 // One net's driver-aware Steiner RC from pin labels and positions in DBU.
-// The driver label must occur in pins, in any position. Above 1000
-// distinct locations it joins spatial FLUTE groups, retains an acyclic
-// resistance-weighted spanning tree, and sets *approximate.
+// The driver label must occur in pins, in any position. Pathological large
+// nets exceeding the driver-aware work bound use spatial FLUTE groups and an
+// acyclic spanning tree, setting *approximate. All-zero wire RC uses one ideal
+// junction independently of pin positions (post-synthesis timing seeds).
 physical::Rc_net    steiner_rc(std::string driver, const std::vector<std::pair<std::string, std::pair<double, double>>>& pins,
                                const Wire_rc& wire, double dbu, bool* approximate = nullptr);
 }  // namespace livehd::placement

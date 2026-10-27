@@ -363,8 +363,33 @@ Construct it with the Liberty/SDC options, then call `evaluate(graph, rc)` with
 its flat mapped graph and placement parasitics. It returns
 `livehd::timing::Feedback` directly, including physical-pin timing, electrical
 violations, area, endpoint WNS/TNS and the path used by physical repair.
-No timing JSON is generated, written or read by this interface. Explicit
-standalone timing reports remain output artifacts, separate from feedback.
+No timing JSON is generated, written or read by `evaluate`. Explicit timing
+reports remain output artifacts, separate from feedback.
+
+GP ranking uses `Feedback::Ranking`: a dense slack/clock array and a shared,
+immutable physical-pin/net layout. The session binds timer pins once per
+topology; coordinate-only updates reuse those bindings. Gate/topology changes
+and what-if access invalidate the bindings before the next ranking sample.
+No per-pin ordered map or detailed pin-time breakdown is built for ranking.
+Feedback owns its layout and exact RC snapshot, so it remains usable after
+scratch graphs and later timer generations are destroyed. Net weighting uses
+numeric pin indices for that snapshot and resolves labels for other snapshots.
+Reset filtering masks a copied array without changing the original sample.
+Cell/terminal/SAT legalization consume the same rank and clock information.
+Detailed timing and report consumers retain the ordinary pin records.
+
+At the final `pass.opentimer` boundary, `lhd synth` can transfer the session
+through the transient `Eprp_var::physical_timing_session` field. `write_report`
+reconciles the final RC, masters, connectivity and reset cuts, rolls back pending
+what-if edits, and renders the ordinary report from that timer. It does not
+rebuild the timing graph or refit unchanged nets. The report preserves per-color
+statistics and populates the ordinary STA cache for later CLI invocations.
+`physical_session_reused` identifies this path; cache hits set it to false.
+Criticality annotation, nonzero margin, legacy hierarchy stitching and changed
+timing options or timing-file contents use the standalone path. Input contents
+are hashed once at initialization and once at reporting; iterative evaluations
+do not reread the files. Successful reporting consumes the
+session; another evaluation starts a fresh timer.
 
 Coordinate-only updates compare an owned cell-identity snapshot and net
 connectivity before updating RC. They reuse the existing cell and connection
@@ -381,7 +406,8 @@ arrival/required times, so registered reset paths cannot dominate downstream dat
 slack. Clock networks stay active for launch and capture. This analysis-only mask
 preserves net connectivity, physical capacitances and RC trees. Replacing the set
 or passing an empty set restores the SDC/Liberty case masks before applying the
-new exclusions; topology changes reapply them. Standalone STA remains unfiltered.
+new exclusions; topology changes reapply them. Standalone STA also applies the
+typed reset cuts carried by its physical RC or explicit pass inputs.
 
 The session loads Liberty and SDC once. Later evaluations apply gate repowering,
 buffer insertion/removal, connectivity changes and changed RC nets to the same

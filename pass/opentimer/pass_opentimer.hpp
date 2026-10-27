@@ -171,6 +171,7 @@ protected:
 
   // STA reuse telemetry, rendered into the qor report's `incremental` member
   // (harvest_sta_incremental lifts it into the result envelope).
+  bool         session_report_   = false;
   bool         cache_enabled_    = false;
   bool         cache_hit_        = false;
   mutable bool cache_digestable_ = true;  // set by cache_key() (const): an undigestable netlist never caches
@@ -224,6 +225,9 @@ protected:
   // chain is intact) rather than the pin's master (out_pins() pins drop it).
   std::string driver_net_of(const hhds::Occurrence_node& owner, const hhds::Occurrence_pin& dpin) const;
   void        backpath_set_color(hhds::Node_class node, int color);
+  bool        configure_session_report(const Eprp_var& var);
+  void        prepare_color_report(const std::shared_ptr<hhds::Graph>& g);
+  void        set_time_unit_label();
   void        write_qor() const;  // write the accumulated qor_blocks_ to qor_path
 
 public:
@@ -236,7 +240,8 @@ public:
 namespace livehd::opentimer {
 // One owner per placement flow. Liberty/SDC are loaded once. evaluate() applies
 // master, connectivity and RC deltas, including undoing rejected repair trials.
-// No timing reports are serialized or written by this interface.
+// evaluate() transports typed feedback only; write_report() is an explicit
+// final-report consumer of the same timer.
 class Physical_session {
   struct Impl;
   struct Proxy;
@@ -264,6 +269,9 @@ public:
   livehd::timing::Feedback evaluate(const std::shared_ptr<hhds::Graph>&                 graph,
                                     std::shared_ptr<const livehd::physical::Parasitics> rc,
                                     const std::set<std::string>& data_exclusions = {}, Purpose purpose = Purpose::detailed);
+  // Returns false for incompatible analysis options, leaving the standalone
+  // pass responsible for that report. A successful handoff consumes the session.
+  bool                     write_report(const Eprp_var& report);
   const Statistics&        statistics() const;
   std::string              statistics_json() const;
   // Transient what-if edits on the last evaluated state (core/timing_whatif.hpp).

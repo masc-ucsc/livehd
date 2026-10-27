@@ -16,6 +16,14 @@ name = "LeanSemanticPrimitives"
 name = "Sims"
 globs = ["Sims.+"]
 
+# Generated LEGACY fast-model simulators
+# (pass/lean/Legacy_Fast_Model_Simulator/make_legacy_sim.py).  Same reasoning as
+# `Sims`: not in `defaultTargets`, because a real design's model is megabytes of
+# generated definitions and nothing else needs it elaborated.
+[[lean_lib]]
+name = "LegacySims"
+globs = ["LegacySims.+"]
+
 # The standalone direct simulator.  Not in `defaultTargets`: linking a native
 # binary on every `lake build` would slow the proof workflow down for no gain.
 # Build it explicitly with `lake build LgraphSim`.
@@ -23,3 +31,11 @@ globs = ["Sims.+"]
 name = "LgraphSim"
 root = "Main"
 exeName = "lgraph-sim"
+
+# One executable per generated legacy simulator.  Built explicitly
+# (`lake build LegacySimMinionTlb`), never by default: linking a native binary on
+# every `lake build` would slow the proof workflow for no gain.
+[[lean_exe]]
+name = "LegacySimMinionTlb"
+root = "LegacySims.minion_tlb_LegacySim"
+exeName = "legacy-sim-minion-tlb"
