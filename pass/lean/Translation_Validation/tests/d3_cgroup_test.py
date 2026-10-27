@@ -127,6 +127,19 @@ def main() -> int:
         base = sweep.cgroup_base()
         print(f"  cgroup_base() -> {base or 'UNAVAILABLE'}\n")
 
+        # WHOSE CGROUPS ARE THESE.  The delegated base is shared by every sweep
+        # this user runs, in ANY checkout, so the leftover scan below cannot read
+        # `d3-*` as "left by this suite".  A sweep running in another checkout --
+        # or one a SIGTERM left behind earlier -- made the scan fail here while
+        # the suite's own cleanup was correct.  The names present BEFORE the runs
+        # are therefore not ours to judge, and only names that appear after them
+        # are.
+        pre_existing = ({d.name for d in base.iterdir()
+                         if d.is_dir() and d.name.startswith("d3-")} if base else set())
+        if pre_existing:
+            print(f"  {len(pre_existing)} d3- cgroup(s) already in the base, "
+                  f"not this suite's: {sorted(pre_existing)}\n")
+
         # ---- refusals, which must hold whether or not delegation exists ------
         stub = tmp / "fake_lake"
         stub.write_text(ALLOC_STUB)
@@ -808,10 +821,12 @@ def main() -> int:
 
             # ---- no cgroup and no process survives any of the above --------------
             leftover = [d.name for d in base.iterdir()
-                        if d.is_dir() and d.name.startswith("d3-")]
+                        if d.is_dir() and d.name.startswith("d3-")
+                        and d.name not in pre_existing]
             check("no_leftover_cgroups", not leftover,
                   f"no per-probe cgroup is left behind after OOM, timeout, 137 and "
-                  f"ordinary exits ({leftover or 'none'})")
+                  f"ordinary exits ({leftover or 'none'}; "
+                  f"{len(pre_existing)} pre-existing ignored)")
             orphans = subprocess.run(
                 ["ps", "-u", str(os.getuid()), "-o", "args="],
                 capture_output=True, text=True).stdout
