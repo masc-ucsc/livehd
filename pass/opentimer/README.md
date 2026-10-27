@@ -411,7 +411,11 @@ time; compare total timing cost when reading statistics across this change.
 What-if queries cache physical-to-timer pin-name translations within the session.
 Gate insertion, gate rollback and a new `evaluate` invalidate those translations.
 The cache holds names only: slack, slew, loads and other timing values continue
-to come from the synchronized timer.
+to come from the synchronized timer. Before a new evaluation, rollback restores
+pending wire RC even when the incoming accepted net is unchanged. The journal
+and its owning RC snapshot are then released; the public what-if proxy remains
+valid and creates a fresh journal on demand. RC restoration queues propagation
+with the incoming evaluation rather than triggering an extra timing pass.
 
 Placement passes a third `data_exclusions` argument containing physical pins on
 excluded non-clock nets. The session masks those net timing arcs before propagating

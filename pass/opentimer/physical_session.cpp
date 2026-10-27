@@ -606,7 +606,10 @@ struct Physical_session::Impl : Pass_opentimer {
         pending_rc.insert(name);
       }
     }
-    void update() {
+    void restore_pending_rc() {
+      if (pending_rc.empty()) {
+        return;
+      }
       index_base();
       // A later set_net can move a sink out of an earlier net and invalidate
       // that net's RC. Attach touched trees only after all topology edits,
@@ -623,6 +626,9 @@ struct Physical_session::Impl : Pass_opentimer {
         }
       }
       pending_rc.clear();
+    }
+    void update() {
+      restore_pending_rc();
       s.timer.update_timing();
     }
     double wns() override {
@@ -839,8 +845,13 @@ struct Physical_session::Impl : Pass_opentimer {
       whatif_->rollback(0);
     }
     if (whatif_) {
-      whatif_->reverse_pins.clear();
-      whatif_->timer_pin_names.clear();
+      // Rollback queues RC restoration. Attach it before the next evaluation's
+      // unchanged-net fast path can skip those trees; propagation still runs
+      // once, together with the incoming snapshot's changes.
+      whatif_->restore_pending_rc();
+      // No journal/index survives an evaluation. Drop its owning RC snapshot
+      // and scratch maps too; the public Proxy resolves a fresh journal lazily.
+      whatif_.reset();
     }
   }
 
