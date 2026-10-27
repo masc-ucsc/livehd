@@ -4,6 +4,7 @@
 #include <array>
 #include <functional>
 
+#include "dlop.hpp"
 #include "gtest/gtest.h"
 
 namespace livehd::domplace {
@@ -128,12 +129,13 @@ struct Run {
     return result;
   }
 };
-Run select(const Builder& b, Select_options options, double cmos_register_area = 10, uint64_t work = 100000000) {
+Run select(const Builder& b, Select_options options, double cmos_register_area = 10, uint64_t work = 100000000,
+           std::span<const usyn::Physical_hint> gating = {}) {
   static const auto model = cmos_model();
   static const auto ref   = reference();
   options.clock           = "clk";
   usyn::Budget budget{work};
-  return {select_physical(b.region, b.names, options, {&ref, &model, cmos_register_area}, budget)};
+  return {select_physical(b.region, b.names, options, {&ref, &model, cmos_register_area}, budget, gating)};
 }
 Select_options all() {
   Select_options options;
@@ -141,6 +143,38 @@ Select_options all() {
   return options;
 }
 }  // namespace
+
+TEST(PhysicalSelect, SynchronousResetsLeaveThePdnOrRetainWithTheirReason) {
+  // U22: a synchronous reset to 0 on input rst. It moves to RST when D loads
+  // 0 while rst is asserted and rst is a direct input of D; a D that loads
+  // something else is reset-shape, one whose cone does not read rst at all
+  // (the cut folded it upstream) is reset-absorbed.
+  Builder    b;
+  const auto a = b.input("a"), c = b.input("c"), rst = b.input("rst");
+  b.state("loads");
+  b.state("shape");
+  b.state("absorbed");
+  b.next(0, formula({lit(0), lit(1), parallel(0, 1), lit(2, true), series(2, 3)}), {a, c, rst});  // (a | c) & !rst
+  b.next(1, formula({lit(0), lit(1), parallel(0, 1)}), {a, rst});                                 // a | rst
+  b.next(2, formula({lit(0), lit(1), series(0, 1)}), {a, c});                                     // a & c
+  std::vector<usyn::Physical_hint> hints(3);
+  for (uint32_t i = 0; i < 3; ++i) {
+    auto& s              = b.region.source.sources[i];
+    s.reset.present      = true;
+    s.reset.bits         = 1;
+    s.initial.present    = true;
+    s.initial.constant   = true;
+    s.initial.value      = *Dlop::create_integer(0);
+    hints[i].reset_input = 3;  // frozen inputs: clk, a, c, rst
+  }
+  const auto run = select(b, all(), 10, 100000000, hints);
+  ASSERT_TRUE(run.emission);
+  EXPECT_EQ(run.reasons(), (std::vector<std::string>{"domino-all", "reset-shape", "reset-absorbed"}));
+  ASSERT_TRUE(run.emission->states[0].reset);
+  EXPECT_EQ(run.emission->states[0].reset->index, 3U);
+  EXPECT_FALSE(run.emission->states[1].reset);
+  EXPECT_FALSE(run.emission->states[2].reset);
+}
 
 TEST(PhysicalSelect, AndOrEndpointConvertsWithRecheckedMetrics) {
   Builder    b;
