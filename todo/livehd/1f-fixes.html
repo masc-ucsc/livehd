@@ -31,6 +31,14 @@ integration build, matched comparisons under the new upstream defaults, and fres
 Gemmini scaling run remain pending. See <code>runs.distribution_link_index_v56</code>;
 the full A–J requirements remain open.</p>
 
+<p>The v55 Gemmini protocol embedded a stale v54 binary manifest. Its preserved
+S/B command records name the v55 executable, and that executable's current hash
+matches the saved v55 manifest; this is not a reconstructed launch-time hash.
+The original artifacts remain unchanged, with the correction recorded in
+<code>runs.borrowed_legal_geometry_v55.provenance_correction</code>. The next
+Gemmini/cnn/partition_c harness checks executable and input hashes before running;
+its input checks pass, but the fresh SB measurements are still pending.</p>
+
 <p>The later upstream merge (<code>58edc9881</code>, including
 <code>2eb47e6ef</code>) changes the default virtual filler fraction from 0.25 to
 1 and cell size scale from 1 to 2, and also updates synthesis. The v55 numbers

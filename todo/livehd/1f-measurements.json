@@ -49361,6 +49361,27 @@
           ]
         },
         "scope": "Recorded v55 benchmark samples precede this merge. A matched upstream comparison is required before making claims for merged defaults."
+      },
+      "provenance_correction": {
+        "issue": "The completed v55 full-driver protocol incorrectly embedded the v54 binary manifest from a hardcoded path. The stored S/B command records name the v55 executable, whose preserved hash matches the v55 manifest. Original evidence is retained unchanged.",
+        "correct_lhd_sha256": "c42d92f0285cfb7dd272819daf8b612d077c62427d7bdb8f4f82b51524f48ba5",
+        "incorrect_embedded_lhd_sha256": "a395cc45bd310ed89278b199bcda7bebeb690a12d30bf360024a0efe6851f062",
+        "command_evidence": {
+          "S": {
+            "command_path": "/home/renau/projs/.agent-artifacts/1f-memory-v55/gemmini-full/gemmini/S/measure/command.json",
+            "command_sha256": "05d9ae05bf90afef9c78d75f4ff0186d91692e57ff7cd4be1027f56e4a656ee1",
+            "executed_path": "/tmp/1f-speed-v55-legal-view/bin/lhd/lhd",
+            "current_executable_sha256": "c42d92f0285cfb7dd272819daf8b612d077c62427d7bdb8f4f82b51524f48ba5"
+          },
+          "B": {
+            "command_path": "/home/renau/projs/.agent-artifacts/1f-memory-v55/gemmini-full/gemmini/B/measure/command.json",
+            "command_sha256": "43ab61a846de45bedcd98fde92498410a1ae88ec6b20ffc33b88b376ab83b1e8",
+            "executed_path": "/tmp/1f-speed-v55-legal-view/bin/lhd/lhd",
+            "current_executable_sha256": "c42d92f0285cfb7dd272819daf8b612d077c62427d7bdb8f4f82b51524f48ba5"
+          }
+        },
+        "limitation": "Hash verification is of the preserved executable now, alongside the original recorded command path; this does not reconstruct a launch-time attestation.",
+        "sidecar": "/tmp/1f-memory-v56/v55-gemmini-provenance-correction.json"
       }
     },
     "distribution_link_index_v56": {
@@ -49404,7 +49425,24 @@
         }
       },
       "memory_scope": "Standalone whole-process peak RSS is essentially unchanged; no placement memory reduction is yet established. Fresh Gemmini and matched new-default placement comparisons remain required.",
-      "evidence": "/tmp/1f-memory-v56/state.json; control-test.log; probe-results/summary.json; integration-build.log"
+      "evidence": "/tmp/1f-memory-v56/state.json; control-test.log; probe-results/summary.json; integration-build.log",
+      "census_harness": {
+        "scope": "Harness preparation only; no fresh SB runtime measurements yet",
+        "inputs": {
+          "gemmini": 10,
+          "cnn": 22,
+          "NVDLA/partition_c": 443
+        },
+        "checks": [
+          "all Python helpers compile",
+          "actual SDC transformations preserve false paths",
+          "unsupported/multiple clocks rejected",
+          "matching executable manifest accepted",
+          "mismatched executable manifest rejected"
+        ],
+        "harness": "/home/renau/projs/.agent-artifacts/1f-memory-v56/full-driver-v1",
+        "evidence": "/tmp/1f-memory-v56/census-harness-checks.json; census-preflight.json"
+      }
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",
