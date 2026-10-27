@@ -30,7 +30,14 @@ struct Physical_session::Impl : Pass_opentimer {
   std::shared_ptr<const livehd::timing::Feedback::Ranking::Layout> ranking_layout;
   std::vector<const ot::Pin*>                                      ranking_pins;
 
-  explicit Impl(const Eprp_var& options) : Pass_opentimer(options) {
+  explicit Impl(const Eprp_var& options, int threads) : Pass_opentimer(options) {
+    if (threads < 0) {
+      throw std::invalid_argument("physical timing worker count must be nonnegative");
+    }
+    if (threads) {
+      timer.set_num_threads(threads);
+    }
+    stats.worker_threads = timer.num_threads();
     // Reporting/caching is a separate consumer, never the feedback transport.
     qor_path.clear();
     cache_dir_.clear();
@@ -1040,12 +1047,12 @@ struct Physical_session::Proxy final : livehd::timing::Whatif {
   std::pair<unsigned, double> electrical(const std::vector<std::string>& labels) override { return w().electrical(labels); }
   double                      clock_period() override { return w().clock_period(); }
 };
-Physical_session::Physical_session(const Eprp_var& options) : options_(options) {
+Physical_session::Physical_session(const Eprp_var& options, int threads) : options_(options), threads_(threads) {
   proxy_ = std::make_unique<Proxy>(*this);
   options_.graphs.clear();
   options_.physical_rc.reset();
   options_.physical_timing_session.reset();
-  impl_ = std::make_unique<Impl>(options_);
+  impl_ = std::make_unique<Impl>(options_, threads_);
 }
 Physical_session::~Physical_session() = default;
 livehd::timing::Feedback Physical_session::evaluate(const std::shared_ptr<hhds::Graph>&                 graph,
@@ -1057,7 +1064,7 @@ livehd::timing::Feedback Physical_session::evaluate(const std::shared_ptr<hhds::
     // Invalid candidate inputs must not poison the next (possibly rolled-back)
     // trial. Normal accepted/rejected trials never recreate this timer.
     const auto previous_stats = impl_->stats;
-    impl_                     = std::make_unique<Impl>(options_);
+    impl_                     = std::make_unique<Impl>(options_, threads_);
     impl_->stats              = previous_stats;
     throw;
   }
@@ -1069,13 +1076,13 @@ bool Physical_session::write_report(const Eprp_var& report) {
       // Reporting is terminal. Drop graph-associated metadata and prevent a
       // later evaluate() from serializing feedback on its hot path.
       const auto stats = impl_->stats;
-      impl_            = std::make_unique<Impl>(options_);
+      impl_            = std::make_unique<Impl>(options_, threads_);
       impl_->stats     = stats;
     }
     return written;
   } catch (...) {
     const auto stats = impl_->stats;
-    impl_            = std::make_unique<Impl>(options_);
+    impl_            = std::make_unique<Impl>(options_, threads_);
     impl_->stats     = stats;
     throw;
   }
@@ -1086,6 +1093,8 @@ std::string                         Physical_session::statistics_json() const {
   rapidjson::StringBuffer                    buffer;
   rapidjson::Writer<rapidjson::StringBuffer> w(buffer);
   w.StartObject();
+  w.Key("worker_threads");
+  w.Uint(s.worker_threads);
   w.Key("evaluations");
   w.Uint(s.evaluations);
   w.Key("builds");

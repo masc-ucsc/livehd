@@ -22,6 +22,30 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Review v44 fixes the previously ignored timing worker budget. OpenTimer
+<code>634270c</code> creates its executor lazily and preserves queued builders
+when resizing it. Placement passes its existing thread option through session
+construction, recovery and report rebuilds; statistics report
+<code>worker_threads</code>. Public option defaults are unchanged. Regression
+coverage includes incremental RC updates, endpoint/multi-path queries and
+session recovery with explicit worker counts. Nine optimized suites pass
+against the published dependency without a local override. A rebuilt lfsr run
+reproduces the candidate's exact DEF and WNS.</p>
+<p>Three alternating evaluations of the same minimax DEF produce byte-identical
+timing reports. Median cold timing is 2.822 → 2.787 s. Lfsr, minimax and
+NVDLA/partition_m retain exact DEFs and independent WNS; placement takes
+1.939, 41.666 and 37.167 s respectively, versus 2.038, 42.395 and 36.433 s in
+v43. All stay within 1.5×. These are single samples, with concurrent build work;
+the small differences do not establish a repeatable speedup. The coralnpu
+full-flow regression is still running. Evidence is in
+<code>runs.timing_worker_budget_v44</code>.</p>
+<p>Gemmini still hits the 16 GiB process-tree guard during initial physical
+timing, before GP (16,784,452 KiB after 111.2 s). Honoring the thread budget
+therefore does not resolve the memory failure. A separate full-allocation heap
+profile was stopped before timing because of its high overhead; its partial
+profiles are diagnostic only. The original A–J task and census gaps remain
+open.</p>
+
 <p>OpenTimer now seeds the ramp-duration fit with a reduced scalar crossing
 equation when both thresholds occur during the ramp. The original bounded
 solver still checks the waveform residual at its existing tolerance. Mixed/tail
@@ -59,7 +83,7 @@ The new gemmini scaling run completed synthesis in 69.6 s CPU at 9,370 MiB RSS,
 but its full flow stopped during initial physical timing. A diagnostic repeat
 confirms the 16 GiB process-tree guard at 16,789,512 KiB, before GP. The live
 process had 33 threads on one pinned CPU; <code>Timer::set_num_threads</code> is
-currently a no-op. Its memory contribution remains unproven. This is a failing
+a no-op in that baseline. Its memory contribution remained unproven. This is a failing
 I result, with the trace and exact stop reason retained for diagnosis.</p>
 
 <p>OpenTimer now reuses each wire response across the paired slew and delay

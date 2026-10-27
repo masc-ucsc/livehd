@@ -366,6 +366,12 @@ violations, area, endpoint WNS/TNS and the path used by physical repair.
 No timing JSON is generated, written or read by `evaluate`. Explicit timing
 reports remain output artifacts, separate from feedback.
 
+Placement callers pass their existing thread budget as the constructor's second
+argument. The session applies it to OpenTimer's lazy worker pool and preserves
+it across recovery and report-triggered rebuilds. `worker_threads` in session
+statistics records that budget. Omitting the argument retains the standalone
+timer's hardware-concurrency default.
+
 GP ranking uses `Feedback::Ranking`: a dense slack/clock array and a shared,
 immutable physical-pin/net layout. The session binds timer pins once per
 topology; coordinate-only updates reuse those bindings. Gate/topology changes

@@ -585,7 +585,7 @@ TEST_F(PhysicalSession, FinalReportReconcilesTrialsAndSeedsStandaloneCache) {
 TEST_F(PhysicalSession, FinalReportReusesUnchangedRcAndFallsBackForChangedOptions) {
   Circuit circuit(false, false);
   for (bool change_load : {false, true}) {
-    auto session = std::make_shared<livehd::opentimer::Physical_session>(options);
+    auto session = std::make_shared<livehd::opentimer::Physical_session>(options, 2);
     session->evaluate(circuit.graph, circuit.rc);
     const auto nets                = session->statistics().updated_nets;
     auto       report              = options;
@@ -607,6 +607,7 @@ TEST_F(PhysicalSession, FinalReportReusesUnchangedRcAndFallsBackForChangedOption
     EXPECT_EQ(session->statistics().builds, 1U);
     EXPECT_EQ(session->statistics().updated_nets, nets);
     EXPECT_EQ(session->statistics().evaluations, change_load ? 1U : 2U);
+    EXPECT_EQ(session->statistics().worker_threads, 2U);
     livehd::opentimer::Physical_session fresh(report);
     compare(livehd::placement::timing_feedback(text), fresh.evaluate(circuit.graph, circuit.rc));
   }
@@ -679,7 +680,7 @@ TEST_F(PhysicalSession, DirectFeedbackMatchesExplicitReportAndDoesNotReloadFiles
 }
 TEST_F(PhysicalSession, InvalidCandidateDoesNotPoisonTheRetainedNetlist) {
   Circuit                             initial(false, false), candidate(true, false);
-  livehd::opentimer::Physical_session session(options);
+  livehd::opentimer::Physical_session session(options, 1);
   const auto                          before  = session.evaluate(initial.graph, initial.rc);
   auto                                unknown = candidate.library.create_io("missing_timing_cell");
   unknown->add_input("A", 0);
@@ -698,6 +699,7 @@ TEST_F(PhysicalSession, InvalidCandidateDoesNotPoisonTheRetainedNetlist) {
   }
   EXPECT_THROW(session.evaluate(candidate.graph, candidate.rc), std::runtime_error);
   compare(session.evaluate(initial.graph, initial.rc), before);
+  EXPECT_EQ(session.statistics().worker_threads, 1U);
 }
 }  // namespace
 namespace {

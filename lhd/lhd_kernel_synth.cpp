@@ -1973,7 +1973,7 @@ void synth_command(Options& opts, Result& res) {
       timing_options.dict["cache_dir"] = "";
       timing_options.dict["qor"]       = "";
       timing_options.set_stage_labels(timing_options.dict);
-      net.physical_timing_session = std::make_shared<livehd::opentimer::Physical_session>(timing_options);
+      net.physical_timing_session = std::make_shared<livehd::opentimer::Physical_session>(timing_options, place_options.threads);
       auto& timing_session        = *net.physical_timing_session;
       place_options.whatif        = &timing_session.whatif();
       std::string phase_step;

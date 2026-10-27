@@ -866,7 +866,7 @@ int main(int argc, char** argv) {
         std::ofstream(root + "/qor.json") << analysis.qor;
         return 0;
       }
-      livehd::opentimer::Physical_session timing_session(timing_options(options.liberty, sdc, top));
+      livehd::opentimer::Physical_session timing_session(timing_options(options.liberty, sdc, top), options.threads);
       options.whatif          = &timing_session.whatif();
       unsigned   serial       = 0;
       const auto raw_evaluate = [&](const pl::Result& placed) {
@@ -932,7 +932,8 @@ int main(int argc, char** argv) {
       std::unique_ptr<livehd::opentimer::Physical_session> trace_session;
       unsigned                                             trace_serial = 0;
       if (trace_interval) {
-        trace_session = std::make_unique<livehd::opentimer::Physical_session>(timing_options(options.liberty, sdc, top));
+        trace_session
+            = std::make_unique<livehd::opentimer::Physical_session>(timing_options(options.liberty, sdc, top), options.threads);
         options.gp_observer_interval = trace_interval;
         options.min_iterations       = std::max(options.min_iterations, stop_iteration);
         options.gp_observer          = [&](const pl::Result& snapshot, const pl::Gp_observation& sample) {
@@ -1252,7 +1253,7 @@ int main(int argc, char** argv) {
       state.parasitics = std::move(rc);
     }
     unsigned                            serial = 0;
-    livehd::opentimer::Physical_session timing_session(timing_options(options.liberty, sdc, top));
+    livehd::opentimer::Physical_session timing_session(timing_options(options.liberty, sdc, top), options.threads);
     options.whatif      = &timing_session.whatif();
     const auto evaluate = [&](const pl::Result& placed) {
       return evaluate_timing(placed, timing_session, serial, prects_timing ? &tech : nullptr, root + "/timing_profile.jsonl");
