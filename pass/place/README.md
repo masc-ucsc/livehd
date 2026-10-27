@@ -175,9 +175,44 @@ cones remain, including controls crossing region boundaries. Logical mapped
 definitions and their resynthesis identities/history are unchanged. The cleanup
 also runs on the new physical copy after an accepted color restart, but never
 on repair/ECO trials. `buffer_cleanup.jsonl` records removed and retained counts.
+The synthesis host releases that cleanup graph once the zero-wire timing seed
+owns its flattened copy. The seed keeps RC in memory without serializing a second
+copy into graph attributes; completed placements still persist their RC for
+standalone timing and reload. The synthesis host retires seed and cleanup
+libraries as soon as placement has made its last independent copy, before that
+stage's GP/RC work. Staged macro placement retains its input until the final
+cell stage copies it; the original synthesis netlist remains for resynthesis.
+Ordinary GP timing checkpoints borrow the current solver coordinates and the
+existing connectivity instead of copying the entire placement view. Exported
+graph/DEF poses remain rounded to DBU while RC keeps fractional pin positions.
+Legal timing snapshots still capture row orientations and rebuild pin offsets;
+returned RC and floorplan snapshots own their data.
+The lightweight ranking callback receives graph, RC and the current topology's
+control classification through `Ranking_view`. Ordinary GP ranking omits the
+unused pin-location map and builds the weighting floorplan after timing retires
+the preceding RC generation. Detailed callbacks and selected macro-GP handoffs
+retain pin-location data; reset/clock cuts follow the same classification.
 The imported-GP diagnostic exposes the same operation through
 `remove_synthesis_buffers=true`; its component-count check accounts for exactly
 those removals while retaining fixed-cell and master checks.
+
+Reset and domino rail buffer trees reuse the placement technology snapshot for
+Liberty cell models. Repeated placement phases do not reopen the library to
+identify asynchronous reset pins or choose the smallest placeable buffer.
+
+A supplied core can have too little free area to reach the requested soft density;
+a fine density grid can also make individual cells unavoidably overfill bins.
+For static cell GP, native placement computes an unavoidable overflow floor from
+movable charge and fixed-bin capacity, and from the minimum bin excess of each
+cell over all grid positions. The stronger conservative bound controls handoff.
+If the floor exceeds `stop_overflow`, it uses excess above that floor to schedule
+criticality samples, stop increasing density pressure and settle before legalization. No option default or density
+target changes. `gp_target_density`, `gp_overflow_floor`, and the history's
+`overflow_floor` expose the distinction; an early handoff reports
+`gp_stop_reason="density_infeasible"` and `gp_converged=false`. Minimum iterations,
+objective/routing checks and final legality still apply. Strict upper-bound
+placement, continuation, moving macros and scheduled/reserved geometry retain
+their existing policy.
 
 `synth.place.resize=true` enables timing-checked sizing and buffering in full
 placement with OpenTimer. Explicitly disable it for a geometry-only comparison.
@@ -1159,6 +1194,15 @@ Optimal repeater spacing generates spatial alternatives; branch selection uses
 RC delay, capacitance and fanout rather than treating that spacing as a hard
 wire-length limit. Cell/area budgets and fresh timing of the legalized candidate
 still decide whether an edit is retained.
+
+For larger fanouts, the search also partitions nearby sinks into local leaf
+groups before building the Steiner backbone. Groups fit the candidate buffer's
+capacitance and fanout limits; seeds use either the group center or the point in
+its bounding box nearest the source. Every drive is then selected with the same
+required-time model. A clustered alternative may not exceed the summed net HPWL
+of the best original candidate. That fixed reference prevents a timing-only
+choice from adding overlapping wire. These are internal candidate-generation
+and acceptance rules; public option defaults are unchanged.
 
 **Reset buffer tree (`synth.place.reset_fanout`, default 32; 2d-domplace U23).** One
 mechanism for every mapper (`abc`, `usyn`, the `domino_provisional` profile): right after

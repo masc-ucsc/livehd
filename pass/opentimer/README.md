@@ -366,6 +366,12 @@ violations, area, endpoint WNS/TNS and the path used by physical repair.
 No timing JSON is generated, written or read by `evaluate`. Explicit timing
 reports remain output artifacts, separate from feedback.
 
+Placement callers pass their existing thread budget as the constructor's second
+argument. The session applies it to OpenTimer's lazy worker pool and preserves
+it across recovery and report-triggered rebuilds. `worker_threads` in session
+statistics records that budget. Omitting the argument retains the standalone
+timer's hardware-concurrency default.
+
 GP ranking uses `Feedback::Ranking`: a dense slack/clock array and a shared,
 immutable physical-pin/net layout. The session binds timer pins once per
 topology; coordinate-only updates reuse those bindings. Gate/topology changes
@@ -394,6 +400,13 @@ session; another evaluation starts a fresh timer.
 Coordinate-only updates compare an owned cell-identity snapshot and net
 connectivity before updating RC. They reuse the existing cell and connection
 indexes; resize, cell-order and topology changes use the full delta path.
+Both paths flush changed RC batches after 65,536 capacitance/resistance records.
+Nets are indivisible, so the last net can take a batch beyond that threshold.
+Each batch replaces the timer's
+old RC trees immediately and releases its temporary SPEF strings. Timing
+propagates once after the complete update, retaining all batches' frontiers.
+RC-tree construction now belongs to reconciliation time rather than propagation
+time; compare total timing cost when reading statistics across this change.
 
 What-if queries cache physical-to-timer pin-name translations within the session.
 Gate insertion, gate rollback and a new `evaluate` invalidate those translations.

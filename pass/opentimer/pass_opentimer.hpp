@@ -246,12 +246,14 @@ class Physical_session {
   struct Impl;
   struct Proxy;
   Eprp_var               options_;
+  int                    threads_;
   std::unique_ptr<Impl>  impl_;
   std::unique_ptr<Proxy> proxy_;  // stable what-if handle across an internal timer rebuild
 
 public:
   enum class Purpose { detailed, ranking };
   struct Statistics {
+    unsigned worker_threads = 0;
     unsigned evaluations = 0, builds = 0;
     unsigned rankings        = 0;
     double   ranking_seconds = 0;
@@ -262,7 +264,9 @@ public:
     double   propagation_seconds = 0, feedback_seconds = 0;
     size_t   update_calls = 0;
   };
-  explicit Physical_session(const Eprp_var& options);
+  // Zero retains the standalone timer's worker default. Placement callers
+  // supply their existing thread budget; it survives timer recovery/rebuilds.
+  explicit Physical_session(const Eprp_var& options, int threads = 0);
   ~Physical_session();
   // Optional optimization-only cut on physical non-clock nets. Connectivity,
   // capacitance and SDC remain intact; an empty set restores full-path timing.

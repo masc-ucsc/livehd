@@ -1286,6 +1286,26 @@ struct View {
   std::map<std::string, double>                 weights;
   std::map<std::string, std::string>            cohesion_owners;
 };
+// A timing checkpoint borrows connectivity and solver geometry. Only exported
+// cell poses use integer DBU coordinates; RC keeps the solver's fractional pin
+// positions. None of these references escape the synchronous checkpoint.
+struct Geometry_view {
+  const View&       view;
+  const dp::Design& design;
+  bool              solver_positions;
+
+  Geometry_view(const View& v) : view(v), design(v.design), solver_positions(false) {}
+  Geometry_view(const View& v, const dp::Design& physical) : view(v), design(physical), solver_positions(true) {}
+
+  Ann_place pose(size_t index) const {
+    auto result = view.cells[index].place;
+    if (solver_positions) {
+      result.x = std::llround(design.node_x[index]);
+      result.y = std::llround(design.node_y[index]);
+    }
+    return result;
+  }
+};
 using CentroidSample = dp::CentroidSample;
 auto summarize_centroids(const dp::Design& d) { return dp::detail::centroid_summary(d); }
 void restore_imported_rows(ph::Floorplan& frame, const View& v) {
@@ -1483,13 +1503,15 @@ void snapshot_nets(ph::Floorplan& frame, const View& v) {
 }
 // The view's frame with its current mapped nets and cell poses, as timing
 // and repair callbacks receive a placement checkpoint.
-void snapshot_frame(ph::Floorplan& frame, const View& v) {
+void snapshot_frame(ph::Floorplan& frame, const Geometry_view& geometry) {
+  const auto& v = geometry.view;
   frame = v.fp;
   restore_imported_rows(frame, v);
   snapshot_nets(frame, v);
   frame.components.clear();
-  for (const auto& c : v.cells) {
-    frame.components.push_back({c.name, c.macro, c.place});
+  for (size_t i = 0; i < v.cells.size(); ++i) {
+    const auto& c = v.cells[i];
+    frame.components.push_back({c.name, c.macro, geometry.pose(i)});
   }
 }
 void make_arrays(View& v, const ph::Technology& tech) {
@@ -2824,9 +2846,11 @@ ph::Rc_net steiner_rc(std::string driver, const std::vector<std::pair<std::strin
   return rc;
 }
 namespace {
-std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology& tech, const Options& options,
-                                            std::map<std::string, std::pair<double, double>>& pin_locations,
+std::shared_ptr<ph::Parasitics> estimate_rc(const Geometry_view& geometry, const ph::Technology& tech, const Options& options,
+                                            std::map<std::string, std::pair<double, double>>* pin_locations,
                                             Rc_cache* cache = nullptr, Rc_reuse_stats* reuse = nullptr, bool provenance = true) {
+  const auto& v                    = geometry.view;
+  const auto& design               = geometry.design;
   auto result               = std::make_shared<ph::Parasitics>();
   result->approximate       = !options.full;
   const auto   wire         = technology_wire_rc(tech,
@@ -2896,17 +2920,19 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology&
   std::vector<Rc_geometry>                                       geometries;
   std::vector<std::pair<std::string, std::pair<double, double>>> pins;
   for (size_t net = 0; net < v.drivers.size(); ++net) {
-    const int begin = v.design.flat_net2pin_start[net], end = v.design.flat_net2pin_start[net + 1];
+    const int begin = design.flat_net2pin_start[net], end = design.flat_net2pin_start[net + 1];
     if (end - begin < 2) {
       continue;
     }
     pins.clear();
     uint64_t load_hash = hash_util::kFnv1a64_offset;
     for (int p = begin; p < end; ++p) {
-      const auto   node = v.design.pin2node[p];
-      const double x = v.design.node_x[node] + v.design.pin_offset_x[p], y = v.design.node_y[node] + v.design.pin_offset_y[p];
+      const auto   node = design.pin2node[p];
+      const double x = design.node_x[node] + design.pin_offset_x[p], y = design.node_y[node] + design.pin_offset_y[p];
       pins.emplace_back(v.pins[p].label(), std::pair{x, y});
-      pin_locations.emplace(pins.back().first, std::pair{x, y});
+      if (pin_locations) {
+        pin_locations->emplace(pins.back().first, std::pair{x, y});
+      }
       if (!cache) {
         hash_format("{}:{}:{};", pins.back().first, std::llround(x), std::llround(y));
       }
@@ -2918,8 +2944,8 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology&
                                                  cell.place.height,
                                                  static_cast<unsigned>(cell.place.orientation),
                                                  v.pins[p].pin,
-                                                 v.design.pin_offset_x[p],
-                                                 v.design.pin_offset_y[p]),
+                                                 design.pin_offset_x[p],
+                                                 design.pin_offset_y[p]),
                                      load_hash);
       }
     }
@@ -2954,10 +2980,12 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology&
 }
 // Attach the view's cell poses and IO terminal positions to its RC estimate,
 // as timing and repair consumers of a placement checkpoint expect them.
-void record_poses(ph::Parasitics& rc, const View& v) {
-  for (const auto& c : v.cells) {
-    rc.cells.push_back(
-        {c.name, c.place.x, c.place.y, static_cast<unsigned>(c.place.orientation), c.macro, c.place.width, c.place.height});
+void record_poses(ph::Parasitics& rc, const Geometry_view& geometry) {
+  const auto& v = geometry.view;
+  for (size_t i = 0; i < v.cells.size(); ++i) {
+    const auto& c    = v.cells[i];
+    const auto  pose = geometry.pose(i);
+    rc.cells.push_back({c.name, pose.x, pose.y, static_cast<unsigned>(pose.orientation), c.macro, pose.width, pose.height});
   }
   for (const auto& t : v.fp.terminals) {
     rc.terminals.push_back({t.name, t.x, t.y});
@@ -4228,7 +4256,8 @@ static bool defer_timing_checkpoint(const Options& options, unsigned done, bool 
   const unsigned quota = std::max(1, int(std::ceil(double(options.fp_timing_max_updates - 1) * iteration / max_iterations)));
   return done >= quota || movement < options.fp_timing_movement;
 }
-static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, const Options& requested) {
+static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, const Options& requested,
+                           const std::function<void()>& release_source = {}) {
   std::optional<Options> automatic_options;
   if (requested.halo_x == -1 || requested.halo_y == -1) {
     automatic_options = requested;
@@ -4241,7 +4270,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       automatic_options->fp_evaluate = [&requested](const Result& state) { return requested.fp_evaluate(state); };
     }
     if (requested.gp_rank) {
-      automatic_options->gp_rank = [&requested](const Result& state) { return requested.gp_rank(state); };
+      automatic_options->gp_rank = [&requested](const Ranking_view& state) { return requested.gp_rank(state); };
     }
   }
   const auto&                                     options = automatic_options ? *automatic_options : requested;
@@ -4562,6 +4591,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     throw std::runtime_error("cannot flatten mapped netlist for placement");
   }
   auto& graph = *result.graph;
+  if (release_source) {
+    release_source();  // Nothing below this point may read source or its library.
+  }
   remove_transparent_latches(graph);
   View       v;
   const auto weight_roles = prects_library(options.technology().cells, options.control_ports);
@@ -4588,7 +4620,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   v.align_macros           = options.macro_align_weight > 0 || options.macro_snap;
   v.global_macro_alignment = options.macro_align_global && options.macro_align_weight > 0;
   v.weights                = options.net_weights;
-  v.fp.design              = std::string(source.get_name());
+  v.fp.design              = std::string(graph.get_name());
   v.fp.dbu                 = tech.dbu;
   const auto memories      = memory_proxies(graph, tech, options.liberty);
   Resolver   resolver(tech, memories, options.unknown_const_zero);
@@ -4607,17 +4639,17 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   };
   const auto reset_tree
       = options.reset_fanout
-            ? buffer_reset_nets(graph, tech, options.liberty, options.reset_fanout, reset_constant, options.reset_pins)
+            ? buffer_reset_nets(graph, tech, options.technology().cells, options.reset_fanout, reset_constant, options.reset_pins)
             : Reset_tree_stats{};
-  const auto  rail_tree  = options.domino_rail_fanout && !options.domino_rail_pins.empty()
-                               ? buffer_pin_nets(graph,
+  const auto rail_tree = options.domino_rail_fanout && !options.domino_rail_pins.empty()
+                             ? buffer_pin_nets(graph,
                                                tech,
-                                               options.liberty,
+                                               options.technology().cells,
                                                options.domino_rail_fanout,
                                                options.domino_rail_pins,
                                                "railtree",
                                                reset_constant)
-                               : Reset_tree_stats{};
+                             : Reset_tree_stats{};
   if (const auto minted = std::max(reset_tree.buffer_um2, rail_tree.buffer_um2); options.growth_budget && minted > 0) {
     // Both trees mint the smallest buffer: only an upsize above it is growth.
     options.growth_budget->tree_master_um2 = minted;
@@ -4877,7 +4909,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           }
         }
         const auto width = solver.rows.front().count * sw, height = static_cast<int64_t>(solver.rows.size()) * rh;
-        if (frame.design == source.get_name() && area <= double(width) * height && max_width <= width
+        if (frame.design == graph.get_name() && area <= double(width) * height && max_width <= width
             && max_height <= static_cast<int64_t>(height)) {
           previous         = std::make_shared<ph::Floorplan>(std::move(frame));
           cached_reference = true;
@@ -4956,7 +4988,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
   } else {
     v.fp = *imported_frame;
-    if (v.fp.design != source.get_name()) {
+    if (v.fp.design != graph.get_name()) {
       throw std::runtime_error("floorplan DEF DESIGN differs from selected top");
     }
     std::unordered_map<std::string_view, Cell*> by_name;
@@ -5871,6 +5903,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           s.align_pairs,
           s.align_residual,
           s.align_ramp);
+      line += std::format(",\"overflow_floor\":{}", s.overflow_floor);
       if constexpr (requires {
                       s.filler_count;
                       s.filler_area;
@@ -6664,14 +6697,15 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             state.pin_locations.clear();
             auto rc_options  = options;
             rc_options.full  = false;
-            state.parasitics = estimate_rc(v, tech, rc_options, state.pin_locations);
+            state.parasitics = estimate_rc(v, tech, rc_options, &state.pin_locations);
             record_poses(*state.parasitics, v);
           };
           refresh(checkpoint);
           const auto evaluate = [&](const Result& state) {
             ++fp_sta_calls;
-            const auto& estimator = options.gp_rank && !options.fp_resize ? options.gp_rank : options.fp_evaluate;
-            return prects_data_timing(estimator(state), v.ignored);
+            auto feedback = options.gp_rank && !options.fp_resize ? options.gp_rank({state.graph, state.parasitics, v.ignored})
+                                                                  : options.fp_evaluate(state);
+            return prects_data_timing(feedback, v.ignored);
           };
           const auto before  = evaluate(checkpoint);
           auto       after   = before;
@@ -6756,7 +6790,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         snapshot_frame(checkpoint.floorplan, view);
         auto rc_options       = options;
         rc_options.full       = false;
-        checkpoint.parasitics = estimate_rc(view, tech, rc_options, checkpoint.pin_locations);
+        checkpoint.parasitics = estimate_rc(view, tech, rc_options, &checkpoint.pin_locations);
         for (const auto& c : view.cells) {
           c.node.attr(attrs::place).set(c.place);
         }
@@ -6909,36 +6943,48 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             && defer_timing_checkpoint(options, macro_checkpoints, final, iteration, control.max_iterations, movement)) {
           return dp::GpUpdate{};
         }
-        auto view   = v;
-        view.design = physical;
-        for (size_t i = 0; i < view.cells.size(); ++i) {
-          view.cells[i].place.x = std::llround(physical.node_x[i]);
-          view.cells[i].place.y = std::llround(physical.node_y[i]);
-          // STA checks graph placement against the RC provenance. Keep the
-          // private physical graph at this checkpoint's coordinates as in FP.
-          view.cells[i].node.attr(attrs::place).set(view.cells[i].place);
-        }
+        // GP changes geometry, not connectivity. Borrow the solver's positions
+        // instead of duplicating the whole View's maps, strings and arrays at
+        // every ranking checkpoint. Legal snapshots still rebuild pin offsets
+        // for row orientations using capture().
+        std::optional<View> legal_view;
         if (legal_timing_snapshot) {
-          capture(view, tech, true);
-          for (const auto& cell : view.cells) {
-            cell.node.attr(attrs::place).set(cell.place);
+          legal_view.emplace(v);
+          legal_view->design = physical;
+          for (size_t i = 0; i < legal_view->cells.size(); ++i) {
+            legal_view->cells[i].place.x = std::llround(physical.node_x[i]);
+            legal_view->cells[i].place.y = std::llround(physical.node_y[i]);
           }
+          capture(*legal_view, tech, true);
+        }
+        const auto geometry = legal_view ? Geometry_view{*legal_view} : Geometry_view{v, physical};
+        for (size_t i = 0; i < geometry.view.cells.size(); ++i) {
+          // STA validates graph poses against the RC provenance. Do not update
+          // v.cells: the original placement remains the base for later trials.
+          geometry.view.cells[i].node.attr(attrs::place).set(geometry.pose(i));
         }
         Result checkpoint;
         checkpoint.prects      = v.prects;
         checkpoint.graph       = result.graph;
         checkpoint.net_weights = v.weights;
         checkpoint.fp_library  = result.fp_library;
-        snapshot_frame(checkpoint.floorplan, view);
+        const bool ranking     = options.gp_rank && !trial_scoring;
+        if (!ranking) {
+          snapshot_frame(checkpoint.floorplan, geometry);
+        }
         auto rc_options = options;
         rc_options.full = false;
         fs::create_directories(options.output_dir);
-        checkpoint.parasitics = estimate_rc(view, tech, rc_options, checkpoint.pin_locations);
-        record_poses(*checkpoint.parasitics, view);
+        // Ordinary ranking consumes RC, not a duplicate string-keyed map of
+        // every pin position. The selected macro handoff still owns that map.
+        auto* pin_locations   = !ranking || save_macro_gp_timing ? &checkpoint.pin_locations : nullptr;
+        checkpoint.parasitics = estimate_rc(geometry, tech, rc_options, pin_locations);
+        record_poses(*checkpoint.parasitics, geometry);
         // Propagation belongs to untimed GP. Do not defer STA to finish jumps.
         final_gp_timing_started |= final_timing;
-        const auto& estimator    = options.gp_rank && !trial_scoring ? options.gp_rank : options.fp_evaluate;
-        auto        timing       = prects_data_timing(estimator(checkpoint), v.ignored);
+        auto timing              = prects_data_timing(
+            ranking ? options.gp_rank({checkpoint.graph, checkpoint.parasitics, v.ignored}) : options.fp_evaluate(checkpoint),
+            v.ignored);
         if (trial_scoring) {
           trial_gp_timing = timing;
           return dp::GpUpdate{};  // Losing branches never refresh shared weights or timing history.
@@ -6949,6 +6995,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         // buffering of provisional GP coordinates must not trigger full STA.
         final_gp_timing                      = timing;
         last_final_timing_iteration          = iteration;
+        if (ranking) {
+          // Build the weighting snapshot after the timer retires the previous
+          // RC generation, avoiding simultaneous copies of both at its peak.
+          snapshot_frame(checkpoint.floorplan, geometry);
+        }
         refresh_timing_weights(checkpoint, options, timing, weight_roles);
         v.weights           = checkpoint.net_weights;
         dp::GpUpdate update = std::move(topology_update);
@@ -6961,7 +7012,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         }
         macro_timed_positions.clear();
         for (size_t i = 0; i < v.cells.size(); ++i) {
-          macro_timed_positions.emplace(v.cells[i].name, Point{view.cells[i].place.x, view.cells[i].place.y});
+          const auto pose = geometry.pose(i);
+          macro_timed_positions.emplace(v.cells[i].name, Point{pose.x, pose.y});
         }
         ++macro_checkpoints;
         std::ofstream trace(options.output_dir + "/" + timing_stage + "_timing.jsonl",
@@ -7565,10 +7617,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         auto rc_options = options;
         rc_options.full = false;
         Rc_reuse_stats reuse;
-        checkpoint.parasitics = estimate_rc(view, tech, rc_options, checkpoint.pin_locations, rc_cache.get(), &reuse);
+        checkpoint.parasitics = estimate_rc(view, tech, rc_options, &checkpoint.pin_locations, rc_cache.get(), &reuse);
         if (options.gp_observer_rc_verify) {
           std::map<std::string, std::pair<double, double>> fresh_locations;
-          const auto                                       fresh = estimate_rc(view, tech, rc_options, fresh_locations);
+          const auto                                       fresh = estimate_rc(view, tech, rc_options, &fresh_locations);
           if (fresh->nets != checkpoint.parasitics->nets || fresh->identity != checkpoint.parasitics->identity
               || fresh->approximate != checkpoint.parasitics->approximate || fresh_locations != checkpoint.pin_locations) {
             throw std::runtime_error("reused checkpoint RC differs from fresh full construction");
@@ -7696,7 +7748,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           auto reference_options = options;
           reference_options.full = false;
           std::map<std::string, std::pair<double, double>> locations;
-          const auto   rc     = estimate_rc(reference, tech, reference_options, locations, nullptr, nullptr, false);
+          const auto   rc     = estimate_rc(reference, tech, reference_options, &locations, nullptr, nullptr, false);
           const double period = session->set_legal_reference(*rc, true);
           write_legal_acceptance({.reference_period_ps = period, .reason = "final output not evaluated"}, false, true);
         } catch (const std::exception& error) {
@@ -7709,7 +7761,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         std::map<std::string, std::pair<double, double>> locations;
         auto                                             rc_options = options;
         rc_options.full                                             = false;
-        const auto    rc      = estimate_rc(v, tech, rc_options, locations, nullptr, nullptr, false);
+        const auto    rc      = estimate_rc(v, tech, rc_options, &locations, nullptr, nullptr, false);
         const auto    initial = session->startup_weights(*rc);
         dp::PinTiming bias;
         bias.coefficient     = config.startup_coefficient;
@@ -7781,7 +7833,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         auto rc_options = options;
         rc_options.full = false;
         std::map<std::string, std::pair<double, double>> locations;
-        const auto rc = estimate_rc(view, tech, rc_options, locations, rc_cache.get(), nullptr, false);
+        const auto rc = estimate_rc(view, tech, rc_options, &locations, rc_cache.get(), nullptr, false);
         if (options.native_gp_buffering) {
           for (size_t i = 0; i < view.cells.size(); ++i) {
             auto& cell        = view.cells[i];
@@ -8045,7 +8097,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           auto rc_options    = options;
           rc_options.full    = false;
           std::map<std::string, std::pair<double, double>> locations;
-          const auto                                       rc    = estimate_rc(view, tech, rc_options, locations);
+          const auto                                       rc    = estimate_rc(view, tech, rc_options, &locations);
           const auto                                       fresh = session->legalization_weights(*rc);
           timeclosure::Legalization_binding                binding;
           binding.nodes        = physical.node_x.size();
@@ -8137,7 +8189,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           auto rc_options    = options;
           rc_options.full    = false;
           std::map<std::string, std::pair<double, double>> locations;
-          const auto                                       rc       = estimate_rc(view, tech, rc_options, locations);
+          const auto                                       rc       = estimate_rc(view, tech, rc_options, &locations);
           const bool                                       legal    = dp::is_legal(physical);
           const auto                                       observed = session->check_legal_output(*rc, legal);
           rapidjson::StringBuffer                          buffer;
@@ -9528,7 +9580,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     rc_options.resistance_ohm_um = 0;
     rc_options.capacitance_ff_um = 0;
   }
-  result.parasitics = estimate_rc(v, tech, rc_options, result.pin_locations);
+  result.parasitics = estimate_rc(v, tech, rc_options, &result.pin_locations);
   if (native_session && options.native_gp_timing->legal_output_guard) {
     // This follows actual final-frame legality and fresh final RC construction.
     // The independently frozen legal baseline is never replaced by GP timing.
@@ -9545,7 +9597,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       result.parasitics->timing_cuts.insert(net.driver);
     }
   }
-  result.graph->get_input_node().attr(attrs::placement_rc).set(ph::serialize_parasitics(*result.parasitics));
+  // The zero-wire timing seed is an in-memory intermediate, never a saved
+  // placement. Its consumer already has result.parasitics; serializing a second
+  // full-design copy retains hundreds of MB until the next placement finishes.
+  if (!options.timing_seed) {
+    result.graph->get_input_node().attr(attrs::placement_rc).set(ph::serialize_parasitics(*result.parasitics));
+  }
   fs::create_directories(options.output_dir);
   if (resolved_uroute.export_features && !options.timing_seed && !options.retain_placement
       && options.completed_stage == Placement_stage::final) {
@@ -9807,6 +9864,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Bool(metrics.continuation_limit);
     json.Key("density_stalled");
     json.Bool(metrics.density_stalled);
+    json.Key("overflow_floor");
+    json.Double(metrics.overflow_floor);
+    json.Key("target_density");
+    json.Double(control.target_density);
     json.Key("route_stalled");
     json.Bool(metrics.route_stalled);
     json.Key("objective_converged");
@@ -9831,6 +9892,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       json.Double(s.hpwl);
       json.Key("raw_overflow");
       json.Double(s.raw_overflow);
+      json.Key("overflow_floor");
+      json.Double(s.overflow_floor);
       json.Key("density_weight");
       json.Double(s.density_weight);
       json.Key("route_overflow");
@@ -9937,15 +10000,18 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                    metrics.centroid.effective_repulsion_weight);
       }
       std::print(stderr,
-                 "WARNING: native DREAMPlace GP stopped at {} iterations ({}) with overflow {:.6f} (target {:.6f}); "
+                 "WARNING: native DREAMPlace GP stopped at {} iterations ({}) with overflow {:.6f} (target {:.6f}, floor {:.6f}); "
                  "objective settled {}, timing observed {}, last timing satisfied {}\n",
                  metrics.iterations,
-                 metrics.density_stalled      ? "density stalled"
+                 metrics.density_stalled && metrics.overflow_floor > control.stop_overflow
+                     ? "density infeasible; handing off to legalization"
+                 : metrics.density_stalled    ? "density stalled"
                  : metrics.route_stalled      ? "routing stalled; handing off to legalization"
                  : metrics.continuation_limit ? "post-density budget"
                                               : "iteration cap",
                  metrics.overflow,
                  control.stop_overflow,
+                 metrics.overflow_floor,
                  metrics.objective_converged,
                  metrics.timing_observed,
                  metrics.timing_satisfied);
@@ -10240,20 +10306,23 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     technology_statistics.AddMember("lef_hash_reads", uint64_t(options.lefs.size()), allocator);
     json.AddMember("technology_snapshot", technology_statistics, allocator);
     json.AddMember("gp_iterations", metrics.iterations, allocator);
+    json.AddMember("gp_target_density", control.target_density, allocator);
+    json.AddMember("gp_overflow_floor", cache.hit ? rapidjson::Value() : rapidjson::Value(metrics.overflow_floor), allocator);
     json.AddMember("gp_density_ready_iteration", metrics.density_iteration, allocator);
     json.AddMember("gp_continuation_deadline", metrics.continuation_deadline, allocator);
     json.AddMember("gp_objective_converged", metrics.objective_converged, allocator);
     json.AddMember("gp_timing_satisfied",
                    options.gp_rank ? rapidjson::Value() : rapidjson::Value(metrics.timing_satisfied),
                    allocator);
-    const char* stop_reason = cache.hit                                         ? "cache_hit"
-                              : options.timing_seed || options.retain_placement ? "snapshot"
-                              : metrics.converged                               ? "converged"
-                              : metrics.density_stalled                         ? "density_stalled"
-                              : metrics.route_stalled                           ? "route_stalled"
-                              : metrics.continuation_limit                      ? "continuation_limit"
-                              : metrics.iterations >= control.max_iterations    ? "iteration_limit"
-                                                                                : "stopped";
+    const char* stop_reason = cache.hit                                                                   ? "cache_hit"
+                              : options.timing_seed || options.retain_placement                           ? "snapshot"
+                              : metrics.converged                                                         ? "converged"
+                              : metrics.density_stalled && metrics.overflow_floor > control.stop_overflow ? "density_infeasible"
+                              : metrics.density_stalled                                                   ? "density_stalled"
+                              : metrics.route_stalled                                                     ? "route_stalled"
+                              : metrics.continuation_limit                                                ? "continuation_limit"
+                              : metrics.iterations >= control.max_iterations                              ? "iteration_limit"
+                                                                                                          : "stopped";
     json.AddMember("gp_stop_reason", rapidjson::Value(stop_reason, allocator), allocator);
     add_uroute_status(json, allocator, metrics.uroute_skipped, metrics.uroute_sample_ids);
     json.AddMember(
@@ -10682,6 +10751,14 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
 }
 
 Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& requested) {
+  return place(source, library, requested, {});
+}
+
+Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& requested,
+             const std::function<void()>& release_source) {
+  if (release_source && source.get_io() && source.get_io()->get_library() == &library) {
+    throw std::invalid_argument("releasing placement input requires a separate destination library");
+  }
   if (requested.gp_search.enabled && requested.gp_resize) {
     throw std::invalid_argument("gp_ab requires fixed topology; disable gp_resize (post-placement resize remains available)");
   }
@@ -10775,10 +10852,10 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
     if (options.after_stage) {
       macro_options.after_stage = std::ref(options.after_stage);
     }
-    return place_single(source, library, macro_options);
+    return place_single(source, library, macro_options, release_source);
   }
   if ((!options.fp_place && !stage_macros) || !options.final_cells || !options.full || options.timing_seed || options.previous) {
-    return place_single(source, library, options);
+    return place_single(source, library, options, release_source);
   }
   // Keep the macro frame in a separate library: the returned final graph must
   // belong to the caller's library, and the original synthesis graph stays intact.
@@ -10855,7 +10932,10 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
   cell_options.macro_density_pull_weight = 0;
   cell_options.floorplan                 = frame;
   cell_options.iterations                = options.final_iterations ? options.final_iterations : options.iterations;
-  auto result = place_single((macro.fp_resized_cells || macro.fp_repair_edits) ? *macro.graph : source, library, cell_options);
+  auto result                            = place_single((macro.fp_resized_cells || macro.fp_repair_edits) ? *macro.graph : source,
+                                                        library,
+                                                        cell_options,
+                                                        release_source);
   result.fp_resized_cells = macro.fp_resized_cells;
   result.fp_repair_edits  = macro.fp_repair_edits;
   if (options.macro_magnet.enabled) {

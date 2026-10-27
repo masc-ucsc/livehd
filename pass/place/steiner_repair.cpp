@@ -156,6 +156,98 @@ Buffer_tree plan_buffers(Point root, const std::vector<Point>& loads, const std:
   return result;
 }
 
+namespace {
+// Partition the sinks before building the distribution backbone. Cutting only
+// a sink-level Steiner tree can leave overlapping, long leaf nets at forks.
+// These alternatives keep leaf loads spatially local; the usual timing model
+// still chooses every drive and compares the complete tree with direct wiring.
+Buffer_tree clustered_buffers(Point root, const std::vector<Point>& loads, const std::vector<double>& capacitances,
+                              const Buffer_drive& drive, double wire_c, bool nearest_root) {
+  std::vector<std::vector<unsigned>> groups(1);
+  groups.front().resize(loads.size());
+  std::iota(groups.front().begin(), groups.front().end(), 0);
+  Buffer_tree        result;
+  std::vector<Point> centers;
+  for (size_t i = 0; i < groups.size(); ++i) {
+    auto   group = std::move(groups[i]);
+    auto   low = loads[group.front()], high = low;
+    double cap = 0;
+    for (const auto index : group) {
+      const auto xy  = loads[index];
+      low.first      = std::min(low.first, xy.first);
+      low.second     = std::min(low.second, xy.second);
+      high.first     = std::max(high.first, xy.first);
+      high.second    = std::max(high.second, xy.second);
+      cap           += capacitances[index];
+    }
+    const Point center
+        = nearest_root ? Point{std::clamp(root.first, low.first, high.first), std::clamp(root.second, low.second, high.second)}
+                       : Point{(low.first + high.first) / 2, (low.second + high.second) / 2};
+    bool fits = group.size() <= drive.max_fanout && cap <= drive.max_cap_ff;
+    if (fits && wire_c > 0) {
+      std::vector<Point> points{center};
+      for (const auto index : group) {
+        points.push_back(loads[index]);
+      }
+      const auto tree = steiner_tree(points);
+      for (const auto& [a, b] : tree.edges) {
+        cap += wire_c
+               * (std::abs(tree.points[a].first - tree.points[b].first) + std::abs(tree.points[a].second - tree.points[b].second));
+      }
+      fits = cap <= drive.max_cap_ff;
+    }
+    if (!fits) {
+      if (group.size() == 1) {
+        throw std::runtime_error("sink load exceeds clustered buffer drive");
+      }
+      const bool x_axis = high.first - low.first >= high.second - low.second;
+      const auto middle = group.begin() + group.size() / 2;
+      std::nth_element(group.begin(), middle, group.end(), [&](unsigned a, unsigned b) {
+        const double lhs = x_axis ? loads[a].first : loads[a].second;
+        const double rhs = x_axis ? loads[b].first : loads[b].second;
+        return lhs != rhs ? lhs < rhs : a < b;
+      });
+      groups.emplace_back(group.begin(), middle);
+      groups.emplace_back(middle, group.end());
+      continue;
+    }
+    if (result.buffers.size() == 1000000) {
+      throw std::runtime_error("Steiner repair exceeds one million buffers (resource limit)");
+    }
+    Buffer_tree::Branch leaf{center, {}};
+    for (const auto index : group) {
+      leaf.loads.push_back({false, index});
+    }
+    centers.push_back(center);
+    result.buffers.push_back(std::move(leaf));
+  }
+  const auto backbone = plan_buffers(root,
+                                     centers,
+                                     std::vector<double>(centers.size(), drive.input_ff),
+                                     drive.input_ff,
+                                     drive.max_cap_ff,
+                                     drive.max_fanout,
+                                     drive.max_distance_dbu,
+                                     wire_c);
+  if (result.buffers.size() + backbone.buffers.size() > 1000000) {
+    throw std::runtime_error("Steiner repair exceeds one million buffers (resource limit)");
+  }
+  const auto offset = static_cast<unsigned>(result.buffers.size());
+  const auto remap  = [&](const std::vector<Buffer_tree::Load>& children) {
+    std::vector<Buffer_tree::Load> mapped;
+    for (const auto child : children) {
+      mapped.push_back({true, child.index + (child.buffer ? offset : 0)});
+    }
+    return mapped;
+  };
+  for (const auto& branch : backbone.buffers) {
+    result.buffers.push_back({branch.position, remap(branch.loads), 0});
+  }
+  result.root = remap(backbone.root);
+  return result;
+}
+}  // namespace
+
 Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, const std::vector<double>& capacitances,
                                 const std::vector<double>& required_ps, const std::vector<Buffer_drive>& drives,
                                 const Buffer_drive& driver, double wire_r_ohm_dbu, double wire_c_ff_dbu,
@@ -171,6 +263,7 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
   }
   Buffer_tree               best;
   double                    best_required = -std::numeric_limits<double>::infinity(), best_area = best_required;
+  double                    best_hpwl = std::numeric_limits<double>::infinity(), spatial_hpwl_limit = best_hpwl;
   bool                      found = false;
   std::vector<Buffer_drive> topologies;
   for (const auto& drive : drives) {
@@ -186,7 +279,14 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
   // Include both the original connection and a single source repeater. A
   // source can satisfy electrical limits yet benefit from isolating its load;
   // requiring an electrical violation would omit this compact alternative.
-  for (size_t candidate = 0; candidate < topologies.size() + 2; ++candidate) {
+  const size_t spatial_candidates = loads.size() > 16 ? 2 * drives.size() : 0;
+  for (size_t candidate = 0; candidate < topologies.size() + 2 + spatial_candidates; ++candidate) {
+    if (candidate == topologies.size() + 2) {
+      // New topologies may improve delay without duplicating more wire than
+      // the best existing alternative. Keep that reference fixed as other
+      // spatial candidates improve timing, so the bound cannot drift.
+      spatial_hpwl_limit = best_hpwl;
+    }
     Buffer_tree plan;
     try {
       if (candidate < 2) {
@@ -199,7 +299,7 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
               {true, 0}
           };
         }
-      } else {
+      } else if (candidate < topologies.size() + 2) {
         const auto& topology = topologies[candidate - 2];
         plan                 = plan_buffers(root,
                                             loads,
@@ -209,17 +309,21 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
                                             topology.max_fanout,
                                             topology.max_distance_dbu,
                                             wire_c_ff_dbu);
+      } else {
+        const auto spatial = candidate - topologies.size() - 2;
+        plan               = clustered_buffers(root, loads, capacitances, drives[spatial / 2], wire_c_ff_dbu, spatial % 2 != 0);
       }
     } catch (const std::runtime_error&) {
       continue;
     }
     struct State {
-      double cap, required, area;
+      double cap, required, area, hpwl = 0;
     };
     std::vector<State> states;
     const auto         aggregate = [&](Point origin, const std::vector<Buffer_tree::Load>& children) {
       State              result{0, std::numeric_limits<double>::infinity(), 0};
       double             longest = 0;
+      auto               low = origin, high = origin;
       std::vector<Point> endpoints{origin};
       for (const auto& child : children) {
         const auto xy = child.buffer ? plan.buffers.at(child.index).position : loads.at(child.index);
@@ -232,9 +336,15 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
         result.cap      += state.cap;
         result.required  = std::min(result.required, state.required - wire_delay);
         result.area     += state.area;
+        result.hpwl     += state.hpwl;
+        low.first        = std::min(low.first, xy.first);
+        low.second       = std::min(low.second, xy.second);
+        high.first       = std::max(high.first, xy.first);
+        high.second      = std::max(high.second, xy.second);
         longest          = std::max(longest, length);
       }
-      const auto wires = steiner_tree(endpoints);
+      result.hpwl      += high.first - low.first + high.second - low.second;
+      const auto wires  = steiner_tree(endpoints);
       for (const auto& [a, b] : wires.edges) {
         const auto p = wires.points[a], q = wires.points[b];
         result.cap += (std::abs(p.first - q.first) + std::abs(p.second - q.second)) * wire_c_ff_dbu;
@@ -293,14 +403,15 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
       }
       branch.drive  = choice;
       const auto& b = drives[choice];
-      states.push_back({b.input_ff, packet.required - b.intrinsic_ps - b.resistance_ohm * packet.cap * 1e-3, packet.area + b.area});
+      states.push_back(
+          {b.input_ff, packet.required - b.intrinsic_ps - b.resistance_ohm * packet.cap * 1e-3, packet.area + b.area, packet.hpwl});
     }
     if (!viable) {
       continue;
     }
     const auto [packet, longest] = aggregate(root, plan.root);
     (void)longest;
-    if (plan.buffers.size() > limits.cells || packet.area > limits.area + 1e-9) {
+    if (plan.buffers.size() > limits.cells || packet.area > limits.area + 1e-9 || packet.hpwl > spatial_hpwl_limit + 1e-9) {
       continue;
     }
     const double required = packet.required - driver.intrinsic_ps - driver.resistance_ohm * packet.cap * 1e-3;
@@ -308,6 +419,7 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
       best          = std::move(plan);
       best_required = required;
       best_area     = packet.area;
+      best_hpwl     = packet.hpwl;
       found         = true;
     }
   }

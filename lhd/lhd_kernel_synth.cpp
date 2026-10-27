@@ -1973,7 +1973,7 @@ void synth_command(Options& opts, Result& res) {
       timing_options.dict["cache_dir"] = "";
       timing_options.dict["qor"]       = "";
       timing_options.set_stage_labels(timing_options.dict);
-      net.physical_timing_session = std::make_shared<livehd::opentimer::Physical_session>(timing_options);
+      net.physical_timing_session = std::make_shared<livehd::opentimer::Physical_session>(timing_options, place_options.threads);
       auto& timing_session        = *net.physical_timing_session;
       place_options.whatif        = &timing_session.whatif();
       std::string phase_step;
@@ -1983,12 +1983,10 @@ void synth_command(Options& opts, Result& res) {
       const auto  timing_log     = next_log_path(opts, "pass.opentimer.incremental");
       const auto& timing_tech    = place_options.technology().lef;
       const bool  timing_profile = truthy(synth_set(opts, "place.timing_profile", "false"));
-      const auto  estimate = [&](const livehd::placement::Result& state, livehd::opentimer::Physical_session::Purpose purpose) {
-        Phase_timer   phase(res,
-                            purpose == livehd::opentimer::Physical_session::Purpose::ranking ? "pass.opentimer.ranking"
-                                                                                             : "pass.opentimer.incremental");
+      const auto  estimate       = [&](const livehd::placement::Ranking_view&       state,
+                                       livehd::opentimer::Physical_session::Purpose purpose) {
         Stdout_to_log redirect(timing_log);
-        const auto    controls = livehd::placement::prects_networks(timing_tech, state.floorplan, state.prects);
+        const auto&   controls = state.controls;
         const auto    before   = timing_session.statistics();
         auto          feedback = timing_session.evaluate(state.graph, state.parasitics, controls.timing_cuts, purpose);
         if (timing_profile) {
@@ -2009,9 +2007,12 @@ void synth_command(Options& opts, Result& res) {
         return livehd::placement::prects_data_timing(feedback, controls);
       };
       const auto evaluate = [&](const livehd::placement::Result& state) {
-        return estimate(state, livehd::opentimer::Physical_session::Purpose::detailed);
+        Phase_timer phase(res, "pass.opentimer.incremental");
+        const auto  controls = livehd::placement::prects_networks(timing_tech, state.floorplan, state.prects);
+        return estimate({state.graph, state.parasitics, controls}, livehd::opentimer::Physical_session::Purpose::detailed);
       };
-      const auto rank = [&](const livehd::placement::Result& state) {
+      const auto rank = [&](const livehd::placement::Ranking_view& state) {
+        Phase_timer phase(res, "pass.opentimer.ranking");
         return estimate(state, livehd::opentimer::Physical_session::Purpose::ranking);
       };
       // One invocation-wide budget for optional detailed trials, rather than a
@@ -2064,9 +2065,10 @@ void synth_command(Options& opts, Result& res) {
         throw Lhd_error{"usage", "invalid synth.place.buffer_cleanup: " + buffer_cleanup, "expected auto, true or false"};
       }
       const bool run_buffer_cleanup = buffer_cleanup == "auto" ? run_resize && !macro_plan_only : buffer_cleanup == "true";
-      hhds::GraphLibrary                               seed_library;
+      std::unique_ptr<hhds::GraphLibrary>              seed_library;
       std::vector<std::unique_ptr<hhds::GraphLibrary>> prepared_libraries;
-      const auto                                       prepare_input = [&]() {
+      bool                                             prepared_before = false;
+      const auto                                       prepare_input   = [&]() {
         if (!place_options.full || !run_buffer_cleanup) {
           return *found;
         }
@@ -2074,7 +2076,7 @@ void synth_command(Options& opts, Result& res) {
         auto        library = std::make_unique<hhds::GraphLibrary>();
         const auto  cleaned = livehd::placement::remove_synthesis_buffers(**found, *library, place_options);
         fs::create_directories(place_options.output_dir);
-        const auto mode = prepared_libraries.empty() ? std::ios::trunc : std::ios::app;
+        const auto mode = prepared_before ? std::ios::app : std::ios::trunc;
         std::ofstream(place_options.output_dir + "/buffer_cleanup.jsonl", mode)
             << std::format("{{\"removed\":{},\"boundary\":{},\"protected\":{},\"unsupported\":{}}}\n",
                            cleaned.removed,
@@ -2082,6 +2084,7 @@ void synth_command(Options& opts, Result& res) {
                            cleaned.protected_cells,
                            cleaned.unsupported);
         prepared_libraries.push_back(std::move(library));
+        prepared_before = true;
         return cleaned.graph;
       };
       auto placement_input = prepare_input();
@@ -2099,6 +2102,7 @@ void synth_command(Options& opts, Result& res) {
         place_options.macro_timing_interval = 0;
       }
       if (run_timing_place && !macro_plan_only) {
+        seed_library                      = std::make_unique<hhds::GraphLibrary>();
         auto seed_options                 = place_options;
         seed_options.timing_seed          = true;
         seed_options.macro_magnet.enabled = false;
@@ -2114,7 +2118,7 @@ void synth_command(Options& opts, Result& res) {
         livehd::placement::Result seed;
         try {
           Stdout_to_log redirect(seed_log);
-          seed = livehd::placement::place(*placement_input, seed_library, seed_options);
+          seed = livehd::placement::place(*placement_input, *seed_library, seed_options);
         } catch (const std::exception& e) {
           throw Lhd_error{"unsupported", std::string("timing seed placement failed: ") + e.what(), "see " + seed_log};
         }
@@ -2122,7 +2126,16 @@ void synth_command(Options& opts, Result& res) {
         phase_log.clear();
         set_crash_context({}, {});
         note_unknown_tied(seed);
-        const auto timing = rank(seed);
+        // The seed owns a flattened copy, including its cell declarations and
+        // source locations. Retire the cleanup generation before constructing
+        // the full-design timer; no later stage reads that scratch graph.
+        placement_input = seed.graph;
+        prepared_libraries.clear();
+        const auto timing = [&] {
+          Phase_timer ranking_phase(res, "pass.opentimer.ranking");
+          const auto  controls = livehd::placement::prects_networks(timing_tech, seed.floorplan, seed.prects);
+          return estimate({seed.graph, seed.parasitics, controls}, livehd::opentimer::Physical_session::Purpose::ranking);
+        }();
         const auto controls
             = livehd::placement::prects_networks(place_options.technology().lef, seed.floorplan, seed.prects, timing);
         const auto data_timing    = livehd::placement::prects_data_timing(timing, controls);
@@ -2136,7 +2149,6 @@ void synth_command(Options& opts, Result& res) {
                           "post-synthesis timing has no constrained data nets for placement weighting",
                           "check synth.sdc"};
         }
-        placement_input = seed.graph;
         res.recipe_steps.emplace_back("pass.place.post_synth_timing");
       }
       const auto log = next_log_path(opts, "pass.place");
@@ -2150,7 +2162,13 @@ void synth_command(Options& opts, Result& res) {
         auto*         generation = &placed_library;
         for (unsigned attempt = 0;; ++attempt) {
           try {
-            placed = livehd::placement::place(*placement_input, *generation, place_options);
+            placed = livehd::placement::place(*placement_input, *generation, place_options, [&] {
+              // The last stage has copied all declarations and provenance. Do
+              // not carry the seed/cleanup graph through GP and its RC peaks.
+              placement_input.reset();
+              seed_library.reset();
+              prepared_libraries.clear();
+            });
             break;
           } catch (const livehd::placement::Placement_restart& restart) {
             if (attempt != 0) {
@@ -2170,6 +2188,11 @@ void synth_command(Options& opts, Result& res) {
       phase_step.clear();
       phase_log.clear();
       set_crash_context({}, {});
+      // Placement has copied its input into the accepted generation. Keep only
+      // that generation and the original synthesis netlist needed by resynthesis.
+      placement_input.reset();
+      seed_library.reset();
+      prepared_libraries.clear();
       if (!run_timing_place) {
         note_unknown_tied(placed);  // the seed (above) already reported it when it ran
       }

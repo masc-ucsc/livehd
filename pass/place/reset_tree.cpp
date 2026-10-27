@@ -21,9 +21,9 @@ using Node   = hhds::Node_class;
 using Pin    = hhds::Pin_class;
 
 // The smallest identity buffer the LEF can place (area, then name: deterministic).
-std::optional<liberty::Comb_cell> smallest_buffer(const std::string& liberty, const physical::Technology& tech) {
+std::optional<liberty::Comb_cell> smallest_buffer(const std::vector<liberty::Comb_cell>& cells, const physical::Technology& tech) {
   std::optional<liberty::Comb_cell> best;
-  for (auto& cell : liberty::scan_comb_cells(liberty)) {
+  for (const auto& cell : cells) {
     if (cell.physical_barrier || cell.inputs.size() != 1 || liberty::cell_truth(cell) != uint64_t{0xaaaaaaaaaaaaaaaa}) {
       continue;
     }
@@ -33,7 +33,7 @@ std::optional<liberty::Comb_cell> smallest_buffer(const std::string& liberty, co
       continue;
     }
     if (!best || cell.area < best->area || (cell.area == best->area && cell.name < best->name)) {
-      best = std::move(cell);
+      best = cell;
     }
   }
   return best;
@@ -64,13 +64,14 @@ bool is_core_cell(Node n, const physical::Technology& tech) {
 
 // Every driver of a trigger pin (and, with `roles`, every driver carrying the synthesis reset role) in
 // graph order (the minted names follow it), then the tree under each one with more than `cap` loads.
-Reset_tree_stats buffer_nets(hhds::Graph& graph, const physical::Technology& tech, const std::string& liberty, unsigned cap,
-                             const Constant_test& is_constant, const Reset_pins& trigger_pins, bool roles, std::string_view tag) {
+Reset_tree_stats buffer_nets(hhds::Graph& graph, const physical::Technology& tech, const std::vector<liberty::Comb_cell>& cells,
+                             unsigned cap, const Constant_test& is_constant, const Reset_pins& trigger_pins, bool roles,
+                             std::string_view tag) {
   Reset_tree_stats stats;
   if (cap < 2 || (trigger_pins.empty() && !roles)) {
     return stats;
   }
-  const auto buffer = smallest_buffer(liberty, tech);
+  const auto buffer = smallest_buffer(cells, tech);
   if (!buffer) {
     return stats;
   }
@@ -233,15 +234,9 @@ Reset_tree_stats buffer_nets(hhds::Graph& graph, const physical::Technology& tec
   }
   return stats;
 }
-}  // namespace
-
-Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technology& tech, const std::string& liberty, unsigned cap,
-                                   const Constant_test& is_constant, const Reset_pins& extra_reset_pins) {
-  if (cap < 2) {
-    return {};
-  }
+Reset_pins reset_pins_for(const std::vector<liberty::Dff_cell>& cells, const Reset_pins& extra_reset_pins) {
   Reset_pins reset_pins = extra_reset_pins;
-  for (const auto& cell : liberty::scan_async_dff_cells(liberty)) {
+  for (const auto& cell : cells) {
     auto& pins = reset_pins[cell.name];
     for (const auto* pin : {&cell.reset0_pin, &cell.reset1_pin}) {
       if (!pin->empty() && std::find(pins.begin(), pins.end(), *pin) == pins.end()) {
@@ -249,11 +244,44 @@ Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technolog
       }
     }
   }
-  return buffer_nets(graph, tech, liberty, cap, is_constant, reset_pins, true, "rsttree");
+  return reset_pins;
+}
+}  // namespace
+
+Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technology& tech, const std::string& liberty, unsigned cap,
+                                   const Constant_test& is_constant, const Reset_pins& extra_reset_pins) {
+  if (cap < 2) {
+    return {};
+  }
+  const auto pins = reset_pins_for(liberty::scan_async_dff_cells(liberty), extra_reset_pins);
+  return buffer_nets(graph, tech, liberty::scan_comb_cells(liberty), cap, is_constant, pins, true, "rsttree");
+}
+
+Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technology& tech, const liberty::Cell_library& cells,
+                                   unsigned cap, const Constant_test& is_constant, const Reset_pins& extra_reset_pins) {
+  if (cap < 2) {
+    return {};
+  }
+  return buffer_nets(graph,
+                     tech,
+                     cells.combinational,
+                     cap,
+                     is_constant,
+                     reset_pins_for(cells.async_dffs, extra_reset_pins),
+                     true,
+                     "rsttree");
 }
 
 Reset_tree_stats buffer_pin_nets(hhds::Graph& graph, const physical::Technology& tech, const std::string& liberty, unsigned cap,
                                  const Reset_pins& pins, std::string_view tag, const Constant_test& is_constant) {
-  return buffer_nets(graph, tech, liberty, cap, is_constant, pins, false, tag);
+  if (cap < 2 || pins.empty()) {
+    return {};
+  }
+  return buffer_nets(graph, tech, liberty::scan_comb_cells(liberty), cap, is_constant, pins, false, tag);
+}
+
+Reset_tree_stats buffer_pin_nets(hhds::Graph& graph, const physical::Technology& tech, const liberty::Cell_library& cells,
+                                 unsigned cap, const Reset_pins& pins, std::string_view tag, const Constant_test& is_constant) {
+  return buffer_nets(graph, tech, cells.combinational, cap, is_constant, pins, false, tag);
 }
 }  // namespace livehd::placement

@@ -50,12 +50,16 @@ Eprp_var timing_options(const std::string& liberty, const std::string& sdc, cons
 pl::Timing_feedback evaluate_timing(const pl::Result& placed, livehd::opentimer::Physical_session& session, unsigned& serial,
                                     const ph::Technology* placement_tech = nullptr, const std::string& profile_path = {},
                                     livehd::opentimer::Physical_session::Purpose purpose
-                                    = livehd::opentimer::Physical_session::Purpose::detailed) {
+                                    = livehd::opentimer::Physical_session::Purpose::detailed,
+                                    const pl::Prects_networks* cached_controls = nullptr) {
   const auto started = std::chrono::steady_clock::now();
   const auto before  = session.statistics();
   ++serial;
   pl::Timing_feedback result;
-  if (placement_tech) {
+  if (cached_controls) {
+    result = pl::prects_data_timing(session.evaluate(placed.graph, placed.parasitics, cached_controls->timing_cuts, purpose),
+                                    *cached_controls);
+  } else if (placement_tech) {
     const auto controls = pl::prects_networks(*placement_tech, placed.floorplan, placed.prects);
     result = pl::prects_data_timing(session.evaluate(placed.graph, placed.parasitics, controls.timing_cuts, purpose), controls);
   } else {
@@ -886,19 +890,23 @@ int main(int argc, char** argv) {
         std::ofstream(root + "/qor.json") << analysis.qor;
         return 0;
       }
-      livehd::opentimer::Physical_session timing_session(timing_options(options.liberty, sdc, top));
+      livehd::opentimer::Physical_session timing_session(timing_options(options.liberty, sdc, top), options.threads);
       options.whatif          = &timing_session.whatif();
       unsigned   serial       = 0;
       const auto raw_evaluate = [&](const pl::Result& placed) {
         return evaluate_timing(placed, timing_session, serial, &tech, root + "/timing_profile.jsonl");
       };
-      const auto rank = [&](const pl::Result& placed) {
+      const auto rank = [&](const pl::Ranking_view& view) {
+        pl::Result placed;
+        placed.graph      = view.graph;
+        placed.parasitics = view.parasitics;
         return evaluate_timing(placed,
                                timing_session,
                                serial,
-                               &tech,
+                               nullptr,
                                root + "/timing_profile.jsonl",
-                               livehd::opentimer::Physical_session::Purpose::ranking);
+                               livehd::opentimer::Physical_session::Purpose::ranking,
+                               &view.controls);
       };
       pl::Evaluate evaluate     = raw_evaluate;
       const auto   start        = std::chrono::steady_clock::now();
@@ -910,7 +918,8 @@ int main(int argc, char** argv) {
       hhds::GraphLibrary seed_library;
       auto               seed          = pl::place(*source, seed_library, seed_options);
       const bool         timing_driven = !config.HasMember("timing_driven") || config["timing_driven"].GetBool();
-      const auto         seed_timing   = timing_driven ? rank(seed) : pl::Timing_feedback{};
+      const auto seed_controls = timing_driven ? pl::prects_networks(tech, seed.floorplan, seed.prects) : pl::Prects_networks{};
+      const auto seed_timing   = timing_driven ? rank({seed.graph, seed.parasitics, seed_controls}) : pl::Timing_feedback{};
       // A separately invoked fixed-macro cell pass can carry the macro pass's
       // last timing weights, exactly as the in-process staged placer does.
       if (!config.HasMember("net_weights") && timing_driven) {
@@ -952,7 +961,8 @@ int main(int argc, char** argv) {
       std::unique_ptr<livehd::opentimer::Physical_session> trace_session;
       unsigned                                             trace_serial = 0;
       if (trace_interval) {
-        trace_session = std::make_unique<livehd::opentimer::Physical_session>(timing_options(options.liberty, sdc, top));
+        trace_session
+            = std::make_unique<livehd::opentimer::Physical_session>(timing_options(options.liberty, sdc, top), options.threads);
         options.gp_observer_interval = trace_interval;
         options.min_iterations       = std::max(options.min_iterations, stop_iteration);
         options.gp_observer          = [&](const pl::Result& snapshot, const pl::Gp_observation& sample) {
@@ -1272,7 +1282,7 @@ int main(int argc, char** argv) {
       state.parasitics = std::move(rc);
     }
     unsigned                            serial = 0;
-    livehd::opentimer::Physical_session timing_session(timing_options(options.liberty, sdc, top));
+    livehd::opentimer::Physical_session timing_session(timing_options(options.liberty, sdc, top), options.threads);
     options.whatif      = &timing_session.whatif();
     const auto evaluate = [&](const pl::Result& placed) {
       return evaluate_timing(placed, timing_session, serial, prects_timing ? &tech : nullptr, root + "/timing_profile.jsonl");
