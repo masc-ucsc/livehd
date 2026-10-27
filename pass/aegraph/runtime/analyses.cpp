@@ -200,14 +200,20 @@ Facts node_facts(const Egraph& eg, const Enode& n, int depth) {
       break;
     }
     case Ntype_op::And: {
-      f.kz = 0;
-      f.ko = ~uint64_t{0};
-      bool any_nonneg = false;
-      Wide cap        = kInf;
+      f.kz                  = 0;
+      f.ko                  = ~uint64_t{0};
+      bool any_nonneg       = false;
+      bool all_bounded      = !ops.empty();
+      Wide cap              = kInf;
+      Wide signed_magnitude = 0;
       for (const auto& o : ops) {
-        const auto g = get(o.cls);
-        f.kz |= g.kz;
-        f.ko &= g.ko;
+        const auto g  = get(o.cls);
+        f.kz         |= g.kz;
+        f.ko         &= g.ko;
+        all_bounded   = all_bounded && g.bounded();
+        if (g.bounded()) {
+          signed_magnitude = std::max({signed_magnitude, g.hi, -g.lo - 1});
+        }
         if (g.nonneg()) {
           any_nonneg = true;
           cap        = std::min(cap, g.hi);
@@ -216,6 +222,12 @@ Facts node_facts(const Egraph& eg, const Enode& n, int depth) {
       if (any_nonneg) {
         f.lo = 0;
         f.hi = cap;
+      } else if (all_bounded) {
+        // All operands fit a common two's-complement width. Their AND has
+        // the same sign extension above that width, including negative masks.
+        const auto limit = Wide{1} << bitlen(signed_magnitude);
+        f.lo             = -limit;
+        f.hi             = limit - 1;
       }
       break;
     }

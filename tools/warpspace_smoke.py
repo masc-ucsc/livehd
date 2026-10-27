@@ -8,6 +8,10 @@ import sys
 import tempfile
 
 BINARY = str(pathlib.Path(sys.argv[1]).resolve())
+# Per-call watchdogs are sized for -c opt. Unoptimized dbg/fastbuild binaries
+# run about 10x slower (the strain preview takes ~4 s of a 6 s watchdog when
+# idle), so scale them like inou/prp/tests/lec.py's DBG_WATCHDOG_SCALE.
+WATCHDOG = 10 if re.search(r'/bazel-out/[^/]*-(?:dbg|fastbuild)/', BINARY) else 1
 
 
 def main():
@@ -45,7 +49,7 @@ END DESIGN
         source = root / 'in.def'
         source.write_text(text)
         command = [BINARY, '--lef', str(lef), '--def', str(source), '--bins', '8', '--pixels', '900', '--rho-max', '.18', '--iters', '3', '--time-limit', '3', '--report', str(root/'report.png'), '--out-def', str(root/'out.def')]
-        run = subprocess.run(command, capture_output=True, text=True, timeout=18)
+        run = subprocess.run(command, capture_output=True, text=True, timeout=18 * WATCHDOG)
         assert run.returncode == 0, run.stdout + run.stderr
         report = json.loads((root/'report.json').read_text())
         assert report['mesh_invariants_passed']
@@ -60,7 +64,7 @@ END DESIGN
         assert components[0] in result
         # Density equilibration contracts empty strips and can release physical
         # FIXED macros, while preserving their shape and DEF status text.
-        balanced = subprocess.run(command + ['--movable-macros', '--balance', '1'], capture_output=True, text=True, timeout=6)
+        balanced = subprocess.run(command + ['--movable-macros', '--balance', '1'], capture_output=True, text=True, timeout=6 * WATCHDOG)
         assert balanced.returncode == 0, balanced.stdout + balanced.stderr
         balanced_report = json.loads((root/'report.json').read_text())
         macro = balanced_report['macros_and_fixed_objects'][0]
@@ -69,11 +73,11 @@ END DESIGN
         assert macro['dx'] < 0 and macro['dy'] > 0, macro  # empty left/top strips shrink
         assert balanced_report['mesh_invariants_passed']
         assert '+ FIXED' in (root/'out.def').read_text()
-        strain = subprocess.run(command + ['--movable-macros', '--balance', '3', '--balance-model', 'strain'], capture_output=True, text=True, timeout=6)
+        strain = subprocess.run(command + ['--movable-macros', '--balance', '3', '--balance-model', 'strain'], capture_output=True, text=True, timeout=6 * WATCHDOG)
         assert strain.returncode == 0, strain.stdout + strain.stderr
         assert json.loads((root/'report.json').read_text())['mesh_invariants_passed']
         preview_command = [BINARY, '--lef', str(lef), '--def', str(source), '--bins', '8', '--pixels', '900', '--iters', '3', '--time-limit', '3', '--balance', '3', '--balance-model', 'strain', '--deformation-preview', '--report', str(root/'preview.png')]
-        preview = subprocess.run(preview_command, capture_output=True, text=True, timeout=6)
+        preview = subprocess.run(preview_command, capture_output=True, text=True, timeout=6 * WATCHDOG)
         assert preview.returncode == 0, preview.stdout + preview.stderr
         preview_report = json.loads((root/'preview.json').read_text())
         assert preview_report['deformation_preview'] and not preview_report['macro_rigidity_enforced']
@@ -82,7 +86,7 @@ END DESIGN
         warped_macro_area = sum(f[6] for f in preview_report['mesh']['free_faces']
                                 if 10 <= vertices[f[0]][0] < 20 and 70 <= vertices[f[0]][1] < 78)
         assert warped_macro_area < 80 * .9, warped_macro_area
-        replayed = subprocess.run(preview_command + ['--replay-mesh', str(root/'preview.json'), '--report', str(root/'replayed.png'), '--density-scale', 'shared'], capture_output=True, text=True, timeout=3)
+        replayed = subprocess.run(preview_command + ['--replay-mesh', str(root/'preview.json'), '--report', str(root/'replayed.png'), '--density-scale', 'shared'], capture_output=True, text=True, timeout=3 * WATCHDOG)
         assert replayed.returncode == 0, replayed.stdout + replayed.stderr
         replay_report = json.loads((root/'replayed.json').read_text())
         assert replay_report['after']['density'] == preview_report['after']['density']
@@ -90,7 +94,7 @@ END DESIGN
         assert replay_report['passes'][0]['axis'] == 'replay'
         assert replay_report['density_palette_before_max'] == replay_report['density_palette_after_max']
         # Passive macros can cross mesh faces and need not contain a vertex.
-        uniform = subprocess.run(preview_command + ['--preview-grid', 'uniform', '--density-scale', 'shared', '--report', str(root/'uniform.png')], capture_output=True, text=True, timeout=6)
+        uniform = subprocess.run(preview_command + ['--preview-grid', 'uniform', '--density-scale', 'shared', '--report', str(root/'uniform.png')], capture_output=True, text=True, timeout=6 * WATCHDOG)
         assert uniform.returncode == 0, uniform.stdout + uniform.stderr
         uniform_report = json.loads((root/'uniform.json').read_text())
         assert uniform_report['mesh_vertices'] == 81
@@ -105,7 +109,7 @@ END DESIGN
             grid['mass'][idx] = 2
         (root/'grid.json').write_text(json.dumps(grid))
         fast_command = [BINARY, '--density-input', str(root/'grid.json'), '--balance', '3', '--balance-model', 'strain', '--iters', '2', '--pixels', '900', '--report', str(root/'fast.png')]
-        fast = subprocess.run(fast_command, capture_output=True, text=True, timeout=6)
+        fast = subprocess.run(fast_command, capture_output=True, text=True, timeout=6 * WATCHDOG)
         assert fast.returncode == 0, fast.stdout + fast.stderr
         fast_report = json.loads((root/'fast.json').read_text())
         assert fast_report['smooth_window'] == 32
@@ -116,7 +120,7 @@ END DESIGN
         assert anchor['size'] == [10, 8]
         assert fast_report['mesh_invariants_passed']
         assert (root/'fast.png').read_bytes().startswith(b'\x89PNG\r\n\x1a\n')
-        extract = subprocess.run([BINARY, '--lef', str(lef), '--def', str(source), '--density-grid', '--bins', '8', '--iters', '0', '--pixels', '900', '--report', str(root/'extracted.png')], capture_output=True, text=True, timeout=3)
+        extract = subprocess.run([BINARY, '--lef', str(lef), '--def', str(source), '--density-grid', '--bins', '8', '--iters', '0', '--pixels', '900', '--report', str(root/'extracted.png')], capture_output=True, text=True, timeout=3 * WATCHDOG)
         assert extract.returncode == 0, extract.stdout + extract.stderr
         extracted = json.loads((root/'extracted.json').read_text())
         assert abs(extracted['total_input_mass'] - 600) < 1e-7
@@ -132,7 +136,7 @@ END DESIGN
                 blocked = max(0, min((x+1)*12.5, 43.75)-x*12.5) * max(0, min((y+1)*12.5, 50)-y*12.5)
                 occupied_grid['mass'].append(.2 * (156.25-blocked))
         (root/'occupied_grid.json').write_text(json.dumps(occupied_grid))
-        occupied_run = subprocess.run([BINARY, '--density-input', str(root/'occupied_grid.json'), '--macro-space', '--smooth-window', '8', '--smooth-blend', '.5', '--balance', '3', '--balance-model', 'strain', '--iters', '2', '--pixels', '900', '--report', str(root/'occupied.png')], capture_output=True, text=True, timeout=6)
+        occupied_run = subprocess.run([BINARY, '--density-input', str(root/'occupied_grid.json'), '--macro-space', '--smooth-window', '8', '--smooth-blend', '.5', '--balance', '3', '--balance-model', 'strain', '--iters', '2', '--pixels', '900', '--report', str(root/'occupied.png')], capture_output=True, text=True, timeout=6 * WATCHDOG)
         assert occupied_run.returncode == 0, occupied_run.stdout + occupied_run.stderr
         occupied_report = json.loads((root/'occupied.json').read_text())
         assert abs(occupied_report['input_macro_area']-2187.5) < 1e-6
@@ -150,7 +154,7 @@ END DESIGN
         for window in [8, 32, None]:
             report = root/f'full_window{window}.png'
             window_args = [] if window is None else ['--smooth-window', str(window)]
-            full = subprocess.run([BINARY, '--density-input', str(root/'varied_input.json'), '--macro-space', *window_args, '--smooth-blend', '1', '--iters', '0', '--pixels', '900', '--report', str(report)], capture_output=True, text=True, timeout=3)
+            full = subprocess.run([BINARY, '--density-input', str(root/'varied_input.json'), '--macro-space', *window_args, '--smooth-blend', '1', '--iters', '0', '--pixels', '900', '--report', str(report)], capture_output=True, text=True, timeout=3 * WATCHDOG)
             assert full.returncode == 0, full.stdout + full.stderr
             data = json.loads(report.with_suffix('.json').read_text())
             assert max(abs(rho-expected_rho) for rho in data['requested_free_density']) < 1e-10
@@ -160,11 +164,11 @@ END DESIGN
         edge = {'die': [0, 0, 100, 100], 'bins': 8, 'mass': [0.0]*64, 'macros': []}
         edge['mass'][0], edge['mass'][7], edge['mass'][63] = 3, 7, 11
         (root/'edge_input.json').write_text(json.dumps(edge))
-        edge_run = subprocess.run([BINARY, '--density-input', str(root/'edge_input.json'), '--smooth-window', '4', '--smooth-blend', '1', '--iters', '0', '--pixels', '900', '--report', str(root/'edge.png')], capture_output=True, text=True, timeout=3)
+        edge_run = subprocess.run([BINARY, '--density-input', str(root/'edge_input.json'), '--smooth-window', '4', '--smooth-blend', '1', '--iters', '0', '--pixels', '900', '--report', str(root/'edge.png')], capture_output=True, text=True, timeout=3 * WATCHDOG)
         assert edge_run.returncode == 0, edge_run.stderr
         edge_report = json.loads((root/'edge.json').read_text())
         assert abs(sum(edge_report['requested_free_density'])/64 - 21/10000) < 1e-12
-        no_blend = subprocess.run([BINARY, '--density-input', str(root/'varied_input.json'), '--macro-space', '--smooth-window', '8', '--smooth-blend', '0', '--balance', '3', '--balance-model', 'strain', '--iters', '1', '--pixels', '900', '--report', str(root/'no_blend.png')], capture_output=True, text=True, timeout=3)
+        no_blend = subprocess.run([BINARY, '--density-input', str(root/'varied_input.json'), '--macro-space', '--smooth-window', '8', '--smooth-blend', '0', '--balance', '3', '--balance-model', 'strain', '--iters', '1', '--pixels', '900', '--report', str(root/'no_blend.png')], capture_output=True, text=True, timeout=3 * WATCHDOG)
         assert no_blend.returncode == 0, no_blend.stdout + no_blend.stderr
         identity = json.loads((root/'no_blend.json').read_text())
         assert max(abs(a-b) for a,b in zip(identity['input_mass'], identity['mass'])) < 1e-4
@@ -174,7 +178,7 @@ END DESIGN
         for idx in [26, 29, 34, 37]:
             symmetric['mass'][idx] = 2
         (root/'symmetric_input.json').write_text(json.dumps(symmetric))
-        sym = subprocess.run([BINARY, '--density-input', str(root/'symmetric_input.json'), '--smooth-window', '8', '--smooth-blend', '.5', '--iters', '0', '--pixels', '900', '--report', str(root/'symmetric.png')], capture_output=True, text=True, timeout=3)
+        sym = subprocess.run([BINARY, '--density-input', str(root/'symmetric_input.json'), '--smooth-window', '8', '--smooth-blend', '.5', '--iters', '0', '--pixels', '900', '--report', str(root/'symmetric.png')], capture_output=True, text=True, timeout=3 * WATCHDOG)
         assert sym.returncode == 0, sym.stderr
         targets = json.loads((root/'symmetric.json').read_text())
         for y in range(8):
@@ -184,44 +188,44 @@ END DESIGN
                 assert abs(t[y*8+x]-t[(7-y)*8+x]) < 1e-7
         preview_report['mesh']['vertices'][0][0] += 1
         (root/'bad_mesh.json').write_text(json.dumps(preview_report))
-        mismatched = subprocess.run(preview_command + ['--replay-mesh', str(root/'bad_mesh.json'), '--report', str(root/'bad.png')], capture_output=True, text=True, timeout=3)
+        mismatched = subprocess.run(preview_command + ['--replay-mesh', str(root/'bad_mesh.json'), '--report', str(root/'bad.png')], capture_output=True, text=True, timeout=3 * WATCHDOG)
         assert mismatched.returncode == 1 and 'original grid differs' in mismatched.stderr
-        forbidden_def = subprocess.run(preview_command + ['--out-def', str(root/'preview.def')], capture_output=True, text=True, timeout=3)
+        forbidden_def = subprocess.run(preview_command + ['--out-def', str(root/'preview.def')], capture_output=True, text=True, timeout=3 * WATCHDOG)
         assert forbidden_def.returncode == 1 and not (root/'preview.def').exists()
         # Reading our own output must work, independently of the mesh solver.
-        render = subprocess.run([BINARY, '--lef', str(lef), '--def', str(root/'out.def'), '--render-only', '--report', str(root/'render.png'), '--pixels', '900'], capture_output=True, text=True, timeout=3)
+        render = subprocess.run([BINARY, '--lef', str(lef), '--def', str(root/'out.def'), '--render-only', '--report', str(root/'render.png'), '--pixels', '900'], capture_output=True, text=True, timeout=3 * WATCHDOG)
         assert render.returncode == 0, render.stderr
         # Fixed standard cells remain part of the measured cell-area density.
         source.write_text(text.replace('- c0 cell + PLACED', '- c0 cell + FIXED'))
-        fixed_render = subprocess.run([BINARY, '--lef', str(lef), '--def', str(source), '--render-only', '--bins', '8', '--report', str(root/'fixed.png')], capture_output=True, text=True, timeout=3)
+        fixed_render = subprocess.run([BINARY, '--lef', str(lef), '--def', str(source), '--render-only', '--bins', '8', '--report', str(root/'fixed.png')], capture_output=True, text=True, timeout=3 * WATCHDOG)
         assert fixed_render.returncode == 0, fixed_render.stderr
         fixed_metrics = json.loads((root/'fixed.json').read_text())
         assert abs(sum(fixed_metrics['before']['density']) - 600*64/10000) < 1e-9
-        protected = subprocess.run(command + ['--movable-macros', '--balance', '1'], capture_output=True, text=True, timeout=6)
+        protected = subprocess.run(command + ['--movable-macros', '--balance', '1'], capture_output=True, text=True, timeout=6 * WATCHDOG)
         assert protected.returncode == 0, protected.stdout + protected.stderr
         protected_report = json.loads((root/'report.json').read_text())
         fixed_cell = next(m for m in protected_report['macros_and_fixed_objects'] if m['name'] == 'c0')
         assert fixed_cell['fixed'] and fixed_cell['displacement'] == 0
         source.write_text(text.replace('- fixed ram + FIXED', '- fixed ram + COVER'))
-        covered = subprocess.run(command + ['--movable-macros', '--balance', '1'], capture_output=True, text=True, timeout=6)
+        covered = subprocess.run(command + ['--movable-macros', '--balance', '1'], capture_output=True, text=True, timeout=6 * WATCHDOG)
         assert covered.returncode == 0, covered.stdout + covered.stderr
         assert json.loads((root/'report.json').read_text())['macros_and_fixed_objects'][0]['displacement'] == 0
         source.write_text(text)
         # A globally impossible cap is a clear failure, not a successful "cap".
-        impossible = subprocess.run(command + ['--rho-max', '.0001'], capture_output=True, text=True, timeout=3)
+        impossible = subprocess.run(command + ['--rho-max', '.0001'], capture_output=True, text=True, timeout=3 * WATCHDOG)
         assert impossible.returncode == 1 and 'globally infeasible' in impossible.stderr
         # No macros exercises the unconstrained mesh boundary independently.
         no_macros = text.replace(components[0] + '\n', '').replace(components[1] + '\n', '').replace('COMPONENTS 602', 'COMPONENTS 600').replace('NETS 2', 'NETS 1').replace('- n1 ( movable A ) ( fixed B ) ;\n', '')
         source.write_text(no_macros)
-        no_macro_run = subprocess.run(command, capture_output=True, text=True, timeout=5)
+        no_macro_run = subprocess.run(command, capture_output=True, text=True, timeout=5 * WATCHDOG)
         assert no_macro_run.returncode == 0, no_macro_run.stdout + no_macro_run.stderr
         assert json.loads((root/'report.json').read_text())['macros_and_fixed_objects'] == []
         # Exact macro edges can leave faces much narrower than .01 * bin pitch.
         source.write_text(text.replace('( 65000 65000 ) E', '( 20001 70000 ) E'))
-        thin = subprocess.run(command + ['--rho-max', '3'], capture_output=True, text=True, timeout=5)
+        thin = subprocess.run(command + ['--rho-max', '3'], capture_output=True, text=True, timeout=5 * WATCHDOG)
         assert thin.returncode == 0, thin.stdout + thin.stderr
         source.write_text(text.replace('( 65000 65000 ) E', '( 10000 70000 ) E'))
-        overlap = subprocess.run(command, capture_output=True, text=True, timeout=3)
+        overlap = subprocess.run(command, capture_output=True, text=True, timeout=3 * WATCHDOG)
         assert overlap.returncode == 1 and 'overlapping rigid objects' in overlap.stderr
         print('density reduction, no-fold invariants, rigid macros, no-macro and thin-face cases, verbatim DEF, PNG, reread and invalid input: passed')
 

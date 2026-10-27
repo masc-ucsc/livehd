@@ -284,7 +284,8 @@ TEST(CustomSizing, UpSizesDisplaceNeighborsThenTheOutputIsBuffered) {
   EXPECT_EQ(eco["displaced_cells"].GetUint64(),
             report["trials"][0]["eco"]["displaced_cells"].GetUint64() + report["trials"][1]["eco"]["displaced_cells"].GetUint64()
                 + report["trials"][3]["eco"]["displaced_cells"].GetUint64());
-  EXPECT_TRUE(report["trials"][2]["eco"].IsNull() || !report["trials"][2].HasMember("eco"));
+  // Test membership first: rapidjson asserts on a missing member in dbg.
+  EXPECT_TRUE(!report["trials"][2].HasMember("eco") || report["trials"][2]["eco"].IsNull());
   const auto& fp = sized.placed.floorplan;
   EXPECT_NO_THROW(check_legality(chain.tech, fp));
   EXPECT_EQ(at(fp, "c1").macro, variant(2));

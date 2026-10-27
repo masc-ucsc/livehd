@@ -2,6 +2,12 @@
 
 Oct 24, 2026 · @Jose Renau
 
+**Paused by request on 2026-10-25.** The current implementation status,
+remaining work and interrupted debug-validation restart checklist are in
+[2t-timeclosure](2t-timeclosure.html#paused-status). This document describes
+the intended design, not a claim that every phase is implemented or accepted.
+Synthesis/resynthesis remains future work; hold repair remains post-route.
+
 ## Goal and constraints
 
 A single-threaded, non-ML timing loop runs inside LiveHD global placement (DREAMPlace fork). At each overflow checkpoint it re-estimates timing, re-buffers nets and re-sizes cells, with no external timer in the loop.

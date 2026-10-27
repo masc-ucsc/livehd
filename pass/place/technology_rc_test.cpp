@@ -219,7 +219,11 @@ TEST(Steiner_rc, ReportsGeometricLengthIndependentlyOfRcUnits) {
   const std::vector<std::pair<std::string, std::pair<double, double>>> pins{{"drv:Y", {1000, 1000}},
                                                                             {"a:A", {4000, 5000}},
                                                                             {"b:A", {4000, 5000}}};
-  for (double scale : {0., 1., 100.}) {
+  // An all-zero wire model is the ideal post-synthesis net: one junction,
+  // independent of pin geometry, with no wire length (see steiner_rc and
+  // Placement.ZeroWireTimingIsIndependentOfPinGeometry). Any nonzero model,
+  // however small, reports the geometric Steiner length.
+  for (double scale : {1e-12, 1., 100.}) {
     Wire_rc wire;
     wire.horizontal_r = wire.vertical_r = scale;
     wire.horizontal_c = wire.vertical_c = scale;

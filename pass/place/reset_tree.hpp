@@ -9,6 +9,10 @@
 #include "hhds/graph.hpp"
 #include "inou/lefdef/physical.hpp"
 
+namespace livehd::liberty {
+struct Cell_library;
+}
+
 namespace livehd::placement {
 struct Reset_tree_stats {
   unsigned nets    = 0;  // nets that were split
@@ -40,6 +44,12 @@ Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technolog
 // buffers named `__place_<tag>*`.
 Reset_tree_stats buffer_pin_nets(hhds::Graph& graph, const physical::Technology& tech, const std::string& liberty, unsigned cap,
                                  const Reset_pins& pins, std::string_view tag, const Constant_test& is_constant = {});
+
+// Reuse the placement technology snapshot without reopening or reparsing Liberty.
+Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technology& tech, const liberty::Cell_library& cells,
+                                   unsigned cap, const Constant_test& is_constant = {}, const Reset_pins& extra_reset_pins = {});
+Reset_tree_stats buffer_pin_nets(hhds::Graph& graph, const physical::Technology& tech, const liberty::Cell_library& cells,
+                                 unsigned cap, const Reset_pins& pins, std::string_view tag, const Constant_test& is_constant = {});
 
 // A buffer of the reset tree or the domino rail tree, by its minted name: the
 // leaf segment of a flattened name (past the hierarchy prefix the tree gives

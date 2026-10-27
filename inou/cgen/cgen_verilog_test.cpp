@@ -69,6 +69,39 @@ TEST(CgenVerilog, StructuralWiringUsesPlainVerilogAndExplicitWidths) {
   EXPECT_NE(verilog.find("assign "), std::string::npos);
 }
 
+// STA does not apply Verilog's implicit extension at Liberty instance ports.
+TEST(CgenVerilog, StructuralInstanceInputsExtendToDeclaredWidth) {
+  const std::string name = "structural_port_width";
+  auto&             lib  = livehd::Hhds_graph_library::instance("lgdb_" + name);
+  auto              cell = lib.create_io("wide_cell");
+  cell->add_input("A", 1);
+  cell->set_bits("A", 8);
+  cell->set_unsign("A", true);
+  cell->add_output("Y", 2);
+  cell->set_bits("Y", 1);
+  auto io = lib.create_io(name);
+  io->add_input("u", 1);
+  io->set_bits("u", 3);
+  io->set_unsign("u", true);
+  io->add_output("y", 2);
+  io->set_bits("y", 1);
+  auto graph = io->create_graph();
+  auto input = graph->get_input_pin("u");
+  gu::set_ubits(input, 3);
+  auto instance = gu::create_typed_node(*graph, Ntype_op::Sub);
+  instance.set_subnode(cell);
+  input.connect_sink(instance.create_sink_pin("A"));
+  auto output = instance.create_driver_pin("Y");
+  gu::set_ubits(output, 1);
+  output.connect_sink(graph->get_output_pin("y"));
+  std::filesystem::create_directories(name);
+  Cgen_verilog{name}.do_from_graph(graph);
+  std::ifstream     file(name + "/" + name + ".v");
+  const std::string verilog{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+  EXPECT_NE(verilog.find(".A({5'b0,u})"), std::string::npos) << verilog;
+  EXPECT_EQ(verilog.find(".A(u)"), std::string::npos) << verilog;
+}
+
 // A wiring node named after the output port it drives must not alias the port
 // when its own width differs, and a graph-IO pin without a `bits` attr is sliced
 // with its GraphIO width.

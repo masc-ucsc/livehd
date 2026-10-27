@@ -11,6 +11,7 @@
 
 #include "gtest/gtest.h"
 #include "node_util.hpp"
+#include "pass/liberty/liberty_dff.hpp"
 
 namespace livehd::placement {
 namespace {
@@ -135,6 +136,51 @@ protected:
     return driver;
   }
 };
+
+TEST_F(Reset_tree, SharedLibraryBuffersResetAndRailsWithoutReopeningFile) {
+  const liberty::Cell_library cells(liberty);
+  ASSERT_TRUE(std::filesystem::remove(liberty));
+  for (int i = 0; i < 20; ++i) {
+    flop("r" + std::to_string(i), reset);
+    inverter("i" + std::to_string(i), tie);
+  }
+  const auto resets = buffer_reset_nets(*graph, tech, cells, 8);
+  EXPECT_EQ(resets.nets, 1u);
+  EXPECT_EQ(resets.sinks, 40u);
+  EXPECT_LE(fanout(reset), 8u);
+  EXPECT_EQ(fanout(tie), 20u);
+  const auto rails = buffer_pin_nets(*graph,
+                                     tech,
+                                     cells,
+                                     8,
+                                     {
+                                         {"INVx1", {"A"}}
+  },
+                                     "railtree");
+  EXPECT_EQ(rails.nets, 1u);
+  EXPECT_EQ(rails.sinks, 20u);
+  EXPECT_LE(fanout(tie), 8u);
+  for (auto n : graph->body().nodes()) {
+    const auto io = n.get_subnode_io();
+    if (io && io->get_name() == "DFFASRNx1") {
+      EXPECT_EQ(root_of(n.get_sink_pin("RESETN")), reset);
+      EXPECT_EQ(root_of(n.get_sink_pin("SETN")), reset);
+    } else if (io && io->get_name() == "INVx1") {
+      EXPECT_EQ(root_of(n.get_sink_pin("A")), tie);
+    }
+  }
+  EXPECT_EQ(buffer_reset_nets(*graph, tech, cells, 8).buffers, 0u);
+  EXPECT_EQ(buffer_pin_nets(*graph,
+                            tech,
+                            cells,
+                            8,
+                            {
+                                {"INVx1", {"A"}}
+  },
+                            "railtree")
+                .buffers,
+            0u);
+}
 
 TEST_F(Reset_tree, BoundsAWideResetNetAndKeepsEveryLoad) {
   for (int i = 0; i < 40; ++i) {

@@ -2230,10 +2230,10 @@ bool write_io_body(hhds::Graph& source, const Imp_def& imported, const synth::Ce
     auto [pin, bit] = imported.pi_leaves[i];
     auto local      = graph->get_pin(pin.get_class_index());
     if (gu::bits_of(local) > 1 || bit > 0) {
-      auto shift = gu::create_typed_node(*graph, Ntype_op::SRA);
-      local.connect_sink(gu::setup_sink_by_name(shift, "a"));
-      gu::create_const(*graph, *Dlop::create_integer(bit)).connect_sink(gu::setup_sink_by_name(shift, "b"));
-      local = shift.create_driver_pin(0);
+      // Keep remapped netlists structural: this is a bit selection, not an
+      // arithmetic shift. The structural Verilog emitter recognizes Get_mask.
+      auto select = gu::create_get_mask(*graph, local, bit);
+      local       = select.create_driver_pin(0);
       gu::set_bits(local, 1);
       gu::set_unsign(local);
     }

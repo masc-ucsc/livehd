@@ -175,9 +175,44 @@ cones remain, including controls crossing region boundaries. Logical mapped
 definitions and their resynthesis identities/history are unchanged. The cleanup
 also runs on the new physical copy after an accepted color restart, but never
 on repair/ECO trials. `buffer_cleanup.jsonl` records removed and retained counts.
+The synthesis host releases that cleanup graph once the zero-wire timing seed
+owns its flattened copy. The seed keeps RC in memory without serializing a second
+copy into graph attributes; completed placements still persist their RC for
+standalone timing and reload. The synthesis host retires seed and cleanup
+libraries as soon as placement has made its last independent copy, before that
+stage's GP/RC work. Staged macro placement retains its input until the final
+cell stage copies it; the original synthesis netlist remains for resynthesis.
+Ordinary GP timing checkpoints borrow the current solver coordinates and the
+existing connectivity instead of copying the entire placement view. Exported
+graph/DEF poses remain rounded to DBU while RC keeps fractional pin positions.
+Legal timing snapshots still capture row orientations and rebuild pin offsets;
+returned RC and floorplan snapshots own their data.
+The lightweight ranking callback receives graph, RC and the current topology's
+control classification through `Ranking_view`. Ordinary GP ranking omits the
+unused pin-location map and builds the weighting floorplan after timing retires
+the preceding RC generation. Detailed callbacks and selected macro-GP handoffs
+retain pin-location data; reset/clock cuts follow the same classification.
 The imported-GP diagnostic exposes the same operation through
 `remove_synthesis_buffers=true`; its component-count check accounts for exactly
 those removals while retaining fixed-cell and master checks.
+
+Reset and domino rail buffer trees reuse the placement technology snapshot for
+Liberty cell models. Repeated placement phases do not reopen the library to
+identify asynchronous reset pins or choose the smallest placeable buffer.
+
+A supplied core can have too little free area to reach the requested soft density;
+a fine density grid can also make individual cells unavoidably overfill bins.
+For static cell GP, native placement computes an unavoidable overflow floor from
+movable charge and fixed-bin capacity, and from the minimum bin excess of each
+cell over all grid positions. The stronger conservative bound controls handoff.
+If the floor exceeds `stop_overflow`, it uses excess above that floor to schedule
+criticality samples, stop increasing density pressure and settle before legalization. No option default or density
+target changes. `gp_target_density`, `gp_overflow_floor`, and the history's
+`overflow_floor` expose the distinction; an early handoff reports
+`gp_stop_reason="density_infeasible"` and `gp_converged=false`. Minimum iterations,
+objective/routing checks and final legality still apply. Strict upper-bound
+placement, continuation, moving macros and scheduled/reserved geometry retain
+their existing policy.
 
 `synth.place.resize=true` enables timing-checked sizing and buffering in full
 placement with OpenTimer. Explicitly disable it for a geometry-only comparison.
@@ -1160,6 +1195,15 @@ RC delay, capacitance and fanout rather than treating that spacing as a hard
 wire-length limit. Cell/area budgets and fresh timing of the legalized candidate
 still decide whether an edit is retained.
 
+For larger fanouts, the search also partitions nearby sinks into local leaf
+groups before building the Steiner backbone. Groups fit the candidate buffer's
+capacitance and fanout limits; seeds use either the group center or the point in
+its bounding box nearest the source. Every drive is then selected with the same
+required-time model. A clustered alternative may not exceed the summed net HPWL
+of the best original candidate. That fixed reference prevents a timing-only
+choice from adding overlapping wire. These are internal candidate-generation
+and acceptance rules; public option defaults are unchanged.
+
 **Reset buffer tree (`synth.place.reset_fanout`, default 32; 2d-domplace U23).** One
 mechanism for every mapper (`abc`, `usyn`, the `domino_provisional` profile): right after
 the mapped hierarchy is flattened, before the first cell is read, every reset net with more
@@ -1319,14 +1363,17 @@ density charges with no pins or nets; they consume no legal sites and never
 appear in the mapped graph, timing/IO callbacks, netlist or DEF. They are removed
 before legalization. The supplied core stays unchanged.
 
-The default `synth.place.virtual_filler_fraction=0.25` requests one quarter of
+The default `synth.place.virtual_filler_fraction=1` requests the full
 available target-density whitespace charge. With macro-density scaling enabled,
-this is `0.25 * max(0, density * (core area - fixed occupancy - movable macro
+this is `max(0, density * (core area - fixed occupancy - movable macro
 area) - movable standard-cell area)`. Physical padding and explicit reservation
 accounting follow the native solver. Thus the budget scales with area,
 utilization, fixed occupancy and macro percentage; there is no default particle
-count target. Particle dimensions follow the design's standard-cell dimensions.
-Set `virtual_filler_fraction=1` to reproduce the previous full charge budget.
+count target. The default `virtual_filler_cell_scale=2` makes particles twice
+the central-90%-mean standard-cell width and height, subject to bin and site
+limits. Compared with fraction 0.25 and scale 1, this requests four times the
+charge and roughly four times the particle area, keeping the particle count
+roughly unchanged when those limits do not bind.
 The requested fraction, available/requested charge area and nonmacro area are
 recorded in `virtual_filler_budget.json`; actual counts and sizes are in GP
 history. The existing optional `virtual_filler_max_count=0` resolution guard is
@@ -1342,10 +1389,10 @@ area alongside density overflow.
 
 `synth.place.virtual_filler_fraction=1` supplies the full target-density
 whitespace charge; a smaller positive fraction is useful for tuning.
-`virtual_filler_cell_scale=1` uses the central-90%-mean standard-cell width and
-height for particle dimensions. `virtual_filler_bin_fraction=0.25` bounds each
-particle dimension by a quarter of the corresponding density-bin pitch, subject
-to site/row granularity. Count is derived from this footprint and the area budget.
+The default `virtual_filler_cell_scale=2` scales the central-90%-mean
+standard-cell width and height by two; use 1 for unscaled dimensions.
+`virtual_filler_bin_fraction=0.25` bounds each particle dimension by a quarter
+of the corresponding density-bin pitch, subject to site/row granularity. Count is derived from this footprint and the area budget.
 
 `virtual_filler_max_count=0` disables the optional count guard. An explicit
 positive guard (up to 100000000) enlarges particle footprints when necessary to
@@ -2534,9 +2581,14 @@ model calls on a switch sample. Values of -1 mark an absent switch measurement.
 
 `tools/rudy_metrics physical_snapshot.txt output_prefix [rudy|rsmt]` measures a
 saved snapshot without modifying it, exporting degree histograms, call times,
-and base/enhanced utilization maps. Evaluate against the same placement's real
-router map: estimator overflow is a proxy, not a routed timing result. In
-particular, HPWL is only a lower bound on Steiner length; the draft's universal
+and base/enhanced utilization maps. `physical_repair` with `snapshot_only=true`
+and `snapshot_prects=true` excludes the same Liberty-derived clock/reset networks
+as placement (including buffer/inverter closure); `snapshot_filters.json` records
+the number excluded. Use this on both layouts when comparing data HPWL or RUDY:
+otherwise reset-distribution wirelength can dominate a pre-CTS comparison. The
+optional filter defaults off, preserving the existing clock-pin-only snapshot.
+Evaluate against the same placement's real router map: estimator overflow is a
+proxy, not a routed timing result. In particular, HPWL is only a lower bound on Steiner length; the draft's universal
 `RSMT <= 1.12 * HPWL` test is invalid (four corners already give 1.5). Tests use
 an independent Manhattan spanning-tree bound instead.
 
@@ -3841,9 +3893,10 @@ cause them. They are diagnostic fields, not an additional ranking term.
 Trial scoring does not overwrite the main trajectory's routing-history counters.
 
 For a separate macro-frame experiment, `physical_repair` supports
-`macro_only=true` together with `floorplan_place=true`, `fp_place=false`, and
-`final_cells=false`. This selects the production macro stage and exports legal
-macros with provisional cell positions; it does not certify final cell legality.
+`macro_only=true` together with `floorplan_place=true` and `final_cells=false`.
+Use `fp_place=true` to run centroid FP before macro planning, or `fp_place=false`
+to run macro planning alone. This exports legal macros with provisional cell
+positions; it does not certify final cell legality.
 Final-cell controls (cell halo, cell jumps, memory transparency, GP A/B search)
 are rejected in this mode. Rebuild row cuts and physical tapcells around the new
 macro positions before preparing a separate fixed-frame final-cell solve.

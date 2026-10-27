@@ -101,8 +101,8 @@ set_output_delay 0 -clock [get_clocks {sys}] -add_delay [get_ports {z}]
         assert subprocess.run([binary, config], capture_output=True).returncode != 0
         budget = json.loads((root/'run/placement/virtual_filler_budget.json').read_text())
         assert budget['policy'] == 'relative_whitespace_charge'
-        assert budget['fraction'] == .25
-        assert budget['requested_charge_area_um2'] == .25 * budget['available_charge_area_um2']
+        assert budget['fraction'] == 1  # default full whitespace charge
+        assert budget['requested_charge_area_um2'] == budget['available_charge_area_um2']
         # Archived absolute-count configurations must fail explicitly rather
         # than silently use a different policy with the current executable.
         invalid = dict(cfg, output=str(root/'obsolete_count'), virtual_filler_target_count=1000000)

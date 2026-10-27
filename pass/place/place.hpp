@@ -25,6 +25,7 @@
 #include "multirow.hpp"
 #include "multirow_eco.hpp"
 #include "power_grid.hpp"
+#include "prects_networks.hpp"
 #include "preroute_design.hpp"
 #include "rc_cache.hpp"
 #include "satlegalize.hpp"
@@ -55,6 +56,15 @@ struct Placement_restart : std::exception {
 };
 using Timing_feedback = livehd::timing::Feedback;
 using Evaluate        = std::function<Timing_feedback(const Result&)>;
+// Synchronous ranking borrows only the electrical snapshot and its topology's
+// control classification. Pin-location maps and DEF connectivity are not timing
+// inputs; detailed evaluation continues to receive the complete Result.
+struct Ranking_view {
+  const std::shared_ptr<hhds::Graph>&          graph;
+  const std::shared_ptr<physical::Parasitics>& parasitics;
+  const Prects_networks&                       controls;
+};
+using Rank = std::function<Timing_feedback(const Ranking_view&)>;
 struct Stage_route {
   std::string                     model = "inherit";
   DreamPlace::native::RoutePolicy policy;
@@ -193,7 +203,7 @@ struct Options {
   Evaluate                              fp_evaluate;
   // Optional lightweight path ranking for placement weights. Detailed timing
   // remains available through fp_evaluate for resizing and resynthesis.
-  Evaluate                              gp_rank;
+  Rank                                            gp_rank;
   double                                fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
   bool                                  fp_distance_attraction = true;
   bool                                  fp_anchor_macros_only  = false;  // frozen targets; retain all-member normalization
@@ -243,8 +253,8 @@ struct Options {
   double                     macro_filler_fraction     = 0;      // macro GP only; physical macro dimensions
   bool                       virtual_fillers           = true;
   int                        virtual_filler_max_count  = 0;
-  double                     virtual_filler_fraction   = .25;
-  double                     virtual_filler_cell_scale = 1, virtual_filler_bin_fraction = .25;
+  double                     virtual_filler_fraction   = 1;
+  double                     virtual_filler_cell_scale = 2, virtual_filler_bin_fraction = .25;
   int                        bin_max = 512, local_density_bins = 512;
   int                        route_bins    = 0;  // grid.route: 0 inherits the configured density count (also in dynamic mode)
   int                        legalize_bins = 0;  // legalize.bin.grid: 0 uses the routing grid
@@ -359,6 +369,11 @@ struct Steiner_tree {
 Steiner_tree steiner_tree(const std::vector<Point>& points);
 // flat_library must outlive the returned graph. Source graphs are read-only.
 Result       place(hhds::Graph& source, hhds::GraphLibrary& flat_library, const Options& options);
+// A host owning a temporary input may retire it after the final independent
+// copy. The callback runs once, before that stage's placement work, and only
+// with distinct source/destination libraries. It may destroy source's library.
+Result       place(hhds::Graph& source, hhds::GraphLibrary& flat_library, const Options& options,
+                   const std::function<void()>& release_source);
 // Mark a final/placed context without losing the original macro spacing request.
 Options      final_cell_options(const Options& options);
 // Regenerate native memory geometry as well as external LEFs for placed-API checks.

@@ -22,6 +22,352 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Review v54 reduces resident RC storage and single-worker timing scheduling
+through published OpenTimer <code>360f4b7</code>. RC trees use contiguous edges
+and outgoing indices, omitting unused incoming lists. Single-worker propagation
+runs dependency order directly; new and retained cyclic cones are reordered
+after the existing loop breakers. Multiple workers retain Taskflow. Public
+defaults, timing models and traversal arithmetic are unchanged.</p>
+<p>Eight optimized suites pass against the published pin, including branched RC replacement/export and
+serial/parallel comparisons across reconvergence, retained cycles and two
+independent cycles. The rebuilt published executable also reproduces lfsr DEF and QoR.
+All four benchmark DEFs and independent QoR are identical
+to v52. Placement takes 1.940 s (lfsr),
+39.371 s (minimax),
+32.887 s (NVDLA/partition_m), and
+629.101 s (coralnpu), all within 1.5×.
+Coral's full flow takes 777.52 s wall and 776.91 s CPU;
+peak RSS falls from 8,756 to 8,509 MiB.
+These are single samples, not repeatable speedup claims. Evidence is in
+<code>runs.compact_rc_serial_propagation_v54</code>.</p>
+<p>Fresh Gemmini <code>--flows SB</code> synthesis passes in 70.3 s.
+Placement now completes GP timing checkpoints at iterations 200, 250 and 1500,
+then exceeds the 16 GiB guard (16,804,856 KiB after 370.5 s).
+The later profile identifies the legal timing snapshot: it copies the full
+placement view and rebuilds arrays (84 of 99 final samples in
+<code>make_arrays</code>). Removing that copy while preserving legal geometry
+is the next memory target. The full scaling requirement and A–J remain open.</p>
+
+<p>Review v52 bounds transient RC transfer through published OpenTimer
+<code>53ce737</code>. The placement host flushes batches after 65,536 electrical
+records without splitting a net. Each batch replaces old RC trees immediately;
+timing propagates once after the complete update, retaining every batch's
+frontiers. Deferred SPEF APIs and public defaults are unchanged. RC construction
+now appears in reconciliation rather than propagation statistics, so total
+cost is the valid comparison.</p>
+<p>Eight optimized suites pass locally and against the published pin. Tests
+cover 22,000 nets across batches, pending topology, unit conversion, repeated
+RC replacement, both timing models and no premature propagation. The rebuilt
+published executable reproduces the frozen candidate's lfsr DEF and score.
+All four designs retain byte-identical DEFs and independent WNS, HPWL, cells
+and area, within 1.5× placement time. Placement takes
+1.918 s (lfsr),
+40.850 s (minimax),
+34.616 s (NVDLA/partition_m) and
+642.630 s (coralnpu). Coral's full flow takes
+792.76 s wall and 792.06 s CPU;
+peak RSS falls from 8,968 to 8,756 MiB.
+These are single samples, not repeatable speedup claims. Evidence is in
+<code>runs.bounded_rc_transfer_v52</code>.</p>
+<p>Fresh Gemmini <code>--flows SB</code> synthesis passes in 70.2 s
+at 8,834,924 KiB, but placement still exceeds the 16 GiB guard
+(16,876,952 KiB after 209.3 s), before its first timing
+checkpoint completes. Separate CPU profiles move the final peak from RC
+transfer to propagation candidate/task setup (121 of 199 final samples include
+<code>_build_prop_tasks</code>, 103 include candidate discovery). Resident RC
+storage and propagation scheduling are the next targets. A–J remain open.</p>
+
+<p>Review v51 narrows ordinary GP ranking input to graph, RC and cached
+control classification. It omits the unused pin-location map and postpones the
+weighting floorplan until after timing. Detailed callbacks and selected macro
+handoffs retain their maps. Temporary seed/cleanup graphs are released after
+placement makes its final independent copy, before that stage's GP/RC work.
+The original synthesis graph remains available for resynthesis. Five optimized
+suites pass, including source destruction, staged release timing, reset cuts and
+macro handoff regressions. Both production executables build. Review found no
+blocking issues; no public defaults or warning flags change.</p>
+<p>All four designs retain byte-identical DEFs and independent WNS, HPWL, cells
+and area with the same defaults, 100 ps clocks and reset false paths. Placement
+takes 1.942 s (lfsr), 38.851 s (minimax), 34.118 s (NVDLA/partition_m), 640.650 s (coralnpu), all within 1.5× of v49.
+Coral's full flow takes 786.16 s wall and 785.53 s CPU;
+peak RSS is 8,968 MiB versus 9,231 MiB.
+These single samples do not establish repeatable speedups. Evidence is in
+<code>runs.ranking_and_input_lifetimes_v51</code>.</p>
+<p>Gemmini still exceeds the 16 GiB guard (16,788,340 KiB
+after 203.2 s), before its first timing checkpoint completes.
+The original A–J acceptance requirements remain open.</p>
+
+<p>Review v49 removes full placement-view copies from ordinary GP timing
+checkpoints. A borrowed geometry view reads solver coordinates and existing
+connectivity; RC retains fractional pin positions while graph/DEF poses are
+rounded to DBU. Legal snapshots still rebuild offsets for row orientation.
+Returned floorplans and RC own their data. Placement, repair and physical-session
+suites pass, including a regression for fractional geometry, retained RC,
+real STA provenance checks and logical equivalence. No public defaults change.</p>
+<p>All four designs retain byte-identical DEFs and independent WNS, HPWL, cells
+and area with the same defaults, 100 ps clocks and reset false paths. Placement
+takes 1.925 s (lfsr), 40.443 s (minimax), 35.471 s (NVDLA/partition_m) and
+665.508 s (coralnpu), all within 1.5× of v48. Coral's full flow takes 815.55 s
+wall and 814.96 s CPU; peak RSS falls from 9,363 to 9,231 MiB. These single
+samples do not establish repeatable speedups. Evidence is in
+<code>runs.borrowed_gp_geometry_v49</code>.</p>
+<p>Gemmini still exceeds the 16 GiB guard (16,797,156 KiB after 199.6 s).
+A separate CPU profile now reaches RC construction past the removed view copy:
+162 of 199 samples in the final two seconds include <code>estimate_rc</code>.
+The first timing checkpoint still does not complete. Its string-keyed pin-location
+map is unused by the production ranking callback and is a target for further
+memory reduction. The original A–J requirements remain open.</p>
+
+<p>Review v48 removes duplicate OpenTimer RC-node name strings. Published
+OpenTimer <code>b107f35</code> uses the owning map's key; tree/SPEF exports
+resolve labels in a temporary per-tree table. Node size falls from 200 to 168
+bytes on this 64-bit build. Timing arithmetic and public defaults are unchanged.
+Nine optimized suites pass, including a long-label chain that verifies export
+names and Elmore delay after map growth and parasitic replacement.</p>
+<p>All four designs retain byte-identical DEFs and independent WNS, HPWL, cells
+and area with common production defaults, 100 ps clocks and reset false paths.
+Placement takes 1.938 s (lfsr), 40.708 s (minimax), 34.802 s
+(NVDLA/partition_m) and 657.554 s (coralnpu), all within 1.5× of v47.
+Coral's full flow takes 805.01 s wall and 804.42 s CPU; peak RSS is
+9,363 MiB versus 9,480 MiB. These single samples do not establish repeatable speedups.
+Three alternating saved-DEF timing pairs have byte-identical reports and median
+cold timing 2.750 → 2.746 s. Evidence is in
+<code>runs.shared_rc_node_labels_v48</code>.</p>
+<p>Gemmini still trips the 16 GiB guard (16,798,300 KiB after
+195.3 s). A separate CPU profile now proves that GP wirelength and
+density iterations run before the guard; its final samples also show a full
+placement-view copy at a timing checkpoint. That copy is a likely contributor
+to the remaining memory spike and a target for further work. It has not been
+removed in this release. The original A–J acceptance requirements remain open.</p>
+
+<p>Review v47 retires placement scratch data when its consumers finish. The
+buffer-cleanup graph is released before building the seed timer; the internal
+zero-wire seed keeps typed RC without another serialized copy. Seed/cleanup
+libraries are released after placement owns its accepted graph. Final placements
+still persist RC for standalone timing and reload. The handoff regression times
+and places the seed after destroying its cleanup source library; placement and
+physical-session suites pass against published OpenTimer <code>fe3f265</code>.
+No public defaults or timing calculations change.</p>
+<p>All four designs retain exact DEFs and independent WNS, HPWL, cells and area.
+Placement times are 1.928 s (lfsr), 40.687 s (minimax), 37.246 s
+(NVDLA/partition_m) and 702.895 s (coralnpu), all within 1.5× of v45. These are
+single samples with concurrent builds, not repeatable speedup claims. Coral's
+peak RSS falls from 9,955 to 9,480 MiB; its whole flow takes 850.96 s wall and
+850.25 s CPU. Evidence is in <code>runs.placement_scratch_lifetimes_v47</code>.</p>
+<p>Gemmini's sampled initial-timing peak falls from 16,187,260 to 14,982,400 KiB,
+but the full flow still hits the 16 GiB guard during placement (16,869,656 KiB
+after 193.5 s). GP iteration entry is not established. A diagnostic heap snapshot
+confirms that the old seed retains a 384 MiB serialized RC allocation during
+placement setup. The broader A–J task remains open.</p>
+
+<p>Review v45 reduces OpenTimer storage without changing timing calculations.
+Published dependency <code>fe3f265</code> removes the never-populated arc
+internal-power array and packs private timing-provenance fields. On this 64-bit
+build, arc storage falls from 264 to 200 bytes and pin storage from 656 to 560
+bytes. Public enum types, float values, pin power reporting and all option
+defaults are unchanged. Regression coverage checks both timing corners and
+transitions, path provenance and the existing zero arc-power reports. Nine
+optimized suites pass against the published dependency without a local override;
+both production executables build successfully.</p>
+<p>All four designs retain byte-identical DEFs and independent WNS, HPWL, cell
+count and area with common production defaults, 100 ps clocks and reset false
+paths. Placement takes 1.928 s for lfsr, 41.111 s for minimax, 34.027 s for
+NVDLA/partition_m and 688.512 s for coralnpu, versus 1.939, 41.666, 37.167 and
+706.336 s in v44. Coral's whole flow takes 837.91 s wall and 837.52 s CPU;
+peak RSS is 9,955 MiB versus 10,169 MiB. These are single flow samples, all
+within 1.5×; small time differences do not establish a repeatable speedup.
+Three alternating saved-DEF timing pairs have byte-identical reports, with
+median cold timing 2.752 → 2.661 s. Evidence is in
+<code>runs.compact_timing_storage_v45</code>.</p>
+<p>Gemmini now completes initial physical timing, but still exceeds the 16 GiB
+process-tree guard during placement setup (16,792,272 KiB after 130.0 s).
+This does not establish that GP iterations began or resolve acceptance item I.
+The subsequent serial-propagation experiment was preserved outside the source
+tree and excluded from this release: its timing-only comparison showed no
+measurable benefit, and gemmini still exceeded the guard. The original A–J
+acceptance targets remain open.</p>
+
+<p>Review v44 fixes the previously ignored timing worker budget. OpenTimer
+<code>634270c</code> creates its executor lazily and preserves queued builders
+when resizing it. Placement passes its existing thread option through session
+construction, recovery and report rebuilds; statistics report
+<code>worker_threads</code>. Public option defaults are unchanged. Regression
+coverage includes incremental RC updates, endpoint/multi-path queries and
+session recovery with explicit worker counts. Nine optimized suites pass
+against the published dependency without a local override. A rebuilt lfsr run
+reproduces the candidate's exact DEF and WNS.</p>
+<p>Three alternating evaluations of the same minimax DEF produce byte-identical
+timing reports. Median cold timing is 2.822 → 2.787 s. Lfsr, minimax and
+NVDLA/partition_m retain exact DEFs and independent WNS; placement takes
+1.939, 41.666 and 37.167 s respectively, versus 2.038, 42.395 and 36.433 s in
+v43. All stay within 1.5×. These are single samples, with concurrent build work;
+the small differences do not establish a repeatable speedup. Coralnpu also
+retains its exact DEF, WNS and HPWL: placement is 706.336 s versus 733.790 s in
+v43 (whole flow 857.01 s wall, 856.62 s CPU; peak RSS 10,169 MiB). Its initial
+run was interrupted by scratch quota and excluded; this result is a fresh,
+completed run after recovering scratch space. All four completed designs stay
+within 1.5×. Evidence is in <code>runs.timing_worker_budget_v44</code>.</p>
+<p>Gemmini still hits the 16 GiB process-tree guard during initial physical
+timing, before GP (16,784,452 KiB after 111.2 s). Honoring the thread budget
+therefore does not resolve the memory failure. A separate full-allocation heap
+profile was stopped before timing because of its high overhead; its partial
+profiles are diagnostic only. The original A–J task and census gaps remain
+open.</p>
+
+<p>OpenTimer now seeds the ramp-duration fit with a reduced scalar crossing
+equation when both thresholds occur during the ramp. The original bounded
+solver still checks the waveform residual at its existing tolerance. Mixed/tail
+crossings and the long-ramp limit retain the old seed. The published pin
+<code>5cb81eb</code> passes six optimized suites, including independent
+voltage-bisection checks across threshold regimes and time scales. Defaults and
+the timing model are unchanged.</p>
+<p>Three alternating evaluations of the same saved minimax placement reduce
+median propagation from 1.445 to 1.236 s (14.5%) and the complete cold evaluation
+from 2.925 to 2.723 s (6.9%). WNS is unchanged. Reports differ in tiny numerical
+rounding: maximum reported pin-slew change is 0.000003815 ps and TNS changes by
+0.000153 ps.</p>
+<table><thead><tr><th>Design</th><th>Unchanged independent WNS (ps)</th><th>Placement, control → candidate (s)</th></tr></thead><tbody>
+<tr><td>lfsr</td><td>-60.271</td><td>2.035 → 2.038</td></tr>
+<tr><td>minimax</td><td>-950.268</td><td>44.247 → 42.395</td></tr>
+<tr><td>NVDLA/partition_m</td><td>-916.800</td><td>37.203 → 36.433</td></tr>
+<tr><td>coralnpu</td><td>-16736.600</td><td>783.386 → 733.790</td></tr>
+</tbody></table>
+<p>Lfsr, minimax and partition_m retain exact DEFs. Coral has 112 changed component
+records, including two master selections, with all other DEF sections unchanged;
+its HPWL improves by 2.152 µm. All four retain independent WNS, cell count and
+area. Runs use common production
+defaults, 100 ps clocks and reset false paths. Small-design controls are fresh on
+CPU 13; coral uses the preceding frozen v42 control on CPU 12. These are single
+flow samples, all within the 1.5× runtime budget. Rebuilding with the published
+pin reproduces lfsr's exact DEF and WNS. Evidence is recorded in
+<code>runs.reduced_ramp_fit_v43</code>.</p>
+<p>The named minimax <code>rep/placement.json</code> artifact also verifies H's
+3% cell/area bound: 16,505 → 16,209 cells (−1.79%) and 2,025.454 → 2,086.121 µm²
+(+2.995%). Its hash and inventory are recorded with the measurement. This is not
+a gross-cell claim for coral's reset/rail trees.</p>
+<p><strong>The full task remains open:</strong> total STA share is still above
+10%, and the prior wire-growth, checkpoint and broader census/import gaps remain.
+The new gemmini scaling run completed synthesis in 69.6 s CPU at 9,370 MiB RSS,
+but its full flow stopped during initial physical timing. A diagnostic repeat
+confirms the 16 GiB process-tree guard at 16,789,512 KiB, before GP. The live
+process had 33 threads on one pinned CPU; <code>Timer::set_num_threads</code> is
+a no-op in that baseline. Its memory contribution remained unproven. This is a failing
+I result, with the trace and exact stop reason retained for diagnosis.</p>
+
+<p>OpenTimer now reuses each wire response across the paired slew and delay
+passes. Ideal-clock bypass, missing source slew and invalidated arcs retain their
+existing behavior. No timing approximation or public default changes. The published
+pin <code>a363059</code> passes six optimized timing/repair suites, including new
+incremental RC/model/clock/mask regressions.</p>
+<p>Three alternating timing-only pairs on the same saved minimax placement produce
+byte-identical timing reports. Median propagation falls from 1.580 to 1.432 s
+(9.4%); the complete cold evaluation falls from 3.057 to 2.901 s (5.1%).</p>
+<table><thead><tr><th>Design</th><th>Unchanged independent WNS (ps)</th><th>Placement, control → candidate (s)</th></tr></thead><tbody>
+<tr><td>lfsr</td><td>-60.271</td><td>2.015 → 2.034</td></tr>
+<tr><td>minimax</td><td>-950.268</td><td>43.430 → 42.256</td></tr>
+<tr><td>NVDLA/partition_m</td><td>-916.800</td><td>35.436 → 38.113</td></tr>
+<tr><td>coralnpu</td><td>-16736.600</td><td>753.026 → 783.386</td></tr>
+</tbody></table>
+<p>All four retain byte-identical final DEFs and unchanged HPWL with common defaults,
+100 ps clocks and reset false paths. Each stays within the 1.5× placement-time
+budget. Small-design controls are fresh on CPU 13; coral uses the earlier frozen
+v41 control on CPU 12. These single flow samples do not establish a whole-flow
+speedup. A rebuild using the published pin reproduces lfsr's exact DEF and WNS.
+Provenance, measurements and review are in <code>runs.paired_wire_response_v42</code>.</p>
+<p><strong>B remains open:</strong> the isolated final-evaluation sample is below
+3 s, but total STA share still exceeds 10%. The full A–J scope and the previously
+recorded wire-growth, checkpoint and census gaps remain in progress.</p>
+
+<p>Forest repair now considers spatial sink clusters before building its
+Steiner backbone. Each alternative uses the existing electrical and timing
+checks, and may not exceed the summed net HPWL of the best original candidate.
+The reference stays fixed across the search. Public defaults are unchanged;
+eight placement, repair, timing-session and integration suites pass, including
+three new coverage/geometry/wire-bound regressions.</p>
+<table><thead><tr><th>Design</th><th>Independent WNS (ps)</th><th>HPWL (µm)</th><th>Placement (s)</th></tr></thead><tbody>
+<tr><td>lfsr</td><td>-60.271 → -60.271</td><td>183.788 → 183.788</td><td>2.037 → 2.057</td></tr>
+<tr><td>minimax</td><td>-950.289 → -950.268</td><td>46924.026 → 46230.310</td><td>45.486 → 43.221</td></tr>
+<tr><td>NVDLA/partition_m</td><td>-916.800 → -916.800</td><td>93405.154 → 93405.154</td><td>37.360 → 36.870</td></tr>
+<tr><td>coralnpu</td><td>-16736.600 → -16736.600</td><td>3907687.297 → 3907687.297</td><td>736.804 → 753.026</td></tr>
+</tbody></table>
+<p>All runs use common production defaults, 100 ps clocks and reset false paths.
+The small-design controls are fresh on CPU 13; coral uses the earlier frozen v40
+control on CPU 12. All satisfy the 1.5× placement-time limit. Minimax reduces
+HPWL by 1.48% with essentially unchanged WNS. The reviewed binary restores the
+existing resource ceiling for combined trees and reproduces minimax's exact
+candidate DEF and independent WNS. Its repeat takes 46.060 s (1.013× the fresh
+control), so this is not a claim of repeatable speedup. Provenance, full comparisons and rejected
+experiments are recorded in <code>runs.spatial_tree_wire_guard_v41</code>.</p>
+<p>Independent scoring localizes minimax's original excess wire to forest
+repair: 40,070.561 → 46,808.685 µm before subsequent cleanup. Four high-fanout
+address trees account for roughly 4,000 µm of added wire. The scored accepted
+sizing/forest/recovery checkpoints, the rejected minimax sizing trial and final
+QoR values agree with OpenSTA WNS within 2.7%; this does not establish the full
+checkpoint/census requirement in G. A hard per-tree wire bound and a local-delay
+tradeoff were rejected for WNS loss; unbounded spatial clustering improved WNS
+but increased HPWL and was also rejected.</p>
+<p><strong>F remains open:</strong> lfsr is still 6.33% above matched pure GP;
+minimax improves from 11.66% to 10.01%, above the required 3%. The original A–J
+scope, including total STA share and the broader census/import checks, remains
+in progress.</p>
+
+<p>The density floor now also includes unavoidable overflow from cells larger
+than the bins. It minimizes each rectangle independently over its possible grid
+positions, then combines that conservative bound with the core-capacity bound.
+Lfsr's actual GP floor is 0.260: main GP now settles at 440 iterations instead of
+1,380 (520 versus 1,480 including the warm round), retains the original density
+and reports <code>density_infeasible</code>, not convergence. Public defaults
+are unchanged; all eleven published-pin validation suites pass.</p>
+<table><thead><tr><th>Design</th><th>Independent WNS (ps)</th><th>HPWL (µm)</th><th>Placement (s)</th></tr></thead><tbody>
+<tr><td>lfsr</td><td>-61.992 → -60.271</td><td>211.974 → 183.788</td><td>2.686 → 2.050</td></tr>
+<tr><td>minimax</td><td>-950.289 → -950.289</td><td>46924.026 → 46924.026</td><td>43.447 → 45.231</td></tr>
+<tr><td>NVDLA/partition_m</td><td>-916.800 → -916.800</td><td>93405.154 → 93405.154</td><td>37.020 → 38.005</td></tr>
+<tr><td>coralnpu</td><td>-16736.600 → -16736.600</td><td>3907687.297 → 3907687.297</td><td>744.113 → 736.804</td></tr>
+</tbody></table>
+<p>All use common production defaults, 100 ps clocks and reset false paths.
+Lfsr has a fresh control; the other controls are earlier frozen v39 runs on the
+same CPUs. All satisfy the 1.5× placement-time budget. Minimax, partition_m and
+coralnpu retain exact DEFs. A rebuild using the published dependency pin reproduces
+lfsr's exact candidate DEF and independent WNS, with placement taking
+2.053 s. The imported minimax diagnostic preserves
+42,708.841 µm HPWL and 360 iterations in 9.74 s CPU. Source provenance, scores,
+validation and the excluded scratch-quota failure are in
+<code>runs.grid_resolution_floor_v40</code>.</p>
+<p>Fresh pure-GP diagnostics explicitly match production input-buffer cleanup.
+Lfsr's full placement is 183.788 µm versus pure GP's 172.848 µm (+6.33%);
+minimax remains 46,924.026 versus 42,022.308 µm (+11.66%).
+<strong>F's 3% bound remains unmet on both designs.</strong> The existing global
+automatic-grid diagnostic chooses 8×8 for lfsr and 128×128 for minimax; it speeds
+lfsr but worsens minimax WNS to −1,142.846 ps, so it remains opt-in. Total STA share,
+a broadly safe automatic grid policy/curve agreement, the broader census and the
+coral regression observed after upstream integration remain open.</p>
+
+<p>Static cell placement now hands off to legalization when the requested density
+is mathematically infeasible and the remaining objective has settled. The original
+requested target is retained and the result reports nonconvergence. Review of the
+upstream merge also found repeated Liberty parsing in reset/rail buffering; these
+phases now reuse the shared technology snapshot. All eleven targeted optimized
+suites pass, including file-independent reset/rail buffering and honest density
+handoff reporting. Public defaults are unchanged.</p>
+<table><thead><tr><th>Design</th><th>Independent WNS (ps)</th><th>Placement (s), upstream → candidate</th></tr></thead><tbody>
+<tr><td>lfsr</td><td>-61.992 → -61.992</td><td>4.751 → 2.639</td></tr>
+<tr><td>minimax</td><td>-950.289 → -950.289</td><td>47.173 → 43.447</td></tr>
+<tr><td>NVDLA/partition_m</td><td>-916.800 → -916.800</td><td>41.866 → 37.020</td></tr>
+<tr><td>coralnpu</td><td>-16736.600 → -16736.600</td><td>757.391 → 744.113</td></tr>
+</tbody></table>
+<p>Fresh matched runs use the same CPU per design, common production defaults,
+100 ps clocks and reset false paths. All four retain byte-identical DEFs, WNS and
+HPWL, and stay within 1.5× placement time. Coralnpu takes
+897.18 s wall / 896.72 s CPU and
+10304.6 MiB peak RSS. The repair growth checks pass; upstream
+excludes reset/rail tree masters from that budget, so this is not a gross-area
+claim. Exact scores and binary provenance are in
+<code>runs.density_floor_shared_reset_v39</code>.</p>
+<p>The control measured after upstream integration is worse than the previous
+measured coralnpu revision: placement 530.499 → 757.391 s and WNS −13,961.971 → −16,736.600 ps.
+The matched table isolates this patch from that regression; resolving it remains
+open. No blocking review findings remain in this patch.</p>
+
 <p>Buffer-tree search now considers a single repeater at the source even when
 that source already satisfies electrical limits. Optimal repeater spacing
 still generates tree alternatives, but does not reject a branch whose RC delay,
@@ -53,13 +399,18 @@ worsens minimax WNS to −1,312.774 ps and still has 50,587.761 µm HPWL. Stage
 reports locate most wirelength growth in buffer insertion, not the warm timing
 rounds. The retained candidate lowers minimax's excess over pure GP from 21.70%
 to 11.66%; <strong>F's 3% bound remains unmet.</strong></p>
-<p>The refreshed imported minimax pure-GP check fails D/E: default density 0.5
-cannot fit the supplied core (movable cells alone occupy 65.4%), reaching
-1,500 iterations with overflow 0.267 and
-701,412.516 µm HPWL. A density-only diagnostic at 0.7 converges in 500 iterations
-and takes 11.84 s CPU, but still has 111,796.250 µm HPWL versus the 50,317.3 µm
-acceptance limit. That override is not a production setting. The full A–J goal,
-including total STA share and the larger-design/import census, remains open.</p>
+<p>The previous v38 imported minimax pure-GP diagnostic was missing input buffer
+cleanup. Corrected geometry-only controls explicitly enable cleanup (upstream
+now defaults to cleanup only when repair runs). With cleanup and the unchanged
+0.5 density / 0.1 overflow targets, the old solver takes 1,500 iterations,
+20.49 s CPU and 572,047.465 µm HPWL. The merged candidate with automatic capacity-floor handoff takes
+360 iterations, 9.90 s CPU and 42,708.841 µm HPWL. It retains raw overflow
+0.277 and correctly reports nonconvergence: the supplied core has an unavoidable
+0.188 overflow floor. This meets D's imported numerical wirelength/time bounds;
+curve agreement, initialization and the rest of D remain unproven. These are
+explicit-cleanup diagnostics, not changed production defaults.</p>
+<p>The full A–J goal remains open, including total STA share, F's 3% wirelength
+bound, lfsr's long density stall and the larger-design/import census.</p>
 
 <p>GP timing feedback now uses dense slack/clock arrays with a shared immutable
 pin/net index. Coordinate-only samples reuse bound timer pins; topology and

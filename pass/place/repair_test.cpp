@@ -468,6 +468,55 @@ TEST_F(Buffer_repair, FinalGpDoesNotRemoveBuffersOnProvisionalTiming) {
   }
 }
 
+TEST_F(Buffer_repair, GpTimingSnapshotsOwnRcAndMatchFractionalGeometry) {
+  auto p = graph->get_input_pin("a");
+  for (int i = 0; i < 3; ++i) {
+    p = gate("sky130_fd_sc_hd__inv_1", "cell" + std::to_string(i), p);
+  }
+  graph->get_output_pin("y").connect_driver(p);
+  options.macro_timing_interval = 2;
+  options.final_timing_start    = 0;
+  options.iterations = options.min_iterations = 8;
+  options.post_density_factor                 = 0;
+  options.cell_jump.depth                     = 0;
+  const auto                            tech  = physical::read_lef(options.lefs);
+  std::shared_ptr<physical::Parasitics> first_rc;
+  std::string                           first_serialized;
+  unsigned                              calls      = 0;
+  bool                                  fractional = false;
+  options.fp_evaluate                              = [&](const Result& snapshot) {
+    ++calls;
+    for (const auto& cell : snapshot.floorplan.components) {
+      const auto& master = tech.macros.at(cell.macro);
+      for (const char* pin : {"A", "Y"}) {
+        const auto [dx, dy] = physical::oriented_center(master, master.pins.at(pin).shapes.front().rect, cell.place.orientation);
+        const auto   xy     = snapshot.pin_locations.at(cell.name + ":" + pin);
+        const double x = xy.first - dx * tech.dbu, y = xy.second - dy * tech.dbu;
+        // The exported DBU pose and the electrical pin geometry must describe
+        // the same checkpoint, including legal row flips. GP RC may retain the
+        // sub-DBU movement that the graph and DEF cannot represent.
+        EXPECT_NEAR(x, cell.place.x, .500001);
+        EXPECT_NEAR(y, cell.place.y, .500001);
+        fractional |= std::abs(x - std::round(x)) > 1e-6 || std::abs(y - std::round(y)) > 1e-6;
+      }
+    }
+    if (!first_rc) {
+      first_rc         = snapshot.parasitics;
+      first_serialized = physical::serialize_parasitics(*first_rc);
+    } else {
+      EXPECT_EQ(physical::serialize_parasitics(*first_rc), first_serialized);
+    }
+    return timing(snapshot);  // Also checks graph poses against RC provenance.
+  };
+  const auto placed = place(*graph, flat, options);
+  EXPECT_GT(calls, 1U);
+  EXPECT_TRUE(fractional);
+  ASSERT_TRUE(first_rc);
+  EXPECT_EQ(physical::serialize_parasitics(*first_rc), first_serialized);
+  check_legality(tech, placed.floorplan);
+  equivalent(placed);
+}
+
 TEST_F(Buffer_repair, SingleCellLegalizationKeepsEveryExistingNeighborFixed) {
   // The production stage selection must also preserve an explicit ECO frame.
   options.fp_place = options.final_cells = true;
@@ -739,6 +788,88 @@ TEST(SteinerRepair, SelectsAnAffordableAlternativeInsteadOfRejectingTheFastestTr
     EXPECT_TRUE(affordable.root.front().buffer);
   }
   EXPECT_THROW(plan_buffer_choices({0, 0}, loads, caps, required, {small, large}, source, 0, 0, {0, 0}), std::runtime_error);
+}
+TEST(SteinerRepair, SpatialClustersIsolateDistantSinkCapacitance) {
+  const Buffer_drive buffer{.1, 16.1, 1000000, 16, 1, 10, 1};
+  const Buffer_drive source{.1, .5, 1000000, 1, 0, 10, 1};
+  std::vector<Point> loads(16, {-100, 0});
+  loads.insert(loads.end(), 16, {100, 0});
+  const auto plan
+      = plan_buffer_choices({0, 0}, loads, std::vector<double>(32, 1), std::vector<double>(32, 100), {buffer}, source, 1, 0);
+  // Each remote group gets a local buffer, so its long upstream wire drives
+  // one small buffer input instead of sixteen sink capacitances. A third
+  // buffer at the source satisfies the original driver's fanout-one limit.
+  ASSERT_EQ(plan.buffers.size(), 3U);
+  std::vector<unsigned> seen(loads.size());
+  size_t                leaf_groups = 0;
+  for (const auto& branch : plan.buffers) {
+    if (branch.loads.front().buffer) {
+      EXPECT_EQ(branch.position, Point(0, 0));
+      EXPECT_EQ(branch.loads.size(), 2U);
+      continue;
+    }
+    ++leaf_groups;
+    EXPECT_EQ(branch.loads.size(), 16U);
+    for (const auto& load : branch.loads) {
+      ASSERT_FALSE(load.buffer);
+      ASSERT_LT(load.index, loads.size());
+      EXPECT_EQ(branch.position, loads[load.index]);
+      ++seen[load.index];
+    }
+  }
+  EXPECT_EQ(leaf_groups, 2U);
+  for (const auto count : seen) {
+    EXPECT_EQ(count, 1U);
+  }
+  ASSERT_EQ(plan.root.size(), 1U);
+  EXPECT_TRUE(plan.root.front().buffer);
+  EXPECT_EQ(plan.root.front().index, 2U);
+}
+TEST(SteinerRepair, SpatialClustersDoNotDuplicateTheNetBoundingBox) {
+  const Buffer_drive buffer{.1, 8.1, 1000000, 8, 1, 10, 1};
+  const Buffer_drive source{.1, .5, 1000000, 1, 0, 10, 1};
+  std::vector<Point> loads;
+  for (const auto& xy : {
+           Point{-100, -100},
+           Point{-100,  100},
+           Point{ 100, -100},
+           Point{ 100,  100}
+  }) {
+    loads.insert(loads.end(), 8, xy);
+  }
+  const auto plan
+      = plan_buffer_choices({0, 0}, loads, std::vector<double>(32, 1), std::vector<double>(32, 100), {buffer}, source, 1, 0);
+  const auto hpwl = [&](Point origin, const std::vector<Buffer_tree::Load>& children) {
+    auto low = origin, high = origin;
+    for (const auto& child : children) {
+      const auto xy = child.buffer ? plan.buffers.at(child.index).position : loads.at(child.index);
+      low.first     = std::min(low.first, xy.first);
+      low.second    = std::min(low.second, xy.second);
+      high.first    = std::max(high.first, xy.first);
+      high.second   = std::max(high.second, xy.second);
+    }
+    return high.first - low.first + high.second - low.second;
+  };
+  double wire = hpwl({0, 0}, plan.root);
+  for (const auto& branch : plan.buffers) {
+    wire += hpwl(branch.position, branch.loads);
+  }
+  EXPECT_DOUBLE_EQ(wire, 400);
+}
+TEST(SteinerRepair, FasterClusterCannotAddAnOverlappingSourceWire) {
+  const Buffer_drive buffer{.1, 100, 1000000, 32, 1, 1, 1};
+  const Buffer_drive source{.1, .5, 1000000, 1, 0, 1000, 1};
+  const Point        root{-50, 0};
+  std::vector<Point> loads(16, {-100, 0});
+  loads.insert(loads.end(), 16, {100, 0});
+  const auto plan
+      = plan_buffer_choices(root, loads, std::vector<double>(32, 1), std::vector<double>(32, 100), {buffer}, source, 1, 0);
+  // Moving the repeater to the center reduces its longest sink path, but
+  // adds a 50-unit source wire over the unchanged 200-unit leaf-net box.
+  // The faster spatial alternative must preserve the reference wire budget.
+  ASSERT_EQ(plan.buffers.size(), 1U);
+  EXPECT_EQ(plan.buffers.front().position, root);
+  EXPECT_EQ(plan.buffers.front().loads.size(), loads.size());
 }
 TEST_F(Buffer_repair, FloorplanSizesAllStressedDriversIncludingEqualAreaDrives) {
   std::filesystem::create_directories(options.output_dir);
@@ -1049,10 +1180,16 @@ TEST_F(Buffer_repair, PostSynthesisWeightsSeedFirstPlacementThenUsePlacedRc) {
   graph->get_output_pin("y").connect_driver(p);
   auto seed_options         = options;
   seed_options.timing_seed  = true;
-  seed_options.output_dir  += "/post_synth";
-  hhds::GraphLibrary seed_library, placed_library;
-  const auto         seed = place(*graph, seed_library, seed_options);
+  seed_options.output_dir   += "/post_synth";
+  hhds::GraphLibrary placed_library;
+  auto               seed_library    = std::make_unique<hhds::GraphLibrary>();
+  auto               cleanup_library = std::make_unique<hhds::GraphLibrary>();
+  auto               cleaned         = remove_synthesis_buffers(*graph, *cleanup_library, options);
+  auto               seed            = place(*cleaned.graph, *seed_library, seed_options);
+  cleaned.graph.reset();
+  cleanup_library.reset();  // The seed must own all declarations/provenance it needs.
   EXPECT_FALSE(std::filesystem::exists(seed_options.output_dir + "/out.def"));
+  EXPECT_FALSE(seed.graph->get_input_node().attr(attrs::placement_rc).has());
   for (const auto& net : seed.parasitics->nets) {
     for (const auto& node : net.nodes) {
       EXPECT_EQ(node.capacitance_ff, 0);
@@ -1060,7 +1197,16 @@ TEST_F(Buffer_repair, PostSynthesisWeightsSeedFirstPlacementThenUsePlacedRc) {
   }
   options.net_weights = timing_weights(*seed.parasitics, timing(seed));
   ASSERT_FALSE(options.net_weights.empty());
-  auto initial = place(*seed.graph, placed_library, options);
+  std::weak_ptr<hhds::Graph> seed_graph = seed.graph;
+  unsigned                   releases   = 0;
+  auto                       initial    = place(*seed.graph, placed_library, options, [&] {
+    ++releases;
+    seed.graph.reset();
+    seed_library.reset();
+    EXPECT_TRUE(seed_graph.expired());
+  });
+  EXPECT_EQ(releases, 1U);
+  EXPECT_TRUE(initial.graph->get_input_node().attr(attrs::placement_rc).has());
   EXPECT_EQ(initial.net_weights, options.net_weights);
   double wire_cap = 0;
   for (const auto& net : initial.parasitics->nets) {
