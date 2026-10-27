@@ -109,6 +109,13 @@ TEST(PrectsNetworks, DistributionClosureExcludesSiblingsButPreservesDataAndGateE
   EXPECT_TRUE(timing.pins.contains("r0:o"));
   EXPECT_EQ(fp.nets, before.nets);
   EXPECT_EQ(fp.components, before.components);
+  const auto* retained = &timing.pins.at("ff:d");
+  timing.path         = {"r0:o", "ff:d"};
+  const auto moved    = prects_data_timing(std::move(timing), excluded);
+  EXPECT_EQ(&moved.pins.at("ff:d"), retained);
+  EXPECT_FALSE(moved.pins.contains("r0:o"));
+  EXPECT_FALSE(moved.pins.contains("ff:c"));
+  EXPECT_EQ(moved.path, (std::vector<std::string>{"ff:d"}));
 }
 
 TEST(PrectsNetworks, MissingDistributionEndpointsDoNotJoinDataToResetOrClock) {
@@ -200,6 +207,11 @@ TEST(PrectsNetworks, DenseRankingClocksAndFilteringMatchNamedFeedback) {
   EXPECT_FALSE(filtered.is_clock_pin("b", "o"));
   EXPECT_TRUE(dense.is_clock_pin("b", "o"));
   EXPECT_EQ(filtered.pin_rank("t", "i").slack, -1);
+  const auto* storage = dense.ranking->pins.data();
+  const auto moved    = prects_data_timing(std::move(dense), actual);
+  EXPECT_EQ(moved.ranking->pins.data(), storage);
+  EXPECT_FALSE(moved.is_clock_pin("b", "o"));
+  EXPECT_EQ(moved.pin_rank("t", "i").slack, -1);
 }
 TEST(PrectsNetworks, ExplicitPortsReplaceOptionalMetadataAndLibraryRoots) {
   auto roles = library();

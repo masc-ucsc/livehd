@@ -6759,7 +6759,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
             ++fp_sta_calls;
             auto feedback = options.gp_rank && !options.fp_resize ? options.gp_rank({state.graph, state.parasitics, v.ignored})
                                                                   : options.fp_evaluate(state);
-            return prects_data_timing(feedback, v.ignored);
+            return prects_data_timing(std::move(feedback), v.ignored);
           };
           const auto before  = evaluate(checkpoint);
           auto       after   = before;
