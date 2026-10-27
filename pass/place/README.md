@@ -750,6 +750,78 @@ Verified same-net supply metal exempts an already attached supply pin; a LEF pin
 rectangle alone does not count as a connection. Search-budget exhaustion fails
 closed.
 
+The standalone `//tools:signal_route_bench` benchmark samples driver-pin nets
+from a supplied mapped, placed DEF. It resolves LEF OUTPUT pins and DEF INPUT
+ports, keeps nets with exactly one driver and at least one sink, and draws
+uniformly with replacement using a reproducible seed. This measures the physical
+`try_route(net, request)` API after driver-to-net resolution, not graph lookup.
+Macros, IOs, high-fanout nets and unsuccessful requests remain in the sample.
+It does not publish routes or change occupancy. Every successful proposal gets
+an independent full-net connectivity check outside the timed call.
+
+```sh
+bazel build -c opt //tools:signal_route_bench
+taskset -c 14 bazel-bin/tools/signal_route_bench \
+  --def placed-with-tracks.def \
+  --lef technology.lef --lef cells.lef --lef macros.lef \
+  --samples 2000 --seed 17 --access 10000 --patterns 10000 \
+  --budget-ms 1000 --guard shared > route-results.jsonl
+```
+
+The DEF must contain the platform's actual routing tracks; a placement-only DEF
+without tracks mostly measures immediate access failures. JSONL reports separate
+read/occupancy/guard setup times, each request's outcome, latency and geometry,
+and overall rates and success/failure latency percentiles. Rates exclude setup,
+JSON emission and independent connectivity validation. Both success and failure
+rates use **total request time** as their denominator, so they sum to the attempt
+rate. `--guard shared` constructs one guard before measuring requests;
+`--guard request` includes standalone guard construction within every deadline.
+The shared mode represents an unchanged physical frame. A host that commits
+routes or moves cells must maintain/rebuild the corresponding occupancy and
+escape state; this benchmark does not measure that update cost.
+
+On the 161,074-cell, 161,855-net coralnpu placement, with platform tracks added
+using OpenROAD, three alternating unprofiled repeats on one
+Ryzen Threadripper PRO 5955WX CPU gave the following medians. Both builds used
+the same 2,000 driver draws, 10,000 access/pattern budgets and 1 s deadline.
+The baseline is `fc383160c` plus the benchmark; the optimized implementation
+filters unrelated access-via templates before geometry decoding and memoizes
+up to 1,024 identical branch-via legality checks per request/template. Cache
+keys include origin and both complete landing rectangles; no cached verdict
+survives a request. Search order, budgets and legality rules remain unchanged.
+
+| Measurement | Baseline | Optimized |
+| --- | ---: | ---: |
+| Attempts/s | 551.4 | 631.4 |
+| Successful routes/s, mixed workload | 16.26 | 18.63 |
+| Failed attempts/s, mixed workload | 535.1 | 612.8 |
+| Successful-call median / p95 | 0.149 / 0.456 ms | 0.143 / 0.442 ms |
+| Failed-call median / p95 | 0.086 / 12.152 ms | 0.076 / 9.409 ms |
+| Guard setup | 14.525 s | 12.466 s |
+| Total setup | 16.342 s | 14.284 s |
+
+All draws, success/failure reasons, work counts and proposed geometries matched
+exactly across these runs: 59 successes, 1,941 failures, no timeouts. Peak RSS
+was approximately 3.78 GiB for both. Other builds were active on the machine;
+observed rates ranged from 550–555 baseline and 625–641 optimized attempts/s.
+The synthetic fixture has no PG wiring: 1,581 failures involve unresolved-pin
+protection, 220 have no legal access, 87 fail maze search, 34 have non-cell
+endpoints and 19 block remaining pin access. These are workload-throughput
+measurements, not a claim of full-design routability or timing improvement.
+A second independent seed (29) preserved all 2,000 outcomes and geometries
+(57 successes, 1,943 failures, no timeouts), improving 781 to 856 attempts/s
+in one paired run. Three optimized standalone requests with `--guard request`
+all reached the 1 s guard-setup deadline before route search; including cleanup,
+these achieved only 0.85 attempts/s.
+
+Sampling the optimized request window at 199 Hz attributed about 75% of samples
+to pattern search and 22% to maze search. Via legality checks appeared in 76%
+and occupancy queries in 27%; these are nested inclusive costs, not additive.
+Repeated spatial queries, spacing checks, string comparisons and geometry
+conversion remain the principal targets. Whole-frame pin-escape construction
+still dominates startup. Repeated consumers should borrow a guard with a clear
+update lifecycle rather than reconstructing one for every dpin.
+
 `try_route` also screens long parallel exposure to foreign metal on the same
 layer. For elongated shapes within two candidate wire widths, it sums parallel
 overlap divided by edge-to-edge separation. The dimensionless

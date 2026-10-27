@@ -660,9 +660,10 @@ TEST(SignalRouter, MultiRowTrunkConnectsEveryPinAndSharesSameTrackBranches) {
       {"Y", "M2", 1045,   3, 540},
       {"X", "M3",    9, 100,  36}
   };
-  auto       occupancy = routing_occupancy(f.tech, f.fp, 64);
-  const auto before    = occupancy.size();
-  auto       result    = Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_pattern(f.net, f.limits);
+  auto          occupancy = routing_occupancy(f.tech, f.fp, 64);
+  const auto    before    = occupancy.size();
+  Signal_router router(f.tech, f.fp, occupancy, f.profile());
+  auto          result = router.propose_pattern(f.net, f.limits);
   ASSERT_TRUE(result.geometry) << result.reason;
   EXPECT_EQ(result.geometry->endpoints.size(), 4);
   EXPECT_DOUBLE_EQ(result.geometry->wire_length_um,
@@ -673,17 +674,18 @@ TEST(SignalRouter, MultiRowTrunkConnectsEveryPinAndSharesSameTrackBranches) {
   EXPECT_TRUE(check_route_connectivity(f.tech, f.fp, routed).connected);
   EXPECT_EQ(occupancy.size(), before);
   EXPECT_TRUE(f.fp.nets.front().wires.empty());
-  // The third row is essential: a router that only joins the first two
+  // Reuse the router after occupancy changes: cached legality must not escape
+  // the request. The third row is essential: a router that only joins the first two
   // endpoints would incorrectly report success despite this obstruction.
   occupancy.insert({
       {"M3", {0, 1800, 4000, 1900}},
       "other"
   });
-  EXPECT_FALSE(Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_pattern(f.net, f.limits).geometry);
+  EXPECT_FALSE(router.propose_pattern(f.net, f.limits).geometry);
   EXPECT_EQ(occupancy.size(), before + 1);
   auto limits     = f.limits;
   limits.deadline = std::chrono::steady_clock::now();
-  EXPECT_TRUE(Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_pattern(f.net, limits).timed_out);
+  EXPECT_TRUE(router.propose_pattern(f.net, limits).timed_out);
 }
 TEST(SignalRouter, MazeDetoursAroundBlockedSameRowWithoutPublishingFailures) {
   Fixture f;

@@ -889,8 +889,13 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
     // Iterative access combinations keep stack usage independent of fanout.
     // One branch per escape-layer track avoids overlapping same-net rectangles and
     // duplicate branch-via cuts when several endpoints share that track.
-    std::vector<size_t> choice(accesses.size(), 0);
-    bool                more = true;
+    // Different endpoint-access combinations often produce the same branch
+    // landing and trunk. Their via verdict is identical within this search:
+    // the template, net owner, rules and occupancy are unchanged. Bound this
+    // request-local cache so high-fanout searches cannot retain unbounded state.
+    std::map<std::array<double, 10>, bool> via_checks;
+    std::vector<size_t>                    choice(accesses.size(), 0);
+    bool                                   more = true;
     while (more) {
       if (stage.expired()) {
         return out;
@@ -927,8 +932,27 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
             }
             landing.rect.xl = std::min(landing.rect.xl, x + m2->rect.xl);
             landing.rect.xh = std::max(landing.rect.xh, x + m2->rect.xh);
-            if (landing.rect.yh - landing.rect.yl != width2
-                || !ph::check_signal_via(tech_, frame_, rules_, occupancy_, {name}, x, y, {landing, trunk}, net.name).legal) {
+            const std::array<double, 10> key{double(x),
+                                             double(y),
+                                             landing.rect.xl,
+                                             landing.rect.yl,
+                                             landing.rect.xh,
+                                             landing.rect.yh,
+                                             trunk.rect.xl,
+                                             trunk.rect.yl,
+                                             trunk.rect.xh,
+                                             trunk.rect.yh};
+            const auto                   cached = via_checks.find(key);
+            const bool                   via_legal
+                = cached != via_checks.end()
+                      ? cached->second
+                      : landing.rect.yh - landing.rect.yl == width2
+                            && ph::check_signal_via(tech_, frame_, rules_, occupancy_, {name}, x, y, {landing, trunk}, net.name)
+                                   .legal;
+            if (cached == via_checks.end() && via_checks.size() < 1024) {
+              via_checks.emplace(key, via_legal);
+            }
+            if (!via_legal) {
               legal = false;
               break;
             }
