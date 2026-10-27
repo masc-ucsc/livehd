@@ -2099,6 +2099,12 @@ Final legalization can accept this feedback too. It reuses detailed timing only
 when the rebuilt RC nets, cell identities/poses, terminals and reset cuts match
 exactly; `final_legalization.reused_timing` records the decision. Changed physical
 states and approximate rankings still require detailed evaluation.
+The final STA report can reuse the persistent placement timer after reconciling
+the final physical state and reset cuts. This is distinct from reusing the prior
+feedback above: the report still checks the requested state, and can propagate
+changes, but avoids rebuilding a second timer and refitting unchanged drivers.
+Its `physical_session_reused` flag and ordinary STA cache counters identify the
+reporting path.
 With pin-level electrical feedback, ordinary sizing selects gates with negative
 slack, electrical violations or drive stress. Healthy neighbors do not consume
 detailed timing trials for optional area recovery, even when an unrelated path

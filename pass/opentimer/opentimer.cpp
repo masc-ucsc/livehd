@@ -340,6 +340,16 @@ void Pass_opentimer::time_work(Eprp_var& var) {
 
   pass.validate_physical_rc(g);  // validate before a warm STA result can be replayed
 
+  if (auto session = std::exchange(var.physical_timing_session, {})) {
+    auto report                 = var;
+    report.graphs               = {g};
+    report.physical_rc          = pass.physical_rc_;
+    report.physical_timing_cuts = pass.physical_timing_cuts_;
+    if (session->write_report(report)) {
+      return;
+    }
+  }
+
   // A design compiled WITHOUT `compile.unroll` -- false is the DEFAULT, so this
   // is the ordinary path -- keeps ONE compact Sub standing for `count`
   // occurrences. pass.opentimer is not occurrence-aware — all three hier modes
@@ -349,32 +359,7 @@ void Pass_opentimer::time_work(Eprp_var& var) {
   // caller and this pass only reads it. A design with no comptime loops has no
   // compact Sub; nothing is copied and the input graph is timed in place.
   const auto design_defs = g->definitions().graphs();
-  if (pass.stats_) {
-    // pass.abc stamps the mapped-region identity on each region graph's input
-    // node. Seed from definitions rather than timed gates so a zero-cell/native
-    // wiring color still gets its required row. The later flattened gate walk
-    // fills occurrence-weighted cell counts and end-to-end arrivals.
-    for (const auto& def : design_defs) {
-      auto input  = def->get_input_node();
-      auto region = input.attr(livehd::attrs::synth_region);
-      if (!region.has()) {
-        continue;
-      }
-      Pass_opentimer::Color_qor row;
-      if (auto id = input.attr(livehd::attrs::synth_region_id); id.has()) {
-        row.region_id = id.get();
-      }
-      row.module = std::string{region.get()};
-      if (auto color = input.attr(livehd::attrs::color); color.has()) {
-        row.color = color.get();
-      }
-      row.resynth = input.attr(livehd::attrs::resynth).has();
-      pass.color_qor_.push_back(std::move(row));
-    }
-    std::sort(pass.color_qor_.begin(), pass.color_qor_.end(), [](const auto& lhs, const auto& rhs) {
-      return std::tie(lhs.module, lhs.color) < std::tie(rhs.module, rhs.color);
-    });
-  }
+  pass.prepare_color_report(g);
   // ---- STA reuse (sta_cache.hpp) -------------------------------------------
   // Keyed on the NETLIST (canonical digest, Merkle-folded through every region
   // body) plus the timing environment, so it hits exactly when re-timing would
@@ -566,20 +551,7 @@ void Pass_opentimer::time_work(Eprp_var& var) {
         .msg("could not map timing annotations to input nodes")
         .fatal();
   }
-  {
-    // The Liberty time unit as a label, for the report and the cache record.
-    if (auto u = pass.timer.time_unit(); u) {
-      auto         near = [](double a, double b) { return a > b * 0.999 && a < b * 1.001; };
-      const double v    = u->value();
-      if (near(v, 1e-6)) {
-        pass.time_unit_label_ = "us";
-      } else if (near(v, 1e-9)) {
-        pass.time_unit_label_ = "ns";
-      } else if (near(v, 1e-12)) {
-        pass.time_unit_label_ = "ps";
-      }
-    }
-  }
+  pass.set_time_unit_label();
   pass.write_qor();
   // Store only an ERROR-FREE analysis: an incomplete timing graph (an
   // unconnected Liberty pin, a non-converging pin tracker) already failed the
@@ -2358,7 +2330,7 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       }
     }
   }
-  if (!max_pin.empty() && !feedback_) {
+  if (!max_pin.empty() && (!feedback_ || session_report_)) {
     if (margin) {
       margin_delay = (max_delay / 100.0) * (100 - margin);
       std::print("slowest delay:{} pin:{} margin:{}% (margin_delay:{})\n", max_delay, max_pin, margin, margin_delay);
@@ -2957,6 +2929,52 @@ livehd::opentimer::Sta_record Pass_opentimer::snapshot() const {
   return rec;
 }
 
+void Pass_opentimer::prepare_color_report(const std::shared_ptr<hhds::Graph>& g) {
+  color_qor_.clear();
+  if (stats_) {
+    // pass.abc stamps the mapped-region identity on each region graph's input
+    // node. Seed from definitions rather than timed gates so a zero-cell/native
+    // wiring color still gets its required row. The later flattened gate walk
+    // fills occurrence-weighted cell counts and end-to-end arrivals.
+    for (const auto& def : g->definitions().graphs()) {
+      auto input  = def->get_input_node();
+      auto region = input.attr(livehd::attrs::synth_region);
+      if (!region.has()) {
+        continue;
+      }
+      Color_qor row;
+      if (auto id = input.attr(livehd::attrs::synth_region_id); id.has()) {
+        row.region_id = id.get();
+      }
+      row.module = std::string{region.get()};
+      if (auto color = input.attr(livehd::attrs::color); color.has()) {
+        row.color = color.get();
+      }
+      row.resynth = input.attr(livehd::attrs::resynth).has();
+      color_qor_.push_back(std::move(row));
+    }
+    std::sort(color_qor_.begin(), color_qor_.end(), [](const auto& lhs, const auto& rhs) {
+      return std::tie(lhs.module, lhs.color) < std::tie(rhs.module, rhs.color);
+    });
+  }
+}
+
+void Pass_opentimer::set_time_unit_label() {
+  time_unit_label_.clear();
+  // The Liberty time unit as a label, for the report and the cache record.
+  if (auto u = timer.time_unit(); u) {
+    auto         near = [](double a, double b) { return a > b * 0.999 && a < b * 1.001; };
+    const double v    = u->value();
+    if (near(v, 1e-6)) {
+      time_unit_label_ = "us";
+    } else if (near(v, 1e-9)) {
+      time_unit_label_ = "ns";
+    } else if (near(v, 1e-12)) {
+      time_unit_label_ = "ps";
+    }
+  }
+}
+
 void Pass_opentimer::write_qor() const {
   if (qor_path.empty()) {
     return;
@@ -2988,6 +3006,7 @@ void Pass_opentimer::write_qor() const {
                    (cache_enabled_ && !cache_hit_) ? 1 : 0,
                    cache_digestable_ ? "true" : "false",
                    cache_lookup_ms_);
+  j += std::format(",\"physical_session_reused\":{}", session_report_ && !cache_hit_);
   j += "}";
   std::ofstream ofs(qor_path, std::ios::binary | std::ios::trunc);
   if (!ofs) {

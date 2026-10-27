@@ -33267,10 +33267,38 @@
               "source": "/tmp/1f-wns-v1/feasible_small/NVDLA__partition_m/summary.json",
               "independent_wns_ps": -914.37086,
               "independent_hpwl_um": 100823.601
+            },
+            "coralnpu": {
+              "placement_seconds": 692.717152,
+              "final_sta_seconds": 43.613483,
+              "run": {
+                "status": "ok",
+                "wall_s": 875.49,
+                "cpu_s": 875.38,
+                "rss_mib": 9726.00390625,
+                "tree_rss_mib": 9727.31640625,
+                "ipc": 1.5548361185332236,
+                "instructions": 6137703245735.0,
+                "cycles": 3947492068505.0,
+                "stop": null
+              },
+              "growth_budget": {
+                "basis": "synthesized_standard_cells",
+                "fraction": 0.03,
+                "baseline_cells": 159338,
+                "baseline_area_um2": 19093.676400001503,
+                "cells": 161829,
+                "area_um2": 19666.480859995612,
+                "within_budget": true,
+                "rejected_proposals": 9981
+              },
+              "source": "/tmp/1f-wns-v1/feasible_candidate/coralnpu/summary.json",
+              "independent_wns_ps": -13961.971191,
+              "independent_hpwl_um": 3671251.142
             }
           },
           "reason": "Review found stale routing evidence; not safe to certify selected geometry",
-          "coral_status": "Diagnostic still running at publication; withdrawn on code-review grounds regardless of QoR"
+          "coral_status": "Completed after67da61410 publication; not retained"
         },
         "ideal_seed_only": {
           "retained": false,
@@ -33358,10 +33386,38 @@
               "source": "/tmp/1f-wns-v1/ideal_only_candidate/NVDLA__partition_m/summary.json",
               "independent_wns_ps": -914.37086,
               "independent_hpwl_um": 100823.601
+            },
+            "coralnpu": {
+              "placement_seconds": 676.9480080000001,
+              "final_sta_seconds": 42.81839,
+              "run": {
+                "status": "ok",
+                "wall_s": 860.35,
+                "cpu_s": 860.19,
+                "rss_mib": 9746.8984375,
+                "tree_rss_mib": 9764.203125,
+                "ipc": 1.5938349003704015,
+                "instructions": 6182065038509.0,
+                "cycles": 3878736145803.0,
+                "stop": null
+              },
+              "growth_budget": {
+                "basis": "synthesized_standard_cells",
+                "fraction": 0.03,
+                "baseline_cells": 159338,
+                "baseline_area_um2": 19093.676400001503,
+                "cells": 161829,
+                "area_um2": 19666.480859995503,
+                "within_budget": true,
+                "rejected_proposals": 9556
+              },
+              "source": "/tmp/1f-wns-v1/ideal_only_candidate/coralnpu/summary.json",
+              "independent_wns_ps": -14667.456641,
+              "independent_hpwl_um": 3669162.351
             }
           },
           "reason": "Isolating seed change regresses minimax WNS; does not correct the high-fanout RC model",
-          "coral_status": "Diagnostic still running at publication; not the retained binary"
+          "coral_status": "Completed after67da61410 publication; not retained"
         }
       },
       "tests": {
@@ -33395,6 +33451,740 @@
         "hightide_head": "9648393ce09887c9f72c3a40eb5fdc8441731c14",
         "build": "LiveHD f0c3048f0 plus bounded high-fanout timing trees and geometry-independent ideal-wire seeds; published DREAMPlace4a006e9 and OpenTimer3197d53",
         "livehd_patch_sha256": "243ce91f2857b8d89d7f0b42acff19cfed952f5dad0d00b8315b55733e1c4940"
+      }
+    },
+    "final_session_report_v36": {
+      "status": "Retained final-report reuse; B final-report timing target met on minimax, total-STA share and broader A-J remain open",
+      "base": "LiveHD67da61410, DREAMPlace4a006e9, OpenTimer3197d53",
+      "implementation": "Transfer persistent Physical_session to final pass.opentimer through transient Eprp_var owner. Reconcile actual final graph, RC and reset cuts; discard pending trial edits; render normal report and seed standalone cache. Fallback for changed timing options or timing-file contents, criticality/margin annotation and legacy stitching. No public defaults changed.",
+      "protocol": "Frozen v36 executables. Four production-default100ps/reset-false-path flows. Same frontend compatibility settings asv33; no benchmark-specific placement knobs. Candidate small flows CPU13, coral CPU14. Non-overlapping placement elapsed phases and separate final report elapsed phase. Contemporaneous sequential minimax control/candidate pair CPU13.",
+      "binary_manifest": {
+        "openroad": "6d604d68329cd788fcce1212a01844e61a8eb62b99248eb6038902f853f5ea13",
+        "yosys": "dc720773d3cafc98f9ac3c1dae1e2faa8a1147629d84fe3d8bf10a8de080a8e2",
+        "lhd": "a025953ad4a1aa235540fd6c0d3726d1d6db438fb3fa5cd481cb5b627de59fb7",
+        "physical_repair": "769c02239aeb1cb82848bfe170f487316c1e8f5e168bddc9470eb2b6b4f9ef79",
+        "livehd_head": "67da61410935ffb6de8e60fd281de05e6a9c2daa",
+        "hightide_head": "9648393ce09887c9f72c3a40eb5fdc8441731c14",
+        "build": "LiveHD67da61410 plus final-report handoff to persistent Physical_session; published dependencies, no local overrides",
+        "livehd_patch_sha256": "95be68a3ee6fa5a67316c8d87f28ae153f6a2ba25c2c14dc9a64613ee4e83948"
+      },
+      "results": {
+        "lfsr": {
+          "baseline": {
+            "placement_seconds": 2.595684,
+            "final_sta_seconds": 0.730395,
+            "run": {
+              "status": "ok",
+              "wall_s": 5.81,
+              "cpu_s": 5.8,
+              "rss_mib": 459.1875,
+              "tree_rss_mib": 468.19140625,
+              "ipc": 2.6804502571719766,
+              "instructions": 69269051620.0,
+              "cycles": 25842319377.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "physical_timing": {
+              "evaluations": 9,
+              "builds": 1,
+              "ranking_evaluations": 6,
+              "ranking_seconds": 0.6382328259999999,
+              "detailed_evaluations": 3,
+              "repowered_gates": 8,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 543,
+              "update_calls": 12,
+              "seconds": 0.6711727679999999,
+              "validation_seconds": 0.000944001,
+              "reconcile_seconds": 0.6284351060000001,
+              "exclusions_seconds": 0.00016551299999999997,
+              "propagation_seconds": 0.037854147000000005,
+              "feedback_seconds": 0.0036436839999999977
+            },
+            "gp": {
+              "gp_converged": false,
+              "gp_stop_reason": "density_stalled",
+              "gp_overflow": 0.356047925,
+              "gp_total_iterations": 1480,
+              "gp_density_ready_iteration": 0,
+              "gp_continuation_deadline": 0,
+              "gp_objective_converged": false,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 1380
+            },
+            "source": "/tmp/1f-wns-v1/ideal_seed_candidate/lfsr/summary.json",
+            "independent_wns_ps": -61.991974,
+            "independent_hpwl_um": 211.974
+          },
+          "candidate": {
+            "placement_seconds": 2.642236,
+            "final_sta_seconds": 0.19465100000000002,
+            "run": {
+              "status": "ok",
+              "wall_s": 5.39,
+              "cpu_s": 5.38,
+              "rss_mib": 407.37890625,
+              "tree_rss_mib": 391.03125,
+              "ipc": 2.6399865987996787,
+              "instructions": 63119892982.0,
+              "cycles": 23909171740.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "physical_timing": {
+              "evaluations": 9,
+              "builds": 1,
+              "ranking_evaluations": 6,
+              "ranking_seconds": 0.6477292499999999,
+              "detailed_evaluations": 3,
+              "repowered_gates": 8,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 543,
+              "update_calls": 12,
+              "seconds": 0.681057274,
+              "validation_seconds": 0.001465779,
+              "reconcile_seconds": 0.6355130210000001,
+              "exclusions_seconds": 0.0003124009999999999,
+              "propagation_seconds": 0.039690492,
+              "feedback_seconds": 0.003895821
+            },
+            "gp": {
+              "gp_converged": false,
+              "gp_stop_reason": "density_stalled",
+              "gp_overflow": 0.356047925,
+              "gp_total_iterations": 1480,
+              "gp_density_ready_iteration": 0,
+              "gp_continuation_deadline": 0,
+              "gp_objective_converged": false,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 1380
+            },
+            "source": "/tmp/1f-wns-v1/session_report_candidate/lfsr/summary.json",
+            "independent_wns_ps": -61.991974,
+            "independent_hpwl_um": 211.974
+          },
+          "placement_ratio": 1.0179343864661492,
+          "final_report_ratio": 0.26650100288200224,
+          "all_sta_phase_seconds": 0.8785470000000001,
+          "sta_to_placement_ratio": 0.33250133598966936
+        },
+        "minimax": {
+          "baseline": {
+            "placement_seconds": 44.217464,
+            "final_sta_seconds": 3.873939,
+            "run": {
+              "status": "ok",
+              "wall_s": 68.74,
+              "cpu_s": 68.72,
+              "rss_mib": 1303.21484375,
+              "tree_rss_mib": 1261.03515625,
+              "ipc": 2.1315403761375125,
+              "instructions": 657882826163.0,
+              "cycles": 308641972504.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16204,
+              "area_um2": 2086.1209799995736,
+              "within_budget": true,
+              "rejected_proposals": 298
+            },
+            "physical_timing": {
+              "evaluations": 14,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 4.4937573109999995,
+              "detailed_evaluations": 7,
+              "repowered_gates": 1402,
+              "inserted_gates": 373,
+              "removed_gates": 0,
+              "updated_nets": 84366,
+              "update_calls": 21,
+              "seconds": 18.477455069,
+              "validation_seconds": 0.32890239699999996,
+              "reconcile_seconds": 3.0967441149999995,
+              "exclusions_seconds": 0.11815646600000002,
+              "propagation_seconds": 12.817529463,
+              "feedback_seconds": 2.0503319749999984
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0885657999,
+              "gp_total_iterations": 520,
+              "gp_density_ready_iteration": 380,
+              "gp_continuation_deadline": 1900,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 440
+            },
+            "source": "/tmp/1f-wns-v1/ideal_seed_candidate/minimax/summary.json",
+            "independent_wns_ps": -991.35478,
+            "independent_hpwl_um": 51140.215
+          },
+          "candidate": {
+            "placement_seconds": 49.06772,
+            "final_sta_seconds": 1.4433150000000001,
+            "run": {
+              "status": "ok",
+              "wall_s": 72.86,
+              "cpu_s": 72.84,
+              "rss_mib": 1277.98828125,
+              "tree_rss_mib": 1282.27734375,
+              "ipc": 1.9432807073943053,
+              "instructions": 635595630499.0,
+              "cycles": 327073504142.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16204,
+              "area_um2": 2086.1209799995736,
+              "within_budget": true,
+              "rejected_proposals": 298
+            },
+            "physical_timing": {
+              "evaluations": 14,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 5.128517704,
+              "detailed_evaluations": 7,
+              "repowered_gates": 1402,
+              "inserted_gates": 373,
+              "removed_gates": 0,
+              "updated_nets": 84366,
+              "update_calls": 21,
+              "seconds": 19.970695573999997,
+              "validation_seconds": 0.3678799250000001,
+              "reconcile_seconds": 3.4769428170000003,
+              "exclusions_seconds": 0.133513344,
+              "propagation_seconds": 13.42182134,
+              "feedback_seconds": 2.5034647970000012
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0885657999,
+              "gp_total_iterations": 520,
+              "gp_density_ready_iteration": 380,
+              "gp_continuation_deadline": 1900,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 440
+            },
+            "source": "/tmp/1f-wns-v1/session_report_candidate/minimax/summary.json",
+            "independent_wns_ps": -991.35478,
+            "independent_hpwl_um": 51140.215
+          },
+          "placement_ratio": 1.109690958305524,
+          "final_report_ratio": 0.37257039927577595,
+          "all_sta_phase_seconds": 22.455426,
+          "sta_to_placement_ratio": 0.4576415207390928
+        },
+        "NVDLA__partition_m": {
+          "baseline": {
+            "placement_seconds": 37.500678,
+            "final_sta_seconds": 4.918453,
+            "run": {
+              "status": "ok",
+              "wall_s": 106.61,
+              "cpu_s": 106.58,
+              "rss_mib": 1550.2578125,
+              "tree_rss_mib": 1506.12109375,
+              "ipc": 1.5253232908316732,
+              "instructions": 731714110977.0,
+              "cycles": 479710835975.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20948,
+              "baseline_area_um2": 2656.096920000048,
+              "cells": 20598,
+              "area_um2": 2735.7766200000606,
+              "within_budget": true,
+              "rejected_proposals": 3957
+            },
+            "physical_timing": {
+              "evaluations": 11,
+              "builds": 1,
+              "ranking_evaluations": 8,
+              "ranking_seconds": 6.449242646,
+              "detailed_evaluations": 3,
+              "repowered_gates": 3998,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 134746,
+              "update_calls": 14,
+              "seconds": 14.667499614,
+              "validation_seconds": 0.371543618,
+              "reconcile_seconds": 2.654524831999999,
+              "exclusions_seconds": 0.059898745,
+              "propagation_seconds": 10.02626153,
+              "feedback_seconds": 1.4598766140000008
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0900059979,
+              "gp_total_iterations": 540,
+              "gp_density_ready_iteration": 380,
+              "gp_continuation_deadline": 1900,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 460
+            },
+            "source": "/tmp/1f-wns-v1/ideal_seed_candidate/NVDLA__partition_m/summary.json",
+            "independent_wns_ps": -914.37086,
+            "independent_hpwl_um": 100823.601
+          },
+          "candidate": {
+            "placement_seconds": 42.895109000000005,
+            "final_sta_seconds": 1.87584,
+            "run": {
+              "status": "ok",
+              "wall_s": 112.75,
+              "cpu_s": 112.72999999999999,
+              "rss_mib": 1550.4140625,
+              "tree_rss_mib": 1550.2890625,
+              "ipc": 1.387774572565589,
+              "instructions": 704020250731.0,
+              "cycles": 507301592527.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20948,
+              "baseline_area_um2": 2656.096920000048,
+              "cells": 20598,
+              "area_um2": 2735.7766200000606,
+              "within_budget": true,
+              "rejected_proposals": 3957
+            },
+            "physical_timing": {
+              "evaluations": 11,
+              "builds": 1,
+              "ranking_evaluations": 8,
+              "ranking_seconds": 7.639179921,
+              "detailed_evaluations": 3,
+              "repowered_gates": 3998,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 134746,
+              "update_calls": 14,
+              "seconds": 16.447522082,
+              "validation_seconds": 0.453134027,
+              "reconcile_seconds": 3.1381294969999995,
+              "exclusions_seconds": 0.06338446099999999,
+              "propagation_seconds": 10.904683689,
+              "feedback_seconds": 1.7654131740000012
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0900059979,
+              "gp_total_iterations": 540,
+              "gp_density_ready_iteration": 380,
+              "gp_continuation_deadline": 1900,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 460
+            },
+            "source": "/tmp/1f-wns-v1/session_report_candidate/NVDLA__partition_m/summary.json",
+            "independent_wns_ps": -914.37086,
+            "independent_hpwl_um": 100823.601
+          },
+          "placement_ratio": 1.1438488925453563,
+          "final_report_ratio": 0.381388212919794,
+          "all_sta_phase_seconds": 19.632734,
+          "sta_to_placement_ratio": 0.4576916682971944
+        },
+        "coralnpu": {
+          "baseline": {
+            "placement_seconds": 549.971089,
+            "final_sta_seconds": 42.428083,
+            "run": {
+              "status": "ok",
+              "wall_s": 727.05,
+              "cpu_s": 726.87,
+              "rss_mib": 9562.11328125,
+              "tree_rss_mib": 9557.4609375,
+              "ipc": 1.6274825473881616,
+              "instructions": 5334147290888.0,
+              "cycles": 3277545003139.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 161829,
+              "area_um2": 19666.480859995612,
+              "within_budget": true,
+              "rejected_proposals": 9981
+            },
+            "physical_timing": {
+              "evaluations": 13,
+              "builds": 1,
+              "ranking_evaluations": 9,
+              "ranking_seconds": 68.195147359,
+              "detailed_evaluations": 4,
+              "repowered_gates": 21522,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 1420840,
+              "update_calls": 17,
+              "seconds": 180.638156847,
+              "validation_seconds": 4.516676886,
+              "reconcile_seconds": 23.971541627,
+              "exclusions_seconds": 0.546460544,
+              "propagation_seconds": 132.27735499000002,
+              "feedback_seconds": 18.438678242999984
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0434294015,
+              "gp_total_iterations": 460,
+              "gp_density_ready_iteration": 200,
+              "gp_continuation_deadline": 1000,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 360
+            },
+            "source": "/tmp/1f-wns-v1/ideal_seed_candidate/coralnpu/summary.json",
+            "independent_wns_ps": -13961.971191,
+            "independent_hpwl_um": 3671251.142
+          },
+          "candidate": {
+            "placement_seconds": 575.361498,
+            "final_sta_seconds": 19.468802,
+            "run": {
+              "status": "ok",
+              "wall_s": 739.42,
+              "cpu_s": 739.3199999999999,
+              "rss_mib": 9719.125,
+              "tree_rss_mib": 9634.36328125,
+              "ipc": 1.5413234967407932,
+              "instructions": 5137322072237.0,
+              "cycles": 3333058947781.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 161829,
+              "area_um2": 19666.480859995612,
+              "within_budget": true,
+              "rejected_proposals": 9981
+            },
+            "physical_timing": {
+              "evaluations": 13,
+              "builds": 1,
+              "ranking_evaluations": 9,
+              "ranking_seconds": 70.69965974099999,
+              "detailed_evaluations": 4,
+              "repowered_gates": 21522,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 1420840,
+              "update_calls": 17,
+              "seconds": 186.134352287,
+              "validation_seconds": 4.911556413000001,
+              "reconcile_seconds": 25.437056305,
+              "exclusions_seconds": 0.5619261609999999,
+              "propagation_seconds": 134.448623221,
+              "feedback_seconds": 19.866816421000006
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0434294015,
+              "gp_total_iterations": 460,
+              "gp_density_ready_iteration": 200,
+              "gp_continuation_deadline": 1000,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 360
+            },
+            "source": "/tmp/1f-wns-v1/session_report_candidate/coralnpu/summary.json",
+            "independent_wns_ps": -13961.971191,
+            "independent_hpwl_um": 3671251.142
+          },
+          "placement_ratio": 1.0461668067791832,
+          "final_report_ratio": 0.45886593556442323,
+          "all_sta_phase_seconds": 220.708371,
+          "sta_to_placement_ratio": 0.38359947922688425
+        }
+      },
+      "report_comparison": {
+        "lfsr": {
+          "scalars_changed": {},
+          "physical_pin_rows_changed": 0,
+          "physical_pin_rows": 442,
+          "def_byte_identical": true,
+          "session_reused": true,
+          "report_sizes": [
+            102606,
+            101260
+          ],
+          "metadata_changed": []
+        },
+        "minimax": {
+          "scalars_changed": {
+            "area": [
+              2086.37378,
+              2086.37109
+            ]
+          },
+          "physical_pin_rows_changed": 0,
+          "physical_pin_rows": 57839,
+          "def_byte_identical": true,
+          "session_reused": true,
+          "report_sizes": [
+            15169754,
+            15035990
+          ],
+          "metadata_changed": []
+        },
+        "NVDLA__partition_m": {
+          "scalars_changed": {
+            "area": [
+              2735.75098,
+              2735.74048
+            ]
+          },
+          "physical_pin_rows_changed": 0,
+          "physical_pin_rows": 69088,
+          "def_byte_identical": true,
+          "session_reused": true,
+          "report_sizes": [
+            20749305,
+            20605448
+          ],
+          "metadata_changed": []
+        },
+        "coralnpu": {
+          "scalars_changed": {
+            "area": [
+              45721.8633,
+              45721.793
+            ]
+          },
+          "physical_pin_rows_changed": 0,
+          "physical_pin_rows": 610739,
+          "def_byte_identical": true,
+          "session_reused": true,
+          "report_sizes": [
+            163090698,
+            162033607
+          ],
+          "metadata_changed": []
+        }
+      },
+      "tests": {
+        "optimized_suites_passed": 8,
+        "logs": [
+          "/tmp/1f-session-report-v36/review-tests.log",
+          "/tmp/1f-session-report-v36/integration-tests.log",
+          "/tmp/1f-session-report-v36/publication-tests.log"
+        ],
+        "coverage": [
+          "Fresh report equivalence after resize/insertion/removal, RC changes, rejected what-if rollback and reset cuts",
+          "Per-color reporting and changed report cache-key options",
+          "Report cache populated by session and replayed through standalone pass",
+          "Unchanged RC reuse and incompatible io_load fallback",
+          "CLI final report handoff, reset trees, memory placement, critical annotation and shared EPRP state",
+          "Changed SDC and Liberty contents with unchanged path, size and timestamp force fresh timing before populating the standalone cache"
+        ]
+      },
+      "warm_cache": {
+        "artifact": "/tmp/1f-session-report-v36/warm-lfsr",
+        "result": "Second invocation in copied workdir restores placement and reportsSTA hit1/miss0, physical_session_reused=false. First relocated invocation misses and populates the cache; its original result preserved."
+      },
+      "limitations": "Report timer identifiers change with the persistent session. All physical-pin metrics and timing scalars match; native area differs by<4ppm from float summation order in OpenTimer. Report improvement does not establish whole-flow speedup on every design: the first sweep whole-flowCPU increased on minimax,partition_m,coral under concurrent host load; paired minimax confirms a reduction. TotalSTA remains above10% ofplacement. Existingcoral523psWNSregression versus earlierceffbaseline persists; this change adds no furtherWNSregression.",
+      "matched_minimax": {
+        "control": {
+          "placement_seconds": 43.843896,
+          "final_sta_seconds": 3.705535,
+          "run": {
+            "status": "ok",
+            "wall_s": 68.29,
+            "cpu_s": 68.27,
+            "rss_mib": 1279.55859375,
+            "tree_rss_mib": 1227.7890625,
+            "ipc": 2.142388265064747,
+            "instructions": 657049335701.0,
+            "cycles": 306690130083.0,
+            "stop": null
+          },
+          "growth_budget": {
+            "basis": "synthesized_standard_cells",
+            "fraction": 0.03,
+            "baseline_cells": 16505,
+            "baseline_area_um2": 2025.453599999931,
+            "cells": 16204,
+            "area_um2": 2086.1209799995736,
+            "within_budget": true,
+            "rejected_proposals": 298
+          },
+          "physical_timing": {
+            "evaluations": 14,
+            "builds": 1,
+            "ranking_evaluations": 7,
+            "ranking_seconds": 4.488319184,
+            "detailed_evaluations": 7,
+            "repowered_gates": 1402,
+            "inserted_gates": 373,
+            "removed_gates": 0,
+            "updated_nets": 84366,
+            "update_calls": 21,
+            "seconds": 18.341874579,
+            "validation_seconds": 0.30932371500000005,
+            "reconcile_seconds": 3.030521529,
+            "exclusions_seconds": 0.117452205,
+            "propagation_seconds": 12.754258247,
+            "feedback_seconds": 2.0642318400000006
+          },
+          "gp": {
+            "gp_converged": true,
+            "gp_stop_reason": "converged",
+            "gp_overflow": 0.0885657999,
+            "gp_total_iterations": 520,
+            "gp_density_ready_iteration": 380,
+            "gp_continuation_deadline": 1900,
+            "gp_objective_converged": true,
+            "gp_timing_satisfied": null,
+            "gp_iterations": 440
+          },
+          "source": "/tmp/1f-wns-v1/session_report_pair_control/minimax/summary.json",
+          "independent_wns_ps": -991.35478,
+          "independent_hpwl_um": 51140.215
+        },
+        "candidate": {
+          "placement_seconds": 45.421252,
+          "final_sta_seconds": 1.2248050000000001,
+          "run": {
+            "status": "ok",
+            "wall_s": 67.04,
+            "cpu_s": 67.01,
+            "rss_mib": 1284.1953125,
+            "tree_rss_mib": 1288.28125,
+            "ipc": 2.111120213371431,
+            "instructions": 635512558421.0,
+            "cycles": 301030966591.0,
+            "stop": null
+          },
+          "growth_budget": {
+            "basis": "synthesized_standard_cells",
+            "fraction": 0.03,
+            "baseline_cells": 16505,
+            "baseline_area_um2": 2025.453599999931,
+            "cells": 16204,
+            "area_um2": 2086.1209799995736,
+            "within_budget": true,
+            "rejected_proposals": 298
+          },
+          "physical_timing": {
+            "evaluations": 14,
+            "builds": 1,
+            "ranking_evaluations": 7,
+            "ranking_seconds": 4.621795195,
+            "detailed_evaluations": 7,
+            "repowered_gates": 1402,
+            "inserted_gates": 373,
+            "removed_gates": 0,
+            "updated_nets": 84366,
+            "update_calls": 21,
+            "seconds": 18.81074518,
+            "validation_seconds": 0.34893617600000004,
+            "reconcile_seconds": 3.1646230490000007,
+            "exclusions_seconds": 0.11925561900000002,
+            "propagation_seconds": 12.987956622,
+            "feedback_seconds": 2.122966516999999
+          },
+          "gp": {
+            "gp_converged": true,
+            "gp_stop_reason": "converged",
+            "gp_overflow": 0.0885657999,
+            "gp_total_iterations": 520,
+            "gp_density_ready_iteration": 380,
+            "gp_continuation_deadline": 1900,
+            "gp_objective_converged": true,
+            "gp_timing_satisfied": null,
+            "gp_iterations": 440
+          },
+          "source": "/tmp/1f-wns-v1/session_report_pair_candidate/minimax/summary.json",
+          "independent_wns_ps": -991.35478,
+          "independent_hpwl_um": 51140.215
+        }
+      },
+      "publication_review": {
+        "finding": "Persistent timing must not populate a cache key for timing-file contents that changed after initialization.",
+        "fix": "Hash timing inputs at initialization and final report only; a mismatch falls back to standalone timing. No iterative file reads.",
+        "validation": "All eight optimized regression suites pass after the fix.",
+        "benchmark_provenance": "The four-design sweep and matched pair above use the pre-guard v36 binary; the reviewed minimax rerun below uses the final binary with the content guard.",
+        "minimax": {
+          "source": "/tmp/1f-wns-v1/session_report_reviewed/minimax/summary.json",
+          "binary_manifest": {
+            "openroad": "6d604d68329cd788fcce1212a01844e61a8eb62b99248eb6038902f853f5ea13",
+            "yosys": "dc720773d3cafc98f9ac3c1dae1e2faa8a1147629d84fe3d8bf10a8de080a8e2",
+            "lhd": "b11d74be6c36c84a798c5ab02458b7193cfda26ed7e787a14db70001953b018a",
+            "livehd_head": "67da61410935ffb6de8e60fd281de05e6a9c2daa",
+            "hightide_head": "9648393ce09887c9f72c3a40eb5fdc8441731c14",
+            "build": "LiveHD67da61410 plus final-report handoff to persistent Physical_session; published dependencies, no local overrides; publication review adds timing-input content validation at initialization and reporting",
+            "livehd_patch_sha256": "c61c2c595b2be545f9312b15cc53fa804ef741ad6d545780784f815c609449bf"
+          },
+          "run": {
+            "status": "ok",
+            "wall_s": 64.25,
+            "cpu_s": 64.22999999999999,
+            "rss_mib": 1269.7734375,
+            "tree_rss_mib": 1274.09375,
+            "ipc": 2.2040630639195773,
+            "instructions": 635682895840.0,
+            "cycles": 288414114027.0,
+            "stop": null
+          },
+          "placement_seconds": 42.888072,
+          "final_sta_seconds": 1.237479,
+          "independent_wns_ps": -991.35478,
+          "def_byte_identical_to_v36": true,
+          "native_timing_and_physical_pin_records_identical_to_v36": true
+        }
       }
     }
   },

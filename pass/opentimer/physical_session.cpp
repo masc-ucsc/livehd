@@ -14,12 +14,14 @@
 #include "pass_opentimer.hpp"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
+#include "sta_salt.hpp"
 #include "timing_whatif.hpp"
 
 namespace livehd::opentimer {
 struct Physical_session::Impl : Pass_opentimer {
   Statistics                                       stats;
-  bool                                             initialized = false;
+  bool                                             initialized        = false;
+  uint64_t                                         timing_inputs_hash = 0;
   std::map<std::string, std::string>               masters, ports, net_names, connections;
   std::vector<std::pair<std::string, std::string>> cell_identity;
   size_t                                           next_gate = 0, next_net = 0;
@@ -56,6 +58,9 @@ struct Physical_session::Impl : Pass_opentimer {
   }
 
   void initialize(const std::shared_ptr<hhds::Graph>& graph) {
+    // Capture the input contents once, outside the iterative timing hot path.
+    // A final report must not cache this timer under subsequently edited files.
+    timing_inputs_hash = Sta_cache::env_hash(timing_file_list, "", "", 0, false);
     setup_hier(graph);
     if (hier_mode_) {
       throw std::invalid_argument("physical timing sessions require the flattened placement graph");
@@ -827,6 +832,46 @@ struct Physical_session::Impl : Pass_opentimer {
     }
   }
 
+  bool write_report(const Eprp_var& report) {
+    if (!initialized || report.graphs.size() != 1 || !report.graphs.front() || !report.physical_rc
+        || timing_inputs_hash != Sta_cache::env_hash(timing_file_list, "", "", 0, false) || !configure_session_report(report)) {
+      return false;
+    }
+    const auto& graph = report.graphs.front();
+    physical_rc_      = report.physical_rc;
+    validate_physical_rc(graph);
+    prepare_color_report(graph);
+    qor_blocks_.clear();
+    report_module_ = std::string(graph->get_name());
+    std::unique_ptr<Sta_cache> cache;
+    std::string                key;
+    if (!cache_dir_.empty()) {
+      const auto started = std::chrono::steady_clock::now();
+      cache_enabled_     = true;
+      cache              = std::make_unique<Sta_cache>(cache_dir_, kStaSrcSalt);
+      key                = cache_key(graph);
+      const auto* record = key.empty() ? nullptr : cache->lookup(key);
+      cache_lookup_ms_   = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+      if (record) {
+        cache_hit_ = true;
+        replay(*record);
+        write_qor();
+        return true;
+      }
+    }
+    // Reconcile even when the caller supplies the last accepted snapshot: the
+    // what-if journal may contain a rejected trial, and RC/cuts can change.
+    emit_boundary_warning();
+    evaluate(graph, report.physical_rc, report.physical_timing_cuts, Purpose::detailed);
+    set_time_unit_label();
+    write_qor();
+    if (cache && !key.empty() && !qor_blocks_.empty() && !livehd::diag::sink().has_errors()) {
+      cache->insert(key, snapshot());
+      cache->save();
+    }
+    return true;
+  }
+
   void apply_data_exclusions(const std::set<std::string>& requested) {
     std::optional<std::set<std::string>> combined;
     if (!physical_timing_cuts_.empty() || (physical_rc_ && !physical_rc_->timing_cuts.empty())) {
@@ -964,6 +1009,7 @@ Physical_session::Physical_session(const Eprp_var& options) : options_(options) 
   proxy_ = std::make_unique<Proxy>(*this);
   options_.graphs.clear();
   options_.physical_rc.reset();
+  options_.physical_timing_session.reset();
   impl_ = std::make_unique<Impl>(options_);
 }
 Physical_session::~Physical_session() = default;
@@ -978,6 +1024,24 @@ livehd::timing::Feedback Physical_session::evaluate(const std::shared_ptr<hhds::
     const auto previous_stats = impl_->stats;
     impl_                     = std::make_unique<Impl>(options_);
     impl_->stats              = previous_stats;
+    throw;
+  }
+}
+bool Physical_session::write_report(const Eprp_var& report) {
+  try {
+    const bool written = impl_->write_report(report);
+    if (written) {
+      // Reporting is terminal. Drop graph-associated metadata and prevent a
+      // later evaluate() from serializing feedback on its hot path.
+      const auto stats = impl_->stats;
+      impl_            = std::make_unique<Impl>(options_);
+      impl_->stats     = stats;
+    }
+    return written;
+  } catch (...) {
+    const auto stats = impl_->stats;
+    impl_            = std::make_unique<Impl>(options_);
+    impl_->stats     = stats;
     throw;
   }
 }

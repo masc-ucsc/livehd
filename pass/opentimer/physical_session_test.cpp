@@ -15,6 +15,7 @@
 #include "pass/place/repair.hpp"
 #include "pass/place/repair_internal.hpp"
 #include "pass_opentimer.hpp"
+#include "rapidjson/document.h"
 
 namespace {
 namespace gu   = livehd::graph_util;
@@ -457,6 +458,148 @@ TEST_F(PhysicalSession, ShieldedLoadsRepowerAndRollbackMatchFreshTiming) {
   EXPECT_GE(session.statistics().repowered_gates, 2u);
   EXPECT_EQ(session.statistics().inserted_gates, 1u);
   EXPECT_EQ(session.statistics().removed_gates, 1u);
+}
+TEST_F(PhysicalSession, FinalReportReconcilesTrialsAndSeedsStandaloneCache) {
+  const auto read_report = [&](const char* name) {
+    std::ifstream       input(directory / name);
+    const std::string   text{std::istreambuf_iterator<char>(input), {}};
+    rapidjson::Document json;
+    json.Parse(text.c_str());
+    EXPECT_FALSE(json.HasParseError());
+    return json;
+  };
+  for (bool cut : {false, true}) {
+    Circuit initial(false, false), trial(true, true, 500, true), final(false, false, 25000, true);
+    auto    session = std::make_shared<livehd::opentimer::Physical_session>(options);
+    session->evaluate(initial.graph, initial.rc);
+    session->evaluate(trial.graph, trial.rc, {}, livehd::opentimer::Physical_session::Purpose::ranking);
+    // The report must discard an unevaluated what-if edit before reconciling
+    // the accepted graph, which also removes the trial's inserted cell.
+    session->whatif().resize("u", "sky130_fd_sc_hd__buf_1");
+    final.graph->get_input_node().attr(livehd::attrs::synth_region).set("report_color");
+    final.graph->get_input_node().attr(livehd::attrs::synth_region_id).set(7);
+    final.graph->get_input_node().attr(livehd::attrs::color).set(2);
+    auto report                     = options;
+    report.graphs                   = {final.graph};
+    report.physical_rc              = final.rc;
+    report.physical_timing_cuts     = cut ? std::set<std::string>{"u:X"} : std::set<std::string>{};
+    report.physical_timing_session  = session;
+    report.dict["qor"]              = (directory / "session.json").string();
+    report.dict["cache_dir"]        = (directory / (cut ? "cut_cache" : "full_cache")).string();
+    report.dict["stats"]            = "true";
+    report.dict["critical_percent"] = "7";
+    report.set_stage_labels(report.dict);
+    Pass_opentimer::time_work(report);
+    EXPECT_FALSE(report.physical_timing_session);
+    EXPECT_EQ(session->statistics().builds, 1U);
+    EXPECT_EQ(session->statistics().removed_gates, 1U);
+    const auto actual = read_report("session.json");
+    ASSERT_TRUE(actual.IsObject());
+    EXPECT_TRUE(actual["physical_session_reused"].GetBool());
+    EXPECT_EQ(actual["incremental"]["misses"].GetUint(), 1U);
+    const auto& colors = actual["designs"][0]["colors"];
+    ASSERT_EQ(colors.Size(), 1U);
+    EXPECT_STREQ(colors[0]["module"].GetString(), "report_color");
+    EXPECT_EQ(colors[0]["cells"].GetUint(), 2U);
+    report.dict["qor"] = (directory / "cached.json").string();
+    report.set_stage_labels(report.dict);
+    Pass_opentimer::time_work(report);
+    const auto cached = read_report("cached.json");
+    EXPECT_EQ(cached["incremental"]["hits"].GetUint(), 1U);
+    EXPECT_FALSE(cached["physical_session_reused"].GetBool());
+    EXPECT_EQ(cached["designs"], actual["designs"]);
+    report.dict["cache_dir"] = "";
+    report.dict["qor"]       = (directory / "fresh.json").string();
+    report.set_stage_labels(report.dict);
+    Pass_opentimer::time_work(report);
+    const auto fresh = read_report("fresh.json");
+    for (const char* field : {"wns", "tns", "area", "cells", "max_delay", "constraints_complete", "timing_cells_complete"}) {
+      ASSERT_EQ(actual["designs"][0].HasMember(field), fresh["designs"][0].HasMember(field)) << field;
+      if (fresh["designs"][0].HasMember(field)) {
+        EXPECT_EQ(actual["designs"][0][field], fresh["designs"][0][field]) << field;
+      }
+    }
+    std::ifstream                       input(directory / "session.json");
+    const std::string                   text{std::istreambuf_iterator<char>(input), {}};
+    livehd::opentimer::Physical_session expected(options);
+    compare(livehd::placement::timing_feedback(text), expected.evaluate(final.graph, final.rc, report.physical_timing_cuts));
+  }
+}
+TEST_F(PhysicalSession, FinalReportReusesUnchangedRcAndFallsBackForChangedOptions) {
+  Circuit circuit(false, false);
+  for (bool change_load : {false, true}) {
+    auto session = std::make_shared<livehd::opentimer::Physical_session>(options);
+    session->evaluate(circuit.graph, circuit.rc);
+    const auto nets                = session->statistics().updated_nets;
+    auto       report              = options;
+    report.graphs                  = {circuit.graph};
+    report.physical_rc             = circuit.rc;
+    report.physical_timing_session = session;
+    report.dict["qor"]             = (directory / "final.json").string();
+    if (change_load) {
+      report.dict["io_load"] = "42";
+    }
+    report.set_stage_labels(report.dict);
+    Pass_opentimer::time_work(report);
+    std::ifstream       input(directory / "final.json");
+    const std::string   text{std::istreambuf_iterator<char>(input), {}};
+    rapidjson::Document json;
+    json.Parse(text.c_str());
+    ASSERT_FALSE(json.HasParseError());
+    EXPECT_EQ(json["physical_session_reused"].GetBool(), !change_load);
+    EXPECT_EQ(session->statistics().builds, 1U);
+    EXPECT_EQ(session->statistics().updated_nets, nets);
+    EXPECT_EQ(session->statistics().evaluations, change_load ? 1U : 2U);
+    livehd::opentimer::Physical_session fresh(report);
+    compare(livehd::placement::timing_feedback(text), fresh.evaluate(circuit.graph, circuit.rc));
+  }
+}
+TEST_F(PhysicalSession, FinalReportReloadsChangedTimingFileContentsBeforeCaching) {
+  Circuit circuit(true, false);
+  for (const char* file : {"timing.sdc", "cells.lib"}) {
+    auto session = std::make_shared<livehd::opentimer::Physical_session>(options);
+    session->evaluate(circuit.graph, circuit.rc);
+    const auto    path  = directory / file;
+    const auto    stamp = std::filesystem::last_write_time(path);
+    std::ifstream input(path);
+    std::string   contents{std::istreambuf_iterator<char>(input), {}};
+    input.close();
+    const bool        sdc      = std::string_view(file) == "timing.sdc";
+    const std::string before   = sdc ? "-period 10" : "0.004206";
+    const std::string after    = sdc ? "-period 20" : "0.008206";
+    const auto        position = contents.find(before);
+    ASSERT_NE(position, std::string::npos);
+    contents.replace(position, before.size(), after);
+    std::ofstream(path) << contents;
+    // Same paths, sizes and timestamps: compatibility must use file contents.
+    std::filesystem::last_write_time(path, stamp);
+    auto report                    = options;
+    report.graphs                  = {circuit.graph};
+    report.physical_rc             = circuit.rc;
+    report.physical_timing_session = session;
+    report.dict["qor"]             = (directory / "changed.json").string();
+    report.dict["cache_dir"]       = (directory / "changed_cache").string();
+    report.set_stage_labels(report.dict);
+    Pass_opentimer::time_work(report);
+    std::ifstream       output(directory / "changed.json");
+    const std::string   text{std::istreambuf_iterator<char>(output), {}};
+    rapidjson::Document json;
+    json.Parse(text.c_str());
+    ASSERT_FALSE(json.HasParseError());
+    EXPECT_FALSE(json["physical_session_reused"].GetBool());
+    EXPECT_EQ(json["incremental"]["misses"].GetUint(), 1U);
+    EXPECT_EQ(session->statistics().evaluations, 1U);
+    livehd::opentimer::Physical_session fresh(report);
+    compare(livehd::placement::timing_feedback(text), fresh.evaluate(circuit.graph, circuit.rc));
+    Pass_opentimer::time_work(report);
+    std::ifstream       cached_output(directory / "changed.json");
+    const std::string   cached_text{std::istreambuf_iterator<char>(cached_output), {}};
+    rapidjson::Document cached;
+    cached.Parse(cached_text.c_str());
+    ASSERT_FALSE(cached.HasParseError());
+    EXPECT_EQ(cached["incremental"]["hits"].GetUint(), 1U);
+    EXPECT_EQ(cached["designs"], json["designs"]);
+  }
 }
 TEST_F(PhysicalSession, DirectFeedbackMatchesExplicitReportAndDoesNotReloadFiles) {
   Circuit circuit(false, false);

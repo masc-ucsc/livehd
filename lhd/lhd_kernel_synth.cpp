@@ -1646,8 +1646,9 @@ void synth_command(Options& opts, Result& res) {
       timing_options.dict["cache_dir"] = "";
       timing_options.dict["qor"]       = "";
       timing_options.set_stage_labels(timing_options.dict);
-      livehd::opentimer::Physical_session timing_session(timing_options);
-      place_options.whatif = &timing_session.whatif();
+      net.physical_timing_session = std::make_shared<livehd::opentimer::Physical_session>(timing_options);
+      auto& timing_session        = *net.physical_timing_session;
+      place_options.whatif        = &timing_session.whatif();
       std::string phase_step;
       std::string phase_log;
       // The session runs in-process (no run_step), so keep Liberty/timer prints off the protocol stdout here.

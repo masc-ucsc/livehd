@@ -22,6 +22,46 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Final STA reporting now reuses the persistent placement timer instead of
+building a second timer for the same final state. The handoff reconciles RC,
+cell changes and reset cuts, rolls back pending what-if edits, preserves
+per-color statistics, and fills the normal STA result cache. Incompatible timing
+options, changed timing-file contents and criticality/margin annotation retain the standalone path. Eight
+optimized suites pass; a warm CLI invocation restores placement and hits the
+STA cache. No public defaults changed. Evidence is in
+<code>runs.final_session_report_v36</code>.</p>
+<table>
+<thead><tr><th>Design</th><th>Final STA report, prior → reuse (s)</th><th>Independent WNS, unchanged (ps)</th></tr></thead>
+<tbody>
+<tr><td>lfsr</td><td>0.730 → 0.195</td><td>−61.992</td></tr>
+<tr><td>minimax</td><td>3.874 → 1.443</td><td>−991.355</td></tr>
+<tr><td>NVDLA/partition_m</td><td>4.918 → 1.876</td><td>−914.371</td></tr>
+<tr><td>coralnpu</td><td>42.428 → 19.469</td><td>−13,961.971</td></tr>
+</tbody>
+</table>
+<p>All four use the same defaults, 100 ps clocks and reset false paths. Their
+DEF files are byte-identical; all 738,108 physical-pin timing records match
+after excluding internal timer identifiers. Native WNS/TNS, electrical and
+constraint metadata match; native area differs by less than 4 ppm because the
+timer sums float cell areas in a different order. All runs satisfy the 1.5×
+placement-time and 3% cell/area limits. A contemporaneous minimax pair on CPU 13
+measures final reporting at 3.706 → 1.225 s and total CPU at 68.27 → 67.01 s,
+with identical independent WNS. The first sweep's total CPU is higher on the
+three larger designs under concurrent host load, so no across-design whole-flow
+speedup is claimed. Coralnpu takes 575.36 s placement and 739.42 s end to end.</p>
+<p>The three-second minimax final-report target is met. Total STA still exceeds
+10% of placement, and initial timer construction, pin/net identity costs,
+HPWL parity and the broader A–J acceptance remain open. The earlier coralnpu WNS
+regression remains; this reporting change neither improves nor worsens it.</p>
+<p>Publication review added content checks for Liberty/SDC inputs at session
+initialization and final reporting, with no iterative file reads. Changed files
+force standalone timing before cache insertion, including edits that preserve
+file size and timestamp. All eight optimized suites pass with this guard. The
+four-design table above was measured before this final guard. The reviewed
+binary's minimax rerun takes 1.237 s for final reporting and 64.23 s total CPU,
+with identical DEF, native pin timing and independent WNS. Its binary and run
+provenance are recorded separately in the measurement artifact.</p>
+
 <p>Publication review retains the high-fanout RC correction and geometry-independent
 zero-wire timing seeds. Driver-aware trees now extend beyond 1,000 distinct
 locations, with bounded visibility and branch-sharing work; pathological cases

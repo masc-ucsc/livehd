@@ -73,6 +73,7 @@ assert [entry['stage'] for entry in legal_timing] == ['global_placement', 'legal
 assert all(entry['ranking_only'] and entry['wns'] is None and entry['tns'] is None
            for entry in legal_timing), legal_timing
 assert native['qor']['sta']['designs'][0]['wns'] is not None, native
+assert native['qor']['sta']['physical_session_reused'], native
 
 assert json.loads((root/'terminal_default/synth/place/route_options.json').read_text())['stages']['final']['model'] == 'rsmt'
 phases = [p['name'] for p in native['phases']]
