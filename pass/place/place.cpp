@@ -4586,6 +4586,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
   }
   Result result;
+  // The flat netlist takes the source name in the caller's library. Every
+  // placement owns a fresh library; a reused one would keep the stale name.
+  if (library.find_io(source.get_name())) {
+    throw std::invalid_argument(
+        std::format("placement library already holds '{}': each placement needs its own library", source.get_name()));
+  }
   result.graph = partition::flatten_hierarchy(&source, &library, source.get_name(), nullptr, false, preserved, {}, true);
   if (!result.graph) {
     throw std::runtime_error("cannot flatten mapped netlist for placement");

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <deque>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -411,9 +412,13 @@ constexpr const char* kDominoTwoRow = "__lhd_domino_two_row";
 const std::string     kDominoTwin   = std::string(kDominoTwoRow) + "_t1";
 struct Two_row_chain {
   std::vector<std::string>     lefs{"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
-  hhds::GraphLibrary           source, flat;
+  hhds::GraphLibrary           source;
   std::shared_ptr<hhds::Graph> graph;
   Options                      options = plain_options();
+  // place() flattens into a caller-owned library that must not already hold
+  // the design; every placement gets its own, alive as long as the chain.
+  std::deque<hhds::GraphLibrary> placements;
+  hhds::GraphLibrary&            next_flat() { return placements.emplace_back(); }
   explicit Two_row_chain(const std::string& master, unsigned cells = 12, const std::map<unsigned, std::string>& variants = {}) {
     const auto  tech = physical::read_lef(lefs);
     const auto& inv  = tech.macros.at("sky130_fd_sc_hd__inv_1");
@@ -480,7 +485,7 @@ TEST(Placement, TwoRowCellsAreAnchoredBeforeTerminalLegalization) {
       {physical::Row_access::horizontal, physical::Row_access::vertical},
       kDominoTwoRow
   };
-  const auto result = place(*chain.graph, chain.flat, options);
+  const auto result = place(*chain.graph, chain.next_flat(), options);
   const auto all    = physical::read_lef(options.lefs);
   EXPECT_NO_THROW(check_legality(all, result.floorplan));
   const auto rh      = std::llround(all.sites.at("unithd").height * all.dbu);
@@ -522,7 +527,7 @@ TEST(Placement, TwoRowCellsAreAnchoredBeforeTerminalLegalization) {
   auto odd_options          = options;
   odd_options.restart_seed  = std::make_shared<const physical::Floorplan>(seed);
   odd_options.output_dir   += "/odd";
-  const auto odd            = place(*chain.graph, chain.flat, odd_options);
+  const auto odd            = place(*chain.graph, chain.next_flat(), odd_options);
   EXPECT_NO_THROW(check_legality(all, odd.floorplan));
   rapidjson::Document odd_qor;
   odd_qor.Parse(odd.qor.c_str());
@@ -548,7 +553,7 @@ TEST(Placement, TwoRowCellsAreAnchoredBeforeTerminalLegalization) {
   auto restricted                                         = odd_options;
   restricted.multirow_templates[kDominoTwoRow].rail_twin  = "";
   restricted.output_dir                                  += "_restricted";
-  const auto even_only                                    = place(*chain.graph, chain.flat, restricted);
+  const auto even_only                                    = place(*chain.graph, chain.next_flat(), restricted);
   EXPECT_NO_THROW(check_legality(all, even_only.floorplan));
   rapidjson::Document even_qor;
   even_qor.Parse(even_only.qor.c_str());
@@ -576,7 +581,7 @@ TEST(Placement, TwoRowCellsAreAnchoredBeforeTerminalLegalization) {
     auto o = options;
     mutate(o);
     try {
-      (void)place(*chain.graph, chain.flat, o);
+      (void)place(*chain.graph, chain.next_flat(), o);
       ADD_FAILURE() << "accepted two-row cells: " << expected;
     } catch (const std::invalid_argument& error) {
       const std::string what = error.what();
@@ -637,15 +642,15 @@ TEST(Placement, TwoRowPlacementsKeyTheCacheAndReuseItLegally) {
       }
     }
   };
-  expect_placed(place(*chain.graph, chain.flat, chain.options), "cold");
+  expect_placed(place(*chain.graph, chain.next_flat(), chain.options), "cold");
   const auto key = environment();
-  expect_placed(place(*chain.graph, chain.flat, chain.options), "warm");
+  expect_placed(place(*chain.graph, chain.next_flat(), chain.options), "warm");
   EXPECT_EQ(environment(), key);
   // A design edit keeps the key, but the cached reference would re-place it
   // through single-row ECO legalization: two-row cells place cold instead.
   Two_row_chain edited(kDominoTwoRow, 14);
   setup(edited);
-  const auto changed = place(*edited.graph, edited.flat, edited.options);
+  const auto changed = place(*edited.graph, edited.next_flat(), edited.options);
   expect_placed(changed, "edited");
   EXPECT_EQ(environment(), key);
   rapidjson::Document qor;
@@ -656,14 +661,14 @@ TEST(Placement, TwoRowPlacementsKeyTheCacheAndReuseItLegally) {
   // The row-access convention and the templates are part of the key.
   auto renamed             = chain.options;
   renamed.row_access->name = "owner";
-  expect_placed(place(*chain.graph, chain.flat, renamed), "renamed convention");
+  expect_placed(place(*chain.graph, chain.next_flat(), renamed), "renamed convention");
   const auto renamed_key = environment();
   EXPECT_NE(renamed_key, key);
   auto templated                                     = chain.options;
   templated.multirow_templates["__lhd_domino_other"] = {
       {physical::Row_access::vertical, physical::Row_access::horizontal}
   };
-  expect_placed(place(*chain.graph, chain.flat, templated), "another template");
+  expect_placed(place(*chain.graph, chain.next_flat(), templated), "another template");
   const auto templated_key = environment();
   EXPECT_NE(templated_key, key);
   EXPECT_NE(templated_key, renamed_key);
@@ -672,7 +677,7 @@ TEST(Placement, TwoRowPlacementsKeyTheCacheAndReuseItLegally) {
   cataloged.custom_cells = custom_catalog({
       Custom_variant{.name = "__lhd_domino_other_v0_t0", .family = "__lhd_domino_other_t0"}
   });
-  expect_placed(place(*chain.graph, chain.flat, cataloged), "custom catalog");
+  expect_placed(place(*chain.graph, chain.next_flat(), cataloged), "custom catalog");
   EXPECT_NE(environment(), key);
   EXPECT_NE(environment(), templated_key);
 }
@@ -717,9 +722,9 @@ TEST(Placement, ARestoredPlacementTakesTheRailTemplateOfItsRows) {
     }
     return flipped;
   };
-  const auto cold = place(*chain.graph, chain.flat, options);
+  const auto cold = place(*chain.graph, chain.next_flat(), options);
   ASSERT_GT(expect_templates(cold), 0U);
-  const auto          warm = place(*chain.graph, chain.flat, options);
+  const auto          warm = place(*chain.graph, chain.next_flat(), options);
   rapidjson::Document qor;
   qor.Parse(warm.qor.c_str());
   EXPECT_TRUE(qor["incremental"]["hit"].GetBool());
@@ -761,7 +766,7 @@ TEST(Placement, TwoRowEcoSwapsVariantsAroundTheirNeighbors) {
     o.output_dir = dir + "/" + out;
   };
   setup(chain.options, "cold");
-  const auto cold = place(*chain.graph, chain.flat, chain.options);
+  const auto cold = place(*chain.graph, chain.next_flat(), chain.options);
   const auto all  = physical::read_lef(chain.options.lefs);
   const auto sw = std::llround(all.sites.at("unithd").width * all.dbu), rh = std::llround(all.sites.at("unithd").height * all.dbu);
 
@@ -811,15 +816,15 @@ TEST(Placement, TwoRowEcoSwapsVariantsAroundTheirNeighbors) {
   eco.changed_cells = {"c1"};
   // Without the internal flag the single-row ECO refusal is unchanged.
   try {
-    (void)place(*grown.graph, grown.flat, eco);
+    (void)place(*grown.graph, grown.next_flat(), eco);
     ADD_FAILURE() << "a two-row ECO ran without multirow_eco";
   } catch (const std::invalid_argument& error) {
     EXPECT_NE(std::string(error.what()).find("ECO legalization is single-row"), std::string::npos) << error.what();
   }
   eco.multirow_eco = Multirow_eco_bounds{.shift_sites = 0, .max_displaced = 16};
-  EXPECT_THROW((void)place(*grown.graph, grown.flat, eco), std::invalid_argument);  // needs legalize_cells
+  EXPECT_THROW((void)place(*grown.graph, grown.next_flat(), eco), std::invalid_argument);  // needs legalize_cells
   eco.legalize_cells = true;
-  const auto result  = place(*grown.graph, grown.flat, eco);
+  const auto result  = place(*grown.graph, grown.next_flat(), eco);
   EXPECT_NO_THROW(check_legality(all, result.floorplan));
   const auto c1 = at(result.floorplan, "c1"), c0 = at(result.floorplan, "c0");
   EXPECT_EQ(c1.macro, wide);
@@ -855,7 +860,7 @@ TEST(Placement, TwoRowEcoSwapsVariantsAroundTheirNeighbors) {
   narrow.options.changed_cells  = {"c1"};
   narrow.options.legalize_cells = true;
   narrow.options.multirow_eco   = Multirow_eco_bounds{};
-  const auto back               = place(*narrow.graph, narrow.flat, narrow.options);
+  const auto back               = place(*narrow.graph, narrow.next_flat(), narrow.options);
   EXPECT_NO_THROW(check_legality(all, back.floorplan));
   EXPECT_EQ(at(back.floorplan, "c1").place, [&] {
     auto p  = c1.place;
@@ -884,7 +889,7 @@ TEST(Placement, TwoRowEcoSwapsVariantsAroundTheirNeighbors) {
   rejected.options.legalize_cells = true;
   rejected.options.multirow_eco   = Multirow_eco_bounds{};
   try {
-    (void)place(*rejected.graph, rejected.flat, rejected.options);
+    (void)place(*rejected.graph, rejected.next_flat(), rejected.options);
     ADD_FAILURE() << "an impossible two-row growth was placed";
   } catch (const Multirow_failure& error) {
     EXPECT_NE(std::string(error.what()).find("two-row ECO cannot place c1"), std::string::npos) << error.what();
@@ -897,7 +902,7 @@ TEST(Placement, TwoRowEcoSwapsVariantsAroundTheirNeighbors) {
   setup(automatic.options, "automatic");
   automatic.options.automatic_bins   = true;
   automatic.options.bins             = 2;
-  const auto          automatic_cold = place(*automatic.graph, automatic.flat, automatic.options);
+  const auto          automatic_cold = place(*automatic.graph, automatic.next_flat(), automatic.options);
   std::ifstream       grid_in(automatic.options.output_dir + "/terminal_legalize.json");
   rapidjson::Document grid;
   grid.Parse(std::string{std::istreambuf_iterator<char>(grid_in), {}}.c_str());
@@ -911,7 +916,7 @@ TEST(Placement, TwoRowEcoSwapsVariantsAroundTheirNeighbors) {
   again.options.changed_cells      = {"c1"};
   again.options.legalize_cells     = true;
   again.options.multirow_eco       = Multirow_eco_bounds{};
-  const auto          again_result = place(*again.graph, again.flat, again.options);
+  const auto          again_result = place(*again.graph, again.next_flat(), again.options);
   rapidjson::Document again_qor;
   again_qor.Parse(again_result.qor.c_str());
   ASSERT_TRUE(again_qor.HasMember("multirow_eco"));
@@ -925,7 +930,7 @@ TEST(Placement, LibraryTwoRowCellsKeepTheSingleRowPaths) {
   // refuses it as before, and draws no two-row refusal.
   Two_row_chain chain("lib_two_row");
   try {
-    (void)place(*chain.graph, chain.flat, chain.options);
+    (void)place(*chain.graph, chain.next_flat(), chain.options);
     ADD_FAILURE() << "a library two-row cell was placed";
   } catch (const std::exception& error) {
     const std::string what = error.what();
