@@ -672,18 +672,40 @@ struct Proxy::Impl {
         }
       }
     }
-    // A recognized gate's enable storage must run on the gate's own clock.
+    // A recognized gate's enable storage must run on the gate's own clock and
+    // change only while the enable cannot reach the output: it launches (a
+    // flop) or opens (a latch) at the edge opposite the enable's capture. An
+    // AND gate, captured at the rise, needs a negative-edge flop or a latch
+    // transparent while the clock is low; an OR gate, captured at the fall, a
+    // positive-edge flop or a latch transparent while it is high.
     for (const auto& gate : gates) {
-      for (auto storage : gate.storages) {
-        bool same = false;
+      for (size_t e = 0; e < gate.storages.size(); ++e) {
+        const auto storage = gate.storages[e];
+        bool       same = false, phased = false;
         for (const auto& [name, index] : cells[storage].pins) {
-          (void)name;
-          if (pins[index].model->clock && pins[index].clock) {
-            same = same || base_clock(pins[index].ideal_clock) == base_clock(gate.clock);
+          if (!pins[index].model->clock || !pins[index].clock) {
+            continue;
+          }
+          same = same || base_clock(pins[index].ideal_clock) == base_clock(gate.clock);
+          for (const auto& [output_name, output] : cells[storage].pins) {
+            (void)output_name;
+            if (pins[output].model->direction != "output") {
+              continue;
+            }
+            for (const auto& arc : pins[output].model->arcs) {
+              if (arc.related_pin != name || !launch_arc(arc)) {
+                continue;
+              }
+              const auto launch = arc.type == "rising_edge" ? pins[index].ideal_clock : inverted(pins[index].ideal_clock);
+              phased            = phased || launch == inverted(gate.captures[e]);
+            }
           }
         }
         if (!same) {
           unsupported.push_back("clock gate enable storage outside the gate's clock: " + cells[storage].name);
+        } else if (!phased) {
+          unsupported.push_back("clock gate enable storage changes while its enable reaches the gated clock: "
+                                + cells[storage].name);
         }
       }
     }

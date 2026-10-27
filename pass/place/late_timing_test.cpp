@@ -602,6 +602,37 @@ TEST(LateTiming, IdealClockPassesARecognizedClockGate) {
   EXPECT_EQ(result.achievable_period_ps, 40);  // 100 - 30 / 0.5
 }
 
+TEST(LateTiming, AClockGateEnableStorageOnTheCaptureEdgeIsUnsupported) {
+  // A positive-edge enable flop on the same clock ANDed with it: the enable
+  // changes right after the rise, while the clock is high and the AND passes
+  // it, so the gated clock can glitch. Not a recognized gate.
+  Circuit circuit({"clk", "en", "d"}, {"q"});
+  circuit.library = std::make_shared<nldm::Library>(nldm::parse(models.substr(0, models.rfind('}')) + gates));
+  auto storage = circuit.cell("s", "FF"), gate = circuit.cell("g", "AND2"), flop = circuit.cell("r", "FF");
+  storage.create_sink_pin("CLK").connect_driver(circuit.graph->get_input_pin("clk"));
+  storage.create_sink_pin("D").connect_driver(circuit.graph->get_input_pin("en"));
+  gate.create_sink_pin("A").connect_driver(circuit.graph->get_input_pin("clk"));
+  gate.create_sink_pin("B").connect_driver(storage.create_driver_pin("Q"));
+  flop.create_sink_pin("CLK").connect_driver(gate.create_driver_pin("Y"));
+  flop.create_sink_pin("D").connect_driver(circuit.graph->get_input_pin("d"));
+  circuit.graph->get_output_pin("q").connect_driver(flop.create_driver_pin("Q"));
+  late::Constraints constraints;
+  constraints.clocks["main"]          = {.period_ps = 100, .roots = {"clk"}};
+  constraints.inputs["en"].arrival_ps = {10, 10};
+  constraints.inputs["en"].clock      = "main";
+  constraints.inputs["d"].arrival_ps  = {10, 10};
+  constraints.inputs["d"].clock       = "main";
+  constraints.outputs["q"]            = {
+      {100, 100},
+      {},
+      "main"
+  };
+  constraints.complete = true;
+  const auto result    = late::Proxy(*circuit.graph, circuit.library, constraints).evaluate();
+  EXPECT_FALSE(result.certified);
+  EXPECT_TRUE(issue(result, "clock gate enable storage changes while its enable reaches the gated clock: s"));
+}
+
 TEST(LateTiming, IdealClockPassesAnIntegratedClockGate) {
   Circuit circuit({"clk", "en", "d"}, {"q"});
   circuit.library = std::make_shared<nldm::Library>(nldm::parse(models.substr(0, models.rfind('}')) + gates));
