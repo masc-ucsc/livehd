@@ -88,6 +88,9 @@ def expect_error(name, fn, note) -> bool:
 
 def main() -> int:
     failures = []
+    # <ROOT>/temp is ignored, so a fresh clone does not have it; mkdtemp
+    # does not create parents.
+    (ROOT / "temp").mkdir(exist_ok=True)
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="d3_manifest_test_", dir=str(ROOT / "temp")))
     try:
         # --- the DEFAULT inputs exist ------------------------------------------

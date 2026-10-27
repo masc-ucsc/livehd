@@ -256,6 +256,9 @@ def refuse_if_build_in_use(build_root: pathlib.Path) -> None:
 
 def main() -> int:
     f = []
+    # <ROOT>/temp is ignored, so a fresh clone does not have it; mkdtemp
+    # does not create parents.
+    (ROOT / "temp").mkdir(exist_ok=True)
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="d3_runner_test_", dir=str(ROOT / "temp")))
     try:
         stub = tmp / "fake_lake"

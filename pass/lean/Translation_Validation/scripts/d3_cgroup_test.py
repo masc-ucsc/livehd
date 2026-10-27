@@ -102,6 +102,9 @@ print(f"D3GATE agree=1 samples={samples} distinct_obs=9")
 
 def main() -> int:
     fails, skipped = [], []
+    # <ROOT>/temp is ignored, so a fresh clone does not have it; mkdtemp
+    # does not create parents.
+    (ROOT / "temp").mkdir(exist_ok=True)
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="d3_cgroup_test_", dir=str(ROOT / "temp")))
     t_start = time.time()
 

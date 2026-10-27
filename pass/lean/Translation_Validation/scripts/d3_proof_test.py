@@ -81,6 +81,9 @@ def agree_row():
 
 def main() -> int:
     fails, skipped = [], []
+    # <ROOT>/temp is ignored, so a fresh clone does not have it; mkdtemp
+    # does not create parents.
+    (ROOT / "temp").mkdir(exist_ok=True)
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="d3_proof_test_", dir=str(ROOT / "temp")))
     t0 = time.time()
 
