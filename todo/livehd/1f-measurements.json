@@ -49443,6 +49443,47 @@
         "harness": "/home/renau/projs/.agent-artifacts/1f-memory-v56/full-driver-v1",
         "evidence": "/tmp/1f-memory-v56/census-harness-checks.json; census-preflight.json"
       }
+    },
+    "rc_string_serialization_v57": {
+      "status": "Implemented; focused tests and synthetic byte comparisons pass. Combined integration, matched placement and fresh census runs pending. Full A-J goal remains open.",
+      "implementation": "Serialize placement RC into the returned std::string using initialized spare characters and a final move, avoiding the second complete allocation when copying RapidJSON StringBuffer. JSON fields/order/numeric precision and public defaults unchanged.",
+      "source_sha256": "b84b5948e54fd302a7d87d50b526e71c2ccc3289b8ad1922473024297fe5bef0",
+      "tests": "Three optimized core:physical_rc_test cases pass: exact schema/escaping and geometry, exact stored-double round trips, backward compatibility and malformed-input rejection.",
+      "probe_scope": "Actual modified product serializer, matched single-process synthetic probes; exact full-string equality at each size. Single samples during concurrent integration compilation, not full-placement runtime/memory acceptance.",
+      "probes": [
+        {
+          "nets": 10000,
+          "serialized_bytes": 3246615,
+          "exact_bytes": true,
+          "control_seconds": 0.010962591,
+          "candidate_seconds": 0.012688987,
+          "control_peak_rss_kib": 15596,
+          "candidate_peak_rss_kib": 15148
+        },
+        {
+          "nets": 100000,
+          "serialized_bytes": 33064975,
+          "exact_bytes": true,
+          "control_seconds": 0.098498377,
+          "candidate_seconds": 0.117141532,
+          "control_peak_rss_kib": 125676,
+          "candidate_peak_rss_kib": 125664
+        },
+        {
+          "nets": 600000,
+          "serialized_bytes": 201726392,
+          "exact_bytes": true,
+          "control_seconds": 0.563871155,
+          "candidate_seconds": 0.628434602,
+          "control_peak_rss_kib": 745200,
+          "candidate_peak_rss_kib": 593688
+        }
+      ],
+      "evidence": "/tmp/1f-memory-v56/serialization-probe/product-results.json; product-manifest.json; core-test.log; source.patch",
+      "integration_scope": "Running integration28728 still tests111f24ad8. Do not treat its result as testing this later serializer change. After it terminates, validate the combined committed candidate using the warmed cache.",
+      "census_driver": "/home/renau/projs/.agent-artifacts/1f-memory-v56/full-driver-v1",
+      "paired_driver": "/home/renau/projs/.agent-artifacts/1f-memory-v56/paired-driver-v1",
+      "prototype_review": "Earlier buffered prototypes used resize_and_overwrite for uninitialized spare bytes; they were not promoted. Product implementation uses ordinary resize so the entire logical string remains initialized."
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",

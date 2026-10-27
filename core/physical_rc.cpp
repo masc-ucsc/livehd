@@ -1,15 +1,40 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "physical_rc.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <numeric>
 #include <stdexcept>
 #include <utility>
 
 #include "rapidjson/document.h"
-#include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 namespace livehd::physical {
+namespace {
+// Serialize into the string returned to the graph attribute. StringBuffer's
+// GetString() otherwise requires a second full JSON allocation at the final
+// placement's RC memory peak. Keep spare, initialized characters so each Put
+// only writes its byte; trim them once when transferring the completed result.
+class Rc_json_buffer {
+  std::string bytes;
+  size_t      used = 0;
+
+public:
+  using Ch = char;
+  void Put(char c) {
+    if (used == bytes.size()) {
+      bytes.resize(std::max(size_t{256}, bytes.size() + bytes.size() / 2));
+    }
+    bytes[used++] = c;
+  }
+  void        Flush() {}
+  std::string take() {
+    bytes.resize(used);
+    return std::move(bytes);
+  }
+};
+}  // namespace
+
 void validate_rc_tree(const Rc_net& net) {
   const auto fail = [&] { throw std::invalid_argument("placement RC must be a connected tree: " + net.driver); };
   if (net.nodes.empty()) {
@@ -44,8 +69,8 @@ void validate_rc_tree(const Rc_net& net) {
   }
 }
 std::string serialize_parasitics(const Parasitics& rc) {
-  rapidjson::StringBuffer                    buffer;
-  rapidjson::Writer<rapidjson::StringBuffer> w(buffer);
+  Rc_json_buffer                     buffer;
+  rapidjson::Writer<Rc_json_buffer>  w(buffer);
   w.StartObject();
   w.Key("version");
   w.Int(3);
@@ -114,7 +139,7 @@ std::string serialize_parasitics(const Parasitics& rc) {
   }
   w.EndArray();
   w.EndObject();
-  return buffer.GetString();
+  return buffer.take();
 }
 static Parasitics parse_parasitics(std::string_view text, bool full_precision) {
   const auto require = [](bool ok) {

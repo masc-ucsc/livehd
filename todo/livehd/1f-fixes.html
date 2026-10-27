@@ -22,6 +22,16 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Review v57 removes the extra full JSON copy when persisting placement RC by
+writing into the returned string. Three focused RC tests pass, including an
+exact schema/escaping check. The actual modified serializer matches the original
+byte-for-byte on synthetic 10k, 100k and 600k-net snapshots. The 600k-net probe
+uses 593,688 versus 745,200 KiB peak RSS, with serialization taking 0.628 versus
+0.564 s. These are diagnostic samples during a concurrent build, not full-flow
+acceptance. Integration of this follow-up and the fresh large-design runs remain
+pending; the full A–J requirements remain open. See
+<code>runs.rc_string_serialization_v57</code>.</p>
+
 <p>Review v56 bounds the control-network pin index to endpoints used by library
 buffer, inverter and clock-gate links, preserving first-connection and missing-pin
 semantics. Six focused tests pass. Matched standalone classifiers produce identical
