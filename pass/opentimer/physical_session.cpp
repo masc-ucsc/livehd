@@ -20,10 +20,15 @@
 
 namespace livehd::opentimer {
 struct Physical_session::Impl : Pass_opentimer {
-  Statistics                                                       stats;
-  bool                                                             initialized        = false;
-  uint64_t                                                         timing_inputs_hash = 0;
-  std::map<std::string, std::string>                               masters, ports, net_names, connections;
+  Statistics                         stats;
+  bool                               initialized        = false;
+  uint64_t                           timing_inputs_hash = 0;
+  std::map<std::string, std::string> masters, ports, net_names;
+  // Net names are owned once by net_names. Map-node addresses survive insertion
+  // and the whole-map move used by topology reconciliation. Keeping a pointer
+  // per connection avoids copying long hierarchical net names for every sink.
+  using Connections = std::map<std::string, const std::string*>;
+  Connections                                                      connections;
   std::vector<std::pair<std::string, std::string>>                 cell_identity;
   size_t                                                           next_gate = 0, next_net = 0;
   std::set<std::string>                                            data_exclusions;
@@ -106,10 +111,10 @@ struct Physical_session::Impl : Pass_opentimer {
       if (!wire) {
         throw std::runtime_error("physical timing driver has no net: " + net.driver);
       }
-      net_names.emplace(net.driver, wire->name());
+      const auto name = net_names.emplace(net.driver, wire->name()).first;
       for (const auto& node : net.nodes) {
         if (!node.pin.empty()) {
-          connections.emplace(pin_name(node.pin), wire->name());
+          connections.emplace(pin_name(node.pin), &name->second);
         }
       }
     }
@@ -245,11 +250,12 @@ struct Physical_session::Impl : Pass_opentimer {
       finish_update(graph, changed);
       return;
     }
-    std::map<std::string, std::string> next_nets, next_connections;
+    std::map<std::string, std::string> next_nets;
+    Connections                        next_connections;
     for (const auto& net : physical_rc_->nets) {
-      auto       old  = net_names.find(net.driver);
-      const auto name = old == net_names.end() ? "__lhd_physical_net_" + std::to_string(next_net++) : old->second;
-      next_nets.emplace(net.driver, name);
+      auto       old      = net_names.find(net.driver);
+      const auto name     = old == net_names.end() ? "__lhd_physical_net_" + std::to_string(next_net++) : old->second;
+      const auto identity = next_nets.emplace(net.driver, name).first;
       if (old == net_names.end()) {
         timer.insert_net(name);
       }
@@ -258,8 +264,8 @@ struct Physical_session::Impl : Pass_opentimer {
           continue;
         }
         const auto pin            = pin_name(node.pin);
-        const auto [it, inserted] = next_connections.emplace(pin, name);
-        if (!inserted && it->second != name) {
+        const auto [it, inserted] = next_connections.emplace(pin, &identity->second);
+        if (!inserted && *it->second != name) {
           throw std::runtime_error("physical pin belongs to multiple nets: " + node.pin);
         }
       }
@@ -271,8 +277,8 @@ struct Physical_session::Impl : Pass_opentimer {
       }
     }
     for (const auto& [pin, net] : next_connections) {
-      if (auto old = connections.find(pin); old == connections.end() || old->second != net) {
-        timer.disconnect_pin(pin).connect_pin(pin, net);
+      if (auto old = connections.find(pin); old == connections.end() || *old->second != *net) {
+        timer.disconnect_pin(pin).connect_pin(pin, *net);
         changed = true;
       }
     }
@@ -398,7 +404,7 @@ struct Physical_session::Impl : Pass_opentimer {
         return it->second;
       }
       const auto it = s.connections.find(pin);
-      return it == s.connections.end() ? std::string{} : it->second;
+      return it == s.connections.end() ? std::string{} : *it->second;
     }
     std::string net_of_driver(const std::string& driver) const {
       if (const auto it = nets.find(driver); it != nets.end()) {
@@ -556,7 +562,7 @@ struct Physical_session::Impl : Pass_opentimer {
             }
             const auto evaluated = s.connections.find(undo.a);
             if ((evaluated == s.connections.end() && undo.b.empty())
-                || (evaluated != s.connections.end() && evaluated->second == undo.b)) {
+                || (evaluated != s.connections.end() && *evaluated->second == undo.b)) {
               conn.erase(undo.a);
             } else {
               conn[undo.a] = undo.b;

@@ -535,6 +535,50 @@ TEST_F(PhysicalSession, RejectsCyclicAndDisconnectedRcBeforeTiming) {
   livehd::opentimer::Physical_session valid(options);
   EXPECT_NO_THROW(valid.evaluate(circuit.graph, circuit.rc));
 }
+
+TEST_F(PhysicalSession, HierarchicalNetNamesSurviveTopologyReplacementAndWhatifRollback) {
+  Circuit           initial(false, false), buffered(false, true);
+  const std::string prefix = "top/repeated_tile/compute_lane/register_bank/";
+  for (auto* circuit : {&initial, &buffered}) {
+    for (auto node : circuit->graph->body().nodes()) {
+      if (node.get_subnode_io()) {
+        node.set_name(prefix + std::string(node.get_name()));
+      }
+    }
+    for (auto& cell : circuit->rc->cells) {
+      cell.name = prefix + cell.name;
+    }
+    const auto rename = [&](std::string& pin) {
+      if (pin.find(':') != std::string::npos) {
+        pin = prefix + pin;
+      }
+    };
+    for (auto& net : circuit->rc->nets) {
+      rename(net.driver);
+      for (auto& node : net.nodes) {
+        rename(node.pin);
+      }
+    }
+  }
+  livehd::opentimer::Physical_session session(options);
+  for (auto* circuit : {&initial, &buffered, &initial, &buffered}) {
+    const auto baseline                            = session.evaluate(circuit->graph, circuit->rc);
+    auto       edited                              = std::make_shared<livehd::physical::Parasitics>(*circuit->rc);
+    edited->nets.at(1).edges.at(0).resistance_ohm *= 4;
+    livehd::opentimer::Physical_session fresh(options);
+    const auto                          expected = fresh.evaluate(circuit->graph, edited);
+    auto&                               whatif   = session.whatif();
+    const auto                          mark     = whatif.mark();
+    whatif.set_net(edited->nets.at(1));
+    ASSERT_TRUE(expected.wns);
+    EXPECT_NEAR(whatif.wns(), *expected.wns * expected.time_unit_ps, 1e-3);
+    whatif.rollback(mark);
+    ASSERT_TRUE(baseline.wns);
+    EXPECT_NEAR(whatif.wns(), *baseline.wns * baseline.time_unit_ps, 1e-3);
+    compare(session.evaluate(circuit->graph, circuit->rc), baseline);
+  }
+  EXPECT_EQ(session.statistics().builds, 1u);
+}
 TEST_F(PhysicalSession, ShieldedLoadsRepowerAndRollbackMatchFreshTiming) {
   livehd::opentimer::Physical_session session(options);
   for (const auto& [strong, extra, resistance] : {
