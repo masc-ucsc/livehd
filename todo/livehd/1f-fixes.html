@@ -22,6 +22,27 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Review v55 removes the full placement-view copy and array rebuild from legal
+timing checkpoints. Connectivity is borrowed; legal cell poses and LEF pin
+offsets retain the prior rounding, row symmetry, fixed-cell, macro and IO
+semantics. Public defaults are unchanged. The extended legal-snapshot regression
+and 176 optimized tests across placement, repair and physical timing pass.</p>
+<p>All four DEFs and independent QoR remain identical to v54. Placement takes
+2.031 s (lfsr), 40.744 s (minimax), 32.620 s (NVDLA/partition_m), and
+635.247 s (coralnpu), all within 1.5×. Coral's full flow takes 782.96 s wall
+and 782.49 s CPU. Initial small-design samples shared CPU 12 with another job;
+accepted repeats used CPU 14. These single samples do not establish a repeatable
+speedup. Evidence is in <code>runs.borrowed_legal_geometry_v55</code>.</p>
+<p>Fresh Gemmini synthesis passes in 69.1 s. Placement now completes both
+legalization and detailed-placement timing checkpoints, then hits the 16 GiB
+diagnostic guard later, after 509.9 s at 16,785,268 KiB. The strict 16 GB
+acceptance remains unmet. A second profile reaches the later failure at 492.3 s:
+75 of 99 final samples are in <code>prects_networks</code>, building a pin index
+after final RC allocation. That index is the next memory target.
+Minimax STA still consumes 15.082 s of its 40.744 s
+placement; a new profile identifies detailed RC waveform fitting as a remaining
+cost. The full A–J requirements remain open.</p>
+
 <p>Review v54 reduces resident RC storage and single-worker timing scheduling
 through published OpenTimer <code>360f4b7</code>. RC trees use contiguous edges
 and outgoing indices, omitting unused incoming lists. Single-worker propagation

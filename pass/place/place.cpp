@@ -1286,25 +1286,24 @@ struct View {
   std::map<std::string, double>                 weights;
   std::map<std::string, std::string>            cohesion_owners;
 };
-// A timing checkpoint borrows connectivity and solver geometry. Only exported
-// cell poses use integer DBU coordinates; RC keeps the solver's fractional pin
-// positions. None of these references escape the synchronous checkpoint.
+// A timing checkpoint borrows connectivity and solver geometry. Ordinary GP
+// retains fractional pin positions. Legal checkpoints round positions and apply
+// row/macro orientations without copying topology or rebuilding native arrays.
+// None of these references escape the synchronous checkpoint.
 struct Geometry_view {
-  const View&       view;
-  const dp::Design& design;
-  bool              solver_positions;
+  const View&           view;
+  const dp::Design&     design;
+  bool                  solver_positions;
+  const ph::Technology* legal_technology = nullptr;
 
   Geometry_view(const View& v) : view(v), design(v.design), solver_positions(false) {}
   Geometry_view(const View& v, const dp::Design& physical) : view(v), design(physical), solver_positions(true) {}
+  Geometry_view(const View& v, const dp::Design& physical, const ph::Technology& tech)
+      : view(v), design(physical), solver_positions(true), legal_technology(&tech) {}
 
-  Ann_place pose(size_t index) const {
-    auto result = view.cells[index].place;
-    if (solver_positions) {
-      result.x = std::llround(design.node_x[index]);
-      result.y = std::llround(design.node_y[index]);
-    }
-    return result;
-  }
+  Ann_place                 pose(size_t index) const;
+  std::pair<double, double> pin_offset(size_t pin) const;
+  std::pair<double, double> pin_position(size_t pin, std::pair<double, double> offset) const;
 };
 using CentroidSample = dp::CentroidSample;
 auto summarize_centroids(const dp::Design& d) { return dp::detail::centroid_summary(d); }
@@ -2008,16 +2007,70 @@ bool macro_tracks_valid(const View& v, const ph::Technology& tech, dp::Design& p
 // Row flips apply only to CORE cells; BLOCK macros keep their supplied
 // orientation. Shared by capture() and restore_cache() so cold and warm runs
 // agree. Returns false when an FS row needs a master without SYMMETRY X.
-bool apply_row_orientation(Cell& c, const ph::Technology& tech, Orientation row) {
-  const auto& master = tech.macros.at(c.macro);
+bool apply_row_orientation(Ann_place& place, const ph::Macro& master, Orientation row) {
   if (!master.klass.starts_with("CORE")) {
     return true;
   }
   if (row == Orientation::FS && !master.symmetry_x) {
     return false;
   }
-  c.place.orientation = row;
+  place.orientation = row;
   return true;
+}
+bool apply_row_orientation(Cell& c, const ph::Technology& tech, Orientation row) {
+  return apply_row_orientation(c.place, tech.macros.at(c.macro), row);
+}
+Ann_place Geometry_view::pose(size_t index) const {
+  const auto& cell   = view.cells[index];
+  auto        result = cell.place;
+  if (solver_positions) {
+    result.x = std::llround(design.node_x[index]);
+    result.y = std::llround(design.node_y[index]);
+  }
+  // The old legal snapshot installed rounded solver positions before capture's
+  // fixed-cell check. Fixed/locked orientations and status remain authoritative.
+  if (!legal_technology || cell.locked || result.status == Status::FIXED || result.status == Status::LOCKED) {
+    return result;
+  }
+  const auto& master = legal_technology->macros.at(cell.macro);
+  if (master.klass.starts_with("CORE")) {
+    const auto row = static_cast<size_t>(std::llround((result.y - view.fp.rows.front().y) / design.layout.row_height));
+    if (row >= view.fp.rows.size()) {
+      throw std::runtime_error("placed cell outside rows");
+    }
+    if (!apply_row_orientation(result, master, view.fp.rows[row].orientation)) {
+      throw std::runtime_error("cell cannot use flipped row: " + cell.name);
+    }
+  } else if (!design.node_orientation.empty()) {
+    result.orientation = physical_orientation(design.node_orientation[index]);
+  }
+  result.status = Status::PLACED;
+  return result;
+}
+std::pair<double, double> Geometry_view::pin_offset(size_t pin) const {
+  if (!legal_technology) {
+    return {design.pin_offset_x[pin], design.pin_offset_y[pin]};
+  }
+  const auto node = design.pin2node[pin];
+  if (view.pins[pin].instance == "PIN") {
+    return {0, 0};
+  }
+  return offset(legal_technology->macros.at(view.cells[node].macro),
+                view.pins[pin].pin,
+                pose(node).orientation,
+                legal_technology->dbu);
+}
+std::pair<double, double> Geometry_view::pin_position(size_t pin, std::pair<double, double> pin_offset) const {
+  const auto node = design.pin2node[pin];
+  if (!legal_technology) {
+    return {design.node_x[node] + pin_offset.first, design.node_y[node] + pin_offset.second};
+  }
+  if (view.pins[pin].instance == "PIN") {
+    // capture/make_arrays rebuilt terminals from the frame, not solver nodes.
+    const auto& terminal = view.fp.terminals.at(view.terminal.at(view.pins[pin].pin));
+    return {terminal.x, terminal.y};
+  }
+  return {std::llround(design.node_x[node]) + pin_offset.first, std::llround(design.node_y[node]) + pin_offset.second};
 }
 void capture(View& v, const ph::Technology& tech, bool full) {
   for (size_t i = 0; i < v.cells.size(); ++i) {
@@ -2928,7 +2981,8 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const Geometry_view& geometry, const
     uint64_t load_hash = hash_util::kFnv1a64_offset;
     for (int p = begin; p < end; ++p) {
       const auto   node = design.pin2node[p];
-      const double x = design.node_x[node] + design.pin_offset_x[p], y = design.node_y[node] + design.pin_offset_y[p];
+      const auto   pin_offset = geometry.pin_offset(p);
+      const auto [x, y]       = geometry.pin_position(p, pin_offset);
       pins.emplace_back(v.pins[p].label(), std::pair{x, y});
       if (pin_locations) {
         pin_locations->emplace(pins.back().first, std::pair{x, y});
@@ -2942,10 +2996,10 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const Geometry_view& geometry, const
                                                  cell.macro,
                                                  cell.place.width,
                                                  cell.place.height,
-                                                 static_cast<unsigned>(cell.place.orientation),
+                                                 static_cast<unsigned>(geometry.pose(node).orientation),
                                                  v.pins[p].pin,
-                                                 design.pin_offset_x[p],
-                                                 design.pin_offset_y[p]),
+                                                 pin_offset.first,
+                                                 pin_offset.second),
                                      load_hash);
       }
     }
@@ -6943,21 +6997,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             && defer_timing_checkpoint(options, macro_checkpoints, final, iteration, control.max_iterations, movement)) {
           return dp::GpUpdate{};
         }
-        // GP changes geometry, not connectivity. Borrow the solver's positions
-        // instead of duplicating the whole View's maps, strings and arrays at
-        // every ranking checkpoint. Legal snapshots still rebuild pin offsets
-        // for row orientations using capture().
-        std::optional<View> legal_view;
-        if (legal_timing_snapshot) {
-          legal_view.emplace(v);
-          legal_view->design = physical;
-          for (size_t i = 0; i < legal_view->cells.size(); ++i) {
-            legal_view->cells[i].place.x = std::llround(physical.node_x[i]);
-            legal_view->cells[i].place.y = std::llround(physical.node_y[i]);
-          }
-          capture(*legal_view, tech, true);
-        }
-        const auto geometry = legal_view ? Geometry_view{*legal_view} : Geometry_view{v, physical};
+        // Names and movable/fixed membership do not change, so native cell
+        // and pin indices remain valid for both GP and legal geometry.
+        const auto geometry = legal_timing_snapshot ? Geometry_view{v, physical, tech} : Geometry_view{v, physical};
         for (size_t i = 0; i < geometry.view.cells.size(); ++i) {
           // STA validates graph poses against the RC provenance. Do not update
           // v.cells: the original placement remains the base for later trials.

@@ -297,9 +297,58 @@ TEST(Placement, LegalStageSnapshotsUsePhysicalRowsAndPreserveFixedMirrors) {
   options.snapshots  = true;
   options.bins       = 2;
   options.core       = {0, 0, 2.76, 5.44};
-  options.die        = {0, 0, 5.52, 10.88};
-  const auto result  = place(*graph, flat, options);
-  const auto tech    = physical::read_lef(options.lefs);
+  options.die                   = {0, 0, 5.52, 10.88};
+  const auto tech               = physical::read_lef(options.lefs);
+  unsigned   legal_checkpoints  = 0;
+  options.macro_timing_interval = 1;
+  options.final_timing_start    = 0;
+  options.fp_evaluate           = [&](const Result& checkpoint) {
+    const auto& frame = checkpoint.floorplan;
+    // GP keeps the original N orientations. A flipped movable cell proves
+    // this callback observes the legal checkpoint, not just the final export.
+    if (std::none_of(frame.components.begin(), frame.components.end(), [](const auto& c) {
+          return c.place.status == physical::Status::PLACED && c.place.orientation == physical::Orientation::FS;
+        })) {
+      return Timing_feedback{};
+    }
+    ++legal_checkpoints;
+    EXPECT_NO_THROW(check_legality(tech, frame));
+    for (const auto& c : frame.components) {
+      if (c.name == "inv0") {
+        EXPECT_EQ(c.place.status, physical::Status::FIXED);
+        EXPECT_EQ(c.place.orientation, physical::Orientation::FN);
+      }
+      const auto& master = tech.macros.at(c.macro);
+      for (const auto* pin : {"A", "Y"}) {
+        const auto& rect    = master.pins.at(pin).shapes.front().rect;
+        const auto [ox, oy] = physical::orient_point((rect.xl + rect.xh) / 2,
+                                                     (rect.yl + rect.yh) / 2,
+                                                     master.width,
+                                                     master.height,
+                                                     c.place.orientation);
+        const auto xy       = checkpoint.pin_locations.at(c.name + ":" + pin);
+        EXPECT_DOUBLE_EQ(xy.first, c.place.x + ox * tech.dbu);
+        EXPECT_DOUBLE_EQ(xy.second, c.place.y + oy * tech.dbu);
+      }
+      const auto pose = std::find_if(checkpoint.parasitics->cells.begin(), checkpoint.parasitics->cells.end(), [&](const auto& p) {
+        return p.name == c.name;
+      });
+      EXPECT_NE(pose, checkpoint.parasitics->cells.end());
+      if (pose != checkpoint.parasitics->cells.end()) {
+        EXPECT_EQ(pose->x, c.place.x);
+        EXPECT_EQ(pose->y, c.place.y);
+        EXPECT_EQ(pose->orientation, static_cast<unsigned>(c.place.orientation));
+      }
+    }
+    for (const auto& terminal : frame.terminals) {
+      const auto xy = checkpoint.pin_locations.at(terminal.name);
+      EXPECT_DOUBLE_EQ(xy.first, terminal.x);
+      EXPECT_DOUBLE_EQ(xy.second, terminal.y);
+    }
+    return Timing_feedback{};
+  };
+  const auto result = place(*graph, flat, options);
+  EXPECT_GT(legal_checkpoints, 0U);
   for (const auto* stage : {"before_legalization.def", "after_legalization.def", "after_detailed.def"}) {
     const auto frame   = physical::read_def(options.output_dir + "/" + stage);
     unsigned   flipped = 0;
