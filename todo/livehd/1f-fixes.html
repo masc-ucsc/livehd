@@ -22,6 +22,33 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Review v45 reduces OpenTimer storage without changing timing calculations.
+Published dependency <code>fe3f265</code> removes the never-populated arc
+internal-power array and packs private timing-provenance fields. On this 64-bit
+build, arc storage falls from 264 to 200 bytes and pin storage from 656 to 560
+bytes. Public enum types, float values, pin power reporting and all option
+defaults are unchanged. Regression coverage checks both timing corners and
+transitions, path provenance and the existing zero arc-power reports. Nine
+optimized suites pass against the published dependency without a local override;
+both production executables build successfully.</p>
+<p>All four designs retain byte-identical DEFs and independent WNS, HPWL, cell
+count and area with common production defaults, 100 ps clocks and reset false
+paths. Placement takes 1.928 s for lfsr, 41.111 s for minimax, 34.027 s for
+NVDLA/partition_m and 688.512 s for coralnpu, versus 1.939, 41.666, 37.167 and
+706.336 s in v44. Coral's whole flow takes 837.91 s wall and 837.52 s CPU;
+peak RSS is 9,955 MiB versus 10,169 MiB. These are single flow samples, all
+within 1.5×; small time differences do not establish a repeatable speedup.
+Three alternating saved-DEF timing pairs have byte-identical reports, with
+median cold timing 2.752 → 2.661 s. Evidence is in
+<code>runs.compact_timing_storage_v45</code>.</p>
+<p>Gemmini now completes initial physical timing, but still exceeds the 16 GiB
+process-tree guard during placement setup (16,792,272 KiB after 130.0 s).
+This does not establish that GP iterations began or resolve acceptance item I.
+The subsequent serial-propagation experiment was preserved outside the source
+tree and excluded from this release: its timing-only comparison showed no
+measurable benefit, and gemmini still exceeded the guard. The original A–J
+acceptance targets remain open.</p>
+
 <p>Review v44 fixes the previously ignored timing worker budget. OpenTimer
 <code>634270c</code> creates its executor lazily and preserves queued builders
 when resizing it. Placement passes its existing thread option through session
