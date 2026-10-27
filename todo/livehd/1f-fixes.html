@@ -22,6 +22,42 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Detailed OpenTimer capacitance fitting now samples both bounds and alternates
+bracketed interpolation with bisection. It retains the same waveform model and
+tightens the charge-residual convergence target from 1e-5 to 1e-7. A 980-case load sweep preserves
+all fit/fallback outcomes while reducing mean Liberty queries from 13.32 to
+6.89. Against a finer bisection reference, worst relative delay error falls from
+0.0958% to 0.000219%. Circuit, charge-conservation, unavailable-endpoint and
+placement regressions pass; public defaults are unchanged. All 12 targeted
+optimized suites pass on merged upstream <code>9b5203ff6</code> with published
+OpenTimer <code>3197d53</code> and no local overrides.</p>
+<p>On unchanged v30 placements, detailed timing takes 4.302 → 3.210 s on minimax,
+6.088 → 4.127 s on partition_m and 54.318 → 36.848 s on coralnpu. The largest
+native WNS change is 0.067 ps. Fresh full flows use the same 100 ps clock, reset
+false paths and common defaults, with independent OpenSTA scores:</p>
+<table>
+<thead><tr><th>Design</th><th>WNS, unchanged (ps)</th><th>Placement, control → faster fit (s)</th><th>Final STA, control → faster fit (s)</th></tr></thead>
+<tbody>
+<tr><td>lfsr</td><td>−61.992</td><td>2.588 → 2.613</td><td>0.716 → 0.719</td></tr>
+<tr><td>minimax</td><td>−996.517</td><td>46.138 → 45.165</td><td>4.796 → 3.719</td></tr>
+<tr><td>NVDLA/partition_m</td><td>−916.549</td><td>44.471 → 37.977</td><td>6.650 → 4.697</td></tr>
+<tr><td>coralnpu</td><td>−13,439.206</td><td>642.009 → 570.426</td><td>59.566 → 41.933</td></tr>
+</tbody>
+</table>
+<p>All four retain identical independent WNS and satisfy the 1.5× placement-time
+and 3% cell/area limits. Partition_m uses a fresh control/candidate pair on CPU 13
+after CPU 4 contention distorted the first candidate's elapsed time; both raw
+runs are retained. Coralnpu's complete flow takes 746.48 s wall / 746.34 s CPU,
+versus 835.87 / 835.71 s. B remains open: final minimax STA still exceeds 3 s,
+and the total-STA share is not yet within 10%.</p>
+<p>The newer coralnpu placement exposes an additional G gap: native setup WNS is
+−16,154.859 ps versus OpenSTA's −13,439.206 ps. Its critical path starts on a
+1,599-sink net, above the 1,000-location driver-aware tree limit. Substituting
+only that net's native RC into OpenSTA gives −14,795.901 ps; substituting the
+next heavily loaded net too gives −14,787.060 ps. The first topology therefore
+explains roughly half the gap; the remainder still needs isolation. The faster
+solver is not presented as a fix for that timing-model discrepancy.</p>
+
 <p>Static cell GP now hands off to legalization when density is feasible and a
 sustained routing plateau persists: six samples over at least 100 iterations,
 HPWL and inflation within 1%, and less than 1% route-overflow improvement.
@@ -492,9 +528,9 @@ recovery.</td></tr>
 handoff. The imported-floorplan ablation here (3.3× HPWL) should be repeated through that full-frame path before the
 GP core is blamed. Initial placement, bin sizing and the density schedule are not covered by 2t.</td></tr>
 <tr><td><a href="#J">J</a> row-import failure</td><td>2t landed H, segmented-row stage adapter</td>
-<td><code>//tools:timeclosure_gp_probe</code> already preserves cut rows with hard masks and restores the original
-segments on export; <code>physical_repair</code> and <code>lhd synth</code> still reject them. Expose the adapter on the
-default import path.</td></tr>
+<td><code>//tools:timeclosure_gp_probe</code> preserves cut rows with hard masks and restores the original
+segments on export. The shared production import path now uses that adapter;
+coralnpu is validated, while the other named macro designs still need checks.</td></tr>
 <tr><td><a href="#C">C</a> Liberty rescans</td><td>2t B (<code>pass/liberty/timing_model</code> parses NLDM once)</td>
 <td>Not addressed by 2t. The one-parse technology object asked for in C should be the same object the proxy's NLDM
 parser feeds, so there is one Liberty read per run for both loops.</td></tr>
