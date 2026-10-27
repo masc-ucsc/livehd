@@ -390,7 +390,11 @@ not worse, or when the period is not worse and setup WNS/TNS (period terms)
 and electrical violations are not worse with some gain (LEF footprint area
 counts). A packing failure is a rejected trial, and so is any other trial
 failure, such as a variant whose register leaves the stage period
-unmeasured (`rejected_failed`, with its reason). `.trials` (default 64) bounds
+unmeasured (`rejected_failed`, with its reason). Every trial also shares full
+placement's 3% cell/area growth budget (`pass/place/README.md`) with the other
+placement edits, against the mapped netlist (domino cells at variant 0): a step
+or buffer past it is `rejected_growth` before any trial placement, and an
+up move rejected that way is followed by the buffer. `.trials` (default 64) bounds
 the trials. The netlist is always variant 0 at synthesis and an instance
 that stepped up never steps back down, so through lhd no instance steps down
 yet (the engine's down path is tested on its own). `place/domino_sizing.json` and
@@ -500,9 +504,12 @@ core at utilization 0.55 failed the anchor prepass on one-row bins; see
 `pass/place/README.md`). Imported DEF placement blockages
 cannot fragment rows here yet, because terminal legalization does not consult
 them. `lhd_domplace_sizing_smoke.py` writes a second register rung (a
-stronger, wider `dfxtp_2`) to its temporary directory and sizes: an up-size
-that displaces a neighbour, LEC with the bundle models, a warm replay, and a
-growth a dense core cannot pack, whose DEF equals the unsized run's.
+stronger `dfxtp_2`, 4 sites wider, so a step fits the 3% growth budget) to its
+temporary directory and sizes: an up-size that displaces a neighbour, LEC with
+the bundle models, a warm replay, a growth a dense core cannot pack, whose DEF
+equals the unsized run's, a 24-site rung whose step is `rejected_growth` (DEF
+again unsized), and an up-size then an output buffer that isolates the one
+critical flop load from 32 unconstrained ones.
 `lhd_domplace_gates_smoke.py` (U21) appends the sequential fixture fragment
 (`inou/lefdef/tests/data/sky130hd_seq.*.fragment`: ICGs, latches, a reset
 flop) and covers an inline latch + AND gate with a test enable, a Liberty ICG

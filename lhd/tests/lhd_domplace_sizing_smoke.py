@@ -2,8 +2,9 @@
 """Post-legal domino sizing (2d-domplace G): synth.place.domino_sizing on a
 sky130 fixture given a second register rung, so each domino master has two
 drive variants: an up-size that displaces a neighbour, an output buffer once
-the top variant is in place, a growth a dense core cannot pack, legality,
-placed-netlist LEC and a warm replay. A down-size cannot happen through lhd
+the top variant is in place, a growth a dense core cannot pack, a step past
+the shared physical growth budget, legality, placed-netlist LEC and a warm
+replay. A down-size cannot happen through lhd
 (synthesis instantiates variant 0 and an instance that stepped up never steps
 back down); custom_sizing_test covers it."""
 import json
@@ -33,9 +34,11 @@ def block(text, start):
 
 
 # The two-rung fixture: dfxtp_2 is dfxtp_1 with 1.5x the CK capacitance, the
-# same Q delay at 4x the load, and a LEF footprint 24 sites wider, so its
-# domino variants are wider than the dfxtp_1 ones. The checked-in data is
-# untouched.
+# same Q delay at 4x the load, and a LEF footprint 4 sites wider, so its
+# domino variants are 2 sites wider than the dfxtp_1 ones: a step inside full
+# placement's 3% cell/area growth budget (pass/place growth_budget.hpp) on
+# these small netlists. `wide_lef` makes it 24 sites, past that budget. The
+# checked-in data is untouched.
 lib = (libdir / 'sky130hd.lib').read_text()
 start = lib.index('cell ("sky130_fd_sc_hd__dfxtp_1")')
 cell = block(lib, start)
@@ -54,9 +57,12 @@ two_rung_lib.write_text(lib[:start + len(cell)] + '\n    ' + strong + lib[start 
 lef = (libdir / 'sky130hd.lef').read_text()
 end = lef.index('END sky130_fd_sc_hd__dfxtp_1') + len('END sky130_fd_sc_hd__dfxtp_1')
 macro = lef[lef.index('MACRO sky130_fd_sc_hd__dfxtp_1'):end].replace('dfxtp_1', 'dfxtp_2')
-macro = macro.replace('SIZE 7.360 BY 2.720', f'SIZE {7.36 + 24 * 0.46:.3f} BY 2.720')
 two_rung_lef = root / 'two_rung.lef'
-two_rung_lef.write_text(lef[:end] + '\n\n' + macro + lef[end:])
+two_rung_lef.write_text(lef[:end] + '\n\n' + macro.replace('SIZE 7.360 BY 2.720', f'SIZE {7.36 + 4 * 0.46:.3f} BY 2.720')
+                        + lef[end:])
+wide_lef = root / 'wide.lef'
+wide_lef.write_text(lef[:end] + '\n\n' + macro.replace('SIZE 7.360 BY 2.720', f'SIZE {7.36 + 24 * 0.46:.3f} BY 2.720')
+                    + lef[end:])
 
 # q1 converts (domino-area under a 13% margin); r0..r7 keep CMOS+DFF and are
 # the single-row neighbours its growth displaces. A 0.3 ns clock leaves q1's
@@ -194,16 +200,33 @@ assert 'no output committed' in failure and tight['eco']['accepted_trials'] == 0
 assert tight['variants']['after'] == tight['variants']['before'] and tight['clock']['delta_ff'] == 0, tight
 run('dense', coefficients + dense)
 assert (root / 'tight/out.def').read_bytes() == (root / 'dense/out.def').read_bytes()
-# Buffering: q1 (internal) loads sixteen flops. Its up-size is accepted,
-# then, its top variant in place and still critical, its Q net is buffered:
-# the buffer is legal on a row, the period improves, and the buffered netlist
-# is sequentially equivalent. The ECO total covers both accepted trials,
-# while qor.place.multirow_eco is the buffer trial's alone.
+# A 24-site rung: q1's step (12 sites on two rows, about 30 um2 on a 259 um2
+# netlist) is past the 3% growth budget that domino sizing shares with every
+# other placement edit, so it is refused before any trial placement and the
+# placement is the unsized one (that rung changes no synthesized cell).
+wide_base = [f'synth.lef={libdir}/sky130hd.tlef,{wide_lef}' if word == f'synth.lef={libdir}/sky130hd.tlef,{two_rung_lef}'
+             else word for word in base]
+wide = run('wide', coefficients + sizing + ['--set', 'synth.place.utilization=0.4',
+                                            '--set', 'synth.place.domino_sizing.buffers=false'],
+           command=wide_base)['qor']['place']
+assert [(t['move'], t['outcome']) for t in wide['domino_sizing']['trials']] == [('up', 'rejected_growth')], wide['domino_sizing']
+assert wide['domino_sizing']['trials'][0]['failure'] == 'physical cell/area growth budget exceeded', wide['domino_sizing']
+assert wide['domino_sizing']['counts']['rejected_growth'] == 1, wide['domino_sizing']['counts']
+assert (root / 'wide/out.def').read_bytes() == (root / 'plain/out.def').read_bytes()
+# Buffering: q1 (internal) loads one flop (r0) and 32 gates to unconstrained
+# outputs. Its up-size is accepted, then, its top variant in place and still
+# critical, its Q net is buffered (the buffer takes every sink but r0's): the
+# buffer is legal on a row, the period improves, and the buffered netlist is
+# sequentially equivalent. The ECO total covers both accepted trials, while
+# qor.place.multirow_eco is the buffer trial's alone. (Sixteen flop loads, all
+# equally critical, no longer gain: synthesis now leaves q1 driving them
+# directly, and a buf_1 behind the strong top variant only adds a stage.)
 fanout = root / 'dobuf.v'
-fanout.write_text('module dobuf(input clk, a, b, c, d, ' + ', '.join(f'x{i}' for i in range(16)) + ', output reg '
-                  + ', '.join(f'r{i}' for i in range(16)) + ');\n'
+fanout.write_text('module dobuf(input clk, a, b, c, d, ' + ', '.join(f'x{i}' for i in range(33)) + ', output reg r0, output '
+                  + ', '.join(f'y{i}' for i in range(32)) + ');\n'
                   'reg q1;\nalways @(posedge clk) q1 <= (a & b) | (c & d);\n'
-                  + ''.join(f'always @(posedge clk) r{i} <= q1 & x{i};\n' for i in range(16)) + 'endmodule\n')
+                  'always @(posedge clk) r0 <= q1 & x0;\n'
+                  + ''.join(f'assign y{i} = q1 & x{i + 1};\n' for i in range(32)) + 'endmodule\n')
 buffered_base = [fanout if word == str(source) else 'dobuf' if word == 'doms' else word for word in base]
 buffered = run('buffered', coefficients + sizing + ['--set', 'synth.place.utilization=0.3'],
                command=buffered_base)['qor']['place']
