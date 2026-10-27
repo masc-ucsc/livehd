@@ -3137,6 +3137,20 @@ sh_test(
     ],
 )
 
+# A native memory proxy beside a movable LEF BLOCK macro: the proxies are
+# track-aligned against fixed geometry only, so both mappers place.
+sh_test(
+    name = "lhd_placement_memory_macro_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_placement_memory_macro_smoke.py"],
+    data = [
+        "sky130_fixture.py",
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
 sh_test(
     name = "lhd_liberty_memory_smoke",
     size = "small",

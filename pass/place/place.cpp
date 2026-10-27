@@ -5530,8 +5530,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     std::vector<ph::Component> frame;
     std::vector<Cell*>         owners;
     for (auto& c : v.cells) {
-      if (tech.macros.at(c.macro).klass.starts_with("CORE") && c.place.status != Status::FIXED
-          && c.place.status != Status::LOCKED) {
+      // The packed proxies move; fixed geometry is their obstacle. A movable
+      // LEF macro (a fakeram) is neither: global placement places it later
+      // and aligns it like any macro, so it must not be validated here as if
+      // fixed at its unplaced origin.
+      if (!packed_memories.contains(&c) && c.place.status != Status::FIXED && c.place.status != Status::LOCKED) {
         continue;
       }
       auto p   = c.place;
