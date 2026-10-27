@@ -1865,15 +1865,28 @@ sh_test(
     ],
 )
 
-# pass.abc.large_flow_latches: a region mapped by the size tier's default flow (large_ge) keeps its
-# latches like the built-in flow, so derived-clock registers map to DFF cells instead of native flops.
+# pass.abc.large_flow_latches (opt-in): a region mapped by the size tier's default flow (large_ge) keeps its
+# latches like the built-in flow, so derived-clock and async-reset registers map to DFF cells instead of native flops.
 sh_test(
     name = "lhd_abc_large_flow_latches_test",
     size = "small",
     srcs = ["lhd_abc_large_flow_latches_test.sh"],
     data = _FLOW_DATA + [
+        "abc_arst_mix.v",
         "abc_arst_q.lib",
+        "abc_arst_qn.lib",
         "abc_derived_clock.v",
+    ],
+)
+
+# compile.sweep + pass.specialize: the per-definition state sweep lets a constant cross registers without compile.flatten.
+sh_test(
+    name = "lhd_sweep_hier_const_test",
+    size = "small",
+    srcs = ["lhd_sweep_hier_const_test.sh"],
+    data = _FLOW_DATA + [
+        "abc_arst_qn.lib",
+        "sweep_hier_const.v",
     ],
 )
 

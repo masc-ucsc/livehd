@@ -59,6 +59,9 @@ enum class Loop_reassoc {
 struct State_options {
   bool             state_sweep     = false;
   bool             merge_registers = false;
+  // synth.flat_sweep: flatten the private copy of `top` (the compiled graphs stay hierarchical and incremental) and fold the
+  // registers that are constant, jointly across the instance boundaries (pass/sweep sweep_state), before they are mapped.
+  bool             flat_sweep          = false;
   // synth.clock_gate: collapse the existing Clock_cells and gate registers that share enable conjuncts (clock_gate.hpp). The
   // minimum bits a gate must cover and the chain depth are synth.clock_gate_min_bits / synth.clock_gate_depth.
   bool             clock_gate          = false;

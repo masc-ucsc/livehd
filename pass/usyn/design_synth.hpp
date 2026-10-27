@@ -42,10 +42,11 @@ struct Design_options {
   uint64_t                                 cost_model_work  = 0;
   bool                                     eq_balance       = false;
   uint64_t                                 max_source_nodes = 2000000;
-  bool                                     specialize       = true;  // pass.specialize on the private copy
-  bool                                     state_sweep      = false;  // delete unobserved state (synth.state_sweep)
-  bool                                     merge_registers  = false;  // merge duplicate registers (synth.merge_registers)
-  bool                                     clock_gate       = false;  // infer and collapse clock gates (synth.clock_gate)
+  bool                                     specialize          = true;   // pass.specialize on the private copy
+  bool                                     state_sweep         = false;  // delete unobserved state (synth.state_sweep)
+  bool                                     merge_registers     = false;  // merge duplicate registers (synth.merge_registers)
+  bool                                     flat_sweep          = false;  // private cross-instance constant-state sweep
+  bool                                     clock_gate          = false;  // infer and collapse clock gates (synth.clock_gate)
   uint32_t                                 clock_gate_min_bits = 16;
   uint32_t                                 clock_gate_depth    = 1;
   bool                                     unroll_carry     = true;  // expand carry-dependent compact loops per ordinal

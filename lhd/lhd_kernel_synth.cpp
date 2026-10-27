@@ -1722,6 +1722,7 @@ void synth_command(Options& opts, Result& res) {
     labels["specialize"]      = synth_set(opts, "specialize", "true");
     labels["state_sweep"]     = synth_set(opts, "state_sweep", "true");
     labels["merge_registers"] = synth_set(opts, "merge_registers", "true");
+    labels["flat_sweep"]      = synth_set(opts, "flat_sweep", "false");
     // Clock gating needs the Liberty's integrated clock-gate cell: without one the gated registers' clock would be computed
     // logic and the registers would stay native flops (no mapped DFF, no timing). The library decides, the user can still say
     // false.

@@ -137,6 +137,7 @@ cc_library(
         "//pass/partition:pass_partition",
         "//pass/semdiff",  # region cache: structural_identical
         "//pass/specialize",
+        "//pass/sweep",
         "@abseil-cpp//absl/container:btree",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/container:flat_hash_set",

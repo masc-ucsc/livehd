@@ -13,6 +13,7 @@
 #include "pass_partition.hpp"
 #include "reassoc.hpp"
 #include "specialize.hpp"
+#include "sweep.hpp"  // //pass/sweep
 #include "synth_policy.hpp"
 
 namespace livehd::synth {
@@ -247,6 +248,33 @@ std::unique_ptr<Prepared_design> prepare_design(std::span<const std::shared_ptr<
     livehd::diag::info(from_pass, "constant-specialized", "progress")
         .msg("{}: {} constant-specialized instance definition(s)", from_pass, specialized)
         .emit();
+  }
+  // synth.flat_sweep: the constant registers whose proof needs the whole flat design (router rings: each is constant only
+  // if its neighbors are). Flattens the PRIVATE copy only, so the compile cache and its incremental reuse are untouched.
+  if (state.flat_sweep) {
+    std::vector<std::shared_ptr<hhds::Graph>> roots;
+    for (const auto& graph : result->roots) {
+      if (graph && (state.top.empty() || graph->get_name() == state.top)) {
+        roots.push_back(graph);
+      }
+    }
+    if (!roots.empty()) {
+      const auto flat = sweep::flatten(roots);
+      for (const auto& root : roots) {
+        sweep::refine_unknown(*root);
+        specialize::refold_private_body(root, specialize::Refold_cost::synth, "synth.flat_sweep");
+        for (int round = 0; round < 16; ++round) {
+          const auto stats = sweep::sweep_state(*root, {.observe_markers = false});
+          if (!stats.changed()) {
+            break;
+          }
+          specialize::refold_private_body(root, specialize::Refold_cost::synth, "synth.flat_sweep");
+        }
+      }
+      livehd::diag::info(from_pass, "flat-swept", "progress")
+          .msg("{}: flat sweep inlined {} instance(s) into {} root(s)", from_pass, flat.inlined, roots.size())
+          .emit();
+    }
   }
   // synth.state_sweep: registers (and the cells behind them) that no output,
   // instance of a body-less cell or memory can ever observe, and the unread

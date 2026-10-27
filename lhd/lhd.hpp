@@ -842,7 +842,8 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.repair.reset",
      "false",
      Synth_set_option::Kind::boolean,
-     "retired control; must be false because pre-CTS clock/reset networks are not sized (synth.place.reset_fanout builds the reset tree)"},
+     "retired control; must be false because pre-CTS clock/reset networks are not sized (synth.place.reset_fanout builds the reset "
+     "tree)"},
     {"place.reset_fanout",
      "32",
      Synth_set_option::Kind::integer,
@@ -1859,6 +1860,12 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::boolean,
      "opt in to merging registers that are the same machine (same clock, enable, reset, reset value, width and D driver) on the "
      "mapper's private copy, repeating until nothing merges: Yosys's opt_merge on flops. Enabled by default"},
+    {"flat_sweep",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "opt in to flattening the mapper's private copy of the top and folding the registers that are constant jointly across the "
+     "instance boundaries (router rings, tied-off clusters): the proof compile.flatten + compile.sweep make, without flattening "
+     "the compiled graphs, so the compile cache stays hierarchical and incremental. Disabled by default"},
     {"clock_gate",
      "true",
      Synth_set_option::Kind::boolean,

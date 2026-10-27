@@ -265,13 +265,13 @@ Design_result synthesize_cmos_design(const std::shared_ptr<hhds::Graph>& top, co
     return work.spend(amount);
   };
   const std::array roots{top};
-  const synth::State_options state{
-      .state_sweep         = options.state_sweep,
-      .merge_registers     = options.merge_registers,
-      .clock_gate          = options.clock_gate,
-      .clock_gate_min_bits = options.clock_gate_min_bits,
-      .clock_gate_depth    = options.clock_gate_depth,
-      .top                 = top->get_name()};
+  const synth::State_options state{.state_sweep         = options.state_sweep,
+                                   .merge_registers     = options.merge_registers,
+                                   .flat_sweep          = options.flat_sweep,
+                                   .clock_gate          = options.clock_gate,
+                                   .clock_gate_min_bits = options.clock_gate_min_bits,
+                                   .clock_gate_depth    = options.clock_gate_depth,
+                                   .top                 = top->get_name()};
   // Merge only guarded-accumulation chains (Reassoc_trees::guarded): a plain
   // expanded chain maps well as written, but the chain the guard rewrite
   // leaves maps linearly unless it is balanced first.
