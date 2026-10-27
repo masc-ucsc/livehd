@@ -46,7 +46,10 @@ genrule(
           "// pin: the ABC incremental-cache code salt (docs/opt_loop_incr.md L2).\\n" +
           "#pragma once\\n#include <cstdint>\\n" +
           "namespace livehd::abc { inline constexpr uint64_t kAbcSrcSalt = 0x%sULL; }\\n' \"$$h\" > $@",
-    visibility = ["//pass/usyn:__pkg__"],
+    visibility = [
+        "//lhd:__pkg__",
+        "//pass/usyn:__pkg__",
+    ],
 )
 
 cc_library(

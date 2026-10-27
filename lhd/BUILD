@@ -163,6 +163,7 @@ genrule(
         "//inou/lefdef:physical_srcs",
         "//pass/opentimer:pass_opentimer",
         # The mapper emits the placed netlist and the domino bundle placement reads.
+        "//pass/abc:abc_salt",
         "//pass/usyn:usyn_salt",
         "//pass/domplace:domplace_salt",
     ],
