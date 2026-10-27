@@ -56,12 +56,12 @@ the original RTL, and `Exporter/DesignCert/scripts/` holds the checks on the
 `DesignCert` format itself (`vc_gates.py`, `dcert_parity.py`,
 `cert_shape_check.py`).
 
-What stays in `scripts/` here is what more than one route runs: `op_census.py`
-and `const_parity.py` with their controls, `axiom_audit.py` with its controls,
-and the 12x5 coverage harness (`fp_cov_run.sh` and the `fp_cov_queue_*.sh`
-queues, which both take `legacy|verified_compiler`). There is no longer a
-`tests/` directory at this level: every file it held tested the legacy route
-and now lives in `Legacy_Fast_Model_Simulator/tests/`.
+What stays in `scripts/` here is what more than one route runs: the gates on an
+emitted file, the axiom audit, the 12x5 coverage harness, and Translation
+Validation's compiler build. [`scripts/README.md`](scripts/README.md) lists each
+one with the routes that call it, so ownership can be read off without grepping.
+There is no longer a `tests/` directory at this level: every file it held tested
+the legacy route and now lives in `Legacy_Fast_Model_Simulator/tests/`.
 
 - `graph_access.*` — graph access, width checks, and the memory policy parser.
 - `design_scan.*` — owns port identities, decimal constants, flop controls,
