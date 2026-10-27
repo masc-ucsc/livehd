@@ -8,8 +8,15 @@ Everything is generated text — there is no hand-written Lean per design.
 It is called *legacy* because it predates the verified-compiler route
 (`mode=verified_compiler`), which emits only a `DesignCert` and lets a
 once-and-for-all-proved compiler produce the model.  Legacy is still the default
-`formal.lean.mode`, and it is the only route that currently produces a **running
-native simulator**.
+`formal.lean.mode`.
+
+What is particular to it is that the emitted file runs on its own: the model is
+in the file, so no separate simulator has to read a certificate first, and
+`lake` links it to a native binary.  It is **not** the only route that produces
+a running binary — the Futamura projection builds native `-O2` drivers and the
+IR-as-semantics simulator builds `lgraph-sim`.  What `verified_compiler` mode
+does not emit is an executable model; it emits only the `DesignCert` those
+routes read.
 
 ---
 
