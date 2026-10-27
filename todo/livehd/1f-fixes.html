@@ -36,9 +36,12 @@ timing reports. Median cold timing is 2.822 → 2.787 s. Lfsr, minimax and
 NVDLA/partition_m retain exact DEFs and independent WNS; placement takes
 1.939, 41.666 and 37.167 s respectively, versus 2.038, 42.395 and 36.433 s in
 v43. All stay within 1.5×. These are single samples, with concurrent build work;
-the small differences do not establish a repeatable speedup. The coralnpu
-full-flow regression is still running. Evidence is in
-<code>runs.timing_worker_budget_v44</code>.</p>
+the small differences do not establish a repeatable speedup. Coralnpu also
+retains its exact DEF, WNS and HPWL: placement is 706.336 s versus 733.790 s in
+v43 (whole flow 857.01 s wall, 856.62 s CPU; peak RSS 10,169 MiB). Its initial
+run was interrupted by scratch quota and excluded; this result is a fresh,
+completed run after recovering scratch space. All four completed designs stay
+within 1.5×. Evidence is in <code>runs.timing_worker_budget_v44</code>.</p>
 <p>Gemmini still hits the 16 GiB process-tree guard during initial physical
 timing, before GP (16,784,452 KiB after 111.2 s). Honoring the thread budget
 therefore does not resolve the memory failure. A separate full-allocation heap

@@ -43340,11 +43340,228 @@
           },
           "def_identical": true,
           "placement_ratio": 1.0201247160942752
+        },
+        "coralnpu": {
+          "control": {
+            "path": "/tmp/1f-wns-v1/ramp_candidate/coralnpu",
+            "score": {
+              "hpwl_um": 3907685.145,
+              "hpwl_all_nets_um": 4173067.872,
+              "measured_nets": 161126,
+              "excluded_nets": 690,
+              "setup_wns_ps": -16736.599729,
+              "setup_tns_ps": -64843349.068619,
+              "hold_wns_ps": 27.430929,
+              "hold_tns_ps": 0.0,
+              "instances": 161074,
+              "logical_cells": 161074,
+              "physical_cells": 0,
+              "buffers": 1090,
+              "buffer_area_um2": 88.1944,
+              "macros": 2,
+              "instance_area_um2": 45769.8019,
+              "macro_area_um2": 26086.1895,
+              "die_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "scoring_seconds": 85.236,
+              "power_mw": 0.692,
+              "reset_ports": [
+                "io_aresetn"
+              ]
+            },
+            "placement_seconds": 733.790456,
+            "run": {
+              "status": "ok",
+              "wall_s": 887.15,
+              "cpu_s": 886.68,
+              "rss_mib": 10235.3203125,
+              "tree_rss_mib": 10247.73828125,
+              "ipc": 1.5796807823925867,
+              "instructions": 6315328167858.0,
+              "cycles": 3997850855850.0,
+              "stop": null
+            },
+            "physical_timing": {
+              "evaluations": 17,
+              "builds": 1,
+              "ranking_evaluations": 11,
+              "ranking_seconds": 81.44709912100001,
+              "detailed_evaluations": 6,
+              "repowered_gates": 22791,
+              "inserted_gates": 492,
+              "removed_gates": 1484,
+              "updated_nets": 2189264,
+              "update_calls": 23,
+              "seconds": 229.70074153599995,
+              "validation_seconds": 6.167912189999999,
+              "reconcile_seconds": 36.55584445900001,
+              "exclusions_seconds": 1.034097527,
+              "propagation_seconds": 161.01720109299998,
+              "feedback_seconds": 24.13582409400002
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 160837,
+              "area_um2": 19666.480859994055,
+              "within_budget": true,
+              "rejected_proposals": 8497
+            },
+            "binary_manifest": {
+              "build": "-c opt --jobs=2; reduced ramp-fit seed candidate; local owned OpenTimer override; published dependency pins",
+              "repos": {
+                "livehd": {
+                  "head": "ea97d54e333f743daad0608f82909d1c2e9f50bb",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                },
+                "DREAMPlace": {
+                  "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                },
+                "OpenTimer": {
+                  "head": "a3630593b990c3ce978c187539b2efecff84ad32",
+                  "patch_sha256": "303ca545391900bfb8e4fdc651f785ac8fd32c521a9b602ae14cdd57f153ed27"
+                }
+              },
+              "lhd": "60766477c65d6c256a519bad74a5781c3d192bd77ac00048096a623ffaf7b9f2",
+              "physical_repair": "c5af0b14fa78627a78b6c22da1555c19ef12f3d9947d2dac6d64420ac2e1c69e",
+              "compiled_dependencies": {
+                "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                "opentimer": "a3630593b990c3ce978c187539b2efecff84ad32 + recorded local patch"
+              },
+              "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+              "harness_sha256": {
+                "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+                "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+              }
+            },
+            "def_sha256": "52c891a097e857f19ae66b0ee03def4a476a97aea5b46127de50a950fab10756"
+          },
+          "candidate": {
+            "path": "/tmp/1f-wns-v1/worker_budget_retry/coralnpu",
+            "score": {
+              "hpwl_um": 3907685.145,
+              "hpwl_all_nets_um": 4173067.872,
+              "measured_nets": 161126,
+              "excluded_nets": 690,
+              "setup_wns_ps": -16736.599729,
+              "setup_tns_ps": -64843349.068619,
+              "hold_wns_ps": 27.430929,
+              "hold_tns_ps": 0.0,
+              "instances": 161074,
+              "logical_cells": 161074,
+              "physical_cells": 0,
+              "buffers": 1090,
+              "buffer_area_um2": 88.1944,
+              "macros": 2,
+              "instance_area_um2": 45769.8019,
+              "macro_area_um2": 26086.1895,
+              "die_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "scoring_seconds": 82.381,
+              "power_mw": 0.692,
+              "reset_ports": [
+                "io_aresetn"
+              ]
+            },
+            "placement_seconds": 706.336353,
+            "run": {
+              "status": "ok",
+              "wall_s": 857.01,
+              "cpu_s": 856.62,
+              "rss_mib": 10169.08203125,
+              "tree_rss_mib": 10126.95703125,
+              "ipc": 1.633454823540076,
+              "instructions": 6311340801952.0,
+              "cycles": 3863798809124.0,
+              "stop": null
+            },
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 17,
+              "builds": 1,
+              "ranking_evaluations": 11,
+              "ranking_seconds": 74.565990825,
+              "detailed_evaluations": 6,
+              "repowered_gates": 22791,
+              "inserted_gates": 492,
+              "removed_gates": 1484,
+              "updated_nets": 2189264,
+              "update_calls": 23,
+              "seconds": 216.34201013799995,
+              "validation_seconds": 6.090758791,
+              "reconcile_seconds": 35.963251297,
+              "exclusions_seconds": 0.998506497,
+              "propagation_seconds": 149.126245034,
+              "feedback_seconds": 23.359431324000003
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 160837,
+              "area_um2": 19666.480859994055,
+              "within_budget": true,
+              "rejected_proposals": 8497
+            },
+            "binary_manifest": {
+              "build": "-c opt --jobs=2; reviewed timing worker-budget fix; published dependency pins; no local overrides",
+              "repos": {
+                "livehd": {
+                  "head": "693270a5d96f9831abf40e0a49e6268e2a52f002",
+                  "patch_sha256": "411db876639654d19ee4867e0abde75d8357c778d754a08f8ef2461fb1d2d101"
+                },
+                "DREAMPlace": {
+                  "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                },
+                "OpenTimer": {
+                  "head": "634270c46c384f29307db2d23820356a9cd90053",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                }
+              },
+              "lhd": "6cbb537d17e4371baf505d03b367049f5a70fcac99110f52de608ad7a8931fb5",
+              "physical_repair": "675421f62ef288bc2932e71c9c42148413649ed2cb4e0deca724b52faaed5134",
+              "compiled_dependencies": {
+                "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                "opentimer": "634270c46c384f29307db2d23820356a9cd90053"
+              },
+              "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+              "harness_sha256": {
+                "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+                "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+              }
+            },
+            "def_sha256": "52c891a097e857f19ae66b0ee03def4a476a97aea5b46127de50a950fab10756"
+          },
+          "def_identical": true,
+          "placement_ratio": 0.9625859088578825
         }
       },
-      "pending": [
-        "coralnpu full-flow regression"
-      ],
+      "pending": [],
       "remaining_scope": "The full A-J task remains open, including total STA share, wire growth, checkpoint coverage and the larger-design census.",
       "gemmini_memory": {
         "path": "/tmp/1f-workers-v44/gemmini-candidate/gemmini/B/measure/measurement.json",
@@ -43367,7 +43584,13 @@
         "placement_seconds": 1.999606,
         "setup_wns_ps": -60.270761,
         "tests": "Nine optimized suites pass with --test_timeout=30 against published dependency and no local overrides"
-      }
+      },
+      "excluded_runs": [
+        {
+          "path": "/tmp/1f-wns-v1/worker_budget_candidate/coralnpu",
+          "reason": "Scratch quota interrupted execution; result.json and measurement/perf/time artifacts empty. Replaced by a fresh run after scratch recovery."
+        }
+      ]
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",
