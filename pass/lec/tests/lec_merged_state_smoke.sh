@@ -1,8 +1,9 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 # A reference register the implementation merged into an equal one
-# (synth.merge_registers) shares that register's state in the induction, and the
-# step rechecks it; a register that is not the same machine must still refute.
+# (synth.merge_registers) shares that register's state in the induction, and one
+# the state sweep folded to a constant is held at it; the step rechecks both, so
+# a register that is not the same machine (or not constant) must still refute.
 set -euo pipefail
 LHD=${LHD:-./bazel-bin/lhd/lhd}
 if [ ! -x "$LHD" ]; then LHD=./lhd/lhd; fi
@@ -70,6 +71,21 @@ elif sys.argv[2].startswith('refuted-'):
     assert sys.argv[3]=='7', r
 PY
 }
+# A register the sweep folded to the one constant it ever holds: the reference
+# keeps it, the implementation reads the constant.
+cat > "$WORK/const_ref.v" <<'VERILOG'
+module dut(input clk, input rst, input en, input [7:0] x, output [7:0] y);
+  reg [7:0] k;
+  always @(posedge clk) if (rst) k <= 8'd5; else if (en) k <= 8'd5;
+  assign y = k + x;
+endmodule
+VERILOG
+cat > "$WORK/const_folded.v" <<'VERILOG'
+module dut(input clk, input rst, input en, input [7:0] x, output [7:0] y);
+  assign y = 8'd5 + x;
+endmodule
+VERILOG
+sed "s/else if (en) k <= 8'd5/else if (en) k <= 8'd6/" "$WORK/const_ref.v" > "$WORK/const_not.v"
 check merged ref merged ind proven-full
 grep -q 'merged state: 2 one-sided reference register(s)' "$WORK/merged.log"
 check merged_auto ref merged auto proven-full
@@ -79,4 +95,8 @@ check reset_differs reset_differs merged ind refuted-unchecked
 check reset_differs_auto reset_differs merged auto refuted-cex
 check init_differs init_ref init_merged ind refuted-unchecked
 check init_differs_auto init_ref init_merged auto refuted-cex
-echo 'PASS: merged reference registers pair with their twin and real differences refute'
+check constant const_ref const_folded ind proven-full
+grep -q 'constant state: 1 one-sided reference register(s)' "$WORK/constant.log"
+check not_constant const_not const_folded ind refuted-unchecked
+check not_constant_auto const_not const_folded auto refuted-cex
+echo 'PASS: merged and folded reference registers pair with their twin or constant and real differences refute'

@@ -7761,6 +7761,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // Reference flops' `initial` driver: the constant's serialization, "?" for a
   // non-constant one (merged-state candidates must agree on it).
   absl::flat_hash_map<std::string, std::string>       ind_ref_init_text;
+  // Reference flops with a fully known constant `initial`: its bits, MSB first.
+  absl::flat_hash_map<std::string, std::string>       ind_ref_init_bits;
   // Input bundles FIRST: one flat symbol per base; the leaves are bound to its
   // extracts, so both sides range over the SAME input space (no extra freedom,
   // no lost bits). add_inputs below keeps any name already present at an
@@ -7884,6 +7886,12 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
             const auto& c = graph_util::const_of(init);
             for (size_t i = 0; i < ones.size(); ++i) {
               ones[i] = c.bit_test(static_cast<int>(i)) && !c.unknown_bit_test(static_cast<int>(i));
+            }
+            if (!c.has_unknowns()) {
+              auto& bits = ind_ref_init_bits[key];  // MSB first, at the register's width
+              for (int i = std::max(w, gu::real_width(q)); i-- > 0;) {
+                bits.push_back(c.bit_test(i) ? '1' : '0');
+              }
             }
           }
         }
@@ -9268,6 +9276,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // state with P's, so a guess that is not inductive costs only the proof.
   // Initial values must agree (no inductive base otherwise).
   absl::flat_hash_map<std::string, std::string> ind_merged;  // one-sided ref key -> paired ref key holding the same value
+  absl::flat_hash_map<std::string, Val>         ind_constant;  // one-sided ref key -> the constant it always holds
   if (opts.assumptions == nullptr) {
     const std::string        nxt_pfx("\x01nxt:");
     std::vector<std::string> lonely;
@@ -9391,8 +9400,63 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           ind_merged.emplace(m.key, it->second);
         }
       }
+      // A one-sided register with no twin may be one the sweep FOLDED: it only
+      // ever holds one constant (its initial value, or the constant its next
+      // state reduces to), and the implementation reads that constant
+      // instead. Hold it at the constant when its next state, with every such
+      // candidate at its constant, rewrites to that same constant -- the
+      // structural form of "constant is inductive" -- and compare its next
+      // state with the constant every step.
+      absl::flat_hash_map<std::string, cvc5::Term> constant;
+      for (const auto& k : lonely) {
+        if (ind_merged.contains(k)) {
+          continue;
+        }
+        const auto& sv  = shared.at(k);
+        auto        cur = re.inputs.find(k);
+        auto        nxt = re.outputs.find(nxt_pfx + k);
+        if (cur == re.inputs.end() || nxt == re.outputs.end() || cur->second.term != sv.term || nxt->second.width != sv.width
+            || !cur->second.x_mask.isNull() || !nxt->second.x_mask.isNull()) {
+          continue;
+        }
+        if (auto it = ind_ref_init_bits.find(k); it != ind_ref_init_bits.end()) {
+          if (static_cast<int>(it->second.size()) == sv.width) {
+            constant.emplace(k, tm.mkBitVector(static_cast<uint32_t>(sv.width), it->second, 2));
+          }
+        } else if (!ind_ref_init_text.contains(k) && opts.gold_x != "zero") {  // power-on X may be chosen to be it
+          if (const auto v = solver.simplify(nxt->second.term); v.isBitVectorValue()) {
+            constant.emplace(k, v);
+          }
+        }
+      }
+      for (bool changed = !constant.empty(); changed;) {
+        changed = false;
+        std::vector<cvc5::Term> from, to;
+        for (const auto& [k, c] : constant) {
+          from.push_back(shared.at(k).term);
+          to.push_back(c);
+        }
+        std::vector<std::string> drop;
+        for (const auto& [k, c] : constant) {
+          const auto v = solver.simplify(re.outputs.at(nxt_pfx + k).term.substitute(from, to));
+          if (v != c) {
+            drop.push_back(k);
+          }
+        }
+        for (const auto& k : drop) {
+          constant.erase(k);
+          changed = true;
+        }
+      }
+      for (const auto& [k, c] : constant) {
+        ind_constant.emplace(k, Val{c, shared.at(k).width, shared.at(k).is_signed});
+      }
       if (livehd::debug::env<"LHD_LEC_DUMP_OBS">() != nullptr) {
         for (const auto& k : lonely) {
+          if (ind_constant.contains(k)) {
+            std::fprintf(stderr, "[LEC_MERGE] %s -> constant\n", k.c_str());
+            continue;
+          }
           auto it = ind_merged.find(k);
           std::fprintf(stderr,
                        "[LEC_MERGE] %s -> %s\n",
@@ -9403,7 +9467,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
   }
 
-  if (!ind_zero_holes.empty() || !ind_merged.empty()) {
+  if (!ind_zero_holes.empty() || !ind_merged.empty() || !ind_constant.empty()) {
     ref_fix_shared = *ind_shared[0];
     for (const auto& [key, holes] : ind_zero_holes) {
       auto&       v = ref_fix_shared.at(key);
@@ -9417,6 +9481,9 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     }
     for (const auto& [key, partner] : ind_merged) {
       ref_fix_shared[key] = shared.at(partner);
+    }
+    for (const auto& [key, value] : ind_constant) {
+      ref_fix_shared[key] = value;
     }
     enc.set_x_dontcare(opts.gold_x != "zero");
     enc.set_box_keys(&ref_box_keys);
@@ -9439,9 +9506,21 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
                       + " one-sided reference register(s) share a paired register's state (rechecked each step) {"
                       + join_capped(names) + "}";
       }
+      if (!ind_constant.empty()) {
+        std::vector<std::string> names;
+        for (const auto& [key, value] : ind_constant) {
+          names.push_back(display_name(key));
+          ind_tied_state.insert("nxt:" + display_name(key));
+        }
+        std::sort(names.begin(), names.end());
+        res.detail += "; constant state: " + std::to_string(ind_constant.size())
+                      + " one-sided reference register(s) held at the constant they always hold (rechecked each step) {"
+                      + join_capped(names) + "}";
+      }
     } else {
       ind_zero_holes.clear();
       ind_merged.clear();
+      ind_constant.clear();
     }
   }
 
@@ -9707,12 +9786,16 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     bad = bad.isNull() ? t : tm.mkTerm(cvc5::Kind::OR, {bad, t});
     ind_diffs.push_back({"bridge", t});
   }
-  // A merged one-sided register's next state is compared with its partner's.
+  // A merged one-sided register's next state is compared with its partner's,
+  // a constant one's with its constant.
   for (const auto& [key, partner] : ind_merged) {
     auto pit = re.outputs.find(std::string("\x01nxt:") + partner);
     if (pit != re.outputs.end() && !ie.outputs.contains(std::string("\x01nxt:") + key)) {
       ie.outputs[std::string("\x01nxt:") + key] = pit->second;
     }
+  }
+  for (const auto& [key, value] : ind_constant) {
+    ie.outputs.try_emplace(std::string("\x01nxt:") + key, value);
   }
   // Recheck the state relation on every retained bit. Holes use the reference
   // next-state bit on both sides of this obligation, imposing no equality on

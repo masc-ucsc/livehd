@@ -220,7 +220,12 @@ current state is replaced by its class representative until each class
 computes one next-state term; widths, signs and initial values must agree).
 The one-sided register then shares its twin's current state, and every step
 compares its next state with the twin's, so a register that is not the same
-machine still refutes (`tests/lec_merged_state_smoke.sh`). Duplicate or
+machine still refutes (`tests/lec_merged_state_smoke.sh`). A one-sided register
+with no twin that only ever holds one constant (`synth.state_sweep` folded it;
+its next state, with every such register at its constant, rewrites to that
+constant, which is its initial value or, with no initial value under the default
+`formal.lec.gold_x=ignore`, its constant next state) is held at the constant and
+its next state is compared with it every step. Duplicate or
 out-of-range bit names cannot form a relation. Explicit implementation initial
 values take precedence over a proposed shared initial state. `pass semdiff
 --stats` reports these projected name pairs separately; they cannot justify a
