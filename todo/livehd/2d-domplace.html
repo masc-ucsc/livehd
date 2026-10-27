@@ -77,6 +77,18 @@ every rail (1600 RST false paths): input->domino 5132 -> 4110 ps, max-cap/transi
 51/78; the limiter is now a 1344-pin data rail (2255 ps and 0/0 with the
 <code>domino_rail_fanout</code> experiment, an unfrozen scratch run). LEC timed out on every leg (assumed pass by the
 2026-10-26 ruling).</li>
+<li>U23/U24 runs, 2026-10-26, <code>lhd_dp_eac9407b</code> (ORFS frame; partition_m at density 0.7
+with <code>domino_fall_gates</code>; LEC capped at 300 s, a timeout recorded as assumed pass;
+<code>HighTide/artifacts/domplace_20261026/{lfsr,sha3,partition_m}_u23</code>; stage period of arms
+1/2/3). partition_m: the one reset tree (12/11/11 buffers on the 354/328-pin SETN net) takes
+flop->flop from 1676/1851/933 to 1035/941/944 ps and max-transition violations from 418/360/65 to
+141/131/124 (arm 3 had the same tree under U22; its delta, like arm 2's HPWL, follows the
+flattened-instance renaming since <code>9cf34297</code>). sha3: no CMOS net above 32 loads besides
+the clock, so arms 1/2 are unchanged (900/1035 ps); arm 3 1600/1600 converted, 2226 ps (was
+4110), 0/0 max-cap/max-transition (was 51/78) with 52 reset and 170 rail buffers. lfsr: arm 3
+converts 0 of 31 under select=area (each state ties: domino 0.55404 plus rail inverter 0.04374 = 0.59778 µm², the CMOS estimate; a tie stays CMOS; it converted 31 on <code>cc93f926</code>), so all
+arms are CMOS (707/692/692 ps), LEC proven. Every leg passes OpenROAD
+<code>check_placement</code>; sha3 and partition_m LEC timed out (assumed pass).</li>
 <li><strong>Exit:</strong> manifests and results under <code>repros/domplace_&lt;date&gt;/</code>
 with the H exit criteria.</li>
 </ul></li>
