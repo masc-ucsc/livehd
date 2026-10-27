@@ -51,7 +51,8 @@ struct Gated_fold_result {
 // glitch-safe clock gate on `domain_clock` keeps its gated clock for the CMOS
 // implementation and gains the gate's cycle-level enable:
 //
-//   clock_pin := root & gclk      (== gclk: the gate ANDs root with its enable)
+//   clock_pin := root & gclk      (== gclk: an AND gate is root & its enable)
+//   clock_pin := root | gclk      (latch-or: == gclk, the gate is root | ~its enable)
 //   enable    := enable & en      (redundant on the gated clock)
 //
 // so the register is a plain enable register on the root clock for the
@@ -69,8 +70,11 @@ struct Gated_fold_result {
 // through 1-bit identities and the outputs of instantiated definitions, whose
 // combinational enable cone (test enables included) is cloned across the
 // boundaries. Anything else is reported, never folded: an inverted clock, a
-// gate on a gated clock (a chain), a clock that is not a design input or not
-// the domain, state inside the enable cone, an unsafe AND/OR.
+// gate on a gated clock (a chain), a clock that is not a one-bit design input
+// or not the domain, state inside the enable cone, an unsafe AND/OR, and a
+// register with a synchronous reset (gated-sync-reset: it outranks the enable,
+// so on the root clock it would reset with the gate closed). A gate whose
+// enable cone is refused is refused once, before any node is cloned.
 // Returns empty registers when `flat` is not the design top.
 Gated_fold_result fold_gated_clocks(hhds::Graph* flat, const Gated_fold_options& options);
 

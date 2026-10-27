@@ -6,6 +6,7 @@
 #include <optional>
 
 #include "absl/container/flat_hash_set.h"
+#include "attr_carry.hpp"
 #include "cell.hpp"
 #include "clock_gates.hpp"
 #include "latch_contract.hpp"
@@ -272,6 +273,10 @@ private:
         t.refusal = "gated-mixed";  // the enable storage is not sampled by the gate's own clock
         return t;
       }
+      if (std::max(1, gu::real_width(gr.net)) != 1) {
+        t.refusal = "multibit-clock";  // the bits of a clock bus the storage and the gate read are not tracked
+        return t;
+      }
       if (gr.inverted) {
         t.refusal = "inverted-clock";  // the gate passes the inverted clock (the falling edge)
         return t;
@@ -334,17 +339,45 @@ private:
 };
 
 // Clones a combinational cone read at some chain level into the top, through
-// definition inputs onto the instances' drivers. Fails on state or hierarchy.
+// definition inputs onto the instances' drivers. admit() walks the cones first
+// without creating anything and fails on state, hierarchy or the node limit,
+// so a refused gate leaves the top untouched; clone() then cannot fail.
 class Cloner {
 public:
   Cloner(hhds::Graph* top, const Chain& chain, int32_t color, uint32_t limit)
       : top_(top), chain_(chain), color_(color), limit_(limit) {}
 
-  hhds::Pin_class clone(const hhds::Pin_class& d, size_t level, int depth = 0) {
-    if (d.is_invalid() || depth > 128 || failed_) {
-      failed_ = true;
-      return {};
+  // Whether `d` (read at `level`) can be cloned, sharing the node limit with
+  // every cone admitted before it.
+  bool admit(const hhds::Pin_class& d, size_t level, int depth = 0) {
+    if (d.is_invalid() || depth > 128) {
+      return false;
     }
+    if (d.is_const() || level == 0 || !seen_.insert(std::pair{level, d}).second) {
+      return true;
+    }
+    if (gu::is_graph_input_pin(d)) {
+      const auto drv = instance_driver(chain_[level].inst, gu::pin_name_of(d));
+      return !drv.is_invalid() && admit(drv, level - 1, depth + 1);
+    }
+    const auto n  = d.get_master_node();
+    const auto op = gu::type_op_of(n);
+    if (Ntype::is_loop_last(op) || op == Ntype_op::IO || op == Ntype_op::Sub || ++nodes_ > limit_) {
+      return false;
+    }
+    for (const auto& sink : n.inp_sorted_pins()) {
+      for (const auto& drv : sink.get_driver_pins()) {
+        if (!admit(drv, level, depth + 1)) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  // Clones an admitted cone. The copies keep their source attributes
+  // (signedness, LUT tables, ...) but not the definition's names.
+  hhds::Pin_class clone(const hhds::Pin_class& d, size_t level) {
     if (d.is_const()) {
       return gu::create_const(*top_, gu::const_of(d));
     }
@@ -356,49 +389,38 @@ public:
       return it->second;
     }
     if (gu::is_graph_input_pin(d)) {
-      const auto drv = instance_driver(chain_[level].inst, gu::pin_name_of(d));
-      if (drv.is_invalid()) {
-        failed_ = true;
-        return {};
-      }
-      auto res    = clone(drv, level - 1, depth + 1);
+      auto res    = clone(instance_driver(chain_[level].inst, gu::pin_name_of(d)), level - 1);
       cache_[key] = res;
       return res;
     }
-    auto       n  = d.get_master_node();
-    const auto op = gu::type_op_of(n);
-    if (Ntype::is_loop_last(op) || op == Ntype_op::IO || op == Ntype_op::Sub || ++nodes_ > limit_) {
-      failed_ = true;
-      return {};
-    }
-    auto neo = gu::create_typed_node(*top_, op);
+    const auto n   = d.get_master_node();
+    auto       neo = gu::create_typed_node(*top_, gu::type_op_of(n));
+    gu::carry_node_attrs(n, neo);
+    neo.attr(hhds::attrs::name).del();
     gu::set_color(neo, color_);
     auto res    = neo.create_driver_pin(d.get_port_id());
     cache_[key] = res;
+    gu::carry_pin_attrs(d, res);
+    res.attr(livehd::attrs::pin_name).del();
     for (auto sink : n.inp_pins_snapshot()) {
       auto sp = neo.create_sink_pin(sink.get_port_id());
+      gu::carry_pin_attrs(sink, sp);
+      sp.attr(livehd::attrs::pin_name).del();
       for (const auto& drv : sink.get_driver_pins()) {
-        auto dp = clone(drv, level, depth + 1);
-        if (dp.is_invalid()) {
-          failed_ = true;
-          return {};
-        }
-        dp.connect_sink(sp);
+        clone(drv, level).connect_sink(sp);
       }
     }
     gu::set_bits(res, std::max(1, static_cast<int>(gu::bits_of(d))));
     return res;
   }
 
-  [[nodiscard]] bool failed() const { return failed_; }
-
 private:
   hhds::Graph*                                                             top_;
   Chain                                                                    chain_;
   int32_t                                                                  color_;
   uint32_t                                                                 limit_;
-  uint32_t                                                                 nodes_  = 0;
-  bool                                                                     failed_ = false;
+  uint32_t                                                                 nodes_ = 0;
+  absl::flat_hash_set<std::pair<size_t, hhds::Pin_class>>                  seen_;
   absl::flat_hash_map<std::pair<size_t, hhds::Pin_class>, hhds::Pin_class> cache_;
 };
 
@@ -452,6 +474,7 @@ Gated_fold_result fold_gated_clocks(hhds::Graph* flat, const Gated_fold_options&
   // partitions apart and reaches every consumer region as one input, the
   // stage's single enable rail, computed once for all of them.
   absl::flat_hash_map<hhds::Pin_class, hhds::Pin_class> enables;
+  absl::flat_hash_map<hhds::Pin_class, std::string>     failures;  // gates whose enable cannot be cloned
   Tracer                                                tracer(flat, options);
   for (const auto& flop : flops) {
     const auto clock = gu::get_driver_of_sink_name(flop, "clock_pin");
@@ -489,6 +512,12 @@ Gated_fold_result fold_gated_clocks(hhds::Graph* flat, const Gated_fold_options&
       refuse("clock-domain");
       continue;
     }
+    // The root and the register's clock are one bit wide: a bit of a clock
+    // bus is not tracked through the gate.
+    if (std::max(1, gu::real_width(t.root.pin)) != 1 || std::max(1, gu::real_width(clock)) != 1) {
+      refuse("multibit-clock");
+      continue;
+    }
     // Only registers the domino profile could convert fold; the rest keep
     // their gate untouched (and their own retention reason).
     const auto posclk = gu::get_driver_of_sink_name(flop, "posclk");
@@ -502,24 +531,36 @@ Gated_fold_result fold_gated_clocks(hhds::Graph* flat, const Gated_fold_options&
       refuse("initial-value");
       continue;
     }
-    if (std::max(1, gu::real_width(clock)) != 1) {
-      refuse("multibit-clock");
-      continue;
+    // A synchronous reset outranks the enable (rst ? v : en ? d : Q) but, on
+    // the gated clock, acts only on an enabled edge. On the root clock it
+    // would reset with the gate closed, and keeping it inside the hold would
+    // put the reset network in the stage: the register keeps its gate.
+    if (!reset.is_invalid() && !const_value(reset, false)) {
+      const auto async = gu::get_driver_of_sink_name(flop, "async");
+      if (!async.is_const() || gu::const_of(async).is_known_false()) {
+        refuse("gated-sync-reset");
+        continue;
+      }
     }
     const auto color = gu::node_color_of(flop);
     const auto key   = peel(clock);
-    auto       en_it = enables.find(key);
+    if (const auto failed = failures.find(key); failed != failures.end()) {
+      refuse(failed->second);  // the gate's enable was already refused for another register
+      continue;
+    }
+    auto en_it = enables.find(key);
     if (en_it == enables.end()) {
-      const auto own = fresh + 1;
+      const auto own  = fresh + 1;
+      const bool test = !tracer.icg_test_.is_invalid() && !const_value(tracer.icg_test_, false);
       Cloner     cloner(flat, t.chain, own, options.max_enable_nodes);
-      auto       en = cloner.clone(t.enable->pin, t.enable->level);
-      if (!en.is_invalid() && !tracer.icg_test_.is_invalid() && !const_value(tracer.icg_test_, false)) {
-        auto test = cloner.clone(tracer.icg_test_, t.enable->level);
-        en        = test.is_invalid() ? hhds::Pin_class{} : or2(*flat, en, test, own);
-      }
-      if (cloner.failed() || en.is_invalid()) {
+      if (!cloner.admit(t.enable->pin, t.enable->level) || (test && !cloner.admit(tracer.icg_test_, t.enable->level))) {
+        failures.emplace(key, "gated-enable-state");
         refuse("gated-enable-state");
         continue;
+      }
+      auto en = cloner.clone(t.enable->pin, t.enable->level);
+      if (test) {
+        en = or2(*flat, en, cloner.clone(tracer.icg_test_, t.enable->level), own);
       }
       // A design input already reaches every region as one input; any other
       // net gets an identity of its own color, so it partitions apart.
@@ -540,7 +581,10 @@ Gated_fold_result fold_gated_clocks(hhds::Graph* flat, const Gated_fold_options&
     auto en_sink = gu::setup_sink_by_name(flop, "enable");
     en_sink.del_sink();
     en_sink.connect_driver(enable);
-    const auto gclk     = and2(*flat, t.root.pin, clock, color);
+    // The root stays visible on the clock pin without changing it: an AND
+    // gate's output is root & en (so root & gclk == gclk), an OR gate's is
+    // root | ~en (so root | gclk == gclk).
+    const auto gclk     = t.kind == "latch-or" ? or2(*flat, t.root.pin, clock, color) : and2(*flat, t.root.pin, clock, color);
     auto       clk_sink = gu::setup_sink_by_name(flop, "clock_pin");
     clk_sink.del_sink();
     clk_sink.connect_driver(gclk);

@@ -253,6 +253,18 @@ cc_test(
 )
 
 cc_test(
+    name = "gated_fold_test",
+    srcs = ["gated_fold_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":synth",
+        "//graph",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
+)
+
+cc_test(
     name = "register_merge_test",
     srcs = ["register_merge_test.cpp"],
     copts = COPTS,

@@ -76,18 +76,13 @@ reports its reason code (`reason.hpp`).
 | An inverted clock / a register output or divider as the clock | retained | `inverted-clock` / `divided-clock` |
 | The gate's enable cone holds state or hierarchy | retained | `gated-enable-state` |
 | A gate sampling its enable at the falling edge without `domino_fall_gates` | retained | `gated-fall-sample` |
+| A gated register with a synchronous reset (it resets only on enabled edges) | retained, the gate kept | `gated-sync-reset` |
 | A recognized in-region ICG the fold left alone (another domain, say) | retained | `gated-clock` |
 | Clock control is not a direct design input (logic or a crossing) | retained | `derived-clock` |
 | Multibit clock / constant or absent clock | retained | `multibit-clock` / `constant-clock` |
 | Clock port is not `domino_clock` | retained | `clock-domain` |
 | Clock is a port of a preserved definition (each instance may clock it from a different root) | retained | `definition-clock` |
 | Memory or opaque scope, transparent latch, ICG latch | retained (barrier) | `memory` / `opaque` / `transparent-latch` / `icg` |
-
-A native barrier is never a frozen state: USYN keeps a memory one native block
-(it is not bit-blasted into registers), so it has no endpoint row. The report
-lists every barrier row of a region (`regions[].barriers`, its source label and
-code) and counts them by code in `totals.barriers`, outside `states`. A memory
-is always `memory`.
 | One-literal endpoint | retained unless `domino_identity=true` | `identity-endpoint` |
 | No support after cofactoring | always retained | `constant-endpoint` |
 | No positive-output formula within stack, branches and inputs | retained | `polarity-illegal` |
@@ -95,6 +90,12 @@ is always `memory`.
 | CMOS+DFF estimate not larger (`domino_select=area`) | retained | `area` |
 | CMOS cone could not be priced | retained | `cmos-estimate` |
 | Physical selection work exhausted | retained | `selection-budget` |
+
+A native barrier is never a frozen state: USYN keeps a memory one native block
+(it is not bit-blasted into registers), so it has no endpoint row. The report
+lists every barrier row of a region (`regions[].barriers`, its source label and
+code) and counts them by code in `totals.barriers`, outside `states`. A memory
+is always `memory`.
 
 Gate and reset retention codes appear only for registers the earlier rows
 admit; the fold's own refusals carry a gated register's code even when another
@@ -122,7 +123,8 @@ seen with its consumers (NVDLA's `slcg` -> `NV_CLK_gate_power` -> `CKLNQD12`).
 A positive-edge register on a recognized gate of `domino_clock` becomes
 
 ```
-clock_pin := root & gclk        (== gclk: the gate ANDs root with its latched enable)
+clock_pin := root & gclk        (== gclk: an AND gate is root & its latched enable)
+clock_pin := root | gclk        (latch-or: == gclk, the gate is root | ~its latched enable)
 enable    := enable & en        (redundant on the gated clock)
 ```
 

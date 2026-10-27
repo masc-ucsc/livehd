@@ -96,6 +96,15 @@ designs = {
                 '  always_ff @(negedge gclk) q1 <= a & b;\n'
                 '  always_ff @(posedge oclk) q2 <= b | c;\n'
                 'endmodule\n',
+    # A synchronous reset on a gated clock acts only on enabled edges: q1
+    # keeps its gate (the reset outranks the enable, so on the root clock it
+    # would reset with the gate closed); q2 beside it still folds.
+    'icgrst': 'module icgrst(input clk, en, rst, a, b, c, output reg q1, q2);\n'
+              '  wire gclk;\n'
+              '  sky130_fd_sc_hd__sdlclkp_1 g(.CLK(clk), .GATE(en), .SCE(1\'b0), .GCLK(gclk));\n'
+              '  always_ff @(posedge gclk) if (rst) q1 <= 1\'b0; else q1 <= (a & b) | c;\n'
+              '  always_ff @(posedge gclk) q2 <= (a | c) & b;\n'
+              'endmodule\n',
 }
 for name, text in designs.items():
     (root / f'{name}.v').write_text(text)
@@ -126,8 +135,8 @@ subprocess.run([lhd, 'pass', 'liberty', 'gensim', str(root / 'seq.lib'), '--emit
                 '--workdir', str(root / 'gensim'), '-q'], check=True, capture_output=True, timeout=20)
 
 
-def proven(work, top, ref):
-    out    = work / 'lec.json'
+def verdict(work, top, ref):
+    out    = work / f'lec_{Path(ref).stem}.json'
     models = work / 'synth/qor.json.domino/models'
     libs   = ['--lib', f'lg:{root}/cells'] + (['--lib', f'lg:{models}'] if any(models.glob('graph_*')) else [])
     subprocess.run([lhd, 'lec', '--impl', f'lg:{work}/synth/net', '--ref', f'verilog:{ref}'] + libs
@@ -135,7 +144,22 @@ def proven(work, top, ref):
                       '--result-json', str(out)], capture_output=True, timeout=20)
     result = json.loads(out.read_text())
     assert 'lec' in result, result.get('error')
-    return result['lec']['verdict'] == 'proven-full' and not result['lec']['bounded']
+    return 'bounded' if result['lec']['bounded'] else result['lec']['verdict']
+
+
+def proven(work, top, ref):
+    return verdict(work, top, ref) == 'proven-full'
+
+
+# A mutated reference: the same top, one statement replaced. The converted
+# netlist must refute it (the LEC is not vacuous on these netlists).
+def mutated(name, old, new):
+    text = (root / f'{name}.v').read_text()
+    assert old in text, (name, old)
+    path = root / 'mutated' / f'{name}.v'
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(text.replace(old, new))
+    return path
 
 
 def reasons(endpoints):
@@ -154,6 +178,7 @@ for name in ('q1', 'q2'):
 assert 'dlxtn' not in netlist and 'dlxtp' not in netlist, 'the unread gate latch must be dropped'
 assert netlist.count('.CLK(clk)') == 3, netlist
 assert proven(work, 'inline', root / 'inline.v')
+assert verdict(work, 'inline', mutated('inline', 'q1 <= (a & b) | c', 'q1 <= (a & b) | d')).startswith('refuted')
 
 # A gate whose clock is also read as data stays, and the netlist proves.
 work, physical, endpoints, netlist = synth('dataread')
@@ -195,4 +220,25 @@ assert physical['clock_gates']['refused'] == {'gated-fall-sample': 1, 'negative-
 _, physical, endpoints, _ = synth('inverted', '--set', 'pass.usyn.domino_fall_gates=true')
 assert reasons(endpoints) == {'q1': 'negative-edge', 'q2': 'domino-all'}, reasons(endpoints)
 assert physical['clock_gates']['folded'] == {'latch-or': 1}, physical['clock_gates']
+# A folded latch-or register that stays CMOS keeps its gating: its clock is
+# root | gclk (== gclk), so dropping the redundant enable from D is sound.
+# (root & gclk would be the bare root: q2 would load on every edge.) The LEC
+# does not model an OR-gated clock, even unfolded, so this one is structural.
+_, physical, endpoints, netlist = synth('inverted', '--set', 'pass.usyn.domino_fall_gates=true', '--set', 'pass.usyn.stack=1')
+assert endpoints['q2']['reason'] == 'enable-stack', reasons(endpoints)
+assert 'posedge clk ' not in netlist and 'dlxtp' in netlist, 'q2 must stay on the gated clock'
+
+# A gated register with a synchronous reset retains (gated-sync-reset) and the
+# ICG stays for it; its unreset twin converts. Both prove against the RTL.
+work, physical, endpoints, netlist = synth('icgrst')
+assert reasons(endpoints) == {'q1': 'gated-sync-reset', 'q2': 'domino-all'}, reasons(endpoints)
+assert physical['clock_gates']['folded'] == {'icg-cell': 1}, physical['clock_gates']
+assert physical['clock_gates']['refused'] == {'gated-sync-reset': 1}, physical['clock_gates']
+assert 'sdlclkp' in netlist, 'the gate stays for the retained register'
+assert proven(work, 'icgrst', root / 'icgrst.v')
+# The reading a fold would have given q1 (the reset sampled on the root clock,
+# outranking the gate) is not the RTL: the LEC refutes it against the netlist.
+root_reset = mutated('icgrst', 'always_ff @(posedge gclk) if (rst) q1 <= 1\'b0; else q1',
+                     'always_ff @(posedge clk) if (rst) q1 <= 1\'b0; else if (en) q1')
+assert verdict(work, 'icgrst', root_reset).startswith('refuted')
 print('lhd_domplace_gates_smoke: ok')

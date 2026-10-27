@@ -51,9 +51,12 @@ enum class Reason : uint8_t {
   reset_internal,  // a synchronous reset computed inside the region (no input or register to wire RST to)
   reset_absorbed,  // the selection cut folded the reset into upstream CMOS: no reset rail to strip
   reset_shape,     // the next-state function does not load the reset value while the reset is asserted
+  // U21 again: a gated register's synchronous reset acts only on enabled
+  // edges, which neither the root-clock RST pin nor the PDN (U22) can keep.
+  gated_sync_reset,
 };
 
-inline constexpr Reason kLastReason = Reason::reset_shape;  // keep at the last enumerator
+inline constexpr Reason kLastReason = Reason::gated_sync_reset;  // keep at the last enumerator
 
 constexpr std::string_view reason_code(Reason reason) {
   switch (reason) {
@@ -93,6 +96,7 @@ constexpr std::string_view reason_code(Reason reason) {
     case Reason::reset_internal    : return "reset-internal";
     case Reason::reset_absorbed    : return "reset-absorbed";
     case Reason::reset_shape       : return "reset-shape";
+    case Reason::gated_sync_reset  : return "gated-sync-reset";
   }
   return "invalid";
 }
