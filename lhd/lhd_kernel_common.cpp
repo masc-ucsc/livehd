@@ -999,6 +999,7 @@ void domino_profile_labels(const Options& opts, const std::string& lefs, Eprp_va
 
 std::vector<Sdc_clock> sdc_clocks(const std::string& sdc_path) {
   static const std::regex port_re(R"(\[\s*get_ports\s+\{?\s*(\$\{[^\s\{\}\[\]]+\}|[^\s\{\}\[\]]+)\s*\}?\s*\])");
+  static const std::regex source_re(R"(-(source|master_clock)\s+(\[[^\]]*\]|\{[^\}]*\}|\S+))");
   Sdc_statements          statements(sdc_path);
   std::vector<Sdc_clock>  found;
   const auto              number = [&](std::string_view tok) -> std::optional<double> {
@@ -1012,7 +1013,9 @@ std::vector<Sdc_clock> sdc_clocks(const std::string& sdc_path) {
       return;
     }
     auto&             clock = found.emplace_back();
-    const std::string text{statement};
+    // A generated clock's -source/-master_clock name the clock it derives
+    // from, not where it is defined: only the remaining object list counts.
+    const std::string text  = std::regex_replace(std::string{statement}, source_re, " ");
     if (std::smatch match; std::regex_search(text, match, port_re)) {
       const auto port     = statements.value(match[1].str());
       clock.port          = port.value_or("");

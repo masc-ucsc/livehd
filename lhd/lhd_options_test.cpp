@@ -233,6 +233,22 @@ TEST(LhdOptions, SynthAttributesAreOptions) {
 // synth.delay_frac turns a fraction of the SDC clock period into the ABC budget, so
 // one setting serves designs with different clocks. An explicit synth.delay wins;
 // an explicit fraction with a missing or unresolvable period is a usage error.
+TEST(LhdOptions, SdcGeneratedClocksAreNotCreditedToTheirSource) {
+  const auto path = ::testing::TempDir() + "/generated.sdc";
+  std::ofstream(path) << "create_clock -name a -period 10 [get_ports clk]\n"
+                      << "create_generated_clock -name g -source [get_ports clk] -divide_by 2 [get_pins x/Q]\n"
+                      << "create_generated_clock -name h -master_clock a -source [get_ports {clk}] -divide_by 2 [get_ports out]\n";
+  const auto clocks = lhd::sdc_clocks(path);
+  ASSERT_EQ(clocks.size(), 3);
+  EXPECT_EQ(clocks[0].port, "clk");
+  EXPECT_TRUE(clocks[0].port_resolved);
+  EXPECT_EQ(clocks[1].name, "g");
+  EXPECT_FALSE(clocks[1].port_resolved);  // defined on a pin, derived from the port
+  EXPECT_EQ(clocks[2].name, "h");
+  EXPECT_EQ(clocks[2].port, "out");
+  EXPECT_TRUE(clocks[2].port_resolved);
+}
+
 TEST(LhdOptions, SynthDelayFractionScalesTheSdcClockPeriod) {
   const auto dir = ::testing::TempDir();
   {
