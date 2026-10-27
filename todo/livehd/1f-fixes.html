@@ -22,6 +22,28 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Review v48 removes duplicate OpenTimer RC-node name strings. Published
+OpenTimer <code>b107f35</code> uses the owning map's key; tree/SPEF exports
+resolve labels in a temporary per-tree table. Node size falls from 200 to 168
+bytes on this 64-bit build. Timing arithmetic and public defaults are unchanged.
+Nine optimized suites pass, including a long-label chain that verifies export
+names and Elmore delay after map growth and parasitic replacement.</p>
+<p>All four designs retain byte-identical DEFs and independent WNS, HPWL, cells
+and area with common production defaults, 100 ps clocks and reset false paths.
+Placement takes 1.938 s (lfsr), 40.708 s (minimax), 34.802 s
+(NVDLA/partition_m) and 657.554 s (coralnpu), all within 1.5× of v47.
+Coral's full flow takes 805.01 s wall and 804.42 s CPU; peak RSS is
+9,363 MiB versus 9,480 MiB. These single samples do not establish repeatable speedups.
+Three alternating saved-DEF timing pairs have byte-identical reports and median
+cold timing 2.750 → 2.746 s. Evidence is in
+<code>runs.shared_rc_node_labels_v48</code>.</p>
+<p>Gemmini still trips the 16 GiB guard (16,798,300 KiB after
+195.3 s). A separate CPU profile now proves that GP wirelength and
+density iterations run before the guard; its final samples also show a full
+placement-view copy at a timing checkpoint. That copy is a likely contributor
+to the remaining memory spike and a target for further work. It has not been
+removed in this release. The original A–J acceptance requirements remain open.</p>
+
 <p>Review v47 retires placement scratch data when its consumers finish. The
 buffer-cleanup graph is released before building the seed timer; the internal
 zero-wire seed keeps typed RC without another serialized copy. Seed/cleanup
