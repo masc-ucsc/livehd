@@ -5338,11 +5338,29 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   std::vector<mp::NodeInfo> macro_report_info;
   bool                      macro_solved = false;
   if (macro_active) {
+    // A restart seed's IOs (same die only) are kept as the regular flow keeps
+    // them, and before macro planning: the macro frame's identity includes
+    // every IO, so a reassigned IO would discard a reusable frame.
+    std::unordered_set<std::string> seeded_ios;
+    if (options.restart_seed && v.fp.die == options.restart_seed->die) {
+      std::map<std::string, const ph::Terminal*> old;
+      for (const auto& t : options.restart_seed->terminals) {
+        old.emplace(t.name, &t);
+      }
+      for (auto& t : v.fp.terminals) {
+        const auto it = old.find(t.name);
+        if (it != old.end() && t.status != Status::FIXED && t.status != Status::LOCKED && !imported_pos.contains(t.name)) {
+          t.x = it->second->x;
+          t.y = it->second->y;
+          seeded_ios.insert(t.name);
+        }
+      }
+    }
     make_arrays(v, tech);
     // Cold automatic IO assignment uses the same first GP as the regular flow.
-    // Warm floorplan/cache IOs are already fixed and avoid this prototype call.
+    // Warm floorplan/cache/seed IOs are already placed and avoid this prototype call.
     if (std::any_of(v.fp.terminals.begin(), v.fp.terminals.end(), [&](const auto& t) {
-          return t.status != Status::FIXED && !imported_pos.contains(t.name);
+          return t.status != Status::FIXED && !imported_pos.contains(t.name) && !seeded_ios.contains(t.name);
         })) {
       dp::Options prototype;
       prototype.max_iterations = options.iterations;
@@ -5356,7 +5374,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       std::vector<Status> statuses;
       for (auto& t : v.fp.terminals) {
         statuses.push_back(t.status);
-        if (imported_pos.contains(t.name)) {
+        if (imported_pos.contains(t.name) || seeded_ios.contains(t.name)) {
           t.status = Status::FIXED;
         }
       }
@@ -5537,43 +5555,49 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       = (macro_solved || options.fp_place) ? CacheInfo{0, hashes.size(), false} : restore_cache(v, tech, cache_path, env, hashes);
   if (options.restart_seed) {
     // This is an initial guess after resynthesis, not an ECO lock. In
-    // particular, never copy the old status or create position boxes.
-    std::map<std::string, Ann_place> positions;
-    for (const auto& c : options.restart_seed->components) {
-      positions.emplace(c.name, c.place);
-    }
+    // particular, never copy the old status or create position boxes. A fresh
+    // H2D solve already legalized the complete cell frame and is kept as the
+    // final placement below; like the placement cache, the seed must not
+    // overwrite it (old coordinates under H2D's row orientations are illegal).
     size_t reused_cells = 0, reused_macros = 0, new_cells = 0, reused_ios = 0;
-    for (auto& c : v.cells) {
-      const auto old = positions.find(c.name);
-      if (c.place.status == Status::FIXED || c.place.status == Status::LOCKED) {
-        continue;
+    if (!macro_solved) {
+      std::map<std::string, Ann_place> positions;
+      for (const auto& c : options.restart_seed->components) {
+        positions.emplace(c.name, c.place);
       }
-      if (old != positions.end()) {
-        c.place.x = old->second.x;
-        c.place.y = old->second.y;
-        ++reused_cells;
-        reused_macros += !tech.macros.at(c.macro).klass.starts_with("CORE");
-      } else {
-        ++new_cells;
+      for (auto& c : v.cells) {
+        const auto old = positions.find(c.name);
+        if (c.place.status == Status::FIXED || c.place.status == Status::LOCKED) {
+          continue;
+        }
+        if (old != positions.end()) {
+          c.place.x = old->second.x;
+          c.place.y = old->second.y;
+          ++reused_cells;
+          reused_macros += !tech.macros.at(c.macro).klass.starts_with("CORE");
+        } else {
+          ++new_cells;
+        }
       }
-    }
-    for (auto& terminal : v.fp.terminals) {
-      for (const auto& old : options.restart_seed->terminals) {
-        // A resynthesis restart can resize the generated die. Keep the fresh
-        // perimeter seeds in that case; old edge coordinates may now be interior.
-        if (v.fp.die == options.restart_seed->die && terminal.name == old.name && terminal.status != Status::FIXED
-            && terminal.status != Status::LOCKED) {
-          terminal.x = old.x;
-          terminal.y = old.y;
-          ++reused_ios;
-          break;
+      for (auto& terminal : v.fp.terminals) {
+        for (const auto& old : options.restart_seed->terminals) {
+          // A resynthesis restart can resize the generated die. Keep the fresh
+          // perimeter seeds in that case; old edge coordinates may now be interior.
+          if (v.fp.die == options.restart_seed->die && terminal.name == old.name && terminal.status != Status::FIXED
+              && terminal.status != Status::LOCKED) {
+            terminal.x = old.x;
+            terminal.y = old.y;
+            ++reused_ios;
+            break;
+          }
         }
       }
     }
     fs::create_directories(options.output_dir);
     std::ofstream report(options.output_dir + "/restart_seed.json");
     report << std::format(
-        R"({{"coordinates_only":true,"reused_movable_cells":{},"reused_movable_macros":{},"new_movable_cells":{},"reused_ios":{}}})",
+        R"({{"coordinates_only":true,"superseded_by_macro_solve":{},"reused_movable_cells":{},"reused_movable_macros":{},"new_movable_cells":{},"reused_ios":{}}})",
+        macro_solved,
         reused_cells,
         reused_macros,
         new_cells,

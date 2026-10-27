@@ -125,7 +125,11 @@ These are movable initial coordinates: the restart does not copy fixed status,
 add position bounds, or lock unchanged colors. The normal macro lock happens
 after macro placement. Saved-feedback resynthesis before placement can use the
 previous completed placement as a hint. `restart_seed.json` in the restarted stage reports reused
-movable cells/macros and new cells. Later stages save
+movable cells/macros and new cells. Under H2D the seed's IOs (same die) are
+kept before macro planning, whose frame identity includes every IO, so an
+unchanged macro frame is reused; a fresh H2D solve, which already legalized
+every cell, supersedes the seeded cell coordinates
+(`superseded_by_macro_solve`). Later stages save
 feedback and warn when another run could help. The per-color decisions and
 used/placed environments are in `synth/place/io_resynth.json`; reusable state is
 in `abc_cache/io_timing.json` and `abc_cache/wire_load.json`. Use a distinct
