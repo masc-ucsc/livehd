@@ -11,8 +11,10 @@ data = Path('inou/lefdef/tests/data')
 source = root / 'dut.v'
 source.write_text('module dut(input [3:0] a,b,output [3:0] y);assign y=~(a^b);endmodule\n')
 sdc = root / 'dut.sdc'
+# The 0.1 ns input budget violates setup: a stage that already meets the SDC
+# skips IO resynthesis (setup_met_stages), so nothing would be checked.
 sdc.write_text('create_clock -name virtual -period 10\n'
-               'set_input_delay -clock virtual 9.5 [all_inputs]\n'
+               'set_input_delay -clock virtual 9.9 [all_inputs]\n'
                'set_output_delay -clock virtual 0 [all_outputs]\n')
 base = ['lhd/lhd', 'synth', str(source), '--top', 'dut', '-q',
         '--set', f'synth.liberty={data}/sky130hd.lib',
@@ -47,7 +49,7 @@ off = run('off', ['--set', 'synth.place.io_resynth=0'])
 assert off['qor']['place']['legal'] and 'io_resynth' not in off['qor']['place'], off
 assert not (root/'off/abc_cache/io_timing.json').exists()
 quiet = root/'quiet.sdc'
-quiet.write_text(sdc.read_text().replace('virtual 9.5', 'virtual 0'))
+quiet.write_text(sdc.read_text().replace('virtual 9.9', 'virtual 0'))
 quiet_on = run('quiet_on', ['--emit', 'verilog:'+str(root/'quiet_on.v')], timing=quiet)
 quiet_off = run('quiet_off', ['--set','synth.place.io_resynth=0',
                              '--emit','verilog:'+str(root/'quiet_off.v')], timing=quiet)
