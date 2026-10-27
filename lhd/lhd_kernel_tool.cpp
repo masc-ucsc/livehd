@@ -349,7 +349,7 @@ std::string tool_pin_label(const hhds::Pin_class& pin) {
 // literal counts its sign bit.
 //
 // The canonical pair is `intrinsic_const_width` / `minimal_unsigned_const_width`
-// in `pass/lean/graph_access.hpp`. They are NOT called here: that header comes
+// in `pass/lean/Exporter/Frontend/graph_access.hpp`. They are NOT called here: that header comes
 // from `//pass/lean:lean_graph_scan`, which `//lhd:lhd_lib` reaches only
 // transitively through `:pass_lean`, so including it would depend on lax header
 // visibility. This is therefore a deliberate second copy, kept line-for-line

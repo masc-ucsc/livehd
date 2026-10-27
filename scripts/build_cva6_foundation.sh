@@ -23,7 +23,7 @@
 #
 # Usage:
 #   scripts/build_cva6_foundation.sh [module-list]
-#     module-list   default pass/lean/tests/d4/cva6_78.list
+#     module-list   default pass/lean/Lgraph_IR_Semantics_Simulator/tests/d4/cva6_78.list
 #
 # Env:
 #   CVA6_ROOT       CVA6 checkout (default /HOMEROOT/projects/cva6-blockfinding,
@@ -38,7 +38,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 die() { printf 'FATAL: %s\n' "$*" >&2; exit 2; }
 
-LIST="${1:-$ROOT/pass/lean/tests/d4/cva6_78.list}"
+LIST="${1:-$ROOT/pass/lean/Lgraph_IR_Semantics_Simulator/tests/d4/cva6_78.list}"
 CVA6_ROOT="${CVA6_ROOT:-/HOMEROOT/projects/cva6-blockfinding}"
 CVA6_TARGET="${CVA6_TARGET:-cv64a6_imafdc_sv39_hpdcache_wb}"
 SLANG="${SLANG:-/HOMEROOT/projects/slang/build/bin/slang}"

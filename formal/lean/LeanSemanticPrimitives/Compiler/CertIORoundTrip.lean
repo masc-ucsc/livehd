@@ -9,7 +9,7 @@ pair: bytes produced by `renderCert` are read back as the same certificate, with
 no restriction on widths, array lengths, Int magnitudes, clock-name bytes or
 which constructors appear.  It says NOTHING about the C++ exporter.  When this
 module was written there was no C++ DCERT2 serializer on master; there is now
-(`pass/lean/emit_dcert.cpp`, 2daa01c94), and `pass/lean/scripts/dcert_parity.py`
+(`pass/lean/Exporter/DesignCert/emit_dcert.cpp`, 2daa01c94), and `pass/lean/Exporter/DesignCert/scripts/dcert_parity.py`
 compares its bytes with `renderCert` of the elaborated Lean literal -- equal
 bytes mean equal certificates, by `renderCert_injective`.  There is still no
 bazel target for it (`//pass/lean:dcert_parity` does not exist).  What neither

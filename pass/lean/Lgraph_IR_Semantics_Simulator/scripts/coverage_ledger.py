@@ -11,7 +11,7 @@ So this reads the primary artifacts every time and recomputes:
             direct_sweep.tsv is authoritative; when a run was stopped before its
             table was written, logs/direct_sweep.log still carries the verdict
             line, and that is recorded as WEAKER evidence, never as equal.
-  CORPUS    pass/lean/tests/d4/coreet_122.list -- the set a count is a fraction OF.
+  CORPUS    pass/lean/Lgraph_IR_Semantics_Simulator/tests/d4/coreet_122.list -- the set a count is a fraction OF.
 
 It FAILS CLOSED.  A module accepted by a later run that is not in the corpus, a
 module whose runs disagree, a duplicate -- each is an error, because every one
@@ -183,7 +183,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--base", default="pass/lean/Lgraph_IR_Semantics_Simulator/evidence/CENSUS_D2_122.tsv")
-    ap.add_argument("--corpus", default="pass/lean/tests/d4/coreet_122.list")
+    ap.add_argument("--corpus", default="pass/lean/Lgraph_IR_Semantics_Simulator/tests/d4/coreet_122.list")
     ap.add_argument("--runs", default="generated/census_d2")
     ap.add_argument("--cva6-legacy", default="pass/lean/Lgraph_IR_Semantics_Simulator/evidence/SWEEP_cva6.tsv")
     ap.add_argument("--d2-sweep", default="pass/lean/Lgraph_IR_Semantics_Simulator/evidence/SWEEP_direction2.tsv")

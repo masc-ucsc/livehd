@@ -5,7 +5,7 @@
 # Stray Lean compiler artifact from a bare `lean <file>` invocation.
 /*.c
 
-# Per-design simulator launchers written by pass/lean/scripts/make_sim_launcher.py
+# Per-design simulator launchers written by pass/lean/Lgraph_IR_Semantics_Simulator/scripts/make_sim_launcher.py
 # (a `<Top>_Cert.lean` + `<Top>_Main.lean` pair, plus a lakefile stanza). Generated
 # from a certificate, so reproducible; tracking them would also mean tracking one
 # pair per design that anyone ever simulates.
