@@ -54,9 +54,12 @@ enum class Reason : uint8_t {
   // U21 again: a gated register's synchronous reset acts only on enabled
   // edges, which neither the root-clock RST pin nor the PDN (U22) can keep.
   gated_sync_reset,
+  // U25: converted by select=area at equal size (within kAreaTieUm2): the
+  // domino keeps its logic inside one cell, so less wiring to route.
+  domino_tie,
 };
 
-inline constexpr Reason kLastReason = Reason::gated_sync_reset;  // keep at the last enumerator
+inline constexpr Reason kLastReason = Reason::domino_tie;  // keep at the last enumerator
 
 constexpr std::string_view reason_code(Reason reason) {
   switch (reason) {
@@ -97,6 +100,7 @@ constexpr std::string_view reason_code(Reason reason) {
     case Reason::reset_absorbed    : return "reset-absorbed";
     case Reason::reset_shape       : return "reset-shape";
     case Reason::gated_sync_reset  : return "gated-sync-reset";
+    case Reason::domino_tie        : return "domino-tie";
   }
   return "invalid";
 }
@@ -112,6 +116,8 @@ constexpr Reason reason_from_code(std::string_view code, Reason fallback) {
 }
 
 // The codes a converted (domino) state carries; every other final code retains CMOS.
-constexpr bool converts(Reason reason) { return reason == Reason::domino_area || reason == Reason::domino_all; }
+constexpr bool converts(Reason reason) {
+  return reason == Reason::domino_area || reason == Reason::domino_all || reason == Reason::domino_tie;
+}
 
 }  // namespace livehd::domplace

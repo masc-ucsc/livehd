@@ -101,11 +101,26 @@ Gate and reset retention codes appear only for registers the earlier rows
 admit; the fold's own refusals carry a gated register's code even when another
 row would also retain it.
 
-A converted state carries `domino-area` or `domino-all`. Under `select=area`
-the comparison is an area proxy: the domino side is `x * A_NOT + A_register`
-plus one `A_NOT` for every complemented rail, and the CMOS side is the
-register plus the Liberty estimate of the D-cone logic that only this state
-uses and that its rail producers do not also need. A tie retains CMOS.
+A converted state carries `domino-area`, `domino-tie` or `domino-all`. Under
+`select=area` the comparison is an area proxy: the domino side is
+`x * A_NOT + A_register` plus one `A_NOT` for every complemented rail, and the
+CMOS side is the register plus the Liberty estimate of the D-cone logic that
+only this state uses and that its rail producers do not also need. A strictly
+smaller domino converts as `domino-area`; one equal to the CMOS side converts
+as `domino-tie` (U25, below); a larger one retains as `area`. Equal means
+within `kAreaTieUm2` = 1e-6 um^2 (`physical_select.hpp`), which only absorbs
+floating rounding of equal Liberty sums: an ASAP7 site is about 0.0146 um^2.
+`domino_area_margin_pct` raises the CMOS side by its share first, so with a
+margin the tie is with the raised threshold.
+
+## Area ties convert (U25)
+
+Ruled 2026-10-26: "At equal size, Dominos should win because there is going
+to be way less wiring routing because it's a big cell doing a lot of logic
+inside." Under `select=area` an exact tie converts, with its own code
+`domino-tie` so reports tell it from a strict win. Before the ruling a tie
+retained CMOS; on NVDLA/partition_m 619 of the 1496 `area` retentions were
+exact ties, and on lfsr all 31 (0.55404 + 0.04374 = 0.59778).
 
 ## Clock gates (U21)
 
@@ -264,8 +279,8 @@ plus `domino_clock_devices` (default 2) clocked devices at half a
 reference-inverter input each. Two experiment knobs keep every default
 unchanged: `domino_pair_area_pct` (default 100) scales only the `x * A_NOT`
 term on both area bases, and `domino_area_margin_pct` (default 0) converts
-under `select=area` while `A_domino + A_rails < (100 + margin)%` of the CMOS
-estimate.
+under `select=area` while `A_domino + A_rails <= (100 + margin)%` of the CMOS
+estimate (equality is the U25 tie).
 
 ## Stage delay estimate
 

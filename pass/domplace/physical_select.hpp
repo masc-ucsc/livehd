@@ -19,10 +19,16 @@ struct Select_options {
   std::string                  clock;              // the selected domain's design input (port name)
   uint64_t                     work = 50'000'000;  // the selection's own slice of the caller's budget
   usyn::Function_search_limits functions;          // the logical search's limits; the output is forced positive
-  // Policy::area converts when A_domino + A_rails < (100 + margin)% of the
-  // CMOS estimate; 0 is the plain comparison, where a tie retains CMOS.
+  // Policy::area converts when A_domino + A_rails <= (100 + margin)% of the
+  // CMOS estimate; 0 is the plain comparison. Equality within kAreaTieUm2
+  // converts as domino-tie (U25), a strict win as domino-area.
   uint32_t                     area_margin_pct = 0;
 };
+
+// The area tie tolerance of Policy::area, in um^2: it absorbs only floating
+// rounding of equal Liberty sums (an ASAP7 site is ~0.0146 um^2, a sky130 HD
+// site ~1.2 um^2).
+inline constexpr double kAreaTieUm2 = 1e-6;
 
 struct Select_context {
   const Domino_reference*        reference          = nullptr;
@@ -39,11 +45,13 @@ struct Select_context {
 // formula, polarity-search when it stops at its own limits.
 // Rails follow gate_rails; every complemented rail producer, a converted
 // state's Q included, is charged one A_NOT. Policy::area converts only when
-// A_domino + A_rails < (A_register + the Liberty estimate of the D-cone logic
+// A_domino + A_rails <= (A_register + the Liberty estimate of the D-cone logic
 // above the rail cut that no other root (output, other state's D) and no rail
-// producer's own cone reaches) * (100 + area_margin_pct) / 100; a tie retains CMOS. Once the work runs out every remaining
-// candidate retains CMOS with `selection-budget`. Every converted state names a variant-0 master interface. nullopt refuses the
-// region: no frozen netlist, a two-phase netlist, a phase-one Domino cell, or an inconsistent frozen cell.
+// producer's own cone reaches) * (100 + area_margin_pct) / 100, a tie included
+// (domino-tie, U25). Once the work runs out every remaining candidate retains
+// CMOS with `selection-budget`. Every converted state names a variant-0 master
+// interface. nullopt refuses the region: no frozen netlist, a two-phase
+// netlist, a phase-one Domino cell, or an inconsistent frozen cell.
 // A register on a folded clock gate (`gating`, U21) is a plain enable register
 // on its root clock (next = en ? f : Q). The selection cut keeps the PDN within
 // the stack and input caps, moving excess f upstream as for any register; it

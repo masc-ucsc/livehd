@@ -168,7 +168,7 @@ for leg in ('area', 'area_again'):
     data = json.loads((root / leg / 'synth/qor.json.usyn.json').read_text())['physical']
     area.append([(e['name'], e['decision'], e['reason']) for r in data['regions'] for e in r['endpoints']])
 assert area[0] == area[1], area
-assert dict((n, r) for n, _, r in area[0])['q1'] in ('domino-area', 'area'), area[0]
+assert dict((n, r) for n, _, r in area[0])['q1'] in ('domino-area', 'domino-tie', 'area'), area[0]
 
 # Placement (H): the 7-cell sky130 fixture maps only plain positive-edge
 # registers, so this leg keeps q1..q3. The two converted states are movable

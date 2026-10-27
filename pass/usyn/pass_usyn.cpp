@@ -598,8 +598,8 @@ void Pass_usyn::setup() {
                        "(register and rail inverters unscaled), 25..400",
                        "100");
   m.add_label_optional("domino_area_margin_pct",
-                       "domino_provisional select=area experiment knob: convert while A_domino + A_rails < (100 + margin)% of "
-                       "the CMOS+DFF estimate, 0..1000 (0: a tie keeps CMOS)",
+                       "domino_provisional select=area experiment knob: convert while A_domino + A_rails <= (100 + margin)% of "
+                       "the CMOS+DFF estimate, 0..1000 (0: equal areas convert as domino-tie, U25)",
                        "0");
   m.add_label_optional("lef", "INTERNAL technology and cell LEFs from synth.lef; required by physical=domino_provisional", "");
   m.add_label_optional("row_access",

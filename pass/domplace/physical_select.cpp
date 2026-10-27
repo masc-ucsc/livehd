@@ -505,12 +505,18 @@ std::optional<usyn::Physical_emission> select_physical(const usyn::Stateful_regi
       }
       // An asynchronous reset needs a reset register in CMOS too.
       state.a_cmos = context.cmos_register_area + (row.reset && row.reset->async ? reference.reset_area : 0.0) + cone.area;
-      // The factor is exactly 1 at margin 0, so the default decision is unchanged.
-      if (!(state.a_domino + state.a_rail_not < *state.a_cmos * ((100.0 + options.area_margin_pct) / 100.0))) {
-        retain(Reason::area);  // a tie retains CMOS
+      // U25: at equal size the domino wins (its logic stays inside one cell,
+      // so less wiring to route). A tie is equality within kAreaTieUm2 of the
+      // threshold, which is the CMOS estimate itself at margin 0 (the factor
+      // is exactly 1); a margin raises the threshold, and a tie with the
+      // raised threshold converts too.
+      const double domino    = state.a_domino + state.a_rail_not;
+      const double threshold = *state.a_cmos * ((100.0 + options.area_margin_pct) / 100.0);
+      if (domino > threshold + kAreaTieUm2) {
+        retain(Reason::area);
         continue;
       }
-      decision = Reason::domino_area;
+      decision = domino < threshold - kAreaTieUm2 ? Reason::domino_area : Reason::domino_tie;
     }
     const auto master = make_domino_master(*state.formula,
                                            support,
