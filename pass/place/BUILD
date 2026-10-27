@@ -475,6 +475,8 @@ filegroup(
         "timing_place.cpp",
         "terminal_legalize.cpp",
         "terminal_legalize.hpp",
+        "pg_rails.cpp",
+        "pg_rails.hpp",
     ],
     visibility = ["//visibility:public"],
 )
