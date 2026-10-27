@@ -23,6 +23,11 @@ globs = ["Sims.+"]
 [[lean_lib]]
 name = "LegacySims"
 globs = ["LegacySims.+"]
+# A real design's fast model lowers to DEEPLY nested C: issue_stage_gate emits
+# 126 MB of it, nested 6736 braces deep, against clang's default limit of 2048
+# ("bracket nesting level exceeded maximum of 2048").  That is a C-frontend
+# limit, not a Lean one -- the Lean side compiled fine.  Raise it with headroom.
+moreLeancArgs = ["-fbracket-depth=32768"]
 
 # The standalone direct simulator.  Not in `defaultTargets`: linking a native
 # binary on every `lake build` would slow the proof workflow down for no gain.
