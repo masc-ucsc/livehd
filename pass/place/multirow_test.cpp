@@ -147,22 +147,25 @@ TEST(Multirow, EvenAndOddStartsTakeTheStartRowOrientation) {
 }
 
 TEST(Multirow, RailTwinsServeBothParitiesOfAlternatingRows) {
+  // (The rail-parity legality check is for the provisional domino masters.)
   // Rows alternate N/FS, so the rail stack a two-row cell needs alternates:
   // t0 (VSS outside) starts on N rows, its twin t1 (VDD outside) on FS rows.
   Fixture f(20, 6);
   f.pg_rails();
-  f.twin_pair("pair", 3);
+  f.twin_pair("__lhd_domino_pair", 3);
   for (size_t row = 0; row < 5; ++row) {
-    EXPECT_EQ(multirow_start_master(f.tech, f.fp, row, "pair", f.options), row % 2 ? "pair_t1" : "pair") << row;
-    EXPECT_EQ(multirow_start_allowed(f.tech, f.fp, row, "pair", f.options), row % 2 == 0) << row;
+    EXPECT_EQ(multirow_start_master(f.tech, f.fp, row, "__lhd_domino_pair", f.options),
+              row % 2 ? "__lhd_domino_pair_t1" : "__lhd_domino_pair")
+        << row;
+    EXPECT_EQ(multirow_start_allowed(f.tech, f.fp, row, "__lhd_domino_pair", f.options), row % 2 == 0) << row;
   }
-  const auto even = f.cell(2, .2, "pair"), odd = f.cell(10, 3.1, "pair");
+  const auto even = f.cell(2, .2, "__lhd_domino_pair"), odd = f.cell(10, 3.1, "__lhd_domino_pair");
   const auto report = anchor_multirow_cells(f.tech, f.fp, f.options);
   EXPECT_EQ(f.at(even).y, 0);
-  EXPECT_EQ(f.fp.components[even].macro, "pair");
+  EXPECT_EQ(f.fp.components[even].macro, "__lhd_domino_pair");
   EXPECT_EQ(f.at(odd).y, 300);  // its nearest start, now legal through the twin
   EXPECT_EQ(f.at(odd).orientation, Orientation::FS);
-  EXPECT_EQ(f.fp.components[odd].macro, "pair_t1");
+  EXPECT_EQ(f.fp.components[odd].macro, "__lhd_domino_pair_t1");
   EXPECT_EQ(report.odd_starts, 1);
   EXPECT_EQ(report.rail_twins, 1);
   expect_legal(f, report);
@@ -172,8 +175,8 @@ TEST(Multirow, RailTwinsServeBothParitiesOfAlternatingRows) {
   auto frame = f.fp;
   release_multirow_anchors(frame, report);
   for (const auto& [cell, wrong] : {
-           std::pair{ odd,    "pair"},
-           {even, "pair_t1"}
+           std::pair{ odd,    "__lhd_domino_pair"},
+           {even, "__lhd_domino_pair_t1"}
   }) {
     auto bad                   = frame;
     bad.components[cell].macro = wrong;
@@ -188,9 +191,9 @@ TEST(Multirow, RailTwinsServeBothParitiesOfAlternatingRows) {
   // Without a twin, starts are restricted to the master's own parity.
   Fixture solo(20, 6);
   solo.pg_rails();
-  solo.two_row("solo", 3);
-  solo.rails("solo", 0);
-  const auto lone = solo.cell(10, 3.1, "solo");
+  solo.two_row("__lhd_domino_solo", 3);
+  solo.rails("__lhd_domino_solo", 0);
+  const auto lone = solo.cell(10, 3.1, "__lhd_domino_solo");
   const auto only = anchor_multirow_cells(solo.tech, solo.fp, solo.options);
   EXPECT_EQ(solo.at(lone).y % 200, 0);
   EXPECT_EQ(only.odd_starts, 0);
@@ -199,13 +202,13 @@ TEST(Multirow, RailTwinsServeBothParitiesOfAlternatingRows) {
   // An FS-first two-row frame has only an FS start: refused by name.
   Fixture flipped(8, 2);
   flipped.pg_rails();
-  flipped.two_row("solo", 3);
-  flipped.rails("solo", 0);
+  flipped.two_row("__lhd_domino_solo", 3);
+  flipped.rails("__lhd_domino_solo", 0);
   for (auto& row : flipped.fp.rows) {
     row.orientation = row.orientation == Orientation::N ? Orientation::FS : Orientation::N;
   }
   flipped.options.access = nullptr;  // rails alone decide
-  flipped.cell(1, 0, "solo");
+  flipped.cell(1, 0, "__lhd_domino_solo");
   EXPECT_TRUE(contains(failure(flipped), "1 starts have the other PG rail parity and no rail twin fits"));
 }
 

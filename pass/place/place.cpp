@@ -3930,9 +3930,11 @@ void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, double 
           throw std::runtime_error("cell orientation differs from row: " + a.name);
         }
       }
-      if (spanned.size() > 1) {
+      if (spanned.size() > 1 && livehd::is_provisional_domino_cell(a.macro)) {
         // Its PG rails must land on rails of the same polarity (OpenROAD's
-        // check_placement rule); a master with rails is never passed unchecked.
+        // check_placement rule); a provisional domino master with rails is
+        // never passed unchecked. A library's own multi-row cells keep the
+        // legalizer's placement (their rows are its contract, not ours).
         if (!rails) {
           rails.emplace(tech);
         }

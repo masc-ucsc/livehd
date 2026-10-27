@@ -74,7 +74,10 @@ std::optional<std::array<Pg_rail, 2>> site_row_rails(const ph::Technology& tech,
       continue;  // multi-row masters and cells without edge rails
     }
     const std::array<Pg_rail, 2> found{edges[0], edges[1]};
-    if (found[0] == found[1] || (result && *result != found)) {
+    if (found[0] == found[1]) {
+      continue;  // one polarity on both edges (a tap or well cell): it says nothing of the row
+    }
+    if (result && *result != found) {
       return std::nullopt;
     }
     result = found;

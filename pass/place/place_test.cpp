@@ -184,8 +184,8 @@ TEST(Placement, RowLegalityChecksEveryBandOfTwoRowCells) {
   const auto  sw            = std::llround(tech.sites.at("unithd").width * tech.dbu);
   const auto  rh            = std::llround(tech.sites.at("unithd").height * tech.dbu);
   const auto& inv           = tech.macros.at("sky130_fd_sc_hd__inv_1");
-  tech.macros["two_row"]    = two_row_template(inv, 0);
-  tech.macros["two_row_t1"] = two_row_template(inv, 1);
+  tech.macros["__lhd_domino_two_row"]    = two_row_template(inv, 0);
+  tech.macros["__lhd_domino_two_row_t1"] = two_row_template(inv, 1);
   const auto          width = std::llround(inv.width * tech.dbu);
   physical::Floorplan fp;
   for (int r = 0; r < 4; ++r) {
@@ -202,8 +202,8 @@ TEST(Placement, RowLegalityChecksEveryBandOfTwoRowCells) {
     fp.components.push_back(c);
     return fp.components.size() - 1;
   };
-  const auto even = add("two_row", 0, 0, Ann_place::Orientation::N);
-  const auto odd  = add("two_row_t1", 4 * sw, rh, Ann_place::Orientation::FS);
+  const auto even = add("__lhd_domino_two_row", 0, 0, Ann_place::Orientation::N);
+  const auto odd  = add("__lhd_domino_two_row_t1", 4 * sw, rh, Ann_place::Orientation::FS);
   EXPECT_NO_THROW(check_legality(tech, fp));
   // The other template on either start puts a rail on the opposite polarity.
   const auto expect_parity = [&](const char* why) {
@@ -214,23 +214,40 @@ TEST(Placement, RowLegalityChecksEveryBandOfTwoRowCells) {
       EXPECT_NE(std::string(error.what()).find("rail parity"), std::string::npos) << error.what();
     }
   };
-  fp.components[odd].macro = "two_row";
+  fp.components[odd].macro = "__lhd_domino_two_row";
   expect_parity("t0 on an FS start");
-  fp.components[odd].macro  = "two_row_t1";
-  fp.components[even].macro = "two_row_t1";
+  fp.components[odd].macro  = "__lhd_domino_two_row_t1";
+  fp.components[even].macro = "__lhd_domino_two_row_t1";
   expect_parity("t1 on an N start");
-  fp.components[even].macro = "two_row";
+  fp.components[even].macro = "__lhd_domino_two_row";
   // A rail on one edge only is still checked; unknown row rails are refused.
   auto one_rail             = tech;
-  one_rail.macros.at("two_row").pins.at("VPWR").shapes.clear();
-  one_rail.macros.at("two_row").pins.at("VGND").shapes.resize(1);  // the bottom edge alone
+  one_rail.macros.at("__lhd_domino_two_row").pins.at("VPWR").shapes.clear();
+  one_rail.macros.at("__lhd_domino_two_row").pins.at("VGND").shapes.resize(1);  // the bottom edge alone
   EXPECT_NO_THROW(check_legality(one_rail, fp));
   for (auto& [name, m] : one_rail.macros) {
-    if (m.height < tech.macros.at("two_row").height) {
+    if (m.height < tech.macros.at("__lhd_domino_two_row").height) {
       m.pins.erase("VPWR");  // no one-row cell gives the row rails
     }
   }
   EXPECT_THROW(check_legality(one_rail, fp), std::runtime_error);
+  // A tap-like one-row cell with one polarity on both edges says nothing of
+  // the row rails: they stay known.
+  auto tapped                       = tech;
+  auto tap                          = inv;
+  tap.pins.at("VPWR").shapes        = {};
+  auto&      tap_ground             = tap.pins.at("VGND").shapes;
+  const auto ground                 = tap_ground.front();
+  tap_ground                        = {ground, ground};
+  tap_ground[1].rect                = ground.rect.translated(0, inv.height);
+  tapped.macros["tap_one_polarity"] = tap;
+  EXPECT_NO_THROW(check_legality(tapped, fp));
+  // A library's own multi-row master is not ours to check: the same wrong
+  // template under a non-provisional name is accepted.
+  tech.macros["lib_two_row_t1"] = tech.macros.at("__lhd_domino_two_row_t1");
+  fp.components[even].macro     = "lib_two_row_t1";
+  EXPECT_NO_THROW(check_legality(tech, fp));
+  fp.components[even].macro = "__lhd_domino_two_row";
   // A single-row cell in the upper band of the even-start cell overlaps it.
   const auto upper = add("sky130_fd_sc_hd__inv_1", 0, rh, Ann_place::Orientation::FS);
   EXPECT_THROW(check_legality(tech, fp), std::runtime_error);
