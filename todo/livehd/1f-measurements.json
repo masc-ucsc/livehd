@@ -32739,6 +32739,51 @@
         }
       },
       "limitations": "B minimax finalSTA remains3.719s>3s and totalSTA share>10%; G new coral model discrepancy; broader A-J acceptance remains active"
+    },
+    "neighbors_review": {
+      "implementation": "Indexed quadrant queries above512 distinct locations; existing quadratic scan at512 or fewer; existing1000-location limit and spatial fallback unchanged",
+      "source_base": "LiveHD09831442e, DREAMPlace4a006e9, OpenTimer3197d53",
+      "tests": {
+        "suites_passed": 4,
+        "log": "/tmp/1f-neighbors-review-tests.log",
+        "neighbor_equivalence": "120 seeded randomized inputs plus four1000-location geometries, exact ordered adjacency comparison against the original scan"
+      },
+      "fixed_placements": {
+        "lfsr": {
+          "wall_s": 1.6309515280881897,
+          "timing_identical": true,
+          "wns_ps": -60.031761169433594,
+          "parasitics_identical": true
+        },
+        "minimax": {
+          "wall_s": 4.9737577070482075,
+          "timing_identical": true,
+          "wns_ps": -990.4119262695312,
+          "parasitics_identical": true
+        },
+        "NVDLA__partition_m": {
+          "wall_s": 6.317010128055699,
+          "timing_identical": true,
+          "wns_ps": -916.8967895507812,
+          "parasitics_identical": true
+        },
+        "coralnpu": {
+          "wall_s": 53.91457292495761,
+          "timing_identical": true,
+          "wns_ps": -16154.92578125,
+          "parasitics_identical": true
+        }
+      },
+      "protocol": "Frozen v30 placements and saved configs from ceff_v31; native timing JSON values identical and parasitics JSON SHA256 identical against prior precise outputs; common defaults,100ps clocks,reset false paths; CPU12",
+      "microbenchmark": {
+        "scope": "Standalone neighbor discovery only, seeded sparse locations,200 repeats at1000pins,CPU12",
+        "old_seconds": 0.400265,
+        "indexed_seconds": 0.198146,
+        "source": "/tmp/1f-neighbors-review/bench.cpp",
+        "log": "/tmp/1f-neighbors-review/microbenchmark.txt"
+      },
+      "binary_sha256": "098b81222c639ae109eb78c2a2d55aeefe7515cc472583975056020881fc63e3",
+      "limitations": "No new full-flow placement speedup claimed; high-fanout timing-model change deferred, G model discrepancy remains unresolved"
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",

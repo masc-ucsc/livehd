@@ -22,6 +22,20 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>RC timing-tree neighbor discovery now uses indexed quadrant queries above
+512 distinct locations and retains the cheaper scan for smaller nets. The
+1000-location timing-tree limit and the spatial fallback remain unchanged;
+removing that limit is a separate, unvalidated model change. Exact neighbor
+ordering agrees with the original scan on 120 randomized inputs and four
+1000-location geometries, including coordinate ties and dense visibility.
+All four targeted optimized placement/timing suites pass. A standalone sparse
+1000-pin neighbor microbenchmark takes 0.198 s versus 0.400 s across 200 repeats;
+this is not a full-placement speedup claim. Re-evaluating saved lfsr, minimax,
+partition_m and coralnpu placements produces byte-identical parasitics JSON and
+identical timing JSON values, including WNS, against the previous precise
+evaluator. Evidence is in <code>1f-measurements.json</code> under
+<code>runs.neighbors_review</code>.</p>
+
 <p>Detailed OpenTimer capacitance fitting now samples both bounds and alternates
 bracketed interpolation with bisection. It retains the same waveform model and
 tightens the charge-residual convergence target from 1e-5 to 1e-7. A 980-case load sweep preserves

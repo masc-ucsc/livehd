@@ -128,6 +128,108 @@ Steiner_topology steiner_topology(const std::vector<Steiner_location>& pins) {
   return out;
 }
 
+std::vector<std::vector<size_t>> detail::timing_neighbors(const std::vector<Steiner_location>& locations) {
+  const size_t count = locations.size();
+  // Linear scans have lower setup cost on small nets; indexed queries pay off
+  // only once the quadratic scan dominates. This changes no neighbor choices.
+  if (count <= 512) {
+    std::vector<size_t> order(count);
+    std::iota(order.begin(), order.end(), 0);
+    std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+      return std::pair{locations[a].second, locations[a].first} < std::pair{locations[b].second, locations[b].first};
+    });
+    std::vector<std::vector<size_t>> neighbors(count);
+    std::vector<int64_t>             upper_right(count, std::numeric_limits<int64_t>::max());
+    std::vector<int64_t>             upper_left(count, std::numeric_limits<int64_t>::min());
+    for (size_t idx = 0; idx < count; ++idx) {
+      const auto n = order[idx];
+      const auto x = locations[n].first;
+      for (size_t i = 0; i < idx; ++i) {
+        const auto below = order[i];
+        const auto bx    = locations[below].first;
+        if (bx <= x && x < upper_right[below]) {
+          neighbors[below].push_back(n);
+          upper_right[below] = x;
+        } else if (upper_left[below] < x && x < bx) {
+          neighbors[below].push_back(n);
+          upper_left[below] = x;
+        }
+      }
+      int64_t right = std::numeric_limits<int64_t>::max(), left = std::numeric_limits<int64_t>::min();
+      for (size_t i = idx; i > 0; --i) {
+        const auto below = order[i - 1];
+        const auto bx    = locations[below].first;
+        if (x <= bx && bx < right) {
+          neighbors[n].push_back(below);
+          right = bx;
+        } else if (left < bx && bx < x) {
+          neighbors[n].push_back(below);
+          left = bx;
+        }
+      }
+    }
+    return neighbors;
+  }
+  std::vector<size_t> order(count), x_rank(count);
+  std::iota(order.begin(), order.end(), 0);
+  std::vector<int64_t> xs;
+  for (const auto& p : locations) {
+    xs.push_back(p.first);
+  }
+  std::sort(xs.begin(), xs.end());
+  xs.erase(std::unique(xs.begin(), xs.end()), xs.end());
+  for (size_t i = 0; i < count; ++i) {
+    x_rank[i] = std::lower_bound(xs.begin(), xs.end(), locations[i].first) - xs.begin();
+  }
+  std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
+    return std::pair{locations[a].second, locations[a].first} < std::pair{locations[b].second, locations[b].first};
+  });
+  size_t base = 1;
+  while (base < xs.size()) {
+    base *= 2;
+  }
+  std::vector<size_t> tree(2 * base);
+  const auto          latest = [&](size_t left, size_t right) {
+    size_t stamp = 0;
+    for (left += base, right += base; left < right; left /= 2, right /= 2) {
+      if (left & 1) {
+        stamp = std::max(stamp, tree[left++]);
+      }
+      if (right & 1) {
+        stamp = std::max(stamp, tree[--right]);
+      }
+    }
+    return stamp;
+  };
+  std::vector<std::vector<size_t>> neighbors(count);
+  for (bool reverse : {false, true}) {
+    std::fill(tree.begin(), tree.end(), 0);
+    for (size_t step = 0; step < count; ++step) {
+      const size_t n    = order[reverse ? count - step - 1 : step];
+      const size_t x    = x_rank[n];
+      size_t       left = latest(0, x), right = latest(x, xs.size());
+      // The newest visible point in each quadrant bounds the next query.
+      // Merge the quadrants by sweep time, reproducing the old scan's order.
+      while (left || right) {
+        const size_t stamp = std::max(left, right);
+        const size_t other = order[reverse ? count - stamp : stamp - 1];
+        neighbors[n].push_back(other);
+        if (left > right) {
+          left = latest(x_rank[other] + 1, x);
+        } else {
+          right = latest(x, x_rank[other]);
+        }
+      }
+      size_t node = base + x;
+      tree[node]  = step + 1;
+      while ((node /= 2) != 0) {
+        tree[node] = std::max(tree[2 * node], tree[2 * node + 1]);
+      }
+    }
+  }
+  return neighbors;
+}
+
 Steiner_topology timing_steiner_topology(const std::vector<Steiner_location>& pins, size_t driver) {
   if (driver >= pins.size()) {
     throw std::invalid_argument("timing Steiner topology requires a valid driver");
@@ -158,49 +260,13 @@ Steiner_topology timing_steiner_topology(const std::vector<Steiner_location>& pi
   const auto distance = [&](size_t a, size_t b) {
     return std::abs(out.locations[a].first - out.locations[b].first) + std::abs(out.locations[a].second - out.locations[b].second);
   };
-  // Empty-rectangle neighbors from Prim-Dijkstra Revisited. A quadrant sweep
-  // retains only points whose bounding box contains no intervening terminal.
-  // Keep this bounded by the same degree limit as FLUTE; larger nets are
-  // partitioned spatially by the RC caller.
-  std::vector<size_t> order(count);
-  std::iota(order.begin(), order.end(), 0);
-  std::sort(order.begin(), order.end(), [&](size_t a, size_t b) {
-    return std::pair{out.locations[a].second, out.locations[a].first} < std::pair{out.locations[b].second, out.locations[b].first};
-  });
-  std::vector<std::vector<size_t>> neighbors(count);
-  std::vector<int64_t>             upper_right(count, std::numeric_limits<int64_t>::max());
-  std::vector<int64_t>             upper_left(count, std::numeric_limits<int64_t>::min());
-  for (size_t idx = 0; idx < count; ++idx) {
-    const auto n = order[idx];
-    const auto x = out.locations[n].first;
-    for (size_t i = 0; i < idx; ++i) {
-      const auto below = order[i];
-      const auto bx    = out.locations[below].first;
-      if (bx <= x && x < upper_right[below]) {
-        neighbors[below].push_back(n);
-        upper_right[below] = x;
-      } else if (upper_left[below] < x && x < bx) {
-        neighbors[below].push_back(n);
-        upper_left[below] = x;
-      }
-    }
-    int64_t right = std::numeric_limits<int64_t>::max(), left = std::numeric_limits<int64_t>::min();
-    for (size_t i = idx; i > 0; --i) {
-      const auto below = order[i - 1];
-      const auto bx    = out.locations[below].first;
-      if (x <= bx && bx < right) {
-        neighbors[n].push_back(below);
-        right = bx;
-      } else if (left < bx && bx < x) {
-        neighbors[n].push_back(below);
-        left = bx;
-      }
-    }
-  }
+  // Indexed quadrant queries cost O((pins + visible edges) log pins), rather
+  // than scanning every earlier pin, without changing neighbor or tie order.
+  const auto neighbors = detail::timing_neighbors(out.locations);
   // Alpha weights distance already traveled from the driver. An unrooted
   // minimum-length tree can leave distant sinks behind long shared RC trunks.
   // The 0.3 balance matches the placement estimator used for independent STA.
-  using Search = std::tuple<float, size_t, size_t, int64_t, size_t>;
+  using Search         = std::tuple<float, size_t, size_t, int64_t, size_t>;
   std::priority_queue<Search, std::vector<Search>, std::greater<Search>> search;
   std::vector<float>                                                     weights(count, std::numeric_limits<float>::infinity());
   std::vector<size_t>                                                    generations(count);
