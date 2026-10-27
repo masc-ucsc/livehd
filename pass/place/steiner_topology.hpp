@@ -22,4 +22,9 @@ void             initialize_flute_tables();
 // avoidance. Edges can require a bend. Does not constitute legal metal.
 // Up to 1000 distinct locations; invalid/out-of-range input throws.
 Steiner_topology steiner_topology(const std::vector<Steiner_location>& pins);
+// Driver-aware placement RC tree. Prim-Dijkstra trades shared wire length for
+// source-to-sink distance (alpha 0.3), then shares overlapping adjacent edges.
+// The geometric router above remains independent of this timing estimate.
+// Same input bounds as steiner_topology; driver indexes the input pins.
+Steiner_topology timing_steiner_topology(const std::vector<Steiner_location>& pins, size_t driver);
 }  // namespace livehd::placement

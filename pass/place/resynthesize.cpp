@@ -10,9 +10,11 @@
 #include <stdexcept>
 
 #include "attrs.hpp"
+#include "growth_budget.hpp"
 #include "node_util.hpp"
 #include "pass/liberty/liberty_dff.hpp"
 #include "pass/partition/flatten.hpp"
+#include "placement_technology.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -405,7 +407,8 @@ void splice(hhds::Graph& graph, const Cone& cone, const synth::Cone_mapping& map
 }
 }  // namespace
 Repair_result resynthesize_cones(Result initial, const Options& requested, const Evaluate& evaluate,
-                                 const synth::Cone_provider& provider) {
+                                 const synth::Cone_provider& provider, std::optional<Timing_feedback> prior_timing,
+                                 const Trial_admission& admit_trial) {
   std::optional<Options> resolved_options;
   if (requested.cell_halo) {
     resolved_options = final_cell_options(requested);
@@ -419,16 +422,16 @@ Repair_result resynthesize_cones(Result initial, const Options& requested, const
   }
   const auto    prior_qor = initial.qor;
   Repair_result result;
-  result.placed   = std::move(initial);
-  const auto tech = physical::read_lef(options.lefs);
-  Cells      cells;
-  for (auto c : liberty::scan_comb_cells(options.liberty)) {
+  result.placed    = std::move(initial);
+  const auto& tech = options.technology().lef;
+  Cells       cells;
+  for (auto c : options.technology().cells.combinational) {
     if (!c.physical_barrier && liberty::cell_truth(c) && tech.macros.contains(c.name)) {
       cells.emplace(c.name, std::move(c));
     }
   }
-  auto                                       score = evaluate(result.placed);
-  rapidjson::StringBuffer                    trace;
+  auto                    score = prior_timing && !prior_timing->ranking_only ? std::move(*prior_timing) : evaluate(result.placed);
+  rapidjson::StringBuffer trace;
   rapidjson::Writer<rapidjson::StringBuffer> w(trace);
   w.StartObject();
   w.Key("model");
@@ -440,6 +443,9 @@ Repair_result resynthesize_cones(Result initial, const Options& requested, const
   std::set<std::string> tried;
   unsigned              attempts = 0, accepted = 0;
   while (attempts < 4) {
+    if (admit_trial && !admit_trial()) {
+      break;
+    }
     std::string root;
     for (auto it = score.path.rbegin(); it != score.path.rend(); ++it) {
       const auto colon = it->rfind(':');
@@ -546,8 +552,9 @@ Repair_result resynthesize_cones(Result initial, const Options& requested, const
           trial.changed_cells.push_back(c.name);
         }
       }
-      trial.output_dir  = options.output_dir + "/resynth/trial_" + std::to_string(attempts);
-      auto       owner  = std::make_unique<hhds::GraphLibrary>();
+      trial.output_dir = options.output_dir + "/resynth/trial_" + std::to_string(attempts);
+      auto owner       = std::make_unique<hhds::GraphLibrary>();
+      require_growth_budget(*graph, trial);
       auto       placed = place(*graph, *owner, trial);
       const auto next   = evaluate(placed);
       w.Key("delay");
@@ -574,6 +581,8 @@ Repair_result resynthesize_cones(Result initial, const Options& requested, const
   w.Uint(attempts);
   w.Key("accepted");
   w.Uint(accepted);
+  w.Key("timing_budget_exhausted");
+  w.Bool(admit_trial && !admit_trial());
   w.Key("after_delay");
   w.Double(score.delay);
   w.EndObject();
@@ -597,6 +606,7 @@ Repair_result resynthesize_cones(Result initial, const Options& requested, const
   result.placed.qor = out.GetString();
   std::ofstream(options.output_dir + "/qor.json") << result.placed.qor << '\n';
   std::ofstream(options.output_dir + "/resynth.json") << result.report << '\n';
+  result.timing = std::move(score);
   return result;
 }
 }  // namespace livehd::placement

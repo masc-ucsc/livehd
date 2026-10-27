@@ -67,9 +67,9 @@ TEST(IoTiming, CrossingColorsAndSingleAutomaticRound) {
   options.capacitance_ff_um = .2;
   options.output_dir        = std::string(std::getenv("TEST_TMPDIR")) + "/io_flow";
   std::filesystem::remove_all(options.output_dir);
-  auto       store    = std::make_shared<synth::Io_store>(options.output_dir + "/abc_cache", 1000);
-  unsigned timing_calls = 0;
-  const auto evaluate = [&](const Result& placed) {
+  auto       store        = std::make_shared<synth::Io_store>(options.output_dir + "/abc_cache", 1000);
+  unsigned   timing_calls = 0;
+  const auto evaluate     = [&](const Result& placed) {
     ++timing_calls;
     Timing_feedback timing;
     timing.time_unit_ps = 1;
@@ -113,16 +113,59 @@ TEST(IoTiming, CrossingColorsAndSingleAutomaticRound) {
       placed.parasitics->nets.push_back(std::move(net));
     }
   }
+  // Per-color synthesis budgets can be negative even when the SDC-constrained
+  // physical design meets setup. Such a stage must not remap or restart.
+  auto met_options          = options;
+  met_options.output_dir   += "/setup_met";
+  auto           met_store  = std::make_shared<synth::Io_store>(met_options.output_dir + "/abc_cache", 1000);
+  Io_timing_flow met(
+      top,
+      met_options,
+      met_store,
+      {
+          {"library", options.liberty},
+          {  "delay",          "1000"}
+  },
+      [&](const Result& state) {
+        auto feedback = evaluate(state);
+        feedback.wns  = 10;
+        return feedback;
+      },
+      5);
+  EXPECT_FALSE(met.after_stage(Placement_stage::final, placed));
+  rapidjson::Document met_report;
+  met_report.Parse(met.report().c_str());
+  EXPECT_EQ(met_report["setup_met_stages"].GetUint(), 1U);
+  EXPECT_EQ(met_report["restarts"].GetUint(), 0U);
+  EXPECT_TRUE(met_report["colors"].Empty());
+  auto completed = met.take_final_timing();
+  ASSERT_TRUE(completed);
+  EXPECT_EQ(completed->wns, 10);
+  EXPECT_FALSE(met.take_final_timing());
+  const auto calls_before_handoff = timing_calls;
+  EXPECT_FALSE(met.after_stage(Placement_stage::final, placed, completed));
+  EXPECT_EQ(timing_calls, calls_before_handoff);
+  completed->ranking_only = true;
+  EXPECT_FALSE(met.after_stage(Placement_stage::final, placed, completed));
+  EXPECT_EQ(timing_calls, calls_before_handoff + 1);
+
   // Probe the saved GP measurement before the automatic remap below removes
   // the even inverter chains. A high trigger threshold keeps this source body
   // unchanged, so arrivals and wire lengths remain independently observable.
-  auto probe_options = options;
-  probe_options.macro_legalize_cells = false;
-  probe_options.output_dir += "/gp_probe";
-  auto probe_store = std::make_shared<synth::Io_store>(probe_options.output_dir + "/abc_cache", 1000);
-  Io_timing_flow probe(top, probe_options, probe_store,
-                       {{"library", options.liberty}, {"delay", "1000"}}, evaluate, 100);
-  const auto calls_before_missing = timing_calls;
+  auto probe_options                  = options;
+  probe_options.macro_legalize_cells  = false;
+  probe_options.output_dir           += "/gp_probe";
+  auto           probe_store          = std::make_shared<synth::Io_store>(probe_options.output_dir + "/abc_cache", 1000);
+  Io_timing_flow probe(top,
+                       probe_options,
+                       probe_store,
+                       {
+                           {"library", options.liberty},
+                           {  "delay",          "1000"}
+  },
+                       evaluate,
+                       100);
+  const auto     calls_before_missing = timing_calls;
   EXPECT_THROW(probe.after_stage(Placement_stage::macro, placed), std::runtime_error);
   EXPECT_EQ(timing_calls, calls_before_missing);
   placed.macro_gp_timing = Macro_gp_timing{evaluate(placed), placed.parasitics, placed.pin_locations};
@@ -139,15 +182,26 @@ TEST(IoTiming, CrossingColorsAndSingleAutomaticRound) {
   const auto calls_before_macro = timing_calls;
   EXPECT_FALSE(probe.after_stage(Placement_stage::macro, placed));
   EXPECT_EQ(timing_calls, calls_before_macro);
+  EXPECT_FALSE(probe.take_final_timing());  // A pre-snap macro frame cannot seed final repair.
   EXPECT_EQ(probe_store->rows.at("top__c1").placed.inputs.at("a[0]"), 850);
   EXPECT_EQ(probe_store->global_wire.length_um.at(1), 10);
+  // Ranking samples deliberately omit arrivals/required times. Resynthesis
+  // must measure the saved GP RC frame once before harvesting its boundaries.
+  placed.macro_gp_timing->timing.ranking_only = true;
+  placed.macro_gp_timing->timing.pins.clear();
+  const auto calls_before_ranked_macro = timing_calls;
+  EXPECT_FALSE(probe.after_stage(Placement_stage::macro, placed));
+  EXPECT_EQ(timing_calls, calls_before_ranked_macro + 1);
+  EXPECT_EQ(probe_store->rows.at("top__c1").placed.inputs.at("a[0]"), 950);
+  EXPECT_EQ(probe_store->global_wire.length_um.at(1), 10);
   EXPECT_FALSE(probe.after_stage(Placement_stage::final, placed));
-  EXPECT_EQ(timing_calls, calls_before_macro + 1);
+  EXPECT_EQ(timing_calls, calls_before_macro + 2);
   EXPECT_EQ(probe_store->rows.at("top__c1").placed.inputs.at("a[0]"), 950);
   EXPECT_EQ(probe_store->global_wire.length_um.at(1), 1000);
   placed.parasitics = placed.macro_gp_timing->parasitics;
   placed.macro_gp_timing.reset();
   EXPECT_TRUE(flow.after_stage(Placement_stage::floorplan, placed));
+  EXPECT_FALSE(flow.take_final_timing());  // A remapped source needs fresh placement/timing.
   EXPECT_EQ(store->wires.size(), 2);
   EXPECT_EQ(store->rows.at("top__c1").used.inputs.at("a[0]"), 950);
   EXPECT_EQ(store->rows.at("top__c2").used.inputs.at("a[0]"), 950);

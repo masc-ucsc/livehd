@@ -1,5 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
@@ -31,6 +32,7 @@ struct Io_decision {
   bool                    checked = false, fired = false, accepted = false;
   double                  slack_before_ps = 0, slack_after_ps = 0, delta_ps = 0, seconds = 0;
   double                  no_wire_delay_ps = 0, wire_delay_ps = 0;
+  double                  required_period_ps = 0, requested_period_ps = 0;
   double                  area  = 0;
   unsigned                gates = 0;
   std::vector<Io_binding> bindings;
@@ -55,6 +57,10 @@ Io_mapper make_io_mapper(const std::string& name, const std::map<std::string, st
 // the GP timing callback. A cache miss invalidates timing, but not wire loads.
 class Io_store {
 public:
+  // Query a complete private replacement or a staged master-swap proposal
+  // before it is published. No reservation is consumed by this callback.
+  using Rewrite_admission = std::function<bool(hhds::Graph&, const std::map<uint64_t, std::string>&)>;
+  Rewrite_admission admit_physical_rewrite;
   struct Mapping {
     std::string flow;
     double      budget_ps = 0;
@@ -64,12 +70,24 @@ public:
   struct Row {
     std::string    netlist, stage, run;
     Io_environment used, placed;
+    double         failed_budget_ps   = 0;
+    double         required_period_ps = 0, requested_period_ps = 0;
+    Io_environment target_environment;
   };
   explicit Io_store(std::string directory, double period_ps, bool persistent = true, std::string timing_identity = {});
   void                       invalidate(const std::string& module);
   void                       mapping(const std::string& module, Mapping value);
   bool                       record(const std::string& module, std::string identity, std::string stage, Io_environment environment);
   void                       used(const std::string& module, std::string identity, const Io_environment& environment);
+  // Boundary cell resizing changes a mapped identity without a new synthesis
+  // attempt. Keep its target history but discard the old placement sample.
+  void                       refined(const std::string& module, std::string identity);
+  void                       failed_target(const std::string& module, std::string identity, double budget_ps);
+  bool                       target_failed(const std::string& module, const std::string& identity, double budget_ps) const;
+  void                       covered_target(const std::string& module, std::string identity, double period_ps, double requested_ps,
+                                            const Io_environment& environment);
+  bool                       target_covered(const std::string& module, const std::string& identity, double period_ps,
+                                            const Io_environment& environment) const;
   void                       save() const;
   const Wire_load&           wire(const std::string& module) const;
   std::map<std::string, Row> rows;

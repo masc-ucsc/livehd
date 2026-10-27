@@ -223,4 +223,42 @@ TEST(PinAdjust, MaskedClockSinkLocationsDoNotAffectIoAssignment) {
   EXPECT_EQ(check_clock_io(false, true, false), (std::pair<int64_t, int64_t>{0, 0}));
 }
 }  // namespace
+TEST(PinAdjust, CircularNeighborsHandleSmallBusesAndWraparound) {
+  for (int lanes : {2, 3, 4, 9}) {
+    Fixture    f(lanes);
+    const auto point = [](double t) -> std::pair<int, int> {
+      if (t < 100) {
+        return {0, std::lround(t)};
+      }
+      if (t < 200) {
+        return {std::lround(t - 100), 100};
+      }
+      if (t < 300) {
+        return {100, std::lround(300 - t)};
+      }
+      return {std::lround(400 - t), 0};
+    };
+    for (int i = 0; i < lanes; ++i) {
+      const auto [x, y]   = point((i + .5) * 400 / lanes);
+      f.fp.terminals[i].x = f.d.node_x[lanes + i] = x;
+      f.fp.terminals[i].y = f.d.node_y[lanes + i] = y;
+    }
+    f.fp.terminals[1].status = physical::Status::FIXED;
+    const auto anchor        = f.fp.terminals[1];
+    for (int step = 0; step < 4; ++step) {
+      // Preferred locations cross existing lanes and the perimeter origin.
+      for (int i = 0; i < lanes; ++i) {
+        const auto [x, y] = point(std::fmod((lanes - i + step + .5) * 400 / lanes, 400));
+        f.d.node_x[i]     = x;
+        f.d.node_y[i]     = y;
+      }
+      const auto stats = adjust_fp_pins(f.d, f.fp, f.bus, f.bits, 5, .5, 0, false);
+      EXPECT_LE(stats.after, stats.before + 1e-10);
+      EXPECT_EQ(f.fp.terminals[1].x, anchor.x);
+      EXPECT_EQ(f.fp.terminals[1].y, anchor.y);
+      f.check();
+    }
+  }
+}
+
 }  // namespace livehd::placement

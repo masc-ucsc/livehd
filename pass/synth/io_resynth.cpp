@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "io_resynth.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
@@ -210,6 +211,21 @@ Io_store::Io_store(std::string dir, double period, bool persistent, std::string 
                     && v.HasMember("placed"));
       rows[m.name.GetString()]
           = {v["netlist"].GetString(), v["stage"].GetString(), v["run"].GetString(), read_env(v["used"]), read_env(v["placed"])};
+      if (compatible && v.HasMember("failed_budget_ps")) {
+        require_state(v["failed_budget_ps"].IsNumber() && std::isfinite(v["failed_budget_ps"].GetDouble())
+                      && v["failed_budget_ps"].GetDouble() >= 0);
+        rows.at(m.name.GetString()).failed_budget_ps = v["failed_budget_ps"].GetDouble();
+      }
+      if (compatible && v.HasMember("requested_period_ps")) {
+        require_state(v["requested_period_ps"].IsNumber() && v.HasMember("required_period_ps") && v["required_period_ps"].IsNumber()
+                      && v.HasMember("target_environment"));
+        auto& row               = rows.at(m.name.GetString());
+        row.requested_period_ps = v["requested_period_ps"].GetDouble();
+        row.required_period_ps  = v["required_period_ps"].GetDouble();
+        require_state(std::isfinite(row.requested_period_ps) && row.requested_period_ps >= 0
+                      && std::isfinite(row.required_period_ps) && row.required_period_ps >= row.requested_period_ps);
+        row.target_environment = read_env(v["target_environment"]);
+      }
       if (!compatible) {
         // Keep the constraints actually used to map this body, but never
         // trigger a pre-placement remap from an obsolete timer's measurement.
@@ -258,9 +274,71 @@ void Io_store::used(const std::string& module, std::string identity, const Io_en
   if (row.netlist != identity) {
     row.stage.clear();
     row.placed = {};
+    row.failed_budget_ps   = 0;
+    row.required_period_ps = row.requested_period_ps = 0;
+    row.target_environment                           = {};
   }
   row.netlist = std::move(identity);
   row.used    = env;
+}
+void Io_store::refined(const std::string& module, std::string identity) {
+  const auto found = rows.find(module);
+  if (found != rows.end() && found->second.netlist != identity) {
+    auto& row   = found->second;
+    row.netlist = std::move(identity);
+    row.stage.clear();
+    row.placed = {};
+  }
+}
+void Io_store::failed_target(const std::string& module, std::string identity, double budget) {
+  if (!std::isfinite(budget) || budget <= 0) {
+    throw std::invalid_argument("failed synthesis target must be a positive finite period");
+  }
+  std::lock_guard lock(mapping_mutex_);
+  auto&           row = rows[module];
+  if (row.netlist != identity) {
+    row         = {};
+    row.netlist = std::move(identity);
+  }
+  // Missing an easier (longer-period) target also rules out tighter targets.
+  row.failed_budget_ps = std::max(row.failed_budget_ps, budget);
+}
+bool Io_store::target_failed(const std::string& module, const std::string& identity, double budget) const {
+  const auto found = rows.find(module);
+  return budget > 0 && found != rows.end() && found->second.netlist == identity && budget <= found->second.failed_budget_ps;
+}
+void Io_store::covered_target(const std::string& module, std::string identity, double period, double request,
+                              const Io_environment& env) {
+  if (!std::isfinite(period) || !std::isfinite(request) || request <= 0 || request > period) {
+    throw std::invalid_argument("invalid synthesis target margin");
+  }
+  auto& row = rows[module];
+  if (row.netlist != identity) {
+    row         = {};
+    row.netlist = std::move(identity);
+  }
+  row.required_period_ps  = period;
+  row.requested_period_ps = request;
+  row.target_environment  = env;
+}
+bool Io_store::target_covered(const std::string& module, const std::string& identity, double period,
+                              const Io_environment& env) const {
+  const auto found = rows.find(module);
+  if (found == rows.end() || found->second.netlist != identity || found->second.requested_period_ps <= 0) {
+    return false;
+  }
+  const auto& row           = found->second;
+  double      arrival_delta = 0, departure_delta = 0;
+  for (const auto& [pin, arrival] : env.inputs) {
+    const auto old = row.target_environment.inputs.find(pin);
+    arrival_delta  = std::max(arrival_delta, arrival - (old == row.target_environment.inputs.end() ? 0 : old->second));
+  }
+  for (const auto& [pin, required] : env.required) {
+    const auto   old           = row.target_environment.required.find(pin);
+    const double old_departure = old == row.target_environment.required.end() ? 0 : row.required_period_ps - old->second;
+    departure_delta            = std::max(departure_delta, period - required - old_departure);
+  }
+  return period - arrival_delta - departure_delta >= row.requested_period_ps;
 }
 const Wire_load& Io_store::wire(const std::string& module) const {
   const auto found = wires.find(module);
@@ -291,6 +369,14 @@ void Io_store::save() const {
     t.String(row.stage.c_str());
     t.Key("run");
     t.String(row.run.c_str());
+    t.Key("failed_budget_ps");
+    t.Double(row.failed_budget_ps);
+    t.Key("required_period_ps");
+    t.Double(row.required_period_ps);
+    t.Key("requested_period_ps");
+    t.Double(row.requested_period_ps);
+    t.Key("target_environment");
+    env_json(t, row.target_environment);
     t.Key("used");
     env_json(t, row.used);
     t.Key("placed");

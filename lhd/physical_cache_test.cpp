@@ -62,8 +62,13 @@ TEST_F(PhysicalCache, RestoresTheCompleteRepairedGenerationAcrossFreshInstances)
     EXPECT_EQ((std::string{std::istreambuf_iterator<char>(guard), {}}), "{\"accepted\":true}");
     std::ifstream timing(root / "restored/place/io_resynth.json");
     EXPECT_EQ((std::string{std::istreambuf_iterator<char>(timing), {}}), "{\"boundary_ps\":213.3134765625}");
-    for (const auto* name : {"preroute.json", "power_grid.json", "magnet.json", "macro_animation.html", "macro/fixed.def",
-                             "macro/gp_history.json", "macro/gp_history.jsonl"}) {
+    for (const auto* name : {"preroute.json",
+                             "power_grid.json",
+                             "magnet.json",
+                             "macro_animation.html",
+                             "macro/fixed.def",
+                             "macro/gp_history.json",
+                             "macro/gp_history.jsonl"}) {
       std::ifstream original(root / "place" / name), restored(root / "restored/place" / name);
       ASSERT_TRUE(restored) << name;
       EXPECT_EQ((std::string{std::istreambuf_iterator<char>(original), {}}),
@@ -91,6 +96,24 @@ TEST_F(PhysicalCache, RejectsCorruptedPrerouteReportBeforeRestoringGeometry) {
   EXPECT_FALSE(cache().restore(root / "restored/net", root / "restored/place"));
   EXPECT_FALSE(fs::exists(root / "restored/net"));
   EXPECT_FALSE(fs::exists(root / "restored/place/out.def"));
+}
+
+TEST_F(PhysicalCache, EditedColorsCanReuseCoordinatesWithoutReplayingTheOldNetlist) {
+  cache().publish(root / "net", root / "place");
+  write("compiled/graph/body.bin", "one edited color; remaining colors unchanged");
+  auto next = cache();
+  EXPECT_FALSE(next.restore(root / "restored/net", root / "restored/place"));
+  EXPECT_EQ(next.placement_hint(), root / "cache/artifacts/place/out.def");
+  EXPECT_FALSE(fs::exists(root / "restored/net"));
+  EXPECT_FALSE(fs::exists(root / "restored/place"));
+  EXPECT_TRUE(cache("different physical options").placement_hint().empty());
+  write("technology.lib", "modified timing model");
+  EXPECT_TRUE(cache().placement_hint().empty());
+  write("technology.lib", "original timing model");
+  write("cache/artifacts/place/out.def", "damaged DEF");
+  EXPECT_TRUE(cache().placement_hint().empty());
+  fs::remove(root / "cache/artifacts/place/out.def");
+  EXPECT_TRUE(cache().placement_hint().empty());
 }
 
 TEST_F(PhysicalCache, RestoringWithoutPrerouteDropsStaleManagedReports) {

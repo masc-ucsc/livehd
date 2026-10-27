@@ -19,10 +19,12 @@
 #include <unordered_map>
 
 #include "attrs.hpp"
+#include "growth_budget.hpp"
 #include "handoff_rows.hpp"
 #include "node_util.hpp"
 #include "pass/liberty/liberty_dff.hpp"
 #include "pass/partition/flatten.hpp"
+#include "placement_technology.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -76,7 +78,7 @@ Inventory inventory(const Options& options, const physical::Technology& tech) {
     throw std::invalid_argument("pre-CTS clock/reset sizing and buffering are disabled");
   }
   Inventory result;
-  for (auto cell : liberty::scan_comb_cells(options.liberty)) {
+  for (auto cell : options.technology().cells.combinational) {
     if (cell.physical_barrier || !tech.macros.contains(cell.name) || !liberty::cell_truth(cell)) {
       continue;
     }
@@ -95,11 +97,14 @@ Inventory inventory(const Options& options, const physical::Technology& tech) {
 // callers always protect reset cones; the old repair-reset override is rejected.
 // Liberty parses are expensive and independent of the graph: floorplan repair scans once.
 Special_pins scan_special_pins(const std::string& libs, bool protect_reset) {
+  return scan_special_pins(liberty::Cell_library(libs), protect_reset);
+}
+Special_pins scan_special_pins(const liberty::Cell_library& library, bool protect_reset) {
   Special_pins special;
-  auto         state = liberty::scan_dff_cells(libs);
-  const auto   async = liberty::scan_async_dff_cells(libs);
+  auto         state = library.dffs;
+  const auto   async = library.async_dffs;
   state.insert(state.end(), async.begin(), async.end());
-  const auto latch = liberty::scan_latch_cells(libs);
+  const auto latch = library.latches;
   state.insert(state.end(), latch.begin(), latch.end());
   for (const auto& c : state) {
     special[c.name] = {c.clk_pin};
@@ -107,10 +112,10 @@ Special_pins scan_special_pins(const std::string& libs, bool protect_reset) {
       special[c.name].insert({c.reset0_pin, c.reset1_pin});
     }
   }
-  for (const auto& c : liberty::scan_icg_cells(libs)) {
+  for (const auto& c : library.icgs) {
     special[c.name] = {c.clk_pin, c.en_pin, c.test_pin};
   }
-  for (const auto& cell : liberty::scan_memory_cells(libs)) {
+  for (const auto& cell : library.memories) {
     for (const auto& pin : cell.pins) {
       if (pin.clock_input) {
         special[cell.name].insert(pin.name);
@@ -233,7 +238,8 @@ std::pair<double, double> wire_rc(const Options& options, const physical::Techno
                                      options.tech_rc_file,
                                      options.resistance_ohm_um,
                                      options.capacitance_ff_um,
-                                     options.rc_pessimism);
+                                     options.rc_pessimism,
+                                     options.technology().cells.contents);
   return {std::max(rc.horizontal_r, rc.vertical_r), std::max(rc.horizontal_c, rc.vertical_c)};
 }
 double wire_limit(const Buffer& b, double r, double c) {
@@ -391,10 +397,12 @@ std::unordered_map<std::string, double> input_resistance(hhds::Graph& graph, con
 }
 std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing_feedback& timing,
                         const std::set<std::string>& protected_names, const Result& placed, const Options& options,
-                        const physical::Technology& tech, const std::vector<liberty::Output_drive>* scanned_drives = nullptr) {
-  const auto output_drives = timing.pins.empty() ? std::vector<liberty::Output_drive>{}
-                             : scanned_drives    ? *scanned_drives
-                                                 : liberty::scan_output_drives(options.liberty);
+                        const physical::Technology& tech, const std::vector<liberty::Output_drive>* scanned_drives = nullptr,
+                        bool repair_only = false) {
+  const bool repair_violations = repair_only && timing.electrical_pin_feedback;
+  const auto output_drives     = timing.pins.empty() ? std::vector<liberty::Output_drive>{}
+                                 : scanned_drives    ? *scanned_drives
+                                                     : options.technology().cells.drives;
   const auto input_r
       = timing.pins.empty() ? std::unordered_map<std::string, double>{} : input_resistance(graph, cells, placed, output_drives);
   std::vector<Node> buffers;
@@ -431,9 +439,12 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
     const auto   p      = timing.pins.find(physical_label(output(n, *c)));
     const double stress = p == timing.pins.end() ? 0 : drive_stress(*c, p->second, timing.time_unit_ps);
     const double slack  = p == timing.pins.end() ? 0 : -p->second.slack.value_or(0);
-    priorities.emplace(
-        n.get_debug_nid(),
-        Node_priority{{stress > 1 ? stress : 0, slack}, critical_nodes.contains(n.get_debug_nid()), std::string(n.get_name())});
+    priorities.emplace(n.get_debug_nid(),
+                       Node_priority{
+                           {stress > 1 ? stress : 0, slack},
+                           critical_nodes.contains(n.get_debug_nid()),
+                           std::string(n.get_name())
+    });
   }
   std::sort(buffers.begin(), buffers.end(), [&](const auto& a, const auto& b) {
     const auto& pa = priorities.at(a.get_debug_nid());
@@ -479,8 +490,17 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
   // Interleave action classes so a bounded search does not spend its entire
   // budget sizing a long chain before it ever considers removing/rebuilding it.
   for (auto n : buffers) {
-    const auto* current   = combinational(n, cells);
-    const bool  is_buffer = identity(*current);
+    const auto* current  = combinational(n, cells);
+    const auto  feedback = timing.pins.find(physical_label(output(n, *current)));
+    if (repair_violations && feedback != timing.pins.end() && feedback->second.slack && *feedback->second.slack >= 0
+        && feedback->second.violations == 0 && feedback->second.electrical_excess <= 1e-6
+        && drive_stress(*current, feedback->second, timing.time_unit_ps) <= 1) {
+      // An unrelated electrical violation must not launch hundreds of area
+      // recovery edits on otherwise healthy gates. Explicit recovery keeps
+      // its separate path; ordinary repair spends work on actual violations.
+      continue;
+    }
+    const bool is_buffer = identity(*current);
     if (is_buffer) {
       result.push_back({"remove", std::string(n.get_name()), {}, 0});
     }
@@ -548,7 +568,88 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
         nodes.emplace(std::string(n.get_name()), n);
       }
     }
+    std::unordered_map<std::string, bool> forest_needed;
+    const auto                            needs_forest_repair = [&](const physical::Rc_net& root) {
+      if (const auto known = forest_needed.find(root.driver); known != forest_needed.end()) {
+        return known->second;
+      }
+      std::vector<const physical::Rc_net*> pending{&root};
+      std::set<std::string>                visited;
+      const auto                           needed = [&] {
+        for (size_t cursor = 0; cursor < pending.size(); ++cursor) {
+          const auto& net = *pending[cursor];
+          if (!visited.insert(net.driver).second) {
+            continue;
+          }
+          const auto colon = net.driver.rfind(':');
+          if (colon != std::string::npos) {
+            const auto node = nodes.find(net.driver.substr(0, colon));
+            if (node != nodes.end()) {
+              const auto pin = timing.pins.find(net.driver);
+              if (pin == timing.pins.end()) {
+                return true;
+              }
+              const auto exceeds = [&](const auto& model) {
+                const auto fanout
+                    = std::count_if(net.nodes.begin(), net.nodes.end(), [](const auto& p) { return !p.pin.empty(); }) - 1;
+                return (model.max_fanout && fanout > *model.max_fanout)
+                       || drive_stress(model, pin->second, timing.time_unit_ps) > 1;
+              };
+              if (const auto* cell = combinational(node->second, cells); cell && exceeds(*cell)) {
+                return true;
+              }
+              const auto io = node->second.get_subnode_io();
+              if (io) {
+                const auto model = state_drives.find({std::string(io->get_name()), net.driver.substr(colon + 1)});
+                if (model != state_drives.end() && exceeds(*model->second)) {
+                  return true;
+                }
+              }
+            }
+          }
+          for (const auto& point : net.nodes) {
+            if (point.pin.empty()) {
+              continue;
+            }
+            const auto pin = timing.pins.find(point.pin);
+            if (pin == timing.pins.end() || !pin->second.slack || *pin->second.slack < 0 || pin->second.violations
+                || pin->second.electrical_excess > 1e-6) {
+              return true;
+            }
+            if (point.pin == net.driver) {
+              continue;
+            }
+            const auto split = point.pin.rfind(':');
+            if (split == std::string::npos) {
+              continue;
+            }
+            const auto node = nodes.find(point.pin.substr(0, split));
+            if (node == nodes.end() || fixed(node->second)) {
+              continue;
+            }
+            if (const auto* b = buffer(node->second, cells)) {
+              const auto next = nets.find(physical_label(output(node->second, *b)));
+              if (next == nets.end()) {
+                return true;
+              }
+              pending.push_back(next->second);
+            }
+          }
+        }
+        return false;
+      }();
+      forest_needed.emplace(root.driver, needed);
+      if (!needed) {
+        for (const auto& driver : visited) {
+          forest_needed.emplace(driver, false);
+        }
+      }
+      return needed;
+    };
     for (const auto& net : placed.parasitics->nets) {
+      if (repair_violations && timing.wns && *timing.wns >= 0 && !needs_forest_repair(net)) {
+        continue;
+      }
       const auto    colon = net.driver.rfind(':');
       std::string   owner;
       const Buffer* cell = nullptr;
@@ -803,6 +904,7 @@ struct Apply_index {
   std::unordered_map<std::string, std::string>                                        pin_driver, origins;
   std::map<std::string, double>                                                       weights;
   size_t                                                                              sequential_drivers = 0;
+  std::optional<Physical_size>                                                        growth_size;
   Apply_index(hhds::Graph& graph, const Result& placed) : weights(placed.net_weights) {
     for (auto n : graph.body().nodes()) {
       if (!n.get_name().empty()) {
@@ -829,6 +931,26 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
     owned.emplace(graph, placed);
     shared = &*owned;
   }
+  const auto admit_growth = [&](int64_t cells_delta, double area_delta) -> std::optional<Physical_size> {
+    if (!options.growth_budget) {
+      return {};
+    }
+    if (!shared->growth_size) {
+      shared->growth_size = physical_size(graph, tech);
+    }
+    auto proposed      = *shared->growth_size;
+    proposed.cells     = static_cast<uint64_t>(static_cast<int64_t>(proposed.cells) + cells_delta);
+    proposed.area_um2 += area_delta;
+    if (!options.growth_budget->allows(proposed)) {
+      ++options.growth_budget->rejected;
+      throw std::runtime_error("physical cell/area growth budget exceeded");
+    }
+    return proposed;
+  };
+  const auto master_area = [&](const std::string& name) {
+    const auto& macro = tech.macros.at(name);
+    return macro.width * macro.height;
+  };
   std::optional<Physical_sink> source;
   if (!edit.driver.empty()) {
     source = physical_pin(graph, edit.driver, shared->nodes, true);
@@ -836,7 +958,9 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
   auto        n       = source ? source->pin.get_master_node() : shared->nodes.at(edit.node);
   const auto* current = source ? nullptr : buffer(n, cells);
   if (edit.kind == "resize" || edit.kind == "gate_resize") {
+    const auto proposed = admit_growth(0, master_area(edit.master) - master_area(std::string(n.get_subnode_io()->get_name())));
     change_master(n, *combinational(n, cells), cells.at(edit.master));
+    shared->growth_size = proposed;
     return {};
   }
   if (edit.kind == "remove") {
@@ -844,6 +968,7 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
     if (driver.is_const() || gu::bits_of(driver) != 1) {
       throw std::runtime_error("buffer input is not scalar");
     }
+    const auto proposed = admit_growth(-1, -master_area(current->name));
     gu::carry_preroute_exclusion(output(n, *current), driver);
     if (n.attr(attrs::preroute_exclude).has()) {
       driver.attr(attrs::preroute_net_exclude).set();
@@ -855,6 +980,7 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
     shared->weights.erase(physical_label(output(n, *current)));
     shared->nodes.erase(std::string(n.get_name()));
     n.del_node();
+    shared->growth_size = proposed;
     return {};
   }
   const auto& b    = cells.at(edit.master);
@@ -893,8 +1019,8 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
         // Retain distribution forks as timing cut points. Flattening every fork
         // can replace an existing shallow backbone with a long wire-minimal
         // path. Single-load chains remain removable/rebuildable as a unit.
-        if (const auto* next = buffer(node, cells);
-            next && !preserve_chains && edit.kind != "preroute" && !fixed(node) && leaf.width == 1 && sinks(output(node, *next)).size() <= 1) {
+        if (const auto* next = buffer(node, cells); next && !preserve_chains && edit.kind != "preroute" && !fixed(node)
+                                                    && leaf.width == 1 && sinks(output(node, *next)).size() <= 1) {
           removed.push_back(node);
           pending.push_back(physical_label(output(node, *next)));
         } else if (leaf_set.insert(point.pin).second) {
@@ -995,10 +1121,10 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
           cell.max_capacitance_ff.value_or(std::numeric_limits<double>::infinity()) * .9,
           wire_limit(cell, r, c) * tech.dbu,
           cell.max_fanout ? static_cast<unsigned>(std::clamp(*cell.max_fanout, 1.0, double(std::max<size_t>(2, locations.size()))))
-                                         : static_cast<unsigned>(std::max<size_t>(2, locations.size())),
+                          : static_cast<unsigned>(std::max<size_t>(2, locations.size())),
           cell.intrinsic_ps,
           cell.resistance_ohm,
-          cell.area};
+          options.growth_budget ? master_area(cell.name) : cell.area};
     };
     for (const auto& [name, cell] : cells) {
       if (identity(cell) && (!cell.max_fanout || *cell.max_fanout >= 2) && cell.inputs == b.inputs && cell.output == b.output
@@ -1035,7 +1161,7 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
     if (!root_cell) {
       if (!shared->output_drives) {
         shared->output_drives.emplace();
-        for (auto drive : liberty::scan_output_drives(options.liberty)) {
+        for (auto drive : options.technology().cells.drives) {
           shared->output_drives->emplace(std::pair{drive.name, drive.output}, std::move(drive));
         }
       }
@@ -1070,7 +1196,30 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
     // real fanout limits still apply; RC delay decides whether a direct source
     // connection or an extra root buffer is faster.
     root_model.max_distance_dbu = std::numeric_limits<double>::infinity();
-    plan = plan_buffer_choices(root_xy->second, locations, capacitances, required, drives, root_model, r / tech.dbu, c / tech.dbu);
+    Buffer_limits limits;
+    if (options.growth_budget) {
+      if (!shared->growth_size) {
+        shared->growth_size = physical_size(graph, tech);
+      }
+      const auto& budget       = *options.growth_budget;
+      const auto& now          = *shared->growth_size;
+      double      removed_area = 0;
+      for (const auto& cell : removed) {
+        removed_area += master_area(std::string(cell.get_subnode_io()->get_name()));
+      }
+      const auto max_cells = static_cast<uint64_t>(std::floor(budget.baseline.cells * (1 + budget.fraction) + 1e-9));
+      limits.cells         = max_cells + removed.size() >= now.cells ? max_cells + removed.size() - now.cells : 0;
+      limits.area          = std::max(0.0, budget.baseline.area_um2 * (1 + budget.fraction) - now.area_um2 + removed_area);
+    }
+    plan = plan_buffer_choices(root_xy->second,
+                               locations,
+                               capacitances,
+                               required,
+                               drives,
+                               root_model,
+                               r / tech.dbu,
+                               c / tech.dbu,
+                               limits);
   } else {
     plan = plan_buffers(root_xy->second,
                         locations,
@@ -1092,6 +1241,14 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
       throw std::runtime_error("invalid repair sink wiring");
     }
   }
+  double area_delta = 0;
+  for (const auto& buffer : plan.buffers) {
+    area_delta += master_area(drive_cells.at(buffer.drive)->name);
+  }
+  for (const auto& cell : removed) {
+    area_delta -= master_area(std::string(cell.get_subnode_io()->get_name()));
+  }
+  const auto proposed = admit_growth(static_cast<int64_t>(plan.buffers.size()) - static_cast<int64_t>(removed.size()), area_delta);
   if (source && source->width > 1) {
     root = gu::create_get_mask(graph, root, source->bit).get_driver_pin(0);
     gu::set_bits(root, 1);
@@ -1175,13 +1332,14 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
     output_names.push_back(physical_label(pin));
   }
   inherit_buffer_weights(shared->weights, root_name, output_names);
+  shared->growth_size = proposed;
   return plan;
 }
 
 // Use the final physical terminals, not graph edge count: wiring aliases and
 // output branches can conceal extra loads. Both nets must be simple cell nets.
 std::vector<Edit> final_buffer_candidates(const Result& state, const Inventory& cells, const std::set<std::string>& protected_names,
-                                          const physical::Technology& tech) {
+                                          const physical::Technology& tech, const Timing_feedback* repair_timing) {
   std::unordered_map<std::string, const physical::Rc_net*> nets, incoming;
   for (const auto& net : state.parasitics->nets) {
     nets.emplace(net.driver, &net);
@@ -1223,10 +1381,28 @@ std::vector<Edit> final_buffer_candidates(const Result& state, const Inventory& 
         || protected_names.contains(std::string(upstream.get_master_node().get_name()))) {
       continue;
     }
+    if (repair_timing && repair_timing->electrical_pin_feedback) {
+      const auto healthy = [&](const physical::Rc_net& net) {
+        return std::all_of(net.nodes.begin(), net.nodes.end(), [&](const auto& point) {
+          if (point.pin.empty()) {
+            return true;
+          }
+          const auto pin = repair_timing->pins.find(point.pin);
+          return pin != repair_timing->pins.end() && pin->second.slack && *pin->second.slack >= 0 && pin->second.violations == 0
+                 && pin->second.electrical_excess <= 1e-6;
+        });
+      };
+      if (healthy(*in->second) && healthy(*out->second)) {
+        continue;  // Normal repair does not spend a detailed STA trial on area-only recovery.
+      }
+    }
     const auto   a = length(*in->second), b = length(*out->second);
     const double nearby = 2 * tech.macros.at(cell->name).height * tech.dbu;
     if (a && b && std::min(*a, *b) <= nearby) {
-      ranked.push_back({std::min(*a, *b), {"remove", std::string(node.get_name()), {}, 0}});
+      ranked.push_back({
+          std::min(*a, *b),
+          {"remove", std::string(node.get_name()), {}, 0}
+      });
     }
   }
   std::sort(ranked.begin(), ranked.end(), [](const auto& a, const auto& b) {
@@ -1261,9 +1437,13 @@ std::vector<std::string_view> retention_failures(const Timing_feedback& before, 
   if (after.electrical_excess > before.electrical_excess + epsilon) {
     failures.emplace_back("electrical_excess");
   }
+  const bool setup_gain = (before.wns && *before.wns < 0 && after.wns && *after.wns > *before.wns + epsilon)
+                          || (before.tns && *before.tns < 0 && after.tns && *after.tns > *before.tns + epsilon);
+  // Different endpoint requirements can improve WNS/TNS without changing the
+  // absolute longest arrival. That is real progress toward the SDC objective.
   if (failures.empty()
-      && !(after.delay + epsilon < before.delay || after.area + epsilon < before.area || after.violations < before.violations
-           || after.electrical_excess + epsilon < before.electrical_excess)) {
+      && !(setup_gain || after.delay + epsilon < before.delay || after.area + epsilon < before.area
+           || after.violations < before.violations || after.electrical_excess + epsilon < before.electrical_excess)) {
     failures.emplace_back("no_improvement");
   }
   return failures;
@@ -1316,9 +1496,9 @@ void Repeater_proposer::prepare() {
   if (prepared_) {
     return;
   }
-  auto              special = scan_special_pins(options_.liberty, true);
+  auto              special = scan_special_pins(options_.technology().cells, true);
   decltype(drives_) drives;
-  for (auto drive : liberty::scan_output_drives(options_.liberty)) {
+  for (auto drive : options_.technology().cells.drives) {
     drives.emplace(std::pair{drive.name, drive.output}, std::move(drive));
   }
   special_  = std::move(special);
@@ -1378,9 +1558,8 @@ std::optional<Repeater_graph> Repeater_proposer::propose(const Result& state, co
     if (net.wires.empty()) {
       continue;
     }
-    const bool fixed_wiring = std::all_of(net.wires.begin(), net.wires.end(), [](const auto& wire) {
-      return wire.type == "FIXED";
-    });
+    const bool fixed_wiring
+        = std::all_of(net.wires.begin(), net.wires.end(), [](const auto& wire) { return wire.type == "FIXED"; });
     for (const auto& pin : net.connections) {
       if (pin.instance != "PIN") {
         if (fixed_wiring) {
@@ -1407,9 +1586,9 @@ std::optional<Repeater_graph> Repeater_proposer::propose(const Result& state, co
     if (protected_names.contains(name) || routed_pins.contains(point.pin) || cell == components.end()) {
       return {};
     }
-    const auto& master = tech_.macros.at(cell->second->macro);
-    const auto status = cell->second->place.status;
-    const bool prior_route_lock = status == physical::Status::FIXED && routed_cells.contains(name);
+    const auto& master           = tech_.macros.at(cell->second->macro);
+    const auto  status           = cell->second->place.status;
+    const bool  prior_route_lock = status == physical::Status::FIXED && routed_cells.contains(name);
     if (!master.klass.starts_with("CORE") || master.virtual_proxy || (status != physical::Status::PLACED && !prior_route_lock)) {
       return {};
     }
@@ -1420,13 +1599,13 @@ std::optional<Repeater_graph> Repeater_proposer::propose(const Result& state, co
   Repeater_graph proposal;
   proposal.library = std::make_shared<hhds::GraphLibrary>();
   proposal.graph   = partition::flatten_hierarchy(state.graph.get(),
-                                                proposal.library.get(),
-                                                state.graph->get_name(),
-                                                nullptr,
-                                                false,
+                                                  proposal.library.get(),
+                                                  state.graph->get_name(),
+                                                  nullptr,
+                                                  false,
                                                   {},
                                                   {},
-                                                true);
+                                                  true);
   if (!proposal.graph) {
     throw std::runtime_error("cannot clone pre-route repeater trial");
   }
@@ -1461,6 +1640,78 @@ std::optional<Repeater_graph> Repeater_proposer::propose(const Result& state, co
 }
 }  // namespace detail
 using namespace detail;
+Buffer_cleanup remove_synthesis_buffers(hhds::Graph& source, hhds::GraphLibrary& library, const Options& options) {
+  const auto&                   tech    = options.technology();
+  const auto                    cells   = inventory(options, tech.lef);
+  const auto                    special = scan_special_pins(tech.cells, true);
+  // Classify controls across hierarchy, but retain the original port cells for
+  // mapper IO binding. Only this physical copy changes: logical region hashes
+  // must continue to match the mapper cache and its failed-target history.
+  partition::Flat_origin_map    origins;
+  std::unordered_set<hhds::Gid> preserved;
+  for (const auto& graph : source.definitions().graphs()) {
+    if (tech.lef.macros.contains(std::string(graph->get_name()))) {
+      preserved.insert(graph->get_gid());
+    }
+  }
+  auto flat = partition::flatten_hierarchy(&source, &library, source.get_name(), &origins, false, preserved, {}, true);
+  if (!flat) {
+    throw std::runtime_error("cannot flatten mapped netlist for synthesis buffer cleanup");
+  }
+  auto protected_names = protected_buffers(*flat, cells, special, true, "");
+  if (!options.control_ports.empty()) {
+    const auto explicit_controls = protected_buffers(*flat, cells, special, true, options.control_ports);
+    protected_names.insert(explicit_controls.begin(), explicit_controls.end());
+  }
+  Buffer_cleanup result;
+  result.graph = flat;
+  // Select before editing: deleting a chain must not turn its later buffers
+  // into apparent input boundaries, making the result depend on node order.
+  std::vector<Node> remove;
+  for (const auto& [node, origin] : origins) {
+    const auto* cell = buffer(node, cells);
+    if (!cell) {
+      continue;
+    }
+    const auto original = origin.src_node;
+    if (fixed(node) || fixed(original) || protected_names.contains(std::string(node.get_name()))) {
+      ++result.protected_cells;
+      continue;
+    }
+    const auto drivers = node.get_sink_pin(cell->inputs.front()).get_driver_pins();
+    const auto out     = output(node, *cell);
+    if (drivers.size() != 1 || drivers.front().is_const() || gu::bits_of(drivers.front()) != 1 || gu::bits_of(out) != 1) {
+      ++result.unsupported;
+      continue;
+    }
+    const auto original_driver = input(original, *cell);
+    const auto targets         = sinks(output(original, *cell));
+    if (original_driver.get_master_node().is_input_node()
+        || std::any_of(targets.begin(), targets.end(), [](Pin sink) { return sink.get_master_node().is_output_node(); })) {
+      ++result.boundary;
+      continue;
+    }
+    remove.push_back(node);
+  }
+  std::sort(remove.begin(), remove.end(), [](Node a, Node b) { return a.get_debug_nid() < b.get_debug_nid(); });
+  for (auto node : remove) {
+    const auto* cell   = buffer(node, cells);
+    const auto  driver = input(node, *cell);
+    const auto  out    = output(node, *cell);
+    gu::carry_signal_roles(out, driver);
+    gu::carry_preroute_exclusion(out, driver);
+    if (node.attr(attrs::preroute_exclude).has()) {
+      driver.attr(attrs::preroute_net_exclude).set();
+    }
+    for (auto sink : sinks(out)) {
+      gu::drop_drivers(sink);
+      sink.connect_driver(driver);
+    }
+    node.del_node();
+    ++result.removed;
+  }
+  return result;
+}
 bool            timing_improves(const Timing_feedback& before, const Timing_feedback& after) { return retain(before, after); }
 Timing_feedback timing_feedback(std::string_view text) {
   rapidjson::Document json;
@@ -1532,10 +1783,10 @@ struct Floorplan_library {
 };
 static Floorplan_library read_floorplan_library(const Options& options) {
   Floorplan_library library;
-  library.tech    = physical::read_lef(options.lefs);
+  library.tech    = options.technology().lef;
   library.cells   = inventory(options, library.tech);
-  library.special = scan_special_pins(options.liberty, !options.repair_reset);
-  library.drives  = liberty::scan_output_drives(options.liberty);
+  library.special = scan_special_pins(options.technology().cells, !options.repair_reset);
+  library.drives  = options.technology().cells.drives;
   return library;
 }
 static Floorplan_resize resize_floorplan(Result& state, const Options& options, const Timing_feedback& before,
@@ -1615,8 +1866,16 @@ static Floorplan_resize resize_floorplan(Result& state, const Options& options, 
       component->place.height = std::llround(master.height * tech.dbu);
       selected.insert(edit.node);
     }
+    if (!growth_admissible(*state.graph, options)) {
+      const auto proposed = static_cast<unsigned>(changes.size());
+      restore();
+      Floorplan_resize result;
+      result.timing   = before;
+      result.proposed = proposed;
+      return result;
+    }
     refresh(state);
-    const auto after    = evaluate(state);  // Always a second STA when FP resize is enabled.
+    const auto after    = evaluate(state);
     const bool keep     = !changes.empty() && retain(before, after);
     const auto proposed = static_cast<unsigned>(changes.size());
     if (!keep && !changes.empty()) {
@@ -1690,6 +1949,7 @@ Floorplan_resize repair_floorplan(Result& state, const Options& options, const T
         trial.graph       = std::move(graph);
         trial.net_weights = std::move(index.weights);
         trial.fp_buffer_origins.insert(index.origins.begin(), index.origins.end());
+        require_growth_budget(*trial.graph, options);
         refresh(trial);
         const auto next = evaluate(trial);
         keep            = retain(result.timing, next);
@@ -1771,6 +2031,7 @@ Floorplan_resize repair_floorplan(Result& state, const Options& options, const T
         trial.graph       = std::move(graph);
         trial.net_weights = std::move(trial_index.weights);
         trial.fp_buffer_origins.insert(trial_index.origins.begin(), trial_index.origins.end());
+        require_growth_budget(*trial.graph, options);
         refresh(trial);
         const auto next = evaluate(trial);
         keep            = retain(result.timing, next);
@@ -1898,7 +2159,7 @@ Floorplan_resize repair_gp_buffers(Result& state, const Options& options, const 
       if (removal) {
         const auto parent = result.timing.pins.find(upstream);
         eligible          = slack > margin && parent != result.timing.pins.end() && !parent->second.clock && parent->second.slack
-                   && *parent->second.slack * result.timing.time_unit_ps > margin;
+                            && *parent->second.slack * result.timing.time_unit_ps > margin;
         // Require positive margin on every sink, including branches. Unknown
         // timing is not evidence that a buffer is safe to remove.
         if (const auto net = index.nets.find(driver); net != index.nets.end()) {
@@ -1985,9 +2246,10 @@ Floorplan_resize repair_gp_buffers(Result& state, const Options& options, const 
       }
       const auto prepared   = std::chrono::steady_clock::now();
       double     rc_seconds = 0, timing_seconds = 0;
-      bool       keep  = false;
-      auto       after = result.timing;
-      if (changed) {
+      bool       keep           = false;
+      auto       after          = result.timing;
+      const bool growth_allowed = !changed || growth_admissible(*trial.graph, options);
+      if (changed && growth_allowed) {
         trial.net_weights = std::move(draft.weights);
         trial.fp_buffer_origins.insert(draft.origins.begin(), draft.origins.end());
         refresh(trial, Gp_refresh::edited);
@@ -2033,6 +2295,8 @@ Floorplan_resize repair_gp_buffers(Result& state, const Options& options, const 
       if (!keep) {
         if (!changed) {
           w.String("no_edits");
+        } else if (!growth_allowed) {
+          w.String("physical cell/area growth budget exceeded");
         } else {
           const auto failures = retention_failures(result.timing, after);
           for (const auto reason : failures) {
@@ -2094,7 +2358,8 @@ Floorplan_resize repair_gp_buffers(Result& state, const Options& options, const 
   return result;
 }
 
-Repair_result finalize_placement(const Result& initial, const Options& requested, const Evaluate& evaluate) {
+Repair_result finalize_placement(const Result& initial, const Options& requested, const Evaluate& evaluate,
+                                 std::optional<Timing_feedback> prior_timing) {
   if (!initial.graph || !requested.full) {
     throw std::invalid_argument("final legalization requires a placed graph in full mode");
   }
@@ -2145,8 +2410,13 @@ Repair_result finalize_placement(const Result& initial, const Options& requested
   result.placed         = place(*initial.graph, *library, options);
   result.libraries.push_back(std::move(library));
   check_placed_legality(result.placed, options);
-  result.timing = evaluate(result.placed);
-  result.report = "{\"stage\":\"final_legalization\",\"gp_iterations\":0}";
+  const auto& before_rc         = initial.parasitics;
+  const auto& after_rc          = result.placed.parasitics;
+  const bool  same_timing_state = before_rc && after_rc && before_rc->nets == after_rc->nets && before_rc->cells == after_rc->cells
+                                  && before_rc->terminals == after_rc->terminals && before_rc->timing_cuts == after_rc->timing_cuts;
+  const bool  reuse_timing      = prior_timing && !prior_timing->ranking_only && same_timing_state;
+  result.timing                 = reuse_timing ? std::move(*prior_timing) : evaluate(result.placed);
+  result.report = std::format("{{\"stage\":\"final_legalization\",\"gp_iterations\":0,\"reused_timing\":{}}}", reuse_timing);
   // Keep optimization diagnostics, replacing geometry/RC metrics with the final
   // result. Both the pre-final and final reports remain in their stage directory.
   rapidjson::Document prior, final;
@@ -2159,6 +2429,13 @@ Repair_result finalize_placement(const Result& initial, const Options& requested
     for (const auto* key : {"incremental",
                             "gp_converged",
                             "gp_overflow",
+                            "gp_iterations",
+                            "gp_total_iterations",
+                            "gp_density_ready_iteration",
+                            "gp_continuation_deadline",
+                            "gp_objective_converged",
+                            "gp_timing_satisfied",
+                            "gp_stop_reason",
                             "initial_hpwl_um",
                             "virtual_filler_count",
                             "virtual_filler_area_um2",
@@ -2183,6 +2460,10 @@ Repair_result finalize_placement(const Result& initial, const Options& requested
       }
     }
     final.AddMember("before_final_legalization", rapidjson::Value(prior, final.GetAllocator()), final.GetAllocator());
+    rapidjson::Document completion;
+    completion.Parse(result.report.c_str());
+    final.RemoveMember("final_legalization");
+    final.AddMember("final_legalization", rapidjson::Value(completion, final.GetAllocator()), final.GetAllocator());
     rapidjson::StringBuffer                    buffer;
     rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
     final.Accept(writer);
@@ -2194,7 +2475,7 @@ Repair_result finalize_placement(const Result& initial, const Options& requested
 }
 
 Repair_result repair_buffers(Result initial, const Options& requested, const Evaluate& evaluate, Repair_scope scope,
-                             std::optional<Timing_feedback> prior_timing) {
+                             std::optional<Timing_feedback> prior_timing, const Trial_admission& admit_trial) {
   std::optional<Options> resolved_options;
   if (requested.cell_halo) {
     resolved_options = final_cell_options(requested);
@@ -2203,20 +2484,27 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
   if (options.cell_halo) {
     check_placed_legality(initial, options);
   }
-  const auto        prior_qor  = initial.qor;
-  const bool        design     = scope == Repair_scope::design || scope == Repair_scope::forest;
+  const auto prior_qor = initial.qor;
+  const bool design = scope == Repair_scope::design || scope == Repair_scope::design_after_sizing || scope == Repair_scope::forest;
   const std::string report_key = scope == Repair_scope::recovery ? "buffer_recovery" : design ? "repair" : "resize";
   if (!options.full) {
     throw std::invalid_argument("buffer repair requires legal full placement");
   }
+  if (scope == Repair_scope::design_after_sizing && (!prior_timing || prior_timing->ranking_only)) {
+    throw std::invalid_argument("design repair after sizing requires the unchanged sizing result's timing");
+  }
   Repair_result result;
-  result.placed              = std::move(initial);
-  const auto tech            = physical::read_lef(options.lefs);
-  const auto cells           = inventory(options, tech);
-  auto       score           = prior_timing ? std::move(*prior_timing) : evaluate(result.placed);
-  const auto protected_names = protected_buffers(*result.placed.graph, cells, options.liberty, true, options.control_ports);
-  std::set<std::string>                      tried;
-  rapidjson::StringBuffer                    trace;
+  result.placed                 = std::move(initial);
+  const auto&             tech  = options.technology().lef;
+  const auto              cells = inventory(options, tech);
+  auto                    score = prior_timing && !prior_timing->ranking_only ? std::move(*prior_timing) : evaluate(result.placed);
+  const auto              protected_names = protected_buffers(*result.placed.graph,
+                                                              cells,
+                                                              scan_special_pins(options.technology().cells, true),
+                                                              true,
+                                                              options.control_ports);
+  std::set<std::string>   tried;
+  rapidjson::StringBuffer trace;
   rapidjson::Writer<rapidjson::StringBuffer> w(trace);
   w.StartObject();
   w.Key("model");
@@ -2227,7 +2515,13 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
   w.Double(score.area);
   w.Key("trials");
   w.StartArray();
-  unsigned       accepted = 0, attempt = 0;
+  unsigned   accepted = 0, attempt = 0;
+  bool       sizing_reused = false;
+  const auto needs_repair  = [&] {
+    return scope == Repair_scope::recovery || !score.wns || *score.wns < 0 || score.violations > 0
+           || score.electrical_excess > 1e-6;
+  };
+  const auto     trial_available   = [&] { return !admit_trial || admit_trial(); };
   const bool     physical_recovery = !score.pins.empty() && scope != Repair_scope::sizing && scope != Repair_scope::forest;
   const unsigned sweep_budget      = physical_recovery ? 12 : 24;
   const auto     directory         = options.output_dir + "/" + report_key;
@@ -2236,10 +2530,14 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
   // proposal per driver is applied transactionally, then legalized and timed
   // once for the batch. Rejected batches are bisected; the STA budget bounds
   // evaluations, not which two instance names happen to appear first.
-  if (!score.pins.empty() && scope != Repair_scope::recovery) {
+  if (needs_repair() && trial_available() && !score.pins.empty() && scope != Repair_scope::recovery) {
     const auto sweep = [&](bool trees) {
+      if (!trial_available()) {
+        return;
+      }
       const auto phase_limit = std::min(sweep_budget, attempt + 12);
-      const auto candidates  = edits(*result.placed.graph, cells, score, protected_names, result.placed, options, tech);
+      const auto candidates
+          = edits(*result.placed.graph, cells, score, protected_names, result.placed, options, tech, nullptr, true);
       Node_index index;
       for (auto n : result.placed.graph->body().nodes()) {
         if (!n.get_name().empty()) {
@@ -2296,12 +2594,37 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
           return (a.kind == "tree") > (b.kind == "tree");
         });
       }
+      if (options.growth_budget) {
+        const auto priority = [&](const Edit& edit) {
+          auto driver = edit.driver;
+          if (driver.empty()) {
+            const auto  found = index.find(edit.node);
+            const auto* cell  = found == index.end() ? nullptr : combinational(found->second, cells);
+            if (cell) {
+              driver = physical_label(output(found->second, *cell));
+            }
+          }
+          const auto   pin   = score.pins.find(driver);
+          const double slack = pin == score.pins.end() ? std::numeric_limits<double>::infinity()
+                                                       : pin->second.slack.value_or(std::numeric_limits<double>::infinity());
+          const double excess
+              = score.electrical_pin_feedback && pin != score.pins.end() ? std::max(0.0, pin->second.electrical_excess) : 0;
+          return std::pair{-excess, slack};
+        };
+        // Repair the largest electrical violations first, then the worst
+        // setup slack. One overloaded source can dominate thousands of paths;
+        // spending all headroom on its downstream gates leaves that load intact.
+        // apply()
+        // admits each complete edit before mutation, so an oversized forest
+        // cannot discard other useful repairs in the same batch.
+        std::stable_sort(selected.begin(), selected.end(), [&](const auto& a, const auto& b) { return priority(a) < priority(b); });
+      }
       index.clear();
       std::vector<std::vector<size_t>> pending(1);
       pending.front().resize(selected.size());
       std::iota(pending.front().begin(), pending.front().end(), 0);
       const auto run = [&](const std::vector<size_t>& batch) {
-        if (batch.empty() || attempt >= phase_limit) {
+        if (batch.empty() || attempt >= phase_limit || !trial_available()) {
           return;
         }
         w.StartObject();
@@ -2319,13 +2642,13 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
         try {
           hhds::GraphLibrary draft;
           auto               graph = partition::flatten_hierarchy(result.placed.graph.get(),
-                                                    &draft,
-                                                    result.placed.graph->get_name(),
-                                                    nullptr,
-                                                    false,
+                                                                  &draft,
+                                                                  result.placed.graph->get_name(),
+                                                                  nullptr,
+                                                                  false,
                                                                   {},
                                                                   {},
-                                                    true);
+                                                                  true);
           if (!graph) {
             throw std::runtime_error("cannot clone electrical sweep");
           }
@@ -2377,10 +2700,11 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
             physical::write_def(frame, trial_options.floorplan);
             const auto placement_start = std::chrono::steady_clock::now();
             auto       owner           = std::make_unique<hhds::GraphLibrary>();
-            auto       placed          = place(*graph, *owner, trial_options);
-            const auto timing_start    = std::chrono::steady_clock::now();
-            auto       next            = evaluate(placed);
-            const auto timing_done     = std::chrono::steady_clock::now();
+            require_growth_budget(*graph, trial_options);
+            auto       placed       = place(*graph, *owner, trial_options);
+            const auto timing_start = std::chrono::steady_clock::now();
+            auto       next         = evaluate(placed);
+            const auto timing_done  = std::chrono::steady_clock::now();
             w.Key("prepare_s");
             w.Double(std::chrono::duration<double>(placement_start - trial_start).count());
             w.Key("placement_rc_s");
@@ -2391,6 +2715,14 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
             w.Double(next.delay);
             w.Key("area");
             w.Double(next.area);
+            if (next.wns) {
+              w.Key("setup_wns");
+              w.Double(*next.wns);
+            }
+            if (next.tns) {
+              w.Key("setup_tns");
+              w.Double(*next.tns);
+            }
             kept = retain(score, next);
             w.Key("rejection_reasons");
             w.StartArray();
@@ -2464,42 +2796,55 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
       };
       // Breadth first: a pathological subset must not spend the whole timing
       // budget before a disjoint half of the design gets an evaluation.
-      for (size_t cursor = 0; cursor < pending.size() && attempt < phase_limit; ++cursor) {
+      for (size_t cursor = 0; cursor < pending.size() && attempt < phase_limit && needs_repair() && trial_available(); ++cursor) {
         // Own the indices while run() appends retries to pending.
         const auto batch = std::move(pending[cursor]);
         run(batch);
       }
     };
-    if (scope != Repair_scope::design && scope != Repair_scope::forest) {
+    bool sizing_done = scope == Repair_scope::design_after_sizing;
+    if (!design) {
       sweep(false);
+      sizing_done = true;
     }
     if (scope != Repair_scope::sizing) {
+      const auto before_forest = accepted;
       sweep(true);
-      // Buffer insertion changes the gate loads. Recover area on slack-positive
-      // gates and size remaining stressed gates using fresh post-repair timing.
+      // Buffer insertion changes gate loads. Size remaining stressed gates
+      // using fresh post-repair timing; healthy neighbors need no repair.
       // Transactional STA/RC checks still guard WNS, TNS, hold and electrical QoR.
-      if (scope != Repair_scope::forest) {
+      // Rejected forest trials leave the preceding sizing result unchanged.
+      // Repeating that sweep would replay the same proposals and detailed STA.
+      if (scope != Repair_scope::forest && (!sizing_done || accepted != before_forest)) {
         sweep(false);
+      } else if (scope != Repair_scope::forest && sizing_done) {
+        sizing_reused = true;
       }
     }
   }
   // Reserve half the shared 24-trial budget for final physical recovery.
   // Every accepted bypass refreshes candidates against the new legal geometry.
   unsigned recovery_attempts = 0, recovery_accepted = 0;
-  while ((physical_recovery && attempt < 24 && recovery_attempts < 12 && recovery_accepted < 8)
-         || (score.pins.empty() && scope != Repair_scope::recovery && attempt < 24 && accepted < 8)) {
-    auto candidates = physical_recovery ? final_buffer_candidates(result.placed, cells, protected_names, tech)
+  while (needs_repair() && trial_available() && (scope == Repair_scope::recovery || !score.wns || *score.wns < 0)
+         && ((physical_recovery && attempt < 24 && recovery_attempts < 12 && recovery_accepted < 8)
+             || (score.pins.empty() && scope != Repair_scope::recovery && attempt < 24 && accepted < 8))) {
+    auto candidates = physical_recovery ? final_buffer_candidates(result.placed,
+                                                                  cells,
+                                                                  protected_names,
+                                                                  tech,
+                                                                  scope == Repair_scope::recovery ? nullptr : &score)
                                         : edits(*result.placed.graph, cells, score, protected_names, result.placed, options, tech);
     if (!physical_recovery) {
       std::erase_if(candidates, [&](const auto& edit) {
         const bool tree = edit.kind == "tree" || edit.kind == "rebuild";
-        return scope == Repair_scope::sizing                                      ? tree
-               : (scope == Repair_scope::design || scope == Repair_scope::forest) ? !tree
-                                                                                  : false;
+        return scope == Repair_scope::sizing ? tree : design ? !tree : false;
       });
     }
     bool progress = false;
     for (const auto& edit : candidates) {
+      if (!trial_available()) {
+        break;
+      }
       const auto key = std::format("{}:{}:{}:{}:{}", edit.kind, edit.node, edit.master, edit.fanout, edit.driver);
       if (!tried.insert(key).second) {
         continue;
@@ -2517,13 +2862,13 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
       try {
         hhds::GraphLibrary draft;
         auto               graph = partition::flatten_hierarchy(result.placed.graph.get(),
-                                                  &draft,
-                                                  result.placed.graph->get_name(),
-                                                  nullptr,
-                                                  false,
+                                                                &draft,
+                                                                result.placed.graph->get_name(),
+                                                                nullptr,
+                                                                false,
                                                                 {},
                                                                 {},
-                                                  true);
+                                                                true);
         if (!graph) {
           throw std::runtime_error("cannot clone buffer trial");
         }
@@ -2551,9 +2896,10 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
           terminal.status = Ann_place::Status::FIXED;
         }
         physical::write_def(floorplan, trial_options.floorplan);
-        auto       library = std::make_unique<hhds::GraphLibrary>();
-        auto       placed  = place(*graph, *library, trial_options);
-        const auto next    = evaluate(placed);
+        auto library = std::make_unique<hhds::GraphLibrary>();
+        require_growth_budget(*graph, trial_options);
+        auto       placed = place(*graph, *library, trial_options);
+        const auto next   = evaluate(placed);
         w.Key("delay");
         w.Double(next.delay);
         w.Key("area");
@@ -2592,6 +2938,10 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
   w.Uint(accepted);
   w.Key("attempts");
   w.Uint(attempt);
+  w.Key("timing_budget_exhausted");
+  w.Bool(!trial_available());
+  w.Key("sizing_reused");
+  w.Bool(sizing_reused);
   w.Key("recovery_attempts");
   w.Uint(recovery_attempts);
   w.Key("recovery_accepted");
@@ -2624,6 +2974,24 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
   prior.Parse(prior_qor.c_str());
   for (const auto* key : {"timing_driven", "resize", "repair", "satlegalize"}) {
     if (prior.HasMember(key) && !qor.HasMember(key) && key != report_key) {
+      qor.AddMember(rapidjson::Value(key, qor.GetAllocator()),
+                    rapidjson::Value(prior[key], qor.GetAllocator()),
+                    qor.GetAllocator());
+    }
+  }
+  // Legal repair candidates run zero GP steps; retain the optimization history.
+  for (const auto* key : {"gp_converged",
+                          "gp_overflow",
+                          "gp_iterations",
+                          "gp_total_iterations",
+                          "gp_density_ready_iteration",
+                          "gp_continuation_deadline",
+                          "gp_objective_converged",
+                          "gp_timing_satisfied",
+                          "gp_stop_reason",
+                          "initial_hpwl_um"}) {
+    if (prior.HasMember(key)) {
+      qor.RemoveMember(key);
       qor.AddMember(rapidjson::Value(key, qor.GetAllocator()),
                     rapidjson::Value(prior[key], qor.GetAllocator()),
                     qor.GetAllocator());

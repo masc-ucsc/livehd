@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 #include <cstdint>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -30,6 +31,7 @@ struct Parasitics {
   struct Io {
     std::string name;
     int64_t     x = 0, y = 0;
+    bool        operator==(const Io&) const = default;
   };
   std::vector<Io> terminals;
   struct Cell {
@@ -38,8 +40,13 @@ struct Parasitics {
     unsigned    orientation = 0;
     std::string master;
     int64_t     width = 0, height = 0;
+    bool        operator==(const Cell&) const = default;
   };
-  std::vector<Cell> cells;
+  std::vector<Cell>     cells;
+  // False-path distribution drivers carried with this exact physical graph.
+  // Persist alongside RC so standalone STA and completed-placement replay use
+  // the same reset policy as the optimization that produced the graph.
+  std::set<std::string> timing_cuts{};
 };
 std::string serialize_parasitics(const Parasitics& rc);
 Parasitics  deserialize_parasitics(std::string_view text);

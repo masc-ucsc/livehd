@@ -1,5 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
+#include <limits>
+
 #include "place.hpp"
 namespace livehd::placement {
 struct Buffer_tree {
@@ -25,10 +27,15 @@ struct Buffer_drive {
   unsigned max_fanout   = 32;
   double   intrinsic_ps = 0, resistance_ohm = 0, area = 0;
 };
+struct Buffer_limits {
+  size_t cells = std::numeric_limits<size_t>::max();
+  double area  = std::numeric_limits<double>::infinity();
+};
 // Generate spatial tree alternatives and select drives bottom-up using sink
 // required times and RC delay. The estimate only proposes edits; STA validates
 // the actual legalized result. Required times use ps; geometry uses DBU.
 Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, const std::vector<double>& capacitances,
                                 const std::vector<double>& required_ps, const std::vector<Buffer_drive>& drives,
-                                const Buffer_drive& driver, double wire_r_ohm_dbu, double wire_c_ff_dbu);
+                                const Buffer_drive& driver, double wire_r_ohm_dbu, double wire_c_ff_dbu,
+                                const Buffer_limits& limits = {});
 }  // namespace livehd::placement

@@ -13,12 +13,390 @@
 <p>High-priority fixes so that <code>lhd synth --set synth.place=true</code> reaches OpenROAD's
 pre-CTS QoR (HPWL, cells, WNS, power measured by the same OpenSTA script) with <em>less CPU time</em>
 than OpenROAD's floorplan → global place → resize → detailed place on the HighTide asap7 benchmark.
-This page points at the problems and where they live; it does not fix them.</p>
-<p><span class="status">Plan drafted 2026-10-26 — problems identified and measured, nothing implemented</span>
+Implementation is in progress; the original measurements and acceptance targets are retained below.</p>
+<p><span class="status">In progress — shared technology snapshot measured; GP timing and convergence fixes under validation</span>
 Source of the issues: <code>HighTide/repros/issues.md</code> (LiveHD <code>8e017a011</code>, HighTide <code>9648393ce</code>,
 host llmHDL, one CPU for LiveHD, 8 threads for OpenROAD). All new measurements below were taken on the same
 frozen binaries with <code>perf</code> and <code>/usr/bin/time</code>; the ablation placements were scored with the
 benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with the A/B/C/D rows.</p>
+
+<h2 id="progress">Implementation progress</h2>
+
+<p>Publication review: pulled LiveHD upstream through <code>ae53a9243</code>
+without conflicts. Published DREAMPlace <code>ba64ec8</code> and OpenTimer
+<code>57e4f9e</code>, and updated the LiveHD dependency pins. All 26 targeted
+optimized regression suites pass with those published dependencies and no local
+overrides, including the detailed-baseline repair regression. The broader A–J
+acceptance items below remain in progress.</p>
+
+<p>A controlled fixed-placement check isolates the large timing-model discrepancy:
+on the v27 minimax DEF, OpenSTA given native parasitics reports −2,260.701 ps,
+within 1.3 ps of native timing, while its own placement RC gives −1,062.622 ps.
+OpenROAD uses driver-aware Prim–Dijkstra trees; the previous native estimator
+used unrooted FLUTE. Switching the native timing estimate to driver-aware trees
+(alpha 0.3, shared-branch Steinerization) brings all four saved placements within
+3% of independent OpenSTA. The geometric router and public defaults are unchanged;
+nets above 1,000 distinct locations retain the existing approximate spatial fallback.</p>
+<table>
+<thead><tr><th>Fixed v27 placement</th><th>Native before → after (ps)</th><th>Independent OpenSTA (ps)</th><th>New relative WNS error</th></tr></thead>
+<tbody>
+<tr><td>lfsr</td><td>−66.702 → −60.055</td><td>−61.726</td><td>2.71%</td></tr>
+<tr><td>minimax</td><td>−2,261.959 → −1,076.838</td><td>−1,062.622</td><td>1.34%</td></tr>
+<tr><td>NVDLA/partition_m</td><td>−912.779 → −904.681</td><td>−902.576</td><td>0.23%</td></tr>
+<tr><td>coralnpu</td><td>−20,192.965 → −15,550.148</td><td>−15,570.484</td><td>0.13%</td></tr>
+</tbody>
+</table>
+<p>These are model-agreement results on unchanged placements, not placement WNS
+improvements. Six targeted topology/placement/repair/CLI suites pass, including the
+named-driver regression. Fresh full-flow measurements are recorded below. G still needs
+validation at decision points and on the remaining designs. The controlled pin-geometry
+ablation changes minimax's FLUTE score by only 0.2 ps, so no pin-geometry change is retained.</p>
+
+<p>The fresh driver-aware v28 full-flow sweep uses the same defaults and 100 ps
+clock as v27. Independent OpenSTA scores show mixed placement changes:</p>
+<table>
+<thead><tr><th>Design</th><th>WNS, v27 → v28 (ps)</th><th>Placement, v27 → v28 (s)</th><th>Time ratio</th></tr></thead>
+<tbody>
+<tr><td>lfsr</td><td>−61.726 → −61.992</td><td>2.612 → 2.607</td><td>0.998×</td></tr>
+<tr><td>minimax</td><td>−1,062.622 → −996.517</td><td>52.327 → 46.055</td><td>0.880×</td></tr>
+<tr><td>NVDLA/partition_m</td><td>−902.576 → −916.549</td><td>40.910 → 41.459</td><td>1.013×</td></tr>
+<tr><td>coralnpu</td><td>−15,570.484 → −15,339.843</td><td>829.816 → 802.890</td><td>0.968×</td></tr>
+</tbody>
+</table>
+<p>All four remain within the 1.5× placement-time and 3% cell/area limits.
+Minimax gains 66.105 ps and coralnpu 230.640 ps; partition_m loses 13.973 ps
+and lfsr loses 0.266 ps. Coralnpu takes 1,000.98 s wall / 998.75 s CPU for the
+complete flow, plus 79.494 s independent scoring. Its placement is 13 min 23 s.
+Minimax HPWL drops to 51,206.312 µm but broader wirelength acceptance remains open.
+These frozen binaries predate the upstream pull and final review fixes; merged
+source is checked separately by regression tests. Review removed an unused
+DREAMPlace initializer and prevented approximate ranking feedback from being
+reused as a detailed buffer-repair baseline.</p>
+
+<p>The latest user request shifts the next pass to WNS improvement with placement time
+bounded by 1.5× the current baseline. The comparison uses a deliberately tight 100 ps clock
+on every design so that meeting timing cannot hide further improvements. The new
+<code>wns-v1</code> sweep removes the harness's design-specific density/utilization overrides,
+uses identical placement defaults across lfsr, minimax, partition_m and coralnpu, and keeps
+the same frontend compatibility settings for all four. Reset distribution is always false-path
+in both native timing and independent scoring. Whole-process CPU and non-overlapping placement
+phase elapsed time on one pinned CPU are reported separately. The four controls
+all miss timing: WNS −61.726/−4,190.668/−902.563/−15,571.683 ps, placement
+2.735/49.383/68.596/829.184 s, respectively. The original harness total counted
+nested ranking/resynthesis callbacks twice; these corrected placement totals
+include their cost once through the enclosing placement phase. Final standalone
+STA is separate. Whole-process CPU measurements are unaffected.</p>
+<p>The measured candidate (<code>speed-v27</code>, <code>reserved</code>) prioritizes
+electrical excess before setup slack when allocating the existing 3% growth allowance.
+It repairs heavily loaded sources before spending that allowance on downstream gates.
+Warm refinement reserves two of the existing optional detailed-evaluation slots for
+sizing and buffer repair. Public defaults and the total timing budget are unchanged.</p>
+<table>
+<thead><tr><th>Design</th><th>Independent WNS, before → after (ps)</th><th>Placement, before → after (s)</th><th>Time ratio</th></tr></thead>
+<tbody>
+<tr><td>lfsr</td><td>−61.726 → −61.726</td><td>2.735 → 2.612</td><td>0.955×</td></tr>
+<tr><td>minimax</td><td>−4,190.668 → −1,062.622</td><td>49.383 → 52.327</td><td>1.060×</td></tr>
+<tr><td>NVDLA/partition_m</td><td>−902.563 → −902.576</td><td>68.596 → 40.910</td><td>0.596×</td></tr>
+<tr><td>coralnpu</td><td>−15,571.683 → −15,570.484</td><td>829.184 → 829.816</td><td>1.001×</td></tr>
+</tbody>
+</table>
+<p>All four meet the 1.5× time bound, legality and the existing cell/area limit.
+Minimax gains 3,128.046 ps WNS and about 75% TNS; its HPWL increases 4.69%, so the
+broader wirelength acceptance remains unresolved. A fresh same-CPU minimax repeat
+reproduces both WNS scores exactly, with placement 47.738→52.206 s (1.094×).
+Coralnpu's complete LiveHD flow takes 1,022.04 s wall / 1,021.51 s CPU, followed by
+74.598 s independent scoring; placement itself takes 13 min 50 s. Scoring resumed
+from the completed DEF after a wrapper CPU-slot index error, without rerunning the flow.</p>
+<p>The preceding unrestricted warm candidate (<code>speed-v26</code>) is rejected:
+on coralnpu three rejected warm trials consumed the shared detailed-evaluation
+allowance and prevented repair. Placement was within budget at 915.105 s (1.104×),
+but independent WNS worsened to −40,780.595 ps. Reserving repair capacity limits
+that design to one rejected warm trial followed by an accepted sizing sweep.
+Five targeted placement/repair/CLI suites pass. Integration checks also exposed and
+fixed a restarted-placement cache write: the DEF is now published only when the
+matching placement cache is enabled.</p>
+<p>Related fixes recognize negative setup WNS/TNS gains without requiring a change
+to the longest absolute arrival, expand SDC exclusions over <code>all_outputs</code>,
+and start short warm refinements at their configured final smoothing scale.
+Density-feasible short trials may be timed without objective convergence when
+routability is disabled; existing routability, legality, HPWL, area and detailed
+STA acceptance checks remain. The uniform dynamic-grid experiment improves small
+lfsr timing but worsens partition_m by 22 ps; no grid or filler defaults changed.</p>
+<p>Earlier user priority was CPU runtime and scaling first. The current WNS pass
+allows at most 1.5× matched placement time; power remains secondary. All designs
+use the same defaults and benchmark-independent policies.</p>
+<p>A shared 3% standard-cell count and LEF-area limit now checks whole-color remaps,
+ABC boundary sizing and private physical repair candidates before publication or timing.
+It counts all repeated color instances and excludes macro area from the allowance.
+Regression tests cover shared hierarchy, refused rewrites preserving the source, rejection
+before STA, and assigning limited area to the most critical driver. The first full-flow
+version (<code>speed-v21</code>) rejected whole repair batches: minimax met the growth bound
+but WNS worsened to −2,578.03 ps. Per-edit admission and critical-first ordering recover
+part of that loss. Frozen <code>speed-v22</code> takes 5.74/75.33/121.83 CPU seconds on
+lfsr/minimax/partition_m, versus v19's 6.86/84.52/124.78. Lfsr and minimax each avoid one
+oversized resynthesis restart. Minimax finishes with 14,536 cells versus 14,758 synthesized,
+and 1,962.1764 µm² versus 1,905.1103 synthesized (+2.995%); independent HPWL is 41,566.484 µm.
+Its WNS remains −2,084.913 ps versus v19's −460.178 ps, so this is a measured runtime/growth
+improvement with a substantial timing-quality regression, not a timing-closure result.
+Lfsr WNS is +24.058 ps; partition_m WNS and HPWL are unchanged. All three final inventories
+meet the growth bound. Larger-design validation and the remaining timing/model issues stay open.</p>
+<p>A GP input mismatch explains much of minimax's wirelength gap: the archived OpenROAD log removes
+1,772 synthesis buffers and inserts 131 port buffers before GP, whereas the archived flow-C input DEF
+precedes that cleanup. On the cleaned imported floorplan, native ordinary-density GP plus legalization
+takes 11.95 CPU seconds and scores 44,273.785 µm independent HPWL; upper-bound GP takes 14.74 s and
+scores 48,348.354 µm. Both meet D's imported-floorplan limits. These unbuffered pure-GP results have
+WNS around −9 to −10 ns and still require electrical repair. A fresh cleaned OpenROAD control takes
+17.30 s, with 49,963.566 µm final HPWL and +39.354 ps WNS after its repair/legalization. The native
+cleanup implementation is validated: it edits a private physical copy, retains port bindings,
+fixed cells and clock/reset cones, and preserves logical color identities and failed-target history.
+Final timing-driven HPWL acceptance remains open.</p>
+<p>The native cleanup now passes 58 repair regressions, including source identity, boundary cells,
+fixed-cell retention and reset cones crossing region boundaries. On the unchanged imported input it
+removes 1,756 buffers and retains 16 existing port buffers. Ordinary GP scores 42,540.662 µm in
+11.78 CPU seconds (540 iterations), upper-bound GP 45,997.977 µm in 16.25 s (1,460 iterations).
+Both meet imported D limits; detailed timing remains poor before repair. Unlike the OpenROAD cleanup
+control, this native policy retains existing port cells without inserting a fresh buffer at every port.
+A shared optional-trial admission budget is implemented for warm refinement, sizing, forest repair,
+recovery and cone resynthesis; it reserves final validation rather than restarting a budget per phase.
+The full v19 build passes 17 test targets, including repair, placement, reset-cut persistence and
+OpenTimer regressions. The frozen coralnpu and cnn full-flow measurements are complete.</p>
+<p>The isolated <code>speed-v18</code> full-flow runs take 6.78/84.70/121.41 CPU seconds for
+lfsr/minimax/partition_m, versus v16's 5.19/89.24/122.83. Independent HPWL is
+187.546/52,385.084/81,242.021 µm and WNS +24.285/−460.178/−398.945 ps. Minimax's primary GP
+converges in 540 iterations, with six detailed physical evaluations plus standalone STA. Cleanup
+triggers new pre-repair resynthesis restarts on lfsr/minimax. An explicit diagnostic disabling IO
+resynthesis takes 5.23/67.26 s, with HPWL 181.043/52,194.835 µm and WNS +24.058/−335.841 ps.
+This motivates moving the decision after electrical repair; disabling resynthesis or changing its
+public threshold is not retained as a production fix. The phase-ordering change remains open.</p>
+<p>The normal-build <code>speed-v19</code> runs take 6.86/84.52/124.78 CPU seconds for
+lfsr/minimax/partition_m, with the same independent HPWL and WNS as v18. Persistent reset
+false-path cuts now survive RC serialization and standalone STA. The own-floorplan pure-GP
+diagnostic takes 4.12 CPU seconds for lfsr and 21.36 for minimax; placement itself takes
+0.82/5.33 seconds. Minimax scores 36,225.566 µm HPWL and converges in 580 iterations,
+meeting D's own-floorplan limits. Timing-driven final HPWL remains 52,385.084 µm and
+still exceeds pure GP; pure GP's unrepaired WNS is −23,488.424 ps.</p>
+<p>Final legalization now reuses an accepted detailed timing result only when rebuilt nets, cell
+identities/poses, terminals and reset cuts match exactly. Its isolated regression suite passes
+60 repair and 75 placement tests. The three small full-flow runs remain quality-identical at
+6.80/85.26/124.01 CPU seconds; all required a fresh final timing call, so this check has not
+produced a measured speedup on them. A separate completed-DEF hint fallback for edited colors
+passes all six physical-cache tests. On an identical small minimax RTL edit with identical prior
+region caches, hints reuse 14,940 cell positions while seeding 1,698 new cells. Total CPU falls
+69.48→64.97 s (6.5%); the initial placement phase falls 16.95→14.64 s (13.6%). Independent
+HPWL rises 47,494.988→48,667.380 µm (+2.47%), while WNS improves −416.371→−306.761 ps.
+Current fixed constraints, connectivity, RC, timing and legality are recomputed.</p>
+<p>Frozen v19 coralnpu completes in 1,244.16 CPU seconds (20.74 min), versus v16's
+1,928.76 s: 35.5% faster, with peak RSS 10,816.68 MiB. Detailed physical evaluations fall
+19→7 (plus standalone STA), meeting the eight-evaluation budget; ranking stays at 11 samples.
+Independent HPWL improves 3,608,756.781→3,480,883.550 µm (−3.54%). Under the same full
+reset-distribution false-path policy, WNS worsens −1,142.716→−1,550.302 ps. Final count is
+174,291 logic cells and two macros; area is 47,909.694 µm². This is the measured runtime/timing
+tradeoff from limiting optional repair, not timing parity. Cnn has now completed and its reset-policy comparison is recorded below.</p>
+<p>The requested filler sweep is complete: 12 small-design runs and one additional full coralnpu
+run, using frozen v19 binaries. Defaults remain charge fraction 0.25 and cell scale 1.
+Repeated default controls take 6.84/84.67/123.48 CPU seconds on lfsr/minimax/partition_m and
+reproduce prior quality exactly. Halving charge gives 6.65/89.79/124.42 s, with WNS
++23.147/−330.021/−319.989 ps: runtime improvement is not consistent. Halving cell scale too
+worsens minimax/partition_m WNS by 67.81/45.42 ps, and increases partition_m HPWL 12.19%.
+Doubling cell scale with unchanged charge has no effect on these three designs' geometry,
+quality or counts because bin-size caps bind; its macro-heavy quality remains untested.</p>
+<p>Half-density coralnpu completes in 1,106.08 CPU seconds, 11.1% faster than the 1,244.16 s
+baseline. Macro GP drops 73,359→36,778 fillers and 71.17→65.30 s at 740 iterations; final GP
+drops 1,000 unconverged iterations→520 converged, and 69.61→39.86 s. However, independent
+reset-distribution-filtered WNS worsens −1,550.302→−1,896.287 ps and HPWL grows
+3,480,883.550→3,620,664.087 µm (+4.02%). The tested reductions therefore fail the user's
+no-WNS-regression condition; no filler defaults were changed. Native synthesis reset-role
+verification reproduces both scored reset cut sets exactly (7,315 baseline, 7,317 half density).</p>
+<p>Frozen v19 cnn completes in 2,631.59 CPU seconds (43.86 min), within the one-hour limit
+that stopped v16 during repair. Peak RSS is 15,006.66 MiB. Its macro GP uses 1,874,147 virtual
+fillers. DEF/Liberty-only classification misses registered synchronous resets, yielding a spurious
+−799,201 ps WNS. Native QoR supplies 21 internal reset roots; their Liberty buffer/inverter closure
+identifies 5,157 false-path nets. With those cuts, independent WNS is −5,131.712 ps versus native
+−3,748.721 ps: the >10% timing-model discrepancy remains open. Independent HPWL is
+12,750,555.060 µm, with 283,003 logic cells, 65 macros and 1,724,676.904 µm² area.</p>
+<p>The iteration set now includes <code>NVDLA/partition_m</code> at the user's request,
+alongside lfsr and minimax. Its saved OpenROAD reference has 19,754 logic cells, providing another
+moderate-size case for runtime, ranking-update cost, convergence, and restart comparisons.</p>
+<p>The iteration set also includes <code>coralnpu</code>: its saved OpenROAD reference has
+178,348 logic cells and two SRAM macros, with WNS −160.60 ps. The initial <code>speed-v14</code>
+run fails before placement after 131.89 CPU seconds: the large-region synthesis policy leaves
+reset/derived-clock registers native, and the timing seed rejects an unmapped flop. A separate
+diagnostic enables the existing <code>pass.abc.large_flow_latches=true</code> option; this is not
+a benchmark-specific production policy or a changed default. It completes in 3,529.57 CPU seconds
+(58.83 minutes), with peak process-tree RSS 10,553.45 MiB, 176,959 cells and two macros.
+Its independent HPWL is 3,381,312.28 µm. The existing large-flow register test also passes its
+unbounded equivalence proof. The run exposes repeated IO bus ordering as a hotspot: precomputing
+each lane's circular movement interval and slot coordinates preserves all 240 isolated comparison
+coordinates and scores while reducing CPU 14.89 → 0.70 s. Tied-projection comparisons also agree
+(14.77 → 0.66 s). Six pin-adjustment regression tests pass; full-flow measurement is pending.</p>
+<p>The coralnpu diagnostic performs one resynthesis restart. Four colors are attempted,
+three are accepted, and unsuccessful targets are skipped at the next stage. The requested period is
+2700 ps for the actual 3000 ps requirement. It performs 38 ranking and 27 detailed physical timing
+evaluations; ranking costs 314.05 s and all physical timing costs 1,864.74 s. Repair spends 1,735.44 s,
+including eleven rejected sizing batches and eight tiny accepted buffer-area recoveries that leave
+the maximum delay unchanged. Newly validated changes apply density-milestone ranking to macro/FP
+placement, reuse detailed feedback across unchanged phase boundaries, and stop warm refinement
+after its first unconverged candidate (the baseline attempted three). A repair profile attributes
+35.44% of samples to <code>expm1</code> and 12.90% to ramp crossing. A better initial guess and use of
+<code>exp-1</code> away from cancellation reduce an isolated 100,000-fit comparison from 0.795 to
+0.542 CPU seconds, with identical aggregate float results. All 12 integration test targets pass,
+including waveform fitting, placement, repair, resynthesis and physical timing.</p>
+<p>The user also requests timing-free macro planning before final placement and reuse of its cell
+seed. The staged flow already fixes macros and IOs, but discarded movable-cell poses at that handoff.
+A frozen-binary coralnpu diagnostic runs one timing-free macro plan in 199.27 CPU seconds (118.40 s
+placement plus 68.47 s endpoint reporting STA). From the identical resulting macro/IO frame, cold final
+placement takes 234.64 CPU seconds and 520 GP iterations; coordinate-seeded final placement takes
+252.53 s and 1,200 iterations. Coordinate reuse alone therefore regresses speed by 7.6%; independent
+HPWL also increases 2.4%. A further paired experiment carries the converged normalized density weight
+along with the coordinates. With the same v15 binaries, cold final placement takes 226.01 CPU seconds;
+the combined seed takes 192.02 s (15.0% less), both converging in 520 GP iterations. Density readiness
+improves from iteration 320 to 200 and physical timing evaluations drop from seven to six. Independent
+HPWL increases 2.67% (3,508,157.90 → 3,601,969.71 µm); reset-false WNS improves from −15,833.92 to
+−8,417.47 ps, with unchanged cells and area. Whole-flow validation of the automatic handoff remains pending.</p>
+<p>Reset paths are always false paths. The final standalone timing pass was missing the typed reset
+cuts used during placement, producing false critical paths into async SETN pins. The fix forwards those
+cuts, shares their application with the physical session, and includes them in the timing cache key.
+Regression coverage passes for registered resets, ranking/detailed model switches and cache reuse
+with cuts enabled and removed. Independent OpenSTA scoring also needed async-register endpoint cuts
+in addition to the existing primary-reset input cut: the same coralnpu placement changes from
+−39,165.97 ps to −8,672.60 ps WNS with that policy. Both scores are retained; the saved OpenROAD
+reference must be re-scored with the same reset policy before making a timing comparison.</p>
+<p><code>speed-v15</code> completes the original three designs with unchanged independent HPWL and WNS:
+lfsr 5.13 CPU seconds, minimax 89.34 s (v14: 97.75), and partition_m 120.60 s (v14: 145.69).
+Detailed physical evaluations fall to 2/7/6 respectively. Final standalone STA costs 0.72/4.91/6.62 s,
+so the three-second minimax STA target remains open. A further repair change filters healthy-neighbor
+sizing and buffer-area trials even while an unrelated path misses setup. An initial attempt also filtered
+forest reconstruction; three connectivity regressions caught that overreach, so forest eligibility is
+retained while setup fails. All three targeted placement/repair/IO test targets pass with the narrowed change. Frozen v16 takes
+5.19/89.24/122.83 CPU seconds on lfsr/minimax/partition_m. Minimax HPWL changes 0.054% to 96,841.90 µm
+and WNS to +18.1377 ps; the other independent quality results are unchanged. Full coralnpu completes in
+1,928.76 CPU seconds (45.35% less than v14), with peak RSS 10,395.88 MiB and 19 detailed/11 ranking
+evaluations. Independent HPWL increases 6.73% to 3,608,756.78 µm, and reset-false WNS regresses from
+−8,672.60 to −33,545.71 ps under the endpoint-only reset policy. Repair still
+performs eleven rejected sizing trials after its accepted forest sweep. Cnn remains running with
+unchanged benchmark settings and a one-hour measurement limit.</p>
+<p>The endpoint-only reset comparison above is incomplete: a reset distribution signal can also
+enter data logic. Independently scoring both saved placements with all recognized reset nets and
+their Liberty buffer/inverter distribution closure marked false gives WNS −1,207.553 ps (v14) and
+−1,142.716 ps (v16). Both exclude 7,292 reset distribution nets using the same policy. Thus WNS
+improves slightly while CPU falls 45.35%; the apparent large regression was a constraint mismatch.
+The v16 internal physical WNS of −1,212.42 ps differs from the matched independent score by about
+6%. Original primary-only, endpoint-only and direct-reset-net scores remain retained separately;
+no benchmark golden has been rewritten.</p>
+<p>Automatic phase completion is the user's next priority: stop stable phases or hand their result
+to the next phase without benchmark-specific controls. The <code>speed-v11</code> run skips optional
+healthy-gate downsizing and healthy-buffer recovery when setup is already met. On partition_m,
+whole-flow CPU drops from 578.91 to 170.61 s; resize/repair drop from 215.30/230.98 to 11.73/32.91 s,
+and detailed physical timing calls fall from 28 to 9. HPWL changes from 84,547.53 to 84,503.28 µm;
+independent WNS changes from −203.35 to −233.68 ps. Internal setup remains positive, so the timing
+model discrepancy is still unresolved. Minimax takes 131.22 s with unchanged HPWL 96,789.55 µm
+and WNS +18.14 ps; lfsr takes 5.44 s. These measurements use the same automatic policy on all three
+designs. Further phase handoff work avoids repeating a completed sizing sweep when buffer repair
+accepts no changes.</p>
+<p><code>speed-v12</code> validates that handoff: partition_m skips the repeated sizing sweep,
+reduces detailed physical timing evaluations from nine to eight, and takes 162.98 s CPU versus
+170.61 s, with identical HPWL and WNS. A second automatic rule hands static fixed-grid cell solves
+to legalization when HPWL and density overflow remain within 1% across 100 iterations despite
+fourfold stronger density pressure. It respects minimum iterations and excludes active geometry
+or scheduled macro work. Lfsr stops with <code>density_stalled</code> at 1,160 instead of 1,500
+iterations; its placement phase falls from 1.409 to 1.212 s, whole-flow CPU from 5.44 to 5.30 s,
+HPWL from 210.613 to 208.004 µm, and WNS from +0.674 to +0.768 ps. Stagnation is explicitly not
+reported as GP convergence. Minimax still converges in 540 primary iterations with unchanged quality;
+CPU is 132.89 versus 131.22 s. All three use unchanged benchmark settings. All 78 affected test targets
+pass, including infeasible-density handoff, minimum-budget protection, macro exclusion and sizing
+reuse. Remaining acceptance work is still open.</p>
+<p><code>speed-v13</code> separates OpenTimer builder materialization from timing propagation.
+RC attachment, case masks and exclusions now finish before evaluating the combined state; structural
+barriers preserve dirty frontiers and invalidate aggregate caches. Seven timing/repair test targets
+pass, including queued RC/model changes, deletion and area changes without timing frontiers.
+All three independent HPWL/WNS scores are identical to <code>speed-v12</code>. Minimax CPU falls
+from 132.89 to 121.36 s (resize 17.94 to 7.97 s); physical timing totals 51.92 s. Partition_m changes
+only from 162.98 to 161.21 s, and lfsr from 5.30 to 5.37 s. The old reconcile bucket included unprofiled
+propagation, so compare total timing rather than interpreting its reduction alone as speedup.
+Detailed waveform propagation and final STA still exceed B's targets.</p>
+<p><code>speed-v14</code> replaces fixed 36-step threshold bisection with a safeguarded Newton solve
+of the same detailed driver waveform. Value and derivative share exponential evaluations; unsafe
+steps retain the bracket and use bisection. The numerical tests compare against an 80-step reference
+and independent circuit equations, including degenerate steps and extreme time-constant ratios.
+An isolated 300,000-crossing comparison takes 0.084 versus 0.461 CPU seconds. Whole-flow minimax
+falls from 121.36 to 97.75 s, partition_m from 161.21 to 145.69 s, and lfsr from 5.37 to 5.16 s.
+Independent HPWL/WNS are identical on all three. Physical timing totals are 36.51 s for minimax
+and 35.49 s for partition_m. Final STA is 5.67/8.03 s respectively: faster, but still above the
+three-second target. This changes solver efficiency, not the detailed waveform model or the
+approximate GP-ranking policy.</p>
+<p>Next priority from the user: GP needs the ordering of the most critical paths, not precise timestamps.
+Its feedback now uses total-load gate characterization and closed-form Elmore wire delay, updates the
+existing timer for RC/master changes, and exports only approximate pin slack and clock flags.
+The existing <code>synth.place.timing_fraction</code> selects 10%, 20%, or another configured fraction of
+data nets by worst path slack; weight magnitudes depend on rank and retain the existing smoothing.
+Detailed timing is retained for resynthesis and physical acceptance/final checks. Statistics distinguish
+ranking calls from detailed calls, and GP reports no WNS or electrical-validity claim for ranking samples.
+Targeted ranking, RC update, gate update, model restoration, and resynthesis-fallback tests pass;
+the frozen <code>speed-v4</code> benchmark reduces minimax whole-flow CPU from 390.49 s
+(<code>speed-v3</code>) to 130.69 s. Its 13 ranking calls total 10.650 s, with ordinary calls
+mostly 0.65–0.76 s; nine detailed calls remain. Total physical timing is 63.491 s, down from
+296.976 s. The independent score is HPWL 95,675.153 µm and WNS +4.764 ps. lfsr is 5.42 s CPU,
+with six ranking calls and four detailed calls. This is not a completion claim: early minimax GP
+still reaches the iteration cap, despite a later accepted warm refinement converging in 60 iterations.</p>
+<p>Measurement note: <code>speed-v4</code>'s aggregate <code>place_s</code> includes nested criticality
+and IO phases, which overlap their parent placement phases. Use whole-flow CPU for these comparisons.
+The criticality phase is renamed <code>pass.opentimer.ranking</code> in the next build to avoid
+double-counting it as a separate placement phase.</p>
+<p>The subsequent <code>speed-v5</code> run reuses physical/timer pin and net bindings for coordinate-only
+RC updates. Minimax is 127.79 s whole-flow CPU, with 13 ranking evaluations totaling 9.154 s;
+ordinary ranking calls are about 0.49–0.59 s. HPWL and the independent WNS score are unchanged from
+<code>speed-v4</code>. The six-target timing regression suite passes, including default detailed
+timing, waveform fitting, incremental RC, and switching between ranking and detailed models.</p>
+<p>The <code>speed-v6</code> quadratic-seed experiment completes minimax in 126.35 s whole-flow CPU,
+with HPWL 92,446.603 µm and WNS +35.629 ps. Its seed costs 0.016 s and contracts weighted starting HPWL
+from 893,504 to 12,413 µm; 11 ranking calls and nine detailed calls remain. lfsr is 5.41 s CPU,
+HPWL 205.793 µm and WNS −1.991 ps. The isolated pure-GP comparison exposed a regression: leaving the
+old IO prototype GP after the new seed increased iterations from 1,060 to 1,500 and HPWL from
+62,900 to 66,899 µm (placement phase 7.787 to 9.335 s). The next experiment replaces that redundant
+prototype with quadratic IO assignment/re-anchoring. These are intermediate results, not acceptance.</p>
+<p>The <code>speed-v7</code>/<code>speed-v8</code> automatic-IO quadratic experiments are not retained:
+the full minimax runs took 146.10/163.81 s CPU, even though the faster adaptive density ramp reduced
+<code>speed-v8</code>'s final GP to 600 iterations and its pure GP to 920. The following fixed-IO
+experiment also regressed imported minimax badly (HPWL 677,615 µm), so quadratic initialization is
+not enabled in the production path. Its bounded native implementation remains an experimental API;
+D's initialization work is unresolved. The faster density ramp is retained only for the ordinary
+density model, preserving the upper-bound model's original ramp. On the opt-in dynamic grid with a
+0.25 continuation factor, <code>speed-v8</code>
+lfsr converges in 540 iterations at 4.31 s CPU; fixed-grid and continuation defaults have not changed.</p>
+<p>GP accounting now preserves the primary solve across accepted timing rounds and through subsequent
+repair/legalization, records each attempted round, and totals its iterations. Warm candidates that
+already fail convergence or HPWL bounds skip detailed STA. The standalone <code>physical_repair</code>
+placement driver now also uses ranking feedback for seed/GP weights and accepts fractional
+<code>post_density_factor</code> values. In <code>speed-v9</code>, standalone lfsr placement takes
+3.23 s CPU and repair 2.39 s, with six ranking and three detailed placement calls. Minimax's ordinary
+pure GP converges in 560 iterations (placement phase 5.924 s), versus 1,060 iterations/7.787 s before
+the faster ramp, at HPWL 63,367 µm versus 62,900 µm. Its full flow is 144.50 s CPU, HPWL 96,790 µm,
+WNS +18.143 ps; nine detailed evaluations remain. A full-flow CPU win from the density change has
+not been established. The broader regression suite and restored imported-floorplan path are under validation.</p>
+<p>The invocation-owned technology snapshot reuses Liberty characterization and LEF geometry across GP,
+repair, resize, IO timing and timing-weight refreshes. A fresh lfsr run reduced reported placement time
+from 88.313 s to 8.100 s (whole-flow CPU 90.47 s to 11.05 s). The independent OpenSTA score was unchanged:
+HPWL 167.809 µm, WNS +22.519 ps, 133 logic cells, power 9.45e-5 mW. Imported-floorplan flow C improved
+from 25.64 + 43.40 s CPU for placement + repair to 7.79 + 4.73 s. These measurements cover the snapshot
+change only; they do not establish completion of the plan. Raw summaries and binary identities are in
+<a href="1f-measurements.json">1f-measurements.json</a>.</p>
+<p>Physical-session timing buckets and evaluation counts now reach the synthesis result's placement report;
+<code>synth.place.timing_profile=true</code> logs per-evaluation costs. GP iterations and stopping status
+are retained through final legalization. The snapshot-only lfsr run still performed 76 STA evaluations.</p>
+<p>In-flight changes: density-milestone GP callbacks, no setup-slack convergence veto, preserved momentum
+for weight-only updates, post-GP topology repair, and short warm timing refinement with HPWL/area guards.
+Full integration, default-policy decisions, minimax and large-design measurements, and the remaining B/D/G/H/I/J
+work are pending. No completion claim or commit/push has been made.</p>
+<p>The next frozen run (<code>speed-v2</code>) avoids repair and resynthesis after the actual setup objective is met.
+lfsr reported placement is 2.321 s, whole-flow CPU 5.57 s, with 10 timing calls taking 0.756 s.
+The independent score is HPWL 198.693 µm, WNS +0.404 ps, 136 logic cells. Its fixed 64-bin GP still reaches
+the 1,500-iteration limit. Minimax completes in 412.34 s CPU (reported placement 404.447 s), with 37 timing
+calls taking 316.510 s; GP converges in 940 iterations. These do not yet meet all speed/convergence targets; minimax's timing and repair work is the next bottleneck. These runs precede the resynthesis-history changes.</p>
+<p>Resynthesis policy requested by the user: remember colors that missed a previously attempted target and
+avoid repeated attempts. Request a period 10% shorter than the real requirement on resynthesis; preserve the
+achieved margin across placement stages and workdir reloads so small IO timing shifts do not retrigger it.
+Reports distinguish the actual period from the requested synthesis period. The initial synthesis hint is
+separate from the SDC objective used to decide whether physical setup needs improvement.</p>
 
 <h2 id="related">Relation to <a class="xref" href="2t-timeclosure.html">2t-timeclosure</a></h2>
 <p>2t-timeclosure is the opt-in redesign of the GP timing loop (<code>synth.place.timeclosure</code>; CNN and litepci

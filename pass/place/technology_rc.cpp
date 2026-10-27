@@ -73,18 +73,21 @@ double scale(std::string value, bool resistance) {
 struct Units {
   double r = 0, c = 0, distance_um = 1;
 };
-Units liberty_units(const std::string& path) {
+Units liberty_units(const std::string& path, std::optional<std::string_view> contents) {
   Units result;
   if (path.empty()) {
     return result;
   }
-  auto             header = text(path);
+  const auto       owned = contents ? std::string{} : text(path);
+  auto             view  = contents.value_or(owned);
   const std::regex first_cell(R"rc(\bcell\s*\()rc"), resistance(R"rc(pulling_resistance_unit\s*:\s*"([^"]+)")rc"),
       capacitance(R"rc(capacitive_load_unit\s*\(\s*([0-9.eE+\-]+)\s*,\s*"?([a-zA-Z]+)"?\s*\))rc");
-  std::smatch match;
-  if (std::regex_search(header, match, first_cell)) {
-    header.resize(match.position());
+  std::match_results<std::string_view::const_iterator> cell_match;
+  if (std::regex_search(view.begin(), view.end(), cell_match, first_cell)) {
+    view = view.substr(0, cell_match.position());
   }
+  const std::string header(view);
+  std::smatch       match;
   if (std::regex_search(header, match, resistance)) {
     result.r = scale(match[1], true);
   }
@@ -98,7 +101,8 @@ struct Parsed_rc {
   Route_technology_rc table;
   std::optional<Rc>   signal;
 };
-Parsed_rc parse_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file, bool detailed) {
+Parsed_rc parse_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file, bool detailed,
+                   std::optional<std::string_view> contents = std::nullopt) {
   Parsed_rc parsed;
   auto&     layers    = parsed.table.layers;
   parsed.table.source = rc_file.empty() ? "LEF" : rc_file;
@@ -113,7 +117,7 @@ Parsed_rc parse_rc(const physical::Technology& tech, const std::string& liberty,
     }
   }
   if (!rc_file.empty()) {
-    auto               units = liberty_units(liberty);
+    auto               units = liberty_units(liberty, contents);
     auto               data  = std::regex_replace(text(rc_file), std::regex("\\\\\r?\n"), " ");
     std::istringstream lines(data);
     std::string        line;
@@ -239,7 +243,8 @@ Route_technology_rc technology_route_rc(const physical::Technology& tech, const 
   return parse_rc(tech, liberty, rc_file, true).table;
 }
 Wire_rc technology_wire_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file,
-                           double resistance, double capacitance, double rc_pessimism) {
+                           double resistance, double capacitance, double rc_pessimism,
+                           std::optional<std::string_view> liberty_text) {
   if (!std::isfinite(rc_pessimism) || rc_pessimism < 1) {
     throw std::invalid_argument("rc_pessimism must be finite and at least 1");
   }
@@ -259,7 +264,7 @@ Wire_rc technology_wire_rc(const physical::Technology& tech, const std::string& 
     }
     return pessimize({resistance, capacitance, resistance, capacitance, "explicit wire_rc"});
   }
-  const auto  parsed = parse_rc(tech, liberty, rc_file, false);
+  const auto  parsed = parse_rc(tech, liberty, rc_file, false, liberty_text);
   const auto& layers = parsed.table.layers;
   if (parsed.signal) {
     const auto& signal = *parsed.signal;

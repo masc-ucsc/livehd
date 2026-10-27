@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <functional>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -42,6 +43,8 @@ public:
   Eprp_lnasts                                         lnasts;
   // Typed in-memory placement RC, consumed by pass.opentimer. No file round trip.
   std::shared_ptr<const livehd::physical::Parasitics> physical_rc;
+  // Physical net launch cuts (e.g. reset distribution), shared with placement STA.
+  std::set<std::string>                               physical_timing_cuts;
   std::shared_ptr<livehd::synth::Io_store>            synthesis_feedback;
 
   // Optional stable ordering for a mixed forest reconstructed from persisted

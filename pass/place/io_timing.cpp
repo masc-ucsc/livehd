@@ -10,11 +10,13 @@
 
 #include "attrs.hpp"
 #include "diag.hpp"
+#include "growth_budget.hpp"
 #include "node_util.hpp"
 #include "pass/liberty/liberty_dff.hpp"
 #include "pass/partition/flatten.hpp"
 #include "pass/synth/region_cache.hpp"
 #include "pass/synth/region_qor.hpp"
+#include "placement_technology.hpp"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 #include "technology_rc.hpp"
@@ -46,6 +48,13 @@ Io_timing_flow::Io_timing_flow(std::shared_ptr<hhds::Graph> source, const Option
     , mapper_(synth::make_io_mapper("abc", mapper_options))
     , evaluate_(std::move(evaluate))
     , percent_(percent) {
+  if (options_.growth_budget) {
+    // Keep the source and technology alive without capturing this flow or the
+    // store itself. The query sees already accepted rewrites of other colors.
+    store_->admit_physical_rewrite = [source = source_, options = options_](auto& candidate, const auto& masters) {
+      return growth_admissible(*source, options, &candidate, masters);
+    };
+  }
   if (mapper_.attach_store) {
     mapper_.attach_store(store_);
   }
@@ -54,19 +63,20 @@ Io_timing_flow::Io_timing_flow(std::shared_ptr<hhds::Graph> source, const Option
 std::map<std::string, synth::Io_environment> Io_timing_flow::harvest(const Result& placed, const Timing_feedback& timing) {
   std::map<std::string, synth::Io_environment> result;
   const auto                                   modules = regions(*source_);
-  const auto                                   tech    = physical::read_lef(options_.lefs);
+  const auto&                                  tech    = options_.technology().lef;
   const auto                                   rc      = technology_wire_rc(tech,
-                                     options_.liberty,
-                                     options_.tech_rc_file,
-                                     options_.resistance_ohm_um,
-                                     options_.capacitance_ff_um,
-                                     options_.rc_pessimism);
+                                                                            options_.liberty,
+                                                                            options_.tech_rc_file,
+                                                                            options_.resistance_ohm_um,
+                                                                            options_.capacitance_ff_um,
+                                                                            options_.rc_pessimism,
+                                                                            options_.technology().cells.contents);
   std::map<std::string, std::set<std::string>> controls;
-  auto                                         flops = liberty::scan_dff_cells(options_.liberty);
-  for (const auto& c : liberty::scan_async_dff_cells(options_.liberty)) {
+  auto                                         flops = options_.technology().cells.dffs;
+  for (const auto& c : options_.technology().cells.async_dffs) {
     flops.push_back(c);
   }
-  for (const auto& c : liberty::scan_latch_cells(options_.liberty)) {
+  for (const auto& c : options_.technology().cells.latches) {
     flops.push_back(c);
   }
   for (const auto& c : flops) {
@@ -76,10 +86,10 @@ std::map<std::string, synth::Io_environment> Io_timing_flow::harvest(const Resul
       }
     }
   }
-  for (const auto& c : liberty::scan_icg_cells(options_.liberty)) {
+  for (const auto& c : options_.technology().cells.icgs) {
     controls[c.name].insert(c.clk_pin);
   }
-  for (const auto& c : liberty::scan_memory_cells(options_.liberty)) {
+  for (const auto& c : options_.technology().cells.memories) {
     for (const auto& pin : c.pins) {
       if (pin.clock_input) {
         controls[c.name].insert(pin.name);
@@ -302,7 +312,7 @@ bool Io_timing_flow::check(const std::string& stage, const std::map<std::string,
           // A neighbour changed during refinement. Its old physical measurement
           // belongs to the previous body; retain what mapping used, then wait
           // for fresh placement before attaching another measured environment.
-          store_->used(module, identity, env);
+          store_->refined(module, identity);
         }
       }
       if (store_->cache && measured.checked) {
@@ -328,7 +338,8 @@ bool Io_timing_flow::check(const std::string& stage, const std::map<std::string,
   return accepted;
 }
 bool Io_timing_flow::before_placement() { return check("before_placement", nullptr, true); }
-bool Io_timing_flow::after_stage(Placement_stage stage, const Result& placed) {
+bool Io_timing_flow::after_stage(Placement_stage stage, const Result& placed, std::optional<Timing_feedback> prior) {
+  final_timing_.reset();
   const bool automatic = first_stage_ && !automatic_used_;
   first_stage_         = false;
   std::map<std::string, synth::Io_environment> values;
@@ -342,12 +353,34 @@ bool Io_timing_flow::after_stage(Placement_stage stage, const Result& placed) {
     measurement.graph         = placed.graph;
     measurement.parasitics    = placed.macro_gp_timing->parasitics;
     measurement.pin_locations = placed.macro_gp_timing->pin_locations;
-    values = harvest(measurement, placed.macro_gp_timing->timing);
+    measurement.floorplan     = placed.floorplan;
+    measurement.prects        = placed.prects;
+    const auto timing = placed.macro_gp_timing->timing.ranking_only ? evaluate_(measurement) : placed.macro_gp_timing->timing;
+    values            = harvest(measurement, timing);
   } else {
-    values = harvest(placed, evaluate_(placed));
+    auto timing = prior && !prior->ranking_only ? std::move(*prior) : evaluate_(placed);
+    // A synthesis-internal color budget must not restart a physical stage
+    // whose actual SDC setup objective is already satisfied.
+    if (timing.wns && *timing.wns >= 0) {
+      ++setup_met_stages_;
+      if (stage == Placement_stage::final) {
+        final_timing_ = std::move(timing);
+      }
+      std::filesystem::create_directories(options_.output_dir);
+      std::ofstream output(options_.output_dir + "/io_resynth.json");
+      if (!(output << report() << '\n')) {
+        throw std::runtime_error("cannot save IO resynthesis report");
+      }
+      return false;
+    }
+    values = harvest(placed, timing);
+    if (stage == Placement_stage::final) {
+      final_timing_ = std::move(timing);
+    }
   }
-  const bool restart   = check(stage_name(stage), &values, automatic);
+  const bool restart = check(stage_name(stage), &values, automatic);
   if (restart) {
+    final_timing_.reset();
     ++restarted_;
     restarted_stage_ = stage_name(stage);
   }
@@ -361,6 +394,8 @@ std::string Io_timing_flow::report() const {
   w.Int(1);
   w.Key("percent");
   w.Double(percent_);
+  w.Key("setup_met_stages");
+  w.Uint(setup_met_stages_);
   w.Key("restarts");
   w.Uint(restarted_);
   w.Key("restarted_stage");
@@ -412,6 +447,10 @@ std::string Io_timing_flow::report() const {
     w.Double(d.slack_after_ps);
     w.Key("tightening_ps");
     w.Double(d.delta_ps);
+    w.Key("required_period_ps");
+    w.Double(d.required_period_ps);
+    w.Key("requested_period_ps");
+    w.Double(d.requested_period_ps);
     w.Key("input");
     w.String(d.input.c_str());
     w.Key("output");

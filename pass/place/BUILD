@@ -406,7 +406,11 @@ filegroup(
         "prects_networks.cpp",
         "prects_networks.hpp",
         "place.cpp",
+        "placement_technology.cpp",
         "place.hpp",
+        "placement_technology.hpp",
+        "growth_budget.cpp",
+        "growth_budget.hpp",
         "uroute.cpp",
         "uroute.hpp",
         "rc_cache.cpp",
@@ -563,7 +567,9 @@ cc_library(
         "memory_proxy.cpp",
         "pin_adjust.cpp",
         "place.cpp",
+        "placement_technology.cpp",
         "repair.cpp",
+        "growth_budget.cpp",
         "reset_tree.cpp",
         "resize_engine.cpp",
         "resynthesize.cpp",
@@ -585,7 +591,9 @@ cc_library(
         "memory_proxy.hpp",
         "pin_adjust.hpp",
         "place.hpp",
+        "placement_technology.hpp",
         "repair.hpp",
+        "growth_budget.hpp",
         "repair_internal.hpp",
         "reset_tree.hpp",
         "resize_engine.hpp",
@@ -925,4 +933,19 @@ filegroup(
     name = "uroute_pretrained",
     srcs = glob(["uroute/pretrained/*"]),
     visibility = ["//visibility:public"],
+)
+
+cc_test(
+    name = "placement_technology_test",
+    srcs = ["placement_technology_test.cpp"],
+    copts = COPTS,
+    data = ["//inou/lefdef:test_data"],
+    deps = [":place", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "growth_budget_test",
+    srcs = ["growth_budget_test.cpp"],
+    copts = COPTS,
+    deps = [":place", "@googletest//:gtest_main"],
 )

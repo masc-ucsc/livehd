@@ -32,10 +32,15 @@ namespace livehd::placement {
 namespace timeclosure {
 struct Gp_timing_settings;
 }
+namespace detail {
+struct Resize_library;
+}
 namespace buffering {
 struct Checkpoint_settings;
 }
 inline constexpr double max_net_weight = 100;  // physical net weight ceiling shared by option checks and the placement database
+struct Technology;
+struct Growth_budget;
 struct Result;
 enum class Placement_stage { floorplan, macro, final };
 struct Placement_restart : std::exception {
@@ -72,6 +77,14 @@ struct Preroute_settings {
   int         max_rows = 0, max_sites = 0;  // Zero leaves original-net pin spans unlimited.
 };
 struct Options {
+  std::shared_ptr<Growth_budget>                        growth_budget;
+  std::optional<double>                                 density_weight_seed;
+  // Shared by copies used for checkpoints, rounds and repair. A new Options
+  // starts a new snapshot; changing the input paths creates a new snapshot.
+  mutable std::shared_ptr<const Technology>             technology_cache;
+  mutable std::shared_ptr<const detail::Resize_library> resize_library_cache;
+  const Technology&                                     technology() const;
+
   // Experimental native fixed-footprint checkpoint binding; absent preserves
   // the existing flow. Requires the native per-pin timing dependency API.
   std::shared_ptr<const timeclosure::Gp_timing_settings> native_gp_timing;
@@ -130,9 +143,12 @@ struct Options {
   // Internal lifecycle state: optimization trials need legal snapshots before
   // the mandatory final legalization. Never exposed as a user option.
   bool                              optimization_pending        = false;
-  bool                                  handoff_taps                = false;   // profile fixed taps before terminal legalization
+  // Internal short timing refinement: use fine wirelength smoothing instead
+  // of restarting the coarse global-placement objective at the seeded pose.
+  bool                              warm_refinement             = false;
+  bool                              handoff_taps                = false;   // profile fixed taps before terminal legalization
   std::string                       pg                          = "none";  // opt-in native power-grid profile
-  Region_options                        region;  // detail-final region mesh shared by busorder/boundarypins/pinalign
+  Region_options                    region;  // detail-final region mesh shared by busorder/boundarypins/pinalign
   Busorder_options                  busorder;
   Boundary_pin_options              boundarypins;
   Cell_jump_options                 cell_jump;                            // diagnostic: extend a supplied distance-one seed
@@ -163,6 +179,9 @@ struct Options {
   unsigned                              reset_fanout = 0;  // retired: pre-CTS control nets are never buffered
   std::string                           control_ports;     // override optional roots; recognized resets stay excluded
   Evaluate                              fp_evaluate;
+  // Optional lightweight path ranking for placement weights. Detailed timing
+  // remains available through fp_evaluate for resizing and resynthesis.
+  Evaluate                              gp_rank;
   double                                fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
   bool                                  fp_distance_attraction = true;
   bool                                  fp_anchor_macros_only  = false;  // frozen targets; retain all-member normalization
@@ -191,42 +210,42 @@ struct Options {
   double                                                     halo_x = -1, halo_y = -1;
   // Unset preserves the macro halo for cells. Applied only after the macro frame is fixed.
   std::optional<std::pair<double, double>>                   cell_halo;
-  bool        cell_stage                = false;  // internal explicit final/placed context; never inferred from an ECO frame
-  bool        scale_macro_density       = true;
-  bool        dynamic_bins              = false;
-  bool        macro_fill_cell_space     = false;  // complement of cell-density target
-  double      macro_filler_fraction     = 0;      // macro GP only; physical macro dimensions
-  bool        virtual_fillers           = true;
-  int         virtual_filler_max_count  = 0;
-  double      virtual_filler_fraction   = .25;
-  double      virtual_filler_cell_scale = 1, virtual_filler_bin_fraction = .25;
-  int         bin_max = 512, local_density_bins = 512;
+  bool                       cell_stage = false;  // internal explicit final/placed context; never inferred from an ECO frame
+  bool                       scale_macro_density       = true;
+  bool                       dynamic_bins              = false;
+  bool                       macro_fill_cell_space     = false;  // complement of cell-density target
+  double                     macro_filler_fraction     = 0;      // macro GP only; physical macro dimensions
+  bool                       virtual_fillers           = true;
+  int                        virtual_filler_max_count  = 0;
+  double                     virtual_filler_fraction   = .25;
+  double                     virtual_filler_cell_scale = 1, virtual_filler_bin_fraction = .25;
+  int                        bin_max = 512, local_density_bins = 512;
   int                        route_bins    = 0;  // grid.route: 0 inherits the configured density count (also in dynamic mode)
   int                        legalize_bins = 0;  // legalize.bin.grid: 0 uses the routing grid
-  double      local_density_weight = 0, local_density_range = 4, local_density_jitter = .01;
-  double      local_density_target      = -1;  // -1 inherits the global density target
-  double      macro_cell_density_weight = 0;   // standard-cell pressure on macros during macro GP only
-  double      macro_cell_density_reach  = 2;   // screening length / largest physical SRAM side
-  double      macro_density_pull_weight = 0, macro_density_pull_range = 4;
-  bool        automatic_bins = false, exact_macro_density = true, adaptive_density = true, routability = true;
-  std::string route_model = "rsmt";
-  Stage_route fp_route, macro_route, final_route;
-  Uroute_options uroute;
+  double                     local_density_weight = 0, local_density_range = 4, local_density_jitter = .01;
+  double                     local_density_target      = -1;  // -1 inherits the global density target
+  double                     macro_cell_density_weight = 0;   // standard-cell pressure on macros during macro GP only
+  double                     macro_cell_density_reach  = 2;   // screening length / largest physical SRAM side
+  double                     macro_density_pull_weight = 0, macro_density_pull_range = 4;
+  bool                       automatic_bins = false, exact_macro_density = true, adaptive_density = true, routability = true;
+  std::string                route_model = "rsmt";
+  Stage_route                fp_route, macro_route, final_route;
+  Uroute_options             uroute;
   // Internal: a pool snapshot preloaded by load_uroute_pool(), reused when its
   // resolved controls match so one run hashes the manifest/weights once.
   std::optional<Uroute_pool> uroute_pool;
   // Internal immutable snapshot supplied to the H2D host adapter.
   Uroute_selection           uroute_selection;
   Uroute_identity            uroute_stage_identity;
-  int         route_degree = 40, route_accuracy = 3;
-  bool        routability_charge_compensation = true;
-  double      routability_macro_weight = 1, routability_macro_range = 2;  // direct channel pressure; range in bins
-  double      macro_overlap_weight = 50, macro_jitter = .01;
-  double      macro_align_weight = 25, macro_align_sigma = .25, macro_align_overlap_boost = 0;
-  int         macro_align_start = 100, macro_align_full = 500;
-  bool        macro_align_nearest = false, macro_snap = true;
-  bool        macro_align_global = true;         // same master across colors; refresh strip pairs each GP iteration
-  std::string macro_snap_mode    = "alignment";  // alignment | symmetry
+  int                        route_degree = 40, route_accuracy = 3;
+  bool                       routability_charge_compensation = true;
+  double                     routability_macro_weight = 1, routability_macro_range = 2;  // direct channel pressure; range in bins
+  double                     macro_overlap_weight = 50, macro_jitter = .01;
+  double                     macro_align_weight = 25, macro_align_sigma = .25, macro_align_overlap_boost = 0;
+  int                        macro_align_start = 100, macro_align_full = 500;
+  bool                       macro_align_nearest = false, macro_snap = true;
+  bool                       macro_align_global = true;         // same master across colors; refresh strip pairs each GP iteration
+  std::string                macro_snap_mode    = "alignment";  // alignment | symmetry
   DreamPlace::native::FloorplanOptions macro_snap_options;
   double                               macro_snap_tolerance = .25;
   int                                  macro_snap_weight    = 100;
@@ -244,7 +263,7 @@ struct Options {
   bool                                 exact_cell_density         = false;
   bool                                 density_upper_bound        = false;  // experimental filler-free upper-bound penalty
   int                                  min_iterations             = 40;
-  int                 post_density_factor                 = 4;  // bounded continuation after geometry/density settle; zero disables
+  double              post_density_factor                 = 4;  // bounded continuation after geometry/density settle; zero disables
   double              convergence_tolerance               = .01;
   bool                full                                = true;
   bool                final_cells                         = true;
@@ -297,6 +316,7 @@ struct Result {
   std::map<std::string, double>                    net_weights;
   std::shared_ptr<hhds::Graph>                     graph;
   std::shared_ptr<physical::Parasitics>            parasitics;
+  std::optional<double>                            gp_density_weight;
   std::string                                      qor;
   physical::Floorplan                              floorplan;
   Prects_library                                   prects;

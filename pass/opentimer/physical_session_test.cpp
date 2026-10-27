@@ -124,7 +124,7 @@ protected:
     directory = std::filesystem::path(std::getenv("TEST_TMPDIR")) / ::testing::UnitTest::GetInstance()->current_test_info()->name();
     std::filesystem::create_directories(directory);
     std::ofstream(directory / "timing.sdc") << "create_clock -name virtual -period 10\nset_input_delay -clock virtual 0 "
-                                                                "[all_inputs]\nset_output_delay -clock virtual 0 [all_outputs]\n";
+                                               "[all_inputs]\nset_output_delay -clock virtual 0 [all_outputs]\n";
     std::ifstream source("inou/lefdef/tests/data/sky130hd.lib");
     std::string   liberty{std::istreambuf_iterator<char>(source), {}};
     const auto    begin = liberty.find("cell (\"sky130_fd_sc_hd__buf_1\")");
@@ -223,10 +223,10 @@ TEST_F(PhysicalSession, RegisteredResetCutChangesDownstreamSlackWithoutChangingL
   auto       reset = cell("reset_stage", "sky130_fd_sc_hd__dfxtp_1", {"CLK", "D"}, "Q");
   auto       mix   = cell("mix", "sky130_fd_sc_hd__nor2_1", {"A", "B"}, "Y");
   const auto wire  = [&](const hhds::Pin_class& from,
-                        const hhds::Pin_class& to,
-                        const std::string&     driver,
-                        const std::string&     sink,
-                        double                 resistance) {
+                         const hhds::Pin_class& to,
+                         const std::string&     driver,
+                         const std::string&     sink,
+                         double                 resistance) {
     from.connect_sink(to);
     rc->nets.push_back({
         driver,
@@ -259,6 +259,18 @@ TEST_F(PhysicalSession, RegisteredResetCutChangesDownstreamSlackWithoutChangingL
   livehd::opentimer::Physical_session fresh(options);
   compare(data, fresh.evaluate(graph, rc, cuts));
   compare(data, session.evaluate(graph, rc, cuts));
+  // Reset is also a false path in the approximate GP model. Changing model
+  // must preserve the cut while keeping the functional data input timed.
+  using Purpose          = livehd::opentimer::Physical_session::Purpose;
+  const auto ranked_full = session.evaluate(graph, rc, {}, Purpose::ranking);
+  const auto ranked_data = session.evaluate(graph, rc, cuts, Purpose::ranking);
+  ASSERT_TRUE(ranked_full.pins.at("y").slack);
+  ASSERT_TRUE(ranked_data.pins.at("y").slack);
+  EXPECT_TRUE(ranked_data.ranking_only);
+  EXPECT_GT(*ranked_data.pins.at("y").slack, *ranked_full.pins.at("y").slack + 1);
+  EXPECT_FALSE(ranked_data.pins.contains("mix:B"));
+  EXPECT_TRUE(ranked_data.pins.at("mix:A").slack);
+  compare(data, session.evaluate(graph, rc, cuts));
   auto       moved          = std::make_shared<livehd::physical::Parasitics>(*rc);
   const auto original_pose  = reset.attr(livehd::attrs::place).get();
   auto       moved_pose     = original_pose;
@@ -278,6 +290,86 @@ TEST_F(PhysicalSession, RegisteredResetCutChangesDownstreamSlackWithoutChangingL
   reset.attr(livehd::attrs::place).set(original_pose);
   compare(full, session.evaluate(graph, rc));
   EXPECT_EQ(session.statistics().builds, 1u);
+
+  auto report_options              = options;
+  report_options.graphs            = {graph};
+  report_options.physical_rc       = rc;
+  report_options.dict["qor"]       = (directory / "reset_report.json").string();
+  report_options.dict["cache_dir"] = (directory / "reset_cache").string();
+  report_options.set_stage_labels(report_options.dict);
+  // Final STA must receive the same cuts, and a cached cut analysis must not
+  // be replayed after those cuts are removed from the same physical design.
+  for (bool cut : {true, true, false, true}) {
+    report_options.physical_timing_cuts = cut ? cuts : std::set<std::string>{};
+    Pass_opentimer::time_work(report_options);
+    std::ifstream     input(directory / "reset_report.json");
+    const std::string json{std::istreambuf_iterator<char>(input), {}};
+    compare(livehd::placement::timing_feedback(json), cut ? data : full);
+  }
+  livehd::opentimer::Physical_session supplied_cuts(report_options);
+  compare(data, supplied_cuts.evaluate(graph, rc));
+  // Persist the distribution driver with its RC, then reload the library as a
+  // standalone STA invocation would. The EPRP handoff is deliberately absent.
+  auto persisted         = std::make_shared<livehd::physical::Parasitics>(*rc);
+  persisted->timing_cuts = {"reset_stage:Q"};
+  graph->get_input_node().attr(livehd::attrs::placement_rc).set(livehd::physical::serialize_parasitics(*persisted));
+  const auto saved = (directory / "reset_library").string();
+  library.save(saved);
+  hhds::GraphLibrary restored;
+  restored.load(saved);
+  const auto reloaded   = restored.find_io("top")->get_graph();
+  report_options.graphs = {reloaded};
+  report_options.physical_rc.reset();
+  report_options.physical_timing_cuts.clear();
+  for (bool cut : {true, true, false, true}) {
+    persisted->timing_cuts = cut ? std::set<std::string>{"reset_stage:Q"} : std::set<std::string>{};
+    reloaded->get_input_node().attr(livehd::attrs::placement_rc).set(livehd::physical::serialize_parasitics(*persisted));
+    Pass_opentimer::time_work(report_options);
+    std::ifstream     input(directory / "reset_report.json");
+    const std::string json{std::istreambuf_iterator<char>(input), {}};
+    compare(livehd::placement::timing_feedback(json), cut ? data : full);
+    // The physical session also applies persisted cuts and restores the old
+    // masks when a later physical graph has none, without rebuilding its timer.
+    compare(cut ? data : full, session.evaluate(graph, persisted));
+  }
+}
+
+TEST_F(PhysicalSession, RankingTracksRcAndGateChangesWithoutPublishingDetailedTimes) {
+  using Purpose = livehd::opentimer::Physical_session::Purpose;
+  livehd::opentimer::Physical_session session(options);
+  Circuit                             initial(false, false, 100);
+  const auto                          first = session.evaluate(initial.graph, initial.rc, {}, Purpose::ranking);
+  ASSERT_TRUE(first.ranking_only);
+  ASSERT_TRUE(first.pins.at("y").slack);
+  EXPECT_FALSE(first.wns);
+  EXPECT_FALSE(first.tns);
+  EXPECT_FALSE(first.electrical_pin_feedback);
+  EXPECT_TRUE(first.path.empty());
+  for (const auto& [name, pin] : first.pins) {
+    EXPECT_FALSE(pin.arrival) << name;
+    EXPECT_FALSE(pin.required) << name;
+    EXPECT_FALSE(pin.slew) << name;
+    EXPECT_FALSE(pin.load_ff) << name;
+    EXPECT_FALSE(pin.hold_slack) << name;
+  }
+  Circuit    longer(false, false, 10000);
+  const auto moved = session.evaluate(longer.graph, longer.rc, {}, Purpose::ranking);
+  ASSERT_TRUE(moved.pins.at("y").slack);
+  EXPECT_LT(*moved.pins.at("y").slack, *first.pins.at("y").slack);
+  Circuit                             changed(true, false, 10000);
+  const auto                          repowered = session.evaluate(changed.graph, changed.rc, {}, Purpose::ranking);
+  livehd::opentimer::Physical_session fresh_rank(options);
+  const auto                          expected_rank = fresh_rank.evaluate(changed.graph, changed.rc, {}, Purpose::ranking);
+  EXPECT_EQ(repowered.pins.at("y").slack, expected_rank.pins.at("y").slack);
+  const auto detailed = session.evaluate(changed.graph, changed.rc);
+  EXPECT_FALSE(detailed.ranking_only);
+  livehd::opentimer::Physical_session fresh_detail(options);
+  compare(detailed, fresh_detail.evaluate(changed.graph, changed.rc));
+  const auto restored = session.evaluate(initial.graph, initial.rc, {}, Purpose::ranking);
+  EXPECT_EQ(restored.pins.at("y").slack, first.pins.at("y").slack);
+  EXPECT_EQ(session.statistics().builds, 1U);
+  EXPECT_EQ(session.statistics().rankings, 4U);
+  EXPECT_EQ(session.statistics().evaluations, 5U);
 }
 
 TEST_F(PhysicalSession, DataCutsSurviveTopologyChangesAndCanBeRemoved) {
@@ -1216,13 +1308,13 @@ TEST_F(PhysicalSession, IntegratedPreroutePublishesOnlyAcceptedGeometryAndRestor
   deferred_options.deferred_pg->macro_connect.clear();
   deferred_options.deferred_pg->pin_layer = "M2";
   const auto with_pg                      = pl::detail::preroute_stage(pg_input,
-                                                  pg_tech,
-                                                  straight_wire,
-                                                  bindings,
-                                                  timer,
-                                                  stage_config,
-                                                  deferred_options,
-                                                  stage_feedback);
+                                                                       pg_tech,
+                                                                       straight_wire,
+                                                                       bindings,
+                                                                       timer,
+                                                                       stage_config,
+                                                                       deferred_options,
+                                                                       stage_feedback);
   ASSERT_EQ(with_pg.records.size(), 1);
   ASSERT_TRUE(with_pg.records.front().accepted) << with_pg.records.front().reason;
   EXPECT_EQ(with_pg.placed.floorplan.special_nets.size(), 2);
@@ -1245,13 +1337,13 @@ TEST_F(PhysicalSession, IntegratedPreroutePublishesOnlyAcceptedGeometryAndRestor
                                                timer,
                                                straight_options);
   const auto cached_grid_route  = pl::preroute(pg_tech,
-                                              wired_grid_frame,
-                                              *pg_input.parasitics,
-                                              *pg_input.preroute_design,
-                                              bindings,
-                                              straight_wire,
-                                              timer,
-                                              cached_grid_options);
+                                               wired_grid_frame,
+                                               *pg_input.parasitics,
+                                               *pg_input.preroute_design,
+                                               bindings,
+                                               straight_wire,
+                                               timer,
+                                               cached_grid_options);
   ASSERT_TRUE(rebuilt_grid_route.records.front().accepted);
   ASSERT_TRUE(cached_grid_route.records.front().accepted);
   EXPECT_EQ(cached_grid_route.frame.nets, rebuilt_grid_route.frame.nets);
@@ -1419,13 +1511,13 @@ TEST_F(PhysicalSession, IntegratedPreroutePublishesOnlyAcceptedGeometryAndRestor
     auto expired_tree_options            = opt;
     expired_tree_options.timing.deadline = std::chrono::steady_clock::now();
     const auto expired_tree              = pl::preroute_tree(tree_tech,
-                                                tree_frame,
-                                                *tree_circuit.rc,
-                                                tree_snapshot,
-                                                tree_bindings,
-                                                wire,
-                                                tree_timer,
-                                                expired_tree_options);
+                                                             tree_frame,
+                                                             *tree_circuit.rc,
+                                                             tree_snapshot,
+                                                             tree_bindings,
+                                                             wire,
+                                                             tree_timer,
+                                                             expired_tree_options);
     EXPECT_FALSE(expired_tree.result);
     EXPECT_TRUE(expired_tree.timings_ms.contains("setup_deadline"));
     EXPECT_EQ(tree_timer.mark(), 0);
@@ -1474,15 +1566,15 @@ TEST_F(PhysicalSession, IntegratedPreroutePublishesOnlyAcceptedGeometryAndRestor
     EXPECT_FALSE(trial.result);
     tree_tech.macros["sky130_fd_sc_hd__buf_1"] = tree_tech.macros.at("middle");
     repeated_trial                             = pl::preroute_repeated_tree(tree_tech,
-                                                repeated_frame,
-                                                *tree_circuit.rc,
-                                                tree_snapshot,
-                                                tree_bindings,
-                                                wire,
-                                                timer,
-                                                opt,
-                                                circuit.rc->nets.at(1),
-                                                repeaters,
+                                                                            repeated_frame,
+                                                                            *tree_circuit.rc,
+                                                                            tree_snapshot,
+                                                                            tree_bindings,
+                                                                            wire,
+                                                                            timer,
+                                                                            opt,
+                                                                            circuit.rc->nets.at(1),
+                                                                            repeaters,
                                                                             {"y"});
     EXPECT_FALSE(repeated_trial.result);
     EXPECT_EQ(timer.mark(), 0);
@@ -1571,15 +1663,15 @@ TEST_F(PhysicalSession, IntegratedPreroutePublishesOnlyAcceptedGeometryAndRestor
     auto            capped_tree_options = bo;
     capped_tree_options.max_sites       = 1000;
     const auto capped_tree              = pl::detail::preroute_stage(input,
-                                                        buffered_tech,
-                                                        brc,
+                                                                     buffered_tech,
+                                                                     brc,
                                                                      {
-                                                            {0, 0, 1}
+                                                                         {0, 0, 1}
     },
-                                                        capped_probe,
-                                                        stage_config,
-                                                        capped_tree_options,
-                                                        before);
+                                                                     capped_probe,
+                                                                     stage_config,
+                                                                     capped_tree_options,
+                                                                     before);
     EXPECT_EQ(capped_probe.additions, 0);
     EXPECT_EQ(capped_tree.repeater_cells, 0);
     ASSERT_EQ(capped_tree.records.size(), 1);
@@ -1591,15 +1683,15 @@ TEST_F(PhysicalSession, IntegratedPreroutePublishesOnlyAcceptedGeometryAndRestor
     capacity_limited.capacity.max_preroute_fraction = 0;
     capacity_limited.timing.deadline                = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     const auto capacity_rejected                    = pl::detail::preroute_stage(input,
-                                                              buffered_tech,
-                                                              brc,
+                                                                                 buffered_tech,
+                                                                                 brc,
                                                                                  {
-                                                                  {0, 0, 1}
+                                                                                     {0, 0, 1}
     },
-                                                              bt,
-                                                              stage_config,
-                                                              capacity_limited,
-                                                              before);
+                                                                                 bt,
+                                                                                 stage_config,
+                                                                                 capacity_limited,
+                                                                                 before);
     ASSERT_EQ(capacity_rejected.records.size(), 1);
     EXPECT_FALSE(capacity_rejected.records.front().accepted);
     EXPECT_NE(capacity_rejected.records.front().capacity_detail.find("tree branch "), std::string::npos);
@@ -1621,15 +1713,15 @@ TEST_F(PhysicalSession, IntegratedPreroutePublishesOnlyAcceptedGeometryAndRestor
     Insertion_probe probe(bt);
     const auto      original_wns  = bt.wns();
     const auto      accepted_tree = pl::detail::preroute_stage(input,
-                                                          buffered_tech,
-                                                          brc,
+                                                               buffered_tech,
+                                                               brc,
                                                                {
-                                                              {0, 0, 1}
+                                                                   {0, 0, 1}
     },
-                                                          probe,
-                                                          stage_config,
-                                                          bo,
-                                                          before);
+                                                               probe,
+                                                               stage_config,
+                                                               bo,
+                                                               before);
     std::string     reasons;
     for (const auto& record : accepted_tree.records) {
       reasons += record.reason + "; ";
@@ -1643,15 +1735,15 @@ TEST_F(PhysicalSession, IntegratedPreroutePublishesOnlyAcceptedGeometryAndRestor
     auto pg_tree_options            = bo;
     pg_tree_options.timing.deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
     const auto pg_tree              = pl::detail::preroute_stage(pg_tree_input,
-                                                    buffered_tech,
-                                                    brc,
+                                                                 buffered_tech,
+                                                                 brc,
                                                                  {
-                                                        {0, 0, 1}
+                                                                     {0, 0, 1}
     },
-                                                    bt,
-                                                    stage_config,
-                                                    pg_tree_options,
-                                                    before);
+                                                                 bt,
+                                                                 stage_config,
+                                                                 pg_tree_options,
+                                                                 before);
     ASSERT_EQ(pg_tree.repeater_trees, 1);
     EXPECT_TRUE(pg_tree.timings_ms.contains("repeater_capacity_seed"));
     EXPECT_TRUE(pg_tree.timings_ms.contains("power_grid_occupancy"));
@@ -1701,15 +1793,15 @@ TEST_F(PhysicalSession, IntegratedPreroutePublishesOnlyAcceptedGeometryAndRestor
       non_signal.floorplan.nets.front().use = use;
       bo.timing.deadline                    = std::chrono::steady_clock::now() + std::chrono::seconds(5);
       const auto excluded_tree              = pl::detail::preroute_stage(non_signal,
-                                                            buffered_tech,
-                                                            brc,
+                                                                         buffered_tech,
+                                                                         brc,
                                                                          {
-                                                                {0, 0, 1}
+                                                                             {0, 0, 1}
       },
-                                                            bt,
-                                                            stage_config,
-                                                            bo,
-                                                            before);
+                                                                         bt,
+                                                                         stage_config,
+                                                                         bo,
+                                                                         before);
       ASSERT_EQ(excluded_tree.records.size(), 1);
       EXPECT_EQ(excluded_tree.records.front().reason, "not an unwired signal net");
       EXPECT_EQ(excluded_tree.repeater_cells, 0);
@@ -1719,15 +1811,15 @@ TEST_F(PhysicalSession, IntegratedPreroutePublishesOnlyAcceptedGeometryAndRestor
   }
   opt.capacity.max_preroute_fraction = 0;
   const auto rejected                = pl::preroute(tech,
-                                     fp,
-                                     *circuit.rc,
-                                     snapshot,
+                                                    fp,
+                                                    *circuit.rc,
+                                                    snapshot,
                                                     {
-                                         {0, 0, 1}
+                                                        {0, 0, 1}
   },
-                                     wire,
-                                     timer,
-                                     opt);
+                                                    wire,
+                                                    timer,
+                                                    opt);
   EXPECT_FALSE(rejected.records[0].accepted);
   EXPECT_EQ(rejected.records[0].reason, "pre-route capacity fraction");
   EXPECT_FALSE(rejected.records[0].capacity_detail.empty());

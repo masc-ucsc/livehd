@@ -326,15 +326,50 @@ Pin_adjust_stats adjust_fp_pins(dp::Design& d, physical::Floorplan& fp, const st
       if (fixed(pin)) {
         continue;
       }
-      const Point before = xy[pin];
-      Point       best   = before;
-      double      value  = cost(pin, before);
-      // Tangential moves may skip free slots, but cannot violate bus order.
+      const Point                              before          = xy[pin];
+      Point                                    best            = before;
+      double                                   value           = cost(pin, before);
+      // A single lane can move only between its current circular neighbors.
+      // Establish that interval once instead of sorting the whole bus for
+      // every improving slot. Three or fewer lanes permit either orientation;
+      // tied perimeter projections retain the general ordering check.
+      const double                             before_position = position(before);
+      std::optional<std::pair<double, double>> order_window;
+      if (group.size() > 3) {
+        std::vector<double> positions;
+        positions.reserve(group.size());
+        for (int q : group) {
+          positions.push_back(position(xy[q]));
+        }
+        std::sort(positions.begin(), positions.end());
+        if (std::adjacent_find(positions.begin(), positions.end()) == positions.end()) {
+          const size_t at = std::lower_bound(positions.begin(), positions.end(), before_position) - positions.begin();
+          order_window    = {positions[(at + positions.size() - 1) % positions.size()], positions[(at + 1) % positions.size()]};
+        }
+      }
+      const auto ordered_candidate = [&](size_t slot) {
+        if (group.size() <= 3) {
+          return true;
+        }
+        if (order_window) {
+          const auto [lo, hi] = *order_window;
+          const double t      = slot_position[slot];
+          if (t != lo && t != hi) {
+            return lo < hi ? lo < t && t < hi : t > lo || t < hi;
+          }
+        }
+        return ordered(group);
+      };
       // Other lanes of this bus may have moved since the occupancy map was
       // built. Check those few lanes explicitly; other-bus obstacles are static.
       for (size_t slot = 0; slot < slots.size(); ++slot) {
-        const Point p = slots[slot];
-        if (distance(before, p) > limit || !clear(slot, pin)) {
+        const Point  p     = slots[slot];
+        const double delta = std::abs(before_position - slot_position[slot]);
+        if (std::min(delta, perimeter - delta) > limit || !clear(slot, pin)) {
+          continue;
+        }
+        const double candidate = cost(pin, p);
+        if (candidate >= value) {
           continue;
         }
         if (std::any_of(group.begin(), group.end(), [&](int q) {
@@ -342,12 +377,8 @@ Pin_adjust_stats adjust_fp_pins(dp::Design& d, physical::Floorplan& fp, const st
             })) {
           continue;
         }
-        const double candidate = cost(pin, p);
-        if (candidate >= value) {
-          continue;
-        }
         xy[pin] = p;
-        if (ordered(group)) {
+        if (ordered_candidate(slot)) {
           value = candidate;
           best  = p;
         }

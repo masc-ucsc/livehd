@@ -7,6 +7,23 @@ Enable `synth.place.fp=true` explicitly for centroid floorplanning and the separ
 macro-refinement/final-cell passes. The legacy `r8h2`/`r8h3` macro modes and manual
 macro-centroid diagnostic have been removed.
 
+GP timing feedback is approximate critical-path ranking. It uses characterized
+gate delay at total load and a closed-form Elmore wire estimate, updates the
+existing timing graph for changed RC and gate strengths, and exports only pin
+slacks and clock flags. `synth.place.timing_fraction=0.2` selects the worst-ranked
+20% of timed data nets (`0.1` selects 10%); weight magnitudes follow rank rather
+than picosecond differences. The existing smoothing controls how quickly weights
+change. This feedback does not claim WNS, electrical validity or a certified
+period. Resynthesis obtains detailed timing for its selected placement frame;
+physical repair validation and final STA retain the detailed waveform model.
+The placement timing statistics separate ranking and detailed evaluations.
+
+The primary GP metrics survive accepted timing-refinement rounds. Each attempted
+round records its own GP metrics in `timing_driven.rounds`, and
+`gp_total_iterations` includes the primary run and these refinement attempts.
+Convergence and HPWL guards run before detailed timing; a rejected geometry
+sample records `timing_evaluated=false` and does not update the detailed timer.
+
 ## Spatial partitions: grid, region, bin
 
 Placement partitions the core in three roles. Each role has one name, and
@@ -63,9 +80,36 @@ At each completed stage, OpenTimer's in-memory pin arrivals/required times are
 reduced to region port bits; clock and reset nets are excluded. A near-critical
 color is remapped only if an IO constraint on a near-critical path tightened by
 more than 5% of the clock period. A scoped fanout-to-Steiner-length wire-load
-table supplies ABC's capacitance estimate. Timing must not worsen under the
+table supplies ABC's capacitance estimate. Timing must improve under the
 same environment and a bounded combinational CEC must prove the replacement.
 State and memory instances remain opaque and retain their interfaces.
+
+Resynthesis requests 90% of the actual SDC clock period, giving 10% headroom.
+The report records both `required_period_ps` and `requested_period_ps`; the
+initial synthesis delay hint does not define the physical setup objective.
+A color that missed its previous synthesis target is not tried again. A color
+that met the requested target is skipped while the new period and cumulative
+IO tightening remain within that saved margin. Target history survives stage
+restarts, boundary cell resizing and workdir reloads, and is invalidated by a
+fresh color synthesis or incompatible timing engine. A stage meeting the actual
+physical setup objective skips resynthesis altogether.
+
+Full synthesis placement shares a cell-count and physical-area growth limit of
+3% over the original mapped standard-cell netlist. The inventory precedes
+synthesis-buffer cleanup and counts every occurrence of a shared color; macro
+area cannot subsidize standard-cell growth. Whole-color replacement and boundary
+master changes are checked before publication. Placement sizing, buffer repair
+and cone resynthesis check their private candidates before RC/timing evaluation.
+Oversized candidates retain the accepted graph. With detailed per-pin electrical
+feedback, batch repair visits the largest electrical excess first, then the worst
+setup slack. Without that feedback it orders by slack alone. This prevents a
+severely overloaded source from losing the limited area allowance to downstream
+gates on the same paths. Each complete edit is checked against the remaining
+headroom before mutation; an oversized forest does not discard other useful
+edits. Its inventory is computed once per batch and updated after successful edits. The
+`growth_budget` object in placement QoR (also exported as
+`placement.json`) records the baseline, current inventory and rejected proposals.
+The repair diagnostic initializes its baseline from the supplied mapped graph.
 
 One automatic batch is allowed: either before placement using saved final
 feedback, or after the first completed stage. An accepted batch restarts that
@@ -74,8 +118,8 @@ IO coordinates are reused only when the die is unchanged; a resized frame keeps
 its newly generated perimeter IO seeds. Fixed and locked IOs are preserved.
 These are movable initial coordinates: the restart does not copy fixed status,
 add position bounds, or lock unchanged colors. The normal macro lock happens
-after macro placement. A saved-feedback resynthesis before placement has no
-placement seed. `restart_seed.json` in the restarted stage reports reused
+after macro placement. Saved-feedback resynthesis before placement can use the
+previous completed placement as a hint. `restart_seed.json` in the restarted stage reports reused
 movable cells/macros and new cells. Later stages save
 feedback and warn when another run could help. The per-color decisions and
 used/placed environments are in `synth/place/io_resynth.json`; reusable state is
@@ -92,10 +136,16 @@ zero new resynthesis attempts and identical used/measured boundary values;
 This avoids applying final feedback to the earlier, unrepaired ABC body.
 The gate checks compiled graph/attribute bytes, all explicit options, engine
 identity, Liberty/LEF, SDC and physical RC/floorplan contents. Missing, changed
-or damaged generations fall back to ordinary per-region synthesis and fresh
-physical optimization. Edited designs still use the existing region cache;
-this completed-generation tier does not claim per-instance physical reuse
-across RTL edits. Artifact digests are checked before restoring any files.
+or damaged generations fall back to ordinary per-region synthesis and physical
+optimization. After an RTL/color edit, matching physical settings and technology
+allow the verified completed DEF to seed surviving instance names, including
+unchanged colors. `pass.place.seed` records this fallback. These coordinates are
+movable hints, not repaired-netlist replay: fixed/locked status comes from the
+current input, new cells get fresh seeds, and connectivity, RC, timing and
+legality are recomputed. IO hints require an unchanged die. Macro planning can
+refine the hints before its ordinary macro/IO freeze and final-stage handoff.
+Incompatible settings, changed technology and damaged DEFs skip the hint.
+Artifact digests are checked before restoring any files.
 The IO timing snapshot records the timing-engine source identity. A timer
 change discards its old measured arrivals/required times before the pre-placement
 trigger check, while preserving the constraints used to map the body and the
@@ -104,6 +154,17 @@ Set `synth.place.io_resynth=0` to disable the loop and retain the single-call
 non-FP flow. Explicit positive values require a workdir, ABC, full placement,
 OpenTimer, and a resolvable SDC clock. No IO timing JSON is exchanged during GP
 timing callbacks; the two state files are stage-boundary snapshots.
+
+Before a fresh full synthesis placement, `remove_synthesis_buffers` makes a
+private physical copy and bypasses internal, scalar, non-inverting Liberty
+buffers. Input/output binding cells, fixed cells and clock/reset distribution
+cones remain, including controls crossing region boundaries. Logical mapped
+definitions and their resynthesis identities/history are unchanged. The cleanup
+also runs on the new physical copy after an accepted color restart, but never
+on repair/ECO trials. `buffer_cleanup.jsonl` records removed and retained counts.
+The imported-GP diagnostic exposes the same operation through
+`remove_synthesis_buffers=true`; its component-count check accounts for exactly
+those removals while retaining fixed-cell and master checks.
 
 `synth.place.resize=true` enables timing-checked sizing and buffering in full
 placement with OpenTimer. Explicitly disable it for a geometry-only comparison.
@@ -201,6 +262,15 @@ the stability window but never extend the continuation deadline. Satisfied
 density does not keep increasing the density penalty during this continuation.
 The GP/FP JSON records the deadline, budget exhaustion, and whether timing was
 observed; a legal placement stopped by the budget is not reported as converged.
+Static cell solves also stop automatically when six samples spanning at least
+100 iterations show less than 1% variation in both HPWL and density overflow,
+despite at least a fourfold increase in density pressure. This detects a possible
+density grid floor rather than spending the remaining budget on it. The handoff respects the
+minimum iteration count, requires satisfied routing and unchanged inflation,
+and waits out the last checkpoint. Moving macros, continuation and scheduled
+objectives retain their own stopping policies. The report records
+`gp_stop_reason="density_stalled"`; legalization still runs, and this stop never
+claims GP convergence.
 For the small full-sky130 trial, `synth.place.grid.density=16` and
 `synth.place.iterations=1500` reached the overflow target; the earlier 32-bin/500-iteration
 trial legalized but did not converge in GP. This is fixture evidence, not a
@@ -325,6 +395,15 @@ fixed macros for cell placement. Both clearances round up to the site/row grid.
 With movable macros, full placement performs the macro-to-cell handoff before
 applying the override. GP-only placement rejects it. Timing-only imports
 continue to preserve their input geometry.
+
+The staged handoff fixes macros and IOs and retains the macro pass's movable-cell
+coordinates as the starting seed for final GP. Cells remain movable, including
+when macro-stage cell legalization or detail was deferred. The seed also avoids
+repeating the automatic-IO prototype with already fixed IOs. Coordinate reuse
+is recorded in `restart_seed.json`. A converged macro stage also supplies its
+normalized density weight, so final GP need not rebuild that pressure from the
+cold initial coefficient. The diagnostic `physical_repair` configuration can
+replay this coefficient with `density_weight_seed`.
 
 With this override, QoR `halo` describes the effective clearance, `macro_halo`
 records the original macro spacing, and `cell_halo` records the requested
@@ -460,40 +539,37 @@ experiments, including runs with `synth.opentimer=false`. Synthesis-only and
 GP-only commands do not enter this refinement loop by default. Full timing-driven
 placement requires OpenTimer and constrained data nets (normally from
 `synth.sdc`). OpenTimer
-first analyzes the mapped netlist with zero wire RC to seed the first placement's
-net weights. It exports physical pin names with arrival, required time, slack,
-slew and load. The seed prepares native memories and tie cells without running
-placement or publishing a placement cache or DEF.
-The worst 20% of data nets get linear weights from 1 to 5 with 0.5 weight
-smoothing; clock nets are excluded. `synth.place.timing_rounds` chooses 1–8
-refinement checkpoints after the first placement (default 3). Each checkpoint
-starts a fresh GP/LG/DP call with fixed IO, then recomputes RC and STA. This is
-outer staged weighting, separate from the FP-only checkpoints below, and does
-not use virtual-buffer timing. Reports are in
-`synth/place/timing_driven.json` and placement QoR; `initial_weights` and
-`initial_timing_source` identify the post-synthesis seed. Missing constrained data
-nets are reported as an error when timing-driven placement is requested.
+first ranks the mapped netlist with zero wire RC to seed the initial net weights.
+The seed prepares native memories and tie cells without running placement or
+publishing a placement cache or DEF. The worst 20% of timed data nets get weights
+from 1 to 5 with 0.5 smoothing; clock and reset networks are excluded.
 
-With `synth.place.resize=true`, `synth.place.resize.gp=true` now enables real
-buffer insertion/removal at final-cell GP timing checkpoints. The first GP
-checkpoint only measures timing. From the second checkpoint, repair trials split
-nets and create movable, physically sized buffers at Steiner seeds; accepted
-changes resume GP before legalization. Macro GP and speculative A/B scoring do
-not edit topology. The post-placement resize/repair and mandatory final
-legalization still run. Set `synth.place.resize.gp=false` to retain only that
-post-placement repair. A zero macro timing interval uses a 50-iteration cadence
-when GP repair is enabled. Cell-jump propagation ends at the first actual final-GP
-timing evaluation; pending depths are skipped, so deeper jump settings can coexist
-with GP buffer repair. `synth.place.final.timing_start=200` delays final-GP
-checkpoints and adaptive A/B timing until at least 200 GP iterations have run.
-The regular cadence is 50 iterations, so the first update normally occurs at
-200 and buffer repair can begin at 250; density gating can delay both. Short
-runs still produce end-of-placement timing and legalization priorities, but do
-not perform early in-loop buffer repair. Synthesis timing may seed initial net
-weights before GP; it does not trigger this placement-timing cutoff. The
-`physical_repair` diagnostic accepts the same setting as `final_timing_start`.
-A future stability-based trigger is tracked in
-[3r-route](../../todo/livehd/3r-route.html#timing-warmup).
+`synth.place.timing_rounds` allows 1–8 refinement attempts (default 3). They are
+skipped when setup is already met; electrical repair remains a separate phase. Each attempt uses
+the current coordinates and normalized density weight, fixed IOs, the configured
+final wirelength smoothing scale, and at most 100 GP iterations. A candidate
+must stay within 3% of the initial HPWL and be density-feasible before detailed
+timing is evaluated; routability flows also require solver convergence. The
+resulting area must stay within 3%. Accepted candidates must improve timing
+without degrading the guarded electrical metrics. A candidate rejected by the
+geometric checks ends refinement and hands the accepted placement to repair. Reports are in
+`synth/place/timing_driven.json` and placement QoR. Detailed feedback passes from
+the completed placement stage into refinement, and from final legalization into
+IO reporting, when it describes exactly the same state. Ranking-only feedback
+cannot replace these detailed checks.
+
+The production GP callbacks update weights without inserting, removing or sizing
+cells. `synth.place.resize.gp` is retained for compatibility; electrical repair
+runs after legal GP. Macro and speculative A/B callbacks also leave topology
+unchanged. `synth.place.final.timing_start=200` delays final-cell ranking samples
+until warm-up completes. The interval samples density, with ranking updates at
+overflow 0.2 and 0.1; thresholds crossed together produce one update. Short runs
+still obtain the selected-frame timing required for legalization and resynthesis.
+Synthesis timing supplies the initial weights. The `physical_repair` diagnostic
+accepts the same warm-up as `final_timing_start`.
+
+The following GP-buffer controls remain available to the explicit experimental
+repair helper; production GP does not invoke that helper.
 
 `synth.place.resize.gp_margin=0.01` is a dimensionless slack dead band, a fraction
 of the shortest constrained clock period. Without a clock it uses estimated
@@ -925,12 +1001,15 @@ When `f=1`, the global density response is unchanged, including response to
 virtual fillers; protecting a pure-filler experiment needs a separate policy.
 
 With timing-driven placement enabled, `synth.place.fp.timing_interval=50`
-recomputes placement RC and runs OpenTimer every 50 completed FP GP iterations.
-It uses the same `timing_weights()` rule and configured smoothing. Set the
-interval to `0` to disable FP timing and sizing checkpoints. The IO prototype
-inherits available weights. Macro and final-cell GP refresh timing using
-`synth.place.macro.timing_interval` (default 50); setting it to zero disables those
-periodic checkpoints. Designs with no FP candidates have no FP pass/checkpoints.
+samples FP density every 50 completed iterations. Ranking-only FP, macro and
+final-cell callbacks recompute RC and critical-net weights at overflow milestones
+0.2 and 0.1. They do not run the timer on every interval, and coalesce milestones
+crossed between samples. The IO prototype inherits available weights. Set the
+FP interval to zero to disable its in-loop callbacks; macro/final-cell sampling
+uses `synth.place.macro.timing_interval` (default 50). Required selected-frame
+measurements for resynthesis and legalization remain separate. Designs with no
+FP candidates have no FP pass. Explicit FP resizing and custom detailed-only
+callback users retain their interval/density scheduling controls.
 
 `synth.place.macro.detailed=false` skips detailed cell placement while macros
 are movable. The default is `true`. This experiment retains macro/cell
@@ -958,15 +1037,15 @@ the final stage still checks all cells. This mode currently requires
 
 `synth.place.final.independent_timing=true` starts final placement with the
 original synthesis timing weights instead of the macro stage's weights. Final
-GP refreshes its own RC and criticalities only after density overflow reaches
-`synth.place.stop_overflow`. The end-of-GP checkpoint remains forced, and the
-existing final legalization/detail timing checks still run. The default is
+GP refreshes its own RC and criticalities at the density milestones above.
+The existing selected-frame and final legalization/detail timing checks still run. The default is
 `false`. This separates the final-cell objective from the provisional macro
 cell placement while keeping synthesis criticalities active initially.
 Use it together with `synth.place.macro.legalize_cells=false` for a macro stage
 whose internal timing weights are discarded at the fixed-macro/IO handoff.
 
-Set `synth.place.fp.timing_after_density=true` to defer FP timing and repair
+For explicit FP resizing or a custom detailed-only callback, set
+`synth.place.fp.timing_after_density=true` to defer FP timing and repair
 while the actual GP overflow exceeds `synth.place.stop_overflow` (default 0.1). This uses the
 native halo-padded density model and rechecks at each timing interval; the
 initial synthesis timing weights remain active. GP cannot declare convergence
@@ -982,11 +1061,11 @@ runs at the first eligible interval; later samples require area-weighted cell/ma
 since the last timed placement, with a progress-based budget controlled by
 `synth.place.fp.timing_max_updates` (default 10, at least 2). One update is reserved
 for the iteration/continuation cap; the default allows nine earlier updates.
-The budget applies only to movement-based scheduling, not fixed cadence;
-repair trials require additional STA calls within each update. Zero preserves
-fixed cadence; `timing_interval=0` disables both modes. Motion from centroid
-forces counts even after density settles. The CNN scheduling comparison enables `0.5`
-explicitly; the existing fixed-cadence default is unchanged.
+The budget applies only to movement-based scheduling; explicit repair trials
+require additional STA calls within each update. Zero disables this extra movement
+gate. Ranking callbacks still use density milestones, and `timing_interval=0`
+disables in-loop callbacks. Motion from centroid forces counts even after density
+settles.
 
 QoR tuning controls preserve the existing numerical defaults:
 
@@ -1084,6 +1163,9 @@ and receive fresh legalization/RC/STA. Rejected sizing batches use per-pin elect
 and setup feedback to exclude changes on newly stressed pins and their immediate
 driver/load neighbors, then retry the remaining edits. This is a proposal filter;
 the full delay, WNS, TNS, hold and electrical acceptance checks still apply.
+An improvement in negative setup WNS or TNS counts as progress even when the
+longest absolute arrival is unchanged: endpoint requirements can differ. Extra
+positive setup slack alone does not justify an edit once timing is met.
 When feedback cannot isolate a useful subset, retries bisect the batch and visit
 disjoint subsets before descending further. Forest batches keep this bisection
 fallback. The budget is
@@ -1094,7 +1176,8 @@ Aggregate-only diagnostic callers retain the bounded individual fallback; it
 interleaves alternatives across drivers and stops at eight accepted edits. `synth/place/resize.json` and
 `synth/place/repair.json` record their trials.
 
-Placement RC uses FLUTE up to 1000 distinct locations of a net; larger nets are
+Placement RC uses driver-aware Prim–Dijkstra Steiner trees (alpha 0.3) up to
+1000 distinct locations of a net; larger nets are
 FLUTE trees over spatial groups of at most 1000 locations joined by a FLUTE tree over
 each group's location nearest the driver (it was a star from the driver).
 Steiner repair uses FLUTE for at most 1000 distinct locations and a deterministic
@@ -1341,7 +1424,7 @@ run of the non-terminal resize flow must also disable `handoff.taps`.
 *What-if timing.* `Physical_session::whatif()` (`core/timing_whatif.hpp`) applies
 transient edits to the evaluated OpenTimer state: a master swap (`repower_gate`), a new
 cell, and `set_net`, which moves pins onto a net and attaches its wire RC. Cutting a wire
-for a buffer is two `set_net` calls whose FLUTE Steiner RC (`steiner_rc`, the same
+for a buffer is two `set_net` calls whose driver-aware Steiner RC (`steiner_rc`, the same
 construction placement RC uses) is rebuilt for both pieces from the seeded buffer
 position. Queries (WNS, TNS per endpoint, pin slack/arrival/slew, net load, Liberty arc
 delays, electrical checks) run an incremental update; `rollback(mark)` undoes edits LIFO
@@ -1975,11 +2058,17 @@ legacy `satlegalize_milliseconds` and `satlegalize_conflicts` options. Omitted
 values use the production defaults.
 
 For a read-only timing comparison, `timing_only:true` preserves all imported
-cell and IO coordinates and reports original-SDC timing. Add `prects_timing:true`
-to use the placement timer's clock/reset exclusions instead; this requires the
+cell and IO coordinates and uses the supplied SDC plus reset false-path cuts
+persisted with the physical RC. Add `prects_timing:true` to derive the placement
+timer's additional clock/reset exclusions; this requires the
 mapped LGraph input (`lg`) so synthesis roles survive and cannot be combined
 with `source_def`. The report labels this analysis with `prects_filtered`.
 No sizing, buffering, legalization or timing-constraint edits run in this mode.
+Independent DEF-based timing comparisons also need the recorded synthesis reset
+roots in QoR's `prects_controls.reset_ports` and `reset_pins`, with the same
+Liberty buffer/inverter distribution closure. DEF and Liberty alone cannot
+identify registered synchronous resets. Preserve this metadata when exporting
+false paths; do not infer reset roles from instance or net names.
 
 `timing_calls.jsonl` separates each diagnostic timing callback into engine/report
 generation and feedback parsing, with report byte counts. Sizing/forest trial
@@ -1991,9 +2080,44 @@ surviving edits. These measurements preserve the existing acceptance checks.
 Placement refinement and repair return their accepted timing feedback. Callers can
 move that feedback into the next repair pass only when graph, placement, RC and
 constraints are unchanged; rejected-trial timing is never reused as the baseline.
+Final legalization can accept this feedback too. It reuses detailed timing only
+when the rebuilt RC nets, cell identities/poses, terminals and reset cuts match
+exactly; `final_legalization.reused_timing` records the decision. Changed physical
+states and approximate rankings still require detailed evaluation.
+With pin-level electrical feedback, ordinary sizing selects gates with negative
+slack, electrical violations or drive stress. Healthy neighbors do not consume
+detailed timing trials for optional area recovery, even when an unrelated path
+misses setup. Final buffer bypass candidates likewise require an affected or
+uncharacterized incident net; explicit recovery remains available for area
+optimization. Forest reconstruction remains available while setup fails; once
+setup is met, healthy forests are skipped too. The sizing-to-design handoff records that
+sizing has already run. If the forest sweep accepts no changes, it skips repeated
+sizing; accepted forest edits reopen sizing against the changed loads. These
+decisions are automatic and do not require benchmark-specific settings.
+The full synthesis flow shares optional-trial admission across warm refinement,
+sizing, forest repair, recovery and cone resynthesis. New trials stop once six
+detailed physical evaluations have been spent, reserving final legalization and
+standalone STA within the eight-evaluation budget. When electrical repair is
+enabled, warm refinement stops at four detailed evaluations, leaving the next
+two slots available for sizing and buffer repair. Rejected warm trials must not
+starve those phases. Ranking samples do not spend this budget. Admission is checked before cloning or legalization, and reports
+record `timing_budget_exhausted`; accepted states and mandatory final validation
+are retained. Cone resynthesis also accepts the preceding unchanged state's
+timing instead of repeating a baseline evaluation. Low-level callers can provide
+their own shared `Trial_admission` callback.
 This avoids duplicate analyses between passes; each changed-state callback is an
 incremental update of the persistent timer. The diagnostic tool publishes the accepted
 analysis as `final_timing.json`; the last numbered trial can be a rejected state.
+Structural barriers use OpenTimer's `update_netlist()` to materialize queued
+library, gate, net, RC and constraint changes without propagating intermediate
+timing. RC attachment, case analysis and data exclusions complete before the
+feedback query propagates timing. Dirty frontiers survive these barriers; the
+next timing query uses the final combined state and the same detailed model.
+Detailed RC threshold crossings use a bracketed Newton solve with the waveform's
+analytic derivative and bisection fallback. Its time-relative tolerance is
+`1e-10`, below the precision of the timer's float outputs; ranking samples retain
+the cheaper total-load/Elmore model. Numerical regressions cover reference
+bisection, waveform residuals, extreme poles and unit scaling.
 
 ### Fixed-macro cell-placement experiments
 

@@ -37,6 +37,7 @@ Pin                   output(Node n, const Buffer& cell);
 std::vector<Pin>      sinks(Pin driver);
 Inventory             inventory(const Options& options, const physical::Technology& tech);
 Special_pins          scan_special_pins(const std::string& libs, bool protect_reset);
+Special_pins                   scan_special_pins(const liberty::Cell_library& library, bool protect_reset);
 std::set<std::string> protected_buffers(hhds::Graph& graph, const Inventory& cells, const Special_pins& special, bool protect_reset,
                                         const std::string& control_ports = {});
 std::string           physical_label(Pin p);

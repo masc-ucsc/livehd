@@ -1450,6 +1450,9 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
         q.cache        = "hit";
         q.resynth      = false;
         q.ms           = since();
+        if (opts_.io_feedback && q.delay_ps && q.delay > ctx.budget && ctx.budget > 0 && !q.div_blackbox) {
+          opts_.io_feedback->failed_target(rb.module_name, mapped_identity(*rb.body), ctx.budget);
+        }
         qor_.push_back(std::move(q));
         report_completion(qor_.back());
         return;
@@ -1684,6 +1687,9 @@ void Region_driver::map_region(const livehd::partition::Region_body& rb) {
   qor_.back().gates    = counts.gates;
   qor_.back().area     = counts.area;
   qor_.back().bypassed = counts.bypassed;
+  if (opts_.io_feedback && qor_.back().delay_ps && qor_.back().delay > ctx.budget && ctx.budget > 0 && !qor_.back().div_blackbox) {
+    opts_.io_feedback->failed_target(rb.module_name, mapped_identity(*rb.body), ctx.budget);
+  }
 
   // rb.body now holds the complete mapped netlist: snapshot it (and the pre-abc
   // body built above) into the cache so the next run's identical region is a
@@ -2324,7 +2330,18 @@ Design_ctx Region_driver::design_ctx() {
 }
 
 uint64_t Region_driver::refine_boundaries(hhds::GraphLibrary& outlib, std::string_view top) {
-  return backend_->refine(outlib, top, design_ctx());
+  const auto changed = backend_->refine(outlib, top, design_ctx());
+  if (changed && opts_.io_feedback) {
+    for (const auto& [module, row] : opts_.io_feedback->rows) {
+      if (row.failed_budget_ps <= 0 && row.requested_period_ps <= 0) {
+        continue;
+      }
+      if (const auto io = outlib.find_io(module); io && io->get_graph()) {
+        opts_.io_feedback->refined(module, mapped_identity(*io->get_graph()));
+      }
+    }
+  }
+  return changed;
 }
 
 Ware_score Region_driver::score_ware(hhds::GraphLibrary& outlib, std::string_view top) {

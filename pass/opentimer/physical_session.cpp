@@ -12,17 +12,19 @@
 
 #include "node_util.hpp"
 #include "pass_opentimer.hpp"
+#include "rapidjson/stringbuffer.h"
+#include "rapidjson/writer.h"
 #include "timing_whatif.hpp"
 
 namespace livehd::opentimer {
 struct Physical_session::Impl : Pass_opentimer {
-  Statistics                         stats;
-  bool                               initialized = false;
-  std::map<std::string, std::string> masters, ports, net_names, connections;
+  Statistics                                       stats;
+  bool                                             initialized = false;
+  std::map<std::string, std::string>               masters, ports, net_names, connections;
   std::vector<std::pair<std::string, std::string>> cell_identity;
   size_t                                           next_gate = 0, next_net = 0;
-  std::set<std::string>              data_exclusions;
-  bool                               exclusions_dirty = true;
+  std::set<std::string>                            data_exclusions;
+  bool                                             exclusions_dirty = true;
 
   explicit Impl(const Eprp_var& options) : Pass_opentimer(options) {
     // Reporting/caching is a separate consumer, never the feedback transport.
@@ -83,7 +85,7 @@ struct Physical_session::Impl : Pass_opentimer {
     apply_physical_rc(graph);
     prepare_critical_targets();
     apply_physical_captures();
-    update_timing_profiled();
+    timer.update_netlist();
     for (const auto& net : physical_rc_->nets) {
       const auto* wire = timer.pins().at(pin_name(net.driver)).net();
       if (!wire) {
@@ -157,7 +159,7 @@ struct Physical_session::Impl : Pass_opentimer {
             physical_rc_->cells.end(),
             [](const auto& identity, const auto& cell) { return identity.first == cell.name && identity.second == cell.master; })
         && same_connectivity()) {
-      finish_update(graph, false);
+      update_bound_rc();
       return;
     }
     std::map<std::string, std::string> next_masters;
@@ -218,7 +220,7 @@ struct Physical_session::Impl : Pass_opentimer {
     // Flush gate edits before resolving newly inserted pins. Constraints and
     // unchanged gates remain in this same Timer throughout candidate rollback.
     if (changed) {
-      update_timing_profiled();
+      timer.update_netlist();
     }
     // Resizing and coordinate-only updates preserve net membership. Avoid
     // reconstructing a million-pin connection map for those common calls.
@@ -273,7 +275,7 @@ struct Physical_session::Impl : Pass_opentimer {
 
   void finish_update(const std::shared_ptr<hhds::Graph>& graph, bool changed) {
     if (changed) {
-      update_timing_profiled();
+      timer.update_netlist();
       apply_case_analysis();
       exclusions_dirty = true;
       std::vector<std::string> ideal;
@@ -285,6 +287,39 @@ struct Physical_session::Impl : Pass_opentimer {
       timer.set_ideal_clocks(std::move(ideal), {physical_clock_endpoints_.begin(), physical_clock_endpoints_.end()});
     }
     apply_physical_rc(graph);
+  }
+
+  void update_bound_rc() {
+    // Coordinate-only snapshots preserve every physical/timer pin binding.
+    // Reuse those names and net identities instead of rebuilding sorted maps
+    // and checking the entire connectivity again for each GP sample.
+    spef::Spef data;
+    data.capacitance_unit = "1 FF";
+    data.resistance_unit  = "1 OHM";
+    for (size_t index = 0; index < physical_rc_->nets.size(); ++index) {
+      const auto& net = physical_rc_->nets[index];
+      if (net == previous_physical_rc_->nets[index]) {
+        continue;
+      }
+      const auto&              name = net_names.at(net.driver);
+      spef::Net                mapped(name, 0);
+      std::vector<std::string> nodes;
+      nodes.reserve(net.nodes.size());
+      for (size_t i = 0; i < net.nodes.size(); ++i) {
+        const auto& node = net.nodes[i];
+        nodes.push_back(node.pin.empty() ? std::format("{}:__lhd_steiner_{}", name, i) : physical_timing_pins_.at(node.pin));
+        mapped.caps.emplace_back(nodes.back(), "", node.capacitance_ff);
+        mapped.lcap += node.capacitance_ff;
+      }
+      for (const auto& edge : net.edges) {
+        mapped.ress.emplace_back(nodes.at(edge.from), nodes.at(edge.to), edge.resistance_ohm);
+      }
+      data.nets.push_back(std::move(mapped));
+    }
+    physical_updated_nets_ = data.nets.size();
+    if (!data.nets.empty()) {
+      timer.read_parasitics(std::move(data));
+    }
   }
 
   // ---- what-if edits (core/timing_whatif.hpp) -------------------------------
@@ -334,12 +369,12 @@ struct Physical_session::Impl : Pass_opentimer {
         }
       }
     }
-    double      unit_ps() { return s.timer.time_unit() ? s.timer.time_unit()->value() * 1e12 : 1000; }
-    double      cap_ff() { return s.timer.capacitance_unit() ? s.timer.capacitance_unit()->value() / 1e-15 : 1; }
+    double unit_ps() { return s.timer.time_unit() ? s.timer.time_unit()->value() * 1e12 : 1000; }
+    double cap_ff() { return s.timer.capacitance_unit() ? s.timer.capacitance_unit()->value() / 1e-15 : 1; }
     // Physical-to-timer identities are stable across RC edits and timing
     // queries. Cache names only, never timing values or pointers into the timer.
     mutable std::unordered_map<std::string, std::string> timer_pin_names;
-    const std::string& timer_pin(const std::string& label) const {
+    const std::string&                                   timer_pin(const std::string& label) const {
       if (const auto it = timer_pin_names.find(label); it != timer_pin_names.end()) {
         return it->second;
       }
@@ -792,7 +827,16 @@ struct Physical_session::Impl : Pass_opentimer {
     }
   }
 
-  void apply_data_exclusions(const std::set<std::string>& exclusions) {
+  void apply_data_exclusions(const std::set<std::string>& requested) {
+    std::optional<std::set<std::string>> combined;
+    if (!physical_timing_cuts_.empty() || (physical_rc_ && !physical_rc_->timing_cuts.empty())) {
+      combined = requested;
+      combined->insert(physical_timing_cuts_.begin(), physical_timing_cuts_.end());
+      if (physical_rc_) {
+        combined->insert(physical_rc_->timing_cuts.begin(), physical_rc_->timing_cuts.end());
+      }
+    }
+    const auto& exclusions = combined ? *combined : requested;
     if (!exclusions_dirty && exclusions == data_exclusions) {
       return;
     }
@@ -800,34 +844,21 @@ struct Physical_session::Impl : Pass_opentimer {
       // Restore the SDC/Liberty masks before replacing our private subset.
       apply_case_analysis();
     }
-    update_timing_profiled();
-    std::unordered_set<std::string> roots;
-    for (const auto& net : physical_rc_->nets) {
-      if (exclusions.contains(net.driver)) {
-        roots.insert(pin_name(net.driver));
-      }
-    }
-    std::vector<std::pair<size_t, uint8_t>> masks;
-    for (const auto& arc : timer.arcs()) {
-      if (arc.is_net_arc() && roots.contains(arc.from().name())) {
-        masks.emplace_back(arc.idx(), 0);
-      }
-    }
-    if (!masks.empty()) {
-      timer.refine_case_masks(std::move(masks));
-    }
+    apply_physical_timing_cuts(exclusions);
     data_exclusions  = exclusions;
     exclusions_dirty = false;
   }
 
   livehd::timing::Feedback evaluate(const std::shared_ptr<hhds::Graph>&                 graph,
-                                    std::shared_ptr<const livehd::physical::Parasitics> rc,
-                                    const std::set<std::string>&                        exclusions) {
+                                    std::shared_ptr<const livehd::physical::Parasitics> rc, const std::set<std::string>& exclusions,
+                                    Purpose purpose) {
     if (!graph || !rc) {
       throw std::invalid_argument("physical timing requires a graph and in-memory RC");
     }
     discard_whatif();
-    const auto start               = std::chrono::steady_clock::now();
+    const auto start   = std::chrono::steady_clock::now();
+    const bool ranking = purpose == Purpose::ranking;
+    timer.set_rc_model(ranking ? ot::RcModel::elmore : ot::RcModel::effective_capacitance);
     const auto initial_propagation = timing_propagation_seconds_;
     const auto initial_updates     = timing_update_calls_;
     physical_rc_                   = std::move(rc);
@@ -855,7 +886,31 @@ struct Physical_session::Impl : Pass_opentimer {
           += std::chrono::duration<double>(phase_end - phase_start).count() - (timing_propagation_seconds_ - phase_propagation);
       phase_start       = phase_end;
       phase_propagation = timing_propagation_seconds_;
-      compute_timing(graph);
+      if (ranking) {
+        update_timing_profiled();
+        result.ranking_only = true;
+        result.time_unit_ps = timer.time_unit() ? timer.time_unit()->value() * 1e12 : 1000;
+        for (const auto& [physical, name] : physical_timing_pins_) {
+          const auto it = timer.pins().find(name);
+          if (it == timer.pins().end()) {
+            continue;
+          }
+          const auto&                   pin = it->second;
+          livehd::timing::Feedback::Pin value;
+          const auto*                   cellpin = pin.cellpin(ot::MAX);
+          value.clock                           = pin.is_ideal_clock() || (cellpin && cellpin->is_clock.value_or(false));
+          for (const auto transition : {ot::RISE, ot::FALL}) {
+            if (const auto slack = pin.slack(ot::MAX, transition); slack && std::isfinite(*slack)) {
+              value.slack = value.slack ? std::min(*value.slack, double(*slack)) : double(*slack);
+            }
+          }
+          if (value.slack || value.clock) {
+            result.pins.emplace(physical, value);
+          }
+        }
+      } else {
+        compute_timing(graph);
+      }
       phase_end = std::chrono::steady_clock::now();
       stats.feedback_seconds
           += std::chrono::duration<double>(phase_end - phase_start).count() - (timing_propagation_seconds_ - phase_propagation);
@@ -864,7 +919,12 @@ struct Physical_session::Impl : Pass_opentimer {
       previous_physical_rc_      = physical_rc_;
       stats.updated_nets        += physical_updated_nets_;
       ++stats.evaluations;
-      stats.seconds += std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+      const auto seconds  = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+      stats.seconds      += seconds;
+      if (ranking) {
+        ++stats.rankings;
+        stats.ranking_seconds += seconds;
+      }
     } catch (...) {
       feedback_ = nullptr;
       throw;
@@ -909,9 +969,9 @@ Physical_session::Physical_session(const Eprp_var& options) : options_(options) 
 Physical_session::~Physical_session() = default;
 livehd::timing::Feedback Physical_session::evaluate(const std::shared_ptr<hhds::Graph>&                 graph,
                                                     std::shared_ptr<const livehd::physical::Parasitics> rc,
-                                                    const std::set<std::string>&                        data_exclusions) {
+                                                    const std::set<std::string>& data_exclusions, Purpose purpose) {
   try {
-    return impl_->evaluate(graph, std::move(rc), data_exclusions);
+    return impl_->evaluate(graph, std::move(rc), data_exclusions, purpose);
   } catch (...) {
     // Invalid candidate inputs must not poison the next (possibly rolled-back)
     // trial. Normal accepted/rejected trials never recreate this timer.
@@ -922,5 +982,45 @@ livehd::timing::Feedback Physical_session::evaluate(const std::shared_ptr<hhds::
   }
 }
 const Physical_session::Statistics& Physical_session::statistics() const { return impl_->stats; }
-livehd::timing::Whatif&             Physical_session::whatif() { return *proxy_; }
+std::string                         Physical_session::statistics_json() const {
+  const auto&                                s = statistics();
+  rapidjson::StringBuffer                    buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> w(buffer);
+  w.StartObject();
+  w.Key("evaluations");
+  w.Uint(s.evaluations);
+  w.Key("builds");
+  w.Uint(s.builds);
+  w.Key("ranking_evaluations");
+  w.Uint(s.rankings);
+  w.Key("ranking_seconds");
+  w.Double(s.ranking_seconds);
+  w.Key("detailed_evaluations");
+  w.Uint(s.evaluations - s.rankings);
+  w.Key("repowered_gates");
+  w.Uint64(s.repowered_gates);
+  w.Key("inserted_gates");
+  w.Uint64(s.inserted_gates);
+  w.Key("removed_gates");
+  w.Uint64(s.removed_gates);
+  w.Key("updated_nets");
+  w.Uint64(s.updated_nets);
+  w.Key("update_calls");
+  w.Uint64(s.update_calls);
+  w.Key("seconds");
+  w.Double(s.seconds);
+  w.Key("validation_seconds");
+  w.Double(s.validation_seconds);
+  w.Key("reconcile_seconds");
+  w.Double(s.reconcile_seconds);
+  w.Key("exclusions_seconds");
+  w.Double(s.exclusions_seconds);
+  w.Key("propagation_seconds");
+  w.Double(s.propagation_seconds);
+  w.Key("feedback_seconds");
+  w.Double(s.feedback_seconds);
+  w.EndObject();
+  return buffer.GetString();
+}
+livehd::timing::Whatif& Physical_session::whatif() { return *proxy_; }
 }  // namespace livehd::opentimer

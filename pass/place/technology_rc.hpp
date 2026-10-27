@@ -2,7 +2,9 @@
 #pragma once
 #include <array>
 #include <map>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -37,9 +39,10 @@ Route_technology_rc technology_route_rc(const physical::Technology&, const std::
 // commands are parsed as data and never executed. Unspecified units come from
 // the first Liberty library header, matching its technology command units.
 Wire_rc             technology_wire_rc(const physical::Technology& tech, const std::string& liberty, const std::string& rc_file,
-                                       double resistance = -1, double capacitance = -1, double rc_pessimism = 1);
-// One net's FLUTE Steiner RC exactly as placement RC estimation builds it, from
-// pin labels and positions in DBU (pins[0] is normally the driver). Above 1000
+                                       double resistance = -1, double capacitance = -1, double rc_pessimism = 1,
+                                       std::optional<std::string_view> liberty_text = std::nullopt);
+// One net's driver-aware Steiner RC from pin labels and positions in DBU.
+// The driver label must occur in pins, in any position. Above 1000
 // distinct locations it joins spatial FLUTE groups, retains an acyclic
 // resistance-weighted spanning tree, and sets *approximate.
 physical::Rc_net    steiner_rc(std::string driver, const std::vector<std::pair<std::string, std::pair<double, double>>>& pins,
