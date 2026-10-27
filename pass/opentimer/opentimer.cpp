@@ -2210,7 +2210,8 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
   auto& max_pin = max_pin_;  // member: the STA cache replays this summary line
   max_pin.clear();
 
-  const auto& pins = timer.pins();
+  const auto& pins   = timer.pins();
+  const bool  render = !qor_path.empty();
 
   // Every annotated gate output, kept for the timing report (2opt-freq D).
   struct Arrival {
@@ -2242,7 +2243,9 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     const auto physical_name
         = physical_instances_.empty() ? physical_instances_.end() : physical_instances_.find(std::string(node.get_name()));
     auto instance_name = physical_name != physical_instances_.end() ? physical_name->second : inst_of(node, hier_mode_);
-    inst2node.emplace(instance_name, node);
+    if (render) {
+      inst2node.emplace(instance_name, node);
+    }
 
     Color_qor* color_row = nullptr;
     if (stats_) {
@@ -2292,7 +2295,9 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       }
       if (delay > 0) {
         set_delay(dpin, delay);
-        arrivals.push_back({delay, pin_name, node});
+        if (render) {
+          arrivals.push_back({delay, pin_name, node});
+        }
 
         if (color_row != nullptr && delay > color_row->max_arrival) {
           color_row->max_arrival  = delay;
@@ -2330,7 +2335,9 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       if (delay < 0) {
         continue;
       }
-      arrivals.push_back({delay, name, {}});
+      if (render) {
+        arrivals.push_back({delay, name, {}});
+      }
       if (delay > max_delay) {
         max_delay = delay;
         max_pin   = name;
@@ -2347,7 +2354,6 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     }
   }
 
-  const bool render = !qor_path.empty();
   if (!render && !feedback_) {
     return;
   }
@@ -2709,13 +2715,27 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     }
   }
   if (feedback_) {
-    std::map<std::string, std::string> physical;
+    // Only path pins need reverse-name lookup. Borrow names from the current
+    // path and immutable physical map instead of copying the whole design.
+    // The first physical spelling still wins when several aliases map to one
+    // timer pin, matching the previous ordered-map emplace behavior.
+    std::map<std::string_view, const std::string*> physical;
+    for (const auto& point : path_pts) {
+      physical.try_emplace(point.pin, nullptr);
+    }
+    size_t remaining = physical.size();
     for (const auto& [name, timer_name] : physical_timing_pins_) {
-      physical.emplace(timer_name, name);
+      if (!remaining) {
+        break;
+      }
+      if (auto it = physical.find(timer_name); it != physical.end() && !it->second) {
+        it->second = &name;
+        --remaining;
+      }
     }
     for (const auto& point : path_pts) {
-      auto it = physical.find(point.pin);
-      feedback_->path.push_back(it == physical.end() ? point.pin : it->second);
+      const auto* name = physical.at(point.pin);
+      feedback_->path.push_back(name ? *name : point.pin);
     }
   }
   if (!render) {

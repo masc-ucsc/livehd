@@ -651,7 +651,8 @@ TEST_F(PhysicalSession, FinalReportReconcilesTrialsAndSeedsStandaloneCache) {
     report.set_stage_labels(report.dict);
     Pass_opentimer::time_work(report);
     const auto fresh = read_report("fresh.json");
-    for (const char* field : {"wns", "tns", "area", "cells", "max_delay", "constraints_complete", "timing_cells_complete"}) {
+    for (const char* field :
+         {"wns", "tns", "area", "cells", "max_delay", "constraints_complete", "timing_cells_complete", "path", "endpoints"}) {
       ASSERT_EQ(actual["designs"][0].HasMember(field), fresh["designs"][0].HasMember(field)) << field;
       if (fresh["designs"][0].HasMember(field)) {
         EXPECT_EQ(actual["designs"][0][field], fresh["designs"][0][field]) << field;
