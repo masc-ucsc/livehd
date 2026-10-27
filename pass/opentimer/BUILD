@@ -83,7 +83,7 @@ cc_test(
     name = "pass_opentimer_test",
     srcs = ["pass_opentimer_test.cpp"],
     copts = COPTS,
-    deps = [":pass_opentimer", "//inou/lefdef:inou_lefdef", "@googletest//:gtest_main"],
+    deps = [":pass_opentimer", "//inou/lefdef:inou_lefdef", "//pass/partition:flatten", "@googletest//:gtest_main"],
 )
 
 cc_test(

@@ -12,6 +12,7 @@
 #include "gtest/gtest.h"
 #include "inou/lefdef/mapped_graph.hpp"
 #include "node_util.hpp"
+#include "pass/partition/flatten.hpp"
 #include "rapidjson/document.h"
 
 namespace {
@@ -95,7 +96,10 @@ TEST_F(SdcClock, ImportedOpenInputsAreAllowedButLostConnectionsStillFail) {
       {"out", {{"macro", "Y"}, {"PIN", "y"}}}
   };
   hhds::GraphLibrary library;
-  const auto         graph    = livehd::physical::mapped_graph(library, fp, tech);
+  const auto         imported = livehd::physical::mapped_graph(library, fp, tech);
+  hhds::GraphLibrary flat_library;
+  const auto graph = livehd::partition::flatten_hierarchy(imported.get(), &flat_library, "flat", nullptr, false, {}, {}, true);
+  ASSERT_NE(graph, nullptr);
   const auto         node     = graph->get_output_pin("y").get_driver_pins().front().get_master_node();
   const auto         instance = std::string(node.get_name()) + "__n" + std::to_string(node.get_debug_nid());
   Circuit_probe      probe(var);

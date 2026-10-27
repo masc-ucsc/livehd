@@ -317,6 +317,11 @@ void Flattener::carry_node_attrs(Ictx* ctx, const hhds::Node_class& orig, const 
     // payload is parsed, never used as an identifier: copy it verbatim.
     neo.attr(hhds::attrs::name).set(nm.find('\x1f') == std::string::npos ? ctx->prefix + nm : nm);
   }
+  // Explicitly open imported terminals are part of the cell's connectivity
+  // contract. Keep them when placement flattens the physical graph.
+  if (auto a = orig.attr(livehd::attrs::physical_open_inputs); a.has()) {
+    neo.attr(livehd::attrs::physical_open_inputs).set(a.get());
+  }
   if (auto a = orig.attr(livehd::attrs::lut); a.has()) {
     neo.attr(livehd::attrs::lut).set(std::string{a.get()});
   }
