@@ -22,6 +22,39 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Static cell GP now hands off to legalization when density is feasible and a
+sustained routing plateau persists: six samples over at least 100 iterations,
+HPWL and inflation within 1%, and less than 1% route-overflow improvement.
+The window must follow the last objective update. Minimum iteration counts,
+moving macros, continuation and scheduled objectives retain their safeguards.
+The report says <code>route_stalled</code>, never claims GP convergence, and all
+public defaults remain unchanged. All 11 targeted optimized suites pass with
+published DREAMPlace <code>4a006e9</code> and no local overrides, including
+minimum-budget, macro and timing-weight-window regressions.</p>
+<p>The matched v30 sweep uses fresh workdirs, the merged Slang 12.1 frontend,
+the same production defaults on all four designs, a 100 ps clock and reset false
+paths. Independent OpenSTA scores and placement times are:</p>
+<table>
+<thead><tr><th>Design</th><th>WNS, control → handoff (ps)</th><th>Placement, control → handoff (s)</th><th>Time ratio</th></tr></thead>
+<tbody>
+<tr><td>lfsr</td><td>−61.992 → −61.992</td><td>2.598 → 2.588</td><td>0.996×</td></tr>
+<tr><td>minimax</td><td>−996.517 → −996.517</td><td>45.991 → 46.138</td><td>1.003×</td></tr>
+<tr><td>NVDLA/partition_m</td><td>−916.549 → −916.549</td><td>42.071 → 41.537</td><td>0.987×</td></tr>
+<tr><td>coralnpu</td><td>−13,880.574 → −13,439.206</td><td>661.763 → 642.009</td><td>0.970×</td></tr>
+</tbody>
+</table>
+<p>Coralnpu gains 441.368 ps WNS with 3% less placement time; its complete flow
+takes 835.87 s wall / 835.71 s CPU. All four satisfy the 1.5× placement-time and
+3% cell/area limits. These fresh controls include upstream changes and must not
+be confused with the older pre-merge v28 baseline.</p>
+<p>On the separate segmented coralnpu input, GP hands off at 620 instead of
+1,500 iterations. Independent WNS improves from −4,449.090 to −4,435.123 ps and
+HPWL falls 1.13%. CPU falls from 332.66 to 282.17 s; wall time is 344.31 →
+355.22 s under concurrent host load (96% versus 79% CPU utilization), so this is
+not a wall-speedup claim. Both runs preserve all 1,962 row segments, 198,300
+masters and 10,059 fixed poses, with identical geometry history through the
+handoff. Final legality passes. A–J acceptance remains in progress.</p>
+
 <p>The production placer now adapts imported segmented N/FS rows to a rectangular
 solver frame with hard exclusions for absent sites. Exports, timing snapshots,
 terminal legalization and ECO repair retain the original segments. Fixed imported

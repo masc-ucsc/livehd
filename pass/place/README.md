@@ -254,10 +254,11 @@ eligible iteration count as **additional** iterations (40 becomes a deadline
 of 200); the configured iteration cap still applies. Set it to zero to replay
 the previous density-only stop. Two consecutive 20-iteration samples must have
 relative weighted-HPWL and inflation changes at most
-`synth.place.convergence_tolerance=0.01`, and current RUDY overflow must be zero
-when routability is enabled. FP's measured OpenTimer setup violation, when
-available, must also be zero. Other phases use weighted HPWL as a timing proxy;
-they do not claim measured timing closure. New net weights or topology reset
+`synth.place.convergence_tolerance=0.01`, and the active routing estimate must
+meet its overflow target when routability is enabled. Measured OpenTimer setup
+violation is reported when available; unmet timing does not veto geometric
+convergence. Weighted HPWL serves as a timing proxy, not a claim of measured
+timing closure. New net weights or topology reset
 the stability window but never extend the continuation deadline. Satisfied
 density does not keep increasing the density penalty during this continuation.
 The GP/FP JSON records the deadline, budget exhaustion, and whether timing was
@@ -271,6 +272,14 @@ and waits out the last checkpoint. Moving macros, continuation and scheduled
 objectives retain their own stopping policies. The report records
 `gp_stop_reason="density_stalled"`; legalization still runs, and this stop never
 claims GP convergence.
+With feasible density, a static cell solve can similarly hand off on a routing
+plateau. Six samples spanning at least 100 iterations must keep HPWL and
+inflated area within 1%, with less than 1% improvement between the best routing
+overflow in each half of the window. All samples must use the same routing
+model, follow the last checkpoint, and meet the density target. The same
+minimum-iteration and scheduled-objective restrictions apply; dynamic grids and
+explicit routing probes retain their own policies. This stop records
+`gp_stop_reason="route_stalled"` and does not certify routing or GP convergence.
 For the small full-sky130 trial, `synth.place.grid.density=16` and
 `synth.place.iterations=1500` reached the overflow target; the earlier 32-bin/500-iteration
 trial legalized but did not converge in GP. This is fixture evidence, not a

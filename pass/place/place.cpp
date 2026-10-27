@@ -9447,6 +9447,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Bool(metrics.continuation_limit);
     json.Key("density_stalled");
     json.Bool(metrics.density_stalled);
+    json.Key("route_stalled");
+    json.Bool(metrics.route_stalled);
     json.Key("objective_converged");
     json.Bool(metrics.objective_converged);
     json.Key("timing_observed_in_gp");
@@ -9579,6 +9581,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                  "objective settled {}, timing observed {}, last timing satisfied {}\n",
                  metrics.iterations,
                  metrics.density_stalled      ? "density stalled"
+                 : metrics.route_stalled      ? "routing stalled; handing off to legalization"
                  : metrics.continuation_limit ? "post-density budget"
                                               : "iteration cap",
                  metrics.overflow,
@@ -9887,6 +9890,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                               : options.timing_seed || options.retain_placement ? "snapshot"
                               : metrics.converged                               ? "converged"
                               : metrics.density_stalled                         ? "density_stalled"
+                              : metrics.route_stalled                           ? "route_stalled"
                               : metrics.continuation_limit                      ? "continuation_limit"
                               : metrics.iterations >= control.max_iterations    ? "iteration_limit"
                                                                                 : "stopped";

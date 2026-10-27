@@ -30775,6 +30775,858 @@
         "log": "/tmp/1f-segmented-merged-tests.log",
         "note": "Benchmark used frozen pre-pull binary recorded above; merged source passes production CLI/placement/repair/DEF/probe tests."
       }
+    },
+    "routing_plateau_v30": {
+      "status": "retained_after_matched_validation",
+      "policy": "Automatic static-cell routing plateau handoff; unchanged public defaults, no per-design placement overrides",
+      "protocol": "100ps clock, reset false paths, fresh workdirs, same frozen control/candidate binaries and CPU per design; independent OpenSTA scores",
+      "baseline_livehd": "a7347ed2cb982de59f7587a682437741048e7159",
+      "baseline_dreamplace": "ba64ec84b396c30bc40a63bdebdeda19364ece18",
+      "opentimer": "57e4f9e64f663dc75d5886b9f4f2caaaccf5e8bc",
+      "upstream": "All three repos pulled; current as of publication review",
+      "tests": {
+        "suite": "Nine targeted optimized suites passed; additional timing-weight-window regression passed",
+        "logs": [
+          "/tmp/1f-route-plateau-tests2.log",
+          "/tmp/1f-route-plateau-update-test.log"
+        ],
+        "published_dependency_validation": {
+          "passed": 11,
+          "log": "/tmp/1f-route-published-tests.log",
+          "local_overrides": false
+        }
+      },
+      "full_flow": {
+        "lfsr": {
+          "control": {
+            "run": {
+              "status": "ok",
+              "wall_s": 5.77,
+              "cpu_s": 5.76,
+              "rss_mib": 462.875,
+              "tree_rss_mib": 474.74609375,
+              "ipc": 2.6990783752493357,
+              "instructions": 69356860425.0,
+              "cycles": 25696497390.0,
+              "stop": null
+            },
+            "score": {
+              "hpwl_um": 211.974,
+              "hpwl_all_nets_um": 226.41,
+              "measured_nets": 136,
+              "excluded_nets": 1,
+              "setup_wns_ps": -61.991974,
+              "setup_tns_ps": -2179.184841,
+              "hold_wns_ps": 53.292124,
+              "hold_tns_ps": 0.0,
+              "instances": 134,
+              "logical_cells": 134,
+              "physical_cells": 0,
+              "buffers": 1,
+              "buffer_area_um2": 0.2624,
+              "macros": 0,
+              "instance_area_um2": 18.6187,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "scoring_seconds": 1.029,
+              "power_mw": 0.000684,
+              "reset_ports": []
+            },
+            "placement_seconds": 2.5977330000000003,
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "gp": {
+              "gp_converged": false,
+              "gp_stop_reason": "density_stalled",
+              "gp_overflow": 0.356047925,
+              "gp_total_iterations": 1480,
+              "gp_density_ready_iteration": 0,
+              "gp_continuation_deadline": 0,
+              "gp_objective_converged": false,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 1380
+            },
+            "binary_manifest": {
+              "openroad": "6d604d68329cd788fcce1212a01844e61a8eb62b99248eb6038902f853f5ea13",
+              "yosys": "dc720773d3cafc98f9ac3c1dae1e2faa8a1147629d84fe3d8bf10a8de080a8e2",
+              "lhd": "374a67a4d5d4d7e6a87c17a2a6268cf190256fcaa9650d7e001149c6704d267d",
+              "physical_repair": "e0077cbadbdfe0fe42a8bc809fec485b56e35e7e697c98a87a43540e2f799492",
+              "livehd_head": "4cc625cc969af216b35cd8110e846cea82a4011e",
+              "hightide_head": "9648393ce09887c9f72c3a40eb5fdc8441731c14",
+              "build": "Published a7347ed2c control, Slang12.1, DREAMPlace ba64ec8, OpenTimer57e4f9e; no local overrides; segmented-row fixes; fresh workdirs"
+            },
+            "source": "/tmp/1f-wns-v1/route_control/lfsr/summary.json"
+          },
+          "candidate": {
+            "run": {
+              "status": "ok",
+              "wall_s": 5.75,
+              "cpu_s": 5.74,
+              "rss_mib": 459.109375,
+              "tree_rss_mib": 456.68359375,
+              "ipc": 2.722187427734504,
+              "instructions": 69599517648.0,
+              "cycles": 25567496543.0,
+              "stop": null
+            },
+            "score": {
+              "hpwl_um": 211.974,
+              "hpwl_all_nets_um": 226.41,
+              "measured_nets": 136,
+              "excluded_nets": 1,
+              "setup_wns_ps": -61.991974,
+              "setup_tns_ps": -2179.184841,
+              "hold_wns_ps": 53.292124,
+              "hold_tns_ps": 0.0,
+              "instances": 134,
+              "logical_cells": 134,
+              "physical_cells": 0,
+              "buffers": 1,
+              "buffer_area_um2": 0.2624,
+              "macros": 0,
+              "instance_area_um2": 18.6187,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "scoring_seconds": 1.038,
+              "power_mw": 0.000684,
+              "reset_ports": []
+            },
+            "placement_seconds": 2.5882940000000003,
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "gp": {
+              "gp_converged": false,
+              "gp_stop_reason": "density_stalled",
+              "gp_overflow": 0.356047925,
+              "gp_total_iterations": 1480,
+              "gp_density_ready_iteration": 0,
+              "gp_continuation_deadline": 0,
+              "gp_objective_converged": false,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 1380
+            },
+            "binary_manifest": {
+              "openroad": "6d604d68329cd788fcce1212a01844e61a8eb62b99248eb6038902f853f5ea13",
+              "yosys": "dc720773d3cafc98f9ac3c1dae1e2faa8a1147629d84fe3d8bf10a8de080a8e2",
+              "lhd": "1e93f010c2e6e360f30b7b1bcf7388eefc7316429937b7438c16258799f056dc",
+              "physical_repair": "fb01f5bfeba28a531e3011be89314c7652101ceda39c01d3b4dfd251f47d3f2a",
+              "livehd_head": "4cc625cc969af216b35cd8110e846cea82a4011e",
+              "hightide_head": "9648393ce09887c9f72c3a40eb5fdc8441731c14",
+              "build": "a7347ed2c plus reviewed routing-plateau handoff; Slang12.1; DREAMPlace ba64ec8 plus route_stalled; OpenTimer57e4f9e; local DREAMPlace override; fresh workdirs"
+            },
+            "source": "/tmp/1f-wns-v1/route_candidate/lfsr/summary.json"
+          },
+          "wns_delta_ps": 0.0,
+          "placement_ratio": 0.9963664472060831,
+          "within_time_budget": true,
+          "within_growth_budget": true
+        },
+        "minimax": {
+          "control": {
+            "run": {
+              "status": "ok",
+              "wall_s": 71.08,
+              "cpu_s": 71.07000000000001,
+              "rss_mib": 1222.6796875,
+              "tree_rss_mib": 1182.6015625,
+              "ipc": 2.2007121034943964,
+              "instructions": 703049362163.0,
+              "cycles": 319464486539.0,
+              "stop": null
+            },
+            "score": {
+              "hpwl_um": 51206.312,
+              "hpwl_all_nets_um": 51365.322,
+              "measured_nets": 16267,
+              "excluded_nets": 1,
+              "setup_wns_ps": -996.517095,
+              "setup_tns_ps": -1966843.691335,
+              "hold_wns_ps": 28.431979,
+              "hold_tns_ps": 0.0,
+              "instances": 16217,
+              "logical_cells": 16217,
+              "physical_cells": 0,
+              "buffers": 389,
+              "buffer_area_um2": 91.0813,
+              "macros": 0,
+              "instance_area_um2": 2086.1939,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "scoring_seconds": 5.21,
+              "power_mw": 0.053,
+              "reset_ports": []
+            },
+            "placement_seconds": 45.990565000000004,
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16217,
+              "area_um2": 2086.1938799995755,
+              "within_budget": true,
+              "rejected_proposals": 362
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0894616016,
+              "gp_total_iterations": 520,
+              "gp_density_ready_iteration": 380,
+              "gp_continuation_deadline": 1900,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 440
+            },
+            "binary_manifest": {
+              "openroad": "6d604d68329cd788fcce1212a01844e61a8eb62b99248eb6038902f853f5ea13",
+              "yosys": "dc720773d3cafc98f9ac3c1dae1e2faa8a1147629d84fe3d8bf10a8de080a8e2",
+              "lhd": "374a67a4d5d4d7e6a87c17a2a6268cf190256fcaa9650d7e001149c6704d267d",
+              "physical_repair": "e0077cbadbdfe0fe42a8bc809fec485b56e35e7e697c98a87a43540e2f799492",
+              "livehd_head": "4cc625cc969af216b35cd8110e846cea82a4011e",
+              "hightide_head": "9648393ce09887c9f72c3a40eb5fdc8441731c14",
+              "build": "Published a7347ed2c control, Slang12.1, DREAMPlace ba64ec8, OpenTimer57e4f9e; no local overrides; segmented-row fixes; fresh workdirs"
+            },
+            "source": "/tmp/1f-wns-v1/route_control/minimax/summary.json"
+          },
+          "candidate": {
+            "run": {
+              "status": "ok",
+              "wall_s": 71.08,
+              "cpu_s": 71.07000000000001,
+              "rss_mib": 1290.87109375,
+              "tree_rss_mib": 1306.02734375,
+              "ipc": 2.201655333784503,
+              "instructions": 703344135101.0,
+              "cycles": 319461508942.0,
+              "stop": null
+            },
+            "score": {
+              "hpwl_um": 51206.312,
+              "hpwl_all_nets_um": 51365.322,
+              "measured_nets": 16267,
+              "excluded_nets": 1,
+              "setup_wns_ps": -996.517095,
+              "setup_tns_ps": -1966843.691335,
+              "hold_wns_ps": 28.431979,
+              "hold_tns_ps": 0.0,
+              "instances": 16217,
+              "logical_cells": 16217,
+              "physical_cells": 0,
+              "buffers": 389,
+              "buffer_area_um2": 91.0813,
+              "macros": 0,
+              "instance_area_um2": 2086.1939,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "scoring_seconds": 5.224,
+              "power_mw": 0.053,
+              "reset_ports": []
+            },
+            "placement_seconds": 46.13786,
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16217,
+              "area_um2": 2086.1938799995755,
+              "within_budget": true,
+              "rejected_proposals": 362
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0894616016,
+              "gp_total_iterations": 520,
+              "gp_density_ready_iteration": 380,
+              "gp_continuation_deadline": 1900,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 440
+            },
+            "binary_manifest": {
+              "openroad": "6d604d68329cd788fcce1212a01844e61a8eb62b99248eb6038902f853f5ea13",
+              "yosys": "dc720773d3cafc98f9ac3c1dae1e2faa8a1147629d84fe3d8bf10a8de080a8e2",
+              "lhd": "1e93f010c2e6e360f30b7b1bcf7388eefc7316429937b7438c16258799f056dc",
+              "physical_repair": "fb01f5bfeba28a531e3011be89314c7652101ceda39c01d3b4dfd251f47d3f2a",
+              "livehd_head": "4cc625cc969af216b35cd8110e846cea82a4011e",
+              "hightide_head": "9648393ce09887c9f72c3a40eb5fdc8441731c14",
+              "build": "a7347ed2c plus reviewed routing-plateau handoff; Slang12.1; DREAMPlace ba64ec8 plus route_stalled; OpenTimer57e4f9e; local DREAMPlace override; fresh workdirs"
+            },
+            "source": "/tmp/1f-wns-v1/route_candidate/minimax/summary.json"
+          },
+          "wns_delta_ps": 0.0,
+          "placement_ratio": 1.0032027221235487,
+          "within_time_budget": true,
+          "within_growth_budget": true
+        },
+        "NVDLA__partition_m": {
+          "control": {
+            "run": {
+              "status": "ok",
+              "wall_s": 111.67,
+              "cpu_s": 111.64,
+              "rss_mib": 1556.06640625,
+              "tree_rss_mib": 1552.984375,
+              "ipc": 1.585263757612185,
+              "instructions": 796952316750.0,
+              "cycles": 502725374830.0,
+              "stop": null
+            },
+            "score": {
+              "hpwl_um": 102574.408,
+              "hpwl_all_nets_um": 118459.102,
+              "measured_nets": 20635,
+              "excluded_nets": 145,
+              "setup_wns_ps": -916.548507,
+              "setup_tns_ps": -455936.772826,
+              "hold_wns_ps": 25.375549,
+              "hold_tns_ps": 0.0,
+              "instances": 20598,
+              "logical_cells": 20598,
+              "physical_cells": 0,
+              "buffers": 138,
+              "buffer_area_um2": 11.1683,
+              "macros": 0,
+              "instance_area_um2": 2735.7766,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "scoring_seconds": 7.026,
+              "power_mw": 0.114,
+              "reset_ports": [
+                "direct_reset_",
+                "dla_reset_rstn",
+                "global_clk_ovr_on",
+                "nvdla_clk_ovr_on",
+                "test_mode",
+                "tmc2slcg_disable_clock_gating"
+              ]
+            },
+            "placement_seconds": 42.070525,
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20948,
+              "baseline_area_um2": 2656.096920000048,
+              "cells": 20598,
+              "area_um2": 2735.776620000061,
+              "within_budget": true,
+              "rejected_proposals": 3948
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0919568351,
+              "gp_total_iterations": 620,
+              "gp_density_ready_iteration": 440,
+              "gp_continuation_deadline": 2200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 540
+            },
+            "binary_manifest": {
+              "openroad": "6d604d68329cd788fcce1212a01844e61a8eb62b99248eb6038902f853f5ea13",
+              "yosys": "dc720773d3cafc98f9ac3c1dae1e2faa8a1147629d84fe3d8bf10a8de080a8e2",
+              "lhd": "374a67a4d5d4d7e6a87c17a2a6268cf190256fcaa9650d7e001149c6704d267d",
+              "physical_repair": "e0077cbadbdfe0fe42a8bc809fec485b56e35e7e697c98a87a43540e2f799492",
+              "livehd_head": "4cc625cc969af216b35cd8110e846cea82a4011e",
+              "hightide_head": "9648393ce09887c9f72c3a40eb5fdc8441731c14",
+              "build": "Published a7347ed2c control, Slang12.1, DREAMPlace ba64ec8, OpenTimer57e4f9e; no local overrides; segmented-row fixes; fresh workdirs"
+            },
+            "source": "/tmp/1f-wns-v1/route_control/NVDLA__partition_m/summary.json"
+          },
+          "candidate": {
+            "run": {
+              "status": "ok",
+              "wall_s": 110.91,
+              "cpu_s": 110.9,
+              "rss_mib": 1565.78515625,
+              "tree_rss_mib": 1534.734375,
+              "ipc": 1.5969299200312967,
+              "instructions": 797354714123.0,
+              "cycles": 499304762295.0,
+              "stop": null
+            },
+            "score": {
+              "hpwl_um": 102574.408,
+              "hpwl_all_nets_um": 118459.102,
+              "measured_nets": 20635,
+              "excluded_nets": 145,
+              "setup_wns_ps": -916.548507,
+              "setup_tns_ps": -455936.772826,
+              "hold_wns_ps": 25.375549,
+              "hold_tns_ps": 0.0,
+              "instances": 20598,
+              "logical_cells": 20598,
+              "physical_cells": 0,
+              "buffers": 138,
+              "buffer_area_um2": 11.1683,
+              "macros": 0,
+              "instance_area_um2": 2735.7766,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "scoring_seconds": 6.774,
+              "power_mw": 0.114,
+              "reset_ports": [
+                "direct_reset_",
+                "dla_reset_rstn",
+                "global_clk_ovr_on",
+                "nvdla_clk_ovr_on",
+                "test_mode",
+                "tmc2slcg_disable_clock_gating"
+              ]
+            },
+            "placement_seconds": 41.537113000000005,
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20948,
+              "baseline_area_um2": 2656.096920000048,
+              "cells": 20598,
+              "area_um2": 2735.776620000061,
+              "within_budget": true,
+              "rejected_proposals": 3948
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0919568351,
+              "gp_total_iterations": 620,
+              "gp_density_ready_iteration": 440,
+              "gp_continuation_deadline": 2200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 540
+            },
+            "binary_manifest": {
+              "openroad": "6d604d68329cd788fcce1212a01844e61a8eb62b99248eb6038902f853f5ea13",
+              "yosys": "dc720773d3cafc98f9ac3c1dae1e2faa8a1147629d84fe3d8bf10a8de080a8e2",
+              "lhd": "1e93f010c2e6e360f30b7b1bcf7388eefc7316429937b7438c16258799f056dc",
+              "physical_repair": "fb01f5bfeba28a531e3011be89314c7652101ceda39c01d3b4dfd251f47d3f2a",
+              "livehd_head": "4cc625cc969af216b35cd8110e846cea82a4011e",
+              "hightide_head": "9648393ce09887c9f72c3a40eb5fdc8441731c14",
+              "build": "a7347ed2c plus reviewed routing-plateau handoff; Slang12.1; DREAMPlace ba64ec8 plus route_stalled; OpenTimer57e4f9e; local DREAMPlace override; fresh workdirs"
+            },
+            "source": "/tmp/1f-wns-v1/route_candidate/NVDLA__partition_m/summary.json"
+          },
+          "wns_delta_ps": 0.0,
+          "placement_ratio": 0.9873210044324382,
+          "within_time_budget": true,
+          "within_growth_budget": true
+        },
+        "coralnpu": {
+          "control": {
+            "run": {
+              "status": "ok",
+              "wall_s": 853.69,
+              "cpu_s": 853.23,
+              "rss_mib": 9697.44921875,
+              "tree_rss_mib": 9610.0703125,
+              "ipc": 1.6942349624746966,
+              "instructions": 6518795620821.0,
+              "cycles": 3847633749276.0,
+              "stop": null
+            },
+            "score": {
+              "hpwl_um": 3641610.498,
+              "hpwl_all_nets_um": 3896231.642,
+              "measured_nets": 161883,
+              "excluded_nets": 690,
+              "setup_wns_ps": -13880.574079,
+              "setup_tns_ps": -63388404.922528,
+              "hold_wns_ps": 27.353337,
+              "hold_tns_ps": 0.0,
+              "instances": 161831,
+              "logical_cells": 161831,
+              "physical_cells": 0,
+              "buffers": 855,
+              "buffer_area_um2": 71.1796,
+              "macros": 2,
+              "instance_area_um2": 45752.6704,
+              "macro_area_um2": 26086.1895,
+              "die_um": [
+                0.0,
+                0.0,
+                387.288,
+                387.45
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                387.288,
+                387.45
+              ],
+              "scoring_seconds": 78.048,
+              "power_mw": 0.677,
+              "reset_ports": [
+                "io_aresetn"
+              ]
+            },
+            "placement_seconds": 661.76258,
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 161829,
+              "area_um2": 19666.48085999563,
+              "within_budget": true,
+              "rejected_proposals": 9455
+            },
+            "gp": {
+              "gp_converged": false,
+              "gp_stop_reason": "continuation_limit",
+              "gp_overflow": 0.0709893094,
+              "gp_total_iterations": 1100,
+              "gp_density_ready_iteration": 200,
+              "gp_continuation_deadline": 1000,
+              "gp_objective_converged": false,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 1000
+            },
+            "binary_manifest": {
+              "openroad": "6d604d68329cd788fcce1212a01844e61a8eb62b99248eb6038902f853f5ea13",
+              "yosys": "dc720773d3cafc98f9ac3c1dae1e2faa8a1147629d84fe3d8bf10a8de080a8e2",
+              "lhd": "374a67a4d5d4d7e6a87c17a2a6268cf190256fcaa9650d7e001149c6704d267d",
+              "physical_repair": "e0077cbadbdfe0fe42a8bc809fec485b56e35e7e697c98a87a43540e2f799492",
+              "livehd_head": "4cc625cc969af216b35cd8110e846cea82a4011e",
+              "hightide_head": "9648393ce09887c9f72c3a40eb5fdc8441731c14",
+              "build": "Published a7347ed2c control, Slang12.1, DREAMPlace ba64ec8, OpenTimer57e4f9e; no local overrides; segmented-row fixes; fresh workdirs"
+            },
+            "source": "/tmp/1f-wns-v1/route_control/coralnpu/summary.json"
+          },
+          "candidate": {
+            "run": {
+              "status": "ok",
+              "wall_s": 835.87,
+              "cpu_s": 835.71,
+              "rss_mib": 9654.609375,
+              "tree_rss_mib": 9661.36328125,
+              "ipc": 1.6541074542724166,
+              "instructions": 6234386623501.0,
+              "cycles": 3769033630432.0,
+              "stop": null
+            },
+            "score": {
+              "hpwl_um": 3690806.61,
+              "hpwl_all_nets_um": 3946931.346,
+              "measured_nets": 161883,
+              "excluded_nets": 690,
+              "setup_wns_ps": -13439.206246,
+              "setup_tns_ps": -62830979.255562,
+              "hold_wns_ps": 27.255571,
+              "hold_tns_ps": 0.0,
+              "instances": 161831,
+              "logical_cells": 161831,
+              "physical_cells": 0,
+              "buffers": 855,
+              "buffer_area_um2": 71.1796,
+              "macros": 2,
+              "instance_area_um2": 45752.6704,
+              "macro_area_um2": 26086.1895,
+              "die_um": [
+                0.0,
+                0.0,
+                387.288,
+                387.45
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                387.288,
+                387.45
+              ],
+              "scoring_seconds": 79.948,
+              "power_mw": 0.679,
+              "reset_ports": [
+                "io_aresetn"
+              ]
+            },
+            "placement_seconds": 642.00914,
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 161829,
+              "area_um2": 19666.48085999544,
+              "within_budget": true,
+              "rejected_proposals": 9567
+            },
+            "gp": {
+              "gp_converged": false,
+              "gp_stop_reason": "route_stalled",
+              "gp_overflow": 0.0760805602,
+              "gp_total_iterations": 720,
+              "gp_density_ready_iteration": 200,
+              "gp_continuation_deadline": 1000,
+              "gp_objective_converged": false,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 620
+            },
+            "binary_manifest": {
+              "openroad": "6d604d68329cd788fcce1212a01844e61a8eb62b99248eb6038902f853f5ea13",
+              "yosys": "dc720773d3cafc98f9ac3c1dae1e2faa8a1147629d84fe3d8bf10a8de080a8e2",
+              "lhd": "1e93f010c2e6e360f30b7b1bcf7388eefc7316429937b7438c16258799f056dc",
+              "physical_repair": "fb01f5bfeba28a531e3011be89314c7652101ceda39c01d3b4dfd251f47d3f2a",
+              "livehd_head": "4cc625cc969af216b35cd8110e846cea82a4011e",
+              "hightide_head": "9648393ce09887c9f72c3a40eb5fdc8441731c14",
+              "build": "a7347ed2c plus reviewed routing-plateau handoff; Slang12.1; DREAMPlace ba64ec8 plus route_stalled; OpenTimer57e4f9e; local DREAMPlace override; fresh workdirs"
+            },
+            "source": "/tmp/1f-wns-v1/route_candidate/coralnpu/summary.json"
+          },
+          "wns_delta_ps": 441.36783300000025,
+          "placement_ratio": 0.9701502614427066,
+          "within_time_budget": true,
+          "within_growth_budget": true
+        }
+      },
+      "segmented": {
+        "control": {
+          "rows_preserved": 1962,
+          "component_masters_preserved": 198300,
+          "fixed_poses_preserved": 10059,
+          "output_sha256": "4490a7abbc2f294d64704d93c8f4af94b30d4c27fac7b7f491a05842a56cf237",
+          "runtime": {
+            "seed_s": 26.8075,
+            "place_s": 239.412,
+            "timing_place_s": 0.00149004,
+            "sizing_s": 4.3e-07,
+            "repair_s": 2e-08,
+            "endpoint_sta_s": 68.7557,
+            "export_s": 1.19671,
+            "timing_refine_s": 69.9539,
+            "fixed_components": 10059,
+            "timing_evaluations": 7,
+            "timing_engine_s": 117.712,
+            "timing_builds": 1,
+            "timing_repowered_gates": 0,
+            "timing_inserted_gates": 0,
+            "timing_removed_gates": 0,
+            "timing_updated_rc_nets": 1150409
+          },
+          "cpu_seconds": 332.65999999999997,
+          "gp": {
+            "gp_converged": false,
+            "gp_overflow": 0.0854393514,
+            "gp_iterations": 1500,
+            "gp_density_ready_iteration": 360,
+            "gp_continuation_deadline": 1800,
+            "gp_objective_converged": false,
+            "gp_timing_satisfied": null,
+            "gp_stop_reason": "iteration_limit"
+          },
+          "score": {
+            "hpwl_um": 3959393.244,
+            "hpwl_all_nets_um": 3961106.753,
+            "measured_nets": 193344,
+            "excluded_nets": 5,
+            "setup_wns_ps": -4449.090003,
+            "setup_tns_ps": -15469650.013952,
+            "hold_wns_ps": 17.682172,
+            "hold_tns_ps": 0.0,
+            "instances": 198300,
+            "logical_cells": 188243,
+            "physical_cells": 10057,
+            "buffers": 21337,
+            "buffer_area_um2": 1609.7486,
+            "macros": 2,
+            "instance_area_um2": 46906.2837,
+            "macro_area_um2": 26086.1895,
+            "die_um": [
+              0.0,
+              0.0,
+              342.686,
+              342.686
+            ],
+            "core_um": [
+              1.026,
+              1.08,
+              341.658,
+              341.55
+            ],
+            "scoring_seconds": 105.238,
+            "power_mw": 0.124,
+            "reset_ports": [
+              "io_aresetn"
+            ]
+          }
+        },
+        "route": {
+          "rows_preserved": 1962,
+          "component_masters_preserved": 198300,
+          "fixed_poses_preserved": 10059,
+          "output_sha256": "65b3781e0ae38c84f2882b5a8c53442fda490874db85c21db4c410ceb626d2a0",
+          "runtime": {
+            "seed_s": 26.4698,
+            "place_s": 258.708,
+            "timing_place_s": 0.0015506,
+            "sizing_s": 5.31e-07,
+            "repair_s": 2e-08,
+            "endpoint_sta_s": 60.4908,
+            "export_s": 1.24539,
+            "timing_refine_s": 61.7378,
+            "fixed_components": 10059,
+            "timing_evaluations": 7,
+            "timing_engine_s": 174.951,
+            "timing_builds": 1,
+            "timing_repowered_gates": 0,
+            "timing_inserted_gates": 0,
+            "timing_removed_gates": 0,
+            "timing_updated_rc_nets": 1146964
+          },
+          "cpu_seconds": 282.16999999999996,
+          "gp": {
+            "gp_converged": false,
+            "gp_overflow": 0.0943868196,
+            "gp_iterations": 620,
+            "gp_density_ready_iteration": 360,
+            "gp_continuation_deadline": 1800,
+            "gp_objective_converged": false,
+            "gp_timing_satisfied": null,
+            "gp_stop_reason": "route_stalled"
+          },
+          "score": {
+            "hpwl_um": 3914714.51,
+            "hpwl_all_nets_um": 3916414.513,
+            "measured_nets": 193344,
+            "excluded_nets": 5,
+            "setup_wns_ps": -4435.123397,
+            "setup_tns_ps": -15477371.624,
+            "hold_wns_ps": 19.067841,
+            "hold_tns_ps": 0.0,
+            "instances": 198300,
+            "logical_cells": 188243,
+            "physical_cells": 10057,
+            "buffers": 21337,
+            "buffer_area_um2": 1609.7486,
+            "macros": 2,
+            "instance_area_um2": 46906.2837,
+            "macro_area_um2": 26086.1895,
+            "die_um": [
+              0.0,
+              0.0,
+              342.686,
+              342.686
+            ],
+            "core_um": [
+              1.026,
+              1.08,
+              341.658,
+              341.55
+            ],
+            "scoring_seconds": 105.48,
+            "power_mw": 0.122,
+            "reset_ports": [
+              "io_aresetn"
+            ]
+          }
+        },
+        "identical_geometry_history_until_handoff": true,
+        "wall_s": {
+          "control": 344.31,
+          "route": 355.22
+        },
+        "timing_limitation": "Concurrent external benchmarks on host; control got96%CPU, candidate79%; report both CPU and wall, no wall-speedup claim",
+        "wns_delta_ps": 13.966605999999956,
+        "cpu_ratio": 0.8482234112908074,
+        "placement_wall_ratio": 1.0805974637862765,
+        "hpwl_ratio": 0.9887157624295829
+      },
+      "artifacts": {
+        "control_driver": "/tmp/1f-wns-route-control.py",
+        "candidate_driver": "/tmp/1f-wns-route-candidate.py",
+        "segmented_score": "/tmp/1f-score-route-segmented.py",
+        "source_patches": [
+          "/tmp/1f-route-dreamplace.patch",
+          "/tmp/1f-route-livehd.patch"
+        ]
+      },
+      "broader_goal": "A-J acceptance remains in progress; no claim of timing closure or universal GP convergence",
+      "published_dreamplace": "4a006e9bf8144047d5608e1287d63e4445041aeb"
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",
