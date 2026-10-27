@@ -5509,6 +5509,14 @@ TEST(Placement, SegmentedImportedRowsConstrainPlacementSnapshotsAndEco) {
     EXPECT_EQ(snapshot.floorplan.components.size(), 2);
     EXPECT_EQ(snapshot.parasitics->cells.size(), 2);
   };
+  options.uroute.export_features = true;
+  options.retain_preroute_design = true;
+  options.after_stage            = [&](Placement_stage, const Result& result) {
+    EXPECT_EQ(result.floorplan.rows, frame.rows);
+    EXPECT_EQ(result.floorplan.blockages, frame.blockages);
+    EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/uroute_export/features.bin"));
+    return false;
+  };
   for (bool terminal : {false, true}) {
     hhds::GraphLibrary placed_library;
     options.optimization_pending = !terminal;
@@ -5518,6 +5526,10 @@ TEST(Placement, SegmentedImportedRowsConstrainPlacementSnapshotsAndEco) {
     EXPECT_EQ(placed.floorplan.rows, frame.rows);
     EXPECT_EQ(placed.floorplan.blockages, frame.blockages);
     EXPECT_EQ(placed.floorplan.components.size(), 2);
+    ASSERT_NE(placed.preroute_design, nullptr);
+    EXPECT_NO_THROW(placed.preroute_design->design.validate());
+    EXPECT_EQ(bind_preroute(placed.floorplan, *placed.parasitics, *placed.preroute_design).size(), placed.parasitics->nets.size());
+    EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/uroute_export/features.bin"));
     for (const auto& file : {"out.def", "before_legalization.def", "after_legalization.def"}) {
       auto exported = physical::read_def(options.output_dir + "/" + file);
       EXPECT_EQ(exported.rows, frame.rows);
@@ -5533,6 +5545,7 @@ TEST(Placement, SegmentedImportedRowsConstrainPlacementSnapshotsAndEco) {
       eco.previous = previous;
       eco.floorplan.clear();
       eco.gp_observer    = {};
+      eco.after_stage    = {};
       eco.changed_cells  = {"inv", "nand"};
       eco.legalize_cells = true;
       eco.output_dir     = root + "/eco";

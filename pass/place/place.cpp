@@ -9646,21 +9646,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
   }
   fs::create_directories(options.output_dir);
-  if (resolved_uroute.export_features && !options.timing_seed && !options.retain_placement
-      && options.completed_stage == Placement_stage::final) {
-    auto snapshot = v;
-    prepare_rows(tech, snapshot.fp);
-    make_arrays(snapshot, tech);
-    const int nx = route_grid_bins(control.auxiliary_bins, metrics.bins_x ? metrics.bins_x : options.bins);
-    const int ny = route_grid_bins(control.auxiliary_bins, metrics.bins_y ? metrics.bins_y : options.bins);
-    export_uroute(fs::path(options.output_dir) / "uroute_export",
-                  snapshot.design,
-                  uroute_id(snapshot),
-                  nx,
-                  ny,
-                  feature_capacity_h,
-                  feature_capacity_v);
-  }
+  const bool export_final_features = resolved_uroute.export_features && !options.timing_seed && !options.retain_placement
+                                     && options.completed_stage == Placement_stage::final;
   if (metrics.uroute_skipped.empty()) {
     metrics.uroute_skipped = selected_uroute.skipped;
   }
@@ -10294,7 +10281,13 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   }
   const auto def = options.output_dir + "/out.def";
   if (handoff_grid) {
-    v.fp = std::move(*handoff_grid);
+    // Keep the signal-only frame for feature export. The handoff appends
+    // power terminals, which are not part of the placement feature tensor.
+    if (export_final_features) {
+      std::swap(v.fp, *handoff_grid);
+    } else {
+      v.fp = std::move(*handoff_grid);
+    }
     write_power_grid_report(v.fp, *pg_profile, options.output_dir + "/power_grid.json", &handoff_channel_stats);
   } else if (final_handoff) {
     std::error_code error;
@@ -10782,6 +10775,33 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
     }
     result.preroute_design = std::move(snapshot);
+  }
+  if (export_final_features) {
+    // Reports, cache entries and retained preroute data have consumed the
+    // solver arrays. Rebuild them in place for export instead of copying the
+    // entire View alongside final timing/RC. Only row preparation changes the
+    // returned floorplan; preserve its original segments and blockages.
+    if (handoff_grid) {
+      std::swap(v.fp, *handoff_grid);
+    }
+    auto rows      = v.fp.rows;
+    auto blockages = v.fp.blockages;
+    prepare_rows(tech, v.fp);
+    make_arrays(v, tech);
+    const int nx = route_grid_bins(control.auxiliary_bins, metrics.bins_x ? metrics.bins_x : options.bins);
+    const int ny = route_grid_bins(control.auxiliary_bins, metrics.bins_y ? metrics.bins_y : options.bins);
+    export_uroute(fs::path(options.output_dir) / "uroute_export",
+                  v.design,
+                  uroute_id(v),
+                  nx,
+                  ny,
+                  feature_capacity_h,
+                  feature_capacity_v);
+    v.fp.rows      = std::move(rows);
+    v.fp.blockages = std::move(blockages);
+    if (handoff_grid) {
+      std::swap(v.fp, *handoff_grid);
+    }
   }
   result.floorplan        = std::move(v.fp);
   result.fp_resized_cells = fp_resized;
