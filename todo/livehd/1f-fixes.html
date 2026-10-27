@@ -22,6 +22,32 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Static cell placement now hands off to legalization when the requested density
+is mathematically infeasible and the remaining objective has settled. The original
+requested target is retained and the result reports nonconvergence. Review of the
+upstream merge also found repeated Liberty parsing in reset/rail buffering; these
+phases now reuse the shared technology snapshot. All eleven targeted optimized
+suites pass, including file-independent reset/rail buffering and honest density
+handoff reporting. Public defaults are unchanged.</p>
+<table><thead><tr><th>Design</th><th>Independent WNS (ps)</th><th>Placement (s), upstream → candidate</th></tr></thead><tbody>
+<tr><td>lfsr</td><td>-61.992 → -61.992</td><td>4.751 → 2.639</td></tr>
+<tr><td>minimax</td><td>-950.289 → -950.289</td><td>47.173 → 43.447</td></tr>
+<tr><td>NVDLA/partition_m</td><td>-916.800 → -916.800</td><td>41.866 → 37.020</td></tr>
+<tr><td>coralnpu</td><td>-16736.600 → -16736.600</td><td>757.391 → 744.113</td></tr>
+</tbody></table>
+<p>Fresh matched runs use the same CPU per design, common production defaults,
+100 ps clocks and reset false paths. All four retain byte-identical DEFs, WNS and
+HPWL, and stay within 1.5× placement time. Coralnpu takes
+897.18 s wall / 896.72 s CPU and
+10304.6 MiB peak RSS. The repair growth checks pass; upstream
+excludes reset/rail tree masters from that budget, so this is not a gross-area
+claim. Exact scores and binary provenance are in
+<code>runs.density_floor_shared_reset_v39</code>.</p>
+<p>The control measured after upstream integration is worse than the previous
+measured coralnpu revision: placement 530.499 → 757.391 s and WNS −13,961.971 → −16,736.600 ps.
+The matched table isolates this patch from that regression; resolving it remains
+open. No blocking review findings remain in this patch.</p>
+
 <p>Buffer-tree search now considers a single repeater at the source even when
 that source already satisfies electrical limits. Optimal repeater spacing
 still generates tree alternatives, but does not reject a branch whose RC delay,
@@ -53,13 +79,18 @@ worsens minimax WNS to −1,312.774 ps and still has 50,587.761 µm HPWL. Stage
 reports locate most wirelength growth in buffer insertion, not the warm timing
 rounds. The retained candidate lowers minimax's excess over pure GP from 21.70%
 to 11.66%; <strong>F's 3% bound remains unmet.</strong></p>
-<p>The refreshed imported minimax pure-GP check fails D/E: default density 0.5
-cannot fit the supplied core (movable cells alone occupy 65.4%), reaching
-1,500 iterations with overflow 0.267 and
-701,412.516 µm HPWL. A density-only diagnostic at 0.7 converges in 500 iterations
-and takes 11.84 s CPU, but still has 111,796.250 µm HPWL versus the 50,317.3 µm
-acceptance limit. That override is not a production setting. The full A–J goal,
-including total STA share and the larger-design/import census, remains open.</p>
+<p>The previous v38 imported minimax pure-GP diagnostic was missing input buffer
+cleanup. Corrected geometry-only controls explicitly enable cleanup (upstream
+now defaults to cleanup only when repair runs). With cleanup and the unchanged
+0.5 density / 0.1 overflow targets, the old solver takes 1,500 iterations,
+20.49 s CPU and 572,047.465 µm HPWL. The merged candidate with automatic capacity-floor handoff takes
+360 iterations, 9.90 s CPU and 42,708.841 µm HPWL. It retains raw overflow
+0.277 and correctly reports nonconvergence: the supplied core has an unavoidable
+0.188 overflow floor. This meets D's imported numerical wirelength/time bounds;
+curve agreement, initialization and the rest of D remain unproven. These are
+explicit-cleanup diagnostics, not changed production defaults.</p>
+<p>The full A–J goal remains open, including total STA share, F's 3% wirelength
+bound, lfsr's long density stall and the larger-design/import census.</p>
 
 <p>GP timing feedback now uses dense slack/clock arrays with a shared immutable
 pin/net index. Coordinate-only samples reuse bound timer pins; topology and

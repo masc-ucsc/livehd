@@ -35984,6 +35984,1233 @@
         "review": "No blocking findings. Reviewed source-repeater postorder, root cap/fanout checks, driver selection, cell/area admission and detailed-STA retention. Diff and compiler-warning guard pass.",
         "runtime_limit": "Merged minimax placement47.817s is1.089x the fresh pre-merge control43.925s, within1.5x. TotalCPU71.92s is higher than the pre-merge candidate62.60s; do not claim a post-merge runtime speedup or attribute the difference without another experiment."
       }
+    },
+    "density_floor_shared_reset_v39": {
+      "status": "reviewed and validated after upstream integration; full A-J goal remains in progress",
+      "livehd_implementation_commit": "b3b65ca1b9bdf885aa9958d971244a3070095773",
+      "published_dreamplace_commit": "2bd0da333891a22f43b44def630ef16bba3c910e",
+      "upstream_livehd_commit": "690756d4c28dcd3d0dc20cbaf9b54d3ade7dc3d2",
+      "control_manifest": {
+        "openroad": "6d604d68329cd788fcce1212a01844e61a8eb62b99248eb6038902f853f5ea13",
+        "yosys": "dc720773d3cafc98f9ac3c1dae1e2faa8a1147629d84fe3d8bf10a8de080a8e2",
+        "lhd": "5a4ddaaf194463441ff192434de6c164002eb30e54bedf1af21ce72366b826c3",
+        "livehd_head": "690756d4c28dcd3d0dc20cbaf9b54d3ade7dc3d2",
+        "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+        "build": "Optimized upstream upstream-control; published dependencies, no local override",
+        "livehd_patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "harness_sha256": {
+          "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+          "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+        },
+        "working_tree_status": "",
+        "compiled_dependencies": {
+          "dreamplace": "4a006e9bf8144047d5608e1287d63e4445041aeb",
+          "opentimer": "3197d532b08a6e11ee0a1c26a200dd34b56148cd"
+        },
+        "physical_repair": "311d365ec433144f029d63a8b1b1746448be85cc5e373b1b888a11b20db09a95"
+      },
+      "candidate_manifest": {
+        "openroad": "6d604d68329cd788fcce1212a01844e61a8eb62b99248eb6038902f853f5ea13",
+        "yosys": "dc720773d3cafc98f9ac3c1dae1e2faa8a1147629d84fe3d8bf10a8de080a8e2",
+        "lhd": "abf24cbcffc72afa77b748cebdd4a097b57f9a79d4a183c915dd85db94107c1b",
+        "livehd_head": "690756d4c28dcd3d0dc20cbaf9b54d3ade7dc3d2",
+        "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+        "build": "Optimized upstream merged-candidate; published dependencies, no local override",
+        "livehd_patch_sha256": "c575d0dcf91a7469dc330f09bb183a1337c9fa09167c2fc4dc0bed3685521c6e",
+        "harness_sha256": {
+          "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+          "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+        },
+        "working_tree_status": " M MODULE.bazel\n M pass/place/README.md\n M pass/place/place.cpp\n M pass/place/place_test.cpp\n M pass/place/reset_tree.cpp\n M pass/place/reset_tree.hpp\n M pass/place/reset_tree_test.cpp\n M todo/livehd/1f-fixes.html\n",
+        "compiled_dependencies": {
+          "dreamplace": "2bd0da333891a22f43b44def630ef16bba3c910e",
+          "opentimer": "3197d532b08a6e11ee0a1c26a200dd34b56148cd"
+        },
+        "physical_repair": "ef2d9cfef82ab0bb6ac584a4051bb2398946266998287a73a993edacacaac0f8"
+      },
+      "protocol": "Fresh upstream control and candidate, same CPU per design (13 smalls, 14 coral), production defaults, common frontend settings, 100 ps clocks, reset and reset-distribution false paths, independent HighTide OpenSTA scoring. Frozen executables; no local dependency override.",
+      "changes": [
+        "Use unavoidable density capacity floor for static-cell handoff scheduling; retain requested density/overflow and report nonconvergence.",
+        "Reuse shared Liberty snapshot for reset/rail tree cells instead of two file scans on each placement invocation."
+      ],
+      "production_comparison": {
+        "lfsr": {
+          "control_source": "/tmp/1f-wns-v1/density_floor_upstream_control/lfsr/summary.json",
+          "candidate_source": "/tmp/1f-wns-v1/density_floor_merged_candidate/lfsr/summary.json",
+          "control": {
+            "run": {
+              "status": "ok",
+              "wall_s": 7.49,
+              "cpu_s": 7.489999999999999,
+              "rss_mib": 448.57421875,
+              "tree_rss_mib": 453.78125,
+              "ipc": 2.577912602368048,
+              "instructions": 86053399092.0,
+              "cycles": 33381038214.0,
+              "stop": null
+            },
+            "placement_seconds": 4.7508919999999994,
+            "score": {
+              "hpwl_um": 211.974,
+              "hpwl_all_nets_um": 226.41,
+              "measured_nets": 136,
+              "excluded_nets": 1,
+              "setup_wns_ps": -61.991974,
+              "setup_tns_ps": -2179.184841,
+              "hold_wns_ps": 53.292124,
+              "hold_tns_ps": 0.0,
+              "instances": 134,
+              "logical_cells": 134,
+              "physical_cells": 0,
+              "buffers": 1,
+              "buffer_area_um2": 0.2624,
+              "macros": 0,
+              "instance_area_um2": 18.6187,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "scoring_seconds": 1.042,
+              "power_mw": 0.000684,
+              "reset_ports": []
+            },
+            "physical_timing": {
+              "evaluations": 9,
+              "builds": 1,
+              "ranking_evaluations": 6,
+              "ranking_seconds": 0.6623361809999999,
+              "detailed_evaluations": 3,
+              "repowered_gates": 8,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 543,
+              "update_calls": 12,
+              "seconds": 0.6970643889999999,
+              "validation_seconds": 0.001266793,
+              "reconcile_seconds": 0.653000996,
+              "exclusions_seconds": 0.000425677,
+              "propagation_seconds": 0.037071677,
+              "feedback_seconds": 0.005201101000000005
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "gp": {
+              "gp_converged": false,
+              "gp_stop_reason": "density_stalled",
+              "gp_overflow": 0.356047925,
+              "gp_total_iterations": 1480,
+              "gp_density_ready_iteration": 0,
+              "gp_continuation_deadline": 0,
+              "gp_objective_converged": false,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 1380
+            }
+          },
+          "candidate": {
+            "run": {
+              "status": "ok",
+              "wall_s": 5.37,
+              "cpu_s": 5.36,
+              "rss_mib": 408.52734375,
+              "tree_rss_mib": 390.8828125,
+              "ipc": 2.6682880227139294,
+              "instructions": 63683067309.0,
+              "cycles": 23866639121.0,
+              "stop": null
+            },
+            "placement_seconds": 2.6385280000000004,
+            "score": {
+              "hpwl_um": 211.974,
+              "hpwl_all_nets_um": 226.41,
+              "measured_nets": 136,
+              "excluded_nets": 1,
+              "setup_wns_ps": -61.991974,
+              "setup_tns_ps": -2179.184841,
+              "hold_wns_ps": 53.292124,
+              "hold_tns_ps": 0.0,
+              "instances": 134,
+              "logical_cells": 134,
+              "physical_cells": 0,
+              "buffers": 1,
+              "buffer_area_um2": 0.2624,
+              "macros": 0,
+              "instance_area_um2": 18.6187,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "scoring_seconds": 1.052,
+              "power_mw": 0.000684,
+              "reset_ports": []
+            },
+            "physical_timing": {
+              "evaluations": 9,
+              "builds": 1,
+              "ranking_evaluations": 6,
+              "ranking_seconds": 0.691229056,
+              "detailed_evaluations": 3,
+              "repowered_gates": 8,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 543,
+              "update_calls": 12,
+              "seconds": 0.72286725,
+              "validation_seconds": 0.000893477,
+              "reconcile_seconds": 0.682834603,
+              "exclusions_seconds": 0.000162159,
+              "propagation_seconds": 0.03501918,
+              "feedback_seconds": 0.003887657000000003
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "gp": {
+              "gp_converged": false,
+              "gp_stop_reason": "density_stalled",
+              "gp_overflow": 0.356047925,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 1480,
+              "gp_density_ready_iteration": 0,
+              "gp_continuation_deadline": 0,
+              "gp_objective_converged": false,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 1380
+            }
+          },
+          "identical_def": true,
+          "wns_improvement_ps": 0.0,
+          "hpwl_change_fraction": 0.0,
+          "placement_time_ratio": 0.555375285314842
+        },
+        "minimax": {
+          "control_source": "/tmp/1f-wns-v1/density_floor_upstream_control/minimax/summary.json",
+          "candidate_source": "/tmp/1f-wns-v1/density_floor_merged_candidate/minimax/summary.json",
+          "control": {
+            "run": {
+              "status": "ok",
+              "wall_s": 69.03,
+              "cpu_s": 69.01,
+              "rss_mib": 1278.34765625,
+              "tree_rss_mib": 1282.3984375,
+              "ipc": 2.1841685767765298,
+              "instructions": 676695861651.0,
+              "cycles": 309818513482.0,
+              "stop": null
+            },
+            "placement_seconds": 47.172828,
+            "score": {
+              "hpwl_um": 46924.026,
+              "hpwl_all_nets_um": 47082.118,
+              "measured_nets": 16259,
+              "excluded_nets": 1,
+              "setup_wns_ps": -950.289184,
+              "setup_tns_ps": -1871873.458389,
+              "hold_wns_ps": 28.151466,
+              "hold_tns_ps": 0.0,
+              "instances": 16209,
+              "logical_cells": 16209,
+              "physical_cells": 0,
+              "buffers": 381,
+              "buffer_area_um2": 91.1687,
+              "macros": 0,
+              "instance_area_um2": 2086.121,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "scoring_seconds": 6.629,
+              "power_mw": 0.053,
+              "reset_ports": []
+            },
+            "physical_timing": {
+              "evaluations": 14,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 3.965327157,
+              "detailed_evaluations": 7,
+              "repowered_gates": 1291,
+              "inserted_gates": 379,
+              "removed_gates": 1,
+              "updated_nets": 84395,
+              "update_calls": 21,
+              "seconds": 18.241715997,
+              "validation_seconds": 0.318327966,
+              "reconcile_seconds": 3.0151442990000006,
+              "exclusions_seconds": 0.103423568,
+              "propagation_seconds": 12.907501795000002,
+              "feedback_seconds": 1.8719114709999984
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16209,
+              "area_um2": 2086.1209799995763,
+              "within_budget": true,
+              "rejected_proposals": 375
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0885657999,
+              "gp_total_iterations": 520,
+              "gp_density_ready_iteration": 380,
+              "gp_continuation_deadline": 1900,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 440
+            }
+          },
+          "candidate": {
+            "run": {
+              "status": "ok",
+              "wall_s": 65.06,
+              "cpu_s": 65.05,
+              "rss_mib": 1266.25,
+              "tree_rss_mib": 1270.515625,
+              "ipc": 2.1755823098139038,
+              "instructions": 635432681778.0,
+              "cycles": 292074760358.0,
+              "stop": null
+            },
+            "placement_seconds": 43.44701800000001,
+            "score": {
+              "hpwl_um": 46924.026,
+              "hpwl_all_nets_um": 47082.118,
+              "measured_nets": 16259,
+              "excluded_nets": 1,
+              "setup_wns_ps": -950.289184,
+              "setup_tns_ps": -1871873.458389,
+              "hold_wns_ps": 28.151466,
+              "hold_tns_ps": 0.0,
+              "instances": 16209,
+              "logical_cells": 16209,
+              "physical_cells": 0,
+              "buffers": 381,
+              "buffer_area_um2": 91.1687,
+              "macros": 0,
+              "instance_area_um2": 2086.121,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "scoring_seconds": 6.463,
+              "power_mw": 0.053,
+              "reset_ports": []
+            },
+            "physical_timing": {
+              "evaluations": 14,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 3.9338558999999993,
+              "detailed_evaluations": 7,
+              "repowered_gates": 1291,
+              "inserted_gates": 379,
+              "removed_gates": 1,
+              "updated_nets": 84395,
+              "update_calls": 21,
+              "seconds": 18.048677411,
+              "validation_seconds": 0.31208502499999996,
+              "reconcile_seconds": 3.008437571,
+              "exclusions_seconds": 0.102354018,
+              "propagation_seconds": 12.746045942,
+              "feedback_seconds": 1.854450345
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16209,
+              "area_um2": 2086.1209799995763,
+              "within_budget": true,
+              "rejected_proposals": 375
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0885657999,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 520,
+              "gp_density_ready_iteration": 380,
+              "gp_continuation_deadline": 1900,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 440
+            }
+          },
+          "identical_def": true,
+          "wns_improvement_ps": 0.0,
+          "hpwl_change_fraction": 0.0,
+          "placement_time_ratio": 0.9210178791909615
+        },
+        "NVDLA__partition_m": {
+          "control_source": "/tmp/1f-wns-v1/density_floor_upstream_control/NVDLA__partition_m/summary.json",
+          "candidate_source": "/tmp/1f-wns-v1/density_floor_merged_candidate/NVDLA__partition_m/summary.json",
+          "control": {
+            "run": {
+              "status": "ok",
+              "wall_s": 110.48,
+              "cpu_s": 110.46,
+              "rss_mib": 1572.83984375,
+              "tree_rss_mib": 1590.66796875,
+              "ipc": 1.5037731892240211,
+              "instructions": 747179926913.0,
+              "cycles": 496870094684.0,
+              "stop": null
+            },
+            "placement_seconds": 41.86636,
+            "score": {
+              "hpwl_um": 93405.154,
+              "hpwl_all_nets_um": 107638.17,
+              "measured_nets": 20647,
+              "excluded_nets": 145,
+              "setup_wns_ps": -916.800306,
+              "setup_tns_ps": -398000.681115,
+              "hold_wns_ps": 25.471559,
+              "hold_tns_ps": 0.0,
+              "instances": 20610,
+              "logical_cells": 20610,
+              "physical_cells": 0,
+              "buffers": 150,
+              "buffer_area_um2": 12.0431,
+              "macros": 0,
+              "instance_area_um2": 2736.6514,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "scoring_seconds": 9.724,
+              "power_mw": 0.122,
+              "reset_ports": [
+                "direct_reset_",
+                "dla_reset_rstn",
+                "global_clk_ovr_on",
+                "nvdla_clk_ovr_on",
+                "test_mode",
+                "tmc2slcg_disable_clock_gating"
+              ]
+            },
+            "physical_timing": {
+              "evaluations": 10,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 6.055203239,
+              "detailed_evaluations": 3,
+              "repowered_gates": 3971,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 113482,
+              "update_calls": 13,
+              "seconds": 14.555524781,
+              "validation_seconds": 0.379896873,
+              "reconcile_seconds": 2.925083098,
+              "exclusions_seconds": 0.05771003400000001,
+              "propagation_seconds": 9.915906396,
+              "feedback_seconds": 1.2452517640000014
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20948,
+              "baseline_area_um2": 2656.096920000048,
+              "cells": 20598,
+              "area_um2": 2735.7766200000697,
+              "within_budget": true,
+              "rejected_proposals": 4016
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0981042075,
+              "gp_total_iterations": 520,
+              "gp_density_ready_iteration": 380,
+              "gp_continuation_deadline": 1900,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 440
+            }
+          },
+          "candidate": {
+            "run": {
+              "status": "ok",
+              "wall_s": 102.17,
+              "cpu_s": 102.14999999999999,
+              "rss_mib": 1566.921875,
+              "tree_rss_mib": 1556.81640625,
+              "ipc": 1.5768965756621014,
+              "instructions": 724762741222.0,
+              "cycles": 459613364889.0,
+              "stop": null
+            },
+            "placement_seconds": 37.020185,
+            "score": {
+              "hpwl_um": 93405.154,
+              "hpwl_all_nets_um": 107638.17,
+              "measured_nets": 20647,
+              "excluded_nets": 145,
+              "setup_wns_ps": -916.800306,
+              "setup_tns_ps": -398000.681115,
+              "hold_wns_ps": 25.471559,
+              "hold_tns_ps": 0.0,
+              "instances": 20610,
+              "logical_cells": 20610,
+              "physical_cells": 0,
+              "buffers": 150,
+              "buffer_area_um2": 12.0431,
+              "macros": 0,
+              "instance_area_um2": 2736.6514,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "scoring_seconds": 8.559,
+              "power_mw": 0.122,
+              "reset_ports": [
+                "direct_reset_",
+                "dla_reset_rstn",
+                "global_clk_ovr_on",
+                "nvdla_clk_ovr_on",
+                "test_mode",
+                "tmc2slcg_disable_clock_gating"
+              ]
+            },
+            "physical_timing": {
+              "evaluations": 10,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 5.496668275,
+              "detailed_evaluations": 3,
+              "repowered_gates": 3971,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 113482,
+              "update_calls": 13,
+              "seconds": 13.836739753,
+              "validation_seconds": 0.322661417,
+              "reconcile_seconds": 2.63428452,
+              "exclusions_seconds": 0.05688900300000001,
+              "propagation_seconds": 9.662483017,
+              "feedback_seconds": 1.1295453200000003
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20948,
+              "baseline_area_um2": 2656.096920000048,
+              "cells": 20598,
+              "area_um2": 2735.7766200000697,
+              "within_budget": true,
+              "rejected_proposals": 4016
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0981042075,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 520,
+              "gp_density_ready_iteration": 380,
+              "gp_continuation_deadline": 1900,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 440
+            }
+          },
+          "identical_def": true,
+          "wns_improvement_ps": 0.0,
+          "hpwl_change_fraction": 0.0,
+          "placement_time_ratio": 0.8842465645448995
+        },
+        "coralnpu": {
+          "control_source": "/tmp/1f-wns-v1/density_floor_upstream_control/coralnpu/summary.json",
+          "candidate_source": "/tmp/1f-wns-v1/density_floor_merged_candidate/coralnpu/summary.json",
+          "control": {
+            "run": {
+              "status": "ok",
+              "wall_s": 915.03,
+              "cpu_s": 914.5,
+              "rss_mib": 10268.04296875,
+              "tree_rss_mib": 10173.6953125,
+              "ipc": 1.587519945320285,
+              "instructions": 6544476557555.0,
+              "cycles": 4122453123721.0,
+              "stop": null
+            },
+            "placement_seconds": 757.391129,
+            "score": {
+              "hpwl_um": 3907687.297,
+              "hpwl_all_nets_um": 4173070.024,
+              "measured_nets": 161126,
+              "excluded_nets": 690,
+              "setup_wns_ps": -16736.599729,
+              "setup_tns_ps": -64843349.068619,
+              "hold_wns_ps": 27.430929,
+              "hold_tns_ps": 0.0,
+              "instances": 161074,
+              "logical_cells": 161074,
+              "physical_cells": 0,
+              "buffers": 1090,
+              "buffer_area_um2": 88.1944,
+              "macros": 2,
+              "instance_area_um2": 45769.8019,
+              "macro_area_um2": 26086.1895,
+              "die_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "scoring_seconds": 84.526,
+              "power_mw": 0.692,
+              "reset_ports": [
+                "io_aresetn"
+              ]
+            },
+            "physical_timing": {
+              "evaluations": 17,
+              "builds": 1,
+              "ranking_evaluations": 11,
+              "ranking_seconds": 84.69863485600001,
+              "detailed_evaluations": 6,
+              "repowered_gates": 22791,
+              "inserted_gates": 492,
+              "removed_gates": 1484,
+              "updated_nets": 2189262,
+              "update_calls": 23,
+              "seconds": 264.30098054,
+              "validation_seconds": 6.167028311999999,
+              "reconcile_seconds": 37.907675264,
+              "exclusions_seconds": 1.035984106,
+              "propagation_seconds": 194.175590345,
+              "feedback_seconds": 24.211155096999978
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 160837,
+              "area_um2": 19666.480859994055,
+              "within_budget": true,
+              "rejected_proposals": 8497
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0723027082,
+              "gp_total_iterations": 640,
+              "gp_density_ready_iteration": 200,
+              "gp_continuation_deadline": 1000,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 560
+            }
+          },
+          "candidate": {
+            "run": {
+              "status": "ok",
+              "wall_s": 897.18,
+              "cpu_s": 896.72,
+              "rss_mib": 10304.5625,
+              "tree_rss_mib": 10245.25,
+              "ipc": 1.6122974855617633,
+              "instructions": 6518267334835.0,
+              "cycles": 4042844073880.0,
+              "stop": null
+            },
+            "placement_seconds": 744.1128299999999,
+            "score": {
+              "hpwl_um": 3907687.297,
+              "hpwl_all_nets_um": 4173070.024,
+              "measured_nets": 161126,
+              "excluded_nets": 690,
+              "setup_wns_ps": -16736.599729,
+              "setup_tns_ps": -64843349.068619,
+              "hold_wns_ps": 27.430929,
+              "hold_tns_ps": 0.0,
+              "instances": 161074,
+              "logical_cells": 161074,
+              "physical_cells": 0,
+              "buffers": 1090,
+              "buffer_area_um2": 88.1944,
+              "macros": 2,
+              "instance_area_um2": 45769.8019,
+              "macro_area_um2": 26086.1895,
+              "die_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "scoring_seconds": 85.815,
+              "power_mw": 0.692,
+              "reset_ports": [
+                "io_aresetn"
+              ]
+            },
+            "physical_timing": {
+              "evaluations": 17,
+              "builds": 1,
+              "ranking_evaluations": 11,
+              "ranking_seconds": 84.084736084,
+              "detailed_evaluations": 6,
+              "repowered_gates": 22791,
+              "inserted_gates": 492,
+              "removed_gates": 1484,
+              "updated_nets": 2189262,
+              "update_calls": 23,
+              "seconds": 261.027854834,
+              "validation_seconds": 6.175823263999999,
+              "reconcile_seconds": 36.40349977100001,
+              "exclusions_seconds": 1.028163539,
+              "propagation_seconds": 193.55428119400003,
+              "feedback_seconds": 23.108909878999977
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 160837,
+              "area_um2": 19666.480859994055,
+              "within_budget": true,
+              "rejected_proposals": 8497
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0723027082,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 640,
+              "gp_density_ready_iteration": 200,
+              "gp_continuation_deadline": 1000,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 560
+            }
+          },
+          "identical_def": true,
+          "wns_improvement_ps": 0.0,
+          "hpwl_change_fraction": 0.0,
+          "placement_time_ratio": 0.9824683726920176
+        }
+      },
+      "imported_diagnostics": {
+        "clean_default": {
+          "purpose": "Imported minimax with production buffer cleanup; diagnostic density or overflow ablation recorded in config",
+          "binary_sha256": "5f6d8957d9bbf7355ca8d36122fd8dce5686cc2a129b1ba80e38f3383bb9c354",
+          "config": {
+            "source_def": true,
+            "cell_place": true,
+            "top": "minimax",
+            "def": "/tmp/1f-speed-v2/minimax/C/input.def",
+            "liberty": "/tmp/1f-speed-v2/lib/minimax.lib",
+            "tech_rc": "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/setRC.tcl",
+            "lefs": [
+              "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/lef/asap7_tech_1x_201209.lef",
+              "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/lef/asap7sc7p5t_28_R_1x_220121a.lef"
+            ],
+            "timing_driven": false,
+            "timing_rounds": 0,
+            "resize": false,
+            "threads": 1,
+            "sdc": "/tmp/1f-wns-v1/indexed_ranking_candidate/minimax/tight.sdc",
+            "output": "/tmp/1f-density-v39/clean_default/placement",
+            "remove_synthesis_buffers": true
+          },
+          "run": {
+            "status": "ok",
+            "wall_s": 20.5,
+            "cpu_s": 20.490000000000002,
+            "rss_mib": 599.08984375,
+            "tree_rss_mib": 616.48828125,
+            "ipc": 2.8516524200222855,
+            "instructions": 262960457784.0,
+            "cycles": 92213362308.0,
+            "stop": null
+          },
+          "gp": {
+            "gp_converged": false,
+            "gp_overflow": 0.226919185,
+            "gp_iterations": 1500,
+            "gp_density_ready_iteration": 0,
+            "gp_continuation_deadline": 0,
+            "gp_objective_converged": false,
+            "gp_timing_satisfied": true,
+            "gp_stop_reason": "iteration_limit"
+          },
+          "native_hpwl_um": 572048.273,
+          "score": {
+            "hpwl_um": 572047.465,
+            "hpwl_all_nets_um": 572161.963,
+            "measured_nets": 16049,
+            "excluded_nets": 1,
+            "setup_wns_ps": -13722.81938,
+            "setup_tns_ps": -27836207.77545,
+            "hold_wns_ps": 39.555893,
+            "hold_tns_ps": 0.0,
+            "instances": 16547,
+            "logical_cells": 15924,
+            "physical_cells": 623,
+            "buffers": 16,
+            "buffer_area_um2": 1.1664,
+            "macros": 0,
+            "instance_area_um2": 1919.7486,
+            "macro_area_um2": 0.0,
+            "die_um": [
+              0.0,
+              0.0,
+              64.175,
+              64.175
+            ],
+            "core_um": [
+              4.05,
+              4.05,
+              60.156,
+              59.94
+            ],
+            "scoring_seconds": 7.829,
+            "power_mw": 0.061,
+            "reset_ports": []
+          },
+          "reset_distribution_nets": 0
+        },
+        "clean_density": {
+          "purpose": "Imported minimax with production buffer cleanup; diagnostic density or overflow ablation recorded in config",
+          "binary_sha256": "5f6d8957d9bbf7355ca8d36122fd8dce5686cc2a129b1ba80e38f3383bb9c354",
+          "config": {
+            "source_def": true,
+            "cell_place": true,
+            "top": "minimax",
+            "def": "/tmp/1f-speed-v2/minimax/C/input.def",
+            "liberty": "/tmp/1f-speed-v2/lib/minimax.lib",
+            "tech_rc": "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/setRC.tcl",
+            "lefs": [
+              "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/lef/asap7_tech_1x_201209.lef",
+              "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/lef/asap7sc7p5t_28_R_1x_220121a.lef"
+            ],
+            "timing_driven": false,
+            "timing_rounds": 0,
+            "resize": false,
+            "threads": 1,
+            "sdc": "/tmp/1f-wns-v1/indexed_ranking_candidate/minimax/tight.sdc",
+            "output": "/tmp/1f-density-v39/clean_density/placement",
+            "remove_synthesis_buffers": true,
+            "density": 0.7
+          },
+          "run": {
+            "status": "ok",
+            "wall_s": 10.65,
+            "cpu_s": 10.64,
+            "rss_mib": 597.7734375,
+            "tree_rss_mib": 615.328125,
+            "ipc": 2.4747934306346893,
+            "instructions": 118191072661.0,
+            "cycles": 47757954744.0,
+            "stop": null
+          },
+          "gp": {
+            "gp_converged": true,
+            "gp_overflow": 0.0895572681,
+            "gp_iterations": 540,
+            "gp_density_ready_iteration": 440,
+            "gp_continuation_deadline": 2200,
+            "gp_objective_converged": true,
+            "gp_timing_satisfied": true,
+            "gp_stop_reason": "converged"
+          },
+          "native_hpwl_um": 42661.884,
+          "score": {
+            "hpwl_um": 42540.662,
+            "hpwl_all_nets_um": 42655.16,
+            "measured_nets": 16049,
+            "excluded_nets": 1,
+            "setup_wns_ps": -10704.352114,
+            "setup_tns_ps": -21884889.152852,
+            "hold_wns_ps": 23.733909,
+            "hold_tns_ps": 0.0,
+            "instances": 16547,
+            "logical_cells": 15924,
+            "physical_cells": 623,
+            "buffers": 16,
+            "buffer_area_um2": 1.1664,
+            "macros": 0,
+            "instance_area_um2": 1919.7486,
+            "macro_area_um2": 0.0,
+            "die_um": [
+              0.0,
+              0.0,
+              64.175,
+              64.175
+            ],
+            "core_um": [
+              4.05,
+              4.05,
+              60.156,
+              59.94
+            ],
+            "scoring_seconds": 7.587,
+            "power_mw": 0.0506,
+            "reset_ports": []
+          },
+          "reset_distribution_nets": 0
+        },
+        "clean_overflow": {
+          "purpose": "Imported minimax with production buffer cleanup; diagnostic density or overflow ablation recorded in config",
+          "binary_sha256": "5f6d8957d9bbf7355ca8d36122fd8dce5686cc2a129b1ba80e38f3383bb9c354",
+          "config": {
+            "source_def": true,
+            "cell_place": true,
+            "top": "minimax",
+            "def": "/tmp/1f-speed-v2/minimax/C/input.def",
+            "liberty": "/tmp/1f-speed-v2/lib/minimax.lib",
+            "tech_rc": "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/setRC.tcl",
+            "lefs": [
+              "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/lef/asap7_tech_1x_201209.lef",
+              "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/lef/asap7sc7p5t_28_R_1x_220121a.lef"
+            ],
+            "timing_driven": false,
+            "timing_rounds": 0,
+            "resize": false,
+            "threads": 1,
+            "sdc": "/tmp/1f-wns-v1/indexed_ranking_candidate/minimax/tight.sdc",
+            "output": "/tmp/1f-density-v39/clean_overflow/placement",
+            "remove_synthesis_buffers": true,
+            "stop_overflow": 0.29
+          },
+          "run": {
+            "status": "ok",
+            "wall_s": 9.76,
+            "cpu_s": 9.75,
+            "rss_mib": 596.5625,
+            "tree_rss_mib": 614.40234375,
+            "ipc": 2.3865344368093933,
+            "instructions": 104362081160.0,
+            "cycles": 43729551751.0,
+            "stop": null
+          },
+          "gp": {
+            "gp_converged": true,
+            "gp_overflow": 0.277374447,
+            "gp_iterations": 360,
+            "gp_density_ready_iteration": 300,
+            "gp_continuation_deadline": 1500,
+            "gp_objective_converged": true,
+            "gp_timing_satisfied": true,
+            "gp_stop_reason": "converged"
+          },
+          "native_hpwl_um": 42788.1615,
+          "score": {
+            "hpwl_um": 42708.841,
+            "hpwl_all_nets_um": 42823.339,
+            "measured_nets": 16049,
+            "excluded_nets": 1,
+            "setup_wns_ps": -11048.257464,
+            "setup_tns_ps": -22584543.420838,
+            "hold_wns_ps": 23.74664,
+            "hold_tns_ps": 0.0,
+            "instances": 16547,
+            "logical_cells": 15924,
+            "physical_cells": 623,
+            "buffers": 16,
+            "buffer_area_um2": 1.1664,
+            "macros": 0,
+            "instance_area_um2": 1919.7486,
+            "macro_area_um2": 0.0,
+            "die_um": [
+              0.0,
+              0.0,
+              64.175,
+              64.175
+            ],
+            "core_um": [
+              4.05,
+              4.05,
+              60.156,
+              59.94
+            ],
+            "scoring_seconds": 7.509,
+            "power_mw": 0.0506,
+            "reset_ports": []
+          },
+          "reset_distribution_nets": 0
+        },
+        "clean_candidate": {
+          "purpose": "Imported minimax native density-floor candidate; production cleanup and default density/overflow; geometry-only diagnostic",
+          "binary_sha256": "2efd4cd4b47890c2999a75a3745bb5fc2b5f65299cb8fce0d4bf6f297be8bb18",
+          "config": {
+            "source_def": true,
+            "cell_place": true,
+            "top": "minimax",
+            "def": "/tmp/1f-speed-v2/minimax/C/input.def",
+            "liberty": "/tmp/1f-speed-v2/lib/minimax.lib",
+            "tech_rc": "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/setRC.tcl",
+            "lefs": [
+              "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/lef/asap7_tech_1x_201209.lef",
+              "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/lef/asap7sc7p5t_28_R_1x_220121a.lef"
+            ],
+            "timing_driven": false,
+            "timing_rounds": 0,
+            "resize": false,
+            "threads": 1,
+            "sdc": "/tmp/1f-wns-v1/indexed_ranking_candidate/minimax/tight.sdc",
+            "output": "/tmp/1f-density-v39/clean_candidate/placement",
+            "remove_synthesis_buffers": true
+          },
+          "run": {
+            "status": "ok",
+            "wall_s": 10.11,
+            "cpu_s": 10.100000000000001,
+            "rss_mib": 597.609375,
+            "tree_rss_mib": 614.78515625,
+            "ipc": 2.298372722242543,
+            "instructions": 104280959949.0,
+            "cycles": 45371648793.0,
+            "stop": null
+          },
+          "gp": {
+            "gp_converged": false,
+            "gp_overflow": 0.277374447,
+            "gp_iterations": 360,
+            "gp_target_density": 0.5,
+            "gp_overflow_floor": 0.18801929065086959,
+            "gp_density_ready_iteration": 300,
+            "gp_continuation_deadline": 1500,
+            "gp_objective_converged": true,
+            "gp_timing_satisfied": true,
+            "gp_stop_reason": "density_infeasible"
+          },
+          "native_hpwl_um": 42788.1615,
+          "score": {
+            "hpwl_um": 42708.841,
+            "hpwl_all_nets_um": 42823.339,
+            "measured_nets": 16049,
+            "excluded_nets": 1,
+            "setup_wns_ps": -11048.257464,
+            "setup_tns_ps": -22584543.420838,
+            "hold_wns_ps": 23.74664,
+            "hold_tns_ps": 0.0,
+            "instances": 16547,
+            "logical_cells": 15924,
+            "physical_cells": 623,
+            "buffers": 16,
+            "buffer_area_um2": 1.1664,
+            "macros": 0,
+            "instance_area_um2": 1919.7486,
+            "macro_area_um2": 0.0,
+            "die_um": [
+              0.0,
+              0.0,
+              64.175,
+              64.175
+            ],
+            "core_um": [
+              4.05,
+              4.05,
+              60.156,
+              59.94
+            ],
+            "scoring_seconds": 8.066,
+            "power_mw": 0.0506,
+            "reset_ports": []
+          },
+          "reset_distribution_nets": 0
+        },
+        "clean_merged_candidate": {
+          "purpose": "Imported minimax native density-floor candidate; explicit input buffer cleanup and default density/overflow; geometry-only diagnostic",
+          "binary_sha256": "ef2d9cfef82ab0bb6ac584a4051bb2398946266998287a73a993edacacaac0f8",
+          "config": {
+            "source_def": true,
+            "cell_place": true,
+            "top": "minimax",
+            "def": "/tmp/1f-speed-v2/minimax/C/input.def",
+            "liberty": "/tmp/1f-speed-v2/lib/minimax.lib",
+            "tech_rc": "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/setRC.tcl",
+            "lefs": [
+              "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/lef/asap7_tech_1x_201209.lef",
+              "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/lef/asap7sc7p5t_28_R_1x_220121a.lef"
+            ],
+            "timing_driven": false,
+            "timing_rounds": 0,
+            "resize": false,
+            "threads": 1,
+            "sdc": "/tmp/1f-wns-v1/indexed_ranking_candidate/minimax/tight.sdc",
+            "output": "/tmp/1f-density-v39/clean_merged_candidate/placement",
+            "remove_synthesis_buffers": true
+          },
+          "run": {
+            "status": "ok",
+            "wall_s": 9.91,
+            "cpu_s": 9.9,
+            "rss_mib": 597.625,
+            "tree_rss_mib": 615.4296875,
+            "ipc": 2.346044290099258,
+            "instructions": 104186954718.0,
+            "cycles": 44409628223.0,
+            "stop": null
+          },
+          "gp": {
+            "gp_converged": false,
+            "gp_overflow": 0.277374447,
+            "gp_iterations": 360,
+            "gp_target_density": 0.5,
+            "gp_overflow_floor": 0.18801929065086959,
+            "gp_density_ready_iteration": 300,
+            "gp_continuation_deadline": 1500,
+            "gp_objective_converged": true,
+            "gp_timing_satisfied": true,
+            "gp_stop_reason": "density_infeasible"
+          },
+          "native_hpwl_um": 42788.1615,
+          "score": {
+            "hpwl_um": 42708.841,
+            "hpwl_all_nets_um": 42823.339,
+            "measured_nets": 16049,
+            "excluded_nets": 1,
+            "setup_wns_ps": -11048.257464,
+            "setup_tns_ps": -22584543.420838,
+            "hold_wns_ps": 23.74664,
+            "hold_tns_ps": 0.0,
+            "instances": 16547,
+            "logical_cells": 15924,
+            "physical_cells": 623,
+            "buffers": 16,
+            "buffer_area_um2": 1.1664,
+            "macros": 0,
+            "instance_area_um2": 1919.7486,
+            "macro_area_um2": 0.0,
+            "die_um": [
+              0.0,
+              0.0,
+              64.175,
+              64.175
+            ],
+            "core_um": [
+              4.05,
+              4.05,
+              60.156,
+              59.94
+            ],
+            "scoring_seconds": 7.714,
+            "power_mw": 0.0506,
+            "reset_ports": []
+          },
+          "reset_distribution_nets": 0
+        }
+      },
+      "imported_protocol": "Geometry-only imported minimax with explicit remove_synthesis_buffers=true to match input preparation. Upstream now defaults cleanup to resize-enabled flows; this override is diagnostic only. Default density 0.5 and stop_overflow 0.1 retained in automatic handoff candidates. Old diagnostic controls predate upstream merge.",
+      "tests": {
+        "configuration": "-c opt --jobs=2 --test_timeout=30; published dependency pins",
+        "passed": 11,
+        "log": "/tmp/1f-density-v39/final-candidate-build.log",
+        "targets": [
+          "@dreamplace//dreamplace/native:placement_test",
+          "@dreamplace//dreamplace/native:placement_rollback_smoke",
+          "@dreamplace//dreamplace/native:reservations_test",
+          "//pass/place:place_test",
+          "//pass/place:reset_tree_test",
+          "//pass/place:repair_test",
+          "//pass/place:resize_engine_test",
+          "//pass/opentimer:physical_session_test",
+          "//lhd/tests:lhd_placement_timing_defaults_smoke",
+          "//lhd/tests:lhd_placement_reset_tree_smoke",
+          "//lhd/tests:lhd_placement_buffer_cleanup_smoke"
+        ]
+      },
+      "review": "No unresolved blocking findings in this patch. New reset/rail snapshot test removes the Liberty file before buffering and verifies fanout, logical roots and idempotence. Density regression verifies legal output, unchanged target, minimum iterations and honest nonconvergence.",
+      "caveats": [
+        "The control measured after the 164-commit upstream integration has different coral placement and repair behavior. Its control takes 757.391129 s placement and WNS -16736.599729 ps versus premerge 530.499071 s and -13961.971191 ps. This regression is not caused by the candidate patch and remains open.",
+        "Upstream excludes reset/rail tree masters from repair growth accounting. within_budget measures that repair budget, not gross added area including tree masters.",
+        "Imported D numerical bounds pass; initialization/curve agreement remains unproven.",
+        "Total STA share, F wirelength growth, lfsr density stalling and the larger-design/import census remain open.",
+        "Candidate patch hash describes the frozen source before final evidence documentation was added."
+      ]
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",
