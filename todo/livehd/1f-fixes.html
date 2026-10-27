@@ -22,6 +22,28 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Review v58 completes combined integration at <code>63b1f5f75</code>: 192
+optimized tests across six targets pass. Against upstream <code>58edc9881</code>
+with identical merged defaults and 100 ps clocks, lfsr, minimax and
+NVDLA/partition_m retain byte-identical DEFs and independent QoR. Candidate
+placement takes 2.026, 42.363 and 36.051 s, respectively, all within 1.5×.
+These are single samples. Coral remains pending after temporary-quota failures;
+a diagnostic replay after reclaiming quota passes its previous crash point but
+is not a completed benchmark. See <code>runs.merged_validation_v58</code>.</p>
+<p>Fresh Gemmini synthesis passes in 69.14 s. Placement exceeds the 16 GiB
+diagnostic guard after 530.17 s at 16,815,404 KiB; the strict 16 GB requirement
+is still unmet. A second profile reaches final RC serialization after final
+control classification. Reducing final live allocations remains necessary.
+Minimax STA still takes 14.629 s, and its GP uses 700 main iterations; the
+10% STA and 600-iteration requirements remain unmet. Full A–J remains open.</p>
+<p>A separate v58 follow-up removes a duplicate memory-interface scan from the
+shared Liberty snapshot. All 40 focused tests pass. Actual lfsr and coralnpu
+library probes retain identical output-drive data, including RAM bus expansion.
+Eight sequential samples per build/library give median snapshot times of
+0.834 → 0.735 s and 0.816 → 0.730 s. These diagnostic parser measurements do
+not establish full-placement speedup. See
+<code>runs.liberty_memory_inventory_reuse_v58</code>.</p>
+
 <p>Review v57 removes the extra full JSON copy when persisting placement RC by
 writing into the returned string. Three focused RC tests pass, including an
 exact schema/escaping check. The actual modified serializer matches the original

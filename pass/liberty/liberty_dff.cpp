@@ -1218,10 +1218,15 @@ void repair_timing(Comb_cell& cell, const std::string& body, const Electrical_un
 }
 }  // namespace
 
-std::vector<Output_drive> scan_output_drives_text(const std::string& contents) {
-  const auto                text     = strip_comments(contents);
-  const auto                units    = electrical_units(text);
-  const auto                memories = scan_memory_cells_text(text);
+static std::vector<Output_drive> scan_output_drives_text_impl(const std::string&              contents,
+                                                              const std::vector<Memory_cell>* known_memories) {
+  const auto                text            = strip_comments(contents);
+  const auto                units           = electrical_units(text);
+  // A Cell_library already owns this inventory from the same immutable text.
+  // Reuse it instead of scanning every library/cell body a second time. The
+  // standalone entry point still discovers its own memory interfaces.
+  const auto                parsed_memories = known_memories ? std::vector<Memory_cell>{} : scan_memory_cells_text(text);
+  const auto&               memories        = known_memories ? *known_memories : parsed_memories;
   std::vector<Output_drive> result;
   std::string               args;
   for (auto open = find_group(text, "cell", 0, args); open != std::string::npos; open = find_group(text, "cell", open + 1, args)) {
@@ -1300,6 +1305,9 @@ std::vector<Output_drive> scan_output_drives_text(const std::string& contents) {
     }
   }
   return result;
+}
+std::vector<Output_drive> scan_output_drives_text(const std::string& contents) {
+  return scan_output_drives_text_impl(contents, nullptr);
 }
 std::vector<Output_drive> scan_output_drives(const std::string& lib_files) {
   return scan_output_drives_text(read_files(lib_files));
@@ -1458,7 +1466,7 @@ Cell_library::Cell_library(const std::string& lib_files) : contents(read_files(l
   combinational = scan_comb_cells_text(contents);
   constants     = scan_constant_cells_text(contents);
   memories      = scan_memory_cells_text(contents);
-  drives        = scan_output_drives_text(contents);
+  drives        = scan_output_drives_text_impl(contents, &memories);
 }
 
 std::optional<double> smallest_flop_area(const std::string& lib_files) {

@@ -49484,6 +49484,320 @@
       "census_driver": "/home/renau/projs/.agent-artifacts/1f-memory-v56/full-driver-v1",
       "paired_driver": "/home/renau/projs/.agent-artifacts/1f-memory-v56/paired-driver-v1",
       "prototype_review": "Earlier buffered prototypes used resize_and_overwrite for uninitialized spare bytes; they were not promoted. Product implementation uses ordinary resize so the entire logical string remains initialized."
+    },
+    "merged_validation_v58": {
+      "status": "Combined integration and three matched small designs pass. Coral remains pending after temporary-quota failures. Fresh Gemmini still exceeds the memory guard; full A-J remains open.",
+      "candidate_commit": "63b1f5f7518eca45fad876c17d787317bf9975e7",
+      "control_commit": "58edc988163b187849402d7e599f40866e789aab",
+      "integration": {
+        "tests": 192,
+        "targets": 6,
+        "evidence": "/tmp/1f-memory-v56/combined-tests.json"
+      },
+      "matched_designs": {
+        "lfsr": {
+          "paths": [
+            "/tmp/1f-wns-v1/merged_v58_upstream/lfsr",
+            "/tmp/1f-wns-v1/merged_v58_candidate/lfsr"
+          ],
+          "settings_and_sdc_identical": true,
+          "def_sha256": [
+            "7ddab5966f7830e7de46749e7d2e6bf976ff0b579bff838434a6ca111050c7e9",
+            "7ddab5966f7830e7de46749e7d2e6bf976ff0b579bff838434a6ca111050c7e9"
+          ],
+          "def_identical": true,
+          "independent_scores_identical": true,
+          "placement_seconds": [
+            2.036985,
+            2.0256290000000003
+          ],
+          "placement_time_ratio": 0.9944250939501275,
+          "within_1_5_time": true,
+          "independent_wns_ps": [
+            -60.862128,
+            -60.862128
+          ],
+          "hpwl_um": [
+            177.29,
+            177.29
+          ],
+          "peak_rss_mib": [
+            341.16796875,
+            342.3046875
+          ],
+          "internal_final_wns": -59.019165,
+          "internal_time_unit": "ps",
+          "physical_timing": {
+            "worker_threads": 1,
+            "evaluations": 11,
+            "builds": 1,
+            "ranking_evaluations": 8,
+            "ranking_seconds": 0.663244921,
+            "detailed_evaluations": 3,
+            "repowered_gates": 8,
+            "inserted_gates": 0,
+            "removed_gates": 0,
+            "updated_nets": 827,
+            "update_calls": 14,
+            "seconds": 0.685135137,
+            "validation_seconds": 0.0011519739999999998,
+            "reconcile_seconds": 0.6597358540000001,
+            "exclusions_seconds": 0.000115129,
+            "propagation_seconds": 0.021549891,
+            "feedback_seconds": 0.002500033000000002
+          },
+          "sta_fraction": 0.33823327815705634,
+          "growth_budget": {
+            "basis": "synthesized_standard_cells",
+            "fraction": 0.03,
+            "baseline_cells": 136,
+            "baseline_area_um2": 18.910260000000008,
+            "cells": 134,
+            "area_um2": 18.618660000000013,
+            "within_budget": true,
+            "rejected_proposals": 0
+          },
+          "gp": {
+            "gp_total_iterations": 600,
+            "gp_iterations": 500,
+            "gp_converged": false,
+            "gp_stop_reason": "density_infeasible",
+            "gp_overflow": 0.350298305
+          }
+        },
+        "minimax": {
+          "paths": [
+            "/tmp/1f-wns-v1/merged_v58_upstream/minimax",
+            "/tmp/1f-wns-v1/merged_v58_candidate/minimax"
+          ],
+          "settings_and_sdc_identical": true,
+          "def_sha256": [
+            "7896e45d8aba5c1ab4be865f1231f763f6568057f8a695dfcc261240cca5dec0",
+            "7896e45d8aba5c1ab4be865f1231f763f6568057f8a695dfcc261240cca5dec0"
+          ],
+          "def_identical": true,
+          "independent_scores_identical": true,
+          "placement_seconds": [
+            41.393775999999995,
+            42.362660000000005
+          ],
+          "placement_time_ratio": 1.023406514061438,
+          "within_1_5_time": true,
+          "independent_wns_ps": [
+            -913.478075,
+            -913.478075
+          ],
+          "hpwl_um": [
+            46555.571,
+            46555.571
+          ],
+          "peak_rss_mib": [
+            997.03125,
+            980.23046875
+          ],
+          "internal_final_wns": -918.570801,
+          "internal_time_unit": "ps",
+          "physical_timing": {
+            "worker_threads": 1,
+            "evaluations": 14,
+            "builds": 1,
+            "ranking_evaluations": 8,
+            "ranking_seconds": 4.369128463999999,
+            "detailed_evaluations": 6,
+            "repowered_gates": 1264,
+            "inserted_gates": 342,
+            "removed_gates": 1,
+            "updated_nets": 103574,
+            "update_calls": 20,
+            "seconds": 14.628502805999998,
+            "validation_seconds": 0.35241347599999995,
+            "reconcile_seconds": 3.74258374,
+            "exclusions_seconds": 0.07734745500000001,
+            "propagation_seconds": 8.768241456,
+            "feedback_seconds": 1.6715264099999998
+          },
+          "sta_fraction": 0.3453159647198735,
+          "growth_budget": {
+            "basis": "synthesized_standard_cells",
+            "fraction": 0.03,
+            "baseline_cells": 16505,
+            "baseline_area_um2": 2025.453599999931,
+            "cells": 16172,
+            "area_um2": 2086.0626599996044,
+            "within_budget": true,
+            "rejected_proposals": 453
+          },
+          "gp": {
+            "gp_total_iterations": 800,
+            "gp_iterations": 700,
+            "gp_converged": true,
+            "gp_stop_reason": "converged",
+            "gp_overflow": 0.0796708268
+          }
+        },
+        "NVDLA__partition_m": {
+          "paths": [
+            "/tmp/1f-wns-v1/merged_v58_upstream/NVDLA__partition_m",
+            "/tmp/1f-wns-v1/merged_v58_candidate/NVDLA__partition_m"
+          ],
+          "settings_and_sdc_identical": true,
+          "def_sha256": [
+            "5a442f329621baf84e6a481b4d6b9596e318634233ca1ec22d939a1aeb73de66",
+            "5a442f329621baf84e6a481b4d6b9596e318634233ca1ec22d939a1aeb73de66"
+          ],
+          "def_identical": true,
+          "independent_scores_identical": true,
+          "placement_seconds": [
+            37.975437,
+            36.051207000000005
+          ],
+          "placement_time_ratio": 0.9493296153511019,
+          "within_1_5_time": true,
+          "independent_wns_ps": [
+            -692.389648,
+            -692.389648
+          ],
+          "hpwl_um": [
+            90620.478,
+            90620.478
+          ],
+          "peak_rss_mib": [
+            1336.76171875,
+            1319.92578125
+          ],
+          "internal_final_wns": -692.494324,
+          "internal_time_unit": "ps",
+          "physical_timing": {
+            "worker_threads": 1,
+            "evaluations": 11,
+            "builds": 1,
+            "ranking_evaluations": 8,
+            "ranking_seconds": 5.7802441259999995,
+            "detailed_evaluations": 3,
+            "repowered_gates": 4144,
+            "inserted_gates": 0,
+            "removed_gates": 0,
+            "updated_nets": 139980,
+            "update_calls": 14,
+            "seconds": 12.28522612,
+            "validation_seconds": 0.38509783900000005,
+            "reconcile_seconds": 3.5357707790000004,
+            "exclusions_seconds": 0.049899655,
+            "propagation_seconds": 7.26636513,
+            "feedback_seconds": 1.022231257
+          },
+          "sta_fraction": 0.3407715619618505,
+          "growth_budget": {
+            "basis": "synthesized_standard_cells",
+            "fraction": 0.03,
+            "baseline_cells": 20824,
+            "baseline_area_um2": 2642.391720000011,
+            "cells": 20434,
+            "area_um2": 2721.663180000068,
+            "within_budget": true,
+            "rejected_proposals": 3597
+          },
+          "gp": {
+            "gp_total_iterations": 800,
+            "gp_iterations": 700,
+            "gp_converged": true,
+            "gp_stop_reason": "converged",
+            "gp_overflow": 0.0820293505
+          }
+        }
+      },
+      "comparison_scope": "Single samples at100ps with identical common defaults; exact DEF and independently scored QoR parity. No repeatable speedup claim.",
+      "coral": "Original pair invalid due EDQUOT; disk-output retries fail SIGBUS during ABC. After verified relocation of inactive temporary archives, GDB replay passes the old crash point and reaches mapping; 90s diagnostic timeout, not a complete run. Quota is suspected, not proven by a crash backtrace.",
+      "gemmini": {
+        "S_status": "pass",
+        "S_wall_s": 69.14,
+        "B_status": "guard-stopped",
+        "B_wall_s": 530.173030962,
+        "B_peak_rss_kib": 16815404,
+        "guard": "16GiB diagnostic, stricter16decimalGB acceptance remains unmet",
+        "profile_wall_s": 512.202886772,
+        "profile_peak_rss_kib": 16779152,
+        "final_2s_samples": 69,
+        "final_2s_serialization_samples": 25,
+        "final_2s_prects_samples": 43,
+        "profile_finding": "Final samples reach serialize_parasitics after final RC estimation and control classification; reduce final live allocations. CPU profile does not by itself attribute retained heap bytes."
+      },
+      "remaining_examples": "Minimax STA14.628503s/42.362660s exceeds10%; GP700main/800total exceeds600. Larger scaling, HPWL and J acceptance remain open.",
+      "artifacts": "/home/renau/projs/.agent-artifacts/1f-memory-v58"
+    },
+    "liberty_memory_inventory_reuse_v58": {
+      "status": "Implemented and40focused tests pass; output-drive parity on actual lfsr and coralnpu libraries; full placement of this followup not yet measured.",
+      "implementation": "Cell_library reuses its already parsed memory inventory when scanning output drives. The standalone API still parses its own inventory; no global cache or default change.",
+      "probe": {
+        "source_commit": "63b1f5f7518eca45fad876c17d787317bf9975e7",
+        "scope": "Diagnostic snapshots, 8 sequential iterations per build/library, CPU14, other jobs active; not a full-flow speedup claim",
+        "tests": "40 optimized Liberty tests pass; liberty-test.log",
+        "libraries": {
+          "lfsr": {
+            "input": "/tmp/1f-speed-v19/lib/lfsr.lib",
+            "input_sha256": "e82bd402c2554ebd9471070d150d4730c623a095f14f9a6871616650ba140c53",
+            "inventory_sha256": "7266ec3257678d56da0f37c1d126493ffcdd230f3fdfc4d2c77848929f4a4ce8",
+            "file_reads_memories_drives": "1 0 204",
+            "exact_output_drive_parity": true,
+            "baseline_seconds": [
+              0.839879103,
+              0.830897318,
+              0.830957112,
+              0.835423999,
+              0.828331709,
+              0.838192473,
+              0.833716909,
+              0.834332988
+            ],
+            "candidate_seconds": [
+              0.741564198,
+              0.73408804,
+              0.733374526,
+              0.732927267,
+              0.735498227,
+              0.730819438,
+              0.73635401,
+              0.737084316
+            ],
+            "baseline_median_seconds": 0.8340249485,
+            "candidate_median_seconds": 0.7347931335
+          },
+          "coralnpu": {
+            "input": "/tmp/1f-speed-v14/lib/coralnpu.lib",
+            "input_sha256": "0c411a9af4c6d4b86afbe18d60246294992a75541d30f96835b7e57a9ee9e437",
+            "inventory_sha256": "ba5c552797887321cf70d234d47cd03601104a84aa37443c1dc266aee776d8f3",
+            "file_reads_memories_drives": "1 2 2764",
+            "exact_output_drive_parity": true,
+            "baseline_seconds": [
+              0.828664931,
+              0.823138843,
+              0.819261605,
+              0.820066082,
+              0.811427287,
+              0.809767187,
+              0.80994779,
+              0.813276607
+            ],
+            "candidate_seconds": [
+              0.739200118,
+              0.734067849,
+              0.734264993,
+              0.733980984,
+              0.723083813,
+              0.72342962,
+              0.726110347,
+              0.726532748
+            ],
+            "baseline_median_seconds": 0.816269106,
+            "candidate_median_seconds": 0.730256866
+          }
+        },
+        "candidate_source_sha256": {
+          "pass/liberty/liberty_dff.cpp": "0f98b7c4fca8650c8e31ad86b2b1620f24c2773c0350d12d27ec1b98c80cad77",
+          "pass/liberty/liberty_dff_test.cpp": "92aa6ae2dd7f65b1261a4235cbed55d53fb9d614c1ecc37e6b079973e30d097b"
+        }
+      },
+      "artifacts": "/home/renau/projs/.agent-artifacts/1f-memory-v58"
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",
