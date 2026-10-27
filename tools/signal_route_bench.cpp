@@ -4,6 +4,7 @@
 #include <charconv>
 #include <chrono>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <random>
 #include <stdexcept>
@@ -43,6 +44,7 @@ int main(int argc, char** argv) {
     std::vector<std::string> lefs;
     std::string              def, guard = "shared";
     size_t                   samples = 200, seed = 1, access = 10000, patterns = 10000, budget_ms = 200;
+    size_t                   min_sinks = 1, max_sinks = std::numeric_limits<size_t>::max();
     for (int i = 1; i < argc; ++i) {
       const std::string key = argv[i];
       if (++i == argc) {
@@ -65,6 +67,10 @@ int main(int argc, char** argv) {
           samples = n;
         } else if (key == "--seed") {
           seed = n;
+        } else if (key == "--min-sinks") {
+          min_sinks = n;
+        } else if (key == "--max-sinks") {
+          max_sinks = n;
         } else if (key == "--access") {
           access = n;
         } else if (key == "--patterns") {
@@ -96,7 +102,7 @@ int main(int argc, char** argv) {
     std::vector<Target> targets;
     for (size_t n = 0; n < frame.nets.size(); ++n) {
       const auto& net = frame.nets[n];
-      if (net.connections.size() < 2) {
+      if (net.connections.size() < 2 || net.connections.size() - 1 < min_sinks || net.connections.size() - 1 > max_sinks) {
         continue;
       }
       std::vector<std::string> drivers;
@@ -160,6 +166,10 @@ int main(int argc, char** argv) {
       w.Uint64(frame.nets.size());
       w.Key("eligible_driver_pins");
       w.Uint64(targets.size());
+      w.Key("min_sinks");
+      w.Uint64(min_sinks);
+      w.Key("max_sinks");
+      w.Uint64(max_sinks);
       w.Key("samples");
       w.Uint64(samples);
       w.Key("seed");

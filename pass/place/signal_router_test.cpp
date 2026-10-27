@@ -687,6 +687,95 @@ TEST(SignalRouter, MultiRowTrunkConnectsEveryPinAndSharesSameTrackBranches) {
   limits.deadline = std::chrono::steady_clock::now();
   EXPECT_TRUE(router.propose_pattern(f.net, limits).timed_out);
 }
+TEST(SignalRouter, SmallTryRouteUsesBothLShapesButDeclinesZDetours) {
+  Fixture f;
+  f.tech.routing_layers.push_back("M3");
+  f.tech.layers["M3"]           = f.tech.layers["M2"];
+  f.tech.layers["M3"].direction = "VERTICAL";
+  f.tech.cut_layers["V2"]       = f.tech.cut_layers["V1"];
+  f.tech.vias["VIA23"].shapes   = {
+      {"M2", {-.014, -.009, .014, .009}},
+      {"M3", {-.009, -.014, .009, .014}},
+      {"V2", {-.009, -.009, .009, .009}}
+  };
+  f.fp.components[1].place.y += 540;
+  f.fp.tracks                 = {
+      {"Y", "M2", 1045,    2, 540},
+      {"X", "M3", 1000, 1000,   1}
+  };
+  auto          occupied = routing_occupancy(f.tech, f.fp, 64);
+  Signal_router router(f.tech, f.fp, occupied, f.profile());
+  const auto    check = [&](int64_t expected_x) {
+    auto result = router.try_route(f.net, {f.limits, {}});
+    ASSERT_EQ(result.candidates.size(), 1) << result.reason;
+    EXPECT_LE(result.patterns_examined, 2);
+    auto routed = f.net;
+    routed.wires.push_back({"FIXED", result.candidates.front().paths});
+    EXPECT_TRUE(check_route_connectivity(f.tech, f.fp, routed).connected);
+    for (const auto& shape : route_geometry(f.tech, f.fp, routed)) {
+      if (shape.layer == "M3") {
+        EXPECT_DOUBLE_EQ((shape.rect.xl + shape.rect.xh) / 2, expected_x);
+      }
+    }
+  };
+  check(1027);
+  occupied.insert({
+      {"M3", {1018, 1250, 1036, 1350}},
+      "block_first_L"
+  });
+  check(1527);
+  occupied.insert({
+      {"M3", {1518, 1250, 1536, 1350}},
+      "block_second_L"
+  });
+  const auto before   = occupied.size();
+  auto       rejected = router.try_route(f.net, {f.limits, {}});
+  EXPECT_TRUE(rejected.candidates.empty());
+  EXPECT_FALSE(rejected.timed_out);
+  EXPECT_LE(rejected.patterns_examined, 2);
+  // There is a legal intermediate-trunk Z route, deliberately outside try-route.
+  EXPECT_TRUE(router.propose_pattern(f.net, f.limits).geometry);
+  EXPECT_EQ(occupied.size(), before);
+  EXPECT_TRUE(f.fp.nets.front().wires.empty());
+}
+
+TEST(SignalRouter, SmallTryRouteConnectsOneThroughEightSinks) {
+  for (size_t sinks = 1; sinks <= 8; ++sinks) {
+    Fixture f(sinks + 1);
+    f.tech.routing_layers.push_back("M3");
+    f.tech.layers["M3"]           = f.tech.layers["M2"];
+    f.tech.layers["M3"].direction = "VERTICAL";
+    f.tech.cut_layers["V2"]       = f.tech.cut_layers["V1"];
+    f.tech.vias["VIA23"].shapes   = {
+        {"M2", {-.014, -.009, .014, .009}},
+        {"M3", {-.009, -.014, .009, .014}},
+        {"V2", {-.009, -.009, .009, .009}}
+    };
+    for (size_t i = 0; i < f.fp.components.size(); ++i) {
+      f.fp.components[i].place.y += (i % 3) * 540;
+    }
+    f.fp.tracks = {
+        {"Y", "M2", 1045,    3, 540},
+        {"X", "M3", 1000, 6000,   1}
+    };
+    auto          occupied = routing_occupancy(f.tech, f.fp, 64);
+    Signal_router router(f.tech, f.fp, occupied, f.profile());
+    auto          result = router.try_route(f.net, {f.limits, {}});
+    ASSERT_EQ(result.candidates.size(), 1) << sinks << ": " << result.reason;
+    EXPECT_EQ(result.candidates.front().endpoints.size(), sinks + 1);
+    EXPECT_LE(result.patterns_examined, sinks + 1);
+    auto routed = f.net;
+    routed.wires.push_back({"FIXED", result.candidates.front().paths});
+    EXPECT_TRUE(check_route_connectivity(f.tech, f.fp, routed).connected);
+    auto tiny     = f.limits;
+    tiny.patterns = 0;
+    EXPECT_TRUE(router.try_route(f.net, {tiny, {}}).candidates.empty());
+    tiny          = f.limits;
+    tiny.deadline = std::chrono::steady_clock::now();
+    EXPECT_TRUE(router.try_route(f.net, {tiny, {}}).timed_out);
+  }
+}
+
 TEST(SignalRouter, MazeDetoursAroundBlockedSameRowWithoutPublishingFailures) {
   Fixture f;
   f.tech.routing_layers.push_back("M3");

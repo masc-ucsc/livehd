@@ -726,6 +726,16 @@ auto proposals = router.try_route(net, {.limits = limits,
 ```
 
 Omit the corridor and set `compare_layers=false` for general bounded routing.
+For two through nine endpoints (the common single-driver, one-to-eight-sink
+case), this tries at most eight common-track span candidates, then uses one
+legal access per pin and trunks at endpoint X coordinates. Two-pin nets try
+both L orientations when their endpoint coordinates are legal branch tracks;
+multi-pin nets share a vertical spine and merge horizontal branches. This fast
+path does not enumerate intermediate Z trunks, Cartesian access combinations,
+or maze detours. A rejection means this restricted search found no witness,
+not that the net is impossible to route. Larger nets retain the bounded deeper
+search; explicit `propose`/`propose_pattern`/`propose_maze` calls remain available
+for callers that deliberately request it.
 All returned candidates share the request's search budget; timeout/work counts
 remain visible even when an earlier baseline candidate succeeded.
 
@@ -735,7 +745,9 @@ wildcard connections, and unassigned control/supply pins. A partially wired
 signal net remains protected until full-net connectivity is established.
 `try_hard` never bypasses this check. Repeated routing borrows the host's
 `Pin_escape_guard`; standalone requests build a temporary guard against current
-occupancy within the request deadline. Final SAT alignment verification shares
+occupancy within the request deadline. General requests defer that construction
+until a geometric candidate exists, so immediate failures avoid whole-frame
+setup. Straight-span requests retain their guard-aware search. Final SAT alignment verification shares
 one index for the completed frame and probes actual two-pin nets, avoiding
 whole-frame setup inside each pair’s search budget. The host still commits the escape trial
 only after all final acceptance gates. Exact escape enumeration currently covers the profile's M1-to-M2 stack.
@@ -765,10 +777,12 @@ taskset -c 14 bazel-bin/tools/signal_route_bench \
   --def placed-with-tracks.def \
   --lef technology.lef --lef cells.lef --lef macros.lef \
   --samples 2000 --seed 17 --access 10000 --patterns 10000 \
-  --budget-ms 1000 --guard shared > route-results.jsonl
+  --budget-ms 1000 --guard shared --min-sinks 1 --max-sinks 8 > route-results.jsonl
 ```
 
-The DEF must contain the platform's actual routing tracks; a placement-only DEF
+`--min-sinks` and `--max-sinks` restrict the sampled single-driver nets by
+fanout (defaults: one through unlimited sinks). Use identical bounds and seeds
+for matched comparisons. The DEF must contain the platform's actual routing tracks; a placement-only DEF
 without tracks mostly measures immediate access failures. JSONL reports separate
 read/occupancy/guard setup times, each request's outcome, latency and geometry,
 and overall rates and success/failure latency percentiles. Rates exclude setup,
@@ -821,6 +835,36 @@ Repeated spatial queries, spacing checks, string comparisons and geometry
 conversion remain the principal targets. Whole-frame pin-escape construction
 still dominates startup. Repeated consumers should borrow a guard with a clear
 update lifecycle rather than reconstructing one for every dpin.
+
+The subsequent small-net direct-search change was compared with `2a449cf49`
+using the same fixture, CPU 15, 10,000 access/pattern budgets, 200 ms deadlines,
+and a shared guard. Each row below contains 5,000 matched random requests;
+other placement jobs were active on separate CPUs.
+
+| Sinks / seed | Previous attempts/s | Direct attempts/s | Accepted, both builds |
+| --- | ---: | ---: | ---: |
+| 1–8 / 17 | 1,345 | 15,218 | 167 |
+| 1–8 / 29 | 1,430 | 15,586 | 155 |
+| 2–8 / 41 | 615 | 12,259 | 20 |
+
+All 15,000 outcomes and accepted geometries matched; neither build timed out.
+This is observed parity on these draws, not a guarantee: the direct search
+intentionally declines feasible Z/maze detours. For seed 17, failed-call p99
+fell from 26.004 ms to 0.181 ms. Mixed-workload successful routes/s rose from
+44.9 to 508.3; successful calls alone sustained 5,635/s (the two-to-eight-sink
+subset sustained 3,241/s). The principal gain is eliminating expensive failed
+searches, not speeding up already short successful calls. Guard setup remained
+12.9–13.3 s and total setup 14.6–15.1 s; these rates require amortizing that
+setup, and exclude route commits, occupancy updates and dpin-to-net lookup.
+
+A separate 50,000-request CPU profile counted 1,445 samples inside `try_route`:
+endpoint-access work appeared in 44%, complete connectivity checking in 17%,
+pin-protection checks in 15%, occupancy queries in 15%, and via legality in 4%.
+These inclusive costs overlap. No maze calls appeared. Access enumeration is
+now the largest remaining request cost; whole-design pin-protection remains
+the dominant setup cost. Regression coverage includes both L orientations,
+rejection of a feasible intermediate Z trunk, one through eight sinks, changed
+occupancy, deadlines, pin protection, and placement/RC consumers (116 tests).
 
 `try_route` also screens long parallel exposure to foreign metal on the same
 layer. For elongated shapes within two candidate wire widths, it sums parallel
