@@ -57,6 +57,32 @@ TEST(PinAccess, FitsLowerPinAndBuildsMinimumAreaOnTrackEscape) {
     EXPECT_TRUE(Signal_metal_rules(tech, fp).rectangle(p.escape).legal);
   }
 }
+TEST(PinAccess, UnrelatedViaLayersPreserveAccessCandidatesAndBudgets) {
+  auto       tech   = technology();
+  const auto fp     = frame();
+  const auto before = enumerate_pin_access(tech, fp, fp.components[0], "A", {}, Signal_metal_rules(tech, fp), 6, asap7_access());
+  tech.layers["M3"] = tech.layers.at("M1");
+  tech.routing_layers.push_back("M3");
+  tech.cut_layers["V2"]     = tech.cut_layers.at("V1");
+  tech.vias["VIA23"].shapes = {
+      {"M2", {-.009, -.011, .009, .011}},
+      {"M3", {-.014, -.009, .014, .009}},
+      {"V2", {-.009, -.009, .009, .009}}
+  };
+  const auto after = enumerate_pin_access(tech, fp, fp.components[0], "A", {}, Signal_metal_rules(tech, fp), 6, asap7_access());
+  ASSERT_FALSE(before.points.empty());
+  ASSERT_EQ(before.points.size(), after.points.size());
+  EXPECT_EQ(before.examined, after.examined);
+  EXPECT_EQ(before.exhausted, after.exhausted);
+  EXPECT_EQ(before.rejected, after.rejected);
+  for (size_t i = 0; i < before.points.size(); ++i) {
+    EXPECT_EQ(before.points[i].x, after.points[i].x);
+    EXPECT_EQ(before.points[i].y, after.points[i].y);
+    EXPECT_EQ(before.points[i].via, after.points[i].via);
+    EXPECT_EQ(before.points[i].escape, after.points[i].escape);
+    EXPECT_EQ(before.points[i].pin_layer, after.points[i].pin_layer);
+  }
+}
 TEST(PinAccess, ForeignMetalAndCutsRemoveOnlyAffectedCandidates) {
   const auto               tech      = technology();
   const auto               fp        = frame();

@@ -38,6 +38,12 @@ struct Options {
   //      instance width): one copy `<name>__k<hash>`, the original untouched;
   //   N  one clone per distinct constant binding, at most N per definition.
   int max_versions = 1;
+  // After a body is refolded because a constant context reached it, also prove which of its
+  // flop bits are constant (pass/sweep sweep_state, the same inductive analysis compile.sweep runs on a
+  // flat top) and refold again. A register fed only by the constant context (or by itself) becomes a
+  // constant right there, so the constant OUTPUTS the bottom-up step publishes into the parent include
+  // the registered ones: a constant crosses state without flattening, per definition and content-keyed.
+  bool                                     sweep_state     = false;
   // Optional changed-body output for incremental callers.
   absl::flat_hash_set<const hhds::Graph*>* modified = nullptr;
 };

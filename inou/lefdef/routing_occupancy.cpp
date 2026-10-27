@@ -34,6 +34,114 @@ bool oversized(const Bins& b, int64_t maximum) {
   return nx > maximum || ny > maximum || nx > maximum / ny;
 }
 }  // namespace
+namespace {
+Rect bitmap_rect(const Rect& r, bool vertical) { return vertical ? Rect{r.yl, r.xl, r.yh, r.xh} : r; }
+}  // namespace
+Routing_occupancy::Layer_bitmap::Layer_bitmap(const Rect& bounds, int64_t pitch, bool transpose)
+    : grid(pitch), vertical(transpose) {
+  const auto b = bins(bitmap_rect(bounds, vertical), grid);
+  xl           = b.xl;
+  yl           = b.yl;
+  nx           = b.xh - b.xl + 1;
+  ny           = b.yh - b.yl + 1;
+  // Avoid an enormous strip directory on malformed or extremely fine grids.
+  // Each strip has a 32-bit coordinate space; unsupported planes fall back.
+  if (uint64_t(nx) <= (uint64_t{1} << 32) && ny <= 32 * 1024 * 1024 / sizeof(Interval_occupancy)) {
+    strips.resize(ny);
+  }
+}
+void Routing_occupancy::Layer_bitmap::insert(const Rect& rect) {
+  if (strips.empty()) {
+    return;
+  }
+  const auto b  = bins(bitmap_rect(rect, vertical), grid);
+  const auto x0 = std::max(b.xl, xl), x1 = std::min(b.xh, xl + int64_t(nx) - 1);
+  const auto y0 = std::max(b.yl, yl), y1 = std::min(b.yh, yl + int64_t(ny) - 1);
+  if (x1 < x0 || y1 < y0) {
+    return;
+  }
+  for (auto y = y0; y <= y1; ++y) {
+    strips[y - yl].insert(uint32_t(x0 - xl), uint32_t(x1 - xl));
+  }
+}
+bool Routing_occupancy::Layer_bitmap::maybe_occupied(const Rect& rect) const {
+  if (strips.empty()) {
+    return true;
+  }
+  const auto b = bins(bitmap_rect(rect, vertical), grid);
+  if (b.xl < xl || b.yl < yl || b.xh >= xl + int64_t(nx) || b.yh >= yl + int64_t(ny)) {
+    return true;  // Geometry outside the bitmap remains in the exact index.
+  }
+  for (auto y = b.yl; y <= b.yh; ++y) {
+    if (strips[y - yl].intersects(uint32_t(b.xl - xl), uint32_t(b.xh - xl))) {
+      return true;
+    }
+  }
+  return false;
+}
+void Routing_occupancy::Layer_bitmap::compact() {
+  for (auto& strip : strips) {
+    strip.compact(nx);
+  }
+}
+size_t Routing_occupancy::Layer_bitmap::bytes() const {
+  size_t total = strips.capacity() * sizeof(Interval_occupancy);
+  for (const auto& strip : strips) {
+    total += strip.bytes();
+  }
+  return total;
+}
+void Routing_occupancy::enable_bitmap(const Rect& bounds, int64_t grid, const std::set<std::string>& vertical_layers) {
+  validate(bounds);
+  if (grid <= 0 || grid > std::numeric_limits<int32_t>::max()) {
+    throw std::invalid_argument("invalid routing bitmap grid");
+  }
+  bitmap_config_ = Bitmap_config{bounds, grid, vertical_layers};
+  for (auto& [name, layer] : layers_) {
+    layer.bitmap.emplace(bounds, grid, vertical_layers.contains(name));
+    for (auto id : layer.all) {
+      const auto& s = shapes_[id / shapes_per_chunk][id % shapes_per_chunk];
+      layer.bitmap->insert({double(s.xl), double(s.yl), double(s.xh), double(s.yh)});
+    }
+    layer.bitmap->compact();
+  }
+}
+void Routing_occupancy::enable_bitmap(const Technology& tech, const Floorplan& fp) {
+  if (!integral_dbu(fp.die) || fp.die.empty()) {
+    return;
+  }
+  int64_t grid = std::numeric_limits<int64_t>::max();
+  for (const auto& track : fp.tracks) {
+    if (track.supported()) {
+      grid = std::min(grid, track.step);
+    }
+  }
+  if (grid == std::numeric_limits<int64_t>::max()) {
+    return;  // No routing grid: retain exact geometry without inventing tracks.
+  }
+  std::set<std::string> vertical;
+  for (const auto& [name, layer] : tech.layers) {
+    if (layer.direction == "VERTICAL") {
+      vertical.insert(name);
+    }
+  }
+  enable_bitmap(fp.die, grid, vertical);
+}
+void Routing_occupancy::disable_bitmap() {
+  bitmap_config_.reset();
+  for (auto& [name, layer] : layers_) {
+    layer.bitmap.reset();
+  }
+}
+size_t Routing_occupancy::bitmap_bytes() const {
+  size_t total = 0;
+  for (const auto& [name, layer] : layers_) {
+    if (layer.bitmap) {
+      total += layer.bitmap->bytes();
+    }
+  }
+  return total;
+}
 size_t Routing_occupancy::Hash::operator()(const Key& key) const {
   // Grid coordinates are highly correlated. Mix the first coordinate before
   // combining: identity integer hashes otherwise collapse a dense 2-D grid
@@ -59,16 +167,17 @@ Routing_occupancy& Routing_occupancy::operator=(Routing_occupancy&& other) noexc
   if (this == &other) {
     return *this;
   }
-  bucket_size_  = other.bucket_size_;
-  base_         = std::move(other.base_);
-  base_size_    = std::exchange(other.base_size_, 0);
-  logical_size_ = std::exchange(other.logical_size_, 0);
-  starts_       = std::move(other.starts_);
-  runs_         = std::move(other.runs_);
-  shapes_       = std::move(other.shapes_);
-  name_ids_     = std::move(other.name_ids_);
-  names_        = std::move(other.names_);
-  layers_       = std::move(other.layers_);
+  bitmap_config_ = std::exchange(other.bitmap_config_, std::nullopt);
+  bucket_size_   = other.bucket_size_;
+  base_          = std::move(other.base_);
+  base_size_     = std::exchange(other.base_size_, 0);
+  logical_size_  = std::exchange(other.logical_size_, 0);
+  starts_        = std::move(other.starts_);
+  runs_          = std::move(other.runs_);
+  shapes_        = std::move(other.shapes_);
+  name_ids_      = std::move(other.name_ids_);
+  names_         = std::move(other.names_);
+  layers_        = std::move(other.layers_);
   other.starts_.clear();
   other.runs_.clear();
   other.shapes_.clear();
@@ -126,6 +235,10 @@ size_t Routing_occupancy::insert(Occupied_shape shape) {
   const auto b     = bins(shape.shape.rect, bucket_size_);
   const auto id    = local_size();
   auto&      layer = layers_[shape.shape.layer];
+  if (!layer.bitmap && bitmap_config_) {
+    const auto& config = *bitmap_config_;
+    layer.bitmap.emplace(config.bounds, config.grid, config.vertical_layers.contains(shape.shape.layer));
+  }
   if (shapes_.empty() || shapes_.back().size() == shapes_per_chunk) {
     shapes_.emplace_back();
     shapes_.back().reserve(shapes_per_chunk);
@@ -142,6 +255,9 @@ size_t Routing_occupancy::insert(Occupied_shape shape) {
   }
   shapes_.back().push_back(stored);
   layer.all.push_back(id);
+  if (layer.bitmap) {
+    layer.bitmap->insert(r);
+  }
   // A macro or long rail must not allocate one entry for every small bucket.
   if (oversized(b, 256)) {
     const auto nx = b.xh - b.xl + 1, ny = b.yh - b.yl + 1;
@@ -228,9 +344,12 @@ std::vector<size_t> Routing_occupancy::query(const std::string& name, const Rect
   if (it == layers_.end()) {
     return base_ ? base_->query(name, rect, clearance, ignore_net) : std::vector<size_t>{};
   }
-  const Rect          expanded{rect.xl - clearance, rect.yl - clearance, rect.xh + clearance, rect.yh + clearance};
-  const auto          b     = bins(expanded, bucket_size_);
-  const auto&         layer = it->second;
+  const Rect  expanded{rect.xl - clearance, rect.yl - clearance, rect.xh + clearance, rect.yh + clearance};
+  const auto  b     = bins(expanded, bucket_size_);
+  const auto& layer = it->second;
+  if (layer.bitmap && !layer.bitmap->maybe_occupied(expanded)) {
+    return base_ ? base_->query(name, rect, clearance, ignore_net) : std::vector<size_t>{};
+  }
   std::vector<size_t> candidates;
   if (oversized(b, 4096)) {
     candidates = layer.all;
@@ -396,6 +515,7 @@ Routing_power_grid::Routing_power_grid(const Technology& tech, const Floorplan& 
   if (checkpoint) {
     checkpoint();
   }
+  occupied.enable_bitmap(tech, fp);
   occupancy_ = std::make_shared<const Routing_occupancy>(std::move(occupied));
 }
 Routing_occupancy Routing_power_grid::overlay(const Technology& tech, const Floorplan& fp, int64_t size) const {
@@ -535,6 +655,7 @@ Routing_occupancy routing_occupancy(const Technology& tech, const Floorplan& fp,
   if (checkpoint) {
     checkpoint();
   }
+  out.enable_bitmap(tech, fp);
   return out;
 }
 }  // namespace livehd::physical

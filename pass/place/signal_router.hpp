@@ -40,6 +40,8 @@ struct Signal_route_trial {
 };
 // One bounded, non-mutating net request. A corridor restricts the request to
 // an aligned straight trunk; compare_layers adds same-center alternatives.
+// Without a corridor, nets with up to nine endpoints try a short span search
+// and endpoint-rooted trunks (both L orientations for two pins), never a maze.
 struct Signal_route_request {
   Signal_route_limits            limits;
   std::optional<physical::Shape> corridor;
@@ -50,6 +52,9 @@ struct Signal_route_request {
   double                         max_parallel_exposure = 100;
   // Relax only the coupling screen, never DRC, access or downstream timing gates.
   bool                           try_hard              = false;
+  // Explicit deeper search for consumers that materialize routes. The default
+  // existence query declines detours; this does not relax any acceptance gate.
+  bool                           search_detours        = false;
 };
 struct Signal_route_proposals {
   std::vector<Signal_route_geometry> candidates;  // baseline first; not timing-ranked
@@ -85,6 +90,8 @@ class Signal_router {
   physical::Route_components                    components_;
   const Pin_escape_guard*                       pin_escapes_ = nullptr;
 
+  Signal_route_trial propose_simple(const physical::Net&, const Signal_route_limits&) const;
+  Signal_route_trial propose_pattern_impl(const physical::Net&, const Signal_route_limits&, bool simple) const;
   Signal_route_trial propose_span_impl(const physical::Net&, const Signal_route_limits&, const physical::Shape*,
                                        const Pin_escape_guard* = nullptr) const;
   // One search stage's result. Past the deadline, expired() marks it timed

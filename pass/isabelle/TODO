@@ -9,7 +9,7 @@ Status:   RESOLVED
     widths" (origin/fix/isabelle-get-mask-sext-width, cherry-picked as
     cb636f4ca). The mask is now materialized at the source width, so the -1
     sentinel becomes all-ones over every source bit (Get_mask(a,-1) == zext a).
-  - pass.lean: fixed in pass/lean/pass_lean.cpp Get_mask emit + certificate
+  - pass.lean: fixed in pass/lean/Exporter/Frontend/pass_lean.cpp Get_mask emit + certificate
     mask-dep, widened to max(src_w, out_w) (behaviorally identical to the
     src_w widening; the source has no bits above src_w).
   Both validated by the add2 oracle:
@@ -60,7 +60,7 @@ and known to be `-1` / all-ones (`v.same_repr(Dlop::create_integer(-1))` or
 
 This matches cgen_sim.cpp:201 `a.get_mask_op(mask).zext_to<tw>`.
 
-Reference fix already applied in pass/lean/pass_lean.cpp (Ntype_op::Get_mask):
+Reference fix already applied in pass/lean/Exporter/Frontend/pass_lean.cpp (Ntype_op::Get_mask):
 
     const uint32_t mask_src_w = pin_width(ctx, drivers[0], node);
     const uint32_t mask_w     = std::max(mask_src_w, w);

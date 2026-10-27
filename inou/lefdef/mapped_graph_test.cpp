@@ -1,10 +1,15 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "mapped_graph.hpp"
 
+#include <cstdlib>
+#include <filesystem>
 #include <set>
 #include <stdexcept>
 
+#include "attr_carry.hpp"
+#include "attrs.hpp"
 #include "gtest/gtest.h"
+#include "node_util.hpp"
 
 namespace livehd::physical {
 TEST(MappedGraph, ImportPreservesSignalConnectivityAndUnusedCells) {
@@ -40,6 +45,35 @@ TEST(MappedGraph, ImportPreservesSignalConnectivityAndUnusedCells) {
   const auto source = drivers.front().get_master_node().get_sink_pin("A").get_driver_pins();
   ASSERT_EQ(source.size(), 1);
   EXPECT_EQ(source.front(), graph->get_input_pin("a"));
+  const auto copied = library.create_io("copy")->create_graph();
+  for (const auto node : graph->body().nodes()) {
+    const auto open = node.attr(livehd::attrs::physical_open_inputs);
+    if (node.get_name() == "unused") {
+      ASSERT_TRUE(open.has());
+      EXPECT_EQ(open.get(), (std::vector<std::string>{"A"}));
+      // The annotation must follow physical graph reconstruction, too.
+      auto clone = livehd::graph_util::create_typed_node(*copied, Ntype_op::Sub);
+      clone.set_subnode(node.get_subnode_io());
+      livehd::graph_util::carry_node_attrs(node, clone);
+      EXPECT_EQ(clone.attr(livehd::attrs::physical_open_inputs).get(), open.get());
+    } else {
+      EXPECT_FALSE(open.has());
+    }
+  }
+  const auto saved = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "open_inputs";
+  library.save(saved.string());
+  hhds::GraphLibrary restored;
+  restored.load(saved.string());
+  bool found = false;
+  for (const auto node : restored.find_io("exact")->get_graph()->body().nodes()) {
+    if (node.get_name() == "unused") {
+      ASSERT_TRUE(node.attr(livehd::attrs::physical_open_inputs).has());
+      EXPECT_EQ(node.attr(livehd::attrs::physical_open_inputs).get(), (std::vector<std::string>{"A"}));
+      found = true;
+    }
+  }
+  EXPECT_TRUE(found);
+  std::filesystem::remove_all(saved);
 }
 TEST(MappedGraph, UndrivenSignalNetIsRejectedInsteadOfDropped) {
   Floorplan fp;

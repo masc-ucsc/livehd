@@ -123,37 +123,47 @@ Signal_route_proposals Signal_router::try_route(const ph::Net& net, const Signal
   }
   struct Access_deadline {};
   std::unique_ptr<Pin_escape_guard> local_escapes;
-  const auto*                       escapes = pin_escapes_;
-  if (!escapes) {
-    try {
-      local_escapes = std::make_unique<Pin_escape_guard>(
-          tech_,
-          frame_,
-          occupancy_,
-          request.limits.access_candidates,
-          [&] {
-            if (expired()) {
-              throw Access_deadline{};
-            }
-          },
-          profile_.access,
-          &rules_);
-      escapes = local_escapes.get();
-    } catch (const Access_deadline&) {
-      result.candidates.clear();
-      result.timed_out = true;
-      result.reason    = "pin escape setup deadline";
-      return result;
+  const auto*                       escapes         = pin_escapes_;
+  const auto                        prepare_escapes = [&] {
+    if (!escapes) {
+      try {
+        local_escapes = std::make_unique<Pin_escape_guard>(
+            tech_,
+            frame_,
+            occupancy_,
+            request.limits.access_candidates,
+            [&] {
+              if (expired()) {
+                throw Access_deadline{};
+              }
+            },
+            profile_.access,
+            &rules_);
+        escapes = local_escapes.get();
+      } catch (const Access_deadline&) {
+        result.candidates.clear();
+        result.timed_out = true;
+        result.reason    = "pin escape setup deadline";
+        return false;
+      }
     }
+    return true;
+  };
+  if (request.straight_span && !prepare_escapes()) {
+    return result;
   }
   auto base                = request.corridor        ? propose_aligned(net, *request.corridor, request.limits)
                              : request.straight_span ? propose_span_impl(net, request.limits, nullptr, escapes)
-                                                     : propose(net, request.limits);
+                             : !request.search_detours && net.connections.size() <= 9 ? propose_simple(net, request.limits)
+                                                                                      : propose(net, request.limits);
   result.access_examined   = base.access_examined;
   result.patterns_examined = base.patterns_examined;
   result.timed_out         = base.timed_out;
   result.reason            = base.reason;
   if (!base.geometry) {
+    return result;
+  }
+  if (!prepare_escapes()) {
     return result;
   }
   result.candidates.push_back(std::move(*base.geometry));
@@ -162,10 +172,10 @@ Signal_route_proposals Signal_router::try_route(const ph::Net& net, const Signal
       if (result.patterns_examined >= request.limits.patterns || result.timed_out) {
         break;
       }
-      auto lifted               = propose_aligned_layer(net,
+      auto lifted = propose_aligned_layer(net,
                                           result.candidates.front(),
                                           layer,
-                                                        {0, request.limits.patterns - result.patterns_examined, request.limits.deadline});
+                                          {0, request.limits.patterns - result.patterns_examined, request.limits.deadline});
       result.patterns_examined += lifted.patterns_examined;
       result.timed_out         |= lifted.timed_out;
       if (lifted.geometry) {
@@ -273,6 +283,21 @@ Signal_route_probe Signal_router::probe_route(const ph::Net& net, const Signal_r
   result.corridor = candidate.straight_corridor;
   return result;
 }
+Signal_route_trial Signal_router::propose_simple(const ph::Net& net, const Signal_route_limits& limits) const {
+  // Small fanout is the latency-sensitive try-route case. Bound the common-track
+  // search and avoid the Cartesian product of accesses and all intervening trunks.
+  auto span = propose_span(net, {limits.access_candidates / 2, std::min(size_t{8}, limits.patterns), limits.deadline});
+  if (span.geometry || span.timed_out || span.patterns_examined >= limits.patterns) {
+    return span;
+  }
+  auto pattern = propose_pattern_impl(
+      net,
+      {limits.access_candidates - span.access_examined, limits.patterns - span.patterns_examined, limits.deadline},
+      true);
+  pattern.access_examined   += span.access_examined;
+  pattern.patterns_examined += span.patterns_examined;
+  return pattern;
+}
 Signal_route_trial Signal_router::propose(const ph::Net& net, const Signal_route_limits& limits) const {
   Signal_route_trial result;
   const std::array   searches{&Signal_router::propose_span, &Signal_router::propose_pattern, &Signal_router::propose_maze};
@@ -280,11 +305,11 @@ Signal_route_trial Signal_router::propose(const ph::Net& net, const Signal_route
     if (result.geometry || result.timed_out) {
       break;
     }
-    const auto remaining_stages  = searches.size() - i;
+    const auto remaining_stages   = searches.size() - i;
     // Reserve work and access enumeration for every remaining strategy. Any
     // unused allowance carries forward; the net's total limits never grow.
-    const auto work              = (limits.patterns - result.patterns_examined) / remaining_stages;
-    const auto access            = (limits.access_candidates - result.access_examined) / remaining_stages;
+    const auto work               = (limits.patterns - result.patterns_examined) / remaining_stages;
+    const auto access             = (limits.access_candidates - result.access_examined) / remaining_stages;
     auto       next              = (this->*searches[i])(net, {access, work, limits.deadline});
     next.access_examined        += result.access_examined;
     next.patterns_examined      += result.patterns_examined;
@@ -787,6 +812,9 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
 }
 
 Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Signal_route_limits& limits) const {
+  return propose_pattern_impl(net, limits, false);
+}
+Signal_route_trial Signal_router::propose_pattern_impl(const ph::Net& net, const Signal_route_limits& limits, bool simple) const {
   Signal_route_trial out;
   const Stage_trial  stage{out, limits.deadline};
   if (stage.expired()) {
@@ -828,32 +856,49 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
       return stage.fail("pin has no legal access");
     }
   }
-  // Only real branch-layer track locations are enumerated. Trunks stay within the
-  // endpoints' X span; expanded-box detours belong to the bounded maze stage.
   std::set<int64_t> xs;
-  int64_t           xmin = INT64_MAX, xmax = INT64_MIN;
-  for (const auto& a : accesses) {
-    for (const auto& p : a.points) {
-      xmin = std::min(xmin, p.x);
-      xmax = std::max(xmax, p.x);
-    }
-  }
-  for (const auto& t : frame_.tracks) {
-    if (t.layer != profile_.branch_layer || t.axis != "X") {
-      continue;
-    }
-    if (!t.supported()) {
-      return stage.fail("unsupported " + profile_.branch_layer + " tracks");
-    }
-    const auto [first, last] = t.index_range(double(xmin), double(xmax));
-    for (auto i = first; i <= last; ++i) {
-      if (stage.expired()) {
-        return out;
+  if (simple) {
+    // Keep one deterministic legal access per pin. Endpoint X coordinates give
+    // exactly the two L orientations for a two-pin net; for larger nets these
+    // are shared vertical spines with merged horizontal branches.
+    for (const auto& access : accesses) {
+      const auto x = access.points.front().x;
+      for (const auto& track : frame_.tracks) {
+        if (track.layer == profile_.branch_layer && track.axis == "X" && track.supported()) {
+          const auto [first, last] = track.index_range(double(x), double(x));
+          if (first <= last) {
+            xs.insert(x);
+          }
+        }
       }
-      if (xs.size() >= limits.patterns) {
-        break;
+    }
+  } else {
+    // Only real branch-layer track locations are enumerated. Trunks stay within the
+    // endpoints' X span; expanded-box detours belong to the bounded maze stage.
+    int64_t xmin = INT64_MAX, xmax = INT64_MIN;
+    for (const auto& a : accesses) {
+      for (const auto& p : a.points) {
+        xmin = std::min(xmin, p.x);
+        xmax = std::max(xmax, p.x);
       }
-      xs.insert(t.start + i * t.step);
+    }
+    for (const auto& t : frame_.tracks) {
+      if (t.layer != profile_.branch_layer || t.axis != "X") {
+        continue;
+      }
+      if (!t.supported()) {
+        return stage.fail("unsupported " + profile_.branch_layer + " tracks");
+      }
+      const auto [first, last] = t.index_range(double(xmin), double(xmax));
+      for (auto i = first; i <= last; ++i) {
+        if (stage.expired()) {
+          return out;
+        }
+        if (xs.size() >= limits.patterns) {
+          break;
+        }
+        xs.insert(t.start + i * t.step);
+      }
     }
   }
   const auto escape_width = ph::wire_width_dbu(tech_.layers.at(profile_.access.escape), frame_.dbu);
@@ -889,8 +934,13 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
     // Iterative access combinations keep stack usage independent of fanout.
     // One branch per escape-layer track avoids overlapping same-net rectangles and
     // duplicate branch-via cuts when several endpoints share that track.
-    std::vector<size_t> choice(accesses.size(), 0);
-    bool                more = true;
+    // Different endpoint-access combinations often produce the same branch
+    // landing and trunk. Their via verdict is identical within this search:
+    // the template, net owner, rules and occupancy are unchanged. Bound this
+    // request-local cache so high-fanout searches cannot retain unbounded state.
+    std::map<std::array<double, 10>, bool> via_checks;
+    std::vector<size_t>                    choice(accesses.size(), 0);
+    bool                                   more = true;
     while (more) {
       if (stage.expired()) {
         return out;
@@ -927,8 +977,27 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
             }
             landing.rect.xl = std::min(landing.rect.xl, x + m2->rect.xl);
             landing.rect.xh = std::max(landing.rect.xh, x + m2->rect.xh);
-            if (landing.rect.yh - landing.rect.yl != width2
-                || !ph::check_signal_via(tech_, frame_, rules_, occupancy_, {name}, x, y, {landing, trunk}, net.name).legal) {
+            const std::array<double, 10> key{double(x),
+                                             double(y),
+                                             landing.rect.xl,
+                                             landing.rect.yl,
+                                             landing.rect.xh,
+                                             landing.rect.yh,
+                                             trunk.rect.xl,
+                                             trunk.rect.yl,
+                                             trunk.rect.xh,
+                                             trunk.rect.yh};
+            const auto                   cached = via_checks.find(key);
+            const bool                   via_legal
+                = cached != via_checks.end()
+                      ? cached->second
+                      : landing.rect.yh - landing.rect.yl == width2
+                            && ph::check_signal_via(tech_, frame_, rules_, occupancy_, {name}, x, y, {landing, trunk}, net.name)
+                                   .legal;
+            if (cached == via_checks.end() && via_checks.size() < 1024) {
+              via_checks.emplace(key, via_legal);
+            }
+            if (!via_legal) {
               legal = false;
               break;
             }
@@ -982,7 +1051,7 @@ Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Sign
         }
       }
       more = false;
-      for (size_t i = choice.size(); i-- > 0;) {
+      for (size_t i = choice.size(); !simple && i-- > 0;) {
         if (++choice[i] < accesses[i].points.size()) {
           more = true;
           break;

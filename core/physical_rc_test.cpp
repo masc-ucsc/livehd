@@ -6,6 +6,34 @@
 
 #include "gtest/gtest.h"
 
+TEST(PhysicalRc, PersistsGeometryAndEscapedNamesWithoutChangingSchema) {
+  using namespace livehd::physical;
+  Parasitics original;
+  original.identity    = "quote\"\\\n";
+  original.approximate = false;
+  original.timing_cuts = {"reset:A"};
+  original.cells       = {
+      {"u", -1, 2, 3, "INV", 4, 5}
+  };
+  original.terminals = {
+      {"a[0]", 6, 7}
+  };
+  original.nets = {
+      {"u:Y", {{"u:Y", .5}, {"a[0]", .25}}, {{0, 1, 2}}, 3}
+  };
+  const auto encoded = serialize_parasitics(original);
+  EXPECT_EQ(
+      encoded,
+      R"({"version":3,"identity":"quote\"\\\n","approximate":false,"timing_cuts":["reset:A"],"cells":[["u",-1,2,3,"INV",4,5]],"terminals":[["a[0]",6,7]],"nets":[{"driver":"u:Y","wire_length_um":3.0,"nodes":[["u:Y",0.5],["a[0]",0.25]],"edges":[[0,1,2.0]]}]})");
+  const auto restored = deserialize_parasitics_exact(encoded);
+  EXPECT_EQ(restored.identity, original.identity);
+  EXPECT_EQ(restored.approximate, original.approximate);
+  EXPECT_EQ(restored.timing_cuts, original.timing_cuts);
+  EXPECT_EQ(restored.cells, original.cells);
+  EXPECT_EQ(restored.terminals, original.terminals);
+  EXPECT_EQ(restored.nets, original.nets);
+}
+
 TEST(PhysicalRc, ExactCheckpointReaderRoundTripsAllStoredDoubles) {
   livehd::physical::Parasitics original;
   original.identity    = "checkpoint";

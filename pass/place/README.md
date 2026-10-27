@@ -726,6 +726,19 @@ auto proposals = router.try_route(net, {.limits = limits,
 ```
 
 Omit the corridor and set `compare_layers=false` for general bounded routing.
+For two through nine endpoints (the common single-driver, one-to-eight-sink
+case), this tries at most eight common-track span candidates, then uses one
+legal access per pin and trunks at endpoint X coordinates. Two-pin nets try
+both L orientations when their endpoint coordinates are legal branch tracks;
+multi-pin nets share a vertical spine and merge horizontal branches. This fast
+path does not enumerate intermediate Z trunks, Cartesian access combinations,
+or maze detours. A rejection means this restricted search found no witness,
+not that the net is impossible to route. Larger nets retain the bounded deeper
+search; explicit `propose`/`propose_pattern`/`propose_maze` calls remain available
+for callers that deliberately request it. Setting `search_detours=true` on a
+request enables that deeper search while retaining pin-protection and coupling
+checks. The production preroute consumer opts in when materializing complete
+routes, including widened via landings; ordinary dpin probes keep the fast default.
 All returned candidates share the request's search budget; timeout/work counts
 remain visible even when an earlier baseline candidate succeeded.
 
@@ -735,7 +748,9 @@ wildcard connections, and unassigned control/supply pins. A partially wired
 signal net remains protected until full-net connectivity is established.
 `try_hard` never bypasses this check. Repeated routing borrows the host's
 `Pin_escape_guard`; standalone requests build a temporary guard against current
-occupancy within the request deadline. Final SAT alignment verification shares
+occupancy within the request deadline. General requests defer that construction
+until a geometric candidate exists, so immediate failures avoid whole-frame
+setup. Straight-span requests retain their guard-aware search. Final SAT alignment verification shares
 one index for the completed frame and probes actual two-pin nets, avoiding
 whole-frame setup inside each pair’s search budget. The host still commits the escape trial
 only after all final acceptance gates. Exact escape enumeration currently covers the profile's M1-to-M2 stack.
@@ -749,6 +764,187 @@ feasible nearby routes; it does not claim exact access on unsupported stacks.
 Verified same-net supply metal exempts an already attached supply pin; a LEF pin
 rectangle alone does not count as a connection. Search-budget exhaustion fails
 closed.
+
+The standalone `//tools:signal_route_bench` benchmark samples driver-pin nets
+from a supplied mapped, placed DEF. It resolves LEF OUTPUT pins and DEF INPUT
+ports, keeps nets with exactly one driver and at least one sink, and draws
+uniformly with replacement using a reproducible seed. This measures the physical
+`try_route(net, request)` API after driver-to-net resolution, not graph lookup.
+Macros, IOs, high-fanout nets and unsuccessful requests remain in the sample.
+It does not publish routes or change occupancy. Every successful proposal gets
+an independent full-net connectivity check outside the timed call.
+
+```sh
+bazel build -c opt //tools:signal_route_bench
+taskset -c 14 bazel-bin/tools/signal_route_bench \
+  --def placed-with-tracks.def \
+  --lef technology.lef --lef cells.lef --lef macros.lef \
+  --samples 2000 --seed 17 --access 10000 --patterns 10000 \
+  --budget-ms 1000 --guard shared --min-sinks 1 --max-sinks 8 > route-results.jsonl
+```
+
+`--min-sinks` and `--max-sinks` restrict the sampled single-driver nets by
+fanout (defaults: one through unlimited sinks). Use identical bounds and seeds
+for matched comparisons. The DEF must contain the platform's actual routing tracks; a placement-only DEF
+without tracks mostly measures immediate access failures. JSONL reports separate
+read/occupancy/guard setup times, each request's outcome, latency and geometry,
+and overall rates and success/failure latency percentiles. Rates exclude setup,
+JSON emission and independent connectivity validation. Both success and failure
+rates use **total request time** as their denominator, so they sum to the attempt
+rate. `--guard shared` constructs one guard before measuring requests;
+`--guard request` includes standalone guard construction within every deadline.
+The shared mode represents an unchanged physical frame. A host that commits
+routes or moves cells must maintain/rebuild the corresponding occupancy and
+escape state; this benchmark does not measure that update cost.
+
+On the 161,074-cell, 161,855-net coralnpu placement, with platform tracks added
+using OpenROAD, three alternating unprofiled repeats on one
+Ryzen Threadripper PRO 5955WX CPU gave the following medians. Both builds used
+the same 2,000 driver draws, 10,000 access/pattern budgets and 1 s deadline.
+The baseline is `fc383160c` plus the benchmark; the optimized implementation
+filters unrelated access-via templates before geometry decoding and memoizes
+up to 1,024 identical branch-via legality checks per request/template. Cache
+keys include origin and both complete landing rectangles; no cached verdict
+survives a request. Search order, budgets and legality rules remain unchanged.
+
+| Measurement | Baseline | Optimized |
+| --- | ---: | ---: |
+| Attempts/s | 551.4 | 631.4 |
+| Successful routes/s, mixed workload | 16.26 | 18.63 |
+| Failed attempts/s, mixed workload | 535.1 | 612.8 |
+| Successful-call median / p95 | 0.149 / 0.456 ms | 0.143 / 0.442 ms |
+| Failed-call median / p95 | 0.086 / 12.152 ms | 0.076 / 9.409 ms |
+| Guard setup | 14.525 s | 12.466 s |
+| Total setup | 16.342 s | 14.284 s |
+
+All draws, success/failure reasons, work counts and proposed geometries matched
+exactly across these runs: 59 successes, 1,941 failures, no timeouts. Peak RSS
+was approximately 3.78 GiB for both. Other builds were active on the machine;
+observed rates ranged from 550–555 baseline and 625–641 optimized attempts/s.
+The synthetic fixture has no PG wiring: 1,581 failures involve unresolved-pin
+protection, 220 have no legal access, 87 fail maze search, 34 have non-cell
+endpoints and 19 block remaining pin access. These are workload-throughput
+measurements, not a claim of full-design routability or timing improvement.
+A second independent seed (29) preserved all 2,000 outcomes and geometries
+(57 successes, 1,943 failures, no timeouts), improving 781 to 856 attempts/s
+in one paired run. Three optimized standalone requests with `--guard request`
+all reached the 1 s guard-setup deadline before route search; including cleanup,
+these achieved only 0.85 attempts/s.
+
+Sampling the optimized request window at 199 Hz attributed about 75% of samples
+to pattern search and 22% to maze search. Via legality checks appeared in 76%
+and occupancy queries in 27%; these are nested inclusive costs, not additive.
+Repeated spatial queries, spacing checks, string comparisons and geometry
+conversion remain the principal targets. Whole-frame pin-escape construction
+still dominates startup. Repeated consumers should borrow a guard with a clear
+update lifecycle rather than reconstructing one for every dpin.
+
+The subsequent small-net direct-search change was compared with `2a449cf49`
+using the same fixture, CPU 15, 10,000 access/pattern budgets, 200 ms deadlines,
+and a shared guard. Each row below contains 5,000 matched random requests;
+other placement jobs were active on separate CPUs.
+
+| Sinks / seed | Previous attempts/s | Direct attempts/s | Accepted, both builds |
+| --- | ---: | ---: | ---: |
+| 1–8 / 17 | 1,345 | 15,218 | 167 |
+| 1–8 / 29 | 1,430 | 15,586 | 155 |
+| 2–8 / 41 | 615 | 12,259 | 20 |
+
+All 15,000 outcomes and accepted geometries matched; neither build timed out.
+This is observed parity on these draws, not a guarantee: the direct search
+intentionally declines feasible Z/maze detours. For seed 17, failed-call p99
+fell from 26.004 ms to 0.181 ms. Mixed-workload successful routes/s rose from
+44.9 to 508.3; successful calls alone sustained 5,635/s (the two-to-eight-sink
+subset sustained 3,241/s). The principal gain is eliminating expensive failed
+searches, not speeding up already short successful calls. Guard setup remained
+12.9–13.3 s and total setup 14.6–15.1 s; these rates require amortizing that
+setup, and exclude route commits, occupancy updates and dpin-to-net lookup.
+
+A separate 50,000-request CPU profile counted 1,445 samples inside `try_route`:
+endpoint-access work appeared in 44%, complete connectivity checking in 17%,
+pin-protection checks in 15%, occupancy queries in 15%, and via legality in 4%.
+These inclusive costs overlap. No maze calls appeared. Access enumeration is
+now the largest remaining request cost; whole-design pin-protection remains
+the dominant setup cost. Regression coverage includes both L orientations,
+rejection of a feasible intermediate Z trunk, one through eight sinks, changed
+occupancy, deadlines, pin protection, and placement/RC consumers (116 tests).
+
+Routing occupancy owns a runtime-only vector of interval strips per layer.
+Each entry covers a grid strip across the preferred direction; occupied ranges
+run along that direction. Vertical layers transpose the coordinates. The DEF
+occupancy builder enables the index once after importing pins, obstructions,
+and traces, using the smallest supported DEF track pitch as a conservative
+coverage grid. Accepted route insertions update the same index, including new
+layers. It is never serialized and is destroyed with its occupancy owner.
+Immutable PG bases keep their own shared index; trial copies/overlays preserve
+isolation. Frames without valid die bounds or supported tracks use exact queries.
+
+Clear regions of the query's spacing-expanded rectangle return immediately.
+Occupied regions retain exact owner and shape filtering, so touching a net's
+own pin never hides foreign metal. Pins, via cuts, and off-direction obstructions
+remain fully indexed. Geometry outside the indexed bounds, strips beyond the
+32-bit coordinate space, or strip directories exceeding 32 MiB use the exact
+index. This accelerator preserves metal, via, pin-protection and connectivity
+validation. Imported ranges are compacted once; commits do not rebuild the
+layer. Each strip merges touching/overlapping closed intervals and answers an
+interval-overlap query with one binary search. Endpoints use 16 bits until a
+coordinate requires 32 bits. Import compaction may replace fragmented runs
+with dense words when those are smaller, capped at 8 KiB per strip; later
+commits update the selected representation in place. There is no serialization
+or general-purpose bitmap dependency.
+
+`signal_route_bench` uses this production index automatically. For measurements,
+`--occupancy-index exact` disables the local accelerator, and
+`--bitmap-grid-dbu N` overrides its grid. Automatic construction is included in
+`occupancy_seconds`; `bitmap_seconds` measures only the explicit override or
+disable operation. `bitmap_bytes` reports interval/word vector capacity and
+strip objects, excluding allocator overhead.
+
+The previous Roaring implementation was measured with three alternating paired
+runs on CPU 15 using the same 20,000 seed-17 draws with one to eight sinks. All 60,000 paired outcomes, rejection
+reasons, work counts and accepted geometries matched the frozen dense-bitmap
+reference, with 684 successes per run and no timeouts. Reported bitmap storage
+fell from 72,710,560 to 11,678,558 bytes (84% less, before the omitted metadata).
+Median throughput fell from 16,663 to 14,538 attempts/s (13% slower), and total
+setup increased from 13.772 to 16.237 s. Mixed-workload successful routes/s fell
+from 569.9 to 497.2. This is a memory improvement, not a demonstrated speedup.
+The fixture is placed coralnpu without PG wiring or route commits during the
+throughput measurement; regression tests cover import and incremental commits.
+
+Short-query membership checks, exact along-track coordinates, and direct run
+container queries were also measured. None recovered dense-bitmap throughput;
+the initial implementation used the public Roaring range API. Those historical
+artifacts are in `.agent-artifacts/route-dpin-v4` through `route-dpin-v7` in the
+parent workspace.
+
+The specialized interval API was then compared against that frozen Roaring
+implementation. Three alternating pairs of 100,000 seed-29 attempts on CPU 13
+had identical outcomes, rejection reasons, work counts and accepted geometry
+(all 300,000 paired attempts). Each run had 3,120 successes, 96,880 failures and
+no timeouts. Median attempt throughput rose from 13,878 to 15,234/s (+9.8%),
+successful-call-only throughput rose from 5,188 to 5,425/s and failed-call-only
+throughput from 14,669 to 16,176/s. Mixed-workload successful routes rose from
+433 to 475/s. Index construction fell from 1.894 to 1.423 s, and total setup fell from 16.425
+to 14.714 s. Reported index storage fell from 11,678,558 to 10,893,728 bytes
+(6.7%; Roaring's figure also omits its container directory). A separate seed-17
+sweep matched all 60,000 paired outcomes; its timings included a strong host
+contention outlier, so the longer repeat is the primary throughput evidence.
+The fixture still excludes PG wiring, route commits and dpin-to-net lookup.
+
+Synthetic strip tests separately compare interval insertion, overlap queries
+and 10,000 incremental updates. At 65,536 coordinates, long-wire overlap queries
+improved from about 22 to 34 million/s with comparable storage. At 256
+coordinates, fragmented adaptive strips reached about 491 million/s, versus
+32 million/s for Roaring and 717 million/s for an explicitly dense strip.
+These are index microbenchmarks, not route throughput. A bounded local router
+can favor dense words even before they become smaller; no separate local
+routing/search mode is introduced here. For strips spanning more than 65,536
+coordinates, 32-bit runs can use more memory than Roaring's chunked 16-bit
+containers (about 1.8x in the million-coordinate wire fixture). Extremely
+fragmented global strips can also make vector insertion expensive. The current
+policy favors the measured common case without changing route-search limits
+or legality checks. Experiments and exact-pair comparisons are under
+`.agent-artifacts/route-dpin-v8`, `route-dpin-v9`, and `route-dpin-v9-repeat`.
 
 `try_route` also screens long parallel exposure to foreign metal on the same
 layer. For elongated shapes within two candidate wire widths, it sums parallel

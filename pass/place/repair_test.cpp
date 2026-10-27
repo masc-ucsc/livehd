@@ -17,6 +17,7 @@
 #include "pass/liberty/liberty_dff.hpp"
 #include "pass/opentimer/pass_opentimer.hpp"
 #include "pass/synth/io_resynth.hpp"
+#include "placement_technology.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -1781,6 +1782,105 @@ TEST_F(Buffer_repair, PreparsedTimingRolesRetainDynamicControlSeeds) {
     EXPECT_DOUBLE_EQ(reused.net_weights.at(std::string_view(control) == "a" ? "d" : "a"), 3);
   }
   EXPECT_TRUE(roles.ports.empty());
+}
+
+TEST_F(Buffer_repair, TimingControlMaskMatchesFilteredFeedbackAcrossRepresentations) {
+  Result state;
+  state.parasitics = std::make_shared<physical::Parasitics>();
+  Timing_feedback feedback;
+  for (unsigned i = 0; i < 20; ++i) {
+    const auto driver = "d" + std::to_string(i), sink = "u" + std::to_string(i);
+    state.floorplan.nets.push_back({
+        driver,
+        {{"PIN", driver}, {sink, "A"}},
+        {},
+        "SIGNAL"
+    });
+    state.parasitics->nets.push_back({
+        driver,
+        {{driver, 0}, {sink + (i % 2 ? "/A" : ":A"), 0}},
+        {}
+    });
+    feedback.pins[driver].slack = i - 30.;
+    for (const auto& label : {sink + ":A", sink + "/A"}) {
+      feedback.pins[label].slack = i - 40.;
+      feedback.pins[label].clock = i == 1;
+    }
+    state.net_weights[driver] = 3;
+  }
+  // Missing slack and an untimed clock must not become critical data nets.
+  feedback.pins["d18"].slack.reset();
+  feedback.pins["u18:A"].slack.reset();
+  feedback.pins["u18/A"].slack.reset();
+  feedback.pins["u19/A"].slack.reset();
+  feedback.pins["u19/A"].clock = true;
+  feedback.path                = {"d0", "u0:A", "d4"};
+  Prects_library roles;
+  roles.reset_ports     = {"d0"};
+  roles.pins            = {"u3/A"};
+  state.prects.ports    = {"d2"};
+  auto effective_roles  = roles;
+  effective_roles.ports = state.prects.ports;
+  const auto& tech      = options.technology().lef;
+  for (bool ranking_only : {false, true}) {
+    feedback.ranking_only = ranking_only;
+    for (unsigned representation = 0; representation < 3; ++representation) {
+      auto input = feedback;
+      if (representation) {
+        auto layout = std::make_shared<Timing_feedback::Ranking::Layout>();
+        input.ranking.emplace();
+        auto& ranking      = *input.ranking;
+        ranking.layout     = layout;
+        ranking.parasitics = state.parasitics;
+        for (const auto& [label, pin] : input.pins) {
+          layout->labels.push_back(label);
+          ranking.pins.push_back({pin.slack.value_or(std::numeric_limits<double>::infinity()), pin.clock});
+        }
+        for (const auto& net : state.parasitics->nets) {
+          layout->net_offsets.push_back(layout->net_pins.size());
+          for (const auto& node : net.nodes) {
+            layout->net_pins.push_back(layout->find(node.pin));
+          }
+        }
+        layout->net_offsets.push_back(layout->net_pins.size());
+        input.pins.clear();
+      }
+      auto actual = state;
+      if (representation == 2) {
+        actual.parasitics = std::make_shared<physical::Parasitics>(*state.parasitics);
+        std::reverse(actual.parasitics->nets.begin(), actual.parasitics->nets.end());
+      }
+      const auto original = input;
+      const auto controls = prects_networks(tech, actual.floorplan, effective_roles, input);
+      ASSERT_TRUE(controls.pins.contains("u3/A"));
+      ASSERT_TRUE(controls.pins.contains("u3:A"));
+      for (double fraction : {.1, .2, 1.}) {
+        options.timing_fraction  = fraction;
+        options.timing_smoothing = .25;
+        const auto target        = timing_weights(*actual.parasitics, prects_data_timing(input, controls), fraction);
+        actual.net_weights       = state.net_weights;
+        refresh_timing_weights(actual, options, input, roles);
+        for (const auto& [driver, weight] : actual.net_weights) {
+          const auto   found    = target.find(driver);
+          const double expected = found == target.end() || found->second <= 1 ? 1 : .75 * 3 + .25 * found->second;
+          EXPECT_DOUBLE_EQ(weight, expected) << driver << " representation=" << representation;
+        }
+      }
+      EXPECT_EQ(input.path, original.path);
+      ASSERT_EQ(input.pins.size(), original.pins.size());
+      for (const auto& [label, pin] : input.pins) {
+        EXPECT_EQ(pin.slack, original.pins.at(label).slack);
+        EXPECT_EQ(pin.clock, original.pins.at(label).clock);
+      }
+      if (input.ranking) {
+        ASSERT_EQ(input.ranking->pins.size(), original.ranking->pins.size());
+        for (size_t i = 0; i < input.ranking->pins.size(); ++i) {
+          EXPECT_EQ(input.ranking->pins[i].slack, original.ranking->pins[i].slack);
+          EXPECT_EQ(input.ranking->pins[i].clock, original.ranking->pins[i].clock);
+        }
+      }
+    }
+  }
 }
 
 TEST_F(Buffer_repair, FinalRecoveryCollapsesLegalCellBufferChainsAndRepeatsSafely) {

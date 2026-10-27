@@ -97,6 +97,12 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "D driver) on the private copy, repeating until nothing merges (default false; the synth.merge_registers "
                        "spelling). Yosys's opt_merge on flops; pass/synth/register_merge.hpp",
                        "false");
+  m.add_label_optional(
+      "flat_sweep",
+      "true|false: flatten the private copy of the top and fold the registers that are constant jointly across the "
+      "instance boundaries (what compile.flatten + compile.sweep do, without touching the compiled graphs or their "
+      "incremental cache; default false; the synth.flat_sweep spelling)",
+      "false");
   m.add_label_optional("reassoc",
                        "true|false: merge the And/Or/Xor chains an expanded carried loop leaves (`acc |= x` per "
                        "iteration, also the guarded `if c { acc |= x }`) into balanced n-ary cells before blasting "
@@ -842,7 +848,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
         .emit();
     return;
   }
-  for (const char* name : {"state_sweep", "merge_registers", "clock_gate"}) {
+  for (const char* name : {"state_sweep", "merge_registers", "flat_sweep", "clock_gate"}) {
     // A misspelt switch must not silently leave the dead state in the netlist.
     const auto text = var.get(name, "false");
     if (text != "true" && text != "false") {
@@ -875,6 +881,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
                                       reassoc_text == "true" ? livehd::synth::Loop_reassoc::all : livehd::synth::Loop_reassoc::none,
                                       livehd::synth::State_options{.state_sweep     = var.get("state_sweep", "false") == "true",
                                                                    .merge_registers = var.get("merge_registers", "false") == "true",
+                                                                   .flat_sweep      = var.get("flat_sweep", "false") == "true",
                                                                    .clock_gate      = var.get("clock_gate", "false") == "true",
                                                                    .clock_gate_min_bits = clock_gate_min_bits,
                                                                    .clock_gate_depth    = clock_gate_depth,

@@ -262,6 +262,7 @@ bool read_options(const Eprp_var& var, Options& options) {
   for (const auto& [switch_name, switch_value] : {
            std::pair{    "state_sweep",     &options.design.state_sweep},
            std::pair{"merge_registers", &options.design.merge_registers},
+           std::pair{     "flat_sweep",      &options.design.flat_sweep},
            std::pair{     "clock_gate",      &options.design.clock_gate}
   }) {
     const auto text = std::string(var.get_stage(switch_name, "false"));
@@ -630,6 +631,10 @@ void Pass_usyn::setup() {
   m.add_label_optional("merge_registers",
                        "true|false: merge registers that are the same machine on the private copy (default false; the "
                        "synth.merge_registers spelling)",
+                       "false");
+  m.add_label_optional("flat_sweep",
+                       "true|false: flatten the private copy and fold state that is constant across instance boundaries "
+                       "(default false; the synth.flat_sweep spelling)",
                        "false");
   m.add_label_optional(
       "adder",

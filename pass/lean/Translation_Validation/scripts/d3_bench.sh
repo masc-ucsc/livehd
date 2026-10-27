@@ -61,7 +61,7 @@ timeit() {  # writes "<cpu> <status>" to stdout; args: <file> <rowdir>
 # hash, and emits a complete row through the same path as every other.
 baseline() {
   local f rowdir res bsha
-  f="probes/d3_base.lean"
+  f="probes/d3/d3_base.lean"
   rowdir="$SCRATCH/baseline"
   rm -rf "$rowdir"; mkdir -p "$rowdir"
   rm -f "$f"
@@ -105,7 +105,7 @@ baseline
 run() {
   local v sh n f res rowdir gen_rc asha
   v="$1"; sh="$2"; n="$3"
-  f="probes/d3b_${v}_${sh}_${n}.lean"
+  f="probes/d3/d3b_${v}_${sh}_${n}.lean"
   rowdir="$SCRATCH/${v}_${sh}_${n}"
   rm -rf "$rowdir"; mkdir -p "$rowdir"
   rm -f "$f"

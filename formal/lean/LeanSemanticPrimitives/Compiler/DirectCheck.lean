@@ -19,7 +19,7 @@ supposed to differ from.
 ## What the accepted-operator table is derived from
 
 Not from `compileOp`'s refusal list.  From the post-lowering LGraph contract as
-the exporter actually implements it (`pass/lean/pass_lean.cpp`,
+the exporter actually implements it (`pass/lean/Exporter/Frontend/pass_lean.cpp`,
 `cert_node_expr`), cross-checked against a census of every generated
 `DesignCert` (469 files, 147 distinct by content hash: DINO ×3, CORE-ET, CVA6):
 

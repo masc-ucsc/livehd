@@ -1721,6 +1721,7 @@ void synth_command(Options& opts, Result& res) {
     labels["specialize"]      = synth_set(opts, "specialize", "true");
     labels["state_sweep"]     = synth_set(opts, "state_sweep", "true");
     labels["merge_registers"] = synth_set(opts, "merge_registers", "true");
+    labels["flat_sweep"]      = synth_set(opts, "flat_sweep", "false");
     // Clock gating needs the Liberty's integrated clock-gate cell: without one the gated registers' clock would be computed
     // logic and the registers would stay native flops (no mapped DFF, no timing). The library decides, the user can still say
     // false.
@@ -2038,7 +2039,7 @@ void synth_command(Options& opts, Result& res) {
                     after.updated_nets - before.updated_nets);
               }
               set_crash_context(phase_step, phase_log);
-              return livehd::placement::prects_data_timing(feedback, controls);
+              return livehd::placement::prects_data_timing(std::move(feedback), controls);
             };
       const auto evaluate = [&](const livehd::placement::Result& state) {
         Phase_timer phase(res, "pass.opentimer.incremental");
@@ -2091,6 +2092,7 @@ void synth_command(Options& opts, Result& res) {
         }
       };
       place_options.optimization_pending = !macro_plan_only && (run_resize || run_timing_place || run_resynth);
+      place_options.persist_parasitics   = !place_options.optimization_pending;
       // Preserve synthesis buffers by default. Explicit auto cleanup delegates
       // buffering to synth.place.resize; timing placement and resynthesis
       // alone do not rebuild it.
@@ -2170,14 +2172,14 @@ void synth_command(Options& opts, Result& res) {
         // the full-design timer; no later stage reads that scratch graph.
         placement_input = seed.graph;
         prepared_libraries.clear();
-        const auto timing = [&] {
+        auto timing = [&] {
           Phase_timer ranking_phase(res, "pass.opentimer.ranking");
           const auto  controls = livehd::placement::prects_networks(timing_tech, seed.floorplan, seed.prects);
           return estimate({seed.graph, seed.parasitics, controls}, livehd::opentimer::Physical_session::Purpose::ranking);
         }();
         const auto controls
             = livehd::placement::prects_networks(place_options.technology().lef, seed.floorplan, seed.prects, timing);
-        const auto data_timing    = livehd::placement::prects_data_timing(timing, controls);
+        const auto data_timing    = livehd::placement::prects_data_timing(std::move(timing), controls);
         place_options.net_weights = livehd::placement::timing_weights(*seed.parasitics,
                                                                       data_timing,
                                                                       place_options.timing_fraction,
@@ -2321,6 +2323,9 @@ void synth_command(Options& opts, Result& res) {
         Phase_timer   phase(res, "pass.place.final_legalize");
         const auto    final_log = next_log_path(opts, "pass.place.final_legalize");
         Stdout_to_log redirect(final_log);
+        // Intermediate timing and repair borrowed Result::parasitics. Persist
+        // the accepted final geometry before saving or invoking standalone STA.
+        place_options.persist_parasitics = true;
         auto prior = run_resynth ? std::move(resynthesized.timing)
                      : run_resize
                          ? (place_options.resize_engine == "new" ? std::move(repaired.timing) : std::move(design_repaired.timing))

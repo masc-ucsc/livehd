@@ -194,6 +194,14 @@ static Pin_access_result enumerate_pin_access_impl(const Technology& tech, const
     if (!via.unsupported.empty() || via.shapes.size() != 3) {
       continue;
     }
+    // Only this three-layer access stack can supply a candidate. Avoid decoding
+    // and scaling every unrelated upper-layer template for every physical pin.
+    const auto has_layer = [&](const std::string& layer) {
+      return std::any_of(via.shapes.begin(), via.shapes.end(), [&](const auto& shape) { return shape.layer == layer; });
+    };
+    if (!has_layer(layers.pin) || !has_layer(layers.escape) || !has_layer(layers.cut)) {
+      continue;
+    }
     const auto   shapes = via_geometry(tech, via_frame, {name});
     const Shape *lower = nullptr, *upper = nullptr, *cut = nullptr;
     for (const auto& shape : shapes) {

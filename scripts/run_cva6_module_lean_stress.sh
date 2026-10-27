@@ -198,7 +198,7 @@ if [[ -r "$generated" && "$LEAN_MODE" == "verified_compiler" ]]; then
   # the LEGACY per-node fast bodies, which this mode does not emit.
   {
     echo "== verified_compiler gates =="
-    python3 "$LIVEHD_ROOT/pass/lean/scripts/vc_gates.py" "$generated" "$TOP" || gate_status=1
+    python3 "$LIVEHD_ROOT/pass/lean/Exporter/DesignCert/scripts/vc_gates.py" "$generated" "$TOP" || gate_status=1
     echo "gate_status=$gate_status"
   } > "$LOG_DIR/static_gates.log" 2>&1
   echo "Static gates: $LOG_DIR/static_gates.log (gate_status=$gate_status)"

@@ -317,7 +317,7 @@ if [[ "$LEAN_MODE" == "verified_compiler" ]]; then
   # verified_compiler file has none of that, so they report 0 nodes and fail.
   #
   # DO NOT reimplement these inline.  This block used to be a hand-rolled copy of
-  # pass/lean/scripts/vc_gates.py, and the copy went stale in both directions:
+  # pass/lean/Exporter/DesignCert/scripts/vc_gates.py, and the copy went stale in both directions:
   #   * it refused any certificate with zero NODES, which is wrong -- a design
   #     whose outputs are all constant-driven is valid and provable.  That gate
   #     alone blocked `null_vpu` and `minion_dcache_texsend`, both of which had
@@ -332,7 +332,7 @@ if [[ "$LEAN_MODE" == "verified_compiler" ]]; then
   #     truncation then native_decide proves it faithfully against a model that
   #     is not the RTL -- the one failure nothing downstream can detect.
   # One implementation, called from both drivers.
-  python3 -I "$LIVEHD_ROOT/pass/lean/scripts/vc_gates.py" "$generated" "$TOP" \
+  python3 -I "$LIVEHD_ROOT/pass/lean/Exporter/DesignCert/scripts/vc_gates.py" "$generated" "$TOP" \
     > "$LOG_DIR/static_gates.log" 2>&1 || gate_status=1
   echo "gate_status=$gate_status" >> "$LOG_DIR/static_gates.log"
 else

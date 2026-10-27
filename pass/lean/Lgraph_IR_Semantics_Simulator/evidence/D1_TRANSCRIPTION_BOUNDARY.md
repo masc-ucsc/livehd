@@ -24,7 +24,7 @@ semantics
 |---|---|---|
 | ④ | `directStep_correct`, `compileDesign_correct`, `compileAndRun_correct`, `directStep_eq_compileAndRun`, the trace lifts | **proved in Lean**, 0 axioms, 0 `sorry` |
 | ①+② | `lhd lec --impl lg:<norm> --ref lg:<ref>` where the reference is an INDEPENDENT Slang read of the same RTL | formal, per module, **off by default** (`RUN_LEC_GATE=false`) |
-| ③ | — | **nothing formal** |
+| ③ | four RTL differentials and seven value gates on chosen shapes; a constants check in two sweep drivers (§1 below) | **nothing formal**, and nothing behavioural across the corpus |
 
 ### A correction this note exists to make
 
@@ -36,19 +36,37 @@ that matters.
 Verilog (`inou/cgen`). It crosses ① ② and the cgen writer. **It never reads a
 DesignCert.** It cannot see a defect in ③, because ③ is not on its path.
 
-The only thing in the tree that crosses ③ end to end is
-`mem_lean_diffsim.py` — source RTL under iverilog against the normalised Lean
-certificate — and it was written for mixed-timing memories, not as a
-corpus-wide gate.
+What does cross ③ is narrow, and an earlier version of this note missed most
+of it. It said `mem_lean_diffsim.py` was the only end-to-end check. That was
+wrong. The checks on ③ live in `pass/lean/Exporter/Frontend/scripts/`:
 
-The static gates do not close this either. `_comb/_next/_step_refines_fast`,
-the op census and `sorry=0` check the emitted file against itself; both sides
-come out of the same C++, so they establish internal consistency of an
-emission, not its fidelity to the LGraph.
+* **Four RTL differentials** — `sign_oracle.sh`, `sdiv_oracle.sh`,
+  `reset_expr_oracle.sh`, `setmask_oracle.sh`. Each runs iverilog on the
+  original RTL and the certificate's `interpretDesign` side by side, cycle by
+  cycle, for one kind of design shape, with controls that must fail. They cross
+  ① to ③ together, on those shapes only.
+* **Seven value gates** — `be_`, `clock_`, `collide_`, `hotmux_`, `mem_`,
+  `reset_` and `row_oracle.sh`. Each steps a certificate that the real exporter
+  produced from a small hand-built graph, and compares it with values written
+  in the gate. They check ③ against a stated expectation, not against RTL.
+* **`cert_lgraph_diff.py`** checks constants only: each fits its width, and
+  each appears in Verilog extracted independently from the same graph. The
+  width half runs in `scripts/run_cva6_vc_sweep.sh` and
+  `scripts/verify_d4_run.sh`; both halves ran over 83 CORE-ET certificates in
+  one recorded sweep.
+
+`mem_lean_diffsim.py`, at the top of the repository, adds an RTL-against-
+certificate run for mixed-timing memories.
+
+The static gates do not close this either. In legacy mode,
+`_comb/_next/_step_refines_fast`, the op census and `sorry=0` check the
+emitted file against itself. In `verified_compiler` mode, `vc_gates.py` checks
+the file's shape. Either way they read only what the exporter wrote, so they
+establish that an emission is well formed, not that it matches the LGraph.
 
 **So the exporter — the largest and most semantic step in the chain — is
-checked corpus-wide by nothing, and spot-checked by one memory-focused
-differential.**
+checked on chosen shapes and on constants. Nothing checks its full behaviour
+across the corpus, and nothing proves it.**
 
 ## 2. What the field does
 
@@ -116,11 +134,12 @@ already emits a straight-line `Foo_step` WITH a proof that it equals
 makes this option credible rather than circular.
 
 **O2 — corpus-wide bounded differential across ③ (the Alive2 posture).**
-Generalise `mem_lean_diffsim.py` from memories to the whole corpus: same
-stimulus into the RTL simulator and into the certificate under the Lean
-simulator, compare at period boundaries. Cheap, finds real defects, proves
-nothing. It closes the MEASUREMENT gap identified in §1 — today ③ is sampled
-on memories only.
+Take the comparison the four RTL differentials already make — iverilog on the
+original RTL against the certificate's `interpretDesign`, same stimulus — and
+run it over the whole corpus instead of chosen shapes. `mem_lean_diffsim.py`
+does the same for memories. Cheap, finds real defects, proves nothing. It
+closes the MEASUREMENT gap identified in §1: today ③ is exercised on chosen
+shapes only.
 
 **O3 — move ③ into Lean and shrink the trusted step.**
 C++ serialises the LGraph faithfully; Lean parses it and builds the
@@ -157,8 +176,9 @@ Staged, cheapest-first, each step useful alone:
 
 1. **O5 immediately** — the v2v claim is wrong and currently provides false
    comfort about the least-checked link in the chain.
-2. **O2 next** — days of work, and it turns ③ from "sampled on memories" into
-   "exercised corpus-wide". Report it as bug-finding, never as proof.
+2. **O2 next** — days of work, because the comparison already exists in four
+   scripts. It turns ③ from "exercised on chosen shapes" into "exercised
+   corpus-wide". Report it as bug-finding, never as proof.
 3. **O4 as the real answer** — a per-design proved equivalence with the solver
    untrusted, built from machinery already trusted here. This is where the
    boundary actually starts to carry weight.

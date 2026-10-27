@@ -58,7 +58,7 @@ timeit() {  # writes "<cpu> <status>" to stdout; args: <file> <rowdir>
 run() {
   local v sh n f res rowdir gen_rc asha
   v="$1"; sh="$2"; n="$3"
-  f="probes/d3c2_${v}_${sh}_${n}.lean"
+  f="probes/d3/d3c2_${v}_${sh}_${n}.lean"
   rowdir="$SCRATCH/${v}_${sh}_${n}"
   rm -rf "$rowdir"; mkdir -p "$rowdir"
   rm -f "$f"

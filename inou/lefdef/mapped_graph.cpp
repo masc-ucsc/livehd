@@ -85,6 +85,22 @@ std::shared_ptr<hhds::Graph> mapped_graph(hhds::GraphLibrary& library, const Flo
       sink.connect_driver(driver);
     }
   }
+  // DEF is also the authority for deliberately unused inputs (for example a
+  // macro's write-mask bus). Record that intent separately from connectivity;
+  // subsequent timing must still reject any originally connected input lost
+  // during graph or timer construction.
+  for (const auto& [name, node] : nodes) {
+    std::vector<std::string> open;
+    for (const auto& declaration : node.get_subnode_io()->get_input_pin_decls()) {
+      const auto pin = node.try_get_sink_pin(declaration.port_id);
+      if (pin.is_invalid() || pin.get_driver_pins().empty()) {
+        open.push_back(declaration.name);
+      }
+    }
+    if (!open.empty()) {
+      node.attr(livehd::attrs::physical_open_inputs).set(std::move(open));
+    }
+  }
   return graph;
 }
 }  // namespace livehd::physical

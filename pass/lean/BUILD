@@ -5,7 +5,7 @@ load("//tools:copt_default.bzl", "COPTS")
 
 py_test(
     name = "coreet_sweep_freshness_smoke",
-    srcs = ["coreet_sweep_freshness_smoke.py"],
+    srcs = ["Lgraph_IR_Semantics_Simulator/tests/coreet_sweep_freshness_smoke.py"],
     args = [
         "$(location Lgraph_IR_Semantics_Simulator/scripts/coreet_sweep_freshness_controls.sh)",
         "$(location Lgraph_IR_Semantics_Simulator/scripts/coreet_full_flow.sh)",
@@ -20,58 +20,58 @@ py_test(
 
 cc_library(
     name = "lean_graph_scan",
-    srcs = ["graph_access.cpp", "design_scan.cpp"],
-    hdrs = ["graph_access.hpp", "design_scan.hpp"],
+    srcs = ["Exporter/Frontend/graph_access.cpp", "Exporter/Frontend/design_scan.cpp"],
+    hdrs = ["Exporter/Frontend/graph_access.hpp", "Exporter/Frontend/design_scan.hpp"],
     copts = COPTS,
-    includes = ["."],
+    includes = ["Exporter/Frontend"],
     visibility = ["//visibility:public"],
     deps = ["//graph", "@abseil-cpp//absl/container:flat_hash_set", "@hhds//hhds:graph"],
 )
 
 cc_library(
     name = "lean_certificate_ir",
-    srcs = ["certificate_ir.cpp", "memory_lowering.cpp", "design_io_meta.cpp"],
-    hdrs = ["certificate_ir.hpp", "certificate_builder.hpp", "memory_lowering.hpp", "design_scan.hpp", "design_io_meta.hpp"],
+    srcs = ["Exporter/Frontend/certificate_ir.cpp", "Exporter/Frontend/memory_lowering.cpp", "Exporter/Frontend/design_io_meta.cpp"],
+    hdrs = ["Exporter/Frontend/certificate_ir.hpp", "Exporter/Frontend/certificate_builder.hpp", "Exporter/Frontend/memory_lowering.hpp", "Exporter/Frontend/design_scan.hpp", "Exporter/Frontend/design_io_meta.hpp"],
     copts = COPTS,
-    includes = ["."],
+    includes = ["Exporter/Frontend"],
     visibility = ["//visibility:public"],
 )
 
 cc_library(
     name = "lean_format",
-    srcs = ["lean_format.cpp"],
-    hdrs = ["lean_format.hpp"],
+    srcs = ["Exporter/Frontend/lean_format.cpp"],
+    hdrs = ["Exporter/Frontend/lean_format.hpp"],
     copts = COPTS,
-    includes = ["."],
+    includes = ["Exporter/Frontend"],
     visibility = ["//visibility:public"],
     deps = [":lean_certificate_ir"],
 )
 
 cc_library(
     name = "lean_dcert",
-    srcs = ["emit_dcert.cpp"],
-    hdrs = ["emit_dcert.hpp"],
+    srcs = ["Exporter/DesignCert/emit_dcert.cpp"],
+    hdrs = ["Exporter/DesignCert/emit_dcert.hpp"],
     copts = COPTS,
-    includes = ["."],
+    includes = ["Exporter/DesignCert"],
     visibility = ["//visibility:public"],
     deps = [":lean_certificate_ir"],
 )
 
 cc_library(
     name = "lean_emitters",
-    srcs = ["emit_design_cert.cpp"],
-    hdrs = ["emit_design_cert.hpp"],
+    srcs = ["Exporter/DesignCert/emit_design_cert.cpp"],
+    hdrs = ["Exporter/DesignCert/emit_design_cert.hpp"],
     copts = COPTS,
-    includes = ["."],
+    includes = ["Exporter/DesignCert"],
     visibility = ["//visibility:public"],
     deps = [":lean_format"],
 )
 
 cc_library(
     name = "lean_options",
-    srcs = ["lean_options.cpp"],
-    hdrs = ["lean_options.hpp"],
-    includes = ["."],
+    srcs = ["Exporter/Frontend/lean_options.cpp"],
+    hdrs = ["Exporter/Frontend/lean_options.hpp"],
+    includes = ["Exporter/Frontend"],
     copts = COPTS,
     deps = ["//pass/common:pass"],
     visibility = ["//visibility:public"],
@@ -139,10 +139,10 @@ cc_library(
 
 cc_library(
     name = "pass_lean",
-    srcs = ["pass_lean.cpp"],
-    hdrs = ["pass_lean.hpp"],
+    srcs = ["Exporter/Frontend/pass_lean.cpp"],
+    hdrs = ["Exporter/Frontend/pass_lean.hpp"],
     copts = COPTS,
-    includes = ["."],
+    includes = ["Exporter/Frontend"],
     visibility = ["//visibility:public"],
     deps = [":lean_options", 
         ":lean_legacy_emitter",
@@ -160,35 +160,35 @@ cc_library(
 
 cc_binary(
     name = "lean_export_graph",
-    srcs = ["tests/export_graph.cpp"],
+    srcs = ["Exporter/Frontend/tests/export_graph.cpp"],
     copts = COPTS,
     deps = [":pass_lean", "//graph", "//pass/common:pass"],
 )
 
 cc_binary(
     name = "lean_graph_census",
-    srcs = ["tests/graph_census.cpp"],
+    srcs = ["Exporter/Frontend/tests/graph_census.cpp"],
     copts = COPTS,
     deps = [":lean_graph_scan", "//graph"],
 )
 
 cc_binary(
     name = "lean_legacy_fixtures",
-    srcs = ["tests/legacy_fixtures.cpp"],
+    srcs = ["Legacy_Fast_Model_Simulator/tests/legacy_fixtures.cpp"],
     copts = COPTS,
     deps = ["//graph"],
 )
 
 cc_test(
     name = "certificate_ir_test",
-    srcs = ["certificate_ir_test.cpp"],
+    srcs = ["Exporter/Frontend/certificate_ir_test.cpp"],
     copts = COPTS,
     deps = [":lean_emitters", "@googletest//:gtest_main"],
 )
 
 cc_test(
     name = "design_scan_test",
-    srcs = ["design_scan_test.cpp"],
+    srcs = ["Exporter/Frontend/design_scan_test.cpp"],
     # Project-local scratch: /tmp is shared between parallel jobs on this box
     # and is not the configured runtime area.
     local_defines = ['LIVEHD_TEST_RUNTIME_DIR=\\"generated/pass_lean_runtime_tmp\\"'],
@@ -205,7 +205,7 @@ cc_test(
 
 cc_test(
     name = "emit_dcert_test",
-    srcs = ["emit_dcert_test.cpp"],
+    srcs = ["Exporter/DesignCert/emit_dcert_test.cpp"],
     copts = COPTS,
     deps = [":lean_dcert", ":lean_emitters", "@googletest//:gtest_main"],
 )

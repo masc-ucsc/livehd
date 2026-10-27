@@ -535,6 +535,50 @@ TEST_F(PhysicalSession, RejectsCyclicAndDisconnectedRcBeforeTiming) {
   livehd::opentimer::Physical_session valid(options);
   EXPECT_NO_THROW(valid.evaluate(circuit.graph, circuit.rc));
 }
+
+TEST_F(PhysicalSession, HierarchicalNetNamesSurviveTopologyReplacementAndWhatifRollback) {
+  Circuit           initial(false, false), buffered(false, true);
+  const std::string prefix = "top/repeated_tile/compute_lane/register_bank/";
+  for (auto* circuit : {&initial, &buffered}) {
+    for (auto node : circuit->graph->body().nodes()) {
+      if (node.get_subnode_io()) {
+        node.set_name(prefix + std::string(node.get_name()));
+      }
+    }
+    for (auto& cell : circuit->rc->cells) {
+      cell.name = prefix + cell.name;
+    }
+    const auto rename = [&](std::string& pin) {
+      if (pin.find(':') != std::string::npos) {
+        pin = prefix + pin;
+      }
+    };
+    for (auto& net : circuit->rc->nets) {
+      rename(net.driver);
+      for (auto& node : net.nodes) {
+        rename(node.pin);
+      }
+    }
+  }
+  livehd::opentimer::Physical_session session(options);
+  for (auto* circuit : {&initial, &buffered, &initial, &buffered}) {
+    const auto baseline                            = session.evaluate(circuit->graph, circuit->rc);
+    auto       edited                              = std::make_shared<livehd::physical::Parasitics>(*circuit->rc);
+    edited->nets.at(1).edges.at(0).resistance_ohm *= 4;
+    livehd::opentimer::Physical_session fresh(options);
+    const auto                          expected = fresh.evaluate(circuit->graph, edited);
+    auto&                               whatif   = session.whatif();
+    const auto                          mark     = whatif.mark();
+    whatif.set_net(edited->nets.at(1));
+    ASSERT_TRUE(expected.wns);
+    EXPECT_NEAR(whatif.wns(), *expected.wns * expected.time_unit_ps, 1e-3);
+    whatif.rollback(mark);
+    ASSERT_TRUE(baseline.wns);
+    EXPECT_NEAR(whatif.wns(), *baseline.wns * baseline.time_unit_ps, 1e-3);
+    compare(session.evaluate(circuit->graph, circuit->rc), baseline);
+  }
+  EXPECT_EQ(session.statistics().builds, 1u);
+}
 TEST_F(PhysicalSession, ShieldedLoadsRepowerAndRollbackMatchFreshTiming) {
   livehd::opentimer::Physical_session session(options);
   for (const auto& [strong, extra, resistance] : {
@@ -607,7 +651,8 @@ TEST_F(PhysicalSession, FinalReportReconcilesTrialsAndSeedsStandaloneCache) {
     report.set_stage_labels(report.dict);
     Pass_opentimer::time_work(report);
     const auto fresh = read_report("fresh.json");
-    for (const char* field : {"wns", "tns", "area", "cells", "max_delay", "constraints_complete", "timing_cells_complete"}) {
+    for (const char* field :
+         {"wns", "tns", "area", "cells", "max_delay", "constraints_complete", "timing_cells_complete", "path", "endpoints"}) {
       ASSERT_EQ(actual["designs"][0].HasMember(field), fresh["designs"][0].HasMember(field)) << field;
       if (fresh["designs"][0].HasMember(field)) {
         EXPECT_EQ(actual["designs"][0][field], fresh["designs"][0][field]) << field;
@@ -740,7 +785,36 @@ TEST_F(PhysicalSession, InvalidCandidateDoesNotPoisonTheRetainedNetlist) {
 }
 }  // namespace
 namespace {
-TEST_F(PhysicalSession, WhatifIndexRetainsItsRcSnapshotAcrossEvaluations) {
+TEST_F(PhysicalSession, EvaluationRestoresAppliedWhatifRcBeforeReusingUnchangedNets) {
+  for (bool explicit_rollback : {false, true}) {
+    Circuit                             circuit(false, false);
+    livehd::opentimer::Physical_session session(options);
+    const auto                          baseline = session.evaluate(circuit.graph, circuit.rc);
+    auto&                               whatif   = session.whatif();
+    const auto                          mark     = whatif.mark();
+    auto                                changed  = circuit.rc->nets.at(1);
+    for (auto& node : changed.nodes) {
+      node.capacitance_ff *= 20;
+    }
+    for (auto& edge : changed.edges) {
+      edge.resistance_ohm *= 1000;
+    }
+    whatif.set_net(changed);
+    ASSERT_TRUE(baseline.wns);
+    EXPECT_GT(std::abs(whatif.wns() - *baseline.wns * baseline.time_unit_ps), 1e-3);
+    if (explicit_rollback) {
+      whatif.rollback(mark);  // Restoration is queued, not propagated yet.
+    }
+    // The incoming snapshot matches the original: ordinary incremental RC
+    // reconciliation skips its nets, so the what-if journal must restore them.
+    const auto restored = session.evaluate(circuit.graph, circuit.rc);
+    compare(restored, baseline);
+    EXPECT_EQ(whatif.mark(), 0U);
+    EXPECT_NEAR(whatif.wns(), *baseline.wns * baseline.time_unit_ps, 1e-3);
+  }
+}
+
+TEST_F(PhysicalSession, WhatifIndexReleasesItsRcSnapshotAtTheNextEvaluation) {
   Circuit                             circuit(false, false);
   livehd::opentimer::Physical_session session(options);
   session.evaluate(circuit.graph, circuit.rc);
@@ -751,9 +825,9 @@ TEST_F(PhysicalSession, WhatifIndexRetainsItsRcSnapshotAcrossEvaluations) {
   std::weak_ptr<const livehd::physical::Parasitics> indexed = circuit.rc;
   circuit.rc                                                = std::make_shared<livehd::physical::Parasitics>(*circuit.rc);
   session.evaluate(circuit.graph, circuit.rc);
-  // The cached net pointers must stay valid even when a checkpoint does no
-  // what-if work. An allocator may reuse a released snapshot's address.
-  EXPECT_FALSE(indexed.expired());
+  // The old index is discarded together with its owning snapshot, even if no
+  // further what-if work occurs. Reusing the public proxy must rebuild it.
+  EXPECT_TRUE(indexed.expired());
   whatif.set_net(circuit.rc->nets.front());
   EXPECT_TRUE(indexed.expired());
   whatif.rollback(mark);

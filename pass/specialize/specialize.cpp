@@ -15,10 +15,11 @@
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "bitwidth.hpp"
-#include "hash_util.hpp"
 #include "fold_body.hpp"
+#include "hash_util.hpp"
 #include "inline_sub.hpp"
 #include "node_util.hpp"
+#include "sweep.hpp"
 
 namespace livehd::specialize {
 namespace gu = livehd::graph_util;
@@ -130,6 +131,24 @@ void refold_private_body(const std::shared_ptr<hhds::Graph>& graph, Refold_cost 
     Bitwidth{16}.do_trans(graph);
   }
 }
+
+namespace {
+// refold_private_body, then (Options::sweep_state) the per-definition constant-state sweep to a fixpoint: each
+// round that proves a flop bit constant is folded again so the constant reaches the logic behind the register.
+void refold_with_options(const Options& options, const std::shared_ptr<hhds::Graph>& graph) {
+  refold_private_body(graph);
+  if (!options.sweep_state) {
+    return;
+  }
+  for (int round = 0; round < 16; ++round) {
+    const auto stats = livehd::sweep::sweep_state(*graph, {.observe_markers = true});
+    if (!stats.changed()) {
+      return;
+    }
+    refold_private_body(graph);
+  }
+}
+}  // namespace
 
 // A node this pass created (a folded clone's new cells, the fit_to_port masks
 // around a published output constant) has no color. In a colored graph it
@@ -306,7 +325,7 @@ int specialize_per_binding(std::vector<std::shared_ptr<hhds::Graph>>& graphs, co
       // another expensive fold/inference sweep. The old global retry folded
       // every unaffected definition after any specialization in the library.
       if (pending_refold.erase(graph.get()) != 0) {
-        refold_private_body(graph);
+        refold_with_options(options, graph);
         if (options.modified) {
           options.modified->insert(graph.get());
         }
@@ -870,7 +889,7 @@ int specialize_shared(std::vector<std::shared_ptr<hhds::Graph>>& graphs, const O
   for (int round = 0; round < 8; ++round) {
     for (const auto& g : graphs) {
       if (pending.erase(g.get()) != 0) {
-        refold_private_body(g);
+        refold_with_options(options, g);
         if (options.modified) {
           options.modified->insert(g.get());
         }
@@ -974,7 +993,7 @@ int specialize_shared(std::vector<std::shared_ptr<hhds::Graph>>& graphs, const O
           break;
         }
       }
-      refold_private_body(target);
+      refold_with_options(options, target);
       changed = true;
     }
     // bottom-up: constant outputs into parents; narrower outputs of copies
@@ -1000,7 +1019,7 @@ int specialize_shared(std::vector<std::shared_ptr<hhds::Graph>>& graphs, const O
   }
   for (const auto& g : graphs) {
     if (pending.erase(g.get()) != 0) {
-      refold_private_body(g);
+      refold_with_options(options, g);
       if (options.modified) {
         options.modified->insert(g.get());
       }

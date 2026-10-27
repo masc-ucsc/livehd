@@ -276,7 +276,7 @@ hhds::Pin_class identity_enable_source(const hhds::Pin_class& p) {
 // PORT DISCOVERY FOLLOWS THE NATIVE CONTRACT.  A port exists when ANY of its
 // fields is driven -- `addr`, `din`, `enable`, `clock_pin` -- and `rdport`
 // DEFAULTS TO FALSE, i.e. a write port (`Memory_port_info::rdport = false` in
-// pass/lean/graph_access.hpp, which cgen and the Lean scanner both rely on).
+// pass/lean/Exporter/Frontend/graph_access.hpp, which cgen and the Lean scanner both rely on).
 // Discovering ports from `rdport` pins alone would make a port that carries
 // `addr`/`din`/`enable` but no explicit `rdport` INVISIBLE, and a writable cell
 // would then be mistaken for a ROM and left ungated.  That is a correctness
@@ -343,7 +343,7 @@ Mem_shape mem_shape_of(const hhds::Node_class& n) {
     } else if (pname == "update" || pname == "update_enable" || pname == "reset") {
       // A WHOLE-ARRAY cell: one bulk next-state bus instead of per-entry write
       // ports, and `reset` restores `init` at RUNTIME.  cgen_verilog and
-      // pass/lean/graph_access.cpp classify these pins independently of the
+      // pass/lean/Exporter/Frontend/graph_access.cpp classify these pins independently of the
       // per-entry write ports, so their presence must be recorded on its own
       // and NOT inferred from whether a write port exists.
       ms.whole_array = true;

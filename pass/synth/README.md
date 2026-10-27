@@ -35,6 +35,14 @@ Remaining native synthesis work is tracked in [2u-usyn](../../todo/livehd/2u-usy
    ([`pass/satopt`](../satopt/README.md)) already ran in the compile step when
    explicitly enabled (`pass.satopt` defaults off for every command); the mapper maps what
    compile produced.
+   **Flat constant-state sweep** (`synth.flat_sweep`, default false). ABC and native
+   USYN can flatten the mapper's private top, refine undriven bits to zero, and
+   alternate constant folding with constant-register proofs for up to 16 rounds.
+   This lets constants cross instance boundaries while the compiled graphs and
+   compile cache remain hierarchical. It is opt-in because it includes unknown-bit
+   refinement. Separately, `compile.sweep=true` enables per-definition constant-state
+   proofs during specialization without requiring flattening. The hierarchical
+   register-chain regression is `//lhd/tests:lhd_sweep_hier_const_test`.
    **State sweep** (`synth.state_sweep`, default false; `state_sweep.cpp`). On the
    private copy, after `pass.specialize` and before the loops are prepared, a
    register that no top output, no instance of a body-less cell (a Liberty cell,
