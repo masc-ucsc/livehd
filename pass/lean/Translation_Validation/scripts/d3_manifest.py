@@ -44,7 +44,11 @@ import time
 ROOT = pathlib.Path(__file__).resolve().parents[4]
 DEFAULT_COREET = "${LIVEHD_NEW_ROOT:-../livehd-new}/generated/vc_sweep2/lean"
 DEFAULT_CVA6 = "${LIVEHD_NEW_ROOT:-../livehd-new}/generated/cva6_vc/lean"
-CVA6_BLOCKS = ROOT / "pass" / "lean" / "tests" / "d4" / "cva6_78.list"
+# The authoritative CVA6 list moved with the IR-semantics simulator's tests in
+# 620b22111, the same deliberate shared boundary as COREET_SWEEP below.
+#   <ROOT>/pass/lean/Lgraph_IR_Semantics_Simulator/tests/d4/cva6_78.list
+CVA6_BLOCKS = (ROOT / "pass" / "lean" / "Lgraph_IR_Semantics_Simulator"
+               / "tests" / "d4" / "cva6_78.list")
 # The CORE-ET sweep record lives with the IR-semantics stream's evidence since
 # 0e245b04e moved it (a pure rename). That directory is a deliberate shared
 # boundary, so the path points into it rather than the file moving back.
@@ -58,7 +62,8 @@ EXPECT_CVA6_SELECTED = 30
 
 SELECTION_RULE = (
     "the 30 CVA6 core-hierarchy blocks (of the authoritative 78 in "
-    "pass/lean/tests/d4/cva6_78.list) that had a certificate when the list was "
+    "pass/lean/Lgraph_IR_Semantics_Simulator/tests/d4/cva6_78.list) that had a "
+    "certificate when the list was "
     "first frozen, ranked by node count, largest first. Ranking by size keeps "
     "the selection re-derivable and biases it toward the hard cases. Once "
     "frozen the list is READ, never recomputed."
