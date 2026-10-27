@@ -2404,7 +2404,7 @@ Repair_result finalize_placement(const Result& initial, const Options& requested
   }
   options.floorplan = options.output_dir + "/input.def";
   physical::write_def(frame, options.floorplan);
-  options.restart_seed = std::make_shared<physical::Floorplan>(frame);
+  options.restart_seed = std::make_shared<physical::Floorplan>(std::move(frame));
   Repair_result result;
   auto          library = std::make_unique<hhds::GraphLibrary>();
   result.placed         = place(*initial.graph, *library, options);

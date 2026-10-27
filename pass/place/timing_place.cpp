@@ -258,8 +258,8 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
     for (auto& terminal : frame.terminals) {
       terminal.status = Ann_place::Status::FIXED;
     }
-    trial.restart_seed = std::make_shared<physical::Floorplan>(frame);
     physical::write_def(frame, trial.floorplan);
+    trial.restart_seed = std::make_shared<physical::Floorplan>(std::move(frame));
     w.StartObject();
     w.Key("weighted_nets");
     w.Uint64(target.size());
