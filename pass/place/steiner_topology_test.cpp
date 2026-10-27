@@ -225,7 +225,7 @@ TEST(SteinerTopology, TimingTreeAccountsForDriverAndAvoidsLongDetours) {
 }
 TEST(SteinerTopology, TimingTreeHandlesCollinearAndLargeCoincidentInputs) {
   std::vector<Steiner_location> pins;
-  for (int i = 0; i < 1000; ++i) {
+  for (int i = 0; i < 5000; ++i) {
     pins.emplace_back(i, 2 * i);
     pins.emplace_back(i, 2 * i);
   }
@@ -234,7 +234,14 @@ TEST(SteinerTopology, TimingTreeHandlesCollinearAndLargeCoincidentInputs) {
   for (size_t i = 0; i < pins.size(); ++i) {
     EXPECT_EQ(lengths[tree.terminals[i]], std::abs(pins[i].first - pins[999].first) + std::abs(pins[i].second - pins[999].second));
   }
-  pins.emplace_back(1000, 2000);
-  EXPECT_THROW(timing_steiner_topology(pins, 0), std::invalid_argument);
+}
+TEST(SteinerTopology, LargeDenseVisibilityStopsAtWorkBound) {
+  std::vector<Steiner_location> pins;
+  // Every point in the lower right row sees the entire upper left row.
+  for (int i = 0; i < 512; ++i) {
+    pins.emplace_back(i + 512, 0);
+    pins.emplace_back(i, 1);
+  }
+  EXPECT_THROW(timing_steiner_topology(pins, 0), std::length_error);
 }
 }  // namespace livehd::placement

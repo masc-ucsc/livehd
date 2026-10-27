@@ -2520,8 +2520,8 @@ std::string uroute_cache_identity(const Options& options) {
 void       initialize_route_tables() { initialize_flute_tables(); }
 // Placement RC uses driver-aware Steiner trees, with half each wire's
 // capacitance on each end. Coincident pins attach to a shared junction through
-// 1e-9 ohm edges. Above 1000 locations, spatial FLUTE groups are joined by
-// representative trees and any cycles in that approximate union are removed.
+// 1e-9 ohm edges. If driver-aware construction exceeds its work bound, spatial
+// FLUTE groups are joined by representative trees and any cycles are removed.
 ph::Rc_net steiner_rc(std::string driver, const std::vector<std::pair<std::string, std::pair<double, double>>>& pins,
                       const Wire_rc& wire, double dbu, bool* approximate) {
   initialize_flute_tables();
@@ -2541,6 +2541,17 @@ ph::Rc_net steiner_rc(std::string driver, const std::vector<std::pair<std::strin
     }
     positions.emplace_back(std::llround(xy.first), std::llround(xy.second));
     rc.nodes.push_back({label, 0});
+  }
+  if (wire.horizontal_r == 0 && wire.vertical_r == 0 && wire.horizontal_c == 0 && wire.vertical_c == 0) {
+    // Post-synthesis timing has no physical wire model. Its seed positions must
+    // not affect criticality through arbitrary junctions or epsilon resistors.
+    // One ideal junction gives every pin the same load and zero wire delay.
+    const auto hub = static_cast<unsigned>(rc.nodes.size());
+    rc.nodes.push_back({{}, 0});
+    for (unsigned pin = 0; pin < hub; ++pin) {
+      rc.edges.push_back({pin, hub, 0});
+    }
+    return rc;
   }
   auto vertex = [&](std::pair<int, int> xy) {
     auto [it, added] = junction.emplace(xy, rc.nodes.size());
@@ -2573,30 +2584,40 @@ ph::Rc_net steiner_rc(std::string driver, const std::vector<std::pair<std::strin
     rc.nodes[a].capacitance_ff += capacitance / 2;
     rc.nodes[b].capacitance_ff += capacitance / 2;
   };
-  if (xs.size() > 1 && xs.size() <= 1000) {
+  bool timing_tree_built = false;
+  if (xs.size() > 1) {
     std::vector<Steiner_location> locations;
     for (size_t i = 0; i < xs.size(); ++i) {
       locations.emplace_back(xs[i], ys[i]);
     }
-    const auto root_location = std::find(locations.begin(),
-                                         locations.end(),
-                                         Steiner_location{positions[driver_index].first, positions[driver_index].second});
-    const auto tree          = timing_steiner_topology(locations, root_location - locations.begin());
-    std::vector<unsigned> rc_vertex(tree.locations.size());
-    for (const auto terminal : tree.terminals) {
-      rc_vertex[terminal] = vertex(tree.locations[terminal]);
+    const auto       root_location = std::find(locations.begin(),
+                                               locations.end(),
+                                               Steiner_location{positions[driver_index].first, positions[driver_index].second});
+    Steiner_topology tree;
+    try {
+      tree              = timing_steiner_topology(locations, root_location - locations.begin());
+      timing_tree_built = true;
+    } catch (const std::length_error&) {
+      // Construction has not modified the RC graph, so fallback starts clean.
     }
-    for (size_t i = locations.size(); i < tree.locations.size(); ++i) {
-      rc_vertex[i] = rc.nodes.size();
-      rc.nodes.push_back({{}, 0});
+    if (timing_tree_built) {
+      std::vector<unsigned> rc_vertex(tree.locations.size());
+      for (const auto terminal : tree.terminals) {
+        rc_vertex[terminal] = vertex(tree.locations[terminal]);
+      }
+      for (size_t i = locations.size(); i < tree.locations.size(); ++i) {
+        rc_vertex[i] = rc.nodes.size();
+        rc.nodes.push_back({{}, 0});
+      }
+      for (const auto& [ai, bi] : tree.edges) {
+        const auto& a = tree.locations[ai];
+        const auto& b = tree.locations[bi];
+        add_edge(rc_vertex[ai], rc_vertex[bi], std::abs(double(a.first) - b.first), std::abs(double(a.second) - b.second));
+      }
     }
-    for (const auto& [ai, bi] : tree.edges) {
-      const auto& a = tree.locations[ai];
-      const auto& b = tree.locations[bi];
-      add_edge(rc_vertex[ai], rc_vertex[bi], std::abs(double(a.first) - b.first), std::abs(double(a.second) - b.second));
-    }
-  } else if (xs.size() > 1000) {
-    // Beyond FLUTE's degree limit: FLUTE trees over spatial groups of at most
+  }
+  if (xs.size() > 1 && !timing_tree_built) {
+    // Work-bounded fallback: FLUTE trees over spatial groups of at most
     // 1000 locations (recursive median bisection), joined by a FLUTE tree over
     // each group's location nearest the driver. A star from the driver would
     // charge every sink its full Manhattan distance (a 1036-sink net timed 6x

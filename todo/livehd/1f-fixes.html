@@ -22,10 +22,43 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Publication review retains the high-fanout RC correction and geometry-independent
+zero-wire timing seeds. Driver-aware trees now extend beyond 1,000 distinct
+locations, with bounded visibility and branch-sharing work; pathological cases
+fall back to the existing spatial tree before modifying the RC graph. Zero-wire
+seeds use an ideal junction so arbitrary seed coordinates cannot perturb the
+initial criticality ranking. Public defaults are unchanged. Eight optimized
+regression suites pass. Evidence is in <code>runs.timing_tree_review</code>.</p>
+<p>The review rejected a proposed short-refinement gate: DREAMPlace's
+<code>route_sampled</code> flag records any measurement during the history interval,
+not necessarily the selected geometry. That gate is excluded. The topology-only
+and seed-only ablations also expose WNS regressions and are recorded separately.</p>
+<table>
+<thead><tr><th>Design</th><th>Independent WNS, baseline → correction (ps)</th><th>Placement, baseline → correction (s)</th></tr></thead>
+<tbody>
+<tr><td>lfsr</td><td>−61.992 → −61.992</td><td>2.613 → 2.596</td></tr>
+<tr><td>minimax</td><td>−996.517 → −991.355</td><td>45.165 → 44.217</td></tr>
+<tr><td>NVDLA/partition_m</td><td>−916.549 → −914.371</td><td>37.977 → 37.501</td></tr>
+<tr><td>coralnpu</td><td>−13,439.206 → −13,961.971</td><td>570.426 → 549.971</td></tr>
+</tbody>
+</table>
+<p>All four use the same production defaults, 100 ps clock and reset false paths,
+and remain within 1.5× placement time and 3% cell/area growth. Coralnpu takes
+727.05 s end to end. Its candidate runs on CPU 14 versus baseline CPU 12, so
+these are not exact same-core speed measurements. <strong>Coralnpu WNS worsens
+by 522.765 ps (3.89%); the WNS improvement pass remains incomplete.</strong>
+This change is retained for RC correctness under the speed-first priorities,
+not presented as a uniform WNS improvement. On the saved coral placement,
+substituting the corrected 1,599-sink net's RC into OpenSTA brings its WNS
+within 20 ps of OpenSTA's own RC; the previous topology differed by about
+1,357 ps. Native final WNS on the new coral flow is −14,714.293 ps versus
+independent −13,961.971 ps (5.39% difference). Full decision-checkpoint agreement
+and the broader A–J acceptance criteria remain open.</p>
+
 <p>RC timing-tree neighbor discovery now uses indexed quadrant queries above
-512 distinct locations and retains the cheaper scan for smaller nets. The
-1000-location timing-tree limit and the spatial fallback remain unchanged;
-removing that limit is a separate, unvalidated model change. Exact neighbor
+512 distinct locations and retains the cheaper scan for smaller nets. At that earlier stage, the
+1000-location timing-tree limit and spatial fallback remained unchanged; the
+subsequent bounded high-fanout correction is described above. Exact neighbor
 ordering agrees with the original scan on 120 randomized inputs and four
 1000-location geometries, including coordinate ties and dense visibility.
 All four targeted optimized placement/timing suites pass. A standalone sparse

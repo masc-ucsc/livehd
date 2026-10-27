@@ -32784,6 +32784,618 @@
       },
       "binary_sha256": "098b81222c639ae109eb78c2a2d55aeefe7515cc472583975056020881fc63e3",
       "limitations": "No new full-flow placement speedup claimed; high-fanout timing-model change deferred, G model discrepancy remains unresolved"
+    },
+    "timing_tree_review": {
+      "status": "Retained RC correctness change; broader WNS improvement and A-J acceptance remain incomplete",
+      "source_base": {
+        "livehd": "f0c3048f0fd4cce018588facbd633868f3e53792",
+        "DREAMPlace": "4a006e9bf8144047d5608e1287d63e4445041aeb",
+        "OpenTimer": "3197d532b08a6e11ee0a1c26a200dd34b56148cd"
+      },
+      "implementation": "Driver-aware timing trees above1000 distinct locations; bounded visibility64*n and branch-pair work1024*n with clean spatial fallback. Zero-wire post-synthesis seeds use an ideal junction independently of geometry. No public option defaults changed.",
+      "protocol": "Same production defaults, common frontend settings,100ps clock and reset false paths on all4 designs. Frozen v33 executables. Placement uses non-overlapping outer phase elapsed times; finalSTA separate. Coral candidate CPU14 versus baseline CPU12 on same host, so not an exact same-core speed comparison.",
+      "review_findings": [
+        {
+          "finding": "Proposed short-refinement gate interpreted route_sampled as a measurement at the selected geometry; DREAMPlace actually accumulates it across the history interval",
+          "resolution": "Withdrawn before publication; timing_place.cpp and routing feasibility reporting unchanged"
+        },
+        {
+          "finding": "Topology-only ablation changes zero-wire seed ranking and regresses minimax/coral WNS",
+          "resolution": "Use a geometry-independent ideal zero-R/C junction with the high-fanout correction; retain ablation results below"
+        },
+        {
+          "finding": "Combined correction still worsens coral independent WNS by522.765ps",
+          "resolution": "Explicitly retained as an RC correctness correction with a known QoR trade-off under speed-first priorities; do not claim the WNS optimization pass is complete"
+        }
+      ],
+      "results": {
+        "lfsr": {
+          "baseline": {
+            "source": "/tmp/1f-wns-v1/ceff_candidate/lfsr/summary.json",
+            "placement_seconds": 2.613292,
+            "final_sta_seconds": 0.71857,
+            "run": {
+              "status": "ok",
+              "wall_s": 13.0,
+              "cpu_s": 5.789999999999999,
+              "rss_mib": 459.22265625,
+              "tree_rss_mib": 455.078125,
+              "ipc": 2.688281984511069,
+              "instructions": 69312041361.0,
+              "cycles": 25783024906.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "independent_wns_ps": -61.991974,
+            "independent_hpwl_um": 211.974
+          },
+          "candidate": {
+            "source": "/tmp/1f-wns-v1/ideal_seed_candidate/lfsr/summary.json",
+            "placement_seconds": 2.595684,
+            "final_sta_seconds": 0.730395,
+            "run": {
+              "status": "ok",
+              "wall_s": 5.81,
+              "cpu_s": 5.8,
+              "rss_mib": 459.1875,
+              "tree_rss_mib": 468.19140625,
+              "ipc": 2.6804502571719766,
+              "instructions": 69269051620.0,
+              "cycles": 25842319377.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "independent_wns_ps": -61.991974,
+            "independent_hpwl_um": 211.974
+          },
+          "placement_ratio": 0.9932621383297389,
+          "independent_wns_delta_ps": 0.0,
+          "native_timing": {
+            "wns": -60.0317612
+          }
+        },
+        "minimax": {
+          "baseline": {
+            "source": "/tmp/1f-wns-v1/ceff_candidate/minimax/summary.json",
+            "placement_seconds": 45.165006,
+            "final_sta_seconds": 3.719351,
+            "run": {
+              "status": "ok",
+              "wall_s": 69.59,
+              "cpu_s": 69.55,
+              "rss_mib": 1230.90625,
+              "tree_rss_mib": 1183.87890625,
+              "ipc": 2.106787363989717,
+              "instructions": 658307397279.0,
+              "cycles": 312469786240.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16217,
+              "area_um2": 2086.1792999995764,
+              "within_budget": true,
+              "rejected_proposals": 427
+            },
+            "independent_wns_ps": -996.517095,
+            "independent_hpwl_um": 51207.419
+          },
+          "candidate": {
+            "source": "/tmp/1f-wns-v1/ideal_seed_candidate/minimax/summary.json",
+            "placement_seconds": 44.217464,
+            "final_sta_seconds": 3.873939,
+            "run": {
+              "status": "ok",
+              "wall_s": 68.74,
+              "cpu_s": 68.72,
+              "rss_mib": 1303.21484375,
+              "tree_rss_mib": 1261.03515625,
+              "ipc": 2.1315403761375125,
+              "instructions": 657882826163.0,
+              "cycles": 308641972504.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16204,
+              "area_um2": 2086.1209799995736,
+              "within_budget": true,
+              "rejected_proposals": 298
+            },
+            "independent_wns_ps": -991.35478,
+            "independent_hpwl_um": 51140.215
+          },
+          "placement_ratio": 0.9790204389655124,
+          "independent_wns_delta_ps": 5.162315000000035,
+          "native_timing": {
+            "wns": -985.419006
+          }
+        },
+        "NVDLA__partition_m": {
+          "baseline": {
+            "source": "/tmp/1f-wns-v1/ceff_pair_candidate/NVDLA__partition_m/summary.json",
+            "placement_seconds": 37.976772,
+            "final_sta_seconds": 4.697336,
+            "run": {
+              "status": "ok",
+              "wall_s": 106.26,
+              "cpu_s": 106.24000000000001,
+              "rss_mib": 1548.5859375,
+              "tree_rss_mib": 1529.5078125,
+              "ipc": 1.5439104044210084,
+              "instructions": 738481071621.0,
+              "cycles": 478318605475.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20948,
+              "baseline_area_um2": 2656.096920000048,
+              "cells": 20598,
+              "area_um2": 2735.776620000061,
+              "within_budget": true,
+              "rejected_proposals": 3948
+            },
+            "independent_wns_ps": -916.548507,
+            "independent_hpwl_um": 102574.408
+          },
+          "candidate": {
+            "source": "/tmp/1f-wns-v1/ideal_seed_candidate/NVDLA__partition_m/summary.json",
+            "placement_seconds": 37.500678,
+            "final_sta_seconds": 4.918453,
+            "run": {
+              "status": "ok",
+              "wall_s": 106.61,
+              "cpu_s": 106.58,
+              "rss_mib": 1550.2578125,
+              "tree_rss_mib": 1506.12109375,
+              "ipc": 1.5253232908316732,
+              "instructions": 731714110977.0,
+              "cycles": 479710835975.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20948,
+              "baseline_area_um2": 2656.096920000048,
+              "cells": 20598,
+              "area_um2": 2735.7766200000606,
+              "within_budget": true,
+              "rejected_proposals": 3957
+            },
+            "independent_wns_ps": -914.37086,
+            "independent_hpwl_um": 100823.601
+          },
+          "placement_ratio": 0.9874635474547443,
+          "independent_wns_delta_ps": 2.177646999999979,
+          "native_timing": {
+            "wns": -915.577942
+          }
+        },
+        "coralnpu": {
+          "baseline": {
+            "source": "/tmp/1f-wns-v1/ceff_candidate/coralnpu/summary.json",
+            "placement_seconds": 570.426057,
+            "final_sta_seconds": 41.933336000000004,
+            "run": {
+              "status": "ok",
+              "wall_s": 746.48,
+              "cpu_s": 746.34,
+              "rss_mib": 9708.25390625,
+              "tree_rss_mib": 9637.546875,
+              "ipc": 1.6407077229165001,
+              "instructions": 5522125556325.0,
+              "cycles": 3365697301960.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 161829,
+              "area_um2": 19666.48085999544,
+              "within_budget": true,
+              "rejected_proposals": 9567
+            },
+            "independent_wns_ps": -13439.206246,
+            "independent_hpwl_um": 3690804.695
+          },
+          "candidate": {
+            "source": "/tmp/1f-wns-v1/ideal_seed_candidate/coralnpu/summary.json",
+            "placement_seconds": 549.971089,
+            "final_sta_seconds": 42.428083,
+            "run": {
+              "status": "ok",
+              "wall_s": 727.05,
+              "cpu_s": 726.87,
+              "rss_mib": 9562.11328125,
+              "tree_rss_mib": 9557.4609375,
+              "ipc": 1.6274825473881616,
+              "instructions": 5334147290888.0,
+              "cycles": 3277545003139.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 161829,
+              "area_um2": 19666.480859995612,
+              "within_budget": true,
+              "rejected_proposals": 9981
+            },
+            "independent_wns_ps": -13961.971191,
+            "independent_hpwl_um": 3671251.142
+          },
+          "placement_ratio": 0.9641408947768317,
+          "independent_wns_delta_ps": -522.7649450000008,
+          "native_timing": {
+            "wns": -14714.293
+          }
+        }
+      },
+      "ablations": {
+        "topology_only": {
+          "retained": false,
+          "results": {
+            "lfsr": {
+              "source": "/tmp/1f-wns-v1/highfanout_candidate/lfsr/summary.json",
+              "placement_seconds": 2.61783,
+              "final_sta_seconds": 0.7172670000000001,
+              "run": {
+                "status": "ok",
+                "wall_s": 5.78,
+                "cpu_s": 5.7700000000000005,
+                "rss_mib": 459.125,
+                "tree_rss_mib": 471.1484375,
+                "ipc": 2.684892444173626,
+                "instructions": 69176256407.0,
+                "cycles": 25765000962.0,
+                "stop": null
+              },
+              "growth_budget": {
+                "basis": "synthesized_standard_cells",
+                "fraction": 0.03,
+                "baseline_cells": 136,
+                "baseline_area_um2": 18.910260000000008,
+                "cells": 134,
+                "area_um2": 18.618660000000013,
+                "within_budget": true,
+                "rejected_proposals": 0
+              },
+              "independent_wns_ps": -61.991974,
+              "independent_hpwl_um": 211.974
+            },
+            "minimax": {
+              "source": "/tmp/1f-wns-v1/highfanout_candidate/minimax/summary.json",
+              "placement_seconds": 47.344023,
+              "final_sta_seconds": 3.73888,
+              "run": {
+                "status": "ok",
+                "wall_s": 71.67,
+                "cpu_s": 71.65,
+                "rss_mib": 1451.46484375,
+                "tree_rss_mib": 1421.94140625,
+                "ipc": 2.0749125082251507,
+                "instructions": 667843229007.0,
+                "cycles": 321865729933.0,
+                "stop": null
+              },
+              "growth_budget": {
+                "basis": "synthesized_standard_cells",
+                "fraction": 0.03,
+                "baseline_cells": 16505,
+                "baseline_area_um2": 2025.453599999931,
+                "cells": 16202,
+                "area_um2": 2086.135559999579,
+                "within_budget": true,
+                "rejected_proposals": 315
+              },
+              "independent_wns_ps": -1247.891906,
+              "independent_hpwl_um": 52362.365
+            },
+            "NVDLA__partition_m": {
+              "source": "/tmp/1f-wns-v1/highfanout_candidate/NVDLA__partition_m/summary.json",
+              "placement_seconds": 38.638527,
+              "final_sta_seconds": 4.900060000000001,
+              "run": {
+                "status": "ok",
+                "wall_s": 107.0,
+                "cpu_s": 106.99000000000001,
+                "rss_mib": 1550.02734375,
+                "tree_rss_mib": 1525.18359375,
+                "ipc": 1.5322469083609083,
+                "instructions": 737993221358.0,
+                "cycles": 481641188069.0,
+                "stop": null
+              },
+              "growth_budget": {
+                "basis": "synthesized_standard_cells",
+                "fraction": 0.03,
+                "baseline_cells": 20948,
+                "baseline_area_um2": 2656.096920000048,
+                "cells": 20598,
+                "area_um2": 2735.776620000061,
+                "within_budget": true,
+                "rejected_proposals": 3948
+              },
+              "independent_wns_ps": -916.548507,
+              "independent_hpwl_um": 102574.408
+            },
+            "coralnpu": {
+              "source": "/tmp/1f-wns-v1/highfanout_candidate/coralnpu/summary.json",
+              "placement_seconds": 713.994756,
+              "final_sta_seconds": 44.222072999999995,
+              "run": {
+                "status": "ok",
+                "wall_s": 897.5,
+                "cpu_s": 897.23,
+                "rss_mib": 9784.921875,
+                "tree_rss_mib": 9767.296875,
+                "ipc": 1.6082159749250113,
+                "instructions": 6506742718070.0,
+                "cycles": 4045938368678.0,
+                "stop": null
+              },
+              "growth_budget": {
+                "basis": "synthesized_standard_cells",
+                "fraction": 0.03,
+                "baseline_cells": 159338,
+                "baseline_area_um2": 19093.676400001503,
+                "cells": 160837,
+                "area_um2": 19666.480859995143,
+                "within_budget": true,
+                "rejected_proposals": 7747
+              },
+              "independent_wns_ps": -15316.869612,
+              "independent_hpwl_um": 3753322.264
+            }
+          },
+          "reason": "Independent WNS regression on minimax and coral"
+        },
+        "proposed_refinement": {
+          "retained": false,
+          "results": {
+            "lfsr": {
+              "placement_seconds": 2.587364,
+              "final_sta_seconds": 0.725215,
+              "run": {
+                "status": "ok",
+                "wall_s": 5.79,
+                "cpu_s": 5.779999999999999,
+                "rss_mib": 462.93359375,
+                "tree_rss_mib": 476.01171875,
+                "ipc": 2.683475966139564,
+                "instructions": 69180162587.0,
+                "cycles": 25780056710.0,
+                "stop": null
+              },
+              "growth_budget": {
+                "basis": "synthesized_standard_cells",
+                "fraction": 0.03,
+                "baseline_cells": 136,
+                "baseline_area_um2": 18.910260000000008,
+                "cells": 134,
+                "area_um2": 18.618660000000013,
+                "within_budget": true,
+                "rejected_proposals": 0
+              },
+              "source": "/tmp/1f-wns-v1/feasible_small/lfsr/summary.json",
+              "independent_wns_ps": -61.991974,
+              "independent_hpwl_um": 211.974
+            },
+            "minimax": {
+              "placement_seconds": 43.150400999999995,
+              "final_sta_seconds": 3.641412,
+              "run": {
+                "status": "ok",
+                "wall_s": 67.15,
+                "cpu_s": 67.13,
+                "rss_mib": 1411.20703125,
+                "tree_rss_mib": 1382.17578125,
+                "ipc": 2.1786481296143734,
+                "instructions": 657105965188.0,
+                "cycles": 301611791393.0,
+                "stop": null
+              },
+              "growth_budget": {
+                "basis": "synthesized_standard_cells",
+                "fraction": 0.03,
+                "baseline_cells": 16505,
+                "baseline_area_um2": 2025.453599999931,
+                "cells": 16204,
+                "area_um2": 2086.1209799995736,
+                "within_budget": true,
+                "rejected_proposals": 298
+              },
+              "source": "/tmp/1f-wns-v1/feasible_small/minimax/summary.json",
+              "independent_wns_ps": -991.35478,
+              "independent_hpwl_um": 51140.215
+            },
+            "NVDLA__partition_m": {
+              "placement_seconds": 38.282782,
+              "final_sta_seconds": 4.801059,
+              "run": {
+                "status": "ok",
+                "wall_s": 106.97,
+                "cpu_s": 106.97,
+                "rss_mib": 1492.1640625,
+                "tree_rss_mib": 1489.3203125,
+                "ipc": 1.5188864880886799,
+                "instructions": 731474082656.0,
+                "cycles": 481585746132.0,
+                "stop": null
+              },
+              "growth_budget": {
+                "basis": "synthesized_standard_cells",
+                "fraction": 0.03,
+                "baseline_cells": 20948,
+                "baseline_area_um2": 2656.096920000048,
+                "cells": 20598,
+                "area_um2": 2735.7766200000606,
+                "within_budget": true,
+                "rejected_proposals": 3957
+              },
+              "source": "/tmp/1f-wns-v1/feasible_small/NVDLA__partition_m/summary.json",
+              "independent_wns_ps": -914.37086,
+              "independent_hpwl_um": 100823.601
+            }
+          },
+          "reason": "Review found stale routing evidence; not safe to certify selected geometry",
+          "coral_status": "Diagnostic still running at publication; withdrawn on code-review grounds regardless of QoR"
+        },
+        "ideal_seed_only": {
+          "retained": false,
+          "results": {
+            "lfsr": {
+              "placement_seconds": 2.623058,
+              "final_sta_seconds": 0.7272609999999999,
+              "run": {
+                "status": "ok",
+                "wall_s": 5.89,
+                "cpu_s": 5.89,
+                "rss_mib": 462.921875,
+                "tree_rss_mib": 476.15625,
+                "ipc": 2.6433989808543616,
+                "instructions": 69273634756.0,
+                "cycles": 26206272779.0,
+                "stop": null
+              },
+              "growth_budget": {
+                "basis": "synthesized_standard_cells",
+                "fraction": 0.03,
+                "baseline_cells": 136,
+                "baseline_area_um2": 18.910260000000008,
+                "cells": 134,
+                "area_um2": 18.618660000000013,
+                "within_budget": true,
+                "rejected_proposals": 0
+              },
+              "source": "/tmp/1f-wns-v1/ideal_only_candidate/lfsr/summary.json",
+              "independent_wns_ps": -61.991974,
+              "independent_hpwl_um": 211.974
+            },
+            "minimax": {
+              "placement_seconds": 46.73127,
+              "final_sta_seconds": 3.930083,
+              "run": {
+                "status": "ok",
+                "wall_s": 71.85,
+                "cpu_s": 71.84,
+                "rss_mib": 1277.4140625,
+                "tree_rss_mib": 1242.63671875,
+                "ipc": 2.0561827024727473,
+                "instructions": 663663456037.0,
+                "cycles": 322764827872.0,
+                "stop": null
+              },
+              "growth_budget": {
+                "basis": "synthesized_standard_cells",
+                "fraction": 0.03,
+                "baseline_cells": 16505,
+                "baseline_area_um2": 2025.453599999931,
+                "cells": 16199,
+                "area_um2": 2085.537779999568,
+                "within_budget": true,
+                "rejected_proposals": 375
+              },
+              "source": "/tmp/1f-wns-v1/ideal_only_candidate/minimax/summary.json",
+              "independent_wns_ps": -1017.509303,
+              "independent_hpwl_um": 51116.757
+            },
+            "NVDLA__partition_m": {
+              "placement_seconds": 39.355557,
+              "final_sta_seconds": 4.877407,
+              "run": {
+                "status": "ok",
+                "wall_s": 108.12,
+                "cpu_s": 108.09,
+                "rss_mib": 1490.6640625,
+                "tree_rss_mib": 1462.66015625,
+                "ipc": 1.5036344916296511,
+                "instructions": 731664678730.0,
+                "cycles": 486597429630.0,
+                "stop": null
+              },
+              "growth_budget": {
+                "basis": "synthesized_standard_cells",
+                "fraction": 0.03,
+                "baseline_cells": 20948,
+                "baseline_area_um2": 2656.096920000048,
+                "cells": 20598,
+                "area_um2": 2735.7766200000606,
+                "within_budget": true,
+                "rejected_proposals": 3957
+              },
+              "source": "/tmp/1f-wns-v1/ideal_only_candidate/NVDLA__partition_m/summary.json",
+              "independent_wns_ps": -914.37086,
+              "independent_hpwl_um": 100823.601
+            }
+          },
+          "reason": "Isolating seed change regresses minimax WNS; does not correct the high-fanout RC model",
+          "coral_status": "Diagnostic still running at publication; not the retained binary"
+        }
+      },
+      "tests": {
+        "optimized_suites": 8,
+        "log": "/tmp/1f-highfanout-v32/ideal-seed-tests.log",
+        "publication_log": "/tmp/1f-highfanout-v32/publication-tests.log",
+        "regressions": [
+          "Connected acyclic RC trees and charge accounting on large inputs and spatial fallback",
+          "5000 unique locations and pathological visibility bound",
+          "Geometry-independent1600-pin ideal wire seed"
+        ],
+        "patch_sha256": "243ce91f2857b8d89d7f0b42acff19cfed952f5dad0d00b8315b55733e1c4940",
+        "publication_suites_passed": 8
+      },
+      "fixed_coral_model_diagnostic": {
+        "old_native_wns_ps": -16154.92578125,
+        "new_native_wns_ps": -14770.177734375,
+        "independent_wns_ps": -13439.206246,
+        "OpenSTA_with_new_first_net_native_RC_ps": -13419.376774567912,
+        "first_net_fanout": 1599,
+        "artifact": "/tmp/1f-highfanout-v32/rc-diagnostic",
+        "limitation": "This isolates the first-net topology discrepancy; remaining gate-model and checkpoint agreement work is open"
+      },
+      "limitations": "Coral independent WNS regresses3.89%; timing-model correction is not a uniform WNS improvement. Final minimax STA still exceeds3s. Full checkpoint timing agreement, pure-GP HPWL comparison and broader A-J census remain open.",
+      "binary_manifest": {
+        "openroad": "6d604d68329cd788fcce1212a01844e61a8eb62b99248eb6038902f853f5ea13",
+        "yosys": "dc720773d3cafc98f9ac3c1dae1e2faa8a1147629d84fe3d8bf10a8de080a8e2",
+        "lhd": "ff09e7e0ca7372f7f7e53b5aafb2edfc6dda6c5e085288b2c79aec26873707a6",
+        "physical_repair": "6861e3116741b0019f8c93b7409bf66599785a895589e37f8fc10e3bb8d03ac6",
+        "livehd_head": "f0c3048f0fd4cce018588facbd633868f3e53792",
+        "hightide_head": "9648393ce09887c9f72c3a40eb5fdc8441731c14",
+        "build": "LiveHD f0c3048f0 plus bounded high-fanout timing trees and geometry-independent ideal-wire seeds; published DREAMPlace4a006e9 and OpenTimer3197d53",
+        "livehd_patch_sha256": "243ce91f2857b8d89d7f0b42acff19cfed952f5dad0d00b8315b55733e1c4940"
+      }
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",

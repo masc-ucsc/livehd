@@ -202,6 +202,11 @@ std::vector<std::vector<size_t>> detail::timing_neighbors(const std::vector<Stei
     return stamp;
   };
   std::vector<std::vector<size_t>> neighbors(count);
+  // Separated rows can expose quadratically many visible pairs. Preserve
+  // previous inputs exactly, but bound work before trying a spatial fallback
+  // on larger nets. Count both directed sweeps in the budget.
+  size_t                           visible_edges = 0;
+  const size_t                     edge_budget   = count <= 1000 ? std::numeric_limits<size_t>::max() : 64 * count;
   for (bool reverse : {false, true}) {
     std::fill(tree.begin(), tree.end(), 0);
     for (size_t step = 0; step < count; ++step) {
@@ -213,6 +218,9 @@ std::vector<std::vector<size_t>> detail::timing_neighbors(const std::vector<Stei
       while (left || right) {
         const size_t stamp = std::max(left, right);
         const size_t other = order[reverse ? count - stamp : stamp - 1];
+        if (++visible_edges > edge_budget) {
+          throw std::length_error("timing Steiner visibility exceeds work bound");
+        }
         neighbors[n].push_back(other);
         if (left > right) {
           left = latest(x_rank[other] + 1, x);
@@ -241,9 +249,6 @@ Steiner_topology timing_steiner_topology(const std::vector<Steiner_location>& pi
       throw std::invalid_argument("coordinates exceed Steiner integer range");
     }
     vertices.emplace(p, 0);
-  }
-  if (vertices.size() > 1000) {
-    throw std::invalid_argument("timing Steiner topology exceeds degree limit");
   }
   Steiner_topology out;
   for (auto& [p, index] : vertices) {
@@ -318,13 +323,18 @@ Steiner_topology timing_steiner_topology(const std::vector<Steiner_location>& pi
   };
   std::priority_queue<Candidate> candidates;
   generations.assign(count, 0);
-  const auto refresh = [&](size_t node) {
+  size_t       branch_work   = 0;
+  const size_t branch_budget = count <= 1000 ? std::numeric_limits<size_t>::max() : 1024 * count;
+  const auto   refresh       = [&](size_t node) {
     const auto  center = out.locations[node];
     Candidate   best{0, center, node, node, node, ++generations[node]};
     const auto& links = adjacent[node];
     for (size_t i = links.size(); i > 0; --i) {
       const auto a = out.locations[links[i - 1]];
       for (size_t j = i - 1; j > 0; --j) {
+        if (++branch_work > branch_budget) {
+          throw std::length_error("timing Steiner branch sharing exceeds work bound");
+        }
         const auto             b = out.locations[links[j - 1]];
         const Steiner_location point{std::clamp(center.first, std::min(a.first, b.first), std::max(a.first, b.first)),
                                      std::clamp(center.second, std::min(a.second, b.second), std::max(a.second, b.second))};

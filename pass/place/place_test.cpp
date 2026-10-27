@@ -3260,7 +3260,38 @@ TEST(Placement, IncrementalNewMemoryUnlocksCachedCellsUnderItsProxy) {
   }));
   EXPECT_EQ(updated.floorplan.components.size(), initial.floorplan.components.size() + 2);  // ram + its enable tie
 }
-TEST(Placement, HierarchicalSteinerRcIsConnectedAcyclicAndChargesOnlyRetainedWire) {
+TEST(Placement, ZeroWireTimingIsIndependentOfPinGeometry) {
+  std::vector<std::pair<std::string, std::pair<double, double>>> pins;
+  for (int i = 0; i < 1600; ++i) {
+    pins.push_back({
+        "pin" + std::to_string(i),
+        {double(i), double(i % 7)}
+    });
+  }
+  bool       approximate = false;
+  const auto before      = steiner_rc("pin700", pins, Wire_rc{0, 0, 0, 0, "ideal"}, 1, &approximate);
+  for (auto& pin : pins) {
+    pin.second = {0, 0};
+  }
+  const auto after = steiner_rc("pin700", pins, Wire_rc{0, 0, 0, 0, "ideal"}, 1, &approximate);
+  EXPECT_FALSE(approximate);
+  ASSERT_EQ(before.nodes.size(), pins.size() + 1);
+  ASSERT_EQ(before.nodes.size(), after.nodes.size());
+  ASSERT_EQ(before.edges.size(), pins.size());
+  ASSERT_EQ(before.edges.size(), after.edges.size());
+  EXPECT_EQ(before.wire_length_um, 0);
+  for (size_t i = 0; i < before.nodes.size(); ++i) {
+    EXPECT_EQ(before.nodes[i].pin, after.nodes[i].pin);
+    EXPECT_EQ(before.nodes[i].capacitance_ff, 0);
+  }
+  for (size_t i = 0; i < before.edges.size(); ++i) {
+    EXPECT_EQ(before.edges[i].from, after.edges[i].from);
+    EXPECT_EQ(before.edges[i].to, after.edges[i].to);
+    EXPECT_EQ(before.edges[i].resistance_ohm, 0);
+    EXPECT_EQ(after.edges[i].resistance_ohm, 0);
+  }
+}
+TEST(Placement, HighFanoutSteinerRcIsConnectedAcyclicAndChargesOnlyRetainedWire) {
   // Independent graph invariants: spatial FLUTE groups and their connector
   // can share several geometric junctions, so deduplicating edges is not
   // sufficient to make their union a tree.
@@ -3268,21 +3299,24 @@ TEST(Placement, HierarchicalSteinerRcIsConnectedAcyclicAndChargesOnlyRetainedWir
            std::pair{  32, 40},
            std::pair{  61, 18},
            std::pair{ 400,  4},
-           std::pair{1201,  1}
+           std::pair{1201,  1},
+           std::pair{ 512,  2}
   }) {
+    const bool dense_visibility = width == 512;
     SCOPED_TRACE(std::format("{}x{}", width, height));
     std::vector<std::pair<std::string, std::pair<double, double>>> pins;
     for (int y = 0; y < height; ++y) {
       for (int x = 0; x < width; ++x) {
         pins.push_back({
             "pin" + std::to_string(pins.size()),
-            {double(x * 10), double(y * 10)}
+            {double((x + (dense_visibility && y == 0 ? 512 : 0)) * 10), double(y * 10)}
         });
       }
     }
     bool       approximate = false;
     const auto rc          = steiner_rc(pins.front().first, pins, Wire_rc{1, 2, 1, 2, "test"}, 1, &approximate);
-    EXPECT_TRUE(approximate);
+    // A very wide, shallow grid also exposes many peers across its rows.
+    EXPECT_EQ(approximate, dense_visibility || width == 400);
     ASSERT_EQ(rc.edges.size() + 1, rc.nodes.size());
     std::vector<unsigned> parent(rc.nodes.size()), degree(rc.nodes.size());
     std::iota(parent.begin(), parent.end(), 0);
@@ -3336,10 +3370,10 @@ TEST(Placement, HierarchicalSteinerSharedJunctionCycleRegression) {
   ASSERT_EQ(pins.size(), 2771);
   bool       approximate = false;
   const auto rc          = steiner_rc("pin0", pins, Wire_rc{1, 2, 1, 2, "test"}, 1000, &approximate);
-  EXPECT_TRUE(approximate);
-  // The unfiltered group union had 6390 nodes and 6390 edges: one cycle.
-  ASSERT_EQ(rc.nodes.size(), 6390);
-  ASSERT_EQ(rc.edges.size(), 6389);
+  EXPECT_FALSE(approximate);
+  // This placement formerly produced a cycle in the spatial group union.
+  // The driver-aware tree must retain connectivity and charge accounting.
+  ASSERT_EQ(rc.edges.size() + 1, rc.nodes.size());
   std::vector<unsigned> parents(rc.nodes.size()), degree(rc.nodes.size());
   std::iota(parents.begin(), parents.end(), 0);
   const auto root = [&](unsigned n) {
@@ -3369,7 +3403,7 @@ TEST(Placement, HierarchicalSteinerSharedJunctionCycleRegression) {
   }
   EXPECT_NEAR(capacitance, 2 * resistance, 1e-8 * capacitance);
 }
-TEST(Placement, HighFanoutRcFallbackRemainsATreeAndIsMarkedApproximate) {
+TEST(Placement, HighFanoutDriverAwareRcRemainsATree) {
   hhds::GraphLibrary source, flat;
   auto               io = source.create_io("top");
   io->add_input("a", 0);
@@ -3406,7 +3440,7 @@ TEST(Placement, HighFanoutRcFallbackRemainsATreeAndIsMarkedApproximate) {
   options.bins       = 8;
   options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/fanout";
   const auto result  = place(*graph, flat, options);
-  EXPECT_TRUE(result.parasitics->approximate);
+  EXPECT_FALSE(result.parasitics->approximate);
   bool high_fanout = false;
   for (const auto& net : result.parasitics->nets) {
     EXPECT_EQ(net.edges.size() + 1, net.nodes.size());
