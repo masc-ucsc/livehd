@@ -22,6 +22,30 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>OpenTimer now reuses each wire response across the paired slew and delay
+passes. Ideal-clock bypass, missing source slew and invalidated arcs retain their
+existing behavior. No timing approximation or public default changes. The published
+pin <code>a363059</code> passes six optimized timing/repair suites, including new
+incremental RC/model/clock/mask regressions.</p>
+<p>Three alternating timing-only pairs on the same saved minimax placement produce
+byte-identical timing reports. Median propagation falls from 1.580 to 1.432 s
+(9.4%); the complete cold evaluation falls from 3.057 to 2.901 s (5.1%).</p>
+<table><thead><tr><th>Design</th><th>Unchanged independent WNS (ps)</th><th>Placement, control → candidate (s)</th></tr></thead><tbody>
+<tr><td>lfsr</td><td>-60.271</td><td>2.015 → 2.034</td></tr>
+<tr><td>minimax</td><td>-950.268</td><td>43.430 → 42.256</td></tr>
+<tr><td>NVDLA/partition_m</td><td>-916.800</td><td>35.436 → 38.113</td></tr>
+<tr><td>coralnpu</td><td>-16736.600</td><td>753.026 → 783.386</td></tr>
+</tbody></table>
+<p>All four retain byte-identical final DEFs and unchanged HPWL with common defaults,
+100 ps clocks and reset false paths. Each stays within the 1.5× placement-time
+budget. Small-design controls are fresh on CPU 13; coral uses the earlier frozen
+v41 control on CPU 12. These single flow samples do not establish a whole-flow
+speedup. A rebuild using the published pin reproduces lfsr's exact DEF and WNS.
+Provenance, measurements and review are in <code>runs.paired_wire_response_v42</code>.</p>
+<p><strong>B remains open:</strong> the isolated final-evaluation sample is below
+3 s, but total STA share still exceeds 10%. The full A–J scope and the previously
+recorded wire-growth, checkpoint and census gaps remain in progress.</p>
+
 <p>Forest repair now considers spatial sink clusters before building its
 Steiner backbone. Each alternative uses the existing electrical and timing
 checks, and may not exceed the summed net HPWL of the best original candidate.
