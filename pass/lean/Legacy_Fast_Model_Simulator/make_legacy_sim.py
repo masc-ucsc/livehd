@@ -17,12 +17,23 @@ emitter prefixes and escapes them -- RTL `vm_enabled_o` becomes record field
 names produces a file that does not compile, so the structures are parsed from
 the generated source, which is authoritative by construction.
 
-THE 256-FIELD LIMIT.  The state record holds one field per flop, and
-`LEAN_MAX_CTOR_FIELDS` is 256 in every Lean 4 toolchain.  A wider record still
-ELABORATES and its proofs stand; only CODE GENERATION fails, with
-"constructor '<Top>_state.mk' has too many fields".  Above the cap a row can
-deliver a proven certificate and cannot deliver an executable.  This script
-reports that rather than hiding it.
+THE CONSTRUCTOR FIELD LIMIT.  The state record holds one field per flop, and a
+Lean constructor could hold at most 255 OBJECT fields: `lean_object` stores the
+count in an 8-bit header field (`m_other:8`, include/lean/lean.h), so 256 did
+not fit.  A wider record still ELABORATES and its proofs stand -- the error is
+raised when the compiler compiles the inductive, not by the kernel -- but code
+generation fails with "constructor '<Top>_state.mk' has too many fields", and
+the file then exits non-zero even though the theorems are proved and clean.
+
+LIFTED IN LEAN 4.36.0 (lean4 PR #15516, merged 2026-10-12).  The compiler now
+keeps the first 254 object fields in the constructor and chains the rest
+through spill objects, so a record of any width compiles; access costs one
+pointer hop per 254 fields.  Verified here: 409, 1011 and 2403 fields all build
+and run on v4.36.0-rc1.  Very wide records may additionally need
+`set_option maxRecDepth` and `set_option maxHeartbeats 0`.
+
+BEWARE EXACTLY 256 ON LEAN < 4.35.0 (lean4 issue #15527): the compiler accepts
+it, the 8-bit count wraps to 0, and every field leaks on free, silently.
 
 Usage:  make_legacy_sim.py <Top>_Lgraph.lean [--cycles N] [--out DIR]
 """
@@ -119,9 +130,17 @@ def main : IO Unit := do
     p.write_text(lean)
     print(f"wrote {p}")
     print(f"  top={top} inputs={len(ins)} outputs={len(outs)} state_fields={nstate} cycles={a.cycles}")
-    if nstate > 256:
-        print(f"  NOTE: {nstate} state fields exceeds LEAN_MAX_CTOR_FIELDS=256.")
-        print("        Elaboration and the proofs still succeed; code generation will not.")
+    if nstate == 256:
+        print(f"  WARNING: exactly {nstate} state fields.  On Lean < 4.35.0 this is")
+        print("           accepted but the 8-bit field count wraps to 0 and every")
+        print("           field leaks on free (lean4 issue #15527).  Use >= 4.35.0.")
+    elif nstate > 255:
+        print(f"  NOTE: {nstate} state fields exceeds the 255 object-field limit of a")
+        print("        Lean constructor.  Needs Lean >= 4.36.0, which spills the")
+        print("        surplus into chained objects (lean4 PR #15516); on an older")
+        print("        toolchain the proofs still stand but codegen fails.")
+        print("        Very wide records may also need `set_option maxRecDepth` and")
+        print("        `set_option maxHeartbeats 0`.")
     return 0
 
 

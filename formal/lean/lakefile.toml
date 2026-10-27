@@ -4,7 +4,7 @@ defaultTargets = ["LeanSemanticPrimitives"]
 [[require]]
 name = "mathlib"
 git = "https://github.com/leanprover-community/mathlib4.git"
-rev = "v4.31.0"
+rev = "v4.36.0-rc1"
 
 [[lean_lib]]
 name = "LeanSemanticPrimitives"
@@ -39,3 +39,13 @@ exeName = "lgraph-sim"
 name = "LegacySimMinionTlb"
 root = "LegacySims.minion_tlb_LegacySim"
 exeName = "legacy-sim-minion-tlb"
+
+# A row whose state record is WIDER than a Lean constructor's 255 object fields
+# (issue_stage_gate: 334).  It builds only on Lean >= 4.36.0, which spills the
+# surplus fields into chained objects (lean4 PR #15516).  Kept as the worked
+# example that the old field wall is gone: on v4.31.0 this row could be proved
+# but never run.
+[[lean_exe]]
+name = "LegacySimIssueStage"
+root = "LegacySims.issue_stage_gate_LegacySim"
+exeName = "legacy-sim-issue-stage"
