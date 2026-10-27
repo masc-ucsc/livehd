@@ -1337,10 +1337,11 @@ void synth_command(Options& opts, Result& res) {
     if (!run_place || !place_options.full || macro_plan_only) {
       throw Lhd_error{"usage", "synth.place.stage_timing needs a final placement", "set synth.place=true (full placement)"};
     }
-    stage_clock = stage_timing_clock(stage_timing_port, usyn_sets, sdc, liberty.empty() ? usyn_liberty : liberty);
+    stage_clock = stage_timing_clock(stage_timing_port, usyn_sets, sdc, usyn_liberty);
   }
   // Post-legal domino sizing (2d-domplace G): opt-in, against stage timing.
   const bool                               run_domino_sizing = truthy(synth_set(opts, "place.domino_sizing", "false"));
+  bool                                     domino_sizing_ran = false;  // this run wrote place/domino_sizing.json
   livehd::placement::Custom_sizing_options domino_sizing;
   domino_sizing.buffers = truthy(synth_set(opts, "place.domino_sizing.buffers", "true"));
   {
@@ -2256,7 +2257,7 @@ void synth_command(Options& opts, Result& res) {
         // Post-legal domino sizing on native stage timing: every trial is
         // re-placed through the two-row ECO and re-timed with this timer.
         if (!stage_timer) {
-          stage_timer = make_stage_timer(liberty.empty() ? usyn_liberty : liberty,
+          stage_timer = make_stage_timer(usyn_liberty,
                                          sdc,
                                          top,
                                          bundle_path,
@@ -2291,7 +2292,10 @@ void synth_command(Options& opts, Result& res) {
         phase_log.clear();
         set_crash_context({}, {});
         res.recipe_steps.emplace_back("pass.place.domino_sizing");
-        res.outputs.push_back(root + "/place/domino_sizing.json");
+        domino_sizing_ran = true;
+        if (user_workdir) {  // a scratch workdir's file does not survive the run
+          res.outputs.push_back(root + "/place/domino_sizing.json");
+        }
       }
       net.graphs = {placed.graph};
       if (io_flow) {
@@ -2450,7 +2454,7 @@ void synth_command(Options& opts, Result& res) {
     if (run_stage_timing) {
       Phase_timer phase(res, "pass.place.stage_timing");
       if (!stage_timer) {
-        stage_timer = make_stage_timer(liberty.empty() ? usyn_liberty : liberty,
+        stage_timer = make_stage_timer(usyn_liberty,
                                        sdc,
                                        top,
                                        bundle_path,
@@ -2541,6 +2545,14 @@ void synth_command(Options& opts, Result& res) {
         const auto report = fs::path(report_emit->path) / "stage_timing.json";
         if (canon(report.string()) != canon(stage_timing_path)) {
           copy_export_file(stage_timing_path, report);
+        }
+        res.outputs.push_back(report.string());
+      }
+      if (domino_sizing_ran) {
+        const auto sized  = root + "/place/domino_sizing.json";
+        const auto report = fs::path(report_emit->path) / "domino_sizing.json";
+        if (canon(report.string()) != canon(sized)) {
+          copy_export_file(sized, report);
         }
         res.outputs.push_back(report.string());
       }

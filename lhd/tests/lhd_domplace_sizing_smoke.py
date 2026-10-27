@@ -145,9 +145,13 @@ assert estimated['domino_sizing']['before']['delay_ps'] > 0, estimated['domino_s
 # Up-size: q1 steps to its dfxtp_2 variant in place and displaces the
 # single-row cell its wider footprint covers; the period improves.
 plain = run('plain', coefficients + ['--set', 'synth.place.utilization=0.4'])
-grown = run('grown', coefficients + sizing + ['--set', 'synth.place.utilization=0.4'])
+grown = run('grown', coefficients + sizing + ['--set', 'synth.place.utilization=0.4', '--emit-dir', f'report:{root}/grown_report'])
 place = grown['qor']['place']
 report = place['domino_sizing']
+# The sizing report is exported with the other report sidecars.
+sized = root / 'W/grown/synth/place/domino_sizing.json'
+assert (root / 'grown_report/domino_sizing.json').read_bytes() == sized.read_bytes()
+assert str(root / 'grown_report/domino_sizing.json') in grown['outputs'] and str(sized) in grown['outputs'], grown['outputs']
 assert [(t['move'], t['outcome']) for t in report['trials']] == [('up', 'accepted')], report['trials']
 assert report['counts']['up_accepted'] == 1 and report['after']['delay_ps'] < report['before']['delay_ps'], report
 eco = place['multirow_eco']
