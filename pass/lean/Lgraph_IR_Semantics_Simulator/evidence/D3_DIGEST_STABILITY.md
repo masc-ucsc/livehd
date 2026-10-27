@@ -12,7 +12,7 @@ evidence does establish instead.
 ## The run that produced the 19 was never retained
 
 §27.2's fresh run reported **RAN 76 / NOT_RUN 46**. Three 122-module runs are
-retained under `pass/lean/tests/d4/`, and none of them is that run:
+retained under `pass/lean/Lgraph_IR_Semantics_Simulator/tests/d4/`, and none of them is that run:
 
 | rows file | `d4_head` | date | RAN | NOT_RUN |
 |---|---|---|---:|---:|

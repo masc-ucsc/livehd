@@ -15,7 +15,7 @@ To simulate a REAL design, generate a launcher beside its emitted certificate:
     def main (args : List String) : IO UInt32 :=
       Compiler.Direct.simMain [("SingleCycleCPU", SingleCycleCPU_designCert)] args
 
-`pass/lean/scripts/make_sim_launcher.py` writes exactly that file.
+`pass/lean/Lgraph_IR_Semantics_Simulator/scripts/make_sim_launcher.py` writes exactly that file.
 -/
 import LeanSemanticPrimitives.Compiler.DirectExamples
 import LeanSemanticPrimitives.Compiler.DirectSim

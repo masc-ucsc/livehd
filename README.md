@@ -289,3 +289,93 @@ vim.diagnostic.setqflist()` to list them).
 See [`pass/isabelle/README.md`](pass/isabelle/README.md) for the
 `pass.isabelle` validation flow, CVA6 cache/memory LEC status, certificate-proof
 workflow, and Isabelle heap-build rules.
+
+# Lean Simulator Translation
+
+`pass.lean` is LiveHD's Lean 4 back end. It takes an LGraph — the design after
+LiveHD has read the RTL and normalised it — and writes it out as Lean 4 source.
+
+
+A simulator turns that output into something that steps the design: given the
+inputs and the current state, it computes the outputs and the next state, in
+bit-vector arithmetic, for as many cycles as asked. The four below differ in how
+they get there, which is what sets their speed, and in what they prove.
+
+**What is proved, and over what.** Two kinds of claim appear below and they are
+not interchangeable. A claim proved **once, for every design** is about the
+machinery, so it holds for any design put through it: LiveHD's Lean compiler is
+proved correct (`compileDesign_correct`), the Futamura specializer and its
+per-cycle step theorem are proved, and the IR-as-semantics simulator's three
+interpreters are proved to agree for every input and every state. A claim
+established **per design** covers only the block in front of it, and says
+nothing about the next one. Some of those are proofs — a kernel-checked theorem
+about that one certificate, which is translation validation under `--prove` and
+the theorems the legacy exporter emits beside each design. Some are only checks:
+translation validation's sampled differential test by default. The Futamura
+projection is in between: its step theorem is proved once and applies to a
+design given the specializer's output for it, which comes from a compiled run,
+not a kernel proof. Its cycle-by-cycle comparison against the reference
+semantics is an extra check on that run, and covers only the cycles run.
+
+**What is not proved.** Every claim above starts at the certificate. Getting
+there is not proved by anyone: reading the RTL, normalising the graph, and the
+C++ exporter that writes the certificate out are trusted by all four routes, so
+a bug in any of them reaches all four alike. Lean's compiler and runtime are
+trusted by anything that executes; for the Futamura projection they also produce
+the specializer's output its theorem takes as given. The Lean kernel is trusted
+throughout, and Mathlib where a route uses it (the Futamura projection does not).
+Each README has a trust boundary section with its own version of this and the
+checks that stand in for a proof today; read it before quoting a block as
+proved.
+
+Four simulators come out of the pass:
+
+- **Translation validation**
+  ([`pass/lean/Translation_Validation/README.md`](pass/lean/Translation_Validation/README.md)).
+  - It turns each certificate into one straight-line Lean function, a compiled
+    simulator.
+  - It checks that function against the semantics that LiveHD's Lean compiler
+    is proved correct for. The check is a sampled differential test by
+    default, and a kernel-checked theorem with `--prove`.
+  - Its README covers how to build and run it, its trust boundary, and the
+    CVA6, CORE-ET and PicoRV32 blocks it covers.
+- **Futamura projection**
+  ([`pass/lean/specialization/README.md`](pass/lean/specialization/README.md)).
+  - It specializes a Lean interpreter of hardware designs to one certificate.
+    What is left is a residual program for that design alone.
+  - Each cycle the residual runs is proved equal to the certificate's
+    reference semantics, `interpretDesign`, given the specializer's compiled
+    run and for inputs and states the runtime accepts. The specializer and that
+    step theorem are proved once for all designs. By default, a run also
+    compares every cycle with `interpretDesign`.
+  - Its README covers how to build and run it, how it works, its trust
+    boundary, the CVA6, CORE-ET and PicoRV32 blocks it covers, and two
+    performance examples.
+- **IR as semantics**
+  ([`pass/lean/Lgraph_IR_Semantics_Simulator/README.md`](pass/lean/Lgraph_IR_Semantics_Simulator/README.md)).
+  - It runs the certificate directly. The certificate is data, and a small Lean
+    program is the definition of what that data means.
+  - It has three ways to run a certificate: a reference interpreter,
+    `interpretDesign`; a checked interpreter; and a compiled fast path. The
+    three are proved to agree for every input and every state, with no axioms
+    and no `sorry`.
+  - Its `interpretDesign` is the reference semantics that translation
+    validation is checked against, and the Futamura projection is proved and
+    checked against.
+  - Its README covers how to build and run it, how it works, its trust
+    boundary, the CVA6 and CORE-ET blocks it covers, and two performance
+    examples.
+- **Legacy fast model**
+  ([`pass/lean/Legacy_Fast_Model_Simulator/README.md`](pass/lean/Legacy_Fast_Model_Simulator/README.md)).
+  - It is the pass's other mode, `legacy`, and the default one. It reads no
+    `DesignCert`. The exporter writes one self-contained Lean program per
+    design: an executable fast model, a certificate holding the same graph as
+    data, and the theorems relating the two. All of it is generated text.
+  - Its output runs on its own. The model is in the emitted file, so no
+    separate simulator has to read it; `lake` links it to a native binary.
+  - Its proofs are emitted with the design and hold per design. By default they
+    establish that the certificate is well formed; the theorem that ties the
+    executable to the certificate is emitted only under `emit_fast_bridge=true`.
+  - Its README covers how to build and run it, how it works, its trust
+    boundary, the CVA6, CORE-ET and PicoRV32 blocks it covers, measured
+    performance, and two worked examples.

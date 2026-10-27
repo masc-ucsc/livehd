@@ -99,6 +99,9 @@ def header(out: pathlib.Path):
 
 
 def main() -> int:
+    # <ROOT>/temp is ignored, so a fresh clone does not have it; mkdtemp
+    # does not create parents.
+    (ROOT / "temp").mkdir(exist_ok=True)
     tmp = pathlib.Path(tempfile.mkdtemp(prefix="d3joinproof_", dir=str(ROOT / "temp")))
     sha = {m: hashlib.sha256(m.encode()).hexdigest() for m in
            ("acc", "accx", "ref", "resrc", "unatt", "budget", "nocert", "norow",
