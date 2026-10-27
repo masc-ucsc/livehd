@@ -3,6 +3,7 @@
 // lhd — the stateless, hermetic LiveHD CLI kernel.
 // See lhd.hpp and the LiveHD docs.
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -138,6 +139,7 @@ int main(int argc, char** argv) {
   }
 
   try {
+    lhd::load_metadata(opts);
     // The run_id content hash is size-dependent WORK, not a constant preamble:
     // it reads every input's bytes, and for `lhd lec` with two lg: sides that is
     // the per-side slice of both libraries — measured 0.4 s of a 2.6 s proof on
@@ -224,6 +226,11 @@ int main(int argc, char** argv) {
 
   if (opts.stats) {
     livehd::Job_manager::global().report();
+  }
+  for (const auto& path : opts.metadata_files) {
+    if (std::find(res.inputs.begin(), res.inputs.end(), path) == res.inputs.end()) {
+      res.inputs.push_back(path);
+    }
   }
   lhd::write_result(opts, res);
   return res.exit_code;

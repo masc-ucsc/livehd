@@ -518,8 +518,7 @@ holds both two-row domino cells and a memory proxy macro is not supported yet
 
 `lhd synth` (and `lhd pass usyn`) plumb the profile's INTERNAL labels:
 `pass.usyn.lef` from `synth.lef` (the placement LEFs) and `pass.usyn.row_access`
-from `synth.place.row_access` (`default`, the stand-in, or a schema-1 JSON
-path); setting either directly is a usage error. An unset
+from the positional `livehd.physical.row_access` metadata record (a schema-1 `convention` object; absent uses the stand-in); setting either directly is a usage error. An unset
 `pass.usyn.domino_clock` is taken from an SDC whose only clock is
 `create_clock ... [get_ports P]`; otherwise it must be named.
 

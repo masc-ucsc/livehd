@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """synth.place.buffer_cleanup: the pre-placement removal of internal synthesis
-buffers runs only when a later phase of the same run rebuilds the buffering
-(auto: synth.place.resize). Without one, the synthesis buffers survive into
-the placed DEF; true forces the cleanup, false keeps them always."""
+buffers is disabled by default. Explicit auto runs it when resize rebuilds
+buffering; true forces the cleanup, false keeps the synthesis buffers."""
 import json
 import os
 from pathlib import Path
@@ -47,9 +46,11 @@ def cleanup(name):
     return json.loads(path.read_text().splitlines()[0]) if path.is_file() else None
 
 
-run('auto', [])
-kept = buffers('auto')
-assert kept > 0 and cleanup('auto') is None, (kept, cleanup('auto'))
+run('default', [])
+kept = buffers('default')
+assert kept > 0 and cleanup('default') is None, (kept, cleanup('default'))
+run('auto', ['--set', 'synth.place.buffer_cleanup=auto'])
+assert buffers('auto') == kept and cleanup('auto') is None
 run('off', ['--set', 'synth.place.buffer_cleanup=false'])
 assert buffers('off') == kept and cleanup('off') is None
 run('forced', ['--set', 'synth.place.buffer_cleanup=true'])

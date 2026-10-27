@@ -32,8 +32,9 @@ struct Row_access_convention {
 // Strict schema-1 JSON object: "schema": 1, "name", "version", "even", "odd"
 // ("horizontal" | "vertical"); optional "origin" ("first_core_row") and
 // "index_base". Unknown keys and invalid values throw std::invalid_argument.
+Row_access_convention parse_row_access(std::string_view json);
 Row_access_convention read_row_access(const std::string& json_path);
-// Option value: "default" (or empty) selects the stand-in, anything else is a JSON path.
+// Internal value: default, serialized convention, or a workdir sidecar path.
 Row_access_convention resolve_row_access(std::string_view option);
 // Core row holding local row `half` of a `rows`-row master whose bottom edge
 // sits on core row start_row in orientation o: N/FN keep the local row order,

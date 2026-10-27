@@ -475,6 +475,10 @@ boundaries need port load annotations and arrival/required budgets, and a net
 crossing a boundary is buffered as a whole net, not as the stub inside one
 partition.
 
+This boundary sizing is opt-in (`pass.abc.boundary=true`, default `false`).
+Disabling it preserves imported cell sizing from this refinement; ordinary
+ABC mapping and input-fanout buffering remain enabled.
+
 The realization keeps the per-region modules (the incremental cache, the
 per-module LEC twin and the memory admission depend on them) and hands each
 region's ABC session a per-PI/PO **environment table** -- `SC_Bnd`, which the
@@ -606,7 +610,7 @@ The option namespace matches the command path (`lhd pass abc`); after the
 | `area_relax` | max percent of a MET delay budget to trade back for area, via ABC's `&nf -R` (bounded by the real slack too); `0` disables that remap — see below | `0` |
 | `area_flow` | AREA command string: empty = the former baseline (`&fraig`/`dc2`/`&dch`/`&nf`); used without delay or as a second candidate after meeting a delay budget. Built-ins append `buffer -N {F}; dnsize {B}`, adding `upsize {B}` before `dnsize` for a timed candidate. `none` disables only the second candidate. Custom strings run verbatim (`{D}`/`{L}`/`{F}`/`{B}` substituted, no tail appended); explicit `flow` takes precedence | empty |
 | `reg_margin` | register overhead subtracted from `delay` to form a flop-bearing region's budget: `auto` = the mapped DFF cell's clk→Q + setup read off its Liberty timing tables (ASAP7 DFFHQNx1 83.9 ps, sky130 dfxtp_1 528 ps), a number = that many ps, `0` = no margin — see below | `auto` |
-| `boundary` | size every region against what lies beyond its partition (see "Partition boundaries" above): the static estimate while it maps, the exact re-size once every region exists | `true` |
+| `boundary` | size every region against what lies beyond its partition (see "Partition boundaries" above): the static estimate while it maps, the exact re-size once every region exists | `false` |
 | `boundary_buffer` | tree every region input's fanout inside the region when it exceeds `max_fanout` -- the design's primary inputs and the sink side of crossing nets alike -- by declaring `boundary_drive` as ABC's driving cell (its `buffer` only trees an input that has a driver); independent of `boundary`; false leaves inputs unbuffered and relies on the exact re-size to upsize the driver | `true` |
 | `boundary_drive` | stand-in Liberty cell driving a region input whose real driver is not a mapped cell (a primary input, a flop, a memory or child output, every input under the estimate): empty = the library's smallest ordinary buffer, `none` = an ideal driver | `` |
 | `reset_fanout` | cap on the asynchronous clear/preset pins one reset net drives inside a region (a region input, a reset-polarity inverter or a mapped reset cone): past it the net is dealt out through a tree of the library's smallest buffer, this many pins per buffer, level by level, exactly like the `icg_fanout` clock tree (see "Asynchronous-reset fanout tree"). `0` disables; `1` is refused (a level could never shrink) | `0` |

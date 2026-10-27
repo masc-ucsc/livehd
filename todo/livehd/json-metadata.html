@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LiveHD JSON metadata — audit and shared record format</title>
+<link rel="stylesheet" href="../todo.css"></head><body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">All tasks</a></nav><main>
+<h1><strong class="item-id">json-metadata</strong> One composable metadata file across passes</h1>
+<p>Audit and design proposal, 2026-10-27. LiveHD should identify each JSON entry
+by its class, preserve user intent alongside generated results, and accept the
+same metadata whether supplied in one combined file or stored in separate
+workdir shards. The current readers do not yet support that uniformly.</p>
+<p>CLI input cleanup: pass one or more JSON paths beside the design inputs, for example
+<code>lhd synth top.v intent.json tuning.json --top top</code>. Combining their arrays into one file is equivalent.
+<code>livehd.placement.hints</code>, <code>livehd.synth.tuning</code>, and <code>livehd.sim.tuning</code>
+select their consumers; <code>livehd.physical.row_access</code> supplies a strict <code>convention</code> object for domino generation. Unrelated classes are retained. Conflicting record identities are rejected.
+The removed <code>synth.metadata</code>, <code>synth.tune.file</code>, <code>sim.tune.file</code>, and <code>synth.place.row_access</code>
+options produce a migration diagnostic. Tuning export paths remain outputs, and private workdir caches retain
+validation gates. Generic attribute-loader file labels, external JSON protocols, query arguments, and JSON design
+formats are not tuning-file selection options.</p>
+<table><tr><th>Removed input selector</th><th>Positional JSON record</th><th>Behavior</th></tr>
+<tr><td><code>synth.metadata</code></td><td><code>livehd.placement.hints</code></td><td>Advisory hints during FP/macro placement.</td></tr>
+<tr><td><code>synth.tune.file</code></td><td><code>livehd.synth.tuning</code></td><td>Existing schema_version=1 and decisions fields; validation gates retained.</td></tr>
+<tr><td><code>sim.tune.file</code></td><td><code>livehd.sim.tuning</code></td><td>Existing schema, knobs/vector and provenance fields; explicit knobs win.</td></tr>
+<tr><td><code>synth.place.row_access</code></td><td><code>livehd.physical.row_access</code></td><td>Strict convention payload; selected by provisional domino generation.</td></tr></table>
+<pre>[{"class":"livehd.physical.row_access","id":"routing-owner","convention":{"schema":1,"name":"owner","version":"1","even":"vertical","odd":"horizontal"}}]</pre>
+<p>Record presence activates that consumer's metadata, not an unrelated pipeline stage: placement hints do not
+turn synthesis-only runs into placement runs, and row-access records do not select the domino mapper.
+Tuning exports consolidate the consumed tuning section and retain unrelated records and other design scopes.
+Internal validated trial files and workdir cache shards remain implementation details. Inline JSON value options
+such as per-color <code>region_opts</code> are not file selectors and are unchanged.</p>
+<h2>Depends on</h2>
+<p>No new placement algorithm is needed for the shared transport. The
+<a href="../../docs/placement_regularity.html#placement-hints">hierarchical placement-hint sketch</a>
+uses positional JSON inputs. Synthesis and simulation tuning also select class-tagged records; source attributes and internal cache schema migrations remain pending.</p>
+<h2>Subtasks — pending</h2>
+<ul class="subtasks">
+<li><strong>A — Shared record reader, writer and registry.</strong> Define class/version/scope
+validation, deterministic compact serialization, duplicate handling, unknown-entry
+preservation and atomic publication. A reader requests a class, not a filename.
+Register each owned payload's reader, writer, dependencies and legacy adapter.</li>
+<li><strong>B — Migrate public metadata inputs.</strong> Start with attribute/color import,
+synthesis tuning, and placement hints; provide one driver-level metadata input
+and export. Read legacy standalone formats through explicit adapters. Do not
+infer an untagged record's type from coincidentally similar keys.</li>
+<li><strong>C — Incremental admission and provenance.</strong> Preserve existing hashes,
+code salts, interface checks, validation levels and artifact integrity. Add typed
+consumed-record digests; separate declared intent, derived state and observations.
+Load a combined document once per invocation, not once per pass or graph node.</li>
+<li><strong>D — Remaining owned reports, state and protocols.</strong> Cover the families
+below and each source in the inventory. Support compact workdir shards and JSONL
+streams, plus lossless bundle export/import. Keep external wire formats unchanged
+through adapters. Update existing consumers together with their producers.</li>
+<li><strong>E — End-to-end checks.</strong> Prove split-versus-combined equivalence,
+input-intent round trips, selective cache invalidation, duplicate diagnostics,
+unknown-entry preservation, coordinate-hint fallback warnings, truncated-stream recovery and atomic concurrent
+publication. Extend synthetic placement comparisons only after hint semantics are
+agreed. Existing contract tests remain unchanged.</li>
+</ul>
+<h2>Subtasks — landed</h2>
+<ul><li>Shared <code>core/metadata</code> bundle reader/writer: canonical compact records, duplicate validation, unknown-record preservation, atomic publication and selected-class identity.</li>
+<li>positional JSON placement consumer: hierarchical templates, groups, soft cluster/direction/snap/alignment, validated movable coordinate seeds, structured diagnostics and generated state/results.</li>
+<li>Completed-placement cache keys include only consumed hint records. Cache restore merges generated records into the current input bundle; inner block reuse is bypassed for hints.</li>
+<li>Unit coverage for repeated hierarchy, name rebinding, invalid/overlapping coordinates, contradictory soft relationships, and metadata round trips. Synthetic and CoralNPU experiments are tracked in the placement guide.</li></ul>
+<p>This is an incremental migration. Existing standalone synthesis/simulation tuning, report and cache formats are still read through their original APIs. Source HDL attributes and automatic admission of exported coordinate-state bundles are not implemented. No existing option default changed.</p>
+<h2>Design notes: findings</h2>
+<p>A static scan of tracked C++/Python sources under core, graph, lhd, inou, pass,
+lsp and tools identified <strong>151 candidate source files</strong>. Tests,
+contract files and benchmark/script subdirectories were excluded from that
+production-oriented scan. Some matches are internal strings, tools or protocol
+payloads rather than metadata files. This is a coverage inventory, not a claim
+that every payload has been semantically validated. Each migration needs its
+producer/consumer pair audited. The inventory includes 23 files with pretty-output
+indicators; compact formatting is already common but not universal.</p>
+<p><a href="../../repros/json_metadata_audit_20261027/inventory.html">Source-site inventory</a>
+· <a href="../../repros/json_metadata_audit_20261027/inventory.json">Machine-readable inventory</a>
+(local generated artifacts, not required inputs).</p>
+<table><thead><tr><th>Family and evidence</th><th>Current shape / reuse</th><th>Issue for one file</th></tr></thead><tbody>
+<tr><td><a href="../../inou/attr/inou_attr.cpp">Attribute/color IO</a></td><td>Array of entries tagged
+<code>class=livehd.lgraph.color</code>; pretty output; unrelated classes skipped.</td><td>Good existing dispatch convention. No per-record version;
+assert-based validation and definition-node naming need review for hierarchical scope.</td></tr>
+<tr><td><a href="../../lhd/lhd_compile_cache.cpp">Compile inventories</a></td><td>Standalone objects;
+<code>schema_version</code> 4/6, code salt, semantic/interface hashes, imports and snapshots.</td><td>Separate filename-bound loaders and graph artifacts; preserve dependency closure and atomic generations.</td></tr>
+<tr><td><a href="../../pass/synth/region_cache.cpp">ABC region cache</a>;
+<a href="../../pass/synth/tmap_cache.cpp">mapping cache</a></td><td>Standalone <code>schema=4</code>,
+salt, region records and separate graph libraries. Bad or stale cache starts cold.</td><td>Not interchangeable with other region-shaped objects. JSON alone is not the cached graph library.</td></tr>
+<tr><td><a href="../../pass/synth/tune_store.hpp">Synthesis tuning</a></td><td><code>schema_version=1</code>
+with decisions; separate applied state, pending/proven choices and JSONL history.</td><td>Keep source-selected choices, suggested choices and validation status distinct; filenames currently select semantics.</td></tr>
+<tr><td><a href="../../pass/synth/io_resynth.cpp">Placement-stage resynthesis</a></td><td>
+<code>schema=1</code>, period, timing-engine identity, per-region netlist identity,
+used/placed timing, separate wire-load state.</td><td>Hardcoded <code>io_timing.json</code> and
+<code>wire_load.json</code>; mismatched timing identity already suppresses obsolete measurements.</td></tr>
+<tr><td><a href="../../lhd/physical_cache.cpp">Physical cache</a></td><td><code>schema=1</code>
+manifest, descriptor and hashed compiled/dependency/artifact inventories; validated
+DEF may serve as a warm-start hint.</td><td>Saved coordinates must not become user relative-placement intent.
+Retain artifact checks and complete-generation publication.</td></tr>
+<tr><td><a href="../../pass/opentimer/sta_cache.cpp">STA cache</a>;
+<a href="../../lhd/formal_cache.cpp">formal cache</a></td><td>Standalone schema/salt-keyed
+analysis or proof records; formatting differs.</td><td>Measurements and proof verdicts need their existing environment/identity checks,
+not just a recognized class tag.</td></tr>
+<tr><td><a href="../../lhd/lhd_tune.hpp">Tuning persistence</a>;
+<a href="../../lhd/lhd_sim_tune_session.cpp">simulation tuning</a></td><td>String schema tags,
+compact JSON/JSONL, retained generations and append/rewrite helpers with locking.</td><td>Reuse atomic-write and partial-tail handling ideas; preserve history order and validation gates.</td></tr>
+<tr><td><a href="../../graph/synth_groups.cpp">Synthesis groups</a>;
+<a href="../../pass/synth/region_driver.cpp">region policies</a></td><td>JSON graph attributes
+and reports with source policy provenance and scoped group information.</td><td>Useful identity/provenance concepts; numeric colors, debug node IDs and
+current module names are not sufficient persistent instance identities.</td></tr>
+<tr><td><a href="../../pass/place/place.cpp">Placement</a>;
+<a href="../../pass/place/region_mesh.cpp">region mesh</a>;
+<a href="../../pass/place/magnet_report.cpp">macro groups</a></td><td>Many independent objects
+and JSONL trajectories; final QoR, stage metrics, buses, repair and routing diagnostics.</td><td>Same filenames or field names recur across stages. Add record scope/run/stage;
+reports must not be accidentally consumed as controls.</td></tr>
+<tr><td><a href="../../pass/domplace/domino_bundle.cpp">Domino model bundle</a>;
+<a href="../../inou/lefdef/row_access.cpp">row access</a></td><td>Explicit schema versions,
+units, technology and companion LEF/Verilog/model libraries. Row-access reader rejects unknown keys.</td><td>Extract the matching record before strict payload validation. Missing required
+technology metadata cannot use the permissive fallback intended for advisory hints.</td></tr>
+<tr><td><a href="../../lhd/lhd_result.cpp">CLI results</a>;
+<a href="../../lhd/lhd_meta.cpp">command descriptions</a></td><td>Command-specific objects,
+embedded reports and schema versions.</td><td>Wrap or adapt explicitly; keep command/protocol consumers compatible.</td></tr>
+<tr><td><a href="../../pass/usyn/provenance.cpp">USYN provenance</a>;
+<a href="../../pass/usyn/native_report.cpp">USYN reports</a>;
+<a href="../../pass/lec/pass_lec.cpp">LEC</a>;
+<a href="../../pass/satopt/satopt.cpp">SAT optimization</a></td><td>Per-pass reports, evidence,
+scopes and sometimes separate artifact bundles.</td><td>Retain certificates, dependencies and measured-versus-estimated distinctions;
+shared transport must not imply shared payload schemas.</td></tr>
+<tr><td><a href="../../inou/cgen/cgen_sim.cpp">Simulator generation</a>;
+<a href="../../inou/prp/prp_sim.cpp">simulation runtime</a>;
+<a href="../../pass/lean/pass_lean.cpp">Lean export</a></td><td>Interface/catalog/digest data,
+profiles and external-tool interchange.</td><td>Separate internal reusable metadata from the formats expected by generated code or external proof tools.</td></tr>
+<tr><td><a href="../../core/diag.cpp">Diagnostics</a>;
+<a href="../../lsp/livehd_lsp.cpp">LSP</a>;
+<a href="../../tools/physical_repair.cpp">diagnostic tools</a></td><td>JSONL events,
+JSON-RPC messages, and standalone tool configurations.</td><td>Preserve wire protocols. Bundle exported copies as explicitly typed payloads;
+do not rewrite JSON-RPC messages into a LiveHD metadata protocol.</td></tr>
+</tbody></table>
+<h2>Proposed common shape</h2>
+<p>Use an array of typed records, extending the existing attribute IO convention.
+A single-record file is a one-element array; combining files combines records,
+not object fields. Each record has <code>class</code>, integer
+<code>schema_version</code>, stable <code>id</code>, and <code>design</code> scope.
+Design-independent records use an explicit null design. Identity is the tuple
+(class, design, id). Template/module/instance selectors live in the class payload.
+Per-class versions evolve independently; no whole-tool format version is needed.</p>
+<pre id="combined-example">[
+  {"class":"livehd.placement.hints","schema_version":1,
+   "id":"floorplan-intent","design":"chip.top",
+   "templates":[{"module":"bank","hints":[
+     {"id":"pair","kind":"snap","subject":"data","relative_to":"tag","side":"east"}
+   ]}]},
+  {"class":"livehd.placement.state","schema_version":1,
+   "id":"macro_plan","design":"chip.top",
+   "depends_on":[{"class":"livehd.placement.hints","design":"chip.top",
+                  "id":"floorplan-intent","digest":"sha256:EXAMPLE"}],
+   "netlist_digest":"sha256:EXAMPLE","technology_digest":"sha256:EXAMPLE",
+   "options_digest":"sha256:EXAMPLE","code_salt":"EXAMPLE",
+   "hints":[{"id":"data-start","kind":"position","subject":["bank0","data"],
+             "frame":"floorplan","anchor":"lower_left","x_um":120,"y_um":80,"orientation":"N"}]},
+  {"class":"livehd.placement.hint_results","schema_version":1,
+   "id":"macro_plan","design":"chip.top",
+   "results":[{"hint":"floorplan-intent","template":"bank","instance":["bank0"],
+               "hint_id":"pair","status":"relaxed","reason":"routing_clearance"}]}
+]</pre>
+<p>Illustrative payloads and coordinates only, not a measured run or supported
+input yet. The digest placeholders are deliberately not valid cache keys.
+A complete reusable state needs the producer's full dependency descriptor;
+the abbreviated example is not an admission algorithm.</p>
+<ul>
+<li>Dispatch on <code>class</code>. Validate the version and payload only with that
+class's reader. Unknown classes remain uninterpreted and survive export. Unknown
+versions are preserved but not applied; optional cache state becomes a miss.
+An incompatible required input gets a diagnostic instead of guessed semantics.</li>
+<li>Preserve authored hints semantically, including relative references, IDs,
+types and unknown extension fields. Generated results and state have their own
+classes. Never replace a relative hint with a measured absolute position.</li>
+<li>Generated relative or coordinate suggestions may use the same templates/hints payload
+under <code>livehd.placement.suggestions</code>. They influence a later run only
+when explicitly selected/promoted. Record the producing run and consumed inputs.</li>
+<li>Do not use array order as precedence. Identical duplicate identities may be
+deduplicated; conflicting duplicates get diagnostics, with advisory records
+skipped rather than silently overwritten. An intentional scoped override must
+identify the target hint. Reject duplicate JSON object keys during validation.</li>
+<li>Resolve logical hierarchy using stable definition and instance identities.
+Use path-segment arrays for generated instance paths to avoid slash/dot escaping
+ambiguity; display paths are labels, not binding keys. Preserve source-to-physical
+mapping for split memories and generated synthesis wrappers.</li>
+</ul>
+<h2>Coordinate hints are advisory too</h2>
+<p>Accept optional <code>kind=position</code> hints from the user and from
+incremental output. Use the same payload in both: stable hint ID, subject instance
+path, explicit frame and anchor, <code>x_um</code>, <code>y_um</code>, and optional
+orientation. Coordinates refer to the lower-left corner of the oriented physical
+body before halos, in DEF's global coordinate system; they are not implicitly
+offset by the core origin. Relative relationships remain the preferred portable
+form. See the <a href="../../docs/placement_regularity.html#placement-position-json">synthetic coordinate example</a>.</p>
+<p>Coordinates are movable initial guesses, never fixed constraints. Generated
+state can retain these hints under <code>livehd.placement.state</code> with its
+usual dependency/admission information. This shares the coordinate representation
+without overwriting the authored <code>livehd.placement.hints</code> record or
+silently promoting all generated state to user intent. After warm-start admission,
+the same geometric validation applies to authored and generated coordinates.</p>
+<p>If a hint cannot be used (overlap with fixed geometry or conflicting coordinate
+hints, out of bounds, illegal row/site/orientation, unresolved or ambiguous target),
+discard it and continue ordinary placement. Validate coordinate requests together;
+file order is not precedence, and transient GP overlap is not grounds to reject
+every movable-cell seed. A split logical memory needs an explicit group transform,
+not identical positions for all generated SRAMs.</p>
+<p>Report the discarded hint through the standard diagnostic sink at warning
+severity, honoring <code>--diag-fmt</code>. Include design/instance, record/hint ID,
+requested pose and reason, with source location when available. Deduplicate the
+same rejection across iterations. Normal optimization movement of an accepted
+initial guess is allowed and does not need a warning. An advisory failure must
+not become a fatal placement error; ordinary physical legality checks still apply.</p>
+<h2>Style, compactness and storage</h2>
+<ul>
+<li>Use snake_case keys, real JSON numbers/booleans/arrays, integer versions, and
+explicit unit suffixes such as <code>delay_ps</code>, <code>x_um</code> and
+<code>area_um2</code>. Missing measurements are null, not zero, NaN, infinity or
+an undocumented negative sentinel. Keep class-specific absence semantics explicit.</li>
+<li>Emit compact UTF-8 JSON with one terminating newline. Pretty output is a view
+for documentation or inspection. Stable field/record ordering makes diffs and
+hashes reproducible; preserve array ordering wherever it has meaning.</li>
+<li>Canonicalize consumed records for cache keys so whitespace/object-member order
+does not invalidate reuse. Specify numeric normalization; preserve integers
+without a double round trip. Serialize digests as algorithm-tagged strings, not
+large JSON numbers that external tools could round.</li>
+<li>Keep one logical metadata input/export at the driver. A registry indexes records
+once; passes request their classes and scopes. A bundle supports all owned JSON
+metadata, but does not implicitly embed RTL, LEF, libraries or binary graph snapshots.</li>
+<li>Workdir sharding is explicitly supported. A shard contains the same typed
+records; long histories may use one typed record per JSONL line with explicit
+run/sequence identity. Pack/export produces a single JSON array and import may
+repartition it. Large artifacts and optional caches can stay separate; missing
+cache assets cause a miss, not a change to declared intent.</li>
+<li>Publish per-pass shards atomically; merge/export through one coordinator or
+locked generation, never competing read-modify-write updates to the same bundle.
+Do not rewrite the user's input file merely because a pass produced new state.</li>
+</ul>
+<h2>Incremental reuse without interference</h2>
+<p>The existing compile semantic/interface hashes, ABC salts, timing-engine
+identities, proof levels and physical artifact inventories are useful. Preserve
+those checks and add hashes of the exact metadata records each stage consumes.
+Hashing the whole combined file would make an appended report invalidate unrelated
+compile/synthesis caches, defeating the purpose.</p>
+<ul>
+<li>A changed placement hint invalidates dependent FP/macro/final placement state.
+It must not authorize stale fixed coordinates. Compilation/mapping can be reused
+when their own semantic inputs and dependencies are unchanged; the implementation
+must track placement attributes separately where current fingerprints combine them.</li>
+<li>A changed timing target/environment invalidates the corresponding timing and
+repair decisions. A saved mapping or timing observation is not authoritative
+merely because it is in the same file as a current user hint.</li>
+<li>Full output reuse requires all current cache-admission checks. A weaker warm
+start may reuse compatible positions as movable initial guesses, with separate
+admission and diagnostics. It must never silently turn a hint into a FIXED object.</li>
+<li>Output retains the original relative-placement record and writes updated state
+beside it. A stale state record can be discarded without losing the user's intent.</li>
+</ul>
+<h2>Acceptance before claiming one-file support</h2>
+<p>Feed the same records as one bundle and as shards through actual pass readers;
+compare normalized consumed records, deterministic results for a frozen seed, and
+cache decisions. Round-trip authored hints unchanged while replacing only the
+producer-owned state/results. Test mixed unknown classes, repeated designs and
+instances, name escaping, version mismatches, duplicates and stale dependencies.
+Test valid and unusable coordinate hints from both authored and incremental
+records, including warning output in human and machine diagnostic formats.
+Appending a report must preserve cache hits; changing a consumed hint must cause
+the appropriate miss. Cold and warm runs must retain netlist identity and physical
+legality. Keep protocol-specific and immutable contract tests intact.</p>
+</main></body></html>

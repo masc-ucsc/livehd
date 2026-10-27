@@ -68,6 +68,7 @@ def run(case, args, output):
            '--result-json', directory/'result.json', '--emit-dir', f'def:{directory}/physical', '-q']
     for key, value in settings.items():
         cmd += ['--set', f'{key}={value}']
+    cmd += args.metadata
     command(cmd, directory/'flow.log', args.timeout)
     place = directory/'work/synth/place'
     qor = json.loads((place/'qor.json').read_text())
@@ -179,6 +180,7 @@ def report(output, results):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('metadata', nargs='*', help='class-tagged JSON metadata inputs forwarded to lhd')
     parser.add_argument('--case', choices=['all']+[c['name'] for c in CASES], default='all')
     parser.add_argument('--lhd', default='lhd/lhd' if os.environ.get('TEST_SRCDIR') else str(Path(os.environ.get('BUILD_WORKSPACE_DIRECTORY', '.'))/'bazel-bin/lhd/lhd'))
     parser.add_argument('--output', type=Path)

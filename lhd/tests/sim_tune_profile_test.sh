@@ -236,7 +236,7 @@ sim "$W/export.json" "$IDLE" --workdir "$I" --setup-only --set sim.tune.export="
   || fail "export failed: $(cat "$W/export.json")"
 python3 - "$W/idle.simtune.json" <<'PY' || fail "bad export file: $(cat "$W/idle.simtune.json")"
 import json, sys
-d = json.load(open(sys.argv[1]))
+d = next(r for r in json.load(open(sys.argv[1])) if r["class"] == "livehd.sim.tuning")
 assert d["schema"] == "lhd-sim-tune-file-1", d
 assert d["knobs"]["dirty"] == "on", d
 assert d["provenance"]["converged"] is True, d
@@ -244,14 +244,14 @@ assert d["vector"].startswith("tv1:d=on;"), d
 PY
 grep -q "idle.simtune.json" "$W/export.json" || fail "the export is not listed in the envelope outputs"
 sim "$W/import.json" "$IDLE" --workdir "$W/fresh" --setup-only --set sim.tune.profile=off \
-  --set sim.tune.file="$W/idle.simtune.json" || fail "import failed: $(cat "$W/import.json")"
-[ "$(tune "$W/import.json" applied.vector)" = "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["vector"])' "$W/idle.simtune.json")" ] \
+  "$W/idle.simtune.json" || fail "import failed: $(cat "$W/import.json")"
+[ "$(tune "$W/import.json" applied.vector)" = "$(python3 -c 'import json,sys; print(next(r for r in json.load(open(sys.argv[1])) if r["class"] == "livehd.sim.tuning")["vector"])' "$W/idle.simtune.json")" ] \
   || fail "the imported vector is not applied: $(tune "$W/import.json" note)"
 [ "$(tune "$W/import.json" source.dirty)" = "file" ] || fail "an imported knob's source must be file"
 [ -d "$W/fresh/incr/scopes/sim" ] && fail "profile=off must not create a tune store"
 grep -q '"vector":"tv1:d=on' "$W/fresh/sim/tune_applied.json" || fail "tune_applied.json does not record the imported vector"
 # A missing tune file is a missing_file error, not a silent default.
-sim "$W/nofile.json" "$IDLE" --workdir "$W/fresh" --setup-only --set sim.tune.file="$W/nope.json" \
+sim "$W/nofile.json" "$IDLE" --workdir "$W/fresh" --setup-only "$W/nope.json" \
   && fail "a missing sim.tune.file must fail"
 grep -q '"class":"missing_file"' "$W/nofile.json" || fail "missing sim.tune.file: wrong error class $(cat "$W/nofile.json")"
 fi

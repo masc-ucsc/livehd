@@ -28,10 +28,12 @@
 #include "absl/strings/str_split.h"
 #include "cgen_verilog.hpp"
 #include "color_common.hpp"
+#include "core/metadata.hpp"
 #include "diag.hpp"
 #include "file_name.hpp"  // livehd::unit_file_stem — the shared long-name policy
 #include "file_output.hpp"
 #include "file_utils.hpp"
+#include "fold_engine.hpp"
 #include "fork_race.hpp"  // kChildExitBadAlloc: a forked solver child's out-of-memory exit status
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
@@ -43,7 +45,6 @@
 #include "lnast.hpp"
 #include "log.hpp"
 #include "node_util.hpp"
-#include "fold_engine.hpp"
 #include "pass.hpp"
 #include "pass/place/sdc_subset.hpp"
 #include "perf_tracing.hpp"
@@ -981,7 +982,20 @@ bool domino_profile(const Eprp_var::Eprp_dict& usyn_labels) {
 
 void domino_profile_labels(const Options& opts, const std::string& lefs, Eprp_var::Eprp_dict& labels) {
   labels["lef"]        = lefs;
-  labels["row_access"] = synth_set(opts, "place.row_access", "default");
+  labels["row_access"] = "default";
+  if (opts.metadata) {
+    const auto records = opts.metadata->select("livehd.physical.row_access", opts.top);
+    if (records.size() > 1) {
+      throw Lhd_error{"config", "multiple row-access conventions match this design", "keep one convention per design"};
+    }
+    if (!records.empty()) {
+      const auto& record = *records.front();
+      if (!record.HasMember("convention") || !record["convention"].IsObject()) {
+        throw Lhd_error{"config", "row-access metadata needs a convention object", ""};
+      }
+      labels["row_access"] = livehd::metadata::canonical(record["convention"]);
+    }
+  }
   if (labels.contains("domino_clock") && !labels["domino_clock"].empty()) {
     return;
   }
@@ -1126,7 +1140,8 @@ void merge_mapper_sets(const Options& opts, std::string_view method, Eprp_var::E
   }
   labels["tune_profile"]  = profile;
   labels["tune_validate"] = validate;
-  labels["tune_file"]     = synth_set(opts, "tune.file", "");
+  labels["tune_metadata"] = opts.metadata ? opts.metadata->json() : "[]";
+  labels["tune_design"]   = opts.top;
   labels["tune_export"]   = synth_set(opts, "tune.export", "");
   labels["tune_attempts"] = synth_set(opts, "tune.attempts", "24");
   labels["tune_time_ms"]  = synth_set(opts, "tune.time_ms", "60000");
@@ -1293,6 +1308,11 @@ void check_known_set_passes(const Options& opts) {
       }
       continue;
     }
+    if (mapper_of_method(pass) != nullptr && (flag == "tune_file" || flag == "tune_metadata" || flag == "tune_design")) {
+      throw Lhd_error{"usage",
+                      std::format("--set/--config '{}.{}' is INTERNAL", pass, flag),
+                      "pass class-tagged JSON metadata as a positional input"};
+    }
     if (mapper_of_method(pass) != nullptr && flag == "library") {
       // ONE Liberty spelling for the whole CLI: `synth.liberty`. Two knobs for
       // the same file is how `lhd pass abc --set synth.liberty=asap7.lib`
@@ -1310,7 +1330,7 @@ void check_known_set_passes(const Options& opts) {
             || flag == "row_access")) {
       // INTERNAL kernel-plumbed labels (synth.liberty/sdc/spef, the lhd
       // invocation record, the persistent cache root, and synth.lef /
-      // synth.place.row_access for the domino profile). A user --set either
+      // positional livehd.physical.row_access metadata for the domino profile). A user --set either
       // did nothing or bypassed the one lhd.incremental switch; refuse it and
       // name the real spelling.
       throw Lhd_error{"usage",
@@ -1319,7 +1339,7 @@ void check_known_set_passes(const Options& opts) {
                       : flag == "cache_dir"
                           ? "the logical/tmap cache lives under a named --workdir and follows --set lhd.incremental=true|false"
                       : flag == "lef"        ? "the LEFs come from --set synth.lef"
-                      : flag == "row_access" ? "the row-access convention comes from --set synth.place.row_access"
+                      : flag == "row_access" ? "the row-access convention comes from positional livehd.physical.row_access metadata"
                                              : "the invocation record is captured by the lhd kernel, not by a --set"};
     }
     if (pass == "compile.yosys" && flag == "liberty") {
@@ -1612,11 +1632,10 @@ void check_known_set_passes(const Options& opts) {
     if (pass == "compile.aegraph" && (flag == "low_lanes" || flag == "loop_hoist" || flag == "engine" || flag == "engine_slots")) {
       // pass.aegraph registers the shared labels as INTERNAL: every knob has ONE
       // user-facing spelling, the compile.cprop one, and the kernel copies it.
-      throw Lhd_error{"usage",
-                      std::format("--set/--config '{}' has one spelling", key),
-                      std::format("use --set compile.cprop.{}={} instead (the aegraph and classic engines share the knob)",
-                                  flag,
-                                  value)};
+      throw Lhd_error{
+          "usage",
+          std::format("--set/--config '{}' has one spelling", key),
+          std::format("use --set compile.cprop.{}={} instead (the aegraph and classic engines share the knob)", flag, value)};
     }
     if (pass == "compile.cprop" && flag == "engine") {
       // Validated eagerly: a typo must not wait for the pass to run. There is no
@@ -1624,14 +1643,16 @@ void check_known_set_passes(const Options& opts) {
       if (value != "classic" && value != "aegraph" && value != "aegraph+classic") {
         throw Lhd_error{"usage",
                         std::format("--set/--config compile.cprop.engine expects classic|aegraph|aegraph+classic, got '{}'", value),
-                        "aegraph is the default; classic is the reference engine; aegraph+classic runs the e-graph engine and then classic in each slot"};
+                        "aegraph is the default; classic is the reference engine; aegraph+classic runs the e-graph engine and then "
+                        "classic in each slot"};
       }
     }
     if (pass == "compile.aegraph" && flag == "cost") {
       if (value != "synth" && value != "sim" && value != "auto") {
-        throw Lhd_error{"usage",
-                        std::format("--set/--config compile.aegraph.cost expects synth|sim|auto, got '{}'", value),
-                        "auto is the default: sim under `lhd sim`, synth for every other command; an explicit synth|sim overrides it"};
+        throw Lhd_error{
+            "usage",
+            std::format("--set/--config compile.aegraph.cost expects synth|sim|auto, got '{}'", value),
+            "auto is the default: sim under `lhd sim`, synth for every other command; an explicit synth|sim overrides it"};
       }
     }
     if (pass == "compile.cprop" && flag == "engine_slots") {
@@ -3343,6 +3364,11 @@ std::vector<std::string> harvest_source_files(Result& res, const std::vector<std
 }
 
 void write_depfile(const Options& opts, Result& res) {
+  for (const auto& path : opts.metadata_files) {
+    if (std::find(res.inputs.begin(), res.inputs.end(), path) == res.inputs.end()) {
+      res.inputs.push_back(path);
+    }
+  }
   if (opts.depfile.empty()) {
     return;
   }

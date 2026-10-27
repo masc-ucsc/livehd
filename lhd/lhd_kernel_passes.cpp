@@ -81,12 +81,12 @@ void semdiff_command(Options& opts, Result& res) {
   const bool hier  = truthy("hier", "1");
 
   livehd::semdiff::Semdiff_options o;
-  o.matching_names = truthy("matching_names", stats ? "true" : "false");
-  o.state_pairing  = truthy("state_pairing", stats ? "true" : "false");
+  o.matching_names     = truthy("matching_names", stats ? "true" : "false");
+  o.state_pairing      = truthy("state_pairing", stats ? "true" : "false");
   o.project_state_bits = stats;
-  o.dump_state     = truthy("dump_state", "false");
-  o.id_granularity = label("id_granularity", "pair");
-  o.verbose        = false;  // the command prints its own summary below
+  o.dump_state         = truthy("dump_state", "false");
+  o.id_granularity     = label("id_granularity", "pair");
+  o.verbose            = false;  // the command prints its own summary below
   if (o.id_granularity != "pair" && o.id_granularity != "region") {
     throw Lhd_error{"usage", std::format("--set pass.semdiff.id_granularity expects pair|region, got '{}'", o.id_granularity), ""};
   }
@@ -960,17 +960,15 @@ void pass_command(Options& opts, Result& res) {
     labels["library"]        = mapped_output || domino ? resolve_liberty(opts) : std::string{};
     if (domino) {
       domino_profile_labels(opts, synth_set(opts, "lef", ""), labels);
-    } else if (method == "pass.usyn" && synth_set(opts, "place.row_access", "default") != "default") {
-      throw Lhd_error{"usage",
-                      "synth.place.row_access needs pass.usyn.physical=domino_provisional",
-                      "the row-access convention only configures the provisional domino abstracts"};
     }
     if (mapper->timing_files) {
       const auto sdc         = synth_set(opts, "sdc", "");
       const auto spef        = synth_set(opts, "spef", "");
       labels["timing_files"] = labels["library"] + (sdc.empty() ? "" : "," + sdc) + (spef.empty() ? "" : "," + spef);
     }
-    if (!labels.contains("threads")) { labels["threads"] = "0"; }
+    if (!labels.contains("threads")) {
+      labels["threads"] = "0";
+    }
     if (!labels["library"].empty()) {
       res.inputs.push_back(labels["library"]);
     }
@@ -1074,7 +1072,9 @@ void pass_command(Options& opts, Result& res) {
       // The output is wiped first: it must not contain the input library.
       const auto out_dir = fs::weakly_canonical(graph_out->path).string() + "/";
       if (fs::weakly_canonical(lg_in).string().starts_with(out_dir)) {
-        throw Lhd_error{"usage", std::format("--emit-dir lg:{} contains the input lg:{}", graph_out->path, lg_in), "pick a separate directory"};
+        throw Lhd_error{"usage",
+                        std::format("--emit-dir lg:{} contains the input lg:{}", graph_out->path, lg_in),
+                        "pick a separate directory"};
       }
       std::error_code ec;
       fs::remove_all(graph_out->path, ec);

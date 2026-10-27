@@ -12,6 +12,7 @@
 #include "boundary_pins.hpp"
 #include "busorder.hpp"
 #include "cell_jump.hpp"
+#include "core/metadata.hpp"
 #include "core/physical_rc.hpp"
 #include "core/timing_feedback.hpp"
 #include "core/timing_whatif.hpp"
@@ -47,6 +48,7 @@ inline constexpr double max_net_weight = 100;  // physical net weight ceiling sh
 struct Technology;
 struct Growth_budget;
 struct Result;
+struct Hint_scope;
 enum class Placement_stage { floorplan, macro, final };
 struct Placement_restart : std::exception {
   physical::Floorplan seed;
@@ -91,6 +93,9 @@ struct Preroute_settings {
   int         max_rows = 0, max_sites = 0;  // Zero leaves original-net pin spans unlimited.
 };
 struct Options {
+  std::shared_ptr<const metadata::Bundle>               metadata;
+  std::shared_ptr<const std::vector<Hint_scope>>        metadata_scopes;             // Before timing seed flattens hierarchy.
+  bool                                                  metadata_finalized = false;  // Internal macro-to-final handoff.
   std::shared_ptr<Growth_budget>                        growth_budget;
   std::optional<double>                                 density_weight_seed;
   // Shared by copies used for checkpoints, rounds and repair. A new Options
@@ -181,38 +186,38 @@ struct Options {
   int                                   gp_buffer_trials      = 4;    // maximum attempts per insertion/removal phase
   double                                gp_buffer_margin      = .01;  // fraction of clock period (path delay without clocks)
 
-  bool                                  repair_reset   = false;  // retired: true is rejected before pre-CTS optimization
+  bool                     repair_reset   = false;  // retired: true is rejected before pre-CTS optimization
   // synth.place.resize.engine: "new" = path-based sizing/buffering on the
   // incremental what-if timer (resize_engine.hpp); "legacy" = batch sweeps.
-  std::string                           resize_engine  = "legacy";
-  bool                                  resize_vt_swap = false;  // allow same-footprint swaps across Liberty files (multi-VT)
-  std::vector<std::string>              resize_dont_use;         // glob patterns never chosen as a new master
+  std::string              resize_engine  = "legacy";
+  bool                     resize_vt_swap = false;  // allow same-footprint swaps across Liberty files (multi-VT)
+  std::vector<std::string> resize_dont_use;         // glob patterns never chosen as a new master
   // What-if handle of the timer behind fp_evaluate/evaluate (required by engine=new).
-  livehd::timing::Whatif*               whatif       = nullptr;
+  livehd::timing::Whatif*  whatif       = nullptr;
   // synth.place.reset_fanout: the pre-placement reset buffer tree of every mapper
   // (reset_tree.hpp): a reset net with more loads is dealt through buffers of at
   // most this many loads (0: off). `reset_pins`, by LEF macro, adds reset pins the
   // Liberty does not describe: the domino storage resets (RST) of 2d-domplace U22.
-  unsigned                                        reset_fanout = 0;
+  unsigned                 reset_fanout = 0;
   std::map<std::string, std::vector<std::string>> reset_pins;
   // synth.place.domino_rail_fanout: the same pre-placement fanout tree for nets
   // on domino data rails, which the per-region mapping never buffers (0: off).
   unsigned                                        domino_rail_fanout = 0;
   std::map<std::string, std::vector<std::string>> domino_rail_pins;
-  std::string                           control_ports;     // override optional roots; recognized resets stay excluded
-  Evaluate                              fp_evaluate;
+  std::string                                     control_ports;  // override optional roots; recognized resets stay excluded
+  Evaluate                                        fp_evaluate;
   // Optional lightweight path ranking for placement weights. Detailed timing
   // remains available through fp_evaluate for resizing and resynthesis.
   Rank                                            gp_rank;
-  double                                fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
-  bool                                  fp_distance_attraction = true;
-  bool                                  fp_anchor_macros_only  = false;  // frozen targets; retain all-member normalization
-  double                                fp_attraction_outside  = 4;      // additional stiffness beyond the centroid circle
-  double                                fp_align_weight = 0, fp_align_sigma = .25;
-  int                                   fp_align_start = 100, fp_align_full = 500;
-  double                                fp_parent_weight = 0, fp_parent_outside = 4;
-  DreamPlace::native::FloorplanOptions  fp_snap;
-  DreamPlace::native::macro::Parameters macro_parameters;
+  double                                          fp_minimum = 3000, fp_attraction = .25, fp_repulsion = 5, fp_anchor = .25;
+  bool                                            fp_distance_attraction = true;
+  bool                                            fp_anchor_macros_only = false;  // frozen targets; retain all-member normalization
+  double                                          fp_attraction_outside = 4;      // additional stiffness beyond the centroid circle
+  double                                          fp_align_weight = 0, fp_align_sigma = .25;
+  int                                             fp_align_start = 100, fp_align_full = 500;
+  double                                          fp_parent_weight = 0, fp_parent_outside = 4;
+  DreamPlace::native::FloorplanOptions            fp_snap;
+  DreamPlace::native::macro::Parameters           macro_parameters;
   std::shared_ptr<const DreamPlace::native::macro::Topology> macro_topology;
   // In-process ECO reference; independent of persistent-cache admission.
   std::shared_ptr<const physical::Floorplan>                 previous;

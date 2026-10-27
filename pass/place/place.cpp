@@ -29,6 +29,8 @@
 #include "attrs.hpp"
 #include "buffering/checkpoint.hpp"
 #include "color_centroids.hpp"
+#include "core/diag.hpp"
+#include "def_binding.hpp"
 #include "dreamplace/native/placement.hpp"
 #include "dreamplace/native/rudy.hpp"
 #include "filler_budget.hpp"
@@ -52,6 +54,7 @@
 #include "pg_rails.hpp"
 #include "pin_adjust.hpp"
 #include "pin_escape_guard.hpp"
+#include "placement_hints.hpp"
 #include "placement_technology.hpp"
 #include "power_grid.hpp"
 #include "provisional_cell.hpp"
@@ -1020,8 +1023,8 @@ public:
     if (!busy.insert(key).second) {
       throw std::runtime_error("cycle in physical wiring aliases");
     }
-    auto     n     = p.get_master_node();
-    auto     input = [&](std::string_view name, int which) {
+    auto n     = p.get_master_node();
+    auto input = [&](std::string_view name, int which) {
       const auto driver = gu::get_driver_of_sink_name(n, name);
       if (driver.is_invalid()) {
         throw std::runtime_error(std::format("invalid physical wiring operand: {} input {} of {} is undriven",
@@ -1505,7 +1508,7 @@ void snapshot_nets(ph::Floorplan& frame, const View& v) {
 // and repair callbacks receive a placement checkpoint.
 void snapshot_frame(ph::Floorplan& frame, const Geometry_view& geometry) {
   const auto& v = geometry.view;
-  frame = v.fp;
+  frame         = v.fp;
   restore_imported_rows(frame, v);
   snapshot_nets(frame, v);
   frame.components.clear();
@@ -1522,7 +1525,7 @@ void make_arrays(View& v, const ph::Technology& tech) {
   // install (sat_install, H2D fixed poses) never flips an offset twice.
   const bool  oriented = v.native_orientations || std::any_of(v.cells.begin(), v.cells.end(), [](const auto& c) {
                           return c.place.orientation != Orientation::N;
-                        });
+                         });
   auto&       d        = v.design;
   const auto& rows     = v.fp.rows;
   // Integer DBU row pitch, as validate_rows and check_legality use.
@@ -2849,9 +2852,9 @@ namespace {
 std::shared_ptr<ph::Parasitics> estimate_rc(const Geometry_view& geometry, const ph::Technology& tech, const Options& options,
                                             std::map<std::string, std::pair<double, double>>* pin_locations,
                                             Rc_cache* cache = nullptr, Rc_reuse_stats* reuse = nullptr, bool provenance = true) {
-  const auto& v                    = geometry.view;
-  const auto& design               = geometry.design;
-  auto result               = std::make_shared<ph::Parasitics>();
+  const auto& v             = geometry.view;
+  const auto& design        = geometry.design;
+  auto        result        = std::make_shared<ph::Parasitics>();
   result->approximate       = !options.full;
   const auto   wire         = technology_wire_rc(tech,
                                                  options.liberty,
@@ -4574,6 +4577,17 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     pg_profile->channels              = options.pg_channels;
     pg_profile->channel_max_ir_drop_v = options.pg_channel_max_ir_drop_v;
   }
+  if (macro_active && options.metadata && !options.metadata->select("livehd.placement.hints", source.get_name()).empty()) {
+    livehd::diag::warn("pass.place", "placement-hint-mode", "placement")
+        .msg("placement metadata hints are supported by native FP/macro GP, not the experimental h2d solver; hints ignored")
+        .emit();
+  }
+  const auto hint_scopes
+      = options.metadata && !macro_active && !options.timing_seed && !options.retain_placement && !options.metadata_finalized
+            ? (options.metadata_scopes ? *options.metadata_scopes : placement_hint_scopes(source, tech))
+            : std::vector<Hint_scope>{};
+  const std::string              hint_design(source.get_name());
+  std::optional<Placement_hints> placement_hints;
   std::optional<Macro_hierarchy> hierarchy;
   if (macro_active) {
     hierarchy = macro_hierarchy(source, tech, options.liberty);
@@ -4631,7 +4645,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   const auto memories      = memory_proxies(graph, tech, options.liberty);
   Resolver   resolver(tech, memories, options.unknown_const_zero);
   collect_control_roles(graph, resolver, v.prects);
-  result.prects          = v.prects;
+  result.prects             = v.prects;
   // The flat reset nets are bounded before the first cell is read. The tree's
   // nets keep their wirelength edges (make_arrays), so the buffers sit near
   // their loads, while the reset stays out of repair and criticality.
@@ -4660,7 +4674,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     // Both trees mint the smallest buffer: only an upsize above it is growth.
     options.growth_budget->tree_master_um2 = minted;
   }
-  double      area       = 0;
+  double      area      = 0;
   int64_t     max_width = 0, max_height = 0;
   std::string site_name;
   for (auto node : graph.body().nodes()) {
@@ -4723,6 +4737,35 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   std::optional<ph::Floorplan> imported_frame;
   if (!options.floorplan.empty()) {
     imported_frame = ph::read_def(options.floorplan);
+    Def_name_binding cells, ports;
+    for (const auto& cell : v.cells) {
+      cells.add(cell.name);
+    }
+    const auto io        = graph.get_io();
+    const auto add_ports = [&](const auto& declarations) {
+      for (const auto& d : declarations) {
+        for (int b = 0; b < std::max(1, static_cast<int>(d.bits)); ++b) {
+          ports.add(bit_name(d.name, std::max(1, static_cast<int>(d.bits)), b));
+        }
+      }
+    };
+    add_ports(io->get_input_pin_decls());
+    add_ports(io->get_output_pin_decls());
+    for (auto& component : imported_frame->components) {
+      component.name = cells.resolve(component.name);
+    }
+    for (auto& terminal : imported_frame->terminals) {
+      terminal.name = ports.resolve(terminal.name);
+    }
+    for (auto& net : imported_frame->nets) {
+      for (auto& connection : net.connections) {
+        if (connection.instance == "PIN") {
+          connection.pin = ports.resolve(connection.pin);
+        } else {
+          connection.instance = cells.resolve(connection.instance);
+        }
+      }
+    }
   }
   const auto* halo_frame = imported_frame ? &*imported_frame : options.previous.get();
   const auto  row_height
@@ -4892,7 +4935,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     env += std::format(":groups:{:016x}", membership);
   }
   const auto cache_path       = (options.timing_seed || options.retain_placement || options.restart_seed || options.handoff_taps
-                                 || options.cache_dir.empty())
+                                 || options.cache_dir.empty() || options.metadata)
                                     ? std::string{}
                                     : options.cache_dir + "/placement.json";
   auto       previous         = options.previous;
@@ -5740,6 +5783,15 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
   }
   make_arrays(v, tech);
+  const auto hint_objects = [&] {
+    std::vector<Hint_object> objects;
+    objects.reserve(v.cells.size());
+    for (const auto& c : v.cells) {
+      const auto& m = tech.macros.at(c.macro);
+      objects.push_back({c.name, c.macro, m.symmetry_x, m.symmetry_y});
+    }
+    return objects;
+  };
   dp::Options control;
   double      feature_capacity_h = 0, feature_capacity_v = 0;
   control.max_iterations  = options.iterations;
@@ -6784,6 +6836,11 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           append_previous_boundary(update.previous_node, v, baseline);
           return update;
         };
+      }
+      if (options.metadata && !hint_scopes.empty()) {
+        placement_hints.emplace(options.metadata, hint_design, hint_scopes, hint_objects(), tech.dbu);
+        placement_hints->seed(v.design);
+        placement_hints->attach(fp_control, hint_objects);
       }
       fp_metrics = dp::place(v.design, fp_control);
       if (options.after_stage) {
@@ -8324,6 +8381,14 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         return replacement;
       };
     }
+    if (options.metadata && !hint_scopes.empty()) {
+      if (!placement_hints) {
+        placement_hints.emplace(options.metadata, hint_design, hint_scopes, hint_objects(), tech.dbu);
+        placement_hints->seed(v.design);
+      }
+      placement_hints->rebind(hint_objects());
+      placement_hints->attach(control, hint_objects);
+    }
     if (refinement_active && !terminal_active) {
       const auto prior        = control.before_legalize;
       control.before_legalize = [&, prior](dp::Design& physical) {
@@ -8495,7 +8560,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         v.design.net_weights    = update.net_weights;
         write_legalize_timing("global_placement");
       }
-      auto frame = sat_frame(v.design, false);
+      auto       frame        = sat_frame(v.design, false);
       // The two-row cells' row-access origin: the first core row before the
       // handoff taps cut rows under macros.
       const auto core_origins = multirow_cells ? first_core_rows(frame) : std::map<std::string, int64_t>{};
@@ -10256,6 +10321,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       throw std::runtime_error("cannot write memory proxy LEF");
     }
   }
+  if (placement_hints) {
+    placement_hints->rebind(hint_objects());
+    placement_hints->write(v.design, options.output_dir + "/metadata.json");
+  } else if (options.metadata) {
+    options.metadata->write(options.output_dir + "/metadata.json");
+  }
   const auto def = options.output_dir + "/out.def";
   if (handoff_grid) {
     v.fp = std::move(*handoff_grid);
@@ -10554,7 +10625,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       double                  max_displacement = 0;
       for (const auto& cell : multirow_eco_report->cells) {
         ++counts[static_cast<size_t>(cell.outcome)];
-        rail_twins        += cell.rail_twin;
+        rail_twins       += cell.rail_twin;
         released         += cell.released_sites;
         grown            += cell.grown_sites;
         max_displacement  = std::max(max_displacement, cell.displacement_um);
@@ -10908,7 +10979,12 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
   }
   const auto frame = macro_options.output_dir + "/fixed.def";
   ph::write_def(macro.floorplan, frame);
-  auto cell_options             = final_cell_options(staged_options);
+  auto cell_options               = final_cell_options(staged_options);
+  cell_options.metadata_finalized = true;
+  if (options.metadata && fs::is_regular_file(macro_options.output_dir + "/metadata.json")) {
+    cell_options.metadata
+        = std::make_shared<const metadata::Bundle>(metadata::Bundle::read(macro_options.output_dir + "/metadata.json"));
+  }
   cell_options.uroute_pool      = macro_options.uroute_pool;
   cell_options.stage_pin_status = std::move(pin_status);
   if (!options.final_independent_timing) {
@@ -10942,8 +11018,8 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
                                                         library,
                                                         cell_options,
                                                         release_source);
-  result.fp_resized_cells = macro.fp_resized_cells;
-  result.fp_repair_edits  = macro.fp_repair_edits;
+  result.fp_resized_cells                = macro.fp_resized_cells;
+  result.fp_repair_edits                 = macro.fp_repair_edits;
   if (options.macro_magnet.enabled) {
     for (const auto* artifact : {"magnet.json", "macro_animation.html"}) {
       fs::copy_file(macro_options.output_dir + "/" + artifact,

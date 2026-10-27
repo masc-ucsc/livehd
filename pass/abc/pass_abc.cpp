@@ -277,7 +277,7 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "region exists -- the exact driver cells and Liberty sink capacitances read off the stitched netlist, "
                        "against which each region is re-sized in place (needs an NLDM Liberty; the exact re-size also needs "
                        "`delay`)",
-                       "true");
+                       "false");
   m.add_label_optional("boundary_buffer",
                        "tree every region input's fanout inside the region past max_fanout -- the design's primary inputs "
                        "and the sink side of crossing nets alike -- by declaring boundary_drive as ABC's driving cell (its "
@@ -308,7 +308,9 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
       "auto");
   m.add_label_optional("tune_profile", "internal synth.tune.profile", "auto");
   m.add_label_optional("tune_validate", "internal synth.tune.validate", "structural");
-  m.add_label_optional("tune_file", "internal synth.tune.file", "");
+  m.add_label_optional("tune_metadata", "INTERNAL class-tagged metadata", "[]");
+  m.add_label_optional("tune_design", "INTERNAL metadata design scope", "");
+  m.add_label_optional("tune_file", "INTERNAL validated trial selection file", "");
   m.add_label_optional("tune_export", "internal synth.tune.export", "");
   m.add_label_optional("tune_finalize", "internal canonical mapping after explicit exploration", "false");
   m.add_label_optional("tune_dir", "internal workdir synthesis tune root", "");
@@ -911,7 +913,7 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
   auto       register_max_bits_s = std::string{var.get("register_max_bits", "0")};
   auto       delay               = std::string{var.get("delay", "")};
   auto       load                = std::string{var.get("load", "")};
-  bool       boundary            = truthy(var.get("boundary", "true"));
+  bool       boundary            = truthy(var.get("boundary", "false"));
   auto       boundary_drive      = std::string{var.get("boundary_drive", "")};
   bool       boundary_buffer     = truthy(var.get("boundary_buffer", "true"));
   auto       io_load_s           = std::string{var.get("io_load", "-1")};
@@ -1212,7 +1214,9 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
                                                                         std::string(var.get("tune_export", "")),
                                                                         var.get("tune_persist", "true") != "false",
                                                                         opts.tune_profile != "off",
-                                                                        opts.tune_validate);
+                                                                        opts.tune_validate,
+                                                                        std::string(var.get("tune_metadata", "[]")),
+                                                                        std::string(var.get("tune_design", "")));
   opts.auto_multiplier    = mult_s == "auto";
   auto barrel             = std::string{var.get("barrel", "auto")};
   if (barrel != "auto" && barrel != "log" && barrel != "reverse") {
@@ -1444,7 +1448,8 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
       dbg,
       [&mapper](const livehd::partition::Region_body& rb) { mapper.map_region(rb); },
       flatten,
-      /*want_pre_bodies=*/mapper.incremental() || opts.ware_trials || !var.get("tune_file", "").empty(),
+      /*want_pre_bodies=*/mapper.incremental() || opts.ware_trials || !var.get("tune_file", "").empty()
+          || opts.tune_store->imported(),
       threads == 1 ? livehd::partition::Body_batch_builder{}
                    : [&mapper](std::span<const livehd::partition::Region_body> batch) { mapper.map_regions(batch); },
       2 * livehd::synth::synthesis_thread_limit(threads, std::thread::hardware_concurrency()),

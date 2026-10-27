@@ -2929,8 +2929,8 @@ sh_test(
 
 # synth.place.reset_fanout: every flat reset net with many loads is dealt out through a buffer tree
 # before placement; bounded, LEC-proven on the placed netlist, on by default (32), 0 turns it off.
-# synth.place.buffer_cleanup=auto removes synthesis buffers before placement only
-# when synth.place.resize rebuilds buffering later in the run.
+# Synthesis buffers are preserved by default; explicit buffer_cleanup=auto removes
+# them before placement only when synth.place.resize rebuilds buffering later.
 sh_test(
     name = "lhd_placement_buffer_cleanup_smoke",
     size = "small",

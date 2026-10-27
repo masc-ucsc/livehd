@@ -14,10 +14,15 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
+
+namespace livehd::metadata {
+class Bundle;
+}
 
 namespace lhd {
 
@@ -44,7 +49,9 @@ struct Options {
   std::string              command;          // compile|lec|scan|pyrope|tool|pass|list|describe|version|help
   std::string              language;         // verilog|pyrope ("" for the IR/meta commands)
 
-  std::vector<std::string> files;  // positional: source files / list pattern / describe name
+  std::vector<std::string>                        metadata_files;  // positional JSON, dispatched by record class
+  std::shared_ptr<const livehd::metadata::Bundle> metadata;
+  std::vector<std::string>                        files;  // positional: source files / list pattern / describe name
 
   std::vector<Typed_path> emits;
   std::vector<Typed_path> emit_dirs;
@@ -171,7 +178,7 @@ struct Options {
   // and then compiles into it) must not turn reuse on by accident.
   bool        workdir_scratch = false;
 
-  std::vector<std::string> raw_args;  // after `--` (elaborate verilog: raw slang args)
+  std::vector<std::string>                         raw_args;  // after `--` (elaborate verilog: raw slang args)
   // (message, hint) of each deprecated synth.* spelling canonicalize_synth_sets
   // rewrote; emitted after the command's setup_diag. Not an input: never hashed.
   std::vector<std::pair<std::string, std::string>> deprecated_sets;
@@ -213,12 +220,12 @@ struct Options {
   std::string              sim_query;
   bool                     sim_observe = false;  // setup-time hierarchical instrumentation needed by VCD/probe/query
   bool sim_runtime_support = true;  // generated checkpoint/probe/query methods; false only for a lean checkpoint-off setup
-  // The RESOLVED `sim.tune.*` vector (explicit --set > sim.tune.file > the
+  // The RESOLVED `sim.tune.*` vector (explicit --set > positional simulation tuning > the
   // workdir's tuned decision > default), set by `lhd sim` before it compiles
   // and handed to inou.cgen.sim as concrete labels. Deliberately NOT mirrored
   // into `sets`: those hash into the run_id and the compile-cache context, and
   // a store-derived value must move neither. `lhd compile --emit-dir sim:`
-  // leaves it unresolved and resolves explicit + sim.tune.file itself.
+  // leaves it unresolved and resolves explicit + positional simulation tuning itself.
   struct Sim_tune {
     bool     resolved   = false;
     bool     dirty      = true;  // the built-in L1 vector (sim_tune_vector.hpp kTuneDefault*)
@@ -498,6 +505,7 @@ struct Lhd_error {
 };
 
 // argv -> Options. Throws Lhd_error{usage,...} on malformed input.
+void    load_metadata(Options& opts);
 Options parse_args(int argc, char** argv);
 
 // Resolve an abbreviated --set/--config key to its canonical
@@ -640,7 +648,7 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "literals zero-fill unless sim.unknown_zero is set; checkpoints are skipped) and the next setup may trial ONE "
      "better vector, kept only if >= 7% cheaper per simulated cycle with byte-identical results; converged data is "
      "reused with no sampling. on: profile and learn even when converged. off: ignore the workdir's tune data. An "
-     "explicit sim.tune.X or sim.tune.file always wins. The envelope's `sim_tune` member reports what was applied", Sim_set_option::Stage::both},
+     "explicit sim.tune.X or positional simulation tuning always wins. The envelope's `sim_tune` member reports what was applied", Sim_set_option::Stage::both},
     {"tune.dirty",
      "auto", Sim_set_option::Kind::tri,
      "auto|on|off (was sim.color_dirty) — the cross-cycle color activation cache, for workloads with long "
@@ -671,17 +679,13 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
      "llvm|slop|auto (was sim.backend) — simulator color-kernel backend. llvm (the default) emits native object "
      "files directly; a color its lowering rejects is a setup error, never a silent fallback. slop emits the "
      "reference C++ kernels. auto = the tuned decision, else slop (the tuner never trials the backend, so auto is "
-     "slop unless sim.tune.file pins one)", Sim_set_option::Stage::codegen,
+     "slop unless positional simulation tuning pins one)", Sim_set_option::Stage::codegen,
      Sim_set_option::Tune::perf_g,
      "be"},
-    {"tune.file",
-     "", Sim_set_option::Kind::path,
-     "FILE — pin the tune vector from a `sim.tune.export` file (how hermetic benchmarks use tuning: a fresh workdir "
-     "never converges in place). Its knobs apply below an explicit --set sim.tune.X and above the workdir's tuned "
-     "decision, in every mode, with or without a --workdir; a file recorded for another design is only a warning"},
     {"tune.export",
      "", Sim_set_option::Kind::path,
-     "FILE — write the current tune decision (explicit > sim.tune.file > tuned > default) as a sim.tune.file, with "
+     "FILE — write the current tune decision (explicit > positional simulation tuning > tuned > default) as a positional "
+     "simulation tuning, with "
      "its provenance (design structure, converged, activity stats)"},
     {"tune.profile_dir",
      "", Sim_set_option::Kind::path,
@@ -700,9 +704,9 @@ inline constexpr Sim_set_option kSimSetOptions[] = {
 consteval bool sim_tune_registry_ok() {
   for (const auto& s : kSimSetOptions) {
     const bool in_tune = s.name.starts_with("tune.");
-    const bool control = s.name == "tune.profile" || s.name == "tune.file" || s.name == "tune.export"
-                         || s.name == "tune.profile_dir" || s.name == "tune.profile_stride";
-    const bool knob    = s.tune != Sim_set_option::Tune::none;
+    const bool control
+        = s.name == "tune.profile" || s.name == "tune.export" || s.name == "tune.profile_dir" || s.name == "tune.profile_stride";
+    const bool knob = s.tune != Sim_set_option::Tune::none;
     if (in_tune != (control || knob) || (control && knob) || knob == s.tv_key.empty()) {
       return false;
     }
@@ -842,7 +846,8 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.repair.reset",
      "false",
      Synth_set_option::Kind::boolean,
-     "retired control; must be false because pre-CTS clock/reset networks are not sized (synth.place.reset_fanout builds the reset tree)"},
+     "retired control; must be false because pre-CTS clock/reset networks are not sized (synth.place.reset_fanout builds the reset "
+     "tree)"},
     {"place.reset_fanout",
      "32",
      Synth_set_option::Kind::integer,
@@ -1072,12 +1077,6 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "",
      Synth_set_option::Kind::file,
      "routing grid file: literal make_tracks data; overrides DEF/LEF track grids"},
-    {"place.row_access",
-     "default",
-     Synth_set_option::Kind::file,
-     "odd/even placement-row access convention the provisional domino abstracts are generated and placed for "
-     "(pass.usyn.physical=domino_provisional): default is the stand-in (bottom core row even = horizontal access, odd = "
-     "vertical), else a schema-1 JSON path"},
     {"place.stage_timing",
      "false",
      Synth_set_option::Kind::boolean,
@@ -1716,7 +1715,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::integer,
      "legacy GP buffer trial budget retained for compatibility; range [1,16]"},
     {"place.buffer_cleanup",
-     "auto",
+     "false",
      Synth_set_option::Kind::file,
      "auto|true|false: bypass internal non-inverting synthesis buffers on the physical copy before full placement; auto "
      "only when synth.place.resize will rebuild the buffering in the same run (else the synthesis buffers stay)"},
@@ -1807,7 +1806,6 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "structural",
      Synth_set_option::Kind::file,
      "structural|region|design: validation required before storing a tuned choice"},
-    {"tune.file", "", Synth_set_option::Kind::file, "portable synthesis decision JSON to replay"},
     {"tune.export", "", Synth_set_option::Kind::file, "export compatible synthesis decisions as versioned JSON"},
     {"tune.attempts", "24", Synth_set_option::Kind::integer, "maximum arithmetic candidates per region during explicit profiling"},
     {"tune.time_ms", "60000", Synth_set_option::Kind::integer, "soft profiling time budget per region"},
@@ -1899,27 +1897,27 @@ struct Synth_set_rename {
   std::string_view true_value = {}, false_value = {};
 };
 inline constexpr Synth_set_rename kSynthSetRenames[] = {
-    {                                "place.bins",                         "place.grid.density"},
-    {                             "place.bin_max",                     "place.grid.density_max"},
-    {                  "place.local_density_bins",                           "place.grid.local"},
-    {                        "place.dynamic_bins",                   "place.grid.density_mode", "dynamic", "fixed"},
-    {                           "place.auto_bins",                   "place.grid.density_mode",   "macro", "fixed"},
-    {                  "place.busorder.max_cells",                     "place.region.max_cells"},
-    {                   "place.busorder.merge_um",                      "place.region.merge_um"},
-    {                            "place.busorder",                      "place.region.busorder"},
-    {                 "place.busorder.iterations",           "place.region.busorder.iterations"},
-    {                    "place.busorder.refresh",              "place.region.busorder.refresh"},
-    {                     "place.busorder.weight",               "place.region.busorder.weight"},
-    {        "place.busorder.max_displacement_um",  "place.region.busorder.max_displacement_um"},
-    {                        "place.boundarypins",                  "place.region.boundarypins"},
-    {                  "place.boundarypins.split",            "place.region.boundarypins.split"},
-    {                  "place.boundarypins.order",            "place.region.boundarypins.order"},
-    {             "place.boundarypins.iterations",       "place.region.boundarypins.iterations"},
-    {    "place.boundarypins.max_displacement_um", "place.region.boundarypins.max_displacement_um"},
-    {                            "place.pinalign",                      "place.region.pinalign"},
-    {                "place.legalize.max_density",             "place.legalize.bin.max_density"},
-    {             "place.satlegalize.region_size",                "place.satlegalize.bin.size_um"},
-    {              "place.satlegalize.route_grid",                   "place.satlegalize.bin.grid",   "route",  "none"},
+    {"place.bins", "place.grid.density"},
+    {"place.bin_max", "place.grid.density_max"},
+    {"place.local_density_bins", "place.grid.local"},
+    {"place.dynamic_bins", "place.grid.density_mode", "dynamic", "fixed"},
+    {"place.auto_bins", "place.grid.density_mode", "macro", "fixed"},
+    {"place.busorder.max_cells", "place.region.max_cells"},
+    {"place.busorder.merge_um", "place.region.merge_um"},
+    {"place.busorder", "place.region.busorder"},
+    {"place.busorder.iterations", "place.region.busorder.iterations"},
+    {"place.busorder.refresh", "place.region.busorder.refresh"},
+    {"place.busorder.weight", "place.region.busorder.weight"},
+    {"place.busorder.max_displacement_um", "place.region.busorder.max_displacement_um"},
+    {"place.boundarypins", "place.region.boundarypins"},
+    {"place.boundarypins.split", "place.region.boundarypins.split"},
+    {"place.boundarypins.order", "place.region.boundarypins.order"},
+    {"place.boundarypins.iterations", "place.region.boundarypins.iterations"},
+    {"place.boundarypins.max_displacement_um", "place.region.boundarypins.max_displacement_um"},
+    {"place.pinalign", "place.region.pinalign"},
+    {"place.legalize.max_density", "place.legalize.bin.max_density"},
+    {"place.satlegalize.region_size", "place.satlegalize.bin.size_um"},
+    {"place.satlegalize.route_grid", "place.satlegalize.bin.grid", "route", "none"},
 };
 
 // The `lhd pass` subcommand vocabulary (pass_command dispatches exactly these).

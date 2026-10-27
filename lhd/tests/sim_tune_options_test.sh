@@ -52,7 +52,7 @@ PRP="$W/acc.prp"
 
 # ---- listing / describe / help --------------------------------------------------
 out=$("$LHD" list options)
-for kv in tune.profile:auto tune.dirty:auto tune.fence:auto tune.live_words:auto tune.backend:llvm tune.file: tune.export: \
+for kv in tune.profile:auto tune.dirty:auto tune.fence:auto tune.live_words:auto tune.backend:llvm tune.export: \
   tune.profile_dir: tune.profile_stride:0; do
   echo "$out" | grep -q "\"name\":\"sim.${kv%%:*}\",\"method\":\"sim\",\"default\":\"${kv#*:}\"" \
     || fail "sim.${kv%%:*} missing or wrong default in lhd list options"
@@ -272,20 +272,20 @@ for be in llvm slop; do
 done
 
 # ---- sim.tune.file: JSON types, depfile and envelope inputs ----------------------------
-echo '{"schema":"lhd-sim-tune-file-1","knobs":{"dirty":true,"fence":0}}' >"$W/tf_json.json"
-"$LHD" compile "$PRP" --emit-dir "sim:$W/et" --set sim.tune.file="$W/tf_json.json" --depfile "$W/et.d" -q \
+echo '[{"class":"livehd.sim.tuning","schema":"lhd-sim-tune-file-1","knobs":{"dirty":true,"fence":0}}]' >"$W/tf_json.json"
+"$LHD" compile "$PRP" --emit-dir "sim:$W/et" "$W/tf_json.json" --depfile "$W/et.d" -q \
   --result-json "$W/et.json" 2>/dev/null || fail "a JSON-typed tune file was rejected: $(cat "$W/et.json")"
 if ls "$W"/et/*.tune-id.cpp >/dev/null 2>&1; then
   grep -q 'tv1:d=on;f=0;lw=256;be=llvm' "$W"/et/*.tune-id.cpp || fail "the JSON bool/int tune file was not applied"
 fi
 grep -q "tf_json.json" "$W/et.d" || fail "the tune file is not in the --depfile: $(cat "$W/et.d")"
 grep -q "tf_json.json" "$W/et.json" || fail "the tune file is not an envelope input"
-"$LHD" sim "$PRP" --workdir "$W/tfs" --setup-only --set sim.tune.profile=off --set sim.tune.file="$W/tf_json.json" -q \
+"$LHD" sim "$PRP" --workdir "$W/tfs" --setup-only --set sim.tune.profile=off "$W/tf_json.json" -q \
   --result-json "$W/tfs.json" 2>/dev/null || fail "lhd sim with a JSON-typed tune file failed: $(cat "$W/tfs.json")"
 grep -q "tf_json.json" "$W/tfs.json" || fail "lhd sim: the tune file is not an envelope input"
 for bad in '"dirty":1' '"fence":1.5' '"backend":true' '"live_words":null'; do
-  echo "{\"schema\":\"lhd-sim-tune-file-1\",\"knobs\":{$bad}}" >"$W/tf_bad.json"
-  "$LHD" sim "$PRP" --workdir "$W/tfs" --setup-only --set sim.tune.file="$W/tf_bad.json" -q >"$W/r.json" 2>/dev/null \
+  echo "[{\"class\":\"livehd.sim.tuning\",\"schema\":\"lhd-sim-tune-file-1\",\"knobs\":{$bad}}]" >"$W/tf_bad.json"
+  "$LHD" sim "$PRP" --workdir "$W/tfs" --setup-only "$W/tf_bad.json" -q >"$W/r.json" 2>/dev/null \
     && fail "tune file knob $bad must fail"
   grep -q '"class":"config"' "$W/r.json" || fail "tune file knob $bad: not a config error: $(cat "$W/r.json")"
   knob=$(echo "$bad" | cut -d'"' -f2)

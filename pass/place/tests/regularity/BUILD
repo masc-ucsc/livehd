@@ -3,7 +3,7 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 filegroup(
     name = "fixtures",
-    srcs = glob(["*.prp", "*.def"]) + ["benchmarks.json", "fake.lef", "fake.lib", "macros.v", "timing.sdc"],
+    srcs = glob(["*.prp", "*.def"]) + ["benchmarks.json", "hierarchy_hints.json", "fake.lef", "fake.lib", "macros.v", "timing.sdc"],
 )
 
 sh_binary(
@@ -32,4 +32,10 @@ sh_test(
     size = "small",
     srcs = ["regularity_checks.py"],
     data = [":fixtures", "generate.py", "render.py"],
+)
+
+filegroup(
+    name = "hint_fixtures",
+    srcs = ["fake.lef", "fake.lib", "macros.v"],
+    visibility = ["//pass/place:__pkg__"],
 )

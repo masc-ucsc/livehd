@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
+#include "core/metadata.hpp"
 #include "file_utils.hpp"
 #include "graph_library_singleton.hpp"
 #include "hhds/graph.hpp"
@@ -666,16 +667,16 @@ void write_pretty(const Options& opts, const Result& res) {
         if (state == "disabled" || state == "inapplicable") {
           continue;
         }
-        const auto num = [&](const char* k) { return v.HasMember(k) && v[k].IsNumber() ? v[k].GetDouble() : 0.0; };
-        row += std::format(" {}={}({:.1f}ms work={:.0f} queries={:.0f} proven={:.0f} applied={:.0f} skips={:.0f})",
-                           st.name.GetString(),
-                           state,
-                           num("ms"),
-                           num("work"),
-                           num("queries"),
-                           num("proven"),
-                           num("applied"),
-                           num("budget_skips"));
+        const auto num  = [&](const char* k) { return v.HasMember(k) && v[k].IsNumber() ? v[k].GetDouble() : 0.0; };
+        row            += std::format(" {}={}({:.1f}ms work={:.0f} queries={:.0f} proven={:.0f} applied={:.0f} skips={:.0f})",
+                                      st.name.GetString(),
+                                      state,
+                                      num("ms"),
+                                      num("work"),
+                                      num("queries"),
+                                      num("proven"),
+                                      num("applied"),
+                                      num("budget_skips"));
       }
       std::print("  satopt[stats]:{}\n", row.empty() ? " nothing ran" : row);
     }
@@ -735,7 +736,11 @@ void write_pretty(const Options& opts, const Result& res) {
     }
   }
   if (res.status != "pass") {
-    std::print("  {}error[{}]{}: {}\n", bad, res.error_category.empty() ? res.error_class : res.error_category, off, res.error_message);
+    std::print("  {}error[{}]{}: {}\n",
+               bad,
+               res.error_category.empty() ? res.error_class : res.error_category,
+               off,
+               res.error_message);
     if (!res.error_hint.empty()) {
       std::print("  help: {}\n", res.error_hint);
     }
@@ -754,6 +759,21 @@ std::string compute_run_id(const Options& opts) {
   buf += ' ';
   buf += opts.language;
   buf += std::format("|top={}|reader={}|pipeline=cprop,bitwidth", opts.top, opts.reader);
+
+  if (opts.metadata) {
+    rapidjson::Document records;
+    const auto          text = opts.metadata->json();
+    records.Parse(text.c_str());
+    std::vector<std::string> canonical;
+    for (const auto& record : records.GetArray()) {
+      canonical.push_back(livehd::metadata::canonical(record));
+    }
+    std::sort(canonical.begin(), canonical.end());
+    canonical.erase(std::unique(canonical.begin(), canonical.end()), canonical.end());
+    for (const auto& record : canonical) {
+      buf += "|metadata:" + std::to_string(record.size()) + ":" + record;
+    }
+  }
 
   auto sets = opts.sets;
   std::sort(sets.begin(), sets.end());

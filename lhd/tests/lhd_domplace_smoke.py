@@ -58,7 +58,7 @@ assert refused['error']['class'] == 'usage' and 'synth.opentimer=false' in refus
 internal = run('internal', base + domino + ['--set', 'pass.usyn.lef=x.lef', '--workdir', str(root / 'R')], False)
 assert 'INTERNAL' in internal['error']['message'], internal['error']
 row_internal = run('internal_row', base + domino + ['--set', 'pass.usyn.row_access=x', '--workdir', str(root / 'R')], False)
-assert 'INTERNAL' in row_internal['error']['message'] and 'synth.place.row_access' in row_internal['error']['hint'], row_internal
+assert 'INTERNAL' in row_internal['error']['message'] and 'livehd.physical.row_access' in row_internal['error']['hint'], row_internal
 # Every consumer the profile does not support is a usage error before the
 # mapper runs; each names its own reason.
 abc = [a if a != 'synth.mapper=usyn' else 'synth.mapper=abc' for a in base]
@@ -226,8 +226,8 @@ assert (root / 'def2/out.def').read_bytes() == first_def
 # nothing is reused, the bundle and placement follow it, and the provenance
 # records the convention file and the LEFs.
 owner = root / 'owner.json'
-owner.write_text('{"schema": 1, "name": "owner", "version": "1", "even": "vertical", "odd": "horizontal"}')
-owned = run('place_owner', place_args + ['--set', f'synth.place.row_access={owner}', '--workdir', str(P)])['qor']['place']
+owner.write_text('[{"class":"livehd.physical.row_access","id":"owner","convention":{"schema":1,"name":"owner","version":"1","even":"vertical","odd":"horizontal"}}]')
+owned = run('place_owner', place_args + [str(owner), '--workdir', str(P)])['qor']['place']
 assert owned['legal'] and not owned.get('reused_final_state'), owned
 assert owned['multirow']['row_access'] == 'owner' and owned['multirow']['cells'] == 2, owned['multirow']
 owned_bundle = P / 'synth/qor.json.domino'
@@ -235,7 +235,7 @@ assert json.loads((owned_bundle / 'row_access.json').read_text())['name'] == 'ow
 assert json.loads((owned_bundle / 'domino_models.json').read_text())['row_access']['even'] == 'vertical'
 paths = {f['path'] for f in json.loads((P / 'synth/qor.json.provenance/manifest.json').read_text())['files']}
 assert str(owner) in paths and any(p.endswith('sky130hd.lef') for p in paths), paths
-missing = run('row_access_missing', base + domino + ['--set', f'synth.place.row_access={root}/nope.json',
+missing = run('row_access_missing', base + domino + [f'{root}/nope.json',
                                                      '--workdir', str(root / 'RA')], False)['error']
-assert 'bundle' in missing['message'] and 'nope.json' in missing['message'], missing
+assert 'metadata' in missing['message'] and 'nope.json' in missing['message'], missing
 print('lhd_domplace_smoke: ok')

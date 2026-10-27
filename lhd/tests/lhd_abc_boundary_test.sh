@@ -55,7 +55,7 @@ esac
 # The rounds the propagated-budget contract needs; NOT the default (see above).
 # Both are word-split on purpose (no value holds a space).
 if [ "$MAPPER" = abc ]; then
-  ROUNDS="--set abc.boundary_rounds=3"
+  ROUNDS="--set abc.boundary=true --set abc.boundary_rounds=3"
   DELAY="--set abc.delay=25"
 else
   ROUNDS="--set pass.usyn.boundary_rounds=3"
@@ -132,7 +132,7 @@ fi
 # noticing, not a silent improvement.
 if [ "$MAPPER" = abc ]; then
   run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_1r" --set synth.liberty="$LIB" \
-      --set abc.delay=25 --workdir "$W/w_1r"
+      --set abc.boundary=true --set abc.delay=25 --workdir "$W/w_1r"
   python3 - "$W/w_1r/qor.json" "$TOP" <<'PY' || fail "the default single round lost the boundary environment"
 import json, sys
 q = json.load(open(sys.argv[1]))
@@ -166,7 +166,7 @@ fi
 # 2. boundary off: the old behaviour, load-free ports (both mappers' switch)
 PREFIX=$([ "$MAPPER" = abc ] && echo abc || echo pass.usyn)
 run pass "$MAPPER" --top "$TOP" lg:"$W/lg" --emit-dir lg:"$W/net_off" --set synth.liberty="$LIB" \
-    $DELAY $ROUNDS --set "$PREFIX.boundary=false" --workdir "$W/w_off"
+    $DELAY --set "$PREFIX.boundary_rounds=3" --set "$PREFIX.boundary=false" --workdir "$W/w_off"
 if [ "$MAPPER" = abc ]; then
   grep -q '"boundary"' "$W/w_off/qor.json" && fail "boundary=false still reports a boundary scoreboard"
 fi

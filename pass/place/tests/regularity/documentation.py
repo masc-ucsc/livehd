@@ -27,6 +27,253 @@ DESCRIPTIONS = {
 }
 
 
+PLACEMENT_HINTS = '''<section id="placement-hints">
+<h2>Hierarchical placement hints</h2>
+<p><strong>Experimental implementation:</strong> pass <code>FILE.json</code>. Use the existing
+<a href="#hierarchy_4x4">hierarchy_4x4</a> fixture and its invented technology with
+optional metadata. Keep the source, mapped netlist, connectivity, technology,
+seed and optimization settings identical with and without hints. The floorplanner
+still chooses the legal placement; a human or agent supplies relative physical
+intent or optional coordinate hints. Relative hints are preferred for portability.</p>
+<p><strong>Every hint is advisory.</strong> Missing, contradictory or unsuitable
+metadata must not change the circuit or override physical legality. The placer
+may relax or ignore a hint, report the reason, and continue ordinary placement.
+Bad hints may worsen QoR. This does not guarantee that an independently infeasible
+floorplan can be legalized. No required-placement mode is proposed here.</p>
+<h3>Current implementation</h3>
+<p>Relative hints guide FP and macro GP through soft center pulls (default per-hint
+<code>weight: 0.35</code>, valid range <code>(0,1]</code>), refreshed every 25 GP iterations.
+They add no nets, pins or timing arcs. Coordinate hints seed movable hard macros;
+normal placement, legal halo spacing, track alignment and legalization still apply.
+Final cell placement inherits the resulting macro frame and does not reapply hints.</p>
+<p><code>work/synth/place/metadata.json</code> preserves authored records and adds
+<code>livehd.placement.hint_results</code> and <code>livehd.placement.state</code>.
+Results report binding, rejected seeds, and geometric residuals after legalization.
+Accepted means consumed; a relationship outside one placement pitch is reported as
+relaxed. Clustering is an objective with no binary satisfaction threshold. Coordinate
+seeds are allowed to move after initialization.</p>
+<p>Generated state uses the same position payload inside module templates. It is
+not automatically promoted over authored relative intent (<code>automatic_reuse:false</code>).
+Existing dependency-checked caches still own incremental reuse. The completed-placement cache hashes selected placement hints, not the filename or
+unrelated records, and merges generated records into the current input on restore.
+The inner block cache is bypassed for hint runs; synthesis and timing caches remain independent. The experimental <code>macro=h2d</code> solver ignores placement hints with a warning.
+Rigid macro magnet contraction does not yet support
+relative hints: those hints are discarded with a warning. Source HDL attribute
+lowering and migration of legacy JSON report/cache formats remain planned work;
+this does not silently reinterpret those existing files.</p>
+<h3>Use the existing repeated hierarchy</h3>
+<pre>hierarchy_4x4.top
+  g0 : quadrant                 g1 : quadrant
+    t0/macro ... t3/macro          t0/macro ... t3/macro
+  g2 : quadrant                 g3 : quadrant
+    t0/macro ... t3/macro          t0/macro ... t3/macro
+
+One suggested arrangement (north is up; no coordinates prescribed):
+    g2                          g3
+    [t2]  [t3]                  [t2]  [t3]
+    [t0]  [t1]                  [t0]  [t1]
+
+    g0                          g1
+    [t2]  [t3]                  [t2]  [t3]
+    [t0]  [t1]                  [t0]  [t1]
+
+All squares are the existing 40 x 40 micrometre REG_MACRO.
+Spaces depict legal routing channels, not fixed distances.</pre>
+<p>The names below refer to logical source instances, before synthesis coloring
+adds generated wrappers. A template attached to <code>quadrant</code> expands
+independently in <code>g0</code>, <code>g1</code>, <code>g2</code> and <code>g3</code>.
+For example, its <code>lower-pair</code> becomes four distinct hints;
+<code>g0/t0/macro</code> is paired with <code>g0/t1/macro</code>, never
+<code>g1/t1/macro</code>. Parent hints explicitly address child groups.</p>
+<h3>Example metadata vocabulary</h3>
+<p>The file is an array of typed records, extending the existing
+<code>inou.attr</code> convention. The explicit
+<code>"class": "livehd.placement.hints"</code> identifies this entry to the
+placement reader, regardless of filename or neighboring records. Each record has
+its own <code>schema_version</code>, <code>id</code> and design scope. A file can
+contain placement hints, synthesis metadata, incremental state and reports
+without mixing their fields. See the <a href="../todo/livehd/json-metadata.html">JSON audit and shared-format plan</a>.</p>
+<p>The JSON placement consumer supports the examples below for hard macros.
+Paths are relative to the template's instance; module selectors identify logical
+source definitions in this example. Exact module names are preferred; a short module name is accepted only when it identifies one definition. Ambiguous or missing instance names produce warnings. Logical memories expanded into multiple physical SRAMs must name those physical children explicitly.</p>
+<pre id="placement-hints-json">[
+  {
+    "class": "livehd.placement.hints",
+    "schema_version": 1,
+    "id": "floorplan-intent",
+    "design": "hierarchy_4x4.top",
+    "templates": [
+      {
+        "module": "quadrant",
+        "groups": {
+          "memories": ["t0/macro", "t1/macro", "t2/macro", "t3/macro"]
+        },
+        "hints": [
+          {"id": "compact", "kind": "cluster", "group": "memories"},
+          {"id": "lower-pair", "kind": "snap", "subject": "t1/macro", "relative_to": "t0/macro", "side": "east"},
+          {"id": "upper-pair", "kind": "snap", "subject": "t3/macro", "relative_to": "t2/macro", "side": "east"},
+          {"id": "rows", "kind": "direction", "subject": "t2/macro", "relative_to": "t0/macro", "side": "north"},
+          {"id": "left-column", "kind": "align", "members": ["t0/macro", "t2/macro"], "axis": "x", "anchor": "center"}
+        ]
+      },
+      {
+        "module": "hierarchy_4x4.top",
+        "hints": [
+          {"id": "bottom-row", "kind": "direction", "subject": "g1/memories", "relative_to": "g0/memories", "side": "east"},
+          {"id": "top-row", "kind": "direction", "subject": "g3/memories", "relative_to": "g2/memories", "side": "east"},
+          {"id": "left-column", "kind": "direction", "subject": "g2/memories", "relative_to": "g0/memories", "side": "north"},
+          {"id": "right-column", "kind": "direction", "subject": "g3/memories", "relative_to": "g1/memories", "side": "north"}
+        ]
+      }
+    ]
+  }
+]</pre>
+<table><tr><th>Hint</th><th>Proposed meaning</th></tr>
+<tr><td>cluster</td><td>Prefer a compact group. Members remain movable;
+its bounding box is not a physical obstacle or reserved empty rectangle.</td></tr>
+<tr><td>direction</td><td>Prefer the subject's body or group envelope beyond the
+specified side of the other body/envelope, including applicable clearance.
+North/south/east/west use the global floorplan axes, including inside templates.</td></tr>
+<tr><td>snap</td><td>Prefer neighboring facing edges with the legal halo/channel
+spacing and overlapping orthogonal spans. If side is omitted, let placement choose
+among the four sides. Snap alone does not require equal orthogonal centers or
+force a permanent rigid merge; abandon an incompatible adjacency.</td></tr>
+<tr><td>align</td><td>Prefer equal x or y center coordinates, or an explicitly
+named edge. Equal x means a column; equal y means a row. A common two-dimensional
+cluster centroid is an attraction target, never an instruction to overlap bodies.</td></tr>
+</table>
+<h3>Optional coordinates, including incremental warm starts</h3>
+<p>Coordinate seeds are supported, although relative hints
+are preferred. For example, add this hint to the top template:</p>
+<pre id="placement-position-json">{
+  "id": "g0-memory-start",
+  "kind": "position",
+  "subject": ["g0", "t0", "macro"],
+  "frame": "floorplan",
+  "anchor": "lower_left",
+  "x_um": 120,
+  "y_um": 80,
+  "orientation": "N"
+}</pre>
+<p>The subject is an instance path relative to the containing template; segment
+arrays avoid ambiguity in names containing separators. The string paths in the
+relative examples are readable shorthand. Coordinates use microns in the same
+global coordinate system as DEF, with its coordinate origin (not an implicit
+core-origin offset). The anchor is the lower-left corner of the oriented physical
+body, before halo padding. An omitted orientation retains the current legal
+orientation. The first implementation should target individual physical objects;
+a logical memory split into several SRAMs needs a group transform rather than
+assigning the same coordinates to every member.</p>
+<p>This is a preferred initial position, <strong>never FIXED</strong>. GP and
+legalization may move the object. If the hint cannot be used because of overlap,
+core bounds, row/site restrictions, illegal orientation, ambiguous identity or
+incompatible metadata, discard the affected hint and continue normal placement.
+Conflicting coordinate hints have no file-order priority. Check them together
+against fixed geometry and other accepted hints; temporary ordinary GP overlap
+is not itself a reason to reject all warm-start coordinates.</p>
+<p>Emit a warning through the normal LiveHD diagnostic sink, respecting
+<code>--diag-fmt</code>, rather than printing an ad-hoc message. Include the record
+and hint IDs, resolved instance, requested coordinates and rejection reason.
+Warn once per rejected hint/reason, not on every GP iteration. Normal movement
+of a successfully accepted initial guess does not produce a warning. Never fail
+an otherwise feasible placement solely because an advisory coordinate cannot
+be honored.</p>
+<h3>Source attributes and external metadata</h3>
+<p>A memory declaration (including a Verilog register declaration that infers RAM)
+can carry the same logical relationships as attributes. Both frontends should
+lower to one hint representation. Syntax for source annotations remains to be
+agreed; no new Pyrope syntax is asserted by this example. External metadata makes
+A/B experiments possible without changing RTL. Use an explicit scope and stable
+hint ID to replace or disable one inherited hint in a particular instance;
+do not silently resolve ambiguous names or append conflicting duplicates.</p>
+<p>Preserve declaration identity and instance scope across coloring, inlining and
+mapping. If a memory becomes multiple SRAMs, its logical reference resolves to a
+group of those SRAMs. If it disappears, report the unresolved hint and skip it.
+Do not guess a physical target from a coincidentally matching flattened name.
+The initial example concerns macros; standard-cell references need the same
+identity and disappearance rules before being supported.</p>
+<h3>Round-trip intent separately from incremental results</h3>
+<p>The output bundle preserves the input <code>livehd.placement.hints</code>
+record, including its relative references and stable IDs. Observed coordinates
+belong to <code>livehd.placement.state</code>; achieved/relaxed relations belong
+to <code>livehd.placement.hint_results</code>. Neither is implicitly promoted into
+user intent. Incremental state may include <code>kind=position</code> hints
+with exactly the same coordinate fields and validation as authored hints; it
+remains generated state. Automatic import of this exported state is not enabled yet.
+An exported relative or coordinate suggestion can reuse the hints payload shape
+under <code>livehd.placement.suggestions</code>, requiring explicit selection
+before it influences a future run.</p>
+<p>The existing completed-placement cache records netlist, technology, relevant options and
+consumed-hint identity; the exported coordinate record is an observation, not a self-admitting cache. Changed intent invalidates affected placement reuse; it
+must not be overwritten by old saved coordinates. Unrelated report changes
+must not invalidate placement. A single combined metadata file is the placement
+external interface; separate compact JSON/JSONL workdir shards remain permitted.
+Packing or splitting preserves record identity and meaning, not a last-writer-wins
+merge of unrelated JSON objects.</p>
+<h3>How it guides the stages</h3>
+<ol>
+<li><strong>FP:</strong> resolve the hint graph once and add normalized soft
+proximity, order and alignment objectives to the relevant groups. Keep ordinary
+connectivity and density objectives. Do not enable timing feedback in this stage.</li>
+<li><strong>Macro planning:</strong> refine using physical macro extents, legal
+orientations, halos and channel requirements. Existing snap/group machinery is a
+possible implementation aid, but an advisory hint must remain relaxable.
+Fixed imported positions and legality take precedence.</li>
+<li><strong>Final cells:</strong> keep the accepted macro frame fixed and run the
+ordinary final placer. Hints create no circuit edges, timing arcs, buffers, pins,
+or additional occupied area. Report achieved versus requested relations after
+macro legalization, not just their temporary GP positions.</li>
+</ol>
+<h3>Regression coverage and additional comparisons</h3>
+<table><tr><th>Variant</th><th>Purpose</th><th>Required checks</th></tr>
+<tr><td>No metadata</td><td>Existing baseline</td><td>Preserve the existing run and legality checks.</td></tr>
+<tr><td>Local hints only</td><td>Test independent expansion in all four quadrants</td><td>No accidental cross-instance binding; all 16 macros retained.</td></tr>
+<tr><td>Local + parent hints</td><td>Test hierarchical grouping</td><td>Same netlist and connectivity; report relation residuals and stage metrics.</td></tr>
+<tr><td>Snap without side</td><td>Leave adjacency direction to placement</td><td>Selected side reported; all physical spacing rules preserved.</td></tr>
+<tr><td>One-instance override</td><td>Change one g1 hint</td><td>Only g1's hint bindings change; other placements may respond naturally.</td></tr>
+<tr><td>Coordinate hints</td><td>Valid initial positions; authored versus incremental export</td><td>Same hint representation and admission; objects remain movable, and authored relative hints survive the round trip.</td></tr>
+<tr><td>Unusable coordinates</td><td>Overlapping requests, outside-core location, illegal orientation, missing or split target</td><td>Discard affected hints with diagnostic-format warnings; retain the feasible baseline flow and circuit identity.</td></tr>
+<tr><td>Bad metadata</td><td>Unknown target, opposing directions, self-snap,
+and a request conflicting with fixed geometry</td><td>Diagnose and relax/skip hints;
+retain circuit identity and legal placement for a feasible baseline floorplan.</td></tr>
+</table>
+<p>For every variant, show FP, macro and final density images alongside HPWL,
+WNS/TNS, RSMT-RUDY congestion and runtime, using identical measurement settings.
+Count satisfied, relaxed and unresolved hints, with distances normalized to object
+size. Report timing only as an observation in FP/macro; feedback belongs in final.
+Geometric preference satisfaction is a QoR measurement, not a correctness test.
+The short <code>//pass/place:placement_hints_smoke</code> test checks repeated instances,
+invalid coordinates, unchanged cell/net inventory, metadata preservation and selective
+cache replay. The unit test covers snap/direction/alignment behavior and coordinate conflicts.
+One-instance override syntax, automatic warm-start import and source attributes remain planned.
+The full synthetic comparison below was run with the same seed and settings.</p>
+<h3>Measured initial validation (2026-10-27)</h3>
+<table><tr><th>Design</th><th>Variant</th><th>Legal</th><th>HPWL (µm)</th><th>WNS</th><th>TNS</th></tr>
+<tr><td>hierarchy_4x4</td><td>baseline</td><td>yes</td><td>2,102,133</td><td>+16.228321 ns</td><td>0 ns</td></tr>
+<tr><td>hierarchy_4x4</td><td>24 hints</td><td>yes</td><td>1,999,788</td><td>+16.228056 ns</td><td>0 ns</td></tr>
+<tr><td>CoralNPU / ASAP7</td><td>baseline</td><td>yes</td><td>2,121,603</td><td>−1,339.791 ps</td><td>−547,537.762 ps</td></tr>
+<tr><td>CoralNPU / ASAP7</td><td>3 macro hints</td><td>yes</td><td>2,084,230</td><td>−1,478.592 ps</td><td>−614,355.406 ps</td></tr></table>
+<p>The synthetic run has 52,245 cells and 16 macros; 7 hints were accepted and 17
+relations relaxed. CoralNPU has 186,367 cells and 2 SRAMs; the cluster objective was
+accepted, while row alignment and east/west ordering were relaxed. CoralNPU placement
+took 125.6 s baseline and 131.8 s with hints (207.2/212.7 s whole invocation).
+Both CoralNPU runs have identical component inventories and byte-identical DEF NETS
+sections. The timing target is 3000 ps and reset is a false path. Timing feedback and
+resizing were disabled. These capped runs did not converge; no post-route claim is made.</p>
+<p>CoralNPU uses the same HighTide OpenROAD-mapped netlist, flattened with OpenROAD,
+in both arms. The RTL attempt failed before placement on an unmapped flop; the
+hierarchical mapped input was stopped during expensive loop handling. GP caps were
+150 FP / 300 macro / 300 final, with FP snapping disabled. The synthetic comparison
+used 300 iterations per stage and the same snap setting. The measured hints lower
+HPWL but do not improve CoralNPU timing.</p>
+<pre>bazel test -c opt --test_timeout=30 //core:metadata_test \
+  //pass/place:placement_hints_test //pass/place:placement_hints_smoke
+python3 pass/place/tests/regularity/run.py --case hierarchy_4x4 \
+  --iterations 300 --set synth.place.fp.snap=false \
+  "$PWD/pass/place/tests/regularity/hierarchy_hints.json"</pre>
+</section>
+'''
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, default=Path('docs/placement_regularity.html'))
@@ -131,7 +378,7 @@ and retain the source instance names used by its DEF. The default cone coloring 
 generated hierarchy. The other cases retain their default synthesis coloring.</p>
 <p>The serpentine follows the alternating runs in <a href="https://share.google/YXcon6ciunlGzwLwz">the supplied zigzag reference</a>,
 with an outside connection closing its two ends into one cycle. The reference image is not copied into the repository.</p>
-'''+''.join(cards)+'''
+'''+PLACEMENT_HINTS+''.join(cards)+'''
 <p>Refresh sources/technology with <code>python3 pass/place/tests/regularity/generate.py</code> and this guide with
 <code>python3 pass/place/tests/regularity/documentation.py</code>. The fast check detects stale generated fixtures.</p>
 </body></html>''')

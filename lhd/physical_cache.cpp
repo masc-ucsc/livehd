@@ -17,6 +17,8 @@ namespace {
 namespace fs    = std::filesystem;
 using Inventory = std::map<std::string, std::string>;
 constexpr std::array kPlaceArtifacts{"out.def",
+                                     "metadata.json",
+                                     "macro/metadata.json",
                                      "qor.json",
                                      "preroute.json",
                                      "power_grid.json",
