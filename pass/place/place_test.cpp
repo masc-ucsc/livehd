@@ -4981,13 +4981,19 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
   o.analyze_colors_only    = true;
   o.final_cells            = false;
   o.fp_evaluate            = [](const Result&) -> Timing_feedback { throw std::runtime_error("analysis invoked STA"); };
-  o.output_dir             = (dir / "analysis").string();
+  o.after_stage            = [](Placement_stage, const Result&) {
+    ADD_FAILURE() << "color analysis invoked a stage callback";
+    return false;
+  };
+  o.output_dir = (dir / "analysis").string();
   hhds::GraphLibrary analysis_flat;
   const auto         analysis = place(*graph, analysis_flat, o);
   EXPECT_TRUE(std::filesystem::exists(dir / "analysis/fp_placement_colors.json"));
   EXPECT_FALSE(std::filesystem::exists(dir / "analysis/fp_gp.json"));
   EXPECT_FALSE(std::filesystem::exists(dir / "analysis/gp_history.json"));
   EXPECT_GE(analysis.floorplan.components.size(), 6);
+  EXPECT_EQ(analysis.parasitics, nullptr);
+  EXPECT_FALSE(analysis.graph->get_input_node().attr(attrs::placement_rc).has());
 }
 TEST(Placement, ProxyMemoryColorsExcludeSharedClockAndResetLogic) {
   hhds::GraphLibrary source, flat;
@@ -6182,6 +6188,16 @@ TEST(Placement, UnsetCellHaloPreservesStatefulCallbackAcrossCalls) {
     bool     operator()(Placement_stage stage, const Result& result) {
       EXPECT_EQ(stage, Placement_stage::final);
       EXPECT_FALSE(result.floorplan.components.empty());
+      const auto stored = result.graph->get_input_node().attr(attrs::placement_rc);
+      EXPECT_TRUE(stored.has());
+      if (stored.has()) {
+        const auto rc = physical::deserialize_parasitics_exact(stored.get());
+        EXPECT_EQ(rc.identity, result.parasitics->identity);
+        EXPECT_EQ(rc.cells, result.parasitics->cells);
+        EXPECT_EQ(rc.terminals, result.parasitics->terminals);
+        EXPECT_EQ(rc.nets, result.parasitics->nets);
+        EXPECT_EQ(rc.timing_cuts, result.parasitics->timing_cuts);
+      }
       ++calls;
       return false;
     }
@@ -6223,6 +6239,13 @@ TEST(Placement, UnsetCellHaloPreservesStatefulCallbackAcrossCalls) {
   EXPECT_NO_THROW(place(*graph, automatic_library, options));
   EXPECT_EQ(options.after_stage.target<Observer>()->calls, 3);
   EXPECT_EQ(first.floorplan.components, second.floorplan.components);
+  options.timing_seed  = true;
+  options.output_dir  += "_seed";
+  hhds::GraphLibrary seed_library;
+  const auto         seed = place(*graph, seed_library, options);
+  ASSERT_NE(seed.parasitics, nullptr);
+  EXPECT_FALSE(seed.graph->get_input_node().attr(attrs::placement_rc).has());
+  EXPECT_EQ(options.after_stage.target<Observer>()->calls, 3);
 }
 }  // namespace livehd::placement
 

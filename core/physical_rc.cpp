@@ -11,25 +11,28 @@
 #include "rapidjson/writer.h"
 namespace livehd::physical {
 namespace {
-// Serialize into the string returned to the graph attribute. StringBuffer's
-// GetString() otherwise requires a second full JSON allocation at the final
-// placement's RC memory peak. Keep spare, initialized characters so each Put
-// only writes its byte; trim them once when transferring the completed result.
+// Count with the same writer before allocating the returned string. Growing a
+// large buffer geometrically temporarily retains both allocations and leaves
+// spare capacity resident in the graph attribute at the final RC memory peak.
+struct Rc_json_size {
+  using Ch     = char;
+  size_t bytes = 0;
+  void   Put(char) { ++bytes; }
+  void   Flush() {}
+};
 class Rc_json_buffer {
   std::string bytes;
   size_t      used = 0;
 
 public:
   using Ch = char;
-  void Put(char c) {
-    if (used == bytes.size()) {
-      bytes.resize(std::max(size_t{256}, bytes.size() + bytes.size() / 2));
-    }
-    bytes[used++] = c;
-  }
+  explicit Rc_json_buffer(size_t size) : bytes(size, '\0') {}
+  void        Put(char c) { bytes.at(used++) = c; }
   void        Flush() {}
   std::string take() {
-    bytes.resize(used);
+    if (used != bytes.size()) {
+      throw std::logic_error("placement RC serialization size changed");
+    }
     return std::move(bytes);
   }
 };
@@ -68,9 +71,9 @@ void validate_rc_tree(const Rc_net& net) {
     fail();
   }
 }
-std::string serialize_parasitics(const Parasitics& rc) {
-  Rc_json_buffer                     buffer;
-  rapidjson::Writer<Rc_json_buffer>  w(buffer);
+template <typename Buffer>
+static void write_parasitics(Buffer& buffer, const Parasitics& rc) {
+  rapidjson::Writer<Buffer> w(buffer);
   w.StartObject();
   w.Key("version");
   w.Int(3);
@@ -139,6 +142,12 @@ std::string serialize_parasitics(const Parasitics& rc) {
   }
   w.EndArray();
   w.EndObject();
+}
+std::string serialize_parasitics(const Parasitics& rc) {
+  Rc_json_size count;
+  write_parasitics(count, rc);
+  Rc_json_buffer buffer(count.bytes);
+  write_parasitics(buffer, rc);
   return buffer.take();
 }
 static Parasitics parse_parasitics(std::string_view text, bool full_precision) {

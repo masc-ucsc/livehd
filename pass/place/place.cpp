@@ -4310,8 +4310,8 @@ static bool defer_timing_checkpoint(const Options& options, unsigned done, bool 
   const unsigned quota = std::max(1, int(std::ceil(double(options.fp_timing_max_updates - 1) * iteration / max_iterations)));
   return done >= quota || movement < options.fp_timing_movement;
 }
-static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, const Options& requested,
-                           const std::function<void()>& release_source = {}) {
+static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& library, const Options& requested,
+                                 const std::function<void()>& release_source, bool& notify_after_stage) {
   std::optional<Options> automatic_options;
   if (requested.halo_x == -1 || requested.halo_y == -1) {
     automatic_options = requested;
@@ -9617,12 +9617,14 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       check_legality(tech, v.fp, options);
     }
   }
-  auto rc_options = options;
   if (options.timing_seed) {
+    auto rc_options              = options;
     rc_options.resistance_ohm_um = 0;
     rc_options.capacitance_ff_um = 0;
+    result.parasitics            = estimate_rc(v, tech, rc_options, &result.pin_locations);
+  } else {
+    result.parasitics = estimate_rc(v, tech, options, &result.pin_locations);
   }
-  result.parasitics = estimate_rc(v, tech, rc_options, &result.pin_locations);
   if (native_session && options.native_gp_timing->legal_output_guard) {
     // This follows actual final-frame legality and fresh final RC construction.
     // The independently frozen legal baseline is never replaced by GP timing.
@@ -9633,17 +9635,15 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
   }
   record_poses(*result.parasitics, v);
-  const auto persisted_controls = prects_networks(tech, v.fp, v.prects);
-  for (const auto& net : result.parasitics->nets) {
-    if (persisted_controls.timing_cuts.contains(net.driver)) {
-      result.parasitics->timing_cuts.insert(net.driver);
+  {
+    // Classification is only needed to attach the cuts. Release its pin sets
+    // before allocating the persisted RC text.
+    const auto persisted_controls = prects_networks(tech, v.fp, v.prects);
+    for (const auto& net : result.parasitics->nets) {
+      if (persisted_controls.timing_cuts.contains(net.driver)) {
+        result.parasitics->timing_cuts.insert(net.driver);
+      }
     }
-  }
-  // The zero-wire timing seed is an in-memory intermediate, never a saved
-  // placement. Its consumer already has result.parasitics; serializing a second
-  // full-design copy retains hundreds of MB until the next placement finishes.
-  if (!options.timing_seed) {
-    result.graph->get_input_node().attr(attrs::placement_rc).set(ph::serialize_parasitics(*result.parasitics));
   }
   fs::create_directories(options.output_dir);
   if (resolved_uroute.export_features && !options.timing_seed && !options.retain_placement
@@ -10786,7 +10786,23 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   result.floorplan        = std::move(v.fp);
   result.fp_resized_cells = fp_resized;
   result.fp_repair_edits  = fp_repairs;
-  if (options.after_stage && !options.timing_seed && !terminal_active && options.after_stage(options.completed_stage, result)) {
+  notify_after_stage      = !terminal_active;
+  return result;
+}
+
+static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, const Options& options,
+                           const std::function<void()>& release_source = {}) {
+  bool notify_after_stage = false;
+  auto result             = place_single_frame(source, library, options, release_source, notify_after_stage);
+  // Solver arrays, endpoint indices and reporting temporaries are no longer
+  // live while the persisted RC text is allocated. Consumers and stage
+  // callbacks still receive the same fully annotated graph.
+  // A zero-wire seed is an in-memory intermediate; color-only analysis has no
+  // electrical snapshot. Neither should acquire a persisted RC attribute.
+  if (result.parasitics && !options.timing_seed) {
+    result.graph->get_input_node().attr(attrs::placement_rc).set(ph::serialize_parasitics(*result.parasitics));
+  }
+  if (notify_after_stage && options.after_stage && !options.timing_seed && options.after_stage(options.completed_stage, result)) {
     throw Placement_restart(result.floorplan, options.completed_stage);
   }
   return result;

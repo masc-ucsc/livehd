@@ -49798,6 +49798,76 @@
         }
       },
       "artifacts": "/home/renau/projs/.agent-artifacts/1f-memory-v58"
+    },
+    "final_rc_lifetimes_v59": {
+      "status": "Implemented;160optimized tests pass; serialization byte parity and standalone RSS measurements pass. Fresh full placement/memory validation pending; A-J remains open.",
+      "implementation": "Complete the placement frame and destroy solver/report temporaries before persisting RC, while preserving persisted state before the stage callback. Skip persistence/callbacks for the same seed/color-only modes. Scope control classification and avoid the unused full Options copy during normal final RC. Count exact JSON bytes before allocating its single output string.",
+      "tests": [
+        {
+          "target": "core/physical_rc_test",
+          "tests": "3",
+          "failures": "0",
+          "disabled": "0",
+          "errors": "0",
+          "time": "0.",
+          "timestamp": "2026-10-27T18:20:09.736",
+          "name": "AllTests",
+          "xml_sha256": "6b8782d0e12a565a33079d4e1d5139aab079c63eee44595ec63b1821f9f1d0f1"
+        },
+        {
+          "target": "pass/place/place_test",
+          "tests": "86",
+          "failures": "0",
+          "disabled": "0",
+          "errors": "0",
+          "time": "3.125",
+          "timestamp": "2026-10-27T18:27:28.826",
+          "name": "AllTests",
+          "xml_sha256": "7bcc32488308c5f22d6b0f0148d94ade49bed15b0b95cbfff6183c4b564d6381"
+        },
+        {
+          "target": "pass/place/repair_test",
+          "tests": "71",
+          "failures": "0",
+          "disabled": "0",
+          "errors": "0",
+          "time": "3.399",
+          "timestamp": "2026-10-27T18:25:20.803",
+          "name": "AllTests",
+          "xml_sha256": "17fed3a850a85c5139a66ec52ffc9020b22eda247628051f2d0f6c586bb3671b"
+        }
+      ],
+      "probe_scope": "Two unprofiled samples per implementation/size plus exact byte comparison; CPU15; concurrent builds and coral runs; processRSS includes fixture creation. Not a whole-flow speedup/memory claim.",
+      "probes": [
+        {
+          "nets": 10000,
+          "bytes": 3246615,
+          "exact_byte_parity": true,
+          "control_median_s": 0.014019655,
+          "candidate_median_s": 0.010408738,
+          "control_median_peak_rss_kib": 14964.0,
+          "candidate_median_peak_rss_kib": 12870.0
+        },
+        {
+          "nets": 100000,
+          "bytes": 33064975,
+          "exact_byte_parity": true,
+          "control_median_s": 0.1283981165,
+          "candidate_median_s": 0.113496263,
+          "control_median_peak_rss_kib": 125500.0,
+          "candidate_median_peak_rss_kib": 94154.0
+        },
+        {
+          "nets": 600000,
+          "bytes": 201726392,
+          "exact_byte_parity": true,
+          "control_median_s": 0.681717224,
+          "candidate_median_s": 0.681616683,
+          "control_median_peak_rss_kib": 594214.0,
+          "candidate_median_peak_rss_kib": 548414.0
+        }
+      ],
+      "artifacts": "/home/renau/projs/.agent-artifacts/1f-memory-v59"
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",
