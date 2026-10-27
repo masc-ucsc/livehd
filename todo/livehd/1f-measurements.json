@@ -50296,7 +50296,7 @@
       }
     },
     "whatif_rc_restore_v60": {
-      "status": "Committed f1457208e; regression reproduced ~546ps stale slack before fix;116 focused/consumer tests pass. Full-placement validation pending.",
+      "status": "Committed f1457208e; regression reproduced ~546ps stale slack before fix. Four matched placements retain identical DEFs and independent QoR; broader A-J remains open.",
       "implementation": "Restore queued what-if wire RC before unchanged-net reconciliation, without an extra propagation. Drop the old journal/index and owning RC snapshot; public proxy remains stable.",
       "tests": {
         "pass/opentimer/physical_session_test": {
@@ -50329,7 +50329,310 @@
       },
       "routing_integration": "08c50ae18 adds explicit search_detours for complete preroute materialization, preserving its widened-via acceptance transaction while keeping default dpin queries direct-only.",
       "artifacts": "/home/renau/projs/.agent-artifacts/1f-memory-v60",
-      "memory_scope": "Weak ownership regression proves obsolete RC snapshot release. No whole-design peak-memory reduction claim. Gemmini heap profiling is diagnostic with a different allocator."
+      "memory_scope": "Weak ownership regression proves obsolete RC snapshot release. No whole-design peak-memory reduction claim. Gemmini heap profiling is diagnostic with a different allocator.",
+      "matched_placement": {
+        "scope": "Fresh v60 matched validation; single samples, concurrent independent jobs, no repeatable speedup claim",
+        "candidate": "704ce387f",
+        "control": "2a449cf49a93229de9016488b24f9adaf242b130",
+        "completed": {
+          "lfsr": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v59/paired-home/v59_candidate_retry/lfsr",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v60/paired-home/v60_candidate/lfsr"
+            ],
+            "settings_and_sdc_identical": true,
+            "def_sha256": [
+              "7ddab5966f7830e7de46749e7d2e6bf976ff0b579bff838434a6ca111050c7e9",
+              "7ddab5966f7830e7de46749e7d2e6bf976ff0b579bff838434a6ca111050c7e9"
+            ],
+            "def_identical": true,
+            "independent_scores_identical": true,
+            "placement_seconds": [
+              2.034465,
+              2.0159849999999997
+            ],
+            "placement_time_ratio": 0.9909165308815829,
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -60.862128,
+              -60.862128
+            ],
+            "hpwl_um": [
+              177.29,
+              177.29
+            ],
+            "peak_rss_mib": [
+              327.96875,
+              341.578125
+            ],
+            "internal_final_wns": -59.019165,
+            "internal_time_unit": "ps",
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 11,
+              "builds": 1,
+              "ranking_evaluations": 8,
+              "ranking_seconds": 0.6528088919999999,
+              "detailed_evaluations": 3,
+              "repowered_gates": 8,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 827,
+              "update_calls": 14,
+              "seconds": 0.674292472,
+              "validation_seconds": 0.001147037,
+              "reconcile_seconds": 0.6488374659999998,
+              "exclusions_seconds": 9.469e-05,
+              "propagation_seconds": 0.02172042,
+              "feedback_seconds": 0.0024101429999999996
+            },
+            "sta_fraction": 0.3344729608603239,
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "gp": {
+              "gp_total_iterations": 600,
+              "gp_iterations": 500,
+              "gp_converged": false,
+              "gp_stop_reason": "density_infeasible",
+              "gp_overflow": 0.350298305
+            }
+          },
+          "minimax": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v59/paired-home/v59_candidate_retry/minimax",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v60/paired-home/v60_candidate/minimax"
+            ],
+            "settings_and_sdc_identical": true,
+            "def_sha256": [
+              "7896e45d8aba5c1ab4be865f1231f763f6568057f8a695dfcc261240cca5dec0",
+              "7896e45d8aba5c1ab4be865f1231f763f6568057f8a695dfcc261240cca5dec0"
+            ],
+            "def_identical": true,
+            "independent_scores_identical": true,
+            "placement_seconds": [
+              38.738232,
+              39.278147
+            ],
+            "placement_time_ratio": 1.0139375230134404,
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -913.478075,
+              -913.478075
+            ],
+            "hpwl_um": [
+              46555.571,
+              46555.571
+            ],
+            "peak_rss_mib": [
+              995.484375,
+              986.83203125
+            ],
+            "internal_final_wns": -918.570801,
+            "internal_time_unit": "ps",
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 14,
+              "builds": 1,
+              "ranking_evaluations": 8,
+              "ranking_seconds": 4.120394502,
+              "detailed_evaluations": 6,
+              "repowered_gates": 1264,
+              "inserted_gates": 342,
+              "removed_gates": 1,
+              "updated_nets": 103574,
+              "update_calls": 20,
+              "seconds": 13.625454324,
+              "validation_seconds": 0.3269460759999999,
+              "reconcile_seconds": 3.4404049490000004,
+              "exclusions_seconds": 0.07646083200000002,
+              "propagation_seconds": 8.270961345999998,
+              "feedback_seconds": 1.4941090600000015
+            },
+            "sta_fraction": 0.34689656627640814,
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16172,
+              "area_um2": 2086.0626599996044,
+              "within_budget": true,
+              "rejected_proposals": 453
+            },
+            "gp": {
+              "gp_total_iterations": 800,
+              "gp_iterations": 700,
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0796708268
+            }
+          },
+          "NVDLA__partition_m": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v59/paired-home/v59_candidate_retry/NVDLA__partition_m",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v60/paired-home/v60_candidate/NVDLA__partition_m"
+            ],
+            "settings_and_sdc_identical": true,
+            "def_sha256": [
+              "5a442f329621baf84e6a481b4d6b9596e318634233ca1ec22d939a1aeb73de66",
+              "5a442f329621baf84e6a481b4d6b9596e318634233ca1ec22d939a1aeb73de66"
+            ],
+            "def_identical": true,
+            "independent_scores_identical": true,
+            "placement_seconds": [
+              35.910976999999995,
+              36.40204
+            ],
+            "placement_time_ratio": 1.013674453914189,
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -692.389648,
+              -692.389648
+            ],
+            "hpwl_um": [
+              90620.478,
+              90620.478
+            ],
+            "peak_rss_mib": [
+              1324.3828125,
+              1329.12109375
+            ],
+            "internal_final_wns": -692.494324,
+            "internal_time_unit": "ps",
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 11,
+              "builds": 1,
+              "ranking_evaluations": 8,
+              "ranking_seconds": 5.844736728,
+              "detailed_evaluations": 3,
+              "repowered_gates": 4144,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 139980,
+              "update_calls": 14,
+              "seconds": 12.394836988,
+              "validation_seconds": 0.404995786,
+              "reconcile_seconds": 3.587212866,
+              "exclusions_seconds": 0.05096873699999999,
+              "propagation_seconds": 7.270625956,
+              "feedback_seconds": 1.0542274209999998
+            },
+            "sta_fraction": 0.3404984167920259,
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20824,
+              "baseline_area_um2": 2642.391720000011,
+              "cells": 20434,
+              "area_um2": 2721.663180000068,
+              "within_budget": true,
+              "rejected_proposals": 3597
+            },
+            "gp": {
+              "gp_total_iterations": 800,
+              "gp_iterations": 700,
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0820293505
+            }
+          },
+          "coralnpu": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v59/paired-home/v59_candidate_retry/coralnpu",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v60/paired-home/v60_candidate/coralnpu"
+            ],
+            "settings_and_sdc_identical": true,
+            "def_sha256": [
+              "7554f3716ab6ee1e1f9e4818c383bb7a843daf3fd210630983d072469353459e",
+              "7554f3716ab6ee1e1f9e4818c383bb7a843daf3fd210630983d072469353459e"
+            ],
+            "def_identical": true,
+            "independent_scores_identical": true,
+            "placement_seconds": [
+              769.953765,
+              744.973804
+            ],
+            "placement_time_ratio": 0.9675565441257372,
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -14703.633037,
+              -14703.633037
+            ],
+            "hpwl_um": [
+              3778952.953,
+              3778952.953
+            ],
+            "peak_rss_mib": [
+              8416.37890625,
+              8420.0390625
+            ],
+            "internal_final_wns": -15728.4844,
+            "internal_time_unit": "ps",
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 17,
+              "builds": 1,
+              "ranking_evaluations": 12,
+              "ranking_seconds": 85.20960092699998,
+              "detailed_evaluations": 5,
+              "repowered_gates": 23378,
+              "inserted_gates": 498,
+              "removed_gates": 1490,
+              "updated_nets": 2071414,
+              "update_calls": 22,
+              "seconds": 199.739135905,
+              "validation_seconds": 5.519917312,
+              "reconcile_seconds": 56.050766882,
+              "exclusions_seconds": 0.7759568980000001,
+              "propagation_seconds": 117.719708617,
+              "feedback_seconds": 19.26026212399999
+            },
+            "sta_fraction": 0.2681156502853354,
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 160837,
+              "area_um2": 19666.48085999512,
+              "within_budget": true,
+              "rejected_proposals": 11284
+            },
+            "gp": {
+              "gp_total_iterations": 1140,
+              "gp_iterations": 1040,
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0363638432
+            }
+          }
+        },
+        "pending": []
+      },
+      "sampled_heap_diagnostic": {
+        "binary_commit": "2a449cf49 (beforewhatiffix)",
+        "status": "guard-stopped",
+        "wall_s": 522.5087718351278,
+        "tree_peak_rss_kib": 16812596,
+        "allocator": "sampled jemalloc; diagnostic only, not acceptance",
+        "summary": "/home/renau/projs/.agent-artifacts/1f-memory-v60/gemmini-sampled-heap/heap/live.2891789.559.i559.summary.json",
+        "largest_first_application_frames_mib": {
+          "cell_arc_insertion": 1691.2,
+          "pin_insertion": 1643.4,
+          "rc_nodes": 1532.1,
+          "place_frame": 978.1,
+          "physical_session_initialization": 876.0
+        }
+      }
     },
     "routing_bitmap_v60": {
       "status": "Optional occupancy bitmap implemented and tested; automatic activation outside benchmark not yet measured.",
@@ -50358,6 +50661,423 @@
         }
       },
       "artifacts": "/home/renau/projs/.agent-artifacts/route-dpin-v3"
+    },
+    "compact_timing_export_v62": {
+      "status": "four matched designs complete; Gemmini memory acceptance fails",
+      "livehd_commit": "1e81bc37d86f13ad12d996cfc325c41f3a7d6439",
+      "opentimer_commit": "17a58a4889049bc1293ce10fa36df26141220247",
+      "changes": [
+        "Compact OpenTimer pin propagation records, preserving optional validity and timing values",
+        "Rebuild final route-feature arrays in place after retained consumers, avoiding a whole View copy"
+      ],
+      "tests": {
+        "commit": "1e81bc37d86f13ad12d996cfc325c41f3a7d6439",
+        "tests": {
+          "pass/opentimer/pass_opentimer_test": {
+            "tests": "33",
+            "failures": "0",
+            "disabled": "0",
+            "errors": "0",
+            "time": "0.021",
+            "timestamp": "2026-10-27T20:43:57.872",
+            "name": "AllTests"
+          },
+          "pass/opentimer/physical_session_test": {
+            "tests": "20",
+            "failures": "0",
+            "disabled": "0",
+            "errors": "0",
+            "time": "0.554",
+            "timestamp": "2026-10-27T20:45:40.960",
+            "name": "AllTests"
+          },
+          "pass/place/place_test": {
+            "tests": "86",
+            "failures": "0",
+            "disabled": "0",
+            "errors": "0",
+            "time": "2.978",
+            "timestamp": "2026-10-27T20:45:37.891",
+            "name": "AllTests"
+          },
+          "pass/place/repair_test": {
+            "tests": "71",
+            "failures": "0",
+            "disabled": "0",
+            "errors": "0",
+            "time": "3.077",
+            "timestamp": "2026-10-27T20:45:41.628",
+            "name": "AllTests"
+          }
+        }
+      },
+      "matched": {
+        "scope": "Same common defaults, 100ps, reset false paths; published OpenTimer pin storage and deferred export memory fixes. Single samples, not a repeatable speedup claim.",
+        "completed": {
+          "lfsr": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v60/paired-home/v60_candidate/lfsr",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v62/paired-home/v62_candidate/lfsr"
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "7ddab5966f7830e7de46749e7d2e6bf976ff0b579bff838434a6ca111050c7e9",
+              "7ddab5966f7830e7de46749e7d2e6bf976ff0b579bff838434a6ca111050c7e9"
+            ],
+            "independent_scores_identical": true,
+            "export_files_identical": true,
+            "export_files": [
+              {
+                "final/uroute_export/features.bin": "f5f163a9efcd5fa63f088adf873a5ca7a275a81706075ecbfd3276e8a11a39ae",
+                "final/uroute_export/metadata.json": "b9893726ad6a4aafa6aaccaa262a016c03f6cb41efb8252e04d275565dc90d72",
+                "resize/sweep_1/uroute_export/features.bin": "3e3c49777a6beff5b2bcac72cc23355320661c437ac45a1ab41f62d1e53dfccd",
+                "resize/sweep_1/uroute_export/metadata.json": "211064ac8ccceef2c49b51823940ba53a8dee689c7c32db9a20243f38495460d",
+                "timing_place/round_0/uroute_export/features.bin": "93be32a344ec2faa843c45e6a8474fede77c4abebb48e49fd2367795201a16ad",
+                "timing_place/round_0/uroute_export/metadata.json": "bb6cca0f68299019061a410503a1b0aee317ad108248f0614ab404ff4441036b",
+                "uroute_export/features.bin": "ee19e05e600642a7b618d8d16444e092fbe6be918e49f02073167555c00aac4f",
+                "uroute_export/metadata.json": "a2914ead4ce5d82f4b022c476965069771fc75d46de4554a936f5bd72351bffa"
+              },
+              {
+                "final/uroute_export/features.bin": "f5f163a9efcd5fa63f088adf873a5ca7a275a81706075ecbfd3276e8a11a39ae",
+                "final/uroute_export/metadata.json": "b9893726ad6a4aafa6aaccaa262a016c03f6cb41efb8252e04d275565dc90d72",
+                "resize/sweep_1/uroute_export/features.bin": "3e3c49777a6beff5b2bcac72cc23355320661c437ac45a1ab41f62d1e53dfccd",
+                "resize/sweep_1/uroute_export/metadata.json": "211064ac8ccceef2c49b51823940ba53a8dee689c7c32db9a20243f38495460d",
+                "timing_place/round_0/uroute_export/features.bin": "93be32a344ec2faa843c45e6a8474fede77c4abebb48e49fd2367795201a16ad",
+                "timing_place/round_0/uroute_export/metadata.json": "bb6cca0f68299019061a410503a1b0aee317ad108248f0614ab404ff4441036b",
+                "uroute_export/features.bin": "ee19e05e600642a7b618d8d16444e092fbe6be918e49f02073167555c00aac4f",
+                "uroute_export/metadata.json": "a2914ead4ce5d82f4b022c476965069771fc75d46de4554a936f5bd72351bffa"
+              }
+            ],
+            "placement_seconds": [
+              2.0159849999999997,
+              2.008823
+            ],
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -60.862128,
+              -60.862128
+            ],
+            "rss_mib": [
+              341.578125,
+              341.6640625
+            ],
+            "sta_fraction": 0.3343090954255302,
+            "gp": {
+              "gp_converged": false,
+              "gp_stop_reason": "density_infeasible",
+              "gp_overflow": 0.350298305,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.2599183801757048,
+              "gp_total_iterations": 600,
+              "gp_density_ready_iteration": 440,
+              "gp_continuation_deadline": 2200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 500
+            }
+          },
+          "minimax": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v60/paired-home/v60_candidate/minimax",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v62/paired-home/v62_candidate/minimax"
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "7896e45d8aba5c1ab4be865f1231f763f6568057f8a695dfcc261240cca5dec0",
+              "7896e45d8aba5c1ab4be865f1231f763f6568057f8a695dfcc261240cca5dec0"
+            ],
+            "independent_scores_identical": true,
+            "export_files_identical": true,
+            "export_files": [
+              {
+                "final/uroute_export/features.bin": "3aba31380884c2a38200eb9bde4b2780c043baeadfa1715efd081354b80b1fbd",
+                "final/uroute_export/metadata.json": "f1d8f010dd9d4532129ddf5840b692022d5912edd99be32c79f409050b6d6464",
+                "repair/sweep_1/uroute_export/features.bin": "1bc37854c8e113da2f40c81992184484be379c4cbb5f66850961307f6512c496",
+                "repair/sweep_1/uroute_export/metadata.json": "ddd852154dab7031968dd3f23995ec012e7cdc9c48ff3c7eef63b72a99aff6bb",
+                "repair/sweep_2/uroute_export/features.bin": "cda872a817b3b110c75171672a25f33737005f7ac36d221a7ba6c3bc2bf0969c",
+                "repair/sweep_2/uroute_export/metadata.json": "5552b65aa0b00f412964ed128f1e148a01d6c13fbe51ca7e670bdbdc060da2a7",
+                "repair/trial_3/uroute_export/features.bin": "857fc1ffc91f8224b74d14f4a7ff733748dbbb9d59aeb31f27eecc53d3696c95",
+                "repair/trial_3/uroute_export/metadata.json": "ca1adcf69b7bda014fa3953c9ec4f5d9cfbb24d72a3cf6effc004754998f4703",
+                "resize/sweep_1/uroute_export/features.bin": "7771ccd9dc66188680b61e07b0fcb0caa7c63191c15a56e4d32763f93fc9b160",
+                "resize/sweep_1/uroute_export/metadata.json": "79a96ce7c1eac31be95efa647b49ac1dd66465f23f2f8822b45e8f21d95373cb",
+                "timing_place/round_0/uroute_export/features.bin": "98fb83a7bba2ab68d2cbc9473fe0d793503aa2660627527d7a5222682acac27e",
+                "timing_place/round_0/uroute_export/metadata.json": "8286824cd72ef2a71cea7eefde644e9c8fa82bbae4832df2b7d9fbbdc316bd23",
+                "uroute_export/features.bin": "56744b08072e0886f8ba1576c3c03e00b6d314eaf9250e82b5ff00ae68fc6d3e",
+                "uroute_export/metadata.json": "07686a6ab2c8a0921df446de8a47bfb36436c8e862b73a702a689d4075316bab"
+              },
+              {
+                "final/uroute_export/features.bin": "3aba31380884c2a38200eb9bde4b2780c043baeadfa1715efd081354b80b1fbd",
+                "final/uroute_export/metadata.json": "f1d8f010dd9d4532129ddf5840b692022d5912edd99be32c79f409050b6d6464",
+                "repair/sweep_1/uroute_export/features.bin": "1bc37854c8e113da2f40c81992184484be379c4cbb5f66850961307f6512c496",
+                "repair/sweep_1/uroute_export/metadata.json": "ddd852154dab7031968dd3f23995ec012e7cdc9c48ff3c7eef63b72a99aff6bb",
+                "repair/sweep_2/uroute_export/features.bin": "cda872a817b3b110c75171672a25f33737005f7ac36d221a7ba6c3bc2bf0969c",
+                "repair/sweep_2/uroute_export/metadata.json": "5552b65aa0b00f412964ed128f1e148a01d6c13fbe51ca7e670bdbdc060da2a7",
+                "repair/trial_3/uroute_export/features.bin": "857fc1ffc91f8224b74d14f4a7ff733748dbbb9d59aeb31f27eecc53d3696c95",
+                "repair/trial_3/uroute_export/metadata.json": "ca1adcf69b7bda014fa3953c9ec4f5d9cfbb24d72a3cf6effc004754998f4703",
+                "resize/sweep_1/uroute_export/features.bin": "7771ccd9dc66188680b61e07b0fcb0caa7c63191c15a56e4d32763f93fc9b160",
+                "resize/sweep_1/uroute_export/metadata.json": "79a96ce7c1eac31be95efa647b49ac1dd66465f23f2f8822b45e8f21d95373cb",
+                "timing_place/round_0/uroute_export/features.bin": "98fb83a7bba2ab68d2cbc9473fe0d793503aa2660627527d7a5222682acac27e",
+                "timing_place/round_0/uroute_export/metadata.json": "8286824cd72ef2a71cea7eefde644e9c8fa82bbae4832df2b7d9fbbdc316bd23",
+                "uroute_export/features.bin": "56744b08072e0886f8ba1576c3c03e00b6d314eaf9250e82b5ff00ae68fc6d3e",
+                "uroute_export/metadata.json": "07686a6ab2c8a0921df446de8a47bfb36436c8e862b73a702a689d4075316bab"
+              }
+            ],
+            "placement_seconds": [
+              39.278147,
+              38.423986000000006
+            ],
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -913.478075,
+              -913.478075
+            ],
+            "rss_mib": [
+              986.83203125,
+              949.7734375
+            ],
+            "sta_fraction": 0.3463942037403407,
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0796708268,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 800,
+              "gp_density_ready_iteration": 640,
+              "gp_continuation_deadline": 3200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 700
+            }
+          },
+          "NVDLA__partition_m": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v60/paired-home/v60_candidate/NVDLA__partition_m",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v62/paired-home/v62_candidate/NVDLA__partition_m"
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "5a442f329621baf84e6a481b4d6b9596e318634233ca1ec22d939a1aeb73de66",
+              "5a442f329621baf84e6a481b4d6b9596e318634233ca1ec22d939a1aeb73de66"
+            ],
+            "independent_scores_identical": true,
+            "export_files_identical": true,
+            "export_files": [
+              {
+                "final/uroute_export/features.bin": "490ff4d3a557ec21254bb39fe6e8df5e3040037fabf99e3ea2fb1e2498c36d82",
+                "final/uroute_export/metadata.json": "8785f25b7cdc6865260214aeb3d965cbd7802a02c881878ab3549e94c80fef6b",
+                "resize/sweep_1/uroute_export/features.bin": "ea50726d528dfd278b6b2b99e738f9648dc5c08a59fa79771ab8cae9f810a41d",
+                "resize/sweep_1/uroute_export/metadata.json": "e3398791176a318d364171d944e9846f10ed32da3daa7e2b82ce68ff0de82861",
+                "timing_place/round_0/uroute_export/features.bin": "4b66573f38e4526d3cd496467da7f29eea48130ecc9bcd054c43ffa86b00795c",
+                "timing_place/round_0/uroute_export/metadata.json": "9223d7204b4c3d6cf05eb9ff739ce5925da52b64878c07ebb2033d3dcace8f5b",
+                "uroute_export/features.bin": "d270d6753598f5914e1073c08174e4fc058f543335a62385ccf8d6cb5163f215",
+                "uroute_export/metadata.json": "0c7c816725f1b9114e23d3f1ecac2b5ad4e4ba1407587315f6023f42c097b036"
+              },
+              {
+                "final/uroute_export/features.bin": "490ff4d3a557ec21254bb39fe6e8df5e3040037fabf99e3ea2fb1e2498c36d82",
+                "final/uroute_export/metadata.json": "8785f25b7cdc6865260214aeb3d965cbd7802a02c881878ab3549e94c80fef6b",
+                "resize/sweep_1/uroute_export/features.bin": "ea50726d528dfd278b6b2b99e738f9648dc5c08a59fa79771ab8cae9f810a41d",
+                "resize/sweep_1/uroute_export/metadata.json": "e3398791176a318d364171d944e9846f10ed32da3daa7e2b82ce68ff0de82861",
+                "timing_place/round_0/uroute_export/features.bin": "4b66573f38e4526d3cd496467da7f29eea48130ecc9bcd054c43ffa86b00795c",
+                "timing_place/round_0/uroute_export/metadata.json": "9223d7204b4c3d6cf05eb9ff739ce5925da52b64878c07ebb2033d3dcace8f5b",
+                "uroute_export/features.bin": "d270d6753598f5914e1073c08174e4fc058f543335a62385ccf8d6cb5163f215",
+                "uroute_export/metadata.json": "0c7c816725f1b9114e23d3f1ecac2b5ad4e4ba1407587315f6023f42c097b036"
+              }
+            ],
+            "placement_seconds": [
+              36.40204,
+              34.833637
+            ],
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -692.389648,
+              -692.389648
+            ],
+            "rss_mib": [
+              1329.12109375,
+              1273.578125
+            ],
+            "sta_fraction": 0.3422862969204163,
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0820293505,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 800,
+              "gp_density_ready_iteration": 640,
+              "gp_continuation_deadline": 3200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 700
+            }
+          },
+          "coralnpu": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v60/paired-home/v60_candidate/coralnpu",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v62/paired-home/v62_candidate/coralnpu"
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "7554f3716ab6ee1e1f9e4818c383bb7a843daf3fd210630983d072469353459e",
+              "7554f3716ab6ee1e1f9e4818c383bb7a843daf3fd210630983d072469353459e"
+            ],
+            "independent_scores_identical": true,
+            "export_files_identical": true,
+            "export_files": [
+              {
+                "final/uroute_export/features.bin": "aa9128f8acc23180d39ab0752e3cdac6c91380417e21524f99c4cbba6f93a632",
+                "final/uroute_export/metadata.json": "212cde7fc80a6662a9c6403ff8fc269f0b1bb8ed0bc0d8eb2c1ee55a87ba77e0",
+                "resize/sweep_1/uroute_export/features.bin": "df59e52da4999326c653f8da475c7174a4065d8059f1dbe58e6de7295d64a3f9",
+                "resize/sweep_1/uroute_export/metadata.json": "d6b3604838e5a01cf03c44cacd69a3763648aaa0045c3a0510bf3249361d9d9a",
+                "timing_place/round_0/uroute_export/features.bin": "ffee210cb8739d61899ec64ce39c455a58f31c322603fbe6016b4c30baa9860e",
+                "timing_place/round_0/uroute_export/metadata.json": "5c5c22bc2fb70fb156e5e3c676bdb07db6d06cc753a39d83c002d4095097e522",
+                "uroute_export/features.bin": "b3d4f695dbbe354dbf28498da9ad6477ff25abfc22db55ad7029f0aaa56c374a",
+                "uroute_export/metadata.json": "a531947566008229d7a6626cab890167fadfe417a1d82471843461786565e3ba"
+              },
+              {
+                "final/uroute_export/features.bin": "aa9128f8acc23180d39ab0752e3cdac6c91380417e21524f99c4cbba6f93a632",
+                "final/uroute_export/metadata.json": "212cde7fc80a6662a9c6403ff8fc269f0b1bb8ed0bc0d8eb2c1ee55a87ba77e0",
+                "resize/sweep_1/uroute_export/features.bin": "df59e52da4999326c653f8da475c7174a4065d8059f1dbe58e6de7295d64a3f9",
+                "resize/sweep_1/uroute_export/metadata.json": "d6b3604838e5a01cf03c44cacd69a3763648aaa0045c3a0510bf3249361d9d9a",
+                "timing_place/round_0/uroute_export/features.bin": "ffee210cb8739d61899ec64ce39c455a58f31c322603fbe6016b4c30baa9860e",
+                "timing_place/round_0/uroute_export/metadata.json": "5c5c22bc2fb70fb156e5e3c676bdb07db6d06cc753a39d83c002d4095097e522",
+                "uroute_export/features.bin": "b3d4f695dbbe354dbf28498da9ad6477ff25abfc22db55ad7029f0aaa56c374a",
+                "uroute_export/metadata.json": "a531947566008229d7a6626cab890167fadfe417a1d82471843461786565e3ba"
+              }
+            ],
+            "placement_seconds": [
+              744.973804,
+              729.06971
+            ],
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -14703.633037,
+              -14703.633037
+            ],
+            "rss_mib": [
+              8420.0390625,
+              7736.73828125
+            ],
+            "sta_fraction": 0.26622429203511966,
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0363638432,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 1140,
+              "gp_density_ready_iteration": 600,
+              "gp_continuation_deadline": 3000,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 1040
+            }
+          }
+        },
+        "pending": []
+      },
+      "gemmini": {
+        "exit_code": -15,
+        "status": "guard-stopped",
+        "stop_reason": "process-tree memory limit",
+        "wall_s": 504.6601858509239,
+        "tree_peak_rss_kb": 16791504
+      },
+      "limitations": "Single samples; exact DEF, independent score and every exported feature byte match on all four designs. Gemmini violates strict 16 decimal GB; no large-design completion claim. Full A-J remains open.",
+      "artifacts": "/home/renau/projs/.agent-artifacts/1f-memory-v62"
+    },
+    "pure_gp_fixed_cleanup_v62": {
+      "scope": "Issue D/F diagnostic, current frozen v62, common geometry defaults; pure GP disables timing/resize/resynthesis and explicitly retains production buffer cleanup. Imported signal I/O frozen without geometric changes. Acceptance thresholds from original task; fresh matched OpenROAD trace/quality census still needed.",
+      "imported": {
+        "scope": "Fresh pure-GP+legalization flow-C import, same original geometry, pin statuses frozen and production buffer cleanup enabled, current common defaults; clock100ps/reset cuts; scoring is outside placement time. Historical OpenROAD GP HPWL threshold from1f applies to the identical input; full fresh matched OR run still pending.",
+        "runtime": {
+          "seed_s": 0.372268,
+          "place_s": 4.53058,
+          "timing_place_s": 3.7511e-05,
+          "sizing_s": 3.81e-07,
+          "repair_s": 2e-08,
+          "endpoint_sta_s": 2.89294,
+          "export_s": 0.0364006,
+          "timing_refine_s": 2.92938,
+          "fixed_components": 623,
+          "timing_evaluations": 1,
+          "timing_engine_s": 2.81899,
+          "timing_builds": 1,
+          "timing_repowered_gates": 0,
+          "timing_inserted_gates": 0,
+          "timing_removed_gates": 0,
+          "timing_updated_rc_nets": 16050
+        },
+        "score": {
+          "hpwl_um": 42653.419,
+          "hpwl_all_nets_um": 42768.008,
+          "measured_nets": 16049,
+          "excluded_nets": 1,
+          "setup_wns_ps": -10833.950669,
+          "setup_tns_ps": -22141461.247226,
+          "hold_wns_ps": 24.46611,
+          "hold_tns_ps": 0.0,
+          "instances": 16547,
+          "logical_cells": 15924,
+          "physical_cells": 623,
+          "buffers": 16,
+          "buffer_area_um2": 1.1664,
+          "macros": 0,
+          "instance_area_um2": 1919.7486,
+          "macro_area_um2": 0.0,
+          "die_um": [
+            0.0,
+            0.0,
+            64.175,
+            64.175
+          ],
+          "core_um": [
+            4.05,
+            4.05,
+            60.156,
+            59.94
+          ],
+          "scoring_seconds": 8.004,
+          "power_mw": 0.0506,
+          "reset_ports": []
+        },
+        "imported_gp_hpwl_target_um": 50317.3,
+        "within_hpwl_target": true,
+        "within_30s_place": true
+      },
+      "own": {
+        "lfsr": {
+          "pure_gp_hpwl_um": 171.796,
+          "pure_placement_s": 0.846639,
+          "pure_gp_main_iterations": 480,
+          "pure_gp_stop": "density_infeasible",
+          "final_hpwl_um": 177.29,
+          "final_to_pure_hpwl": 1.0319797899834688,
+          "F_pass": false,
+          "pure_artifacts": "/home/renau/projs/.agent-artifacts/1f-memory-v62/paired-home/v62_pure_clean/lfsr"
+        },
+        "minimax": {
+          "pure_gp_hpwl_um": 46071.875,
+          "pure_placement_s": 7.908789,
+          "pure_gp_main_iterations": 820,
+          "pure_gp_stop": "converged",
+          "final_hpwl_um": 46555.571,
+          "final_to_pure_hpwl": 1.0104987261751341,
+          "F_pass": true,
+          "pure_artifacts": "/home/renau/projs/.agent-artifacts/1f-memory-v62/paired-home/v62_pure_clean/minimax",
+          "D_own_floorplan_pass": true
+        }
+      },
+      "io_parity": {
+        "all_signal_io_geometry_identical": true,
+        "signal_pins": 133,
+        "omitted_power_pins": [
+          "VDD",
+          "VSS"
+        ],
+        "scope": "Compare status, orientation, coordinates and every layer rectangle of all signal terminals, independent of renamed nets and DEF PORT syntax."
+      }
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",

@@ -22,13 +22,40 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Review v62 consumes published OpenTimer <code>17a58a488</code>, reducing each
+pin record from 560 to 464 bytes without changing timing values, and removes
+the final route-feature export's whole placement-view copy. All 210 focused and
+consumer tests pass. Four matched runs preserve byte-identical DEFs, independent
+QoR and every route-feature export file. Placement takes 2.009 s on lfsr,
+38.424 s on minimax, 34.834 s on NVDLA/partition_m and 729.070 s on coralnpu,
+all within 1.5× of v60. Coral peak process RSS falls from 8,420 to 7,737 MiB.
+These are single samples, not repeatable speedup claims. Fresh Gemmini still
+exceeds the diagnostic memory guard after 504.660 s at 16,791,504 KiB, so I's
+strict 16 GB requirement remains unmet. See <code>runs.compact_timing_export_v62</code>.</p>
+
+<p>Fresh v62 pure-GP checks meet D's two numerical minimax limits: imported
+floorplan 42,653.419 µm independent HPWL in 4.531 s; own floorplan 46,071.875 µm
+in 7.909 s. Both retain production synthesis-buffer cleanup while disabling
+timing optimization. The imported experiment freezes the original 133 signal
+I/O pins; all coordinates, orientations and layer rectangles match exactly.
+An earlier diagnostic omitted cleanup and allowed PLACED I/Os to move, so its
+111,477.984 µm result is not the fixed-I/O cleaned comparison. The original input
+and every diagnostic remain archived. Pure GP still takes 820 iterations on
+minimax. F passes on minimax (+1.05% final HPWL), but lfsr is +3.20%, just above
+the +3% bound. Fresh equal-overflow OpenROAD traces, E and the remaining A–J
+requirements stay open. See <code>runs.pure_gp_fixed_cleanup_v62</code>.</p>
+
 <p>Review v60 fixes a reproduced what-if rollback error: an applied trial RC
 could survive into an evaluation whose accepted net was unchanged, shifting
 slack by about 546 ps in the regression. Commit <code>f1457208e</code> restores
 queued RC before incremental comparison and releases the obsolete journal and
 its owning snapshot, without an extra propagation. All 116 focused and consumer
-tests pass. Full-placement validation and the A–J requirements remain open.
-See <code>runs.whatif_rc_restore_v60</code>.</p>
+tests pass. Four matched placements retain byte-identical DEFs and independent
+QoR: lfsr 2.016 s, minimax 39.278 s, NVDLA/partition_m 36.402 s and coralnpu
+744.974 s, each within 1.5× of its v59 control. These are single samples,
+not repeatable speedup claims. STA fractions remain 33.4%, 34.7%, 34.0% and
+26.8%; minimax still uses 700 main GP iterations. The B/E and broader A–J
+requirements remain open. See <code>runs.whatif_rc_restore_v60</code>.</p>
 
 <p>Review v59 releases solver arrays, endpoint indices and reporting temporaries
 before allocating persisted RC, preserving the complete graph annotation before
