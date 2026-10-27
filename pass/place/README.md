@@ -869,7 +869,7 @@ the dominant setup cost. Regression coverage includes both L orientations,
 rejection of a feasible intermediate Z trunk, one through eight sinks, changed
 occupancy, deadlines, pin protection, and placement/RC consumers (116 tests).
 
-Routing occupancy owns a runtime-only vector of Roaring bitmaps per layer.
+Routing occupancy owns a runtime-only vector of interval strips per layer.
 Each entry covers a grid strip across the preferred direction; occupied ranges
 run along that direction. Vertical layers transpose the coordinates. The DEF
 occupancy builder enables the index once after importing pins, obstructions,
@@ -886,16 +886,22 @@ remain fully indexed. Geometry outside the indexed bounds, strips beyond the
 32-bit coordinate space, or strip directories exceeding 32 MiB use the exact
 index. This accelerator preserves metal, via, pin-protection and connectivity
 validation. Imported ranges are compacted once; commits do not rebuild the
-layer. The dependency is CRoaring 4.3.11 (`@roaring//:roaring_cpp`).
+layer. Each strip merges touching/overlapping closed intervals and answers an
+interval-overlap query with one binary search. Endpoints use 16 bits until a
+coordinate requires 32 bits. Import compaction may replace fragmented runs
+with dense words when those are smaller, capped at 8 KiB per strip; later
+commits update the selected representation in place. There is no serialization
+or general-purpose bitmap dependency.
 
 `signal_route_bench` uses this production index automatically. For measurements,
 `--occupancy-index exact` disables the local accelerator, and
 `--bitmap-grid-dbu N` overrides its grid. Automatic construction is included in
 `occupancy_seconds`; `bitmap_seconds` measures only the explicit override or
-disable operation. `bitmap_bytes` reports compressed container payload and
-strip objects, excluding container-directory and allocator overhead.
+disable operation. `bitmap_bytes` reports interval/word vector capacity and
+strip objects, excluding allocator overhead.
 
-Three alternating paired runs on CPU 15 used the same 20,000 seed-17 draws with one to eight sinks. All 60,000 paired outcomes, rejection
+The previous Roaring implementation was measured with three alternating paired
+runs on CPU 15 using the same 20,000 seed-17 draws with one to eight sinks. All 60,000 paired outcomes, rejection
 reasons, work counts and accepted geometries matched the frozen dense-bitmap
 reference, with 684 successes per run and no timeouts. Reported bitmap storage
 fell from 72,710,560 to 11,678,558 bytes (84% less, before the omitted metadata).
@@ -907,9 +913,38 @@ throughput measurement; regression tests cover import and incremental commits.
 
 Short-query membership checks, exact along-track coordinates, and direct run
 container queries were also measured. None recovered dense-bitmap throughput;
-the implementation keeps the simpler public Roaring range API and the smaller
-coarse representation. Artifacts are in `.agent-artifacts/route-dpin-v4` through
-`route-dpin-v7` in the parent workspace. The final implementation matches v4.
+the initial implementation used the public Roaring range API. Those historical
+artifacts are in `.agent-artifacts/route-dpin-v4` through `route-dpin-v7` in the
+parent workspace.
+
+The specialized interval API was then compared against that frozen Roaring
+implementation. Three alternating pairs of 100,000 seed-29 attempts on CPU 13
+had identical outcomes, rejection reasons, work counts and accepted geometry
+(all 300,000 paired attempts). Each run had 3,120 successes, 96,880 failures and
+no timeouts. Median attempt throughput rose from 13,878 to 15,234/s (+9.8%),
+successful-call-only throughput rose from 5,188 to 5,425/s and failed-call-only
+throughput from 14,669 to 16,176/s. Mixed-workload successful routes rose from
+433 to 475/s. Index construction fell from 1.894 to 1.423 s, and total setup fell from 16.425
+to 14.714 s. Reported index storage fell from 11,678,558 to 10,893,728 bytes
+(6.7%; Roaring's figure also omits its container directory). A separate seed-17
+sweep matched all 60,000 paired outcomes; its timings included a strong host
+contention outlier, so the longer repeat is the primary throughput evidence.
+The fixture still excludes PG wiring, route commits and dpin-to-net lookup.
+
+Synthetic strip tests separately compare interval insertion, overlap queries
+and 10,000 incremental updates. At 65,536 coordinates, long-wire overlap queries
+improved from about 22 to 34 million/s with comparable storage. At 256
+coordinates, fragmented adaptive strips reached about 491 million/s, versus
+32 million/s for Roaring and 717 million/s for an explicitly dense strip.
+These are index microbenchmarks, not route throughput. A bounded local router
+can favor dense words even before they become smaller; no separate local
+routing/search mode is introduced here. For strips spanning more than 65,536
+coordinates, 32-bit runs can use more memory than Roaring's chunked 16-bit
+containers (about 1.8x in the million-coordinate wire fixture). Extremely
+fragmented global strips can also make vector insertion expensive. The current
+policy favors the measured common case without changing route-search limits
+or legality checks. Experiments and exact-pair comparisons are under
+`.agent-artifacts/route-dpin-v8`, `route-dpin-v9`, and `route-dpin-v9-repeat`.
 
 `try_route` also screens long parallel exposure to foreign metal on the same
 layer. For elongated shapes within two candidate wire widths, it sums parallel

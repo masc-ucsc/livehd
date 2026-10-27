@@ -3,10 +3,10 @@ load("//tools:copt_default.bzl", "COPTS")
 cc_library(
     name = "inou_lefdef",
     srcs = ["route_graph_store.cpp", "route_store.cpp", "physical.cpp", "mapped_graph.cpp", "routing_geometry.cpp", "routing_rules.cpp", "pin_access.cpp", "routing_occupancy.cpp", "routing_connectivity.cpp", "signal_via.cpp", "cut_rules.cpp", "tech_profile.cpp", "lef_writer.cpp", "row_access.cpp"],
-    hdrs = ["route_store.hpp", "physical.hpp", "mapped_graph.hpp", "routing_geometry.hpp", "routing_rules.hpp", "pin_access.hpp", "routing_occupancy.hpp", "routing_connectivity.hpp", "signal_via.hpp", "cut_rules.hpp", "tech_profile.hpp", "lef_writer.hpp", "row_access.hpp"],
+    hdrs = ["interval_occupancy.hpp", "route_store.hpp", "physical.hpp", "mapped_graph.hpp", "routing_geometry.hpp", "routing_rules.hpp", "pin_access.hpp", "routing_occupancy.hpp", "routing_connectivity.hpp", "signal_via.hpp", "cut_rules.hpp", "tech_profile.hpp", "lef_writer.hpp", "row_access.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":index_union_find", "//core", "//graph", "//third_party/misc/lef/lef", "//third_party/misc/def/def", "@rapidjson", "@roaring//:roaring_cpp"],
+    deps = [":index_union_find", "//core", "//graph", "//third_party/misc/lef/lef", "//third_party/misc/def/def", "@rapidjson"],
 )
 cc_library(
     name = "index_union_find",
@@ -116,6 +116,13 @@ filegroup(
 cc_test(
     name = "route_store_test",
     srcs = ["route_store_test.cpp"],
+    copts = COPTS,
+    deps = [":inou_lefdef", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "interval_occupancy_smoke",
+    srcs = ["interval_occupancy_smoke.cpp"],
     copts = COPTS,
     deps = [":inou_lefdef", "@googletest//:gtest_main"],
 )

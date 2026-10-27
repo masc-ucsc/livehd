@@ -86,7 +86,7 @@ TEST(RoutingOccupancy, BitmapPreservesBaseOverlaysCopiesAndConservativeFallback)
   EXPECT_THROW(moved.enable_bitmap({0, 0, 100, 100}, 0), std::invalid_argument);
 }
 
-TEST(RoutingOccupancy, RoaringRangesCrossContainersAndReachCoordinateLimits) {
+TEST(RoutingOccupancy, IntervalRangesCrossCoordinateWidthsAndReachLimits) {
   for (bool vertical : {false, true}) {
     Routing_occupancy exact(100000), compressed(100000);
     const auto rect = [vertical](double a, double b, double c, double d) { return vertical ? Rect{b, a, d, c} : Rect{a, b, c, d}; };
@@ -111,7 +111,7 @@ TEST(RoutingOccupancy, RoaringRangesCrossContainersAndReachCoordinateLimits) {
     }
   }
 }
-TEST(RoutingOccupancy, RoaringSparseDenseAndRunStripsMatchExactQueries) {
+TEST(RoutingOccupancy, IntervalSparseDenseAndRunStripsMatchExactQueries) {
   Routing_occupancy exact(64);
   // Separated pairs favor bitset storage; sparse pairs favor array storage;
   // long solid intervals favor run storage. Exercise both orientations.
@@ -156,7 +156,7 @@ TEST(RoutingOccupancy, RoaringSparseDenseAndRunStripsMatchExactQueries) {
     }
   }
 }
-TEST(RoutingOccupancy, ImportedIndexRetainsRoaringAcrossCommitsAndNewLayers) {
+TEST(RoutingOccupancy, ImportedIndexRetainsIntervalsAcrossCommitsAndNewLayers) {
   Technology tech;
   tech.layers["M2"].direction = "HORIZONTAL";
   tech.layers["M3"].direction = "VERTICAL";

@@ -6,8 +6,8 @@
 #include <set>
 #include <unordered_map>
 
+#include "interval_occupancy.hpp"
 #include "physical.hpp"
-#include "roaring/roaring.hh"
 
 namespace livehd::physical {
 struct Occupied_shape {
@@ -32,11 +32,11 @@ class Routing_occupancy {
   // Conservative coverage only: a clear region proves there are no shapes;
   // marked regions still use exact ownership/geometry filtering.
   struct Layer_bitmap {
-    int64_t                       grid, xl, yl;
-    size_t                        nx, ny;
-    bool                          vertical;
+    int64_t                         grid, xl, yl;
+    size_t                          nx, ny;
+    bool                            vertical;
     // Each strip stores coordinates along the preferred routing direction.
-    std::vector<roaring::Roaring> strips;
+    std::vector<Interval_occupancy> strips;
     Layer_bitmap(const Rect&, int64_t, bool);
     void   insert(const Rect&);
     bool   maybe_occupied(const Rect&) const;
@@ -96,7 +96,7 @@ public:
   // Append-only overlay. The shared base must remain immutable for its lifetime.
   // Copies share only that base; local insertions never affect sibling trials.
   explicit Routing_occupancy(std::shared_ptr<const Routing_occupancy> base);
-  // Runtime-only Roaring broad phase, retained until this owner is destroyed.
+  // Runtime-only interval broad phase, retained until this owner is destroyed.
   // Insertions (including new layers) update it; no ownership/DRC verdict is
   // cached. Imported geometry is compacted once, never serialized.
   // Geometry outside supported bounds retains the exact index.
@@ -104,7 +104,7 @@ public:
   // Choose a conservative grid from DEF tracks; no benchmark-specific tuning.
   void                enable_bitmap(const Technology&, const Floorplan&);
   void                disable_bitmap();  // Exact reference for measurements.
-  // Compressed payload plus strip objects, excluding allocator overhead.
+  // Interval/word capacity plus strip objects, excluding allocator overhead.
   size_t              bitmap_bytes() const;
   size_t              insert(Occupied_shape);
   // Exact arithmetic progression of identical rectangles, including reversed

@@ -46,7 +46,7 @@ Routing_occupancy::Layer_bitmap::Layer_bitmap(const Rect& bounds, int64_t pitch,
   ny           = b.yh - b.yl + 1;
   // Avoid an enormous strip directory on malformed or extremely fine grids.
   // Each strip has a 32-bit coordinate space; unsupported planes fall back.
-  if (uint64_t(nx) <= (uint64_t{1} << 32) && ny <= 32 * 1024 * 1024 / sizeof(roaring::Roaring)) {
+  if (uint64_t(nx) <= (uint64_t{1} << 32) && ny <= 32 * 1024 * 1024 / sizeof(Interval_occupancy)) {
     strips.resize(ny);
   }
 }
@@ -61,7 +61,7 @@ void Routing_occupancy::Layer_bitmap::insert(const Rect& rect) {
     return;
   }
   for (auto y = y0; y <= y1; ++y) {
-    strips[y - yl].addRange(uint64_t(x0 - xl), uint64_t(x1 - xl) + 1);
+    strips[y - yl].insert(uint32_t(x0 - xl), uint32_t(x1 - xl));
   }
 }
 bool Routing_occupancy::Layer_bitmap::maybe_occupied(const Rect& rect) const {
@@ -73,7 +73,7 @@ bool Routing_occupancy::Layer_bitmap::maybe_occupied(const Rect& rect) const {
     return true;  // Geometry outside the bitmap remains in the exact index.
   }
   for (auto y = b.yl; y <= b.yh; ++y) {
-    if (roaring::api::roaring_bitmap_intersect_with_range(&strips[y - yl].roaring, uint64_t(b.xl - xl), uint64_t(b.xh - xl) + 1)) {
+    if (strips[y - yl].intersects(uint32_t(b.xl - xl), uint32_t(b.xh - xl))) {
       return true;
     }
   }
@@ -81,16 +81,13 @@ bool Routing_occupancy::Layer_bitmap::maybe_occupied(const Rect& rect) const {
 }
 void Routing_occupancy::Layer_bitmap::compact() {
   for (auto& strip : strips) {
-    strip.runOptimize();
-    strip.shrinkToFit();
+    strip.compact(nx);
   }
 }
 size_t Routing_occupancy::Layer_bitmap::bytes() const {
-  size_t total = strips.capacity() * sizeof(roaring::Roaring);
+  size_t total = strips.capacity() * sizeof(Interval_occupancy);
   for (const auto& strip : strips) {
-    roaring::api::roaring_statistics_t stat{};
-    roaring::api::roaring_bitmap_statistics(&strip.roaring, &stat);
-    total += stat.n_bytes_array_containers + stat.n_bytes_run_containers + stat.n_bytes_bitset_containers;
+    total += strip.bytes();
   }
   return total;
 }
