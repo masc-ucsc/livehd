@@ -232,7 +232,11 @@ fanout.write_text('module dobuf(input clk, a, b, c, d, ' + ', '.join(f'x{i}' for
                   'always @(posedge clk) r0 <= q1 & x0;\n'
                   + ''.join(f'assign y{i} = q1 & x{i + 1};\n' for i in range(32)) + 'endmodule\n')
 buffered_base = [fanout if word == str(source) else 'dobuf' if word == 'doms' else word for word in base]
-buffered = run('buffered', coefficients + sizing + ['--set', 'synth.place.utilization=0.3'],
+# The mapper buffers q1's 33 loads; without resize nothing would rebuild that
+# buffering, so the placement keeps it (synth.place.buffer_cleanup=auto). This
+# leg removes it, as resize would, so sizing sees q1 driving its loads.
+buffered = run('buffered', coefficients + sizing + ['--set', 'synth.place.utilization=0.3',
+                                                    '--set', 'synth.place.buffer_cleanup=true'],
                command=buffered_base)['qor']['place']
 sized = buffered['domino_sizing']
 assert [(t['move'], t['outcome']) for t in sized['trials']] == [('up', 'accepted'), ('buffer', 'accepted')], sized['trials']
