@@ -6840,16 +6840,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         std::vector<std::optional<double>> cell_slacks(v.cells.size());
         std::vector<double>                ranked;
         for (size_t i = 0; i < v.cells.size(); ++i) {
-          const std::string prefix = v.cells[i].name + ":";
-          for (auto it = final_gp_timing.pins.lower_bound(prefix);
-               it != final_gp_timing.pins.end() && it->first.starts_with(prefix);
-               ++it) {
-            if (!it->second.clock && it->second.slack && std::isfinite(*it->second.slack)) {
-              if (!cell_slacks[i] || *it->second.slack < *cell_slacks[i]) {
-                cell_slacks[i] = *it->second.slack;
-              }
-            }
-          }
+          cell_slacks[i] = final_gp_timing.cell_slack(v.cells[i].name);
           if (cell_slacks[i]) {
             ranked.push_back(*cell_slacks[i]);
           }

@@ -1639,10 +1639,10 @@ struct Model {
       Net                   item{slack, n, {}, {}};
       std::vector<size_t>   untimed_sinks;
       for (const auto& c : net.connections) {
-        const auto pin  = timing.find_pin(c.instance, c.pin);
-        clock          |= pin && pin->clock;
-        if (pin && pin->slack && std::isfinite(*pin->slack)) {
-          slack = std::min(slack, *pin->slack * timing.time_unit_ps);
+        const auto pin  = timing.pin_rank(c.instance, c.pin);
+        clock          |= pin.clock;
+        if (std::isfinite(pin.slack)) {
+          slack = std::min(slack, pin.slack * timing.time_unit_ps);
         }
         const auto found = names.find(c.instance);
         if (found == names.end()) {
@@ -1654,8 +1654,7 @@ struct Model {
         if (p != m.pins.end()) {
           power |= p->second.use == "POWER" || p->second.use == "GROUND";
           clock |= p->second.use == "CLOCK";
-          if (options.critical_fanin_depth && movable[i] && p->second.direction == "INPUT"
-              && (!pin || !pin->slack || !std::isfinite(*pin->slack))) {
+          if (options.critical_fanin_depth && movable[i] && p->second.direction == "INPUT" && !std::isfinite(pin.slack)) {
             untimed_sinks.push_back(i);
           }
           if (p->second.direction == "OUTPUT") {

@@ -9,6 +9,7 @@
 #include "attrs.hpp"
 #include "gtest/gtest.h"
 #include "node_util.hpp"
+#include "pass/place/prects_networks.hpp"
 #include "pass/place/preroute.hpp"
 #include "pass/place/preroute_repair.hpp"
 #include "pass/place/preroute_timing.hpp"
@@ -265,12 +266,12 @@ TEST_F(PhysicalSession, RegisteredResetCutChangesDownstreamSlackWithoutChangingL
   using Purpose          = livehd::opentimer::Physical_session::Purpose;
   const auto ranked_full = session.evaluate(graph, rc, {}, Purpose::ranking);
   const auto ranked_data = session.evaluate(graph, rc, cuts, Purpose::ranking);
-  ASSERT_TRUE(ranked_full.pins.at("y").slack);
-  ASSERT_TRUE(ranked_data.pins.at("y").slack);
+  ASSERT_TRUE(std::isfinite(ranked_full.pin_rank("PIN", "y").slack));
+  ASSERT_TRUE(std::isfinite(ranked_data.pin_rank("PIN", "y").slack));
   EXPECT_TRUE(ranked_data.ranking_only);
-  EXPECT_GT(*ranked_data.pins.at("y").slack, *ranked_full.pins.at("y").slack + 1);
-  EXPECT_FALSE(ranked_data.pins.contains("mix:B"));
-  EXPECT_TRUE(ranked_data.pins.at("mix:A").slack);
+  EXPECT_GT(ranked_data.pin_rank("PIN", "y").slack, ranked_full.pin_rank("PIN", "y").slack + 1);
+  EXPECT_FALSE(std::isfinite(ranked_data.pin_rank("mix", "B").slack));
+  EXPECT_TRUE(std::isfinite(ranked_data.pin_rank("mix", "A").slack));
   compare(data, session.evaluate(graph, rc, cuts));
   auto       moved          = std::make_shared<livehd::physical::Parasitics>(*rc);
   const auto original_pose  = reset.attr(livehd::attrs::place).get();
@@ -341,38 +342,94 @@ TEST_F(PhysicalSession, RankingTracksRcAndGateChangesWithoutPublishingDetailedTi
   Circuit                             initial(false, false, 100);
   const auto                          first = session.evaluate(initial.graph, initial.rc, {}, Purpose::ranking);
   ASSERT_TRUE(first.ranking_only);
-  ASSERT_TRUE(first.pins.at("y").slack);
+  ASSERT_TRUE(first.ranking);
+  ASSERT_TRUE(std::isfinite(first.pin_rank("PIN", "y").slack));
+  EXPECT_TRUE(first.pins.empty());
   EXPECT_FALSE(first.wns);
   EXPECT_FALSE(first.tns);
   EXPECT_FALSE(first.electrical_pin_feedback);
   EXPECT_TRUE(first.path.empty());
-  for (const auto& [name, pin] : first.pins) {
-    EXPECT_FALSE(pin.arrival) << name;
-    EXPECT_FALSE(pin.required) << name;
-    EXPECT_FALSE(pin.slew) << name;
-    EXPECT_FALSE(pin.load_ff) << name;
-    EXPECT_FALSE(pin.hold_slack) << name;
-  }
   Circuit    longer(false, false, 10000);
   const auto moved = session.evaluate(longer.graph, longer.rc, {}, Purpose::ranking);
-  ASSERT_TRUE(moved.pins.at("y").slack);
-  EXPECT_LT(*moved.pins.at("y").slack, *first.pins.at("y").slack);
+  ASSERT_TRUE(std::isfinite(moved.pin_rank("PIN", "y").slack));
+  EXPECT_EQ(first.ranking->layout, moved.ranking->layout);
+  EXPECT_LT(moved.pin_rank("PIN", "y").slack, first.pin_rank("PIN", "y").slack);
   Circuit                             changed(true, false, 10000);
   const auto                          repowered = session.evaluate(changed.graph, changed.rc, {}, Purpose::ranking);
   livehd::opentimer::Physical_session fresh_rank(options);
   const auto                          expected_rank = fresh_rank.evaluate(changed.graph, changed.rc, {}, Purpose::ranking);
-  EXPECT_EQ(repowered.pins.at("y").slack, expected_rank.pins.at("y").slack);
+  EXPECT_EQ(repowered.pin_rank("PIN", "y").slack, expected_rank.pin_rank("PIN", "y").slack);
   const auto detailed = session.evaluate(changed.graph, changed.rc);
   EXPECT_FALSE(detailed.ranking_only);
   livehd::opentimer::Physical_session fresh_detail(options);
   compare(detailed, fresh_detail.evaluate(changed.graph, changed.rc));
   const auto restored = session.evaluate(initial.graph, initial.rc, {}, Purpose::ranking);
-  EXPECT_EQ(restored.pins.at("y").slack, first.pins.at("y").slack);
+  EXPECT_EQ(restored.pin_rank("PIN", "y").slack, first.pin_rank("PIN", "y").slack);
   EXPECT_EQ(session.statistics().builds, 1U);
   EXPECT_EQ(session.statistics().rankings, 4U);
   EXPECT_EQ(session.statistics().evaluations, 5U);
 }
 
+TEST_F(PhysicalSession, IndexedRankingPreservesWeightsAcrossTopologyAndFiltering) {
+  using Purpose = livehd::opentimer::Physical_session::Purpose;
+  livehd::opentimer::Physical_session session(options);
+  std::vector<Feedback>               retained;
+  for (const auto& [strong, extra] : {
+           std::pair{false, false},
+           { true,  true},
+           {false, false}
+  }) {
+    Circuit    circuit(strong, extra, 5000, true);
+    const auto rank = session.evaluate(circuit.graph, circuit.rc, {}, Purpose::ranking);
+    ASSERT_TRUE(rank.ranking);
+    EXPECT_TRUE(rank.pins.empty());
+    EXPECT_EQ(rank.ranking->parasitics, circuit.rc);
+    livehd::opentimer::Physical_session fresh(options);
+    const auto                          expected = fresh.evaluate(circuit.graph, circuit.rc, {}, Purpose::ranking);
+    EXPECT_EQ(rank.ranking->layout->labels, expected.ranking->layout->labels);
+    for (const auto& label : rank.ranking->layout->labels) {
+      EXPECT_EQ(rank.ranking->find(label)->slack, expected.ranking->find(label)->slack) << label;
+      EXPECT_EQ(rank.ranking->find(label)->clock, expected.ranking->find(label)->clock) << label;
+    }
+    Feedback legacy;
+    legacy.ranking_only = true;
+    for (const auto& label : rank.ranking->layout->labels) {
+      const auto& value = *rank.ranking->find(label);
+      if (std::isfinite(value.slack)) {
+        legacy.pins[label].slack = value.slack;
+      }
+      if (value.clock) {
+        legacy.pins[label].clock = true;
+      }
+    }
+    auto reordered = *circuit.rc;
+    std::reverse(reordered.nets.begin(), reordered.nets.end());
+    for (bool filter : {false, true}) {
+      livehd::placement::Prects_networks controls;
+      if (filter) {
+        controls.pins = {"u:A", "y"};  // Exercise partial-net filtering too.
+      }
+      const auto indexed = livehd::placement::prects_data_timing(rank, controls);
+      const auto named   = livehd::placement::prects_data_timing(legacy, controls);
+      for (double fraction : {.1, .2, 1.}) {
+        const auto weights = livehd::placement::timing_weights(*circuit.rc, named, fraction);
+        EXPECT_EQ(livehd::placement::timing_weights(*circuit.rc, indexed, fraction), weights);
+        EXPECT_EQ(livehd::placement::timing_weights(reordered, indexed, fraction), weights);
+      }
+      EXPECT_EQ(indexed.cell_slack("u"), named.cell_slack("u"));
+      EXPECT_EQ(indexed.cell_slack("missing"), named.cell_slack("missing"));
+    }
+    session.whatif().add_cell("trial_only", "sky130_fd_sc_hd__buf_1");
+    const auto restored = session.evaluate(circuit.graph, circuit.rc, {}, Purpose::ranking);
+    EXPECT_EQ(restored.pin_rank("PIN", "y").slack, rank.pin_rank("PIN", "y").slack);
+    retained.push_back(rank);
+  }
+  // Old feedback owns its snapshot and layout after scratch graphs, timer
+  // bindings and later topology generations have gone away.
+  for (const auto& rank : retained) {
+    EXPECT_FALSE(livehd::placement::timing_weights(*rank.ranking->parasitics, rank, .2).empty());
+  }
+}
 TEST_F(PhysicalSession, DataCutsSurviveTopologyChangesAndCanBeRemoved) {
   livehd::opentimer::Physical_session session(options);
   for (bool extra : {false, true, false}) {

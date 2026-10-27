@@ -366,6 +366,18 @@ violations, area, endpoint WNS/TNS and the path used by physical repair.
 No timing JSON is generated, written or read by `evaluate`. Explicit timing
 reports remain output artifacts, separate from feedback.
 
+GP ranking uses `Feedback::Ranking`: a dense slack/clock array and a shared,
+immutable physical-pin/net layout. The session binds timer pins once per
+topology; coordinate-only updates reuse those bindings. Gate/topology changes
+and what-if access invalidate the bindings before the next ranking sample.
+No per-pin ordered map or detailed pin-time breakdown is built for ranking.
+Feedback owns its layout and exact RC snapshot, so it remains usable after
+scratch graphs and later timer generations are destroyed. Net weighting uses
+numeric pin indices for that snapshot and resolves labels for other snapshots.
+Reset filtering masks a copied array without changing the original sample.
+Cell/terminal/SAT legalization consume the same rank and clock information.
+Detailed timing and report consumers retain the ordinary pin records.
+
 At the final `pass.opentimer` boundary, `lhd synth` can transfer the session
 through the transient `Eprp_var::physical_timing_session` field. `write_report`
 reconciles the final RC, masters, connectivity and reset cuts, rolls back pending

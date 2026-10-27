@@ -146,6 +146,35 @@ TEST(TerminalLegalize, FineGridOnSmallCoreKeepsCellsIndivisibleAndHardCap) {
   EXPECT_EQ(report.bins_y, 2);
   EXPECT_EQ(report.bins.size(), 4);
 }
+TEST(TerminalLegalize, DenseRankingPreservesCriticalCellsAndFinalGeometry) {
+  Fixture named(11, 1);
+  named.options.bins_x = named.options.bins_y = 1;
+  named.options.critical_fraction             = 1;
+  named.options.critical_pair_limit           = 0;
+  const auto a = named.cell(9, 0), b = named.cell(10, 0);
+  named.net(a, b, -1);
+  for (int i = 0; i < 3; ++i) {
+    named.cell(3, 0);
+  }
+  auto dense     = named;
+  auto layout    = std::make_shared<timing::Feedback::Ranking::Layout>();
+  layout->labels = {"c0:Y", "c1:A"};
+  dense.timing.pins.clear();
+  dense.timing.ranking_only = true;
+  auto& rank                = dense.timing.ranking.emplace();
+  rank.layout               = layout;
+  rank.pins                 = {
+      {-1, false},
+      {-1, false}
+  };
+  const auto expected = terminal_legalize(named.tech, named.fp, named.timing, named.options);
+  const auto actual   = terminal_legalize(dense.tech, dense.fp, dense.timing, dense.options);
+  EXPECT_EQ(expected.critical_cells, 2U);
+  EXPECT_EQ(actual.critical_cells, expected.critical_cells);
+  EXPECT_EQ(dense.fp.components, named.fp.components);
+  EXPECT_EQ(dense.fp.rows, named.fp.rows);
+  dense.check(actual);
+}
 
 TEST(TerminalLegalize, ControlEdgesCannotConsumeCriticalBudgetOrContaminateCellSlack) {
   Fixture    f;

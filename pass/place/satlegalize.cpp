@@ -271,8 +271,7 @@ std::vector<Pair> pairs(const ph::Technology& tech, const ph::Floorplan& fp, con
     }
     const auto& net       = fp.nets[n];
     const bool  clock_net = std::any_of(net.connections.begin(), net.connections.end(), [&](const auto& connection) {
-      const auto* pin = timing.find_pin(connection.instance, connection.pin);
-      return pin && pin->clock;
+      return timing.is_clock_pin(connection.instance, connection.pin);
     });
     if (clock_net) {
       continue;
@@ -307,15 +306,15 @@ std::vector<Pair> pairs(const ph::Technology& tech, const ph::Floorplan& fp, con
       if (a == b || !movable(tech, fp.components[a]) || !movable(tech, fp.components[b])) {
         continue;
       }
-      const auto* t = timing.find_pin(sink.instance, sink.pin);
-      if (!t || !t->slack || t->clock) {
+      const auto t = timing.pin_rank(sink.instance, sink.pin);
+      if (!std::isfinite(t.slack) || t.clock) {
         continue;
       }
       const auto& pa = fp.components[a].place;
       const auto& pb = fp.components[b].place;
       result.push_back({
           {a, b, driver->pin, sink.pin},
-          *t->slack,
+          t.slack,
           double(std::abs(pa.x - pb.x) + std::abs(pa.y - pb.y))
       });
     }

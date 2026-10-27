@@ -133,6 +133,42 @@ TEST(PrectsNetworks, LefAndTimingEvidenceNeedNoFiniteSlack) {
   EXPECT_EQ(excluded.ignored, (std::vector<bool>{true, true, true, true}));
   EXPECT_TRUE(excluded.timing_cuts.empty());
 }
+TEST(PrectsNetworks, DenseRankingClocksAndFilteringMatchNamedFeedback) {
+  auto                 roles = library();
+  physical::Technology tech;
+  physical::Floorplan  fp;
+  fp.components = {
+      {"b", "unary", {}},
+      {"t", "unary", {}}
+  };
+  fp.nets = {
+      {       "clock", {{"PIN", "clk"}, {"b", "i"}}},
+      {"clock_branch",   {{"b", "o"}, {"PIN", "q"}}},
+      {        "data",   {{"PIN", "d"}, {"t", "i"}}}
+  };
+  timing::Feedback named;
+  named.pins["b/o"].clock = true;
+  named.pins["t:i"].slack = -1;
+  timing::Feedback dense;
+  dense.ranking_only = true;
+  auto layout        = std::make_shared<timing::Feedback::Ranking::Layout>();
+  layout->labels     = {"b/o", "t:i"};
+  auto& rank         = dense.ranking.emplace();
+  rank.layout        = layout;
+  rank.pins          = {
+      {std::numeric_limits<double>::infinity(),  true},
+      {                                     -1, false}
+  };
+  const auto expected = prects_networks(tech, fp, roles, named);
+  const auto actual   = prects_networks(tech, fp, roles, dense);
+  EXPECT_EQ(actual.ignored, expected.ignored);
+  EXPECT_EQ(actual.pins, expected.pins);
+  EXPECT_EQ(actual.timing_cuts, expected.timing_cuts);
+  const auto filtered = prects_data_timing(dense, actual);
+  EXPECT_FALSE(filtered.is_clock_pin("b", "o"));
+  EXPECT_TRUE(dense.is_clock_pin("b", "o"));
+  EXPECT_EQ(filtered.pin_rank("t", "i").slack, -1);
+}
 TEST(PrectsNetworks, ExplicitPortsReplaceOptionalMetadataAndLibraryRoots) {
   auto roles = library();
   roles.pins.insert("registered:q");

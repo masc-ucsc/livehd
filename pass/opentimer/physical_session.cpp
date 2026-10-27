@@ -19,14 +19,16 @@
 
 namespace livehd::opentimer {
 struct Physical_session::Impl : Pass_opentimer {
-  Statistics                                       stats;
-  bool                                             initialized        = false;
-  uint64_t                                         timing_inputs_hash = 0;
-  std::map<std::string, std::string>               masters, ports, net_names, connections;
-  std::vector<std::pair<std::string, std::string>> cell_identity;
-  size_t                                           next_gate = 0, next_net = 0;
-  std::set<std::string>                            data_exclusions;
-  bool                                             exclusions_dirty = true;
+  Statistics                                                       stats;
+  bool                                                             initialized        = false;
+  uint64_t                                                         timing_inputs_hash = 0;
+  std::map<std::string, std::string>                               masters, ports, net_names, connections;
+  std::vector<std::pair<std::string, std::string>>                 cell_identity;
+  size_t                                                           next_gate = 0, next_net = 0;
+  std::set<std::string>                                            data_exclusions;
+  bool                                                             exclusions_dirty = true;
+  std::shared_ptr<const livehd::timing::Feedback::Ranking::Layout> ranking_layout;
+  std::vector<const ot::Pin*>                                      ranking_pins;
 
   explicit Impl(const Eprp_var& options) : Pass_opentimer(options) {
     // Reporting/caching is a separate consumer, never the feedback transport.
@@ -279,6 +281,8 @@ struct Physical_session::Impl : Pass_opentimer {
   }
 
   void finish_update(const std::shared_ptr<hhds::Graph>& graph, bool changed) {
+    ranking_layout.reset();
+    ranking_pins.clear();
     if (changed) {
       timer.update_netlist();
       apply_case_analysis();
@@ -817,6 +821,10 @@ struct Physical_session::Impl : Pass_opentimer {
   };
   std::unique_ptr<Whatif_impl> whatif_;
   Whatif_impl&                 whatif() {
+    // Trial topology can invalidate bound timer pin addresses. Rebind once
+    // when ranking resumes after the trial journal has been rolled back.
+    ranking_layout.reset();
+    ranking_pins.clear();
     if (!whatif_) {
       whatif_ = std::make_unique<Whatif_impl>(*this);
     }
@@ -894,6 +902,52 @@ struct Physical_session::Impl : Pass_opentimer {
     exclusions_dirty = false;
   }
 
+  void collect_ranking(livehd::timing::Feedback& result) {
+    using Ranking = livehd::timing::Feedback::Ranking;
+    if (!ranking_layout) {
+      auto layout = std::make_shared<Ranking::Layout>();
+      layout->labels.reserve(physical_timing_pins_.size());
+      ranking_pins.clear();
+      ranking_pins.reserve(physical_timing_pins_.size());
+      for (const auto& [physical, name] : physical_timing_pins_) {
+        layout->labels.push_back(physical);
+        ranking_pins.push_back(&timer.pins().at(name));
+      }
+      layout->net_offsets.reserve(physical_rc_->nets.size() + 1);
+      for (const auto& net : physical_rc_->nets) {
+        layout->net_offsets.push_back(layout->net_pins.size());
+        for (const auto& node : net.nodes) {
+          if (!node.pin.empty()) {
+            const auto index = layout->find(node.pin);
+            if (index == layout->labels.size()) {
+              throw std::runtime_error("physical ranking pin has no timing identity: " + node.pin);
+            }
+            layout->net_pins.push_back(index);
+          }
+        }
+      }
+      layout->net_offsets.push_back(layout->net_pins.size());
+      ranking_layout = std::move(layout);
+    }
+    result.ranking_only = true;
+    result.time_unit_ps = timer.time_unit() ? timer.time_unit()->value() * 1e12 : 1000;
+    auto& ranking       = result.ranking.emplace();
+    ranking.layout      = ranking_layout;
+    ranking.parasitics  = physical_rc_;
+    ranking.pins.resize(ranking_pins.size());
+    for (size_t index = 0; index < ranking_pins.size(); ++index) {
+      const auto& pin     = *ranking_pins[index];
+      auto&       value   = ranking.pins[index];
+      const auto* cellpin = pin.cellpin(ot::MAX);
+      value.clock         = pin.is_ideal_clock() || (cellpin && cellpin->is_clock.value_or(false));
+      for (const auto transition : {ot::RISE, ot::FALL}) {
+        if (const auto slack = pin.slack(ot::MAX, transition); slack && std::isfinite(*slack)) {
+          value.slack = std::min(value.slack, double(*slack));
+        }
+      }
+    }
+  }
+
   livehd::timing::Feedback evaluate(const std::shared_ptr<hhds::Graph>&                 graph,
                                     std::shared_ptr<const livehd::physical::Parasitics> rc, const std::set<std::string>& exclusions,
                                     Purpose purpose) {
@@ -933,26 +987,7 @@ struct Physical_session::Impl : Pass_opentimer {
       phase_propagation = timing_propagation_seconds_;
       if (ranking) {
         update_timing_profiled();
-        result.ranking_only = true;
-        result.time_unit_ps = timer.time_unit() ? timer.time_unit()->value() * 1e12 : 1000;
-        for (const auto& [physical, name] : physical_timing_pins_) {
-          const auto it = timer.pins().find(name);
-          if (it == timer.pins().end()) {
-            continue;
-          }
-          const auto&                   pin = it->second;
-          livehd::timing::Feedback::Pin value;
-          const auto*                   cellpin = pin.cellpin(ot::MAX);
-          value.clock                           = pin.is_ideal_clock() || (cellpin && cellpin->is_clock.value_or(false));
-          for (const auto transition : {ot::RISE, ot::FALL}) {
-            if (const auto slack = pin.slack(ot::MAX, transition); slack && std::isfinite(*slack)) {
-              value.slack = value.slack ? std::min(*value.slack, double(*slack)) : double(*slack);
-            }
-          }
-          if (value.slack || value.clock) {
-            result.pins.emplace(physical, value);
-          }
-        }
+        collect_ranking(result);
       } else {
         compute_timing(graph);
       }

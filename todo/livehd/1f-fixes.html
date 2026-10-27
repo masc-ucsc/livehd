@@ -22,6 +22,44 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>GP timing feedback now uses dense slack/clock arrays with a shared immutable
+pin/net index. Coordinate-only samples reuse bound timer pins; topology and
+what-if changes invalidate the bindings. Net weighting uses numeric indices for
+the sampled RC snapshot, with label lookup for other snapshots. Reset filtering,
+cell priorities, SAT legalization and terminal legalization preserve their
+previous behavior. Detailed timing and public defaults are unchanged. Ten
+optimized suites pass, including topology/rollback, old-snapshot lifetime,
+reordered nets, partial-net filtering and legalization equivalence.</p>
+<table>
+<thead><tr><th>Design</th><th>GP ranking after initialization, total seconds</th><th>Placement, seconds</th></tr></thead>
+<tbody>
+<tr><td>lfsr</td><td>0.012 → 0.013</td><td>2.643 → 2.622</td></tr>
+<tr><td>minimax</td><td>3.101 → 2.815</td><td>43.443 → 44.208</td></tr>
+<tr><td>NVDLA/partition_m</td><td>5.235 → 4.550</td><td>37.635 → 35.531</td></tr>
+<tr><td>coralnpu</td><td>63.017 → 56.560</td><td>575.361 → 536.009</td></tr>
+</tbody>
+</table>
+<p>All four default-option runs have byte-identical DEFs and final net weights,
+identical full native timing reports (738,108 physical-pin rows), and unchanged
+independent WNS. The first three are sequential control/candidate pairs on CPU 13.
+Minimax ranking improves 9.2% and partition_m 13.1%; lfsr is effectively unchanged.
+Minimax whole-flow CPU rises 65.03 → 65.91 s, while partition_m falls
+102.53 → 100.25 s. Coralnpu ranking improves 10.2%; its candidate takes
+686.57 s wall / 686.42 s CPU and 9,648.9 MiB peak RSS, but the control is an earlier
+CPU-14 run, so the whole-flow delta is not a contemporaneous speedup measurement.
+All four remain within the 1.5× placement-time and 3% cell/area bounds.
+Evidence and exact binary provenance: <code>runs.indexed_ranking_v37</code>.</p>
+<p>The refreshed pure-GP diagnostic uses the same disabled timing/resize/resynthesis
+settings on lfsr and minimax, with other production options retained. The cores
+match their full-flow counterparts. Lfsr's HPWL is 209.968 → 211.974 µm
+(+0.96%), satisfying F. Minimax is 42,022.308 → 51,140.215 µm (+21.70%), so F
+remains open; its full flow improves WNS from −8,195.403 to −991.355 ps.
+Pure minimax placement takes 6.140 s and fits D's stated own-floorplan numeric
+limits, while the imported flow-C comparison remains open. Total STA still
+exceeds 10% of placement; RC conversion, physical validation and detailed
+feedback still use named identities. This is progress on B, not completion of
+B or the broader A–J requirements.</p>
+
 <p>Final STA reporting now reuses the persistent placement timer instead of
 building a second timer for the same final state. The handoff reconciles RC,
 cell changes and reset cuts, rolls back pending what-if edits, preserves

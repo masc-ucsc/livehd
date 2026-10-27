@@ -89,6 +89,27 @@ TEST(Satlegalize, AcceptedCountsDistinguishExistingAndNewTrackCorridors) {
     }
   }
 }
+TEST(Satlegalize, DenseRankingPreservesCriticalPairs) {
+  Fixture named, dense;
+  auto    layout = std::make_shared<timing::Feedback::Ranking::Layout>();
+  layout->labels = {"sink:A"};
+  dense.timing.pins.clear();
+  dense.timing.ranking_only = true;
+  auto& rank                = dense.timing.ranking.emplace();
+  rank.layout               = layout;
+  rank.pins                 = {
+      {-1, false}
+  };
+  Satlegalize_options options;
+  options.max_pairs       = 1;
+  options.boundary_growth = 1;
+  const auto expected     = satlegalize(named.tech, named.fp, named.timing, options);
+  const auto actual       = satlegalize(dense.tech, dense.fp, dense.timing, options);
+  ASSERT_EQ(expected.accepted.size(), 1U);
+  EXPECT_EQ(actual.accepted.size(), expected.accepted.size());
+  EXPECT_EQ(dense.fp.components, named.fp.components);
+  EXPECT_EQ(dense.fp.rows, named.fp.rows);
+}
 TEST(Satlegalize, MissingGridUnknownAndFixedSpaceFallBack) {
   Fixture             f;
   const auto          original = f.fp;

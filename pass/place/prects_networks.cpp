@@ -135,7 +135,7 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
           && (roles.pins.contains(label) || roles.pins.contains(c.instance + "/" + c.pin))) {
         mark(n);
       }
-      if (const auto* t = timing.find_pin(c.instance, c.pin); t && t->clock) {
+      if (timing.is_clock_pin(c.instance, c.pin)) {
         mark_clock(n);
         if (!roles.override_controls) {
           mark(n);
@@ -218,6 +218,12 @@ timing::Feedback prects_data_timing(const timing::Feedback& source, const Prects
   auto result = source;
   for (const auto& pin : networks.pins) {
     result.pins.erase(pin);
+    if (result.ranking) {
+      const auto index = result.ranking->layout->find(pin);
+      if (index < result.ranking->pins.size()) {
+        result.ranking->pins[index] = {};
+      }
+    }
   }
   std::erase_if(result.path, [&](const auto& pin) { return networks.pins.contains(pin); });
   return result;

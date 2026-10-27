@@ -2105,6 +2105,12 @@ feedback above: the report still checks the requested state, and can propagate
 changes, but avoids rebuilding a second timer and refitting unchanged drivers.
 Its `physical_session_reused` flag and ordinary STA cache counters identify the
 reporting path.
+GP rank feedback carries a compact pin array and an immutable pin/net index.
+Net weighting uses indices for the sampled RC snapshot; a different or reordered
+snapshot uses physical labels. Clock/reset filtering and timing-aware legalizers
+accept this representation as well as detailed feedback. This preserves rank
+selection and legalization priorities without copying full pin maps at each GP
+checkpoint. Detailed repair still requires detailed feedback.
 With pin-level electrical feedback, ordinary sizing selects gates with negative
 slack, electrical violations or drive stress. Healthy neighbors do not consume
 detailed timing trials for optional area recovery, even when an unrelated path
