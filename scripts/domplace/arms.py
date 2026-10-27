@@ -299,9 +299,10 @@ def main():
                  for n, a, c, s in plan],
         'notes': ['matched: seed, iterations, density, grid density, no timing-driven placement, resizing or resynthesis, '
                   'io_resynth=0, OpenTimer off, native stage timing; tmap_trials=1 in arms 2 and 3',
-                  'arm 3 stage coefficients are only those passed with --arm3-set; none is built in',
+                  'arm 3 stage coefficients: the built-in labeled estimates (U1), each overridden by --arm3-set',
                   'final RUDY: not reported (plan H3 not implemented)',
-                  'HighTide: not integrated (pending decisions U14 and U15)'],
+                  'HighTide: approved (plan H5), not integrated; arm-3 OpenSTA scoring (U14) pending; the fixed core '
+                  'is the arm-1 area-driven run (U15)'],
     }
     (out / 'manifest.json').write_text(json.dumps(manifest, indent=1) + '\n')
     if args.dry_run:

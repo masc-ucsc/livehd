@@ -159,7 +159,10 @@ information.
 
 - **Observability: unobservable flop bits leave the obligation** (`observe.cpp`,
   single-step inductive miter; `LHD_LEC_OBS_OFF=1` disables, `LHD_LEC_DUMP_OBS=1` lists
-  the kept bits). A flop bit is observable iff it reaches a compared obligation
+  the kept bits and, on stderr, one `[LEC_MERGE] <register> -> <twin>` line per
+  one-sided register of the induction: the paired register it was merged with,
+  `constant` when it is held at a constant, or `(no twin among the paired
+  registers)`). A flop bit is observable iff it reaches a compared obligation
   that is not a candidate cut's next state -- a primary output, a box input, a
   property, a memory port/next state, another cut's (bridged) next state --
   through combinational logic and other observable flop bits. After both sides
