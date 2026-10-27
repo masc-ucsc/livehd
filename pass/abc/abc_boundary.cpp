@@ -1545,7 +1545,7 @@ uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, c
         table.uninstall();
         continue;
       }
-      logic        = Abc_FrameReadNtk(frame);
+      logic = Abc_FrameReadNtk(frame);
       // Time the sized network and read the port times for the next round:
       // the arrival at each output's driver (without the port's own downstream
       // delay) and the departure at each input (with it).
@@ -1578,8 +1578,31 @@ uint64_t Abc_backend::refine(hhds::GraphLibrary& outlib, std::string_view top, c
         }
         return measured;
       };
-      auto after = measure();
-      if (base_.io_boundary_timing && before && after.valid && after.delay > before->first + 1e-4) {
+      auto after          = measure();
+      bool growth_allowed = true;
+      if (base_.io_feedback && base_.io_feedback->admit_physical_rewrite) {
+        std::map<uint64_t, std::string> changes;
+        for (auto& [nobj, lobj, sub] : pairs) {
+          (void)nobj;
+          auto*      gate = static_cast<Mio_Gate_t*>(lobj->pData);
+          const auto cur  = sub.get_subnode_io();
+          if (!gate || !cur || cur->get_name() == std::string_view{Mio_GateReadName(gate)}) {
+            continue;
+          }
+          const auto& nd      = cell_desc_for(outlib, gate);
+          const auto& inputs  = cur->get_input_pin_decls();
+          const auto& outputs = cur->get_output_pin_decls();
+          bool compatible = inputs.size() == nd.input_names.size() && outputs.size() == 1 && outputs.front().name == nd.output_name;
+          for (size_t k = 0; compatible && k < inputs.size(); ++k) {
+            compatible = inputs[k].name == nd.input_names[k] && inputs[k].port_id == static_cast<hhds::Port_id>(k + 1);
+          }
+          if (compatible) {
+            changes.emplace(sub.get_debug_nid(), nd.name);
+          }
+        }
+        growth_allowed = changes.empty() || base_.io_feedback->admit_physical_rewrite(*d.g, changes);
+      }
+      if (!growth_allowed || (base_.io_boundary_timing && before && after.valid && after.delay > before->first + 1e-4)) {
         for (auto& pair : pairs) {
           pair.obj->pData = pair.net_obj->pData;
         }
@@ -2145,7 +2168,8 @@ std::string pin_decl(hhds::Pin_class pin, bool input, int bit = -1) {
 }
 // The importer cuts at every state/memory boundary; CEC therefore proves the
 // complete combinational relation while clock/reset/state instances stay exact.
-void write_io_body(hhds::Graph& source, const Imp_def& imported, const synth::Cell_netlist& net, const synth::Cell_library& cells) {
+bool write_io_body(hhds::Graph& source, const Imp_def& imported, const synth::Cell_netlist& net, const synth::Cell_library& cells,
+                   const synth::Io_store::Rewrite_admission& admit) {
   if (!net.latches.empty() || net.sources.size() != imported.pi_leaves.size() || net.outputs.size() != imported.po_sinks.size()) {
     throw std::runtime_error("resynthesis changed the mapped region boundary");
   }
@@ -2335,6 +2359,9 @@ void write_io_body(hhds::Graph& source, const Imp_def& imported, const synth::Ce
     }
   }
   graph->commit();
+  if (admit && !admit(*graph, {})) {
+    return false;
+  }
   for (auto n : graph->body().nodes()) {
     if (n.get_subnode_io()) {
       partition::resolve_or_clone_subdef(source_library, n);
@@ -2343,6 +2370,7 @@ void write_io_body(hhds::Graph& source, const Imp_def& imported, const synth::Ce
   if (!source_library->replace_body_from(source.get_name(), *graph)) {
     throw std::runtime_error("cannot publish resynthesized region");
   }
+  return true;
 }
 }  // namespace
 
@@ -2354,8 +2382,12 @@ synth::Io_decision Abc_backend::io_region(hhds::Graph& graph, const synth::Io_en
   partition::Region_body rb;
   rb.module_name = result.module;
   synth::Region_ctx context(rb, base_);
-  context.budget           = base_.delay.empty() ? period : std::stod(base_.delay);
-  context.timing_requested = true;
+  // Placement feedback uses the actual SDC period, not the aggressive hint
+  // used by initial synthesis. Ask for ten percent headroom on every remap.
+  context.budget             = .9 * period;
+  result.required_period_ps  = period;
+  result.requested_period_ps = context.budget;
+  context.timing_requested   = true;
   for (auto node : graph.body().nodes()) {
     (void)node;
     ++context.input_ge;
@@ -2363,8 +2395,15 @@ synth::Io_decision Abc_backend::io_region(hhds::Graph& graph, const synth::Io_en
   const auto mapping       = base_.io_feedback ? base_.io_feedback->mappings.find(result.module)
                                                : std::map<std::string, synth::Io_store::Mapping>::const_iterator{};
   const bool known_mapping = base_.io_feedback && mapping != base_.io_feedback->mappings.end();
-  if (known_mapping && mapping->second.budget_ps > 0) {
-    context.budget = mapping->second.budget_ps;
+  const auto identity      = !bindings_only && base_.io_feedback ? synth::mapped_identity(graph) : std::string{};
+  const bool target_failed
+      = !identity.empty() && base_.io_feedback->target_failed(result.module, identity, std::numeric_limits<double>::min());
+  const bool        target_covered = !identity.empty() && base_.io_feedback->target_covered(result.module, identity, period, env);
+  const std::string skip_reason    = target_failed ? "previous synthesis missed target" : "within previous synthesis margin";
+  if ((target_failed || target_covered) && apply) {
+    result.decision = skip_reason;
+    result.seconds  = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+    return result;
   }
   auto scope = region_scope();
   (void)plan(context);
@@ -2481,7 +2520,7 @@ synth::Io_decision Abc_backend::io_region(hhds::Graph& graph, const synth::Io_en
     const auto& term = d.po[i];
     const auto  key  = term.port >= 0 ? io_bit(d.out_names[term.port], term.bit) : std::string{};
     const auto  it   = env.required.find(key);
-    table.set_po(i, std::max(typical_cap_ff_, 0.f), it == env.required.end() ? 0 : std::max(0., context.budget - it->second));
+    table.set_po(i, std::max(typical_cap_ff_, 0.f), it == env.required.end() ? 0 : std::max(0., period - it->second));
   }
   table.install();
   Abc_FrameReplaceCurrentNetwork(frame, logic);
@@ -2501,7 +2540,7 @@ synth::Io_decision Abc_backend::io_region(hhds::Graph& graph, const synth::Io_en
   result.wire_delay_ps   = Abc_SclReadMaxDelay(timing);
   result.area            = timing->SumArea0;
   result.gates           = d.cells;
-  result.slack_before_ps = context.budget - result.wire_delay_ps;
+  result.slack_before_ps = period - result.wire_delay_ps;
   result.slack_after_ps  = result.slack_before_ps;
   // Arrival + departure identifies every near-critical boundary bit, avoiding
   // an unrelated port delta triggering a resynthesis of this color.
@@ -2518,7 +2557,7 @@ synth::Io_decision Abc_backend::io_region(hhds::Graph& graph, const synth::Io_en
     }
     const auto   old   = used.inputs.find(key);
     const double delta = current->second - (old == used.inputs.end() ? 0 : old->second);
-    const auto   slack = Abc_SclObjGetSlack(timing, Abc_NtkPi(logic, i), context.budget);
+    const auto   slack = Abc_SclObjGetSlack(timing, Abc_NtkPi(logic, i), period);
     if (slack <= threshold && delta > result.delta_ps) {
       result.delta_ps = delta;
       result.input    = key;
@@ -2535,8 +2574,8 @@ synth::Io_decision Abc_backend::io_region(hhds::Graph& graph, const synth::Io_en
       continue;
     }
     const auto   old   = used.required.find(key);
-    const double delta = (old == used.required.end() ? context.budget : old->second) - current->second;
-    const auto   slack = context.budget - Abc_SclObjTimeMax(timing, Abc_NtkPo(logic, i));
+    const double delta = (old == used.required.end() ? period : old->second) - current->second;
+    const auto   slack = period - Abc_SclObjTimeMax(timing, Abc_NtkPo(logic, i));
     if (slack <= threshold && delta > result.delta_ps) {
       result.delta_ps = delta;
       result.output   = key;
@@ -2545,6 +2584,10 @@ synth::Io_decision Abc_backend::io_region(hhds::Graph& graph, const synth::Io_en
   Abc_SclManFree(timing);
   result.fired    = synth::io_trigger(result.slack_before_ps, result.delta_ps, period, percent);
   result.decision = result.fired ? "would resynthesize" : "not critical or no tightening";
+  if (target_failed || target_covered) {
+    result.fired    = false;
+    result.decision = skip_reason;
+  }
   if (result.fired && apply && d.depth_complete) {
     std::unique_ptr<Abc_Ntk_t, decltype(free_network)> before(Abc_NtkDup(logic), free_network);
     Flow_plan                                          flow;
@@ -2561,12 +2604,13 @@ synth::Io_decision Abc_backend::io_region(hhds::Graph& graph, const synth::Io_en
       return (!base_.time_budget_ms || elapsed <= base_.time_budget_ms)
              && (now <= rss || now - rss <= uint64_t(base_.memory_budget_mb) * 1024 * 1024);
     };
-    const auto mapped    = execute_flow(frame, flow, admission);
-    auto*      candidate = Abc_FrameReadNtk(frame);
-    const auto after     = physical_flow_qor(candidate, wire.enabled());
+    const auto mapped        = execute_flow(frame, flow, admission);
+    auto*      candidate     = Abc_FrameReadNtk(frame);
+    const auto after         = physical_flow_qor(candidate, wire.enabled());
+    const bool missed_target = mapped.status == Flow_status::completed && after && after->first > context.budget + 1e-4;
     if (mapped.status != Flow_status::completed || !after || !admission("complete")) {
       result.decision = "mapping refused";
-    } else if (after->first > result.wire_delay_ps + 1e-4) {
+    } else if (after->first >= result.wire_delay_ps - 1e-4) {
       result.decision = "no gain";
     } else {
       // Bounded combinational CEC, matching effort=test; unproven trials stay old.
@@ -2581,14 +2625,29 @@ synth::Io_decision Abc_backend::io_region(hhds::Graph& graph, const synth::Io_en
         if (!cells) {
           result.decision = "readback unavailable";
         } else {
-          write_io_body(graph, d, *cells, cell_library_);
-          result.accepted       = true;
-          result.slack_after_ps = context.budget - after->first;
-          result.decision       = "accepted";
-          result.area           = after->second;
-          result.gates          = cells->cells.size();
+          if (!write_io_body(
+                  graph,
+                  d,
+                  *cells,
+                  cell_library_,
+                  base_.io_feedback ? base_.io_feedback->admit_physical_rewrite : synth::Io_store::Rewrite_admission{})) {
+            result.decision = "physical growth budget exceeded";
+          } else {
+            result.accepted       = true;
+            result.slack_after_ps = period - after->first;
+            result.decision       = "accepted";
+            result.area           = after->second;
+            result.gates          = cells->cells.size();
+          }
         }
       }
+    }
+    if (missed_target && base_.io_feedback) {
+      // Remember completed attempts even when the candidate was rejected.
+      // Accepted rewrites attach the failure to the body actually published.
+      base_.io_feedback->failed_target(result.module, synth::mapped_identity(graph), context.budget);
+    } else if (result.accepted && base_.io_feedback) {
+      base_.io_feedback->covered_target(result.module, synth::mapped_identity(graph), period, context.budget, env);
     }
   } else if (result.fired && apply) {
     result.decision = "unsupported native cut; retained original";

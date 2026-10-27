@@ -85,7 +85,7 @@ float Pass_opentimer::override_period(const std::string& name, const std::vector
 }
 
 void Pass_opentimer::prepare_critical_targets() {
-  timer.update_timing();
+  timer.update_netlist();
   for (const auto& [name, value] : target_overrides_) {
     bool found = false;
     for (const auto& [clock, target] : timing_targets_) {

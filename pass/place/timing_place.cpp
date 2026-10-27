@@ -6,7 +6,9 @@
 #include <limits>
 #include <optional>
 #include <stdexcept>
+#include <string_view>
 
+#include "placement_technology.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -23,7 +25,8 @@ std::map<std::string, double> timing_weights(const physical::Parasitics& nets, c
   if (!std::isfinite(exponent) || exponent < 1) {
     throw std::invalid_argument("timing criticality exponent must be finite and at least 1");
   }
-  std::vector<std::pair<double, std::string>> ranked;
+  std::vector<std::pair<double, std::string_view>> ranked;
+  ranked.reserve(nets.nets.size());
   for (const auto& net : nets.nets) {
     double slack = std::numeric_limits<double>::infinity();
     bool   clock = false;
@@ -39,33 +42,41 @@ std::map<std::string, double> timing_weights(const physical::Parasitics& nets, c
       ranked.emplace_back(slack, net.driver);
     }
   }
-  std::sort(ranked.begin(), ranked.end());
   if (ranked.empty()) {
     return {};
   }
   // Preserve the existing default exactly. One-ulp product roundoff (e.g.
   // 0.14 * 100) must not select an extra net at an integer cutoff.
-  const auto                    count    = std::ceil(std::nextafter(fraction * ranked.size(), 0.));
-  const size_t                  selected = fraction == .2 ? std::max<size_t>(1, (ranked.size() + 4) / 5)
-                                                          : std::clamp<size_t>(static_cast<size_t>(count), 1, ranked.size());
+  const auto   count    = std::ceil(std::nextafter(fraction * ranked.size(), 0.));
+  const size_t selected = fraction == .2 ? std::max<size_t>(1, (ranked.size() + 4) / 5)
+                                         : std::clamp<size_t>(static_cast<size_t>(count), 1, ranked.size());
+  // Only the selected critical fraction needs an ordering. Keep views into
+  // the immutable parasitics instead of copying every driver name.
+  if (selected < ranked.size()) {
+    std::nth_element(ranked.begin(), ranked.begin() + selected, ranked.end());
+    ranked.resize(selected);
+  }
+  std::sort(ranked.begin(), ranked.end());
   const double                  worst = ranked.front().first, cutoff = ranked[selected - 1].first;
   std::map<std::string, double> target;
   for (size_t i = 0; i < selected; ++i) {
-    const double priority    = cutoff > worst + 1e-12 ? (cutoff - ranked[i].first) / (cutoff - worst) : 1;
-    target[ranked[i].second] = 1 + (max_weight - 1) * std::pow(priority, exponent);
+    const double priority = timing.ranking_only ? (selected > 1 ? 1. - double(i) / (selected - 1) : 1.)
+                                                : (cutoff > worst + 1e-12 ? (cutoff - ranked[i].first) / (cutoff - worst) : 1.);
+    target[std::string(ranked[i].second)] = 1 + (max_weight - 1) * std::pow(priority, exponent);
   }
   return target;
 }
 void refresh_timing_weights(Result& state, const Options& options, const Timing_feedback& timing) {
-  const auto roles = state.floorplan.nets.empty() ? Prects_library{} : prects_library(options.liberty, options.control_ports);
+  const auto roles
+      = state.floorplan.nets.empty() ? Prects_library{} : prects_library(options.technology().cells, options.control_ports);
   refresh_timing_weights(state, options, timing, roles);
 }
 void refresh_timing_weights(Result& state, const Options& options, const Timing_feedback& timing,
                             const Prects_library& library_roles) {
   std::optional<Timing_feedback> filtered;
   if (!state.floorplan.nets.empty()) {
-    const auto tech  = physical::read_lef(options.lefs);
-    auto       roles = library_roles;
+    const auto& tech  = options.technology().lef;
+    auto        roles = library_roles;
     if (!roles.override_controls) {
       roles.ports.insert(state.prects.ports.begin(), state.prects.ports.end());
       roles.pins.insert(state.prects.pins.begin(), state.prects.pins.end());
@@ -73,7 +84,7 @@ void refresh_timing_weights(Result& state, const Options& options, const Timing_
     filtered = prects_data_timing(timing, prects_networks(tech, state.floorplan, roles, timing));
   }
   const auto& data = filtered ? *filtered : timing;
-  const auto target
+  const auto  target
       = timing_weights(*state.parasitics, data, options.timing_fraction, options.timing_max_weight, options.timing_exponent);
   std::map<std::string, double> current;
   for (const auto& net : state.parasitics->nets) {
@@ -98,7 +109,8 @@ void inherit_buffer_weights(std::map<std::string, double>& weights, const std::s
     weights[output] = reduced;
   }
 }
-Repair_result timing_place(Result initial, const Options& requested, const Evaluate& evaluate, unsigned rounds) {
+Repair_result timing_place(Result initial, const Options& requested, const Evaluate& evaluate, unsigned rounds,
+                           std::optional<Timing_feedback> prior, const Trial_admission& admit_trial) {
   std::optional<Options> resolved_options;
   if (requested.cell_halo) {
     resolved_options = final_cell_options(requested);
@@ -111,9 +123,22 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
     throw std::invalid_argument("timing placement requires full mode and 1..8 rounds");
   }
   Repair_result result;
-  result.placed                                   = std::move(initial);
-  auto                                       best = evaluate(result.placed);
-  rapidjson::StringBuffer                    buffer;
+  result.placed             = std::move(initial);
+  auto         best         = prior && !prior->ranking_only ? std::move(*prior) : evaluate(result.placed);
+  const double initial_area = best.area;
+  const auto   hpwl         = [](const Result& placed) {
+    rapidjson::Document report;
+    report.Parse(placed.qor.c_str());
+    if (!report.IsObject() || !report.HasMember("hpwl_um") || !report["hpwl_um"].IsNumber()) {
+      throw std::invalid_argument("timing refinement requires measured placement HPWL");
+    }
+    return report["hpwl_um"].GetDouble();
+  };
+  const double        initial_hpwl = hpwl(result.placed);
+  rapidjson::Document initial_qor;
+  initial_qor.Parse(result.placed.qor.c_str());
+  unsigned                total_gp_iterations = initial_qor.HasMember("gp_iterations") ? initial_qor["gp_iterations"].GetUint() : 0;
+  rapidjson::StringBuffer buffer;
   rapidjson::Writer<rapidjson::StringBuffer> w(buffer);
   w.StartObject();
   w.Key("model");
@@ -135,6 +160,8 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
   w.EndObject();
   w.Key("initial_timing_source");
   w.String(result.placed.net_weights.empty() ? "first_placement" : "post_synthesis_zero_wire");
+  w.Key("skipped_setup_met");
+  w.Bool(best.wns && *best.wns >= 0);
   w.Key("before_delay");
   w.Double(best.delay);
   w.Key("rounds");
@@ -146,7 +173,12 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
   // An accepted round already refreshed toward the new best; smoothing again
   // at the next round start would apply the step twice.
   bool refreshed = false;
-  for (unsigned round = 0; round < rounds; ++round) {
+  // Positive setup slack already meets the SDC objective. A cold or warm
+  // timing round has no setup violation to fix in this case.
+  for (unsigned round = 0; round < rounds && (!best.wns || *best.wns < 0); ++round) {
+    if (admit_trial && !admit_trial()) {
+      break;
+    }
     auto target = timing_weights(*result.placed.parasitics,
                                  best,
                                  options.timing_fraction,
@@ -164,17 +196,24 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
     trial.cache_dir.clear();
     trial.previous.reset();
     trial.changed_cells.clear();
-    trial.net_weights = weights;
-    trial.iterations  = std::max(1, options.iterations / static_cast<int>(rounds));
-    trial.output_dir  = directory + "/round_" + std::to_string(round);
-    trial.floorplan   = directory + "/floorplan.def";
-    auto frame        = result.placed.floorplan;
-    std::erase_if(frame.components, [](const auto& c) {
-      return c.place.status != Ann_place::Status::FIXED && c.place.status != Ann_place::Status::LOCKED;
-    });
+    trial.net_weights      = weights;
+    trial.iterations       = std::clamp(options.iterations / static_cast<int>(rounds), 1, 100);
+    trial.min_iterations   = std::min(trial.iterations, 20);
+    trial.final_iterations = trial.iterations;
+    trial.fp_place = trial.final_cells = false;
+    trial.cell_stage                   = true;
+    trial.fp_evaluate                  = {};
+    trial.gp_rank                      = {};
+    trial.gp_resize                    = false;
+    trial.warm_refinement              = true;
+    trial.density_weight_seed          = result.placed.gp_density_weight;
+    trial.output_dir                   = directory + "/round_" + std::to_string(round);
+    trial.floorplan                    = directory + "/floorplan.def";
+    auto frame                         = result.placed.floorplan;
     for (auto& terminal : frame.terminals) {
       terminal.status = Ann_place::Status::FIXED;
     }
+    trial.restart_seed = std::make_shared<physical::Floorplan>(frame);
     physical::write_def(frame, trial.floorplan);
     w.StartObject();
     w.Key("weighted_nets");
@@ -186,18 +225,63 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
       w.Double(weight);
     }
     w.EndObject();
-    bool keep = false;
+    bool keep      = false;
+    bool exhausted = false;
     try {
-      auto       owner     = std::make_unique<hhds::GraphLibrary>();
-      auto       candidate = place(*result.placed.graph, *owner, trial);
-      const auto score     = evaluate(candidate);
-      w.Key("delay");
-      w.Double(score.delay);
-      keep = timing_improves(best, score);
+      auto                owner          = std::make_unique<hhds::GraphLibrary>();
+      auto                candidate      = place(*result.placed.graph, *owner, trial);
+      const double        candidate_hpwl = hpwl(candidate);
+      bool                bounded        = candidate_hpwl <= initial_hpwl * 1.03 + 1e-9;
+      rapidjson::Document geometry;
+      geometry.Parse(candidate.qor.c_str());
+      const bool converged     = geometry.HasMember("gp_converged") && geometry["gp_converged"].GetBool();
+      // A short warm solve need not reach a stationary objective before STA
+      // can judge its legal result. Require density feasibility; routability
+      // flows retain the solver's complete convergence gate.
+      const bool density_ready = converged
+                                 || (!options.routability && geometry.HasMember("gp_overflow") && geometry["gp_overflow"].IsNumber()
+                                     && geometry["gp_overflow"].GetDouble() <= options.stop_overflow);
+      // A rejected geometric retry would restart from the same accepted state.
+      exhausted                = !density_ready || !bounded;
+      w.Key("density_ready_for_timing");
+      w.Bool(density_ready);
+      for (const auto& member : geometry.GetObject()) {
+        if (std::string_view(member.name.GetString()).starts_with("gp_")) {
+          w.Key(member.name.GetString());
+          member.value.Accept(w);
+        }
+      }
+      if (geometry.HasMember("gp_iterations")) {
+        total_gp_iterations += geometry["gp_iterations"].GetUint();
+      }
+      w.Key("hpwl_um");
+      w.Double(candidate_hpwl);
+      // Geometry already rules these candidates out. Avoid a detailed STA
+      // update for a placement that cannot pass the acceptance guard.
+      std::optional<Timing_feedback> score;
+      if (density_ready && bounded) {
+        score   = evaluate(candidate);
+        bounded = score->area <= initial_area * 1.03 + 1e-9;
+        w.Key("delay");
+        w.Double(score->delay);
+        if (score->wns) {
+          w.Key("setup_wns");
+          w.Double(*score->wns);
+        }
+        if (score->tns) {
+          w.Key("setup_tns");
+          w.Double(*score->tns);
+        }
+      }
+      w.Key("timing_evaluated");
+      w.Bool(score.has_value());
+      w.Key("growth_bounded");
+      w.Bool(bounded);
+      keep = score && bounded && timing_improves(best, *score);
       if (keep) {
         result.placed = std::move(candidate);
         result.libraries.push_back(std::move(owner));
-        best = score;
+        best = std::move(*score);
         refresh_timing_weights(result.placed, options, best);
         refreshed = true;
         ++accepted;
@@ -208,17 +292,35 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
     }
     w.Key("accepted");
     w.Bool(keep);
+    w.Key("stopped_unconverged");
+    w.Bool(exhausted);
     w.EndObject();
+    if (exhausted) {
+      break;
+    }
   }
   w.EndArray();
   w.Key("accepted");
   w.Uint(accepted);
+  w.Key("timing_budget_exhausted");
+  w.Bool(admit_trial && !admit_trial());
   w.Key("after_delay");
   w.Double(best.delay);
   w.EndObject();
   result.report = buffer.GetString();
   rapidjson::Document q;
   q.Parse(result.placed.qor.c_str());
+  // The primary GP's convergence and cost must survive an accepted short
+  // refinement. Each attempted round reports its own GP metrics above.
+  for (const auto& member : initial_qor.GetObject()) {
+    if (std::string_view(member.name.GetString()).starts_with("gp_")) {
+      q.RemoveMember(member.name.GetString());
+      q.AddMember(rapidjson::Value(member.name, q.GetAllocator()),
+                  rapidjson::Value(member.value, q.GetAllocator()),
+                  q.GetAllocator());
+    }
+  }
+  q.AddMember("gp_total_iterations", total_gp_iterations, q.GetAllocator());
   rapidjson::Document report;
   report.Parse(result.report.c_str());
   q.AddMember("timing_driven", rapidjson::Value(report, q.GetAllocator()), q.GetAllocator());

@@ -1,6 +1,6 @@
 # inou/slang — direct SystemVerilog → LNAST reader
 
-The direct `--reader slang` front-end: slang v11 elaborates SystemVerilog and
+The direct `--reader slang` front-end: slang v12.1 elaborates SystemVerilog and
 `Slang_context` lowers the AST straight to LNAST, one Lnast per module in the
 extracted unit form (`top -> [io, stmts]`, `lambda_kind="mod"`, exact Verilog
 module names) so the standard upass pipeline (SSA → io_meta → tolg) compiles
@@ -99,15 +99,32 @@ The sources may come entirely from the file list, so a positional
 `verilog:`/`*.v` input is optional in that case (`files` and the raw flags are
 both accepted; at least one must supply sources). lhd hands the args to
 `inou.slang` as the `slang_flags` label (`\x1f`-separated so shell tokens like
-`+incdir+a,b` survive). Covered by `tests/slang_filelist.sh`
+`+incdir+a,b` survive). An existing `+incdir+PATH` directory is treated literally,
+including `+` characters in Bazel canonical repository names. Otherwise the
+standard `+incdir+dir1+dir2` list syntax applies; `-I PATH` is unambiguous. Covered by `tests/slang_filelist.sh`
 (`bazel test //inou/slang:slang_filelist`).
+
+Fixed unpacked structs with integral leaves lower to a deterministic bitstream
+layout (declaration order, most significant field first). Nested structs, fixed
+arrays inside them, whole copies, field writes, and typed module connections
+share that layout. Dynamic array selectors retain bounds checks and signed
+fields retain their signed interpretation. Dynamic containers and non-hardware
+leaves such as strings still require a diagnostic.
+
+`--ignore-unknown-modules` retains missing definitions as typed, opaque graph
+interfaces using the existing port-direction inference. The interface is the
+union of every instance's connected ports at the widest connected width; a port
+inferred as both input and output, or a lone connected output on one instance
+while another connects more, is rejected. This does **not** infer memory behavior from SRAM
+names: include the behavioral SRAM `.v` models in the file list to obtain
+LGraph `Memory` nodes. A Liberty-only macro remains an opaque physical cell.
 
 ## File map (CIRCT ImportVerilog-shaped split)
 
 | file | concern |
 |---|---|
 | `inou_slang.cpp` | EPRP entry (`inou.slang` / `inou.verilog`), per-file driver loop, options |
-| `slang_driver.cpp` | embedded slang v11 driver; diagnostics → `diag::Sink` |
+| `slang_driver.cpp` | embedded slang v12.1 driver; diagnostics → `diag::Sink` |
 | `slang_context.{hpp,cpp}` | the one `Slang_context` class: naming, const-eval tiers, bool/int kind discipline, provenance, diags |
 | `slang_structure.cpp` | modules, ports/io, process classification (comb/ff/async-reset), dataflow-ordered driver emission, instances, generate |
 | `slang_stmt.cpp` | statements: if, case→`if`/`unique_if`, capped slang-side loop unrolling |
@@ -281,7 +298,7 @@ When a SystemVerilog construct fails to lower, decide whether it is a bug to fix
 or a test to drop using three reference points — the standalone slang frontend,
 the integrated Yosys Slang frontend, and our native reader:
 
-1. **slang native frontend rejects it → out of scope, for sure.** slang v11 is
+1. **slang native frontend rejects it → out of scope, for sure.** slang v12.1 is
    the strictest valid-SV gate; if its frontend cannot elaborate the construct it
    is either illegal SV or non-elaboratable, so `--reader slang` has nothing
    well-formed to lower. Drop it (or keep it as an `error`-tier test when slang
@@ -312,7 +329,7 @@ lhd compile --reader yosys foo.v --emit-dir verilog:out/
 ```
 
 **When standalone `slang` is not installed**, use `--reader slang` as a proxy for
-check 1: the native reader embeds the same slang v11 frontend, so a clean
+check 1: the native reader embeds the same slang v12.1 frontend, so a clean
 elaboration that merely hits a lowering gap surfaces as an `unsupported-*`
 diagnostic (`"pass":"inou.slang","category":"unsupported"`), whereas a frontend
 rejection surfaces with slang's own diagnostic code (e.g.
@@ -389,12 +406,12 @@ pass `-- --ignore-uninstantiated-modules` or `--set compile.slang.ignore_uninsta
 (the form a flow that cannot append raw slang arguments uses). This opts into Slang's existing
 `IgnoreUninstantiatedModules` policy; syntax errors and semantic errors within the
 selected hierarchy remain errors. Vendor RTL that hides simulation-only code between
-`// synopsys translate_off` and `// synopsys translate_on` (the `synthesis` spelling too,
-with or without a space after `//`) needs `--set compile.slang.translate_off=true`, which
-enables slang's `--translate-off-format` for both spellings; an unclosed region is still an
-error. Both are covered by `//inou/slang:slang_vendor_bundle_options`. The separate upstream argument
-`--allow-use-before-declare` supports legacy declaration ordering. Both are explicit
-compatibility choices; the frontend's strict defaults are unchanged.
+`// synopsys translate_off` and `// synopsys translate_on` (the `synthesis` and `pragma` spellings too,
+with or without a space after `//`) is excluded by default, matching synthesis semantics.
+`--set compile.slang.translate_off=false` keeps that text for parsing and lowering instead.
+The default enables slang's `--translate-off-format` for all three spellings; an unclosed
+region is still an error. Explicit raw `--translate-off-format` arguments replace this list. Both are covered by `//inou/slang:slang_vendor_bundle_options`. The separate upstream argument
+`--allow-use-before-declare` supports legacy declaration ordering. Ignoring uninstantiated modules and allowing use before declaration remain opt-in.
 Unfinished reference RTL that must not even be parsed belongs inside a Verilog
 `` `ifndef SYNTHESIS `` guard. Define it explicitly with `-- -DSYNTHESIS=1`.
 The HighTide run uses both that define and `--ignore-uninstantiated-modules`.
@@ -434,3 +451,23 @@ replaces whatever the sources say about it. Each is `--set compile.slang.<flag>=
 A port listed twice in a module header (`input a, input a`) is accepted by `--compat=vcs`
 (`Redefinition` becomes a warning); the first declaration is the port, the later ones add
 neither an IO nor an instance connection.
+
+### Passive SystemVerilog interfaces
+
+The direct reader lowers passive interface connections through the existing
+LNAST tuple and module-call machinery. Named `input` and `output` modport members
+become separate `<port>__in` and `<port>__out` bundles; no new graph node type is
+needed. Supported members are uninitialized integral signals, including packed
+arrays and packed structs, with value/type parameters. Interface instance arrays,
+generated instances, forwarding through module ports, and registered writes to
+output members are supported. Connected interface types participate in module
+specialization; interface-bearing instances retain their own elaborated bodies.
+
+Procedural or continuous logic inside an interface, unpacked signal arrays,
+undirected interface ports, and modport `inout`, `ref`, expressions or methods
+are rejected explicitly. This does not provide DPI or simulation file-operation
+support. Combinational-loop checking remains enabled.
+
+`//inou/slang:slang_passive_interfaces` compares emitted hardware against Yosys
+`read_slang` for payload types, forwarding, array ordering, different connected
+shapes and registered outputs, and checks unsupported-interface diagnostics.

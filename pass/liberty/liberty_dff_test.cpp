@@ -1153,3 +1153,21 @@ TEST(LibertyDff, NestedBodiesDoNotHideFollowingScalarAttributes) {
   ASSERT_TRUE(cells[0].max_capacitance_ff.has_value());
   EXPECT_DOUBLE_EQ(*cells[0].max_capacitance_ff, .005);
 }
+
+TEST(LibertyDff, CellLibraryOwnsOneSnapshotAcrossFileReplacement) {
+  const auto                          path = write_lib("snapshot.lib", lib(q_cell("OLD", 2)));
+  const livehd::liberty::Cell_library first(path);
+  ASSERT_EQ(first.dffs.size(), 1);
+  EXPECT_EQ(first.dffs.front().name, "OLD");
+  EXPECT_EQ(first.combinational.size(), 1);
+  EXPECT_EQ(first.combinational.front().name, "INVx1");
+  EXPECT_FALSE(first.drives.empty());
+  write_lib("snapshot.lib", lib(q_cell("NEW", 3)));
+  const livehd::liberty::Cell_library second(path);
+  EXPECT_EQ(second.dffs.front().name, "NEW");
+  EXPECT_EQ(first.dffs.front().name, "OLD");
+  EXPECT_EQ(first.dffs.front().area, 2);
+  EXPECT_NE(first.contents, second.contents);
+  std::filesystem::remove(path);
+  EXPECT_EQ(first.combinational.front().function, "A'");
+}

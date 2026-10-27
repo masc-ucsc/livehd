@@ -3,7 +3,7 @@
 #
 # Vendor RTL bundles (NVDLA's generated vmod tree) are written for DC / Yosys /
 # VCS and lean on two conventions slang does not apply by itself. Both are
-# opt-in so the strict defaults stay intact:
+# configurable; translate_off is enabled by default:
 #   compile.slang.translate_off=true
 #       drops the text between `// synopsys translate_off` and `translate_on`
 #       (and the `synthesis` spelling, with or without a space after `//`);
@@ -32,14 +32,21 @@ sim_only_monitor mon (.clk(clk), .x(y));
 //synthesis translate_off
 reg dbg2; initial begin dbg2 = 1'b0; $timeformat(-9, 2, "ns", 15); end
 //synthesis translate_on
+// pragma translate_off
+string trace_entry; always @(posedge clk) $sformat(trace_entry, "%d", y);
+// pragma translate_on
 endmodule
 V
 
-# Strict default: the simulation-only region is real code and fails.
+# Explicit opt-out: the simulation-only region is real code and fails.
 if "$LHD" compile "$W/pragma.v" --top pragma_top --workdir "$W/strict" --emit-dir verilog:"$W/strict_net" -q \
-    --emit diagnostics:"$W/strict.jsonl" > /dev/null 2>&1; then
-  fail "translate_off region was dropped without the opt-in"
+    --set compile.slang.translate_off=false --emit diagnostics:"$W/strict.jsonl" > /dev/null 2>&1; then
+  fail "translate_off region was dropped despite the explicit opt-out"
 fi
+"$LHD" compile "$W/pragma.v" --top pragma_top --workdir "$W/default" --emit-dir verilog:"$W/default_net" -q \
+  || fail "default translate_off did not drop the regions"
+[ -f "$W/default_net/pragma_top.v" ] || fail "no netlist with default translate_off"
+! grep -q 'sim_only_monitor\|dbg\|trace_entry' "$W/default_net/pragma_top.v" || fail "dropped region leaked into default netlist"
 "$LHD" compile "$W/pragma.v" --top pragma_top --workdir "$W/off" --emit-dir verilog:"$W/off_net" -q \
   --set compile.slang.translate_off=true || fail "translate_off=true did not drop the regions"
 [ -f "$W/off_net/pragma_top.v" ] || fail "no netlist with translate_off=true"
@@ -47,7 +54,8 @@ fi
 # A raw slang format wins over the label (slang rejects a repeated optional flag, a repeated list is fine).
 "$LHD" compile "$W/pragma.v" --top pragma_top --workdir "$W/raw" --emit-dir verilog:"$W/raw_net" -q \
   --set compile.slang.translate_off=true -- --translate-off-format synopsys,translate_off,translate_on \
-  --translate-off-format synthesis,translate_off,translate_on || fail "raw --translate-off-format with the label"
+  --translate-off-format synthesis,translate_off,translate_on \
+  --translate-off-format pragma,translate_off,translate_on || fail "raw --translate-off-format with the label"
 # An unclosed region is an error, never a silently truncated design.
 cat > "$W/unclosed.v" <<'V'
 module unclosed_top(input a, output y);
@@ -83,4 +91,4 @@ if "$LHD" compile "$W/bundle.v" --top dead_unfinished --workdir "$W/dead_top" -q
     --set compile.slang.ignore_uninstantiated_modules=true > /dev/null 2>&1; then
   fail "an error inside the selected hierarchy was accepted"
 fi
-echo 'PASS: translate_off and ignore_uninstantiated_modules are opt-in and scoped'
+echo 'PASS: translate_off defaults on, supports opt-out, and vendor policies stay scoped'

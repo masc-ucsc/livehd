@@ -3,7 +3,7 @@
 
 // Predicted GENERIC-AIG size of one LGraph node -- the unit `pass.color synth
 // --set pass.color.synth.mode=cones` budgets its cone walk in, ranks cone overlaps in, and
-// merges colors under (todo/livehd/2c-color-synthcones.html section B).
+// merges colors under (see pass/color/README.md).
 //
 // WHY a second unit next to synthesis_ge_weight. Measured over 1930 regions
 // from 7 lhdsuite designs, synthesis GE predicts the MAPPED gate count with a

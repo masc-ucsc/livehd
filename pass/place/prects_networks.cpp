@@ -10,6 +10,10 @@
 
 namespace livehd::placement {
 Prects_library prects_library(const std::string& library, const std::string& control_ports) {
+  return prects_library(liberty::Cell_library(library), control_ports);
+}
+
+Prects_library prects_library(const liberty::Cell_library& library, const std::string& control_ports) {
   Prects_library result;
   const auto     parse = [](std::string text, auto& names) {
     std::replace(text.begin(), text.end(), ',', ' ');
@@ -20,14 +24,11 @@ Prects_library prects_library(const std::string& library, const std::string& con
   };
   parse(control_ports, result.ports);
   result.override_controls = !control_ports.empty();
-  if (library.empty()) {
-    return result;
-  }
-  auto state = liberty::scan_dff_cells(library);
-  for (const auto& cell : liberty::scan_async_dff_cells(library)) {
+  auto state               = library.dffs;
+  for (const auto& cell : library.async_dffs) {
     state.push_back(cell);
   }
-  for (const auto& cell : liberty::scan_latch_cells(library)) {
+  for (const auto& cell : library.latches) {
     state.push_back(cell);
   }
   for (const auto& cell : state) {
@@ -46,7 +47,7 @@ Prects_library prects_library(const std::string& library, const std::string& con
       }
     }
   }
-  for (const auto& cell : liberty::scan_memory_cells(library)) {
+  for (const auto& cell : library.memories) {
     for (const auto& pin : cell.pins) {
       if (pin.clock_input) {
         result.controls[cell.name].insert(pin.name);
@@ -54,7 +55,7 @@ Prects_library prects_library(const std::string& library, const std::string& con
       }
     }
   }
-  for (const auto& cell : liberty::scan_comb_cells(library)) {
+  for (const auto& cell : library.combinational) {
     if (cell.inputs.size() == 1) {
       const auto truth = liberty::cell_truth(cell);
       if (truth && (*truth == 0xaaaaaaaaaaaaaaaaULL || *truth == 0x5555555555555555ULL)) {
@@ -62,7 +63,7 @@ Prects_library prects_library(const std::string& library, const std::string& con
       }
     }
   }
-  for (const auto& cell : liberty::scan_icg_cells(library)) {
+  for (const auto& cell : library.icgs) {
     result.controls[cell.name].insert({cell.clk_pin, cell.out_pin});
     result.clocks[cell.name].insert({cell.clk_pin, cell.out_pin});
     result.links[cell.name].emplace_back(cell.clk_pin, cell.out_pin);

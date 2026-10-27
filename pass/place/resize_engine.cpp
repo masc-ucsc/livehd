@@ -11,7 +11,6 @@
 #include <functional>
 #include <iostream>
 #include <limits>
-#include <mutex>
 #include <numeric>
 #include <optional>
 #include <set>
@@ -22,8 +21,10 @@
 
 #include "attrs.hpp"
 #include "debug_env.hpp"
+#include "growth_budget.hpp"
 #include "node_util.hpp"
 #include "pass/partition/flatten.hpp"
+#include "placement_technology.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
@@ -31,8 +32,23 @@
 #include "technology_rc.hpp"
 
 namespace livehd::placement {
+namespace detail {
+struct Resize_library {
+  std::shared_ptr<const Technology>                                    snapshot;
+  std::string                                                          key;
+  physical::Technology                                                 tech;
+  Inventory                                                            cells;
+  Special_pins                                                         special;
+  std::map<std::pair<std::string, std::string>, liberty::Output_drive> drives;   // (master, output pin)
+  std::map<std::string, std::vector<const Buffer*>>                    ladders;  // same function/footprint, ascending area
+  std::vector<const Buffer*>                                           buffers;  // repeater candidates, ascending area
+  Wire_rc                                                              wire;
+  double                                                               r_dbu = 0, c_dbu = 0;  // ohm and fF per DBU
+};
+}  // namespace detail
 namespace {
 using namespace detail;
+using Library         = detail::Resize_library;
 namespace gu          = graph_util;
 namespace fs          = std::filesystem;
 using Clock           = std::chrono::steady_clock;
@@ -58,22 +74,15 @@ std::string json_string(const std::string& text) {
 }
 
 // ---- Liberty/LEF view shared by planning and materialization ---------------
-struct Library {
-  physical::Technology                                                 tech;
-  Inventory                                                            cells;
-  Special_pins                                                         special;
-  std::map<std::pair<std::string, std::string>, liberty::Output_drive> drives;   // (master, output pin)
-  std::map<std::string, std::vector<const Buffer*>>                    ladders;  // same function/footprint, ascending area
-  std::vector<const Buffer*>                                           buffers;  // repeater candidates, ascending area
-  Wire_rc                                                              wire;
-  double                                                               r_dbu = 0, c_dbu = 0;  // ohm and fF per DBU
-};
-std::shared_ptr<const Library> build_library(const Options& options) {
-  auto lib     = std::make_shared<Library>();
-  lib->tech    = physical::read_lef(options.lefs);
-  lib->cells   = inventory(options, lib->tech);
-  lib->special = scan_special_pins(options.liberty, !options.repair_reset);
-  for (auto& d : liberty::scan_output_drives(options.liberty)) {
+
+std::shared_ptr<Library> build_library(const Options& options) {
+  auto lib = std::make_shared<Library>();
+  (void)options.technology();
+  lib->snapshot = options.technology_cache;
+  lib->tech     = options.technology().lef;
+  lib->cells    = inventory(options, lib->tech);
+  lib->special  = scan_special_pins(options.technology().cells, !options.repair_reset);
+  for (auto& d : options.technology().cells.drives) {
     lib->drives.emplace(std::pair{d.name, d.output}, d);
   }
   // Threshold-voltage families: with several Liberty files and no vt_swap a
@@ -133,20 +142,19 @@ std::shared_ptr<const Library> build_library(const Options& options) {
     return std::tie(a->area, a->name) < std::tie(b->area, b->name);
   });
   lib->wire  = technology_wire_rc(lib->tech,
-                                 options.liberty,
-                                 options.tech_rc_file,
-                                 options.resistance_ohm_um,
-                                 options.capacitance_ff_um,
-                                 options.rc_pessimism);
+                                  options.liberty,
+                                  options.tech_rc_file,
+                                  options.resistance_ohm_um,
+                                  options.capacitance_ff_um,
+                                  options.rc_pessimism,
+                                  options.technology().cells.contents);
   lib->r_dbu = (lib->wire.horizontal_r + lib->wire.vertical_r) / 2 / lib->tech.dbu;
   lib->c_dbu = (lib->wire.horizontal_c + lib->wire.vertical_c) / 2 / lib->tech.dbu;
   return lib;
 }
 // Liberty and LEF parses dominate small FP checkpoints; one immutable view per configuration.
 std::shared_ptr<const Library> library(const Options& options) {
-  static std::mutex                                            lock;
-  static std::map<std::string, std::shared_ptr<const Library>> cache;
-  std::string                                                  key = options.liberty + "|" + options.tech_rc_file;
+  std::string key = options.liberty + "|" + options.tech_rc_file;
   for (const auto& l : options.lefs) {
     key += "|" + l;
   }
@@ -159,12 +167,14 @@ std::shared_ptr<const Library> library(const Options& options) {
                      options.resistance_ohm_um,
                      options.capacitance_ff_um,
                      options.rc_pessimism);
-  std::scoped_lock guard(lock);
-  if (const auto it = cache.find(key); it != cache.end()) {
-    return it->second;
+  (void)options.technology();
+  if (options.resize_library_cache && options.resize_library_cache->snapshot == options.technology_cache
+      && options.resize_library_cache->key == key) {
+    return options.resize_library_cache;
   }
-  auto lib = build_library(options);
-  cache.emplace(key, lib);
+  auto lib                     = build_library(options);
+  lib->key                     = std::move(key);
+  options.resize_library_cache = lib;
   return lib;
 }
 Point pin_offset(const Library& lib, const std::string& master, const std::string& pin) {
@@ -2245,6 +2255,10 @@ Resize_trial run_resize_trial(const Result& state, const Options& options, const
   }
   physical::write_def(frame, trial_options.floorplan);
   Resize_trial trial;
+  if (!growth_admissible(*graph, trial_options)) {
+    trial.rejected = "physical cell/area growth budget exceeded";
+    return trial;
+  }
   trial.owner  = std::make_unique<hhds::GraphLibrary>();
   trial.placed = place(*graph, *trial.owner, trial_options);
   trial.timing = evaluate(trial.placed);
@@ -2302,10 +2316,10 @@ void apply_resize_edits(hhds::Graph& graph, const Options& options, const std::v
     }
     bool preroute_excluded = gu::preroute_net_excluded(root) || root.get_master_node().attr(attrs::preroute_exclude).has();
     for (const auto& name : e.sinks) {
-      const auto sink = physical_pin(graph, name, nodes, false).pin;
-      preroute_excluded |= sink.get_master_node().attr(attrs::preroute_exclude).has();
-      const auto old_driver = sink.get_driver_pin();
-      preroute_excluded |= gu::preroute_net_excluded(old_driver);
+      const auto sink        = physical_pin(graph, name, nodes, false).pin;
+      preroute_excluded     |= sink.get_master_node().attr(attrs::preroute_exclude).has();
+      const auto old_driver  = sink.get_driver_pin();
+      preroute_excluded     |= gu::preroute_net_excluded(old_driver);
       if (!old_driver.is_invalid() && !old_driver.is_const()) {
         preroute_excluded |= old_driver.get_master_node().attr(attrs::preroute_exclude).has();
       }
@@ -2428,12 +2442,22 @@ Repair_result resize_placed(Result initial, const Options& requested, const Eval
       }
       const auto t = Clock::now();
       ++commits;
-      auto       trial  = run_resize_trial(result.placed,
+      auto trial = run_resize_trial(result.placed,
                                     options,
                                     edits,
                                     evaluate,
                                     std::format("{}/commit_{}", directory, commits),
                                     directory + "/floorplan.def");
+      if (!trial.rejected.empty()) {
+        trials += std::format(R"({}{{"groups":{},"edits":{},"reason":"{}","accepted":false,"seconds":{:.3f}}})",
+                              trials.empty() ? "" : ",",
+                              groups,
+                              edits.size(),
+                              trial.rejected,
+                              elapsed(t));
+        groups /= 2;
+        continue;
+      }
       const auto next   = trial.timing;
       const bool keep   = resize_accepts(score, next);
       trials           += std::format(R"({}{{"groups":{},"edits":{},"timing":{},"accepted":{},"seconds":{:.3f}}})",
@@ -2547,6 +2571,14 @@ Floorplan_resize resize_floorplan_engine(Result& state, const Options& options, 
     std::map<std::string, std::string> origins;
     auto                               inherited_weights = state.net_weights;
     apply_resize_edits(*graph, options, edits, &origins, &inherited_weights);
+    if (!growth_admissible(*graph, options)) {
+      trials += std::format(R"({}{{"groups":{},"edits":{},"reason":"physical cell/area growth budget exceeded","accepted":false}})",
+                            trials.empty() ? "" : ",",
+                            groups,
+                            edits.size());
+      groups /= 2;
+      continue;
+    }
     Result trial      = state;
     trial.fp_library  = std::move(library);
     trial.graph       = std::move(graph);

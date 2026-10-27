@@ -37,7 +37,7 @@ done
 echo "PASS: all pass.color algorithms run through the lhd CLI"
 
 # `synth` has three boundary modes behind one --set. cones is the cone-seeded
-# one (todo/livehd/2c-color-synthcones.html); its own end-to-end coverage is
+# one (see pass/color/README.md); its own end-to-end coverage is
 # lhd_color_cones_test.sh, this only keeps the mode in the CLI smoke loop.
 for SALG in pipe synth cones; do
   option_args=()

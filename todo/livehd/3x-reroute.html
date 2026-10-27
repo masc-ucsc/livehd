@@ -165,12 +165,12 @@ Experiment evidence and unresolved checks stay under ignored
 <code>repros/reroute/</code>.</p>
 
 <h2>Depends on</h2>
-<p>Legal final placement from <a class="xref" href="3p-placement.html">3p-placement</a>
-and the final legalization of <a class="xref" href="3s-terminal-legalize.html">3s-terminal-legalize</a>
+<p>Legal final placement from <a href="../../pass/place/README.md">native placement</a>
+and <a href="../../pass/place/README.md">final terminal legalization</a>
 (nothing moves after pre-routing). The track-capacity model of
-<a class="xref" href="3r-route.html">3r-route</a> is reused for the pre-route
+<a href="../../pass/place/README.md">routability feedback</a> is reused for the pre-route
 occupancy grid. The OpenROAD inspection issues in
-<a class="xref" href="2p-plan.html">2p-plan</a> (local ties, IO/clock pins) must
+<a href="../../pass/place/README.md">Placement preparation</a> (local ties, IO/clock pins) must
 not be regressed. The measurement harness is the frozen
 <code>repros/route_compare_20261019</code> flow (<code>handoff.tcl</code>,
 <code>run.py</code>, ORFS <code>cts.tcl</code> → <code>final_report.tcl</code>).</p>

@@ -320,6 +320,11 @@ Repair_result size_custom_placed(Result legal, const Options& requested, const E
                                    evaluate,
                                    std::format("{}/trial_{}", dir, trials),
                                    dir + "/floorplan.def");
+          if (!trial->rejected.empty()) {
+            failure   = trial->rejected;
+            failed_as = "rejected_growth";
+            trial.reset();
+          }
         } catch (const Multirow_failure& error) {
           failure = error.what();  // the two-row ECO found no legal pose: rejected
         } catch (const std::runtime_error& error) {

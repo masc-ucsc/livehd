@@ -21,9 +21,11 @@ base = ['lhd/lhd', 'synth', str(source), '--top', 'dut',
         '--set', f'synth.sdc={sdc}',
         '--set', 'synth.place.grid.density=8', '--set', 'synth.place.timing_rounds=1', '-q']
 
-def run(name, extra, success=True, expect=None, iterations=30):
+def run(name, extra, success=True, expect=None, iterations=30, bins=8):
     report = root / (name + '.json')
-    p = subprocess.run(base + ['--set', f'synth.place.iterations={iterations}'] + extra + ['--workdir', str(root/name), '--result-json', str(report)],
+    invocation = list(base)
+    invocation[invocation.index('synth.place.grid.density=8')] = f'synth.place.grid.density={bins}'
+    p = subprocess.run(invocation + ['--set', f'synth.place.iterations={iterations}'] + extra + ['--workdir', str(root/name), '--result-json', str(report)],
                        capture_output=True, text=True, timeout=10)
     assert report.exists(), (name, p.returncode, p.stdout, p.stderr)
     data = json.loads(report.read_text())
@@ -38,11 +40,13 @@ run('invalid_gp_margin', ['--set', 'synth.place=true', '--set', 'synth.place.res
     success=False, expect='resize.gp_margin')
 native = run('terminal_default', ['--set', 'synth.place=true', '--set', 'synth.place.macro.timing_interval=5',
                                   '--set', 'synth.place.final.timing_start=5'])
-first_gp_repair = json.loads((root/'terminal_default/synth/place/gp_buffer_repair_5.json').read_text())
-assert first_gp_repair['measurement_only'] and first_gp_repair['trials'] == [], first_gp_repair
-second_gp_repair = json.loads((root/'terminal_default/synth/place/gp_buffer_repair_10.json').read_text())
-assert second_gp_repair['checkpoint'] == 2 and second_gp_repair['margin_fraction'] == .01, second_gp_repair
-assert second_gp_repair['scale'] == 'shortest_clock_period', second_gp_repair
+# GP ranks paths for weights; detailed electrical repair follows legal GP.
+assert not list((root/'terminal_default/synth/place').rglob('gp_buffer_repair_*.json'))
+gp_ranking = [json.loads(line) for line in
+              (root/'terminal_default/synth/place/final_timing.jsonl').read_text().splitlines()]
+assert gp_ranking and all(p['ranking_only'] and p['delay'] is None for p in gp_ranking), gp_ranking
+assert native['qor']['place']['physical_timing']['ranking_evaluations'] > 0, native
+assert native['qor']['place']['physical_timing']['detailed_evaluations'] > 0, native
 run('gp_repair_disabled', ['--set', 'synth.place=true', '--set', 'synth.place.macro.timing_interval=5',
                            '--set', 'synth.place.final.timing_start=5',
                            '--set', 'synth.place.resize.gp=false'])
@@ -50,10 +54,13 @@ assert not list((root/'gp_repair_disabled/synth/place').rglob('gp_buffer_repair_
 
 run('timing_warmup', ['--set', 'synth.place=true',
                       '--set', 'synth.place.min_iterations=260'], iterations=260)
-repair_files = sorted((root/'timing_warmup/synth/place').glob('gp_buffer_repair_*.json'))
-assert [p.name for p in repair_files] == ['gp_buffer_repair_200.json', 'gp_buffer_repair_250.json'], repair_files
-assert json.loads(repair_files[0].read_text())['measurement_only']
-assert json.loads(repair_files[1].read_text())['checkpoint'] == 2
+warmup_ranking = [json.loads(line) for line in
+                  (root/'timing_warmup/synth/place/final_timing.jsonl').read_text().splitlines()]
+periodic = [p for p in warmup_ranking if not p['forced']]
+# Stable geometry may skip periodic updates; it must not bypass warm-up.
+assert all(p['iteration'] >= 200 for p in periodic), periodic
+assert warmup_ranking, warmup_ranking
+assert all(p['ranking_only'] and p['delay'] is None for p in warmup_ranking), warmup_ranking
 run('invalid_timing_start', ['--set', 'synth.place=true', '--set', 'synth.place.final.timing_start=-1'],
     success=False, expect='timing_start')
 
@@ -63,7 +70,9 @@ assert terminal['remainder_wire_weight'] == 4 and terminal['joint_minimize_total
 assert terminal['timed_nets'] > 0 and terminal['critical_nets'] > 0, terminal
 legal_timing = [json.loads(line) for line in (root/'terminal_default/synth/place/final/legalize_timing.jsonl').read_text().splitlines()]
 assert [entry['stage'] for entry in legal_timing] == ['global_placement', 'legalization'], legal_timing
-assert all(entry['wns'] is not None and entry['tns'] is not None for entry in legal_timing), legal_timing
+assert all(entry['ranking_only'] and entry['wns'] is None and entry['tns'] is None
+           for entry in legal_timing), legal_timing
+assert native['qor']['sta']['designs'][0]['wns'] is not None, native
 
 assert json.loads((root/'terminal_default/synth/place/route_options.json').read_text())['stages']['final']['model'] == 'rsmt'
 phases = [p['name'] for p in native['phases']]
@@ -96,7 +105,7 @@ assert td['initial_timing_source'] == 'post_synthesis_zero_wire', td
 assert max(td['initial_weights'].values()) > 1, td
 assert td['timing_fraction'] == 0.2 and td['timing_max_weight'] == 5 and td['timing_smoothing'] == .5, td
 assert td['timing_exponent'] == 1, td
-assert len(td['rounds']) == 1, td
+assert td['skipped_setup_met'] and td['rounds'] == [], td
 assert 'pass.place.post_synth_timing' in [p['name'] for p in timed['phases']]
 
 debug = run('debug', ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=false',
@@ -129,10 +138,11 @@ ram = run('fp_macro', ['--set', 'synth.place=true',
                      '--set', 'synth.place.fp.iterations=120', '--set', 'synth.place.utilization=0.1'])
 assert ram['qor']['place']['legal'], ram
 fp = json.loads((root/'fp_macro/synth/place/macro/fp_place.json').read_text())
-assert fp['timing_interval'] == 50 and fp['timing_checkpoints'] > 0, fp
-# The approved resize default runs STA before and after each sizing/repair
-# checkpoint, including a checkpoint whose trial makes no accepted edits.
-assert fp['timing_sta_calls'] == 2 * fp['timing_checkpoints'], fp
+assert fp['timing_interval'] == 50, fp
+# This short, coarse-grid FP never reaches the first ranking milestone.
+assert fp['fp_overflow'] > .2 and fp['timing_checkpoints'] == 0, fp
+# Each FP checkpoint ranks once; detailed repair follows placement.
+assert fp['timing_sta_calls'] == fp['timing_checkpoints'], fp
 assert fp['timing_resized_cells'] == 0, fp
 assert fp['centroid_align_weight'] == 0 and fp['centroid_align_seconds'] == 0, fp
 assert fp['centroid_parent_weight'] == 0 and fp['centroid_parent_seconds'] == 0, fp
@@ -155,9 +165,12 @@ assert not (root/'fp_macro/synth/place/alignment.json').exists()
 final_history = json.loads((root/'fp_macro/synth/place/gp_history.json').read_text())
 assert all(s['align_force'] == 0 and s['align_pairs'] == 0 for s in final_history['samples']), final_history
 assert fp['fp_routing_history'], fp
-assert fp['fp_timing_observed'], fp
+assert not fp['fp_timing_observed'], fp
 assert 'fp_continuation_deadline' in fp and 'fp_timing_satisfied_at_last_checkpoint' in fp, fp
-assert not fp['timing_after_density'] and fp['timing_density_schedule'] == [], fp
+assert not fp['timing_after_density'] and fp['timing_density_schedule'], fp
+assert all(not p['invoked'] and p['overflow'] > .2 for p in fp['timing_density_schedule']), fp
+# A coarse grid makes this two-gate fixture density-feasible so it exercises
+# ranking, complementing the skipped case above.
 gated_result = run('fp_gated', ['--set', 'synth.place=true', '--set', 'synth.place.halo=0',
                  '--set', 'synth.place.fp=true', '--set', 'synth.place.fp.colors=true', '--set', 'synth.place.fp.minimum=0',
                  '--set', 'synth.place.fp.iterations=120', '--set', 'synth.place.utilization=0.1',
@@ -178,7 +191,7 @@ gated_result = run('fp_gated', ['--set', 'synth.place=true', '--set', 'synth.pla
                  '--set', 'synth.place.routability_macro_weight=0', '--set', 'synth.place.routability_macro_range=3',
                  '--set', 'synth.place.timing_max_weight=3', '--set', 'synth.place.timing_smoothing=0.25',
                  '--set', 'synth.place.stop_overflow=0.08', '--set', 'synth.place.initial_density_weight=0.02',
-                 '--set', 'synth.place.fp.timing_movement=0.01', '--set', 'synth.place.fp.timing_max_updates=2'])
+                 '--set', 'synth.place.fp.timing_movement=0.01', '--set', 'synth.place.fp.timing_max_updates=2'], bins=2)
 gated = json.loads((root/'fp_gated/synth/place/macro/fp_place.json').read_text())
 assert json.loads((root/'fp_gated/synth/place/macro/alignment.json').read_text())['global_same_master']
 assert gated['centroid_align_weight'] == 1 and gated['centroid_align_sigma'] == .25, gated

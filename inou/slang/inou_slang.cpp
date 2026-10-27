@@ -118,8 +118,8 @@ void Inou_slang::setup() {
                         "true to skip semantic elaboration of modules outside the --top hierarchy (same as the slang flag "
                         "--ignore-uninstantiated-modules; syntax errors are still reported everywhere)");
   m1.add_label_optional("translate_off",
-                        "true to drop the source text between `// synopsys translate_off` and `// synopsys translate_on` (and the "
-                        "`synthesis` spelling), as DC, Yosys and Vivado do (same as slang --translate-off-format)");
+                        "true (default) to drop the source text between `// synopsys translate_off` and `// synopsys translate_on` (and the "
+                        "`synthesis` and `pragma` spellings), as DC, Yosys and Vivado do (same as slang --translate-off-format)");
   m1.add_label_optional("liberty_macro_precedence",
                         "true to let a synth.liberty RAM macro win over a same-named design-source module (default: refuse the collision)");
   m1.add_label_optional("liberty_allow_truncation",
@@ -164,8 +164,8 @@ void Inou_slang::setup() {
                         "true to skip semantic elaboration of modules outside the --top hierarchy (same as the slang flag "
                         "--ignore-uninstantiated-modules; syntax errors are still reported everywhere)");
   m2.add_label_optional("translate_off",
-                        "true to drop the source text between `// synopsys translate_off` and `// synopsys translate_on` (and the "
-                        "`synthesis` spelling), as DC, Yosys and Vivado do (same as slang --translate-off-format)");
+                        "true (default) to drop the source text between `// synopsys translate_off` and `// synopsys translate_on` (and the "
+                        "`synthesis` and `pragma` spellings), as DC, Yosys and Vivado do (same as slang --translate-off-format)");
   m2.add_label_optional("liberty_macro_precedence",
                         "true to let a synth.liberty RAM macro win over a same-named design-source module (default: refuse the collision)");
   m2.add_label_optional("liberty_allow_truncation",
@@ -230,10 +230,10 @@ void Inou_slang::work(Eprp_var& var) {
     argv.push_back(strdup("8192"));
   }
 
-  // Opt-in vendor-bundle compatibility, spelled as `--set compile.slang.<label>=true`
-  // so a flow that cannot append raw slang args can still enable them. Both
-  // are plain slang driver policies; a raw flag of the same name wins (slang
-  // rejects a repeated optional flag).
+  // Vendor-bundle policies are also available through typed labels. Honor
+  // synthesis translate-off regions by default, as Yosys does; callers can
+  // explicitly disable this with compile.slang.translate_off=false. Raw
+  // translate-off formats override the built-in list.
   const auto label_true = [&](std::string_view label) {
     return var.has_label(label) && (var.get(label) == "true" || var.get(label) == "1");
   };
@@ -243,8 +243,8 @@ void Inou_slang::work(Eprp_var& var) {
   if (label_true("ignore_uninstantiated_modules") && !user_has("--ignore-uninstantiated-modules")) {
     argv.push_back(strdup("--ignore-uninstantiated-modules"));
   }
-  if (label_true("translate_off") && !user_has_prefix("--translate-off-format")) {
-    for (const char* common : {"synopsys", "synthesis"}) {
+  if ((!var.has_label("translate_off") || label_true("translate_off")) && !user_has_prefix("--translate-off-format")) {
+    for (const char* common : {"synopsys", "synthesis", "pragma"}) {
       argv.push_back(strdup("--translate-off-format"));
       argv.push_back(strdup(std::format("{},translate_off,translate_on", common).c_str()));
     }

@@ -335,6 +335,9 @@ void Pass_opentimer::time_work(Eprp_var& var) {
       pass.physical_rc_ = std::make_shared<livehd::physical::Parasitics>(livehd::physical::deserialize_parasitics(stored.get()));
     }
   }
+  if (pass.physical_rc_) {
+    pass.physical_timing_cuts_.insert(pass.physical_rc_->timing_cuts.begin(), pass.physical_rc_->timing_cuts.end());
+  }
 
   pass.validate_physical_rc(g);  // validate before a warm STA result can be replayed
 
@@ -550,6 +553,7 @@ void Pass_opentimer::time_work(Eprp_var& var) {
   pass.read_sdc_spef();
   pass.apply_case_analysis();
   pass.apply_physical_rc(g);
+  pass.apply_physical_timing_cuts(pass.physical_timing_cuts_);
   pass.prepare_critical_targets();
   pass.apply_physical_captures();
   pass.annotate_critical(g);
@@ -1823,7 +1827,7 @@ void Pass_opentimer::build_circuit(const std::shared_ptr<hhds::Graph>& g) {
         const auto name = sink_pin_name_of(node, sink);
         const bool data = name.ends_with("din") || (op != Ntype_op::Latch && name.ends_with("enable")) || name == "update"
                           || name.ends_with("addr");
-        const auto off             = sink.get_port_id() % Ntype::Memory_port_stride;
+        const auto off  = sink.get_port_id() % Ntype::Memory_port_stride;
         const bool memory_physical = physical_rc_ && op == Ntype_op::Memory
                                      && (off == 0 || off == 2 || off == 3 || off == 4 || off == 12 || off == 13 || off == 14);
         if (!data && !memory_physical) {
@@ -2538,12 +2542,12 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
           const bool rise_pair = arc.cell_rise && arc.rise_transition;
           const bool fall_pair = arc.cell_fall && arc.fall_transition;
           const bool no_delay  = type == ot::TimingType::MIN_PULSE_WIDTH || type == ot::TimingType::MINIMUM_PERIOD
-                                || type == ot::TimingType::MAX_CLOCK_TREE_PATH || type == ot::TimingType::MIN_CLOCK_TREE_PATH;
-          const bool tables = no_delay                                                            ? true
-                              : type == ot::TimingType::COMBINATIONAL_RISE                        ? rise_pair
-                              : type == ot::TimingType::COMBINATIONAL_FALL                        ? fall_pair
-                              : (type == ot::TimingType::PRESET || type == ot::TimingType::CLEAR) ? (rise_pair || fall_pair)
-                                                                                                  : (rise_pair && fall_pair);
+                                 || type == ot::TimingType::MAX_CLOCK_TREE_PATH || type == ot::TimingType::MIN_CLOCK_TREE_PATH;
+          const bool tables    = no_delay                                                            ? true
+                                 : type == ot::TimingType::COMBINATIONAL_RISE                        ? rise_pair
+                                 : type == ot::TimingType::COMBINATIONAL_FALL                        ? fall_pair
+                                 : (type == ot::TimingType::PRESET || type == ot::TimingType::CLEAR) ? (rise_pair || fall_pair)
+                                                                                                     : (rise_pair && fall_pair);
           if (!arc.is_constraint() && !tables) {
             timing_cells_complete = false;
             incomplete_cell
@@ -2882,8 +2886,13 @@ std::string Pass_opentimer::cache_key(const std::shared_ptr<hhds::Graph>& g) con
     cache_digestable_ = false;
     return {};
   }
-  const uint64_t env = livehd::opentimer::Sta_cache::env_hash(timing_file_list, top_filter, hier_setting_, margin, stats_);
-  return std::format("{:016x}{:016x}{:016x}:load={:.9g}:critical={}:percent={:.9g}:targets={}:nodes={}:physical={}",
+  const uint64_t env       = livehd::opentimer::Sta_cache::env_hash(timing_file_list, top_filter, hier_setting_, margin, stats_);
+  uint64_t       cuts_hash = livehd::hash_util::kFnv1a64_offset;
+  for (const auto& pin : physical_timing_cuts_) {
+    cuts_hash = livehd::hash_util::fnv1a64_u64(pin.size(), cuts_hash);
+    cuts_hash = livehd::hash_util::fnv1a64(pin, cuts_hash);
+  }
+  return std::format("{:016x}{:016x}{:016x}:load={:.9g}:critical={}:percent={:.9g}:targets={}:nodes={}:physical={}:cuts={:016x}",
                      d.h0,
                      d.h1,
                      env,
@@ -2892,7 +2901,8 @@ std::string Pass_opentimer::cache_key(const std::shared_ptr<hhds::Graph>& g) con
                      critical_percent_,
                      targets_text_,
                      annotation_identity(g),
-                     physical_rc_ ? physical_rc_->identity : std::string{});
+                     physical_rc_ ? physical_rc_->identity : std::string{},
+                     cuts_hash);
 }
 
 void Pass_opentimer::replay(const livehd::opentimer::Sta_record& rec) {

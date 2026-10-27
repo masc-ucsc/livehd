@@ -326,4 +326,18 @@ std::shared_ptr<hhds::GraphIO> create_icg_io(hhds::GraphLibrary& outlib, const I
 // source gate. No-op when a model of that name already exists.
 void emit_icg_model(hhds::GraphLibrary& outlib, const Icg_cell& icg);
 
+// Immutable, invocation-owned characterization. Read the files once, then share
+// this snapshot across physical stages; no process-global or path-only cache.
+struct Cell_library {
+  size_t                     file_reads = 0;
+  std::string                contents;
+  std::vector<Dff_cell>      dffs, async_dffs, latches;
+  std::vector<Icg_cell>      icgs;
+  std::vector<Comb_cell>     combinational;
+  std::vector<Constant_cell> constants;
+  std::vector<Memory_cell>   memories;
+  std::vector<Output_drive>  drives;
+  explicit Cell_library(const std::string& lib_files);
+};
+
 }  // namespace livehd::liberty

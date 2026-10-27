@@ -8,7 +8,7 @@
 #include "pass_opentimer.hpp"
 
 void Pass_opentimer::apply_case_analysis() {
-  timer.update_timing();
+  timer.update_netlist();  // truth tables and arc masks depend on connectivity, not propagated times
   const auto& library = timer.celllib(ot::MAX);
   if (!library) {
     return;

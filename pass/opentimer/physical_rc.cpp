@@ -3,10 +3,36 @@
 #include <format>
 #include <map>
 #include <stdexcept>
+#include <unordered_set>
 
 #include "attrs.hpp"
 #include "node_util.hpp"
 #include "pass_opentimer.hpp"
+
+void Pass_opentimer::apply_physical_timing_cuts(const std::set<std::string>& cuts) {
+  if (cuts.empty()) {
+    return;
+  }
+  if (!physical_rc_) {
+    throw std::invalid_argument("physical timing cuts require placement RC");
+  }
+  timer.update_netlist();
+  std::unordered_set<std::string> roots;
+  for (const auto& net : physical_rc_->nets) {
+    if (cuts.contains(net.driver)) {
+      roots.insert(physical_timing_pins_.at(net.driver));
+    }
+  }
+  std::vector<std::pair<size_t, uint8_t>> masks;
+  for (const auto& arc : timer.arcs()) {
+    if (arc.is_net_arc() && roots.contains(arc.from().name())) {
+      masks.emplace_back(arc.idx(), 0);
+    }
+  }
+  if (!masks.empty()) {
+    timer.refine_case_masks(std::move(masks));
+  }
+}
 
 void Pass_opentimer::validate_physical_rc(const std::shared_ptr<hhds::Graph>& graph) const {
   if (!physical_rc_) {
@@ -77,7 +103,7 @@ void Pass_opentimer::apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph
     return;
   }
   validate_physical_rc(graph);
-  timer.update_timing();  // materialize queued pin/net builders before matching identities
+  timer.update_netlist();  // materialize pin/net builders before matching identities; RC is attached below
   if (previous_physical_rc_ && previous_physical_rc_->nets == physical_rc_->nets) {
     physical_updated_nets_ = 0;
     return;  // Master changes retain pin identities; unchanged wire RC stays attached.

@@ -17,6 +17,7 @@
 #include "memory_proxy.hpp"
 #include "pass/liberty/liberty_dff.hpp"
 #include "pass/partition/flatten.hpp"
+#include "placement_technology.hpp"
 #include "prects_networks.hpp"
 #include "preroute.hpp"
 #include "preroute_repair.hpp"
@@ -181,9 +182,9 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
       = detail::preroute_stage(signal_first ? *signal_first : placed, tech, wire, bindings, timer, options, route, initial_timing);
   auto                candidate = std::move(stage.placed);
   Preroute_result     routed{std::move(candidate.floorplan),
-                         *candidate.parasitics,
-                         std::move(stage.records),
-                         std::move(stage.timings_ms)};
+                             *candidate.parasitics,
+                             std::move(stage.records),
+                             std::move(stage.timings_ms)};
   const double        route_ms = elapsed_ms(route_start);
   rapidjson::Document report(rapidjson::kObjectType);
   auto&               alloc = report.GetAllocator();
@@ -226,7 +227,7 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
   rapidjson::Value records(rapidjson::kArrayType);
   size_t           accepted = 0, attempted = 0, via_count = 0;
   using Counts = std::array<size_t, 3>;  // mapped nets, search attempted, accepted
-  std::map<std::string, Counts> pin_buckets, length_buckets;
+  std::map<std::string, Counts>   pin_buckets, length_buckets;
   std::map<std::string, uint64_t> rejections;
   std::map<std::string, double>   layer_lengths;
   // A string-keyed map of lengths, times or counts as one JSON object.
@@ -400,13 +401,13 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
   if (candidate.graph == placed.graph) {
     auto library = std::make_shared<hhds::GraphLibrary>();
     auto graph   = partition::flatten_hierarchy(candidate.graph.get(),
-                                              library.get(),
-                                              candidate.graph->get_name(),
-                                              nullptr,
-                                              false,
+                                                library.get(),
+                                                candidate.graph->get_name(),
+                                                nullptr,
+                                                false,
                                                 {},
                                                 {},
-                                              true);
+                                                true);
     if (!graph) {
       throw std::runtime_error("cannot clone pre-route handoff graph");
     }
@@ -432,7 +433,14 @@ void preroute_placed(Result& placed, const Options& options, const Evaluate& eva
   const auto def = options.output_dir + "/out.def.preroute";
   physical::write_def(routed.frame, def);
   physical::verify_def_roundtrip(routed.frame, physical::read_def(def));
-  auto parasitics = std::make_shared<physical::Parasitics>(std::move(routed.parasitics));
+  auto       parasitics = std::make_shared<physical::Parasitics>(std::move(routed.parasitics));
+  const auto controls   = prects_networks(options.technology().lef, routed.frame, candidate.prects);
+  parasitics->timing_cuts.clear();
+  for (const auto& net : parasitics->nets) {
+    if (controls.timing_cuts.contains(net.driver)) {
+      parasitics->timing_cuts.insert(net.driver);
+    }
+  }
   for (auto node : candidate.graph->body().nodes()) {
     if (auto lock = locks.find(std::string(node.get_name())); lock != locks.end()) {
       node.attr(attrs::place).set(lock->second);

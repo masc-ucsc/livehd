@@ -269,10 +269,32 @@ void Slang_context::emit_package_units() {
   referenced_pkg_types_.clear();
 }
 
+void Slang_context::fill_unknown_stubs() {
+  for (auto& [callee, itf] : unknown_interfaces_) {
+    auto& stub    = *itf.stub;
+    auto  root    = stub.set_root(Lnast_ntype::create_top());
+    auto  io      = stub.add_child(root, Lnast_ntype::create_io());
+    auto  inputs  = stub.add_child(io, Lnast_ntype::create_tuple_add());
+    auto  outputs = stub.add_child(io, Lnast_ntype::create_tuple_add());
+    stub.add_child(root, Lnast_ntype::create_stmts());
+    for (const auto& name : itf.order) {
+      const auto& p     = itf.ports.at(name);
+      auto        entry = stub.add_child(p.is_out ? outputs : inputs, Lnast_ntype::create_store());
+      stub.add_child(entry, Lnast_node::create_ref(ref_name_of_raw(name)));
+      stub.add_child(entry, Lnast_node::create_const("nil"));
+      auto ty = stub.add_child(entry, Lnast_ntype::create_prim_type_int());
+      stub.add_child(ty, Lnast_node::create_const(int_max_str(p.bits, p.is_signed)));
+      stub.add_child(ty, Lnast_node::create_const(int_min_str(p.bits, p.is_signed)));
+    }
+  }
+}
+
 std::vector<std::shared_ptr<Lnast>> Slang_context::pick_lnast() {
+  fill_unknown_stubs();
   std::vector<std::shared_ptr<Lnast>> v = std::move(ordered_lnasts_);
   ordered_lnasts_.clear();
   lowered_.clear();
+  unknown_interfaces_.clear();
   module_names_.clear();
   module_names_used_.clear();
   return v;

@@ -16,9 +16,19 @@ namespace lhd {
 namespace {
 namespace fs    = std::filesystem;
 using Inventory = std::map<std::string, std::string>;
-constexpr std::array kPlaceArtifacts{"out.def", "qor.json", "preroute.json", "power_grid.json", "io_resynth.json",
-                                     "memory_proxies.lef", "magnet.json", "macro_animation.html", "macro/gp_history.json",
-                                     "macro/gp_history.jsonl", "macro/fixed.def", "route_options.json", "sat_route_grid.json",
+constexpr std::array kPlaceArtifacts{"out.def",
+                                     "qor.json",
+                                     "preroute.json",
+                                     "power_grid.json",
+                                     "io_resynth.json",
+                                     "memory_proxies.lef",
+                                     "magnet.json",
+                                     "macro_animation.html",
+                                     "macro/gp_history.json",
+                                     "macro/gp_history.jsonl",
+                                     "macro/fixed.def",
+                                     "route_options.json",
+                                     "sat_route_grid.json",
                                      "sat_route_guard.json"};
 
 std::string digest(const fs::path& path) {
@@ -155,6 +165,35 @@ bool Physical_cache::restore(const fs::path& net, const fs::path& place) {
   } catch (const std::exception& error) {
     reason_ = error.what();
     return false;
+  }
+}
+
+fs::path Physical_cache::placement_hint() const {
+  try {
+    std::ifstream input(directory_ / "manifest.json");
+    if (!input) {
+      return {};
+    }
+    const std::string   text{std::istreambuf_iterator<char>(input), {}};
+    rapidjson::Document manifest;
+    manifest.Parse(text.c_str());
+    if (manifest.HasParseError() || !manifest.IsObject() || !manifest.HasMember("schema") || !manifest["schema"].IsInt()
+        || manifest["schema"].GetInt() != 1 || !manifest.HasMember("descriptor") || !manifest["descriptor"].IsString()
+        || manifest["descriptor"].GetString() != descriptor_ || !manifest.HasMember("dependencies")
+        || !matches(manifest["dependencies"], dependencies(dependencies_)) || !manifest.HasMember("artifacts")
+        || !manifest["artifacts"].IsObject()) {
+      return {};
+    }
+    const auto found = manifest["artifacts"].FindMember("place/out.def");
+    const auto path  = directory_ / "artifacts/place/out.def";
+    if (found == manifest["artifacts"].MemberEnd() || !found->value.IsString() || fs::is_symlink(path) || !fs::is_regular_file(path)
+        || digest(path) != found->value.GetString()) {
+      return {};
+    }
+    return path;
+  } catch (const std::exception&) {
+    // Hints are optional: a damaged or stale artifact never blocks a fresh run.
+    return {};
   }
 }
 

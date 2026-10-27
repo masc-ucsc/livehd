@@ -17,10 +17,14 @@ public:
                  std::vector<std::string> dependencies);
   // A dependency known only after construction (a generated input such as the
   // domino LEF the mapper writes); add it before restore and publish.
-  void               add_dependency(std::string path) { dependencies_.push_back(std::move(path)); }
-  bool               restore(const std::filesystem::path& net, const std::filesystem::path& place);
-  void               publish(const std::filesystem::path& net, const std::filesystem::path& place);
-  const std::string& reason() const { return reason_; }
+  void                  add_dependency(std::string path) { dependencies_.push_back(std::move(path)); }
+  bool                  restore(const std::filesystem::path& net, const std::filesystem::path& place);
+  // A changed design cannot replay the repaired generation, but matching
+  // technology/options may reuse its verified DEF as movable coordinate hints.
+  // No graph, constraints, timing, or placement certification is restored.
+  std::filesystem::path placement_hint() const;
+  void                  publish(const std::filesystem::path& net, const std::filesystem::path& place);
+  const std::string&    reason() const { return reason_; }
 
 private:
   std::filesystem::path    directory_, compiled_;

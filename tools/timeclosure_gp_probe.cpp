@@ -665,7 +665,7 @@ int main(int argc, char** argv) {
       writer.Key("wire_model");
       writer.String(continuous_star
                         ? (star.options.calibrate_admittance ? "wire_scaled_star_admittance_v2" : "wire_scaled_star_elmore_v1")
-                        : "FLUTE_Steiner");
+                        : "driver_aware_Steiner");
       writer.Key("star_calibration");
       if (continuous_star) {
         writer.StartObject();

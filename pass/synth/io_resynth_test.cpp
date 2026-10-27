@@ -100,6 +100,37 @@ TEST(IoResynth, EnvironmentIncludesWireLoadAndPortIdentity) {
   b.wire.length_um[1]      = 10;
   EXPECT_NE(environment_identity(a), environment_identity(b));
 }
+TEST(IoResynth, FailedTargetsSurvivePlacementAndReloadButNotNewBodies) {
+  const auto directory = std::string(std::getenv("TEST_TMPDIR")) + "/io_failed_target";
+  std::filesystem::remove_all(directory);
+  {
+    Io_store store(directory, 1000, true, "timer-A");
+    store.failed_target("c1", "body1", 400);
+    store.failed_target("c1", "body1", 300);
+    EXPECT_TRUE(store.target_failed("c1", "body1", 400));
+    EXPECT_TRUE(store.target_failed("c1", "body1", 200));
+    EXPECT_FALSE(store.target_failed("c1", "body1", 500));
+    EXPECT_FALSE(store.target_failed("c2", "body1", 400));
+    EXPECT_FALSE(store.target_failed("c1", "body2", 400));
+    store.used("c1", "body1", {});
+    store.record("c1", "body1", "final", {});
+    store.save();
+  }
+  Io_store warm(directory, 1000, true, "timer-A");
+  EXPECT_TRUE(warm.target_failed("c1", "body1", 400));
+  warm.record("c1", "body1", "fp", {});
+  EXPECT_TRUE(warm.target_failed("c1", "body1", 400));
+  warm.refined("c1", "resized-body1");
+  EXPECT_TRUE(warm.target_failed("c1", "resized-body1", 400));
+  EXPECT_TRUE(warm.rows.at("c1").stage.empty());
+  warm.used("c1", "body2", {});
+  EXPECT_FALSE(warm.target_failed("c1", "body2", 400));
+  warm.failed_target("c1", "body2", 400);
+  warm.invalidate("c1");
+  EXPECT_FALSE(warm.target_failed("c1", "body2", 400));
+  Io_store new_timer(directory, 1000, true, "timer-B");
+  EXPECT_FALSE(new_timer.target_failed("c1", "body1", 400));
+}
 TEST(IoResynth, DisabledPersistenceNeitherReadsNorWrites) {
   const auto directory = std::string(std::getenv("TEST_TMPDIR")) + "/io_disabled";
   std::filesystem::create_directories(directory);
@@ -119,6 +150,38 @@ TEST(IoResynth, DisabledPersistenceNeitherReadsNorWrites) {
   input >> contents;
   EXPECT_EQ(contents, "corrupt");
   EXPECT_FALSE(std::filesystem::exists(directory + "/wire_load.json"));
+}
+TEST(IoResynth, TargetMarginAbsorbsSmallTimingChangesAcrossRuns) {
+  const auto directory = std::string(std::getenv("TEST_TMPDIR")) + "/io_target_margin";
+  std::filesystem::remove_all(directory);
+  Io_environment env;
+  env.inputs["a[0]"]   = 200;
+  env.required["y[0]"] = 800;
+  {
+    Io_store store(directory, 1000, true, "timer-A");
+    store.covered_target("c1", "body", 1000, 900, env);
+    store.used("c1", "body", env);
+    store.record("c1", "body", "final", env);
+    store.save();
+  }
+  Io_store warm(directory, 1000, true, "timer-A");
+  EXPECT_TRUE(warm.target_covered("c1", "body", 1000, env));
+  auto shifted              = env;
+  shifted.inputs["a[0]"]   += 20;
+  shifted.required["y[0]"] -= 20;
+  EXPECT_TRUE(warm.target_covered("c1", "body", 1000, shifted));
+  shifted.inputs["a[0]"] += 70;
+  EXPECT_FALSE(warm.target_covered("c1", "body", 1000, shifted));
+  shifted                   = env;
+  shifted.required["y[0]"] -= 20;
+  EXPECT_TRUE(warm.target_covered("c1", "body", 980, shifted));
+  shifted.required["y[0]"] -= 90;
+  EXPECT_FALSE(warm.target_covered("c1", "body", 890, shifted));
+  EXPECT_FALSE(warm.target_covered("c1", "new-body", 1000, env));
+  warm.refined("c1", "resized-body");
+  EXPECT_TRUE(warm.target_covered("c1", "resized-body", 1000, env));
+  Io_store changed(directory, 1000, true, "timer-B");
+  EXPECT_FALSE(changed.target_covered("c1", "body", 1000, env));
 }
 TEST(IoResynth, CorruptStateIsRejectedCleanly) {
   const auto directory = std::string(std::getenv("TEST_TMPDIR")) + "/io_corrupt";

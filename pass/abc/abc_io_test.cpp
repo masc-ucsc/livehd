@@ -1,4 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include <filesystem>
+
 #include "abc_boundary.hpp"
 #include "attrs.hpp"
 #include "gtest/gtest.h"
@@ -19,7 +21,7 @@ namespace {
 struct Fixture {
   hhds::GraphLibrary           library;
   std::shared_ptr<hhds::Graph> graph;
-  Fixture() {
+  explicit Fixture(int length = 4) {
     auto inv = library.create_io("INVx1");
     inv->add_input("A", 1);
     inv->add_output("Y", 2);
@@ -35,7 +37,7 @@ struct Fixture {
     graph->get_input_node().attr(attrs::synth_region_id).set(1);
     auto driver = graph->get_input_pin("a");
     graph_util::set_bits(driver, 1);
-    for (int i = 0; i < 4; ++i) {
+    for (int i = 0; i < length; ++i) {
       auto n = graph_util::create_typed_node(*graph, Ntype_op::Sub);
       n.set_subnode(inv);
       n.set_name("inv" + std::to_string(i));
@@ -76,6 +78,33 @@ TEST(AbcIo, MappedBoundaryTimingAndProvedRewrite) {
   EXPECT_EQ(f.graph->get_io()->get_output_pin_decls().front().name, "y");
   EXPECT_TRUE(mapper(*f.graph, env, env, 1000, 5, false).checked);
 }
+TEST(AbcIo, GrowthAdmissionRejectsBeforePublishingAProvedReplacement) {
+  Fixture    f;
+  auto       mapper = synth::make_io_mapper("abc",
+                                            {
+                                                {"library", "inou/prp/tests/abc/timing.lib"}
+  });
+  auto       store  = std::make_shared<synth::Io_store>(std::string(std::getenv("TEST_TMPDIR")) + "/growth_admission", 1000, false);
+  const auto original           = synth::mapped_identity(*f.graph);
+  unsigned   queries            = 0;
+  store->admit_physical_rewrite = [&](auto& candidate, const auto& masters) {
+    ++queries;
+    EXPECT_TRUE(masters.empty());
+    EXPECT_EQ(synth::mapped_identity(*f.graph), original);
+    EXPECT_NE(synth::mapped_identity(candidate), original);
+    return false;
+  };
+  mapper.attach_store(store);
+  synth::Io_environment env;
+  env.inputs["a[0]"]   = 950;
+  env.required["y[0]"] = 1000;
+  const auto result    = mapper(*f.graph, env, {}, 1000, 5, true);
+  EXPECT_TRUE(result.fired);
+  EXPECT_FALSE(result.accepted);
+  EXPECT_EQ(result.decision, "physical growth budget exceeded");
+  EXPECT_EQ(queries, 1U);
+  EXPECT_EQ(synth::mapped_identity(*f.graph), original);
+}
 TEST(AbcIo, WireLoadIsScopedAndChangesTiming) {
   Fixture               f;
   auto                  mapper = synth::make_io_mapper("abc",
@@ -95,6 +124,63 @@ TEST(AbcIo, WireLoadIsScopedAndChangesTiming) {
   env.wire         = {};
   const auto after = mapper(*f.graph, env, {}, 1000, 5, false);
   EXPECT_DOUBLE_EQ(after.wire_delay_ps, baseline.wire_delay_ps);
+}
+TEST(AbcIo, FailedFrequencyTargetPreventsRepeatedSynthesis) {
+  Fixture    f;
+  const auto directory = std::string(std::getenv("TEST_TMPDIR")) + "/abc_failed_target";
+  std::filesystem::remove_all(directory);
+  auto store  = std::make_shared<synth::Io_store>(directory, 1000);
+  auto mapper = synth::make_io_mapper("abc",
+                                      {
+                                          {"library", "inou/prp/tests/abc/timing.lib"}
+  });
+  mapper.attach_store(store);
+  synth::Io_environment env;
+  env.inputs["a[0]"]   = 1100;
+  env.required["y[0]"] = 1000;
+  const auto first     = mapper(*f.graph, env, {}, 1000, 5, true);
+  ASSERT_TRUE(first.fired);
+  EXPECT_DOUBLE_EQ(first.required_period_ps, 1000);
+  EXPECT_DOUBLE_EQ(first.requested_period_ps, 900);
+  const auto identity = synth::mapped_identity(*f.graph);
+  ASSERT_TRUE(store->target_failed("top__c1", identity, 900)) << first.decision;
+  store->save();
+  mapper.attach_store(std::make_shared<synth::Io_store>(directory, 1000));
+  const auto repeated = mapper(*f.graph, env, {}, 1000, 5, true);
+  EXPECT_FALSE(repeated.checked);
+  EXPECT_FALSE(repeated.fired);
+  EXPECT_FALSE(repeated.accepted);
+  EXPECT_EQ(repeated.decision, "previous synthesis missed target");
+  EXPECT_EQ(synth::mapped_identity(*f.graph), identity);
+  const auto tighter = mapper(*f.graph, env, {}, 900, 5, true);
+  EXPECT_EQ(tighter.decision, "previous synthesis missed target");
+  const auto relaxed = mapper(*f.graph, env, {}, 1200, 5, true);
+  EXPECT_EQ(relaxed.decision, "previous synthesis missed target");
+}
+TEST(AbcIo, AchievedMarginAvoidsRemappingAfterSmallPlacementChanges) {
+  Fixture f(24);
+  auto    store  = std::make_shared<synth::Io_store>(std::string(std::getenv("TEST_TMPDIR")) + "/abc_target_margin", 1000, false);
+  auto    mapper = synth::make_io_mapper("abc",
+                                         {
+                                             {"library", "inou/prp/tests/abc/timing.lib"}
+  });
+  mapper.attach_store(store);
+  synth::Io_environment env;
+  env.inputs["a[0]"]   = 850;
+  env.required["y[0]"] = 1000;
+  const auto first     = mapper(*f.graph, env, {}, 1000, 5, true);
+  ASSERT_TRUE(first.accepted) << first.decision;
+  ASSERT_GE(first.slack_after_ps, 100);
+  ASSERT_TRUE(store->target_covered("top__c1", synth::mapped_identity(*f.graph), 1000, env));
+  auto shifted            = env;
+  shifted.inputs["a[0]"] += 20;
+  const auto repeat       = mapper(*f.graph, shifted, env, 1000, 5, true);
+  EXPECT_FALSE(repeat.checked);
+  EXPECT_FALSE(repeat.fired);
+  EXPECT_EQ(repeat.decision, "within previous synthesis margin");
+  shifted.inputs["a[0]"] += 90;
+  const auto outside      = mapper(*f.graph, shifted, env, 1000, 5, true);
+  EXPECT_TRUE(outside.checked);
 }
 TEST(AbcIo, ConstantOutputsStayGraphConstants) {
   Fixture f;

@@ -178,6 +178,31 @@ set_output_delay 20 -clock virtual [all_outputs]
   EXPECT_FLOAT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE).value(), 70);
   EXPECT_TRUE(pass.complete());
 }
+TEST_F(SdcClock, OutputListSearchRetainsConstraintsWhenTheClockIsNotAnOutput) {
+  for (const auto* excluded : {"clock_out", "clk"}) {
+    SCOPED_TRACE(excluded);
+    Sdc_probe pass(var);
+    pass.timer.insert_primary_input("clk");
+    pass.timer.insert_primary_output("clock_out").disconnect_pin("clock_out").connect_pin("clock_out", "wire");
+    pass.read_sdc(write(std::format(R"sdc(
+set clk_port [get_ports {}]
+set outputs [lsearch -inline -all -not -exact [all_outputs] $clk_port]
+create_clock -name virtual -period 100
+set_input_delay 10 -clock virtual [all_inputs]
+set_output_delay 20 -clock virtual $outputs
+)sdc",
+                                    excluded)));
+    EXPECT_FLOAT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE).value(), 70);
+    const auto slack = pass.timer.report_slack("clock_out", ot::MAX, ot::RISE);
+    if (std::string_view(excluded) == "clock_out") {
+      EXPECT_FALSE(slack);
+    } else {
+      ASSERT_TRUE(slack);
+      EXPECT_FLOAT_EQ(*slack, 70);
+    }
+    EXPECT_TRUE(pass.complete());
+  }
+}
 TEST_F(SdcClock, NestedListSearchExcludesEveryNamedInputAndBackslashJoinsLines) {
   Sdc_probe pass(var);
   pass.timer.insert_primary_input("clk_p").insert_primary_input("clk_n");
@@ -232,9 +257,16 @@ set_output_delay 20 -clock virtual [all_outputs]
   EXPECT_FLOAT_EQ(pass.timer.report_slack("y", ot::MAX, ot::RISE).value(), 70);
 }
 TEST_F(SdcClock, ExprDividesIntegersLikeTcl) {
-  Sdc_probe pass(var);
-  const std::string clock = "create_clock -name virtual -period 100\n";
-  const std::pair<const char*, float> cases[] = {{"1001/2", 500}, {"5/2.0", 2.5}, {"-5/2", -3}, {"(1+1)/4", 0}, {"0x1E/2", 15}, {"0x1F/2", 15}};
+  Sdc_probe                           pass(var);
+  const std::string                   clock   = "create_clock -name virtual -period 100\n";
+  const std::pair<const char*, float> cases[] = {
+      { "1001/2", 500},
+      {  "5/2.0", 2.5},
+      {   "-5/2",  -3},
+      {"(1+1)/4",   0},
+      { "0x1E/2",  15},
+      { "0x1F/2",  15}
+  };
   for (const auto& [expression, expected] : cases) {
     pass.read_sdc(write(clock + std::format("set_input_delay [expr {}] -clock virtual [get_ports a]\n", expression)));
     EXPECT_FLOAT_EQ(pass.timer.report_at("a", ot::MAX, ot::RISE).value(), expected) << expression;
@@ -282,7 +314,8 @@ set_propagated_clock [get_clocks {one}]
   EXPECT_TRUE(pass.propagated("two"));
 }
 TEST_F(SdcClock, PropagatedClockListedNamesAreEachResolved) {
-  const std::string clocks = "create_clock -name one -period 100 [get_ports a]\ncreate_clock -name two -period 100 [get_ports c2]\n";
+  const std::string clocks
+      = "create_clock -name one -period 100 [get_ports a]\ncreate_clock -name two -period 100 [get_ports c2]\n";
   {
     Sdc_probe pass(var);
     pass.timer.insert_primary_input("c2");

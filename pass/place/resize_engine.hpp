@@ -44,11 +44,13 @@ void apply_resize_edits(hhds::Graph& graph, const Options& options, const std::v
 // re-placed by ECO legalization against state's floorplan (its FIXED cells
 // and ports written to `floorplan`, a DEF path), with output in output_dir,
 // then evaluated. `state` is never mutated, so a rejected or failed trial
-// needs no rollback; place() errors (e.g. Multirow_failure) propagate.
+// needs no rollback; place() errors (e.g. Multirow_failure) propagate. A trial
+// over the physical growth budget is not placed: `rejected` names why.
 struct Resize_trial {
   std::unique_ptr<hhds::GraphLibrary> owner;  // owns placed.graph
   Result                              placed;
   Timing_feedback                     timing;
+  std::string                         rejected;
 };
 Resize_trial     run_resize_trial(const Result& state, const Options& options, const std::vector<Resize_edit>& edits,
                                   const Evaluate& evaluate, const std::string& output_dir, const std::string& floorplan);

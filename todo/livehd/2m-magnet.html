@@ -31,13 +31,13 @@ groups and is out of scope.</p>
 <h2>Depends on</h2>
 <ul>
 <li>The staged native placement pipeline in
-<a class="xref" href="3p-placement.html">3p-placement</a>: macro GP with the
+<a href="../../pass/place/README.md">native placement</a>: macro GP with the
 same-master alignment well force (<code>synth.place.macro.align_*</code>, on by
 default), end-of-GP macro snap, macro LP legalization, fixed-macro handoff to the
 final cell stage. See <a href="../../pass/place/README.md">the placement README</a>.</li>
 <li>DREAMPlace native GP controls already used by <code>pass/place/place.cpp</code>:
 <code>checkpoint_interval</code> (timing callbacks), <code>macro_pull_*</code>
-(<a class="xref" href="2w-warpspace.html">2w-warpspace</a> anchors with
+(<a href="../../pass/place/README.md">density-warp</a> anchors with
 <code>macro_pull_settle_iterations</code>), <code>terminal_interval</code>, the
 per-iteration same-master pair strip index, and <code>GpSample</code>/
 <code>gp_history.json</code> overflow sampling.</li>
@@ -203,7 +203,7 @@ reports <code>routing_track_phase</code> and leaves GP running.</li>
 <ul>
 <li>A round computes poses for all chosen pairs (ruling 8), issues one atomic
 batch of merges (subtask A), marks the instability event, and lets GP continue.
-Existing anchors (<a class="xref" href="2w-warpspace.html">macro pulls</a>) of the
+Existing anchors (<a href="../../pass/place/README.md">macro pulls</a>) of the
 members are dropped; the next scheduled pull refresh sees the group as one
 memory with the union rectangle. Timing checkpoints are unaffected: pins keep
 physical coordinates through the group transform.</li>

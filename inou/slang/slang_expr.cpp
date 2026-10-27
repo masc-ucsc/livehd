@@ -87,7 +87,7 @@ std::optional<std::pair<std::string, int64_t>> Slang_context::render_const_expr(
     }
     case ExpressionKind::NamedValue       :
     case ExpressionKind::HierarchicalValue: {
-      const auto& sym = e.as<slang::ast::ValueExpressionBase>().symbol;
+      const auto& sym = interface_signal(e.as<slang::ast::ValueExpressionBase>().symbol);
       const auto* cv  = package_const_value(sym);
       if (cv == nullptr || !cv->isInteger()) {
         return std::nullopt;
@@ -236,7 +236,7 @@ std::optional<std::string> Slang_context::package_param_ref(const slang::ast::Ex
   if (e->kind != ExpressionKind::NamedValue && e->kind != ExpressionKind::HierarchicalValue) {
     return std::nullopt;
   }
-  const auto& sym = e->as<slang::ast::ValueExpressionBase>().symbol;
+  const auto& sym = interface_signal(e->as<slang::ast::ValueExpressionBase>().symbol);
   if (peeled) {
     // Peeling is only sound for VALUE-PRESERVING conversions: a narrowing cast
     // like 4'(P) with P=300 evaluates to 12, and emitting the symbolic ref
@@ -421,7 +421,7 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
         auto        ti = tinfo(to);
         return materialize_conversion(sv, static_cast<int>(sc.getBitstreamWidth()), false, ti.bits, ti.is_signed);
       }
-      if (!to.isIntegral() || !from.isIntegral()) {
+      if (!bit_layout_type(to) || !bit_layout_type(from)) {
         emit_unsupported(expr.sourceRange, "unsupported-conversion", "only integral conversions are supported by --reader slang");
         return "0";
       }
@@ -579,6 +579,13 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
 }
 
 std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang::SourceRange range) {
+  if (&interface_signal(sym) != &sym) {
+    return read_symbol(interface_signal(sym), range);
+  }
+  if (interface_signals_.contains(&sym) && input_syms_.contains(&sym)) {
+    return read_leaf(lname_of(sym));
+  }
+
   if (auto it = blocking_values_.find(&sym); it != blocking_values_.end()) {
     return it->second;
   }
@@ -1120,7 +1127,7 @@ std::string Slang_context::lower_assignment_pattern(const slang::ast::Expression
   // (`cause_t'{cause: c, interrupt_x: i, default: '0}` then advances the offset by
   // 1, not 58, and lands interrupt_x at bit 6 instead of 63 — silently wrong), and
   // it drops packed-array patterns, which have no fields at all.
-  if (!expr.type->isIntegral()) {
+  if (!bit_layout_type(*expr.type)) {
     emit_unsupported(expr.sourceRange,
                      "unsupported-assignment-pattern",
                      "only packed (integral) '{...} assignment patterns are supported by --reader slang yet");
@@ -1311,7 +1318,7 @@ std::optional<Slang_context::Bit_window> Slang_context::const_bit_window(const s
   std::vector<std::string_view> fields;  // innermost-last; reversed into the key
   while (cur->kind == ExpressionKind::MemberAccess) {
     const auto& ma = cur->as<slang::ast::MemberAccessExpression>();
-    if (ma.member.kind != slang::ast::SymbolKind::Field || !ma.value().type->isIntegral()) {
+    if (ma.member.kind != slang::ast::SymbolKind::Field || !bit_layout_type(*ma.value().type)) {
       return std::nullopt;
     }
     fields.push_back(ma.member.name);
@@ -1444,11 +1451,37 @@ std::string Slang_context::lower_concat(const slang::ast::ConcatenationExpressio
 // Shared base+offset math for packed element/range selects and member access.
 // Returns the lowered value with the selected field shifted down to bit 0.
 std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
-  auto ti = tinfo(*expr.type);
+  auto        ti        = tinfo(*expr.type);
+  const auto* aggregate = lhs_base_symbol(expr);
+  if (aggregate && aggregate->getType().isStruct() && !aggregate->getType().isIntegral() && bit_layout_type(aggregate->getType())) {
+    Packed_lv lv;
+    if (resolve_packed_lvalue(expr, lv) && !lv.window) {
+      if (lv.in_range == "false") {
+        return "0";  // a constant element past an unpacked array reads the default
+      }
+      auto value  = to_int_value(read_symbol(*lv.base, expr.sourceRange));
+      auto offset = lv.dyn_off.empty()  ? std::to_string(lv.const_off)
+                    : lv.const_off == 0 ? lv.dyn_off
+                                        : builder_.create_plus_stmts(lv.dyn_off, std::to_string(lv.const_off));
+      auto result = trunc_to(builder_.create_sra_stmts(value, offset), ti.bits);
+      if (!lv.in_range.empty()) {
+        auto guarded = fresh_local("aggregate_read");
+        builder_.create_declare_stmts(guarded, "mut", mask_text(ti.bits), "0");
+        builder_.create_assign_stmts(guarded, "0");
+        auto branch = builder_.create_if_stmt(false);
+        builder_.add_if_cond(branch, lv.in_range);
+        builder_.push_stmts(builder_.add_if_stmts(branch));
+        builder_.create_assign_stmts(guarded, result);
+        builder_.pop_stmts();
+        result = guarded;
+      }
+      return ti.is_signed ? builder_.create_sext_stmts(result, std::to_string(ti.bits - 1)) : result;
+    }
+  }
 
   if (expr.kind == ExpressionKind::MemberAccess) {
     const auto& ma = expr.as<slang::ast::MemberAccessExpression>();
-    if (ma.member.kind != slang::ast::SymbolKind::Field || !ma.value().type->isIntegral()) {
+    if (ma.member.kind != slang::ast::SymbolKind::Field || !bit_layout_type(*ma.value().type)) {
       emit_unsupported(expr.sourceRange, "unsupported-member-access", "only packed-struct field access is supported");
       return "0";
     }
@@ -1551,7 +1584,7 @@ std::string Slang_context::lower_select(const slang::ast::Expression& expr) {
     const auto& field = ma.member.as<slang::ast::FieldSymbol>();
     auto        bi    = tinfo(*ma.value().type);
     auto        p     = to_pattern(to_int_value(lower_rvalue(ma.value())), bi.bits, bi.is_signed);
-    auto        lo    = static_cast<int64_t>(field.bitOffset);
+    auto        lo    = field_bit_offset(*ma.value().type, field);
     auto        r     = extract_field(p, lo, ti.bits);
     return ti.is_signed ? builder_.create_sext_stmts(r, std::to_string(ti.bits - 1)) : r;
   }

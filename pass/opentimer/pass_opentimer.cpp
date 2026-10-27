@@ -69,7 +69,8 @@ Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var
   // A negative-edge check (clock-gate enable flops) captures the rising-edge
   // launch of the same cycle, as OpenSTA times a half-cycle path.
   timer.falling_edge_same_cycle(true);
-  physical_rc_ = var.physical_rc;
+  physical_rc_          = var.physical_rc;
+  physical_timing_cuts_ = var.physical_timing_cuts;
   parse_critical_options(var);
   const auto load_text = std::string(var.get("io_load", "-1"));
   char*      load_end  = nullptr;
@@ -157,8 +158,8 @@ void Pass_opentimer::ensure_libs() {
   }
   // Flush the (lineage-queued) read_celllib so build_circuit can validate cell
   // names against the loaded library at queue time. The design is still empty,
-  // so this is a no-op timing update.
-  timer.update_timing();
+  // so no timing propagation is needed.
+  timer.update_netlist();
   // A transparent LATCH cell (pass.abc maps level-sensitive latches onto the
   // Liberty's own: ASAP7 DHLx1/DLLx1, sky130 dlxtp/dlxtn) carries a
   // combinational data->Q arc beside its enable->Q edge arc. OpenTimer times
@@ -346,7 +347,8 @@ class Sdc_expression {
       if (hex) {
         token.remove_prefix(2);
       }
-      value.is_int = !token.empty() && token.find_first_not_of(hex ? "0123456789abcdefABCDEF" : "0123456789") == std::string_view::npos;
+      value.is_int
+          = !token.empty() && token.find_first_not_of(hex ? "0123456789abcdefABCDEF" : "0123456789") == std::string_view::npos;
       cursor = end;
     }
     --depth;
@@ -414,13 +416,13 @@ std::string sdc_expand(std::string_view line, const std::map<std::string, std::s
   std::string text;
   // Tcl does not substitute inside {...}; only expr's own braced argument is
   // evaluated with substitution (`[expr {4.0 * $cap}]`).
-  unsigned depth      = 0;
-  bool     expr_group = false;
+  unsigned    depth      = 0;
+  bool        expr_group = false;
   for (size_t i = 0; i < line.size();) {
     if (line[i] == '{' && depth++ == 0) {
       const auto last = text.find_last_not_of(" \t\r");
       expr_group      = last != std::string::npos && last >= 4 && last + 1 < text.size() && text.compare(last - 3, 4, "expr") == 0
-                   && text[last - 4] == '[';
+                        && text[last - 4] == '[';
     } else if (line[i] == '}' && depth > 0 && --depth == 0) {
       expr_group = false;
     }
@@ -465,7 +467,7 @@ std::string sdc_expand(std::string_view line, const std::map<std::string, std::s
     }
     text.replace(at, end - at + 1, std::format("{:.9g}", Sdc_expression(expression).value()));
   }
-  // HighTide/ORFS excludes the clock inputs using this Tcl list-search idiom,
+  // HighTide/ORFS excludes clock ports from input/output collections using this Tcl list-search idiom,
   // alone or nested once per excluded port:
   //   [lsearch -inline -all -not [lsearch -inline -all -not [all_inputs] a] b]
   // Preserve an exact exclusion selector rather than evaluating Tcl or silently
@@ -474,8 +476,9 @@ std::string sdc_expand(std::string_view line, const std::map<std::string, std::s
   // to be the same thing. The innermost search is rewritten first, so an outer
   // one then sees the `[all_inputs -exclude_exact ...]` it extends.
   static const std::regex exclusion(
-      R"(\[lsearch\s+((?:-[a-z]+\s+){3,4})(\[all_inputs(?:\s+-exclude_exact\s+[^\s\[\]{}]+)*)\]\s+(?:\[get_ports\s+([^\s\[\]{}]+)\]|([^\s\[\]{}]+))\s*\])");
-  for (size_t at = text.rfind("[lsearch "); at != std::string::npos; at = at == 0 ? std::string::npos : text.rfind("[lsearch ", at - 1)) {
+      R"(\[lsearch\s+((?:-[a-z]+\s+){3,4})(\[all_(?:inputs|outputs)(?:\s+-exclude_exact\s+[^\s\[\]{}]+)*)\]\s+(?:\[get_ports\s+([^\s\[\]{}]+)\]|([^\s\[\]{}]+))\s*\])");
+  for (size_t at = text.rfind("[lsearch "); at != std::string::npos;
+       at        = at == 0 ? std::string::npos : text.rfind("[lsearch ", at - 1)) {
     std::smatch match;
     if (!std::regex_search(text.cbegin() + at, text.cend(), match, exclusion, std::regex_constants::match_continuous)) {
       throw std::runtime_error("unsupported SDC list-search expression");
@@ -483,8 +486,9 @@ std::string sdc_expand(std::string_view line, const std::map<std::string, std::s
     std::vector<std::string> flags = absl::StrSplit(match[1].str(), absl::ByAnyChar(" \t\r"), absl::SkipWhitespace());
     std::sort(flags.begin(), flags.end());
     const bool exact = flags.size() == 4;
-    if (flags != (exact ? std::vector<std::string>{"-all", "-exact", "-inline", "-not"}
-                        : std::vector<std::string>{"-all", "-inline", "-not"})) {
+    if (flags
+        != (exact ? std::vector<std::string>{"-all", "-exact", "-inline", "-not"}
+                  : std::vector<std::string>{"-all", "-inline", "-not"})) {
       throw std::runtime_error("SDC list search requires -inline -all -not [-exact]");
     }
     const auto port = match[3].matched ? match[3].str() : match[4].str();
@@ -501,7 +505,7 @@ std::string sdc_expand(std::string_view line, const std::map<std::string, std::s
 void Pass_opentimer::read_sdc(std::string_view sdc_file) {
   // Circuit construction is queued in OpenTimer. Materialize the ports before
   // expanding all_inputs/all_outputs; otherwise those collections are empty.
-  timer.update_timing();
+  timer.update_netlist();
   std::ifstream file(std::string{sdc_file});
   if (!file.is_open()) {
     livehd::diag::err("pass.opentimer", "missing-file", "io").msg("could not open sdc:{}", sdc_file).fatal();
@@ -561,9 +565,15 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
     }
   };
   // Directives whose lines this reader models: a bad Tcl substitution there is a hard error.
-  static const absl::flat_hash_set<std::string> modelled{"create_clock",   "set_input_delay", "set_input_transition",
-                                                         "set_output_delay", "set_load",        "set_driving_cell",
-                                                         "set_false_path",  "set_propagated_clock", "current_design"};
+  static const absl::flat_hash_set<std::string> modelled{"create_clock",
+                                                         "set_input_delay",
+                                                         "set_input_transition",
+                                                         "set_output_delay",
+                                                         "set_load",
+                                                         "set_driving_cell",
+                                                         "set_false_path",
+                                                         "set_propagated_clock",
+                                                         "current_design"};
 
   while (std::getline(file, line)) {
     ++lineno;
@@ -586,7 +596,7 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
     // than reading its body line by line (an undefined loop variable would fail a constraint that is fine).
     {
       static const absl::flat_hash_set<std::string> control{"foreach", "for", "while", "if", "switch", "proc", "catch"};
-      const std::string word = line.substr(first, line.find_first_of(" \t\r{", first) - first);
+      const std::string                             word = line.substr(first, line.find_first_of(" \t\r{", first) - first);
       if (control.contains(word)) {
         int         depth = brace_delta(line);
         std::string more;
@@ -687,7 +697,7 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
       bool                     supported = true, have_period = false, have_name = false;
       float                    period = 1000;
       std::vector<float>       waveform;  // -waveform {rise fall}
-      std::string              pname  = "clock";
+      std::string              pname = "clock";
       std::vector<std::string> source_ports, source_pins;
       for (std::size_t i = 1; i < tok.size(); i++) {
         if (tok[i] == "-period" || tok[i] == "-name") {
@@ -763,7 +773,7 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
           // The mapped netlist is flattened out of region modules, so an instance carries a hierarchy
           // prefix and a uniquifier (`sub_16.pcie_us__n6780`). Accept exactly one pin on an instance
           // that is the SDC's name once those are removed.
-          const std::string wanted = candidate.substr(0, colon), pin = candidate.substr(colon);
+          const std::string        wanted = candidate.substr(0, colon), pin = candidate.substr(colon);
           std::vector<std::string> match;
           for (const auto& [key, pin_data] : timer.pins()) {
             (void)pin_data;
@@ -772,12 +782,14 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
               continue;
             }
             std::string_view instance(key.data(), at);
-            if (const auto tail = instance.rfind("__n"); tail != std::string_view::npos && tail + 3 < instance.size()
+            if (const auto tail = instance.rfind("__n");
+                tail != std::string_view::npos && tail + 3 < instance.size()
                 && instance.find_first_not_of("0123456789", tail + 3) == std::string_view::npos) {
               instance = instance.substr(0, tail);
             }
             if (instance == wanted
-                || (instance.size() > wanted.size() && instance.ends_with(wanted) && instance[instance.size() - wanted.size() - 1] == '.')) {
+                || (instance.size() > wanted.size() && instance.ends_with(wanted)
+                    && instance[instance.size() - wanted.size() - 1] == '.')) {
               match.push_back(key);
             }
           }
@@ -835,7 +847,8 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
         supported = false;  // a virtual clock has no source to carry its edges
       }
       timing_targets_[pname] = {period, source_ports, clock_pin};
-      if (supported && source_ports.empty() && clock_pin.empty() && have_period && have_name && !pname.empty() && sdc_clocks_ == 1) {
+      if (supported && source_ports.empty() && clock_pin.empty() && have_period && have_name && !pname.empty()
+          && sdc_clocks_ == 1) {
         virtual_clock_name_   = pname;
         virtual_clock_period_ = period;
       } else {
@@ -872,7 +885,7 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
     bool                             want_min = false, want_max = false, want_rise = false, want_fall = false;
     bool                             all_inputs = false, all_outputs = false, no_clocks = false;
     std::vector<std::string>         ports;
-    absl::flat_hash_set<std::string> excluded_inputs;
+    absl::flat_hash_set<std::string> excluded_inputs, excluded_outputs;
     std::string                      reference_clock;
     std::string                      drive_cell, drive_pin, drive_from;
     std::array<float, 2>             drive_slew{0, 0};
@@ -939,11 +952,11 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
           const auto& arg = selector.args[j];
           if (arg == "-no_clocks" && bare == "all_inputs") {
             no_clocks = true;
-          } else if (arg == "-exclude_exact" && bare == "all_inputs") {
+          } else if (arg == "-exclude_exact" && (bare == "all_inputs" || bare == "all_outputs")) {
             if (++j >= selector.args.size()) {
-              fail("sdc-syntax", "input exclusion needs a port name");
+              fail("sdc-syntax", "port exclusion needs a port name");
             }
-            excluded_inputs.insert(selector.args[j]);
+            (bare == "all_inputs" ? excluded_inputs : excluded_outputs).insert(selector.args[j]);
           } else if (bare == "get_ports" && !arg.empty()) {
             ports.push_back(arg);
           } else if (!arg.empty()) {
@@ -989,7 +1002,7 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
     }
     if (all_outputs) {
       for (const auto& [pname, _] : timer.primary_outputs()) {
-        if (!native_end_clocks_.contains(pname)) {
+        if (!native_end_clocks_.contains(pname) && !excluded_outputs.contains(pname)) {
           ports.push_back(pname);
         }
       }
@@ -1021,8 +1034,8 @@ void Pass_opentimer::read_sdc(std::string_view sdc_file) {
       }
       for (const auto split : {ot::MIN, ot::MAX}) {
         if (is_drive && applicable && ((split == ot::MIN && do_min) || (split == ot::MAX && do_max))) {
-          const auto& library = timer.celllib(split);
-          applicable &= library && library->cell(drive_cell);
+          const auto& library  = timer.celllib(split);
+          applicable          &= library && library->cell(drive_cell);
         }
       }
       if (!applicable) {

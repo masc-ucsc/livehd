@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 1f-fixes — placer CPU time and QoR parity with OpenROAD</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">1f-fixes</strong> Placer CPU time and QoR parity with OpenROAD</h1>
+<p>High-priority fixes so that <code>lhd synth --set synth.place=true</code> reaches OpenROAD's
+pre-CTS QoR (HPWL, cells, WNS, power measured by the same OpenSTA script) with <em>less CPU time</em>
+than OpenROAD's floorplan → global place → resize → detailed place on the HighTide asap7 benchmark.
+Implementation is in progress; the original measurements and acceptance targets are retained below.</p>
+<p><span class="status">In progress — shared technology snapshot measured; GP timing and convergence fixes under validation</span>
+Source of the issues: <code>HighTide/repros/issues.md</code> (LiveHD <code>8e017a011</code>, HighTide <code>9648393ce</code>,
+host llmHDL, one CPU for LiveHD, 8 threads for OpenROAD). All new measurements below were taken on the same
+frozen binaries with <code>perf</code> and <code>/usr/bin/time</code>; the ablation placements were scored with the
+benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with the A/B/C/D rows.</p>
+
+<h2 id="progress">Implementation progress</h2>
+
+<p>Publication review: pulled LiveHD upstream through <code>ae53a9243</code>
+without conflicts. Published DREAMPlace <code>ba64ec8</code> and OpenTimer
+<code>57e4f9e</code>, and updated the LiveHD dependency pins. All 26 targeted
+optimized regression suites pass with those published dependencies and no local
+overrides, including the detailed-baseline repair regression. The broader A–J
+acceptance items below remain in progress.</p>
+
+<p>A controlled fixed-placement check isolates the large timing-model discrepancy:
+on the v27 minimax DEF, OpenSTA given native parasitics reports −2,260.701 ps,
+within 1.3 ps of native timing, while its own placement RC gives −1,062.622 ps.
+OpenROAD uses driver-aware Prim–Dijkstra trees; the previous native estimator
+used unrooted FLUTE. Switching the native timing estimate to driver-aware trees
+(alpha 0.3, shared-branch Steinerization) brings all four saved placements within
+3% of independent OpenSTA. The geometric router and public defaults are unchanged;
+nets above 1,000 distinct locations retain the existing approximate spatial fallback.</p>
+<table>
+<thead><tr><th>Fixed v27 placement</th><th>Native before → after (ps)</th><th>Independent OpenSTA (ps)</th><th>New relative WNS error</th></tr></thead>
+<tbody>
+<tr><td>lfsr</td><td>−66.702 → −60.055</td><td>−61.726</td><td>2.71%</td></tr>
+<tr><td>minimax</td><td>−2,261.959 → −1,076.838</td><td>−1,062.622</td><td>1.34%</td></tr>
+<tr><td>NVDLA/partition_m</td><td>−912.779 → −904.681</td><td>−902.576</td><td>0.23%</td></tr>
+<tr><td>coralnpu</td><td>−20,192.965 → −15,550.148</td><td>−15,570.484</td><td>0.13%</td></tr>
+</tbody>
+</table>
+<p>These are model-agreement results on unchanged placements, not placement WNS
+improvements. Six targeted topology/placement/repair/CLI suites pass, including the
+named-driver regression. Fresh full-flow measurements are recorded below. G still needs
+validation at decision points and on the remaining designs. The controlled pin-geometry
+ablation changes minimax's FLUTE score by only 0.2 ps, so no pin-geometry change is retained.</p>
+
+<p>The fresh driver-aware v28 full-flow sweep uses the same defaults and 100 ps
+clock as v27. Independent OpenSTA scores show mixed placement changes:</p>
+<table>
+<thead><tr><th>Design</th><th>WNS, v27 → v28 (ps)</th><th>Placement, v27 → v28 (s)</th><th>Time ratio</th></tr></thead>
+<tbody>
+<tr><td>lfsr</td><td>−61.726 → −61.992</td><td>2.612 → 2.607</td><td>0.998×</td></tr>
+<tr><td>minimax</td><td>−1,062.622 → −996.517</td><td>52.327 → 46.055</td><td>0.880×</td></tr>
+<tr><td>NVDLA/partition_m</td><td>−902.576 → −916.549</td><td>40.910 → 41.459</td><td>1.013×</td></tr>
+<tr><td>coralnpu</td><td>−15,570.484 → −15,339.843</td><td>829.816 → 802.890</td><td>0.968×</td></tr>
+</tbody>
+</table>
+<p>All four remain within the 1.5× placement-time and 3% cell/area limits.
+Minimax gains 66.105 ps and coralnpu 230.640 ps; partition_m loses 13.973 ps
+and lfsr loses 0.266 ps. Coralnpu takes 1,000.98 s wall / 998.75 s CPU for the
+complete flow, plus 79.494 s independent scoring. Its placement is 13 min 23 s.
+Minimax HPWL drops to 51,206.312 µm but broader wirelength acceptance remains open.
+These frozen binaries predate the upstream pull and final review fixes; merged
+source is checked separately by regression tests. Review removed an unused
+DREAMPlace initializer and prevented approximate ranking feedback from being
+reused as a detailed buffer-repair baseline.</p>
+
+<p>The latest user request shifts the next pass to WNS improvement with placement time
+bounded by 1.5× the current baseline. The comparison uses a deliberately tight 100 ps clock
+on every design so that meeting timing cannot hide further improvements. The new
+<code>wns-v1</code> sweep removes the harness's design-specific density/utilization overrides,
+uses identical placement defaults across lfsr, minimax, partition_m and coralnpu, and keeps
+the same frontend compatibility settings for all four. Reset distribution is always false-path
+in both native timing and independent scoring. Whole-process CPU and non-overlapping placement
+phase elapsed time on one pinned CPU are reported separately. The four controls
+all miss timing: WNS −61.726/−4,190.668/−902.563/−15,571.683 ps, placement
+2.735/49.383/68.596/829.184 s, respectively. The original harness total counted
+nested ranking/resynthesis callbacks twice; these corrected placement totals
+include their cost once through the enclosing placement phase. Final standalone
+STA is separate. Whole-process CPU measurements are unaffected.</p>
+<p>The measured candidate (<code>speed-v27</code>, <code>reserved</code>) prioritizes
+electrical excess before setup slack when allocating the existing 3% growth allowance.
+It repairs heavily loaded sources before spending that allowance on downstream gates.
+Warm refinement reserves two of the existing optional detailed-evaluation slots for
+sizing and buffer repair. Public defaults and the total timing budget are unchanged.</p>
+<table>
+<thead><tr><th>Design</th><th>Independent WNS, before → after (ps)</th><th>Placement, before → after (s)</th><th>Time ratio</th></tr></thead>
+<tbody>
+<tr><td>lfsr</td><td>−61.726 → −61.726</td><td>2.735 → 2.612</td><td>0.955×</td></tr>
+<tr><td>minimax</td><td>−4,190.668 → −1,062.622</td><td>49.383 → 52.327</td><td>1.060×</td></tr>
+<tr><td>NVDLA/partition_m</td><td>−902.563 → −902.576</td><td>68.596 → 40.910</td><td>0.596×</td></tr>
+<tr><td>coralnpu</td><td>−15,571.683 → −15,570.484</td><td>829.184 → 829.816</td><td>1.001×</td></tr>
+</tbody>
+</table>
+<p>All four meet the 1.5× time bound, legality and the existing cell/area limit.
+Minimax gains 3,128.046 ps WNS and about 75% TNS; its HPWL increases 4.69%, so the
+broader wirelength acceptance remains unresolved. A fresh same-CPU minimax repeat
+reproduces both WNS scores exactly, with placement 47.738→52.206 s (1.094×).
+Coralnpu's complete LiveHD flow takes 1,022.04 s wall / 1,021.51 s CPU, followed by
+74.598 s independent scoring; placement itself takes 13 min 50 s. Scoring resumed
+from the completed DEF after a wrapper CPU-slot index error, without rerunning the flow.</p>
+<p>The preceding unrestricted warm candidate (<code>speed-v26</code>) is rejected:
+on coralnpu three rejected warm trials consumed the shared detailed-evaluation
+allowance and prevented repair. Placement was within budget at 915.105 s (1.104×),
+but independent WNS worsened to −40,780.595 ps. Reserving repair capacity limits
+that design to one rejected warm trial followed by an accepted sizing sweep.
+Five targeted placement/repair/CLI suites pass. Integration checks also exposed and
+fixed a restarted-placement cache write: the DEF is now published only when the
+matching placement cache is enabled.</p>
+<p>Related fixes recognize negative setup WNS/TNS gains without requiring a change
+to the longest absolute arrival, expand SDC exclusions over <code>all_outputs</code>,
+and start short warm refinements at their configured final smoothing scale.
+Density-feasible short trials may be timed without objective convergence when
+routability is disabled; existing routability, legality, HPWL, area and detailed
+STA acceptance checks remain. The uniform dynamic-grid experiment improves small
+lfsr timing but worsens partition_m by 22 ps; no grid or filler defaults changed.</p>
+<p>Earlier user priority was CPU runtime and scaling first. The current WNS pass
+allows at most 1.5× matched placement time; power remains secondary. All designs
+use the same defaults and benchmark-independent policies.</p>
+<p>A shared 3% standard-cell count and LEF-area limit now checks whole-color remaps,
+ABC boundary sizing and private physical repair candidates before publication or timing.
+It counts all repeated color instances and excludes macro area from the allowance.
+Regression tests cover shared hierarchy, refused rewrites preserving the source, rejection
+before STA, and assigning limited area to the most critical driver. The first full-flow
+version (<code>speed-v21</code>) rejected whole repair batches: minimax met the growth bound
+but WNS worsened to −2,578.03 ps. Per-edit admission and critical-first ordering recover
+part of that loss. Frozen <code>speed-v22</code> takes 5.74/75.33/121.83 CPU seconds on
+lfsr/minimax/partition_m, versus v19's 6.86/84.52/124.78. Lfsr and minimax each avoid one
+oversized resynthesis restart. Minimax finishes with 14,536 cells versus 14,758 synthesized,
+and 1,962.1764 µm² versus 1,905.1103 synthesized (+2.995%); independent HPWL is 41,566.484 µm.
+Its WNS remains −2,084.913 ps versus v19's −460.178 ps, so this is a measured runtime/growth
+improvement with a substantial timing-quality regression, not a timing-closure result.
+Lfsr WNS is +24.058 ps; partition_m WNS and HPWL are unchanged. All three final inventories
+meet the growth bound. Larger-design validation and the remaining timing/model issues stay open.</p>
+<p>A GP input mismatch explains much of minimax's wirelength gap: the archived OpenROAD log removes
+1,772 synthesis buffers and inserts 131 port buffers before GP, whereas the archived flow-C input DEF
+precedes that cleanup. On the cleaned imported floorplan, native ordinary-density GP plus legalization
+takes 11.95 CPU seconds and scores 44,273.785 µm independent HPWL; upper-bound GP takes 14.74 s and
+scores 48,348.354 µm. Both meet D's imported-floorplan limits. These unbuffered pure-GP results have
+WNS around −9 to −10 ns and still require electrical repair. A fresh cleaned OpenROAD control takes
+17.30 s, with 49,963.566 µm final HPWL and +39.354 ps WNS after its repair/legalization. The native
+cleanup implementation is validated: it edits a private physical copy, retains port bindings,
+fixed cells and clock/reset cones, and preserves logical color identities and failed-target history.
+Final timing-driven HPWL acceptance remains open.</p>
+<p>The native cleanup now passes 58 repair regressions, including source identity, boundary cells,
+fixed-cell retention and reset cones crossing region boundaries. On the unchanged imported input it
+removes 1,756 buffers and retains 16 existing port buffers. Ordinary GP scores 42,540.662 µm in
+11.78 CPU seconds (540 iterations), upper-bound GP 45,997.977 µm in 16.25 s (1,460 iterations).
+Both meet imported D limits; detailed timing remains poor before repair. Unlike the OpenROAD cleanup
+control, this native policy retains existing port cells without inserting a fresh buffer at every port.
+A shared optional-trial admission budget is implemented for warm refinement, sizing, forest repair,
+recovery and cone resynthesis; it reserves final validation rather than restarting a budget per phase.
+The full v19 build passes 17 test targets, including repair, placement, reset-cut persistence and
+OpenTimer regressions. The frozen coralnpu and cnn full-flow measurements are complete.</p>
+<p>The isolated <code>speed-v18</code> full-flow runs take 6.78/84.70/121.41 CPU seconds for
+lfsr/minimax/partition_m, versus v16's 5.19/89.24/122.83. Independent HPWL is
+187.546/52,385.084/81,242.021 µm and WNS +24.285/−460.178/−398.945 ps. Minimax's primary GP
+converges in 540 iterations, with six detailed physical evaluations plus standalone STA. Cleanup
+triggers new pre-repair resynthesis restarts on lfsr/minimax. An explicit diagnostic disabling IO
+resynthesis takes 5.23/67.26 s, with HPWL 181.043/52,194.835 µm and WNS +24.058/−335.841 ps.
+This motivates moving the decision after electrical repair; disabling resynthesis or changing its
+public threshold is not retained as a production fix. The phase-ordering change remains open.</p>
+<p>The normal-build <code>speed-v19</code> runs take 6.86/84.52/124.78 CPU seconds for
+lfsr/minimax/partition_m, with the same independent HPWL and WNS as v18. Persistent reset
+false-path cuts now survive RC serialization and standalone STA. The own-floorplan pure-GP
+diagnostic takes 4.12 CPU seconds for lfsr and 21.36 for minimax; placement itself takes
+0.82/5.33 seconds. Minimax scores 36,225.566 µm HPWL and converges in 580 iterations,
+meeting D's own-floorplan limits. Timing-driven final HPWL remains 52,385.084 µm and
+still exceeds pure GP; pure GP's unrepaired WNS is −23,488.424 ps.</p>
+<p>Final legalization now reuses an accepted detailed timing result only when rebuilt nets, cell
+identities/poses, terminals and reset cuts match exactly. Its isolated regression suite passes
+60 repair and 75 placement tests. The three small full-flow runs remain quality-identical at
+6.80/85.26/124.01 CPU seconds; all required a fresh final timing call, so this check has not
+produced a measured speedup on them. A separate completed-DEF hint fallback for edited colors
+passes all six physical-cache tests. On an identical small minimax RTL edit with identical prior
+region caches, hints reuse 14,940 cell positions while seeding 1,698 new cells. Total CPU falls
+69.48→64.97 s (6.5%); the initial placement phase falls 16.95→14.64 s (13.6%). Independent
+HPWL rises 47,494.988→48,667.380 µm (+2.47%), while WNS improves −416.371→−306.761 ps.
+Current fixed constraints, connectivity, RC, timing and legality are recomputed.</p>
+<p>Frozen v19 coralnpu completes in 1,244.16 CPU seconds (20.74 min), versus v16's
+1,928.76 s: 35.5% faster, with peak RSS 10,816.68 MiB. Detailed physical evaluations fall
+19→7 (plus standalone STA), meeting the eight-evaluation budget; ranking stays at 11 samples.
+Independent HPWL improves 3,608,756.781→3,480,883.550 µm (−3.54%). Under the same full
+reset-distribution false-path policy, WNS worsens −1,142.716→−1,550.302 ps. Final count is
+174,291 logic cells and two macros; area is 47,909.694 µm². This is the measured runtime/timing
+tradeoff from limiting optional repair, not timing parity. Cnn has now completed and its reset-policy comparison is recorded below.</p>
+<p>The requested filler sweep is complete: 12 small-design runs and one additional full coralnpu
+run, using frozen v19 binaries. Defaults remain charge fraction 0.25 and cell scale 1.
+Repeated default controls take 6.84/84.67/123.48 CPU seconds on lfsr/minimax/partition_m and
+reproduce prior quality exactly. Halving charge gives 6.65/89.79/124.42 s, with WNS
++23.147/−330.021/−319.989 ps: runtime improvement is not consistent. Halving cell scale too
+worsens minimax/partition_m WNS by 67.81/45.42 ps, and increases partition_m HPWL 12.19%.
+Doubling cell scale with unchanged charge has no effect on these three designs' geometry,
+quality or counts because bin-size caps bind; its macro-heavy quality remains untested.</p>
+<p>Half-density coralnpu completes in 1,106.08 CPU seconds, 11.1% faster than the 1,244.16 s
+baseline. Macro GP drops 73,359→36,778 fillers and 71.17→65.30 s at 740 iterations; final GP
+drops 1,000 unconverged iterations→520 converged, and 69.61→39.86 s. However, independent
+reset-distribution-filtered WNS worsens −1,550.302→−1,896.287 ps and HPWL grows
+3,480,883.550→3,620,664.087 µm (+4.02%). The tested reductions therefore fail the user's
+no-WNS-regression condition; no filler defaults were changed. Native synthesis reset-role
+verification reproduces both scored reset cut sets exactly (7,315 baseline, 7,317 half density).</p>
+<p>Frozen v19 cnn completes in 2,631.59 CPU seconds (43.86 min), within the one-hour limit
+that stopped v16 during repair. Peak RSS is 15,006.66 MiB. Its macro GP uses 1,874,147 virtual
+fillers. DEF/Liberty-only classification misses registered synchronous resets, yielding a spurious
+−799,201 ps WNS. Native QoR supplies 21 internal reset roots; their Liberty buffer/inverter closure
+identifies 5,157 false-path nets. With those cuts, independent WNS is −5,131.712 ps versus native
+−3,748.721 ps: the >10% timing-model discrepancy remains open. Independent HPWL is
+12,750,555.060 µm, with 283,003 logic cells, 65 macros and 1,724,676.904 µm² area.</p>
+<p>The iteration set now includes <code>NVDLA/partition_m</code> at the user's request,
+alongside lfsr and minimax. Its saved OpenROAD reference has 19,754 logic cells, providing another
+moderate-size case for runtime, ranking-update cost, convergence, and restart comparisons.</p>
+<p>The iteration set also includes <code>coralnpu</code>: its saved OpenROAD reference has
+178,348 logic cells and two SRAM macros, with WNS −160.60 ps. The initial <code>speed-v14</code>
+run fails before placement after 131.89 CPU seconds: the large-region synthesis policy leaves
+reset/derived-clock registers native, and the timing seed rejects an unmapped flop. A separate
+diagnostic enables the existing <code>pass.abc.large_flow_latches=true</code> option; this is not
+a benchmark-specific production policy or a changed default. It completes in 3,529.57 CPU seconds
+(58.83 minutes), with peak process-tree RSS 10,553.45 MiB, 176,959 cells and two macros.
+Its independent HPWL is 3,381,312.28 µm. The existing large-flow register test also passes its
+unbounded equivalence proof. The run exposes repeated IO bus ordering as a hotspot: precomputing
+each lane's circular movement interval and slot coordinates preserves all 240 isolated comparison
+coordinates and scores while reducing CPU 14.89 → 0.70 s. Tied-projection comparisons also agree
+(14.77 → 0.66 s). Six pin-adjustment regression tests pass; full-flow measurement is pending.</p>
+<p>The coralnpu diagnostic performs one resynthesis restart. Four colors are attempted,
+three are accepted, and unsuccessful targets are skipped at the next stage. The requested period is
+2700 ps for the actual 3000 ps requirement. It performs 38 ranking and 27 detailed physical timing
+evaluations; ranking costs 314.05 s and all physical timing costs 1,864.74 s. Repair spends 1,735.44 s,
+including eleven rejected sizing batches and eight tiny accepted buffer-area recoveries that leave
+the maximum delay unchanged. Newly validated changes apply density-milestone ranking to macro/FP
+placement, reuse detailed feedback across unchanged phase boundaries, and stop warm refinement
+after its first unconverged candidate (the baseline attempted three). A repair profile attributes
+35.44% of samples to <code>expm1</code> and 12.90% to ramp crossing. A better initial guess and use of
+<code>exp-1</code> away from cancellation reduce an isolated 100,000-fit comparison from 0.795 to
+0.542 CPU seconds, with identical aggregate float results. All 12 integration test targets pass,
+including waveform fitting, placement, repair, resynthesis and physical timing.</p>
+<p>The user also requests timing-free macro planning before final placement and reuse of its cell
+seed. The staged flow already fixes macros and IOs, but discarded movable-cell poses at that handoff.
+A frozen-binary coralnpu diagnostic runs one timing-free macro plan in 199.27 CPU seconds (118.40 s
+placement plus 68.47 s endpoint reporting STA). From the identical resulting macro/IO frame, cold final
+placement takes 234.64 CPU seconds and 520 GP iterations; coordinate-seeded final placement takes
+252.53 s and 1,200 iterations. Coordinate reuse alone therefore regresses speed by 7.6%; independent
+HPWL also increases 2.4%. A further paired experiment carries the converged normalized density weight
+along with the coordinates. With the same v15 binaries, cold final placement takes 226.01 CPU seconds;
+the combined seed takes 192.02 s (15.0% less), both converging in 520 GP iterations. Density readiness
+improves from iteration 320 to 200 and physical timing evaluations drop from seven to six. Independent
+HPWL increases 2.67% (3,508,157.90 → 3,601,969.71 µm); reset-false WNS improves from −15,833.92 to
+−8,417.47 ps, with unchanged cells and area. Whole-flow validation of the automatic handoff remains pending.</p>
+<p>Reset paths are always false paths. The final standalone timing pass was missing the typed reset
+cuts used during placement, producing false critical paths into async SETN pins. The fix forwards those
+cuts, shares their application with the physical session, and includes them in the timing cache key.
+Regression coverage passes for registered resets, ranking/detailed model switches and cache reuse
+with cuts enabled and removed. Independent OpenSTA scoring also needed async-register endpoint cuts
+in addition to the existing primary-reset input cut: the same coralnpu placement changes from
+−39,165.97 ps to −8,672.60 ps WNS with that policy. Both scores are retained; the saved OpenROAD
+reference must be re-scored with the same reset policy before making a timing comparison.</p>
+<p><code>speed-v15</code> completes the original three designs with unchanged independent HPWL and WNS:
+lfsr 5.13 CPU seconds, minimax 89.34 s (v14: 97.75), and partition_m 120.60 s (v14: 145.69).
+Detailed physical evaluations fall to 2/7/6 respectively. Final standalone STA costs 0.72/4.91/6.62 s,
+so the three-second minimax STA target remains open. A further repair change filters healthy-neighbor
+sizing and buffer-area trials even while an unrelated path misses setup. An initial attempt also filtered
+forest reconstruction; three connectivity regressions caught that overreach, so forest eligibility is
+retained while setup fails. All three targeted placement/repair/IO test targets pass with the narrowed change. Frozen v16 takes
+5.19/89.24/122.83 CPU seconds on lfsr/minimax/partition_m. Minimax HPWL changes 0.054% to 96,841.90 µm
+and WNS to +18.1377 ps; the other independent quality results are unchanged. Full coralnpu completes in
+1,928.76 CPU seconds (45.35% less than v14), with peak RSS 10,395.88 MiB and 19 detailed/11 ranking
+evaluations. Independent HPWL increases 6.73% to 3,608,756.78 µm, and reset-false WNS regresses from
+−8,672.60 to −33,545.71 ps under the endpoint-only reset policy. Repair still
+performs eleven rejected sizing trials after its accepted forest sweep. Cnn remains running with
+unchanged benchmark settings and a one-hour measurement limit.</p>
+<p>The endpoint-only reset comparison above is incomplete: a reset distribution signal can also
+enter data logic. Independently scoring both saved placements with all recognized reset nets and
+their Liberty buffer/inverter distribution closure marked false gives WNS −1,207.553 ps (v14) and
+−1,142.716 ps (v16). Both exclude 7,292 reset distribution nets using the same policy. Thus WNS
+improves slightly while CPU falls 45.35%; the apparent large regression was a constraint mismatch.
+The v16 internal physical WNS of −1,212.42 ps differs from the matched independent score by about
+6%. Original primary-only, endpoint-only and direct-reset-net scores remain retained separately;
+no benchmark golden has been rewritten.</p>
+<p>Automatic phase completion is the user's next priority: stop stable phases or hand their result
+to the next phase without benchmark-specific controls. The <code>speed-v11</code> run skips optional
+healthy-gate downsizing and healthy-buffer recovery when setup is already met. On partition_m,
+whole-flow CPU drops from 578.91 to 170.61 s; resize/repair drop from 215.30/230.98 to 11.73/32.91 s,
+and detailed physical timing calls fall from 28 to 9. HPWL changes from 84,547.53 to 84,503.28 µm;
+independent WNS changes from −203.35 to −233.68 ps. Internal setup remains positive, so the timing
+model discrepancy is still unresolved. Minimax takes 131.22 s with unchanged HPWL 96,789.55 µm
+and WNS +18.14 ps; lfsr takes 5.44 s. These measurements use the same automatic policy on all three
+designs. Further phase handoff work avoids repeating a completed sizing sweep when buffer repair
+accepts no changes.</p>
+<p><code>speed-v12</code> validates that handoff: partition_m skips the repeated sizing sweep,
+reduces detailed physical timing evaluations from nine to eight, and takes 162.98 s CPU versus
+170.61 s, with identical HPWL and WNS. A second automatic rule hands static fixed-grid cell solves
+to legalization when HPWL and density overflow remain within 1% across 100 iterations despite
+fourfold stronger density pressure. It respects minimum iterations and excludes active geometry
+or scheduled macro work. Lfsr stops with <code>density_stalled</code> at 1,160 instead of 1,500
+iterations; its placement phase falls from 1.409 to 1.212 s, whole-flow CPU from 5.44 to 5.30 s,
+HPWL from 210.613 to 208.004 µm, and WNS from +0.674 to +0.768 ps. Stagnation is explicitly not
+reported as GP convergence. Minimax still converges in 540 primary iterations with unchanged quality;
+CPU is 132.89 versus 131.22 s. All three use unchanged benchmark settings. All 78 affected test targets
+pass, including infeasible-density handoff, minimum-budget protection, macro exclusion and sizing
+reuse. Remaining acceptance work is still open.</p>
+<p><code>speed-v13</code> separates OpenTimer builder materialization from timing propagation.
+RC attachment, case masks and exclusions now finish before evaluating the combined state; structural
+barriers preserve dirty frontiers and invalidate aggregate caches. Seven timing/repair test targets
+pass, including queued RC/model changes, deletion and area changes without timing frontiers.
+All three independent HPWL/WNS scores are identical to <code>speed-v12</code>. Minimax CPU falls
+from 132.89 to 121.36 s (resize 17.94 to 7.97 s); physical timing totals 51.92 s. Partition_m changes
+only from 162.98 to 161.21 s, and lfsr from 5.30 to 5.37 s. The old reconcile bucket included unprofiled
+propagation, so compare total timing rather than interpreting its reduction alone as speedup.
+Detailed waveform propagation and final STA still exceed B's targets.</p>
+<p><code>speed-v14</code> replaces fixed 36-step threshold bisection with a safeguarded Newton solve
+of the same detailed driver waveform. Value and derivative share exponential evaluations; unsafe
+steps retain the bracket and use bisection. The numerical tests compare against an 80-step reference
+and independent circuit equations, including degenerate steps and extreme time-constant ratios.
+An isolated 300,000-crossing comparison takes 0.084 versus 0.461 CPU seconds. Whole-flow minimax
+falls from 121.36 to 97.75 s, partition_m from 161.21 to 145.69 s, and lfsr from 5.37 to 5.16 s.
+Independent HPWL/WNS are identical on all three. Physical timing totals are 36.51 s for minimax
+and 35.49 s for partition_m. Final STA is 5.67/8.03 s respectively: faster, but still above the
+three-second target. This changes solver efficiency, not the detailed waveform model or the
+approximate GP-ranking policy.</p>
+<p>Next priority from the user: GP needs the ordering of the most critical paths, not precise timestamps.
+Its feedback now uses total-load gate characterization and closed-form Elmore wire delay, updates the
+existing timer for RC/master changes, and exports only approximate pin slack and clock flags.
+The existing <code>synth.place.timing_fraction</code> selects 10%, 20%, or another configured fraction of
+data nets by worst path slack; weight magnitudes depend on rank and retain the existing smoothing.
+Detailed timing is retained for resynthesis and physical acceptance/final checks. Statistics distinguish
+ranking calls from detailed calls, and GP reports no WNS or electrical-validity claim for ranking samples.
+Targeted ranking, RC update, gate update, model restoration, and resynthesis-fallback tests pass;
+the frozen <code>speed-v4</code> benchmark reduces minimax whole-flow CPU from 390.49 s
+(<code>speed-v3</code>) to 130.69 s. Its 13 ranking calls total 10.650 s, with ordinary calls
+mostly 0.65–0.76 s; nine detailed calls remain. Total physical timing is 63.491 s, down from
+296.976 s. The independent score is HPWL 95,675.153 µm and WNS +4.764 ps. lfsr is 5.42 s CPU,
+with six ranking calls and four detailed calls. This is not a completion claim: early minimax GP
+still reaches the iteration cap, despite a later accepted warm refinement converging in 60 iterations.</p>
+<p>Measurement note: <code>speed-v4</code>'s aggregate <code>place_s</code> includes nested criticality
+and IO phases, which overlap their parent placement phases. Use whole-flow CPU for these comparisons.
+The criticality phase is renamed <code>pass.opentimer.ranking</code> in the next build to avoid
+double-counting it as a separate placement phase.</p>
+<p>The subsequent <code>speed-v5</code> run reuses physical/timer pin and net bindings for coordinate-only
+RC updates. Minimax is 127.79 s whole-flow CPU, with 13 ranking evaluations totaling 9.154 s;
+ordinary ranking calls are about 0.49–0.59 s. HPWL and the independent WNS score are unchanged from
+<code>speed-v4</code>. The six-target timing regression suite passes, including default detailed
+timing, waveform fitting, incremental RC, and switching between ranking and detailed models.</p>
+<p>The <code>speed-v6</code> quadratic-seed experiment completes minimax in 126.35 s whole-flow CPU,
+with HPWL 92,446.603 µm and WNS +35.629 ps. Its seed costs 0.016 s and contracts weighted starting HPWL
+from 893,504 to 12,413 µm; 11 ranking calls and nine detailed calls remain. lfsr is 5.41 s CPU,
+HPWL 205.793 µm and WNS −1.991 ps. The isolated pure-GP comparison exposed a regression: leaving the
+old IO prototype GP after the new seed increased iterations from 1,060 to 1,500 and HPWL from
+62,900 to 66,899 µm (placement phase 7.787 to 9.335 s). The next experiment replaces that redundant
+prototype with quadratic IO assignment/re-anchoring. These are intermediate results, not acceptance.</p>
+<p>The <code>speed-v7</code>/<code>speed-v8</code> automatic-IO quadratic experiments are not retained:
+the full minimax runs took 146.10/163.81 s CPU, even though the faster adaptive density ramp reduced
+<code>speed-v8</code>'s final GP to 600 iterations and its pure GP to 920. The following fixed-IO
+experiment also regressed imported minimax badly (HPWL 677,615 µm), so quadratic initialization is
+not enabled in the production path. Its bounded native implementation remains an experimental API;
+D's initialization work is unresolved. The faster density ramp is retained only for the ordinary
+density model, preserving the upper-bound model's original ramp. On the opt-in dynamic grid with a
+0.25 continuation factor, <code>speed-v8</code>
+lfsr converges in 540 iterations at 4.31 s CPU; fixed-grid and continuation defaults have not changed.</p>
+<p>GP accounting now preserves the primary solve across accepted timing rounds and through subsequent
+repair/legalization, records each attempted round, and totals its iterations. Warm candidates that
+already fail convergence or HPWL bounds skip detailed STA. The standalone <code>physical_repair</code>
+placement driver now also uses ranking feedback for seed/GP weights and accepts fractional
+<code>post_density_factor</code> values. In <code>speed-v9</code>, standalone lfsr placement takes
+3.23 s CPU and repair 2.39 s, with six ranking and three detailed placement calls. Minimax's ordinary
+pure GP converges in 560 iterations (placement phase 5.924 s), versus 1,060 iterations/7.787 s before
+the faster ramp, at HPWL 63,367 µm versus 62,900 µm. Its full flow is 144.50 s CPU, HPWL 96,790 µm,
+WNS +18.143 ps; nine detailed evaluations remain. A full-flow CPU win from the density change has
+not been established. The broader regression suite and restored imported-floorplan path are under validation.</p>
+<p>The invocation-owned technology snapshot reuses Liberty characterization and LEF geometry across GP,
+repair, resize, IO timing and timing-weight refreshes. A fresh lfsr run reduced reported placement time
+from 88.313 s to 8.100 s (whole-flow CPU 90.47 s to 11.05 s). The independent OpenSTA score was unchanged:
+HPWL 167.809 µm, WNS +22.519 ps, 133 logic cells, power 9.45e-5 mW. Imported-floorplan flow C improved
+from 25.64 + 43.40 s CPU for placement + repair to 7.79 + 4.73 s. These measurements cover the snapshot
+change only; they do not establish completion of the plan. Raw summaries and binary identities are in
+<a href="1f-measurements.json">1f-measurements.json</a>.</p>
+<p>Physical-session timing buckets and evaluation counts now reach the synthesis result's placement report;
+<code>synth.place.timing_profile=true</code> logs per-evaluation costs. GP iterations and stopping status
+are retained through final legalization. The snapshot-only lfsr run still performed 76 STA evaluations.</p>
+<p>In-flight changes: density-milestone GP callbacks, no setup-slack convergence veto, preserved momentum
+for weight-only updates, post-GP topology repair, and short warm timing refinement with HPWL/area guards.
+Full integration, default-policy decisions, minimax and large-design measurements, and the remaining B/D/G/H/I/J
+work are pending. No completion claim or commit/push has been made.</p>
+<p>The next frozen run (<code>speed-v2</code>) avoids repair and resynthesis after the actual setup objective is met.
+lfsr reported placement is 2.321 s, whole-flow CPU 5.57 s, with 10 timing calls taking 0.756 s.
+The independent score is HPWL 198.693 µm, WNS +0.404 ps, 136 logic cells. Its fixed 64-bin GP still reaches
+the 1,500-iteration limit. Minimax completes in 412.34 s CPU (reported placement 404.447 s), with 37 timing
+calls taking 316.510 s; GP converges in 940 iterations. These do not yet meet all speed/convergence targets; minimax's timing and repair work is the next bottleneck. These runs precede the resynthesis-history changes.</p>
+<p>Resynthesis policy requested by the user: remember colors that missed a previously attempted target and
+avoid repeated attempts. Request a period 10% shorter than the real requirement on resynthesis; preserve the
+achieved margin across placement stages and workdir reloads so small IO timing shifts do not retrigger it.
+Reports distinguish the actual period from the requested synthesis period. The initial synthesis hint is
+separate from the SDC objective used to decide whether physical setup needs improvement.</p>
+
+<h2 id="related">Relation to <a class="xref" href="2t-timeclosure.html">2t-timeclosure</a></h2>
+<p>2t-timeclosure is the opt-in redesign of the GP timing loop (<code>synth.place.timeclosure</code>; CNN and litepci
+from OpenROAD's preCTS netlist, no resynthesis): a cheap in-memory late-mode proxy, incremental wire and timing
+updates, a stability-gated phase controller and phase-7 buffering/sizing. Its premise — no external timer in the
+loop, speed from incremental work and a cheap timer — is exactly what the measurements below show the
+<em>default</em> flow lacks. Division of work: <strong>1f fixes the default path</strong> every <code>lhd synth</code>
+run takes today (legacy checkpoint / repair / rounds loop, Liberty rescans, convergence veto), reusing 2t's landed
+foundations where they fit; <strong>2t keeps building the replacement loop</strong> and must not inherit the
+behaviors measured here. The numbers on this page are the control baseline and the “audit legacy callbacks and
+worker paths” that 2t's item A asks for.</p>
+<table>
+<thead><tr><th>1f item</th><th>2t item / landed foundation</th><th>Tie</th></tr></thead>
+<tbody>
+<tr><td><a href="#A">A</a> evaluation count</td><td><a href="2t-timeclosure.html#A">2t A</a>, <a href="2t-timeclosure.html#H">2t H</a></td>
+<td>2t A forbids a per-sample or trial-scoring external timer; 2t H separates cheap sampling, decision checkpoints and
+expensive Steiner refresh, gated on stability and overflow milestones. The legacy <code>repair_gp_buffers</code> trial
+loop is the hidden trial-scoring timer 2t A says to audit.</td></tr>
+<tr><td><a href="#B">B</a> evaluation cost</td><td><a href="2t-timeclosure.html#B">2t B</a> (<code>pass/place/late_timing</code> proxy, landed),
+<a href="2t-timeclosure.html#C">2t C</a> (<code>rc_cache</code>, <code>star_rc</code> landed; incremental propagation pending)</td>
+<td>The native proxy is the candidate cheap in-loop timer for B(2); <code>rc_cache</code> already tells unchanged wire
+trees from changed ones across snapshots, which <code>apply_physical_rc</code> should reuse for B(1). 2t's driver-fit
+work (charge-matched effective-C, positive-ramp infeasibility) and the OpenTimer fork's <code>RcDriver::crossing</code>
+are the same class of iterative waveform model; <code>timing_closure_plan.md</code> (“OpenTimer as a regression test”)
+already puts it at sign-off, not at every checkpoint.</td></tr>
+<tr><td><a href="#E">E</a> convergence veto, continuation</td><td><a href="2t-timeclosure.html#H">2t H</a>; landed <code>native_timing_max_overflow</code> and rollback</td>
+<td>2t H: “never extend the hard budget through restarts, rollback, dwell or post-density continuation”. The legacy
+<code>timing_satisfied</code> veto and the 5× <code>post_density_factor</code> continuation are what that rule excludes;
+2t's density-bounded retention is the replacement acceptance model.</td></tr>
+<tr><td><a href="#F">F</a> cold-restart rounds</td><td><a href="2t-timeclosure.html#D">2t D</a>, <a href="2t-timeclosure.html#H">2t H</a>; landed <code>native_timing_final_guard</code></td>
+<td>2t D: compare candidate and retained state under the same timing generation and compatible density/legality, and
+guard the best period rather than WNS against a moving target. The rounds violate both. 2t's own weighted
+experiments show the same wirelength trade (HPWL +18.6 % and +48 % on CNN), so F's HPWL-bounded acceptance applies to
+2t as well.</td></tr>
+<tr><td><a href="#G">G</a> timing target, <code>io_resynth</code></td><td><a href="2t-timeclosure.html#D">2t D</a>, <a href="2t-timeclosure.html#K">2t K</a></td>
+<td>2t D defines one period objective from the SDC (<code>T* = T_SDC − worst slack</code>); 2t K keeps once-per-run
+<code>io_resynth</code> as “the legacy policy” and asks to define its interaction with stage restarts — ablation 1b
+(accepted remaps, byte-identical output) is a defect in that legacy policy.</td></tr>
+<tr><td><a href="#H">H</a> repair budget</td><td><a href="2t-timeclosure.html#J">2t J</a>, <a href="2t-timeclosure.html#I">2t I</a></td>
+<td>2t J: “do not mutate cell sizes in phases 1–6 through a leftover legacy repair hook” — <code>repair_gp_buffers</code>
+at every checkpoint is that hook. 2t I/J move buffering and sizing to phase 7 under a worst-period guard with area
+recovery.</td></tr>
+<tr><td><a href="#D">D</a> bare-GP quality</td><td>2t landed A/M full-frame audits</td>
+<td>2t found the signal-only frame omitted 213 570 locked welltaps on CNN and added a <code>fixed_occupancy_def</code>
+handoff. The imported-floorplan ablation here (3.3× HPWL) should be repeated through that full-frame path before the
+GP core is blamed. Initial placement, bin sizing and the density schedule are not covered by 2t.</td></tr>
+<tr><td><a href="#J">J</a> row-import failure</td><td>2t landed H, segmented-row stage adapter</td>
+<td><code>//tools:timeclosure_gp_probe</code> already preserves cut rows with hard masks and restores the original
+segments on export; <code>physical_repair</code> and <code>lhd synth</code> still reject them. Expose the adapter on the
+default import path.</td></tr>
+<tr><td><a href="#C">C</a> Liberty rescans</td><td>2t B (<code>pass/liberty/timing_model</code> parses NLDM once)</td>
+<td>Not addressed by 2t. The one-parse technology object asked for in C should be the same object the proxy's NLDM
+parser feeds, so there is one Liberty read per run for both loops.</td></tr>
+</tbody>
+</table>
+
+<h2 id="scope">Scope: the issues selected</h2>
+<p>Rule: keep the issues whose LiveHD run takes more than 30 s <em>and</em> shows the largest CPU gap to OpenROAD.
+CPU is user+sys of the process tree, not wall clock; OpenROAD's CPU includes its 8 threads and about 1.1 s of
+process start per ORFS step (11 steps between floorplan and detailed placement).</p>
+<table>
+<thead><tr><th>issues.md</th><th>Design / flow</th><th>LiveHD CPU</th><th>OpenROAD CPU (floorplan → DP)</th><th>Gap</th><th>Kept?</th></tr></thead>
+<tbody>
+<tr><td>2, 3</td><td>minimax, flow B (full LiveHD)</td><td>6 387 s (placer 6 385 s)</td><td>100 s (≈ 88 s without process starts)</td><td>64×</td><td><strong>yes</strong> — largest gap, largest QoR loss</td></tr>
+<tr><td>4</td><td>minimax, flow C (Yosys netlist → <code>physical_repair</code>)</td><td>959 s (place 495 + repair 464)</td><td>100 s</td><td>9.6×</td><td><strong>yes</strong> — isolates the placer from synthesis</td></tr>
+<tr><td>1</td><td>lfsr, flow B (133 cells)</td><td>88 s (placer 86 s)</td><td>18.7 s (≈ 6.6 s without process starts)</td><td>4.7× (13× on real work)</td><td><strong>yes</strong> — exposes fixed per-checkpoint overheads</td></tr>
+<tr><td>6</td><td>cnn 232 k, gemmini 645 k, NVDLA partition_c 273 k cells</td><td>&gt; 10 800 s, no result</td><td>6 642 / 3 785 / 6 059 s</td><td>&gt; 1.6–2.9×, unbounded</td><td><strong>yes</strong> — same engines, scaling</td></tr>
+<tr><td>5</td><td>eyeriss (0.2 s front-end error), NyuziProcessor (157 s) and bp_uno (97 s) flop-mapping failures, floorplan import of macro designs</td><td colspan="3">hard failures, not speed</td><td>no — but they block measuring issue 6 designs with macros; listed under <a href="#J">J</a></td></tr>
+</tbody>
+</table>
+
+<h2 id="targets">Targets</h2>
+<p>Per design, on one CPU, compared with the OpenROAD reference of the same HighTide SDC and floorplan settings
+(utilization / density from the design's <code>BUILD.bazel</code>). QoR by <code>score.tcl</code>: same Liberty, SDC,
+<code>setRC.tcl</code>, <code>estimate_parasitics -placement</code>, HPWL without clock/reset nets.</p>
+<table>
+<thead><tr><th></th><th>CPU budget (LiveHD, one thread)</th><th>HPWL</th><th>Logic cells</th><th>Setup WNS</th><th>Power</th></tr></thead>
+<tbody>
+<tr><td>lfsr</td><td>≤ 5 s placer (OpenROAD ≈ 6.6 s of work)</td><td>≤ +5 % of 155.5 µm</td><td>≤ 146</td><td>≥ +20.6 ps</td><td>≤ 8.8e-5 mW</td></tr>
+<tr><td>minimax</td><td>≤ 60 s placer (OpenROAD ≈ 88 s of work on 8 threads)</td><td>≤ +5 % of 47 587 µm</td><td>≤ 16 616 (+3 %)</td><td>≥ +53.7 ps</td><td>≤ 5.3e-3 mW (+5 %)</td></tr>
+<tr><td>cnn / gemmini / partition_c</td><td>finish in &lt; 1 h each; CPU ≤ OpenROAD's 6 642 / 3 785 / 6 059 s</td><td>≤ +5 %</td><td>≤ +3 %</td><td>≥ OpenROAD</td><td>≤ +5 %</td></tr>
+</tbody>
+</table>
+<p>Flow D (LiveHD's netlist placed by OpenROAD: HPWL −8.9 %, WNS +82 ps, +3 % cells) shows these targets are
+reachable with LiveHD's synthesis as it is. The gap is entirely in the physical stage.</p>
+
+<h2 id="anatomy">Where the CPU goes (measured)</h2>
+<h3>minimax, flow B — 6 387 s CPU</h3>
+<p>From the per-pass <code>phases</code> of <code>result.json</code>, attributing each <code>pass.opentimer.incremental</code>
+entry to the enclosing <code>pass.place.*</code> phase:</p>
+<table>
+<thead><tr><th>Phase</th><th>Seconds</th><th>STA evaluations</th><th>Seconds inside STA</th></tr></thead>
+<tbody>
+<tr><td>final GP stage: 2 runs × 1 500 iterations (the second is the <code>io_resynth</code> restart)</td><td>4 637</td><td>319</td><td>4 133</td></tr>
+<tr><td>timing-driven rounds: 3 × 500 iterations, cold restarts</td><td>1 285</td><td>94</td><td>1 131</td></tr>
+<tr><td>resize (legacy engine, 12 attempts, 3 accepted)</td><td>156</td><td>12</td><td>116</td></tr>
+<tr><td>repair (16 attempts + 4 recovery, 8 accepted)</td><td>275</td><td>16</td><td>217</td></tr>
+<tr><td>final legalization</td><td>12</td><td>3</td><td>7</td></tr>
+<tr><td>synthesis (compile + color + ABC) / final STA</td><td>9.7 / 8.4</td><td>—</td><td>—</td></tr>
+<tr><td><strong>total</strong></td><td><strong>6 387</strong></td><td><strong>446</strong></td><td><strong>5 607 (88 %)</strong></td></tr>
+</tbody>
+</table>
+<p>One STA evaluation: median 14.1 s, p90 17.8 s, max 19.0 s (the few 0.3 s ones are re-evaluations of an unchanged
+placement). The 4 500 GP iterations themselves cost about 650 s (10 %). OpenROAD on the same design: 428 GP
+iterations with <em>two</em> timing evaluations (at overflow 0.63 and 0.19), 46 s CPU for GP, 100 s for the whole stage.</p>
+
+<h3>minimax, flow C repair pass — what one STA evaluation does</h3>
+<p><code>perf</code> on <code>physical_repair</code> (repair pass, 28 evaluations, 450 s user): 74 % of all cycles are
+OpenTimer's RC driver model — <code>ot::RcDriver::crossing</code> 11.6 %, <code>ot::detail::RcRamp::crossing</code> 10.2 %,
+<code>rc_ramp_voltage</code> 6.8 %, <code>rc_fit_ramp</code> 6.4 %, <code>rc_effective_gate</code> 2.7 %, and the
+<code>expm1</code>/<code>exp</code> they call 34 %. LiveHD-side map building (<code>compute_timing</code> 0.25 %) and Liberty
+rescans (3.6 %) are minor here. So an evaluation is expensive because (i) every net is re-timed and (ii) each net's
+driver is re-fitted with an iterative waveform model (see <a href="#B">B</a>).</p>
+
+<h3>lfsr, flow B — 88 s CPU for 133 cells</h3>
+<p>Call-graph <code>perf</code> (inclusive): <code>repair_gp_buffers → read_floorplan_library</code> <strong>40.6 %</strong>
+(<code>scan_special_pins</code> 20.4 %, <code>scan_output_drives</code> 13.4 %, <code>inventory → scan_comb_cells</code> 12.0 %),
+<code>prects_library</code> 7.7 %, <code>liberty::read_files</code> 15.1 % (34 s of the 90 s are kernel time reading the
+45 MB merged Liberty again and again), <code>DreamPlace::native::place</code> <strong>3.6 %</strong>,
+<code>Physical_session::evaluate</code> 0.09 %. The GP solver is irrelevant on this design; the run is dominated by
+re-reading and re-scanning the Liberty text at every GP checkpoint (<a href="#C">C</a>).</p>
+
+<h2 id="ablations">Ablations run for this plan (2026-10-26)</h2>
+<p>Same frozen <code>lhd</code>/<code>physical_repair</code>, same inputs as the benchmark, one CPU, scored with
+<code>score.tcl</code>. “Pure GP” = <code>synth.place.timing_driven=false resize=false resize.gp=false
+macro.timing_interval=0 io_resynth=0</code>, i.e. floorplan + global placement + legalization only.</p>
+<table>
+<thead><tr><th>minimax</th><th>CPU</th><th>HPWL µm</th><th>WNS ps</th><th>cells</th><th>power mW</th><th>note</th></tr></thead>
+<tbody>
+<tr><td>A — OpenROAD, Yosys netlist</td><td>100 s</td><td>47 587</td><td>+53.7</td><td>16 616</td><td>5.33e-3</td><td>reference</td></tr>
+<tr><td>D — LiveHD netlist, OpenROAD placer</td><td>—</td><td>43 333</td><td>+82.4</td><td>17 115</td><td>6.09e-3</td><td>synthesis is fine</td></tr>
+<tr><td>B — LiveHD full</td><td>6 387 s</td><td>107 253</td><td>+87.9</td><td>18 283</td><td>7.43e-3</td><td>+125 % HPWL, +39 % power</td></tr>
+<tr><td>C — Yosys netlist, LiveHD place + repair</td><td>959 s</td><td>130 129</td><td>+62.4</td><td>17 680</td><td>5.57e-3</td><td>cells = input DEF (OpenROAD's 3_1 buffering), LiveHD added none</td></tr>
+<tr><td><strong>Ablation 1</strong> — LiveHD netlist, pure GP, own floorplan</td><td><strong>28 s</strong> (GP 9.5 s, ABC 9.3 s, STA 7.8 s)</td><td>62 900</td><td>−231.6</td><td>14 759</td><td>5.62e-3</td><td>GP converged (overflow 0.096 at iteration 1 060); HPWL +32 % vs A; fails timing</td></tr>
+<tr><td>Ablation 1b — as 1 with <code>io_resynth=5</code></td><td>47 s</td><td>62 900</td><td>−231.6</td><td>14 759</td><td>—</td><td>reports 2 accepted remaps and a stage restart, yet the output is byte-identical to ablation 1 (<a href="#G">G</a>)</td></tr>
+<tr><td><strong>Ablation 2</strong> — flow C input (OpenROAD floorplan, IO, taps), pure GP</td><td>26 s</td><td><strong>157 612</strong></td><td>−140.7</td><td>17 680</td><td>5.69e-3</td><td>GP converged in 24 s but 3.3× OpenROAD's wirelength on the same problem (<a href="#D">D</a>)</td></tr>
+<tr><td>Ablation 2b — as 2 with <code>fixed_macro_overlap_weight=0</code></td><td>25 s</td><td>157 612</td><td>−140.7</td><td>17 680</td><td>—</td><td>identical: fixed tap cells are not the cause</td></tr>
+<tr><td>OpenROAD <code>repair_design</code> on the ablation-1 DEF</td><td>1.3 s</td><td>—</td><td>−235</td><td>+7 buffers</td><td>—</td><td>4 slew violations only: the −232 ps is placement/netlist, not fanout</td></tr>
+</tbody>
+</table>
+<table>
+<thead><tr><th>lfsr</th><th>CPU</th><th>GP</th><th>HPWL (LiveHD metric)</th><th>WNS (internal)</th></tr></thead>
+<tbody>
+<tr><td>B baseline (<code>bins=64</code>)</td><td>90 s</td><td>4 runs at the iteration cap, overflow 0.28–0.40</td><td>148.0 µm</td><td>+23.3 ps</td></tr>
+<tr><td><code>synth.place.bins=8</code></td><td>67 s</td><td>main GP converged without a cap warning; the 3 rounds still hit their 500 cap at overflow 0.19–0.21</td><td>146.7 µm</td><td>+25.5 ps</td></tr>
+</tbody>
+</table>
+<p>Reading: with every timing loop off, LiveHD's physical stage costs 10–25 s of CPU on minimax (4–10× <em>less</em>
+than OpenROAD) and converges. The 6 000 s and the +125 % HPWL are the timing machinery; the remaining −232 ps and
++32 % HPWL of the bare GP are a placement-quality problem that the machinery then fights by brute force.</p>
+
+<h2 id="problems">Problems to address</h2>
+<ul class="subtasks">
+
+<li id="A"><strong>A — Hundreds of full-design STA evaluations where OpenROAD does two.</strong>
+<ul>
+<li><strong>Observed:</strong> 446 evaluations on minimax (319 inside GP, 94 in the rounds, 28 in resize/repair), 76 on lfsr.
+Each evaluation on minimax costs 14 s; OpenSTA scores the whole placed design from files in 6.3 s.</li>
+<li><strong>Where:</strong> final-GP checkpoint every <code>synth.place.macro.timing_interval=50</code> iterations from
+<code>final.timing_start=200</code> plus a forced final one (<code>pass/place/place.cpp:6503-6622</code>). Each checkpoint
+runs the STA once, then <code>repair_gp_buffers</code> (<code>repair.cpp:1815</code>) runs up to
+<code>resize.gp_trials=4</code> trial batches per phase for two phases (insert, remove), each scored by a <em>full</em>
+<code>evaluate</code> (<code>repair.cpp:1995</code>): about 6 evaluations per checkpoint, 52 checkpoints. The rounds
+(<code>timing_place.cpp:149-205</code>) add GP checkpoints plus one evaluation per candidate; the legacy resize and the
+repair pass evaluate every attempt (<code>repair.cpp:2382, 2556</code>; <code>synth.place.resize.engine=legacy</code> is the
+default, <code>lhd/lhd_kernel_synth.cpp:644</code>).</li>
+<li><strong>What has to change:</strong> checkpoint on density milestones (OpenROAD evaluates at overflow ≈ 0.6 and ≈ 0.2
+and at the end), never on an iteration clock; score trial edits with the existing what-if timer
+(<code>Physical_session::Proxy</code>, <code>physical_session.cpp:877</code>; the <code>new</code> resize engine already
+requires it, <code>resize_engine.cpp:2308-2330</code>) instead of a full re-evaluation; one evaluation per outer stage.
+Budget: ≤ 8 full evaluations for the whole flow on any design. Reuse the cheap-sampling / decision-checkpoint split of <a class="xref" href="2t-timeclosure.html#H">2t H</a>.</li>
+<li><strong>Acceptance:</strong> <code>pass.opentimer.incremental</code> count ≤ 8 on lfsr and minimax with WNS within
+5 ps of today's B result.</li>
+</ul></li>
+
+<li id="B"><strong>B — An “incremental” evaluation re-times the whole design and re-fits every driver.</strong>
+<ul>
+<li><strong>Observed:</strong> 14 s per evaluation on 18 k cells; every evaluation logs OpenTimer's
+<code>rebase spef resistance</code>; 74 % of the repair pass is <code>RcDriver::crossing</code> /
+<code>RcRamp::crossing</code> / <code>rc_fit_ramp</code> / <code>expm1</code>.</li>
+<li><strong>Where:</strong> <code>Pass_opentimer::apply_physical_rc</code> (<code>pass/opentimer/physical_rc.cpp:75-179</code>)
+compares each net's RC tree with the previous evaluation and re-attaches every net that differs. During GP every cell
+moves, so every net differs and <code>timer.read_parasitics</code> puts every net root on the frontier
+(<code>OpenTimer ot/timer/spef.cpp:40-50</code>) → full forward/backward propagation. Each propagated net arc then goes
+through the fork's iterative effective-capacitance waveform fit (<code>ot/timer</code> RC driver, the
+<code>27c3982</code> “crossing bracket” work) — the dominant per-net cost. Around it, every evaluation also rebuilds
+string-keyed maps over all nodes (<code>validate_physical_rc</code>, <code>physical_rc.cpp:11-50</code>;
+<code>Impl::update</code>, <code>physical_session.cpp:150-272</code>) and fills <code>Feedback.pins</code>, a
+<code>std::map&lt;std::string, Pin&gt;</code> with seven optionals per pin for every pin
+(<code>opentimer.cpp:2194-2700</code>), which <code>timing_weights</code> then looks up by string per net
+(<code>timing_place.cpp:14-58</code>).</li>
+<li><strong>What has to change:</strong> (1) only nets whose RC changed beyond a tolerance are re-attached, and the GP
+checkpoint should move only the critical fraction's trees (or evaluate on a coarse star/Elmore model and keep the
+waveform fit for the final STA); (2) a closed-form driver model (Elmore + Dartu-style ramp, as OpenSTA uses) for
+in-loop evaluations, with the iterative fit reserved for sign-off; (3) index-based pin/net identity between the
+placer and the timer — no string maps on the per-evaluation path. Measure with the existing
+<code>Physical_session::Statistics</code> buckets (<code>pass_opentimer.hpp:246-254</code>), which already split
+validation / reconcile / propagation / feedback time but are not reported in <code>result.json</code>. The native proxy of <a class="xref" href="2t-timeclosure.html#B">2t B</a> and the <code>rc_cache</code> of <a class="xref" href="2t-timeclosure.html#C">2t C</a> are the landed building blocks.</li>
+<li><strong>Acceptance:</strong> a GP-checkpoint evaluation on minimax ≤ 1 s; the final evaluation ≤ 3 s; total STA time
+≤ 10 % of the placer on every design.</li>
+</ul></li>
+
+<li id="C"><strong>C — The 45 MB Liberty text is re-read and re-scanned at every checkpoint.</strong>
+<ul>
+<li><strong>Observed:</strong> lfsr spends 41 % of 90 s in <code>read_floorplan_library</code> and 8 % in
+<code>prects_library</code>; 34 s of kernel time is file reading; 15 % is <code>liberty::read_files</code>.</li>
+<li><strong>Where:</strong> <code>read_floorplan_library</code> (<code>repair.cpp:1533-1539</code>) is called from every
+<code>repair_gp_buffers</code> (<code>repair.cpp:1824</code>) and from the resize/repair entry points
+(<code>repair.cpp:1639, 1643</code>); it calls <code>read_lef</code>, <code>inventory → scan_comb_cells</code>,
+<code>scan_special_pins</code> (five scans: dff, async dff, latch, icg, memory) and <code>scan_output_drives</code>.
+Every <code>liberty::scan_*</code> re-reads the files (<code>pass/liberty/liberty_dff.cpp:144</code>) and re-scans the whole
+text (<code>scan_cells</code>, <code>liberty_dff.cpp:1056</code>). <code>refresh_timing_weights</code> re-parses the LEFs and
+<code>prects_library</code> (six more scans) on every weight refresh (<code>timing_place.cpp:60-67</code>);
+<code>resize_engine.cpp:74-76</code> and <code>repair.cpp:2214-2215</code> do it again per pass;
+<code>environment_key</code> re-hashes the Liberty text (<code>place.cpp:354-372</code>). None of this depends on the
+placement.</li>
+<li><strong>What has to change:</strong> parse Liberty and LEF once per run into one shared technology object
+(cells, drives, special pins, control roles, truth tables) owned by the placement session and passed to repair,
+resize, weights and io-timing. Scans of a 45 MB file must not be on any per-checkpoint or per-attempt path.</li>
+<li><strong>Acceptance:</strong> lfsr placer ≤ 5 s CPU; <code>liberty::scan_*</code> and <code>read_lef</code> appear at
+most once each in a call-graph profile.</li>
+</ul></li>
+
+<li id="D"><strong>D — The bare global placement is far from OpenROAD's wirelength and timing.</strong>
+<ul>
+<li><strong>Observed:</strong> pure GP on LiveHD's own floorplan: HPWL +32 % vs A and WNS −232 ps where OpenROAD on the
+same LiveHD netlist (D) gets −9 % HPWL and +82 ps. On OpenROAD's floorplan (flow C input, identical netlist, IO and
+taps) the pure GP gives 3.3× OpenROAD's HPWL. OpenROAD's <code>repair_design</code> on the ablation-1 placement finds
+only 4 slew violations and does not recover timing: the loss is the placement itself, not missing buffers.</li>
+<li><strong>Where to look first:</strong> (1) initial positions are uniform random over the core
+(<code>DREAMPlace dreamplace/native/placement.cpp:1631-1632</code>): initial HPWL 652 k µm (ablation 1) and 868 k µm
+(ablation 2) versus OpenROAD's conjugate-gradient initial placement at 17 k µm; Nesterov then has to <em>contract</em>
+wires against the density force and settles in a worse basin. (2) Density ramp: overflow is still 0.475 at iteration
+500 and reaches 0.1 at 1 060, OpenROAD reaches 0.19 at 428 (<code>initial_density_weight=0.01</code> and the
+multiplier schedule). (3) Bins are fixed at 64×64 regardless of die and cell size (<code>synth.place.bins=64</code>,
+<code>dynamic_bins=false</code>; <code>place.cpp:5441</code>, <code>lhd_kernel_synth.cpp:456-457</code>): on lfsr a bin is
+0.09 µm against a 0.27 µm row, the overflow floor is 0.28–0.40 and <code>stop_overflow=0.1</code> is unreachable;
+OpenROAD derives 8×8 (lfsr) and 64×64 (minimax) from average cell area over target density. The <code>bins=8</code>
+ablation made lfsr's main GP converge. (4) On the imported floorplan: IO terminals, the 4 µm core margin and the
+density target 0.7 below the 0.71 utilization (OpenROAD raised its target to 0.72) must be checked one at a time;
+fixed-cell repulsion is already excluded (ablation 2b).</li>
+<li><strong>What has to change:</strong> a quadratic/center initial placement; bins from cell area and target density;
+a density schedule that reaches the target in a few hundred iterations; a per-iteration HPWL/overflow trace next to
+OpenROAD's for the same netlist and floorplan (<code>3_3_place_gp.log</code> is the reference) until the two curves
+agree within 10 % at equal overflow.</li>
+<li><strong>Acceptance:</strong> pure GP + legalization on the flow-C input within +10 % of OpenROAD's 45 743 µm GP
+wirelength; on LiveHD's own floorplan within +10 % of flow D's 43 333 µm; both in ≤ 30 s.</li>
+</ul></li>
+
+<li id="E"><strong>E — Global placement is not allowed to converge.</strong>
+<ul>
+<li><strong>Observed:</strong> every GP run in B and C stopped at its iteration cap (<code>WARNING: native DREAMPlace GP
+stopped at 1500/500 iterations … objective settled false</code>), 9 times on minimax, 4 on lfsr; with the timing
+machinery off the same GP converges at iteration 1 060.</li>
+<li><strong>Where:</strong> with <code>post_density_factor=4</code> (default, <code>lhd_kernel_synth.cpp:339</code>) the
+objective counts as converged only if <code>convergence.timing_satisfied</code>, i.e. the last checkpoint reported
+<code>timing_violation == 0</code> (<code>placement.cpp:3531-3536, 4033-4040</code>); the checkpoint sets it from the
+GP-time WNS (<code>place.cpp:6627-6629</code>). On an unlegalized, half-spread placement with Steiner RC the WNS is
+negative (“last timing satisfied false” on every minimax run), so convergence is vetoed until the cap. The
+continuation deadline is 5× the iteration at which density first settled (<code>placement.cpp:3944-3950</code>) — with
+density settling near 300 that is exactly the 1 500 cap. Every weight refresh (smoothing 0.5, up to 5× on 20 % of
+nets, every 50 iterations) and every accepted GP buffer insertion replaces the design and restarts Nesterov
+momentum (<code>placement.hpp:196, 372</code>), so the objective never settles either.</li>
+<li><strong>What has to change:</strong> convergence = overflow ≤ target (plus routability if enabled); timing may
+re-weight nets but must never veto convergence; weight refreshes without momentum restart and only at density
+milestones; continuation bounded to a small fraction (≤ 25 %) of the density-settling iteration; the
+<code>iteration cap</code> warning should be an exceptional outcome, not the normal one. <a class="xref" href="2t-timeclosure.html#H">2t H</a> states the same rule for the new controller.</li>
+<li><strong>Acceptance:</strong> no cap warning on any benchmark design; GP iterations ≤ 600 on minimax.</li>
+</ul></li>
+
+<li id="F"><strong>F — The timing-driven rounds cold-restart placement and are accepted on timing alone.</strong>
+<ul>
+<li><strong>Observed:</strong> minimax HPWL 94 954 µm entering the rounds → 107 230 µm after; the three round GPs stop at
+500 iterations with overflow 0.41–0.46, and legalizing a placement 4× over the density target is what inflates the
+wirelength. lfsr: 33 s (38 % of the run) for one accepted round that improved the internal path delay by 0.5 %.</li>
+<li><strong>Where:</strong> <code>timing_place</code> (<code>pass/place/timing_place.cpp:149-205</code>) erases every
+non-FIXED component from the floorplan (line 172) and runs a complete <code>place()</code> again with
+<code>iterations / rounds = 500</code> (line 168, 192) — a cold GP that cannot converge in that budget — then keeps the
+candidate if <code>timing_improves</code> (line 196), which is <code>retain()</code>: “no timing or electrical metric got
+worse” (<code>repair.cpp:1271</code>); HPWL, area and power are never consulted.</li>
+<li><strong>What has to change:</strong> rounds off by default when the first STA shows positive WNS; when on, warm
+start from the converged placement with the density weight preserved, a short refinement budget, and an acceptance
+test that bounds HPWL and area growth. OpenROAD's model — re-weight inside the same Nesterov run with a virtual
+repair, twice — is the reference, and the same-generation, density-compatible acceptance of <a class="xref" href="2t-timeclosure.html#D">2t D</a> is the model.</li>
+<li><strong>Acceptance:</strong> HPWL after the physical stage ≤ +3 % of the pure-GP HPWL on lfsr and minimax.</li>
+</ul></li>
+
+<li id="G"><strong>G — The internal timing target is inconsistent with the SDC and with OpenSTA.</strong>
+<ul>
+<li><strong>Observed:</strong> ABC targets 0.4 × the SDC period (<code>synth-target-unreachable: timing target 360 ps
+… achieved 803 ps</code> on minimax, 280 vs 665 ps on lfsr); <code>io_resynth</code> reports color slacks of −581 ps and
+−199 ps while OpenSTA measures +88 ps on the same final placement; GP checkpoints report violations that
+<a href="#E">E</a> turns into non-convergence. Flow D proves the netlist meets the clock with margin in OpenROAD.
+In ablation 1b <code>io_resynth</code> reports two accepted remaps and a restarted stage, but the final netlist and
+placement are byte-identical to the run with <code>io_resynth=0</code> — the accepted result is either dropped or
+never applied when GP checkpoints are off.</li>
+<li><strong>What has to change:</strong> one timing target for the physical stage, equal to the SDC period, used by
+weights, convergence, resynthesis triggers and repair; the 0.4× budget stays a synthesis-internal hint and must not
+leak into placement decisions; GP-time timing feedback only once the placement is near-legal (overflow ≤ 0.2);
+<code>io_resynth</code> must be verified to apply what it accepts, and a restart of the whole final stage (minimax:
++1 500 iterations and +131 evaluations = 1 786 s) needs a measured benefit before it is automatic. See <a class="xref" href="2t-timeclosure.html#D">2t D</a> (one period objective) and <a class="xref" href="2t-timeclosure.html#K">2t K</a> (restart interaction of the legacy <code>io_resynth</code> policy).</li>
+<li><strong>Acceptance:</strong> internal WNS within 10 % of <code>score.tcl</code> on the final placement at every
+checkpoint that feeds a decision; no “unreachable target” for a design that meets its SDC in OpenROAD.</li>
+</ul></li>
+
+<li id="H"><strong>H — Physical repair adds cells and area without a budget.</strong>
+<ul>
+<li><strong>Observed:</strong> B has 18 283 cells against 17 115 for the same LiveHD netlist repaired by OpenROAD (D):
++1 168 cells, +100 µm² (+4.9 %), power 7.43e-3 vs 6.09e-3 mW. OpenROAD's <code>repair_design</code> on minimax inserts
+one buffer and the GP-time virtual repair nets −0.7 % area; LiveHD's GP buffer repair, resize and repair run on a
+negative internal slack (<a href="#G">G</a>) and so keep inserting.</li>
+<li><strong>Where:</strong> <code>repair_gp_buffers</code> (<code>repair.cpp:1815-2080</code>) at every checkpoint;
+<code>resize_placed</code> / repair pass after the rounds (<code>resize_engine.cpp</code>, <code>repair.cpp:2148-2560</code>).</li>
+<li><strong>What has to change:</strong> electrical repair (slew, cap, fanout) once after GP; setup repair only against
+the SDC target and only on legal geometry; an explicit area/cell growth budget reported in <code>placement.json</code>. <a class="xref" href="2t-timeclosure.html#J">2t J</a>: no sizing or buffering through a legacy hook before phase 7.</li>
+<li><strong>Acceptance:</strong> cells ≤ +3 % and area ≤ +3 % over the synthesized netlist on minimax, as in flow D.</li>
+</ul></li>
+
+<li id="I"><strong>I — Scaling to the 230–650 k-cell designs (issue 6).</strong>
+<ul>
+<li><strong>Observed:</strong> one evaluation grew 440× (32 ms → 14 s) for 137× the cells between lfsr and minimax; at
+cnn/gemmini size a single evaluation would take minutes and the 3 h budget is gone before the first GP ends. GP
+iteration cost is fine (≈ 9 ms per iteration at 15 k cells, 9.5 s total) but 4 500 iterations at 645 k cells is still
+hours. Peak RSS is 1.8 GB at 18 k cells (OpenROAD: 458 MB in GP), i.e. ≈ 100 kB per cell — the 64 GB cap is hit near
+600 k cells. Per-checkpoint <code>Design</code> snapshots (<code>placement.cpp:3436</code>), per-checkpoint JSON traces
+and <code>gp_buffer_repair_&lt;iter&gt;.json</code> files, and the string-keyed maps of <a href="#B">B</a> all scale with
+the design.</li>
+<li><strong>What has to change:</strong> everything on the per-checkpoint path must be O(changed), not O(design)
+(<a href="#A">A</a>, <a href="#B">B</a>, <a href="#C">C</a>); memory per cell measured and bounded; the iteration budget
+follows from convergence (<a href="#E">E</a>). Re-run cnn, gemmini and partition_c with <code>run_design.py … --flows
+SB</code> once <a href="#A">A</a>–<a href="#E">E</a> land.</li>
+<li><strong>Acceptance:</strong> each finishes in &lt; 1 h and &lt; 16 GB; CPU ≤ OpenROAD's for the same stage.</li>
+</ul></li>
+
+<li id="J"><strong>J — Hard failures that block the measurement of macro designs (issue 5, out of this plan's speed scope).</strong>
+<ul>
+<li><code>lhd synth</code>: eyeriss front-end (<code>undeclared identifier 'psum_acc_times'</code>, elaborates in
+yosys-slang); NyuziProcessor and bp_uno <code>unmapped physical object: flop</code> after ABC.</li>
+<li><code>physical_repair</code>: <code>floorplan requires contiguous equal-width N/FS rows</code> for every design whose
+rows OpenROAD cut around macros — the flow-C comparison is impossible on cnn, partition_c, NyuziProcessor, bp_uno,
+eyeriss until imported row fragments are supported. The segmented-row adapter landed for the <a class="xref" href="2t-timeclosure.html#H">2t H</a> GP probe already handles such rows; it is not on the <code>physical_repair</code> / <code>lhd synth</code> import path.</li>
+</ul></li>
+</ul>
+
+<h2 id="order">Order of work</h2>
+<ol>
+<li><strong>Instrument</strong> (half a day): put <code>Physical_session::Statistics</code>, evaluation count, GP iterations,
+cap/convergence reason and Liberty/LEF read counts into <code>result.json</code>; add a <code>--set</code> that prints the
+per-checkpoint STA cost. Re-run lfsr/minimax B and C to get the baseline with these fields.</li>
+<li><strong>C</strong> then <strong>A</strong>: pure waste, no QoR risk. Expected: lfsr 90 → ~10 s, minimax 6 387 → ~1 000 s with
+unchanged QoR.</li>
+<li><strong>E</strong> and <strong>F</strong>: convergence and rounds. Expected: HPWL back near the pure-GP value, another
+3–5× CPU.</li>
+<li><strong>D</strong>: GP quality against OpenROAD traces on the flow-C input. This is the only item that needs
+algorithm work; it decides whether the targets are met.</li>
+<li><strong>B</strong>, <strong>G</strong>, <strong>H</strong>: evaluation cost and repair budget — needed to keep WNS at
+OpenROAD's level once the loops are gone.</li>
+<li><strong>I</strong>: run the three big designs; fix <strong>J</strong> in parallel to add the macro designs.</li>
+</ol>
+<p><a class="xref" href="2t-timeclosure.html">2t-timeclosure</a> stays opt-in and does not gate any of this. When its
+controller becomes the default loop it supersedes A, E, F and H on that path; B(2), C, D and J are needed either way, and
+every change here is measured against the same control artifacts 2t A records.</p>
+
+<h2 id="protocol">Measurement protocol</h2>
+<ul>
+<li>Harness: <code>HighTide/repros/run_design.py &lt;design&gt; --restore --flows SBC --redo SBC</code> re-runs only the
+LiveHD side against the archived OpenROAD reference (<code>repros/data/&lt;design&gt;/</code>); <code>report.py</code> rebuilds
+the comparison page. CPU = <code>cpu_s</code> in <code>result.json</code>; phases from <code>--result-json</code>.</li>
+<li>Profiles: <code>perf record -F 499</code> (flat) and <code>perf record -F 97 --call-graph dwarf</code> on the pinned run;
+report with <code>--children --sort symbol</code> to read inclusive costs of <code>read_floorplan_library</code>,
+<code>repair_gp_buffers</code>, <code>Physical_session::evaluate</code>, <code>DreamPlace::native::place</code>.</li>
+<li>QoR: always <code>score.tcl</code> on the exported DEF, never LiveHD's internal numbers, for any claim in this page's
+targets. The 2026-10-26 ablation scripts, DEFs, scores and <code>perf.data</code> are in the session scratchpad
+(<code>…/scratchpad/exp/</code>) and are not kept; the recipe is the command lines in <code>issues.md</code> plus the
+<code>--set</code> overrides named above.</li>
+</ul>
+
+<h2 id="open">Open questions</h2>
+<ul>
+<li>Why is the bare GP 3.3× worse on the imported OpenROAD floorplan than on LiveHD's own (1.3×)? Candidates after
+ablation 2b: IO terminal positions, 4 µm core margin, density target below utilization, random initial placement.</li>
+<li>Does the iterative RC driver model change the sign of any decision versus a closed-form Ceff on these designs? If
+not, it should be sign-off only.</li>
+<li>Netlist identity across flows: ablation 1 has 14 759 cells, flow D (LiveHD synth-only netlist) ends with 17 115
+including 613 OpenROAD buffers; confirm the two synthesis paths produce the same mapped netlist before comparing
+repair growth.</li>
+</ul>
+</main>
+<footer>LiveHD TODO · 1f-fixes · drafted 2026-10-26 from HighTide/repros/issues.md and same-day profiles/ablations</footer>
+</body>
+</html>

@@ -9,6 +9,10 @@
 #include "core/timing_feedback.hpp"
 #include "inou/lefdef/physical.hpp"
 
+namespace livehd::liberty {
+struct Cell_library;
+}
+
 namespace livehd::placement {
 // Read once per placement invocation; never infer a signal role from a cell or
 // net name. Internal pin seeds come from synthesis signal-role metadata. A
@@ -22,6 +26,7 @@ struct Prects_library {
   bool                                                                    override_controls = false;
 };
 Prects_library prects_library(const std::string& liberty, const std::string& control_ports = {});
+Prects_library prects_library(const liberty::Cell_library& library, const std::string& control_ports = {});
 struct Prects_networks {
   std::vector<bool>     ignored;
   std::set<std::string> pins;

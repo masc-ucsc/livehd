@@ -141,13 +141,16 @@ private:
   }
 };
 
-std::string read_files(const std::string& lib_files) {
+std::string read_files(const std::string& lib_files, size_t* reads = nullptr) {
   std::string       all;
   std::stringstream ss(lib_files);
   std::string       path;
   while (ss >> path) {
     std::ifstream ifs(path, std::ios::binary);
     if (ifs) {
+      if (reads) {
+        ++*reads;
+      }
       std::array<char, 65536> block;
       while (ifs.read(block.data(), block.size()) || ifs.gcount() > 0) {
         all.append(block.data(), static_cast<size_t>(ifs.gcount()));
@@ -1053,8 +1056,8 @@ struct Cell_scan {
 // One pass over the concatenated Liberty text: the flops (the register pick)
 // and the dont_use set (the one-time report) come from the same read, since
 // a full PDK library is tens of MB.
-Cell_scan scan_cells(const std::string& lib_files) {
-  std::string                            text = strip_comments(read_files(lib_files));
+Cell_scan scan_cells_text(const std::string& contents) {
+  std::string                            text = strip_comments(contents);
   // `time_unit` is a library-header attribute; several files may be
   // concatenated here, so each cell takes the unit of the nearest header
   // before it (a file without one gets the Liberty default, 1ns).
@@ -1105,6 +1108,8 @@ Cell_scan scan_cells(const std::string& lib_files) {
   }
   return out;
 }
+
+Cell_scan scan_cells(const std::string& lib_files) { return scan_cells_text(read_files(lib_files)); }
 
 }  // namespace
 
@@ -1394,8 +1399,8 @@ std::vector<Comb_cell> scan_comb_cells_text(const std::string& contents) {
 
 std::vector<Comb_cell> scan_comb_cells(const std::string& lib_files) { return scan_comb_cells_text(read_files(lib_files)); }
 
-std::vector<Constant_cell> scan_constant_cells(const std::string& lib_files) {
-  const auto                 text = strip_comments(read_files(lib_files));
+static std::vector<Constant_cell> scan_constant_cells_text(const std::string& contents) {
+  const auto                 text = strip_comments(contents);
   std::vector<Constant_cell> result;
   std::string                args;
   for (size_t p = find_group(text, "cell", 0, args); p != std::string::npos; p = find_group(text, "cell", p + 1, args)) {
@@ -1438,6 +1443,22 @@ std::vector<Constant_cell> scan_constant_cells(const std::string& lib_files) {
     }
   }
   return result;
+}
+
+std::vector<Constant_cell> scan_constant_cells(const std::string& lib_files) {
+  return scan_constant_cells_text(read_files(lib_files));
+}
+
+Cell_library::Cell_library(const std::string& lib_files) : contents(read_files(lib_files, &file_reads)) {
+  auto state    = scan_cells_text(contents);
+  dffs          = std::move(state.dffs);
+  async_dffs    = std::move(state.async);
+  latches       = std::move(state.latches);
+  icgs          = std::move(state.icgs);
+  combinational = scan_comb_cells_text(contents);
+  constants     = scan_constant_cells_text(contents);
+  memories      = scan_memory_cells_text(contents);
+  drives        = scan_output_drives_text(contents);
 }
 
 std::optional<double> smallest_flop_area(const std::string& lib_files) {

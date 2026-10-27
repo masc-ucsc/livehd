@@ -59,6 +59,8 @@ protected:
   std::set<std::string>                               physical_clock_endpoints_;  // memory clock pins: RC sinks, not captures
   void                                                validate_physical_rc(const std::shared_ptr<hhds::Graph>& graph) const;
   void                                                apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph);
+  void                                                apply_physical_timing_cuts(const std::set<std::string>& cuts);
+  std::set<std::string>                               physical_timing_cuts_;
   void                                                apply_physical_captures();
   std::set<std::string>                               propagated_clocks_;
   std::set<std::string>                               false_start_ports_;
@@ -243,8 +245,11 @@ class Physical_session {
   std::unique_ptr<Proxy> proxy_;  // stable what-if handle across an internal timer rebuild
 
 public:
+  enum class Purpose { detailed, ranking };
   struct Statistics {
     unsigned evaluations = 0, builds = 0;
+    unsigned rankings        = 0;
+    double   ranking_seconds = 0;
     size_t   repowered_gates = 0, inserted_gates = 0, removed_gates = 0, updated_nets = 0;
     double   seconds            = 0;
     // Disjoint wall-time buckets; reconciliation excludes propagation below.
@@ -258,8 +263,9 @@ public:
   // capacitance and SDC remain intact; an empty set restores full-path timing.
   livehd::timing::Feedback evaluate(const std::shared_ptr<hhds::Graph>&                 graph,
                                     std::shared_ptr<const livehd::physical::Parasitics> rc,
-                                    const std::set<std::string>&                        data_exclusions = {});
+                                    const std::set<std::string>& data_exclusions = {}, Purpose purpose = Purpose::detailed);
   const Statistics&        statistics() const;
+  std::string              statistics_json() const;
   // Transient what-if edits on the last evaluated state (core/timing_whatif.hpp).
   // evaluate() first discards every pending what-if edit.
   livehd::timing::Whatif&  whatif();

@@ -48,11 +48,17 @@ std::string serialize_parasitics(const Parasitics& rc) {
   rapidjson::Writer<rapidjson::StringBuffer> w(buffer);
   w.StartObject();
   w.Key("version");
-  w.Int(2);
+  w.Int(3);
   w.Key("identity");
   w.String(rc.identity.c_str());
   w.Key("approximate");
   w.Bool(rc.approximate);
+  w.Key("timing_cuts");
+  w.StartArray();
+  for (const auto& driver : rc.timing_cuts) {
+    w.String(driver.c_str());
+  }
+  w.EndArray();
   w.Key("cells");
   w.StartArray();
   for (const auto& c : rc.cells) {
@@ -123,7 +129,7 @@ static Parasitics parse_parasitics(std::string_view text, bool full_precision) {
     json.Parse(text.data(), text.size());
   }
   require(!json.HasParseError() && json.IsObject());
-  require(json.HasMember("version") && json["version"].IsInt() && (json["version"].GetInt() == 1 || json["version"].GetInt() == 2));
+  require(json.HasMember("version") && json["version"].IsInt() && json["version"].GetInt() >= 1 && json["version"].GetInt() <= 3);
   require(json.HasMember("identity") && json["identity"].IsString() && json.HasMember("approximate")
           && json["approximate"].IsBool());
   require(json.HasMember("cells") && json["cells"].IsArray() && json.HasMember("terminals") && json["terminals"].IsArray()
@@ -131,6 +137,13 @@ static Parasitics parse_parasitics(std::string_view text, bool full_precision) {
   Parasitics result;
   result.identity    = json["identity"].GetString();
   result.approximate = json["approximate"].GetBool();
+  if (json["version"].GetInt() >= 3 || json.HasMember("timing_cuts")) {
+    require(json.HasMember("timing_cuts") && json["timing_cuts"].IsArray());
+    for (const auto& driver : json["timing_cuts"].GetArray()) {
+      require(driver.IsString() && driver.GetStringLength() > 0);
+      result.timing_cuts.emplace(driver.GetString());
+    }
+  }
   for (const auto& cell : json["cells"].GetArray()) {
     require(cell.IsArray() && (cell.Size() == 4 || cell.Size() == 7) && cell[0].IsString() && cell[1].IsInt64() && cell[2].IsInt64()
             && cell[3].IsUint() && cell[3].GetUint() < 8);

@@ -24,6 +24,9 @@ struct Feedback {
   std::string                source_report;  // optional external-report provenance only
   std::optional<double>      wns, tns, hold_wns;
   std::vector<std::string>   path;
+  // Approximate path ordering only; no sign-off WNS, electrical or pin-time
+  // breakdown is present. Consumers may use pin slacks to rank net weights.
+  bool                       ranking_only = false;
   // Physical connection lookup: a top port (instance "PIN") is keyed by its
   // name; an instance pin by "inst:pin", else the "inst/pin" spelling.
   const Pin*                 find_pin(const std::string& instance, const std::string& pin) const {

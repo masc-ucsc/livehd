@@ -31,21 +31,31 @@ must work with resynthesis disabled; <a href="#K">K</a> adds it independently.</
 
 <h2>Depends on</h2>
 <ul>
-<li><a class="xref" href="3p-placement.html">3p-placement</a> supplies the native
+<li><a href="../../pass/place/README.md">native placement</a> supplies the native
 placement stages, mapped physical graph, technology RC, checkpoints and export.
 Reuse the implemented interfaces; this task does not wait for every outstanding
 placement experiment.</li>
-<li><a class="xref" href="3r-route.html">3r-route</a> supplies RSMT-RUDY and
+<li><a href="../../pass/place/README.md">routability feedback</a> supplies RSMT-RUDY and
 full-footprint congestion measurements. Its pending
-<a href="3r-route.html#timing-warmup">stability-based timing warm-up</a> is implemented
+stability-based timing warm-up is implemented
 by H for the new loop, avoiding a second independent gate controller.</li>
-<li><a class="xref" href="2p-plan.html#E">2p-plan E</a> and
-<a class="xref" href="3s-terminal-legalize.html">3s-terminal-legalize</a> supply
+<li><a href="../../pass/place/README.md">Timing-aware legalization</a> and
+<a href="../../pass/place/README.md">terminal legalization</a> supply
 legalization and timing protection for the phase-7 handoff. Existing legalizers
 remain usable; optional SAT alignment is not a prerequisite.</li>
 <li><a class="xref" href="2is-incsynth.html">2is-incsynth</a> is needed only for K:
 reuse color environments, mapped-body remapping and equivalence checks. Its
 once-per-run policy remains the legacy policy.</li>
+<li><a class="xref" href="1f-fixes.html">1f-fixes</a> measures the legacy default loop this task replaces
+(HighTide asap7, 2026-10-26): 446 full OpenTimer evaluations in one minimax run (88 % of 6 387 s CPU), about six
+per GP checkpoint from <code>repair_gp_buffers</code> trial scoring; each evaluation re-attaches every net and
+re-fits every driver (14 s); the 45 MB Liberty is rescanned at every checkpoint; GP convergence is vetoed by
+<code>timing_satisfied</code>; the timing rounds cold-restart <code>place()</code>. Those numbers are the control
+and the legacy-callback audit that A asks for. 1f fixes the default path now, independently of this opt-in mode,
+and reuses the B/C/H foundations (<code>late_timing</code>, <code>rc_cache</code>/<code>star_rc</code>,
+<code>native_timing_max_overflow</code>, the segmented-row adapter). Behaviors 1f documents must not be inherited
+here: timing vetoing convergence, post-density continuation to the cap, acceptance on timing alone from an
+unconverged density state, per-checkpoint library rescans.</li>
 </ul>
 
 <h2>Subtasks — pending</h2>

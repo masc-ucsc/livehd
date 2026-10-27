@@ -51,6 +51,17 @@
 #include "lnast_builder.hpp"
 // clang-format on
 
+// A modport signal is a directional view of the interface's original net,
+// not independent storage. Use one identity for reads, writes and dependencies.
+inline const slang::ast::ValueSymbol& interface_signal(const slang::ast::ValueSymbol& sym) {
+  if (const auto* port = sym.as_if<slang::ast::ModportPortSymbol>(); port && port->internalSymbol) {
+    if (const auto* value = port->internalSymbol->as_if<slang::ast::ValueSymbol>()) {
+      return *value;
+    }
+  }
+  return sym;
+}
+
 // Walk an assignment-target spine (`.field` / `[idx]` / `[hi:lo]` / bitcast)
 // down to the base symbol it selects part of. Returns nullptr for a
 // concatenation (the caller iterates its operands itself) and for any other
@@ -60,8 +71,8 @@ inline const slang::ast::ValueSymbol* lhs_base_symbol(const slang::ast::Expressi
   const auto* e = &lhs;
   while (true) {
     switch (e->kind) {
-      case slang::ast::ExpressionKind::NamedValue:
-      case slang::ast::ExpressionKind::HierarchicalValue: return &e->as<slang::ast::ValueExpressionBase>().symbol;
+      case slang::ast::ExpressionKind::NamedValue       :
+      case slang::ast::ExpressionKind::HierarchicalValue: return &interface_signal(e->as<slang::ast::ValueExpressionBase>().symbol);
       case slang::ast::ExpressionKind::ElementSelect    : e = &e->as<slang::ast::ElementSelectExpression>().value(); break;
       case slang::ast::ExpressionKind::RangeSelect      : e = &e->as<slang::ast::RangeSelectExpression>().value(); break;
       case slang::ast::ExpressionKind::MemberAccess     : e = &e->as<slang::ast::MemberAccessExpression>().value(); break;
@@ -86,7 +97,9 @@ inline const slang::ast::ValueSymbol* lhs_base_symbol(const slang::ast::Expressi
 // Slang_context derives from it privately so the visitor code keeps naming the
 // members directly.
 struct Slang_module_state {
-  Lnast_builder builder_;
+  Lnast_builder                                                       builder_;
+  absl::flat_hash_set<const slang::ast::ValueSymbol*>                 interface_signals_;
+  std::vector<std::pair<const slang::ast::ValueSymbol*, std::string>> interface_outputs_;
 
   const slang::ast::InstanceBodySymbol*                       body_ = nullptr;
   std::optional<slang::ast::EvalContext>                      eval_ctx_;
@@ -556,6 +569,25 @@ private:
   std::vector<std::shared_ptr<Lnast>>                                                ordered_lnasts_;
   absl::flat_hash_set<const slang::ast::ValueSymbol*>                                simulation_only_vars_;
 
+  // --ignore-unknown-modules: ONE typed, body-less stub per missing module.
+  // The interface is the UNION over every instance of its connected ports
+  // (an unconnected `.p()` in one instance is not a different module) at the
+  // widest connected width; only a port inferred both input and output is a
+  // conflict. pick_lnast writes the merged ports into each stub's io.
+  struct Unknown_port {
+    bool is_out    = false;
+    int  bits      = 0;
+    bool is_signed = false;
+  };
+  struct Unknown_interface {
+    std::shared_ptr<Lnast>                         stub;
+    std::vector<std::string>                       order;  // first-seen port order
+    absl::flat_hash_map<std::string, Unknown_port> ports;
+    bool                                           single_out_bound = false;  // some call bound its lone output directly
+  };
+  absl::flat_hash_map<std::string, Unknown_interface> unknown_interfaces_;
+  void                                                fill_unknown_stubs();
+
   // ── per-module state ───────────────────────────────────────────────────────
   // Lives in Slang_module_state (the private base) so lower_module can swap it
   // as ONE unit around a recursive submodule lowering.
@@ -656,6 +688,17 @@ private:
   void emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std::string_view initial, std::string_view reset_ref, bool edge_pos,
                             bool initial_is_ref = false, bool async = true, int64_t bit = -1);
   void finalize_pending_async_resets();
+  struct Interface_leaf {
+    const slang::ast::ValueSymbol* signal;
+    std::string                    field;
+    bool                           output;
+  };
+  std::vector<Interface_leaf> interface_port_leaves(const slang::ast::InterfacePortSymbol&     port,
+                                                    slang::ast::InterfacePortSymbol::IfaceConn connection);
+  bool                        check_passive_interface(const slang::ast::InstanceSymbol& instance);
+  void                        prepare_interfaces(const slang::ast::Scope& scope);
+  void emit_interface_io(const slang::ast::InterfacePortSymbol& port, const Lnast_nid& inputs, const Lnast_nid& outputs);
+  void bind_interface_outputs();
   void lower_instance(const slang::ast::InstanceSymbol& inst);
   // Blackbox instance (slang UninstantiatedDef, i.e. --ignore-unknown-modules):
   // no definition, so port directions come from the collect-pass inference
@@ -725,6 +768,9 @@ private:
   // classification, the split-wire device and the async-reset source check all
   // refuse it.
   bool is_module_level(const slang::ast::Symbol& sym) const {
+    if (const auto* value = sym.as_if<slang::ast::ValueSymbol>(); value && interface_signals_.contains(value)) {
+      return true;  // passive interface members have the owning module's lifetime
+    }
     const auto* sc = sym.getParentScope();
     return sc != nullptr && (&sc->asSymbol() == body_ || sc->asSymbol().kind == slang::ast::SymbolKind::GenerateBlock);
   }
@@ -1161,11 +1207,12 @@ private:
     int  bits      = 0;
     bool is_signed = false;
   };
+  static bool        bit_layout_type(const slang::ast::Type& t);
+  static int64_t     field_bit_offset(const slang::ast::Type& t, const slang::ast::FieldSymbol& field);
+  // Width/sign of a type. A fixed hardware aggregate (unpacked array/struct of
+  // integral leaves) reports its FLAT bitstream width, unsigned -- the packed
+  // bus an unpacked-array port or unpacked struct lowers to.
   static Tinfo       tinfo(const slang::ast::Type& t);
-  // Like tinfo, but a fixed-size unpacked array of integral elements reports
-  // its FLAT packed width (elem_bits * count, unsigned) — the representation an
-  // unpacked-array port lowers to. Other types fall through to tinfo.
-  static Tinfo       flat_or_tinfo(const slang::ast::Type& t);
   void               emit_prim_type_int(const Lnast_nid& parent, int bits, bool is_signed);
   // Pyrope literals for the max/min value of a `bits`-wide integer of the given
   // sign: 2^(bits-1)-1 / -2^(bits-1) signed, 2^bits-1 / 0 unsigned.

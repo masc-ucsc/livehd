@@ -51,7 +51,7 @@ struct Self_field_read_collector : public slang::ast::ASTVisitor<Self_field_read
       cur = &cur->as<slang::ast::ConversionExpression>().operand();
     }
     if (!path.empty() && (cur->kind == ExpressionKind::NamedValue || cur->kind == ExpressionKind::HierarchicalValue)
-        && &cur->as<slang::ast::ValueExpressionBase>().symbol == target) {
+        && &interface_signal(cur->as<slang::ast::ValueExpressionBase>().symbol) == target) {
       // The member chain is collected outside-in, so the last item is the
       // top-level field represented by Struct_info::fields.
       reads->insert(std::string(path.back()));
@@ -228,7 +228,7 @@ void Slang_context::lower_assign(const slang::ast::AssignmentExpression& expr) {
       l = &l->as<slang::ast::ConversionExpression>().operand();
     }
     if (l->kind == ExpressionKind::NamedValue || l->kind == ExpressionKind::HierarchicalValue) {
-      const auto& lsym = l->as<slang::ast::ValueExpressionBase>().symbol;
+      const auto& lsym = interface_signal(l->as<slang::ast::ValueExpressionBase>().symbol);
       if (is_scalar_struct_var(lsym)) {
         current_assign_nonblocking_ = expr.isNonBlocking();
         if (assign_struct_whole(lsym, expr.right())) {
@@ -433,8 +433,8 @@ bool Slang_context::lower_unpacked_whole_copy(const slang::ast::Expression& raw_
   if (!lhs_named || !rhs_named) {
     return false;
   }
-  const auto& lsym = lhs->as<slang::ast::ValueExpressionBase>().symbol;
-  const auto& rsym = rhs->as<slang::ast::ValueExpressionBase>().symbol;
+  const auto& lsym = interface_signal(lhs->as<slang::ast::ValueExpressionBase>().symbol);
+  const auto& rsym = interface_signal(rhs->as<slang::ast::ValueExpressionBase>().symbol);
 
   // Combinational locals are declared lazily at their first access, while
   // state arrays are hoisted into the module prologue. Make both operands'
@@ -570,6 +570,15 @@ bool Slang_context::lower_unpacked_whole_copy(const slang::ast::Expression& raw_
 }
 
 void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::string& rhs) {
+  const auto* aggregate = lhs_base_symbol(lhs);
+  if (aggregate && aggregate->getType().isStruct() && !aggregate->getType().isIntegral() && bit_layout_type(aggregate->getType())
+      && lhs.kind != ExpressionKind::NamedValue && lhs.kind != ExpressionKind::HierarchicalValue) {
+    Packed_lv lv;
+    if (resolve_packed_lvalue(lhs, lv)) {
+      emit_packed_rmw(lv, rhs, lhs.sourceRange);
+      return;
+    }
+  }
   switch (lhs.kind) {
     // A HierarchicalValue target (`gen_blk.sig = v`, e.g. an output-port
     // connection driving a named generate block's net) is a ValueExpressionBase
@@ -578,7 +587,7 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
     case ExpressionKind::NamedValue       :
     case ExpressionKind::HierarchicalValue: {
       const auto& nv  = lhs.as<slang::ast::ValueExpressionBase>();
-      const auto& sym = nv.symbol;
+      const auto& sym = interface_signal(nv.symbol);
       if (!declared_.contains(&sym) && !input_syms_.contains(&sym)) {
         declare_value_symbol(sym, /*force_reg=*/false);
       }
@@ -848,7 +857,7 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
 
     case ExpressionKind::MemberAccess: {
       const auto& ma = lhs.as<slang::ast::MemberAccessExpression>();
-      if (ma.member.kind != slang::ast::SymbolKind::Field || !ma.value().type->isIntegral()) {
+      if (ma.member.kind != slang::ast::SymbolKind::Field || !bit_layout_type(*ma.value().type)) {
         emit_unsupported(lhs.sourceRange, "unsupported-lhs-member", "only packed-struct field targets are supported");
         return;
       }
@@ -1279,7 +1288,7 @@ void Slang_context::assign_to_pattern(const slang::ast::Expression& lhs, std::sp
 
   if (!ct.isIntegral() && ct.kind == slang::ast::SymbolKind::FixedSizeUnpackedArrayType) {
     const auto&   arr  = ct.as<slang::ast::FixedSizeUnpackedArrayType>();
-    const int     eb   = flat_or_tinfo(arr.elementType).bits;
+    const int     eb   = tinfo(arr.elementType).bits;
     const int     flat = eb * static_cast<int>(arr.range.width());
     const int64_t left = arr.range.left;
     const int64_t step = arr.range.right >= arr.range.left ? 1 : -1;
@@ -2149,7 +2158,7 @@ const slang::ast::ValueSymbol* Slang_context::resolve_base_symbol(const slang::a
   // block, e.g. an unpacked-array read `gen[g-1].s[2*i+0]` (PriorityEncoder): the
   // base symbol is the genblock instance's array, declared on demand here.
   if (base.kind == ExpressionKind::NamedValue || base.kind == ExpressionKind::HierarchicalValue) {
-    const auto& sym = base.as<slang::ast::ValueExpressionBase>().symbol;
+    const auto& sym = interface_signal(base.as<slang::ast::ValueExpressionBase>().symbol);
     if (!declared_.contains(&sym) && !input_syms_.contains(&sym)) {
       declare_value_symbol(sym, /*force_reg=*/false);
     }
@@ -2167,9 +2176,9 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
   switch (lhs.kind) {
     case ExpressionKind::NamedValue       :
     case ExpressionKind::HierarchicalValue: {
-      const auto& sym = lhs.as<slang::ast::ValueExpressionBase>().symbol;
+      const auto& sym = interface_signal(lhs.as<slang::ast::ValueExpressionBase>().symbol);
       const auto& ct  = sym.getType().getCanonicalType();
-      if (!ct.isIntegral() || !ct.hasFixedRange()) {
+      if ((!ct.isIntegral() || !ct.hasFixedRange()) && !(ct.isStruct() && bit_layout_type(ct))) {
         return false;  // unpacked / non-packed root: not a packed slice
       }
       if (!static_only && !declared_.contains(&sym) && !input_syms_.contains(&sym)) {
@@ -2194,7 +2203,7 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
 
     case ExpressionKind::MemberAccess: {
       const auto& ma = lhs.as<slang::ast::MemberAccessExpression>();
-      if (ma.member.kind != slang::ast::SymbolKind::Field || !ma.value().type->isIntegral()) {
+      if (ma.member.kind != slang::ast::SymbolKind::Field || !bit_layout_type(*ma.value().type)) {
         return false;
       }
       // A member of a clipped part select has no single position.
@@ -2203,7 +2212,7 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
       }
       const auto& field  = ma.member.as<slang::ast::FieldSymbol>();
       auto        ti     = tinfo(*lhs.type);
-      out.const_off     += static_cast<int64_t>(field.bitOffset);  // field offset within its struct
+      out.const_off     += field_bit_offset(*ma.value().type, field);  // field offset within its struct
       out.width          = ti.bits;
       out.is_signed      = ti.is_signed;
       if (out.dyn_off.empty()) {
@@ -2264,7 +2273,7 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
         }
       }
 
-      if (!base_ty.isIntegral() || !base_ty.hasFixedRange()) {
+      if ((!base_ty.isIntegral() && !bit_layout_type(base_ty)) || !base_ty.hasFixedRange()) {
         return false;  // unpacked array element / non-packed base
       }
       if (static_only) {
@@ -2285,7 +2294,7 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
       }
 
       auto range  = base_ty.getFixedRange();
-      int  stride = base_ty.isPackedArray() ? static_cast<int>(base_ty.getArrayElementType()->getBitWidth()) : 1;
+      int  stride = base_ty.isArray() ? tinfo(*base_ty.getArrayElementType()).bits : 1;
       auto ti     = tinfo(*lhs.type);
 
       // local low-bit offset within `base`, in element units (const and/or
@@ -2345,6 +2354,9 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
       }
 
       // fold the local offset (bits) into the accumulator
+      if (const_low && base_ty.isUnpackedArray() && (*const_low < 0 || *const_low >= count)) {
+        out.in_range = "false";  // a constant element past the array: never lands (same literal as the memory path)
+      }
       if (const_low) {
         out.const_off += (*const_low) * stride;
       }
@@ -2381,6 +2393,9 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
 }
 
 void Slang_context::emit_packed_rmw(const Packed_lv& lv, const std::string& rhs, slang::SourceRange sr) {
+  if (lv.in_range == "false") {
+    return;
+  }
   if (auto it = packed_wire_bits_.find(lv.base); it != packed_wire_bits_.end()) {
     if (!lv.dyn_off.empty() || lv.const_off < 0 || lv.const_off + lv.width > static_cast<int64_t>(it->second.size())) {
       emit_unsupported(sr, "unsupported-packed-wire-write", "concurrent packed wires require constant in-range destinations");
@@ -2621,7 +2636,11 @@ std::string Slang_context::guard_element_index(const std::string& idx, const std
     auto le = builder_.create_le_stmts(idx, std::to_string(count - 1));
     ok      = ok.empty() ? le : builder_.create_log_and_stmts(ok, le);
   }
-  in_range = in_range.empty() ? ok : builder_.create_log_and_stmts(in_range, ok);
+  // "false" (a constant element already past its array) stays the bare
+  // sentinel: readers and writers test for it and emit nothing.
+  if (in_range != "false") {
+    in_range = in_range.empty() ? ok : builder_.create_log_and_stmts(in_range, ok);
+  }
   // Under the check the ordinal fits its own width, so the position computed
   // from it is non-negative by construction.
   return trunc_to(idx, std::max(1, static_cast<int>(std::bit_width(static_cast<uint64_t>(count - 1)))));

@@ -65,5 +65,11 @@ ${LHD} lec --set formal.effort=proof --impl pyrope:"$WD"/prp --ref verilog:"$WD"
   exit 1
 }
 
+# The same opt-in also preserves typed blackboxes through LGraph lowering.
+${LHD} compile --top bbtop --emit-dir lg:"$WD/lg" --emit verilog:"$WD/graph.v" \
+  --workdir "$WD/graph_work" -q -- --ignore-unknown-modules "$DIR/bbtop.v" \
+  > "$WD/graph.log" 2>&1 || { cat "$WD/graph.log"; exit 1; }
+grep -q 'array_0_ext' "$WD/graph.v" || { echo "missing SRAM blackbox"; exit 1; }
+grep -q 'bb2' "$WD/graph.v" || { echo "missing multi-output blackbox"; exit 1; }
 echo "PASS(blackbox)"
 exit 0

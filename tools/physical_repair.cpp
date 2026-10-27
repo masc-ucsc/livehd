@@ -17,6 +17,8 @@
 #include "inou/lefdef/mapped_graph.hpp"
 #include "node_util.hpp"
 #include "pass/opentimer/pass_opentimer.hpp"
+#include "pass/place/growth_budget.hpp"
+#include "pass/place/placement_technology.hpp"
 #include "pass/place/prects_networks.hpp"
 #include "pass/place/repair.hpp"
 #include "pass/place/resize_engine.hpp"
@@ -46,21 +48,23 @@ Eprp_var timing_options(const std::string& liberty, const std::string& sdc, cons
   return options;
 }
 pl::Timing_feedback evaluate_timing(const pl::Result& placed, livehd::opentimer::Physical_session& session, unsigned& serial,
-                                    const ph::Technology* placement_tech = nullptr, const std::string& profile_path = {}) {
+                                    const ph::Technology* placement_tech = nullptr, const std::string& profile_path = {},
+                                    livehd::opentimer::Physical_session::Purpose purpose
+                                    = livehd::opentimer::Physical_session::Purpose::detailed) {
   const auto started = std::chrono::steady_clock::now();
   const auto before  = session.statistics();
   ++serial;
   pl::Timing_feedback result;
   if (placement_tech) {
     const auto controls = pl::prects_networks(*placement_tech, placed.floorplan, placed.prects);
-    result              = pl::prects_data_timing(session.evaluate(placed.graph, placed.parasitics, controls.timing_cuts), controls);
+    result = pl::prects_data_timing(session.evaluate(placed.graph, placed.parasitics, controls.timing_cuts, purpose), controls);
   } else {
-    result = session.evaluate(placed.graph, placed.parasitics);
+    result = session.evaluate(placed.graph, placed.parasitics, {}, purpose);
   }
   if (!profile_path.empty()) {
     const auto&   after = session.statistics();
     std::ofstream out(profile_path, std::ios::app);
-    out << "{\"evaluation\":" << serial
+    out << "{\"evaluation\":" << serial << ",\"ranking_only\":" << (result.ranking_only ? "true" : "false")
         << ",\"wall_s\":" << std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count()
         << ",\"engine_s\":" << after.seconds - before.seconds
         << ",\"validation_s\":" << after.validation_seconds - before.validation_seconds
@@ -99,9 +103,9 @@ void physical_snapshot(const ph::Technology& tech, const ph::Floorplan& fp, cons
       << fp.components.size() + fp.terminals.size() << '\n';
   std::map<std::string, int> cells, terminals;
   for (size_t i = 0; i < fp.components.size(); ++i) {
-    const auto& c     = fp.components[i];
-    const auto& m     = tech.macros.at(c.macro);
-    const bool  macro = !m.klass.starts_with("CORE");
+    const auto& c       = fp.components[i];
+    const auto& m       = tech.macros.at(c.macro);
+    const bool  macro   = !m.klass.starts_with("CORE");
     const auto [bh, bv] = macro ? pl::lef_track_capacity(tech, m.blocked_layers) : std::pair{0., 0.};
     cells.emplace(c.name, i);
     // Placement halos reserve whitespace for access/routing; only the physical
@@ -285,6 +289,11 @@ int main(int argc, char** argv) {
       sizing_forest = scope == "sizing_forest";
     }
     number_option("density", options.density);
+    if (config.HasMember("density_weight_seed")) {
+      double seed = 0;
+      number_option("density_weight_seed", seed);
+      options.density_weight_seed = seed;
+    }
     number_option("rc_pessimism", options.rc_pessimism);
     integer_option("grid_density", options.bins);
     integer_option("threads", options.threads);
@@ -358,7 +367,7 @@ int main(int argc, char** argv) {
     options.exact_cell_density  = config.HasMember("exact_cell_density") && config["exact_cell_density"].GetBool();
     options.min_iterations      = config.HasMember("min_iterations") ? config["min_iterations"].GetInt() : 40;
     if (config.HasMember("post_density_factor")) {
-      options.post_density_factor = config["post_density_factor"].GetInt();
+      options.post_density_factor = config["post_density_factor"].GetDouble();
     }
     if (config.HasMember("convergence_tolerance")) {
       options.convergence_tolerance = config["convergence_tolerance"].GetDouble();
@@ -580,8 +589,8 @@ int main(int argc, char** argv) {
     for (const auto& path : config["lefs"].GetArray()) {
       options.lefs.emplace_back(path.GetString());
     }
-    const auto tech  = ph::read_lef(options.lefs);
-    auto       frame = std::make_shared<ph::Floorplan>(*options.previous);
+    const auto& tech  = options.technology().lef;
+    auto        frame = std::make_shared<ph::Floorplan>(*options.previous);
     for (auto& cell : frame->components) {
       const auto& macro = tech.macros.at(cell.macro);
       cell.place.width  = std::llround(macro.width * tech.dbu);
@@ -637,6 +646,7 @@ int main(int argc, char** argv) {
       }
       source = io->get_graph();
     }
+    pl::initialize_growth_budget(*source, options);
     hhds::GraphLibrary seeded_source_library;
     if (config.HasMember("seed_def_positions") && config["seed_def_positions"].GetBool()) {
       // Resolve hierarchical physical names through the normal retained-frame
@@ -702,8 +712,18 @@ int main(int argc, char** argv) {
       options.restart_seed = options.previous;
     }
     hhds::GraphLibrary placed_library;
+    hhds::GraphLibrary cleanup_library;
+    unsigned           removed_synthesis_buffers = 0;
     if (floorplan_mode || (config.HasMember("cell_place") && config["cell_place"].GetBool())) {
       // Controlled full cell-GP import, not the ECO/retained-placement path.
+      if (config.HasMember("remove_synthesis_buffers") && config["remove_synthesis_buffers"].GetBool()) {
+        const auto cleaned        = pl::remove_synthesis_buffers(*source, cleanup_library, options);
+        source                    = cleaned.graph;
+        removed_synthesis_buffers = cleaned.removed;
+        std::ofstream(root + "/buffer_cleanup.json")
+            << "{\"removed\":" << cleaned.removed << ",\"boundary\":" << cleaned.boundary
+            << ",\"protected\":" << cleaned.protected_cells << ",\"unsupported\":" << cleaned.unsupported << "}\n";
+      }
       const auto input = options.previous;
       options.previous.reset();
       options.snapshots = true;
@@ -852,6 +872,14 @@ int main(int argc, char** argv) {
       const auto raw_evaluate = [&](const pl::Result& placed) {
         return evaluate_timing(placed, timing_session, serial, &tech, root + "/timing_profile.jsonl");
       };
+      const auto rank = [&](const pl::Result& placed) {
+        return evaluate_timing(placed,
+                               timing_session,
+                               serial,
+                               &tech,
+                               root + "/timing_profile.jsonl",
+                               livehd::opentimer::Physical_session::Purpose::ranking);
+      };
       pl::Evaluate evaluate     = raw_evaluate;
       const auto   start        = std::chrono::steady_clock::now();
       auto         seed_options = options;
@@ -862,7 +890,7 @@ int main(int argc, char** argv) {
       hhds::GraphLibrary seed_library;
       auto               seed          = pl::place(*source, seed_library, seed_options);
       const bool         timing_driven = !config.HasMember("timing_driven") || config["timing_driven"].GetBool();
-      const auto         seed_timing   = timing_driven ? evaluate(seed) : pl::Timing_feedback{};
+      const auto         seed_timing   = timing_driven ? rank(seed) : pl::Timing_feedback{};
       // A separately invoked fixed-macro cell pass can carry the macro pass's
       // last timing weights, exactly as the in-process staged placer does.
       if (!config.HasMember("net_weights") && timing_driven) {
@@ -874,6 +902,7 @@ int main(int argc, char** argv) {
       }
       if (timing_driven) {
         options.fp_evaluate = raw_evaluate;
+        options.gp_rank     = rank;
       }
       const auto seeded            = std::chrono::steady_clock::now();
       const bool run_resize        = config.HasMember("resize") && config["resize"].GetBool();
@@ -954,10 +983,14 @@ int main(int argc, char** argv) {
 
       options.restart_seed.reset();
       ph::write_def(state.floorplan, root + "/initial.def");
+      const pl::Trial_admission admit_trial = [&] {
+        const auto& stats = timing_session.statistics();
+        return stats.evaluations - stats.rankings < 6;
+      };
       const auto        placed = std::chrono::steady_clock::now();
       pl::Repair_result refined;
       if (timing_rounds) {
-        refined = pl::timing_place(std::move(state), options, evaluate, timing_rounds);
+        refined = pl::timing_place(std::move(state), options, evaluate, timing_rounds, std::nullopt, admit_trial);
       } else {
         refined.placed = std::move(state);
         refined.report = "{\"model\":\"placement_only\",\"rounds\":[],\"accepted\":0}";
@@ -970,24 +1003,35 @@ int main(int argc, char** argv) {
         repaired = pl::resize_placed(std::move(refined.placed), options, evaluate);
         std::ofstream(root + "/repair.json") << repaired.report;
       } else if (run_resize) {
-        sized
-            = pl::repair_buffers(std::move(refined.placed), options, evaluate, pl::Repair_scope::sizing, std::move(refined.timing));
+        sized = pl::repair_buffers(std::move(refined.placed),
+                                   options,
+                                   evaluate,
+                                   pl::Repair_scope::sizing,
+                                   std::move(refined.timing),
+                                   admit_trial);
         std::ofstream(root + "/resize.json") << sized.report;
       }
       const auto sized_at = std::chrono::steady_clock::now();
       if (run_resize && !new_engine) {
-        repaired
-            = pl::repair_buffers(std::move(sized.placed), options, evaluate, pl::Repair_scope::design, std::move(sized.timing));
+        repaired = pl::repair_buffers(std::move(sized.placed),
+                                      options,
+                                      evaluate,
+                                      pl::Repair_scope::design_after_sizing,
+                                      std::move(sized.timing),
+                                      admit_trial);
         std::ofstream(root + "/repair.json") << repaired.report;
       }
       const auto        repaired_at = std::chrono::steady_clock::now();
       auto&             optimized   = run_resize ? repaired.placed : refined.placed;
       pl::Repair_result finalized;
       if (options.optimization_pending) {
-        finalized = pl::finalize_placement(optimized, options, raw_evaluate);
+        finalized = pl::finalize_placement(optimized,
+                                           options,
+                                           raw_evaluate,
+                                           run_resize ? std::move(repaired.timing) : std::move(refined.timing));
       }
       auto&      result         = options.optimization_pending ? finalized.placed : optimized;
-      const auto final_feedback = raw_evaluate(result);
+      const auto final_feedback = finalized.timing ? *finalized.timing : raw_evaluate(result);
       pl::refresh_timing_weights(result, options, final_feedback);
       const auto                                 timed_at = std::chrono::steady_clock::now();
       rapidjson::StringBuffer                    weights_json;
@@ -1002,10 +1046,10 @@ int main(int argc, char** argv) {
         throw std::runtime_error("cannot write net_weights");
       }
       const auto                                 membership = pl::timing_weights(*result.parasitics,
-                                                 final_feedback,
-                                                 options.timing_fraction,
-                                                 options.timing_max_weight,
-                                                 options.timing_exponent);
+                                                                                 final_feedback,
+                                                                                 options.timing_fraction,
+                                                                                 options.timing_max_weight,
+                                                                                 options.timing_exponent);
       rapidjson::StringBuffer                    final_weights_json;
       rapidjson::Writer<rapidjson::StringBuffer> final_weights(final_weights_json);
       final_weights.StartObject();
@@ -1067,7 +1111,7 @@ int main(int argc, char** argv) {
         originals.emplace(cell.name, &cell);
       }
       const bool editable = options.fp_resize || run_resize;
-      if (!editable && result.floorplan.components.size() != originals.size()) {
+      if (!editable && result.floorplan.components.size() + (floorplan_mode ? 0 : removed_synthesis_buffers) != originals.size()) {
         throw std::runtime_error("cell placement changed component count");
       }
       unsigned fixed = 0;
@@ -1328,12 +1372,12 @@ int main(int argc, char** argv) {
     const auto sized  = std::chrono::steady_clock::now();
     auto       repair = forest_only ? std::move(sizing)
                                     : pl::repair_buffers(std::move(sizing.placed),
-                                                   options,
-                                                   evaluate,
-                                                   sizing_forest  ? pl::Repair_scope::forest
+                                                         options,
+                                                         evaluate,
+                                                         sizing_forest  ? pl::Repair_scope::forest
                                                          : repair_first ? pl::Repair_scope::sizing
-                                                                        : pl::Repair_scope::design,
-                                                   std::move(sizing.timing));
+                                                                        : pl::Repair_scope::design_after_sizing,
+                                                         std::move(sizing.timing));
     if (!forest_only) {
       std::ofstream(root + (repair_first ? "/resize.json" : "/repair.json")) << repair.report;
     }

@@ -2,12 +2,14 @@
 #include "physical_rc.hpp"
 
 #include <cmath>
+#include <stdexcept>
 
 #include "gtest/gtest.h"
 
 TEST(PhysicalRc, ExactCheckpointReaderRoundTripsAllStoredDoubles) {
   livehd::physical::Parasitics original;
-  original.identity = "checkpoint";
+  original.identity    = "checkpoint";
+  original.timing_cuts = {"d"};
   original.nets.push_back({
       "d",
       {{"d", 0}, {"s", 0}},
@@ -22,5 +24,15 @@ TEST(PhysicalRc, ExactCheckpointReaderRoundTripsAllStoredDoubles) {
     const auto restored = livehd::physical::deserialize_parasitics_exact(livehd::physical::serialize_parasitics(original));
     EXPECT_EQ(restored.identity, original.identity);
     EXPECT_EQ(restored.nets, original.nets);
+    EXPECT_EQ(restored.timing_cuts, original.timing_cuts);
   }
+}
+TEST(PhysicalRc, ReadsOlderSnapshotsWithoutCutsAndRejectsMalformedCuts) {
+  const std::string old = R"({"version":2,"identity":"old","approximate":true,"cells":[],"terminals":[],"nets":[]})";
+  EXPECT_TRUE(livehd::physical::deserialize_parasitics(old).timing_cuts.empty());
+  const std::string missing = R"({"version":3,"identity":"bad","approximate":true,"cells":[],"terminals":[],"nets":[]})";
+  EXPECT_THROW(livehd::physical::deserialize_parasitics(missing), std::runtime_error);
+  const std::string malformed
+      = R"({"version":3,"identity":"bad","approximate":true,"cells":[],"terminals":[],"nets":[],"timing_cuts":[7]})";
+  EXPECT_THROW(livehd::physical::deserialize_parasitics(malformed), std::runtime_error);
 }

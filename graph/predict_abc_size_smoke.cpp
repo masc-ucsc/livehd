@@ -3,7 +3,7 @@
 // Pins the ONE per-op constant table in graph/predict_abc_size.hpp -- the
 // predicted generic-AIG score that `pass.color synth --set synth_alg=cones`
 // budgets its walk in, ranks cone overlaps in and merges under
-// (todo/livehd/2c-color-synthcones.html section B). The three uses share the
+// (see pass/color/README.md). The three uses share the
 // unit, so a change to one constant must be made here too or they stop agreeing.
 //
 // Named *_smoke, not *_test: predict_abc_size is header-only (there is no

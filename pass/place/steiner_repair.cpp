@@ -158,7 +158,8 @@ Buffer_tree plan_buffers(Point root, const std::vector<Point>& loads, const std:
 
 Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, const std::vector<double>& capacitances,
                                 const std::vector<double>& required_ps, const std::vector<Buffer_drive>& drives,
-                                const Buffer_drive& driver, double wire_r_ohm_dbu, double wire_c_ff_dbu) {
+                                const Buffer_drive& driver, double wire_r_ohm_dbu, double wire_c_ff_dbu,
+                                const Buffer_limits& limits) {
   if (drives.empty() || loads.size() != required_ps.size() || loads.size() != capacitances.size() || !std::isfinite(wire_r_ohm_dbu)
       || wire_r_ohm_dbu < 0) {
     throw std::invalid_argument("invalid buffer-choice model");
@@ -288,6 +289,9 @@ Buffer_tree plan_buffer_choices(Point root, const std::vector<Point>& loads, con
     }
     const auto [packet, longest] = aggregate(root, plan.root);
     (void)longest;
+    if (plan.buffers.size() > limits.cells || packet.area > limits.area + 1e-9) {
+      continue;
+    }
     const double required = packet.required - driver.intrinsic_ps - driver.resistance_ohm * packet.cap * 1e-3;
     if (!found || required > best_required + 1e-6 || (std::abs(required - best_required) <= 1e-6 && packet.area < best_area)) {
       best          = std::move(plan);

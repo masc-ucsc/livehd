@@ -25,6 +25,7 @@
 #include "pass/liberty/liberty_dff.hpp"
 #include "pass/opentimer/pass_opentimer.hpp"
 #include "place_test_fixture.hpp"
+#include "placement_technology.hpp"
 #include "preroute.hpp"
 #include "rapidjson/document.h"
 #include "repair.hpp"
@@ -1179,6 +1180,16 @@ TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegaliza
     EXPECT_EQ(std::filesystem::exists(options.output_dir + "/macro/after_detailed.def"), detail);
     EXPECT_EQ(std::filesystem::exists(options.output_dir + "/after_detailed.def"), !terminal);
     EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/after_legalization.def"));
+    std::ifstream seed_file(options.output_dir + "/restart_seed.json");
+    ASSERT_TRUE(seed_file);
+    const std::string   seed_text{std::istreambuf_iterator<char>(seed_file), {}};
+    rapidjson::Document seed;
+    seed.Parse(seed_text.c_str());
+    ASSERT_FALSE(seed.HasParseError());
+    EXPECT_TRUE(seed["coordinates_only"].GetBool());
+    EXPECT_EQ(seed["reused_movable_cells"].GetUint64(), 2U);
+    EXPECT_EQ(seed["reused_movable_macros"].GetUint64(), 0U);
+    EXPECT_EQ(seed["new_movable_cells"].GetUint64(), 0U);
     if (fp) {
       const auto read_report = [&](const std::string& name) {
         std::ifstream       file(options.output_dir + "/" + name);
@@ -5063,6 +5074,51 @@ TEST(Placement, BeforeLegalizeReceivesPhysicalHaloCoordinatesAndPreservesAnchors
   EXPECT_EQ(d.node_y[1], 1);
 }
 
+TEST(Placement, MacroRankingUpdatesOnlyAtDensityMilestones) {
+  const auto root = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "macro_ranking_milestones";
+  std::filesystem::create_directories(root);
+  std::ifstream input("inou/lefdef/tests/data/sky130hd.lef");
+  std::string   lef{std::istreambuf_iterator<char>(input), {}};
+  lef.replace(lef.find("CLASS CORE"), std::string("CLASS CORE").size(), "CLASS BLOCK");
+  const auto path = (root / "macro.lef").string();
+  std::ofstream(path) << lef;
+  hhds::GraphLibrary source, placed_library;
+  auto               graph   = tie_graph(source, false);
+  auto               options = plain_options();
+  options.lefs               = {"inou/lefdef/tests/data/sky130hd.tlef", path};
+  options.liberty            = "inou/lefdef/tests/data/sky130hd.lib";
+  options.output_dir         = (root / "out").string();
+  options.core               = {0, 0, 30, 30};
+  options.bins               = 2;
+  options.iterations = options.min_iterations = 120;
+  options.macro_timing_interval               = 10;
+  unsigned ranking_calls                      = 0;
+  options.fp_evaluate                         = [](const Result&) { return Timing_feedback{}; };
+  options.gp_rank                             = [&](const Result&) {
+    ++ranking_calls;
+    Timing_feedback feedback;
+    feedback.ranking_only        = true;
+    feedback.pins["inv:A"].slack = -10;
+    return feedback;
+  };
+  const auto placed = place(*graph, placed_library, options);
+  EXPECT_GT(ranking_calls, 0U);
+  EXPECT_LE(ranking_calls, 2U);
+  EXPECT_NO_THROW(check_legality(options.technology().lef, placed.floorplan));
+  std::ifstream trace(options.output_dir + "/macro_timing.jsonl");
+  ASSERT_TRUE(trace);
+  unsigned samples = 0;
+  for (std::string line; std::getline(trace, line);) {
+    rapidjson::Document sample;
+    sample.Parse(line.c_str());
+    ASSERT_FALSE(sample.HasParseError());
+    EXPECT_TRUE(sample["ranking_only"].GetBool());
+    EXPECT_LE(sample["overflow"].GetDouble(), .2);
+    ++samples;
+  }
+  EXPECT_EQ(samples, ranking_calls);
+}
+
 TEST(Placement, ObservationalGpSamplingPreservesPlacementAndTimingSchedule) {
   hhds::GraphLibrary source, baseline_library, observed_library;
   auto               graph   = tie_graph(source, false);
@@ -6180,9 +6236,11 @@ TEST(Placement, CutRowsRequireActualSiteCoverageAndUseSegmentOrientations) {
   cell.symmetry_y          = true;
   physical::Floorplan fp;
   fp.die  = {0, 0, 100, 20};
-  fp.rows = {{"r0_left", "s", 0, 0, 3, 10, physical::Orientation::N},
-             {"r0_right", "s", 60, 0, 4, 10, physical::Orientation::N},
-             {"r1", "s", 0, 10, 10, 10, physical::Orientation::FS}};
+  fp.rows = {
+      { "r0_left", "s",  0,  0,  3, 10,  physical::Orientation::N},
+      {"r0_right", "s", 60,  0,  4, 10,  physical::Orientation::N},
+      {      "r1", "s",  0, 10, 10, 10, physical::Orientation::FS}
+  };
   Ann_place p(80, 0, 10, 10);
   p.status = physical::Status::PLACED;
   fp.components.push_back({"c", "cell", p});
@@ -6259,11 +6317,11 @@ END LIBRARY
   options.halo_x = options.halo_y = 4;
   options.iterations              = 0;
   options.bins                    = 4;
-  options.optimization_pending = false;  // handoff taps need fresh terminal legalization
-  options.handoff_taps = options.snapshots = true;
-  options.terminal_legalize_options.critical_fraction                  = 0;
-  const auto result                                                    = place(*graph, flat, options);
-  const auto tech                                                      = physical::read_lef(options.lefs);
+  options.optimization_pending    = false;  // handoff taps need fresh terminal legalization
+  options.handoff_taps = options.snapshots            = true;
+  options.terminal_legalize_options.critical_fraction = 0;
+  const auto result                                   = place(*graph, flat, options);
+  const auto tech                                     = physical::read_lef(options.lefs);
   EXPECT_NO_THROW(check_legality(tech, result.floorplan, options));
   size_t taps = 0;
   for (const auto& c : result.floorplan.components) {
@@ -6282,10 +6340,12 @@ END LIBRARY
 }  // namespace livehd::placement
 
 TEST(Placement, SteinerRcSharedTopologyPreservesLengthAndCharge) {
-  const std::vector<std::pair<std::string, std::pair<double, double>>> pins{{"driver", {0, 0}},
-                                                                            {"a", {100, 0}},
-                                                                            {"b", {50, 100}},
-                                                                            {"coincident", {0, 0}}};
+  const std::vector<std::pair<std::string, std::pair<double, double>>> pins{
+      {    "driver",    {0, 0}},
+      {         "a",  {100, 0}},
+      {         "b", {50, 100}},
+      {"coincident",    {0, 0}}
+  };
   const auto rc = livehd::placement::steiner_rc("driver", pins, {2, 3, 4, 5, "test"}, 1000);
   ASSERT_EQ(rc.nodes.size(), 8);
   EXPECT_EQ(rc.edges.size(), 7);
@@ -6299,4 +6359,25 @@ TEST(Placement, SteinerRcSharedTopologyPreservesLengthAndCharge) {
   }
   EXPECT_NEAR(capacitance, .8, 1e-12);
   EXPECT_NEAR(resistance, .6 + 4e-9, 1e-12);
+}
+
+TEST(Placement, SteinerRcUsesNamedDriverRegardlessOfPinOrder) {
+  std::mt19937                                                   random(817);
+  std::vector<std::pair<std::string, std::pair<double, double>>> pins{
+      {"driver", {0, 0}}
+  };
+  for (size_t i = 0; i < 40; ++i) {
+    const double x = random() % 1000, y = random() % 1000;
+    pins.push_back({
+        "sink" + std::to_string(i),
+        {x, y}
+    });
+  }
+  const auto before = livehd::placement::steiner_rc("driver", pins, {1, 2, 1, 2, "test"}, 1000);
+  std::rotate(pins.begin(), pins.begin() + 1, pins.end());
+  const auto after = livehd::placement::steiner_rc("driver", pins, {1, 2, 1, 2, "test"}, 1000);
+  EXPECT_EQ(before.wire_length_um, after.wire_length_um);
+  EXPECT_EQ(before.nodes.size(), after.nodes.size());
+  EXPECT_EQ(before.edges.size(), after.edges.size());
+  EXPECT_THROW(livehd::placement::steiner_rc("absent", pins, {1, 2, 1, 2, "test"}, 1000), std::invalid_argument);
 }
