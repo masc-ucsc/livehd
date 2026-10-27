@@ -295,7 +295,7 @@ workflow, and Isabelle heap-build rules.
 `pass.lean` writes a design as a Lean certificate. See
 [`pass/lean/README.md`](pass/lean/README.md) for the pass and its options.
 
-Two simulators run these certificates:
+Three simulators run these certificates:
 
 - **Translation validation**
   ([`pass/lean/Translation_Validation/README.md`](pass/lean/Translation_Validation/README.md)).
@@ -317,3 +317,16 @@ Two simulators run these certificates:
   - Its README covers how to build and run it, how it works, its trust
     boundary, the CVA6, CORE-ET and PicoRV32 blocks it covers, and two
     performance examples.
+- **IR as semantics**
+  ([`pass/lean/Lgraph_IR_Semantics_Simulator/README.md`](pass/lean/Lgraph_IR_Semantics_Simulator/README.md)).
+  - It runs the certificate directly. The certificate is data, and a small Lean
+    program is the definition of what that data means.
+  - It has three ways to run a certificate: a reference interpreter,
+    `interpretDesign`; a checked interpreter; and a compiled fast path. The
+    three are proved to agree for every input and every state, with no axioms
+    and no `sorry`.
+  - Its `interpretDesign` is the reference semantics that the other two
+    simulators are checked against.
+  - Its README covers how to build and run it, how it works, its trust
+    boundary, the CVA6 and CORE-ET blocks it covers, and two performance
+    examples.
