@@ -175,6 +175,11 @@ cones remain, including controls crossing region boundaries. Logical mapped
 definitions and their resynthesis identities/history are unchanged. The cleanup
 also runs on the new physical copy after an accepted color restart, but never
 on repair/ECO trials. `buffer_cleanup.jsonl` records removed and retained counts.
+The synthesis host releases that cleanup graph once the zero-wire timing seed
+owns its flattened copy. The seed keeps RC in memory without serializing a second
+copy into graph attributes; completed placements still persist their RC for
+standalone timing and reload. Seed and cleanup libraries are released after
+placement accepts its own graph, before physical repair starts.
 The imported-GP diagnostic exposes the same operation through
 `remove_synthesis_buffers=true`; its component-count check accounts for exactly
 those removals while retaining fixed-cell and master checks.

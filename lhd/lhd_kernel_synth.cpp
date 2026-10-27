@@ -2064,9 +2064,10 @@ void synth_command(Options& opts, Result& res) {
         throw Lhd_error{"usage", "invalid synth.place.buffer_cleanup: " + buffer_cleanup, "expected auto, true or false"};
       }
       const bool run_buffer_cleanup = buffer_cleanup == "auto" ? run_resize && !macro_plan_only : buffer_cleanup == "true";
-      hhds::GraphLibrary                               seed_library;
+      std::unique_ptr<hhds::GraphLibrary>              seed_library;
       std::vector<std::unique_ptr<hhds::GraphLibrary>> prepared_libraries;
-      const auto                                       prepare_input = [&]() {
+      bool                                             prepared_before = false;
+      const auto                                       prepare_input   = [&]() {
         if (!place_options.full || !run_buffer_cleanup) {
           return *found;
         }
@@ -2074,7 +2075,7 @@ void synth_command(Options& opts, Result& res) {
         auto        library = std::make_unique<hhds::GraphLibrary>();
         const auto  cleaned = livehd::placement::remove_synthesis_buffers(**found, *library, place_options);
         fs::create_directories(place_options.output_dir);
-        const auto mode = prepared_libraries.empty() ? std::ios::trunc : std::ios::app;
+        const auto mode = prepared_before ? std::ios::app : std::ios::trunc;
         std::ofstream(place_options.output_dir + "/buffer_cleanup.jsonl", mode)
             << std::format("{{\"removed\":{},\"boundary\":{},\"protected\":{},\"unsupported\":{}}}\n",
                            cleaned.removed,
@@ -2082,6 +2083,7 @@ void synth_command(Options& opts, Result& res) {
                            cleaned.protected_cells,
                            cleaned.unsupported);
         prepared_libraries.push_back(std::move(library));
+        prepared_before = true;
         return cleaned.graph;
       };
       auto placement_input = prepare_input();
@@ -2099,6 +2101,7 @@ void synth_command(Options& opts, Result& res) {
         place_options.macro_timing_interval = 0;
       }
       if (run_timing_place && !macro_plan_only) {
+        seed_library                      = std::make_unique<hhds::GraphLibrary>();
         auto seed_options                 = place_options;
         seed_options.timing_seed          = true;
         seed_options.macro_magnet.enabled = false;
@@ -2114,7 +2117,7 @@ void synth_command(Options& opts, Result& res) {
         livehd::placement::Result seed;
         try {
           Stdout_to_log redirect(seed_log);
-          seed = livehd::placement::place(*placement_input, seed_library, seed_options);
+          seed = livehd::placement::place(*placement_input, *seed_library, seed_options);
         } catch (const std::exception& e) {
           throw Lhd_error{"unsupported", std::string("timing seed placement failed: ") + e.what(), "see " + seed_log};
         }
@@ -2122,6 +2125,11 @@ void synth_command(Options& opts, Result& res) {
         phase_log.clear();
         set_crash_context({}, {});
         note_unknown_tied(seed);
+        // The seed owns a flattened copy, including its cell declarations and
+        // source locations. Retire the cleanup generation before constructing
+        // the full-design timer; no later stage reads that scratch graph.
+        placement_input = seed.graph;
+        prepared_libraries.clear();
         const auto timing = rank(seed);
         const auto controls
             = livehd::placement::prects_networks(place_options.technology().lef, seed.floorplan, seed.prects, timing);
@@ -2136,7 +2144,6 @@ void synth_command(Options& opts, Result& res) {
                           "post-synthesis timing has no constrained data nets for placement weighting",
                           "check synth.sdc"};
         }
-        placement_input = seed.graph;
         res.recipe_steps.emplace_back("pass.place.post_synth_timing");
       }
       const auto log = next_log_path(opts, "pass.place");
@@ -2170,6 +2177,11 @@ void synth_command(Options& opts, Result& res) {
       phase_step.clear();
       phase_log.clear();
       set_crash_context({}, {});
+      // Placement has copied its input into the accepted generation. Keep only
+      // that generation and the original synthesis netlist needed by resynthesis.
+      placement_input.reset();
+      seed_library.reset();
+      prepared_libraries.clear();
       if (!run_timing_place) {
         note_unknown_tied(placed);  // the seed (above) already reported it when it ran
       }

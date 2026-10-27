@@ -9546,7 +9546,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       result.parasitics->timing_cuts.insert(net.driver);
     }
   }
-  result.graph->get_input_node().attr(attrs::placement_rc).set(ph::serialize_parasitics(*result.parasitics));
+  // The zero-wire timing seed is an in-memory intermediate, never a saved
+  // placement. Its consumer already has result.parasitics; serializing a second
+  // full-design copy retains hundreds of MB until the next placement finishes.
+  if (!options.timing_seed) {
+    result.graph->get_input_node().attr(attrs::placement_rc).set(ph::serialize_parasitics(*result.parasitics));
+  }
   fs::create_directories(options.output_dir);
   if (resolved_uroute.export_features && !options.timing_seed && !options.retain_placement
       && options.completed_stage == Placement_stage::final) {

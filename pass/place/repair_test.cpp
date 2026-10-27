@@ -1131,10 +1131,15 @@ TEST_F(Buffer_repair, PostSynthesisWeightsSeedFirstPlacementThenUsePlacedRc) {
   graph->get_output_pin("y").connect_driver(p);
   auto seed_options         = options;
   seed_options.timing_seed  = true;
-  seed_options.output_dir  += "/post_synth";
+  seed_options.output_dir   += "/post_synth";
   hhds::GraphLibrary seed_library, placed_library;
-  const auto         seed = place(*graph, seed_library, seed_options);
+  auto               cleanup_library = std::make_unique<hhds::GraphLibrary>();
+  auto               cleaned         = remove_synthesis_buffers(*graph, *cleanup_library, options);
+  const auto         seed            = place(*cleaned.graph, seed_library, seed_options);
+  cleaned.graph.reset();
+  cleanup_library.reset();  // The seed must own all declarations/provenance it needs.
   EXPECT_FALSE(std::filesystem::exists(seed_options.output_dir + "/out.def"));
+  EXPECT_FALSE(seed.graph->get_input_node().attr(attrs::placement_rc).has());
   for (const auto& net : seed.parasitics->nets) {
     for (const auto& node : net.nodes) {
       EXPECT_EQ(node.capacitance_ff, 0);
@@ -1143,6 +1148,7 @@ TEST_F(Buffer_repair, PostSynthesisWeightsSeedFirstPlacementThenUsePlacedRc) {
   options.net_weights = timing_weights(*seed.parasitics, timing(seed));
   ASSERT_FALSE(options.net_weights.empty());
   auto initial = place(*seed.graph, placed_library, options);
+  EXPECT_TRUE(initial.graph->get_input_node().attr(attrs::placement_rc).has());
   EXPECT_EQ(initial.net_weights, options.net_weights);
   double wire_cap = 0;
   for (const auto& net : initial.parasitics->nets) {

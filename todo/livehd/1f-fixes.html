@@ -22,6 +22,26 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Review v47 retires placement scratch data when its consumers finish. The
+buffer-cleanup graph is released before building the seed timer; the internal
+zero-wire seed keeps typed RC without another serialized copy. Seed/cleanup
+libraries are released after placement owns its accepted graph. Final placements
+still persist RC for standalone timing and reload. The handoff regression times
+and places the seed after destroying its cleanup source library; placement and
+physical-session suites pass against published OpenTimer <code>fe3f265</code>.
+No public defaults or timing calculations change.</p>
+<p>All four designs retain exact DEFs and independent WNS, HPWL, cells and area.
+Placement times are 1.928 s (lfsr), 40.687 s (minimax), 37.246 s
+(NVDLA/partition_m) and 702.895 s (coralnpu), all within 1.5× of v45. These are
+single samples with concurrent builds, not repeatable speedup claims. Coral's
+peak RSS falls from 9,955 to 9,480 MiB; its whole flow takes 850.96 s wall and
+850.25 s CPU. Evidence is in <code>runs.placement_scratch_lifetimes_v47</code>.</p>
+<p>Gemmini's sampled initial-timing peak falls from 16,187,260 to 14,982,400 KiB,
+but the full flow still hits the 16 GiB guard during placement (16,869,656 KiB
+after 193.5 s). GP iteration entry is not established. A diagnostic heap snapshot
+confirms that the old seed retains a 384 MiB serialized RC allocation during
+placement setup. The broader A–J task remains open.</p>
+
 <p>Review v45 reduces OpenTimer storage without changing timing calculations.
 Published dependency <code>fe3f265</code> removes the never-populated arc
 internal-power array and packs private timing-provenance fields. On this 64-bit
