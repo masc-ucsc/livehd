@@ -4543,6 +4543,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                                                "railtree",
                                                reset_constant)
                                : Reset_tree_stats{};
+  if (const auto minted = std::max(reset_tree.buffer_um2, rail_tree.buffer_um2); options.growth_budget && minted > 0) {
+    // Both trees mint the smallest buffer: only an upsize above it is growth.
+    options.growth_budget->tree_master_um2 = minted;
+  }
   double      area       = 0;
   int64_t     max_width = 0, max_height = 0;
   std::string site_name;
@@ -10290,12 +10294,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       tree.AddMember("nets", reset_tree.nets, allocator);
       tree.AddMember("sinks", reset_tree.sinks, allocator);
       tree.AddMember("added", reset_tree.buffers, allocator);
-      tree.AddMember(
-          "buffers",
-          static_cast<uint64_t>(std::count_if(v.cells.begin(),
-                                              v.cells.end(),
-                                              [](const Cell& c) { return c.name.find("__place_rsttree") != std::string::npos; })),
-          allocator);
+      tree.AddMember("buffers",
+                     static_cast<uint64_t>(
+                         std::count_if(v.cells.begin(), v.cells.end(), [](const Cell& c) { return is_reset_tree_buffer(c.name); })),
+                     allocator);
       tree.AddMember("levels", reset_tree.levels, allocator);
       tree.AddMember("skipped", reset_tree.skipped, allocator);
       json.AddMember("reset_tree", tree, allocator);
@@ -10307,12 +10309,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       tree.AddMember("sinks", rail_tree.sinks, allocator);
       tree.AddMember("added", rail_tree.buffers, allocator);
       tree.AddMember("levels", rail_tree.levels, allocator);
-      tree.AddMember(
-          "buffers",
-          static_cast<uint64_t>(std::count_if(v.cells.begin(),
-                                              v.cells.end(),
-                                              [](const Cell& c) { return c.name.find("__place_railtree") != std::string::npos; })),
-          allocator);
+      tree.AddMember("buffers",
+                     static_cast<uint64_t>(
+                         std::count_if(v.cells.begin(), v.cells.end(), [](const Cell& c) { return is_rail_tree_buffer(c.name); })),
+                     allocator);
       json.AddMember("domino_rail_tree", tree, allocator);
     }
     if (macro_run) {

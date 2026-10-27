@@ -104,5 +104,58 @@ TEST(GrowthBudget, ResetAndRailTreeBuffersAreNotGrowth) {
   EXPECT_EQ(physical_size(*top, tech).cells, 11U);
   EXPECT_FALSE(budget.allows(physical_size(*top, tech)));
 }
+TEST(GrowthBudget, OnlyTheLeafNamesATreeBufferAndUpsizingIsGrowth) {
+  physical::Technology tech;
+  for (const auto* name : {"BUF", "BUF4"}) {
+    tech.macros[name].klass  = "CORE";
+    tech.macros[name].width  = std::string_view(name) == "BUF4" ? 4 : 1;
+    tech.macros[name].height = 1;
+  }
+  hhds::GraphLibrary library;
+  const auto         buf = library.create_io("BUF");
+  const auto         top = library.create_io("top")->create_graph();
+  for (int i = 0; i < 100; ++i) {
+    instance(*top, buf);
+  }
+  Growth_budget budget{physical_size(*top, tech)};
+  budget.tree_master_um2 = 1;
+  // A repair buffer named after a tree buffer, and a tree prefix inside a
+  // hierarchy segment, are ordinary cells.
+  for (const auto* name : {"__place_rebuffer___place_railtree0_1_0", "__place_rsttree0.u_mem.q", "a.b___place_rsttree"}) {
+    auto       candidate = physical_size(*top, tech);
+    const auto cell      = instance(*top, buf);
+    cell.set_name(name);
+    EXPECT_EQ(physical_size(*top, tech).cells, candidate.cells + 1) << name;
+    cell.del_node();
+  }
+  const auto tree = instance(*top, buf);
+  tree.set_name("u0.__place_railtree0_2");
+  auto size = physical_size(*top, tech);
+  EXPECT_EQ(size.cells, 100U);
+  EXPECT_EQ(size.tree_cells, 1U);
+  EXPECT_DOUBLE_EQ(budget.charged_area(size), 100);
+  // Upsizing it (a repair proposal) charges the area above the minted BUF:
+  // 3 um2 fits the 3% budget, a second one does not.
+  size = physical_size(*top,
+                       tech,
+                       top.get(),
+                       {
+                           {tree.get_debug_nid(), "BUF4"}
+  });
+  EXPECT_DOUBLE_EQ(budget.charged_area(size), 103);
+  EXPECT_TRUE(budget.allows(size));
+  const auto second = instance(*top, buf);
+  second.set_name("__place_rsttree1_0");
+  size = physical_size(*top,
+                       tech,
+                       top.get(),
+                       {
+                           {  tree.get_debug_nid(), "BUF4"},
+                           {second.get_debug_nid(), "BUF4"}
+  });
+  EXPECT_EQ(size.cells, 100U);
+  EXPECT_DOUBLE_EQ(budget.charged_area(size), 106);
+  EXPECT_FALSE(budget.allows(size));
+}
 }  // namespace
 }  // namespace livehd::placement

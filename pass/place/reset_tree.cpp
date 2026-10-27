@@ -74,6 +74,8 @@ Reset_tree_stats buffer_nets(hhds::Graph& graph, const physical::Technology& tec
   if (!buffer) {
     return stats;
   }
+  const auto& minted = tech.macros.at(buffer->name);
+  stats.buffer_um2   = minted.width * minted.height;
 
   std::vector<Pin>                        drivers;
   std::set<std::pair<uint64_t, uint64_t>> seen;

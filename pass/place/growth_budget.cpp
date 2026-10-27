@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "growth_budget.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <format>
 #include <set>
@@ -27,8 +28,8 @@ Physical_size physical_size(hhds::Graph& source, const physical::Technology& tec
     Physical_size result;
     for (auto node : graph.body().nodes()) {
       const auto io = node.get_subnode_io();
-      if (!io || is_tree_buffer(node.get_name())) {
-        continue;  // reset/rail tree buffers are structural, not growth
+      if (!io) {
+        continue;
       }
       std::string master(io->get_name());
       if (&graph == replacement) {
@@ -37,14 +38,23 @@ Physical_size physical_size(hhds::Graph& source, const physical::Technology& tec
         }
       }
       if (const auto found = technology.macros.find(master); found != technology.macros.end()) {
-        if (found->second.klass.starts_with("CORE")) {
+        if (!found->second.klass.starts_with("CORE")) {
+          continue;
+        }
+        const auto area = found->second.width * found->second.height;
+        if (is_tree_buffer(node.get_name())) {
+          ++result.tree_cells;  // reset/rail tree buffers are structural, not growth
+          result.tree_um2 += area;
+        } else {
           ++result.cells;
-          result.area_um2 += found->second.width * found->second.height;
+          result.area_um2 += area;
         }
       } else if (const auto child = io->get_graph(); child && master == io->get_name()) {
         const auto nested  = self(self, *child);
         result.cells      += nested.cells;
         result.area_um2   += nested.area_um2;
+        result.tree_cells  += nested.tree_cells;
+        result.tree_um2    += nested.tree_um2;
       } else {
         throw std::runtime_error("physical growth inventory has no LEF master: " + master);
       }
@@ -55,9 +65,16 @@ Physical_size physical_size(hhds::Graph& source, const physical::Technology& tec
   };
   return visit(visit, source);
 }
+double Growth_budget::charged_area(const Physical_size& candidate) const {
+  if (tree_master_um2 <= 0) {
+    return candidate.area_um2;
+  }
+  return candidate.area_um2 + std::max(0.0, candidate.tree_um2 - candidate.tree_cells * tree_master_um2);
+}
 bool Growth_budget::allows(const Physical_size& candidate) const {
-  return candidate.cells <= std::floor(baseline.cells * (1 + fraction) + 1e-9) && std::isfinite(candidate.area_um2)
-         && candidate.area_um2 <= baseline.area_um2 * (1 + fraction) + 1e-9;
+  const auto area = charged_area(candidate);
+  return candidate.cells <= std::floor(baseline.cells * (1 + fraction) + 1e-9) && std::isfinite(area)
+         && area <= baseline.area_um2 * (1 + fraction) + 1e-9;
 }
 void initialize_growth_budget(hhds::Graph& source, Options& options) {
   options.growth_budget           = std::make_shared<Growth_budget>();

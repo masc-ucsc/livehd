@@ -1209,7 +1209,7 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
       }
       const auto max_cells = static_cast<uint64_t>(std::floor(budget.baseline.cells * (1 + budget.fraction) + 1e-9));
       limits.cells         = max_cells + removed.size() >= now.cells ? max_cells + removed.size() - now.cells : 0;
-      limits.area          = std::max(0.0, budget.baseline.area_um2 * (1 + budget.fraction) - now.area_um2 + removed_area);
+      limits.area = std::max(0.0, budget.baseline.area_um2 * (1 + budget.fraction) - budget.charged_area(now) + removed_area);
     }
     plan = plan_buffer_choices(root_xy->second,
                                locations,

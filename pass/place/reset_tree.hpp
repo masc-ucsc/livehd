@@ -16,6 +16,7 @@ struct Reset_tree_stats {
   unsigned buffers = 0;  // buffers minted
   unsigned levels = 0;   // deepest tree
   unsigned skipped = 0;   // trigger pins/drivers left alone: a multi-bit or multi-driver wiring alias
+  double   buffer_um2 = 0;   // the LEF area of the master the tree mints (0: no placeable buffer)
 };
 // `is_constant(driver)` says a driver resolves to a constant through bus wiring: the inactive pin of a
 // clear+preset flop is tied by such an alias, and a tree behind a tie cell would only add cells.
@@ -40,10 +41,18 @@ Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technolog
 Reset_tree_stats buffer_pin_nets(hhds::Graph& graph, const physical::Technology& tech, const std::string& liberty, unsigned cap,
                                  const Reset_pins& pins, std::string_view tag, const Constant_test& is_constant = {});
 
-// A buffer of the reset tree or the domino rail tree, by its minted name (a flattened name may carry a
-// hierarchy prefix). Structural fanout restructuring done before the first cell is read, so the
-// physical growth budget (growth_budget.hpp) leaves it out of the inventory.
-inline bool is_tree_buffer(std::string_view instance) {
-  return instance.find("__place_rsttree") != std::string_view::npos || instance.find("__place_railtree") != std::string_view::npos;
+// A buffer of the reset tree or the domino rail tree, by its minted name: the
+// leaf segment of a flattened name (past the hierarchy prefix the tree gives
+// it, `a.b.__place_rsttree0_3`) starts with the tree's prefix, so a repair
+// buffer named after one (`__place_rebuffer___place_railtree0_1_0`) is not a
+// tree buffer. Structural fanout restructuring done before the first cell is
+// read, so the physical growth budget (growth_budget.hpp) counts no cell for
+// it, only its area above the master it was minted with.
+inline std::string_view instance_leaf(std::string_view instance) {
+  const auto dot = instance.rfind('.');
+  return dot == std::string_view::npos ? instance : instance.substr(dot + 1);
 }
+inline bool is_reset_tree_buffer(std::string_view instance) { return instance_leaf(instance).starts_with("__place_rsttree"); }
+inline bool is_rail_tree_buffer(std::string_view instance) { return instance_leaf(instance).starts_with("__place_railtree"); }
+inline bool is_tree_buffer(std::string_view instance) { return is_reset_tree_buffer(instance) || is_rail_tree_buffer(instance); }
 }  // namespace livehd::placement
