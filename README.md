@@ -303,3 +303,13 @@ sampled differential test by default, and a kernel-checked theorem with
 [`pass/lean/Translation_Validation/README.md`](pass/lean/Translation_Validation/README.md)
 for how to build and run it, its trust boundary, and the CVA6, CORE-ET and
 PicoRV32 blocks it covers.
+
+The Futamura-projection simulator specializes a Lean interpreter of hardware
+designs to one certificate. What is left is a residual program for that design
+alone, and each cycle it runs is proved equal to the certificate's reference
+semantics, `interpretDesign`. The specializer and that step theorem are proved
+once for all designs. By default, a run also compares every cycle with
+`interpretDesign`. See
+[`pass/lean/specialization/README.md`](pass/lean/specialization/README.md)
+for how to build and run it, how it works, its trust boundary, the CVA6,
+CORE-ET and PicoRV32 blocks it covers, and two performance examples.
