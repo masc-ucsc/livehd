@@ -1,0 +1,60 @@
+/*
+:name: gate_flop_enable_child
+:type: simulation
+*/
+
+// A clock gate whose enable is a FLOP Q, driving state in a CHILD module --
+// Ibex's core clock gate (ibex_top gates clk with core_busy_q, ibex_core's
+// flops sit behind it). The other gate fixtures drive the enable from an
+// input, so the child's commit guard never had to resolve a flop.
+//
+// The child's guard is built by walking the enable cone across the boundary.
+// That walk did not resolve a flop Q, the guard came back empty, and empty
+// reads as "no predicate": the child committed every edge. A gate-owned color
+// hid it for plain flops; an async-reset flop is never gate-owned (its reset
+// must land while the gate is closed), so Ibex's core ran one cycle early.
+//
+// VALUES (hand-derived, end-of-tick observation): `en` loads `go` (high from
+// c2), so the gate is open from the c3 edge. Both gated counters read 0 in
+// c0..c2 and then 1, 2, 3; reset (c0, c1) holds every flop at 0.
+
+mod cnt(gclk:Clock, rst:Bool) -> (o:U4@[]) {
+  reg f:U4:[clock_pin=gclk, reset_pin=rst, async=true] = 0
+  f = (f + 1)#[0..<4]
+  o = f
+}
+
+pub mod gfec(clk:Clock, rst:Bool, go:Bool) -> (local_o:U4@[], child_o:U4@[]) {
+  reg en:Bool:[clock_pin=clk, reset_pin=rst, async=true] = false
+  en = go
+  const g = Clock(clock_pin=clk, enable=en)
+  // CONTROL: the same counter on the same gate, in this module.
+  reg lf:U4:[clock_pin=g, reset_pin=rst, async=true] = 0
+  lf = (lf + 1)#[0..<4]
+  mut c = cnt::[name=c](gclk = g, rst = rst)
+  local_o = lf
+  child_o = c.o
+}
+
+test gfec.child_waits_for_the_gate {
+  mut acc     = gfec
+  mut seen    = 0
+  mut bad     = 0
+  mut bad_ctl = 0
+  tick 6 {
+    acc.rst = clock < 2
+    acc.go  = clock >= 2
+    step
+    const golden:U4 = if clock >= 3 { clock - 2 } else { 0 }
+    seen = seen + 1
+    if acc.local_o != golden {
+      bad_ctl = bad_ctl + 1
+    }
+    if acc.child_o != golden {
+      bad = bad + 1
+    }
+  }
+  assert(seen == 6, "the comparisons actually ran (guards against a vacuous pass)")
+  assert(bad_ctl == 0, "CONTROL: the gated counter in the gate's own module")
+  assert(bad == 0, "the child's async-reset flop commits only while the flop-driven gate is open")
+}

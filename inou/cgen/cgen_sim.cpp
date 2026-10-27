@@ -12304,6 +12304,14 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
         // member is ready before this guard is evaluated.
         return bool_pin_expr(occurrence_member(color_plan_->sites()[it->second]) + "_din", pin.base_pin());
       }
+      // A flop Q in the enable cone: pre-rise its member still holds the old
+      // value, which is what the ICG latch captures. Without this the guard is
+      // empty and a child flop on the gate commits every edge.
+      if (const auto it = direct_site_index.find(pin.get_master_node().get_occurrence_index());
+          it != direct_site_index.end() && color_plan_->sites()[it->second].kind == livehd::sim::Color_plan::Site_kind::state
+          && type_op_of(color_plan_->sites()[it->second].node.base_node()) == Ntype_op::Flop) {
+        return bool_pin_expr(occurrence_member(color_plan_->sites()[it->second]), pin.base_pin());
+      }
       const auto node = pin.get_master_node();
       const auto op   = type_op_of(node.base_node());
       if (op == Ntype_op::Clock_cell) {
