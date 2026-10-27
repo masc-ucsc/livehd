@@ -22,6 +22,27 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Review v49 removes full placement-view copies from ordinary GP timing
+checkpoints. A borrowed geometry view reads solver coordinates and existing
+connectivity; RC retains fractional pin positions while graph/DEF poses are
+rounded to DBU. Legal snapshots still rebuild offsets for row orientation.
+Returned floorplans and RC own their data. Placement, repair and physical-session
+suites pass, including a regression for fractional geometry, retained RC,
+real STA provenance checks and logical equivalence. No public defaults change.</p>
+<p>All four designs retain byte-identical DEFs and independent WNS, HPWL, cells
+and area with the same defaults, 100 ps clocks and reset false paths. Placement
+takes 1.925 s (lfsr), 40.443 s (minimax), 35.471 s (NVDLA/partition_m) and
+665.508 s (coralnpu), all within 1.5× of v48. Coral's full flow takes 815.55 s
+wall and 814.96 s CPU; peak RSS falls from 9,363 to 9,231 MiB. These single
+samples do not establish repeatable speedups. Evidence is in
+<code>runs.borrowed_gp_geometry_v49</code>.</p>
+<p>Gemmini still exceeds the 16 GiB guard (16,797,156 KiB after 199.6 s).
+A separate CPU profile now reaches RC construction past the removed view copy:
+162 of 199 samples in the final two seconds include <code>estimate_rc</code>.
+The first timing checkpoint still does not complete. Its string-keyed pin-location
+map is unused by the production ranking callback and is a target for further
+memory reduction. The original A–J requirements remain open.</p>
+
 <p>Review v48 removes duplicate OpenTimer RC-node name strings. Published
 OpenTimer <code>b107f35</code> uses the owning map's key; tree/SPEF exports
 resolve labels in a temporary per-tree table. Node size falls from 200 to 168

@@ -180,6 +180,11 @@ owns its flattened copy. The seed keeps RC in memory without serializing a secon
 copy into graph attributes; completed placements still persist their RC for
 standalone timing and reload. Seed and cleanup libraries are released after
 placement accepts its own graph, before physical repair starts.
+Ordinary GP timing checkpoints borrow the current solver coordinates and the
+existing connectivity instead of copying the entire placement view. Exported
+graph/DEF poses remain rounded to DBU while RC keeps fractional pin positions.
+Legal timing snapshots still capture row orientations and rebuild pin offsets;
+returned RC and floorplan snapshots own their data.
 The imported-GP diagnostic exposes the same operation through
 `remove_synthesis_buffers=true`; its component-count check accounts for exactly
 those removals while retaining fixed-cell and master checks.

@@ -1286,6 +1286,26 @@ struct View {
   std::map<std::string, double>                 weights;
   std::map<std::string, std::string>            cohesion_owners;
 };
+// A timing checkpoint borrows connectivity and solver geometry. Only exported
+// cell poses use integer DBU coordinates; RC keeps the solver's fractional pin
+// positions. None of these references escape the synchronous checkpoint.
+struct Geometry_view {
+  const View&       view;
+  const dp::Design& design;
+  bool              solver_positions;
+
+  Geometry_view(const View& v) : view(v), design(v.design), solver_positions(false) {}
+  Geometry_view(const View& v, const dp::Design& physical) : view(v), design(physical), solver_positions(true) {}
+
+  Ann_place pose(size_t index) const {
+    auto result = view.cells[index].place;
+    if (solver_positions) {
+      result.x = std::llround(design.node_x[index]);
+      result.y = std::llround(design.node_y[index]);
+    }
+    return result;
+  }
+};
 using CentroidSample = dp::CentroidSample;
 auto summarize_centroids(const dp::Design& d) { return dp::detail::centroid_summary(d); }
 void restore_imported_rows(ph::Floorplan& frame, const View& v) {
@@ -1483,13 +1503,15 @@ void snapshot_nets(ph::Floorplan& frame, const View& v) {
 }
 // The view's frame with its current mapped nets and cell poses, as timing
 // and repair callbacks receive a placement checkpoint.
-void snapshot_frame(ph::Floorplan& frame, const View& v) {
+void snapshot_frame(ph::Floorplan& frame, const Geometry_view& geometry) {
+  const auto& v = geometry.view;
   frame = v.fp;
   restore_imported_rows(frame, v);
   snapshot_nets(frame, v);
   frame.components.clear();
-  for (const auto& c : v.cells) {
-    frame.components.push_back({c.name, c.macro, c.place});
+  for (size_t i = 0; i < v.cells.size(); ++i) {
+    const auto& c = v.cells[i];
+    frame.components.push_back({c.name, c.macro, geometry.pose(i)});
   }
 }
 void make_arrays(View& v, const ph::Technology& tech) {
@@ -2824,9 +2846,11 @@ ph::Rc_net steiner_rc(std::string driver, const std::vector<std::pair<std::strin
   return rc;
 }
 namespace {
-std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology& tech, const Options& options,
+std::shared_ptr<ph::Parasitics> estimate_rc(const Geometry_view& geometry, const ph::Technology& tech, const Options& options,
                                             std::map<std::string, std::pair<double, double>>& pin_locations,
                                             Rc_cache* cache = nullptr, Rc_reuse_stats* reuse = nullptr, bool provenance = true) {
+  const auto& v                    = geometry.view;
+  const auto& design               = geometry.design;
   auto result               = std::make_shared<ph::Parasitics>();
   result->approximate       = !options.full;
   const auto   wire         = technology_wire_rc(tech,
@@ -2896,15 +2920,15 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology&
   std::vector<Rc_geometry>                                       geometries;
   std::vector<std::pair<std::string, std::pair<double, double>>> pins;
   for (size_t net = 0; net < v.drivers.size(); ++net) {
-    const int begin = v.design.flat_net2pin_start[net], end = v.design.flat_net2pin_start[net + 1];
+    const int begin = design.flat_net2pin_start[net], end = design.flat_net2pin_start[net + 1];
     if (end - begin < 2) {
       continue;
     }
     pins.clear();
     uint64_t load_hash = hash_util::kFnv1a64_offset;
     for (int p = begin; p < end; ++p) {
-      const auto   node = v.design.pin2node[p];
-      const double x = v.design.node_x[node] + v.design.pin_offset_x[p], y = v.design.node_y[node] + v.design.pin_offset_y[p];
+      const auto   node = design.pin2node[p];
+      const double x = design.node_x[node] + design.pin_offset_x[p], y = design.node_y[node] + design.pin_offset_y[p];
       pins.emplace_back(v.pins[p].label(), std::pair{x, y});
       pin_locations.emplace(pins.back().first, std::pair{x, y});
       if (!cache) {
@@ -2918,8 +2942,8 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology&
                                                  cell.place.height,
                                                  static_cast<unsigned>(cell.place.orientation),
                                                  v.pins[p].pin,
-                                                 v.design.pin_offset_x[p],
-                                                 v.design.pin_offset_y[p]),
+                                                 design.pin_offset_x[p],
+                                                 design.pin_offset_y[p]),
                                      load_hash);
       }
     }
@@ -2954,10 +2978,12 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const View& v, const ph::Technology&
 }
 // Attach the view's cell poses and IO terminal positions to its RC estimate,
 // as timing and repair consumers of a placement checkpoint expect them.
-void record_poses(ph::Parasitics& rc, const View& v) {
-  for (const auto& c : v.cells) {
-    rc.cells.push_back(
-        {c.name, c.place.x, c.place.y, static_cast<unsigned>(c.place.orientation), c.macro, c.place.width, c.place.height});
+void record_poses(ph::Parasitics& rc, const Geometry_view& geometry) {
+  const auto& v = geometry.view;
+  for (size_t i = 0; i < v.cells.size(); ++i) {
+    const auto& c    = v.cells[i];
+    const auto  pose = geometry.pose(i);
+    rc.cells.push_back({c.name, pose.x, pose.y, static_cast<unsigned>(pose.orientation), c.macro, pose.width, pose.height});
   }
   for (const auto& t : v.fp.terminals) {
     rc.terminals.push_back({t.name, t.x, t.y});
@@ -6910,32 +6936,37 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             && defer_timing_checkpoint(options, macro_checkpoints, final, iteration, control.max_iterations, movement)) {
           return dp::GpUpdate{};
         }
-        auto view   = v;
-        view.design = physical;
-        for (size_t i = 0; i < view.cells.size(); ++i) {
-          view.cells[i].place.x = std::llround(physical.node_x[i]);
-          view.cells[i].place.y = std::llround(physical.node_y[i]);
-          // STA checks graph placement against the RC provenance. Keep the
-          // private physical graph at this checkpoint's coordinates as in FP.
-          view.cells[i].node.attr(attrs::place).set(view.cells[i].place);
-        }
+        // GP changes geometry, not connectivity. Borrow the solver's positions
+        // instead of duplicating the whole View's maps, strings and arrays at
+        // every ranking checkpoint. Legal snapshots still rebuild pin offsets
+        // for row orientations using capture().
+        std::optional<View> legal_view;
         if (legal_timing_snapshot) {
-          capture(view, tech, true);
-          for (const auto& cell : view.cells) {
-            cell.node.attr(attrs::place).set(cell.place);
+          legal_view.emplace(v);
+          legal_view->design = physical;
+          for (size_t i = 0; i < legal_view->cells.size(); ++i) {
+            legal_view->cells[i].place.x = std::llround(physical.node_x[i]);
+            legal_view->cells[i].place.y = std::llround(physical.node_y[i]);
           }
+          capture(*legal_view, tech, true);
+        }
+        const auto geometry = legal_view ? Geometry_view{*legal_view} : Geometry_view{v, physical};
+        for (size_t i = 0; i < geometry.view.cells.size(); ++i) {
+          // STA validates graph poses against the RC provenance. Do not update
+          // v.cells: the original placement remains the base for later trials.
+          geometry.view.cells[i].node.attr(attrs::place).set(geometry.pose(i));
         }
         Result checkpoint;
         checkpoint.prects      = v.prects;
         checkpoint.graph       = result.graph;
         checkpoint.net_weights = v.weights;
         checkpoint.fp_library  = result.fp_library;
-        snapshot_frame(checkpoint.floorplan, view);
+        snapshot_frame(checkpoint.floorplan, geometry);
         auto rc_options = options;
         rc_options.full = false;
         fs::create_directories(options.output_dir);
-        checkpoint.parasitics = estimate_rc(view, tech, rc_options, checkpoint.pin_locations);
-        record_poses(*checkpoint.parasitics, view);
+        checkpoint.parasitics = estimate_rc(geometry, tech, rc_options, checkpoint.pin_locations);
+        record_poses(*checkpoint.parasitics, geometry);
         // Propagation belongs to untimed GP. Do not defer STA to finish jumps.
         final_gp_timing_started |= final_timing;
         const auto& estimator    = options.gp_rank && !trial_scoring ? options.gp_rank : options.fp_evaluate;
@@ -6962,7 +6993,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         }
         macro_timed_positions.clear();
         for (size_t i = 0; i < v.cells.size(); ++i) {
-          macro_timed_positions.emplace(v.cells[i].name, Point{view.cells[i].place.x, view.cells[i].place.y});
+          const auto pose = geometry.pose(i);
+          macro_timed_positions.emplace(v.cells[i].name, Point{pose.x, pose.y});
         }
         ++macro_checkpoints;
         std::ofstream trace(options.output_dir + "/" + timing_stage + "_timing.jsonl",

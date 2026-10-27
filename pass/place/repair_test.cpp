@@ -468,6 +468,55 @@ TEST_F(Buffer_repair, FinalGpDoesNotRemoveBuffersOnProvisionalTiming) {
   }
 }
 
+TEST_F(Buffer_repair, GpTimingSnapshotsOwnRcAndMatchFractionalGeometry) {
+  auto p = graph->get_input_pin("a");
+  for (int i = 0; i < 3; ++i) {
+    p = gate("sky130_fd_sc_hd__inv_1", "cell" + std::to_string(i), p);
+  }
+  graph->get_output_pin("y").connect_driver(p);
+  options.macro_timing_interval = 2;
+  options.final_timing_start    = 0;
+  options.iterations = options.min_iterations = 8;
+  options.post_density_factor                 = 0;
+  options.cell_jump.depth                     = 0;
+  const auto                            tech  = physical::read_lef(options.lefs);
+  std::shared_ptr<physical::Parasitics> first_rc;
+  std::string                           first_serialized;
+  unsigned                              calls      = 0;
+  bool                                  fractional = false;
+  options.fp_evaluate                              = [&](const Result& snapshot) {
+    ++calls;
+    for (const auto& cell : snapshot.floorplan.components) {
+      const auto& master = tech.macros.at(cell.macro);
+      for (const char* pin : {"A", "Y"}) {
+        const auto [dx, dy] = physical::oriented_center(master, master.pins.at(pin).shapes.front().rect, cell.place.orientation);
+        const auto   xy     = snapshot.pin_locations.at(cell.name + ":" + pin);
+        const double x = xy.first - dx * tech.dbu, y = xy.second - dy * tech.dbu;
+        // The exported DBU pose and the electrical pin geometry must describe
+        // the same checkpoint, including legal row flips. GP RC may retain the
+        // sub-DBU movement that the graph and DEF cannot represent.
+        EXPECT_NEAR(x, cell.place.x, .500001);
+        EXPECT_NEAR(y, cell.place.y, .500001);
+        fractional |= std::abs(x - std::round(x)) > 1e-6 || std::abs(y - std::round(y)) > 1e-6;
+      }
+    }
+    if (!first_rc) {
+      first_rc         = snapshot.parasitics;
+      first_serialized = physical::serialize_parasitics(*first_rc);
+    } else {
+      EXPECT_EQ(physical::serialize_parasitics(*first_rc), first_serialized);
+    }
+    return timing(snapshot);  // Also checks graph poses against RC provenance.
+  };
+  const auto placed = place(*graph, flat, options);
+  EXPECT_GT(calls, 1U);
+  EXPECT_TRUE(fractional);
+  ASSERT_TRUE(first_rc);
+  EXPECT_EQ(physical::serialize_parasitics(*first_rc), first_serialized);
+  check_legality(tech, placed.floorplan);
+  equivalent(placed);
+}
+
 TEST_F(Buffer_repair, SingleCellLegalizationKeepsEveryExistingNeighborFixed) {
   // The production stage selection must also preserve an explicit ECO frame.
   options.fp_place = options.final_cells = true;
