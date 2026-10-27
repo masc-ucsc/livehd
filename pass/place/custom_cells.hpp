@@ -28,7 +28,8 @@ struct Custom_variant {
   std::string                          clock = "CLK", output = "Q";
   double                               area_um2 = 0, estimate_um2 = 0;  // LEF footprint; Liberty-basis estimate
   int64_t                              width_dbu = 0;
-  std::optional<double>                rail_ff, clock_ff;  // labeled estimates, absent when unknown
+  std::vector<std::optional<double>>   rails_ff;  // per rail, in `rails` order; labeled estimates, absent when unknown
+  std::optional<double>                clock_ff;
   std::optional<liberty::Output_drive> drive;
 };
 struct Custom_catalog {

@@ -69,6 +69,7 @@ struct Sidecar {
   // coefficient's recorded source is `source`.
   std::string                                      source  = "logical-effort-estimate";
   std::optional<double>                            rail_ff = 2, clock_ff = 4, fo4 = 10;
+  std::optional<double>                            r1_ff;  // R1's own capacitance when set, else rail_ff
   std::array<std::optional<double>, 2>             setup_capture{5, 7};
   std::array<std::optional<double>, 2>             eval_variant;  // when set, this variant's eval_delay_ps
   std::vector<std::pair<std::string, std::string>> instances;  // (state, master)
@@ -186,7 +187,18 @@ struct Sidecar {
       real("a_estimate_um2", 3.5 + v);
       w.Key("pin_caps");
       w.StartObject();
-      real("rail_ff", rail_ff);
+      w.Key("rails_ff");  // one per rail, R0 and R1 (U26)
+      w.StartArray();
+      for (int k = 0; k < 2; ++k) {
+        const auto cap = k == 1 && r1_ff ? r1_ff : rail_ff;
+        if (cap) {
+          w.Double(*cap);
+        } else {
+          w.Null();
+        }
+      }
+      w.EndArray();
+      real("reset_ff", rail_ff);
       real("clock_ff", clock_ff);
       w.EndObject();
       real("setup_capture_ps", setup_capture[v]);

@@ -265,12 +265,14 @@ std::shared_ptr<const late::Provisional_cells> domino_timing_cells(const Domino_
     if (!view.stage.uncertainty_first_ps) {
       cell.unsupported.push_back("domino uncertainty_first_ps is null (unmeasured)");
     }
-    for (const auto& rail : variant.rails) {
-      model::Pin pin;
+    for (size_t k = 0; k < variant.rails.size(); ++k) {
+      const auto& rail = variant.rails[k];
+      model::Pin  pin;
       pin.name      = rail;
       pin.direction = "input";
-      if (variant.rail_ff) {
-        pin.capacitance_ff = {variant.rail_ff, variant.rail_ff};
+      // U26: the rail's own load, its PDN devices x 1/2 reference-inverter input.
+      if (const auto cap = k < variant.rails_ff.size() ? variant.rails_ff[k] : std::nullopt) {
+        pin.capacitance_ff = {cap, cap};
       }
       model::Arc setup;
       setup.related_pin = interface.clock;
@@ -281,14 +283,14 @@ std::shared_ptr<const late::Provisional_cells> domino_timing_cells(const Domino_
       pin.arcs.push_back(std::move(setup));
       cell.pins.emplace(rail, std::move(pin));
     }
-    // U22: the storage reset pin loads its net like a rail and has no check:
-    // reset to RST is a false path of the stage model.
+    // U22: the storage reset pin loads its net with its own estimate and has
+    // no check: reset to RST is a false path of the stage model.
     if (!variant.reset_pin.empty()) {
       model::Pin reset;
       reset.name      = variant.reset_pin;
       reset.direction = "input";
-      if (variant.rail_ff) {
-        reset.capacitance_ff = {variant.rail_ff, variant.rail_ff};
+      if (variant.reset_ff) {
+        reset.capacitance_ff = {variant.reset_ff, variant.reset_ff};
       }
       cell.pins.emplace(variant.reset_pin, std::move(reset));
     }

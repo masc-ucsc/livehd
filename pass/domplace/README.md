@@ -249,7 +249,7 @@ need; a master without a twin (a sidecar may omit `rail_twin`) is
 restricted to its own parity. `check_legality` checks the parity of every
 multi-row cell (`pass/place/pg_rails.hpp`), so a wrong template never passes.
 
-The bundle sidecar (`domino_models.json`, schema 5) records the stage model
+The bundle sidecar (`domino_models.json`, schema 6) records the stage model
 with each coefficient's source (`stage_model.sources`), units (`ps`, `fF`,
 `um`, DBU), the corner, technology and row-access identity, the named
 reference inverter and register family (with each register's pin names and CK
@@ -257,16 +257,17 @@ capacitance), FO4 and the delay model (`delay_model`: source, citation,
 formula, parameters, tau and the FO4 derivation), the coefficients and
 experiment knobs, the reset storage term (`reset_storage`), every master
 (formula, rails, storage `reset` with its pin, kind, polarity and value, metrics, variants with
-estimated and rounded areas, pin caps, per-variant capture setup, per-variant
+estimated and rounded areas, pin caps (one per rail, U26), per-variant capture setup, per-variant
 `timing` with the evaluate and precharge delays and their logical-effort
 terms, access checks; each variant in both rail templates with its
 `template`, `pg_rails`, `start_orientations` and `rail_twin`), the row rails
 it derived them from (`technology.row_rails`) and every instance with the
 original state it owns. A coefficient that cannot be derived is `null` with a
-diagnostic; `read_domino_sidecar` reads schema 5 only, refuses another schema
+diagnostic; `read_domino_sidecar` reads schema 6 only, refuses another schema
 by number (regenerate the bundle), and returns the variant catalog (one
 family per master and template), the row-access templates and the rail
-twins for placement. Schema 5 added the storage reset pin (U22).
+twins for placement. Schema 5 added the storage reset pin (U22); schema 6 the
+per-rail pin capacitances (U26).
 
 Every stage coefficient has a built-in, labeled value under the profile (the
 U1 ruling; see Stage delay estimate). `pass.usyn.domino_eval_fo4`, `domino_precharge_fo4`,
@@ -302,22 +303,39 @@ derated. `tau = FO4 / (4 + p_inv)`.
 
 With `s` the formula's series stack, `b` its parallel branches, `n` its PDN
 transistors (`Gate_formula` metrics), `C_D` the variant register's D input
-and `C_in` the reference inverter's input (every rail is one `C_in`, so each
-pull-down device is width 3 in units where the unit inverter is NMOS 1 + PMOS 2):
+and `C_in` the reference inverter's input. Widths are in units where the unit
+inverter is NMOS 1 + PMOS 2 (input 3, pull-down resistance 1, and
+`tau = R * C / 3` per unit). Each pull-down device is an NMOS of width
+`x = 1.5`, half a reference-inverter input (U26, below):
+
+- the footed stack (`s` devices and the foot) has resistance `(s+1)/x`; its
+  logical effort is `(x/3) * (s+1)/x = (s+1)/3` and its electrical effort the
+  output inverter (`3k`) over one device input (`x`), `h = 3k/x`;
+- the dynamic node carries `b` branch-top drains of width `x`, the precharge
+  drain `w`, and `n - b` devices below a branch top at weight `l`, so its
+  parasitic delay is `(s+1)/x * p_inv (x b + x l (n-b) + w) / 3`;
+- precharge charges the output inverter gate (`3k`) and the branch-top and
+  precharge drains (`p_inv (x b + w)`) through a PMOS of drive `w/2`.
 
 ```
-eval      = tau * [ (s+1)/3 * k                         footed pull-down: g = (s+1)/3, h = k
-                  + p_inv (s+1) (b + l (n-b) + w/3) / 3   dynamic node: b branch tops, the precharge drain,
+eval      = tau * [ (s+1)/3 * 3k/x                       footed pull-down: g = (s+1)/3, h = 3k/x
+                  + p_inv (s+1) (b + l (n-b) + w/x) / 3   dynamic node: b branch tops, the precharge drain,
                                                           n-b internal devices at weight l
                   + C_D / (k C_in) + p_inv ]              output inverter into the register D input
-precharge = tau * 2 (3k + p_inv (3b + w)) / (3w)          PMOS of drive w/2 charging the output inverter
+precharge = tau * 2 (3k + p_inv (x b + w)) / (3w)         PMOS of drive w/2 charging the output inverter
                                                           gate and the dynamic-node diffusion
 setup_eval = 0.5 FO4      precharge_margin = 0.5 FO4
 ```
 
+At `x = 3` (one reference-inverter input per device, the model before U26)
+this is `h = k`, `w/3` and `3b`. With `x = 1.5` a device draws half the input
+current and has twice the resistance, so the pull-down effort doubles
+(`h = 2k`) while its drains halve.
+
 | Parameter | Default | Meaning |
 |---|---|---|
 | `p_inv` | 1 | reference-inverter parasitic delay in tau (FO4 = 5 tau) |
+| `pulldown_width` `x` | 1.5 | one pull-down NMOS, half a reference-inverter input (U26); the rail pin capacitance counts the same device |
 | `precharge_width` `w` | 2 | precharge PMOS width, a unit inverter's pull-up |
 | `internal_load` `k` | 1 | the output inverter on the dynamic node, in reference-inverter inputs (the internal-load assumption; the keeper is not modeled) |
 | `internal_node_weight` `l` | 0.5 | diffusion of a device below a branch top, relative to one on the dynamic node |
@@ -332,8 +350,27 @@ FO4 and everything it scales `null`, a register without a D capacitance
 leaves its variants' delays `null`; either is a bundle diagnostic and a
 `domino-delay` warning from pass.usyn, and the stage timing then reports the
 class unmeasured. On the sky130 fixture (inv_1, dfxtp_1) FO4 is 82.91 ps and
-an AND2/AND3/AND4 master evaluates in 80.8/109.3/143.4 ps with a 44.2 ps
-precharge (`domino_delay_test`).
+an AND2/AND3/AND4 master evaluates in 108.4/146.2/189.5 ps with a 35.9 ps
+precharge (`domino_delay_test`; before U26, with width-3 devices,
+80.8/109.3/143.4 ps and 44.2 ps). On ASAP7 (INVx1, DFFHQNx1, FO4 14.37 ps)
+they are 19.4/25.9/33.4 ps with a 6.2 ps precharge (before:
+14.6/19.5/25.4 ps and 7.7 ps).
+
+## Rail pin capacitance (U26)
+
+Ruled 2026-10-26: "the input capacitance, if it's only using one of the
+stacks, the variable should be half of a NOT gate. But if the variable is
+using three stacks, it should be 1.5 times the NOT gate." A rail pin loads its
+driver with the PDN devices it gates: `m * C_in / 2`, `m` the literal
+occurrences of its (input, polarity) in the checked formula, repeated
+occurrences included (the counts sum to `n`; a complemented rail is its own
+pin with its own count). It is the same half-inverter device the delay
+estimate sizes (`pulldown_width`), so the input load and the pull-down drive
+agree. The sidecar records each rail's `pdn_devices` and each variant's
+`pin_caps.rails_ff` (pin order) with its source label; the stage timer gives
+each rail pin its own capacitance. The storage reset pin keeps the earlier
+labeled one-reference-inverter-input estimate (`pin_caps.reset_ff`: one reset
+transistor, not characterized), and CLK and the Q arcs are unchanged.
 
 ## Stage timing
 

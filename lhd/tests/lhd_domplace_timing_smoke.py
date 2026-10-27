@@ -124,7 +124,7 @@ assert len(reasons) == summary['excluded'], (reasons, summary)
 classes = {(c['launch'], c['capture']): c for c in timing['classes']}
 assert ('domino', 'domino') in classes, classes  # q2.Q into its own rail
 model = timing['model']['provisional']
-assert model['bundle_schema'] == 5 and model['coefficients']['eval_delay_ps']['source'] == 'option', model
+assert model['bundle_schema'] == 6 and model['coefficients']['eval_delay_ps']['source'] == 'option', model
 stages = {s['stage_id'].rsplit('.', 1)[-1]: s for s in timing['stages']}
 assert sorted(stages) == ['q1', 'q2'], stages.keys()
 for leaf, stage in stages.items():
@@ -177,7 +177,7 @@ for leaf, stage in bare_stages.items():
     assert stage['internal']['status'] == 'measured' and stage['precharge']['status'] == 'measured', stage
     assert 0 < stage['internal']['eval_delay_ps'] < 4 * fo4 and 0 < stage['precharge']['precharge_ps'] < 4 * fo4, stage
 # q1 = (a & b) | (c & d): two branches of two in series into dfxtp_1's D.
-assert abs(bare_stages['q1']['internal']['eval_delay_ps'] - 105.63056083546012) < 1e-6, bare_stages['q1']['internal']
+assert abs(bare_stages['q1']['internal']['eval_delay_ps'] - 133.2680096998603) < 1e-6, bare_stages['q1']['internal']
 
 # Arm 2 against OpenTimer: the same placement timed by both. OpenTimer also
 # times the unconstrained outputs (required 0), which the native subset cuts,

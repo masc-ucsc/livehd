@@ -73,7 +73,7 @@ std::shared_ptr<const Custom_catalog> custom_catalog(std::vector<Custom_variant>
         throw std::invalid_argument(std::format("custom family {} repeats rank {}", variant.family, variant.rank));
       }
     }
-    std::string text = std::format("{}|{}|{}|{}|{}|{}|{:.17g}|{:.17g}|{}|{}|{}",
+    std::string text = std::format("{}|{}|{}|{}|{}|{}|{:.17g}|{:.17g}|{}|{}",
                                    variant.name,
                                    variant.family,
                                    variant.register_cell,
@@ -83,10 +83,12 @@ std::shared_ptr<const Custom_catalog> custom_catalog(std::vector<Custom_variant>
                                    variant.area_um2,
                                    variant.estimate_um2,
                                    variant.width_dbu,
-                                   optional_text(variant.rail_ff),
                                    optional_text(variant.clock_ff));
     for (const auto& rail : variant.rails) {
       text += "|" + rail;
+    }
+    for (const auto& cap : variant.rails_ff) {
+      text += "|" + optional_text(cap);
     }
     if (const auto& d = variant.drive) {
       text += std::format("|drive:{}:{}:{}:{:.17g}:{:.17g}:{}:{}:{}",

@@ -68,7 +68,7 @@ struct Model_overrides {
 void apply_overrides(Domino_timing_view& view, const Model_overrides& overrides);
 
 // One sequential provisional cell per variant, named after it:
-// - R* inputs with capacitance rail_ff and a scalar setup_rising arc to CLK
+// - R* inputs, each with its own rails_ff capacitance (U26), and a scalar setup_rising arc to CLK
 //   of setup_eval_ps (the T/2 rail capture);
 // - CLK, a clock input with capacitance clock_ff;
 // - Q, the register's own clock-to-Q (rising_edge) arcs of its Q pin with the

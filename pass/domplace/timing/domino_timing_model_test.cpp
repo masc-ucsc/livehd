@@ -33,7 +33,7 @@ TEST(DominoTimingModel, ReadsTheTimingViewOfASchemaThreeBundle) {
       {"q1", test::kDomino}
   };
   const auto v = view(sidecar, "model_view");
-  EXPECT_EQ(v.bundle_schema, 5U);
+  EXPECT_EQ(v.bundle_schema, 6U);
   EXPECT_EQ(v.stage_version, 1U);
   EXPECT_EQ(v.model_version, 1U);
   EXPECT_EQ(v.clock, "clk");
@@ -60,6 +60,8 @@ TEST(DominoTimingModel, ReadsTheTimingViewOfASchemaThreeBundle) {
   EXPECT_EQ(qn->q_pin, "QN");
   EXPECT_EQ(qn->setup_capture_ps, 7);
   EXPECT_EQ(qn->rails, (std::vector<std::string>{"R0", "R1"}));
+  EXPECT_EQ(qn->rails_ff, (std::vector<std::optional<double>>{2, 2}));  // one per rail (U26)
+  EXPECT_EQ(qn->reset_ff, 2);
   ASSERT_EQ(v.instances.size(), 1U);
   EXPECT_EQ(v.instances[0].state, "q1");
   EXPECT_EQ(v.digest.size(), 16U);
@@ -69,13 +71,13 @@ TEST(DominoTimingModel, ReadsTheTimingViewOfASchemaThreeBundle) {
   {
     std::ifstream     in(old_dir / kBundleSidecar);
     std::string       text{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
-    const std::string key = "\"schema\":5";
+    const std::string key = "\"schema\":6";
     ASSERT_NE(text.find(key), std::string::npos);
-    text.replace(text.find(key), key.size(), "\"schema\":4");
+    text.replace(text.find(key), key.size(), "\"schema\":5");
     std::ofstream(old_dir / kBundleSidecar) << text;
   }
   EXPECT_FALSE(read_domino_timing(old_dir, &why));
-  EXPECT_NE(why.find("is schema 4; this build reads schema 5 only"), std::string::npos) << why;
+  EXPECT_NE(why.find("is schema 5; this build reads schema 6 only"), std::string::npos) << why;
   EXPECT_FALSE(read_domino_timing(std::filesystem::path(std::getenv("TEST_TMPDIR")) / "missing", &why));
   EXPECT_NE(why.find("missing"), std::string::npos) << why;
 }
@@ -196,6 +198,18 @@ library(ns) {time_unit:"1ns";capacitive_load_unit(1,pf);
   EXPECT_NEAR(*cell.pins.at("Q").max_capacitance_ff, 50, 1e-9);
   EXPECT_EQ(cell.pins.at("R0").arcs.at(0).constraint[0]->lookup({}), 3);
   EXPECT_EQ(cell.pins.at("R0").capacitance_ff[0], 2);
+}
+
+TEST(DominoTimingModel, EachRailPinTakesItsOwnCapacitance) {
+  // U26: a rail gating three PDN devices loads 3x one gating a single device.
+  test::Sidecar sidecar;
+  sidecar.r1_ff     = 6;
+  const auto  v     = view(sidecar, "model_rail_caps");
+  const auto  cells = domino_timing_cells(v, base(), nullptr, nullptr);
+  const auto& cell  = cells->library.cells.at(test::kDomino);
+  EXPECT_EQ(cell.pins.at("R0").capacitance_ff[0], 2);
+  EXPECT_EQ(cell.pins.at("R1").capacitance_ff[0], 6);
+  EXPECT_EQ(cell.pins.at("R1").capacitance_ff[1], 6);
 }
 
 TEST(DominoTimingModel, OverridesAreRecordedAndMoveTheGeneration) {

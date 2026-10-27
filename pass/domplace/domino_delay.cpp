@@ -112,6 +112,21 @@ Delay_model domino_delay_model(const Domino_reference& reference, const Delay_pa
   return out;
 }
 
+std::vector<uint32_t> rail_devices(const usyn::Gate_formula& formula, std::span<const usyn::Gate_rail> rails) {
+  std::vector<uint32_t> out(rails.size(), 0);
+  for (const auto& node : formula.nodes) {
+    if (node.kind != usyn::Gate_formula::Kind::literal) {
+      continue;
+    }
+    for (size_t k = 0; k < rails.size(); ++k) {
+      if (rails[k].input == node.variable && rails[k].negative == node.inverted) {
+        ++out[k];
+      }
+    }
+  }
+  return out;
+}
+
 std::optional<Stage_delay> estimate_stage_delay(const Delay_model& model, const usyn::Gate_formula::Metrics& metrics,
                                                 std::optional<double> register_d_ff, std::string* why) {
   const auto fail = [&](std::string reason) -> std::optional<Stage_delay> {
@@ -132,24 +147,28 @@ std::optional<Stage_delay> estimate_stage_delay(const Delay_model& model, const 
   const auto&  q = model.parameters;
   const double s = metrics.stack, b = metrics.branches, n = metrics.transistors;
   const double k = q.internal_load, w = q.precharge_width, p = q.p_inv, l = q.internal_node_weight;
+  const double x = q.pulldown_width;
   Stage_delay  d;
-  // Footed pull-down: s logic devices plus the foot in series, each width 3
-  // (one reference-inverter input per rail), so its drive is 3/(s+1) of a
-  // unit inverter and its logical effort (s+1)/3. Its load is the output
-  // inverter, k reference-inverter inputs over one rail input.
+  // Footed pull-down: s logic devices plus the foot in series, each an NMOS
+  // of width x (U26: half a reference-inverter input, the same device the rail
+  // pin capacitance counts), so its drive is x/(s+1) of a unit inverter and
+  // its logical effort (x/3) * (s+1)/x = (s+1)/3. Its load is the output
+  // inverter, k reference-inverter inputs (3k) over one device input (x).
   d.g_dynamic     = (s + 1) / 3;
-  d.h_dynamic     = k;
-  // Diffusion on the dynamic node: b branch-top drains and the precharge
-  // drain; the n-b devices below a branch top add internal-node diffusion at
-  // weight l. Divided by the pull-down drive, in units of p_inv.
-  d.p_dynamic     = p * (s + 1) * (b + l * (n - b) + w / 3) / 3;
+  d.h_dynamic     = 3 * k / x;
+  // Diffusion on the dynamic node: b branch-top drains (width x) and the
+  // precharge drain (w); the n-b devices below a branch top add internal-node
+  // diffusion at weight l. Times the pull-down resistance (s+1)/x over the
+  // unit inverter's 3, in units of p_inv.
+  d.p_dynamic     = p * (s + 1) * (b + l * (n - b) + w / x) / 3;
   // The output inverter (k reference inverters) drives the register D input.
   d.h_output      = *register_d_ff / (k * *model.c_in_ff);
   d.p_output      = p;
   d.eval_tau      = d.g_dynamic * d.h_dynamic + d.p_dynamic + d.h_output + d.p_output;
   // Precharge: the PMOS (drive w/2) charges the output inverter gate and the
-  // dynamic-node diffusion; internal stack nodes are not precharged.
-  d.c_dynamic     = 3 * k + p * (3 * b + w);
+  // dynamic-node diffusion (b branch tops of width x and its own drain);
+  // internal stack nodes are not precharged.
+  d.c_dynamic     = 3 * k + p * (x * b + w);
   d.precharge_tau = d.c_dynamic / (3 * w / 2);
   d.eval_ps       = d.eval_tau * *model.tau_ps;
   d.precharge_ps  = d.precharge_tau * *model.tau_ps;

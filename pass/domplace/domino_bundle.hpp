@@ -25,7 +25,9 @@ namespace livehd::domplace {
 // models, external simulators read the Verilog models; the sidecar records the
 // units, corner, technology, reference cells, coefficients, masters and the
 // original state that owns every instance.
-inline constexpr uint32_t         kBundleSchema      = 5;
+// Schema 6 (U26): per-rail pin capacitances (pin_caps.rails_ff, from each
+// rail's PDN devices) and the reset pin's own (pin_caps.reset_ff).
+inline constexpr uint32_t         kBundleSchema      = 6;
 inline constexpr std::string_view kBundleLef         = "domino_cells.lef";
 inline constexpr std::string_view kBundleSidecar     = "domino_models.json";
 inline constexpr std::string_view kBundleVerilog     = "domino_models.v";
@@ -103,7 +105,10 @@ struct Catalog_entry {
   std::string                          reset_pin;  // the storage reset (U22), empty without one
   int64_t                              width_dbu       = 0;
   double                               a_footprint_um2 = 0, a_estimate_um2 = 0;
-  std::optional<double>                rail_ff, clock_ff;  // labeled estimates; null when not derivable
+  // Labeled estimates; null when not derivable. rails_ff is per rail, in
+  // `rails` order: its PDN devices x 1/2 reference-inverter input (U26).
+  std::vector<std::optional<double>>   rails_ff;
+  std::optional<double>                reset_ff, clock_ff;
   std::optional<double>                setup_capture_ps;   // the register's setup at its capture; null when unknown
   std::optional<double>                eval_delay_ps, precharge_ps;  // this variant's; null when not derivable
   std::optional<liberty::Output_drive> drive;              // the register family's Q model

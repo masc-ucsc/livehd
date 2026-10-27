@@ -407,6 +407,7 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
     w.StartObject();
     real(w, "p_inv", inputs.delay.p_inv);
     real(w, "precharge_width", inputs.delay.precharge_width);
+    real(w, "pulldown_width", inputs.delay.pulldown_width);
     real(w, "internal_load", inputs.delay.internal_load);
     real(w, "internal_node_weight", inputs.delay.internal_node_weight);
     real(w, "setup_eval_fo4", inputs.delay.setup_eval_fo4);
@@ -485,6 +486,8 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
       } else {
         w.Null();
       }
+      // U26: each rail loads its driver with the PDN devices it gates.
+      const auto devices = rail_devices(master.formula, master.rails);
       w.Key("rails");
       w.StartArray();
       for (size_t k = 0; k < master.rails.size(); ++k) {
@@ -492,6 +495,7 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
         text(w, "pin", variants[m].front().cell.rails[k]);
         number(w, "input", master.rails[k].input);
         text(w, "polarity", master.rails[k].negative ? "negative" : "positive");
+        number(w, "pdn_devices", devices[k]);
         w.EndObject();
       }
       w.EndArray();
@@ -536,12 +540,24 @@ Bundle_result generate_domino_bundle(const Bundle_design& design, const Bundle_i
         w.EndArray();
         w.Key("pin_caps");
         w.StartObject();
-        real(w, "rail_ff", c_in);
+        w.Key("rails_ff");  // in rail (pin) order
+        w.StartArray();
+        for (const auto count : devices) {
+          if (c_in) {
+            w.Double(count * kRailDeviceCinFraction * *c_in);
+          } else {
+            w.Null();
+          }
+        }
+        w.EndArray();
+        real(w, "reset_ff", c_in);
         real(w, "clock_ff", clock_ff[v]);
         text(w,
              "source",
-             std::format("labeled-estimate: one reference-inverter input per rail; CLK = the register's CK input + {}/2 "
-                         "reference-inverter inputs (clocked precharge and foot devices)",
+             std::format("labeled-estimate (U26): a rail = its PDN devices x 1/2 reference-inverter input (the pull-down "
+                         "device the delay estimate sizes); RST = one reference-inverter input (the storage reset "
+                         "transistor, not characterized); CLK = the register's CK input + {}/2 reference-inverter inputs "
+                         "(clocked precharge and foot devices)",
                          reference.clock_devices));
         w.EndObject();
         real(w, "setup_capture_ps", reference.registers[v].setup_ps);
@@ -745,8 +761,23 @@ std::optional<Domino_sidecar> read_domino_sidecar(const rapidjson::Document& doc
       entry.width_dbu        = static_cast<int64_t>(variant["width_dbu"].GetUint64());
       entry.a_footprint_um2  = estimate(variant, "a_footprint_um2").value_or(0);
       entry.a_estimate_um2   = estimate(variant, "a_estimate_um2").value_or(0);
-      entry.rail_ff          = estimate(variant["pin_caps"], "rail_ff");
-      entry.clock_ff         = estimate(variant["pin_caps"], "clock_ff");
+      // U26: one capacitance per rail pin, in pin order.
+      const auto& caps       = variant["pin_caps"];
+      if (!caps.IsObject() || !caps.HasMember("rails_ff") || !caps["rails_ff"].IsArray()
+          || caps["rails_ff"].Size() != rails.size()) {
+        return refuse("variant " + entry.name + " has no per-rail pin capacitance");
+      }
+      for (const auto& value : caps["rails_ff"].GetArray()) {
+        if (value.IsNull()) {
+          entry.rails_ff.emplace_back();
+        } else if (value.IsNumber() && std::isfinite(value.GetDouble()) && value.GetDouble() >= 0) {
+          entry.rails_ff.emplace_back(value.GetDouble());
+        } else {
+          return refuse("variant " + entry.name + " has a malformed rail pin capacitance");
+        }
+      }
+      entry.reset_ff         = estimate(caps, "reset_ff");
+      entry.clock_ff         = estimate(caps, "clock_ff");
       entry.setup_capture_ps = estimate(variant, "setup_capture_ps");
       entry.eval_delay_ps    = estimate(variant["timing"], "eval_delay_ps");
       entry.precharge_ps     = estimate(variant["timing"], "precharge_ps");

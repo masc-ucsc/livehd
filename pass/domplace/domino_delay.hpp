@@ -3,8 +3,10 @@
 
 #include <cstdint>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include "domino_reference.hpp"
 #include "function.hpp"
@@ -23,12 +25,12 @@ inline constexpr std::string_view kDelaySource = "logical-effort-estimate";
 inline constexpr std::string_view kDelayModel  = "Sutherland-Sproull-Harris logical effort, footed domino gate + output inverter";
 // The formula, written into the sidecar beside the parameters (s = stack,
 // b = branches, n = PDN transistors, k = internal_load, w = precharge_width,
-// l = internal_node_weight, p = p_inv, C_D = the variant register's D input,
-// C_in = the reference inverter's input).
+// x = pulldown_width, l = internal_node_weight, p = p_inv, C_D = the variant
+// register's D input, C_in = the reference inverter's input).
 inline constexpr std::string_view kDelayFormula
     = "tau = FO4 / (4 + p); "
-      "eval = tau * [ (s+1)/3 * k + p * (s+1) * (b + l*(n-b) + w/3) / 3 + C_D / (k*C_in) + p ]; "
-      "precharge = tau * 2 * (3k + p * (3b + w)) / (3w); "
+      "eval = tau * [ (s+1)/3 * 3k/x + p * (s+1) * (b + l*(n-b) + w/x) / 3 + C_D / (k*C_in) + p ]; "
+      "precharge = tau * 2 * (3k + p * (x*b + w)) / (3w); "
       "setup_eval = setup_eval_fo4 * FO4; precharge_margin = precharge_margin_fo4 * FO4";
 
 // The FO4 delay of the reference inverter on its NLDM tables: the inverter
@@ -51,10 +53,14 @@ struct Fo4_derivation {
 std::optional<Fo4_derivation> derive_fo4(const liberty::timing::Cell& inverter, double c_in_ff, std::string* why);
 
 // Fixed built-in parameters, recorded in the sidecar. Units are logical-effort
-// widths: the unit inverter is NMOS 1 + PMOS 2 (input 3), and every rail is
-// one reference-inverter input, so each pull-down device is width 3.
+// widths: the unit inverter is NMOS 1 + PMOS 2 (input 3). Each pull-down
+// device is width pulldown_width = 1.5, half a reference-inverter input (U26):
+// a rail that gates m devices loads its driver with m * C_in / 2
+// (kRailDeviceCinFraction), the same device size the delay assumes.
+inline constexpr double kRailDeviceCinFraction = 0.5;
 struct Delay_parameters {
   double p_inv                = 1;    // reference-inverter parasitic delay in tau (FO4 = 5 tau)
+  double pulldown_width       = 3 * kRailDeviceCinFraction;  // one PDN NMOS, in unit widths
   double precharge_width      = 2;    // precharge PMOS width: a unit inverter's pull-up
   double internal_load        = 1;    // output inverter on the dynamic node, in reference-inverter inputs
   double internal_node_weight = 0.5;  // diffusion of a device below a branch top, relative to the dynamic node
@@ -73,6 +79,12 @@ struct Delay_model {
 // capacitance. A missing NLDM model or capacitance leaves fo4 absent and names
 // it in `issue`; nothing defaults to zero.
 Delay_model domino_delay_model(const Domino_reference& reference, const Delay_parameters& parameters = {});
+
+// The PDN devices each rail gates (U26): the literal occurrences of its
+// (input, polarity) in the formula, repeated physical occurrences included,
+// so the counts sum to metrics.transistors. A rail's pin capacitance is
+// count * kRailDeviceCinFraction * C_in.
+std::vector<uint32_t> rail_devices(const usyn::Gate_formula& formula, std::span<const usyn::Gate_rail> rails);
 
 // One master variant's estimate with its logical-effort terms (in tau).
 struct Stage_delay {

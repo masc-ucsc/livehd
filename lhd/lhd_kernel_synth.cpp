@@ -1820,15 +1820,16 @@ void synth_command(Options& opts, Result& res) {
           v.register_cell = entry.register_cell;
           v.rank          = entry.rank;
           v.rails         = entry.rails;
+          v.rails_ff      = entry.rails_ff;
           if (!entry.reset_pin.empty()) {
             v.rails.push_back(entry.reset_pin);  // the storage reset: one more input of the same interface
+            v.rails_ff.push_back(entry.reset_ff);
           }
           v.clock         = stage::kDominoPins.clock;
           v.output        = stage::kDominoPins.output;
           v.area_um2      = entry.a_footprint_um2;
           v.estimate_um2  = entry.a_estimate_um2;
           v.width_dbu     = entry.width_dbu;
-          v.rail_ff       = entry.rail_ff;
           v.clock_ff      = entry.clock_ff;
           v.drive         = entry.drive;
           variants.push_back(std::move(v));

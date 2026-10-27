@@ -126,6 +126,7 @@ TEST(DominoBundle, WritesARoundTrippingDeterministicBundle) {
   EXPECT_EQ(stage["uncertainty_second_ps"].GetDouble(), 0);
   const double fo4 = doc["fo4_ps"]["value"].GetDouble();
   const double tau = fo4 / 5;
+  const double eval_ps = (2 + 13.0 / 3 + 1.681 / 2.39 + 1) * tau;
   EXPECT_NEAR(fo4, 82.91234659320048, 1e-6);
   EXPECT_DOUBLE_EQ(stage["setup_eval_ps"].GetDouble(), .5 * fo4);
   EXPECT_DOUBLE_EQ(stage["precharge_margin_ps"].GetDouble(), .5 * fo4);
@@ -162,9 +163,10 @@ TEST(DominoBundle, WritesARoundTrippingDeterministicBundle) {
                          + doc["reference"]["inverter"]["input_capacitance_ff"].GetDouble());
     EXPECT_EQ(v["setup_capture_ps"], doc["reference"]["registers"][0]["setup_ps"]);
     // Both masters are two branches of two in series (s=2, b=2, n=4) into
-    // dfxtp_1's 1.681 fF D input: 6.370014 tau and 11/3 tau.
-    EXPECT_NEAR(v["timing"]["eval_delay_ps"].GetDouble(), 105.63056083546012, 1e-6);
-    EXPECT_NEAR(v["timing"]["precharge_ps"].GetDouble(), 11.0 / 3 * tau, 1e-6);
+    // dfxtp_1's 1.681 fF D input, half-inverter devices (U26):
+    // (2 + 13/3 + 1.681/2.39 + 1) tau and 8/3 tau.
+    EXPECT_NEAR(v["timing"]["eval_delay_ps"].GetDouble(), eval_ps, 1e-6);
+    EXPECT_NEAR(v["timing"]["precharge_ps"].GetDouble(), 8.0 / 3 * tau, 1e-6);
     EXPECT_DOUBLE_EQ(v["timing"]["register_d_ff"].GetDouble(), 1.681);
     EXPECT_DOUBLE_EQ(v["timing"]["estimate"]["g_dynamic"].GetDouble(), 1);
     if (m["n_pdn"].GetUint() == 4 && m["inputs"].GetUint() == 4) {
@@ -193,8 +195,8 @@ TEST(DominoBundle, WritesARoundTrippingDeterministicBundle) {
   EXPECT_EQ(sidecar->instances, 2U);
   EXPECT_EQ(sidecar->templates.at(f.design.instances[0].cell), (std::array{ph::Row_access::horizontal, ph::Row_access::vertical}));
   for (const auto& entry : sidecar->catalog) {
-    EXPECT_NEAR(entry.eval_delay_ps.value_or(0), 105.63056083546012, 1e-6) << entry.name;
-    EXPECT_NEAR(entry.precharge_ps.value_or(0), 11.0 / 3 * tau, 1e-6) << entry.name;
+    EXPECT_NEAR(entry.eval_delay_ps.value_or(0), eval_ps, 1e-6) << entry.name;
+    EXPECT_NEAR(entry.precharge_ps.value_or(0), 8.0 / 3 * tau, 1e-6) << entry.name;
   }
   EXPECT_TRUE(a.delay_issue.empty()) << a.delay_issue;
   {
@@ -237,7 +239,7 @@ TEST(DominoBundle, SchemaFourRecordsRegisterPinsClockLoadsCoefficientsTemplatesA
   const auto          text = read(dir / kBundleSidecar);
   doc.Parse(text.c_str());
   ASSERT_FALSE(doc.HasParseError());
-  EXPECT_EQ(doc["schema"].GetUint(), 5U);
+  EXPECT_EQ(doc["schema"].GetUint(), 6U);
   EXPECT_STREQ(doc["technology"]["row_rails"]["bottom"].GetString(), "VGND");
   EXPECT_STREQ(doc["technology"]["row_rails"]["top"].GetString(), "VPWR");
   const double fo4   = doc["fo4_ps"]["value"].GetDouble();
@@ -321,7 +323,13 @@ TEST(DominoBundle, SchemaFourRecordsRegisterPinsClockLoadsCoefficientsTemplatesA
     EXPECT_EQ(entry.rails, domino_interface(master, 0).rails);
     EXPECT_EQ(entry.width_dbu, static_cast<int64_t>(doc["masters"][i / 4]["variants"][i % 4]["width_dbu"].GetUint()));
     EXPECT_GT(entry.a_footprint_um2, entry.a_estimate_um2 - 1e-9);
-    EXPECT_DOUBLE_EQ(*entry.rail_ff, c_in);
+    // U26: each rail is its PDN devices x 1/2 reference-inverter input.
+    const auto devices = rail_devices(master.formula, master.rails);
+    ASSERT_EQ(entry.rails_ff.size(), devices.size());
+    for (size_t k = 0; k < devices.size(); ++k) {
+      ASSERT_TRUE(entry.rails_ff[k]);
+      EXPECT_DOUBLE_EQ(*entry.rails_ff[k], devices[k] * 0.5 * c_in) << k;
+    }
     EXPECT_EQ(entry.clock_ff.has_value(), rung == 0);
     EXPECT_EQ(entry.drive.has_value(), rung == 0);
     EXPECT_EQ(entry.clk_pin, "CLK");  // the register's own pins
@@ -342,13 +350,13 @@ TEST(DominoBundle, SchemaFourRecordsRegisterPinsClockLoadsCoefficientsTemplatesA
   EXPECT_FALSE(read_domino_sidecar(dir, &why));
   EXPECT_NE(why.find("names an unlisted register test_dfxtp_2"), std::string::npos) << why;
 
-  // Only schema 5 is read; an older sidecar (schema 4 had no storage reset
-  // pin) asks for regeneration.
+  // Only schema 6 is read; an older sidecar (schema 5 had one capacitance
+  // for every rail) asks for regeneration.
   auto older = text;
-  older.replace(older.find("\"schema\":5"), 10, "\"schema\":4");
+  older.replace(older.find("\"schema\":6"), 10, "\"schema\":5");
   std::ofstream(dir / kBundleSidecar, std::ios::trunc) << older;
   EXPECT_FALSE(read_domino_sidecar(dir, &why));
-  EXPECT_NE(why.find("is schema 4; this build reads schema 5 only (regenerate the bundle"), std::string::npos) << why;
+  EXPECT_NE(why.find("is schema 5; this build reads schema 6 only (regenerate the bundle"), std::string::npos) << why;
 }
 
 TEST(DominoBundle, MissingDelayDataIsNamedAndNeverZero) {

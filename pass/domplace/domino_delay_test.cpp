@@ -69,26 +69,76 @@ TEST(DominoDelay, HandComputedEstimatesOnSky130) {
   ASSERT_TRUE(model.tau_ps);
   const double tau = 82.91234659320048 / 5;
   std::string  why;
-  // AND2 (s=2, b=1, n=2): g h = 3/3 * 1; p = 3 (1 + 0.5*1 + 2/3) / 3 = 13/6;
-  // output 1.681/2.39 + 1; precharge (3 + 3 + 2) / 3 = 8/3.
+  // U26: every pull-down device is width x = 1.5 (half a reference-inverter
+  // input), so the output inverter (3) over one device input is h = 2 and the
+  // drains on the dynamic node are 1.5 wide; the precharge drain is w = 2.
+  const double out  = 1.681 / 2.39 + 1;  // output inverter into dfxtp_1's D, plus its parasitic
+  // AND2 (s=2, b=1, n=2): g h = 3/3 * 2; p = 3 (1 + 0.5*1 + 2/1.5) / 3 = 17/6;
+  // precharge (3 + 1.5*1 + 2) / 3 = 13/6.
   const auto   and2 = estimate_stage_delay(model, pdn(2, 1, 2), 1.681, &why);
   ASSERT_TRUE(and2) << why;
   EXPECT_DOUBLE_EQ(and2->g_dynamic, 1);
-  EXPECT_DOUBLE_EQ(and2->h_dynamic, 1);
-  EXPECT_NEAR(and2->p_dynamic, 13.0 / 6, 1e-12);
+  EXPECT_DOUBLE_EQ(and2->h_dynamic, 2);
+  EXPECT_NEAR(and2->p_dynamic, 17.0 / 6, 1e-12);
   EXPECT_NEAR(and2->h_output, 1.681 / 2.39, 1e-12);
-  EXPECT_NEAR(and2->eval_tau, 1 + 13.0 / 6 + 1.681 / 2.39 + 1, 1e-12);
-  EXPECT_NEAR(and2->eval_ps, 80.75685685749998, 1e-6);
-  EXPECT_NEAR(and2->precharge_tau, 8.0 / 3, 1e-12);
-  EXPECT_NEAR(and2->precharge_ps, 8.0 / 3 * tau, 1e-6);
-  // AND3 and AND4: deeper footed stacks.
-  EXPECT_NEAR(eval_ps(model, pdn(3, 1, 3)), 109.31555401738014, 1e-6);
-  EXPECT_NEAR(eval_ps(model, pdn(4, 1, 4)), 143.40174095014035, 1e-6);
-  // ab + cd (s=2, b=2, n=4) and OR4 (s=1, b=4, n=4).
-  EXPECT_NEAR(eval_ps(model, pdn(2, 2, 4)), 105.63056083546012, 1e-6);
-  EXPECT_NEAR(precharge_ps(model, pdn(2, 2, 4)), 11.0 / 3 * tau, 1e-6);
-  EXPECT_NEAR(eval_ps(model, pdn(1, 4, 4)), 90.89058810778005, 1e-6);
-  EXPECT_NEAR(precharge_ps(model, pdn(1, 4, 4)), 17.0 / 3 * tau, 1e-6);
+  EXPECT_NEAR(and2->eval_tau, 2 + 17.0 / 6 + out, 1e-12);
+  EXPECT_NEAR(and2->eval_ps, (2 + 17.0 / 6 + out) * tau, 1e-6);
+  EXPECT_NEAR(and2->precharge_tau, 13.0 / 6, 1e-12);
+  EXPECT_NEAR(and2->precharge_ps, 13.0 / 6 * tau, 1e-6);
+  // AND3 and AND4: deeper footed stacks. g h = (s+1)/3 * 2,
+  // p = (s+1) (1 + 0.5 (s-1) + 4/3) / 3; the precharge is AND2's.
+  EXPECT_NEAR(eval_ps(model, pdn(3, 1, 3)), (8.0 / 3 + 40.0 / 9 + out) * tau, 1e-6);
+  EXPECT_NEAR(eval_ps(model, pdn(4, 1, 4)), (10.0 / 3 + 115.0 / 18 + out) * tau, 1e-6);
+  EXPECT_NEAR(precharge_ps(model, pdn(4, 1, 4)), 13.0 / 6 * tau, 1e-6);
+  // ab + cd (s=2, b=2, n=4): p = 3 (2 + 0.5*2 + 4/3) / 3 = 13/3, precharge
+  // (3 + 3 + 2) / 3; OR4 (s=1, b=4, n=4): g h = 4/3, p = 2 (4 + 4/3) / 3 =
+  // 32/9, precharge (3 + 6 + 2) / 3.
+  EXPECT_NEAR(eval_ps(model, pdn(2, 2, 4)), (2 + 13.0 / 3 + out) * tau, 1e-6);
+  EXPECT_NEAR(precharge_ps(model, pdn(2, 2, 4)), 8.0 / 3 * tau, 1e-6);
+  EXPECT_NEAR(eval_ps(model, pdn(1, 4, 4)), (4.0 / 3 + 32.0 / 9 + out) * tau, 1e-6);
+  EXPECT_NEAR(precharge_ps(model, pdn(1, 4, 4)), 11.0 / 3 * tau, 1e-6);
+  // The width-3 devices of the earlier model (pulldown_width = 3) give back
+  // its AND2: h = 1, p = 13/6, precharge 8/3.
+  Delay_parameters wide;
+  wide.pulldown_width = 3;
+  auto old            = model;
+  old.parameters      = wide;
+  EXPECT_NEAR(eval_ps(old, pdn(2, 1, 2)), 80.75685685749998, 1e-6);
+  EXPECT_NEAR(precharge_ps(old, pdn(2, 1, 2)), 8.0 / 3 * tau, 1e-6);
+}
+
+TEST(DominoDelay, RailCapacitanceCountsThePdnDevicesItGates) {
+  // a&b | a&c | a&d: rail a gates three devices (1.5 C_in), b, c and d one
+  // each (0.5 C_in); a complemented rail is its own pin.
+  using Kind = usyn::Gate_formula::Kind;
+  usyn::Gate_formula f;
+  const auto         lit = [&](uint32_t v, bool negative = false) {
+    f.nodes.push_back({Kind::literal, 0, 0, v, negative});
+    return static_cast<uint32_t>(f.nodes.size() - 1);
+  };
+  const auto op = [&](Kind kind, uint32_t l, uint32_t r) {
+    f.nodes.push_back({kind, l, r, 0, false});
+    return static_cast<uint32_t>(f.nodes.size() - 1);
+  };
+  const auto ab = op(Kind::series, lit(0), lit(1));
+  const auto ac = op(Kind::series, lit(0), lit(2));
+  const auto ad = op(Kind::series, lit(0), lit(3, true));
+  op(Kind::parallel, op(Kind::parallel, ab, ac), ad);
+  const auto metrics = f.metrics();
+  ASSERT_TRUE(metrics);
+  const auto rails   = usyn::gate_rails(*metrics, 4);
+  const auto devices = rail_devices(f, rails);
+  ASSERT_EQ(rails.size(), 4U);
+  EXPECT_EQ(devices, (std::vector<uint32_t>{3, 1, 1, 1}));
+  EXPECT_TRUE(rails[3].negative);  // !d
+  uint32_t total = 0;
+  for (const auto count : devices) {
+    total += count;
+  }
+  EXPECT_EQ(total, metrics->transistors);
+  const double c_in = 2.39;
+  EXPECT_DOUBLE_EQ(devices[0] * kRailDeviceCinFraction * c_in, 1.5 * c_in);
+  EXPECT_DOUBLE_EQ(devices[1] * kRailDeviceCinFraction * c_in, 0.5 * c_in);
 }
 
 TEST(DominoDelay, DeeperStacksAndMoreBranchesAreSlower) {

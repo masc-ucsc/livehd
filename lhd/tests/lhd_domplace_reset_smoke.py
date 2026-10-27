@@ -67,7 +67,7 @@ assert len(endpoints['q2']['rails']) == 6, endpoints['q2']
 # kind, polarity and value, and the reset storage priced from dfrtp_1.
 bundle = work / 'synth/qor.json.domino'
 sidecar = json.loads((bundle / 'domino_models.json').read_text())
-assert sidecar['schema'] == 5, sidecar['schema']
+assert sidecar['schema'] == 6, sidecar['schema']
 storage = sidecar['reset_storage']
 assert storage['register'] == 'sky130_fd_sc_hd__dfrtp_1' and storage['liberty_area'] > 0, storage
 masters = {i['state']: i['master'] for i in sidecar['instances']}
