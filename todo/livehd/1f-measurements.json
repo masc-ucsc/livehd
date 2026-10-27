@@ -49362,6 +49362,49 @@
         },
         "scope": "Recorded v55 benchmark samples precede this merge. A matched upstream comparison is required before making claims for merged defaults."
       }
+    },
+    "distribution_link_index_v56": {
+      "status": "Implemented and focused checks passed; merged integration build and full placement benchmarks pending. Full A-J goal remains open.",
+      "source_commit": "111f24ad82670e7978a1fbf020f1a46dcaba789e",
+      "implementation": "Preseed only endpoint labels queried by library distribution links. Resolve their first physical connection; skip missing endpoints. Net scanning, reset/clock roots and bidirectional closure are unchanged. No public defaults changed by this fix.",
+      "tests": "Six optimized prects_networks tests pass, including missing endpoints, repeated connections, reset false paths and clock/data separation.",
+      "protocol": "Matched standalone classifiers, same optimized compiler flags and dependencies, CPU14, four saved v55 DEFs and their reset metadata. Single diagnostic samples taken during a concurrent integration build; these are not full placement speed or memory acceptance results.",
+      "probes": {
+        "lfsr": {
+          "exact_control_annotations": true,
+          "output_sha256": "bfd73fde2e37a1ffae62342958c628cb04dd6a49c712a0457a7bbc8f3e572d0b",
+          "control_classification_seconds": 0.000224165,
+          "candidate_classification_seconds": 0.000203085,
+          "control_process_peak_rss_kib": 194500.0,
+          "candidate_process_peak_rss_kib": 194780.0
+        },
+        "minimax": {
+          "exact_control_annotations": true,
+          "output_sha256": "999959ab3428eb165f6f9c0ded913ffe09850290c47fc10f23b5f2aeec70e84c",
+          "control_classification_seconds": 0.0322069,
+          "candidate_classification_seconds": 0.0241631,
+          "control_process_peak_rss_kib": 206680.0,
+          "candidate_process_peak_rss_kib": 206704.0
+        },
+        "NVDLA__partition_m": {
+          "exact_control_annotations": true,
+          "output_sha256": "4d0b9ae403f0c690272676fc802906475a5ce9eb955dc120c2b16e869491d841",
+          "control_classification_seconds": 0.0931912,
+          "candidate_classification_seconds": 0.0294323,
+          "control_process_peak_rss_kib": 212348.0,
+          "candidate_process_peak_rss_kib": 212472.0
+        },
+        "coralnpu": {
+          "exact_control_annotations": true,
+          "output_sha256": "c305178c2eddde76bd94bcabacd8486f889a0a2e61c8f0e1165e5767588df786",
+          "control_classification_seconds": 0.770305,
+          "candidate_classification_seconds": 0.401345,
+          "control_process_peak_rss_kib": 350648.0,
+          "candidate_process_peak_rss_kib": 350508.0
+        }
+      },
+      "memory_scope": "Standalone whole-process peak RSS is essentially unchanged; no placement memory reduction is yet established. Fresh Gemmini and matched new-default placement comparisons remain required.",
+      "evidence": "/tmp/1f-memory-v56/state.json; control-test.log; probe-results/summary.json; integration-build.log"
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",

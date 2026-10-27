@@ -22,6 +22,15 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Review v56 bounds the control-network pin index to endpoints used by library
+buffer, inverter and clock-gate links, preserving first-connection and missing-pin
+semantics. Six focused tests pass. Matched standalone classifiers produce identical
+ignored-pin and timing-cut sets on all four saved v55 DEFs. These diagnostic checks
+do not establish full-placement memory or runtime improvements. The combined
+integration build, matched comparisons under the new upstream defaults, and fresh
+Gemmini scaling run remain pending. See <code>runs.distribution_link_index_v56</code>;
+the full A–J requirements remain open.</p>
+
 <p>The later upstream merge (<code>58edc9881</code>, including
 <code>2eb47e6ef</code>) changes the default virtual filler fraction from 0.25 to
 1 and cell size scale from 1 to 2, and also updates synthesis. The v55 numbers
