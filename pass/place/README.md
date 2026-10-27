@@ -735,7 +735,10 @@ path does not enumerate intermediate Z trunks, Cartesian access combinations,
 or maze detours. A rejection means this restricted search found no witness,
 not that the net is impossible to route. Larger nets retain the bounded deeper
 search; explicit `propose`/`propose_pattern`/`propose_maze` calls remain available
-for callers that deliberately request it.
+for callers that deliberately request it. Setting `search_detours=true` on a
+request enables that deeper search while retaining pin-protection and coupling
+checks. The production preroute consumer opts in when materializing complete
+routes, including widened via landings; ordinary dpin probes keep the fast default.
 All returned candidates share the request's search budget; timeout/work counts
 remain visible even when an earlier baseline candidate succeeded.
 

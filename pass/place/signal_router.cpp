@@ -152,10 +152,10 @@ Signal_route_proposals Signal_router::try_route(const ph::Net& net, const Signal
   if (request.straight_span && !prepare_escapes()) {
     return result;
   }
-  auto base                = request.corridor              ? propose_aligned(net, *request.corridor, request.limits)
-                             : request.straight_span       ? propose_span_impl(net, request.limits, nullptr, escapes)
-                             : net.connections.size() <= 9 ? propose_simple(net, request.limits)
-                                                           : propose(net, request.limits);
+  auto base                = request.corridor        ? propose_aligned(net, *request.corridor, request.limits)
+                             : request.straight_span ? propose_span_impl(net, request.limits, nullptr, escapes)
+                             : !request.search_detours && net.connections.size() <= 9 ? propose_simple(net, request.limits)
+                                                                                      : propose(net, request.limits);
   result.access_examined   = base.access_examined;
   result.patterns_examined = base.patterns_examined;
   result.timed_out         = base.timed_out;

@@ -735,6 +735,9 @@ TEST(SignalRouter, SmallTryRouteUsesBothLShapesButDeclinesZDetours) {
   EXPECT_LE(rejected.patterns_examined, 2);
   // There is a legal intermediate-trunk Z route, deliberately outside try-route.
   EXPECT_TRUE(router.propose_pattern(f.net, f.limits).geometry);
+  Signal_route_request deeper{f.limits, {}};
+  deeper.search_detours = true;
+  EXPECT_FALSE(router.try_route(f.net, deeper).candidates.empty());
   EXPECT_EQ(occupied.size(), before);
   EXPECT_TRUE(f.fp.nets.front().wires.empty());
 }

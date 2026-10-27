@@ -52,6 +52,9 @@ struct Signal_route_request {
   double                         max_parallel_exposure = 100;
   // Relax only the coupling screen, never DRC, access or downstream timing gates.
   bool                           try_hard              = false;
+  // Explicit deeper search for consumers that materialize routes. The default
+  // existence query declines detours; this does not relax any acceptance gate.
+  bool                           search_detours        = false;
 };
 struct Signal_route_proposals {
   std::vector<Signal_route_geometry> candidates;  // baseline first; not timing-ranked
