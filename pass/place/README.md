@@ -97,9 +97,14 @@ physical setup objective skips resynthesis altogether.
 Full synthesis placement shares a cell-count and physical-area growth limit of
 3% over the original mapped standard-cell netlist. The inventory precedes
 synthesis-buffer cleanup and counts every occurrence of a shared color; macro
-area cannot subsidize standard-cell growth. Whole-color replacement and boundary
-master changes are checked before publication. Placement sizing, buffer repair
-and cone resynthesis check their private candidates before RC/timing evaluation.
+area cannot subsidize standard-cell growth. The reset and domino rail tree
+buffers (`__place_rsttree*`, `__place_railtree*`, below) are structural fanout
+restructuring done before the first cell is read, not growth: the inventory
+leaves them out, so a default-on tree does not spend the repair headroom.
+Whole-color replacement and boundary
+master changes are checked before publication. Placement sizing (including
+`synth.place.domino_sizing` variant steps and output buffers, `rejected_growth`),
+buffer repair and cone resynthesis check their private candidates before RC/timing evaluation.
 Oversized candidates retain the accepted graph. With detailed per-pin electrical
 feedback, batch repair visits the largest electrical excess first, then the worst
 setup slack. Without that feedback it orders by slack alone. This prevents a
@@ -1145,7 +1150,8 @@ the CMOS flows); 1 is refused. `qor.place.reset_tree` records `fanout`, `nets`, 
 of that placement call and `buffers`, the `__place_rsttree*` cells in the placed netlist; the
 value is part of the placement cache identity. The tree is not reset repair:
 `synth.place.repair.reset=true` (sizing reset cones) stays rejected, and the tree's nets
-keep the pre-CTS exclusion below (the buffers are reset-network cells).
+keep the pre-CTS exclusion below (the buffers are reset-network cells). The tree's buffers
+are not growth for the shared cell/area growth budget above.
 
 `synth.place.domino_rail_fanout` (default 32 since 2d-domplace U24, 0 off) applies the same tree
 to nets on domino data rails under `pass.usyn.physical=domino_provisional` (the per-region

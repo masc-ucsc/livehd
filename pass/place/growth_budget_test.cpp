@@ -82,5 +82,27 @@ TEST(GrowthBudget, MasterSwapsRespectAreaAndMacrosCannotSubsidizeGrowth) {
   EXPECT_FALSE(budget.allows(candidate));
   EXPECT_EQ(changed.get_subnode_io()->get_name(), "INV");
 }
+TEST(GrowthBudget, ResetAndRailTreeBuffersAreNotGrowth) {
+  physical::Technology tech;
+  tech.macros["BUF"].klass = "CORE";
+  tech.macros["BUF"].width = tech.macros["BUF"].height = 1;
+  hhds::GraphLibrary library;
+  const auto         buf = library.create_io("BUF");
+  const auto         top = library.create_io("top")->create_graph();
+  for (int i = 0; i < 10; ++i) {
+    instance(*top, buf);
+  }
+  const Growth_budget budget{physical_size(*top, tech)};
+  // The placement trees (synth.place.reset_fanout/domino_rail_fanout) mint
+  // these names, flattened with or without a hierarchy prefix.
+  for (const auto* name : {"__place_rsttree0", "u0.__place_rsttree3", "__place_railtree1"}) {
+    instance(*top, buf).set_name(name);
+  }
+  EXPECT_EQ(physical_size(*top, tech).cells, 10U);
+  EXPECT_DOUBLE_EQ(physical_size(*top, tech).area_um2, 10);
+  instance(*top, buf).set_name("g_place_rsttree");  // any other new cell is growth
+  EXPECT_EQ(physical_size(*top, tech).cells, 11U);
+  EXPECT_FALSE(budget.allows(physical_size(*top, tech)));
+}
 }  // namespace
 }  // namespace livehd::placement

@@ -8,6 +8,7 @@
 
 #include "place.hpp"
 #include "placement_technology.hpp"
+#include "reset_tree.hpp"
 
 namespace livehd::placement {
 Physical_size physical_size(hhds::Graph& source, const physical::Technology& technology, hhds::Graph* replacement,
@@ -26,8 +27,8 @@ Physical_size physical_size(hhds::Graph& source, const physical::Technology& tec
     Physical_size result;
     for (auto node : graph.body().nodes()) {
       const auto io = node.get_subnode_io();
-      if (!io) {
-        continue;
+      if (!io || is_tree_buffer(node.get_name())) {
+        continue;  // reset/rail tree buffers are structural, not growth
       }
       std::string master(io->get_name());
       if (&graph == replacement) {

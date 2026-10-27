@@ -39,4 +39,11 @@ Reset_tree_stats buffer_reset_nets(hhds::Graph& graph, const physical::Technolog
 // buffers named `__place_<tag>*`.
 Reset_tree_stats buffer_pin_nets(hhds::Graph& graph, const physical::Technology& tech, const std::string& liberty, unsigned cap,
                                  const Reset_pins& pins, std::string_view tag, const Constant_test& is_constant = {});
+
+// A buffer of the reset tree or the domino rail tree, by its minted name (a flattened name may carry a
+// hierarchy prefix). Structural fanout restructuring done before the first cell is read, so the
+// physical growth budget (growth_budget.hpp) leaves it out of the inventory.
+inline bool is_tree_buffer(std::string_view instance) {
+  return instance.find("__place_rsttree") != std::string_view::npos || instance.find("__place_railtree") != std::string_view::npos;
+}
 }  // namespace livehd::placement

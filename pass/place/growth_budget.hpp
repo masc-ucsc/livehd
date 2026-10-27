@@ -14,6 +14,8 @@ struct Physical_size {
   double   area_um2 = 0;
 };
 // Standard-cell inventory: fixed macro area cannot subsidize logic growth.
+// Reset and domino rail tree buffers (reset_tree.hpp) are structural fanout
+// restructuring, not growth, and stay out of it.
 // Replacements apply to every occurrence of the named definition, including
 // nested/shared colors. Master overrides are private resize proposals.
 using Master_changes = std::map<uint64_t, std::string>;
