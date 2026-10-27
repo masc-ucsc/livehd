@@ -8,6 +8,7 @@
 #include "attrs.hpp"
 #include "node_util.hpp"
 #include "pass_opentimer.hpp"
+#include "rc_batch.hpp"
 
 void Pass_opentimer::apply_physical_timing_cuts(const std::set<std::string>& cuts) {
   if (cuts.empty()) {
@@ -150,9 +151,7 @@ void Pass_opentimer::apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph
       previous.emplace(net.driver, &net);
     }
   }
-  spef::Spef data;
-  data.capacitance_unit = "1 FF";
-  data.resistance_unit  = "1 OHM";
+  livehd::opentimer::Rc_batch batch(timer);
   for (const auto& net : physical_rc_->nets) {
     const auto old                    = previous.find(net.driver);
     const bool unchanged              = old != previous.end() && *old->second == net;
@@ -196,10 +195,8 @@ void Pass_opentimer::apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph
       }
       mapped.ress.emplace_back(nodes[edge.from], nodes[edge.to], edge.resistance_ohm);
     }
-    data.nets.push_back(std::move(mapped));
+    batch.add(std::move(mapped));
   }
-  physical_updated_nets_ = data.nets.size();
-  if (!data.nets.empty()) {
-    timer.read_parasitics(std::move(data));
-  }
+  batch.flush();
+  physical_updated_nets_ = batch.size();
 }

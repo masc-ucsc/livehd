@@ -47271,6 +47271,807 @@
         "completed_timing_checkpoint": false
       },
       "acceptance": "All original A-J requirements remain in force. Gemmini scaling, total timing share, wire growth, decision-checkpoint accuracy and the broad design/import census remain open."
+    },
+    "bounded_rc_transfer_v52": {
+      "status": "Bounded RC transfer validated; complete A-J acceptance remains open.",
+      "implementation": "OpenTimer update_parasitics materializes pending builders and replaces RC trees synchronously without propagation. LiveHD flushes changed nets after 65536 capacitance/resistance records; indivisible nets may exceed the threshold. Initial mapping and geometry-only updates share the batching path. One later timing update retains all batch frontiers.",
+      "opentimer_commit": "53ce73749b8bc09b33f2b4e737c921dd897efe6e",
+      "protocol": "Same production defaults, one CPU per flow, 100 ps clocks and reset/reset-distribution false paths. Single samples with concurrent builds and benchmarks on separate CPUs; no repeatable speedup claim. Control is published v51.",
+      "four_design_comparison": {
+        "lfsr": {
+          "control": {
+            "placement_seconds": 1.941646,
+            "score": {
+              "hpwl_um": 183.788,
+              "hpwl_all_nets_um": 197.9,
+              "measured_nets": 136,
+              "excluded_nets": 1,
+              "setup_wns_ps": -60.270761,
+              "setup_tns_ps": -2166.75545,
+              "hold_wns_ps": 53.285192,
+              "hold_tns_ps": 0.0,
+              "instances": 134,
+              "logical_cells": 134,
+              "physical_cells": 0,
+              "buffers": 1,
+              "buffer_area_um2": 0.2624,
+              "macros": 0,
+              "instance_area_um2": 18.6187,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "scoring_seconds": 1.072,
+              "power_mw": 0.000682,
+              "reset_ports": []
+            },
+            "run": {
+              "status": "ok",
+              "wall_s": 4.5,
+              "cpu_s": 4.5,
+              "rss_mib": 328.66796875,
+              "tree_rss_mib": 343.828125,
+              "ipc": 2.6285668935142485,
+              "instructions": 53098534615.0,
+              "cycles": 20200564325.0,
+              "stop": null
+            },
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 11,
+              "builds": 1,
+              "ranking_evaluations": 8,
+              "ranking_seconds": 0.670527402,
+              "detailed_evaluations": 3,
+              "repowered_gates": 8,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 779,
+              "update_calls": 14,
+              "seconds": 0.69220318,
+              "validation_seconds": 0.001145022,
+              "reconcile_seconds": 0.662876996,
+              "exclusions_seconds": 0.000155696,
+              "propagation_seconds": 0.025638597000000003,
+              "feedback_seconds": 0.002315273999999998
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "path": "/tmp/1f-wns-v1/early_release_candidate/lfsr",
+            "def_sha256": "b3d67bb84f18ed886207fa77ed0f0691034721f9b7db6e338b54f8a495e9366f"
+          },
+          "candidate": {
+            "placement_seconds": 1.917855,
+            "score": {
+              "hpwl_um": 183.788,
+              "hpwl_all_nets_um": 197.9,
+              "measured_nets": 136,
+              "excluded_nets": 1,
+              "setup_wns_ps": -60.270761,
+              "setup_tns_ps": -2166.75545,
+              "hold_wns_ps": 53.285192,
+              "hold_tns_ps": 0.0,
+              "instances": 134,
+              "logical_cells": 134,
+              "physical_cells": 0,
+              "buffers": 1,
+              "buffer_area_um2": 0.2624,
+              "macros": 0,
+              "instance_area_um2": 18.6187,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "scoring_seconds": 1.061,
+              "power_mw": 0.000682,
+              "reset_ports": []
+            },
+            "run": {
+              "status": "ok",
+              "wall_s": 4.48,
+              "cpu_s": 4.46,
+              "rss_mib": 328.6484375,
+              "tree_rss_mib": 343.828125,
+              "ipc": 2.640367014741187,
+              "instructions": 52992588603.0,
+              "cycles": 20070160060.0,
+              "stop": null
+            },
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 11,
+              "builds": 1,
+              "ranking_evaluations": 8,
+              "ranking_seconds": 0.6476719799999998,
+              "detailed_evaluations": 3,
+              "repowered_gates": 8,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 779,
+              "update_calls": 14,
+              "seconds": 0.6695090119999998,
+              "validation_seconds": 0.001123902,
+              "reconcile_seconds": 0.642996509,
+              "exclusions_seconds": 9.5019e-05,
+              "propagation_seconds": 0.02285294,
+              "feedback_seconds": 0.002366592999999998
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "path": "/tmp/1f-wns-v1/rc_batches_candidate/lfsr",
+            "def_sha256": "b3d67bb84f18ed886207fa77ed0f0691034721f9b7db6e338b54f8a495e9366f"
+          },
+          "def_identical": true,
+          "time_ratio": 0.9877469940452586,
+          "score_identical": true
+        },
+        "minimax": {
+          "control": {
+            "placement_seconds": 38.851334,
+            "score": {
+              "hpwl_um": 46230.31,
+              "hpwl_all_nets_um": 46388.402,
+              "measured_nets": 16259,
+              "excluded_nets": 1,
+              "setup_wns_ps": -950.268312,
+              "setup_tns_ps": -1854618.411151,
+              "hold_wns_ps": 27.911343,
+              "hold_tns_ps": 0.0,
+              "instances": 16209,
+              "logical_cells": 16209,
+              "physical_cells": 0,
+              "buffers": 381,
+              "buffer_area_um2": 91.1687,
+              "macros": 0,
+              "instance_area_um2": 2086.121,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "scoring_seconds": 6.453,
+              "power_mw": 0.0531,
+              "reset_ports": []
+            },
+            "run": {
+              "status": "ok",
+              "wall_s": 60.1,
+              "cpu_s": 60.04,
+              "rss_mib": 1018.8125,
+              "tree_rss_mib": 995.1328125,
+              "ipc": 2.2929844800730517,
+              "instructions": 620510220604.0,
+              "cycles": 270612481679.0,
+              "stop": null
+            },
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 14,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 3.60329869,
+              "detailed_evaluations": 7,
+              "repowered_gates": 1325,
+              "inserted_gates": 379,
+              "removed_gates": 1,
+              "updated_nets": 84483,
+              "update_calls": 21,
+              "seconds": 14.585810245,
+              "validation_seconds": 0.29363819799999996,
+              "reconcile_seconds": 2.8650564600000004,
+              "exclusions_seconds": 0.090240811,
+              "propagation_seconds": 9.70997788,
+              "feedback_seconds": 1.6104069900000015
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16209,
+              "area_um2": 2086.120979999586,
+              "within_budget": true,
+              "rejected_proposals": 479
+            },
+            "path": "/tmp/1f-wns-v1/early_release_candidate/minimax",
+            "def_sha256": "36e36ec0d5bf6cfeb1345c2fe97730b8c8759ab17c6900dd79a34dbf7f38c26e"
+          },
+          "candidate": {
+            "placement_seconds": 40.849968999999994,
+            "score": {
+              "hpwl_um": 46230.31,
+              "hpwl_all_nets_um": 46388.402,
+              "measured_nets": 16259,
+              "excluded_nets": 1,
+              "setup_wns_ps": -950.268312,
+              "setup_tns_ps": -1854618.411151,
+              "hold_wns_ps": 27.911343,
+              "hold_tns_ps": 0.0,
+              "instances": 16209,
+              "logical_cells": 16209,
+              "physical_cells": 0,
+              "buffers": 381,
+              "buffer_area_um2": 91.1687,
+              "macros": 0,
+              "instance_area_um2": 2086.121,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "scoring_seconds": 6.741,
+              "power_mw": 0.0531,
+              "reset_ports": []
+            },
+            "run": {
+              "status": "ok",
+              "wall_s": 62.81,
+              "cpu_s": 62.690000000000005,
+              "rss_mib": 1006.77734375,
+              "tree_rss_mib": 995.29296875,
+              "ipc": 2.196643138461261,
+              "instructions": 620731016851.0,
+              "cycles": 282581638311.0,
+              "stop": null
+            },
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 14,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 4.021347673,
+              "detailed_evaluations": 7,
+              "repowered_gates": 1325,
+              "inserted_gates": 379,
+              "removed_gates": 1,
+              "updated_nets": 84483,
+              "update_calls": 21,
+              "seconds": 15.538360738,
+              "validation_seconds": 0.317951095,
+              "reconcile_seconds": 3.6260963039999994,
+              "exclusions_seconds": 0.090760483,
+              "propagation_seconds": 9.735739872999998,
+              "feedback_seconds": 1.7509960550000017
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16209,
+              "area_um2": 2086.120979999586,
+              "within_budget": true,
+              "rejected_proposals": 479
+            },
+            "path": "/tmp/1f-wns-v1/rc_batches_candidate/minimax",
+            "def_sha256": "36e36ec0d5bf6cfeb1345c2fe97730b8c8759ab17c6900dd79a34dbf7f38c26e"
+          },
+          "def_identical": true,
+          "time_ratio": 1.0514431499314796,
+          "score_identical": true
+        },
+        "NVDLA/partition_m": {
+          "control": {
+            "placement_seconds": 34.1181,
+            "score": {
+              "hpwl_um": 93405.154,
+              "hpwl_all_nets_um": 107638.17,
+              "measured_nets": 20647,
+              "excluded_nets": 145,
+              "setup_wns_ps": -916.800306,
+              "setup_tns_ps": -398000.681115,
+              "hold_wns_ps": 25.471559,
+              "hold_tns_ps": 0.0,
+              "instances": 20610,
+              "logical_cells": 20610,
+              "physical_cells": 0,
+              "buffers": 150,
+              "buffer_area_um2": 12.0431,
+              "macros": 0,
+              "instance_area_um2": 2736.6514,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "scoring_seconds": 9.513,
+              "power_mw": 0.122,
+              "reset_ports": [
+                "direct_reset_",
+                "dla_reset_rstn",
+                "global_clk_ovr_on",
+                "nvdla_clk_ovr_on",
+                "test_mode",
+                "tmc2slcg_disable_clock_gating"
+              ]
+            },
+            "run": {
+              "status": "ok",
+              "wall_s": 98.59,
+              "cpu_s": 98.49,
+              "rss_mib": 1347.86328125,
+              "tree_rss_mib": 1340.54296875,
+              "ipc": 1.5952568470666662,
+              "instructions": 708534961788.0,
+              "cycles": 444151023762.0,
+              "stop": null
+            },
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 10,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 5.295291067,
+              "detailed_evaluations": 3,
+              "repowered_gates": 3971,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 113482,
+              "update_calls": 13,
+              "seconds": 11.775824035,
+              "validation_seconds": 0.392621406,
+              "reconcile_seconds": 2.660628355,
+              "exclusions_seconds": 0.05105622199999999,
+              "propagation_seconds": 7.624919399,
+              "feedback_seconds": 1.0231150280000003
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20948,
+              "baseline_area_um2": 2656.096920000048,
+              "cells": 20598,
+              "area_um2": 2735.7766200000697,
+              "within_budget": true,
+              "rejected_proposals": 4016
+            },
+            "path": "/tmp/1f-wns-v1/early_release_candidate/NVDLA__partition_m",
+            "def_sha256": "dcd4ab3ce6ff51087c148dde5cf90a6967320c7882941e27c3a64820fabccb45"
+          },
+          "candidate": {
+            "placement_seconds": 34.616003,
+            "score": {
+              "hpwl_um": 93405.154,
+              "hpwl_all_nets_um": 107638.17,
+              "measured_nets": 20647,
+              "excluded_nets": 145,
+              "setup_wns_ps": -916.800306,
+              "setup_tns_ps": -398000.681115,
+              "hold_wns_ps": 25.471559,
+              "hold_tns_ps": 0.0,
+              "instances": 20610,
+              "logical_cells": 20610,
+              "physical_cells": 0,
+              "buffers": 150,
+              "buffer_area_um2": 12.0431,
+              "macros": 0,
+              "instance_area_um2": 2736.6514,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "scoring_seconds": 9.842,
+              "power_mw": 0.122,
+              "reset_ports": [
+                "direct_reset_",
+                "dla_reset_rstn",
+                "global_clk_ovr_on",
+                "nvdla_clk_ovr_on",
+                "test_mode",
+                "tmc2slcg_disable_clock_gating"
+              ]
+            },
+            "run": {
+              "status": "ok",
+              "wall_s": 99.74,
+              "cpu_s": 99.67999999999999,
+              "rss_mib": 1333.37890625,
+              "tree_rss_mib": 1330.75,
+              "ipc": 1.5752311654805693,
+              "instructions": 708030365041.0,
+              "cycles": 449477118379.0,
+              "stop": null
+            },
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 10,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 5.7433717060000005,
+              "detailed_evaluations": 3,
+              "repowered_gates": 3971,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 113482,
+              "update_calls": 13,
+              "seconds": 12.487790058,
+              "validation_seconds": 0.354876918,
+              "reconcile_seconds": 3.491854477,
+              "exclusions_seconds": 0.050645812,
+              "propagation_seconds": 7.505825205999998,
+              "feedback_seconds": 1.064706974000002
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20948,
+              "baseline_area_um2": 2656.096920000048,
+              "cells": 20598,
+              "area_um2": 2735.7766200000697,
+              "within_budget": true,
+              "rejected_proposals": 4016
+            },
+            "path": "/tmp/1f-wns-v1/rc_batches_candidate/NVDLA__partition_m",
+            "def_sha256": "dcd4ab3ce6ff51087c148dde5cf90a6967320c7882941e27c3a64820fabccb45"
+          },
+          "def_identical": true,
+          "time_ratio": 1.0145935148791991,
+          "score_identical": true
+        },
+        "coralnpu": {
+          "control": {
+            "placement_seconds": 640.64977,
+            "score": {
+              "hpwl_um": 3907685.145,
+              "hpwl_all_nets_um": 4173067.872,
+              "measured_nets": 161126,
+              "excluded_nets": 690,
+              "setup_wns_ps": -16736.599729,
+              "setup_tns_ps": -64843349.068619,
+              "hold_wns_ps": 27.430929,
+              "hold_tns_ps": 0.0,
+              "instances": 161074,
+              "logical_cells": 161074,
+              "physical_cells": 0,
+              "buffers": 1090,
+              "buffer_area_um2": 88.1944,
+              "macros": 2,
+              "instance_area_um2": 45769.8019,
+              "macro_area_um2": 26086.1895,
+              "die_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "scoring_seconds": 80.581,
+              "power_mw": 0.692,
+              "reset_ports": [
+                "io_aresetn"
+              ]
+            },
+            "run": {
+              "status": "ok",
+              "wall_s": 786.16,
+              "cpu_s": 785.5300000000001,
+              "rss_mib": 8968.05859375,
+              "tree_rss_mib": 8968.15234375,
+              "ipc": 1.761802831634487,
+              "instructions": 6242497090161.0,
+              "cycles": 3543243873873.0,
+              "stop": null
+            },
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 17,
+              "builds": 1,
+              "ranking_evaluations": 11,
+              "ranking_seconds": 73.15567280699999,
+              "detailed_evaluations": 6,
+              "repowered_gates": 22791,
+              "inserted_gates": 492,
+              "removed_gates": 1484,
+              "updated_nets": 2189264,
+              "update_calls": 23,
+              "seconds": 207.504695757,
+              "validation_seconds": 5.934909422000001,
+              "reconcile_seconds": 34.37838792299999,
+              "exclusions_seconds": 0.920809211,
+              "propagation_seconds": 144.91504903300003,
+              "feedback_seconds": 20.66195346099997
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 160837,
+              "area_um2": 19666.480859994055,
+              "within_budget": true,
+              "rejected_proposals": 8497
+            },
+            "path": "/tmp/1f-wns-v1/early_release_candidate/coralnpu",
+            "def_sha256": "52c891a097e857f19ae66b0ee03def4a476a97aea5b46127de50a950fab10756"
+          },
+          "candidate": {
+            "placement_seconds": 642.629958,
+            "score": {
+              "hpwl_um": 3907685.145,
+              "hpwl_all_nets_um": 4173067.872,
+              "measured_nets": 161126,
+              "excluded_nets": 690,
+              "setup_wns_ps": -16736.599729,
+              "setup_tns_ps": -64843349.068619,
+              "hold_wns_ps": 27.430929,
+              "hold_tns_ps": 0.0,
+              "instances": 161074,
+              "logical_cells": 161074,
+              "physical_cells": 0,
+              "buffers": 1090,
+              "buffer_area_um2": 88.1944,
+              "macros": 2,
+              "instance_area_um2": 45769.8019,
+              "macro_area_um2": 26086.1895,
+              "die_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "scoring_seconds": 81.478,
+              "power_mw": 0.692,
+              "reset_ports": [
+                "io_aresetn"
+              ]
+            },
+            "run": {
+              "status": "ok",
+              "wall_s": 792.76,
+              "cpu_s": 792.06,
+              "rss_mib": 8755.96875,
+              "tree_rss_mib": 8713.71875,
+              "ipc": 1.751042611780253,
+              "instructions": 6257191640668.0,
+              "cycles": 3573409121270.0,
+              "stop": null
+            },
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 17,
+              "builds": 1,
+              "ranking_evaluations": 11,
+              "ranking_seconds": 86.07747966599999,
+              "detailed_evaluations": 6,
+              "repowered_gates": 22791,
+              "inserted_gates": 492,
+              "removed_gates": 1484,
+              "updated_nets": 2189264,
+              "update_calls": 23,
+              "seconds": 228.771721722,
+              "validation_seconds": 4.646877782,
+              "reconcile_seconds": 61.807990579999995,
+              "exclusions_seconds": 0.7511527509999999,
+              "propagation_seconds": 140.42043343700004,
+              "feedback_seconds": 20.746743007999953
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 160837,
+              "area_um2": 19666.480859994055,
+              "within_budget": true,
+              "rejected_proposals": 8497
+            },
+            "path": "/tmp/1f-wns-v1/rc_batches_candidate/coralnpu",
+            "def_sha256": "52c891a097e857f19ae66b0ee03def4a476a97aea5b46127de50a950fab10756"
+          },
+          "def_identical": true,
+          "time_ratio": 1.0030909056597335,
+          "score_identical": true
+        }
+      },
+      "binary_manifest": {
+        "build": "-c opt --jobs=2; bounded RC batches with immediate tree replacement; published dependencies; published dependency pins",
+        "repos": {
+          "livehd": {
+            "head": "f898e7f400e3ca715b108f1e6b07685a113156cc",
+            "patch_sha256": "92abc99831d9d141a881a90b0a21b87ebb18c07c07dff568019b57a7943d9e60"
+          },
+          "DREAMPlace": {
+            "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+            "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "OpenTimer": {
+            "head": "b107f35a70ac6368cf9954d20c85fced684a6439",
+            "patch_sha256": "e09f7eabaf3d50d3fd5fdbedba70843599deaba74d218228e4364b163506b39f"
+          }
+        },
+        "lhd": "6f3c5b137b95fa17ffa72ef2c5aaaba554f0be97e0d6261e918c51ea9b26911e",
+        "physical_repair": "9a2ca3b86c056696ef8d76025ad95b68e67b1db842e646b6e8f7866f87ccb8e1",
+        "compiled_dependencies": {
+          "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+          "opentimer": {
+            "local_checkout": "/home/renau/projs/OpenTimer",
+            "head": "b107f35a70ac6368cf9954d20c85fced684a6439",
+            "patch_sha256": "e09f7eabaf3d50d3fd5fdbedba70843599deaba74d218228e4364b163506b39f"
+          }
+        },
+        "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+        "harness_sha256": {
+          "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+          "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+        }
+      },
+      "published_build": {
+        "status": "pass",
+        "def_identical": true,
+        "score_identical": true,
+        "def_sha256": "b3d67bb84f18ed886207fa77ed0f0691034721f9b7db6e338b54f8a495e9366f",
+        "frozen_seconds": 1.917855,
+        "published_seconds": 1.9168859999999999,
+        "published_manifest": {
+          "build": "-c opt --jobs=2; bounded RC batches using published OpenTimer pin; published dependencies; published dependency pins",
+          "repos": {
+            "livehd": {
+              "head": "f898e7f400e3ca715b108f1e6b07685a113156cc",
+              "patch_sha256": "e74d36c91af6519c69fdbcd184c0c515ad300c8b1cef2bd43733aac4ac46e4a9"
+            },
+            "DREAMPlace": {
+              "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+              "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "OpenTimer": {
+              "head": "53ce73749b8bc09b33f2b4e737c921dd897efe6e",
+              "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          },
+          "lhd": "03d6b74e66118d9cbc1f2e662d915cc6390227d61015a321914e7be237ffa2d6",
+          "physical_repair": "e8d0c048a92e76df60afccc2be56696af2ca8764a0e523d35370f77529a549e0",
+          "compiled_dependencies": {
+            "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+            "opentimer": "53ce73749b8bc09b33f2b4e737c921dd897efe6e"
+          },
+          "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+          "harness_sha256": {
+            "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+            "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+          }
+        }
+      },
+      "build_provenance": "The benchmark binary used the owning local OpenTimer checkout. Its exact patch was then published as 53ce737. All eight suites and both executables passed again using that published pin without a local override; rebuilt lfsr has identical DEF and independent QoR. Frozen binaries were never overwritten.",
+      "review": {
+        "findings": [],
+        "scope": [
+          "Bounded transient SPEF lifetime and immediate replacement of old trees",
+          "Deferred builder ordering, unit rebasing and preservation of timing frontiers",
+          "No intermediate timing propagation; detailed/ranking models and reset cuts remain intact",
+          "Changed-net statistics and accounting of RC construction in reconciliation"
+        ],
+        "validation": [
+          "Eight optimized suites pass with --test_timeout=30 --jobs=2 against published dependencies: rc_propagation, rc_ceff, rc_waveform, celllib_smoke, physical_session_test, pass_opentimer_test, place_test and repair_test",
+          "New regression materializes 22000 independent nets across multiple batches and verifies every arrival after one propagation",
+          "New OpenTimer regression checks pending topology, repeated RC replacement, both timing models/corners/transitions, unit rebasing and unchanged timing values before propagation",
+          "All four designs have byte-identical DEFs and independent QoR, within 1.5x placement time and cell/area growth budgets",
+          "Compiler-warning contract guard and git diff --check pass"
+        ],
+        "fixture_note": "First new fixtures used ohms where expected picosecond values assumed kOhm*fF; corrected fixture units and detailed waveform expectations. Existing tests passed throughout. Final eight-suite runs pass locally and with the published pin.",
+        "documentation_note": "Clarified that batches flush after the record threshold, so their last indivisible net may take them beyond 65536 records."
+      },
+      "gemmini": {
+        "command": "run_design.py gemmini --flows SB --slot 0 via frozen scratch wrapper",
+        "flows": {
+          "S": {
+            "status": "ok",
+            "stop_reason": null,
+            "wall_s": 70.20016556698829,
+            "cpu_s": 69.84,
+            "tree_peak_rss_kb": 8834924,
+            "path": "/home/renau/projs/.agent-artifacts/1f-memory-v52/gemmini-candidate/gemmini/S"
+          },
+          "B": {
+            "status": "guard-stopped",
+            "stop_reason": "process-tree memory limit",
+            "wall_s": 209.3102426668629,
+            "cpu_s": null,
+            "tree_peak_rss_kb": 16876952,
+            "path": "/home/renau/projs/.agent-artifacts/1f-memory-v52/gemmini-candidate/gemmini/B"
+          }
+        },
+        "completed_placement_timing_checkpoint": false
+      },
+      "profiles": {
+        "before": {
+          "binary": "v51",
+          "summary": "/tmp/1f-memory-v52/cpu-summary.json",
+          "path": "/home/renau/projs/.agent-artifacts/1f-memory-v52/gemmini-profile/phase.perf",
+          "last_two_seconds_samples": 199,
+          "update_bound_rc_samples": 106
+        },
+        "after": {
+          "binary": "v52",
+          "summary": "/tmp/1f-memory-v52/batched-cpu-summary.json",
+          "path": "/home/renau/projs/.agent-artifacts/1f-memory-v52/gemmini-profile-batched/phase.perf",
+          "last_two_seconds_samples": 199,
+          "update_timing_samples": 124,
+          "build_prop_tasks_samples": 121,
+          "build_prop_candidates_samples": 103
+        },
+        "finding": "Batched transfer gets beyond full-design SPEF construction; the remaining guard failure occurs during propagation candidate/task setup. No first completed placement timing checkpoint yet.",
+        "next": "Reduce resident RC storage and propagation scheduling memory. Reassess direct single-worker propagation against the new peak; the earlier v46 prototype was tested before transfer/setup memory had been reduced."
+      },
+      "accounting": "RC-tree construction moves from propagation into reconciliation. Compare total timing cost, not isolated bucket changes.",
+      "acceptance": "All original A-J requirements remain in force. Gemmini placement scaling, total timing share, wire growth, decision-checkpoint accuracy and the broad design/import census remain open."
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",

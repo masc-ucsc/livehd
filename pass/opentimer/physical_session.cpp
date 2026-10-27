@@ -14,6 +14,7 @@
 #include "pass_opentimer.hpp"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
+#include "rc_batch.hpp"
 #include "sta_salt.hpp"
 #include "timing_whatif.hpp"
 
@@ -309,9 +310,7 @@ struct Physical_session::Impl : Pass_opentimer {
     // Coordinate-only snapshots preserve every physical/timer pin binding.
     // Reuse those names and net identities instead of rebuilding sorted maps
     // and checking the entire connectivity again for each GP sample.
-    spef::Spef data;
-    data.capacitance_unit = "1 FF";
-    data.resistance_unit  = "1 OHM";
+    Rc_batch batch(timer);
     for (size_t index = 0; index < physical_rc_->nets.size(); ++index) {
       const auto& net = physical_rc_->nets[index];
       if (net == previous_physical_rc_->nets[index]) {
@@ -330,12 +329,10 @@ struct Physical_session::Impl : Pass_opentimer {
       for (const auto& edge : net.edges) {
         mapped.ress.emplace_back(nodes.at(edge.from), nodes.at(edge.to), edge.resistance_ohm);
       }
-      data.nets.push_back(std::move(mapped));
+      batch.add(std::move(mapped));
     }
-    physical_updated_nets_ = data.nets.size();
-    if (!data.nets.empty()) {
-      timer.read_parasitics(std::move(data));
-    }
+    batch.flush();
+    physical_updated_nets_ = batch.size();
   }
 
   // ---- what-if edits (core/timing_whatif.hpp) -------------------------------

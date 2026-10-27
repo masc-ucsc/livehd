@@ -17,10 +17,47 @@
 #include "pass/place/repair_internal.hpp"
 #include "pass_opentimer.hpp"
 #include "rapidjson/document.h"
+#include "rc_batch.hpp"
 
 namespace {
 namespace gu   = livehd::graph_util;
 using Feedback = livehd::timing::Feedback;
+
+TEST(RcBatch, LargeUpdatesMaterializeInChunksAndKeepEveryNetForPropagation) {
+  ot::Timer timer;
+  timer.set_num_threads(1);
+  timer.set_time_unit(ot::second_t(1e-12))
+      .set_capacitance_unit(ot::farad_t(1e-15))
+      .set_resistance_unit(ot::ohm_t(1000))
+      .set_rc_model(ot::RcModel::elmore);
+  constexpr size_t count = 22000;
+  for (size_t i = 0; i < count; ++i) {
+    const auto a = "input_" + std::to_string(i), y = "output_" + std::to_string(i);
+    timer.insert_primary_input(a).insert_primary_output(y).disconnect_pin(y).connect_pin(y, a);
+    timer.set_at(a, ot::MAX, ot::RISE, 0).set_slew(a, ot::MAX, ot::RISE, 20);
+  }
+  timer.update_netlist();
+  livehd::opentimer::Rc_batch batch(timer);
+  for (size_t i = 0; i < count; ++i) {
+    const auto a = "input_" + std::to_string(i), y = "output_" + std::to_string(i);
+    spef::Net  net(a, 10);
+    net.caps.emplace_back(a, "", 2);
+    net.caps.emplace_back(y, "", 8);
+    net.ress.emplace_back(a, y, 1000);
+    batch.add(std::move(net));
+  }
+  EXPECT_EQ(batch.size(), count);
+  // Earlier chunks have replaced their trees; a final partial chunk remains.
+  EXPECT_NE(timer.pins().at("input_0").net()->rct(), nullptr);
+  EXPECT_EQ(timer.pins().at("input_21999").net()->rct(), nullptr);
+  EXPECT_FALSE(timer.pins().at("output_0").at(ot::MAX, ot::RISE));
+  batch.flush();
+  batch.flush();  // Empty flush must not clear the accumulated frontier.
+  timer.update_timing();
+  for (size_t i = 0; i < count; ++i) {
+    EXPECT_EQ(timer.pins().at("output_" + std::to_string(i)).at(ot::MAX, ot::RISE), 8);
+  }
+}
 // Fault injection after an insertion has already changed the real timer journal.
 class Insertion_probe : public livehd::timing::Whatif {
   livehd::timing::Whatif& inner;

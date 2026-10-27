@@ -22,6 +22,35 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Review v52 bounds transient RC transfer through published OpenTimer
+<code>53ce737</code>. The placement host flushes batches after 65,536 electrical
+records without splitting a net. Each batch replaces old RC trees immediately;
+timing propagates once after the complete update, retaining every batch's
+frontiers. Deferred SPEF APIs and public defaults are unchanged. RC construction
+now appears in reconciliation rather than propagation statistics, so total
+cost is the valid comparison.</p>
+<p>Eight optimized suites pass locally and against the published pin. Tests
+cover 22,000 nets across batches, pending topology, unit conversion, repeated
+RC replacement, both timing models and no premature propagation. The rebuilt
+published executable reproduces the frozen candidate's lfsr DEF and score.
+All four designs retain byte-identical DEFs and independent WNS, HPWL, cells
+and area, within 1.5× placement time. Placement takes
+1.918 s (lfsr),
+40.850 s (minimax),
+34.616 s (NVDLA/partition_m) and
+642.630 s (coralnpu). Coral's full flow takes
+792.76 s wall and 792.06 s CPU;
+peak RSS falls from 8,968 to 8,756 MiB.
+These are single samples, not repeatable speedup claims. Evidence is in
+<code>runs.bounded_rc_transfer_v52</code>.</p>
+<p>Fresh Gemmini <code>--flows SB</code> synthesis passes in 70.2 s
+at 8,834,924 KiB, but placement still exceeds the 16 GiB guard
+(16,876,952 KiB after 209.3 s), before its first timing
+checkpoint completes. Separate CPU profiles move the final peak from RC
+transfer to propagation candidate/task setup (121 of 199 final samples include
+<code>_build_prop_tasks</code>, 103 include candidate discovery). Resident RC
+storage and propagation scheduling are the next targets. A–J remain open.</p>
+
 <p>Review v51 narrows ordinary GP ranking input to graph, RC and cached
 control classification. It omits the unused pin-location map and postpones the
 weighting floorplan until after timing. Detailed callbacks and selected macro
