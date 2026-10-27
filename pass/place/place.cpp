@@ -5342,7 +5342,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   std::optional<Macro_run>  macro_run;
   dp::Design                macro_report_design;
   std::vector<mp::NodeInfo> macro_report_info;
-  bool                      macro_solved = false;
+  bool                      macro_solved     = false;
+  size_t                    macro_seeded_ios = 0;  // restart-seed IOs kept before macro planning
   if (macro_active) {
     // A restart seed's IOs (same die only) are kept as the regular flow keeps
     // them, and before macro planning: the macro frame's identity includes
@@ -5361,6 +5362,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           seeded_ios.insert(t.name);
         }
       }
+      macro_seeded_ios = seeded_ios.size();
     }
     make_arrays(v, tech);
     // Cold automatic IO assignment uses the same first GP as the regular flow.
@@ -5565,7 +5567,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     // H2D solve already legalized the complete cell frame and is kept as the
     // final placement below; like the placement cache, the seed must not
     // overwrite it (old coordinates under H2D's row orientations are illegal).
-    size_t reused_cells = 0, reused_macros = 0, new_cells = 0, reused_ios = 0;
+    // A macro solve keeps the seed's IOs it took before planning.
+    size_t reused_cells = 0, reused_macros = 0, new_cells = 0, reused_ios = macro_solved ? macro_seeded_ios : 0;
     if (!macro_solved) {
       std::map<std::string, Ann_place> positions;
       for (const auto& c : options.restart_seed->components) {

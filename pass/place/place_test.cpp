@@ -1041,6 +1041,25 @@ TEST(Placement, ResynthesisRestartSeedsCoordinatesWithoutLockingCellsOrMacros) {
     EXPECT_TRUE(terminal.x == die.xl || terminal.x == die.xh || terminal.y == die.yl || terminal.y == die.yh)
         << terminal.name << " at " << terminal.x << "," << terminal.y;
   }
+
+  // A macro solve supersedes the seed's cells but keeps its IOs (taken before
+  // planning): the report counts them.
+  options.restart_seed = std::make_shared<physical::Floorplan>(frame);
+  options.core         = {0, 0, 100, 100};
+  options.macro_mode   = "h2d";
+  options.full         = true;
+  options.output_dir   = (root / "macro_solved").string();
+  hhds::GraphLibrary solved_library;
+  place(*graph, solved_library, options);
+  std::ifstream       solved_file(options.output_dir + "/restart_seed.json");
+  const std::string   solved_text{std::istreambuf_iterator<char>(solved_file), {}};
+  rapidjson::Document solved;
+  solved.Parse(solved_text.c_str());
+  ASSERT_FALSE(solved.HasParseError()) << solved_text;
+  EXPECT_TRUE(solved["superseded_by_macro_solve"].GetBool()) << solved_text;
+  EXPECT_EQ(solved["reused_movable_cells"].GetUint64(), 0U);
+  EXPECT_EQ(solved["reused_ios"].GetUint64(), frame.terminals.size()) << solved_text;
+  EXPECT_GT(frame.terminals.size(), 0U);
 }
 TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegalization) {
   const auto root = std::filesystem::path(std::getenv("TEST_TMPDIR")) / "macro_detail";
