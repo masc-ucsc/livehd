@@ -9,6 +9,83 @@
 #include "routing_geometry.hpp"
 
 namespace livehd::physical {
+TEST(RoutingOccupancy, BitmapMatchesExactQueriesAcrossUpdatesOwnersAndBoundaries) {
+  Routing_occupancy                  exact(64);
+  std::mt19937                       random(7249);
+  std::uniform_int_distribution<int> coordinate(-2000, 3000), extent(1, 110);
+  for (int i = 0; i < 200; ++i) {
+    const int x = coordinate(random), y = coordinate(random);
+    exact.insert({
+        {i % 2 ? "M2" : "M3", {double(x), double(y), double(x + extent(random)), double(y + extent(random))}},
+        i % 3 ? "signal" : "other"
+    });
+  }
+  exact.insert_run(
+      {
+          {"M2", {-1500, -500, -1482, -482}},
+          "rail"
+  },
+      36,
+      0,
+      100);
+  auto bitmap = exact;
+  bitmap.enable_bitmap({-1000, -1000, 2000, 2000}, 17, {"M3"});
+  EXPECT_GT(bitmap.bitmap_bytes(), 0U);
+  const auto compare = [&] {
+    for (int i = 0; i < 500; ++i) {
+      const int  x = coordinate(random), y = coordinate(random);
+      const Rect rect{double(x), double(y), double(x + extent(random)), double(y + extent(random))};
+      for (const auto& layer : {"M2", "M3", "new_layer"}) {
+        for (const auto& owner : {"", "signal", "other"}) {
+          EXPECT_EQ(bitmap.query(layer, rect, i % 49, owner), exact.query(layer, rect, i % 49, owner));
+        }
+      }
+    }
+  };
+  compare();
+  for (const auto& layer : {"M2", "M3", "new_layer"}) {
+    Occupied_shape added{
+        {layer, {63 * 17, 0, 65 * 17, 17}},
+        "signal"
+    };
+    exact.insert(added);
+    bitmap.insert(added);
+    EXPECT_EQ(bitmap.query(layer, {64 * 17, 17, 65 * 17, 18}, 0), exact.query(layer, {64 * 17, 17, 65 * 17, 18}, 0));
+  }
+  compare();
+  bitmap.enable_bitmap({-2500, -2500, 4000, 4000}, 36, {"M3"});
+  compare();
+}
+TEST(RoutingOccupancy, BitmapPreservesBaseOverlaysCopiesAndConservativeFallback) {
+  auto base = std::make_shared<Routing_occupancy>(64);
+  base->insert({
+      {"M2", {40, 0, 60, 20}},
+      "base"
+  });
+  base->enable_bitmap({0, 0, 100, 100}, 10);
+  Routing_occupancy overlay(base);
+  overlay.insert({
+      {"M2", {0, 0, 20, 20}},
+      "local"
+  });
+  overlay.enable_bitmap({0, 0, 100, 100}, 10);
+  EXPECT_EQ(overlay.query("M2", {40, 0, 60, 20}, 0), std::vector<size_t>{0});
+  auto copy = overlay;
+  copy.insert({
+      {"M2", {80, 80, 100, 100}},
+      "new"
+  });
+  EXPECT_TRUE(overlay.query("M2", {80, 80, 100, 100}, 0).empty());
+  EXPECT_EQ(copy.query("M2", {80, 80, 100, 100}, 0), std::vector<size_t>{2});
+  Routing_occupancy moved(std::move(copy));
+  EXPECT_EQ(moved.query("M2", {80, 80, 100, 100}, 0), std::vector<size_t>{2});
+  const auto before = moved.query("M2", {0, 0, 100, 100}, 0);
+  moved.enable_bitmap({-2147483647, -2147483647, 2147483647, 2147483647}, 1);
+  EXPECT_EQ(moved.bitmap_bytes(), 0U);
+  EXPECT_EQ(moved.query("M2", {0, 0, 100, 100}, 0), before);
+  EXPECT_THROW(moved.enable_bitmap({0, 0, 100, 100}, 0), std::invalid_argument);
+}
+
 TEST(RoutingOccupancy, RouteProvenanceSurvivesRunsCopiesAndOverlays) {
   Routing_occupancy index(64);
   const auto        pin  = index.insert({

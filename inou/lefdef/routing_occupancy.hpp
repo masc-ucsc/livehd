@@ -2,6 +2,7 @@
 #pragma once
 #include <functional>
 #include <memory>
+#include <optional>
 #include <set>
 #include <unordered_map>
 
@@ -27,7 +28,19 @@ class Routing_occupancy {
   struct Hash {
     size_t operator()(const Key&) const;
   };
+  // Conservative coverage only: a clear region proves there are no shapes;
+  // marked regions still use exact ownership/geometry filtering.
+  struct Layer_bitmap {
+    int64_t               grid, xl, yl;
+    size_t                nx, ny, stride;
+    bool                  vertical;
+    std::vector<uint64_t> words;
+    Layer_bitmap(const Rect&, int64_t, bool);
+    void insert(const Rect&);
+    bool maybe_occupied(const Rect&) const;
+  };
   struct Layer_index {
+    std::optional<Layer_bitmap>                        bitmap;
     std::unordered_map<Key, std::vector<size_t>, Hash> buckets;
     // Long narrow rails use only their short-axis buckets. Broad blockages
     // remain in large, keeping insertion bounded independently of rail length.
@@ -73,6 +86,11 @@ public:
   // Append-only overlay. The shared base must remain immutable for its lifetime.
   // Copies share only that base; local insertions never affect sibling trials.
   explicit Routing_occupancy(std::shared_ptr<const Routing_occupancy> base);
+  // Optional broad phase for repeated trials. No ownership or DRC verdict is
+  // cached. Insertions update existing layer bitmaps; new layers use the exact
+  // index until the next enable call. Oversized layers retain the exact index.
+  void                enable_bitmap(const Rect& bounds, int64_t grid_dbu, const std::set<std::string>& vertical_layers = {});
+  size_t              bitmap_bytes() const;
   size_t              insert(Occupied_shape);
   // Exact arithmetic progression of identical rectangles, including reversed
   // or diagonal progressions. Queries return individual cut IDs, never a hull.

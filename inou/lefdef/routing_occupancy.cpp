@@ -34,6 +34,83 @@ bool oversized(const Bins& b, int64_t maximum) {
   return nx > maximum || ny > maximum || nx > maximum / ny;
 }
 }  // namespace
+namespace {
+Rect     bitmap_rect(const Rect& r, bool vertical) { return vertical ? Rect{r.yl, r.xl, r.yh, r.xh} : r; }
+uint64_t bit_range(size_t first, size_t last) { return (~uint64_t{0} << first) & (~uint64_t{0} >> (63 - last)); }
+}  // namespace
+Routing_occupancy::Layer_bitmap::Layer_bitmap(const Rect& bounds, int64_t pitch, bool transpose)
+    : grid(pitch), vertical(transpose) {
+  const auto b               = bins(bitmap_rect(bounds, vertical), grid);
+  xl                         = b.xl;
+  yl                         = b.yl;
+  nx                         = b.xh - b.xl + 1;
+  ny                         = b.yh - b.yl + 1;
+  stride                     = (nx + 63) / 64;
+  // Bound each optional layer to 32 MiB. Empty storage means exact fallback.
+  constexpr size_t max_words = 32 * 1024 * 1024 / sizeof(uint64_t);
+  if (stride <= max_words / ny) {
+    words.resize(stride * ny);
+  }
+}
+void Routing_occupancy::Layer_bitmap::insert(const Rect& rect) {
+  if (words.empty()) {
+    return;
+  }
+  const auto b  = bins(bitmap_rect(rect, vertical), grid);
+  const auto x0 = std::max(b.xl, xl), x1 = std::min(b.xh, xl + int64_t(nx) - 1);
+  const auto y0 = std::max(b.yl, yl), y1 = std::min(b.yh, yl + int64_t(ny) - 1);
+  if (x1 < x0 || y1 < y0) {
+    return;
+  }
+  const size_t first = x0 - xl, last = x1 - xl;
+  for (auto y = y0; y <= y1; ++y) {
+    const auto offset = size_t(y - yl) * stride;
+    for (size_t w = first / 64; w <= last / 64; ++w) {
+      words[offset + w] |= bit_range(w == first / 64 ? first % 64 : 0, w == last / 64 ? last % 64 : 63);
+    }
+  }
+}
+bool Routing_occupancy::Layer_bitmap::maybe_occupied(const Rect& rect) const {
+  if (words.empty()) {
+    return true;
+  }
+  const auto b = bins(bitmap_rect(rect, vertical), grid);
+  if (b.xl < xl || b.yl < yl || b.xh >= xl + int64_t(nx) || b.yh >= yl + int64_t(ny)) {
+    return true;  // Geometry outside the bitmap is still represented by the exact index.
+  }
+  const size_t first = b.xl - xl, last = b.xh - xl;
+  for (auto y = b.yl; y <= b.yh; ++y) {
+    const auto offset = size_t(y - yl) * stride;
+    for (size_t w = first / 64; w <= last / 64; ++w) {
+      if (words[offset + w] & bit_range(w == first / 64 ? first % 64 : 0, w == last / 64 ? last % 64 : 63)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+void Routing_occupancy::enable_bitmap(const Rect& bounds, int64_t grid, const std::set<std::string>& vertical_layers) {
+  validate(bounds);
+  if (grid <= 0 || grid > std::numeric_limits<int32_t>::max()) {
+    throw std::invalid_argument("invalid routing bitmap grid");
+  }
+  for (auto& [name, layer] : layers_) {
+    layer.bitmap.emplace(bounds, grid, vertical_layers.contains(name));
+    for (auto id : layer.all) {
+      const auto& s = shapes_[id / shapes_per_chunk][id % shapes_per_chunk];
+      layer.bitmap->insert({double(s.xl), double(s.yl), double(s.xh), double(s.yh)});
+    }
+  }
+}
+size_t Routing_occupancy::bitmap_bytes() const {
+  size_t total = 0;
+  for (const auto& [name, layer] : layers_) {
+    if (layer.bitmap) {
+      total += layer.bitmap->words.size() * sizeof(uint64_t);
+    }
+  }
+  return total;
+}
 size_t Routing_occupancy::Hash::operator()(const Key& key) const {
   // Grid coordinates are highly correlated. Mix the first coordinate before
   // combining: identity integer hashes otherwise collapse a dense 2-D grid
@@ -142,6 +219,9 @@ size_t Routing_occupancy::insert(Occupied_shape shape) {
   }
   shapes_.back().push_back(stored);
   layer.all.push_back(id);
+  if (layer.bitmap) {
+    layer.bitmap->insert(r);
+  }
   // A macro or long rail must not allocate one entry for every small bucket.
   if (oversized(b, 256)) {
     const auto nx = b.xh - b.xl + 1, ny = b.yh - b.yl + 1;
@@ -228,9 +308,12 @@ std::vector<size_t> Routing_occupancy::query(const std::string& name, const Rect
   if (it == layers_.end()) {
     return base_ ? base_->query(name, rect, clearance, ignore_net) : std::vector<size_t>{};
   }
-  const Rect          expanded{rect.xl - clearance, rect.yl - clearance, rect.xh + clearance, rect.yh + clearance};
-  const auto          b     = bins(expanded, bucket_size_);
-  const auto&         layer = it->second;
+  const Rect  expanded{rect.xl - clearance, rect.yl - clearance, rect.xh + clearance, rect.yh + clearance};
+  const auto  b     = bins(expanded, bucket_size_);
+  const auto& layer = it->second;
+  if (layer.bitmap && !layer.bitmap->maybe_occupied(expanded)) {
+    return base_ ? base_->query(name, rect, clearance, ignore_net) : std::vector<size_t>{};
+  }
   std::vector<size_t> candidates;
   if (oversized(b, 4096)) {
     candidates = layer.all;

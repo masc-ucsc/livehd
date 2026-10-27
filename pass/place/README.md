@@ -869,6 +869,28 @@ the dominant setup cost. Regression coverage includes both L orientations,
 rejection of a feasible intermediate Z trunk, one through eight sinks, changed
 occupancy, deadlines, pin protection, and placement/RC consumers (116 tests).
 
+An optional conservative occupancy bitmap can be enabled once on the shared
+index with `Routing_occupancy::enable_bitmap(bounds, grid_dbu, vertical_layers)`.
+It rasterizes shape coverage and checks the query's spacing-expanded rectangle
+using 64-bit words; vertical layers transpose the bitmap so long vertical runs
+scan contiguous words. Clear regions return immediately. Marked regions retain
+exact owner and shape filtering, so touching a net's own pin never masks foreign
+metal. Insertions update existing bitmaps; copies/overlays retain their ordinary
+isolation. Out-of-range queries, new layers and layers above the 32 MiB bitmap
+limit fall back to the exact index. This is an optional accelerator, not a
+replacement for metal, via, pin-protection or connectivity validation.
+
+`signal_route_bench --bitmap-grid-dbu 36` exercises this accelerator. Three
+alternating pairs on CPU 12, each using the same 20,000 seed-17 draws with one
+to eight sinks, preserved all 60,000 paired outcomes, reasons, work counts and
+accepted geometries. Median throughput improved from 15,746 to 16,907 attempts/s
+(7.4%); mixed-workload successful routes/s improved from 538.5 to 578.2. Bitmap
+storage was 72,710,560 bytes and construction took 0.077 s. Median shared-guard
+setup fell from 12.593 to 11.931 s, and total setup from 14.288 to 13.761 s.
+These are the same placed coralnpu fixture without PG wiring or commit/update
+traffic. Automatic activation in other consumers remains to be measured; their
+current defaults are unchanged.
+
 `try_route` also screens long parallel exposure to foreign metal on the same
 layer. For elongated shapes within two candidate wire widths, it sums parallel
 overlap divided by edge-to-edge separation. The dimensionless

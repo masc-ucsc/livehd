@@ -44,7 +44,7 @@ int main(int argc, char** argv) {
     std::vector<std::string> lefs;
     std::string              def, guard = "shared";
     size_t                   samples = 200, seed = 1, access = 10000, patterns = 10000, budget_ms = 200;
-    size_t                   min_sinks = 1, max_sinks = std::numeric_limits<size_t>::max();
+    size_t                   min_sinks = 1, max_sinks = std::numeric_limits<size_t>::max(), bitmap_grid = 0;
     for (int i = 1; i < argc; ++i) {
       const std::string key = argv[i];
       if (++i == argc) {
@@ -71,6 +71,8 @@ int main(int argc, char** argv) {
           min_sinks = n;
         } else if (key == "--max-sinks") {
           max_sinks = n;
+        } else if (key == "--bitmap-grid-dbu") {
+          bitmap_grid = n;
         } else if (key == "--access") {
           access = n;
         } else if (key == "--patterns") {
@@ -130,9 +132,20 @@ int main(int argc, char** argv) {
       throw std::runtime_error("no single-driver nets with sinks");
     }
     auto       phase             = Clock::now();
-    const auto occupancy         = ph::routing_occupancy(tech, frame, frame.dbu);
+    auto       occupancy         = ph::routing_occupancy(tech, frame, frame.dbu);
     const auto occupancy_seconds = seconds(phase);
     phase                        = Clock::now();
+    if (bitmap_grid) {
+      std::set<std::string> vertical;
+      for (const auto& [name, layer] : tech.layers) {
+        if (layer.direction == "VERTICAL") {
+          vertical.insert(name);
+        }
+      }
+      occupancy.enable_bitmap(frame.die, bitmap_grid, vertical);
+    }
+    const auto bitmap_seconds = seconds(phase);
+    phase                     = Clock::now();
     const ph::Signal_metal_rules rules(tech, frame);
     const auto                   profile       = pl::signal_route_profile(ph::resolve_tech_profile(tech), tech);
     const auto                   rules_seconds = seconds(phase);
@@ -186,6 +199,12 @@ int main(int argc, char** argv) {
       w.Double(read_seconds);
       w.Key("occupancy_seconds");
       w.Double(occupancy_seconds);
+      w.Key("bitmap_grid_dbu");
+      w.Uint64(bitmap_grid);
+      w.Key("bitmap_bytes");
+      w.Uint64(occupancy.bitmap_bytes());
+      w.Key("bitmap_seconds");
+      w.Double(bitmap_seconds);
       w.Key("rules_seconds");
       w.Double(rules_seconds);
       w.Key("guard_seconds");
