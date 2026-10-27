@@ -25,14 +25,35 @@ brew install elan
 
 ## Code layout
 
+The exporter is split by who uses each part.
+
+* `Exporter/Frontend/` is the front half. Every route uses it, including
+  legacy: the pass entry point, the options, the scan, the certificate's
+  in-memory form, memory lowering, the `_io.json` sidecar and the shared
+  output helpers.
+* `Exporter/DesignCert/` is the back end that writes a `DesignCert`. Three
+  routes read what it writes: the IR-as-semantics simulator, Translation
+  Validation and the Futamura projection. Legacy does not use it.
+* `Legacy_Fast_Model_Simulator/` holds the legacy back end.
+
+All three keep their Bazel targets in this directory's `BUILD`, with the same
+labels as before; each target adds its folder to `includes`, so `#include`
+lines name the header alone.
+
 ```text
-Pass_lean / LeanOptions                                 pass_lean.cpp, lean_options.cpp
-  -> scan_design(Graph, ScanOptions) : DesignScan       design_scan.*, graph_access.*
-  -> build_certificate(DesignScan, ..) : CertificateIR  certificate_ir.*, memory_lowering.*
-  -> build_io_meta(DesignScan, CertificateIR)           design_io_meta.*
-  -> verified_compiler: emit_design_cert, render_dcert  emit_design_cert.*, emit_dcert.*
-     legacy:            emit_legacy_model               legacy_model.*, emit_legacy_*.*
+Pass_lean / LeanOptions                                 Exporter/Frontend/   pass_lean.cpp, lean_options.cpp
+  -> scan_design(Graph, ScanOptions) : DesignScan       Exporter/Frontend/   design_scan.*, graph_access.*
+  -> build_certificate(DesignScan, ..) : CertificateIR  Exporter/Frontend/   certificate_ir.*, memory_lowering.*
+  -> build_io_meta(DesignScan, CertificateIR)           Exporter/Frontend/   design_io_meta.*
+  -> verified_compiler: emit_design_cert, render_dcert  Exporter/DesignCert/ emit_design_cert.*, emit_dcert.*
+     legacy:            emit_legacy_model               Legacy_Fast_Model_Simulator/  legacy_model.*, emit_legacy_*.*
 ```
+
+Checks on the exporter's output live beside the part they check:
+`Exporter/Frontend/scripts/` holds the oracles that run a certificate against
+the original RTL, and `Exporter/DesignCert/scripts/` holds the checks on the
+`DesignCert` format itself (`vc_gates.py`, `dcert_parity.py`,
+`cert_shape_check.py`).
 
 - `graph_access.*` — graph access, width checks, and the memory policy parser.
 - `design_scan.*` — owns port identities, decimal constants, flop controls,
@@ -72,11 +93,12 @@ direction owns and the rest of LiveHD does not: the corpora it measures
 (`manifests/`), the measurements (`evidence/`: the CORE-ET censuses, the
 sweeps, `GATED_MODULES.tsv`, and the write-ups of individual findings) and the
 tooling that produces them (`scripts/`: `run_coreet_module_lean.sh` and the
-`coreet_*` helpers, `coverage_ledger.py`, and the RTL-vs-regenerated
-differential).
+`coreet_*` helpers, `coverage_ledger.py`, the `lgraph-sim` launcher generator,
+and the RTL-vs-regenerated differential), and its tests (`tests/`, including
+the D4 runtime sweep in `tests/d4/`).
 
 It holds **no compiled code**, deliberately. The exporter is the `.cpp|hpp`
-files documented above, and the semantics it targets is
+files under `Exporter/`, documented above, and the semantics it targets is
 `formal/lean/LeanSemanticPrimitives/Compiler/` — `interpretDesign`,
 `directStep` and `compileDesign`, with `DirectVsCompiled` tying them together.
 Both are shared with the D3, D4 and projection directions, which is why

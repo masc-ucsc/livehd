@@ -11,7 +11,7 @@
   The values below are the ONLY thing standing between a passing build and that
   panic coming back, so they are `#guard`s, not commented `#eval`s: a wrong
   answer -- or a panic -- fails this file, and the file is built by
-  `pass/lean/tests/d4/shl_regression.sh`.
+  `pass/lean/Lgraph_IR_Semantics_Simulator/tests/d4/shl_regression.sh`.
 
   Every case goes through the VERIFIED runtime path, `compileDesign` followed by
   `denoteResidual`, except where a case names the semantics it is pinning

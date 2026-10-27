@@ -12,7 +12,8 @@ because the Lean program that runs it is the definition of what it means.
 **The simulator itself is not in this directory.** It is Lean source, and it
 lives in `formal/lean/LeanSemanticPrimitives/Compiler/`. This directory is
 named for the work it serves, not for what it contains. What is here is the set
-of designs we measure, the measurements, and the scripts that produce them.
+of designs we measure, the measurements, and the scripts and tests that produce
+them. The next section says where the code is.
 
 ```text
 pass/lean/Lgraph_IR_Semantics_Simulator/
@@ -21,13 +22,68 @@ pass/lean/Lgraph_IR_Semantics_Simulator/
   evidence/    what was measured: the censuses, the sweeps, the ledger of
                blocked modules, and write-ups of individual findings
   scripts/     the tooling: the CORE-ET flow (run_coreet_module_lean.sh and
-               the coreet_* helpers), the coverage ledger, and the
+               the coreet_* helpers), the coverage ledger, the lgraph-sim
+               launcher generator, the direct sweep, and the
                RTL-versus-regenerated-Verilog differential
+  tests/       this simulator's tests, including the D4 runtime sweep in
+               tests/d4/ (its corpus lists, its run records and its gates)
 ```
 
-Throughout this file, a bare `evidence/`, `manifests/` or `scripts/` path is
-relative to this directory. Anything else is given from the top of the
+Throughout this file, a bare `evidence/`, `manifests/`, `scripts/` or `tests/`
+path is relative to this directory. Anything else is given from the top of the
 repository.
+
+## Code layout
+
+This simulator's code lives in three places, and other parts of LiveHD use
+two of them.
+
+| what | where | who else uses it |
+|---|---|---|
+| the simulator and its proofs, in Lean | `formal/lean/LeanSemanticPrimitives/Compiler/` | Translation Validation and the Futamura projection check their results against its `interpretDesign` |
+| the front half of the exporter, in C++ | `pass/lean/Exporter/Frontend/` | every route, including legacy |
+| the `DesignCert` writers, in C++ | `pass/lean/Exporter/DesignCert/` | Translation Validation and the Futamura projection read what they write |
+| this simulator's corpus, measurements, scripts and tests | this directory | no other route |
+
+The Lean side runs a certificate:
+
+```text
+formal/lean/LeanSemanticPrimitives/Compiler/
+  DesignCert.lean        the certificate's datatype
+  DesignSemantics.lean   interpretDesign, the reference semantics
+  DirectSemantics.lean   directStep, the checked interpreter, one cycle
+  DirectTrace.lean       runDirect, the checked interpreter, a whole run
+  CompileDesign*.lean    compileDesign, the compiled fast path, and its proof
+  DirectVsCompiled.lean  the theorems that make the three agree
+  CertIO*.lean           the proved reader for .dcert files
+```
+
+The C++ side writes the certificate. It is the exporter inside `pass.lean`:
+
+```text
+pass/lean/Exporter/Frontend/
+  pass_lean.*                 the pass entry point; picks legacy or verified_compiler
+  lean_options.*              the pass options
+  graph_access.*              reads the LGraph
+  design_scan.*               walks the graph once and copies what the certificate
+                              needs into plain values
+  certificate_ir.*            the certificate's in-memory form
+  certificate_builder.hpp     helpers for building that form
+  memory_lowering.*           lowers each memory, read side and write side
+  design_io_meta.*            writes <Top>_io.json, the port and clock sidecar
+  lean_format.*               output helpers shared by every writer
+  scripts/                    oracles that run a certificate against the original RTL
+  tests/                      exporter test tools and integration records
+
+pass/lean/Exporter/DesignCert/
+  emit_design_cert.*          writes <Top>_designCert, the Lean source form
+  emit_dcert.*                writes <Top>.dcert, the compact DCERT2 form
+  scripts/                    checks on the DesignCert format: vc_gates.py,
+                              dcert_parity.py, cert_shape_check.py, cert_cut.py
+```
+
+The exporter's Bazel targets stay in `pass/lean/BUILD` under their old labels.
+`pass/lean/README.md` documents the exporter in more detail.
 
 ## How the simulator works
 
@@ -41,7 +97,7 @@ LGraph
   │ 2. edge normalisation                     pass/single_edge
   ▼
 LGraph, normalised
-  │ 3. the exporter                           pass/lean/*.cpp
+  │ 3. the exporter                           pass/lean/Exporter/
   ▼
 DesignCert
   │ 4. the simulator                          formal/lean/LeanSemanticPrimitives/Compiler/
@@ -147,7 +203,7 @@ To execute the certificate rather than only check it, generate a launcher and
 run the simulator binary:
 
 ```bash
-python3 pass/lean/scripts/make_sim_launcher.py <path to txfma_adder_Lgraph.lean>
+python3 pass/lean/Lgraph_IR_Semantics_Simulator/scripts/make_sim_launcher.py <path to txfma_adder_Lgraph.lean>
 cd formal/lean && lake build LgraphSim
 ./.lake/build/bin/lgraph-sim txfma_adder --cycles 10
 ```
@@ -176,7 +232,7 @@ It is the largest design this simulator has run. It is interesting because it
 has memories in it, which is the hardest part of the certificate format.
 
 Measured in the Direction 4 sweep, recorded in
-`pass/lean/tests/d4/cva6_30_rows.tsv`:
+`pass/lean/Lgraph_IR_Semantics_Simulator/tests/d4/cva6_30_rows.tsv`:
 
 | | |
 |---|---|
@@ -188,7 +244,7 @@ Measured in the Direction 4 sweep, recorded in
 | time to compile it and run one cycle | 10,351 ms |
 
 The same flow runs it, with the CVA6 corpus instead of CORE-ET. The run is
-driven by `pass/lean/tests/d4` rather than by the CORE-ET script, because CVA6
+driven by `pass/lean/Lgraph_IR_Semantics_Simulator/tests/d4` rather than by the CORE-ET script, because CVA6
 modules need generated wrappers before they can be elaborated on their own.
 
 ## Performance
@@ -225,7 +281,7 @@ which, and how they were chosen.
   `--set cprop.engine=classic`. The difference is an upstream regression
   written up in `evidence/AEGRAPH_EXPORT_REGRESSION.md`.
 * 93 of 122 were parsed and executed in the Direction 4 runtime sweep
-  (`pass/lean/tests/d4/coreet_122_r2_rows.tsv`).
+  (`pass/lean/Lgraph_IR_Semantics_Simulator/tests/d4/coreet_122_r2_rows.tsv`).
 
 **CVA6**, a 64-bit RISC-V application-class core.
 
@@ -235,7 +291,7 @@ which, and how they were chosen.
   `PROVEN` (`evidence/SWEEP_master_cva6_prove.tsv`). That sweep took 2,236
   seconds in total, between 12.5 and 161 seconds per module.
 * 30 were run through the Direction 4 runtime sweep, and all 30 executed
-  (`pass/lean/tests/d4/cva6_30_rows.tsv`).
+  (`pass/lean/Lgraph_IR_Semantics_Simulator/tests/d4/cva6_30_rows.tsv`).
 
 Regenerate the coverage summary with:
 
@@ -258,25 +314,50 @@ they are not covered by the proof. What checks them today:
 | step | what checks it |
 |---|---|
 | 1 and 2, the reader and the normaliser | `lhd lec`, comparing the normalised graph against an independent second read of the same RTL. This is a real equivalence check, but it is **off by default** (`RUN_LEC_GATE=false`). |
-| 3, the exporter | **Nothing, across the corpus.** |
+| 3, the exporter | **No proof, and no check of its full behaviour across the corpus.** Narrower checks exist, listed below. |
+
+What does check step 3 is narrow. None of it is formal.
+
+* **Four RTL differentials**, in `pass/lean/Exporter/Frontend/scripts/`:
+  `sign_oracle.sh`, `sdiv_oracle.sh`, `reset_expr_oracle.sh` and
+  `setmask_oracle.sh`. Each runs iverilog on the original RTL and the
+  certificate's `interpretDesign` side by side, cycle by cycle, for one kind of
+  design shape. Each also has controls that must fail. They cross steps 1 to 3
+  together, but only for those shapes.
+* **Seven value gates** in the same folder: `be_oracle.sh`, `clock_oracle.sh`,
+  `collide_oracle.sh`, `hotmux_oracle.sh`, `mem_oracle.sh`,
+  `reset_oracle.sh` and `row_oracle.sh`. Each takes a certificate that the real
+  exporter produced from a small hand-built graph, steps it in Lean, and
+  compares the result with values written in the gate. They check step 3
+  against a stated expectation, not against RTL.
+* **`cert_lgraph_diff.py`**, in the same folder, checks constants only. Every
+  constant must fit its width. Every constant must also appear in Verilog
+  extracted independently from the same graph. The width check runs in the
+  CVA6 sweep (`scripts/run_cva6_vc_sweep.sh`) and in the D4 run verifier
+  (`scripts/verify_d4_run.sh`). Both checks were run over 83 CORE-ET
+  certificates in one recorded sweep (`tests/d4/coreet_122_fresh_gates.tsv`).
+  The CORE-ET runner in this directory does not call it.
+* **`scripts/mem_lean_diffsim.py`**, at the top of the repository rather than
+  in this directory, runs the source RTL against the certificate. It was
+  written for mixed-timing memories.
 
 Two things are often mistaken for a check on step 3 and are not:
 
 * `scripts/v2v_verilator_diff.py` compares the original RTL against Verilog
   regenerated from the graph. It never reads a certificate, so it cannot see a
   mistake made by the exporter.
-* The static gates compare the emitted Lean file against itself. Both sides are
-  produced by the same C++, so they show that an emission is internally
-  consistent, not that it matches the graph.
+* The static gates check the emitted file: its shape in `verified_compiler`
+  mode (`vc_gates.py`), and in legacy mode its internal consistency. They read
+  only what the exporter wrote, so they cannot tell whether it matches the
+  graph.
 
-The only tool that crosses step 3 from end to end is
-`scripts/mem_lean_diffsim.py` at the top of the repository — note that this is
-not one of this directory's scripts — which runs the source RTL against the
-certificate. It was written for memories and is not a corpus-wide gate.
+So step 3 is checked on chosen shapes and on constants. Nothing checks its full
+behaviour across the corpus, and nothing proves it.
 
 `evidence/D1_TRANSCRIPTION_BOUNDARY.md` surveys how other projects handle this
-same gap, and sets out four options for closing it, with a recommendation.
-Nothing from it is implemented yet.
+same gap, and sets out options for closing it, with a recommendation. The
+cheapest real step is to run the four RTL differentials' comparison over the
+whole corpus instead of chosen shapes. Nothing from it is implemented yet.
 
 ## What is deliberately not in this directory
 
@@ -285,9 +366,9 @@ LiveHD directions, so moving it here would break them.
 
 | what | where it lives | why it stays there |
 |---|---|---|
-| the exporter, LGraph to `DesignCert` | `pass/lean/*.cpp`, `*.hpp` | 3,598 build targets outside `pass/lean` depend on it |
+| the exporter, LGraph to `DesignCert` | `pass/lean/Exporter/Frontend/`, `pass/lean/Exporter/DesignCert/` | every route uses the front half, and three routes use the `DesignCert` writer |
 | the simulator and its proofs | `formal/lean/LeanSemanticPrimitives/Compiler/` | it is one Lake package with a pinned toolchain and a Mathlib dependency; 17 of its 33 modules are imported from elsewhere, `CompileDesign` 13 times |
 | the proof tools | `pass/lean/tools/` | the HDLProof engine, under active development upstream |
-| the Bazel test data | `pass/lean/tests/` | wired into test targets |
+| other routes' tests, and scripts several routes share | `pass/lean/tests/`, `pass/lean/scripts/` | they belong to the legacy route, Translation Validation and the shared coverage harness |
 
 `pass/lean/README.md` documents the exporter and links here.

@@ -42,7 +42,7 @@ LHD="$(cd "$(dirname "$LHD")" && pwd)/$(basename "$LHD")"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/../.." && pwd)"
 DIFF="$ROOT/scripts/mem_lean_diffsim.py"
-SWEEP="$ROOT/pass/lean/scripts/direct_sweep.py"
+SWEEP="$ROOT/pass/lean/Lgraph_IR_Semantics_Simulator/scripts/direct_sweep.py"
 [ -r "$DIFF" ]  || { echo "FAIL: missing $DIFF"; exit 1; }
 [ -r "$SWEEP" ] || { echo "FAIL: missing $SWEEP"; exit 1; }
 

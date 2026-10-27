@@ -353,8 +353,8 @@ head2 "4b. EMITTER RESULT AND RETAINED-ARTIFACT GATES"
 # artifact passes both static gates.  Clean cgroup counters prove only that
 # MemoryMax did not kill the emission; they do not make a nonzero emitter result
 # a success, and they say nothing about the certificate's contents.
-GATE_VC="$ROOT_REPO/pass/lean/scripts/vc_gates.py"
-GATE_DIFF="$ROOT_REPO/pass/lean/scripts/cert_lgraph_diff.py"
+GATE_VC="$ROOT_REPO/pass/lean/Exporter/DesignCert/scripts/vc_gates.py"
+GATE_DIFF="$ROOT_REPO/pass/lean/Exporter/Frontend/scripts/cert_lgraph_diff.py"
 [[ -r "$GATE_VC" ]]   || bad "missing $GATE_VC"
 [[ -r "$GATE_DIFF" ]] || bad "missing $GATE_DIFF"
 n_rc_bad=0; n_gate_bad=0; n_gate_ok=0; n_nolean=0; n_inv=0

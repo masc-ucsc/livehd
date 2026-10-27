@@ -56,8 +56,8 @@ gf=0
 for f in "${files[@]}"; do
   [[ -e "$f" ]] || continue
   m=$(basename "$f" _Lgraph.lean)
-  python3 "$R/pass/lean/scripts/vc_gates.py" "$f" "$m" --quiet || { echo "GATE-FAIL $m"; gf=$((gf+1)); }
-  python3 "$R/pass/lean/scripts/cert_lgraph_diff.py" "$f" --quiet || { echo "DIFF-FAIL $m"; gf=$((gf+1)); }
+  python3 "$R/pass/lean/Exporter/DesignCert/scripts/vc_gates.py" "$f" "$m" --quiet || { echo "GATE-FAIL $m"; gf=$((gf+1)); }
+  python3 "$R/pass/lean/Exporter/Frontend/scripts/cert_lgraph_diff.py" "$f" --quiet || { echo "DIFF-FAIL $m"; gf=$((gf+1)); }
 done
 echo "CVA6-GATES: $gf failures"
 
