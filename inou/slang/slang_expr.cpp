@@ -87,7 +87,7 @@ std::optional<std::pair<std::string, int64_t>> Slang_context::render_const_expr(
     }
     case ExpressionKind::NamedValue       :
     case ExpressionKind::HierarchicalValue: {
-      const auto& sym = e.as<slang::ast::ValueExpressionBase>().symbol;
+      const auto& sym = interface_signal(e.as<slang::ast::ValueExpressionBase>().symbol);
       const auto* cv  = package_const_value(sym);
       if (cv == nullptr || !cv->isInteger()) {
         return std::nullopt;
@@ -236,7 +236,7 @@ std::optional<std::string> Slang_context::package_param_ref(const slang::ast::Ex
   if (e->kind != ExpressionKind::NamedValue && e->kind != ExpressionKind::HierarchicalValue) {
     return std::nullopt;
   }
-  const auto& sym = e->as<slang::ast::ValueExpressionBase>().symbol;
+  const auto& sym = interface_signal(e->as<slang::ast::ValueExpressionBase>().symbol);
   if (peeled) {
     // Peeling is only sound for VALUE-PRESERVING conversions: a narrowing cast
     // like 4'(P) with P=300 evaluates to 12, and emitting the symbolic ref
@@ -579,6 +579,13 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
 }
 
 std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang::SourceRange range) {
+  if (&interface_signal(sym) != &sym) {
+    return read_symbol(interface_signal(sym), range);
+  }
+  if (interface_signals_.contains(&sym) && input_syms_.contains(&sym)) {
+    return read_leaf(lname_of(sym));
+  }
+
   if (auto it = blocking_values_.find(&sym); it != blocking_values_.end()) {
     return it->second;
   }

@@ -1,6 +1,6 @@
 # inou/slang — direct SystemVerilog → LNAST reader
 
-The direct `--reader slang` front-end: slang v11 elaborates SystemVerilog and
+The direct `--reader slang` front-end: slang v12.1 elaborates SystemVerilog and
 `Slang_context` lowers the AST straight to LNAST, one Lnast per module in the
 extracted unit form (`top -> [io, stmts]`, `lambda_kind="mod"`, exact Verilog
 module names) so the standard upass pipeline (SSA → io_meta → tolg) compiles
@@ -124,7 +124,7 @@ LGraph `Memory` nodes. A Liberty-only macro remains an opaque physical cell.
 | file | concern |
 |---|---|
 | `inou_slang.cpp` | EPRP entry (`inou.slang` / `inou.verilog`), per-file driver loop, options |
-| `slang_driver.cpp` | embedded slang v11 driver; diagnostics → `diag::Sink` |
+| `slang_driver.cpp` | embedded slang v12.1 driver; diagnostics → `diag::Sink` |
 | `slang_context.{hpp,cpp}` | the one `Slang_context` class: naming, const-eval tiers, bool/int kind discipline, provenance, diags |
 | `slang_structure.cpp` | modules, ports/io, process classification (comb/ff/async-reset), dataflow-ordered driver emission, instances, generate |
 | `slang_stmt.cpp` | statements: if, case→`if`/`unique_if`, capped slang-side loop unrolling |
@@ -298,7 +298,7 @@ When a SystemVerilog construct fails to lower, decide whether it is a bug to fix
 or a test to drop using three reference points — the standalone slang frontend,
 the integrated Yosys Slang frontend, and our native reader:
 
-1. **slang native frontend rejects it → out of scope, for sure.** slang v11 is
+1. **slang native frontend rejects it → out of scope, for sure.** slang v12.1 is
    the strictest valid-SV gate; if its frontend cannot elaborate the construct it
    is either illegal SV or non-elaboratable, so `--reader slang` has nothing
    well-formed to lower. Drop it (or keep it as an `error`-tier test when slang
@@ -329,7 +329,7 @@ lhd compile --reader yosys foo.v --emit-dir verilog:out/
 ```
 
 **When standalone `slang` is not installed**, use `--reader slang` as a proxy for
-check 1: the native reader embeds the same slang v11 frontend, so a clean
+check 1: the native reader embeds the same slang v12.1 frontend, so a clean
 elaboration that merely hits a lowering gap surfaces as an `unsupported-*`
 diagnostic (`"pass":"inou.slang","category":"unsupported"`), whereas a frontend
 rejection surfaces with slang's own diagnostic code (e.g.
@@ -451,3 +451,23 @@ replaces whatever the sources say about it. Each is `--set compile.slang.<flag>=
 A port listed twice in a module header (`input a, input a`) is accepted by `--compat=vcs`
 (`Redefinition` becomes a warning); the first declaration is the port, the later ones add
 neither an IO nor an instance connection.
+
+### Passive SystemVerilog interfaces
+
+The direct reader lowers passive interface connections through the existing
+LNAST tuple and module-call machinery. Named `input` and `output` modport members
+become separate `<port>__in` and `<port>__out` bundles; no new graph node type is
+needed. Supported members are uninitialized integral signals, including packed
+arrays and packed structs, with value/type parameters. Interface instance arrays,
+generated instances, forwarding through module ports, and registered writes to
+output members are supported. Connected interface types participate in module
+specialization; interface-bearing instances retain their own elaborated bodies.
+
+Procedural or continuous logic inside an interface, unpacked signal arrays,
+undirected interface ports, and modport `inout`, `ref`, expressions or methods
+are rejected explicitly. This does not provide DPI or simulation file-operation
+support. Combinational-loop checking remains enabled.
+
+`//inou/slang:slang_passive_interfaces` compares emitted hardware against Yosys
+`read_slang` for payload types, forwarding, array ordering, different connected
+shapes and registered outputs, and checks unsupported-interface diagnostics.

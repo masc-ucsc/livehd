@@ -13,7 +13,7 @@
 <p>Add a learned congestion estimator, modeled on URoute (Lin, Lin, Liu, Du,
 <em>URoute: Universal Routability Prediction</em>, IEEE TCAD 45(7), July 2026),
 above RSMT-RUDY in the one-way routability ladder of
-<a class="xref" href="3r-route.html">3r-route</a>:
+<a href="../../pass/place/README.md">routability feedback</a>:
 <code>rudy → rsmt → uroute</code>. The estimator is a small convolutional
 encoder-decoder with a cross-matching block. It takes the four feature maps the
 placer can already compute (RUDY, PinRUDY, macro region, cell density) plus a
@@ -932,7 +932,7 @@ commit and prefix hashes are retained under
 <h2>Depends on</h2>
 <p>The one-way estimator ladder, the per-stage probe and the
 <code>RudyModel</code>/<code>RoutePolicy</code> interface of
-<a class="xref" href="3r-route.html">3r-route</a> (R1–R3 implemented in the
+<a href="../../pass/place/README.md">routability feedback</a> (R1–R3 implemented in the
 DREAMPlace sibling). The R0 router reference of 3r-route is the scoring harness
 here too; it is still unfinished and must be completed as U0. The routed-DEF
 flow is the frozen <code>repros/route_compare_20261019</code>

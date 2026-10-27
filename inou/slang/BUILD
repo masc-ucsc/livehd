@@ -409,3 +409,14 @@ sh_test(
     srcs = ["tests/routing_protection.sh"],
     data = ["//lhd"],
 )
+
+sh_test(
+    name = "slang_passive_interfaces",
+    srcs = ["tests/passive_interfaces.sh"],
+    data = [
+        "tests/interfaces/passive.sv",
+        "tests/interfaces/unsupported.sv",
+        "//lhd",
+        "//inou/yosys:yosys2",
+    ],
+)

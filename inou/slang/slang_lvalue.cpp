@@ -51,7 +51,7 @@ struct Self_field_read_collector : public slang::ast::ASTVisitor<Self_field_read
       cur = &cur->as<slang::ast::ConversionExpression>().operand();
     }
     if (!path.empty() && (cur->kind == ExpressionKind::NamedValue || cur->kind == ExpressionKind::HierarchicalValue)
-        && &cur->as<slang::ast::ValueExpressionBase>().symbol == target) {
+        && &interface_signal(cur->as<slang::ast::ValueExpressionBase>().symbol) == target) {
       // The member chain is collected outside-in, so the last item is the
       // top-level field represented by Struct_info::fields.
       reads->insert(std::string(path.back()));
@@ -228,7 +228,7 @@ void Slang_context::lower_assign(const slang::ast::AssignmentExpression& expr) {
       l = &l->as<slang::ast::ConversionExpression>().operand();
     }
     if (l->kind == ExpressionKind::NamedValue || l->kind == ExpressionKind::HierarchicalValue) {
-      const auto& lsym = l->as<slang::ast::ValueExpressionBase>().symbol;
+      const auto& lsym = interface_signal(l->as<slang::ast::ValueExpressionBase>().symbol);
       if (is_scalar_struct_var(lsym)) {
         current_assign_nonblocking_ = expr.isNonBlocking();
         if (assign_struct_whole(lsym, expr.right())) {
@@ -433,8 +433,8 @@ bool Slang_context::lower_unpacked_whole_copy(const slang::ast::Expression& raw_
   if (!lhs_named || !rhs_named) {
     return false;
   }
-  const auto& lsym = lhs->as<slang::ast::ValueExpressionBase>().symbol;
-  const auto& rsym = rhs->as<slang::ast::ValueExpressionBase>().symbol;
+  const auto& lsym = interface_signal(lhs->as<slang::ast::ValueExpressionBase>().symbol);
+  const auto& rsym = interface_signal(rhs->as<slang::ast::ValueExpressionBase>().symbol);
 
   // Combinational locals are declared lazily at their first access, while
   // state arrays are hoisted into the module prologue. Make both operands'
@@ -587,7 +587,7 @@ void Slang_context::assign_to(const slang::ast::Expression& lhs, const std::stri
     case ExpressionKind::NamedValue       :
     case ExpressionKind::HierarchicalValue: {
       const auto& nv  = lhs.as<slang::ast::ValueExpressionBase>();
-      const auto& sym = nv.symbol;
+      const auto& sym = interface_signal(nv.symbol);
       if (!declared_.contains(&sym) && !input_syms_.contains(&sym)) {
         declare_value_symbol(sym, /*force_reg=*/false);
       }
@@ -2158,7 +2158,7 @@ const slang::ast::ValueSymbol* Slang_context::resolve_base_symbol(const slang::a
   // block, e.g. an unpacked-array read `gen[g-1].s[2*i+0]` (PriorityEncoder): the
   // base symbol is the genblock instance's array, declared on demand here.
   if (base.kind == ExpressionKind::NamedValue || base.kind == ExpressionKind::HierarchicalValue) {
-    const auto& sym = base.as<slang::ast::ValueExpressionBase>().symbol;
+    const auto& sym = interface_signal(base.as<slang::ast::ValueExpressionBase>().symbol);
     if (!declared_.contains(&sym) && !input_syms_.contains(&sym)) {
       declare_value_symbol(sym, /*force_reg=*/false);
     }
@@ -2176,7 +2176,7 @@ bool Slang_context::resolve_packed_lvalue(const slang::ast::Expression& lhs, Pac
   switch (lhs.kind) {
     case ExpressionKind::NamedValue       :
     case ExpressionKind::HierarchicalValue: {
-      const auto& sym = lhs.as<slang::ast::ValueExpressionBase>().symbol;
+      const auto& sym = interface_signal(lhs.as<slang::ast::ValueExpressionBase>().symbol);
       const auto& ct  = sym.getType().getCanonicalType();
       if ((!ct.isIntegral() || !ct.hasFixedRange()) && !(ct.isStruct() && bit_layout_type(ct))) {
         return false;  // unpacked / non-packed root: not a packed slice

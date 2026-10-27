@@ -153,21 +153,45 @@ git_repository(
 http_archive(
     name = "fmt",
     build_file = "//packages:fmt.BUILD",
-    sha256 = "e6a2b43c6ec4779fb53b15b705f7c20b4eb9d5ae35784d610ac6daec30737019",
-    strip_prefix = "fmt-12.1.0",  # slang v11.0 requires fmt >= 12.1
+    sha256 = "8bc0dfbeccc1ba96dc9c0f9bf0bbc95f3c7a35308122618638c5755f389e5e72",
+    strip_prefix = "fmt-12.2.0",  # matches slang v12.1
     urls = [
-        "https://github.com/fmtlib/fmt/archive/refs/tags/12.1.0.zip",
+        "https://github.com/fmtlib/fmt/archive/refs/tags/12.2.0.zip",
     ],
+)
+
+# Slang 12.1 FetchContent dependency, supplied offline to CMake.
+http_archive(
+    name = "slang_regex",
+    build_file_content = """
+filegroup(name = "all", srcs = glob(["**"]), visibility = ["//visibility:public"])
+filegroup(name = "cmake_root", srcs = ["CMakeLists.txt"], visibility = ["//visibility:public"])
+""",
+    sha256 = "3f28de7a7a00fd2d01461d28cffe3e2ca69e9e4e026e603e68626e6159c34f13",
+    strip_prefix = "regex-boost-1.91.0",
+    urls = ["https://github.com/MikePopoloski/regex/archive/refs/tags/boost-1.91.0.zip"],
+)
+
+# Slang 12.1 FetchContent dependency, supplied offline to CMake.
+http_archive(
+    name = "slang_toml",
+    build_file_content = """
+filegroup(name = "all", srcs = glob(["**"]), visibility = ["//visibility:public"])
+filegroup(name = "cmake_root", srcs = ["CMakeLists.txt"], visibility = ["//visibility:public"])
+""",
+    sha256 = "ad2a4cd786e25305d802e7490ea65a2531195e5834bf6b4fa5a323421fd81f9b",
+    strip_prefix = "tomlplusplus-3.4.0",
+    urls = ["https://github.com/marzer/tomlplusplus/archive/refs/tags/v3.4.0.zip"],
 )
 
 http_archive(
     name = "slang",
     build_file = "//packages:slang.BUILD",
     patches = ["//packages:slang.patch"],
-    sha256 = "f33547e9a2d1b21510174f064584aa31efff5a6956dfda4153a21ee878ff90d5",
-    strip_prefix = "slang-11.0",
+    sha256 = "2bc04d208cfe626aa2722549a03a65d9450ca91d1ceae2a86f4b024c0a257b92",
+    strip_prefix = "slang-12.1",
     urls = [
-        "https://github.com/MikePopoloski/slang/archive/refs/tags/v11.0.zip",
+        "https://github.com/MikePopoloski/slang/archive/refs/tags/v12.1.zip",
     ],
 )
 

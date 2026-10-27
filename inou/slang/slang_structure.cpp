@@ -355,7 +355,7 @@ struct Read_collector : public slang::ast::ASTVisitor<Read_collector, slang::ast
     lhs_selectors(expr.left());
     expr.right().visit(*this);
   }
-  void handle(const slang::ast::ValueExpressionBase& expr) { reads.insert(&expr.symbol); }
+  void handle(const slang::ast::ValueExpressionBase& expr) { reads.insert(&interface_signal(expr.symbol)); }
 };
 
 // Symbols DEFINITELY assigned (blocking) on EVERY path through `stmt`.
@@ -1417,12 +1417,21 @@ std::optional<slang::ConstantValue> Slang_context::try_eval_const_net(const slan
   return cv;
 }
 
-std::string Slang_context::module_name_of(const slang::ast::InstanceSymbol& symbol) {
-  const auto* body = symbol.getCanonicalBody();
-  if (body == nullptr) {
-    body = &symbol.body;
+// Interface connections supply types and symbol identities beyond value parameters.
+// Slang's canonical module body can belong to another connected interface shape.
+static const slang::ast::InstanceBodySymbol* lowering_body(const slang::ast::InstanceSymbol& symbol) {
+  for (const auto* port : symbol.body.getPortList()) {
+    if (port->kind == SymbolKind::InterfacePort) {
+      return &symbol.body;
+    }
   }
-  auto it = module_names_.find(body);
+  const auto* canonical = symbol.getCanonicalBody();
+  return canonical ? canonical : &symbol.body;
+}
+
+std::string Slang_context::module_name_of(const slang::ast::InstanceSymbol& symbol) {
+  const auto* body = lowering_body(symbol);
+  auto        it   = module_names_.find(body);
   if (it != module_names_.end()) {
     return it->second;
   }
@@ -1516,20 +1525,9 @@ void Slang_context::emit_synth_marker(const livehd::synth_attr::Policy& policy, 
 }
 
 void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, const Lnast_nid& in_tup, const Lnast_nid& out_tup) {
-  // Register the ports of the CANONICAL body — the same body lower_module walks
-  // (line: `body = symbol.getCanonicalBody()`). slang deduplicates structurally
-  // identical instances and shares one canonical body; the port `internalSymbol`
-  // the module body actually references belongs to that canonical body. When the
-  // lowering of a module is triggered by a NON-canonical duplicate (common in a
-  // large, multi-threaded elaboration where the first instance reached in our
-  // depth-first walk is not the one slang picked as canonical), symbol.body's
-  // port nets are DIFFERENT symbols than the canonical body's — same name, other
-  // pointer. Registering symbol.body's nets here while the body resolves to the
-  // canonical ones makes lname_of collide every port (clock/reads) into a
-  // `<name>_sN` uniquified name, so tolg later rejects the dangling clock_pin
-  // ("reg names clock_pin 'RW0_clk_s1' but module has no such input/wire").
-  const auto* canon = symbol.getCanonicalBody();
-  const auto& body  = canon != nullptr ? *canon : symbol.body;
+  // Register exactly the body that lower_module walks: using another instance's
+  // port symbols creates duplicate names and dangling clock / interface wires.
+  const auto&                           body = *lowering_body(symbol);
   // `--compat=vcs` downgrades slang's `Redefinition` error to a warning, so a port declared TWICE
   // (the Xilinx GTHE4_CHANNEL stub lists some of its ports twice) reaches this loop as two
   // PortSymbols of one name. Like VCS, the first declaration is the port; the later ones name the
@@ -1695,10 +1693,7 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
       }
       ln.set_pending_srcid(hhds::SourceId_invalid);
     } else if (p->kind == SymbolKind::InterfacePort) {
-      emit_unsupported(p->location,
-                       "unsupported-interface-port",
-                       std::string("interface port '") + std::string(p->name) + "' is not supported by --reader slang",
-                       "use --reader yosys-slang for interface ports");
+      emit_interface_io(p->as<slang::ast::InterfacePortSymbol>(), in_tup, out_tup);
     } else if (p->kind == SymbolKind::MultiPort) {
       emit_unsupported(p->location,
                        "unsupported-multi-port",
@@ -2087,10 +2082,7 @@ void Slang_context::collect_state_vars(const slang::ast::Scope& body) {
 }
 
 bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
-  const auto* body = symbol.getCanonicalBody();
-  if (body == nullptr) {
-    body = &symbol.body;
-  }
+  const auto* body = lowering_body(symbol);
 
   if (auto it = lowered_.find(body); it != lowered_.end()) {
     return it->second != nullptr;  // already done (or already failed)
@@ -2099,7 +2091,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   if (!symbol.isModule()) {
     emit_unsupported(symbol.location,
                      "unsupported-instance-kind",
-                     std::string("'") + std::string(symbol.name) + "' is not a module (interfaces/programs unsupported)");
+                     std::string("'") + std::string(symbol.name) + "' is not a module (programs unsupported)");
     return false;
   }
 
@@ -2174,6 +2166,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   }
 
   emit_module_io(symbol, in_tup, out_tup);
+  prepare_interfaces(*body);
   // compile.slang.blackbox_attribute: a `(* blackbox *)` module (a hard macro or vendor primitive stub: Yosys'
   // own convention for "this is the interface, the body lives elsewhere") is its ports only. Lowering its
   // empty body would turn every output into an unknown constant; flag the unit so tolg declares the
@@ -2754,6 +2747,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   auto outer_past = std::exchange(past_chain_, {});
   declare_past_chains(*body);
   lower_members(*body);
+  bind_interface_outputs();
   emit_past_chain_updates();
   past_chain_ = std::move(outer_past);
   finalize_pending_async_resets();
@@ -3680,6 +3674,9 @@ bool Slang_context::whole_copied_selfref_pattern(const slang::ast::ValueSymbol& 
 }
 
 bool Slang_context::is_scalar_struct_var(const slang::ast::ValueSymbol& sym) const {
+  if (interface_signals_.contains(&sym)) {
+    return false;
+  }
   if (auto it = scalar_struct_var_cache_.find(&sym); it != scalar_struct_var_cache_.end()) {
     return it->second;
   }
@@ -4216,8 +4213,10 @@ struct Dep_collector : public slang::ast::ASTVisitor<Dep_collector, slang::ast::
   void note_lhs(const slang::ast::Expression& lhs) {
     switch (lhs.kind) {
       case ExpressionKind::NamedValue:
-      case ExpressionKind::HierarchicalValue: writes.insert(&lhs.as<slang::ast::ValueExpressionBase>().symbol); return;
-      case ExpressionKind::Conversion       : note_lhs(lhs.as<slang::ast::ConversionExpression>().operand()); return;
+      case ExpressionKind::HierarchicalValue:
+        writes.insert(&interface_signal(lhs.as<slang::ast::ValueExpressionBase>().symbol));
+        return;
+      case ExpressionKind::Conversion: note_lhs(lhs.as<slang::ast::ConversionExpression>().operand()); return;
       case ExpressionKind::Concatenation:
         for (const auto* op : lhs.as<slang::ast::ConcatenationExpression>().operands()) {
           note_lhs(*op);
@@ -4315,8 +4314,8 @@ struct Dep_collector : public slang::ast::ASTVisitor<Dep_collector, slang::ast::
   }
 
   void handle(const slang::ast::ValueExpressionBase& expr) {
-    reads.insert(&expr.symbol);
-    rhs_reads.insert(&expr.symbol);
+    reads.insert(&interface_signal(expr.symbol));
+    rhs_reads.insert(&interface_signal(expr.symbol));
   }
 };
 
@@ -4455,7 +4454,8 @@ static void collect_state_outputs(const slang::ast::InstanceSymbol&             
     while (rhs->kind == ExpressionKind::Conversion) {
       rhs = &rhs->as<slang::ast::ConversionExpression>().operand();
     }
-    if (rhs->kind == ExpressionKind::NamedValue && regs.contains(&rhs->as<slang::ast::ValueExpressionBase>().symbol)) {
+    if (rhs->kind == ExpressionKind::NamedValue
+        && regs.contains(&interface_signal(rhs->as<slang::ast::ValueExpressionBase>().symbol))) {
       reg_driven.insert(lhs);
     }
   }
@@ -4499,7 +4499,7 @@ struct Element_reads : public slang::ast::ASTVisitor<Element_reads, slang::ast::
     const auto& base = e.value();
     if (base.kind == ExpressionKind::NamedValue || base.kind == ExpressionKind::HierarchicalValue) {
       if (auto index = eval(e.selector())) {
-        elements[&base.as<slang::ast::ValueExpressionBase>().symbol].insert(*index);
+        elements[&interface_signal(base.as<slang::ast::ValueExpressionBase>().symbol)].insert(*index);
         e.selector().visit(*this);
         return;
       }
@@ -4545,10 +4545,11 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
   std::function<void(const slang::ast::Scope&)> collect = [&](const slang::ast::Scope& sc) {
     for (const auto& member : sc.members()) {
       switch (member.kind) {
-        case SymbolKind::Port:
-        case SymbolKind::Parameter:
-        case SymbolKind::TypeParameter:
-        case SymbolKind::TypeAlias:
+        case SymbolKind::Port             :
+        case SymbolKind::InterfacePort    :
+        case SymbolKind::Parameter        :
+        case SymbolKind::TypeParameter    :
+        case SymbolKind::TypeAlias        :
         case SymbolKind::TransparentMember:
         case SymbolKind::EmptyMember:
         case SymbolKind::Genvar:
@@ -4643,9 +4644,19 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
         }
 
         case SymbolKind::Instance: {
+          if (member.as<slang::ast::InstanceSymbol>().isInterface()) {
+            break;  // passive interface storage was prepared before driver collection
+          }
           collect_state_outputs(member.as<slang::ast::InstanceSymbol>(), seq_out_nets);
           Driver d{.member = &member, .prefix = genblk_prefix_};
           for (const auto* conn : member.as<slang::ast::InstanceSymbol>().getPortConnections()) {
+            if (conn->port.kind == SymbolKind::InterfacePort) {
+              for (const auto& leaf :
+                   interface_port_leaves(conn->port.as<slang::ast::InterfacePortSymbol>(), conn->getIfaceConn())) {
+                (leaf.output ? d.writes : d.reads).insert(leaf.signal);
+              }
+              continue;
+            }
             const auto* expr = conn->getExpression();
             if (expr == nullptr || conn->port.kind != SymbolKind::Port) {
               continue;
@@ -5622,6 +5633,12 @@ void Slang_context::lower_members(const slang::ast::Scope& scope) {
       wire_split_tmp_[wsym] = std::move(orig);  // accumulator = the pre-declared mut
       wire_split_flat_.insert(wsym);
       sym_lname_[wsym] = std::move(wnet);  // readers resolve through the wire
+    }
+  }
+
+  for (const auto* sym : emit_ordered(interface_signals_)) {
+    if (!declared_.contains(sym) && !wire_split_tmp_.contains(sym)) {
+      declare_value_symbol(*sym, false);
     }
   }
 
@@ -8138,10 +8155,11 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
     const slang::ast::Expression* expr;
     bool                          bundle = false;  // child port is a tuple bundle (M7)
   };
-  std::vector<std::pair<std::string, std::string>> in_args;  // (port, value)
-  std::vector<Out_conn>                            outs;
-  size_t                                           n_outputs_total = 0;
-  bool                                             any_bundle_out  = false;
+  std::vector<std::pair<std::string, std::string>>                    in_args;  // (port, value)
+  std::vector<Out_conn>                                               outs;
+  std::vector<std::pair<const slang::ast::ValueSymbol*, std::string>> interface_outs;
+  size_t                                                              n_outputs_total = 0;
+  bool                                                                any_bundle_out  = false;
 
   // Route bits between two leaf tilings of the SAME packed layout WITHOUT a
   // whole-struct reassembly. The two sides can differ in GRAIN — a bundle
@@ -8320,6 +8338,20 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
 
   absl::flat_hash_set<std::string_view> seen_port_names;  // a port listed twice under --compat=vcs: the first wins
   for (const auto* conn : inst.getPortConnections()) {
+    if (conn->port.kind == SymbolKind::InterfacePort) {
+      const auto& port = conn->port.as<slang::ast::InterfacePortSymbol>();
+      for (const auto& leaf : interface_port_leaves(port, conn->getIfaceConn())) {
+        auto path = absl::StrCat(port.name, leaf.output ? "__out." : "__in.", leaf.field);
+        if (leaf.output) {
+          interface_outs.emplace_back(leaf.signal, std::move(path));
+          ++n_outputs_total;
+          any_bundle_out = true;
+        } else {
+          in_args.emplace_back(std::move(path), read_symbol(*leaf.signal, slang::SourceRange(inst.location, inst.location)));
+        }
+      }
+      continue;
+    }
     if (conn->port.kind != SymbolKind::Port) {
       end_input_phase();
       emit_unsupported(inst.location,
@@ -8470,6 +8502,16 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   // per-leaf dotted ports on the Sub, so even a lone bundle output makes the
   // instance result MULTI-output (dotted tuple_get path, never bare result).
   const bool single_out = n_outputs_total == 1 && !any_bundle_out;
+  for (const auto& [signal, path] : interface_outs) {
+    const auto value = builder_.create_lnast_tmp();
+    auto       get   = builder_.add_child(Lnast_ntype::create_tuple_get());
+    ln.add_child(get, Lnast_node::create_ref(value));
+    ln.add_child(get, Lnast_node::create_ref(result));
+    ln.add_child(get, Lnast_node::create_const(path));
+    note_write(*signal, false, inst.location);
+    auto ti = tinfo(signal->getType());
+    builder_.create_assign_stmts(lname_of(*signal), fit_wrap(value, ti.bits, ti.is_signed));
+  }
   for (const auto& oc : outs) {
     if (oc.bundle) {
       // M7: read each leaf via ONE tuple_get with the DOTTED name (the form

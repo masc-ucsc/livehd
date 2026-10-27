@@ -35,12 +35,12 @@ must work with resynthesis disabled; <a href="#K">K</a> adds it independently.</
 placement stages, mapped physical graph, technology RC, checkpoints and export.
 Reuse the implemented interfaces; this task does not wait for every outstanding
 placement experiment.</li>
-<li><a class="xref" href="3r-route.html">3r-route</a> supplies RSMT-RUDY and
+<li><a href="../../pass/place/README.md">routability feedback</a> supplies RSMT-RUDY and
 full-footprint congestion measurements. Its pending
-<a href="3r-route.html#timing-warmup">stability-based timing warm-up</a> is implemented
+stability-based timing warm-up is implemented
 by H for the new loop, avoiding a second independent gate controller.</li>
-<li><a class="xref" href="2p-plan.html#E">2p-plan E</a> and
-<a class="xref" href="3s-terminal-legalize.html">3s-terminal-legalize</a> supply
+<li><a href="../../pass/place/README.md">Timing-aware legalization</a> and
+<a href="../../pass/place/README.md">terminal legalization</a> supply
 legalization and timing protection for the phase-7 handoff. Existing legalizers
 remain usable; optional SAT alignment is not a prerequisite.</li>
 <li><a class="xref" href="2is-incsynth.html">2is-incsynth</a> is needed only for K:
