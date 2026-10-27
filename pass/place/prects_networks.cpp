@@ -104,11 +104,26 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
     }
     instances.emplace(c.name, &info);
   }
+  // Only distribution-cell links query pin_net. Indexing every data pin
+  // duplicates the whole design's labels at the final RC memory peak.
+  // Preseed the queried identities, then retain their first connection just as
+  // the full index did, including aliases with the same physical label.
+  const auto                              unbound = fp.nets.size();
   std::unordered_map<std::string, size_t> pin_net;
-  std::vector<std::vector<size_t>>        adjacent(fp.nets.size());
-  std::vector<size_t>                     pending, pending_clocks;
-  std::vector<bool>                       clock_nets(fp.nets.size());
-  const auto                              mark_clock = [&](size_t n) {
+  for (const auto& c : fp.components) {
+    const auto links = roles.links.find(c.macro);
+    if (links == roles.links.end()) {
+      continue;
+    }
+    for (const auto& [a, b] : links->second) {
+      pin_net.try_emplace(c.name + ":" + a, unbound);
+      pin_net.try_emplace(c.name + ":" + b, unbound);
+    }
+  }
+  std::vector<std::vector<size_t>> adjacent(fp.nets.size());
+  std::vector<size_t>              pending, pending_clocks;
+  std::vector<bool>                clock_nets(fp.nets.size());
+  const auto                       mark_clock = [&](size_t n) {
     if (!clock_nets[n]) {
       clock_nets[n] = true;
       pending_clocks.push_back(n);
@@ -123,7 +138,9 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
   for (size_t n = 0; n < fp.nets.size(); ++n) {
     for (const auto& c : fp.nets[n].connections) {
       const auto label = physical::connection_label(c);
-      pin_net.emplace(label, n);
+      if (const auto entry = pin_net.find(label); entry != pin_net.end() && entry->second == unbound) {
+        entry->second = n;
+      }
       if ((c.instance == "PIN" && roles.reset_ports.contains(c.pin))
           || (c.instance != "PIN" && (roles.reset_pins.contains(label) || roles.reset_pins.contains(c.instance + "/" + c.pin)))) {
         mark(n);
@@ -181,7 +198,7 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
     }
     for (const auto& [a, b] : links->second) {
       const auto x = pin_net.find(c.name + ":" + a), y = pin_net.find(c.name + ":" + b);
-      if (x != pin_net.end() && y != pin_net.end() && x->second != y->second) {
+      if (x != pin_net.end() && y != pin_net.end() && x->second != unbound && y->second != unbound && x->second != y->second) {
         adjacent[x->second].push_back(y->second);
         adjacent[y->second].push_back(x->second);
       }

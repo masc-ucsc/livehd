@@ -111,6 +111,38 @@ TEST(PrectsNetworks, DistributionClosureExcludesSiblingsButPreservesDataAndGateE
   EXPECT_EQ(fp.components, before.components);
 }
 
+TEST(PrectsNetworks, MissingDistributionEndpointsDoNotJoinDataToResetOrClock) {
+  auto                 roles = library();
+  physical::Technology tech;
+  physical::Floorplan  fp;
+  fp.components = {
+      { "missing_input",  "unary", {}},
+      {"missing_output", "invert", {}},
+      {      "complete",  "unary", {}},
+      {            "ff",  "state", {}}
+  };
+  fp.nets = {
+      {      "data",                         {{"PIN", "data"}, {"ff", "d"}}},
+      {     "reset",  {{"PIN", "rst"}, {"missing_input", "o"}, {"ff", "r"}}},
+      {     "clock", {{"PIN", "clk"}, {"missing_output", "i"}, {"ff", "c"}}},
+      { "branch_in",                 {{"PIN", "branch"}, {"complete", "i"}}},
+      {"branch_out",              {{"complete", "o"}, {"PIN", "reset_out"}}}
+  };
+  roles.reset_ports.insert("reset_out");
+  // Duplicate references to an existing endpoint must not create extra links.
+  fp.nets[3].connections.push_back({"complete", "i"});
+  const auto result = prects_networks(tech, fp, roles);
+  EXPECT_EQ(result.ignored, (std::vector<bool>{false, true, true, true, true}));
+  EXPECT_FALSE(result.pins.contains("data"));
+  EXPECT_FALSE(result.pins.contains("ff:d"));
+  EXPECT_FALSE(result.pins.contains("missing_input:i"));
+  EXPECT_FALSE(result.pins.contains("missing_output:o"));
+  EXPECT_TRUE(result.timing_cuts.contains("missing_input:o"));
+  EXPECT_FALSE(result.timing_cuts.contains("missing_output:i"));
+  EXPECT_TRUE(result.timing_cuts.contains("branch"));
+  EXPECT_TRUE(result.timing_cuts.contains("complete:o"));
+}
+
 TEST(PrectsNetworks, LefAndTimingEvidenceNeedNoFiniteSlack) {
   auto                 roles = library();
   physical::Technology tech;
