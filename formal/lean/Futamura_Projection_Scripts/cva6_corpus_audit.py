@@ -13,7 +13,7 @@ Support (the six `SupportedByProjection` fields) is NOT computed here -- it is
 Lean's, via `proto_probe --support`, and the command is printed so the two are
 not conflated.
 
-    python3 scripts/cva6_corpus_audit.py \
+    python3 Futamura_Projection_Scripts/cva6_corpus_audit.py \
         --frozen  <d4>/pass/lean/Lgraph_IR_Semantics_Simulator/tests/d4/cva6_30.list \
         --corpus  <d4>/temp/cva6_30_auth/blocks \
         --corpus  <d4>/temp/cva6_30_auth2/blocks \

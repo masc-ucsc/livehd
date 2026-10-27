@@ -103,9 +103,9 @@ bash .build-proj.sh
 
 # 3. the native drivers (-O2), into a project-local root
 ROOT=$PWD/../../generated/fp/nat_root
-OPT=-O2 ROOT=$ROOT bash scripts/build-opt.sh scripts/dcert2_memroute.lean \
-    scripts/dcert2_loadcheck.lean scripts/dcert2_support.lean \
-    scripts/gen_probe_v2.lean scripts/gen_readiness_v2.lean
+OPT=-O2 ROOT=$ROOT bash Futamura_Projection_Scripts/build-opt.sh Futamura_Projection_Scripts/dcert2_memroute.lean \
+    Futamura_Projection_Scripts/dcert2_loadcheck.lean Futamura_Projection_Scripts/dcert2_support.lean \
+    Futamura_Projection_Scripts/gen_probe_v2.lean Futamura_Projection_Scripts/gen_readiness_v2.lean
 # -> $ROOT/nat/dcert2_memroute, ...
 
 # 4. self-tests: the comparison and state-file rules, then the four small fixtures
@@ -166,8 +166,9 @@ bash pass/lean/specialization/scripts/fp_cov_dcert2.sh --native $ROOT/nat --only
     --memmax 32G <livehd-checkout> <out-dir> 20000000 500000 4 $W/lean/top.dcert
 ```
 
-- Phases: `decode`, `support`, `generate`, `readiness` (the scalar route) and
-  `memroute`; the default runs all of them.
+- Phases: the default runs the scalar route's four, `decode`, `support`,
+  `generate` and `readiness`. The memory route, which the benchmark rows use,
+  runs only with `--only memroute`, as above.
 - `--memmax` is a memory ceiling for host safety. A run it stops is recorded as
   KILLED, never as a refusal by the design. There is no time limit.
 - `<livehd-checkout>` supplies `LEAN_PATH` for the interpreted route (no `--native`),
@@ -303,7 +304,7 @@ One rule decides where a file goes:
 |---|---|
 | `fp_cov_dcert2.sh` | the recorded runner: decode, support, generate, readiness and memroute phases; immutable attempt folders, reuse only on identical identity, memory ceiling, no time limit |
 | `fp_gen_build.sh`, `fp_gen_sample.sh`, `fp_gen_measure.sh`, `fp_gen_counterbalanced.sh` | generation-latency builds and counterbalanced measurements |
-| `fp_install.py` | installs the projection-branch probes onto master (its map: `evidence/fp_install_map.tsv`) |
+| `fp_install.py` | historical: installed the projection branch's files onto master, at the paths they had then (`formal/lean/scripts/...`); its map is `evidence/fp_install_map.tsv` |
 | `fp_replay.py` | replays historical FP rows into a fresh output folder |
 | `coreet_operator_census.py` | which operators the CORE-ET certificates use, and whether the interpreter implements each (`coreet_operator_census.md`) |
 
@@ -314,7 +315,8 @@ One rule decides where a file goes:
 | `axiom_gate_controls.sh`: the axiom gate refuses `sorry`, `native_decide` and an explicit axiom | `bash pass/lean/specialization/tests/axiom_gate_controls.sh` |
 | `check_overlay.sh`: the shared semantics have not drifted from their base | `bash pass/lean/specialization/tests/check_overlay.sh [--semantic]` |
 | `check_certio.sh`: the provenance of the DCERT1 codec (`Compiler/CertIOV1.lean`) | `bash pass/lean/specialization/tests/check_certio.sh` |
-| `fp_csimp_checks.lean`, `fp_sext_controls.lean`, `fp_dcert1_admission_controls.lean` | `lean` from `formal/lean` |
+| `fp_sext_controls.lean`, `fp_dcert1_admission_controls.lean` | from `formal/lean`: `LEAN_PATH=.olean-dev lean ../../pass/lean/specialization/tests/<file>` |
+| `fp_csimp_checks.lean`: the `@[csimp]` equalities and their axioms | it needs the `Proto/` modules, which only `build-opt.sh` builds: `LEAN_PATH=$ROOT/olean lean ...` |
 
 `evidence/` holds the coverage, admission, generation and readiness tables
 (`fp_*.tsv`, `fp_master_experiments.jsonl`), the speed-up table `fp_speedup.tsv`,
@@ -325,10 +327,14 @@ log and profiles (`certio/`), and the FP branch's historical overlay
 The Lean code stays in the Lean project:
 - `formal/lean/LeanSemanticPrimitives/Projection/`: the interpreter, the
   specializer, the proofs, the memory route and the axiom gate;
-- `formal/lean/scripts/`: the drivers (`dcert2_*`, `gen_probe_v2`,
-  `gen_readiness_v2`, `cert_runner_any`, ...), the build scripts `build-opt.sh`
-  and `build-native.sh`, the helpers next to them, and the state and stimulus
-  files in `memstate/`.
+- `formal/lean/Futamura_Projection_Scripts/`: every file is this direction's.
+  It holds the drivers (`dcert2_*`, `gen_probe_v2`, `gen_readiness_v2`,
+  `cert_runner_any`, `cert_trace`, ...), the build scripts `build-opt.sh` and
+  `build-native.sh`, the helpers next to them, and the state and stimulus files
+  in `memstate/`. It was `formal/lean/scripts/`; recorded runs keep that path.
+  Two other users: the proof tools build with its `build-opt.sh`, and the
+  exporter's RTL oracles (`pass/lean/Exporter/Frontend/scripts/*_oracle.sh`) run
+  its `cert_trace.lean`.
 
 Elsewhere:
 - the proof tools that use the residual: `pass/lean/tools/` (their design note,

@@ -13,7 +13,7 @@ the `nthD` lookup summary already integrated, in namespace
 `Term.var` and `Eval` are untouched: offsets live only in partial values.  The
 proved `k = 0` fast-path block is omitted (a deferred shift is O(1) anyway).
 No theorems; not imported by `Audit.lean`.  It exists to measure
-S1 -> summary -> summary + deferred shifting, with `scripts/s3_probe.lean`.
+S1 -> summary -> summary + deferred shifting, with `Futamura_Projection_Scripts/s3_probe.lean`.
 -/
 import LeanSemanticPrimitives.Projection.BindingTime
 import LeanSemanticPrimitives.Projection.ObjectLanguageSemantics

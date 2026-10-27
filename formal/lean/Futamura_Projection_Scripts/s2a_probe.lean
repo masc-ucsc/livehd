@@ -1,19 +1,15 @@
 /-
-S2 -- the INTEGRATED lookup summary.  ONE source, built twice: against a tree
-whose `PartialEvaluator.lean`, `PartialEvaluatorCorrect.lean` and
-`MixProgram.lean` are S1's (0f175676b), and against the current tree.  So the
-HOST column is S1 in one build and the integrated summary in the other, while
-the PROTO column -- the S2a prototype, `ProtoSum` -- is the same code in both
-and serves as the in-process control.  Specification: certio/PHASE6_PERF.md 35-37.
+S2a -- the restricted lookup summary (`Proto/PartialEvaluatorSummary.lean`)
+against S1, the PROVED specializer.  Specification: certio/PHASE6_PERF.md 35.
 
   s2a_probe grid
-      the HOST and the prototype in ONE process on the S0.4 two-axis grid plus the
+      S1 and the prototype in ONE process on the S0.4 two-axis grid plus the
       all-dynamic fixture.  Per point: both times, residual term counts, a
       digest of each residual's `repr` (identity), and -- OUTSIDE the timed
       sections -- the fragment checker and `interpretDesign` at each residual's
       own checked bound.
 
-  s2a_probe cert PATH (host|proto) [sf wf]
+  s2a_probe cert PATH (s1|proto) [sf wf]
       ONE backend per process, so `/usr/bin/time` RSS belongs to that backend.
       Specialize once (timed), print the digest, then the CHECKED SIMULATOR PATH
       exactly as `total_probe`: the checker must accept, six width-aware stimuli
@@ -57,12 +53,12 @@ partial def digT : Term → UInt64
 def digest (R : Program) : UInt64 :=
   R.funs.foldl (fun h fd => mixHash h (mixHash (hash fd.arity) (digT fd.body))) (hash R.entry)
 
-/-- VERBATIM from `scripts/total_probe.lean`. -/
+/-- VERBATIM from `Futamura_Projection_Scripts/total_probe.lean`. -/
 def runStep (sim : ProjectedSimulator) (D : DesignCert) (e : ClockEdges)
     (i : RuntimeInput) (s : RuntimeState) : Outcome :=
   outcomeOfSim (stepOf sim D e i s)
 
-/-- VERBATIM from `scripts/total_probe.lean`. -/
+/-- VERBATIM from `Futamura_Projection_Scripts/total_probe.lean`. -/
 def traceBoth (sim : ProjectedSimulator) (D : DesignCert) (n seed : Nat) :
     IO (Bool × Nat) := do
   let mut stRef := mkStateFor D seed
@@ -88,7 +84,7 @@ def specS1 (sf wf : Nat) (D : DesignCert) : Except MixError Program :=
 def specProto (sf wf : Nat) (D : DesignCert) : Except ProtoSum.MixError Program :=
   ProtoSum.mixDriver sf wf hwAPVarT [encDesign D]
 
-/-- `srcD` generalised, as in `scripts/s0_grid.lean`; `dynamic` makes every
+/-- `srcD` generalised, as in `Futamura_Projection_Scripts/s0_grid.lean`; `dynamic` makes every
 source an input. -/
 def gridD (nsrc nnode arity : Nat) (dynamic : Bool := false) : DesignCert where
   sources  := (List.range nsrc).toArray.map (fun i =>
@@ -125,13 +121,13 @@ def point (label : String) (s n a : Nat) (dyn : Bool := false) : IO Bool := do
     let (c1, f1) := checkRun D A
     let (c2, f2) := checkRun D B
     let same := digest A == digest B
-    IO.println s!"  {label} | S {s} N {n} E {n * a} | HOST {t1} ms | PROTO {t2} ms | terms {szOf A}/{szOf B} \
-identical {same} | HOST digest {digest A} | HOST chk {c1} ref {f1} | PROTO chk {c2} ref {f2}"
+    IO.println s!"  {label} | S {s} N {n} E {n * a} | S1 {t1} ms | proto {t2} ms | terms {szOf A}/{szOf B} \
+identical {same} | S1 chk {c1} ref {f1} | proto chk {c2} ref {f2}"
     return (same && c1 && f1 && c2 && f2)
   | _, _ => do IO.println s!"  {label} | a backend FAILED"; return false
 
 def grid : IO UInt32 := do
-  IO.println "S2 grid: HOST (proved, this build) vs PROTO (S2a prototype, control), same process"
+  IO.println "S2a grid: S1 (proved) vs prototype (summary), same process, same budgets"
   let mut ok := true
   IO.println "[A] S varies, N=256, arity 2"
   for s in [64, 128, 256, 512, 1024] do unless (← point "A" s 256 2) do ok := false
@@ -177,7 +173,7 @@ def cert (path backend : String) (sf wf : Nat) : IO UInt32 := do
   unless sr.allOK do IO.eprintln "  NOT SupportedByProjection"; return 2
   IO.println s!"  backend: {backend}  fuel {sf}/{wf}  interpreter hwAPVarT"
   (← IO.getStdout).flush
-  if backend == "host" then
+  if backend == "s1" then
     let (r, t) ← stage "specialize" (fun (r : Except MixError Program) =>
                     match r with | .ok p => szOf p | .error _ => 0) (fun _ => specS1 sf wf D)
     match r with
@@ -197,4 +193,4 @@ def main (args : List String) : IO UInt32 := do
   | ["grid"] => grid
   | ["cert", p, b] => cert p b 200000 2000
   | ["cert", p, b, a, c] => cert p b ((a.toNat?).getD 200000) ((c.toNat?).getD 2000)
-  | _ => do IO.eprintln "usage: s2a_probe grid | cert PATH (host|proto) [sf wf]"; return 2
+  | _ => do IO.eprintln "usage: s2a_probe grid | cert PATH (s1|proto) [sf wf]"; return 2

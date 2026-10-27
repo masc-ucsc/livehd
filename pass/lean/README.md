@@ -135,7 +135,7 @@ and `evidence/` (measurements kept as records).
 
 Its Lean sources stay in the Lean project: the interpreter, the specializer and
 their proofs in `formal/lean/LeanSemanticPrimitives/Projection/`, and the
-drivers and build scripts in `formal/lean/scripts/`. The 12-row coverage
+drivers and build scripts in `formal/lean/Futamura_Projection_Scripts/`. The 12-row coverage
 harness every route uses (`scripts/fp_cov_run.sh`, `scripts/fp_cov_queue_*.sh`)
 stays in this directory's `scripts/`. `specialization/README.md` has the build
 and run commands, the trust boundary, the benchmarks covered and two
@@ -780,7 +780,7 @@ The pipeline of one run:
 # lhd (see Build above); the native drivers, into a project-local root:
 cd formal/lean
 ROOT=$PWD/../../generated/sym/nat_root
-OPT=-O2 ROOT=$ROOT bash scripts/build-opt.sh ../../pass/lean/tools/drivers/sym_verify.lean \
+OPT=-O2 ROOT=$ROOT bash Futamura_Projection_Scripts/build-opt.sh ../../pass/lean/tools/drivers/sym_verify.lean \
     ../../pass/lean/tools/drivers/sym_refine.lean ../../pass/lean/tools/drivers/sym_refmap.lean
 # the solver: cadical ships with the Lean toolchain; link it next to the drivers
 # (or pass solver:<path>)

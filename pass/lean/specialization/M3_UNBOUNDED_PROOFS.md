@@ -157,7 +157,7 @@ that k.
   certificate. Specification inputs default to the implementation input of
   the same name.
 - **Native builds.**
-  `OPT=-O2 ROOT=<dir> bash formal/lean/scripts/build-opt.sh ../../pass/lean/tools/drivers/sym_verify.lean ../../pass/lean/tools/drivers/sym_refine.lean`.
+  `OPT=-O2 ROOT=<dir> bash formal/lean/Futamura_Projection_Scripts/build-opt.sh ../../pass/lean/tools/drivers/sym_verify.lean ../../pass/lean/tools/drivers/sym_refine.lean`.
   Pass `solver:` explicitly, or link the toolchain's cadical
   (`$(dirname $(elan which lean))/cadical`, run from `formal/lean`) into the
   build directory.

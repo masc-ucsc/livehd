@@ -42,7 +42,7 @@ SCOPE -- read this before quoting a number:
     `nthD fq idx` hold read; `flopD` residualises about TWICE that, so (C) is a
     lower bound, not a fit.
 
-    python3 scripts/cert_shape.py [--ops] [--summary] FILE.dcert [...]
+    python3 Futamura_Projection_Scripts/cert_shape.py [--ops] [--summary] FILE.dcert [...]
 """
 import sys, collections
 

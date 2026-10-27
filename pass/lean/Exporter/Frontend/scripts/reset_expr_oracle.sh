@@ -8,7 +8,7 @@ set -euo pipefail
 # exporter reads such a flop through an override node
 # `MuxBool(rst, Q, resetValue)` and keeps `FlopDesc.resetPin`/`asyncReset` on
 # the commit side. This compares the certificate's `interpretDesign`
-# (scripts/cert_trace.lean) against iverilog on the ORIGINAL RTL, step by step,
+# (Futamura_Projection_Scripts/cert_trace.lean) against iverilog on the ORIGINAL RTL, step by step,
 # under two clock schedules:
 #   all    every step clocks
 #   third  every third step is QUIET -- where an asynchronous reset still acts
@@ -90,7 +90,7 @@ rtl() { # <source.sv> <mode> <out>
 }
 for mode in all third; do
   rtl "$OUT/arst.sv" "$mode" "rtl_$mode"
-  (cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run scripts/cert_trace.lean \
+  (cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run Futamura_Projection_Scripts/cert_trace.lean \
      "$OUT/lean/arst.dcert" 40 "$OUT/stim.txt" "edges:$mode" > "$OUT/cert_$mode.txt" 2> "$OUT/cert_$mode.err") \
     || { cat "$OUT/cert_$mode.err"; echo "FAIL: cert_trace"; exit 1; }
   [[ $(wc -l < "$OUT/rtl_$mode.txt") -eq 40 ]] || { echo "FAIL: the RTL run did not produce 40 steps"; exit 1; }

@@ -40,10 +40,10 @@ CODE_COMMON = ['LeanSemanticPrimitives/Projection/ProjectionCorrect.lean',
                'LeanSemanticPrimitives/Projection/ResidualFragment.lean',
                'LeanSemanticPrimitives/Projection/ProjectedStep.lean',
                'LeanSemanticPrimitives/Projection/HardwareInterpreter.lean']
-CODE_FORK  = ['scripts/proto_probe.lean',
+CODE_FORK  = ['Futamura_Projection_Scripts/proto_probe.lean',
               'LeanSemanticPrimitives/Projection/Proto/InterpreterVariant.lean',
               'LeanSemanticPrimitives/Projection/Proto/PartialEvaluatorFast.lean']
-CODE_TOTAL = ['scripts/total_probe.lean',
+CODE_TOTAL = ['Futamura_Projection_Scripts/total_probe.lean',
               'LeanSemanticPrimitives/Projection/Proto/RunnerSupport.lean',
               'LeanSemanticPrimitives/Projection/Proto/VariantExec.lean',
               'LeanSemanticPrimitives/Projection/Proto/VariantAdequacy.lean',

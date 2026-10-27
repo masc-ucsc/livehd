@@ -8,13 +8,15 @@ R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"   # the repo root,
 G=$R/generated/master_port/fp/genprobe
 export LEAN_NUM_THREADS=4
 
-build() {                       # build <tag> <tree-formal-lean> <probe-abs>
-  local tag=$1 tree=$2 probe=$3
+# The two trees name the driver folder differently: master's is
+# Futamura_Projection_Scripts/, the 9bb41a09d pin's is scripts/.
+build() {                       # build <tag> <tree-formal-lean> <driver-dir> <probe>
+  local tag=$1 tree=$2 dir=$3 probe=$4
   local root=$G/root-$tag
   mkdir -p "$root"
-  echo "OPT=-O2 ROOT=$root bash scripts/build-opt.sh $probe   # cwd=$tree" > "$root/build.cmd"
+  echo "OPT=-O2 ROOT=$root bash $dir/build-opt.sh $probe   # cwd=$tree" > "$root/build.cmd"
   ( cd "$tree" && /usr/bin/time -f '%e s %M kB' -o "$root/build.time" \
-      nice -n19 ionice -c3 env OPT=-O2 ROOT="$root" bash scripts/build-opt.sh "$probe" ) \
+      nice -n19 ionice -c3 env OPT=-O2 ROOT="$root" bash "$dir/build-opt.sh" "$probe" ) \
       > "$root/build.log" 2>&1
   local rc=$?
   echo "$tag rc=$rc $(cat "$root/build.time" 2>/dev/null)"
@@ -22,6 +24,6 @@ build() {                       # build <tag> <tree-formal-lean> <probe-abs>
   [ -x "$root/nat/$(basename "$probe" .lean)" ] && sha256sum "$root/nat/$(basename "$probe" .lean)"
 }
 
-build master "$R/formal/lean"                     scripts/gen_probe.lean
-build pin    "$G/pin_tree/formal/lean"            scripts/gen_probe.lean
+build master "$R/formal/lean"           Futamura_Projection_Scripts Futamura_Projection_Scripts/gen_probe.lean
+build pin    "$G/pin_tree/formal/lean"  scripts                     scripts/gen_probe.lean
 echo "GENPROBE BUILDS DONE"

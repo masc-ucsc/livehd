@@ -52,7 +52,7 @@
 # in every request and attempt either way.
 #
 # THE NATIVE ROUTE (--native DIR).  DIR holds the drivers built by
-# scripts/build-opt.sh (dcert2_loadcheck, dcert2_support, gen_probe_v2,
+# Futamura_Projection_Scripts/build-opt.sh (dcert2_loadcheck, dcert2_support, gen_probe_v2,
 # gen_readiness_v2, dcert2_memroute).  The DCERT2 codec is Mathlib-free since the
 # CertIOCodec/CertIORoute split, so the drivers link natively.  A native binary
 # carries all of its code, so its IDENTITY is its own sha256: no LEAN_PATH is
@@ -198,15 +198,15 @@ LPCLOSURE=$( { for d in "${LPPRIV[@]}"; do find "$d" -name '*.olean' -print0; do
 echo "lean_path closure digest $LPCLOSURE over ${#LPPRIV[@]} private entries"
 fi
 
-DRV_DECODE=$R/formal/lean/scripts/dcert2_loadcheck.lean
-DRV_SUPPORT=$R/formal/lean/scripts/dcert2_support.lean
-DRV_GEN=$R/formal/lean/scripts/gen_probe_v2.lean
-DRV_READY=$R/formal/lean/scripts/gen_readiness_v2.lean
+DRV_DECODE=$R/formal/lean/Futamura_Projection_Scripts/dcert2_loadcheck.lean
+DRV_SUPPORT=$R/formal/lean/Futamura_Projection_Scripts/dcert2_support.lean
+DRV_GEN=$R/formal/lean/Futamura_Projection_Scripts/gen_probe_v2.lean
+DRV_READY=$R/formal/lean/Futamura_Projection_Scripts/gen_readiness_v2.lean
 # The MEMORY route. Deliberately NOT part of `--only all`: a memory-bearing
 # certificate currently stops the scalar row at `support` with exit 2, and
 # folding a sixth phase into the default sweep would change that disposition
 # for every such row. Select it explicitly with `--only memroute`.
-DRV_MEMROUTE=$R/formal/lean/scripts/dcert2_memroute.lean
+DRV_MEMROUTE=$R/formal/lean/Futamura_Projection_Scripts/dcert2_memroute.lean
 for f in "$DRV_DECODE" "$DRV_SUPPORT" "$DRV_GEN" "$DRV_READY" "$DRV_MEMROUTE"; do
   [ -f "$f" ] || { echo "REFUSING: missing driver $f"; exit 2; }
 done
