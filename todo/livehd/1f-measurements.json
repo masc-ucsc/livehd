@@ -49345,6 +49345,22 @@
         "estimate_rc_samples": 206,
         "evidence": "/tmp/1f-memory-v55/cpu-summary.json",
         "next_target": "Final control-network classification builds a string-to-net index for every physical pin after final RC and pin locations are allocated. The index is only queried for library roles.links buffer/inverter/ICG connections. Bound it to link endpoints or use compact borrowed identities, preserving clock/reset closure and alias semantics."
+      },
+      "later_upstream_merge": {
+        "fix_commit": "c679b0639f76aed70a05789b6f1d2b4a3b07aa4b",
+        "merge_commit": "7ec572cfb7a98f3dd050b32f389785642793c00f",
+        "upstream": "58edc9881",
+        "default_changes": {
+          "virtual_filler_fraction": [
+            0.25,
+            1
+          ],
+          "virtual_filler_cell_scale": [
+            1,
+            2
+          ]
+        },
+        "scope": "Recorded v55 benchmark samples precede this merge. A matched upstream comparison is required before making claims for merged defaults."
       }
     }
   },

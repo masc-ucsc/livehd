@@ -22,6 +22,12 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>The later upstream merge (<code>58edc9881</code>, including
+<code>2eb47e6ef</code>) changes the default virtual filler fraction from 0.25 to
+1 and cell size scale from 1 to 2, and also updates synthesis. The v55 numbers
+below describe the frozen pre-merge build. They do not establish performance or
+QoR for the merged defaults; a matched upstream comparison is still required.</p>
+
 <p>Review v55 removes the full placement-view copy and array rebuild from legal
 timing checkpoints. Connectivity is borrowed; legal cell poses and LEF pin
 offsets retain the prior rounding, row symmetry, fixed-cell, macro and IO
