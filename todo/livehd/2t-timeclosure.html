@@ -13,7 +13,7 @@
 <p>Implement a single-threaded, non-ML timing loop in native DREAMPlace GP:
 optimize achievable period with a LiveHD timing proxy, model buffering and reserve
 its space early, then materialize buffers and resize cells in phase 7.</p>
-<p><span class="status">In progress — native late proxy and observation controller foundations implemented; GP integration pending</span>
+<p><span class="status">Paused by request — 2026-10-25; partial native GP integration implemented, production acceptance unfinished</span>
 The design rationale and algorithm references are in
 <a href="timing_closure_plan.md">timing_closure_plan.md</a>.
 This page translates that proposal into ordered deliverables, integration points,
@@ -28,6 +28,58 @@ this shared-netlist flow works. Earlier Eyeriss traces remain useful for replay.
 and the observation/replay part of <a href="#H">H</a>. Establish trustworthy proxy
 timing and gate decisions before enabling forces or graph edits. The core loop
 must work with resynthesis disabled; <a href="#K">K</a> adds it independently.</p>
+
+<h2 id="paused-status">Paused status and remaining work — 2026-10-25</h2>
+<p>This is the restart checklist. The dated implementation and experiment notes
+below retain their original evidence; implemented components and finite-cohort
+diagnostics do not close their whole-flow acceptance gates.</p>
+<ul>
+<li><strong>Validation/publication follow-up:</strong> latest upstream changes
+and the first debug-suite fixes are merged and published in LiveHD
+<code>ba02874f25921c74c6baf6439e8c872a4907bfd2</code>. Another writer subsequently
+advanced the shared checkout to <code>8e017a011da96f09fda4111d9aad4af2db6fd871</code>
+while validation was running. The full debug run was interrupted at the user's
+pause request, after reporting 3,009 passes
+and one failure, <code>//tools/uroute:inference_test</code>; this is not a
+completed suite. An uncommitted numerical fix is preserved in the owning
+<code>../DREAMPlace/dreamplace/native/rudy_uroute.cpp</code>. All five standalone
+golden cases pass in debug and optimized builds, without changing tolerances
+or reference data. Review and publish that fix, update LiveHD's DREAMPlace pin
+(currently <code>5ddd24ed57e3b0a6e8e090d85e496bbab85431b9</code>), run the actual
+Bazel inference test and a complete final debug suite, fix any remaining
+failures, then finish review and commit/push. Logs, source fingerprints and
+numeric evidence are under <code>repros/dbg_review_20261025/</code>.</li>
+<li><strong>A–D: timing correctness and incremental acceptance.</strong> Finish
+the supported-coverage, calibration/invalidation and shared objective/LR
+acceptance checks on the integrated flow. Independently compare identical-RC
+endpoint timing and near-critical rankings, including path-style fidelity;
+unsupported paths and incomplete work must remain explicit.</li>
+<li><strong>E–G: production buffering and placement feedback.</strong> Complete
+scalable native buffering candidate generation (CPB/VG/BEN and calibrated early
+estimates), global demand and routing/crossing capacity characterization, and
+production refresh of negotiated gap forces and density reservations. Connect
+critical-buffer inflation policy and validate full buffered-graph timing and
+rankings. Existing bounded searches and real-net cohorts are partial evidence.</li>
+<li><strong>H–J: phase actions and real netlist changes.</strong> Connect the
+production phase policy, bounded inactive buffer pool, atomic logical-graph/pool
+activation and removal, complete rollback and discrete LR sizing/area recovery.
+Verify timing and electrical constraints across virtual-to-real transitions.</li>
+<li><strong>L–M: end-to-end acceptance and comparisons.</strong> Preserve gains
+through legalization and complete matched CNN/litepci convergence, preCTS and
+post-route comparisons against OpenROAD, including WNS/TNS, electrical/routing
+checks, placement and total wall/CPU breakdowns, and OpenROAD thread usage.
+The earlier CNN extracted routed gain remains evidence for that weighted
+experiment; it does not validate the new joint checkpoint flow. Reconcile the
+separate routed jobs' final results when work resumes.</li>
+<li><strong>Suggestion experiments:</strong> the approved area/utilization-relative
+quarter-filler default is implemented, with no absolute filler-count target.
+The startup timing hint is implemented and remains off by default after its
+measured time/quality tradeoff. Full convergence and routed validation of these
+suggestions remains open; short pre-route comparisons are proxies.</li>
+<li><strong>Explicitly deferred:</strong> synthesis/resynthesis (<a href="#K">K</a>)
+is future work. Hold repair stays a later post-route task and is not a placement
+acceptance requirement.</li>
+</ul>
 
 <h2>Depends on</h2>
 <ul>

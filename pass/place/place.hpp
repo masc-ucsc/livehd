@@ -253,8 +253,8 @@ struct Options {
   double                     macro_filler_fraction     = 0;      // macro GP only; physical macro dimensions
   bool                       virtual_fillers           = true;
   int                        virtual_filler_max_count  = 0;
-  double                     virtual_filler_fraction   = .25;
-  double                     virtual_filler_cell_scale = 1, virtual_filler_bin_fraction = .25;
+  double                     virtual_filler_fraction   = 1;
+  double                     virtual_filler_cell_scale = 2, virtual_filler_bin_fraction = .25;
   int                        bin_max = 512, local_density_bins = 512;
   int                        route_bins    = 0;  // grid.route: 0 inherits the configured density count (also in dynamic mode)
   int                        legalize_bins = 0;  // legalize.bin.grid: 0 uses the routing grid

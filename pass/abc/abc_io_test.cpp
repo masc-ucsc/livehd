@@ -1,9 +1,11 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <filesystem>
+#include <fstream>
 
 #include "abc_boundary.hpp"
 #include "attrs.hpp"
 #include "gtest/gtest.h"
+#include "inou/cgen/cgen_verilog.hpp"
 #include "io_resynth.hpp"
 #include "node_util.hpp"
 
@@ -104,6 +106,44 @@ TEST(AbcIo, GrowthAdmissionRejectsBeforePublishingAProvedReplacement) {
   EXPECT_EQ(result.decision, "physical growth budget exceeded");
   EXPECT_EQ(queries, 1U);
   EXPECT_EQ(synth::mapped_identity(*f.graph), original);
+}
+TEST(AbcIo, RemappedBusSelectionEmitsStructuralVerilog) {
+  Fixture f;
+  auto    input = f.graph->get_input_pin("a");
+  f.graph->get_io()->set_bits("a", 2);
+  graph_util::set_bits(input, 2);
+  auto first = f.graph->get_output_pin("y").get_driver_pin();
+  while (first.get_master_node().get_name() != "inv0") {
+    first = first.get_master_node().get_sink_pin("A").get_driver_pin();
+  }
+  auto sink = first.get_master_node().get_sink_pin("A");
+  sink.del_sink(input);
+  auto select = graph_util::create_get_mask(*f.graph, input, 1).create_driver_pin(0);
+  graph_util::set_bits(select, 1);
+  graph_util::set_unsign(select);
+  select.connect_sink(sink);
+  f.graph->commit();
+  auto                  mapper = synth::make_io_mapper("abc",
+                                                       {
+                                                           {"library", "inou/prp/tests/abc/timing.lib"}
+  });
+  synth::Io_environment env;
+  env.inputs["a[1]"]   = 950;
+  env.required["y[0]"] = 1000;
+  auto result          = mapper(*f.graph, env, {}, 1000, 5, true);
+  ASSERT_TRUE(result.accepted) << result.decision;
+  EXPECT_TRUE(mapper(*f.graph, env, env, 1000, 5, false).checked);
+  const auto directory = testing::TempDir() + "/abc_io_structural";
+  std::filesystem::create_directories(directory);
+  Cgen_verilog emitter(directory);
+  emitter.do_from_graph(f.graph);
+  std::ifstream stream(directory + "/top__c1.v");
+  ASSERT_TRUE(stream);
+  const std::string verilog{std::istreambuf_iterator<char>(stream), {}};
+  EXPECT_NE(verilog.find("a[1]"), std::string::npos);
+  EXPECT_EQ(verilog.find("always"), std::string::npos);
+  EXPECT_EQ(verilog.find("reg "), std::string::npos);
+  std::filesystem::remove_all(directory);
 }
 TEST(AbcIo, WireLoadIsScopedAndChangesTiming) {
   Fixture               f;

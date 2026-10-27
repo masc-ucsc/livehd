@@ -156,6 +156,7 @@ cc_test(
     data = ["//inou/prp:abc_tests"],
     deps = [
         ":pass_abc",
+        "//inou/cgen:inou_cgen",
         "@abc",
         "@googletest//:gtest_main",
     ],

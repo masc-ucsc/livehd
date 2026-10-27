@@ -44,10 +44,11 @@ cp "$WD/B.prp" "$WD/inc/fp.prp"
 "$LHD" compile "$WD/inc/fp.prp" --workdir "$WD/inc/wd" --set lhd.incremental=true \
   --emit verilog:"$WD/warmB.v" -q >/dev/null
 "$LHD" compile "$WD/inc/fp.prp" --emit verilog:"$WD/coldB.v" -q >/dev/null
-grep -q 'o = p;' "$WD/warmA.v" || fail "A (o = p) did not compile to o = p"
+A_OUT="o = (p|\\{1'b0,p\\});"  # structural cgen may zero-extend p explicitly
+grep -Eq "$A_OUT" "$WD/warmA.v" || fail "A (o = p) did not compile to o = p"
 diff <(grep 'o = ' "$WD/warmB.v") <(grep 'o = ' "$WD/coldB.v") >/dev/null \
   || fail "warm B reused A's netlist: $(grep 'o = ' "$WD/warmB.v")"
-grep -q 'o = p;' "$WD/warmB.v" && fail "warm B compiled to A's o = p"
+grep -Eq "$A_OUT" "$WD/warmB.v" && fail "warm B compiled to A's o = p"
 
 # --- 1b. fingerprint vs comment-like bytes inside strings ----------------------
 # Each pair differs ONLY in string bytes that look like a comment: a `//` or

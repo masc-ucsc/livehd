@@ -6443,8 +6443,8 @@ TEST(Placement, RelativeFillerChargeScalesInPreliminaryAndFinalGp) {
     ASSERT_FALSE(fp.HasParseError());
     ASSERT_FALSE(gp.HasParseError());
     ASSERT_FALSE(budget.HasParseError());
-    EXPECT_DOUBLE_EQ(budget["fraction"].GetDouble(), .25);
-    EXPECT_DOUBLE_EQ(budget["requested_charge_area_um2"].GetDouble(), .25 * budget["available_charge_area_um2"].GetDouble());
+    EXPECT_DOUBLE_EQ(budget["fraction"].GetDouble(), 1);
+    EXPECT_DOUBLE_EQ(budget["requested_charge_area_um2"].GetDouble(), budget["available_charge_area_um2"].GetDouble());
     EXPECT_GT(fp["fp_virtual_filler_count"].GetInt(), 0);
     EXPECT_GT(gp["virtual_filler_count"].GetInt(), 0);
     const std::array<double, 2> areas{fp["fp_virtual_filler_area_um2"].GetDouble(), gp["virtual_filler_area_um2"].GetDouble()};
