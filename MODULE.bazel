@@ -289,7 +289,7 @@ http_archive(
 # OpenTimer: the masc-ucsc fork provides its own BUILD.bazel.
 git_repository(
     name = "opentimer",
-    commit = "53ce73749b8bc09b33f2b4e737c921dd897efe6e",
+    commit = "360f4b703f3b9e9d74ee12543740e33069e7cf12",
     remote = "https://github.com/masc-ucsc/OpenTimer.git",
 )
 # For local co-development swap the git_repository above for:

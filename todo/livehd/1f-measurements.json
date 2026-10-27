@@ -48072,6 +48072,1008 @@
       },
       "accounting": "RC-tree construction moves from propagation into reconciliation. Compare total timing cost, not isolated bucket changes.",
       "acceptance": "All original A-J requirements remain in force. Gemmini placement scaling, total timing share, wire growth, decision-checkpoint accuracy and the broad design/import census remain open."
+    },
+    "compact_rc_serial_propagation_v54": {
+      "status": "Compact RC storage and cycle-aware serial timing validated; full A-J acceptance remains open.",
+      "implementation": "RC trees use a contiguous edge vector and outgoing edge indices instead of edge/fanin/fanout lists. Single-worker timing runs candidate orders directly. New or retained SCC cones are reordered after existing loop breaking; multiple workers retain Taskflow. No public defaults or timing models changed.",
+      "opentimer_commit": "360f4b703f3b9e9d74ee12543740e33069e7cf12",
+      "protocol": "Same production defaults, 100 ps clocks, reset/reset-distribution false paths and one CPU per invocation. Control is published v52. Single samples with concurrent jobs on separate CPUs; no repeatable speedup claim.",
+      "four_design_comparison": {
+        "lfsr": {
+          "control": {
+            "placement_seconds": 1.917855,
+            "score": {
+              "hpwl_um": 183.788,
+              "hpwl_all_nets_um": 197.9,
+              "measured_nets": 136,
+              "excluded_nets": 1,
+              "setup_wns_ps": -60.270761,
+              "setup_tns_ps": -2166.75545,
+              "hold_wns_ps": 53.285192,
+              "hold_tns_ps": 0.0,
+              "instances": 134,
+              "logical_cells": 134,
+              "physical_cells": 0,
+              "buffers": 1,
+              "buffer_area_um2": 0.2624,
+              "macros": 0,
+              "instance_area_um2": 18.6187,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "scoring_seconds": 1.061,
+              "power_mw": 0.000682,
+              "reset_ports": []
+            },
+            "run": {
+              "status": "ok",
+              "wall_s": 4.48,
+              "cpu_s": 4.46,
+              "rss_mib": 328.6484375,
+              "tree_rss_mib": 343.828125,
+              "ipc": 2.640367014741187,
+              "instructions": 52992588603.0,
+              "cycles": 20070160060.0,
+              "stop": null
+            },
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 11,
+              "builds": 1,
+              "ranking_evaluations": 8,
+              "ranking_seconds": 0.6476719799999998,
+              "detailed_evaluations": 3,
+              "repowered_gates": 8,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 779,
+              "update_calls": 14,
+              "seconds": 0.6695090119999998,
+              "validation_seconds": 0.001123902,
+              "reconcile_seconds": 0.642996509,
+              "exclusions_seconds": 9.5019e-05,
+              "propagation_seconds": 0.02285294,
+              "feedback_seconds": 0.002366592999999998
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "path": "/tmp/1f-wns-v1/rc_batches_candidate/lfsr",
+            "def_sha256": "b3d67bb84f18ed886207fa77ed0f0691034721f9b7db6e338b54f8a495e9366f"
+          },
+          "candidate": {
+            "placement_seconds": 1.9395060000000002,
+            "score": {
+              "hpwl_um": 183.788,
+              "hpwl_all_nets_um": 197.9,
+              "measured_nets": 136,
+              "excluded_nets": 1,
+              "setup_wns_ps": -60.270761,
+              "setup_tns_ps": -2166.75545,
+              "hold_wns_ps": 53.285192,
+              "hold_tns_ps": 0.0,
+              "instances": 134,
+              "logical_cells": 134,
+              "physical_cells": 0,
+              "buffers": 1,
+              "buffer_area_um2": 0.2624,
+              "macros": 0,
+              "instance_area_um2": 18.6187,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "scoring_seconds": 1.075,
+              "power_mw": 0.000682,
+              "reset_ports": []
+            },
+            "run": {
+              "status": "ok",
+              "wall_s": 4.5,
+              "cpu_s": 4.49,
+              "rss_mib": 328.40234375,
+              "tree_rss_mib": 342.81640625,
+              "ipc": 2.6252734432108356,
+              "instructions": 53035367311.0,
+              "cycles": 20201845049.0,
+              "stop": null
+            },
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 11,
+              "builds": 1,
+              "ranking_evaluations": 8,
+              "ranking_seconds": 0.6663947840000001,
+              "detailed_evaluations": 3,
+              "repowered_gates": 8,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 779,
+              "update_calls": 14,
+              "seconds": 0.687892523,
+              "validation_seconds": 0.001119182,
+              "reconcile_seconds": 0.6624791159999999,
+              "exclusions_seconds": 8.651499999999998e-05,
+              "propagation_seconds": 0.021773470000000003,
+              "feedback_seconds": 0.002357582999999998
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "path": "/tmp/1f-wns-v1/serial_scc_candidate/lfsr",
+            "def_sha256": "b3d67bb84f18ed886207fa77ed0f0691034721f9b7db6e338b54f8a495e9366f"
+          },
+          "def_identical": true,
+          "time_ratio": 1.011289174624776,
+          "score_identical": true
+        },
+        "minimax": {
+          "control": {
+            "placement_seconds": 40.849968999999994,
+            "score": {
+              "hpwl_um": 46230.31,
+              "hpwl_all_nets_um": 46388.402,
+              "measured_nets": 16259,
+              "excluded_nets": 1,
+              "setup_wns_ps": -950.268312,
+              "setup_tns_ps": -1854618.411151,
+              "hold_wns_ps": 27.911343,
+              "hold_tns_ps": 0.0,
+              "instances": 16209,
+              "logical_cells": 16209,
+              "physical_cells": 0,
+              "buffers": 381,
+              "buffer_area_um2": 91.1687,
+              "macros": 0,
+              "instance_area_um2": 2086.121,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "scoring_seconds": 6.741,
+              "power_mw": 0.0531,
+              "reset_ports": []
+            },
+            "run": {
+              "status": "ok",
+              "wall_s": 62.81,
+              "cpu_s": 62.690000000000005,
+              "rss_mib": 1006.77734375,
+              "tree_rss_mib": 995.29296875,
+              "ipc": 2.196643138461261,
+              "instructions": 620731016851.0,
+              "cycles": 282581638311.0,
+              "stop": null
+            },
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 14,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 4.021347673,
+              "detailed_evaluations": 7,
+              "repowered_gates": 1325,
+              "inserted_gates": 379,
+              "removed_gates": 1,
+              "updated_nets": 84483,
+              "update_calls": 21,
+              "seconds": 15.538360738,
+              "validation_seconds": 0.317951095,
+              "reconcile_seconds": 3.6260963039999994,
+              "exclusions_seconds": 0.090760483,
+              "propagation_seconds": 9.735739872999998,
+              "feedback_seconds": 1.7509960550000017
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16209,
+              "area_um2": 2086.120979999586,
+              "within_budget": true,
+              "rejected_proposals": 479
+            },
+            "path": "/tmp/1f-wns-v1/rc_batches_candidate/minimax",
+            "def_sha256": "36e36ec0d5bf6cfeb1345c2fe97730b8c8759ab17c6900dd79a34dbf7f38c26e"
+          },
+          "candidate": {
+            "placement_seconds": 39.371091,
+            "score": {
+              "hpwl_um": 46230.31,
+              "hpwl_all_nets_um": 46388.402,
+              "measured_nets": 16259,
+              "excluded_nets": 1,
+              "setup_wns_ps": -950.268312,
+              "setup_tns_ps": -1854618.411151,
+              "hold_wns_ps": 27.911343,
+              "hold_tns_ps": 0.0,
+              "instances": 16209,
+              "logical_cells": 16209,
+              "physical_cells": 0,
+              "buffers": 381,
+              "buffer_area_um2": 91.1687,
+              "macros": 0,
+              "instance_area_um2": 2086.121,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "scoring_seconds": 6.546,
+              "power_mw": 0.0531,
+              "reset_ports": []
+            },
+            "run": {
+              "status": "ok",
+              "wall_s": 60.81,
+              "cpu_s": 60.75,
+              "rss_mib": 989.10546875,
+              "tree_rss_mib": 1004.44921875,
+              "ipc": 2.256074490567543,
+              "instructions": 617824287389.0,
+              "cycles": 273849241225.0,
+              "stop": null
+            },
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 14,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 3.60948467,
+              "detailed_evaluations": 7,
+              "repowered_gates": 1325,
+              "inserted_gates": 379,
+              "removed_gates": 1,
+              "updated_nets": 84483,
+              "update_calls": 21,
+              "seconds": 14.619299343,
+              "validation_seconds": 0.30796100200000004,
+              "reconcile_seconds": 3.4502378900000004,
+              "exclusions_seconds": 0.089658058,
+              "propagation_seconds": 9.098918686999998,
+              "feedback_seconds": 1.6557862400000023
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16209,
+              "area_um2": 2086.120979999586,
+              "within_budget": true,
+              "rejected_proposals": 479
+            },
+            "path": "/tmp/1f-wns-v1/serial_scc_candidate/minimax",
+            "def_sha256": "36e36ec0d5bf6cfeb1345c2fe97730b8c8759ab17c6900dd79a34dbf7f38c26e"
+          },
+          "def_identical": true,
+          "time_ratio": 0.9637973287078873,
+          "score_identical": true
+        },
+        "NVDLA/partition_m": {
+          "control": {
+            "placement_seconds": 34.616003,
+            "score": {
+              "hpwl_um": 93405.154,
+              "hpwl_all_nets_um": 107638.17,
+              "measured_nets": 20647,
+              "excluded_nets": 145,
+              "setup_wns_ps": -916.800306,
+              "setup_tns_ps": -398000.681115,
+              "hold_wns_ps": 25.471559,
+              "hold_tns_ps": 0.0,
+              "instances": 20610,
+              "logical_cells": 20610,
+              "physical_cells": 0,
+              "buffers": 150,
+              "buffer_area_um2": 12.0431,
+              "macros": 0,
+              "instance_area_um2": 2736.6514,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "scoring_seconds": 9.842,
+              "power_mw": 0.122,
+              "reset_ports": [
+                "direct_reset_",
+                "dla_reset_rstn",
+                "global_clk_ovr_on",
+                "nvdla_clk_ovr_on",
+                "test_mode",
+                "tmc2slcg_disable_clock_gating"
+              ]
+            },
+            "run": {
+              "status": "ok",
+              "wall_s": 99.74,
+              "cpu_s": 99.67999999999999,
+              "rss_mib": 1333.37890625,
+              "tree_rss_mib": 1330.75,
+              "ipc": 1.5752311654805693,
+              "instructions": 708030365041.0,
+              "cycles": 449477118379.0,
+              "stop": null
+            },
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 10,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 5.7433717060000005,
+              "detailed_evaluations": 3,
+              "repowered_gates": 3971,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 113482,
+              "update_calls": 13,
+              "seconds": 12.487790058,
+              "validation_seconds": 0.354876918,
+              "reconcile_seconds": 3.491854477,
+              "exclusions_seconds": 0.050645812,
+              "propagation_seconds": 7.505825205999998,
+              "feedback_seconds": 1.064706974000002
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20948,
+              "baseline_area_um2": 2656.096920000048,
+              "cells": 20598,
+              "area_um2": 2735.7766200000697,
+              "within_budget": true,
+              "rejected_proposals": 4016
+            },
+            "path": "/tmp/1f-wns-v1/rc_batches_candidate/NVDLA__partition_m",
+            "def_sha256": "dcd4ab3ce6ff51087c148dde5cf90a6967320c7882941e27c3a64820fabccb45"
+          },
+          "candidate": {
+            "placement_seconds": 32.886506000000004,
+            "score": {
+              "hpwl_um": 93405.154,
+              "hpwl_all_nets_um": 107638.17,
+              "measured_nets": 20647,
+              "excluded_nets": 145,
+              "setup_wns_ps": -916.800306,
+              "setup_tns_ps": -398000.681115,
+              "hold_wns_ps": 25.471559,
+              "hold_tns_ps": 0.0,
+              "instances": 20610,
+              "logical_cells": 20610,
+              "physical_cells": 0,
+              "buffers": 150,
+              "buffer_area_um2": 12.0431,
+              "macros": 0,
+              "instance_area_um2": 2736.6514,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "scoring_seconds": 9.167,
+              "power_mw": 0.122,
+              "reset_ports": [
+                "direct_reset_",
+                "dla_reset_rstn",
+                "global_clk_ovr_on",
+                "nvdla_clk_ovr_on",
+                "test_mode",
+                "tmc2slcg_disable_clock_gating"
+              ]
+            },
+            "run": {
+              "status": "ok",
+              "wall_s": 97.47,
+              "cpu_s": 97.38999999999999,
+              "rss_mib": 1325.55859375,
+              "tree_rss_mib": 1306.6484375,
+              "ipc": 1.6086093567892412,
+              "instructions": 706421463528.0,
+              "cycles": 439150413086.0,
+              "stop": null
+            },
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 10,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 5.043555571000001,
+              "detailed_evaluations": 3,
+              "repowered_gates": 3971,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 113482,
+              "update_calls": 13,
+              "seconds": 11.430277580000002,
+              "validation_seconds": 0.32674363799999995,
+              "reconcile_seconds": 3.201903862,
+              "exclusions_seconds": 0.048514938,
+              "propagation_seconds": 6.820524949,
+              "feedback_seconds": 1.0124771909999997
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20948,
+              "baseline_area_um2": 2656.096920000048,
+              "cells": 20598,
+              "area_um2": 2735.7766200000697,
+              "within_budget": true,
+              "rejected_proposals": 4016
+            },
+            "path": "/tmp/1f-wns-v1/serial_scc_candidate/NVDLA__partition_m",
+            "def_sha256": "dcd4ab3ce6ff51087c148dde5cf90a6967320c7882941e27c3a64820fabccb45"
+          },
+          "def_identical": true,
+          "time_ratio": 0.950037645883033,
+          "score_identical": true
+        },
+        "coralnpu": {
+          "control": {
+            "placement_seconds": 642.629958,
+            "score": {
+              "hpwl_um": 3907685.145,
+              "hpwl_all_nets_um": 4173067.872,
+              "measured_nets": 161126,
+              "excluded_nets": 690,
+              "setup_wns_ps": -16736.599729,
+              "setup_tns_ps": -64843349.068619,
+              "hold_wns_ps": 27.430929,
+              "hold_tns_ps": 0.0,
+              "instances": 161074,
+              "logical_cells": 161074,
+              "physical_cells": 0,
+              "buffers": 1090,
+              "buffer_area_um2": 88.1944,
+              "macros": 2,
+              "instance_area_um2": 45769.8019,
+              "macro_area_um2": 26086.1895,
+              "die_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "scoring_seconds": 81.478,
+              "power_mw": 0.692,
+              "reset_ports": [
+                "io_aresetn"
+              ]
+            },
+            "run": {
+              "status": "ok",
+              "wall_s": 792.76,
+              "cpu_s": 792.06,
+              "rss_mib": 8755.96875,
+              "tree_rss_mib": 8713.71875,
+              "ipc": 1.751042611780253,
+              "instructions": 6257191640668.0,
+              "cycles": 3573409121270.0,
+              "stop": null
+            },
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 17,
+              "builds": 1,
+              "ranking_evaluations": 11,
+              "ranking_seconds": 86.07747966599999,
+              "detailed_evaluations": 6,
+              "repowered_gates": 22791,
+              "inserted_gates": 492,
+              "removed_gates": 1484,
+              "updated_nets": 2189264,
+              "update_calls": 23,
+              "seconds": 228.771721722,
+              "validation_seconds": 4.646877782,
+              "reconcile_seconds": 61.807990579999995,
+              "exclusions_seconds": 0.7511527509999999,
+              "propagation_seconds": 140.42043343700004,
+              "feedback_seconds": 20.746743007999953
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 160837,
+              "area_um2": 19666.480859994055,
+              "within_budget": true,
+              "rejected_proposals": 8497
+            },
+            "path": "/tmp/1f-wns-v1/rc_batches_candidate/coralnpu",
+            "def_sha256": "52c891a097e857f19ae66b0ee03def4a476a97aea5b46127de50a950fab10756"
+          },
+          "candidate": {
+            "placement_seconds": 629.100618,
+            "score": {
+              "hpwl_um": 3907685.145,
+              "hpwl_all_nets_um": 4173067.872,
+              "measured_nets": 161126,
+              "excluded_nets": 690,
+              "setup_wns_ps": -16736.599729,
+              "setup_tns_ps": -64843349.068619,
+              "hold_wns_ps": 27.430929,
+              "hold_tns_ps": 0.0,
+              "instances": 161074,
+              "logical_cells": 161074,
+              "physical_cells": 0,
+              "buffers": 1090,
+              "buffer_area_um2": 88.1944,
+              "macros": 2,
+              "instance_area_um2": 45769.8019,
+              "macro_area_um2": 26086.1895,
+              "die_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "scoring_seconds": 85.694,
+              "power_mw": 0.692,
+              "reset_ports": [
+                "io_aresetn"
+              ]
+            },
+            "run": {
+              "status": "ok",
+              "wall_s": 777.52,
+              "cpu_s": 776.91,
+              "rss_mib": 8508.5078125,
+              "tree_rss_mib": 8449.8515625,
+              "ipc": 1.7712322226195405,
+              "instructions": 6208351150821.0,
+              "cycles": 3505102872191.0,
+              "stop": null
+            },
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 17,
+              "builds": 1,
+              "ranking_evaluations": 11,
+              "ranking_seconds": 75.358788217,
+              "detailed_evaluations": 6,
+              "repowered_gates": 22791,
+              "inserted_gates": 492,
+              "removed_gates": 1484,
+              "updated_nets": 2189264,
+              "update_calls": 23,
+              "seconds": 212.07401717999997,
+              "validation_seconds": 4.863079754000001,
+              "reconcile_seconds": 55.95116860699999,
+              "exclusions_seconds": 0.7644173560000002,
+              "propagation_seconds": 129.35265082600003,
+              "feedback_seconds": 20.708750142999975
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 160837,
+              "area_um2": 19666.480859994055,
+              "within_budget": true,
+              "rejected_proposals": 8497
+            },
+            "path": "/tmp/1f-wns-v1/serial_scc_candidate/coralnpu",
+            "def_sha256": "52c891a097e857f19ae66b0ee03def4a476a97aea5b46127de50a950fab10756"
+          },
+          "def_identical": true,
+          "time_ratio": 0.9789469198695527,
+          "score_identical": true
+        }
+      },
+      "binary_manifest": {
+        "build": "-c opt --jobs=2; compact RC adjacency and direct single-worker propagation with SCC ordering; command-line OpenTimer checkout override",
+        "repos": {
+          "livehd": {
+            "head": "7826475d936d29c8115994edf98477cfcf398cd5",
+            "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "DREAMPlace": {
+            "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+            "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "OpenTimer": {
+            "head": "53ce73749b8bc09b33f2b4e737c921dd897efe6e",
+            "patch_sha256": "53d33dbe8112eb567345b47dfe1b0034a8c1312486cb107ab4dd463bab1af173"
+          }
+        },
+        "lhd": "a395cc45bd310ed89278b199bcda7bebeb690a12d30bf360024a0efe6851f062",
+        "physical_repair": "733d9a22e585f62fbe8c32244043e83e64fd2e0d7ea390426b6769ea026a2507",
+        "compiled_dependencies": {
+          "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+          "opentimer": {
+            "local_checkout": "/home/renau/projs/OpenTimer",
+            "head": "53ce73749b8bc09b33f2b4e737c921dd897efe6e",
+            "patch_sha256": "53d33dbe8112eb567345b47dfe1b0034a8c1312486cb107ab4dd463bab1af173"
+          }
+        },
+        "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+        "harness_sha256": {
+          "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+          "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+        }
+      },
+      "review": {
+        "findings": [],
+        "scope": [
+          "RC edge/node lifetime across vector growth and map rehash; unchanged traversal and export order",
+          "Forward and backward dependency order; newly discovered and retained SCCs; existing loop breakers preserved",
+          "No per-pin task allocation with one worker; multi-worker scheduling unchanged",
+          "Public defaults and reset cuts unchanged"
+        ],
+        "validation": [
+          "Eight optimized suites passed with --test_timeout=30 --jobs=2, including rc_propagation, rc_ceff, rc_waveform, celllib_smoke, physical_session_test, pass_opentimer_test, place_test and repair_test",
+          "Branched RC tree checks analytical load/delay, both models and replacement/export; existing long-chain and batched-RC tests pass",
+          "Serial/parallel regression covers reconvergence, new cycles, retained backward-cone cycles, two independent cycles and reconnection",
+          "Additional two-cycle regression passed; all eight suites rerun after review added an explicit exception include and a candidate-count invariant",
+          "All four designs retain byte-identical DEFs and all independent score fields except scoring runtime; placement remains within 1.5x and cell/area budgets"
+        ],
+        "candidate_provenance": "Frozen benchmark production sources match the published implementation apart from the review-added explicit stdexcept include and an assertion of complete candidate ordering. The extra independent-cycle fixture changes tests only. Published-pin build verification is recorded separately."
+      },
+      "gemmini": {
+        "command": "run_design.py gemmini --flows SB --slot 0 via frozen scratch wrapper",
+        "flows": {
+          "S": {
+            "status": "ok",
+            "stop_reason": null,
+            "wall_s": 70.25256888917647,
+            "cpu_s": 69.97,
+            "tree_peak_rss_kb": 9077520,
+            "path": "/home/renau/projs/.agent-artifacts/1f-memory-v54/gemmini-full/gemmini/S"
+          },
+          "B": {
+            "status": "guard-stopped",
+            "stop_reason": "process-tree memory limit",
+            "wall_s": 370.5280096977949,
+            "cpu_s": null,
+            "tree_peak_rss_kb": 16804856,
+            "path": "/home/renau/projs/.agent-artifacts/1f-memory-v54/gemmini-full/gemmini/B"
+          }
+        },
+        "completed_gp_checkpoints": [
+          {
+            "stage": "final",
+            "iteration": 200,
+            "forced": false,
+            "overflow": 0.10362075586602933,
+            "movement_bins": 0,
+            "timing_seconds": 28.291784198,
+            "weighted_nets": 134447,
+            "timing_exponent": 1,
+            "max_applied_weight": 4.986299433977702,
+            "delay": null,
+            "time_unit_ps": 1,
+            "ranking_only": true
+          },
+          {
+            "stage": "final",
+            "iteration": 250,
+            "forced": false,
+            "overflow": 0.09421179710654813,
+            "movement_bins": 7.113676102645733,
+            "timing_seconds": 31.435642915,
+            "weighted_nets": 134447,
+            "timing_exponent": 1,
+            "max_applied_weight": 4.9924951839758425,
+            "delay": null,
+            "time_unit_ps": 1,
+            "ranking_only": true
+          },
+          {
+            "stage": "final",
+            "iteration": 1500,
+            "forced": true,
+            "overflow": 0.09421179710654813,
+            "movement_bins": 10.920307849414648,
+            "timing_seconds": 32.645144395,
+            "weighted_nets": 134447,
+            "timing_exponent": 1,
+            "max_applied_weight": 4.841814990293573,
+            "delay": null,
+            "time_unit_ps": 1,
+            "ranking_only": true
+          }
+        ],
+        "acceptance": "S passes. B still exceeds the 16 GiB diagnostic guard after GP; this also fails the requested <16 GB acceptance."
+      },
+      "profiles": {
+        "path": "/home/renau/projs/.agent-artifacts/1f-memory-v54/gemmini-profile/phase.perf",
+        "summary": "/tmp/1f-memory-v54/cpu-summary.json",
+        "last_two_seconds": {
+          "samples": 99,
+          "leaf": [
+            [
+              "__memcmp_avx2_movbe",
+              25
+            ],
+            [
+              "livehd::placement::(anonymous namespace)::Cell::operator=(livehd::placement::(anonymous namespace)::Cell&&) [clone .isra.0]",
+              12
+            ],
+            [
+              "[unknown]",
+              8
+            ],
+            [
+              "std::_Rb_tree<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::_Select1st<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > >::find(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)",
+              7
+            ],
+            [
+              "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::operator=(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&&)",
+              5
+            ],
+            [
+              "__memmove_avx_unaligned_erms",
+              5
+            ],
+            [
+              "livehd::placement::(anonymous namespace)::Cell* std::__move_merge<__gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, livehd::placement::(anonymous namespace)::Cell*, __gnu_cxx::__ops::_Iter_comp_iter<livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)::{lambda(auto:1 const&, auto:2 const&)#1}> >(__gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, livehd::placement::(anonymous namespace)::Cell*, __gnu_cxx::__ops::_Iter_comp_iter<livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)::{lambda(auto:1 const&, auto:2 const&)#1}>)",
+              4
+            ],
+            [
+              "livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)",
+              4
+            ],
+            [
+              "__libc_malloc2",
+              4
+            ],
+            [
+              "std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, unsigned long, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, unsigned long> > >::at(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)",
+              3
+            ],
+            [
+              "memcmp@plt",
+              3
+            ],
+            [
+              "void std::__insertion_sort<__gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__ops::_Iter_comp_iter<livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)::{lambda(auto:1 const&, auto:2 const&)#1}> >(__gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__ops::_Iter_comp_iter<livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)::{lambda(auto:1 const&, auto:2 const&)#1}>)",
+              2
+            ],
+            [
+              "decltype ((__char_traits_cmp_cat<std::char_traits<char> >)(0)) std::operator<=><char, std::char_traits<char>, std::allocator<char> >(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) [clone .isra.0]",
+              2
+            ],
+            [
+              "tcache_put_n",
+              2
+            ],
+            [
+              "_int_malloc",
+              2
+            ]
+          ],
+          "inclusive": [
+            [
+              "livehd::placement::place_single(hhds::Graph&, hhds::GraphLibrary&, livehd::placement::Options const&, std::function<void ()> const&)::{lambda(DreamPlace::native::Design const&, int)#2}::operator()(DreamPlace::native::Design const&, int) const",
+              86
+            ],
+            [
+              "livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)",
+              84
+            ],
+            [
+              "void std::__stable_sort<__gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__ops::_Iter_comp_iter<livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)::{lambda(auto:1 const&, auto:2 const&)#1}> >(__gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__ops::_Iter_comp_iter<livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)::{lambda(auto:1 const&, auto:2 const&)#1}>) [clone .isra.0]",
+              27
+            ],
+            [
+              "void std::__stable_sort_adaptive<__gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, livehd::placement::(anonymous namespace)::Cell*, __gnu_cxx::__ops::_Iter_comp_iter<livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)::{lambda(auto:1 const&, auto:2 const&)#1}> >(__gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, livehd::placement::(anonymous namespace)::Cell*, __gnu_cxx::__ops::_Iter_comp_iter<livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)::{lambda(auto:1 const&, auto:2 const&)#1}>) [clone .isra.0]",
+              25
+            ],
+            [
+              "__memcmp_avx2_movbe",
+              25
+            ],
+            [
+              "void std::__merge_sort_with_buffer<__gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, livehd::placement::(anonymous namespace)::Cell*, __gnu_cxx::__ops::_Iter_comp_iter<livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)::{lambda(auto:1 const&, auto:2 const&)#1}> >(__gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, livehd::placement::(anonymous namespace)::Cell*, __gnu_cxx::__ops::_Iter_comp_iter<livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)::{lambda(auto:1 const&, auto:2 const&)#1}>) [clone .isra.0]",
+              23
+            ],
+            [
+              "std::_Rb_tree<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::_Select1st<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > > >::find(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)",
+              16
+            ],
+            [
+              "__gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > > std::__move_merge<livehd::placement::(anonymous namespace)::Cell*, __gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__ops::_Iter_comp_iter<livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)::{lambda(auto:1 const&, auto:2 const&)#1}> >(livehd::placement::(anonymous namespace)::Cell*, livehd::placement::(anonymous namespace)::Cell*, livehd::placement::(anonymous namespace)::Cell*, livehd::placement::(anonymous namespace)::Cell*, __gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__ops::_Iter_comp_iter<livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)::{lambda(auto:1 const&, auto:2 const&)#1}>)",
+              13
+            ],
+            [
+              "livehd::placement::(anonymous namespace)::Cell::operator=(livehd::placement::(anonymous namespace)::Cell&&) [clone .isra.0]",
+              12
+            ],
+            [
+              "decltype ((__char_traits_cmp_cat<std::char_traits<char> >)(0)) std::operator<=><char, std::char_traits<char>, std::allocator<char> >(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) [clone .isra.0]",
+              12
+            ],
+            [
+              "livehd::placement::(anonymous namespace)::Cell* std::__move_merge<__gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, livehd::placement::(anonymous namespace)::Cell*, __gnu_cxx::__ops::_Iter_comp_iter<livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)::{lambda(auto:1 const&, auto:2 const&)#1}> >(__gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, livehd::placement::(anonymous namespace)::Cell*, __gnu_cxx::__ops::_Iter_comp_iter<livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)::{lambda(auto:1 const&, auto:2 const&)#1}>)",
+              9
+            ],
+            [
+              "[unknown]",
+              9
+            ],
+            [
+              "__libc_malloc2",
+              7
+            ],
+            [
+              "void std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::_M_construct<true>(char const*, unsigned long)",
+              6
+            ],
+            [
+              "_int_malloc",
+              6
+            ],
+            [
+              "std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >::operator=(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >&&)",
+              5
+            ],
+            [
+              "operator new",
+              5
+            ],
+            [
+              "__memmove_avx_unaligned_erms",
+              5
+            ],
+            [
+              "std::map<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, unsigned long, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, unsigned long> > >::at(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&)",
+              4
+            ],
+            [
+              "void std::__insertion_sort<__gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__ops::_Iter_comp_iter<livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)::{lambda(auto:1 const&, auto:2 const&)#1}> >(__gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__ops::_Iter_comp_iter<livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)::{lambda(auto:1 const&, auto:2 const&)#1}>)",
+              3
+            ],
+            [
+              "std::_Rb_tree<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::_Identity<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > > >::find(std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&) const",
+              3
+            ],
+            [
+              "std::_Rb_tree_iterator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, unsigned long> > std::_Rb_tree<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> >, std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, unsigned long>, std::_Select1st<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, unsigned long> >, std::less<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > >, std::allocator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, unsigned long> > >::_M_emplace_hint_unique<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, unsigned long>(std::_Rb_tree_const_iterator<std::pair<std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const, unsigned long> >, std::__cxx11::basic_string<char, std::char_traits<char>, std::allocator<char> > const&, unsigned long&&)",
+              3
+            ],
+            [
+              "memcmp@plt",
+              3
+            ],
+            [
+              "void std::__merge_adaptive<__gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, long, livehd::placement::(anonymous namespace)::Cell*, __gnu_cxx::__ops::_Iter_comp_iter<livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)::{lambda(auto:1 const&, auto:2 const&)#1}> >(__gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, __gnu_cxx::__normal_iterator<livehd::placement::(anonymous namespace)::Cell*, std::vector<livehd::placement::(anonymous namespace)::Cell, std::allocator<livehd::placement::(anonymous namespace)::Cell> > >, long, long, livehd::placement::(anonymous namespace)::Cell*, __gnu_cxx::__ops::_Iter_comp_iter<livehd::placement::(anonymous namespace)::make_arrays(livehd::placement::(anonymous namespace)::View&, livehd::physical::Technology const&)::{lambda(auto:1 const&, auto:2 const&)#1}>) [clone .isra.0]",
+              2
+            ],
+            [
+              "tcache_put_n",
+              2
+            ]
+          ]
+        },
+        "finding": "The final 2 seconds contain 99 samples, 84 in make_arrays; the last 10 seconds also show View copying and native legalization. Source inspection ties this to the legal timing checkpoint copying View and calling capture/make_arrays. GP timing checkpoints now complete; the next memory peak is the legal checkpoint snapshot.",
+        "next": "Borrow legal checkpoint geometry without copying the entire View or rebuilding connectivity, preserving fixed objects, row orientation, macro orientation and rounded pin geometry."
+      },
+      "experiments": {
+        "rc_only": "v53 compact RC alone passed the three small comparisons but Gemmini still failed in task construction. The interrupted coralnpu run is not acceptance evidence.",
+        "acyclic_only": "The earlier acyclic-only serial fast path retained the task scheduler for cycles. All four designs passed exact-output comparisons after rerunning coralnpu, but Gemmini still built propagation tasks. This motivated the cycle-aware path.",
+        "storage_incident": "Two v53 coralnpu attempts and one repeat profile encountered ENOSPC; those runs were rejected. Completed evidence was losslessly compressed/deduplicated with hash checks and original paths preserved. Final v54 runs used fresh directories with adequate space.",
+        "v53_evidence": "/tmp/1f-memory-v53"
+      },
+      "acceptance": "A-J remain in force: large-design completion, total STA share, HPWL growth, every decision-checkpoint accuracy, convergence census and the named frontend/import failures remain incomplete or unverified.",
+      "published_build": {
+        "published_opentimer": "360f4b703f3b9e9d74ee12543740e33069e7cf12",
+        "tests": "Eight optimized suites pass with published pin and no local override (four rerun, four cached).",
+        "build_log": "/tmp/1f-memory-v54/published-build.log",
+        "lfsr_def_identical": true,
+        "lfsr_score_identical": true,
+        "def_sha256": "b3d67bb84f18ed886207fa77ed0f0691034721f9b7db6e338b54f8a495e9366f",
+        "placement_seconds": 1.909847,
+        "binary_manifest": {
+          "build": "-c opt --jobs=2; compact RC and cycle-aware single-worker timing using published OpenTimer pin; published dependencies; published dependency pins",
+          "repos": {
+            "livehd": {
+              "head": "7826475d936d29c8115994edf98477cfcf398cd5",
+              "patch_sha256": "b3e7f63302ff4080cdf783ebac0238433d43cf38aca3b06b8b576979e27489c1"
+            },
+            "DREAMPlace": {
+              "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+              "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "OpenTimer": {
+              "head": "360f4b703f3b9e9d74ee12543740e33069e7cf12",
+              "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          },
+          "lhd": "f83e2daf187f1ad19402089396e692f5bbac1898a738a7281ebb61ba48f6cd84",
+          "physical_repair": "78cdbd4b2152a8a098445212cc7518f6c1a4aac3dfba25bf8798f34c190e23c9",
+          "compiled_dependencies": {
+            "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+            "opentimer": "360f4b703f3b9e9d74ee12543740e33069e7cf12"
+          },
+          "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+          "harness_sha256": {
+            "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+            "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+          }
+        }
+      }
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",

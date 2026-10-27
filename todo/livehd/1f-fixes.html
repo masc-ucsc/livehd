@@ -22,6 +22,32 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Review v54 reduces resident RC storage and single-worker timing scheduling
+through published OpenTimer <code>360f4b7</code>. RC trees use contiguous edges
+and outgoing indices, omitting unused incoming lists. Single-worker propagation
+runs dependency order directly; new and retained cyclic cones are reordered
+after the existing loop breakers. Multiple workers retain Taskflow. Public
+defaults, timing models and traversal arithmetic are unchanged.</p>
+<p>Eight optimized suites pass against the published pin, including branched RC replacement/export and
+serial/parallel comparisons across reconvergence, retained cycles and two
+independent cycles. The rebuilt published executable also reproduces lfsr DEF and QoR.
+All four benchmark DEFs and independent QoR are identical
+to v52. Placement takes 1.940 s (lfsr),
+39.371 s (minimax),
+32.887 s (NVDLA/partition_m), and
+629.101 s (coralnpu), all within 1.5×.
+Coral's full flow takes 777.52 s wall and 776.91 s CPU;
+peak RSS falls from 8,756 to 8,509 MiB.
+These are single samples, not repeatable speedup claims. Evidence is in
+<code>runs.compact_rc_serial_propagation_v54</code>.</p>
+<p>Fresh Gemmini <code>--flows SB</code> synthesis passes in 70.3 s.
+Placement now completes GP timing checkpoints at iterations 200, 250 and 1500,
+then exceeds the 16 GiB guard (16,804,856 KiB after 370.5 s).
+The later profile identifies the legal timing snapshot: it copies the full
+placement view and rebuilds arrays (84 of 99 final samples in
+<code>make_arrays</code>). Removing that copy while preserving legal geometry
+is the next memory target. The full scaling requirement and A–J remain open.</p>
+
 <p>Review v52 bounds transient RC transfer through published OpenTimer
 <code>53ce737</code>. The placement host flushes batches after 65,536 electrical
 records without splitting a net. Each batch replaces old RC trees immediately;
