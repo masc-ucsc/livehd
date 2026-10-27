@@ -1178,6 +1178,15 @@ RC delay, capacitance and fanout rather than treating that spacing as a hard
 wire-length limit. Cell/area budgets and fresh timing of the legalized candidate
 still decide whether an edit is retained.
 
+For larger fanouts, the search also partitions nearby sinks into local leaf
+groups before building the Steiner backbone. Groups fit the candidate buffer's
+capacitance and fanout limits; seeds use either the group center or the point in
+its bounding box nearest the source. Every drive is then selected with the same
+required-time model. A clustered alternative may not exceed the summed net HPWL
+of the best original candidate. That fixed reference prevents a timing-only
+choice from adding overlapping wire. These are internal candidate-generation
+and acceptance rules; public option defaults are unchanged.
+
 **Reset buffer tree (`synth.place.reset_fanout`, default 32; 2d-domplace U23).** One
 mechanism for every mapper (`abc`, `usyn`, the `domino_provisional` profile): right after
 the mapped hierarchy is flattened, before the first cell is read, every reset net with more

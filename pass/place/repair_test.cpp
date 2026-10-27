@@ -740,6 +740,88 @@ TEST(SteinerRepair, SelectsAnAffordableAlternativeInsteadOfRejectingTheFastestTr
   }
   EXPECT_THROW(plan_buffer_choices({0, 0}, loads, caps, required, {small, large}, source, 0, 0, {0, 0}), std::runtime_error);
 }
+TEST(SteinerRepair, SpatialClustersIsolateDistantSinkCapacitance) {
+  const Buffer_drive buffer{.1, 16.1, 1000000, 16, 1, 10, 1};
+  const Buffer_drive source{.1, .5, 1000000, 1, 0, 10, 1};
+  std::vector<Point> loads(16, {-100, 0});
+  loads.insert(loads.end(), 16, {100, 0});
+  const auto plan
+      = plan_buffer_choices({0, 0}, loads, std::vector<double>(32, 1), std::vector<double>(32, 100), {buffer}, source, 1, 0);
+  // Each remote group gets a local buffer, so its long upstream wire drives
+  // one small buffer input instead of sixteen sink capacitances. A third
+  // buffer at the source satisfies the original driver's fanout-one limit.
+  ASSERT_EQ(plan.buffers.size(), 3U);
+  std::vector<unsigned> seen(loads.size());
+  size_t                leaf_groups = 0;
+  for (const auto& branch : plan.buffers) {
+    if (branch.loads.front().buffer) {
+      EXPECT_EQ(branch.position, Point(0, 0));
+      EXPECT_EQ(branch.loads.size(), 2U);
+      continue;
+    }
+    ++leaf_groups;
+    EXPECT_EQ(branch.loads.size(), 16U);
+    for (const auto& load : branch.loads) {
+      ASSERT_FALSE(load.buffer);
+      ASSERT_LT(load.index, loads.size());
+      EXPECT_EQ(branch.position, loads[load.index]);
+      ++seen[load.index];
+    }
+  }
+  EXPECT_EQ(leaf_groups, 2U);
+  for (const auto count : seen) {
+    EXPECT_EQ(count, 1U);
+  }
+  ASSERT_EQ(plan.root.size(), 1U);
+  EXPECT_TRUE(plan.root.front().buffer);
+  EXPECT_EQ(plan.root.front().index, 2U);
+}
+TEST(SteinerRepair, SpatialClustersDoNotDuplicateTheNetBoundingBox) {
+  const Buffer_drive buffer{.1, 8.1, 1000000, 8, 1, 10, 1};
+  const Buffer_drive source{.1, .5, 1000000, 1, 0, 10, 1};
+  std::vector<Point> loads;
+  for (const auto& xy : {
+           Point{-100, -100},
+           Point{-100,  100},
+           Point{ 100, -100},
+           Point{ 100,  100}
+  }) {
+    loads.insert(loads.end(), 8, xy);
+  }
+  const auto plan
+      = plan_buffer_choices({0, 0}, loads, std::vector<double>(32, 1), std::vector<double>(32, 100), {buffer}, source, 1, 0);
+  const auto hpwl = [&](Point origin, const std::vector<Buffer_tree::Load>& children) {
+    auto low = origin, high = origin;
+    for (const auto& child : children) {
+      const auto xy = child.buffer ? plan.buffers.at(child.index).position : loads.at(child.index);
+      low.first     = std::min(low.first, xy.first);
+      low.second    = std::min(low.second, xy.second);
+      high.first    = std::max(high.first, xy.first);
+      high.second   = std::max(high.second, xy.second);
+    }
+    return high.first - low.first + high.second - low.second;
+  };
+  double wire = hpwl({0, 0}, plan.root);
+  for (const auto& branch : plan.buffers) {
+    wire += hpwl(branch.position, branch.loads);
+  }
+  EXPECT_DOUBLE_EQ(wire, 400);
+}
+TEST(SteinerRepair, FasterClusterCannotAddAnOverlappingSourceWire) {
+  const Buffer_drive buffer{.1, 100, 1000000, 32, 1, 1, 1};
+  const Buffer_drive source{.1, .5, 1000000, 1, 0, 1000, 1};
+  const Point        root{-50, 0};
+  std::vector<Point> loads(16, {-100, 0});
+  loads.insert(loads.end(), 16, {100, 0});
+  const auto plan
+      = plan_buffer_choices(root, loads, std::vector<double>(32, 1), std::vector<double>(32, 100), {buffer}, source, 1, 0);
+  // Moving the repeater to the center reduces its longest sink path, but
+  // adds a 50-unit source wire over the unchanged 200-unit leaf-net box.
+  // The faster spatial alternative must preserve the reference wire budget.
+  ASSERT_EQ(plan.buffers.size(), 1U);
+  EXPECT_EQ(plan.buffers.front().position, root);
+  EXPECT_EQ(plan.buffers.front().loads.size(), loads.size());
+}
 TEST_F(Buffer_repair, FloorplanSizesAllStressedDriversIncludingEqualAreaDrives) {
   std::filesystem::create_directories(options.output_dir);
   const std::string from = "sky130_fd_sc_hd__buf_1", to = "sky130_fd_sc_hd__buf_2", overloaded = "sky130_fd_sc_hd__buf_4";

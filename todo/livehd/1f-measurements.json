@@ -38489,6 +38489,1358 @@
         "Total STA share, decision-checkpoint timing agreement, larger/import census and coral regression observed after upstream integration remain open.",
         "Published build manifest precedes this final evidence documentation."
       ]
+    },
+    "spatial_tree_wire_guard_v41": {
+      "protocol": "100 ps clocks, reset false paths, unchanged production placement defaults, one CPU. Fresh matched CPU13 controls for lfsr/minimax/partition_m; frozen v40 CPU12 coral control.",
+      "comparison": {
+        "lfsr": {
+          "control": {
+            "path": "/tmp/1f-wns-v1/wire_cluster_control/lfsr",
+            "score": {
+              "hpwl_um": 183.788,
+              "hpwl_all_nets_um": 197.9,
+              "measured_nets": 136,
+              "excluded_nets": 1,
+              "setup_wns_ps": -60.270761,
+              "setup_tns_ps": -2166.75545,
+              "hold_wns_ps": 53.285192,
+              "hold_tns_ps": 0.0,
+              "instances": 134,
+              "logical_cells": 134,
+              "physical_cells": 0,
+              "buffers": 1,
+              "buffer_area_um2": 0.2624,
+              "macros": 0,
+              "instance_area_um2": 18.6187,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "scoring_seconds": 1.064,
+              "power_mw": 0.000682,
+              "reset_ports": []
+            },
+            "placement_seconds": 2.036703,
+            "run": {
+              "status": "ok",
+              "wall_s": 4.74,
+              "cpu_s": 4.7299999999999995,
+              "rss_mib": 407.7734375,
+              "tree_rss_mib": 391.609375,
+              "ipc": 2.5362254660415466,
+              "instructions": 53423673126.0,
+              "cycles": 21064244422.0,
+              "stop": null
+            },
+            "def_sha256": "b3d67bb84f18ed886207fa77ed0f0691034721f9b7db6e338b54f8a495e9366f",
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "physical_timing": {
+              "evaluations": 11,
+              "builds": 1,
+              "ranking_evaluations": 8,
+              "ranking_seconds": 0.684465377,
+              "detailed_evaluations": 3,
+              "repowered_gates": 8,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 779,
+              "update_calls": 14,
+              "seconds": 0.7157005759999999,
+              "validation_seconds": 0.001184347,
+              "reconcile_seconds": 0.670298426,
+              "exclusions_seconds": 0.000180532,
+              "propagation_seconds": 0.041108122,
+              "feedback_seconds": 0.002851121999999994
+            }
+          },
+          "candidate": {
+            "path": "/tmp/1f-wns-v1/wire_guarded_candidate/lfsr",
+            "score": {
+              "hpwl_um": 183.788,
+              "hpwl_all_nets_um": 197.9,
+              "measured_nets": 136,
+              "excluded_nets": 1,
+              "setup_wns_ps": -60.270761,
+              "setup_tns_ps": -2166.75545,
+              "hold_wns_ps": 53.285192,
+              "hold_tns_ps": 0.0,
+              "instances": 134,
+              "logical_cells": 134,
+              "physical_cells": 0,
+              "buffers": 1,
+              "buffer_area_um2": 0.2624,
+              "macros": 0,
+              "instance_area_um2": 18.6187,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "scoring_seconds": 1.028,
+              "power_mw": 0.000682,
+              "reset_ports": []
+            },
+            "placement_seconds": 2.057296,
+            "run": {
+              "status": "ok",
+              "wall_s": 4.79,
+              "cpu_s": 4.779999999999999,
+              "rss_mib": 408.56640625,
+              "tree_rss_mib": 426.5546875,
+              "ipc": 2.5333879111872544,
+              "instructions": 53806639488.0,
+              "cycles": 21239005385.0,
+              "stop": null
+            },
+            "def_sha256": "b3d67bb84f18ed886207fa77ed0f0691034721f9b7db6e338b54f8a495e9366f",
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "physical_timing": {
+              "evaluations": 11,
+              "builds": 1,
+              "ranking_evaluations": 8,
+              "ranking_seconds": 0.6832461959999999,
+              "detailed_evaluations": 3,
+              "repowered_gates": 8,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 779,
+              "update_calls": 14,
+              "seconds": 0.7150957099999999,
+              "validation_seconds": 0.001340294,
+              "reconcile_seconds": 0.672024836,
+              "exclusions_seconds": 0.00029455899999999996,
+              "propagation_seconds": 0.038481486,
+              "feedback_seconds": 0.0028836519999999987
+            }
+          },
+          "placement_ratio": 1.0101109489208784,
+          "hpwl_change_fraction": 0.0,
+          "wns_change_ps": 0.0
+        },
+        "minimax": {
+          "control": {
+            "path": "/tmp/1f-wns-v1/wire_cluster_control/minimax",
+            "score": {
+              "hpwl_um": 46924.026,
+              "hpwl_all_nets_um": 47082.118,
+              "measured_nets": 16259,
+              "excluded_nets": 1,
+              "setup_wns_ps": -950.289184,
+              "setup_tns_ps": -1871873.458389,
+              "hold_wns_ps": 28.151466,
+              "hold_tns_ps": 0.0,
+              "instances": 16209,
+              "logical_cells": 16209,
+              "physical_cells": 0,
+              "buffers": 381,
+              "buffer_area_um2": 91.1687,
+              "macros": 0,
+              "instance_area_um2": 2086.121,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "scoring_seconds": 6.587,
+              "power_mw": 0.053,
+              "reset_ports": []
+            },
+            "placement_seconds": 45.485846,
+            "run": {
+              "status": "ok",
+              "wall_s": 67.28,
+              "cpu_s": 67.27,
+              "rss_mib": 1272.66015625,
+              "tree_rss_mib": 1276.83984375,
+              "ipc": 2.104870499024592,
+              "instructions": 636015725251.0,
+              "cycles": 302163826965.0,
+              "stop": null
+            },
+            "def_sha256": "e2ee4084f591d0cfa44a21e7b710df231e1a6018aefa44553288e39e5415e27c",
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16209,
+              "area_um2": 2086.1209799995763,
+              "within_budget": true,
+              "rejected_proposals": 375
+            },
+            "physical_timing": {
+              "evaluations": 14,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 4.107233108,
+              "detailed_evaluations": 7,
+              "repowered_gates": 1291,
+              "inserted_gates": 379,
+              "removed_gates": 1,
+              "updated_nets": 84395,
+              "update_calls": 21,
+              "seconds": 18.460858257,
+              "validation_seconds": 0.34679901199999996,
+              "reconcile_seconds": 3.1749676229999997,
+              "exclusions_seconds": 0.105896808,
+              "propagation_seconds": 12.84262954,
+              "feedback_seconds": 1.965155868000001
+            }
+          },
+          "candidate": {
+            "path": "/tmp/1f-wns-v1/wire_guarded_candidate/minimax",
+            "score": {
+              "hpwl_um": 46230.31,
+              "hpwl_all_nets_um": 46388.402,
+              "measured_nets": 16259,
+              "excluded_nets": 1,
+              "setup_wns_ps": -950.268312,
+              "setup_tns_ps": -1854618.411151,
+              "hold_wns_ps": 27.911343,
+              "hold_tns_ps": 0.0,
+              "instances": 16209,
+              "logical_cells": 16209,
+              "physical_cells": 0,
+              "buffers": 381,
+              "buffer_area_um2": 91.1687,
+              "macros": 0,
+              "instance_area_um2": 2086.121,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "scoring_seconds": 6.289,
+              "power_mw": 0.0531,
+              "reset_ports": []
+            },
+            "placement_seconds": 43.220822999999996,
+            "run": {
+              "status": "ok",
+              "wall_s": 64.89,
+              "cpu_s": 64.87,
+              "rss_mib": 1274.7734375,
+              "tree_rss_mib": 1278.69140625,
+              "ipc": 2.2148874054817176,
+              "instructions": 645033499626.0,
+              "cycles": 291226316078.0,
+              "stop": null
+            },
+            "def_sha256": "36e36ec0d5bf6cfeb1345c2fe97730b8c8759ab17c6900dd79a34dbf7f38c26e",
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16209,
+              "area_um2": 2086.120979999586,
+              "within_budget": true,
+              "rejected_proposals": 479
+            },
+            "physical_timing": {
+              "evaluations": 14,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 3.873303716,
+              "detailed_evaluations": 7,
+              "repowered_gates": 1325,
+              "inserted_gates": 379,
+              "removed_gates": 1,
+              "updated_nets": 84483,
+              "update_calls": 21,
+              "seconds": 17.783580007,
+              "validation_seconds": 0.302847936,
+              "reconcile_seconds": 2.9291826649999995,
+              "exclusions_seconds": 0.103728059,
+              "propagation_seconds": 12.655514835,
+              "feedback_seconds": 1.7674065650000002
+            }
+          },
+          "placement_ratio": 0.9502037842717049,
+          "hpwl_change_fraction": -0.014783812454626122,
+          "wns_change_ps": 0.02087199999994027
+        },
+        "NVDLA__partition_m": {
+          "control": {
+            "path": "/tmp/1f-wns-v1/wire_cluster_control/NVDLA__partition_m",
+            "score": {
+              "hpwl_um": 93405.154,
+              "hpwl_all_nets_um": 107638.17,
+              "measured_nets": 20647,
+              "excluded_nets": 145,
+              "setup_wns_ps": -916.800306,
+              "setup_tns_ps": -398000.681115,
+              "hold_wns_ps": 25.471559,
+              "hold_tns_ps": 0.0,
+              "instances": 20610,
+              "logical_cells": 20610,
+              "physical_cells": 0,
+              "buffers": 150,
+              "buffer_area_um2": 12.0431,
+              "macros": 0,
+              "instance_area_um2": 2736.6514,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "scoring_seconds": 8.928,
+              "power_mw": 0.122,
+              "reset_ports": [
+                "direct_reset_",
+                "dla_reset_rstn",
+                "global_clk_ovr_on",
+                "nvdla_clk_ovr_on",
+                "test_mode",
+                "tmc2slcg_disable_clock_gating"
+              ]
+            },
+            "placement_seconds": 37.360087,
+            "run": {
+              "status": "ok",
+              "wall_s": 103.23,
+              "cpu_s": 103.21,
+              "rss_mib": 1570.96484375,
+              "tree_rss_mib": 1571.078125,
+              "ipc": 1.5592335847992227,
+              "instructions": 724257894996.0,
+              "cycles": 464496084523.0,
+              "stop": null
+            },
+            "def_sha256": "dcd4ab3ce6ff51087c148dde5cf90a6967320c7882941e27c3a64820fabccb45",
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20948,
+              "baseline_area_um2": 2656.096920000048,
+              "cells": 20598,
+              "area_um2": 2735.7766200000697,
+              "within_budget": true,
+              "rejected_proposals": 4016
+            },
+            "physical_timing": {
+              "evaluations": 10,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 5.571021205,
+              "detailed_evaluations": 3,
+              "repowered_gates": 3971,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 113482,
+              "update_calls": 13,
+              "seconds": 13.860582959,
+              "validation_seconds": 0.3406481840000001,
+              "reconcile_seconds": 2.700766985,
+              "exclusions_seconds": 0.060271325,
+              "propagation_seconds": 9.613824959,
+              "feedback_seconds": 1.1136860720000012
+            }
+          },
+          "candidate": {
+            "path": "/tmp/1f-wns-v1/wire_guarded_candidate/NVDLA__partition_m",
+            "score": {
+              "hpwl_um": 93405.154,
+              "hpwl_all_nets_um": 107638.17,
+              "measured_nets": 20647,
+              "excluded_nets": 145,
+              "setup_wns_ps": -916.800306,
+              "setup_tns_ps": -398000.681115,
+              "hold_wns_ps": 25.471559,
+              "hold_tns_ps": 0.0,
+              "instances": 20610,
+              "logical_cells": 20610,
+              "physical_cells": 0,
+              "buffers": 150,
+              "buffer_area_um2": 12.0431,
+              "macros": 0,
+              "instance_area_um2": 2736.6514,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "scoring_seconds": 8.835,
+              "power_mw": 0.122,
+              "reset_ports": [
+                "direct_reset_",
+                "dla_reset_rstn",
+                "global_clk_ovr_on",
+                "nvdla_clk_ovr_on",
+                "test_mode",
+                "tmc2slcg_disable_clock_gating"
+              ]
+            },
+            "placement_seconds": 36.869507,
+            "run": {
+              "status": "ok",
+              "wall_s": 101.48,
+              "cpu_s": 101.46000000000001,
+              "rss_mib": 1571.85546875,
+              "tree_rss_mib": 1558.91796875,
+              "ipc": 1.5900683856682978,
+              "instructions": 725932665737.0,
+              "cycles": 456541789196.0,
+              "stop": null
+            },
+            "def_sha256": "dcd4ab3ce6ff51087c148dde5cf90a6967320c7882941e27c3a64820fabccb45",
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20948,
+              "baseline_area_um2": 2656.096920000048,
+              "cells": 20598,
+              "area_um2": 2735.7766200000697,
+              "within_budget": true,
+              "rejected_proposals": 4016
+            },
+            "physical_timing": {
+              "evaluations": 10,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 5.489640337000001,
+              "detailed_evaluations": 3,
+              "repowered_gates": 3971,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 113482,
+              "update_calls": 13,
+              "seconds": 13.728116926000002,
+              "validation_seconds": 0.32643248900000005,
+              "reconcile_seconds": 2.6450313979999995,
+              "exclusions_seconds": 0.056914938000000005,
+              "propagation_seconds": 9.551202326,
+              "feedback_seconds": 1.1175663970000014
+            }
+          },
+          "placement_ratio": 0.9868688742614544,
+          "hpwl_change_fraction": 0.0,
+          "wns_change_ps": 0.0
+        },
+        "coralnpu": {
+          "control": {
+            "path": "/tmp/1f-wns-v1/grid_floor_retry/coralnpu",
+            "score": {
+              "hpwl_um": 3907687.297,
+              "hpwl_all_nets_um": 4173070.024,
+              "measured_nets": 161126,
+              "excluded_nets": 690,
+              "setup_wns_ps": -16736.599729,
+              "setup_tns_ps": -64843349.068619,
+              "hold_wns_ps": 27.430929,
+              "hold_tns_ps": 0.0,
+              "instances": 161074,
+              "logical_cells": 161074,
+              "physical_cells": 0,
+              "buffers": 1090,
+              "buffer_area_um2": 88.1944,
+              "macros": 2,
+              "instance_area_um2": 45769.8019,
+              "macro_area_um2": 26086.1895,
+              "die_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "scoring_seconds": 84.262,
+              "power_mw": 0.692,
+              "reset_ports": [
+                "io_aresetn"
+              ]
+            },
+            "placement_seconds": 736.804341,
+            "run": {
+              "status": "ok",
+              "wall_s": 889.2,
+              "cpu_s": 888.78,
+              "rss_mib": 10316.38671875,
+              "tree_rss_mib": 10243.19140625,
+              "ipc": 1.6264564819512854,
+              "instructions": 6517370359540.0,
+              "cycles": 4007097903856.0,
+              "stop": null
+            },
+            "def_sha256": "41f6a523765f8fde6f3d16dfbcf22201a8414ddd6bb07b25843a487dd605773f",
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 160837,
+              "area_um2": 19666.480859994055,
+              "within_budget": true,
+              "rejected_proposals": 8497
+            },
+            "physical_timing": {
+              "evaluations": 17,
+              "builds": 1,
+              "ranking_evaluations": 11,
+              "ranking_seconds": 82.227832493,
+              "detailed_evaluations": 6,
+              "repowered_gates": 22791,
+              "inserted_gates": 492,
+              "removed_gates": 1484,
+              "updated_nets": 2189262,
+              "update_calls": 23,
+              "seconds": 259.763344355,
+              "validation_seconds": 5.969390259,
+              "reconcile_seconds": 35.649660133,
+              "exclusions_seconds": 1.017552875,
+              "propagation_seconds": 193.15726958000005,
+              "feedback_seconds": 23.198767448999956
+            }
+          },
+          "candidate": {
+            "path": "/tmp/1f-wns-v1/wire_guarded_candidate/coralnpu",
+            "score": {
+              "hpwl_um": 3907687.297,
+              "hpwl_all_nets_um": 4173070.024,
+              "measured_nets": 161126,
+              "excluded_nets": 690,
+              "setup_wns_ps": -16736.599729,
+              "setup_tns_ps": -64843349.068619,
+              "hold_wns_ps": 27.430929,
+              "hold_tns_ps": 0.0,
+              "instances": 161074,
+              "logical_cells": 161074,
+              "physical_cells": 0,
+              "buffers": 1090,
+              "buffer_area_um2": 88.1944,
+              "macros": 2,
+              "instance_area_um2": 45769.8019,
+              "macro_area_um2": 26086.1895,
+              "die_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "scoring_seconds": 84.871,
+              "power_mw": 0.692,
+              "reset_ports": [
+                "io_aresetn"
+              ]
+            },
+            "placement_seconds": 753.025564,
+            "run": {
+              "status": "ok",
+              "wall_s": 904.95,
+              "cpu_s": 904.82,
+              "rss_mib": 10331.46484375,
+              "tree_rss_mib": 10311.6171875,
+              "ipc": 1.6149648389362539,
+              "instructions": 6587999748966.0,
+              "cycles": 4079345624209.0,
+              "stop": null
+            },
+            "def_sha256": "41f6a523765f8fde6f3d16dfbcf22201a8414ddd6bb07b25843a487dd605773f",
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 160837,
+              "area_um2": 19666.480859994055,
+              "within_budget": true,
+              "rejected_proposals": 8497
+            },
+            "physical_timing": {
+              "evaluations": 17,
+              "builds": 1,
+              "ranking_evaluations": 11,
+              "ranking_seconds": 82.33346619,
+              "detailed_evaluations": 6,
+              "repowered_gates": 22791,
+              "inserted_gates": 492,
+              "removed_gates": 1484,
+              "updated_nets": 2189262,
+              "update_calls": 23,
+              "seconds": 260.068551136,
+              "validation_seconds": 6.129188235,
+              "reconcile_seconds": 36.55091251600001,
+              "exclusions_seconds": 1.0054452029999998,
+              "propagation_seconds": 191.99157037199996,
+              "feedback_seconds": 23.612729502000047
+            }
+          },
+          "placement_ratio": 1.0220156452634146,
+          "hpwl_change_fraction": 0.0,
+          "wns_change_ps": 0.0
+        }
+      },
+      "reviewed_minimax": {
+        "path": "/tmp/1f-wns-v1/wire_reviewed_candidate/minimax",
+        "score": {
+          "hpwl_um": 46230.31,
+          "hpwl_all_nets_um": 46388.402,
+          "measured_nets": 16259,
+          "excluded_nets": 1,
+          "setup_wns_ps": -950.268312,
+          "setup_tns_ps": -1854618.411151,
+          "hold_wns_ps": 27.911343,
+          "hold_tns_ps": 0.0,
+          "instances": 16209,
+          "logical_cells": 16209,
+          "physical_cells": 0,
+          "buffers": 381,
+          "buffer_area_um2": 91.1687,
+          "macros": 0,
+          "instance_area_um2": 2086.121,
+          "macro_area_um2": 0.0,
+          "die_um": [
+            0.0,
+            0.0,
+            80.838,
+            81.0
+          ],
+          "core_um": [
+            0.0,
+            0.0,
+            80.838,
+            81.0
+          ],
+          "scoring_seconds": 6.112,
+          "power_mw": 0.0531,
+          "reset_ports": []
+        },
+        "placement_seconds": 46.060379,
+        "run": {
+          "status": "ok",
+          "wall_s": 67.64,
+          "cpu_s": 67.63,
+          "rss_mib": 1269.61328125,
+          "tree_rss_mib": 1287.796875,
+          "ipc": 2.125910801550732,
+          "instructions": 645707599730.0,
+          "cycles": 303732216450.0,
+          "stop": null
+        },
+        "def_sha256": "36e36ec0d5bf6cfeb1345c2fe97730b8c8759ab17c6900dd79a34dbf7f38c26e",
+        "growth_budget": {
+          "basis": "synthesized_standard_cells",
+          "fraction": 0.03,
+          "baseline_cells": 16505,
+          "baseline_area_um2": 2025.453599999931,
+          "cells": 16209,
+          "area_um2": 2086.120979999586,
+          "within_budget": true,
+          "rejected_proposals": 479
+        },
+        "physical_timing": {
+          "evaluations": 14,
+          "builds": 1,
+          "ranking_evaluations": 7,
+          "ranking_seconds": 4.14194835,
+          "detailed_evaluations": 7,
+          "repowered_gates": 1325,
+          "inserted_gates": 379,
+          "removed_gates": 1,
+          "updated_nets": 84483,
+          "update_calls": 21,
+          "seconds": 18.556630490999996,
+          "validation_seconds": 0.351044359,
+          "reconcile_seconds": 3.173972773000001,
+          "exclusions_seconds": 0.106968244,
+          "propagation_seconds": 12.949617159,
+          "feedback_seconds": 1.9488748699999991
+        }
+      },
+      "manifest": {
+        "build": "-c opt --jobs=2; wirelength-guarded spatial clustering candidate; published dependency pins",
+        "repos": {
+          "livehd": {
+            "head": "07049aa2b84b9e18878048bc0733c7f3b146d21f",
+            "patch_sha256": "031033d2e92972f896b670e58e370b07ed604fa1109a17ab2fda154425fa3c9e"
+          },
+          "DREAMPlace": {
+            "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+            "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "OpenTimer": {
+            "head": "3197d532b08a6e11ee0a1c26a200dd34b56148cd",
+            "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "lhd": "371a90a9f10246563794bdf7d7c6579e75f8183847169e218b6ccdd7f3ead885",
+        "physical_repair": "722c39120d5e35557daac1355fde56de8a4cb00d4edb50dca7157b5be484834a",
+        "compiled_dependencies": {
+          "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+          "opentimer": "3197d532b08a6e11ee0a1c26a200dd34b56148cd"
+        },
+        "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+        "harness_sha256": {
+          "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+          "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+        }
+      },
+      "reviewed_manifest": {
+        "build": "-c opt --jobs=2; reviewed wire-guarded spatial clustering; resource ceiling restored; published dependency pins",
+        "repos": {
+          "livehd": {
+            "head": "07049aa2b84b9e18878048bc0733c7f3b146d21f",
+            "patch_sha256": "f649da87a1f2c7c94a26f5d1d41164dad5815eecd0822a7aa8fe1cdeaa4a6abb"
+          },
+          "DREAMPlace": {
+            "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+            "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "OpenTimer": {
+            "head": "3197d532b08a6e11ee0a1c26a200dd34b56148cd",
+            "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "lhd": "427e31e67ce221dedb2db30b209a01bee68d225fc9895b22abd4862c33703da3",
+        "physical_repair": "5d51a9588e1dd03535dc7907de838ef41d0aa09d4159627e784d75161cd99657",
+        "compiled_dependencies": {
+          "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+          "opentimer": "3197d532b08a6e11ee0a1c26a200dd34b56148cd"
+        },
+        "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+        "harness_sha256": {
+          "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+          "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+        }
+      },
+      "reviewed_delta": "The reviewed binary adds the existing million-buffer resource ceiling to combined clustered trees. All benchmark-selected trees are below it; reviewed minimax reproduces the exact candidate DEF and score. Test-only additions cover leaf coverage and wire rejection.",
+      "stage_analysis": {
+        "source": "v40 production defaults, 100 ps clock, reset false paths",
+        "designs": {
+          "lfsr": {
+            "main_gp": {
+              "hpwl_um": 184.528,
+              "setup_wns_ps": -60.166525,
+              "logical_cells": 134,
+              "instance_area_um2": 18.502,
+              "def_sha256": "6cc744b7b1c304fec4a8f37f114e728816e12c7d425acd442cc4a272c0029069"
+            },
+            "sizing": {
+              "hpwl_um": 185.168,
+              "setup_wns_ps": -60.166525,
+              "logical_cells": 134,
+              "instance_area_um2": 18.6187,
+              "def_sha256": "b778da78616fbb266e803cc2e9898a944cf93f351f010524ddfb133e1c72e7ad",
+              "native_wns_ps": -58.820281982421875,
+              "relative_wns_error": 0.022375282893238806
+            },
+            "final": {
+              "hpwl_um": 183.788,
+              "setup_wns_ps": -60.270761,
+              "logical_cells": 134,
+              "instance_area_um2": 18.6187,
+              "def_sha256": "b3d67bb84f18ed886207fa77ed0f0691034721f9b7db6e338b54f8a495e9366f",
+              "native_wns_ps": -58.6982346,
+              "relative_wns_error": 0.026091032764626963,
+              "native_source": "final qor.json wns, not the preceding repair result"
+            }
+          },
+          "minimax": {
+            "main_gp": {
+              "hpwl_um": 39939.976,
+              "setup_wns_ps": -8019.139163,
+              "logical_cells": 15831,
+              "instance_area_um2": 1959.2896,
+              "def_sha256": "60f36dd8d8755831b50dd3800638e9e2abf6d157e1fbb7a541e56f7e0431c281"
+            },
+            "sizing": {
+              "hpwl_um": 40070.561,
+              "setup_wns_ps": -7867.704741,
+              "logical_cells": 15831,
+              "instance_area_um2": 1995.4042,
+              "def_sha256": "baf3aecb10a9be53bcbde1937a0f6383027744a653d59645aa3cbb2335573a35",
+              "native_wns_ps": -7829.47412109375,
+              "relative_wns_error": 0.004859183353313075
+            },
+            "forest": {
+              "hpwl_um": 46808.685,
+              "setup_wns_ps": -950.395655,
+              "logical_cells": 16210,
+              "instance_area_um2": 2086.121,
+              "def_sha256": "89222b7d9813e26097d05cfd39d2b0dd4de370ec1d4714597325c195c08af11c",
+              "native_wns_ps": -940.6982421875,
+              "relative_wns_error": 0.010203553395348838
+            },
+            "recovery": {
+              "hpwl_um": 46808.756,
+              "setup_wns_ps": -950.395655,
+              "logical_cells": 16210,
+              "instance_area_um2": 2086.2085,
+              "def_sha256": "cb2c720c0c05354b571dc307be65339140ea8ddb5ce61326a4a6b14881a0b4be",
+              "native_wns_ps": -940.6982421875,
+              "relative_wns_error": 0.010203553395348838
+            },
+            "remove": {
+              "hpwl_um": 46808.543,
+              "setup_wns_ps": -950.395655,
+              "logical_cells": 16209,
+              "instance_area_um2": 2086.121,
+              "def_sha256": "1227d8861ea9f80ff4d7aaf5f57dd50953c773253422fd06e06846a2d9a4778f",
+              "native_wns_ps": -940.6982421875,
+              "relative_wns_error": 0.010203553395348838
+            },
+            "final": {
+              "hpwl_um": 46924.026,
+              "setup_wns_ps": -950.289184,
+              "logical_cells": 16209,
+              "instance_area_um2": 2086.121,
+              "def_sha256": "e2ee4084f591d0cfa44a21e7b710df231e1a6018aefa44553288e39e5415e27c",
+              "native_wns_ps": -940.654907,
+              "relative_wns_error": 0.010138258082078726,
+              "native_source": "final qor.json wns, not the preceding repair result"
+            },
+            "rejected_sizing": {
+              "hpwl_um": 46811.893,
+              "setup_wns_ps": -951.701388,
+              "logical_cells": 16210,
+              "instance_area_um2": 2086.2085,
+              "native_wns_ps": -942.0040283203125,
+              "relative_wns_error": 0.010189498304784916,
+              "def_sha256": "028fa4e20fda543a65169c43d35bcac89317b660f18367abbe8ce38620355fa3"
+            }
+          }
+        },
+        "conclusions": [
+          "lfsr wirelength growth precedes post-GP sizing/repair; those stages reduce final HPWL slightly.",
+          "minimax forest repair increases HPWL by 6738.124 um, from 40070.561 to 46808.685; subsequent stages add only 115.341 um.",
+          "All scored accepted post-GP sizing/forest/recovery checkpoints, minimax's rejected sizing checkpoint and the final QoR WNS are within 10% of independent OpenSTA. This does not cover all initial GP/IO-resynthesis decisions or the larger design census."
+        ]
+      },
+      "rejected_experiments": {
+        "hard_bound": {
+          "decision": "rejected: unacceptable WNS loss from enforcing a per-tree HPWL bound",
+          "baseline": {
+            "score": {
+              "hpwl_um": 46924.026,
+              "hpwl_all_nets_um": 47082.118,
+              "measured_nets": 16259,
+              "excluded_nets": 1,
+              "setup_wns_ps": -950.289184,
+              "setup_tns_ps": -1871873.458389,
+              "hold_wns_ps": 28.151466,
+              "hold_tns_ps": 0.0,
+              "instances": 16209,
+              "logical_cells": 16209,
+              "physical_cells": 0,
+              "buffers": 381,
+              "buffer_area_um2": 91.1687,
+              "macros": 0,
+              "instance_area_um2": 2086.121,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "scoring_seconds": 6.226,
+              "power_mw": 0.053,
+              "reset_ports": []
+            },
+            "placement_seconds": 45.230588
+          },
+          "candidate": {
+            "score": {
+              "hpwl_um": 40445.499,
+              "hpwl_all_nets_um": 40603.591,
+              "measured_nets": 16078,
+              "excluded_nets": 1,
+              "setup_wns_ps": -7814.91941,
+              "setup_tns_ps": -16508503.970298,
+              "hold_wns_ps": 35.806656,
+              "hold_tns_ps": 0.0,
+              "instances": 16028,
+              "logical_cells": 16028,
+              "physical_cells": 0,
+              "buffers": 200,
+              "buffer_area_um2": 58.4804,
+              "macros": 0,
+              "instance_area_um2": 2053.418,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "scoring_seconds": 5.883,
+              "power_mw": 0.0547,
+              "reset_ports": []
+            },
+            "placement_seconds": 42.583345
+          },
+          "test_log": "/tmp/1f-wire-v41/build.log",
+          "manifest": {
+            "build": "-c opt --jobs=2; wirelength-bounded repair candidate; published dependency pins",
+            "repos": {
+              "livehd": {
+                "head": "07049aa2b84b9e18878048bc0733c7f3b146d21f",
+                "patch_sha256": "503c8492435708694fae77564ed904dcdf44c6d6fafc50ecdeebd12cd0bc2968"
+              },
+              "DREAMPlace": {
+                "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "OpenTimer": {
+                "head": "3197d532b08a6e11ee0a1c26a200dd34b56148cd",
+                "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            "lhd": "9aef524fa87a43bab22318be9b2f738cec556db34814593f42361a6c1d690dd9",
+            "physical_repair": "419c44b9b9c3d790034ac99b9bbeb101f658dd15e8025bb991840619334fe27e",
+            "compiled_dependencies": {
+              "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+              "opentimer": "3197d532b08a6e11ee0a1c26a200dd34b56148cd"
+            },
+            "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+            "harness_sha256": {
+              "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+              "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+            }
+          }
+        },
+        "local_delay_tolerance": {
+          "decision": "not retained: small wire reduction with worse WNS; investigate spatial topology candidates",
+          "results": {
+            "minimax": {
+              "score": {
+                "hpwl_um": 46686.881,
+                "hpwl_all_nets_um": 46844.973,
+                "measured_nets": 16250,
+                "excluded_nets": 1,
+                "setup_wns_ps": -955.841521,
+                "setup_tns_ps": -1860748.178092,
+                "hold_wns_ps": 28.009659,
+                "hold_tns_ps": 0.0,
+                "instances": 16200,
+                "logical_cells": 16200,
+                "physical_cells": 0,
+                "buffers": 372,
+                "buffer_area_um2": 91.2562,
+                "macros": 0,
+                "instance_area_um2": 2086.1793,
+                "macro_area_um2": 0.0,
+                "die_um": [
+                  0.0,
+                  0.0,
+                  80.838,
+                  81.0
+                ],
+                "core_um": [
+                  0.0,
+                  0.0,
+                  80.838,
+                  81.0
+                ],
+                "scoring_seconds": 6.321,
+                "power_mw": 0.0531,
+                "reset_ports": []
+              },
+              "placement_seconds": 42.803598
+            },
+            "lfsr": {
+              "score": {
+                "hpwl_um": 183.788,
+                "hpwl_all_nets_um": 197.9,
+                "measured_nets": 136,
+                "excluded_nets": 1,
+                "setup_wns_ps": -60.270761,
+                "setup_tns_ps": -2166.75545,
+                "hold_wns_ps": 53.285192,
+                "hold_tns_ps": 0.0,
+                "instances": 134,
+                "logical_cells": 134,
+                "physical_cells": 0,
+                "buffers": 1,
+                "buffer_area_um2": 0.2624,
+                "macros": 0,
+                "instance_area_um2": 18.6187,
+                "macro_area_um2": 0.0,
+                "die_um": [
+                  0.0,
+                  0.0,
+                  7.884,
+                  7.83
+                ],
+                "core_um": [
+                  0.0,
+                  0.0,
+                  7.884,
+                  7.83
+                ],
+                "scoring_seconds": 1.068,
+                "power_mw": 0.000682,
+                "reset_ports": []
+              },
+              "placement_seconds": 2.056886
+            },
+            "NVDLA__partition_m": {
+              "score": {
+                "hpwl_um": 93405.154,
+                "hpwl_all_nets_um": 107638.17,
+                "measured_nets": 20647,
+                "excluded_nets": 145,
+                "setup_wns_ps": -916.800306,
+                "setup_tns_ps": -398000.681115,
+                "hold_wns_ps": 25.471559,
+                "hold_tns_ps": 0.0,
+                "instances": 20610,
+                "logical_cells": 20610,
+                "physical_cells": 0,
+                "buffers": 150,
+                "buffer_area_um2": 12.0431,
+                "macros": 0,
+                "instance_area_um2": 2736.6514,
+                "macro_area_um2": 0.0,
+                "die_um": [
+                  0.0,
+                  0.0,
+                  93.366,
+                  93.42
+                ],
+                "core_um": [
+                  0.0,
+                  0.0,
+                  93.366,
+                  93.42
+                ],
+                "scoring_seconds": 8.241,
+                "power_mw": 0.122,
+                "reset_ports": [
+                  "direct_reset_",
+                  "dla_reset_rstn",
+                  "global_clk_ovr_on",
+                  "nvdla_clk_ovr_on",
+                  "test_mode",
+                  "tmc2slcg_disable_clock_gating"
+                ]
+              },
+              "placement_seconds": 35.109631
+            }
+          },
+          "manifest": {
+            "build": "-c opt --jobs=2; wirelength/delay tradeoff candidate; published dependency pins",
+            "repos": {
+              "livehd": {
+                "head": "07049aa2b84b9e18878048bc0733c7f3b146d21f",
+                "patch_sha256": "8b72eb4918917913319180c865119f63b5f220be204815b10742df519797826f"
+              },
+              "DREAMPlace": {
+                "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "OpenTimer": {
+                "head": "3197d532b08a6e11ee0a1c26a200dd34b56148cd",
+                "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            "lhd": "850b7888d9936f04938c86d4fb52970e69f5a7b8741047fec1f9d75d73afa413",
+            "physical_repair": "94483897300923e96ba6e59c0b479f6273d7e0eeafeaab943737f6f51708d431",
+            "compiled_dependencies": {
+              "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+              "opentimer": "3197d532b08a6e11ee0a1c26a200dd34b56148cd"
+            },
+            "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+            "harness_sha256": {
+              "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+              "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+            }
+          },
+          "test_log": "/tmp/1f-wire-v41/pareto-tests.log"
+        },
+        "unbounded_clustering": {
+          "decision": "not retained: improves WNS but increases minimax wirelength",
+          "results": {
+            "minimax": {
+              "score": {
+                "hpwl_um": 51178.344,
+                "hpwl_all_nets_um": 51336.436,
+                "measured_nets": 16261,
+                "excluded_nets": 1,
+                "setup_wns_ps": -873.032095,
+                "setup_tns_ps": -1690822.962181,
+                "hold_wns_ps": 28.009659,
+                "hold_tns_ps": 0.0,
+                "instances": 16211,
+                "logical_cells": 16211,
+                "physical_cells": 0,
+                "buffers": 383,
+                "buffer_area_um2": 91.2271,
+                "macros": 0,
+                "instance_area_um2": 2086.1501,
+                "macro_area_um2": 0.0,
+                "die_um": [
+                  0.0,
+                  0.0,
+                  80.838,
+                  81.0
+                ],
+                "core_um": [
+                  0.0,
+                  0.0,
+                  80.838,
+                  81.0
+                ],
+                "scoring_seconds": 6.134,
+                "power_mw": 0.0529,
+                "reset_ports": []
+              },
+              "placement_seconds": 43.057998
+            },
+            "lfsr": {
+              "score": {
+                "hpwl_um": 183.788,
+                "hpwl_all_nets_um": 197.9,
+                "measured_nets": 136,
+                "excluded_nets": 1,
+                "setup_wns_ps": -60.270761,
+                "setup_tns_ps": -2166.75545,
+                "hold_wns_ps": 53.285192,
+                "hold_tns_ps": 0.0,
+                "instances": 134,
+                "logical_cells": 134,
+                "physical_cells": 0,
+                "buffers": 1,
+                "buffer_area_um2": 0.2624,
+                "macros": 0,
+                "instance_area_um2": 18.6187,
+                "macro_area_um2": 0.0,
+                "die_um": [
+                  0.0,
+                  0.0,
+                  7.884,
+                  7.83
+                ],
+                "core_um": [
+                  0.0,
+                  0.0,
+                  7.884,
+                  7.83
+                ],
+                "scoring_seconds": 1.048,
+                "power_mw": 0.000682,
+                "reset_ports": []
+              },
+              "placement_seconds": 2.036592
+            },
+            "NVDLA__partition_m": {
+              "score": {
+                "hpwl_um": 93405.154,
+                "hpwl_all_nets_um": 107638.17,
+                "measured_nets": 20647,
+                "excluded_nets": 145,
+                "setup_wns_ps": -916.800306,
+                "setup_tns_ps": -398000.681115,
+                "hold_wns_ps": 25.471559,
+                "hold_tns_ps": 0.0,
+                "instances": 20610,
+                "logical_cells": 20610,
+                "physical_cells": 0,
+                "buffers": 150,
+                "buffer_area_um2": 12.0431,
+                "macros": 0,
+                "instance_area_um2": 2736.6514,
+                "macro_area_um2": 0.0,
+                "die_um": [
+                  0.0,
+                  0.0,
+                  93.366,
+                  93.42
+                ],
+                "core_um": [
+                  0.0,
+                  0.0,
+                  93.366,
+                  93.42
+                ],
+                "scoring_seconds": 8.792,
+                "power_mw": 0.122,
+                "reset_ports": [
+                  "direct_reset_",
+                  "dla_reset_rstn",
+                  "global_clk_ovr_on",
+                  "nvdla_clk_ovr_on",
+                  "test_mode",
+                  "tmc2slcg_disable_clock_gating"
+                ]
+              },
+              "placement_seconds": 36.627915
+            }
+          },
+          "coralnpu": "intentionally stopped exact measurement process group 3461300; incomplete, excluded from comparisons",
+          "manifest": {
+            "build": "-c opt --jobs=2; spatial buffer clustering candidate; published dependency pins",
+            "repos": {
+              "livehd": {
+                "head": "07049aa2b84b9e18878048bc0733c7f3b146d21f",
+                "patch_sha256": "25c2bd16901a594515e1c40049aacdcbc384f7c7790fe7be88bf8dd76bda3fda"
+              },
+              "DREAMPlace": {
+                "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              },
+              "OpenTimer": {
+                "head": "3197d532b08a6e11ee0a1c26a200dd34b56148cd",
+                "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+              }
+            },
+            "lhd": "75f9213b57e5ce2fb39c5655e17dce056624eadebd5d5a4fb65bdf496a034285",
+            "physical_repair": "b60221e72b92147c58b279fc5630c31fdef0c184b0dcfa0c490460e85a6ead19",
+            "compiled_dependencies": {
+              "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+              "opentimer": "3197d532b08a6e11ee0a1c26a200dd34b56148cd"
+            },
+            "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+            "harness_sha256": {
+              "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+              "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+            }
+          },
+          "test_log": "/tmp/1f-wire-v41/cluster-tests.log"
+        }
+      },
+      "review": {
+        "scope": "Add spatially clustered buffer candidates without exceeding the original fastest topology HPWL",
+        "findings_resolved": [
+          "Combined leaf groups and backbone now retain the existing one-million-buffer resource ceiling.",
+          "Rejected a hard per-tree bound that prevented critical repairs.",
+          "Rejected timing-tolerance selection and unbounded spatial alternatives because their measured QoR tradeoffs did not advance the wirelength target."
+        ],
+        "correctness": [
+          "Median splits strictly reduce each non-fitting group. Moved group storage is independent of the growing queue.",
+          "Every original sink occurs in one leaf group; backbone remapping produces postorder references to earlier buffers.",
+          "Electrical source/branch constraints, area/cell limits and detailed legalized timing retention are unchanged.",
+          "The wire bound is anchored before spatial candidates; later candidates cannot relax it.",
+          "Reset/clock exclusion stays in the existing caller. No user-visible defaults changed."
+        ],
+        "tests": [
+          "SpatialClustersIsolateDistantSinkCapacitance",
+          "SpatialClustersDoNotDuplicateTheNetBoundingBox",
+          "FasterClusterCannotAddAnOverlappingSourceWire",
+          "3 placement/repair suites and 5 integration/session/reset suites passed"
+        ],
+        "remaining": [
+          "F still fails: lfsr +6.329%, minimax about +10.014% versus matched pure GP.",
+          "Full A-J objective remains active; STA-share, broader census, automatic-grid/curve agreement and other recorded gaps remain."
+        ]
+      },
+      "tests": {
+        "guarded-build.log": {
+          "path": "/tmp/1f-wire-v41/guarded-build.log",
+          "sha256": "7a44fce5d3537dfcc47e80a470884e09b12f80cb40863c06218196e6c26042f1"
+        },
+        "guarded-tests.log": {
+          "path": "/tmp/1f-wire-v41/guarded-tests.log",
+          "sha256": "3820bb73e3678f4802012ed047994e69bc470ecf2e7a36e70435f14977f9b03f"
+        },
+        "wire-guard-test.log": {
+          "path": "/tmp/1f-wire-v41/wire-guard-test.log",
+          "sha256": "233ffba2f77d0a23fcb158806722cf523bd4dbc8d3227b98a6dbdeb7d5fb1b5b"
+        },
+        "integration-tests.log": {
+          "path": "/tmp/1f-wire-v41/integration-tests.log",
+          "sha256": "72d9ad02b64cfa46e25a3ca008ff9b9129c372df234a1e0100c4115308d5137f"
+        },
+        "reviewed-build.log": {
+          "path": "/tmp/1f-wire-v41/reviewed-build.log",
+          "sha256": "c1874660cb32e02e03513c631043349978e17c3ee0071ffbe859285457f83f14"
+        },
+        "reviewed-integration-tests.log": {
+          "path": "/tmp/1f-wire-v41/reviewed-integration-tests.log",
+          "sha256": "95b278d32b795eaae76bd59f17168dcbca08150f743341427cf2b92755ff16f1"
+        }
+      },
+      "remaining": "Full A-J goal remains open. F still exceeds 3% over matched pure GP on both designs; other previously recorded STA-share, census, grid-policy/curve-agreement and import issues remain."
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",
