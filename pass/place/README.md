@@ -1132,6 +1132,14 @@ branches and inserts repeaters along long edges. It uses Liberty input caps,
 available slew/cap/fanout limits and placement wire RC to plan candidates. Resolved
 physical pins preserve individual packed-bus bits through wiring aliases.
 
+The forest search includes the direct source connection and one repeater at the
+source, even when that source meets its electrical limits. A weak but legal
+driver may benefit from isolating its load without a larger distribution tree.
+Optimal repeater spacing generates spatial alternatives; branch selection uses
+RC delay, capacitance and fanout rather than treating that spacing as a hard
+wire-length limit. Cell/area budgets and fresh timing of the legalized candidate
+still decide whether an edit is retained.
+
 Pre-CTS placement does not construct reset trees. `synth.place.reset_fanout` defaults
 to 0; nonzero values are rejected. Existing mapped control cells remain physical
 objects for density, overlap, site and row legality.

@@ -22,6 +22,45 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Buffer-tree search now considers a single repeater at the source even when
+that source already satisfies electrical limits. Optimal repeater spacing
+still generates tree alternatives, but does not reject a branch whose RC delay,
+load and fanout are acceptable. Detailed timing of the legalized candidate and
+the existing cell/area budgets still govern retention. Six optimized suites pass
+on merged upstream <code>88832abdf</code>; public defaults are unchanged.</p>
+<table><thead><tr><th>Design</th><th>Independent WNS (ps)</th><th>HPWL (µm)</th><th>Placement (s)</th></tr></thead><tbody>
+<tr><td>lfsr</td><td>-61.992 → -61.992</td><td>211.974 → 211.974</td><td>2.622 → 2.617</td></tr>
+<tr><td>minimax</td><td>-991.355 → -950.289</td><td>51140.215 → 46924.026</td><td>43.925 → 41.397</td></tr>
+<tr><td>NVDLA/partition_m</td><td>-914.371 → -914.371</td><td>100823.601 → 100823.601</td><td>35.531 → 35.654</td></tr>
+<tr><td>coralnpu</td><td>-13961.971 → -13961.971</td><td>3671251.142 → 3671251.142</td><td>536.009 → 520.035</td></tr>
+</tbody></table>
+<p>All four use common production defaults, 100 ps clocks and reset false paths,
+and satisfy the 1.5× placement-time and 3% cell/area bounds. Lfsr, partition_m
+and coralnpu retain byte-identical DEFs. Minimax improves WNS by 41.066 ps and
+reduces HPWL by 8.24%. Its fresh control and candidate
+run on CPU 13; the other controls are earlier v37 measurements. Coralnpu takes
+667.53 s wall / 667.47 s CPU and
+9843.0 MiB peak RSS. Exact provenance, scores and tests are in
+<code>runs.compact_source_repeater_v38</code>.</p>
+<p>Publication validation rebuilds after upstream proof-tooling changes and passes
+all six optimized suites. A fresh minimax run with that executable preserves the
+exact DEF, weights, HPWL and independent WNS; placement takes
+47.817 s and total CPU 71.92 s. This is 1.089× the fresh control placement
+time, within the 1.5× budget, but does not demonstrate a post-merge speedup.
+No blocking code-review findings remain for this change.</p>
+<p>The diagnostic with timing-driven GP disabled but normal repair retained
+worsens minimax WNS to −1,312.774 ps and still has 50,587.761 µm HPWL. Stage
+reports locate most wirelength growth in buffer insertion, not the warm timing
+rounds. The retained candidate lowers minimax's excess over pure GP from 21.70%
+to 11.66%; <strong>F's 3% bound remains unmet.</strong></p>
+<p>The refreshed imported minimax pure-GP check fails D/E: default density 0.5
+cannot fit the supplied core (movable cells alone occupy 65.4%), reaching
+1,500 iterations with overflow 0.267 and
+701,412.516 µm HPWL. A density-only diagnostic at 0.7 converges in 500 iterations
+and takes 11.84 s CPU, but still has 111,796.250 µm HPWL versus the 50,317.3 µm
+acceptance limit. That override is not a production setting. The full A–J goal,
+including total STA share and the larger-design/import census, remains open.</p>
+
 <p>GP timing feedback now uses dense slack/clock arrays with a shared immutable
 pin/net index. Coordinate-only samples reuse bound timer pins; topology and
 what-if changes invalidate the bindings. Net weighting uses numeric indices for
