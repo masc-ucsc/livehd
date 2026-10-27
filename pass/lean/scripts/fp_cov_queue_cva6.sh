@@ -42,7 +42,7 @@ json_status() { python3 -I -c "import json,sys;print((json.load(open(sys.argv[1]
 # PRE-LAUNCH provenance binding: written BEFORE any phase executes.
 { echo "row=$ROW attempt=$ATTEMPT top=$TOP"; echo "wrapper=$WRAP sha256=$(sha256sum "$WRAP" | cut -d\  -f1)";
   echo "filelist=$FL sha256=$(sha256sum "$FL" | cut -d\  -f1)"; echo "lhd=$LOPT sha256=$(sha256sum "$LOPT" | cut -d\  -f1)";
-  echo "max_width=1048576 (scripts/run_cva6_module_lean_stress.sh:175; the DEFAULT 1024 refusal is preserved and recorded)";
+  echo "max_width=1048576 (scripts/run_cva6_module_lean_stress.sh:175; set explicitly -- the pass default is no cap)";
 } > "$B/BINDING.txt"
 
 $CR "$ROW" s1_compile_lg "$B/s1_compile" "${FP_MEMMAX:-48G}" "${FP_TIMEOUT:-0}" -- \

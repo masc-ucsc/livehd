@@ -28,7 +28,9 @@ LeanCertWFFallback parse_cert_wf_fallback(std::string_view mode) {
   }
   return LeanCertWFFallback::Fail;
 }
-size_t parse_max_width(std::string_view s, size_t dflt = 1024) {
+// Default: NO CAP -- see core/str_tools.hpp::parse_max_width, whose contract this
+// mirrors. Keep the two in step.
+size_t parse_max_width(std::string_view s, size_t dflt = std::numeric_limits<size_t>::max()) {
   if (s.empty()) {
     return dflt;
   }

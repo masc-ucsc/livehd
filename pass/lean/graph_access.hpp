@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -132,7 +133,7 @@ struct Memory_info {
 struct LeanCtx {
   hhds::Graph*                    g         = nullptr;
   bool                            strict    = true;
-  size_t                          max_width = 1024;
+  size_t                          max_width = std::numeric_limits<size_t>::max();  // no cap by default
   std::map<std::string, uint32_t> input_width;
   std::map<std::string, uint32_t> input_source_id;
   std::map<uint32_t, uint32_t>    flop_width;

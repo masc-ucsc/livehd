@@ -15,7 +15,10 @@ namespace lean_export {
 
 struct ScanOptions {
   bool   strict    = true;
-  size_t max_width = 1024;
+  // Hard cap on any node's Bits width. No cap is the DEFAULT on purpose: a
+  // ceiling here refuses designs LiveHD itself represents fine (`bits` is a
+  // finite int32), so it is opt-in for a proof backend that wants one.
+  size_t max_width = std::numeric_limits<size_t>::max();
   // Hard cap on the scanned combinational cone's node count. 0 = unlimited,
   // and that is the DEFAULT on purpose: a budget that fires out of the box
   // could refuse a design that emits fine today, and the traversal's own push

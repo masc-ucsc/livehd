@@ -438,6 +438,59 @@ TEST(DesignScan, HotmuxWithoutArmsIsRefused) {
   EXPECT_THROW(scan_design(*g, {}), std::runtime_error);
 }
 
+// The node-width ceiling is OPT-IN. Scanning with default options must accept a
+// node of any finite width LiveHD can represent; only an explicitly requested
+// `max_width` may refuse one. A default ceiling here refuses designs the rest of
+// the tool handles perfectly well -- rows B09 and B10 of the 12x5 matrix carry
+// 3536- and 2080-bit nodes and were turned away by a 1024 default nobody asked
+// for, which read as "the emitter cannot do this design" when it could.
+TEST(DesignScan, WideNodesScanByDefaultAndOnlyAnExplicitCapRefusesThem) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_wide_node");
+  auto  io  = lib.create_io("wide_node");
+  io->add_input("a", 1);
+  io->set_bits("a", 3536);
+  io->add_input("b", 2);
+  io->set_bits("b", 3536);
+  io->add_output("y", 1);
+  io->set_bits("y", 3536);
+  auto g    = io->create_graph();
+  auto node = create_typed_node(*g, Ntype_op::And);
+  set_bits(node.create_driver_pin(0), 3536);
+  g->get_input_pin("a").connect_sink(node.create_sink_pin(0));
+  g->get_input_pin("b").connect_sink(node.create_sink_pin(1));
+  node.create_driver_pin(0).connect_sink(g->get_output_pin("y"));
+
+  EXPECT_NO_THROW(scan_design(*g, {})) << "the default must impose no width cap";
+  EXPECT_THROW(scan_design(*g, ScanOptions{.max_width = 1024}), std::runtime_error)
+      << "an explicitly requested cap must still refuse a node above it";
+}
+
+// Same property through the Get_mask path, which infers a width rather than
+// reading one off a pin. `[0:1025]` is a well-formed 1026-bit extraction: it
+// satisfies `0 <= lo < hi`, and a mask wider than its source extends rather
+// than being malformed. Only an explicit cap may turn it away.
+TEST(DesignScan, WideMaskEndpointsScanByDefaultAndOnlyAnExplicitCapRefusesThem) {
+  using namespace livehd::graph_util;
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_wide_mask");
+  auto  io  = lib.create_io("wide_mask");
+  io->add_output("y", 1);
+  io->set_bits("y", 8);
+  auto       g     = io->create_graph();
+  auto       node  = create_typed_node(*g, Ntype_op::Get_mask);
+  const auto drive = [&](std::string_view name, int value) {
+    create_const(*g, *Dlop::create_integer(value)).connect_sink(setup_sink_by_name(node, name));
+  };
+  drive("a", 171);
+  drive("lo", 0);
+  drive("hi", 1025);
+  set_bits(node.create_driver_pin(0), 8);
+  node.create_driver_pin(0).connect_sink(g->get_output_pin("y"));
+
+  EXPECT_NO_THROW(scan_design(*g, {})) << "a 1026-bit mask is well formed; the default imposes no cap";
+  EXPECT_THROW(scan_design(*g, ScanOptions{.max_width = 1024}), std::runtime_error)
+      << "an explicitly requested cap must still refuse it";
+}
+
 TEST(DesignScan, ConstantPoolPreservesUnsizedValuesAndSignedWidths) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_const_pool");
   auto  io  = lib.create_io("constant_pool");
@@ -529,13 +582,16 @@ TEST(DesignScan, EndpointMasksPreserveExtractionAndReplacement) {
     }
   }
 }
+// The rule is `0 <= lo < hi` and nothing more (design_scan.cpp:1022). A mask
+// WIDER than its source is legitimate -- it extends -- so do not add a wide
+// endpoint pair here expecting a refusal: that is a `max_width` question, and
+// it lives in WideNodesScanByDefaultAndOnlyAnExplicitCapRefusesThem below.
 TEST(DesignScan, InvalidMaskEndpointsAreRefused) {
   using namespace livehd::graph_util;
   for (const auto& [lo, hi] : std::vector<std::pair<int, int>>{
-           {-1,    3},
-           { 3,    3},
-           { 4,    3},
-           { 0, 1025}
+           {-1, 3},
+           { 3, 3},
+           { 4, 3}
   }) {
     auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_bad_range_" + std::to_string(lo) + "_" + std::to_string(hi));
     auto  io  = lib.create_io("bad_range");

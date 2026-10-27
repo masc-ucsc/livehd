@@ -119,7 +119,11 @@ namespace str_tools {
 // no cap -> SIZE_MAX (every `w > max_width` guard is then always-false, so the
 // upper bound is disabled while the separate `w == 0` unsized-node check stays).
 // A positive integer sets that cap; empty/garbage falls back to the default.
-[[nodiscard]] inline size_t parse_max_width(std::string_view s, size_t dflt = 1024) {
+//
+// The default is NO CAP. LiveHD's own `bits` attribute is a finite int32, so a
+// width ceiling here refuses designs the rest of the tool handles; it is opt-in
+// for the proof backends that actually want one, never the out-of-the-box state.
+[[nodiscard]] inline size_t parse_max_width(std::string_view s, size_t dflt = std::numeric_limits<size_t>::max()) {
   if (s.empty()) {
     return dflt;
   }

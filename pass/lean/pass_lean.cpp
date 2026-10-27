@@ -28,7 +28,9 @@ void Pass_lean::setup() {
                         "legacy|verified_compiler. verified_compiler emits ONLY <Top>_designCert; the model comes from "
                         "the proved compiler Compiler.compileDesign instead of from this pass.",
                         "legacy");
-  m1.add_label_optional("max_width", "Hard cap on node Bits width; 0 or 'unlimited' = no cap (default 1024).", "1024");
+  m1.add_label_optional("max_width",
+                        "Hard cap on node Bits width; 0 or 'unlimited' = no cap (default: no cap).",
+                        "unlimited");
   m1.add_label_optional("max_nodes",
                         "Hard cap on the combinational cone's node count; 0 or 'unlimited' = no cap (default 0).",
                         "0");

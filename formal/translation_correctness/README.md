@@ -500,7 +500,7 @@ When invoking `lhd` directly, pass these with `--set formal.isabelle.<option>=<v
 |--------|---------|---------|
 | `strict` | `true` | Abort on unsupported ops |
 | `normalize` | `true` | Normalize pre-export width artifacts |
-| `max_width` | `1024` | Cap on node width (`0` or `unlimited` = no cap) |
+| `max_width` | no cap | Cap on node width (`0` or `unlimited` = no cap; a positive N imposes one) |
 | `emit_fast_bridge` | `false` | Emit per-node fast values `<top>_fv<id>`; non-memory designs only |
 | `cert_wf` | `skip` | `skip`, `eval`, `sorry`, or `chunked` |
 | `cert_wf_fallback` | `fail` | `fail`, `sorry`, or `eval` for unsupported chunks under `cert_wf:chunked` |
