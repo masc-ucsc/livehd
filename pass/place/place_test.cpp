@@ -4675,6 +4675,85 @@ TEST(Placement, OriginalDefBlockagesRemainPhysicalConstraintsWithoutSignalInstan
   EXPECT_THROW(place(*graph, transparent_library, options), std::invalid_argument);
 }
 
+TEST(Placement, SegmentedImportedRowsConstrainPlacementSnapshotsAndEco) {
+  hhds::GraphLibrary source, seed_library;
+  auto               graph   = tie_graph(source, false);
+  auto               options = plain_options();
+  options.lefs               = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  const auto root            = std::string(std::getenv("TEST_TMPDIR")) + "/segmented_import";
+  options.density            = .5;
+  options.output_dir         = root + "/seed";
+  options.iterations         = 0;
+  options.bins               = 4;
+  options.core = options.die = {0, 0, 18.4, 10.88};
+  auto       seed            = place(*graph, seed_library, options);
+  const auto tech            = physical::read_lef(options.lefs);
+  auto       frame           = seed.floorplan;
+  const auto first           = frame.rows.front();
+  auto       left = first, right = first;
+  left.name        = "left";
+  left.count       = 10;
+  right.name       = "right";
+  right.x         += 30 * first.step;
+  right.count      = 10;
+  // A hole within one row and a completely missing row both remain forbidden.
+  frame.rows       = {right, frame.rows[3], left, frame.rows[2]};
+  frame.blockages  = {
+      {false, {}, {{13800, 8160, 18400, 10880}}}
+  };
+  for (auto& terminal : frame.terminals) {
+    terminal.status = physical::Status::FIXED;
+  }
+  options.floorplan = root + "/segments.def";
+  physical::write_def(frame, options.floorplan);
+  options.iterations = options.min_iterations = 20;
+  options.snapshots                           = true;
+  options.gp_observer_interval                = 10;
+  unsigned observed                           = 0;
+  options.gp_observer                         = [&](const Result& snapshot, const Gp_observation&) {
+    ++observed;
+    EXPECT_EQ(snapshot.floorplan.rows, frame.rows);
+    EXPECT_EQ(snapshot.floorplan.blockages, frame.blockages);
+    EXPECT_EQ(snapshot.floorplan.components.size(), 2);
+    EXPECT_EQ(snapshot.parasitics->cells.size(), 2);
+  };
+  for (bool terminal : {false, true}) {
+    hhds::GraphLibrary placed_library;
+    options.optimization_pending = !terminal;
+    options.output_dir           = root + (terminal ? "/terminal" : "/native");
+    auto placed                  = place(*graph, placed_library, options);
+    EXPECT_NO_THROW(check_legality(tech, placed.floorplan));
+    EXPECT_EQ(placed.floorplan.rows, frame.rows);
+    EXPECT_EQ(placed.floorplan.blockages, frame.blockages);
+    EXPECT_EQ(placed.floorplan.components.size(), 2);
+    for (const auto& file : {"out.def", "before_legalization.def", "after_legalization.def"}) {
+      auto exported = physical::read_def(options.output_dir + "/" + file);
+      EXPECT_EQ(exported.rows, frame.rows);
+      EXPECT_EQ(exported.blockages, frame.blockages);
+    }
+    if (terminal) {
+      auto previous = std::make_shared<physical::Floorplan>(placed.floorplan);
+      for (auto& cell : previous->components) {
+        cell.place.x = 9200;
+        cell.place.y = 2720;
+      }
+      auto eco     = options;
+      eco.previous = previous;
+      eco.floorplan.clear();
+      eco.gp_observer    = {};
+      eco.changed_cells  = {"inv", "nand"};
+      eco.legalize_cells = true;
+      eco.output_dir     = root + "/eco";
+      hhds::GraphLibrary eco_library;
+      const auto         repaired = place(*graph, eco_library, eco);
+      EXPECT_NO_THROW(check_legality(tech, repaired.floorplan));
+      EXPECT_EQ(repaired.floorplan.rows, frame.rows);
+      EXPECT_EQ(repaired.floorplan.blockages, frame.blockages);
+    }
+  }
+  EXPECT_GT(observed, 0);
+}
+
 TEST(Placement, TieLocalizationRespectsHardDefExclusionsAfterNativeLegalization) {
   hhds::GraphLibrary source, seed_library, placed_library;
   auto               graph = tie_graph(source);
@@ -5619,6 +5698,22 @@ END LIBRARY
   EXPECT_GT(taps, 40);
   EXPECT_EQ(result.floorplan.components.size(), 13 + taps);
   EXPECT_GT(result.floorplan.rows.size(), 20);
+  auto imported_options         = options;
+  imported_options.handoff_taps = false;
+  EXPECT_NO_THROW(check_legality(tech, result.floorplan, imported_options));
+  auto overlapping = result.floorplan;
+  auto tap         = std::find_if(overlapping.components.begin(), overlapping.components.end(), [](const auto& c) {
+    return c.macro == "TAPCELL_ASAP7_75t_R";
+  });
+  ASSERT_NE(tap, overlapping.components.end());
+  auto second_tap
+      = std::find_if(std::next(tap), overlapping.components.end(), [](const auto& c) { return c.macro == "TAPCELL_ASAP7_75t_R"; });
+  ASSERT_NE(second_tap, overlapping.components.end());
+  second_tap->place = tap->place;
+  EXPECT_THROW(check_legality(tech, overlapping, imported_options), std::runtime_error);
+  tap->place.x = macro_place.x;
+  tap->place.y = macro_place.y;
+  EXPECT_THROW(check_legality(tech, overlapping, imported_options), std::runtime_error);
   const auto snapshot = physical::read_def(options.output_dir + "/after_legalization.def");
   EXPECT_EQ(snapshot.components.size(), result.floorplan.components.size());
   EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/handoff_taps.json"));

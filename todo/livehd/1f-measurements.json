@@ -30699,6 +30699,82 @@
           "Correct driver-aware timing model descriptions"
         ]
       }
+    },
+    "segmented_rows_v29": {
+      "status": "passed",
+      "purpose": "segmented-row import and physical legality; no comparative QoR claim",
+      "input": "/tmp/1f-speed-v14/coralnpu/C/input.def",
+      "output": "/tmp/1f-segmented/coralnpu_fixed/out.def",
+      "input_sha256": "bb436ac7808a2c0ceb618f2a590c9902a70c1f997ecbaa7b6efe8092a4ab6c68",
+      "output_sha256": "4490a7abbc2f294d64704d93c8f4af94b30d4c27fac7b7f491a05842a56cf237",
+      "row_segments": 1962,
+      "row_levels": 1261,
+      "row_records_unchanged": true,
+      "component_count": 198300,
+      "fixed_component_poses_unchanged": 10059,
+      "all_component_masters_unchanged": true,
+      "binary": {
+        "sha256": "91cc1124c3536e402acbc57e4b89c3f0eb4380b4fcbfc67514c6721c759a7cbf",
+        "parent_commit": "faceca47e",
+        "changes": "segmented rows and imported physical tap/spacer halo checks"
+      },
+      "config": {
+        "output": "/tmp/1f-segmented/coralnpu_fixed",
+        "top": "CoreMiniAxi",
+        "sdc": "/tmp/1f-wns-v1/reserved/coralnpu/tight.sdc",
+        "liberty": "/tmp/1f-speed-v14/lib/coralnpu.lib",
+        "tech_rc": "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/setRC.tcl",
+        "lefs": [
+          "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/lef/asap7_tech_1x_201209.lef",
+          "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/lef/asap7sc7p5t_28_R_1x_220121a.lef",
+          "/home/renau/projs/HighTide/designs/asap7/coralnpu/sram/lef/fakeram_2048x128_1rw.lef",
+          "/home/renau/projs/HighTide/designs/asap7/coralnpu/sram/lef/fakeram_512x128_1rw.lef"
+        ],
+        "def": "/tmp/1f-speed-v14/coralnpu/C/input.def",
+        "timing_only": false,
+        "threads": 1,
+        "source_def": true,
+        "export_rc": false,
+        "cell_place": true
+      },
+      "user_cpu_s": 323.09,
+      "system_cpu_s": 6.2,
+      "peak_rss_kib": 9573720,
+      "tests": "Seven optimized suites passed; additional physical overlap regression passed",
+      "baseline": "Frozen v28 binary rejects identical input at contiguous equal-width row validation",
+      "limitations": "Other segmented benchmark imports and J frontend failures remain unverified; A-J overall still in progress",
+      "runtime": {
+        "seed_s": 27.046,
+        "place_s": 236.814,
+        "timing_place_s": 0.00135397,
+        "sizing_s": 4.2e-07,
+        "repair_s": 2e-08,
+        "endpoint_sta_s": 56.4801,
+        "export_s": 1.10773,
+        "timing_refine_s": 57.5892,
+        "fixed_components": 10059,
+        "timing_evaluations": 7,
+        "timing_engine_s": 105.539,
+        "timing_builds": 1,
+        "timing_repowered_gates": 0,
+        "timing_inserted_gates": 0,
+        "timing_removed_gates": 0,
+        "timing_updated_rc_nets": 1150409
+      },
+      "wall_s": 329.47,
+      "iteration_cap_warning": true,
+      "gp_iterations": 1500,
+      "final_gp_overflow": 0.08543935138212602,
+      "test_log": "/tmp/1f-segmented-tap-tests.log",
+      "overlap_test_log": "/tmp/1f-segmented-tap-overlap-test.log",
+      "merged_validation": {
+        "upstream": "1a8c39613",
+        "status": "passed",
+        "suites": 7,
+        "test_timeout_s": 30,
+        "log": "/tmp/1f-segmented-merged-tests.log",
+        "note": "Benchmark used frozen pre-pull binary recorded above; merged source passes production CLI/placement/repair/DEF/probe tests."
+      }
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",

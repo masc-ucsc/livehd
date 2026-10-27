@@ -338,11 +338,17 @@ the replaced root's `placement_block`, color and synthesis-region provenance.
 Displacement is bounded by the chosen window; there is no separate per-cell
 radius constraint, and solver momentum is not reused across calls.
 
-Floorplan input currently requires the same DBU as LEF and contiguous equal-width
-N/FS rows. Imported IO pins must be FIXED unless IO adjustment is enabled;
+Floorplan input requires the same DBU as LEF and N/FS rows on a common site
+lattice. Segmented rows and missing row bands are supported: the solver uses
+a rectangular frame with hard exclusions for absent sites. Exported DEFs,
+timing snapshots and repair handoffs retain the original row segments and
+blockages. Overlapping segments, inconsistent orientations within a row band,
+off-grid segments and rotated rows are refused.
+Fixed physical-only WELLTAP/SPACER cells may occupy macro spacing halos, as in
+terminal legalization; their actual bodies still must not overlap any cell.
+Imported IO pins must be FIXED unless IO adjustment is enabled;
 PLACED pins then supply movable initial positions, and UNPLACED pins receive
-generated perimeter seeds. Explicit FIXED pins remain fixed. Row gaps/blockages
-and rotated rows are refused.
+generated perimeter seeds. Explicit FIXED pins remain fixed.
 Mapped standard cells need matching LEF and Liberty models. Explicit hard macros
 remain movable and retain exact LEF dimensions, even when their widths/heights
 are not integral standard-cell sites/rows. DREAMPlace uses its existing macro

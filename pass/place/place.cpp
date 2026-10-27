@@ -1230,6 +1230,8 @@ struct View {
   int64_t                                       halo_x = 0, halo_y = 0;
   std::map<Endpoint, Bus_bit>                   bus_names;
   ph::Floorplan                                 fp;
+  // Solver rows span a rectangle; exports retain the imported row segments.
+  std::shared_ptr<const ph::Floorplan>          original_row_frame;
   std::vector<std::string>                      io_buses;
   std::vector<int>                              io_bits;
   std::vector<Cell>                             cells;
@@ -1244,7 +1246,13 @@ struct View {
   std::map<std::string, std::string>            cohesion_owners;
 };
 using CentroidSample = dp::CentroidSample;
-auto          summarize_centroids(const dp::Design& d) { return dp::detail::centroid_summary(d); }
+auto summarize_centroids(const dp::Design& d) { return dp::detail::centroid_summary(d); }
+void restore_imported_rows(ph::Floorplan& frame, const View& v) {
+  if (v.original_row_frame) {
+    frame.rows      = v.original_row_frame->rows;
+    frame.blockages = v.original_row_frame->blockages;
+  }
+}
 ph::Floorplan blockage_frame(const View& v) {
   // v.fp is a frame, with signal components deliberately removed. Bind only
   // the associated fixed components from the authoritative current cell view.
@@ -1436,6 +1444,7 @@ void snapshot_nets(ph::Floorplan& frame, const View& v) {
 // and repair callbacks receive a placement checkpoint.
 void snapshot_frame(ph::Floorplan& frame, const View& v) {
   frame = v.fp;
+  restore_imported_rows(frame, v);
   snapshot_nets(frame, v);
   frame.components.clear();
   for (const auto& c : v.cells) {
@@ -2263,6 +2272,38 @@ void validate_rows(const ph::Technology& tech, ph::Floorplan& fp) {
       throw std::runtime_error("DEF rows outside DIEAREA");
     }
   }
+}
+std::shared_ptr<const ph::Floorplan> prepare_rows(const ph::Technology& tech, ph::Floorplan& fp) {
+  auto rows = fp.rows;
+  std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.y < b.y; });
+  bool rectangular = !rows.empty() && tech.sites.contains(rows.front().site);
+  if (rectangular) {
+    const auto& first = rows.front();
+    const auto  rh    = std::llround(tech.sites.at(first.site).height * tech.dbu);
+    for (size_t i = 0; i < rows.size(); ++i) {
+      const auto& row  = rows[i];
+      rectangular     &= row.x == first.x && row.count == first.count && row.y == first.y + static_cast<int64_t>(i) * rh;
+    }
+  }
+  if (rectangular) {
+    validate_rows(tech, fp);
+    return {};
+  }
+  // The shared adapter validates the lattice and turns absent sites into hard
+  // exclusions. Keep these masks private: original rows encode them in DEF.
+  ph::Floorplan solver;
+  try {
+    solver = ph::rectangular_placement_frame(fp, tech);
+  } catch (const std::invalid_argument& error) {
+    throw std::runtime_error(error.what());  // Preserve the placer import error contract.
+  }
+  auto original       = std::make_shared<ph::Floorplan>();
+  original->rows      = std::move(fp.rows);
+  original->blockages = std::move(fp.blockages);
+  fp.rows             = std::move(solver.rows);
+  fp.blockages        = std::move(solver.blockages);
+  validate_rows(tech, fp);
+  return original;
 }
 // Rectangular Hungarian assignment; cost is Manhattan distance to each net's
 // current cell-pin centroid. Already fixed terminals reserve their slots. Slots
@@ -3869,15 +3910,19 @@ void check_placed_legality(const Result& result, const Options& options) {
 void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, const Options& requested) {
   const auto options = resolve_macro_halo(requested, fp.rows.empty() ? 0 : tech.sites.at(fp.rows.front().site).height);
   check_macro_halo(tech, fp, options);
-  const auto [x, y] = effective_halo(options);
-  if (requested.handoff_taps) {
-    // Physical-only well taps may occupy the macro placement halo; the standard
-    // cells must still respect it. Every body is checked for real overlap below.
-    const auto& tap_master = placement_tech_profile(tech, requested).tap_master;
-    auto        logical    = fp;
-    std::erase_if(logical.components, [&](const auto& c) {
-      return c.macro == tap_master && (c.place.status == Status::FIXED || c.place.status == Status::LOCKED);
-    });
+  const auto [x, y]              = effective_halo(options);
+  const auto tap_master          = requested.handoff_taps ? placement_tech_profile(tech, requested).tap_master : std::string{};
+  const auto physical_only_fixed = [&](const auto& c) {
+    const auto& kind = tech.macros.at(c.macro).klass;
+    return (c.place.status == Status::FIXED || c.place.status == Status::LOCKED)
+           && (kind == "CORE WELLTAP" || kind == "CORE SPACER" || (!tap_master.empty() && c.macro == tap_master));
+  };
+  if (std::any_of(fp.components.begin(), fp.components.end(), physical_only_fixed)) {
+    // Imported physical-only cells follow the same rule as generated handoff
+    // taps and terminal legalization: halos protect logic, while every actual
+    // body (including taps/spacers) must remain nonoverlapping.
+    auto logical = fp;
+    std::erase_if(logical.components, physical_only_fixed);
     check_legality(tech, logical, x, y);
     check_legality(tech, fp, 0, 0);
   } else {
@@ -4624,8 +4669,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     if (!cached.HasParseError() && cached.IsObject() && cached.HasMember("environment") && cached["environment"].IsString()
         && cached["environment"].GetString() == env) {
       try {
-        auto frame = ph::read_def(options.cache_dir + "/floorplan.def");
-        validate_rows(tech, frame);
+        auto frame  = ph::read_def(options.cache_dir + "/floorplan.def");
+        auto solver = frame;
+        prepare_rows(tech, solver);
         for (auto& c : frame.components) {
           const auto master = tech.macros.find(c.macro);
           if (master != tech.macros.end()) {
@@ -4633,7 +4679,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
             c.place.height = std::llround(master->second.height * tech.dbu);
           }
         }
-        const auto width = frame.rows.front().count * sw, height = static_cast<int64_t>(frame.rows.size()) * rh;
+        const auto width = solver.rows.front().count * sw, height = static_cast<int64_t>(solver.rows.size()) * rh;
         if (frame.design == source.get_name() && area <= double(width) * height && max_width <= width
             && max_height <= static_cast<int64_t>(height)) {
           previous         = std::make_shared<ph::Floorplan>(std::move(frame));
@@ -4648,7 +4694,6 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   const bool generated_rows = options.floorplan.empty() && (!previous || cached_reference);
   if (options.floorplan.empty() && previous) {
     v.fp = *previous;
-    validate_rows(tech, v.fp);
   } else if (options.floorplan.empty()) {
     int64_t columns = 0, rows = 0, origin_x = 0, origin_y = 0;
     if (options.die.empty() && options.core.empty()) {
@@ -4741,7 +4786,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       }
     }
   }
-  validate_rows(tech, v.fp);
+  v.original_row_frame = prepare_rows(tech, v.fp);
   if ((options.macro_transparency.enabled() || options.vanished_memory)
       && std::any_of(v.fp.blockages.begin(), v.fp.blockages.end(), [](const auto& b) { return !b.soft; })) {
     throw std::invalid_argument("hard DEF placement blockages require opaque fixed macros until mask opacity is independent");
@@ -4899,6 +4944,15 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
         if (generated_rows) {
           for (auto& row : v.fp.rows) {
             row.orientation = Orientation::N;
+          }
+          if (v.original_row_frame) {
+            // Private cached rows may change orientation with the generated
+            // solve. Explicit imported/previous rows never enter this branch.
+            auto frame = std::make_shared<ph::Floorplan>(*v.original_row_frame);
+            for (auto& row : frame->rows) {
+              row.orientation = Orientation::N;
+            }
+            v.original_row_frame = std::move(frame);
           }
           // A cached frame already seeded its CORE cells with the old FS flips.
           for (auto& c : v.cells) {
@@ -6085,6 +6139,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           const std::string name = stage == dp::PlacementStage::global_placement ? "before_legalization.def"
                                    : stage == dp::PlacementStage::legalization   ? "after_legalization.def"
                                                                                  : "after_detailed.def";
+          restore_imported_rows(frame, v);
           if (!handoff_rows.empty()) {
             frame.rows = handoff_rows;
             frame.components.insert(frame.components.end(), handoff_cells.begin(), handoff_cells.end());
@@ -6958,6 +7013,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       view.design = physical;
       capture(view, tech, legal);
       auto frame = view.fp;
+      restore_imported_rows(frame, view);
       frame.components.clear();
       frame.nets.clear();
       for (const auto& c : view.cells) {
@@ -8971,6 +9027,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   }
   if (options.analyze_colors_only) {
     result.floorplan = v.fp;
+    restore_imported_rows(result.floorplan, v);
     for (const auto& c : v.cells) {
       result.floorplan.components.push_back({c.name, c.macro, c.place});
     }
@@ -9052,6 +9109,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     }
   }
   shape_io_perimeter_pins(v.fp);
+  restore_imported_rows(v.fp, v);
   std::optional<ph::Floorplan> handoff_grid;
   Pg_channel_stats             handoff_channel_stats;
   // Only a fresh final placement exports the physical handoff frame.
@@ -9132,6 +9190,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   if (resolved_uroute.export_features && !options.timing_seed && !options.retain_placement
       && options.completed_stage == Placement_stage::final) {
     auto snapshot = v;
+    prepare_rows(tech, snapshot.fp);
     make_arrays(snapshot, tech);
     const int nx = route_grid_bins(control.auxiliary_bins, metrics.bins_x ? metrics.bins_x : options.bins);
     const int ny = route_grid_bins(control.auxiliary_bins, metrics.bins_y ? metrics.bins_y : options.bins);

@@ -22,6 +22,21 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>The production placer now adapts imported segmented N/FS rows to a rectangular
+solver frame with hard exclusions for absent sites. Exports, timing snapshots,
+terminal legalization and ECO repair retain the original segments. Fixed imported
+WELLTAP/SPACER cells may occupy macro spacing halos, consistently with terminal
+legalization; actual body overlaps remain errors. Seven targeted optimized suites
+pass, including a split-row/missing-row/ECO regression and physical-overlap checks. The same seven suites also pass after merging upstream <code>1a8c39613</code> (Slang 12.1); the benchmark below remains tied to its frozen pre-pull binary.</p>
+<p>On the saved coralnpu flow-C floorplan, the old frozen v28 binary fails the
+contiguous-row check. The updated cell-placement path completes in 329.47 s wall /
+329.29 s CPU, with peak RSS 9,573,720 KiB. All 1,962 row segments across 1,261 row
+levels, all 198,300 component masters, and 10,059 fixed-component positions are
+preserved. This is an import/legality result, not a comparative QoR claim. GP still
+hits its 1,500-iteration cap at overflow 0.08544 and final endpoint STA takes
+56.48 s; E and B remain open. Other segmented benchmark imports and the frontend
+failures in J still need validation.</p>
+
 <p>Publication review: pulled LiveHD upstream through <code>ae53a9243</code>
 without conflicts. Published DREAMPlace <code>ba64ec8</code> and OpenTimer
 <code>57e4f9e</code>, and updated the LiveHD dependency pins. All 26 targeted
@@ -737,7 +752,7 @@ SB</code> once <a href="#A">A</a>–<a href="#E">E</a> land.</li>
 yosys-slang); NyuziProcessor and bp_uno <code>unmapped physical object: flop</code> after ABC.</li>
 <li><code>physical_repair</code>: <code>floorplan requires contiguous equal-width N/FS rows</code> for every design whose
 rows OpenROAD cut around macros — the flow-C comparison is impossible on cnn, partition_c, NyuziProcessor, bp_uno,
-eyeriss until imported row fragments are supported. The segmented-row adapter landed for the <a class="xref" href="2t-timeclosure.html#H">2t H</a> GP probe already handles such rows; it is not on the <code>physical_repair</code> / <code>lhd synth</code> import path.</li>
+eyeriss until imported row fragments are supported. The segmented-row adapter first landed for the <a class="xref" href="2t-timeclosure.html#H">2t H</a> GP probe. It is now integrated into the shared production placement import path, with a completed coralnpu flow-C import check; the other named designs remain to be checked.</li>
 </ul></li>
 </ul>
 
