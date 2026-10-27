@@ -22,6 +22,46 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>OpenTimer now seeds the ramp-duration fit with a reduced scalar crossing
+equation when both thresholds occur during the ramp. The original bounded
+solver still checks the waveform residual at its existing tolerance. Mixed/tail
+crossings and the long-ramp limit retain the old seed. The published pin
+<code>5cb81eb</code> passes six optimized suites, including independent
+voltage-bisection checks across threshold regimes and time scales. Defaults and
+the timing model are unchanged.</p>
+<p>Three alternating evaluations of the same saved minimax placement reduce
+median propagation from 1.445 to 1.236 s (14.5%) and the complete cold evaluation
+from 2.925 to 2.723 s (6.9%). WNS is unchanged. Reports differ in tiny numerical
+rounding: maximum reported pin-slew change is 0.000003815 ps and TNS changes by
+0.000153 ps.</p>
+<table><thead><tr><th>Design</th><th>Unchanged independent WNS (ps)</th><th>Placement, control → candidate (s)</th></tr></thead><tbody>
+<tr><td>lfsr</td><td>-60.271</td><td>2.035 → 2.038</td></tr>
+<tr><td>minimax</td><td>-950.268</td><td>44.247 → 42.395</td></tr>
+<tr><td>NVDLA/partition_m</td><td>-916.800</td><td>37.203 → 36.433</td></tr>
+<tr><td>coralnpu</td><td>-16736.600</td><td>783.386 → 733.790</td></tr>
+</tbody></table>
+<p>Lfsr, minimax and partition_m retain exact DEFs. Coral has 112 changed component
+records, including two master selections, with all other DEF sections unchanged;
+its HPWL improves by 2.152 µm. All four retain independent WNS, cell count and
+area. Runs use common production
+defaults, 100 ps clocks and reset false paths. Small-design controls are fresh on
+CPU 13; coral uses the preceding frozen v42 control on CPU 12. These are single
+flow samples, all within the 1.5× runtime budget. Rebuilding with the published
+pin reproduces lfsr's exact DEF and WNS. Evidence is recorded in
+<code>runs.reduced_ramp_fit_v43</code>.</p>
+<p>The named minimax <code>rep/placement.json</code> artifact also verifies H's
+3% cell/area bound: 16,505 → 16,209 cells (−1.79%) and 2,025.454 → 2,086.121 µm²
+(+2.995%). Its hash and inventory are recorded with the measurement. This is not
+a gross-cell claim for coral's reset/rail trees.</p>
+<p><strong>The full task remains open:</strong> total STA share is still above
+10%, and the prior wire-growth, checkpoint and broader census/import gaps remain.
+The new gemmini scaling run completed synthesis in 69.6 s CPU at 9,370 MiB RSS,
+but its full flow stopped during initial physical timing. A diagnostic repeat
+confirms the 16 GiB process-tree guard at 16,789,512 KiB, before GP. The live
+process had 33 threads on one pinned CPU; <code>Timer::set_num_threads</code> is
+currently a no-op. Its memory contribution remains unproven. This is a failing
+I result, with the trace and exact stop reason retained for diagnosis.</p>
+
 <p>OpenTimer now reuses each wire response across the paired slew and delay
 passes. Ideal-clock bypass, missing source slew and invalidated arcs retain their
 existing behavior. No timing approximation or public default changes. The published

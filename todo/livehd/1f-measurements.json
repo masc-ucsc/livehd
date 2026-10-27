@@ -40948,6 +40948,1698 @@
         "compiler_flags_contract": "pass"
       },
       "limitations": "The isolated cold minimax evaluation meets 3 s in this sample; B remains open because full STA share is above 10%, and this is not a complete checkpoint census. Original A-J requirements and previously documented QoR/census gaps remain open."
+    },
+    "reduced_ramp_fit_v43": {
+      "protocol": "Unchanged production defaults, 100 ps clocks, reset false paths, one pinned CPU. Fresh CPU13 controls for lfsr/minimax/partition_m; earlier frozen v42 CPU12 coral control. Full-flow times are single samples.",
+      "implementation": "Seed ramp duration with a reduced crossing equation when both thresholds cross during the ramp. The existing waveform residual, bounds and tolerance validate it; other regimes retain the original seed. No cache, model or default change.",
+      "opentimer_commit": "5cb81eb33d9465ba1b835ea3041186224647a1b4",
+      "comparison": {
+        "lfsr": {
+          "control": {
+            "path": "/tmp/1f-wns-v1/ramp_control/lfsr",
+            "score": {
+              "hpwl_um": 183.788,
+              "hpwl_all_nets_um": 197.9,
+              "measured_nets": 136,
+              "excluded_nets": 1,
+              "setup_wns_ps": -60.270761,
+              "setup_tns_ps": -2166.75545,
+              "hold_wns_ps": 53.285192,
+              "hold_tns_ps": 0.0,
+              "instances": 134,
+              "logical_cells": 134,
+              "physical_cells": 0,
+              "buffers": 1,
+              "buffer_area_um2": 0.2624,
+              "macros": 0,
+              "instance_area_um2": 18.6187,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "scoring_seconds": 1.086,
+              "power_mw": 0.000682,
+              "reset_ports": []
+            },
+            "placement_seconds": 2.035454,
+            "run": {
+              "status": "ok",
+              "wall_s": 4.77,
+              "cpu_s": 4.76,
+              "rss_mib": 407.84765625,
+              "tree_rss_mib": 391.421875,
+              "ipc": 2.5310046965629778,
+              "instructions": 53510152907.0,
+              "cycles": 21141862352.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "physical_timing": {
+              "evaluations": 11,
+              "builds": 1,
+              "ranking_evaluations": 8,
+              "ranking_seconds": 0.687764222,
+              "detailed_evaluations": 3,
+              "repowered_gates": 8,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 779,
+              "update_calls": 14,
+              "seconds": 0.717157775,
+              "validation_seconds": 0.001484458,
+              "reconcile_seconds": 0.674038856,
+              "exclusions_seconds": 0.00019600200000000005,
+              "propagation_seconds": 0.038218307,
+              "feedback_seconds": 0.0031351100000000017
+            },
+            "binary_manifest": {
+              "build": "-c opt --jobs=2; reviewed wire-response reuse; published dependency pins; no local overrides",
+              "repos": {
+                "livehd": {
+                  "head": "9ca0b96ea612a1712f8eeb9c1a31a42a1aaf1a55",
+                  "patch_sha256": "461ef6db2db21100bcdb1727a7d07e545e0aa8850d0ac29a2d7a051c2c5ed0b0"
+                },
+                "DREAMPlace": {
+                  "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                },
+                "OpenTimer": {
+                  "head": "a3630593b990c3ce978c187539b2efecff84ad32",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                }
+              },
+              "lhd": "e7ba2560f21dfd6766c1a3484415710b76c32af4e7dfea8ceb34992babc85513",
+              "physical_repair": "8cf4bcceb52047bc0246f872b3d27479ab250921235f70ea2ac6cedfcce0ef88",
+              "compiled_dependencies": {
+                "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                "opentimer": "a3630593b990c3ce978c187539b2efecff84ad32"
+              },
+              "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+              "harness_sha256": {
+                "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+                "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+              }
+            },
+            "def_sha256": "b3d67bb84f18ed886207fa77ed0f0691034721f9b7db6e338b54f8a495e9366f"
+          },
+          "candidate": {
+            "path": "/tmp/1f-wns-v1/ramp_candidate/lfsr",
+            "score": {
+              "hpwl_um": 183.788,
+              "hpwl_all_nets_um": 197.9,
+              "measured_nets": 136,
+              "excluded_nets": 1,
+              "setup_wns_ps": -60.270761,
+              "setup_tns_ps": -2166.75545,
+              "hold_wns_ps": 53.285192,
+              "hold_tns_ps": 0.0,
+              "instances": 134,
+              "logical_cells": 134,
+              "physical_cells": 0,
+              "buffers": 1,
+              "buffer_area_um2": 0.2624,
+              "macros": 0,
+              "instance_area_um2": 18.6187,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "scoring_seconds": 1.052,
+              "power_mw": 0.000682,
+              "reset_ports": []
+            },
+            "placement_seconds": 2.038463,
+            "run": {
+              "status": "ok",
+              "wall_s": 4.74,
+              "cpu_s": 4.7299999999999995,
+              "rss_mib": 408.90234375,
+              "tree_rss_mib": 416.3671875,
+              "ipc": 2.5591290192231813,
+              "instructions": 53732798757.0,
+              "cycles": 20996518094.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "physical_timing": {
+              "evaluations": 11,
+              "builds": 1,
+              "ranking_evaluations": 8,
+              "ranking_seconds": 0.698081196,
+              "detailed_evaluations": 3,
+              "repowered_gates": 8,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 779,
+              "update_calls": 14,
+              "seconds": 0.7236458039999999,
+              "validation_seconds": 0.001177336,
+              "reconcile_seconds": 0.6829352329999999,
+              "exclusions_seconds": 0.000168718,
+              "propagation_seconds": 0.036305067,
+              "feedback_seconds": 0.002977173999999998
+            },
+            "binary_manifest": {
+              "build": "-c opt --jobs=2; reduced ramp-fit seed candidate; local owned OpenTimer override; published dependency pins",
+              "repos": {
+                "livehd": {
+                  "head": "ea97d54e333f743daad0608f82909d1c2e9f50bb",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                },
+                "DREAMPlace": {
+                  "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                },
+                "OpenTimer": {
+                  "head": "a3630593b990c3ce978c187539b2efecff84ad32",
+                  "patch_sha256": "303ca545391900bfb8e4fdc651f785ac8fd32c521a9b602ae14cdd57f153ed27"
+                }
+              },
+              "lhd": "60766477c65d6c256a519bad74a5781c3d192bd77ac00048096a623ffaf7b9f2",
+              "physical_repair": "c5af0b14fa78627a78b6c22da1555c19ef12f3d9947d2dac6d64420ac2e1c69e",
+              "compiled_dependencies": {
+                "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                "opentimer": "a3630593b990c3ce978c187539b2efecff84ad32 + recorded local patch"
+              },
+              "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+              "harness_sha256": {
+                "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+                "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+              }
+            },
+            "def_sha256": "b3d67bb84f18ed886207fa77ed0f0691034721f9b7db6e338b54f8a495e9366f"
+          },
+          "identical_def": true,
+          "placement_ratio": 1.0014782942773455,
+          "wns_change_ps": 0.0,
+          "hpwl_change_um": 0.0
+        },
+        "minimax": {
+          "control": {
+            "path": "/tmp/1f-wns-v1/ramp_control/minimax",
+            "score": {
+              "hpwl_um": 46230.31,
+              "hpwl_all_nets_um": 46388.402,
+              "measured_nets": 16259,
+              "excluded_nets": 1,
+              "setup_wns_ps": -950.268312,
+              "setup_tns_ps": -1854618.411151,
+              "hold_wns_ps": 27.911343,
+              "hold_tns_ps": 0.0,
+              "instances": 16209,
+              "logical_cells": 16209,
+              "physical_cells": 0,
+              "buffers": 381,
+              "buffer_area_um2": 91.1687,
+              "macros": 0,
+              "instance_area_um2": 2086.121,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "scoring_seconds": 6.572,
+              "power_mw": 0.0531,
+              "reset_ports": []
+            },
+            "placement_seconds": 44.246944,
+            "run": {
+              "status": "ok",
+              "wall_s": 65.91,
+              "cpu_s": 65.88,
+              "rss_mib": 1274.09765625,
+              "tree_rss_mib": 1277.91796875,
+              "ipc": 2.149910113179099,
+              "instructions": 635800606322.0,
+              "cycles": 295733576220.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16209,
+              "area_um2": 2086.120979999586,
+              "within_budget": true,
+              "rejected_proposals": 479
+            },
+            "physical_timing": {
+              "evaluations": 14,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 3.970226695,
+              "detailed_evaluations": 7,
+              "repowered_gates": 1325,
+              "inserted_gates": 379,
+              "removed_gates": 1,
+              "updated_nets": 84483,
+              "update_calls": 21,
+              "seconds": 17.242033666999998,
+              "validation_seconds": 0.331131202,
+              "reconcile_seconds": 3.07583093,
+              "exclusions_seconds": 0.103881939,
+              "propagation_seconds": 11.780116025999998,
+              "feedback_seconds": 1.9248899200000016
+            },
+            "binary_manifest": {
+              "build": "-c opt --jobs=2; reviewed wire-response reuse; published dependency pins; no local overrides",
+              "repos": {
+                "livehd": {
+                  "head": "9ca0b96ea612a1712f8eeb9c1a31a42a1aaf1a55",
+                  "patch_sha256": "461ef6db2db21100bcdb1727a7d07e545e0aa8850d0ac29a2d7a051c2c5ed0b0"
+                },
+                "DREAMPlace": {
+                  "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                },
+                "OpenTimer": {
+                  "head": "a3630593b990c3ce978c187539b2efecff84ad32",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                }
+              },
+              "lhd": "e7ba2560f21dfd6766c1a3484415710b76c32af4e7dfea8ceb34992babc85513",
+              "physical_repair": "8cf4bcceb52047bc0246f872b3d27479ab250921235f70ea2ac6cedfcce0ef88",
+              "compiled_dependencies": {
+                "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                "opentimer": "a3630593b990c3ce978c187539b2efecff84ad32"
+              },
+              "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+              "harness_sha256": {
+                "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+                "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+              }
+            },
+            "def_sha256": "36e36ec0d5bf6cfeb1345c2fe97730b8c8759ab17c6900dd79a34dbf7f38c26e"
+          },
+          "candidate": {
+            "path": "/tmp/1f-wns-v1/ramp_candidate/minimax",
+            "score": {
+              "hpwl_um": 46230.31,
+              "hpwl_all_nets_um": 46388.402,
+              "measured_nets": 16259,
+              "excluded_nets": 1,
+              "setup_wns_ps": -950.268312,
+              "setup_tns_ps": -1854618.411151,
+              "hold_wns_ps": 27.911343,
+              "hold_tns_ps": 0.0,
+              "instances": 16209,
+              "logical_cells": 16209,
+              "physical_cells": 0,
+              "buffers": 381,
+              "buffer_area_um2": 91.1687,
+              "macros": 0,
+              "instance_area_um2": 2086.121,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "scoring_seconds": 6.404,
+              "power_mw": 0.0531,
+              "reset_ports": []
+            },
+            "placement_seconds": 42.39496,
+            "run": {
+              "status": "ok",
+              "wall_s": 63.94,
+              "cpu_s": 63.93,
+              "rss_mib": 1272.4921875,
+              "tree_rss_mib": 1276.9453125,
+              "ipc": 2.173649609477868,
+              "instructions": 623855379787.0,
+              "cycles": 287008254259.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16209,
+              "area_um2": 2086.120979999586,
+              "within_budget": true,
+              "rejected_proposals": 479
+            },
+            "physical_timing": {
+              "evaluations": 14,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 3.97836902,
+              "detailed_evaluations": 7,
+              "repowered_gates": 1325,
+              "inserted_gates": 379,
+              "removed_gates": 1,
+              "updated_nets": 84483,
+              "update_calls": 21,
+              "seconds": 15.689845772,
+              "validation_seconds": 0.32993844600000005,
+              "reconcile_seconds": 3.0594945319999995,
+              "exclusions_seconds": 0.103022954,
+              "propagation_seconds": 10.293506056999998,
+              "feedback_seconds": 1.8777974870000016
+            },
+            "binary_manifest": {
+              "build": "-c opt --jobs=2; reduced ramp-fit seed candidate; local owned OpenTimer override; published dependency pins",
+              "repos": {
+                "livehd": {
+                  "head": "ea97d54e333f743daad0608f82909d1c2e9f50bb",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                },
+                "DREAMPlace": {
+                  "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                },
+                "OpenTimer": {
+                  "head": "a3630593b990c3ce978c187539b2efecff84ad32",
+                  "patch_sha256": "303ca545391900bfb8e4fdc651f785ac8fd32c521a9b602ae14cdd57f153ed27"
+                }
+              },
+              "lhd": "60766477c65d6c256a519bad74a5781c3d192bd77ac00048096a623ffaf7b9f2",
+              "physical_repair": "c5af0b14fa78627a78b6c22da1555c19ef12f3d9947d2dac6d64420ac2e1c69e",
+              "compiled_dependencies": {
+                "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                "opentimer": "a3630593b990c3ce978c187539b2efecff84ad32 + recorded local patch"
+              },
+              "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+              "harness_sha256": {
+                "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+                "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+              }
+            },
+            "def_sha256": "36e36ec0d5bf6cfeb1345c2fe97730b8c8759ab17c6900dd79a34dbf7f38c26e"
+          },
+          "identical_def": true,
+          "placement_ratio": 0.9581443635971786,
+          "wns_change_ps": 0.0,
+          "hpwl_change_um": 0.0
+        },
+        "NVDLA/partition_m": {
+          "control": {
+            "path": "/tmp/1f-wns-v1/ramp_control/NVDLA__partition_m",
+            "score": {
+              "hpwl_um": 93405.154,
+              "hpwl_all_nets_um": 107638.17,
+              "measured_nets": 20647,
+              "excluded_nets": 145,
+              "setup_wns_ps": -916.800306,
+              "setup_tns_ps": -398000.681115,
+              "hold_wns_ps": 25.471559,
+              "hold_tns_ps": 0.0,
+              "instances": 20610,
+              "logical_cells": 20610,
+              "physical_cells": 0,
+              "buffers": 150,
+              "buffer_area_um2": 12.0431,
+              "macros": 0,
+              "instance_area_um2": 2736.6514,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "scoring_seconds": 8.438,
+              "power_mw": 0.122,
+              "reset_ports": [
+                "direct_reset_",
+                "dla_reset_rstn",
+                "global_clk_ovr_on",
+                "nvdla_clk_ovr_on",
+                "test_mode",
+                "tmc2slcg_disable_clock_gating"
+              ]
+            },
+            "placement_seconds": 37.203078,
+            "run": {
+              "status": "ok",
+              "wall_s": 102.29,
+              "cpu_s": 102.22,
+              "rss_mib": 1571.015625,
+              "tree_rss_mib": 1541.75,
+              "ipc": 1.5674113627684694,
+              "instructions": 721125855779.0,
+              "cycles": 460074408613.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20948,
+              "baseline_area_um2": 2656.096920000048,
+              "cells": 20598,
+              "area_um2": 2735.7766200000697,
+              "within_budget": true,
+              "rejected_proposals": 4016
+            },
+            "physical_timing": {
+              "evaluations": 10,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 5.4809265630000015,
+              "detailed_evaluations": 3,
+              "repowered_gates": 3971,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 113482,
+              "update_calls": 13,
+              "seconds": 13.36967815,
+              "validation_seconds": 0.347519659,
+              "reconcile_seconds": 2.682495863,
+              "exclusions_seconds": 0.057268277,
+              "propagation_seconds": 9.097285207,
+              "feedback_seconds": 1.1528113279999992
+            },
+            "binary_manifest": {
+              "build": "-c opt --jobs=2; reviewed wire-response reuse; published dependency pins; no local overrides",
+              "repos": {
+                "livehd": {
+                  "head": "9ca0b96ea612a1712f8eeb9c1a31a42a1aaf1a55",
+                  "patch_sha256": "461ef6db2db21100bcdb1727a7d07e545e0aa8850d0ac29a2d7a051c2c5ed0b0"
+                },
+                "DREAMPlace": {
+                  "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                },
+                "OpenTimer": {
+                  "head": "a3630593b990c3ce978c187539b2efecff84ad32",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                }
+              },
+              "lhd": "e7ba2560f21dfd6766c1a3484415710b76c32af4e7dfea8ceb34992babc85513",
+              "physical_repair": "8cf4bcceb52047bc0246f872b3d27479ab250921235f70ea2ac6cedfcce0ef88",
+              "compiled_dependencies": {
+                "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                "opentimer": "a3630593b990c3ce978c187539b2efecff84ad32"
+              },
+              "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+              "harness_sha256": {
+                "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+                "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+              }
+            },
+            "def_sha256": "dcd4ab3ce6ff51087c148dde5cf90a6967320c7882941e27c3a64820fabccb45"
+          },
+          "candidate": {
+            "path": "/tmp/1f-wns-v1/ramp_candidate/NVDLA__partition_m",
+            "score": {
+              "hpwl_um": 93405.154,
+              "hpwl_all_nets_um": 107638.17,
+              "measured_nets": 20647,
+              "excluded_nets": 145,
+              "setup_wns_ps": -916.800306,
+              "setup_tns_ps": -398000.681115,
+              "hold_wns_ps": 25.471559,
+              "hold_tns_ps": 0.0,
+              "instances": 20610,
+              "logical_cells": 20610,
+              "physical_cells": 0,
+              "buffers": 150,
+              "buffer_area_um2": 12.0431,
+              "macros": 0,
+              "instance_area_um2": 2736.6514,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "scoring_seconds": 9.183,
+              "power_mw": 0.122,
+              "reset_ports": [
+                "direct_reset_",
+                "dla_reset_rstn",
+                "global_clk_ovr_on",
+                "nvdla_clk_ovr_on",
+                "test_mode",
+                "tmc2slcg_disable_clock_gating"
+              ]
+            },
+            "placement_seconds": 36.433309,
+            "run": {
+              "status": "ok",
+              "wall_s": 101.3,
+              "cpu_s": 101.28,
+              "rss_mib": 1572.6796875,
+              "tree_rss_mib": 1590.859375,
+              "ipc": 1.5644699902993549,
+              "instructions": 713151398058.0,
+              "cycles": 455842171777.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20948,
+              "baseline_area_um2": 2656.096920000048,
+              "cells": 20598,
+              "area_um2": 2735.7766200000697,
+              "within_budget": true,
+              "rejected_proposals": 4016
+            },
+            "physical_timing": {
+              "evaluations": 10,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 5.529507627999999,
+              "detailed_evaluations": 3,
+              "repowered_gates": 3971,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 113482,
+              "update_calls": 13,
+              "seconds": 12.406604698,
+              "validation_seconds": 0.342532862,
+              "reconcile_seconds": 2.7030808270000004,
+              "exclusions_seconds": 0.057892579,
+              "propagation_seconds": 8.106808570000002,
+              "feedback_seconds": 1.164881460999998
+            },
+            "binary_manifest": {
+              "build": "-c opt --jobs=2; reduced ramp-fit seed candidate; local owned OpenTimer override; published dependency pins",
+              "repos": {
+                "livehd": {
+                  "head": "ea97d54e333f743daad0608f82909d1c2e9f50bb",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                },
+                "DREAMPlace": {
+                  "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                },
+                "OpenTimer": {
+                  "head": "a3630593b990c3ce978c187539b2efecff84ad32",
+                  "patch_sha256": "303ca545391900bfb8e4fdc651f785ac8fd32c521a9b602ae14cdd57f153ed27"
+                }
+              },
+              "lhd": "60766477c65d6c256a519bad74a5781c3d192bd77ac00048096a623ffaf7b9f2",
+              "physical_repair": "c5af0b14fa78627a78b6c22da1555c19ef12f3d9947d2dac6d64420ac2e1c69e",
+              "compiled_dependencies": {
+                "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                "opentimer": "a3630593b990c3ce978c187539b2efecff84ad32 + recorded local patch"
+              },
+              "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+              "harness_sha256": {
+                "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+                "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+              }
+            },
+            "def_sha256": "dcd4ab3ce6ff51087c148dde5cf90a6967320c7882941e27c3a64820fabccb45"
+          },
+          "identical_def": true,
+          "placement_ratio": 0.9793089969598753,
+          "wns_change_ps": 0.0,
+          "hpwl_change_um": 0.0
+        },
+        "coralnpu": {
+          "control": {
+            "path": "/tmp/1f-wns-v1/response_candidate/coralnpu",
+            "score": {
+              "hpwl_um": 3907687.297,
+              "hpwl_all_nets_um": 4173070.024,
+              "measured_nets": 161126,
+              "excluded_nets": 690,
+              "setup_wns_ps": -16736.599729,
+              "setup_tns_ps": -64843349.068619,
+              "hold_wns_ps": 27.430929,
+              "hold_tns_ps": 0.0,
+              "instances": 161074,
+              "logical_cells": 161074,
+              "physical_cells": 0,
+              "buffers": 1090,
+              "buffer_area_um2": 88.1944,
+              "macros": 2,
+              "instance_area_um2": 45769.8019,
+              "macro_area_um2": 26086.1895,
+              "die_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "scoring_seconds": 94.035,
+              "power_mw": 0.692,
+              "reset_ports": [
+                "io_aresetn"
+              ]
+            },
+            "placement_seconds": 783.3861380000001,
+            "run": {
+              "status": "ok",
+              "wall_s": 942.18,
+              "cpu_s": 941.6999999999999,
+              "rss_mib": 10290.37890625,
+              "tree_rss_mib": 10297.234375,
+              "ipc": 1.5291215148524404,
+              "instructions": 6490449777393.0,
+              "cycles": 4244561151191.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 160837,
+              "area_um2": 19666.480859994055,
+              "within_budget": true,
+              "rejected_proposals": 8497
+            },
+            "physical_timing": {
+              "evaluations": 17,
+              "builds": 1,
+              "ranking_evaluations": 11,
+              "ranking_seconds": 86.406113763,
+              "detailed_evaluations": 6,
+              "repowered_gates": 22791,
+              "inserted_gates": 492,
+              "removed_gates": 1484,
+              "updated_nets": 2189262,
+              "update_calls": 23,
+              "seconds": 258.1274303,
+              "validation_seconds": 6.552602991,
+              "reconcile_seconds": 38.323581623,
+              "exclusions_seconds": 1.0444391000000002,
+              "propagation_seconds": 186.889201291,
+              "feedback_seconds": 24.515333030000026
+            },
+            "binary_manifest": {
+              "build": "-c opt --jobs=2; wire-response reuse candidate; local owned OpenTimer override; published dependency pins",
+              "repos": {
+                "livehd": {
+                  "head": "9ca0b96ea612a1712f8eeb9c1a31a42a1aaf1a55",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                },
+                "DREAMPlace": {
+                  "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                },
+                "OpenTimer": {
+                  "head": "3197d532b08a6e11ee0a1c26a200dd34b56148cd",
+                  "patch_sha256": "ac61d471cd288f3e21249a0429195c2072aed84032f2768112082b6d3caf967b"
+                }
+              },
+              "lhd": "7c0961da45984d32bb6a6af32fad3e9ecbd9ba9c6954a65dfca94b46b5c014d0",
+              "physical_repair": "159ff126c4603ca340b1572fc1d51f05a7cccd63cb73d7b1260e4021359ef1be",
+              "compiled_dependencies": {
+                "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                "opentimer": "3197d532b08a6e11ee0a1c26a200dd34b56148cd + recorded local patch"
+              },
+              "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+              "harness_sha256": {
+                "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+                "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+              }
+            },
+            "def_sha256": "41f6a523765f8fde6f3d16dfbcf22201a8414ddd6bb07b25843a487dd605773f"
+          },
+          "candidate": {
+            "path": "/tmp/1f-wns-v1/ramp_candidate/coralnpu",
+            "score": {
+              "hpwl_um": 3907685.145,
+              "hpwl_all_nets_um": 4173067.872,
+              "measured_nets": 161126,
+              "excluded_nets": 690,
+              "setup_wns_ps": -16736.599729,
+              "setup_tns_ps": -64843349.068619,
+              "hold_wns_ps": 27.430929,
+              "hold_tns_ps": 0.0,
+              "instances": 161074,
+              "logical_cells": 161074,
+              "physical_cells": 0,
+              "buffers": 1090,
+              "buffer_area_um2": 88.1944,
+              "macros": 2,
+              "instance_area_um2": 45769.8019,
+              "macro_area_um2": 26086.1895,
+              "die_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "scoring_seconds": 85.236,
+              "power_mw": 0.692,
+              "reset_ports": [
+                "io_aresetn"
+              ]
+            },
+            "placement_seconds": 733.790456,
+            "run": {
+              "status": "ok",
+              "wall_s": 887.15,
+              "cpu_s": 886.68,
+              "rss_mib": 10235.3203125,
+              "tree_rss_mib": 10247.73828125,
+              "ipc": 1.5796807823925867,
+              "instructions": 6315328167858.0,
+              "cycles": 3997850855850.0,
+              "stop": null
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 160837,
+              "area_um2": 19666.480859994055,
+              "within_budget": true,
+              "rejected_proposals": 8497
+            },
+            "physical_timing": {
+              "evaluations": 17,
+              "builds": 1,
+              "ranking_evaluations": 11,
+              "ranking_seconds": 81.44709912100001,
+              "detailed_evaluations": 6,
+              "repowered_gates": 22791,
+              "inserted_gates": 492,
+              "removed_gates": 1484,
+              "updated_nets": 2189264,
+              "update_calls": 23,
+              "seconds": 229.70074153599995,
+              "validation_seconds": 6.167912189999999,
+              "reconcile_seconds": 36.55584445900001,
+              "exclusions_seconds": 1.034097527,
+              "propagation_seconds": 161.01720109299998,
+              "feedback_seconds": 24.13582409400002
+            },
+            "binary_manifest": {
+              "build": "-c opt --jobs=2; reduced ramp-fit seed candidate; local owned OpenTimer override; published dependency pins",
+              "repos": {
+                "livehd": {
+                  "head": "ea97d54e333f743daad0608f82909d1c2e9f50bb",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                },
+                "DREAMPlace": {
+                  "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                  "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                },
+                "OpenTimer": {
+                  "head": "a3630593b990c3ce978c187539b2efecff84ad32",
+                  "patch_sha256": "303ca545391900bfb8e4fdc651f785ac8fd32c521a9b602ae14cdd57f153ed27"
+                }
+              },
+              "lhd": "60766477c65d6c256a519bad74a5781c3d192bd77ac00048096a623ffaf7b9f2",
+              "physical_repair": "c5af0b14fa78627a78b6c22da1555c19ef12f3d9947d2dac6d64420ac2e1c69e",
+              "compiled_dependencies": {
+                "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+                "opentimer": "a3630593b990c3ce978c187539b2efecff84ad32 + recorded local patch"
+              },
+              "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+              "harness_sha256": {
+                "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+                "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+              }
+            },
+            "def_sha256": "52c891a097e857f19ae66b0ee03def4a476a97aea5b46127de50a950fab10756"
+          },
+          "identical_def": false,
+          "placement_ratio": 0.9366906311022827,
+          "wns_change_ps": 0.0,
+          "hpwl_change_um": -2.151999999769032
+        }
+      },
+      "timing_only": {
+        "medians": {
+          "control": {
+            "wall_s": 2.92509,
+            "propagation_s": 1.44508,
+            "reconcile_s": 1.2448,
+            "feedback_s": 0.21961
+          },
+          "candidate": {
+            "wall_s": 2.72333,
+            "propagation_s": 1.23602,
+            "reconcile_s": 1.25289,
+            "feedback_s": 0.218649
+          }
+        },
+        "samples": [
+          {
+            "variant": "control",
+            "repeat": 0,
+            "evaluations": [
+              {
+                "evaluation": 1,
+                "ranking_only": false,
+                "wall_s": 2.92509,
+                "engine_s": 2.92496,
+                "validation_s": 0.0172249,
+                "reconcile_s": 1.2448,
+                "exclusions_s": 6.41e-07,
+                "propagation_s": 1.44333,
+                "feedback_s": 0.21961,
+                "update_calls": 2,
+                "updated_rc_nets": 16260,
+                "rc_nets": 16260
+              }
+            ],
+            "timing_sha256": "4729398f2f55440d96e3b9841de80a31515ed66ebb87ed42699ba8a1ba9db25b"
+          },
+          {
+            "variant": "candidate",
+            "repeat": 0,
+            "evaluations": [
+              {
+                "evaluation": 1,
+                "ranking_only": false,
+                "wall_s": 2.72333,
+                "engine_s": 2.7232,
+                "validation_s": 0.0173167,
+                "reconcile_s": 1.25455,
+                "exclusions_s": 5.61e-07,
+                "propagation_s": 1.23118,
+                "feedback_s": 0.220148,
+                "update_calls": 2,
+                "updated_rc_nets": 16260,
+                "rc_nets": 16260
+              }
+            ],
+            "timing_sha256": "9bb5c75e2efb95e118a735fcea4e7959a8b330fb53aff48f255917673f805003"
+          },
+          {
+            "variant": "candidate",
+            "repeat": 1,
+            "evaluations": [
+              {
+                "evaluation": 1,
+                "ranking_only": false,
+                "wall_s": 2.72033,
+                "engine_s": 2.72021,
+                "validation_s": 0.0170944,
+                "reconcile_s": 1.25289,
+                "exclusions_s": 7.11e-07,
+                "propagation_s": 1.23602,
+                "feedback_s": 0.214207,
+                "update_calls": 2,
+                "updated_rc_nets": 16260,
+                "rc_nets": 16260
+              }
+            ],
+            "timing_sha256": "9bb5c75e2efb95e118a735fcea4e7959a8b330fb53aff48f255917673f805003"
+          },
+          {
+            "variant": "control",
+            "repeat": 1,
+            "evaluations": [
+              {
+                "evaluation": 1,
+                "ranking_only": false,
+                "wall_s": 2.92327,
+                "engine_s": 2.92315,
+                "validation_s": 0.0169819,
+                "reconcile_s": 1.24035,
+                "exclusions_s": 8.11e-07,
+                "propagation_s": 1.44508,
+                "feedback_s": 0.220737,
+                "update_calls": 2,
+                "updated_rc_nets": 16260,
+                "rc_nets": 16260
+              }
+            ],
+            "timing_sha256": "4729398f2f55440d96e3b9841de80a31515ed66ebb87ed42699ba8a1ba9db25b"
+          },
+          {
+            "variant": "control",
+            "repeat": 2,
+            "evaluations": [
+              {
+                "evaluation": 1,
+                "ranking_only": false,
+                "wall_s": 2.93068,
+                "engine_s": 2.93056,
+                "validation_s": 0.0169085,
+                "reconcile_s": 1.25455,
+                "exclusions_s": 8.22e-07,
+                "propagation_s": 1.44529,
+                "feedback_s": 0.213815,
+                "update_calls": 2,
+                "updated_rc_nets": 16260,
+                "rc_nets": 16260
+              }
+            ],
+            "timing_sha256": "4729398f2f55440d96e3b9841de80a31515ed66ebb87ed42699ba8a1ba9db25b"
+          },
+          {
+            "variant": "candidate",
+            "repeat": 2,
+            "evaluations": [
+              {
+                "evaluation": 1,
+                "ranking_only": false,
+                "wall_s": 2.72839,
+                "engine_s": 2.72827,
+                "validation_s": 0.0171126,
+                "reconcile_s": 1.25212,
+                "exclusions_s": 1.092e-06,
+                "propagation_s": 1.24039,
+                "feedback_s": 0.218649,
+                "update_calls": 2,
+                "updated_rc_nets": 16260,
+                "rc_nets": 16260
+              }
+            ],
+            "timing_sha256": "9bb5c75e2efb95e118a735fcea4e7959a8b330fb53aff48f255917673f805003"
+          }
+        ],
+        "wns_unchanged": true,
+        "hold_wns_unchanged": true,
+        "max_pin_slew_change": 3.814697265625e-06,
+        "note": "Same saved minimax DEF; three alternating pairs; cold timer construction included. WNS unchanged, but reports are not byte-identical (tiny slew/TNS rounding changes)."
+      },
+      "review": {
+        "blocking_findings": [],
+        "scope": "Reduced scalar ramp-fit seed",
+        "checks": [
+          "Eliminating ramp duration yields x + (1 + low/(logic-low)*(1-exp(-d)))*exp(-x) = 1 + low/(logic-low)*d, with d=target/tau.",
+          "The seed is used only for finite positive durations inside existing bounds with both crossings inside the ramp.",
+          "Existing waveform residual, fit tolerance, iteration bound and fallback remain unchanged.",
+          "Long-ramp limit keeps the original seed; no persistent state, public defaults or warning flags change.",
+          "Independent voltage-bisection unit checks and 100000 sampled feasibility/residual checks pass."
+        ],
+        "validation": "Six optimized suites pass using the published pin. Four benchmark flows satisfy WNS and runtime guards; published lfsr reproduces its DEF. Gemmini scaling gate fails and remains open."
+      },
+      "coral_def_diff": {
+        "changed_components": 112,
+        "changed_masters": 2,
+        "other_def_sections_identical": true,
+        "component_names_identical": true,
+        "hpwl_change_um": -2.152,
+        "changes": [
+          {
+            "before": "- __flat___sub_24.g3038_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 146178 188730 ) FS ;",
+            "after": "- __flat___sub_24.g3038_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 146286 188460 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g3282_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 145476 189540 ) N ;",
+            "after": "- __flat___sub_24.g3282_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 145368 189540 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g3501_NOR2x1_ASAP7_75t_R NOR2x1_ASAP7_75t_R + PLACED ( 146016 189540 ) N ;",
+            "after": "- __flat___sub_24.g3501_NOR2x1_ASAP7_75t_R NOR2x1_ASAP7_75t_R + PLACED ( 147582 189810 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g3503_OR3x1_ASAP7_75t_R OR3x1_ASAP7_75t_R + PLACED ( 146880 189540 ) N ;",
+            "after": "- __flat___sub_24.g3503_OR3x1_ASAP7_75t_R OR3x1_ASAP7_75t_R + PLACED ( 146664 189540 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g4047_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 145962 189810 ) FS ;",
+            "after": "- __flat___sub_24.g4047_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 145800 189540 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g4048_AND2x2_ASAP7_75t_R AND2x2_ASAP7_75t_R + PLACED ( 146448 189540 ) N ;",
+            "after": "- __flat___sub_24.g4048_AND2x2_ASAP7_75t_R AND2x2_ASAP7_75t_R + PLACED ( 146232 189810 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g4759_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 132300 179820 ) N ;",
+            "after": "- __flat___sub_24.g4759_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 132354 177930 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g4842_OR3x1_ASAP7_75t_R OR3x1_ASAP7_75t_R + PLACED ( 146880 188730 ) FS ;",
+            "after": "- __flat___sub_24.g4842_OR3x1_ASAP7_75t_R OR3x1_ASAP7_75t_R + PLACED ( 146664 188730 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g4868_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 132246 177930 ) FS ;",
+            "after": "- __flat___sub_24.g4868_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 132408 176850 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g4969_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 132354 176850 ) FS ;",
+            "after": "- __flat___sub_24.g4969_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 132300 176580 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g4970_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 132300 176580 ) N ;",
+            "after": "- __flat___sub_24.g4970_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 132138 177120 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5278_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 136782 167940 ) N ;",
+            "after": "- __flat___sub_24.g5278_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 136782 168480 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5296_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 136242 170910 ) FS ;",
+            "after": "- __flat___sub_24.g5296_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 136242 170640 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5297_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 136242 170640 ) N ;",
+            "after": "- __flat___sub_24.g5297_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 135756 170100 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5298_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 136404 171450 ) FS ;",
+            "after": "- __flat___sub_24.g5298_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 136296 171180 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5358_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 135756 170100 ) N ;",
+            "after": "- __flat___sub_24.g5358_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 135378 169560 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5368_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 132894 169830 ) FS ;",
+            "after": "- __flat___sub_24.g5368_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 134784 169290 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5369_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 133488 169290 ) FS ;",
+            "after": "- __flat___sub_24.g5369_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 133866 169830 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5401_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 133056 176850 ) FS ;",
+            "after": "- __flat___sub_24.g5401_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 133110 176850 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5403_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 135378 169560 ) N ;",
+            "after": "- __flat___sub_24.g5403_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 136782 167940 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5442_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 136296 171180 ) N ;",
+            "after": "- __flat___sub_24.g5442_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 136242 170910 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5483_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 134190 168480 ) N ;",
+            "after": "- __flat___sub_24.g5483_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 134514 168210 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5487_NOR2x1_ASAP7_75t_R NOR2x1_ASAP7_75t_R + PLACED ( 147582 189810 ) FS ;",
+            "after": "- __flat___sub_24.g5487_NOR2x1_ASAP7_75t_R NOR2x1_ASAP7_75t_R + PLACED ( 147150 189540 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5495_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 133164 168480 ) N ;",
+            "after": "- __flat___sub_24.g5495_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 133326 168210 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5499_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 135594 168480 ) N ;",
+            "after": "- __flat___sub_24.g5499_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 131976 168480 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5500_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 134784 169290 ) FS ;",
+            "after": "- __flat___sub_24.g5500_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 133218 169560 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5512_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 133002 170100 ) N ;",
+            "after": "- __flat___sub_24.g5512_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 132840 169830 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5513_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 132300 171450 ) FS ;",
+            "after": "- __flat___sub_24.g5513_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 132246 170100 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5521_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 132948 169560 ) N ;",
+            "after": "- __flat___sub_24.g5521_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 132300 170370 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5568_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 132732 172260 ) N ;",
+            "after": "- __flat___sub_24.g5568_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 132624 172260 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5572_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 133272 168750 ) FS ;",
+            "after": "- __flat___sub_24.g5572_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 133326 169290 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5579_XOR2x2_ASAP7_75t_R XOR2x2_ASAP7_75t_R + PLACED ( 130302 167670 ) FS ;",
+            "after": "- __flat___sub_24.g5579_XOR2x2_ASAP7_75t_R XOR2x2_ASAP7_75t_R + PLACED ( 130572 167940 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5582_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 132300 172530 ) FS ;",
+            "after": "- __flat___sub_24.g5582_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 130896 170910 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5583_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 133596 168480 ) N ;",
+            "after": "- __flat___sub_24.g5583_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 133218 168480 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5596_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 135162 174960 ) N ;",
+            "after": "- __flat___sub_24.g5596_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 134946 175230 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5597_AND2x2_ASAP7_75t_R AND2x2_ASAP7_75t_R + PLACED ( 135540 175230 ) FS ;",
+            "after": "- __flat___sub_24.g5597_AND2x2_ASAP7_75t_R AND2x2_ASAP7_75t_R + PLACED ( 135540 174960 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5599_NOR2x1_ASAP7_75t_R NOR2x1_ASAP7_75t_R + PLACED ( 135756 175500 ) N ;",
+            "after": "- __flat___sub_24.g5599_NOR2x1_ASAP7_75t_R NOR2x1_ASAP7_75t_R + PLACED ( 135702 175500 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5600_AOI21x1_ASAP7_75t_R AOI21x1_ASAP7_75t_R + PLACED ( 135216 175500 ) N ;",
+            "after": "- __flat___sub_24.g5600_AOI21x1_ASAP7_75t_R AOI21x1_ASAP7_75t_R + PLACED ( 135540 175230 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5602_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 130896 170910 ) FS ;",
+            "after": "- __flat___sub_24.g5602_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 129762 169830 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5607_XOR2x2_ASAP7_75t_R XOR2x1_ASAP7_75t_R + PLACED ( 130140 166590 ) FS ;",
+            "after": "- __flat___sub_24.g5607_XOR2x2_ASAP7_75t_R XOR2x2_ASAP7_75t_R + PLACED ( 130140 166590 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5609_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 135000 164160 ) N ;",
+            "after": "- __flat___sub_24.g5609_XNOR2x2_ASAP7_75t_R XNOR2x1_ASAP7_75t_R + PLACED ( 135000 164160 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5611_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 132948 168210 ) FS ;",
+            "after": "- __flat___sub_24.g5611_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 131652 168210 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5612_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 135108 168210 ) FS ;",
+            "after": "- __flat___sub_24.g5612_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 135540 167940 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5615_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 134730 168210 ) FS ;",
+            "after": "- __flat___sub_24.g5615_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 134622 168480 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5616_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 133218 168210 ) FS ;",
+            "after": "- __flat___sub_24.g5616_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 133326 168750 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5631_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 134784 169560 ) N ;",
+            "after": "- __flat___sub_24.g5631_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 134622 169020 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5634_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 134352 169020 ) N ;",
+            "after": "- __flat___sub_24.g5634_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 133812 168480 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5641_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 131976 168480 ) N ;",
+            "after": "- __flat___sub_24.g5641_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 132300 171450 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5643_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 132462 170370 ) FS ;",
+            "after": "- __flat___sub_24.g5643_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 132678 170100 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5644_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 132300 170100 ) N ;",
+            "after": "- __flat___sub_24.g5644_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 131652 169020 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5645_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 132138 168210 ) FS ;",
+            "after": "- __flat___sub_24.g5645_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 132084 167940 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5646_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 131166 172530 ) FS ;",
+            "after": "- __flat___sub_24.g5646_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 131274 172800 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5647_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 132246 172800 ) N ;",
+            "after": "- __flat___sub_24.g5647_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 132300 172800 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5648_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 131706 173070 ) FS ;",
+            "after": "- __flat___sub_24.g5648_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 131760 173070 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5649_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 131490 172260 ) N ;",
+            "after": "- __flat___sub_24.g5649_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 131760 172530 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5650_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 131598 172530 ) FS ;",
+            "after": "- __flat___sub_24.g5650_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 131490 172260 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5651_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 131922 169290 ) FS ;",
+            "after": "- __flat___sub_24.g5651_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 131922 168210 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5652_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 131652 169020 ) N ;",
+            "after": "- __flat___sub_24.g5652_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 131922 169290 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5660_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 132678 172800 ) N ;",
+            "after": "- __flat___sub_24.g5660_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 132462 172530 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5665_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 129924 169830 ) FS ;",
+            "after": "- __flat___sub_24.g5665_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 129654 169560 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5670_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 131058 172260 ) N ;",
+            "after": "- __flat___sub_24.g5670_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 131328 172530 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5677_XOR2x2_ASAP7_75t_R XOR2x2_ASAP7_75t_R + PLACED ( 132516 167670 ) FS ;",
+            "after": "- __flat___sub_24.g5677_XOR2x2_ASAP7_75t_R XOR2x2_ASAP7_75t_R + PLACED ( 132624 168210 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5678_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 132570 166860 ) N ;",
+            "after": "- __flat___sub_24.g5678_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 132786 167670 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5711_XOR2x2_ASAP7_75t_R XOR2x2_ASAP7_75t_R + PLACED ( 143856 162270 ) FS ;",
+            "after": "- __flat___sub_24.g5711_XOR2x2_ASAP7_75t_R XOR2x2_ASAP7_75t_R + PLACED ( 143370 162270 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5730_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 131652 172800 ) N ;",
+            "after": "- __flat___sub_24.g5730_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 131706 172800 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5741_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 130464 167400 ) N ;",
+            "after": "- __flat___sub_24.g5741_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 130194 167670 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5744_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 133974 169830 ) FS ;",
+            "after": "- __flat___sub_24.g5744_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 134784 169560 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5749_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 131166 167400 ) N ;",
+            "after": "- __flat___sub_24.g5749_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 131544 167400 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5750_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 131976 167940 ) N ;",
+            "after": "- __flat___sub_24.g5750_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 131490 167670 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5755_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 131544 168210 ) FS ;",
+            "after": "- __flat___sub_24.g5755_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 130896 167670 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5756_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 131004 167670 ) FS ;",
+            "after": "- __flat___sub_24.g5756_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 131004 167130 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5802_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 135270 175230 ) FS ;",
+            "after": "- __flat___sub_24.g5802_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 135270 174960 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5803_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 135918 174960 ) N ;",
+            "after": "- __flat___sub_24.g5803_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 135972 174960 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5817_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 133434 170100 ) N ;",
+            "after": "- __flat___sub_24.g5817_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 133380 170100 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5818_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 133326 169830 ) FS ;",
+            "after": "- __flat___sub_24.g5818_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 133272 169830 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5856_XOR2x2_ASAP7_75t_R XOR2x2_ASAP7_75t_R + PLACED ( 143964 162540 ) N ;",
+            "after": "- __flat___sub_24.g5856_XOR2x2_ASAP7_75t_R XOR2x2_ASAP7_75t_R + PLACED ( 144072 162270 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5941_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 143262 162270 ) FS ;",
+            "after": "- __flat___sub_24.g5941_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 143262 162540 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5953_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 131490 167130 ) FS ;",
+            "after": "- __flat___sub_24.g5953_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 132192 167670 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5956_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 131868 167400 ) N ;",
+            "after": "- __flat___sub_24.g5956_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 132624 167400 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5957_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 132246 167670 ) FS ;",
+            "after": "- __flat___sub_24.g5957_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 132948 166860 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5958_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 132462 167400 ) N ;",
+            "after": "- __flat___sub_24.g5958_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 132300 166860 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5966_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 132246 177120 ) N ;",
+            "after": "- __flat___sub_24.g5966_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 132300 179820 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5967_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 132570 178470 ) FS ;",
+            "after": "- __flat___sub_24.g5967_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 132624 178470 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g5993_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 130680 167940 ) N ;",
+            "after": "- __flat___sub_24.g5993_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 130950 167400 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g6117_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 131706 166860 ) N ;",
+            "after": "- __flat___sub_24.g6117_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 131922 167130 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g6118_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 132084 167130 ) FS ;",
+            "after": "- __flat___sub_24.g6118_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 131706 166860 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g6155_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 144558 162270 ) FS ;",
+            "after": "- __flat___sub_24.g6155_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 144774 162270 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g6397_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 123444 159300 ) N ;",
+            "after": "- __flat___sub_24.g6397_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 123714 158760 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g6471_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 122364 159840 ) N ;",
+            "after": "- __flat___sub_24.g6471_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 122310 160380 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g6472_XOR2x2_ASAP7_75t_R XOR2x2_ASAP7_75t_R + PLACED ( 122472 160110 ) FS ;",
+            "after": "- __flat___sub_24.g6472_XOR2x2_ASAP7_75t_R XOR2x2_ASAP7_75t_R + PLACED ( 122310 160110 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g6473_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 123066 159030 ) FS ;",
+            "after": "- __flat___sub_24.g6473_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 122472 159840 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g6474_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 123552 158760 ) N ;",
+            "after": "- __flat___sub_24.g6474_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 122958 157950 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g6676_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 122958 158760 ) N ;",
+            "after": "- __flat___sub_24.g6676_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 123066 159030 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g6684_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 122256 160380 ) N ;",
+            "after": "- __flat___sub_24.g6684_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 120366 159030 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g6708_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 123498 156060 ) N ;",
+            "after": "- __flat___sub_24.g6708_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 123012 158760 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g6709_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 124524 156600 ) N ;",
+            "after": "- __flat___sub_24.g6709_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 123498 156060 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g6725_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 125226 156600 ) N ;",
+            "after": "- __flat___sub_24.g6725_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 125010 156870 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g6726_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 125118 156330 ) FS ;",
+            "after": "- __flat___sub_24.g6726_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 124902 156600 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g6767_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 122958 159840 ) N ;",
+            "after": "- __flat___sub_24.g6767_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 123444 159300 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g6865_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 125010 156060 ) N ;",
+            "after": "- __flat___sub_24.g6865_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 125118 156330 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g7054_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 110970 167400 ) N ;",
+            "after": "- __flat___sub_24.g7054_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 111618 165510 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g7055_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 110862 164970 ) FS ;",
+            "after": "- __flat___sub_24.g7055_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 111456 164970 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g7413_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 110160 165240 ) N ;",
+            "after": "- __flat___sub_24.g7413_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 108324 165510 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g7414_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 110862 165240 ) N ;",
+            "after": "- __flat___sub_24.g7414_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 110160 165240 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g7598_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 107784 166050 ) FS ;",
+            "after": "- __flat___sub_24.g7598_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 109620 165780 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g7600_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 108054 165780 ) N ;",
+            "after": "- __flat___sub_24.g7600_NAND2x1_ASAP7_75t_R NAND2x1_ASAP7_75t_R + PLACED ( 107622 166320 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g7601_OA21x2_ASAP7_75t_R OA21x2_ASAP7_75t_R + PLACED ( 108054 166050 ) FS ;",
+            "after": "- __flat___sub_24.g7601_OA21x2_ASAP7_75t_R OA21x2_ASAP7_75t_R + PLACED ( 109404 166320 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g7602_NOR2x1_ASAP7_75t_R NOR2x1_ASAP7_75t_R + PLACED ( 108594 165510 ) FS ;",
+            "after": "- __flat___sub_24.g7602_NOR2x1_ASAP7_75t_R NOR2x1_ASAP7_75t_R + PLACED ( 108054 165780 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g7603_AO21x1_ASAP7_75t_R AO21x1_ASAP7_75t_R + PLACED ( 108162 165510 ) FS ;",
+            "after": "- __flat___sub_24.g7603_AO21x1_ASAP7_75t_R AO21x1_ASAP7_75t_R + PLACED ( 108108 166050 ) FS ;"
+          },
+          {
+            "before": "- __flat___sub_24.g7652_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 111996 165780 ) N ;",
+            "after": "- __flat___sub_24.g7652_XNOR2x2_ASAP7_75t_R XNOR2x2_ASAP7_75t_R + PLACED ( 110862 165240 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g7778_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 111726 165240 ) N ;",
+            "after": "- __flat___sub_24.g7778_INVx1_ASAP7_75t_R INVx1_ASAP7_75t_R + PLACED ( 110970 164700 ) N ;"
+          },
+          {
+            "before": "- __flat___sub_24.g7779_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 111618 165510 ) FS ;",
+            "after": "- __flat___sub_24.g7779_MAJx2_ASAP7_75t_R MAJx2_ASAP7_75t_R + PLACED ( 110862 164970 ) FS ;"
+          }
+        ]
+      },
+      "growth_artifact_audit": {
+        "requirement": "H: minimax cell/area growth and named placement.json artifact",
+        "path": "/tmp/1f-wns-v1/ramp_candidate/minimax/rep/placement.json",
+        "sha256": "90a995cff26bef99ef42ee8f4ed783edbf2acae422b0a98e22cb6c7a172b1d7c",
+        "growth_budget": {
+          "basis": "synthesized_standard_cells",
+          "fraction": 0.03,
+          "baseline_cells": 16505,
+          "baseline_area_um2": 2025.453599999931,
+          "cells": 16209,
+          "area_um2": 2086.120979999586,
+          "within_budget": true,
+          "rejected_proposals": 479
+        },
+        "cell_growth_fraction": -0.01793395940624054,
+        "area_growth_fraction": 0.029952490641926843,
+        "source": "lhd/lhd_kernel_synth.cpp exports the final QoR as report/placement.json; growth_budget.cpp records the pre-repair synthesized inventory.",
+        "scope_note": "This establishes the named minimax acceptance and artifact; it does not claim a gross-cell budget for coral reset/rail trees."
+      },
+      "validation": {
+        "suites_passed": [
+          "@opentimer//unittest:rc_propagation",
+          "@opentimer//unittest:rc_waveform",
+          "@opentimer//unittest:rc_ceff",
+          "//pass/opentimer:physical_session_test",
+          "//pass/opentimer:pass_opentimer_test",
+          "//pass/place:repair_test"
+        ],
+        "flags": "-c opt --jobs=2 --test_timeout=30; published pins, no overrides",
+        "log": "/tmp/1f-ramp-v43/published-build.log",
+        "published_lfsr": {
+          "path": "/tmp/1f-wns-v1/ramp_published/lfsr",
+          "def_sha256": "b3d67bb84f18ed886207fa77ed0f0691034721f9b7db6e338b54f8a495e9366f",
+          "placement_seconds": 2.033118,
+          "score": {
+            "hpwl_um": 183.788,
+            "hpwl_all_nets_um": 197.9,
+            "measured_nets": 136,
+            "excluded_nets": 1,
+            "setup_wns_ps": -60.270761,
+            "setup_tns_ps": -2166.75545,
+            "hold_wns_ps": 53.285192,
+            "hold_tns_ps": 0.0,
+            "instances": 134,
+            "logical_cells": 134,
+            "physical_cells": 0,
+            "buffers": 1,
+            "buffer_area_um2": 0.2624,
+            "macros": 0,
+            "instance_area_um2": 18.6187,
+            "macro_area_um2": 0.0,
+            "die_um": [
+              0.0,
+              0.0,
+              7.884,
+              7.83
+            ],
+            "core_um": [
+              0.0,
+              0.0,
+              7.884,
+              7.83
+            ],
+            "scoring_seconds": 1.046,
+            "power_mw": 0.000682,
+            "reset_ports": []
+          }
+        },
+        "compiler_flags_contract": "pass"
+      },
+      "limitations": "The isolated cold minimax evaluation meets 3 s in this sample; B remains open because full STA share is above 10%, and this is not a complete checkpoint census. Original A-J requirements and previously documented QoR/census gaps remain open.",
+      "gemmini_census": {
+        "design": "gemmini",
+        "protocol": "Frozen published v43 binary; production placement defaults, 100 ps clock, one CPU14; common frontend settings; 3600 s per invocation and 16 GiB process-tree guard. Original run_design.py SB flow with read-only archived library list; no HighTide archive writes or pruning.",
+        "synthesis": {
+          "path": "/tmp/1f-census-v43-reviewed/gemmini/S",
+          "run": {
+            "status": "ok",
+            "wall_s": 69.62,
+            "cpu_s": 69.6,
+            "rss_mib": 9369.9765625,
+            "tree_rss_mib": 9384.30078125,
+            "ipc": 1.4353686355053827,
+            "instructions": 449737211397.0,
+            "cycles": 313325232468.0,
+            "stop": null
+          },
+          "status": "ok"
+        },
+        "placement_memory_probe": {
+          "path": "/tmp/1f-census-v43-memory/gemmini/B",
+          "measurement": {
+            "argv": [
+              "taskset",
+              "-c",
+              "14",
+              "/tmp/1f-speed-v43-published/bin/lhd/lhd",
+              "synth",
+              "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/execroot/_main/bazel-out/k8-fastbuild/bin/designs/src/gemmini/gemmini.v",
+              "--top",
+              "gemmini",
+              "--workdir",
+              "/tmp/1f-census-v43-memory/gemmini/B/w",
+              "--emit",
+              "verilog:/tmp/1f-census-v43-memory/gemmini/B/netlist.v",
+              "--emit-dir",
+              "report:/tmp/1f-census-v43-memory/gemmini/B/rep/",
+              "--stats",
+              "--result-json",
+              "/tmp/1f-census-v43-memory/gemmini/B/result.json",
+              "--emit-dir",
+              "def:/tmp/1f-census-v43-memory/gemmini/B/def/",
+              "--set",
+              "synth.liberty=/tmp/1f-census-v43-memory/lib/gemmini.lib",
+              "--set",
+              "synth.sdc=/tmp/1f-census-v43-memory/gemmini-100ps.sdc",
+              "--set",
+              "synth.lef=/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/lef/asap7_tech_1x_201209.lef,/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/lef/asap7sc7p5t_28_R_1x_220121a.lef",
+              "--set",
+              "synth.place=true",
+              "--set",
+              "synth.place.tech_rc=/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/setRC.tcl",
+              "--set",
+              "synth.place.threads=1",
+              "--set",
+              "pass.abc.threads=1",
+              "--set",
+              "synth.memory=flops",
+              "--set",
+              "pass.abc.drop_init=true",
+              "--set",
+              "pass.abc.derived_clock=true",
+              "--set",
+              "synth.place.unknown_const=zero",
+              "--set",
+              "compile.slang.ignore_uninstantiated_modules=true",
+              "--set",
+              "compile.slang.translate_off=true",
+              "--set",
+              "pass.abc.large_flow_latches=true",
+              "--",
+              "-D",
+              "SYNTHESIS",
+              "--ignore-assertions",
+              "--compat=vcs",
+              "--timescale=1ns/1ps"
+            ],
+            "cwd": "/tmp/1f-census-v43-memory/gemmini/B",
+            "environment": {
+              "OMP_NUM_THREADS": "1"
+            },
+            "timeout_s": 3600.0,
+            "memory_limit_gib": 16,
+            "os_reserve_gib": 4,
+            "perf_events": "task-clock,cycles,instructions,branches,branch-misses,cache-references,cache-misses",
+            "exit_code": -15,
+            "status": "guard-stopped",
+            "stop_reason": "process-tree memory limit",
+            "wall_s": 107.71838324586861,
+            "tree_peak_rss_kb": 16789512,
+            "perf": {},
+            "ipc": null
+          },
+          "phase_peak_rss_mib": {
+            "None": 15.7734375,
+            "002_lhd_pass_upass.log": 216.40625,
+            "010_lhd_pass_color.log": 338.61328125,
+            "011_lhd_pass_abc.log": 523.15625,
+            "013_lhd_pass_place_io_resynth.log": 1735.64453125,
+            "014_lhd_pass_place_post_synth_timing.log": 16319.2578125
+          },
+          "last_phase": "014_lhd_pass_place_post_synth_timing.log",
+          "memory_trace": "/tmp/1f-census-v43-memory/memory.jsonl",
+          "memory_trace_sha256": "c8ee32fa6368224227909bfbf2c68a9e50f42c8715b93cb5279a16367ce00a12"
+        },
+        "thread_observation": {
+          "pid": 3149138,
+          "threads": 33,
+          "rss_kib": 14952636,
+          "elapsed": "01:39",
+          "method": "ps -eo pid,ppid,nlwp,rss,etime,comm",
+          "limitation": "This confirms worker oversubscription on the pinned CPU, but does not establish its share of the memory peak."
+        },
+        "harness_correction": "The scratch copy of measure.py checks for a nonempty GNU-time file before parsing it, so a guard stop preserves its exact reason and sampled peak. HighTide sources are untouched.",
+        "outcome": "I fails for this current gemmini run: process-tree memory limit reached before GP. cnn and partition_c still need current-version checks."
+      }
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",
