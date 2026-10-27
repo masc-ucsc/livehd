@@ -289,3 +289,17 @@ vim.diagnostic.setqflist()` to list them).
 See [`pass/isabelle/README.md`](pass/isabelle/README.md) for the
 `pass.isabelle` validation flow, CVA6 cache/memory LEC status, certificate-proof
 workflow, and Isabelle heap-build rules.
+
+# Lean Translation
+
+`pass.lean` writes a design as a Lean certificate. See
+[`pass/lean/README.md`](pass/lean/README.md) for the pass and its options.
+
+The translation-validation simulator turns each certificate into one
+straight-line Lean function, a compiled simulator, and checks it against the
+semantics that LiveHD's Lean compiler is proved correct for. The check is a
+sampled differential test by default, and a kernel-checked theorem with
+`--prove`. See
+[`pass/lean/Translation_Validation/README.md`](pass/lean/Translation_Validation/README.md)
+for how to build and run it, its trust boundary, and the CVA6, CORE-ET and
+PicoRV32 blocks it covers.
