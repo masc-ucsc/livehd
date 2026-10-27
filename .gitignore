@@ -70,7 +70,8 @@ difftest_*/
 generated/b1_refactor/
 
 # Local master-port validation artifacts (fresh exports, generated Lean files,
-# proof logs). Evidence is summarized in pass/lean/tests/*.json; the raw tree is
+# proof logs). Evidence is summarized in
+# pass/lean/Legacy_Fast_Model_Simulator/tests/*.json; the raw tree is
 # thousands of files and is not source.
 generated/master_port/
 # Generated per-design simulator launchers (pass/lean/Lgraph_IR_Semantics_Simulator/scripts/make_sim_launcher.py).
@@ -150,9 +151,9 @@ generated/master_port/
 /pass/lean/MASTER_INTEGRATION.md
 /pass/lean/specialization/FUTAMURA_PROJECTIONS.md
 # Plan-shaped data: target matrices, schedules and requested-unit manifests.
-/pass/lean/tests/MASTER_SIM_*
-/pass/lean/tests/MASTER_BENCHMARK_MANIFEST.json
-/pass/lean/tests/MASTER_D2_PORT_PLAN_AUDIT.json
+/pass/lean/Legacy_Fast_Model_Simulator/tests/MASTER_SIM_*
+/pass/lean/Legacy_Fast_Model_Simulator/tests/MASTER_BENCHMARK_MANIFEST.json
+/pass/lean/Legacy_Fast_Model_Simulator/tests/MASTER_D2_PORT_PLAN_AUDIT.json
 /pass/lean/specialization/tests/FP_SUPPORT_MANIFEST.tsv
 /pass/lean/specialization/tests/fp_obligation_inventory.tsv
 /todo/livehd/simulator-generation-matrix.html

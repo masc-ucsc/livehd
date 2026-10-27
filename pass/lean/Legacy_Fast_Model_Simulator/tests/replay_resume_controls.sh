@@ -12,8 +12,8 @@ set -uo pipefail
 #
 # Usage: replay_resume_controls.sh <positive-bridge.lean> <Top> <env.json>
 
-R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
-REPLAY="$R/pass/lean/tests/replay_legacy_proofs.py"
+R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
+REPLAY="$R/pass/lean/Legacy_Fast_Model_Simulator/tests/replay_legacy_proofs.py"
 SRC="${1:?usage: replay_resume_controls.sh <artifact.lean> <Top> <env.json>}"
 TOP="${2:?}"
 ENVJSON="${3:?}"

@@ -17,7 +17,7 @@ name = "Sims"
 globs = ["Sims.+"]
 
 # Generated LEGACY fast-model simulators
-# (pass/lean/Legacy_Fast_Model_Simulator/make_legacy_sim.py).  Same reasoning as
+# (pass/lean/Legacy_Fast_Model_Simulator/scripts/make_legacy_sim.py).  Same reasoning as
 # `Sims`: not in `defaultTargets`, because a real design's model is megabytes of
 # generated definitions and nothing else needs it elaborated.
 [[lean_lib]]

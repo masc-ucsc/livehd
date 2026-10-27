@@ -34,7 +34,8 @@ The exporter is split by who uses each part.
 * `Exporter/DesignCert/` is the back end that writes a `DesignCert`. Three
   routes read what it writes: the IR-as-semantics simulator, Translation
   Validation and the Futamura projection. Legacy does not use it.
-* `Legacy_Fast_Model_Simulator/` holds the legacy back end.
+* `Legacy_Fast_Model_Simulator/` holds the legacy back end, and -- like the
+  other two -- the scripts and tests that check only it.
 
 All three keep their Bazel targets in this directory's `BUILD`, with the same
 labels as before; each target adds its folder to `includes`, so `#include`
@@ -54,6 +55,13 @@ Checks on the exporter's output live beside the part they check:
 the original RTL, and `Exporter/DesignCert/scripts/` holds the checks on the
 `DesignCert` format itself (`vc_gates.py`, `dcert_parity.py`,
 `cert_shape_check.py`).
+
+What stays in `scripts/` here is what more than one route runs: `op_census.py`
+and `const_parity.py` with their controls, `axiom_audit.py` with its controls,
+and the 12x5 coverage harness (`fp_cov_run.sh` and the `fp_cov_queue_*.sh`
+queues, which both take `legacy|verified_compiler`). There is no longer a
+`tests/` directory at this level: every file it held tested the legacy route
+and now lives in `Legacy_Fast_Model_Simulator/tests/`.
 
 - `graph_access.*` — graph access, width checks, and the memory policy parser.
 - `design_scan.*` — owns port identities, decimal constants, flop controls,

@@ -10,6 +10,10 @@ import json
 from pathlib import Path
 import re
 import sys
+
+# compare_exports.py belongs to the exporter front half and lives there since
+# the Exporter split; it is not a sibling of this file any more.
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'Exporter' / 'Frontend' / 'tests'))
 from compare_exports import summarize
 
 

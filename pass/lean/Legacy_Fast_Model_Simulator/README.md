@@ -225,7 +225,7 @@ green.
 ### Make it executable
 
 ```bash
-python3 pass/lean/Legacy_Fast_Model_Simulator/make_legacy_sim.py \
+python3 pass/lean/Legacy_Fast_Model_Simulator/scripts/make_legacy_sim.py \
         <out>/<Top>_Lgraph.lean --cycles 8 \
         --out formal/lean/LegacySims --module-prefix LegacySims
 ```
@@ -291,7 +291,7 @@ Limits 2–4 are already handled in this repo and need no action:
   deeply nested C — `issue_stage_gate` emits **126 MB** of it, nested **6736**
   braces deep — and clang's default stops at 2048.  Expect
   `-Wstack-exhausted` warnings from clang at that depth; they are warnings.
-- `make_legacy_sim.py` emits `set_option maxRecDepth 100000` and
+- `scripts/make_legacy_sim.py` emits `set_option maxRecDepth 100000` and
   `maxHeartbeats 0` into every driver.  A wide input or state record is one
   term with an entry per port or flop, and the stock limits are sized for
   ordinary source.  Without them a large row fails *while elaborating the
@@ -409,7 +409,7 @@ cd formal/lean && lake build LeanSemanticPrimitives.Translation.OpBridge
 lake env lean LegacySims/minion_tlb_Lgraph.lean      # 13 s, exit 0
 
 # 3. run
-python3 pass/lean/Legacy_Fast_Model_Simulator/make_legacy_sim.py \
+python3 pass/lean/Legacy_Fast_Model_Simulator/scripts/make_legacy_sim.py \
         out/B11/minion_tlb_Lgraph.lean --out formal/lean/LegacySims \
         --module-prefix LegacySims
 cd formal/lean && lake build LegacySimMinionTlb
@@ -498,9 +498,15 @@ established is certificate well-formedness, not fast-model equivalence.  Add
 
 ---
 
-## 9. Files
+## 9. Code layout
 
-| file | role |
+Everything that belongs to this route and to nothing else is in this folder.
+Three things it needs are deliberately **not** here, because other routes use
+them too.
+
+### This folder
+
+| path | role |
 |---|---|
 | `legacy_model.{cpp,hpp}` | coordinates the emitters below |
 | `emit_legacy_schema.*` | `_in`/`_out`/`_state` records, RTL mapping comments |
@@ -509,8 +515,30 @@ established is certificate well-formedness, not fast-model equivalence.  Add
 | `emit_legacy_cert_wf.*` | optional chunked well-formedness proofs (`cert_wf`) |
 | `emit_legacy_fast_bridge.*` | optional per-node bridge — the §3 equivalence theorems |
 | `legacy_emit_options.hpp` | `LegacyEmitOptions`, split out to break a header cycle |
-| `make_legacy_sim.py` | driver generator: the `main` that runs a design |
-| `legacy_model_test.cpp` | unit tests |
+| `legacy_model_test.cpp` | the unit tests (`//pass/lean:legacy_model_test`) |
+| `scripts/make_legacy_sim.py` | driver generator: the `main` that runs a design (§4) |
+| `scripts/nary_bridge_check.sh` | elaborates 14 fresh n-ary / Or bridge fixtures |
+| `tests/legacy_fixtures.cpp` | fixture-graph generator (`//pass/lean:lean_legacy_fixtures`) |
+| `tests/replay_legacy_proofs.py` | serial corpus replay: time, RSS, axiom audit |
+| `tests/check_legacy_oracles.py` | tiny legacy exports against `DesignCert`, sampled |
+| `tests/audit_legacy_parity.py` | baseline-vs-refactored export comparison |
+| `tests/legacy_semantic_audit/` | the Lean audits behind specific semantic decisions |
+| `tests/LEGACY_*`, `tests/MASTER_*` | recorded runs: coverage, scalability, bridge and record-layout results |
+
+Bazel targets keep their old labels in `pass/lean/BUILD`; only the `srcs` paths
+name this folder.
+
+### What this route uses but does not own
+
+| what | where | why it is not here |
+|---|---|---|
+| the exporter front half | `pass/lean/Exporter/Frontend/` | every route uses it: pass entry, options, `scan_design`, `build_certificate`, memory lowering, the `_io.json` sidecar |
+| the Lean support library | `formal/lean/LeanSemanticPrimitives/` | `evalGraphC`, `OpBridge`, `NaryBridge`, `OrBridge`, `LegacyCertWF` — shared, not generated per design |
+| shared gates | `pass/lean/scripts/` | `op_census.py`, `const_parity.py` and `axiom_audit.py` with their controls; three routes and the repo-level runners call them |
+| the 12×5 coverage harness | `pass/lean/scripts/` | `fp_cov_run.sh` and the `fp_cov_queue_*.sh` queues both take `legacy` or `verified_compiler` |
+
+`Exporter/DesignCert/` is the one exporter part this route does **not** touch;
+it writes the `DesignCert` the other three routes read.
 
 Options are documented in [`../README.md`](../README.md#options); the scan and
-certificate stages it builds on are described in the same file.
+certificate stages this route builds on are described in the same file.

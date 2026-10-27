@@ -33,7 +33,9 @@ import subprocess
 # from BEFORE a policy repair cannot be silently reused by --resume: the resume
 # check compares these, and a mismatch re-runs rather than trusting a verdict
 # that a weaker gate produced.
-AUDIT = Path(__file__).resolve().parents[1] / 'scripts' / 'axiom_audit.py'
+# parents[2] is pass/lean: axiom_audit.py is SHARED and deliberately stays
+# there, so this climb is one longer than this file's own folder depth.
+AUDIT = Path(__file__).resolve().parents[2] / 'scripts' / 'axiom_audit.py'
 
 
 def policy_identity():

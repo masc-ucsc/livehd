@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Self-contained emitter fixtures: no benchmark checkout or external RTL.
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 OUT="${OUT:-$ROOT/generated/nary_bridge_check}"
 : "${TEST_BIN:?set TEST_BIN to the built pass/lean legacy_model_test binary}"
 LAKE="${LAKE:-lake}"
