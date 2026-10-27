@@ -65,7 +65,7 @@ Per design the pass writes `<Top>_Lgraph.lean` and `<Top>_io.json`;
 `verified_compiler` also writes `<Top>.dcert`.  The files are published as one
 group: if emission fails, the previous set is kept.
 
-## Where the IR-as-semantics (Direction 2) work lives
+## Where the IR-as-semantics work lives
 
 `Lgraph_IR_Semantics_Simulator/` — beside this file — holds everything that
 direction owns and the rest of LiveHD does not: the corpora it measures

@@ -290,7 +290,7 @@ See [`pass/isabelle/README.md`](pass/isabelle/README.md) for the
 `pass.isabelle` validation flow, CVA6 cache/memory LEC status, certificate-proof
 workflow, and Isabelle heap-build rules.
 
-# Lean Translation
+# Lean Simulator Translation
 
 `pass.lean` writes a design as a Lean certificate. See
 [`pass/lean/README.md`](pass/lean/README.md) for the pass and its options.

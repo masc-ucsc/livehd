@@ -1,9 +1,8 @@
 # Lgraph_IR_Semantics_Simulator
 
-This directory holds the working set of LiveHD's Direction 2, which is called
-"IR as semantics".
+This directory holds the working set of LiveHD's IR as semantics simulator.
 
-The idea of Direction 2 is this. LiveHD compiles RTL into its own graph, the
+The idea of this direction is this. LiveHD compiles RTL into its own graph, the
 LGraph. The `pass.lean` pass then writes that graph out as a piece of data
 called a `DesignCert`, short for design certificate. A small Lean program reads
 that data and runs it. The certificate is therefore not a description of the
