@@ -75,8 +75,9 @@ any of these. -/
 
 `Translation/LGraphModel.lean` in THIS branch is the semantic base plus one
 definitional factoring: `bv_shl_step` names the shifted copy `Op_SHL` folds,
-which was previously written inline.  `Projection/overlays/` carries the patch
-and a drift check for it.
+which was previously written inline.  `pass/lean/specialization/` carries the
+patch (`evidence/bv_shl_step.patch`) and a drift check for it
+(`tests/check_overlay.sh`).
 
 The theorems below are the obligation that goes with taking that liberty, and
 they are stated so that they cannot be satisfied by a semantic change: each

@@ -129,9 +129,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument('--generated',
-                    default=os.path.join(os.environ.get('LHD_NEW_ROOT', os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), *(['..'] * 6), 'livehd-new'))), 'generated/core-et'))
+                    default=os.path.join(os.environ.get('LHD_NEW_ROOT', os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), *(['..'] * 5), 'livehd-new'))), 'generated/core-et'))
     ap.add_argument('--interpreter',
-                    default=os.path.join(here, '..', 'HardwareInterpreter.lean'))
+                    default=os.path.join(here, '..', '..', '..', '..', 'formal', 'lean', 'LeanSemanticPrimitives', 'Projection', 'HardwareInterpreter.lean'))
     a = ap.parse_args()
 
     impl = implemented_ops(a.interpreter)

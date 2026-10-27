@@ -35,7 +35,7 @@ them directly: `ObjectLanguageSemantics` evaluates `.bvSra` / `.bvShl` with
 `bv_sra` / `bv_shl_step`.
 
 `bv_shl_step` -- the name the FP branch introduced by its overlay
-(`overlays/bv_shl_step.patch`) so `evalPrim`, `OperatorBridge` and
+(`pass/lean/specialization/evidence/bv_shl_step.patch`) so `evalPrim`, `OperatorBridge` and
 `HardwareAdequacy` could name the `Op_SHL` fold term -- is defined on master
 with MASTER's guarded body.  The patch was not applied: its body is the
 unguarded `2 ^ k`, and taking it would delete a proved repair (regression R46).
@@ -69,7 +69,7 @@ branch.  The statements are the pinned ones, unchanged.
 
 ## Checking it
 
-    bash formal/lean/LeanSemanticPrimitives/Projection/overlays/check_overlay.sh [--semantic]
+    bash pass/lean/specialization/tests/check_overlay.sh [--semantic]
 
 Runnable from any directory.  It checks the six files against the base (taken
 from THIS repository by default; `BASE_REPO` overrides) and the two adapted

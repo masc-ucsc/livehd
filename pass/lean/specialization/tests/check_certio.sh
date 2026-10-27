@@ -19,7 +19,7 @@
 set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-ROOT=$(cd "$HERE/../../../../.." && pwd)
+ROOT=$(cd "$HERE/../../../.." && pwd)
 
 SRC_REPO=${SRC_REPO:-$ROOT}
 D4_REV=c63b21cea2adff657083af02e34e680268692e42

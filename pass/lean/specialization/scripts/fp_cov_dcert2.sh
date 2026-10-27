@@ -139,7 +139,7 @@ done
 # A sweep over zero certificates is not a successful sweep.
 [ "$#" -gt 0 ] || { echo "REFUSING: no certificate given; a sweep with no target is not a pass"; exit 2; }
 
-R=${FP_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}
+R=${FP_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)}
 PABS=$(readlink -e "$P") || { echo "REFUSING: cannot resolve $P"; exit 2; }
 if [ -n "$NATIVE" ]; then
   NATABS=$(readlink -e "$NATIVE") || { echo "REFUSING: cannot resolve --native $NATIVE"; exit 2; }

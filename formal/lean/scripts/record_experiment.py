@@ -29,7 +29,7 @@ import argparse, hashlib, json, os, re, subprocess, sys, datetime, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LEAN = os.path.dirname(HERE)
-OUT = os.path.join(LEAN, 'LeanSemanticPrimitives', 'Projection', 'certio',
+OUT = os.path.join(LEAN, '..', '..', 'pass', 'lean', 'specialization', 'evidence', 'certio',
                    'experiments.jsonl')
 # The sources that decide what a run DID, per runner.  A fixed list was wrong:
 # it hashed proto_probe/InterpreterVariant/PartialEvaluatorFast for every runner,

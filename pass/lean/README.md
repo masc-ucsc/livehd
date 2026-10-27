@@ -122,6 +122,25 @@ the shared `formal/lean/LeanSemanticPrimitives/Compiler/`, which the D3, D4
 and projection directions all use. `Translation_Validation/README.md` has the
 build and run commands, the trust boundary and the benchmarks covered.
 
+## Where the Futamura-projection work lives
+
+`specialization/` — beside this file — holds that direction: a Lean
+interpreter of `DesignCert`s, specialized to one certificate, gives a residual
+simulator whose step is proved equal to `interpretDesign`. It is split by the
+same rule: `scripts/` (the recorded runner `fp_cov_dcert2.sh`, the
+generation-latency measurements, the replay and install tools, the CORE-ET
+operator census), `tests/` (the runner's reuse rules, the replay and axiom-gate
+controls, the shared-semantics drift check, with fixtures in `tests/fixtures/`)
+and `evidence/` (measurements kept as records).
+
+Its Lean sources stay in the Lean project: the interpreter, the specializer and
+their proofs in `formal/lean/LeanSemanticPrimitives/Projection/`, and the
+drivers and build scripts in `formal/lean/scripts/`. The 12-row coverage
+harness every route uses (`scripts/fp_cov_run.sh`, `scripts/fp_cov_queue_*.sh`)
+stays in this directory's `scripts/`. `specialization/README.md` has the build
+and run commands, the trust boundary, the benchmarks covered and two
+performance examples.
+
 ## Lean Support Library and Emitted Model
 
 - `formal/lean` builds a Lean package named `LeanSemanticPrimitives`.

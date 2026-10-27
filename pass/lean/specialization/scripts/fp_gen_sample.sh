@@ -11,7 +11,7 @@
 #     frames may be elided.
 # Usage: sample_gen.sh <side> <block> <out-dir> [max-samples]
 set -uo pipefail
-R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"   # the repo root, from this script's location
+R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"   # the repo root, from this script's location
 G=$R/generated/master_port/fp/genprobe
 side=${1:?side}; blk=${2:?block}; OUT=${3:?outdir}; MAX=${4:-40}
 mkdir -p "$OUT"

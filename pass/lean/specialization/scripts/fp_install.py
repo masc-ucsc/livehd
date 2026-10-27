@@ -28,7 +28,7 @@ import pathlib
 import shutil
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parents[3]
+ROOT = pathlib.Path(__file__).resolve().parents[4]
 
 # The ONE adaptation this checkpoint makes, and the reason it is forced.
 #

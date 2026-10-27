@@ -38,7 +38,7 @@ observations stay absent rather than being backfilled.
 
 import argparse, hashlib, json, os, pathlib, re, subprocess, sys, time, uuid
 
-ROOT = pathlib.Path(__file__).resolve().parents[3]
+ROOT = pathlib.Path(__file__).resolve().parents[4]
 WANT_SEEDS = ["0", "1", "2", "3", "4", "7"]
 WANT_TRACE_CYCLES = 4
 

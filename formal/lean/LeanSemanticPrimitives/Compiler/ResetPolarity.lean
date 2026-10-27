@@ -14,7 +14,7 @@ Both polarities are legal hardware (LiveHD's Flop carries a constant
 `negreset` pin), and the two records must agree for the SAME flop on the SAME
 signal.  The DCERT1 exporter did not guarantee that: the imported DCERT1 corpus
 has 5,837 raw-port opposite polarities across 59 certificates, master's DCERT2
-writer none in 132 (`pass/lean/specialization/tests/fp_reset_polarity_census.tsv`), because
+writer none in 132 (`pass/lean/specialization/evidence/fp_reset_polarity_census.tsv`), because
 master derives both records from one scanned `active_low`.  On such a
 certificate one of the two readings is always in reset -- `btb_gate` simulates
 all-zero at either reset level -- so agreement between two simulators of it is

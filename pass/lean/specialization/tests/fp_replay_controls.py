@@ -17,7 +17,7 @@ or build executes.
 import json, pathlib, re, shutil, subprocess, sys, tempfile, os
 
 ROOT = pathlib.Path(__file__).resolve().parents[4]
-CLI = ROOT / "pass" / "lean" / "specialization" / "fp_replay.py"
+CLI = ROOT / "pass" / "lean" / "specialization" / "scripts" / "fp_replay.py"
 SRC = ROOT / "generated" / "master_port" / "fp" / "nat-proto-O2"
 fails = []
 

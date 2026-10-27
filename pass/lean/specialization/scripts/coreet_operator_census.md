@@ -6,7 +6,7 @@ the numbers reproducible.
 
 ## Reproduce
 
-    python3 formal/lean/LeanSemanticPrimitives/Projection/census/coreet_operator_census.py
+    python3 pass/lean/specialization/scripts/coreet_operator_census.py
 
 Exit status is 0 when every operator in the census has an implementation AND
 no fixed-arity operator is given the wrong operand count.
