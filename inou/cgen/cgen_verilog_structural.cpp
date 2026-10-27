@@ -78,9 +78,9 @@ std::string Cgen_verilog::structural_range(const hhds::Pin_class& pin, int width
     uint64_t value = 0;
     bool     known = true;
     for (int bit = 0; bit < width && known; ++bit) {
-      const auto text = structural_bit(pin, low + bit);
-      known           = text != "1'bx";
-      value          |= (text == "1'b1" ? uint64_t{1} : uint64_t{0}) << bit;
+      const auto text  = structural_bit(pin, low + bit);
+      known            = text != "1'bx";
+      value           |= (text == "1'b1" ? uint64_t{1} : uint64_t{0}) << bit;
     }
     if (known) {
       return absl::StrCat(width, "'h", absl::Hex(value));
@@ -93,11 +93,12 @@ std::string Cgen_verilog::structural_range(const hhds::Pin_class& pin, int width
     return structural_bit(pin, low);
   }
   if (!pin.is_const()) {
-    // Structural nets are all declared unsigned, so the assignment context
-    // zero-extends a bare net and a contiguous in-range slice is one part-select.
+    // Make extension explicit, including instance inputs. OpenSTA rejects a
+    // short bus connected to a wider Liberty port instead of extending it,
+    // leaving the entire port disconnected from timing.
     const auto declared = std::max(1, decl_bits_of(pin));
     if (low == 0 && width > declared && gu::is_unsign(pin)) {
-      return pin2var.at(pin.get_class_index());
+      return absl::StrCat("{", width - declared, "'b0,", pin2var.at(pin.get_class_index()), "}");
     }
     if (declared > 1 && low + width <= declared) {
       return absl::StrCat(pin2var.at(pin.get_class_index()), "[", low + width - 1, ":", low, "]");

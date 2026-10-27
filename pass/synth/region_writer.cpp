@@ -5,8 +5,8 @@
 #include "region_writer.hpp"
 
 #include <algorithm>
-#include <map>
 #include <format>
+#include <map>
 #include <numeric>
 
 #include "absl/container/flat_hash_set.h"
@@ -87,9 +87,7 @@ void bypass_setmask_bit_reads(hhds::Graph* g) {
   for (const auto& rewrite : rewrites) {
     hhds::Pin_class replacement = rewrite.source;
     if (rewrite.bit != 0 || gu::bits_of(replacement) != 1) {
-      auto select = gu::create_typed_node(*g, Ntype_op::SRA);
-      replacement.connect_sink(gu::setup_sink_by_name(select, "a"));
-      gu::create_const(*g, *Dlop::create_integer(rewrite.bit)).connect_sink(gu::setup_sink_by_name(select, "b"));
+      auto select = gu::create_get_mask(*g, replacement, rewrite.bit);
       replacement = select.create_driver_pin(0);
       gu::set_bits(replacement, 1);
       gu::set_unsign(replacement);
@@ -168,15 +166,9 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   // find-or-declare a 1-bit blackbox cell def (Liberty pins) in the out library
   auto cell_desc = [&](uint32_t type) -> const Cell_decl& { return lib.decl(*outlib_, type); };
 
-  // Select one bit as an explicit Get_mask with the one-hot `(1 << b)` mask.
-  //
-  // This used to be `(bus >> b)` stamped to one bit, which kept a W-bit
-  // boundary's selector constants at O(W log W) instead of the O(W^2) the
-  // one-hot bigints cost. That form is NOT reload-safe (see below), so the
-  // one-hot is the price of correctness; a W in the tens of thousands (whole
-  // design flatten forces this path at every width, below) pays ~W^2/8 bytes of
-  // pooled constants. Revisit as `Get_mask(SRA(bus, b), mask=1)` -- 3 nodes per
-  // bit but log-sized constants -- if that ever becomes the bottleneck.
+  // Select one bit explicitly with a compact [b, b + 1) Get_mask range.
+  // This stays structural in Verilog and preserves selection semantics when
+  // the saved mapped graph is compiled again.
   auto extract_body_bit = [&](const hhds::Pin_class& bus, int b) {
     // A shift with a one-bit hint is still an unlimited-precision shift.
     // Its high bits reappear when a saved mapped graph is compiled again,
@@ -187,7 +179,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
     return out;
   };
 
-  // Lazily build bit b of a body input pin (compact shift-select; pin itself if 1-bit).
+  // Lazily build bit b of a body input pin (range select; pin itself if 1-bit).
   std::vector<std::vector<hhds::Pin_class>> in_bit(rb.inputs.size());
   std::vector<hhds::Pin_class>              body_input_pin(rb.inputs.size());
   std::vector<hhds::Node_class>             body_input_splitter(rb.inputs.size());
@@ -247,10 +239,8 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       gu::set_bits(input, width);  // consumers read the body pin, not the IO decl
       for (int b = width - 1; b >= 0; --b) {
         auto output = std::format("b{}", b);
-        auto shift  = gu::create_typed_node(*split_body, Ntype_op::SRA);
-        input.connect_sink(gu::setup_sink_by_name(shift, "a"));
-        gu::create_const(*split_body, *Dlop::create_integer(b)).connect_sink(gu::setup_sink_by_name(shift, "b"));
-        auto bit = shift.create_driver_pin(0);
+        auto select = gu::create_get_mask(*split_body, input, b);
+        auto bit    = select.create_driver_pin(0);
         gu::set_bits(bit, 1);
         gu::set_unsign(bit);
         bit.connect_sink(split_body->get_output_pin(output));

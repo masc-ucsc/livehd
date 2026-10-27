@@ -4,8 +4,8 @@
 
 #include <algorithm>
 #include <chrono>
-#include <mutex>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -341,6 +341,45 @@ TEST(Aegraph, ASharedWindowedSumIsNotAddedAgainInEachConsumer) {
   }
   EXPECT_EQ(sums, 3u);
   EXPECT_EQ(operands, 6u) << "each subtraction adds one operand to the shared sum, not v and inc again";
+}
+
+// Signed truncation between additions must not serialize a modular reduction.
+TEST(Aegraph, SignedModularSumChainFlattensOnlyAcrossWideEnoughBoundaries) {
+  for (const bool subtract : {false, true}) {
+    for (const int keep : {7, 8}) {
+      hhds::GraphLibrary lib;
+      auto               g    = io_graph(lib, "signed_sum_chain", 8, 1);
+      const auto         sext = [&](const hhds::Pin_class& value, int bits) {
+        auto n = gu::create_typed_node(*g, Ntype_op::Sext);
+        value.connect_sink(gu::setup_sink_by_name(n, "a"));
+        konst(g, bits).connect_sink(gu::setup_sink_by_name(n, "b"));
+        gu::set_sbits(n.create_driver_pin(0), bits);
+        return n.create_driver_pin(0);
+      };
+      const auto term = [&](int i) {
+        return binop(g,
+                     Ntype_op::And,
+                     sext(g->get_input_pin("i" + std::to_string(i)), 8),
+                     sext(g->get_input_pin("i" + std::to_string(i + 4)), 8));
+      };
+      auto value = term(0);
+      for (int i = 1; i < 4; ++i) {
+        auto sum = gu::create_typed_node(*g, Ntype_op::Sum);
+        term(i).connect_sink(gu::setup_sink_by_name(sum, "as"));
+        value.connect_sink(gu::setup_sink_by_name(sum, subtract ? "bs" : "as"));
+        gu::set_ubits(sum.create_driver_pin(0), 8);
+        value = sum.create_driver_pin(0);
+        if (i != 3) {
+          value = sext(value, keep);
+        }
+      }
+      auto window = gu::create_get_mask(*g, value, 0, 8).create_driver_pin(0);
+      gu::set_ubits(window, 8);
+      window.connect_sink(g->get_output_pin("o0"));
+      livehd::aegraph::optimize(g, {}, checked());
+      EXPECT_EQ(count_op(g, Ntype_op::Sum), keep == 8 ? 1u : 3u);
+    }
+  }
 }
 
 // `match op { == 0 {A} == 1 {B} == 2 {A} == 3 {B} else {C} }`: the post steps flatten the Mux chain into one Hotmux whose

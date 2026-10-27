@@ -41,6 +41,13 @@ cc_binary(
 )
 
 cc_binary(
+    name = "synth_io_replay",
+    srcs = ["synth_io_replay.cpp"],
+    copts = COPTS,
+    deps = ["//graph", "//inou/cgen:inou_cgen", "//pass/abc:pass_abc", "//pass/synth", "@rapidjson"],
+)
+
+cc_binary(
     name = "timeclosure_replay",
     srcs = ["timeclosure_replay.cpp"],
     copts = COPTS,

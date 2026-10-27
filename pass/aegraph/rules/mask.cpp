@@ -13,7 +13,6 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
-
 #include "runtime/analyses.hpp"
 #include "runtime/match.hpp"
 
@@ -264,10 +263,13 @@ AEG_NATIVE_RULE(getmask_drop_terms, simplify, 36, Ntype_op::Get_mask) {
 // (modular arithmetic: the truncation of the inner sum is undone by the outer one). Classic folds the same chain
 // (`(base + size - 1)` of an address range). Only when every operand of y already fits `hi` bits, so the merged Sum
 // is no wider than the outer window: a wide y would trade the inner mask for a wider adder.
+// Sext(y, k) is the signed form of the same modular boundary: for k >= hi its
+// low hi bits also equal y's. Keeping those boundaries serialized signed MAC
+// reductions even though only the final low bits are observed.
 AEG_NATIVE_RULE(getmask_sum_chain, simplify, 37, Ntype_op::Get_mask) {
   Class_id x = kNoClass;
   int64_t  lo = 0, hi = 0;
-  if (!get_mask_window(ctx, root, x, lo, hi) || lo != 0 || hi > 4096) {
+  if (!get_mask_window(ctx, root, x, lo, hi) || lo != 0 || hi <= 0 || hi > 4096) {
     return;
   }
   const Enode* sum = nullptr;
@@ -287,14 +289,37 @@ AEG_NATIVE_RULE(getmask_sum_chain, simplify, 37, Ntype_op::Get_mask) {
     return;
   }
   ctx.grant_fuel(terms.size() * 8);
-  std::vector<Operand> merged;
-  bool                 peeled        = false;
-  bool                 private_inner = true;  // every merged window is read by this Sum only
-  for (const auto& t : terms) {
+  std::vector<Operand>  merged;
+  std::vector<Operand>  pending = terms;
+  std::vector<Class_id> expanded{x};
+  bool                  peeled        = false;
+  bool                  private_inner = true;  // every merged window is read by this Sum only
+  while (!pending.empty()) {
+    const auto t = pending.back();
+    pending.pop_back();
     const Enode* inner = nullptr;
     Class_id     y     = kNoClass;
     if (const auto s = slice_of(ctx, t.cls); s && s->lo == 0 && s->hi >= hi) {
       y = s->source;
+    } else {
+      ctx.each_member(t.cls, [&](Class_id member) {
+        const auto* n = ctx.node_of(member);
+        if (n == nullptr || n->op != Ntype_op::Sext) {
+          return false;
+        }
+        const auto ops = ctx.operands_of(*n);
+        if (ops.size() != 2 || ops[0].bank != 0 || ops[1].bank != 1) {
+          return false;
+        }
+        const auto keep = ctx.small_int(ops[1].cls);
+        if (!keep || *keep < hi) {
+          return false;
+        }
+        y = ops[0].cls;
+        return true;
+      });
+    }
+    if (y != kNoClass) {
       ctx.each_member(y, [&](Class_id member) {
         const Enode* n = ctx.node_of(member);
         if (n != nullptr && n->op == Ntype_op::Sum) {
@@ -304,23 +329,28 @@ AEG_NATIVE_RULE(getmask_sum_chain, simplify, 37, Ntype_op::Get_mask) {
         return false;
       });
     }
-    if (inner == nullptr) {
+    if (inner == nullptr || std::ranges::find(expanded, y) != expanded.end() || expanded.size() >= 64) {
       merged.push_back(t);
       continue;
     }
     const std::vector<Operand> ys(ctx.operands_of(*inner).begin(), ctx.operands_of(*inner).end());
     bool                       narrow = ys.size() <= 16;
     for (const auto& o : ys) {
-      const int64_t bits = unsigned_bits(ctx.eg(), o.cls);
-      narrow             = narrow && bits >= 0 && bits <= hi;
+      const int64_t bits        = unsigned_bits(ctx.eg(), o.cls);
+      const auto    facts       = facts_of(ctx.eg(), o.cls);
+      const auto    sign_limit  = Wide{1} << std::min<int64_t>(hi - 1, 99);
+      const bool    signed_fits = facts.bounded() && facts.lo >= -sign_limit && facts.hi < sign_limit;
+      narrow                    = narrow && ((bits >= 0 && bits <= hi) || signed_fits);
     }
     if (!narrow) {
       merged.push_back(t);
       continue;
     }
+    expanded.push_back(y);
+    ctx.grant_fuel(ys.size() * 8);
     for (const auto& o : ys) {
       // a subtracted Sum operand under a subtracted slot adds back: flip the bank when the slot is subtracted
-      merged.push_back(Operand{t.bank == 0 ? o.bank : (o.bank == 0 ? uint32_t{1} : uint32_t{0}), o.cls});
+      pending.push_back(Operand{t.bank == 0 ? o.bank : (o.bank == 0 ? uint32_t{1} : uint32_t{0}), o.cls});
     }
     peeled        = true;
     private_inner = private_inner && ctx.single_use(t.cls) && ctx.single_use(y);  // the window AND the sum under it
