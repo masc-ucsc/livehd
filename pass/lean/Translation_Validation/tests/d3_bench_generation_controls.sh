@@ -17,7 +17,7 @@
 # No Lean semantics are involved; this is harness evidence only.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+# <ROOT>/pass/lean/Translation_Validation/tests/<this file>: four levels down.
 ROOT="$(cd "$HERE/../../../.." && pwd)"
 BENCH="$ROOT/pass/lean/Translation_Validation/scripts/d3_bench2.sh"
 GEN="$ROOT/pass/lean/Translation_Validation/scripts/d3_gen.py"
@@ -39,7 +39,7 @@ rm -rf "$W"; mkdir -p "$W/bin"
 cp "$ROOT/pass/lean/Translation_Validation/scripts/d3_gen.py" "$W/gen_real.py"
 restore_gen() { cp -f "$W/gen_real.py" "$ROOT/pass/lean/Translation_Validation/scripts/d3_gen.py" 2>/dev/null; }
 trap restore_gen EXIT INT TERM
-PROBE="$ROOT/formal/lean/probes/d3c2_pruned_chain_4.lean"
+PROBE="$ROOT/formal/lean/probes/d3/d3c2_pruned_chain_4.lean"
 GEN_SHA_BEFORE="$(sha256sum < "$GEN")"
 
 common=(D3_ROOT="$ROOT" SCRATCH="$W/scratch" TMO=600

@@ -10,7 +10,7 @@ The single invariant under test: **no log may yield `verdict == "agree"` unless
 the checker proved, in that same run, that it rejects a wrong answer at every
 observable the design actually has.**
 
-Run: python3 pass/lean/Translation_Validation/scripts/d3_sweep_parser_test.py
+Run: python3 pass/lean/Translation_Validation/tests/d3_sweep_parser_test.py
 """
 
 import importlib.util
@@ -18,7 +18,9 @@ import pathlib
 import sys
 
 HERE = pathlib.Path(__file__).resolve().parent
-spec = importlib.util.spec_from_file_location("d3_sweep", HERE / "d3_sweep.py")
+# The drivers under test sit beside this directory, in scripts/.
+SCRIPTS = HERE.parent / "scripts"
+spec = importlib.util.spec_from_file_location("d3_sweep", SCRIPTS / "d3_sweep.py")
 d3 = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(d3)
 

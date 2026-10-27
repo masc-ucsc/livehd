@@ -23,8 +23,10 @@
 # another build in the same tree.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+# <ROOT>/pass/lean/Translation_Validation/tests/<this file>: four levels down.
 ROOT="$(cd "$HERE/../../../.." && pwd)"
+# The drivers under test sit beside this directory, in scripts/.
+SCRIPTS="$HERE/../scripts"
 SRC_CERT="${D3_CONTROL_CERT:-$ROOT/pass/lean/Translation_Validation/tests/fixtures/tiny_sync_ram_Lgraph.lean}"
 LEAN_ROOT="${D3_LEAN_ROOT:-$ROOT/formal/lean}"
 
@@ -36,8 +38,8 @@ bad() { printf '  FAIL %s\n' "$1"; fails=$((fails + 1)); }
 
 W="$ROOT/generated/d3_module_cli_controls"
 rm -rf "$W"; mkdir -p "$W"
-LIVE_WORKER_SHA="$(sha256sum < "$HERE/d3_module_proof.py")"
-LIVE_SWEEP_SHA="$(sha256sum < "$HERE/d3_sweep.py")"
+LIVE_WORKER_SHA="$(sha256sum < "$SCRIPTS/d3_module_proof.py")"
+LIVE_SWEEP_SHA="$(sha256sum < "$SCRIPTS/d3_sweep.py")"
 SRC_CERT_SHA="$(sha256sum < "$SRC_CERT")"
 
 ctx() { # ctx <tag> <stub-mode> [alloc_mb]
@@ -46,8 +48,8 @@ ctx() { # ctx <tag> <stub-mode> [alloc_mb]
   local alloc="${3:-0}"
   local d="$W/$tag"
   rm -rf "$d"; mkdir -p "$d/scripts" "$d/certs"
-  cp "$HERE/d3_sweep.py" "$HERE/d3_manifest.py" "$HERE/d3_guarded_build.py" \
-     "$HERE/d3_gen_modules.py" "$d/scripts/" 2>/dev/null
+  cp "$SCRIPTS/d3_sweep.py" "$SCRIPTS/d3_manifest.py" "$SCRIPTS/d3_guarded_build.py" \
+     "$SCRIPTS/d3_gen_modules.py" "$d/scripts/" 2>/dev/null
   cp "$SRC_CERT" "$d/certs/"
   local cert="$d/certs/$(basename "$SRC_CERT")"
   sha256sum < "$cert" | cut -d' ' -f1 > "$d/cert.sha"
@@ -191,9 +193,9 @@ else
 fi
 
 # ---- nothing live was touched ----------------------------------------------
-[[ "$(sha256sum < "$HERE/d3_module_proof.py")" == "$LIVE_WORKER_SHA" ]] \
+[[ "$(sha256sum < "$SCRIPTS/d3_module_proof.py")" == "$LIVE_WORKER_SHA" ]] \
   && ok "the live d3_module_proof.py is byte-identical" || bad "the live worker changed"
-[[ "$(sha256sum < "$HERE/d3_sweep.py")" == "$LIVE_SWEEP_SHA" ]] \
+[[ "$(sha256sum < "$SCRIPTS/d3_sweep.py")" == "$LIVE_SWEEP_SHA" ]] \
   && ok "the live d3_sweep.py is byte-identical" || bad "the live sweep changed"
 [[ "$(sha256sum < "$SRC_CERT")" == "$SRC_CERT_SHA" ]] \
   && ok "the source certificate is unchanged" || bad "the source certificate changed"

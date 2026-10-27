@@ -12,7 +12,7 @@ at all would otherwise satisfy most of this file while doing nothing -- the same
 vacuity that let an earlier timeout suite pass 6 of 9 assertions against code
 that had none of the fix.
 
-Run: python3 pass/lean/Translation_Validation/scripts/d3_merge_test.py
+Run: python3 pass/lean/Translation_Validation/tests/d3_merge_test.py
 """
 
 import copy
@@ -27,12 +27,14 @@ import sys
 import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
-# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+# <ROOT>/pass/lean/Translation_Validation/tests/<this file>: four levels down.
 ROOT = HERE.parents[3]
-MERGE = HERE / "d3_merge.py"
-JOIN = HERE / "d3_join.py"
+# The drivers under test sit beside this directory, in scripts/.
+SCRIPTS = HERE.parent / "scripts"
+MERGE = SCRIPTS / "d3_merge.py"
+JOIN = SCRIPTS / "d3_join.py"
 
-_spec = importlib.util.spec_from_file_location("d3_sweep", HERE / "d3_sweep.py")
+_spec = importlib.util.spec_from_file_location("d3_sweep", SCRIPTS / "d3_sweep.py")
 sweep = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(sweep)
 RESULT_COLS = sweep.RESULT_COLS
@@ -591,7 +593,7 @@ def main() -> int:
         _s = _il.spec_from_file_location("d3_merge", MERGE)
         _m = _il.module_from_spec(_s); _s.loader.exec_module(_m)
         known = set(_m.SEMANTIC_KEYS) | set(_m.SELECTION_KEYS) | set(_m.ABORT_KEYS)
-        tree = _ast.parse((HERE / "d3_sweep.py").read_text())
+        tree = _ast.parse((SCRIPTS / "d3_sweep.py").read_text())
         emitted = set()
         for node in _ast.walk(tree):
             if (isinstance(node, _ast.Subscript) and isinstance(node.value, _ast.Name)

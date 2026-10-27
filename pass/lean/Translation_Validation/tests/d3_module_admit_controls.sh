@@ -44,20 +44,22 @@
 # No Lean proof runs here; no leg says anything about a theorem.
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+# <ROOT>/pass/lean/Translation_Validation/tests/<this file>: four levels down.
 ROOT="$(cd "$HERE/../../../.." && pwd)"
+# The drivers under test sit beside this directory, in scripts/.
+SCRIPTS="$HERE/../scripts"
 SRC_CERT="${D3_CONTROL_CERT:-$ROOT/pass/lean/Translation_Validation/tests/fixtures/tiny_sync_ram_Lgraph.lean}"
 
-[[ -r "$HERE/d3_sweep.py" ]] || { echo "FATAL: missing d3_sweep.py" >&2; exit 2; }
+[[ -r "$SCRIPTS/d3_sweep.py" ]] || { echo "FATAL: missing d3_sweep.py" >&2; exit 2; }
 [[ -s "$SRC_CERT" ]] || { echo "SKIP: no control certificate at $SRC_CERT" >&2; exit 3; }
 
 W="$ROOT/generated/d3_module_admit_controls"
 rm -rf "$W"; mkdir -p "$W"
-SWEEP_SHA="$(sha256sum < "$HERE/d3_sweep.py")"
-WORKER_SHA="$(sha256sum < "$HERE/d3_module_proof.py")"
+SWEEP_SHA="$(sha256sum < "$SCRIPTS/d3_sweep.py")"
+WORKER_SHA="$(sha256sum < "$SCRIPTS/d3_module_proof.py")"
 CERT_SHA="$(sha256sum < "$SRC_CERT")"
 
-python3 -I - "$HERE/d3_sweep.py" "$SRC_CERT" "$W" <<'PYEOF'
+python3 -I - "$SCRIPTS/d3_sweep.py" "$SRC_CERT" "$W" <<'PYEOF'
 import hashlib, importlib.util, json, os, pathlib, shutil, sys
 sweep_path, src_cert, workdir = sys.argv[1], pathlib.Path(sys.argv[2]), pathlib.Path(sys.argv[3])
 spec = importlib.util.spec_from_file_location("sw", sweep_path)
@@ -167,12 +169,12 @@ sys.exit(1 if fails else 0)
 PYEOF
 rc=$?
 
-if [[ "$(sha256sum < "$HERE/d3_sweep.py")" != "$SWEEP_SHA" ]]; then
+if [[ "$(sha256sum < "$SCRIPTS/d3_sweep.py")" != "$SWEEP_SHA" ]]; then
   echo "  FAIL the live d3_sweep.py changed"; rc=1
 else
   echo "  ok   the live d3_sweep.py is byte-identical (imported, never written)"
 fi
-if [[ "$(sha256sum < "$HERE/d3_module_proof.py")" != "$WORKER_SHA" ]]; then
+if [[ "$(sha256sum < "$SCRIPTS/d3_module_proof.py")" != "$WORKER_SHA" ]]; then
   echo "  FAIL the live d3_module_proof.py changed"; rc=1
 else
   echo "  ok   the live d3_module_proof.py is byte-identical (never swapped)"

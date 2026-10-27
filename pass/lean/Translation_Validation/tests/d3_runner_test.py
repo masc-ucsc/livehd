@@ -9,10 +9,10 @@ join can report a denominator it did not measure.
 Lean is STUBBED. The subject here is the runner's bookkeeping, and a real probe
 costs minutes; the stub emits a well-formed gate log so these run in seconds and
 stay deterministic. Parser behaviour on malformed logs is covered by
-`d3_sweep_parser_test.py`, the checker itself by `probes/d3_harness_test.lean`,
+`d3_sweep_parser_test.py`, the checker itself by `probes/d3/d3_harness_test.lean`,
 and process teardown by `d3_sweep_cancel_test.py`.
 
-Run: python3 pass/lean/Translation_Validation/scripts/d3_runner_test.py
+Run: python3 pass/lean/Translation_Validation/tests/d3_runner_test.py
 """
 
 import csv
@@ -28,10 +28,12 @@ import tempfile
 import time
 
 HERE = pathlib.Path(__file__).resolve().parent
-# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+# <ROOT>/pass/lean/Translation_Validation/tests/<this file>: four levels down.
 ROOT = HERE.parents[3]
-SWEEP = HERE / "d3_sweep.py"
-JOIN = HERE / "d3_join.py"
+# The drivers under test sit beside this directory, in scripts/.
+SCRIPTS = HERE.parent / "scripts"
+SWEEP = SCRIPTS / "d3_sweep.py"
+JOIN = SCRIPTS / "d3_join.py"
 
 # The runner as a MODULE, so schema constants are quoted from the source of
 # truth rather than re-spelled here -- a test that hardcodes "time-max-rss"

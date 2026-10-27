@@ -19,7 +19,7 @@ were allowed to change the experiment:
 Lean is stubbed through `d3_runner_test`'s fixtures; a real probe costs minutes
 and nothing here depends on one.
 
-Run: python3 pass/lean/Translation_Validation/scripts/d3_scheduler_test.py
+Run: python3 pass/lean/Translation_Validation/tests/d3_scheduler_test.py
 """
 
 import csv
@@ -34,10 +34,12 @@ import sys
 import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
-# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+# <ROOT>/pass/lean/Translation_Validation/tests/<this file>: four levels down.
 ROOT = HERE.parents[3]
-SWEEP = HERE / "d3_sweep.py"
-JOIN = HERE / "d3_join.py"
+# The drivers under test sit beside this directory, in scripts/.
+SCRIPTS = HERE.parent / "scripts"
+SWEEP = SCRIPTS / "d3_sweep.py"
+JOIN = SCRIPTS / "d3_join.py"
 
 spec = importlib.util.spec_from_file_location("d3_runner_test", HERE / "d3_runner_test.py")
 rt = importlib.util.module_from_spec(spec)
@@ -563,7 +565,7 @@ def main() -> int:
         # environment variable while the sidecar recorded --rss-sample-seconds.
         # A run could therefore sample at 0.05 s and certify 5.0 -- and these very
         # tests, which set that variable, were certifying the mismatch.
-        src = (HERE / "d3_sweep.py").read_text()
+        src = (SCRIPTS / "d3_sweep.py").read_text()
         body = src.split("def _rss_monitor")[1].split("\ndef ")[0]
         check("no_env_interval_override", "os.environ" not in body,
               "_rss_monitor reads no environment variable for its interval, so the "

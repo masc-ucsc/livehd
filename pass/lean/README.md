@@ -105,6 +105,23 @@ Both are shared with the D3, D4 and projection directions, which is why
 neither moved.  `Lgraph_IR_Semantics_Simulator/README.md` records that split
 and what each link in the chain is actually checked by.
 
+## Where the translation-validation work lives
+
+`Translation_Validation/` — beside this file — holds that direction: the
+simulator it builds from a `DesignCert` is one straight-line Lean function,
+checked per design against `interpretDesign`. The folder is split by what you
+do with a file: `scripts/` is what you run to produce a result (the sweep
+driver `d3_sweep.py`, the result-table tools, the corpus drivers, the probe
+generator and the scaling benches), `tests/` is what you run to check the tool
+(the unit suites and the end-to-end controls, with the fixture certificate in
+`tests/fixtures/`), and `evidence/` holds measurements kept as records.
+
+Its Lean sources stay in the Lean project: the regression probes in
+`formal/lean/probes/d3/`, and the compiler, the reifiers and the harness in
+the shared `formal/lean/LeanSemanticPrimitives/Compiler/`, which the D3, D4
+and projection directions all use. `Translation_Validation/README.md` has the
+build and run commands, the trust boundary and the benchmarks covered.
+
 ## Lean Support Library and Emitted Model
 
 - `formal/lean` builds a Lean package named `LeanSemanticPrimitives`.

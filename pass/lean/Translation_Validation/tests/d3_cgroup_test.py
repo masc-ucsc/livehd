@@ -16,7 +16,7 @@ Where delegation is unavailable the mechanism tests SKIP rather than fail -- tha
 is a property of the host, not a defect -- but the refusal tests still run,
 because refusing to pretend is the behaviour that matters most there.
 
-Run: python3 pass/lean/Translation_Validation/scripts/d3_cgroup_test.py
+Run: python3 pass/lean/Translation_Validation/tests/d3_cgroup_test.py
 """
 
 import importlib.util
@@ -31,9 +31,11 @@ import tempfile
 import time
 
 HERE = pathlib.Path(__file__).resolve().parent
-# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+# <ROOT>/pass/lean/Translation_Validation/tests/<this file>: four levels down.
 ROOT = HERE.parents[3]
-SWEEP = HERE / "d3_sweep.py"
+# The drivers under test sit beside this directory, in scripts/.
+SCRIPTS = HERE.parent / "scripts"
+SWEEP = SCRIPTS / "d3_sweep.py"
 
 spec = importlib.util.spec_from_file_location("d3_sweep", SWEEP)
 sweep = importlib.util.module_from_spec(spec)

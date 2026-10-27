@@ -10,7 +10,7 @@ Each case builds a throwaway corpus under the project's own temp directory and
 asserts the manifest either REFUSES or records the change as current evidence —
 never that it quietly carries stale metadata forward.
 
-Run: python3 pass/lean/Translation_Validation/scripts/d3_manifest_test.py
+Run: python3 pass/lean/Translation_Validation/tests/d3_manifest_test.py
 """
 
 import csv
@@ -21,9 +21,11 @@ import sys
 import tempfile
 
 HERE = pathlib.Path(__file__).resolve().parent
-# <ROOT>/pass/lean/Translation_Validation/scripts/<this file>: four levels down.
+# <ROOT>/pass/lean/Translation_Validation/tests/<this file>: four levels down.
 ROOT = HERE.parents[3]
-spec = importlib.util.spec_from_file_location("d3_manifest", HERE / "d3_manifest.py")
+# The drivers under test sit beside this directory, in scripts/.
+SCRIPTS = HERE.parent / "scripts"
+spec = importlib.util.spec_from_file_location("d3_manifest", SCRIPTS / "d3_manifest.py")
 dm = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(dm)
 

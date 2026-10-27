@@ -10,16 +10,37 @@ design. Instead, each design's output is checked on its own. The check is a
 sampled differential test by default. With `--prove` it becomes a
 kernel-checked theorem.
 
+## Code layout
+
+Everything this direction owns sits in one folder, split by what you do with
+a file: `scripts/` is what you run to produce a result, `tests/` is what you
+run to check the tool, and `evidence/` is a measurement kept as a record.
+
 ```text
 pass/lean/Translation_Validation/
-  scripts/   the sweep driver (d3_sweep.py), merge/join of result tables,
-             the corpus driver (run_d3_corpus.sh), generators, unit tests
-  tests/     controls that run the driver end to end, and the fixture
-             certificate (tests/fixtures/tiny_sync_ram_Lgraph.lean)
+  scripts/    the sweep driver (d3_sweep.py); the result-table tools
+              (d3_merge.py, d3_join.py, d3_manifest.py, d3_cost_census.py);
+              the corpus drivers (run_d3_corpus.sh, d3_master_corpus.py,
+              tv_cov_sweep.sh); the module-proof worker (d3_module_proof.py,
+              d3_gen_modules.py, d3_guarded_build.py); the probe generator
+              (d3_gen.py) and the scaling benches (d3_bench.sh, d3_bench2.sh)
+  tests/      the unit suites (d3_*_test.py), the end-to-end controls
+              (*_controls.*), and the fixture certificate
+              (fixtures/tiny_sync_ram_Lgraph.lean)
+  evidence/   measurements kept as records (d3_cost_census.tsv,
+              scoreboard_cost_ladder.tsv)
 ```
 
-The Lean side lives in the shared library,
-`formal/lean/LeanSemanticPrimitives/Compiler/`:
+Two kinds of file this direction owns live elsewhere, because they are Lean
+sources and belong in the Lean project:
+
+* `formal/lean/probes/d3/` — the Lean regression probes (`d3_*.lean`: the
+  harness, the reifiers, flops, memories, stimuli, clocks) and the scaling
+  benches the generator writes (`d3b_*`, `d3c2_*`, ignored).
+* `formal/lean/LeanSemanticPrimitives/Compiler/` — the shared library below.
+
+The compiler and its semantics are shared with the other Lean directions, so
+they stay where they are:
 
 | file | what it holds |
 |---|---|
@@ -191,9 +212,10 @@ way (legacy reifier, no proof):
   has a judged result with a matching hash.
 * The generated probes stay in `temp/d3_sweep/runs/<run_id>/probes/`.
   `<m>.lean` is the simulator and its check; `<m>.proof.lean` is the proof.
-* Unit suites: `scripts/d3_{manifest,merge,sweep_parser,sweep_cancel,cgroup,scheduler,runner,proof}_test.py`.
-  End-to-end controls: `tests/*_controls.*` and
-  `scripts/d3_{resume,module_cli,module_admit}_controls.sh`.
+* Unit suites: `tests/d3_{manifest,merge,sweep_parser,sweep_cancel,cgroup,scheduler,runner,proof}_test.py`.
+  End-to-end controls, which run the real drivers: `tests/*_controls.*`.
+  The Lean side has its own probes in `formal/lean/probes/d3/`, each run with
+  `cd formal/lean && lake env lean probes/d3/<name>.lean`.
 
 ## Trust boundary
 
