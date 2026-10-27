@@ -648,8 +648,8 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.macro_filler_fraction       = number("place.macro.filler_fraction", "0");
   out.virtual_fillers             = truthy(synth_set(opts, "place.virtual_fillers", "true"));
   out.virtual_filler_max_count    = integer("place.virtual_filler_max_count", "0");
-  out.virtual_filler_fraction     = number("place.virtual_filler_fraction", "0.25");
-  out.virtual_filler_cell_scale   = number("place.virtual_filler_cell_scale", "1");
+  out.virtual_filler_fraction     = number("place.virtual_filler_fraction", "1");
+  out.virtual_filler_cell_scale   = number("place.virtual_filler_cell_scale", "2");
   out.virtual_filler_bin_fraction = number("place.virtual_filler_bin_fraction", "0.25");
   out.bin_max                     = integer("place.grid.density_max", "512");
   out.local_density_weight        = number("place.local_density_weight", "0");

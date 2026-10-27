@@ -90,7 +90,8 @@ std::shared_ptr<hhds::Graph> mapped_def(hhds::GraphLibrary& library, const ph::F
 
 // Geometry-only export for the native RUDY evaluator and placement PNGs. It
 // uses the same LEF pin centers, ideal-clock masks and layer capacities as GP.
-void physical_snapshot(const ph::Technology& tech, const ph::Floorplan& fp, const std::string& root) {
+void physical_snapshot(const ph::Technology& tech, const ph::Floorplan& fp, const std::string& root,
+                       const std::set<std::string>& ignored_nets = {}) {
   if (fp.rows.empty() || fp.dbu != tech.dbu) {
     throw std::invalid_argument("physical snapshot requires rows and matching LEF/DEF units");
   }
@@ -121,10 +122,11 @@ void physical_snapshot(const ph::Technology& tech, const ph::Floorplan& fp, cons
     out << t.x << ' ' << t.y << " 0 0 0 0 0\n";
   }
   const auto measured = [&](const ph::Net& net) {
-    return net.connections.size() >= 2 && std::none_of(net.connections.begin(), net.connections.end(), [&](const auto& c) {
-             return c.instance != "PIN"
-                    && tech.macros.at(fp.components.at(cells.at(c.instance)).macro).pins.at(c.pin).use == "CLOCK";
-           });
+    return !ignored_nets.contains(net.name) && net.connections.size() >= 2
+           && std::none_of(net.connections.begin(), net.connections.end(), [&](const auto& c) {
+                return c.instance != "PIN"
+                       && tech.macros.at(fp.components.at(cells.at(c.instance)).macro).pins.at(c.pin).use == "CLOCK";
+              });
   };
   out << std::count_if(fp.nets.begin(), fp.nets.end(), measured) << '\n';
   for (const auto& net : fp.nets) {
@@ -630,7 +632,25 @@ int main(int argc, char** argv) {
       }
     }
     if (config.HasMember("snapshot_only") && config["snapshot_only"].GetBool()) {
-      physical_snapshot(tech, *options.previous, root);
+      std::set<std::string> ignored_nets;
+      bool                  snapshot_prects = false;
+      boolean_option("snapshot_prects", snapshot_prects);
+      if (snapshot_prects) {
+        const auto controls
+            = pl::prects_networks(tech, *options.previous, pl::prects_library(options.liberty, options.control_ports));
+        for (size_t n = 0; n < options.previous->nets.size(); ++n) {
+          if (controls.ignored[n]) {
+            ignored_nets.insert(options.previous->nets[n].name);
+          }
+        }
+      }
+      physical_snapshot(tech, *options.previous, root, ignored_nets);
+      std::ofstream filters(root + "/snapshot_filters.json");
+      filters << "{\"prects_controls\":" << (snapshot_prects ? "true" : "false") << ",\"ignored_nets\":" << ignored_nets.size()
+              << "}\n";
+      if (!filters) {
+        throw std::runtime_error("cannot write physical snapshot filter report");
+      }
       return 0;
     }
     std::cout << "loading mapped graph" << std::endl;
@@ -840,11 +860,11 @@ int main(int argc, char** argv) {
         }
       }
       if (macro_only) {
-        if (options.fp_place || options.final_cells || options.cell_halo || options.gp_search.enabled || options.vanished_memory
+        if (options.final_cells || options.cell_halo || options.gp_search.enabled || options.vanished_memory
             || options.macro_transparency.enabled() || options.cell_jump.depth) {
-          throw std::invalid_argument("macro_only requires fp_place=false, final_cells=false and no final-cell controls");
+          throw std::invalid_argument("macro_only requires final_cells=false and no final-cell controls");
         }
-        // Use the production macro stage, then export its legal macro frame.
+        // Optional centroid FP feeds the production macro stage; export its legal frame.
         // Physical rows/tapcells can be rebuilt before a separate final solve.
         options.completed_stage      = pl::Placement_stage::macro;
         options.macro_legalize_cells = false;
