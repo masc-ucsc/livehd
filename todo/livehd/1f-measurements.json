@@ -51078,6 +51078,1098 @@
         ],
         "scope": "Compare status, orientation, coordinates and every layer rectangle of all signal terminals, independent of renamed nets and DEF PORT syntax."
       }
+    },
+    "shared_timing_net_names_v63": {
+      "status": "four matched designs exact and within time cap; Gemmini memory guard failed",
+      "livehd_commit": "cc6b0f5c0aa13455ab564c2c3aae3e5da717dbb8",
+      "change": "Borrow net-name strings from the session-owned net map",
+      "focused_tests_passed": 125,
+      "artifacts": "/home/renau/projs/.agent-artifacts/1f-memory-v63",
+      "matched": {
+        "scope": "Same common defaults, 100ps, reset false paths; shared persistent timing net names. Single samples, not a repeatable speedup claim.",
+        "completed": {
+          "lfsr": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v62/paired-home/v62_candidate/lfsr",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v63/paired-home/v63_candidate/lfsr"
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "7ddab5966f7830e7de46749e7d2e6bf976ff0b579bff838434a6ca111050c7e9",
+              "7ddab5966f7830e7de46749e7d2e6bf976ff0b579bff838434a6ca111050c7e9"
+            ],
+            "independent_scores_identical": true,
+            "export_files_identical": true,
+            "export_files": [
+              {
+                "final/uroute_export/features.bin": "f5f163a9efcd5fa63f088adf873a5ca7a275a81706075ecbfd3276e8a11a39ae",
+                "final/uroute_export/metadata.json": "b9893726ad6a4aafa6aaccaa262a016c03f6cb41efb8252e04d275565dc90d72",
+                "resize/sweep_1/uroute_export/features.bin": "3e3c49777a6beff5b2bcac72cc23355320661c437ac45a1ab41f62d1e53dfccd",
+                "resize/sweep_1/uroute_export/metadata.json": "211064ac8ccceef2c49b51823940ba53a8dee689c7c32db9a20243f38495460d",
+                "timing_place/round_0/uroute_export/features.bin": "93be32a344ec2faa843c45e6a8474fede77c4abebb48e49fd2367795201a16ad",
+                "timing_place/round_0/uroute_export/metadata.json": "bb6cca0f68299019061a410503a1b0aee317ad108248f0614ab404ff4441036b",
+                "uroute_export/features.bin": "ee19e05e600642a7b618d8d16444e092fbe6be918e49f02073167555c00aac4f",
+                "uroute_export/metadata.json": "a2914ead4ce5d82f4b022c476965069771fc75d46de4554a936f5bd72351bffa"
+              },
+              {
+                "final/uroute_export/features.bin": "f5f163a9efcd5fa63f088adf873a5ca7a275a81706075ecbfd3276e8a11a39ae",
+                "final/uroute_export/metadata.json": "b9893726ad6a4aafa6aaccaa262a016c03f6cb41efb8252e04d275565dc90d72",
+                "resize/sweep_1/uroute_export/features.bin": "3e3c49777a6beff5b2bcac72cc23355320661c437ac45a1ab41f62d1e53dfccd",
+                "resize/sweep_1/uroute_export/metadata.json": "211064ac8ccceef2c49b51823940ba53a8dee689c7c32db9a20243f38495460d",
+                "timing_place/round_0/uroute_export/features.bin": "93be32a344ec2faa843c45e6a8474fede77c4abebb48e49fd2367795201a16ad",
+                "timing_place/round_0/uroute_export/metadata.json": "bb6cca0f68299019061a410503a1b0aee317ad108248f0614ab404ff4441036b",
+                "uroute_export/features.bin": "ee19e05e600642a7b618d8d16444e092fbe6be918e49f02073167555c00aac4f",
+                "uroute_export/metadata.json": "a2914ead4ce5d82f4b022c476965069771fc75d46de4554a936f5bd72351bffa"
+              }
+            ],
+            "placement_seconds": [
+              2.008823,
+              2.030961
+            ],
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -60.862128,
+              -60.862128
+            ],
+            "rss_mib": [
+              341.6640625,
+              342.65625
+            ],
+            "sta_fraction": 0.3399606452314939,
+            "gp": {
+              "gp_converged": false,
+              "gp_stop_reason": "density_infeasible",
+              "gp_overflow": 0.350298305,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.2599183801757048,
+              "gp_total_iterations": 600,
+              "gp_density_ready_iteration": 440,
+              "gp_continuation_deadline": 2200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 500
+            }
+          },
+          "minimax": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v62/paired-home/v62_candidate/minimax",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v63/paired-home/v63_candidate/minimax"
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "7896e45d8aba5c1ab4be865f1231f763f6568057f8a695dfcc261240cca5dec0",
+              "7896e45d8aba5c1ab4be865f1231f763f6568057f8a695dfcc261240cca5dec0"
+            ],
+            "independent_scores_identical": true,
+            "export_files_identical": true,
+            "export_files": [
+              {
+                "final/uroute_export/features.bin": "3aba31380884c2a38200eb9bde4b2780c043baeadfa1715efd081354b80b1fbd",
+                "final/uroute_export/metadata.json": "f1d8f010dd9d4532129ddf5840b692022d5912edd99be32c79f409050b6d6464",
+                "repair/sweep_1/uroute_export/features.bin": "1bc37854c8e113da2f40c81992184484be379c4cbb5f66850961307f6512c496",
+                "repair/sweep_1/uroute_export/metadata.json": "ddd852154dab7031968dd3f23995ec012e7cdc9c48ff3c7eef63b72a99aff6bb",
+                "repair/sweep_2/uroute_export/features.bin": "cda872a817b3b110c75171672a25f33737005f7ac36d221a7ba6c3bc2bf0969c",
+                "repair/sweep_2/uroute_export/metadata.json": "5552b65aa0b00f412964ed128f1e148a01d6c13fbe51ca7e670bdbdc060da2a7",
+                "repair/trial_3/uroute_export/features.bin": "857fc1ffc91f8224b74d14f4a7ff733748dbbb9d59aeb31f27eecc53d3696c95",
+                "repair/trial_3/uroute_export/metadata.json": "ca1adcf69b7bda014fa3953c9ec4f5d9cfbb24d72a3cf6effc004754998f4703",
+                "resize/sweep_1/uroute_export/features.bin": "7771ccd9dc66188680b61e07b0fcb0caa7c63191c15a56e4d32763f93fc9b160",
+                "resize/sweep_1/uroute_export/metadata.json": "79a96ce7c1eac31be95efa647b49ac1dd66465f23f2f8822b45e8f21d95373cb",
+                "timing_place/round_0/uroute_export/features.bin": "98fb83a7bba2ab68d2cbc9473fe0d793503aa2660627527d7a5222682acac27e",
+                "timing_place/round_0/uroute_export/metadata.json": "8286824cd72ef2a71cea7eefde644e9c8fa82bbae4832df2b7d9fbbdc316bd23",
+                "uroute_export/features.bin": "56744b08072e0886f8ba1576c3c03e00b6d314eaf9250e82b5ff00ae68fc6d3e",
+                "uroute_export/metadata.json": "07686a6ab2c8a0921df446de8a47bfb36436c8e862b73a702a689d4075316bab"
+              },
+              {
+                "final/uroute_export/features.bin": "3aba31380884c2a38200eb9bde4b2780c043baeadfa1715efd081354b80b1fbd",
+                "final/uroute_export/metadata.json": "f1d8f010dd9d4532129ddf5840b692022d5912edd99be32c79f409050b6d6464",
+                "repair/sweep_1/uroute_export/features.bin": "1bc37854c8e113da2f40c81992184484be379c4cbb5f66850961307f6512c496",
+                "repair/sweep_1/uroute_export/metadata.json": "ddd852154dab7031968dd3f23995ec012e7cdc9c48ff3c7eef63b72a99aff6bb",
+                "repair/sweep_2/uroute_export/features.bin": "cda872a817b3b110c75171672a25f33737005f7ac36d221a7ba6c3bc2bf0969c",
+                "repair/sweep_2/uroute_export/metadata.json": "5552b65aa0b00f412964ed128f1e148a01d6c13fbe51ca7e670bdbdc060da2a7",
+                "repair/trial_3/uroute_export/features.bin": "857fc1ffc91f8224b74d14f4a7ff733748dbbb9d59aeb31f27eecc53d3696c95",
+                "repair/trial_3/uroute_export/metadata.json": "ca1adcf69b7bda014fa3953c9ec4f5d9cfbb24d72a3cf6effc004754998f4703",
+                "resize/sweep_1/uroute_export/features.bin": "7771ccd9dc66188680b61e07b0fcb0caa7c63191c15a56e4d32763f93fc9b160",
+                "resize/sweep_1/uroute_export/metadata.json": "79a96ce7c1eac31be95efa647b49ac1dd66465f23f2f8822b45e8f21d95373cb",
+                "timing_place/round_0/uroute_export/features.bin": "98fb83a7bba2ab68d2cbc9473fe0d793503aa2660627527d7a5222682acac27e",
+                "timing_place/round_0/uroute_export/metadata.json": "8286824cd72ef2a71cea7eefde644e9c8fa82bbae4832df2b7d9fbbdc316bd23",
+                "uroute_export/features.bin": "56744b08072e0886f8ba1576c3c03e00b6d314eaf9250e82b5ff00ae68fc6d3e",
+                "uroute_export/metadata.json": "07686a6ab2c8a0921df446de8a47bfb36436c8e862b73a702a689d4075316bab"
+              }
+            ],
+            "placement_seconds": [
+              38.423986000000006,
+              37.767109
+            ],
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -913.478075,
+              -913.478075
+            ],
+            "rss_mib": [
+              949.7734375,
+              945.15625
+            ],
+            "sta_fraction": 0.3477902845568614,
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0796708268,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 800,
+              "gp_density_ready_iteration": 640,
+              "gp_continuation_deadline": 3200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 700
+            }
+          },
+          "NVDLA__partition_m": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v62/paired-home/v62_candidate/NVDLA__partition_m",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v63/paired-home/v63_candidate/NVDLA__partition_m"
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "5a442f329621baf84e6a481b4d6b9596e318634233ca1ec22d939a1aeb73de66",
+              "5a442f329621baf84e6a481b4d6b9596e318634233ca1ec22d939a1aeb73de66"
+            ],
+            "independent_scores_identical": true,
+            "export_files_identical": true,
+            "export_files": [
+              {
+                "final/uroute_export/features.bin": "490ff4d3a557ec21254bb39fe6e8df5e3040037fabf99e3ea2fb1e2498c36d82",
+                "final/uroute_export/metadata.json": "8785f25b7cdc6865260214aeb3d965cbd7802a02c881878ab3549e94c80fef6b",
+                "resize/sweep_1/uroute_export/features.bin": "ea50726d528dfd278b6b2b99e738f9648dc5c08a59fa79771ab8cae9f810a41d",
+                "resize/sweep_1/uroute_export/metadata.json": "e3398791176a318d364171d944e9846f10ed32da3daa7e2b82ce68ff0de82861",
+                "timing_place/round_0/uroute_export/features.bin": "4b66573f38e4526d3cd496467da7f29eea48130ecc9bcd054c43ffa86b00795c",
+                "timing_place/round_0/uroute_export/metadata.json": "9223d7204b4c3d6cf05eb9ff739ce5925da52b64878c07ebb2033d3dcace8f5b",
+                "uroute_export/features.bin": "d270d6753598f5914e1073c08174e4fc058f543335a62385ccf8d6cb5163f215",
+                "uroute_export/metadata.json": "0c7c816725f1b9114e23d3f1ecac2b5ad4e4ba1407587315f6023f42c097b036"
+              },
+              {
+                "final/uroute_export/features.bin": "490ff4d3a557ec21254bb39fe6e8df5e3040037fabf99e3ea2fb1e2498c36d82",
+                "final/uroute_export/metadata.json": "8785f25b7cdc6865260214aeb3d965cbd7802a02c881878ab3549e94c80fef6b",
+                "resize/sweep_1/uroute_export/features.bin": "ea50726d528dfd278b6b2b99e738f9648dc5c08a59fa79771ab8cae9f810a41d",
+                "resize/sweep_1/uroute_export/metadata.json": "e3398791176a318d364171d944e9846f10ed32da3daa7e2b82ce68ff0de82861",
+                "timing_place/round_0/uroute_export/features.bin": "4b66573f38e4526d3cd496467da7f29eea48130ecc9bcd054c43ffa86b00795c",
+                "timing_place/round_0/uroute_export/metadata.json": "9223d7204b4c3d6cf05eb9ff739ce5925da52b64878c07ebb2033d3dcace8f5b",
+                "uroute_export/features.bin": "d270d6753598f5914e1073c08174e4fc058f543335a62385ccf8d6cb5163f215",
+                "uroute_export/metadata.json": "0c7c816725f1b9114e23d3f1ecac2b5ad4e4ba1407587315f6023f42c097b036"
+              }
+            ],
+            "placement_seconds": [
+              34.833637,
+              34.539410000000004
+            ],
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -692.389648,
+              -692.389648
+            ],
+            "rss_mib": [
+              1273.578125,
+              1262.15625
+            ],
+            "sta_fraction": 0.34193821709751265,
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0820293505,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 800,
+              "gp_density_ready_iteration": 640,
+              "gp_continuation_deadline": 3200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 700
+            }
+          },
+          "coralnpu": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v62/paired-home/v62_candidate/coralnpu",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v63/paired-home/v63_candidate/coralnpu"
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "7554f3716ab6ee1e1f9e4818c383bb7a843daf3fd210630983d072469353459e",
+              "7554f3716ab6ee1e1f9e4818c383bb7a843daf3fd210630983d072469353459e"
+            ],
+            "independent_scores_identical": true,
+            "export_files_identical": true,
+            "export_files": [
+              {
+                "final/uroute_export/features.bin": "aa9128f8acc23180d39ab0752e3cdac6c91380417e21524f99c4cbba6f93a632",
+                "final/uroute_export/metadata.json": "212cde7fc80a6662a9c6403ff8fc269f0b1bb8ed0bc0d8eb2c1ee55a87ba77e0",
+                "resize/sweep_1/uroute_export/features.bin": "df59e52da4999326c653f8da475c7174a4065d8059f1dbe58e6de7295d64a3f9",
+                "resize/sweep_1/uroute_export/metadata.json": "d6b3604838e5a01cf03c44cacd69a3763648aaa0045c3a0510bf3249361d9d9a",
+                "timing_place/round_0/uroute_export/features.bin": "ffee210cb8739d61899ec64ce39c455a58f31c322603fbe6016b4c30baa9860e",
+                "timing_place/round_0/uroute_export/metadata.json": "5c5c22bc2fb70fb156e5e3c676bdb07db6d06cc753a39d83c002d4095097e522",
+                "uroute_export/features.bin": "b3d4f695dbbe354dbf28498da9ad6477ff25abfc22db55ad7029f0aaa56c374a",
+                "uroute_export/metadata.json": "a531947566008229d7a6626cab890167fadfe417a1d82471843461786565e3ba"
+              },
+              {
+                "final/uroute_export/features.bin": "aa9128f8acc23180d39ab0752e3cdac6c91380417e21524f99c4cbba6f93a632",
+                "final/uroute_export/metadata.json": "212cde7fc80a6662a9c6403ff8fc269f0b1bb8ed0bc0d8eb2c1ee55a87ba77e0",
+                "resize/sweep_1/uroute_export/features.bin": "df59e52da4999326c653f8da475c7174a4065d8059f1dbe58e6de7295d64a3f9",
+                "resize/sweep_1/uroute_export/metadata.json": "d6b3604838e5a01cf03c44cacd69a3763648aaa0045c3a0510bf3249361d9d9a",
+                "timing_place/round_0/uroute_export/features.bin": "ffee210cb8739d61899ec64ce39c455a58f31c322603fbe6016b4c30baa9860e",
+                "timing_place/round_0/uroute_export/metadata.json": "5c5c22bc2fb70fb156e5e3c676bdb07db6d06cc753a39d83c002d4095097e522",
+                "uroute_export/features.bin": "b3d4f695dbbe354dbf28498da9ad6477ff25abfc22db55ad7029f0aaa56c374a",
+                "uroute_export/metadata.json": "a531947566008229d7a6626cab890167fadfe417a1d82471843461786565e3ba"
+              }
+            ],
+            "placement_seconds": [
+              729.06971,
+              804.623575
+            ],
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -14703.633037,
+              -14703.633037
+            ],
+            "rss_mib": [
+              7736.73828125,
+              7683.578125
+            ],
+            "sta_fraction": 0.26469311491401426,
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0363638432,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 1140,
+              "gp_density_ready_iteration": 600,
+              "gp_continuation_deadline": 3000,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 1040
+            }
+          }
+        },
+        "pending": []
+      },
+      "gemmini": {
+        "status": "guard-stopped",
+        "stop_reason": "process-tree memory limit",
+        "wall_s": 650.8931047758088,
+        "tree_peak_rss_kb": 16811240,
+        "memory_limit_gib": 16,
+        "acceptance": "Strict limit is 16,000,000,000 bytes; the 16 GiB diagnostic guard is not the acceptance bound."
+      }
+    },
+    "move_temporary_feedback_v64": {
+      "status": "three exact outputs; lfsr and minimax exceed time cap; Gemmini memory guard failed",
+      "livehd_commit": "e5d24264a5a39a38844181dd64da4d780059b0b9",
+      "change": "Move temporary feedback into control filtering",
+      "focused_tests_passed": 217,
+      "artifacts": "/home/renau/projs/.agent-artifacts/1f-memory-v64",
+      "matched": {
+        "scope": "Same common defaults, 100ps, reset false paths; ownership transfer in temporary feedback filtering; small candidate runs use CPU15 versus CPU14 controls, so timing is a coarse regression check only. Single samples, not a repeatable speedup claim.",
+        "completed": {
+          "lfsr": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v63/paired-home/v63_candidate/lfsr",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v64/paired-home/v64_candidate/lfsr"
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "7ddab5966f7830e7de46749e7d2e6bf976ff0b579bff838434a6ca111050c7e9",
+              "7ddab5966f7830e7de46749e7d2e6bf976ff0b579bff838434a6ca111050c7e9"
+            ],
+            "independent_scores_identical": true,
+            "export_files_identical": true,
+            "export_files": [
+              {
+                "final/uroute_export/features.bin": "f5f163a9efcd5fa63f088adf873a5ca7a275a81706075ecbfd3276e8a11a39ae",
+                "final/uroute_export/metadata.json": "b9893726ad6a4aafa6aaccaa262a016c03f6cb41efb8252e04d275565dc90d72",
+                "resize/sweep_1/uroute_export/features.bin": "3e3c49777a6beff5b2bcac72cc23355320661c437ac45a1ab41f62d1e53dfccd",
+                "resize/sweep_1/uroute_export/metadata.json": "211064ac8ccceef2c49b51823940ba53a8dee689c7c32db9a20243f38495460d",
+                "timing_place/round_0/uroute_export/features.bin": "93be32a344ec2faa843c45e6a8474fede77c4abebb48e49fd2367795201a16ad",
+                "timing_place/round_0/uroute_export/metadata.json": "bb6cca0f68299019061a410503a1b0aee317ad108248f0614ab404ff4441036b",
+                "uroute_export/features.bin": "ee19e05e600642a7b618d8d16444e092fbe6be918e49f02073167555c00aac4f",
+                "uroute_export/metadata.json": "a2914ead4ce5d82f4b022c476965069771fc75d46de4554a936f5bd72351bffa"
+              },
+              {
+                "final/uroute_export/features.bin": "f5f163a9efcd5fa63f088adf873a5ca7a275a81706075ecbfd3276e8a11a39ae",
+                "final/uroute_export/metadata.json": "b9893726ad6a4aafa6aaccaa262a016c03f6cb41efb8252e04d275565dc90d72",
+                "resize/sweep_1/uroute_export/features.bin": "3e3c49777a6beff5b2bcac72cc23355320661c437ac45a1ab41f62d1e53dfccd",
+                "resize/sweep_1/uroute_export/metadata.json": "211064ac8ccceef2c49b51823940ba53a8dee689c7c32db9a20243f38495460d",
+                "timing_place/round_0/uroute_export/features.bin": "93be32a344ec2faa843c45e6a8474fede77c4abebb48e49fd2367795201a16ad",
+                "timing_place/round_0/uroute_export/metadata.json": "bb6cca0f68299019061a410503a1b0aee317ad108248f0614ab404ff4441036b",
+                "uroute_export/features.bin": "ee19e05e600642a7b618d8d16444e092fbe6be918e49f02073167555c00aac4f",
+                "uroute_export/metadata.json": "a2914ead4ce5d82f4b022c476965069771fc75d46de4554a936f5bd72351bffa"
+              }
+            ],
+            "placement_seconds": [
+              2.030961,
+              3.1997150000000003
+            ],
+            "within_1_5_time": false,
+            "independent_wns_ps": [
+              -60.862128,
+              -60.862128
+            ],
+            "rss_mib": [
+              342.65625,
+              341.66015625
+            ],
+            "sta_fraction": 0.3517587288242858,
+            "gp": {
+              "gp_converged": false,
+              "gp_stop_reason": "density_infeasible",
+              "gp_overflow": 0.350298305,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.2599183801757048,
+              "gp_total_iterations": 600,
+              "gp_density_ready_iteration": 440,
+              "gp_continuation_deadline": 2200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 500
+            }
+          },
+          "minimax": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v63/paired-home/v63_candidate/minimax",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v64/paired-home/v64_candidate/minimax"
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "7896e45d8aba5c1ab4be865f1231f763f6568057f8a695dfcc261240cca5dec0",
+              "7896e45d8aba5c1ab4be865f1231f763f6568057f8a695dfcc261240cca5dec0"
+            ],
+            "independent_scores_identical": true,
+            "export_files_identical": true,
+            "export_files": [
+              {
+                "final/uroute_export/features.bin": "3aba31380884c2a38200eb9bde4b2780c043baeadfa1715efd081354b80b1fbd",
+                "final/uroute_export/metadata.json": "f1d8f010dd9d4532129ddf5840b692022d5912edd99be32c79f409050b6d6464",
+                "repair/sweep_1/uroute_export/features.bin": "1bc37854c8e113da2f40c81992184484be379c4cbb5f66850961307f6512c496",
+                "repair/sweep_1/uroute_export/metadata.json": "ddd852154dab7031968dd3f23995ec012e7cdc9c48ff3c7eef63b72a99aff6bb",
+                "repair/sweep_2/uroute_export/features.bin": "cda872a817b3b110c75171672a25f33737005f7ac36d221a7ba6c3bc2bf0969c",
+                "repair/sweep_2/uroute_export/metadata.json": "5552b65aa0b00f412964ed128f1e148a01d6c13fbe51ca7e670bdbdc060da2a7",
+                "repair/trial_3/uroute_export/features.bin": "857fc1ffc91f8224b74d14f4a7ff733748dbbb9d59aeb31f27eecc53d3696c95",
+                "repair/trial_3/uroute_export/metadata.json": "ca1adcf69b7bda014fa3953c9ec4f5d9cfbb24d72a3cf6effc004754998f4703",
+                "resize/sweep_1/uroute_export/features.bin": "7771ccd9dc66188680b61e07b0fcb0caa7c63191c15a56e4d32763f93fc9b160",
+                "resize/sweep_1/uroute_export/metadata.json": "79a96ce7c1eac31be95efa647b49ac1dd66465f23f2f8822b45e8f21d95373cb",
+                "timing_place/round_0/uroute_export/features.bin": "98fb83a7bba2ab68d2cbc9473fe0d793503aa2660627527d7a5222682acac27e",
+                "timing_place/round_0/uroute_export/metadata.json": "8286824cd72ef2a71cea7eefde644e9c8fa82bbae4832df2b7d9fbbdc316bd23",
+                "uroute_export/features.bin": "56744b08072e0886f8ba1576c3c03e00b6d314eaf9250e82b5ff00ae68fc6d3e",
+                "uroute_export/metadata.json": "07686a6ab2c8a0921df446de8a47bfb36436c8e862b73a702a689d4075316bab"
+              },
+              {
+                "final/uroute_export/features.bin": "3aba31380884c2a38200eb9bde4b2780c043baeadfa1715efd081354b80b1fbd",
+                "final/uroute_export/metadata.json": "f1d8f010dd9d4532129ddf5840b692022d5912edd99be32c79f409050b6d6464",
+                "repair/sweep_1/uroute_export/features.bin": "1bc37854c8e113da2f40c81992184484be379c4cbb5f66850961307f6512c496",
+                "repair/sweep_1/uroute_export/metadata.json": "ddd852154dab7031968dd3f23995ec012e7cdc9c48ff3c7eef63b72a99aff6bb",
+                "repair/sweep_2/uroute_export/features.bin": "cda872a817b3b110c75171672a25f33737005f7ac36d221a7ba6c3bc2bf0969c",
+                "repair/sweep_2/uroute_export/metadata.json": "5552b65aa0b00f412964ed128f1e148a01d6c13fbe51ca7e670bdbdc060da2a7",
+                "repair/trial_3/uroute_export/features.bin": "857fc1ffc91f8224b74d14f4a7ff733748dbbb9d59aeb31f27eecc53d3696c95",
+                "repair/trial_3/uroute_export/metadata.json": "ca1adcf69b7bda014fa3953c9ec4f5d9cfbb24d72a3cf6effc004754998f4703",
+                "resize/sweep_1/uroute_export/features.bin": "7771ccd9dc66188680b61e07b0fcb0caa7c63191c15a56e4d32763f93fc9b160",
+                "resize/sweep_1/uroute_export/metadata.json": "79a96ce7c1eac31be95efa647b49ac1dd66465f23f2f8822b45e8f21d95373cb",
+                "timing_place/round_0/uroute_export/features.bin": "98fb83a7bba2ab68d2cbc9473fe0d793503aa2660627527d7a5222682acac27e",
+                "timing_place/round_0/uroute_export/metadata.json": "8286824cd72ef2a71cea7eefde644e9c8fa82bbae4832df2b7d9fbbdc316bd23",
+                "uroute_export/features.bin": "56744b08072e0886f8ba1576c3c03e00b6d314eaf9250e82b5ff00ae68fc6d3e",
+                "uroute_export/metadata.json": "07686a6ab2c8a0921df446de8a47bfb36436c8e862b73a702a689d4075316bab"
+              }
+            ],
+            "placement_seconds": [
+              37.767109,
+              57.351946000000005
+            ],
+            "within_1_5_time": false,
+            "independent_wns_ps": [
+              -913.478075,
+              -913.478075
+            ],
+            "rss_mib": [
+              945.15625,
+              945.19140625
+            ],
+            "sta_fraction": 0.30428548398340305,
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0796708268,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 800,
+              "gp_density_ready_iteration": 640,
+              "gp_continuation_deadline": 3200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 700
+            }
+          },
+          "NVDLA__partition_m": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v63/paired-home/v63_candidate/NVDLA__partition_m",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v64/paired-home/v64_candidate/NVDLA__partition_m"
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "5a442f329621baf84e6a481b4d6b9596e318634233ca1ec22d939a1aeb73de66",
+              "5a442f329621baf84e6a481b4d6b9596e318634233ca1ec22d939a1aeb73de66"
+            ],
+            "independent_scores_identical": true,
+            "export_files_identical": true,
+            "export_files": [
+              {
+                "final/uroute_export/features.bin": "490ff4d3a557ec21254bb39fe6e8df5e3040037fabf99e3ea2fb1e2498c36d82",
+                "final/uroute_export/metadata.json": "8785f25b7cdc6865260214aeb3d965cbd7802a02c881878ab3549e94c80fef6b",
+                "resize/sweep_1/uroute_export/features.bin": "ea50726d528dfd278b6b2b99e738f9648dc5c08a59fa79771ab8cae9f810a41d",
+                "resize/sweep_1/uroute_export/metadata.json": "e3398791176a318d364171d944e9846f10ed32da3daa7e2b82ce68ff0de82861",
+                "timing_place/round_0/uroute_export/features.bin": "4b66573f38e4526d3cd496467da7f29eea48130ecc9bcd054c43ffa86b00795c",
+                "timing_place/round_0/uroute_export/metadata.json": "9223d7204b4c3d6cf05eb9ff739ce5925da52b64878c07ebb2033d3dcace8f5b",
+                "uroute_export/features.bin": "d270d6753598f5914e1073c08174e4fc058f543335a62385ccf8d6cb5163f215",
+                "uroute_export/metadata.json": "0c7c816725f1b9114e23d3f1ecac2b5ad4e4ba1407587315f6023f42c097b036"
+              },
+              {
+                "final/uroute_export/features.bin": "490ff4d3a557ec21254bb39fe6e8df5e3040037fabf99e3ea2fb1e2498c36d82",
+                "final/uroute_export/metadata.json": "8785f25b7cdc6865260214aeb3d965cbd7802a02c881878ab3549e94c80fef6b",
+                "resize/sweep_1/uroute_export/features.bin": "ea50726d528dfd278b6b2b99e738f9648dc5c08a59fa79771ab8cae9f810a41d",
+                "resize/sweep_1/uroute_export/metadata.json": "e3398791176a318d364171d944e9846f10ed32da3daa7e2b82ce68ff0de82861",
+                "timing_place/round_0/uroute_export/features.bin": "4b66573f38e4526d3cd496467da7f29eea48130ecc9bcd054c43ffa86b00795c",
+                "timing_place/round_0/uroute_export/metadata.json": "9223d7204b4c3d6cf05eb9ff739ce5925da52b64878c07ebb2033d3dcace8f5b",
+                "uroute_export/features.bin": "d270d6753598f5914e1073c08174e4fc058f543335a62385ccf8d6cb5163f215",
+                "uroute_export/metadata.json": "0c7c816725f1b9114e23d3f1ecac2b5ad4e4ba1407587315f6023f42c097b036"
+              }
+            ],
+            "placement_seconds": [
+              34.539410000000004,
+              40.59066899999999
+            ],
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -692.389648,
+              -692.389648
+            ],
+            "rss_mib": [
+              1262.15625,
+              1255.0390625
+            ],
+            "sta_fraction": 0.33390593638651306,
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0820293505,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 800,
+              "gp_density_ready_iteration": 640,
+              "gp_continuation_deadline": 3200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 700
+            }
+          }
+        },
+        "pending": [
+          "coralnpu"
+        ]
+      },
+      "gemmini": {
+        "status": "guard-stopped",
+        "stop_reason": "process-tree memory limit",
+        "wall_s": 623.4142051101662,
+        "tree_peak_rss_kb": 16804208,
+        "memory_limit_gib": 16,
+        "acceptance": "Strict limit is 16,000,000,000 bytes; the 16 GiB diagnostic guard is not the acceptance bound."
+      },
+      "limitation": "Candidate CPU15 versus historical CPU14 control; nearly equal instruction counts but lower IPC. Timing failures retained. v65 uses fresh alternating pairs on the same CPU15 and includes this ownership change."
+    },
+    "deferred_intermediate_rc_v65": {
+      "status": "all four exact and within 1.5 time bound; small designs use fresh alternating same-CPU pairs; three saved-RC replays exact; Gemmini memory guard failed",
+      "livehd_commit": "b9795ed559bbb2fdc7c48e091a706e1fcdc08777",
+      "change": "Persist fused placement RC only after final legalization",
+      "focused_tests_passed": 211,
+      "artifacts": "/home/renau/projs/.agent-artifacts/1f-memory-v65",
+      "matched": {
+        "scope": "Same common defaults, 100ps, reset false paths; temporary feedback ownership and deferred intermediate RC persistence; small designs alternate fresh control/candidate on CPU15; CoralNPU uses CPU14 and its completed v63 control; single samples. Single samples, not a repeatable speedup claim.",
+        "completed": {
+          "lfsr": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v65/paired-home/v63_control/lfsr",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v65/paired-home/v65_candidate/lfsr"
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "7ddab5966f7830e7de46749e7d2e6bf976ff0b579bff838434a6ca111050c7e9",
+              "7ddab5966f7830e7de46749e7d2e6bf976ff0b579bff838434a6ca111050c7e9"
+            ],
+            "independent_scores_identical": true,
+            "export_files_identical": true,
+            "export_files": [
+              {
+                "final/uroute_export/features.bin": "f5f163a9efcd5fa63f088adf873a5ca7a275a81706075ecbfd3276e8a11a39ae",
+                "final/uroute_export/metadata.json": "b9893726ad6a4aafa6aaccaa262a016c03f6cb41efb8252e04d275565dc90d72",
+                "resize/sweep_1/uroute_export/features.bin": "3e3c49777a6beff5b2bcac72cc23355320661c437ac45a1ab41f62d1e53dfccd",
+                "resize/sweep_1/uroute_export/metadata.json": "211064ac8ccceef2c49b51823940ba53a8dee689c7c32db9a20243f38495460d",
+                "timing_place/round_0/uroute_export/features.bin": "93be32a344ec2faa843c45e6a8474fede77c4abebb48e49fd2367795201a16ad",
+                "timing_place/round_0/uroute_export/metadata.json": "bb6cca0f68299019061a410503a1b0aee317ad108248f0614ab404ff4441036b",
+                "uroute_export/features.bin": "ee19e05e600642a7b618d8d16444e092fbe6be918e49f02073167555c00aac4f",
+                "uroute_export/metadata.json": "a2914ead4ce5d82f4b022c476965069771fc75d46de4554a936f5bd72351bffa"
+              },
+              {
+                "final/uroute_export/features.bin": "f5f163a9efcd5fa63f088adf873a5ca7a275a81706075ecbfd3276e8a11a39ae",
+                "final/uroute_export/metadata.json": "b9893726ad6a4aafa6aaccaa262a016c03f6cb41efb8252e04d275565dc90d72",
+                "resize/sweep_1/uroute_export/features.bin": "3e3c49777a6beff5b2bcac72cc23355320661c437ac45a1ab41f62d1e53dfccd",
+                "resize/sweep_1/uroute_export/metadata.json": "211064ac8ccceef2c49b51823940ba53a8dee689c7c32db9a20243f38495460d",
+                "timing_place/round_0/uroute_export/features.bin": "93be32a344ec2faa843c45e6a8474fede77c4abebb48e49fd2367795201a16ad",
+                "timing_place/round_0/uroute_export/metadata.json": "bb6cca0f68299019061a410503a1b0aee317ad108248f0614ab404ff4441036b",
+                "uroute_export/features.bin": "ee19e05e600642a7b618d8d16444e092fbe6be918e49f02073167555c00aac4f",
+                "uroute_export/metadata.json": "a2914ead4ce5d82f4b022c476965069771fc75d46de4554a936f5bd72351bffa"
+              }
+            ],
+            "placement_seconds": [
+              2.000036,
+              1.999012
+            ],
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -60.862128,
+              -60.862128
+            ],
+            "rss_mib": [
+              341.82421875,
+              343.640625
+            ],
+            "sta_fraction": 0.3288398538878205,
+            "gp": {
+              "gp_converged": false,
+              "gp_stop_reason": "density_infeasible",
+              "gp_overflow": 0.350298305,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.2599183801757048,
+              "gp_total_iterations": 600,
+              "gp_density_ready_iteration": 440,
+              "gp_continuation_deadline": 2200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 500
+            }
+          },
+          "minimax": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v65/paired-home/v63_control/minimax",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v65/paired-home/v65_candidate/minimax"
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "7896e45d8aba5c1ab4be865f1231f763f6568057f8a695dfcc261240cca5dec0",
+              "7896e45d8aba5c1ab4be865f1231f763f6568057f8a695dfcc261240cca5dec0"
+            ],
+            "independent_scores_identical": true,
+            "export_files_identical": true,
+            "export_files": [
+              {
+                "final/uroute_export/features.bin": "3aba31380884c2a38200eb9bde4b2780c043baeadfa1715efd081354b80b1fbd",
+                "final/uroute_export/metadata.json": "f1d8f010dd9d4532129ddf5840b692022d5912edd99be32c79f409050b6d6464",
+                "repair/sweep_1/uroute_export/features.bin": "1bc37854c8e113da2f40c81992184484be379c4cbb5f66850961307f6512c496",
+                "repair/sweep_1/uroute_export/metadata.json": "ddd852154dab7031968dd3f23995ec012e7cdc9c48ff3c7eef63b72a99aff6bb",
+                "repair/sweep_2/uroute_export/features.bin": "cda872a817b3b110c75171672a25f33737005f7ac36d221a7ba6c3bc2bf0969c",
+                "repair/sweep_2/uroute_export/metadata.json": "5552b65aa0b00f412964ed128f1e148a01d6c13fbe51ca7e670bdbdc060da2a7",
+                "repair/trial_3/uroute_export/features.bin": "857fc1ffc91f8224b74d14f4a7ff733748dbbb9d59aeb31f27eecc53d3696c95",
+                "repair/trial_3/uroute_export/metadata.json": "ca1adcf69b7bda014fa3953c9ec4f5d9cfbb24d72a3cf6effc004754998f4703",
+                "resize/sweep_1/uroute_export/features.bin": "7771ccd9dc66188680b61e07b0fcb0caa7c63191c15a56e4d32763f93fc9b160",
+                "resize/sweep_1/uroute_export/metadata.json": "79a96ce7c1eac31be95efa647b49ac1dd66465f23f2f8822b45e8f21d95373cb",
+                "timing_place/round_0/uroute_export/features.bin": "98fb83a7bba2ab68d2cbc9473fe0d793503aa2660627527d7a5222682acac27e",
+                "timing_place/round_0/uroute_export/metadata.json": "8286824cd72ef2a71cea7eefde644e9c8fa82bbae4832df2b7d9fbbdc316bd23",
+                "uroute_export/features.bin": "56744b08072e0886f8ba1576c3c03e00b6d314eaf9250e82b5ff00ae68fc6d3e",
+                "uroute_export/metadata.json": "07686a6ab2c8a0921df446de8a47bfb36436c8e862b73a702a689d4075316bab"
+              },
+              {
+                "final/uroute_export/features.bin": "3aba31380884c2a38200eb9bde4b2780c043baeadfa1715efd081354b80b1fbd",
+                "final/uroute_export/metadata.json": "f1d8f010dd9d4532129ddf5840b692022d5912edd99be32c79f409050b6d6464",
+                "repair/sweep_1/uroute_export/features.bin": "1bc37854c8e113da2f40c81992184484be379c4cbb5f66850961307f6512c496",
+                "repair/sweep_1/uroute_export/metadata.json": "ddd852154dab7031968dd3f23995ec012e7cdc9c48ff3c7eef63b72a99aff6bb",
+                "repair/sweep_2/uroute_export/features.bin": "cda872a817b3b110c75171672a25f33737005f7ac36d221a7ba6c3bc2bf0969c",
+                "repair/sweep_2/uroute_export/metadata.json": "5552b65aa0b00f412964ed128f1e148a01d6c13fbe51ca7e670bdbdc060da2a7",
+                "repair/trial_3/uroute_export/features.bin": "857fc1ffc91f8224b74d14f4a7ff733748dbbb9d59aeb31f27eecc53d3696c95",
+                "repair/trial_3/uroute_export/metadata.json": "ca1adcf69b7bda014fa3953c9ec4f5d9cfbb24d72a3cf6effc004754998f4703",
+                "resize/sweep_1/uroute_export/features.bin": "7771ccd9dc66188680b61e07b0fcb0caa7c63191c15a56e4d32763f93fc9b160",
+                "resize/sweep_1/uroute_export/metadata.json": "79a96ce7c1eac31be95efa647b49ac1dd66465f23f2f8822b45e8f21d95373cb",
+                "timing_place/round_0/uroute_export/features.bin": "98fb83a7bba2ab68d2cbc9473fe0d793503aa2660627527d7a5222682acac27e",
+                "timing_place/round_0/uroute_export/metadata.json": "8286824cd72ef2a71cea7eefde644e9c8fa82bbae4832df2b7d9fbbdc316bd23",
+                "uroute_export/features.bin": "56744b08072e0886f8ba1576c3c03e00b6d314eaf9250e82b5ff00ae68fc6d3e",
+                "uroute_export/metadata.json": "07686a6ab2c8a0921df446de8a47bfb36436c8e862b73a702a689d4075316bab"
+              }
+            ],
+            "placement_seconds": [
+              39.209714,
+              38.754205
+            ],
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -913.478075,
+              -913.478075
+            ],
+            "rss_mib": [
+              945.46875,
+              920.10546875
+            ],
+            "sta_fraction": 0.34963962602251814,
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0796708268,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 800,
+              "gp_density_ready_iteration": 640,
+              "gp_continuation_deadline": 3200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 700
+            }
+          },
+          "NVDLA__partition_m": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v65/paired-home/v63_control/NVDLA__partition_m",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v65/paired-home/v65_candidate/NVDLA__partition_m"
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "5a442f329621baf84e6a481b4d6b9596e318634233ca1ec22d939a1aeb73de66",
+              "5a442f329621baf84e6a481b4d6b9596e318634233ca1ec22d939a1aeb73de66"
+            ],
+            "independent_scores_identical": true,
+            "export_files_identical": true,
+            "export_files": [
+              {
+                "final/uroute_export/features.bin": "490ff4d3a557ec21254bb39fe6e8df5e3040037fabf99e3ea2fb1e2498c36d82",
+                "final/uroute_export/metadata.json": "8785f25b7cdc6865260214aeb3d965cbd7802a02c881878ab3549e94c80fef6b",
+                "resize/sweep_1/uroute_export/features.bin": "ea50726d528dfd278b6b2b99e738f9648dc5c08a59fa79771ab8cae9f810a41d",
+                "resize/sweep_1/uroute_export/metadata.json": "e3398791176a318d364171d944e9846f10ed32da3daa7e2b82ce68ff0de82861",
+                "timing_place/round_0/uroute_export/features.bin": "4b66573f38e4526d3cd496467da7f29eea48130ecc9bcd054c43ffa86b00795c",
+                "timing_place/round_0/uroute_export/metadata.json": "9223d7204b4c3d6cf05eb9ff739ce5925da52b64878c07ebb2033d3dcace8f5b",
+                "uroute_export/features.bin": "d270d6753598f5914e1073c08174e4fc058f543335a62385ccf8d6cb5163f215",
+                "uroute_export/metadata.json": "0c7c816725f1b9114e23d3f1ecac2b5ad4e4ba1407587315f6023f42c097b036"
+              },
+              {
+                "final/uroute_export/features.bin": "490ff4d3a557ec21254bb39fe6e8df5e3040037fabf99e3ea2fb1e2498c36d82",
+                "final/uroute_export/metadata.json": "8785f25b7cdc6865260214aeb3d965cbd7802a02c881878ab3549e94c80fef6b",
+                "resize/sweep_1/uroute_export/features.bin": "ea50726d528dfd278b6b2b99e738f9648dc5c08a59fa79771ab8cae9f810a41d",
+                "resize/sweep_1/uroute_export/metadata.json": "e3398791176a318d364171d944e9846f10ed32da3daa7e2b82ce68ff0de82861",
+                "timing_place/round_0/uroute_export/features.bin": "4b66573f38e4526d3cd496467da7f29eea48130ecc9bcd054c43ffa86b00795c",
+                "timing_place/round_0/uroute_export/metadata.json": "9223d7204b4c3d6cf05eb9ff739ce5925da52b64878c07ebb2033d3dcace8f5b",
+                "uroute_export/features.bin": "d270d6753598f5914e1073c08174e4fc058f543335a62385ccf8d6cb5163f215",
+                "uroute_export/metadata.json": "0c7c816725f1b9114e23d3f1ecac2b5ad4e4ba1407587315f6023f42c097b036"
+              }
+            ],
+            "placement_seconds": [
+              34.628766,
+              36.010366999999995
+            ],
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -692.389648,
+              -692.389648
+            ],
+            "rss_mib": [
+              1266.53515625,
+              1242.3984375
+            ],
+            "sta_fraction": 0.3407013222608923,
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0820293505,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 800,
+              "gp_density_ready_iteration": 640,
+              "gp_continuation_deadline": 3200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 700
+            }
+          },
+          "coralnpu": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v65/paired-home/v63_control/coralnpu",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v65/paired-home/v65_candidate/coralnpu"
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "7554f3716ab6ee1e1f9e4818c383bb7a843daf3fd210630983d072469353459e",
+              "7554f3716ab6ee1e1f9e4818c383bb7a843daf3fd210630983d072469353459e"
+            ],
+            "independent_scores_identical": true,
+            "export_files_identical": true,
+            "export_files": [
+              {
+                "final/uroute_export/features.bin": "aa9128f8acc23180d39ab0752e3cdac6c91380417e21524f99c4cbba6f93a632",
+                "final/uroute_export/metadata.json": "212cde7fc80a6662a9c6403ff8fc269f0b1bb8ed0bc0d8eb2c1ee55a87ba77e0",
+                "resize/sweep_1/uroute_export/features.bin": "df59e52da4999326c653f8da475c7174a4065d8059f1dbe58e6de7295d64a3f9",
+                "resize/sweep_1/uroute_export/metadata.json": "d6b3604838e5a01cf03c44cacd69a3763648aaa0045c3a0510bf3249361d9d9a",
+                "timing_place/round_0/uroute_export/features.bin": "ffee210cb8739d61899ec64ce39c455a58f31c322603fbe6016b4c30baa9860e",
+                "timing_place/round_0/uroute_export/metadata.json": "5c5c22bc2fb70fb156e5e3c676bdb07db6d06cc753a39d83c002d4095097e522",
+                "uroute_export/features.bin": "b3d4f695dbbe354dbf28498da9ad6477ff25abfc22db55ad7029f0aaa56c374a",
+                "uroute_export/metadata.json": "a531947566008229d7a6626cab890167fadfe417a1d82471843461786565e3ba"
+              },
+              {
+                "final/uroute_export/features.bin": "aa9128f8acc23180d39ab0752e3cdac6c91380417e21524f99c4cbba6f93a632",
+                "final/uroute_export/metadata.json": "212cde7fc80a6662a9c6403ff8fc269f0b1bb8ed0bc0d8eb2c1ee55a87ba77e0",
+                "resize/sweep_1/uroute_export/features.bin": "df59e52da4999326c653f8da475c7174a4065d8059f1dbe58e6de7295d64a3f9",
+                "resize/sweep_1/uroute_export/metadata.json": "d6b3604838e5a01cf03c44cacd69a3763648aaa0045c3a0510bf3249361d9d9a",
+                "timing_place/round_0/uroute_export/features.bin": "ffee210cb8739d61899ec64ce39c455a58f31c322603fbe6016b4c30baa9860e",
+                "timing_place/round_0/uroute_export/metadata.json": "5c5c22bc2fb70fb156e5e3c676bdb07db6d06cc753a39d83c002d4095097e522",
+                "uroute_export/features.bin": "b3d4f695dbbe354dbf28498da9ad6477ff25abfc22db55ad7029f0aaa56c374a",
+                "uroute_export/metadata.json": "a531947566008229d7a6626cab890167fadfe417a1d82471843461786565e3ba"
+              }
+            ],
+            "placement_seconds": [
+              804.623575,
+              743.6507330000001
+            ],
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -14703.633037,
+              -14703.633037
+            ],
+            "rss_mib": [
+              7683.578125,
+              7518.31640625
+            ],
+            "sta_fraction": 0.2679847956769243,
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0363638432,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 1140,
+              "gp_density_ready_iteration": 600,
+              "gp_continuation_deadline": 3000,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 1040
+            }
+          }
+        },
+        "pending": []
+      },
+      "gemmini": {
+        "status": "guard-stopped",
+        "stop_reason": "process-tree memory limit",
+        "wall_s": 598.9918429828249,
+        "tree_peak_rss_kb": 16841188,
+        "memory_limit_gib": 16,
+        "acceptance": "Strict 16,000,000,000-byte limit failed."
+      },
+      "saved_graph_replays": {
+        "persisted-replay-NVDLA__partition_m": {
+          "saved_graph": "/home/renau/projs/.agent-artifacts/1f-memory-v65/paired-home/v65_candidate/NVDLA__partition_m/w/synth/net",
+          "parasitics": {
+            "model": "placement_flute",
+            "identity": "9e0c9175852cf915",
+            "approximate": false,
+            "nets": 20628
+          },
+          "wns": -692.494324,
+          "rc_identity_and_wns_identical": true
+        },
+        "persisted-replay-lfsr": {
+          "saved_graph": "/home/renau/projs/.agent-artifacts/1f-memory-v65/paired-home/v65_candidate/lfsr/w/synth/net",
+          "parasitics": {
+            "model": "placement_flute",
+            "identity": "589fc25772bad51c",
+            "approximate": false,
+            "nets": 137
+          },
+          "wns": -59.019165,
+          "rc_identity_and_wns_identical": true
+        },
+        "persisted-replay-minimax": {
+          "saved_graph": "/home/renau/projs/.agent-artifacts/1f-memory-v65/paired-home/v65_candidate/minimax/w/synth/net",
+          "parasitics": {
+            "model": "placement_flute",
+            "identity": "f924bcb5f9b33cb0",
+            "approximate": false,
+            "nets": 16223
+          },
+          "wns": -918.570801,
+          "rc_identity_and_wns_identical": true
+        }
+      }
+    },
+    "borrowed_weight_feedback_v66": {
+      "status": "three same-CPU pairs exact and within time bound; combined later candidate will cover Coral; Gemmini allocation profile running, not acceptance",
+      "livehd_commit": "84e083002",
+      "change": "Exclude control pins during ranking without copying detailed feedback or ranking values",
+      "tests": {
+        "repair_test": {
+          "tests": "72",
+          "failures": "0",
+          "disabled": "0",
+          "errors": "0",
+          "time": "3.345",
+          "timestamp": "2026-10-27T21:37:16.026",
+          "name": "AllTests"
+        },
+        "prects_networks_test": {
+          "tests": "6",
+          "failures": "0",
+          "disabled": "0",
+          "errors": "0",
+          "time": "0.",
+          "timestamp": "2026-10-27T21:14:39.606",
+          "name": "AllTests"
+        },
+        "place_test": {
+          "tests": "86",
+          "failures": "0",
+          "disabled": "0",
+          "errors": "0",
+          "time": "3.306",
+          "timestamp": "2026-10-27T21:37:12.604",
+          "name": "AllTests"
+        }
+      },
+      "matched": {
+        "scope": "Same common defaults, 100ps, reset false paths; borrowed timing feedback with control exclusion mask; small designs alternate fresh control/candidate on CPU15; CoralNPU uses CPU14 and its completed v65 control; single samples. Not a repeatable speedup claim.",
+        "completed": {
+          "lfsr": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v66/paired-home/v65_control/lfsr",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v66/paired-home/v66_candidate/lfsr"
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "7ddab5966f7830e7de46749e7d2e6bf976ff0b579bff838434a6ca111050c7e9",
+              "7ddab5966f7830e7de46749e7d2e6bf976ff0b579bff838434a6ca111050c7e9"
+            ],
+            "independent_scores_identical": true,
+            "export_files_identical": true,
+            "export_files": [
+              {
+                "final/uroute_export/features.bin": "f5f163a9efcd5fa63f088adf873a5ca7a275a81706075ecbfd3276e8a11a39ae",
+                "final/uroute_export/metadata.json": "b9893726ad6a4aafa6aaccaa262a016c03f6cb41efb8252e04d275565dc90d72",
+                "resize/sweep_1/uroute_export/features.bin": "3e3c49777a6beff5b2bcac72cc23355320661c437ac45a1ab41f62d1e53dfccd",
+                "resize/sweep_1/uroute_export/metadata.json": "211064ac8ccceef2c49b51823940ba53a8dee689c7c32db9a20243f38495460d",
+                "timing_place/round_0/uroute_export/features.bin": "93be32a344ec2faa843c45e6a8474fede77c4abebb48e49fd2367795201a16ad",
+                "timing_place/round_0/uroute_export/metadata.json": "bb6cca0f68299019061a410503a1b0aee317ad108248f0614ab404ff4441036b",
+                "uroute_export/features.bin": "ee19e05e600642a7b618d8d16444e092fbe6be918e49f02073167555c00aac4f",
+                "uroute_export/metadata.json": "a2914ead4ce5d82f4b022c476965069771fc75d46de4554a936f5bd72351bffa"
+              },
+              {
+                "final/uroute_export/features.bin": "f5f163a9efcd5fa63f088adf873a5ca7a275a81706075ecbfd3276e8a11a39ae",
+                "final/uroute_export/metadata.json": "b9893726ad6a4aafa6aaccaa262a016c03f6cb41efb8252e04d275565dc90d72",
+                "resize/sweep_1/uroute_export/features.bin": "3e3c49777a6beff5b2bcac72cc23355320661c437ac45a1ab41f62d1e53dfccd",
+                "resize/sweep_1/uroute_export/metadata.json": "211064ac8ccceef2c49b51823940ba53a8dee689c7c32db9a20243f38495460d",
+                "timing_place/round_0/uroute_export/features.bin": "93be32a344ec2faa843c45e6a8474fede77c4abebb48e49fd2367795201a16ad",
+                "timing_place/round_0/uroute_export/metadata.json": "bb6cca0f68299019061a410503a1b0aee317ad108248f0614ab404ff4441036b",
+                "uroute_export/features.bin": "ee19e05e600642a7b618d8d16444e092fbe6be918e49f02073167555c00aac4f",
+                "uroute_export/metadata.json": "a2914ead4ce5d82f4b022c476965069771fc75d46de4554a936f5bd72351bffa"
+              }
+            ],
+            "placement_seconds": [
+              2.244536,
+              2.174667
+            ],
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -60.862128,
+              -60.862128
+            ],
+            "rss_mib": [
+              342.16796875,
+              342.234375
+            ],
+            "sta_fraction": 0.33739327446455025,
+            "gp": {
+              "gp_converged": false,
+              "gp_stop_reason": "density_infeasible",
+              "gp_overflow": 0.350298305,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.2599183801757048,
+              "gp_total_iterations": 600,
+              "gp_density_ready_iteration": 440,
+              "gp_continuation_deadline": 2200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 500
+            }
+          },
+          "minimax": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v66/paired-home/v65_control/minimax",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v66/paired-home/v66_candidate/minimax"
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "7896e45d8aba5c1ab4be865f1231f763f6568057f8a695dfcc261240cca5dec0",
+              "7896e45d8aba5c1ab4be865f1231f763f6568057f8a695dfcc261240cca5dec0"
+            ],
+            "independent_scores_identical": true,
+            "export_files_identical": true,
+            "export_files": [
+              {
+                "final/uroute_export/features.bin": "3aba31380884c2a38200eb9bde4b2780c043baeadfa1715efd081354b80b1fbd",
+                "final/uroute_export/metadata.json": "f1d8f010dd9d4532129ddf5840b692022d5912edd99be32c79f409050b6d6464",
+                "repair/sweep_1/uroute_export/features.bin": "1bc37854c8e113da2f40c81992184484be379c4cbb5f66850961307f6512c496",
+                "repair/sweep_1/uroute_export/metadata.json": "ddd852154dab7031968dd3f23995ec012e7cdc9c48ff3c7eef63b72a99aff6bb",
+                "repair/sweep_2/uroute_export/features.bin": "cda872a817b3b110c75171672a25f33737005f7ac36d221a7ba6c3bc2bf0969c",
+                "repair/sweep_2/uroute_export/metadata.json": "5552b65aa0b00f412964ed128f1e148a01d6c13fbe51ca7e670bdbdc060da2a7",
+                "repair/trial_3/uroute_export/features.bin": "857fc1ffc91f8224b74d14f4a7ff733748dbbb9d59aeb31f27eecc53d3696c95",
+                "repair/trial_3/uroute_export/metadata.json": "ca1adcf69b7bda014fa3953c9ec4f5d9cfbb24d72a3cf6effc004754998f4703",
+                "resize/sweep_1/uroute_export/features.bin": "7771ccd9dc66188680b61e07b0fcb0caa7c63191c15a56e4d32763f93fc9b160",
+                "resize/sweep_1/uroute_export/metadata.json": "79a96ce7c1eac31be95efa647b49ac1dd66465f23f2f8822b45e8f21d95373cb",
+                "timing_place/round_0/uroute_export/features.bin": "98fb83a7bba2ab68d2cbc9473fe0d793503aa2660627527d7a5222682acac27e",
+                "timing_place/round_0/uroute_export/metadata.json": "8286824cd72ef2a71cea7eefde644e9c8fa82bbae4832df2b7d9fbbdc316bd23",
+                "uroute_export/features.bin": "56744b08072e0886f8ba1576c3c03e00b6d314eaf9250e82b5ff00ae68fc6d3e",
+                "uroute_export/metadata.json": "07686a6ab2c8a0921df446de8a47bfb36436c8e862b73a702a689d4075316bab"
+              },
+              {
+                "final/uroute_export/features.bin": "3aba31380884c2a38200eb9bde4b2780c043baeadfa1715efd081354b80b1fbd",
+                "final/uroute_export/metadata.json": "f1d8f010dd9d4532129ddf5840b692022d5912edd99be32c79f409050b6d6464",
+                "repair/sweep_1/uroute_export/features.bin": "1bc37854c8e113da2f40c81992184484be379c4cbb5f66850961307f6512c496",
+                "repair/sweep_1/uroute_export/metadata.json": "ddd852154dab7031968dd3f23995ec012e7cdc9c48ff3c7eef63b72a99aff6bb",
+                "repair/sweep_2/uroute_export/features.bin": "cda872a817b3b110c75171672a25f33737005f7ac36d221a7ba6c3bc2bf0969c",
+                "repair/sweep_2/uroute_export/metadata.json": "5552b65aa0b00f412964ed128f1e148a01d6c13fbe51ca7e670bdbdc060da2a7",
+                "repair/trial_3/uroute_export/features.bin": "857fc1ffc91f8224b74d14f4a7ff733748dbbb9d59aeb31f27eecc53d3696c95",
+                "repair/trial_3/uroute_export/metadata.json": "ca1adcf69b7bda014fa3953c9ec4f5d9cfbb24d72a3cf6effc004754998f4703",
+                "resize/sweep_1/uroute_export/features.bin": "7771ccd9dc66188680b61e07b0fcb0caa7c63191c15a56e4d32763f93fc9b160",
+                "resize/sweep_1/uroute_export/metadata.json": "79a96ce7c1eac31be95efa647b49ac1dd66465f23f2f8822b45e8f21d95373cb",
+                "timing_place/round_0/uroute_export/features.bin": "98fb83a7bba2ab68d2cbc9473fe0d793503aa2660627527d7a5222682acac27e",
+                "timing_place/round_0/uroute_export/metadata.json": "8286824cd72ef2a71cea7eefde644e9c8fa82bbae4832df2b7d9fbbdc316bd23",
+                "uroute_export/features.bin": "56744b08072e0886f8ba1576c3c03e00b6d314eaf9250e82b5ff00ae68fc6d3e",
+                "uroute_export/metadata.json": "07686a6ab2c8a0921df446de8a47bfb36436c8e862b73a702a689d4075316bab"
+              }
+            ],
+            "placement_seconds": [
+              39.359021,
+              41.449022
+            ],
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -913.478075,
+              -913.478075
+            ],
+            "rss_mib": [
+              920.37109375,
+              920.2734375
+            ],
+            "sta_fraction": 0.3486013358288646,
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0796708268,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 800,
+              "gp_density_ready_iteration": 640,
+              "gp_continuation_deadline": 3200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 700
+            }
+          },
+          "NVDLA__partition_m": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v66/paired-home/v65_control/NVDLA__partition_m",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v66/paired-home/v66_candidate/NVDLA__partition_m"
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "5a442f329621baf84e6a481b4d6b9596e318634233ca1ec22d939a1aeb73de66",
+              "5a442f329621baf84e6a481b4d6b9596e318634233ca1ec22d939a1aeb73de66"
+            ],
+            "independent_scores_identical": true,
+            "export_files_identical": true,
+            "export_files": [
+              {
+                "final/uroute_export/features.bin": "490ff4d3a557ec21254bb39fe6e8df5e3040037fabf99e3ea2fb1e2498c36d82",
+                "final/uroute_export/metadata.json": "8785f25b7cdc6865260214aeb3d965cbd7802a02c881878ab3549e94c80fef6b",
+                "resize/sweep_1/uroute_export/features.bin": "ea50726d528dfd278b6b2b99e738f9648dc5c08a59fa79771ab8cae9f810a41d",
+                "resize/sweep_1/uroute_export/metadata.json": "e3398791176a318d364171d944e9846f10ed32da3daa7e2b82ce68ff0de82861",
+                "timing_place/round_0/uroute_export/features.bin": "4b66573f38e4526d3cd496467da7f29eea48130ecc9bcd054c43ffa86b00795c",
+                "timing_place/round_0/uroute_export/metadata.json": "9223d7204b4c3d6cf05eb9ff739ce5925da52b64878c07ebb2033d3dcace8f5b",
+                "uroute_export/features.bin": "d270d6753598f5914e1073c08174e4fc058f543335a62385ccf8d6cb5163f215",
+                "uroute_export/metadata.json": "0c7c816725f1b9114e23d3f1ecac2b5ad4e4ba1407587315f6023f42c097b036"
+              },
+              {
+                "final/uroute_export/features.bin": "490ff4d3a557ec21254bb39fe6e8df5e3040037fabf99e3ea2fb1e2498c36d82",
+                "final/uroute_export/metadata.json": "8785f25b7cdc6865260214aeb3d965cbd7802a02c881878ab3549e94c80fef6b",
+                "resize/sweep_1/uroute_export/features.bin": "ea50726d528dfd278b6b2b99e738f9648dc5c08a59fa79771ab8cae9f810a41d",
+                "resize/sweep_1/uroute_export/metadata.json": "e3398791176a318d364171d944e9846f10ed32da3daa7e2b82ce68ff0de82861",
+                "timing_place/round_0/uroute_export/features.bin": "4b66573f38e4526d3cd496467da7f29eea48130ecc9bcd054c43ffa86b00795c",
+                "timing_place/round_0/uroute_export/metadata.json": "9223d7204b4c3d6cf05eb9ff739ce5925da52b64878c07ebb2033d3dcace8f5b",
+                "uroute_export/features.bin": "d270d6753598f5914e1073c08174e4fc058f543335a62385ccf8d6cb5163f215",
+                "uroute_export/metadata.json": "0c7c816725f1b9114e23d3f1ecac2b5ad4e4ba1407587315f6023f42c097b036"
+              }
+            ],
+            "placement_seconds": [
+              37.175287,
+              36.98268100000001
+            ],
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -692.389648,
+              -692.389648
+            ],
+            "rss_mib": [
+              1235.1796875,
+              1239.50390625
+            ],
+            "sta_fraction": 0.34429767812128054,
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0820293505,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 800,
+              "gp_density_ready_iteration": 640,
+              "gp_continuation_deadline": 3200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 700
+            }
+          }
+        },
+        "pending": [
+          "coralnpu"
+        ]
+      },
+      "artifacts": "/home/renau/projs/.agent-artifacts/1f-memory-v66"
+    },
+    "macro_failure_rechecks_v65": {
+      "status": "in progress; no full J completion claim",
+      "root": "/home/renau/projs/.agent-artifacts/1f-hard-failures-v65",
+      "original_eyeriss": {
+        "compile_front_s": 0.0,
+        "run": {
+          "status": "failed",
+          "wall_s": 0.25,
+          "cpu_s": 0.24000000000000002,
+          "rss_mib": 192.3828125,
+          "tree_rss_mib": 167.578125,
+          "ipc": 1.4265591242606916,
+          "instructions": 1553621754.0,
+          "cycles": 1089069305.0,
+          "stop": null
+        },
+        "status": "failed",
+        "phases": {
+          "compile_s": 0.23852199999999998,
+          "synth_s": 0.0,
+          "place_s": 0.0,
+          "sta_s": 0.0,
+          "invocation_s": 0.239726991,
+          "place_detail_s": {}
+        },
+        "log": "/home/renau/projs/.agent-artifacts/1f-hard-failures-v65/original-eyeriss/eyeriss/B/measure/run.log",
+        "message": "misplaced trailing ','"
+      },
+      "source_scope": "Original stale RTL fails syntax with misplaced trailing comma. HighTide/repros/issues.md documents the common upstream RTL correction used in both benchmark flows. Corrected eyeriss has reached placement; full outcome pending. NyuziProcessor and bp_uno follow sequentially.",
+      "imported_rows_root": "/home/renau/projs/.agent-artifacts/1f-imported-rows-v66",
+      "imported_rows_status": "Fresh common-config checks started on NyuziProcessor; other named designs queued."
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",

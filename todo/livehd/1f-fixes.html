@@ -22,6 +22,42 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Reviews v63–v65 reduce timing-name duplication, move temporary feedback
+instead of copying it, and defer persisted RC on intermediate fused-placement
+graphs until final legalization. Standalone placement retains its annotation
+contract. The v65 candidate passes 211 focused tests. Three fresh alternating
+control/candidate pairs on CPU 15 retain identical DEFs, independent QoR and
+route-feature exports: lfsr 2.000 → 1.999 s, minimax 39.210 → 38.754 s,
+NVDLA/partition_m 34.629 → 36.010 s. Fresh processes loading all three final
+saved graphs reproduce RC identities and internal WNS exactly. CoralNPU also
+retains exact DEF, independent QoR and export bytes: placement 804.624 → 743.651 s,
+peak process RSS 7,684 → 7,518 MiB. These are single samples. Fresh Gemmini still
+exceeds the diagnostic guard after 598.992 s at 16,841,188 KiB, failing the strict
+16 GB requirement. See <code>runs.deferred_intermediate_rc_v65</code>.</p>
+
+<p>Review v66 removes the remaining full feedback copy from timing-weight
+refresh: indexed rankings use a control-exclusion bit mask; other snapshots use
+pin labels. All 164 focused tests pass, including detailed/indexed/reordered
+feedback comparisons against the prior filtering behavior. Three fresh
+same-CPU pairs preserve exact outputs within the time bound: lfsr 2.245 → 2.175 s,
+minimax 39.359 → 41.449 s, partition_m 37.175 → 36.983 s. These results do not
+prove a speedup. A current Gemmini allocation profile and the named macro-design
+failure/import checks are running. The original stale eyeriss RTL still fails
+syntax; HighTide documents its common RTL correction, which the benchmark run
+uses. No J completion claim follows from that substitution. See
+<code>runs.borrowed_weight_feedback_v66</code> and
+<code>runs.macro_failure_rechecks_v65</code>.</p>
+
+<p>The preceding v63 candidate retained exact outputs on all four designs,
+including coralnpu at 804.624 s and 7,684 MiB peak process RSS, within 1.5× of
+v62. v64 also retained exact small-design outputs, but its CPU-15 lfsr and
+minimax samples exceeded the time bound against historical CPU-14 controls;
+those failures are retained, and the fresh v65 pairs above include that change.
+Fresh Gemmini v63 and v64 both exceeded the diagnostic memory guard, after
+650.893 s and 623.414 s respectively. The strict 16 GB requirement and the
+remaining A–J criteria stay open. See <code>runs.shared_timing_net_names_v63</code>
+and <code>runs.move_temporary_feedback_v64</code>.</p>
+
 <p>Review v62 consumes published OpenTimer <code>17a58a488</code>, reducing each
 pin record from 560 to 464 bytes without changing timing values, and removes
 the final route-feature export's whole placement-view copy. All 210 focused and
