@@ -111,6 +111,9 @@ struct Options {
   std::optional<double>                                     pg_channel_max_ir_drop_v;
   // Internal host handoff, collected only for a completed final placement.
   bool                                                      retain_preroute_design = false;
+  // Internal fused-flow lifetime: intermediate consumers use Result::parasitics.
+  // Standalone placement and final publication retain the persisted annotation.
+  bool                                                      persist_parasitics = true;
   // Diagnostic-only, synchronous observation; never supplies optimizer feedback.
   std::function<void(const Result&, const Gp_observation&)> gp_observer;
   int                                                       gp_observer_interval  = 0;

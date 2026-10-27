@@ -10819,8 +10819,12 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   // callbacks still receive the same fully annotated graph.
   // A zero-wire seed is an in-memory intermediate; color-only analysis has no
   // electrical snapshot. Neither should acquire a persisted RC attribute.
-  if (result.parasitics && !options.timing_seed) {
+  if (result.parasitics && !options.timing_seed && options.persist_parasitics) {
     result.graph->get_input_node().attr(attrs::placement_rc).set(ph::serialize_parasitics(*result.parasitics));
+  } else if (!options.persist_parasitics) {
+    // A copied input may carry an obsolete annotation. The fused optimizer
+    // uses the current in-memory RC and persists only its accepted final state.
+    result.graph->get_input_node().attr(attrs::placement_rc).del();
   }
   if (notify_after_stage && options.after_stage && !options.timing_seed && options.after_stage(options.completed_stage, result)) {
     throw Placement_restart(result.floorplan, options.completed_stage);

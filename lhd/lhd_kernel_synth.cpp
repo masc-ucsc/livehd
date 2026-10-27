@@ -2057,6 +2057,7 @@ void synth_command(Options& opts, Result& res) {
         }
       };
       place_options.optimization_pending = !macro_plan_only && (run_resize || run_timing_place || run_resynth);
+      place_options.persist_parasitics   = !place_options.optimization_pending;
       // The cleanup leaves the buffering to the post-placement repair: only
       // synth.place.resize rebuilds it (timing-driven placement and resynthesis
       // do not), so by default it runs only when that phase will.
@@ -2278,6 +2279,9 @@ void synth_command(Options& opts, Result& res) {
         Phase_timer   phase(res, "pass.place.final_legalize");
         const auto    final_log = next_log_path(opts, "pass.place.final_legalize");
         Stdout_to_log redirect(final_log);
+        // Intermediate timing and repair borrowed Result::parasitics. Persist
+        // the accepted final geometry before saving or invoking standalone STA.
+        place_options.persist_parasitics = true;
         auto prior = run_resynth ? std::move(resynthesized.timing)
                      : run_resize
                          ? (place_options.resize_engine == "new" ? std::move(repaired.timing) : std::move(design_repaired.timing))

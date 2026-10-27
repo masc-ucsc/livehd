@@ -6259,6 +6259,29 @@ TEST(Placement, UnsetCellHaloPreservesStatefulCallbackAcrossCalls) {
   ASSERT_NE(seed.parasitics, nullptr);
   EXPECT_FALSE(seed.graph->get_input_node().attr(attrs::placement_rc).has());
   EXPECT_EQ(options.after_stage.target<Observer>()->calls, 3);
+  options.timing_seed         = false;
+  options.persist_parasitics  = false;
+  options.output_dir         += "_transient";
+  unsigned transient_calls    = 0;
+  options.after_stage         = [&](Placement_stage, const Result& result) {
+    ++transient_calls;
+    EXPECT_NE(result.parasitics, nullptr);
+    EXPECT_FALSE(result.graph->get_input_node().attr(attrs::placement_rc).has());
+    return false;
+  };
+  hhds::GraphLibrary transient_library;
+  const auto         transient = place(*first.graph, transient_library, options);
+  EXPECT_EQ(transient_calls, 1);
+  EXPECT_FALSE(transient.graph->get_input_node().attr(attrs::placement_rc).has());
+  EXPECT_TRUE(first.graph->get_input_node().attr(attrs::placement_rc).has());
+  options.persist_parasitics  = true;
+  options.output_dir         += "_persisted";
+  options.after_stage         = Observer{};
+  hhds::GraphLibrary persisted_library;
+  const auto         persisted = place(*transient.graph, persisted_library, options);
+  EXPECT_EQ(options.after_stage.target<Observer>()->calls, 1);
+  EXPECT_TRUE(persisted.graph->get_input_node().attr(attrs::placement_rc).has());
+  EXPECT_FALSE(transient.graph->get_input_node().attr(attrs::placement_rc).has());
 }
 }  // namespace livehd::placement
 
