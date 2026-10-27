@@ -56,6 +56,13 @@ int materialize_clock_cells_all(hhds::Graph* top, const std::vector<hhds::Graph*
 // buffer/inverter polarity and gates instead of an opaque cell.
 [[nodiscard]] std::string inline_clock_lib_cells(const Cell_models& sub_lib, hhds::Graph* graph);
 
+// The same for clock cones that leave their definition: every register's
+// clock cone is walked from `top` across instance boundaries, per occurrence
+// (a shared definition's ports lead to a different parent cone through each
+// instance), and each combinational `--lib` cell it reaches is spliced into
+// the definition that holds it, once per definition node.
+[[nodiscard]] std::string inline_hier_clock_lib_cells(const Cell_models& sub_lib, hhds::Graph* top);
+
 // Inline STATEFUL `--lib` cells (mapped DFFs), so their state is real body state
 // the flop cut can correspond, named after the instance for single-flop models.
 [[nodiscard]] std::string inline_stateful_lib_cells(const Cell_models& sub_lib, hhds::Graph* impl_g);

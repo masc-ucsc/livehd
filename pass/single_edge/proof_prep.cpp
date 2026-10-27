@@ -615,7 +615,11 @@ std::string inline_hier_clock_lib_cells(const absl::flat_hash_map<hhds::Gid, hhd
       pending.push_back(livehd::latch_contract::sink_driver_hier(node, "clock_pin"));
     }
   }
-  absl::flat_hash_set<std::pair<hhds::Graph*, uint64_t>> seen;
+  // Walked per OCCURRENCE: a definition node reached through a second
+  // instance leads, through that instance's ports, to a different parent cone.
+  // Only the splice list is per definition node.
+  absl::flat_hash_set<hhds::Occurrence_node>             seen;
+  absl::flat_hash_set<std::pair<hhds::Graph*, uint64_t>> queued;
   std::vector<std::pair<hhds::Graph*, hhds::Node_class>> cells;
   while (!pending.empty()) {
     const auto pin = pending.back();
@@ -625,15 +629,15 @@ std::string inline_hier_clock_lib_cells(const absl::flat_hash_map<hhds::Gid, hhd
     }
     auto  node  = pin.get_master_node();
     auto* graph = node.get_graph();
-    if (graph == nullptr || !seen.emplace(graph, static_cast<uint64_t>(node.base_node().get_class_index().value)).second
-        || livehd::graph_util::is_type_register(node)) {
+    if (graph == nullptr || !seen.insert(node).second || livehd::graph_util::is_type_register(node)) {
       continue;
     }
     if (livehd::graph_util::type_op_of(node) == Ntype_op::Sub && sub_lib.contains(node.get_subnode_gid())) {
       if (!combinational(node.base_node())) {
         continue;
       }
-      if (!sub_lib.contains(graph->get_gid()) && !node.is_loop_subnode()) {
+      if (!sub_lib.contains(graph->get_gid()) && !node.is_loop_subnode()
+          && queued.emplace(graph, static_cast<uint64_t>(node.base_node().get_class_index().value)).second) {
         cells.emplace_back(graph, node.base_node());
       }
     }

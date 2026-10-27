@@ -580,3 +580,95 @@ TEST(ProofPrep, TimeBasePreparationHonoursTheDeadline) {
   EXPECT_EQ(on_time.recipe_steps, none.recipe_steps);
   EXPECT_EQ(on_time_after, none_after);
 }
+
+// A shared definition whose register clock leaves it: `wrap` buffers its `ck`
+// port into its flop, and top drives one instance's port through a BUF cell
+// and the other's through an INV cell. The second occurrence of wrap's buffer
+// leads to a different top cell, so the walk is per occurrence: both top
+// cells and wrap's buffer are spliced.
+TEST(ProofPrep, HierClockConeWalksEveryOccurrence) {
+  // The netlist declares its cells body-less; their behavior is the --lib
+  // models, in a library of their own.
+  hhds::GraphLibrary lib, cell_lib;
+  se::Cell_models    models;
+  const auto         cell = [&](const char* name, Ntype_op op) {
+    for (auto* l : {&lib, &cell_lib}) {
+      auto io = l->create_io(name);
+      io->add_input("A", 1);
+      io->add_output("Y", 2);
+      io->set_bits("A", 1);
+      io->set_bits("Y", 1);
+    }
+    auto g = cell_lib.find_io(name)->create_graph();
+    if (op == Ntype_op::Not) {
+      auto n = gu::create_typed_node(*g, Ntype_op::Not, 1);
+      g->get_input_pin("A").connect_sink(n.create_sink_pin(0));
+      auto y = n.create_driver_pin(0);
+      gu::set_ubits(y, 1);
+      y.connect_sink(g->get_output_pin("Y"));
+    } else {
+      g->get_input_pin("A").connect_sink(g->get_output_pin("Y"));
+    }
+    const auto decl = lib.find_io(name);
+    models.emplace(decl->get_gid(), g.get());
+    return decl;
+  };
+  const auto buf = cell("BUF", Ntype_op::And), inv = cell("INV", Ntype_op::Not);
+  const auto instance = [](hhds::Graph& host, const std::shared_ptr<hhds::GraphIO>& decl, const hhds::Pin_class& a) {
+    auto n = gu::create_typed_node(host, Ntype_op::Sub);
+    n.set_subnode(decl);
+    a.connect_sink(n.create_sink_pin(1));
+    auto y = n.create_driver_pin(2);
+    gu::set_ubits(y, 1);
+    return y;
+  };
+  auto wio = lib.create_io("wrap");
+  wio->add_input("ck", 1);
+  wio->add_input("d", 2);
+  wio->add_output("q", 3);
+  for (const char* p : {"ck", "d", "q"}) {
+    wio->set_bits(p, 1);
+  }
+  auto wrap = wio->create_graph();
+  auto flop = gu::create_typed_node(*wrap, Ntype_op::Flop, 1);
+  instance(*wrap, buf, wrap->get_input_pin("ck")).connect_sink(gu::setup_sink_by_name(flop, "clock_pin"));
+  wrap->get_input_pin("d").connect_sink(gu::setup_sink_by_name(flop, "din"));
+  auto q = flop.create_driver_pin(0);
+  gu::set_ubits(q, 1);
+  q.connect_sink(wrap->get_output_pin("q"));
+  auto tio = lib.create_io("top");
+  tio->add_input("clk", 1);
+  tio->add_input("a", 2);
+  tio->add_input("b", 3);
+  tio->add_output("qa", 4);
+  tio->add_output("qb", 5);
+  for (const char* p : {"clk", "a", "b", "qa", "qb"}) {
+    tio->set_bits(p, 1);
+  }
+  auto top = tio->create_graph();
+  for (const auto& [clock, data, out] : {
+           std::tuple{buf, "a", "qa"},
+           std::tuple{inv, "b", "qb"}
+  }) {
+    auto w = gu::create_typed_node(*top, Ntype_op::Sub);
+    w.set_subnode(wio);
+    instance(*top, clock, top->get_input_pin("clk")).connect_sink(w.create_sink_pin(1));
+    top->get_input_pin(data).connect_sink(w.create_sink_pin(2));
+    auto o = w.create_driver_pin(3);
+    gu::set_ubits(o, 1);
+    o.connect_sink(top->get_output_pin(out));
+  }
+  const auto cells = [&](hhds::Graph& g) {
+    int n = 0;
+    for (auto node : g.body().nodes()) {
+      const auto io  = node.get_subnode_io();
+      n             += io && (io->get_name() == "BUF" || io->get_name() == "INV");
+    }
+    return n;
+  };
+  ASSERT_EQ(cells(*top), 2);
+  ASSERT_EQ(cells(*wrap), 1);
+  EXPECT_EQ(se::inline_hier_clock_lib_cells(models, top.get()), "");
+  EXPECT_EQ(cells(*top), 0);
+  EXPECT_EQ(cells(*wrap), 0);
+}
