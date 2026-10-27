@@ -37211,6 +37211,1284 @@
         "Total STA share, F wirelength growth, lfsr density stalling and the larger-design/import census remain open.",
         "Candidate patch hash describes the frozen source before final evidence documentation was added."
       ]
+    },
+    "grid_resolution_floor_v40": {
+      "status": "reviewed and validated; full A-J goal remains in progress",
+      "dreamplace_commit": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+      "implementation": "Combine whole-core capacity floor with sum of independently minimized per-rectangle bin excess; preserve public defaults, density forces and raw convergence checks.",
+      "source_manifest": {
+        "build": "-c opt --jobs=2; local owned DREAMPlace override for grid-floor candidate",
+        "repos": {
+          "livehd": {
+            "head": "63e08901f66268d1ef2ff93c22ca1abe25c08fc4",
+            "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "DREAMPlace": {
+            "head": "2bd0da333891a22f43b44def630ef16bba3c910e",
+            "patch_sha256": "aa03146ca3e4370ce96fdbe0764b96d417d5dc11271fc66847da2b804e9793f4"
+          },
+          "OpenTimer": {
+            "head": "3197d532b08a6e11ee0a1c26a200dd34b56148cd",
+            "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "lhd": "1c0678ad22af31bd1293fc6f546e2f77ee4c1df0f92038213130aced18d02b69",
+        "physical_repair": "512aeec1bf0075a30ebb3d7fae217006a138bc5b57adc21abe4952fd80da4b27",
+        "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+        "harness_sha256": {
+          "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+          "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+        }
+      },
+      "published_manifest": {
+        "build": "-c opt --jobs=2; published dependency pins; no local override",
+        "repos": {
+          "livehd": {
+            "head": "63e08901f66268d1ef2ff93c22ca1abe25c08fc4",
+            "patch_sha256": "cd5f1b351de18336f8a8c7643ca720d9a9a2dc299ffaa2cf2612835de989738e"
+          },
+          "DREAMPlace": {
+            "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+            "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          },
+          "OpenTimer": {
+            "head": "3197d532b08a6e11ee0a1c26a200dd34b56148cd",
+            "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+          }
+        },
+        "lhd": "9d3383486ac4613c5811f365a948b362386e645e42532f996a524a96eed13836",
+        "physical_repair": "8103dc345c8fce2530da2b99cb030728ed7b2de333a52a4fe96867f153b00f3b",
+        "compiled_dependencies": {
+          "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+          "opentimer": "3197d532b08a6e11ee0a1c26a200dd34b56148cd"
+        },
+        "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+        "harness_sha256": {
+          "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+          "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+        }
+      },
+      "protocol": "Common production defaults, 100 ps clocks, reset and reset-distribution false paths, one CPU per design (13 smalls, 14 coral). Fresh lfsr control; other controls are the earlier frozen published-v39 runs on the same CPU. Independent HighTide OpenSTA scoring.",
+      "production_comparison": {
+        "lfsr": {
+          "control_source": "/tmp/1f-wns-v1/grid_floor_control/lfsr/summary.json",
+          "candidate_source": "/tmp/1f-wns-v1/grid_floor_candidate/lfsr/summary.json",
+          "control": {
+            "run": {
+              "status": "ok",
+              "wall_s": 5.45,
+              "cpu_s": 5.44,
+              "rss_mib": 408.10546875,
+              "tree_rss_mib": 407.15234375,
+              "ipc": 2.6209641980038727,
+              "instructions": 63527001891.0,
+              "cycles": 24238027341.0,
+              "stop": null
+            },
+            "placement_seconds": 2.6857860000000002,
+            "score": {
+              "hpwl_um": 211.974,
+              "hpwl_all_nets_um": 226.41,
+              "measured_nets": 136,
+              "excluded_nets": 1,
+              "setup_wns_ps": -61.991974,
+              "setup_tns_ps": -2179.184841,
+              "hold_wns_ps": 53.292124,
+              "hold_tns_ps": 0.0,
+              "instances": 134,
+              "logical_cells": 134,
+              "physical_cells": 0,
+              "buffers": 1,
+              "buffer_area_um2": 0.2624,
+              "macros": 0,
+              "instance_area_um2": 18.6187,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "scoring_seconds": 1.137,
+              "power_mw": 0.000684,
+              "reset_ports": []
+            },
+            "physical_timing": {
+              "evaluations": 9,
+              "builds": 1,
+              "ranking_evaluations": 6,
+              "ranking_seconds": 0.6875937569999999,
+              "detailed_evaluations": 3,
+              "repowered_gates": 8,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 543,
+              "update_calls": 12,
+              "seconds": 0.7198630639999999,
+              "validation_seconds": 0.001255583,
+              "reconcile_seconds": 0.6775404279999999,
+              "exclusions_seconds": 0.000396484,
+              "propagation_seconds": 0.037564234,
+              "feedback_seconds": 0.0030189389999999983
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "gp": {
+              "gp_converged": false,
+              "gp_stop_reason": "density_stalled",
+              "gp_overflow": 0.356047925,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 1480,
+              "gp_density_ready_iteration": 0,
+              "gp_continuation_deadline": 0,
+              "gp_objective_converged": false,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 1380
+            }
+          },
+          "candidate": {
+            "run": {
+              "status": "ok",
+              "wall_s": 4.76,
+              "cpu_s": 4.75,
+              "rss_mib": 408.85546875,
+              "tree_rss_mib": 426.9296875,
+              "ipc": 2.54271030104853,
+              "instructions": 53679535269.0,
+              "cycles": 21111148701.0,
+              "stop": null
+            },
+            "placement_seconds": 2.0501840000000002,
+            "score": {
+              "hpwl_um": 183.788,
+              "hpwl_all_nets_um": 197.9,
+              "measured_nets": 136,
+              "excluded_nets": 1,
+              "setup_wns_ps": -60.270761,
+              "setup_tns_ps": -2166.75545,
+              "hold_wns_ps": 53.285192,
+              "hold_tns_ps": 0.0,
+              "instances": 134,
+              "logical_cells": 134,
+              "physical_cells": 0,
+              "buffers": 1,
+              "buffer_area_um2": 0.2624,
+              "macros": 0,
+              "instance_area_um2": 18.6187,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "scoring_seconds": 1.074,
+              "power_mw": 0.000682,
+              "reset_ports": []
+            },
+            "physical_timing": {
+              "evaluations": 11,
+              "builds": 1,
+              "ranking_evaluations": 8,
+              "ranking_seconds": 0.6870535110000001,
+              "detailed_evaluations": 3,
+              "repowered_gates": 8,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 779,
+              "update_calls": 14,
+              "seconds": 0.7201531760000002,
+              "validation_seconds": 0.0011953279999999998,
+              "reconcile_seconds": 0.672984975,
+              "exclusions_seconds": 0.000183668,
+              "propagation_seconds": 0.042797008,
+              "feedback_seconds": 0.0028881080000000025
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "gp": {
+              "gp_converged": false,
+              "gp_stop_reason": "density_infeasible",
+              "gp_overflow": 0.352626478,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.2599183801757048,
+              "gp_total_iterations": 520,
+              "gp_density_ready_iteration": 400,
+              "gp_continuation_deadline": 2000,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 440
+            }
+          },
+          "identical_def": false,
+          "wns_improvement_ps": 1.7212129999999988,
+          "hpwl_change_fraction": -0.13296913772443786,
+          "placement_time_ratio": 0.7633460000163825
+        },
+        "minimax": {
+          "control_source": "/tmp/1f-wns-v1/density_floor_merged_candidate/minimax/summary.json",
+          "candidate_source": "/tmp/1f-wns-v1/grid_floor_candidate/minimax/summary.json",
+          "control": {
+            "run": {
+              "status": "ok",
+              "wall_s": 65.06,
+              "cpu_s": 65.05,
+              "rss_mib": 1266.25,
+              "tree_rss_mib": 1270.515625,
+              "ipc": 2.1755823098139038,
+              "instructions": 635432681778.0,
+              "cycles": 292074760358.0,
+              "stop": null
+            },
+            "placement_seconds": 43.44701800000001,
+            "score": {
+              "hpwl_um": 46924.026,
+              "hpwl_all_nets_um": 47082.118,
+              "measured_nets": 16259,
+              "excluded_nets": 1,
+              "setup_wns_ps": -950.289184,
+              "setup_tns_ps": -1871873.458389,
+              "hold_wns_ps": 28.151466,
+              "hold_tns_ps": 0.0,
+              "instances": 16209,
+              "logical_cells": 16209,
+              "physical_cells": 0,
+              "buffers": 381,
+              "buffer_area_um2": 91.1687,
+              "macros": 0,
+              "instance_area_um2": 2086.121,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "scoring_seconds": 6.463,
+              "power_mw": 0.053,
+              "reset_ports": []
+            },
+            "physical_timing": {
+              "evaluations": 14,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 3.9338558999999993,
+              "detailed_evaluations": 7,
+              "repowered_gates": 1291,
+              "inserted_gates": 379,
+              "removed_gates": 1,
+              "updated_nets": 84395,
+              "update_calls": 21,
+              "seconds": 18.048677411,
+              "validation_seconds": 0.31208502499999996,
+              "reconcile_seconds": 3.008437571,
+              "exclusions_seconds": 0.102354018,
+              "propagation_seconds": 12.746045942,
+              "feedback_seconds": 1.854450345
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16209,
+              "area_um2": 2086.1209799995763,
+              "within_budget": true,
+              "rejected_proposals": 375
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0885657999,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 520,
+              "gp_density_ready_iteration": 380,
+              "gp_continuation_deadline": 1900,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 440
+            }
+          },
+          "candidate": {
+            "run": {
+              "status": "ok",
+              "wall_s": 68.15,
+              "cpu_s": 68.14,
+              "rss_mib": 1269.0234375,
+              "tree_rss_mib": 1272.35546875,
+              "ipc": 2.0782361788352017,
+              "instructions": 635753226400.0,
+              "cycles": 305909998524.0,
+              "stop": null
+            },
+            "placement_seconds": 45.230588,
+            "score": {
+              "hpwl_um": 46924.026,
+              "hpwl_all_nets_um": 47082.118,
+              "measured_nets": 16259,
+              "excluded_nets": 1,
+              "setup_wns_ps": -950.289184,
+              "setup_tns_ps": -1871873.458389,
+              "hold_wns_ps": 28.151466,
+              "hold_tns_ps": 0.0,
+              "instances": 16209,
+              "logical_cells": 16209,
+              "physical_cells": 0,
+              "buffers": 381,
+              "buffer_area_um2": 91.1687,
+              "macros": 0,
+              "instance_area_um2": 2086.121,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "scoring_seconds": 6.226,
+              "power_mw": 0.053,
+              "reset_ports": []
+            },
+            "physical_timing": {
+              "evaluations": 14,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 4.144144848,
+              "detailed_evaluations": 7,
+              "repowered_gates": 1291,
+              "inserted_gates": 379,
+              "removed_gates": 1,
+              "updated_nets": 84395,
+              "update_calls": 21,
+              "seconds": 18.837621628,
+              "validation_seconds": 0.349457933,
+              "reconcile_seconds": 3.17564894,
+              "exclusions_seconds": 0.102399484,
+              "propagation_seconds": 13.242318983,
+              "feedback_seconds": 1.9419178790000011
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16209,
+              "area_um2": 2086.1209799995763,
+              "within_budget": true,
+              "rejected_proposals": 375
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0885657999,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 520,
+              "gp_density_ready_iteration": 380,
+              "gp_continuation_deadline": 1900,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 440
+            }
+          },
+          "identical_def": true,
+          "wns_improvement_ps": 0.0,
+          "hpwl_change_fraction": 0.0,
+          "placement_time_ratio": 1.041051609111585
+        },
+        "NVDLA__partition_m": {
+          "control_source": "/tmp/1f-wns-v1/density_floor_merged_candidate/NVDLA__partition_m/summary.json",
+          "candidate_source": "/tmp/1f-wns-v1/grid_floor_candidate/NVDLA__partition_m/summary.json",
+          "control": {
+            "run": {
+              "status": "ok",
+              "wall_s": 102.17,
+              "cpu_s": 102.14999999999999,
+              "rss_mib": 1566.921875,
+              "tree_rss_mib": 1556.81640625,
+              "ipc": 1.5768965756621014,
+              "instructions": 724762741222.0,
+              "cycles": 459613364889.0,
+              "stop": null
+            },
+            "placement_seconds": 37.020185,
+            "score": {
+              "hpwl_um": 93405.154,
+              "hpwl_all_nets_um": 107638.17,
+              "measured_nets": 20647,
+              "excluded_nets": 145,
+              "setup_wns_ps": -916.800306,
+              "setup_tns_ps": -398000.681115,
+              "hold_wns_ps": 25.471559,
+              "hold_tns_ps": 0.0,
+              "instances": 20610,
+              "logical_cells": 20610,
+              "physical_cells": 0,
+              "buffers": 150,
+              "buffer_area_um2": 12.0431,
+              "macros": 0,
+              "instance_area_um2": 2736.6514,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "scoring_seconds": 8.559,
+              "power_mw": 0.122,
+              "reset_ports": [
+                "direct_reset_",
+                "dla_reset_rstn",
+                "global_clk_ovr_on",
+                "nvdla_clk_ovr_on",
+                "test_mode",
+                "tmc2slcg_disable_clock_gating"
+              ]
+            },
+            "physical_timing": {
+              "evaluations": 10,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 5.496668275,
+              "detailed_evaluations": 3,
+              "repowered_gates": 3971,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 113482,
+              "update_calls": 13,
+              "seconds": 13.836739753,
+              "validation_seconds": 0.322661417,
+              "reconcile_seconds": 2.63428452,
+              "exclusions_seconds": 0.05688900300000001,
+              "propagation_seconds": 9.662483017,
+              "feedback_seconds": 1.1295453200000003
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20948,
+              "baseline_area_um2": 2656.096920000048,
+              "cells": 20598,
+              "area_um2": 2735.7766200000697,
+              "within_budget": true,
+              "rejected_proposals": 4016
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0981042075,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 520,
+              "gp_density_ready_iteration": 380,
+              "gp_continuation_deadline": 1900,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 440
+            }
+          },
+          "candidate": {
+            "run": {
+              "status": "ok",
+              "wall_s": 106.12,
+              "cpu_s": 106.10000000000001,
+              "rss_mib": 1571.16796875,
+              "tree_rss_mib": 1589.35546875,
+              "ipc": 1.5179976397480717,
+              "instructions": 724787526694.0,
+              "cycles": 477462881177.0,
+              "stop": null
+            },
+            "placement_seconds": 38.005323,
+            "score": {
+              "hpwl_um": 93405.154,
+              "hpwl_all_nets_um": 107638.17,
+              "measured_nets": 20647,
+              "excluded_nets": 145,
+              "setup_wns_ps": -916.800306,
+              "setup_tns_ps": -398000.681115,
+              "hold_wns_ps": 25.471559,
+              "hold_tns_ps": 0.0,
+              "instances": 20610,
+              "logical_cells": 20610,
+              "physical_cells": 0,
+              "buffers": 150,
+              "buffer_area_um2": 12.0431,
+              "macros": 0,
+              "instance_area_um2": 2736.6514,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                93.366,
+                93.42
+              ],
+              "scoring_seconds": 9.326,
+              "power_mw": 0.122,
+              "reset_ports": [
+                "direct_reset_",
+                "dla_reset_rstn",
+                "global_clk_ovr_on",
+                "nvdla_clk_ovr_on",
+                "test_mode",
+                "tmc2slcg_disable_clock_gating"
+              ]
+            },
+            "physical_timing": {
+              "evaluations": 10,
+              "builds": 1,
+              "ranking_evaluations": 7,
+              "ranking_seconds": 5.555570254000002,
+              "detailed_evaluations": 3,
+              "repowered_gates": 3971,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 113482,
+              "update_calls": 13,
+              "seconds": 14.078553178,
+              "validation_seconds": 0.341063383,
+              "reconcile_seconds": 2.6812275490000004,
+              "exclusions_seconds": 0.05875588200000001,
+              "propagation_seconds": 9.776684800999998,
+              "feedback_seconds": 1.1853419740000015
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20948,
+              "baseline_area_um2": 2656.096920000048,
+              "cells": 20598,
+              "area_um2": 2735.7766200000697,
+              "within_budget": true,
+              "rejected_proposals": 4016
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0981042075,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 520,
+              "gp_density_ready_iteration": 380,
+              "gp_continuation_deadline": 1900,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 440
+            }
+          },
+          "identical_def": true,
+          "wns_improvement_ps": 0.0,
+          "hpwl_change_fraction": 0.0,
+          "placement_time_ratio": 1.0266108340625526
+        },
+        "coralnpu": {
+          "control_source": "/tmp/1f-wns-v1/density_floor_merged_candidate/coralnpu/summary.json",
+          "candidate_source": "/tmp/1f-wns-v1/grid_floor_retry/coralnpu/summary.json",
+          "control": {
+            "run": {
+              "status": "ok",
+              "wall_s": 897.18,
+              "cpu_s": 896.72,
+              "rss_mib": 10304.5625,
+              "tree_rss_mib": 10245.25,
+              "ipc": 1.6122974855617633,
+              "instructions": 6518267334835.0,
+              "cycles": 4042844073880.0,
+              "stop": null
+            },
+            "placement_seconds": 744.1128299999999,
+            "score": {
+              "hpwl_um": 3907687.297,
+              "hpwl_all_nets_um": 4173070.024,
+              "measured_nets": 161126,
+              "excluded_nets": 690,
+              "setup_wns_ps": -16736.599729,
+              "setup_tns_ps": -64843349.068619,
+              "hold_wns_ps": 27.430929,
+              "hold_tns_ps": 0.0,
+              "instances": 161074,
+              "logical_cells": 161074,
+              "physical_cells": 0,
+              "buffers": 1090,
+              "buffer_area_um2": 88.1944,
+              "macros": 2,
+              "instance_area_um2": 45769.8019,
+              "macro_area_um2": 26086.1895,
+              "die_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "scoring_seconds": 85.815,
+              "power_mw": 0.692,
+              "reset_ports": [
+                "io_aresetn"
+              ]
+            },
+            "physical_timing": {
+              "evaluations": 17,
+              "builds": 1,
+              "ranking_evaluations": 11,
+              "ranking_seconds": 84.084736084,
+              "detailed_evaluations": 6,
+              "repowered_gates": 22791,
+              "inserted_gates": 492,
+              "removed_gates": 1484,
+              "updated_nets": 2189262,
+              "update_calls": 23,
+              "seconds": 261.027854834,
+              "validation_seconds": 6.175823263999999,
+              "reconcile_seconds": 36.40349977100001,
+              "exclusions_seconds": 1.028163539,
+              "propagation_seconds": 193.55428119400003,
+              "feedback_seconds": 23.108909878999977
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 160837,
+              "area_um2": 19666.480859994055,
+              "within_budget": true,
+              "rejected_proposals": 8497
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0723027082,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 640,
+              "gp_density_ready_iteration": 200,
+              "gp_continuation_deadline": 1000,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 560
+            }
+          },
+          "candidate": {
+            "run": {
+              "status": "ok",
+              "wall_s": 889.2,
+              "cpu_s": 888.78,
+              "rss_mib": 10316.38671875,
+              "tree_rss_mib": 10243.19140625,
+              "ipc": 1.6264564819512854,
+              "instructions": 6517370359540.0,
+              "cycles": 4007097903856.0,
+              "stop": null
+            },
+            "placement_seconds": 736.804341,
+            "score": {
+              "hpwl_um": 3907687.297,
+              "hpwl_all_nets_um": 4173070.024,
+              "measured_nets": 161126,
+              "excluded_nets": 690,
+              "setup_wns_ps": -16736.599729,
+              "setup_tns_ps": -64843349.068619,
+              "hold_wns_ps": 27.430929,
+              "hold_tns_ps": 0.0,
+              "instances": 161074,
+              "logical_cells": 161074,
+              "physical_cells": 0,
+              "buffers": 1090,
+              "buffer_area_um2": 88.1944,
+              "macros": 2,
+              "instance_area_um2": 45769.8019,
+              "macro_area_um2": 26086.1895,
+              "die_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                387.18,
+                387.18
+              ],
+              "scoring_seconds": 84.262,
+              "power_mw": 0.692,
+              "reset_ports": [
+                "io_aresetn"
+              ]
+            },
+            "physical_timing": {
+              "evaluations": 17,
+              "builds": 1,
+              "ranking_evaluations": 11,
+              "ranking_seconds": 82.227832493,
+              "detailed_evaluations": 6,
+              "repowered_gates": 22791,
+              "inserted_gates": 492,
+              "removed_gates": 1484,
+              "updated_nets": 2189262,
+              "update_calls": 23,
+              "seconds": 259.763344355,
+              "validation_seconds": 5.969390259,
+              "reconcile_seconds": 35.649660133,
+              "exclusions_seconds": 1.017552875,
+              "propagation_seconds": 193.15726958000005,
+              "feedback_seconds": 23.198767448999956
+            },
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 160837,
+              "area_um2": 19666.480859994055,
+              "within_budget": true,
+              "rejected_proposals": 8497
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0723027082,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 640,
+              "gp_density_ready_iteration": 200,
+              "gp_continuation_deadline": 1000,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 560
+            }
+          },
+          "identical_def": true,
+          "wns_improvement_ps": 0.0,
+          "hpwl_change_fraction": 0.0,
+          "placement_time_ratio": 0.9901782515966028
+        }
+      },
+      "published_lfsr": {
+        "variant": "grid_floor_published",
+        "design": "lfsr",
+        "clock_period_ps": 100,
+        "placement_options": "production defaults, no density/utilization or timing overrides; one pinned CPU",
+        "common_frontend_settings": {
+          "compile.slang.ignore_uninstantiated_modules": "true",
+          "compile.slang.translate_off": "true",
+          "pass.abc.large_flow_latches": "true"
+        },
+        "binary_manifest": {
+          "build": "-c opt --jobs=2; published dependency pins; no local override",
+          "repos": {
+            "livehd": {
+              "head": "63e08901f66268d1ef2ff93c22ca1abe25c08fc4",
+              "patch_sha256": "cd5f1b351de18336f8a8c7643ca720d9a9a2dc299ffaa2cf2612835de989738e"
+            },
+            "DREAMPlace": {
+              "head": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+              "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            },
+            "OpenTimer": {
+              "head": "3197d532b08a6e11ee0a1c26a200dd34b56148cd",
+              "patch_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+            }
+          },
+          "lhd": "9d3383486ac4613c5811f365a948b362386e645e42532f996a524a96eed13836",
+          "physical_repair": "8103dc345c8fce2530da2b99cb030728ed7b2de333a52a4fe96867f153b00f3b",
+          "compiled_dependencies": {
+            "dreamplace": "1e5b19d9edeb6aa0c75be4ff9e9c77f8518fb60a",
+            "opentimer": "3197d532b08a6e11ee0a1c26a200dd34b56148cd"
+          },
+          "hightide_head": "ef9e530bed6b24e56e7399bb56e730ca8b73bba9",
+          "harness_sha256": {
+            "vsl.py": "c86086beddf4a14d66e1a098e2994ac3b08481c61904ee325b1b5a6904940d67",
+            "score.tcl": "ce39cd28c18e5923da13cff9dcc2289ce3c25238fa66c6f0f5b74564593ba677"
+          }
+        },
+        "original_sdc": "/home/renau/projs/HighTide/designs/asap7/lfsr/constraint.sdc",
+        "tight_sdc_sha256": "20ab825421fb7624097cfb50206e120927ce2dcdead77f0d7b0d7adff6fa1347",
+        "run": {
+          "status": "ok",
+          "wall_s": 4.77,
+          "cpu_s": 4.76,
+          "rss_mib": 412.5078125,
+          "tree_rss_mib": 396.19921875,
+          "ipc": 2.5420047777529327,
+          "instructions": 53672429750.0,
+          "cycles": 21114212774.0,
+          "stop": null
+        },
+        "status": "pass",
+        "error": null,
+        "phases": {
+          "compile_s": 0.26537700000000003,
+          "synth_s": 0.948035,
+          "place_s": 2.053093,
+          "sta_s": 0.2511,
+          "invocation_s": 4.7426220169999995,
+          "place_detail_s": {
+            "pass.place.restore": 6e-06,
+            "pass.place.io_resynth.before": 0.00033,
+            "pass.place.buffer_cleanup": 0.000705,
+            "pass.place.post_synth_timing": 0.72335,
+            "pass.opentimer.incremental": 0.032475000000000004,
+            "pass.place.io_resynth": 0.34572800000000004,
+            "pass.place": 1.0404559999999998,
+            "pass.place.timing_driven": 0.075616,
+            "pass.place.resize": 0.031163,
+            "pass.place.repair": 0.007522999999999999,
+            "pass.place.final_legalize": 0.041678,
+            "pass.place.save": 0.132266
+          }
+        },
+        "score": {
+          "hpwl_um": 183.788,
+          "hpwl_all_nets_um": 197.9,
+          "measured_nets": 136,
+          "excluded_nets": 1,
+          "setup_wns_ps": -60.270761,
+          "setup_tns_ps": -2166.75545,
+          "hold_wns_ps": 53.285192,
+          "hold_tns_ps": 0.0,
+          "instances": 134,
+          "logical_cells": 134,
+          "physical_cells": 0,
+          "buffers": 1,
+          "buffer_area_um2": 0.2624,
+          "macros": 0,
+          "instance_area_um2": 18.6187,
+          "macro_area_um2": 0.0,
+          "die_um": [
+            0.0,
+            0.0,
+            7.884,
+            7.83
+          ],
+          "core_um": [
+            0.0,
+            0.0,
+            7.884,
+            7.83
+          ],
+          "scoring_seconds": 1.049,
+          "power_mw": 0.000682,
+          "reset_ports": []
+        },
+        "reset_distribution_nets": 2,
+        "growth_budget": {
+          "basis": "synthesized_standard_cells",
+          "fraction": 0.03,
+          "baseline_cells": 136,
+          "baseline_area_um2": 18.910260000000008,
+          "cells": 134,
+          "area_um2": 18.618660000000013,
+          "within_budget": true,
+          "rejected_proposals": 0
+        },
+        "physical_timing": {
+          "evaluations": 11,
+          "builds": 1,
+          "ranking_evaluations": 8,
+          "ranking_seconds": 0.6945789139999998,
+          "detailed_evaluations": 3,
+          "repowered_gates": 8,
+          "inserted_gates": 0,
+          "removed_gates": 0,
+          "updated_nets": 779,
+          "update_calls": 14,
+          "seconds": 0.7262555669999998,
+          "validation_seconds": 0.001131537,
+          "reconcile_seconds": 0.681847014,
+          "exclusions_seconds": 0.00017849800000000002,
+          "propagation_seconds": 0.039858269,
+          "feedback_seconds": 0.003166989999999999
+        },
+        "gp": {
+          "gp_converged": false,
+          "gp_stop_reason": "density_infeasible",
+          "gp_overflow": 0.352626478,
+          "gp_target_density": 0.5,
+          "gp_overflow_floor": 0.2599183801757048,
+          "gp_total_iterations": 520,
+          "gp_density_ready_iteration": 400,
+          "gp_continuation_deadline": 2000,
+          "gp_objective_converged": true,
+          "gp_timing_satisfied": null,
+          "gp_iterations": 440
+        },
+        "placement_seconds": 2.053093,
+        "final_sta_seconds": 0.2511,
+        "physical_stage_seconds": 2.304193,
+        "placement_measurement": "outer phase elapsed time on one pinned CPU; nested ranking/STA/resynthesis and restart cleanup excluded; final standalone STA separate",
+        "legacy_overlapping_place_s": 2.398821
+      },
+      "pure_gp_comparison": {
+        "lfsr": {
+          "pure": {
+            "hpwl_um": 172.848,
+            "wns_ps": -61.605735,
+            "cells": 134,
+            "area_um2": 18.502,
+            "gp": {
+              "gp_converged": false,
+              "gp_overflow": 0.35766909,
+              "gp_iterations": 420,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.25986085715868795,
+              "gp_density_ready_iteration": 380,
+              "gp_continuation_deadline": 1900,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": true,
+              "gp_stop_reason": "density_infeasible"
+            }
+          },
+          "final": {
+            "hpwl_um": 183.788,
+            "wns_ps": -60.270761,
+            "cells": 134,
+            "area_um2": 18.6187
+          },
+          "hpwl_growth": 0.06329260390632241
+        },
+        "minimax": {
+          "pure": {
+            "hpwl_um": 42022.308,
+            "wns_ps": -8195.4035,
+            "cells": 15831,
+            "area_um2": 1959.2896,
+            "gp": {
+              "gp_converged": true,
+              "gp_overflow": 0.0667059027,
+              "gp_iterations": 560,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_density_ready_iteration": 480,
+              "gp_continuation_deadline": 2400,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": true,
+              "gp_stop_reason": "converged"
+            }
+          },
+          "final": {
+            "hpwl_um": 46924.026,
+            "wns_ps": -950.289184,
+            "cells": 16209,
+            "area_um2": 2086.121
+          },
+          "hpwl_growth": 0.11664561594284639
+        }
+      },
+      "pure_gp_protocol": "Same binary and common inputs. Disable timing/resize/resynthesis and explicitly enable synthesis-buffer cleanup to match production input preparation. No density or overflow override.",
+      "imported_minimax": {
+        "purpose": "Imported minimax native density-floor candidate; explicit input buffer cleanup and default density/overflow; geometry-only diagnostic",
+        "binary_sha256": "512aeec1bf0075a30ebb3d7fae217006a138bc5b57adc21abe4952fd80da4b27",
+        "config": {
+          "source_def": true,
+          "cell_place": true,
+          "top": "minimax",
+          "def": "/tmp/1f-speed-v2/minimax/C/input.def",
+          "liberty": "/tmp/1f-speed-v2/lib/minimax.lib",
+          "tech_rc": "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/setRC.tcl",
+          "lefs": [
+            "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/lef/asap7_tech_1x_201209.lef",
+            "/home/renau/.cache/bazel/_bazel_renau/e89feab91b9c23a93bdaa11c75f4275f/external/orfs+/flow/platforms/asap7/lef/asap7sc7p5t_28_R_1x_220121a.lef"
+          ],
+          "timing_driven": false,
+          "timing_rounds": 0,
+          "resize": false,
+          "threads": 1,
+          "sdc": "/tmp/1f-wns-v1/indexed_ranking_candidate/minimax/tight.sdc",
+          "output": "/tmp/1f-grid-v40/imported_candidate/placement",
+          "remove_synthesis_buffers": true
+        },
+        "run": {
+          "status": "ok",
+          "wall_s": 9.75,
+          "cpu_s": 9.74,
+          "rss_mib": 597.109375,
+          "tree_rss_mib": 615.140625,
+          "ipc": 2.3772222770529434,
+          "instructions": 104164991720.0,
+          "cycles": 43817943625.0,
+          "stop": null
+        },
+        "gp": {
+          "gp_converged": false,
+          "gp_overflow": 0.277374447,
+          "gp_iterations": 360,
+          "gp_target_density": 0.5,
+          "gp_overflow_floor": 0.18801929065086959,
+          "gp_density_ready_iteration": 300,
+          "gp_continuation_deadline": 1500,
+          "gp_objective_converged": true,
+          "gp_timing_satisfied": true,
+          "gp_stop_reason": "density_infeasible"
+        },
+        "native_hpwl_um": 42788.1615,
+        "score": {
+          "hpwl_um": 42708.841,
+          "hpwl_all_nets_um": 42823.339,
+          "measured_nets": 16049,
+          "excluded_nets": 1,
+          "setup_wns_ps": -11048.257464,
+          "setup_tns_ps": -22584543.420838,
+          "hold_wns_ps": 23.74664,
+          "hold_tns_ps": 0.0,
+          "instances": 16547,
+          "logical_cells": 15924,
+          "physical_cells": 623,
+          "buffers": 16,
+          "buffer_area_um2": 1.1664,
+          "macros": 0,
+          "instance_area_um2": 1919.7486,
+          "macro_area_um2": 0.0,
+          "die_um": [
+            0.0,
+            0.0,
+            64.175,
+            64.175
+          ],
+          "core_um": [
+            4.05,
+            4.05,
+            60.156,
+            59.94
+          ],
+          "scoring_seconds": 7.936,
+          "power_mw": 0.0506,
+          "reset_ports": []
+        },
+        "reset_distribution_nets": 0
+      },
+      "dynamic_grid_diagnostic": {
+        "status": "diagnostic only; not adopted globally due minimax WNS regression",
+        "designs": {
+          "lfsr": {
+            "override": "synth.place.grid.density_mode=dynamic",
+            "bins": [
+              8,
+              8
+            ],
+            "placement_seconds": 1.470848,
+            "score": {
+              "hpwl_um": 174.853,
+              "hpwl_all_nets_um": 188.641,
+              "measured_nets": 136,
+              "excluded_nets": 1,
+              "setup_wns_ps": -62.276184,
+              "setup_tns_ps": -2172.578126,
+              "hold_wns_ps": 53.268942,
+              "hold_tns_ps": 0.0,
+              "instances": 134,
+              "logical_cells": 134,
+              "physical_cells": 0,
+              "buffers": 1,
+              "buffer_area_um2": 0.2624,
+              "macros": 0,
+              "instance_area_um2": 18.6187,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                7.884,
+                7.83
+              ],
+              "scoring_seconds": 1.064,
+              "power_mw": 0.000681,
+              "reset_ports": []
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0358576623,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 800,
+              "gp_density_ready_iteration": 340,
+              "gp_continuation_deadline": 1700,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 560
+            },
+            "wns_change_vs_fixed_grid_candidate_ps": -2.0054230000000004
+          },
+          "minimax": {
+            "override": "synth.place.grid.density_mode=dynamic",
+            "bins": [
+              128,
+              128
+            ],
+            "placement_seconds": 47.141566,
+            "score": {
+              "hpwl_um": 52172.105,
+              "hpwl_all_nets_um": 52329.657,
+              "measured_nets": 16296,
+              "excluded_nets": 1,
+              "setup_wns_ps": -1142.845712,
+              "setup_tns_ps": -2238798.52441,
+              "hold_wns_ps": 31.292642,
+              "hold_tns_ps": 0.0,
+              "instances": 16246,
+              "logical_cells": 16246,
+              "physical_cells": 0,
+              "buffers": 418,
+              "buffer_area_um2": 92.4809,
+              "macros": 0,
+              "instance_area_um2": 2086.1793,
+              "macro_area_um2": 0.0,
+              "die_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "core_um": [
+                0.0,
+                0.0,
+                80.838,
+                81.0
+              ],
+              "scoring_seconds": 6.675,
+              "power_mw": 0.0535,
+              "reset_ports": []
+            },
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0905282448,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 640,
+              "gp_density_ready_iteration": 500,
+              "gp_continuation_deadline": 2500,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 540
+            },
+            "wns_change_vs_fixed_grid_candidate_ps": -192.55652800000007
+          }
+        }
+      },
+      "tests": {
+        "configuration": "-c opt --jobs=2 --test_timeout=30; final run uses published pins without local override",
+        "passed": 11,
+        "log": "/tmp/1f-grid-v40/published-build.log",
+        "initial_validation": "Ten native/LiveHD suites passed with local override. Initial new shrink fixture used an illegal fractional row height; corrected to shrink width while preserving row height, then native suite passed."
+      },
+      "proof_and_review": {
+        "scope": "Grid-resolution lower bound for static-cell GP density handoff",
+        "proof": [
+          "In each bin, max(0,sum(cell_charge)-capacity) >= sum(max(0,cell_charge-capacity)).",
+          "A rectangle covers n full bins with edges summing to r, or n-1 full bins with edges summing to 1+r, along each axis.",
+          "For fixed perpendicular intersections, excess is convex and symmetric in the two edge fragments, so equal fragments minimize it.",
+          "Taking the minimum of the four balanced-edge combinations gives each rectangle's independent minimum; summing and ignoring fixed occupancy is conservative.",
+          "Take the maximum of this bound and the existing core-capacity bound. Neither changes target density or raw convergence checks."
+        ],
+        "validation": [
+          "Analytic 2x2 rectangle on unit bins gives floor0.125, attained by half-bin edges.",
+          "100 sampled phase/size combinations verify floor <= observed physical overflow and translation independence.",
+          "Non-square bins preserve normalized bound under coordinate scaling.",
+          "Checkpoint resize uses one-bin width with legal row height and refreshes floor tozero.",
+          "All ten targeted native/LiveHD suites pass after correcting the new fixture.",
+          "lfsr main440 iterations, full520, WNS-60.270761ps, HPWL183.788um, placement2.050184s; fresh control1380main, WNS-61.991974ps, HPWL211.974um,2.685786s.",
+          "minimax andpartition_m finalDEF/WNS/HPWL identical; ratios1.041and1.027 vs publishedv39.",
+          "Coral retry passes with exact control DEF/WNS/HPWL, placement736.804s versus744.113s. All four satisfy1.5x budget.",
+          "Published-pin build passes all eleven suites; final lfsr matches candidate DEF and WNS, placement2.053093s."
+        ],
+        "pending": [],
+        "remaining_goal": [
+          "F: lfsr6.329% andminimax11.665% over matched input-cleanup pureGP.",
+          "D: automatic bins/default policy and curve agreement remain unproven.",
+          "B: totalSTA share remains above10%.",
+          "A/G/H/I/J broad census andcheckpoint evidence remain incomplete.",
+          "Coral regression observed after upstream integration remains open."
+        ],
+        "blocking_findings": []
+      },
+      "quota_failure": {
+        "failed_session": 16426,
+        "process_check": "No benchmark child remained in ps after session exit1",
+        "failed_run": "/tmp/1f-wns-v1/grid_floor_candidate/coralnpu",
+        "evidence": "measurement.json/perf.csv/time.tsv empty; no result.json; sandbox mount allocation reported quota exceeded",
+        "cleanup_logs": [
+          "/tmp/1f-grid-v40/cache-cleanup.json",
+          "/tmp/1f-grid-v40/cache-cleanup-small.json"
+        ],
+        "freed_gib": 9.99,
+        "action": "Fresh output variantgrid_floor_retry on CPU14; never reuse failed metrics"
+      },
+      "caveats": [
+        "Failed coral run has no valid result or timing measurement and is excluded. Retry uses a fresh output directory and the same frozen executable.",
+        "Repair growth budgets exclude reset/rail tree masters introduced upstream; this is not a gross-area claim.",
+        "F remains unmet: lfsr6.329% andminimax11.665% final wirelength over matched input-cleanup pureGP, despite improved absolute lfsr wirelength.",
+        "D numerical imported/own-floorplan bounds pass; curve agreement and a broadly safe automatic grid policy remain unproven. Existing global dynamic-grid diagnostic regresses minimaxWNS192.557ps and is not adopted.",
+        "Total STA share, decision-checkpoint timing agreement, larger/import census and coral regression observed after upstream integration remain open.",
+        "Published build manifest precedes this final evidence documentation."
+      ]
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",

@@ -183,11 +183,13 @@ Reset and domino rail buffer trees reuse the placement technology snapshot for
 Liberty cell models. Repeated placement phases do not reopen the library to
 identify asynchronous reset pins or choose the smallest placeable buffer.
 
-A supplied core can have too little free area to reach the requested soft density.
+A supplied core can have too little free area to reach the requested soft density;
+a fine density grid can also make individual cells unavoidably overfill bins.
 For static cell GP, native placement computes an unavoidable overflow floor from
-movable charge and fixed-bin capacity. If the floor exceeds `stop_overflow`, it
-uses excess above that floor to schedule criticality samples, stop increasing
-density pressure and settle before legalization. No option default or density
+movable charge and fixed-bin capacity, and from the minimum bin excess of each
+cell over all grid positions. The stronger conservative bound controls handoff.
+If the floor exceeds `stop_overflow`, it uses excess above that floor to schedule
+criticality samples, stop increasing density pressure and settle before legalization. No option default or density
 target changes. `gp_target_density`, `gp_overflow_floor`, and the history's
 `overflow_floor` expose the distinction; an early handoff reports
 `gp_stop_reason="density_infeasible"` and `gp_converged=false`. Minimum iterations,

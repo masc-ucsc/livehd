@@ -22,6 +22,37 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>The density floor now also includes unavoidable overflow from cells larger
+than the bins. It minimizes each rectangle independently over its possible grid
+positions, then combines that conservative bound with the core-capacity bound.
+Lfsr's actual GP floor is 0.260: main GP now settles at 440 iterations instead of
+1,380 (520 versus 1,480 including the warm round), retains the original density
+and reports <code>density_infeasible</code>, not convergence. Public defaults
+are unchanged; all eleven published-pin validation suites pass.</p>
+<table><thead><tr><th>Design</th><th>Independent WNS (ps)</th><th>HPWL (µm)</th><th>Placement (s)</th></tr></thead><tbody>
+<tr><td>lfsr</td><td>-61.992 → -60.271</td><td>211.974 → 183.788</td><td>2.686 → 2.050</td></tr>
+<tr><td>minimax</td><td>-950.289 → -950.289</td><td>46924.026 → 46924.026</td><td>43.447 → 45.231</td></tr>
+<tr><td>NVDLA/partition_m</td><td>-916.800 → -916.800</td><td>93405.154 → 93405.154</td><td>37.020 → 38.005</td></tr>
+<tr><td>coralnpu</td><td>-16736.600 → -16736.600</td><td>3907687.297 → 3907687.297</td><td>744.113 → 736.804</td></tr>
+</tbody></table>
+<p>All use common production defaults, 100 ps clocks and reset false paths.
+Lfsr has a fresh control; the other controls are earlier frozen v39 runs on the
+same CPUs. All satisfy the 1.5× placement-time budget. Minimax, partition_m and
+coralnpu retain exact DEFs. A rebuild using the published dependency pin reproduces
+lfsr's exact candidate DEF and independent WNS, with placement taking
+2.053 s. The imported minimax diagnostic preserves
+42,708.841 µm HPWL and 360 iterations in 9.74 s CPU. Source provenance, scores,
+validation and the excluded scratch-quota failure are in
+<code>runs.grid_resolution_floor_v40</code>.</p>
+<p>Fresh pure-GP diagnostics explicitly match production input-buffer cleanup.
+Lfsr's full placement is 183.788 µm versus pure GP's 172.848 µm (+6.33%);
+minimax remains 46,924.026 versus 42,022.308 µm (+11.66%).
+<strong>F's 3% bound remains unmet on both designs.</strong> The existing global
+automatic-grid diagnostic chooses 8×8 for lfsr and 128×128 for minimax; it speeds
+lfsr but worsens minimax WNS to −1,142.846 ps, so it remains opt-in. Total STA share,
+a broadly safe automatic grid policy/curve agreement, the broader census and the
+coral regression observed after upstream integration remain open.</p>
+
 <p>Static cell placement now hands off to legalization when the requested density
 is mathematically infeasible and the remaining objective has settled. The original
 requested target is retained and the result reports nonconvergence. Review of the
