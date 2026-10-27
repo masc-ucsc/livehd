@@ -42,7 +42,7 @@ double quantile(std::vector<double> values, double fraction) {
 int main(int argc, char** argv) {
   try {
     std::vector<std::string> lefs;
-    std::string              def, guard = "shared";
+    std::string              def, guard = "shared", occupancy_index = "auto";
     size_t                   samples = 200, seed = 1, access = 10000, patterns = 10000, budget_ms = 200;
     size_t                   min_sinks = 1, max_sinks = std::numeric_limits<size_t>::max(), bitmap_grid = 0;
     for (int i = 1; i < argc; ++i) {
@@ -57,6 +57,8 @@ int main(int argc, char** argv) {
         def = value;
       } else if (key == "--guard") {
         guard = value;
+      } else if (key == "--occupancy-index") {
+        occupancy_index = value;
       } else {
         size_t     n      = 0;
         const auto parsed = std::from_chars(value.data(), value.data() + value.size(), n);
@@ -86,6 +88,9 @@ int main(int argc, char** argv) {
     }
     if (def.empty() || lefs.empty() || (guard != "shared" && guard != "request")) {
       throw std::invalid_argument("requires --def and --lef; --guard is shared or request");
+    }
+    if (occupancy_index != "auto" && occupancy_index != "exact") {
+      throw std::invalid_argument("--occupancy-index is auto or exact");
     }
     const auto start        = Clock::now();
     const auto tech         = ph::read_lef(lefs);
@@ -144,6 +149,9 @@ int main(int argc, char** argv) {
       }
       occupancy.enable_bitmap(frame.die, bitmap_grid, vertical);
     }
+    if (occupancy_index == "exact") {
+      occupancy.disable_bitmap();
+    }
     const auto bitmap_seconds = seconds(phase);
     phase                     = Clock::now();
     const ph::Signal_metal_rules rules(tech, frame);
@@ -199,6 +207,8 @@ int main(int argc, char** argv) {
       w.Double(read_seconds);
       w.Key("occupancy_seconds");
       w.Double(occupancy_seconds);
+      w.Key("occupancy_index");
+      w.String(occupancy_index.c_str());
       w.Key("bitmap_grid_dbu");
       w.Uint64(bitmap_grid);
       w.Key("bitmap_bytes");

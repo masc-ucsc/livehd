@@ -869,27 +869,47 @@ the dominant setup cost. Regression coverage includes both L orientations,
 rejection of a feasible intermediate Z trunk, one through eight sinks, changed
 occupancy, deadlines, pin protection, and placement/RC consumers (116 tests).
 
-An optional conservative occupancy bitmap can be enabled once on the shared
-index with `Routing_occupancy::enable_bitmap(bounds, grid_dbu, vertical_layers)`.
-It rasterizes shape coverage and checks the query's spacing-expanded rectangle
-using 64-bit words; vertical layers transpose the bitmap so long vertical runs
-scan contiguous words. Clear regions return immediately. Marked regions retain
-exact owner and shape filtering, so touching a net's own pin never masks foreign
-metal. Insertions update existing bitmaps; copies/overlays retain their ordinary
-isolation. Out-of-range queries, new layers and layers above the 32 MiB bitmap
-limit fall back to the exact index. This is an optional accelerator, not a
-replacement for metal, via, pin-protection or connectivity validation.
+Routing occupancy owns a runtime-only vector of Roaring bitmaps per layer.
+Each entry covers a grid strip across the preferred direction; occupied ranges
+run along that direction. Vertical layers transpose the coordinates. The DEF
+occupancy builder enables the index once after importing pins, obstructions,
+and traces, using the smallest supported DEF track pitch as a conservative
+coverage grid. Accepted route insertions update the same index, including new
+layers. It is never serialized and is destroyed with its occupancy owner.
+Immutable PG bases keep their own shared index; trial copies/overlays preserve
+isolation. Frames without valid die bounds or supported tracks use exact queries.
 
-`signal_route_bench --bitmap-grid-dbu 36` exercises this accelerator. Three
-alternating pairs on CPU 12, each using the same 20,000 seed-17 draws with one
-to eight sinks, preserved all 60,000 paired outcomes, reasons, work counts and
-accepted geometries. Median throughput improved from 15,746 to 16,907 attempts/s
-(7.4%); mixed-workload successful routes/s improved from 538.5 to 578.2. Bitmap
-storage was 72,710,560 bytes and construction took 0.077 s. Median shared-guard
-setup fell from 12.593 to 11.931 s, and total setup from 14.288 to 13.761 s.
-These are the same placed coralnpu fixture without PG wiring or commit/update
-traffic. Automatic activation in other consumers remains to be measured; their
-current defaults are unchanged.
+Clear regions of the query's spacing-expanded rectangle return immediately.
+Occupied regions retain exact owner and shape filtering, so touching a net's
+own pin never hides foreign metal. Pins, via cuts, and off-direction obstructions
+remain fully indexed. Geometry outside the indexed bounds, strips beyond the
+32-bit coordinate space, or strip directories exceeding 32 MiB use the exact
+index. This accelerator preserves metal, via, pin-protection and connectivity
+validation. Imported ranges are compacted once; commits do not rebuild the
+layer. The dependency is CRoaring 4.3.11 (`@roaring//:roaring_cpp`).
+
+`signal_route_bench` uses this production index automatically. For measurements,
+`--occupancy-index exact` disables the local accelerator, and
+`--bitmap-grid-dbu N` overrides its grid. Automatic construction is included in
+`occupancy_seconds`; `bitmap_seconds` measures only the explicit override or
+disable operation. `bitmap_bytes` reports compressed container payload and
+strip objects, excluding container-directory and allocator overhead.
+
+Three alternating paired runs on CPU 15 used the same 20,000 seed-17 draws with one to eight sinks. All 60,000 paired outcomes, rejection
+reasons, work counts and accepted geometries matched the frozen dense-bitmap
+reference, with 684 successes per run and no timeouts. Reported bitmap storage
+fell from 72,710,560 to 11,678,558 bytes (84% less, before the omitted metadata).
+Median throughput fell from 16,663 to 14,538 attempts/s (13% slower), and total
+setup increased from 13.772 to 16.237 s. Mixed-workload successful routes/s fell
+from 569.9 to 497.2. This is a memory improvement, not a demonstrated speedup.
+The fixture is placed coralnpu without PG wiring or route commits during the
+throughput measurement; regression tests cover import and incremental commits.
+
+Short-query membership checks, exact along-track coordinates, and direct run
+container queries were also measured. None recovered dense-bitmap throughput;
+the implementation keeps the simpler public Roaring range API and the smaller
+coarse representation. Artifacts are in `.agent-artifacts/route-dpin-v4` through
+`route-dpin-v7` in the parent workspace. The final implementation matches v4.
 
 `try_route` also screens long parallel exposure to foreign metal on the same
 layer. For elongated shapes within two candidate wire widths, it sums parallel

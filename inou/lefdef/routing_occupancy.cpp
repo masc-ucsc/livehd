@@ -35,25 +35,23 @@ bool oversized(const Bins& b, int64_t maximum) {
 }
 }  // namespace
 namespace {
-Rect     bitmap_rect(const Rect& r, bool vertical) { return vertical ? Rect{r.yl, r.xl, r.yh, r.xh} : r; }
-uint64_t bit_range(size_t first, size_t last) { return (~uint64_t{0} << first) & (~uint64_t{0} >> (63 - last)); }
+Rect bitmap_rect(const Rect& r, bool vertical) { return vertical ? Rect{r.yl, r.xl, r.yh, r.xh} : r; }
 }  // namespace
 Routing_occupancy::Layer_bitmap::Layer_bitmap(const Rect& bounds, int64_t pitch, bool transpose)
     : grid(pitch), vertical(transpose) {
-  const auto b               = bins(bitmap_rect(bounds, vertical), grid);
-  xl                         = b.xl;
-  yl                         = b.yl;
-  nx                         = b.xh - b.xl + 1;
-  ny                         = b.yh - b.yl + 1;
-  stride                     = (nx + 63) / 64;
-  // Bound each optional layer to 32 MiB. Empty storage means exact fallback.
-  constexpr size_t max_words = 32 * 1024 * 1024 / sizeof(uint64_t);
-  if (stride <= max_words / ny) {
-    words.resize(stride * ny);
+  const auto b = bins(bitmap_rect(bounds, vertical), grid);
+  xl           = b.xl;
+  yl           = b.yl;
+  nx           = b.xh - b.xl + 1;
+  ny           = b.yh - b.yl + 1;
+  // Avoid an enormous strip directory on malformed or extremely fine grids.
+  // Each strip has a 32-bit coordinate space; unsupported planes fall back.
+  if (uint64_t(nx) <= (uint64_t{1} << 32) && ny <= 32 * 1024 * 1024 / sizeof(roaring::Roaring)) {
+    strips.resize(ny);
   }
 }
 void Routing_occupancy::Layer_bitmap::insert(const Rect& rect) {
-  if (words.empty()) {
+  if (strips.empty()) {
     return;
   }
   const auto b  = bins(bitmap_rect(rect, vertical), grid);
@@ -62,51 +60,87 @@ void Routing_occupancy::Layer_bitmap::insert(const Rect& rect) {
   if (x1 < x0 || y1 < y0) {
     return;
   }
-  const size_t first = x0 - xl, last = x1 - xl;
   for (auto y = y0; y <= y1; ++y) {
-    const auto offset = size_t(y - yl) * stride;
-    for (size_t w = first / 64; w <= last / 64; ++w) {
-      words[offset + w] |= bit_range(w == first / 64 ? first % 64 : 0, w == last / 64 ? last % 64 : 63);
-    }
+    strips[y - yl].addRange(uint64_t(x0 - xl), uint64_t(x1 - xl) + 1);
   }
 }
 bool Routing_occupancy::Layer_bitmap::maybe_occupied(const Rect& rect) const {
-  if (words.empty()) {
+  if (strips.empty()) {
     return true;
   }
   const auto b = bins(bitmap_rect(rect, vertical), grid);
   if (b.xl < xl || b.yl < yl || b.xh >= xl + int64_t(nx) || b.yh >= yl + int64_t(ny)) {
-    return true;  // Geometry outside the bitmap is still represented by the exact index.
+    return true;  // Geometry outside the bitmap remains in the exact index.
   }
-  const size_t first = b.xl - xl, last = b.xh - xl;
   for (auto y = b.yl; y <= b.yh; ++y) {
-    const auto offset = size_t(y - yl) * stride;
-    for (size_t w = first / 64; w <= last / 64; ++w) {
-      if (words[offset + w] & bit_range(w == first / 64 ? first % 64 : 0, w == last / 64 ? last % 64 : 63)) {
-        return true;
-      }
+    if (roaring::api::roaring_bitmap_intersect_with_range(&strips[y - yl].roaring, uint64_t(b.xl - xl), uint64_t(b.xh - xl) + 1)) {
+      return true;
     }
   }
   return false;
+}
+void Routing_occupancy::Layer_bitmap::compact() {
+  for (auto& strip : strips) {
+    strip.runOptimize();
+    strip.shrinkToFit();
+  }
+}
+size_t Routing_occupancy::Layer_bitmap::bytes() const {
+  size_t total = strips.capacity() * sizeof(roaring::Roaring);
+  for (const auto& strip : strips) {
+    roaring::api::roaring_statistics_t stat{};
+    roaring::api::roaring_bitmap_statistics(&strip.roaring, &stat);
+    total += stat.n_bytes_array_containers + stat.n_bytes_run_containers + stat.n_bytes_bitset_containers;
+  }
+  return total;
 }
 void Routing_occupancy::enable_bitmap(const Rect& bounds, int64_t grid, const std::set<std::string>& vertical_layers) {
   validate(bounds);
   if (grid <= 0 || grid > std::numeric_limits<int32_t>::max()) {
     throw std::invalid_argument("invalid routing bitmap grid");
   }
+  bitmap_config_ = Bitmap_config{bounds, grid, vertical_layers};
   for (auto& [name, layer] : layers_) {
     layer.bitmap.emplace(bounds, grid, vertical_layers.contains(name));
     for (auto id : layer.all) {
       const auto& s = shapes_[id / shapes_per_chunk][id % shapes_per_chunk];
       layer.bitmap->insert({double(s.xl), double(s.yl), double(s.xh), double(s.yh)});
     }
+    layer.bitmap->compact();
+  }
+}
+void Routing_occupancy::enable_bitmap(const Technology& tech, const Floorplan& fp) {
+  if (!integral_dbu(fp.die) || fp.die.empty()) {
+    return;
+  }
+  int64_t grid = std::numeric_limits<int64_t>::max();
+  for (const auto& track : fp.tracks) {
+    if (track.supported()) {
+      grid = std::min(grid, track.step);
+    }
+  }
+  if (grid == std::numeric_limits<int64_t>::max()) {
+    return;  // No routing grid: retain exact geometry without inventing tracks.
+  }
+  std::set<std::string> vertical;
+  for (const auto& [name, layer] : tech.layers) {
+    if (layer.direction == "VERTICAL") {
+      vertical.insert(name);
+    }
+  }
+  enable_bitmap(fp.die, grid, vertical);
+}
+void Routing_occupancy::disable_bitmap() {
+  bitmap_config_.reset();
+  for (auto& [name, layer] : layers_) {
+    layer.bitmap.reset();
   }
 }
 size_t Routing_occupancy::bitmap_bytes() const {
   size_t total = 0;
   for (const auto& [name, layer] : layers_) {
     if (layer.bitmap) {
-      total += layer.bitmap->words.size() * sizeof(uint64_t);
+      total += layer.bitmap->bytes();
     }
   }
   return total;
@@ -136,16 +170,17 @@ Routing_occupancy& Routing_occupancy::operator=(Routing_occupancy&& other) noexc
   if (this == &other) {
     return *this;
   }
-  bucket_size_  = other.bucket_size_;
-  base_         = std::move(other.base_);
-  base_size_    = std::exchange(other.base_size_, 0);
-  logical_size_ = std::exchange(other.logical_size_, 0);
-  starts_       = std::move(other.starts_);
-  runs_         = std::move(other.runs_);
-  shapes_       = std::move(other.shapes_);
-  name_ids_     = std::move(other.name_ids_);
-  names_        = std::move(other.names_);
-  layers_       = std::move(other.layers_);
+  bitmap_config_ = std::exchange(other.bitmap_config_, std::nullopt);
+  bucket_size_   = other.bucket_size_;
+  base_          = std::move(other.base_);
+  base_size_     = std::exchange(other.base_size_, 0);
+  logical_size_  = std::exchange(other.logical_size_, 0);
+  starts_        = std::move(other.starts_);
+  runs_          = std::move(other.runs_);
+  shapes_        = std::move(other.shapes_);
+  name_ids_      = std::move(other.name_ids_);
+  names_         = std::move(other.names_);
+  layers_        = std::move(other.layers_);
   other.starts_.clear();
   other.runs_.clear();
   other.shapes_.clear();
@@ -203,6 +238,10 @@ size_t Routing_occupancy::insert(Occupied_shape shape) {
   const auto b     = bins(shape.shape.rect, bucket_size_);
   const auto id    = local_size();
   auto&      layer = layers_[shape.shape.layer];
+  if (!layer.bitmap && bitmap_config_) {
+    const auto& config = *bitmap_config_;
+    layer.bitmap.emplace(config.bounds, config.grid, config.vertical_layers.contains(shape.shape.layer));
+  }
   if (shapes_.empty() || shapes_.back().size() == shapes_per_chunk) {
     shapes_.emplace_back();
     shapes_.back().reserve(shapes_per_chunk);
@@ -479,6 +518,7 @@ Routing_power_grid::Routing_power_grid(const Technology& tech, const Floorplan& 
   if (checkpoint) {
     checkpoint();
   }
+  occupied.enable_bitmap(tech, fp);
   occupancy_ = std::make_shared<const Routing_occupancy>(std::move(occupied));
 }
 Routing_occupancy Routing_power_grid::overlay(const Technology& tech, const Floorplan& fp, int64_t size) const {
@@ -618,6 +658,7 @@ Routing_occupancy routing_occupancy(const Technology& tech, const Floorplan& fp,
   if (checkpoint) {
     checkpoint();
   }
+  out.enable_bitmap(tech, fp);
   return out;
 }
 }  // namespace livehd::physical

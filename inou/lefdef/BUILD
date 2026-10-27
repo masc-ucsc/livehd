@@ -6,7 +6,7 @@ cc_library(
     hdrs = ["route_store.hpp", "physical.hpp", "mapped_graph.hpp", "routing_geometry.hpp", "routing_rules.hpp", "pin_access.hpp", "routing_occupancy.hpp", "routing_connectivity.hpp", "signal_via.hpp", "cut_rules.hpp", "tech_profile.hpp", "lef_writer.hpp", "row_access.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
-    deps = [":index_union_find", "//core", "//graph", "//third_party/misc/lef/lef", "//third_party/misc/def/def", "@rapidjson"],
+    deps = [":index_union_find", "//core", "//graph", "//third_party/misc/lef/lef", "//third_party/misc/def/def", "@rapidjson", "@roaring//:roaring_cpp"],
 )
 cc_library(
     name = "index_union_find",

@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 #include "physical.hpp"
+#include "roaring/roaring.hh"
 
 namespace livehd::physical {
 struct Occupied_shape {
@@ -31,13 +32,16 @@ class Routing_occupancy {
   // Conservative coverage only: a clear region proves there are no shapes;
   // marked regions still use exact ownership/geometry filtering.
   struct Layer_bitmap {
-    int64_t               grid, xl, yl;
-    size_t                nx, ny, stride;
-    bool                  vertical;
-    std::vector<uint64_t> words;
+    int64_t                       grid, xl, yl;
+    size_t                        nx, ny;
+    bool                          vertical;
+    // Each strip stores coordinates along the preferred routing direction.
+    std::vector<roaring::Roaring> strips;
     Layer_bitmap(const Rect&, int64_t, bool);
-    void insert(const Rect&);
-    bool maybe_occupied(const Rect&) const;
+    void   insert(const Rect&);
+    bool   maybe_occupied(const Rect&) const;
+    void   compact();
+    size_t bytes() const;
   };
   struct Layer_index {
     std::optional<Layer_bitmap>                        bitmap;
@@ -47,6 +51,12 @@ class Routing_occupancy {
     std::unordered_map<int64_t, std::vector<size_t>>   x_bands, y_bands;
     std::vector<size_t>                                large, all;
   };
+  struct Bitmap_config {
+    Rect                  bounds;
+    int64_t               grid;
+    std::set<std::string> vertical_layers;
+  };
+  std::optional<Bitmap_config>             bitmap_config_;
   int64_t                                  bucket_size_;
   std::shared_ptr<const Routing_occupancy> base_;
   size_t                                   base_size_ = 0;
@@ -86,10 +96,15 @@ public:
   // Append-only overlay. The shared base must remain immutable for its lifetime.
   // Copies share only that base; local insertions never affect sibling trials.
   explicit Routing_occupancy(std::shared_ptr<const Routing_occupancy> base);
-  // Optional broad phase for repeated trials. No ownership or DRC verdict is
-  // cached. Insertions update existing layer bitmaps; new layers use the exact
-  // index until the next enable call. Oversized layers retain the exact index.
+  // Runtime-only Roaring broad phase, retained until this owner is destroyed.
+  // Insertions (including new layers) update it; no ownership/DRC verdict is
+  // cached. Imported geometry is compacted once, never serialized.
+  // Geometry outside supported bounds retains the exact index.
   void                enable_bitmap(const Rect& bounds, int64_t grid_dbu, const std::set<std::string>& vertical_layers = {});
+  // Choose a conservative grid from DEF tracks; no benchmark-specific tuning.
+  void                enable_bitmap(const Technology&, const Floorplan&);
+  void                disable_bitmap();  // Exact reference for measurements.
+  // Compressed payload plus strip objects, excluding allocator overhead.
   size_t              bitmap_bytes() const;
   size_t              insert(Occupied_shape);
   // Exact arithmetic progression of identical rectangles, including reversed
@@ -112,6 +127,12 @@ bool same_supply_wiring(const std::vector<Net>&, const std::vector<Net>&);
 class Routing_power_grid {
   const Technology*                        technology_;
   Floorplan                                signature_;
+  struct Bitmap_config {
+    Rect bounds;
+    int64_t grid;
+    std::set<std::string> vertical_layers;
+  };
+  std::optional<Bitmap_config> bitmap_config_;
   int64_t                                  bucket_size_;
   std::shared_ptr<const Routing_occupancy> occupancy_;
 
