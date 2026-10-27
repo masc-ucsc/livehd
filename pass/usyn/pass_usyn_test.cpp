@@ -697,6 +697,19 @@ TEST_F(PassSynth, DominoProfileRequirementsAreExplicitUsageErrors) {
     EXPECT_EQ(report_text(), published) << key;
     livehd::diag::sink().clear();
   }
+  // A clock bus names one of its bits: the bare port is refused.
+  var.dict                 = base;
+  var.dict["domino_clock"] = "b";
+  var.dict["out"]          = root + "/invalid";
+  var.graphs[0]->get_io()->set_bits("b", 2);
+  run(var);
+  var.graphs[0]->get_io()->set_bits("b", 1);
+  EXPECT_TRUE(livehd::diag::sink().has_halting_errors());
+  ASSERT_FALSE(livehd::diag::sink().records().empty());
+  EXPECT_EQ(livehd::diag::sink().records().back().code, "domino-profile");
+  EXPECT_NE(livehd::diag::sink().records().back().message.find("2-bit"), std::string::npos);
+  EXPECT_FALSE(fs::exists(root + "/invalid"));
+  livehd::diag::sink().clear();
   // Without the profile, a domino option spelled at its listed default is
   // the implicit default, not an error.
   var.dict             = base;

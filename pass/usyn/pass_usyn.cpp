@@ -855,10 +855,19 @@ void Pass_usyn::synthesize(Eprp_var& var) {
   // other name would quietly retain every register as clock-domain.
   if (options.physical == "domino_provisional") {
     const std::string_view clock = options.domino.clock;
-    if (!top->get_io() || !top->get_io()->has_input(std::string{clock.substr(0, clock.find('['))})) {
+    const std::string      port{clock.substr(0, clock.find('['))};
+    if (!top->get_io() || !top->get_io()->has_input(port)) {
       livehd::diag::err("pass.usyn", "domino-profile", "syntax")
           .msg("pass.usyn.domino_clock={} names no input of the design top {}", clock, top->get_name())
           .hint("name the one constrained clock port of the top module")
+          .emit();
+      return;
+    }
+    // A bus port is one clock per bit: the domain is one of them.
+    if (port.size() == clock.size() && top->get_io()->get_bits(port) > 1) {
+      livehd::diag::err("pass.usyn", "domino-profile", "syntax")
+          .msg("pass.usyn.domino_clock={} is a {}-bit input of {}", clock, top->get_io()->get_bits(port), top->get_name())
+          .hint(std::format("select one bit of the clock bus as {}[i]", clock))
           .emit();
       return;
     }
