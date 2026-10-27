@@ -19,6 +19,7 @@ library) from the OpenROAD-flow-scripts sky130hd platform files
 `sky130_fd_sc_hd__tt_025C_1v80.lib` and `sky130_fd_sc_hd_merged.lef`, which
 redistribute the same SkyWater PDK: the integrated clock gates dlclkp_1 and
 sdlclkp_1 (with a test enable), the latches dlxtn_1 and dlxtp_1 and the
-asynchronous-reset flop dfrtp_1. The domplace clock-gate and reset smokes
-append them to `sky130hd.lib` / `sky130hd.lef` in their temporary directory;
-the seven-cell files above stay as they are.
+asynchronous-reset flop dfrtp_1. The lhd smokes append them (all, or only
+dfrtp_1 for the placement reset tree) to `sky130hd.lib` / `sky130hd.lef` in
+their temporary directory through `lhd/tests/sky130_fixture.py`; the
+seven-cell files above stay as they are.

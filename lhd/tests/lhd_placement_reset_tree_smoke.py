@@ -6,17 +6,17 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
+
+sys.path.insert(0, 'lhd/tests')
+from sky130_fixture import part_library, seq_library  # noqa: E402
 
 root = Path(os.environ['TEST_TMPDIR']) / 'reset_tree'
 root.mkdir()
 libdir = Path('inou/lefdef/tests/data')
-# The fixture library has no asynchronous-reset flop: append sky130's dfrtp_1 (RESET_B clears Q).
-lib = (libdir / 'sky130hd.lib').read_text()
-lib = lib[:lib.rindex('}')] + '\n' + Path('lhd/tests/sky130hd_dfrtp_1.lib.part').read_text() + '}\n'
-(root / 'arst.lib').write_text(lib)
-lef = (libdir / 'sky130hd.lef').read_text()
-cut = lef.rindex('END LIBRARY')
-(root / 'arst.lef').write_text(lef[:cut] + Path('lhd/tests/sky130hd_dfrtp_1.lef.part').read_text() + '\n' + lef[cut:])
+# The fixture library has no asynchronous-reset flop: append sky130's dfrtp_1 (RESET_B clears Q) from the
+# sequential fragment.
+seq_library(root, 'arst', ['sky130_fd_sc_hd__dfrtp_1'])
 source = root / 'dut.v'
 source.write_text('module dut(input clk, input rst_n, input [47:0] d, output [47:0] q);\n'
                   '  reg [47:0] r;\n'
@@ -127,12 +127,7 @@ both = run('both', ['--set', 'synth.place.reset_fanout=8', '--set', f'pass.{mapp
 assert both['qor']['place']['reset_tree']['nets'] == 0, both['qor']['place']['reset_tree']  # the mapper's tree already bounds it
 # A flop with a clear AND a preset (ASAP7 DFFASRHQN-shaped) ties one pin inactive: the tie is not a reset net, in the seed
 # placement or in the final one that re-reads the placed graph (timing_driven=true places twice).
-dual_lib = (libdir / 'sky130hd.lib').read_text()
-dual_lib = dual_lib[:dual_lib.rindex('}')] + '\n' + Path('lhd/tests/sky130hd_dfbbp_1.lib.part').read_text() + '}\n'
-(root / 'dual.lib').write_text(dual_lib)
-dual_lef = (libdir / 'sky130hd.lef').read_text()
-cut = dual_lef.rindex('END LIBRARY')
-(root / 'dual.lef').write_text(dual_lef[:cut] + Path('lhd/tests/sky130hd_dfbbp_1.lef.part').read_text() + '\n' + dual_lef[cut:])
+part_library(root, 'dual', 'sky130hd_dfbbp_1')
 dual_source = root / 'dual.v'
 dual_source.write_text(source.read_text().replace('module dut', 'module dual').replace("48'h0", "48'h5555aaaa5555"))
 dual_base = [a.replace(f'{root}/arst.lib', f'{root}/dual.lib').replace(f'{root}/arst.lef', f'{root}/dual.lef') for a in base]

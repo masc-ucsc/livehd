@@ -8,18 +8,17 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import sys
+
+sys.path.insert(0, 'lhd/tests')
+from sky130_fixture import seq_library  # noqa: E402
 
 root = Path(os.environ['TEST_TMPDIR']) / 'gclk'
 root.mkdir()
 libdir = Path('inou/lefdef/tests/data')
 lhd = 'lhd/lhd'
 
-lib = (libdir / 'sky130hd.lib').read_text()
-end = lib.rindex('}')
-(root / 'seq.lib').write_text(lib[:end] + (libdir / 'sky130hd_seq.lib.fragment').read_text() + lib[end:])
-lef = (libdir / 'sky130hd.lef').read_text()
-end = lef.rindex('END LIBRARY')
-(root / 'seq.lef').write_text(lef[:end] + (libdir / 'sky130hd_seq.lef.fragment').read_text() + '\n' + lef[end:])
+seq_library(root)
 sdc = root / 'g.sdc'
 sdc.write_text('create_clock -name clk -period 10 [get_ports clk]\n')
 

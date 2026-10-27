@@ -2935,10 +2935,9 @@ sh_test(
     timeout = "moderate",
     srcs = ["lhd_placement_reset_tree_smoke.py"],
     data = [
+        "sky130_fixture.py",
         "sky130hd_dfbbp_1.lef.part",
         "sky130hd_dfbbp_1.lib.part",
-        "sky130hd_dfrtp_1.lef.part",
-        "sky130hd_dfrtp_1.lib.part",
         "//inou/lefdef:test_data",
         "//lhd",
     ],
@@ -2972,6 +2971,7 @@ sh_test(
     timeout = "short",
     srcs = ["lhd_lec_gated_clock_smoke.py"],
     data = [
+        "sky130_fixture.py",
         "//inou/lefdef:test_data",
         "//lhd",
     ],
@@ -2983,6 +2983,7 @@ sh_test(
     timeout = "short",
     srcs = ["lhd_domplace_gates_smoke.py"],
     data = [
+        "sky130_fixture.py",
         "//inou/lefdef:test_data",
         "//lhd",
     ],
@@ -2998,6 +2999,7 @@ sh_test(
     timeout = "short",
     srcs = ["lhd_usyn_memory_lec_smoke.py"],
     data = [
+        "sky130_fixture.py",
         "//inou/lefdef:test_data",
         "//lhd",
     ],
@@ -3012,6 +3014,7 @@ sh_test(
     timeout = "short",
     srcs = ["lhd_domplace_reset_smoke.py"],
     data = [
+        "sky130_fixture.py",
         "//inou/lefdef:test_data",
         "//lhd",
     ],
