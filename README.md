@@ -295,21 +295,25 @@ workflow, and Isabelle heap-build rules.
 `pass.lean` writes a design as a Lean certificate. See
 [`pass/lean/README.md`](pass/lean/README.md) for the pass and its options.
 
-The translation-validation simulator turns each certificate into one
-straight-line Lean function, a compiled simulator, and checks it against the
-semantics that LiveHD's Lean compiler is proved correct for. The check is a
-sampled differential test by default, and a kernel-checked theorem with
-`--prove`. See
-[`pass/lean/Translation_Validation/README.md`](pass/lean/Translation_Validation/README.md)
-for how to build and run it, its trust boundary, and the CVA6, CORE-ET and
-PicoRV32 blocks it covers.
+Two simulators run these certificates:
 
-The Futamura-projection simulator specializes a Lean interpreter of hardware
-designs to one certificate. What is left is a residual program for that design
-alone, and each cycle it runs is proved equal to the certificate's reference
-semantics, `interpretDesign`. The specializer and that step theorem are proved
-once for all designs. By default, a run also compares every cycle with
-`interpretDesign`. See
-[`pass/lean/specialization/README.md`](pass/lean/specialization/README.md)
-for how to build and run it, how it works, its trust boundary, the CVA6,
-CORE-ET and PicoRV32 blocks it covers, and two performance examples.
+- **Translation validation**
+  ([`pass/lean/Translation_Validation/README.md`](pass/lean/Translation_Validation/README.md)).
+  - It turns each certificate into one straight-line Lean function, a compiled
+    simulator.
+  - It checks that function against the semantics that LiveHD's Lean compiler
+    is proved correct for. The check is a sampled differential test by
+    default, and a kernel-checked theorem with `--prove`.
+  - Its README covers how to build and run it, its trust boundary, and the
+    CVA6, CORE-ET and PicoRV32 blocks it covers.
+- **Futamura projection**
+  ([`pass/lean/specialization/README.md`](pass/lean/specialization/README.md)).
+  - It specializes a Lean interpreter of hardware designs to one certificate.
+    What is left is a residual program for that design alone.
+  - Each cycle the residual runs is proved equal to the certificate's
+    reference semantics, `interpretDesign`. The specializer and that step
+    theorem are proved once for all designs. By default, a run also compares
+    every cycle with `interpretDesign`.
+  - Its README covers how to build and run it, how it works, its trust
+    boundary, the CVA6, CORE-ET and PicoRV32 blocks it covers, and two
+    performance examples.

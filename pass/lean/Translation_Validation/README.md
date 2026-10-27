@@ -1,4 +1,4 @@
-# Translation_Validation — the translation-validation simulator (Direction 3)
+# Translation_Validation — the translation-validation simulator
 
 For each hardware design, this simulator turns the design's certificate into
 one straight-line Lean function: a compiled simulator with no interpreter loop
