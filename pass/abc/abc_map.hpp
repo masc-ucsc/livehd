@@ -34,12 +34,11 @@ struct Map_options : synth::Driver_options {
   // bit-blasted AIG directly. Empty or large_ge==0 disables the tier; an
   // explicit global/per-region flow wins.
   std::string large_flow;
-  // The size tier's flow is a user-visible command list, so by default a region it maps
-  // is treated like any custom flow: it "may reshape latches", and clock-gated, derived-clock
-  // and asynchronously reset registers stay native flops (unplaceable). The tool's own default
-  // large_flow only strashes and maps, which keeps every latch: true treats a region mapped by
-  // the tier's flow like the built-in flow (a user-supplied large_flow keeps the old rule).
-  bool        large_flow_latches = false;
+  // The tool's own default large_flow (the size tier) only strashes and maps, which keeps every latch, so by default a
+  // region it maps is treated like the built-in flow: clock-gated, derived-clock and asynchronously reset registers map to
+  // cells (clear/preset flops for async resets) instead of staying native, unplaceable flops. false keeps the old rule that
+  // the tier's flow is a user command list that "may reshape latches"; a user-supplied large_flow always keeps that rule.
+  bool        large_flow_latches = true;
   std::string load;  // {L} substitution
   // A delay target is a BUDGET, not "go as fast as you can". ABC's `&nf -D` is
   // silently IGNORED by the mapper (giaNf reads only `MapDelayTarget`, which
