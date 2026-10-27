@@ -127,6 +127,13 @@ std::vector<Eligibility> physical_eligibility(const usyn::Stateful_region& regio
     if (row.reason != Reason::candidate || !s.reset.present || s.reset.constant) {
       continue;
     }
+    // A folded register's synchronous reset acts only on the gate's enabled
+    // edges, which an RST pin sampled on the root clock does not
+    // (synth::fold_gated_clocks already keeps such a register on its gate).
+    if (row.clock_root && !s.async_reset) {
+      row.reason = Reason::gated_sync_reset;
+      continue;
+    }
     const auto bit = source.bits[region.state_bits[i]].bit;
     if (s.reset.bits != 1
         || (s.initial.present && (!s.initial.constant || s.initial.value.unknown_bit_test(static_cast<int>(bit))))) {

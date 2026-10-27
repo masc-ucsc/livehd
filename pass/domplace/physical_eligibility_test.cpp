@@ -224,6 +224,35 @@ TEST(PhysicalEligibility, ScopeBarriersAndMalformedCorrespondence) {
   EXPECT_TRUE(physical_eligibility(unfrozen, f.names, "clk").empty());
 }
 
+TEST(PhysicalEligibility, FoldedRegistersKeepOnlyAsynchronousResets) {
+  // A folded register's synchronous reset acts only on enabled edges of its
+  // gate: an RST pin on the root clock would reset with the gate closed.
+  Fixture f;
+  for (const bool async : {false, true}) {
+    f.add(Fixture::gated_output, [async](auto& s) {
+      s.reset.present = true;
+      s.reset.bits    = 1;
+      s.async_reset   = async;
+    });
+  }
+  f.region.source.controls.push_back({1, synth::State_control_kind::async_reset, {4}});
+  std::vector<usyn::Physical_hint> hints(2);
+  for (auto& hint : hints) {
+    hint.code        = "fold";
+    hint.root_input  = 0;
+    hint.gclk_input  = 2;
+    hint.reset_input = 3;
+  }
+  const auto rows = physical_eligibility(f.region, f.names, "clk", hints);
+  ASSERT_EQ(rows.size(), 2);
+  EXPECT_EQ(rows[0].reason, Reason::gated_sync_reset);
+  EXPECT_FALSE(rows[0].reset);
+  EXPECT_EQ(rows[1].reason, Reason::candidate);
+  ASSERT_TRUE(rows[1].reset);
+  EXPECT_TRUE(rows[1].reset->async);
+  EXPECT_EQ(reason_code(Reason::gated_sync_reset), "gated-sync-reset");
+}
+
 TEST(ReasonCodes, SpellingsAreStableAndOnlyDominoCodesConvert) {
   EXPECT_EQ(reason_code(Reason::candidate), "candidate");
   EXPECT_EQ(reason_code(Reason::async_reset), "async-reset");
