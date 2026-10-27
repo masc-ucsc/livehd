@@ -45,13 +45,15 @@ LEAN_DIR = ROOT / "formal/lean"
 # old fixture fails to typecheck against the current library with exactly that
 # arity mismatch.
 #
-# The path and the module name are inputs now, with a project-local default.
-# The string-matching cases below keep their own literal module name -- they
-# parse gate lines and never touch Lean -- so only the real-Lean legs depend on
-# this, and they SKIP, reported as skips rather than passes, when it is absent.
+# The path and the module name are inputs now. The default is a tracked,
+# post-clock certificate in tests/fixtures/, which the three D3 controls that
+# need a real certificate share. The string-matching cases below keep their own
+# literal module name -- they parse gate lines and never touch Lean -- so only
+# the real-Lean legs depend on this, and they SKIP, reported as skips rather
+# than passes, when the certificate is absent.
 CERT = pathlib.Path(os.environ.get(
     "D3_PROOF_TEST_CERT",
-    str(ROOT / "generated/master_port/d3_pilot/certs/tiny_sync_ram_Lgraph.lean")))
+    str(ROOT / "pass/lean/Translation_Validation/tests/fixtures/tiny_sync_ram_Lgraph.lean")))
 CERT_MODULE = os.environ.get("D3_PROOF_TEST_MODULE", "tiny_sync_ram")
 # The reifier the end-to-end leg builds its probe with. `legacy` is
 # `make_proof_probe`'s default and is what the pinned test used, but
