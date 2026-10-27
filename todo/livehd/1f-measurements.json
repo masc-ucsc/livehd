@@ -49723,7 +49723,85 @@
         "profile_finding": "Final samples reach serialize_parasitics after final RC estimation and control classification; reduce final live allocations. CPU profile does not by itself attribute retained heap bytes."
       },
       "remaining_examples": "Minimax STA14.628503s/42.362660s exceeds10%; GP700main/800total exceeds600. Larger scaling, HPWL and J acceptance remain open.",
-      "artifacts": "/home/renau/projs/.agent-artifacts/1f-memory-v58"
+      "artifacts": "/home/renau/projs/.agent-artifacts/1f-memory-v58",
+      "coral_completion": {
+        "paths": [
+          "/home/renau/projs/.agent-artifacts/1f-memory-v58/paired-home/merged_v58_recovered_upstream/coralnpu",
+          "/home/renau/projs/.agent-artifacts/1f-memory-v58/paired-home/merged_v58_recovered_candidate/coralnpu"
+        ],
+        "settings_and_sdc_identical": true,
+        "def_sha256": [
+          "7554f3716ab6ee1e1f9e4818c383bb7a843daf3fd210630983d072469353459e",
+          "7554f3716ab6ee1e1f9e4818c383bb7a843daf3fd210630983d072469353459e"
+        ],
+        "def_identical": true,
+        "independent_scores_identical": true,
+        "placement_seconds": [
+          759.846505,
+          739.4784659999999
+        ],
+        "placement_time_ratio": 0.9731945348620112,
+        "within_1_5_time": true,
+        "independent_wns_ps": [
+          -14703.633037,
+          -14703.633037
+        ],
+        "hpwl_um": [
+          3778952.953,
+          3778952.953
+        ],
+        "peak_rss_mib": [
+          8547.3359375,
+          8499.44140625
+        ],
+        "full_flow_wall_s": [
+          909.69,
+          889.42
+        ],
+        "full_flow_cpu_s": [
+          909.38,
+          889.15
+        ],
+        "internal_final_wns": -15728.4844,
+        "internal_time_unit": "ps",
+        "physical_timing": {
+          "worker_threads": 1,
+          "evaluations": 17,
+          "builds": 1,
+          "ranking_evaluations": 12,
+          "ranking_seconds": 85.49571891100001,
+          "detailed_evaluations": 5,
+          "repowered_gates": 23378,
+          "inserted_gates": 498,
+          "removed_gates": 1490,
+          "updated_nets": 2071414,
+          "update_calls": 22,
+          "seconds": 198.485478686,
+          "validation_seconds": 5.006988853,
+          "reconcile_seconds": 56.669247002999995,
+          "exclusions_seconds": 0.773244751,
+          "propagation_seconds": 116.685694854,
+          "feedback_seconds": 18.945648006999996
+        },
+        "sta_fraction": 0.2684127906518376,
+        "growth_budget": {
+          "basis": "synthesized_standard_cells",
+          "fraction": 0.03,
+          "baseline_cells": 159338,
+          "baseline_area_um2": 19093.676400001503,
+          "cells": 160837,
+          "area_um2": 19666.48085999512,
+          "within_budget": true,
+          "rejected_proposals": 11284
+        },
+        "gp": {
+          "gp_total_iterations": 1140,
+          "gp_iterations": 1040,
+          "gp_converged": true,
+          "gp_stop_reason": "converged",
+          "gp_overflow": 0.0363638432
+        }
+      }
     },
     "liberty_memory_inventory_reuse_v58": {
       "status": "Implemented and40focused tests pass; output-drive parity on actual lfsr and coralnpu libraries; full placement of this followup not yet measured.",
@@ -49800,7 +49878,7 @@
       "artifacts": "/home/renau/projs/.agent-artifacts/1f-memory-v58"
     },
     "final_rc_lifetimes_v59": {
-      "status": "Implemented;160optimized tests pass; serialization byte parity and standalone RSS measurements pass. Fresh full placement/memory validation pending; A-J remains open.",
+      "status": "Four matched small/coral outputs and QoR identical within1.5x. CNN completes below1h/16GB. Gemmini andpartition_c fail16GB. Full A-J remains open.",
       "implementation": "Complete the placement frame and destroy solver/report temporaries before persisting RC, while preserving persisted state before the stage callback. Skip persistence/callbacks for the same seed/color-only modes. Scope control classification and avoid the unused full Options copy during normal final RC. Count exact JSON bytes before allocating its single output string.",
       "tests": [
         {
@@ -49867,7 +49945,419 @@
           "candidate_median_peak_rss_kib": 548414.0
         }
       ],
-      "artifacts": "/home/renau/projs/.agent-artifacts/1f-memory-v59"
+      "artifacts": "/home/renau/projs/.agent-artifacts/1f-memory-v59",
+      "whole_flow": {
+        "scope": "Fresh v59 matched validation; single samples, concurrent independent jobs, no repeatable speedup claim",
+        "candidate": "2a449cf49a93229de9016488b24f9adaf242b130",
+        "control": "63b1f5f7518eca45fad876c17d787317bf9975e7",
+        "completed": {
+          "lfsr": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v59/paired-home/v59_control63b/lfsr",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v59/paired-home/v59_candidate_retry/lfsr"
+            ],
+            "settings_and_sdc_identical": true,
+            "def_sha256": [
+              "7ddab5966f7830e7de46749e7d2e6bf976ff0b579bff838434a6ca111050c7e9",
+              "7ddab5966f7830e7de46749e7d2e6bf976ff0b579bff838434a6ca111050c7e9"
+            ],
+            "def_identical": true,
+            "independent_scores_identical": true,
+            "placement_seconds": [
+              2.0318430000000003,
+              2.034465
+            ],
+            "placement_time_ratio": 1.0012904540360645,
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -60.862128,
+              -60.862128
+            ],
+            "hpwl_um": [
+              177.29,
+              177.29
+            ],
+            "peak_rss_mib": [
+              341.6875,
+              327.96875
+            ],
+            "internal_final_wns": -59.019165,
+            "internal_time_unit": "ps",
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 11,
+              "builds": 1,
+              "ranking_evaluations": 8,
+              "ranking_seconds": 0.6648157849999999,
+              "detailed_evaluations": 3,
+              "repowered_gates": 8,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 827,
+              "update_calls": 14,
+              "seconds": 0.6872527029999999,
+              "validation_seconds": 0.001228212,
+              "reconcile_seconds": 0.6609578639999998,
+              "exclusions_seconds": 0.000116261,
+              "propagation_seconds": 0.022175813000000003,
+              "feedback_seconds": 0.0026587229999999983
+            },
+            "sta_fraction": 0.3378051246888002,
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 136,
+              "baseline_area_um2": 18.910260000000008,
+              "cells": 134,
+              "area_um2": 18.618660000000013,
+              "within_budget": true,
+              "rejected_proposals": 0
+            },
+            "gp": {
+              "gp_total_iterations": 600,
+              "gp_iterations": 500,
+              "gp_converged": false,
+              "gp_stop_reason": "density_infeasible",
+              "gp_overflow": 0.350298305
+            }
+          },
+          "minimax": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v59/paired-home/v59_control63b/minimax",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v59/paired-home/v59_candidate_retry/minimax"
+            ],
+            "settings_and_sdc_identical": true,
+            "def_sha256": [
+              "7896e45d8aba5c1ab4be865f1231f763f6568057f8a695dfcc261240cca5dec0",
+              "7896e45d8aba5c1ab4be865f1231f763f6568057f8a695dfcc261240cca5dec0"
+            ],
+            "def_identical": true,
+            "independent_scores_identical": true,
+            "placement_seconds": [
+              39.808229,
+              38.738232
+            ],
+            "placement_time_ratio": 0.9731212106923924,
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -913.478075,
+              -913.478075
+            ],
+            "hpwl_um": [
+              46555.571,
+              46555.571
+            ],
+            "peak_rss_mib": [
+              991.51171875,
+              995.484375
+            ],
+            "internal_final_wns": -918.570801,
+            "internal_time_unit": "ps",
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 14,
+              "builds": 1,
+              "ranking_evaluations": 8,
+              "ranking_seconds": 3.923958217,
+              "detailed_evaluations": 6,
+              "repowered_gates": 1264,
+              "inserted_gates": 342,
+              "removed_gates": 1,
+              "updated_nets": 103574,
+              "update_calls": 20,
+              "seconds": 13.483460995,
+              "validation_seconds": 0.32259595399999996,
+              "reconcile_seconds": 3.327738123,
+              "exclusions_seconds": 0.075500615,
+              "propagation_seconds": 8.272927828,
+              "feedback_seconds": 1.4683699159999994
+            },
+            "sta_fraction": 0.3480659880141148,
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 16505,
+              "baseline_area_um2": 2025.453599999931,
+              "cells": 16172,
+              "area_um2": 2086.0626599996044,
+              "within_budget": true,
+              "rejected_proposals": 453
+            },
+            "gp": {
+              "gp_total_iterations": 800,
+              "gp_iterations": 700,
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0796708268
+            }
+          },
+          "NVDLA__partition_m": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v59/paired-home/v59_control63b/NVDLA__partition_m",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v59/paired-home/v59_candidate_retry/NVDLA__partition_m"
+            ],
+            "settings_and_sdc_identical": true,
+            "def_sha256": [
+              "5a442f329621baf84e6a481b4d6b9596e318634233ca1ec22d939a1aeb73de66",
+              "5a442f329621baf84e6a481b4d6b9596e318634233ca1ec22d939a1aeb73de66"
+            ],
+            "def_identical": true,
+            "independent_scores_identical": true,
+            "placement_seconds": [
+              36.573024,
+              35.910976999999995
+            ],
+            "placement_time_ratio": 0.9818979420460282,
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -692.389648,
+              -692.389648
+            ],
+            "hpwl_um": [
+              90620.478,
+              90620.478
+            ],
+            "peak_rss_mib": [
+              1342.1875,
+              1324.3828125
+            ],
+            "internal_final_wns": -692.494324,
+            "internal_time_unit": "ps",
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 11,
+              "builds": 1,
+              "ranking_evaluations": 8,
+              "ranking_seconds": 5.76350203,
+              "detailed_evaluations": 3,
+              "repowered_gates": 4144,
+              "inserted_gates": 0,
+              "removed_gates": 0,
+              "updated_nets": 139980,
+              "update_calls": 14,
+              "seconds": 12.288465337,
+              "validation_seconds": 0.401285876,
+              "reconcile_seconds": 3.5078147139999993,
+              "exclusions_seconds": 0.050524247,
+              "propagation_seconds": 7.274698053000001,
+              "feedback_seconds": 1.0276398849999993
+            },
+            "sta_fraction": 0.342192453772561,
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 20824,
+              "baseline_area_um2": 2642.391720000011,
+              "cells": 20434,
+              "area_um2": 2721.663180000068,
+              "within_budget": true,
+              "rejected_proposals": 3597
+            },
+            "gp": {
+              "gp_total_iterations": 800,
+              "gp_iterations": 700,
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0820293505
+            }
+          },
+          "coralnpu": {
+            "paths": [
+              "/home/renau/projs/.agent-artifacts/1f-memory-v58/paired-home/merged_v58_recovered_candidate/coralnpu",
+              "/home/renau/projs/.agent-artifacts/1f-memory-v59/paired-home/v59_candidate_retry/coralnpu"
+            ],
+            "settings_and_sdc_identical": true,
+            "def_sha256": [
+              "7554f3716ab6ee1e1f9e4818c383bb7a843daf3fd210630983d072469353459e",
+              "7554f3716ab6ee1e1f9e4818c383bb7a843daf3fd210630983d072469353459e"
+            ],
+            "def_identical": true,
+            "independent_scores_identical": true,
+            "placement_seconds": [
+              739.4784659999999,
+              769.953765
+            ],
+            "placement_time_ratio": 1.0412118816181999,
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -14703.633037,
+              -14703.633037
+            ],
+            "hpwl_um": [
+              3778952.953,
+              3778952.953
+            ],
+            "peak_rss_mib": [
+              8499.44140625,
+              8416.37890625
+            ],
+            "internal_final_wns": -15728.4844,
+            "internal_time_unit": "ps",
+            "physical_timing": {
+              "worker_threads": 1,
+              "evaluations": 17,
+              "builds": 1,
+              "ranking_evaluations": 12,
+              "ranking_seconds": 88.863492183,
+              "detailed_evaluations": 5,
+              "repowered_gates": 23378,
+              "inserted_gates": 498,
+              "removed_gates": 1490,
+              "updated_nets": 2071414,
+              "update_calls": 22,
+              "seconds": 206.689484036,
+              "validation_seconds": 5.695767504000001,
+              "reconcile_seconds": 59.39179699799999,
+              "exclusions_seconds": 0.8306297770000001,
+              "propagation_seconds": 119.98256705200002,
+              "feedback_seconds": 20.37309751899998
+            },
+            "sta_fraction": 0.2684440201886668,
+            "growth_budget": {
+              "basis": "synthesized_standard_cells",
+              "fraction": 0.03,
+              "baseline_cells": 159338,
+              "baseline_area_um2": 19093.676400001503,
+              "cells": 160837,
+              "area_um2": 19666.48085999512,
+              "within_budget": true,
+              "rejected_proposals": 11284
+            },
+            "gp": {
+              "gp_total_iterations": 1140,
+              "gp_iterations": 1040,
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0363638432
+            }
+          }
+        },
+        "pending": []
+      },
+      "gemmini": {
+        "status": "guard-stopped",
+        "B_wall_s": 522.0234171000775,
+        "tree_peak_rss_kib": 16799000,
+        "diagnostic_guard_gib": 16,
+        "acceptance_bytes": 16000000000,
+        "scope": "Fresh SB run, same common production defaults; memory acceptance fails."
+      },
+      "cnn": {
+        "status": "ok",
+        "wall_s": 2385.888115378795,
+        "cpu_s": 2385.42,
+        "tree_peak_rss_kib": 12409012,
+        "process_peak_rss_kib": 12461456,
+        "stop_reason": null,
+        "score": {
+          "hpwl_um": 6799057.064999,
+          "hpwl_all_nets_um": 11530258.813999,
+          "measured_nets": 259175,
+          "excluded_nets": 3021,
+          "setup_wns_ps": -8857.251856,
+          "setup_tns_ps": -47501806.155829,
+          "hold_wns_ps": 3.94327,
+          "hold_tns_ps": 0.0,
+          "instances": 261017,
+          "logical_cells": 261017,
+          "physical_cells": 0,
+          "buffers": 12135,
+          "buffer_area_um2": 1643.1806,
+          "macros": 65,
+          "instance_area_um2": 1719114.7072,
+          "macro_area_um2": 1683386.0381,
+          "die_um": [
+            0.0,
+            0.0,
+            2392.794,
+            2393.01
+          ],
+          "core_um": [
+            0.0,
+            0.0,
+            2392.794,
+            2393.01
+          ],
+          "scoring_seconds": 94.414,
+          "power_mw": 4.41,
+          "reset_ports": []
+        },
+        "scope": "Fresh SB census with common defaults and100ps. Historical OpenROAD reference is not a matched100ps comparison."
+      },
+      "partition_c": {
+        "status": "guard-stopped",
+        "wall_s": 2137.1045796130784,
+        "cpu_s": null,
+        "tree_peak_rss_kib": 16979676,
+        "process_peak_rss_kib": null,
+        "stop_reason": "process-tree memory limit",
+        "score": null,
+        "scope": "Fresh SB census with common defaults and100ps. Historical OpenROAD reference is not a matched100ps comparison."
+      }
+    },
+    "whatif_rc_restore_v60": {
+      "status": "Committed f1457208e; regression reproduced ~546ps stale slack before fix;116 focused/consumer tests pass. Full-placement validation pending.",
+      "implementation": "Restore queued what-if wire RC before unchanged-net reconciliation, without an extra propagation. Drop the old journal/index and owning RC snapshot; public proxy remains stable.",
+      "tests": {
+        "pass/opentimer/physical_session_test": {
+          "tests": "20",
+          "failures": "0",
+          "disabled": "0",
+          "errors": "0",
+          "time": "0.612",
+          "timestamp": "2026-10-27T19:09:19.772",
+          "name": "AllTests"
+        },
+        "pass/place/repair_test": {
+          "tests": "71",
+          "failures": "0",
+          "disabled": "0",
+          "errors": "0",
+          "time": "3.219",
+          "timestamp": "2026-10-27T19:09:19.928",
+          "name": "AllTests"
+        },
+        "pass/place/signal_router_test": {
+          "tests": "25",
+          "failures": "0",
+          "disabled": "0",
+          "errors": "0",
+          "time": "0.161",
+          "timestamp": "2026-10-27T19:13:15.622",
+          "name": "AllTests"
+        }
+      },
+      "routing_integration": "08c50ae18 adds explicit search_detours for complete preroute materialization, preserving its widened-via acceptance transaction while keeping default dpin queries direct-only.",
+      "artifacts": "/home/renau/projs/.agent-artifacts/1f-memory-v60",
+      "memory_scope": "Weak ownership regression proves obsolete RC snapshot release. No whole-design peak-memory reduction claim. Gemmini heap profiling is diagnostic with a different allocator."
+    },
+    "routing_bitmap_v60": {
+      "status": "Optional occupancy bitmap implemented and tested; automatic activation outside benchmark not yet measured.",
+      "scope": "Coralnpu fixture with real platform tracks, noPG,1-8sinks,20000draws per paired repeat,3pairs,CPU12, unchanged route API budgets.",
+      "results": {
+        "scope": "Three alternating paired runs on CPU12, same frozen binary, 20000 draws each seed17,1-8sinks. Bitmap36DBU vs disabled; no PG wiring or route commits.",
+        "paired_attempts": 60000,
+        "all_outcomes_reasons_counts_geometry_equal": true,
+        "plain_median": {
+          "attempts_per_second": 15745.815179589325,
+          "successful_routes_per_second": 538.5068791419549,
+          "route_seconds": 1.2701787600000034,
+          "guard_seconds": 12.592763244,
+          "setup_seconds": 14.288378278,
+          "bitmap_seconds": 2e-08,
+          "bitmap_bytes": 0
+        },
+        "bitmap_median": {
+          "attempts_per_second": 16907.408894883636,
+          "successful_routes_per_second": 578.2333842050203,
+          "route_seconds": 1.1829133680000024,
+          "guard_seconds": 11.930699265,
+          "setup_seconds": 13.761361284,
+          "bitmap_seconds": 0.077278506,
+          "bitmap_bytes": 72710560
+        }
+      },
+      "artifacts": "/home/renau/projs/.agent-artifacts/route-dpin-v3"
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",
