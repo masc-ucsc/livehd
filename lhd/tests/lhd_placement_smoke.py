@@ -112,10 +112,21 @@ disabled = run('disabled', ['--set', 'synth.place=true', '--set', 'lhd.increment
 assert not disabled['qor']['place']['incremental']['enabled']
 assert not disabled['qor']['place'].get('reused_final_state', False)
 # The remaining optimization legs exercise the native final legalizer and outer recovery loop.
+# A met SDC skips the timing rounds (lhd_placement_timing_defaults_smoke), so
+# this leg leaves a 0.1 ns input budget the 4-bit cone cannot meet.
+met_sdc = sdc.read_text()
+sdc.write_text(met_sdc.replace('set_input_delay -clock virtual 0 ', 'set_input_delay -clock virtual 9.9 '))
 timed = run('timing_driven', ['--set', 'synth.place=true',
                             '--set', 'synth.place.timing_driven=true', '--set', 'synth.place.timing_rounds=2'])
-assert timed['qor']['place']['legal'] and len(timed['qor']['place']['timing_driven']['rounds']) == 2
+sdc.write_text(met_sdc)
+assert timed['qor']['place']['legal'], timed['qor']['place']
 td = timed['qor']['place']['timing_driven']
+assert not td['skipped_setup_met'] and 1 <= len(td['rounds']) <= 2, td
+# Setup stays violated, so the loop ends early only on a geometrically
+# exhausted round (unconverged GP or HPWL past its 3% bound) or the shared
+# detailed-timing trial budget.
+assert (len(td['rounds']) == 2 or td['rounds'][-1]['stopped_unconverged']
+        or td['timing_budget_exhausted']), td['rounds']
 assert td['initial_timing_source'] == 'post_synthesis_zero_wire' and max(td['initial_weights'].values()) > 1, td
 assert 'pass.place.post_synth_timing' in [p['name'] for p in timed['phases']]
 
