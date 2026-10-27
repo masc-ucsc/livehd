@@ -2182,25 +2182,48 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
 
   // OpenTimer logs and skips a connect_pin whose pin/net is absent, but does
   // not return an error to its caller. Never publish QoR from such a partial
-  // graph: every Liberty-cell input in a mapped netlist must have a net.
-  size_t                   unconnected = 0;
-  std::vector<std::string> examples;
+  // graph. A physical import can explicitly preserve open input terminals;
+  // those are allowed only while the current graph also leaves them open.
+  std::set<std::string> unconnected;
   for (const auto& [name, pin] : timer.pins()) {
     if (pin.gate() != nullptr && pin.is_input() && pin.net() == nullptr) {
-      ++unconnected;
-      if (examples.size() < 4) {
-        examples.push_back(name);
+      unconnected.insert(name);
+    }
+  }
+  if (!unconnected.empty()) {
+    for (const auto& node : leaf_nodes(g)) {
+      const auto open = node.base_node().attr(livehd::attrs::physical_open_inputs);
+      if (!open.has() || type_op_of(node) != Ntype_op::Sub) {
+        continue;
+      }
+      const auto physical = physical_instances_.find(std::string(node.get_name()));
+      const auto instance = physical != physical_instances_.end() ? physical->second : inst_of(node, hier_mode_);
+      absl::flat_hash_set<std::string> connected;
+      // Include the node-as-pin input at port zero, just as build_circuit does.
+      for (const auto& pin : node.inp_sorted_pins()) {
+        if (!pin.get_driver_pins().empty()) {
+          connected.insert(sink_pin_name_of(node, pin));
+        }
+      }
+      for (const auto& name : open.get()) {
+        if (!connected.contains(name)) {
+          unconnected.erase(instance + ":" + name);
+        }
       }
     }
   }
-  if (unconnected != 0) {
+  if (!unconnected.empty()) {
     std::string sample;
-    for (const auto& name : examples) {
+    size_t      examples = 0;
+    for (const auto& name : unconnected) {
       sample += sample.empty() ? name : std::format(", {}", name);
+      if (++examples == 4) {
+        break;
+      }
     }
     livehd::diag::err("pass.opentimer", "unconnected-pin", "internal")
         .msg("pass.opentimer built an incomplete timing graph: {} Liberty input pin(s) are unconnected (first: {})",
-             unconnected,
+             unconnected.size(),
              sample)
         .fatal();
     return;
@@ -2884,17 +2907,40 @@ std::string Pass_opentimer::cache_key(const std::shared_ptr<hhds::Graph>& g) con
     cuts_hash = livehd::hash_util::fnv1a64_u64(pin.size(), cuts_hash);
     cuts_hash = livehd::hash_util::fnv1a64(pin, cuts_hash);
   }
-  return std::format("{:016x}{:016x}{:016x}:load={:.9g}:critical={}:percent={:.9g}:targets={}:nodes={}:physical={}:cuts={:016x}",
-                     d.h0,
-                     d.h1,
-                     env,
-                     io_load_ff_,
-                     critical_,
-                     critical_percent_,
-                     targets_text_,
-                     annotation_identity(g),
-                     physical_rc_ ? physical_rc_->identity : std::string{},
-                     cuts_hash);
+  // The functional digest ignores physical open-input intent. A cached valid
+  // import must not hide a missing-connection error after that intent changes.
+  std::vector<std::tuple<std::string, uint64_t, std::string>> open_inputs;
+  for (const auto& def : g->definitions().graphs()) {
+    for (const auto node : def->body().nodes()) {
+      if (const auto open = node.attr(livehd::attrs::physical_open_inputs); open.has()) {
+        for (const auto& pin : open.get()) {
+          open_inputs.emplace_back(def->get_name(), node.get_debug_nid(), pin);
+        }
+      }
+    }
+  }
+  std::sort(open_inputs.begin(), open_inputs.end());
+  uint64_t open_hash = livehd::hash_util::kFnv1a64_offset;
+  for (const auto& [definition, node, pin] : open_inputs) {
+    open_hash = livehd::hash_util::fnv1a64_u64(definition.size(), open_hash);
+    open_hash = livehd::hash_util::fnv1a64(definition, open_hash);
+    open_hash = livehd::hash_util::fnv1a64_u64(node, open_hash);
+    open_hash = livehd::hash_util::fnv1a64_u64(pin.size(), open_hash);
+    open_hash = livehd::hash_util::fnv1a64(pin, open_hash);
+  }
+  return std::format(
+      "{:016x}{:016x}{:016x}:load={:.9g}:critical={}:percent={:.9g}:targets={}:nodes={}:physical={}:cuts={:016x}:open={:016x}",
+      d.h0,
+      d.h1,
+      env,
+      io_load_ff_,
+      critical_,
+      critical_percent_,
+      targets_text_,
+      annotation_identity(g),
+      physical_rc_ ? physical_rc_->identity : std::string{},
+      cuts_hash,
+      open_hash);
 }
 
 void Pass_opentimer::replay(const livehd::opentimer::Sta_record& rec) {

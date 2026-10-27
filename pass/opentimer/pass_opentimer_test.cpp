@@ -10,6 +10,7 @@
 
 #include "attrs.hpp"
 #include "gtest/gtest.h"
+#include "inou/lefdef/mapped_graph.hpp"
 #include "node_util.hpp"
 #include "rapidjson/document.h"
 
@@ -34,6 +35,8 @@ public:
   explicit Circuit_probe(const Eprp_var& var) : Pass_opentimer(var) { timer.set_num_threads(1); }
   using Pass_opentimer::apply_case_analysis;
   using Pass_opentimer::build_circuit;
+  using Pass_opentimer::cache_key;
+  using Pass_opentimer::compute_timing;
   using Pass_opentimer::timer;
 };
 class SdcClock : public ::testing::Test {
@@ -54,6 +57,70 @@ protected:
     return path;
   }
 };
+TEST_F(SdcClock, ImportedOpenInputsAreAllowedButLostConnectionsStillFail) {
+  const auto path = directory + "/macro.lib";
+  std::ofstream(path) << R"lib(library(macros) {
+    time_unit : "1ps"; capacitive_load_unit(1,ff);
+    cell(MACRO) {
+      area : 1;
+      pin(A) { direction : input; capacitance : 1; }
+      pin("MASK[0]") { direction : input; capacitance : 1; }
+      pin("MASK[1]") { direction : input; capacitance : 1; }
+      pin(Y) { direction : output; function : "A";
+        timing() { related_pin : "A"; timing_sense : positive_unate;
+          cell_rise(scalar) { values("10"); } cell_fall(scalar) { values("10"); }
+          rise_transition(scalar) { values("1"); } fall_transition(scalar) { values("1"); }
+        }
+      }
+    }
+  })lib";
+  var.dict["files"] = path;
+  var.set_stage_labels(var.dict);
+  livehd::physical::Technology tech;
+  for (const auto* name : {"A", "MASK[0]", "MASK[1]"}) {
+    tech.macros["MACRO"].pins[name].direction = "INPUT";
+  }
+  tech.macros["MACRO"].pins["Y"].direction = "OUTPUT";
+  livehd::physical::Floorplan fp;
+  fp.design = "top";
+  fp.components.push_back({"macro", "MACRO", {}});
+  livehd::physical::Terminal input, output;
+  input.name       = "a";
+  input.direction  = "INPUT";
+  output.name      = "y";
+  output.direction = "OUTPUT";
+  fp.terminals     = {input, output};
+  fp.nets          = {
+      { "in", {{"PIN", "a"}, {"macro", "A"}}},
+      {"out", {{"macro", "Y"}, {"PIN", "y"}}}
+  };
+  hhds::GraphLibrary library;
+  const auto         graph    = livehd::physical::mapped_graph(library, fp, tech);
+  const auto         node     = graph->get_output_pin("y").get_driver_pins().front().get_master_node();
+  const auto         instance = std::string(node.get_name()) + "__n" + std::to_string(node.get_debug_nid());
+  Circuit_probe      probe(var);
+  probe.build_circuit(graph);
+  EXPECT_NO_THROW(probe.compute_timing(graph));
+  // These remain electrically open, never silently tied to a constant.
+  ASSERT_EQ(probe.timer.pins().at(instance + ":MASK[0]").net(), nullptr);
+  ASSERT_EQ(probe.timer.pins().at(instance + ":MASK[1]").net(), nullptr);
+  // A lost connection on an input that DEF did connect must remain an error.
+  const auto wire = probe.timer.pins().at(instance + ":A").net()->name();
+  probe.timer.disconnect_pin(instance + ":A");
+  EXPECT_THROW(probe.compute_timing(graph), std::runtime_error);
+  // Even an erroneous open annotation cannot hide a timer connection missing
+  // from an input that the current graph still connects.
+  node.attr(livehd::attrs::physical_open_inputs).set({"A", "MASK[0]", "MASK[1]"});
+  EXPECT_THROW(probe.compute_timing(graph), std::runtime_error);
+  probe.timer.connect_pin(instance + ":A", wire);
+  EXPECT_NO_THROW(probe.compute_timing(graph));
+  // Re-evaluation must consult current intent, not an old cached whitelist.
+  const auto accepted_key = probe.cache_key(graph);
+  ASSERT_FALSE(accepted_key.empty());
+  node.attr(livehd::attrs::physical_open_inputs).set({"MASK[0]"});
+  EXPECT_NE(probe.cache_key(graph), accepted_key);
+  EXPECT_THROW(probe.compute_timing(graph), std::runtime_error);
+}
 TEST_F(SdcClock, ResolvesClockRelativeSetupAndHoldWithSeparateCornersAndTransitions) {
   Sdc_probe pass(var);
   pass.read_sdc(write(R"sdc(
