@@ -22,6 +22,26 @@ benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with th
 
 <h2 id="progress">Implementation progress</h2>
 
+<p>Review v51 narrows ordinary GP ranking input to graph, RC and cached
+control classification. It omits the unused pin-location map and postpones the
+weighting floorplan until after timing. Detailed callbacks and selected macro
+handoffs retain their maps. Temporary seed/cleanup graphs are released after
+placement makes its final independent copy, before that stage's GP/RC work.
+The original synthesis graph remains available for resynthesis. Five optimized
+suites pass, including source destruction, staged release timing, reset cuts and
+macro handoff regressions. Both production executables build. Review found no
+blocking issues; no public defaults or warning flags change.</p>
+<p>All four designs retain byte-identical DEFs and independent WNS, HPWL, cells
+and area with the same defaults, 100 ps clocks and reset false paths. Placement
+takes 1.942 s (lfsr), 38.851 s (minimax), 34.118 s (NVDLA/partition_m), 640.650 s (coralnpu), all within 1.5× of v49.
+Coral's full flow takes 786.16 s wall and 785.53 s CPU;
+peak RSS is 8,968 MiB versus 9,231 MiB.
+These single samples do not establish repeatable speedups. Evidence is in
+<code>runs.ranking_and_input_lifetimes_v51</code>.</p>
+<p>Gemmini still exceeds the 16 GiB guard (16,788,340 KiB
+after 203.2 s), before its first timing checkpoint completes.
+The original A–J acceptance requirements remain open.</p>
+
 <p>Review v49 removes full placement-view copies from ordinary GP timing
 checkpoints. A borrowed geometry view reads solver coordinates and existing
 connectivity; RC retains fractional pin positions while graph/DEF poses are

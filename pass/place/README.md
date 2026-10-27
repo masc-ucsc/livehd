@@ -178,13 +178,20 @@ on repair/ECO trials. `buffer_cleanup.jsonl` records removed and retained counts
 The synthesis host releases that cleanup graph once the zero-wire timing seed
 owns its flattened copy. The seed keeps RC in memory without serializing a second
 copy into graph attributes; completed placements still persist their RC for
-standalone timing and reload. Seed and cleanup libraries are released after
-placement accepts its own graph, before physical repair starts.
+standalone timing and reload. The synthesis host retires seed and cleanup
+libraries as soon as placement has made its last independent copy, before that
+stage's GP/RC work. Staged macro placement retains its input until the final
+cell stage copies it; the original synthesis netlist remains for resynthesis.
 Ordinary GP timing checkpoints borrow the current solver coordinates and the
 existing connectivity instead of copying the entire placement view. Exported
 graph/DEF poses remain rounded to DBU while RC keeps fractional pin positions.
 Legal timing snapshots still capture row orientations and rebuild pin offsets;
 returned RC and floorplan snapshots own their data.
+The lightweight ranking callback receives graph, RC and the current topology's
+control classification through `Ranking_view`. Ordinary GP ranking omits the
+unused pin-location map and builds the weighting floorplan after timing retires
+the preceding RC generation. Detailed callbacks and selected macro-GP handoffs
+retain pin-location data; reset/clock cuts follow the same classification.
 The imported-GP diagnostic exposes the same operation through
 `remove_synthesis_buffers=true`; its component-count check accounts for exactly
 those removals while retaining fixed-cell and master checks.

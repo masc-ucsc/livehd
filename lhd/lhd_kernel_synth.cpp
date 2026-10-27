@@ -1983,12 +1983,10 @@ void synth_command(Options& opts, Result& res) {
       const auto  timing_log     = next_log_path(opts, "pass.opentimer.incremental");
       const auto& timing_tech    = place_options.technology().lef;
       const bool  timing_profile = truthy(synth_set(opts, "place.timing_profile", "false"));
-      const auto  estimate = [&](const livehd::placement::Result& state, livehd::opentimer::Physical_session::Purpose purpose) {
-        Phase_timer   phase(res,
-                            purpose == livehd::opentimer::Physical_session::Purpose::ranking ? "pass.opentimer.ranking"
-                                                                                             : "pass.opentimer.incremental");
+      const auto  estimate       = [&](const livehd::placement::Ranking_view&       state,
+                                       livehd::opentimer::Physical_session::Purpose purpose) {
         Stdout_to_log redirect(timing_log);
-        const auto    controls = livehd::placement::prects_networks(timing_tech, state.floorplan, state.prects);
+        const auto&   controls = state.controls;
         const auto    before   = timing_session.statistics();
         auto          feedback = timing_session.evaluate(state.graph, state.parasitics, controls.timing_cuts, purpose);
         if (timing_profile) {
@@ -2009,9 +2007,12 @@ void synth_command(Options& opts, Result& res) {
         return livehd::placement::prects_data_timing(feedback, controls);
       };
       const auto evaluate = [&](const livehd::placement::Result& state) {
-        return estimate(state, livehd::opentimer::Physical_session::Purpose::detailed);
+        Phase_timer phase(res, "pass.opentimer.incremental");
+        const auto  controls = livehd::placement::prects_networks(timing_tech, state.floorplan, state.prects);
+        return estimate({state.graph, state.parasitics, controls}, livehd::opentimer::Physical_session::Purpose::detailed);
       };
-      const auto rank = [&](const livehd::placement::Result& state) {
+      const auto rank = [&](const livehd::placement::Ranking_view& state) {
+        Phase_timer phase(res, "pass.opentimer.ranking");
         return estimate(state, livehd::opentimer::Physical_session::Purpose::ranking);
       };
       // One invocation-wide budget for optional detailed trials, rather than a
@@ -2130,7 +2131,11 @@ void synth_command(Options& opts, Result& res) {
         // the full-design timer; no later stage reads that scratch graph.
         placement_input = seed.graph;
         prepared_libraries.clear();
-        const auto timing = rank(seed);
+        const auto timing = [&] {
+          Phase_timer ranking_phase(res, "pass.opentimer.ranking");
+          const auto  controls = livehd::placement::prects_networks(timing_tech, seed.floorplan, seed.prects);
+          return estimate({seed.graph, seed.parasitics, controls}, livehd::opentimer::Physical_session::Purpose::ranking);
+        }();
         const auto controls
             = livehd::placement::prects_networks(place_options.technology().lef, seed.floorplan, seed.prects, timing);
         const auto data_timing    = livehd::placement::prects_data_timing(timing, controls);
@@ -2157,7 +2162,13 @@ void synth_command(Options& opts, Result& res) {
         auto*         generation = &placed_library;
         for (unsigned attempt = 0;; ++attempt) {
           try {
-            placed = livehd::placement::place(*placement_input, *generation, place_options);
+            placed = livehd::placement::place(*placement_input, *generation, place_options, [&] {
+              // The last stage has copied all declarations and provenance. Do
+              // not carry the seed/cleanup graph through GP and its RC peaks.
+              placement_input.reset();
+              seed_library.reset();
+              prepared_libraries.clear();
+            });
             break;
           } catch (const livehd::placement::Placement_restart& restart) {
             if (attempt != 0) {

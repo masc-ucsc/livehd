@@ -1150,6 +1150,7 @@ TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegaliza
     bool     macro_complete = false, checked_final_weights = false;
     double   macro_weight       = 0;
     unsigned macro_timing_calls = 0;
+    unsigned source_releases    = 0;
     options.fp_evaluate         = [&](const Result& checkpoint) {
       if (!macro_complete) {
         ++macro_timing_calls;
@@ -1164,6 +1165,7 @@ TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegaliza
     };
     physical::Floorplan macro_frame;
     options.after_stage = [&](Placement_stage stage, const Result& result) {
+      EXPECT_EQ(source_releases, stage == Placement_stage::final ? 1U : 0U);
       if (stage == Placement_stage::final || (stage == Placement_stage::macro && legalize)) {
         EXPECT_NO_THROW(check_legality(physical::read_lef(options.lefs), result.floorplan));
       }
@@ -1204,7 +1206,8 @@ TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegaliza
       return false;
     };
     hhds::GraphLibrary  placed;
-    const auto          result = place(*graph, placed, options);
+    const auto          result = place(*graph, placed, options, [&] { ++source_releases; });
+    EXPECT_EQ(source_releases, 1U);
     rapidjson::Document final_qor;
     final_qor.Parse(result.qor.c_str());
     EXPECT_DOUBLE_EQ(final_qor["macro_filler_fraction"].GetDouble(), 0);
@@ -1523,7 +1526,7 @@ TEST(Placement, TechnologyClockPinsAreExcludedOnlyFromPlacementCost) {
   EXPECT_EQ(automatic.floorplan.nets, reset.floorplan.nets);
 }
 TEST(Placement, TimingCheckpointsCarryConnectivityForAutomaticResetCuts) {
-  for (unsigned mode = 0; mode < 4; ++mode) {
+  for (unsigned mode = 0; mode < 8; ++mode) {
     const bool         floorplan = mode & 1;
     hhds::GraphLibrary source, flat;
     auto               io = source.create_io("checkpoint_controls");
@@ -1605,14 +1608,17 @@ TEST(Placement, TimingCheckpointsCarryConnectivityForAutomaticResetCuts) {
     options.fp_resize                = false;
     options.fp_timing_interval = options.macro_timing_interval = 1;
     options.final_timing_start                                 = 0;  // Short fixture: exercise in-loop timing.
-    unsigned   calls = 0, floorplan_stages = 0;
-    const auto check = [&](const Result& state) {
-      EXPECT_EQ(state.floorplan.nets.size(), 5);
-      const auto controls = prects_networks(tech, state.floorplan, state.prects);
+    unsigned   calls = 0, ranking_calls = 0, floorplan_stages = 0;
+    const auto check_controls = [&](const Prects_networks& controls) {
       EXPECT_TRUE(controls.timing_cuts.contains("reset_stage:Q"));
       EXPECT_TRUE(controls.timing_cuts.contains("mix:B"));
       EXPECT_FALSE(controls.timing_cuts.contains("clk"));
       EXPECT_FALSE(controls.timing_cuts.contains("mix:A"));
+    };
+    const auto check = [&](const Result& state) {
+      EXPECT_EQ(state.floorplan.nets.size(), 5);
+      const auto controls = prects_networks(tech, state.floorplan, state.prects);
+      check_controls(controls);
       return controls;
     };
     options.fp_evaluate = [&](const Result& state) {
@@ -1624,6 +1630,18 @@ TEST(Placement, TimingCheckpointsCarryConnectivityForAutomaticResetCuts) {
       EXPECT_TRUE(timing.pins.at("reset_stage:CLK").clock);
       return prects_data_timing(timing, controls);
     };
+    if (mode & 4) {
+      options.gp_rank = [&](const Ranking_view& state) {
+        ++calls;
+        ++ranking_calls;
+        check_controls(state.controls);
+        auto timing = timer.evaluate(state.graph, state.parasitics, state.controls.timing_cuts);
+        EXPECT_TRUE(timing.pins.at("mix:A").arrival);
+        EXPECT_FALSE(timing.pins.at("mix:B").arrival);
+        EXPECT_TRUE(timing.pins.at("reset_stage:CLK").clock);
+        return prects_data_timing(timing, state.controls);
+      };
+    }
     options.after_stage = [&](Placement_stage stage, const Result& state) {
       check(state);
       floorplan_stages += stage == Placement_stage::floorplan;
@@ -1631,6 +1649,9 @@ TEST(Placement, TimingCheckpointsCarryConnectivityForAutomaticResetCuts) {
     };
     const auto result = place(*graph, flat, options);
     EXPECT_GT(calls, 0);
+    if (mode & 4) {
+      EXPECT_GT(ranking_calls, 0U);
+    }
     EXPECT_EQ(floorplan_stages, floorplan ? 1 : 0);
     EXPECT_EQ(result.floorplan.nets.size(), 5);
   }
@@ -5191,7 +5212,7 @@ TEST(Placement, MacroRankingUpdatesOnlyAtDensityMilestones) {
   options.macro_timing_interval               = 10;
   unsigned ranking_calls                      = 0;
   options.fp_evaluate                         = [](const Result&) { return Timing_feedback{}; };
-  options.gp_rank                             = [&](const Result&) {
+  options.gp_rank                             = [&](const Ranking_view&) {
     ++ranking_calls;
     Timing_feedback feedback;
     feedback.ranking_only        = true;
@@ -5214,6 +5235,15 @@ TEST(Placement, MacroRankingUpdatesOnlyAtDensityMilestones) {
     ++samples;
   }
   EXPECT_EQ(samples, ranking_calls);
+
+  options.output_dir           += "_handoff";
+  options.macro_legalize_cells  = false;
+  options.after_stage           = [](Placement_stage, const Result&) { return false; };
+  hhds::GraphLibrary handoff_library;
+  const auto         handoff = place(*graph, handoff_library, options);
+  ASSERT_TRUE(handoff.macro_gp_timing);
+  EXPECT_FALSE(handoff.macro_gp_timing->pin_locations.empty());
+  EXPECT_NE(handoff.macro_gp_timing->parasitics, nullptr);
 }
 
 TEST(Placement, ObservationalGpSamplingPreservesPlacementAndTimingSchedule) {
