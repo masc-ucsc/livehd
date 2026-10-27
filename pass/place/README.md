@@ -179,6 +179,22 @@ The imported-GP diagnostic exposes the same operation through
 `remove_synthesis_buffers=true`; its component-count check accounts for exactly
 those removals while retaining fixed-cell and master checks.
 
+Reset and domino rail buffer trees reuse the placement technology snapshot for
+Liberty cell models. Repeated placement phases do not reopen the library to
+identify asynchronous reset pins or choose the smallest placeable buffer.
+
+A supplied core can have too little free area to reach the requested soft density.
+For static cell GP, native placement computes an unavoidable overflow floor from
+movable charge and fixed-bin capacity. If the floor exceeds `stop_overflow`, it
+uses excess above that floor to schedule criticality samples, stop increasing
+density pressure and settle before legalization. No option default or density
+target changes. `gp_target_density`, `gp_overflow_floor`, and the history's
+`overflow_floor` expose the distinction; an early handoff reports
+`gp_stop_reason="density_infeasible"` and `gp_converged=false`. Minimum iterations,
+objective/routing checks and final legality still apply. Strict upper-bound
+placement, continuation, moving macros and scheduled/reserved geometry retain
+their existing policy.
+
 `synth.place.resize=true` enables timing-checked sizing and buffering in full
 placement with OpenTimer. Explicitly disable it for a geometry-only comparison.
 The shared synthesis defaults use coarse partitions, state sweeping and register

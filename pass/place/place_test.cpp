@@ -2198,6 +2198,33 @@ static std::shared_ptr<hhds::Graph> tie_graph(hhds::GraphLibrary& source, bool c
   graph->get_output_pin("k").connect_driver(unknown_k ? gu::create_const(*graph, *Dlop::from_pyrope("0ub?")) : one());
   return graph;
 }
+TEST(Placement, InfeasibleDensityHandsOffAndReportsOriginalTarget) {
+  hhds::GraphLibrary source, placed;
+  auto               graph = tie_graph(source, false);
+  auto               o     = plain_options();
+  o.lefs                   = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  o.core = o.die        = {0, 0, 5.52, 2.72};
+  o.bins                = 2;
+  o.density             = .1;
+  o.iterations          = 200;
+  o.min_iterations      = 40;
+  o.post_density_factor = 4;
+  o.snapshots           = true;
+  o.output_dir          = std::string(std::getenv("TEST_TMPDIR")) + "/infeasible_density";
+  const auto result     = place(*graph, placed, o);
+  EXPECT_NO_THROW(check_legality(physical::read_lef(o.lefs), result.floorplan));
+  rapidjson::Document qor;
+  qor.Parse(result.qor.c_str());
+  ASSERT_FALSE(qor.HasParseError());
+  EXPECT_DOUBLE_EQ(qor["gp_target_density"].GetDouble(), o.density);
+  EXPECT_GT(qor["gp_overflow_floor"].GetDouble(), o.stop_overflow);
+  EXPECT_GT(qor["gp_overflow"].GetDouble(), o.stop_overflow);
+  EXPECT_FALSE(qor["gp_converged"].GetBool());
+  EXPECT_STREQ(qor["gp_stop_reason"].GetString(), "density_infeasible");
+  EXPECT_GE(qor["gp_iterations"].GetInt(), o.min_iterations);
+  EXPECT_LT(qor["gp_iterations"].GetInt(), o.iterations);
+}
+
 struct Tie_fixture {
   std::string                               name;
   std::vector<std::pair<std::string, bool>> outputs;

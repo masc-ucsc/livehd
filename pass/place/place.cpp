@@ -4607,17 +4607,17 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   };
   const auto reset_tree
       = options.reset_fanout
-            ? buffer_reset_nets(graph, tech, options.liberty, options.reset_fanout, reset_constant, options.reset_pins)
+            ? buffer_reset_nets(graph, tech, options.technology().cells, options.reset_fanout, reset_constant, options.reset_pins)
             : Reset_tree_stats{};
-  const auto  rail_tree  = options.domino_rail_fanout && !options.domino_rail_pins.empty()
-                               ? buffer_pin_nets(graph,
+  const auto rail_tree = options.domino_rail_fanout && !options.domino_rail_pins.empty()
+                             ? buffer_pin_nets(graph,
                                                tech,
-                                               options.liberty,
+                                               options.technology().cells,
                                                options.domino_rail_fanout,
                                                options.domino_rail_pins,
                                                "railtree",
                                                reset_constant)
-                               : Reset_tree_stats{};
+                             : Reset_tree_stats{};
   if (const auto minted = std::max(reset_tree.buffer_um2, rail_tree.buffer_um2); options.growth_budget && minted > 0) {
     // Both trees mint the smallest buffer: only an upsize above it is growth.
     options.growth_budget->tree_master_um2 = minted;
@@ -5871,6 +5871,7 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
           s.align_pairs,
           s.align_residual,
           s.align_ramp);
+      line += std::format(",\"overflow_floor\":{}", s.overflow_floor);
       if constexpr (requires {
                       s.filler_count;
                       s.filler_area;
@@ -9807,6 +9808,10 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     json.Bool(metrics.continuation_limit);
     json.Key("density_stalled");
     json.Bool(metrics.density_stalled);
+    json.Key("overflow_floor");
+    json.Double(metrics.overflow_floor);
+    json.Key("target_density");
+    json.Double(control.target_density);
     json.Key("route_stalled");
     json.Bool(metrics.route_stalled);
     json.Key("objective_converged");
@@ -9831,6 +9836,8 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
       json.Double(s.hpwl);
       json.Key("raw_overflow");
       json.Double(s.raw_overflow);
+      json.Key("overflow_floor");
+      json.Double(s.overflow_floor);
       json.Key("density_weight");
       json.Double(s.density_weight);
       json.Key("route_overflow");
@@ -9937,15 +9944,18 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
                    metrics.centroid.effective_repulsion_weight);
       }
       std::print(stderr,
-                 "WARNING: native DREAMPlace GP stopped at {} iterations ({}) with overflow {:.6f} (target {:.6f}); "
+                 "WARNING: native DREAMPlace GP stopped at {} iterations ({}) with overflow {:.6f} (target {:.6f}, floor {:.6f}); "
                  "objective settled {}, timing observed {}, last timing satisfied {}\n",
                  metrics.iterations,
-                 metrics.density_stalled      ? "density stalled"
+                 metrics.density_stalled && metrics.overflow_floor > control.stop_overflow
+                     ? "density infeasible; handing off to legalization"
+                 : metrics.density_stalled    ? "density stalled"
                  : metrics.route_stalled      ? "routing stalled; handing off to legalization"
                  : metrics.continuation_limit ? "post-density budget"
                                               : "iteration cap",
                  metrics.overflow,
                  control.stop_overflow,
+                 metrics.overflow_floor,
                  metrics.objective_converged,
                  metrics.timing_observed,
                  metrics.timing_satisfied);
@@ -10240,20 +10250,23 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
     technology_statistics.AddMember("lef_hash_reads", uint64_t(options.lefs.size()), allocator);
     json.AddMember("technology_snapshot", technology_statistics, allocator);
     json.AddMember("gp_iterations", metrics.iterations, allocator);
+    json.AddMember("gp_target_density", control.target_density, allocator);
+    json.AddMember("gp_overflow_floor", cache.hit ? rapidjson::Value() : rapidjson::Value(metrics.overflow_floor), allocator);
     json.AddMember("gp_density_ready_iteration", metrics.density_iteration, allocator);
     json.AddMember("gp_continuation_deadline", metrics.continuation_deadline, allocator);
     json.AddMember("gp_objective_converged", metrics.objective_converged, allocator);
     json.AddMember("gp_timing_satisfied",
                    options.gp_rank ? rapidjson::Value() : rapidjson::Value(metrics.timing_satisfied),
                    allocator);
-    const char* stop_reason = cache.hit                                         ? "cache_hit"
-                              : options.timing_seed || options.retain_placement ? "snapshot"
-                              : metrics.converged                               ? "converged"
-                              : metrics.density_stalled                         ? "density_stalled"
-                              : metrics.route_stalled                           ? "route_stalled"
-                              : metrics.continuation_limit                      ? "continuation_limit"
-                              : metrics.iterations >= control.max_iterations    ? "iteration_limit"
-                                                                                : "stopped";
+    const char* stop_reason = cache.hit                                                                   ? "cache_hit"
+                              : options.timing_seed || options.retain_placement                           ? "snapshot"
+                              : metrics.converged                                                         ? "converged"
+                              : metrics.density_stalled && metrics.overflow_floor > control.stop_overflow ? "density_infeasible"
+                              : metrics.density_stalled                                                   ? "density_stalled"
+                              : metrics.route_stalled                                                     ? "route_stalled"
+                              : metrics.continuation_limit                                                ? "continuation_limit"
+                              : metrics.iterations >= control.max_iterations                              ? "iteration_limit"
+                                                                                                          : "stopped";
     json.AddMember("gp_stop_reason", rapidjson::Value(stop_reason, allocator), allocator);
     add_uroute_status(json, allocator, metrics.uroute_skipped, metrics.uroute_sample_ids);
     json.AddMember(
