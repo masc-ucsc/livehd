@@ -76,6 +76,34 @@ assert info['fanout'] == 8 and info['buffers'] >= 6, info
 loads, buffers = reset_loads('tree')
 assert loads <= 8 and buffers == info['buffers'], (loads, buffers, info)
 
+
+def buffer_excess(name):
+    """Per tree buffer, how much it widens the bounding box of the loads it drives (DEF units), and the die."""
+    text = (root / f'{name}_def' / 'out.def').read_text()
+    at = {m[0]: (int(m[1]), int(m[2])) for m in re.findall(r'^\s*- (\S+) \S+ .*?\( (-?\d+) (-?\d+) \)', text, re.M)}
+    die = [int(v) for v in re.search(r'DIEAREA \( (-?\d+) (-?\d+) \) \( (-?\d+) (-?\d+) \)', text).groups()]
+    nets = re.search(r'^NETS \d+ ;(.*?)^END NETS', text, re.S | re.M).group(1)
+
+    def hpwl(points):
+        return max(x for x, _ in points) - min(x for x, _ in points) + max(y for _, y in points) - min(y for _, y in points)
+
+    excess = []
+    for net in nets.split(';'):
+        conns = re.findall(r'\(\s*(\S+)\s+(\S+)\s*\)', net)
+        driver = [inst for inst, pin in conns if '__place_rsttree' in inst and pin == 'X']
+        loads = [at[inst] for inst, _ in conns if inst != 'PIN' and inst not in driver]
+        if driver and loads:
+            excess.append(hpwl(loads + [at[driver[0]]]) - hpwl(loads))
+    return excess, die[2] - die[0] + die[3] - die[1]
+
+
+# The tree's nets keep their wirelength edges in global placement (only repair
+# and criticality leave the reset out), so each buffer sits among its loads
+# instead of wherever the density pushed it (measured: 12k vs 202k units of
+# added bounding box over 7 nets on this fixture).
+excess, die = buffer_excess('tree')
+assert len(excess) == info['buffers'] and sum(excess) <= die // 4, (excess, die)
+
 # Reset repair (sizing reset cones) stays retired.
 refused = run('repair', ['--set', 'synth.place.repair.reset=true'], False)
 assert 'pre-CTS' in json.dumps(refused['error']), refused['error']

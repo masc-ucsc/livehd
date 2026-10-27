@@ -1677,8 +1677,13 @@ void make_arrays(View& v, const ph::Technology& tech) {
       throw std::invalid_argument("invalid physical net weight");
     }
     d.net_weights.push_back(weight);
-    // These physical nets remain in DEF/STA, but have no placement edges.
-    d.net_mask.push_back(!v.ignored.ignored[v.drivers.size() - 1] && !sinks.empty());
+    // Pre-CTS nets remain in DEF/STA, but have no placement edges. A reset or
+    // rail tree's nets (reset_tree.hpp) keep theirs: the tree bounds each of
+    // them to its fanout, and without them its buffers would sit wherever the
+    // density pushes them. They stay out of repair and criticality.
+    const bool tree = is_tree_buffer(driver.instance)
+                      || std::any_of(sinks.begin(), sinks.end(), [](const auto& s) { return is_tree_buffer(s.instance); });
+    d.net_mask.push_back((tree || !v.ignored.ignored[v.drivers.size() - 1]) && !sinks.empty());
   }
   d.build_maps();
   if (v.centroids) {
@@ -4523,7 +4528,9 @@ static Result place_single(hhds::Graph& source, hhds::GraphLibrary& library, con
   Resolver   resolver(tech, memories, options.unknown_const_zero);
   collect_control_roles(graph, resolver, v.prects);
   result.prects          = v.prects;
-  // The flat reset nets are bounded before the first cell is read, so the buffers place like any cell.
+  // The flat reset nets are bounded before the first cell is read. The tree's
+  // nets keep their wirelength edges (make_arrays), so the buffers sit near
+  // their loads, while the reset stays out of repair and criticality.
   // A driver that resolves to a constant (the tied inactive pin of a clear+preset flop) is not a reset net.
   const auto reset_constant = [&](const Pin& driver) {
     try {
