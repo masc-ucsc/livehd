@@ -445,16 +445,7 @@ bool read_options(const Eprp_var& var, Options& options) {
   return true;
 }
 
-// Lowercase hex of a finished SHA-256.
-std::string hex_digest(llvm::SHA256& hash) {
-  std::string    digest;
-  constexpr char hex[] = "0123456789abcdef";
-  for (const auto byte : hash.final()) {
-    digest += hex[byte >> 4];
-    digest += hex[byte & 15];
-  }
-  return digest;
-}
+using livehd::usyn::hex_digest;
 
 // SHA-256 of a file's bytes; nullopt when it cannot be read.
 std::optional<std::string> file_digest(const std::string& path) {

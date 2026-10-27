@@ -15,7 +15,6 @@
 #include "rapidjson/writer.h"
 
 namespace livehd::usyn {
-namespace {
 std::string hex_digest(llvm::SHA256& hash) {
   std::string    result;
   constexpr char hex[] = "0123456789abcdef";
@@ -25,6 +24,7 @@ std::string hex_digest(llvm::SHA256& hash) {
   }
   return result;
 }
+namespace {
 void write(const std::filesystem::path& path, std::string_view text) {
   std::ofstream out(path, std::ios::binary);
   out.write(text.data(), text.size());

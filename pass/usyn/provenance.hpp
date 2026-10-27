@@ -5,7 +5,14 @@
 #include <string>
 #include <string_view>
 
+namespace llvm {
+class SHA256;
+}
+
 namespace livehd::usyn {
+// Lowercase hex of a SHA-256 (finalizes `hash`).
+std::string hex_digest(llvm::SHA256& hash);
+
 struct Provenance_limits {
   uint64_t bytes   = 64 * 1024 * 1024;
   uint32_t entries = 4096;
