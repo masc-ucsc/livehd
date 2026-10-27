@@ -10,6 +10,7 @@
 #include <string>
 #include <vector>
 
+#include "growth_budget.hpp"
 #include "gtest/gtest.h"
 #include "inou/lefdef/lef_writer.hpp"
 #include "node_util.hpp"
@@ -139,6 +140,10 @@ struct Domino_chain {
     std::ofstream(dir + "/domino.lef") << physical::write_lef_macros(macros, base_tech.dbu);
     catalog              = custom_catalog(variants);
     options.custom_cells = catalog;
+    // Options caches the LEF/Liberty by path (immutable within a run); this
+    // fixture rewrites domino.lef in place, so drop what a placement cached.
+    options.technology_cache.reset();
+    options.resize_library_cache.reset();
   }
   // The top variant `over` sites wider than a row of `fp`. At -1 it fits the
   // core, but no row pair holds it with a padding site on both sides.
@@ -441,6 +446,30 @@ TEST(CustomSizing, AnUnmeasuredTrialIsRejectedNotFatal) {
   EXPECT_NO_THROW(check_legality(chain.tech, sized.placed.floorplan));
   const Evaluate never = [](const Result&) -> Timing_feedback { throw std::runtime_error("unmeasured"); };
   EXPECT_THROW(size_custom_placed(cold, chain.options, never, {}), std::runtime_error);
+}
+
+TEST(CustomSizing, AGrowthPastTheSharedBudgetIsRejectedBeforePlacement) {
+  // Domino sizing shares full placement's cell/area growth budget (3% over the
+  // mapped netlist, growth_budget.hpp) with the other placement edits. c1's
+  // first step (16 -> 19 sites on two rows, ~7.5 um2) is past 3% of this
+  // ~165 um2 chain, and the buffer (one cell) is past 3% of its 15 cells:
+  // both are rejected_growth before any trial placement; the state stays.
+  Domino_chain chain("sizing_growth");
+  const auto   cold = place(*chain.graph, chain.flat, chain.options);
+  initialize_growth_budget(*chain.graph, chain.options);
+  ASSERT_EQ(chain.options.growth_budget->baseline.cells, 15U);
+  const Table_timing timing{chain.catalog.get(), chain.tech.dbu, {{"c1", {-30, -20, -10, -5}}}};
+  const auto         sized  = size_custom_placed(cold, chain.options, timing, {});
+  const auto         report = parse(sized.report);
+  EXPECT_EQ(trial_moves(report), (std::vector<std::string>{"up:rejected_growth", "buffer:rejected_growth"}));
+  EXPECT_EQ(std::string(report["trials"][0]["failure"].GetString()), "physical cell/area growth budget exceeded");
+  EXPECT_EQ(report["counts"]["rejected_growth"].GetUint(), 2U);
+  EXPECT_EQ(chain.options.growth_budget->rejected, 2U);
+  EXPECT_EQ(sized.placed.floorplan.components, cold.floorplan.components);
+  EXPECT_EQ(sized.placed.graph, cold.graph);
+  // The same step fits a 10% budget.
+  chain.options.growth_budget->fraction = .1;
+  EXPECT_EQ(trial_moves(parse(size_custom_placed(cold, chain.options, timing, {.buffers = false}).report))[0], "up:accepted");
 }
 
 TEST(CustomSizing, UsageErrors) {

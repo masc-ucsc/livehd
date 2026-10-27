@@ -420,8 +420,13 @@ Repair_result size_custom_placed(Result legal, const Options& requested, const E
   r.StartObject();
   r.Key("trials");
   r.Uint(trials);
-  for (const auto* key :
-       {"up_accepted", "down_accepted", "buffer_accepted", "rejected_timing", "rejected_packing", "rejected_failed"}) {
+  for (const auto* key : {"up_accepted",
+                          "down_accepted",
+                          "buffer_accepted",
+                          "rejected_timing",
+                          "rejected_packing",
+                          "rejected_growth",
+                          "rejected_failed"}) {
     r.Key(key);
     r.Uint(tally[key]);
   }
