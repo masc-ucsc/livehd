@@ -16,9 +16,9 @@ than OpenROAD's floorplan → global place → resize → detailed place on the 
 Implementation is in progress; the original measurements and acceptance targets are retained below.</p>
 <p><span class="status">In progress — shared technology snapshot measured; GP timing and convergence fixes under validation</span>
 Source of the issues: <code>HighTide/repros/issues.md</code> (LiveHD <code>8e017a011</code>, HighTide <code>9648393ce</code>,
-host llmHDL, one CPU for LiveHD, 8 threads for OpenROAD). All new measurements below were taken on the same
-frozen binaries with <code>perf</code> and <code>/usr/bin/time</code>; the ablation placements were scored with the
-benchmark's own <code>repros/score.tcl</code> so they compare one-to-one with the A/B/C/D rows.</p>
+host llmHDL, one CPU for LiveHD, 8 threads for OpenROAD). Each new comparison records its
+frozen binaries and uses <code>perf</code> and <code>/usr/bin/time</code>; the ablation placements are scored with the
+benchmark's <code>repros/score.tcl</code>. Historical measurements apply to their recorded revisions.</p>
 
 <h2 id="progress">Current implementation and acceptance status</h2>
 <p>This page records the reviewed source checkpoint and separates completed fixes
@@ -28,12 +28,16 @@ binding. Historical experiments, failed runs, binary identities and full compari
 are retained in <a href="1f-measurements.json">1f-measurements.json</a>; they are no
 longer repeated as a chronological log on this page.</p>
 
-<p>The checkpoint passes 21 focused optimized Bazel test targets with Bazel 9.3.1,
+<p>The v70 checkpoint passes 21 focused optimized Bazel test targets with Bazel 9.3.1,
 including the router, placement, timing, flattening and synthesis regressions.
 The CLI, physical-repair tool and signal-routing benchmark build with published
 dependency pins. A direct Yosys-Verilog parser check also passes after making
-Flex's m4 tool an explicit build dependency. Existing option defaults are retained;
-the new private flat constant-state sweep is opt-in for both ABC and USYN.</p>
+Flex's m4 tool an explicit build dependency. The private flat constant-state sweep
+is opt-in for both ABC and USYN.</p>
+<p>The merged checkpoint passes 11 optimized test targets covering timing,
+placement, repair, shared metadata, placement hints and the CLI buffer-preservation
+default. The CLI and physical-repair binaries build using the published OpenTimer
+commit <code>7f25ca3</code>, without a local repository override.</p>
 
 <table>
 <thead><tr><th>Requirement</th><th>Verified evidence and remaining work</th></tr></thead>
@@ -65,11 +69,13 @@ resynthesis census remain unverified.</td></tr>
 <tr><td><a href="#H">H — repair growth</a></td><td>Area/cell budgets are implemented
 and the small-design checks pass. Revalidate the integrated checkpoint and extend
 the census to the large designs.</td></tr>
-<tr><td><a href="#I">I — scaling</a></td><td>Open. Fresh Gemmini v68 exceeds the
-diagnostic memory guard after 641.282 s at 16,785,636 KiB tree RSS. CNN v59 completes
-in 2,385.888 s at 12,461,456 KiB process RSS; partition_c v59 exceeds the guard.
-The strict limit is 16 decimal GB. Fresh matched 100 ps OpenROAD references are
-running; no CPU-parity acceptance is claimed.</td></tr>
+<tr><td><a href="#I">I — scaling</a></td><td>Open. Fresh Gemmini v71 control and
+candidate both exceed the diagnostic memory guard: 605.111 s / 16,448 MiB and
+673.420 s / 16,390 MiB tree RSS. The candidate reaches physical optimization,
+but neither passes the strict 16-decimal-GB limit. CNN v59 completes in 2,385.888 s
+at 12,461,456 KiB process RSS; partition_c v59 exceeds the guard. Matched 100 ps
+OpenROAD references are complete for Gemmini and CNN; partition_c is still running.
+No CPU-parity acceptance is claimed.</td></tr>
 <tr><td><a href="#J">J — macro failures</a></td><td>Fragmented rows are accepted by
 the shared import path. Corrected eyeriss and native Nyuzi reach placement but hit
 the memory guard. Imported Nyuzi reaches timing, then fails on 2,821 input pins
@@ -81,27 +87,31 @@ Native bp_uno completes with 1,724.217 s placement and 14,870 MiB peak process R
 </tbody>
 </table>
 
-<p>The most recent completed exact-output comparisons cover v67 on all four
-routine designs: lfsr 3.328 → 3.318 s, minimax 68.944 → 69.914 s,
-partition_m 48.258 → 49.263 s, coralnpu 743.651 → 885.111 s. DEFs, independent
-QoR and route-feature exports match, and all are within 1.5×. Coral RSS is
-7,439 MiB. These are single samples under concurrent load, not repeatable speedup
-claims. v68 retains exact small-design outputs: lfsr 2.259 → 2.241 s,
-minimax 42.596 → 40.055 s, partition_m 37.450 → 37.782 s. Its original Coral run
-failed during disk exhaustion and is invalid. Its fresh repeat finishes placement in
-771.461 s versus 885.111 s for the control, with identical DEF, scores and exports;
-peak process RSS is 7,454 MiB.</p>
+<p>The latest v71 comparisons use the published v70 source checkpoint as control
+and the arrival-predecessor optimization as candidate. All four DEFs and independent
+QoR scores match exactly: lfsr 2.023 → 2.029 s, minimax 38.034 → 38.003 s,
+partition_m 34.797 → 37.662 s, and coralnpu 740.830 → 778.361 s placement.
+All remain within 1.5×. Coral peak process RSS falls from 7,462 to 7,261 MiB.
+These are single samples under concurrent load, not repeatable speedup claims;
+historical v67/v68 comparisons remain in the measurement JSON.</p>
 
-<p>Memory reviews now avoid copies of temporary feedback and restart floorplans,
+<p>Memory reviews avoid copies of temporary feedback and restart floorplans,
 defer persisted RC until final legalization, and omit report-only timing tables
-from physical feedback. The v66 allocation profile still shows substantial
-required detailed feedback and about 672 MiB retained in the thread-local path
-cache. Allocation estimates are not RSS; these observations do not close I.</p>
+from physical feedback. OpenTimer now recovers a single worst path from arrival
+predecessors when CPPR is disabled, avoiding a graph-sized suffix-tree cache.
+CPPR and multiple-path reporting retain the original search, with regression
+coverage for both timing corners, transitions, changing arrivals, masked arcs
+and sequential endpoints. The v66 allocation profile identified about 672 MiB
+in the old cache, but allocation estimates are not RSS savings. The fresh Gemmini
+failure shows that required detailed feedback and other live storage still need work.</p>
 
 <p>Benchmark protocol remains common defaults, 100 ps stress clocks, reset false
 paths, independently scored final placements and frozen binaries. Historical
-measurements apply to their recorded revisions. The merged checkpoint must be
-validated against its own controls before inheriting performance claims.</p>
+measurements apply to their recorded revisions. The later upstream merge
+<code>db6a5de1b</code> adds metadata and placement hints and changes synthesis-buffer
+preservation to the default. The timing-path optimization itself changes no defaults.
+Future performance comparisons need fresh controls with those merged defaults;
+the v71 paired results above apply to the pre-merge binaries.</p>
 
 <p>The associated driver-pin routing optimization is complete for this checkpoint:
 commit <code>ce3e628e8</code> adds persistent per-layer interval occupancy with dense

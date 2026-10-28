@@ -52953,7 +52953,7 @@
       }
     },
     "matched_openroad_100ps_v67": {
-      "status": "Gemmini complete at 100ps; CNN and partition_c references running or queued. No matched LiveHD CPU-parity claim.",
+      "status": "Gemmini and CNN complete at 100ps; partition_c reference still running. No matched LiveHD CPU-parity claim.",
       "artifacts": "/home/renau/projs/.agent-artifacts/1f-openroad-100ps-v67",
       "designs": [
         "gemmini",
@@ -53005,6 +53005,50 @@
           },
           "physical_cpu_s": 5136.0,
           "physical_wall_s": 2202.4700000000003
+        },
+        "cnn": {
+          "design": "cnn",
+          "abc_times": {
+            "wall_s": 153.27,
+            "cpu_s": 151.52999999999997,
+            "runs": 41
+          },
+          "failed_steps": [],
+          "score": {
+            "hpwl_um": 9981437.713,
+            "hpwl_all_nets_um": 9985323.808,
+            "measured_nets": 279037,
+            "excluded_nets": 1,
+            "setup_wns_ps": -11004.897482,
+            "setup_tns_ps": -29565679.26039,
+            "hold_wns_ps": 22.843939,
+            "hold_tns_ps": 0.0,
+            "instances": 484008,
+            "logical_cells": 269963,
+            "physical_cells": 214045,
+            "buffers": 110483,
+            "buffer_area_um2": 15850.5887,
+            "macros": 65,
+            "instance_area_um2": 1720017.2383,
+            "macro_area_um2": 1683386.0381,
+            "die_um": [
+              0.0,
+              0.0,
+              1948.421,
+              1948.421
+            ],
+            "core_um": [
+              1.026,
+              1.08,
+              1947.402,
+              1947.24
+            ],
+            "scoring_seconds": 78.417,
+            "power_mw": 4.18,
+            "reset_ports": []
+          },
+          "physical_cpu_s": 8707.9,
+          "physical_wall_s": 2423.54
         }
       }
     },
@@ -53305,6 +53349,365 @@
       },
       "defaults": "large_flow_latches remains false; flat_sweep remains opt-in",
       "scope": "Routing optimization and current integration fixes complete. Full A-J placement acceptance remains open; previous performance samples apply only to their recorded frozen binaries."
+    },
+    "arrival_path_recovery_v71": {
+      "status": "Four paired designs retain exact DEF and independent QoR; both Gemmini runs exceed the memory guard. Full A-J acceptance remains open.",
+      "artifacts": "/home/renau/projs/.agent-artifacts/1f-path-v71",
+      "protocol": {
+        "scope": "K=1 timing path recovery from arrival provenance when CPPR is off. Preserve CPPR and multi-path suffix-tree search. Fresh paired controls/candidates on current published LiveHD checkpoint, same common options and 100ps/reset-false clocks.",
+        "baseline_livehd": "68190d9661f8055f1fc662230dc5aeb1c2b7bc5b",
+        "baseline_opentimer": "17a58a4889049bc1293ce10fa36df26141220247",
+        "dreamplace": "f16bf8e8fcbee09e9d7d01c8045d221fae48ccdb",
+        "scope_limit": "Old QoR comparisons are not a substitute for current controls; full A-J goal still open",
+        "candidate_opentimer": "7f25ca3a6a7ec9af8ce9919d739ae88e5a578883"
+      },
+      "implementation": "Recover K=1 path from propagated arrival predecessors when CPPR is off; retain suffix-tree fallback for incomplete provenance, CPPR and multi-path reporting.",
+      "opentimer_commit": "7f25ca3a6a7ec9af8ce9919d739ae88e5a578883",
+      "opentimer_published": true,
+      "comparison": {
+        "scope": "Fresh published-checkpoint control vs single-path arrival-provenance recovery; common options, 100ps, reset false paths, same CPU per pair. Single samples, not a repeatable speedup claim.",
+        "completed": {
+          "lfsr": {
+            "placement_seconds": [
+              2.023085,
+              2.029395
+            ],
+            "time_ratio": 1.003118998954567,
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -60.862128,
+              -60.862128
+            ],
+            "wns_delta_ps": 0.0,
+            "wns_within_5ps": true,
+            "rss_mib": [
+              339.64453125,
+              346.21875
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "7ddab5966f7830e7de46749e7d2e6bf976ff0b579bff838434a6ca111050c7e9",
+              "7ddab5966f7830e7de46749e7d2e6bf976ff0b579bff838434a6ca111050c7e9"
+            ],
+            "independent_scores_identical": true,
+            "sta_fraction": 0.33782195629732026,
+            "gp": {
+              "gp_converged": false,
+              "gp_stop_reason": "density_infeasible",
+              "gp_overflow": 0.350298305,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.2599183801757048,
+              "gp_total_iterations": 600,
+              "gp_density_ready_iteration": 440,
+              "gp_continuation_deadline": 2200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 500
+            }
+          },
+          "minimax": {
+            "placement_seconds": [
+              38.034096,
+              38.003054
+            ],
+            "time_ratio": 0.9991838375756321,
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -913.478075,
+              -913.478075
+            ],
+            "wns_delta_ps": 0.0,
+            "wns_within_5ps": true,
+            "rss_mib": [
+              917.28515625,
+              908.97265625
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "7896e45d8aba5c1ab4be865f1231f763f6568057f8a695dfcc261240cca5dec0",
+              "7896e45d8aba5c1ab4be865f1231f763f6568057f8a695dfcc261240cca5dec0"
+            ],
+            "independent_scores_identical": true,
+            "sta_fraction": 0.3422298787355353,
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0796708268,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 800,
+              "gp_density_ready_iteration": 640,
+              "gp_continuation_deadline": 3200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 700
+            }
+          },
+          "NVDLA__partition_m": {
+            "placement_seconds": [
+              34.796779,
+              37.661532
+            ],
+            "time_ratio": 1.082328108587292,
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -692.389648,
+              -692.389648
+            ],
+            "wns_delta_ps": 0.0,
+            "wns_within_5ps": true,
+            "rss_mib": [
+              1229.390625,
+              1214.5234375
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "5a442f329621baf84e6a481b4d6b9596e318634233ca1ec22d939a1aeb73de66",
+              "5a442f329621baf84e6a481b4d6b9596e318634233ca1ec22d939a1aeb73de66"
+            ],
+            "independent_scores_identical": true,
+            "sta_fraction": 0.3406517684676237,
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0820293505,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 800,
+              "gp_density_ready_iteration": 640,
+              "gp_continuation_deadline": 3200,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 700
+            }
+          },
+          "coralnpu": {
+            "placement_seconds": [
+              740.829914,
+              778.361029
+            ],
+            "time_ratio": 1.050660906492499,
+            "within_1_5_time": true,
+            "independent_wns_ps": [
+              -14703.633037,
+              -14703.633037
+            ],
+            "wns_delta_ps": 0.0,
+            "wns_within_5ps": true,
+            "rss_mib": [
+              7461.8046875,
+              7260.69140625
+            ],
+            "def_identical": true,
+            "def_sha256": [
+              "7554f3716ab6ee1e1f9e4818c383bb7a843daf3fd210630983d072469353459e",
+              "7554f3716ab6ee1e1f9e4818c383bb7a843daf3fd210630983d072469353459e"
+            ],
+            "independent_scores_identical": true,
+            "sta_fraction": 0.2636982327361613,
+            "gp": {
+              "gp_converged": true,
+              "gp_stop_reason": "converged",
+              "gp_overflow": 0.0363638432,
+              "gp_target_density": 0.5,
+              "gp_overflow_floor": 0.0,
+              "gp_total_iterations": 1140,
+              "gp_density_ready_iteration": 600,
+              "gp_continuation_deadline": 3000,
+              "gp_objective_converged": true,
+              "gp_timing_satisfied": null,
+              "gp_iterations": 1040
+            }
+          }
+        },
+        "pending": []
+      },
+      "gemmini": {
+        "control": {
+          "compile_front_s": 0.0,
+          "run": {
+            "status": "guard-stopped",
+            "wall_s": 605.1109647778794,
+            "cpu_s": null,
+            "rss_mib": 0.0,
+            "tree_rss_mib": 16448.0390625,
+            "ipc": null,
+            "instructions": null,
+            "cycles": null,
+            "stop": "process-tree memory limit"
+          },
+          "status": "guard-stopped",
+          "log": "/home/renau/projs/.agent-artifacts/1f-path-v71/gemmini-control/gemmini/B/measure/run.log",
+          "message": "process-tree memory limit",
+          "error": "lhd guard-stopped: process-tree memory limit",
+          "done": true,
+          "driver_s": 605.1119577884674
+        },
+        "candidate": {
+          "compile_front_s": 0.0,
+          "run": {
+            "status": "guard-stopped",
+            "wall_s": 673.4195074818563,
+            "cpu_s": null,
+            "rss_mib": 0.0,
+            "tree_rss_mib": 16390.25,
+            "ipc": null,
+            "instructions": null,
+            "cycles": null,
+            "stop": "process-tree memory limit"
+          },
+          "status": "guard-stopped",
+          "log": "/home/renau/projs/.agent-artifacts/1f-path-v71/gemmini-candidate/gemmini/B/measure/run.log",
+          "message": "process-tree memory limit",
+          "error": "lhd guard-stopped: process-tree memory limit",
+          "done": true,
+          "driver_s": 673.420731306076
+        }
+      },
+      "validation": {
+        "owning_repository_tests": [
+          "path_report",
+          "path",
+          "rc_propagation",
+          "celllib_smoke"
+        ],
+        "integrated_local_override_tests": "5 optimized targets passed; lhd and physical_repair built",
+        "published_pin_build": "passed; 5 optimized test targets and lhd/physical_repair binaries, before upstream merge"
+      },
+      "incidents": [
+        "First lfsr control placement passed but independent scoring failed because the frozen OpenROAD binary was missing. Preserved that unscored run, supplied the binary, and reran both sides in fresh workspaces."
+      ],
+      "interpretation": "Single samples under concurrent host load; no repeatable speedup claim. Gemmini guard truncation prevents a completed memory/QoR comparison. No public defaults changed.",
+      "integration": {
+        "upstream_head": "db6a5de1bca250a67373d4f77e839a6aa87b4ffc",
+        "merge": "fast-forward, no conflicts",
+        "validation": {
+          "status": "passed",
+          "upstream_head": "db6a5de1bca250a67373d4f77e839a6aa87b4ffc",
+          "test_targets": 11,
+          "build": "Bazel 9.3.1 -c opt --jobs=2 --test_timeout=30",
+          "build_sources_match_publication": true,
+          "local_override": false,
+          "tests": {
+            "core/metadata_test": {
+              "tests": "4",
+              "failures": "0",
+              "disabled": "0",
+              "errors": "0",
+              "time": "0.",
+              "timestamp": "2026-10-28T00:11:12.193",
+              "name": "AllTests"
+            },
+            "lhd/lhd_options_test": {
+              "tests": "18",
+              "failures": "0",
+              "disabled": "0",
+              "errors": "0",
+              "time": "0.017",
+              "timestamp": "2026-10-28T00:36:38.361",
+              "name": "AllTests"
+            },
+            "lhd/tests/lhd_placement_buffer_cleanup_smoke": {},
+            "pass/opentimer/pass_opentimer_test": {
+              "tests": "34",
+              "failures": "0",
+              "disabled": "0",
+              "errors": "0",
+              "time": "0.249",
+              "timestamp": "2026-10-28T00:36:38.595",
+              "name": "AllTests"
+            },
+            "pass/opentimer/physical_session_test": {
+              "tests": "21",
+              "failures": "0",
+              "disabled": "0",
+              "errors": "0",
+              "time": "2.331",
+              "timestamp": "2026-10-28T00:36:47.127",
+              "name": "AllTests"
+            },
+            "pass/place/place_test": {
+              "tests": "86",
+              "failures": "0",
+              "disabled": "0",
+              "errors": "0",
+              "time": "5.356",
+              "timestamp": "2026-10-28T00:36:39.064",
+              "name": "AllTests"
+            },
+            "pass/place/placement_hints_smoke": {},
+            "pass/place/placement_hints_test": {
+              "tests": "8",
+              "failures": "0",
+              "disabled": "0",
+              "errors": "0",
+              "time": "0.001",
+              "timestamp": "2026-10-28T00:36:44.710",
+              "name": "AllTests"
+            },
+            "pass/place/repair_test": {
+              "tests": "72",
+              "failures": "0",
+              "disabled": "0",
+              "errors": "0",
+              "time": "5.797",
+              "timestamp": "2026-10-28T00:36:38.777",
+              "name": "AllTests"
+            },
+            "pass/synth/tune_metadata_smoke": {
+              "tests": "2",
+              "failures": "0",
+              "disabled": "0",
+              "errors": "0",
+              "time": "0.",
+              "timestamp": "2026-10-28T00:36:38.144",
+              "name": "AllTests"
+            },
+            "external/+git_repository+opentimer/unittest/path_report": {
+              "tests": "2",
+              "failures": "0",
+              "disabled": "0",
+              "errors": "0",
+              "time": "0.045",
+              "timestamp": "2026-10-28T00:08:50.145",
+              "name": "AllTests"
+            }
+          },
+          "built": [
+            "//lhd:lhd",
+            "//tools:physical_repair"
+          ],
+          "published_dependencies": {
+            "dreamplace": {
+              "commit": "f16bf8e8fcbee09e9d7d01c8045d221fae48ccdb",
+              "published": true,
+              "source_status": ""
+            },
+            "iassert": {
+              "commit": "5ad1ddb96d9ecce9f5269ce4b89ef1fa6d727a39",
+              "published": true,
+              "source_status": ""
+            },
+            "hlop": {
+              "commit": "b0a61425993d2b88ddea8eda614004090e5bd2c9",
+              "published": true,
+              "source_status": ""
+            },
+            "hhds": {
+              "commit": "508274e33c6b51a7cdd5a719648c4f1c29bc5619",
+              "published": true,
+              "source_status": ""
+            },
+            "opentimer": {
+              "commit": "7f25ca3a6a7ec9af8ce9919d739ae88e5a578883",
+              "published": true,
+              "source_status": ""
+            }
+          },
+          "concurrent_work": "Uncommitted design_prepare.cpp instrumentation and its independent main build are excluded; main binary refresh canceled without disturbing that task."
+        },
+        "scope": "Upstream changes default synthesis-buffer preservation; frozen paired runs predate this merge and are not performance proof for the merged defaults."
+      }
     }
   },
   "note": "shared-tech measures only library snapshot reuse and instrumentation, before subsequent GP checkpoint/convergence/refinement changes; binary hashes identify the measured executables. Full acceptance and large-design runs remain pending.",
