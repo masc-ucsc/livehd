@@ -13,15 +13,15 @@
 <p>High-priority fixes so that <code>lhd synth --set synth.place=true</code> reaches OpenROAD's
 pre-CTS QoR (HPWL, cells, WNS, power measured by the same OpenSTA script) with <em>less CPU time</em>
 than OpenROAD's floorplan → global place → resize → detailed place on the HighTide asap7 benchmark.
-The current optimization pass is closed; the remaining acceptance work and its original targets are retained below.</p>
-<p><span class="status">Optimization pass complete — remaining A–J acceptance is open</span>
+The validated source checkpoint is published; work on the remaining acceptance targets continues below.</p>
+<p><span class="status">Validated checkpoint — remaining A–J acceptance is open</span>
 Source of the issues: <code>HighTide/repros/issues.md</code> (LiveHD <code>8e017a011</code>, HighTide <code>9648393ce</code>,
 host llmHDL, one CPU for LiveHD, 8 threads for OpenROAD). Each new comparison records its
 frozen binaries and uses <code>perf</code> and <code>/usr/bin/time</code>; the ablation placements are scored with the
 benchmark's <code>repros/score.tcl</code>. Historical measurements apply to their recorded revisions.</p>
 
 <h2 id="progress">Current implementation and acceptance status</h2>
-<p>The current optimization pass is reviewed and closed as a shared source baseline.
+<p>The source checkpoint is reviewed; work on the remaining A–J conditions continues.
 The driver-pin routing work is complete for this pass. The broader placer A–J
 acceptance task is <strong>not complete</strong>; its remaining requirements are
 listed below. Historical measurements are retained in
@@ -29,8 +29,8 @@ listed below. Historical measurements are retained in
 recorded revisions. Raw experiments and failed runs stay outside the build.</p>
 
 <h3 id="checkpoint">Reproducible source checkpoint</h3>
-<p>The accepted implementation is LiveHD
-<a href="https://github.com/masc-ucsc/livehd/commit/ea58ccc8638bfeb00d02531eb8eb19a215c7d1c2"><code>ea58ccc86</code></a>.
+<p>This density-state follow-up builds on LiveHD
+<a href="https://github.com/masc-ucsc/livehd/commit/88ba2aca6fe33d4c986ea1c5af8ccef0e3ed09f6"><code>88ba2aca6</code></a>.
 <code>MODULE.bazel</code> uses published commits for OpenTimer
 <a href="https://github.com/masc-ucsc/OpenTimer/commit/ee2d641d4574d10fe6f0ada466d1ea4870b19499"><code>ee2d641d</code></a>
 and DREAMPlace
@@ -175,6 +175,28 @@ three placement/router tools build with published Bazel pins and no overrides.
 The repositories were fetched and their owned dependency pins checked against
 upstream. Completed routing and source-publication work is closed; the open
 A–J items above remain follow-up work, with their original requirements intact.</p>
+
+<h3 id="density-state">Density continuation state and refinement audit</h3>
+<p>Physical repair, resizing, region refinement and final legalization now preserve
+the full-GP density coefficient. Their coordinate-only results previously lost it,
+so a later warm timing refinement restarted density from the default. Regression
+checks cover accepted rebuffering, accepted resizing and final legalization;
+the placement, repair and resize test targets pass with published dependency pins.</p>
+<p>The standalone v86 fix preserves final DEFs and independent QoR exactly on all
+four designs under common defaults and 100 ps reset-cut clocks. Placement times
+are lfsr 2.219 → 2.128 s, minimax 25.565 → 24.844 s, partition_m
+32.596 → 32.361 s and CoralNPU 647.416 → 638.032 s, all within 1.5×.
+The small controls reuse immutable v81 runs of the same implementation;
+CoralNPU has a fresh sequential control/candidate pair. These single samples do
+not establish a repeatable speedup.</p>
+<p>The broader v82–v85 experiments are rejected. Deferring seed weights and moving
+refinement after repair lose 31.135 ps WNS on minimax. Preserving density state
+reduces its trial overflow from 0.8104 to 0.0747, but the trial still violates
+the HPWL guard. Independent scoring of that rejected geometry gives
+67,532.601 µm HPWL and −753.722 ps WNS: both worse than the retained repaired
+state. Initial-weight smoothing loses 33.403 ps, while detailed-only refinement
+accepts no minimax move and still loses 18.040 ps on partition_m. The original
+weights, phase order and acceptance guards remain unchanged. F remains open.</p>
 
 <h3>Completed driver-pin routing pass</h3>
 <p>Commit <code>ce3e628e8</code> adds persistent per-layer interval occupancy with

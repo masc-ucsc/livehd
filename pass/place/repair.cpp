@@ -2413,6 +2413,8 @@ Repair_result finalize_placement(const Result& initial, const Options& requested
   Repair_result result;
   auto          library = std::make_unique<hhds::GraphLibrary>();
   result.placed         = place(*initial.graph, *library, options);
+  // Coordinate-only legalization retains the previous GP continuation state.
+  result.placed.gp_density_weight = initial.gp_density_weight;
   result.libraries.push_back(std::move(library));
   check_placed_legality(result.placed, options);
   const auto& before_rc         = initial.parasitics;
@@ -2501,6 +2503,8 @@ Repair_result refine_regions(Result initial, const Options& requested, const Eva
   Repair_result result;
   auto          library = std::make_unique<hhds::GraphLibrary>();
   result.placed         = place(*initial.graph, *library, options);
+  // Coordinate-only legalization retains the previous GP continuation state.
+  result.placed.gp_density_weight = initial.gp_density_weight;
   result.libraries.push_back(std::move(library));
   check_placed_legality(result.placed, options);
   std::map<std::string, std::pair<double, double>> old_position;
@@ -2541,6 +2545,8 @@ Repair_result sat_align_placed(Result initial, const Options& requested, const E
   Repair_result result;
   auto          library = std::make_unique<hhds::GraphLibrary>();
   result.placed         = place(*initial.graph, *library, options);
+  // Coordinate-only legalization retains the previous GP continuation state.
+  result.placed.gp_density_weight = initial.gp_density_weight;
   result.libraries.push_back(std::move(library));
   check_placed_legality(result.placed, options);
   result.timing = evaluate(result.placed);
@@ -2778,6 +2784,7 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
             auto       owner           = std::make_unique<hhds::GraphLibrary>();
             require_growth_budget(*graph, trial_options);
             auto       placed       = place(*graph, *owner, trial_options);
+            placed.gp_density_weight = result.placed.gp_density_weight;
             const auto timing_start = std::chrono::steady_clock::now();
             auto       next         = evaluate(placed);
             const auto timing_done  = std::chrono::steady_clock::now();
@@ -2978,6 +2985,7 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
         auto library = std::make_unique<hhds::GraphLibrary>();
         require_growth_budget(*graph, trial_options);
         auto       placed = place(*graph, *library, trial_options);
+        placed.gp_density_weight = result.placed.gp_density_weight;
         const auto next   = evaluate(placed);
         w.Key("delay");
         w.Double(next.delay);

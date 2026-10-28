@@ -622,7 +622,9 @@ from 1 to 5 with 0.5 smoothing; clock and reset networks are excluded.
 `synth.place.timing_rounds` allows 1–8 refinement attempts (default 3). They are
 skipped when setup is already met; electrical repair remains a separate phase. Each attempt uses
 the current coordinates and normalized density weight, fixed IOs, the configured
-final wirelength smoothing scale, and at most 100 GP iterations. A candidate
+final wirelength smoothing scale, and at most 100 GP iterations. Physical repair,
+resizing, region refinement and final legalization retain the full-GP density
+coefficient, so a later warm refinement does not restart density from the default. A candidate
 must stay within 3% of the initial HPWL and be density-feasible before detailed
 timing is evaluated; routability flows also require solver convergence. The
 resulting area must stay within 3%. Accepted candidates must improve timing

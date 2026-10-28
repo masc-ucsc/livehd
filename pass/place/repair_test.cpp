@@ -262,6 +262,7 @@ TEST_F(Buffer_repair, FinalLegalizationReusesTimingOnlyForIdenticalPhysicalState
   options.density = .5;
   graph->get_output_pin("y").connect_driver(gate("sky130_fd_sc_hd__inv_1", "sink", graph->get_input_pin("a")));
   auto           initial  = place(*graph, flat, options);
+  ASSERT_TRUE(initial.gp_density_weight);
   const auto     before   = timing(initial);
   unsigned       calls    = 0;
   const Evaluate evaluate = [&](const Result& state) {
@@ -272,6 +273,7 @@ TEST_F(Buffer_repair, FinalLegalizationReusesTimingOnlyForIdenticalPhysicalState
   EXPECT_EQ(calls, 0U);
   EXPECT_EQ(reused.timing->delay, before.delay);
   EXPECT_EQ(reused.placed.parasitics->nets, initial.parasitics->nets);
+  EXPECT_EQ(reused.placed.gp_density_weight, initial.gp_density_weight);
   equivalent(reused.placed);
   rapidjson::Document report;
   report.Parse(reused.report.c_str());
@@ -2297,6 +2299,8 @@ TEST_F(Buffer_repair, RejectsWorseTrialsAndRebuildsEveryFanoutBranch) {
     graph->get_output_pin(name).connect_driver(p);
   }
   auto       placed   = place(*graph, flat, options);
+  ASSERT_TRUE(placed.gp_density_weight);
+  const auto density_weight = placed.gp_density_weight;
   // Controlled objective isolates the rebuffer mutation/rollback machinery
   // from the timing heuristic: only a newly balanced tree is an improvement.
   const auto evaluate = [&](const Result& r) {
@@ -2306,6 +2310,7 @@ TEST_F(Buffer_repair, RejectsWorseTrialsAndRebuildsEveryFanoutBranch) {
     return f;
   };
   const auto repaired = repair_buffers(std::move(placed), options, evaluate);
+  EXPECT_EQ(repaired.placed.gp_density_weight, density_weight);
   EXPECT_GT(count(repaired.placed, "__place_rebuffer"), 1);
   EXPECT_EQ(count(repaired.placed, "root"), 0);
   equivalent(repaired.placed);
