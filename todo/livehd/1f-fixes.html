@@ -29,10 +29,10 @@ listed below. Historical measurements are retained in
 recorded revisions. Raw experiments and failed runs stay outside the build.</p>
 
 <h3 id="checkpoint">Reproducible source checkpoint</h3>
-<p>This indexed-RC follow-up builds on the density-state fix in LiveHD
-<a href="https://github.com/masc-ucsc/livehd/commit/a3136fd5e745059d177edc0c31d71ed45e9f7298"><code>a3136fd5e</code></a>.
+<p>This timing-arc storage follow-up builds on the indexed-RC checkpoint in LiveHD
+<a href="https://github.com/masc-ucsc/livehd/commit/706d22ee0cf49e3341223f3ff2bc678839f3d9c8"><code>706d22ee0</code></a>.
 <code>MODULE.bazel</code> uses published commits for OpenTimer
-<a href="https://github.com/masc-ucsc/OpenTimer/commit/5f38099bd18282860505692b176f4f9cf2fe0d78"><code>5f38099b</code></a>
+<a href="https://github.com/masc-ucsc/OpenTimer/commit/c5c53b561a2f0ffca2631d4234c9f2485db7e862"><code>c5c53b56</code></a>
 and DREAMPlace
 <a href="https://github.com/masc-ucsc/DREAMPlace/commit/3bd9bc36cf8dbab376ae87a78bcc5e0f328a6e89"><code>3bd9bc36</code></a>.
 All owned dependency pins are reachable from their upstream branches; no sibling
@@ -79,10 +79,14 @@ complete placement flow. Two later control-port helpers receive empty library
 paths and read no files. All three small-design reports record one Liberty file
 read and one parse per LEF; lfsr placement remains about 2.2 s, within 5 s.
 The file-backed parse-once lfsr acceptance is verified.</td></tr>
-<tr><td><a href="#D">D — pure-GP quality</a></td><td>The fixed-I/O imported minimax
-experiment reaches 42,653.419 µm HPWL in 4.531 s; the own-floorplan experiment reaches
-46,071.875 µm in 7.909 s, meeting both numerical limits. Fresh equal-overflow traces
-against OpenROAD remain incomplete.</td></tr>
+<tr><td><a href="#D">D — pure-GP quality</a></td><td>Open. The historical fixed-I/O
+imported minimax result (42,653.419 µm in 4.531 s) explicitly enabled synthesis-buffer
+cleanup and does not establish default-flow acceptance. The fresh v92 replay
+without that override reports 111,713.934 µm internal HPWL in 4.577 s and stops
+with <code>density_infeasible</code> at the unchanged 0.5 target. Independent
+scoring and matched OpenROAD overflow traces remain incomplete. The historical
+own-floorplan result (46,071.875 µm in 7.909 s) is also not a current-default
+acceptance result.</td></tr>
 <tr><td><a href="#E">E — convergence</a></td><td>Open. Minimax needs 640 main
 iterations (740 total) in v74; the historical pure-GP experiment used 820 total.
 A common threefold stalled-density ramp reduces minimax to 560 main / 660 total
@@ -112,11 +116,13 @@ before repair, with only 10 net additional cells afterward. The new report
 identifies constants by Liberty master and exposes their counts/area as a subset
 still fully charged to the original budget. The cause is diagnosed; admission of
 mandatory physical preparation and the broader census remain unresolved.</td></tr>
-<tr><td><a href="#I">I — scaling</a></td><td>Open. Fresh Gemmini v74 control and
-candidate both exceed the diagnostic memory guard: 735.214 s / 16,399 MiB and
-824.553 s / 16,420 MiB tree RSS. The candidate runs longer before the guard;
-these incomplete flows establish neither a speed ratio nor compliance with the
-strict 16-decimal-GB limit. CNN v74 completes in 1,997.801 s placement
+<tr><td><a href="#I">I — scaling</a></td><td>Open. Fresh Gemmini v91 control and
+candidate, both using the default allocator and strict 16-decimal-GB guard,
+stop at 689.394 s / 15,626,936 KiB and 935.324 s / 15,657,624 KiB sampled
+tree RSS. Compact shared arcs reduce memory on completed smaller flows, but
+Gemmini still exceeds the limit. These incomplete flows establish neither a
+speed ratio nor full-flow QoR acceptance. They supersede the looser v74
+diagnostic guard runs. CNN v74 completes in 1,997.801 s placement
 (2,284.909 s full flow) at 10,306,872 KiB peak process RSS. Its independently
 scored WNS is −26,531.888 ps; the original scorer hit the host-reserve guard and
 only scoring was retried. It still stops with <code>route_stalled</code> and
@@ -224,6 +230,35 @@ The default allocator, placement options, phase order and acceptance guards are
 unchanged. Rejected experiments and raw results stay outside Git and Bazel.
 The completed implementation work is separated from the open A–J acceptance
 items above; none of those unmet requirements is marked solved.</p>
+
+<h3 id="arc-storage">Compact timing arcs and publication validation</h3>
+<p>OpenTimer stores delay validity separately from its float values and consumes
+each arc's effective load during slew propagation. Arc storage falls from 216
+to 152 bytes on the measured build. Compatible MIN/MAX propagation arcs share
+storage only when their complete authored timing sequences agree in order,
+endpoints, type, sense and condition. Their numerical tables remain separate;
+setup/hold constraints and mismatched sequences retain separate arcs. Regression
+coverage checks load changes, missing transitions, ideal-clock restoration,
+case masks, different corner tables, repowering and multiple timing workers.</p>
+<p>Fresh v91 candidates preserve final DEFs and independent QoR exactly on lfsr,
+minimax, NVDLA/partition_m and CoralNPU, using common defaults and 100 ps reset-cut
+clocks. Placement times are 2.126 → 2.134 s, 24.071 → 24.086 s,
+30.672 → 31.085 s and 600.840 → 606.886 s. These single samples are within
+1.4% of their controls and satisfy the 1.5× time bound; they do not establish
+a speedup. CoralNPU peak process RSS falls from 6,684.992 to 6,234.145 MiB.</p>
+<p>The fixed-geometry partition_c replay preserves DEF and timing byte-for-byte.
+Peak process RSS falls from 6,435.125 to 5,933.188 MiB, with 1.37% fewer
+instructions; CPU time is essentially unchanged at 63.18 → 63.66 s.
+This replay is evidence for storage reduction, not fresh-placement acceptance.
+The default allocator and all public placement options remain unchanged.</p>
+<p>The final Bazel check uses the published OpenTimer commit with no repository
+override: <code>celllib_smoke</code>, <code>path_report</code>,
+<code>rc_propagation</code>, <code>rc_ceff</code>, <code>rc_waveform</code>,
+<code>arc_adjacency</code> and <code>physical_session_test</code> all pass.
+<code>lhd</code>, <code>physical_repair</code> and
+<code>signal_route_bench</code> build successfully. Owned dependencies are
+reachable from their fetched upstream branches. Only source, documentation
+and the Bazel pin are published; raw results remain outside Git.</p>
 
 <h3>Completed driver-pin routing pass</h3>
 <p>Commit <code>ce3e628e8</code> adds persistent per-layer interval occupancy with

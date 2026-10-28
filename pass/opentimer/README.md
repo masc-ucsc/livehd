@@ -348,6 +348,13 @@ separately through OpenTimer's `Net::effective_load` and the diagnostic probe.
 This remains an RC approximation. Keep its residual differences separate from
 Liberty/constraint errors and differences between placement RC estimators.
 
+OpenTimer consumes each cell arc's fitted effective load during slew propagation
+and stores the resulting delay with separate validity bits. Compatible MIN/MAX
+propagation arcs share storage when the complete authored timing sequences match
+in order, endpoints, type, sense and condition; each corner retains its own
+characterized tables. Constraints and mismatched sequences keep separate arcs.
+This reduces timing storage without changing the RC model or public delay API.
+
 Compare a persistent session with a fresh session before changing the timing
 model. Then compare engines with zero wire RC and with an identical exported RC
 network. Inspect one common path by transition, not just each engine's own worst
