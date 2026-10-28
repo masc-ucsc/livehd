@@ -29,10 +29,10 @@ listed below. Historical measurements are retained in
 recorded revisions. Raw experiments and failed runs stay outside the build.</p>
 
 <h3 id="checkpoint">Reproducible source checkpoint</h3>
-<p>This timing-arc storage follow-up builds on the indexed-RC checkpoint in LiveHD
-<a href="https://github.com/masc-ucsc/livehd/commit/706d22ee0cf49e3341223f3ff2bc678839f3d9c8"><code>706d22ee0</code></a>.
+<p>This pin-name storage follow-up builds on the timing-arc checkpoint in LiveHD
+<a href="https://github.com/masc-ucsc/livehd/commit/6999a588cc0bc23d6a58584c6bd4cfc633f00e77"><code>6999a588c</code></a>.
 <code>MODULE.bazel</code> uses published commits for OpenTimer
-<a href="https://github.com/masc-ucsc/OpenTimer/commit/c5c53b561a2f0ffca2631d4234c9f2485db7e862"><code>c5c53b56</code></a>
+<a href="https://github.com/masc-ucsc/OpenTimer/commit/67180f302f72c9257162f3cc5137ed8b24dfd507"><code>67180f30</code></a>
 and DREAMPlace
 <a href="https://github.com/masc-ucsc/DREAMPlace/commit/3bd9bc36cf8dbab376ae87a78bcc5e0f328a6e89"><code>3bd9bc36</code></a>.
 All owned dependency pins are reachable from their upstream branches; no sibling
@@ -83,8 +83,10 @@ The file-backed parse-once lfsr acceptance is verified.</td></tr>
 imported minimax result (42,653.419 µm in 4.531 s) explicitly enabled synthesis-buffer
 cleanup and does not establish default-flow acceptance. The fresh v92 replay
 without that override reports 111,713.934 µm internal HPWL in 4.577 s and stops
-with <code>density_infeasible</code> at the unchanged 0.5 target. Independent
-scoring and matched OpenROAD overflow traces remain incomplete. The historical
+with <code>density_infeasible</code> at the unchanged 0.5 target. The v93 independent
+score is 111,608.583 µm; a fresh OpenROAD run retaining the same buffers scores
+104,718.690 µm. This input audit does not meet the original 50,317.3 µm limit;
+the preprocessing and density differences are recorded below. The historical
 own-floorplan result (46,071.875 µm in 7.909 s) is also not a current-default
 acceptance result.</td></tr>
 <tr><td><a href="#E">E — convergence</a></td><td>Open. Minimax needs 640 main
@@ -259,6 +261,55 @@ override: <code>celllib_smoke</code>, <code>path_report</code>,
 <code>signal_route_bench</code> build successfully. Owned dependencies are
 reachable from their fetched upstream branches. Only source, documentation
 and the Bazel pin are published; raw results remain outside Git.</p>
+
+<h3 id="pin-name-storage">Pin-name ownership and publication cleanup</h3>
+<p>Timer-owned pins now borrow their stable unordered-map keys instead of owning
+another copy of the same name. Standalone pins still own their names. The public
+reference API and timing calculations are unchanged; regression coverage checks
+caller mutation, temporary strings, map rehash and unrelated gate removal.
+On this build, each pin shrinks from 464 to 448 bytes in addition to eliminating
+its duplicate string allocation.</p>
+<p>The fixed-geometry partition_c replay preserves its DEF and timing JSON
+byte-for-byte. Peak process RSS falls from 5,933.188 to 5,787.496 MiB
+(145.691 MiB); CPU time is 63.66 → 61.69 s and wall time is 64.203 → 62.187 s.
+This is one matched replay, not a full-flow Gemmini memory acceptance result.</p>
+<p>Fresh v95 production runs use common defaults and 100 ps clocks with reset
+false paths. Final DEFs and independent QoR scores match the immutable v91
+controls exactly on lfsr, minimax, partition_m and CoralNPU. Placement times are
+2.134 → 2.119 s, 24.086 → 23.403 s, 31.085 → 32.218 s and
+606.886 → 597.975 s, respectively, all within 1.5×. CoralNPU peak process RSS
+falls from 6,234.145 to 6,207.121 MiB. These single samples verify the time guard;
+they do not establish a repeatable whole-flow speedup.</p>
+<p>Seven focused optimized timing tests pass with the published OpenTimer pin,
+including the name-lifetime regression and the physical-session integration test.
+The <code>lhd</code>, <code>physical_repair</code> and
+<code>signal_route_bench</code> targets build without a local repository override.
+Associated repositories are synchronized with upstream; no benchmark data is
+needed by these Bazel targets.</p>
+<p>The current work is closed as a source checkpoint. Rejected initialization
+and smoothing experiments are documented below and have no production patch.
+Completed routing and dependency-publication work need no further action;
+remaining A–J acceptance work stays open with its original requirements.
+Raw benchmark outputs, frozen binaries and profiler files remain outside Git.</p>
+
+<h3 id="gp-input-audit">Pure-GP input and initialization audit</h3>
+<p>The v93 runs use the original flow-C geometry, fixed signal I/O and 623 fixed
+physical cells. With all 17,680 logical cells and 1,772 buffers retained, default
+LiveHD GP plus legalization takes 4.527 s and independently scores
+111,608.583 µm HPWL / −872.851 ps WNS. A fresh one-CPU OpenROAD GP plus
+legalization takes 2.684 s and scores 104,718.690 µm / −857.192 ps on the same
+netlist. OpenROAD includes pin-density area adjustment and derives a 0.77 density
+from its 0.76 lower bound; LiveHD retains its requested 0.5 target. Thus the
+6.6% HPWL difference is evidence about these inputs, not equal-density acceptance.</p>
+<p>Removing buffers in a separate OpenROAD diagnostic lowers HPWL to 38,165.959 µm,
+but changes the logical count to 15,908 and WNS to −10,224.589 ps. The historical
+low-wirelength result must not be treated as a retained-buffer reference.
+Center and quadratic seeds retain every original cell and reduce initial
+LiveHD HPWL to 11,677.504 and 9,052.041 µm, respectively, yet their final scores
+remain 110,545.660 and 109,739.435 µm. The quadratic candidate loses 5.748 ps WNS
+against the default control. Earlier fine-smoothing diagnostics also worsen
+wirelength. None of these experiments changes production options or algorithms;
+the original D acceptance and equal-overflow trace requirements remain open.</p>
 
 <h3>Completed driver-pin routing pass</h3>
 <p>Commit <code>ce3e628e8</code> adds persistent per-layer interval occupancy with
