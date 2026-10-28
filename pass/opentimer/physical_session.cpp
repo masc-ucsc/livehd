@@ -364,7 +364,7 @@ struct Physical_session::Impl : Pass_opentimer {
       nodes.reserve(net.nodes.size());
       for (size_t i = 0; i < net.nodes.size(); ++i) {
         const auto& node = net.nodes[i];
-        nodes.push_back(node.pin.empty() ? std::format("{}:__lhd_steiner_{}", name, i) : physical_timing_pins_.at(node.pin));
+        nodes.push_back(node.pin.empty() ? std::format("{}:__lhd_steiner_{}", name, i) : physical_timing_pin(node.pin).name());
         mapped.caps.emplace_back(nodes.back(), "", node.capacitance_ff);
         mapped.lcap += node.capacitance_ff;
       }
@@ -729,8 +729,8 @@ struct Physical_session::Impl : Pass_opentimer {
         }
       }
       if (reverse_pins.empty()) {
-        for (const auto& [physical, timer] : s.physical_timing_pins_) {
-          reverse_pins.emplace(timer, physical);
+        for (size_t index = 0; index < s.physical_timing_pins_.size(); ++index) {
+          reverse_pins.emplace(s.physical_timing_pins_[index]->name(), s.physical_feedback_index_->labels[index]);
         }
       }
       std::vector<std::pair<std::string, double>> result;
@@ -963,12 +963,8 @@ struct Physical_session::Impl : Pass_opentimer {
     if (!ranking_layout) {
       auto layout = std::make_shared<Ranking::Layout>();
       layout->labels.reserve(physical_timing_pins_.size());
-      ranking_pins.clear();
-      ranking_pins.reserve(physical_timing_pins_.size());
-      for (const auto& [physical, name] : physical_timing_pins_) {
-        layout->labels.push_back(physical);
-        ranking_pins.push_back(&timer.pins().at(name));
-      }
+      layout->labels = physical_feedback_index_->labels;
+      ranking_pins   = physical_timing_pins_;
       layout->net_offsets.reserve(physical_rc_->nets.size() + 1);
       for (const auto& net : physical_rc_->nets) {
         layout->net_offsets.push_back(layout->net_pins.size());

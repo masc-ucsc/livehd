@@ -2657,22 +2657,6 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     const double unit_ps   = timer.time_unit() ? timer.time_unit()->value() * 1e12 : 1000;
     if (feedback_) {
       feedback_->time_unit_ps = unit_ps;
-      // Geometry and cell-strength changes retain physical identities. Keep
-      // those labels alive across snapshots, rebuilding only after topology
-      // changes. Values remain independently owned by each evaluation.
-      if (!physical_feedback_index_ || physical_feedback_index_->labels.size() != physical_timing_pins_.size()
-          || !std::equal(physical_feedback_index_->labels.begin(),
-                         physical_feedback_index_->labels.end(),
-                         physical_timing_pins_.begin(),
-                         [](const auto& label, const auto& entry) { return label == entry.first; })) {
-        auto index = std::make_shared<livehd::timing::Feedback::Pin_index>();
-        index->labels.reserve(physical_timing_pins_.size());
-        for (const auto& [physical, name] : physical_timing_pins_) {
-          (void)name;
-          index->labels.push_back(physical);
-        }
-        physical_feedback_index_ = std::move(index);
-      }
       auto& dense = feedback_->dense.emplace();
       dense.index = physical_feedback_index_;
       dense.values.resize(dense.index->labels.size());
@@ -2681,17 +2665,10 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       j += std::format(",\"time_unit_ps\":{},\"physical_pins\":[", unit_ps);
     }
     bool comma = false;
-    size_t physical_index = 0;
-    for (const auto& [physical, name] : physical_timing_pins_) {
-      const auto index = physical_index++;
-      const auto it = pins.find(name);
-      if (it == pins.end()) {
-        if (feedback_) {
-          feedback_->dense->erase(index);
-        }
-        continue;
-      }
-      const auto&                   pin = it->second;
+    for (size_t index = 0; index < physical_timing_pins_.size(); ++index) {
+      const auto&                   physical = physical_feedback_index_->labels[index];
+      const auto&                   pin      = *physical_timing_pins_[index];
+      const auto&                   name     = pin.name();
       livehd::timing::Feedback::Pin value;
       if (const auto electrical = electrical_pins.find(name); electrical != electrical_pins.end()) {
         value.violations        = electrical->second.first;
@@ -2771,12 +2748,12 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       physical.try_emplace(point.pin, nullptr);
     }
     size_t remaining = physical.size();
-    for (const auto& [name, timer_name] : physical_timing_pins_) {
+    for (size_t index = 0; index < physical_timing_pins_.size(); ++index) {
       if (!remaining) {
         break;
       }
-      if (auto it = physical.find(timer_name); it != physical.end() && !it->second) {
-        it->second = &name;
+      if (auto it = physical.find(physical_timing_pins_[index]->name()); it != physical.end() && !it->second) {
+        it->second = &physical_feedback_index_->labels[index];
         --remaining;
       }
     }

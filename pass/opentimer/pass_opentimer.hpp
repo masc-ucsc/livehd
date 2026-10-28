@@ -7,6 +7,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
@@ -54,8 +55,12 @@ protected:
   std::shared_ptr<const livehd::physical::Parasitics> previous_physical_rc_;
   std::shared_ptr<const livehd::physical::Parasitics> physical_rc_;
   std::map<std::string, std::string>                  physical_native_pins_;
-  std::map<std::string, std::string>                  physical_timing_pins_;
+  // One owned, sorted label index serves bindings and retained feedback.
+  // Timer pins survive geometry/repower/what-if edits. Rebind after topology
+  // reconciliation before any consumer can inspect removed/recycled pins.
   std::shared_ptr<const livehd::timing::Feedback::Pin_index> physical_feedback_index_;
+  std::vector<const ot::Pin*>                                physical_timing_pins_;
+  const ot::Pin&                                             physical_timing_pin(std::string_view physical) const;
   std::map<std::string, std::string>                  physical_memory_captures_;
   std::set<std::string>                               physical_clock_endpoints_;  // memory clock pins: RC sinks, not captures
   void                                                validate_physical_rc(const std::shared_ptr<hhds::Graph>& graph) const;

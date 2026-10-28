@@ -29,7 +29,7 @@ are retained in <a href="1f-measurements.json">1f-measurements.json</a>; they ar
 longer repeated as a chronological log on this page.</p>
 
 <h3 id="checkpoint">Reproducible source checkpoint</h3>
-<p>The reviewed implementation is published in LiveHD
+<p>The base implementation is published in LiveHD
 <a href="https://github.com/masc-ucsc/livehd/commit/fcc3ad4f9a5a4be56beafb069ea97928d3b21920"><code>fcc3ad4f9</code></a>.
 Its <code>MODULE.bazel</code> pins OpenTimer
 <a href="https://github.com/masc-ucsc/OpenTimer/commit/2306b447d81ce0e3b64d25a73da420d42891a7dd"><code>2306b447</code></a>
@@ -40,12 +40,21 @@ no sibling checkout or local repository override is required. The associated
 HighTide source fixes are published at
 <a href="https://github.com/masc-ucsc/HighTide/commit/8bb05a7b51f095722566b4de49c7695e562c3e41"><code>8bb05a7b</code></a>.
 Raw benchmark outputs and experimental worktrees are not build inputs.</p>
+<p>The dense physical pin-binding follow-up is integrated on upstream
+<code>9dbae9107</code>, including its published HHDS/HLOP pins. It replaces the
+physical-label/name map with stable timer-pin bindings and shares the owned label
+index with retained feedback. Topology reconciliation rebuilds bindings before
+use; geometry and cell-strength changes preserve them. A regression covers
+scratch-RC lifetime, alternating topology and temporary-cell rollback. The change
+preserves timing math, label order and all public defaults. Eight focused
+optimized Bazel targets pass on the merged tree, and both <code>lhd</code> and
+<code>physical_repair</code> build with the published dependency pins.</p>
 <p>Completed implementation work includes bounded driver-pin routing and persistent
 interval occupancy, placement reuse and shared technology, reduced timing feedback
 overhead, and compact timing/RC storage. The table below is the remaining acceptance
 checklist; publishing this checkpoint does not close those outstanding targets.</p>
 
-<p>The current source checkpoint passes eleven optimized Bazel test targets covering
+<p>The base source checkpoint passes eleven optimized Bazel test targets covering
 physical timing, placement, repair, sizing, I/O timing, clock/reset filtering and
 routing occupancy. The CLI, physical-repair tool and routing benchmark build with published dependency pins and no local
 repository override. Detailed timing snapshots now store values densely and share
@@ -73,14 +82,16 @@ The private flat constant-state sweep remains opt-in for both ABC and USYN.</p>
 <tr><td><a href="#A">A — STA evaluation count</a></td><td>Density-driven ranking and
 what-if trials limit detailed evaluations to 7 on lfsr, 3 on minimax, 3 on
 partition_m and 4 on coralnpu in the current matched controls. These flows also
-perform 8, 8, 8 and 12 coarse ranking evaluations, respectively. Complete the
+perform 8, 8, 8 and 12 coarse ranking evaluations, respectively. The completed
+v74 CNN flow uses 5 detailed and 9 ranking evaluations. Complete the
 all-design census and retain the WNS bound.</td></tr>
 <tr><td><a href="#B">B — incremental timing cost</a></td><td>Coarse in-loop RC,
 indexed rankings and selective reconciliation are implemented. Minimax checkpoint
 and final-evaluation numerical limits have passed, but total STA remains roughly
 24–34% of placement in the v74 pairs, above 10%. Detailed evaluations now use dense values with
 a shared immutable pin-label index, and evaluated connections use a dense pin-index
-array. The all-design STA-cost target remains open.</td></tr>
+array. Physical bindings now share that label index and avoid repeated timer
+pin-name lookups. The all-design STA-cost target remains open.</td></tr>
 <tr><td><a href="#C">C — shared technology</a></td><td>The placement session shares
 technology data; lfsr placement is about 2.2 s in the latest completed small pairs.
 The complete parse-once call-graph census remains to be verified.</td></tr>
@@ -92,22 +103,29 @@ against OpenROAD remain incomplete.</td></tr>
 iterations (740 total) in v74; the historical pure-GP experiment used 820 total. Macro and large designs still emit
 iteration/deadline or stalled-routing warnings despite acceptable overflow.</td></tr>
 <tr><td><a href="#F">F — physical-stage HPWL</a></td><td>Warm starts and bounded
-acceptance are implemented. Minimax passes at +1.05%; lfsr is +3.20%, exceeding +3%.</td></tr>
+acceptance are implemented. Minimax passes at +1.05%; lfsr is +3.20%, exceeding +3%.
+Independent scoring of rejected v75 warm refinements worsens WNS by 18.808 ps on
+minimax and 4.337 ps on partition_m, so loosening their acceptance gate is not
+supported by those experiments.</td></tr>
 <tr><td><a href="#G">G — timing consistency</a></td><td>Reset cuts, physical clock
 objectives and resynthesis history are implemented. Prior four-design final scores
 are within 10% of independent OpenSTA; every decision checkpoint and the broader
 resynthesis census remain unverified.</td></tr>
 <tr><td><a href="#H">H — repair growth</a></td><td>Area/cell budgets are implemented
-and the small-design checks pass. Revalidate the integrated checkpoint and extend
-the census to the large designs.</td></tr>
+and the small-design checks pass. The completed v74 CNN flow also stays within
+the 3% budget. Revalidate the integrated checkpoint and complete the large-design
+census.</td></tr>
 <tr><td><a href="#I">I — scaling</a></td><td>Open. Fresh Gemmini v74 control and
 candidate both exceed the diagnostic memory guard: 735.214 s / 16,399 MiB and
 824.553 s / 16,420 MiB tree RSS. The candidate runs longer before the guard;
 these incomplete flows establish neither a speed ratio nor compliance with the
-strict 16-decimal-GB limit. CNN v59 completes in 2,385.888 s
-at 12,461,456 KiB process RSS; partition_c v59 exceeds the guard. Matched 100 ps
-OpenROAD references are complete for Gemmini, CNN and partition_c.
-No CPU-parity acceptance is claimed.</td></tr>
+strict 16-decimal-GB limit. CNN v74 completes in 1,997.801 s placement
+(2,284.909 s full flow) at 10,306,872 KiB peak process RSS. Its independently
+scored WNS is −26,531.888 ps; the original scorer hit the host-reserve guard and
+only scoring was retried. It still stops with <code>route_stalled</code> and
+spends 10.11% of placement in STA. Partition_c v59 exceeds the guard and its fresh
+v74 run remains deferred. Matched 100 ps OpenROAD references are complete for
+Gemmini, CNN and partition_c. No all-design CPU-parity acceptance is claimed.</td></tr>
 <tr><td><a href="#J">J — macro failures</a></td><td>Fragmented rows are accepted by
 the shared import path. Corrected eyeriss and native Nyuzi reach placement but hit
 the memory guard. Imported Nyuzi reaches timing, then fails on 2,821 input pins
@@ -128,6 +146,16 @@ Time ratios range from 0.941× to 0.982×, within the 1.5× limit. CoralNPU peak
 process RSS changes from 6,950.5 to 6,716.6 MiB. These are single samples under
 concurrent load; no repeatable whole-design speedup or large-design memory-limit
 acceptance is claimed.</p>
+
+<p>The v75 dense-binding comparison uses <code>5cd36a1c5</code> as control,
+with the same defaults, 100 ps clocks and reset false paths. All four DEFs and
+independent QoR scores match exactly: lfsr 2.130 → 2.118 s, minimax 26.603 →
+24.999 s, partition_m 34.660 → 33.225 s, and coralnpu 671.668 → 674.468 s
+placement. All ratios remain below 1.5×; CoralNPU peak process RSS changes from
+6,736.0 to 6,611.1 MiB. These are single samples under concurrent load. Total STA
+still consumes 24–33% of placement, so the 10% target remains open. These
+performance numbers precede the upstream <code>9dbae9107</code> integration;
+they do not measure its unrelated placement-flow changes.</p>
 
 <p>Memory reviews avoid copies of temporary feedback and restart floorplans,
 defer persisted RC until final legalization, and omit report-only timing tables

@@ -528,6 +528,40 @@ TEST_F(PhysicalSession, ResizeRcTopologyAndRejectedTrialRollbackMatchFreshTiming
   EXPECT_EQ(session.statistics().inserted_gates, 1u);
   EXPECT_EQ(session.statistics().removed_gates, 1u);
 }
+TEST_F(PhysicalSession, PhysicalBindingsOutliveScratchRcAndRebindAfterTopologyChanges) {
+  using Purpose = livehd::opentimer::Physical_session::Purpose;
+  std::vector<std::pair<Feedback, Feedback>>        retained;
+  std::weak_ptr<const livehd::physical::Parasitics> discarded;
+  {
+    livehd::opentimer::Physical_session session(options);
+    for (unsigned step = 0; step < 6; ++step) {
+      // Alternating topology removes and recreates b's pins. Fresh scratch
+      // graphs/RC die each iteration, while detailed feedback stays alive.
+      Circuit    circuit(step % 2, step % 3 != 1, 100 + 500 * step, true);
+      const auto rank   = session.evaluate(circuit.graph, circuit.rc, {}, Purpose::ranking);
+      const auto actual = session.evaluate(circuit.graph, circuit.rc);
+      ASSERT_TRUE(actual.dense);
+      ASSERT_TRUE(rank.ranking);
+      EXPECT_EQ(actual.dense->index->labels, rank.ranking->layout->labels);
+      livehd::opentimer::Physical_session fresh(options);
+      retained.emplace_back(actual, fresh.evaluate(circuit.graph, circuit.rc));
+      compare(retained.back().first, retained.back().second);
+      EXPECT_TRUE(discarded.expired());
+      discarded         = circuit.rc;
+      auto&      whatif = session.whatif();
+      const auto mark   = whatif.mark();
+      whatif.add_cell("temporary_with_a_long_name", "sky130_fd_sc_hd__buf_1");
+      (void)whatif.wns();
+      whatif.rollback(mark);
+      compare(session.evaluate(circuit.graph, circuit.rc), actual);
+    }
+  }
+  EXPECT_TRUE(discarded.expired());
+  for (const auto& [actual, expected] : retained) {
+    compare(actual, expected);
+  }
+}
+
 TEST_F(PhysicalSession, RejectsCyclicAndDisconnectedRcBeforeTiming) {
   Circuit circuit(false, false);
   auto&   net = circuit.rc->nets.front();
