@@ -27,7 +27,17 @@ module args(input [7:0] a, output [7:0] b);
     logic signed [7:0] narrow;
     h = 0; binary = 0; octal = 0; packed_text = 0; narrow = 0;
     status = $value$plusargs("number=%d", number);
-    if ($test$plusargs("number=")) assert (status == 1); else assert (number == 19 && status == 0);
+    // begin/end on both arms is REQUIRED, not style: Verilator 5.048 hits an
+    // internal error ("V3Ast.cpp:594: Node has no back, already unlinked?") on a
+    // bare immediate assert used directly as an if/else branch, which this test
+    // reaches through its --cc --assert oracle. The assertions are unchanged;
+    // only the statement nesting is explicit. The `number == 19` spelling is
+    // load-bearing: a later sed rewrites it to 20 for the edit leg.
+    if ($test$plusargs("number=")) begin
+      assert (status == 1);
+    end else begin
+      assert (number == 19 && status == 0);
+    end
     status = $value$plusargs("file=%s", file);
     status = $value$plusargs("hex=%h", h);
     status = $value$plusargs("binary=%b", binary);
