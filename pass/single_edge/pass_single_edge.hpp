@@ -70,6 +70,10 @@ struct Result {
   // Decision 3A: same-edge readers given the latch's value AT the edge (see
   // apply_reader_forwards) instead of a rule-4 refusal.
   int  reader_forwards = 0;
+  // DATA-gated latches made transparent (see make_data_latch_transparent), and
+  // the reader inputs moved from the held Q onto the open value.
+  int  data_latches_transparent = 0;
+  int  data_latch_reads         = 0;
   // Identity of the REFERENCE clock the slots are expressed against (a graph
   // input's name when there is one; "" when the design has no clock at all).
   // A miter whose two sides normalize against DIFFERENT reference clocks is
@@ -115,6 +119,12 @@ struct Options {
   // `reset ? RV : (E ? D : Q)` -- instead of refusing them. Off by default: with
   // it off rule 4 refuses exactly as before, which pass/lec's fallback relies on.
   bool forward_same_edge = false;
+  // A DATA-gated latch (its enable is logic, not a clock phase) is transparent
+  // whenever the enable holds, so every reader -- a flop at the edge, an output,
+  // combinational logic -- sees `reset ? RV : (E ? D : Q)`, not the held Q the
+  // retyped flop keeps. On by default; `false` restores the flop-with-enable
+  // lowering, which is a full cycle late on every same-cycle read.
+  bool transparent_data_latch = true;
 };
 
 // Normalize `g` in place. `defs` (may be empty) are the resolution-library

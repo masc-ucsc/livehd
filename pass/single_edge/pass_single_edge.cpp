@@ -1792,6 +1792,112 @@ int apply_reader_forwards(hhds::Graph& g, const std::vector<std::pair<hhds::Node
   return rewired;
 }
 
+// ---------------------------------------------------------------------------
+// DATA-gated latches: the open value
+//
+// A data-gated latch -- PicoRV32's `always @*` case on mem_wordsize, which
+// leaves mem_rdata_word unassigned on an unreachable arm -- is retyped into a
+// flop with the latch's enable: that flop is the value the latch HOLDS. But the
+// latch is level-sensitive: while its enable holds it passes D straight
+// through, so a reader in the same cycle (the posedge flop that latches a load,
+// an output, combinational logic) sees D, not the held Q. Leaving the readers on
+// Q is the full-cycle error rule 4 names for a same-edge pair, and rule 4 never
+// sees it here: a data-gated latch and the posedge flops reading it are in
+// different commit classes. Measured on PicoRV32 P0: every load returned the
+// previous load's data.
+//
+// So every reader moves to the open value `reset ? RV : (E ? D : Q)`, exactly
+// apply_reader_forwards' value at the edge, built from the latch's own enable
+// (after the active-low lowering, before any slot gate: transparency does not
+// depend on the phase). Exempt are the latch itself and the nodes in its own
+// din/enable/reset cone: that is where the hold arm reads Q, and moving such a
+// read onto the open value would close a combinational loop.
+absl::flat_hash_set<hhds::Class_index> latch_own_cone(const hhds::Node_class& l) {
+  absl::flat_hash_set<hhds::Class_index> seen;
+  std::vector<hhds::Pin_class>           work;
+  for (const char* pin : {"din", "enable", "reset_pin", "negreset", "initial"}) {
+    if (auto d = sink_driver(l, pin); !d.is_invalid()) {
+      work.push_back(d);
+    }
+  }
+  while (!work.empty()) {
+    auto p = work.back();
+    work.pop_back();
+    if (p.is_invalid() || p.is_const() || gu::is_graph_input_pin(p)) {
+      continue;
+    }
+    const auto n = p.get_master_node();
+    if (gu::is_type_register(n) || gu::type_op_of(n) == Ntype_op::Sub) {
+      continue;
+    }
+    if (!seen.insert(n.get_class_index()).second) {
+      continue;
+    }
+    for (auto sink : n.inp_sorted_pins()) {
+      for (const auto& drv : sink.get_driver_pins()) {
+        work.push_back(drv);
+      }
+    }
+  }
+  return seen;
+}
+
+// Returns the number of reader inputs moved onto the open value.
+int make_data_latch_transparent(hhds::Graph& g, const hhds::Node_class& l) {
+  const auto q = l.get_driver_pin(0);
+  if (q.is_invalid()) {
+    return 0;
+  }
+  const auto cone = latch_own_cone(l);
+  absl::flat_hash_set<hhds::Class_index> made;  // the muxes built here read Q
+  const auto mux = [&](const hhds::Pin_class& sel, const hhds::Pin_class& if0, const hhds::Pin_class& if1) {
+    auto m = gu::create_typed_node(g, Ntype_op::Mux);
+    made.insert(m.get_class_index());
+    sel.connect_sink(livehd::graph_util::setup_sink_pid(m, 0));
+    if0.connect_sink(livehd::graph_util::setup_sink_pid(m, 1));
+    if1.connect_sink(livehd::graph_util::setup_sink_pid(m, 2));
+    auto o = m.create_driver_pin(0);
+    copy_width_sign(q, o);  // the latch's width and sign, NOT its name
+    return o;
+  };
+  const auto din = sink_driver(l, "din");
+  if (din.is_invalid()) {
+    return 0;  // no data: nothing passes through
+  }
+  hhds::Pin_class v = din;
+  if (const auto en = sink_driver(l, "enable"); !en.is_invalid()) {
+    v = mux(en, q, v);
+  }
+  if (const auto rst = sink_driver(l, "reset_pin"); !rst.is_invalid()) {
+    auto rv = sink_driver(l, "initial");
+    if (rv.is_invalid()) {
+      rv = gu::create_const(g, *Dlop::create_integer(0));
+    }
+    const auto neg = sink_driver(l, "negreset");
+    v = (neg.is_const() && !neg.is_known_false()) ? mux(rst, rv, v) : mux(rst, v, rv);
+  }
+  if (v.get_class_index() == q.get_class_index()) {
+    return 0;
+  }
+  // Snapshot first: out_edges() is a view over live storage.
+  std::vector<hhds::Pin_class> readers;
+  for (const auto& e : q.out_edges()) {
+    const auto rn = e.sink.get_master_node();
+    if (rn.get_class_index() == l.get_class_index() || made.contains(rn.get_class_index())
+        || cone.contains(rn.get_class_index())) {
+      continue;
+    }
+    readers.push_back(e.sink);
+  }
+  // Delete the EDGE, keep the sink pin (graph/clock_gate.cpp's redirect_readers): deleting
+  // the pin and reconnecting renumbers a banked operand, which broke a Concat's lane table.
+  for (const auto& sink : readers) {
+    sink.del_sink(q);
+    v.connect_sink(sink);
+  }
+  return static_cast<int>(readers.size());
+}
+
 Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Options& opts) {
   Result     r;
   const bool quiet = opts.quiet || opts.dry_run;
@@ -2619,6 +2725,10 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       drop_sink(e.node, "posclk");
       gu::set_type_op(e.node, Ntype_op::Flop);
       ++r.latches_retyped;  // clock_pin is bound by the shared rebind below
+      if (e.cc.role != lc::Net_role::Clock && opts.transparent_data_latch) {
+        r.data_latch_reads += make_data_latch_transparent(*g, e.node);
+        ++r.data_latches_transparent;
+      }
     } else if (!e.cc.rising) {
       // A negedge flop becomes a posedge flop in slot 1.
       drop_sink(e.node, "posclk");
@@ -3016,9 +3126,14 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       r.mem_ports_slotted,
       r.clock_domains,
       plan.domains > 1 ? " exported" + plan.domain_desc : "",
-      r.reader_forwards > 0
+      (r.reader_forwards > 0
                  ? std::format(", {} same-edge reader input(s) forwarded from {} latch read(s)", r.reader_forwards, plan.forwards.size())
-                 : "",
+                 : std::string{})
+          + (r.data_latches_transparent > 0
+                 ? std::format(", {} data-gated latch(es) transparent over {} reader input(s)",
+                               r.data_latches_transparent,
+                               r.data_latch_reads)
+                 : std::string{}),
       need.why.empty() ? "def-driven" : need.why);
   livehd::diag::info(kPass, "single-edge-applied", "progress")
       .msg("edge normalization on `{}`: {}", g->get_name(), r.reason)
@@ -3045,6 +3160,11 @@ void Pass_single_edge::setup() {
                        "true|false. Admit a flop committing on the edge a latch it reads closes on (rule 4) by giving "
                        "that reader alone the latch's value at the edge, instead of refusing the pair",
                        "false");
+  m.add_label_optional("transparent_data_latch",
+                       "true|false. Give every reader of a DATA-gated latch its open value "
+                       "`reset ? RV : (E ? D : Q)` (the latch is level-sensitive); false keeps the "
+                       "flop-with-enable lowering, a full cycle late on same-cycle reads",
+                       "true");
   m.add_label_optional("multi_clock",
                        "true|false. Export unrelated clock domains (plain posedge state off the reference clock is "
                        "left on its own clock, for a consumer that carries clock ordinals) instead of refusing them",
@@ -3101,6 +3221,7 @@ void Pass_single_edge::work(Eprp_var& var) {
   livehd::single_edge::Options opts;
   opts.multi_clock       = std::string{var.get("multi_clock", "false")} == "true";
   opts.forward_same_edge = std::string{var.get("forward_same_edge", "false")} == "true";
+  opts.transparent_data_latch = std::string{var.get("transparent_data_latch", "true")} != "false";
   const auto res         = livehd::single_edge::normalize(g, defs, opts);
   if (res.error) {
     livehd::diag::err("pass.single_edge", "normalize-refused", "unsupported")

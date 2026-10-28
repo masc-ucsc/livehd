@@ -1161,6 +1161,17 @@ sh_test(
     data = ["//lhd"],
 )
 
+# A DATA-gated latch (PicoRV32's `always @*` case with an unassigned arm) read
+# in the same cycle -- by a posedge flop, an output and logic -- is lowered
+# transparent; with LHD_EXTERNAL_SIM=1 an Icarus differential against the RTL,
+# with the old flop-with-enable lowering as the negative control.
+sh_test(
+    name = "single_edge_data_latch_test",
+    size = "large",
+    srcs = ["single_edge_data_latch_test.sh"],
+    data = ["//lhd"],
+)
+
 # LIVE test for todo/livehd/2f-latch M8 steps 3b + 3g: all FOUR commit classes
 # (posedge, negedge, transparent-high, transparent-low) in ONE module.
 # Discrimination is checked through `lhd lec` (collapsing any two classes must
