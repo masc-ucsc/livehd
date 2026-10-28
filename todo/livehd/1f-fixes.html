@@ -13,7 +13,7 @@
 <p>High-priority fixes so that <code>lhd synth --set synth.place=true</code> reaches OpenROAD's
 pre-CTS QoR (HPWL, cells, WNS, power measured by the same OpenSTA script) with <em>less CPU time</em>
 than OpenROAD's floorplan → global place → resize → detailed place on the HighTide asap7 benchmark.
-Implementation is in progress; the original measurements and acceptance targets are retained below.</p>
+The current optimization pass is closed; the remaining acceptance work and its original targets are retained below.</p>
 <p><span class="status">Optimization pass complete — remaining A–J acceptance is open</span>
 Source of the issues: <code>HighTide/repros/issues.md</code> (LiveHD <code>8e017a011</code>, HighTide <code>9648393ce</code>,
 host llmHDL, one CPU for LiveHD, 8 threads for OpenROAD). Each new comparison records its
@@ -21,7 +21,7 @@ frozen binaries and uses <code>perf</code> and <code>/usr/bin/time</code>; the a
 benchmark's <code>repros/score.tcl</code>. Historical measurements apply to their recorded revisions.</p>
 
 <h2 id="progress">Current implementation and acceptance status</h2>
-<p>The current optimization pass is reviewed and ready as a shared source baseline.
+<p>The current optimization pass is reviewed and closed as a shared source baseline.
 The driver-pin routing work is complete for this pass. The broader placer A–J
 acceptance task is <strong>not complete</strong>; its remaining requirements are
 listed below. Historical measurements are retained in
@@ -29,8 +29,8 @@ listed below. Historical measurements are retained in
 recorded revisions. Raw experiments and failed runs stay outside the build.</p>
 
 <h3 id="checkpoint">Reproducible source checkpoint</h3>
-<p>This follow-up builds on LiveHD
-<a href="https://github.com/masc-ucsc/livehd/commit/3a31a9bb2e3fea7ad13959e2d1c1229beaee0ca3"><code>3a31a9bb2</code></a>.
+<p>The accepted implementation is LiveHD
+<a href="https://github.com/masc-ucsc/livehd/commit/ea58ccc8638bfeb00d02531eb8eb19a215c7d1c2"><code>ea58ccc86</code></a>.
 <code>MODULE.bazel</code> uses published commits for OpenTimer
 <a href="https://github.com/masc-ucsc/OpenTimer/commit/ee2d641d4574d10fe6f0ada466d1ea4870b19499"><code>ee2d641d</code></a>
 and DREAMPlace
@@ -160,26 +160,21 @@ tradeoff, recorded under C and F above. Earlier acceptance figures do not overri
 these current-revision measurements. Raw outputs and debugger/profile artifacts
 remain outside the repositories.</p>
 
-<h3>Final tie-cell validation and limits</h3>
-<p>The v79 comparison uses frozen binaries from <code>618923c09</code> and this
-follow-up, common production defaults, 100 ps clocks and reset false paths.
-Final DEFs and independent QoR match exactly on lfsr, minimax and
-NVDLA/partition_m. Placement times are 2.128 → 2.123 s, 26.246 → 24.908 s and
-33.902 → 32.487 s, respectively. These are single samples under concurrent load;
-no repeatable whole-flow speedup is claimed. The lfsr control required a
-scoring-only retry after restoring the scorer executable; placement was not rerun.</p>
-<p>A fixed-geometry partition_c replay also produces identical DEF and timing
-results: 67.195 → 67.144 s, with about 1.1% fewer instructions. It imports an
-already materialized design, so it establishes neither fresh-placement speedup
-nor growth-budget acceptance. The fresh CoralNPU control was guard-stopped after
-620.855 s under host memory pressure; its wrapper did not retain the exact guard
-cause. No candidate pair was completed, and this run is not a runtime or QoR
-acceptance result.</p>
-<p>The earlier v74 compact-RC and v75 dense-binding comparisons each preserved
-DEFs and independent QoR on lfsr, minimax, partition_m and CoralNPU, within the
-1.5× placement-time bound. Those results precede the upstream
-<code>9dbae9107</code> placement-flow integration and do not substitute for the
-remaining current-revision acceptance checks.</p>
+<h3>Final experiment disposition</h3>
+<p>The v81 experiment deferred automatic zero-wire timing weights until the existing
+geometry-based density checkpoints, preserving explicit replay weights and public
+defaults. Fresh matched minimax runs reduce HPWL from 70,082.787 to 61,396.790 µm,
+but worsen independent WNS from −697.551 to −728.687 ps (31.135 ps), beyond the
+5 ps guard. Partition_m also loses 20.384 ps WNS; lfsr loses 0.948 ps.
+Minimax placement is essentially unchanged at 25.565 → 25.594 s. The patch
+is rejected and removed from the source checkpoint; its frozen binaries, patch
+and measurements remain outside the repositories. No CoralNPU run is needed to
+reject an experiment that already fails the small-design gate.</p>
+<p>Seven focused optimized tests pass for the accepted implementation, and the
+three placement/router tools build with published Bazel pins and no overrides.
+The repositories were fetched and their owned dependency pins checked against
+upstream. Completed routing and source-publication work is closed; the open
+A–J items above remain follow-up work, with their original requirements intact.</p>
 
 <h3>Completed driver-pin routing pass</h3>
 <p>Commit <code>ce3e628e8</code> adds persistent per-layer interval occupancy with
