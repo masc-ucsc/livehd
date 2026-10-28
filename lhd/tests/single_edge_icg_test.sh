@@ -762,4 +762,155 @@ echo "ok: the gate is folded into a full-width write enable and the clock is reb
 # 40-bit lanes; gate-dropped mutant MEM_FAIL errs=9). The structural checks
 # above -- root clock rebound, full-width enable -- are what this test guards.
 
+# ---- NESTED GATES: a flop behind a gate whose clock is itself gated -----------
+# CORE-ET's vpu_top (B07): vpu_lane's prim_clk_gate gates `clock` into
+# `clock_txfma`, and txfmafrac_top's cgate_txfma0_ctrl_frf gates THAT again for
+# `always_ff @(posedge ctrl_frf_clk)`; txfma_top also clocks flops straight on
+# `clock_txfma`, which makes it a clock root. While clk is high the outer enable
+# latch holds: if it holds 1 the inner enable latch is shut, and if it holds 0
+# the inner gated clock is 0 with no edge at all. So the inner flop commits at
+# clk's rise iff BOTH enables are on there -- an exact flop enable, which
+# single_edge used to refuse as `clock-gate-latch-phase` (the opposite-phase
+# rule for a flop did not condition on the outer enable; the window rule for a
+# gated latch already did).
+cat > "$W/nest.v" <<'EOF'
+module prim_clk_gate(input clk_i, input en_i, output clk_o);
+  logic en_latch;
+  always_latch if (!clk_i) en_latch <= en_i;
+  assign clk_o = clk_i & en_latch;
+endmodule
+
+module nest(input clk, input en_o, input en_i, input [7:0] d, output [7:0] q, output [7:0] f);
+  logic gclk, g2;
+  prim_clk_gate u_outer(.clk_i(clk),  .en_i(en_o), .clk_o(gclk));
+  prim_clk_gate u_inner(.clk_i(gclk), .en_i(en_i), .clk_o(g2));
+  reg [7:0] fo;                         // a flop on the OUTER gated clock: a clock root, as in B07
+  always @(posedge gclk) fo <= d + 8'd3;
+  reg [7:0] qi;                         // the flop behind BOTH gates
+  always @(posedge g2) qi <= d;
+  assign q = qi;
+  assign f = fo;
+endmodule
+EOF
+nestbuild() { # <name> <src> <top>
+  rm -rf "$W/lgn_$1"
+  "$LHD" compile "$2" --reader slang --top "$3" --emit-dir "lg:$W/lgn_$1" --workdir "$W/cwn_$1" \
+    >"$W/cn_$1.log" 2>&1 || { tail -5 "$W/cn_$1.log"; fail "compile of $2 failed"; }
+}
+nestbuild good "$W/nest.v" nest
+rm -rf "$W/lgn_norm"
+out="$("$LHD" pass single_edge --top nest "lg:$W/lgn_good" --emit-dir "lg:$W/lgn_norm" --workdir "$W/pwn" 2>&1)"
+[ $? -eq 0 ] || { echo "$out" | tail -3; fail "a flop behind a gate of a gated clock was refused"; }
+grep -q "clock nets" <<<"$out" && { echo "$out" | tail -3; fail "the nested gate was counted as a second clock"; }
+grep -q "gated clock(s) folded into an enable" <<<"$out" && grep -q "P=1 slots" <<<"$out" \
+  || { echo "$out" | tail -3; fail "the nested gate did not fold into flop enables at P=1"; }
+echo "ok: a flop behind a gate of a gated clock folds into an enable at P=1"
+
+# Two shapes must stay refused:
+#   - an inner gate whose latch is open on the GATED phase (passes a change of
+#     en_i straight through while the gated clock is high: a glitch edge);
+#   - two enable latches whose windows each need the other: both open while
+#     clk is high once either holds 0, so a change on both at once makes the
+#     gated clock rise mid-phase. The gated-latch window rule refuses this pair
+#     while analysing the enable latches themselves, before the flop is reached
+#     -- measured also with the flop rule conditioned on EVERY other enable --
+#     so this case guards the pair, not the flop rule's restriction to steady
+#     enables, which is defense in depth.
+cat > "$W/nest_glitch.v" <<'EOF'
+module nest_glitch(input clk, input en_o, input en_i, input [7:0] d, output [7:0] q);
+  reg g;  always_latch if (!clk) g = en_o;
+  wire gclk = clk & g;
+  reg h;  always_latch if (gclk) h = en_i;      // the GATED phase: wrong
+  wire g2 = gclk & h;
+  reg [7:0] qi;
+  always @(posedge g2) qi <= d;
+  assign q = qi;
+endmodule
+EOF
+cat > "$W/nest_mutual.v" <<'EOF'
+module nest_mutual(input clk, input e1, input e2, input [7:0] d, output [7:0] q);
+  reg h1, h2;
+  always_latch if (!(clk & h2)) h1 = e1;      // shut at clk=1 only while h2 is on ...
+  always_latch if (!(clk & h1)) h2 = e2;      // ... and h2 only while h1 is on
+  wire g = clk & h1 & h2;
+  reg [7:0] qi;
+  always @(posedge g) qi <= d;
+  assign q = qi;
+endmodule
+EOF
+for neg in nest_glitch nest_mutual; do
+  nestbuild "$neg" "$W/$neg.v" "$neg"
+  rm -rf "$W/lgn_${neg}_n"
+  out="$("$LHD" pass single_edge --top "$neg" "lg:$W/lgn_$neg" --emit-dir "lg:$W/lgn_${neg}_n" --workdir "$W/pwn_$neg" 2>&1)"
+  [ $? -eq 0 ] && { echo "$out" | tail -3; fail "$neg was ACCEPTED: the nested-gate rule must not lean on an enable that is not itself a steady opposite-phase latch"; }
+  grep -q "clock-gate-latch-phase" <<<"$out" \
+    || { echo "$out" | tail -3; fail "$neg was refused, but not as clock-gate-latch-phase"; }
+  echo "ok: $neg stays refused (clock-gate-latch-phase)"
+done
+
+# The transformation against the ORIGINAL RTL under an independent simulator,
+# plus two mutated sources that must DISAGREE with it: one that ignores the
+# inner enable, one whose inner gate ignores the outer enable. Without them an
+# agreement could come from a testbench that never exercises either enable.
+if external_sim; then
+  rm -rf "$W/vn_norm"
+  "$LHD" compile "lg:$W/lgn_norm" --top nest.nest --emit-dir "verilog:$W/vn_norm" --workdir "$W/vwn" \
+    >"$W/en.log" 2>&1 || { tail -5 "$W/en.log"; fail "verilog emission of the normalized nest failed"; }
+  sed 's/^module nest(/module nest_n(/' "$W"/vn_norm/*.v > "$W/nest_norm.v"
+  grep -q "always_latch" "$W/nest_norm.v" && fail "the NORMALIZED nest still holds a latch"
+  grep -E "always @\(posedge" "$W/nest_norm.v" | grep -vE "posedge clk[ )]" | grep -q . \
+    && fail "the NORMALIZED nest still holds a gated (or derived) clock"
+  cat > "$W/tbn.v" <<'EOF'
+`timescale 1ns/1ps
+module tbn;
+  reg clk = 0, en_o = 0, en_i = 0;
+  reg [7:0] d = 0;
+  wire [7:0] qs, qn, fs, fn;
+  integer k, errs = 0, both = 0;
+  always #10 clk = ~clk;                 // rise at 10+20k, fall at 20+20k
+  nest   s(.clk(clk), .en_o(en_o), .en_i(en_i), .d(d), .q(qs), .f(fs));
+  nest_n n(.clk(clk), .en_o(en_o), .en_i(en_i), .d(d), .q(qn), .f(fn));
+  initial begin
+    // One cycle with both gates on, so both flops leave X before comparing.
+    #5 en_o = 1; en_i = 1; d = 8'h5a;
+    #20;
+    for (k = 1; k < 48; k = k + 1) begin
+      // Stimulus changes mid-LOW phase, clear of the rise (the ICG contract).
+      #(5 + 20*k - $time);
+      en_o = (k % 3) != 0;               // all four (en_o, en_i) pairs occur
+      en_i = (k % 4) < 2;
+      d    = (7 + 29*k) & 8'hff;
+      if (en_o && en_i) both = both + 1;
+      #(18 + 20*k - $time);              // sample mid-HIGH, after the rise
+      if (qs !== qn || fs !== fn) begin
+        errs = errs + 1;
+        if (errs < 6) $display("MISMATCH k=%0d src=%0d/%0d norm=%0d/%0d en_o=%0b en_i=%0b", k, qs, fs, qn, fn, en_o, en_i);
+      end
+    end
+    if (errs == 0 && both > 0) $display("NEST_DIFF_OK both=%0d", both); else $display("NEST_DIFF_FAIL errs=%0d", errs);
+    $finish;
+  end
+endmodule
+EOF
+  iverilog -g2012 -o "$W/tbn.vvp" "$W/nest.v" "$W/nest_norm.v" "$W/tbn.v" >"$W/ivn.log" 2>&1 \
+    || { cat "$W/ivn.log"; fail "iverilog could not elaborate the nest source+normalized pair"; }
+  out="$(vvp "$W/tbn.vvp" 2>&1)"
+  grep -q "NEST_DIFF_OK" <<<"$out" \
+    || { echo "$out" | head -8; fail "the normalized nest does not match the original RTL under iverilog"; }
+  echo "ok: original nested-gate RTL and the normalized flop enables agree over 47 cycles under iverilog"
+
+  # Mutated SOURCES (the normalized side is unchanged): each must disagree.
+  sed 's/\.en_i(en_i), \.clk_o(g2)/.en_i(1'"'"'b1), .clk_o(g2)/' "$W/nest.v" > "$W/nest_noinner.v"
+  sed 's/u_inner(\.clk_i(gclk)/u_inner(.clk_i(clk)/' "$W/nest.v" > "$W/nest_noouter.v"
+  for m in nest_noinner nest_noouter; do
+    cmp -s "$W/nest.v" "$W/$m.v" && fail "the $m mutation did not apply"
+    iverilog -g2012 -o "$W/$m.vvp" "$W/$m.v" "$W/nest_norm.v" "$W/tbn.v" >"$W/iv_$m.log" 2>&1 \
+      || { cat "$W/iv_$m.log"; fail "could not build the $m negative control"; }
+    out="$(vvp "$W/$m.vvp" 2>&1)"
+    grep -q "NEST_DIFF_FAIL" <<<"$out" \
+      || { echo "$out" | head -4; fail "$m still matched the normalized nest -- the testbench does not exercise that enable"; }
+    echo "ok: $m DISAGREES with the normalized nest (that enable is load-bearing)"
+  done
+fi
+
 echo "PASS: single_edge_icg_test"

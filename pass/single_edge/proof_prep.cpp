@@ -1446,6 +1446,10 @@ Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::v
   // forced plan still refuses stays the hard error it was (the read-only phase
   // schedule is NOT a safe fallback here: it misreads a negedge register that
   // lives in a child clocked by an inverted parent net).
+  // What each side's plan says it will do, kept across the forced re-probe
+  // below so the route check after it reads the plan that was actually applied.
+  int plan_ref_latches  = pr.latches_retyped;
+  int plan_impl_latches = pi.latches_retyped;
   if (ao.force_slots > 1) {
     Options fo = ao;
     fo.dry_run = true;
@@ -1485,6 +1489,44 @@ Time_base prepare_time_base(const Cell_models& sub_lib, hhds::Graph* ref, std::v
       tb.error_hint = "the verdict would need a phase divider threaded through a module boundary; nothing was compared";
       return tb;
     }
+    plan_ref_latches  = fr.latches_retyped;
+    plan_impl_latches = fi.latches_retyped;
+  }
+  // ROUTE AGREEMENT, the last thing checked before the sides are rewritten.
+  // `slots` and `ref_clock` below say the two sides COUNT time the same way.
+  // Neither says they were put in that time base the same way. A gate folded
+  // into a flop enable on one side, against the same gate's enable latch
+  // retyped into the divider on the other, is one circuit in two different
+  // normal forms -- and the encoder compares them as though they were one. The
+  // failure is not a wrong answer to the question asked; it is a verdict on a
+  // question nobody asked, and it can come back REFUTED (a counterexample that
+  // no stimulus reproduces) just as easily as PROVEN.
+  //
+  // Decline rather than fail: nothing has been edge-normalized yet, so the
+  // encoder's read-only 4-microstep phase schedule still gives an honest
+  // verdict on these graphs, exactly as it does for a side that refuses
+  // outright. Flattening is semantics-preserving, so a side the forced probe
+  // flattened is still the same circuit.
+  //
+  // Only ALL-or-NOTHING is judged here. Equal nonzero counts are both on the
+  // retype route and comparable in kind; unequal nonzero counts (a real data
+  // latch on both sides plus an unrecognized gate on one) would also be a
+  // disagreement, but the recognition above removes the cause rather than
+  // leaving it to be declined, so judging it here would cost proofs without
+  // buying soundness.
+  if (ref != impl && (plan_ref_latches == 0) != (plan_impl_latches == 0)) {
+    tb.declined     = true;
+    tb.declined_ref = plan_ref_latches == 0;
+    tb.decline_reason
+        = std::format("the two sides reach the time base differently: the ref side retypes {} enable latch(es) and the "
+                      "impl side {}, so one folds its gated clocks into flop enables while the other keeps them as state",
+                      plan_ref_latches,
+                      plan_impl_latches);
+    if (quiet_decline) {
+      tb.recipe_steps.emplace_back(
+          std::format("pass.lec phase_sched: 4-microstep schedule (edge normalization declined: {})", tb.decline_reason));
+    }
+    return tb;
   }
   if (stop("edge normalization")) {
     return tb;
