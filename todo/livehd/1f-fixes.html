@@ -14,78 +14,46 @@
 pre-CTS QoR (HPWL, cells, WNS, power measured by the same OpenSTA script) with <em>less CPU time</em>
 than OpenROAD's floorplan → global place → resize → detailed place on the HighTide asap7 benchmark.
 Implementation is in progress; the original measurements and acceptance targets are retained below.</p>
-<p><span class="status">Source checkpoint published — remaining A–J acceptance is open</span>
+<p><span class="status">Optimization pass complete — remaining A–J acceptance is open</span>
 Source of the issues: <code>HighTide/repros/issues.md</code> (LiveHD <code>8e017a011</code>, HighTide <code>9648393ce</code>,
 host llmHDL, one CPU for LiveHD, 8 threads for OpenROAD). Each new comparison records its
 frozen binaries and uses <code>perf</code> and <code>/usr/bin/time</code>; the ablation placements are scored with the
 benchmark's <code>repros/score.tcl</code>. Historical measurements apply to their recorded revisions.</p>
 
 <h2 id="progress">Current implementation and acceptance status</h2>
-<p>This page records the reviewed source checkpoint and separates completed fixes
-from the remaining performance acceptance work.
-This task is <strong>not complete</strong>: the original A–J requirements below remain
-binding. Historical experiments, failed runs, binary identities and full comparisons
-are retained in <a href="1f-measurements.json">1f-measurements.json</a>; they are no
-longer repeated as a chronological log on this page.</p>
+<p>The current optimization pass is reviewed and ready as a shared source baseline.
+The driver-pin routing work is complete for this pass. The broader placer A–J
+acceptance task is <strong>not complete</strong>; its remaining requirements are
+listed below. Historical measurements are retained in
+<a href="1f-measurements.json">1f-measurements.json</a> and apply only to their
+recorded revisions. Raw experiments and failed runs stay outside the build.</p>
 
 <h3 id="checkpoint">Reproducible source checkpoint</h3>
-<p>The timing and routing base is published in LiveHD
-<a href="https://github.com/masc-ucsc/livehd/commit/d657d425dd248512809331f7a68b63df250389bb"><code>d657d425d</code></a>.
-The current <code>MODULE.bazel</code> pins OpenTimer
+<p>This follow-up builds on LiveHD
+<a href="https://github.com/masc-ucsc/livehd/commit/618923c09417113985bd37c4252a9774e7fe52d7"><code>618923c09</code></a>.
+<code>MODULE.bazel</code> uses published commits for OpenTimer
 <a href="https://github.com/masc-ucsc/OpenTimer/commit/2306b447d81ce0e3b64d25a73da420d42891a7dd"><code>2306b447</code></a>
 and DREAMPlace
 <a href="https://github.com/masc-ucsc/DREAMPlace/commit/3bd9bc36cf8dbab376ae87a78bcc5e0f328a6e89"><code>3bd9bc36</code></a>.
-All owned dependency pins are reachable from their published upstream branches;
-no sibling checkout or local repository override is required. The associated
-HighTide source fixes are published at
+All owned dependency pins are reachable from their upstream branches; no sibling
+checkout or local repository override is required. Associated HighTide source
+fixes are published at
 <a href="https://github.com/masc-ucsc/HighTide/commit/8bb05a7b51f095722566b4de49c7695e562c3e41"><code>8bb05a7b</code></a>.
 Raw benchmark outputs and experimental worktrees are not build inputs.</p>
-<p>The dense physical pin-binding follow-up is integrated on upstream
-<code>9dbae9107</code>, including its published HHDS/HLOP pins. It replaces the
-physical-label/name map with stable timer-pin bindings and shares the owned label
-index with retained feedback. Topology reconciliation rebuilds bindings before
-use; geometry and cell-strength changes preserve them. A regression covers
-scratch-RC lifetime, alternating topology and temporary-cell rollback. The change
-preserves timing math, label order and all public defaults. Eight focused
-optimized Bazel targets pass on the merged tree, and both <code>lhd</code> and
-<code>physical_repair</code> build with the published dependency pins.</p>
-<p>The grid-selection follow-up makes an automatically selected density grid use
-exactly the same numerical transform and static density/routing handoff rules as
-an explicit grid with the same dimensions. Automatic selection happens before
-the solve; it no longer changes those policies independently of grid dimensions.
-Regression coverage includes small and large grids and an infeasible-density
-handoff. Automatic grid selection remains opt-in; all public defaults and the
-existing stalled-density ramp are retained. Final default-grid placements on
-lfsr, minimax and partition_m reproduce the published control DEFs and independent
-QoR exactly. Fourteen focused optimized tests pass with the published dependency
-pins and no local repository override; <code>lhd</code>,
-<code>physical_repair</code> and <code>signal_route_bench</code> all build.</p>
-<p>Completed implementation work includes bounded driver-pin routing and persistent
-interval occupancy, placement reuse and shared technology, reduced timing feedback
-overhead, and compact timing/RC storage. The table below is the remaining acceptance
-checklist; publishing this checkpoint does not close those outstanding targets.</p>
-
-<p>The base source checkpoint passes eleven optimized Bazel test targets covering
-physical timing, placement, repair, sizing, I/O timing, clock/reset filtering and
-routing occupancy. The CLI, physical-repair tool and routing benchmark build with published dependency pins and no local
-repository override. Detailed timing snapshots now store values densely and share
-an immutable pin-label index across geometry and cell-strength updates. Topology
-changes rebuild that index; filtering and value changes remain private to each
-snapshot. Evaluated connectivity now stores net pointers by timer pin index,
-removing the duplicate pin-name map. Reconciliation materializes queued what-if
-rollback before inspecting connections. Regressions cover commit-after-trial,
-recycled indices, rollback and invalid duplicate connections. OpenTimer embeds
-both endpoint adjacency links in each arc, preserving insertion order while
-removing two allocations per arc. RC nodes now share wire capacitance across
-corners, keep transient moments only during one tree update, and link neighbors
-through existing edge padding. Pending SPEF payloads are allocated only until
-materialization. On the validation machine RC nodes shrink from 144 to 72 bytes
-and timing nets from 648 to 544 bytes. Six focused OpenTimer targets pass,
-including analytical branch moments, corner loads, queued replacement and unit
-scaling. Pin precision, traversal order and public defaults are unchanged.</p>
-<p>Earlier validated fixes include the router, physical flattening, shared metadata,
-placement hints and the Yosys-Verilog parser's explicit Flex/m4 build dependency.
-The private flat constant-state sweep remains opt-in for both ABC and USYN.</p>
+<p>Completed changes include bounded routing with persistent interval occupancy,
+placement reuse, shared technology, dense timing labels and pin bindings, compact
+RC storage, and consistent solver behavior for equal density grids. Automatic
+grid selection remains opt-in. The final tie-cell follow-up indexes existing
+cells and previous tie positions, preserving names, per-pin ownership,
+connectivity and placement seeds. Growth reports expose constant cells as a
+charged subset; budget limits and public defaults are unchanged.</p>
+<p>Ten focused optimized Bazel targets pass for growth accounting, placement,
+repair, physical timing, sizing, clock/reset filtering and routing occupancy.
+<code>lhd</code>, <code>physical_repair</code> and <code>signal_route_bench</code>
+build with published dependency pins and no local repository override. Regression
+coverage includes fresh/imported ties, reused poses, shared hierarchy and
+constant-cell charging. The preceding grid checkpoint also passed five native
+DREAMPlace targets, including equal-grid and infeasible-density handoff coverage.</p>
 
 <table>
 <thead><tr><th>Requirement</th><th>Verified evidence and remaining work</th></tr></thead>
@@ -131,7 +99,11 @@ resynthesis census remain unverified.</td></tr>
 and the small-design checks pass. The completed v74 CNN flow also stays within
 the 3% budget. The completed v74 partition_c flow increases standard cells
 from 310,377 to 322,297 (+3.84%), violating the cell-count budget despite only
-+1.25% area growth. Fix that remaining growth path and complete the census.</td></tr>
++1.25% area growth. The preparation step already adds 11,910 per-pin tie cells
+before repair, with only 10 net additional cells afterward. The new report
+identifies constants by Liberty master and exposes their counts/area as a subset
+still fully charged to the original budget. The cause is diagnosed; admission of
+mandatory physical preparation and the broader census remain unresolved.</td></tr>
 <tr><td><a href="#I">I — scaling</a></td><td>Open. Fresh Gemmini v74 control and
 candidate both exceed the diagnostic memory guard: 735.214 s / 16,399 MiB and
 824.553 s / 16,420 MiB tree RSS. The candidate runs longer before the guard;
@@ -158,59 +130,37 @@ Native bp_uno completes with 1,724.217 s placement and 14,870 MiB peak process R
 </tbody>
 </table>
 
-<p>The v74 comparison uses the published <code>ac8dc23fe</code> checkpoint as
-control. The candidate adds OpenTimer <code>2306b44</code> compact RC storage,
-with common defaults and frontend settings. All four DEFs and independent QoR
-scores match exactly: lfsr 2.262 → 2.148 s, minimax 27.515 → 25.889 s,
-partition_m 37.215 → 36.107 s, and coralnpu 691.551 → 678.830 s placement.
-Time ratios range from 0.941× to 0.982×, within the 1.5× limit. CoralNPU peak
-process RSS changes from 6,950.5 to 6,716.6 MiB. These are single samples under
-concurrent load; no repeatable whole-design speedup or large-design memory-limit
-acceptance is claimed.</p>
+<h3>Final tie-cell validation and limits</h3>
+<p>The v79 comparison uses frozen binaries from <code>618923c09</code> and this
+follow-up, common production defaults, 100 ps clocks and reset false paths.
+Final DEFs and independent QoR match exactly on lfsr, minimax and
+NVDLA/partition_m. Placement times are 2.128 → 2.123 s, 26.246 → 24.908 s and
+33.902 → 32.487 s, respectively. These are single samples under concurrent load;
+no repeatable whole-flow speedup is claimed. The lfsr control required a
+scoring-only retry after restoring the scorer executable; placement was not rerun.</p>
+<p>A fixed-geometry partition_c replay also produces identical DEF and timing
+results: 67.195 → 67.144 s, with about 1.1% fewer instructions. It imports an
+already materialized design, so it establishes neither fresh-placement speedup
+nor growth-budget acceptance. The fresh CoralNPU control was guard-stopped after
+620.855 s under host memory pressure; its wrapper did not retain the exact guard
+cause. No candidate pair was completed, and this run is not a runtime or QoR
+acceptance result.</p>
+<p>The earlier v74 compact-RC and v75 dense-binding comparisons each preserved
+DEFs and independent QoR on lfsr, minimax, partition_m and CoralNPU, within the
+1.5× placement-time bound. Those results precede the upstream
+<code>9dbae9107</code> placement-flow integration and do not substitute for the
+remaining current-revision acceptance checks.</p>
 
-<p>The v75 dense-binding comparison uses <code>5cd36a1c5</code> as control,
-with the same defaults, 100 ps clocks and reset false paths. All four DEFs and
-independent QoR scores match exactly: lfsr 2.130 → 2.118 s, minimax 26.603 →
-24.999 s, partition_m 34.660 → 33.225 s, and coralnpu 671.668 → 674.468 s
-placement. All ratios remain below 1.5×; CoralNPU peak process RSS changes from
-6,736.0 to 6,611.1 MiB. These are single samples under concurrent load. Total STA
-still consumes 24–33% of placement, so the 10% target remains open. These
-performance numbers precede the upstream <code>9dbae9107</code> integration;
-they do not measure its unrelated placement-flow changes.</p>
-
-<p>Memory reviews avoid copies of temporary feedback and restart floorplans,
-defer persisted RC until final legalization, and omit report-only timing tables
-from physical feedback. OpenTimer now recovers a single worst path from arrival
-predecessors when CPPR is disabled, avoiding a graph-sized suffix-tree cache.
-CPPR and multiple-path reporting retain the original search, with regression
-coverage for both timing corners, transitions, changing arrivals, masked arcs
-and sequential endpoints. The v66 allocation profile identified about 672 MiB
-in the old cache, but allocation estimates are not RSS savings. Earlier Gemmini
-failures motivated the dense feedback and connectivity storage changes. The v73
-allocation profile also identifies cell-arc adjacency allocations, now removed
-by the embedded links. The v74 diagnostic profile confirms substantial RC-node
-storage; the compact representation reduces that persistent storage. Both normal
-v74 Gemmini runs still exceed the memory guard. Other live storage and the
-full-design memory limit remain open.</p>
-
-<p>Benchmark protocol remains common defaults, 100 ps stress clocks, reset false
-paths, independently scored final placements and frozen binaries. Historical
-measurements apply to their recorded revisions. The later upstream merge
-<code>db6a5de1b</code> adds metadata and placement hints and changes synthesis-buffer
-preservation to the default. The timing-path optimization itself changes no defaults.
-The v74 storage comparison uses fresh controls with those merged defaults;
-historical v71 results apply to the pre-merge binaries. The initial v74 Gemmini
-control overlapped a diagnostic profile and hit the host-reserve guard; it is
-excluded. The recorded control is a fresh retry without profiling.</p>
-
-<p>The associated driver-pin routing optimization is complete for this checkpoint:
-commit <code>ce3e628e8</code> adds persistent per-layer interval occupancy with dense
-storage for small fragmented strips. Three 100,000-attempt pairs on placed CoralNPU
-match outcomes, rejection reasons and geometry. Median throughput increases from
-13,878 to 15,234 attempts/s, and setup drops from 16.425 to 14.714 s. These tests
-include successful and rejected calls, with one driver and one to eight sinks;
-they exclude PG wiring and committed-route updates. Regression tests cover updates.
-See <code>pass/place/README.md</code> for the components and remaining bottlenecks.</p>
+<h3>Completed driver-pin routing pass</h3>
+<p>Commit <code>ce3e628e8</code> adds persistent per-layer interval occupancy with
+dense storage for small fragmented strips. Three 100,000-attempt pairs on placed
+CoralNPU match outcomes, rejection reasons and geometry. Median throughput
+increases from 13,878 to 15,234 attempts/s, and setup drops from 16.425 to 14.714 s.
+These tests include successful and rejected calls with one driver and one to
+eight sinks; they exclude PG wiring and committed-route updates. Regression tests
+cover updates. See <code>pass/place/README.md</code> for the components and
+remaining bottlenecks. Broader routing and power-grid acceptance belongs to
+<a href="3x-reroute.html">3x-reroute</a>.</p>
 
 <h2 id="related">Relation to <a class="xref" href="2t-timeclosure.html">2t-timeclosure</a></h2>
 <p>2t-timeclosure is the opt-in redesign of the GP timing loop (<code>synth.place.timeclosure</code>; CNN and litepci

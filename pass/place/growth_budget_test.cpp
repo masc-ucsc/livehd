@@ -104,6 +104,33 @@ TEST(GrowthBudget, ResetAndRailTreeBuffersAreNotGrowth) {
   EXPECT_EQ(physical_size(*top, tech).cells, 11U);
   EXPECT_FALSE(budget.allows(physical_size(*top, tech)));
 }
+TEST(GrowthBudget, ConstantCellsRemainChargedThroughSharedHierarchy) {
+  physical::Technology tech;
+  for (const auto* name : {"BUF", "TIE"}) {
+    tech.macros[name].klass = "CORE";
+    tech.macros[name].width = tech.macros[name].height = 1;
+  }
+  hhds::GraphLibrary library;
+  const auto         buf = library.create_io("BUF"), tie = library.create_io("TIE");
+  const auto         color = library.create_io("color")->create_graph();
+  instance(*color, buf).set_name("__place_tiehi_not_a_constant");
+  instance(*color, tie).set_name("arbitrary_constant_name");
+  const auto top = library.create_io("top")->create_graph();
+  instance(*top, color->get_io());
+  instance(*top, color->get_io());
+  const std::set<std::string> constants{"TIE"};
+  const auto                  baseline = physical_size(*top, tech, nullptr, {}, &constants);
+  EXPECT_EQ(baseline.cells, 4U);
+  EXPECT_EQ(baseline.constant_cells, 2U);
+  EXPECT_DOUBLE_EQ(baseline.area_um2, 4);
+  EXPECT_DOUBLE_EQ(baseline.constant_um2, 2);
+  const Growth_budget budget{baseline};
+  instance(*top, tie);
+  const auto candidate = physical_size(*top, tech, nullptr, {}, &constants);
+  EXPECT_EQ(candidate.cells, 5U);
+  EXPECT_EQ(candidate.constant_cells, 3U);
+  EXPECT_FALSE(budget.allows(candidate));
+}
 TEST(GrowthBudget, OnlyTheLeafNamesATreeBufferAndUpsizingIsGrowth) {
   physical::Technology tech;
   for (const auto* name : {"BUF", "BUF4"}) {

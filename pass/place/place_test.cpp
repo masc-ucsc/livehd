@@ -18,6 +18,7 @@
 #include <tuple>
 
 #include "attrs.hpp"
+#include "growth_budget.hpp"
 #include "gtest/gtest.h"
 #include "inou/lefdef/lef_writer.hpp"
 #include "macro_tracks.hpp"
@@ -2365,6 +2366,28 @@ static std::shared_ptr<hhds::Graph> both_constants(hhds::GraphLibrary& source) {
   graph->get_io()->set_bits("low", 1);
   graph->get_output_pin("low").connect_driver(gu::create_const(*graph, *Dlop::create_integer(0)));
   return graph;
+}
+TEST(Placement, GrowthReportShowsMaterializedConstantsWithoutDiscountingThem) {
+  hhds::GraphLibrary source, flat;
+  const auto         graph   = both_constants(source);
+  auto               options = tie_options("constant_growth",
+                                           {
+                                               {"HIGH",  {{"H", true}}},
+                                               { "LOW", {{"L", false}}}
+  });
+  initialize_growth_budget(*graph, options);
+  const auto          placed = place(*graph, flat, options);
+  rapidjson::Document qor;
+  qor.Parse(placed.qor.c_str());
+  ASSERT_FALSE(qor.HasParseError());
+  const auto& growth = qor["growth_budget"];
+  EXPECT_EQ(growth["baseline_cells"].GetUint64(), 2U);
+  EXPECT_EQ(growth["baseline_constant_cells"].GetUint64(), 0U);
+  EXPECT_EQ(growth["cells"].GetUint64(), 5U);
+  EXPECT_EQ(growth["constant_cells"].GetUint64(), 3U);
+  EXPECT_GT(growth["constant_area_um2"].GetDouble(), 0);
+  EXPECT_LT(growth["constant_area_um2"].GetDouble(), growth["area_um2"].GetDouble());
+  EXPECT_FALSE(growth["within_budget"].GetBool());
 }
 TEST(Placement, ConstantDriversUseLibertyPolarityAndPhysicalCandidates) {
   hhds::GraphLibrary source, flat;

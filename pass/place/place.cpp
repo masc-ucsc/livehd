@@ -5321,14 +5321,29 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       constant_nets.emplace(driver, sinks);
     }
   }
+  // A large design can need thousands of single-load ties. Index existing
+  // cells once instead of scanning the whole design for each source/user.
+  // Owning names and vector indices stay valid when new ties grow v.cells;
+  // make_arrays rebuilds this same index after sorting the completed cells.
+  std::map<std::pair<std::string_view, std::string_view>, const ph::Component*> previous_ties;
+  if (!constant_nets.empty()) {
+    for (size_t i = 0; i < v.cells.size(); ++i) {
+      v.cell.try_emplace(v.cells[i].name, i);
+    }
+    if (previous) {
+      for (const auto& old : previous->components) {
+        if (v.constant_masters.contains(old.macro)) {
+          previous_ties.insert_or_assign({old.name, old.macro}, &old);
+        }
+      }
+    }
+  }
   for (const auto& [constant_driver, sinks] : constant_nets) {
     const bool  imported = constant_driver.constant < 0;
     const int   value    = imported ? int(characterized_ties.at(constant_driver)) : constant_driver.constant;
     std::string master_name, output;
     if (imported) {
-      const auto cell
-          = std::find_if(v.cells.begin(), v.cells.end(), [&](const Cell& c) { return c.name == constant_driver.instance; });
-      master_name = cell->macro;
+      master_name = v.cells.at(v.cell.at(constant_driver.instance)).macro;
       output      = constant_driver.pin;
     } else {
       if (!tie_cells[value]) {
@@ -5371,13 +5386,14 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       const auto& target = sinks[i];
       const auto  base   = imported ? constant_driver.instance : std::string(value ? "__place_tiehi" : "__place_tielo");
       const auto  name = imported && i == 0 ? base : std::format("{}_{:016x}", base, hash_text(target.instance + ":" + target.pin));
-      auto        existing = std::find_if(v.cells.begin(), v.cells.end(), [&](const Cell& c) { return c.name == name; });
+      const auto  existing = v.cell.find(name);
       Node        node;
-      if (existing != v.cells.end()) {
-        if (existing->macro != master_name) {
+      if (existing != v.cell.end()) {
+        const auto& cell = v.cells.at(existing->second);
+        if (cell.macro != master_name) {
           throw std::runtime_error("tie cell master mismatch: " + name);
         }
-        node = existing->node;
+        node = cell.node;
       } else {
         node = graph.create_node();
         gu::set_type_op(node, Ntype_op::Sub);
@@ -5385,13 +5401,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         node.set_name(name);
         const auto& master = tech.macros.at(master_name);
         Ann_place   place(0, 0, std::llround(master.width * tech.dbu), std::llround(master.height * tech.dbu));
-        if (previous) {
-          for (const auto& old : previous->components) {
-            if (old.name == name && old.macro == master_name) {
-              place = old.place;
-            }
-          }
+        if (const auto old = previous_ties.find({name, master_name}); old != previous_ties.end()) {
+          place = old->second->place;
         }
+        v.cell.emplace(name, v.cells.size());
         v.cells.push_back({node, name, master_name, "__ties", place});
       }
       auto driver = node.create_driver_pin(output);
@@ -5400,6 +5413,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       v.nets[{name, output, -1}].push_back(target);
     }
   }
+  previous_ties.clear();
   // Materialize tie sources inside bus aliases too, including memory ports.
   // Timing, DEF and the saved logical graph must see the same bit connectivity.
   for (const auto& c : v.cells) {

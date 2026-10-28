@@ -114,6 +114,11 @@ headroom before mutation; an oversized forest does not discard other useful
 edits. Its inventory is computed once per batch and updated after successful edits. The
 `growth_budget` object in placement QoR (also exported as
 `placement.json`) records the baseline, current inventory and rejected proposals.
+It also reports the constant-cell subset by Liberty master, including its baseline
+and area. These cells remain fully charged: the breakdown exposes required tie
+materialization before repair without disguising it as repair growth or raising
+the allowance. Tie creation indexes existing cells and prior tie positions once;
+per-pin ownership, names and connectivity are unchanged on fresh and reused runs.
 The repair diagnostic initializes its baseline from the supplied mapped graph.
 
 One automatic batch is allowed: either before placement using saved final
