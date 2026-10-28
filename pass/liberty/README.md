@@ -36,6 +36,12 @@ cells (`Latch(din=D, enable=CLK)`, through `Not` for an active-low enable or a
 QN output, with the Latch's own `reset_pin` for a clear/preset latch). Every
 other sequential cell is skipped.
 
+The shared text scanner skips quoted timing-table payloads and complete nested
+groups when extracting top-level scalar attributes. It retains the existing quote
+delimiters and malformed-input behavior; braces inside quoted strings do not
+change group depth. This reduces scanning work without changing library contents
+or cell selection.
+
 `lhd synth` and `lhd compile` also use explicitly selected `synth.liberty`
 RAM cells as typed, opaque module interfaces. Scalar and bus pin directions,
 widths and declaration order come from that library. The direct Slang reader

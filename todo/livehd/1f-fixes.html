@@ -14,14 +14,15 @@
 pre-CTS QoR (HPWL, cells, WNS, power measured by the same OpenSTA script) with <em>less CPU time</em>
 than OpenROAD's floorplan → global place → resize → detailed place on the HighTide asap7 benchmark.
 Validated source checkpoints are published; remaining acceptance targets are tracked below.</p>
-<p><span class="status">Optimization in progress — remaining A–J acceptance is open</span>
+<p><span class="status">Source checkpoint closed — remaining A–J acceptance is open</span>
 Source of the issues: <code>HighTide/repros/issues.md</code> (LiveHD <code>8e017a011</code>, HighTide <code>9648393ce</code>,
 host llmHDL, one CPU for LiveHD, 8 threads for OpenROAD). Each new comparison records its
 frozen binaries and uses <code>perf</code> and <code>/usr/bin/time</code>; the ablation placements are scored with the
 benchmark's <code>repros/score.tcl</code>. Historical measurements apply to their recorded revisions.</p>
 
 <h2 id="progress">Current implementation and acceptance status</h2>
-<p>The latest source checkpoint is reviewed; the broader optimization goal remains in progress.
+<p>The current optimization pass is closed as a reviewed source checkpoint.
+Completed implementation and dependency-publication work has no pending local patch.
 The driver-pin routing work is complete for this pass. The broader placer A–J
 acceptance task is <strong>not complete</strong>; its remaining requirements are
 listed below. Historical measurements are retained in
@@ -29,8 +30,8 @@ listed below. Historical measurements are retained in
 recorded revisions. Raw experiments and failed runs stay outside the build.</p>
 
 <h3 id="checkpoint">Reproducible source checkpoint</h3>
-<p>This dense-RC follow-up builds on the pin-name checkpoint in LiveHD
-<a href="https://github.com/masc-ucsc/livehd/commit/f8680dd1b637954fa7cf4b07096cf2c94f23d45e"><code>f8680dd1b</code></a>.
+<p>This Liberty-scanner follow-up builds on the dense-RC checkpoint in LiveHD
+<a href="https://github.com/masc-ucsc/livehd/commit/fc4d5b0a6e3dcbd10e0fd93e7b07708aab200320"><code>fc4d5b0a6</code></a>.
 <code>MODULE.bazel</code> uses published commits for OpenTimer
 <a href="https://github.com/masc-ucsc/OpenTimer/commit/763207ca8c1019c82b57fbb76cf702ca8785acf6"><code>763207ca</code></a>
 and DREAMPlace
@@ -41,14 +42,15 @@ fixes are published at
 <a href="https://github.com/masc-ucsc/HighTide/commit/8bb05a7b51f095722566b4de49c7695e562c3e41"><code>8bb05a7b</code></a>.
 Raw benchmark outputs and experimental worktrees are not build inputs.</p>
 <p>Completed changes include bounded routing with persistent interval occupancy,
-placement reuse, shared technology, dense timing labels and pin bindings, compact
-RC storage, and consistent solver behavior for equal density grids. Automatic
+placement reuse, shared technology, faster Liberty scanning, dense timing labels
+and pin bindings, compact RC storage, and consistent solver behavior for equal density grids. Automatic
 grid selection remains opt-in. The final tie-cell follow-up indexes existing
 cells and previous tie positions, preserving names, per-pin ownership,
 connectivity and placement seeds. Growth reports expose constant cells as a
 charged subset; budget limits and public defaults are unchanged.</p>
-<p>Ten focused optimized Bazel targets pass for growth accounting, placement,
-repair, physical timing, sizing, clock/reset filtering and routing occupancy.
+<p>The preceding placement/routing checkpoint passed ten focused optimized Bazel
+targets for growth accounting, placement, repair, physical timing, sizing,
+clock/reset filtering and routing occupancy.
 <code>lhd</code>, <code>physical_repair</code> and <code>signal_route_bench</code>
 build with published dependency pins and no local repository override. Regression
 coverage includes fresh/imported ties, reused poses, shared hierarchy and
@@ -261,6 +263,29 @@ override: <code>celllib_smoke</code>, <code>path_report</code>,
 <code>signal_route_bench</code> build successfully. Owned dependencies are
 reachable from their fetched upstream branches. Only source, documentation
 and the Bazel pin are published; raw results remain outside Git.</p>
+
+<h3 id="liberty-scanner">Liberty scanner and final publication check</h3>
+<p>The scalar-attribute scanner skips quoted timing-table payloads and whole
+nested groups instead of processing every character individually. Quote,
+brace and malformed-input behavior is preserved. Existing nested-table regression
+coverage passes, as do <code>liberty_dff_test</code>, <code>timing_model_test</code>
+and <code>physical_session_test</code>. An artifact-only differential check also
+matches the old scanner on 100,000 generated inputs. All three tools named above
+build with published dependency pins and no local repository overrides.</p>
+<p>The v99 runs retain common production defaults, 100 ps clocks and reset false
+paths. Final DEFs and independently scored QoR match the v96 controls exactly on
+lfsr, minimax, partition_m and CoralNPU. Placement times are respectively
+2.129 → 2.150 s, 23.367 → 24.300 s, 29.983 → 30.854 s and
+603.129 → 620.095 s, all within 1.5×. Whole-flow instruction counts decrease by
+11.09%, 1.47%, 0.84% and 0.10%. Lfsr whole-flow CPU falls from 4.52 to 4.35 s;
+the other three single samples take slightly longer, so these measurements do
+not establish a repeatable whole-flow speedup. CoralNPU takes 761.64 s wall time
+and 761.17 s CPU, with 5,966.148 MiB peak process RSS.</p>
+<p>This closes the current implementation and publication pass. All associated
+repositories were checked against upstream, and all owned Bazel pins are
+published. No raw results, profiler data, local dependency overrides or rejected
+experiments are required by the build. The remaining A–J requirements above
+retain their original acceptance criteria.</p>
 
 <h3 id="bound-rc">Dense pin-bound RC and current memory audit</h3>
 <p>Placement RC now reaches OpenTimer as numeric driver/pin identities and edge
