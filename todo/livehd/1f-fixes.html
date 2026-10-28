@@ -39,8 +39,13 @@ removing the duplicate pin-name map. Reconciliation materializes queued what-if
 rollback before inspecting connections. Regressions cover commit-after-trial,
 recycled indices, rollback and invalid duplicate connections. OpenTimer embeds
 both endpoint adjacency links in each arc, preserving insertion order while
-removing two allocations per arc; six focused OpenTimer targets pass.
-Pin precision, traversal order and public defaults are unchanged.</p>
+removing two allocations per arc. RC nodes now share wire capacitance across
+corners, keep transient moments only during one tree update, and link neighbors
+through existing edge padding. Pending SPEF payloads are allocated only until
+materialization. On the validation machine RC nodes shrink from 144 to 72 bytes
+and timing nets from 648 to 544 bytes. Six focused OpenTimer targets pass,
+including analytical branch moments, corner loads, queued replacement and unit
+scaling. Pin precision, traversal order and public defaults are unchanged.</p>
 <p>Earlier validated fixes include the router, physical flattening, shared metadata,
 placement hints and the Yosys-Verilog parser's explicit Flex/m4 build dependency.
 The private flat constant-state sweep remains opt-in for both ABC and USYN.</p>
@@ -49,12 +54,14 @@ The private flat constant-state sweep remains opt-in for both ABC and USYN.</p>
 <thead><tr><th>Requirement</th><th>Verified evidence and remaining work</th></tr></thead>
 <tbody>
 <tr><td><a href="#A">A — STA evaluation count</a></td><td>Density-driven ranking and
-what-if trials reduce detailed evaluations to 3 on lfsr and 6 on minimax in the
-measured flow. Complete the all-design census and retain the WNS bound.</td></tr>
+what-if trials limit detailed evaluations to 7 on lfsr, 3 on minimax, 3 on
+partition_m and 4 on coralnpu in the current matched controls. These flows also
+perform 8, 8, 8 and 12 coarse ranking evaluations, respectively. Complete the
+all-design census and retain the WNS bound.</td></tr>
 <tr><td><a href="#B">B — incremental timing cost</a></td><td>Coarse in-loop RC,
 indexed rankings and selective reconciliation are implemented. Minimax checkpoint
 and final-evaluation numerical limits have passed, but total STA remains roughly
-25–35% of placement in the v73 pairs, above 10%. Detailed evaluations now use dense values with
+24–34% of placement in the v74 pairs, above 10%. Detailed evaluations now use dense values with
 a shared immutable pin-label index, and evaluated connections use a dense pin-index
 array. The all-design STA-cost target remains open.</td></tr>
 <tr><td><a href="#C">C — shared technology</a></td><td>The placement session shares
@@ -65,7 +72,7 @@ experiment reaches 42,653.419 µm HPWL in 4.531 s; the own-floorplan experiment 
 46,071.875 µm in 7.909 s, meeting both numerical limits. Fresh equal-overflow traces
 against OpenROAD remain incomplete.</td></tr>
 <tr><td><a href="#E">E — convergence</a></td><td>Open. Minimax needs 640 main
-iterations (740 total) in v73; the historical pure-GP experiment used 820 total. Macro and large designs still emit
+iterations (740 total) in v74; the historical pure-GP experiment used 820 total. Macro and large designs still emit
 iteration/deadline or stalled-routing warnings despite acceptable overflow.</td></tr>
 <tr><td><a href="#F">F — physical-stage HPWL</a></td><td>Warm starts and bounded
 acceptance are implemented. Minimax passes at +1.05%; lfsr is +3.20%, exceeding +3%.</td></tr>
@@ -76,9 +83,9 @@ resynthesis census remain unverified.</td></tr>
 <tr><td><a href="#H">H — repair growth</a></td><td>Area/cell budgets are implemented
 and the small-design checks pass. Revalidate the integrated checkpoint and extend
 the census to the large designs.</td></tr>
-<tr><td><a href="#I">I — scaling</a></td><td>Open. Fresh Gemmini v73 control and
-candidate both exceed the diagnostic memory guard: 541.169 s / 16,385 MiB and
-758.504 s / 16,388 MiB tree RSS. The candidate runs longer before the guard;
+<tr><td><a href="#I">I — scaling</a></td><td>Open. Fresh Gemmini v74 control and
+candidate both exceed the diagnostic memory guard: 735.214 s / 16,399 MiB and
+824.553 s / 16,420 MiB tree RSS. The candidate runs longer before the guard;
 these incomplete flows establish neither a speed ratio nor compliance with the
 strict 16-decimal-GB limit. CNN v59 completes in 2,385.888 s
 at 12,461,456 KiB process RSS; partition_c v59 exceeds the guard. Matched 100 ps
@@ -95,15 +102,15 @@ Native bp_uno completes with 1,724.217 s placement and 14,870 MiB peak process R
 </tbody>
 </table>
 
-<p>The v73 comparison uses the published <code>a71897e3f</code> checkpoint as
-control. The candidate adds dense evaluated connectivity and OpenTimer
-<code>c95ddb7</code> intrusive arc adjacency, with common defaults and frontend
-settings. All four DEFs and independent QoR scores match exactly: lfsr
-2.192 → 2.191 s, minimax 28.978 → 26.650 s, partition_m 36.714 → 36.898 s,
-and coralnpu 682.361 → 689.971 s placement. The largest time ratio is 1.0112×,
-within the 1.5× limit. CoralNPU peak process RSS changes from 7,127.7 to
-6,894.2 MiB. These are single samples under concurrent load; no repeatable
-whole-design speedup or large-design memory-limit acceptance is claimed.</p>
+<p>The v74 comparison uses the published <code>ac8dc23fe</code> checkpoint as
+control. The candidate adds OpenTimer <code>2306b44</code> compact RC storage,
+with common defaults and frontend settings. All four DEFs and independent QoR
+scores match exactly: lfsr 2.262 → 2.148 s, minimax 27.515 → 25.889 s,
+partition_m 37.215 → 36.107 s, and coralnpu 691.551 → 678.830 s placement.
+Time ratios range from 0.941× to 0.982×, within the 1.5× limit. CoralNPU peak
+process RSS changes from 6,950.5 to 6,716.6 MiB. These are single samples under
+concurrent load; no repeatable whole-design speedup or large-design memory-limit
+acceptance is claimed.</p>
 
 <p>Memory reviews avoid copies of temporary feedback and restart floorplans,
 defer persisted RC until final legalization, and omit report-only timing tables
@@ -115,16 +122,20 @@ and sequential endpoints. The v66 allocation profile identified about 672 MiB
 in the old cache, but allocation estimates are not RSS savings. Earlier Gemmini
 failures motivated the dense feedback and connectivity storage changes. The v73
 allocation profile also identifies cell-arc adjacency allocations, now removed
-by the embedded links. Both v73 Gemmini runs still exceed the memory guard.
-Other live storage and the full-design memory limit remain open.</p>
+by the embedded links. The v74 diagnostic profile confirms substantial RC-node
+storage; the compact representation reduces that persistent storage. Both normal
+v74 Gemmini runs still exceed the memory guard. Other live storage and the
+full-design memory limit remain open.</p>
 
 <p>Benchmark protocol remains common defaults, 100 ps stress clocks, reset false
 paths, independently scored final placements and frozen binaries. Historical
 measurements apply to their recorded revisions. The later upstream merge
 <code>db6a5de1b</code> adds metadata and placement hints and changes synthesis-buffer
 preservation to the default. The timing-path optimization itself changes no defaults.
-The v73 storage comparison uses fresh controls with those merged defaults;
-historical v71 results apply to the pre-merge binaries.</p>
+The v74 storage comparison uses fresh controls with those merged defaults;
+historical v71 results apply to the pre-merge binaries. The initial v74 Gemmini
+control overlapped a diagnostic profile and hit the host-reserve guard; it is
+excluded. The recorded control is a fresh retry without profiling.</p>
 
 <p>The associated driver-pin routing optimization is complete for this checkpoint:
 commit <code>ce3e628e8</code> adds persistent per-layer interval occupancy with dense
