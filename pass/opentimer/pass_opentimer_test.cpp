@@ -1038,9 +1038,9 @@ protected:
       const auto                          feedback = session.evaluate(graph, rc);
       const auto                          repeated = session.evaluate(graph, rc);
       EXPECT_EQ(session.statistics().builds, 1u);
-      EXPECT_EQ(feedback.pins.size(), repeated.pins.size());
+      EXPECT_EQ(feedback.pin_count(), repeated.pin_count());
       for (const auto& p : json["designs"][0]["physical_pins"].GetArray()) {
-        const auto& pin = feedback.pins.at(p["pin"].GetString());
+        const auto& pin = feedback.at_pin(p["pin"].GetString());
         EXPECT_EQ(pin.clock, p["clock"].GetBool());
         EXPECT_EQ(pin.required.has_value(), p.HasMember("required"));
         if (pin.required) {

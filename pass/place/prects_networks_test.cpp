@@ -272,4 +272,67 @@ TEST(PrectsNetworks, ExplicitPortsCannotDisableRecognizedResetFalsePaths) {
   EXPECT_FALSE(excluded.timing_cuts.contains("ff:c"));
 }
 
+TEST(PrectsNetworks, DenseFeedbackFilteringPreservesSnapshotsAndLookup) {
+  timing::Feedback sparse;
+  sparse.pins["data"].arrival = 0;
+  sparse.pins["u:A"].slack    = -10;
+  sparse.pins["u:B"].slack    = -20;
+  sparse.pins["u:CLK"].clock  = true;
+  sparse.pins["u:CLK"].slack  = -100;
+  sparse.pins["v/B"].required = 50;
+  sparse.path                 = {"data", "u:A", "u:CLK", "v/B"};
+  auto             index      = std::make_shared<timing::Feedback::Pin_index>();
+  timing::Feedback dense;
+  auto&            values = dense.dense.emplace();
+  for (const auto& [name, pin] : sparse.pins) {
+    index->labels.push_back(name);
+    values.values.push_back(pin);
+  }
+  values.index = index;
+  dense.path   = sparse.path;
+  EXPECT_TRUE(dense.pins.empty());
+  EXPECT_EQ(dense.pin_count(), sparse.pin_count());
+  EXPECT_EQ(dense.cell_slack("u"), sparse.cell_slack("u"));
+  ASSERT_NE(dense.find_pin("v", "B"), nullptr);
+  EXPECT_EQ(dense.find_pin("v", "B")->required, 50);
+  EXPECT_EQ(dense.find_label("absent"), nullptr);
+  EXPECT_THROW(dense.at_pin("absent"), std::out_of_range);
+
+  Prects_networks controls;
+  controls.pins = {"data", "u:CLK", "absent"};
+  auto filtered = prects_data_timing(dense, controls);
+  auto expected = prects_data_timing(sparse, controls);
+  EXPECT_EQ(filtered.dense->index, dense.dense->index);
+  EXPECT_NE(&filtered.at_pin("u:A"), &dense.at_pin("u:A"));
+  EXPECT_EQ(filtered.pin_count(), expected.pin_count());
+  EXPECT_EQ(filtered.path, expected.path);
+  EXPECT_NE(dense.find_label("data"), nullptr);
+  EXPECT_EQ(filtered.find_label("data"), nullptr);
+  std::vector<std::string> visited;
+  filtered.for_each_pin([&](const auto& name, const auto& pin) {
+    visited.push_back(name);
+    EXPECT_EQ(pin.slack, expected.at_pin(name).slack);
+    EXPECT_EQ(pin.required, expected.at_pin(name).required);
+  });
+  EXPECT_EQ(visited, (std::vector<std::string>{"u:A", "u:B", "v/B"}));
+  filtered.erase_pin("u:B");
+  filtered.erase_pin("u:B");
+  EXPECT_EQ(filtered.pin_count(), 2u);
+  EXPECT_EQ(filtered.cell_slack("u"), -10);
+  EXPECT_EQ(dense.cell_slack("u"), -20);
+  filtered.at_pin("u:A").slack = 5;
+  EXPECT_EQ(filtered.cell_slack("u"), 5);
+  EXPECT_EQ(dense.at_pin("u:A").slack, -10);
+
+  const auto* retained = &dense.at_pin("u:A");
+  auto        moved    = prects_data_timing(std::move(dense), controls);
+  EXPECT_EQ(&moved.at_pin("u:A"), retained);
+  for (const auto& name : index->labels) {
+    moved.erase_pin(name);
+  }
+  EXPECT_FALSE(moved.has_pins());
+  EXPECT_EQ(moved.pin_count(), 0u);
+  moved.for_each_pin([](const auto&, const auto&) { ADD_FAILURE() << "erased pin was visited"; });
+}
+
 }  // namespace livehd::placement

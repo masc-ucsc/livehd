@@ -65,9 +65,8 @@ std::optional<Resize_edit> output_buffer(const Result& state, const Timing_feedb
     if (label.empty()) {
       continue;
     }
-    const auto it = score.pins.find(label);
-    labels.emplace_back(it != score.pins.end() && it->second.slack ? *it->second.slack * score.time_unit_ps
-                                                                   : std::numeric_limits<double>::infinity(),
+    const auto it = score.find_label(label);
+    labels.emplace_back(it != nullptr && it->slack ? *it->slack * score.time_unit_ps : std::numeric_limits<double>::infinity(),
                         std::move(label));
   }
   if (labels.size() < 2) {

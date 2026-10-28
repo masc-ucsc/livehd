@@ -1679,9 +1679,9 @@ TEST(Placement, TimingCheckpointsCarryConnectivityForAutomaticResetCuts) {
       ++calls;
       const auto controls = check(state);
       auto       timing   = timer.evaluate(state.graph, state.parasitics, controls.timing_cuts);
-      EXPECT_TRUE(timing.pins.at("mix:A").arrival);
-      EXPECT_FALSE(timing.pins.at("mix:B").arrival);
-      EXPECT_TRUE(timing.pins.at("reset_stage:CLK").clock);
+      EXPECT_TRUE(timing.at_pin("mix:A").arrival);
+      EXPECT_FALSE(timing.at_pin("mix:B").arrival);
+      EXPECT_TRUE(timing.at_pin("reset_stage:CLK").clock);
       return prects_data_timing(timing, controls);
     };
     if (mode & 4) {
@@ -1690,9 +1690,9 @@ TEST(Placement, TimingCheckpointsCarryConnectivityForAutomaticResetCuts) {
         ++ranking_calls;
         check_controls(state.controls);
         auto timing = timer.evaluate(state.graph, state.parasitics, state.controls.timing_cuts);
-        EXPECT_TRUE(timing.pins.at("mix:A").arrival);
-        EXPECT_FALSE(timing.pins.at("mix:B").arrival);
-        EXPECT_TRUE(timing.pins.at("reset_stage:CLK").clock);
+        EXPECT_TRUE(timing.at_pin("mix:A").arrival);
+        EXPECT_FALSE(timing.at_pin("mix:B").arrival);
+        EXPECT_TRUE(timing.at_pin("reset_stage:CLK").clock);
         return prects_data_timing(timing, state.controls);
       };
     }

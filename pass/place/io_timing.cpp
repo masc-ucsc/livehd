@@ -142,9 +142,9 @@ std::map<std::string, synth::Io_environment> Io_timing_flow::harvest(const Resul
   for (const auto& net : placed.parasitics->nets) {
     bool protected_net = false;
     for (const auto& node : net.nodes) {
-      const auto pin   = timing.pins.find(node.pin);
+      const auto pin   = timing.find_label(node.pin);
       const auto colon = node.pin.rfind(':');
-      if (pin != timing.pins.end() && pin->second.clock) {
+      if (pin != nullptr && pin->clock) {
         protected_net = true;
       }
       if (colon != std::string::npos) {
@@ -173,11 +173,11 @@ std::map<std::string, synth::Io_environment> Io_timing_flow::harvest(const Resul
       }
       for (const auto& name : names->second) {
         const auto key = name + ":" + binding.pin;
-        const auto pin = timing.pins.find(key);
-        if (protected_pins.contains(key) || pin == timing.pins.end() || pin->second.clock) {
+        const auto pin = timing.find_label(key);
+        if (protected_pins.contains(key) || pin == nullptr || pin->clock) {
           continue;
         }
-        const auto value = binding.input ? pin->second.arrival : pin->second.required;
+        const auto value = binding.input ? pin->arrival : pin->required;
         if (!value || !std::isfinite(*value)) {
           continue;
         }

@@ -233,7 +233,7 @@ Prects_networks prects_networks(const physical::Technology& tech, const physical
 
 timing::Feedback prects_data_timing(timing::Feedback result, const Prects_networks& networks) {
   for (const auto& pin : networks.pins) {
-    result.pins.erase(pin);
+    result.erase_pin(pin);
     if (result.ranking) {
       const auto index = result.ranking->layout->find(pin);
       if (index < result.ranking->pins.size()) {

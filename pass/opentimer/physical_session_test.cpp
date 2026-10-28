@@ -206,10 +206,10 @@ protected:
     optional(actual.wns, expected.wns);
     optional(actual.tns, expected.tns);
     optional(actual.hold_wns, expected.hold_wns);
-    ASSERT_EQ(actual.pins.size(), expected.pins.size());
-    for (const auto& [name, pin] : expected.pins) {
-      ASSERT_TRUE(actual.pins.contains(name)) << name;
-      const auto& value = actual.pins.at(name);
+    ASSERT_EQ(actual.pin_count(), expected.pin_count());
+    expected.for_each_pin([&](const auto& name, const auto& pin) {
+      ASSERT_NE(actual.find_label(name), nullptr) << name;
+      const auto& value = actual.at_pin(name);
       optional(value.arrival, pin.arrival);
       optional(value.required, pin.required);
       optional(value.slack, pin.slack);
@@ -220,7 +220,7 @@ protected:
       EXPECT_EQ(value.clock, pin.clock);
       EXPECT_EQ(value.violations, pin.violations);
       number(value.electrical_excess, pin.electrical_excess);
-    }
+    });
     EXPECT_EQ(actual.path, expected.path);
   }
 };
@@ -286,14 +286,20 @@ TEST_F(PhysicalSession, RegisteredResetCutChangesDownstreamSlackWithoutChangingL
   const auto                          full = session.evaluate(graph, rc);
   const std::set<std::string>         cuts{"reset_stage:Q", "mix:B"};
   const auto                          data = session.evaluate(graph, rc, cuts);
-  ASSERT_TRUE(full.pins.at("y").slack);
-  ASSERT_TRUE(data.pins.at("y").slack);
-  EXPECT_GT(*data.pins.at("y").slack, *full.pins.at("y").slack + 1);
-  EXPECT_TRUE(data.pins.at("reset_stage:CLK").clock);
-  EXPECT_FALSE(data.pins.at("mix:B").arrival);
-  EXPECT_TRUE(data.pins.at("mix:A").arrival);
-  EXPECT_EQ(data.pins.at("reset_stage:Q").load_ff, full.pins.at("reset_stage:Q").load_ff);
-  EXPECT_EQ(data.pins.at("mix:B").capacitance_ff, full.pins.at("mix:B").capacitance_ff);
+  ASSERT_TRUE(full.dense);
+  ASSERT_TRUE(data.dense);
+  EXPECT_TRUE(full.pins.empty());
+  EXPECT_TRUE(data.pins.empty());
+  EXPECT_EQ(full.dense->index, data.dense->index);
+  EXPECT_NE(full.dense->values.data(), data.dense->values.data());
+  ASSERT_TRUE(full.at_pin("y").slack);
+  ASSERT_TRUE(data.at_pin("y").slack);
+  EXPECT_GT(*data.at_pin("y").slack, *full.at_pin("y").slack + 1);
+  EXPECT_TRUE(data.at_pin("reset_stage:CLK").clock);
+  EXPECT_FALSE(data.at_pin("mix:B").arrival);
+  EXPECT_TRUE(data.at_pin("mix:A").arrival);
+  EXPECT_EQ(data.at_pin("reset_stage:Q").load_ff, full.at_pin("reset_stage:Q").load_ff);
+  EXPECT_EQ(data.at_pin("mix:B").capacitance_ff, full.at_pin("mix:B").capacitance_ff);
   EXPECT_EQ(rc->nets, before.nets);
   livehd::opentimer::Physical_session fresh(options);
   compare(data, fresh.evaluate(graph, rc, cuts));
@@ -324,7 +330,9 @@ TEST_F(PhysicalSession, RegisteredResetCutChangesDownstreamSlackWithoutChangingL
   }
   livehd::opentimer::Physical_session fresh_moved(options);
   const auto                          moved_data = session.evaluate(graph, moved, cuts);
-  EXPECT_FALSE(moved_data.pins.at("mix:B").arrival);
+  ASSERT_TRUE(moved_data.dense);
+  EXPECT_EQ(moved_data.dense->index, full.dense->index);
+  EXPECT_FALSE(moved_data.at_pin("mix:B").arrival);
   compare(moved_data, fresh_moved.evaluate(graph, moved, cuts));
   reset.attr(livehd::attrs::place).set(original_pose);
   compare(full, session.evaluate(graph, rc));
@@ -381,7 +389,7 @@ TEST_F(PhysicalSession, RankingTracksRcAndGateChangesWithoutPublishingDetailedTi
   ASSERT_TRUE(first.ranking_only);
   ASSERT_TRUE(first.ranking);
   ASSERT_TRUE(std::isfinite(first.pin_rank("PIN", "y").slack));
-  EXPECT_TRUE(first.pins.empty());
+  EXPECT_FALSE(first.has_pins());
   EXPECT_FALSE(first.wns);
   EXPECT_FALSE(first.tns);
   EXPECT_FALSE(first.electrical_pin_feedback);
@@ -419,7 +427,7 @@ TEST_F(PhysicalSession, IndexedRankingPreservesWeightsAcrossTopologyAndFiltering
     Circuit    circuit(strong, extra, 5000, true);
     const auto rank = session.evaluate(circuit.graph, circuit.rc, {}, Purpose::ranking);
     ASSERT_TRUE(rank.ranking);
-    EXPECT_TRUE(rank.pins.empty());
+    EXPECT_FALSE(rank.has_pins());
     EXPECT_EQ(rank.ranking->parasitics, circuit.rc);
     livehd::opentimer::Physical_session fresh(options);
     const auto                          expected = fresh.evaluate(circuit.graph, circuit.rc, {}, Purpose::ranking);
@@ -473,11 +481,11 @@ TEST_F(PhysicalSession, DataCutsSurviveTopologyChangesAndCanBeRemoved) {
     Circuit                     circuit(false, extra);
     const std::set<std::string> cuts{"u:X"};
     const auto                  cut = session.evaluate(circuit.graph, circuit.rc, cuts);
-    EXPECT_FALSE(cut.pins.at("y").arrival);
+    EXPECT_FALSE(cut.at_pin("y").arrival);
     livehd::opentimer::Physical_session fresh(options);
     compare(cut, fresh.evaluate(circuit.graph, circuit.rc, cuts));
     const auto restored = session.evaluate(circuit.graph, circuit.rc);
-    EXPECT_TRUE(restored.pins.at("y").arrival);
+    EXPECT_TRUE(restored.at_pin("y").arrival);
     compare(restored, fresh.evaluate(circuit.graph, circuit.rc));
     // Leave the same mask active across the next topology change.
     compare(cut, session.evaluate(circuit.graph, circuit.rc, cuts));
@@ -854,10 +862,10 @@ TEST_F(PhysicalSession, WhatifResizeBufferAndRollbackMatchFreshTiming) {
   livehd::opentimer::Physical_session fresh_strong(options);
   const auto                          sized = fresh_strong.evaluate(strong.graph, strong.rc);
   EXPECT_NEAR(w.wns(), ps(sized, *sized.wns), 1e-3);
-  EXPECT_NEAR(*w.pin("y").slack, ps(sized, *sized.pins.at("y").slack), 1e-3);
-  ASSERT_TRUE(sized.pins.at("y").hold_slack);
+  EXPECT_NEAR(*w.pin("y").slack, ps(sized, *sized.at_pin("y").slack), 1e-3);
+  ASSERT_TRUE(sized.at_pin("y").hold_slack);
   ASSERT_TRUE(w.pin("y").hold_slack);
-  EXPECT_NEAR(*w.pin("y").hold_slack, ps(sized, *sized.pins.at("y").hold_slack), 1e-3);
+  EXPECT_NEAR(*w.pin("y").hold_slack, ps(sized, *sized.at_pin("y").hold_slack), 1e-3);
   w.rollback(start);
   EXPECT_NEAR(w.wns(), wns0, 1e-6);
 
@@ -876,7 +884,7 @@ TEST_F(PhysicalSession, WhatifResizeBufferAndRollbackMatchFreshTiming) {
   livehd::opentimer::Physical_session fresh_buffered(options);
   const auto                          inserted = fresh_buffered.evaluate(buffered.graph, buffered.rc);
   EXPECT_NEAR(w.wns(), ps(inserted, *inserted.wns), 1e-3);
-  EXPECT_NEAR(*w.pin("v:A").arrival, ps(inserted, *inserted.pins.at("v:A").arrival), 1e-3);
+  EXPECT_NEAR(*w.pin("v:A").arrival, ps(inserted, *inserted.at_pin("v:A").arrival), 1e-3);
   ASSERT_TRUE(w.load("b:X"));
   EXPECT_GT(*w.load("b:X"), .29);
   ASSERT_TRUE(w.pin("b:X").arrival);  // Populate the transient identity cache.
@@ -887,7 +895,7 @@ TEST_F(PhysicalSession, WhatifResizeBufferAndRollbackMatchFreshTiming) {
   EXPECT_NEAR(w.wns(), wns0, 1e-6);
   EXPECT_NEAR(w.tns(), tns0, 1e-6);
   EXPECT_THROW(w.pin("b:X"), std::runtime_error);
-  EXPECT_NEAR(*w.pin("v:A").arrival, ps(before, *before.pins.at("v:A").arrival), 1e-3);
+  EXPECT_NEAR(*w.pin("v:A").arrival, ps(before, *before.at_pin("v:A").arrival), 1e-3);
 
   // Pending edits never leak into the next full evaluation.
   w.resize("u", "sky130_fd_sc_hd__buf_2");
@@ -905,14 +913,19 @@ TEST_F(PhysicalSession, WhatifResizeBufferAndRollbackMatchFreshTiming) {
   EXPECT_GT(*w.pin_capacitance("sky130_fd_sc_hd__buf_1", "A"), 0);
   // A checkpoint may reuse a physical name with a different timer identity.
   const auto refreshed = session.evaluate(buffered.graph, buffered.rc);
+  ASSERT_TRUE(before.dense);
+  ASSERT_TRUE(refreshed.dense);
+  EXPECT_NE(before.dense->index, refreshed.dense->index);
+  EXPECT_EQ(before.find_label("b:X"), nullptr);
+  EXPECT_NE(refreshed.find_label("b:X"), nullptr);
   ASSERT_TRUE(w.pin("b:X").arrival);
-  ASSERT_TRUE(refreshed.pins.at("b:X").arrival);
-  EXPECT_NEAR(*w.pin("b:X").arrival, ps(refreshed, *refreshed.pins.at("b:X").arrival), 1e-3);
+  ASSERT_TRUE(refreshed.at_pin("b:X").arrival);
+  EXPECT_NEAR(*w.pin("b:X").arrival, ps(refreshed, *refreshed.at_pin("b:X").arrival), 1e-3);
   session.evaluate(initial.graph, initial.rc);
   EXPECT_THROW(w.pin("b:X"), std::runtime_error);
   const auto reinserted = session.evaluate(buffered.graph, buffered.rc);
   ASSERT_TRUE(w.pin("b:X").arrival);
-  EXPECT_NEAR(*w.pin("b:X").arrival, ps(reinserted, *reinserted.pins.at("b:X").arrival), 1e-3);
+  EXPECT_NEAR(*w.pin("b:X").arrival, ps(reinserted, *reinserted.at_pin("b:X").arrival), 1e-3);
 }
 }  // namespace
 

@@ -421,23 +421,23 @@ private:
         net_of_.emplace(node.pin, net.driver);
       }
       const auto owner = instance_of(net.driver);
-      const auto pin   = timing_.pins.find(net.driver);
+      const auto pin   = timing_.find_label(net.driver);
       if (constant_drivers_.contains(net.driver)) {
         blocked_drivers_.insert(net.driver);
       }
-      if ((pin != timing_.pins.end() && pin->second.clock) || (owner.empty() && protected_names.contains("@port:" + net.driver))
+      if ((pin && pin->clock) || (owner.empty() && protected_names.contains("@port:" + net.driver))
           || (!owner.empty() && protected_names.contains(owner))) {
         blocked_drivers_.insert(net.driver);
       }
     }
     // A sink of a clock net is part of the clock network as well.
-    for (const auto& [label, pin] : timing_.pins) {
+    timing_.for_each_pin([&](const auto& label, const auto& pin) {
       if (pin.clock) {
         if (const auto d = net_of_.find(label); d != net_of_.end()) {
           blocked_drivers_.insert(d->second);
         }
       }
-    }
+    });
     for (const auto& [label, xy] : state_.pin_locations) {
       pos_.emplace(label, xy);
     }
@@ -709,16 +709,16 @@ private:
   // ---- phase E: real Liberty violations only --------------------------------
   void electrical_phase() {
     std::set<std::string> drivers;
-    for (const auto& [label, pin] : timing_.pins) {
+    timing_.for_each_pin([&](const auto& label, const auto& pin) {
       if (pin.violations == 0 || pin.clock) {
-        continue;
+        return;
       }
       if (nets_.contains(label)) {
         drivers.insert(label);
       } else if (const auto d = net_of_.find(label); d != net_of_.end()) {
         drivers.insert(d->second);
       }
-    }
+    });
     std::vector<std::string> todo;
     for (const auto& driver : drivers) {
       if (!blocked_drivers_.contains(driver) && nets_.contains(driver)) {

@@ -55,6 +55,7 @@ protected:
   std::shared_ptr<const livehd::physical::Parasitics> physical_rc_;
   std::map<std::string, std::string>                  physical_native_pins_;
   std::map<std::string, std::string>                  physical_timing_pins_;
+  std::shared_ptr<const livehd::timing::Feedback::Pin_index> physical_feedback_index_;
   std::map<std::string, std::string>                  physical_memory_captures_;
   std::set<std::string>                               physical_clock_endpoints_;  // memory clock pins: RC sinks, not captures
   void                                                validate_physical_rc(const std::shared_ptr<hhds::Graph>& graph) const;

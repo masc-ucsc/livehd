@@ -400,10 +400,10 @@ TEST_F(Buffer_repair, FinalGpPreservesTopologyUntilLegalRepair) {
     score.hold_wns          = 0;
     score.violations        = 0;
     score.electrical_excess = 0;
-    for (auto& [name, pin] : score.pins) {
-      (void)name;
+    score.for_each_pin([&](const auto& name, const auto&) {
+      auto& pin = score.at_pin(name);
       pin.slack = -.1 * options.whatif->clock_period() / score.time_unit_ps;
-    }
+    });
     return score;
   };
   const auto    placed = place(*graph, flat, options);
@@ -450,12 +450,12 @@ TEST_F(Buffer_repair, FinalGpDoesNotRemoveBuffersOnProvisionalTiming) {
       score.hold_wns          = 0;
       score.violations        = 0;
       score.electrical_excess = 0;
-      for (auto& [name, pin] : score.pins) {
-        (void)name;
+      score.for_each_pin([&](const auto& name, const auto&) {
+        auto& pin   = score.at_pin(name);
         pin.slack   = (mode == 1 ? .005 : .05) * period / score.time_unit_ps;
         pin.load_ff = 0;
         pin.slew    = 0;
-      }
+      });
       return score;
     };
     hhds::GraphLibrary owner;
@@ -1299,10 +1299,10 @@ TEST_F(Buffer_repair, FloorplanTimingCheckpointsAreScopedAndResizeRunsStaTwice) 
         score.hold_wns          = 0;
         score.violations        = 0;
         score.electrical_excess = 0;
-        for (auto& [name, pin] : score.pins) {
-          (void)name;
+        score.for_each_pin([&](const auto& name, const auto&) {
+          auto& pin = score.at_pin(name);
           pin.slack = -1;
-        }
+        });
       }
       return score;
     };
@@ -1399,15 +1399,15 @@ TEST_F(Buffer_repair, FloorplanAndMacroTimingApplyCriticalityCurve) {
       EXPECT_DOUBLE_EQ(snapshot.net_weights.at("buffer:X"), 1.5);
       EXPECT_DOUBLE_EQ(snapshot.net_weights.at("macro:Y"), 1);
     }
-    for (auto& [name, pin] : score.pins) {
-      (void)name;
+    score.for_each_pin([&](const auto& name, const auto&) {
+      auto& pin = score.at_pin(name);
       pin.slack = 1000;
-    }
+    });
     // Simulate criticality changing with the macro placement. The later solve
     // must reweight the opposite end of this path, not keep its FP weights.
-    score.pins["a"].slack        = calls <= 2 ? -100 : 0;
-    score.pins["buffer:X"].slack = -50;
-    score.pins["macro:Y"].slack  = calls <= 2 ? 0 : -100;
+    score.at_pin("a").slack        = calls <= 2 ? -100 : 0;
+    score.at_pin("buffer:X").slack = -50;
+    score.at_pin("macro:Y").slack  = calls <= 2 ? 0 : -100;
     score.wns                    = 0;
     return score;
   };
@@ -1654,7 +1654,7 @@ TEST_F(Buffer_repair, TimingPlacementUsesSlackWeightsAndRejectsRegressions) {
   rapidjson::Document initial_qor;
   initial_qor.Parse(placed.qor.c_str());
   const auto before = timing(placed);
-  ASSERT_FALSE(before.pins.empty());
+  ASSERT_TRUE(before.has_pins());
   options.iterations = 200;  // Give each warm candidate time to reach the timing guard.
   const auto result  = timing_place(
       std::move(placed),
@@ -1867,11 +1867,11 @@ TEST_F(Buffer_repair, TimingControlMaskMatchesFilteredFeedbackAcrossRepresentati
         }
       }
       EXPECT_EQ(input.path, original.path);
-      ASSERT_EQ(input.pins.size(), original.pins.size());
-      for (const auto& [label, pin] : input.pins) {
-        EXPECT_EQ(pin.slack, original.pins.at(label).slack);
-        EXPECT_EQ(pin.clock, original.pins.at(label).clock);
-      }
+      ASSERT_EQ(input.pin_count(), original.pin_count());
+      input.for_each_pin([&](const auto& label, const auto& pin) {
+        EXPECT_EQ(pin.slack, original.at_pin(label).slack);
+        EXPECT_EQ(pin.clock, original.at_pin(label).clock);
+      });
       if (input.ranking) {
         ASSERT_EQ(input.ranking->pins.size(), original.ranking->pins.size());
         for (size_t i = 0; i < input.ranking->pins.size(); ++i) {
@@ -2058,7 +2058,7 @@ TEST_F(Buffer_repair, TimingWeightsExcludeClockNetsAndRevertWorsePlacements) {
       options,
       [&](const Result& r) {
         auto f                      = timing(r);
-        f.pins.at("invert:A").clock = true;
+        f.at_pin("invert:A").clock  = true;
         f.delay                     = evaluations++ ? 100 : 1;
         f.wns                       = -1;
         return f;
@@ -2529,10 +2529,10 @@ TEST_F(Buffer_repair, RealTimingSteinerRepairReducesLongWireViolations) {
   ASSERT_TRUE(before.electrical_pin_feedback);
   unsigned pin_violations = 0;
   double   pin_excess     = 0;
-  for (const auto& [name, pin] : before.pins) {
+  before.for_each_pin([&](const auto&, const auto& pin) {
     pin_violations += pin.violations;
     pin_excess     += pin.electrical_excess;
-  }
+  });
   EXPECT_EQ(pin_violations, before.violations);
   EXPECT_NEAR(pin_excess, before.electrical_excess, before.electrical_excess * 1e-7);
   const auto result = repair_buffers(std::move(placed), options, [&](const Result& r) { return timing(r); }, Repair_scope::design);
@@ -2759,7 +2759,7 @@ TEST_F(Buffer_repair, HealthyCharacterizedStateOutputDoesNotRequestAFanoutTree) 
       options,
       [&](const Result& r) {
         auto f                    = evaluate(r);
-        f.pins.at("state:X").slew = 1e6;
+        f.at_pin("state:X").slew  = 1e6;
         f.violations              = 1;
         return f;
       },
@@ -2783,12 +2783,12 @@ TEST_F(Buffer_repair, HealthyPositiveSlackGateDoesNotGetAnArtificialFanoutFourTr
       options,
       [&](const Result& trial) {
         auto score = timing(trial);
-        for (auto& [name, pin] : score.pins) {
-          (void)name;
+        score.for_each_pin([&](const auto& name, const auto&) {
+          auto& pin   = score.at_pin(name);
           pin.slack   = 1;
           pin.slew    = .001;
           pin.load_ff = .01;
-        }
+        });
         return score;
       },
       Repair_scope::design);

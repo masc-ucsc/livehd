@@ -301,9 +301,9 @@ bool needs_repair(Node n, const Inventory& cells, const Timing_feedback& timing,
     }
   }
   const auto* c   = combinational(n, cells);
-  const auto  pin = timing.pins.find(label);
-  if (c && pin != timing.pins.end()) {
-    const auto& p = pin->second;
+  const auto  pin = timing.find_label(label);
+  if (c && pin != nullptr) {
+    const auto& p = *pin;
     if (c->max_capacitance_ff && p.load_ff && *p.load_ff > *c->max_capacitance_ff) {
       return true;
     }
@@ -400,11 +400,11 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
                         const physical::Technology& tech, const std::vector<liberty::Output_drive>* scanned_drives = nullptr,
                         bool repair_only = false) {
   const bool repair_violations = repair_only && timing.electrical_pin_feedback;
-  const auto output_drives     = timing.pins.empty() ? std::vector<liberty::Output_drive>{}
-                                 : scanned_drives    ? *scanned_drives
-                                                     : options.technology().cells.drives;
+  const auto output_drives     = !timing.has_pins() ? std::vector<liberty::Output_drive>{}
+                                 : scanned_drives   ? *scanned_drives
+                                                    : options.technology().cells.drives;
   const auto input_r
-      = timing.pins.empty() ? std::unordered_map<std::string, double>{} : input_resistance(graph, cells, placed, output_drives);
+      = !timing.has_pins() ? std::unordered_map<std::string, double>{} : input_resistance(graph, cells, placed, output_drives);
   std::vector<Node> buffers;
   for (auto n : graph.body().nodes()) {
     if (combinational(n, cells) && !fixed(n) && !protected_names.contains(std::string(n.get_name()))) {
@@ -436,9 +436,9 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
   // including its name tie-break, so equivalent keys retain the old permutation.
   for (const auto& n : buffers) {
     const auto*  c      = combinational(n, cells);
-    const auto   p      = timing.pins.find(physical_label(output(n, *c)));
-    const double stress = p == timing.pins.end() ? 0 : drive_stress(*c, p->second, timing.time_unit_ps);
-    const double slack  = p == timing.pins.end() ? 0 : -p->second.slack.value_or(0);
+    const auto   p      = timing.find_label(physical_label(output(n, *c)));
+    const double stress = p == nullptr ? 0 : drive_stress(*c, *p, timing.time_unit_ps);
+    const double slack  = p == nullptr ? 0 : -p->slack.value_or(0);
     priorities.emplace(n.get_debug_nid(),
                        Node_priority{
                            {stress > 1 ? stress : 0, slack},
@@ -491,10 +491,9 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
   // budget sizing a long chain before it ever considers removing/rebuilding it.
   for (auto n : buffers) {
     const auto* current  = combinational(n, cells);
-    const auto  feedback = timing.pins.find(physical_label(output(n, *current)));
-    if (repair_violations && feedback != timing.pins.end() && feedback->second.slack && *feedback->second.slack >= 0
-        && feedback->second.violations == 0 && feedback->second.electrical_excess <= 1e-6
-        && drive_stress(*current, feedback->second, timing.time_unit_ps) <= 1) {
+    const auto  feedback = timing.find_label(physical_label(output(n, *current)));
+    if (repair_violations && feedback != nullptr && feedback->slack && *feedback->slack >= 0 && feedback->violations == 0
+        && feedback->electrical_excess <= 1e-6 && drive_stress(*current, *feedback, timing.time_unit_ps) <= 1) {
       // An unrelated electrical violation must not launch hundreds of area
       // recovery edits on otherwise healthy gates. Explicit recovery keeps
       // its separate path; ordinary repair spends work on actual violations.
@@ -510,8 +509,8 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
       const auto r = input_r.find(physical_label(n.get_sink_pin(pin)));
       upstream.push_back(r == input_r.end() ? 0 : r->second);
     }
-    const auto pin            = timing.pins.find(physical_label(output(n, *current)));
-    const auto load           = pin != timing.pins.end() ? pin->second.load_ff.value_or(0) : 0;
+    const auto pin            = timing.find_label(physical_label(output(n, *current)));
+    const auto load           = pin != nullptr ? pin->load_ff.value_or(0) : 0;
     const auto candidate_cost = [&](const Buffer* c) {
       double input_delay = -std::numeric_limits<double>::infinity();
       for (size_t i = 0; i < upstream.size(); ++i) {
@@ -521,11 +520,10 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
       }
       return drive_cost(*c, load) + (upstream.empty() ? 0 : input_delay);
     };
-    if (pin != timing.pins.end() && pin->second.load_ff) {
+    if (pin != nullptr && pin->load_ff) {
       std::stable_sort(ladder.begin(), ladder.end(), [&](const auto* a, const auto* b) {
-        const bool recover_area
-            = pin->second.slack.value_or(0) > 0 && drive_stress(*current, pin->second, timing.time_unit_ps) <= 1;
-        const double budget = .5 * pin->second.slack.value_or(0) * timing.time_unit_ps;
+        const bool   recover_area = pin->slack.value_or(0) > 0 && drive_stress(*current, *pin, timing.time_unit_ps) <= 1;
+        const double budget       = .5 * pin->slack.value_or(0) * timing.time_unit_ps;
         const auto   cost   = [&](const Buffer* c) {
           const auto delay = candidate_cost(c);
           return std::tuple{bool(c->max_capacitance_ff && load > *c->max_capacitance_ff)
@@ -555,7 +553,7 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
       }
     }
   }
-  if (!timing.pins.empty() && preferred) {
+  if (timing.has_pins() && preferred) {
     std::map<std::pair<std::string, std::string>, const liberty::Output_drive*> state_drives;
     for (const auto& drive : output_drives) {
       if (drive.sequential && (drive.resistance_ohm > 0 || drive.intrinsic_ps > 0)) {
@@ -585,15 +583,14 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
           if (colon != std::string::npos) {
             const auto node = nodes.find(net.driver.substr(0, colon));
             if (node != nodes.end()) {
-              const auto pin = timing.pins.find(net.driver);
-              if (pin == timing.pins.end()) {
+              const auto pin = timing.find_label(net.driver);
+              if (pin == nullptr) {
                 return true;
               }
               const auto exceeds = [&](const auto& model) {
                 const auto fanout
                     = std::count_if(net.nodes.begin(), net.nodes.end(), [](const auto& p) { return !p.pin.empty(); }) - 1;
-                return (model.max_fanout && fanout > *model.max_fanout)
-                       || drive_stress(model, pin->second, timing.time_unit_ps) > 1;
+                return (model.max_fanout && fanout > *model.max_fanout) || drive_stress(model, *pin, timing.time_unit_ps) > 1;
               };
               if (const auto* cell = combinational(node->second, cells); cell && exceeds(*cell)) {
                 return true;
@@ -611,9 +608,8 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
             if (point.pin.empty()) {
               continue;
             }
-            const auto pin = timing.pins.find(point.pin);
-            if (pin == timing.pins.end() || !pin->second.slack || *pin->second.slack < 0 || pin->second.violations
-                || pin->second.electrical_excess > 1e-6) {
+            const auto pin = timing.find_label(point.pin);
+            if (pin == nullptr || !pin->slack || *pin->slack < 0 || pin->violations || pin->electrical_excess > 1e-6) {
               return true;
             }
             if (point.pin == net.driver) {
@@ -671,11 +667,11 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
         }
         cell = combinational(node->second, cells);
       }
-      const auto pin = timing.pins.find(net.driver);
-      if (pin != timing.pins.end() && pin->second.clock) {
+      const auto pin = timing.find_label(net.driver);
+      if (pin != nullptr && pin->clock) {
         continue;
       }
-      const bool                   critical_net = pin != timing.pins.end() && pin->second.slack.value_or(0) < 0;
+      const bool                   critical_net = pin != nullptr && pin->slack.value_or(0) < 0;
       const liberty::Output_drive* state_drive  = nullptr;
       if (!cell && colon != std::string::npos) {
         const auto node  = nodes.find(owner);
@@ -694,11 +690,11 @@ std::vector<Edit> edits(hhds::Graph& graph, const Inventory& cells, const Timing
       bool       needed      = (!characterize_source || critical_net) && sink_count > 3;
       const auto max_fanout  = cell ? cell->max_fanout : state_drive ? state_drive->max_fanout : std::nullopt;
       needed                |= max_fanout && sink_count > *max_fanout;
-      if (state_drive && pin != timing.pins.end()) {
-        needed |= drive_stress(*state_drive, pin->second, timing.time_unit_ps) > 1;
+      if (state_drive && pin != nullptr) {
+        needed |= drive_stress(*state_drive, *pin, timing.time_unit_ps) > 1;
       }
-      if (cell && pin != timing.pins.end()) {
-        needed |= drive_stress(*cell, pin->second, timing.time_unit_ps) > 1;
+      if (cell && pin != nullptr) {
+        needed |= drive_stress(*cell, *pin, timing.time_unit_ps) > 1;
       }
       const auto root = placed.pin_locations.find(net.driver);
       for (const auto& p : net.nodes) {
@@ -1097,11 +1093,11 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
       throw std::runtime_error("missing Steiner sink geometry: " + name);
     }
     locations.push_back(xy->second);
-    const auto pin = timing.pins.find(name);
-    if (pin != timing.pins.end() && pin->second.clock) {
+    const auto pin = timing.find_label(name);
+    if (pin != nullptr && pin->clock) {
       throw std::runtime_error("Steiner branch reaches a clock sink");
     }
-    capacitances.push_back(pin == timing.pins.end() ? 0 : pin->second.capacitance_ff.value_or(pin->second.load_ff.value_or(0)));
+    capacitances.push_back(pin == nullptr ? 0 : pin->capacitance_ff.value_or(pin->load_ff.value_or(0)));
   }
   if (!shared->rc) {
     shared->rc = wire_rc(options, tech);
@@ -1112,7 +1108,7 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
   const auto   fanout    = b.max_fanout ? std::min(edit.fanout, static_cast<unsigned>(std::max(0.0, *b.max_fanout))) : edit.fanout;
   Buffer_tree  plan;
   std::vector<const Buffer*> drive_cells{&b};
-  if (!timing.pins.empty()) {
+  if (timing.has_pins()) {
     drive_cells.clear();
     std::vector<Buffer_drive> drives;
     const auto                model = [&](const Buffer& cell) {
@@ -1139,12 +1135,12 @@ std::optional<Buffer_tree> apply(hhds::Graph& graph, const Inventory& cells, con
     double                             latest = 0;
     bool                               any    = false;
     for (const auto& name : leaf_names) {
-      const auto pin = timing.pins.find(name);
-      if (pin == timing.pins.end() || !pin->second.required) {
+      const auto pin = timing.find_label(name);
+      if (pin == nullptr || !pin->required) {
         constrained.emplace_back();
         continue;
       }
-      constrained.emplace_back(*pin->second.required * timing.time_unit_ps);
+      constrained.emplace_back(*pin->required * timing.time_unit_ps);
       latest = any ? std::max(latest, *constrained.back()) : *constrained.back();
       any    = true;
     }
@@ -1387,9 +1383,8 @@ std::vector<Edit> final_buffer_candidates(const Result& state, const Inventory& 
           if (point.pin.empty()) {
             return true;
           }
-          const auto pin = repair_timing->pins.find(point.pin);
-          return pin != repair_timing->pins.end() && pin->second.slack && *pin->second.slack >= 0 && pin->second.violations == 0
-                 && pin->second.electrical_excess <= 1e-6;
+          const auto pin = repair_timing->find_label(point.pin);
+          return pin != nullptr && pin->slack && *pin->slack >= 0 && pin->violations == 0 && pin->electrical_excess <= 1e-6;
         });
       };
       if (healthy(*in->second) && healthy(*out->second)) {
@@ -1467,18 +1462,18 @@ std::set<std::string> regressed_nodes(const Timing_feedback& before, const Timin
       nodes.insert(pin.substr(0, colon));
     }
   };
-  for (const auto& [name, pin] : after.pins) {
-    const auto old = before.pins.find(name);
-    if (old == before.pins.end() || pin.clock) {
-      continue;
+  after.for_each_pin([&](const auto& name, const auto& pin) {
+    const auto old = before.find_label(name);
+    if (old == nullptr || pin.clock) {
+      return;
     }
-    const auto& prior = old->second;
+    const auto& prior = *old;
     if ((electrical && (pin.violations > prior.violations || pin.electrical_excess > prior.electrical_excess + eps))
         || (setup && pin.slack && prior.slack && *pin.slack < std::min(0.0, *prior.slack) - eps)) {
       bad_pins.insert(name);
       add_node(name);
     }
-  }
+  });
   // Do not expand recursively: a shared high-fanout net must not flood the
   // entire design simply because a neighbor was marked by an earlier net.
   for (const auto& net : nets.nets) {
@@ -1832,11 +1827,11 @@ static Floorplan_resize resize_floorplan(Result& state, const Options& options, 
       if (!from) {
         continue;
       }
-      const auto pin = before.pins.find(physical_label(output(node, *from)));
-      if (pin == before.pins.end()) {
+      const auto pin = before.find_label(physical_label(output(node, *from)));
+      if (pin == nullptr) {
         continue;
       }
-      const auto& p = pin->second;
+      const auto& p = *pin;
       if (!p.load_ff || edit.gain_ps < -1e-6 || (std::abs(edit.gain_ps) <= 1e-6 && to.area <= from->area)) {
         continue;
       }
@@ -1911,7 +1906,7 @@ Floorplan_resize repair_floorplan(Result& state, const Options& options, const T
   w.String("fp_placement_rc_gate_buffer_steiner_repair");
   w.Key("trials");
   w.StartArray();
-  if (!result.timing.pins.empty()) {
+  if (result.timing.has_pins()) {
     w.StartObject();
     w.Key("kind");
     w.String("forest_sweep");
@@ -2150,16 +2145,16 @@ Floorplan_resize repair_gp_buffers(Result& state, const Options& options, const 
       if (!ready(driver) || !ready(candidate.node) || (!upstream.empty() && !ready(upstream))) {
         continue;
       }
-      const auto feedback = result.timing.pins.find(driver);
-      if (feedback == result.timing.pins.end() || feedback->second.clock) {
+      const auto feedback = result.timing.find_label(driver);
+      if (feedback == nullptr || feedback->clock) {
         continue;
       }
-      const double slack = feedback->second.slack.value_or(-std::numeric_limits<double>::infinity()) * result.timing.time_unit_ps;
+      const double slack    = feedback->slack.value_or(-std::numeric_limits<double>::infinity()) * result.timing.time_unit_ps;
       bool         eligible = false;
       if (removal) {
-        const auto parent = result.timing.pins.find(upstream);
-        eligible          = slack > margin && parent != result.timing.pins.end() && !parent->second.clock && parent->second.slack
-                            && *parent->second.slack * result.timing.time_unit_ps > margin;
+        const auto parent = result.timing.find_label(upstream);
+        eligible          = slack > margin && parent != nullptr && !parent->clock && parent->slack
+                            && *parent->slack * result.timing.time_unit_ps > margin;
         // Require positive margin on every sink, including branches. Unknown
         // timing is not evidence that a buffer is safe to remove.
         if (const auto net = index.nets.find(driver); net != index.nets.end()) {
@@ -2167,18 +2162,18 @@ Floorplan_resize repair_gp_buffers(Result& state, const Options& options, const 
             if (p.pin.empty()) {
               continue;
             }
-            const auto f = result.timing.pins.find(p.pin);
-            eligible &= f != result.timing.pins.end() && f->second.slack && *f->second.slack * result.timing.time_unit_ps > margin;
+            const auto f  = result.timing.find_label(p.pin);
+            eligible     &= f != nullptr && f->slack && *f->slack * result.timing.time_unit_ps > margin;
           }
         } else {
           eligible = false;
         }
       } else {
         // Negative slack beyond the dead band, or a clear electrical violation.
-        eligible = feedback->second.slack && slack < -margin;
+        eligible = feedback->slack && slack < -margin;
         if (node != index.nodes.end()) {
           if (const auto* cell = combinational(node->second, cells)) {
-            eligible |= drive_stress(*cell, feedback->second, result.timing.time_unit_ps) > 1.1;
+            eligible |= drive_stress(*cell, *feedback, result.timing.time_unit_ps) > 1.1;
           }
         }
       }
@@ -2261,11 +2256,11 @@ Floorplan_resize repair_gp_buffers(Result& state, const Options& options, const 
         keep                 = retain(result.timing, after);
         if (removal) {
           for (const auto& driver : touched) {
-            if (driver.find(':') == std::string::npos && !after.pins.contains(driver)) {
+            if (driver.find(':') == std::string::npos && !after.find_label(driver)) {
               continue;
             }
-            const auto f = after.pins.find(driver);
-            if (f == after.pins.end() || !f->second.slack || *f->second.slack * after.time_unit_ps <= margin) {
+            const auto f = after.find_label(driver);
+            if (f == nullptr || !f->slack || *f->slack * after.time_unit_ps <= margin) {
               keep = false;
             }
           }
@@ -2522,7 +2517,7 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
            || score.electrical_excess > 1e-6;
   };
   const auto     trial_available   = [&] { return !admit_trial || admit_trial(); };
-  const bool     physical_recovery = !score.pins.empty() && scope != Repair_scope::sizing && scope != Repair_scope::forest;
+  const bool     physical_recovery = score.has_pins() && scope != Repair_scope::sizing && scope != Repair_scope::forest;
   const unsigned sweep_budget      = physical_recovery ? 12 : 24;
   const auto     directory         = options.output_dir + "/" + report_key;
   fs::create_directories(directory);
@@ -2530,7 +2525,7 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
   // proposal per driver is applied transactionally, then legalized and timed
   // once for the batch. Rejected batches are bisected; the STA budget bounds
   // evaluations, not which two instance names happen to appear first.
-  if (needs_repair() && trial_available() && !score.pins.empty() && scope != Repair_scope::recovery) {
+  if (needs_repair() && trial_available() && score.has_pins() && scope != Repair_scope::recovery) {
     const auto sweep = [&](bool trees) {
       if (!trial_available()) {
         return;
@@ -2565,11 +2560,11 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
           auto        node = index.at(edit.node);
           const auto* from = combinational(node, cells);
           const auto& to   = cells.at(edit.master);
-          const auto  pin  = score.pins.find(physical_label(output(node, *from)));
-          if (pin == score.pins.end() || !pin->second.load_ff) {
+          const auto  pin  = score.find_label(physical_label(output(node, *from)));
+          if (pin == nullptr || !pin->load_ff) {
             continue;
           }
-          const auto&  feedback     = pin->second;
+          const auto&  feedback     = *pin;
           const double slack_ps     = feedback.slack.value_or(0) * score.time_unit_ps;
           const bool   recover_area = slack_ps > 0 && drive_stress(*from, feedback, score.time_unit_ps) <= 1;
           if (recover_area) {
@@ -2604,11 +2599,10 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
               driver = physical_label(output(found->second, *cell));
             }
           }
-          const auto   pin   = score.pins.find(driver);
-          const double slack = pin == score.pins.end() ? std::numeric_limits<double>::infinity()
-                                                       : pin->second.slack.value_or(std::numeric_limits<double>::infinity());
-          const double excess
-              = score.electrical_pin_feedback && pin != score.pins.end() ? std::max(0.0, pin->second.electrical_excess) : 0;
+          const auto   pin    = score.find_label(driver);
+          const double slack  = pin == nullptr ? std::numeric_limits<double>::infinity()
+                                               : pin->slack.value_or(std::numeric_limits<double>::infinity());
+          const double excess = score.electrical_pin_feedback && pin != nullptr ? std::max(0.0, pin->electrical_excess) : 0;
           return std::pair{-excess, slack};
         };
         // Repair the largest electrical violations first, then the worst
@@ -2827,7 +2821,7 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
   unsigned recovery_attempts = 0, recovery_accepted = 0;
   while (needs_repair() && trial_available() && (scope == Repair_scope::recovery || !score.wns || *score.wns < 0)
          && ((physical_recovery && attempt < 24 && recovery_attempts < 12 && recovery_accepted < 8)
-             || (score.pins.empty() && scope != Repair_scope::recovery && attempt < 24 && accepted < 8))) {
+             || (!score.has_pins() && scope != Repair_scope::recovery && attempt < 24 && accepted < 8))) {
     auto candidates = physical_recovery ? final_buffer_candidates(result.placed,
                                                                   cells,
                                                                   protected_names,

@@ -67,10 +67,10 @@ std::map<std::string, double> data_timing_weights(const physical::Parasitics& ne
             clock |= pin->clock;
             slack  = std::min(slack, pin->slack);
           }
-        } else if (const auto it = timing.pins.find(node.pin); it != timing.pins.end()) {
-          clock |= it->second.clock;
-          if (it->second.slack) {
-            slack = std::min(slack, *it->second.slack);
+        } else if (const auto it = timing.find_label(node.pin); it != nullptr) {
+          clock |= it->clock;
+          if (it->slack) {
+            slack = std::min(slack, *it->slack);
           }
         }
       }

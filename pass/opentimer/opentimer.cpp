@@ -2657,14 +2657,38 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     const double unit_ps   = timer.time_unit() ? timer.time_unit()->value() * 1e12 : 1000;
     if (feedback_) {
       feedback_->time_unit_ps = unit_ps;
+      // Geometry and cell-strength changes retain physical identities. Keep
+      // those labels alive across snapshots, rebuilding only after topology
+      // changes. Values remain independently owned by each evaluation.
+      if (!physical_feedback_index_ || physical_feedback_index_->labels.size() != physical_timing_pins_.size()
+          || !std::equal(physical_feedback_index_->labels.begin(),
+                         physical_feedback_index_->labels.end(),
+                         physical_timing_pins_.begin(),
+                         [](const auto& label, const auto& entry) { return label == entry.first; })) {
+        auto index = std::make_shared<livehd::timing::Feedback::Pin_index>();
+        index->labels.reserve(physical_timing_pins_.size());
+        for (const auto& [physical, name] : physical_timing_pins_) {
+          (void)name;
+          index->labels.push_back(physical);
+        }
+        physical_feedback_index_ = std::move(index);
+      }
+      auto& dense = feedback_->dense.emplace();
+      dense.index = physical_feedback_index_;
+      dense.values.resize(dense.index->labels.size());
     }
     if (render) {
       j += std::format(",\"time_unit_ps\":{},\"physical_pins\":[", unit_ps);
     }
     bool comma = false;
+    size_t physical_index = 0;
     for (const auto& [physical, name] : physical_timing_pins_) {
+      const auto index = physical_index++;
       const auto it = pins.find(name);
       if (it == pins.end()) {
+        if (feedback_) {
+          feedback_->dense->erase(index);
+        }
         continue;
       }
       const auto&                   pin = it->second;
@@ -2707,7 +2731,7 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       }
       value.clock = clock;
       if (feedback_) {
-        feedback_->pins.emplace(physical, value);
+        feedback_->dense->values[index] = value;
       }
       if (render) {
         if (comma) {
