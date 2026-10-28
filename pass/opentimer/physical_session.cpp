@@ -350,7 +350,7 @@ struct Physical_session::Impl : Pass_opentimer {
 
   void update_bound_rc() {
     // Coordinate-only snapshots preserve every physical/timer pin binding.
-    // Reuse those names and net identities instead of rebuilding sorted maps
+    // Reuse their numeric identities instead of rebuilding sorted maps
     // and checking the entire connectivity again for each GP sample.
     Rc_batch batch(timer);
     for (size_t index = 0; index < physical_rc_->nets.size(); ++index) {
@@ -358,16 +358,14 @@ struct Physical_session::Impl : Pass_opentimer {
       if (net == previous_physical_rc_->nets[index]) {
         continue;
       }
-      const auto&              name = net_names.at(net.driver);
-      ot::IndexedRc            mapped;
-      mapped.name = name;
+      ot::BoundRc mapped;
+      mapped.driver = physical_timing_pin(net.driver).idx();
       mapped.nodes.reserve(net.nodes.size());
       mapped.edges.reserve(net.edges.size());
       for (size_t i = 0; i < net.nodes.size(); ++i) {
         const auto& node = net.nodes[i];
-        mapped.nodes.push_back(
-            {node.pin.empty() ? std::format("{}:__lhd_steiner_{}", name, i) : physical_timing_pin(node.pin).name(),
-             static_cast<float>(node.capacitance_ff)});
+        mapped.nodes.push_back({node.pin.empty() ? ot::BoundRc::no_pin : physical_timing_pin(node.pin).idx(),
+                                static_cast<float>(node.capacitance_ff)});
       }
       for (const auto& edge : net.edges) {
         mapped.edges.push_back({edge.from, edge.to, static_cast<float>(edge.resistance_ohm)});

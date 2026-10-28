@@ -357,6 +357,11 @@ This reduces timing storage without changing the RC model or public delay API.
 Timer-owned pins also share their names with stable map keys, eliminating a
 duplicate string per pin. Standalone pins retain ownership of their names; the
 public name reference remains valid across unrelated insertion and removal.
+Placement RC uses `BoundRc` batches with numeric driver/pin identities and dense
+node storage. The timer checks complete pin coverage and tree connectivity before
+replacing a batch; topology edits require fresh bindings. Propagation uses numeric
+node indices. Named SPEF imports retain their existing representation; dense-tree
+exports generate internal node names on demand and preserve physical pin names.
 
 Compare a persistent session with a fresh session before changing the timing
 model. Then compare engines with zero wire RC and with an identical exported RC

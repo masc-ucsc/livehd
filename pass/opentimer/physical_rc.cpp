@@ -176,16 +176,17 @@ void Pass_opentimer::apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph
     }
     bindings.emplace_back(net.driver, &driver->second);
     const auto               name = driver->second.net()->name();
-    ot::IndexedRc            mapped;
-    mapped.name = name;
+    ot::BoundRc              mapped;
+    mapped.driver = driver->second.idx();
     if (!unchanged) {
       mapped.nodes.reserve(net.nodes.size());
       mapped.edges.reserve(net.edges.size());
     }
     for (size_t i = 0; i < net.nodes.size(); ++i) {
       const auto& node  = net.nodes[i];
-      auto        label = node.pin.empty() ? std::format("{}:__lhd_steiner_{}", name, i) : timer_pin(node.pin);
+      size_t      pin_index = ot::BoundRc::no_pin;
       if (!node.pin.empty()) {
+        const auto label                = timer_pin(node.pin);
         const auto pin                  = timer.pins().find(label);
         if (pin == timer.pins().end() || !pin->second.net() || pin->second.net()->name() != name) {
           throw std::runtime_error("placement RC endpoint differs from STA connectivity: " + label + " on " + name + ", actual "
@@ -194,12 +195,13 @@ void Pass_opentimer::apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph
                                                                 : std::string("no net")));
         }
         bindings.emplace_back(node.pin, &pin->second);
+        pin_index = pin->second.idx();
       }
       if (!std::isfinite(node.capacitance_ff) || node.capacitance_ff < 0) {
         throw std::invalid_argument("invalid placement capacitance");
       }
       if (!unchanged) {
-        mapped.nodes.push_back({std::move(label), static_cast<float>(node.capacitance_ff)});
+        mapped.nodes.push_back({pin_index, static_cast<float>(node.capacitance_ff)});
       }
     }
     if (unchanged) {

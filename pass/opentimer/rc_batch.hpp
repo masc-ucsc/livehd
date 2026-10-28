@@ -13,7 +13,7 @@ namespace livehd::opentimer {
 // the destructor; timing propagation happens only after the whole update.
 class Rc_batch {
   ot::Timer& timer;
-  std::vector<ot::IndexedRc> data;
+  std::vector<ot::BoundRc> data;
   size_t     records = 0, nets = 0;
 
 public:
@@ -22,11 +22,11 @@ public:
     if (data.empty()) {
       return;
     }
-    timer.update_parasitics(std::move(data), ot::farad_t(1e-15), ot::ohm_t(1));
+    timer.update_bound_parasitics(std::move(data), ot::farad_t(1e-15), ot::ohm_t(1));
     data    = {};
     records = 0;
   }
-  void add(ot::IndexedRc net) {
+  void add(ot::BoundRc net) {
     records += net.nodes.size() + net.edges.size();
     ++nets;
     data.push_back(std::move(net));

@@ -13,15 +13,15 @@
 <p>High-priority fixes so that <code>lhd synth --set synth.place=true</code> reaches OpenROAD's
 pre-CTS QoR (HPWL, cells, WNS, power measured by the same OpenSTA script) with <em>less CPU time</em>
 than OpenROAD's floorplan → global place → resize → detailed place on the HighTide asap7 benchmark.
-This optimization pass is closed at a validated source checkpoint; remaining acceptance targets are recorded below for follow-up.</p>
-<p><span class="status">Optimization pass complete — remaining A–J acceptance is open</span>
+Validated source checkpoints are published; remaining acceptance targets are tracked below.</p>
+<p><span class="status">Optimization in progress — remaining A–J acceptance is open</span>
 Source of the issues: <code>HighTide/repros/issues.md</code> (LiveHD <code>8e017a011</code>, HighTide <code>9648393ce</code>,
 host llmHDL, one CPU for LiveHD, 8 threads for OpenROAD). Each new comparison records its
 frozen binaries and uses <code>perf</code> and <code>/usr/bin/time</code>; the ablation placements are scored with the
 benchmark's <code>repros/score.tcl</code>. Historical measurements apply to their recorded revisions.</p>
 
 <h2 id="progress">Current implementation and acceptance status</h2>
-<p>The source checkpoint is reviewed and this optimization pass is complete.
+<p>The latest source checkpoint is reviewed; the broader optimization goal remains in progress.
 The driver-pin routing work is complete for this pass. The broader placer A–J
 acceptance task is <strong>not complete</strong>; its remaining requirements are
 listed below. Historical measurements are retained in
@@ -29,10 +29,10 @@ listed below. Historical measurements are retained in
 recorded revisions. Raw experiments and failed runs stay outside the build.</p>
 
 <h3 id="checkpoint">Reproducible source checkpoint</h3>
-<p>This pin-name storage follow-up builds on the timing-arc checkpoint in LiveHD
-<a href="https://github.com/masc-ucsc/livehd/commit/6999a588cc0bc23d6a58584c6bd4cfc633f00e77"><code>6999a588c</code></a>.
+<p>This dense-RC follow-up builds on the pin-name checkpoint in LiveHD
+<a href="https://github.com/masc-ucsc/livehd/commit/f8680dd1b637954fa7cf4b07096cf2c94f23d45e"><code>f8680dd1b</code></a>.
 <code>MODULE.bazel</code> uses published commits for OpenTimer
-<a href="https://github.com/masc-ucsc/OpenTimer/commit/67180f302f72c9257162f3cc5137ed8b24dfd507"><code>67180f30</code></a>
+<a href="https://github.com/masc-ucsc/OpenTimer/commit/763207ca8c1019c82b57fbb76cf702ca8785acf6"><code>763207ca</code></a>
 and DREAMPlace
 <a href="https://github.com/masc-ucsc/DREAMPlace/commit/3bd9bc36cf8dbab376ae87a78bcc5e0f328a6e89"><code>3bd9bc36</code></a>.
 All owned dependency pins are reachable from their upstream branches; no sibling
@@ -118,12 +118,12 @@ before repair, with only 10 net additional cells afterward. The new report
 identifies constants by Liberty master and exposes their counts/area as a subset
 still fully charged to the original budget. The cause is diagnosed; admission of
 mandatory physical preparation and the broader census remain unresolved.</td></tr>
-<tr><td><a href="#I">I — scaling</a></td><td>Open. Fresh Gemmini v91 control and
-candidate, both using the default allocator and strict 16-decimal-GB guard,
-stop at 689.394 s / 15,626,936 KiB and 935.324 s / 15,657,624 KiB sampled
-tree RSS. Compact shared arcs reduce memory on completed smaller flows, but
-Gemmini still exceeds the limit. These incomplete flows establish neither a
-speed ratio nor full-flow QoR acceptance. They supersede the looser v74
+<tr><td><a href="#I">I — scaling</a></td><td>Open. Fresh Gemmini v95 control and
+v96 dense-RC candidate, both using the default allocator and strict 16-decimal-GB
+guard, stop at 1,061.427 s / 15,641,776 KiB and 1,042.930 s / 15,635,224 KiB sampled
+tree RSS. Dense RC reduces memory on completed smaller flows, but Gemmini still
+exceeds the limit. These incomplete flows establish neither a speed ratio nor
+full-flow QoR acceptance. They supersede the v91 strict-guard and v74 looser
 diagnostic guard runs. CNN v74 completes in 1,997.801 s placement
 (2,284.909 s full flow) at 10,306,872 KiB peak process RSS. Its independently
 scored WNS is −26,531.888 ps; the original scorer hit the host-reserve guard and
@@ -261,6 +261,30 @@ override: <code>celllib_smoke</code>, <code>path_report</code>,
 <code>signal_route_bench</code> build successfully. Owned dependencies are
 reachable from their fetched upstream branches. Only source, documentation
 and the Bazel pin are published; raw results remain outside Git.</p>
+
+<h3 id="bound-rc">Dense pin-bound RC and current memory audit</h3>
+<p>Placement RC now reaches OpenTimer as numeric driver/pin identities and edge
+indices. Dense node arrays replace retained name maps; propagation uses the pin's
+numeric RC index. The complete batch is checked for valid pins, full net coverage,
+finite values and tree connectivity before replacing existing RC. Named SPEF
+imports remain available, and diagnostic exports generate collision-free internal
+names only on demand. No placement default or timing equation changes.</p>
+<p>Seven focused optimized timing tests pass, including named/dense comparisons
+across corners, models, worker counts, unit conversion and replacement; malformed
+batches preserve installed RC. The physical-session chunking and what-if checks
+also pass. A fixed-geometry partition_c replay preserves DEF and timing JSON
+byte-for-byte, reducing peak process RSS from 5,787.496 to 5,582.973 MiB
+(204.523 MiB), CPU time from 61.69 to 60.60 s, and instructions by 1.49%.</p>
+<p>All four v96 final DEFs and independent QoR scores match the v95 controls
+exactly under common production defaults and 100 ps clocks with reset false paths.
+Placement times are lfsr 2.119 → 2.129 s, minimax 23.403 → 23.367 s,
+partition_m 32.218 → 29.983 s and CoralNPU 597.975 → 603.129 s; all meet the 1.5×
+time guard. CoralNPU peak process RSS falls from 6,207.121 to 6,014.492 MiB.
+These are single samples, not a repeatable whole-flow speedup claim.</p>
+<p>The strict Gemmini control and candidate both fail the memory limit as recorded
+under I. The memory improvement does not close large-design acceptance. Total STA
+also remains above 10%: minimax uses 6.512 s of timing in 23.367 s of placement.
+Raw profiles and benchmark outputs remain outside Git.</p>
 
 <h3 id="pin-name-storage">Pin-name ownership and publication cleanup</h3>
 <p>Timer-owned pins now borrow their stable unordered-map keys instead of owning
