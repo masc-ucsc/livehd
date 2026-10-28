@@ -840,6 +840,9 @@ Fold K scalar `reg <prefix>_<N>_<field>:<W>` declarations (for N=0..K-1) into **
 - **Do not fold forward-referenced wires.** If a field's references include reads that appear *before* any write in source order, the family must stay as `wire` scalars (the array-wire gap applies).
 - **Do not change module signatures, `io.*` field names, comments, or whitespace** beyond the decls+refs being folded.
 - **Do not use this rule to fold scalar wires** declared with `wire ... :<W>` (no initializer, forward-refs allowed). Those are the `wire`-array-gap class — fold is blocked until Pyrope gains array-wire support.
+- **Do not fold families with per-index reset init.** If any decl in the group carries an `:[initial=…]` or `:[reset_pin=…]` attribute with a non-zero or index-specific value (e.g. `reg state_0:u1:[initial=1,…]` while `state_1..5` initialize to 0; or BOOM CSRFile's `reg_pmp_3_addr=268435456` + `reg_pmp_7_addr=536870912` baked PMP region constants in the firtool-emitted ref), SKIP. Collapsing the group into a single `reg …:[K]uW:[ordering="old"]` array drops the per-index init and the LEC solver finds an initial-state counter-example — verdict UNKNOWN after a long BMC timeout. The matching Rocket CSRFile pyroA (committed as NCE, not PROVEN) is the published precedent; this skill guarantees PROVEN only, so the family must be SKIP'd here.
+- **Do not fold families with sparse (non-dense-from-0) indices.** Patterns like `arb_uop_bits_fu_code_1`, `arb_uop_bits_fu_code_2` (MemExeUnit — indices start at 1, no `_0`) or RenameBusyTable's `wakeups_wu_valid_REG` + `wakeups_wu_valid_REG_2` + `wakeups_wu_valid_REG_4` (indices {implicit 0, 2, 4}) are legitimate domain-indexed scalars where the index encodes semantics (functional-unit lane number, pipeline stage ID). Folding them into `[K]uW` would misalign the index with the semantics and produce either a compile fail or a REFUTED LEC. SKIP.
+- **Do not fold families with mixed-prefix naming.** When the group alternates between `<base>` (no numeric infix) and `<base>_<N>` (with infix) — RenameBusyTable's `wakeups_wu_bits_REG_uop_pdst` vs `wakeups_wu_bits_REG_1_uop_pdst` vs `wakeups_wu_bits_REG_2_uop_pdst` — the implicit "index 0" cannot be matched by the ref-rewrite sed without a bespoke pre-pass to normalize the names. SKIP unless the caller first runs `rename` to unify the naming.
 
 ### Detection algorithm
 
@@ -848,9 +851,11 @@ Given a target `.prp` file and (optionally) a `<prefix>` + `<field>` + `<K>` tri
 1. **Enumerate candidate families.** Grep every decl matching `^\s*reg\s+<prefix>_[0-9]+_<field>:<W>$`. Record (prefix, field, N, W) per decl.
 2. **Group by (prefix, field, W).** For each group, let `S` = the sorted set of N values and `K` = max(S)+1. Require `S = {0, 1, …, K-1}` (dense, zero-indexed, no gaps) and `K ≥ 2`.
 3. **Verify uniform width.** All K decls must have the same `W`. If widths disagree, the group is NOT a fold candidate — mark `SKIP_MIXED_WIDTH`.
-4. **Enumerate references.** For each `<prefix>_<N>_<field>` with N ∈ S, grep every occurrence that is NOT the decl line (word-boundary). Verify none are inside a `wire ... :<W>` declaration or a port list.
-5. **Forward-ref check.** For each ref line L and the matching decl's would-be write line Lw: if `wire` ever introduced the field earlier, SKIP. For `reg` decls (the common case), this is a non-issue because reg values persist across cycles.
-6. **Form the plan.** Per field: `FOLD` (K, W, refcount), `SKIP_WIRE_FAMILY` (array-wire gap), `SKIP_MIXED_WIDTH`, `SKIP_SPARSE_N` (gaps in S), or `SKIP_TOO_FEW` (K < 2).
+4. **Per-index-init check.** Grep each decl for `:[initial=…]` or `:[reset_pin=…]`. If ANY decl in the group has a non-zero or index-specific init expression — `SKIP_PER_INDEX_INIT`. Also check the matching ref `.sv` for `initial begin … regX = …` blocks or Chisel `RegInit(<nonzero>)` emissions (counter-example PMP addresses in BOOM CSRFile). The ref-side init is the authoritative check because the ref is what LEC compares against; a pyroA `reg …:[K]uW:[ordering="old"]` has free random init that can't match a specific per-index init.
+5. **Mixed-prefix check.** Enumerate every decl of form `<prefix>_<?suffix>` where `?suffix` is either empty or `_<N>_<field>`. If the group contains both the no-index form and `_<N>_` forms — `SKIP_MIXED_PREFIX`.
+6. **Enumerate references.** For each `<prefix>_<N>_<field>` with N ∈ S, grep every occurrence that is NOT the decl line (word-boundary). Verify none are inside a `wire ... :<W>` declaration or a port list.
+7. **Forward-ref check.** For each ref line L and the matching decl's would-be write line Lw: if `wire` ever introduced the field earlier, SKIP. For `reg` decls (the common case), this is a non-issue because reg values persist across cycles.
+8. **Form the plan.** Per field: `FOLD` (K, W, refcount), `SKIP_WIRE_FAMILY` (array-wire gap), `SKIP_MIXED_WIDTH`, `SKIP_SPARSE_N` (gaps in S), `SKIP_TOO_FEW` (K < 2), `SKIP_PER_INDEX_INIT` (ref has baked per-index reset values), or `SKIP_MIXED_PREFIX` (implicit-index-0 names coexist with `_<N>_` forms).
 
 ### Rewrite procedure
 
@@ -878,7 +883,7 @@ For each `FOLD` field in order:
 For each invocation, given a target `.prp` path and optional `<prefix>_<field>_<K>_<W>` tuples:
 
 1. **Read** the file. If the caller supplied a specific field, scope the detection to that field; otherwise enumerate all fold candidates by prefix.
-2. **Classify** each candidate family: `FOLD`, `SKIP_WIRE_FAMILY`, `SKIP_MIXED_WIDTH`, `SKIP_SPARSE_N`, or `SKIP_TOO_FEW`.
+2. **Classify** each candidate family: `FOLD`, `SKIP_WIRE_FAMILY`, `SKIP_MIXED_WIDTH`, `SKIP_SPARSE_N`, `SKIP_TOO_FEW`, `SKIP_PER_INDEX_INIT`, or `SKIP_MIXED_PREFIX`.
 3. **Emit the plan** — one line per field, with the decision and the reason. Example:
    ```
    FOLD      fb_uop_ram _ _inst          K=8 W=u32 refs=48   (anchor: pub mod line)
