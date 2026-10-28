@@ -58,7 +58,7 @@ void publish_engine_qor(Result& placed, const std::string& prior_qor, std::initi
 // (no weights) stay unweighted, and aggregate-only feedback has no per-net
 // target to move toward.
 inline void                    refresh_repair_weights(Result& state, const Options& options, const Timing_feedback& timing) {
-  if (!state.net_weights.empty() && !timing.pins.empty()) {
+  if (!state.net_weights.empty() && timing.has_pins()) {
     refresh_timing_weights(state, options, timing);
   }
 }

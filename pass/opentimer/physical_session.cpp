@@ -20,10 +20,29 @@
 
 namespace livehd::opentimer {
 struct Physical_session::Impl : Pass_opentimer {
-  Statistics                                                       stats;
-  bool                                                             initialized        = false;
-  uint64_t                                                         timing_inputs_hash = 0;
-  std::map<std::string, std::string>                               masters, ports, net_names, connections;
+  Statistics                         stats;
+  bool                               initialized        = false;
+  uint64_t                           timing_inputs_hash = 0;
+  std::map<std::string, std::string> masters, ports, net_names;
+  // Net identities live in net_names; the timer already owns every pin name.
+  // Keep only the evaluated net pointer at each timer pin index. What-if edits
+  // preserve baseline pins, and topology reconciliation rebuilds this array
+  // after gate edits, so recycled indices cannot retain another pin's binding.
+  using Connections = std::vector<const std::string*>;
+  Connections               connections;
+  static const std::string* connection_at(const Connections& values, size_t index) {
+    return index < values.size() ? values[index] : nullptr;
+  }
+  static const std::string*& connection_slot(Connections& values, size_t index) {
+    if (index >= values.size()) {
+      values.resize(index + 1);
+    }
+    return values[index];
+  }
+  const std::string* evaluated_connection(const std::string& name) const {
+    const auto pin = timer.pins().find(name);
+    return pin == timer.pins().end() ? nullptr : connection_at(connections, pin->second.idx());
+  }
   std::vector<std::pair<std::string, std::string>>                 cell_identity;
   size_t                                                           next_gate = 0, next_net = 0;
   std::set<std::string>                                            data_exclusions;
@@ -106,10 +125,10 @@ struct Physical_session::Impl : Pass_opentimer {
       if (!wire) {
         throw std::runtime_error("physical timing driver has no net: " + net.driver);
       }
-      net_names.emplace(net.driver, wire->name());
+      const auto name = net_names.emplace(net.driver, wire->name()).first;
       for (const auto& node : net.nodes) {
         if (!node.pin.empty()) {
-          connections.emplace(pin_name(node.pin), wire->name());
+          connection_slot(connections, timer.pins().at(pin_name(node.pin)).idx()) = &name->second;
         }
       }
     }
@@ -245,11 +264,17 @@ struct Physical_session::Impl : Pass_opentimer {
       finish_update(graph, changed);
       return;
     }
-    std::map<std::string, std::string> next_nets, next_connections;
+    // A discarded what-if journal may still have queued rollback edits even
+    // when no gates changed. Materialize them before comparing pin.net() with
+    // the incoming snapshot, otherwise a trial connection can hide an edit.
+    timer.update_netlist();
+    std::map<std::string, std::string> next_nets;
+    Connections                        next_connections;
+    next_connections.reserve(timer.pins().size());
     for (const auto& net : physical_rc_->nets) {
-      auto       old  = net_names.find(net.driver);
-      const auto name = old == net_names.end() ? "__lhd_physical_net_" + std::to_string(next_net++) : old->second;
-      next_nets.emplace(net.driver, name);
+      auto       old      = net_names.find(net.driver);
+      const auto name     = old == net_names.end() ? "__lhd_physical_net_" + std::to_string(next_net++) : old->second;
+      const auto identity = next_nets.emplace(net.driver, name).first;
       if (old == net_names.end()) {
         timer.insert_net(name);
       }
@@ -257,22 +282,39 @@ struct Physical_session::Impl : Pass_opentimer {
         if (node.pin.empty()) {
           continue;
         }
-        const auto pin            = pin_name(node.pin);
-        const auto [it, inserted] = next_connections.emplace(pin, name);
-        if (!inserted && it->second != name) {
+        const auto found = timer.pins().find(pin_name(node.pin));
+        if (found == timer.pins().end()) {
+          throw std::runtime_error("physical timing pin missing during reconciliation: " + node.pin);
+        }
+        const auto& pin  = found->second;
+        auto&       slot = connection_slot(next_connections, pin.idx());
+        if (slot && *slot != name) {
           throw std::runtime_error("physical pin belongs to multiple nets: " + node.pin);
         }
+        slot = &identity->second;
       }
     }
-    for (const auto& [pin, net] : connections) {
-      if (!next_connections.contains(pin) && timer.pins().contains(pin)) {
-        timer.disconnect_pin(pin);
+    // Preserve the old string-map edit order, including disconnects before
+    // connects. Borrow names from materialized pins only for this update;
+    // the queued net edits cannot destroy those pins.
+    std::vector<const ot::Pin*> ordered;
+    ordered.reserve(timer.pins().size());
+    for (const auto& [name, pin] : timer.pins()) {
+      (void)name;
+      if (connection_at(connections, pin.idx()) || connection_at(next_connections, pin.idx())) {
+        ordered.push_back(&pin);
+      }
+    }
+    std::sort(ordered.begin(), ordered.end(), [](const auto* a, const auto* b) { return a->name() < b->name(); });
+    for (const auto* pin : ordered) {
+      if (connection_at(connections, pin->idx()) && !connection_at(next_connections, pin->idx()) && pin->net()) {
+        timer.disconnect_pin(pin->name());
         changed = true;
       }
     }
-    for (const auto& [pin, net] : next_connections) {
-      if (auto old = connections.find(pin); old == connections.end() || old->second != net) {
-        timer.disconnect_pin(pin).connect_pin(pin, net);
+    for (const auto* pin : ordered) {
+      if (const auto net = connection_at(next_connections, pin->idx()); net && (!pin->net() || pin->net()->name() != *net)) {
+        timer.disconnect_pin(pin->name()).connect_pin(pin->name(), *net);
         changed = true;
       }
     }
@@ -322,7 +364,7 @@ struct Physical_session::Impl : Pass_opentimer {
       nodes.reserve(net.nodes.size());
       for (size_t i = 0; i < net.nodes.size(); ++i) {
         const auto& node = net.nodes[i];
-        nodes.push_back(node.pin.empty() ? std::format("{}:__lhd_steiner_{}", name, i) : physical_timing_pins_.at(node.pin));
+        nodes.push_back(node.pin.empty() ? std::format("{}:__lhd_steiner_{}", name, i) : physical_timing_pin(node.pin).name());
         mapped.caps.emplace_back(nodes.back(), "", node.capacitance_ff);
         mapped.lcap += node.capacitance_ff;
       }
@@ -397,8 +439,8 @@ struct Physical_session::Impl : Pass_opentimer {
       if (const auto it = conn.find(pin); it != conn.end()) {
         return it->second;
       }
-      const auto it = s.connections.find(pin);
-      return it == s.connections.end() ? std::string{} : it->second;
+      const auto net = s.evaluated_connection(pin);
+      return net ? *net : std::string{};
     }
     std::string net_of_driver(const std::string& driver) const {
       if (const auto it = nets.find(driver); it != nets.end()) {
@@ -554,9 +596,8 @@ struct Physical_session::Impl : Pass_opentimer {
             if (!undo.b.empty()) {
               s.timer.connect_pin(undo.a, undo.b);
             }
-            const auto evaluated = s.connections.find(undo.a);
-            if ((evaluated == s.connections.end() && undo.b.empty())
-                || (evaluated != s.connections.end() && evaluated->second == undo.b)) {
+            const auto evaluated = s.evaluated_connection(undo.a);
+            if ((!evaluated && undo.b.empty()) || (evaluated && *evaluated == undo.b)) {
               conn.erase(undo.a);
             } else {
               conn[undo.a] = undo.b;
@@ -606,7 +647,10 @@ struct Physical_session::Impl : Pass_opentimer {
         pending_rc.insert(name);
       }
     }
-    void update() {
+    void restore_pending_rc() {
+      if (pending_rc.empty()) {
+        return;
+      }
       index_base();
       // A later set_net can move a sink out of an earlier net and invalidate
       // that net's RC. Attach touched trees only after all topology edits,
@@ -623,6 +667,9 @@ struct Physical_session::Impl : Pass_opentimer {
         }
       }
       pending_rc.clear();
+    }
+    void update() {
+      restore_pending_rc();
       s.timer.update_timing();
     }
     double wns() override {
@@ -682,8 +729,8 @@ struct Physical_session::Impl : Pass_opentimer {
         }
       }
       if (reverse_pins.empty()) {
-        for (const auto& [physical, timer] : s.physical_timing_pins_) {
-          reverse_pins.emplace(timer, physical);
+        for (size_t index = 0; index < s.physical_timing_pins_.size(); ++index) {
+          reverse_pins.emplace(s.physical_timing_pins_[index]->name(), s.physical_feedback_index_->labels[index]);
         }
       }
       std::vector<std::pair<std::string, double>> result;
@@ -839,8 +886,13 @@ struct Physical_session::Impl : Pass_opentimer {
       whatif_->rollback(0);
     }
     if (whatif_) {
-      whatif_->reverse_pins.clear();
-      whatif_->timer_pin_names.clear();
+      // Rollback queues RC restoration. Attach it before the next evaluation's
+      // unchanged-net fast path can skip those trees; propagation still runs
+      // once, together with the incoming snapshot's changes.
+      whatif_->restore_pending_rc();
+      // No journal/index survives an evaluation. Drop its owning RC snapshot
+      // and scratch maps too; the public Proxy resolves a fresh journal lazily.
+      whatif_.reset();
     }
   }
 
@@ -911,12 +963,8 @@ struct Physical_session::Impl : Pass_opentimer {
     if (!ranking_layout) {
       auto layout = std::make_shared<Ranking::Layout>();
       layout->labels.reserve(physical_timing_pins_.size());
-      ranking_pins.clear();
-      ranking_pins.reserve(physical_timing_pins_.size());
-      for (const auto& [physical, name] : physical_timing_pins_) {
-        layout->labels.push_back(physical);
-        ranking_pins.push_back(&timer.pins().at(name));
-      }
+      layout->labels = physical_feedback_index_->labels;
+      ranking_pins   = physical_timing_pins_;
       layout->net_offsets.reserve(physical_rc_->nets.size() + 1);
       for (const auto& net : physical_rc_->nets) {
         layout->net_offsets.push_back(layout->net_pins.size());

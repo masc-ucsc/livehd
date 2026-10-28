@@ -6,12 +6,16 @@
 #include <mutex>
 #include <vector>
 
+#include "core/metadata.hpp"
 #include "synth_policy.hpp"
 namespace livehd::synth {
 class Tune_store {
   std::string                        directory_, export_;
+  metadata::Bundle                   metadata_;
+  std::string                        design_;
   bool                               persist_;
-  bool                               dirty_ = false;
+  bool                               dirty_    = false;
+  bool                               imported_ = false;
   std::string                        required_;
   std::map<std::string, std::string> decisions_, applied_, pending_;
   std::mutex                         mutex_;
@@ -37,6 +41,9 @@ class Tune_store {
     const std::string   data{std::istreambuf_iterator<char>(in), {}};
     rapidjson::Document d;
     d.Parse(data.c_str());
+    load_record(d, file);
+  }
+  void load_record(const rapidjson::Value& d, const std::string& file) {
     if (!d.IsObject() || !d.HasMember("schema_version") || d["schema_version"] != 1 || !d.HasMember("decisions")
         || !d["decisions"].IsObject()) {
       throw std::runtime_error("unsupported synth tune file: " + file);
@@ -52,7 +59,7 @@ class Tune_store {
         }
         synth_attr::validate(key, synth_attr::json(o[key]));
       }
-      decisions_[m.name.GetString()] = synth_attr::json(m.value);
+      decisions_[m.name.GetString()] = metadata::canonical(m.value);
     }
   }
   static std::string object(const std::map<std::string, std::string>& rows) {
@@ -67,15 +74,37 @@ class Tune_store {
   }
 
 public:
-  Tune_store(std::string dir, std::string file, std::string exp, bool persist, bool read_store, std::string required = "structural")
-      : directory_(std::move(dir)), export_(std::move(exp)), persist_(persist), required_(std::move(required)) {
+  Tune_store(std::string dir, std::string file, std::string exp, bool persist, bool read_store, std::string required = "structural",
+             std::string metadata_json = "[]", std::string design = "")
+      : directory_(std::move(dir))
+      , export_(std::move(exp))
+      , metadata_(metadata_json)
+      , design_(std::move(design))
+      , persist_(persist)
+      , required_(std::move(required)) {
     if (read_store && persist_ && !directory_.empty()) {
       load(directory_ + "/state.json");
     }
     if (read_store) {
+      std::map<std::string, std::string> imported;
+      for (const auto* record : metadata_.select("livehd.synth.tuning", design_)) {
+        if (!record->HasMember("decisions") || !(*record)["decisions"].IsObject()) {
+          throw std::runtime_error("synthesis tuning metadata needs decisions");
+        }
+        for (const auto& row : (*record)["decisions"].GetObject()) {
+          const auto [it, added] = imported.emplace(row.name.GetString(), metadata::canonical(row.value));
+          if (!added && it->second != metadata::canonical(row.value)) {
+            throw std::runtime_error("conflicting synthesis tuning decision: " + std::string(row.name.GetString()));
+          }
+        }
+        load_record(*record, "livehd.synth.tuning");
+        imported_ = true;
+      }
+      // Internal validated trial selection supersedes the imported incumbent.
       load(file);
     }
   }
+  bool        imported() const { return imported_; }
   std::string find(const std::string& key) {
     std::lock_guard lock(mutex_);
     auto            it = decisions_.find(key);
@@ -175,7 +204,15 @@ public:
       }
     }
     if (!export_.empty()) {
-      atomic(export_, state);
+      rapidjson::Document record;
+      record.Parse(state.c_str());
+      auto& a = record.GetAllocator();
+      record.AddMember("class", "livehd.synth.tuning", a);
+      record.AddMember("id", "selection", a);
+      record.AddMember("design", rapidjson::Value(design_.c_str(), a), a);
+      metadata_.erase_selected("livehd.synth.tuning", design_);
+      metadata_.replace(record);
+      metadata_.write(export_);
     }
   }
 };

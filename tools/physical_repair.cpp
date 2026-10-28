@@ -1298,11 +1298,11 @@ int main(int argc, char** argv) {
       // feedback path. Keep the worst pins and path without dumping every pin
       // in a large design on each timing evaluation.
       std::vector<std::pair<std::string, const pl::Timing_feedback::Pin*>> pins;
-      for (const auto& [name, pin] : initial.pins) {
+      initial.for_each_pin([&](const auto& name, const auto& pin) {
         if (pin.slack && !pin.clock) {
           pins.emplace_back(name, &pin);
         }
-      }
+      });
       std::sort(pins.begin(), pins.end(), [](const auto& a, const auto& b) {
         return *a.second->slack != *b.second->slack ? *a.second->slack < *b.second->slack : a.first < b.first;
       });
@@ -1345,17 +1345,17 @@ int main(int argc, char** argv) {
       json.Key("pins");
       json.StartObject();
       for (const auto& name : selected) {
-        const auto it = initial.pins.find(name);
-        if (it == initial.pins.end()) {
+        const auto it = initial.find_label(name);
+        if (it == nullptr) {
           continue;
         }
         json.Key(name.c_str());
         json.StartObject();
-        field("arrival", it->second.arrival);
-        field("required", it->second.required);
-        field("slack", it->second.slack);
-        field("slew", it->second.slew);
-        field("load_ff", it->second.load_ff);
+        field("arrival", it->arrival);
+        field("required", it->required);
+        field("slack", it->slack);
+        field("slew", it->slew);
+        field("load_ff", it->load_ff);
         json.EndObject();
       }
       json.EndObject();

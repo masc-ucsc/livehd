@@ -51,11 +51,11 @@ bool parse(std::string_view text, T& value) {
 }
 
 struct Options {
-  livehd::usyn::Design_options design;
-  livehd::synth::Tmap_options  mapping;
-  std::string                  tmap        = "abc";
-  uint64_t                     work        = 4000000000;
-  uint32_t                     tmap_trials = 2;
+  livehd::usyn::Design_options     design;
+  livehd::synth::Tmap_options      mapping;
+  std::string                      tmap        = "abc";
+  uint64_t                         work        = 4000000000;
+  uint32_t                         tmap_trials = 2;
   // The opt-in provisional physical profile (pass/domplace). The logical
   // target stays cmos; `none` changes nothing.
   std::string                      physical    = "none";
@@ -262,6 +262,7 @@ bool read_options(const Eprp_var& var, Options& options) {
   for (const auto& [switch_name, switch_value] : {
            std::pair{    "state_sweep",     &options.design.state_sweep},
            std::pair{"merge_registers", &options.design.merge_registers},
+           std::pair{     "flat_sweep",      &options.design.flat_sweep},
            std::pair{     "clock_gate",      &options.design.clock_gate}
   }) {
     const auto text = std::string(var.get_stage(switch_name, "false"));
@@ -333,10 +334,10 @@ bool read_options(const Eprp_var& var, Options& options) {
     return invalid_option("domino_fall_gates", "true|false");
   }
   options.domino.functions = endpoint.functions;
-  options.domino.clock    = std::string(var.get_stage("domino_clock", ""));
-  options.domino_inverter = std::string(var.get_stage("domino_inverter", ""));
-  options.domino_register = std::string(var.get_stage("domino_register", ""));
-  options.lef             = std::string(var.get_stage("lef", ""));
+  options.domino.clock     = std::string(var.get_stage("domino_clock", ""));
+  options.domino_inverter  = std::string(var.get_stage("domino_inverter", ""));
+  options.domino_register  = std::string(var.get_stage("domino_register", ""));
+  options.lef              = std::string(var.get_stage("lef", ""));
   if (!read("domino_aux", "4", options.domino_aux) || options.domino_aux > 64) {
     return invalid_option("domino_aux", "0..64 domino-only devices outside the register");
   }
@@ -602,10 +603,11 @@ void Pass_usyn::setup() {
                        "the CMOS+DFF estimate, 0..1000 (0: equal areas convert as domino-tie, U25)",
                        "0");
   m.add_label_optional("lef", "INTERNAL technology and cell LEFs from synth.lef; required by physical=domino_provisional", "");
-  m.add_label_optional("row_access",
-                       "INTERNAL odd/even placement-row access convention from synth.place.row_access: default (the "
-                       "stand-in) or a JSON path",
-                       "default");
+  m.add_label_optional(
+      "row_access",
+      "INTERNAL odd/even placement-row access convention from positional livehd.physical.row_access metadata: default (the "
+      "stand-in) or serialized convention",
+      "default");
   m.add_label_optional("unroll_carry",
                        "true|false: expand carry-dependent compact loops per ordinal before synthesis (default true, as "
                        "pass.abc). False maps one generic body and stitches the carry afterwards: the body keeps its "
@@ -630,13 +632,19 @@ void Pass_usyn::setup() {
                        "true|false: merge registers that are the same machine on the private copy (default false; the "
                        "synth.merge_registers spelling)",
                        "false");
+  m.add_label_optional("flat_sweep",
+                       "true|false: flatten the private copy and fold state that is constant across instance boundaries "
+                       "(default false; the synth.flat_sweep spelling)",
+                       "false");
   m.add_label_optional(
       "adder",
       "Native arithmetic: auto (Brent-Kung wide sums, comparisons and multiplier carry), rca, cska, cla, prefix or brent",
       "auto");
   m.add_label_optional("tune_profile", "internal synth.tune.profile", "auto");
   m.add_label_optional("tune_validate", "internal synth.tune.validate", "structural");
-  m.add_label_optional("tune_file", "internal synth.tune.file", "");
+  m.add_label_optional("tune_metadata", "INTERNAL class-tagged metadata", "[]");
+  m.add_label_optional("tune_design", "INTERNAL metadata design scope", "");
+  m.add_label_optional("tune_file", "INTERNAL validated trial selection file", "");
   m.add_label_optional("tune_export", "internal synth.tune.export", "");
   m.add_label_optional("tune_dir", "internal workdir synthesis tune root", "");
   m.add_label_optional("tune_persist", "internal lhd.incremental gate", "true");
@@ -829,7 +837,9 @@ void Pass_usyn::synthesize(Eprp_var& var) {
                                                                              std::string(var.get_stage("tune_export", "")),
                                                                              var.get_stage("tune_persist", "true") != "false",
                                                                              options.design.tune_profile != "off",
-                                                                             options.design.tune_validate);
+                                                                             options.design.tune_validate,
+                                                                             std::string(var.get_stage("tune_metadata", "[]")),
+                                                                             std::string(var.get_stage("tune_design", "")));
   const auto                   requested_top = var.get("top", "");
   std::shared_ptr<hhds::Graph> top;
   for (const auto& graph : var.graphs) {
@@ -918,7 +928,7 @@ void Pass_usyn::synthesize(Eprp_var& var) {
   resources.process_limit_bytes = livehd::cost::configured_budget_bytes();
   resources.time_limit_ms       = options.mapping.time_budget_ms;
   usyn::Budget work{options.work};
-  work.admission = [&] { return resources.admit(elapsed(), livehd::cost::process_footprint_bytes()); };
+  work.admission             = [&] { return resources.admit(elapsed(), livehd::cost::process_footprint_bytes()); };
   // One Liberty content snapshot prices native cells. cost_mode ranks logical
   // choices with it; the domino profile prices CMOS cones with it.
   const auto read_cost_model = [&](usyn::Budget& budget) -> std::optional<std::pair<usyn::Native_cost_model, std::string>> {
@@ -991,11 +1001,11 @@ void Pass_usyn::synthesize(Eprp_var& var) {
     }
     std::string why;
     auto        reference = livehd::domplace::resolve_domino_reference(options.mapping.library,
-                                                                options.domino_inverter,
-                                                                options.domino_register,
-                                                                options.domino_aux,
-                                                                options.domino_variants,
-                                                                &why);
+                                                                       options.domino_inverter,
+                                                                       options.domino_register,
+                                                                       options.domino_aux,
+                                                                       options.domino_variants,
+                                                                       &why);
     if (!reference) {
       livehd::diag::err("pass.usyn", "domino-reference", "unsupported")
           .msg("domino_provisional reference cells: {}", why)
@@ -1013,14 +1023,14 @@ void Pass_usyn::synthesize(Eprp_var& var) {
     reference->pair_area_pct = options.domino_pair_area_pct;
     reference->clock_devices = options.domino_clock_devices;
     domino_reference         = std::make_shared<const livehd::domplace::Domino_reference>(std::move(*reference));
-    domino_report    = {domino_reference.get(), &options.domino, cmos->name, cmos->area, physical_work.consumed};
+    domino_report            = {domino_reference.get(), &options.domino, cmos->name, cmos->area, physical_work.consumed};
     options.design.physical  = [reference = domino_reference, model = native_model, select = options.domino, area = cmos->area](
-                                  const usyn::Stateful_region& region,
-                                  std::span<const std::string>
-                                      names,
-                                  std::span<const usyn::Physical_hint>
-                                                gating,
-                                  usyn::Budget& budget) {
+                                   const usyn::Stateful_region& region,
+                                   std::span<const std::string>
+                                       names,
+                                   std::span<const usyn::Physical_hint>
+                                                 gating,
+                                   usyn::Budget& budget) {
       return livehd::domplace::select_physical(region, names, select, {reference.get(), model.get(), area}, budget, gating);
     };
     // U21: registers on recognized clock gates of the domain become enable
@@ -1224,15 +1234,15 @@ void Pass_usyn::synthesize(Eprp_var& var) {
       tech             = livehd::physical::read_lef(lefs);
       const auto route = livehd::domplace::domino_route_policy(tech, &inputs.technology);
       inputs.geometry  = livehd::domplace::geometry_inputs(tech,
-                                                          domino_reference->inverter.name,
-                                                          route,
-                                                          livehd::physical::resolve_row_access(options.row_access));
+                                                           domino_reference->inverter.name,
+                                                           route,
+                                                           livehd::physical::resolve_row_access(options.row_access));
     } catch (const std::exception& error) {
       refuse_bundle(error.what());
       return;
     }
-    inputs.reference     = domino_reference.get();
-    inputs.stage.clock   = options.domino.clock;
+    inputs.reference                   = domino_reference.get();
+    inputs.stage.clock                 = options.domino.clock;
     inputs.eval_fo4                    = options.domino_eval_fo4;
     inputs.precharge_fo4               = options.domino_precharge_fo4;
     inputs.setup_eval_fo4              = options.domino_setup_eval_fo4;
@@ -1240,8 +1250,8 @@ void Pass_usyn::synthesize(Eprp_var& var) {
     inputs.stage.uncertainty_first_ps  = options.domino_uncertainty_first_ps;
     inputs.stage.uncertainty_second_ps = options.domino_uncertainty_second_ps;
     inputs.area_margin_pct             = options.domino.area_margin_pct;
-    bundle_staging.path  = fs::path(base + ".domino.tmp");
-    auto bundle          = livehd::domplace::generate_domino_bundle(*design, inputs, bundle_staging.path);
+    bundle_staging.path                = fs::path(base + ".domino.tmp");
+    auto bundle                        = livehd::domplace::generate_domino_bundle(*design, inputs, bundle_staging.path);
     if (!bundle.ok) {
       refuse_bundle(bundle.reason);
       return;

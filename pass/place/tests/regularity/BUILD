@@ -3,7 +3,7 @@ load("@rules_shell//shell:sh_test.bzl", "sh_test")
 
 filegroup(
     name = "fixtures",
-    srcs = glob(["*.prp", "*.def"]) + ["benchmarks.json", "fake.lef", "fake.lib", "macros.v", "timing.sdc"],
+    srcs = glob(["*.prp", "*.def"]) + ["benchmarks.json", "hierarchy_hints.json", "fake.lef", "fake.lib", "macros.v", "timing.sdc"],
 )
 
 sh_binary(
@@ -12,17 +12,17 @@ sh_binary(
     data = [":fixtures", "generate.py", "render.py", "//lhd:lhd"],
 )
 
-# Default suite excludes long1. Opt in with --test_tag_filters=placement
-# and --test_timeout=3600. No external simulator, PDK, or Python package needed.
+# Exercise every physical stage and handoff on the full fixtures. These checks
+# require legal placement, not optimization convergence; keep the optimization
+# budget bounded. The run binary retains the longer measurement settings.
 [
     sh_test(
         name = case,
-        size = "large",
-        timeout = "eternal",
+        size = "small",
         srcs = ["run.py"],
-        args = ["--case", case],
+        args = ["--case", case, "--iterations", "20"],
         data = [":fixtures", "generate.py", "render.py", "//lhd:lhd"],
-        tags = ["long1", "placement"],
+        tags = ["placement"],
     )
     for case in ["mesh_2x2", "mesh_4x4", "ring_32", "hierarchy_4x4", "mesh_6x6"]
 ]
@@ -32,4 +32,10 @@ sh_test(
     size = "small",
     srcs = ["regularity_checks.py"],
     data = [":fixtures", "generate.py", "render.py"],
+)
+
+filegroup(
+    name = "hint_fixtures",
+    srcs = ["fake.lef", "fake.lib", "macros.v"],
+    visibility = ["//pass/place:__pkg__"],
 )

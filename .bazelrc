@@ -85,12 +85,12 @@ build:prof --linkopt -pg
 #build:prof --cxxopt -ftest-coverage
 #build:prof --linkopt -ftest-coverage
 
-test --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual,-fixme"
-# Every test must finish in well under 30s on a fast host; 150s (not bazel's
-# 300s/900s per-size defaults) still leaves headroom for a slow machine.
-test --test_timeout=150
+test --test_tag_filters "-manual,-fixme"
+# Soft target: every test under ~30s. 300s (bazel's medium default) is only a
+# safety net against hangs, not a goal; slow tests get optimized, never skipped.
+test --test_timeout=300
 # benchmark tests are timing contracts; instrumented binaries can't meet them
-coverage --test_tag_filters "-long1,-long2,-long3,-long4,-long5,-long6,-long7,-long8,-manual,-fixme,-benchmark"
+coverage --test_tag_filters "-manual,-fixme,-benchmark"
 coverage --cache_test_results=no
 
 # Address sanitizer

@@ -78,12 +78,12 @@ std::set<std::string> protected_cones(hhds::Graph& graph, const Timing_feedback&
       }
       auto lower = name;
       std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
-      const auto it  = timing.pins.find(label(n, name));
+      const auto it  = timing.find_label(label(n, name));
       const auto op  = gu::type_op_of(n);
       const auto off = p.get_port_id() % Ntype::Memory_port_stride;
-      if ((it != timing.pins.end() && it->second.clock) || lower.find("clk") != std::string::npos
-          || lower.find("clock") != std::string::npos || lower.find("reset") != std::string::npos
-          || lower.find("rst") != std::string::npos || (op == Ntype_op::Memory && (off == 2 || off == 14))) {
+      if ((it != nullptr && it->clock) || lower.find("clk") != std::string::npos || lower.find("clock") != std::string::npos
+          || lower.find("reset") != std::string::npos || lower.find("rst") != std::string::npos
+          || (op == Ntype_op::Memory && (off == 2 || off == 14))) {
         for (auto d : p.get_driver_pins()) {
           protect(protect, d);
         }
@@ -153,11 +153,11 @@ Cone extract(hhds::Graph& graph, const std::string& root, const Cells& cells, co
     const auto id = driver.get_debug_pid();
     auto       n  = driver.get_master_node();
     if (!selected.contains(std::string(n.get_name()))) {
-      const auto it = timing.pins.find(sink);
-      if (it == timing.pins.end() || !it->second.arrival || !it->second.slew || it->second.clock) {
+      const auto it = timing.find_label(sink);
+      if (it == nullptr || !it->arrival || !it->slew || it->clock) {
         throw std::runtime_error("missing data-pin arrival/slew at cut input: " + sink);
       }
-      const auto& p = it->second;
+      const auto& p = *it;
       size_t      index;
       if (const auto found = input_indices.find(id); found != input_indices.end()) {
         index = found->second;
@@ -212,30 +212,30 @@ Cone extract(hhds::Graph& graph, const std::string& root, const Cells& cells, co
     if (cone.outputs.size() == 8) {
       throw Cut_limit("cone exceeds eight outputs");
     }
-    const auto it = timing.pins.find(label(n, c.output));
-    if (it == timing.pins.end() || !it->second.required || !it->second.load_ff) {
+    const auto it = timing.find_label(label(n, c.output));
+    if (it == nullptr || !it->required || !it->load_ff) {
       throw std::runtime_error("missing output required time/load");
     }
-    double load = *it->second.load_ff;
+    double load = *it->load_ff;
     // Keep wire capacitance and external pins; remove the selected sink cells'
     // old pin capacitance because ABC accounts for its replacement cells.
-    for (const auto& pin : timing.pins) {
-      const auto colon = pin.first.rfind(':');
-      if (colon == std::string::npos || !selected.contains(pin.first.substr(0, colon)) || !pin.second.capacitance_ff) {
-        continue;
+    timing.for_each_pin([&](const auto& pin_name, const auto& pin) {
+      const auto colon = pin_name.rfind(':');
+      if (colon == std::string::npos || !selected.contains(pin_name.substr(0, colon)) || !pin.capacitance_ff) {
+        return;
       }
-      auto        sink_node = selected.at(pin.first.substr(0, colon));
+      auto        sink_node = selected.at(pin_name.substr(0, colon));
       const auto* sc        = cell(sink_node, cells);
-      const auto  port      = pin.first.substr(colon + 1);
+      const auto  port      = pin_name.substr(colon + 1);
       if (std::find(sc->inputs.begin(), sc->inputs.end(), port) == sc->inputs.end()) {
-        continue;
+        return;
       }
       if (sink_node.get_sink_pin(port).get_driver_pin() == out) {
-        load -= *pin.second.capacitance_ff;
+        load -= *pin.capacitance_ff;
       }
-    }
+    });
     cone.outputs.push_back(out);
-    cone.boundary.outputs.push_back({*it->second.required * timing.time_unit_ps, std::max(0.0, load)});
+    cone.boundary.outputs.push_back({*it->required * timing.time_unit_ps, std::max(0.0, load)});
     cone.logic.add_output(build(build, out, {}), "out_" + std::to_string(cone.outputs.size() - 1));
   }
   if (cone.outputs.empty()) {
@@ -546,6 +546,10 @@ Repair_result resynthesize_cones(Result initial, const Options& requested, const
       trial.cache_dir.clear();
       trial.net_weights = result.placed.net_weights;
       trial.previous    = std::make_shared<physical::Floorplan>(result.placed.floorplan);
+      if (options.optimization_multirow_eco) {
+        trial.multirow_eco   = options.optimization_multirow_eco;
+        trial.legalize_cells = true;  // the two-row ECO is the nearest-whitespace legalization
+      }
       trial.changed_cells.clear();
       for (const auto& c : result.placed.floorplan.components) {
         if (c.name == root) {

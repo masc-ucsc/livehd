@@ -423,6 +423,30 @@ failure. `//tools:stage_timing_probe`
 reruns the same report offline on a saved placement, with coefficient
 overrides for sweeps that must not re-place.
 
+## Timing for OpenTimer
+
+OpenTimer reads Liberty only, and the domino cells have none. When the profile is
+on and STA runs, lhd writes `<workdir>/synth/domino_timing.lib` from the bundle
+(`pass/domplace/timing/domino_liberty.hpp`) and passes it to `pass.opentimer`
+as `extra_libs`, which loads it into **both** corners (a second entry of
+`files` is the min-corner library, not extra cells). The library holds exactly
+the cells the native stage timer characterizes: one sequential cell per bundle
+variant, with the rails as setup-checked inputs, `CLK`, and `Q` carrying the
+register's clock-to-Q arcs. A Liberty setup check captures at the next clock
+edge, a domino stage at a fraction of the period, so each rail's setup is
+written as `setup + uncertainty + (1 - fraction) * period` for the SDC clock;
+for a single-clock design the slack in ps equals the stage timer's half-cycle
+slack. The stage timer stays the authority for the schedule's other checks
+(precharge, evaluate-to-storage) and for `stage_timing.json`. The two timers
+still disagree on the CMOS logic feeding a rail (different RC and slew
+models), so compare their numbers only per timer.
+
+Optimization trials re-place their edits through the two-row ECO
+(`Options::optimization_multirow_eco`, set by lhd for the profile): the domino
+cells they do not edit stay where they are, and the final legalization packs
+them as before. A bundle that converted nothing has no domino cell and no
+library.
+
 ## Sizing
 
 `lhd synth --set synth.place.domino_sizing=true` (with the profile and
@@ -518,15 +542,16 @@ holds both two-row domino cells and a memory proxy macro is not supported yet
 
 `lhd synth` (and `lhd pass usyn`) plumb the profile's INTERNAL labels:
 `pass.usyn.lef` from `synth.lef` (the placement LEFs) and `pass.usyn.row_access`
-from `synth.place.row_access` (`default`, the stand-in, or a schema-1 JSON
-path); setting either directly is a usage error. An unset
+from the positional `livehd.physical.row_access` metadata record (a schema-1 `convention` object; absent uses the stand-in); setting either directly is a usage error. An unset
 `pass.usyn.domino_clock` is taken from an SDC whose only clock is
 `create_clock ... [get_ports P]`; otherwise it must be named.
 
 The profile never moves a default; what it cannot support is a usage error:
-another mapper, STA (`synth.opentimer=false` is required: the cells have no
-Liberty timing), timing-driven placement, resize and resynthesis, and the
-detail-final region consumers (busorder, boundarypins). `synth.place.pg` is
+another mapper, and the detail-final region consumers (busorder,
+boundarypins). OpenTimer, timing-driven placement, resize, buffer repair and
+cone resynthesis all run on a domino netlist (see "Timing for OpenTimer"
+below); `synth.place.io_resynth` (whole-color resynthesis from placed IO
+timing) remains ABC-only, since USYN does not yet consume placed IO delays. `synth.place.pg` is
 allowed: the native grid derives row rails from one-row cells only, and the
 rail templates match them (checked on the lfsr ORFS frame with handoff taps:
 OpenROAD `check_placement` passes). It needs what any PG run needs (handoff

@@ -90,13 +90,9 @@ yosys_bison = rule(
 )
 
 def _yosys_flex_impl(ctx):
-    m4 = _find_m4(ctx.attr.flex[DefaultInfo].default_runfiles.files.to_list(), ctx.attr.flex.label)
-
+    # Flex's runtime helper is a separate tool, not part of its runfiles.
     env = {
-        "M4": "{}.runfiles/{}".format(
-            ctx.executable.flex.path,
-            m4.short_path[len("../"):],
-        ),
+        "M4": ctx.file.m4.path,
     }
 
     if len(ctx.outputs.outs) != 1:
@@ -140,7 +136,7 @@ rm "$2"
         arguments = [ctx.executable.flex.path, out_tmp, out.path, args],
         inputs = ctx.files.srcs,
         outputs = [out],
-        tools = [ctx.executable.flex] + ctx.attr.flex[DefaultInfo].default_runfiles.files.to_list(),
+        tools = [ctx.attr.flex[DefaultInfo].files_to_run] + ctx.files.m4 + ctx.attr.m4[DefaultInfo].default_runfiles.files.to_list(),
         mnemonic = "YosysFlexGen",
         env = env,
     )
@@ -163,12 +159,18 @@ yosys_flex = rule(
             executable = True,
             mandatory = True,
         ),
+        "m4": attr.label(
+            doc = "The m4 binary used by flex.",
+            default = Label("@flex//:m4"),
+            cfg = "exec",
+            allow_single_file = True,
+        ),
         "outs": attr.output_list(
-            doc = "Outputs from bison.",
+            doc = "Outputs from flex.",
             mandatory = True,
         ),
         "srcs": attr.label_list(
-            doc = "Sources to provide to bison.",
+            doc = "Sources to provide to flex.",
             mandatory = True,
             allow_files = True,
         ),

@@ -250,6 +250,7 @@ cc_library(
         "//pass/satopt",
         "//pass/usyn:pass_usyn",
         "//pass/domplace:domino_bundle",
+        "//pass/domplace/timing:domino_liberty",
         "//pass/domplace/timing:stage_timing",
         "//pass/bitfuzz:pass_bitfuzz",
         "//pass/bitwidth:pass_bitwidth",

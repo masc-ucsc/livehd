@@ -590,6 +590,10 @@ static Preroute_result preroute_impl(const physical::Technology& tech, const phy
                     {},
             candidate.critical
         };
+        // This consumer commits complete routes, including legal widened via
+        // landings. Retain its explicit deeper search; cheap dpin probes use
+        // try_route's direct-only default instead.
+        request.search_detours = true;
         if (options.straight_only) {
           request.corridor = options.straight_routes.at(net.name);
         }

@@ -17,6 +17,10 @@ lhd pass opentimer --top 'm__c0' lg:net cells.lib --workdir W
 - Timing files are **positional** (like `pass liberty gensim`): 1–2 Liberty
   (`.lib`, second = min corner) plus optional `.sdc` / `.spef`. `files` is a
   kernel-managed label — the kernel assembles it, `--set` cannot.
+- `extra_libs` (kernel-set, comma list of `.lib`): more cells for **both**
+  corners, loaded after the max/min pair of `files` and part of the STA cache
+  key. `lhd synth` uses it for the provisional domino cells, whose Liberty it
+  generates from the bundle (`pass/domplace/README.md`, "Timing for OpenTimer").
 - **One design per run** (one `ot::Timer` holds one design): `--top` picks the
   def out of the netlist library. Time a region module (`<mod>__c<N>`), a
   single flat module (`pass.color flat` + `pass.abc` map the whole design as
@@ -411,7 +415,11 @@ time; compare total timing cost when reading statistics across this change.
 What-if queries cache physical-to-timer pin-name translations within the session.
 Gate insertion, gate rollback and a new `evaluate` invalidate those translations.
 The cache holds names only: slack, slew, loads and other timing values continue
-to come from the synchronized timer.
+to come from the synchronized timer. Before a new evaluation, rollback restores
+pending wire RC even when the incoming accepted net is unchanged. The journal
+and its owning RC snapshot are then released; the public what-if proxy remains
+valid and creates a fresh journal on demand. RC restoration queues propagation
+with the incoming evaluation rather than triggering an extra timing pass.
 
 Placement passes a third `data_exclusions` argument containing physical pins on
 excluded non-clock nets. The session masks those net timing arcs before propagating

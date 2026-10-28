@@ -241,3 +241,16 @@ cc_test(
     copts = COPTS,
     deps = [":core", "@googletest//:gtest_main"],
 )
+
+cc_test(
+    name = "metadata_test",
+    srcs = ["tests/metadata_test.cpp"],
+    copts = COPTS,
+    deps = [":core", "@googletest//:gtest_main"],
+)
+
+filegroup(
+    name = "metadata_srcs",
+    srcs = ["metadata.cpp", "metadata.hpp"],
+    visibility = ["//visibility:public"],
+)

@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/metadata.hpp"
 #include "gtest/gtest.h"
 #include "lhd.hpp"
 #include "lhd_kernel_internal.hpp"
@@ -528,13 +529,14 @@ TEST(LhdOptions, RecommendedSharedDefaults) {
   for (const auto& [key, value] : std::vector<std::pair<std::string, std::string>>{
            {                "compile.specialize_modules",   "true"},
            {                       "pass.abc.area_relax",      "0"},
+           {                         "pass.abc.boundary",  "false"},
            {                       "pass.abc.max_fanout",     "32"},
            {                          "synth.delay_frac",    "0.4"},
            {                           "synth.partition", "coarse"},
            {                  "synth.place.reset_fanout",     "32"},
            {            "synth.place.domino_rail_fanout",     "32"},
            {                        "synth.place.resize",   "true"},
-           {                "synth.place.buffer_cleanup",   "auto"},
+           {                "synth.place.buffer_cleanup",  "false"},
            {                          "synth.place.halo",   "auto"},
            {                 "synth.place.fp.pin_adjust",   "true"},
            {              "synth.place.macro.pin_adjust",   "true"},
@@ -631,4 +633,52 @@ TEST(LhdOptions, DeprecatedPartitionSpellingsCanonicalize) {
   };
   lhd::canonicalize_synth_sets(opts);
   EXPECT_EQ(value("synth.place.dynamic_bins"), std::vector<std::string>{"true"});
+}
+
+TEST(LhdOptions, PositionalMetadataIsNotSourceAndMergesByClass) {
+  const auto file = testing::TempDir() + "/input-metadata.json";
+  {
+    std::ofstream out(file);
+    out << R"([{"class":"foreign","id":"x"}])";
+  }
+  std::vector<std::string> args{"lhd", "synth", file, "top.v", file, "--top", "top"};
+  std::vector<char*>       argv;
+  for (auto& a : args) {
+    argv.push_back(a.data());
+  }
+  auto opts = lhd::parse_args(argv.size(), argv.data());
+  lhd::load_metadata(opts);
+  EXPECT_EQ(opts.files, std::vector<std::string>{"top.v"});
+  EXPECT_EQ(opts.language, "verilog");
+  ASSERT_TRUE(opts.metadata);
+  EXPECT_EQ(opts.metadata->select("foreign", "top").size(), 1);
+  auto combined = opts;
+  combined.files.clear();
+  combined.metadata_files.clear();
+  combined.metadata = std::make_shared<const livehd::metadata::Bundle>(R"([{"id":"x","class":"foreign"}])");
+  auto split        = opts;
+  split.files.clear();
+  EXPECT_EQ(lhd::compute_run_id(combined), lhd::compute_run_id(split));
+
+  for (const auto* key : {"synth.metadata", "synth.tune.file", "sim.tune.file", "synth.place.row_access"}) {
+    args = {"lhd", "synth", "top.v", "--set", std::string(key) + "=" + file};
+    argv.clear();
+    for (auto& a : args) {
+      argv.push_back(a.data());
+    }
+    auto removed = lhd::parse_args(argv.size(), argv.data());
+    EXPECT_THROW(lhd::load_metadata(removed), lhd::Lhd_error);
+  }
+  const auto listed = lhd::list_set_options();
+  for (const auto* method : {"pass.abc", "pass.usyn"}) {
+    for (const auto* flag : {"tune_file", "tune_metadata", "tune_design"}) {
+      const auto key = std::string(method) + "." + flag;
+      EXPECT_TRUE(std::none_of(listed.begin(), listed.end(), [&](const auto& option) { return option.name == key; }));
+      lhd::Options internal;
+      internal.command = "synth";
+      internal.sets.emplace_back(key, "x");
+      EXPECT_THROW(lhd::check_known_set_passes(internal), lhd::Lhd_error);
+    }
+  }
+  std::remove(file.c_str());
 }

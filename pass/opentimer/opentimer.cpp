@@ -2182,25 +2182,48 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
 
   // OpenTimer logs and skips a connect_pin whose pin/net is absent, but does
   // not return an error to its caller. Never publish QoR from such a partial
-  // graph: every Liberty-cell input in a mapped netlist must have a net.
-  size_t                   unconnected = 0;
-  std::vector<std::string> examples;
+  // graph. A physical import can explicitly preserve open input terminals;
+  // those are allowed only while the current graph also leaves them open.
+  std::set<std::string> unconnected;
   for (const auto& [name, pin] : timer.pins()) {
     if (pin.gate() != nullptr && pin.is_input() && pin.net() == nullptr) {
-      ++unconnected;
-      if (examples.size() < 4) {
-        examples.push_back(name);
+      unconnected.insert(name);
+    }
+  }
+  if (!unconnected.empty()) {
+    for (const auto& node : leaf_nodes(g)) {
+      const auto open = node.base_node().attr(livehd::attrs::physical_open_inputs);
+      if (!open.has() || type_op_of(node) != Ntype_op::Sub) {
+        continue;
+      }
+      const auto physical = physical_instances_.find(std::string(node.get_name()));
+      const auto instance = physical != physical_instances_.end() ? physical->second : inst_of(node, hier_mode_);
+      absl::flat_hash_set<std::string> connected;
+      // Include the node-as-pin input at port zero, just as build_circuit does.
+      for (const auto& pin : node.inp_sorted_pins()) {
+        if (!pin.get_driver_pins().empty()) {
+          connected.insert(sink_pin_name_of(node, pin));
+        }
+      }
+      for (const auto& name : open.get()) {
+        if (!connected.contains(name)) {
+          unconnected.erase(instance + ":" + name);
+        }
       }
     }
   }
-  if (unconnected != 0) {
+  if (!unconnected.empty()) {
     std::string sample;
-    for (const auto& name : examples) {
+    size_t      examples = 0;
+    for (const auto& name : unconnected) {
       sample += sample.empty() ? name : std::format(", {}", name);
+      if (++examples == 4) {
+        break;
+      }
     }
     livehd::diag::err("pass.opentimer", "unconnected-pin", "internal")
         .msg("pass.opentimer built an incomplete timing graph: {} Liberty input pin(s) are unconnected (first: {})",
-             unconnected,
+             unconnected.size(),
              sample)
         .fatal();
     return;
@@ -2210,7 +2233,8 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
   auto& max_pin = max_pin_;  // member: the STA cache replays this summary line
   max_pin.clear();
 
-  const auto& pins = timer.pins();
+  const auto& pins   = timer.pins();
+  const bool  render = !qor_path.empty();
 
   // Every annotated gate output, kept for the timing report (2opt-freq D).
   struct Arrival {
@@ -2242,7 +2266,9 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     const auto physical_name
         = physical_instances_.empty() ? physical_instances_.end() : physical_instances_.find(std::string(node.get_name()));
     auto instance_name = physical_name != physical_instances_.end() ? physical_name->second : inst_of(node, hier_mode_);
-    inst2node.emplace(instance_name, node);
+    if (render) {
+      inst2node.emplace(instance_name, node);
+    }
 
     Color_qor* color_row = nullptr;
     if (stats_) {
@@ -2292,7 +2318,9 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       }
       if (delay > 0) {
         set_delay(dpin, delay);
-        arrivals.push_back({delay, pin_name, node});
+        if (render) {
+          arrivals.push_back({delay, pin_name, node});
+        }
 
         if (color_row != nullptr && delay > color_row->max_arrival) {
           color_row->max_arrival  = delay;
@@ -2330,7 +2358,9 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       if (delay < 0) {
         continue;
       }
-      arrivals.push_back({delay, name, {}});
+      if (render) {
+        arrivals.push_back({delay, name, {}});
+      }
       if (delay > max_delay) {
         max_delay = delay;
         max_pin   = name;
@@ -2347,7 +2377,6 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     }
   }
 
-  const bool render = !qor_path.empty();
   if (!render && !feedback_) {
     return;
   }
@@ -2628,17 +2657,18 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     const double unit_ps   = timer.time_unit() ? timer.time_unit()->value() * 1e12 : 1000;
     if (feedback_) {
       feedback_->time_unit_ps = unit_ps;
+      auto& dense = feedback_->dense.emplace();
+      dense.index = physical_feedback_index_;
+      dense.values.resize(dense.index->labels.size());
     }
     if (render) {
       j += std::format(",\"time_unit_ps\":{},\"physical_pins\":[", unit_ps);
     }
     bool comma = false;
-    for (const auto& [physical, name] : physical_timing_pins_) {
-      const auto it = pins.find(name);
-      if (it == pins.end()) {
-        continue;
-      }
-      const auto&                   pin = it->second;
+    for (size_t index = 0; index < physical_timing_pins_.size(); ++index) {
+      const auto&                   physical = physical_feedback_index_->labels[index];
+      const auto&                   pin      = *physical_timing_pins_[index];
+      const auto&                   name     = pin.name();
       livehd::timing::Feedback::Pin value;
       if (const auto electrical = electrical_pins.find(name); electrical != electrical_pins.end()) {
         value.violations        = electrical->second.first;
@@ -2678,7 +2708,7 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
       }
       value.clock = clock;
       if (feedback_) {
-        feedback_->pins.emplace(physical, value);
+        feedback_->dense->values[index] = value;
       }
       if (render) {
         if (comma) {
@@ -2709,13 +2739,27 @@ void Pass_opentimer::compute_timing(const std::shared_ptr<hhds::Graph>& g) {
     }
   }
   if (feedback_) {
-    std::map<std::string, std::string> physical;
-    for (const auto& [name, timer_name] : physical_timing_pins_) {
-      physical.emplace(timer_name, name);
+    // Only path pins need reverse-name lookup. Borrow names from the current
+    // path and immutable physical map instead of copying the whole design.
+    // The first physical spelling still wins when several aliases map to one
+    // timer pin, matching the previous ordered-map emplace behavior.
+    std::map<std::string_view, const std::string*> physical;
+    for (const auto& point : path_pts) {
+      physical.try_emplace(point.pin, nullptr);
+    }
+    size_t remaining = physical.size();
+    for (size_t index = 0; index < physical_timing_pins_.size(); ++index) {
+      if (!remaining) {
+        break;
+      }
+      if (auto it = physical.find(physical_timing_pins_[index]->name()); it != physical.end() && !it->second) {
+        it->second = &physical_feedback_index_->labels[index];
+        --remaining;
+      }
     }
     for (const auto& point : path_pts) {
-      auto it = physical.find(point.pin);
-      feedback_->path.push_back(it == physical.end() ? point.pin : it->second);
+      const auto* name = physical.at(point.pin);
+      feedback_->path.push_back(name ? *name : point.pin);
     }
   }
   if (!render) {
@@ -2864,17 +2908,40 @@ std::string Pass_opentimer::cache_key(const std::shared_ptr<hhds::Graph>& g) con
     cuts_hash = livehd::hash_util::fnv1a64_u64(pin.size(), cuts_hash);
     cuts_hash = livehd::hash_util::fnv1a64(pin, cuts_hash);
   }
-  return std::format("{:016x}{:016x}{:016x}:load={:.9g}:critical={}:percent={:.9g}:targets={}:nodes={}:physical={}:cuts={:016x}",
-                     d.h0,
-                     d.h1,
-                     env,
-                     io_load_ff_,
-                     critical_,
-                     critical_percent_,
-                     targets_text_,
-                     annotation_identity(g),
-                     physical_rc_ ? physical_rc_->identity : std::string{},
-                     cuts_hash);
+  // The functional digest ignores physical open-input intent. A cached valid
+  // import must not hide a missing-connection error after that intent changes.
+  std::vector<std::tuple<std::string, uint64_t, std::string>> open_inputs;
+  for (const auto& def : g->definitions().graphs()) {
+    for (const auto node : def->body().nodes()) {
+      if (const auto open = node.attr(livehd::attrs::physical_open_inputs); open.has()) {
+        for (const auto& pin : open.get()) {
+          open_inputs.emplace_back(def->get_name(), node.get_debug_nid(), pin);
+        }
+      }
+    }
+  }
+  std::sort(open_inputs.begin(), open_inputs.end());
+  uint64_t open_hash = livehd::hash_util::kFnv1a64_offset;
+  for (const auto& [definition, node, pin] : open_inputs) {
+    open_hash = livehd::hash_util::fnv1a64_u64(definition.size(), open_hash);
+    open_hash = livehd::hash_util::fnv1a64(definition, open_hash);
+    open_hash = livehd::hash_util::fnv1a64_u64(node, open_hash);
+    open_hash = livehd::hash_util::fnv1a64_u64(pin.size(), open_hash);
+    open_hash = livehd::hash_util::fnv1a64(pin, open_hash);
+  }
+  return std::format(
+      "{:016x}{:016x}{:016x}:load={:.9g}:critical={}:percent={:.9g}:targets={}:nodes={}:physical={}:cuts={:016x}:open={:016x}",
+      d.h0,
+      d.h1,
+      env,
+      io_load_ff_,
+      critical_,
+      critical_percent_,
+      targets_text_,
+      annotation_identity(g),
+      physical_rc_ ? physical_rc_->identity : std::string{},
+      cuts_hash,
+      open_hash);
 }
 
 void Pass_opentimer::replay(const livehd::opentimer::Sta_record& rec) {

@@ -1,4 +1,5 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include <algorithm>
 #include <cmath>
 #include <format>
 #include <map>
@@ -10,6 +11,14 @@
 #include "pass_opentimer.hpp"
 #include "rc_batch.hpp"
 
+const ot::Pin& Pass_opentimer::physical_timing_pin(std::string_view physical) const {
+  const auto index = physical_feedback_index_ ? physical_feedback_index_->find(physical) : physical_timing_pins_.size();
+  if (index >= physical_timing_pins_.size()) {
+    throw std::out_of_range("physical timing pin not found: " + std::string(physical));
+  }
+  return *physical_timing_pins_[index];
+}
+
 void Pass_opentimer::apply_physical_timing_cuts(const std::set<std::string>& cuts) {
   if (cuts.empty()) {
     return;
@@ -18,15 +27,15 @@ void Pass_opentimer::apply_physical_timing_cuts(const std::set<std::string>& cut
     throw std::invalid_argument("physical timing cuts require placement RC");
   }
   timer.update_netlist();
-  std::unordered_set<std::string> roots;
+  std::unordered_set<const ot::Pin*> roots;
   for (const auto& net : physical_rc_->nets) {
     if (cuts.contains(net.driver)) {
-      roots.insert(physical_timing_pins_.at(net.driver));
+      roots.insert(&physical_timing_pin(net.driver));
     }
   }
   std::vector<std::pair<size_t, uint8_t>> masks;
   for (const auto& arc : timer.arcs()) {
-    if (arc.is_net_arc() && roots.contains(arc.from().name())) {
+    if (arc.is_net_arc() && roots.contains(&arc.from())) {
       masks.emplace_back(arc.idx(), 0);
     }
   }
@@ -111,7 +120,12 @@ void Pass_opentimer::apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph
   }
   std::map<std::string, std::string> ports;
   std::map<std::string, std::string> instances = physical_instances_;
-  physical_timing_pins_.clear();
+  std::vector<std::pair<std::string_view, const ot::Pin*>> bindings;
+  size_t                                                   binding_count = physical_rc_->nets.size();
+  for (const auto& net : physical_rc_->nets) {
+    binding_count += std::count_if(net.nodes.begin(), net.nodes.end(), [](const auto& node) { return !node.pin.empty(); });
+  }
+  bindings.reserve(binding_count);
   for (auto node : graph->body().nodes()) {
     if (!node.get_subnode_io() && livehd::graph_util::type_op_of(node) != Ntype_op::Memory) {
       continue;
@@ -156,11 +170,11 @@ void Pass_opentimer::apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph
     const auto old                    = previous.find(net.driver);
     const bool unchanged              = old != previous.end() && *old->second == net;
     const auto root                   = timer_pin(net.driver);
-    physical_timing_pins_[net.driver] = root;
     const auto driver                 = timer.pins().find(root);
     if (driver == timer.pins().end() || !driver->second.net()) {
       throw std::runtime_error("placement RC driver missing from STA: " + root);
     }
+    bindings.emplace_back(net.driver, &driver->second);
     const auto               name = driver->second.net()->name();
     spef::Net                mapped(name, 0);
     std::vector<std::string> nodes;
@@ -168,7 +182,6 @@ void Pass_opentimer::apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph
       const auto& node  = net.nodes[i];
       auto        label = node.pin.empty() ? std::format("{}:__lhd_steiner_{}", name, i) : timer_pin(node.pin);
       if (!node.pin.empty()) {
-        physical_timing_pins_[node.pin] = label;
         const auto pin                  = timer.pins().find(label);
         if (pin == timer.pins().end() || !pin->second.net() || pin->second.net()->name() != name) {
           throw std::runtime_error("placement RC endpoint differs from STA connectivity: " + label + " on " + name + ", actual "
@@ -176,6 +189,7 @@ void Pass_opentimer::apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph
                                       : pin->second.net()       ? pin->second.net()->name()
                                                                 : std::string("no net")));
         }
+        bindings.emplace_back(node.pin, &pin->second);
       }
       if (!std::isfinite(node.capacitance_ff) || node.capacitance_ff < 0) {
         throw std::invalid_argument("invalid placement capacitance");
@@ -199,4 +213,28 @@ void Pass_opentimer::apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph
   }
   batch.flush();
   physical_updated_nets_ = batch.size();
+  // Borrow labels only during this call; the RC snapshot can be released on
+  // the next evaluation. Identical physical labels resolve to the same pin.
+  std::sort(bindings.begin(), bindings.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+  bindings.erase(std::unique(bindings.begin(), bindings.end(), [](const auto& a, const auto& b) { return a.first == b.first; }),
+                 bindings.end());
+  if (!physical_feedback_index_ || physical_feedback_index_->labels.size() != bindings.size()
+      || !std::equal(physical_feedback_index_->labels.begin(),
+                     physical_feedback_index_->labels.end(),
+                     bindings.begin(),
+                     [](const auto& label, const auto& entry) { return label == entry.first; })) {
+    auto index = std::make_shared<livehd::timing::Feedback::Pin_index>();
+    index->labels.reserve(bindings.size());
+    for (const auto& [physical, pin] : bindings) {
+      (void)pin;
+      index->labels.emplace_back(physical);
+    }
+    physical_feedback_index_ = std::move(index);
+  }
+  physical_timing_pins_.clear();
+  physical_timing_pins_.reserve(bindings.size());
+  for (const auto& [physical, pin] : bindings) {
+    (void)physical;
+    physical_timing_pins_.push_back(pin);
+  }
 }

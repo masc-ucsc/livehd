@@ -23,6 +23,20 @@ cc_library(
     ],
 )
 
+# The same cells as one Liberty library, for engines that read Liberty only
+# (OpenTimer: placement resizing, buffer repair, timing-driven placement).
+cc_library(
+    name = "domino_liberty",
+    srcs = ["domino_liberty.cpp"],
+    hdrs = ["domino_liberty.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":domino_timing_model",
+        "//pass/liberty:timing_model",
+    ],
+)
+
 # The code identity of stage timing: part of the physical cache key only when
 # domino sizing optimizes against it (report-only timing never re-places).
 genrule(
@@ -91,5 +105,17 @@ cc_test(
         ":stage_timing",
         "@googletest//:gtest_main",
         "@rapidjson",
+    ],
+)
+
+cc_test(
+    name = "domino_liberty_test",
+    size = "small",
+    srcs = ["domino_liberty_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":domino_liberty",
+        ":domino_timing_fixture",
+        "@googletest//:gtest_main",
     ],
 )

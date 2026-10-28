@@ -83,7 +83,7 @@ For performance measurements:
   simulator experiment;
 - pin the tune vector on BOTH the setup and the run-only command:
   `--set sim.tune.profile=off` (the built-in defaults) or
-  `--set sim.tune.file=F`. Under the default `sim.tune.profile=auto` a
+  `F`. Under the default `sim.tune.profile=auto` a
   persistent workdir profiles its runs (zero-filled `?`, no checkpoints) and a
   later setup may regenerate the color root with a trial vector (§13);
 - use retired instructions as the primary low-noise metric, cycles/IPC as the
@@ -362,7 +362,7 @@ mkdir -p "${RUN_ROOT}/minion" "${RUN_ROOT}/dino"
 
 Every `lhd sim` below pins `--set sim.tune.profile=off`, so the retained
 binary is the built-in default vector and no run is profiled. To measure a
-tuned vector instead, replace it with `--set sim.tune.file=F` (§13.6). The
+tuned vector instead, replace it with `F` (§13.6). The
 direct `drv.bin` runs need nothing: a driver never profiles unless it is given
 `--set sim.tune.profile=on`.
 
@@ -683,7 +683,7 @@ result, and an explicit `--set` always wins.
 | `sim.tune.fence` | `auto`\|`none`\|N (0..2^20) | `auto` = `none` with dirty off, 16 with it on | fence a module used once into its own colors when it has at least N sites per interface word; `0` fences every such module. A fence pays only when dirty gating can skip what it isolates |
 | `sim.tune.live_words` | `auto`\|N (1..2^20) | `auto` = 256 | per-color live-value budget, in 64-bit words |
 | `sim.tune.backend` | `llvm`\|`slop`\|`auto` | `llvm` | color-kernel backend. `llvm` emits native color objects (a color it cannot lower fails setup rather than falling back); `slop` emits the reference C++ kernels; an explicit `auto` keeps its old meaning, the tuned decision, else slop (the tuner never trials the backend, so `auto` is slop unless a tune file pins one) |
-| `sim.tune.file` | PATH | "" | apply a vector written by `sim.tune.export` (§13.6) |
+| positional `FILE.json` | path | none | apply the `livehd.sim.tuning` record written by `sim.tune.export` (§13.6) |
 | `sim.tune.export` | PATH | "" | write the applied vector, with its provenance, to PATH |
 | `sim.tune.profile_dir` | DIR | "" | drv.bin only: where a profiling run writes its raw run file |
 | `sim.tune.profile_stride` | N (0..2^20) | 0 = auto | drv.bin only, for tests: a fixed sampling stride with no jitter |
@@ -721,7 +721,7 @@ benchmarks depend on -- and exists to measure what the rolled protocol costs
   the history. It can re-open a converged decision (after a testbench change,
   say). Deleting the store (§13.4) starts from scratch.
 - **`off`**. Ignore the workdir's tune data and use the built-in defaults.
-  Nothing is read or written; `sim.tune.file` and explicit `--set` still apply.
+  Nothing is read or written; positional simulation tuning and explicit `--set` still apply.
 
 The tuner is active only with a user-named `--workdir` and
 `lhd.incremental=true`, and never on an observation run (VCD, `--probe`,
@@ -859,7 +859,7 @@ profiling but never re-applies that trial, so an `on` loop over changing
 arguments cannot rebuild the root every other run forever. A build or run
 failure bans the vector only when it happens twice on the same structure, since
 a bad `$CXX` or a full disk is not the vector's fault. A pending trial whose
-moved knob gets pinned (`--set` or `sim.tune.file`), or whose `from` is no
+moved knob gets pinned (`--set` or positional simulation tuning), or whose `from` is no
 longer the resolved vector, is STALE: it is closed without counting an attempt
 and never applied.
 
@@ -870,7 +870,7 @@ Per knob, highest first:
 1. an explicit `--set sim.tune.X=V` or a `--config` `[sim.tune]` entry (a
    CLI `--set` overrides the `--config` entry; two CLI `--set` of one key with
    different values are a usage error); `auto` means "not set";
-2. `sim.tune.file`;
+2. positional simulation tuning;
 3. the workdir's converged decision;
 4. the built-in default.
 
@@ -948,14 +948,14 @@ so one `--set` list can be passed to both setup and run.
 lhd sim DUT TB --workdir P +cycles=N --result-json r.json
 # write the decision, then pin it anywhere else
 lhd sim DUT TB --workdir P --setup-only --set sim.tune.export=design.simtune.json
-lhd sim DUT TB --workdir W --set sim.tune.profile=off --set sim.tune.file=design.simtune.json
+lhd sim DUT TB --workdir W --set sim.tune.profile=off design.simtune.json
 ```
 
 ```json
-{"schema":"lhd-sim-tune-file-1","vector":"tv1:d=on;f=0;lw=256;be=llvm",
+[{"class":"livehd.sim.tuning","id":"selection","schema":"lhd-sim-tune-file-1","vector":"tv1:d=on;f=0;lw=256;be=llvm",
  "knobs":{"dirty":"on","fence":"0","live_words":"256","backend":"llvm"},
  "provenance":{"structure":"...","converged":true,
-               "stats":{"I_s":0.93,"I":0.91,"q":0.00,"pairs":812},"created":"..."}}
+               "stats":{"I_s":0.93,"I":0.91,"q":0.00,"pairs":812},"created":"..."}}]
 ```
 
 The file's knobs apply with source `file`, in every mode, with or without a
@@ -1001,7 +1001,7 @@ variant, on a quiet machine, serially.
      `lhd sim DUT TB +cycles=N --set sim.vcd=false --set sim.ninja=false --workdir P --result-json rI.json`
      until `sim_tune.converged` (cap it at 5 runs), recording each run's
      `inou.cgen.sim` and `sim.hostbuild` phases as the convergence cost; then
-     export (§13.6) and measure V0 plus `--set sim.tune.file=F` in a fresh
+     export (§13.6) and measure V0 plus `F` in a fresh
      workdir.
 3. Per variant, in a fresh workdir W:
    - setup: `lhd sim DUT TB --setup-only --set sim.vcd=false <variant> --workdir W --result-json setup.json`;

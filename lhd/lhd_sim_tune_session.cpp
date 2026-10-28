@@ -14,6 +14,7 @@
 #include <map>
 #include <set>
 
+#include "core/metadata.hpp"
 #include "diag.hpp"
 #include "lhd_compile_cache.hpp"
 #include "lhd_kernel_internal.hpp"
@@ -39,24 +40,25 @@ void add_input(Result& res, const std::string& path) {
   }
 }
 
-// `sim.tune.file`: missing -> missing_file, unreadable format -> config. A
-// file that was read is an input of the generated code.
+// Replay only the simulation section; explicit --set knobs retain precedence.
 std::optional<sim_tune::Tune_file> load_tune_file(const Options& opts, Result& res) {
-  const auto path = sim_tune::last_set(opts.sets, "sim.tune.file");
-  if (!path || path->empty()) {
+  if (!opts.metadata) {
     return std::nullopt;
   }
-  const auto text = tune::read_file(*path);
-  if (!text) {
-    throw Lhd_error{"missing_file",
-                    std::format("--set sim.tune.file={}: no such file", *path),
-                    "write one with `lhd sim ... --workdir W --set sim.tune.export=FILE`"};
+  const auto records = opts.metadata->select("livehd.sim.tuning", opts.top);
+  if (records.empty()) {
+    return std::nullopt;
   }
-  add_input(res, *path);
+  if (records.size() != 1) {
+    throw Lhd_error{"config", "multiple simulation tuning records match this design", "keep one tune vector per design"};
+  }
+  for (const auto& path : opts.metadata_files) {
+    add_input(res, path);
+  }
   std::string err;
-  auto        f = sim_tune::parse_tune_file(*text, err);
+  auto        f = sim_tune::parse_tune_file(livehd::metadata::canonical(*records.front()), err);
   if (!f) {
-    throw Lhd_error{"config", std::format("--set sim.tune.file={}: {}", *path, err), ""};
+    throw Lhd_error{"config", "simulation tuning metadata: " + err, ""};
   }
   return f;
 }
@@ -412,8 +414,8 @@ std::vector<std::pair<std::string, std::string>> sim_tune_codegen_labels(const O
   if (opts.sim_tune.resolved) {
     v = Tune_vector{opts.sim_tune.dirty, opts.sim_tune.fence, opts.sim_tune.live_words, opts.sim_tune.llvm};
     // The session already read the file; the compile phase reset the inputs.
-    if (const auto path = sim_tune::last_set(opts.sets, "sim.tune.file"); path && !path->empty()) {
-      add_input(res, *path);
+    for (const auto& path : opts.metadata_files) {
+      add_input(res, path);
     }
   } else {
     // `lhd compile --emit-dir sim:`: no workdir tune store; explicit > file > default.
@@ -1051,7 +1053,7 @@ struct Sim_tune_session::Impl {
       if (!file_structure.empty() && !state.runs.empty() && !state.runs.back().structure.empty()
           && file_structure != state.runs.back().structure) {
         warn("sim-tune-file-structure",
-             std::format("sim.tune.file was recorded for design structure {}, this workdir last ran {}",
+             std::format("positional simulation tuning was recorded for design structure {}, this workdir last ran {}",
                          file_structure,
                          state.runs.back().structure),
              "the pinned vector still applies (a tune knob never changes values); refresh the file when convenient");
@@ -1281,8 +1283,20 @@ struct Sim_tune_session::Impl {
         p.stats = sim_tune::window_stats(win);
       }
     }
-    std::string why;
-    if (tune::write_file_atomic(export_path, sim_tune::tune_file_json(cur.v, p), why)) {
+    std::string         why;
+    rapidjson::Document record;
+    const auto          exported = sim_tune::tune_file_json(cur.v, p);
+    record.Parse(exported.c_str());
+    auto& a = record.GetAllocator();
+    record.AddMember("class", "livehd.sim.tuning", a);
+    record.AddMember("id", "selection", a);
+    if (!opts.top.empty()) {
+      record.AddMember("design", rapidjson::Value(opts.top.c_str(), a), a);
+    }
+    livehd::metadata::Bundle bundle(opts.metadata ? opts.metadata->json() : "[]");
+    bundle.erase_selected("livehd.sim.tuning", opts.top);
+    bundle.replace(record);
+    if (tune::write_file_atomic(export_path, bundle.json() + "\n", why)) {
       res.outputs.push_back(export_path);
       if (!p.converged) {
         notes.push_back("exported a decision that has not converged yet");

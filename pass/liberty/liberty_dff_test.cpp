@@ -1095,16 +1095,24 @@ TEST(LibertyFunction, ClockedMemoryBusDriveKeepsConstantDelayAndElectricalLimits
       }
     }
   )";
-  const auto        drives   = livehd::liberty::scan_output_drives_text(contents);
-  ASSERT_EQ(drives.size(), 2);
-  for (size_t i = 0; i < drives.size(); ++i) {
-    EXPECT_EQ(drives[i].name, "RAM");
-    EXPECT_EQ(drives[i].output, "Q[" + std::to_string(i + 2) + "]");
-    EXPECT_TRUE(drives[i].sequential);
-    EXPECT_DOUBLE_EQ(drives[i].max_capacitance_ff.value(), 500);
-    EXPECT_DOUBLE_EQ(drives[i].intrinsic_ps, 218);
-    EXPECT_DOUBLE_EQ(drives[i].resistance_ohm, 0);
-    EXPECT_FALSE(drives[i].max_fanout);
+  const auto                          drives   = livehd::liberty::scan_output_drives_text(contents);
+  const livehd::liberty::Cell_library snapshot(write_lib("memory-drive-snapshot.lib", contents));
+  ASSERT_EQ(snapshot.memories.size(), 1);
+  EXPECT_EQ(snapshot.file_reads, 1);
+  // Both independent parsing and the shared snapshot must retain bus expansion,
+  // sequential identity, unit conversion and absent electrical limits.
+  for (const auto* inventory : {&drives, &snapshot.drives}) {
+    ASSERT_EQ(inventory->size(), 2);
+    for (size_t i = 0; i < inventory->size(); ++i) {
+      const auto& drive = (*inventory)[i];
+      EXPECT_EQ(drive.name, "RAM");
+      EXPECT_EQ(drive.output, "Q[" + std::to_string(i + 2) + "]");
+      EXPECT_TRUE(drive.sequential);
+      EXPECT_DOUBLE_EQ(drive.max_capacitance_ff.value(), 500);
+      EXPECT_DOUBLE_EQ(drive.intrinsic_ps, 218);
+      EXPECT_DOUBLE_EQ(drive.resistance_ohm, 0);
+      EXPECT_FALSE(drive.max_fanout);
+    }
   }
   auto              async_contents = contents;
   const std::string edge           = "related_pin : \"CLK\"; timing_type : rising_edge;";

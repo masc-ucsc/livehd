@@ -109,6 +109,45 @@ TEST(PrectsNetworks, DistributionClosureExcludesSiblingsButPreservesDataAndGateE
   EXPECT_TRUE(timing.pins.contains("r0:o"));
   EXPECT_EQ(fp.nets, before.nets);
   EXPECT_EQ(fp.components, before.components);
+  const auto* retained = &timing.pins.at("ff:d");
+  timing.path         = {"r0:o", "ff:d"};
+  const auto moved    = prects_data_timing(std::move(timing), excluded);
+  EXPECT_EQ(&moved.pins.at("ff:d"), retained);
+  EXPECT_FALSE(moved.pins.contains("r0:o"));
+  EXPECT_FALSE(moved.pins.contains("ff:c"));
+  EXPECT_EQ(moved.path, (std::vector<std::string>{"ff:d"}));
+}
+
+TEST(PrectsNetworks, MissingDistributionEndpointsDoNotJoinDataToResetOrClock) {
+  auto                 roles = library();
+  physical::Technology tech;
+  physical::Floorplan  fp;
+  fp.components = {
+      { "missing_input",  "unary", {}},
+      {"missing_output", "invert", {}},
+      {      "complete",  "unary", {}},
+      {            "ff",  "state", {}}
+  };
+  fp.nets = {
+      {      "data",                         {{"PIN", "data"}, {"ff", "d"}}},
+      {     "reset",  {{"PIN", "rst"}, {"missing_input", "o"}, {"ff", "r"}}},
+      {     "clock", {{"PIN", "clk"}, {"missing_output", "i"}, {"ff", "c"}}},
+      { "branch_in",                 {{"PIN", "branch"}, {"complete", "i"}}},
+      {"branch_out",              {{"complete", "o"}, {"PIN", "reset_out"}}}
+  };
+  roles.reset_ports.insert("reset_out");
+  // Duplicate references to an existing endpoint must not create extra links.
+  fp.nets[3].connections.push_back({"complete", "i"});
+  const auto result = prects_networks(tech, fp, roles);
+  EXPECT_EQ(result.ignored, (std::vector<bool>{false, true, true, true, true}));
+  EXPECT_FALSE(result.pins.contains("data"));
+  EXPECT_FALSE(result.pins.contains("ff:d"));
+  EXPECT_FALSE(result.pins.contains("missing_input:i"));
+  EXPECT_FALSE(result.pins.contains("missing_output:o"));
+  EXPECT_TRUE(result.timing_cuts.contains("missing_input:o"));
+  EXPECT_FALSE(result.timing_cuts.contains("missing_output:i"));
+  EXPECT_TRUE(result.timing_cuts.contains("branch"));
+  EXPECT_TRUE(result.timing_cuts.contains("complete:o"));
 }
 
 TEST(PrectsNetworks, LefAndTimingEvidenceNeedNoFiniteSlack) {
@@ -168,6 +207,11 @@ TEST(PrectsNetworks, DenseRankingClocksAndFilteringMatchNamedFeedback) {
   EXPECT_FALSE(filtered.is_clock_pin("b", "o"));
   EXPECT_TRUE(dense.is_clock_pin("b", "o"));
   EXPECT_EQ(filtered.pin_rank("t", "i").slack, -1);
+  const auto* storage = dense.ranking->pins.data();
+  const auto moved    = prects_data_timing(std::move(dense), actual);
+  EXPECT_EQ(moved.ranking->pins.data(), storage);
+  EXPECT_FALSE(moved.is_clock_pin("b", "o"));
+  EXPECT_EQ(moved.pin_rank("t", "i").slack, -1);
 }
 TEST(PrectsNetworks, ExplicitPortsReplaceOptionalMetadataAndLibraryRoots) {
   auto roles = library();
@@ -226,6 +270,69 @@ TEST(PrectsNetworks, ExplicitPortsCannotDisableRecognizedResetFalsePaths) {
   }
   EXPECT_FALSE(excluded.timing_cuts.contains("data:o"));
   EXPECT_FALSE(excluded.timing_cuts.contains("ff:c"));
+}
+
+TEST(PrectsNetworks, DenseFeedbackFilteringPreservesSnapshotsAndLookup) {
+  timing::Feedback sparse;
+  sparse.pins["data"].arrival = 0;
+  sparse.pins["u:A"].slack    = -10;
+  sparse.pins["u:B"].slack    = -20;
+  sparse.pins["u:CLK"].clock  = true;
+  sparse.pins["u:CLK"].slack  = -100;
+  sparse.pins["v/B"].required = 50;
+  sparse.path                 = {"data", "u:A", "u:CLK", "v/B"};
+  auto             index      = std::make_shared<timing::Feedback::Pin_index>();
+  timing::Feedback dense;
+  auto&            values = dense.dense.emplace();
+  for (const auto& [name, pin] : sparse.pins) {
+    index->labels.push_back(name);
+    values.values.push_back(pin);
+  }
+  values.index = index;
+  dense.path   = sparse.path;
+  EXPECT_TRUE(dense.pins.empty());
+  EXPECT_EQ(dense.pin_count(), sparse.pin_count());
+  EXPECT_EQ(dense.cell_slack("u"), sparse.cell_slack("u"));
+  ASSERT_NE(dense.find_pin("v", "B"), nullptr);
+  EXPECT_EQ(dense.find_pin("v", "B")->required, 50);
+  EXPECT_EQ(dense.find_label("absent"), nullptr);
+  EXPECT_THROW(dense.at_pin("absent"), std::out_of_range);
+
+  Prects_networks controls;
+  controls.pins = {"data", "u:CLK", "absent"};
+  auto filtered = prects_data_timing(dense, controls);
+  auto expected = prects_data_timing(sparse, controls);
+  EXPECT_EQ(filtered.dense->index, dense.dense->index);
+  EXPECT_NE(&filtered.at_pin("u:A"), &dense.at_pin("u:A"));
+  EXPECT_EQ(filtered.pin_count(), expected.pin_count());
+  EXPECT_EQ(filtered.path, expected.path);
+  EXPECT_NE(dense.find_label("data"), nullptr);
+  EXPECT_EQ(filtered.find_label("data"), nullptr);
+  std::vector<std::string> visited;
+  filtered.for_each_pin([&](const auto& name, const auto& pin) {
+    visited.push_back(name);
+    EXPECT_EQ(pin.slack, expected.at_pin(name).slack);
+    EXPECT_EQ(pin.required, expected.at_pin(name).required);
+  });
+  EXPECT_EQ(visited, (std::vector<std::string>{"u:A", "u:B", "v/B"}));
+  filtered.erase_pin("u:B");
+  filtered.erase_pin("u:B");
+  EXPECT_EQ(filtered.pin_count(), 2u);
+  EXPECT_EQ(filtered.cell_slack("u"), -10);
+  EXPECT_EQ(dense.cell_slack("u"), -20);
+  filtered.at_pin("u:A").slack = 5;
+  EXPECT_EQ(filtered.cell_slack("u"), 5);
+  EXPECT_EQ(dense.at_pin("u:A").slack, -10);
+
+  const auto* retained = &dense.at_pin("u:A");
+  auto        moved    = prects_data_timing(std::move(dense), controls);
+  EXPECT_EQ(&moved.at_pin("u:A"), retained);
+  for (const auto& name : index->labels) {
+    moved.erase_pin(name);
+  }
+  EXPECT_FALSE(moved.has_pins());
+  EXPECT_EQ(moved.pin_count(), 0u);
+  moved.for_each_pin([](const auto&, const auto&) { ADD_FAILURE() << "erased pin was visited"; });
 }
 
 }  // namespace livehd::placement

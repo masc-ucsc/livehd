@@ -82,12 +82,16 @@ TEST(Placement, ExperimentalBoundaryRefinementsRunOnlyAtTheFinalStage) {
     options.busorder.enabled     = mode == 0;
     options.boundarypins.enabled = mode == 1;
     options.boundarypins.align   = mode == 2;
-    for (bool terminal : {false, true}) {
+    // 0: optimization pending, an ordinary call (never refines); 1: pending, the dedicated refine_regions call;
+    // 2: terminal (nothing pending).
+    for (int phase : {0, 1, 2}) {
+      const bool terminal = phase == 2;
       for (auto stage : {Placement_stage::macro, Placement_stage::final}) {
         hhds::GraphLibrary placed;
         options.optimization_pending = !terminal;
+        options.region_refine        = phase == 1;
         options.completed_stage      = stage;
-        options.output_dir = std::format("{}/busorder_stages_{}_{}_{}", std::getenv("TEST_TMPDIR"), mode, terminal, int(stage));
+        options.output_dir = std::format("{}/busorder_stages_{}_{}_{}", std::getenv("TEST_TMPDIR"), mode, phase, int(stage));
         std::filesystem::remove_all(options.output_dir);
         const auto result = place(*graph, placed, options);
         check_legality(physical::read_lef(options.lefs), result.floorplan);
@@ -109,8 +113,11 @@ TEST(Placement, ExperimentalBoundaryRefinementsRunOnlyAtTheFinalStage) {
         }
         const auto report_path = options.output_dir + (boundary ? "/boundarypins/report.json" : "/busorder/report.json");
         EXPECT_EQ(result.floorplan.components.size(), 4u);
-        EXPECT_EQ(std::filesystem::exists(report_path), stage == Placement_stage::final);
-        if (stage == Placement_stage::final) {
+        // The final stage refines in the terminal pass and in the dedicated region_refine call; an ordinary
+        // optimization-pending call (first placement, timing round, resize trial) never does.
+        const bool refined = stage == Placement_stage::final && phase != 0;
+        EXPECT_EQ(std::filesystem::exists(report_path), refined);
+        if (refined) {
           std::ifstream       report_file(report_path);
           const std::string   text((std::istreambuf_iterator<char>(report_file)), {});
           rapidjson::Document report;
@@ -298,9 +305,58 @@ TEST(Placement, LegalStageSnapshotsUsePhysicalRowsAndPreserveFixedMirrors) {
   options.snapshots  = true;
   options.bins       = 2;
   options.core       = {0, 0, 2.76, 5.44};
-  options.die        = {0, 0, 5.52, 10.88};
-  const auto result  = place(*graph, flat, options);
-  const auto tech    = physical::read_lef(options.lefs);
+  options.die                   = {0, 0, 5.52, 10.88};
+  const auto tech               = physical::read_lef(options.lefs);
+  unsigned   legal_checkpoints  = 0;
+  options.macro_timing_interval = 1;
+  options.final_timing_start    = 0;
+  options.fp_evaluate           = [&](const Result& checkpoint) {
+    const auto& frame = checkpoint.floorplan;
+    // GP keeps the original N orientations. A flipped movable cell proves
+    // this callback observes the legal checkpoint, not just the final export.
+    if (std::none_of(frame.components.begin(), frame.components.end(), [](const auto& c) {
+          return c.place.status == physical::Status::PLACED && c.place.orientation == physical::Orientation::FS;
+        })) {
+      return Timing_feedback{};
+    }
+    ++legal_checkpoints;
+    EXPECT_NO_THROW(check_legality(tech, frame));
+    for (const auto& c : frame.components) {
+      if (c.name == "inv0") {
+        EXPECT_EQ(c.place.status, physical::Status::FIXED);
+        EXPECT_EQ(c.place.orientation, physical::Orientation::FN);
+      }
+      const auto& master = tech.macros.at(c.macro);
+      for (const auto* pin : {"A", "Y"}) {
+        const auto& rect    = master.pins.at(pin).shapes.front().rect;
+        const auto [ox, oy] = physical::orient_point((rect.xl + rect.xh) / 2,
+                                                     (rect.yl + rect.yh) / 2,
+                                                     master.width,
+                                                     master.height,
+                                                     c.place.orientation);
+        const auto xy       = checkpoint.pin_locations.at(c.name + ":" + pin);
+        EXPECT_DOUBLE_EQ(xy.first, c.place.x + ox * tech.dbu);
+        EXPECT_DOUBLE_EQ(xy.second, c.place.y + oy * tech.dbu);
+      }
+      const auto pose = std::find_if(checkpoint.parasitics->cells.begin(), checkpoint.parasitics->cells.end(), [&](const auto& p) {
+        return p.name == c.name;
+      });
+      EXPECT_NE(pose, checkpoint.parasitics->cells.end());
+      if (pose != checkpoint.parasitics->cells.end()) {
+        EXPECT_EQ(pose->x, c.place.x);
+        EXPECT_EQ(pose->y, c.place.y);
+        EXPECT_EQ(pose->orientation, static_cast<unsigned>(c.place.orientation));
+      }
+    }
+    for (const auto& terminal : frame.terminals) {
+      const auto xy = checkpoint.pin_locations.at(terminal.name);
+      EXPECT_DOUBLE_EQ(xy.first, terminal.x);
+      EXPECT_DOUBLE_EQ(xy.second, terminal.y);
+    }
+    return Timing_feedback{};
+  };
+  const auto result = place(*graph, flat, options);
+  EXPECT_GT(legal_checkpoints, 0U);
   for (const auto* stage : {"before_legalization.def", "after_legalization.def", "after_detailed.def"}) {
     const auto frame   = physical::read_def(options.output_dir + "/" + stage);
     unsigned   flipped = 0;
@@ -570,13 +626,19 @@ TEST(Placement, TwoRowCellsAreAnchoredBeforeTerminalLegalization) {
       {                 [](Options& o) { o.busorder.enabled = true; },                                 "region mesh"},
       {             [](Options& o) { o.boundarypins.enabled = true; },                                 "region mesh"},
       {               [](Options& o) { o.boundarypins.align = true; },                                 "region mesh"},
-      {             [](Options& o) { o.optimization_pending = true; }, "native legalization outside the final stage"},
       {[](Options& o) { o.satlegalize = o.satlegalize_route = true; },             "satlegalize treats multi-height"},
       {                   [](Options& o) { o.legalize_cells = true; },              "ECO legalization is single-row"},
       {                  [](Options& o) { o.changed_cells = {"c1"}; },              "ECO legalization is single-row"},
       {                    [&](Options& o) { o.previous = previous; },              "ECO legalization is single-row"},
       {                                                           h2d,                       "macro placement stage"},
   };
+  // Optimization pending defers the packing to finalize_placement: the placement itself is accepted.
+  {
+    auto o                = options;
+    o.optimization_pending = true;
+    o.output_dir          += "_pending";
+    EXPECT_NO_THROW((void)place(*chain.graph, chain.next_flat(), o));
+  }
   for (const auto& [mutate, expected] : refusals) {
     auto o = options;
     mutate(o);
@@ -1630,9 +1692,9 @@ TEST(Placement, TimingCheckpointsCarryConnectivityForAutomaticResetCuts) {
       ++calls;
       const auto controls = check(state);
       auto       timing   = timer.evaluate(state.graph, state.parasitics, controls.timing_cuts);
-      EXPECT_TRUE(timing.pins.at("mix:A").arrival);
-      EXPECT_FALSE(timing.pins.at("mix:B").arrival);
-      EXPECT_TRUE(timing.pins.at("reset_stage:CLK").clock);
+      EXPECT_TRUE(timing.at_pin("mix:A").arrival);
+      EXPECT_FALSE(timing.at_pin("mix:B").arrival);
+      EXPECT_TRUE(timing.at_pin("reset_stage:CLK").clock);
       return prects_data_timing(timing, controls);
     };
     if (mode & 4) {
@@ -1641,9 +1703,9 @@ TEST(Placement, TimingCheckpointsCarryConnectivityForAutomaticResetCuts) {
         ++ranking_calls;
         check_controls(state.controls);
         auto timing = timer.evaluate(state.graph, state.parasitics, state.controls.timing_cuts);
-        EXPECT_TRUE(timing.pins.at("mix:A").arrival);
-        EXPECT_FALSE(timing.pins.at("mix:B").arrival);
-        EXPECT_TRUE(timing.pins.at("reset_stage:CLK").clock);
+        EXPECT_TRUE(timing.at_pin("mix:A").arrival);
+        EXPECT_FALSE(timing.at_pin("mix:B").arrival);
+        EXPECT_TRUE(timing.at_pin("reset_stage:CLK").clock);
         return prects_data_timing(timing, state.controls);
       };
     }
@@ -4937,13 +4999,19 @@ TEST(Placement, PlacementColorsUseLibertyRolesAndPinsMoveWithoutSta) {
   o.analyze_colors_only    = true;
   o.final_cells            = false;
   o.fp_evaluate            = [](const Result&) -> Timing_feedback { throw std::runtime_error("analysis invoked STA"); };
-  o.output_dir             = (dir / "analysis").string();
+  o.after_stage            = [](Placement_stage, const Result&) {
+    ADD_FAILURE() << "color analysis invoked a stage callback";
+    return false;
+  };
+  o.output_dir = (dir / "analysis").string();
   hhds::GraphLibrary analysis_flat;
   const auto         analysis = place(*graph, analysis_flat, o);
   EXPECT_TRUE(std::filesystem::exists(dir / "analysis/fp_placement_colors.json"));
   EXPECT_FALSE(std::filesystem::exists(dir / "analysis/fp_gp.json"));
   EXPECT_FALSE(std::filesystem::exists(dir / "analysis/gp_history.json"));
   EXPECT_GE(analysis.floorplan.components.size(), 6);
+  EXPECT_EQ(analysis.parasitics, nullptr);
+  EXPECT_FALSE(analysis.graph->get_input_node().attr(attrs::placement_rc).has());
 }
 TEST(Placement, ProxyMemoryColorsExcludeSharedClockAndResetLogic) {
   hhds::GraphLibrary source, flat;
@@ -5459,6 +5527,14 @@ TEST(Placement, SegmentedImportedRowsConstrainPlacementSnapshotsAndEco) {
     EXPECT_EQ(snapshot.floorplan.components.size(), 2);
     EXPECT_EQ(snapshot.parasitics->cells.size(), 2);
   };
+  options.uroute.export_features = true;
+  options.retain_preroute_design = true;
+  options.after_stage            = [&](Placement_stage, const Result& result) {
+    EXPECT_EQ(result.floorplan.rows, frame.rows);
+    EXPECT_EQ(result.floorplan.blockages, frame.blockages);
+    EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/uroute_export/features.bin"));
+    return false;
+  };
   for (bool terminal : {false, true}) {
     hhds::GraphLibrary placed_library;
     options.optimization_pending = !terminal;
@@ -5468,6 +5544,10 @@ TEST(Placement, SegmentedImportedRowsConstrainPlacementSnapshotsAndEco) {
     EXPECT_EQ(placed.floorplan.rows, frame.rows);
     EXPECT_EQ(placed.floorplan.blockages, frame.blockages);
     EXPECT_EQ(placed.floorplan.components.size(), 2);
+    ASSERT_NE(placed.preroute_design, nullptr);
+    EXPECT_NO_THROW(placed.preroute_design->design.validate());
+    EXPECT_EQ(bind_preroute(placed.floorplan, *placed.parasitics, *placed.preroute_design).size(), placed.parasitics->nets.size());
+    EXPECT_TRUE(std::filesystem::exists(options.output_dir + "/uroute_export/features.bin"));
     for (const auto& file : {"out.def", "before_legalization.def", "after_legalization.def"}) {
       auto exported = physical::read_def(options.output_dir + "/" + file);
       EXPECT_EQ(exported.rows, frame.rows);
@@ -5483,6 +5563,7 @@ TEST(Placement, SegmentedImportedRowsConstrainPlacementSnapshotsAndEco) {
       eco.previous = previous;
       eco.floorplan.clear();
       eco.gp_observer    = {};
+      eco.after_stage    = {};
       eco.changed_cells  = {"inv", "nand"};
       eco.legalize_cells = true;
       eco.output_dir     = root + "/eco";
@@ -6138,6 +6219,16 @@ TEST(Placement, UnsetCellHaloPreservesStatefulCallbackAcrossCalls) {
     bool     operator()(Placement_stage stage, const Result& result) {
       EXPECT_EQ(stage, Placement_stage::final);
       EXPECT_FALSE(result.floorplan.components.empty());
+      const auto stored = result.graph->get_input_node().attr(attrs::placement_rc);
+      EXPECT_TRUE(stored.has());
+      if (stored.has()) {
+        const auto rc = physical::deserialize_parasitics_exact(stored.get());
+        EXPECT_EQ(rc.identity, result.parasitics->identity);
+        EXPECT_EQ(rc.cells, result.parasitics->cells);
+        EXPECT_EQ(rc.terminals, result.parasitics->terminals);
+        EXPECT_EQ(rc.nets, result.parasitics->nets);
+        EXPECT_EQ(rc.timing_cuts, result.parasitics->timing_cuts);
+      }
       ++calls;
       return false;
     }
@@ -6179,6 +6270,36 @@ TEST(Placement, UnsetCellHaloPreservesStatefulCallbackAcrossCalls) {
   EXPECT_NO_THROW(place(*graph, automatic_library, options));
   EXPECT_EQ(options.after_stage.target<Observer>()->calls, 3);
   EXPECT_EQ(first.floorplan.components, second.floorplan.components);
+  options.timing_seed  = true;
+  options.output_dir  += "_seed";
+  hhds::GraphLibrary seed_library;
+  const auto         seed = place(*graph, seed_library, options);
+  ASSERT_NE(seed.parasitics, nullptr);
+  EXPECT_FALSE(seed.graph->get_input_node().attr(attrs::placement_rc).has());
+  EXPECT_EQ(options.after_stage.target<Observer>()->calls, 3);
+  options.timing_seed         = false;
+  options.persist_parasitics  = false;
+  options.output_dir         += "_transient";
+  unsigned transient_calls    = 0;
+  options.after_stage         = [&](Placement_stage, const Result& result) {
+    ++transient_calls;
+    EXPECT_NE(result.parasitics, nullptr);
+    EXPECT_FALSE(result.graph->get_input_node().attr(attrs::placement_rc).has());
+    return false;
+  };
+  hhds::GraphLibrary transient_library;
+  const auto         transient = place(*first.graph, transient_library, options);
+  EXPECT_EQ(transient_calls, 1);
+  EXPECT_FALSE(transient.graph->get_input_node().attr(attrs::placement_rc).has());
+  EXPECT_TRUE(first.graph->get_input_node().attr(attrs::placement_rc).has());
+  options.persist_parasitics  = true;
+  options.output_dir         += "_persisted";
+  options.after_stage         = Observer{};
+  hhds::GraphLibrary persisted_library;
+  const auto         persisted = place(*transient.graph, persisted_library, options);
+  EXPECT_EQ(options.after_stage.target<Observer>()->calls, 1);
+  EXPECT_TRUE(persisted.graph->get_input_node().attr(attrs::placement_rc).has());
+  EXPECT_FALSE(transient.graph->get_input_node().attr(attrs::placement_rc).has());
 }
 }  // namespace livehd::placement
 
@@ -6329,6 +6450,7 @@ TEST(Placement, SatInstallKeepsImportedFlippedCorePins) {
     options.macro_timing_interval = 1;
     options.final_timing_start    = 0;
     options.satlegalize           = sat;
+    options.region_sat            = sat;  // the dedicated SAT call (an ordinary pending call never runs the SAT pass)
     options.fp_evaluate           = [&](const Result& r) {
       for (const char* pin : {"A", "Y"}) {
         if (const auto found = r.pin_locations.find(std::string("fixed:") + pin); found != r.pin_locations.end()) {

@@ -360,6 +360,7 @@ cc_test(
 filegroup(
     name = "place_srcs",
     srcs = [
+        "//core:metadata_srcs",
         "handoff_rows.cpp",
         "handoff_rows.hpp",
         "repeater_wire_filter.cpp",
@@ -418,8 +419,11 @@ filegroup(
         "prects_networks.cpp",
         "prects_networks.hpp",
         "place.cpp",
+        "placement_hints.cpp",
         "placement_technology.cpp",
         "place.hpp",
+        "placement_hints.hpp",
+        "def_binding.hpp",
         "placement_technology.hpp",
         "growth_budget.cpp",
         "growth_budget.hpp",
@@ -659,6 +663,7 @@ cc_library(
         "memory_proxy.cpp",
         "pin_adjust.cpp",
         "place.cpp",
+        "placement_hints.cpp",
         "placement_technology.cpp",
         "repair.cpp",
         "growth_budget.cpp",
@@ -684,6 +689,8 @@ cc_library(
         "memory_proxy.hpp",
         "pin_adjust.hpp",
         "place.hpp",
+        "placement_hints.hpp",
+        "def_binding.hpp",
         "placement_technology.hpp",
         "repair.hpp",
         "growth_budget.hpp",
@@ -1064,4 +1071,22 @@ cc_test(
     srcs = ["growth_budget_test.cpp"],
     copts = COPTS,
     deps = [":place", "@googletest//:gtest_main"],
+)
+
+cc_test(
+    name = "placement_hints_test",
+    srcs = ["placement_hints_test.cpp"],
+    copts = COPTS,
+    deps = [":place", "@googletest//:gtest_main"],
+)
+
+py_test(
+    name = "placement_hints_smoke",
+    srcs = ["tests/placement_hints_smoke.py"],
+    main = "tests/placement_hints_smoke.py",
+    size = "small",
+    data = [
+        "//lhd:lhd",
+        "//pass/place/tests/regularity:hint_fixtures",
+    ],
 )

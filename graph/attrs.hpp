@@ -231,6 +231,15 @@ struct placement_block_t {
 };
 inline constexpr placement_block_t placement_block{};
 
+// Input terminals explicitly absent from an imported physical netlist. This
+// preserves open connections without inventing tie cells. Timing may accept
+// only these named inputs, and only while the graph still leaves them open.
+struct physical_open_inputs_t {
+  using value_type = std::vector<std::string>;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr physical_open_inputs_t physical_open_inputs{};
+
 // Committed signal-route payload, keyed by its driver pin. The fixed-width
 // records hold DBU geometry and indexes into the companion string table;
 // inou/lefdef/route_store owns the versioned encoding. Trial/search data never
@@ -494,6 +503,8 @@ inline constexpr Attr_kind attr_kind<placement_rc_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<placement_block_t> = Attr_kind::node;
 template <>
+inline constexpr Attr_kind attr_kind<physical_open_inputs_t> = Attr_kind::node;
+template <>
 inline constexpr Attr_kind attr_kind<pin_place_t> = Attr_kind::any_pin;
 template <>
 inline constexpr Attr_kind attr_kind<place_weight_t> = Attr_kind::driver_pin;
@@ -556,6 +567,7 @@ inline constexpr bool carry_on_rebuild<route_strings_v1_t> = false;
   X(route_strings_v1)               \
   X(placement_rc)                   \
   X(placement_block)                \
+  X(physical_open_inputs)           \
   X(pin_place)                      \
   X(place_weight)                   \
   X(bits)                           \

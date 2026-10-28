@@ -73,7 +73,6 @@ VERILOG_TESTS = glob(
     ],
     exclude = [
         "tests/fixme*.v",
-        "tests/long*.v",
         "tests/nocheck*.v",
     ],
 )

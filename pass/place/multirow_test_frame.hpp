@@ -45,7 +45,7 @@ struct Multirow_frame {
   // A two-row CORE master with the row-access template t0 (bottom half horizontal).
   void two_row(const std::string& name, double width) {
     macro(name, "CORE", width, 2, true);
-    templates[name] = {physical::Row_access::horizontal, physical::Row_access::vertical};
+    templates[name] = {{physical::Row_access::horizontal, physical::Row_access::vertical}};
   }
   // PG rails on M1 (pg_rails.hpp): the one-row "cell" has VSS (GROUND) on its
   // bottom edge and VDD (POWER) on its top, so an N row has VSS below and an

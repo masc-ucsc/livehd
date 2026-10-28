@@ -2924,7 +2924,10 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           note_edge("read", i, param_bit(ID::RD_CLK_POLARITY, i));
         }
       }
-      const int wr_clkp = mem_mixed ? Ntype::Memory_posclk_mixed : ((have_edge && mem_pos) ? 1 : 0);
+      // A memory with no clocked port (async ROM, comb read) has no edge to record: keep the default
+      // posedge. Marking it negedge made an undriven clock look like a falling-edge state element, so
+      // the phase schedule saw a second root clock next to the design's real one.
+      const int wr_clkp = mem_mixed ? Ntype::Memory_posclk_mixed : ((!have_edge || mem_pos) ? 1 : 0);
 
       setup_sink_by_name(exit_node, "bits").connect_driver(create_const(*g, *Dlop::create_integer(width)));
       setup_sink_by_name(exit_node, "fwd").connect_driver(create_const(*g, transp ? *transp : *Dlop::create_integer(0)));

@@ -218,7 +218,7 @@ TEST_F(Resize_engine, MetTimingAddsNoCellsDownsizesAndNeverWorsensSetup) {
   auto         placed = place(*graph, flat, options);
   const auto   probe  = timing(placed);
   // Re-time with a period just above the chain delay: the chain is critical.
-  const double chain  = probe.pins.at("y").arrival.value_or(0) * probe.time_unit_ps;
+  const double chain  = probe.at_pin("y").arrival.value_or(0) * probe.time_unit_ps;
   ASSERT_GT(chain, 50);
   session.reset();
   period_ns         = (chain + 120) / 1000;
@@ -411,8 +411,8 @@ TEST_F(Resize_engine, SynthesisBufferChainIsBypassedForTheCriticalSink) {
   output("y8", 8, gate("sky130_fd_sc_hd__inv_1", "last", p));
   auto         placed = place(*graph, flat, options);
   const auto   probe  = timing(placed);
-  const double last   = probe.pins.at("y8").arrival.value_or(0) * probe.time_unit_ps;
-  const double first  = probe.pins.at("y1").arrival.value_or(0) * probe.time_unit_ps;
+  const double last   = probe.at_pin("y8").arrival.value_or(0) * probe.time_unit_ps;
+  const double first  = probe.at_pin("y1").arrival.value_or(0) * probe.time_unit_ps;
   ASSERT_GT(last - first, 300);
   session.reset();
   period_ns         = (last - 150) / 1000;  // only the chain's end fails

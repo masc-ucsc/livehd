@@ -14,8 +14,9 @@
 #include "rapidjson/writer.h"
 #include "repair.hpp"
 namespace livehd::placement {
-std::map<std::string, double> timing_weights(const physical::Parasitics& nets, const Timing_feedback& timing, double fraction,
-                                             double max_weight, double exponent) {
+namespace {
+std::map<std::string, double> data_timing_weights(const physical::Parasitics& nets, const Timing_feedback& timing, double fraction,
+                                                  double max_weight, double exponent, const Prects_networks* controls) {
   if (!std::isfinite(fraction) || fraction <= 0 || fraction > 1) {
     throw std::invalid_argument("timing fraction must be in (0, 1]");
   }
@@ -27,7 +28,20 @@ std::map<std::string, double> timing_weights(const physical::Parasitics& nets, c
   }
   std::vector<std::pair<double, std::string_view>> ranked;
   ranked.reserve(nets.nets.size());
-  const auto* indexed = timing.ranking && timing.ranking->parasitics.get() == &nets ? &*timing.ranking : nullptr;
+  const auto*       indexed = timing.ranking && timing.ranking->parasitics.get() == &nets ? &*timing.ranking : nullptr;
+  // Borrow feedback: filtering controls must not duplicate all detailed pin
+  // records or ranking values. Indexed rankings need only one exclusion bit
+  // per pin; a different RC snapshot retains the label-based fallback below.
+  std::vector<bool> excluded;
+  if (indexed && controls && !controls->pins.empty()) {
+    excluded.resize(indexed->pins.size());
+    for (const auto& label : controls->pins) {
+      const auto index = indexed->layout->find(label);
+      if (index < excluded.size()) {
+        excluded[index] = true;
+      }
+    }
+  }
   for (size_t net_index = 0; net_index < nets.nets.size(); ++net_index) {
     const auto& net   = nets.nets[net_index];
     double      slack = std::numeric_limits<double>::infinity();
@@ -35,21 +49,28 @@ std::map<std::string, double> timing_weights(const physical::Parasitics& nets, c
     if (indexed) {
       const auto& layout = *indexed->layout;
       for (size_t i = layout.net_offsets.at(net_index); i < layout.net_offsets.at(net_index + 1); ++i) {
-        const auto& pin  = indexed->pins.at(layout.net_pins[i]);
+        const auto index = layout.net_pins[i];
+        if (!excluded.empty() && excluded.at(index)) {
+          continue;
+        }
+        const auto& pin  = indexed->pins.at(index);
         clock           |= pin.clock;
         slack            = std::min(slack, pin.slack);
       }
     } else {
       for (const auto& node : net.nodes) {
+        if (controls && controls->pins.contains(node.pin)) {
+          continue;
+        }
         if (timing.ranking) {
           if (const auto* pin = timing.ranking->find(node.pin)) {
             clock |= pin->clock;
             slack  = std::min(slack, pin->slack);
           }
-        } else if (const auto it = timing.pins.find(node.pin); it != timing.pins.end()) {
-          clock |= it->second.clock;
-          if (it->second.slack) {
-            slack = std::min(slack, *it->second.slack);
+        } else if (const auto it = timing.find_label(node.pin); it != nullptr) {
+          clock |= it->clock;
+          if (it->slack) {
+            slack = std::min(slack, *it->slack);
           }
         }
       }
@@ -82,6 +103,11 @@ std::map<std::string, double> timing_weights(const physical::Parasitics& nets, c
   }
   return target;
 }
+}  // namespace
+std::map<std::string, double> timing_weights(const physical::Parasitics& nets, const Timing_feedback& timing, double fraction,
+                                             double max_weight, double exponent) {
+  return data_timing_weights(nets, timing, fraction, max_weight, exponent, nullptr);
+}
 void refresh_timing_weights(Result& state, const Options& options, const Timing_feedback& timing) {
   const auto roles
       = state.floorplan.nets.empty() ? Prects_library{} : prects_library(options.technology().cells, options.control_ports);
@@ -89,7 +115,7 @@ void refresh_timing_weights(Result& state, const Options& options, const Timing_
 }
 void refresh_timing_weights(Result& state, const Options& options, const Timing_feedback& timing,
                             const Prects_library& library_roles) {
-  std::optional<Timing_feedback> filtered;
+  std::optional<Prects_networks> controls;
   if (!state.floorplan.nets.empty()) {
     const auto& tech  = options.technology().lef;
     auto        roles = library_roles;
@@ -97,11 +123,14 @@ void refresh_timing_weights(Result& state, const Options& options, const Timing_
       roles.ports.insert(state.prects.ports.begin(), state.prects.ports.end());
       roles.pins.insert(state.prects.pins.begin(), state.prects.pins.end());
     }
-    filtered = prects_data_timing(timing, prects_networks(tech, state.floorplan, roles, timing));
+    controls = prects_networks(tech, state.floorplan, roles, timing);
   }
-  const auto& data = filtered ? *filtered : timing;
-  const auto  target
-      = timing_weights(*state.parasitics, data, options.timing_fraction, options.timing_max_weight, options.timing_exponent);
+  const auto                    target = data_timing_weights(*state.parasitics,
+                                                             timing,
+                                                             options.timing_fraction,
+                                                             options.timing_max_weight,
+                                                             options.timing_exponent,
+                                                             controls ? &*controls : nullptr);
   std::map<std::string, double> current;
   for (const auto& net : state.parasitics->nets) {
     const auto next     = target.find(net.driver);
@@ -229,8 +258,8 @@ Repair_result timing_place(Result initial, const Options& requested, const Evalu
     for (auto& terminal : frame.terminals) {
       terminal.status = Ann_place::Status::FIXED;
     }
-    trial.restart_seed = std::make_shared<physical::Floorplan>(frame);
     physical::write_def(frame, trial.floorplan);
+    trial.restart_seed = std::make_shared<physical::Floorplan>(std::move(frame));
     w.StartObject();
     w.Key("weighted_nets");
     w.Uint64(target.size());

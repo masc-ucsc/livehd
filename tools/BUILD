@@ -241,3 +241,10 @@ cc_binary(
     copts = COPTS,
     deps = ["//pass/place:signal_router", "//pass/place:routed_rc", "//pass/place:satlegalize", "//pass/place:place", "//inou/lefdef:inou_lefdef"],
 )
+
+cc_binary(
+    name = "signal_route_bench",
+    srcs = ["signal_route_bench.cpp"],
+    copts = COPTS,
+    deps = ["//pass/place:signal_router", "//inou/lefdef:inou_lefdef", "@rapidjson"],
+)

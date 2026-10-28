@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <limits>
@@ -10,6 +11,7 @@
 #include <string_view>
 #include <vector>
 
+#include "core/metadata.hpp"
 #include "lhd.hpp"
 #include "str_tools.hpp"
 
@@ -320,6 +322,33 @@ void load_config(Options& opts) {
 }
 
 }  // namespace
+
+void load_metadata(Options& opts) {
+  for (const auto& [key, value] : opts.sets) {
+    if (key == "synth.metadata" || key == "synth.tune.file" || key == "sim.tune.file" || key == "synth.place.row_access") {
+      throw Lhd_error{"usage",
+                      std::format("{} was removed; pass '{}' as a positional JSON input", key, value),
+                      "record classes select placement hints, tuning, or row-access conventions"};
+    }
+  }
+  if (opts.metadata_files.empty()) {
+    return;
+  }
+  auto bundle = std::make_shared<livehd::metadata::Bundle>();
+  for (const auto& path : opts.metadata_files) {
+    if (!std::filesystem::exists(path)) {
+      throw Lhd_error{"missing_file", "metadata input not found: " + path, "pass an existing class-tagged JSON file"};
+    }
+    try {
+      bundle->merge(livehd::metadata::Bundle::read(path));
+    } catch (const std::exception& e) {
+      throw Lhd_error{"config",
+                      std::format("metadata '{}': {}", path, e.what()),
+                      "use an array of class-tagged records; conflicting identities are not overridden"};
+    }
+  }
+  opts.metadata = std::move(bundle);
+}
 
 Options parse_args(int argc, char** argv) {
   Options opts;
@@ -778,6 +807,18 @@ Options parse_args(int argc, char** argv) {
   // consumes the resolved config (a config file and the equivalent explicit
   // flags must be indistinguishable downstream).
   load_config(opts);
+
+  // JSON positionals are shared metadata, never HDL sources or simulator selectors.
+  if (opts.command == "compile" || opts.command == "synth" || opts.command == "sim" || opts.command == "pass") {
+    for (auto it = opts.files.begin(); it != opts.files.end();) {
+      if (!ends_with(*it, ".json")) {
+        ++it;
+        continue;
+      }
+      opts.metadata_files.push_back(*it);
+      it = opts.files.erase(it);
+    }
+  }
 
   // Infer the source language from the file extensions when not given.
   if ((opts.command == "compile" || opts.command == "sim" || opts.command == "synth") && opts.language.empty()

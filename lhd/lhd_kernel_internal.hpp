@@ -172,7 +172,7 @@ struct Retired_set_option {
   std::string_view hint;
 };
 inline constexpr Retired_set_option kRetiredSetOptions[] = {
-    {        "pass.usyn","threads",                               "Use --set lhd.jobs=N for shared native synthesis admission."                                                      },
+    {        "pass.usyn","threads",                                                            "Use --set lhd.jobs=N for shared native synthesis admission."                         },
     {"inou.cgen.verilog",                   "verbose",                                                               "This option had no implemented effect; drop the setting."},
     {        "pass.lean",                 "normalize",                                                               "This option had no implemented effect; drop the setting."},
     {     "pass.semdiff",                       "alg",                                                               "This option had no implemented effect; drop the setting."},
@@ -213,69 +213,69 @@ inline constexpr Retired_set_option kRetiredSetOptions[] = {
     {     "pass.semdiff",                     "stats",                                                                    "Use --stats or --set lhd.stats=true for statistics."},
     {         "pass.lec",                     "stats",                                                                    "Use --stats or --set lhd.stats=true for statistics."},
     {         "pass.lec",
-     "allow_oversize",                                                                                                                          "The design-size gate was removed: lec and formal verify always attempt the design, and a run that outgrows memory reports "
-     "TIMEOUT-memory instead of crashing. Drop the setting."                                                                                                                                                         },
+     "allow_oversize",                                                              "The design-size gate was removed: lec and formal verify always attempt the design, and a run that outgrows memory reports "
+                                                              "TIMEOUT-memory instead of crashing. Drop the setting."                                    },
     {         "pass.abc",
-     "allow_oversize",                                                                                                                          "The design-size gate was removed: pass.abc always attempts the design; raise pass.abc.memory_budget_mb for a larger "
-     "per-color ceiling, and a run that outgrows memory reports TIMEOUT-memory instead of crashing. Drop the setting."                                                                                                                                                          },
+     "allow_oversize",    "The design-size gate was removed: pass.abc always attempts the design; raise pass.abc.memory_budget_mb for a larger "
+    "per-color ceiling, and a run that outgrows memory reports TIMEOUT-memory instead of crashing. Drop the setting."                                    },
     {         "pass.lec",
-     "strict",                                                                                                                          "formal.strict was removed. Every verdict now carries a modifier: TIMEOUT-time/-memory exit 0 with a warning (no proof "
-     "claimed), REFUTED-cex exits 10, and every other REFUTED-<why> (interface, unsupported, unchecked, vacuous, unexplained) "
-     "exits 7; a contradictory assume set or a check with nothing to compare is REFUTED-vacuous. Drop the setting."},
+     "strict",       "formal.strict was removed. Every verdict now carries a modifier: TIMEOUT-time/-memory exit 0 with a warning (no proof "
+       "claimed), REFUTED-cex exits 10, and every other REFUTED-<why> (interface, unsupported, unchecked, vacuous, unexplained) "
+       "exits 7; a contradictory assume set or a check with nothing to compare is REFUTED-vacuous. Drop the setting."                                            },
     {        "pass.usyn",
-     "recipes",       "pass.usyn runs one native recipe; tune logical_inputs, stack, branches and cut_inputs instead. Drop the setting."                                                          },
+     "recipes",       "pass.usyn runs one native recipe; tune logical_inputs, stack, branches and cut_inputs instead. Drop the setting."                                       },
     {        "pass.usyn",
-     "proof_seconds", "pass.usyn no longer proves equivalence; verify the mapped netlist with `lhd lec` as a separate step. Drop the setting."},
+     "proof_seconds", "pass.usyn no longer proves equivalence; verify the mapped netlist with `lhd lec` as a separate step. Drop the setting."                                 },
     {        "pass.usyn",
-     "proof_nodes", "pass.usyn no longer proves equivalence; verify the mapped netlist with `lhd lec` as a separate step. Drop the setting."                               },
-    {        "pass.usyn",           "delay_tolerance",                                     "pass.usyn no longer compares its result against an ABC baseline. Drop the setting."  },
+     "proof_nodes", "pass.usyn no longer proves equivalence; verify the mapped netlist with `lhd lec` as a separate step. Drop the setting."                                   },
+    {        "pass.usyn",           "delay_tolerance",                                     "pass.usyn no longer compares its result against an ABC baseline. Drop the setting."},
     {        "pass.usyn",
-     "max_depth",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
-     "the setting."                },
+     "max_depth",                                                                                                       "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+                                                                                                       "the setting."                                         },
     {        "pass.usyn",
-     "cuts",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
-     "the setting."                                                                                                                                                            },
+     "cuts",                                                                                                       "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+                                                                                                       "the setting."                                              },
     {        "pass.usyn",
-     "joint_limit",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
-     "the setting."                                                                                                                                                                   },
+     "joint_limit",                                                                                                       "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+                                                                                                       "the setting."                                       },
     {        "pass.usyn",
-     "joint_windows",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
-     "the setting."                                                                                                                                                             },
+     "joint_windows",                                                                                                       "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+                                                                                                       "the setting."                                     },
     {        "pass.usyn",
-     "image_inputs",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
-     "the setting."},
+     "image_inputs",                                                                                                       "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+                                                                                                       "the setting."                                      },
     {        "pass.usyn",
-     "reshape_limit",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
-     "the setting."},
+     "reshape_limit",                                                                                                       "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+                                                                                                       "the setting."                                     },
     {        "pass.usyn",
-     "encoding_limit",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
-     "the setting."                                                                                                                                                            },
+     "encoding_limit",                                                                                                       "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+                                                                                                       "the setting."                                    },
     {        "pass.usyn",
-     "encoding_code_limit",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
-     "the setting."                                                                                                                                                          },
+     "encoding_code_limit",                                                                                                       "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+                                                                                                       "the setting."                               },
     {        "pass.usyn",
-     "encoding_pair_limit",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
-     "the setting."                                                                                                                                                          },
+     "encoding_pair_limit",                                                                                                       "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+                                                                                                       "the setting."                               },
     {        "pass.usyn",
-     "symbolic_nodes",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
-     "the setting."},
+     "symbolic_nodes",                                                                                                       "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+                                                                                                       "the setting."                                    },
     {        "pass.usyn",
-     "cover_limit",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
-     "the setting."},
+     "cover_limit",                                                                                                       "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+                                                                                                       "the setting."                                       },
     {        "pass.usyn",
-     "divisor_limit",                                                                                                                          "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
-     "the setting."                                                                                                                                                            },
-    {        "pass.usyn",                     "split",                       "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."                                                                                                                                                         },
+     "divisor_limit",                                                                                                       "The unate search this bounded was removed; native USYN is bounded by work, endpoint_work, cut_inputs and window_nodes. Drop "
+                                                                                                       "the setting."                                     },
+    {        "pass.usyn",                     "split",                       "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."},
     {        "pass.usyn",
-     "split_exact",                       "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."                                                                                                                                                             },
+     "split_exact",                       "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."                                   },
     {        "pass.usyn",
-     "split_factor",                       "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."                                                                                                                                      },
+     "split_factor",                       "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."                                  },
     {        "pass.usyn",                 "split_cut",                       "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."},
     {        "pass.usyn",
-     "split_share",                       "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."},
+     "split_share",                       "The per-cone split mode was removed; pass.usyn always covers the whole region. Drop the setting."                                   },
     {        "pass.usyn",                 "reference",                                                             "The ABC `&if` LUT reference was removed. Drop the setting."},
     {        "pass.usyn",
-     "witness_bytes",              "pass.usyn no longer writes a witness archive; verify the mapped netlist with `lhd lec`. Drop the setting."},
+     "witness_bytes",              "pass.usyn no longer writes a witness archive; verify the mapped netlist with `lhd lec`. Drop the setting."                                 },
 };
 inline std::string_view retired_set_hint(std::string_view method, std::string_view flag) {
   if ((method == "pass.abc" || method == "pass.usyn") && flag == "satopt") {
@@ -424,15 +424,15 @@ void              check_known_set_passes(const Options& opts);
 // names right after validation, and queue one `deprecated-option` warning
 // each in opts.deprecated_sets. synth emits them with emit_deprecated_sets
 // once its last sink-clearing setup_diag (the compile front end) is done.
-void                  canonicalize_synth_sets(Options& opts);
-void                  emit_deprecated_sets(const Options& opts);
+void              canonicalize_synth_sets(Options& opts);
+void              emit_deprecated_sets(const Options& opts);
 // The `synth.*` command namespace, readable from any command: `synth.liberty`
 // is THE one Liberty spelling (`lhd synth`, `lhd pass abc`, `lhd pass
 // opentimer` all resolve through resolve_liberty), so no two Liberty readers
 // in one flow can end up on different files.
 std::string       synth_set(const Options& opts, std::string_view flag, std::string_view def);
 std::string       resolve_liberty(const Options& opts);
-std::optional<double> sdc_min_clock_period_ps(const std::string& sdc_path, const std::string& liberty_path);
+std::optional<double>              sdc_min_clock_period_ps(const std::string& sdc_path, const std::string& liberty_path);
 // The SDC time and load units: the Liberty's first `time_unit` (ps when
 // absent, as sdc_min_clock_period_ps reads it) and `capacitive_load_unit`
 // (fF when absent).
@@ -454,32 +454,32 @@ std::vector<Sdc_clock>   sdc_clocks(const std::string& sdc_path);
 std::optional<Sdc_clock> sdc_single_clock(const std::string& sdc_path);
 // The provisional domino profile (pass.usyn.physical=domino_provisional, see
 // pass/domplace): whether the merged pass.usyn labels request it, and its
-// INTERNAL labels -- the comma-joined LEFs, synth.place.row_access, and, when
+// INTERNAL labels -- the comma-joined LEFs, positional row-access metadata, and, when
 // pass.usyn.domino_clock is unset, the port of the SDC's one clock.
-bool                  domino_profile(const Eprp_var::Eprp_dict& usyn_labels);
-void                  domino_profile_labels(const Options& opts, const std::string& lefs, Eprp_var::Eprp_dict& labels);
-bool                  lnastfmt_enabled(const Options& opts);
+bool                     domino_profile(const Eprp_var::Eprp_dict& usyn_labels);
+void                     domino_profile_labels(const Options& opts, const std::string& lefs, Eprp_var::Eprp_dict& labels);
+bool                     lnastfmt_enabled(const Options& opts);
 // `compile.verify_frozen`: freeze every legalized def and re-check it after the
 // emits (pass/legalize). A full structural digest per graph twice, so on by
 // default only in debug builds (same policy as lnast_fmt).
-bool                  verify_frozen_enabled(const Options& opts);
-bool                  compile_unroll_requested(const Options& opts);  // compile.unroll (default false)
-std::optional<bool>   satopt_setting(const Options& opts);            // the explicit pass.satopt, if any
+bool                     verify_frozen_enabled(const Options& opts);
+bool                     compile_unroll_requested(const Options& opts);  // compile.unroll (default false)
+std::optional<bool>      satopt_setting(const Options& opts);            // the explicit pass.satopt, if any
 // Options for materializing a --lib model library (lg: -> cgen Verilog): no
 // --lib recursion, no top selection (a cell library holds many unrelated
 // tops), and satopt pinned off -- an explicit pass.satopt=true targets the
 // elaborated design, never the model library.
-Options               library_model_opts(const Options& opts);
+Options                  library_model_opts(const Options& opts);
 // satopt in the compile graph pipeline: explicit setting, otherwise disabled.
-bool                  satopt_during_compile(const Options& opts);
-bool                  compile_cache_enabled(const Options& opts);
-void                  apply_log_settings(const Options& opts);
-void                  apply_lhd_settings(Options& opts);
+bool                     satopt_during_compile(const Options& opts);
+bool                     compile_cache_enabled(const Options& opts);
+void                     apply_log_settings(const Options& opts);
+void                     apply_lhd_settings(Options& opts);
 std::vector<std::pair<std::string, std::string>> compile_graph_passes(const Options& opts);
 // Per step of `passes` (compile_graph_passes): true when a pass.bitwidth step
 // precedes it. pass.aegraph gets the INTERNAL after_bitwidth label exactly there,
 // so its low-lane narrowing stays off once bitwidth has run.
-inline std::vector<bool> follows_bitwidth(const std::vector<std::pair<std::string, std::string>>& passes) {
+inline std::vector<bool>                         follows_bitwidth(const std::vector<std::pair<std::string, std::string>>& passes) {
   std::vector<bool> after;
   bool              seen = false;
   for (const auto& [set_name, method] : passes) {
@@ -500,8 +500,8 @@ Cprop_engine             resolve_cprop_engine(const Options& opts);
 // The EPRP methods that run in compile cprop slot `slot` (0 = before
 // pass.legalize, 1 = after enableopt), in order.
 std::vector<std::string> cprop_slot_methods(const Cprop_engine& choice, int slot);
-// `compile.aegraph.cost` (synth|sim|auto, default auto: sim under `lhd sim`, synth elsewhere) resolved to the profile pass.aegraph runs:
-// `auto` is `sim` under `lhd sim` and `synth` everywhere else; an explicit synth|sim overrides it.
+// `compile.aegraph.cost` (synth|sim|auto, default auto: sim under `lhd sim`, synth elsewhere) resolved to the profile pass.aegraph
+// runs: `auto` is `sim` under `lhd sim` and `synth` everywhere else; an explicit synth|sim overrides it.
 std::string              resolve_aegraph_cost(const Options& opts);
 // The engine identity the compile-cache descriptor names ("classic" or
 // "aegraph+classic:first:cost=sim", ...): what the resolved schedule actually runs, including the resolved

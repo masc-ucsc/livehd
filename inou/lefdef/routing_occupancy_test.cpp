@@ -9,6 +9,194 @@
 #include "routing_geometry.hpp"
 
 namespace livehd::physical {
+TEST(RoutingOccupancy, BitmapMatchesExactQueriesAcrossUpdatesOwnersAndBoundaries) {
+  Routing_occupancy                  exact(64);
+  std::mt19937                       random(7249);
+  std::uniform_int_distribution<int> coordinate(-2000, 3000), extent(1, 110);
+  for (int i = 0; i < 200; ++i) {
+    const int x = coordinate(random), y = coordinate(random);
+    exact.insert({
+        {i % 2 ? "M2" : "M3", {double(x), double(y), double(x + extent(random)), double(y + extent(random))}},
+        i % 3 ? "signal" : "other"
+    });
+  }
+  exact.insert_run(
+      {
+          {"M2", {-1500, -500, -1482, -482}},
+          "rail"
+  },
+      36,
+      0,
+      100);
+  auto bitmap = exact;
+  bitmap.enable_bitmap({-1000, -1000, 2000, 2000}, 17, {"M3"});
+  EXPECT_GT(bitmap.bitmap_bytes(), 0U);
+  const auto compare = [&] {
+    for (int i = 0; i < 500; ++i) {
+      const int  x = coordinate(random), y = coordinate(random);
+      const Rect rect{double(x), double(y), double(x + extent(random)), double(y + extent(random))};
+      for (const auto& layer : {"M2", "M3", "new_layer"}) {
+        for (const auto& owner : {"", "signal", "other"}) {
+          EXPECT_EQ(bitmap.query(layer, rect, i % 49, owner), exact.query(layer, rect, i % 49, owner));
+        }
+      }
+    }
+  };
+  compare();
+  for (const auto& layer : {"M2", "M3", "new_layer"}) {
+    Occupied_shape added{
+        {layer, {63 * 17, 0, 65 * 17, 17}},
+        "signal"
+    };
+    exact.insert(added);
+    bitmap.insert(added);
+    EXPECT_EQ(bitmap.query(layer, {64 * 17, 17, 65 * 17, 18}, 0), exact.query(layer, {64 * 17, 17, 65 * 17, 18}, 0));
+  }
+  compare();
+  bitmap.enable_bitmap({-2500, -2500, 4000, 4000}, 36, {"M3"});
+  compare();
+}
+TEST(RoutingOccupancy, BitmapPreservesBaseOverlaysCopiesAndConservativeFallback) {
+  auto base = std::make_shared<Routing_occupancy>(64);
+  base->insert({
+      {"M2", {40, 0, 60, 20}},
+      "base"
+  });
+  base->enable_bitmap({0, 0, 100, 100}, 10);
+  Routing_occupancy overlay(base);
+  overlay.insert({
+      {"M2", {0, 0, 20, 20}},
+      "local"
+  });
+  overlay.enable_bitmap({0, 0, 100, 100}, 10);
+  EXPECT_EQ(overlay.query("M2", {40, 0, 60, 20}, 0), std::vector<size_t>{0});
+  auto copy = overlay;
+  copy.insert({
+      {"M2", {80, 80, 100, 100}},
+      "new"
+  });
+  EXPECT_TRUE(overlay.query("M2", {80, 80, 100, 100}, 0).empty());
+  EXPECT_EQ(copy.query("M2", {80, 80, 100, 100}, 0), std::vector<size_t>{2});
+  Routing_occupancy moved(std::move(copy));
+  EXPECT_EQ(moved.query("M2", {80, 80, 100, 100}, 0), std::vector<size_t>{2});
+  const auto before = moved.query("M2", {0, 0, 100, 100}, 0);
+  moved.enable_bitmap({-2147483647, -2147483647, 2147483647, 2147483647}, 1);
+  EXPECT_EQ(moved.bitmap_bytes(), 0U);
+  EXPECT_EQ(moved.query("M2", {0, 0, 100, 100}, 0), before);
+  EXPECT_THROW(moved.enable_bitmap({0, 0, 100, 100}, 0), std::invalid_argument);
+}
+
+TEST(RoutingOccupancy, IntervalRangesCrossCoordinateWidthsAndReachLimits) {
+  for (bool vertical : {false, true}) {
+    Routing_occupancy exact(100000), compressed(100000);
+    const auto rect = [vertical](double a, double b, double c, double d) { return vertical ? Rect{b, a, d, c} : Rect{a, b, c, d}; };
+    compressed.enable_bitmap(rect(-2147483647., 0, 2147483647., 1),
+                             1,
+                             vertical ? std::set<std::string>{"M2"} : std::set<std::string>{});
+    for (const auto& r : {rect(-2147483647., 0, -2147418112., 1), rect(2147483646., 0, 2147483647., 1)}) {
+      exact.insert({
+          {"M2", r},
+          "owner"
+      });
+      compressed.insert({
+          {"M2", r},
+          "owner"
+      });
+    }
+    EXPECT_GT(compressed.bitmap_bytes(), 0U);
+    for (double x : {-2147483647., -2147418113., -2147418112., -2147418111., 0., 2147483645., 2147483646.}) {
+      for (int clearance : {0, 1}) {
+        EXPECT_EQ(exact.query("M2", rect(x, 0, x + 1, 1), clearance), compressed.query("M2", rect(x, 0, x + 1, 1), clearance));
+      }
+    }
+  }
+}
+TEST(RoutingOccupancy, IntervalSparseDenseAndRunStripsMatchExactQueries) {
+  Routing_occupancy exact(64);
+  // Separated pairs favor bitset storage; sparse pairs favor array storage;
+  // long solid intervals favor run storage. Exercise both orientations.
+  for (int i = 0; i < 5000; ++i) {
+    exact.insert({
+        {"M2", {double(i * 3), 0, double(i * 3 + 1), 1}},
+        "dense"
+    });
+    exact.insert({
+        {"M3", {0, double(i * 3), 1, double(i * 3 + 1)}},
+        "dense"
+    });
+  }
+  for (int i = 0; i < 20; ++i) {
+    exact.insert({
+        {"M2", {double(65530 + i * 3), 10, double(65531 + i * 3), 11}},
+        "sparse"
+    });
+    exact.insert({
+        {"M3", {10, double(65530 + i * 3), 11, double(65531 + i * 3)}},
+        "sparse"
+    });
+  }
+  exact.insert({
+      {"M2", {65000, 20, 66000, 21}},
+      "run"
+  });
+  exact.insert({
+      {"M3", {20, 65000, 21, 66000}},
+      "run"
+  });
+  auto indexed = exact;
+  indexed.enable_bitmap({0, 0, 100000, 100000}, 1, {"M3"});
+  for (int row : {0, 10, 20}) {
+    for (int x : {0, 1, 2, 15, 14999, 15000, 64999, 65530, 65531, 65532, 65535, 65536, 65999, 66000, 66001}) {
+      for (int width : {1, 3, 64}) {
+        const Rect horizontal{double(x), double(row), double(x + width), double(row + 1)};
+        const Rect vertical{horizontal.yl, horizontal.xl, horizontal.yh, horizontal.xh};
+        EXPECT_EQ(indexed.query("M2", horizontal, 0), exact.query("M2", horizontal, 0));
+        EXPECT_EQ(indexed.query("M3", vertical, 0), exact.query("M3", vertical, 0));
+      }
+    }
+  }
+}
+TEST(RoutingOccupancy, ImportedIndexRetainsIntervalsAcrossCommitsAndNewLayers) {
+  Technology tech;
+  tech.layers["M2"].direction = "HORIZONTAL";
+  tech.layers["M3"].direction = "VERTICAL";
+  Floorplan fp;
+  fp.dbu = 1000;
+  fp.die = {0, 0, 10000, 10000};
+  fp.tracks.push_back({"Y", "M2", 0, 100, 100});
+  Terminal pin;
+  pin.status = Status::PLACED;
+  pin.net    = "original";
+  pin.shapes.push_back({
+      "M2",
+      {0, 0, 100, 100}
+  });
+  fp.terminals.push_back(pin);
+  auto indexed = routing_occupancy(tech, fp, 1000);
+  auto exact   = indexed;
+  exact.disable_bitmap();
+  const auto bytes = indexed.bitmap_bytes();
+  EXPECT_GT(bytes, 0U);
+  const std::vector<Occupied_shape> commit = {
+      {{"M2", {500, 500, 1000, 600}}, "new", true},
+      {{"M3", {500, 600, 600, 2000}}, "new", true}
+  };
+  indexed.insert_many(commit);
+  exact.insert_many(commit);
+  EXPECT_GT(indexed.bitmap_bytes(), bytes);
+  for (const auto& layer : {"M2", "M3"}) {
+    EXPECT_EQ(indexed.query(layer, {500, 500, 600, 600}, 100), exact.query(layer, {500, 500, 600, 600}, 100));
+    EXPECT_EQ(indexed.query(layer, {500, 500, 600, 600}, 100, "new"), exact.query(layer, {500, 500, 600, 600}, 100, "new"));
+  }
+  auto moved = std::move(indexed);
+  indexed.insert({
+      {"M2", {0, 0, 100, 100}},
+      "reused"
+  });
+  EXPECT_EQ(indexed.bitmap_bytes(), 0U);
+  EXPECT_EQ(moved.query("M3", {500, 600, 600, 2000}, 0), (std::vector<size_t>{2}));
+}
+
 TEST(RoutingOccupancy, RouteProvenanceSurvivesRunsCopiesAndOverlays) {
   Routing_occupancy index(64);
   const auto        pin  = index.insert({

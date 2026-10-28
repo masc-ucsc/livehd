@@ -1748,9 +1748,9 @@ void sim_command(Options& opts, Result& res) {
   // under <simroot>/ckpt/<test>/ckp<cycle>/ (regs.json + *.hex + tb.json +
   // meta.json). Default ON; a short run (< the min-secs floor) writes none. The
   // settings are forwarded to the driver, which owns the fork cadence + prune.
-  bool        ckpt_on          = true;
-  bool        ckpt_explicit    = false;  // the user configured checkpoints (sim.tune: auto does not profile then)
-  bool        init_zero        = false;
+  bool        ckpt_on       = true;
+  bool        ckpt_explicit = false;  // the user configured checkpoints (sim.tune: auto does not profile then)
+  bool        init_zero     = false;
   std::string warn_undefined;  // empty: the driver's default (on)
   bool        unknown_zero     = false;
   bool        unknown_zero_set = false;  // an explicit sim.unknown_zero is always followed (sim.tune ruling 3)
@@ -1813,7 +1813,7 @@ void sim_command(Options& opts, Result& res) {
                     "run the query batch on its own; a VCD or a restart is a separate invocation"};
   }
 
-  // ---- sim.tune: resolve the tune vector (explicit --set > sim.tune.file > the
+  // ---- sim.tune: resolve the tune vector (explicit --set > positional simulation tuning > the
   // workdir's tuned decision > default) into opts.sim_tune BEFORE the compile,
   // ingest pending profiles, judge or apply a trial (lhd_sim_tune_session.cpp).
   // Its destructor finishes on every return path below.
@@ -1862,9 +1862,9 @@ void sim_command(Options& opts, Result& res) {
       fs::remove(dir / std::format("{}.cpp", prp_sim::kDriverBasename), ec);
       fs::remove(dir / std::format("{}.bin", prp_sim::kDriverBasename), ec);
       std::ofstream out(marker, std::ios::trunc);
-      const bool from_res = res.status != "pass";
-      const auto cls      = from_res ? res.error_class : thrown_cls;
-      const auto msg      = from_res ? res.error_message : thrown_msg;
+      const bool    from_res = res.status != "pass";
+      const auto    cls      = from_res ? res.error_class : thrown_cls;
+      const auto    msg      = from_res ? res.error_message : thrown_msg;
       out << (cls.empty() ? "internal" : cls) << '\n'
           << (msg.empty() ? std::string{"the setup did not complete (see its diagnostics)"} : msg) << '\n';
     }
@@ -2170,23 +2170,23 @@ void sim_command(Options& opts, Result& res) {
   // ABSOLUTE -I: `--workdir` is routinely relative, and the ninja build runs
   // with its cwd set to the sim dir (so its .ninja_deps/.ninja_log land there),
   // where a relative `-Iw/sim` would resolve to nothing.
-  const std::string simdir_abs = fs::absolute(simdir).string();
-  std::string       cflags     = std::format("-std=c++23 -DNDEBUG -Os -pthread -I{} -I{} -I{}",
-                                             shell_quote(simdir_abs),
-                                             shell_quote(hlop_inc),
-                                             shell_quote(iassert_inc));
+  const std::string simdir_abs  = fs::absolute(simdir).string();
+  std::string       cflags      = std::format("-std=c++23 -DNDEBUG -Os -pthread -I{} -I{} -I{}",
+                                              shell_quote(simdir_abs),
+                                              shell_quote(hlop_inc),
+                                              shell_quote(iassert_inc));
   // --set lhd.jobs=N bounds the fan-out (0/unset = one per hardware thread).
   // Pin it to make a build-time measurement reproducible, or to leave the
   // machine usable while a big design builds. Also becomes `ninja -j`.
   // Under `bazel test` (TEST_SRCDIR set) the default is 2: bazel already runs
   // tests in parallel, and a per-test fan-out of every hardware thread
   // oversubscribes the machine several times over.
-  int jobs = static_cast<int>(opts.jobs);
+  int               jobs        = static_cast<int>(opts.jobs);
   // The load-independent job count: what the PCH decision below compares
   // against. `jobs` follows the machine's CURRENT load, and the PCH choice lands
   // in every TU's stamped command line, so deciding on the load would rebuild
   // every object whenever the host was busier than the last run.
-  int stable_jobs = jobs > 0 ? jobs : static_cast<int>(livehd::sim::available_cpus());
+  int               stable_jobs = jobs > 0 ? jobs : static_cast<int>(livehd::sim::available_cpus());
   if (jobs <= 0) {
     jobs = static_cast<int>(livehd::sim::available_compile_jobs());
   }
@@ -2329,8 +2329,8 @@ void sim_command(Options& opts, Result& res) {
         unity_objs.push_back(std::format("{}/unity-{}.o", objdir, b));
       }
       if (!unity_tus.empty()) {
-        std::vector<std::string>              kept_tus;
-        std::vector<std::string>              kept_objs;
+        std::vector<std::string> kept_tus;
+        std::vector<std::string> kept_objs;
         for (size_t i = 0; i < tus.size(); ++i) {
           if (!batched[i]) {
             kept_tus.push_back(std::move(tus[i]));
@@ -2341,8 +2341,8 @@ void sim_command(Options& opts, Result& res) {
           kept_tus.push_back(std::move(unity_tus[b]));
           kept_objs.push_back(std::move(unity_objs[b]));
         }
-        tus          = std::move(kept_tus);
-        objs         = std::move(kept_objs);
+        tus  = std::move(kept_tus);
+        objs = std::move(kept_objs);
       }
     }
     // Batches a previous run wrote and this one does not reference (the design
@@ -2473,7 +2473,7 @@ void sim_command(Options& opts, Result& res) {
     // jobs, 6.4 -> 7.0 s. `true` forces it, `false` disables it.
     const bool pch_forced = pch_set == "true" || pch_set == "1" || pch_set == "on";
     bool       pch_on     = pch_set != "false" && pch_set != "0" && pch_set != "off"
-                  && (pch_forced || tus.size() >= 2 * static_cast<size_t>(std::max(stable_jobs, 1)));
+                            && (pch_forced || tus.size() >= 2 * static_cast<size_t>(std::max(stable_jobs, 1)));
     if (pch_on) {
       int        vrc     = 0;
       const auto version = capture(std::format("{} --version 2>&1", shell_quote(cxx)), vrc);
@@ -2484,10 +2484,11 @@ void sim_command(Options& opts, Result& res) {
     if (pch_on) {
       ensure_dir(pch_dir);
       // Write-if-different: its mtime keys every PCH and so every TU.
-      const std::string prelude_hdr  = pch_dir + "/prelude.hpp";
-      const std::string prelude_text = "// Generated by `lhd sim`: precompiled prelude of every generated TU.\n#pragma once\n"
-                                       "#include <array>\n#include <cstdint>\n#include <map>\n#include <string>\n"
-                                       "#include <vector>\n#include \"slop.hpp\"\n#include \"memory.hpp\"\n";
+      const std::string prelude_hdr = pch_dir + "/prelude.hpp";
+      const std::string prelude_text
+          = "// Generated by `lhd sim`: precompiled prelude of every generated TU.\n#pragma once\n"
+            "#include <array>\n#include <cstdint>\n#include <map>\n#include <string>\n"
+            "#include <vector>\n#include \"slop.hpp\"\n#include \"memory.hpp\"\n";
       std::string old;
       if (std::ifstream in(prelude_hdr); in) {
         old.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
@@ -2516,7 +2517,7 @@ void sim_command(Options& opts, Result& res) {
               path = inc.lexically_normal().string();
               break;  // a unity batch: follow its first member
             }
-            const fs::path hdr = fs::path(simdir) / inc.filename();
+            const fs::path  hdr = fs::path(simdir) / inc.filename();
             std::error_code ec;
             return fs::exists(hdr, ec) && inc.lexically_normal().parent_path() == fs::path(simdir).lexically_normal()
                        ? hdr.string()
@@ -2541,7 +2542,9 @@ void sim_command(Options& opts, Result& res) {
         std::string base;  // chained-on PCH ("" for the prelude)
         bool        ok = false;
       };
-      std::vector<Pch_unit> units{{prelude_hdr, pch_dir + "/prelude.pch", "", false}};
+      std::vector<Pch_unit> units{
+          {prelude_hdr, pch_dir + "/prelude.pch", "", false}
+      };
       std::map<std::string, size_t> unit_of;
       for (const auto& [hdr, n] : users) {
         if (n >= 2) {
@@ -2579,12 +2582,11 @@ void sim_command(Options& opts, Result& res) {
       build_unit(units[0], "");
       if (units[0].ok) {
         std::atomic<size_t> cursor{1};
-        livehd::run_workers(static_cast<size_t>(std::clamp<size_t>(jobs, 1, std::max<size_t>(1, units.size() - 1))),
-                            [&](size_t) {
-                              for (size_t u = cursor.fetch_add(1); u < units.size(); u = cursor.fetch_add(1)) {
-                                build_unit(units[u], units[0].pch);
-                              }
-                            });
+        livehd::run_workers(static_cast<size_t>(std::clamp<size_t>(jobs, 1, std::max<size_t>(1, units.size() - 1))), [&](size_t) {
+          for (size_t u = cursor.fetch_add(1); u < units.size(); u = cursor.fetch_add(1)) {
+            build_unit(units[u], units[0].pch);
+          }
+        });
         for (size_t i = 0; i < tus.size(); ++i) {
           if (tus[i].ends_with("/vcd_writer.cpp")) {
             continue;
@@ -2600,8 +2602,10 @@ void sim_command(Options& opts, Result& res) {
       const auto name = de.path().filename().string();
       bool       used = name == "prelude.hpp";
       for (const auto& p : tu_pch) {
-        used = used || (!p.empty() && (name == fs::path(p).filename().string() || name == fs::path(p).filename().string() + ".d"
-                                       || name == fs::path(p).filename().string() + ".cmd"));
+        used = used
+               || (!p.empty()
+                   && (name == fs::path(p).filename().string() || name == fs::path(p).filename().string() + ".d"
+                       || name == fs::path(p).filename().string() + ".cmd"));
       }
       if (!used) {
         std::error_code rm_ec;
@@ -2611,9 +2615,7 @@ void sim_command(Options& opts, Result& res) {
   }
   // No leading space: ninja strips it from a variable's value (the `cc` rule
   // spells `$cflags $pchflags`); the built-in command adds its own.
-  const auto pch_flag = [&](size_t i) {
-    return tu_pch[i].empty() ? std::string{} : "-include-pch " + shell_quote(tu_pch[i]);
-  };
+  const auto pch_flag = [&](size_t i) { return tu_pch[i].empty() ? std::string{} : "-include-pch " + shell_quote(tu_pch[i]); };
 
   // build.ninja, ALWAYS written (even when the build below does not use ninja).
   // It is the escape hatch that works: `ninja -C <simdir>` reproduces exactly
@@ -2696,16 +2698,16 @@ void sim_command(Options& opts, Result& res) {
        << "  rspfile_content = $in_newline\n"
        << "  description = LINK $out\n\n";
     for (size_t i = 0; i < tus.size(); ++i) {
-        nf << "build " << nesc(objs[i]) << ": cc " << nesc(tus[i]);
-        if (!tu_pch[i].empty()) {
-          // lhd builds the PCH (stage 0 above); ninja only orders on it.
-          std::string flag;
-          for (char c : pch_flag(i)) {
-            flag += (c == '$') ? "$$" : std::string(1, c);
-          }
-          nf << " | " << nesc(tu_pch[i]) << "\n  pchflags = " << flag;
+      nf << "build " << nesc(objs[i]) << ": cc " << nesc(tus[i]);
+      if (!tu_pch[i].empty()) {
+        // lhd builds the PCH (stage 0 above); ninja only orders on it.
+        std::string flag;
+        for (char c : pch_flag(i)) {
+          flag += (c == '$') ? "$$" : std::string(1, c);
         }
-        nf << "\n";
+        nf << " | " << nesc(tu_pch[i]) << "\n  pchflags = " << flag;
+      }
+      nf << "\n";
     }
     nf << "\nbuild " << nesc(exe) << ": link";
     for (const auto& o : objs) {
@@ -3171,8 +3173,8 @@ void sim_command(Options& opts, Result& res) {
                                     signal_description(killed_by),
                                     n_run,
                                     killed_by == SIGILL ? "; an illegal instruction in generated code is a simulator bug, compare "
-                                                       "with --set sim.tune.backend=slop"
-                                                     : "");
+                                                          "with --set sim.tune.backend=slop"
+                                                        : "");
     res.exit_code     = exit_code_for(res.error_class);
   } else {
     // rc == 1 (a test's assert fired) or rc < 0 (the driver could not run).

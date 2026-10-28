@@ -1925,7 +1925,17 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
         // bypasses the selected engine and can reshape a false-cycle predicate
         // before the legalizer has discharged its hold arm.
         absl::flat_hash_set<const hhds::Graph*> specialized_bodies;
-        (void)livehd::specialize::specialize_constants(design, {.max_versions = 64, .modified = &specialized_bodies});
+        // compile.unknown_zero reads an undriven or unconnected bit as 0 (Yosys `setundef -zero`); do it BEFORE the
+        // specialization so a tied-off or empty module's constants cross the instance boundaries, and let compile.sweep
+        // prove the registers behind those constants constant per definition (no flatten, content-keyed copies).
+        if (set_on("compile.unknown_zero")) {
+          for (const auto& graph : design) {
+            (void)livehd::sweep::refine_unknown(*graph);
+          }
+        }
+        (void)livehd::specialize::specialize_constants(
+            design,
+            {.max_versions = 64, .sweep_state = set_on("compile.sweep"), .modified = &specialized_bodies});
         for (const auto* graph : specialized_bodies) {
           restored.erase(std::string{graph->get_name()});
         }

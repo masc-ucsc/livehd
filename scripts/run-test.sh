@@ -33,32 +33,15 @@ else
   exit 8
 fi
 
-CXX=${CXX} CC=${CC} bazel test -c ${LIVEHD_BUILD_MODE} //...
-if [ $? -ne 0 ]; then
-  echo "run-test.sh: short test failed"
-  exit 1
-fi
-
-if [ "$RUN_TYPE" == "long" ]; then
-  # Not manual test
-  TST="long1,long2,long3,long4,long5,long6,long7,long8"
-elif [ "$RUN_TYPE" == "long1" ]; then
-  # Not manual test
-  TST="long1"
-elif [ "$RUN_TYPE" == "long2" ]; then
-  # Not manual test
-  TST="long2"
-elif [ "$RUN_TYPE" != "" ]; then
+# Legacy long selections now run the same complete suite.
+if [[ -n "$RUN_TYPE" && "$RUN_TYPE" != "long" && "$RUN_TYPE" != "long1" && "$RUN_TYPE" != "long2" ]]; then
   echo "run-test.sh: unknown ${RUN_TYPE} run option"
   exit 1
-else
-  echo "run-test.sh: no need to do long test"
-  exit 0
 fi
 
-bazel test -c ${LIVEHD_BUILD_MODE} --test_tag_filters ${TST} //...
+CXX=${CXX} CC=${CC} bazel test -c ${LIVEHD_BUILD_MODE} //...
 if [ $? -ne 0 ]; then
-  echo "run-test.sh: long test failed"
+  echo "run-test.sh: test failed"
   exit 1
 fi
 

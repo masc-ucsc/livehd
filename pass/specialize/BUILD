@@ -32,6 +32,7 @@ cc_library(
         "//pass/aegraph:pass_aegraph",  # livehd::fold_body: classic | aegraph | aegraph+classic
         "//pass/bitwidth:pass_bitwidth",
         "//pass/cprop:pass_cprop",
+        "//pass/sweep",
         "@hhds//hhds:graph",
         "@hlop//hlop",
     ],

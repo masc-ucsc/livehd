@@ -71,6 +71,9 @@ std::string synth_invocation_context(const Options& opts, const Result& res, con
       inputs.insert(std::move(path));
     }
   };
+  for (const auto& path : opts.metadata_files) {
+    input(path);
+  }
   for (const auto& path : res.inputs) {
     input(path);
   }
@@ -85,7 +88,7 @@ std::string synth_invocation_context(const Options& opts, const Result& res, con
   input(opts.config);
   // The domino profile's abstracts are generated from the LEFs and the
   // row-access convention file (pass.usyn.lef / row_access, kernel-plumbed).
-  if (auto it = labels.find("row_access"); it != labels.end() && it->second != "default") {
+  if (auto it = labels.find("row_access"); it != labels.end() && it->second != "default" && !it->second.starts_with("{")) {
     input(it->second);
   }
   for (const auto key : {"library", "timing_files", "lef"}) {

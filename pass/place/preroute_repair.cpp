@@ -366,14 +366,14 @@ Preroute_stage_result preroute_stage(const Result& original, const physical::Tec
         margin = -std::numeric_limits<double>::infinity();
         break;
       }
-      const auto            cached = initial_timing.pins.find(node.pin);
+      const auto            cached = initial_timing.find_label(node.pin);
       std::optional<double> setup, hold;
-      if (use_feedback && cached != initial_timing.pins.end()) {
-        if (cached->second.slack) {
-          setup = *cached->second.slack * initial_timing.time_unit_ps;
+      if (use_feedback && cached != nullptr) {
+        if (cached->slack) {
+          setup = *cached->slack * initial_timing.time_unit_ps;
         }
-        if (cached->second.hold_slack) {
-          hold = *cached->second.hold_slack * initial_timing.time_unit_ps;
+        if (cached->hold_slack) {
+          hold = *cached->hold_slack * initial_timing.time_unit_ps;
         }
       } else {
         const auto pin = timer.pin(node.pin);
@@ -501,8 +501,8 @@ Preroute_stage_result preroute_stage(const Result& original, const physical::Tec
         }
         const auto pin   = timer.pin(node.pin);
         auto&      value = feedback.pins[node.pin];
-        if (const auto prior = initial_timing.pins.find(node.pin); prior != initial_timing.pins.end()) {
-          value = prior->second;
+        if (const auto prior = initial_timing.find_label(node.pin); prior != nullptr) {
+          value = *prior;
         }
         if (pin.required) {
           value.required = *pin.required / feedback.time_unit_ps;

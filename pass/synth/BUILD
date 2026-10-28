@@ -49,6 +49,7 @@ genrule(
     srcs = [
         ":synth_srcs",
         "//core:debug_env_srcs",
+        "//core:metadata_srcs",
         "//graph",
         "//core:bus_name_srcs",  # per-bit register names (x[i])
         "//ware:cgen_memory_rtl",
@@ -137,6 +138,7 @@ cc_library(
         "//pass/partition:pass_partition",
         "//pass/semdiff",  # region cache: structural_identical
         "//pass/specialize",
+        "//pass/sweep",
         "@abseil-cpp//absl/container:btree",
         "@abseil-cpp//absl/container:flat_hash_map",
         "@abseil-cpp//absl/container:flat_hash_set",
@@ -395,4 +397,12 @@ cc_test(
         "@googletest//:gtest_main",
         "@hhds//hhds:graph",
     ],
+)
+
+cc_test(
+    name = "tune_metadata_smoke",
+    size = "small",
+    srcs = ["tune_metadata_smoke.cpp"],
+    copts = COPTS,
+    deps = [":synth", "@googletest//:gtest_main"],
 )

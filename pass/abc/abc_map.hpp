@@ -64,7 +64,7 @@ struct Map_options : synth::Driver_options {
   // drove no load, a PI came from an ideal driver, and `buffer -N` never treed
   // a PI's fanout -- so the driver of a net crossing into five regions was
   // sized for fanout ONE and every sink region assumed an infinitely strong
-  // source. With `boundary=true` (default) each region is sized against what
+  // source. With `boundary=true` (opt-in) each region is sized against what
   // lies beyond the partition: first a static estimate from the source graph
   // (consumer pins per output bit, driver class per input), then -- once every
   // region is mapped or restored -- the exact environment read off the
@@ -75,7 +75,7 @@ struct Map_options : synth::Driver_options {
   // additionally needs a `delay` target (there is no budget to size to
   // without one). A crossing net is buffered on BOTH sides: the sink side by
   // each region (boundary_buffer), the driver side by its real load.
-  bool        boundary        = true;
+  bool        boundary        = false;
   // Tree every region input's fanout inside the region when it exceeds
   // `max_fanout` -- the design's primary inputs and the sink side of crossing
   // nets alike, the same fanout rule internal nets follow -- by declaring

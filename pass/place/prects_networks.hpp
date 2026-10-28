@@ -36,7 +36,8 @@ struct Prects_networks {
 };
 Prects_networks  prects_networks(const physical::Technology&, const physical::Floorplan&, const Prects_library&,
                                  const timing::Feedback& = {});
-// A private optimization view. The original STA result and exported connectivity
-// remain intact, including recovery/removal checks in downstream tools.
-timing::Feedback prects_data_timing(const timing::Feedback&, const Prects_networks&);
+// A private optimization view. Lvalue inputs retain the original STA result;
+// temporary feedback transfers ownership instead of copying every pin record.
+// Exported connectivity and downstream recovery/removal checks stay intact.
+timing::Feedback prects_data_timing(timing::Feedback, const Prects_networks&);
 }  // namespace livehd::placement

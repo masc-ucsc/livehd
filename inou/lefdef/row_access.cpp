@@ -50,9 +50,13 @@ Row_access_convention read_row_access(const std::string& path) {
   if (!file) {
     throw std::invalid_argument(where + ": cannot open");
   }
-  const std::string   text{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+  const std::string text{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+  return parse_row_access(text);
+}
+Row_access_convention parse_row_access(std::string_view text) {
+  const std::string   where = "row access metadata";
   rapidjson::Document doc;
-  doc.Parse(text.c_str(), text.size());
+  doc.Parse(text.data(), text.size());
   if (doc.HasParseError() || !doc.IsObject()) {
     throw std::invalid_argument(where + ": expected a JSON object");
   }
@@ -93,14 +97,17 @@ Row_access_convention read_row_access(const std::string& path) {
   return convention;
 }
 Row_access_convention resolve_row_access(std::string_view option) {
-  return option.empty() || option == "default" ? Row_access_convention{} : read_row_access(std::string(option));
+  if (option.empty() || option == "default") {
+    return {};
+  }
+  return option.starts_with("{") ? parse_row_access(option) : read_row_access(std::string(option));
 }
 size_t placed_row_of_half(size_t start_row, size_t rows, size_t half, Orientation o) {
   if (half >= rows) {
     throw std::invalid_argument("row half outside the master");
   }
   switch (o) {
-    case Orientation::N:
+    case Orientation::N :
     case Orientation::FN: return start_row + half;
     case Orientation::FS:
     case Orientation::S : return start_row + rows - 1 - half;

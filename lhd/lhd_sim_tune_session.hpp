@@ -35,8 +35,8 @@ std::optional<std::pair<std::string, std::string>> renamed_sim_set(std::string_v
 // The inou.cgen.sim labels of the resolved tune vector (color_dirty,
 // fence_ratio, live_words, backend). Uses opts.sim_tune when `lhd sim`
 // resolved it; otherwise (`lhd compile --emit-dir sim:`) resolves explicit
-// --set > sim.tune.file > default itself. Throws Lhd_error on a bad tune file.
-// A sim.tune.file is an input of the generated code: it joins res.inputs (so
+// --set > positional simulation tuning > default itself. Throws Lhd_error on a bad tune file.
+// A positional simulation tuning is an input of the generated code: it joins res.inputs (so
 // the --depfile lists it) either way.
 std::vector<std::pair<std::string, std::string>> sim_tune_codegen_labels(const Options& opts, Result& res);
 
