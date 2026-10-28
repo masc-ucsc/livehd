@@ -406,9 +406,13 @@ connectivity before updating RC. They reuse the existing cell and connection
 indexes; resize, cell-order and topology changes use the full delta path.
 Both paths flush changed RC batches after 65,536 capacitance/resistance records.
 Nets are indivisible, so the last net can take a batch beyond that threshold.
-Each batch replaces the timer's
-old RC trees immediately and releases its temporary SPEF strings. Timing
-propagates once after the complete update, retaining all batches' frontiers.
+Batches carry one name per RC node and numeric segment endpoints through
+OpenTimer's indexed in-memory API, avoiding repeated endpoint strings and
+lookups. Each batch replaces the timer's old RC trees immediately and releases
+its temporary payload. Node insertion and segment order match the SPEF path
+to preserve floating-point results. Timing propagates once after the complete
+update, retaining all batches' frontiers. External SPEF and what-if rollback
+continue to use the named API.
 RC-tree construction now belongs to reconciliation time rather than propagation
 time; compare total timing cost when reading statistics across this change.
 

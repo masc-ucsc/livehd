@@ -13,15 +13,15 @@
 <p>High-priority fixes so that <code>lhd synth --set synth.place=true</code> reaches OpenROAD's
 pre-CTS QoR (HPWL, cells, WNS, power measured by the same OpenSTA script) with <em>less CPU time</em>
 than OpenROAD's floorplan → global place → resize → detailed place on the HighTide asap7 benchmark.
-The validated source checkpoint is published; work on the remaining acceptance targets continues below.</p>
-<p><span class="status">Validated checkpoint — remaining A–J acceptance is open</span>
+This optimization pass is closed at a validated source checkpoint; remaining acceptance targets are recorded below for follow-up.</p>
+<p><span class="status">Optimization pass complete — remaining A–J acceptance is open</span>
 Source of the issues: <code>HighTide/repros/issues.md</code> (LiveHD <code>8e017a011</code>, HighTide <code>9648393ce</code>,
 host llmHDL, one CPU for LiveHD, 8 threads for OpenROAD). Each new comparison records its
 frozen binaries and uses <code>perf</code> and <code>/usr/bin/time</code>; the ablation placements are scored with the
 benchmark's <code>repros/score.tcl</code>. Historical measurements apply to their recorded revisions.</p>
 
 <h2 id="progress">Current implementation and acceptance status</h2>
-<p>The source checkpoint is reviewed; work on the remaining A–J conditions continues.
+<p>The source checkpoint is reviewed and this optimization pass is complete.
 The driver-pin routing work is complete for this pass. The broader placer A–J
 acceptance task is <strong>not complete</strong>; its remaining requirements are
 listed below. Historical measurements are retained in
@@ -29,10 +29,10 @@ listed below. Historical measurements are retained in
 recorded revisions. Raw experiments and failed runs stay outside the build.</p>
 
 <h3 id="checkpoint">Reproducible source checkpoint</h3>
-<p>This density-state follow-up builds on LiveHD
-<a href="https://github.com/masc-ucsc/livehd/commit/88ba2aca6fe33d4c986ea1c5af8ccef0e3ed09f6"><code>88ba2aca6</code></a>.
+<p>This indexed-RC follow-up builds on the density-state fix in LiveHD
+<a href="https://github.com/masc-ucsc/livehd/commit/a3136fd5e745059d177edc0c31d71ed45e9f7298"><code>a3136fd5e</code></a>.
 <code>MODULE.bazel</code> uses published commits for OpenTimer
-<a href="https://github.com/masc-ucsc/OpenTimer/commit/ee2d641d4574d10fe6f0ada466d1ea4870b19499"><code>ee2d641d</code></a>
+<a href="https://github.com/masc-ucsc/OpenTimer/commit/5f38099bd18282860505692b176f4f9cf2fe0d78"><code>5f38099b</code></a>
 and DREAMPlace
 <a href="https://github.com/masc-ucsc/DREAMPlace/commit/3bd9bc36cf8dbab376ae87a78bcc5e0f328a6e89"><code>3bd9bc36</code></a>.
 All owned dependency pins are reachable from their upstream branches; no sibling
@@ -197,6 +197,33 @@ the HPWL guard. Independent scoring of that rejected geometry gives
 state. Initial-weight smoothing loses 33.403 ps, while detailed-only refinement
 accepts no minimax move and still loses 18.040 ps on partition_m. The original
 weights, phase order and acceptance guards remain unchanged. F remains open.</p>
+
+<h3 id="indexed-rc">Indexed RC transport and final checkpoint</h3>
+<p>OpenTimer accepts ground-capacitance networks with numeric segment endpoints.
+LiveHD passes each node name once, avoiding repeated endpoint strings and hash
+lookups during RC reconstruction. The API preserves node insertion, segment
+order, unit conversion and deferred timing propagation. Repeated replacement,
+both RC models, unit changes, malformed indices and multi-batch frontiers have
+regression coverage. External SPEF and what-if rollback retain the named API.</p>
+<p>The final optimized Bazel check passes <code>rc_propagation</code>,
+<code>rc_ceff</code>, <code>rc_waveform</code> and
+<code>physical_session_test</code>, and builds <code>lhd</code>,
+<code>physical_repair</code> and <code>signal_route_bench</code> using the
+published OpenTimer pin without a local repository override.</p>
+<p>The v88 candidate preserves final DEFs and every independently scored QoR
+field on lfsr, minimax, NVDLA/partition_m and CoralNPU. All runs use common
+placement defaults, 100 ps clocks and reset false paths. Placement times are
+2.128 → 2.126 s, 24.844 → 24.071 s, 32.361 → 30.672 s and
+638.032 → 600.840 s respectively, all within 1.5×. A fixed-geometry partition_c
+replay also preserves DEF and timing exactly: reconciliation takes
+18.143 → 16.885 s, total CPU 64.90 → 63.14 s, with 1.23% fewer instructions.
+These single samples support this checkpoint; they do not establish a repeatable
+whole-flow speedup or satisfy the remaining all-design STA-cost target.</p>
+<p>Allocator experiments remain diagnostic and are not included in the patch.
+The default allocator, placement options, phase order and acceptance guards are
+unchanged. Rejected experiments and raw results stay outside Git and Bazel.
+The completed implementation work is separated from the open A–J acceptance
+items above; none of those unmet requirements is marked solved.</p>
 
 <h3>Completed driver-pin routing pass</h3>
 <p>Commit <code>ce3e628e8</code> adds persistent per-layer interval occupancy with

@@ -359,17 +359,18 @@ struct Physical_session::Impl : Pass_opentimer {
         continue;
       }
       const auto&              name = net_names.at(net.driver);
-      spef::Net                mapped(name, 0);
-      std::vector<std::string> nodes;
-      nodes.reserve(net.nodes.size());
+      ot::IndexedRc            mapped;
+      mapped.name = name;
+      mapped.nodes.reserve(net.nodes.size());
+      mapped.edges.reserve(net.edges.size());
       for (size_t i = 0; i < net.nodes.size(); ++i) {
         const auto& node = net.nodes[i];
-        nodes.push_back(node.pin.empty() ? std::format("{}:__lhd_steiner_{}", name, i) : physical_timing_pin(node.pin).name());
-        mapped.caps.emplace_back(nodes.back(), "", node.capacitance_ff);
-        mapped.lcap += node.capacitance_ff;
+        mapped.nodes.push_back(
+            {node.pin.empty() ? std::format("{}:__lhd_steiner_{}", name, i) : physical_timing_pin(node.pin).name(),
+             static_cast<float>(node.capacitance_ff)});
       }
       for (const auto& edge : net.edges) {
-        mapped.ress.emplace_back(nodes.at(edge.from), nodes.at(edge.to), edge.resistance_ohm);
+        mapped.edges.push_back({edge.from, edge.to, static_cast<float>(edge.resistance_ohm)});
       }
       batch.add(std::move(mapped));
     }
