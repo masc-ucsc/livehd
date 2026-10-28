@@ -348,6 +348,21 @@ separately through OpenTimer's `Net::effective_load` and the diagnostic probe.
 This remains an RC approximation. Keep its residual differences separate from
 Liberty/constraint errors and differences between placement RC estimators.
 
+OpenTimer consumes each cell arc's fitted effective load during slew propagation
+and stores the resulting delay with separate validity bits. Compatible MIN/MAX
+propagation arcs share storage when the complete authored timing sequences match
+in order, endpoints, type, sense and condition; each corner retains its own
+characterized tables. Constraints and mismatched sequences keep separate arcs.
+This reduces timing storage without changing the RC model or public delay API.
+Timer-owned pins also share their names with stable map keys, eliminating a
+duplicate string per pin. Standalone pins retain ownership of their names; the
+public name reference remains valid across unrelated insertion and removal.
+Placement RC uses `BoundRc` batches with numeric driver/pin identities and dense
+node storage. The timer checks complete pin coverage and tree connectivity before
+replacing a batch; topology edits require fresh bindings. Propagation uses numeric
+node indices. Named SPEF imports retain their existing representation; dense-tree
+exports generate internal node names on demand and preserve physical pin names.
+
 Compare a persistent session with a fresh session before changing the timing
 model. Then compare engines with zero wire RC and with an identical exported RC
 network. Inspect one common path by transition, not just each engine's own worst
@@ -406,9 +421,13 @@ connectivity before updating RC. They reuse the existing cell and connection
 indexes; resize, cell-order and topology changes use the full delta path.
 Both paths flush changed RC batches after 65,536 capacitance/resistance records.
 Nets are indivisible, so the last net can take a batch beyond that threshold.
-Each batch replaces the timer's
-old RC trees immediately and releases its temporary SPEF strings. Timing
-propagates once after the complete update, retaining all batches' frontiers.
+Batches carry one name per RC node and numeric segment endpoints through
+OpenTimer's indexed in-memory API, avoiding repeated endpoint strings and
+lookups. Each batch replaces the timer's old RC trees immediately and releases
+its temporary payload. Node insertion and segment order match the SPEF path
+to preserve floating-point results. Timing propagates once after the complete
+update, retaining all batches' frontiers. External SPEF and what-if rollback
+continue to use the named API.
 RC-tree construction now belongs to reconciliation time rather than propagation
 time; compare total timing cost when reading statistics across this change.
 

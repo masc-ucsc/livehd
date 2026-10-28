@@ -2264,6 +2264,7 @@ Resize_trial run_resize_trial(const Result& state, const Options& options, const
   }
   trial.owner  = std::make_unique<hhds::GraphLibrary>();
   trial.placed = place(*graph, *trial.owner, trial_options);
+  trial.placed.gp_density_weight = state.gp_density_weight;
   trial.timing = evaluate(trial.placed);
   return trial;
 }

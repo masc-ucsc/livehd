@@ -176,12 +176,17 @@ void Pass_opentimer::apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph
     }
     bindings.emplace_back(net.driver, &driver->second);
     const auto               name = driver->second.net()->name();
-    spef::Net                mapped(name, 0);
-    std::vector<std::string> nodes;
+    ot::BoundRc              mapped;
+    mapped.driver = driver->second.idx();
+    if (!unchanged) {
+      mapped.nodes.reserve(net.nodes.size());
+      mapped.edges.reserve(net.edges.size());
+    }
     for (size_t i = 0; i < net.nodes.size(); ++i) {
       const auto& node  = net.nodes[i];
-      auto        label = node.pin.empty() ? std::format("{}:__lhd_steiner_{}", name, i) : timer_pin(node.pin);
+      size_t      pin_index = ot::BoundRc::no_pin;
       if (!node.pin.empty()) {
+        const auto label                = timer_pin(node.pin);
         const auto pin                  = timer.pins().find(label);
         if (pin == timer.pins().end() || !pin->second.net() || pin->second.net()->name() != name) {
           throw std::runtime_error("placement RC endpoint differs from STA connectivity: " + label + " on " + name + ", actual "
@@ -190,24 +195,24 @@ void Pass_opentimer::apply_physical_rc(const std::shared_ptr<hhds::Graph>& graph
                                                                 : std::string("no net")));
         }
         bindings.emplace_back(node.pin, &pin->second);
+        pin_index = pin->second.idx();
       }
       if (!std::isfinite(node.capacitance_ff) || node.capacitance_ff < 0) {
         throw std::invalid_argument("invalid placement capacitance");
       }
       if (!unchanged) {
-        nodes.push_back(label);
-        mapped.caps.emplace_back(label, "", node.capacitance_ff);
-        mapped.lcap += node.capacitance_ff;
+        mapped.nodes.push_back({pin_index, static_cast<float>(node.capacitance_ff)});
       }
     }
     if (unchanged) {
       continue;
     }
     for (const auto& edge : net.edges) {
-      if (edge.from >= nodes.size() || edge.to >= nodes.size() || !std::isfinite(edge.resistance_ohm) || edge.resistance_ohm < 0) {
+      if (edge.from >= mapped.nodes.size() || edge.to >= mapped.nodes.size() || !std::isfinite(edge.resistance_ohm)
+          || edge.resistance_ohm < 0) {
         throw std::invalid_argument("invalid placement RC edge");
       }
-      mapped.ress.emplace_back(nodes[edge.from], nodes[edge.to], edge.resistance_ohm);
+      mapped.edges.push_back({edge.from, edge.to, static_cast<float>(edge.resistance_ohm)});
     }
     batch.add(std::move(mapped));
   }

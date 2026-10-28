@@ -40,10 +40,11 @@ TEST(RcBatch, LargeUpdatesMaterializeInChunksAndKeepEveryNetForPropagation) {
   livehd::opentimer::Rc_batch batch(timer);
   for (size_t i = 0; i < count; ++i) {
     const auto a = "input_" + std::to_string(i), y = "output_" + std::to_string(i);
-    spef::Net  net(a, 10);
-    net.caps.emplace_back(a, "", 2);
-    net.caps.emplace_back(y, "", 8);
-    net.ress.emplace_back(a, y, 1000);
+    ot::BoundRc net{
+        timer.pins().at(a).idx(),
+        {{timer.pins().at(a).idx(), 2}, {timer.pins().at(y).idx(), 8}},
+        {{0, 1, 1000}}
+    };
     batch.add(std::move(net));
   }
   EXPECT_EQ(batch.size(), count);

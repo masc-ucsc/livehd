@@ -3,34 +3,33 @@
 
 #include <cstddef>
 #include <utility>
+#include <vector>
 
 #include "ot/timer/timer.hpp"
 
 namespace livehd::opentimer {
-// Bound transient SPEF storage by electrical records, not by design size.
+// Bound transient indexed RC storage by electrical records, not by design size.
 // One large net remains indivisible. Explicit flush keeps exceptions out of
 // the destructor; timing propagation happens only after the whole update.
 class Rc_batch {
   ot::Timer& timer;
-  spef::Spef data;
+  std::vector<ot::BoundRc> data;
   size_t     records = 0, nets = 0;
 
 public:
   explicit Rc_batch(ot::Timer& value) : timer(value) {}
   void flush() {
-    if (data.nets.empty()) {
+    if (data.empty()) {
       return;
     }
-    data.capacitance_unit = "1 FF";
-    data.resistance_unit  = "1 OHM";
-    timer.update_parasitics(std::move(data));
+    timer.update_bound_parasitics(std::move(data), ot::farad_t(1e-15), ot::ohm_t(1));
     data    = {};
     records = 0;
   }
-  void add(spef::Net net) {
-    records += net.caps.size() + net.ress.size();
+  void add(ot::BoundRc net) {
+    records += net.nodes.size() + net.edges.size();
     ++nets;
-    data.nets.push_back(std::move(net));
+    data.push_back(std::move(net));
     if (records >= 65536) {
       flush();
     }

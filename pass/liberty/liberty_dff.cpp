@@ -185,22 +185,20 @@ std::string strip_comments(const std::string& s) {
 
 // Index of the `}` matching the `{` at `open`, honoring quoted strings.
 size_t match_brace(const std::string& s, size_t open) {
-  int  d = 0;
-  bool q = false;
+  int depth = 0;
   for (size_t i = open; i < s.size(); ++i) {
-    char c = s[i];
-    if (q) {
-      if (c == '"') {
-        q = false;
-      }
-    } else if (c == '"') {
-      q = true;
-    } else if (c == '{') {
-      ++d;
-    } else if (c == '}') {
-      if (--d == 0) {
+    const char c = s[i];
+    if (c == '"') {
+      // Timing tables dominate library size. Jump over their quoted payload
+      // while preserving the scanner's existing quote-delimiter semantics.
+      i = s.find('"', i + 1);
+      if (i == std::string::npos) {
         return i;
       }
+    } else if (c == '{') {
+      ++depth;
+    } else if (c == '}' && --depth == 0) {
+      return i;
     }
   }
   return std::string::npos;
@@ -355,21 +353,26 @@ bool parse_next_state(std::string_view expr, std::string& pin, bool& inverted) {
 std::string top_level_only(const std::string& body) {
   std::string out;
   out.reserve(std::min<size_t>(body.size(), 4096));
-  int  depth = 0;
-  bool quote = false;
-  for (char c : body) {
-    if (quote) {
-      if (c == '"') {
-        quote = false;
-      }
+  int depth = 0;
+  for (size_t i = 0; i < body.size(); ++i) {
+    const char c = body[i];
+    if (c == '"') {
+      const auto end = body.find('"', i + 1);
       if (depth <= 0) {
-        out += c;
+        out.append(body, i, end == std::string::npos ? body.size() - i : end - i + 1);
       }
-    } else if (c == '"') {
-      quote = true;
-      if (depth <= 0) {
-        out += c;
+      if (end == std::string::npos) {
+        break;
       }
+      i = end;
+    } else if (c == '{' && depth == 0) {
+      out            += ' ';
+      const auto end  = match_brace(body, i);
+      if (end == std::string::npos) {
+        break;
+      }
+      out += ' ';
+      i    = end;
     } else if (c == '{') {
       if (depth++ <= 0) {
         out += ' ';

@@ -216,6 +216,8 @@ TEST_F(Resize_engine, MetTimingAddsNoCellsDownsizesAndNeverWorsensSetup) {
   auto big = gate("sky130_fd_sc_hd__buf_8", "big", graph->get_input_pin("a"));
   output("y1", 1, gate("sky130_fd_sc_hd__inv_1", "leaf", big));
   auto         placed = place(*graph, flat, options);
+  ASSERT_TRUE(placed.gp_density_weight);
+  const auto   density_weight = placed.gp_density_weight;
   const auto   probe  = timing(placed);
   // Re-time with a period just above the chain delay: the chain is critical.
   const double chain  = probe.at_pin("y").arrival.value_or(0) * probe.time_unit_ps;
@@ -225,6 +227,7 @@ TEST_F(Resize_engine, MetTimingAddsNoCellsDownsizesAndNeverWorsensSetup) {
   const auto before = timing(placed);
   ASSERT_GT(ps(before, before.wns), 0);
   auto       result = resize_placed(std::move(placed), options, [&](const Result& r) { return timing(r); });
+  EXPECT_EQ(result.placed.gp_density_weight, density_weight);
   const auto after  = timing(result.placed);
   SCOPED_TRACE(result.report);
   EXPECT_EQ(count(result.placed, "__place_rebuffer"), 0u);

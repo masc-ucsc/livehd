@@ -12,8 +12,17 @@
 #include "reset_tree.hpp"
 
 namespace livehd::placement {
+namespace {
+std::set<std::string> constant_masters(const Options& options) {
+  std::set<std::string> result;
+  for (const auto& cell : options.technology().cells.constants) {
+    result.insert(cell.name);
+  }
+  return result;
+}
+}  // namespace
 Physical_size physical_size(hhds::Graph& source, const physical::Technology& technology, hhds::Graph* replacement,
-                            const Master_changes& masters) {
+                            const Master_changes& masters, const std::set<std::string>* constants) {
   std::map<std::string, Physical_size> memo;
   std::set<std::string>                active;
   const auto                           visit = [&](auto&& self, hhds::Graph& original) -> Physical_size {
@@ -48,13 +57,19 @@ Physical_size physical_size(hhds::Graph& source, const physical::Technology& tec
         } else {
           ++result.cells;
           result.area_um2 += area;
+          if (constants && constants->contains(master)) {
+            ++result.constant_cells;
+            result.constant_um2 += area;
+          }
         }
       } else if (const auto child = io->get_graph(); child && master == io->get_name()) {
-        const auto nested  = self(self, *child);
-        result.cells      += nested.cells;
-        result.area_um2   += nested.area_um2;
-        result.tree_cells  += nested.tree_cells;
-        result.tree_um2    += nested.tree_um2;
+        const auto nested      = self(self, *child);
+        result.cells          += nested.cells;
+        result.area_um2       += nested.area_um2;
+        result.tree_cells     += nested.tree_cells;
+        result.tree_um2       += nested.tree_um2;
+        result.constant_cells += nested.constant_cells;
+        result.constant_um2   += nested.constant_um2;
       } else {
         throw std::runtime_error("physical growth inventory has no LEF master: " + master);
       }
@@ -77,8 +92,9 @@ bool Growth_budget::allows(const Physical_size& candidate) const {
          && area <= baseline.area_um2 * (1 + fraction) + 1e-9;
 }
 void initialize_growth_budget(hhds::Graph& source, Options& options) {
+  const auto constants            = constant_masters(options);
   options.growth_budget           = std::make_shared<Growth_budget>();
-  options.growth_budget->baseline = physical_size(source, options.technology().lef);
+  options.growth_budget->baseline = physical_size(source, options.technology().lef, nullptr, {}, &constants);
 }
 bool growth_admissible(hhds::Graph& source, const Options& options, hhds::Graph* replacement, const Master_changes& masters) {
   if (!options.growth_budget) {
@@ -97,15 +113,20 @@ std::string growth_budget_report(hhds::Graph& source, const Options& options) {
   if (!options.growth_budget) {
     return "null";
   }
-  const auto  now    = physical_size(source, options.technology().lef);
-  const auto& budget = *options.growth_budget;
+  const auto  constants = constant_masters(options);
+  const auto  now       = physical_size(source, options.technology().lef, nullptr, {}, &constants);
+  const auto& budget    = *options.growth_budget;
   return std::format(
-      R"({{"basis":"synthesized_standard_cells","fraction":{},"baseline_cells":{},"baseline_area_um2":{},"cells":{},"area_um2":{},"within_budget":{},"rejected_proposals":{}}})",
+      R"({{"basis":"synthesized_standard_cells","fraction":{},"baseline_cells":{},"baseline_area_um2":{},"baseline_constant_cells":{},"baseline_constant_area_um2":{},"cells":{},"area_um2":{},"constant_cells":{},"constant_area_um2":{},"within_budget":{},"rejected_proposals":{}}})",
       budget.fraction,
       budget.baseline.cells,
       budget.baseline.area_um2,
+      budget.baseline.constant_cells,
+      budget.baseline.constant_um2,
       now.cells,
       now.area_um2,
+      now.constant_cells,
+      now.constant_um2,
       budget.allows(now),
       budget.rejected);
 }
