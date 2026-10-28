@@ -29,12 +29,12 @@ are retained in <a href="1f-measurements.json">1f-measurements.json</a>; they ar
 longer repeated as a chronological log on this page.</p>
 
 <h3 id="checkpoint">Reproducible source checkpoint</h3>
-<p>The base implementation is published in LiveHD
-<a href="https://github.com/masc-ucsc/livehd/commit/fcc3ad4f9a5a4be56beafb069ea97928d3b21920"><code>fcc3ad4f9</code></a>.
-Its <code>MODULE.bazel</code> pins OpenTimer
+<p>The timing and routing base is published in LiveHD
+<a href="https://github.com/masc-ucsc/livehd/commit/d657d425dd248512809331f7a68b63df250389bb"><code>d657d425d</code></a>.
+The current <code>MODULE.bazel</code> pins OpenTimer
 <a href="https://github.com/masc-ucsc/OpenTimer/commit/2306b447d81ce0e3b64d25a73da420d42891a7dd"><code>2306b447</code></a>
 and DREAMPlace
-<a href="https://github.com/masc-ucsc/DREAMPlace/commit/f16bf8e8fcbee09e9d7d01c8045d221fae48ccdb"><code>f16bf8e8</code></a>.
+<a href="https://github.com/masc-ucsc/DREAMPlace/commit/3bd9bc36cf8dbab376ae87a78bcc5e0f328a6e89"><code>3bd9bc36</code></a>.
 All owned dependency pins are reachable from their published upstream branches;
 no sibling checkout or local repository override is required. The associated
 HighTide source fixes are published at
@@ -49,6 +49,17 @@ scratch-RC lifetime, alternating topology and temporary-cell rollback. The chang
 preserves timing math, label order and all public defaults. Eight focused
 optimized Bazel targets pass on the merged tree, and both <code>lhd</code> and
 <code>physical_repair</code> build with the published dependency pins.</p>
+<p>The grid-selection follow-up makes an automatically selected density grid use
+exactly the same numerical transform and static density/routing handoff rules as
+an explicit grid with the same dimensions. Automatic selection happens before
+the solve; it no longer changes those policies independently of grid dimensions.
+Regression coverage includes small and large grids and an infeasible-density
+handoff. Automatic grid selection remains opt-in; all public defaults and the
+existing stalled-density ramp are retained. Final default-grid placements on
+lfsr, minimax and partition_m reproduce the published control DEFs and independent
+QoR exactly. Fourteen focused optimized tests pass with the published dependency
+pins and no local repository override; <code>lhd</code>,
+<code>physical_repair</code> and <code>signal_route_bench</code> all build.</p>
 <p>Completed implementation work includes bounded driver-pin routing and persistent
 interval occupancy, placement reuse and shared technology, reduced timing feedback
 overhead, and compact timing/RC storage. The table below is the remaining acceptance
@@ -83,7 +94,8 @@ The private flat constant-state sweep remains opt-in for both ABC and USYN.</p>
 what-if trials limit detailed evaluations to 7 on lfsr, 3 on minimax, 3 on
 partition_m and 4 on coralnpu in the current matched controls. These flows also
 perform 8, 8, 8 and 12 coarse ranking evaluations, respectively. The completed
-v74 CNN flow uses 5 detailed and 9 ranking evaluations. Complete the
+v74 CNN flow uses 5 detailed and 9 ranking evaluations; partition_c uses
+4 detailed and 12 ranking evaluations. Complete the
 all-design census and retain the WNS bound.</td></tr>
 <tr><td><a href="#B">B — incremental timing cost</a></td><td>Coarse in-loop RC,
 indexed rankings and selective reconciliation are implemented. Minimax checkpoint
@@ -100,8 +112,12 @@ experiment reaches 42,653.419 µm HPWL in 4.531 s; the own-floorplan experiment 
 46,071.875 µm in 7.909 s, meeting both numerical limits. Fresh equal-overflow traces
 against OpenROAD remain incomplete.</td></tr>
 <tr><td><a href="#E">E — convergence</a></td><td>Open. Minimax needs 640 main
-iterations (740 total) in v74; the historical pure-GP experiment used 820 total. Macro and large designs still emit
-iteration/deadline or stalled-routing warnings despite acceptable overflow.</td></tr>
+iterations (740 total) in v74; the historical pure-GP experiment used 820 total.
+A common threefold stalled-density ramp reduces minimax to 560 main / 660 total
+iterations, but worsens CoralNPU WNS by 65.056 ps despite reducing placement from
+672.999 to 635.548 s. That experiment is rejected; the published ramp is retained.
+Macro and large designs still emit iteration/deadline or stalled-routing warnings
+despite acceptable overflow.</td></tr>
 <tr><td><a href="#F">F — physical-stage HPWL</a></td><td>Warm starts and bounded
 acceptance are implemented. Minimax passes at +1.05%; lfsr is +3.20%, exceeding +3%.
 Independent scoring of rejected v75 warm refinements worsens WNS by 18.808 ps on
@@ -113,8 +129,9 @@ are within 10% of independent OpenSTA; every decision checkpoint and the broader
 resynthesis census remain unverified.</td></tr>
 <tr><td><a href="#H">H — repair growth</a></td><td>Area/cell budgets are implemented
 and the small-design checks pass. The completed v74 CNN flow also stays within
-the 3% budget. Revalidate the integrated checkpoint and complete the large-design
-census.</td></tr>
+the 3% budget. The completed v74 partition_c flow increases standard cells
+from 310,377 to 322,297 (+3.84%), violating the cell-count budget despite only
++1.25% area growth. Fix that remaining growth path and complete the census.</td></tr>
 <tr><td><a href="#I">I — scaling</a></td><td>Open. Fresh Gemmini v74 control and
 candidate both exceed the diagnostic memory guard: 735.214 s / 16,399 MiB and
 824.553 s / 16,420 MiB tree RSS. The candidate runs longer before the guard;
@@ -123,8 +140,12 @@ strict 16-decimal-GB limit. CNN v74 completes in 1,997.801 s placement
 (2,284.909 s full flow) at 10,306,872 KiB peak process RSS. Its independently
 scored WNS is −26,531.888 ps; the original scorer hit the host-reserve guard and
 only scoring was retried. It still stops with <code>route_stalled</code> and
-spends 10.11% of placement in STA. Partition_c v59 exceeds the guard and its fresh
-v74 run remains deferred. Matched 100 ps OpenROAD references are complete for
+spends 10.11% of placement in STA. Fresh native partition_c v74 completes
+placement in 1,822.214 s (1,979.190 s full flow), with 13,885.965 MiB peak process
+RSS and independently scored WNS −6,316.847 ps. It reaches 1,500 main / 1,600 total
+GP iterations at 0.0304 overflow and spends 14.99% of placement in STA; its
+cell-growth budget still fails. These completed native flows do not resolve
+the earlier imported-flow guards. Matched 100 ps OpenROAD references are complete for
 Gemmini, CNN and partition_c. No all-design CPU-parity acceptance is claimed.</td></tr>
 <tr><td><a href="#J">J — macro failures</a></td><td>Fragmented rows are accepted by
 the shared import path. Corrected eyeriss and native Nyuzi reach placement but hit
