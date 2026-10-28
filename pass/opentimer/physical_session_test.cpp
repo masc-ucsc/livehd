@@ -845,6 +845,103 @@ TEST_F(PhysicalSession, WhatifIndexReleasesItsRcSnapshotAtTheNextEvaluation) {
   EXPECT_NEAR(whatif.wns(), *expected.wns * expected.time_unit_ps, 1e-3);
 }
 
+TEST_F(PhysicalSession, ReconciliationMaterializesRollbackBeforeCommittingTrialConnections) {
+  Circuit                             circuit(false, false);
+  livehd::opentimer::Physical_session session(options);
+  session.evaluate(circuit.graph, circuit.rc);
+  auto candidate = std::make_shared<livehd::physical::Parasitics>(*circuit.rc);
+  // Bypass u for v's input without adding or removing any timing gates.
+  candidate->nets[0].nodes.push_back(candidate->nets[1].nodes.back());
+  candidate->nets[0].edges.push_back({0, 2, 100});
+  candidate->nets[1].nodes.pop_back();
+  candidate->nets[1].edges.clear();
+  for (auto node : circuit.graph->body().nodes()) {
+    if (node.get_name() == "v") {
+      node.get_sink_pin("A").del_driver();
+      node.get_sink_pin("A").connect_driver(circuit.graph->get_input_pin("a"));
+    }
+  }
+  auto& whatif = session.whatif();
+  for (const auto& net : candidate->nets) {
+    whatif.set_net(net);
+  }
+  const auto expected_wns = whatif.wns();  // Apply the trial connections.
+  const auto expected_tns = whatif.tns();
+  ASSERT_TRUE(std::isfinite(expected_wns));
+  ASSERT_TRUE(std::isfinite(expected_tns));
+  // evaluate() queues rollback, then commits this same topology. It must not
+  // mistake the still-materialized trial connections for the baseline.
+  const auto committed = session.evaluate(circuit.graph, candidate);
+  ASSERT_TRUE(committed.wns);
+  ASSERT_TRUE(committed.tns);
+  EXPECT_NEAR(*committed.wns * committed.time_unit_ps, expected_wns, 1e-3);
+  EXPECT_NEAR(*committed.tns * committed.time_unit_ps, expected_tns, 1e-3);
+}
+
+TEST_F(PhysicalSession, EvaluatedConnectionsSurviveRecycledPinsAndWhatifRollback) {
+  Circuit                             first(false, true), plain(false, false);
+  livehd::opentimer::Physical_session session(options);
+  session.evaluate(first.graph, first.rc);
+  for (const auto& name : {std::string("replacement"), std::string("b"), std::string("last")}) {
+    // Removing a cell initialized between u and v leaves reusable pin indices
+    // inside the evaluated index range, not just beyond its end.
+    const auto before = session.evaluate(plain.graph, plain.rc);
+    Circuit    next(false, true);
+    for (auto node : next.graph->body().nodes()) {
+      if (node.get_name() == "b") {
+        node.set_name(name);
+      }
+    }
+    for (auto& cell : next.rc->cells) {
+      if (cell.name == "b") {
+        cell.name = name;
+      }
+    }
+    const auto rename = [&](std::string& pin) {
+      if (pin.starts_with("b:")) {
+        pin = name + pin.substr(1);
+      }
+    };
+    for (auto& net : next.rc->nets) {
+      rename(net.driver);
+      for (auto& point : net.nodes) {
+        rename(point.pin);
+      }
+    }
+    // Connectivity must not depend on the incoming net order.
+    std::reverse(next.rc->nets.begin(), next.rc->nets.end());
+    livehd::opentimer::Physical_session fresh(options);
+    const auto                          expected = fresh.evaluate(next.graph, next.rc);
+    ASSERT_TRUE(before.wns);
+    ASSERT_TRUE(expected.wns);
+    auto&      whatif = session.whatif();
+    const auto mark   = whatif.mark();
+    whatif.add_cell(name, "sky130_fd_sc_hd__buf_1");
+    for (const auto& net : next.rc->nets) {
+      whatif.set_net(net);
+    }
+    EXPECT_NEAR(whatif.wns(), *expected.wns * expected.time_unit_ps, 1e-3);
+    whatif.rollback(mark);
+    EXPECT_NEAR(whatif.wns(), *before.wns * before.time_unit_ps, 1e-3);
+    EXPECT_THROW(whatif.pin(name + ":X"), std::runtime_error);
+    compare(session.evaluate(plain.graph, plain.rc), before);
+    compare(session.evaluate(next.graph, next.rc), expected);
+  }
+}
+
+TEST_F(PhysicalSession, DuplicatePhysicalConnectionFailsAndSessionCanRecover) {
+  Circuit                             circuit(false, false);
+  livehd::opentimer::Physical_session session(options);
+  const auto                          before    = session.evaluate(circuit.graph, circuit.rc);
+  auto                                duplicate = std::make_shared<livehd::physical::Parasitics>(*circuit.rc);
+  auto&                               net       = duplicate->nets.front();
+  const auto                          index     = net.nodes.size();
+  net.nodes.push_back({"y", .2});
+  net.edges.push_back({0, static_cast<unsigned>(index), 100});
+  EXPECT_THROW(session.evaluate(circuit.graph, duplicate), std::runtime_error);
+  compare(session.evaluate(circuit.graph, circuit.rc), before);
+}
+
 TEST_F(PhysicalSession, WhatifResizeBufferAndRollbackMatchFreshTiming) {
   Circuit                             initial(false, false), strong(true, false), buffered(false, true);
   livehd::opentimer::Physical_session session(options);
