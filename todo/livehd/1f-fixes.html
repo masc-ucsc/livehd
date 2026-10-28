@@ -14,7 +14,7 @@
 pre-CTS QoR (HPWL, cells, WNS, power measured by the same OpenSTA script) with <em>less CPU time</em>
 than OpenROAD's floorplan → global place → resize → detailed place on the HighTide asap7 benchmark.
 Implementation is in progress; the original measurements and acceptance targets are retained below.</p>
-<p><span class="status">Dense detailed feedback implemented — broader performance acceptance remains open</span>
+<p><span class="status">Source checkpoint published — remaining A–J acceptance is open</span>
 Source of the issues: <code>HighTide/repros/issues.md</code> (LiveHD <code>8e017a011</code>, HighTide <code>9648393ce</code>,
 host llmHDL, one CPU for LiveHD, 8 threads for OpenROAD). Each new comparison records its
 frozen binaries and uses <code>perf</code> and <code>/usr/bin/time</code>; the ablation placements are scored with the
@@ -27,6 +27,23 @@ This task is <strong>not complete</strong>: the original A–J requirements belo
 binding. Historical experiments, failed runs, binary identities and full comparisons
 are retained in <a href="1f-measurements.json">1f-measurements.json</a>; they are no
 longer repeated as a chronological log on this page.</p>
+
+<h3 id="checkpoint">Reproducible source checkpoint</h3>
+<p>The reviewed implementation is published in LiveHD
+<a href="https://github.com/masc-ucsc/livehd/commit/fcc3ad4f9a5a4be56beafb069ea97928d3b21920"><code>fcc3ad4f9</code></a>.
+Its <code>MODULE.bazel</code> pins OpenTimer
+<a href="https://github.com/masc-ucsc/OpenTimer/commit/2306b447d81ce0e3b64d25a73da420d42891a7dd"><code>2306b447</code></a>
+and DREAMPlace
+<a href="https://github.com/masc-ucsc/DREAMPlace/commit/f16bf8e8fcbee09e9d7d01c8045d221fae48ccdb"><code>f16bf8e8</code></a>.
+All owned dependency pins are reachable from their published upstream branches;
+no sibling checkout or local repository override is required. The associated
+HighTide source fixes are published at
+<a href="https://github.com/masc-ucsc/HighTide/commit/8bb05a7b51f095722566b4de49c7695e562c3e41"><code>8bb05a7b</code></a>.
+Raw benchmark outputs and experimental worktrees are not build inputs.</p>
+<p>Completed implementation work includes bounded driver-pin routing and persistent
+interval occupancy, placement reuse and shared technology, reduced timing feedback
+overhead, and compact timing/RC storage. The table below is the remaining acceptance
+checklist; publishing this checkpoint does not close those outstanding targets.</p>
 
 <p>The current source checkpoint passes eleven optimized Bazel test targets covering
 physical timing, placement, repair, sizing, I/O timing, clock/reset filtering and
