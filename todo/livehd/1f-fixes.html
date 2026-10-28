@@ -30,9 +30,9 @@ recorded revisions. Raw experiments and failed runs stay outside the build.</p>
 
 <h3 id="checkpoint">Reproducible source checkpoint</h3>
 <p>This follow-up builds on LiveHD
-<a href="https://github.com/masc-ucsc/livehd/commit/618923c09417113985bd37c4252a9774e7fe52d7"><code>618923c09</code></a>.
+<a href="https://github.com/masc-ucsc/livehd/commit/3a31a9bb2e3fea7ad13959e2d1c1229beaee0ca3"><code>3a31a9bb2</code></a>.
 <code>MODULE.bazel</code> uses published commits for OpenTimer
-<a href="https://github.com/masc-ucsc/OpenTimer/commit/2306b447d81ce0e3b64d25a73da420d42891a7dd"><code>2306b447</code></a>
+<a href="https://github.com/masc-ucsc/OpenTimer/commit/ee2d641d4574d10fe6f0ada466d1ea4870b19499"><code>ee2d641d</code></a>
 and DREAMPlace
 <a href="https://github.com/masc-ucsc/DREAMPlace/commit/3bd9bc36cf8dbab376ae87a78bcc5e0f328a6e89"><code>3bd9bc36</code></a>.
 All owned dependency pins are reachable from their upstream branches; no sibling
@@ -72,9 +72,13 @@ and final-evaluation numerical limits have passed, but total STA remains roughly
 a shared immutable pin-label index, and evaluated connections use a dense pin-index
 array. Physical bindings now share that label index and avoid repeated timer
 pin-name lookups. The all-design STA-cost target remains open.</td></tr>
-<tr><td><a href="#C">C — shared technology</a></td><td>The placement session shares
-technology data; lfsr placement is about 2.2 s in the latest completed small pairs.
-The complete parse-once call-graph census remains to be verified.</td></tr>
+<tr><td><a href="#C">C — shared technology</a></td><td>The fresh lfsr function-entry
+and call-stack census verifies one placement technology construction, one
+file-backed Liberty inventory/read and one call reading the two LEFs across the
+complete placement flow. Two later control-port helpers receive empty library
+paths and read no files. All three small-design reports record one Liberty file
+read and one parse per LEF; lfsr placement remains about 2.2 s, within 5 s.
+The file-backed parse-once lfsr acceptance is verified.</td></tr>
 <tr><td><a href="#D">D — pure-GP quality</a></td><td>The fixed-I/O imported minimax
 experiment reaches 42,653.419 µm HPWL in 4.531 s; the own-floorplan experiment reaches
 46,071.875 µm in 7.909 s, meeting both numerical limits. Fresh equal-overflow traces
@@ -86,11 +90,15 @@ iterations, but worsens CoralNPU WNS by 65.056 ps despite reducing placement fro
 672.999 to 635.548 s. That experiment is rejected; the published ramp is retained.
 Macro and large designs still emit iteration/deadline or stalled-routing warnings
 despite acceptable overflow.</td></tr>
-<tr><td><a href="#F">F — physical-stage HPWL</a></td><td>Warm starts and bounded
-acceptance are implemented. Minimax passes at +1.05%; lfsr is +3.20%, exceeding +3%.
-Independent scoring of rejected v75 warm refinements worsens WNS by 18.808 ps on
-minimax and 4.337 ps on partition_m, so loosening their acceptance gate is not
-supported by those experiments.</td></tr>
+<tr><td><a href="#F">F — physical-stage HPWL</a></td><td>Open. Fresh v80 ablations
+on <code>3a31a9bb2</code>, using the specified pure-GP switches and common 100 ps
+clocks, supersede earlier acceptance figures: lfsr improves from 213.339 to
+208.909 µm (−2.08%), but minimax grows from 63,506.939 to 70,082.787 µm
+(+10.35%), exceeding 3%. Disabling GP timing weights while retaining default
+post-placement repair gives minimax 61,033.668 µm in 17.479 s, but loses
+56.185 ps WNS versus the default flow. Simply removing those weights is not an
+acceptable timing-preserving fix. The earlier v75 warm-refinement experiments
+also worsened WNS; the acceptance gate remains unchanged.</td></tr>
 <tr><td><a href="#G">G — timing consistency</a></td><td>Reset cuts, physical clock
 objectives and resynthesis history are implemented. Prior four-design final scores
 are within 10% of independent OpenSTA; every decision checkpoint and the broader
@@ -129,6 +137,28 @@ passes through physical flattening; full-flow acceptance remains open. Imported 
 Native bp_uno completes with 1,724.217 s placement and 14,870 MiB peak process RSS.</td></tr>
 </tbody>
 </table>
+
+<h3>Waveform batching and current acceptance audit</h3>
+<p>OpenTimer now shares waveform preparation and the initial bracket sample across
+arrival and slew threshold queries. Each threshold retains its independent solve,
+equations and tolerances. Seven focused optimized OpenTimer/LiveHD tests pass;
+<code>lhd</code>, <code>physical_repair</code> and <code>signal_route_bench</code>
+build using the published pin without a local override.</p>
+<p>Fresh v80 control/candidate pairs on <code>3a31a9bb2</code> use common defaults,
+100 ps clocks and reset false paths. All four final DEFs and independent QoR
+scores match exactly. Placement times are lfsr 2.249 → 2.122 s, minimax
+25.616 → 26.093 s, partition_m 34.151 → 35.294 s and CoralNPU
+637.025 → 631.620 s, all within 1.5×. The isolated crossing benchmark is 14.2%
+faster with bit-identical values. A fixed-geometry partition_c replay preserves
+DEF/timing results, uses 1.6% fewer instructions and reduces propagation from
+20.863 to 20.183 s; total runtime is essentially unchanged at about 68 s.
+These are single full-flow samples under concurrent load, not evidence of a
+repeatable whole-design speedup. Total STA still consumes 24–33% of placement.</p>
+<p>The current lfsr call-count audit verifies the file-backed parse-once path.
+Fresh pure-GP and post-repair ablations expose a remaining minimax timing/wirelength
+tradeoff, recorded under C and F above. Earlier acceptance figures do not override
+these current-revision measurements. Raw outputs and debugger/profile artifacts
+remain outside the repositories.</p>
 
 <h3>Final tie-cell validation and limits</h3>
 <p>The v79 comparison uses frozen binaries from <code>618923c09</code> and this
