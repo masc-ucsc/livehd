@@ -45,7 +45,7 @@ The lesson is about measurement: in-process timestamps around PURE work are not
 trustworthy in Lean.  Use separate processes, or an IO sequencing barrier, and
 check the generated C.
 
-SUPERSEDED BY `scripts/proto_probe.lean`, which runs the REAL `projectDesign`
+SUPERSEDED BY `Futamura_Projection_Scripts/proto_probe.lean`, which runs the REAL `projectDesign`
 against a forked specializer and times separate processes.  Its result refutes
 the n^3 -> n^2 hypothesis this file was written to test.  Kept only as a record
 of the trap.

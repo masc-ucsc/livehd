@@ -37,8 +37,31 @@ jobs:
           "$CC" --version
           "$CXX" --version
 
+      # The event-simulator legs are opt-in: without LHD_EXTERNAL_SIM a script
+      # prints "external-simulator leg skipped" and exits 0, so a BROKEN leg
+      # reports PASS. That is how single_edge_latch_icg_test stayed red and
+      # unnoticed. Installing iverilog here and setting the flag below turns on
+      # ~40 source-vs-normalized differentials across 18 scripts -- the only
+      # checks in the repo performed by a simulator that does not share our
+      # model's assumptions.
+      # LHD_EXTERNAL_SIM is OVERLOADED: it gates the iverilog differentials, the
+      # Verilator oracles (slang_plusargs_smoke) and the ninja build-planning leg
+      # (sim_unity_batch_test). A script FAILS, not skips, when the flag is set
+      # and its tool is missing, so all three must be here.
+      - name: Install external simulators and build tools
+        run: |
+          brew install icarus-verilog verilator ninja
+          command -v iverilog vvp verilator ninja
+          iverilog -V | head -1
+          verilator --version
+          ninja --version
+
+      # --test_env=PATH is NOT redundant. These targets do not declare
+      # env_inherit = ["PATH"], and when the flag is set but no simulator is
+      # found the scripts FAIL rather than skip -- so the tool must be reachable
+      # from inside the test, wherever the runner's package manager put it.
       - name: Run self-contained regression
-        run: bazel test -c opt --test_output=errors //...
+        run: bazel test -c opt --test_output=errors --test_env=LHD_EXTERNAL_SIM=1 --test_env=PATH //...
 
       # A full build is expensive and failures tend to happen late. Keep
       # successfully produced Bazel outputs for the next run either way.

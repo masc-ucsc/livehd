@@ -13,7 +13,7 @@ WHAT IT IS NOT.  It runs the reference only.  It is a diagnostic, not a route:
 it specializes nothing, checks no residual and earns no readiness credit.  The
 driver remains the thing that executes the projection.
 
-The stimulus is the one in `scripts/memstate/pico_run_instr.stim`, written out
+The stimulus is the one in `Futamura_Projection_Scripts/memstate/pico_run_instr.stim`, written out
 here rather than parsed, so this file has no copy of the driver's parsers to
 drift from: reset LOW for two cycles then HIGH, `mem_ready` reacting to the
 previous cycle's `mem_valid`, and `mem_rdata` held at `addi x1, x0, 1`.

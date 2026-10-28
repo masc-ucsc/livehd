@@ -9,7 +9,7 @@ unchanged unfold path whenever it does not apply.
 
 Everything else is byte-for-byte S1.  This file carries no theorems and is not
 imported by `Audit.lean`; it exists to MEASURE the summary against S1 in one
-process (`scripts/s2a_probe.lean`) before any proof work.  The specification,
+process (`Futamura_Projection_Scripts/s2a_probe.lean`) before any proof work.  The specification,
 the restriction and its reason (every spine leaf at lookup time is `dyn`), the
 recognizer and the planned `MixProgram.lean` mirror are all in 35.
 -/

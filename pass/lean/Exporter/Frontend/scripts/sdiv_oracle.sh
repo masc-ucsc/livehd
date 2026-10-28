@@ -9,7 +9,7 @@ set -euo pipefail
 # unsigned and Op_SDiv deps as two's complement at each dep's own width, so the
 # exporter picks SDiv when any operand is signed and gives an unsigned operand
 # a zero bit first. This compares the certificate's `interpretDesign`
-# (scripts/cert_trace.lean) against iverilog on the ORIGINAL RTL, step by step:
+# (Futamura_Projection_Scripts/cert_trace.lean) against iverilog on the ORIGINAL RTL, step by step:
 #   q_ss    signed / signed            q_uu   unsigned / unsigned
 #   q_nar   signed, 4-bit result       q_mix  signed / unsigned (Verilog: unsigned)
 #   q_cast  $signed() of unsigned inputs
@@ -108,7 +108,7 @@ rtl() { # <source.sv> <out>
   iverilog -g2012 -o "$OUT/$2.vvp" "$1" "$OUT/tb.v" && vvp "$OUT/$2.vvp" | grep '^STEP' > "$OUT/$2.txt"
 }
 cert() { # <cert> <out>
-  (cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run scripts/cert_trace.lean \
+  (cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run Futamura_Projection_Scripts/cert_trace.lean \
      "$1" "$CYCLES" "$OUT/stim.txt" edges:all > "$OUT/$2.txt" 2> "$OUT/$2.err") \
     || { cat "$OUT/$2.err"; echo "FAIL: cert_trace on $1"; exit 1; }
 }

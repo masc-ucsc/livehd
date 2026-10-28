@@ -4,7 +4,7 @@ under a supplied stimulus. The oracle side of an RTL differential: the same
 `stim v1` file drives an event simulator on the original RTL, and the two
 traces are compared line by line.
 
-    lean --run scripts/cert_trace.lean <cert> <cycles> <stim> [edges:all|edges:third]
+    lean --run Futamura_Projection_Scripts/cert_trace.lean <cert> <cycles> <stim> [edges:all|edges:third]
 
 `stim v1` is the dcert2_memroute format, restricted to what an RTL testbench
 can replay: `in <ordinal> <width> <value>` (every cycle) and

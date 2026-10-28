@@ -122,6 +122,25 @@ the shared `formal/lean/LeanSemanticPrimitives/Compiler/`, which the D3, D4
 and projection directions all use. `Translation_Validation/README.md` has the
 build and run commands, the trust boundary and the benchmarks covered.
 
+## Where the Futamura-projection work lives
+
+`specialization/` — beside this file — holds that direction: a Lean
+interpreter of `DesignCert`s, specialized to one certificate, gives a residual
+simulator whose step is proved equal to `interpretDesign`. It is split by the
+same rule: `scripts/` (the recorded runner `fp_cov_dcert2.sh`, the
+generation-latency measurements, the replay and install tools, the CORE-ET
+operator census), `tests/` (the runner's reuse rules, the replay and axiom-gate
+controls, the shared-semantics drift check, with fixtures in `tests/fixtures/`)
+and `evidence/` (measurements kept as records).
+
+Its Lean sources stay in the Lean project: the interpreter, the specializer and
+their proofs in `formal/lean/LeanSemanticPrimitives/Projection/`, and the
+drivers and build scripts in `formal/lean/Futamura_Projection_Scripts/`. The 12-row coverage
+harness every route uses (`scripts/fp_cov_run.sh`, `scripts/fp_cov_queue_*.sh`)
+stays in this directory's `scripts/`. `specialization/README.md` has the build
+and run commands, the trust boundary, the benchmarks covered and two
+performance examples.
+
 ## Lean Support Library and Emitted Model
 
 - `formal/lean` builds a Lean package named `LeanSemanticPrimitives`.
@@ -761,7 +780,7 @@ The pipeline of one run:
 # lhd (see Build above); the native drivers, into a project-local root:
 cd formal/lean
 ROOT=$PWD/../../generated/sym/nat_root
-OPT=-O2 ROOT=$ROOT bash scripts/build-opt.sh ../../pass/lean/tools/drivers/sym_verify.lean \
+OPT=-O2 ROOT=$ROOT bash Futamura_Projection_Scripts/build-opt.sh ../../pass/lean/tools/drivers/sym_verify.lean \
     ../../pass/lean/tools/drivers/sym_refine.lean ../../pass/lean/tools/drivers/sym_refmap.lean
 # the solver: cadical ships with the Lean toolchain; link it next to the drivers
 # (or pass solver:<path>)

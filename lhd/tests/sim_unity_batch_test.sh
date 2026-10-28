@@ -146,8 +146,23 @@ else
   *"no work to do"*) ;;
   *) fail "ninja: a rebuild with nothing changed still has work to do: $plan" ;;
   esac
-  ninja_obj=$(basename "$(grep -l "\"\.\./$victim_cpp\"" "$NS"/unity/unity-*.cpp)" .cpp).o
-  [ "$ninja_obj" != ".o" ] || fail "ninja: $victim_cpp is not batched in $NS/unity (test assumption broken)"
+  # Re-discover the batched source HERE, exactly as step 4 does for the built-in
+  # builder. `$victim_cpp` came from the other workdir and from before the U8->U9
+  # edit; a leaf's generated file carries a specialization suffix keyed on its
+  # interface (`leaves.leaf_7__k8bb173c30106d1f7.cpp`), so that name does not
+  # survive an interface change or a different build root. The contract being
+  # checked is "leaf_7's batched source rebuilds its batch", not what it is called.
+  ninja_victim=""
+  for f in "$NS"/leaves.leaf_7*.cpp; do
+    base=$(basename "$f")
+    if grep -lq "\"\.\./$base\"" "$NS"/unity/unity-*.cpp; then
+      ninja_victim="$base"
+      break
+    fi
+  done
+  [ -n "$ninja_victim" ] \
+    || fail "ninja: no generated source of leaf_7 was batched (test assumption broken): $(ls "$NS"/unity)"
+  ninja_obj=$(basename "$(grep -l "\"\.\./$ninja_victim\"" "$NS"/unity/unity-*.cpp)" .cpp).o
   sed -e 's/pub comb leaf_7(a:U9)/pub comb leaf_7(a:U10)/' "$W/leaves.prp" > "$W/leaves.new" && mv "$W/leaves.new" "$W/leaves.prp"
   grep -q 'leaf_7(a:U10)' "$W/leaves.prp" || fail "the second interface edit did not apply (test bug)"
   "$LHD" sim "$W/tb.prp" --set compile.upass.inline=false --setup-only --workdir "$NW" >"$W/setup_n.log" 2>&1 \
@@ -157,7 +172,7 @@ else
   plan=$(ninja -C "$NS" -n 2>&1 | grep -v '^ninja: Entering')
   case "$plan" in
   *"$ninja_obj"*) ;;
-  *) fail "ninja: rewriting $victim_cpp did not rebuild its batch $ninja_obj -- the wrapper's depfile is not tracking members: $plan" ;;
+  *) fail "ninja: rewriting $ninja_victim did not rebuild its batch $ninja_obj -- the wrapper's depfile is not tracking members: $plan" ;;
   esac
   echo "ok: ninja plans no work after a warm build and rebuilds $ninja_obj after a member edit"
 fi

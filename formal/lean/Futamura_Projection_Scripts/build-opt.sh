@@ -3,7 +3,7 @@
 # olean cache, so neither `.olean-dev` nor `.native-dev` -- which hold the
 # binaries of in-flight experiments -- is touched.
 #
-#   OPT=-O2 ROOT=/abs/path bash scripts/build-opt.sh scripts/total_probe.lean [more.lean ...]
+#   OPT=-O2 ROOT=/abs/path bash Futamura_Projection_Scripts/build-opt.sh Futamura_Projection_Scripts/total_probe.lean [more.lean ...]
 #   (the proof-tool drivers: ../../pass/lean/tools/drivers/sym_verify.lean sym_refine.lean sym_refmap.lean)
 # OPT may carry several flags, e.g. OPT="-O2 -g -fno-omit-frame-pointer"
 # for a profiling build that keeps -O2 but can be unwound.

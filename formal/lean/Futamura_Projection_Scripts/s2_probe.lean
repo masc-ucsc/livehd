@@ -1,15 +1,10 @@
 /-
-S3 -- deferred binder shifting (`Proto/PartialEvaluatorShift.lean`, `ProtoShift`)
-against the PROVED host.  ONE source, built twice: against a tree whose proved
-specializer files are S1's, and against the current tree (S2, summary
-integrated).  So the HOST column is S1 or S2, and the SHIFT column -- the
-deferred-shift prototype, same code in both builds -- is the common control.
-Specification: certio/PHASE6_PERF.md 38.
-
-  s3_probe spec grid S N A (host|shift)   specialize ONCE, print time, terms and
-  s3_probe spec cert PATH (host|shift)    digest, and exit -- for RSS and for
-                                          callgrind allocation counts, with no
-                                          residual execution in the process
+S2 -- the INTEGRATED lookup summary.  ONE source, built twice: against a tree
+whose `PartialEvaluator.lean`, `PartialEvaluatorCorrect.lean` and
+`MixProgram.lean` are S1's (0f175676b), and against the current tree.  So the
+HOST column is S1 in one build and the integrated summary in the other, while
+the PROTO column -- the S2a prototype, `ProtoSum` -- is the same code in both
+and serves as the in-process control.  Specification: certio/PHASE6_PERF.md 35-37.
 
   s2a_probe grid
       the HOST and the prototype in ONE process on the S0.4 two-axis grid plus the
@@ -18,7 +13,7 @@ Specification: certio/PHASE6_PERF.md 38.
       sections -- the fragment checker and `interpretDesign` at each residual's
       own checked bound.
 
-  s2a_probe cert PATH (host|shift) [sf wf]
+  s2a_probe cert PATH (host|proto) [sf wf]
       ONE backend per process, so `/usr/bin/time` RSS belongs to that backend.
       Specialize once (timed), print the digest, then the CHECKED SIMULATOR PATH
       exactly as `total_probe`: the checker must accept, six width-aware stimuli
@@ -30,7 +25,7 @@ Exit: 0 pass / 1 disagreement or checker rejection / 2 setup / 3 out of fuel.
 -/
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
 import LeanSemanticPrimitives.Projection.CertLoad
-import LeanSemanticPrimitives.Projection.Proto.PartialEvaluatorShift
+import LeanSemanticPrimitives.Projection.Proto.PartialEvaluatorSummary
 import LeanSemanticPrimitives.Projection.CertLoadAny   -- DCERT1 (unchanged) or DCERT2
 
 open Compiler Projection Projection.Hw Projection.Runner Projection.ProtoVar
@@ -62,12 +57,12 @@ partial def digT : Term → UInt64
 def digest (R : Program) : UInt64 :=
   R.funs.foldl (fun h fd => mixHash h (mixHash (hash fd.arity) (digT fd.body))) (hash R.entry)
 
-/-- VERBATIM from `scripts/total_probe.lean`. -/
+/-- VERBATIM from `Futamura_Projection_Scripts/total_probe.lean`. -/
 def runStep (sim : ProjectedSimulator) (D : DesignCert) (e : ClockEdges)
     (i : RuntimeInput) (s : RuntimeState) : Outcome :=
   outcomeOfSim (stepOf sim D e i s)
 
-/-- VERBATIM from `scripts/total_probe.lean`. -/
+/-- VERBATIM from `Futamura_Projection_Scripts/total_probe.lean`. -/
 def traceBoth (sim : ProjectedSimulator) (D : DesignCert) (n seed : Nat) :
     IO (Bool × Nat) := do
   let mut stRef := mkStateFor D seed
@@ -90,10 +85,10 @@ def traceBoth (sim : ProjectedSimulator) (D : DesignCert) (n seed : Nat) :
 
 def specS1 (sf wf : Nat) (D : DesignCert) : Except MixError Program :=
   mixDriver sf wf hwAPVarT [encDesign D]
-def specProto (sf wf : Nat) (D : DesignCert) : Except ProtoShift.MixError Program :=
-  ProtoShift.mixDriver sf wf hwAPVarT [encDesign D]
+def specProto (sf wf : Nat) (D : DesignCert) : Except ProtoSum.MixError Program :=
+  ProtoSum.mixDriver sf wf hwAPVarT [encDesign D]
 
-/-- `srcD` generalised, as in `scripts/s0_grid.lean`; `dynamic` makes every
+/-- `srcD` generalised, as in `Futamura_Projection_Scripts/s0_grid.lean`; `dynamic` makes every
 source an input. -/
 def gridD (nsrc nnode arity : Nat) (dynamic : Bool := false) : DesignCert where
   sources  := (List.range nsrc).toArray.map (fun i =>
@@ -123,20 +118,20 @@ def point (label : String) (s n a : Nat) (dyn : Bool := false) : IO Bool := do
   let D := gridD s n a dyn
   let (r1, t1) ← stage "s1" (fun (r : Except MixError Program) =>
                     match r with | .ok p => szOf p | .error _ => 0) (fun _ => specS1 200000 2000 D)
-  let (r2, t2) ← stage "proto" (fun (r : Except ProtoShift.MixError Program) =>
+  let (r2, t2) ← stage "proto" (fun (r : Except ProtoSum.MixError Program) =>
                     match r with | .ok p => szOf p | .error _ => 0) (fun _ => specProto 200000 2000 D)
   match r1, r2 with
   | .ok A, .ok B =>
     let (c1, f1) := checkRun D A
     let (c2, f2) := checkRun D B
     let same := digest A == digest B
-    IO.println s!"  {label} | S {s} N {n} E {n * a} | HOST {t1} ms | SHIFT {t2} ms | terms {szOf A}/{szOf B} \
-identical {same} | HOST digest {digest A} | HOST chk {c1} ref {f1} | SHIFT chk {c2} ref {f2}"
+    IO.println s!"  {label} | S {s} N {n} E {n * a} | HOST {t1} ms | PROTO {t2} ms | terms {szOf A}/{szOf B} \
+identical {same} | HOST digest {digest A} | HOST chk {c1} ref {f1} | PROTO chk {c2} ref {f2}"
     return (same && c1 && f1 && c2 && f2)
   | _, _ => do IO.println s!"  {label} | a backend FAILED"; return false
 
 def grid : IO UInt32 := do
-  IO.println "S3 grid: HOST (proved, this build) vs SHIFT (deferred-shift prototype, control), same process"
+  IO.println "S2 grid: HOST (proved, this build) vs PROTO (S2a prototype, control), same process"
   let mut ok := true
   IO.println "[A] S varies, N=256, arity 2"
   for s in [64, 128, 256, 512, 1024] do unless (← point "A" s 256 2) do ok := false
@@ -190,35 +185,16 @@ def cert (path backend : String) (sf wf : Nat) : IO UInt32 := do
     | .error .outOfFuel => do IO.eprintln "  OUT OF FUEL"; return 3
     | .error e => do IO.eprintln s!"  FAILED {repr e}"; return 2
   else
-    let (r, t) ← stage "specialize" (fun (r : Except ProtoShift.MixError Program) =>
+    let (r, t) ← stage "specialize" (fun (r : Except ProtoSum.MixError Program) =>
                     match r with | .ok p => szOf p | .error _ => 0) (fun _ => specProto sf wf D)
     match r with
     | .ok R => accept D R t
     | .error .outOfFuel => do IO.eprintln "  OUT OF FUEL"; return 3
     | .error e => do IO.eprintln s!"  FAILED {repr e}"; return 2
 
-/-- Specialize ONCE with one backend and exit: no checker, no residual runs. -/
-def specOnly (D : DesignCert) (backend : String) : IO UInt32 := do
-  let t0 ← IO.monoMsNow
-  if backend == "host" then
-    match ← IO.lazyPure (fun _ => specS1 200000 2000 D) with
-    | .ok R => do
-        let dg ← IO.lazyPure (fun _ => digest R)
-        IO.println s!"  SPEC host  {(← IO.monoMsNow) - t0} ms  terms {szOf R}  digest {dg}"; return 0
-    | .error e => do IO.eprintln s!"  FAILED {repr e}"; return 2
-  else
-    match ← IO.lazyPure (fun _ => specProto 200000 2000 D) with
-    | .ok R => do
-        let dg ← IO.lazyPure (fun _ => digest R)
-        IO.println s!"  SPEC shift {(← IO.monoMsNow) - t0} ms  terms {szOf R}  digest {dg}"; return 0
-    | .error e => do IO.eprintln s!"  FAILED {repr e}"; return 2
-
 def main (args : List String) : IO UInt32 := do
   match args with
-  | ["spec", "grid", s, n, a, b] =>
-      specOnly (gridD ((s.toNat?).getD 64) ((n.toNat?).getD 64) ((a.toNat?).getD 2)) b
-  | ["spec", "cert", p, b] => do specOnly (← CertLoadAny.loadCertAny p) b
   | ["grid"] => grid
   | ["cert", p, b] => cert p b 200000 2000
   | ["cert", p, b, a, c] => cert p b ((a.toNat?).getD 200000) ((c.toNat?).getD 2000)
-  | _ => do IO.eprintln "usage: s2a_probe grid | cert PATH (host|shift) [sf wf]"; return 2
+  | _ => do IO.eprintln "usage: s2a_probe grid | cert PATH (host|proto) [sf wf]"; return 2

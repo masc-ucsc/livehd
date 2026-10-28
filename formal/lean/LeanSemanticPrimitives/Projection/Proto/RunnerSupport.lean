@@ -1,7 +1,7 @@
 /-
 # Shared scaffolding for the native runners
 
-`scripts/proto_probe.lean` grew these as script-local definitions.  A second
+`Futamura_Projection_Scripts/proto_probe.lean` grew these as script-local definitions.  A second
 runner needs the same ones, so they live here and are compiled once.
 
 **State this accurately: the duplication is NOT yet removed.**  `proto_probe`

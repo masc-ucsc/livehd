@@ -198,7 +198,7 @@ TEST(SingleEdgeMemoryGate, NarrowConcatLaneOfTheSharedZeroIsUntouched) {
 // They also run BEFORE bitwidth/cprop, so a width that is correct here can
 // still be narrowed on the way to emission -- which is exactly what happened to
 // the first version of this gate.  The emitted VALUE is checked separately by
-// `formal/lean/scripts/slot_mask_check.lean` against a real certificate.
+// `formal/lean/Futamura_Projection_Scripts/slot_mask_check.lean` against a real certificate.
 //
 // EVERY HIGH LANE SURVIVES the active step: the gated enable is the ORIGINAL
 // vector ANDed with the mask, at the full `wensize`.

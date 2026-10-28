@@ -6,7 +6,7 @@ set -euo pipefail
 # assignment to shifts and masks -- so the fixture is Pyrope, whose bit-range
 # writes (`r#[2..=5] = v`) lower to Set_mask chains. Two independent lowerings
 # of the SAME LGraph are compared step by step:
-#   the certificate's `interpretDesign` (scripts/cert_trace.lean), and
+#   the certificate's `interpretDesign` (Futamura_Projection_Scripts/cert_trace.lean), and
 #   LiveHD's own Verilog for the graph (--emit verilog), under iverilog,
 # on a contiguous window, two single-bit writes, a window inside a SIGNED
 # carrier, and a window filled from a signed source.
@@ -97,7 +97,7 @@ rtl() { # <verilog> <out>
   iverilog -g2012 -o "$OUT/$2.vvp" "$1" "$OUT/tb.v" && vvp "$OUT/$2.vvp" | grep '^STEP' > "$OUT/$2.txt"
 }
 LP=$(cd "$ROOT/formal/lean" && lake env printenv LEAN_PATH)
-(cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run scripts/cert_trace.lean \
+(cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run Futamura_Projection_Scripts/cert_trace.lean \
    "$OUT/lean/smk.dcert" "$CYCLES" "$OUT/stim.txt" edges:all > "$OUT/cert.txt" 2> "$OUT/cert.err") \
   || { cat "$OUT/cert.err"; echo "FAIL: cert_trace"; exit 1; }
 rtl "$OUT/smk.gen.v" lhdv

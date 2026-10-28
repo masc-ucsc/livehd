@@ -27,8 +27,8 @@ NOT a claim about intended RTL semantics, and not a projection result.  It reads
 the two places a certificate records a reset polarity and reports whether, and
 how, they can be compared.
 
-    python3 scripts/reset_polarity_census.py [--json out.json] FILE.dcert [...]
-    python3 scripts/reset_polarity_census.py --glob 'dir/**/*.dcert'
+    python3 Futamura_Projection_Scripts/reset_polarity_census.py [--json out.json] FILE.dcert [...]
+    python3 Futamura_Projection_Scripts/reset_polarity_census.py --glob 'dir/**/*.dcert'
 """
 import argparse, collections, glob, hashlib, json, os, sys
 

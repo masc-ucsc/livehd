@@ -1,7 +1,7 @@
 /-
 `residual_census` -- M3 stage S0: what a projection residual is made of.
 
-    lean --run scripts/residual_census.lean <cert> <stepFuel> <workFuel> [route:scalar|mem|var|fused]
+    lean --run Futamura_Projection_Scripts/residual_census.lean <cert> <stepFuel> <workFuel> [route:scalar|mem|var|fused]
 
 Specializes the certificate on the chosen route (scalar: `mixDriver` on
 `hwAPVarT`; mem: `projectMemDesignAt`; var: `MemVariant.projectMemVarDesignAt`;

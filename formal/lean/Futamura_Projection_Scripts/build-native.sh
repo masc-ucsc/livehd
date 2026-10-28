@@ -114,7 +114,7 @@ for m in "${MODULES[@]}"; do
 done
 
 # the probe is always rebuilt: it is cheap and it is what the numbers come from
-PROBE=${1:-scripts/perf_probe.lean}
+PROBE=${1:-Futamura_Projection_Scripts/perf_probe.lean}
 pb=$(basename "$PROBE" .lean)
 printf '  %-44s ' "$pb (probe)"
 s=$(date +%s%N)

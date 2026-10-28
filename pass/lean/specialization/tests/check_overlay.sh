@@ -14,14 +14,14 @@
 # record: it rebuilds Projection/OperatorBridge (no Mathlib) and, under lake,
 # Translation/OpBridge (Mathlib).
 #
-# overlays/bv_shl_step.patch is the FP branch's historical overlay; master did
+# evidence/bv_shl_step.patch is the FP branch's historical overlay; master did
 # not apply it (its body is the unguarded 2^k), so it is no longer regenerated.
 #
 # Runnable from ANY directory: the repo root comes from this script's location.
 set -uo pipefail
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-ROOT=$(cd "$HERE/../../../../.." && pwd)
+ROOT=$(cd "$HERE/../../../.." && pwd)
 
 BASE_REV=90583be1349acbd25f740b176a406aa8bbe1251c
 BASE_REPO=${BASE_REPO:-$ROOT}

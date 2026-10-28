@@ -35,7 +35,7 @@ cd formal/lean
 bash .build-proj.sh                       # simulator + tools, into .olean-dev, with the axiom gate
 bash .build-proj.sh HDLProof/Sym/ConjT    # one tools module
 # native drivers, into a project-local root:
-OPT=-O2 ROOT=$PWD/../../generated/sym/nat_root bash scripts/build-opt.sh \
+OPT=-O2 ROOT=$PWD/../../generated/sym/nat_root bash Futamura_Projection_Scripts/build-opt.sh \
     ../../pass/lean/tools/drivers/sym_verify.lean ../../pass/lean/tools/drivers/sym_refine.lean \
     ../../pass/lean/tools/drivers/sym_refmap.lean
 ln -s "$(dirname "$(elan which lean)")/cadical" ../../generated/sym/nat_root/nat/cadical

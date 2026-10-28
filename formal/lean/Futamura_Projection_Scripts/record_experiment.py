@@ -29,7 +29,7 @@ import argparse, hashlib, json, os, re, subprocess, sys, datetime, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 LEAN = os.path.dirname(HERE)
-OUT = os.path.join(LEAN, 'LeanSemanticPrimitives', 'Projection', 'certio',
+OUT = os.path.join(LEAN, '..', '..', 'pass', 'lean', 'specialization', 'evidence', 'certio',
                    'experiments.jsonl')
 # The sources that decide what a run DID, per runner.  A fixed list was wrong:
 # it hashed proto_probe/InterpreterVariant/PartialEvaluatorFast for every runner,
@@ -40,10 +40,10 @@ CODE_COMMON = ['LeanSemanticPrimitives/Projection/ProjectionCorrect.lean',
                'LeanSemanticPrimitives/Projection/ResidualFragment.lean',
                'LeanSemanticPrimitives/Projection/ProjectedStep.lean',
                'LeanSemanticPrimitives/Projection/HardwareInterpreter.lean']
-CODE_FORK  = ['scripts/proto_probe.lean',
+CODE_FORK  = ['Futamura_Projection_Scripts/proto_probe.lean',
               'LeanSemanticPrimitives/Projection/Proto/InterpreterVariant.lean',
               'LeanSemanticPrimitives/Projection/Proto/PartialEvaluatorFast.lean']
-CODE_TOTAL = ['scripts/total_probe.lean',
+CODE_TOTAL = ['Futamura_Projection_Scripts/total_probe.lean',
               'LeanSemanticPrimitives/Projection/Proto/RunnerSupport.lean',
               'LeanSemanticPrimitives/Projection/Proto/VariantExec.lean',
               'LeanSemanticPrimitives/Projection/Proto/VariantAdequacy.lean',

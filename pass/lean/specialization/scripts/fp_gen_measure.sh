@@ -9,7 +9,7 @@
 # figure is the MEDIAN of the repetitions.
 #   measure_genprobe.sh <out-subdir> <reps> <block>...
 set -uo pipefail
-R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"   # the repo root, from this script's location
+R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"   # the repo root, from this script's location
 G=$R/generated/master_port/fp/genprobe
 SUB=${1:?out subdir}; REPS=${2:?reps}; shift 2
 O=$G/runs/$SUB; mkdir -p "$O"

@@ -26,10 +26,10 @@
 #   fp_cov_dcert2_reuse_test.sh [scratch-dir]
 set -uo pipefail
 HERE=$(dirname "$(readlink -f "$0")")
-SRC=$HERE/fp_cov_dcert2.sh
-[ -f "$SRC" ] || { echo "no fp_cov_dcert2.sh beside this test"; exit 2; }
+SRC=$HERE/../scripts/fp_cov_dcert2.sh
+[ -f "$SRC" ] || { echo "no fp_cov_dcert2.sh in ../scripts"; exit 2; }
 # PROJECT-LOCAL by default: no temporary directories under the filesystem root.
-J=${1:-$HERE/../../../generated/fixture/fp_cov_reuse_$$}
+J=${1:-$HERE/../../../../generated/fixture/fp_cov_reuse_$$}
 mkdir -p "$J/lp" || exit 2
 J=$(readlink -f "$J")
 sed -n '/^runner_of() {/,/^}$/p;/^identity_of() {/,/^}$/p;/^reusable() {/,/^}$/p;/^phase() {/,/^}$/p' "$SRC" > "$J/funcs.sh"

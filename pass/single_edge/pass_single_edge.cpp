@@ -944,16 +944,65 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_cloc
                     || lc::gated_latch_closed_assuming(dn, e.icg->clock, /*closed_level=*/window_level, others))
                 && (lc::latch_open_at(dn, e.icg->clock, /*level=*/!window_level)
                     || lc::latch_open_assuming(dn, e.icg->clock, /*level=*/!window_level, others));
-          if (opposite_for_other_edge && !opposite_here) {
+          // NESTED GATES, FOR A FLOP. The same flattening puts a FLOP behind the
+          // inner gate: CORE-ET's vpu_lane gates `clock` into `clock_txfma`, and
+          // txfmafrac_top's cgate_txfma0_ctrl_frf gates that again for
+          // `always_ff @(posedge ctrl_frf_clk)` (B07). The inner enable latch is
+          // shut at clk=1 only while the OUTER enable is on -- and while it is
+          // off there is no gated edge at all -- so the opposite-phase rule
+          // holds conditioned on the outer enable, and the arm bypass below
+          // reads exactly what the flop samples.
+          //
+          // Lean ONLY on an enable that is itself a textbook opposite-phase
+          // latch, unconditionally: it cannot change during the phase in
+          // question, so "shut whenever it is 1" holds for the whole phase.
+          // Conditioning on every other enable, as the window rule does, would
+          // let two latches whose windows each need the other vouch for each
+          // other -- both open while the clock is high, both pass a change at
+          // once, and the gated clock glitches. (Today the window rule already
+          // refuses such a pair while analysing the enable latches themselves;
+          // this keeps the flop rule sound without leaning on that order.)
+          bool opposite_nested = false;
+          if (!e.is_latch && !opposite_here) {
+            std::vector<hhds::Pin_class> steady;
+            for (const auto& o : others) {
+              if (o.is_invalid() || o.is_const() || gu::is_graph_input_pin(o)) {
+                continue;
+              }
+              auto on = o.get_master_node();
+              if (gu::type_op_of(on) != Ntype_op::Latch) {
+                auto under = o;  // the same zero-extend walk as for `en` above
+                for (int depth = 0; depth < 4; ++depth) {
+                  under = identity_enable_source(under);
+                  if (under.is_invalid()) {
+                    break;
+                  }
+                  if (gu::type_op_of(under.get_master_node()) == Ntype_op::Latch) {
+                    on = under.get_master_node();
+                    break;
+                  }
+                }
+              }
+              if (gu::type_op_of(on) == Ntype_op::Latch && lc::gated_latch_closed_at(on, e.icg->clock, closed_after)
+                  && lc::latch_open_at(on, e.icg->clock, !closed_after)) {
+                steady.push_back(o);
+              }
+            }
+            opposite_nested = !steady.empty() && lc::gated_latch_closed_assuming(dn, e.icg->clock, closed_after, steady)
+                              && (lc::latch_open_at(dn, e.icg->clock, !closed_after)
+                                  || lc::latch_open_assuming(dn, e.icg->clock, !closed_after, steady));
+          }
+          const bool opposite_ok = opposite_here || opposite_nested;
+          if (opposite_for_other_edge && !opposite_ok) {
             e.icg_hold = true;
           }
-          if (!opposite_here && !opposite_for_other_edge && !held_for_window) {
+          if (!opposite_ok && !opposite_for_other_edge && !held_for_window) {
             plan.code = "clock-gate-latch-phase";
             plan.why  = "state element `" + label_of(n) + "` is clocked through a gate whose enable latch `" + label_of(dn)
                        + "` is not transparent exactly on the phase opposite the gated edge";
             return plan;
           }
-          if (held_for_window && !opposite_here) {
+          if (held_for_window && !opposite_ok) {
             ++e.icg_window_held;
             continue;  // the held Q, deliberately: see above
           }
@@ -2441,6 +2490,11 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     // Everything above is analysis; nothing has been mutated. Report what the
     // rewrite WOULD do so a miter can pick one shared time base first.
     r.applied   = plan.slots > 1 || r.latches_retyped > 0 || need.n_latches > 0 || need.n_negedge_flops > 0;
+    // The latches the rewrite WOULD retype into the divider. A miter reads this
+    // to check that both sides reach the time base the SAME way: a gate folded
+    // into a flop enable on one side and its enable latch retyped on the other
+    // are two different normal forms (see prepare_time_base's route check).
+    r.latches_retyped = need.n_latches;
     r.slots     = plan.slots;
     r.ref_clock = plan.ref_clock_name;
     r.reason    = std::format("plan: P={} slots ({})", plan.slots, need.why.empty() ? "forced" : need.why);

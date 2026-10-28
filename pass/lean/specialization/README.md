@@ -5,9 +5,8 @@ is proved equal to the reference semantics of the design. It is built by the fir
 Futamura projection: a Lean interpreter of hardware designs is specialized to one
 design, and what is left is a program for that design alone.
 
-This folder holds the simulator's runner, its measurement scripts and its evidence.
-The Lean code is in `formal/lean/LeanSemanticPrimitives/Projection/` and the drivers
-are in `formal/lean/scripts/`.
+This folder holds the simulator's scripts, tests and evidence. Its Lean code
+stays in the Lean project ([Code layout](#code-layout)).
 
 **Terms used below:**
 - **Certificate** (`<top>.dcert`, format DCERT2): the design as LiveHD exports it.
@@ -104,9 +103,9 @@ bash .build-proj.sh
 
 # 3. the native drivers (-O2), into a project-local root
 ROOT=$PWD/../../generated/fp/nat_root
-OPT=-O2 ROOT=$ROOT bash scripts/build-opt.sh scripts/dcert2_memroute.lean \
-    scripts/dcert2_loadcheck.lean scripts/dcert2_support.lean \
-    scripts/gen_probe_v2.lean scripts/gen_readiness_v2.lean
+OPT=-O2 ROOT=$ROOT bash Futamura_Projection_Scripts/build-opt.sh Futamura_Projection_Scripts/dcert2_memroute.lean \
+    Futamura_Projection_Scripts/dcert2_loadcheck.lean Futamura_Projection_Scripts/dcert2_support.lean \
+    Futamura_Projection_Scripts/gen_probe_v2.lean Futamura_Projection_Scripts/gen_readiness_v2.lean
 # -> $ROOT/nat/dcert2_memroute, ...
 
 # 4. self-tests: the comparison and state-file rules, then the four small fixtures
@@ -163,12 +162,13 @@ folder, with its identity (certificate, driver and argument hashes), timing, CPU
 peak memory and exit status:
 
 ```bash
-bash pass/lean/specialization/fp_cov_dcert2.sh --native $ROOT/nat --only memroute \
+bash pass/lean/specialization/scripts/fp_cov_dcert2.sh --native $ROOT/nat --only memroute \
     --memmax 32G <livehd-checkout> <out-dir> 20000000 500000 4 $W/lean/top.dcert
 ```
 
-- Phases: `decode`, `support`, `generate`, `readiness` (the scalar route) and
-  `memroute`; the default runs all of them.
+- Phases: the default runs the scalar route's four, `decode`, `support`,
+  `generate` and `readiness`. The memory route, which the benchmark rows use,
+  runs only with `--only memroute`, as above.
 - `--memmax` is a memory ceiling for host safety. A run it stops is recorded as
   KILLED, never as a refusal by the design. There is no time limit.
 - `<livehd-checkout>` supplies `LEAN_PATH` for the interpreted route (no `--native`),
@@ -230,9 +230,9 @@ fuel 20000000/500000, `init=zero`, 4 cycles each compared with `interpretDesign`
 **Earlier CVA6 blocks, scalar route:**
 - Combinational: `alu`, `alu_wrapper`, `commit_stage`, `compressed_decoder`, `decoder`,
   `instr_scan`, `pmp`, `pmp_data_if`. Their 26 historical passes were re-run at a later
-  HEAD and all passed again (`tests/fp_b6_head_replay.tsv`).
+  HEAD and all passed again (`evidence/fp_b6_head_replay.tsv`).
 - Sequential: `ariane_regfile`, `serdiv`, `instr_queue`, `btb`, `store_buffer`,
-  `id_stage`, `cva6_ptw`, `perf_counters`, `bht` (`tests/fp_frozen30_seq_join.tsv`).
+  `id_stage`, `cva6_ptw`, `perf_counters`, `bht` (`evidence/fp_frozen30_seq_join.tsv`).
 
 ## Performance
 
@@ -281,7 +281,7 @@ dcert2_memroute load_store_unit_gate.dcert 20000000 500000 4 zero
   bit and adds powers of two (`bits_to_int`). The split between the residual and the
   reference was not measured on these rows.
 - **What specialization buys** was measured on the scalar route
-  (`tests/fp_speedup.tsv`): the same six stimuli run through `interpretDesign` and
+  (`evidence/fp_speedup.tsv`): the same six stimuli run through `interpretDesign` and
   through the residual, native -O2, in one process. The residual is 17–97× faster on
   8 sequential CVA6 blocks (mean 49×), for example `instr_queue` 97×, `btb` 90× and
   `id_stage` 27×. It is 0.9–22× faster on 8 combinational blocks (mean 5.9×).
@@ -293,29 +293,52 @@ The same residual is the input of the unbounded proof tools (invariants, k-induc
 refinement with stuttering): see `M3_UNBOUNDED_PROOFS.md` and
 `pass/lean/tools/README.md`.
 
-## Files
+## Code layout
 
-| file | role |
+One rule decides where a file goes:
+- `scripts/`: what you run to produce a result;
+- `tests/`: what you run to check the tool, with fixtures in `tests/fixtures/`;
+- `evidence/`: measurements and run records, kept as records. Nothing reads them.
+
+| `scripts/` | role |
 |---|---|
 | `fp_cov_dcert2.sh` | the recorded runner: decode, support, generate, readiness and memroute phases; immutable attempt folders, reuse only on identical identity, memory ceiling, no time limit |
-| `fp_cov_dcert2_reuse_test.sh` | checks the runner's identity, reuse and attempt rules on fixtures |
 | `fp_gen_build.sh`, `fp_gen_sample.sh`, `fp_gen_measure.sh`, `fp_gen_counterbalanced.sh` | generation-latency builds and counterbalanced measurements |
-| `fp_install.py` | installs the projection-branch probes onto master (`tests/fp_install_map.tsv`) |
+| `fp_install.py` | historical: installed the projection branch's files onto master, at the paths they had then (`formal/lean/scripts/...`); its map is `evidence/fp_install_map.tsv` |
 | `fp_replay.py` | replays historical FP rows into a fresh output folder |
-| `M3_UNBOUNDED_PROOFS.md` | unbounded proofs on the residual, and the `MemVariant`/`MemFused` interpreters |
+| `coreet_operator_census.py` | which operators the CORE-ET certificates use, and whether the interpreter implements each (`coreet_operator_census.md`) |
 
-The certificate exporter (`pass/lean/*.cpp`), the coverage harness shared by every
-approach (`pass/lean/scripts/fp_cov_run.sh`, the `fp_cov_queue_*.sh` queues,
-`fp_cov_ir_check.sh`, the CORE-ET input adapters) and the Lean semantics are not here.
-
-### tests/
-
-Evidence (`*.tsv`, `*.jsonl`), the generation-only measurement procedure
-(`fp_generation_only.md`), and controls:
-
-| control | run |
+| `tests/` | run |
 |---|---|
-| `axiom_gate_controls.sh` | `bash pass/lean/specialization/tests/axiom_gate_controls.sh` |
-| `fp_replay_controls.py` | `python pass/lean/specialization/tests/fp_replay_controls.py` |
-| `fp_csimp_checks.lean`, `fp_sext_controls.lean`, `fp_dcert1_admission_controls.lean` | `lean` from `formal/lean` |
-| `fp_cov_dcert2_reuse_test.sh` (one level up) | `bash pass/lean/specialization/fp_cov_dcert2_reuse_test.sh` |
+| `fp_cov_dcert2_reuse_test.sh`: the runner's identity, reuse and attempt rules | `bash pass/lean/specialization/tests/fp_cov_dcert2_reuse_test.sh` |
+| `fp_replay_controls.py`: `fp_replay.py`'s admission rules | `python pass/lean/specialization/tests/fp_replay_controls.py` |
+| `axiom_gate_controls.sh`: the axiom gate refuses `sorry`, `native_decide` and an explicit axiom | `bash pass/lean/specialization/tests/axiom_gate_controls.sh` |
+| `check_overlay.sh`: the shared semantics have not drifted from their base | `bash pass/lean/specialization/tests/check_overlay.sh [--semantic]` |
+| `check_certio.sh`: the provenance of the DCERT1 codec (`Compiler/CertIOV1.lean`) | `bash pass/lean/specialization/tests/check_certio.sh` |
+| `fp_sext_controls.lean`, `fp_dcert1_admission_controls.lean` | from `formal/lean`: `LEAN_PATH=.olean-dev lean ../../pass/lean/specialization/tests/<file>` |
+| `fp_csimp_checks.lean`: the `@[csimp]` equalities and their axioms | it needs the `Proto/` modules, which only `build-opt.sh` builds: `LEAN_PATH=$ROOT/olean lean ...` |
+
+`evidence/` holds the coverage, admission, generation and readiness tables
+(`fp_*.tsv`, `fp_master_experiments.jsonl`), the speed-up table `fp_speedup.tsv`,
+the generation-only procedure (`fp_generation_only.md`), the CertIO experiment
+log and profiles (`certio/`), and the FP branch's historical overlay
+(`bv_shl_step.patch`).
+
+The Lean code stays in the Lean project:
+- `formal/lean/LeanSemanticPrimitives/Projection/`: the interpreter, the
+  specializer, the proofs, the memory route and the axiom gate;
+- `formal/lean/Futamura_Projection_Scripts/`: every file is this direction's.
+  It holds the drivers (`dcert2_*`, `gen_probe_v2`, `gen_readiness_v2`,
+  `cert_runner_any`, `cert_trace`, ...), the build scripts `build-opt.sh` and
+  `build-native.sh`, the helpers next to them, and the state and stimulus files
+  in `memstate/`. It was `formal/lean/scripts/`; recorded runs keep that path.
+  Two other users: the proof tools build with its `build-opt.sh`, and the
+  exporter's RTL oracles (`pass/lean/Exporter/Frontend/scripts/*_oracle.sh`) run
+  its `cert_trace.lean`.
+
+Elsewhere:
+- the proof tools that use the residual: `pass/lean/tools/` (their design note,
+  `M3_UNBOUNDED_PROOFS.md`, is in this folder);
+- the exporter: `pass/lean/Exporter/`;
+- the 12-row coverage harness that every route uses: `pass/lean/scripts/fp_cov_run.sh`
+  and the `fp_cov_queue_*.sh` queues.
