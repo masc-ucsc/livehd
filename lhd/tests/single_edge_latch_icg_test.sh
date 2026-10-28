@@ -375,11 +375,27 @@ out="$(run_sim npos "$W/nnorm.v")"
 grep -q "WCE_DIFF_OK" <<<"$out" \
   || { echo "$out" | grep -E 'MISMATCH|WCE' | head -6; fail "the normalized NESTED design does not match its source under $SIM"; }
 echo "ok: a latch pair behind a gate of a gated clock agrees with its source over 80 periods under $SIM"
-grep -q "if ((single_edge_phase & g & en_1p)) begin" "$W/nnorm.v" \
-  || { grep -n "single_edge_phase" "$W/nnorm.v" | head; fail "the nested slot-1 commit is not spelled as expected; its controls cannot be derived"; }
+# THE SLOT-1 COMMIT, by its TERMS rather than by one spelling. The guard is a
+# chain of `and1` folds onto ONE commutative And node, so the operand order in
+# the emitted text is the graph's driver order for that sink, not a property
+# single_edge promises -- it has flipped (`g & en_1p` -> `en_1p & g`) with no
+# change to the enable walk or the fold. What the rule actually claims is that
+# the commit reads the phase and BOTH gates' HELD enables, so check that, and
+# derive the mutants from the line as emitted so order cannot make them no-ops.
+CMT="$(grep -oE 'if \(\(single_edge_phase( & [A-Za-z_][A-Za-z_0-9]*)+\)\) begin' "$W/nnorm.v" | head -1)"
+[ -n "$CMT" ] \
+  || { grep -n "single_edge_phase" "$W/nnorm.v" | head; fail "no slot-1 commit gated on the phase divider was emitted"; }
+grep -qE '\ben_1p\b' <<<"$CMT" && grep -qE '\bg\b' <<<"$CMT" \
+  || { echo "$CMT"; fail "the nested slot-1 commit does not read BOTH held enables (en_1p and g)"; }
 # NEGATIVE CONTROLS: each held read replaced by its gate latch's live input.
-sed 's/if ((single_edge_phase & g & en_1p)) begin/if ((single_edge_phase \& g \& en)) begin/' "$W/nnorm.v" > "$W/nnorm_inner.v"
-sed 's/if ((single_edge_phase & g & en_1p)) begin/if ((single_edge_phase \& en_wb \& en_1p)) begin/' "$W/nnorm.v" > "$W/nnorm_outer.v"
+mutate() { # <replacement line> -> the design with the commit line replaced
+  awk -v old="$CMT" -v new="$1" '
+    { p = index($0, old)
+      if (p > 0) { $0 = substr($0, 1, p - 1) new substr($0, p + length(old)) }
+      print }' "$W/nnorm.v"
+}
+mutate "$(sed -E 's/\ben_1p\b/en/'    <<<"$CMT")" > "$W/nnorm_inner.v"
+mutate "$(sed -E 's/\bg\b/en_wb/'     <<<"$CMT")" > "$W/nnorm_outer.v"
 cmp -s "$W/nnorm.v" "$W/nnorm_inner.v" && fail "the inner-bypass mutation did not apply"
 cmp -s "$W/nnorm.v" "$W/nnorm_outer.v" && fail "the outer-bypass mutation did not apply"
 out="$(run_sim ninner "$W/nnorm_inner.v")"
