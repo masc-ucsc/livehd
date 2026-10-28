@@ -23,6 +23,10 @@ static Pass_plugin sample("pass_opentimer", Pass_opentimer::setup);
 void Pass_opentimer::setup() {
   Eprp_method m1("pass.opentimer", "timing analysis on lgraph", &Pass_opentimer::time_work);
   m1.add_label_required("files", "Liberty, spef, sdc file[s] for timing");
+  m1.add_label_optional("extra_libs",
+                        "Liberty file[s] with more cells for BOTH corners (e.g. the provisional domino cells), loaded after "
+                        "`files`' own max/min library pair",
+                        "");
   m1.add_label_optional("margin", "% arrival time marging (0-100)", "0");
   m1.add_label_optional("critical", "Annotate all nodes on paths near their timing target; requires targets or SDC", "false");
   m1.add_label_optional("critical_percent", "Setup slack margin as a percentage of each target period (0-100)", "5");
@@ -99,6 +103,15 @@ Pass_opentimer::Pass_opentimer(const Eprp_var& var) : Pass("pass.opentimer", var
     } else if (str_tools::ends_with(f, ".prp")) {  // Nothing to do
     } else {
       livehd::diag::err("pass.opentimer", "bad-option", "io").msg("unknown file extension '{}'", f).fatal();
+    }
+  }
+
+  // Cells the max/min pair does not carry: read into both corners, and part of
+  // the file list the STA cache and the physical session key on.
+  for (const auto f : absl::StrSplit(std::string(var.get("extra_libs", "")), ',')) {
+    if (!f.empty()) {
+      timing_file_list.emplace_back(f);
+      extra_lib_file_list.emplace_back(f);
     }
   }
 
@@ -179,6 +192,10 @@ void Pass_opentimer::ensure_libs() {
     } else {
       timer.read_celllib(lib_file_list[i], ot::MIN);
     }
+  }
+  for (const auto& file : extra_lib_file_list) {
+    std::print("opentimer using extra liberty file '{}'\n", file);
+    timer.read_celllib(file);
   }
   // Flush the (lineage-queued) read_celllib so build_circuit can validate cell
   // names against the loaded library at queue time. The design is still empty,

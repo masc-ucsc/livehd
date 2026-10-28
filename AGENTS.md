@@ -11,11 +11,15 @@
 
 - **Build**: `bazel build -c dbg //...`
 - **Test**: `bazel test //...`
-- **Test runtime**: Keep each test under 20 seconds with `-c opt` and under
-  60 seconds with `-c dbg`; 30 seconds is the hard per-test limit for the
-  optimized regression on this machine (run with `--test_timeout=30`).
+- **Test runtime**: Aim for at most 30 seconds per test (soft target, any
+  build mode). It is machine-dependent, not a failure threshold. Bazel keeps
+  its 300 second timeout (`.bazelrc`) only as a hang safety net; never raise it
+  to hide a slow test. Periodically review slow tests and reduce their cost.
   Simplify oversized fixtures and avoid repeated
   compilation; keep large design benchmarks in their own repositories.
+  Never skip, exclude, mark manual, or weaken a test because it is slow.
+  Fix the implementation or test setup, or split independent checks while
+  preserving coverage. Report measured runtimes and use them to guide cleanup.
 - **Independent tests**: LiveHD scripts and BUILD rules must not access sibling
   benchmark repositories. Test inputs must be provided by this repository or
   declared build dependencies.

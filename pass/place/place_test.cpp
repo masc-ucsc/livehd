@@ -82,12 +82,16 @@ TEST(Placement, ExperimentalBoundaryRefinementsRunOnlyAtTheFinalStage) {
     options.busorder.enabled     = mode == 0;
     options.boundarypins.enabled = mode == 1;
     options.boundarypins.align   = mode == 2;
-    for (bool terminal : {false, true}) {
+    // 0: optimization pending, an ordinary call (never refines); 1: pending, the dedicated refine_regions call;
+    // 2: terminal (nothing pending).
+    for (int phase : {0, 1, 2}) {
+      const bool terminal = phase == 2;
       for (auto stage : {Placement_stage::macro, Placement_stage::final}) {
         hhds::GraphLibrary placed;
         options.optimization_pending = !terminal;
+        options.region_refine        = phase == 1;
         options.completed_stage      = stage;
-        options.output_dir = std::format("{}/busorder_stages_{}_{}_{}", std::getenv("TEST_TMPDIR"), mode, terminal, int(stage));
+        options.output_dir = std::format("{}/busorder_stages_{}_{}_{}", std::getenv("TEST_TMPDIR"), mode, phase, int(stage));
         std::filesystem::remove_all(options.output_dir);
         const auto result = place(*graph, placed, options);
         check_legality(physical::read_lef(options.lefs), result.floorplan);
@@ -109,8 +113,11 @@ TEST(Placement, ExperimentalBoundaryRefinementsRunOnlyAtTheFinalStage) {
         }
         const auto report_path = options.output_dir + (boundary ? "/boundarypins/report.json" : "/busorder/report.json");
         EXPECT_EQ(result.floorplan.components.size(), 4u);
-        EXPECT_EQ(std::filesystem::exists(report_path), stage == Placement_stage::final);
-        if (stage == Placement_stage::final) {
+        // The final stage refines in the terminal pass and in the dedicated region_refine call; an ordinary
+        // optimization-pending call (first placement, timing round, resize trial) never does.
+        const bool refined = stage == Placement_stage::final && phase != 0;
+        EXPECT_EQ(std::filesystem::exists(report_path), refined);
+        if (refined) {
           std::ifstream       report_file(report_path);
           const std::string   text((std::istreambuf_iterator<char>(report_file)), {});
           rapidjson::Document report;
@@ -619,13 +626,19 @@ TEST(Placement, TwoRowCellsAreAnchoredBeforeTerminalLegalization) {
       {                 [](Options& o) { o.busorder.enabled = true; },                                 "region mesh"},
       {             [](Options& o) { o.boundarypins.enabled = true; },                                 "region mesh"},
       {               [](Options& o) { o.boundarypins.align = true; },                                 "region mesh"},
-      {             [](Options& o) { o.optimization_pending = true; }, "native legalization outside the final stage"},
       {[](Options& o) { o.satlegalize = o.satlegalize_route = true; },             "satlegalize treats multi-height"},
       {                   [](Options& o) { o.legalize_cells = true; },              "ECO legalization is single-row"},
       {                  [](Options& o) { o.changed_cells = {"c1"}; },              "ECO legalization is single-row"},
       {                    [&](Options& o) { o.previous = previous; },              "ECO legalization is single-row"},
       {                                                           h2d,                       "macro placement stage"},
   };
+  // Optimization pending defers the packing to finalize_placement: the placement itself is accepted.
+  {
+    auto o                = options;
+    o.optimization_pending = true;
+    o.output_dir          += "_pending";
+    EXPECT_NO_THROW((void)place(*chain.graph, chain.next_flat(), o));
+  }
   for (const auto& [mutate, expected] : refusals) {
     auto o = options;
     mutate(o);
@@ -6437,6 +6450,7 @@ TEST(Placement, SatInstallKeepsImportedFlippedCorePins) {
     options.macro_timing_interval = 1;
     options.final_timing_start    = 0;
     options.satlegalize           = sat;
+    options.region_sat            = sat;  // the dedicated SAT call (an ordinary pending call never runs the SAT pass)
     options.fp_evaluate           = [&](const Result& r) {
       for (const char* pin : {"A", "Y"}) {
         if (const auto found = r.pin_locations.find(std::string("fixed:") + pin); found != r.pin_locations.end()) {

@@ -17,6 +17,10 @@ lhd pass opentimer --top 'm__c0' lg:net cells.lib --workdir W
 - Timing files are **positional** (like `pass liberty gensim`): 1–2 Liberty
   (`.lib`, second = min corner) plus optional `.sdc` / `.spef`. `files` is a
   kernel-managed label — the kernel assembles it, `--set` cannot.
+- `extra_libs` (kernel-set, comma list of `.lib`): more cells for **both**
+  corners, loaded after the max/min pair of `files` and part of the STA cache
+  key. `lhd synth` uses it for the provisional domino cells, whose Liberty it
+  generates from the bundle (`pass/domplace/README.md`, "Timing for OpenTimer").
 - **One design per run** (one `ot::Timer` holds one design): `--top` picks the
   def out of the netlist library. Time a region module (`<mod>__c<N>`), a
   single flat module (`pass.color flat` + `pass.abc` map the whole design as

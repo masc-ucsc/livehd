@@ -3,9 +3,10 @@
 #
 # Verilog round-trip via the lhd kernel: each test compiles
 # verilog -> LGraph (yosys-verilog reader) -> cprop/bitwidth -> cgen verilog,
-# then checks the generated netlist against the original with both lgcheck
-# and native Slang/default lhd lec. The native sanity check accepts only an
-# explicit internal timeout (5s); its outer watchdog (10s) must not expire.
+# then checks the generated netlist against the original with lgcheck and
+# against the pre-emission graph with native lhd lec (Slang reads the emitted
+# Verilog). Reuse that graph instead of compiling the source twice; this also
+# keeps Yosys's accepted source dialect independent of Slang's stricter syntax.
 # lgcheck must pass. One `lhd compile` replaces the old
 # tolg|>lgraph.save + lgraph.match|>cprop|>cgen lgshell pipelines; the
 # stderr-grep heuristics are gone because lhd checks the diag sink after
@@ -59,10 +60,6 @@ do
   base=${input%.*}
 
   if [[ $input =~ "long_" ]]; then
-    if [[ $long == "" ]]; then
-      echo "Skipping long test for "$base
-      continue
-    fi
     base=${base:5}
   else
     if [[ $long == "true" && $fixme != "true" ]]; then
@@ -119,7 +116,7 @@ do
       continue
     fi
   else
-    # Independent Yosys/lgcheck oracle plus native Slang/default LEC. Run
+    # Independent source-level Yosys/lgcheck oracle plus native round-trip LEC. Run
     # both even if one fails, so a disagreement is visible in both logs.
     inou/yosys/lgcheck --implementation tmp_yosys_mix/all_${base}.v --reference "${full_input}" \
       --top "${base}" >tmp_yosys/${input}.lgcheck.log 2>&1
@@ -130,10 +127,22 @@ do
     # report `proven`, so requiring it costs nothing and restores the claim the
     # pre-consolidation gate made with `lhd lec`'s own exit code).
     python3 inou/prp/tests/lec.py --timeout 5 -- \
-      ${LHD} lec --impl verilog:tmp_yosys_mix/all_${base}.v --ref verilog:${full_input} \
+      ${LHD} lec --impl verilog:tmp_yosys_mix/all_${base}.v --ref lg:tmp_yosys/${base}_lg \
       --top ${base} --workdir tmp_yosys/${base}_check -q \
       --result-json tmp_yosys/${input}.check.json >tmp_yosys/${input}.lec.log 2>&1
     lec_rc=$?
+    # The pre-emission graph is the preferred reference. A graph the LEC encoder
+    # cannot model at all (verdict refuted-unsupported: e.g. an undriven operand
+    # of a generated netlist) says nothing about equivalence, so compare against
+    # the source through Slang instead. Any other failure (cex, timeout) stands.
+    if [ "$lec_rc" -ne 0 ] && grep -q '"verdict": *"refuted-unsupported"' tmp_yosys/${input}.check.json 2>/dev/null; then
+      echo "lec: lg: reference of ${base} is not modelable; checking against the source"
+      python3 inou/prp/tests/lec.py --timeout 5 -- \
+        ${LHD} lec --impl verilog:tmp_yosys_mix/all_${base}.v --ref verilog:${full_input} \
+        --top ${base} --workdir tmp_yosys/${base}_check_src -q \
+        --result-json tmp_yosys/${input}.check.json >tmp_yosys/${input}.lec.log 2>&1
+      lec_rc=$?
+    fi
     if [ "$lec_rc" -eq 0 ] && [ "$lgcheck_rc" -eq 0 ]; then
       tail -1 tmp_yosys/${input}.lec.log
       echo "Successfully matched generated verilog with original verilog (${full_input})"

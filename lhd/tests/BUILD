@@ -3105,6 +3105,19 @@ sh_test(
     ],
 )
 
+# OpenTimer, timing-driven placement, resize and cone resynthesis on a domino
+# netlist, through the Liberty generated from the bundle.
+sh_test(
+    name = "lhd_domplace_opentimer_smoke",
+    size = "small",
+    timeout = "short",
+    srcs = ["lhd_domplace_opentimer_smoke.py"],
+    data = [
+        "//inou/lefdef:test_data",
+        "//lhd",
+    ],
+)
+
 sh_test(
     name = "lhd_placement_smoke_usyn",
     size = "small",

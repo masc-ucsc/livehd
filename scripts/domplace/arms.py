@@ -64,8 +64,32 @@ def git(*args):
         return None
 
 
+def ps_tree_rss_kib(pid):
+    """Resident KiB of pid and its descendants from `ps` (no /proc on macOS), 0 once it is gone."""
+    try:
+        listing = subprocess.run(['ps', '-A', '-o', 'pid=,ppid=,rss='], capture_output=True, text=True,
+                                 timeout=10, check=True).stdout
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    rows, children = {}, {}
+    for line in listing.splitlines():
+        fields = line.split()
+        if len(fields) == 3:
+            child, parent, rss = map(int, fields)
+            rows[child] = rss
+            children.setdefault(parent, []).append(child)
+    total, stack = 0, [pid]
+    while stack:
+        current = stack.pop()
+        total += rows.get(current, 0)
+        stack.extend(children.get(current, []))
+    return total
+
+
 def tree_rss_kib(pid):
-    """Resident KiB of pid and its descendants (/proc), 0 once it is gone."""
+    """Resident KiB of pid and its descendants (/proc, else ps), 0 once it is gone."""
+    if not Path('/proc/self/status').exists():
+        return ps_tree_rss_kib(pid)
     total, stack = 0, [pid]
     while stack:
         current = stack.pop()

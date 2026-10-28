@@ -50,11 +50,11 @@ def with_sdc(name, text):
     return [a if not a.startswith('synth.sdc=') else f'synth.sdc={path}' for a in base]
 
 
-# The profile is opt-in and never moves a default: STA stays on unless the
-# run turns it off, so the profile is an explicit usage error, and the LEFs
-# and row access are kernel-plumbed (INTERNAL) labels.
-refused = run('sta', base + ['--set', 'pass.usyn.physical=domino_provisional', '--workdir', str(root / 'R')], False)
-assert refused['error']['class'] == 'usage' and 'synth.opentimer=false' in refused['error']['hint'], refused['error']
+# The profile is opt-in and never moves a default. STA stays on: OpenTimer times
+# the domino cells through the Liberty generated from the bundle (see
+# lhd_domplace_opentimer_smoke.py). The LEFs and row access are kernel-plumbed
+# (INTERNAL) labels.
+run('sta', base + ['--set', 'pass.usyn.physical=domino_provisional', '--workdir', str(root / 'R_sta')])
 internal = run('internal', base + domino + ['--set', 'pass.usyn.lef=x.lef', '--workdir', str(root / 'R')], False)
 assert 'INTERNAL' in internal['error']['message'], internal['error']
 row_internal = run('internal_row', base + domino + ['--set', 'pass.usyn.row_access=x', '--workdir', str(root / 'R')], False)
@@ -65,9 +65,6 @@ abc = [a if a != 'synth.mapper=usyn' else 'synth.mapper=abc' for a in base]
 place_on = ['--set', 'synth.place=true', '--set', 'synth.place.timing_driven=false']
 for leg, args, needle in (
         ('mapper', abc + domino, 'needs synth.mapper=usyn'),
-        ('timing_place', base + domino + ['--set', 'synth.place=true'], 'need OpenTimer'),  # timing-driven by default
-        ('resize', base + domino + place_on + ['--set', 'synth.place.resize=true'], 'need OpenTimer'),
-        ('resynth', base + domino + place_on + ['--set', 'synth.place.resynth=true'], 'need OpenTimer'),
         ('busorder', base + domino + place_on + ['--set', 'synth.place.region.busorder=true'], 'single-row cells'),
         ('boundarypins', base + domino + place_on + ['--set', 'synth.place.region.boundarypins=true'], 'single-row cells')):
     error = run(f'refused_{leg}', args + ['--workdir', str(root / 'R')], False)['error']

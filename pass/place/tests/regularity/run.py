@@ -17,11 +17,11 @@ import render
 ROOT = Path(__file__).resolve().parent
 
 
-def command(args, log, timeout):
+def command(args, log):
     with log.open('w') as stream:
         stream.write(json.dumps([str(a) for a in args])+'\n')
         stream.flush()
-        completed = subprocess.run([str(a) for a in args], stdout=stream, stderr=subprocess.STDOUT, timeout=timeout)
+        completed = subprocess.run([str(a) for a in args], stdout=stream, stderr=subprocess.STDOUT)
     if completed.returncode:
         raise RuntimeError(f'command exited {completed.returncode}; see {log}')
 
@@ -42,7 +42,7 @@ def run(case, args, output):
     started = time.monotonic()
     binary_hash = render.digest(args.lhd)
     command([args.lhd, 'compile', ROOT/'macros.v', '--top', 'REG_MACRO', '--set', 'compile.slang.blackbox_attribute=true', '--set', 'lhd.incremental=false',
-             '--emit-dir', f'lg:{directory}/macro_lg', '--workdir', directory/'macro_work', '-q'], directory/'macro.log', args.timeout)
+             '--emit-dir', f'lg:{directory}/macro_lg', '--workdir', directory/'macro_work', '-q'], directory/'macro.log')
     settings = {
         'synth.liberty': ROOT/'fake.lib', 'synth.lef': ROOT/'fake.lef', 'synth.sdc': ROOT/'timing.sdc',
         'synth.place': 'true', 'synth.place.fp': 'true', 'synth.place.final': 'true',
@@ -69,7 +69,7 @@ def run(case, args, output):
     for key, value in settings.items():
         cmd += ['--set', f'{key}={value}']
     cmd += args.metadata
-    command(cmd, directory/'flow.log', args.timeout)
+    command(cmd, directory/'flow.log')
     place = directory/'work/synth/place'
     qor = json.loads((place/'qor.json').read_text())
     flow = json.loads((place/'flow.json').read_text())
@@ -189,11 +189,10 @@ def main():
                         help='synth.place.fp.min_macros: a hierarchy candidate needs more macros than this; 0 makes each one-macro tile a candidate')
     parser.add_argument('--set', action='append', default=[], help='additional lhd setting KEY=VALUE')
     parser.add_argument('--snap-mode', choices=['alignment', 'symmetry'], help='synth.place.macro.snap_mode (flow default: alignment)')
-    parser.add_argument('--timeout', type=int, default=3600)
     parser.add_argument('--max-pattern-rms', type=float)
     args = parser.parse_args()
-    if args.iterations < 1 or args.timeout < 1 or (args.max_pattern_rms is not None and (not math.isfinite(args.max_pattern_rms) or args.max_pattern_rms < 0)):
-        parser.error('iterations/timeout must be positive and pattern threshold must be finite and nonnegative')
+    if args.iterations < 1 or (args.max_pattern_rms is not None and (not math.isfinite(args.max_pattern_rms) or args.max_pattern_rms < 0)):
+        parser.error('iterations must be positive and pattern threshold must be finite and nonnegative')
     args.lhd = str(Path(args.lhd).resolve())
     output = (args.output or Path(os.environ.get('TEST_UNDECLARED_OUTPUTS_DIR', 'repros/placement_regularity'))).resolve()
     output.mkdir(parents=True, exist_ok=True)
@@ -206,7 +205,7 @@ def main():
         print(f'Running {case["name"]}: {output}', flush=True)
         try:
             results[case['name']] = run(case, args, output)
-        except (RuntimeError, ValueError, KeyError, OSError, subprocess.TimeoutExpired) as error:
+        except (RuntimeError, ValueError, KeyError, OSError) as error:
             results[case['name']] = dict(name=case['name'], error=str(error))
             print(str(error), file=sys.stderr, flush=True)
         failed |= 'error' in results[case['name']]

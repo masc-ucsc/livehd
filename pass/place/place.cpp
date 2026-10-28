@@ -628,6 +628,11 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
       h = hash_text("multirow-rail-twin-v1:" + t.rail_twin, h);
     }
   }
+  if (o.optimization_multirow_eco) {
+    h = hash_text(std::format("optimization-multirow-eco-v1:{}:{}", o.optimization_multirow_eco->shift_sites,
+                              o.optimization_multirow_eco->max_displaced),
+                  h);
+  }
   if (o.multirow_eco) {
     h = hash_text(std::format("multirow-eco-v1:{}:{}", o.multirow_eco->shift_sites, o.multirow_eco->max_displaced), h);
   }
@@ -6108,8 +6113,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   if (options.macro_magnet.enabled && !movable_macros) {
     throw std::invalid_argument("macro magnet requires movable macros");
   }
+  // Taps are inserted by the terminal legalization alone. A call with optimization pending (first placement,
+  // timing round, resize/repair trial) legalizes natively without them and is followed by finalize_placement,
+  // which inserts the taps in its fresh final solve; any other non-fresh call is refused.
   if (options.handoff_taps && !options.timing_seed && !options.retain_placement && options.completed_stage == Placement_stage::final
-      && (!options.full || options.optimization_pending || options.previous || macro_active)) {
+      && (!options.full || macro_active || (options.previous && !options.optimization_pending))) {
     throw std::invalid_argument("handoff taps require fresh final terminal legalization with fixed macros");
   }
   const bool terminal_active   = options.full && !options.optimization_pending && !options.fp_place
@@ -6122,10 +6130,13 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   if (terminal_active && movable_macros) {
     throw std::invalid_argument("terminal legalization requires the final cell stage with fixed macros");
   }
-  const bool bus_active = options.busorder.enabled && options.full && !options.fp_place
+  // While optimization is pending (timing-driven placement, resize, repair follow) only the dedicated
+  // refine_regions call refines: it runs once on the timing-driven result, then timing gets a chance to react.
+  const bool refine_here = !options.optimization_pending || options.region_refine;
+  const bool bus_active  = options.busorder.enabled && options.full && !options.fp_place && refine_here
                           && options.completed_stage == Placement_stage::final && !options.timing_seed && !options.retain_placement
                           && !options.analyze_colors_only;
-  const bool boundary_active   = options.boundarypins.enabled && options.full && !options.fp_place
+  const bool boundary_active   = options.boundarypins.enabled && options.full && !options.fp_place && refine_here
                                  && options.completed_stage == Placement_stage::final && !options.timing_seed
                                  && !options.retain_placement && !options.analyze_colors_only;
   const bool refinement_active = bus_active || boundary_active;
@@ -6152,7 +6163,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     if (macro_active) {
       refuse("the macro placement stage is not supported");
     }
-    if (options.full && !terminal_active && !options.timing_seed && !options.retain_placement && !options.analyze_colors_only) {
+    // Optimization pending: the legalization is deferred to finalize_placement,
+    // which packs the two-row cells; the optimization trials in between place
+    // the edits they make through the two-row ECO.
+    if (options.full && !terminal_active && !options.optimization_pending && !options.timing_seed && !options.retain_placement
+        && !options.analyze_colors_only) {
       refuse("native legalization outside the final stage is not supported");
     }
     if (options.satlegalize) {
@@ -7540,7 +7555,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       physical.validate();
     };
-    if (final_timing && options.satlegalize && !terminal_active) {
+    if (final_timing && options.satlegalize && !terminal_active && (!options.optimization_pending || options.region_sat)) {
       if (!options.fp_evaluate || !control.checkpoint) {
         throw std::invalid_argument("satlegalize requires timing feedback and a positive timing interval");
       }
@@ -9640,7 +9655,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   // Only a fresh final placement exports the physical handoff frame.
   const bool final_handoff = options.full && options.completed_stage == Placement_stage::final && !options.timing_seed
                              && !options.retain_placement && !options.fp_place;
-  if (pg_profile && final_handoff) {
+  // The power grid is exported by the terminal pass alone: an optimization-pending call is followed by
+  // finalize_placement, which builds the frame (a second export would find the grid already in it).
+  if (pg_profile && final_handoff && !options.optimization_pending) {
     if (!handoff_rows.empty()) {
       v.fp.rows = handoff_rows;
     }

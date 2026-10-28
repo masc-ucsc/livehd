@@ -3468,8 +3468,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           break;
         }
         case Ntype_op::EQ: {
-          if (all.size() < 2) {
-            return fail("EQ expects >= 2 operands");
+          if (all.empty()) {
+            return fail("EQ has no operand");
+          }
+          if (all.size() == 1) {
+            // One driver pin is one value, and a repeated (driver, sink) pair is
+            // deduped by hhds: this is EQ(x, x), which holds for every x (the
+            // convention pass.cprop folds, cprop_test SameDriverOperandsFold).
+            result = pred_to_bv(tm_.mkBoolean(true));
+            break;
           }
           // LGraph compares integer values, independently of Verilog's
           // expression coercions. Extend each operand with its own sign and
@@ -3601,7 +3608,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         }
         case Ntype_op::Sext: {
           if (pid(0).empty() || pid(1).empty()) {
-            return fail("Sext missing a/pos");
+            return fail("Sext missing a/pos (node " + gu::debug_name(node) + ": a " + std::to_string(pid(0).size()) + ", pos " + std::to_string(pid(1).size()) + ")");
           }
           const Val&           a = pid(0)[0];
           // pos must be a constant we can read.
@@ -6047,7 +6054,20 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     auto occurrence_spin = output_view.lift(spin);
     auto output_drivers  = occurrence_spin.get_driver_pins();
     if (output_drivers.empty()) {
-      return fail("output '" + d.name + "' is undriven");
+      if (!x_dontcare_) {
+        return fail("output '" + d.name + "' is undriven");
+      }
+      // An undriven REFERENCE output is Verilog's `x`: every bit is don't-care,
+      // so any implementation value is a legal refinement (the lg: reference of
+      // a yosys-read design that never assigns an output port).
+      int uw = gu::real_width(spin, *gio, d.name);
+      if (uw == 0) {
+        uw = 1;
+      }
+      Val uv{bv_const(tm_, uw, 0), uw, !gio->is_unsign(d.name)};
+      uv.x_mask           = tm_.mkTerm(Kind::BITVECTOR_NOT, {bv_const(tm_, uw, 0)});
+      out.outputs[d.name] = uv;
+      continue;
     }
     out.cone_seed[d.name] = output_drivers.front();
     bool ok = true;

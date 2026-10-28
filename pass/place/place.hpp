@@ -236,6 +236,18 @@ struct Options {
   // instead of the refusal; nearest-whitespace legalization then re-places the
   // single-row cells they displaced, and any failure throws Multirow_failure.
   std::optional<Multirow_eco_bounds>                         multirow_eco;
+  // Internal: set by the kernel for a netlist with two-row (domino) cells. The
+  // optimization trials (resize, buffer repair, cone resynthesis) copy it into
+  // `multirow_eco`, so their edited-cell re-placement takes the two-row ECO
+  // around the unedited two-row cells instead of refusing them.
+  std::optional<Multirow_eco_bounds>                         optimization_multirow_eco;
+  // Internal: this call is the dedicated region-refinement step (refine_regions). While optimization is
+  // pending only this call runs bus ordering / boundary pins / pin alignment, so they run once, on the
+  // timing-driven result, instead of in every first-placement, timing-round and resize-trial call.
+  bool                                                       region_refine = false;
+  // Internal: this call is the dedicated SAT-legalization step (sat_align_placed), run after resize/repair and
+  // immediately before final legalization. While optimization is pending only this call runs the SAT pass.
+  bool                                                       region_sat = false;
   // Internal: same-interface variants of custom sequential macros (the domino
   // masters) that domino sizing may swap; part of the environment key.
   std::shared_ptr<const Custom_catalog>                      custom_cells;

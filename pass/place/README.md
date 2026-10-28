@@ -3878,13 +3878,24 @@ The automatic macro halo (`synth.place.halo=auto`) uses ten selected
 placement-row heights; explicit micron overrides remain supported. FP and
 macro IO bus adjustment default on.
 
+### Order of the pre-legalization steps
+
+With timing-driven placement, resize, repair or resynthesis enabled (optimization pending), `lhd synth` runs:
+first placement, timing-driven rounds, **region refinement** (`refine_regions`: bus order, boundary pins, pin
+alignment, once, on the timing-driven result), a **timing-driven kick-in** when the refinement moved cells
+(`pass.place.timing_driven.regions`), resize/repair/resynthesis, the experimental **SAT legalization**
+(`sat_align_placed`, `pass.place.satlegalize`, last: nothing resizes after it and timing-driven placement is not
+re-run), then `finalize_placement` (terminal legalization, handoff taps, power grid) and the optional pre-route.
+Ordinary placement calls while optimization is pending (first placement, timing rounds, resize/repair trials)
+never run the refinements or the SAT pass; handoff taps and the power grid are produced only by the final pass.
+The internal options `region_refine` / `region_sat` select the dedicated calls.
+
 ### Experimental final-placement bus ordering
 
 `place.region.busorder=false` is the default. Opt in with
 `--set synth.place.region.busorder=true` (or `"region_busorder": true` in a
 `physical_repair` configuration). Only the final cell stage uses it, between
-ordinary GP and legalization; macro and IO positions stay fixed.
-
+ordinary GP and legalization; macro and IO positions stay fixed. 
 The region mesh (`Region_mesh`, built once per detail-final phase and shared
 with boundary pins and pin alignment) comes from that run's cell coordinates, macro edges,
 and IO bus spans. Cuts within `region.merge_um=5` um merge; regions over

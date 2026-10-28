@@ -546,6 +546,10 @@ Repair_result resynthesize_cones(Result initial, const Options& requested, const
       trial.cache_dir.clear();
       trial.net_weights = result.placed.net_weights;
       trial.previous    = std::make_shared<physical::Floorplan>(result.placed.floorplan);
+      if (options.optimization_multirow_eco) {
+        trial.multirow_eco   = options.optimization_multirow_eco;
+        trial.legalize_cells = true;  // the two-row ECO is the nearest-whitespace legalization
+      }
       trial.changed_cells.clear();
       for (const auto& c : result.placed.floorplan.components) {
         if (c.name == root) {

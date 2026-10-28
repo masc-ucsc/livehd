@@ -21,14 +21,14 @@ A sketch does not prescribe an exact gate location.</p>
 <a href="../pass/place/tests/regularity/generate.py">Fixture generator</a></p>
 <h2>Run and inspect</h2>
 <pre>bazel run -c opt //pass/place/tests/regularity:run -- --case all --min-macros 0 --output "$PWD/repros/placement_regularity"
-# These longer tests are excluded from the default suite by the existing long1 filter:
-bazel test -c opt --test_tag_filters=placement --test_timeout=3600 //pass/place/tests/regularity:all
-# Fast fixture/observer checks stay in the ordinary suite:
+# Every topology runs in the default suite with a bounded optimization budget:
+bazel test -c opt //pass/place/tests/regularity:all
+# Fixture/observer checks also run in the ordinary suite:
 bazel test -c opt //pass/place/tests/regularity:regularity_checks</pre>
 <p>Bazel test retains PNGs, HTML, metrics, DEFs and logs under
 <code>bazel-testlogs/pass/place/tests/regularity/&lt;case&gt;/test.outputs/</code>
 (or <code>outputs.zip</code> when undeclared-output zipping is enabled).
-The run target accepts <code>--iterations N</code>, <code>--timeout SECONDS</code>, <code>--min-macros N</code> (default 0),
+The run target accepts <code>--iterations N</code>, <code>--min-macros N</code> (default 0),
 <code>--snap-mode alignment|symmetry</code>, and an optional <code>--max-pattern-rms PITCHES</code>. Use the same explicit settings and frozen binary for comparisons.
 Every benchmark runs cold (<code>lhd.incremental=false</code>) so saved placements cannot mask regressions.</p>
 <h2>What is measured</h2>

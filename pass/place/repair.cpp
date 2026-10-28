@@ -2353,16 +2353,13 @@ Floorplan_resize repair_gp_buffers(Result& state, const Options& options, const 
   return result;
 }
 
-Repair_result finalize_placement(const Result& initial, const Options& requested, const Evaluate& evaluate,
-                                 std::optional<Timing_feedback> prior_timing) {
-  if (!initial.graph || !requested.full) {
-    throw std::invalid_argument("final legalization requires a placed graph in full mode");
-  }
-  auto options                 = final_cell_options(requested);
-  options.optimization_pending = false;
-  options.gp_resize            = false;
-  options.completed_stage      = Placement_stage::final;
-  options.cell_stage           = true;
+// The options of a zero-GP pass over an already placed graph (final legalization, region refinement):
+// no floorplan/macro/GP work, seeded from the current placement.
+static Options zero_gp_options(const Options& requested, const Result& initial) {
+  auto options            = final_cell_options(requested);
+  options.gp_resize       = false;
+  options.completed_stage = Placement_stage::final;
+  options.cell_stage      = true;
   options.fp_place = options.final_cells = options.timing_seed = options.retain_placement = false;
   options.macro_mode                                                                      = "none";
   options.macro_snap                                                                      = false;
@@ -2370,7 +2367,6 @@ Repair_result finalize_placement(const Result& initial, const Options& requested
   options.fp_pin_adjust = options.macro_pin_adjust = false;
   options.after_stage                              = {};
   options.fp_resize                                = false;
-  options.fp_evaluate                              = evaluate;
   options.iterations = options.min_iterations = options.final_iterations = options.io_iterations = options.schedule_iterations = 0;
   options.post_density_factor                                                                                                  = 0;
   options.vanished_memory                   = false;
@@ -2389,6 +2385,20 @@ Repair_result finalize_placement(const Result& initial, const Options& requested
   options.changed_cells.clear();
   options.cache_dir.clear();
   options.net_weights = initial.net_weights;
+  return options;
+}
+
+Repair_result finalize_placement(const Result& initial, const Options& requested, const Evaluate& evaluate,
+                                 std::optional<Timing_feedback> prior_timing) {
+  if (!initial.graph || !requested.full) {
+    throw std::invalid_argument("final legalization requires a placed graph in full mode");
+  }
+  auto options                 = zero_gp_options(requested, initial);
+  options.optimization_pending = false;
+  options.fp_evaluate          = evaluate;
+  // The region refinements ran once, in the dedicated refine_regions step (or the first placement when nothing
+  // else is pending); their result is the placement the optimizations continued from.
+  options.busorder.enabled = options.boundarypins.enabled = options.boundarypins.align = false;
   options.output_dir  = requested.output_dir + "/final";
   fs::create_directories(options.output_dir);
   auto frame = initial.floorplan;
@@ -2466,6 +2476,75 @@ Repair_result finalize_placement(const Result& initial, const Options& requested
   }
   physical::write_def(result.placed.floorplan, requested.output_dir + "/out.def");
   std::ofstream(requested.output_dir + "/qor.json") << result.placed.qor << '\n';
+  return result;
+}
+
+Repair_result refine_regions(Result initial, const Options& requested, const Evaluate& evaluate) {
+  if (!initial.graph || !requested.full) {
+    throw std::invalid_argument("region refinement requires a placed graph in full mode");
+  }
+  auto options                 = zero_gp_options(requested, initial);
+  options.optimization_pending = true;  // native legalization only; the terminal one stays in finalize_placement
+  options.region_refine        = true;
+  options.fp_evaluate          = evaluate;
+  options.output_dir           = requested.output_dir + "/regions";
+  fs::create_directories(options.output_dir);
+  const auto before = initial.floorplan.components;
+  auto       frame  = initial.floorplan;
+  for (auto& terminal : frame.terminals) {
+    options.stage_pin_status[terminal.name] = terminal.status;
+    terminal.status                         = physical::Status::FIXED;
+  }
+  options.floorplan = options.output_dir + "/input.def";
+  physical::write_def(frame, options.floorplan);
+  options.restart_seed = std::make_shared<physical::Floorplan>(std::move(frame));
+  Repair_result result;
+  auto          library = std::make_unique<hhds::GraphLibrary>();
+  result.placed         = place(*initial.graph, *library, options);
+  result.libraries.push_back(std::move(library));
+  check_placed_legality(result.placed, options);
+  std::map<std::string, std::pair<double, double>> old_position;
+  for (const auto& c : before) {
+    old_position[c.name] = {c.place.x, c.place.y};
+  }
+  unsigned moved = 0;
+  for (const auto& c : result.placed.floorplan.components) {
+    const auto it = old_position.find(c.name);
+    moved += it == old_position.end() || it->second.first != c.place.x || it->second.second != c.place.y;
+  }
+  result.moved_cells = moved;
+  result.timing      = evaluate(result.placed);
+  result.report      = std::format("{{\"stage\":\"region_refinement\",\"moved_cells\":{}}}", moved);
+  return result;
+}
+
+Repair_result sat_align_placed(Result initial, const Options& requested, const Evaluate& evaluate) {
+  if (!initial.graph || !requested.full || !requested.satlegalize) {
+    throw std::invalid_argument("SAT legalization requires a placed graph in full mode with satlegalize enabled");
+  }
+  auto options                 = zero_gp_options(requested, initial);
+  options.satlegalize          = true;
+  options.optimization_pending = true;  // native legalization only; the terminal one stays in finalize_placement
+  options.region_sat           = true;
+  options.busorder.enabled = options.boundarypins.enabled = options.boundarypins.align = false;  // ran earlier
+  options.fp_evaluate  = evaluate;
+  options.output_dir   = requested.output_dir + "/satlegalize_step";
+  fs::create_directories(options.output_dir);
+  auto frame = initial.floorplan;
+  for (auto& terminal : frame.terminals) {
+    options.stage_pin_status[terminal.name] = terminal.status;
+    terminal.status                         = physical::Status::FIXED;
+  }
+  options.floorplan = options.output_dir + "/input.def";
+  physical::write_def(frame, options.floorplan);
+  options.restart_seed = std::make_shared<physical::Floorplan>(std::move(frame));
+  Repair_result result;
+  auto          library = std::make_unique<hhds::GraphLibrary>();
+  result.placed         = place(*initial.graph, *library, options);
+  result.libraries.push_back(std::move(library));
+  check_placed_legality(result.placed, options);
+  result.timing = evaluate(result.placed);
+  result.report = "{\"stage\":\"satlegalize\"}";
   return result;
 }
 
@@ -2679,6 +2758,9 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
             auto trial_options = options;
             trial_options.cache_dir.clear();
             trial_options.legalize_cells = true;
+            if (options.optimization_multirow_eco) {
+              trial_options.multirow_eco = options.optimization_multirow_eco;
+            }
             trial_options.net_weights    = std::move(draft_index.weights);
             trial_options.previous       = std::make_shared<physical::Floorplan>(result.placed.floorplan);
             trial_options.changed_cells  = std::move(changed_names);
@@ -2877,6 +2959,9 @@ Repair_result repair_buffers(Result initial, const Options& requested, const Eva
         auto trial_options = options;
         trial_options.cache_dir.clear();
         trial_options.legalize_cells = true;
+        if (options.optimization_multirow_eco) {
+          trial_options.multirow_eco = options.optimization_multirow_eco;
+        }
         trial_options.net_weights    = std::move(trial_index.weights);
         trial_options.previous       = std::make_shared<physical::Floorplan>(result.placed.floorplan);
         trial_options.changed_cells  = {edit.node};

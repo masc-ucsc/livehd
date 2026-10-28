@@ -40,6 +40,7 @@ struct Repair_result {
   Result                                           placed;
   std::string                                      report;
   std::optional<Timing_feedback>                   timing;
+  unsigned                                         moved_cells = 0;  // refine_regions: cells whose pose changed
 };
 struct Floorplan_resize {
   Timing_feedback timing;
@@ -78,6 +79,14 @@ Repair_result    timing_place(Result initial, const Options& options, const Eval
 // identical. The caller must use unchanged timing constraints/model.
 Repair_result    finalize_placement(const Result& initial, const Options& options, const Evaluate& evaluate,
                                     std::optional<Timing_feedback> prior = std::nullopt);
+// Bus ordering / boundary pins / pin alignment (whichever the options enable) on a placed result: extra GP
+// iterations from the current placement, then native legalization (the terminal legalization stays in
+// finalize_placement). Runs once, on the timing-driven result; the caller gives timing a chance to react
+// afterwards (timing_place again) when `moved_cells` is nonzero, then resizes and repairs.
+Repair_result    refine_regions(Result initial, const Options& options, const Evaluate& evaluate);
+// The experimental SAT legalization (satlegalize, fixed bins) on a placed result: run after resize and repair,
+// immediately before final legalization; nothing resizes afterwards and timing-driven placement is not re-run.
+Repair_result    sat_align_placed(Result initial, const Options& options, const Evaluate& evaluate);
 // design_after_sizing consumes an unchanged sizing result: gate sizing only
 // reopens if a forest edit is accepted. forest skips sizing/area recovery.
 enum class Repair_scope { all, sizing, design, design_after_sizing, forest, recovery };

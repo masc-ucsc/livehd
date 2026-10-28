@@ -166,11 +166,11 @@ yosys_flex = rule(
             allow_single_file = True,
         ),
         "outs": attr.output_list(
-            doc = "Outputs from bison.",
+            doc = "Outputs from flex.",
             mandatory = True,
         ),
         "srcs": attr.label_list(
-            doc = "Sources to provide to bison.",
+            doc = "Sources to provide to flex.",
             mandatory = True,
             allow_files = True,
         ),

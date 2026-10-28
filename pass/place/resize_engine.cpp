@@ -2241,6 +2241,9 @@ Resize_trial run_resize_trial(const Result& state, const Options& options, const
   auto trial_options           = options;
   trial_options.cache_dir      = {};
   trial_options.legalize_cells = true;
+  if (options.optimization_multirow_eco) {
+    trial_options.multirow_eco = options.optimization_multirow_eco;
+  }
   trial_options.net_weights    = std::move(inherited_weights);
   trial_options.previous       = std::make_shared<physical::Floorplan>(state.floorplan);
   trial_options.changed_cells  = changed_names(edits);

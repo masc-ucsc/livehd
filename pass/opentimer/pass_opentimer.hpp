@@ -117,6 +117,7 @@ protected:
   // read_celllib is DEFERRED (a 12 MB sky130 parse) so a cache hit never pays
   // it -- the same lazy-startup rule pass.abc applies to Abc_Start/read_lib.
   std::vector<std::string> lib_file_list;
+  std::vector<std::string> extra_lib_file_list;  // both-corner cell libraries (extra_libs)
   bool                     libs_loaded_ = false;
 
   std::string cache_dir_;  // STA reuse cache directory; empty = no cache

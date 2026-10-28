@@ -174,7 +174,7 @@ cc_binary(
 
 cc_binary(
     name = "lean_legacy_fixtures",
-    srcs = ["Legacy_Fast_Model_Simulator/tests/legacy_fixtures.cpp"],
+    srcs = ["tests/legacy_fixtures.cpp"],
     copts = COPTS,
     deps = ["//graph"],
 )
