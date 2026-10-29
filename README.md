@@ -284,6 +284,25 @@ vim.diagnostic.setqflist()` to list them).
 > `prpfmt` auto-formatting is independent of the language server above — wire it
 > up separately via [`conform.nvim`](https://github.com/stevearc/conform.nvim).
 
+# Lean Translation
+
+`pass.lean` exports an LGraph as Lean 4: a model of the design together with a
+certificate describing the same graph as data, so the two can be checked against
+each other.  See [`pass/lean/README.md`](pass/lean/README.md) for the pass
+itself — options, the scan and certificate stages, memory nodes, and the
+validation pipeline.
+
+Two routes emit from it.  `mode=verified_compiler` emits only a `DesignCert` and
+leaves the model to a once-and-for-all-proved compiler.  The default,
+**legacy**, writes a complete self-contained Lean program per design and is the
+only route that currently produces a running native simulator:
+
+> **[`pass/lean/Legacy_Fast_Model_Simulator/`](pass/lean/Legacy_Fast_Model_Simulator/README.md)**
+> — the Legacy Fast Model Simulator.  How to build and run it, what the emitted
+> file contains, **what the proofs do and do not establish**, the twelve CVA6 /
+> CORE-ET benchmark designs it covers, measured performance, and two worked
+> examples (a 31-field TLB end to end, and CVA6's 334-field issue stage).
+
 # Isabelle Translation
 
 See [`pass/isabelle/README.md`](pass/isabelle/README.md) for the
@@ -294,7 +313,13 @@ workflow, and Isabelle heap-build rules.
 
 `pass.lean` is LiveHD's Lean 4 back end. It takes an LGraph — the design after
 LiveHD has read the RTL and normalised it — and writes it out as Lean 4 source.
-
+It has two modes. `legacy`, the default, writes a complete self-contained Lean
+program for the design. `verified_compiler` writes a **certificate** instead:
+the design as plain data, one entry per node giving the operator, the bit widths
+and the dependencies, with what that data means fixed separately, once, by a
+Lean function every design shares. See
+[`pass/lean/README.md`](pass/lean/README.md) for the pass, both modes and its
+options.
 
 A simulator turns that output into something that steps the design: given the
 inputs and the current state, it computes the outputs and the next state, in

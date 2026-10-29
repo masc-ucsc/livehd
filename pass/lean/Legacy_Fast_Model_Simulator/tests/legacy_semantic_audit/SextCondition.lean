@@ -4,7 +4,7 @@ The expression is the emitted fast-model Sext operation. Positive amount and
 result width preserve bit zero and nonzero for every one-bit source, including
 both reset polarities. This is a condition-preservation theorem, not a claim
 that every result bit is a copy of the source or that RTL-to-graph is verified.
-Run from formal/lean with: lake env lean ../../pass/lean/tests/legacy_semantic_audit/SextCondition.lean
+Run from formal/lean with: lake env lean ../../pass/lean/Legacy_Fast_Model_Simulator/tests/legacy_semantic_audit/SextCondition.lean
 -/
 import LeanSemanticPrimitives.Translation.OpBridge
 

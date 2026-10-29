@@ -4,7 +4,7 @@ defaultTargets = ["LeanSemanticPrimitives"]
 [[require]]
 name = "mathlib"
 git = "https://github.com/leanprover-community/mathlib4.git"
-rev = "v4.31.0"
+rev = "v4.36.0-rc1"
 
 [[lean_lib]]
 name = "LeanSemanticPrimitives"
@@ -17,12 +17,17 @@ name = "Sims"
 globs = ["Sims.+"]
 
 # Generated LEGACY fast-model simulators
-# (pass/lean/Legacy_Fast_Model_Simulator/make_legacy_sim.py).  Same reasoning as
+# (pass/lean/Legacy_Fast_Model_Simulator/scripts/make_legacy_sim.py).  Same reasoning as
 # `Sims`: not in `defaultTargets`, because a real design's model is megabytes of
 # generated definitions and nothing else needs it elaborated.
 [[lean_lib]]
 name = "LegacySims"
 globs = ["LegacySims.+"]
+# A real design's fast model lowers to DEEPLY nested C: issue_stage_gate emits
+# 126 MB of it, nested 6736 braces deep, against clang's default limit of 2048
+# ("bracket nesting level exceeded maximum of 2048").  That is a C-frontend
+# limit, not a Lean one -- the Lean side compiled fine.  Raise it with headroom.
+moreLeancArgs = ["-fbracket-depth=32768"]
 
 # The standalone direct simulator.  Not in `defaultTargets`: linking a native
 # binary on every `lake build` would slow the proof workflow down for no gain.
@@ -39,3 +44,13 @@ exeName = "lgraph-sim"
 name = "LegacySimMinionTlb"
 root = "LegacySims.minion_tlb_LegacySim"
 exeName = "legacy-sim-minion-tlb"
+
+# A row whose state record is WIDER than a Lean constructor's 255 object fields
+# (issue_stage_gate: 334).  It builds only on Lean >= 4.36.0, which spills the
+# surplus fields into chained objects (lean4 PR #15516).  Kept as the worked
+# example that the old field wall is gone: on v4.31.0 this row could be proved
+# but never run.
+[[lean_exe]]
+name = "LegacySimIssueStage"
+root = "LegacySims.issue_stage_gate_LegacySim"
+exeName = "legacy-sim-issue-stage"

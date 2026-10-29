@@ -369,6 +369,7 @@ LiveHD directions, so moving it here would break them.
 | the exporter, LGraph to `DesignCert` | `pass/lean/Exporter/Frontend/`, `pass/lean/Exporter/DesignCert/` | every route uses the front half, and three routes use the `DesignCert` writer |
 | the simulator and its proofs | `formal/lean/LeanSemanticPrimitives/Compiler/` | it is one Lake package with a pinned toolchain and a Mathlib dependency; 17 of its 33 modules are imported from elsewhere, `CompileDesign` 13 times |
 | the proof tools | `pass/lean/tools/` | the HDLProof engine, under active development upstream |
-| other routes' tests, and scripts several routes share | `pass/lean/tests/`, `pass/lean/scripts/` | they belong to the legacy route, Translation Validation and the shared coverage harness |
+| other routes' tests | `pass/lean/Legacy_Fast_Model_Simulator/tests/`, `pass/lean/Translation_Validation/`, `pass/lean/specialization/` | each route keeps its own |
+| scripts several routes share | `pass/lean/scripts/` | the census and parity gates, the axiom audit, and the 12x5 coverage harness |
 
 `pass/lean/README.md` documents the exporter and links here.
