@@ -17,6 +17,7 @@ function in the logic, so there is no term the logic could quantify over.
 -/
 import Lean
 import LeanSemanticPrimitives.Compiler.CompileDesignDefs
+import LeanSemanticPrimitives.Compiler.FastResidual
 
 open Lean Elab Command Meta
 open Compiler.Residual

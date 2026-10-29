@@ -34,6 +34,7 @@ the dense array holds `eval_op_cert` applied to the node's own operator, so the
 recurrence is an equality between two spellings of the same call.
 -/
 import LeanSemanticPrimitives.Compiler.DirectCheck
+import LeanSemanticPrimitives.Translation.FastBV
 
 namespace Compiler
 namespace Direct

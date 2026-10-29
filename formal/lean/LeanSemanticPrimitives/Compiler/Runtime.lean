@@ -11,6 +11,7 @@ type — the two sides have to produce comparable values or the equation cannot
 even be stated.
 -/
 import LeanSemanticPrimitives.Compiler.DesignCert
+import LeanSemanticPrimitives.Translation.FastBV
 
 namespace Compiler
 

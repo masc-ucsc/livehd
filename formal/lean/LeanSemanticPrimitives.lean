@@ -1,5 +1,6 @@
 import LeanSemanticPrimitives.SemanticPrimitives
 import LeanSemanticPrimitives.Translation.LGraphModel
+import LeanSemanticPrimitives.Translation.FastBV
 import LeanSemanticPrimitives.Translation.FastModelBridge
 import LeanSemanticPrimitives.Translation.GraphRefine
 -- OpBridge is intentionally NOT imported here: it pulls in Mathlib, and the

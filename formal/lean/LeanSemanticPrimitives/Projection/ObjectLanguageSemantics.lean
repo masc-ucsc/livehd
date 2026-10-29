@@ -15,6 +15,7 @@
 
 import LeanSemanticPrimitives.Projection.ObjectLanguage
 import LeanSemanticPrimitives.Translation.LGraphModel
+import LeanSemanticPrimitives.Translation.FastBV
 
 namespace Projection
 

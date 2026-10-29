@@ -35,6 +35,7 @@ substantially more proof cost, against a bug class that has not occurred.  It is
 recorded as follow-up work, not claimed as done.
 -/
 import LeanSemanticPrimitives.Compiler.ResidualIR
+import LeanSemanticPrimitives.Translation.FastBV
 
 namespace Compiler
 namespace Residual
