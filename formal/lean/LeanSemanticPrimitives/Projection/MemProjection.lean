@@ -6,6 +6,7 @@ Stage 1: the annotated program.
 import LeanSemanticPrimitives.Projection.ResidualFragment
 import LeanSemanticPrimitives.Projection.MemSupport
 import LeanSemanticPrimitives.Projection.AxiomGate
+import LeanSemanticPrimitives.Projection.EvalFuelArr
 
 namespace Projection
 namespace MemProjection
