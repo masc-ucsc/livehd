@@ -48,35 +48,70 @@ theorem and_maskTab (x w : Nat) (h : w < maskTab.size) : x &&& maskTab[w] = x % 
 
 theorem two_pow_int (w : Nat) : (2 : Int) ^ w = ((2 ^ w : Nat) : Int) := (Int.natCast_pow 2 w).symm
 
+/-- `2 ^ w` for `w ≤ 128`. The entries from `2 ^ 63` up are big numbers, but they are built
+once, so a wide value (a 64-bit counter) never computes a power at run time. -/
+def pow2Big : Array Nat := (Array.range 129).map fun w => 2 ^ w
+
+theorem pow2Big_get (w : Nat) (h : w < pow2Big.size) : pow2Big[w] = 2 ^ w := by
+  simp [pow2Big]
+
+/-- `2 ^ w`, from the table when it has `w`. -/
+@[inline] def pow2Of (w : Nat) : Nat := if h : w < pow2Big.size then pow2Big[w] else 2 ^ w
+
+theorem pow2Of_eq (w : Nat) : pow2Of w = 2 ^ w := by
+  unfold pow2Of; split
+  · rename_i h; exact pow2Big_get w h
+  · rfl
+
+/-- `x % 2 ^ w` without computing `2 ^ w`: a table mask below 63 bits; up to 128 bits, a
+comparison with the tabled power (a scalar `x` is always below `2 ^ 63`), and the
+remainder only when `x` really is wider. -/
+@[inline] def modPow2 (w x : Nat) : Nat :=
+  if h : w < maskTab.size then x &&& maskTab[w]
+  else if h2 : w < pow2Big.size then (if x < pow2Big[w] then x else x % pow2Big[w])
+  else x % 2 ^ w
+
+theorem modPow2_eq (w x : Nat) : modPow2 w x = x % 2 ^ w := by
+  unfold modPow2
+  split
+  · rename_i h; exact and_maskTab x w h
+  · split
+    · rename_i h2
+      rw [pow2Big_get _ h2]
+      split
+      · rename_i hx; exact (Nat.mod_eq_of_lt hx).symm
+      · rfl
+    · rfl
+
+/-- `2 ^ w - 1`, from a table when it has `w`. -/
+@[inline] def maskOf (w : Nat) : Nat := if h : w < maskTab.size then maskTab[w] else pow2Of w - 1
+
+theorem maskOf_eq (w : Nat) : maskOf w = 2 ^ w - 1 := by
+  unfold maskOf; split
+  · rename_i h; exact maskTab_get w h
+  · rw [pow2Of_eq]
+
 /-! ## Reduction modulo `2 ^ w` -/
 
-/-- `(v % 2 ^ w).toNat` with no `2 ^ w`: a mask for a nonnegative `v`, and the mask minus
-the complement for a negative one. -/
+/-- `(v % 2 ^ w).toNat` with no `2 ^ w` computed at run time: the reduced value for a
+nonnegative `v`, and `2 ^ w - 1` minus the reduced complement for a negative one. -/
 @[inline] def modNat (w : Nat) (v : Int) : Nat :=
-  if h : w < maskTab.size then
-    match v with
-    | .ofNat n => n &&& maskTab[w]
-    | .negSucc n => maskTab[w] - (n &&& maskTab[w])
-  else (v % (2 ^ w : Int)).toNat
+  match v with
+  | .ofNat n => modPow2 w n
+  | .negSucc n => pow2Of w - 1 - modPow2 w n
 
 theorem emod_two_pow_eq (w : Nat) (v : Int) : v % (2 ^ w : Int) = ((modNat w v : Nat) : Int) := by
-  unfold modNat
-  split
-  · rename_i h
-    rw [two_pow_int]
-    cases v with
-    | ofNat n =>
-      simp only [and_maskTab n w h]
-      rfl
-    | negSucc n =>
-      simp only [and_maskTab n w h]
-      rw [maskTab_get w h]
-      have hm : n % 2 ^ w < 2 ^ w := Nat.mod_lt _ (Nat.two_pow_pos w)
-      rw [Int.negSucc_emod_ofNat, Int.subNatNat_of_le (by omega)]
-      congr 1
-      omega
-  · rw [Int.toNat_of_nonneg (Int.emod_nonneg _ (by
-      rw [two_pow_int]; exact Int.natCast_ne_zero.mpr (Nat.pos_iff_ne_zero.mp (Nat.two_pow_pos w))))]
+  rw [two_pow_int]
+  cases v with
+  | ofNat n =>
+    simp only [modNat, modPow2_eq]
+    rfl
+  | negSucc n =>
+    simp only [modNat, modPow2_eq, pow2Of_eq]
+    have hm : n % 2 ^ w < 2 ^ w := Nat.mod_lt _ (Nat.two_pow_pos w)
+    rw [Int.negSucc_emod_ofNat, Int.subNatNat_of_le (by omega)]
+    congr 1
+    omega
 
 theorem modNat_lt (w : Nat) (v : Int) : modNat w v < 2 ^ w := by
   have h := emod_two_pow_eq w v
@@ -116,14 +151,10 @@ theorem mk_bv_natCast (w n : Nat) (h : n < 2 ^ w) : mk_bv w (n : Int) = ofNatLt 
 theorem mk_bv_natCast_mod (w n : Nat) : mk_bv w (n : Int) = ofNatLt w (n % 2 ^ w) := by
   simp only [mk_bv, ofNatLt, two_pow_int, ← Int.natCast_emod]
 
-/-- `x &&& maskTab[w]` when the table has `w`, else `x % 2 ^ w`. -/
-@[inline] def truncNat (w x : Nat) : Nat :=
-  if h : w < maskTab.size then x &&& maskTab[w] else x % 2 ^ w
+/-- `x % 2 ^ w`, by `modPow2`. -/
+@[inline] def truncNat (w x : Nat) : Nat := modPow2 w x
 
-theorem truncNat_eq (w x : Nat) : truncNat w x = x % 2 ^ w := by
-  unfold truncNat; split
-  · rename_i h; exact and_maskTab x w h
-  · rfl
+theorem truncNat_eq (w x : Nat) : truncNat w x = x % 2 ^ w := modPow2_eq w x
 
 def bvResizeFast (w : Nat) (x : BV) : BV := ofNatLt w (truncNat w (uintNat x))
 
@@ -210,21 +241,18 @@ theorem bitwiseNat_lt (w : Nat) (f : Bool → Bool → Bool) (A B : Nat) : bitwi
   simp only []
   exact Nat.lt_of_le_of_lt Nat.and_le_right (Nat.sub_lt (Nat.two_pow_pos w) (by decide))
 
-/-- `bitwiseNat` with the mask from the table. -/
+/-- `bitwiseNat` with the mask from a table. -/
 @[inline] def bitwiseNatTab (w : Nat) (f : Bool → Bool → Bool) (A B : Nat) : Nat :=
-  if h : w < maskTab.size then
-    let m := maskTab[w]
-    let nA := A ^^^ m
-    let nB := B ^^^ m
-    ((if f true true then A &&& B else 0) ||| (if f true false then A &&& nB else 0)
-      ||| (if f false true then nA &&& B else 0) ||| (if f false false then nA &&& nB else 0)) &&& m
-  else bitwiseNat w f A B
+  let m := maskOf w
+  let nA := A ^^^ m
+  let nB := B ^^^ m
+  ((if f true true then A &&& B else 0) ||| (if f true false then A &&& nB else 0)
+    ||| (if f false true then nA &&& B else 0) ||| (if f false false then nA &&& nB else 0)) &&& m
 
 theorem bitwiseNatTab_eq (w : Nat) (f : Bool → Bool → Bool) (A B : Nat) :
     bitwiseNatTab w f A B = bitwiseNat w f A B := by
-  unfold bitwiseNatTab; split
-  · rename_i h; simp only [maskTab_get w h]; rfl
-  · rfl
+  unfold bitwiseNatTab bitwiseNat
+  rw [maskOf_eq]
 
 /-- Inlined, so at a call site with a literal operator (`fun x y => x && y`) the compiler
 evaluates the truth table itself and keeps one word operation, instead of calling the
@@ -293,7 +321,7 @@ def bvShlStepFast (w : Nat) (a b : BV) : BV :=
   else if h : w < maskTab.size then
     ofNatLt w ((uintNat a &&& maskTab[w - k]'(by omega)) *
       pow2Tab[k]'(by rw [pow2Tab_size]; rw [maskTab_size] at h; omega))
-  else bv_shl_step w a b
+  else ofNatLt w (modPow2 w (uintNat a * pow2Of k))
 
 theorem mul_two_pow_mod (x s w : Nat) (hs : s ≤ w) :
     x * 2 ^ s % 2 ^ w = x % 2 ^ (w - s) * 2 ^ s := by
@@ -312,7 +340,7 @@ theorem mul_two_pow_mod (x s w : Nat) (hs : s ≤ w) :
     · rename_i h
       rw [and_maskTab _ _ (by omega), pow2Tab_get, two_pow_int, ← Int.natCast_mul, mk_bv_natCast_mod,
         mul_two_pow_mod _ _ _ (by omega)]
-    · rfl
+    · rw [two_pow_int, ← Int.natCast_mul, mk_bv_natCast_mod, modPow2_eq, pow2Of_eq]
 
 /-! ## `bv_get_mask` on a contiguous mask -/
 
