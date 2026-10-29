@@ -70,8 +70,25 @@ theorem findAlt_eraseAlts : ∀ (as : List AAlt) (tag : Nat) (a : AAlt),
       -- in the hypothesis instead leaves the two sides syntactically apart
       simp only [eraseAlts, findAlt, Alt.tag]
       split at h
-      · rename_i htag; cases h; rw [if_pos htag]
-      · rename_i htag; rw [if_neg htag]; exact findAlt_eraseAlts as tag a h
+      -- `split` on the GOAL's own `ite`, rather than `rw [if_pos/if_neg htag]`.
+      -- On Lean 4.36 those rewrites no longer match here: the `simp only
+      -- [Alt.tag]` above leaves the goal's `ite` carrying a `Decidable`
+      -- instance the rewrite cannot see through, and `rw` reports the pattern
+      -- as absent while it is plainly in the target. `split` works on the term
+      -- that is actually there, so it is immune to that, and both branches are
+      -- discharged by the same facts as before.
+      -- `simp [htag]` rather than `rw [if_pos/if_neg htag]`. On Lean 4.36 those
+      -- rewrites no longer match here: the `simp only [Alt.tag]` above leaves
+      -- the goal's `ite` carrying a `Decidable` instance `rw` cannot see
+      -- through, so it reports the pattern as absent while it is plainly in
+      -- the target ("the target expression is not type-correct under the
+      -- `implicit` transparency level"). `simp` reduces the same `ite` from
+      -- the same hypothesis, and the two branches are discharged by the facts
+      -- they were before.
+      · rename_i htag; cases h; simp [htag]
+      · rename_i htag
+        simp only [htag, reduceIte]
+        exact findAlt_eraseAlts as tag a h
 
 /-! ## Shifting the partial environment -/
 

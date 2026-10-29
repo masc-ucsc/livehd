@@ -36,8 +36,16 @@ open Lean Elab Command
 def stdAxioms : Array Name := #[``propext, ``Classical.choice, ``Quot.sound]
 
 /-- Axioms that record a compiled evaluation rather than a kernel check. -/
+--
+-- The first two are NAME LITERALS, not `` quotations: Lean 4.36 no longer
+-- declares `Lean.ofReduceBool` or `Lean.trustCompiler`, so resolving them is an
+-- "unknown constant" error. They are still matched by name, because what this
+-- predicate classifies is an axiom recorded in a theorem -- including one read
+-- from an olean or a log written by an older toolchain -- rather than a
+-- constant that must exist here. `native_decide` on 4.36 produces the third
+-- form, `_native.<tac>.ax_N`.
 def isNativeAxiom (n : Name) : Bool :=
-  n == ``Lean.ofReduceBool || n == ``Lean.trustCompiler ||
+  n == `Lean.ofReduceBool || n == `Lean.trustCompiler ||
     n.components.any (· == `_native)
 
 /-- Print as `#print axioms` does, then refuse anything not admitted. -/
