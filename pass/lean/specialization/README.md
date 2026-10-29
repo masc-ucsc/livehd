@@ -89,7 +89,7 @@ agrees with `interpretDesign` at every cycle.
 
 ## Build
 
-Lean 4.31.0 is pinned in `formal/lean/lean-toolchain`. Run Lean commands from
+Lean 4.36.0-rc1 is pinned in `formal/lean/lean-toolchain`. Run Lean commands from
 `formal/lean`.
 
 ```bash

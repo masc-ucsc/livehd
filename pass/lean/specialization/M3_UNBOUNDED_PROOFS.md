@@ -135,7 +135,7 @@ that k.
   compiles one and checks its axiom list.
 - **cadical is never trusted.** The exporter and the observer outputs
   (below) stay the semantic boundary.
-- **No kernel control on Lean 4.31.** `decide +kernel` gets stuck in
+- **No kernel control (found on Lean 4.31).** `decide +kernel` got stuck in
   `Std.Tactic.BVDecide.LRAT.check` even on a 3-clause CNF. A kernel
   control would need an enumeration over primary variables (`enumUnsat`),
   which is not implemented.

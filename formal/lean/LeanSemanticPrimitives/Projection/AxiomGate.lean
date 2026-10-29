@@ -9,8 +9,8 @@
 
   `#print axioms` alone only reports. A `sorry` anywhere in a dependency shows
   up as `sorryAx`, and a `native_decide` as an axiom whose name has a `_native`
-  component (Lean 4.31 mints one per call; the older `Lean.ofReduceBool` is
-  deprecated). Either would be printed and the build would still succeed, so a
+  component (one per call; Lean 4.36 removed the older `Lean.ofReduceBool`).
+  Either would be printed and the build would still succeed, so a
   printed audit is only as good as whoever reads it. This command turns the
   same output into a gate.
 

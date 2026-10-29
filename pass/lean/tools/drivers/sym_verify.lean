@@ -55,13 +55,12 @@ open Std.Tactic.BVDecide
 def decodeInputs (φ : BVLogicalExpr) (model : Std.HashMap Nat Bool) (inW : List Nat) (k : Nat) :
     Array RuntimeInput := Id.run do
   let entry := φ.bitblast
-  let (_, map) := entry.relabelNat'
-  let aigSize := entry.aig.decls.size
+  let nodes := atomNodes entry.aig
   let nIn := inW.length
   let mut out := #[]
   for j in List.range k do
     out := out.push ((inW.zipIdx.map fun (w, t) =>
-      mk_bv w (Int.ofNat (modelValue map aigSize model (j * nIn + t) w))).toArray)
+      mk_bv w (Int.ofNat (modelValue nodes model (j * nIn + t) w))).toArray)
   return out
 
 /-- Run the decoded inputs on the projection's simulator from `s0`; the first
