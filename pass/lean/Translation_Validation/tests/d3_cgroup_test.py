@@ -19,12 +19,14 @@ because refusing to pretend is the behaviour that matters most there.
 Run: python3 pass/lean/Translation_Validation/tests/d3_cgroup_test.py
 """
 
+import hashlib
 import importlib.util
 import json
 import os
 import pathlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -236,6 +238,23 @@ def main() -> int:
                          "    return _d(self)\n"
                          "m.Cgroup.destroy = _nd\n")
 
+        # Parks the worker in the post-probe window -- after the probe exited,
+        # before `destroy()` -- and says so in a file, so the SIGTERM case can
+        # fire at the exact moment the hazard is open instead of guessing at it.
+        # `peak_kb` is the real first call of that `finally`, so this is where a
+        # signal lands in production too: timing capture, log writing and gate
+        # parsing all happen in this window. `destroy` itself is NOT patched,
+        # because the behaviour under test is whether anything else calls it.
+        PARK_PATCH = (MARK_PROBE +
+                      "_pk = m.Cgroup.peak_kb\n"
+                      "def _park(self):\n"
+                      "    if getattr(self, '_probe', False):\n"
+                      "        import os as _o, pathlib as _p, time as _t\n"
+                      "        _p.Path(_o.environ['D3_PARK_FILE']).write_text('parked')\n"
+                      "        _t.sleep(30)\n"
+                      "    return _pk(self)\n"
+                      "m.Cgroup.peak_kb = _park\n")
+
         # Never recovers: every attempt on the probe's cgroup fails and removes
         # nothing, so the directory genuinely leaks. The case asserts the runner
         # says so, then removes it here.
@@ -307,6 +326,8 @@ def main() -> int:
                       "cgroup_killed_row_zero_credit",
                       "exit137_without_oom_is_not_rss_killed",
                       "cgroup_timeout_is_timeout_not_oom", "no_leftover_cgroups",
+                      "sigterm_removes_cgroup",
+                      "sigterm_removes_cgroup_worker_parked",
                       "hybrid_arms_both_guards",
                       "requested_vs_actual_recorded",
                       "auto_uses_cgroup_when_available"):
@@ -818,6 +839,133 @@ def main() -> int:
                   f"{len(probes3)} probe(s) launched, run ended in {live_s:.1f}s "
                   f"against a 60 s sleeper (rc={r3.returncode})",
                   f"{probes3} {r3.stderr[-300:]}")
+
+            # ---- SIGTERM removes the cgroup, it does not just empty it ----------
+            # The measured gap. `_on_signal` reaped the probe's processes and
+            # `os._exit`ed, so `run_one`'s `finally` -- at the time the only
+            # place that removed a cgroup -- never ran. The directory survived,
+            # empty, and every later `no_leftover_cgroups` run by this suite
+            # then failed on a cgroup no run of it had created. Cancelling a
+            # sweep is routine, so this accumulated.
+            #
+            # The name is COMPUTED, not discovered. With `D3_RUN_ID` fixed the
+            # probe's directory is `d3-<sha256(run_id-module)[:32]>-<uuid>`, so
+            # a sweep another session starts in this shared base during the
+            # window cannot be mistaken for ours, and ours cannot be missed.
+            rid = f"cgterm-{os.getpid()}"
+            want = "d3-" + hashlib.sha256(f"{rid}-aaa_gate".encode()).hexdigest()[:32]
+
+            def term_cgroups():
+                return [d for d in base.iterdir()
+                        if d.is_dir() and d.name.startswith(want)]
+
+            pr = subprocess.Popen(
+                [sys.executable, str(SWEEP), "--certs", str(cdir),
+                 "--out", str(tmp / "cgterm.tsv"), "--jobs", "1",
+                 "--timeout", "120", "--enforce", "cgroup",
+                 "--kill-over-rss-kb", "400000"],
+                cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                env=dict(os.environ, LAKE=str(stub), TMPDIR=str(tmp),
+                         D3_RUN_ID=rid, STUB_MODE="sleep", SLEEP_S="60"))
+            try:
+                end = time.time() + 60
+                while not term_cgroups() and pr.poll() is None and time.time() < end:
+                    time.sleep(0.2)
+                # BOTH halves are needed: "no cgroup afterwards" is also true of
+                # a run whose probe never reached the cgroup at all, and that
+                # would pass while testing nothing.
+                armed = bool(term_cgroups())
+                if armed:
+                    pr.send_signal(signal.SIGTERM)
+                    try:
+                        rc_term = pr.wait(timeout=60)
+                    except subprocess.TimeoutExpired:
+                        pr.kill()
+                        rc_term = pr.wait(timeout=10)
+                else:
+                    rc_term = None
+                left_term = [d.name for d in term_cgroups()]
+                check("sigterm_removes_cgroup", armed and not left_term,
+                      f"SIGTERM to the driver removes the probe's cgroup, not "
+                      f"only the processes in it (cgroup seen: {armed}, "
+                      f"rc={rc_term}, left: {left_term or 'none'})")
+            finally:
+                # Whatever happened, this case leaves nothing for the scan
+                # below to find: a failure here must be reported ONCE, by the
+                # case that provoked it.
+                if pr.poll() is None:
+                    pr.kill()
+                    pr.wait(timeout=10)
+                for d in term_cgroups():
+                    try:
+                        (d / "cgroup.kill").write_text("1")
+                    except OSError:
+                        pass
+                    try:
+                        d.rmdir()
+                    except OSError:
+                        pass
+
+            # ---- ... even when the worker cannot do it itself ------------------
+            # The case above passes today for a reason that is not the code's
+            # doing: `_teardown` sleeps while reaping, the worker thread wakes
+            # in that window and runs its own `finally`. That is a race, and on
+            # a loaded machine or a worker parked in the post-probe window it is
+            # lost -- which is how empty `d3-*` cgroups came to accumulate in
+            # the shared base. So hold the worker where the hazard is and ask
+            # the question again: with the worker unable to clean up, does
+            # anything else remove the cgroup?
+            rid2 = f"cgpark-{os.getpid()}"
+            want2 = "d3-" + hashlib.sha256(f"{rid2}-aaa_gate".encode()).hexdigest()[:32]
+            park_file = tmp / "parked.flag"
+            park_drv = tmp / "patch_park.py"
+            park_drv.write_text(PATCH % (str(SWEEP), PARK_PATCH))
+
+            def park_cgroups():
+                return [d for d in base.iterdir()
+                        if d.is_dir() and d.name.startswith(want2)]
+
+            pp = subprocess.Popen(
+                [sys.executable, str(park_drv), "--certs", str(cdir),
+                 "--out", str(tmp / "cgpark.tsv"), "--jobs", "1",
+                 "--timeout", "120", "--enforce", "cgroup",
+                 "--kill-over-rss-kb", "400000"],
+                cwd=ROOT, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                env=dict(os.environ, LAKE=str(stub), TMPDIR=str(tmp),
+                         D3_RUN_ID=rid2, D3_PARK_FILE=str(park_file)))
+            try:
+                end = time.time() + 90
+                while not park_file.exists() and pp.poll() is None and time.time() < end:
+                    time.sleep(0.2)
+                parked = park_file.exists() and bool(park_cgroups())
+                if parked:
+                    pp.send_signal(signal.SIGTERM)
+                    try:
+                        rc_park = pp.wait(timeout=60)
+                    except subprocess.TimeoutExpired:
+                        pp.kill()
+                        rc_park = pp.wait(timeout=10)
+                else:
+                    rc_park = None
+                left_park = [d.name for d in park_cgroups()]
+                check("sigterm_removes_cgroup_worker_parked",
+                      parked and not left_park,
+                      f"with the worker held in the post-probe window so its own "
+                      f"`finally` cannot run, SIGTERM still removes the cgroup "
+                      f"(parked: {parked}, rc={rc_park}, left: {left_park or 'none'})")
+            finally:
+                if pp.poll() is None:
+                    pp.kill()
+                    pp.wait(timeout=10)
+                for d in park_cgroups():
+                    try:
+                        (d / "cgroup.kill").write_text("1")
+                    except OSError:
+                        pass
+                    try:
+                        d.rmdir()
+                    except OSError:
+                        pass
 
             # ---- no cgroup and no process survives any of the above --------------
             leftover = [d.name for d in base.iterdir()
