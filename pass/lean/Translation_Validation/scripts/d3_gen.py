@@ -210,6 +210,21 @@ def gen_composed(n, shape, prune=False):
             # duplicate-slot repair above.
             dead = [f"ra{k}"] + ([] if same else [f"rb{k}"]) + [f"hv{k}", f"hag{k}"]
             L.append(f"  clear {' '.join(dead)}")
+    # The E chain is a `set` per binding, so E{k} is a LET-BOUND local whose
+    # body mentions E{k-1}.  Lean 4.36 unfolds such a local in `whnf` and
+    # recurses TWICE per level without caching the result, so reaching
+    # `E{n}.toList` costs 2^n.  Measured on composed/far with byte-identical
+    # sources and library: n=20 spends 91.9 ms in `simp` under 4.31 and 70.9 s
+    # under 4.36; n=32 takes 29.6 s under 4.31 and does not finish in 1800 s
+    # under 4.36, where the trace shows E19.toList at 22.0 s splitting into
+    # two E18.toList at 10.9 s and 11.1 s, and so on down.
+    #
+    # Nothing from here on reads an E body: the size (`hs`), agreement (`hag`)
+    # and read (`ra`/`rb`) facts are already proved, and the steps below go
+    # through `hE{k}` and `rout`, which are propositional.  Making the chain
+    # opaque is therefore free, and it is the same pruning idea the `pruned`
+    # variant already applies to hypotheses.  n=32 returns to 23 s under 4.36.
+    L.append("  clear_value " + " ".join(f"E{k}" for k in range(n, -1, -1)))
     L.append("  simp only [runBindings]")
     L += emit_read(n, NSRC + n - 1, "rout")
     L.append("  simp only [Array.map_singleton, rout]")

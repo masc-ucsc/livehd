@@ -843,6 +843,7 @@ theorem fast_correct : ∀ e i s, fast i s = denoteResidual R e i s := by
   have hag32 : ∀ j, j < E0.size → refBV E32 j = refBV E0 j :=
     fun j hj => by rw [hE32]; exact srcAgree_push _ (by omega) hag31 j hj
   clear ra31 rb31 hv31 hag31
+  clear_value E32 E31 E30 E29 E28 E27 E26 E25 E24 E23 E22 E21 E20 E19 E18 E17 E16 E15 E14 E13 E12 E11 E10 E9 E8 E7 E6 E5 E4 E3 E2 E1 E0
   simp only [runBindings]
   have rout : refBV E32 33 = v31 := by
     rw [hE32, show (33 : Nat) = E31.size from (hs31).symm, refBV_push_self]
