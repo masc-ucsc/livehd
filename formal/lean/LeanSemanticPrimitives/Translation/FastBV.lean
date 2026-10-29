@@ -226,7 +226,10 @@ theorem bitwiseNatTab_eq (w : Nat) (f : Bool → Bool → Bool) (A B : Nat) :
   · rename_i h; simp only [maskTab_get w h]; rfl
   · rfl
 
-def bvBitwiseFast (w : Nat) (f : Bool → Bool → Bool) (a b : BV) : BV :=
+/-- Inlined, so at a call site with a literal operator (`fun x y => x && y`) the compiler
+evaluates the truth table itself and keeps one word operation, instead of calling the
+operator's closure four times per use. -/
+@[inline] def bvBitwiseFast (w : Nat) (f : Bool → Bool → Bool) (a b : BV) : BV :=
   ofNatLt w (bitwiseNatTab w f (uintNat a) (uintNat b))
 
 @[csimp] theorem bv_bitwise_eq_fast : @bv_bitwise = @bvBitwiseFast := by
@@ -236,7 +239,7 @@ def bvBitwiseFast (w : Nat) (f : Bool → Bool → Bool) (a b : BV) : BV :=
       (fun i hi => by rw [testBit_bitwiseNat]; simp [hi, bv_bit_eq]),
     mk_bv_natCast w _ (bitwiseNat_lt _ _ _ _)]
 
-def bvNotFast (w : Nat) (a : BV) : BV :=
+@[inline] def bvNotFast (w : Nat) (a : BV) : BV :=
   ofNatLt w (bitwiseNatTab w (fun x _ => !x) (uintNat a) 0)
 
 @[csimp] theorem bv_not_eq_fast : @bv_not = @bvNotFast := by
