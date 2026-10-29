@@ -51,7 +51,7 @@ table cell".
 | file | role |
 |---|---|
 | `private_compiler_build.sh` | builds the fourteen compiler modules by explicit name, which a default `lake build` does not cover; step 3 of `Translation_Validation/README.md` |
-| `pcb_importer_guard_test.sh` | guards the importer that build relies on; its fixture is in `specialization/tests/` |
+| `pcb_importer_guard_test.sh` | guards the importer that build relies on; its fixture is in `specialization/evidence/` |
 
 These two are documented by the route that runs them. They sit here because
 both Translation Validation and the Futamura projection reference them.

@@ -125,8 +125,8 @@ proving bounds what the *lowering* can get wrong; it does not bound what the
 
 ### What a default run establishes
 
-With `emit_cert=true` (and `emit_fast_bridge` left at its default `false`), the
-emitted theorems are:
+With `emit_cert=true` (and `emit_fast_bridge` left at its default `false`), a
+design with state emits these four:
 
 ```lean
 theorem <Top>_comb_cert_refines_cert   : <Top>_comb_cert i s = <Top>_outputsFromCert (evalGraphC …) := rfl
@@ -145,6 +145,34 @@ the right shapes, and every `BitVec` width lines up across a multi-megabyte
 file.  That catches real emission bugs.  But it is a **well-formedness result,
 not an equivalence result**, and a green axiom audit on these four theorems does
 not say the thing you run matches the certificate.
+
+Which of the four appear depends on the design.  `_next_cert_refines_cert` and
+`_step_cert_refines_lgraph_certificate` are emitted only when the design has
+state (`emit_legacy_graph_cert.cpp:107`), so a purely combinational top emits
+fewer.
+
+### The one default theorem that is not `rfl`
+
+A design with **no memory values** also gets a fifth theorem
+(`emit_legacy_graph_cert.cpp:113`):
+
+```lean
+theorem <Top>_evalGraph_correct :
+    envCorrectOn <Top>_graphCert.topo (evalGraph …) (graphDenotation …) := by
+  exact evalGraphCorrectForCert <Top>_graphCert (<Top>_sourceEnv …)
+```
+
+This one has real content.  `evalGraph` is the evaluator and `graphDenotation`
+is a separate denotational definition of the same graph; `evalGraphCorrectForCert`
+says they agree on every node of the topological order, and it rests on
+`eval_op_correct : eval_op = denote_op`, proved by cases over every operator
+(`LGraphModel.lean:674`, `:645`).
+
+Two things keep it in proportion.  It is proved **once, in the library, for
+every graph** — the emitted line only instantiates it at this design, so the
+per-design content is the instantiation, not the proof.  And it relates two
+*certificate-side* definitions, so like the four above it does not mention the
+executable fast model.
 
 ### What connects the executable to the certificate
 

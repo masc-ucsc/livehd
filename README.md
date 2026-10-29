@@ -313,7 +313,13 @@ workflow, and Isabelle heap-build rules.
 
 `pass.lean` is LiveHD's Lean 4 back end. It takes an LGraph — the design after
 LiveHD has read the RTL and normalised it — and writes it out as Lean 4 source.
-
+It has two modes. `legacy`, the default, writes a complete self-contained Lean
+program for the design. `verified_compiler` writes a **certificate** instead:
+the design as plain data, one entry per node giving the operator, the bit widths
+and the dependencies, with what that data means fixed separately, once, by a
+Lean function every design shares. See
+[`pass/lean/README.md`](pass/lean/README.md) for the pass, both modes and its
+options.
 
 A simulator turns that output into something that steps the design: given the
 inputs and the current state, it computes the outputs and the next state, in
