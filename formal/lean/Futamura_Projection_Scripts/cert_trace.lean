@@ -1,5 +1,6 @@
 /-
-`cert_trace` -- the per-step OUTPUTS of `interpretDesign` on a certificate,
+`cert_trace` -- the per-step OUTPUTS of `interpretDesign` on a certificate
+(computed by `directStep`, proved equal to it),
 under a supplied stimulus. The oracle side of an RTL differential: the same
 `stim v1` file drives an event simulator on the original RTL, and the two
 traces are compared line by line.
@@ -20,6 +21,7 @@ separately check their residual against this same `interpretDesign`.
 -/
 import LeanSemanticPrimitives.Projection.CertLoadAny
 import LeanSemanticPrimitives.Compiler.DesignSemantics
+import LeanSemanticPrimitives.Compiler.DirectSemantics
 
 open Compiler
 
@@ -91,7 +93,15 @@ def main (args : List String) : IO UInt32 := do
       | .error e => do IO.eprintln s!"stimulus: {e}"; return 2
     let mut s := zeroState D
     for k in List.range cycles do
-      let r := interpretDesign D (edgesAt D third k) (inputAt D st k) s
+      -- `directStep` is proved equal to `interpretDesign` on every input it
+      -- accepts (`directStep_correct`; it refuses a certificate or runtime shape
+      -- outside the checked fragment instead of stepping it). Executing
+      -- `interpretDesign` itself is exponential in the number of steps on a
+      -- design with a memory: measured on a 16x4 register file, 7 s for 10
+      -- steps and about 2.3x per extra step, against 0.6 s for 200 steps here.
+      let r ← match Compiler.Direct.directStep D (edgesAt D third k) (inputAt D st k) s with
+        | .ok r => pure r
+        | .error e => do IO.eprintln s!"step {k}: refused: {e.render}"; return 1
       IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"
       s := r.nextState
     return 0
