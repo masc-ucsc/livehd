@@ -530,6 +530,23 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
           const auto& p = n.operands[i];
           if (i == 1) {
             add(p, b.pin_width(p.driver));  // the mask
+          } else if (i == 0) {
+            // The BASE must be materialized at the RESULT width. bv_set_mask
+            // folds bv_set_bit over it, and bv_set_bit keeps its argument's
+            // width, so a narrower base dropped every inserted bit at or above
+            // that width (the final resize comes too late). value_dep does not
+            // widen an UNSIGNED node -- a value read never needs it -- so the
+            // zero extension is emitted here. Pyrope equiv corpus bitset_gap:
+            // `o[7:0] = i[7:0]; o[11:4] = i[15:8]` lost bits 8..11.
+            const auto own = b.pin_width(p.driver);
+            const auto w   = std::max(own, n.width);
+            if (p.driver.kind == PinKind::Constant) {
+              add(p, w);
+            } else if (!p.driver.is_signed && own < w) {
+              c.deps.push_back(b.emit({Operation::Or, 0, {}}, w, {b.dep(p.driver, own)}));
+            } else {
+              vadd(p, w);
+            }
           } else if (p.driver.kind == PinKind::Constant) {
             add(p, b.pin_width(p.driver));
           } else {
