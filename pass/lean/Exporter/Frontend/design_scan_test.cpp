@@ -3622,6 +3622,58 @@ TEST(DesignScan, CountedReductionsAreRefusedRawAndAcceptedLowered) {
   EXPECT_GE(ops[ScanOp::Sum], 1) << "the popcount tree";
 }
 
+// A SIGNED lane below the top of a Concat must contribute only its own bits.
+// The certificate's SHL and Or read a narrower signed operand sign-extended to
+// the result width, so `{hi, lo_signed, c}` with lo negative set every bit of
+// `hi` (Pyrope equiv corpus: concat_tuple_lanes, zd = 504 for 472). The lowering
+// now passes a signed lane through an UNSIGNED Or at its lane width first.
+TEST(DesignScan, ConcatSignedMiddleLaneIsConfinedToItsWindow) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_concat_signed_mid");
+  auto  io  = lib.create_io("concat_mid");
+  io->add_input("hi", 1);
+  io->set_bits("hi", 4);
+  io->add_input("lo", 2);
+  io->set_bits("lo", 3);
+  io->add_input("c", 3);
+  io->set_bits("c", 2);
+  io->add_output("y", 1);
+  io->set_bits("y", 9);
+  auto       g  = io->create_graph();
+  const auto hi = g->get_input_pin("hi");
+  const auto lo = g->get_input_pin("lo");
+  const auto c  = g->get_input_pin("c");
+  set_bits(hi, 4);
+  livehd::graph_util::set_unsign(hi);
+  set_bits(lo, 3);
+  livehd::graph_util::set_sign(lo);
+  set_bits(c, 2);
+  livehd::graph_util::set_unsign(c);
+  auto       concat    = create_typed_node(*g, Ntype_op::Concat);
+  const auto width_pin = [&](int port, int value) {
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(value)).connect_sink(concat.create_sink_pin(port));
+  };
+  hi.connect_sink(concat.create_sink_pin(0));  // MSB lane first
+  width_pin(1, 4);
+  lo.connect_sink(concat.create_sink_pin(2));
+  width_pin(3, 3);
+  c.connect_sink(concat.create_sink_pin(4));
+  width_pin(5, 2);
+  set_bits(concat.create_driver_pin(0), 9);
+  concat.create_driver_pin(0).connect_sink(g->get_output_pin("y"));
+  const auto design = scan_design(*g, {});
+  const auto lo_it  = std::find_if(design.inputs.begin(), design.inputs.end(), [](const Port& p) { return p.name == "lo"; });
+  ASSERT_NE(lo_it, design.inputs.end());
+  const auto lo_id    = lo_it->id;
+  bool       confined = false;
+  for (const auto& n : design.nodes) {
+    if (n.op == ScanOp::Or && n.width == 3 && n.operands.size() == 1 && n.operands[0].driver.kind == PinKind::Input
+        && n.operands[0].driver.id == lo_id) {
+      confined = true;
+    }
+  }
+  EXPECT_TRUE(confined) << "the signed 3-bit lane is not passed through an unsigned 3-bit Or before its shift";
+}
+
 // ONE WAY across two read ports is an ordinary DAG edge, not a cycle: read 0's
 // data feeds read 1's address and nothing returns. Two reads of one array are
 // two `MemRead` nodes over one image, and the certificate orders them like any

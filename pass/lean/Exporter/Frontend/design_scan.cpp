@@ -205,8 +205,21 @@ void lower_concat(const LeanCtx& ctx, const Node& node, DesignScan& design, uint
         });
       }
     }
-    // SHL and OR already zero-extend to their result width. Explicit Sext
-    // above is restricted to a signed lane's window, before that extension.
+    // Every lane contributes exactly its own window. A SIGNED lane value would
+    // be sign-extended by the certificate's SHL and Or (both read a narrower
+    // signed operand at the result width), filling every lane above it with
+    // its sign bit: `{hi, lo_signed, c}` with lo = -1 set the `hi` bits too
+    // (Pyrope equiv corpus: concat_tuple_lanes). An Or at the lane width
+    // yields an UNSIGNED value with the same bits, so the shift and the
+    // final Or zero-extend it. The explicit Sext above stays: it fills a
+    // signed source's own window, which is what the lane means.
+    if (value.is_signed) {
+      value = emit(ScanOp::Or,
+                   lane_width,
+                   {
+                       {0, 0, value}
+      });
+    }
     if (lane.offset != 0) {
       value = emit(ScanOp::SHL,
                    width,
