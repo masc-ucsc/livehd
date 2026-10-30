@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <map>
 #include <set>
 #include <sstream>
 #include <tuple>
@@ -18,6 +19,7 @@
 #include "gtest/gtest.h"
 #include "lean_format.hpp"
 #include "node_util.hpp"
+#include "reduce_lower.hpp"
 
 namespace lean_export {
 namespace {
@@ -3570,6 +3572,54 @@ TEST(DesignScan, CombinationalArrayMemoryIsRefused) {
   auto  f   = build_mem(lib, "comb_array", /*sync_read=*/false, /*fwd=*/1, /*reads=*/2);
   repin_global(f, "type", Ntype::Memory_type_array);
   expect_refusal(*f.g, "COMBINATIONAL array");
+}
+
+// Rxor (`^a`) and Popcount have no certificate operator, so the scan alone
+// refuses them; pass.lean first expands them with lower_counted_reductions_copy
+// (the expansion pass.isabelle uses) into Get_mask bits joined by an Xor / Sum
+// tree. The values are checked against Icarus by the Lean differential on
+// inou/prp/tests/equiv/reduce_{xor,popcount}.prp.
+TEST(DesignScan, CountedReductionsAreRefusedRawAndAcceptedLowered) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_reduce");
+  auto  io  = lib.create_io("reduce");
+  io->add_input("a", 1);
+  io->set_bits("a", 8);
+  io->set_unsign("a", true);
+  io->add_output("x", 2);
+  io->set_bits("x", 1);
+  io->add_output("p", 3);
+  io->set_bits("p", 4);
+  auto g = io->create_graph();
+  for (const auto& [op, out, bits] : {
+           std::tuple{    Ntype_op::Rxor, "x", 1},
+           std::tuple{Ntype_op::Popcount, "p", 4}
+  }) {
+    auto n = create_typed_node(*g, op);
+    g->get_input_pin("a").connect_sink(n.create_sink_pin(Ntype::get_sink_pid(op, "a")));
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(8)).connect_sink(n.create_sink_pin(Ntype::get_sink_pid(op, "b")));
+    auto d = n.create_driver_pin(0);
+    set_bits(d, bits);
+    livehd::graph_util::set_unsign(d);
+    d.connect_sink(g->get_output_pin(out));
+  }
+  expect_refusal(*g, "unsupported certificate op(s): popcount");
+
+  hhds::GraphLibrary scratch;
+  const auto         lowered = livehd::graph_util::lower_counted_reductions_copy(g, scratch);
+  ASSERT_NE(lowered.get(), g.get()) << "a graph with reductions must be copied and expanded";
+  DesignScan design;
+  try {
+    design = scan_design(*lowered, {});
+  } catch (const std::exception& e) {
+    FAIL() << "the expanded graph was refused: " << e.what();
+  }
+  std::map<ScanOp, int> ops;
+  for (const auto& n : design.nodes) {
+    ++ops[n.op];
+  }
+  EXPECT_GE(ops[ScanOp::GetMask], 8) << "one Get_mask per counted bit";
+  EXPECT_GE(ops[ScanOp::Xor], 1) << "the parity tree";
+  EXPECT_GE(ops[ScanOp::Sum], 1) << "the popcount tree";
 }
 
 // ONE WAY across two read ports is an ordinary DAG edge, not a cycle: read 0's
