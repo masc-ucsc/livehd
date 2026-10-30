@@ -55,7 +55,7 @@ rm -rf "$T"; mkdir -p "$T"; cd "$T" || exit 1
 fails=0
 
 # ---- STRUCTURAL ----------------------------------------------------------
-"$LHD" compile verilog "$RTL" --top "$TOP" --reader yosys-slang \
+"$LHD" compile verilog "$RTL" --top "$TOP" --reader yosys-slang --set yosys.setundef=zero \
   --workdir "$T/w" --emit-dir "lg:$T/lg" > "$T/compile.log" 2>&1 \
   || { echo "FAIL: the fixture did not import"; tail -3 "$T/compile.log"; exit 1; }
 "$LHD" pass single_edge --top "$TOP" "lg:$T/lg" --emit-dir "lg:$T/lgn" \
@@ -125,22 +125,44 @@ echo "$neg" | grep -q "BEHAVIORAL_DIFF_FAIL" \
        echo "      microstep alignment is not being tested"; fails=$((fails+1)); }
 
 # Bypass the INSERTED slot gate, in the certificate (test side), not via a
-# production switch: make both arms of the write-lane mux the real mask.
+# production switch. The gate is an AND of the port's write-lane mask with the
+# slot mask, on the MemWriteBE byte-enable. It is found by following that
+# dependency, not by node shape: an earlier version looked for "one wide
+# MuxN", the shape the gate had before the certificate changed, and found none.
+# The mutant keeps the write-lane mask on both sides of the AND, so the write
+# lands in BOTH slots.
 mkdir -p "$T/neg_gate"
 python3 - "$CERT" "$T/neg_gate/cert.lean" <<'PYG'
 import re, sys
 src = open(sys.argv[1]).read()
-wide = [m for m in re.findall(
-    r'\{ op := LGraphOp\.Op_MuxN, width := (\d+), deps := #\[([^\]]*)\], origin := \d+ \}', src)
-    if int(m[0]) > 1]
-if len(wide) != 1:
-    print(f"MUTATION-UNAVAILABLE expected one wide MuxN, found {len(wide)}"); sys.exit(2)
-w, deps = wide[0]
-a = [x.strip() for x in deps.split(",")]
-old = f'{{ op := LGraphOp.Op_MuxN, width := {w}, deps := #[{deps}]'
-new = f'{{ op := LGraphOp.Op_MuxN, width := {w}, deps := #[{a[0]}, {a[2]}, {a[2]}]'
-assert src.count(old) == 1
-open(sys.argv[2], "w").write(src.replace(old, new))
+srcs = src[src.index("sources  := #["):src.index("nodes    := #[")]
+nsrc = len(re.findall(r"SourceDesc\.\w+", srcs))
+node_re = re.compile(r"\{ op := LGraphOp\.(\w+)(?: \d+)?, width := (\d+), deps := #\[([^\]]*)\]")
+nodes_txt = src[src.index("nodes    := #["):]
+nodes = [(m.group(1), [int(x) for x in m.group(3).split(",") if x.strip()], m.group(0)) for m in node_re.finditer(nodes_txt)]
+writes = [n for n in nodes if n[0] == "Op_MemWriteBE"]
+if len(writes) != 1:
+    print(f"MUTATION-UNAVAILABLE expected one MemWriteBE, found {len(writes)}"); sys.exit(2)
+slot = writes[0][1][3]                      # [mem, addr, data, byte_enable]
+gate = None
+for _ in range(4):                          # through resize Ors to the AND
+    if slot < nsrc:
+        break
+    op, deps, _ = nodes[slot - nsrc]
+    if op == "Op_And" and len(deps) == 2:
+        gate = slot
+        break
+    if op == "Op_Or" and len(deps) == 1:
+        slot = deps[0]
+        continue
+    break
+if gate is None:
+    print("MUTATION-UNAVAILABLE no two-input AND on the MemWriteBE byte-enable"); sys.exit(2)
+op, deps, text = nodes[gate - nsrc]
+mutant = text.replace(f"deps := #[{deps[0]}, {deps[1]}]", f"deps := #[{deps[0]}, {deps[0]}]")
+assert src.count(text) == 1 and mutant != text
+open(sys.argv[2], "w").write(src.replace(text, mutant))
+print(f"mutant: slot {gate} AND [{deps[0]}, {deps[1]}] -> [{deps[0]}, {deps[0]}]")
 PYG
 if [ $? -ne 0 ]; then
   echo "FAIL: could not build the gate-bypass mutant, so that control is untested"
