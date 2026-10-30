@@ -149,23 +149,25 @@ structure StateExt where
   mems  : Array (Nat × MemImageExt) := #[]
 deriving Inhabited
 
-def StateExt.build (D : DesignCert) (st : StateExt) : RuntimeState :=
+/-- A flop the state file does not name starts at its RESET VALUE (`resetState`),
+or at 0 with `zeroInit` (`zeroState`, the default before 2026-10-30). -/
+def StateExt.build (D : DesignCert) (st : StateExt) (zeroInit : Bool := false) : RuntimeState :=
   { flops := (Array.range D.flops.size).map fun k =>
       let w := (D.flops[k]?).elim 1 FlopDesc.width
       match st.flops.find? (fun p => p.1 == k) with
       | some p => mk_bv w p.2
-      | none   => mk_bv w 0
+      | none   => mk_bv w (if zeroInit then 0 else (D.flops[k]?).elim 0 FlopDesc.resetValue)
     mems := (Array.range D.memories.size).map fun k =>
       let dw := (D.memories[k]?).elim 1 MemoryDesc.dw
       match st.mems.find? (fun p => p.1 == k) with
       | some p => ({ p.2 with dw := dw } : MemImageExt).decode
       | none   => fun _ => mk_bv dw 0 }
 
-theorem StateExt.build_flops (D : DesignCert) (st : StateExt) :
-    (st.build D).flops.size = D.flops.size := by simp [StateExt.build]
+theorem StateExt.build_flops (D : DesignCert) (st : StateExt) (z : Bool) :
+    (st.build D z).flops.size = D.flops.size := by simp [StateExt.build]
 
-theorem StateExt.build_mems (D : DesignCert) (st : StateExt) :
-    (st.build D).mems.size = D.memories.size := by simp [StateExt.build]
+theorem StateExt.build_mems (D : DesignCert) (st : StateExt) (z : Bool) :
+    (st.build D z).mems.size = D.memories.size := by simp [StateExt.build]
 
 --------------------------------------------------------------------------------
 -- File formats
@@ -246,6 +248,7 @@ structure SimOptions where
   checkOnly : Bool                  := false
   hex       : Bool                  := false
   list      : Bool                  := false
+  zeroInit  : Bool                  := false
 deriving Inhabited
 
 def usage : String :=
@@ -254,7 +257,10 @@ def usage : String :=
   "  --inputs FILE          input trace, one cycle per line (default: all zeros);\n" ++
   "                         a line may start with @<bits>, one 0/1 per declared clock\n" ++
   "                         (ordinal 0 first) = which clocks fire that cycle (default: all)\n" ++
-  "  --state FILE           initial state (default: all zeros)\n" ++
+  "  --state FILE           initial state; a flop it does not name starts at\n" ++
+  "                         its reset value (memories at zero)\n" ++
+  "  --init reset|zero      the start of every flop the state file does not name:\n" ++
+  "                         its reset value (default) or 0\n" ++
   "  --cycles N             cycles to run (default: the input trace's length, else 1)\n" ++
   "  --show-state           also print the flop state each cycle\n" ++
   "  --watch-mem IDX:ADDR   print memory IDX at ADDR each cycle (repeatable)\n" ++
@@ -270,6 +276,9 @@ def parseArgs : List String → SimOptions → Except String SimOptions
   | "--hex" :: rest, o => parseArgs rest { o with hex := true }
   | "--inputs" :: f :: rest, o => parseArgs rest { o with inputs := some f }
   | "--state" :: f :: rest, o => parseArgs rest { o with state := some f }
+  | "--init" :: "reset" :: rest, o => parseArgs rest { o with zeroInit := false }
+  | "--init" :: "zero" :: rest, o => parseArgs rest { o with zeroInit := true }
+  | "--init" :: v :: _, _ => .error s!"--init expects reset or zero, got '{v}'"
   | "--cycles" :: n :: rest, o =>
       match parseNat? n with
       | some n => parseArgs rest { o with cycles := some n }
@@ -329,7 +338,7 @@ inductive SimOutcome where
 a function of the certificate and the trace, not of the process. -/
 def simRun (o : SimOptions) (name : String) (D : DesignCert)
     (stExt : StateExt) (rows : Array TraceRow) : SimOutcome :=
-  let s0 := stExt.build D
+  let s0 := stExt.build D o.zeroInit
   let n := match o.cycles with
     | some n => n
     | none   => if rows.isEmpty then 1 else rows.size

@@ -93,6 +93,21 @@ void emit_legacy_schema(const DesignScan& d, const LegacyNames& n, std::ostream&
     }
   }
   os << (n.memories.empty() ? "deriving Repr, Inhabited\n\n" : "deriving Inhabited\n\n");
+  // The start state a runner uses by default: every flop at its reset value,
+  // every memory word and read register at 0. A Verilog power-on value with no
+  // reset (`reg r = 5`) reaches the scan as the flop's reset value, so starting
+  // from `default` (all zero) would start such a flop at 0 and every later cycle
+  // would be off. The certificate runners start the same way (`resetState`,
+  // `initStateOf`).
+  os << "def " << n.base << "_initState : " << n.base << "_state :=\n";
+  std::string fields;
+  for (const auto& [id, f] : flops) {
+    if (f->initial != "0") {
+      fields += std::string(fields.empty() ? "" : ",\n    ") + n.flops.at(id) + " := BitVec.ofInt " + std::to_string(f->width)
+                + " (" + f->initial + ")";
+    }
+  }
+  os << (fields.empty() ? std::string("  default") : "  { (default : " + n.base + "_state) with\n    " + fields + " }") << "\n\n";
 }
 void emit_legacy_field_mapping(const DesignScan& d, const LegacyNames& n, std::ostream& os) {
   os << "\n-- Field mapping (Lean selector -> RTL name).\n";

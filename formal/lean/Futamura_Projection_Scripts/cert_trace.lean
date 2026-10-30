@@ -10,8 +10,8 @@ traces are compared line by line.
 `stim v1` is the dcert2_memroute format, restricted to what an RTL testbench
 can replay: `in <ordinal> <width> <value>` (every cycle) and
 `at <cycle> in <ordinal> <width> <value>` (that cycle wins). Unlisted inputs
-are 0 at their declared width. The initial state is all-zero (flops and
-memories). Edges: `all` fires every declared clock on every step; `third` is
+are 0 at their declared width. The initial state puts every flop at its reset
+value and every memory word at 0 (`init:zero` starts the flops at 0 instead). Edges: `all` fires every declared clock on every step; `third` is
 `edgeSchedule`'s one-clock pattern, every clock quiet on steps k % 3 = 2 --
 the quiet steps are where an ASYNCHRONOUS reset and a synchronous one differ.
 
@@ -75,6 +75,14 @@ def zeroState (D : DesignCert) : RuntimeState :=
   { flops := D.flops.map (fun f => mk_bv f.width 0)
   , mems  := D.memories.map (fun m => fun _ => mk_bv m.dw 0) }
 
+/-- Every flop at its reset value, memories zero: the default start. A flop with
+a Verilog power-on value and no reset carries that value as `resetValue`, so this
+is the start that matches the RTL; it is also the Futamura runner's
+(`initStateOf`). `init:zero` keeps the old all-zero start. -/
+def resetState (D : DesignCert) : RuntimeState :=
+  { flops := D.flops.map (fun f => mk_bv f.width f.resetValue)
+  , mems  := D.memories.map (fun m => fun _ => mk_bv m.dw 0) }
+
 def edgesAt (D : DesignCert) (third : Bool) (k : Nat) : ClockEdges :=
   if third && k % 3 == 2 then Array.replicate D.clocks.size false
   else Array.replicate D.clocks.size true
@@ -83,15 +91,20 @@ def main (args : List String) : IO UInt32 := do
   match args with
   | cert :: cyc :: stimPath :: rest =>
     let some cycles := cyc.toNat? | IO.eprintln s!"cycles {repr cyc} is not a number"; return 2
-    let third ← match rest with
-      | [] | ["edges:all"] => pure false
-      | ["edges:third"] => pure true
-      | _ => do IO.eprintln s!"unknown option {rest}"; return 2
+    let mut third := false
+    let mut zeroInit := false
+    for opt in rest do
+      match opt with
+      | "edges:all" => third := false
+      | "edges:third" => third := true
+      | "init:reset" => zeroInit := false
+      | "init:zero" => zeroInit := true
+      | _ => do IO.eprintln s!"unknown option {opt}"; return 2
     let (_, D) ← Projection.CertLoadAny.loadAny cert
     let st ← match parseStim (← IO.FS.readFile stimPath) with
       | .ok s => pure s
       | .error e => do IO.eprintln s!"stimulus: {e}"; return 2
-    let mut s := zeroState D
+    let mut s := if zeroInit then zeroState D else resetState D
     for k in List.range cycles do
       -- `directStep` is proved equal to `interpretDesign` on every input it
       -- accepts (`directStep_correct`; it refuses a certificate or runtime shape
@@ -106,5 +119,5 @@ def main (args : List String) : IO UInt32 := do
       s := r.nextState
     return 0
   | _ =>
-    IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third]"
+    IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero]"
     return 2
