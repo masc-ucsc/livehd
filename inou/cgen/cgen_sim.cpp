@@ -6989,6 +6989,28 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
     }
     return cond;
   };
+  // When a SYNCHRONOUS read port (type 1) loads its read register: on a memory
+  // edge (`mem_gate_cond`) AND while the port's own `enable` is high. A disabled
+  // read HOLDS the register: `if (re) q <= mem[a]`, Yosys RD_EN on a sync port
+  // being the output register's clock enable, and the Lean model's
+  // `sram_sync_read_reg_next ren raw cur = if ren then raw else cur`.
+  // cgen_verilog has held since def8ad252; this register used to load the
+  // value at the current address every cycle, whatever the enable said.
+  // An unconnected or constant-true enable adds no condition.
+  auto mem_read_commit_cond = [&](const Mem& m, const MemPort& rp) -> std::string {
+    std::string cond = mem_gate_cond(m);
+    if (rp.enable.is_invalid()) {
+      return cond;
+    }
+    if (rp.enable.is_const()) {
+      const auto& c = const_of(rp.enable);
+      if (!c.has_unknowns() && !c.is_known_false()) {
+        return cond;
+      }
+    }
+    absl::StrAppend(&cond, cond.empty() ? "" : " && ", emit_known_true(operand(rp.enable, std::max(1, bits_of(rp.enable)))));
+    return cond;
+  };
   auto emit_wen = [&](const Mem& m, const MemPort& wp) -> std::string {
     std::string wen
         = wp.enable.is_invalid() ? absl::StrCat("Slop<", m.wensize, ">::create_integer(-1)") : raw_operand(wp.enable, m.wensize);
@@ -11088,8 +11110,9 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
             // A latency-1 read is a REGISTER on the array's clock, so it takes the
             // same gate the writes take. Latching it unconditionally made the read
             // data follow the address through periods the gate holds — the silent
-            // half of the memory clock-gate fold.
-            const std::string cond = mem_gate_cond(m);
+            // half of the memory clock-gate fold. It also holds while its own read
+            // enable is low (mem_read_commit_cond).
+            const std::string cond = mem_read_commit_cond(m, p);
             fout->append(absl::StrCat("    ",
                                       cond.empty() ? "" : absl::StrCat("if (", cond, ") "),
                                       "__gen += slop_update(",
@@ -17351,7 +17374,7 @@ void Cgen_sim::do_from_graph(const std::shared_ptr<hhds::Graph>& graph) {
                   continue;
                 }
                 const std::string q    = absl::StrCat(state, "_q", port.rdidx);
-                const std::string gate = mem_gate_cond(*memory);
+                const std::string gate = mem_read_commit_cond(*memory, port);
                 const std::string read
                     = absl::StrCat(state, ".read<", port.rdidx, ">(", raw_operand(port.addr, std::max(1, bits_of(port.addr))), ")");
                 fout->append(absl::StrCat("  ",
