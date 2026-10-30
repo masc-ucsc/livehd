@@ -46,6 +46,28 @@ TEST(LegacyModel, UsesOwnedCertificateRatherThanScanNodeSemantics) {
   EXPECT_NE(os.str().find("LGraphOp.Op_Xor"), std::string::npos);
   EXPECT_EQ(os.str().find("LGraphOp.Op_Sum"), std::string::npos);
 }
+// The legacy step advances every state element on every call and never reads a
+// clock, so it can only model ONE clock domain. Two domains are refused rather
+// than stepped together; one is accepted.
+TEST(LegacyModel, MoreThanOneClockDomainIsRefused) {
+  auto d   = binary(ScanOp::Sum, 8);
+  d.clocks = {
+      {"k_a", "clk_a", true, false},
+      {"k_b", "clk_b", true, false}
+  };
+  const auto         c = build_certificate(d, {});
+  std::ostringstream os;
+  try {
+    emit_legacy_model(d, c, {}, os);
+    ADD_FAILURE() << "a two-domain design was emitted as a one-step legacy model";
+  } catch (const std::invalid_argument& e) {
+    EXPECT_NE(std::string(e.what()).find("legacy mode models one clock domain"), std::string::npos) << e.what();
+    EXPECT_NE(std::string(e.what()).find("clk_a, clk_b"), std::string::npos) << e.what();
+  }
+  d.clocks.pop_back();
+  std::ostringstream one;
+  EXPECT_NO_THROW(emit_legacy_model(d, build_certificate(d, {}), {}, one));
+}
 TEST(LegacyModel, PreservesGlobalSelectorUniquenessAndEscapesMappingComments) {
   auto d            = binary(ScanOp::Or, 8);
   d.inputs[0].name  = "a-b";
