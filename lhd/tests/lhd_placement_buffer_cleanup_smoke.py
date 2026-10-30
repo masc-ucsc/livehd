@@ -12,7 +12,7 @@ root = Path(os.environ['TEST_TMPDIR']) / 'buffer_cleanup'
 root.mkdir()
 libdir = Path('inou/lefdef/tests/data')
 source = root / 'fan.v'
-# One internal net with 64 loads: the mapper buffers it (pass.abc.max_fanout=32).
+# One internal net with 64 loads: the mapper buffers it (pass.abc.max_fanout=16).
 source.write_text('module fan(input clk, input a, input b, input [63:0] d, output reg [63:0] q);\n'
                   '  wire e = a ^ b;\n'
                   '  always @(posedge clk) q <= d & {64{e}};\n'

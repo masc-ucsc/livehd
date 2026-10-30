@@ -7,6 +7,12 @@ struct Boundary_pin_options {
   bool     enabled = false, split = true, order = false, align = false;
   unsigned iterations          = 50;
   double   max_displacement_um = 20;
+  // With order: GP iterations at the original crossings before the bus order is chosen, so the order follows where
+  // the settled cells pull (0 orders at once).
+  unsigned settle_iterations   = 20;
+  // With order: spacing between assigned pins on an edge (0 = the caller's automatic pitch); an edge without room
+  // halves it down to one site.
+  double   pitch_um            = 0;
 };
 void validate_boundary_pin_options(const Boundary_pin_options&);
 struct Boundary_pin {
@@ -17,7 +23,9 @@ struct Boundary_pin {
 struct Boundary_pin_order_stats {
   unsigned groups = 0, unordered_before = 0, unordered_after = 0, ambiguous_groups = 0, capacity_edges = 0, corner_pins = 0,
            moved = 0, macro_pins_before = 0, macro_pins_after = 0;
-  double seconds = 0, before = 0, after = 0;
+  unsigned narrowed_edges = 0;  // edges assigned below the requested pitch
+  double   seconds = 0, before = 0, after = 0;
+  double   min_pitch = 0;  // smallest pitch used on an ordered edge (design units)
 };
 struct Boundary_pin_model {
   DreamPlace::native::Design design;
@@ -33,8 +41,10 @@ struct Boundary_pin_model {
 // Temporary optimization topology only. Each original pin occurs exactly once;
 // connected RSMT pieces in different rectangles share zero-area fixed terminals.
 Boundary_pin_model       split_boundary_nets(const DreamPlace::native::Design&, const Region_mesh&, const Busorder_route&);
+// pitch (design units): spacing of the assigned pins on an edge; 0 or below one site uses one site. An edge
+// without room for its pins at the pitch retries at half of it, down to one site.
 Boundary_pin_order_stats order_boundary_pins(Boundary_pin_model&, const Region_mesh&, const std::vector<Bus_bit>&,
-                                             const std::vector<int>& macros = {});
+                                             const std::vector<int>& macros = {}, double pitch = 0);
 struct Pin_align_pair {
   int         input = -1, output = -1, rectangle = -1, cell = -1;
   std::string outcome;
@@ -62,6 +72,7 @@ class Boundary_pins {
   Boundary_pin_model               model;
   std::vector<Bus_bit>             identities;
   std::vector<int>                 macros;
+  std::vector<std::string>         drivers;  // per original net: driver "instance/pin" or the IO name (pins.tsv)
   std::vector<Boundary_pin>        original_anchors;
   Boundary_pin_order_stats         ordering;
   Pin_align_stats                  alignment;
@@ -73,7 +84,7 @@ class Boundary_pins {
 
 public:
   Boundary_pins(const Region_mesh&, Busorder_route, double, Boundary_pin_options, std::string output_dir = {},
-                std::vector<Bus_bit> bus_bits = {}, std::vector<int> macro_nodes = {});
+                std::vector<Bus_bit> bus_bits = {}, std::vector<int> macro_nodes = {}, std::vector<std::string> net_drivers = {});
   void                                    refine(DreamPlace::native::Design&, const DreamPlace::native::Options&);
   void                                    observe(const DreamPlace::native::Design&, const std::string& stage);
   const std::vector<Boundary_pin_sample>& samples() const { return history; }

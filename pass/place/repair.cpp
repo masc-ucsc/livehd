@@ -2398,7 +2398,7 @@ Repair_result finalize_placement(const Result& initial, const Options& requested
   options.fp_evaluate          = evaluate;
   // The region refinements ran once, in the dedicated refine_regions step (or the first placement when nothing
   // else is pending); their result is the placement the optimizations continued from.
-  options.busorder.enabled = options.boundarypins.enabled = options.boundarypins.align = false;
+  options.boundarypins.enabled = options.boundarypins.align = false;
   options.output_dir  = requested.output_dir + "/final";
   fs::create_directories(options.output_dir);
   auto frame = initial.floorplan;
@@ -2488,6 +2488,11 @@ Repair_result refine_regions(Result initial, const Options& requested, const Eva
   auto options                 = zero_gp_options(requested, initial);
   options.optimization_pending = true;  // native legalization only; the terminal one stays in finalize_placement
   options.region_refine        = true;
+  // Zero GP iterations here: the boundary refinement settles the placed result with more DREAMPlace iterations and
+  // must start from that placement's converged density weight (place() seeds it from options.density_weight_seed)
+  if (initial.gp_density_weight) {
+    options.density_weight_seed = initial.gp_density_weight;
+  }
   options.fp_evaluate          = evaluate;
   options.output_dir           = requested.output_dir + "/regions";
   fs::create_directories(options.output_dir);
@@ -2503,6 +2508,14 @@ Repair_result refine_regions(Result initial, const Options& requested, const Eva
   Repair_result result;
   auto          library = std::make_unique<hhds::GraphLibrary>();
   result.placed         = place(*initial.graph, *library, options);
+  if (!result.placed.boundary_refined) {
+    // a single region rectangle (bus order is on by default): nothing to refine, the placement stays as it was
+    Repair_result unchanged;
+    unchanged.placed = std::move(initial);
+    unchanged.timing = evaluate(unchanged.placed);
+    unchanged.report = R"({"stage":"region_refinement","moved_cells":0,"skipped":"single region"})";
+    return unchanged;
+  }
   // Coordinate-only legalization retains the previous GP continuation state.
   result.placed.gp_density_weight = initial.gp_density_weight;
   result.libraries.push_back(std::move(library));
@@ -2530,7 +2543,7 @@ Repair_result sat_align_placed(Result initial, const Options& requested, const E
   options.satlegalize          = true;
   options.optimization_pending = true;  // native legalization only; the terminal one stays in finalize_placement
   options.region_sat           = true;
-  options.busorder.enabled = options.boundarypins.enabled = options.boundarypins.align = false;  // ran earlier
+  options.boundarypins.enabled = options.boundarypins.align = false;  // ran earlier
   options.fp_evaluate  = evaluate;
   options.output_dir   = requested.output_dir + "/satlegalize_step";
   fs::create_directories(options.output_dir);

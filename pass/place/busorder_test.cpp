@@ -44,14 +44,8 @@ dp::Design fixture(const std::vector<double>& lanes = {10, 20, 40, 30}) {
   return d;
 }
 Region_mesh mesh(const dp::Design& d) { return Region_mesh::build(d, {}, {}, {.max_cells = 4, .merge_um = 0}, 1); }
-Busorder    make_order(const dp::Design& d, double weight = 100) {
-  Busorder_options o;
-  o.enabled             = true;
-  o.weight              = weight;
-  o.iterations          = 40;
-  o.refresh             = 20;
-  o.max_displacement_um = 20;
-  const auto router     = [](const std::vector<Busorder_point>& pins) {
+Busorder    make_order(const dp::Design& d) {
+  const auto router = [](const std::vector<Busorder_point>& pins) {
     const auto    tree = steiner_tree(pins);
     Busorder_tree edges;
     for (auto [a, b] : tree.edges) {
@@ -61,15 +55,14 @@ Busorder    make_order(const dp::Design& d, double weight = 100) {
   };
   return Busorder(d,
                   mesh(d),
-                     {
+                  {
                       {"bus",  1},
                       {"bus",  2},
                       {"bus", 20},
                       {"bus", 21}
   },
                   router,
-                  1,
-                  o);
+                  1);
 }
 }  // namespace
 
@@ -98,49 +91,8 @@ TEST(Busorder, AcceptsBothDirectionsAndExcludesMaskedNets) {
   auto d = fixture();
   d.net_mask.assign(4, 0);
   auto order = make_order(d);
-  EXPECT_TRUE(order.constraints(d).empty());
-}
-TEST(Busorder, ConvergenceMovesRealPinsWithoutChangingConnectivityOrFixedGeometry) {
-  auto       d           = fixture();
-  const auto original    = d;
-  auto       order       = make_order(d);
-  const auto constraints = order.constraints(d);
-  ASSERT_FALSE(constraints.empty());
-  bool violated = false;
-  for (const auto& e : constraints) {
-    EXPECT_EQ(e.axis, dp::Axis::y);
-    violated |= d.node_y[e.from] + d.node_size_y[e.from] + e.separation > d.node_y[e.to];
-  }
-  ASSERT_TRUE(violated);
-  dp::Options options;
-  options.bins_x = options.bins_y = 8;
-  options.target_density          = .8;
-  options.add_fillers             = false;
-  options.density_upper_bound     = true;
-  options.legalize = options.detailed_place = false;
-  order.refine(d, options);
-  const auto  before = order.samples().front();
-  const auto& after  = order.samples().back();
-  ASSERT_GT(before.initially_unordered, 0u);
-  EXPECT_LT(after.penalty, before.penalty);
-  EXPECT_NE(d.node_y, original.node_y);
-  EXPECT_EQ(d.pin2node, original.pin2node);
-  EXPECT_EQ(d.flat_net2pin, original.flat_net2pin);
-  EXPECT_EQ(d.net_weights, original.net_weights);
-  EXPECT_TRUE(d.order_edges.empty());
-  EXPECT_TRUE(d.node_boxes.empty());
-  for (int i = 0; i < 8; ++i) {
-    EXPECT_LE(std::abs(d.node_x[i] - original.node_x[i]), 20.000001);
-    EXPECT_LE(std::abs(d.node_y[i] - original.node_y[i]), 20.000001);
-  }
-  for (int i : {8, 9}) {
-    EXPECT_EQ(d.node_x[i], original.node_x[i]);
-    EXPECT_EQ(d.node_y[i], original.node_y[i]);
-  }
-  d.net_mask.assign(4, 0);
-  order.observe(d, "after_legalization");
-  EXPECT_EQ(order.samples().back().resolved, 0u);
-  EXPECT_EQ(order.samples().back().no_longer_comparable, before.initially_unordered);
+  order.observe(d, "before");
+  EXPECT_EQ(order.samples().back().groups, 0u);  // masked nets are never measured
 }
 TEST(Busorder, CoincidentCrossingsAreNotCountedAsUntangled) {
   auto d     = fixture();

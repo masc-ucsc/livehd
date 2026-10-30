@@ -68,8 +68,9 @@ void validate_boundary_pin_options(const Boundary_pin_options& o) {
   if (o.align && !o.split) {
     throw std::invalid_argument("pinalign requires split boundary nets");
   }
-  if (!o.iterations || o.iterations > 2000 || !std::isfinite(o.max_displacement_um) || o.max_displacement_um <= 0) {
-    throw std::invalid_argument("invalid boundary-pin iteration/displacement controls");
+  if (!o.iterations || o.iterations > 2000 || !std::isfinite(o.max_displacement_um) || o.max_displacement_um <= 0
+      || o.settle_iterations > 2000 || !std::isfinite(o.pitch_um) || o.pitch_um < 0) {
+    throw std::invalid_argument("invalid boundary-pin iteration/displacement/pitch controls");
   }
 }
 
@@ -240,7 +241,8 @@ Boundary_pin_model split_boundary_nets(const dp::Design& original, const Region_
 }
 
 Boundary_pin_order_stats order_boundary_pins(Boundary_pin_model& model, const Region_mesh& mesh,
-                                             const std::vector<Bus_bit>& identities, const std::vector<int>& macros) {
+                                             const std::vector<Bus_bit>& identities, const std::vector<int>& macros,
+                                             double requested_pitch) {
   const auto               start = Clock::now();
   auto&                    d     = model.design;
   Boundary_pin_order_stats stats;
@@ -280,7 +282,8 @@ Boundary_pin_order_stats order_boundary_pins(Boundary_pin_model& model, const Re
       by_edge[pin.edge].push_back(i);
     }
   }
-  const double pitch    = std::max(1., std::ceil(d.layout.site_width));
+  const double site     = std::max(1., std::ceil(d.layout.site_width));
+  const double wanted   = std::max(site, std::round(requested_pitch / site) * site);  // a whole number of sites
   const auto   identity = [&](int anchor) {
     int net = model.anchors[anchor].original_net;
     return net < int(identities.size()) ? identities[net] : Bus_bit{};
@@ -332,116 +335,132 @@ Boundary_pin_order_stats order_boundary_pins(Boundary_pin_model& model, const Re
         stats.unordered_before += !ordered(group);
       }
     }
-    std::vector<double> slots;
-    for (double t = std::ceil((edge.low + pitch) / pitch) * pitch; t <= edge.high - pitch; t += pitch) {
-      slots.push_back(t);
-    }
-    std::vector<bool> blocked(slots.size());
-    // A rectangle edge may extend through a macro after mesh pruning. Keep
-    // slots on macro boundaries usable, but never select their interiors.
-    for (size_t k = 0; k < slots.size(); ++k) {
-      blocked[k] = inside_macro(edge.axis == 0 ? edge.position : slots[k], edge.axis == 0 ? slots[k] : edge.position);
-    }
-
-    const auto reserve = [&](double t) {
-      auto begin = std::upper_bound(slots.begin(), slots.end(), t - pitch + .1);
-      auto end   = std::lower_bound(slots.begin(), slots.end(), t + pitch - .1);
-      for (auto it = begin; it != end; ++it) {
-        blocked[it - slots.begin()] = true;
-      }
-    };
-    for (const auto& name : ambiguous) {
-      for (int p : groups.at(name)) {
-        reserve(coordinate(p));
-      }
-    }
     std::map<int, double> saved;
     for (int p : anchors) {
       saved[p] = coordinate(p);
     }
-    bool feasible = slots.size() >= anchors.size();
-    for (const auto& [name, group] : groups) {
-      if (!feasible) {
-        break;
+    // One assignment of every group on the edge at `pitch`; restores the saved coordinates when it does not fit.
+    const auto assign = [&](double pitch) {
+      std::vector<double> slots;
+      for (double t = std::ceil((edge.low + pitch) / pitch) * pitch; t <= edge.high - pitch; t += pitch) {
+        slots.push_back(t);
       }
-      if (ambiguous.contains(name)) {
-        continue;
+      std::vector<bool> blocked(slots.size());
+      // A rectangle edge may extend through a macro after mesh pruning. Keep
+      // slots on macro boundaries usable, but never select their interiors.
+      for (size_t k = 0; k < slots.size(); ++k) {
+        blocked[k] = inside_macro(edge.axis == 0 ? edge.position : slots[k], edge.axis == 0 ? slots[k] : edge.position);
       }
-      struct Interval {
-        double lo, hi, weight;
+      const auto reserve = [&](double t) {
+        auto begin = std::upper_bound(slots.begin(), slots.end(), t - pitch + .1);
+        auto end   = std::lower_bound(slots.begin(), slots.end(), t + pitch - .1);
+        for (auto it = begin; it != end; ++it) {
+          blocked[it - slots.begin()] = true;
+        }
       };
-      std::map<int, std::vector<Interval>> bounds;
-      for (int a : group) {
-        const int     node = model.anchors[a].node;
-        std::set<int> nets;
-        for (int k = d.flat_node2pin_start[node]; k < d.flat_node2pin_start[node + 1]; ++k) {
-          nets.insert(d.pin2net[d.flat_node2pin[k]]);
-        }
-        for (int net : nets) {
-          if (!d.net_mask[net]) {
-            continue;
-          }
-          double lo = INFINITY, hi = -INFINITY;
-          for (int k = d.flat_net2pin_start[net]; k < d.flat_net2pin_start[net + 1]; ++k) {
-            int pin = d.flat_net2pin[k], n = d.pin2node[pin];
-            if (n == node) {
-              continue;
-            }
-            double t = edge.axis == 0 ? d.node_y[n] + d.pin_offset_y[pin] : d.node_x[n] + d.pin_offset_x[pin];
-            lo       = std::min(lo, t);
-            hi       = std::max(hi, t);
-          }
-          if (std::isfinite(lo)) {
-            bounds[a].push_back({lo, hi, d.net_weights[net]});
-          }
+      for (const auto& name : ambiguous) {
+        for (int p : groups.at(name)) {
+          reserve(coordinate(p));
         }
       }
-      const auto cost = [&](int a, size_t slot) {
-        if (blocked[slot]) {
-          return double(INFINITY);
+      bool feasible = slots.size() >= anchors.size();
+      for (const auto& [name, group] : groups) {
+        if (!feasible) {
+          break;
         }
-        double value = 1e-9 * std::abs(slots[slot] - saved.at(a));
-        for (const auto& b : bounds[a]) {
-          value += b.weight * (std::max(b.hi, slots[slot]) - std::min(b.lo, slots[slot]));
-        }
-        return value;
-      };
-      double           best = INFINITY;
-      std::vector<int> chosen, sequence;
-      for (bool reverse : {false, true}) {
-        auto order = group;
-        if (reverse) {
-          std::reverse(order.begin(), order.end());
-        }
-        auto assignment
-            = ordered_pin_slots(order.size(), slots.size(), [&](size_t k, size_t slot) { return cost(order[k], slot); });
-        if (assignment.empty()) {
+        if (ambiguous.contains(name)) {
           continue;
         }
-        double value = 0;
-        for (size_t k = 0; k < order.size(); ++k) {
-          value += cost(order[k], assignment[k]);
+        struct Interval {
+          double lo, hi, weight;
+        };
+        std::map<int, std::vector<Interval>> bounds;
+        for (int a : group) {
+          const int     node = model.anchors[a].node;
+          std::set<int> nets;
+          for (int k = d.flat_node2pin_start[node]; k < d.flat_node2pin_start[node + 1]; ++k) {
+            nets.insert(d.pin2net[d.flat_node2pin[k]]);
+          }
+          for (int net : nets) {
+            if (!d.net_mask[net]) {
+              continue;
+            }
+            double lo = INFINITY, hi = -INFINITY;
+            for (int k = d.flat_net2pin_start[net]; k < d.flat_net2pin_start[net + 1]; ++k) {
+              int pin = d.flat_net2pin[k], n = d.pin2node[pin];
+              if (n == node) {
+                continue;
+              }
+              double t = edge.axis == 0 ? d.node_y[n] + d.pin_offset_y[pin] : d.node_x[n] + d.pin_offset_x[pin];
+              lo       = std::min(lo, t);
+              hi       = std::max(hi, t);
+            }
+            if (std::isfinite(lo)) {
+              bounds[a].push_back({lo, hi, d.net_weights[net]});
+            }
+          }
         }
-        if (value < best) {
-          best     = value;
-          chosen   = std::move(assignment);
-          sequence = std::move(order);
+        // the pull of the pieces each pin joins: the span of their other pins along the edge, so the order (and
+        // its direction) follows where the cells already are
+        const auto cost = [&](int a, size_t slot) {
+          if (blocked[slot]) {
+            return double(INFINITY);
+          }
+          double value = 1e-9 * std::abs(slots[slot] - saved.at(a));
+          for (const auto& b : bounds[a]) {
+            value += b.weight * (std::max(b.hi, slots[slot]) - std::min(b.lo, slots[slot]));
+          }
+          return value;
+        };
+        double           best = INFINITY;
+        std::vector<int> chosen, sequence;
+        for (bool reverse : {false, true}) {
+          auto order = group;
+          if (reverse) {
+            std::reverse(order.begin(), order.end());
+          }
+          auto assignment
+              = ordered_pin_slots(order.size(), slots.size(), [&](size_t k, size_t slot) { return cost(order[k], slot); });
+          if (assignment.empty()) {
+            continue;
+          }
+          double value = 0;
+          for (size_t k = 0; k < order.size(); ++k) {
+            value += cost(order[k], assignment[k]);
+          }
+          if (value < best) {
+            best     = value;
+            chosen   = std::move(assignment);
+            sequence = std::move(order);
+          }
+        }
+        if (chosen.empty()) {
+          feasible = false;
+          break;
+        }
+        for (size_t k = 0; k < chosen.size(); ++k) {
+          install(sequence[k], slots[chosen[k]]);
+          reserve(slots[chosen[k]]);
         }
       }
-      if (chosen.empty()) {
-        feasible = false;
-        break;
+      if (!feasible) {
+        for (const auto& [a, t] : saved) {
+          install(a, t);
+        }
       }
-      for (size_t k = 0; k < chosen.size(); ++k) {
-        install(sequence[k], slots[chosen[k]]);
-        reserve(slots[chosen[k]]);
-      }
+      return feasible;
+    };
+    double pitch = wanted;
+    bool   fits  = assign(pitch);
+    while (!fits && pitch > site) {  // a crowded edge keeps the order at a tighter pitch
+      pitch = std::max(site, std::round(pitch / 2 / site) * site);
+      fits  = assign(pitch);
     }
-    if (!feasible) {
+    if (!fits) {
       ++stats.capacity_edges;
-      for (const auto& [a, t] : saved) {
-        install(a, t);
-      }
+    } else {
+      stats.narrowed_edges += pitch < wanted;
+      stats.min_pitch       = stats.min_pitch > 0 ? std::min(stats.min_pitch, pitch) : pitch;
     }
     for (const auto& [name, group] : groups) {
       if (!ambiguous.contains(name) && group.size() > 1) {
@@ -462,14 +481,16 @@ Boundary_pin_order_stats order_boundary_pins(Boundary_pin_model& model, const Re
 }
 
 Boundary_pins::Boundary_pins(const Region_mesh& regions, Busorder_route router, double units, Boundary_pin_options policy,
-                             std::string directory, std::vector<Bus_bit> bus_bits, std::vector<int> macro_nodes)
+                             std::string directory, std::vector<Bus_bit> bus_bits, std::vector<int> macro_nodes,
+                             std::vector<std::string> net_drivers)
     : options(policy)
     , mesh(regions)
     , route(std::move(router))
     , dbu(units)
     , output(std::move(directory))
     , identities(std::move(bus_bits))
-    , macros(std::move(macro_nodes)) {
+    , macros(std::move(macro_nodes))
+    , drivers(std::move(net_drivers)) {
   validate_boundary_pin_options(options);
   if (!std::isfinite(dbu) || dbu <= 0) {
     throw std::invalid_argument("invalid boundary-pin units");
@@ -489,24 +510,20 @@ void Boundary_pins::refine(dp::Design& physical, const dp::Options& base) {
     model.design = physical;
   }
   original_anchors = model.anchors;
-  if (options.split && options.order) {
-    ordering = order_boundary_pins(model, mesh, identities, macros);
-  }
-  if (options.split && options.align) {
-    alignment = align_boundary_pins(model, mesh, identities, macros);
-  }
-  build_seconds            = elapsed(start);
-  auto& work               = model.design;
+  auto& work       = model.design;
   limit_displacement(work, node_weight_criticality(physical), options.max_displacement_um * dbu);
   auto control           = base;
-  control.max_iterations = control.min_iterations = control.schedule_iterations = options.iterations;
-  control.post_density_factor                                                   = 0;
-  control.wirelength_gamma_start                                                = control.wirelength_gamma_end;
-  control.max_step                                                              = std::min(control.max_step, .05);
+  // Settle a converged placement so that only the pins move cells: fillers start in its free space (random fillers
+  // push cells around: real HPWL +20-30% in 50 iterations) and the seeded density weight follows the starting
+  // overflow (GP stopped while still spreading, so no fixed weight holds it).
+  control.fillers_in_whitespace  = true;
+  control.hold_overflow          = true;
+  control.post_density_factor    = 0;
+  control.wirelength_gamma_start = control.wirelength_gamma_end;
+  control.max_step               = std::min(control.max_step, .05);
   control.legalize = control.detailed_place = false;
   control.before_legalize                   = {};
   control.after_macro_legalize              = {};
-  control.observer                          = {};
   control.progress_observer                 = {};
   control.checkpoint                        = {};
   control.checkpoint_interval               = 0;
@@ -516,7 +533,8 @@ void Boundary_pins::refine(dp::Design& physical, const dp::Options& base) {
   control.terminal_interval                 = 0;
   control.macro_pull_update                 = {};
   control.macro_pull_interval               = 0;
-  auto actual                               = physical;
+  auto        actual                        = physical;
+  std::string phase                         = "iteration";
   control.observer_interval                 = 10;
   control.observer                          = [&](const dp::Design& snapshot, dp::PlacementStage stage, int iteration) {
     if (stage != dp::PlacementStage::global_placement) {
@@ -526,22 +544,42 @@ void Boundary_pins::refine(dp::Design& physical, const dp::Options& base) {
       actual.node_x[i] = snapshot.node_x[i];
       actual.node_y[i] = snapshot.node_y[i];
     }
-    history.push_back({"iteration",
+    history.push_back({phase,
                        unsigned(iteration),
                        dp::hpwl(actual),
                        dp::density_overflow(actual, base.bins_x, base.bins_y, base.target_density, base.scale_macro_density),
                        dp::hpwl(snapshot),
                        elapsed(start)});
   };
+  // GP with every virtual pin fixed; the pins never move.
+  const auto settle = [&](unsigned iterations) {
+    control.max_iterations = control.min_iterations = control.schedule_iterations = iterations;
+    dp::GpState state;
+    const auto  result = dp::place(work, control, &state);
+    for (const auto& pin : model.anchors) {
+      if (work.node_x[pin.node] != pin.x || work.node_y[pin.node] != pin.y) {
+        throw std::runtime_error("virtual boundary pin moved");
+      }
+    }
+    return result;
+  };
+  // Anchors at the original crossings, a short settle, then each bus is ordered by where its settled cells pull
+  // and every pin on the edge spaced at the pitch; the final settle runs with the ordered pins fixed.
+  if (options.split && options.order && options.settle_iterations) {
+    phase = "settle";
+    settle(options.settle_iterations);
+    phase = "iteration";
+  }
+  if (options.split && options.order) {
+    ordering = order_boundary_pins(model, mesh, identities, macros, options.pitch_um * dbu);
+  }
+  if (options.split && options.align) {
+    alignment = align_boundary_pins(model, mesh, identities, macros);
+  }
+  build_seconds     = elapsed(start);
   // Keep the last settled candidate, even if its metrics regress: this
   // experiment measures the overhead of pins, without an ordering selector.
-  dp::GpState state;
-  const auto  result = dp::place(work, control, &state);
-  for (const auto& pin : model.anchors) {
-    if (work.node_x[pin.node] != pin.x || work.node_y[pin.node] != pin.y) {
-      throw std::runtime_error("virtual boundary pin moved");
-    }
-  }
+  const auto result = settle(options.iterations);
   for (int i = 0; i < physical.num_movable; ++i) {
     physical.node_x[i] = work.node_x[i];
     physical.node_y[i] = work.node_y[i];
@@ -608,6 +646,14 @@ void Boundary_pins::write() const {
   j.Double(ordering.before);
   j.Key("weighted_split_hpwl_after");
   j.Double(ordering.after);
+  j.Key("pitch_dbu");
+  j.Double(options.pitch_um * dbu);
+  j.Key("min_pitch_dbu");
+  j.Double(ordering.min_pitch);
+  j.Key("narrowed_edges");
+  j.Uint(ordering.narrowed_edges);
+  j.Key("settle_iterations");
+  j.Uint(options.order ? options.settle_iterations : 0);
   j.EndObject();
   j.Key("pinalign");
   j.StartObject();
@@ -721,12 +767,21 @@ void Boundary_pins::write() const {
   j.EndObject();
   std::ofstream report(output + "/report.json");
   report << buffer.GetString() << '\n';
+  // The fixed virtual IO pins of the regions (the contract with region-local placement and routing): the net by its
+  // driver, its bus bit, the edge (normal axis 0 = vertical boundary) and the rectangles on its low and high side.
   std::ofstream pins(output + "/pins.tsv");
-  pins << "node\toriginal_net\tx_dbu\ty_dbu\tedge\toriginal_x_dbu\toriginal_y_dbu\n";
+  pins << "node\toriginal_net\tx_dbu\ty_dbu\tedge\toriginal_x_dbu\toriginal_y_dbu\tdriver\tbus\tbit\taxis\trect_low\trect_high\n";
   for (const auto& p : model.anchors) {
-    const auto& old = original_anchors[&p - model.anchors.data()];
+    const auto& old  = original_anchors[&p - model.anchors.data()];
+    const auto  side = [&](double delta) {
+      const int  axis = p.edge >= 0 ? model.edges[p.edge].axis : -1;
+      const auto rect = axis == 0 ? mesh.rect_of(p.x + delta, p.y) : axis == 1 ? mesh.rect_of(p.x, p.y + delta) : std::nullopt;
+      return rect.value_or(-1);
+    };
+    const auto& bit = p.original_net < int(identities.size()) ? identities[p.original_net] : Bus_bit{};
     pins << p.node << '\t' << p.original_net << '\t' << p.x << '\t' << p.y << '\t' << p.edge << '\t' << old.x << '\t' << old.y
-         << '\n';
+         << '\t' << (p.original_net < int(drivers.size()) ? drivers[p.original_net] : "") << '\t' << bit.bus << '\t' << bit.bit
+         << '\t' << (p.edge >= 0 ? model.edges[p.edge].axis : -1) << '\t' << side(-1) << '\t' << side(1) << '\n';
   }
   if (!report || !pins) {
     throw std::runtime_error("cannot write boundary-pin report");

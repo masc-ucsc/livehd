@@ -47,7 +47,8 @@ in todo 3g-partitions), two capacity models.
 | `grid.local` | `512` | local spreading grid per axis |
 | `region.max_cells` | `10000` | movable-cell cap per region rectangle |
 | `region.merge_um` | `5` | merge macro-edge/IO-span cut lines closer than this |
-| `region.busorder`, `region.boundarypins`, `region.pinalign` | `false` | the mesh consumers; their sub-options keep their names under the same prefix |
+| `region.busorder` | `true` | bus order (boundary pins with order); skipped when the mesh has one rectangle |
+| `region.boundarypins`, `region.pinalign` | `false` | the other mesh consumers; their sub-options keep their names under the same prefix |
 | `legalize.bin.grid` | `route` | terminal legalization bins only: the routing grid (bounded for tiny cores) or an explicit 1..1024 used as given. SAT route-grid bins keep `grid.route` |
 | `legalize.bin.max_density` | `0.8` | hard terminal bin cap; must exceed the GP target |
 | `satlegalize.bin.size_um` | empty | fixed SAT bins `W,H` µm anchored at the die origin |
@@ -3897,58 +3898,30 @@ Ordinary placement calls while optimization is pending (first placement, timing 
 never run the refinements or the SAT pass; handoff taps and the power grid are produced only by the final pass.
 The internal options `region_refine` / `region_sat` select the dedicated calls.
 
-### Experimental final-placement bus ordering
+### Final-placement bus ordering
 
-`place.region.busorder=false` is the default. Opt in with
-`--set synth.place.region.busorder=true` (or `"region_busorder": true` in a
-`physical_repair` configuration). Only the final cell stage uses it, between
-ordinary GP and legalization; macro and IO positions stay fixed. 
-The region mesh (`Region_mesh`, built once per detail-final phase and shared
-with boundary pins and pin alignment) comes from that run's cell coordinates, macro edges,
-and IO bus spans. Cuts within `region.merge_um=5` um merge; regions over
+`place.region.busorder=true` is the default. Opt out with
+`--set synth.place.region.busorder=false` (or `"region_busorder": false` in a
+`physical_repair` configuration). When the mesh has a single rectangle there is no
+region edge, and the refinement returns the placement unchanged. It runs the fixed boundary-pin flow below with
+`boundarypins.order=true`: fixed virtual IO pins on the region boundaries, each bus
+ordered on its edge by where its cells pull, spaced, and kept fixed while the cells
+settle. Only the final cell stage uses it, between ordinary GP and legalization;
+macro and IO positions stay fixed. The boundary-pin options
+(`place.region.boundarypins.*`) apply.
+
+The region mesh (`Region_mesh`, built once per detail-final phase and shared by bus
+order, boundary pins and pin alignment) comes from that run's cell coordinates, macro
+edges, and IO bus spans. Cuts within `region.merge_um=5` um merge; regions over
 `region.max_cells=10000` movable cells split along their longest dimension.
 Pruning alternates H/V candidates sorted by their initial neighbor distance,
 without reranking. The mesh then stays fixed; `region_mesh.json` describes it.
 
-RSMT crossings supply soft adjacent-bit order constraints. Ascending and
-descending orders both work, including gaps in bit indices. Each virtual crossing
-is a supporting real pin coordinate plus an offset, so its force moves real cells;
-there are no added physical cells, signal nets, capacitance or timing arcs. A
-one-DBU order margin avoids making coincident crossings a zero-force optimum;
-it does not reserve physical routing tracks.
-Clock/reset masks apply. Ambiguous branched crossings are measured but do not
-receive single-lane constraints. RSMT uses a deterministic HV realization where
-its branch is diagonal; these are placement estimates, not routed wires.
-
-Controls under `place.region.busorder.` (`physical_repair` JSON uses `region_busorder_` followed by the field):
-
-| Option | Experimental default | Meaning |
-|---|---:|---|
-| `iterations` | 100 | Extra GP iteration budget |
-| `refresh` | 20 | Rebuild crossing constraints between chunks |
-| `weight` | 4 | Ordering strength; 0 is an extra-GP-only control |
-| `max_displacement_um` | 20 | Movement bound, reduced for timing-weighted cells |
-
-Each chunk starts with final wire smoothing and fresh optimizer state; existing
-wirelength, density and routability objectives remain active. A snapshot must
-stay within +2% physical HPWL and +0.01 density overflow of the input to be
-accepted. Selection favors genuinely resolved initial bus/edge groups, followed
-by lower ordering penalty. This is not a timing guarantee: compare actual
-post-CTS routed timing, wire/via counts, DRC and hold results.
-
-`busorder/report.json` records the mesh and per-chunk measurements. The initial
-unordered bus/edge cohort is tracked after convergence and after legalization:
-ordered percentage, still-unordered percentage, tied/ambiguous groups, and groups
-whose participating bits changed or no longer cross the same edge. Ties and
-missing crossings are not counted as untangled. Stage TSVs contain crossing
-coordinates for overlays. The report also includes the overall current unordered
-count, since new disorder can appear outside the original cohort.
-
 ### Experimental fixed boundary pins
 
-`--set synth.place.region.boundarypins=true` enables a separate final-GP experiment
-(default false), with `place.region.busorder=false`. The same independently built mesh
-is used. All active signal nets are considered; clock/reset masks apply.
+`--set synth.place.region.boundarypins=true` enables a final-GP refinement
+(default false; `place.region.busorder=true`, the default, also enables it, with order). The same
+independently built mesh is used. All active signal nets are considered; clock/reset masks apply.
 
 Each RSMT branch is cut where it crosses rectangle boundaries. Connected pieces
 inside a rectangle become local placement nets, joined through fixed zero-area
@@ -3961,33 +3934,42 @@ LGraph; only real movable cell coordinates are copied out of the temporary model
 
 The default extra budget is 50 iterations (`place.region.boundarypins.iterations`).
 `place.region.boundarypins.split=false` runs the matched extra-GP control without virtual
-pins. Both use final wire smoothing, the same optimizer startup and a 20 um
-movement bound reduced by original timing weights
-(`place.region.boundarypins.max_displacement_um`). Pin coordinates and the partition
-are frozen throughout this extra phase. Its last result is legalized normally,
-including when placement metrics regress: this experiment measures pin overhead
-and does not use the bus-order candidate selector.
+pins. Both use final wire smoothing and a 20 um movement bound reduced by original
+timing weights (`place.region.boundarypins.max_displacement_um`). Every settle keeps
+the converged placement: it starts from GP's density weight, its fillers start in the
+placement's free space (random fillers pushed real cells around: +20-30% HPWL in 50
+iterations), and the density weight follows the starting overflow instead of
+escalating (DREAMPlace `fillers_in_whitespace`, `hold_overflow`). Pin coordinates and
+the partition are frozen throughout a settle. The last result is legalized normally.
 
 `boundarypins/report.json` records the boxes, pin/net counts, build time, real-net
 HPWL and density overflow before/after refinement and after legalization.
 Temporary split-net HPWL is labeled separately and is not comparable to real-net
 HPWL. `boundarypins/pins.tsv` gives the immutable boundary-pin locations for PNG
-overlays. `physical_repair` JSON uses `region_boundarypins`, `region_boundarypins_split`,
-`region_boundarypins_iterations` and `region_boundarypins_max_displacement_um`.
+overlays and is the regions' pin contract: each pin's net (by its driver
+`instance/pin` or IO name), bus and bit, edge axis and the rectangles on its low and
+high side. `physical_repair` JSON uses `region_boundarypins`, `region_boundarypins_split`,
+`region_boundarypins_iterations`, `region_boundarypins_settle_iterations`,
+`region_boundarypins_pitch_um` and `region_boundarypins_max_displacement_um`.
 
 `place.region.boundarypins.order=true` uses the same prefix-minimum slot-assignment
 solver as top-level IO initialization to order bus lanes and minimize weighted
 split-net HPWL. Each virtual pin stays on its original atomic rectangle edge;
 there is no perimeter rotation or pin-to-pin ordering force. Per-bus assignment
 tries ascending and descending bit order, permits missing bits, and reserves
-site-pitch-spaced slots against other buses. Slots inside real macro footprints
+slots against other buses. Every pin of an edge is spaced at
+`place.region.boundarypins.pitch_um` (0, the default, is twice the widest flop: one
+2x2 cell-box); an edge without room halves it down to one site, reported as
+`narrowed_edges` / `min_pitch_dbu`. Slots inside real macro footprints
 are forbidden; frame masks are not routing obstacles. Residual macro-interior
 pins from ambiguity or whole-edge fallback are reported explicitly. Ambiguous repeated crossings of one
 bit and corner pins stay fixed. An edge without sufficient slots is restored to
 its original coordinates and reported rather than silently breaking constraints.
 
-The assignment runs once before the extra GP iterations. All resulting virtual
-pins remain fixed throughout GP and are removed before normal legalization.
+The pins start at the original crossings for `place.region.boundarypins.settle_iterations`
+(default 20) GP iterations, so the order follows where the settled cells pull; the
+assignment then runs once, and the ordered pins stay fixed for the remaining iterations.
+They are removed before normal legalization; `pins.tsv` keeps them.
 The ordering report distinguishes virtual-pin order from actual estimated RSMT
 order: `boundarypins/rsmt_order/` tracks the initial unordered real-net cohort
 before GP, after GP, and after legalization. Changed or ambiguous groups are not

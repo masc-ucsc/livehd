@@ -530,7 +530,7 @@ TEST(LhdOptions, RecommendedSharedDefaults) {
            {                "compile.specialize_modules",   "true"},
            {                       "pass.abc.area_relax",      "0"},
            {                         "pass.abc.boundary",  "false"},
-           {                       "pass.abc.max_fanout",     "32"},
+           {                       "pass.abc.max_fanout",     "16"},
            {                          "synth.delay_frac",    "0.4"},
            {                           "synth.partition", "coarse"},
            {                  "synth.place.reset_fanout",     "32"},

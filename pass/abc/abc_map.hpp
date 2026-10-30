@@ -26,8 +26,8 @@ struct Map_options : synth::Driver_options {
   // Cap on the fanout of any net ABC MAPS, enforced by appending
   // `buffer -N <n>; dnsize` to a built-in flow. 0 disables the tail.
   // Nets driven by native (unblasted) nodes are outside ABC and keep their
-  // fanout regardless. Default 32.
-  uint32_t    max_fanout = 32;
+  // fanout regardless. Default 16 (pass.usyn's too).
+  uint32_t    max_fanout = 16;
   // Indivisible wide operations can exceed pass.color.synth.max_gate by orders of
   // magnitude. The default large tier (at or above Driver_options::large_ge)
   // skips ABC's unbounded structural-choice synthesis and maps the already

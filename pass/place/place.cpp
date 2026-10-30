@@ -676,26 +676,17 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     h = hash_text(std::format("gp-post-density:{}:{}", o.post_density_factor, o.convergence_tolerance), h);
   }
   if (o.boundarypins.enabled) {
-    h = hash_text(std::format("boundarypins:{}:{}:{}:{}:{}:{}:{}",
+    h = hash_text(std::format("boundarypins:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                               o.boundarypins.split,
                               o.boundarypins.order,
                               o.boundarypins.align,
                               o.boundarypins.iterations,
                               o.boundarypins.max_displacement_um,
+                              o.boundarypins.settle_iterations,
+                              o.boundarypins.pitch_um,
                               o.region.merge_um,
                               o.region.max_cells),
                   h);
-  }
-  if (o.busorder.enabled) {
-    const auto& b = o.busorder;
-    h             = hash_text(std::format("busorder:{}:{}:{}:{}:{}:{}",
-                                          b.iterations,
-                                          b.refresh,
-                                          o.region.max_cells,
-                                          b.weight,
-                                          o.region.merge_um,
-                                          b.max_displacement_um),
-                              h);
   }
   if (o.virtual_fillers && o.macro_fill_cell_space) {
     h = hash_text("macro-cell-space-fillers-v1", h);
@@ -4835,7 +4826,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   const auto [cell_halo_x, cell_halo_y] = effective_halo(options);
   const auto bus_endpoint               = [&](Pin pin, int bit) {
     const auto endpoint = resolver.bit(pin, bit);
-    if (options.busorder.enabled || options.boundarypins.enabled) {
+    if (options.boundarypins.enabled) {
       if (const auto name = pin.attr(attrs::pin_name); name.has()) {
         if (gu::bits_of(pin) > 1) {
           v.bus_names.try_emplace(endpoint, Bus_bit{std::string(name.get()), bit});
@@ -5182,7 +5173,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   }
   v.fp.terminals.clear();
   v.fp.components.clear();
-  if (options.busorder.enabled || options.boundarypins.enabled) {
+  if (options.boundarypins.enabled) {
     for (const auto& net : v.fp.nets) {
       if (const auto identity = indexed_bus_bit(net.name)) {
         for (const auto& pin : net.connections) {
@@ -6147,13 +6138,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   // While optimization is pending (timing-driven placement, resize, repair follow) only the dedicated
   // refine_regions call refines: it runs once on the timing-driven result, then timing gets a chance to react.
   const bool refine_here = !options.optimization_pending || options.region_refine;
-  const bool bus_active  = options.busorder.enabled && options.full && !options.fp_place && refine_here
-                          && options.completed_stage == Placement_stage::final && !options.timing_seed && !options.retain_placement
-                          && !options.analyze_colors_only;
   const bool boundary_active   = options.boundarypins.enabled && options.full && !options.fp_place && refine_here
                                  && options.completed_stage == Placement_stage::final && !options.timing_seed
                                  && !options.retain_placement && !options.analyze_colors_only;
-  const bool refinement_active = bus_active || boundary_active;
+  const bool refinement_active = boundary_active;
   if (refinement_active && movable_macros) {
     throw std::invalid_argument("final boundary refinement requires fixed macros");
   }
@@ -6187,7 +6175,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     if (options.satlegalize) {
       refuse("satlegalize treats multi-height cells as immutable");
     }
-    if (options.busorder.enabled || options.boundarypins.enabled || options.boundarypins.align) {
+    if (options.boundarypins.enabled || options.boundarypins.align) {
       refuse("the detail-final region mesh (busorder, boundarypins) needs single-row cells");
     }
     if (!options.multirow_eco) {
@@ -6215,7 +6203,15 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   }
   std::optional<Busorder>      bus_order;
   std::optional<Boundary_pins> boundary_pins;
+  // The boundary refinements settle the converged GP placement with more DREAMPlace iterations. They must start
+  // from GP's converged density weight: restarted at initial_density_weight, wirelength collapses the spread
+  // placement (overflow 5% -> 50%+ within 100 iterations).
+  double                       gp_density_weight       = 0;
   const auto                   refine_final_boundaries = [&](dp::Design& physical) {
+    auto refine_control = control;
+    if (gp_density_weight > 0) {
+      refine_control.density_weight_seed = gp_density_weight;
+    }
     std::vector<int> bus_macros;
     for (size_t i = 0; i < v.cells.size(); ++i) {
       if (!tech.macros.at(v.cells[i].macro).klass.starts_with("CORE") && !v.cells[i].name.starts_with("__lhd_frame_mask_")) {
@@ -6277,33 +6273,47 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     };
     const auto regions = Region_mesh::build(physical, bus_macros, ios, options.region, tech.dbu);
     regions.write(options.output_dir);
-    if (boundary_active) {
+    if (regions.rects.size() < 2) {
+      return;  // one rectangle: no region edge to put virtual pins on (bus order is on by default)
+    }
+    {
+      // the real nets' estimated crossing order, before and after the refinement (boundarypins/rsmt_order)
       bus_order.emplace(physical,
                         regions,
                         identities,
                         router,
                         tech.dbu,
-                        options.busorder,
                         options.output_dir.empty() ? "" : options.output_dir + "/boundarypins/rsmt_order");
+      bus_order->measure_density(refine_control);
       bus_order->observe(physical, "before");
+      // pins spaced one 2x2 cell-box apart by default (twice the widest flop): bits stay separable for
+      // region-local placement and routing; a crowded edge narrows it
+      auto pin_options = options.boundarypins;
+      if (pin_options.pitch_um <= 0) {
+        double flop = 0;
+        for (const auto& cell : v.cells) {
+          const auto& macro = tech.macros.at(cell.macro);
+          if (macro.klass.starts_with("CORE")
+              && std::any_of(macro.pins.begin(), macro.pins.end(), [](const auto& p) { return p.second.use == "CLOCK"; })) {
+            flop = std::max(flop, macro.width);
+          }
+        }
+        pin_options.pitch_um = 2 * flop;
+      }
+      std::vector<std::string> drivers;
+      for (const auto& [driver, sinks] : v.nets) {
+        drivers.push_back(driver.instance == "PIN" ? driver.pin : driver.instance + "/" + driver.pin);
+      }
       boundary_pins.emplace(regions,
                             router,
                             tech.dbu,
-                            options.boundarypins,
+                            pin_options,
                             options.output_dir.empty() ? "" : options.output_dir + "/boundarypins",
                             identities,
-                            bus_macros);
-      boundary_pins->refine(physical, control);
+                            bus_macros,
+                            std::move(drivers));
+      boundary_pins->refine(physical, refine_control);
       bus_order->observe(physical, "after_gp");
-    } else {
-      bus_order.emplace(physical,
-                        regions,
-                        identities,
-                        router,
-                        tech.dbu,
-                        options.busorder,
-                        options.output_dir.empty() ? "" : options.output_dir + "/busorder");
-      bus_order->refine(physical, control);
     }
     if (control.observer) {
       control.observer(physical, dp::PlacementStage::global_placement, control.max_iterations);
@@ -7214,7 +7224,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       };
     }
     if (final_timing && options.gp_search.enabled) {
-      if (!control.checkpoint || options.boundarypins.enabled || options.busorder.enabled || options.cell_jump.depth > 1) {
+      if (!control.checkpoint || options.boundarypins.enabled || options.cell_jump.depth > 1) {
         throw std::invalid_argument("gp_ab requires timing feedback and fixed terminals, with cell_jump at most one");
       }
       control.gp_search    = options.gp_search;
@@ -8461,6 +8471,13 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       placement_hints->attach(control, hint_objects);
     }
     if (refinement_active && !terminal_active) {
+      const auto prior_progress = control.progress_observer;
+      control.progress_observer = [&, prior_progress](const dp::GpSample& sample) {
+        gp_density_weight = sample.density_weight;  // the latest GP density weight seeds the refinement
+        if (prior_progress) {
+          prior_progress(sample);
+        }
+      };
       const auto prior        = control.before_legalize;
       control.before_legalize = [&, prior](dp::Design& physical) {
         refine_final_boundaries(physical);
@@ -8616,6 +8633,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       macro_warp->finish(metrics.iterations);
     }
     if (refinement_active && terminal_active) {
+      gp_density_weight = metrics.density_weight;
       refine_final_boundaries(v.design);
     }
     if (terminal_active) {
@@ -9613,7 +9631,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     if (v.drivers[net].instance != "PIN") {
       // Preserve identified buses through the macro-to-final handoff when the
       // experimental final refinement is requested. Never rename input nets.
-      if (options.busorder.enabled || options.boundarypins.enabled) {
+      if (options.boundarypins.enabled) {
         auto identity = v.bus_names.find(v.drivers[net]);
         if (identity == v.bus_names.end()) {
           for (const auto& sink : v.nets.at(v.drivers[net])) {
@@ -10411,6 +10429,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   if (metrics.density_weight > 0) {
     result.gp_density_weight = metrics.density_weight;
   }
+  result.boundary_refined   = boundary_pins.has_value();
   result.unknown_const_tied = resolver.unknown_tied();
   result.qor                = std::format(
       R"({{"schema_version":1,"kind":"placement","mode":"{}","legal":{},"gp_converged":{},"gp_overflow":{},"hpwl_um":{},"initial_hpwl_um":{},"cells":{},"nets":{},"estimated_macros":{},"virtual_fillers":{},"density_constraint":"soft","timing_model":"placement_rc","timing_approximate":{},"rc_identity":"{}","incremental":{{"enabled":{},"hit":{},"reused_blocks":{},"changed_blocks":{}}}}})",
@@ -10976,12 +10995,8 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
     throw std::invalid_argument(
         "pre-CTS clock/reset sizing is disabled; repair_reset must be false (reset_fanout builds the reset tree)");
   }
-  validate_busorder_options(requested.busorder);
   validate_region_options(requested.region);
   validate_boundary_pin_options(requested.boundarypins);
-  if (requested.busorder.enabled && (requested.boundarypins.enabled || requested.boundarypins.align)) {
-    throw std::invalid_argument("busorder and boundarypins are separate experiments; enable only one");
-  }
   validate_warp_options(requested.fp_warp);
   validate_warp_options(requested.macro_warp);
   requested.macro_magnet.validate();

@@ -437,14 +437,14 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.boundarypins.order               = truthy(synth_set(opts, "place.region.boundarypins.order", "false"));
   out.boundarypins.iterations          = integer("place.region.boundarypins.iterations", "50");
   out.boundarypins.max_displacement_um = number("place.region.boundarypins.max_displacement_um", "20");
+  out.boundarypins.settle_iterations   = integer("place.region.boundarypins.settle_iterations", "20");
+  out.boundarypins.pitch_um            = number("place.region.boundarypins.pitch_um", "0");
   out.boundarypins.align               = truthy(synth_set(opts, "place.region.pinalign", "false"));
+  // bus order across region edges is the boundary-pin flow with ordered, spaced, fixed virtual pins
+  if (truthy(synth_set(opts, "place.region.busorder", "true"))) {
+    out.boundarypins.enabled = out.boundarypins.split = out.boundarypins.order = true;
+  }
   livehd::placement::validate_boundary_pin_options(out.boundarypins);
-  out.busorder.enabled             = truthy(synth_set(opts, "place.region.busorder", "false"));
-  out.busorder.iterations          = integer("place.region.busorder.iterations", "100");
-  out.busorder.refresh             = integer("place.region.busorder.refresh", "20");
-  out.busorder.weight              = number("place.region.busorder.weight", "4");
-  out.busorder.max_displacement_um = number("place.region.busorder.max_displacement_um", "20");
-  livehd::placement::validate_busorder_options(out.busorder);
   auto& terminal                  = out.terminal_legalize_options;
   terminal.remainder_warp.enabled = truthy(synth_set(opts, "place.legalize.warpspace", "false"));
   terminal.remainder_warp.weight  = number("place.legalize.warpspace.weight", "1");
@@ -1290,7 +1290,14 @@ void synth_command(Options& opts, Result& res) {
     if (mapper_method != "pass.usyn") {
       throw Lhd_error{"usage", "pass.usyn.physical=domino_provisional needs synth.mapper=usyn", ""};
     }
-    if (run_place && (place_options.busorder.enabled || place_options.boundarypins.enabled || place_options.boundarypins.align)) {
+    // bus order is on by default: two-row cells only refuse an explicit request
+    const bool region_requested = !synth_set(opts, "place.region.busorder", "").empty()
+                                  || truthy(synth_set(opts, "place.region.boundarypins", "false"))
+                                  || truthy(synth_set(opts, "place.region.pinalign", "false"));
+    if (run_place && !region_requested) {
+      place_options.boundarypins.enabled = place_options.boundarypins.order = false;
+    }
+    if (run_place && (place_options.boundarypins.enabled || place_options.boundarypins.align)) {
       throw Lhd_error{"usage",
                       "detail-final region placement (busorder, boundarypins) needs single-row cells; the domino profile places "
                       "two-row cells",
@@ -2314,7 +2321,7 @@ void synth_command(Options& opts, Result& res) {
             placed          = std::move(timed_placement.placed);
             res.recipe_steps.emplace_back("pass.place.timing_driven");
           }
-          if (place_options.busorder.enabled || place_options.boundarypins.enabled) {
+          if (place_options.boundarypins.enabled) {
             // The region refinements (bus order, boundary pins, pin alignment) are pre-legalization steps: once the
             // timing-driven placement has converged, run them exactly once, and let timing react if they moved cells.
             {

@@ -171,7 +171,6 @@ struct Options {
   bool                              handoff_taps                = false;   // profile fixed taps before terminal legalization
   std::string                       pg                          = "none";  // opt-in native power-grid profile
   Region_options                    region;  // detail-final region mesh shared by busorder/boundarypins/pinalign
-  Busorder_options                  busorder;
   Boundary_pin_options              boundarypins;
   Cell_jump_options                 cell_jump;                            // diagnostic: extend a supplied distance-one seed
   bool                              vanished_memory             = false;  // final-GP centered memory growth and local-pressure ramp
@@ -373,6 +372,7 @@ struct Result {
   std::shared_ptr<hhds::Graph>                     graph;
   std::shared_ptr<physical::Parasitics>            parasitics;
   std::optional<double>                            gp_density_weight;
+  bool                                             boundary_refined = false;  // the region boundary refinement ran
   std::string                                      qor;
   physical::Floorplan                              floorplan;
   Prects_library                                   prects;

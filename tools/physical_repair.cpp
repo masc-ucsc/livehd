@@ -179,10 +179,6 @@ int main(int argc, char** argv) {
         {                         "bin_max",                        "grid_density_max"},
         {              "local_density_bins",                              "grid_local"},
         {                        "busorder",                         "region_busorder"},
-        {                 "busorder_weight",                  "region_busorder_weight"},
-        {             "busorder_iterations",              "region_busorder_iterations"},
-        {                "busorder_refresh",                 "region_busorder_refresh"},
-        {    "busorder_max_displacement_um",     "region_busorder_max_displacement_um"},
         {              "busorder_max_cells",                        "region_max_cells"},
         {               "busorder_merge_um",                         "region_merge_um"},
         {                    "boundarypins",                     "region_boundarypins"},
@@ -190,6 +186,8 @@ int main(int argc, char** argv) {
         {              "boundarypins_order",               "region_boundarypins_order"},
         {         "boundarypins_iterations",          "region_boundarypins_iterations"},
         {"boundarypins_max_displacement_um", "region_boundarypins_max_displacement_um"},
+        {  "boundarypins_settle_iterations",   "region_boundarypins_settle_iterations"},
+        {           "boundarypins_pitch_um",            "region_boundarypins_pitch_um"},
         {                        "pinalign",                         "region_pinalign"},
         {            "legalize_max_density",                "legalize_bin_max_density"},
         {         "satlegalize_bin_size_um",                 "satlegalize_bin_size_um"},
@@ -390,10 +388,13 @@ int main(int argc, char** argv) {
     boolean_option("region_boundarypins_order", options.boundarypins.order);
     boolean_option("region_pinalign", options.boundarypins.align);
     number_option("region_boundarypins_max_displacement_um", options.boundarypins.max_displacement_um);
-    boolean_option("region_busorder", options.busorder.enabled);
-    number_option("region_busorder_weight", options.busorder.weight);
+    number_option("region_boundarypins_pitch_um", options.boundarypins.pitch_um);
+    bool busorder = false;  // bus order = the boundary-pin flow with ordered virtual pins
+    boolean_option("region_busorder", busorder);
+    if (busorder) {
+      options.boundarypins.enabled = options.boundarypins.split = options.boundarypins.order = true;
+    }
     number_option("region_merge_um", options.region.merge_um);
-    number_option("region_busorder_max_displacement_um", options.busorder.max_displacement_um);
     auto& terminal_options = options.terminal_legalize_options;
     boolean_option("legalize_joint_minimize_total", terminal_options.joint_minimize_total);
     number_option("legalize_remainder_wire_weight", terminal_options.remainder_wire_weight);
@@ -417,6 +418,7 @@ int main(int argc, char** argv) {
     };
     auto& sat_options = options.satlegalize_options;
     sat_limit("region_boundarypins_iterations", options.boundarypins.iterations);
+    sat_limit("region_boundarypins_settle_iterations", options.boundarypins.settle_iterations);
     sat_limit("cell_jump", options.cell_jump.depth);
     sat_limit("cell_jump_settle", options.cell_jump.settle);
     sat_limit("cell_jump_interval", options.cell_jump.interval);
@@ -430,8 +432,6 @@ int main(int argc, char** argv) {
       throw std::invalid_argument(
           "experimental cell_jump propagation requires final cell_place and a distance-one restart_seed_def");
     }
-    sat_limit("region_busorder_iterations", options.busorder.iterations);
-    sat_limit("region_busorder_refresh", options.busorder.refresh);
     sat_limit("region_max_cells", options.region.max_cells);
     sat_limit("legalize_padding_sites", terminal_options.padding_sites);
     sat_limit("legalize_padding_max_extra_rows", terminal_options.padding_max_extra_rows);
