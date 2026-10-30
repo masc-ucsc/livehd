@@ -730,6 +730,14 @@ sh_test(
     tags = ["no-sandbox"],
 )
 
+# Hierarchical reads into child instances see the child's value.
+sh_test(
+    name = "lhd_formal_hier_ref_test",
+    srcs = ["lhd_formal_hier_ref_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
 sh_test(
     name = "lhd_formal_reuse_test",
     srcs = ["lhd_formal_reuse_test.sh"],

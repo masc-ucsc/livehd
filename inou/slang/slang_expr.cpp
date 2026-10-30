@@ -401,7 +401,8 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
       // .symbol slang already resolved to the target instance's member. Its
       // lname is cached (lname_of) at the prefix where the member was declared,
       // and Dep_collector records the cross-block read, so the dependency sort
-      // emits the producing block first and the read is a plain wire.
+      // emits the producing block first and the read is a plain wire. A read
+      // into a child instance goes through read_xmr inside read_symbol.
       const auto& nv = expr.as<slang::ast::ValueExpressionBase>();
       return read_symbol(nv.symbol, expr.sourceRange);
     }
@@ -581,6 +582,9 @@ std::string Slang_context::lower_rvalue(const slang::ast::Expression& expr) {
 std::string Slang_context::read_symbol(const slang::ast::ValueSymbol& sym, slang::SourceRange range) {
   if (&interface_signal(sym) != &sym) {
     return read_symbol(interface_signal(sym), range);
+  }
+  if (auto xmr = read_xmr(sym, range)) {
+    return *xmr;
   }
   if (interface_signals_.contains(&sym) && input_syms_.contains(&sym)) {
     return read_leaf(lname_of(sym));
