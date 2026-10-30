@@ -461,6 +461,23 @@ TEST(CertificateIR, SraOfAnUnsignedValueShiftsInZeros) {
   ASSERT_EQ(c.nodes.size(), 1);
   EXPECT_EQ(c.nodes[0].deps, (std::vector<uint32_t>{2000000000, 2000000001}));
 }
+TEST(CertificateIR, SraOfANonNegativeConstantGainsASignBit) {
+  // A packed ROM table `(10, 20, 30, 40)` is the constant 0x281E140A, whose
+  // intrinsic width is 30 with bit 29 set. bv_sra reads its value operand as
+  // two's complement at the operand's own width, so at 30 bits the table read
+  // as NEGATIVE and `table >> 24` gave 0xE8 instead of 40 (Pyrope equiv corpus:
+  // mem_rom, and tolg_field_read_zero's `33` at 6 bits). A non-negative constant
+  // gets one more bit, as Div already does.
+  auto d = binary(ScanOp::SRA, 30, constant("673059850", 30), input(2000000001, 5));
+  auto c = build_certificate(d, {});
+  ASSERT_GE(c.sources.size(), 1u);
+  EXPECT_EQ(c.sources[0].const_int, "673059850");
+  EXPECT_EQ(c.sources[0].width, 31) << "the value needs a zero sign bit above bit 29";
+  // a NEGATIVE constant keeps its two's-complement width
+  d = binary(ScanOp::SRA, 8, constant("-4", 3), input(2000000001, 3));
+  c = build_certificate(d, {});
+  EXPECT_EQ(c.sources[0].width, 8);
+}
 TEST(CertificateIR, NarrowSignedOperandIsSignExtendedForAZeroExtendingRead) {
   // Sum reads its operands unsigned at the result width: a 3-bit signed -4
   // (100) must read 11111100, not 00000100.
