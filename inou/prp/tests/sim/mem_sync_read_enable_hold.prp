@@ -1,0 +1,59 @@
+/*
+:name: mem_sync_read_enable_hold
+:type: simulation
+*/
+
+// A ONE-CYCLE (`type` = 1) memory read whose read ENABLE is a real input. While
+// `re` is low the read register must HOLD the last value read, whatever the
+// address does: `if (re) q <= mem[ra]` in Verilog, Yosys RD_EN on a sync port
+// (the output register's clock enable), and the Lean model's
+// `sram_sync_read_reg_next ren raw cur = if ren then raw else cur`.
+//
+// `lhd sim` used to load the value at the current address every cycle: both
+// sync-read commit sites were gated only by the memory's clock gate. The
+// assertion failed at cycle 6, the first disabled cycle after a read (it showed
+// mem[3] = 0x44 where the register still held mem[2] = 0x33). The only other
+// type = 1 test (equiv/spec_memory_rtl_named.prp) ties its read enables to 1.
+//
+// GOLDEN: Icarus on the Verilog twin `if (re) q_r <= mem[ra];` with the same
+// stimulus. Cycles 0-3 write 0x11, 0x22, 0x33, 0x44; from cycle 4 `re` is high
+// one cycle in four while the read address keeps moving.
+pub mod sync_hold_mem(clk:Clock, we:Bool, re:Bool, wa:U2, ra:U2, wd:U8) -> (q:U8@[1]) {
+  mut res = __memory(
+    addr    = (ra, wa),
+    bits    = 8,
+    size    = 4,
+    din     = (0, wd),
+    enable  = (re, we),
+    fwd     = false,
+    `type`  = 1,
+    wensize = 1,
+    rdport  = (1, 0),
+  )
+  q = res[0]
+}
+
+test sync_hold_mem.disabled_read_holds {
+  mut dut = sync_hold_mem
+  mut expected:U8 = 0
+  mut have:Bool = false
+  mut checked = 0
+  tick 32 {
+    const writing = clock < 4
+    dut.we = writing
+    dut.wa = clock & 3
+    dut.wd = 17 * ((clock & 3) + 1)
+    dut.re = (not writing) and ((clock & 3) == 1)
+    dut.ra = ((clock >> 2) + (clock & 3)) & 3
+    if dut.re {
+      expected = 17 * ((((clock >> 2) + (clock & 3)) & 3) + 1)
+      have = true
+    }
+    step
+    if have {
+      checked = checked + 1
+      assert(dut.q == expected, "a disabled synchronous read holds the last value read")
+    }
+  }
+  assert(checked == 27, "the comparisons actually ran (guards against a vacuous pass)")
+}

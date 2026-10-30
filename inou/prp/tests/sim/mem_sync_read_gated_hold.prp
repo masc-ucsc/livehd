@@ -1,0 +1,59 @@
+/*
+:name: mem_sync_read_gated_hold
+:type: simulation
+*/
+
+// CONTROL for the synchronous-read HOLD rule on a GATED clock: the read register
+// of a one-cycle (`type` = 1) memory must hold when the clock gate is closed (the
+// memory-gate fold, mem_sim_gated_clock.prp's path, which already worked) AND
+// when its own read enable is low (the path mem_sync_read_enable_hold.prp
+// covers), and load only when both are open. Writes are gated by the clock too.
+//
+// Before the read enable was honoured, 18 of cycles 4-39 differed from Icarus,
+// every one with the gate open and `re` low.
+//
+// GOLDEN: Icarus on the Verilog twin (an ICG-style latch on `g` feeding
+// `posedge (clk & en_l)`, `if (re) q_r <= mem[ra]`), inputs changed while the
+// clock is low. Cycles 0-3 write 0x11, 0x21, 0x31, 0x41 with the gate open.
+pub mod gated_mem(clk:Clock, g:Bool, we:Bool, re:Bool, wa:U2, ra:U2, wd:U8) -> (q:U8@[1]) {
+  const gclk = Clock(clock_pin=clk, enable=g)
+  mut res = __memory(
+    addr      = (ra, wa),
+    bits      = 8,
+    size      = 4,
+    din       = (0, wd),
+    enable    = (re, we),
+    clock_pin = gclk,
+    fwd       = false,
+    `type`    = 1,
+    wensize   = 1,
+    rdport    = (1, 0),
+  )
+  q = res[0]
+}
+
+test gated_mem.holds_when_gate_closed_or_read_disabled {
+  mut dut = gated_mem
+  mut model_q:U8 = 0
+  mut have:Bool = false
+  mut checked = 0
+  tick 40 {
+    const writing = clock < 4
+    dut.g  = writing or (clock & 1) == 0 or (clock & 7) == 5
+    dut.we = writing
+    dut.wa = clock & 3
+    dut.wd = 16 * ((clock & 3) + 1) + 1
+    dut.re = (not writing) and (clock & 2) == 0
+    dut.ra = ((clock >> 1) + clock) & 3
+    if dut.g and dut.re {
+      model_q = 16 * ((((clock >> 1) + clock) & 3) + 1) + 1
+      have = true
+    }
+    step
+    if have {
+      checked = checked + 1
+      assert(dut.q == model_q, "the read register loads only when the gate is open and re is high")
+    }
+  }
+  assert(checked == 36, "the comparisons actually ran (guards against a vacuous pass)")
+}

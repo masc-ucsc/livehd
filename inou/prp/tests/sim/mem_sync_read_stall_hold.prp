@@ -1,0 +1,71 @@
+/*
+:name: mem_sync_read_stall_hold
+:type: simulation
+*/
+
+// WHY a disabled synchronous read must HOLD: a consumer that uses the read data
+// EVERY cycle. A one-cycle (`type` = 1) memory read feeds an accumulator, like an
+// operand register in a pipeline, and `stall` lowers the read enable: the fetched
+// operand must stay put while the pipeline is stalled.
+//
+// Under the old `lhd sim`, which loaded the read register every cycle, the
+// accumulator added operands the design never fetched: 16 of cycles 5-23 differed
+// from Icarus (by cycle 12 the sum was 20 where it should be 18).
+// mem_sync_read_enable_hold.prp is the minimal form of the same rule.
+//
+// GOLDEN: Icarus on the Verilog twin (`if (!stall) q_r <= mem[ra]; sum <= reset ?
+// 0 : sum + q_r;`). Cycles 0-3 write 1, 2, 3, 4; from cycle 4 the read address
+// walks 0, 1, 2, 3, ... and `stall` is high one cycle in three. The accumulator
+// is held in reset until the first fetch has landed, so no power-on value enters
+// the sum.
+pub mod stall_acc(clk:Clock, we:Bool, wa:U2, wd:U8, stall:Bool, ra:U2) -> (acc:U16@[1], q:U8@[1]) {
+  mut res = __memory(
+    addr    = (ra, wa),
+    bits    = 8,
+    size    = 4,
+    din     = (0, wd),
+    enable  = (not stall, we),
+    fwd     = false,
+    `type`  = 1,
+    wensize = 1,
+    rdport  = (1, 0),
+  )
+  reg sum:U16 = 0
+  sum = sum + res[0]
+  acc = sum
+  q = res[0]
+}
+
+test stall_acc.stalled_operand_holds {
+  mut dut = stall_acc
+  mut model_q:U8 = 0
+  mut model_acc:U16 = 0
+  mut checked = 0
+  tick 24 {
+    const writing = clock < 4
+    dut.we = writing
+    dut.wa = clock & 3
+    dut.wd = (clock & 3) + 1
+    dut.stall = writing or ((clock - 4) - 3 * ((clock - 4) / 3)) == 2
+    dut.ra = (clock - 4) & 3
+    dut.reset = clock < 5
+    // The model: the accumulator adds the read register's value from BEFORE
+    // this edge; the read register loads mem[ra] = ra + 1 only when not stalled.
+    const q_before = model_q
+    if dut.reset {
+      model_acc = 0
+    } else {
+      model_acc = model_acc + q_before
+    }
+    if not dut.stall {
+      model_q = ((clock - 4) & 3) + 1
+    }
+    step
+    if clock >= 4 {
+      checked = checked + 1
+      assert(dut.q == model_q, "the fetched operand holds while stalled")
+      assert(dut.acc == model_acc, "the accumulator adds only fetched operands")
+    }
+  }
+  assert(checked == 20, "the comparisons actually ran (guards against a vacuous pass)")
+}
