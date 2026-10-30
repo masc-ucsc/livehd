@@ -14,9 +14,9 @@
 #include "design_io_meta.hpp"
 #include "emit_dcert.hpp"
 #include "emit_design_cert.hpp"
-#include "lean_format.hpp"
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
+#include "lean_format.hpp"
 #include "node_util.hpp"
 
 namespace lean_export {
@@ -1093,6 +1093,80 @@ TEST(DesignScanClocks, ConstantClockIsRefused) {
       .connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "clock_pin")));
   flop.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
   expect_refusal(*g, "CONSTANT");
+}
+
+// An Fflop with only `din` and `clock_pin` driven. `is_type_flop` counts it as
+// a flop and the pin walk refuses only a DRIVEN `valid`/`stop`, so before the
+// explicit refusal it was exported as a plain Flop with its handshake dropped.
+TEST(DesignScanClocks, FflopIsRefusedByName) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_clk_fflop");
+  auto  io  = lib.create_io("fflop");
+  io->add_input("clk", 1);
+  io->set_bits("clk", 1);
+  io->add_input("d", 2);
+  io->set_bits("d", 8);
+  io->add_output("q", 1);
+  io->set_bits("q", 8);
+  auto g  = io->create_graph();
+  auto ff = create_typed_node(*g, Ntype_op::Fflop);
+  set_bits(ff.create_driver_pin(0), 8);
+  g->get_input_pin("d").connect_sink(ff.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Fflop, "din")));
+  g->get_input_pin("clk").connect_sink(ff.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Fflop, "clock_pin")));
+  ff.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+  expect_refusal(*g, "is an Fflop");
+}
+
+namespace {
+// A flop clocked through a Clock_cell(clk_ref = clk, en = <en_input or none>),
+// the cell a Pyrope `Clock(clock_pin=, enable=)` lowers to.
+std::shared_ptr<hhds::Graph> build_clock_cell_flop(std::string_view lgdb, bool with_enable) {
+  auto& lib = livehd::Hhds_graph_library::instance(lgdb);
+  auto  io  = lib.create_io("ccflop");
+  io->add_input("clk", 1);
+  io->set_bits("clk", 1);
+  io->add_input("en", 2);
+  io->set_bits("en", 1);
+  io->add_input("d", 3);
+  io->set_bits("d", 8);
+  io->add_output("q", 1);
+  io->set_bits("q", 8);
+  auto g    = io->create_graph();
+  auto cell = create_typed_node(*g, Ntype_op::Clock_cell);
+  set_bits(cell.create_driver_pin(0), 1);
+  g->get_input_pin("clk").connect_sink(cell.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Clock_cell, "clk_ref")));
+  if (with_enable) {
+    g->get_input_pin("en").connect_sink(cell.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Clock_cell, "en")));
+  }
+  auto flop = create_typed_node(*g, Ntype_op::Flop);
+  set_bits(flop.create_driver_pin(0), 8);
+  g->get_input_pin("d").connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "din")));
+  cell.create_driver_pin(0).connect_sink(flop.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "clock_pin")));
+  flop.create_driver_pin(0).connect_sink(g->get_output_pin("q"));
+  return g;
+}
+}  // namespace
+
+// A flop behind a Clock_cell GATE. `resolve_icg` walks through the cell to its
+// reference clock, so the old check passed it and the commit class dropped the
+// enable: the certificate loaded the flop while the gate was closed (measured on
+// inou/prp/tests/sim/chained_clock_gates.prp, 2 of 6 periods wrong vs Icarus).
+TEST(DesignScanClocks, ClockCellGateIsRefused) {
+  auto g = build_clock_cell_flop("lgdb_clk_ccgate", /*with_enable=*/true);
+  expect_refusal(*g, "unnormalized clock gate");
+}
+
+// The same cell with no enable (and div 1) is a plain buffer of its reference
+// clock: nothing is dropped, so it must still be accepted.
+TEST(DesignScanClocks, ClockCellWithoutEnableIsAPlainClock) {
+  auto       g = build_clock_cell_flop("lgdb_clk_ccbuf", /*with_enable=*/false);
+  DesignScan design;
+  try {
+    design = scan_design(*g, {});
+  } catch (const std::exception& e) {
+    FAIL() << "an ungated Clock_cell was refused: " << e.what();
+  }
+  ASSERT_EQ(design.flops.size(), 1u);
+  ASSERT_EQ(design.clocks.size(), 1u);
 }
 
 // A clock whose name is NOT a conventional spelling is still a clock, because a
@@ -2791,7 +2865,7 @@ TEST(DesignScanClocks, PerReadRowForwardingValueOracle) {
   };
   konst("bits", 8);
   konst("size", 4);
-  konst("type", 2);  // ASYNCHRONOUS reads: the value is combinational
+  konst("type", 0);  // ASYNCHRONOUS reads (type 0; type 2 is a combinational array)
   konst("wensize", 1);
   konst("posclk", 1);
   // fwd bit (r * n_writes + w) with ONE write port: bit 0 = read 0, bit 1 =
@@ -3298,7 +3372,7 @@ MemFix build_mem(hhds::GraphLibrary& lib, const std::string& mod, bool sync_read
   global("fwd", fwd);
   global("wensize", 1);
   global("posclk", 1);
-  global("type", sync_read ? 1 : 2);
+  global("type", sync_read ? 1 : 0);
   auto port = [&](int idx, const char* name, const hhds::Pin_class& drv) {
     drv.connect_sink(f.mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, name) + idx * stride));
   };
@@ -3465,6 +3539,39 @@ TEST(DesignScan, MixedReadTimingSplitFollowsThePins) {
   }
 }
 
+namespace {
+// Replace one cell-global constant pin of an already built memory.
+void repin_global(MemFix& f, const char* name, int64_t v) {
+  auto sink = f.mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, name));
+  sink.del_sink();
+  livehd::graph_util::create_const(*f.g, *Dlop::create_integer(v)).connect_sink(sink);
+}
+}  // namespace
+
+// `posclk` = 2 (Memory_posclk_mixed): the ports commit on different edges. The
+// domain code reads `posclk != 0` as rising, so before this refusal every
+// falling-edge port was moved to the rising edge without a word (measured: a
+// negedge write port fed by a posedge register stored the previous period's
+// value, 6 of 8 periods wrong against Icarus). pass.single_edge skips such a
+// memory, so the exporter is the last place to stop it.
+TEST(DesignScan, MixedEdgeMemoryIsRefused) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_mem_mixed_edge");
+  auto  f   = build_mem(lib, "mixed_edge", /*sync_read=*/false, /*fwd=*/0);
+  repin_global(f, "posclk", Ntype::Memory_posclk_mixed);
+  expect_refusal(*f.g, "DIFFERENT clock edges");
+}
+
+// type = 2 is a COMBINATIONAL array: no state across cycles, and every read sees
+// every write of the cycle. Exported as the persistent RAM with a per-port
+// forwarding matrix, a second read port missed the cycle's write (measured on a
+// two-read Pyrope `mut` array: 8 of 8 periods wrong, while `lhd sim` was right).
+TEST(DesignScan, CombinationalArrayMemoryIsRefused) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_mem_comb_array");
+  auto  f   = build_mem(lib, "comb_array", /*sync_read=*/false, /*fwd=*/1, /*reads=*/2);
+  repin_global(f, "type", Ntype::Memory_type_array);
+  expect_refusal(*f.g, "COMBINATIONAL array");
+}
+
 // ONE WAY across two read ports is an ordinary DAG edge, not a cycle: read 0's
 // data feeds read 1's address and nothing returns. Two reads of one array are
 // two `MemRead` nodes over one image, and the certificate orders them like any
@@ -3568,7 +3675,7 @@ std::shared_ptr<hhds::Graph> build_chained_memories(hhds::GraphLibrary& lib, con
     global("fwd", 0);
     global("wensize", 1);
     global("posclk", 1);
-    global("type", 2);
+    global("type", 0);
     auto port = [&](int idx, const char* name, const hhds::Pin_class& drv) {
       drv.connect_sink(mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, name) + idx * stride));
     };

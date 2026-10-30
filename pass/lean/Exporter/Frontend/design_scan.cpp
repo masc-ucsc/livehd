@@ -434,13 +434,22 @@ std::optional<std::string> clock_root_bit_refusal(const LeanCtx& ctx, const Node
 // cone is still a gate when the Lean scan runs, that normalization did not
 // happen for this element and there is nothing in the certificate carrying the
 // enables.
+//
+// `clock_op_of` is the ONE gate recognizer (latch_contract.hpp): a Clock_cell,
+// an instantiated gate cell, then the inline `clk & en` that `resolve_icg`
+// alone sees. `resolve_icg` walks straight through a Clock_cell to its
+// reference clock, so a Pyrope `Clock(clock_pin=, enable=)` gate used to pass
+// this check and the commit class then dropped its enable: measured on
+// inou/prp/tests/sim/chained_clock_gates.prp, the certificate loaded the flop
+// while a gate was closed (2 of 6 periods wrong against Icarus). A cell with
+// no enable and div 1 is a plain buffer of its reference and is not a gate.
 std::optional<std::string> gated_clock_refusal(const Node_pin& clock_pin, const lc::Design_clocks& clocks,
                                                std::string_view what) {
   if (clock_pin.is_invalid()) {
     return std::nullopt;
   }
-  const auto icg = lc::resolve_icg(clock_pin, clocks);
-  if (!icg.has_value()) {
+  const auto icg = lc::clock_op_of(clock_pin, clocks);
+  if (!icg.has_value() || (icg->enables.empty() && icg->div == 1)) {
     return std::nullopt;
   }
   std::string why = std::string(what) + " is clocked through an unnormalized clock gate (" + std::to_string(icg->enables.size())
@@ -670,6 +679,15 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
   uint64_t          next_lowered_id = 0;
   for (const auto node : graph.body().nodes()) {
     next_lowered_id = std::max(next_lowered_id, static_cast<uint64_t>(node_id(node)) + 1);
+    // `is_type_flop` counts Fflop too, and the pin walk below fatals only on a
+    // DRIVEN `valid`/`stop`, so an Fflop with those pins open would export as a
+    // plain Flop. Its elastic handshake is not modeled; refuse it by name.
+    if (node_op(node) == Ntype_op::Fflop) {
+      fatal(ctx,
+            "fflop n_" + std::to_string(node_id(node)) + " (`" + state_name(node, "fflop_")
+                + "`) is an Fflop (fluid flop, valid/stop handshake). pass.lean models plain Flop state only; "
+                  "exporting it as a Flop would drop the handshake.");
+    }
     if (node_is_flop(node)) {
       const auto width = raw_node_width(node);
       check_width(ctx, node, width, "flop");
@@ -1193,13 +1211,27 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
   // first unsupported node, so a design needing two operators reported one and
   // the remaining work could not be sized from the diagnostic.
   if (!unsupported.empty()) {
+    // What to do about each refused cell, where there is something to do. The
+    // census keys are `Ntype::get_name`, the lowercase cell name.
+    static const std::map<std::string, std::string> hint = {
+        {     "latch",                                "run pass.single_edge first; it retypes a latch into a flop"},
+        {       "sub", "flatten the hierarchy first (the Yosys readers flatten; native slang keeps Sub instances)"},
+        {"clock_cell",                              "a Clock_cell outside a clock pin has no value semantics here"},
+        {       "rem",                                                     "remainder has no certificate encoding"},
+        {      "rxor",                                                    "reduce-xor has no certificate encoding"},
+        {  "popcount",                                                      "popcount has no certificate encoding"},
+    };
     std::string detail;
+    std::string hints;
     for (const auto& [name, example] : unsupported) {
       detail += (detail.empty() ? "" : ", ") + name + " (first at " + example + ")";
+      if (const auto it = hint.find(name); it != hint.end()) {
+        hints += " " + name + ": " + it->second + ".";
+      }
     }
     fatal(ctx,
           "unsupported certificate op(s): " + detail + ". " + std::to_string(unsupported_nodes)
-              + " node(s) in this design have no certificate encoding.");
+              + " node(s) in this design have no certificate encoding." + hints);
   }
   join_and_restrict_domains(ctx, design, clock_table);
   finalize_clocks(design, std::move(clock_table));
