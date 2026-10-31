@@ -68,13 +68,83 @@ void validate_boundary_pin_options(const Boundary_pin_options& o) {
   if (o.align && !o.split) {
     throw std::invalid_argument("pinalign requires split boundary nets");
   }
+  if (o.clean_cuts && !o.split) {
+    throw std::invalid_argument("clean region cuts require split boundary nets");
+  }
+  if (!std::isfinite(o.align_near) || o.align_near < 0) {
+    throw std::invalid_argument("invalid pinalign near distance");
+  }
   if (!o.iterations || o.iterations > 2000 || !std::isfinite(o.max_displacement_um) || o.max_displacement_um <= 0
       || o.settle_iterations > 2000 || !std::isfinite(o.pitch_um) || o.pitch_um < 0) {
     throw std::invalid_argument("invalid boundary-pin iteration/displacement/pitch controls");
   }
 }
 
-Boundary_pin_model split_boundary_nets(const dp::Design& original, const Region_mesh& mesh, const Busorder_route& router) {
+unsigned move_dipping_cells(dp::Design& d, const Region_mesh& mesh, double max_move) {
+  d.validate();
+  std::vector<unsigned> load;
+  for (const auto& r : mesh.rects) {
+    load.push_back(r.cells);
+  }
+  unsigned moved = 0;
+  for (int c = 0; c < d.num_movable; ++c) {
+    if (!d.node_macro.empty() && d.node_macro[c]) {
+      continue;
+    }
+    const double w = d.node_size_x[c], h = d.node_size_y[c], x = d.node_x[c] + w / 2, y = d.node_y[c] + h / 2;
+    const auto   home = mesh.rect_of(x, y);
+    if (!home) {
+      continue;
+    }
+    const auto& r     = mesh.rects[*home];
+    unsigned    sides = 0b1111;  // the sides every other pin is beyond: left, right, below, above
+    bool        any   = false;
+    for (int k = d.flat_node2pin_start[c]; k < d.flat_node2pin_start[c + 1] && sides; ++k) {
+      const int net = d.pin2net[d.flat_node2pin[k]], begin = d.flat_net2pin_start[net], end = d.flat_net2pin_start[net + 1];
+      if ((!d.net_mask.empty() && !d.net_mask[net]) || end - begin < 2 || end - begin > 1000) {
+        continue;
+      }
+      for (int q = begin; q < end; ++q) {
+        const int pin = d.flat_net2pin[q], node = d.pin2node[pin];
+        if (node == c) {
+          continue;
+        }
+        any             = true;
+        const double px = d.node_x[node] + d.pin_offset_x[pin], py = d.node_y[node] + d.pin_offset_y[pin];
+        sides &= unsigned(px < r.xl) | unsigned(px >= r.xh) << 1 | unsigned(py < r.yl) << 2 | unsigned(py >= r.yh) << 3;
+      }
+    }
+    if (!any || !sides) {
+      continue;
+    }
+    // across the nearest such side, just outside the rectangle
+    const double gap[] = {x - r.xl, r.xh - x, y - r.yl, r.yh - y};
+    int          side  = -1;
+    for (int s = 0; s < 4; ++s) {
+      if (sides >> s & 1 && (side < 0 || gap[s] < gap[side])) {
+        side = s;
+      }
+    }
+    const double nx = side == 0 ? r.xl - w / 2 - 1 : side == 1 ? r.xh + w / 2 : x;
+    const double ny = side == 2 ? r.yl - h / 2 - 1 : side == 3 ? r.yh + h / 2 : y;
+    const auto   to = mesh.rect_of(nx, ny);
+    if (!to || *to == *home || std::abs(nx - x) + std::abs(ny - y) > max_move || load[*to] >= mesh.options.max_cells) {
+      continue;
+    }
+    d.node_x[c] = nx - w / 2;
+    d.node_y[c] = ny - h / 2;
+    if (!d.node_boxes.empty()) {
+      d.node_boxes[c] = {d.node_x[c], d.node_y[c], d.node_x[c] + w, d.node_y[c] + h};
+    }
+    --load[*home];
+    ++load[*to];
+    ++moved;
+  }
+  return moved;
+}
+
+Boundary_pin_model split_boundary_nets(const dp::Design& original, const Region_mesh& mesh, const Busorder_route& router,
+                                       bool remove_dips) {
   original.validate();
   if (mesh.rects.empty() || !router) {
     throw std::invalid_argument("boundary pins require a mesh and RSMT router");
@@ -196,7 +266,7 @@ Boundary_pin_model split_boundary_nets(const dp::Design& original, const Region_
       segment(a, bend);
       segment(bend, b);
     }
-    std::map<size_t, std::vector<Pin>> pieces;
+    std::vector<int> real_vertex;
     for (size_t i = 0; i < real.size(); ++i) {
       const Point p{double(std::llround(terminals[i].first)), double(std::llround(terminals[i].second))};
       const int   index = point(p);
@@ -204,11 +274,56 @@ Boundary_pin_model split_boundary_nets(const dp::Design& original, const Region_
       if (!regions[index].empty() && !regions[index].contains(box)) {
         box = *regions[index].begin();
       }
-      pieces[sets.find(vertex(box, index))].push_back(real_pin(real[i]));
+      real_vertex.push_back(vertex(box, index));
+    }
+    std::vector<char> dropped(coordinates.size(), 0);  // crossings of removed dips
+    if (remove_dips) {
+      std::set<size_t> with_pins;
+      for (int v : real_vertex) {
+        with_pins.insert(sets.find(v));
+      }
+      std::map<size_t, std::pair<int, std::vector<int>>> crossings;  // pinless piece -> (rectangle, crossing points)
+      for (size_t i = 0; i < coordinates.size(); ++i) {
+        if (regions[i].size() < 2) {
+          continue;
+        }
+        for (int box : regions[i]) {
+          const size_t c = sets.find(vertices.at({box, int(i)}));
+          if (box >= 0 && !with_pins.contains(c)) {
+            auto& [where, at] = crossings[c];
+            where             = box;
+            at.push_back(int(i));
+          }
+        }
+      }
+      for (const auto& [c, entry] : crossings) {
+        const auto& [box, at] = entry;
+        bool line_x = true, line_y = true, ok = true;
+        int  other = -2;
+        for (int i : at) {
+          line_x      &= coordinates[i].first == coordinates[at[0]].first;
+          line_y      &= coordinates[i].second == coordinates[at[0]].second;
+          const int q  = regions[i].size() == 2 ? *regions[i].begin() == box ? *regions[i].rbegin() : *regions[i].begin() : -2;
+          ok          &= !dropped[i] && q != -2 && (other == -2 || q == other);
+          other        = q;
+        }
+        if (!ok || !(line_x || line_y)) {
+          continue;
+        }
+        for (int i : at) {
+          dropped[i] = 1;
+          sets.merge(vertices.at({other, i}), vertices.at({other, at[0]}));
+        }
+        ++result.dips_removed;
+      }
+    }
+    std::map<size_t, std::vector<Pin>> pieces;
+    for (size_t i = 0; i < real.size(); ++i) {
+      pieces[sets.find(real_vertex[i])].push_back(real_pin(real[i]));
     }
     const size_t old_anchors = result.anchors.size();
     for (size_t i = 0; i < coordinates.size(); ++i) {
-      if (regions[i].size() < 2) {
+      if (regions[i].size() < 2 || dropped[i]) {
         continue;
       }
       const int node = append_anchor(d, coordinates[i]);
@@ -504,8 +619,11 @@ void Boundary_pins::refine(dp::Design& physical, const dp::Options& base) {
   original_pins    = physical.pin2node.size();
   original_nets    = physical.flat_net2pin_start.size() - 1;
   observe(physical, "before");
+  if (options.split && options.clean_cuts) {
+    moved_cells = move_dipping_cells(physical, mesh, options.max_displacement_um * dbu);
+  }
   if (options.split) {
-    model = split_boundary_nets(physical, mesh, route);
+    model = split_boundary_nets(physical, mesh, route, options.clean_cuts);
   } else {
     model.design = physical;
   }
@@ -574,7 +692,7 @@ void Boundary_pins::refine(dp::Design& physical, const dp::Options& base) {
     ordering = order_boundary_pins(model, mesh, identities, macros, options.pitch_um * dbu);
   }
   if (options.split && options.align) {
-    alignment = align_boundary_pins(model, mesh, identities, macros);
+    alignment = align_boundary_pins(model, mesh, identities, macros, options.align_near * options.pitch_um * dbu);
   }
   build_seconds     = elapsed(start);
   // Keep the last settled candidate, even if its metrics regress: this
@@ -655,6 +773,15 @@ void Boundary_pins::write() const {
   j.Key("settle_iterations");
   j.Uint(options.order ? options.settle_iterations : 0);
   j.EndObject();
+  j.Key("clean_cuts");
+  j.StartObject();
+  j.Key("enabled");
+  j.Bool(options.clean_cuts);
+  j.Key("moved_cells");
+  j.Uint(moved_cells);
+  j.Key("removed_dips");
+  j.Uint(model.dips_removed);
+  j.EndObject();
   j.Key("pinalign");
   j.StartObject();
   j.Key("enabled");
@@ -663,6 +790,10 @@ void Boundary_pins::write() const {
   j.Uint(alignment.direct);
   j.Key("one_cell");
   j.Uint(alignment.one_cell);
+  j.Key("near");
+  j.Uint(alignment.near);
+  j.Key("near_pitches");
+  j.Double(options.align_near);
   j.Key("aligned");
   j.Uint(alignment.aligned);
   j.Key("already_aligned");

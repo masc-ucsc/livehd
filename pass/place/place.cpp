@@ -28,6 +28,7 @@
 
 #include "attrs.hpp"
 #include "buffering/checkpoint.hpp"
+#include "cell_criticality.hpp"
 #include "color_centroids.hpp"
 #include "core/diag.hpp"
 #include "def_binding.hpp"
@@ -43,6 +44,7 @@
 #include "handoff_rows.hpp"
 #include "hash_util.hpp"
 #include "inou/lefdef/index_union_find.hpp"
+#include "inou/lefdef/routing_geometry.hpp"
 #include "macro_snap.hpp"
 #include "macro_tracks.hpp"
 #include "magnet_report.hpp"
@@ -366,6 +368,8 @@ int64_t macro_halo(double microns, int64_t dbu, int64_t pitch) {
 }
 // Process policy for these options: an enabled native power grid names the
 // technology profile explicitly; otherwise it is detected from the LEF.
+// The power grid's metal as legroute obstacles: the grid depends on rows, macros and taps, not on cell positions,
+// so building it on the legalization frame gives the exact rails, stripes and via-stack landings of the handoff grid.
 static const ph::Tech_profile& placement_tech_profile(const ph::Technology& tech, const Options& options) {
   const bool pg = options.pg != "none" && options.pg != "off";
   return ph::resolve_tech_profile(tech, pg ? std::string_view(options.pg) : std::string_view("auto"));
@@ -687,6 +691,65 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               o.region.merge_um,
                               o.region.max_cells),
                   h);
+  }
+  if (o.boundarypins.enabled && (o.boundarypins.clean_cuts || o.boundarypins.align_near > 0)) {
+    h = hash_text(std::format("boundarypins-cuts:{}:{}", o.boundarypins.clean_cuts, o.boundarypins.align_near), h);
+  }
+  if (o.legroute) {
+    const auto& l = o.legroute_options;
+    h             = hash_text(std::format("legroute-v2:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:"
+                                          "{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+                                          l.box_fill,
+                                          l.box_net_max,
+                                          l.merge_cost,
+                                          l.crit_fraction,
+                                          l.crit_window_ps,
+                                          l.reserved_tracks,
+                                          l.clock_spine,
+                                          l.rib_tiles,
+                                          l.final,
+                                          l.route_passes,
+                                          l.subregion_cells,
+                                          l.cap_scale,
+                                          l.window_tiles,
+                                          l.crit_boxes,
+                                          l.tree_boxes,
+                                          l.tree_moves,
+                                          l.sat_relax_rounds,
+                                          l.inbox_span,
+                                          l.tree_load,
+                                          l.tree_clauses,
+                                          l.tree_by_crit,
+                                          l.io_preroute,
+                                          l.sat_alt,
+                                          l.push_rounds,
+                                          l.push_fraction,
+                                          l.tree_room,
+                                          l.tree_congestion),
+                              h);
+    h             = hash_text(std::format("legroute-budgets:{}:{}:{}:{}:{}:{}:{}:{}",
+                                          l.sat_conflicts,
+                                          l.sat_ms,
+                                          l.sat_min_fill,
+                                          l.route_access,
+                                          l.route_patterns,
+                                          l.route_ms,
+                                          l.threads,
+                                          o.allow_increase_area),
+                              h);
+    if (o.legroute_probe.enabled) {
+      const auto& q = o.legroute_probe;
+      h             = hash_text(std::format("legroute-probe:{}:{}:{}:{}:{}:{}:{}:{}",
+                                            q.cells,
+                                            q.sat_ms,
+                                            q.iterations,
+                                            q.fill,
+                                            q.target,
+                                            q.max_inflate,
+                                            l.sat_min_fill,
+                                            q.tree_congestion),
+                                h);
+    }
   }
   if (o.virtual_fillers && o.macro_fill_cell_space) {
     h = hash_text("macro-cell-space-fillers-v1", h);
@@ -1945,9 +2008,74 @@ void refresh_floorplan_view(View& v, const View& baseline, Result& state, const 
   }
 }
 // Routing-track correction belongs between macro legalization and row packing.
+// Macro tile snap (todo 2l-legroute L1, ruling Q3): a movable macro's halo frame starts on a corner of the
+// legroute tile grid (2 x the widest flop, two rows) so the tiles around it stay whole; the track alignment that
+// follows moves it by less than a pitch. Fixed macros keep their custom location, and a snap that leaves the
+// rows or overlaps another macro's halo frame is skipped.
+static void snap_macros_to_tiles(const View& v, const ph::Technology& tech, std::vector<ph::Component>& frame) {
+  if (v.fp.rows.empty()) {
+    return;
+  }
+  int64_t flop = 0;
+  for (const auto& c : v.cells) {
+    const auto& m = tech.macros.at(c.macro);
+    if (m.klass.starts_with("CORE")
+        && std::any_of(m.pins.begin(), m.pins.end(), [](const auto& p) { return p.second.use == "CLOCK"; })) {
+      flop = std::max(flop, std::llround(m.width * v.fp.dbu));
+    }
+  }
+  const auto site = tech.sites.find(v.fp.rows.front().site);
+  if (flop <= 0 || site == tech.sites.end()) {
+    return;
+  }
+  Legroute_tile tile;
+  const auto    step = std::llround(site->second.width * v.fp.dbu);
+  tile.w             = (2 * flop + step - 1) / step * step;
+  tile.h             = 2 * std::llround(site->second.height * v.fp.dbu);
+  tile.x0 = tile.y0 = std::numeric_limits<int64_t>::max();
+  int64_t xh = std::numeric_limits<int64_t>::min(), yh = xh;
+  for (const auto& r : v.fp.rows) {
+    tile.x0 = std::min(tile.x0, r.x);
+    tile.y0 = std::min(tile.y0, r.y);
+    xh      = std::max(xh, r.x + r.count * r.step);
+    yh      = std::max(yh, r.y + tile.h / 2);
+  }
+  const auto frame_of = [&](const ph::Component& c) {
+    return ph::Rect{double(c.place.x - v.halo_x),
+                    double(c.place.y - v.halo_y),
+                    double(c.place.x + c.place.width + v.halo_x),
+                    double(c.place.y + c.place.height + v.halo_y)};
+  };
+  for (auto& c : frame) {
+    if (c.place.status != Status::PLACED || tech.macros.at(c.macro).klass.starts_with("CORE")) {
+      continue;
+    }
+    const auto [x, y] = snap_to_tiles(tile, c.place.x, c.place.y, v.halo_x, v.halo_y);
+    auto moved        = c;
+    moved.place.x     = x;
+    moved.place.y     = y;
+    const auto f      = frame_of(moved);
+    bool       ok     = f.xl >= tile.x0 - v.halo_x && f.yl >= tile.y0 - v.halo_y && f.xh <= xh + v.halo_x && f.yh <= yh + v.halo_y;
+    for (const auto& o : frame) {
+      if (!ok) {
+        break;
+      }
+      if (&o != &c && !tech.macros.at(o.macro).klass.starts_with("CORE")) {
+        const auto g = frame_of(o);
+        ok           = f.xh <= g.xl || g.xh <= f.xl || f.yh <= g.yl || g.yh <= f.yl;
+      }
+    }
+    if (ok) {
+      c.place.x = x;
+      c.place.y = y;
+    }
+  }
+}
+
 // Movable CORE coordinates are not obstacles until the native cell legalizer
 // packs them; explicit fixed cells and all macro hard halos remain obstacles.
-bool align_macro_geometry(const View& v, const ph::Technology& tech, dp::Design& physical, bool move, bool freeze_all) {
+bool align_macro_geometry(const View& v, const ph::Technology& tech, dp::Design& physical, bool move, bool freeze_all,
+                          bool tile_snap = false) {
   if (std::none_of(physical.node_macro.begin(), physical.node_macro.begin() + v.cells.size(), [](auto macro) { return macro; })) {
     return false;
   }
@@ -1975,6 +2103,9 @@ bool align_macro_geometry(const View& v, const ph::Technology& tech, dp::Design&
     frame.push_back({c.name, c.macro, place});
     indexes.push_back(i);
     rigid_ids.push_back(physical.node_group_id.empty() ? 0 : physical.node_group_id[i]);
+  }
+  if (move && tile_snap) {
+    snap_macros_to_tiles(v, tech, frame);
   }
   if (std::any_of(rigid_ids.begin(), rigid_ids.end(), [](auto id) { return id != 0; })) {
     legalize_rigid_macro_tracks(tech, v.fp, frame, rigid_ids, v.halo_x, v.halo_y, move);
@@ -5673,7 +5804,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
     macro_run              = place_macros(v.design, macro_report_info, *hierarchy, resolved, identity);
     macro_solved           = !macro_run->cache_hit;
-    const bool track_moved = align_macro_geometry(v, tech, v.design, true, false);
+    const bool track_moved = align_macro_geometry(v, tech, v.design, true, false, options.legroute);
     macro_report_design    = v.design;
     for (size_t i = 0; i < v.cells.size(); ++i) {
       if (macro_report_info[i].macro) {
@@ -5865,7 +5996,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   if (options.full && !options.timing_seed && !options.retain_placement && !options.analyze_colors_only) {
     align_macro_geometry(v, tech, v.design, false, false);
   }
-  control.after_macro_legalize = [&](dp::Design& physical) { align_macro_geometry(v, tech, physical, true, false); };
+  control.after_macro_legalize
+      = [&](dp::Design& physical) { align_macro_geometry(v, tech, physical, true, false, options.legroute); };
   control.bins_x = control.bins_y    = options.bins;
   control.num_threads                = options.threads;
   control.dynamic_bins               = options.dynamic_bins;
@@ -6203,25 +6335,35 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   }
   std::optional<Busorder>      bus_order;
   std::optional<Boundary_pins> boundary_pins;
+  std::optional<Region_mesh>   final_regions;  // the detail-final region mesh (legroute's regions)
   // The boundary refinements settle the converged GP placement with more DREAMPlace iterations. They must start
   // from GP's converged density weight: restarted at initial_density_weight, wirelength collapses the spread
   // placement (overflow 5% -> 50%+ within 100 iterations).
   double                       gp_density_weight       = 0;
-  const auto                   refine_final_boundaries = [&](dp::Design& physical) {
-    auto refine_control = control;
-    if (gp_density_weight > 0) {
-      refine_control.density_weight_seed = gp_density_weight;
-    }
-    std::vector<int> bus_macros;
+  // the region mesh's inputs: the fixed macros (not placement masks) and the IO terminals
+  const auto                   region_macros           = [&] {
+    std::vector<int> macros;
     for (size_t i = 0; i < v.cells.size(); ++i) {
       if (!tech.macros.at(v.cells[i].macro).klass.starts_with("CORE") && !v.cells[i].name.starts_with("__lhd_frame_mask_")) {
-        bus_macros.push_back(i);
+        macros.push_back(i);
       }
     }
+    return macros;
+  };
+  const auto region_ios = [&] {
     std::vector<Region_io> ios;
     for (const auto& t : v.fp.terminals) {
       ios.push_back({t.name, double(t.x), double(t.y)});
     }
+    return ios;
+  };
+  const auto refine_final_boundaries = [&](dp::Design& physical) {
+    auto refine_control = control;
+    if (gp_density_weight > 0) {
+      refine_control.density_weight_seed = gp_density_weight;
+    }
+    const auto           bus_macros = region_macros();
+    const auto           ios        = region_ios();
     std::vector<Bus_bit> identities;
     for (const auto& [driver, sinks] : v.nets) {
       Bus_bit    identity;
@@ -6273,6 +6415,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     };
     const auto regions = Region_mesh::build(physical, bus_macros, ios, options.region, tech.dbu);
     regions.write(options.output_dir);
+    final_regions = regions;
     if (regions.rects.size() < 2) {
       return;  // one rectangle: no region edge to put virtual pins on (bus order is on by default)
     }
@@ -6320,6 +6463,17 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
   };
   std::optional<Terminal_legalize_report> terminal_report;
+  std::optional<Legroute_report>          legroute_report;
+  // legroute's routed signal wires by driver (instance, pin), with the connections and cells they were routed for:
+  // out.def keeps a net's wires only while its connections and cells are unchanged
+  struct Legroute_net {
+    std::vector<ph::Connection> connections;
+    std::vector<ph::Wire>       wires;
+  };
+  std::map<std::pair<std::string, std::string>, Legroute_net> legroute_wires;
+  std::map<std::string, ph::Component, std::less<>>           legroute_cells;
+  ph::Route_width_rules                                       legroute_rules;      // the router's wire-width rules
+  std::map<std::string, ph::Terminal>                         legroute_terminals;  // the IO pins its wires end on
   std::optional<Multirow_report>          multirow_report;
   std::optional<Multirow_eco_report>      multirow_eco_report;
   std::pair<unsigned, unsigned>           multirow_eco_grid;  // its terminal bin grid
@@ -8632,6 +8786,292 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     if (macro_warp) {
       macro_warp->finish(metrics.iterations);
     }
+    // legroute's frame additions: the handoff taps and end caps (rows cut under macros), and the planned power grid
+    // (obstacles, power nets and vias; the IO pins as the handoff exports them). Returns the routing profile.
+    const auto add_handoff_taps = [&](ph::Floorplan& frame) {
+      const auto& tap_master = tech_profile->tap_master;
+      const auto& master     = tech.macros.at(tap_master);
+      frame.rows             = cut_macro_rows(frame,
+                                              tech,
+                                              std::llround(tech_profile->tap_row_halo * frame.dbu),
+                                              std::llround(tech_profile->tap_row_halo * frame.dbu),
+                                              std::llround(2 * master.width * frame.dbu));
+      auto caps              = row_endcaps(frame, tech, tap_master);
+      frame.components.insert(frame.components.end(), caps.begin(), caps.end());
+      auto taps = row_taps(frame, tech, tap_master, std::llround(tech_profile->tap_distance * frame.dbu));
+      frame.components.insert(frame.components.end(), taps.begin(), taps.end());
+    };
+    const auto legroute_power = [&](ph::Floorplan& frame, Legroute_regions& regions) -> const ph::Tech_profile* {
+      const ph::Tech_profile* profile = nullptr;
+      try {
+        profile = &placement_tech_profile(tech, options);
+      } catch (const std::invalid_argument&) {
+        profile = nullptr;  // an unregistered technology: legroute takes the LEF routing stack
+      }
+      if (pg_profile) {
+        auto grid = make_power_grid(tech, frame, *pg_profile);
+        if (profile && !profile->io_pin_layers[0].empty() && !profile->io_pin_layers[1].empty()) {
+          // the IO pins the handoff exports (their layer, shape and track), so legroute's wires end on them; the
+          // handoff sees each pin's status as the export does (a stage freeze is not a user constraint)
+          auto pin_frame = grid;
+          for (auto& t : pin_frame.terminals) {
+            if (const auto it = options.stage_pin_status.find(t.name); it != options.stage_pin_status.end()) {
+              t.status = it->second;
+            }
+          }
+          auto pins = handoff_pins(tech, pin_frame, profile->io_pin_layers[0], profile->io_pin_layers[1]);
+          for (size_t i = 0; i < pins.size() && i < frame.terminals.size(); ++i) {
+            pins[i].status = frame.terminals[i].status;
+          }
+          for (size_t i = 0; i < frame.terminals.size() && i < pins.size(); ++i) {
+            if (pins[i].name == frame.terminals[i].name) {
+              frame.terminals[i] = pins[i];
+            }
+          }
+        }
+        for (const auto& net : grid.special_nets) {
+          for (auto& shape : ph::route_geometry(tech, grid, net, true)) {
+            regions.obstacles.push_back(std::move(shape));
+          }
+        }
+        regions.power_nets = std::move(grid.special_nets);
+        regions.power_vias = std::move(grid.vias);
+      }
+      return profile;
+    };
+    // legroute.probe: a quick legroute on small regions (no virtual pins) finds the regions it cannot route; their
+    // cells widen (GOALPlace-style inflation, x only: r = fill / target, less for timing-critical cells) and GP resumes
+    // from the converged placement until it settles; the widths come back before bus order and the real legroute.
+    const auto run_legroute_probe = [&](dp::Design& design) {
+      const auto&    po    = options.legroute_probe;
+      const auto     start = std::chrono::steady_clock::now();
+      Region_options ro    = options.region;
+      ro.max_cells         = po.cells;
+      const auto mesh      = Region_mesh::build(design, region_macros(), region_ios(), ro, tech.dbu);
+      auto       frame     = sat_frame(design, false);
+      if (options.handoff_taps) {
+        add_handoff_taps(frame);
+      }
+      Legroute_regions regions;
+      if (mesh.rects.size() > 1) {
+        for (const auto& r : mesh.rects) {
+          regions.rects.push_back({r.xl, r.yl, r.xh, r.yh});
+        }
+      }
+      const auto* profile = legroute_power(frame, regions);
+      auto        lopt    = options.legroute_options;
+      lopt.final          = false;
+      lopt.sat_ms         = po.sat_ms;
+      lopt.sat_min_fill   = po.fill;
+      lopt.sat_alt.clear();
+      lopt.push_rounds      = 0;
+      lopt.macro_halo_x_dbu = v.halo_x;
+      lopt.macro_halo_y_dbu = v.halo_y;
+      lopt.output_dir       = options.output_dir.empty() ? "" : options.output_dir + "/legroute_probe";
+      if (!lopt.output_dir.empty()) {
+        std::filesystem::create_directories(lopt.output_dir);
+      }
+      const auto          probe = legroute(tech, frame, final_gp_timing, lopt, regions, profile);
+      // per cell of an unroutable region: r = its region's box fill / target, at most max_inflate; the most timing-critical
+      // cells (top 10% by timing weight, GOALPlace's 10-quantile guard) keep their size
+      std::vector<double> fill(probe.region_stats.size(), 0), solved;
+      for (size_t r = 0; r < probe.region_stats.size(); ++r) {
+        const auto& st = probe.region_stats[r];
+        fill[r]        = st.tiles ? double(st.boxes) / double(st.tiles) : 0;
+        if (st.status == 0) {
+          solved.push_back(fill[r]);
+        }
+      }
+      // the target fill this design routes at: the median fill of the regions the probe solved, else just under the
+      // emptiest region it tried (all failed); never above probe.target
+      double target = po.target;
+      if (solved.size() >= 2) {
+        std::ranges::nth_element(solved, solved.begin() + solved.size() / 2);
+        target = std::min(target, solved[solved.size() / 2]);
+      } else if (solved.empty()) {
+        double lowest = INFINITY;
+        for (size_t r = 0; r < fill.size(); ++r) {
+          if (probe.region_stats[r].status == 1 || probe.region_stats[r].status == 2) {
+            lowest = std::min(lowest, fill[r]);
+          }
+        }
+        if (std::isfinite(lowest)) {
+          target = std::min(target, .9 * lowest);
+        }
+      }
+      target            = std::max(target, .2);
+      const auto weight = node_weight_criticality(design);  // max net weight, at least 1
+      double     guard  = INFINITY;
+      if (design.num_movable > 0) {
+        std::vector<double> w(weight.begin(), weight.begin() + design.num_movable);
+        std::ranges::nth_element(w, w.begin() + w.size() * 9 / 10);
+        guard = w[w.size() * 9 / 10];
+        if (guard <= 1) {  // untimed weights: nobody is protected
+          guard = INFINITY;
+        }
+      }
+      std::vector<double> grow(design.num_movable, 0);  // added width per movable cell
+      double              area = 0, added = 0;
+      for (int i = 0; i < design.num_movable; ++i) {
+        area += design.node_size_x[i] * design.node_size_y[i];
+      }
+      for (size_t k = 0; k < probe.unroutable_components.size(); ++k) {
+        const size_t i = probe.unroutable_components[k];
+        const int    r = probe.unroutable_regions[k];
+        if (i >= size_t(design.num_movable) || r < 0 || size_t(r) >= fill.size()) {
+          continue;
+        }
+        const double ratio = std::clamp(fill[r] / target, 1.0, po.max_inflate);
+        if (weight[i] >= guard) {
+          continue;
+        }
+        grow[i]  = design.node_size_x[i] * (ratio - 1);
+        added   += grow[i] * design.node_size_y[i];
+      }
+      // the widened cells must fit the core: the GP target density rises up to 0.95 of the free core area (fixed
+      // nodes clipped to the core), beyond that the inflation scales down
+      const auto& l          = design.layout;
+      double      fixed_area = 0;
+      for (size_t i = design.num_movable; i < design.node_x.size(); ++i) {
+        const double w  = std::min(design.node_x[i] + design.node_size_x[i], l.xh) - std::max(design.node_x[i], l.xl);
+        const double h  = std::min(design.node_y[i] + design.node_size_y[i], l.yh) - std::max(design.node_y[i], l.yl);
+        fixed_area     += std::max(0.0, w) * std::max(0.0, h);
+      }
+      const double free_area = std::max(0.0, (l.xh - l.xl) * (l.yh - l.yl) - fixed_area);
+      const double wanted    = added;
+      // no room for the inflation at the target density: a generated core grows, and placement restarts at the
+      // utilization that fits, the GP target density lowered with it (utilization + 0.05) so the cells spread over
+      // the new core
+      const double grow_core = free_area > 0 ? (area + wanted) / control.target_density / free_area : 1;
+      if (grow_core > 1.05 && options.allow_increase_area && options.generated_core) {
+        const double utilization = options.utilization / grow_core;
+        std::fprintf(stderr,
+                     "legroute probe: the inflated cells need %.0f%% more core; placement restarts at utilization %.3f\n",
+                     100 * (grow_core - 1),
+                     utilization);
+        throw Placement_area_restart(utilization, utilization + .05);
+      }
+      if (area + added > .95 * free_area) {
+        const double scale = added > 0 ? std::max(0.0, .95 * free_area - area) / added : 0;
+        for (auto& g : grow) {
+          g *= scale;
+        }
+        added *= scale;
+      }
+      const double density = free_area > 0 ? std::max(control.target_density, (area + added) / free_area) : control.target_density;
+      std::fprintf(stderr,
+                   "legroute probe: target fill %.3f, movable area %.4g, free core %.4g (fill %.3f), inflation wanted %.4g kept "
+                   "%.4g, GP target density %.3f -> %.3f\n",
+                   target,
+                   area,
+                   free_area,
+                   free_area > 0 ? area / free_area : 0.0,
+                   wanted,
+                   added,
+                   control.target_density,
+                   density);
+      const double hpwl_before = dp::hpwl(design);
+      size_t       inflated    = 0;
+      unsigned     iterations  = 0;
+      if (added > 0) {
+        // widen around the centre (pins keep their absolute positions), GP from the converged placement, narrow back
+        const auto widen = [&](double sign) {
+          for (int i = 0; i < design.num_movable; ++i) {
+            if (grow[i] <= 0) {
+              continue;
+            }
+            const double half      = sign * grow[i] / 2;
+            design.node_size_x[i] += 2 * half;
+            design.node_x[i]      -= half;
+            for (int k = design.flat_node2pin_start[i]; k < design.flat_node2pin_start[i + 1]; ++k) {
+              design.pin_offset_x[design.flat_node2pin[k]] += half;
+            }
+            if (!design.node_boxes.empty()) {
+              design.node_boxes[i] = {design.node_x[i],
+                                      design.node_y[i],
+                                      design.node_x[i] + design.node_size_x[i],
+                                      design.node_y[i] + design.node_size_y[i]};
+            }
+          }
+        };
+        for (double g : grow) {
+          inflated += g > 0;
+        }
+        widen(1);
+        auto ctl = control;
+        if (metrics.density_weight > 0) {
+          ctl.density_weight_seed = metrics.density_weight;
+        }
+        ctl.target_density         = density;
+        ctl.fillers_in_whitespace  = true;
+        ctl.hold_overflow          = true;
+        ctl.post_density_factor    = 0;
+        ctl.wirelength_gamma_start = ctl.wirelength_gamma_end;
+        ctl.max_step               = std::min(ctl.max_step, .05);
+        ctl.legalize = ctl.detailed_place = false;
+        ctl.before_legalize               = {};
+        ctl.after_macro_legalize          = {};
+        ctl.progress_observer             = {};
+        ctl.observer                      = {};
+        ctl.checkpoint                    = {};
+        ctl.checkpoint_interval           = 0;
+        ctl.checkpoint_final              = false;
+        ctl.checkpoint_after_density      = false;
+        ctl.terminal_update               = {};
+        ctl.terminal_interval             = 0;
+        ctl.macro_pull_update             = {};
+        ctl.macro_pull_interval           = 0;
+        ctl.max_iterations = ctl.schedule_iterations = int(po.iterations);
+        ctl.min_iterations                           = std::min<int>(ctl.min_iterations, int(po.iterations));
+        dp::GpState state;
+        const auto  result = dp::place(design, ctl, &state);
+        iterations         = unsigned(result.iterations);
+        widen(-1);
+        design.validate();
+      }
+      const double          hpwl_after = dp::hpwl(design);
+      std::array<size_t, 4> count{};
+      for (const auto& st : probe.region_stats) {
+        ++count[size_t(std::clamp(st.status, 0, 3))];
+      }
+      const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
+      std::fprintf(stderr,
+                   "legroute probe: %zu regions (routable %zu, unsat %zu, no answer %zu, sparse %zu), %zu cells widened "
+                   "(+%.1f%% area), GP %u iterations, HPWL %.4g -> %.4g, %.1f s\n",
+                   probe.region_stats.size(),
+                   count[0],
+                   count[1],
+                   count[2],
+                   count[3],
+                   inflated,
+                   area > 0 ? 100 * added / area : 0.0,
+                   iterations,
+                   hpwl_before,
+                   hpwl_after,
+                   seconds);
+      if (!lopt.output_dir.empty()) {
+        std::ofstream report(lopt.output_dir + "/probe.json");
+        report << std::format(
+            R"({{"regions":{},"routable":{},"unsat":{},"no_answer":{},"sparse":{},"inflated_cells":{},"added_area_ratio":{:.4f},)"
+            R"("gp_iterations":{},"hpwl_before":{},"hpwl_after":{},"probe_seconds":{:.2f},"seconds":{:.2f}}})",
+            probe.region_stats.size(),
+            count[0],
+            count[1],
+            count[2],
+            count[3],
+            inflated,
+            area > 0 ? added / area : 0.0,
+            iterations,
+            hpwl_before,
+            hpwl_after,
+            probe.seconds,
+            seconds)
+               << '\n';
+      }
+    };
+    if (terminal_active && options.legroute && options.legroute_probe.enabled && !multirow_cells) {
+      run_legroute_probe(v.design);
+    }
     if (refinement_active && terminal_active) {
       gp_density_weight = metrics.density_weight;
       refine_final_boundaries(v.design);
@@ -8654,18 +9094,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       // handoff taps cut rows under macros.
       const auto core_origins = multirow_cells ? first_core_rows(frame) : std::map<std::string, int64_t>{};
       if (options.handoff_taps) {
-        const auto& tap_master     = tech_profile->tap_master;
-        const auto& master         = tech.macros.at(tap_master);
-        const auto  original_count = frame.components.size();
-        frame.rows                 = cut_macro_rows(frame,
-                                                    tech,
-                                                    std::llround(tech_profile->tap_row_halo * frame.dbu),
-                                                    std::llround(tech_profile->tap_row_halo * frame.dbu),
-                                                    std::llround(2 * master.width * frame.dbu));
-        auto caps                  = row_endcaps(frame, tech, tap_master);
-        frame.components.insert(frame.components.end(), caps.begin(), caps.end());
-        auto taps = row_taps(frame, tech, tap_master, std::llround(tech_profile->tap_distance * frame.dbu));
-        frame.components.insert(frame.components.end(), taps.begin(), taps.end());
+        const auto original_count = frame.components.size();
+        add_handoff_taps(frame);
         handoff_cells.assign(frame.components.begin() + original_count, frame.components.end());
         handoff_rows = frame.rows;
       }
@@ -8687,7 +9117,63 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       if (multirow_cells) {
         multirow_report = anchor_multirow_cells(tech, frame, anchor_controls(options, terminal_options, core_origins));
       }
-      terminal_report = terminal_legalize(tech, frame, final_gp_timing, terminal_options);
+      if (options.legroute) {
+        auto lopt = options.legroute_options;
+        if (options.legroute_probe.enabled) {  // the second pass: the fixed trees avoid the congestion
+          lopt.tree_congestion = std::max(lopt.tree_congestion, options.legroute_probe.tree_congestion);
+        }
+        lopt.macro_halo_x_dbu = v.halo_x;
+        lopt.macro_halo_y_dbu = v.halo_y;
+        lopt.output_dir       = options.output_dir;
+        Legroute_regions regions;
+        if (!final_regions) {  // a final stage without the boundary refinement: the same mesh, without virtual pins
+          final_regions = Region_mesh::build(v.design, region_macros(), region_ios(), options.region, tech.dbu);
+        }
+        if (final_regions->rects.size() > 1) {
+          for (const auto& r : final_regions->rects) {
+            regions.rects.push_back({r.xl, r.yl, r.xh, r.yh});
+          }
+          if (boundary_pins) {
+            for (const auto& a : boundary_pins->pin_model().anchors) {
+              if (a.original_net >= 0 && size_t(a.original_net) < frame.nets.size()) {
+                regions.pins.push_back({size_t(a.original_net), a.x, a.y});
+              }
+            }
+          }
+        }
+        const auto* profile = legroute_power(frame, regions);
+        legroute_report     = legroute(tech, frame, final_gp_timing, lopt, regions, profile);
+        if (const size_t failed = legroute_report->sat_unsat_regions + legroute_report->sat_unknown_regions) {
+          // Stop on an unsuccessful model solve; UNKNOWN is not proof of unroutability.
+          const bool fixed_core = !options.generated_core;
+          throw std::runtime_error(
+              std::format("legroute did not find a placement for {} of {} regions ({} model UNSAT, {} without an answer in "
+                          "time) at utilization {:.3f}{}",
+                          failed,
+                          legroute_report->sat_regions,
+                          legroute_report->sat_unsat_regions,
+                          legroute_report->sat_unknown_regions,
+                          options.utilization,
+                          !options.legroute_probe.enabled ? ""
+                          : !options.allow_increase_area  ? "; allow_increase_area is off"
+                          : fixed_core                    ? "; the core is fixed (die, core, floorplan or previous placement given)"
+                                                          : ""));
+        }
+        for (const auto& n : frame.nets) {
+          if (!n.wires.empty() && !n.connections.empty()) {
+            legroute_wires[{n.connections.front().instance, n.connections.front().pin}] = {n.connections, n.wires};
+          }
+        }
+        for (const auto& c : frame.components) {
+          legroute_cells.emplace(c.name, c);
+        }
+        legroute_rules = frame.nondefault_rules;
+        for (const auto& t : frame.terminals) {
+          legroute_terminals.emplace(t.name, t);
+        }
+      } else {
+        terminal_report = terminal_legalize(tech, frame, final_gp_timing, terminal_options);
+      }
       if (multirow_report) {
         release_multirow_anchors(frame, *multirow_report);
         adopt_rail_twins(v, frame);
@@ -8695,11 +9181,14 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       sat_install(v.design, frame);
       metrics.legal                               = dp::is_legal(v.design);
       metrics.hpwl                                = dp::hpwl(v.design);
-      metrics.alignment.cell_legalization_seconds = terminal_report->seconds;
+      metrics.alignment.cell_legalization_seconds = terminal_report ? terminal_report->seconds : legroute_report->seconds;
       if (!metrics.legal) {
-        throw std::runtime_error("terminal legalization failed independent native geometry validation");
+        throw std::runtime_error(options.legroute ? "legroute failed independent native geometry validation"
+                                                  : "terminal legalization failed independent native geometry validation");
       }
-      write_terminal_legalize_report(*terminal_report, frame, terminal_options, options.output_dir + "/terminal_legalize");
+      if (terminal_report) {
+        write_terminal_legalize_report(*terminal_report, frame, terminal_options, options.output_dir + "/terminal_legalize");
+      }
       if (options.handoff_taps) {
         std::ofstream report(options.output_dir + "/handoff_taps.json");
         report << std::format(
@@ -9626,6 +10115,14 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     terminal.net.clear();
     net_names.insert(terminal.name);
   }
+  std::map<std::string_view, const ph::Component*> final_cells;
+  if (!legroute_wires.empty()) {
+    for (const auto& c : v.fp.components) {
+      final_cells.emplace(c.name, &c);
+    }
+  }
+  size_t                   legroute_kept = 0;
+  std::vector<std::string> legroute_changed;
   for (size_t net = 0; net < v.drivers.size(); ++net) {
     auto name = v.drivers[net].instance == "PIN" ? v.drivers[net].pin : std::format("net_{}", net);
     if (v.drivers[net].instance != "PIN") {
@@ -9664,7 +10161,51 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         v.fp.terminals[v.terminal.at(c.pin)].net = name;
       }
     }
+    if (const auto it = legroute_wires.find({v.drivers[net].instance, v.drivers[net].pin}); it != legroute_wires.end()) {
+      // keep legroute's wires only for the same connections over the same cells (legroute.final F6 lists the rest)
+      bool same = it->second.connections.size() == n.connections.size()
+                  && std::is_permutation(n.connections.begin(), n.connections.end(), it->second.connections.begin());
+      for (const auto& c : n.connections) {
+        if (!same || c.instance == "PIN") {
+          continue;
+        }
+        const auto then = legroute_cells.find(c.instance);
+        const auto now  = final_cells.find(c.instance);
+        same            = then != legroute_cells.end() && now != final_cells.end() && then->second.macro == now->second->macro
+                          && then->second.place.x == now->second->place.x && then->second.place.y == now->second->place.y
+                          && then->second.place.orientation == now->second->place.orientation;
+      }
+      if (same) {
+        n.wires = it->second.wires;
+        ++legroute_kept;
+      } else {
+        legroute_changed.push_back(name);
+      }
+    }
     v.fp.nets.push_back(std::move(n));
+  }
+  // All or nothing: a net changed after legroute would leave partial wiring an external router may fail on, so
+  // every legroute wire is dropped and the router starts from the legal placement.
+  const bool legroute_all = !legroute_wires.empty() && legroute_changed.empty() && legroute_kept == legroute_wires.size();
+  if (!legroute_wires.empty()) {
+    if (legroute_all) {
+      v.fp.nondefault_rules.insert(legroute_rules.begin(), legroute_rules.end());
+    } else {
+      for (auto& n : v.fp.nets) {
+        n.wires.clear();
+      }
+    }
+  }
+  if (!legroute_wires.empty() && !options.output_dir.empty()) {
+    std::ofstream report(options.output_dir + "/legroute_eco.json");
+    report << std::format(R"({{"routed":{},"kept":{},"emitted":{},"changed":[)",
+                          legroute_wires.size(),
+                          legroute_kept,
+                          legroute_all);
+    for (size_t k = 0; k < legroute_changed.size(); ++k) {
+      report << (k ? "," : "") << '"' << legroute_changed[k] << '"';
+    }
+    report << "]}\n";
   }
   // Unconnected input ports still need a DEF NET and stable terminal identity.
   for (auto& t : v.fp.terminals) {
@@ -9695,6 +10236,13 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     }
     handoff_grid            = make_power_grid(tech, v.fp, *pg_profile, &handoff_channel_stats);
     handoff_grid->terminals = handoff_pins(tech, *handoff_grid, tech_profile->io_pin_layers[0], tech_profile->io_pin_layers[1]);
+    if (legroute_all) {  // legroute's wires end on the IO pins it routed to
+      for (auto& t : handoff_grid->terminals) {
+        if (const auto it = legroute_terminals.find(t.name); it != legroute_terminals.end()) {
+          t = it->second;
+        }
+      }
+    }
     // Power terminals are appended only to the exported frame. The placement
     // and RC arrays continue to contain the original signal IO suffix.
     for (size_t i = 0; i < v.fp.terminals.size(); ++i) {
@@ -11016,6 +11564,16 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
     if (requested.boundarypins.align) {
       resolved_options->boundarypins.enabled = true;
     }
+  }
+  // the staged final-cell pass imports the macro pass's frame: whether the core may grow is decided here
+  if (requested.allow_increase_area && requested.legroute_probe.enabled) {
+    if (!resolved_options) {
+      resolved_options = requested;
+    }
+    // (the staged final pass calls place() again with the macro frame: keep the outer decision)
+    resolved_options->generated_core = requested.generated_core
+                                       || (requested.floorplan.empty() && requested.die.empty() && requested.core.empty()
+                                           && !requested.previous && !requested.timing_seed);
   }
   const auto& options = resolved_options ? *resolved_options : requested;
   if (options.final_iterations < 0) {

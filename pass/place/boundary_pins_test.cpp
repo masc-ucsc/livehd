@@ -60,6 +60,49 @@ TEST(BoundaryPins, SplitsAtTheOriginalCrossingWithOneSharedTransparentTerminal) 
   }
   EXPECT_EQ(original.pin2node, (std::vector<int>{0, 1}));
 }
+TEST(BoundaryPins, PinlessDipThroughOneSideIsRemoved) {
+  auto d         = fixture();
+  d.node_x[1]    = 40;
+  d.node_y[1]    = 40;
+  const auto dip = [](const std::vector<Busorder_point>&) {
+    return Busorder_tree{
+        {{10, 20}, {60, 20}},
+        {{60, 20}, {60, 40}},
+        {{60, 40}, {40, 40}}
+    };
+  };
+  const auto kept = split_boundary_nets(d, boxes, dip);
+  EXPECT_EQ(kept.anchors.size(), 2u);
+  EXPECT_EQ(kept.dips_removed, 0u);
+  const auto clean = split_boundary_nets(d, boxes, dip, true);
+  EXPECT_TRUE(clean.anchors.empty());
+  EXPECT_EQ(clean.dips_removed, 1u);
+  EXPECT_EQ(clean.design.pin2node, d.pin2node);
+  // a dip that leaves through two sides (here: into the exterior) stays
+  const auto through = [](const std::vector<Busorder_point>&) {
+    return Busorder_tree{
+        { {10, 20},  {60, 20}},
+        { {60, 20}, {60, 120}},
+        {{60, 120}, {40, 120}},
+        {{40, 120},  {40, 40}}
+    };
+  };
+  EXPECT_EQ(split_boundary_nets(d, boxes, through, true).dips_removed, 0u);
+}
+TEST(BoundaryPins, CellWhoseNetsLeaveThroughOneSideMovesAcross) {
+  auto d      = fixture();
+  d.node_x[0] = 45;
+  auto moved  = d;
+  EXPECT_EQ(move_dipping_cells(moved, boxes, 1), 0u);  // too far
+  EXPECT_EQ(move_dipping_cells(moved, boxes, 10), 1u);
+  EXPECT_EQ(moved.node_x[0], 50);
+  EXPECT_EQ(moved.node_y[0], 20);
+  EXPECT_EQ(moved.node_x[1], 90);
+  // a cell with a neighbor inside its rectangle stays
+  auto both      = d;
+  both.node_x[1] = 20;
+  EXPECT_EQ(move_dipping_cells(both, boxes, 10), 0u);
+}
 TEST(BoundaryPins, MaskedControlNetworksAreNeverSplit) {
   auto d           = fixture();
   d.net_mask[0]    = 0;

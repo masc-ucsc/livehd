@@ -17,7 +17,7 @@ struct Fixture {
       {  "data", 0},
       {"result", 0}
   };
-  explicit Fixture(bool cell = false) {
+  explicit Fixture(bool cell = false, bool trunk = false) {
     auto& d              = m.design;
     d.layout             = {0, 0, 100, 100, 1, 1};
     d.num_movable        = 3;
@@ -32,6 +32,8 @@ struct Fixture {
     if (cell) {
       net({3, 1}, 1, 0, -1);
       net({1, 4}, 1, 1, 1);
+    } else if (trunk) {  // the wire also feeds the middle cell
+      net({3, 1, 4}, 1, 0, -1);
     } else {
       net({3, 4}, 1, 0, -1);
     }
@@ -63,8 +65,8 @@ struct Fixture {
     m.parent_net.push_back(original);
     m.piece_region.push_back(box);
   }
-  Pin_align_stats run(const std::vector<int>& macros = {}) {
-    return align_boundary_pins(m, Region_mesh::from_rects(mesh), bits, macros);
+  Pin_align_stats run(const std::vector<int>& macros = {}, double near = 0) {
+    return align_boundary_pins(m, Region_mesh::from_rects(mesh), bits, macros, near);
   }
 };
 }  // namespace
@@ -87,6 +89,23 @@ TEST(Pinalign, DirectWireKeepsInputWhileOneCellMovesBothVirtualPins) {
     }
     EXPECT_EQ(f.m.design.pin2node, old.pin2node);
   }
+}
+TEST(Pinalign, NearTrunkThroughCellsAlignsWithinTheDistance) {
+  {
+    Fixture f(false, true);
+    EXPECT_TRUE(f.run().pairs.empty());
+  }
+  {
+    Fixture f(false, true);
+    EXPECT_TRUE(f.run({}, 39).pairs.empty());
+  }
+  Fixture f(false, true);
+  auto    s = f.run({}, 40);
+  EXPECT_EQ(s.near, 1u);
+  EXPECT_EQ(s.direct, 0u);
+  ASSERT_EQ(s.aligned, 1u);
+  EXPECT_EQ(f.m.anchors[0].y, 20);
+  EXPECT_EQ(f.m.anchors[1].y, 20);
 }
 TEST(Pinalign, DriverDirectionAndVerticalEdges) {
   for (bool vertical : {false, true}) {

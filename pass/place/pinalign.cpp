@@ -10,7 +10,7 @@
 
 namespace livehd::placement {
 Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const Region_mesh& mesh, const std::vector<Bus_bit>& identities,
-                                    const std::vector<int>& macros) {
+                                    const std::vector<int>& macros, double near) {
   auto&           d = model.design;
   Pin_align_stats stats;
   const int       nets = d.net_weights.size(), count = model.anchors.size();
@@ -91,6 +91,10 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const Region_mesh
     const double lo = ea.axis == 0 ? r.xl : r.yl, hi = ea.axis == 0 ? r.xh : r.yh;
     return (ea.position == lo && eb.position == hi) || (ea.position == hi && eb.position == lo);
   };
+  const auto coord = [&](int a) {
+    const auto& p = model.anchors[a];
+    return model.edges[p.edge].axis == 0 ? p.y : p.x;
+  };
   std::set<std::tuple<int, int, int, int, int, int>> candidates;
   struct Cell_paths {
     std::vector<std::pair<int, int>> inputs, outputs;  // anchor and physical cell pin
@@ -120,6 +124,12 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const Region_mesh
       for (int b : outputs) {
         if (opposite(inputs[0], b, box)) {
           candidates.emplace(inputs[0], b, box, -1, -1, -1);
+        }
+      }
+    } else if (near > 0 && inputs.size() == 1) {  // a trunk through the rectangle's cells, nearly straight already
+      for (int b : outputs) {
+        if (opposite(inputs[0], b, box) && std::abs(coord(inputs[0]) - coord(b)) <= near) {
+          candidates.emplace(inputs[0], b, box, -2, -1, -1);
         }
       }
     }
@@ -165,7 +175,9 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const Region_mesh
       pair.output_target         = origin + offsets[output_pin];
     }
     stats.pairs.push_back(pair);
-    if (cell < 0) {
+    if (cell == -2) {
+      ++stats.near;
+    } else if (cell < 0) {
       ++stats.direct;
     } else {
       ++stats.one_cell;
@@ -176,10 +188,6 @@ Pin_align_stats align_boundary_pins(Boundary_pin_model& model, const Region_mesh
   for (size_t i = 0; i < stats.pairs.size(); ++i) {
     components[sets.find(stats.pairs[i].input)].push_back(i);
   }
-  const auto coord = [&](int a) {
-    const auto& p = model.anchors[a];
-    return model.edges[p.edge].axis == 0 ? p.y : p.x;
-  };
   constexpr double tolerance = 1e-6;  // native coordinates; tolerate floating point sums
   const auto       aligned   = [&](const Pin_align_pair& p) {
     return p.cell < 0

@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <algorithm>
 #include <cmath>
+#include <format>
 #include <fstream>
 #include <set>
 #include <stdexcept>
@@ -592,8 +593,20 @@ ph::Floorplan make_power_grid(const ph::Technology& tech, const ph::Floorplan& i
           legal = !ph::violates_cut_spacing(shape.rect, obstacle.shape.rect, *reach);
         }
         if (!legal) {
-          throw std::invalid_argument("power grid conflicts with retained signal " + name + " on " + shape.layer + " ("
-                                      + obstacle.net + ")");
+          throw std::invalid_argument(
+              std::format("power grid conflicts with retained signal {} on {} ({}): signal [{} {} {} {}], "
+                          "power [{} {} {} {}] DBU",
+                          name,
+                          shape.layer,
+                          obstacle.net,
+                          shape.rect.xl,
+                          shape.rect.yl,
+                          shape.rect.xh,
+                          shape.rect.yh,
+                          obstacle.shape.rect.xl,
+                          obstacle.shape.rect.yl,
+                          obstacle.shape.rect.xh,
+                          obstacle.shape.rect.yh));
         }
       }
     };

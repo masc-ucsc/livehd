@@ -440,11 +440,51 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.boundarypins.settle_iterations   = integer("place.region.boundarypins.settle_iterations", "20");
   out.boundarypins.pitch_um            = number("place.region.boundarypins.pitch_um", "0");
   out.boundarypins.align               = truthy(synth_set(opts, "place.region.pinalign", "false"));
+  out.boundarypins.align_near          = number("place.region.pinalign.near", "0");
+  out.boundarypins.clean_cuts          = truthy(synth_set(opts, "place.region.cleancuts", "false"));
   // bus order across region edges is the boundary-pin flow with ordered, spaced, fixed virtual pins
   if (truthy(synth_set(opts, "place.region.busorder", "true"))) {
     out.boundarypins.enabled = out.boundarypins.split = out.boundarypins.order = true;
   }
   livehd::placement::validate_boundary_pin_options(out.boundarypins);
+  out.legroute                          = truthy(synth_set(opts, "place.legroute", "false"));
+  out.legroute_options.final            = truthy(synth_set(opts, "place.legroute.final", "true"));
+  out.legroute_options.box_fill         = number("place.legroute.box_fill", "1");
+  out.legroute_options.merge_cost       = number("place.legroute.merge_cost", "20");
+  out.legroute_options.clock_spine      = truthy(synth_set(opts, "place.legroute.clock_spine", "true"));
+  out.legroute_options.rib_tiles        = integer("place.legroute.rib_tiles", "4");
+  out.legroute_options.subregion_cells  = integer("place.legroute.subregion_cells", "0");
+  out.legroute_options.cap_scale        = number("place.legroute.cap_scale", "1");
+  out.legroute_options.window_tiles     = integer("place.legroute.window_tiles", "4");
+  out.legroute_options.crit_boxes       = number("place.legroute.crit_boxes", "0");
+  out.legroute_options.tree_boxes       = number("place.legroute.tree_boxes", "0");
+  out.legroute_options.tree_moves       = integer("place.legroute.tree_moves", "2");
+  out.legroute_options.sat_relax_rounds = integer("place.legroute.sat_relax_rounds", "0");
+  out.legroute_options.tree_load        = number("place.legroute.tree_load", "0");
+  out.legroute_options.tree_clauses     = number("place.legroute.tree_clauses", "10000000");
+  out.legroute_options.tree_by_crit     = truthy(synth_set(opts, "place.legroute.tree_by_crit", "false"));
+  out.legroute_options.io_preroute      = truthy(synth_set(opts, "place.legroute.io_preroute", "false"));
+  out.legroute_options.sat_alt          = synth_set(opts, "place.legroute.sat_alt", "");
+  out.legroute_options.tree_room        = truthy(synth_set(opts, "place.legroute.tree_room", "false"));
+  out.legroute_options.tree_congestion  = number("place.legroute.tree_congestion", "0");
+  out.legroute_probe.tree_congestion    = number("place.legroute.probe.tree_congestion", "1");
+  out.legroute_options.push_rounds      = integer("place.legroute.push_rounds", "0");
+  out.legroute_options.push_fraction    = number("place.legroute.push_fraction", "0.05");
+  out.legroute_probe.enabled            = truthy(synth_set(opts, "place.legroute.probe", "false"));
+  out.legroute_probe.cells              = integer("place.legroute.probe.cells", "1200");
+  out.legroute_probe.fill               = number("place.legroute.probe.fill", "0.5");
+  out.legroute_probe.target             = number("place.legroute.probe.target", "0.6");
+  out.legroute_probe.max_inflate        = number("place.legroute.probe.max_inflate", "1.5");
+  out.legroute_probe.sat_ms             = integer("place.legroute.probe.sat_ms", "20000");
+  out.legroute_probe.iterations         = integer("place.legroute.probe.iterations", "100");
+  if (out.legroute_probe.enabled
+      && (!out.legroute_probe.cells || !(out.legroute_probe.fill >= 0 && out.legroute_probe.fill < 1)
+          || !(out.legroute_probe.target > 0 && out.legroute_probe.target <= 1) || !(out.legroute_probe.max_inflate >= 1)
+          || !out.legroute_probe.iterations)) {
+    throw Lhd_error{"usage", "invalid synth.place.legroute.probe.* value", ""};
+  }
+  out.legroute_options.inbox_span = truthy(synth_set(opts, "place.legroute.inbox_span", "false"));
+  livehd::placement::validate_legroute_options(out.legroute_options);
   auto& terminal                  = out.terminal_legalize_options;
   terminal.remainder_warp.enabled = truthy(synth_set(opts, "place.legalize.warpspace", "false"));
   terminal.remainder_warp.weight  = number("place.legalize.warpspace.weight", "1");
@@ -504,6 +544,7 @@ livehd::placement::Options placement_options(const Options& opts) {
     throw Lhd_error{"usage", "synth.place.cohesion must be nonnegative", ""};
   }
   out.utilization = number("place.utilization", "0.30");
+  out.allow_increase_area = truthy(synth_set(opts, "place.allow_increase_area", "true"));
   out.aspect      = number("place.aspect", "1");
   for (const auto& [key, frame] : {
            std::pair<const char*, std::vector<double>*>{ "place.die",  &out.die},
@@ -533,6 +574,8 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (!out.floorplan.empty() && (!out.die.empty() || !out.core.empty())) {
     throw Lhd_error{"usage", "synth.place.die/core cannot be combined with synth.place.floorplan", "supply one frame source"};
   }
+  // nested placement calls (repair, timing trials) start from a previous frame: the user's frame decides core growth
+  out.generated_core        = out.floorplan.empty() && out.die.empty() && out.core.empty();
   out.density               = number("place.density", "0.5");
   out.iterations            = integer("place.iterations", "1500");
   out.min_iterations        = integer("place.min_iterations", "40");
@@ -1249,7 +1292,39 @@ std::string resolve_liberty(const Options& opts) {
   return lib;
 }
 
+namespace {
+void synth_command_once(Options& opts, Result& res);
+}
+
+// legroute.probe can ask for a larger core from any placement phase (the final legalization runs last): the whole
+// command runs again at the lower utilization, at most twice (synthesis reuses its ABC cache)
 void synth_command(Options& opts, Result& res) {
+  const Result start = res;
+  for (unsigned restarts = 0;; ++restarts) {
+    try {
+      synth_command_once(opts, res);
+      return;
+    } catch (const livehd::placement::Placement_area_restart& restart) {
+      if (restarts >= 2) {
+        throw Lhd_error{"unsupported",
+                        "not routable: legroute asked for a larger core a third time",
+                        "lower synth.place.utilization or relax the timing target"};
+      }
+      res                  = start;
+      // the GP target density follows (cells spread over the larger core instead of packing to the old density)
+      const double density = std::min(std::stod(synth_set(opts, "place.density", "0.5")), restart.density);
+      opts.sets.emplace_back("synth.place.utilization", std::format("{:.4f}", restart.utilization));
+      opts.sets.emplace_back("synth.place.density", std::format("{:.4f}", density));
+      std::fprintf(stderr,
+                   "lhd synth: restarting at synth.place.utilization=%.4f density=%.4f for routability\n",
+                   restart.utilization,
+                   density);
+    }
+  }
+}
+
+namespace {
+void synth_command_once(Options& opts, Result& res) {
   setup_diag(opts, "synth");
 
   auto       ir          = gather_ir_inputs(opts, "synth");
@@ -2253,7 +2328,8 @@ void synth_command(Options& opts, Result& res) {
       try {
         Phase_timer   phase(res, "pass.place");
         Stdout_to_log redirect(log);
-        auto*         generation = &placed_library;
+        auto*         generation    = &placed_library;
+        unsigned      area_restarts = 0;
         for (unsigned attempt = 0;; ++attempt) {
           try {
             placed = livehd::placement::place(*placement_input, *generation, place_options, [&] {
@@ -2264,6 +2340,18 @@ void synth_command(Options& opts, Result& res) {
               prepared_libraries.clear();
             });
             break;
+          } catch (const livehd::placement::Placement_area_restart& restart) {
+            // routability needs a larger core (legroute.probe): place again at the lower utilization
+            if (++area_restarts > 2) {
+              throw std::runtime_error("legroute probe asked for a larger core more than twice");
+            }
+            placement_input           = prepare_input();
+            retry_library             = std::make_unique<hhds::GraphLibrary>();
+            generation                = retry_library.get();
+            place_options.utilization = restart.utilization;
+            place_options.density     = std::min(place_options.density, restart.density);
+            place_options.cache_dir.clear();
+            res.recipe_steps.emplace_back(std::format("pass.place.area_restart.utilization={:.3f}", restart.utilization));
           } catch (const livehd::placement::Placement_restart& restart) {
             if (attempt != 0) {
               throw std::runtime_error("whole-color resynthesis exceeded one automatic restart");
@@ -2398,6 +2486,8 @@ void synth_command(Options& opts, Result& res) {
             sat_step_ran = true;
             res.recipe_steps.emplace_back("pass.place.satlegalize");
           }
+        } catch (const livehd::placement::Placement_area_restart&) {
+          throw;  // the whole command runs again with a larger core (synth_command)
         } catch (const std::exception& e) {
           throw Lhd_error{"unsupported", std::string("placement optimization failed: ") + e.what(), "see " + phase_log};
         }
@@ -2812,5 +2902,6 @@ void synth_command(Options& opts, Result& res) {
     }
   }
 }
+}  // namespace
 
 }  // namespace lhd

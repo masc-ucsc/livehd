@@ -1,0 +1,446 @@
+// This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+// legroute L2: cell-boxes. Connected cells merge cheapest first, cost = (1 + d (1 + 4 crit) / u) / (1 + conn +
+// nets made internal), no merge above the cost cap; then part-full boxes pack with the box of their nearest member
+// cell, the radius growing from 1.5 to 5 box widths (prototype variant c1_T20_pa_cd4).
+#include <algorithm>
+#include <cmath>
+#include <numeric>
+#include <queue>
+#include <unordered_map>
+
+#include "legroute_internal.hpp"
+
+namespace livehd::placement::lr {
+namespace {
+using Count = std::vector<std::pair<int, int>>;  // (net, pins of the net in the box), sorted by net
+
+struct Builder {
+  const Design&                 d;
+  const Grid&                   g;
+  double                        fill, unit, pin_limit;
+  std::vector<int>              parent;
+  std::vector<std::vector<int>> widths;  // per root: cell widths (sites)
+  std::vector<int>              sites;   // per root
+  std::vector<double>           pins, sx, sy, w, bcrit;
+  std::vector<int>              slot, ext;
+  std::vector<Count>            nets;
+  std::vector<int>              npins;   // per net: all pins
+  std::vector<double>           cx, cy;  // per movable cell center
+
+  Builder(const Design& dd, const Grid& gg) : d(dd), g(gg) {}
+  int find(int i) {
+    while (parent[i] != i) {
+      parent[i] = parent[parent[i]];
+      i         = parent[i];
+    }
+    return i;
+  }
+  bool packs(const std::vector<int>& ws) const {
+    std::array<double, 2> room{g.sites * fill + 1e-9, g.sites * fill + 1e-9};
+    auto                  sorted = ws;
+    std::ranges::sort(sorted, std::greater<>());
+    for (int x : sorted) {
+      auto& r = room[0] >= room[1] ? room[0] : room[1];
+      if (r < x) {
+        return false;
+      }
+      r -= x;
+    }
+    return true;
+  }
+  bool fits(int a, int b) const {
+    if (sites[a] + sites[b] > 2 * g.sites * fill + 1e-9 || pins[a] + pins[b] > pin_limit || (slot[a] >= 0 && slot[b] >= 0)) {
+      return false;
+    }
+    auto ws = widths[a];
+    ws.insert(ws.end(), widths[b].begin(), widths[b].end());
+    return packs(ws);
+  }
+  // external nets of the merged box; conn (connection weight) and gone (nets made internal) through the pointers
+  int merged_ext(int a, int b, double* conn = nullptr, int* gone = nullptr) const {
+    const auto& A = nets[a];
+    const auto& B = nets[b];
+    int         e = ext[a] + ext[b], ng = 0;
+    double      cw = 0;
+    for (size_t i = 0, j = 0; i < A.size() && j < B.size();) {
+      if (A[i].first < B[j].first) {
+        ++i;
+      } else if (B[j].first < A[i].first) {
+        ++j;
+      } else {
+        const int n = A[i].first, x = A[i].second, y = B[j].second;
+        e  += (x + y < npins[n]) - (x < npins[n]) - (y < npins[n]);
+        ng += x + y == npins[n];
+        cw += double(x) * y / (npins[n] - 1);
+        ++i;
+        ++j;
+      }
+    }
+    if (conn) {
+      *conn = cw;
+    }
+    if (gone) {
+      *gone = ng;
+    }
+    return e;
+  }
+  double cost(int a, int b) const {
+    double dd    = std::abs(sx[a] / w[a] - sx[b] / w[b]) + std::abs(sy[a] / w[a] - sy[b] / w[b]);
+    dd          *= 1 + 4 * std::max(bcrit[a], bcrit[b]);
+    double conn  = 0;
+    int    gone  = 0;
+    merged_ext(a, b, &conn, &gone);
+    return (1 + dd / unit) / (1 + conn + gone);
+  }
+  void join(int a, int b) {  // b into a
+    ext[a]    = merged_ext(a, b);
+    parent[b] = a;
+    widths[a].insert(widths[a].end(), widths[b].begin(), widths[b].end());
+    sites[a] += sites[b];
+    pins[a]  += pins[b];
+    sx[a]    += sx[b];
+    sy[a]    += sy[b];
+    w[a]     += w[b];
+    bcrit[a]  = std::max(bcrit[a], bcrit[b]);
+    slot[a]   = std::max(slot[a], slot[b]);
+    Count merged;
+    std::ranges::merge(nets[a], nets[b], std::back_inserter(merged));
+    Count out;
+    for (const auto& [n, c] : merged) {
+      if (!out.empty() && out.back().first == n) {
+        out.back().second += c;
+      } else {
+        out.emplace_back(n, c);
+      }
+    }
+    nets[a] = std::move(out);
+    nets[b].clear();
+    widths[b].clear();
+  }
+};
+}  // namespace
+
+int cell_sites(const Design& d, const Grid& g, int m) { return int((d.width[m] + g.site - 1) / g.site); }
+
+bool box_fits(const Design& d, const Grid& g, const Box& b, int tile) {
+  if (g.blocked[tile]) {
+    return false;
+  }
+  std::vector<int> ws, room;
+  for (int c : b.cells) {
+    ws.push_back(cell_sites(d, g, c));
+  }
+  for (const auto& s : g.segs(tile)) {
+    room.push_back(s.hi - s.lo);
+  }
+  return !pack_segments(ws, room).empty();
+}
+
+Boxes build_boxes(const Design& d, const Grid& g, const std::map<int, int>& fixed_slot) {
+  Builder    b(d, g);
+  const auto n = int(d.movable.size());
+  b.fill       = d.opt.box_fill;
+  b.unit       = double(*std::min_element(d.width.begin(), d.width.end()));
+  // pin room: half a track per signal pin over a two-site-wide box, against the H tracks over the tile (box layer
+  // and the routed H layers, one reserved each) with two to spare
+  {
+    double h = 0;
+    for (const auto& l : g.layers) {
+      h += l.horizontal ? double(g.tile_h) / l.pitch - d.opt.reserved_tracks : 0;
+    }
+    const auto box = d.tech.layers.find(g.box_layer);
+    if (box != d.tech.layers.end() && box->second.pitch_y > 0) {
+      h += double(g.tile_h) / std::llround(box->second.pitch_y * d.fp.dbu) - d.opt.reserved_tracks;
+    }
+    b.pin_limit = std::floor(h) - 2;
+  }
+  b.parent.resize(n);
+  std::iota(b.parent.begin(), b.parent.end(), 0);
+  b.widths.resize(n);
+  b.sites.resize(n);
+  b.pins.resize(n);
+  b.sx.resize(n);
+  b.sy.resize(n);
+  b.w.resize(n);
+  b.bcrit.assign(n, 0);
+  b.slot.assign(n, -1);
+  b.ext.assign(n, 0);
+  b.nets.resize(n);
+  b.cx.resize(n);
+  b.cy.resize(n);
+  b.npins.resize(d.nets.size());
+  for (size_t k = 0; k < d.nets.size(); ++k) {
+    b.npins[k] = int(d.nets[k].pins.size());
+  }
+  std::vector<int> region(n);
+  for (int i = 0; i < n; ++i) {
+    const auto& c = d.fp.components[d.movable[i]];
+    b.cx[i]       = c.place.x + d.width[i] / 2.0;
+    b.cy[i]       = c.place.y + g.row_h / 2.0;
+    if (const auto s = fixed_slot.find(i); s != fixed_slot.end()) {
+      b.cx[i]   = g.cx(g.col(s->second));
+      b.cy[i]   = g.cy(g.row(s->second));
+      b.slot[i] = s->second;
+    }
+    region[i]   = g.region[g.tile_of(b.cx[i], b.cy[i])];
+    b.sites[i]  = cell_sites(d, g, i);
+    b.widths[i] = {b.sites[i]};
+    b.w[i]      = double(d.width[i]);
+    b.sx[i]     = b.cx[i] * b.w[i];
+    b.sy[i]     = b.cy[i] * b.w[i];
+    int signal  = 0;
+    for (const auto& [_, p] : d.macro[d.movable[i]]->pins) {
+      signal += p.use != "CLOCK" && p.use != "POWER" && p.use != "GROUND";
+    }
+    b.pins[i] = std::ceil(.5 * signal) / 2;
+    for (int net : d.nets_of[i]) {
+      const auto& N = d.nets[net];
+      if (N.clock || N.power) {
+        continue;
+      }
+      int in_cell = 0;
+      for (const auto& p : N.pins) {
+        in_cell += p.comp == d.movable[i];
+      }
+      b.nets[i].emplace_back(net, in_cell);
+      b.ext[i]   += in_cell < b.npins[net];
+      b.bcrit[i]  = std::max(b.bcrit[i], N.ramp);
+    }
+  }
+  // cells legroute.global put on one slot share a box
+  std::map<int, int> slot_root;
+  for (const auto& [cell, tile] : fixed_slot) {
+    const auto [it, fresh] = slot_root.try_emplace(tile, cell);
+    if (!fresh && b.find(cell) != b.find(it->second)) {
+      b.slot[cell] = -1;
+      b.join(b.find(it->second), b.find(cell));
+    }
+  }
+  // connected pairs in one region, nets of at most box_net_max cells, any distance
+  using Item = std::tuple<double, int, int>;
+  std::vector<Item> items;
+  std::vector<int>  cells;
+  for (const auto& N : d.nets) {
+    if (N.clock || N.power) {
+      continue;
+    }
+    cells.clear();
+    for (const auto& p : N.pins) {
+      if (p.comp >= 0 && d.cell[p.comp] >= 0) {
+        cells.push_back(d.cell[p.comp]);
+      }
+    }
+    std::ranges::sort(cells);
+    cells.erase(std::unique(cells.begin(), cells.end()), cells.end());
+    if (cells.size() < 2 || cells.size() > d.opt.box_net_max) {
+      continue;
+    }
+    for (size_t x = 0; x < cells.size(); ++x) {
+      for (size_t y = x + 1; y < cells.size(); ++y) {
+        if (region[cells[x]] == region[cells[y]]) {
+          items.emplace_back(0, cells[x], cells[y]);
+        }
+      }
+    }
+  }
+  std::ranges::sort(items);
+  items.erase(std::unique(items.begin(), items.end()), items.end());
+  for (auto& [c, u, v] : items) {
+    c = b.cost(b.find(u), b.find(v));
+  }
+  std::priority_queue<Item, std::vector<Item>, std::greater<>> heap(std::greater<>(), std::move(items));
+  Boxes                                                        out;
+  while (!heap.empty()) {
+    const auto [c0, u, v] = heap.top();
+    heap.pop();
+    const int ru = b.find(u), rv = b.find(v);
+    if (ru == rv) {
+      continue;
+    }
+    const double c1 = b.cost(ru, rv);
+    if (c1 > c0 + 1e-9) {  // stale: one of the boxes grew since this pair was scored
+      heap.emplace(c1, u, v);
+      continue;
+    }
+    if (c1 > d.opt.merge_cost) {
+      break;
+    }
+    if (!b.fits(ru, rv)) {
+      continue;  // boxes only grow: never fits again
+    }
+    b.join(ru, rv);
+    ++out.merges;
+  }
+  // pack-all: part-full boxes merge with the box of their nearest member cell; each radius repeats while it
+  // still merges, then grows by 1.5 up to 5 box widths
+  for (double cell = 1.5 * g.tile_w; cell < 5.0 * g.tile_w;) {
+    std::unordered_map<int64_t, std::vector<int>> grid;
+    const auto                                    key = [&](int64_t gx, int64_t gy) { return gx * 1000003 + gy; };
+    std::vector<std::vector<int>>                 members(n);
+    for (int i = 0; i < n; ++i) {
+      members[b.find(i)].push_back(i);
+      grid[key(int64_t(b.cx[i] / cell), int64_t(b.cy[i] / cell))].push_back(i);
+    }
+    std::vector<int> roots;
+    for (int i = 0; i < n; ++i) {
+      if (b.find(i) == i) {
+        roots.push_back(i);
+      }
+    }
+    std::ranges::stable_sort(roots, [&](int x, int y) { return b.sites[x] < b.sites[y]; });
+    std::vector<char> merged(n, 0);
+    bool              any = false;
+    for (int r : roots) {
+      if (merged[r] || b.find(r) != r) {
+        continue;
+      }
+      double best = INFINITY;
+      int    to   = -1;
+      for (int i : members[r]) {
+        const auto ix = int64_t(b.cx[i] / cell), iy = int64_t(b.cy[i] / cell);
+        for (auto ax = ix - 1; ax <= ix + 1; ++ax) {
+          for (auto ay = iy - 1; ay <= iy + 1; ++ay) {
+            const auto it = grid.find(key(ax, ay));
+            if (it == grid.end()) {
+              continue;
+            }
+            for (int j : it->second) {
+              const int q = b.find(j);
+              if (q == r || merged[q] || q == to || region[j] != region[i]) {
+                continue;
+              }
+              const double dd = std::abs(b.cx[i] - b.cx[j]) + std::abs(b.cy[i] - b.cy[j]);
+              if (dd <= cell && dd < best && b.fits(q, r)) {
+                best = dd;
+                to   = q;
+              }
+            }
+          }
+        }
+      }
+      if (to >= 0) {
+        b.join(to, r);
+        merged[to] = merged[r] = 1;
+        any                    = true;
+      }
+    }
+    if (!any) {
+      cell *= 1.5;
+    }
+  }
+  std::vector<int> id(n, -1);
+  out.box_of.assign(n, -1);
+  for (int i = 0; i < n; ++i) {
+    const int r = b.find(i);
+    if (id[r] < 0) {
+      id[r] = int(out.boxes.size());
+      out.boxes.emplace_back();
+    }
+    auto& box = out.boxes[id[r]];
+    box.cells.push_back(i);
+    out.box_of[i] = id[r];
+  }
+  for (size_t k = 0; k < out.boxes.size(); ++k) {
+    auto&  box = out.boxes[k];
+    double ws  = 0;
+    for (int i : box.cells) {
+      box.cx    += b.cx[i] * d.width[i];
+      box.cy    += b.cy[i] * d.width[i];
+      ws        += d.width[i];
+      box.sites += cell_sites(d, g, i);
+      box.clock  = box.clock || d.flop[i];
+      if (b.slot[i] >= 0) {
+        box.fixed = true;
+        box.tile  = b.slot[i];
+      }
+    }
+    box.cx     /= ws;
+    box.cy     /= ws;
+    box.region  = g.region[g.tile_of(box.cx, box.cy)];
+    std::unordered_map<int, int> count;
+    for (int i : box.cells) {
+      for (int net : d.nets_of[i]) {
+        const auto& N = d.nets[net];
+        if (N.clock || N.power) {
+          continue;
+        }
+        for (const auto& p : N.pins) {
+          count[net] += p.comp == d.movable[i];
+        }
+      }
+    }
+    for (const auto& [net, c] : count) {
+      const auto& N = d.nets[net];
+      box.crit      = std::max(box.crit, N.crit);
+      box.ramp      = std::max(box.ramp, N.ramp);
+      box.critical  = box.critical || N.critical;
+      if (c == int(N.pins.size())) {
+        ++box.internal;
+      } else {
+        ++box.external;
+      }
+    }
+  }
+  return out;
+}
+
+void pack_cells(const Design& d, const Grid& g, const Boxes& boxes) {
+  for (const auto& b : boxes.boxes) {
+    const int        c = g.col(b.tile), r = g.row(b.tile);
+    const auto&      segs = g.segs(b.tile);
+    std::vector<int> ws, room, prefer;
+    // the box moved by (dx, dy) from its centroid: keep each cell's relative place
+    const double     dx = g.cx(c) - b.cx;
+    for (int i : b.cells) {
+      ws.push_back(cell_sites(d, g, i));
+      const auto& p    = d.fp.components[d.movable[i]].place;
+      const int   row  = std::clamp(int(std::lround(double(p.y - g.bottom(r)) / g.row_h)), 0, 1);
+      const auto  x    = (p.x + dx - g.left(c)) / g.site;
+      int         pref = -1;
+      for (size_t s = 0; s < segs.size(); ++s) {
+        if (segs[s].row == row && x >= segs[s].lo && x < segs[s].hi) {
+          pref = int(s);
+        }
+      }
+      prefer.push_back(pref);
+    }
+    for (const auto& s : segs) {
+      room.push_back(s.hi - s.lo);
+    }
+    auto got = pack_segments(ws, room, &prefer);
+    if (got.empty()) {
+      got = pack_segments(ws, room);
+    }
+    if (got.empty()) {
+      throw std::logic_error("legroute: a snapped box does not fit its tile");
+    }
+    for (size_t s = 0; s < segs.size(); ++s) {
+      std::vector<int> in;
+      int              total = 0;
+      double           want  = INFINITY;
+      for (size_t k = 0; k < b.cells.size(); ++k) {
+        if (got[k] == int(s)) {
+          in.push_back(int(k));
+          total += ws[k];
+          want   = std::min(want, (d.fp.components[d.movable[b.cells[k]]].place.x + dx - g.left(c)) / double(g.site));
+        }
+      }
+      if (in.empty()) {
+        continue;
+      }
+      std::ranges::sort(in, [&](int a, int e) {
+        return d.fp.components[d.movable[b.cells[a]]].place.x < d.fp.components[d.movable[b.cells[e]]].place.x;
+      });
+      int x = std::clamp(int(std::lround(want)), segs[s].lo, segs[s].hi - total);
+      for (int k : in) {
+        auto& p        = d.fp.components[d.movable[b.cells[k]]].place;
+        p.x            = g.left(c) + int64_t(x) * g.site;
+        p.y            = g.bottom(r) + segs[s].row * g.row_h;
+        p.orientation  = g.row_orient[2 * r + segs[s].row];
+        p.status       = physical::Status::PLACED;
+        x             += ws[k];
+      }
+    }
+  }
+}
+}  // namespace livehd::placement::lr

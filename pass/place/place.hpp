@@ -23,6 +23,7 @@
 #include "hhds/graph.hpp"
 #include "inou/lefdef/physical.hpp"
 #include "inou/lefdef/row_access.hpp"
+#include "legroute.hpp"
 #include "multirow.hpp"
 #include "multirow_eco.hpp"
 #include "power_grid.hpp"
@@ -55,6 +56,13 @@ struct Placement_restart : std::exception {
   Placement_stage     stage;
   Placement_restart(physical::Floorplan frame, Placement_stage s) : seed(std::move(frame)), stage(s) {}
   const char* what() const noexcept override { return "placement restarted after whole-color resynthesis"; }
+};
+// legroute.probe with allow_increase_area: the probe's target box fill needs a lower GP target density (or the
+// inflation does not fit) in a generated core; placement runs again with this utilization and density (a larger core)
+struct Placement_area_restart : std::exception {
+  double utilization, density;  // the new utilization and GP target density
+  Placement_area_restart(double u, double d) : utilization(u), density(d) {}
+  const char* what() const noexcept override { return "placement restarted with a larger core for routability"; }
 };
 using Timing_feedback = livehd::timing::Feedback;
 using Evaluate        = std::function<Timing_feedback(const Result&)>;
@@ -181,6 +189,19 @@ struct Options {
   DreamPlace::native::GpSearch      gp_search;               // opt-in final-GP A/B trials
   DreamPlace::native::MacroTransparency macro_transparency;  // diagnostic final-GP barrier schedule
   Terminal_legalize_options             terminal_legalize_options;
+  // synth.place.legroute: route-aware legalization replaces terminal legalization; out.def carries its routes
+  bool                                  legroute = false;
+  Legroute_options                      legroute_options;
+  // legroute.probe: before bus order, a quick legroute on small regions (no virtual pins); the cells of the regions
+  // it cannot route widen (x only, r = box fill / target up to max_inflate, the target lowered to the median fill of
+  // the regions the probe solved; the top 10% timing-critical cells keep their size) and GP resumes for at most
+  // `iterations`, then the widths return. Regions at or under `fill` box occupancy skip the SAT.
+  struct Legroute_probe {
+    bool     enabled = false;
+    unsigned cells = 1200, sat_ms = 20000, iterations = 100;
+    double   fill = 0.5, target = 0.6, max_inflate = 1.5;
+    double   tree_congestion = 1;  // the real legroute's tree congestion weight once the probe ran
+  } legroute_probe;
   int                                   fp_timing_max_updates = 10;
   bool                                  fp_resize             = false;
   // Resolved by the driver: enabled with resize unless explicitly disabled.
@@ -256,6 +277,11 @@ struct Options {
   std::vector<std::string>                                   eco_trace_cells;
   std::map<std::string, double>                              net_weights;
   double                                                     utilization = 0.30, aspect = 1, density = 0.5;
+  // a generated core (no die, core or floorplan given) may grow when routability needs it (legroute.probe): placement
+  // restarts at the utilization that fits the inflated cells (Placement_area_restart)
+  bool                                                       allow_increase_area = true;
+  // no frame given by the user (die, core, floorplan): set by lhd and by the outermost place(); nested calls inherit it
+  bool                                                       generated_core      = false;
   // Fixed generated frame in microns, {xl, yl, xh, yh}; empty means derive it from utilization/aspect.
   // `core` is snapped inward to the site/row grid; with only one of the two given the other equals it.
   // An imported `floorplan` (also what the staged macro/cell passes feed themselves) wins over both.

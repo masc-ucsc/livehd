@@ -72,6 +72,13 @@ public:
   Pin_escape_trial check(const std::vector<physical::Shape>&, const std::string& net,
                          const std::function<bool()>& expired = {}) const;
   void             commit(const Pin_escape_trial&);
+  // One candidate shape alone: the protected access points of other nets it collides with, and whether it takes the
+  // last one of some pin. A search cost, not an acceptance check (check() sees the whole route).
+  struct Cost {
+    size_t points = 0;
+    bool   fatal  = false;
+  };
+  Cost             cost(const physical::Shape&, const std::string& net) const;
   size_t           protected_pins() const { return pins_.size(); }
   size_t           unresolved_pins() const { return unresolved_pins_; }
 };

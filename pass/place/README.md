@@ -2877,6 +2877,36 @@ forest-only repair. Both explicit scopes require the legacy engine. Absent
 batch ends these modes; rejected batches retain the existing bounded bisection
 behavior.
 
+## Route-aware legalization (legroute)
+
+`synth.place.legroute=true` enables the experimental alternative to terminal legalization.
+It remains a work in progress and is disabled by default. The implementation and plan are
+in `legroute*.cpp` and `todo/livehd/2l-legroute.html`. legroute.local builds 2x2 cell-boxes
+(two widest-flop widths by two rows), merging connected cells before packing partially
+filled boxes. A per-region SAT model places boxes and constrains routing demand against
+tile track capacity. Optional fixed trees, critical-box placement and IO prerouting reduce
+the model; `sat_alt` compares two policies, and `push_rounds` can redistribute boxes between
+regions. Clock spines and track assignment follow. A SAT answer is a capacity-model result,
+not proof of detailed routability or DRC closure. legroute.final places the cells inside each box and
+writes the global metal as planar wires only; the shared signal router (the one
+`satlegalize.route` uses, `signal_router.hpp`) then makes every via: it joins each layer change of
+the global metal, taps each cell pin onto its net's metal nearby (the box layer and the lowest
+vertical layer weigh more, so a tap climbs early instead of running over other pins), and routes
+each local net whole on the low layers. Its maze steers around other pins' access points (the
+pin-escape guard prices each box-layer step). A net whose global metal breaks a rule, or whose
+tree does not close, is routed whole by the router instead. The planned power grid is part of the
+router's frame (supply pins attach to their rails). The router has no rip-up, so routing runs up
+to `route_passes` passes, each with the previous pass's failed nets first, and keeps the best.
+All or nothing: unless every net closes, no signal wire is written and an external router starts
+from the legal placement; the same holds in `out.def` when a later step changed a routed net.
+`final/legroute.json` reports every step and its time, the failure reasons, and where routing
+fails: the failed nets' boxes (fill, internal and external pins, in-box demand against the box
+layer's tracks) and, per bucket of fill, internal pins and external pins, all boxes against the
+boxes with a failed net. `final/legroute_eco.json` lists the nets changed after legroute. DRC
+stays external: `pass/place/legroute_drc.tcl` runs OpenROAD's checker on `out.def` without
+rerouting. With legroute enabled, movable macros (memories included) snap their halo frame
+to the legroute tile grid before routing-track alignment when the snapped position fits.
+
 ## Terminal legalization
 
 Terminal legalization is mandatory for the final cell handoff. After GP and enabled sizing/buffer repair, the terminal

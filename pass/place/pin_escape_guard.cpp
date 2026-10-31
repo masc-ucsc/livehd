@@ -526,6 +526,32 @@ Pin_escape_trial Pin_escape_guard::check(const std::vector<ph::Shape>& shapes, c
   out.legal = true;
   return out;
 }
+Pin_escape_guard::Cost Pin_escape_guard::cost(const ph::Shape& shape, const std::string& net) const {
+  Cost out;
+  if (!incomplete_reason_.empty() || (shape.layer != layers_.escape && shape.layer != layers_.cut)) {
+    return out;
+  }
+  const auto               clearance = shape.layer == layers_.escape ? metal_clearance_ : cut_clearance_;
+  std::map<size_t, size_t> lost;
+  for (const auto index : index_.query(shape.layer, shape.rect, clearance, net)) {
+    const auto  id    = indexed_points_.at(index);
+    const auto& point = points_.at(id);
+    const auto& pin   = pins_.at(point.pin);
+    if (!point.active || routed_.contains(pin.net)) {
+      continue;
+    }
+    const bool collides = shape.layer == layers_.escape
+                              ? !rules_.spacing(point.escape, shape).legal || !rules_.spacing(point.landing, shape).legal
+                                    || !rules_.spacing(point.probe, shape).legal
+                              : ph::violates_cut_spacing(point.cut.rect, shape.rect, cut_clearance_);
+    if (!collides) {
+      continue;
+    }
+    ++out.points;
+    out.fatal |= ++lost[point.pin] >= pin.remaining;
+  }
+  return out;
+}
 void Pin_escape_guard::commit(const Pin_escape_trial& trial) {
   if (!trial.legal || trial.owner != this || trial.generation != generation_) {
     throw std::invalid_argument("invalid or stale pin escape trial");

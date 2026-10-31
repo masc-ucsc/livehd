@@ -395,6 +395,11 @@ int main(int argc, char** argv) {
       options.boundarypins.enabled = options.boundarypins.split = options.boundarypins.order = true;
     }
     number_option("region_merge_um", options.region.merge_um);
+    boolean_option("legroute", options.legroute);
+    boolean_option("legroute_final", options.legroute_options.final);
+    boolean_option("legroute_clock_spine", options.legroute_options.clock_spine);
+    number_option("legroute_box_fill", options.legroute_options.box_fill);
+    number_option("legroute_merge_cost", options.legroute_options.merge_cost);
     auto& terminal_options = options.terminal_legalize_options;
     boolean_option("legalize_joint_minimize_total", terminal_options.joint_minimize_total);
     number_option("legalize_remainder_wire_weight", terminal_options.remainder_wire_weight);
