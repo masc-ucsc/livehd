@@ -290,9 +290,17 @@ against satlegalize's &minus;717.6 / &minus;1,389.1k on the same core (1.3% and 
 ps / TNS &minus;261.5k against satlegalize's &minus;719.3 / &minus;257.1k on the same core (2.3% and 1.7%
 worse; one die-edge DRC each): on a sparse design the box snap costs what the tiers do not recover.</li>
 <li>OpenROAD on the sha3 SAT placement with the default tiers: zero overflow, zero DRCs, DR WNS &minus;383.6 ps
-/ TNS &minus;469.7k against the satlegalize baseline's &minus;394.5 / &minus;466k on the same core (2.8%
-better WNS, 0.8% worse TNS). Over the three designs legroute.local is within 3% of satlegalize + OpenROAD
-either way, with routability by construction.</li>
+/ TNS &minus;469.7k against a same-session satlegalize run's &minus;382.4 / &minus;466.6k on the same core
+(equal within 1%; an earlier session's baseline of &minus;394.5 was a different placement run). Over the
+three designs legroute.local is within 3% of satlegalize + OpenROAD on the same core, with routability by
+construction, and its routed wire is 5 to 12% longer (the box snap).</li>
+<li>Against the standard flow at HighTide's default densities (satlegalize + OpenROAD, zero overflow): sha3 at
+utilization 0.70 routes clean on a 3,043 um&sup2; die, 30% smaller than where legroute's push-back lands
+(0.495, 4,333 um&sup2;), at DR WNS &minus;397.1 / TNS &minus;483.1k; minimax at 0.65 (3,218 um&sup2;,
+&minus;716.7 / &minus;1,425.5k) matches legroute's 0.634 (3,307 um&sup2;); partition_m at 0.55 (4,770
+um&sup2;, &minus;694.4 / &minus;226.1k) is 44% larger than legroute's 0.792 (3,314 um&sup2;). So the SAT's
+capacity model is conservative on sha3's dense regions (OpenROAD routes a denser standard placement clean)
+and permissive where the cell-level legalizer gives up (partition_m).</li>
 <li>Route guides (<code>legroute.guide</code>: per net the corridor of tiles its SAT route covers, on every
 routing layer, M1 on the pin tiles; OpenROAD <code>read_guides</code> then <code>detailed_route</code>):
 TritonRoute accepts them, but the guided detailed route converges slowly (77k violations after its first
