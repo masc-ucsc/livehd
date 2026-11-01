@@ -3571,6 +3571,29 @@ void take_rail_twin(View& v, size_t i, const std::string& macro) {
     c.macro = macro;
   }
 }
+// Region_options for the mesh: with cut = "ratio", the tracks a cut line crosses per micron come from the routing
+// stack legroute routes on (the horizontal layers above the box layer for a vertical line, the vertical ones for a
+// horizontal line), so a split weighs the two axes by what the region can carry.
+Region_options region_options_with_tracks(const ph::Technology& tech, const Region_options& o) {
+  Region_options ro = o;
+  if (ro.cut == "ratio" && ro.h_tracks_per_um <= 0 && ro.v_tracks_per_um <= 0) {
+    size_t k = 0;
+    for (const auto& name : tech.routing_layers) {
+      ++k;
+      const auto it = tech.layers.find(name);
+      if (it == tech.layers.end() || k <= 2 || k > 7) {
+        continue;  // M1 holds the pins, M2 is legroute's box layer; the stack above M7 is not routed
+      }
+      const auto&  L     = it->second;
+      const bool   h     = L.direction == "HORIZONTAL";
+      const double pitch = h ? (L.pitch_y > 0 ? L.pitch_y : L.pitch_x) : (L.pitch_x > 0 ? L.pitch_x : L.pitch_y);
+      if (pitch > 0) {
+        (h ? ro.h_tracks_per_um : ro.v_tracks_per_um) += 1.0 / pitch;
+      }
+    }
+  }
+  return ro;
+}
 // Each cell takes the master its component in frame has: the anchor prepass
 // and the two-row ECO pick the rail twin a start needs. frame lists v.cells
 // first, in order.
@@ -6487,7 +6510,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       return segments;
     };
-    const auto regions = Region_mesh::build(physical, bus_macros, ios, options.region, tech.dbu);
+    const auto regions = Region_mesh::build(physical, bus_macros, ios, region_options_with_tracks(tech, options.region), tech.dbu);
     regions.write(options.output_dir);
     final_regions = regions;
     if (regions.rects.size() < 2) {
@@ -8921,7 +8944,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     const auto run_legroute_probe = [&](dp::Design& design, unsigned round) {
       const auto&    po    = options.legroute_probe;
       const auto     start = std::chrono::steady_clock::now();
-      Region_options ro    = options.region;
+      Region_options ro    = region_options_with_tracks(tech, options.region);
       ro.max_cells         = po.cells ? po.cells : options.region.max_cells;
       const auto mesh      = Region_mesh::build(design, region_macros(), region_ios(), ro, tech.dbu);
       auto       frame     = sat_frame(design, false);
@@ -9223,7 +9246,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         lopt.fail_fast        = options.legroute_probe.strict;  // strict: any failure restarts or stops the run
         Legroute_regions regions;
         if (!final_regions) {  // a final stage without the boundary refinement: the same mesh, without virtual pins
-          final_regions = Region_mesh::build(v.design, region_macros(), region_ios(), options.region, tech.dbu);
+          final_regions = Region_mesh::build(v.design, region_macros(), region_ios(), region_options_with_tracks(tech, options.region), tech.dbu);
         }
         if (final_regions->rects.size() > 1) {
           for (const auto& r : final_regions->rects) {

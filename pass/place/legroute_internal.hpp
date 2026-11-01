@@ -187,7 +187,7 @@ struct Global_routes {
   double                   seconds  = 0;
 };
 // cap_h[t], cap_v[t]: the tile's tracks per direction; margin_tiles: the search box around a net's endpoints
-Global_routes global_route(const Grid&, const std::vector<int>& cap_h, const std::vector<int>& cap_v, double share,
+Global_routes global_route(const Grid&, const std::vector<int>& cap_h, const std::vector<int>& cap_v, double share, double own_share,
                            const std::vector<Global_net>&, unsigned margin_tiles);
 
 // ---------------------------------------------------------------- L3 SAT placement

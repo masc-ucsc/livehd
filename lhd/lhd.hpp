@@ -1254,7 +1254,9 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.region.cut",
      "macro",
      Synth_set_option::Kind::file,
-     "region cut lines: macro = every macro edge and IO bus span first, then the longest side split at its middle; "
+     "region cut lines: macro = every macro edge and IO bus span first, then the longest side split at its middle; ratio = "
+     "no forced line, each split takes the axis and position whose children have the lowest worst internal cut over the "
+     "tracks across it; "
      "mincut = no forced line, each split takes the position in the middle half of the longest side that the fewest "
      "nets cross (a macro sits inside its region, no boundary runs along its channel)"},
     {"place.region.boundarypins",
@@ -1436,6 +1438,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "with legroute.global_route: share of an edge's tracks (the narrower tile's, per direction) the routed trees may "
      "take; the rest stays for the regions' own routes"},
+    {"place.legroute.global_own_share",
+     "0",
+     Synth_set_option::Kind::file,
+     "with legroute.global_route: the router also charges a net's edges inside its own regions against this share of "
+     "their tracks (0: free), so a net exits where its region's internal cuts are least loaded"},
     {"place.legroute.global_margin",
      "8",
      Synth_set_option::Kind::integer,

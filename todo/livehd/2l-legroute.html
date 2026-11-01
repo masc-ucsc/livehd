@@ -542,6 +542,18 @@ pass constrained to them, before the detailed route is a fair test of the routes
 </ul>
 
 <h2>Plan</h2>
+<p><strong>Measured 2026-11-01 (sha3, usyn CMOS, utilization 0.45): the model rejects what OpenROAD routes clean.</strong>
+Two regions unsat by the cut bound (278 nets forced across one internal column boundary with 263 tracks; 378 with
+336), both full-width strips (24 tiles wide, 12&ndash;16 tall) because the IO bus spans cut the die into bands. OpenROAD
+routes the placement with zero overflow and zero DRC, and crosses that boundary inside the region's rows only 146 times
+(M2 62, M4 67, M6 19). Of the region's nets with cells on both sides, 30 are internal, 145 leave through a hop, 3 pass
+through: the hop tile chosen ahead of the SAT decides whether a leaving net crosses inside the region, OpenROAD decides
+it per net. Charging own-region edges in the global router (<code>legroute.global_own_share</code>, off by default) did
+not help. The fixes, in order: (1) the SAT chooses each crossing net's hop among a few boundary tiles (the plan item
+below), with the cut bound counting only what no choice avoids; (2) <code>region.cut=ratio</code> (landed, off by default):
+no forced lines, each split picks the axis and position whose children have the lowest worst internal cut over the
+tracks across it, from the routing stack's pitches; (3) more of M2 credited to the global routes.</p>
+
 <p><strong>Next (user, 2026-11-01): spread cell-boxes into the empty tiles as a local path recovery.</strong> A
 placement at utilization 0.50 (sha3 usyn domino, bisection landing) shows it: the boxes are 0.81 full but half the
 tiles are empty, so the cells sit in dense 2&times;2 clumps with white space around them. After legroute.local has its

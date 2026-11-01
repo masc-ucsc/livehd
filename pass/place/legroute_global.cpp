@@ -23,7 +23,7 @@ struct Search {  // the per-tile state of one search, valid for the stamp of tha
 };
 }  // namespace
 
-Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const std::vector<int>& cap_v, double share,
+Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const std::vector<int>& cap_v, double share, double own_share,
                            const std::vector<Global_net>& nets, unsigned margin_tiles) {
   const auto    start = Clock::now();
   Global_routes out;
@@ -135,11 +135,18 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
             if (free_edges.contains(int64_t(e) * 2 + h)) {
             } else if (g.region[t] == g.region[q] && own[size_t(g.region[t])] == mark) {
               // inside a region of the net's own pins: the region routes it, nothing is reserved here; an edge
-              // without tracks (a macro) stays closed, or a hop could land in a pocket the region cannot reach
-              if (std::min((h ? cap_h : cap_v)[size_t(t)], (h ? cap_h : cap_v)[size_t(q)]) <= 0) {
+              // without tracks (a macro) stays closed, or a hop could land in a pocket the region cannot reach.
+              // With own_share the edge's load still costs (never closes): the exit that loads the region's
+              // internal cuts least wins
+              const int mc = std::min((h ? cap_h : cap_v)[size_t(t)], (h ? cap_h : cap_v)[size_t(q)]);
+              if (mc <= 0) {
                 continue;
               }
               cost = 1;
+              if (own_share > 0) {
+                const int lim_own = std::max(1, int(std::floor(own_share * mc)));
+                cost += 2.0 * double((h ? use_h : use_v)[size_t(e)] + 1) / double(lim_own);
+              }
             } else {
               const int lim = (h ? lim_h : lim_v)[size_t(e)], use = (h ? use_h : use_v)[size_t(e)];
               if (lim <= 0 || use >= lim) {
@@ -178,8 +185,8 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
     }
     tree.routed = true;
     tree.edges  = std::move(edges);
-    for (const auto& [a, b] : tree.edges) {  // the hops and the pass-through runs take room; own regions do not
-      if (g.region[a] == g.region[b] && own[size_t(g.region[a])] == mark) {
+    for (const auto& [a, b] : tree.edges) {  // the hops and the pass-through runs take room; own regions only with own_share
+      if (g.region[a] == g.region[b] && own[size_t(g.region[a])] == mark && own_share <= 0) {
         continue;
       }
       const bool h   = g.row(a) == g.row(b);

@@ -3055,7 +3055,7 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
       gr_index[n] = gnets.size();
       gnets.push_back(std::move(gn));
     }
-    GR                  = global_route(g, cap_h, cap_v, d.opt.global_share, gnets, d.opt.global_margin);
+    GR                  = global_route(g, cap_h, cap_v, d.opt.global_share, d.opt.global_own_share, gnets, d.opt.global_margin);
     out.global_unrouted = GR.unrouted;
     out.global_full     = GR.edges_full;
     out.global_seconds  = GR.seconds;

@@ -74,6 +74,10 @@ struct Legroute_options {
   // regions holding none of the net's pins are fixed pieces. A net without a path keeps the hop chain
   bool        global_route     = false;
   double      global_share     = .5;
+  // experiment: the router charges a net's own-region edges against this share of their tracks too (0: free, as the
+  // region routes them), so a net picks the exit that loads its region's internal cuts least and the pass-throughs
+  // see that load
+  double      global_own_share = 0;
   unsigned    global_margin    = 8;
   // chained hops of a pass-through net (hop to hop inside a region) avoid the rows and columns earlier pass-throughs
   // took: this many tile widths of distance per fully loaded edge on the run (0: nearest only)
