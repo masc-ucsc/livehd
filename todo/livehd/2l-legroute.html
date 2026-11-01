@@ -542,6 +542,16 @@ pass constrained to them, before the detailed route is a fair test of the routes
 </ul>
 
 <h2>Plan</h2>
+<p><strong>Next (user, 2026-11-01): spread cell-boxes into the empty tiles as a local path recovery.</strong> A
+placement at utilization 0.50 (sha3 usyn domino, bisection landing) shows it: the boxes are 0.81 full but half the
+tiles are empty, so the cells sit in dense 2&times;2 clumps with white space around them. After legroute.local has its
+SAT answer and before the final route, a local pass should split the boxes that hold critical cells into the empty
+tiles around them (rounding out the empty area, re-deriving those nets' routes within the tracks the capacity
+guarantees), as a WNS recovery on the critical paths. Even where WNS and routing come out the same, spreading is
+worth keeping: it leaves room for ECOs and lowers the local power density. Evaluate on sha3 and minimax, both
+flavours, after the domino runs finish: WNS / TNS, routed wire, and a measure of spread (cells per occupied tile,
+largest empty run).</p>
+
 <ol>
 <li><strong>Boundary crossings:</strong> done (every crossing modeled, hops spread off loaded rows and
 columns). Next is letting the SAT choose among a few boundary tiles per net when a region still times out.</li>
