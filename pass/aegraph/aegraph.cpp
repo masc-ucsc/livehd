@@ -2302,11 +2302,6 @@ Engine::Replaced Engine::replace(const Member& member, const hhds::Pin_class& ta
       if (gu::closes_loop_self_edge(target, out.sink)) {
         return Replaced::declined;
       }
-      // A Concat lane reader keeps the member when the representative is
-      // declared wider than the lane's window (the Concat contract; see rewire).
-      if (const auto window = concat_lane_window(out.sink); window && gu::bits_of(target) > *window) {
-        return Replaced::declined;
-      }
       // Parallel-edge refusal: if the target ALREADY drives this consumer sink,
       // the reconnect needs a second parallel edge and hhds dedups it, so the
       // consumer would lose an operand (Sum(a,a') = 2a halves to a). And/Or are
@@ -2358,6 +2353,17 @@ Engine::Replaced Engine::replace(const Member& member, const hhds::Pin_class& ta
     target.attr(livehd::attrs::preroute_net_exclude).set();
   }
   for (const auto& out : outs) {
+    // A Concat lane reads a representative declared wider than its window
+    // through Get_mask(target, 0, window) (the Concat contract; see rewire).
+    // Keeping the member instead would leave it on its old operands, which can
+    // be realized through this very lane and close a loop.
+    if (const auto window = concat_lane_window(out.sink); window && !target.is_const() && gu::bits_of(target) > *window) {
+      auto masked = gu::create_get_mask(g_, target, 0, static_cast<int>(*window)).create_driver_pin(0);
+      gu::set_ubits(masked, static_cast<int>(*window));
+      masked.connect_sink(out.sink);
+      ++stats_.lane_masked;
+      continue;
+    }
     target.connect_sink(out.sink);
   }
   node.del_node();
