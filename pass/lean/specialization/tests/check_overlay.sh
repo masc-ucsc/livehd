@@ -144,6 +144,11 @@ if [ $SEMANTIC -eq 1 ]; then
   else
     echo "  FAIL   Translation/OpBridge did not build under lake"; rc=1
   fi
+  if (cd "$ROOT/formal/lean" && lake build LeanSemanticPrimitives.Translation.SraGuard >/dev/null 2>&1); then
+    echo "  ok     Translation/SraGuard (bv_sra_guard_eq_any: the guard on every BV)"
+  else
+    echo "  FAIL   Translation/SraGuard did not build under lake"; rc=1
+  fi
 fi
 
 [ $rc -eq 0 ] && echo "overlay check: OK" || echo "overlay check: FAILED"

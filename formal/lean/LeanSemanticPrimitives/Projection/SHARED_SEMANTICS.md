@@ -70,8 +70,14 @@ the bridge results below.
 
 The per-operator BitVec bridges, re-proved against the repairs:
 `bv_sra_guard_eq` shows the guarded `bv_sra` equals the unguarded formula on
-canonical (`bvenc`) operands, the form both bridges apply it to.  On an
-arbitrary, possibly unnormalised `BV` that equality remains open.
+canonical (`bvenc`) operands, the form both bridges apply it to.
+`Translation/SraGuard.lean` closes the general case: `bv_sra_guard_eq_any`
+proves the same equality on EVERY `BV`, normalised or not, with no hypothesis
+(`bv_sint` reads its argument only through `bv_uint`, which already reduces
+modulo `2 ^ width`), and `bv_sra_guard_eq_of_any` re-derives the canonical
+case from it.  It is a separate file so the pinned `OpBridge.lean` and
+`LGraphModel.lean` stay byte-identical; `LGraphModel.lean`'s docstring still
+says "still open" for that reason.
 
 ## The repairs change no value FP's theorems depend on
 
