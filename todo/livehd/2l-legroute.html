@@ -188,7 +188,9 @@ region meshes at the same core first (regions a quarter larger, then a fifth sma
 after both fail, and its step is <code>place.area_step</code> (0.92) with up to <code>place.area_restarts</code>
 (12) placements. The search from utilization 0 then goes 0.99, 0.91, 0.84, 0.77, 0.71 (boxes do not fit the
 tiles each time) to 0.6525 / 0.7025, where all 15 regions route at fills 0.78 to 0.84: a 3,283 um&sup2; die in
-407 s, 8% above the standard flow's default and 25% below the first push-back's landing. With the coarse 0.8
+407 s, 8% above the standard flow's default and 25% below the first push-back's landing; OpenROAD routes it
+with zero overflow and zero DRCs at DR WNS &minus;346.8 ps / TNS &minus;455.1k, the best sha3 timing of the
+session (the standard flow: &minus;397.1 / &minus;483.1k on its 3,043 um&sup2; default die). With the coarse 0.8
 step it had landed at 0.545 (3,930 um&sup2;, DR WNS &minus;385.2 / TNS &minus;495.4k), worse than the 0.70
 placement on the smaller die: feasibility and quality follow the region cut more than the density. The next
 lever beyond that is the one in the plan: let the SAT choose among a few boundary tiles per crossing, and
