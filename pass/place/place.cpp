@@ -698,7 +698,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.legroute) {
     const auto& l = o.legroute_options;
     h             = hash_text(
-        std::format("legroute-v3:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+        std::format("legroute-v3:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                     l.box_fill,
                     l.box_net_max,
                     l.merge_cost,
@@ -728,11 +728,16 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                     l.steiner_min,
                     l.hop_share,
                     l.hop_spread,
-                    l.sat_seed),
+                    l.sat_seed,
+                    l.tiers,
+                    l.tier_rounds,
+                    l.tier_fraction,
+                    l.tier_batch),
         h);
-    h             = hash_text(std::format("legroute-budgets:{}:{}:{}:{}:{}:{}:{}:{}",
+    h             = hash_text(std::format("legroute-budgets:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                                           l.sat_conflicts,
                                           l.sat_ms,
+                                          l.tier_ms,
                                           l.sat_min_fill,
                                           l.route_access,
                                           l.route_patterns,

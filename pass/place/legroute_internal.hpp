@@ -162,7 +162,8 @@ int   cell_sites(const Design&, const Grid&, int movable);
 bool  box_fits(const Design&, const Grid&, const Box&, int tile);
 
 // ---------------------------------------------------------------- L3 SAT placement
-void pack_cells(const Design&, const Grid&, const Boxes&);  // trivial in-box packing (F1 refines)
+void                     pack_cells(const Design&, const Grid&, const Boxes&);  // trivial in-box packing (F1 refines)
+std::vector<std::string> tier_names(const std::string& tiers);                  // Legroute_options::tiers split, blanks dropped
 
 // ---------------------------------------------------------------- routing model
 struct Vpin {  // a virtual IO pin pair on a boundary tile edge: inside node (tile) -> outside node (tile)

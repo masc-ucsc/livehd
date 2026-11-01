@@ -478,6 +478,11 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_options.capacity_lazy    = integer("place.legroute.capacity_lazy", "2");
   out.legroute_options.freeze           = truthy(synth_set(opts, "place.legroute.freeze", "false"));
   out.legroute_options.sat_seed         = truthy(synth_set(opts, "place.legroute.sat_seed", "true"));
+  out.legroute_options.tiers            = synth_set(opts, "place.legroute.tiers", "adjacent,pins,home");
+  out.legroute_options.tier_rounds      = integer("place.legroute.tier_rounds", "8");
+  out.legroute_options.tier_fraction    = number("place.legroute.tier_fraction", "0.05");
+  out.legroute_options.tier_batch       = integer("place.legroute.tier_batch", "8");
+  out.legroute_options.tier_ms          = integer("place.legroute.tier_ms", "30000");
   out.legroute_probe.tree_congestion    = number("place.legroute.probe.tree_congestion", "1");
   out.legroute_probe.enabled            = truthy(synth_set(opts, "place.legroute.probe", "false"));
   out.legroute_probe.cells              = integer("place.legroute.probe.cells", "1200");

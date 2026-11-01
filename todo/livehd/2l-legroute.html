@@ -282,19 +282,38 @@ columns). Next is letting the SAT choose among a few boundary tiles per net when
 OpenROAD witness) that the boxing pin limit is enough; tighten boxing if not.</li>
 <li><strong>In-box demand.</strong> The 20&ndash;25% H share is an estimate (internal-net spans plus a quarter
 of the external pins); calibrate it against legroute.final's in-box routes.</li>
-<li><strong>Then</strong> the timing tiers, legroute.final speed, and partition_m.</li>
+<li><strong>Timing tiers:</strong> built (three on by default, see below); next are the coupling tier and the
+first/last cell of a critical path at its IO pins, each judged by the routed timing.</li>
+<li><strong>Then</strong> legroute.final speed and partition_m.</li>
 </ol>
 
-<h2>Timing tiers</h2>
-<p>Each tier adds constraints that must stay SAT; it is kept when the proxy improves. The proxy is the
-box-to-box RC only (no in-box taps, no load detail): WNS plus the top x% critical paths, pushed as short as
-possible.</p>
+<h2>Timing tiers (built 2026-10-31)</h2>
+<p>After a region's routable answer, each tier's constraints are tried in batches of 8, most critical first (a
+net is critical for the tiers when its slack rank is under <code>tier_fraction</code>, 5%), with every box held
+on its tile by assumptions, so the answer moves only where a constraint needs it. An UNSAT core loosens the
+held boxes in it (first to within one tile, then free inside their windows); a core with no box drops the
+constraints in it; a batch out of rounds (<code>tier_rounds</code>, 8) is dropped. Kept constraints become
+units for the batches and tiers after, the lazy capacity bounds keep every answer routable, and all tiers
+share <code>tier_ms</code> (30 s) per region, so a dense region keeps its base answer. The tiers
+(<code>place.legroute.tiers</code>, in order; the first three are the default):</p>
 <ol>
-<li>Critical 1-1 nets adjacent (straight).</li>
-<li>Cells connected to a virtual IO pin next to it.</li>
-<li>Critical boxes near their global-placement location.</li>
-<li>Long critical traces take three tracks (metal plus a free track on each side: coupling K=2 to K=1).</li>
+<li><code>adjacent</code>: a critical 1-1 net's two boxes are neighbors (in-box metal, no lane).</li>
+<li><code>pins</code>: a critical net's box on or beside the net's fixed tile (virtual pin, hop, fixed cell).</li>
+<li><code>home</code>: a critical box within one tile of its placement tile.</li>
+<li><code>near</code> (off): a critical connection's two boxes within one tile of each other.</li>
 </ol>
+<p>Measured on sha3 (OpenROAD detailed route of the placement, zero DRCs in every case; the satlegalize
+baseline on the same core is &minus;394.5 ps / &minus;466k): no tiers WNS &minus;395.0 ps / TNS &minus;473.8k;
+adjacent + pins + home with the boxes freed outright on a core and no budget (446 of 675 kept, the densest
+region spending its whole 180 s) &minus;388.0 / &minus;472.0k; the same three tiers with the two-stage
+loosening and the 30 s budget (518 of 675 kept, 67 s wall) &minus;383.6 / &minus;469.7k, the default; with
+<code>near</code> added (1,193 more candidates, 197 kept, the batches starving the tiers after it)
+&minus;415.1 / &minus;478.8k. The proxy (the tier nets' length, &minus;1.1% with near, flat without) did not
+predict any of this: the boxes a batch loosens drift inside their windows, and what they lengthen is not in
+the proxy. So a tier earns its place by the routed timing, not the proxy.</p>
+<p>Still to try as tiers: long critical traces with a free track on each side (coupling), and the first and
+last cell of a critical path aligned with its IO pins. The regions solve in parallel now (one task per region
+and policy), so legroute.local's wall time is the slowest region's (sha3 69 s, minimax 6 s).</p>
 
 <h2>Removed</h2>
 <p>The min-cost snap (LEMON), the RUDY bin spill and PathFinder pattern routing: density targets and

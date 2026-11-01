@@ -78,7 +78,19 @@ struct Legroute_options {
   // a region whose boxes fill at most this fraction of its free tiles is taken as routable without a solve (0: every
   // region solves); the routability probe skips the sparse regions
   double      sat_min_fill    = 0;
-  unsigned    reserved_tracks = 1;  // per layer and tile: pin access, clock and power drops
+  // timing tiers after a routable answer, in this order, each tried in batches of tier_batch constraints, most
+  // critical first, every box held on its tile so the answer moves only where a constraint needs it (an UNSAT core
+  // frees the boxes in it, or drops the constraints in it, at most tier_rounds times per batch): adjacent = a
+  // critical 1-1 net's boxes are neighbors (in-box metal, no lane); pins = the box of a critical net on or next to
+  // the net's fixed tile (virtual pin, hop, fixed cell); home = a critical box within one tile of its placement
+  // tile; near = a critical connection's two boxes within one tile of each other. Critical: a net's slack rank
+  // under tier_fraction. Comma-separated names; empty: no tier
+  std::string tiers           = "adjacent,pins,home";
+  double      tier_fraction   = .05;
+  unsigned    tier_batch      = 8;
+  unsigned    tier_rounds     = 8;
+  unsigned    tier_ms         = 30000;  // per region, all tiers together (within sat_ms)
+  unsigned    reserved_tracks = 1;      // per layer and tile: pin access, clock and power drops
   bool        clock_spine     = true;
   unsigned    rib_tiles       = 4;  // clock rib pitch in tile rows
   // legroute.final: in-box placement, in-box routes, taps and routed wires
@@ -148,6 +160,11 @@ struct Legroute_report {
   size_t  frozen_boxes        = 0;  // freeze: boxes pinned on their fallback tiles
   size_t  sat_seeded          = 0;  // sat_seed: regions whose answer is the fallback placement
   size_t  sat_skipped_regions = 0;  // sat_min_fill: regions taken as routable without a solve
+  // timing tiers: constraints kept, dropped (UNSAT cores), tiers dropped whole (out of time), solves, and the
+  // weighted route length (tiles) of the routable answers before and after the tiers
+  size_t  tier_kept = 0, tier_dropped = 0, tier_timeouts = 0, tier_solves = 0;
+  double  tier_cost_before = 0, tier_cost_after = 0;
+  double  tier_crit_before = 0, tier_crit_after = 0;  // the tier nets' connection length (tiles) before and after
   // per region (grid region id): 0 routable, 1 UNSAT, 2 no answer in time, 3 skipped (sat_min_fill); its boxes and
   // free tiles. unroutable_components: the floorplan components of the regions with status 1 or 2
   struct Region_stat {

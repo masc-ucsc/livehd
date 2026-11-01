@@ -85,6 +85,17 @@ Legroute_options sat_alt_options(const Legroute_options& base) {
   }
   return o;
 }
+std::vector<std::string> tier_names(const std::string& tiers) {
+  std::vector<std::string> names;
+  for (size_t i = 0; i <= tiers.size();) {
+    const size_t j = std::min(tiers.size(), tiers.find(',', i));
+    if (j > i) {
+      names.push_back(tiers.substr(i, j - i));
+    }
+    i = j + 1;
+  }
+  return names;
+}
 }  // namespace lr
 
 void validate_legroute_options(const Legroute_options& o) {
@@ -138,6 +149,14 @@ void validate_legroute_options(const Legroute_options& o) {
   }
   if (!(o.sat_min_fill >= 0 && o.sat_min_fill < 1)) {
     fail("sat_min_fill must be in [0, 1)");
+  }
+  if (!(o.tier_fraction >= 0 && o.tier_fraction <= 1) || !o.tier_batch) {
+    fail("tier_fraction must be in [0, 1] and tier_batch positive");
+  }
+  for (const auto& name : lr::tier_names(o.tiers)) {
+    if (name != "adjacent" && name != "near" && name != "pins" && name != "home") {
+      fail("tiers must name adjacent, near, pins or home");
+    }
   }
   if (!o.sat_alt.empty()) {
     validate_legroute_options(lr::sat_alt_options(o));
@@ -352,7 +371,7 @@ void write_legroute_report(const Legroute_report& r, const std::string& path) {
       R"("mean_cells_per_box":{:.3f},"max_cells_per_box":{},"fill":{:.3f},"internal_nets":{},"external_nets":{},)"
       R"("displacement_um":{:.1f},"max_displacement_um":{:.2f},"spilled_regions":{},"sat_regions":{},"sat_variables":{},)"
       R"("sat_clauses":{},"sat_solves":{},"sat_relaxed_windows":{},"sat_unsat_regions":{},"sat_unknown_regions":{},)"
-      R"("sat_binding_tiles":{},"sat_unjoined_crossings":{},"sat_adjacent_nets":{},"sat_relaxed_tiles":{},"sat_deficit_tracks":{},"crit_pinned":{},"crit_unpinned_regions":{},"crit_cost_before":{:.1f},"crit_cost_after":{:.1f},"tree_nets":{},"tree_boxes":{},"tree_skipped_nets":{},"tree_dropped_regions":{},"tree_tiles_over_half":{},"tree_um_before":{:.1f},"tree_um_after":{:.1f},"tree_max_load":{:.3f},"forced_trees_dropped":{},"forced_crit_unpinned":{},"tree_load_skipped":{},"tree_clauses_before":{},"tree_clauses_after":{},"io_feedthroughs":{},"io_boxes":{},"io_skipped":{},"io_lifted":{},"sat_alt_regions":{},"sat_both_regions":{},"sat_skipped_regions":{},"lazy_rounds":{},"lazy_bounds":{},"lazy_skipped":{},"frozen_boxes":{},"sat_seeded":{},"unroutable_cells":{},)"
+      R"("sat_binding_tiles":{},"sat_unjoined_crossings":{},"sat_adjacent_nets":{},"sat_relaxed_tiles":{},"sat_deficit_tracks":{},"crit_pinned":{},"crit_unpinned_regions":{},"crit_cost_before":{:.1f},"crit_cost_after":{:.1f},"tree_nets":{},"tree_boxes":{},"tree_skipped_nets":{},"tree_dropped_regions":{},"tree_tiles_over_half":{},"tree_um_before":{:.1f},"tree_um_after":{:.1f},"tree_max_load":{:.3f},"forced_trees_dropped":{},"forced_crit_unpinned":{},"tree_load_skipped":{},"tree_clauses_before":{},"tree_clauses_after":{},"io_feedthroughs":{},"io_boxes":{},"io_skipped":{},"io_lifted":{},"sat_alt_regions":{},"sat_both_regions":{},"sat_skipped_regions":{},"tier_kept":{},"tier_dropped":{},"tier_timeouts":{},"tier_solves":{},"tier_cost_before":{:.1f},"tier_cost_after":{:.1f},"tier_crit_before":{:.1f},"tier_crit_after":{:.1f},"lazy_rounds":{},"lazy_bounds":{},"lazy_skipped":{},"frozen_boxes":{},"sat_seeded":{},"unroutable_cells":{},)"
       R"("sat_seconds":{:.3f},"sat_seconds_max":{:.3f},)"
       R"("connections":{},"critical_connections":{},"unassigned_segments":{},)"
       R"("clock_domains":{},"clock_ribs":{},"wire_um":{:.1f},"critical_wire_um":{:.1f},"vias":{},"wires_emitted":{},"route_passes":{},"routed_nets":{},"local_nets":{},"joins":{},"taps":{},)"
@@ -411,6 +430,14 @@ void write_legroute_report(const Legroute_report& r, const std::string& path) {
       r.sat_alt_regions,
       r.sat_both_regions,
       r.sat_skipped_regions,
+      r.tier_kept,
+      r.tier_dropped,
+      r.tier_timeouts,
+      r.tier_solves,
+      r.tier_cost_before,
+      r.tier_cost_after,
+      r.tier_crit_before,
+      r.tier_crit_after,
       r.lazy_rounds,
       r.lazy_bounds,
       r.lazy_skipped,

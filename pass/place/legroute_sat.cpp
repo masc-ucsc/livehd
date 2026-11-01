@@ -1464,7 +1464,7 @@ struct Region_out {
 };
 void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int r, const std::vector<int>& B,
                   const std::vector<int>& T, Boxes& boxes, const std::vector<Net_ends>& ends,
-                  const std::set<std::pair<int, int>>& treed, std::unordered_map<int, std::vector<int>>& allowed,
+                  const std::set<std::pair<int, int>>& treed, const std::unordered_map<int, std::vector<int>>& allowed,
                   const std::vector<char>& pinned_tile, const std::string& tag, const std::vector<int>& cap_h0,
                   const std::vector<int>& cap_v0, const Edge_reserve& reserve, Region_out& out) {
   auto&      rep   = out.rep;
@@ -1548,9 +1548,10 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       }
     }
   }
-  const auto on_track = [&](int b, int t) {
+  std::set<int> lifted;  // boxes taken off their IO track (the track stays reserved, the box is free again)
+  const auto    on_track = [&](int b, int t) {
     const auto it = allowed.find(b);
-    return it == allowed.end() || std::ranges::find(it->second, t) != it->second.end();
+    return it == allowed.end() || lifted.contains(b) || std::ranges::find(it->second, t) != it->second.end();
   };
   // the windows together must hold the boxes (fixed boxes take tiles in clusters, so a few free tiles per window are
   // not enough): grow the windows of the boxes a matching leaves out until every box has a tile
@@ -1659,7 +1660,7 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       break;
     }
     for (size_t i : left) {
-      if (allowed.erase(B[i])) {  // off its IO track: the track stays reserved, the box is free again
+      if (allowed.contains(B[i]) && lifted.insert(B[i]).second) {  // off its IO track
         ++rep.io_lifted;
       }
       win[i] = {std::max(c0, win[i].c0 - 1), std::min(c1, win[i].c1 + 1), std::max(r0, win[i].r0 - 1), std::min(r1, win[i].r1 + 1)};
@@ -1756,7 +1757,7 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
     }
     return it->second;
   };
-  std::vector<int> orient(conns.size()), adjacent(conns.size(), 0);
+  std::vector<int> orient(conns.size()), adjacent(conns.size(), 0), near(conns.size(), 0);
   for (size_t k = 0; k < conns.size(); ++k) {
     const auto& cn  = conns[k];
     const auto& a   = eps[cn.a];
@@ -1786,6 +1787,20 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       }
       cnf.add({-lone, eqc, eqr});
       adjacent[k] = lone;
+    }
+    // a critical connection between two boxes: near may hold only when the boxes are within one tile of each other
+    // in both directions (a tier's literal; the adjacency above also needs a shared row or column)
+    if (a.box >= 0 && b.box >= 0 && !o.tiers.empty() && d.nets[cn.net].rank < o.tier_fraction) {
+      const int nr = cnf.var();
+      for (int i = x0; i <= x1 + 1; ++i) {
+        cnf.add({-nr, -col_ge(a, i + 1), col_ge(b, i)});
+        cnf.add({-nr, -col_ge(b, i + 1), col_ge(a, i)});
+      }
+      for (int j = y0; j <= y1 + 1; ++j) {
+        cnf.add({-nr, -row_ge(a, j + 1), row_ge(b, j)});
+        cnf.add({-nr, -row_ge(b, j + 1), row_ge(a, j)});
+      }
+      near[k] = nr;
     }
     // a leg of zero length takes no track of its direction (same column: the V leg alone covers the tiles)
     const int same_c = cnf.var(), same_r = cnf.var();
@@ -2108,7 +2123,7 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
   // sat_min_fill: a region this empty is taken as routable without a solve (its boxes on their nearest tiles)
   const auto free_tiles     = std::ranges::count_if(T, [&](int t) { return !g.blocked[t]; });
   out.skipped               = o.sat_min_fill > 0 && double(B.size()) <= o.sat_min_fill * double(free_tiles);
-  const auto       deadline = Clock::now() + std::chrono::milliseconds(o.sat_ms);
+  auto             deadline = Clock::now() + std::chrono::milliseconds(o.sat_ms);
   // sat_seed: the fallback placement is tried first (its tile literals assumed); a routable answer there is kept,
   // an UNSAT drops the assumptions and the free model continues with what the solver learned
   std::vector<int> seed;
@@ -2126,16 +2141,18 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       }
     }
   }
-  bool       seeded     = !seed.empty();
-  const auto solve_once = [&] {
-    const auto left = [&] {
-      return unsigned(
-          std::max<long long>(1, std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count()));
-    };
+  bool       seeded  = !seed.empty();
+  const auto left_ms = [&] {
+    return unsigned(std::max<long long>(1, std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count()));
+  };
+  // one solve under the bounds' assumptions, the seed (dropped on its first UNSAT) and extra assumptions
+  const auto solve_with = [&](const std::vector<int>& extra) {
+    std::vector<int> a = assume;
+    a.insert(a.end(), extra.begin(), extra.end());
     if (seeded) {
-      std::vector<int> a = assume;
-      a.insert(a.end(), seed.begin(), seed.end());
-      const auto st = cnf.solver.solve(a, o.sat_conflicts, left());
+      std::vector<int> b = a;
+      b.insert(b.end(), seed.begin(), seed.end());
+      const auto st = cnf.solver.solve(b, o.sat_conflicts, left_ms());
       ++rep.sat_solves;
       if (st != Sat_status::unsatisfiable) {
         return st;
@@ -2143,85 +2160,82 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       seeded = false;
     }
     ++rep.sat_solves;
-    return cnf.solver.solve(assume, o.sat_conflicts, left());
+    return cnf.solver.solve(a, o.sat_conflicts, left_ms());
   };
-  Sat_status status = out.skipped ? Sat_status::unknown : solve_once();
-  out.status        = status;
-  if (lazy.empty() && status == Sat_status::satisfiable && seeded) {
-    ++rep.sat_seeded;
-  }
-  if (!lazy.empty() && !out.skipped) {
-    // the answer's decoded legs (connections, Steiner trunks and ribs) and occupants against the lazy bounds: an
-    // overflowed bound is added and the model solved again, incrementally, until no bound overflows, UNSAT or the
-    // time is out. The answer kept is overflow-free on every bound, lazy or not.
-    const auto decoded = [&] {
-      std::map<std::pair<int, int>, std::set<int>> covers;  // (tile, h) -> nets whose legs cover it
-      std::vector<int>                             at_box(B.size(), -1);
-      for (size_t i = 0; i < B.size(); ++i) {
-        for (const auto& [t, p] : tiles_of[i]) {
-          if (cnf.solver.value(p)) {
-            at_box[i] = t;
-          }
+  // the answer's decoded legs (connections, Steiner trunks and ribs) per tile and direction
+  const auto decoded = [&] {
+    std::map<std::pair<int, int>, std::set<int>> covers;  // (tile, h) -> nets whose legs cover it
+    std::vector<int>                             at_box(B.size(), -1);
+    for (size_t i = 0; i < B.size(); ++i) {
+      for (const auto& [t, p] : tiles_of[i]) {
+        if (cnf.solver.value(p)) {
+          at_box[i] = t;
         }
       }
-      const auto ep_tile = [&](const Endpoint& e) { return e.box >= 0 ? at_box[size_t(slot.at(e.box))] : e.tile; };
-      const auto hcover  = [&](int n, int c1, int c2, int rr) {
-        for (int i = std::min(c1, c2); i <= std::max(c1, c2); ++i) {
-          covers[{g.tile(i, rr), 1}].insert(n);
-        }
-      };
-      const auto vcover = [&](int n, int cc, int r1, int r2) {
-        for (int j = std::min(r1, r2); j <= std::max(r1, r2); ++j) {
-          covers[{g.tile(cc, j), 0}].insert(n);
-        }
-      };
-      for (size_t k = 0; k < conns.size(); ++k) {
-        if (adjacent[k] && cnf.solver.value(adjacent[k])) {
-          continue;
-        }
-        const int  ta = ep_tile(eps[size_t(conns[k].a)]), tb = ep_tile(eps[size_t(conns[k].b)]);
-        const bool hf = cnf.solver.value(orient[k]);
-        const int  hr = hf ? g.row(ta) : g.row(tb), vc = hf ? g.col(tb) : g.col(ta);
-        if (g.col(ta) != g.col(tb)) {
-          hcover(conns[k].net, g.col(ta), g.col(tb), hr);
-        }
-        if (g.row(ta) != g.row(tb)) {
-          vcover(conns[k].net, vc, g.row(ta), g.row(tb));
-        }
+    }
+    const auto ep_tile = [&](const Endpoint& e) { return e.box >= 0 ? at_box[size_t(slot.at(e.box))] : e.tile; };
+    const auto hcover  = [&](int n, int c1, int c2, int rr) {
+      for (int i = std::min(c1, c2); i <= std::max(c1, c2); ++i) {
+        covers[{g.tile(i, rr), 1}].insert(n);
       }
-      for (const auto& st : steiner) {
-        const bool ht   = cnf.solver.value(st.h_trunk);
-        int        axis = ht ? st.y0 : st.x0;
-        for (int lit : (ht ? st.row_ge : st.col_ge)) {
-          axis += cnf.solver.value(lit) ? 1 : 0;
-        }
-        int lo = INT32_MAX, hi = INT32_MIN;
-        for (int k = 0; k < st.count; ++k) {
-          const int t     = ep_tile(eps[size_t(st.first + k)]);
-          const int along = ht ? g.col(t) : g.row(t), across = ht ? g.row(t) : g.col(t);
-          lo = std::min(lo, along);
-          hi = std::max(hi, along);
-          if (across != axis) {
-            if (ht) {
-              vcover(st.net, g.col(t), g.row(t), axis);
-            } else {
-              hcover(st.net, g.col(t), axis, g.row(t));
-            }
-          }
-        }
-        if (lo != hi) {
-          if (ht) {
-            hcover(st.net, lo, hi, axis);
-          } else {
-            vcover(st.net, axis, lo, hi);
-          }
-        }
-      }
-      return std::pair{covers, at_box};
     };
-    unsigned rounds      = 0;
-    size_t   added_total = 0;
-    while (status == Sat_status::satisfiable) {
+    const auto vcover = [&](int n, int cc, int r1, int r2) {
+      for (int j = std::min(r1, r2); j <= std::max(r1, r2); ++j) {
+        covers[{g.tile(cc, j), 0}].insert(n);
+      }
+    };
+    for (size_t k = 0; k < conns.size(); ++k) {
+      if (adjacent[k] && cnf.solver.value(adjacent[k])) {
+        continue;
+      }
+      const int  ta = ep_tile(eps[size_t(conns[k].a)]), tb = ep_tile(eps[size_t(conns[k].b)]);
+      const bool hf = cnf.solver.value(orient[k]);
+      const int  hr = hf ? g.row(ta) : g.row(tb), vc = hf ? g.col(tb) : g.col(ta);
+      if (g.col(ta) != g.col(tb)) {
+        hcover(conns[k].net, g.col(ta), g.col(tb), hr);
+      }
+      if (g.row(ta) != g.row(tb)) {
+        vcover(conns[k].net, vc, g.row(ta), g.row(tb));
+      }
+    }
+    for (const auto& st : steiner) {
+      const bool ht   = cnf.solver.value(st.h_trunk);
+      int        axis = ht ? st.y0 : st.x0;
+      for (int lit : (ht ? st.row_ge : st.col_ge)) {
+        axis += cnf.solver.value(lit) ? 1 : 0;
+      }
+      int lo = INT32_MAX, hi = INT32_MIN;
+      for (int k = 0; k < st.count; ++k) {
+        const int t     = ep_tile(eps[size_t(st.first + k)]);
+        const int along = ht ? g.col(t) : g.row(t), across = ht ? g.row(t) : g.col(t);
+        lo = std::min(lo, along);
+        hi = std::max(hi, along);
+        if (across != axis) {
+          if (ht) {
+            vcover(st.net, g.col(t), g.row(t), axis);
+          } else {
+            hcover(st.net, g.col(t), axis, g.row(t));
+          }
+        }
+      }
+      if (lo != hi) {
+        if (ht) {
+          hcover(st.net, lo, hi, axis);
+        } else {
+          vcover(st.net, axis, lo, hi);
+        }
+      }
+    }
+    return std::pair{covers, at_box};
+  };
+  unsigned   lazy_rounds = 0;
+  size_t     lazy_added  = 0;
+  // settle: solve under extra assumptions; an answer that overflows a lazy bound adds the bound and solves again,
+  // incrementally, until no bound overflows, UNSAT or the time is out. The answer kept is overflow-free on every
+  // bound, lazy or not
+  const auto settle      = [&](const std::vector<int>& extra) {
+    Sat_status st = solve_with(extra);
+    while (st == Sat_status::satisfiable && !lazy.empty()) {
       const auto  dec    = decoded();
       const auto& covers = dec.first;
       size_t      added  = 0;
@@ -2247,30 +2261,289 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       if (!added) {
         break;
       }
-      added_total += added;
-      ++rounds;
-      const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count();
-      if (left <= 0) {
-        status = Sat_status::unknown;
+      lazy_added += added;
+      ++lazy_rounds;
+      if (Clock::now() >= deadline) {
+        st = Sat_status::unknown;
         break;
       }
-      status = solve_once();
+      st = solve_with(extra);
     }
-    out.status        = status;
-    rep.sat_seeded   += status == Sat_status::satisfiable && seeded;
-    rep.lazy_rounds  += rounds;
-    rep.lazy_bounds  += added_total;
-    rep.lazy_skipped += size_t(std::ranges::count_if(lazy, [](const Lazy& L) { return !L.xs.empty(); }));
+    return st;
+  };
+  // the answer: the boxes' tiles, the connections with their shapes (neighbor boxes of a 1-1 net: in-box metal, no
+  // lane), the trees as straight trunk pieces between the ribs' feet and straight ribs. Decoded after every routable
+  // solve, so a tier that fails later leaves the last routable answer
+  size_t     adjacent_nets = 0;
+  const auto decode_answer = [&] {
+    out.conns.clear();
+    out.local.clear();
+    adjacent_nets = 0;
+    for (size_t i = 0; i < B.size(); ++i) {
+      for (const auto& [t, p] : tiles_of[i]) {
+        if (cnf.solver.value(p)) {
+          boxes.boxes[B[i]].tile = t;
+          break;
+        }
+      }
+    }
+    for (size_t k = 0; k < conns.size(); ++k) {
+      const auto& cn = conns[k];
+      const auto  ta = eps[cn.a].box >= 0 ? boxes.boxes[eps[cn.a].box].tile : eps[cn.a].tile;
+      const auto  tb = eps[cn.b].box >= 0 ? boxes.boxes[eps[cn.b].box].tile : eps[cn.b].tile;
+      if (adjacent[k] && cnf.solver.value(adjacent[k])) {
+        out.local.push_back(cn.net);
+        ++adjacent_nets;
+        continue;
+      }
+      out.conns.push_back({cn.net, ta, tb, static_cast<bool>(cnf.solver.value(orient[k]))});
+    }
+    for (const auto& st : steiner) {
+      const bool  ht   = cnf.solver.value(st.h_trunk);
+      const auto& v    = ht ? st.row_ge : st.col_ge;
+      int         axis = ht ? st.y0 : st.x0;
+      for (int lit : v) {
+        axis += cnf.solver.value(lit) ? 1 : 0;
+      }
+      std::vector<int> feet;  // along coordinate of each rib's foot on the trunk
+      for (int k = 0; k < st.count; ++k) {
+        const auto& e    = eps[size_t(st.first + k)];
+        const int   t    = e.box >= 0 ? boxes.boxes[e.box].tile : e.tile;
+        const int   foot = ht ? g.tile(g.col(t), axis) : g.tile(axis, g.row(t));
+        if (foot != t) {
+          out.conns.push_back({st.net, t, foot, ht});
+        }
+        feet.push_back(ht ? g.col(t) : g.row(t));
+      }
+      std::ranges::sort(feet);
+      feet.erase(std::unique(feet.begin(), feet.end()), feet.end());
+      for (size_t k = 1; k < feet.size(); ++k) {
+        const int ta = ht ? g.tile(feet[k - 1], axis) : g.tile(axis, feet[k - 1]);
+        const int tb = ht ? g.tile(feet[k], axis) : g.tile(axis, feet[k]);
+        out.conns.push_back({st.net, ta, tb, ht});
+      }
+    }
+  };
+  // the timing proxy: weighted route length (tiles) of the answer's connections, and the plain length of the tier
+  // nets' connections (slack rank under tier_fraction)
+  const auto route_cost = [&](double& crit) {
+    double c = 0;
+    crit     = 0;
+    for (const auto& pc : out.conns) {
+      const double len  = double(std::abs(g.col(pc.ta) - g.col(pc.tb)) + std::abs(g.row(pc.ta) - g.row(pc.tb)));
+      c                += d.nets[pc.net].weight * len;
+      crit             += d.nets[pc.net].rank < o.tier_fraction ? len : 0;
+    }
+    return c;
+  };
+  Sat_status status = out.skipped ? Sat_status::unknown : settle({});
+  out.status        = status;
+  if (status == Sat_status::satisfiable) {
+    rep.sat_seeded += seeded;  // the answer is the fallback placement
+    decode_answer();
+  }
+  if (!lazy.empty() && !out.skipped) {
     std::fprintf(stderr,
                  "legroute sat region %d lazy: rounds %u, bounds added %zu of %zu, clauses %zu (eager estimate %zu)%s\n",
                  r,
-                 rounds,
-                 added_total,
+                 lazy_rounds,
+                 lazy_added,
                  lazy.size(),
                  cnf.clauses,
                  cl_conn + cap_est,
                  tag.c_str());
   }
+  // ---- timing tiers: on a routable answer, each tier's constraints are tried in batches, most critical first, with
+  // every box held on its tile by assumptions, so the answer moves only where a constraint needs it: an UNSAT core
+  // frees the held boxes in it, or drops the constraints in it when it holds no box; a batch out of rounds or time
+  // is dropped. Kept constraints become units for the batches and tiers after
+  if (status == Sat_status::satisfiable && !o.sat_relax_rounds && !o.tiers.empty()) {
+    seeded                = false;  // the fallback seed gives way to the current answer's tiles
+    deadline              = std::min(deadline, Clock::now() + std::chrono::milliseconds(o.tier_ms));
+    double crit_len       = 0;
+    rep.tier_cost_before += route_cost(crit_len);
+    rep.tier_crit_before += crit_len;
+    const auto tile_lit   = [&](size_t i, int t) {  // the box's literal on tile t, 0 when it cannot be there
+      for (const auto& [q, p] : tiles_of[i]) {
+        if (q == t) {
+          return p;
+        }
+      }
+      return 0;
+    };
+    // the box's tile literals within one tile of t: on or beside it (Manhattan), or any neighbor (Chebyshev)
+    const auto near_lits = [&](size_t i, int t, bool diagonal) {
+      std::vector<int> lits;
+      for (const auto& [q, p] : tiles_of[i]) {
+        const int dc = std::abs(g.col(q) - g.col(t)), dr = std::abs(g.row(q) - g.row(t));
+        if (diagonal ? std::max(dc, dr) <= 1 : dc + dr <= 1) {
+          lits.push_back(p);
+        }
+      }
+      return lits;
+    };
+    const auto implies_any = [&](const std::vector<int>& lits) {  // a fresh literal that forces one of lits
+      const int        v = cnf.var();
+      std::vector<int> cl{-v};
+      cl.insert(cl.end(), lits.begin(), lits.end());
+      cnf.add(cl);
+      return v;
+    };
+    std::map<std::pair<size_t, int>, int> near_cache;  // (box index, tile) -> the literal holding it within one tile
+    const auto                            near_lit = [&](size_t i, int t) {
+      auto [it, fresh] = near_cache.try_emplace({i, t}, 0);
+      if (fresh) {
+        const auto lits = near_lits(i, t, true);
+        it->second      = lits.empty() ? 0 : implies_any(lits);
+      }
+      return it->second;
+    };
+    const auto box_rank = [&](int b) {  // the slack rank of the box's most critical routed net
+      double rk = 1;
+      for (int c : boxes.boxes[b].cells) {
+        for (int n : d.nets_of[size_t(c)]) {
+          if (d.nets[n].routed) {
+            rk = std::min(rk, d.nets[n].rank);
+          }
+        }
+      }
+      return rk;
+    };
+    struct Cand {
+      double rank;
+      int    lit;
+    };
+    for (const auto& name : tier_names(o.tiers)) {
+      std::vector<Cand> cands;
+      if (name == "adjacent") {  // a critical 1-1 net between two boxes: neighbors
+        for (size_t k = 0; k < conns.size(); ++k) {
+          if (adjacent[k] && d.nets[conns[k].net].rank < o.tier_fraction) {
+            cands.push_back({d.nets[conns[k].net].rank, adjacent[k]});
+          }
+        }
+      } else if (name == "near") {  // a critical connection's boxes within one tile of each other
+        for (size_t k = 0; k < conns.size(); ++k) {
+          if (near[k]) {
+            cands.push_back({d.nets[conns[k].net].rank, near[k]});
+          }
+        }
+      } else if (name == "pins") {           // a critical net's box on or beside the net's fixed tile
+        std::set<std::pair<int, int>> seen;  // (box, fixed tile)
+        for (size_t k = 0; k < conns.size(); ++k) {
+          const auto& a = eps[size_t(conns[k].a)];
+          const auto& b = eps[size_t(conns[k].b)];
+          if ((a.box < 0) == (b.box < 0) || d.nets[conns[k].net].rank >= o.tier_fraction) {
+            continue;
+          }
+          const int bx = a.box >= 0 ? a.box : b.box, pin = a.box < 0 ? a.tile : b.tile;
+          if (boxes.boxes[bx].fixed || !seen.emplace(bx, pin).second) {
+            continue;
+          }
+          if (const auto lits = near_lits(size_t(slot.at(bx)), pin, false); !lits.empty()) {
+            cands.push_back({d.nets[conns[k].net].rank, implies_any(lits)});
+          }
+        }
+      } else if (name == "home") {  // a critical box within one tile of its placement tile
+        for (size_t i = 0; i < B.size(); ++i) {
+          const auto&  box = boxes.boxes[B[i]];
+          const double rk  = box_rank(B[i]);
+          if (box.fixed || rk >= o.tier_fraction) {
+            continue;
+          }
+          if (const auto lits = near_lits(i, g.tile_of(box.cx, box.cy), true); !lits.empty()) {
+            cands.push_back({rk, implies_any(lits)});
+          }
+        }
+      }
+      if (cands.empty()) {
+        continue;
+      }
+      std::ranges::stable_sort(cands, {}, &Cand::rank);
+      size_t   kept_n = 0, batches = 0, solves = 0;
+      unsigned rounds_total = 0;
+      bool     timed_out    = false;
+      for (size_t at = 0; at < cands.size() && !timed_out; at += std::max(1u, o.tier_batch), ++batches) {
+        std::vector<int> active;
+        for (size_t k = at; k < std::min(cands.size(), at + std::max(1u, o.tier_batch)); ++k) {
+          active.push_back(cands[k].lit);
+        }
+        // boxes held on their current tiles (2), then within one tile of them (1), then free (0)
+        std::vector<char> held(B.size(), 2);
+        std::vector<int>  hold(B.size(), 0);  // the literal holding each box this round
+        Sat_status        st     = Sat_status::unknown;
+        unsigned          rounds = 0;
+        for (; rounds <= o.tier_rounds && !active.empty(); ++rounds) {
+          if (Clock::now() >= deadline) {
+            st = Sat_status::unknown;
+            break;
+          }
+          std::vector<int> extra = active;
+          for (size_t i = 0; i < B.size(); ++i) {
+            const int t = boxes.boxes[B[i]].tile;
+            hold[i]     = held[i] == 2 ? tile_lit(i, t) : held[i] == 1 ? near_lit(i, t) : 0;
+            if (hold[i]) {
+              extra.push_back(hold[i]);
+            }
+          }
+          st = settle(extra);
+          ++solves;
+          if (st != Sat_status::unsatisfiable) {
+            break;
+          }
+          size_t loosened = 0;  // the core: the held boxes in it get a tile of room, then go free
+          for (size_t i = 0; i < B.size(); ++i) {
+            if (hold[i] && cnf.solver.failed(hold[i])) {
+              --held[i];
+              ++loosened;
+            }
+          }
+          if (loosened) {
+            continue;
+          }
+          std::vector<int> rest;  // no box to free: the constraints in the core go
+          for (int v : active) {
+            if (!cnf.solver.failed(v)) {
+              rest.push_back(v);
+            }
+          }
+          if (rest.size() == active.size()) {
+            rest.clear();
+          }
+          active.swap(rest);
+        }
+        rounds_total += rounds;
+        if (st == Sat_status::satisfiable && !active.empty()) {  // the answer first: a clause invalidates the model
+          decode_answer();
+          for (int v : active) {
+            cnf.add({v});
+          }
+          kept_n += active.size();
+        } else {
+          timed_out = st == Sat_status::unknown;
+        }
+      }
+      rep.tier_kept     += kept_n;
+      rep.tier_dropped  += cands.size() - kept_n;
+      rep.tier_timeouts += timed_out;
+      rep.tier_solves   += solves;
+      std::fprintf(stderr,
+                   "legroute sat region %d tier %s: kept %zu of %zu, batches %zu, rounds %u, solves %zu%s%s\n",
+                   r,
+                   name.c_str(),
+                   kept_n,
+                   cands.size(),
+                   batches,
+                   rounds_total,
+                   solves,
+                   timed_out ? ", out of time" : "",
+                   tag.c_str());
+    }
+    rep.tier_cost_after += route_cost(crit_len);
+    rep.tier_crit_after += crit_len;
+  }
+  rep.lazy_rounds  += lazy_rounds;
+  rep.lazy_bounds  += lazy_added;
+  rep.lazy_skipped += size_t(std::ranges::count_if(lazy, [](const Lazy& L) { return !L.xs.empty(); }));
   if (status == Sat_status::unsatisfiable && o.sat_relax_rounds) {
     // diagnostic: what would make the region routable. Drop the tile bounds of each UNSAT core until it solves; the
     // answer's demand on the dropped tiles over their tracks is the deficit (the region stays unrouted)
@@ -2422,52 +2695,8 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
     }
     return;
   }
-  for (size_t i = 0; i < B.size(); ++i) {
-    for (const auto& [t, p] : tiles_of[i]) {
-      if (cnf.solver.value(p)) {
-        boxes.boxes[B[i]].tile = t;
-        break;
-      }
-    }
-  }
-  // the connections with their shapes
-  for (size_t k = 0; k < conns.size(); ++k) {
-    const auto& cn = conns[k];
-    const auto  ta = eps[cn.a].box >= 0 ? boxes.boxes[eps[cn.a].box].tile : eps[cn.a].tile;
-    const auto  tb = eps[cn.b].box >= 0 ? boxes.boxes[eps[cn.b].box].tile : eps[cn.b].tile;
-    if (adjacent[k] && cnf.solver.value(adjacent[k])) {  // neighbor boxes: in-box metal, no lane
-      out.local.push_back(cn.net);
-      ++rep.sat_adjacent_nets;
-      continue;
-    }
-    out.conns.push_back({cn.net, ta, tb, static_cast<bool>(cnf.solver.value(orient[k]))});
-  }
-  for (const auto& st : steiner) {  // the trees: straight trunk pieces between the ribs' feet, straight ribs
-    const bool  ht   = cnf.solver.value(st.h_trunk);
-    const auto& v    = ht ? st.row_ge : st.col_ge;
-    int         axis = ht ? st.y0 : st.x0;
-    for (int lit : v) {
-      axis += cnf.solver.value(lit) ? 1 : 0;
-    }
-    std::vector<int> feet;  // along coordinate of each rib's foot on the trunk
-    for (int k = 0; k < st.count; ++k) {
-      const auto& e    = eps[size_t(st.first + k)];
-      const int   t    = e.box >= 0 ? boxes.boxes[e.box].tile : e.tile;
-      const int   foot = ht ? g.tile(g.col(t), axis) : g.tile(axis, g.row(t));
-      if (foot != t) {
-        out.conns.push_back({st.net, t, foot, ht});
-      }
-      feet.push_back(ht ? g.col(t) : g.row(t));
-    }
-    std::ranges::sort(feet);
-    feet.erase(std::unique(feet.begin(), feet.end()), feet.end());
-    for (size_t k = 1; k < feet.size(); ++k) {
-      const int ta = ht ? g.tile(feet[k - 1], axis) : g.tile(axis, feet[k - 1]);
-      const int tb = ht ? g.tile(feet[k], axis) : g.tile(axis, feet[k]);
-      out.conns.push_back({st.net, ta, tb, ht});
-    }
-  }
-  rep.sat_seconds += secs;
+  rep.sat_adjacent_nets += adjacent_nets;
+  rep.sat_seconds       += secs;
   for (int b : B) {
     out.tiles.emplace_back(b, boxes.boxes[b].tile);
   }
@@ -2966,85 +3195,61 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
     for (int t = 0; t < int(g.size()); ++t) {
       region_tiles[g.region[t]].push_back(t);
     }
-    for (int r = 0; r < g.regions; ++r) {
-      std::vector<Region_out> outs(policies.size());
-      const auto              run = [&](size_t p) {
-        auto&      Q     = P[p];
-        auto&      out   = outs[p];
-        const auto start = Clock::now();
-        solve_region(d,
-                     policies[p],
-                     g,
-                     r,
-                     region_boxes[r],
-                     region_tiles[r],
-                     Q.boxes,
-                     x.ends,
-                     Q.treed,
-                     Q.allowed,
-                     Q.pinned_tile,
-                     policies.size() > 1 ? std::format(" policy {}", p) : "",
-                     cap_h0,
-                     cap_v0,
-                     Q.reserve,
-                     out);
-        out.seconds = seconds_since(start);
-        for (const auto& ft : Q.trees) {  // the policy's fixed trees and IO pre-routes in the region
-          for (const auto& piece : ft.pieces) {
-            if (!ft.dropped && piece.region == r) {
-              out.conns.push_back({piece.net, piece.a, piece.b, true});
-            }
-          }
-        }
-        for (const auto& io : Q.io_routes) {  // (a box off its lifted track bends to it)
-          if (io.region != r) {
-            continue;
-          }
-          if (io.box < 0) {
-            out.conns.push_back({io.net_a, io.ta, io.tb, io.h_first});
-          } else {
-            out.conns.push_back({io.net_a, io.ta, Q.boxes.boxes[io.box].tile, io.h_first});
-            out.conns.push_back({io.net_b, Q.boxes.boxes[io.box].tile, io.tb, io.h_first});
-          }
-        }
-        for (const auto& c : out.conns) {  // the timing proxy: weighted route length (tiles)
-          out.cost += d.nets[c.net].weight * double(std::abs(g.col(c.ta) - g.col(c.tb)) + std::abs(g.row(c.ta) - g.row(c.tb)));
-        }
-      };
-      if (policies.size() == 1) {
-        run(0);
-      } else {  // an exception in a policy's thread comes back here
-        std::vector<std::exception_ptr> errors(policies.size());
-        std::vector<std::jthread>       threads;
-        for (size_t p = 0; p < policies.size(); ++p) {
-          threads.emplace_back([&, p] {
-            try {
-              run(p);
-            } catch (...) {
-              errors[p] = std::current_exception();
-            }
-          });
-        }
-        for (auto& t : threads) {
-          t.join();
-        }
-        for (const auto& e : errors) {
-          if (e) {
-            std::rethrow_exception(e);
+    // every (region, policy) solve is a task: the regions are independent once the hops are fixed
+    lr::parallel(size_t(g.regions) * policies.size(), d.opt.threads, [&](size_t task) {
+      const int    r     = int(task / policies.size());
+      const size_t p     = task % policies.size();
+      auto&        Q     = P[p];
+      auto&        out   = last[p][r];
+      const auto   start = Clock::now();
+      solve_region(d,
+                   policies[p],
+                   g,
+                   r,
+                   region_boxes[r],
+                   region_tiles[r],
+                   Q.boxes,
+                   x.ends,
+                   Q.treed,
+                   Q.allowed,
+                   Q.pinned_tile,
+                   policies.size() > 1 ? std::format(" policy {}", p) : "",
+                   cap_h0,
+                   cap_v0,
+                   Q.reserve,
+                   out);
+      out.seconds = seconds_since(start);
+      for (const auto& ft : Q.trees) {  // the policy's fixed trees and IO pre-routes in the region
+        for (const auto& piece : ft.pieces) {
+          if (!ft.dropped && piece.region == r) {
+            out.conns.push_back({piece.net, piece.a, piece.b, true});
           }
         }
       }
-      // a routable answer first, then the lower cost; no answer: the first policy's fallback
+      for (const auto& io : Q.io_routes) {  // (a box off its lifted track bends to it)
+        if (io.region != r) {
+          continue;
+        }
+        if (io.box < 0) {
+          out.conns.push_back({io.net_a, io.ta, io.tb, io.h_first});
+        } else {
+          out.conns.push_back({io.net_a, io.ta, Q.boxes.boxes[io.box].tile, io.h_first});
+          out.conns.push_back({io.net_b, Q.boxes.boxes[io.box].tile, io.tb, io.h_first});
+        }
+      }
+      for (const auto& c : out.conns) {  // the timing proxy: weighted route length (tiles)
+        out.cost += d.nets[c.net].weight * double(std::abs(g.col(c.ta) - g.col(c.tb)) + std::abs(g.row(c.ta) - g.row(c.tb)));
+      }
+    });
+    for (int r = 0; r < g.regions; ++r) {  // a routable answer first, then the lower cost; none: the first policy's
       int best = -1;
-      for (int p = 0; p < int(outs.size()); ++p) {
-        if (outs[p].status == Sat_status::satisfiable && (best < 0 || outs[p].cost < outs[best].cost)) {
+      for (int p = 0; p < int(policies.size()); ++p) {
+        if (last[size_t(p)][r].status == Sat_status::satisfiable
+            && (best < 0 || last[size_t(p)][r].cost < last[size_t(best)][r].cost)) {
           best = p;
         }
       }
       chosen[r] = std::max(best, 0);
-      for (size_t p = 0; p < outs.size(); ++p) {
-        last[p][r] = std::move(outs[p]);
-      }
     }
   }
   // ---- the chosen answers: tiles, counters, connections
@@ -3135,6 +3340,14 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
     rep.lazy_skipped        += q.lazy_skipped;
     rep.frozen_boxes        += q.frozen_boxes;
     rep.sat_seeded          += q.sat_seeded;
+    rep.tier_kept           += q.tier_kept;
+    rep.tier_dropped        += q.tier_dropped;
+    rep.tier_timeouts       += q.tier_timeouts;
+    rep.tier_solves         += q.tier_solves;
+    rep.tier_cost_before    += q.tier_cost_before;
+    rep.tier_cost_after     += q.tier_cost_after;
+    rep.tier_crit_before    += q.tier_crit_before;
+    rep.tier_crit_after     += q.tier_crit_after;
     {  // per region: its answer, and the cells of a region without a routable answer
       Legroute_report::Region_stat st;
       st.status = out.skipped ? 3 : out.status == Sat_status::satisfiable ? 0 : out.status == Sat_status::unsatisfiable ? 1 : 2;
