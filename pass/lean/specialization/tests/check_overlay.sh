@@ -127,10 +127,14 @@ check_hash Compiler/Runtime.lean        "$EXPECTED_RUNTIME_SHA256"
 
 if [ $SEMANTIC -eq 1 ]; then
   echo "-- the bridge theorems, rebuilt"
-  if (cd "$ROOT/formal/lean" && bash .build-proj.sh SemanticPrimitives Translation/LGraphModel \
-        Translation/FastBV Translation/GraphRefine Compiler/DesignCert Compiler/Runtime Compiler/DesignCertWF \
-        Compiler/DesignSemantics Projection/ObjectLanguage Projection/ObjectLanguageSemantics \
-        Projection/OperatorBridge) | grep -q 'Projection/OperatorBridge *ok'; then
+  # OperatorBridge's whole import closure, in dependency order: .build-proj.sh builds
+  # only what it is given, so a missing import passed only when an earlier full
+  # build had left its .olean behind.
+  if (cd "$ROOT/formal/lean" && bash .build-proj.sh Projection/ObjectLanguage Projection/BindingTime \
+        Projection/Encoding SemanticPrimitives Translation/LGraphModel Compiler/DesignCert \
+        Projection/DesignEncoding Translation/FastBV Projection/ObjectLanguageSemantics Translation/GraphRefine \
+        Compiler/DesignCertWF Compiler/Runtime Compiler/DesignSemantics Projection/SimulatorContract \
+        Projection/RuntimeEncoding Projection/OperatorBridge) | grep -q 'Projection/OperatorBridge *ok'; then
     echo "  ok     Projection/OperatorBridge (bv_shl_step_unfolds, evalOp_SHL/denoteOp_SHL_unchanged_by_overlay, evalOp_Sext)"
   else
     echo "  FAIL   Projection/OperatorBridge did not build"; rc=1
