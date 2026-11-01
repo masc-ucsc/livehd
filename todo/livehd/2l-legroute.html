@@ -552,7 +552,15 @@ it per net. Charging own-region edges in the global router (<code>legroute.globa
 not help. The fixes, in order: (1) the SAT chooses each crossing net's hop among a few boundary tiles (the plan item
 below), with the cut bound counting only what no choice avoids; (2) <code>region.cut=ratio</code> (landed, off by default):
 no forced lines, each split picks the axis and position whose children have the lowest worst internal cut over the
-tracks across it, from the routing stack's pitches; (3) more of M2 credited to the global routes.</p>
+tracks across it, from the routing stack's pitches; (3) more of M2 credited to the global routes. With the ratio cut the
+searches still find no all-regions point for either usyn flavour: the relax diagnostic on the domino run at 0.50 (region
+2, 16&times;62 tiles, 746 boxes, 2,139 nets, 9 pass-throughs, unsat in 365 s while the other 8 regions solve in 32&ndash;139
+s) names two horizontal edges at tiles holding a fixed endpoint, 7 tracks left after the routes fixed ahead and 34 nets
+needing them (deficit 27, worst 17); relaxing those two bounds makes it SAT. One hot boundary tile where a fan-out
+converges on the hop chosen ahead: the hop choice is the fix, not capacity. Proposed form: solve the regions in two
+waves of a checkerboard; a region of the first wave chooses each crossing net's hop among a few boundary tiles (tile
+literals on the boundary, the cut bound counting only what no choice avoids), its choice is then the fixed endpoint
+for the neighbour in the second wave.</p>
 
 <p><strong>Next (user, 2026-11-01): spread cell-boxes into the empty tiles as a local path recovery.</strong> A
 placement at utilization 0.50 (sha3 usyn domino, bisection landing) shows it: the boxes are 0.81 full but half the
