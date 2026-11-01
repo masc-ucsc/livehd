@@ -37,6 +37,8 @@ open Compiler Compiler.ReifyProof
 #guard exprRefsTyped (.rsum 8 1 #[4, 7, 2]) == #[(4, false), (7, false), (2, false)]
 #guard exprRefsTyped (.rnot 8 5) == #[(5, false)]
 #guard exprRefsTyped (.rgetMask 8 6 7) == #[(6, false), (7, false)]
+#guard exprRefsTyped (.rsdiv 8 6 7) == #[(6, false), (7, false)]
+#guard exprRefsTyped (.rsetMask 8 5 6 7) == #[(5, false), (6, false), (7, false)]
 
 --------------------------------------------------------------------------------
 -- The fixture: a chain, a diamond, an early-dead value, a terminal-only output

@@ -70,9 +70,9 @@ be unreachable:
     division whose signedness is ungrounded.
 
 Accepting an operator here does not make the direct compiler LOWER it:
-`compileOp` refuses `Op_UDiv`, `Op_SDiv` and `Op_SetMask` itself, while the
-projection's memory route admits through this checker and executes the
-operators its own `OpSupported` names.
+`compileOp` keeps its own list (it lowers `Op_UDiv`, `Op_SDiv` and `Op_SetMask`
+too, which it once refused), while the projection's memory route admits through
+this checker and executes the operators its own `OpSupported` names.
 
 Refusing an operator whose Lean equation is not grounded in the exporter is the
 whole point of a fail-closed checker; accepting it because the equation happens

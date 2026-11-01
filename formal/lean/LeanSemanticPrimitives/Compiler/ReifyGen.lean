@@ -108,6 +108,10 @@ private def rhsSyntax (nsrc : Nat) : ResidualExpr → MetaM Term
   | .rsra w a b     => do `(rsraV $(quote w) $(slotIdent nsrc a) $(slotIdent nsrc b))
   | .rsext w a m    => do `(rsextV $(quote w) $(slotIdent nsrc a) $(slotIdent nsrc m))
   | .rgetMask w a m => do `(rgetMaskV $(quote w) $(slotIdent nsrc a) $(slotIdent nsrc m))
+  | .rudiv w a b    => do `(rudivV $(quote w) $(slotIdent nsrc a) $(slotIdent nsrc b))
+  | .rsdiv w a b    => do `(rsdivV $(quote w) $(slotIdent nsrc a) $(slotIdent nsrc b))
+  | .rsetMask w a m v => do
+      `(rsetMaskV $(quote w) $(slotIdent nsrc a) $(slotIdent nsrc m) $(slotIdent nsrc v))
   | .rmux w s f t   => do
       `(rmuxV $(quote w) $(slotIdent nsrc s) $(slotIdent nsrc f) $(slotIdent nsrc t))
   | .rmemRead w m a e => do
@@ -189,6 +193,10 @@ private def valSyntaxG (ref : Bool → ResidualRef → MetaM Term) :
   | .rsra w a b     => do `(Residual.rsraV $(quote w) $(← ref false a) $(← ref false b))
   | .rsext w a m    => do `(Residual.rsextV $(quote w) $(← ref false a) $(← ref false m))
   | .rgetMask w a m => do `(Residual.rgetMaskV $(quote w) $(← ref false a) $(← ref false m))
+  | .rudiv w a b    => do `(Residual.rudivV $(quote w) $(← ref false a) $(← ref false b))
+  | .rsdiv w a b    => do `(Residual.rsdivV $(quote w) $(← ref false a) $(← ref false b))
+  | .rsetMask w a m v => do
+      `(Residual.rsetMaskV $(quote w) $(← ref false a) $(← ref false m) $(← ref false v))
   | .rmux w s f t   => do
       `(Residual.rmuxV $(quote w) $(← ref false s) $(← ref false f)
          $(← ref false t))

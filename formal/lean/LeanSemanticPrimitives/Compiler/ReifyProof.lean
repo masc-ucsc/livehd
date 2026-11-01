@@ -111,8 +111,9 @@ def exprRefsTyped : ResidualExpr → Array (ResidualRef × Bool)
   | .rredOr _ a | .req _ a | .rshl _ a | .rmuxN _ a => a.map (fun r => (r, false))
   | .rnot _ a => #[(a, false)]
   | .rult _ a b | .rugt _ a b | .rslt _ a b | .rsgt _ a b
-  | .rsra _ a b | .rsext _ a b | .rgetMask _ a b => #[(a, false), (b, false)]
-  | .rmux _ s f t => #[(s, false), (f, false), (t, false)]
+  | .rsra _ a b | .rsext _ a b | .rgetMask _ a b
+  | .rudiv _ a b | .rsdiv _ a b => #[(a, false), (b, false)]
+  | .rmux _ s f t | .rsetMask _ s f t => #[(s, false), (f, false), (t, false)]
   | .rmemRead _ m a e => #[(m, true), (a, false), (e, false)]
   | .rmemWrite m a d e => #[(m, true), (a, false), (d, false), (e, false)]
   | .rmemWriteBE _ _ m a d be => #[(m, true), (a, false), (d, false), (be, false)]
@@ -179,6 +180,10 @@ def qExpr : ResidualExpr → MetaM Term
   | .rsra w a b     => do `(Compiler.ResidualExpr.rsra $(qNat w) $(qNat a) $(qNat b))
   | .rsext w a m    => do `(Compiler.ResidualExpr.rsext $(qNat w) $(qNat a) $(qNat m))
   | .rgetMask w a m => do `(Compiler.ResidualExpr.rgetMask $(qNat w) $(qNat a) $(qNat m))
+  | .rudiv w a b    => do `(Compiler.ResidualExpr.rudiv $(qNat w) $(qNat a) $(qNat b))
+  | .rsdiv w a b    => do `(Compiler.ResidualExpr.rsdiv $(qNat w) $(qNat a) $(qNat b))
+  | .rsetMask w a m v => do
+      `(Compiler.ResidualExpr.rsetMask $(qNat w) $(qNat a) $(qNat m) $(qNat v))
   | .rmux w s f t   => do
       `(Compiler.ResidualExpr.rmux $(qNat w) $(qNat s) $(qNat f) $(qNat t))
   | .rmemRead w m a e => do

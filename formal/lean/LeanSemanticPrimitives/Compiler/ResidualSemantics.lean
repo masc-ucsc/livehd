@@ -125,6 +125,13 @@ def rsextV (w : Nat) (a amt : BV) : BV :=
 
 def rgetMaskV (w : Nat) (a m : BV) : BV := bv_get_mask w a m
 
+/-- Spelled exactly as `eval_op`'s `Op_UDiv`, `Op_SDiv` and `Op_SetMask` cases, so
+each `*_correct` lemma is `rfl`. -/
+def rudivV (w : Nat) (a b : BV) : BV :=
+  mk_bv w (if bv_uint b = 0 then 0 else bv_uint a / bv_uint b)
+def rsdivV (w : Nat) (a b : BV) : BV := bv_sdiv w a b
+def rsetMaskV (w : Nat) (a m v : BV) : BV := bv_set_mask w a m v
+
 /-- Deps are `[sel, falseVal, trueVal]`.  Swapping the last two here is exactly
 what `compile_mux_correct` refuses to prove. -/
 def rmuxV (w : Nat) (sel fv tv : BV) : BV :=
@@ -194,6 +201,9 @@ def denoteExpr (env : SlotEnv) : ResidualExpr → CertVal
   | .rsra w a b           => .bv (rsraV w (refBV env a) (refBV env b))
   | .rsext w a amt        => .bv (rsextV w (refBV env a) (refBV env amt))
   | .rgetMask w a m       => .bv (rgetMaskV w (refBV env a) (refBV env m))
+  | .rudiv w a b          => .bv (rudivV w (refBV env a) (refBV env b))
+  | .rsdiv w a b          => .bv (rsdivV w (refBV env a) (refBV env b))
+  | .rsetMask w a m v     => .bv (rsetMaskV w (refBV env a) (refBV env m) (refBV env v))
   | .rmux w sel fv tv     => .bv (rmuxV w (refBV env sel) (refBV env fv) (refBV env tv))
   | .rmemRead w m a en    => .bv (rmemReadV w (refMem env m) (refBV env a) (refBV env en))
   | .rmemWrite m a d en   => .mem (rmemWriteV (refMem env m) (refBV env a) (refBV env d)

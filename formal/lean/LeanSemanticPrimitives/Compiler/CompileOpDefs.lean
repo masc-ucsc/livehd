@@ -77,6 +77,18 @@ def compileOp (nid : Nat) (c : DenseNodeCert) : Except CompileError ResidualExpr
       match c.deps.toList with
       | [a, m] => .ok (.rgetMask c.width a m)
       | l      => .error (.badArity c.op l.length)
+  | .Op_UDiv =>
+      match c.deps.toList with
+      | [a, b] => .ok (.rudiv c.width a b)
+      | l      => .error (.badArity c.op l.length)
+  | .Op_SDiv =>
+      match c.deps.toList with
+      | [a, b] => .ok (.rsdiv c.width a b)
+      | l      => .error (.badArity c.op l.length)
+  | .Op_SetMask =>
+      match c.deps.toList with
+      | [a, m, v] => .ok (.rsetMask c.width a m v)
+      | l         => .error (.badArity c.op l.length)
   | .Op_MuxBool =>
       -- deps are [sel, falseVal, trueVal]; this ORDER is what the proof checks
       match c.deps.toList with
@@ -95,7 +107,8 @@ def compileOp (nid : Nat) (c : DenseNodeCert) : Except CompileError ResidualExpr
       match c.deps.toList with
       | [m, a, d, be] => .ok (.rmemWriteBE c.width bw m a d be)
       | l             => .error (.badArity c.op l.length)
-  -- the eight the census found unreachable
+  -- Op_Const (a source, never a node), and Op_Sub / Op_Div / Op_LT / Op_GT, which
+  -- the exporter never emits (see ResidualIR's header)
   | op => .error (.unsupportedOp op)
 
 --------------------------------------------------------------------------------
