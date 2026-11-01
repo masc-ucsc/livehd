@@ -1284,6 +1284,7 @@ std::vector<std::pair<int, int>> io_path(const Grid& g, int ta, int tb, bool h_f
 // near its placement (allowed). The orientation with more room (and, with a box, closer to the box) wins.
 std::vector<Io_route> io_preroute(const Design& d, const Legroute_options& o, const Grid& g, const Boxes& boxes,
                                   const std::vector<Net_ends>& ends, std::vector<int>& cap_h, std::vector<int>& cap_v,
+                                  const std::vector<int>& cap_h0, const std::vector<int>& cap_v0,
                                   std::set<std::pair<int, int>>& routed_ahead, std::unordered_map<int, std::vector<int>>& allowed,
                                   Legroute_report& rep) {
   std::vector<Io_route> routes;
@@ -1311,11 +1312,13 @@ std::vector<Io_route> io_preroute(const Design& d, const Legroute_options& o, co
     }
   }
   const int  w    = int(o.window_tiles);
-  const auto room = [&](const std::vector<std::pair<int, int>>& path, int r) {  // load share, or INFINITY
+  // load share, or INFINITY: a tile whose routes fixed ahead (with this one) would pass reserve_share of its tracks
+  // has no room
+  const auto room = [&](const std::vector<std::pair<int, int>>& path, int r) {
     double cost = 0;
     for (const auto& [t, h] : path) {
-      const int c = (h ? cap_h : cap_v)[t];
-      if (g.region[t] != r || c < 1) {
+      const int c = (h ? cap_h : cap_v)[t], c0 = (h ? cap_h0 : cap_v0)[t];
+      if (g.region[t] != r || c < 1 || double(c0 - c + 1) > o.reserve_share * double(c0)) {
         return double(INFINITY);
       }
       cost += 1.0 / c;
@@ -2708,7 +2711,8 @@ struct Crossings {
   std::vector<Net_ends>            ends;
   std::vector<std::pair<int, int>> hops;  // tile pairs across region boundaries
   std::vector<int>                 hop_net;
-  size_t                           unjoined = 0;
+  size_t                           unjoined   = 0;
+  size_t                           over_share = 0;  // hops placed past hop_share on every tile of their boundary
 };
 Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Legroute_regions& regions, std::vector<int>& cap_h,
                     std::vector<int>& cap_v, bool diagnose) {
@@ -3035,6 +3039,27 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
               bv   = v;
             }
           }
+          if (bu < 0) {  // every tile of the boundary is at the share: the least loaded one, nearest on a tie
+            double least = INFINITY;
+            for (auto [u, v] : edges.at(key)) {
+              if (g.region[u] != a) {
+                std::swap(u, v);
+              }
+              const int    h    = g.row(u) == g.row(v) ? 0 : 1;
+              const double load = std::max(double(hop_use[u][h]) / std::max(1, (h ? cap_v : cap_h)[u]),
+                                           double(hop_use[v][h]) / std::max(1, (h ? cap_v : cap_h)[v]));
+              const double mx = (g.cx(g.col(u)) + g.cx(g.col(v))) / 2.0, my = (g.cy(g.row(u)) + g.cy(g.row(v))) / 2.0;
+              const double cost = load + 1e-6 * (std::abs(mx - aim.first) + std::abs(my - aim.second)) / double(g.tile_w);
+              if (cost < least) {
+                least = cost;
+                bu    = u;
+                bv    = v;
+              }
+            }
+            if (bu >= 0) {
+              ++out.over_share;
+            }
+          }
           if (bu >= 0 && prev >= 0) {
             run_edges(bv, run_load(bv, true) <= run_load(bv, false), [&](int t, int dir) { ++through[t][dir]; });
           }
@@ -3174,7 +3199,7 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
         Q.trees = place_trees(d, o, g, Q.boxes, x.ends, dem_h, dem_v, Q.cap_h, Q.cap_v, Q.treed, Q.rep);
       }
       if (o.io_preroute) {
-        Q.io_routes = io_preroute(d, o, g, Q.boxes, x.ends, Q.cap_h, Q.cap_v, Q.treed, Q.allowed, Q.rep);
+        Q.io_routes = io_preroute(d, o, g, Q.boxes, x.ends, Q.cap_h, Q.cap_v, cap_h0, cap_v0, Q.treed, Q.allowed, Q.rep);
       }
       if (o.crit_boxes > 0 || !Q.trees.empty()) {
         repair_forced(d, o, g, Q.boxes, x.ends, dem_h, dem_v, Q.cap_h, Q.cap_v, Q.trees, Q.treed, Q.rep);
@@ -3254,6 +3279,7 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
   }
   // ---- the chosen answers: tiles, counters, connections
   rep.sat_unjoined_crossings += x.unjoined;
+  rep.sat_hops_over_share    += x.over_share;
   {  // pre-placement counters: the first policy's
     const auto& q              = P[0].rep;
     rep.crit_pinned           += q.crit_pinned;

@@ -472,7 +472,8 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_options.steiner_pins     = integer("place.legroute.steiner_pins", "0");
   out.legroute_options.steiner_min      = integer("place.legroute.steiner_min", "3");
   out.legroute_options.reserved_tracks  = integer("place.legroute.reserved_tracks", "1");
-  out.legroute_options.hop_share        = number("place.legroute.hop_share", "1.0");
+  out.legroute_options.hop_share        = number("place.legroute.hop_share", "0.5");
+  out.legroute_options.reserve_share    = number("place.legroute.reserve_share", "0.5");
   out.legroute_options.hop_spread       = number("place.legroute.hop_spread", "6");
   out.legroute_options.sat_ms           = integer("place.legroute.sat_ms", "60000");
   out.legroute_options.capacity_lazy    = integer("place.legroute.capacity_lazy", "2");
@@ -491,9 +492,10 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_probe.max_inflate        = number("place.legroute.probe.max_inflate", "1.5");
   out.legroute_probe.sat_ms             = integer("place.legroute.probe.sat_ms", "20000");
   out.legroute_probe.iterations         = integer("place.legroute.probe.iterations", "100");
+  out.legroute_probe.rounds             = integer("place.legroute.probe.rounds", "1");
   out.legroute_probe.strict             = truthy(synth_set(opts, "place.legroute.strict", "true"));
   if (out.legroute_probe.enabled
-      && (!out.legroute_probe.cells || !(out.legroute_probe.fill >= 0 && out.legroute_probe.fill < 1)
+      && (!(out.legroute_probe.fill >= 0 && out.legroute_probe.fill < 1)
           || !(out.legroute_probe.target > 0 && out.legroute_probe.target <= 1) || !(out.legroute_probe.max_inflate >= 1)
           || !out.legroute_probe.iterations)) {
     throw Lhd_error{"usage", "invalid synth.place.legroute.probe.* value", ""};
@@ -560,6 +562,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   }
   out.utilization = number("place.utilization", "0.30");
   out.allow_increase_area = truthy(synth_set(opts, "place.allow_increase_area", "true"));
+  out.area_restarts       = integer("place.area_restarts", "8");
   out.aspect      = number("place.aspect", "1");
   for (const auto& [key, frame] : {
            std::pair<const char*, std::vector<double>*>{ "place.die",  &out.die},
@@ -592,6 +595,20 @@ livehd::placement::Options placement_options(const Options& opts) {
   // nested placement calls (repair, timing trials) start from a previous frame: the user's frame decides core growth
   out.generated_core        = out.floorplan.empty() && out.die.empty() && out.core.empty();
   out.density               = number("place.density", "0.5");
+  // utilization 0: a search for the core. Placement starts at the densest point the placer takes and legroute's
+  // push-back lowers it until every region routes (density 0 follows the utilization)
+  if (out.utilization <= 0) {
+    if (!out.legroute || !out.allow_increase_area || !out.generated_core) {
+      throw Lhd_error{"usage",
+                      "synth.place.utilization=0 searches for the core: it needs synth.place.legroute=true, "
+                      "synth.place.allow_increase_area=true and a generated core",
+                      "set a utilization in (0,1) or enable legroute"};
+    }
+    out.utilization = .99;
+    out.density     = 1;
+  } else if (out.density <= 0) {
+    out.density = std::min(1.0, out.utilization + .05);
+  }
   out.iterations            = integer("place.iterations", "1500");
   out.min_iterations        = integer("place.min_iterations", "40");
   out.post_density_factor   = number("place.post_density_factor", "4");
@@ -1321,14 +1338,16 @@ void synth_command(Options& opts, Result& res) {
       synth_command_once(opts, res);
       return;
     } catch (const livehd::placement::Placement_area_restart& restart) {
-      if (restarts >= 8) {
+      const unsigned limit = unsigned(std::max(0.0, std::stod(synth_set(opts, "place.area_restarts", "8"))));
+      if (restarts >= limit) {
         throw Lhd_error{"unsupported",
-                        "not routable: legroute asked for a larger core a ninth time",
-                        "lower synth.place.utilization or relax the timing target"};
+                        std::format("not routable: legroute asked for a larger core after {} restarts", restarts),
+                        "lower synth.place.utilization, raise synth.place.area_restarts or relax the timing target"};
       }
       res                  = start;
       // the GP target density follows (cells spread over the larger core instead of packing to the old density)
-      const double density = std::min(std::stod(synth_set(opts, "place.density", "0.5")), restart.density);
+      const double given   = std::stod(synth_set(opts, "place.density", "0.5"));
+      const double density = given > 0 ? std::min(given, restart.density) : restart.density;
       opts.sets.emplace_back("synth.place.utilization", std::format("{:.4f}", restart.utilization));
       opts.sets.emplace_back("synth.place.density", std::format("{:.4f}", density));
       std::fprintf(stderr,
@@ -2313,7 +2332,7 @@ void synth_command_once(Options& opts, Result& res) {
             seed = livehd::placement::place(*placement_input, *seed_library, seed_options);
             break;
           } catch (const std::exception& e) {
-            if (!density_failure(e, seed_options) || too_dense >= 8) {
+            if (!density_failure(e, seed_options) || too_dense >= seed_options.area_restarts) {
               throw Lhd_error{"unsupported", std::string("timing seed placement failed: ") + e.what(), "see " + seed_log};
             }
             // too dense for the core: the seed and the placement after it run at a lower utilization
@@ -2367,7 +2386,8 @@ void synth_command_once(Options& opts, Result& res) {
         Phase_timer   phase(res, "pass.place");
         Stdout_to_log redirect(log);
         auto*         generation    = &placed_library;
-        unsigned      area_restarts = 0;
+        unsigned      area_restarts  = 0;
+        const auto    mesh_max_cells = place_options.region.max_cells;  // the mesh as asked; the variants scale it
         for (unsigned attempt = 0;; ++attempt) {
           try {
             placed = livehd::placement::place(*placement_input, *generation, place_options, [&] {
@@ -2381,16 +2401,22 @@ void synth_command_once(Options& opts, Result& res) {
           } catch (const livehd::placement::Placement_area_restart& restart) {
             // routability needs a larger core (legroute.probe, or a region without a routable answer): place again
             // at the lower utilization
-            if (++area_restarts > 8) {
-              throw std::runtime_error("legroute asked for a larger core more than eight times");
+            if (++area_restarts > place_options.area_restarts) {
+              throw std::runtime_error(std::format("legroute asked for a larger core more than {} times", place_options.area_restarts));
             }
             placement_input           = prepare_input();
             retry_library             = std::make_unique<hhds::GraphLibrary>();
             generation                = retry_library.get();
             place_options.utilization = restart.utilization;
             place_options.density     = std::min(place_options.density, restart.density);
+            // the region mesh variant: regions a quarter larger (1) or a fifth smaller (2) than asked, the given mesh (0)
+            place_options.mesh_variant     = restart.mesh_variant;
+            place_options.region.max_cells = unsigned(std::lround(
+                double(mesh_max_cells) * (restart.mesh_variant == 1 ? 1.25 : restart.mesh_variant == 2 ? .8 : 1.0)));
             place_options.cache_dir.clear();
-            res.recipe_steps.emplace_back(std::format("pass.place.area_restart.utilization={:.3f}", restart.utilization));
+            res.recipe_steps.emplace_back(std::format("pass.place.area_restart.utilization={:.3f}.mesh={}",
+                                                      restart.utilization,
+                                                      restart.mesh_variant));
           } catch (const livehd::placement::Placement_restart& restart) {
             if (attempt != 0) {
               throw std::runtime_error("whole-color resynthesis exceeded one automatic restart");
@@ -2402,7 +2428,7 @@ void synth_command_once(Options& opts, Result& res) {
             place_options.cache_dir.clear();
             res.recipe_steps.emplace_back("pass.place.io_resynth.restart");
           } catch (const std::runtime_error& e) {  // the legalizer cannot close it: too dense for the core
-            if (!density_failure(e, place_options) || ++area_restarts > 8) {
+            if (!density_failure(e, place_options) || ++area_restarts > place_options.area_restarts) {
               throw;
             }
             const double utilization = place_options.utilization * .8;

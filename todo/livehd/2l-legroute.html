@@ -163,6 +163,31 @@ legalization exhausts the core and commits nothing. The denser
 the core, the more the box snap costs against a cell-level legalizer (minimax 6%), and the push-back lands
 where the SAT says routable, which OpenROAD confirms.</p>
 
+<p><strong>Iterating on sha3's push-back (2026-10-31, later).</strong> Where sha3 stops is not a fill problem: at
+utilization 0.634 the whole chip sits at box fill 0.78 to 0.87, regions at 0.86 route and two at 0.82 fail, and
+four rounds of per-region inflation (the probe on the real region size, the unroutable regions' cells widened,
+GP resumed in place: <code>legroute.probe.rounds</code>) move the fills by a hundredth and change nothing,
+because GP packs every region to its target density and the pushed cells have nowhere to go. The UNSAT cores
+say what it is: four or five boundary tile edges per failing region, each holding a fixed endpoint, with 180 to
+360 nets asked to cross 31 to 37 tracks left. The routes fixed ahead of the SAT were eating those edges: IO
+pre-routes stopped only at zero tracks (1,338 feedthroughs on sha3) and hops filled a boundary tile to its
+whole capacity (<code>hop_share</code> 1). Now the routes fixed ahead may take at most half of a tile's tracks
+per direction (<code>reserve_share</code>, 0.5; <code>hop_share</code> 0.5, a hop past it going to the least
+loaded tile of its boundary so every crossing is still modeled): at 0.634 that takes sha3 from 10 to 11 of 12
+regions (147 feedthroughs kept, 1,705 refused). The last region is the most connected one (173 boxes, 1,396
+nets, 2,556 connections) and stays UNSAT: too many crossings for its boundary under a model that pins each
+crossing to one tile and each net to an L inside its region, which is where OpenROAD, free to spread
+crossings along a boundary and detour, routes the standard flow's placement at utilization 0.70. The search
+from utilization 0 (<code>place.utilization=0</code>) lands at 0.488 either way, because the region mesh
+changes with the core and a different pair of regions fails at 0.538. The proof that the cut, not the density,
+decides: at the standard flow's own utilization 0.70 / density 0.75 the model routes all 12 regions (fills 0.80
+to 0.95, slowest region 119 s), and OpenROAD routes that placement with zero overflow (one die-edge pin DRC)
+at DR WNS &minus;356.2 ps / TNS &minus;442.9k, against the standard flow's &minus;397.1 / &minus;483.1k on the
+same 3,043 um&sup2; die: 10% better WNS and 8% better TNS at equal area. So the push-back now retries other
+region meshes at the same core first (regions a quarter larger, then a fifth smaller) and grows the core only
+after both fail. The next lever beyond that is the one in the plan: let the SAT choose among a few boundary
+tiles per crossing, and space busorder's pins to the track capacity of a tile edge.</p>
+
 <h2>Region cuts (busorder regions)</h2>
 <ul>
 <li>No net dips into a region through one side with zero or one cell inside: a cell whose nets all leave

@@ -698,7 +698,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.legroute) {
     const auto& l = o.legroute_options;
     h             = hash_text(
-        std::format("legroute-v3:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+        std::format("legroute-v3:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                     l.box_fill,
                     l.box_net_max,
                     l.merge_cost,
@@ -727,6 +727,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                     l.freeze,
                     l.steiner_min,
                     l.hop_share,
+                    l.reserve_share,
                     l.hop_spread,
                     l.sat_seed,
                     l.tiers,
@@ -8850,11 +8851,13 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     // legroute.probe: a quick legroute on small regions (no virtual pins) finds the regions it cannot route; their
     // cells widen (GOALPlace-style inflation, x only: r = fill / target, less for timing-critical cells) and GP resumes
     // from the converged placement until it settles; the widths come back before bus order and the real legroute.
-    const auto run_legroute_probe = [&](dp::Design& design) {
+    // one probe round: legroute on the converged GP, the unroutable regions' cells widened, GP resumed; true when
+    // every region routed (or nothing could be widened)
+    const auto run_legroute_probe = [&](dp::Design& design, unsigned round) {
       const auto&    po    = options.legroute_probe;
       const auto     start = std::chrono::steady_clock::now();
       Region_options ro    = options.region;
-      ro.max_cells         = po.cells;
+      ro.max_cells         = po.cells ? po.cells : options.region.max_cells;
       const auto mesh      = Region_mesh::build(design, region_macros(), region_ios(), ro, tech.dbu);
       auto       frame     = sat_frame(design, false);
       if (options.handoff_taps) {
@@ -8874,11 +8877,21 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       lopt.sat_alt.clear();
       lopt.macro_halo_x_dbu = v.halo_x;
       lopt.macro_halo_y_dbu = v.halo_y;
-      lopt.output_dir       = options.output_dir.empty() ? "" : options.output_dir + "/legroute_probe";
+      lopt.output_dir       = options.output_dir.empty() ? "" : options.output_dir + std::format("/legroute_probe{}", round);
       if (!lopt.output_dir.empty()) {
         std::filesystem::create_directories(lopt.output_dir);
       }
-      const auto          probe = legroute(tech, frame, final_gp_timing, lopt, regions, profile);
+      Legroute_report probe;
+      try {
+        probe = legroute(tech, frame, final_gp_timing, lopt, regions, profile);
+      } catch (const Legroute_unfit& e) {  // too dense for the tile grid: the core grows before any inflation
+        if (!options.allow_increase_area || !options.generated_core) {
+          throw;
+        }
+        const double utilization = options.utilization * .8;
+        std::fprintf(stderr, "legroute probe: %s; placement restarts at utilization %.3f\n", e.what(), utilization);
+        throw Placement_area_restart(utilization, utilization + .05);
+      }
       // per cell of an unroutable region: r = its region's box fill / target, at most max_inflate; the most timing-critical
       // cells (top 10% by timing weight, GOALPlace's 10-quantile guard) keep their size
       std::vector<double> fill(probe.region_stats.size(), 0), solved;
@@ -9044,8 +9057,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
       std::fprintf(stderr,
-                   "legroute probe: %zu regions (routable %zu, unsat %zu, no answer %zu, sparse %zu), %zu cells widened "
+                   "legroute probe round %u: %zu regions (routable %zu, unsat %zu, no answer %zu, sparse %zu), %zu cells widened "
                    "(+%.1f%% area), GP %u iterations, HPWL %.4g -> %.4g, %.1f s\n",
+                   round,
                    probe.region_stats.size(),
                    count[0],
                    count[1],
@@ -9076,9 +9090,14 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
             seconds)
                << '\n';
       }
+      return count[1] + count[2] == 0 || added <= 0;
     };
     if (terminal_active && options.legroute && options.legroute_probe.enabled && !multirow_cells) {
-      run_legroute_probe(v.design);
+      for (unsigned round = 0; round < std::max(1u, options.legroute_probe.rounds); ++round) {
+        if (run_legroute_probe(v.design, round)) {
+          break;
+        }
+      }
     }
     if (refinement_active && terminal_active) {
       gp_density_weight = metrics.density_weight;
@@ -9158,6 +9177,14 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           std::fprintf(stderr, "legroute: %s; placement restarts at utilization %.3f\n", why.c_str(), utilization);
           throw Placement_area_restart(utilization, utilization + .05);
         };
+        // a region without a routable answer: other region meshes at the same core first (the failing crossings
+        // fall elsewhere), then the smaller core
+        const auto recut = [&](const std::string& why) {
+          if (options.mesh_variant < 2) {
+            std::fprintf(stderr, "legroute: %s; placement restarts with region mesh variant %u\n", why.c_str(), options.mesh_variant + 1);
+            throw Placement_area_restart(options.utilization, options.density, options.mesh_variant + 1);
+          }
+        };
         try {
           legroute_report = legroute(tech, frame, final_gp_timing, lopt, regions, profile);
         } catch (const Legroute_unfit& e) {
@@ -9179,11 +9206,12 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
               worst = std::max(worst, double(st.boxes) / double(st.tiles));
             }
           }
-          restart(std::clamp(.7 / std::max(worst, 1e-9), .5, .92),
-                  std::format("{} of {} regions without a routable answer (densest failing region fill {:.2f})",
-                              failed,
-                              legroute_report->sat_regions,
-                              worst));
+          const auto why = std::format("{} of {} regions without a routable answer (densest failing region fill {:.2f})",
+                                       failed,
+                                       legroute_report->sat_regions,
+                                       worst);
+          recut(why);
+          restart(std::clamp(.7 / std::max(worst, 1e-9), .5, .92), why);
         } else if (failed) {
           // Stop on an unsuccessful model solve; UNKNOWN is not proof of unroutability.
           const bool fixed_core = !options.generated_core;

@@ -60,8 +60,9 @@ struct Placement_restart : std::exception {
 // legroute.probe with allow_increase_area: the probe's target box fill needs a lower GP target density (or the
 // inflation does not fit) in a generated core; placement runs again with this utilization and density (a larger core)
 struct Placement_area_restart : std::exception {
-  double utilization, density;  // the new utilization and GP target density
-  Placement_area_restart(double u, double d) : utilization(u), density(d) {}
+  double   utilization, density;  // the new utilization and GP target density
+  unsigned mesh_variant = 0;      // the region mesh to place with next (0: the given one; see Options::mesh_variant)
+  Placement_area_restart(double u, double d, unsigned v = 0) : utilization(u), density(d), mesh_variant(v) {}
   const char* what() const noexcept override { return "placement restarted with a larger core for routability"; }
 };
 using Timing_feedback = livehd::timing::Feedback;
@@ -126,7 +127,7 @@ struct Options {
   bool                                                      retain_preroute_design = false;
   // Internal fused-flow lifetime: intermediate consumers use Result::parasitics.
   // Standalone placement and final publication retain the persisted annotation.
-  bool                                                      persist_parasitics = true;
+  bool                                                      persist_parasitics     = true;
   // Diagnostic-only, synchronous observation; never supplies optimizer feedback.
   std::function<void(const Result&, const Gp_observation&)> gp_observer;
   int                                                       gp_observer_interval  = 0;
@@ -198,19 +199,20 @@ struct Options {
   // `iterations`, then the widths return. Regions at or under `fill` box occupancy skip the SAT.
   struct Legroute_probe {
     bool     enabled = false;
-    unsigned cells = 1200, sat_ms = 20000, iterations = 100;
+    unsigned cells = 1200, sat_ms = 20000, iterations = 100;  // cells 0: the region mesh's own size
+    unsigned rounds = 1;  // probe, inflate and resume GP this many times, until every region routes
     double   fill = 0.5, target = 0.6, max_inflate = 1.5;
     double   tree_congestion = 1;  // the real legroute's tree congestion weight once the probe ran
     // false (experiments): a legroute run with regions left without a routable answer keeps its placement (boxes on
     // their nearest tiles) with a warning instead of stopping as not routable
-    bool     strict = true;
+    bool     strict          = true;
   } legroute_probe;
-  int                                   fp_timing_max_updates = 10;
-  bool                                  fp_resize             = false;
+  int    fp_timing_max_updates = 10;
+  bool   fp_resize             = false;
   // Resolved by the driver: enabled with resize unless explicitly disabled.
-  bool                                  gp_resize             = false;
-  int                                   gp_buffer_trials      = 4;    // maximum attempts per insertion/removal phase
-  double                                gp_buffer_margin      = .01;  // fraction of clock period (path delay without clocks)
+  bool   gp_resize             = false;
+  int    gp_buffer_trials      = 4;    // maximum attempts per insertion/removal phase
+  double gp_buffer_margin      = .01;  // fraction of clock period (path delay without clocks)
 
   bool                     repair_reset   = false;  // retired: true is rejected before pre-CTS optimization
   // synth.place.resize.engine: "new" = path-based sizing/buffering on the
@@ -270,7 +272,7 @@ struct Options {
   bool                                                       region_refine = false;
   // Internal: this call is the dedicated SAT-legalization step (sat_align_placed), run after resize/repair and
   // immediately before final legalization. While optimization is pending only this call runs the SAT pass.
-  bool                                                       region_sat = false;
+  bool                                                       region_sat    = false;
   // Internal: same-interface variants of custom sequential macros (the domino
   // masters) that domino sizing may swap; part of the environment key.
   std::shared_ptr<const Custom_catalog>                      custom_cells;
@@ -283,17 +285,21 @@ struct Options {
   // a generated core (no die, core or floorplan given) may grow when routability needs it (legroute.probe): placement
   // restarts at the utilization that fits the inflated cells (Placement_area_restart)
   bool                                                       allow_increase_area = true;
+  unsigned                                 area_restarts  = 8;  // placements at a lower utilization before stopping
+  // legroute push-back: a region without a routable answer first tries other region meshes at the same core (1:
+  // regions a quarter larger, 2: a fifth smaller), then the core grows; the driver scales region.max_cells by it
+  unsigned                                 mesh_variant   = 0;
   // no frame given by the user (die, core, floorplan): set by lhd and by the outermost place(); nested calls inherit it
-  bool                                                       generated_core      = false;
+  bool                                     generated_core = false;
   // Fixed generated frame in microns, {xl, yl, xh, yh}; empty means derive it from utilization/aspect.
   // `core` is snapped inward to the site/row grid; with only one of the two given the other equals it.
   // An imported `floorplan` (also what the staged macro/cell passes feed themselves) wins over both.
-  std::vector<double>                                        die, core;
-  double                                                     stop_overflow = .1, initial_density_weight = .01;
+  std::vector<double>                      die, core;
+  double                                   stop_overflow = .1, initial_density_weight = .01;
   // -1 resolves to ten placement-row heights; nonnegative values are explicit microns per side.
-  double                                                     halo_x = -1, halo_y = -1;
+  double                                   halo_x = -1, halo_y = -1;
   // Unset preserves the macro halo for cells. Applied only after the macro frame is fixed.
-  std::optional<std::pair<double, double>>                   cell_halo;
+  std::optional<std::pair<double, double>> cell_halo;
   bool                       cell_stage = false;  // internal explicit final/placed context; never inferred from an ECO frame
   bool                       scale_macro_density       = true;
   bool                       dynamic_bins              = false;

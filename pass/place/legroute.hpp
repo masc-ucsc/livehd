@@ -56,9 +56,12 @@ struct Legroute_options {
   // the fewest endpoints a net needs for the trunk encoding (2: a 2-pin net is a Z-shape, its trunk on any row or
   // column between its endpoints, instead of an L)
   unsigned    steiner_min      = 3;
-  // the share of a boundary tile's tracks the hops of region-crossing nets may take (a net past that share is left
-  // unjoined: its crossing is not modeled)
-  double      hop_share        = 1;
+  // the share of a boundary tile's tracks the hops of region-crossing nets may take; past it a hop takes the least
+  // loaded tile of its boundary (counted as over the share), so every crossing is modeled
+  double      hop_share        = .5;
+  // the share of a tile's tracks, per direction, that the routes fixed ahead of the SAT (hops, IO pre-routes) may
+  // take together; the rest stays for the region's own routes
+  double      reserve_share    = .5;
   // chained hops of a pass-through net (hop to hop inside a region) avoid the rows and columns earlier pass-throughs
   // took: this many tile widths of distance per fully loaded edge on the run (0: nearest only)
   double      hop_spread       = 6;
@@ -137,6 +140,7 @@ struct Legroute_report {
   // the SAT placement: regions solved, model size, solves, windows grown or dropped, regions without an answer
   size_t  sat_regions = 0, sat_variables = 0, sat_clauses = 0, sat_solves = 0, sat_relaxed_windows = 0;
   size_t  sat_unsat_regions = 0, sat_unknown_regions = 0, sat_binding_tiles = 0, sat_unjoined_crossings = 0;
+  size_t  sat_hops_over_share = 0;  // hops placed past hop_share (every boundary tile of their pair was at it)
   size_t  sat_relaxed_tiles = 0, sat_deficit_tracks = 0;  // sat_relax_rounds: dropped tile bounds, tracks short
   size_t  sat_adjacent_nets = 0;                          // 1-1 nets between neighbor boxes: in-box metal, no lane
   // critical pre-placement: boxes fixed before the SAT, and their nets' weighted star length (tiles) at the placement
