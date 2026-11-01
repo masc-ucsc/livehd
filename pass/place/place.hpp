@@ -201,6 +201,9 @@ struct Options {
     unsigned cells = 1200, sat_ms = 20000, iterations = 100;
     double   fill = 0.5, target = 0.6, max_inflate = 1.5;
     double   tree_congestion = 1;  // the real legroute's tree congestion weight once the probe ran
+    // false (experiments): a legroute run with regions left without a routable answer keeps its placement (boxes on
+    // their nearest tiles) with a warning instead of stopping as not routable
+    bool     strict = true;
   } legroute_probe;
   int                                   fp_timing_max_updates = 10;
   bool                                  fp_resize             = false;

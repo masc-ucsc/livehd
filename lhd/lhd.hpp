@@ -1240,7 +1240,8 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "false",
      Synth_set_option::Kind::boolean,
      "with busorder/boundarypins: a cell whose nets all leave its region through one side moves across it, and an RSMT "
-     "piece with no pin entering and leaving a region through one side is dropped (no 0/1-cell dips)"},
+     "piece with no pin entering and leaving a region through one side is dropped (no 0/1-cell dips); on with legroute "
+     "unless set"},
     {"place.region.boundarypins.order",
      "false",
      Synth_set_option::Kind::boolean,
@@ -1284,10 +1285,6 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::boolean,
      "with legroute: a clock spine (trunk and ribs on fixed tracks) per region and clock, routed first"},
     {"place.legroute.rib_tiles", "4", Synth_set_option::Kind::integer, "with legroute: clock rib pitch in tile rows"},
-    {"place.legroute.subregion_cells",
-     "0",
-     Synth_set_option::Kind::integer,
-     "with legroute (experiment): bisect each region by minimum cuts into sub-regions of about this many cells; 0 = off"},
     {"place.legroute.cap_scale",
      "1",
      Synth_set_option::Kind::file,
@@ -1326,11 +1323,50 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "false",
      Synth_set_option::Kind::boolean,
      "with legroute.tree_load: try the 1:n nets most critical first instead of highest fanout first"},
-    {"place.legroute.tree_room",
+    {"place.legroute.steiner_pins",
+     "0",
+     Synth_set_option::Kind::integer,
+     "with legroute (experiment): nets with 3 to this many endpoints in a region route as one single-trunk Steiner tree "
+     "in the SAT placement (trunk on a row or column, ribs to it) instead of a star of L-shapes; below 3 = stars only"},
+    {"place.legroute.sat_seed",
+     "true",
+     Synth_set_option::Kind::boolean,
+     "with legroute: try the fallback placement (cell-boxes on their nearest fitting tiles) first, as assumptions; a "
+     "routable answer there is kept, otherwise the free model continues"},
+    {"place.legroute.freeze",
      "false",
      Synth_set_option::Kind::boolean,
-     "with legroute fixed trees: a tree's box moves keep the most H/V tracks free on the tiles they touch first, the "
-     "tree length second"},
+     "with legroute (calibration): every cell-box pinned on the tile the fallback placement gives it; the SAT decides "
+     "the route shapes only, so a region's verdict tests the model's rules against a placement an external router can "
+     "be given"},
+    {"place.legroute.sat_ms",
+     "60000",
+     Synth_set_option::Kind::integer,
+     "with legroute: wall-clock limit of one region's SAT solve (ms; the lazy re-solves share it)"},
+    {"place.legroute.hop_spread",
+     "6",
+     Synth_set_option::Kind::file,
+     "with legroute: a pass-through net's chained hops avoid the rows and columns earlier pass-throughs took, this "
+     "many tile widths of distance per fully loaded edge (0 = nearest hop only)"},
+    {"place.legroute.hop_share",
+     "1.0",
+     Synth_set_option::Kind::file,
+     "with legroute: share of a region-boundary tile's tracks that the hops of region-crossing nets may take; a "
+     "crossing past it is left unmodeled"},
+    {"place.legroute.reserved_tracks",
+     "1",
+     Synth_set_option::Kind::integer,
+     "with legroute: tracks per routing layer and tile kept out of the SAT model (pin access, clock and power drops)"},
+    {"place.legroute.steiner_min",
+     "3",
+     Synth_set_option::Kind::integer,
+     "with legroute.steiner_pins: the fewest endpoints for the trunk encoding; 2 routes 2-pin nets as Z-shapes (trunk "
+     "on any row or column between the endpoints) instead of L-shapes"},
+    {"place.legroute.capacity_lazy",
+     "2",
+     Synth_set_option::Kind::integer,
+     "with legroute (experiment): track-capacity bounds added only when an answer overflows them, re-solving "
+     "incrementally until none does (0 = all bounds up front, 1 = V bounds lazily, 2 = every bound lazily)"},
     {"place.legroute.tree_congestion",
      "0",
      Synth_set_option::Kind::file,
@@ -1340,13 +1376,8 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "",
      Synth_set_option::Kind::file,
      "with legroute: a second SAT policy as comma-separated overrides (crit_boxes, tree_boxes, tree_moves, tree_load, "
-     "tree_clauses, tree_by_crit, tree_room, tree_congestion, io_preroute, window_tiles); each region solves under both "
+     "tree_clauses, tree_by_crit, tree_congestion, io_preroute, window_tiles); each region solves under both "
      "in parallel and keeps a routable answer, the shorter weighted routes when both are (empty = one policy)"},
-    {"place.legroute.push_rounds",
-     "0",
-     Synth_set_option::Kind::integer,
-     "with legroute: regions without a routable answer push boxes to neighbor regions and the changed regions solve "
-     "again, at most this many rounds (0 = off)"},
     {"place.legroute.probe",
      "false",
      Synth_set_option::Kind::boolean,
@@ -1369,14 +1400,15 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "with legroute.probe: the real legroute after the probe places its fixed trees with this congestion weight (at "
      "least legroute.tree_congestion)"},
+    {"place.legroute.strict",
+     "true",
+     Synth_set_option::Kind::boolean,
+     "with legroute: stop as not routable when a region has no routable answer; false (experiments) keeps the "
+     "placement with a warning"},
     {"place.legroute.probe.iterations",
      "100",
      Synth_set_option::Kind::integer,
      "with legroute.probe: GP iterations after the inflation"},
-    {"place.legroute.push_fraction",
-     "0.05",
-     Synth_set_option::Kind::file,
-     "with legroute.push_rounds: fraction of a failing region's free boxes pushed per round"},
     {"place.legroute.io_preroute",
      "false",
      Synth_set_option::Kind::boolean,

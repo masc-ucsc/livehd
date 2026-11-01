@@ -45,26 +45,39 @@ struct Legroute_options {
   double      tree_load        = 0;
   double      tree_clauses     = 10e6;
   bool        tree_by_crit     = false;
-  // tree moves (within tree_moves) keep the most tracks free on the tiles they touch first, the tree length second
-  bool        tree_room        = false;
   // tree moves and trunk axes also avoid congestion: a Poisson potential of the per-tile routing demand over the tracks
   // (DCGP-style), this many tile lengths per tile at full potential, times 4 (0: off)
   double      tree_congestion  = 0;
+  // experiment: a net with 3 to this many endpoints in a region is one single-trunk Steiner tree in the SAT (a trunk on
+  // a row or column, ribs to it) instead of a star of L-shapes from its first endpoint (below 3: stars only; no gain
+  // measured on sha3 and minimax)
+  unsigned    steiner_pins     = 0;
+  // the fewest endpoints a net needs for the trunk encoding (2: a 2-pin net is a Z-shape, its trunk on any row or
+  // column between its endpoints, instead of an L)
+  unsigned    steiner_min      = 3;
+  // the share of a boundary tile's tracks the hops of region-crossing nets may take (a net past that share is left
+  // unjoined: its crossing is not modeled)
+  double      hop_share        = 1;
+  // chained hops of a pass-through net (hop to hop inside a region) avoid the rows and columns earlier pass-throughs
+  // took: this many tile widths of distance per fully loaded edge on the run (0: nearest only)
+  double      hop_spread       = 6;
+  // experiment: capacity bounds added only when an answer overflows them, the model solved again incrementally until
+  // none does (0: every bound up front; 1: the V bounds lazily; 2: every bound lazily)
+  unsigned    capacity_lazy    = 2;
+  // calibration: every box pinned on the tile the fallback placement gives it (the placement a run without an answer
+  // keeps); the SAT decides the route shapes only, so a region's verdict tests the model's rules, not the placement
+  bool        freeze           = false;
+  // the fallback placement (boxes on their nearest fitting tiles) is tried first, as assumptions: a routable answer
+  // there is kept, otherwise the free model continues with what the solver learned
+  bool        sat_seed         = true;
   // a second policy (comma-separated overrides of crit_boxes, tree_boxes, tree_moves, tree_load, tree_clauses,
-  // tree_by_crit, tree_room, tree_congestion, io_preroute, window_tiles, e.g. "tree_load=0.3,io_preroute=false"): each region
+  // tree_by_crit, tree_congestion, io_preroute, window_tiles, e.g. "tree_load=0.3,io_preroute=false"): each region
   // solves under both in parallel and keeps a routable answer, the lower weighted route length when both are (empty:
   // one policy)
   std::string sat_alt;
-  // density push: after a pass, push_fraction of the boxes of each region without a routable answer move to
-  // neighbor regions with free tiles (least critical, nearest first), and the changed regions solve again, at most
-  // push_rounds times (0: off)
-  unsigned    push_rounds     = 0;
-  double      push_fraction   = 0.05;
   // a region whose boxes fill at most this fraction of its free tiles is taken as routable without a solve (0: every
   // region solves); the routability probe skips the sparse regions
   double      sat_min_fill    = 0;
-  // experiment: bisect each region by minimum cuts (VieCut) into sub-regions of about this many cells (0: off)
-  unsigned    subregion_cells = 0;
   unsigned    reserved_tracks = 1;  // per layer and tile: pin access, clock and power drops
   bool        clock_spine     = true;
   unsigned    rib_tiles       = 4;  // clock rib pitch in tile rows
@@ -128,9 +141,12 @@ struct Legroute_report {
   size_t  tree_load_skipped = 0, tree_clauses_before = 0, tree_clauses_after = 0;
   // io_preroute: feedthroughs and pin -> box -> pin pairs routed ahead, candidates without room, boxes freed off a track
   size_t  io_feedthroughs = 0, io_boxes = 0, io_skipped = 0, io_lifted = 0;
-  // policies and density push: regions that kept the second policy, regions both solved, push rounds, boxes pushed
-  size_t  sat_alt_regions = 0, sat_both_regions = 0, push_rounds = 0, push_moved = 0;
-  size_t  push_kept_round     = 0;  // the round whose answers were kept (the most routable regions)
+  // policies: regions that kept the second policy, regions both policies solved
+  size_t  sat_alt_regions = 0, sat_both_regions = 0;
+  // capacity_lazy: re-solves, bounds added because an answer overflowed them, bounds never needed
+  size_t  lazy_rounds = 0, lazy_bounds = 0, lazy_skipped = 0;
+  size_t  frozen_boxes        = 0;  // freeze: boxes pinned on their fallback tiles
+  size_t  sat_seeded          = 0;  // sat_seed: regions whose answer is the fallback placement
   size_t  sat_skipped_regions = 0;  // sat_min_fill: regions taken as routable without a solve
   // per region (grid region id): 0 routable, 1 UNSAT, 2 no answer in time, 3 skipped (sat_min_fill); its boxes and
   // free tiles. unroutable_components: the floorplan components of the regions with status 1 or 2
@@ -141,11 +157,6 @@ struct Legroute_report {
   std::vector<Region_stat>      region_stats;
   std::vector<size_t>           unroutable_components;
   std::vector<int>              unroutable_regions;  // per unroutable component: its region
-  // sub-regions (experiment): crossings (pieces per net beyond the first) for the regions, the min-cut sub-regions
-  // and a geometric bisection to the same size
-  size_t                        cut_subregions = 0, cut_unbalanced = 0, cut_crossings_regions = 0, cut_crossings_mincut = 0;
-  size_t                        cut_crossings_geometric = 0;
-  double                        cut_seconds             = 0;
   double                        sat_seconds = 0, sat_seconds_max = 0;
   size_t                        clock_domains = 0, clock_ribs = 0;
   double                        wire_um = 0, critical_wire_um = 0;

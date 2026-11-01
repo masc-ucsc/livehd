@@ -697,36 +697,39 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.legroute) {
     const auto& l = o.legroute_options;
-    h             = hash_text(std::format("legroute-v2:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:"
-                                          "{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
-                                          l.box_fill,
-                                          l.box_net_max,
-                                          l.merge_cost,
-                                          l.crit_fraction,
-                                          l.crit_window_ps,
-                                          l.reserved_tracks,
-                                          l.clock_spine,
-                                          l.rib_tiles,
-                                          l.final,
-                                          l.route_passes,
-                                          l.subregion_cells,
-                                          l.cap_scale,
-                                          l.window_tiles,
-                                          l.crit_boxes,
-                                          l.tree_boxes,
-                                          l.tree_moves,
-                                          l.sat_relax_rounds,
-                                          l.inbox_span,
-                                          l.tree_load,
-                                          l.tree_clauses,
-                                          l.tree_by_crit,
-                                          l.io_preroute,
-                                          l.sat_alt,
-                                          l.push_rounds,
-                                          l.push_fraction,
-                                          l.tree_room,
-                                          l.tree_congestion),
-                              h);
+    h             = hash_text(
+        std::format("legroute-v3:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+                    l.box_fill,
+                    l.box_net_max,
+                    l.merge_cost,
+                    l.crit_fraction,
+                    l.crit_window_ps,
+                    l.reserved_tracks,
+                    l.clock_spine,
+                    l.rib_tiles,
+                    l.final,
+                    l.route_passes,
+                    l.cap_scale,
+                    l.window_tiles,
+                    l.crit_boxes,
+                    l.tree_boxes,
+                    l.tree_moves,
+                    l.sat_relax_rounds,
+                    l.inbox_span,
+                    l.tree_load,
+                    l.tree_clauses,
+                    l.tree_by_crit,
+                    l.io_preroute,
+                    l.sat_alt,
+                    l.tree_congestion,
+                    l.steiner_pins,
+                    l.capacity_lazy,
+                    l.freeze,
+                    l.steiner_min,
+                    l.hop_share,
+                    l.hop_spread,
+                    l.sat_seed),
+        h);
     h             = hash_text(std::format("legroute-budgets:{}:{}:{}:{}:{}:{}:{}:{}",
                                           l.sat_conflicts,
                                           l.sat_ms,
@@ -8864,7 +8867,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       lopt.sat_ms         = po.sat_ms;
       lopt.sat_min_fill   = po.fill;
       lopt.sat_alt.clear();
-      lopt.push_rounds      = 0;
       lopt.macro_halo_x_dbu = v.halo_x;
       lopt.macro_halo_y_dbu = v.halo_y;
       lopt.output_dir       = options.output_dir.empty() ? "" : options.output_dir + "/legroute_probe";
@@ -9144,7 +9146,13 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         }
         const auto* profile = legroute_power(frame, regions);
         legroute_report     = legroute(tech, frame, final_gp_timing, lopt, regions, profile);
-        if (const size_t failed = legroute_report->sat_unsat_regions + legroute_report->sat_unknown_regions) {
+        if (const size_t failed = legroute_report->sat_unsat_regions + legroute_report->sat_unknown_regions;
+            failed && !options.legroute_probe.strict) {
+          std::fprintf(stderr,
+                       "legroute: %zu of %zu regions without a routable answer; keeping the placement (legroute.strict=false)\n",
+                       failed,
+                       legroute_report->sat_regions);
+        } else if (failed) {
           // Stop on an unsuccessful model solve; UNKNOWN is not proof of unroutability.
           const bool fixed_core = !options.generated_core;
           throw std::runtime_error(

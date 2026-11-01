@@ -403,7 +403,8 @@ TEST(Legroute, FailureLeavesTheFloorplanUnchanged) {
   EXPECT_EQ(f.fp.components, before.components);
 }
 
-// The SAT placement's guarantee: per tile and direction, the nets whose chosen legs cover the tile fit its tracks.
+// The SAT placement's guarantee: per tile edge and direction, the nets whose chosen legs cross the edge fit the tracks
+// of the narrower tile beside it.
 TEST(Legroute, SatPlacementFitsTheTracks) {
   for (unsigned reserved : {1u, 7u}) {  // 7 of the fixture's 8-10 tracks per layer reserved: the capacity binds
     Fixture f;
@@ -426,24 +427,33 @@ TEST(Legroute, SatPlacementFitsTheTracks) {
     for (const auto& b : boxes.boxes) {
       EXPECT_TRUE(used.insert(b.tile).second) << "two boxes on tile " << b.tile;
     }
-    std::map<std::pair<int, bool>, std::set<int>> cover;  // (tile, horizontal) -> nets
+    std::map<std::pair<int, bool>, std::set<int>> cross;  // (edge: its left / lower tile, horizontal) -> nets
     for (const auto& c : R.conns) {
       for (size_t k = 0; k + 1 < c.poly.size(); ++k) {
         const auto [c0, r0] = c.poly[k];
         const auto [c1, r1] = c.poly[k + 1];
-        for (int cc = std::min(c0, c1); cc <= std::max(c0, c1); ++cc) {
-          for (int rr = std::min(r0, r1); rr <= std::max(r0, r1); ++rr) {
-            cover[{g.tile(cc, rr), r0 == r1}].insert(c.net);
+        if (r0 == r1) {
+          for (int cc = std::min(c0, c1); cc < std::max(c0, c1); ++cc) {
+            cross[{g.tile(cc, r0), true}].insert(c.net);
+          }
+        } else {
+          for (int rr = std::min(r0, r1); rr < std::max(r0, r1); ++rr) {
+            cross[{g.tile(c0, rr), false}].insert(c.net);
           }
         }
       }
     }
-    for (const auto& [key, nets] : cover) {
-      int cap = key.second ? g.box_cap[key.first] : 0;  // the box layer's tracks count as H
+    const auto tracks = [&](int t, bool h) {
+      int cap = h ? g.box_cap[t] : 0;  // the box layer's tracks count as H
       for (size_t l = 0; l < g.layers.size(); ++l) {
-        cap += g.layers[l].horizontal == key.second ? g.cap[l][key.first] : 0;
+        cap += g.layers[l].horizontal == h ? g.cap[l][t] : 0;
       }
-      EXPECT_LE(int(nets.size()), cap) << "tile " << key.first << (key.second ? " H" : " V");
+      return cap;
+    };
+    for (const auto& [key, nets] : cross) {
+      const int t = key.first, q = key.second ? t + 1 : t + g.cols;
+      EXPECT_LE(int(nets.size()), std::min(tracks(t, key.second), tracks(q, key.second)))
+          << "edge of tile " << t << (key.second ? " H" : " V");
     }
   }
 }

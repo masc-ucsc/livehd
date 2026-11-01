@@ -162,8 +162,6 @@ int   cell_sites(const Design&, const Grid&, int movable);
 bool  box_fits(const Design&, const Grid&, const Box&, int tile);
 
 // ---------------------------------------------------------------- L3 SAT placement
-// experiment (Legroute_options::subregion_cells): min-cut sub-regions replace the regions of the grid and boxes
-void subdivide_regions(const Design&, Grid&, Boxes&, Legroute_report&);
 void pack_cells(const Design&, const Grid&, const Boxes&);  // trivial in-box packing (F1 refines)
 
 // ---------------------------------------------------------------- routing model

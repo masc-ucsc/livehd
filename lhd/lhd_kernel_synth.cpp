@@ -442,6 +442,10 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.boundarypins.align               = truthy(synth_set(opts, "place.region.pinalign", "false"));
   out.boundarypins.align_near          = number("place.region.pinalign.near", "0");
   out.boundarypins.clean_cuts          = truthy(synth_set(opts, "place.region.cleancuts", "false"));
+  // legroute's regions want clean cuts (no net dipping into a region through one side with 0 or 1 cell there)
+  if (truthy(synth_set(opts, "place.legroute", "false")) && synth_set(opts, "place.region.cleancuts", "").empty()) {
+    out.boundarypins.clean_cuts = true;
+  }
   // bus order across region edges is the boundary-pin flow with ordered, spaced, fixed virtual pins
   if (truthy(synth_set(opts, "place.region.busorder", "true"))) {
     out.boundarypins.enabled = out.boundarypins.split = out.boundarypins.order = true;
@@ -453,7 +457,6 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_options.merge_cost       = number("place.legroute.merge_cost", "20");
   out.legroute_options.clock_spine      = truthy(synth_set(opts, "place.legroute.clock_spine", "true"));
   out.legroute_options.rib_tiles        = integer("place.legroute.rib_tiles", "4");
-  out.legroute_options.subregion_cells  = integer("place.legroute.subregion_cells", "0");
   out.legroute_options.cap_scale        = number("place.legroute.cap_scale", "1");
   out.legroute_options.window_tiles     = integer("place.legroute.window_tiles", "4");
   out.legroute_options.crit_boxes       = number("place.legroute.crit_boxes", "0");
@@ -465,11 +468,17 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_options.tree_by_crit     = truthy(synth_set(opts, "place.legroute.tree_by_crit", "false"));
   out.legroute_options.io_preroute      = truthy(synth_set(opts, "place.legroute.io_preroute", "false"));
   out.legroute_options.sat_alt          = synth_set(opts, "place.legroute.sat_alt", "");
-  out.legroute_options.tree_room        = truthy(synth_set(opts, "place.legroute.tree_room", "false"));
   out.legroute_options.tree_congestion  = number("place.legroute.tree_congestion", "0");
+  out.legroute_options.steiner_pins     = integer("place.legroute.steiner_pins", "0");
+  out.legroute_options.steiner_min      = integer("place.legroute.steiner_min", "3");
+  out.legroute_options.reserved_tracks  = integer("place.legroute.reserved_tracks", "1");
+  out.legroute_options.hop_share        = number("place.legroute.hop_share", "1.0");
+  out.legroute_options.hop_spread       = number("place.legroute.hop_spread", "6");
+  out.legroute_options.sat_ms           = integer("place.legroute.sat_ms", "60000");
+  out.legroute_options.capacity_lazy    = integer("place.legroute.capacity_lazy", "2");
+  out.legroute_options.freeze           = truthy(synth_set(opts, "place.legroute.freeze", "false"));
+  out.legroute_options.sat_seed         = truthy(synth_set(opts, "place.legroute.sat_seed", "true"));
   out.legroute_probe.tree_congestion    = number("place.legroute.probe.tree_congestion", "1");
-  out.legroute_options.push_rounds      = integer("place.legroute.push_rounds", "0");
-  out.legroute_options.push_fraction    = number("place.legroute.push_fraction", "0.05");
   out.legroute_probe.enabled            = truthy(synth_set(opts, "place.legroute.probe", "false"));
   out.legroute_probe.cells              = integer("place.legroute.probe.cells", "1200");
   out.legroute_probe.fill               = number("place.legroute.probe.fill", "0.5");
@@ -477,6 +486,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_probe.max_inflate        = number("place.legroute.probe.max_inflate", "1.5");
   out.legroute_probe.sat_ms             = integer("place.legroute.probe.sat_ms", "20000");
   out.legroute_probe.iterations         = integer("place.legroute.probe.iterations", "100");
+  out.legroute_probe.strict             = truthy(synth_set(opts, "place.legroute.strict", "true"));
   if (out.legroute_probe.enabled
       && (!out.legroute_probe.cells || !(out.legroute_probe.fill >= 0 && out.legroute_probe.fill < 1)
           || !(out.legroute_probe.target > 0 && out.legroute_probe.target <= 1) || !(out.legroute_probe.max_inflate >= 1)

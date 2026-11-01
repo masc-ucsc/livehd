@@ -96,13 +96,20 @@ at a fixed tile.</li>
 both. Each leg covers every tile from end to end in its row or column, the boxes' own tiles included (an
 external pin always needs a trace in its box).</li>
 <li><strong>Overlap is free within a net:</strong> per tile and direction one literal per net, implied by
-any of its connections' legs covering the tile. Capacity is a cardinality constraint over those literals
-plus the in-box demand of the box on the tile.</li>
+any of its connections' legs covering the tile.</li>
+<li><strong>Capacity per tile edge:</strong> a cardinality constraint per edge between two neighbor tiles over
+the nets whose covers hold on both (the nets crossing it), against the physical tracks of the narrower tile
+less the edges the routes fixed ahead cross. The in-box wires stay off the edge counters (the boxing pin
+limit and legroute.final's job). The bounds are lazy: an edge's constraint is added only when an answer
+overflows it, and the model is solved again incrementally (<code>capacity_lazy</code>).</li>
+<li><strong>Seeded search:</strong> the fallback placement (boxes on their nearest fitting tiles) is tried
+first as assumptions (<code>sat_seed</code>); an UNSAT there drops them and the free model continues with
+what the solver learned.</li>
 <li><strong>Later, as tiers or exceptions:</strong> trivial Steiner shapes for 1-n nets (all sinks on one
 row or column, or two crossing axes); adjacent 1-1 nets cost no track (in-box metal).</li>
 </ul>
 
-<h2>Pre-placement, policies and density push (experimental options, off by default)</h2>
+<h2>Pre-placement and policies (options, off by default)</h2>
 <ul>
 <li><strong>Fixed ahead of the SAT:</strong> the top critical boxes on their timing tiles; 1-n trees, highest
 fanout first, skipping a net that would leave a tile with less than half of its tracks free, until the
@@ -111,9 +118,6 @@ box held under the track). Fixed demand over a tile's tracks drops trees, then u
 <li><strong>Two policies per region, in parallel:</strong> the options and a second set
 (<code>sat_alt</code>) that fails differently (more fixed: fast UNSAT; fewer fixed: timeouts). A region keeps a
 routable answer, the shorter weighted routes when both are.</li>
-<li><strong>Density push:</strong> a region without a routable answer pushes a fraction of its least critical
-free boxes, nearest first, to neighbor regions with free tiles, and the changed regions solve again. A region
-whose model is unchanged (same clauses) keeps its earlier answer.</li>
 </ul>
 
 <h2>Routability probe (GOALPlace-style inflation, off by default)</h2>
@@ -148,6 +152,47 @@ cells, when already within a pin pitch (<code>place.region.pinalign.near</code>)
 alignment.</li>
 </ul>
 
+<h2>Rules validated against a routed witness (2026-10-31)</h2>
+<p>The method: route a legroute placement with OpenROAD (same core, M2&ndash;M7), count its wires in the tile grid
+(<code>scratchpad/cal/route_census.py</code>), apply our counting rules to those wires
+(<code>rules_check.py</code>), and solve the SAT with every box frozen on that placement
+(<code>legroute.freeze=true</code>). A rule that rejects a routing that exists is wrong; simplifying a wrong
+model is pointless. On sha3 at utilization 0.52 OpenROAD routes legroute's own fallback placement with zero
+overflow and zero DRCs; the old model said 0 of 8 regions, UNSAT in under a second even frozen. Three rules
+were wrong, each about 2&times;:</p>
+<ol>
+<li><strong>Count per tile edge, not per tile.</strong> 73% of the real H runs stay inside one tile (pin stubs);
+per-tile distinct nets are 2.3&times; the per-edge count. (Now the only counting; the per-tile model is
+gone.)</li>
+<li><strong>The in-box charge stays off the edge counters.</strong> The wires that stay inside a tile (mean
+14.5 nets, max 42) fit on their own; adding our in-box charge (mean 6, max 14) to the edge count rejected
+1,275 of 3,094 edges of the real routing. The in-box budget is a boxing rule (pin limit) and legroute.final's
+job. (The option to charge them on the edges is gone.)</li>
+<li><strong>Fixed routes reserve the edges they cross, not whole tiles.</strong> A hop, a fixed tree or an IO
+pre-route took one track from every tile of its path, i.e. two or three edges per crossing; at the boundary
+tiles the hops cluster (up to 15 per tile) and left 0&ndash;5 tracks for the region. The UNSAT cores of the
+frozen model were all region-edge tiles with a fixed endpoint. Now a hop takes its boundary edge only and a
+trunk the edges along it.</li>
+</ol>
+<p>A fourth, in the hop chaining: a region-crossing net joined a region to the net through the first adjacent
+region already joined, in region-id order, so chip-spanning nets (minimax's 17-pin buffer trees) were pulled
+through regions holding none of their pins, stacking 30+ hop-to-hop straight runs on one row (minimax region 7:
+UNSAT in 0.5 s while OpenROAD used 8&ndash;12 nets there). The join now prefers regions holding the net's own
+endpoints, nearest first.</p>
+<p>Search: the fallback placement (boxes on their nearest fitting tiles) is tried first as assumptions
+(<code>sat_seed</code>); the dense sha3 regions that timed out at 180 s are SAT on it in 5&ndash;13 s, and an
+UNSAT costs little while the solver keeps what it learned. OpenROAD on the resulting sha3 placement: zero
+overflow, zero DRCs, WNS &minus;392.7 ps / TNS &minus;470k against the satlegalize baseline's &minus;394.5 /
+&minus;466k on the same core (10 GHz SDC): timing competitive before any timing tier.</p>
+<p>With the fixes the frozen witness placement is SAT in every sha3 region (1&ndash;13 s each), the
+unfrozen SAT routes 8 of 8 sha3 regions and 11 of 11 minimax regions (every crossing modeled), and lazy bounds
+(<code>capacity_lazy=2</code>: a tile edge's bound is added only when an answer overflows it, re-solving
+incrementally) cut the model from 74M to 13M clauses. Every region-boundary crossing is modeled
+(<code>hop_share</code> 1): a pass-through net's chained hops avoid the rows and columns earlier
+pass-throughs loaded (<code>hop_spread</code>, either L orientation), which is what let the last dense sha3
+region solve. Still open: the in-box routing is no longer checked by the SAT; shapes (Z, trunks) made no
+difference once the counting was right.</p>
+
 <h2>Experiments that did not work</h2>
 <p>sha3 and minimax (asap7, 10 GHz SDC), legroute.local at 1&times; tracks unless noted. "Routable" counts
 regions with a SAT answer. Every option below exists, off by default, unless marked removed.</p>
@@ -159,7 +204,7 @@ critical first, 30% or 70% rules, a 5M target (<code>tree_load</code>, <code>tre
 <td>At 1&times; only one sha3 region solves under every rule. At 1.25&times; the 50% rule is best (4 of 9).
 More fixed boxes: fast UNSAT. Fewer: timeouts.</td>
 <td>The tracks run out, not the search; the rule only moves which way a region fails.</td></tr>
-<tr><td>Trees keep the most tracks free instead of the shortest RC (<code>tree_room</code>)</td>
+<tr><td>Trees keep the most tracks free instead of the shortest RC (<code>tree_room</code>, removed)</td>
 <td>No change (3 of 9 at 1.25&times;).</td>
 <td>Most regions start under 10M clauses and get no trees at all.</td></tr>
 <tr><td>IO pre-route: pin-to-pin feedthroughs and pin&ndash;box&ndash;pin tracks routed ahead
@@ -176,9 +221,8 @@ regions unchanged or one fewer.</td>
 <td>The second policy wins 0&ndash;2 regions; a fewer-trees second policy builds 15&ndash;26M-clause models
 that always time out.</td>
 <td>Both policies fail on the same dense regions.</td></tr>
-<tr><td>Density push: boxes of failing regions move to neighbors (<code>push_rounds</code>)</td>
-<td>The neighbors that receive boxes stop solving (sha3 went from 3 routable regions to 2 at 1.25&times;); now
-the best round is kept, so it can only waste time.</td>
+<tr><td>Density push: boxes of failing regions move to neighbors (<code>push_rounds</code>, removed)</td>
+<td>The neighbors that receive boxes stop solving (sha3 went from 3 routable regions to 2 at 1.25&times;).</td>
 <td>The neighbors are as dense; moving boxes moves the problem.</td></tr>
 <tr><td>Lower utilization alone (0.45&ndash;0.55)</td>
 <td>Most regions stay at 0.75&ndash;0.85 box fill; only sparse leftovers solve.</td>
@@ -194,33 +238,48 @@ density = utilization + 0.05.</td>
 <td>Not built: regions are already near 10M clauses, and small ones fail too (68 boxes, 0.8M clauses,
 timeout; 94 boxes, UNSAT in 0.15 s).</td>
 <td>Model size is not what makes a region hard.</td></tr>
-<tr><td>Min-cut sub-regions (VieCut, <code>subregion_cells</code>)</td>
+<tr><td>Min-cut sub-regions (VieCut, <code>subregion_cells</code>, removed)</td>
 <td>No routability gain; the work moved to larger regions with more fixed ahead instead.</td>
 <td>Same density, same tracks.</td></tr>
+<tr><td>Rigid templates: repeated 1-n structures boxed alike and placed as a whole
+(<code>templates</code>, removed)</td>
+<td>11% more boxes (the first copy's grouping rarely fits the others), no routability gain.</td>
+<td>The structures repeat in cell types, not in geometry; the solver places the copies well enough one box
+at a time.</td></tr>
+<tr><td>Z-shapes and single-trunk Steiner trees in the model (<code>steiner_min</code>,
+<code>steiner_pins</code>, kept as options)</td>
+<td>No change once the counting was per edge.</td>
+<td>A net's L-shapes already overlap for free, so a star is close to a tree where it counts.</td></tr>
+<tr><td>Per-tile capacity with the in-box demand on the counters (the first model)</td>
+<td>Rejected a placement OpenROAD routed with zero overflow (see the witness section). Removed.</td>
+<td>About 2&times; pessimistic per rule.</td></tr>
 </table>
 
 <h2>Status (2026-10-31)</h2>
 <ul>
-<li>litedram (utilization 0.45) is fully routable: 8 of 8 regions, SAT 118 s.</li>
-<li>minimax: 10 of 13 regions with the probe, core growth to 0.54 and density lowered with it.</li>
-<li>sha3: 1&ndash;2 of 8&ndash;12 regions in every setting. The best was 6 of 12, at utilization 0.45, density
-0.55, 2,500-cell regions, no probe.</li>
-<li>Lower bound per region (in-box demand plus each net's legs across the gaps between its endpoints'
-windows): failing sha3 regions need only 41&ndash;76% of their H tracks and 31&ndash;47% of V. Regions fail
-well under capacity, so the routes the model allows are long or local.</li>
-<li>H is the binding direction everywhere: in-box demand alone takes 20&ndash;25% of the H tracks.</li>
-<li>The relax diagnostic (drop UNSAT cores of tile bounds) never reaches SAT in three rounds: the shortage is
-spread over the region, not a few tiles at virtual pins or fixed boxes.</li>
+<li>sha3 (utilization 0.52, density 0.57, 2,500-cell regions): 8 of 8 regions routable, SAT 62 s in all (the
+densest region 34 s), 11.1M clauses, every boundary crossing modeled, 7 of 8 regions on their seeded
+placement; 656 edge bounds added over 51 re-solves.</li>
+<li>minimax (utilization 0.54, density 0.59): 11 of 11 regions, SAT 5 s in all, every region under 2 s, 7.0M
+clauses, 87 bounds over 26 re-solves.</li>
+<li>litedram (utilization 0.45): 8 of 8 regions (earlier model, 118 s).</li>
+<li>OpenROAD on the sha3 SAT placement: zero overflow, zero DRCs, DR WNS &minus;392.7 ps / TNS &minus;470k
+against the satlegalize baseline's &minus;394.5 / &minus;466k on the same core.</li>
+<li>Route guides (<code>legroute.guide</code>: per net the corridor of tiles its SAT route covers, on every
+routing layer, M1 on the pin tiles; OpenROAD <code>read_guides</code> then <code>detailed_route</code>):
+TritonRoute accepts them, but the guided detailed route converges slowly (77k violations after its first
+iteration, 11k after three, where OpenROAD's own global route reaches zero on the same placement). The
+corridors are one tile wide and the SAT's shapes allow no detours; the guides need width, or a global-route
+pass constrained to them, before the detailed route is a fair test of the routes themselves.</li>
+<li>H is the binding direction everywhere; V never binds.</li>
 </ul>
 
 <h2>Plan</h2>
 <ol>
-<li><strong>Steiner connections instead of stars.</strong> Every 1-n net becomes one trunk (H or V, on an
-endpoint's row or column) with ribs, the shape the fixed trees already use. Today each sink is its own L from
-the first endpoint. First measure star against trunk H demand on sha3 offline to size the gain.</li>
-<li><strong>Z-shapes.</strong> One extra bend per connection, so a route can step around a full row.</li>
-<li><strong>Tree templates.</strong> sha3's 1-n nets repeat (half of them fall in 19 driver/sink-type
-structures, 88% have a twin): solve each structure's box pattern and trunk once and reuse it.</li>
+<li><strong>Boundary crossings:</strong> done (every crossing modeled, hops spread off loaded rows and
+columns). Next is letting the SAT choose among a few boundary tiles per net when a region still times out.</li>
+<li><strong>In-box check.</strong> The SAT no longer bounds in-box wires: validate with legroute.final (or the
+OpenROAD witness) that the boxing pin limit is enough; tighten boxing if not.</li>
 <li><strong>In-box demand.</strong> The 20&ndash;25% H share is an estimate (internal-net spans plus a quarter
 of the external pins); calibrate it against legroute.final's in-box routes.</li>
 <li><strong>Then</strong> the timing tiers, legroute.final speed, and partition_m.</li>
@@ -239,7 +298,12 @@ possible.</p>
 
 <h2>Removed</h2>
 <p>The min-cost snap (LEMON), the RUDY bin spill and PathFinder pattern routing: density targets and
-negotiation guess routability; the SAT model guarantees it.</p>
+negotiation guess routability; the SAT model guarantees it. From the SAT experiments (2026-10-31): the
+per-tile capacity model and the in-box charge on the counters, density push, rigid templates, VieCut
+sub-regions, <code>tree_room</code>, and the model-hash answer reuse across push rounds. What stays: the
+per-edge lazy bounds, the seeded search, edge reservations of the fixed routes, the hop join preference and
+spread, the fixed trees and IO pre-routes, two policies, the relax and freeze diagnostics, and the
+routability probe.</p>
 
 <h2>Evaluation</h2>
 <ul>

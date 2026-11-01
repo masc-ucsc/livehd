@@ -298,21 +298,26 @@ Boundary_pin_model split_boundary_nets(const dp::Design& original, const Region_
       }
       for (const auto& [c, entry] : crossings) {
         const auto& [box, at] = entry;
-        bool line_x = true, line_y = true, ok = true;
+        bool line_x = true, line_y = true, ok = true, same = true;
         int  other = -2;
         for (int i : at) {
           line_x      &= coordinates[i].first == coordinates[at[0]].first;
           line_y      &= coordinates[i].second == coordinates[at[0]].second;
           const int q  = regions[i].size() == 2 ? *regions[i].begin() == box ? *regions[i].rbegin() : *regions[i].begin() : -2;
-          ok          &= !dropped[i] && q != -2 && (other == -2 || q == other);
+          ok          &= !dropped[i] && q != -2;
+          same        &= other == -2 || q == other;
           other        = q;
         }
         if (!ok || !(line_x || line_y)) {
           continue;
         }
+        // a dip into one neighbor: its crossings join there; a dip between two neighbors (the tree bent below their
+        // shared boundary line): the crossings go, the neighbors' pieces stay apart (legroute joins them by a hop)
         for (int i : at) {
           dropped[i] = 1;
-          sets.merge(vertices.at({other, i}), vertices.at({other, at[0]}));
+          if (same) {
+            sets.merge(vertices.at({other, i}), vertices.at({other, at[0]}));
+          }
         }
         ++result.dips_removed;
       }
