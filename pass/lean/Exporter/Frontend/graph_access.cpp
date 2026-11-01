@@ -1,8 +1,12 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "graph_access.hpp"
 
+#include <exception>
 #include <limits>
 #include <sstream>
+#include <vector>
+
+#include "hlop/readmem.hpp"
 
 namespace lean_pass {
 [[noreturn]] void fatal(const LeanCtx& /*ctx*/, const std::string& msg) { throw Emit_error("[ERROR] pass.lean: " + msg); }
@@ -439,20 +443,18 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
   }
 
   if (!mi.init_pin.is_invalid()) {
-    // A file preload (`initial` is a constant STRING, the memory image spec) is
-    // external state, not constant contents (graph/node_util.hpp
-    // memory_image_of). Nothing here can read the file, so refuse it by name
-    // before the contents checks misread the string as bits.
-    if (pin_is_const(mi.init_pin) && pin_const_value(mi.init_pin).is_string()) {
-      fatal(ctx,
-            memory_policy_summary(mi) + ". `init` is a FILE PRELOAD (`" + pin_const_value(mi.init_pin).to_string()
-                + "`): external state loaded from a file, not constant contents. pass.lean cannot read it.");
-    }
+    // A FILE PRELOAD: `initial` is a constant STRING, the memory image command
+    // (`$readmemh`/`$readmemb`, Pyrope's readmem; graph/node_util.hpp
+    // memory_image_of). The file is read HERE, at export, into the same packed
+    // constant a literal initializer gives, so everything below treats the two
+    // alike.
+    const auto image = livehd::graph_util::memory_image_of(node);
     // STRICT: only an immutable table becomes `memConst`.
     if (!mi.write_ports.empty()) {
       fatal(ctx, memory_policy_summary(mi)
                      + ". `init` is driven on a memory that also has " + std::to_string(mi.write_ports.size())
-                     + " write port(s): that is RAM WITH INITIAL CONTENTS, which needs an initial-state constraint on "
+                     + " write port(s)" + (image ? " (a file preload of `" + image->path + "`)" : std::string{})
+                     + ": that is RAM WITH INITIAL CONTENTS, which needs an initial-state constraint on "
                        "mutable memory state, not the immutable-table model. Refusing rather than dropping the "
                        "initial contents.");
     }
@@ -475,7 +477,39 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
       fatal(ctx, memory_policy_summary(mi) + ". `init` on unsupported memory type " + std::to_string(mi.type) + ".");
     }
 
-    const auto iv = pin_const_value(mi.init_pin);
+    // The file is read as `lhd sim` reads it at power-on (inou/cgen/cgen_sim.cpp:
+    // fill with 0, then load; hlop/readmem.hpp parses): an entry the file does
+    // not name is 0, a word wider than an entry keeps its low bits, and an X/Z
+    // digit is four-valued contents, refused below like a literal's. The path
+    // is opened as written: an SV filename keeps runtime-cwd semantics (the
+    // slang reader records it unresolved), so a relative one is relative to the
+    // directory `lhd` runs in.
+    const Dlop iv = [&]() -> Dlop {
+      if (!image) {
+        return pin_const_value(mi.init_pin);
+      }
+      std::vector<hlop::Memory_image_word> words;
+      try {
+        words = hlop::read_memory_image(image->path, image->radix, static_cast<int>(mi.bits), static_cast<size_t>(mi.size));
+      } catch (const std::exception& ex) {
+        fatal(ctx,
+              memory_policy_summary(mi) + ". `init` is a FILE PRELOAD that cannot be read (" + ex.what()
+                  + "; a relative path is opened from the directory `lhd` runs in).");
+      }
+      auto packed = Dlop::create_integer(0);
+      for (const auto& w : words) {
+        const auto entry = Dlop::from_pyrope("0ub" + w.binary);
+        if (entry->has_unknowns()) {
+          fatal(ctx,
+                memory_policy_summary(mi) + ". the file preload `" + image->path + "` has X/Z digits at entry "
+                    + std::to_string(w.address) + "; the strict certificate rejects four-valued contents.");
+        }
+        const auto at   = Dlop::create_integer(static_cast<int64_t>(w.address) * static_cast<int64_t>(mi.bits));
+        const auto keep = Dlop::get_mask_value(static_cast<int>(mi.bits))->shl_op(*at)->not_op();
+        packed          = packed->and_op(*keep)->or_op(*entry->shl_op(*at));  // a later word for one address wins
+      }
+      return *packed;
+    }();
     if (iv.has_unknowns()) {
       fatal(ctx, memory_policy_summary(mi) + ". `init` has X/Z bits; the strict certificate rejects four-valued contents.");
     }
