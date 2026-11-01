@@ -16,10 +16,13 @@ set -euo pipefail
 #   export   the certificate carries the commit table (Lean literal and DCERT3).
 #   IR, TV   cert_trace equals iverilog on every step, under the random
 #            schedule and with both clocks every step.
-#   legacy   the legacy model (no proof bridge) equals iverilog under the random
-#            schedule. The bridge refuses the commit table by name.
+#   legacy   the legacy model, with its proof bridge (`_next_refines_fast`,
+#            elaborated without sorry), equals iverilog under the random
+#            schedule.
 #   FP       refuses admission (`oneDomain false`): it does not model a commit
 #            table yet.
+#   D3       translation validation (d3_sweep.py, its default generator) passes
+#            every gate, the proof included, and rejects a memory mutation.
 # Controls:
 #   the random schedule's trace differs from the both-clocks trace;
 #   a certificate whose two entries are swapped differs from iverilog;
@@ -183,17 +186,11 @@ PY
   echo "ok: control -- the certificate with $what differs from the source on $n steps"
 done
 
-# ---- legacy: the model without the bridge; the bridge refuses ----------------------
+# ---- legacy: the model with its proof bridge ----------------------------------------
 L="$OUT/legacy"
 mkdir -p "$L"
-if (cd "$L" && "$LHD" compile lg:../lg --top ram2c --emit-dir lean:bridge --set formal.lean.emit_cert=true \
-      --set formal.lean.emit_fast_bridge=true --workdir bw > bridge.log 2>&1); then
-  echo "FAIL: the legacy bridge accepted a commit table"; exit 1
-fi
-grep -q 'commit table' "$L/bridge.log" || { grep -o '"message":"[^"]*' "$L/bridge.log" | head -2; echo "FAIL: the bridge refusal does not name the commit table"; exit 1; }
-echo "ok: the legacy proof bridge refuses the commit table by name"
 (cd "$L" && "$LHD" compile lg:../lg --top ram2c --emit-dir lean:model --set formal.lean.emit_cert=true \
-   --set formal.lean.emit_fast_bridge=false --workdir lw > model.log 2>&1) \
+   --set formal.lean.emit_fast_bridge=true --workdir lw > model.log 2>&1) \
   || { grep -o '"message":"[^"]*' "$L/model.log" | head -2; echo "FAIL: legacy emission"; exit 1; }
 LR="$L/lroot"; OL="$L/olean"
 mkdir -p "$LR/LegacyRam2c" "$OL/LegacyRam2c"
@@ -203,12 +200,14 @@ python3 -I "$ROOT/pass/lean/Legacy_Fast_Model_Simulator/scripts/make_legacy_sim.
   || { tail -3 "$L/gen.log"; echo "FAIL: make_legacy_sim"; exit 1; }
 (cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP:$OL" lean -R "$LR" -o "$OL/LegacyRam2c/ram2c_Lgraph.olean" \
    "$LR/LegacyRam2c/ram2c_Lgraph.lean" > "$L/build.log" 2>&1) \
-  || { grep -m5 error "$L/build.log"; echo "FAIL: legacy elaboration"; exit 1; }
+  || { grep -m5 error "$L/build.log"; echo "FAIL: legacy elaboration (bridge proofs)"; exit 1; }
 grep -q sorry "$L/build.log" && { echo "FAIL: sorry in the legacy model"; exit 1; }
+grep -q 'theorem ram2c_next_refines_fast' "$LR/LegacyRam2c/ram2c_Lgraph.lean" \
+  || { echo "FAIL: the bridge theorem for the next state was not emitted"; exit 1; }
 (cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP:$OL" lean --run "$LR/LegacyRam2c/ram2c_LegacySim.lean" \
    "$OUT/stim.txt" "$OUT/edges.txt" > "$L/legacy.txt" 2> "$L/legacy.err") || { cat "$L/legacy.err"; echo "FAIL: legacy run"; exit 1; }
 diff "$OUT/rtl_tb.txt" "$L/legacy.txt" > "$L/diff.txt" || { head -4 "$L/diff.txt"; echo "FAIL: legacy differs from the source"; exit 1; }
-echo "ok: the legacy model equals iverilog on all $STEPS steps under the random schedule"
+echo "ok: the legacy model (bridge proofs elaborated) equals iverilog on all $STEPS steps under the random schedule"
 
 # ---- FP: refuses admission --------------------------------------------------------
 rc=0
@@ -219,4 +218,23 @@ rc=0
 grep -q 'oneDomain false' "$OUT/fp.log" && grep -q 'MEMROUTE ADMISSION REFUSED' "$OUT/fp.log" \
   || { tail -5 "$OUT/fp.log"; cat "$OUT/fp.err"; echo "FAIL: FP did not refuse on oneDomain"; exit 1; }
 echo "ok: FP refuses admission (oneDomain false)"
+
+# ---- D3: translation validation, with its proof -------------------------------------
+D3="$OUT/d3"
+mkdir -p "$D3/certs"
+cp "$OUT/vc/ram2c_Lgraph.lean" "$D3/certs/"
+(cd "$ROOT" && env -u OUT -u TMPDIR python3 -I pass/lean/Translation_Validation/scripts/d3_sweep.py \
+   --certs "$D3/certs" --out "$D3/out" --jobs 1 --timeout 900 --prove > "$D3/sweep.log" 2>&1) \
+  || { tail -5 "$D3/sweep.log"; echo "FAIL: D3 sweep"; exit 1; }
+python3 -I - "$D3/out" <<'PY'
+import csv, sys
+rows = list(csv.DictReader(open(sys.argv[1]), delimiter="\t"))
+if len(rows) != 1:
+    sys.exit(f"FAIL: D3 wrote {len(rows)} rows")
+r = rows[0]
+gates = "".join(r[k] for k in ("cert", "compile", "reify", "typecheck", "sim", "checker", "agree", "proof"))
+if gates != "11111111" or r["mut_mem"] != "rejected" or r["drift"]:
+    sys.exit(f"FAIL: D3 {r['verdict']}: gates {gates}, mut_mem {r['mut_mem']}, drift {r['drift'] or '-'}")
+print("ok: D3 -- every gate passes, the proof included; a memory mutation is rejected")
+PY
 echo "PASS: two_clock_mem_oracle"

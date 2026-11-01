@@ -288,6 +288,70 @@ def memNext (env : SlotEnv) (e : ClockEdges) (s : RuntimeState) (idx : Nat)
     | some c => refMem env c.nextImg
     | none   => s.mems[idx]?.getD (fun _ => mk_bv 0 0)
 
+/-- The entry of a commit table whose clock set is exactly the clocks that
+fired, with its image given as a value; `held` when none matches. -/
+def pickCommit (d : MemoryDesc) (e : ClockEdges) (held : Int → BV) :
+    List (MemCommit × (Int → BV)) → (Int → BV)
+  | []             => held
+  | (c, v) :: rest => if d.firedIs e c then v else pickCommit d e held rest
+
+/-- The descriptor the commit-table rule reads: `allFire` and `firedIs` read a
+memory's `clock` and `commits` and nothing else. -/
+def tableDesc (ck : Nat) (cs : Array MemCommit) : MemoryDesc :=
+  { aw := 0, dw := 0, nextImg := 0, clock := ck, commits := cs }
+
+/-- A memory with a commit table, its clock and table as LITERALS and its images
+as VALUES: `all` when every clock of the memory fired, else the matching entry,
+else `held`. This is what a generated (D3) model computes;
+`memNext_eq_memPick` ties it to `memNext`. -/
+def memPick (ck : Nat) (cs : Array MemCommit) (e : ClockEdges) (all : Int → BV)
+    (entries : List (MemCommit × (Int → BV))) (held : Int → BV) : Int → BV :=
+  if (tableDesc ck cs).allFire e then all else pickCommit (tableDesc ck cs) e held entries
+
+theorem pickCommit_find (d : MemoryDesc) (e : ClockEdges) (held : Int → BV)
+    (img : MemCommit → (Int → BV)) :
+    ∀ cs : List MemCommit,
+      pickCommit d e held (cs.map fun c => (c, img c))
+        = match cs.find? (d.firedIs e) with
+          | some c => img c
+          | none   => held
+  | []      => rfl
+  | c :: cs => by
+      simp only [List.map_cons, pickCommit, List.find?_cons]
+      cases h : d.firedIs e c
+      · simp [pickCommit_find d e held img cs]
+      · simp
+
+/-- `pickCommit` reads its descriptor only through `firedIs`. -/
+theorem pickCommit_congr {d₁ d₂ : MemoryDesc} {e : ClockEdges} (held : Int → BV)
+    (h : d₁.firedIs e = d₂.firedIs e) :
+    ∀ l, pickCommit d₁ e held l = pickCommit d₂ e held l
+  | []             => rfl
+  | (c, v) :: rest => by simp only [pickCommit, h, pickCommit_congr held h rest]
+
+/-- With a commit table, `memNext` IS `memPick` over the table's images. -/
+theorem memNext_eq_memPick (env : SlotEnv) (e : ClockEdges) (s : RuntimeState) (idx : Nat)
+    (m : ResidualMemoryUpdate) (hc : m.commits.isEmpty = false) :
+    memNext env e s idx m
+      = memPick m.clock m.commits e (refMem env m.nextImg)
+          (m.commits.toList.map fun c => (c, refMem env c.nextImg))
+          (s.mems[idx]?.getD (fun _ => mk_bv 0 0)) := by
+  have ha : (tableDesc m.clock m.commits).allFire e = m.toDesc.allFire e := rfl
+  have hf : (tableDesc m.clock m.commits).firedIs e = m.toDesc.firedIs e := rfl
+  unfold memNext memPick
+  rw [hc, ha, pickCommit_congr _ hf]
+  simp only [Bool.false_eq_true, ite_false]
+  congr 1
+  rw [pickCommit_find, ← Array.find?_toList]
+
+/-- Without one, `memNext` is the one-domain rule. -/
+theorem memNext_of_isEmpty (env : SlotEnv) (e : ClockEdges) (s : RuntimeState) (idx : Nat)
+    (m : ResidualMemoryUpdate) (hc : m.commits.isEmpty = true) :
+    memNext env e s idx m
+      = if fires e m.clock then refMem env m.nextImg
+        else s.mems[idx]?.getD (fun _ => mk_bv 0 0) := by
+  simp [memNext, hc]
+
 def denoteResidual (R : ResidualProgram) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
     RuntimeResult :=
   let env := runBindings R.bindings.toList (sourceEnvArr R.sources i s)

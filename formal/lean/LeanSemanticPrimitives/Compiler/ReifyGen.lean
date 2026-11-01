@@ -75,6 +75,19 @@ def markPhase (msg : String) : CommandElabM Unit := do
   IO.FS.withFile path IO.FS.Mode.append fun h => h.putStrLn s!"{msg} t={t}"
 
 
+/-- A memory WITH a commit table (DCERT3, decision #9), in a generated model:
+`Compiler.memPick` over the table's images, `img` writing one image slot.
+A memory without one keeps each generator's own one-domain term, so a design
+with no table reifies to exactly the term it did before. -/
+def memPickSyntax (eId : Term) (mu : ResidualMemoryUpdate) (all held : Term)
+    (img : Nat → MetaM Term) : MetaM Term := do
+  let cs ← mu.commits.mapM fun c =>
+    `(({ mask := $(quote c.mask), nextImg := $(quote c.nextImg) } : Compiler.MemCommit))
+  let ents ← mu.commits.toList.mapM fun c => do
+    `((({ mask := $(quote c.mask), nextImg := $(quote c.nextImg) } : Compiler.MemCommit),
+        $(← img c.nextImg)))
+  `(Compiler.memPick $(quote mu.clock) #[$cs,*] $eId $all [$(ents.toArray),*] $held)
+
 /-- Slot `sl` names a source (`s<sl>`) or an earlier binding (`v<sl-nsrc>`). -/
 private def slotIdent (nsrc sl : Nat) : Ident :=
   mkIdent (Name.mkSimple (if sl < nsrc then s!"s{sl}" else s!"v{sl - nsrc}"))
@@ -269,13 +282,7 @@ def elabReifyDesignNamed : CommandElab := fun stx => do
       let cert ← unsafe evalExpr DesignCert (mkConst ``DesignCert) dExpr
       match compileDesign cert with
       | .error _ => throwError "reify_design_named: compileDesign refused {d}"
-      | .ok R    =>
-        -- The generated memory step is the one-domain rule; a memory on more
-        -- than one clock domain (a DCERT3 commit table) is refused by name.
-        if R.memoryUpdates.any (fun m => !m.commits.isEmpty) then
-          throwError "reify_design_named: {d} has a memory on more than one clock domain \
-                      (a commit table), which D3 does not model yet"
-        pure R
+      | .ok R    => pure R
     let nsrc := R.sources.size
     let base := f.getId
     let e0   := mkIdent (Name.mkSimple "e0")
@@ -323,8 +330,13 @@ def elabReifyDesignNamed : CommandElab := fun stx => do
     -- is wrong for every step in which that memory's clock does not fire.
     let mems : Array Term ← R.memoryUpdates.mapIdxM fun k mu => do
       let t ← liftTermElabM (NamedModel.valRefAtTyped base nsrc true mu.nextImg envT)
-      liftTermElabM `(if Compiler.fires $eId $(quote mu.clock) then $t
-                      else (($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
+      if mu.commits.isEmpty then
+        liftTermElabM `(if Compiler.fires $eId $(quote mu.clock) then $t
+                        else (($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
+      else
+        let held ← `((($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
+        liftTermElabM (memPickSyntax eId mu t held
+          (fun r => NamedModel.valRefAtTyped base nsrc true r envT))
     elabCommand (← `(command|
       def $f ($eId : Compiler.ClockEdges) ($iId : Compiler.RuntimeInput)
           ($stId : Compiler.RuntimeState) :
@@ -427,8 +439,12 @@ def emitChunkedModel (R : ResidualProgram) (d f : Ident) (csize : Nat) :
           (Compiler.fires $eId $(quote fu.clock)) $aRl)
   let mems : Array Term ← R.memoryUpdates.mapIdxM fun k mu => do
     let t ← liftTermElabM (rootRef true mu.nextImg)
-    liftTermElabM `(if Compiler.fires $eId $(quote mu.clock) then $t
-                    else (($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
+    if mu.commits.isEmpty then
+      liftTermElabM `(if Compiler.fires $eId $(quote mu.clock) then $t
+                      else (($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
+    else
+      let held ← `((($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
+      liftTermElabM (memPickSyntax eId mu t held (rootRef true))
   let mut mbody ← `({ outputs := #[$outs,*],
                       nextState := { flops := #[$flops,*], mems := #[$mems,*] } })
   for t in [0 : nseg] do
@@ -453,12 +469,7 @@ def residualOf (who : String) (d : Ident) : CommandElabM ResidualProgram :=
     let cert ← unsafe evalExpr DesignCert (mkConst ``DesignCert) dExpr
     match compileDesign cert with
     | .error _ => throwError "{who}: compileDesign refused {d}"
-    | .ok R    =>
-      -- As `reify_design_named`: the generated memory step is the one-domain rule.
-      if R.memoryUpdates.any (fun m => !m.commits.isEmpty) then
-        throwError "{who}: {d} has a memory on more than one clock domain (a commit table), \
-                    which D3 does not model yet"
-      pure R
+    | .ok R    => pure R
 
 @[command_elab reifyDesignChunked]
 def elabReifyDesignChunked : CommandElab := fun stx => do
@@ -627,8 +638,12 @@ def elabReifyDesignShared : CommandElab := fun stx => do
             (Compiler.fires $eId $(quote fu.clock)) $aRl)
     let mems : Array Term ← R.memoryUpdates.mapIdxM fun k mu => do
       let t ← liftTermElabM (rootRef true mu.nextImg)
-      liftTermElabM `(if Compiler.fires $eId $(quote mu.clock) then $t
-                      else (($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
+      if mu.commits.isEmpty then
+        liftTermElabM `(if Compiler.fires $eId $(quote mu.clock) then $t
+                        else (($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
+      else
+        let held ← `((($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
+        liftTermElabM (memPickSyntax eId mu t held (rootRef true))
     -- innermost first, then wrap one `let` per binding, outermost = binding 0
     let mut body ← `({ outputs := #[$outs,*],
                        nextState := { flops := #[$flops,*], mems := #[$mems,*] } })
@@ -672,8 +687,13 @@ def elabReifyDesign : CommandElab := fun stx => do
         `(bv_resize $(quote o.width) $(slotIdent nsrc o.slot))
       -- A MEMORY HOLDS ON A QUIET DOMAIN (see `denoteResidual`).
       let mems : Array Term ← R.memoryUpdates.mapIdxM fun k m =>
-        `(if Compiler.fires e $(quote m.clock) then $(slotIdent nsrc m.nextImg)
-          else (st.mems[$(quote k)]?).getD (fun _ => mk_bv 0 0))
+        if m.commits.isEmpty then
+          `(if Compiler.fires e $(quote m.clock) then $(slotIdent nsrc m.nextImg)
+            else (st.mems[$(quote k)]?).getD (fun _ => mk_bv 0 0))
+        else do
+          memPickSyntax (← `(e)) m (slotIdent nsrc m.nextImg)
+            (← `((st.mems[$(quote k)]?).getD (fun _ => mk_bv 0 0)))
+            (fun r => pure (slotIdent nsrc r))
       -- THE HAND-ROLLED FLOP UPDATE WAS CLOCKLESS, and could not be repaired
       -- in place: it applied the reset whenever the pin was asserted and
       -- otherwise took `din` or held on the ENABLE alone, with no notion of an

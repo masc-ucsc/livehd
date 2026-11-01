@@ -28,15 +28,6 @@ bool needs_mul_bridge(const CertificateIR& c) {
   });
 }
 void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, const LegacyNames& names, std::ostream& ofs) {
-  for (const auto& m : c.memories) {
-    if (!m.commits.empty()) {
-      // The bridge proves `_next` against the certificate's one-domain memory
-      // step; a commit table (DCERT3, decision #9) is not in it yet.
-      throw std::invalid_argument("emit_fast_bridge: memory n_" + std::to_string(m.origin)
-                                  + " is on more than one clock domain (a commit table), which the legacy proof "
-                                    "bridge does not cover yet; emit with emit_fast_bridge=false");
-    }
-  }
   const auto&                     base_name  = names.base;
   const bool                      sequential = names.sequential;
   const bool                      mem_mode   = names.memory_values;
@@ -429,9 +420,17 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
         }
       }
     }
+    // A memory's next state reads its image, and each commit-table entry's
+    // image too (DCERT3, decision #9); both sides choose among them by the same
+    // edge test (legacy_memory_next), so rewriting the images is the proof.
     for (const auto& m : c.memories) {
       if (next_seen.insert(m.next_img).second) {
         next_ids.push_back(m.next_img);
+      }
+      for (const auto& cm : m.commits) {
+        if (next_seen.insert(cm.second).second) {
+          next_ids.push_back(cm.second);
+        }
       }
     }
     for (const auto d : next_ids) {
