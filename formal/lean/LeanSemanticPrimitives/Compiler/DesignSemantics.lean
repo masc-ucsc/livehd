@@ -84,6 +84,15 @@ def srcMemNext (rho : Nat → CertVal) (e : ClockEdges) (s : RuntimeState) (idx 
   if fires e m.clock then (rho m.nextImg).asMem
   else s.mems[idx]?.getD (fun _ => mk_bv 0 0)
 
+/-- A memory's POWER-ON image (DCERT3 `MemoryDesc.init`): word `a` is
+`init[a]`, and 0 past its end or at a negative address, as `lhd sim` fills a
+memory with 0 before it loads a file.  Not part of a step -- `interpretDesign`
+never reads `init` -- but where every runner's start state takes a memory from
+(`resetState` here and in cert_trace, FP's `initMemsOf`, the legacy model's
+`initState`). -/
+def MemoryDesc.powerOnImg (m : MemoryDesc) : Int → BV :=
+  fun a => if 0 ≤ a then mk_bv m.dw (m.initWord a.toNat : Int) else mk_bv m.dw 0
+
 /-- What a `DesignCert` MEANS, for one step in which the clocks `e` fire. -/
 def interpretDesign (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
     RuntimeResult :=

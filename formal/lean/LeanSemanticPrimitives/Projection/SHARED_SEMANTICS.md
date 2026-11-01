@@ -15,23 +15,40 @@ which is present in this repository.  On master the shared files are master's
 own; the projection consumes them unchanged.  Against the base:
 
     Translation/GraphRefine.lean      byte-identical
-    Compiler/DesignCert.lean          COMMENT-ONLY (identical without comments; recorded hash)
     Compiler/Runtime.lean             IMPORT-ONLY (identical without one added import; recorded hash)
     Compiler/DesignCertWF.lean        byte-identical
-    Compiler/DesignSemantics.lean     byte-identical
     SemanticPrimitives.lean           byte-identical
 
     Translation/LGraphModel.lean      MASTER-ADAPTED (operator boundary repairs)
     Translation/OpBridge.lean         MASTER-ADAPTED (bridges re-proved for them)
+    Compiler/DesignCert.lean          MASTER-ADAPTED (DCERT3 memory fields; recorded hash)
+    Compiler/DesignSemantics.lean     MASTER-ADAPTED (the power-on image; recorded hash)
 
 ### `Compiler/DesignCert.lean`
 
 032690762 (D2 audit item C4) corrected the `ClockDesc` docstring: it claimed
 ordinal 0 is the reference clock, "the net carrying the most state", which the
 exporter does not provide (it numbers domains by sorting on a structural key)
-and nothing in the semantics reads. The change is in a comment only, so the
-check compares the file with the base after removing Lean comments, and pins
-the current bytes with a recorded hash.
+and nothing in the semantics reads. That was a comment-only change.
+
+DCERT3 (decisions #5, #9 and #2, one revision) is a CODE change: `MemoryDesc`
+gains `init` (a memory's power-on words, entry 0 first, 0 past the end), and two
+RESERVED fields, `commits` (a commit table for a memory on more than one clock)
+and `asyncImg` (an async-reset image for a whole-array cell), with the
+`MemCommit` record and the helpers `reservedFree` and `initWord`.  Every field
+defaults to today's meaning, and the step semantics reads none of them:
+`interpretDesign` is unchanged.  Admission (`certWfError`) refuses a
+non-default reserved field until a route models it.  The check pins the bytes
+with a recorded hash.
+
+### `Compiler/DesignSemantics.lean`
+
+DCERT3 adds one definition, `MemoryDesc.powerOnImg` (word `a` is `init[a]`, 0
+past its end): the start image every runner takes a memory from
+(`DirectTrace.resetState`, cert_trace's `resetState`).  `interpretDesign`, the
+step every theorem is about, is byte-for-byte what it was.  FP's start state
+builds the same table as `MemImg.ofInit` (`initMemsOf`).  The check pins the
+bytes with a recorded hash.
 
 ### `Compiler/Runtime.lean`
 
@@ -98,16 +115,15 @@ branch.  The statements are the pinned ones, unchanged.
 
     bash pass/lean/specialization/tests/check_overlay.sh [--semantic]
 
-Runnable from any directory.  It checks the four byte-identical files against
+Runnable from any directory.  It checks the three byte-identical files against
 the base (taken from THIS repository by default; `BASE_REPO` overrides),
-`DesignCert.lean` against the base without comments, `Runtime.lean` against
-the base without its one added import, and the two adapted files,
-`DesignCert.lean` and `Runtime.lean` against recorded sha256 values.  `--semantic` also rebuilds
+`Runtime.lean` against the base without its one added import, and the four
+adapted files and `Runtime.lean` against recorded sha256 values.  `--semantic` also rebuilds
 `OperatorBridge` (no Mathlib) and, under lake, `Translation/OpBridge`, so the
 bridge theorems above are re-checked rather than trusted.
 
-If one of the four must change, change it deliberately and update this document.
-If either adapted file changes, update its recorded hash in the check script in
+If one of the three must change, change it deliberately and update this document.
+If an adapted file changes, update its recorded hash in the check script in
 the same commit, and say why.
 
 ## What the projection imports from the rest of the tree
@@ -122,7 +138,7 @@ the same commit, and say why.
 | `Compiler/DesignCertWF.lean` | well-formedness |
 | `Compiler/DesignSemantics.lean` | **`interpretDesign`** — the reference one-cycle semantics |
 | `Compiler/DirectCheck.lean` | the checker's slot kinds (memory route only) |
-| `Compiler/CertIOV1` / `CertIOCodec` / `CertIORoute` | the DCERT1 and DCERT2 codecs and the router |
+| `Compiler/CertIOV1` / `CertIOCodec` / `CertIORoute` | the DCERT1 and DCERT3 codecs and the router |
 | `Compiler/ResetPolarity` / `RunAdmission` | the drivers' run-admission checks |
 
 `Translation/OpBridge.lean` needs Mathlib and is not imported by any Projection

@@ -142,7 +142,7 @@ void lower_memory_writes(CertificateBuilder& b, const Memory& m) {
   }
   const auto next = chain(b, m, st, all);
   if (!m.is_rom) {
-    b.memory_drivers.emplace(m.id, MemoryDriver{m.addr_width, m.bits, next, m.id, m.clock_ordinal});
+    b.memory_drivers.emplace(m.id, MemoryDriver{m.addr_width, m.bits, next, m.id, m.clock_ordinal, m.init_contents});
   }
 }
 }  // namespace lean_export::detail

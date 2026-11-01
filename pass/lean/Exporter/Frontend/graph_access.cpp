@@ -449,15 +449,12 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
     // constant a literal initializer gives, so everything below treats the two
     // alike.
     const auto image = livehd::graph_util::memory_image_of(node);
-    // STRICT: only an immutable table becomes `memConst`.
-    if (!mi.write_ports.empty()) {
-      fatal(ctx, memory_policy_summary(mi)
-                     + ". `init` is driven on a memory that also has " + std::to_string(mi.write_ports.size())
-                     + " write port(s)" + (image ? " (a file preload of `" + image->path + "`)" : std::string{})
-                     + ": that is RAM WITH INITIAL CONTENTS, which needs an initial-state constraint on "
-                       "mutable memory state, not the immutable-table model. Refusing rather than dropping the "
-                       "initial contents.");
-    }
+    // A memory with NO write port is an immutable table (`memConst`). One WITH
+    // write ports is RAM WITH INITIAL CONTENTS: the same words, read below in
+    // the same way, become its POWER-ON image (DCERT3 `MemoryDesc.init`), which
+    // every runner's start state takes (`initMemsOf`). Not a step value: a
+    // Memory `initial` is power-on contents, never a reset (graph/cell.cpp).
+    const bool writable = !mi.write_ports.empty();
     if (!pin_is_const(mi.init_pin)) {
       fatal(ctx, memory_policy_summary(mi)
                      + ". `init` is driven by a NON-CONSTANT pin; contents must be comptime for the immutable-table "
@@ -552,7 +549,12 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
       }
     }
 
-    mi.is_rom = true;
+    if (writable) {
+      mi.init_contents = std::move(mi.rom_contents);
+      mi.rom_contents.clear();
+    } else {
+      mi.is_rom = true;
+    }
   }
 
   // posclk = 2 (Ntype::Memory_posclk_mixed): the ports commit on DIFFERENT

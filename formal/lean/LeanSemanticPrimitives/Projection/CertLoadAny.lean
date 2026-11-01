@@ -2,9 +2,9 @@
 # One loader for both certificate formats
 
 `CertLoad` is FP's production runner and reads DCERT1 only, through
-`Compiler.CertIO.V1`.  Master's C++ pass emits DCERT2 only.  So until this
+`Compiler.CertIO.V1`.  Master's C++ pass emits DCERT3 only.  So until this
 module, no Projection runner could read a certificate master itself produces:
-DCERT2 reached the projection only through driver scripts that import the
+DCERT3 reached the projection only through driver scripts that import the
 Mathlib-side `CertIOFacade`.
 
 This module routes by magic through `Compiler.CertIORoute` (Mathlib-free) and
@@ -14,7 +14,7 @@ keeps each format's own policy:
     `loadCertAny` parses with `V1.parseCert` and admits nothing, as
     `V1.loadCert` always did for the probes; `runOneAny` DELEGATES to
     `CertLoad.runOne`, which runs FP's `asyncOK` transport check.
-  * DCERT2 -- `CertIO.readCertChecked`: parse, then `certWfError` (at least one
+  * DCERT3 -- `CertIO.readCertChecked`: parse, then `certWfError` (at least one
     clock, every flop and memory clock ordinal declared, every output slot in
     range).  The format carries `FlopDesc.asyncReset`, so FP's `asyncOK`
     transport constraint -- which exists only because DCERT1 cannot -- does not
@@ -34,7 +34,7 @@ namespace CertLoadAny
 open Compiler Projection.Hw Projection.CertLoad
 
 /-- Load either format and SAY WHICH.  A DCERT1 file parses to a one-clock
-record indistinguishable from a genuinely one-clock DCERT2 one, so the caller
+record indistinguishable from a genuinely one-clock DCERT3 one, so the caller
 is told the format instead of inferring it. -/
 def loadAny (p : System.FilePath) : IO (CertIO.Format × DesignCert) := do
   let b ← IO.FS.readBinFile p
@@ -48,21 +48,21 @@ def loadAny (p : System.FilePath) : IO (CertIO.Format × DesignCert) := do
       | .ok D    => pure (.v2, D)
       | .error e => throw (IO.userError s!"{p}: {e}")
   | none =>
-      throw (IO.userError s!"{p}: unrecognised certificate: expected DCERT2 or DCERT1")
+      throw (IO.userError s!"{p}: unrecognised certificate: expected DCERT3 or DCERT1")
 
 /-- Drop-in for `CertIO.V1.loadCert` in the probes.  On a DCERT1 file it is
-exactly that function (same parse, same error text); on DCERT2 it admits
+exactly that function (same parse, same error text); on DCERT3 it admits
 through `readCertChecked`. -/
 def loadCertAny (p : System.FilePath) : IO DesignCert :=
   return (← loadAny p).2
 
-/-- `runOne` for a DCERT2 certificate: the same five steps and the same exit
+/-- `runOne` for a DCERT3 certificate: the same five steps and the same exit
 codes, with `readCertChecked` as the admission and the codec's (byte-identical)
 `stimulus`/`digest`.  Exit codes: 1 admission, 3 support, 4 specialization or
 fragment check, 5/6 one cycle refused/mismatch, 7/8 trace refused/mismatch,
 9 run admission (`Compiler.RunAdmission`: reset polarity, edge vector). -/
 def runV2 (path : String) (bytes : ByteArray) (cycles : Nat) (seed : Nat) : IO UInt32 := do
-  say s!"=== {path}  [DCERT2]"
+  say s!"=== {path}  [DCERT3]"
   let t1 ← ms
   let D ← match CertIO.readCertChecked bytes with
           | .ok D    => pure D
@@ -125,7 +125,7 @@ size {(sim.prog.funs.map (fun fd => tsize fd.body)).foldl (·+·) 0}  bound {sim
 kernel proof about it; `SimWF` is still undischarged for a loaded certificate."
   return 0
 
-/-- Route one certificate: DCERT1 to FP's `runOne` unchanged, DCERT2 to `runV2`. -/
+/-- Route one certificate: DCERT1 to FP's `runOne` unchanged, DCERT3 to `runV2`. -/
 def runOneAny (path : String) (cycles : Nat) (seed : Nat) : IO UInt32 := do
   let bytes ← IO.FS.readBinFile path
   -- Run admission (decision C4), for BOTH formats, before either runner:
@@ -145,11 +145,11 @@ def runOneAny (path : String) (cycles : Nat) (seed : Nat) : IO UInt32 := do
   | some .v2 => runV2 path bytes cycles seed
   | none     => do
       say s!"=== {path}"
-      say "  PARSE FAILED: unrecognised certificate: expected DCERT2 or DCERT1"
+      say "  PARSE FAILED: unrecognised certificate: expected DCERT3 or DCERT1"
       return 1
 
 /-- The same three shared fixtures as `CertLoad.emitFixtures`, written as
-DCERT2, so the DCERT2 path can be smoke-tested on designs whose answer is
+DCERT3, so the DCERT3 path can be smoke-tested on designs whose answer is
 already known from the DCERT1 path. -/
 def emitFixturesV2 (dir : String) : IO Unit := do
   IO.FS.createDirAll dir
@@ -169,7 +169,7 @@ def main (args : List String) : IO UInt32 := do
       let seed   := ((rest.drop 1).head?.bind String.toNat?).getD 1
       runOneAny path cycles seed
   | [] => do
-      say "usage: cert_runner_any <file.dcert> [cycles] [seed]   (DCERT1 or DCERT2)"
+      say "usage: cert_runner_any <file.dcert> [cycles] [seed]   (DCERT1 or DCERT3)"
       return 64
 
 end CertLoadAny

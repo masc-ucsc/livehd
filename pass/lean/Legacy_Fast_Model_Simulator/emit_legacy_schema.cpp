@@ -119,7 +119,8 @@ void emit_legacy_schema(const DesignScan& d, const LegacyNames& n, std::ostream&
     os << "deriving Repr, Inhabited\n\n";
   }
   // The start state a runner uses by default: every flop at its reset value,
-  // every memory word and read register at 0. A Verilog power-on value with no
+  // every memory at its power-on words (DCERT3 `MemoryDesc.init`, 0 past them),
+  // every read register at 0. A Verilog power-on value with no
   // reset (`reg r = 5`) reaches the scan as the flop's reset value, so starting
   // from `default` (all zero) would start such a flop at 0 and every later cycle
   // would be off. The certificate runners start the same way (`resetState`,
@@ -131,6 +132,19 @@ void emit_legacy_schema(const DesignScan& d, const LegacyNames& n, std::ostream&
       fields += std::string(fields.empty() ? "" : ",\n    ") + n.flops.at(id) + " := BitVec.ofInt " + std::to_string(f->width)
                 + " (" + f->initial + ")";
     }
+  }
+  // A WRITABLE memory's power-on words (DCERT3 `MemoryDesc.init`): word `a` is
+  // the table entry, 0 past its end -- the start the certificate runners take.
+  for (const auto& [id, m] : d.memories) {
+    if (m.is_rom || m.init_contents.empty()) {
+      continue;
+    }
+    std::string table;
+    for (size_t k = 0; k < m.init_contents.size(); ++k) {
+      table += (k == 0 ? "" : ", ") + std::string("BitVec.ofNat ") + std::to_string(m.bits) + " " + m.init_contents[k];
+    }
+    fields += std::string(fields.empty() ? "" : ",\n    ") + n.memories.at(id) + " := fun a => (#[" + table + "] : Array (BitVec "
+              + std::to_string(m.bits) + ")).getD a.toNat 0";
   }
   os << (fields.empty() ? std::string("  default") : "  { (default : " + n.base + "_state) with\n    " + fields + " }") << "\n\n";
 }

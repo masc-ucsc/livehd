@@ -1,5 +1,5 @@
 /-
-# The DCERT2 codec -- Mathlib-free
+# The DCERT3 codec -- Mathlib-free
 
 The wire format, the pure writer, the TOTAL reader, checked admission
 (`certWfError` / `readCertChecked`), `loadCert`, and the deterministic stimulus
@@ -12,7 +12,7 @@ native objects, so anything importing it cannot be linked into a compiled
 driver and cannot be built by the no-Mathlib `.build-proj.sh`.  Nothing here
 needs it: the codec depends on the `DesignCert` record and `Runtime` alone.
 Splitting it out lets the Futamura-projection modules and their native drivers
-read DCERT2 directly.  `Compiler/CertIO.lean` imports this module and keeps the
+read DCERT3 directly.  `Compiler/CertIO.lean` imports this module and keeps the
 verified entry point (`runChecked`, `runChecked_correct`, `loadAndRun`,
 `runCycles`) and `clockName_utf8_inverse`; the round-trip theorem stays in
 `CertIORoundTrip`.  Like the D3 `Defs` split, this module holds definitions
@@ -33,7 +33,7 @@ record.  Deliberately dull: `pass_lean.cpp` already walks exactly these fields
 to print the Lean literal, so emitting this instead is a change of punctuation
 in the printer, not a change of structure.
 
-  DCERT2
+  DCERT3
   <nSources>   then per source, a tag and its fields:
      0 idx width                                   input
      1 width value                                 const
@@ -46,7 +46,9 @@ in the printer, not a change of structure.
   <nOutputs>   then per output:  slot width
   <nFlops>     then per flop:
      width din hasEn en hasRst rst resetValue activeLow clock asyncReset
-  <nMemories>  then per memory:  aw dw nextImg clock
+  <nMemories>  then per memory:
+     aw dw nextImg clock nInit i0 .. i(n-1) nCommits (mask nextImg)..
+     hasAsync asyncImg
   <nClocks>    then per clock:   <nameBytes> <name>
 
 `hasEn`/`hasRst` keep the arity fixed so the reader never branches on shape.
@@ -59,11 +61,18 @@ clock name may contain a space or a newline, and not re-encoded, because
 `String.fromUTF8? s.toUTF8 = some s` is what makes the round trip hold for every
 name without an ASCII side condition.
 
-The clocks section is LAST because it is the section this version ADDED.  That
-is the only sense in which the order is inherited: the records above are NOT
+The clocks section is LAST because it is the section DCERT2 ADDED.  That is the
+only sense in which the order is inherited: the records above are NOT
 byte-identical to DCERT1, since the flop record gained `clock` and `asyncReset`
 and the memory record gained `clock`.  A DCERT1 stream is refused by `hasMagic`
 rather than defaulted (see `magicBytes`), and would be unreadable here anyway.
+
+DCERT3 (decisions #5, #9 and #2, one revision) extends ONLY the memory record:
+its power-on words `init` (a count, then the words, as `memConst` spells them),
+then the commit table RESERVED for a memory on more than one clock (a count,
+then `mask nextImg` pairs), then the async-reset image RESERVED for a
+whole-array cell (`hasAsync asyncImg`, as a flop spells `enable`).  A DCERT2
+stream is refused by magic: its memory record is a different length.
 -/
 
 /-- Operator tag and its payload.  The payload slot is always present and is `0`
@@ -223,10 +232,19 @@ def flopBody (f : FlopDesc) : List UInt8 :=
 
 def flopBytes (f : FlopDesc) : List UInt8 := flopBody f ++ [chNL]
 
+def commitBody (c : MemCommit) : List UInt8 :=
+  spc (natBytes c.mask) ++ spc (natBytes c.nextImg)
+
 def memBody (m : MemoryDesc) : List UInt8 :=
+  let (ha, a) := match m.asyncImg with | some x => (1, x) | none => (0, 0)
   natBytes m.aw ++ spc (natBytes m.dw) ++ spc (natBytes m.nextImg)
     -- DCERT2: the clock every committing port of this memory is on.
     ++ spc (natBytes m.clock)
+    -- DCERT3: the power-on words, the (reserved) commit table and the
+    -- (reserved) async-reset image.
+    ++ spc (natBytes m.init.size) ++ (m.init.toList.map (fun v => spc (natBytes v))).flatten
+    ++ spc (natBytes m.commits.size) ++ (m.commits.toList.map commitBody).flatten
+    ++ spc (natBytes ha) ++ spc (natBytes a)
 
 def memBytes (m : MemoryDesc) : List UInt8 := memBody m ++ [chNL]
 
@@ -234,14 +252,18 @@ def memBytes (m : MemoryDesc) : List UInt8 := memBody m ++ [chNL]
 @[inline] def section' {α : Type} (f : α → List UInt8) (xs : Array α) : List UInt8 :=
   natBytes xs.size ++ [chNL] ++ (xs.toList.map f).flatten
 
-/-- "DCERT2\n" -- spelled as bytes so the proof never unfolds `String.toUTF8`.
+/-- "DCERT3\n" -- spelled as bytes so the proof never unfolds `String.toUTF8`.
+
+VERSION 3. DCERT2 carried no `MemoryDesc.init`, `commits` or `asyncImg`; its
+memory record is shorter, so it is refused by name like DCERT1.
+
 
 VERSION 2. DCERT1 carried no `clocks` section, no `FlopDesc.clock`, no
 `asyncReset` and no `MemoryDesc.clock`. Reading a DCERT1 stream as a one-clock
 design would be an assumption about the DESIGN, not a default of the record, so
 the version is bumped rather than extended in place and DCERT1 is refused by
 name. -/
-def magicBytes : List UInt8 := [68, 67, 69, 82, 84, 50, 10]
+def magicBytes : List UInt8 := [68, 67, 69, 82, 84, 51, 10]
 
 /-- The certificate as bytes.  This is the thing `parseCert` is proved to invert. -/
 def certBytes (D : DesignCert) : List UInt8 :=
@@ -383,12 +405,24 @@ def readFlop (b : ByteArray) (i : Nat) : Option (FlopDesc × Nat) := do
           resetValue := rv, resetActiveLow := al != 0,
           clock := clk, asyncReset := aR != 0 }, i)
 
+def readCommit (b : ByteArray) (i : Nat) : Option (MemCommit × Nat) := do
+  let (mask, i) ← readNat b i
+  let (nx, i)   ← readNat b i
+  some ({ mask := mask, nextImg := nx }, i)
+
 def readMemory (b : ByteArray) (i : Nat) : Option (MemoryDesc × Nat) := do
   let (aw, i) ← readNat b i
   let (dw, i) ← readNat b i
   let (nx, i) ← readNat b i
   let (ck, i) ← readNat b i
-  some ({ aw := aw, dw := dw, nextImg := nx, clock := ck }, i)
+  let (ni, i) ← readNat b i
+  let (iv, i) ← readMany readNat b i ni #[]
+  let (nc, i) ← readNat b i
+  let (cs, i) ← readMany readCommit b i nc #[]
+  let (ha, i) ← readNat b i
+  let (a, i)  ← readNat b i
+  some ({ aw := aw, dw := dw, nextImg := nx, clock := ck, init := iv, commits := cs,
+          asyncImg := if ha != 0 then some a else none }, i)
 
 /-- A length-prefixed name: the count, ONE separating space -- CHECKED, not
 assumed -- then exactly that many bytes taken without scanning. -/
@@ -405,19 +439,19 @@ def readClock (b : ByteArray) (i : Nat) : Option (ClockDesc × Nat) := do
 
 /-- Check the magic without materialising a `String` for the whole buffer. -/
 def hasMagic (b : ByteArray) : Bool :=
-  let m := "DCERT2".toUTF8
+  let m := "DCERT3".toUTF8
   b.size ≥ m.size && (List.range m.size).all fun k => b[k]! == m[k]!
 
 /-- Parse a whole certificate.  The CODEC: a faithful decoding that judges
 nothing.  Every semantic refusal lives in `certWfError` / `readCertChecked`. -/
 def parseCert (b : ByteArray) : Except String DesignCert :=
-  if !hasMagic b then .error "bad magic: expected DCERT2" else
+  if !hasMagic b then .error "bad magic: expected DCERT3" else
   match go b with
   | some D => .ok D
   | none   => .error "malformed certificate"
 where
   go (b : ByteArray) : Option DesignCert := do
-    -- Past the six bytes of "DCERT2"; the magic's trailing newline is consumed
+    -- Past the six bytes of "DCERT3"; the magic's trailing newline is consumed
     -- as leading whitespace by the first `readNat`.
     let i := 6
     let (ns, i)   ← readNat b i
@@ -457,6 +491,13 @@ def certWfError (D : DesignCert) : Option String :=
   if nclk == 0 then
     some "no clock domains: a certificate must declare at least one"
   else
+    -- DCERT3 reserves a memory's commit table and async-reset image for
+    -- decisions #9 and #2; until the step semantics reads them, a certificate
+    -- that uses them would mean something no route computes.
+    match D.memories.findIdx? (fun m => !m.reservedFree) with
+    | some k => some s!"memory {k} uses a field DCERT3 reserves (a commit table or an async-reset \
+                        image); no route models it yet"
+    | none =>
     match D.flops.findIdx? (fun f => f.clock ≥ nclk) with
     | some k => some s!"flop {k} commits on clock ordinal {D.flops[k]!.clock}, \
                         outside the {nclk} declared"

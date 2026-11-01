@@ -806,6 +806,7 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
     m.sync         = info.sync;
     m.is_rom       = info.is_rom;
     m.rom_contents = info.rom_contents;
+    m.init_contents = info.init_contents;
     m.read_ports   = info.read_ports;
     m.write_ports  = info.write_ports;
     for (const auto& port : info.ports) {

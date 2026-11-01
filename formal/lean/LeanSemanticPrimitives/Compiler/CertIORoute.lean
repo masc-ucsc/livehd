@@ -9,7 +9,7 @@ second needs the round-trip proof, which needs Mathlib.  Drivers that only
 ROUTE and ADMIT -- the Futamura-projection loaders and native drivers -- import
 this module instead and stay Mathlib-free.
 
-The policy is the facade's, unchanged: DCERT2 is admitted by `readCertChecked`
+The policy is the facade's, unchanged: DCERT3 is admitted by `readCertChecked`
 (parse, then `certWfError`); DCERT1 by FP's parse-then-`asyncOK`, without
 `certWfError`.  See `CertIOFacade.lean` for the reasons.
 -/
@@ -23,8 +23,11 @@ namespace CertIO
 inductive Format where
   | /-- DCERT1: FP's format. No clocks section, no commit-side async flag. -/
     v1
-  | /-- DCERT2: carries the clock table, `FlopDesc.clock`/`asyncReset` and
-    `MemoryDesc.clock`. What the C++ pass emits. -/
+  | /-- The clock-aware codec (`Compiler.CertIO`), named for DCERT2, where it
+    began: the clock table, `FlopDesc.clock`/`asyncReset` and `MemoryDesc.clock`.
+    It is DCERT3 now (the memory record gained `init`, `commits`, `asyncImg`);
+    a DCERT2 stream matches neither magic and is refused. What the C++ pass
+    emits. -/
     v2
 deriving Repr, DecidableEq, Inhabited
 
@@ -35,13 +38,13 @@ def detect (b : ByteArray) : Option Format :=
 
 /-- Parse either version, and SAY WHICH. The caller is told the format rather
 than left to infer it from the record, because a DCERT1 file parses to a
-certificate that is indistinguishable from a genuinely one-clock DCERT2 one --
+certificate that is indistinguishable from a genuinely one-clock DCERT3 one --
 and they do not mean the same thing. -/
 def parseAny (b : ByteArray) : Except String (Format × DesignCert) :=
   match detect b with
   | some .v2 => (parseCert b).map (fun D => (Format.v2, D))
   | some .v1 => (V1.parseCert b).map (fun D => (Format.v1, D))
-  | none     => .error "unrecognised certificate: expected DCERT2 or DCERT1"
+  | none     => .error "unrecognised certificate: expected DCERT3 or DCERT1"
 
 /-- D4's admission, unchanged. -/
 def admitV2 (b : ByteArray) : Except String DesignCert := readCertChecked b
@@ -63,7 +66,7 @@ def admitAny (b : ByteArray) : Except String (Format × DesignCert) :=
   match detect b with
   | some .v2 => (admitV2 b).map (fun D => (Format.v2, D))
   | some .v1 => (admitV1 b).map (fun D => (Format.v1, D))
-  | none     => .error "unrecognised certificate: expected DCERT2 or DCERT1"
+  | none     => .error "unrecognised certificate: expected DCERT3 or DCERT1"
 
 end CertIO
 end Compiler

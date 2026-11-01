@@ -87,13 +87,14 @@ def zeroState (D : DesignCert) : RuntimeState :=
   { flops := D.flops.map (fun f => mk_bv f.width 0)
   , mems  := D.memories.map (fun m => fun _ => mk_bv m.dw 0) }
 
-/-- Every flop at its reset value, memories zero: the default start. A flop with
-a Verilog power-on value and no reset carries that value as `resetValue`, so this
-is the start that matches the RTL; it is also the Futamura runner's
-(`initStateOf`). `init:zero` keeps the old all-zero start. -/
+/-- Every flop at its reset value, every memory at its power-on image (DCERT3
+`MemoryDesc.init`, 0 past its words): the default start. A flop with a Verilog
+power-on value and no reset carries that value as `resetValue`, so this is the
+start that matches the RTL; it is also the Futamura runner's (`initStateOf`).
+`init:zero` keeps the old all-zero start. -/
 def resetState (D : DesignCert) : RuntimeState :=
   { flops := D.flops.map (fun f => mk_bv f.width f.resetValue)
-  , mems  := D.memories.map (fun m => fun _ => mk_bv m.dw 0) }
+  , mems  := D.memories.map (fun m => m.powerOnImg) }
 
 /-- An `edges v1` schedule: `at <cycle> <b0> <b1> ...`, one bit per clock ordinal. -/
 def parseEdges (txt : String) : Except String (List (Nat × Array Bool)) := do

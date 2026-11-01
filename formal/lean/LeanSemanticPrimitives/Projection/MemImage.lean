@@ -104,6 +104,12 @@ def setAt (m : MemImg) (x : Int) (d : BV) : MemImg :=
 /-- A read/write memory covering an `aw`-bit address space. -/
 def zeroImg (aw dw : Nat) : MemImg := ⟨List.replicate (2 ^ aw) (mk_bv dw 0), mk_bv dw 0⟩
 
+/-- A memory's POWER-ON image (DCERT3 `MemoryDesc.init`): word `a` is `init[a]`,
+or 0 past its end, as `lhd sim` fills a memory with 0 before it loads a file.
+A full `2 ^ aw` table like `zeroImg`, which it is when `init` is empty. -/
+def ofInit (aw dw : Nat) (init : Array Nat) : MemImg :=
+  ⟨(List.range (2 ^ aw)).map (fun a => mk_bv dw (init.getD a 0)), mk_bv dw 0⟩
+
 /-- `SourceDesc.memConst`: **actual contents**, zero above them.  The table is
 `contents.size` long, NOT `2 ^ aw`, and the words are preserved. -/
 def ofMemConst (dw : Nat) (contents : Array Int) : MemImg :=

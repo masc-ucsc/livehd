@@ -652,14 +652,15 @@ theorem admits_run_two {D : DesignCert} {i₁ i₂ : RuntimeInput} {st : StateM}
 
 Checking a state is only half of a policy.  If no state passed, `admits_run`
 would be vacuous.  `initStateOf` builds one from the design alone — each flop at
-its declared reset value, each memory a zero table of its declared geometry —
-and it passes. -/
+its declared reset value, each memory a full table of its declared geometry
+holding its power-on words (`MemoryDesc.init`, 0 past its end) — and it
+passes. -/
 
 def initFlopsOf (D : DesignCert) : Array BV :=
   D.flops.map (fun f => mk_bv f.width f.resetValue)
 
 def initMemsOf (D : DesignCert) : Array MemImg :=
-  D.memories.map (fun md => MemImg.zeroImg md.aw md.dw)
+  D.memories.map (fun md => MemImg.ofInit md.aw md.dw md.init)
 
 def initStateOf (D : DesignCert) : StateM :=
   { flops := initFlopsOf D, mems := initMemsOf D }
@@ -678,12 +679,23 @@ theorem zeroImg_shape (md : MemoryDesc) :
     simpa [MemImg.zeroImg] using hw
   rw [List.eq_of_mem_replicate hmem]; simp [mk_bv]
 
+/-- The power-on image has the declared geometry whatever `init` holds: a
+longer `init` is cut at `2 ^ aw`, a shorter one padded with 0, and every word is
+built at width `dw`. -/
+theorem ofInit_shape (md : MemoryDesc) :
+    MemShapeOK md (MemImg.ofInit md.aw md.dw md.init) := by
+  refine ⟨by simp [MemImg.ofInit], ?_, by simp [MemImg.ofInit, mk_bv]⟩
+  intro w hw
+  simp only [MemImg.ofInit, List.mem_map, List.mem_range] at hw
+  obtain ⟨a, -, rfl⟩ := hw
+  simp [mk_bv]
+
 theorem initStateOf_word (D : DesignCert) : StateWordOK D (initStateOf D) := by
   intro idx md hmd
   have hlt : idx < D.memories.size := mem_lt_of_getElem? hmd
   have hmd' : D.memories[idx] = md := by
     rw [Array.getElem?_eq_getElem hlt] at hmd; exact Option.some.inj hmd
-  refine ⟨MemImg.zeroImg md.aw md.dw, ?_, zeroImg_shape md⟩
+  refine ⟨MemImg.ofInit md.aw md.dw md.init, ?_, ofInit_shape md⟩
   simp [initStateOf, initMemsOf, hlt, hmd']
 
 /-- **The canonical state passes.** -/

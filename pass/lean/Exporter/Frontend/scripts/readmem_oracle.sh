@@ -18,8 +18,12 @@ set -euo pipefail
 #            12-15 read 0 (lhd sim's fill; iverilog has x there).
 #   x digit  refused at export, like X/Z bits in a literal initializer.
 #   missing  refused at export, naming the file.
-#   ram      a WRITABLE memory with a file preload is still refused (that
-#            needs decision #5), and the message names the file.
+#   ram      a WRITABLE memory loaded from the same image (written back with
+#            its own registered read every cycle): the file's words are its
+#            POWER-ON image (DCERT3 `MemoryDesc.init`, decision #5), and IR and
+#            TV equal iverilog on every step, FP (`initStateOf`) equals IR, and
+#            the legacy model (`initState`) equals iverilog. Control: the RAM
+#            loaded from the one-entry-changed image differs.
 #
 # The Lean toolchain pin lives in formal/lean; lean runs from there.
 
@@ -153,7 +157,63 @@ fi
 grep -q 'cannot be read' "$M/vc_missing.log" || { grep -o '"message":"[^"]*' "$M/vc_missing.log" | head -2; echo "FAIL: the missing-file refusal does not say why"; exit 1; }
 echo "ok: a missing image file is refused"
 W="$OUT/ram"
-if run "$W" full.hex ram_file ram_file.v; then echo "FAIL: a writable memory with a file preload was exported"; exit 1; fi
-grep -q 'file preload of `rom.hex`' "$W/vc.log" || { grep -o '"message":"[^"]*' "$W/vc.log" | head -2; echo "FAIL: the writable refusal does not name the file"; exit 1; }
-echo "ok: a writable memory with a file preload is still refused (decision #5), naming the file"
+run "$W" full.hex ram_file ram_file.v \
+  || { grep -o '"message":"[^"]*' "$W/vc.log" | head -2; echo "FAIL: the export refused a writable memory with a file preload"; exit 1; }
+grep -q 'init := #\[' "$W/vc/ram_file_Lgraph.lean" || { echo "FAIL: the certificate carries no power-on words"; exit 1; }
+cmp -s <(python3 -I -c 'import json,sys; print([(i["name"],i["ordinal"]) for i in json.load(open(sys.argv[1]))["inputs"]])' "$W/vc/ram_file_io.json") \
+       <(python3 -I -c 'import json,sys; print([(i["name"],i["ordinal"]) for i in json.load(open(sys.argv[1]))["inputs"]])' "$R/vc/rom_file_io.json") \
+  || { echo "FAIL: the RAM's input ordinals differ from the ROM's; the shared stimulus does not apply"; exit 1; }
+sed 's/ rom_file u(/ ram_file u(/' "$OUT/tb.v" > "$OUT/tb_ram.v"
+simram() { # <dir> -> <dir>/rtl.txt
+  (cd "$1" && iverilog -g2012 -o rtl.vvp ram_file.v "$OUT/tb_ram.v" > iverilog.log 2>&1 && vvp rtl.vvp | grep '^STEP' > rtl.txt) \
+    || { cat "$1/iverilog.log"; echo "FAIL: iverilog in $1"; exit 1; }
+}
+simram "$W"
+grep -q x "$W/rtl.txt" && { echo "FAIL: the RAM source read x"; exit 1; }
+for route in ir tv; do
+  opts=(edges:all); [[ $route == tv ]] && opts+=(route:tv)
+  (cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run \
+     Futamura_Projection_Scripts/cert_trace.lean "$W/vc/ram_file.dcert" "$STEPS" "$OUT/stim.txt" "${opts[@]}" \
+     > "$W/$route.txt" 2> "$W/$route.err") || { cat "$W/$route.err"; echo "FAIL: cert_trace $route (ram)"; exit 1; }
+  diff "$W/rtl.txt" "$W/$route.txt" > "$W/diff_$route.txt" \
+    || { head -4 "$W/diff_$route.txt"; echo "FAIL: ram $route differs from the source"; exit 1; }
+done
+echo "ok: ram -- a writable memory starts from the file's words: IR and TV equal iverilog on all $STEPS steps"
+# FP starts from `initStateOf`; its `edges:all` leaves every third step quiet,
+# so it is compared with cert_trace `edges:third`.
+(cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run \
+   Futamura_Projection_Scripts/cert_trace.lean "$W/vc/ram_file.dcert" "$STEPS" "$OUT/stim.txt" edges:third \
+   > "$W/ir_third.txt" 2> "$W/ir_third.err") || { cat "$W/ir_third.err"; echo "FAIL: cert_trace edges:third (ram)"; exit 1; }
+(cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run \
+   Futamura_Projection_Scripts/dcert2_memroute.lean "$W/vc/ram_file.dcert" 20000 200 "$STEPS" zero edges:all \
+   "stim:$OUT/stim.txt" outputs nocompare > "$W/fp.log" 2> "$W/fp.err") \
+  || { tail -3 "$W/fp.log"; cat "$W/fp.err"; echo "FAIL: FP runner (ram)"; exit 1; }
+grep '^STEP' "$W/fp.log" > "$W/fp.txt"
+diff "$W/ir_third.txt" "$W/fp.txt" > "$W/diff_fp.txt" || { head -4 "$W/diff_fp.txt"; echo "FAIL: ram FP differs from IR"; exit 1; }
+echo "ok: ram -- FP (initStateOf) equals IR with every third step quiet"
+# The legacy model starts from its emitted `initState`; built with `lean -R`
+# into this run's directory, so no `lake build` runs in the shared workspace.
+(cd "$W" && "$LHD" compile lg:lg --top ram_file --emit-dir lean:legacy --set formal.lean.emit_cert=true \
+   --set formal.lean.emit_fast_bridge=true --workdir lw > legacy.log 2>&1) \
+  || { grep -o '"message":"[^"]*' "$W/legacy.log" | head -2; echo "FAIL: legacy emission (ram)"; exit 1; }
+LR="$W/lroot"; OL="$W/olean"
+mkdir -p "$LR/LegacyRam" "$OL/LegacyRam"
+cp "$W/legacy/ram_file_Lgraph.lean" "$LR/LegacyRam/"
+python3 -I "$ROOT/pass/lean/Legacy_Fast_Model_Simulator/scripts/make_legacy_sim.py" "$LR/LegacyRam/ram_file_Lgraph.lean" \
+  --cycles "$STEPS" --stim --out "$LR/LegacyRam" --module-prefix LegacyRam > "$W/legacy_gen.log" 2>&1 \
+  || { tail -3 "$W/legacy_gen.log"; echo "FAIL: make_legacy_sim (ram)"; exit 1; }
+(cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP:$OL" lean -R "$LR" -o "$OL/LegacyRam/ram_file_Lgraph.olean" \
+   "$LR/LegacyRam/ram_file_Lgraph.lean" > "$W/legacy_build.log" 2>&1) \
+  || { grep -m5 error "$W/legacy_build.log"; echo "FAIL: legacy elaboration (ram, bridge proofs)"; exit 1; }
+grep -q sorry "$W/legacy_build.log" && { echo "FAIL: sorry in the legacy proofs (ram)"; exit 1; }
+(cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP:$OL" lean --run "$LR/LegacyRam/ram_file_LegacySim.lean" \
+   "$OUT/stim.txt" > "$W/legacy.txt" 2> "$W/legacy.err") || { cat "$W/legacy.err"; echo "FAIL: legacy run (ram)"; exit 1; }
+diff "$W/rtl.txt" "$W/legacy.txt" > "$W/diff_legacy.txt" || { head -4 "$W/diff_legacy.txt"; echo "FAIL: ram legacy differs from the source"; exit 1; }
+echo "ok: ram -- the legacy model (initState, bridge proofs) equals iverilog on all $STEPS steps"
+WC="$OUT/ram_alt"
+mkdir -p "$WC"; cp "$OUT/alt.hex" "$WC/rom.hex"; cp "$OUT/ram_file.v" "$WC/"
+simram "$WC"
+n=$(diff "$WC/rtl.txt" "$W/ir.txt" | grep -c '^<' || true)
+[[ $n -gt 0 ]] || { echo "FAIL: the RAM from a different image gave the same trace"; exit 1; }
+echo "ok: control -- the RAM loaded from the one-entry-changed image differs on $n steps"
 echo "PASS: readmem_oracle"

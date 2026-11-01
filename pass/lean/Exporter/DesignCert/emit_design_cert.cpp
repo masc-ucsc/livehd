@@ -87,9 +87,18 @@ void emit_design_cert(const std::string& base, const CertificateIR& d, std::ostr
 
   std::vector<std::string> mem_lines;
   for (const auto& m : d.memories) {
-    mem_lines.push_back("{ aw := " + std::to_string(m.addr_w) + ", dw := " + std::to_string(m.data_w)
-                        + ", nextImg := " + std::to_string(d.slot_of.at(m.next_img))
-                        + ", clock := " + std::to_string(m.clock) + " }");
+    // `init` only when present: an empty one is the field's default, so a
+    // memory with no power-on words prints exactly as before DCERT3.
+    std::string init;
+    if (!m.init.empty()) {
+      init = ", init := #[";
+      for (size_t k = 0; k < m.init.size(); ++k) {
+        init += (k == 0 ? "" : ", ") + m.init[k];
+      }
+      init += "]";
+    }
+    mem_lines.push_back("{ aw := " + std::to_string(m.addr_w) + ", dw := " + std::to_string(m.data_w) + ", nextImg := "
+                        + std::to_string(d.slot_of.at(m.next_img)) + ", clock := " + std::to_string(m.clock) + init + " }");
   }
 
   auto emit_array = [&os](const char* field, const std::vector<std::string>& lines, bool) {

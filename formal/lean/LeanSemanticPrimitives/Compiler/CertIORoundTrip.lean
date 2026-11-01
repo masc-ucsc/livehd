@@ -1,5 +1,5 @@
 /-
-The DCERT2 round trip: `parseCert (renderCert D) = .ok D`, for EVERY `DesignCert`
+The DCERT3 round trip: `parseCert (renderCert D) = .ok D`, for EVERY `DesignCert`
 on the post-D2 clock-aware schema -- including the `clocks` section, every
 `FlopDesc.clock`/`asyncReset` and every `MemoryDesc.clock`, with no restriction
 on clock names.
@@ -443,33 +443,6 @@ theorem readOutput_outBody (l : List UInt8) (i : Nat) (o : OutputDesc) (rest : L
   simp [readOutput, h1, h2, hlen]
   omega
 
-theorem readMemory_memBody (l : List UInt8) (i : Nat) (m : MemoryDesc) (rest : List UInt8)
-    (hd : rem l i = memBody m ++ chNL :: rest) :
-    readMemory (ofList l) i = some (m, i + (memBody m).length) := by
-  -- DCERT2 adds `clock`, so `nextImg` is now followed by a SPACE and the walk
-  -- has a fourth field before the newline.
-  have hd' : rem l i = natBytes m.aw ++ chSpace :: (natBytes m.dw ++ chSpace ::
-      (natBytes m.nextImg ++ chSpace :: (natBytes m.clock ++ chNL :: rest))) := by
-    simpa [memBody, spc, List.append_assoc] using hd
-  have h1 := readNat_here l i m.aw _ hd' (stop_space _)
-  have hr1 := rem_add l i (natBytes m.aw) _ hd'
-  have h2 := readNat_sep l (i + (natBytes m.aw).length) m.dw _ hr1 (stop_space _)
-  have hr2 := rem_add l (i + (natBytes m.aw).length + 1) (natBytes m.dw) _
-                (rem_cons l _ _ _ hr1)
-  have h3 := readNat_sep l (i + (natBytes m.aw).length + 1 + (natBytes m.dw).length)
-               m.nextImg _ hr2 (stop_space _)
-  have hr3 := rem_add l (i + (natBytes m.aw).length + 1 + (natBytes m.dw).length + 1)
-                (natBytes m.nextImg) _ (rem_cons l _ _ _ hr2)
-  have h4 := readNat_sep l (i + (natBytes m.aw).length + 1 + (natBytes m.dw).length + 1
-                            + (natBytes m.nextImg).length)
-               m.clock (chNL :: rest) hr3 (stop_nl _)
-  have hlen : (memBody m).length
-      = (natBytes m.aw).length + 1 + (natBytes m.dw).length + 1
-        + (natBytes m.nextImg).length + 1 + (natBytes m.clock).length := by
-    simp [memBody, spc, List.length_append, List.length_cons]; omega
-  simp [readMemory, h1, h2, h3, h4, hlen]
-  omega
-
 --------------------------------------------------------------------------------
 -- 4.  The compositional interface
 --------------------------------------------------------------------------------
@@ -698,19 +671,99 @@ theorem readOutput_reads (l : List UInt8) (i : Nat) (ws : List UInt8) (o : Outpu
   obtain ⟨h2, r2⟩ := fieldNat l _ o.width rest chNL (Or.inr rfl) (by simpa using r1)
   exact ⟨_, by simp [readOutput, h1, h2], r2⟩
 
+/-- The commit table's entries are two space-prefixed numbers each, so whatever
+follows the run is a separator. -/
+theorem head_commit_run (cs : List MemCommit) (c₀ : UInt8) (T : List UInt8)
+    (hc : c₀ = chSpace ∨ c₀ = chNL) :
+    ∀ c, ((cs.map commitBody).flatten ++ c₀ :: T).head? = some c → ¬ isDigit c := by
+  cases cs with
+  | nil => intro c hc'; exact stop_of_sep T c₀ hc c (by simpa using hc')
+  | cons x xs =>
+      intro c hc'
+      simp only [List.map_cons, List.flatten_cons, commitBody, spc, List.cons_append,
+                 List.head?_cons, Option.some.injEq] at hc'
+      subst hc'; exact not_digit_space
+
+/-- `readMany readCommit` over the rendered commit table (DCERT3). -/
+theorem readMany_commits (l : List UInt8) :
+    ∀ (cs : List MemCommit) (i : Nat) (acc : Array MemCommit) (c₀ : UInt8) (T : List UInt8),
+      (c₀ = chSpace ∨ c₀ = chNL) →
+      rem l i = (cs.map commitBody).flatten ++ c₀ :: T →
+      ∃ j, readMany readCommit (ofList l) i cs.length acc = some (acc ++ cs.toArray, j) ∧
+           rem l j = c₀ :: T := by
+  intro cs
+  induction cs with
+  | nil => intro i acc c₀ T _ hd; exact ⟨i, by simp [readMany], by simpa using hd⟩
+  | cons c cs ih =>
+      intro i acc c₀ T hc hd
+      have hd' : rem l i = chSpace :: (natBytes c.mask ++ chSpace ::
+          (natBytes c.nextImg ++ ((cs.map commitBody).flatten ++ c₀ :: T))) := by
+        simpa [commitBody, spc, List.append_assoc] using hd
+      obtain ⟨h1, r1⟩ := fieldNat l i c.mask _ chSpace (Or.inl rfl) hd'
+      obtain ⟨h2, r2⟩ := fieldNat' l _ c.nextImg _ (head_commit_run cs c₀ T hc) r1
+      obtain ⟨j, hj, hjr⟩ := ih _ (acc.push c) c₀ T hc r2
+      refine ⟨j, ?_, hjr⟩
+      simp only [List.length_cons, readMany, readCommit, h1, h2, Option.bind_eq_bind,
+                 Option.bind_some]
+      simpa using hj
+
+/-- The async-reset image (DCERT3) as a presence flag and a slot, like a flop's
+`enable`. -/
+theorem memBody_shape (m : MemoryDesc) :
+    ∃ ha a : Nat,
+      ((m.asyncImg = none ∧ ha = 0 ∧ a = 0) ∨ (∃ x, m.asyncImg = some x ∧ ha = 1 ∧ a = x)) ∧
+      memBody m = natBytes m.aw ++ spc (natBytes m.dw) ++ spc (natBytes m.nextImg)
+        ++ spc (natBytes m.clock)
+        ++ spc (natBytes m.init.size) ++ (m.init.toList.map (fun v => spc (natBytes v))).flatten
+        ++ spc (natBytes m.commits.size) ++ (m.commits.toList.map commitBody).flatten
+        ++ spc (natBytes ha) ++ spc (natBytes a) := by
+  cases ha : m.asyncImg
+  · exact ⟨0, 0, Or.inl ⟨rfl, rfl, rfl⟩, by simp [memBody, ha]⟩
+  · next x => exact ⟨1, x, Or.inr ⟨x, rfl, rfl, rfl⟩, by simp [memBody, ha]⟩
+
+/-- What follows a rendered field is always a separator, never a digit. -/
 theorem readMemory_reads (l : List UInt8) (i : Nat) (ws : List UInt8) (m : MemoryDesc)
     (rest : List UInt8) (hws : ∀ c ∈ ws, isWs c)
     (hd : rem l i = ws ++ memBody m ++ chNL :: rest) :
     ReadsTo readMemory l i m (chNL :: rest) := by
-  -- DCERT2: `clock` follows `nextImg`.
+  obtain ⟨ha, a, hA, hBody⟩ := memBody_shape m
+  rw [hBody] at hd
+  -- DCERT2's four fields, then DCERT3's init run, commit run and async flag.
   have hd' : rem l i = ws ++ natBytes m.aw ++ chSpace :: (natBytes m.dw ++ chSpace ::
-      (natBytes m.nextImg ++ chSpace :: (natBytes m.clock ++ chNL :: rest))) := by
-    simpa [memBody, spc, List.append_assoc] using hd
+      (natBytes m.nextImg ++ chSpace :: (natBytes m.clock ++ chSpace ::
+      (natBytes m.init.size ++ ((m.init.toList.map (fun v => chSpace :: natBytes v)).flatten
+        ++ chSpace :: (natBytes m.commits.size ++ ((m.commits.toList.map commitBody).flatten
+        ++ chSpace :: (natBytes ha ++ chSpace :: (natBytes a ++ chNL :: rest))))))))) := by
+    simpa [spc, List.append_assoc] using hd
   obtain ⟨h1, r1⟩ := headNat l i ws m.aw _ chSpace hws (Or.inl rfl) (by simpa using hd')
   obtain ⟨h2, r2⟩ := fieldNat l _ m.dw _ chSpace (Or.inl rfl) (by simpa using r1)
   obtain ⟨h3, r3⟩ := fieldNat l _ m.nextImg _ chSpace (Or.inl rfl) (by simpa using r2)
-  obtain ⟨h4, r4⟩ := fieldNat l _ m.clock rest chNL (Or.inr rfl) (by simpa using r3)
-  exact ⟨_, by simp [readMemory, h1, h2, h3, h4], r4⟩
+  obtain ⟨h4, r4⟩ := fieldNat l _ m.clock _ chSpace (Or.inl rfl) (by simpa using r3)
+  obtain ⟨h5, r5⟩ := fieldNat' l _ m.init.size
+    ((m.init.toList.map (fun v => chSpace :: natBytes v)).flatten
+      ++ chSpace :: (natBytes m.commits.size ++ ((m.commits.toList.map commitBody).flatten
+      ++ chSpace :: (natBytes ha ++ chSpace :: (natBytes a ++ chNL :: rest)))))
+    (head_sep_run natBytes m.init.toList chSpace _ (Or.inl rfl)) (by simpa using r4)
+  obtain ⟨j₀, hj₀, hj₀r⟩ := readMany_nats l m.init.toList _ #[] chSpace _ (Or.inl rfl)
+    (by simpa using r5)
+  obtain ⟨h6, r6⟩ := fieldNat' l j₀ m.commits.size
+    ((m.commits.toList.map commitBody).flatten
+      ++ chSpace :: (natBytes ha ++ chSpace :: (natBytes a ++ chNL :: rest)))
+    (head_commit_run m.commits.toList chSpace _ (Or.inl rfl)) (by simpa using hj₀r)
+  obtain ⟨j₁, hj₁, hj₁r⟩ := readMany_commits l m.commits.toList _ #[] chSpace _ (Or.inl rfl)
+    (by simpa using r6)
+  obtain ⟨h7, r7⟩ := fieldNat l j₁ ha _ chSpace (Or.inl rfl) (by simpa using hj₁r)
+  obtain ⟨h8, r8⟩ := fieldNat l _ a rest chNL (Or.inr rfl) (by simpa using r7)
+  refine ⟨_, ?_, r8⟩
+  rw [Array.length_toList] at hj₀ hj₁
+  simp [readMemory, h1, h2, h3, h4, h5]
+  erw [hj₀]
+  simp [h6]
+  erw [hj₁]
+  simp [h7, h8]
+  rcases hA with ⟨hN, h0, h0'⟩ | ⟨x, hS, h1', h1''⟩
+  · subst h0; subst h0'; cases m; simp_all
+  · subst h1'; subst h1''; cases m; simp_all
 
 /-- The presence flags, pulled out so the field chain runs once instead of four
 times.  Both optional fields encode as a flag plus a slot, and the decode
@@ -1018,12 +1071,12 @@ theorem hasMagic_render (D : DesignCert) : hasMagic (renderCert D) = true := by
       ++ section' outBytes D.outputs ++ section' flopBytes D.flops
       ++ section' memBytes D.memories ++ section' clkBytes D.clocks with ht
   rw [hb, hasMagic]
-  have hsz : (ofList (magicBytes ++ t)).size ≥ ("DCERT2".toUTF8).size := by
-    rw [show "DCERT2".toUTF8.size = 6 from rfl]; simp [magicBytes]
+  have hsz : (ofList (magicBytes ++ t)).size ≥ ("DCERT3".toUTF8).size := by
+    rw [show "DCERT3".toUTF8.size = 6 from rfl]; simp [magicBytes]
   refine Bool.and_eq_true _ _ |>.mpr ⟨by simpa using hsz, ?_⟩
   simp only [List.all_eq_true, List.mem_range]
   intro k hk
-  rw [show "DCERT2".toUTF8.size = 6 from rfl] at hk
+  rw [show "DCERT3".toUTF8.size = 6 from rfl] at hk
   have hk6 : k < magicBytes.length := by simp [magicBytes]; omega
   rw [getElem!_prefix magicBytes t k hk6]
   interval_cases k <;> rfl

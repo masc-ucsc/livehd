@@ -161,7 +161,7 @@ exact prior image when quiet. -/
 private def fMemNext : SFun :=
   { name := "memNext", params := ["m", "edges", "env", "n", "ms", "idx"], inline := true
   , body := .switch (R "m")
-              [(tagMemory, ["aw", "dw", "nxt", "ck"],
+              [(tagMemory, ["aw", "dw", "nxt", "ck", "init", "cms", "aimg"],
                 .ite (C "firesAt" [R "edges", R "ck"])
                      (C "slot" [R "env", R "n", R "nxt"])
                      (C "memAt" [R "ms", R "idx"]))] }

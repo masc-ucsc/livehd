@@ -157,6 +157,7 @@ struct Memory {
   uint32_t                 clock_ordinal = 0;
   bool                     sync = false, is_rom = false;
   std::vector<std::string> rom_contents;
+  std::vector<std::string> init_contents;  // a WRITABLE memory's power-on words (DCERT3 `init`)
   std::vector<MemoryPort>  ports;
   std::vector<size_t>      read_ports, write_ports;
   std::string              raw_name;

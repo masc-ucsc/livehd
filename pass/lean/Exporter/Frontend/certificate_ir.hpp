@@ -80,6 +80,9 @@ struct MemoryDriver {
   uint32_t addr_w = 0, data_w = 0, next_img = 0;
   uint32_t origin = 0;
   uint32_t clock  = 0;
+  // Power-on words, entry 0 first, decimal (DCERT3 `MemoryDesc.init`); an
+  // entry past the end is 0. Empty: the memory powers on all zero.
+  std::vector<std::string> init;
 };
 // One emitted clock. Mirrors DesignScan::ClockDomain, minus the structural key:
 // the key is the scan's grouping identity and has no meaning in the certificate,

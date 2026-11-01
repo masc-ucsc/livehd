@@ -77,7 +77,7 @@ pass/lean/Exporter/Frontend/
 
 pass/lean/Exporter/DesignCert/
   emit_design_cert.*          writes <Top>_designCert, the Lean source form
-  emit_dcert.*                writes <Top>.dcert, the compact DCERT2 form
+  emit_dcert.*                writes <Top>.dcert, the compact DCERT3 form
   scripts/                    checks on the DesignCert format: vc_gates.py,
                               dcert_parity.py, cert_shape_check.py, cert_cut.py
 ```

@@ -256,6 +256,7 @@ def tagFlop        : Nat := 113
 def tagMemory      : Nat := 114
 def tagDesign      : Nat := 115
 def tagClock       : Nat := 116
+def tagCommit      : Nat := 117
 
 @[inline] def encOp (op : LGraphOp) : Val := .ctor tagOp [encNat (opCode op), opPayload op]
 
@@ -388,21 +389,43 @@ def decFlop : Val → Option FlopDesc
 @[simp] theorem decFlop_encFlop (f : FlopDesc) : decFlop (encFlop f) = some f := by
   simp [encFlop, decFlop, tagFlop]
 
+def encCommit (c : MemCommit) : Val := .ctor tagCommit [encNat c.mask, encNat c.nextImg]
+
+def decCommit : Val → Option MemCommit
+  | .ctor tg [k, n] =>
+    if tg = tagCommit then
+      match decNat k, decNat n with
+      | some k', some n' => some { mask := k', nextImg := n' }
+      | _, _ => none
+    else none
+  | _ => none
+
+@[simp] theorem decCommit_encCommit (c : MemCommit) : decCommit (encCommit c) = some c := by
+  simp [encCommit, decCommit, tagCommit]
+
+/-- DCERT3's three memory fields ride along so `decDesign_encDesign` stays a
+round trip for EVERY certificate; the object program reads only `nxt` and `ck`
+(`fMemNext`): `init` is a start-state fact and the other two are reserved. -/
 def encMemory (m : MemoryDesc) : Val :=
-  .ctor tagMemory [encNat m.aw, encNat m.dw, encNat m.nextImg, encNat m.clock]
+  .ctor tagMemory [encNat m.aw, encNat m.dw, encNat m.nextImg, encNat m.clock,
+                   encArr encNat m.init, encArr encCommit m.commits, encONat m.asyncImg]
 
 def decMemory : Val → Option MemoryDesc
-  | .ctor tg [a, d, n, ck] =>
+  | .ctor tg [a, d, n, ck, iv, cs, ai] =>
     if tg = tagMemory then
-      match decNat a, decNat d, decNat n, decNat ck with
-      | some a', some d', some n', some ck' =>
-          some { aw := a', dw := d', nextImg := n', clock := ck' }
-      | _, _, _, _ => none
+      match decNat a, decNat d, decNat n, decNat ck, decArr decNat iv, decArr decCommit cs,
+            decONat ai with
+      | some a', some d', some n', some ck', some iv', some cs', some ai' =>
+          some { aw := a', dw := d', nextImg := n', clock := ck', init := iv', commits := cs',
+                 asyncImg := ai' }
+      | _, _, _, _, _, _, _ => none
     else none
   | _ => none
 
 @[simp] theorem decMemory_encMemory (m : MemoryDesc) : decMemory (encMemory m) = some m := by
-  simp [encMemory, decMemory, tagMemory]
+  simp [encMemory, decMemory, tagMemory,
+        decArr_encArr (e := encNat) (d := decNat) decNat_encNat,
+        decArr_encArr (e := encCommit) (d := decCommit) decCommit_encCommit]
 
 /-! ## Clock domains
 
