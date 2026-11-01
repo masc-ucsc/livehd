@@ -264,6 +264,9 @@ double           wire_um(const Grid&, const Conn&);
 double           net_delay_ps(const Design&, const Grid&, const Boxes&, const Routing&, int net);
 
 // ---------------------------------------------------------------- legroute.final
+// legroute.dump_regions: each chosen region ("all", "failed" or ids) as a DEF of its own in dir (region_<r>.def/.json)
+void dump_regions(const Design&, const Grid&, const Boxes&, const Routing&, const Legroute_regions&, const Legroute_report&,
+                  const std::string& dir, const std::string& which);
 void final_place(const Design&, const Grid&, const Boxes&, const Routing&, unsigned threads);                           // F1
 void final_wires(const Design&, const Grid&, const Boxes&, const Routing&, const Legroute_regions&, Legroute_report&);  // F2-F4
 }  // namespace livehd::placement::lr

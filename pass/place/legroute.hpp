@@ -118,6 +118,14 @@ struct Legroute_options {
   unsigned    threads          = 0;  // 0: hardware concurrency
   int64_t     macro_halo_x_dbu = 0, macro_halo_y_dbu = 0;
   std::string output_dir;  // legroute.json when set
+  // with output_dir: regions written as chips of their own (region_<r>.def: the region's cells at their tiles, a die
+  // pin per hop on its track, the power grid and macros inside), for an external router to judge the region alone:
+  // "all", "failed" (regions without a routable answer) or comma-separated region ids; empty: none
+  std::string dump_regions;
+  // the regions solve most at risk first (box fill plus the share of their tracks the routes fixed ahead took), so
+  // a failing design fails early; with fail_fast the first region without a routable answer ends the solve (the
+  // callers that restart the placement on any failure set it; a run that keeps the placement solves every region)
+  bool        fail_fast = false;
 };
 void validate_legroute_options(const Legroute_options&);
 // Region rectangles (DBU) of the busorder region mesh and its fixed virtual IO pins. Empty: one region.
@@ -156,6 +164,7 @@ struct Legroute_report {
   size_t  sat_hops_over_share = 0;             // hops placed past hop_share (every boundary tile of their pair was at it)
   size_t  global_nets = 0, global_pieces = 0;  // legroute.global: nets joined by L traces, their pass-through pieces
   size_t  global_unrouted = 0, global_full_edges = 0;  // global_route: nets without a path, edges filled to the share
+  size_t  sat_fail_fast_skipped = 0;                    // fail_fast: regions left unsolved after the first failure
   double  global_seconds  = 0;
   size_t  sat_relaxed_tiles = 0, sat_deficit_tracks = 0;  // sat_relax_rounds: dropped tile bounds, tracks short
   size_t  sat_adjacent_nets = 0;                          // 1-1 nets between neighbor boxes: in-box metal, no lane

@@ -944,6 +944,7 @@ cc_library(
     srcs = [
         "legroute.cpp",
         "legroute_boxes.cpp",
+        "legroute_dump.cpp",
         "legroute_final.cpp",
         "legroute_global.cpp",
         "legroute_grid.cpp",

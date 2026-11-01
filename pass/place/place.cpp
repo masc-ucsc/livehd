@@ -681,7 +681,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     h = hash_text(std::format("gp-post-density:{}:{}", o.post_density_factor, o.convergence_tolerance), h);
   }
   if (o.boundarypins.enabled) {
-    h = hash_text(std::format("boundarypins:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+    h = hash_text(std::format("boundarypins:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                               o.boundarypins.split,
                               o.boundarypins.order,
                               o.boundarypins.align,
@@ -690,7 +690,8 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               o.boundarypins.settle_iterations,
                               o.boundarypins.pitch_um,
                               o.region.merge_um,
-                              o.region.max_cells),
+                              o.region.max_cells,
+                              o.region.cut),
                   h);
   }
   if (o.boundarypins.enabled && (o.boundarypins.clean_cuts || o.boundarypins.align_near > 0)) {
@@ -8880,6 +8881,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       lopt.final          = false;
       lopt.sat_ms         = po.sat_ms;
       lopt.sat_min_fill   = po.fill;
+      lopt.fail_fast      = po.strict;  // a failing probe restarts the placement: no need to solve the other regions
       lopt.sat_alt.clear();
       lopt.macro_halo_x_dbu = v.halo_x;
       lopt.macro_halo_y_dbu = v.halo_y;
@@ -9158,6 +9160,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         lopt.macro_halo_x_dbu = v.halo_x;
         lopt.macro_halo_y_dbu = v.halo_y;
         lopt.output_dir       = options.output_dir;
+        lopt.fail_fast        = options.legroute_probe.strict;  // strict: any failure restarts or stops the run
         Legroute_regions regions;
         if (!final_regions) {  // a final stage without the boundary refinement: the same mesh, without virtual pins
           final_regions = Region_mesh::build(v.design, region_macros(), region_ios(), options.region, tech.dbu);

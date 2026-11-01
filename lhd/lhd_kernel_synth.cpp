@@ -434,6 +434,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.mesh_variants    = integer("place.mesh_variants", "0");
   out.area_search      = truthy(synth_set(opts, "place.area_search", "false"));  // set by the driver's search
   out.region.merge_um  = number("place.region.merge_um", "5");
+  out.region.cut       = synth_set(opts, "place.region.cut", "macro");
   livehd::placement::validate_region_options(out.region);
   out.boundarypins.enabled             = truthy(synth_set(opts, "place.region.boundarypins", "false"));
   out.boundarypins.split               = truthy(synth_set(opts, "place.region.boundarypins.split", "true"));
@@ -481,6 +482,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_options.global_route     = truthy(synth_set(opts, "place.legroute.global_route", "false"));
   out.legroute_options.global_share     = number("place.legroute.global_share", "0.5");
   out.legroute_options.global_margin    = integer("place.legroute.global_margin", "8");
+  out.legroute_options.dump_regions     = synth_set(opts, "place.legroute.dump_regions", "");
   out.legroute_options.threads          = integer("place.legroute.threads", "0");
   out.legroute_options.hop_spread       = number("place.legroute.hop_spread", "6");
   out.legroute_options.sat_ms           = integer("place.legroute.sat_ms", "60000");

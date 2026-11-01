@@ -41,6 +41,9 @@ std::vector<double> merge_lines(std::vector<double> values, double low, double h
 }  // namespace
 
 void validate_region_options(const Region_options& o) {
+  if (o.cut != "macro" && o.cut != "mincut") {
+    throw std::invalid_argument("region cut must be macro or mincut");
+  }
   if (!o.max_cells || o.max_cells > 1000000 || !std::isfinite(o.merge_um) || o.merge_um < 0) {
     throw std::invalid_argument("invalid region cell cap/merge distance");
   }
@@ -137,13 +140,16 @@ Region_mesh Region_mesh::build(const dp::Design& d, const std::vector<int>& macr
   auto&       members   = result.members;
   result.options        = options;
   const auto&         l = d.layout;
+  const bool          mincut = options.cut == "mincut";
   std::vector<double> raw[2];
   for (int i : macros) {
     if (i < d.num_movable || i >= int(d.node_x.size())) {
       throw std::invalid_argument("invalid region mesh fixed macro index");
     }
-    raw[0].insert(raw[0].end(), {d.node_x[i], d.node_x[i] + d.node_size_x[i]});
-    raw[1].insert(raw[1].end(), {d.node_y[i], d.node_y[i] + d.node_size_y[i]});
+    if (!mincut) {
+      raw[0].insert(raw[0].end(), {d.node_x[i], d.node_x[i] + d.node_size_x[i]});
+      raw[1].insert(raw[1].end(), {d.node_y[i], d.node_y[i] + d.node_size_y[i]});
+    }
   }
   std::map<std::pair<std::string, int>, std::pair<double, double>> buses;
   for (const auto& io : ios) {
@@ -160,7 +166,9 @@ Region_mesh Region_mesh::build(const dp::Design& d, const std::vector<int>& macr
   }
   for (const auto& [key, span] : buses) {
     const int axis = key.second < 2 ? 1 : 0;
-    raw[axis].insert(raw[axis].end(), {span.first, span.second});
+    if (!mincut) {
+      raw[axis].insert(raw[axis].end(), {span.first, span.second});
+    }
   }
   const auto                    xs = merge_lines(raw[0], l.xl, l.xh, options.merge_um * dbu);
   const auto                    ys = merge_lines(raw[1], l.yl, l.yh, options.merge_um * dbu);
@@ -190,7 +198,81 @@ Region_mesh Region_mesh::build(const dp::Design& d, const std::vector<int>& macr
       throw std::runtime_error("region mesh cannot split coincident cell centers below the cell cap");
     }
     const bool       x   = box.xh - box.xl >= box.yh - box.yl;
-    const double     mid = x ? (box.xl + box.xh) / 2 : (box.yl + box.yh) / 2;
+    double           mid = x ? (box.xl + box.xh) / 2 : (box.yl + box.yh) / 2;
+    if (mincut && !d.flat_net2pin_start.empty()) {
+      // the cut that the fewest nets cross, within the middle half of the side: a net's cells inside the box span
+      // [lo, hi] along the axis; it crosses a cut at p iff lo < p <= hi. The crossings over p come from a sweep of
+      // those spans, sampled at the cells' positions (a cut lands between two cells)
+      std::vector<char> in_box(size_t(d.num_movable), 0);
+      for (int i : cells) {
+        in_box[size_t(i)] = 1;
+      }
+      const auto pos = [&](int i) { return x ? d.node_x[i] + d.node_size_x[i] / 2 : d.node_y[i] + d.node_size_y[i] / 2; };
+      std::vector<std::pair<double, double>> spans;  // (lo, hi) per net with two or more cells in the box, weighted below
+      std::vector<double>                    weights;
+      {
+        std::vector<int> seen(d.flat_net2pin_start.size(), 0);
+        for (int i : cells) {
+          for (int k = d.flat_node2pin_start[size_t(i)]; k < d.flat_node2pin_start[size_t(i) + 1]; ++k) {
+            const int n = d.pin2net[size_t(d.flat_node2pin[size_t(k)])];
+            if (n < 0 || seen[size_t(n)] || (!d.net_mask.empty() && !d.net_mask[size_t(n)])) {
+              continue;
+            }
+            seen[size_t(n)] = 1;
+            double lo = INFINITY, hi = -INFINITY;
+            int    inside = 0;
+            for (int q = d.flat_net2pin_start[size_t(n)]; q < d.flat_net2pin_start[size_t(n) + 1]; ++q) {
+              const int node = d.pin2node[size_t(d.flat_net2pin[size_t(q)])];
+              if (node >= 0 && node < d.num_movable && in_box[size_t(node)]) {
+                const double p = pos(node);
+                lo             = std::min(lo, p);
+                hi             = std::max(hi, p);
+                ++inside;
+              }
+            }
+            if (inside >= 2 && hi > lo) {
+              spans.emplace_back(lo, hi);
+              weights.push_back(d.net_weights.empty() ? 1.0 : std::max(1.0, d.net_weights[size_t(n)]));
+            }
+          }
+        }
+      }
+      // candidate cuts: between consecutive cell positions inside the middle half of the side
+      std::vector<double> ps;
+      for (int i : cells) {
+        ps.push_back(pos(i));
+      }
+      std::sort(ps.begin(), ps.end());
+      const double lo_side = x ? box.xl : box.yl, hi_side = x ? box.xh : box.yh;
+      const double a = lo_side + 0.25 * (hi_side - lo_side), b = lo_side + 0.75 * (hi_side - lo_side);
+      std::vector<std::tuple<double, double, int>> events;  // (position, weight, +1 open / -1 close)
+      for (size_t k = 0; k < spans.size(); ++k) {
+        events.emplace_back(spans[k].first, weights[k], 1);
+        events.emplace_back(spans[k].second, weights[k], -1);
+      }
+      std::sort(events.begin(), events.end());
+      double best = INFINITY, open = 0;
+      size_t e    = 0;
+      for (size_t k = 0; k + 1 < ps.size(); ++k) {
+        if (ps[k] == ps[k + 1]) {
+          continue;
+        }
+        const double p = (ps[k] + ps[k + 1]) / 2;  // the cut between two cells: lo < p <= hi counts
+        if (p < a || p > b) {
+          continue;
+        }
+        while (e < events.size() && std::get<0>(events[e]) < p) {
+          open += std::get<2>(events[e]) * std::get<1>(events[e]);
+          ++e;
+        }
+        // the spans closed exactly at p stay crossed (lo < p <= hi): open counts them until the sweep passes hi
+        const double cost = open + 1e-3 * std::abs(p - (lo_side + hi_side) / 2) / std::max(1e-9, hi_side - lo_side);
+        if (cost < best) {
+          best = cost;
+          mid  = p;
+        }
+      }
+    }
     std::vector<int> low, high;
     for (int i : cells) {
       const double p = x ? d.node_x[i] + d.node_size_x[i] / 2 : d.node_y[i] + d.node_size_y[i] / 2;

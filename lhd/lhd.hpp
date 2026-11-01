@@ -1251,6 +1251,12 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "5",
      Synth_set_option::Kind::file,
      "merge region cut lines from macro edges and IO bus spans within this distance in microns"},
+    {"place.region.cut",
+     "macro",
+     Synth_set_option::Kind::file,
+     "region cut lines: macro = every macro edge and IO bus span first, then the longest side split at its middle; "
+     "mincut = no forced line, each split takes the position in the middle half of the longest side that the fewest "
+     "nets cross (a macro sits inside its region, no boundary runs along its channel)"},
     {"place.region.boundarypins",
      "false",
      Synth_set_option::Kind::boolean,
@@ -1434,6 +1440,12 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "8",
      Synth_set_option::Kind::integer,
      "with legroute.global_route: tiles around a net's bounding box the path search covers (grown when no path fits)"},
+    {"place.legroute.dump_regions",
+     "",
+     Synth_set_option::Kind::file,
+     "with legroute: write regions as chips of their own (<place dir>/final/region_<r>.def: the region's cells at their "
+     "tiles, a die pin per crossing net on the track its hop took, the power grid and macros inside) for an external "
+     "router to judge the region alone; all, failed (regions without a routable answer) or comma-separated ids"},
     {"place.legroute.reserve_share",
      "0.5",
      Synth_set_option::Kind::file,

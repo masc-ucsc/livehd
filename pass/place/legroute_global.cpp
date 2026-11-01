@@ -91,12 +91,14 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
     pend[size_t(net.endpoints.front())] = 0;
     std::vector<std::pair<int, int>> edges;
     bool                             ok = true;
-    // a search joins the nearest pending endpoint to the tree; the bounding box grows twice before giving up
+    // a search joins the nearest pending endpoint to the tree; the box grows twice (4x and 16x the margin, plus
+    // a quarter then all of the net's span) before the net is left to the hop chain: a whole-die search per
+    // unroutable net cost a large design its minutes
     for (size_t left = net.endpoints.size() - 1; left && ok;) {
       bool joined = false;
       for (int grow = 0; grow < 3 && !joined; ++grow) {
-        const int margin = grow == 2 ? std::max(g.cols, g.rows)
-                                     : int(margin_tiles) * (1 << (2 * grow)) + ((sp[1] - sp[0]) + (sp[3] - sp[2])) / 8 * (1 + grow);
+        const int len    = (sp[1] - sp[0]) + (sp[3] - sp[2]);
+        const int margin = int(margin_tiles) * (1 << (2 * grow)) + (grow == 0 ? len / 8 : grow == 1 ? len / 4 : len);
         const int c0 = std::max(0, sp[0] - margin), c1 = std::min(g.cols - 1, sp[1] + margin);
         const int r0 = std::max(0, sp[2] - margin), r1 = std::min(g.rows - 1, sp[3] + margin);
         ++S.gen;

@@ -3572,13 +3572,48 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
                  x.unjoined,
                  x.pieces.size(),
                  size_t(std::max(1u, d.opt.threads)));
+    // the regions most at risk first: box fill plus the share of the region's tracks the routes fixed ahead took
+    // (hops, pieces, trees, IO pre-routes). A failing design then fails early (fail_fast ends the solve at the
+    // first failure), and the long solves start first, so the threads end together
+    std::vector<double> risk(size_t(g.regions), 0);
+    {
+      std::vector<double> free_t(size_t(g.regions), 0), cap(size_t(g.regions), 0), taken(size_t(g.regions), 0);
+      for (int t = 0; t < int(g.size()); ++t) {
+        const auto r  = size_t(g.region[t]);
+        free_t[r]    += !g.blocked[t];
+        cap[r]       += cap_h0[t] + cap_v0[t];
+        taken[r]     += P[0].reserve.h[size_t(t)] + P[0].reserve.v[size_t(t)];
+      }
+      for (int r = 0; r < g.regions; ++r) {
+        risk[size_t(r)] = double(region_boxes[r].size()) / std::max(1.0, free_t[size_t(r)]) + taken[size_t(r)] / std::max(1.0, cap[size_t(r)]);
+      }
+    }
+    std::vector<size_t> task_order(size_t(g.regions) * policies.size());
+    std::iota(task_order.begin(), task_order.end(), 0);
+    std::ranges::stable_sort(task_order, [&](size_t a, size_t b) { return risk[a / policies.size()] > risk[b / policies.size()]; });
+    {
+      std::string head;
+      for (size_t k = 0; k < std::min<size_t>(8, task_order.size()); k += policies.size()) {
+        const auto r = task_order[k] / policies.size();
+        head += std::format(" {}({:.2f})", r, risk[r]);
+      }
+      std::fprintf(stderr, "legroute sat: regions by risk (fill + fixed share), first:%s\n", head.c_str());
+    }
+    std::atomic<bool> failed_fast{false};
     // every (region, policy) solve is a task: the regions are independent once the hops are fixed
-    lr::parallel(size_t(g.regions) * policies.size(), d.opt.threads, [&](size_t task) {
+    lr::parallel(size_t(g.regions) * policies.size(), d.opt.threads, [&](size_t slot) {
+      const size_t task  = task_order[slot];
       const int    r     = int(task / policies.size());
       const size_t p     = task % policies.size();
       auto&        Q     = P[p];
       auto&        out   = last[p][r];
       const auto   start = Clock::now();
+      if (failed_fast.load()) {  // fail_fast: the placement restarts anyway; the region keeps its boxes unsolved
+        out.skipped = true;
+        out.status  = Sat_status::unknown;
+        ++out.rep.sat_fail_fast_skipped;
+        return;
+      }
       solve_region(d,
                    policies[p],
                    g,
@@ -3596,6 +3631,11 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
                    Q.reserve,
                    out);
       out.seconds = seconds_since(start);
+      if (d.opt.fail_fast && out.status != Sat_status::satisfiable && !out.skipped) {
+        if (!failed_fast.exchange(true)) {
+          std::fprintf(stderr, "legroute sat: fail fast: region %d has no routable answer, the other regions are left\n", r);
+        }
+      }
       for (const auto& ft : Q.trees) {  // the policy's fixed trees and IO pre-routes in the region
         for (const auto& piece : ft.pieces) {
           if (!ft.dropped && piece.region == r) {
@@ -3723,6 +3763,7 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
     rep.sat_unsat_regions   += q.sat_unsat_regions;
     rep.sat_unknown_regions += q.sat_unknown_regions;
     rep.sat_skipped_regions += q.sat_skipped_regions;
+    rep.sat_fail_fast_skipped += q.sat_fail_fast_skipped;
     rep.lazy_rounds         += q.lazy_rounds;
     rep.lazy_bounds         += q.lazy_bounds;
     rep.lazy_skipped        += q.lazy_skipped;
