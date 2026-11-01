@@ -35,7 +35,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # The residual-half cut is shared with make_sim_launcher.py: both tools redirect
 # the same import and cut at the same boundary, and both carried the same two
 # defects independently. One copy, so a repair cannot drift.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# cert_cut.py lives with the certificate tools, pass/lean/Exporter/DesignCert/scripts
+# (two levels up from this directory, then down).
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "..", "Exporter", "DesignCert", "scripts"))
 import cert_cut
 
 LEAN_DIR = os.path.realpath(

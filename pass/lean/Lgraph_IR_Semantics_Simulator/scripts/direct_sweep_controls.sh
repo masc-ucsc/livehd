@@ -7,15 +7,15 @@
 set -u
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 WORK="$ROOT/generated/master_port/direct_sweep_controls"
-CERT="$ROOT/generated/master_port/replay/jobs/CORE-ET/verified_compiler/txfma_e4/lean/txfma_e4_Lgraph.lean"
-[ -f "$CERT" ] || { echo "REFUSE: no certificate at $CERT" >&2; exit 2; }
+CERT="${1:-$ROOT/generated/master_port/replay/jobs/CORE-ET/verified_compiler/txfma_e4/lean/txfma_e4_Lgraph.lean}"
+[ -f "$CERT" ] || { echo "REFUSE: no certificate at $CERT (pass one as \$1)" >&2; exit 2; }
 rm -rf "$WORK"; mkdir -p "$WORK"
 
 ROOT="$ROOT" CERT="$CERT" WORK="$WORK" python3 -I - <<'PY'
 import importlib.util, os, re, sys
 root, cert, work = os.environ["ROOT"], os.environ["CERT"], os.environ["WORK"]
 spec = importlib.util.spec_from_file_location(
-    "ds", os.path.join(root, "pass", "lean", "scripts", "direct_sweep.py"))
+    "ds", os.path.join(root, "pass", "lean", "Lgraph_IR_Semantics_Simulator", "scripts", "direct_sweep.py"))
 ds = importlib.util.module_from_spec(spec); spec.loader.exec_module(ds)
 src = open(cert).read()
 fails = []
@@ -157,7 +157,7 @@ ROOT="$ROOT" CERT="$CERT" WORK="$WORK" python3 -I - <<'PYEOF'
 import importlib.util, os, hashlib, sys, shutil
 root, cert, work = os.environ["ROOT"], os.environ["CERT"], os.environ["WORK"]
 spec = importlib.util.spec_from_file_location(
-    "ds", os.path.join(root, "pass", "lean", "scripts", "direct_sweep.py"))
+    "ds", os.path.join(root, "pass", "lean", "Lgraph_IR_Semantics_Simulator", "scripts", "direct_sweep.py"))
 ds = importlib.util.module_from_spec(spec); spec.loader.exec_module(ds)
 fails = []
 def ok(name, cond, detail=""):

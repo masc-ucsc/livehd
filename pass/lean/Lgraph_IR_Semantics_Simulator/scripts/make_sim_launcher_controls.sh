@@ -25,7 +25,7 @@ fixture() {
   local name="$1"
   local nosims="${2:-}"
   local d="$WORK/$name"
-  rm -rf "$d"; mkdir -p "$d/pass/lean/scripts" "$d/formal/lean"
+  rm -rf "$d"; mkdir -p "$d/pass/lean/Lgraph_IR_Semantics_Simulator/scripts" "$d/pass/lean/Exporter/DesignCert/scripts" "$d/formal/lean"
   # Hard links: same inode, so a control can never run a stale copy. Both
   # files, because the generator imports its sibling -- and the first run after
   # that import was added failed here with ModuleNotFoundError, which is the

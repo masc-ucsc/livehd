@@ -44,7 +44,10 @@ import sys
 # The residual-half cut is shared with direct_sweep.py: both tools redirect the
 # same import and cut at the same boundary, and both carried the same two
 # defects. A repair applied to one copy is a repair that drifts.
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# cert_cut.py lives with the certificate tools, pass/lean/Exporter/DesignCert/scripts
+# (two levels up from this directory, then down).
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "..", "..", "Exporter", "DesignCert", "scripts"))
 import cert_cut
 
 LEAN_DIR = os.path.realpath(
