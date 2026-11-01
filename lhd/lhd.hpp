@@ -1419,6 +1419,21 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "legroute.global: a region-crossing net with slack rank under this fraction joins its regions by an L trace over "
      "the tile grid ahead of the regions (hops at the boundaries it crosses, fixed pieces through the regions it only "
      "passes); 0 = every crossing joins by the hop chain"},
+    {"place.legroute.global_route",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "legroute.global: every region-crossing net routed over the tile grid ahead of the regions (a tree by shortest "
+     "paths on the edges with room, most critical nets first); its boundary crossings are the hops, its runs through "
+     "the regions holding none of its pins are fixed pieces; a net without a path keeps the hop chain"},
+    {"place.legroute.global_share",
+     "0.5",
+     Synth_set_option::Kind::file,
+     "with legroute.global_route: share of an edge's tracks (the narrower tile's, per direction) the routed trees may "
+     "take; the rest stays for the regions' own routes"},
+    {"place.legroute.global_margin",
+     "8",
+     Synth_set_option::Kind::integer,
+     "with legroute.global_route: tiles around a net's bounding box the path search covers (grown when no path fits)"},
     {"place.legroute.reserve_share",
      "0.5",
      Synth_set_option::Kind::file,

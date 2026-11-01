@@ -9,6 +9,7 @@
 #include <exception>
 #include <limits>
 #include <map>
+#include <numeric>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -160,6 +161,33 @@ struct Boxes {
 Boxes build_boxes(const Design&, const Grid&, const std::map<int, int>& fixed_slot = {});
 int   cell_sites(const Design&, const Grid&, int movable);
 bool  box_fits(const Design&, const Grid&, const Box&, int tile);
+
+// ---------------------------------------------------------------- L3 legroute.global: the crossing nets' trees
+// A region-crossing net routed over the tile grid ahead of the regions: a tree of tile edges joining its endpoint
+// tiles (its boxes' placement tiles, its fixed pins, the hop tiles of its fixed virtual pins) by shortest paths on
+// the edges with room: an edge carries at most a share of the narrower tile's tracks in its direction, the fuller
+// an edge the costlier, most critical nets first. The fixed edges of a net (a virtual pin's hop) cost it nothing.
+struct Global_net {
+  int                              net  = -1;
+  double                           crit = 0;  // order: highest first, then the short nets
+  std::vector<int>                 endpoints;  // distinct tiles, the driver's first
+  std::vector<std::pair<int, int>> fixed_edges;
+  // the regions holding the net's own pins: the region's model routes the net there itself, so the tree's edges
+  // inside them cost length only and take no room (only the boundary crossings and the pass-through runs do)
+  std::vector<int>                 own_regions;
+};
+struct Global_tree {
+  bool                             routed = false;
+  std::vector<std::pair<int, int>> edges;  // adjacent tile pairs, lower tile first
+};
+struct Global_routes {
+  std::vector<Global_tree> trees;  // per Global_net
+  size_t                   unrouted = 0, edges_full = 0;  // nets without a path; edges filled to their share
+  double                   seconds  = 0;
+};
+// cap_h[t], cap_v[t]: the tile's tracks per direction; margin_tiles: the search box around a net's endpoints
+Global_routes global_route(const Grid&, const std::vector<int>& cap_h, const std::vector<int>& cap_v, double share,
+                           const std::vector<Global_net>&, unsigned margin_tiles);
 
 // ---------------------------------------------------------------- L3 SAT placement
 void                     pack_cells(const Design&, const Grid&, const Boxes&);  // trivial in-box packing (F1 refines)

@@ -497,16 +497,27 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
     for (const auto& s : regions.obstacles) {
       add_rail(s);
     }
+    // the rails by tile row (a rail's spacing band reaches the rows it touches): a tile checks its own row's rails.
+    // Every rail of the die per tile and track was hours on a large design
+    std::vector<std::vector<int>> rails_by_row(g.rows);
+    for (int k = 0; k < int(rails.size()); ++k) {
+      const auto& q = rails[k];
+      for (int rr = g.row_of(q.yl - double(keep)); rr <= g.row_of(q.yh + double(keep)); ++rr) {
+        rails_by_row[rr].push_back(k);
+      }
+    }
     g.box_cap.assign(g.size(), 0);
     for (int tr = 0; tr < g.rows; ++tr) {
-      const auto lo = std::lower_bound(ys_all.begin(), ys_all.end(), g.bottom(tr));
-      const auto hi = std::lower_bound(ys_all.begin(), ys_all.end(), g.bottom(tr) + g.tile_h);
+      const auto  lo   = std::lower_bound(ys_all.begin(), ys_all.end(), g.bottom(tr));
+      const auto  hi   = std::lower_bound(ys_all.begin(), ys_all.end(), g.bottom(tr) + g.tile_h);
+      const auto& near = rails_by_row[tr];
       for (int tc = 0; tc < g.cols; ++tc) {
         const double txl = double(g.left(tc)), txh = txl + double(g.tile_w);
         int          n = 0;
         for (auto it = lo; it != hi; ++it) {
           const double y  = double(*it);
-          n              += std::none_of(rails.begin(), rails.end(), [&](const ph::Rect& q) {
+          n              += std::none_of(near.begin(), near.end(), [&](int k) {
+            const auto& q = rails[k];
             return q.xl < txh && q.xh > txl && y > q.yl - double(keep) && y < q.yh + double(keep);
           });
         }

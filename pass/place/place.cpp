@@ -699,7 +699,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   if (o.legroute) {
     const auto& l = o.legroute_options;
     h = hash_text(std::format("legroute-v3:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{"
-                              "}:{}:{}:{}:{}:{}:{}",
+                              "}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                               l.box_fill,
                               l.box_net_max,
                               l.merge_cost,
@@ -730,6 +730,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               l.hop_share,
                               l.reserve_share,
                               l.global_fraction,
+                              l.global_route,
+                              l.global_share,
+                              l.global_margin,
                               l.hop_spread,
                               l.sat_seed,
                               l.tiers,

@@ -478,6 +478,9 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_options.hop_share        = number("place.legroute.hop_share", "0.5");
   out.legroute_options.reserve_share    = number("place.legroute.reserve_share", "0.5");
   out.legroute_options.global_fraction  = number("place.legroute.global_fraction", "0.05");
+  out.legroute_options.global_route     = truthy(synth_set(opts, "place.legroute.global_route", "false"));
+  out.legroute_options.global_share     = number("place.legroute.global_share", "0.5");
+  out.legroute_options.global_margin    = integer("place.legroute.global_margin", "8");
   out.legroute_options.threads          = integer("place.legroute.threads", "0");
   out.legroute_options.hop_spread       = number("place.legroute.hop_spread", "6");
   out.legroute_options.sat_ms           = integer("place.legroute.sat_ms", "60000");

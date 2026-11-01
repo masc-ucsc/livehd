@@ -67,6 +67,14 @@ struct Legroute_options {
   // through keeps the run as a fixed piece (reserved on its edges, routed straight), so the long trace is as short
   // as the grid allows and the regions' models never see it (0: every crossing joins by the hop chain)
   double      global_fraction  = .05;
+  // legroute.global (global_route): every region-crossing net is routed over the tile grid ahead of the regions, a
+  // tree of tile edges by shortest paths on the edges with room (at most global_share of the narrower tile's tracks
+  // per edge, the fuller the costlier, most critical nets first; the search box is the net's bounding box plus
+  // global_margin tiles, grown when no path is found): its boundary crossings are the hops, its runs through the
+  // regions holding none of the net's pins are fixed pieces. A net without a path keeps the hop chain
+  bool        global_route     = false;
+  double      global_share     = .5;
+  unsigned    global_margin    = 8;
   // chained hops of a pass-through net (hop to hop inside a region) avoid the rows and columns earlier pass-throughs
   // took: this many tile widths of distance per fully loaded edge on the run (0: nearest only)
   double      hop_spread       = 6;
@@ -147,6 +155,8 @@ struct Legroute_report {
   size_t  sat_unsat_regions = 0, sat_unknown_regions = 0, sat_binding_tiles = 0, sat_unjoined_crossings = 0;
   size_t  sat_hops_over_share = 0;             // hops placed past hop_share (every boundary tile of their pair was at it)
   size_t  global_nets = 0, global_pieces = 0;  // legroute.global: nets joined by L traces, their pass-through pieces
+  size_t  global_unrouted = 0, global_full_edges = 0;  // global_route: nets without a path, edges filled to the share
+  double  global_seconds  = 0;
   size_t  sat_relaxed_tiles = 0, sat_deficit_tracks = 0;  // sat_relax_rounds: dropped tile bounds, tracks short
   size_t  sat_adjacent_nets = 0;                          // 1-1 nets between neighbor boxes: in-box metal, no lane
   // critical pre-placement: boxes fixed before the SAT, and their nets' weighted star length (tiles) at the placement

@@ -77,8 +77,11 @@ below). Starting points may change for speed, but every answer keeps the baselin
 small SAT or search), then connect its pins to the lanes that reach or cross the box, one trace at a time,
 adding metal and vias inside the box only. Boxes that fail are placed for real and legroute.local runs again
 with their actual in-box demand.</td></tr>
-<tr><td><strong>legroute.global</strong> (optional, later)</td>
-<td>Whole-chip critical cross-region traces fixed or constrained ahead of the regions.</td></tr>
+<tr><td><strong>legroute.global</strong> (<code>global_route</code>, built 2026-11-01)</td>
+<td>Every region-crossing net routed over the tile grid ahead of the regions: a tree of tile edges by shortest
+paths on the edges with room, most critical nets first. Its boundary crossings become the regions' hops, its
+runs through the regions holding none of the net's pins become fixed pieces; the regions holding its pins route
+it themselves. See <a href="#global">legroute.global</a>.</td></tr>
 </table>
 <p>All or nothing: unless every net closes, no signal wire is written and an external router starts from the
 legal placement.</p>
@@ -216,6 +219,34 @@ standard flow's default); OpenROAD: zero overflow, one die-edge pin DRC, DR WNS 
 and the next search on that workdir starts there, bracketed by a tenth, so an incremental run confirms its core
 in two or three placements. The next step of that idea is per synthesis color: keep the best routable density
 per color in the incremental cache, so an unchanged color keeps its area budget and only changed colors search.</p>
+
+<h2 id="global">legroute.global: the crossing nets routed ahead (2026-11-01)</h2>
+<p>What partition_c showed (328k cells, 632 regions, 274 regions without an answer): the regions that fail are
+<em>pass-through</em> regions, thin slivers between macros that hold two boxes and carry two thousand nets of
+other regions. The hop chain chooses a boundary tile with hop room for every crossing, but room on a boundary
+tile says nothing about the tracks across the region behind it, so a 6-tile channel was asked to carry what
+only a 60-tile one could; the IO pre-route ran out of room (263k feedthroughs skipped) and the SAT got the rest.
+The fix is a global router for the crossing nets (<code>pass/place/legroute_global.cpp</code>,
+<code>synth.place.legroute.global_route=true</code>):</p>
+<ul>
+<li><strong>Graph:</strong> the tile grid; an edge between two neighbor tiles carries at most
+<code>global_share</code> (0.5) of the narrower tile's tracks in its direction, so the regions keep the other
+half for their own routes. The edges inside a region holding one of the net's own pins cost length only and take
+no room: that region's SAT routes the net there, nothing is reserved. A boundary crossing costs one extra tile,
+so a path along an irregular boundary does not hop back and forth.</li>
+<li><strong>Nets:</strong> every net with endpoints in two or more regions (its boxes' placement tiles, its fixed
+pins, the hop tiles of its busorder virtual pins, which it crosses for free). Most critical first, then the short
+nets (few ways to go) before the long ones (they detour). Each net is a tree grown by multi-source Dijkstra from
+the driver's tile to the nearest pending endpoint, within the bounding box plus <code>global_margin</code> (8)
+tiles, grown four times and then to the die when no path fits; the cost of an edge is 1 + 2&middot;use/limit.
+A net without a path keeps the hop chain (counted as <code>global_unrouted</code>).</li>
+<li><strong>Hand-off:</strong> a tree edge between two regions is a hop (both tiles are endpoints of their
+regions, as before); the tree's edges inside a region without any of the net's pins are split at hop and branch
+tiles into straight runs, two runs make an L piece (<code>Global_piece</code>, reserved on its edges by
+<code>edge_reserve</code>, emitted as a fixed connection, the region's model skips the net).</li>
+<li><strong>Cost:</strong> 0.3 s for sha3's 3,951 crossing nets; seconds on partition_c.</li>
+</ul>
+<p>Results: sha3 @0.70 first samples below (option sweep table, rows <code>gr*</code>); partition_c and cnn pending.</p>
 
 <h2>Larger designs with macros (cnn, partition_c)</h2>
 <p>The next targets are HighTide's cnn (69 FakeRAM hard macros, four of them 0.3 mm&sup2; each) and NVDLA

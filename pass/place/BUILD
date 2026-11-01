@@ -945,6 +945,7 @@ cc_library(
         "legroute.cpp",
         "legroute_boxes.cpp",
         "legroute_final.cpp",
+        "legroute_global.cpp",
         "legroute_grid.cpp",
         "legroute_internal.hpp",
         "legroute_route.cpp",
