@@ -723,7 +723,7 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
         auto&   s  = R.segments[si];
         int64_t lo = tile_lo(s, s.lo), hi = tile_hi(s, s.hi);
         if (horizontal) {  // exact ends: the node riser or the bend partner's track
-          const auto end_x = [&](int node, int k, bool low) -> int64_t {
+          const auto end_x = [&](int node, int band, bool low) -> int64_t {
             if (node >= 0) {
               const auto& nd = R.trees[s.net].nodes[node];
               if (nd.riser_track >= 0) {
@@ -732,12 +732,12 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
             } else if (s.conn >= 0) {
               for (int o : R.conns[s.conn].segs) {
                 const auto& p = R.segments[o];
-                if (o != si && !g.layers[p.layer].horizontal && p.band == k && p.track >= 0) {
+                if (o != si && !g.layers[p.layer].horizontal && p.band == band && p.track >= 0) {
                   return g.track_coord(p.layer, p.track);
                 }
               }
             }
-            return low ? tile_lo(s, k) : tile_hi(s, k);
+            return low ? tile_lo(s, band) : tile_hi(s, band);
           };
           lo = end_x(s.node_lo, s.lo, true);
           hi = end_x(s.node_hi, s.hi, false);

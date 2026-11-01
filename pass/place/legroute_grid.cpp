@@ -543,7 +543,7 @@ Legroute_tile legroute_tile(const ph::Technology& tech, const ph::Floorplan& fp)
   for (const auto& c : fp.components) {
     const auto m = tech.macros.find(c.macro);
     if (m != tech.macros.end() && m->second.klass.starts_with("CORE") && lr::has_clock_pin(m->second)) {
-      flop = std::max(flop, std::llround(m->second.width * fp.dbu));
+      flop = std::max<int64_t>(flop, std::llround(m->second.width * fp.dbu));
     }
   }
   if (flop <= 0 || site <= 0) {

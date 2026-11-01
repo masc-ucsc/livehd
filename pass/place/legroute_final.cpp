@@ -209,9 +209,9 @@ void final_place(const Design& d, const Grid& g, const Boxes& boxes, const Routi
       int        best_start = seg.lo + edge;
       const auto try_order  = [&](const std::vector<int>& o) {
         for (int start = seg.lo + edge; start <= seg.hi - total - edge; ++start) {
-          const double k = cost_of(o, start);
-          if (k < best) {
-            best       = k;
+          const double trial = cost_of(o, start);
+          if (trial < best) {
+            best       = trial;
             best_order = o;
             best_start = start;
           }
@@ -535,15 +535,15 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
     const ph::Signal_metal_rules rules(d.tech, work);
     const auto                   conflict = [&](const ph::Shape& s, const std::string& net) -> std::string {
       const auto cut   = d.tech.cut_layers.find(s.layer);
-      const auto reach = cut == d.tech.cut_layers.end() ? rules.clearance(s.layer)
+      const auto limit = cut == d.tech.cut_layers.end() ? rules.clearance(s.layer)
                                                         : std::optional<int64_t>{ph::signal_cut_spacing(cut->second, d.fp.dbu)};
-      if (!reach) {
+      if (!limit) {
         return {};
       }
-      for (const auto q : occ.query(s.layer, s.rect, *reach, net)) {
+      for (const auto q : occ.query(s.layer, s.rect, *limit, net)) {
         const auto o     = occ.at(q);
         const bool legal = cut == d.tech.cut_layers.end() ? rules.spacing(s, o.shape).legal
-                                                          : !ph::violates_cut_spacing(s.rect, o.shape.rect, double(*reach));
+                                                          : !ph::violates_cut_spacing(s.rect, o.shape.rect, double(*limit));
         if (!legal) {
           return std::format("global metal: {} to {} ({} [{} {} {} {}] vs [{} {} {} {}])",
                              s.layer,
