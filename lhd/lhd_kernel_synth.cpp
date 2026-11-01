@@ -1503,18 +1503,20 @@ void synth_command_once(Options& opts, Result& res) {
     if (mapper_method != "pass.usyn") {
       throw Lhd_error{"usage", "pass.usyn.physical=domino_provisional needs synth.mapper=usyn", ""};
     }
-    // bus order is on by default: two-row cells only refuse an explicit request
+    // bus order is on by default: two-row cells only refuse an explicit request, unless legroute places the
+    // cells (it takes a two-row cell as a tile-tall box, on the busorder regions)
     const bool region_requested = !synth_set(opts, "place.region.busorder", "").empty()
                                   || truthy(synth_set(opts, "place.region.boundarypins", "false"))
                                   || truthy(synth_set(opts, "place.region.pinalign", "false"));
-    if (run_place && !region_requested) {
+    const bool legroute_places  = truthy(synth_set(opts, "place.legroute", "false"));
+    if (run_place && !region_requested && !legroute_places) {
       place_options.boundarypins.enabled = place_options.boundarypins.order = false;
     }
-    if (run_place && (place_options.boundarypins.enabled || place_options.boundarypins.align)) {
+    if (run_place && !legroute_places && (place_options.boundarypins.enabled || place_options.boundarypins.align)) {
       throw Lhd_error{"usage",
                       "detail-final region placement (busorder, boundarypins) needs single-row cells; the domino profile places "
                       "two-row cells",
-                      "leave synth.place.region.busorder and synth.place.region.boundarypins off"};
+                      "leave synth.place.region.busorder and synth.place.region.boundarypins off, or place with synth.place.legroute=true"};
     }
   }
   if ((truthy(synth_set(opts, "place.preroute", "false")) || truthy(synth_set(opts, "place.satlegalize.route", "false")))

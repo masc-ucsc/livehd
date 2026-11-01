@@ -290,6 +290,54 @@ on both sides, weighted), so a macro sits inside the region whose cuts surround 
 region's problem. The boundary pins already keep off macro interiors. partition_c with it: pending.</li>
 </ul>
 
+<h2 id="cut-bound">The cut bound, regions as chips (results), domino cells (2026-11-01, later)</h2>
+<p><strong>Regions as chips: the dump had a bug, now fixed.</strong> Nine of sha3's twelve region DEFs aborted in
+OpenROAD's detailed router ("Maze Route cannot find path") on a boundary net: the hop pin sat within half a pin width of a
+die corner and its rectangle left the die, so it had no access point. The dump now treats a track whose pin would leave
+the die (two pitches clear of a corner) like a taken track and moves the pin inward. With that, every sha3 region routes
+as a chip of its own (pin access + global route 5 s, detailed route 3 to 11 minutes per region, a few end-of-line
+violations at the edge pins); the chip-level detailed route of the same placement is 285 s for all twelve, so the
+region-as-chip time is inflated by the fixed edge pins and is not the number to quote.</p>
+<p><strong>The cut bound: unsat before any solving.</strong> With a window of two tiles, a net whose endpoints are held
+on both sides of a tile-column (row) boundary must cover one of that boundary's edges, so the nets forced across a
+boundary cannot exceed the summed tracks of its edges (the model's own k per edge; a 2-pin net between boxes that may
+sit side by side across the boundary takes no track and does not count). <code>solve_region</code> checks every
+boundary after the windows are final and returns unsat with the boundary named; the same bound from the placement
+windows is the leading term of the risk order (cut ratio, then box fill, then the fixed routes' share). On the
+crossbar it rejects the three unsat stripes in 0.01&ndash;0.02 s instead of 2.5&ndash;8.3 s of solving ("359 nets
+forced across column boundary 10, 153 tracks"); the three timeouts stay timeouts (their demand is just over the tracks and
+the windows leave the bound unprovable). Unit test <code>CutBoundIsUnsatBeforeSolving</code>; report field
+<code>sat_cut_regions</code>. <code>scratchpad/cpsat/region_cut.py</code> prints the same demand per cut for any
+dumped run.</p>
+<p><strong>Why the crossbar fails: region shape, not the model.</strong> syn_xbar32x8 cut into full-width
+horizontal stripes (20&times;12 tiles) puts every input bus across each stripe: the worst vertical cut of stripe 2 is
+crossed by 542 nets against 12 rows &times; 19 H tracks (M4+M6; 34 with M2), stripes 0 and 4 need 31&ndash;33 per
+row-tile edge, the three unknown stripes 22&ndash;23. sha3's regions sit at 10&ndash;20 (all SAT). The min-cut region cut
+does not help here (7 of 11 regions fail against 6 of 14), because a bus crosses every cut equally; the next criterion is
+the cut <em>ratio</em> (forced nets over the tracks across the cut) when choosing where and in which direction to split,
+so a bus becomes pass-through traffic for narrow regions instead of internal traffic for wide ones.</p>
+<p><strong>partition_c with min-cut cuts:</strong> 343 regions (670 with the macro cuts), 212 SAT / 57 unsat / 74
+unknown (131 failures, 38%, against 163 of 632, 26%), L3 5,060 s against 2,951 s, 179k unroutable cells against 147k.
+Fewer, larger regions in the macro channels time out more. Cuts stay <code>macro</code> by default; the ratio criterion
+above is the follow-up.</p>
+<p><strong>Domino cells through legroute.</strong> The provisional domino profile (<code>pass.usyn.physical=domino_provisional</code>)
+emits two-row masters (0.54 &micro;m tall, 1.0&ndash;1.1 &micro;m wide on asap7: half a tile). legroute now takes a
+two-row movable cell as a tile-tall box: it takes the same sites in both rows of its tile (<code>tall_layout</code> in
+<code>legroute_boxes.cpp</code>: widest first into the leftmost span free in both rows, the single-row cells of the box
+pack beside it), lands on the tile's bottom row with that row's orientation (the rail-twin sync at the end of placement
+picks the master its rows need), and single-row flops alone set the tile width. The placement no longer refuses
+busorder regions or anchors the two-row cells ahead when legroute is on (<code>place.cpp</code>, the kernel's usage
+check); satlegalize still refuses them, so these runs use <code>synth.place.satlegalize=false</code>. Unit test
+<code>TwoRowCellsPlaceAsTileTallBoxes</code>. Two macro-design fixes came with it: the generated core flipped rows (N/FS)
+only when every cell was X-symmetric, and a memory block (minimax's register file, one block under USYN) is not, so its
+rows were all N and no two-row cell could match shared rails (block macros no longer decide the flip); and the final
+stage's frame import now accepts a two-row cell's rail twin as the same cell (the macro stage had already switched it).
+The area rule of the provisional cells changed at the same time:
+<code>x = N_PDN / 3 + aux / 2</code> instead of <code>(N_PDN + aux) / 2</code> (a pull-down device is a third of the
+reference inverter, the P/N auxiliary devices half of one, the register keeps its own area), which takes the sky130
+reference master from 14 to 13 two-row sites. Driver: <code>scratchpad/cpsat/dom_run.sh DESIGN cmos|dom</code> (usyn
+CMOS or usyn + domino, busorder, legroute, OpenROAD route with the domino Liberty); results in
+<code>repros/domino_vs_cmos.html</code>.</p>
 <h2>Larger designs with macros (cnn, partition_c)</h2>
 <p>The next targets are HighTide's cnn (69 FakeRAM hard macros, four of them 0.3 mm&sup2; each) and NVDLA
 partition_c (two FakeRAM macro types through the NVDLA RAM wrappers, the other RAM sizes as flops), both as

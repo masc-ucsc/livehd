@@ -37,7 +37,18 @@ struct Builder {
   }
   bool packs(const std::vector<int>& ws) const {
     std::array<double, 2> room{g.sites * fill + 1e-9, g.sites * fill + 1e-9};
-    auto                  sorted = ws;
+    std::vector<int>      sorted;
+    for (int x : ws) {
+      if (x < 0) {  // a two-row cell (negated width): the same sites in both rows
+        room[0] += x;
+        room[1] += x;
+        if (room[0] < 0 || room[1] < 0) {
+          return false;
+        }
+      } else {
+        sorted.push_back(x);
+      }
+    }
     std::ranges::sort(sorted, std::greater<>());
     for (int x : sorted) {
       auto& r = room[0] >= room[1] ? room[0] : room[1];
@@ -122,18 +133,70 @@ struct Builder {
 
 int cell_sites(const Design& d, const Grid& g, int m) { return int((d.width[m] + g.site - 1) / g.site); }
 
+// A box's two-row cells take the same sites in both rows of the tile: each goes to the leftmost span free in both
+// rows that holds it (widest first), and the single-row cells pack into what is left. False when a two-row cell has
+// no span; tall_at gets each cell's site offset (-1 for a single-row cell) and rest the free segments left.
+bool tall_layout(const Design& d, const Grid& g, const Box& b, int tile, std::vector<int>& tall_at, std::vector<Seg>& rest) {
+  const auto& segs = g.segs(tile);
+  rest.assign(segs.begin(), segs.end());
+  tall_at.assign(b.cells.size(), -1);
+  std::vector<std::pair<int, size_t>> talls;  // (sites, position in b.cells)
+  for (size_t k = 0; k < b.cells.size(); ++k) {
+    if (d.tall[size_t(b.cells[k])]) {
+      talls.emplace_back(cell_sites(d, g, b.cells[k]), k);
+    }
+  }
+  std::ranges::sort(talls, std::greater<>());
+  for (const auto& [w, k] : talls) {
+    int    at = -1;
+    size_t i = 0, j = 0;
+    for (size_t a = 0; a < rest.size() && at < 0; ++a) {
+      for (size_t c = 0; c < rest.size() && at < 0; ++c) {
+        if (rest[a].row == 0 && rest[c].row == 1) {
+          const int lo = std::max(rest[a].lo, rest[c].lo), hi = std::min(rest[a].hi, rest[c].hi);
+          if (hi - lo >= w) {
+            at = lo;
+            i  = a;
+            j  = c;
+          }
+        }
+      }
+    }
+    if (at < 0) {
+      return false;
+    }
+    tall_at[k] = at;
+    for (const size_t s : {i, j}) {  // cut [at, at + w) out of both segments
+      const Seg a = rest[s];
+      rest[s]     = {a.row, at + w, a.hi};
+      if (a.lo < at) {
+        rest.push_back({a.row, a.lo, at});
+      }
+    }
+  }
+  std::erase_if(rest, [](const Seg& s) { return s.hi <= s.lo; });
+  return true;
+}
+
 bool box_fits(const Design& d, const Grid& g, const Box& b, int tile) {
   if (g.blocked[tile]) {
     return false;
   }
-  std::vector<int> ws, room;
-  for (int c : b.cells) {
-    ws.push_back(cell_sites(d, g, c));
+  std::vector<int> tall_at;
+  std::vector<Seg> rest;
+  if (!tall_layout(d, g, b, tile, tall_at, rest)) {
+    return false;
   }
-  for (const auto& s : g.segs(tile)) {
+  std::vector<int> ws, room;
+  for (size_t k = 0; k < b.cells.size(); ++k) {
+    if (tall_at[k] < 0) {
+      ws.push_back(cell_sites(d, g, b.cells[k]));
+    }
+  }
+  for (const auto& s : rest) {
     room.push_back(s.hi - s.lo);
   }
-  return !pack_segments(ws, room).empty();
+  return ws.empty() || !pack_segments(ws, room).empty();
 }
 
 Boxes build_boxes(const Design& d, const Grid& g, const std::map<int, int>& fixed_slot) {
@@ -183,8 +246,8 @@ Boxes build_boxes(const Design& d, const Grid& g, const std::map<int, int>& fixe
       b.slot[i] = s->second;
     }
     region[i]   = g.region[g.tile_of(b.cx[i], b.cy[i])];
-    b.sites[i]  = cell_sites(d, g, i);
-    b.widths[i] = {b.sites[i]};
+    b.sites[i]  = cell_sites(d, g, i) * (d.tall[size_t(i)] ? 2 : 1);  // a two-row cell takes its sites in both rows
+    b.widths[i] = {d.tall[size_t(i)] ? -cell_sites(d, g, i) : cell_sites(d, g, i)};
     b.w[i]      = double(d.width[i]);
     b.sx[i]     = b.cx[i] * b.w[i];
     b.sy[i]     = b.cy[i] * b.w[i];
@@ -347,7 +410,7 @@ Boxes build_boxes(const Design& d, const Grid& g, const std::map<int, int>& fixe
       box.cx    += b.cx[i] * d.width[i];
       box.cy    += b.cy[i] * d.width[i];
       ws        += d.width[i];
-      box.sites += cell_sites(d, g, i);
+      box.sites += cell_sites(d, g, i) * (d.tall[size_t(i)] ? 2 : 1);
       box.clock  = box.clock || d.flop[i];
       if (b.slot[i] >= 0) {
         box.fixed = true;
@@ -387,11 +450,29 @@ Boxes build_boxes(const Design& d, const Grid& g, const std::map<int, int>& fixe
 void pack_cells(const Design& d, const Grid& g, const Boxes& boxes) {
   for (const auto& b : boxes.boxes) {
     const int        c = g.col(b.tile), r = g.row(b.tile);
-    const auto&      segs = g.segs(b.tile);
-    std::vector<int> ws, room, prefer;
+    std::vector<int> tall_at;
+    std::vector<Seg> segs;  // the free segments left once the two-row cells have their spans
+    if (!tall_layout(d, g, b, b.tile, tall_at, segs)) {
+      throw std::logic_error("legroute: a snapped box's two-row cell does not fit its tile");
+    }
+    std::vector<int> ws, room, prefer, cells;
     // the box moved by (dx, dy) from its centroid: keep each cell's relative place
     const double     dx = g.cx(c) - b.cx;
-    for (int i : b.cells) {
+    for (size_t k = 0; k < b.cells.size(); ++k) {
+      if (tall_at[k] < 0) {
+        cells.push_back(b.cells[k]);
+        continue;
+      }
+      auto& p       = d.fp.components[d.movable[b.cells[k]]].place;  // a two-row cell: the tile's bottom row, its orientation
+      p.x           = g.left(c) + int64_t(tall_at[k]) * g.site;
+      p.y           = g.bottom(r);
+      p.orientation = g.row_orient[2 * r];
+      p.status      = physical::Status::PLACED;
+    }
+    if (cells.empty()) {
+      continue;
+    }
+    for (int i : cells) {
       ws.push_back(cell_sites(d, g, i));
       const auto& p    = d.fp.components[d.movable[i]].place;
       const int   row  = std::clamp(int(std::lround(double(p.y - g.bottom(r)) / g.row_h)), 0, 1);
@@ -418,22 +499,22 @@ void pack_cells(const Design& d, const Grid& g, const Boxes& boxes) {
       std::vector<int> in;
       int              total = 0;
       double           want  = INFINITY;
-      for (size_t k = 0; k < b.cells.size(); ++k) {
+      for (size_t k = 0; k < cells.size(); ++k) {
         if (got[k] == int(s)) {
           in.push_back(int(k));
           total += ws[k];
-          want   = std::min(want, (d.fp.components[d.movable[b.cells[k]]].place.x + dx - g.left(c)) / double(g.site));
+          want   = std::min(want, (d.fp.components[d.movable[cells[k]]].place.x + dx - g.left(c)) / double(g.site));
         }
       }
       if (in.empty()) {
         continue;
       }
       std::ranges::sort(in, [&](int a, int e) {
-        return d.fp.components[d.movable[b.cells[a]]].place.x < d.fp.components[d.movable[b.cells[e]]].place.x;
+        return d.fp.components[d.movable[cells[a]]].place.x < d.fp.components[d.movable[cells[e]]].place.x;
       });
       int x = std::clamp(int(std::lround(want)), segs[s].lo, segs[s].hi - total);
       for (int k : in) {
-        auto& p        = d.fp.components[d.movable[b.cells[k]]].place;
+        auto& p        = d.fp.components[d.movable[cells[k]]].place;
         p.x            = g.left(c) + int64_t(x) * g.site;
         p.y            = g.bottom(r) + segs[s].row * g.row_h;
         p.orientation  = g.row_orient[2 * r + segs[s].row];

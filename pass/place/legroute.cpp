@@ -265,6 +265,44 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
     step("L5 layers, tracks");
     if (!options.output_dir.empty() && !opt.dump_regions.empty()) {
       lr::dump_regions(d, g, boxes, R, regions, rep, options.output_dir, opt.dump_regions);
+      // legroute_wires.json: every assigned segment as a wire on its layer and track, between the centres of its end
+      // tiles (for drawings of the routes; the diagnostic mode only, the file is as large as the routing)
+      std::vector<std::string> per_net(d.nets.size());
+      for (const auto& sg : R.segments) {
+        if (sg.net < 0 || sg.layer < 0 || sg.track < 0 || sg.layer >= int(g.layers.size())) {
+          continue;
+        }
+        const auto&   lay   = g.layers[size_t(sg.layer)];
+        const int64_t at    = g.track_coord(sg.layer, sg.track);
+        per_net[size_t(sg.net)] += std::format("{}[{},{},{},{},{},{}]",
+                                               per_net[size_t(sg.net)].empty() ? "" : ",",
+                                               sg.layer,
+                                               lay.horizontal ? g.cx(sg.lo) : at,
+                                               lay.horizontal ? at : g.cy(sg.lo),
+                                               lay.horizontal ? g.cx(sg.hi) : at,
+                                               lay.horizontal ? at : g.cy(sg.hi),
+                                               sg.critical ? 1 : 0);
+      }
+      std::ofstream wires_out(options.output_dir + "/legroute_wires.json");
+      wires_out << std::format(R"({{"dbu":{},"layers":[)", g.dbu);
+      for (size_t li = 0; li < g.layers.size(); ++li) {
+        wires_out << std::format(R"({}{{"name":"{}","horizontal":{},"pitch":{},"width":{}}})",
+                             li ? "," : "",
+                             g.layers[li].name,
+                             g.layers[li].horizontal ? "true" : "false",
+                             g.layers[li].pitch,
+                             g.layers[li].width);
+      }
+      wires_out << R"(],"nets":[)";
+      bool first_net = true;
+      for (size_t ni = 0; ni < d.nets.size(); ++ni) {
+        if (per_net[ni].empty()) {
+          continue;
+        }
+        wires_out << std::format(R"({}{{"name":"{}","segs":[{}]}})", first_net ? "" : ",\n", fp.nets[d.nets[ni].frame].name, per_net[ni]);
+        first_net = false;
+      }
+      wires_out << "]}\n";
     }
     if (!options.output_dir.empty()) {  // legroute.guide: the routes as detailed-routing guides (OpenROAD read_guides)
       // per net, the corridor of tiles its route covers, on every routing layer (the detailed router picks layers and
@@ -380,7 +418,7 @@ void write_legroute_report(const Legroute_report& r, const std::string& path) {
       R"({{"schema_version":2,"tile_um":[{},{}],"grid":[{},{}],"regions":{},"tiles_free":{},"cells":{},"boxes":{},)"
       R"("mean_cells_per_box":{:.3f},"max_cells_per_box":{},"fill":{:.3f},"internal_nets":{},"external_nets":{},)"
       R"("displacement_um":{:.1f},"max_displacement_um":{:.2f},"spilled_regions":{},"sat_regions":{},"sat_variables":{},)"
-      R"("sat_clauses":{},"sat_solves":{},"sat_relaxed_windows":{},"sat_unsat_regions":{},"sat_unknown_regions":{},)"
+      R"("sat_clauses":{},"sat_solves":{},"sat_relaxed_windows":{},"sat_unsat_regions":{},"sat_unknown_regions":{},"sat_cut_regions":{},)"
       R"("sat_binding_tiles":{},"sat_unjoined_crossings":{},"sat_hops_over_share":{},"global_nets":{},"global_pieces":{},"global_unrouted":{},"global_full_edges":{},"global_seconds":{:.1f},"sat_adjacent_nets":{},"sat_relaxed_tiles":{},"sat_deficit_tracks":{},"crit_pinned":{},"crit_unpinned_regions":{},"crit_cost_before":{:.1f},"crit_cost_after":{:.1f},"tree_nets":{},"tree_boxes":{},"tree_skipped_nets":{},"tree_dropped_regions":{},"tree_tiles_over_half":{},"tree_um_before":{:.1f},"tree_um_after":{:.1f},"tree_max_load":{:.3f},"forced_trees_dropped":{},"forced_crit_unpinned":{},"tree_load_skipped":{},"tree_clauses_before":{},"tree_clauses_after":{},"io_feedthroughs":{},"io_boxes":{},"io_skipped":{},"io_lifted":{},"sat_alt_regions":{},"sat_both_regions":{},"sat_skipped_regions":{},"sat_fail_fast_skipped":{},"tier_kept":{},"tier_dropped":{},"tier_timeouts":{},"tier_solves":{},"tier_cost_before":{:.1f},"tier_cost_after":{:.1f},"tier_crit_before":{:.1f},"tier_crit_after":{:.1f},"lazy_rounds":{},"lazy_bounds":{},"lazy_skipped":{},"frozen_boxes":{},"sat_seeded":{},"unroutable_cells":{},)"
       R"("sat_seconds":{:.3f},"sat_seconds_max":{:.3f},)"
       R"("connections":{},"critical_connections":{},"unassigned_segments":{},)"
@@ -411,6 +449,7 @@ void write_legroute_report(const Legroute_report& r, const std::string& path) {
       r.sat_relaxed_windows,
       r.sat_unsat_regions,
       r.sat_unknown_regions,
+      r.sat_cut_regions,
       r.sat_binding_tiles,
       r.sat_unjoined_crossings,
       r.sat_hops_over_share,

@@ -103,7 +103,11 @@ row would also retain it.
 
 A converted state carries `domino-area`, `domino-tie` or `domino-all`. Under
 `select=area` the comparison is an area proxy: the domino side is
-`x * A_NOT + A_register` plus one `A_NOT` for every complemented rail, and the
+`x * A_NOT + A_register` plus one `A_NOT` for every complemented rail, with
+`x = N_PDN / 3 + aux / 2` (a pull-down device is a third of the reference
+inverter: NMOS only, in a shared-diffusion stack, no P/N pair; an auxiliary
+device, precharge, foot, keeper or output inverter, half of one; the register
+keeps its own P/N area), and the
 CMOS side is the register plus the Liberty estimate of the D-cone logic that
 only this state uses and that its rail producers do not also need. A strictly
 smaller domino converts as `domino-area`; one equal to the CMOS side converts

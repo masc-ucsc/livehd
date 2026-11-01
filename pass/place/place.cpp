@@ -3579,6 +3579,55 @@ void adopt_rail_twins(View& v, const ph::Floorplan& frame) {
     take_rail_twin(v, i, frame.components.at(i).macro);
   }
 }
+// The same on a frame legroute placed: each two-row cell with a rail twin
+// takes the master the PG rails of its rows need, before the frame is checked
+// or cached. Returns the cells switched.
+size_t sync_rail_twins(const ph::Technology& tech, ph::Floorplan& frame, const Options& options) {
+  if (options.multirow_templates.empty() || frame.rows.empty()) {
+    return 0;
+  }
+  const Pg_rail_model rails(tech);
+  const auto          rh       = std::llround(tech.sites.at(frame.rows.front().site).height * tech.dbu);
+  size_t              switched = 0, tall = 0, unmatched = 0;
+  for (auto& c : frame.components) {
+    const auto t = options.multirow_templates.find(c.macro);
+    const auto m = tech.macros.find(c.macro);
+    const auto h = m == tech.macros.end() ? int64_t{0} : std::llround(m->second.height * tech.dbu);  // the master's, not the pose's
+    if (t == options.multirow_templates.end() || t->second.rail_twin.empty() || c.place.status == Status::UNPLACED || h <= rh) {
+      continue;
+    }
+    ++tall;
+    std::vector<Orientation> rows;
+    for (int64_t y = c.place.y; y < c.place.y + h; y += rh) {
+      const auto row = std::find_if(frame.rows.begin(), frame.rows.end(), [&](const ph::Row& r) {
+        return r.y == y && c.place.x >= r.x && c.place.x < r.x + r.count * r.step;
+      });
+      if (row == frame.rows.end()) {
+        break;
+      }
+      rows.push_back(row->orientation);
+    }
+    if (rows.size() * rh != size_t(h)) {
+      ++unmatched;
+      continue;
+    }
+    if (rails.fit(c.macro, c.place.orientation, rows) == Rail_fit::mismatch) {
+      if (rails.fit(t->second.rail_twin, c.place.orientation, rows) == Rail_fit::fit) {
+        c.macro = t->second.rail_twin;
+        ++switched;
+      } else {
+        ++unmatched;
+      }
+    }
+  }
+  std::fprintf(stderr,
+               "legroute: rail twins: %zu of %zu two-row cells switched to the twin their rows need, %zu without a fit (%zu templates)\n",
+               switched,
+               tall,
+               unmatched,
+               options.multirow_templates.size());
+  return switched;
+}
 // Every placed multi-row cell with a rail twin takes the master the PG rails
 // of its rows need (a restored placement keeps the netlist's template).
 // Returns the cells switched.
@@ -5220,9 +5269,13 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         throw std::runtime_error("a mapped cell or macro halo does not fit in the fixed core");
       }
     }
-    // Alternating N/FS rows require X-symmetric cells, as in sky130HD.
-    const bool flip
-        = std::all_of(v.cells.begin(), v.cells.end(), [&](const auto& c) { return tech.macros.at(c.macro).symmetry_x; });
+    // Alternating N/FS rows require X-symmetric row cells, as in sky130HD. A block
+    // macro (a memory, a hard macro) never sits in a row, so it does not decide
+    // the flip: all-N rows would leave every two-row cell without shared rails.
+    const bool flip = std::all_of(v.cells.begin(), v.cells.end(), [&](const auto& c) {
+      const auto& m = tech.macros.at(c.macro);
+      return !m.klass.starts_with("CORE") || m.symmetry_x;
+    });
     for (int64_t row = 0; row < rows; ++row) {
       v.fp.rows.push_back({"ROW_" + std::to_string(row),
                            site_name,
@@ -5251,7 +5304,12 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       auto& c = *it->second;
       if (imported.macro != c.macro) {
-        throw std::runtime_error("floorplan cell master mismatch: " + c.name);
+        // a two-row cell's rail twin (the frame's rows decided it in an earlier stage): the same cell, taken as is
+        const auto t = options.multirow_templates.find(c.macro);
+        if (t == options.multirow_templates.end() || t->second.rail_twin != imported.macro) {
+          throw std::runtime_error("floorplan cell master mismatch: " + c.name);
+        }
+        take_rail_twin(v, size_t(&c - v.cells.data()), imported.macro);
       }
       if (imported.place.status == Status::FIXED) {
         auto p   = imported.place;
@@ -6323,8 +6381,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     if (options.satlegalize) {
       refuse("satlegalize treats multi-height cells as immutable");
     }
-    if (options.boundarypins.enabled || options.boundarypins.align) {
-      refuse("the detail-final region mesh (busorder, boundarypins) needs single-row cells");
+    if ((options.boundarypins.enabled || options.boundarypins.align) && !options.legroute) {
+      refuse("the detail-final region mesh (busorder, boundarypins) needs single-row cells");  // legroute places them
     }
     if (!options.multirow_eco) {
       if (options.previous || !options.changed_cells.empty() || options.legalize_cells) {
@@ -9149,7 +9207,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                         terminal_options);
       // Anchor the two-row cells first; terminal legalization packs the
       // single-row cells around them as fixed obstacles, then they are released.
-      if (multirow_cells) {
+      // legroute places them itself (a two-row cell is a tile tall), and
+      // sync_rail_twins gives each the master its rows' rails need.
+      if (multirow_cells && !options.legroute) {
         multirow_report = anchor_multirow_cells(tech, frame, anchor_controls(options, terminal_options, core_origins));
       }
       if (options.legroute) {
@@ -9240,6 +9300,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                           : fixed_core                    ? "; the core is fixed (die, core, floorplan or previous placement given)"
                                                           : ""));
         }
+        if (multirow_cells) {  // the two-row cells legroute placed take the rail twin their rows need
+          sync_rail_twins(tech, frame, options);
+        }
         for (const auto& n : frame.nets) {
           if (!n.wires.empty() && !n.connections.empty()) {
             legroute_wires[{n.connections.front().instance, n.connections.front().pin}] = {n.connections, n.wires};
@@ -9257,6 +9320,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       if (multirow_report) {
         release_multirow_anchors(frame, *multirow_report);
+        adopt_rail_twins(v, frame);
+      } else if (multirow_cells && options.legroute) {
         adopt_rail_twins(v, frame);
       }
       sat_install(v.design, frame);

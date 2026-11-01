@@ -161,6 +161,8 @@ struct Legroute_report {
   // the SAT placement: regions solved, model size, solves, windows grown or dropped, regions without an answer
   size_t  sat_regions = 0, sat_variables = 0, sat_clauses = 0, sat_solves = 0, sat_relaxed_windows = 0;
   size_t  sat_unsat_regions = 0, sat_unknown_regions = 0, sat_binding_tiles = 0, sat_unjoined_crossings = 0;
+  size_t  sat_cut_regions = 0;  // of the unsat regions, those over the cut bound (nets forced across a tile boundary
+                                // beyond its tracks): unsat before any solving
   size_t  sat_hops_over_share = 0;             // hops placed past hop_share (every boundary tile of their pair was at it)
   size_t  global_nets = 0, global_pieces = 0;  // legroute.global: nets joined by L traces, their pass-through pieces
   size_t  global_unrouted = 0, global_full_edges = 0;  // global_route: nets without a path, edges filled to the share

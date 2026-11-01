@@ -75,10 +75,11 @@ struct Design {
   const Legroute_options&             opt;
   const physical::Tech_profile*       profile = nullptr;
   std::vector<const physical::Macro*> macro;    // per component
-  std::vector<int>                    movable;  // component ids of movable single-row cells
+  std::vector<int>                    movable;  // component ids of movable cells (one row, or two rows: a tile's height)
   std::vector<int>                    cell;     // component -> movable index, -1 otherwise
   std::vector<int64_t>                width;    // per movable (DBU)
   std::vector<bool>                   flop;     // per movable: has a clock pin
+  std::vector<char>                   tall;     // per movable: a two-row cell, taking the same sites in both rows of its tile
   std::vector<Net>                    nets;
   std::vector<std::vector<int>>       nets_of;  // per movable: its net ids (each once)
   double                              wns    = 0;

@@ -70,15 +70,19 @@ Design build_design(const ph::Technology& tech, ph::Floorplan& fp, const timing:
     if (frame_role(tech, c) != Frame_role::movable) {
       continue;
     }
-    if (std::llround(m->second.height * fp.dbu) > row_h) {
+    // a two-row cell (a domino master) is a tile tall and moves like any other cell: its box takes the same sites
+    // in both rows; taller cells must be anchored (fixed) first
+    const auto height = std::llround(m->second.height * fp.dbu);
+    if (height > row_h && height != 2 * row_h) {
       throw std::invalid_argument("legroute: multi-row cell " + c.name + " must be anchored (fixed) first");
     }
     d.cell[i] = int(d.movable.size());
     d.movable.push_back(int(i));
     d.width.push_back(std::llround(m->second.width * fp.dbu));
     d.flop.push_back(has_clock_pin(m->second));
+    d.tall.push_back(height == 2 * row_h);
     d.widest = std::max(d.widest, d.width.back());
-    if (d.flop.back()) {
+    if (d.flop.back() && !d.tall.back()) {  // the tile is two flops wide: single-row flops set it
       d.flop_w = std::max(d.flop_w, d.width.back());
     }
   }

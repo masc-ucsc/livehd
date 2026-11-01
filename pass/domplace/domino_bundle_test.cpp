@@ -171,8 +171,8 @@ TEST(DominoBundle, WritesARoundTrippingDeterministicBundle) {
     EXPECT_DOUBLE_EQ(v["timing"]["estimate"]["g_dynamic"].GetDouble(), 1);
     if (m["n_pdn"].GetUint() == 4 && m["inputs"].GetUint() == 4) {
       found = true;
-      EXPECT_EQ(v["width_dbu"].GetUint(), 14U * 460U);
-      EXPECT_NEAR(v["a_estimate_um2"].GetDouble(), 35.0336, 1e-9);
+      EXPECT_EQ(v["width_dbu"].GetUint(), 13U * 460U);
+      EXPECT_NEAR(v["a_estimate_um2"].GetDouble(), 32.5312, 1e-9);  // x = 4/3 + 2
       EXPECT_STREQ(m["next_state"].GetString(), "((R0 & R1) | (R2 & R3))");
     }
   }

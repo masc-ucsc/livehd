@@ -457,4 +457,88 @@ TEST(Legroute, SatPlacementFitsTheTracks) {
     }
   }
 }
+
+// The cut bound: nets whose endpoints are held on both sides of a tile boundary beyond the tracks of its edges make the
+// region unsat before any solving (16 flop-to-flop nets end to end across a strip two tile rows tall, with most tracks
+// reserved).
+TEST(Legroute, CutBoundIsUnsatBeforeSolving) {
+  Fixture             f(240, 4);  // a 12 um strip: 15 tile columns of 0.8 um, 2 tile rows
+  std::vector<size_t> left, right;
+  for (int row = 0; row < 4; ++row) {
+    for (int k = 0; k < 4; ++k) {
+      left.push_back(f.cell("dff", 400 * k, 250 * row));
+      right.push_back(f.cell("dff", 10400 + 400 * k, 250 * row));
+    }
+  }
+  for (size_t k = 0; k < left.size(); ++k) {
+    f.net({
+        { left[k], "Q"},
+        {right[k], "D"}
+    });
+  }
+  Legroute_options opt;
+  opt.threads           = 1;
+  opt.reserved_tracks   = 7;  // 3 tracks left per 10-track layer, none on the 5-track one
+  opt.clock_spine       = false;
+  opt.merge_cost        = 2;  // a flop never joins its partner's box across the strip (cost 8); neighbors pack as usual
+  const auto      d     = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
+  const auto      g     = lr::build_grid(d, {});
+  auto            boxes = lr::build_boxes(d, g);
+  lr::Routing     R;
+  Legroute_report rep;
+  lr::sat_place(d, g, boxes, {}, R, rep);
+  EXPECT_EQ(rep.sat_regions, 1u);
+  EXPECT_EQ(rep.sat_unsat_regions, 1u);
+  EXPECT_EQ(rep.sat_cut_regions, 1u) << "the bound, not a solver run, must reject it";
+  EXPECT_EQ(rep.sat_solves, 0u);
+  std::set<int> used;  // the boxes still have distinct tiles (the fallback placement)
+  for (const auto& b : boxes.boxes) {
+    EXPECT_TRUE(used.insert(b.tile).second) << "two boxes on tile " << b.tile;
+  }
+}
+
+// A two-row cell (a domino master, a tile tall) moves as a box like any cell: it lands on a tile's bottom row with
+// that row's orientation, takes the same sites in both rows, and the single-row cells of its box pack beside it.
+TEST(Legroute, TwoRowCellsPlaceAsTileTallBoxes) {
+  Fixture f(200, 8);
+  f.tech.macros["dom"]        = f.tech.macros.at("dff");  // 0.8 um wide (a tile), two rows tall
+  f.tech.macros["dom"].width  = .8;
+  f.tech.macros["dom"].height = .5;
+  std::vector<size_t> doms, invs;
+  for (int k = 0; k < 6; ++k) {
+    doms.push_back(f.cell("dom", 1000 + 1200 * k, 500 * (k % 3)));
+    invs.push_back(f.cell("inv", 1100 + 1200 * k, 250 + 500 * (k % 3)));
+    f.net({
+        {doms[k], "Q"},
+        {invs[k], "A"}
+    });
+  }
+  Legroute_options opt;
+  opt.threads     = 1;
+  opt.clock_spine = false;
+  const auto d    = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
+  ASSERT_EQ(d.movable.size(), 12u);
+  EXPECT_EQ(std::count(d.tall.begin(), d.tall.end(), 1), 6);
+  const auto g = lr::build_grid(d, {});
+  EXPECT_EQ(g.tile_w, 800) << "two single-row flops wide, not the two-row cell";
+  auto            boxes = lr::build_boxes(d, g);
+  lr::Routing     R;
+  Legroute_report rep;
+  lr::sat_place(d, g, boxes, {}, R, rep);
+  ASSERT_EQ(rep.sat_unsat_regions + rep.sat_unknown_regions, 0u);
+  lr::pack_cells(d, g, boxes);
+  std::vector<std::tuple<int64_t, int64_t, int64_t, int64_t>> rects;  // every movable cell's placed rectangle
+  for (int m : d.movable) {
+    const auto& c = f.fp.components[size_t(m)];
+    const auto  w = std::llround(f.tech.macros.at(c.macro).width * 1000), h = std::llround(f.tech.macros.at(c.macro).height * 1000);
+    if (h > 250) {
+      EXPECT_EQ((c.place.y - g.y0) % g.tile_h, 0) << c.name << " starts at a tile's bottom row";
+      EXPECT_EQ(c.place.orientation, g.row_orient[size_t(2 * g.row(g.tile_of(double(c.place.x + 1), double(c.place.y + 1))))]) << c.name;
+    }
+    for (const auto& [x0, y0, x1, y1] : rects) {
+      EXPECT_FALSE(c.place.x < x1 && x0 < c.place.x + w && c.place.y < y1 && y0 < c.place.y + h) << c.name << " overlaps a cell";
+    }
+    rects.emplace_back(c.place.x, c.place.y, c.place.x + w, c.place.y + h);
+  }
+}
 }  // namespace livehd::placement

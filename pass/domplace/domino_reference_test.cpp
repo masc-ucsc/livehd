@@ -62,14 +62,15 @@ TEST(DominoReference, FunctionPickRecordsNamesAndChargesTheRegisterOnce) {
   EXPECT_FALSE(reference->registers[0].clk_to_q_ps);  // no table: absent, not zero
   EXPECT_FALSE(reference->registers[0].hold_ps);
 
-  // x = (N_PDN + aux) / 2: four literal devices and four auxiliary devices are
-  // four inverter equivalents; the full register is added exactly once.
+  // x = N_PDN / 3 + aux / 2: four literal devices (a third of an inverter each)
+  // and four auxiliary devices (half of one each) are 10/3 inverter
+  // equivalents; the full register is added exactly once.
   const auto four = domino_area(devices(4), *reference, 0);
-  EXPECT_EQ(four.x, 4.0);
+  EXPECT_DOUBLE_EQ(four.x, 20 / 6.0);
   EXPECT_EQ(four.a_not, 1.25);
   EXPECT_EQ(four.a_register, 20.0);
-  EXPECT_EQ(four.a_domino, 25.0);
-  EXPECT_EQ(domino_area(devices(5), *reference, 0).a_domino, 4.5 * 1.25 + 20);
+  EXPECT_DOUBLE_EQ(four.a_domino, 20 / 6.0 * 1.25 + 20);
+  EXPECT_DOUBLE_EQ(domino_area(devices(5), *reference, 0).a_domino, 22 / 6.0 * 1.25 + 20);
 
   // Drive variants share the PDN term and take the ladder's own areas: X4 is
   // the family's area, never four times the base register.
@@ -78,7 +79,7 @@ TEST(DominoReference, FunctionPickRecordsNamesAndChargesTheRegisterOnce) {
     EXPECT_EQ(area.a_domino - area.a_register, four.a_domino - four.a_register) << variant;
     EXPECT_EQ(area.a_register, reference->registers[variant].area) << variant;
   }
-  EXPECT_EQ(domino_area(devices(4), *reference, 2).a_domino - four.a_domino, 3.5);
+  EXPECT_DOUBLE_EQ(domino_area(devices(4), *reference, 2).a_domino - four.a_domino, 3.5);
   EXPECT_THROW((void)domino_area(devices(4), *reference, 3), std::out_of_range);
 }
 
@@ -130,18 +131,14 @@ TEST(DominoReference, PairAreaPercentScalesOnlyThePdnTerm) {
   ASSERT_TRUE(reference) << why;
   // The default is exactly the unscaled x * A_NOT + A_register.
   EXPECT_EQ(reference->pair_area_pct, 100U);
-  EXPECT_EQ(domino_area(devices(4), *reference, 0).a_domino, 4.0 * 1.25 + 20);
-  EXPECT_EQ(domino_area(devices(5), *reference, 2).a_domino, 4.5 * 1.25 + 23.5);
-  for (const auto& [pct, expected] : {
-           std::pair{ 75U, 3.75},
-           {125U, 6.25},
-           {400U, 20.0}
-  }) {
+  EXPECT_DOUBLE_EQ(domino_area(devices(4), *reference, 0).a_domino, 20 / 6.0 * 1.25 + 20);
+  EXPECT_DOUBLE_EQ(domino_area(devices(5), *reference, 2).a_domino, 22 / 6.0 * 1.25 + 23.5);
+  for (const unsigned pct : {75U, 125U, 400U}) {
     reference->pair_area_pct = pct;
     const auto area          = domino_area(devices(4), *reference, 1);
-    EXPECT_EQ(area.x, 4.0) << pct;
+    EXPECT_DOUBLE_EQ(area.x, 20 / 6.0) << pct;
     EXPECT_EQ(area.a_not, 1.25) << pct;
-    EXPECT_EQ(area.a_domino, expected + 21.25) << pct;  // the register is never scaled
+    EXPECT_DOUBLE_EQ(area.a_domino, 20 / 6.0 * 1.25 * (pct / 100.0) + 21.25) << pct;  // the register is never scaled
   }
 }
 

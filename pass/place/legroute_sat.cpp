@@ -1702,6 +1702,105 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
   const auto win_of = [&](const Endpoint& e) {
     return e.box >= 0 ? win[slot.at(e.box)] : Win{g.col(e.tile), g.col(e.tile), g.row(e.tile), g.row(e.tile)};
   };
+  const std::set<int> here(T.begin(), T.end());
+  // the cut bound: a net with an endpoint held on each side of a tile-column (row) boundary covers an edge across it,
+  // so the nets forced across a boundary are at most the tracks of its edges. A region over the bound is unsat before
+  // any solving, and the boundary is the diagnosis. A 2-pin net between boxes that may sit side by side across the
+  // boundary takes no track (in-box metal) and does not count.
+  if (!o.sat_relax_rounds) {
+    std::vector<int> fc(size_t(c1 - c0 + 2), 0), fr(size_t(r1 - r0 + 2), 0);  // forced nets per boundary, as differences
+    for (size_t n = 0; n < d.nets.size(); ++n) {
+      const auto it = ends[n].per_region.find(r);
+      if (it == ends[n].per_region.end() || it->second.size() < 2 || treed.contains({int(n), r})) {
+        continue;
+      }
+      int lo_c = g.cols, hi_c = -1, lo_r = g.rows, hi_r = -1;  // the leftmost endpoint's last column, the rightmost's first
+      for (const auto& e : it->second) {
+        const auto wn = win_of(e);
+        lo_c          = std::min(lo_c, std::clamp(wn.c1, c0, c1));
+        hi_c          = std::max(hi_c, std::clamp(wn.c0, c0, c1));
+        lo_r          = std::min(lo_r, std::clamp(wn.r1, r0, r1));
+        hi_r          = std::max(hi_r, std::clamp(wn.r0, r0, r1));
+      }
+      if (it->second.size() == 2 && d.nets[n].pins.size() == 2 && it->second[0].box >= 0 && it->second[1].box >= 0) {
+        const auto wa = win_of(it->second[0]), wb = win_of(it->second[1]);
+        if (hi_c == lo_c + 1 && wa.r0 <= wb.r1 && wb.r0 <= wa.r1) {
+          hi_c = lo_c;  // side by side across its one forced column boundary
+        }
+        if (hi_r == lo_r + 1 && wa.c0 <= wb.c1 && wb.c0 <= wa.c1) {
+          hi_r = lo_r;
+        }
+      }
+      if (hi_c > lo_c) {  // forced across the column boundaries c with lo_c < c <= hi_c
+        ++fc[size_t(lo_c + 1 - c0)];
+        --fc[size_t(hi_c + 1 - c0)];
+      }
+      if (hi_r > lo_r) {
+        ++fr[size_t(lo_r + 1 - r0)];
+        --fr[size_t(hi_r + 1 - r0)];
+      }
+    }
+    struct Cut {
+      int  at = -1, forced = 0, tracks = 0;
+      bool h = true;  // a column boundary (H edges cross it) or a row boundary (V edges)
+    } worst;
+    for (int c = c0 + 1, run = 0; c <= c1; ++c) {
+      run += fc[size_t(c - c0)];
+      int tracks = 0;
+      for (int j = r0; j <= r1; ++j) {
+        const int t = g.tile(c - 1, j), q = g.tile(c, j);
+        if (here.contains(t) && here.contains(q)) {
+          tracks += std::max(0, int(std::floor(std::min(cap_h0[t], cap_h0[q]) * o.cap_scale)) - reserve.h[size_t(t)]);
+        }
+      }
+      if (run - tracks > worst.forced - worst.tracks) {
+        worst = {c, run, tracks, true};
+      }
+    }
+    for (int j = r0 + 1, run = 0; j <= r1; ++j) {
+      run += fr[size_t(j - r0)];
+      int tracks = 0;
+      for (int i = c0; i <= c1; ++i) {
+        const int t = g.tile(i, j - 1), q = g.tile(i, j);
+        if (here.contains(t) && here.contains(q)) {
+          tracks += std::max(0, int(std::floor(std::min(cap_v0[t], cap_v0[q]) * o.cap_scale)) - reserve.v[size_t(t)]);
+        }
+      }
+      if (run - tracks > worst.forced - worst.tracks) {
+        worst = {j, run, tracks, false};
+      }
+    }
+    if (worst.at >= 0) {
+      ++rep.sat_regions;
+      ++rep.sat_unsat_regions;
+      ++rep.sat_cut_regions;
+      const double secs   = seconds_since(start);
+      rep.sat_seconds_max = std::max(rep.sat_seconds_max, secs);
+      std::fprintf(stderr,
+                   "legroute sat region %d: boxes %zu tiles %zu status unsat by the cut bound: %d nets forced across %s %d, "
+                   "%d tracks, %.2f s%s\n",
+                   r,
+                   B.size(),
+                   T.size(),
+                   worst.forced,
+                   worst.h ? "column boundary" : "row boundary",
+                   worst.at,
+                   worst.tracks,
+                   secs,
+                   tag.c_str());
+      out.status       = Sat_status::unsatisfiable;
+      const auto tiles = fallback_tiles(window_tiles);  // the region keeps its boxes on fitting tiles (not routable)
+      for (size_t i = 0; i < B.size(); ++i) {
+        if (tiles[i] >= 0) {
+          boxes.boxes[B[i]].tile = tiles[i];
+        }
+      }
+      for (int b : B) {
+        out.tiles.emplace_back(b, boxes.boxes[b].tile);
+      }
+      return;
+    }
+  }
   // tile literals: a box on a free tile it fits; one tile per box (the order literals pin it), one box per tile
   std::unordered_map<int, std::vector<std::pair<int, int>>> at_tile;  // tile -> (box index, literal)
   std::vector<std::vector<std::pair<int, int>>>             tiles_of(B.size());
@@ -1951,7 +2050,6 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
   // to their own tile (charging them on the edges rejected a placement OpenROAD routed), and two nets that end in a
   // tile from opposite sides share a track, each on its own edge
   std::map<std::pair<int, int>, std::vector<int>> inputs;  // (left / lower tile, h) -> the crossing literals
-  const std::set<int>                             here(T.begin(), T.end());
   const auto next_tile = [&](int t, int h) {  // the neighbor across the right (H) or upper (V) edge, -1 if outside
     const int q = h ? (g.col(t) + 1 < g.cols ? t + 1 : -1) : (t + g.cols < int(g.size()) ? t + g.cols : -1);
     return q >= 0 && here.contains(q) ? q : -1;
@@ -3575,7 +3673,8 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
     // the regions most at risk first: box fill plus the share of the region's tracks the routes fixed ahead took
     // (hops, pieces, trees, IO pre-routes). A failing design then fails early (fail_fast ends the solve at the
     // first failure), and the long solves start first, so the threads end together
-    std::vector<double> risk(size_t(g.regions), 0);
+    std::vector<double> risk(size_t(g.regions), 0), cut_ratio(size_t(g.regions), 0);
+    size_t              over_cut = 0;
     {
       std::vector<double> free_t(size_t(g.regions), 0), cap(size_t(g.regions), 0), taken(size_t(g.regions), 0);
       for (int t = 0; t < int(g.size()); ++t) {
@@ -3584,8 +3683,97 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
         cap[r]       += cap_h0[t] + cap_v0[t];
         taken[r]     += P[0].reserve.h[size_t(t)] + P[0].reserve.v[size_t(t)];
       }
+      // the cut bound from the placement (the exact one is in solve_region): nets whose endpoints' windows are held
+      // on both sides of a tile boundary of the region, over the tracks of the boundary's edges; a ratio above one
+      // is unsat before any solving, so these regions go first
+      struct Rect {
+        int c0, c1, r0, r1;
+      };
+      std::vector<Rect> rect(size_t(g.regions), {g.cols, -1, g.rows, -1});
+      for (int t = 0; t < int(g.size()); ++t) {
+        auto& rc = rect[size_t(g.region[t])];
+        rc       = {std::min(rc.c0, g.col(t)), std::max(rc.c1, g.col(t)), std::min(rc.r0, g.row(t)), std::max(rc.r1, g.row(t))};
+      }
+      std::vector<std::vector<int>> fc(size_t(g.regions)), fr(size_t(g.regions));
       for (int r = 0; r < g.regions; ++r) {
-        risk[size_t(r)] = double(region_boxes[r].size()) / std::max(1.0, free_t[size_t(r)]) + taken[size_t(r)] / std::max(1.0, cap[size_t(r)]);
+        fc[size_t(r)].assign(size_t(std::max(0, rect[size_t(r)].c1 - rect[size_t(r)].c0) + 2), 0);
+        fr[size_t(r)].assign(size_t(std::max(0, rect[size_t(r)].r1 - rect[size_t(r)].r0) + 2), 0);
+      }
+      const int   win_t = int(policies[0].window_tiles);
+      const auto& Q0    = P[0];
+      for (size_t n = 0; n < d.nets.size(); ++n) {
+        for (const auto& [r, eps_r] : x.ends[n].per_region) {
+          const auto& rc = rect[size_t(r)];
+          if (eps_r.size() < 2 || rc.c1 < 0 || Q0.treed.contains({int(n), r})) {
+            continue;
+          }
+          int lo_c = g.cols, hi_c = -1, lo_r = g.rows, hi_r = -1;
+          for (const auto& ep : eps_r) {
+            int ec0, ec1, er0, er1;
+            if (ep.box >= 0 && !Q0.boxes.boxes[size_t(ep.box)].fixed) {
+              const auto& bx = Q0.boxes.boxes[size_t(ep.box)];
+              const int   cc = std::clamp(g.col_of(bx.cx), rc.c0, rc.c1), rr = std::clamp(g.row_of(bx.cy), rc.r0, rc.r1);
+              ec0 = std::max(rc.c0, cc - win_t);
+              ec1 = std::min(rc.c1, cc + win_t);
+              er0 = std::max(rc.r0, rr - win_t);
+              er1 = std::min(rc.r1, rr + win_t);
+            } else {
+              const int t = ep.box >= 0 ? Q0.boxes.boxes[size_t(ep.box)].tile : ep.tile;
+              ec0 = ec1 = std::clamp(g.col(t), rc.c0, rc.c1);
+              er0 = er1 = std::clamp(g.row(t), rc.r0, rc.r1);
+            }
+            lo_c = std::min(lo_c, ec1);
+            hi_c = std::max(hi_c, ec0);
+            lo_r = std::min(lo_r, er1);
+            hi_r = std::max(hi_r, er0);
+          }
+          if (eps_r.size() == 2 && d.nets[n].pins.size() == 2 && eps_r[0].box >= 0 && eps_r[1].box >= 0) {
+            if (hi_c == lo_c + 1) {  // may sit side by side: no track
+              hi_c = lo_c;
+            }
+            if (hi_r == lo_r + 1) {
+              hi_r = lo_r;
+            }
+          }
+          if (hi_c > lo_c) {
+            ++fc[size_t(r)][size_t(lo_c + 1 - rc.c0)];
+            --fc[size_t(r)][size_t(hi_c + 1 - rc.c0)];
+          }
+          if (hi_r > lo_r) {
+            ++fr[size_t(r)][size_t(lo_r + 1 - rc.r0)];
+            --fr[size_t(r)][size_t(hi_r + 1 - rc.r0)];
+          }
+        }
+      }
+      for (int r = 0; r < g.regions; ++r) {
+        const auto& rc = rect[size_t(r)];
+        if (rc.c1 >= 0) {
+          for (int c = rc.c0 + 1, run = 0; c <= rc.c1; ++c) {
+            run += fc[size_t(r)][size_t(c - rc.c0)];
+            int tracks = 0;
+            for (int j = rc.r0; j <= rc.r1; ++j) {
+              const int t = g.tile(c - 1, j), q = g.tile(c, j);
+              if (g.region[t] == r && g.region[q] == r) {
+                tracks += std::max(0, int(std::floor(std::min(cap_h0[t], cap_h0[q]) * policies[0].cap_scale)) - Q0.reserve.h[size_t(t)]);
+              }
+            }
+            cut_ratio[size_t(r)] = std::max(cut_ratio[size_t(r)], double(run) / std::max(1.0, double(tracks)));
+          }
+          for (int j = rc.r0 + 1, run = 0; j <= rc.r1; ++j) {
+            run += fr[size_t(r)][size_t(j - rc.r0)];
+            int tracks = 0;
+            for (int i = rc.c0; i <= rc.c1; ++i) {
+              const int t = g.tile(i, j - 1), q = g.tile(i, j);
+              if (g.region[t] == r && g.region[q] == r) {
+                tracks += std::max(0, int(std::floor(std::min(cap_v0[t], cap_v0[q]) * policies[0].cap_scale)) - Q0.reserve.v[size_t(t)]);
+              }
+            }
+            cut_ratio[size_t(r)] = std::max(cut_ratio[size_t(r)], double(run) / std::max(1.0, double(tracks)));
+          }
+        }
+        over_cut       += cut_ratio[size_t(r)] > 1;
+        risk[size_t(r)] = cut_ratio[size_t(r)] + double(region_boxes[r].size()) / std::max(1.0, free_t[size_t(r)])
+                          + taken[size_t(r)] / std::max(1.0, cap[size_t(r)]);
       }
     }
     std::vector<size_t> task_order(size_t(g.regions) * policies.size());
@@ -3595,9 +3783,13 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
       std::string head;
       for (size_t k = 0; k < std::min<size_t>(8, task_order.size()); k += policies.size()) {
         const auto r = task_order[k] / policies.size();
-        head += std::format(" {}({:.2f})", r, risk[r]);
+        head += std::format(" {}({:.2f}, cut {:.2f})", r, risk[r], cut_ratio[r]);
       }
-      std::fprintf(stderr, "legroute sat: regions by risk (fill + fixed share), first:%s\n", head.c_str());
+      std::fprintf(stderr,
+                   "legroute sat: regions by risk (cut ratio + fill + fixed share), %zu over the cut bound by the placement, "
+                   "first:%s\n",
+                   over_cut,
+                   head.c_str());
     }
     std::atomic<bool> failed_fast{false};
     // every (region, policy) solve is a task: the regions are independent once the hops are fixed
@@ -3761,6 +3953,7 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
     rep.sat_relaxed_tiles   += q.sat_relaxed_tiles;
     rep.sat_deficit_tracks  += q.sat_deficit_tracks;
     rep.sat_unsat_regions   += q.sat_unsat_regions;
+    rep.sat_cut_regions     += q.sat_cut_regions;
     rep.sat_unknown_regions += q.sat_unknown_regions;
     rep.sat_skipped_regions += q.sat_skipped_regions;
     rep.sat_fail_fast_skipped += q.sat_fail_fast_skipped;

@@ -61,20 +61,28 @@ struct Domino_reference {
 std::optional<Domino_reference> resolve_domino_reference(const std::string& liberty_files, std::string_view inverter,
                                                          std::string_view reg, uint32_t aux, uint32_t variants, std::string* why);
 
-// 2x = N_PDN + aux, the one rule behind the inverter-equivalent count x: the
-// literal devices of the formula (metrics.transistors, repeats included) and
-// the domino-only devices outside the register. Integral, so a basis area times
-// it stays exact.
+// The devices behind the inverter-equivalent count x: the literal devices of
+// the formula (metrics.transistors, repeats included) and the domino-only
+// devices outside the register (aux_nonregister: precharge, foot, keeper and
+// output inverter).
 inline int64_t domino_proxy_devices(const usyn::Gate_formula::Metrics& metrics, const Domino_reference& reference) {
   return int64_t{metrics.transistors} + reference.aux_nonregister;
+}
+// 6x = 2 N_PDN + 3 aux: a pull-down device is a third of the reference
+// inverter (NMOS only, in a shared-diffusion stack: no P/N pair, no well
+// overhead), an auxiliary device half of one (those are P/N pairs). Integral,
+// so a basis area times it stays exact.
+inline int64_t domino_proxy_sixths(const usyn::Gate_formula::Metrics& metrics, const Domino_reference& reference) {
+  return 2 * int64_t{metrics.transistors} + 3 * int64_t{reference.aux_nonregister};
 }
 
 struct Domino_area {
   double x = 0, a_not = 0, a_register = 0, a_reset = 0, a_domino = 0;
 };
 // A_domino = x * A_NOT * pair_area_pct / 100 + A_register(variant),
-// x = domino_proxy_devices / 2, on the Liberty basis. The PDN term is shared
-// by every variant; the drive changes only the register area.
+// x = N_PDN / 3 + aux / 2 (domino_proxy_sixths / 6), on the Liberty basis. The
+// PDN term is shared by every variant; the drive changes only the register
+// area (the register keeps its own P/N area).
 // A stage whose storage has a reset (U22) adds reference.reset_area.
 Domino_area domino_area(const usyn::Gate_formula::Metrics& metrics, const Domino_reference& reference, size_t variant,
                         bool reset = false);

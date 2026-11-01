@@ -178,7 +178,15 @@ void dump_regions(const Design& d, const Grid& g, const Boxes& boxes, const Rout
         }
       }
       const int side = horizontal ? (g.col(q) > g.col(p) ? 1 : 0) : (g.row(q) > g.row(p) ? 3 : 2);  // L, R, B, T
-      if (layer < 0 || taken.contains({side, layer, track})) {
+      // the pin's rectangle stays inside the region's die, two pitches clear of the corners: a pin that leaves the die
+      // (a track within half a width of a corner) has no access point, and OpenROAD's maze route aborts on it
+      const auto fits = [&](int l, int64_t t) {
+        const auto&  L = g.layers[size_t(l)];
+        const double w = double(L.width > 0 ? L.width : L.pitch / 2), c = double(g.track_coord(l, t));
+        const double m = w / 2 + 2.0 * double(L.pitch);
+        return horizontal ? (c - m >= box.yl && c + m <= box.yh) : (c - m >= box.xl && c + m <= box.xh);
+      };
+      if (layer < 0 || taken.contains({side, layer, track}) || !fits(layer, track)) {
         // a free track of the crossing's direction, nearest the hop tile: its band first, then the bands beside it
         // (a boundary tile carries more hops than one layer's tracks), every layer of the direction per band
         const int band = horizontal ? g.row(p) : g.col(p), bands = horizontal ? g.rows : g.cols;
@@ -198,7 +206,7 @@ void dump_regions(const Design& d, const Grid& g, const Boxes& boxes, const Rout
               const auto [f, hi] = g.tracks(int(l), b);
               for (int64_t k = 0; k <= hi - f && layer < 0; ++k) {  // from the band's middle outward
                 const int64_t t = (f + hi) / 2 + (k % 2 ? -(k + 1) / 2 : (k + 1) / 2);
-                if (t >= f && t <= hi && !taken.contains({side, int(l), t})) {
+                if (t >= f && t <= hi && !taken.contains({side, int(l), t}) && fits(int(l), t)) {
                   layer = int(l);
                   track = t;
                 }

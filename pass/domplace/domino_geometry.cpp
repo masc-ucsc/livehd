@@ -337,6 +337,7 @@ Domino_variant_geometry generate_domino_macro(const usyn::Physical_cell_interfac
     refuse("register is absent from LEF: " + register_cell);
   }
   const auto proxy_devices = domino_proxy_devices(pdn, reference_cells);
+  const auto proxy_sixths  = domino_proxy_sixths(pdn, reference_cells);
   if (proxy_devices == 0 || pins.name.empty() || pins.rails.empty()) {
     refuse("a domino master needs a name, rails and proxy devices: " + pins.name);
   }
@@ -349,10 +350,10 @@ Domino_variant_geometry generate_domino_macro(const usyn::Physical_cell_interfac
   const auto h     = ref.row_height;
   const auto a_reg
       = to_dbu(reg->second.width, dbu, register_cell + " width") * to_dbu(reg->second.height, dbu, register_cell + " height");
-  // 200 * A_domino is integral in DBU^2 (x is a multiple of 1/2 and the
+  // 600 * A_domino is integral in DBU^2 (x is a multiple of 1/6 and the
   // per-pair percent scales x * A_NOT only), so the site count is exact:
-  // 35.0336 um^2 on sky130 is 14 two-row sites, never 15. At 100% this is
-  // 100 * (2 * A_domino), which leaves every default width and area unchanged.
+  // 32.5312 um^2 on sky130 is 13 two-row sites, never 14. At 100% this is
+  // 100 * (6 * A_domino), which leaves every default width and area unchanged.
   const auto pct = int64_t{reference_cells.pair_area_pct};
   if (pct <= 0) {
     refuse("the per-pair area percent must be positive");
@@ -372,14 +373,14 @@ Domino_variant_geometry generate_domino_macro(const usyn::Physical_cell_interfac
           = std::max<int64_t>(0, area(rst, reference_cells.reset_register) - area(base, reference_cells.registers.front().name));
     }
   }
-  const auto   twice100 = proxy_devices * ref.area * pct + 200 * (a_reg + a_reset);
-  const double dbu2     = double(dbu) * double(dbu);
-  g.x                   = proxy_devices / 2.0;
-  g.a_not_um2           = ref.area / dbu2;
-  g.a_register_um2      = a_reg / dbu2;
-  g.a_reset_um2         = a_reset / dbu2;
-  g.a_estimate_um2      = double(twice100) / 100 / (2 * dbu2);
-  g.w_area              = ceil_div(twice100, 100 * 2 * (2 * h * sw)) * sw;
+  const auto   six100 = proxy_sixths * ref.area * pct + 600 * (a_reg + a_reset);
+  const double dbu2   = double(dbu) * double(dbu);
+  g.x                 = proxy_sixths / 6.0;
+  g.a_not_um2         = ref.area / dbu2;
+  g.a_register_um2    = a_reg / dbu2;
+  g.a_reset_um2       = a_reset / dbu2;
+  g.a_estimate_um2    = double(six100) / 100 / (6 * dbu2);
+  g.w_area            = ceil_div(six100, 100 * 6 * (2 * h * sw)) * sw;
   // Pin slots: vertical-layer tracks wide enough for every site x-phase.
   const auto v       = lattice(tech, in.vertical_layer, true, "vertical-access");
   const auto pin     = lattice(tech, in.access.pin, true, "pin");
