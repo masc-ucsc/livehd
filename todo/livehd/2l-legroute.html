@@ -260,11 +260,18 @@ at a time.</td></tr>
 <li>sha3 (utilization 0.52, density 0.57, 2,500-cell regions): 8 of 8 regions routable, SAT 62 s in all (the
 densest region 34 s), 11.1M clauses, every boundary crossing modeled, 7 of 8 regions on their seeded
 placement; 656 edge bounds added over 51 re-solves.</li>
-<li>minimax (utilization 0.54, density 0.59): 11 of 11 regions, SAT 5 s in all, every region under 2 s, 7.0M
-clauses, 87 bounds over 26 re-solves.</li>
+<li>minimax (utilization 0.54, density 0.59): 11 of 11 regions, SAT 5 s wall with the tiers (866 of 1,087
+kept), 7.0M clauses. OpenROAD on it: zero overflow, zero DRCs, DR WNS &minus;726.7 ps / TNS &minus;1,423.9k
+against satlegalize's &minus;717.6 / &minus;1,389.1k on the same core (1.3% and 2.5% worse).</li>
 <li>litedram (utilization 0.45): 8 of 8 regions (earlier model, 118 s).</li>
-<li>OpenROAD on the sha3 SAT placement: zero overflow, zero DRCs, DR WNS &minus;392.7 ps / TNS &minus;470k
-against the satlegalize baseline's &minus;394.5 / &minus;466k on the same core.</li>
+<li>partition_m (20.5k cells, utilization 0.52, density 0.57): 12 of 12 regions, SAT 1.3 s wall with the tiers
+(344 of 383 kept), the whole <code>lhd synth</code> run 86 s. OpenROAD on it: zero overflow, DR WNS &minus;735.5
+ps / TNS &minus;261.5k against satlegalize's &minus;719.3 / &minus;257.1k on the same core (2.3% and 1.7%
+worse; one die-edge DRC each): on a sparse design the box snap costs what the tiers do not recover.</li>
+<li>OpenROAD on the sha3 SAT placement with the default tiers: zero overflow, zero DRCs, DR WNS &minus;383.6 ps
+/ TNS &minus;469.7k against the satlegalize baseline's &minus;394.5 / &minus;466k on the same core (2.8%
+better WNS, 0.8% worse TNS). Over the three designs legroute.local is within 3% of satlegalize + OpenROAD
+either way, with routability by construction.</li>
 <li>Route guides (<code>legroute.guide</code>: per net the corridor of tiles its SAT route covers, on every
 routing layer, M1 on the pin tiles; OpenROAD <code>read_guides</code> then <code>detailed_route</code>):
 TritonRoute accepts them, but the guided detailed route converges slowly (77k violations after its first
