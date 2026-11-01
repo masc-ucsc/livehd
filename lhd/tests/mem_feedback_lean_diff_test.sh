@@ -153,7 +153,7 @@ emit() {  # <top> -> $T/<top>/{cert.lean,io.json}
   local top="$1" d="$T/$1"
   mkdir -p "$d"
   ( cd "$d" && "$LHD" compile verilog "$HERE/$top.v" --top "$top" --reader yosys-slang \
-      --workdir w --emit-dir lg:lg ) > "$d/compile.log" 2>&1 \
+      --set yosys.setundef=zero --workdir w --emit-dir lg:lg ) > "$d/compile.log" 2>&1 \
     || { echo "FAIL: $top did not import"; tail -3 "$d/compile.log"; return 1; }
   "$LHD" pass single_edge --top "$top" "lg:$d/lg" --emit-dir "lg:$d/lgn" \
     --set multi_clock=true --workdir "$d/se" > "$d/se.log" 2>&1 \
@@ -190,7 +190,9 @@ done
 python3 "$SWEEP" --out "$T/sweep.tsv" --jobs 1 --cycles 6 --max-rec-depth 20000000 \
   "$T/sweeproot" > "$T/sweep.log" 2>&1
 sweep_rc=$?
-acc="$(awk -F'\t' 'NR>1 && $2=="ACCEPTED"' "$T/sweep.tsv" 2>/dev/null | wc -l)"
+# The verdict column by its header name: the table has grown columns before.
+acc="$(awk -F'\t' 'NR==1 { for (i = 1; i <= NF; i++) if ($i == "verdict") v = i; next }
+                   v && $v == "ACCEPTED"' "$T/sweep.tsv" 2>/dev/null | wc -l)"
 if [ "$sweep_rc" -ne 0 ] || [ "$acc" -ne 2 ]; then
   echo "FAIL: checkDesign/directStep accepted $acc of 2 (sweep rc=$sweep_rc); see $T/sweep.log"
   tail -5 "$T/sweep.log" | sed 's/^/      /'
@@ -303,7 +305,11 @@ PYM
   fi
 
   # (b) make a consumer of the SYNCHRONOUS port see the ungated read instead of
-  #     the read-data register: the value is then a cycle early.
+  #     the read-data register: the value is then a cycle early. Consumers are
+  #     the nodes AND the outputs that read the register's flopQ source; the
+  #     register's own next-state cone (its `din` node, which holds the value
+  #     when the certificate gates it with a mux) is not a consumer and keeps
+  #     reading it.
   mkdir -p "$T/neg_sync"
   python3 - "$T/mem_sync_read_feedback/lean/mem_sync_read_feedback_Lgraph.lean" \
             "$T/neg_sync/cert.lean" <<'PYM'
@@ -313,29 +319,31 @@ entries = re.search(r"sources\s*:=\s*#\[(.*?)\n\s*\]", src, re.S).group(1)
 elist = [l.strip().lstrip(", ").strip() for l in entries.strip().splitlines()]
 nsrc = len(elist)
 flop = [i for i, e in enumerate(elist) if e.startswith("SourceDesc.flopQ")]
+dins = [int(x) for x in re.findall(r"\{ width := \d+, din := (\d+),", src)]
 nodes = re.findall(r"\{ op := (LGraphOp\.\S+(?: \d+)?), width := (\d+), deps := #\[([0-9, ]*)\], origin := (\d+) \}", src)
 raw = [nsrc + i for i, (op, w, d, o) in enumerate(nodes) if op == "LGraphOp.Op_MemRead"]
-mux = [nsrc + i for i, (op, w, d, o) in enumerate(nodes) if op == "LGraphOp.Op_MuxBool"]
-if len(flop) != 1 or len(raw) != 1 or len(mux) != 1:
-    print(f"MUTATION-UNAVAILABLE flopQ={len(flop)} raw={len(raw)} mux={len(mux)}"); sys.exit(2)
-reg, r = flop[0], raw[0]
-out = []
-changed = 0
-for op, w, d, o in nodes:
-    ds = [x.strip() for x in d.split(",") if x.strip()]
-    slot = nsrc + len(out)
-    if slot != mux[0] and str(reg) in ds:
-        ds = [str(r) if x == str(reg) else x for x in ds]
-        changed += 1
-    out.append((op, w, ds, o))
-if changed == 0:
-    print("MUTATION-UNAVAILABLE nothing outside the register's own mux reads it"); sys.exit(2)
+if len(flop) != 1 or len(dins) != 1 or len(raw) != 1:
+    print(f"MUTATION-UNAVAILABLE flopQ={len(flop)} flops={len(dins)} raw={len(raw)}"); sys.exit(2)
+reg, din, r = flop[0], dins[0], raw[0]
 new = src
-for (op, w, ds, o), (op0, w0, d0, o0) in zip(out, nodes):
-    if ds != [x.strip() for x in d0.split(",") if x.strip()]:
-        a = "{ op := %s, width := %s, deps := #[%s], origin := %s }" % (op0, w0, d0, o0)
-        b = "{ op := %s, width := %s, deps := #[%s], origin := %s }" % (op0, w0, ", ".join(ds), o0)
-        new = new.replace(a, b, 1)
+changed = 0
+for i, (op, w, d, o) in enumerate(nodes):
+    ds = [x.strip() for x in d.split(",") if x.strip()]
+    if nsrc + i == din or str(reg) not in ds:
+        continue
+    a = "{ op := %s, width := %s, deps := #[%s], origin := %s }" % (op, w, d, o)
+    b = "{ op := %s, width := %s, deps := #[%s], origin := %s }" % (
+        op, w, ", ".join(str(r) if x == str(reg) else x for x in ds), o)
+    if new.count(a) != 1:
+        print(f"MUTATION-UNAVAILABLE node {nsrc + i} is not unique"); sys.exit(2)
+    new = new.replace(a, b, 1)
+    changed += 1
+outs = re.search(r"outputs\s*:=\s*#\[(.*?)\]", new, re.S)
+body = re.sub(r"\{ slot := %d, width := (\d+) \}" % reg, r"{ slot := %d, width := \1 }" % r, outs.group(1))
+changed += body != outs.group(1)
+new = new[:outs.start(1)] + body + new[outs.end(1):]
+if changed == 0:
+    print("MUTATION-UNAVAILABLE nothing but the register's own din reads it"); sys.exit(2)
 open(sys.argv[2], "w").write(new)
 PYM
   if [ $? -ne 0 ]; then
