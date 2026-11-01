@@ -379,12 +379,17 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
               + " wensize=" + std::to_string(mi.wensize));
   }
 
+  // A WHOLE-ARRAY cell (`update`/`update_enable`/`reset` driven; refused by
+  // name below) carries the cell's clock on port 0 with no addr/din/enable.
+  // That port is the cell's clock, not a malformed write port, so it must not
+  // be refused here before the whole-array refusal can name the shape.
+  const bool whole_array = !mi.update_pin.is_invalid() || !mi.update_enable_pin.is_invalid() || !mi.bulk_reset_pin.is_invalid();
   for (size_t idx = 0; idx < mi.ports.size(); ++idx) {
     auto& p   = mi.ports[idx];
     p.port_id = idx;
     // A resize gap (a port_id that never appeared on any sink) is not a real
     // port; skip it so a sparse port map is not mistaken for a malformed write.
-    if (p.addr.is_invalid() && p.din.is_invalid() && p.enable.is_invalid() && p.clock.is_invalid()) {
+    if (p.addr.is_invalid() && p.din.is_invalid() && p.enable.is_invalid() && (whole_array || p.clock.is_invalid())) {
       continue;
     }
     if (p.rdport) {
@@ -422,7 +427,7 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
   // walk, the port split and `addr_width`, so every diagnostic below can report
   // the real shape.
   // ---------------------------------------------------------------------------
-  if (!mi.update_pin.is_invalid() || !mi.update_enable_pin.is_invalid() || !mi.bulk_reset_pin.is_invalid()) {
+  if (whole_array) {
     // A WHOLE-ARRAY cell: one bulk next-state bus instead of N per-entry write
     // ports, and `reset` restores `init` at runtime (graph/cell.cpp:234-241).
     // None of that is modeled; `init` is a RUNTIME bus in this shape, not
@@ -434,6 +439,15 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
   }
 
   if (!mi.init_pin.is_invalid()) {
+    // A file preload (`initial` is a constant STRING, the memory image spec) is
+    // external state, not constant contents (graph/node_util.hpp
+    // memory_image_of). Nothing here can read the file, so refuse it by name
+    // before the contents checks misread the string as bits.
+    if (pin_is_const(mi.init_pin) && pin_const_value(mi.init_pin).is_string()) {
+      fatal(ctx,
+            memory_policy_summary(mi) + ". `init` is a FILE PRELOAD (`" + pin_const_value(mi.init_pin).to_string()
+                + "`): external state loaded from a file, not constant contents. pass.lean cannot read it.");
+    }
     // STRICT: only an immutable table becomes `memConst`.
     if (!mi.write_ports.empty()) {
       fatal(ctx, memory_policy_summary(mi)
