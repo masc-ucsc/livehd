@@ -21,7 +21,9 @@
 set -uo pipefail
 R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)"   # the repo root, from this script's location
 COV=$R/generated/master_port/cov12x5
-LEANBIN=${FP_LEAN_BIN:-${ELAN_HOME:-$HOME/.elan}/toolchains/leanprover--lean4---v4.31.0/bin/lean}
+# The toolchain pinned in formal/lean/lean-toolchain, in elan's directory naming.
+LEAN_PIN=$(sed -e 's|^leanprover/lean4:|leanprover--lean4---|' "$R/formal/lean/lean-toolchain")
+LEANBIN=${FP_LEAN_BIN:-${ELAN_HOME:-$HOME/.elan}/toolchains/$LEAN_PIN/bin/lean}
 
 # classify <cell-dir> <phase-name>  ->  prints "<label> exit=<e> time_exit=<t>"
 #   OK | CAP | REFUSED | MISSING | DISAGREE

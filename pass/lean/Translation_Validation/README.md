@@ -125,7 +125,7 @@ use the same one.
    `--repo_env=CC=/usr/bin/gcc-15`. Do not change warning options instead.
 
 2. **Lean.** The toolchain is pinned in `formal/lean/lean-toolchain`
-   (Lean 4.31.0) and installed by `elan`. Fetch the pinned Mathlib build:
+   and installed by `elan`. Fetch the pinned Mathlib build:
 
    ```sh
    cd formal/lean && lake exe cache get
@@ -226,7 +226,7 @@ way (legacy reifier, no proof):
 | `ResidualProgram` → simulator (default) | **Tested per design:** 32 sampled stimuli, with mutation controls. This is not a proof; coverage is a lower bound. |
 | `ResidualProgram` → simulator (`--prove`) | **Proved per design:** `d3_fast.correct`, kernel-checked, with only the three standard axioms. |
 | running the simulator | **Trusted:** Lean's evaluator runs the `def`. |
-| Lean 4.31.0 kernel, Mathlib | **Trusted.** |
+| Lean kernel (the toolchain in `formal/lean/lean-toolchain`), Mathlib | **Trusted.** |
 
 The certificate's own `<top>_step_correct` theorems use `native_decide`. The
 simulator's proof does not depend on them.

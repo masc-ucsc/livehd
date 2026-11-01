@@ -298,7 +298,8 @@ per-design instantiation the emitter prints.
   (off-topo ids read through to the source env).
 
 - **Mathlib dependency** — the op-bridge proofs need Mathlib, so `formal/lean`
-  requires `mathlib @ v4.31.0`; fetch oleans once with `lake exe cache get`.
+  requires the Mathlib revision pinned in `formal/lean/lake-manifest.json`;
+  fetch oleans once with `lake exe cache get`.
   `OpBridge` is NOT imported by the package root (non-bridge output stays
   Mathlib-free); the emitter adds the import only to bridge-enabled files.
   Each bridge lemma carries an `example` of its intended use in `OpBridge.lean`

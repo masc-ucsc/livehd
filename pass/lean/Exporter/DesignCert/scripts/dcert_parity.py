@@ -166,8 +166,11 @@ def main() -> int:
     ap.add_argument("--iso", default=str(ROOT / "generated/port_staging/iso"),
                     help="build root holding CertIOParity.olean")
     ap.add_argument("--out", required=True, help="directory for the probe and its log")
+    # The toolchain pinned in formal/lean/lean-toolchain, in elan's directory naming.
+    pin = (ROOT / "formal/lean/lean-toolchain").read_text(encoding="utf-8").strip()
     ap.add_argument("--toolchain",
-                    default=os.path.join(os.environ.get("ELAN_HOME", os.path.expanduser("~/.elan")), "toolchains/leanprover--lean4---v4.31.0"))
+                    default=os.path.join(os.environ.get("ELAN_HOME", os.path.expanduser("~/.elan")), "toolchains",
+                                         pin.replace("leanprover/lean4:", "leanprover--lean4---")))
     a = ap.parse_args()
 
     lean_src = pathlib.Path(a.lean).read_text(encoding="utf-8")

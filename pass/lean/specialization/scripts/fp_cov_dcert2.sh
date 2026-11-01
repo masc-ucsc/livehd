@@ -151,8 +151,10 @@ if [ -n "$NATIVE" ]; then
   echo "route: native drivers in $NATABS"
 else
 ROUTE="INTERPRETED (lean --run, ulimit -s unlimited, --tstack=1048576)"
-LEANBIN=${FP_LEAN_BIN:-${ELAN_HOME:-$HOME/.elan}/toolchains/leanprover--lean4---v4.31.0/bin/lean}
-TOOLCHAIN=${FP_TOOLCHAIN_ROOT:-${ELAN_HOME:-$HOME/.elan}/toolchains/leanprover--lean4---v4.31.0}
+# The toolchain pinned by the tree under test, in elan's directory naming.
+LEAN_PIN=$(sed -e 's|^leanprover/lean4:|leanprover--lean4---|' "$PABS/formal/lean/lean-toolchain")
+LEANBIN=${FP_LEAN_BIN:-${ELAN_HOME:-$HOME/.elan}/toolchains/$LEAN_PIN/bin/lean}
+TOOLCHAIN=${FP_TOOLCHAIN_ROOT:-${ELAN_HOME:-$HOME/.elan}/toolchains/$LEAN_PIN}
 [ -x "$LEANBIN" ] || { echo "REFUSING: no lean at $LEANBIN"; exit 2; }
 TCABS=$(readlink -e "$TOOLCHAIN") || { echo "REFUSING: cannot resolve toolchain $TOOLCHAIN"; exit 2; }
 
