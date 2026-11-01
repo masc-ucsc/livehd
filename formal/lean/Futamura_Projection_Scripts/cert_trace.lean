@@ -6,6 +6,7 @@ under a supplied stimulus. The oracle side of an RTL differential: the same
 traces are compared line by line.
 
     lean --run Futamura_Projection_Scripts/cert_trace.lean <cert> <cycles> <stim> [edges:all|edges:third]
+         [init:reset|init:zero] [route:ir|route:tv]
 
 `stim v1` is the dcert2_memroute format, restricted to what an RTL testbench
 can replay: `in <ordinal> <width> <value>` (every cycle) and
@@ -18,10 +19,17 @@ the quiet steps are where an ASYNCHRONOUS reset and a synchronous one differ.
 Output: one line per step, `STEP <k> <out0> <out1> ...`, each output as its
 unsigned value (`bv_uint`). Runs the SPEC, not a residual: the FP drivers
 separately check their residual against this same `interpretDesign`.
+
+`route:tv` runs the translation-validation compiler instead: `compileDesign`
+once, then its straight-line program (`denoteResidual`) every step -- the
+program `compileDesign_correct` proves equal to `interpretDesign`. Same stimulus,
+same output format, so the two routes' traces compare line for line. A
+certificate `compileDesign` refuses is reported and exits 1.
 -/
 import LeanSemanticPrimitives.Projection.CertLoadAny
 import LeanSemanticPrimitives.Compiler.DesignSemantics
 import LeanSemanticPrimitives.Compiler.DirectSemantics
+import LeanSemanticPrimitives.Compiler.CompileDesignDefs
 
 open Compiler
 
@@ -93,18 +101,30 @@ def main (args : List String) : IO UInt32 := do
     let some cycles := cyc.toNat? | IO.eprintln s!"cycles {repr cyc} is not a number"; return 2
     let mut third := false
     let mut zeroInit := false
+    let mut tv := false
     for opt in rest do
       match opt with
       | "edges:all" => third := false
       | "edges:third" => third := true
       | "init:reset" => zeroInit := false
       | "init:zero" => zeroInit := true
+      | "route:ir" => tv := false
+      | "route:tv" => tv := true
       | _ => do IO.eprintln s!"unknown option {opt}"; return 2
     let (_, D) ← Projection.CertLoadAny.loadAny cert
     let st ← match parseStim (← IO.FS.readFile stimPath) with
       | .ok s => pure s
       | .error e => do IO.eprintln s!"stimulus: {e}"; return 2
     let mut s := if zeroInit then zeroState D else resetState D
+    if tv then
+      match compileDesign D with
+      | .error e => do IO.eprintln s!"compileDesign refused: {repr e}"; return 1
+      | .ok R =>
+        for k in List.range cycles do
+          let r := denoteResidual R (edgesAt D third k) (inputAt D st k) s
+          IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"
+          s := r.nextState
+        return 0
     for k in List.range cycles do
       -- `directStep` is proved equal to `interpretDesign` on every input it
       -- accepts (`directStep_correct`; it refuses a certificate or runtime shape
@@ -119,5 +139,5 @@ def main (args : List String) : IO UInt32 := do
       s := r.nextState
     return 0
   | _ =>
-    IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero]"
+    IO.eprintln "usage: cert_trace <cert> <cycles> <stim> [edges:all|edges:third] [init:reset|init:zero] [route:ir|route:tv]"
     return 2

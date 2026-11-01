@@ -62,6 +62,10 @@ MODULES=(
   Projection/Proto/RunnerSupport
   # the memory entry with env0 inlined (projectMemVarDesignAt)
   Projection/MemVariant Projection/MemVariantSim Projection/MemFused
+  # The IR/TV trace driver (cert_trace, and its route:tv): the direct simulator
+  # and the translation-validation compiler's executable half, all Mathlib-free.
+  Compiler/DirectSemantics Compiler/ResidualIR Compiler/ResidualSemantics
+  Compiler/CompileOpDefs Compiler/CompileGraphDefs Compiler/CompileDesignDefs
 )
 # The proof tools (pass/lean/tools, HDLProof): a second source root.
 TOOLS="$(cd ../../pass/lean/tools && pwd)"

@@ -289,8 +289,24 @@ Build through lake, not `leanc` by hand: the generated file imports `OpBridge`,
 so a hand-rolled link fails on `initialize_…_OpBridge` / `initialize_mathlib_Mathlib`.
 
 The default stimulus is a generic counter, enough to show the model computing.
-Driving real vectors means replacing one function, `stim`, in the generated
-driver.
+
+To drive real vectors, generate with `--stim`. The driver then reads a
+`stim v1` file named on its own command line -- the format
+`formal/lean/Futamura_Projection_Scripts/cert_trace.lean` reads -- and prints
+`STEP <k> <out0> <out1> ...`, cert_trace's own format, so the legacy trace and
+the IR (`cert_trace`) or TV (`cert_trace ... route:tv`) trace compare line for
+line:
+
+```bash
+python3 pass/lean/Legacy_Fast_Model_Simulator/scripts/make_legacy_sim.py \
+        formal/lean/LegacySims/<Top>_Lgraph.lean --cycles 20 --stim \
+        --out formal/lean/LegacySims --module-prefix LegacySims
+cd formal/lean && lake build LegacySims.<Top>_Lgraph
+lake env lean --run LegacySims/<Top>_LegacySim.lean <stim file>
+```
+
+Checked on B11 (`minion_tlb`) and B12 (`picorv32`): 20 steps, byte-identical to
+`cert_trace` on the same certificate and stimulus.
 
 ---
 
