@@ -52,6 +52,14 @@ bool memory_is_ignored(const hhds::Occurrence_node& n, const std::vector<std::st
   return false;
 }
 
+// The name `--set formal.ignore_memory=<name>` takes for this memory: the leaf
+// of its hierarchical name.
+std::string ignore_memory_name(const hhds::Occurrence_node& node) {
+  const std::string name{node.get_hier_name()};
+  const auto        dot = name.rfind('.');
+  return name.empty() ? gu::debug_name(node) : (dot == std::string::npos ? name : name.substr(dot + 1));
+}
+
 std::string mixed_memory_edge_error(const hhds::Occurrence_node& node, const std::vector<std::string>& ignored) {
   if (gu::type_op_of(node) != Ntype_op::Memory || memory_is_ignored(node, ignored)) {
     return {};
@@ -61,8 +69,7 @@ std::string mixed_memory_edge_error(const hhds::Occurrence_node& node, const std
     return {};
   }
   const std::string name{node.get_hier_name()};
-  const auto        dot     = name.rfind('.');
-  const auto        suggest = name.empty() ? gu::debug_name(node) : (dot == std::string::npos ? name : name.substr(dot + 1));
+  const auto        suggest = ignore_memory_name(node);
   return std::format(
       "memory '{}' ({}) has PER-PORT clock edge polarity: its ports do not all commit on the same clock edge. "
       "Formal cannot model this schedule. Exclude it with '--set formal.ignore_memory={}', which BLACKBOXES its reads "
@@ -2141,9 +2148,19 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             continue;
           }
           if (!memory_clock_shape_ok(driver)) {
+            // An EXCLUDED memory never has its clock modelled: its reads are
+            // shared free symbols and its next state is not built (below).
+            if (mc.ignored) {
+              continue;
+            }
+            // A mixed-edge memory reaches here too: the readers clock its
+            // falling ports through an inverter (decision #9).
             return fail_unsupported("memory '" + gu::debug_name(node)
                                     + "' has a derived clock the encoder cannot model (it treats every memory write as "
-                                      "landing once per step, with the clock derivation as dead code)");
+                                      "landing once per step, with the clock derivation as dead code). Exclude it with "
+                                      "'--set formal.ignore_memory="
+                                    + ignore_memory_name(node)
+                                    + "', which BLACKBOXES its reads and excludes its stored contents from the proof");
           }
         }
       }
