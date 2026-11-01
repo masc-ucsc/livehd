@@ -287,6 +287,10 @@ struct Options {
   bool                                                       allow_increase_area = true;
   unsigned                                 area_restarts  = 12;   // placements at a lower utilization before stopping
   double                                   area_step      = .92;  // the utilization factor per push-back step
+  // place.utilization=0: the driver bisects the utilization; placement never retries in place, every failure goes
+  // back to the driver as a failed point
+  bool                                     area_search    = false;
+  unsigned                                 mesh_variants  = 0;  // region meshes tried at the same core before it grows (0..2)
   // legroute push-back: a region without a routable answer first tries other region meshes at the same core (1:
   // regions a quarter larger, 2: a fifth smaller), then the core grows; the driver scales region.max_cells by it
   unsigned                                 mesh_variant   = 0;

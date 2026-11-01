@@ -9180,7 +9180,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         // a region without a routable answer: other region meshes at the same core first (the failing crossings
         // fall elsewhere), then the smaller core
         const auto recut = [&](const std::string& why) {
-          if (options.mesh_variant < 2) {
+          if (options.mesh_variant < std::min(2u, options.mesh_variants)) {
             std::fprintf(stderr, "legroute: %s; placement restarts with region mesh variant %u\n", why.c_str(), options.mesh_variant + 1);
             throw Placement_area_restart(options.utilization, options.density, options.mesh_variant + 1);
           }

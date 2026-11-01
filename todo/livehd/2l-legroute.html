@@ -195,6 +195,22 @@ step it had landed at 0.545 (3,930 um&sup2;, DR WNS &minus;385.2 / TNS &minus;49
 placement on the smaller die: feasibility and quality follow the region cut more than the density. The next
 lever beyond that is the one in the plan: let the SAT choose among a few boundary tiles per crossing, and
 space busorder's pins to the track capacity of a tile edge.</p>
+<p><strong>Bisection (the user's divide and conquer).</strong> <code>place.utilization=0</code> now bisects: the
+first point is <code>area_search.start</code> (0.8); a routable placement raises the lower bound and the next
+point is the middle of what is left above it, a failure lowers the upper bound and the next point is the middle
+below; it stops after <code>area_restarts</code> (12) placements or when the bounds are
+<code>area_search.tolerance</code> (0.02) apart, and the placement kept is routable (the best point placed once
+more when the last try failed). During a search no failure retries inside placement, so every point counts
+once. sha3: 0.8 fails, 0.6 and 0.7 route, 0.75, 0.725 and 0.7125 fail; kept 0.70 / 0.75, 12 of 12 regions, a
+3,067 um&sup2; die (the standard flow's default is 3,043) in seven placements. minimax: 0.8 fails, 0.6, 0.7 and
+0.75 route, 0.775 and 0.7625 fail; kept 0.75 / 0.80, 16 of 16 regions,
+a 2,798 um&sup2; die (13% below the standard flow's default) in 472 s and seven placements; OpenROAD: zero
+overflow, zero DRCs, DR WNS &minus;755.5 ps / TNS &minus;1,474.1k (the standard flow on its 3,218 um&sup2;
+default die: &minus;716.7 / &minus;1,425.5k). partition_m, bisected one <code>lhd</code> process per point
+(its clock-gate subs come back unmapped when the command re-synthesizes in one process, a bug in the restart
+path still to fix): the same path to 0.75 / 0.80, 12 of 12 regions, a 3,499 um&sup2; die (27% below the
+standard flow's default); OpenROAD: zero overflow, one die-edge pin DRC, DR WNS &minus;759.6 ps / TNS
+&minus;251.0k (the standard flow on its 4,770 um&sup2; default die: &minus;694.4 / &minus;226.1k).</p>
 
 <h2>Region cuts (busorder regions)</h2>
 <ul>

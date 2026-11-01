@@ -787,8 +787,21 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.utilization",
      "0.30",
      Synth_set_option::Kind::file,
-     "cell area / generated core area, in (0,1); 0 with legroute: search for the core, starting at the densest point "
-     "and lowering it until every region routes"},
+     "cell area / generated core area, in (0,1); 0 with legroute: bisection search for the densest core that routes, "
+     "from area_search.start between area_search.min and area_search.max, at most area_restarts placements"},
+    {"place.area_search", "false", Synth_set_option::Kind::boolean, "core search state, set by the driver: failures go back to the search"},
+    {"place.area_search.start", "0.8", Synth_set_option::Kind::file, "core search: the first utilization tried"},
+    {"place.area_search.min", "0.4", Synth_set_option::Kind::file, "core search: the lowest utilization considered"},
+    {"place.area_search.max", "0.99", Synth_set_option::Kind::file, "core search: the highest utilization considered"},
+    {"place.area_search.tolerance",
+     "0.02",
+     Synth_set_option::Kind::file,
+     "core search: stop when the routable and failing utilizations are this close"},
+    {"place.mesh_variants",
+     "0",
+     Synth_set_option::Kind::integer,
+     "legroute push-back: region meshes tried at the same core before it grows (1: regions a quarter larger, 2: also a "
+     "fifth smaller)"},
     {"place.mesh_variant",
      "0",
      Synth_set_option::Kind::integer,
