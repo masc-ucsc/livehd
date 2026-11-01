@@ -430,6 +430,7 @@ livehd::placement::Options placement_options(const Options& opts) {
     livehd::placement::validate_warp_options(policy);
   }
   out.region.max_cells = integer("place.region.max_cells", "10000");
+  out.mesh_variant     = integer("place.mesh_variant", "0");  // legroute push-back state (set by the restart loop)
   out.region.merge_um  = number("place.region.merge_um", "5");
   livehd::placement::validate_region_options(out.region);
   out.boundarypins.enabled             = truthy(synth_set(opts, "place.region.boundarypins", "false"));
@@ -562,7 +563,11 @@ livehd::placement::Options placement_options(const Options& opts) {
   }
   out.utilization = number("place.utilization", "0.30");
   out.allow_increase_area = truthy(synth_set(opts, "place.allow_increase_area", "true"));
-  out.area_restarts       = integer("place.area_restarts", "8");
+  out.area_restarts       = integer("place.area_restarts", "12");
+  out.area_step           = number("place.area_step", "0.92");
+  if (!(out.area_step > 0 && out.area_step < 1)) {
+    throw Lhd_error{"usage", "synth.place.area_step must be in (0, 1)", ""};
+  }
   out.aspect      = number("place.aspect", "1");
   for (const auto& [key, frame] : {
            std::pair<const char*, std::vector<double>*>{ "place.die",  &out.die},
@@ -1332,13 +1337,14 @@ void synth_command_once(Options& opts, Result& res);
 // no routable answer): the whole command runs again at the lower utilization, at most 8 times (synthesis reuses
 // its ABC cache)
 void synth_command(Options& opts, Result& res) {
-  const Result start = res;
+  const Result start      = res;
+  const double base_cells = std::stod(synth_set(opts, "place.region.max_cells", "10000"));  // the mesh as asked
   for (unsigned restarts = 0;; ++restarts) {
     try {
       synth_command_once(opts, res);
       return;
     } catch (const livehd::placement::Placement_area_restart& restart) {
-      const unsigned limit = unsigned(std::max(0.0, std::stod(synth_set(opts, "place.area_restarts", "8"))));
+      const unsigned limit = unsigned(std::max(0.0, std::stod(synth_set(opts, "place.area_restarts", "12"))));
       if (restarts >= limit) {
         throw Lhd_error{"unsupported",
                         std::format("not routable: legroute asked for a larger core after {} restarts", restarts),
@@ -1350,10 +1356,16 @@ void synth_command(Options& opts, Result& res) {
       const double density = given > 0 ? std::min(given, restart.density) : restart.density;
       opts.sets.emplace_back("synth.place.utilization", std::format("{:.4f}", restart.utilization));
       opts.sets.emplace_back("synth.place.density", std::format("{:.4f}", density));
+      // the region mesh variant: regions a quarter larger (1) or a fifth smaller (2) than asked, the given mesh (0)
+      const double scale = restart.mesh_variant == 1 ? 1.25 : restart.mesh_variant == 2 ? .8 : 1.0;
+      opts.sets.emplace_back("synth.place.region.max_cells", std::format("{}", std::lround(base_cells * scale)));
+      opts.sets.emplace_back("synth.place.mesh_variant", std::format("{}", restart.mesh_variant));
       std::fprintf(stderr,
-                   "lhd synth: restarting at synth.place.utilization=%.4f density=%.4f for routability\n",
+                   "lhd synth: restarting at synth.place.utilization=%.4f density=%.4f region.max_cells=%ld (mesh variant %u) for routability\n",
                    restart.utilization,
-                   density);
+                   density,
+                   std::lround(base_cells * scale),
+                   restart.mesh_variant);
     }
   }
 }
@@ -2336,7 +2348,7 @@ void synth_command_once(Options& opts, Result& res) {
               throw Lhd_error{"unsupported", std::string("timing seed placement failed: ") + e.what(), "see " + seed_log};
             }
             // too dense for the core: the seed and the placement after it run at a lower utilization
-            seed_options.utilization *= .8;
+            seed_options.utilization *= seed_options.area_step;
             seed_options.density      = std::min(seed_options.density, seed_options.utilization + .05);
             place_options.utilization = seed_options.utilization;
             place_options.density     = seed_options.density;
@@ -2431,7 +2443,7 @@ void synth_command_once(Options& opts, Result& res) {
             if (!density_failure(e, place_options) || ++area_restarts > place_options.area_restarts) {
               throw;
             }
-            const double utilization = place_options.utilization * .8;
+            const double utilization = place_options.utilization * place_options.area_step;
             std::fprintf(stderr, "lhd synth: %s; placement runs again at utilization %.3f\n", e.what(), utilization);
             placement_input           = prepare_input();
             retry_library             = std::make_unique<hhds::GraphLibrary>();

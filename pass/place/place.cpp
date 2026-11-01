@@ -8888,7 +8888,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         if (!options.allow_increase_area || !options.generated_core) {
           throw;
         }
-        const double utilization = options.utilization * .8;
+        const double utilization = options.utilization * options.area_step;
         std::fprintf(stderr, "legroute probe: %s; placement restarts at utilization %.3f\n", e.what(), utilization);
         throw Placement_area_restart(utilization, utilization + .05);
       }
@@ -9191,7 +9191,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           if (!pushback) {
             throw;
           }
-          restart(.8, e.what());
+          restart(options.area_step, e.what());
         }
         if (const size_t failed = legroute_report->sat_unsat_regions + legroute_report->sat_unknown_regions;
             failed && !options.legroute_probe.strict) {
@@ -9211,7 +9211,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                                        legroute_report->sat_regions,
                                        worst);
           recut(why);
-          restart(std::clamp(.7 / std::max(worst, 1e-9), .5, .92), why);
+          restart(std::clamp(.7 / std::max(worst, 1e-9), .5, options.area_step), why);
         } else if (failed) {
           // Stop on an unsuccessful model solve; UNKNOWN is not proof of unroutability.
           const bool fixed_core = !options.generated_core;

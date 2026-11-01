@@ -285,7 +285,8 @@ struct Options {
   // a generated core (no die, core or floorplan given) may grow when routability needs it (legroute.probe): placement
   // restarts at the utilization that fits the inflated cells (Placement_area_restart)
   bool                                                       allow_increase_area = true;
-  unsigned                                 area_restarts  = 8;  // placements at a lower utilization before stopping
+  unsigned                                 area_restarts  = 12;   // placements at a lower utilization before stopping
+  double                                   area_step      = .92;  // the utilization factor per push-back step
   // legroute push-back: a region without a routable answer first tries other region meshes at the same core (1:
   // regions a quarter larger, 2: a fifth smaller), then the core grows; the driver scales region.max_cells by it
   unsigned                                 mesh_variant   = 0;

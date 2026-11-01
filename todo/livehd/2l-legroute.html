@@ -185,8 +185,14 @@ to 0.95, slowest region 119 s), and OpenROAD routes that placement with zero ove
 at DR WNS &minus;356.2 ps / TNS &minus;442.9k, against the standard flow's &minus;397.1 / &minus;483.1k on the
 same 3,043 um&sup2; die: 10% better WNS and 8% better TNS at equal area. So the push-back now retries other
 region meshes at the same core first (regions a quarter larger, then a fifth smaller) and grows the core only
-after both fail. The next lever beyond that is the one in the plan: let the SAT choose among a few boundary
-tiles per crossing, and space busorder's pins to the track capacity of a tile edge.</p>
+after both fail, and its step is <code>place.area_step</code> (0.92) with up to <code>place.area_restarts</code>
+(12) placements. The search from utilization 0 then goes 0.99, 0.91, 0.84, 0.77, 0.71 (boxes do not fit the
+tiles each time) to 0.6525 / 0.7025, where all 15 regions route at fills 0.78 to 0.84: a 3,283 um&sup2; die in
+407 s, 8% above the standard flow's default and 25% below the first push-back's landing. With the coarse 0.8
+step it had landed at 0.545 (3,930 um&sup2;, DR WNS &minus;385.2 / TNS &minus;495.4k), worse than the 0.70
+placement on the smaller die: feasibility and quality follow the region cut more than the density. The next
+lever beyond that is the one in the plan: let the SAT choose among a few boundary tiles per crossing, and
+space busorder's pins to the track capacity of a tile edge.</p>
 
 <h2>Region cuts (busorder regions)</h2>
 <ul>
