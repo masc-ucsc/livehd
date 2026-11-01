@@ -1518,6 +1518,10 @@ TOOL_FILES = [
     LEAN_DIR / "LeanSemanticPrimitives/Compiler/ResidualSemantics.lean",
     LEAN_DIR / "LeanSemanticPrimitives/Compiler/Runtime.lean",
     LEAN_DIR / "LeanSemanticPrimitives/Compiler/DesignCert.lean",
+    # The @[csimp] fast forms that ResidualSemantics, ReifyGen and Runtime compile
+    # against: an edit to them changes the code a probe runs.
+    LEAN_DIR / "LeanSemanticPrimitives/Translation/FastBV.lean",
+    LEAN_DIR / "LeanSemanticPrimitives/Compiler/FastResidual.lean",
 ]
 
 

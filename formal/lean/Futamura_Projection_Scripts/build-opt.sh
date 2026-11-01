@@ -19,7 +19,7 @@ mkdir -p "$OUT/LeanSemanticPrimitives/Projection/Proto" \
 export LEAN_PATH="$OUT"
 
 MODULES=(
-  SemanticPrimitives Translation/LGraphModel Translation/GraphRefine
+  SemanticPrimitives Translation/LGraphModel Translation/FastBV Translation/GraphRefine
   Compiler/DesignCert Compiler/Runtime Compiler/DesignCertWF
   # master's Compiler/CertIO imports the Mathlib compiler chain, which this
   # route does not build; its DCERT2 CODEC is Compiler/CertIOCodec and the
@@ -51,7 +51,7 @@ MODULES=(
   Projection/HardwareMemOutFlop Projection/HardwareMemMain Projection/HardwareMemWidth
   Projection/HardwareMemAdmit Projection/HardwareMemSlotTy Projection/HardwareMemRuntime
   Projection/HardwareMemFixture Projection/HardwareMemWrite Projection/MemSupport
-  Projection/MemProjection Projection/HardwareMemWriteAdmit
+  Projection/EvalFuelArr Projection/MemProjection Projection/HardwareMemWriteAdmit
   # residual serialization (gen_probe_v2 save:, gen_readiness_v2 load:)
   Projection/ResidualIO
   Projection/Proto/PartialEvaluatorFast Projection/Proto/PartialEvaluatorSummary

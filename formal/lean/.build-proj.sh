@@ -24,6 +24,7 @@ export LEAN_NUM_THREADS=4
 MODULES=(
   SemanticPrimitives
   Translation/LGraphModel
+  Translation/FastBV
   Translation/GraphRefine
   Compiler/DesignCert
   Compiler/Runtime
@@ -98,6 +99,7 @@ MODULES=(
   Projection/HardwareMemFixture
   Projection/HardwareMemWrite
   Projection/MemSupport
+  Projection/EvalFuelArr
   Projection/MemProjection
   Projection/HardwareMemWriteAdmit
   # The memory entry with `env0` inlined (the scalar route's TOTAL-variant

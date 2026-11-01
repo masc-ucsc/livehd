@@ -3,12 +3,16 @@
 #
 #   check_overlay.sh [--semantic]
 #
-# Five files must be byte-identical to the semantic base 90583be (present in
+# Four files must be byte-identical to the semantic base 90583be (present in
 # this repository; BASE_REPO overrides).  One is a COMMENT-ONLY adaptation --
 # Compiler/DesignCert.lean, whose ClockDesc docstring 032690762 corrected -- and
 # must equal the base once Lean comments are removed AND match a recorded
 # sha256, so a code change fails the first test and any further edit, even to a
-# comment, has to update the record.  Two are MASTER-ADAPTED --
+# comment, has to update the record.  One is an IMPORT-ONLY adaptation --
+# Compiler/Runtime.lean, which imports Translation/FastBV so the code compiled
+# in it and in every module that imports it uses the proved @[csimp] fast
+# forms -- and must equal the base once that one import line is removed AND
+# match a recorded sha256, the same way.  Two are MASTER-ADAPTED --
 # Translation/LGraphModel.lean (the SHL/SRA/Sext boundary repairs) and
 # Translation/OpBridge.lean (the bridges re-proved for them) -- and are checked
 # against recorded sha256 values.  Changing either is legitimate, but must
@@ -36,6 +40,9 @@ EXPECTED_LGRAPHMODEL_SHA256=432bb98394892ad67d156923197ed90945f57cfbf86f3e6d2b60
 EXPECTED_OPBRIDGE_SHA256=fc9366004cb12f1d96ae8624aaea4187960939d67c5b2b0c0b3bd3455d853b77
 # comment-only adaptation: path, recorded sha256
 EXPECTED_DESIGNCERT_SHA256=c622029ee92ef9a954af643584bd56a328c759bbf02a344650f90481cb8b13f9
+# import-only adaptation: the one added line, recorded sha256
+RUNTIME_ADDED_IMPORT='import LeanSemanticPrimitives.Translation.FastBV'
+EXPECTED_RUNTIME_SHA256=ba7b341173caf8f6925ca57477634b2e72c987f4893d777332628445a94de3e8
 
 SEMANTIC=0
 [ "${1:-}" = "--semantic" ] && SEMANTIC=1
@@ -71,12 +78,11 @@ print("\n".join(l.rstrip() for l in "".join(out).splitlines() if l.strip()))
 '
 }
 
-echo "-- five files, expected byte-identical to $BASE_REV"
+echo "-- four files, expected byte-identical to $BASE_REV"
 if ! (cd "$BASE_REPO" && git cat-file -e "$BASE_REV^{commit}") 2>/dev/null; then
   echo "  FAIL   base $BASE_REV not found in $BASE_REPO"; rc=1
 else
   for f in Translation/GraphRefine.lean \
-           Compiler/Runtime.lean \
            Compiler/DesignCertWF.lean Compiler/DesignSemantics.lean \
            SemanticPrimitives.lean; do
     if (cd "$BASE_REPO" && git show "$BASE_REV:formal/lean/LeanSemanticPrimitives/$f") \
@@ -90,9 +96,19 @@ else
   else
     echo "  DRIFT  $f differs from the base OUTSIDE comments"; rc=1
   fi
+  echo "-- one import-only adaptation: equal to $BASE_REV without its one added import, and a recorded hash"
+  f=Compiler/Runtime.lean
+  if [ "$(grep -c -x -F "$RUNTIME_ADDED_IMPORT" "$SRC/$f")" != 1 ]; then
+    echo "  DRIFT  $f does not carry exactly one '$RUNTIME_ADDED_IMPORT'"; rc=1
+  elif cmp -s <(cd "$BASE_REPO" && git show "$BASE_REV:formal/lean/LeanSemanticPrimitives/$f") \
+              <(grep -v -x -F "$RUNTIME_ADDED_IMPORT" "$SRC/$f"); then
+    echo "  ok     $f (no change against the base but the import)"
+  else
+    echo "  DRIFT  $f differs from the base in more than the added import"; rc=1
+  fi
 fi
 
-echo "-- recorded hashes: two master-adapted files and the comment-only one"
+echo "-- recorded hashes: two master-adapted files, the comment-only one and the import-only one"
 check_hash() {   # path expected
   local got; got=$(sha256sum "$SRC/$1" | cut -d' ' -f1)
   if [ "$got" = "$2" ]; then
@@ -107,11 +123,12 @@ check_hash() {   # path expected
 check_hash Translation/LGraphModel.lean "$EXPECTED_LGRAPHMODEL_SHA256"
 check_hash Translation/OpBridge.lean    "$EXPECTED_OPBRIDGE_SHA256"
 check_hash Compiler/DesignCert.lean     "$EXPECTED_DESIGNCERT_SHA256"
+check_hash Compiler/Runtime.lean        "$EXPECTED_RUNTIME_SHA256"
 
 if [ $SEMANTIC -eq 1 ]; then
   echo "-- the bridge theorems, rebuilt"
   if (cd "$ROOT/formal/lean" && bash .build-proj.sh SemanticPrimitives Translation/LGraphModel \
-        Translation/GraphRefine Compiler/DesignCert Compiler/Runtime Compiler/DesignCertWF \
+        Translation/FastBV Translation/GraphRefine Compiler/DesignCert Compiler/Runtime Compiler/DesignCertWF \
         Compiler/DesignSemantics Projection/ObjectLanguage Projection/ObjectLanguageSemantics \
         Projection/OperatorBridge) | grep -q 'Projection/OperatorBridge *ok'; then
     echo "  ok     Projection/OperatorBridge (bv_shl_step_unfolds, evalOp_SHL/denoteOp_SHL_unchanged_by_overlay, evalOp_Sext)"

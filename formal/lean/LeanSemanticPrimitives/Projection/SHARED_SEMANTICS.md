@@ -16,7 +16,7 @@ own; the projection consumes them unchanged.  Against the base:
 
     Translation/GraphRefine.lean      byte-identical
     Compiler/DesignCert.lean          COMMENT-ONLY (identical without comments; recorded hash)
-    Compiler/Runtime.lean             byte-identical
+    Compiler/Runtime.lean             IMPORT-ONLY (identical without one added import; recorded hash)
     Compiler/DesignCertWF.lean        byte-identical
     Compiler/DesignSemantics.lean     byte-identical
     SemanticPrimitives.lean           byte-identical
@@ -32,6 +32,18 @@ exporter does not provide (it numbers domains by sorting on a structural key)
 and nothing in the semantics reads. The change is in a comment only, so the
 check compares the file with the base after removing Lean comments, and pins
 the current bytes with a recorded hash.
+
+### `Compiler/Runtime.lean`
+
+95c80e506 added one line, `import LeanSemanticPrimitives.Translation.FastBV`.
+`FastBV` proves a `@[csimp]` theorem `f = fFast` for each hot `BV` primitive,
+and the compiler uses `fFast` in code compiled after the theorem is in scope.
+Importing it here puts it in scope for `Runtime` and for every module that
+imports `Runtime`, among them the byte-identical `DesignSemantics`.  No
+definition changes, and the substitution is a checked theorem, so every value
+FP's theorems talk about is the same.  The check compares the file with the
+base after removing exactly that one line, and pins the current bytes with a
+recorded hash.
 
 ### `Translation/LGraphModel.lean`
 
@@ -80,14 +92,15 @@ branch.  The statements are the pinned ones, unchanged.
 
     bash pass/lean/specialization/tests/check_overlay.sh [--semantic]
 
-Runnable from any directory.  It checks the five byte-identical files against
+Runnable from any directory.  It checks the four byte-identical files against
 the base (taken from THIS repository by default; `BASE_REPO` overrides),
-`DesignCert.lean` against the base without comments, and the two adapted files
-and `DesignCert.lean` against recorded sha256 values.  `--semantic` also rebuilds
+`DesignCert.lean` against the base without comments, `Runtime.lean` against
+the base without its one added import, and the two adapted files,
+`DesignCert.lean` and `Runtime.lean` against recorded sha256 values.  `--semantic` also rebuilds
 `OperatorBridge` (no Mathlib) and, under lake, `Translation/OpBridge`, so the
 bridge theorems above are re-checked rather than trusted.
 
-If one of the five must change, change it deliberately and update this document.
+If one of the four must change, change it deliberately and update this document.
 If either adapted file changes, update its recorded hash in the check script in
 the same commit, and say why.
 

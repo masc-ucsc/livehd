@@ -14,6 +14,7 @@ mkdir -p "$NAT"
 MODULES=(
   SemanticPrimitives
   Translation/LGraphModel
+  Translation/FastBV
   Translation/GraphRefine
   Compiler/DesignCert
   Compiler/Runtime
@@ -71,6 +72,7 @@ MODULES=(
   Projection/HardwareMemFixture
   Projection/HardwareMemWrite
   Projection/MemSupport
+  Projection/EvalFuelArr
   Projection/MemProjection
   Projection/HardwareMemWriteAdmit
   Projection/ResidualIO
