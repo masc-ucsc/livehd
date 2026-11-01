@@ -246,7 +246,49 @@ tiles into straight runs, two runs make an L piece (<code>Global_piece</code>, r
 <code>edge_reserve</code>, emitted as a fixed connection, the region's model skips the net).</li>
 <li><strong>Cost:</strong> 0.3 s for sha3's 3,951 crossing nets; seconds on partition_c.</li>
 </ul>
-<p>Results: sha3 @0.70 first samples below (option sweep table, rows <code>gr*</code>); partition_c and cnn pending.</p>
+<p>Results: sha3 @0.70 samples in the option sweep table (rows <code>global_route</code>). partition_c (328k cells,
+632 regions, 8 threads): 163 regions without an answer against 274 with the hop chain, 437M clauses against 1.05G,
+147k cells unroutable against 191k, the IO pre-route skipped 58k feedthroughs against 263k; the router itself took
+1,092 s on the first binary (a whole-die retry per unroutable net; bounded since) and left 3,420 nets to the chain,
+which is where the remaining failures sit: macro-channel regions with 0 to 30 boxes and hundreds of chained
+pass-through nets.</p>
+
+<h2 id="regions-as-chips">Iterating on one region, and on regular blocks (2026-11-01)</h2>
+<p>Two shortcuts, both from the review: a region as a chip of its own, and synthetic regular blocks.</p>
+<ul>
+<li><strong><code>synth.place.legroute.dump_regions=all|failed|ids</code></strong> writes
+<code>final/region_&lt;r&gt;.def</code> (+ <code>.json</code>): the region's cells at the tiles legroute gave
+them, one die pin per hop of a crossing net on the layer and track its hop took (a free track of the hop tile's
+row or column, over every layer of that direction and the bands beside it, when the region has no answer), the
+rows clipped, the power grid clipped from the planned grid, the fixed cells and the macros reaching in (the die
+grows to hold a macro whole). <code>scratchpad/cpsat/route_region.py RUN [ids]</code> routes them with OpenROAD
+in parallel and prints the SAT verdict against OpenROAD's overflow and DRC count, in minutes instead of a
+whole-chip run; the failing partition_c regions are the first use.</li>
+<li><strong>Synthetic blocks</strong> (<code>scratchpad/cpsat/synthetic.py</code>, <code>syn_run.sh</code>): a
+16&times;16 mesh of 8-bit nodes mixed from their four neighbors (36k cells), a 12&times;12 systolic array (10.6k),
+64 drivers each fanning out to 32 sinks, and a 32&times;32 crossbar; each through the standard flow and legroute
+with the router at the same core, routed by OpenROAD. First results: mesh, standard &minus;280.1 / &minus;320.6k
+(wire 180k um) against legroute 28/28 regions in 6 s, &minus;266.0 / &minus;330.3k (191.5k um); systolic,
+standard &minus;300.5 / &minus;34.9k (42.0k um) against legroute 6/6 in 31 s, &minus;300.9 / &minus;36.0k
+(47.6k um): the regular lattices route in both flows, legroute's wire is 6 to 13% longer (the box snap), WNS
+equal or better, TNS 3% worse.</li>
+</ul>
+
+<h2 id="risk-order">Regions most at risk first, and cuts by net cut (2026-11-01)</h2>
+<ul>
+<li><strong>Risk order and fail-fast.</strong> The regions solve in order of risk (box fill plus the share of the
+region's tracks that the routes fixed ahead took: hops, pieces, trees, IO pre-routes), so the long solves start
+first and the threads end together; with <code>fail_fast</code> (set when the caller restarts the placement on any
+failure: the probe and the strict push-back) the first region without an answer ends the solve and the density
+push-back iterates at once instead of after every region.</li>
+<li><strong><code>synth.place.region.cut=mincut</code>.</strong> The macro mesh forced a cut line at every macro
+edge and IO bus span: partition_c started from 1,959 rectangles, merged back to 670, 300 of them under 50 cells,
+and the thin channel regions between macros are exactly the ones the SAT cannot route, since a boundary along a
+macro's channel leaves the channel's routes to two regions and hops. With <code>mincut</code> no line is forced;
+each split takes the position in the middle half of the longest side that the fewest nets cross (nets with cells
+on both sides, weighted), so a macro sits inside the region whose cuts surround it and its channel is one
+region's problem. The boundary pins already keep off macro interiors. partition_c with it: pending.</li>
+</ul>
 
 <h2>Larger designs with macros (cnn, partition_c)</h2>
 <p>The next targets are HighTide's cnn (69 FakeRAM hard macros, four of them 0.3 mm&sup2; each) and NVDLA
@@ -290,6 +332,10 @@ every case; detailed-route WNS / TNS in ps; the clock and reset nets unrouted sp
 <tr><td>global_fraction 0.05 (two runs)</td><td>12/12</td><td>120&ndash;142</td><td>&minus;348.8 / &minus;354.1</td><td>&minus;432.1k / &minus;435.2k</td></tr>
 <tr><td>defaults again, hop candidates pruned to the nearest 12</td><td>12/12</td><td>120</td><td>&minus;362.9</td><td>&minus;445.3k</td></tr>
 <tr><td>global_fraction 1.0</td><td>12/12</td><td>124</td><td>&minus;354.4</td><td>&minus;445.7k</td></tr>
+<tr><td>global_route, share 0.5 (865 nets without a path keep the chain)</td><td>12/12</td><td>75</td><td>&minus;352.8</td><td>&minus;434.5k</td></tr>
+<tr><td>global_route, share 0.75 (111 without a path)</td><td>11/12</td><td>181</td><td>&minus;358.5</td><td>&minus;447.7k</td></tr>
+<tr><td>global_route, share 0.5, own-region edges free (691 without a path)</td><td>12/12</td><td>158</td><td>&minus;359.1</td><td>&minus;439.2k</td></tr>
+<tr><td>global_route, share 0.6, own-region edges free (387 without a path)</td><td>12/12</td><td>87</td><td>&minus;348.1</td><td>&minus;434.8k</td></tr>
 </table>
 <p>Reading: the same options place deterministically (two runs of the defaults on one binary are identical), and
 a small change in the hop choice (the pruning to the nearest 12 candidates, done for the large designs) moves
