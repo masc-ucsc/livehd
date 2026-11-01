@@ -14,22 +14,13 @@ void emit_legacy_model(const DesignScan& design, const CertificateIR& cert, cons
   if (options.emit_fast_bridge && !options.emit_cert) {
     throw std::invalid_argument("emit_fast_bridge requires emit_cert=true");
   }
-  // The legacy model has ONE step: `<Top>_next` advances every flop and memory
-  // on every call and never reads a clock. That is the certificate's semantics
-  // only when every clock edges on every step. With two or more domains, a
-  // schedule where one clock is idle gives a different answer: measured on a
-  // two-counter design, clk_b held at 0 for five steps still counted cb to 4.
-  // The certificate routes (mode=verified_compiler) carry per-domain edges.
-  if (design.clocks.size() > 1) {
-    std::string names;
-    for (const auto& c : design.clocks) {
-      names += (names.empty() ? "" : ", ") + c.name;
-    }
-    throw std::invalid_argument("legacy mode models one clock domain, and this design has " + std::to_string(design.clocks.size())
-                                + " (" + names
-                                + "): every step would advance every domain. Use formal.lean.mode=verified_compiler, "
-                                  "whose certificate takes per-domain clock edges.");
-  }
+  // Two or more clock domains: `<Top>_next` and `<Top>_step` take a
+  // `<Top>_edges` record, one Bool per domain, and a flop or memory whose
+  // domain does not fire holds (an asserted asynchronous reset still resets
+  // its flop), as DesignSemantics.srcFlopNext / srcMemNext. Before this, the
+  // single step advanced every domain on every call: measured on a two-counter
+  // design, clk_b held at 0 for five steps still counted cb to 4. One domain
+  // emits exactly what it did before (legacy_names leaves `edges` empty).
   const auto names       = legacy_names(design, options.top);
   const bool wf          = options.emit_cert && options.cert_wf != LeanCertWFMode::Skip;
   const bool lookup_tree = options.emit_fast_bridge || wf;
