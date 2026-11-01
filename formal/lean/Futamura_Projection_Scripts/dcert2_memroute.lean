@@ -557,6 +557,20 @@ structure Cfg where
   only, `runMemSim(W)V_correct`) or `plain` (`projectMemDesignAt`,
   `runMemSim(W)_correct`). All three conclusions are the same. -/
   route : String := "fused"
+  /-- print each executed cycle's outputs as `STEP <k> <out0> <out1> ...` (each
+  output's unsigned value, before the state update), the line format
+  `cert_trace` prints, so an FP trace compares line for line with the IR, TV and
+  legacy traces on the same stimulus. Two names differ between the runners:
+  - edges: this runner's `edges:all` (and `auto` on one clock) is
+    `edgeSchedule`, every third cycle quiet. That is `cert_trace`'s
+    `edges:third`; `cert_trace`'s `edges:all` fires every clock on every step,
+    and this runner has no such mode.
+  - start state: this runner's `zero` is `initStateOf` (flops at their reset
+    values, memories zero). That is `cert_trace`'s default start (`init:reset`),
+    not `cert_trace`'s `init:zero`.
+  So `zero edges:all stim:<f> outputs` here matches
+  `cert_trace <cert> <n> <f> edges:third`. -/
+  outputs : Bool := false
 
 def say (s : String) : IO Unit := IO.println s
 
@@ -713,6 +727,8 @@ effEn {ws.effEn} origEn {ws.origEn} mask {ws.mask} pred {ws.pred} phaseSrc {ws.p
           | none   => tags := "no-step" :: tags; bad := true
           | some r =>
               tags := "ok" :: tags
+              if cfg.outputs then
+                IO.println s!"STEP {k} {" ".intercalate (r.outputs.toList.map (fun o => toString (bv_uint o)))}"
               outs := r.outputs :: outs
               prevOuts := r.outputs
               flops := r.nextState.flops :: flops
@@ -858,7 +874,7 @@ def buildState (D : DesignCert) (im : InitMode) : IO (Except String (StateM × S
 
 def usage : String :=
   "usage: dcert2_memroute (<cert.dcert>|--fixture <name>|--selftest) <stepFuel> \
-<workFuel> [cycles] [init] [nocompare] [trace] [no-plain-write] [route:fused|var|plain]\n  fixtures: full mixed twomem lane\n\
+<workFuel> [cycles] [init] [nocompare] [trace] [outputs] [no-plain-write] [route:fused|var|plain]\n  fixtures: full mixed twomem lane\n\
   fixtures (negative): romwrite\n  init: zero | ramp | narrow | file:<path>"
 
 def parseCfg (rest : List String) : Except String Cfg := do
@@ -883,6 +899,7 @@ contents or use init=zero, which is a legal-state witness only."
     -- changes anything
     let pw  := !(tl.contains "no-plain-write")
     let tr  := tl.contains "trace"
+    let op  := tl.contains "outputs"
     let stimTok := tl.find? (fun t => t.startsWith "stim:")
     let prov := match stimTok with
                 | some t => s!"PENDING {t}"
@@ -893,7 +910,7 @@ contents or use init=zero, which is a legal-state witness only."
     let route := (tl.findSome? (fun t => (t.dropPrefix? "route:").map (·.toString))).getD "fused"
     unless ["fused", "var", "plain"].contains route do
       .error s!"route:{route} is not one of fused | var | plain"
-    .ok ⟨sf, wf, cyc, im, cmp, none, [], [], prov, sup, tr, pw, em, route⟩
+    .ok ⟨sf, wf, cyc, im, cmp, none, [], [], prov, sup, tr, pw, em, route, op⟩
   | _ => .error usage
 
 /-! ## Comparison self-test
