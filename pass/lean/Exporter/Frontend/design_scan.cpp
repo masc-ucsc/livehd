@@ -345,6 +345,87 @@ void lower_hotmux(const LeanCtx& ctx, const Node& node, DesignScan& design, uint
   }
 }
 
+// Rem is supported only with a nonzero CONSTANT divisor. `x % 0` is X in
+// Verilog and undefined in every LiveHD executor, so no certificate value is
+// right; a variable divisor can be zero at run time.
+bool rem_constant_divisor(const Node& node) {
+  const auto b = livehd::graph_util::get_driver_of_sink_name(node, "b");
+  if (b.is_invalid() || !pin_is_const(b)) {
+    return false;
+  }
+  const auto v = pin_const_value(b);
+  return v.is_integer() && !v.has_unknowns() && !(v.is_just_i64() && v.to_just_i64() == 0);
+}
+
+// Lower `a % c` (c a nonzero constant) to `a - (a / c) * c`.
+//
+// LGraph's Rem is the TRUNCATED remainder: its sign follows the dividend
+// (graph/cell.hpp). The certificate's division truncates toward zero too, so
+// the identity holds for every sign of a and c.
+//
+// The quotient is at least width(a)+1 bits, which holds every |a / c| <= |a|,
+// including -2^(k-1) / -1 = 2^(k-1), and at least the Rem width w. The product
+// and the difference are then exact modulo 2^w, which is all the Rem node's w
+// bits carry.
+//
+// The three nodes are ordinary Div, Mult and Sum scan nodes, so the
+// CertificateBuilder treats them as it treats any other: SDiv when an operand
+// is signed or the constant is negative, UDiv otherwise, and each operand
+// extended to the width it is read at. The Sum keeps the Rem node's id, so
+// every reader of the Rem resolves to it.
+void lower_rem(const LeanCtx& ctx, const Node& node, DesignScan& design, uint64_t& next_id) {
+  const auto w = node_width(ctx, node);
+  const auto a = livehd::graph_util::get_driver_of_sink_name(node, "a");
+  const auto b = livehd::graph_util::get_driver_of_sink_name(node, "b");
+  if (a.is_invalid() || b.is_invalid()) {
+    fatal(ctx, "Rem node n_" + std::to_string(node_id(node)) + " is not binary.");
+  }
+  const auto dividend = capture_pin(ctx, a);
+  const auto divisor  = capture_pin(ctx, b);
+  const auto constant = [](const PinRef& p) { return p.kind == PinKind::Constant; };
+  const auto negative = [&](const PinRef& p) { return constant(p) && p.value.starts_with('-'); };
+  const auto aw       = constant(dividend) ? std::max(dividend.width, dividend.intrinsic_width) : dividend.width;
+  const auto qw       = std::max<uint32_t>(w, aw + 1);
+  check_width(ctx, node, qw, "Rem quotient");
+  // The same signedness rule the CertificateBuilder applies to a Div.
+  const bool signed_math = negative(dividend) || negative(divisor) || (!constant(dividend) && dividend.is_signed);
+  const auto emit        = [&](ScanOp op, uint32_t bits, bool is_signed, std::vector<Operand> operands) {
+    // CertificateBuilder reserves IDs starting at 1e9 for owned sources and
+    // memory lowering. Graph nodes and these adapter nodes stay below it.
+    if (next_id >= 1000000000) {
+      fatal(ctx, "Rem lowering exhausted the graph-node ID range");
+    }
+    PinRef result;
+    result.id        = static_cast<uint32_t>(next_id++);
+    result.width     = bits;
+    result.is_signed = is_signed;
+    design.nodes.push_back({result.id, op, bits, is_signed, std::move(operands)});
+    return result;
+  };
+  const auto quotient = emit(ScanOp::Div,
+                             qw,
+                             signed_math,
+                             {
+                                 {0, 0, dividend},
+                                 {1, 1,  divisor}
+  });
+  const auto product  = emit(ScanOp::Mult,
+                            w,
+                            false,
+                             {
+                                {0, 0, quotient},
+                                {1, 1,  divisor}
+  });
+  // Sum: bank 0 is added, bank 1 subtracted.
+  design.nodes.push_back({
+      node_id(node),
+      ScanOp::Sum,
+      w,
+      node_output_is_signed(node),
+      {{0, 0, dividend}, {1, 1, product}}
+  });
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -1032,6 +1113,8 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
             lower_concat(ctx, node, design, next_lowered_id);
           } else if (node_op(node) == Ntype_op::Hotmux) {
             lower_hotmux(ctx, node, design, next_lowered_id);
+          } else if (node_op(node) == Ntype_op::Rem && rem_constant_divisor(node)) {
+            lower_rem(ctx, node, design, next_lowered_id);
           } else if (const auto mapped = try_scan_op(node); !mapped) {
             // CENSUS, do not stop. Record this operator and keep walking, so the
             // refusal below names every unsupported operator in the design
@@ -1235,10 +1318,12 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
     // What to do about each refused cell, where there is something to do. The
     // census keys are `Ntype::get_name`, the lowercase cell name.
     static const std::map<std::string, std::string> hint = {
-        {     "latch",                                "run pass.single_edge first; it retypes a latch into a flop"},
+        {     "latch",          "run pass.single_edge first; it retypes a latch into a flop"                      },
         {       "sub", "flatten the hierarchy first (the Yosys readers flatten; native slang keeps Sub instances)"},
         {"clock_cell",                              "a Clock_cell outside a clock pin has no value semantics here"},
-        {       "rem",                                                     "remainder has no certificate encoding"},
+        {       "rem",
+         "only a nonzero CONSTANT divisor is supported; `x % 0` is X in Verilog, so a variable or zero divisor has no certificate "
+         "value"                                                                                                  },
         {      "rxor",                                                    "reduce-xor has no certificate encoding"},
         {  "popcount",                                                      "popcount has no certificate encoding"},
     };

@@ -150,6 +150,8 @@ TEST(DesignScan, MalformedBinaryArityIsRefused) {
 TEST(DesignScan, UnsupportedOperatorRefusalNamesTheWholeCensus) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_census");
   auto  io  = lib.create_io("census");
+  io->add_input("d", 1);
+  io->set_bits("d", 8);
   io->add_output("y", 1);
   io->set_bits("y", 8);
   auto g   = io->create_graph();
@@ -157,8 +159,11 @@ TEST(DesignScan, UnsupportedOperatorRefusalNamesTheWholeCensus) {
   auto pop = create_typed_node(*g, Ntype_op::Popcount);
   set_bits(rem.create_driver_pin(0), 8);
   set_bits(pop.create_driver_pin(0), 8);
+  // A VARIABLE divisor: Rem by a nonzero constant is lowered, so only this
+  // form is still unsupported.
+  livehd::graph_util::create_const(*g, *Dlop::create_integer(3)).connect_sink(rem.create_sink_pin(0));
+  g->get_input_pin("d").connect_sink(rem.create_sink_pin(1));
   for (int slot = 0; slot < 2; ++slot) {
-    livehd::graph_util::create_const(*g, *Dlop::create_integer(slot + 3)).connect_sink(rem.create_sink_pin(slot));
     livehd::graph_util::create_const(*g, *Dlop::create_integer(slot + 5)).connect_sink(pop.create_sink_pin(slot));
   }
   auto combine = create_typed_node(*g, Ntype_op::Or);
@@ -174,6 +179,53 @@ TEST(DesignScan, UnsupportedOperatorRefusalNamesTheWholeCensus) {
     const std::string msg = e.what();
     EXPECT_NE(msg.find(Ntype::get_name(Ntype_op::Rem)), std::string::npos) << msg;
     EXPECT_NE(msg.find(Ntype::get_name(Ntype_op::Popcount)), std::string::npos) << msg;
+  }
+}
+
+// `a % c` with c a nonzero constant lowers to `a - (a / c) * c`: a Div whose
+// quotient cannot wrap (at least width(a)+1 bits), a Mult and a Sum at the Rem
+// width, the Sum keeping the Rem's id. A zero divisor stays refused.
+TEST(DesignScan, RemByConstantLowersToDivMultSum) {
+  for (const int divisor : {5, 0}) {
+    SCOPED_TRACE(divisor);
+    auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_rem_" + std::to_string(divisor));
+    auto  io  = lib.create_io("remk");
+    io->add_input("a", 1);
+    io->set_bits("a", 8);
+    io->add_output("y", 1);
+    io->set_bits("y", 8);
+    auto g   = io->create_graph();
+    auto rem = create_typed_node(*g, Ntype_op::Rem);
+    set_bits(rem.create_driver_pin(0), 8);
+    g->get_input_pin("a").connect_sink(rem.create_sink_pin(0));
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(divisor)).connect_sink(rem.create_sink_pin(1));
+    rem.create_driver_pin(0).connect_sink(g->get_output_pin("y"));
+    if (divisor == 0) {
+      try {
+        scan_design(*g, {});
+        FAIL() << "a zero divisor must be refused";
+      } catch (const std::runtime_error& e) {
+        EXPECT_NE(std::string(e.what()).find("only a nonzero CONSTANT divisor"), std::string::npos) << e.what();
+      }
+      continue;
+    }
+    const auto design = scan_design(*g, {});
+    const auto find   = [&](ScanOp op) {
+      return std::find_if(design.nodes.begin(), design.nodes.end(), [&](const DesignNode& n) { return n.op == op; });
+    };
+    const auto div = find(ScanOp::Div), mul = find(ScanOp::Mult), sum = find(ScanOp::Sum);
+    ASSERT_NE(div, design.nodes.end());
+    ASSERT_NE(mul, design.nodes.end());
+    ASSERT_NE(sum, design.nodes.end());
+    EXPECT_GE(div->width, 9u);
+    EXPECT_EQ(mul->width, 8u);
+    EXPECT_EQ(sum->width, 8u);
+    EXPECT_EQ(sum->id, static_cast<uint32_t>(rem.get_debug_nid()));
+    ASSERT_EQ(mul->operands.size(), 2u);
+    EXPECT_EQ(mul->operands[0].driver.id, div->id);
+    ASSERT_EQ(sum->operands.size(), 2u);
+    EXPECT_EQ(sum->operands[1].bank, 1u);  // subtracted
+    EXPECT_EQ(sum->operands[1].driver.id, mul->id);
   }
 }
 
