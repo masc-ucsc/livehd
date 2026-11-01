@@ -43,6 +43,29 @@ constexpr uint64_t mix(uint64_t h, uint64_t v) {
   h ^= h >> 31;
   return h;
 }
+
+// A Concat's lanes are interleaved (value, width) pairs: lane i's value on sink
+// port 2i, its constant window on 2i+1 (graph/cell.cpp). The window of the lane
+// `sink` feeds, or nullopt when `sink` is not a Concat value lane.
+std::optional<int64_t> concat_lane_window(const hhds::Pin_class& sink) {
+  const auto node = sink.get_master_node();
+  if (gu::type_op_of(node) != Ntype_op::Concat || sink.get_port_id() % 2 != 0) {
+    return std::nullopt;
+  }
+  for (const auto& spin : node.inp_sorted_pins()) {
+    if (spin.get_port_id() != sink.get_port_id() + 1) {
+      continue;
+    }
+    const auto drivers = spin.get_driver_pins();
+    if (drivers.size() == 1 && drivers.front().is_const()) {
+      const auto& width = gu::const_of(drivers.front());
+      if (width.is_just_i64()) {
+        return width.to_just_i64();
+      }
+    }
+  }
+  return std::nullopt;
+}
 }  // namespace
 
 uint64_t Egraph::hash_of(Ntype_op op, uint32_t attr, std::span<const Operand> operands) {
@@ -2044,9 +2067,31 @@ void Engine::rewire(const hhds::Node_class& node, Ntype_op op, std::span<const O
       return kx < ky;
     });
   }
+  // A Concat lane's driver may be NARROWER than its window, never wider
+  // (graph/node_util.hpp, the Concat contract; pass.bitwidth refuses a wider one
+  // as "concat-lane-width"). A lane's class can be realized by a pin DECLARED
+  // wider than the window -- getmask_fits merges Get_mask(y, 0, n) into a y that
+  // fits n bits but is declared wider -- so such a lane reads it through
+  // Get_mask(v, 0, window). The classes are equal, so v fits and no value changes.
+  absl::flat_hash_map<uint32_t, int64_t> lane_window;  // value port -> window
+  if (op == Ntype_op::Concat) {
+    for (const auto& operand : ops) {
+      const auto pin = rep_pin_[operand.cls];
+      if (operand.bank % 2 == 1 && !pin.is_invalid() && pin.is_const() && gu::const_of(pin).is_just_i64()) {
+        lane_window[operand.bank - 1] = gu::const_of(pin).to_just_i64();
+      }
+    }
+  }
   for (const auto& operand : ordered) {
-    const auto      driver = rep_pin_[operand.cls];
+    auto            driver = rep_pin_[operand.cls];
     hhds::Pin_class sink;
+    if (const auto it = lane_window.find(operand.bank);
+        it != lane_window.end() && !driver.is_const() && gu::bits_of(driver) > it->second) {
+      auto mask = gu::create_get_mask(g_, driver, 0, static_cast<int>(it->second));
+      driver    = mask.create_driver_pin(0);
+      gu::set_ubits(driver, static_cast<int>(it->second));
+      ++stats_.lane_masked;
+    }
     if (banked) {
       I(operand.bank < stride);
       sink               = node.create_sink_pin(next[operand.bank]);
@@ -2255,6 +2300,11 @@ Engine::Replaced Engine::replace(const Member& member, const hhds::Pin_class& ta
       // A ring that closes over a compact loop keeps this node: forwarding
       // would make the loop's output drive its own input, which reads as a carry.
       if (gu::closes_loop_self_edge(target, out.sink)) {
+        return Replaced::declined;
+      }
+      // A Concat lane reader keeps the member when the representative is
+      // declared wider than the lane's window (the Concat contract; see rewire).
+      if (const auto window = concat_lane_window(out.sink); window && gu::bits_of(target) > *window) {
         return Replaced::declined;
       }
       // Parallel-edge refusal: if the target ALREADY drives this consumer sink,
