@@ -30,8 +30,8 @@ DCERT2. The flop record gained `clock` and `asyncReset`, the memory record
 gained `clock`, and the clocks section is new. A historical DCERT1 file is
 REFUSED by magic -- never re-read as a one-clock design, which would invent a
 domain the bytes do not state. DCERT3 extends only the memory record (its
-power-on words, then a commit table and an async-reset image that are reserved);
-a DCERT2 file is refused by magic too.
+power-on words, then a commit table for a memory on more than one clock, then an
+async-reset image that is reserved); a DCERT2 file is refused by magic too.
 
 The clock NAME forced one structural change: it is a byte count, one space and
 exactly that many raw bytes, so a name may contain a space or a newline and the

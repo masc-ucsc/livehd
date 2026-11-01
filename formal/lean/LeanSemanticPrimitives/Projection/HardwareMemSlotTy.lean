@@ -235,10 +235,10 @@ theorem admits_mainM_resolved {D : DesignCert} {i : RuntimeInput} {st : StateM}
         (StateM.encResultM r)
       ∧ r.denote = Compiler.interpretDesign D e i (StateM.denote st)
       ∧ StateShapeOK D r.nextState := by
-  obtain ⟨hwf, hsem, hgsrc, hadm, harity, hprop, hpol⟩ := admits_static_premises h
+  obtain ⟨hwf, hsem, hgsrc, hadm, harity, hprop, hpol, hmcm⟩ := admits_static_premises h
   obtain ⟨r, hev, hden, hpres⟩ :=
     mainM_adequate_resolved (G := geomAt D) hwf hsem hstate hgsrc hadm harity hprop
-      (admits_writeAddrFits h i st) hin hstb hfclk hmclk hfsize
+      (admits_writeAddrFits h i st) hin hstb hfclk hmclk hmcm hfsize
   exact ⟨r, hev, hden, hpres hpol⟩
 
 /-! ## 6. The checked geometry IS the hand-written one

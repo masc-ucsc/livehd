@@ -38,6 +38,7 @@ proof.  `Op_UDiv`, `Op_SDiv` (b6d917c25, 0143ea8cc) and `Op_SetMask` were once
 listed here as unreachable; the exporter emits all three, so they compile.
 -/
 import LeanSemanticPrimitives.Compiler.Runtime
+import LeanSemanticPrimitives.Compiler.MemDomains
 
 namespace Compiler
 
@@ -122,7 +123,18 @@ structure ResidualMemoryUpdate where
   nextImg : Nat
   /-- ordinal of the clock domain this memory commits on (`MemoryDesc.clock`) -/
   clock   : Nat
+  /-- the commit table of a memory on more than one domain (`MemoryDesc.commits`) -/
+  commits : Array MemCommit := #[]
+  /-- the power-on words (`MemoryDesc.init`): not part of a step, carried so a
+  generated restatement of the certificate's memories (D3's `D_mems`) is exact -/
+  init    : Array Nat := #[]
 deriving Repr, Inhabited, DecidableEq
+
+/-- The `MemoryDesc` view of an update: what `MemoryDesc.allFire` / `firedIs`
+read (its `clock` and `commits`), so the target asks "which domains fired" with
+the same predicates as the source. -/
+def ResidualMemoryUpdate.toDesc (m : ResidualMemoryUpdate) : MemoryDesc :=
+  { aw := m.aw, dw := m.dw, nextImg := m.nextImg, clock := m.clock, commits := m.commits }
 
 /-- The compiled program.  `sources` is carried so `denoteResidual` needs no
 `DesignCert` at all — the target is executable on its own. -/

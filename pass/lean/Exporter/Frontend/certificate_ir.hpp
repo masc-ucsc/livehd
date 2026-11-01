@@ -83,6 +83,11 @@ struct MemoryDriver {
   // Power-on words, entry 0 first, decimal (DCERT3 `MemoryDesc.init`); an
   // entry past the end is 0. Empty: the memory powers on all zero.
   std::vector<std::string> init;
+  // A memory on more than one clock domain (DCERT3 `MemoryDesc.commits`): per
+  // PROPER non-empty set of its domains, the set as a clock-ordinal bit mask and
+  // the image after the writes of the ports on those domains. `next_img` stays
+  // the image after every port's write. Empty: one domain, `clock`.
+  std::vector<std::pair<uint64_t, uint32_t>> commits;
 };
 // One emitted clock. Mirrors DesignScan::ClockDomain, minus the structural key:
 // the key is the scan's grouping identity and has no meaning in the certificate,

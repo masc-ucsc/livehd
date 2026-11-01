@@ -127,7 +127,12 @@ def geomAt (D : DesignCert) (k : Nat) : Option Nat :=
   | some (.tbl aw _) => some aw
   | _                => none
 
-/-! ## 2. The executable checker -/
+/-! ## 2. The executable checker
+
+Each memory must also be on ONE clock domain: an empty commit table
+(`MemoryDesc.commits`, decision #9).  The direct checker admits a commit table,
+because `interpretDesign` gives it a meaning; this program's memory commit reads
+only `md.clock`, so it refuses one here. -/
 
 def admitsB (D : DesignCert) : Bool :=
   Direct.acceptsDesign D
@@ -136,9 +141,10 @@ def admitsB (D : DesignCert) : Bool :=
       | some ts =>
           ts.size == D.numSlots
           && D.memories.toList.all (fun md =>
-               match ts[md.nextImg]? with
-               | some (.tbl aw dw) => aw == md.aw && dw == md.dw
-               | _                 => false))
+               md.commits.isEmpty
+               && match ts[md.nextImg]? with
+                  | some (.tbl aw dw) => aw == md.aw && dw == md.dw
+                  | _                 => false))
 
 /-! ## 3. Soundness: what a successful check gives
 
@@ -264,7 +270,28 @@ theorem admits_nextImgGeom {D : DesignCert} (h : admitsB D = true) :
       | tbl aw dw =>
           rw [hty] at hthis
           simp only [Bool.and_eq_true, beq_iff_eq] at hthis
-          rw [hthis.1]
+          rw [hthis.2.1]
+
+/-- **No admitted memory has a commit table**: each commits on its one `clock`. -/
+theorem admits_noCommits {D : DesignCert} (h : admitsB D = true) :
+    ∀ md ∈ D.memories.toList, md.commits = #[] := by
+  intro md hmem
+  obtain ⟨ts, hts⟩ := admitsB_infer h
+  unfold admitsB at h
+  rw [hts] at h
+  simp only [Bool.and_eq_true] at h
+  have hthis := List.all_eq_true.mp h.2.2 md hmem
+  simp only [Bool.and_eq_true] at hthis
+  simpa [Array.isEmpty_iff] using hthis.1
+
+theorem admits_noCommits_at {D : DesignCert} (h : admitsB D = true)
+    {idx : Nat} {md : MemoryDesc} (hmd : D.memories[idx]? = some md) :
+    md.commits = #[] := by
+  have hmem : md ∈ D.memories.toList := by
+    obtain ⟨h1, h2⟩ := List.getElem?_eq_some_iff.mp
+      (show D.memories.toList[idx]? = some md by rw [← hmd]; simp)
+    exact h2 ▸ List.getElem_mem h1
+  exact admits_noCommits h md hmem
 
 /-! ### The per-node recurrence
 
@@ -485,12 +512,13 @@ def StaticPremises (D : DesignCert) : Prop :=
   ∧ (∀ (j : Nat) (c : DenseNodeCert), D.nodes[j]? = some c →
        WritePropagates D (geomAt D) j c)
   ∧ NextImgGeomOK D (geomAt D)
+  ∧ (∀ md ∈ D.memories.toList, md.commits = #[])
 
 /-- **The static premises, from one Boolean check.** -/
 theorem admits_static_premises {D : DesignCert} (h : admitsB D = true) :
     StaticPremises D :=
   ⟨admits_wf h, admits_semwf h, admits_geom_src h, admits_nodeAdmitted h,
-   admits_arity h, admits_writePropagates h, admits_nextImgGeom h⟩
+   admits_arity h, admits_writePropagates h, admits_nextImgGeom h, admits_noCommits h⟩
 
 /-! ## 4. The retained designs pass, and the refusals bite
 
@@ -638,6 +666,7 @@ theorem laneDesign_static : StaticPremises laneDesign :=
   admits_static_premises laneDesign_admits
 
 #audit_axioms admits_semwf
+#audit_axioms admits_noCommits
 #audit_axioms admits_wf
 #audit_axioms admits_geom_src
 #audit_axioms admits_nextImgGeom

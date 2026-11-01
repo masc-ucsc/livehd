@@ -132,18 +132,31 @@ def main : IO UInt32 := do
     let extra := { D with clocks := D.clocks.push { name := "extra" } }
     if renderCert extra == raw then bad lg "adding a clock left the bytes identical"
       else ok lg "sensitive to the clock table"
-    -- DCERT3: the power-on words reach the bytes, and a RESERVED field is a
-    -- good record (the codec reads it) and a refused design (admission).
+    -- DCERT3: the power-on words and the commit table reach the bytes; a
+    -- RESERVED field (the async image) is a good record (the codec reads it)
+    -- and a refused design (admission); so is a malformed commit-table entry.
     if D.memories.isEmpty then
       IO.println "  --   no memories: DCERT3 memory controls skipped"
     else
-      let pw := { D with memories := D.memories.modify 0 (fun m => { m with init := m.init.push 1 }) }
+      let mem0 := fun (f : MemoryDesc → MemoryDesc) => { D with memories := D.memories.modify 0 f }
+      let pw := mem0 (fun m => { m with init := m.init.push 1 })
       if renderCert pw == raw then bad lg "changing a memory's power-on words left the bytes identical"
         else ok lg "sensitive to a memory's power-on words"
-      let withCommit := fun (m : MemoryDesc) => { m with commits := #[{ mask := 1, nextImg := m.nextImg }] }
-      let rsv := renderCert { D with memories := D.memories.modify 0 withCommit }
-      expectOk    lg "codec reads a memory with a commit table (it judges nothing)" (parseCert rsv)
+      let ct := mem0 (fun m => { m with commits := m.commits.push { mask := 1, nextImg := m.nextImg } })
+      if renderCert ct == raw then bad lg "adding a commit-table entry left the bytes identical"
+        else ok lg "sensitive to a memory's commit table"
+      expectOk    lg "admission accepts a well-formed commit-table entry" (readCertChecked (renderCert ct))
+      let rsv := renderCert (mem0 (fun m => { m with asyncImg := some m.nextImg }))
+      expectOk    lg "codec reads a memory with an async image (it judges nothing)" (parseCert rsv)
       expectError lg "admission refuses that reserved field" (readCertChecked rsv)
+      let entry := fun (c : MemCommit) => renderCert (mem0 (fun m => { m with commits := #[c] }))
+      let img := D.memories[0]!.nextImg
+      expectError lg "admission refuses a commit-table entry with mask 0"
+        (readCertChecked (entry { mask := 0, nextImg := img }))
+      expectError lg "admission refuses a commit-table entry on an undeclared clock"
+        (readCertChecked (entry { mask := 2 ^ D.clocks.size, nextImg := img }))
+      expectError lg "admission refuses a commit-table entry whose image slot is out of range"
+        (readCertChecked (entry { mask := 1, nextImg := D.numSlots }))
 
   -- 5. REFUSAL CONTROLS on the production bytes.
   expectError lg "DCERT1 magic" (parseCert (raw.set! 5 49))

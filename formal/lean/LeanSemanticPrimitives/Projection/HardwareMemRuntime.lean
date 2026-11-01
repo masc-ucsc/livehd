@@ -519,7 +519,7 @@ theorem admits_nextImgTy {D : DesignCert} (h : admitsB D = true)
           simp only [Bool.and_eq_true, beq_iff_eq] at hthis
           constructor
           · unfold tyAt; rw [hts]
-            simp only [Option.bind_some, hty, hthis.1, hthis.2]
+            simp only [Option.bind_some, hty, hthis.2.1, hthis.2.2]
           · rw [← hsz]; exact mem_lt_of_getElem? hty
 
 /-- **The policy is preserved.**  Both branches of the per-memory commit give an
@@ -565,8 +565,7 @@ theorem admits_run_pres {D : DesignCert} {i : RuntimeInput} {st : StateM}
   have hmden : m.denote
       = Compiler.srcMemNext (slotValM D i st) e (StateM.denote st) idx md :=
     Option.some.inj hx
-  rw [hmden]
-  unfold Compiler.srcMemNext
+  rw [hmden, Compiler.srcMemNext_of_empty _ _ _ _ _ (admits_noCommits_at hA hmd)]
   by_cases hf : fires e md.clock
   · simp only [hf, if_true]
     obtain ⟨hty, hnum⟩ := admits_nextImgTy hA hmd

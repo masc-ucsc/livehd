@@ -86,11 +86,11 @@ void emit_legacy_graph_cert(const DesignScan& d, const CertificateIR& c, const L
     for (const auto& m : c.memories) {
       const auto field = n.memories.at(m.origin);
       fields.push_back(field);
-      auto next = "memdec " + std::to_string(m.addr_w) + " " + std::to_string(m.data_w) + " (rho " + std::to_string(m.next_img)
-                  + ").asMem";
-      if (!n.edges.empty()) {
-        next = "if e." + n.edges.at(m.clock) + " then " + next + " else s." + field;
-      }
+      // The same rule as the fast model's `_next` (legacy_memory_next).
+      const auto img  = [&](uint32_t id) {
+        return "memdec " + std::to_string(m.addr_w) + " " + std::to_string(m.data_w) + " (rho " + std::to_string(id) + ").asMem";
+      };
+      const auto next = legacy_memory_next(m, n, img, "s." + field);
       os << "  let new_" << field << " : (BitVec " << m.addr_w << " -> BitVec " << m.data_w << ") := " << next << "\n";
     }
     os << "  { ";

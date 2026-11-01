@@ -89,7 +89,8 @@ theorem memNextsOf_denote_array {D : DesignCert} {i : RuntimeInput} {st : StateM
     (hpre : PrefixRelM D i st G m ss)
     (hnext : ∀ md ∈ D.memories.toList, md.nextImg < ss.length)
     (hkind : ∀ md ∈ D.memories.toList,
-               Direct.slotIsMem D md.nextImg = some true) :
+               Direct.slotIsMem D md.nextImg = some true)
+    (hcm : ∀ md ∈ D.memories.toList, md.commits = #[]) :
     ((memNextsOf e st ss 0 D.memories.toList).toArray).map MemImg.denote
       = D.memories.mapIdx
           (fun idx md => Compiler.srcMemNext (slotValM D i st) e (StateM.denote st) idx md) := by
@@ -111,7 +112,7 @@ theorem memNextsOf_denote_array {D : DesignCert} {i : RuntimeInput} {st : StateM
     simp only [Array.getElem_map, List.getElem_toArray]
     rw [hval]
     simp only [Array.getElem_mapIdx]
-    exact memNextOf_denote hpre (hnext _ hmem) (hkind _ hmem)
+    exact memNextOf_denote hpre (hnext _ hmem) (hkind _ hmem) (hcm _ hmem)
 
 /-! ## 3. The whole cycle
 
@@ -140,6 +141,7 @@ theorem mainM_adequate_gen {D : DesignCert} {i : RuntimeInput} {st : StateM}
     (hstb : ∀ sd ∈ D.sources.toList, SourceFlopBound sd st.flops.size)
     (hfclk : ∀ f ∈ D.flops.toList, f.clock < e.size)
     (hmclk : ∀ md ∈ D.memories.toList, md.clock < e.size)
+    (hmcm : ∀ md ∈ D.memories.toList, md.commits = #[])
     (hfsize : D.flops.size ≤ st.flops.size) :
     ∃ r : StateM.ResultM,
       SEval hwMemS []
@@ -214,7 +216,7 @@ theorem mainM_adequate_gen {D : DesignCert} {i : RuntimeInput} {st : StateM}
         = D.flops.mapIdx
             (fun idx f => srcFlopNext (slotValM D i st) e (StateM.denote st) idx f) := by
       rw [flopNextsFrom_mapIdx]
-    have hmems := memNextsOf_denote_array (e := e) hss hmnext hmkind
+    have hmems := memNextsOf_denote_array (e := e) hss hmnext hmkind hmcm
     have href : Compiler.interpretDesign D e i (StateM.denote st)
         = { outputs := D.outputs.map
               (fun o => bv_resize o.width ((slotValM D i st) o.slot).asBV)
@@ -256,6 +258,7 @@ theorem mainM_adequate {D : DesignCert} {i : RuntimeInput} {st : StateM}
     (hstb : ∀ sd ∈ D.sources.toList, SourceFlopBound sd st.flops.size)
     (hfclk : ∀ f ∈ D.flops.toList, f.clock < e.size)
     (hmclk : ∀ md ∈ D.memories.toList, md.clock < e.size)
+    (hmcm : ∀ md ∈ D.memories.toList, md.commits = #[])
     (hfsize : D.flops.size ≤ st.flops.size) :
     ∃ r : StateM.ResultM,
       SEval hwMemS []
@@ -268,7 +271,7 @@ theorem mainM_adequate {D : DesignCert} {i : RuntimeInput} {st : StateM}
     (fun j c hcj hj hmemc ss hpre =>
       node_step (i := i) (st := st) hwf hsem hcj hj (hadm _ hmemc) (harity _ hmemc)
         (hprop j _ hcj) (hfits _ hmemc) hpre)
-    hin hstb hfclk hmclk hfsize
+    hin hstb hfclk hmclk hmcm hfsize
 
 /-- **The same, through the runtime denotation relation.**  `ResultRelR v r`
 says `v` decodes to a representable witness whose denotation IS the reference
@@ -288,6 +291,7 @@ theorem mainM_resultRel {D : DesignCert} {i : RuntimeInput} {st : StateM}
     (hstb : ∀ sd ∈ D.sources.toList, SourceFlopBound sd st.flops.size)
     (hfclk : ∀ f ∈ D.flops.toList, f.clock < e.size)
     (hmclk : ∀ md ∈ D.memories.toList, md.clock < e.size)
+    (hmcm : ∀ md ∈ D.memories.toList, md.commits = #[])
     (hfsize : D.flops.size ≤ st.flops.size) :
     ∃ v : Val,
       SEval hwMemS []
@@ -295,7 +299,7 @@ theorem mainM_resultRel {D : DesignCert} {i : RuntimeInput} {st : StateM}
                         .lit (StateM.encStateM st)]) v
       ∧ StateM.ResultRelR v (Compiler.interpretDesign D e i (StateM.denote st)) := by
   obtain ⟨r, hev, hden, -⟩ :=
-    mainM_adequate hwf hsem hstate hGsrc hadm harity hprop hfits hin hstb hfclk hmclk hfsize
+    mainM_adequate hwf hsem hstate hGsrc hadm harity hprop hfits hin hstb hfclk hmclk hmcm hfsize
   refine ⟨StateM.encResultM r, hev, ?_⟩
   rw [← hden]
   exact StateM.ResultRelR_encResultM r
@@ -329,6 +333,7 @@ theorem mainM_adequate_resolved_gen {D : DesignCert} {i : RuntimeInput} {st : St
     (hstb : ∀ sd ∈ D.sources.toList, SourceFlopBound sd st.flops.size)
     (hfclk : ∀ f ∈ D.flops.toList, f.clock < e.size)
     (hmclk : ∀ md ∈ D.memories.toList, md.clock < e.size)
+    (hmcm : ∀ md ∈ D.memories.toList, md.commits = #[])
     (hfsize : D.flops.size ≤ st.flops.size) :
     ∃ r : StateM.ResultM,
       Eval hwMemP []
@@ -338,7 +343,7 @@ theorem mainM_adequate_resolved_gen {D : DesignCert} {i : RuntimeInput} {st : St
       ∧ r.denote = Compiler.interpretDesign D e i (StateM.denote st)
       ∧ (NextImgGeomOK D G → StateShapeOK D r.nextState) := by
   obtain ⟨r, hev, hden, hpres⟩ :=
-    mainM_adequate_gen hwf hsem hstate hGsrc hstep hin hstb hfclk hmclk hfsize
+    mainM_adequate_gen hwf hsem hstate hGsrc hstep hin hstb hfclk hmclk hmcm hfsize
   refine ⟨r, ?_, hden, hpres⟩
   refine SEval_entry hwMemP_resolves ?_
   simpa [hwMemS_entry] using hev
@@ -358,6 +363,7 @@ theorem mainM_adequate_resolved {D : DesignCert} {i : RuntimeInput} {st : StateM
     (hstb : ∀ sd ∈ D.sources.toList, SourceFlopBound sd st.flops.size)
     (hfclk : ∀ f ∈ D.flops.toList, f.clock < e.size)
     (hmclk : ∀ md ∈ D.memories.toList, md.clock < e.size)
+    (hmcm : ∀ md ∈ D.memories.toList, md.commits = #[])
     (hfsize : D.flops.size ≤ st.flops.size) :
     ∃ r : StateM.ResultM,
       Eval hwMemP []
@@ -370,7 +376,7 @@ theorem mainM_adequate_resolved {D : DesignCert} {i : RuntimeInput} {st : StateM
     (fun j c hcj hj hmemc ss hpre =>
       node_step (i := i) (st := st) hwf hsem hcj hj (hadm _ hmemc) (harity _ hmemc)
         (hprop j _ hcj) (hfits _ hmemc) hpre)
-    hin hstb hfclk hmclk hfsize
+    hin hstb hfclk hmclk hmcm hfsize
 
 #audit_axioms mainM_adequate
 #audit_axioms mainM_adequate_gen

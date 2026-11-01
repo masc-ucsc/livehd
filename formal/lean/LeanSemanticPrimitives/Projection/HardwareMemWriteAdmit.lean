@@ -215,9 +215,10 @@ def tysOK (D : DesignCert) : Option (Array SlotTy) → Bool
   | some ts =>
       ts.size == D.numSlots
       && D.memories.toList.all (fun md =>
-           match ts[md.nextImg]? with
-           | some (.tbl aw dw) => aw == md.aw && dw == md.dw
-           | _                 => false)
+           md.commits.isEmpty
+           && match ts[md.nextImg]? with
+              | some (.tbl aw dw) => aw == md.aw && dw == md.dw
+              | _                 => false)
 
 theorem admitsB_tysOK (D : DesignCert) :
     admitsB D = (Direct.acceptsDesign D && tysOK D (inferTys D)) := by
@@ -774,7 +775,28 @@ theorem admitsW_nextImgGeom {D : DesignCert} (h : admitsWB D = true) :
       | tbl aw dw =>
           rw [hty] at hthis
           simp only [Bool.and_eq_true, beq_iff_eq] at hthis
-          rw [hthis.1]
+          rw [hthis.2.1]
+
+/-- No memory of an extended-admitted design has a commit table. -/
+theorem admitsW_noCommits {D : DesignCert} (h : admitsWB D = true) :
+    ∀ md ∈ D.memories.toList, md.commits = #[] := by
+  intro md hmem
+  obtain ⟨ts, hts⟩ := admitsWB_infer h
+  unfold admitsWB at h
+  rw [hts] at h
+  simp only [tysOK, Bool.and_eq_true] at h
+  have hthis := List.all_eq_true.mp h.2.2 md hmem
+  simp only [Bool.and_eq_true] at hthis
+  simpa [Array.isEmpty_iff] using hthis.1
+
+theorem admitsW_noCommits_at {D : DesignCert} (h : admitsWB D = true)
+    {idx : Nat} {md : MemoryDesc} (hmd : D.memories[idx]? = some md) :
+    md.commits = #[] := by
+  have hmem : md ∈ D.memories.toList := by
+    obtain ⟨h1, h2⟩ := List.getElem?_eq_some_iff.mp
+      (show D.memories.toList[idx]? = some md by rw [← hmd]; simp)
+    exact h2 ▸ List.getElem_mem h1
+  exact admitsW_noCommits h md hmem
 
 /-- **Every node of an extended-admitted design is admitted by the EXTENDED
 predicate.**  Note what this does NOT say: it does not say `NodeAdmitted`, and
@@ -999,7 +1021,7 @@ theorem admitsW_mainM_resolved {D : DesignCert} {i : RuntimeInput} {st : StateM}
       (fun j c hcj hj hmemc ss hpre =>
         node_stepW hwf hsem hcj hj (hadm _ hmemc) (harit _ hmemc)
           (hprop j _ hcj) (hfits _ hmemc) hpre)
-      hin hstb hfclk hmclk hfsize
+      hin hstb hfclk hmclk (admitsW_noCommits h) hfsize
   exact ⟨r, hev, hden, hpres hpol⟩
 
 /-! ## 3h. The FULL runtime policy on the extended route
@@ -1170,7 +1192,7 @@ theorem admitsW_nextImgTy {D : DesignCert} (h : admitsWB D = true)
           simp only [Bool.and_eq_true, beq_iff_eq] at hthis
           constructor
           · unfold tyAtW; rw [hts]
-            simp only [Option.bind_some, hty, hthis.1, hthis.2]
+            simp only [Option.bind_some, hty, hthis.2.1, hthis.2.2]
           · rw [← hsz]; exact mem_lt_of_getElem?' hty
 
 /-- One step under the length-level policy. -/
@@ -1230,8 +1252,7 @@ theorem admits_runW_pres {D : DesignCert} {i : RuntimeInput} {st : StateM}
   have hmden : m.denote
       = Compiler.srcMemNext (slotValM D i st) e (StateM.denote st) idx md :=
     Option.some.inj hx
-  rw [hmden]
-  unfold Compiler.srcMemNext
+  rw [hmden, Compiler.srcMemNext_of_empty _ _ _ _ _ (admitsW_noCommits_at hA hmd)]
   by_cases hf : fires e md.clock
   · simp only [hf, if_true]
     obtain ⟨hty, hnum⟩ := admitsW_nextImgTy hA hmd
@@ -1878,6 +1899,7 @@ theorem plainRamSim_runs {sim : MemSimulator} (h : plainRamSim = some sim)
 #audit_axioms node_step_memWrite
 #audit_axioms node_stepW
 #audit_axioms admits_node_tyW
+#audit_axioms admitsW_noCommits
 #audit_axioms admitsW_nodeAdmitted
 #audit_axioms admitsW_writePropagates
 #audit_axioms admits_slot_widthW

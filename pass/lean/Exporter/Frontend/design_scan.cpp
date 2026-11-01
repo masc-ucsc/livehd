@@ -586,7 +586,7 @@ std::string domain_name(const lc::Commit_class& cc) {
   return "clk_" + cc.net_key();
 }
 
-// Design-wide implicit-domain join, then the memory common-domain restriction.
+// Design-wide implicit-domain join, then each memory's image clock.
 //
 // BOTH must run after EVERY domain is resolved, which is why neither lives in
 // the memory loop. Doing the join per memory, before the flops were scanned,
@@ -602,7 +602,7 @@ std::string domain_name(const lc::Commit_class& cc) {
 //
 // R13.3's rule is about the whole design: join the unique explicit domain,
 // otherwise retain an explicit implicit-domain entry rather than guessing.
-void join_and_restrict_domains(const LeanCtx& ctx, DesignScan& design, std::vector<ClockDomain>& table) {
+void join_and_restrict_domains(const LeanCtx& /*ctx*/, DesignScan& design, std::vector<ClockDomain>& table) {
   // Every domain actually USED by a committing element, design-wide.
   std::set<uint32_t> explicit_used;
   bool               implicit_used = false;
@@ -644,33 +644,27 @@ void join_and_restrict_domains(const LeanCtx& ctx, DesignScan& design, std::vect
     }
   }
 
-  // ONE MemoryDesc carries ONE clock. That is a CERTIFICATE restriction, not a
-  // hardware guarantee: cells have a per-port `clock_pin` and a single global
-  // `posclk`, and a shared polarity does not imply a shared root. Enforced
-  // across every committing port rather than assumed -- distinct roots are
-  // refused, never merged onto whichever port was scanned first.
-  for (auto& [id, m] : design.memories) {
-    bool        have = false;
-    uint32_t    chosen = 0;
-    std::string chosen_what;
-    for (const auto& p : m.ports) {
-      if (!p.has_domain) {
-        continue;
-      }
-      const std::string pw = "port " + std::to_string(p.port_id);
-      if (!have) {
-        have        = true;
-        chosen      = p.clock_ordinal;
-        chosen_what = pw;
-      } else if (p.clock_ordinal != chosen) {
-        fatal(ctx,
-              "memory n_" + std::to_string(m.id) + " (`" + m.raw_name + "`) commits on more than one clock domain: "
-                  + chosen_what + " on `" + table[chosen].name + "` and " + pw + " on `" + table[p.clock_ordinal].name
-                  + "`. A certificate carries ONE MemoryDesc.clock, so these cannot be represented without merging "
-                    "two time bases into one.");
+  // A memory's `clock_ordinal` is the domain its IMAGE commits on: its first
+  // WRITE port's. A registered read's register is not the image; it carries its
+  // own port's clock (memory_lowering). Write ports on OTHER domains keep their
+  // own ordinals: DCERT3 gives such a memory a commit table (decision #9), which
+  // memory_lowering builds from them -- distinct roots are never merged onto one
+  // time base. A memory with no write port (a ROM) takes its first committing
+  // port's domain, and one with no committing port ordinal 0.
+  auto first_domain = [](const Memory& m, const std::vector<size_t>& ords) -> std::optional<uint32_t> {
+    for (const auto ord : ords) {
+      if (m.ports.at(ord).has_domain) {
+        return m.ports.at(ord).clock_ordinal;
       }
     }
-    m.clock_ordinal = have ? chosen : 0;
+    return std::nullopt;
+  };
+  for (auto& [id, m] : design.memories) {
+    std::vector<size_t> all(m.ports.size());
+    for (size_t k = 0; k < all.size(); ++k) {
+      all[k] = k;
+    }
+    m.clock_ordinal = first_domain(m, m.write_ports).value_or(first_domain(m, all).value_or(0));
   }
 }
 

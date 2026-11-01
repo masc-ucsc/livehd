@@ -141,10 +141,9 @@ structure FlopDesc where
   asyncReset     : Bool := false
 deriving Repr, Inhabited, DecidableEq
 
-/-- One entry of a memory's commit table (DCERT3, RESERVED until decision #9
-gives it a step meaning): when exactly the clock domains in `mask` (bit `k` =
-clock ordinal `k`) fire among the memory's own domains, the image becomes slot
-`nextImg`. -/
+/-- One entry of a memory's commit table (DCERT3, decision #9): when exactly the
+clock domains in `mask` (bit `k` = clock ordinal `k`) fire among the memory's
+own domains, the image becomes slot `nextImg` (`srcMemNext`). -/
 structure MemCommit where
   mask    : Nat
   nextImg : Nat
@@ -165,9 +164,10 @@ structure MemoryDesc where
   `lhd sim` fills a memory before it loads a file.  Not a step: the step
   semantics never read it.  Every runner's START state does (`initMemsOf`). -/
   init     : Array Nat := #[]
-  /-- RESERVED (DCERT3) for a memory on more than one clock domain (decision
-  #9): non-empty, it replaces `clock`/`nextImg`.  No step meaning yet, so every
-  loader refuses a non-empty table by name (`MemoryDesc.reservedFree`). -/
+  /-- A memory on more than one clock domain (DCERT3, decision #9): one entry
+  per PROPER non-empty set of its domains that can fire together, naming the
+  chain of the writes of the ports on those domains.  `nextImg` stays the chain
+  of every port, taken when all of them fire.  Empty: one domain, `clock`. -/
   commits  : Array MemCommit := #[]
   /-- RESERVED (DCERT3) for an ASYNCHRONOUS whole-array reset (decision #2): the
   slot of the held image with the reset applied, taken when no domain of the
@@ -175,10 +175,10 @@ structure MemoryDesc where
   asyncImg : Option Nat := none
 deriving Repr, Inhabited, DecidableEq
 
-/-- The fields DCERT3 reserves are at their defaults, so the step semantics
-(which reads only `clock` and `nextImg`) is the whole meaning of the memory. -/
+/-- The field DCERT3 still reserves (`asyncImg`) is at its default, so the step
+semantics is the whole meaning of the memory. -/
 def MemoryDesc.reservedFree (m : MemoryDesc) : Bool :=
-  m.commits.isEmpty && m.asyncImg.isNone
+  m.asyncImg.isNone
 
 /-- Power-on word `a`: the `init` entry, or 0 past its end. -/
 def MemoryDesc.initWord (m : MemoryDesc) (a : Nat) : Nat :=

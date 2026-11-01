@@ -12,10 +12,13 @@
 # Translation/LGraphModel.lean (the SHL/SRA/Sext boundary repairs),
 # Translation/OpBridge.lean (the bridges re-proved for them), and
 # Compiler/DesignCert.lean and Compiler/DesignSemantics.lean (DCERT3: the
-# memory record's power-on words and two reserved fields, and the power-on
-# image every runner starts from) -- and are checked against recorded sha256
-# values.  Changing one is legitimate, but must update the record here in the
-# same commit (see SHARED_SEMANTICS.md).
+# memory record's power-on words, commit table and reserved async field; the
+# power-on image every runner starts from, and the memory step for a commit
+# table) -- and are checked against recorded sha256 values.  One is
+# MASTER-ONLY -- Compiler/MemDomains.lean, new with decision #9 (which clock
+# domains of a memory fire), absent from the base -- and is checked against a
+# recorded sha256 too.  Changing one is legitimate, but must update the record
+# here in the same commit (see SHARED_SEMANTICS.md).
 #
 # --semantic additionally re-checks the bridge THEOREMS rather than trusting the
 # record: it rebuilds Projection/OperatorBridge (no Mathlib) and, under lake,
@@ -37,10 +40,13 @@ SRC=$ROOT/formal/lean/LeanSemanticPrimitives
 # master-adapted files: path, recorded sha256
 EXPECTED_LGRAPHMODEL_SHA256=432bb98394892ad67d156923197ed90945f57cfbf86f3e6d2b602eead0f173ba
 EXPECTED_OPBRIDGE_SHA256=fc9366004cb12f1d96ae8624aaea4187960939d67c5b2b0c0b3bd3455d853b77
-# DCERT3 (decisions #5, #9, #2): MemoryDesc.init/commits/asyncImg, and
-# MemoryDesc.powerOnImg next to interpretDesign, whose step is unchanged
-EXPECTED_DESIGNCERT_SHA256=e5080402ed3689865d400c8593daf3263cc09ed36b4b035ea31980b5c5b01950
-EXPECTED_DESIGNSEMANTICS_SHA256=d03448b1892e69d0b63e2c3103315507680b62fdb3f5870ce7677312815ff282
+# DCERT3 (decisions #5, #9, #2): MemoryDesc.init/commits/asyncImg,
+# MemoryDesc.powerOnImg, and srcMemNext's commit-table rule (#9; a memory with
+# an empty table steps as before, srcMemNext_of_empty)
+EXPECTED_DESIGNCERT_SHA256=10f89e546b62172d78f088bab2895cc6abdc4d16f08603feb17f27ba0d1773ef
+EXPECTED_DESIGNSEMANTICS_SHA256=64f9753161fd660aaabcaadaeb0c7cfd005c8bf4304966c5c61c629b08ed6507
+# master-only file (not in the base): recorded sha256
+EXPECTED_MEMDOMAINS_SHA256=72ede618a667aec0ec885e58934999dd68f64af3f480819983eb76b4fee70858
 # import-only adaptation: the one added line, recorded sha256
 RUNTIME_ADDED_IMPORT='import LeanSemanticPrimitives.Translation.FastBV'
 EXPECTED_RUNTIME_SHA256=ba7b341173caf8f6925ca57477634b2e72c987f4893d777332628445a94de3e8
@@ -72,7 +78,7 @@ else
   fi
 fi
 
-echo "-- recorded hashes: four master-adapted files and the import-only one"
+echo "-- recorded hashes: four master-adapted files, the master-only one and the import-only one"
 check_hash() {   # path expected
   local got; got=$(sha256sum "$SRC/$1" | cut -d' ' -f1)
   if [ "$got" = "$2" ]; then
@@ -88,6 +94,7 @@ check_hash Translation/LGraphModel.lean "$EXPECTED_LGRAPHMODEL_SHA256"
 check_hash Translation/OpBridge.lean    "$EXPECTED_OPBRIDGE_SHA256"
 check_hash Compiler/DesignCert.lean     "$EXPECTED_DESIGNCERT_SHA256"
 check_hash Compiler/DesignSemantics.lean "$EXPECTED_DESIGNSEMANTICS_SHA256"
+check_hash Compiler/MemDomains.lean     "$EXPECTED_MEMDOMAINS_SHA256"
 check_hash Compiler/Runtime.lean        "$EXPECTED_RUNTIME_SHA256"
 
 if [ $SEMANTIC -eq 1 ]; then
@@ -98,7 +105,8 @@ if [ $SEMANTIC -eq 1 ]; then
   if (cd "$ROOT/formal/lean" && bash .build-proj.sh Projection/ObjectLanguage Projection/BindingTime \
         Projection/Encoding SemanticPrimitives Translation/LGraphModel Compiler/DesignCert \
         Projection/DesignEncoding Translation/FastBV Projection/ObjectLanguageSemantics Translation/GraphRefine \
-        Compiler/DesignCertWF Compiler/Runtime Compiler/DesignSemantics Projection/SimulatorContract \
+        Compiler/DesignCertWF Compiler/Runtime Compiler/MemDomains Compiler/DesignSemantics \
+        Projection/SimulatorContract \
         Projection/RuntimeEncoding Projection/OperatorBridge) | grep -q 'Projection/OperatorBridge *ok'; then
     echo "  ok     Projection/OperatorBridge (bv_shl_step_unfolds, evalOp_SHL/denoteOp_SHL_unchanged_by_overlay, evalOp_Sext)"
   else

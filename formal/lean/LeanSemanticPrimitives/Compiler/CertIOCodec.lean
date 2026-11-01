@@ -69,9 +69,9 @@ rather than defaulted (see `magicBytes`), and would be unreadable here anyway.
 
 DCERT3 (decisions #5, #9 and #2, one revision) extends ONLY the memory record:
 its power-on words `init` (a count, then the words, as `memConst` spells them),
-then the commit table RESERVED for a memory on more than one clock (a count,
-then `mask nextImg` pairs), then the async-reset image RESERVED for a
-whole-array cell (`hasAsync asyncImg`, as a flop spells `enable`).  A DCERT2
+then the commit table of a memory on more than one clock (a count, then `mask
+nextImg` pairs), then the async-reset image RESERVED for a whole-array cell
+(`hasAsync asyncImg`, as a flop spells `enable`).  A DCERT2
 stream is refused by magic: its memory record is a different length.
 -/
 
@@ -240,7 +240,7 @@ def memBody (m : MemoryDesc) : List UInt8 :=
   natBytes m.aw ++ spc (natBytes m.dw) ++ spc (natBytes m.nextImg)
     -- DCERT2: the clock every committing port of this memory is on.
     ++ spc (natBytes m.clock)
-    -- DCERT3: the power-on words, the (reserved) commit table and the
+    -- DCERT3: the power-on words, the commit table and the
     -- (reserved) async-reset image.
     ++ spc (natBytes m.init.size) ++ (m.init.toList.map (fun v => spc (natBytes v))).flatten
     ++ spc (natBytes m.commits.size) ++ (m.commits.toList.map commitBody).flatten
@@ -491,12 +491,19 @@ def certWfError (D : DesignCert) : Option String :=
   if nclk == 0 then
     some "no clock domains: a certificate must declare at least one"
   else
-    -- DCERT3 reserves a memory's commit table and async-reset image for
-    -- decisions #9 and #2; until the step semantics reads them, a certificate
-    -- that uses them would mean something no route computes.
+    -- DCERT3 reserves a memory's async-reset image for decision #2; until the
+    -- step semantics reads it, a certificate that uses it would mean something
+    -- no route computes.
     match D.memories.findIdx? (fun m => !m.reservedFree) with
-    | some k => some s!"memory {k} uses a field DCERT3 reserves (a commit table or an async-reset \
-                        image); no route models it yet"
+    | some k => some s!"memory {k} uses a field DCERT3 reserves (an async-reset image); \
+                        no route models it yet"
+    | none =>
+    -- A commit-table entry names a non-empty set of DECLARED clocks and a real
+    -- slot (decision #9).
+    match D.memories.findIdx? (fun m => m.commits.any fun c =>
+            c.mask == 0 || c.mask ≥ 2 ^ nclk || c.nextImg ≥ D.sources.size + D.nodes.size) with
+    | some k => some s!"memory {k} has a commit-table entry with an empty clock set, a clock \
+                        outside the {nclk} declared, or a slot outside the design"
     | none =>
     match D.flops.findIdx? (fun f => f.clock ≥ nclk) with
     | some k => some s!"flop {k} commits on clock ordinal {D.flops[k]!.clock}, \

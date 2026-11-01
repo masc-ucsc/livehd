@@ -223,11 +223,13 @@ theorem memNextOf_denote {D : DesignCert} {i : RuntimeInput} {st : StateM}
     (hpre : PrefixRelM D i st G m ss)
     {idx : Nat} {md : MemoryDesc}
     (hnext : md.nextImg < ss.length)
-    (hkind : Direct.slotIsMem D md.nextImg = some true) :
+    (hkind : Direct.slotIsMem D md.nextImg = some true)
+    (hcm : md.commits = #[]) :
     MemImg.denote (memNextOf e st ss idx md)
       = Compiler.srcMemNext (slotValM D i st) e (StateM.denote st) idx md := by
   obtain ⟨-, hden⟩ := memSlot_img hpre hnext hkind
-  unfold memNextOf Compiler.srcMemNext
+  rw [Compiler.srcMemNext_of_empty _ _ _ _ _ hcm]
+  unfold memNextOf
   rw [Hardware.memCommit_denote e st idx md (slotImg ss md.nextImg)
         ((slotValM D i st md.nextImg).asMem) hden]
 
@@ -238,24 +240,26 @@ theorem memNextsOf_denote {D : DesignCert} {i : RuntimeInput} {st : StateM}
     ∀ (mems : List MemoryDesc) (idx p : Nat) (md : MemoryDesc),
       (∀ md' ∈ mems, md'.nextImg < ss.length) →
       (∀ md' ∈ mems, Direct.slotIsMem D md'.nextImg = some true) →
+      (∀ md' ∈ mems, md'.commits = #[]) →
       mems[p]? = some md →
       ∃ g, (memNextsOf e st ss idx mems)[p]? = some g
          ∧ MemImg.denote g
              = Compiler.srcMemNext (slotValM D i st) e (StateM.denote st) (idx + p) md
-  | [],         _,   p, _,  _,     _,     hp => by simp at hp
-  | md' :: rest, idx, p, md, hnext, hkind, hp => by
+  | [],         _,   p, _,  _,     _,     _,   hp => by simp at hp
+  | md' :: rest, idx, p, md, hnext, hkind, hcm, hp => by
       cases p with
       | zero =>
           have hmd : md' = md := by simpa using hp
           subst hmd
           refine ⟨memNextOf e st ss idx md', by simp [memNextsOf], ?_⟩
           simpa using memNextOf_denote hpre (hnext md' List.mem_cons_self)
-            (hkind md' List.mem_cons_self)
+            (hkind md' List.mem_cons_self) (hcm md' List.mem_cons_self)
       | succ q =>
           have hq : rest[q]? = some md := by simpa using hp
           obtain ⟨g, hg, hd⟩ := memNextsOf_denote hpre rest (idx + 1) q md
             (fun x hx => hnext x (List.mem_cons_of_mem _ hx))
-            (fun x hx => hkind x (List.mem_cons_of_mem _ hx)) hq
+            (fun x hx => hkind x (List.mem_cons_of_mem _ hx))
+            (fun x hx => hcm x (List.mem_cons_of_mem _ hx)) hq
           refine ⟨g, by simpa [memNextsOf] using hg, ?_⟩
           rw [hd]
           congr 1

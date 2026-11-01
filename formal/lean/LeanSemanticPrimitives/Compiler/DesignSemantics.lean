@@ -29,6 +29,7 @@ changed the meaning of no existing certificate, as a theorem rather than a claim
 -/
 import LeanSemanticPrimitives.Compiler.DesignCertWF
 import LeanSemanticPrimitives.Compiler.Runtime
+import LeanSemanticPrimitives.Compiler.MemDomains
 
 namespace Compiler
 
@@ -78,11 +79,24 @@ def srcFlopNext (rho : Nat → CertVal) (e : ClockEdges) (s : RuntimeState) (idx
 /-- Source-side memory rule: the post-write image when the memory's domain
 fires, the pre-step image otherwise.  (A write port whose enable is low already
 leaves the image unchanged; the hold is for the write that WOULD have happened
-had the edge come.) -/
+had the edge come.)
+
+A memory on MORE THAN ONE domain (DCERT3 `commits`, decision #9): `nextImg` is
+the chain of every port's writes, taken when ALL its domains fire -- which is
+the one-clock rule's image, so `interpretDesign_allEdges` still holds.  When only
+SOME fire, the image is the entry of the commit table naming exactly those (the
+chain of the writes of the ports on them, in port order); when none fires, or
+the table names no such entry, it holds. -/
 def srcMemNext (rho : Nat → CertVal) (e : ClockEdges) (s : RuntimeState) (idx : Nat)
     (m : MemoryDesc) : Int → BV :=
-  if fires e m.clock then (rho m.nextImg).asMem
-  else s.mems[idx]?.getD (fun _ => mk_bv 0 0)
+  if m.commits.isEmpty then
+    if fires e m.clock then (rho m.nextImg).asMem
+    else s.mems[idx]?.getD (fun _ => mk_bv 0 0)
+  else if m.allFire e then (rho m.nextImg).asMem
+  else
+    match m.commits.find? (m.firedIs e) with
+    | some c => (rho c.nextImg).asMem
+    | none   => s.mems[idx]?.getD (fun _ => mk_bv 0 0)
 
 /-- A memory's POWER-ON image (DCERT3 `MemoryDesc.init`): word `a` is
 `init[a]`, and 0 past its end or at a negative address, as `lhd sim` fills a
@@ -144,18 +158,38 @@ theorem srcFlopNext_fires (rho : Nat → CertVal) (e : ClockEdges) (s : RuntimeS
   simp [srcFlopNext, srcFlopNextLegacy, h]
 
 theorem srcMemNext_fires (rho : Nat → CertVal) (e : ClockEdges) (s : RuntimeState) (idx : Nat)
-    (m : MemoryDesc) (h : fires e m.clock = true) :
+    (m : MemoryDesc) (hc : m.commits = #[]) (h : fires e m.clock = true) :
     srcMemNext rho e s idx m = (rho m.nextImg).asMem := by
-  simp [srcMemNext, h]
+  simp [srcMemNext, hc, h]
 
-/-- **Conservativity.**  For every design whose clock ordinals are declared, the
-all-fire stimulus recovers the one-clock semantics exactly — at every input and
-every state.  Every certificate emitted before clocks existed satisfies the
-hypotheses trivially (`clocks` defaults to one domain, every ordinal to 0), so
-this is the theorem that adding clocks changed the meaning of none of them. -/
+/-- With no commit table the rule is the one-domain rule, verbatim. -/
+theorem srcMemNext_of_empty (rho : Nat → CertVal) (e : ClockEdges) (s : RuntimeState) (idx : Nat)
+    (m : MemoryDesc) (hc : m.commits = #[]) :
+    srcMemNext rho e s idx m =
+      if fires e m.clock then (rho m.nextImg).asMem
+      else s.mems[idx]?.getD (fun _ => mk_bv 0 0) := by
+  simp [srcMemNext, hc]
+
+/-- Under the all-fire stimulus a memory takes `nextImg`, table or not. -/
+theorem srcMemNext_allEdges {D : DesignCert} (rho : Nat → CertVal) (s : RuntimeState) (idx : Nat)
+    {m : MemoryDesc} (hm : m.clock < D.clocks.size)
+    (hc : ∀ c ∈ m.commits, c.mask < 2 ^ D.clocks.size) :
+    srcMemNext rho (allEdges D) s idx m = (rho m.nextImg).asMem := by
+  unfold srcMemNext
+  split
+  · simp [fires_allEdges hm]
+  · simp [allFire_allEdges hm hc]
+
+/-- **Conservativity.**  For every design whose clock ordinals are declared (a
+memory's commit table included), the all-fire stimulus recovers the one-clock
+semantics exactly — at every input and every state.  Every certificate emitted
+before clocks existed satisfies the hypotheses trivially (`clocks` defaults to
+one domain, every ordinal to 0, every commit table is empty), so this is the
+theorem that adding clocks changed the meaning of none of them. -/
 theorem interpretDesign_allEdges (D : DesignCert)
     (hf : ∀ f ∈ D.flops, f.clock < D.clocks.size)
     (hm : ∀ m ∈ D.memories, m.clock < D.clocks.size)
+    (hc : ∀ m ∈ D.memories, ∀ c ∈ m.commits, c.mask < 2 ^ D.clocks.size)
     (i : RuntimeInput) (s : RuntimeState) :
     interpretDesign D (allEdges D) i s = interpretDesignLegacy D i s := by
   simp only [interpretDesign, interpretDesignLegacy]
@@ -170,6 +204,6 @@ theorem interpretDesign_allEdges (D : DesignCert)
     · simp
     · intro idx h1 h2
       simp only [Array.getElem_mapIdx, Array.getElem_map]
-      exact srcMemNext_fires _ _ _ _ _ (fires_allEdges (hm _ (Array.getElem_mem _)))
+      exact srcMemNext_allEdges _ _ _ (hm _ (Array.getElem_mem _)) (hc _ (Array.getElem_mem _))
 
 end Compiler

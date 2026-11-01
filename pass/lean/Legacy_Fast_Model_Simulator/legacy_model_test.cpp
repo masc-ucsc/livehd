@@ -119,6 +119,28 @@ TEST(LegacyModel, TwoClockDomainsGuardEachFlopByItsOwnEdge) {
   EXPECT_EQ(one.str().find("(e : "), std::string::npos);
   EXPECT_EQ(one.str().find("if e."), std::string::npos);
 }
+// A memory on more than one domain (DCERT3 commit table, decision #9): both
+// legacy emitters take its next image from `legacy_memory_next`, which is the
+// certificate's `srcMemNext`. Here the memory is on domains 0 and 2 of three, so
+// domain 1 must not appear in any condition.
+TEST(LegacyModel, CommitTableMemoryNextIsTheCertificateRule) {
+  LegacyNames n;
+  n.edges = {"edge_a", "edge_b", "edge_c"};
+  MemoryDriver m;
+  m.next_img     = 30;
+  m.clock        = 0;
+  m.commits      = {{uint64_t{1} << 0, 31}, {uint64_t{1} << 2, 32}};
+  const auto img = [](uint32_t id) { return "img" + std::to_string(id); };
+  EXPECT_EQ(legacy_memory_next(m, n, img, "held"),
+            "if e.edge_a && e.edge_c then img30 else if e.edge_a && !e.edge_c then img31 "
+            "else if !e.edge_a && e.edge_c then img32 else held");
+  // No commit table: the one-domain rule on the memory's clock.
+  m.commits.clear();
+  EXPECT_EQ(legacy_memory_next(m, n, img, "held"), "if e.edge_a then img30 else held");
+  // One domain in the design: no edges record, no guard.
+  n.edges.clear();
+  EXPECT_EQ(legacy_memory_next(m, n, img, "held"), "img30");
+}
 TEST(LegacyModel, PreservesGlobalSelectorUniquenessAndEscapesMappingComments) {
   auto d            = binary(ScanOp::Or, 8);
   d.inputs[0].name  = "a-b";

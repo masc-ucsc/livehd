@@ -148,12 +148,11 @@ struct Memory {
   // this struct free of `Dlop` and so free of HHDS, which is the contract
   // directly below.
   std::vector<std::vector<bool>> fwd_rows;
-  // The ONE domain this memory commits on. `DesignCert` carries a single
-  // `MemoryDesc.clock`, which is a CERTIFICATE RESTRICTION, not a hardware
-  // guarantee: cells have a per-port `clock_pin` and one global `posclk`, and a
-  // shared polarity does not imply a shared root. The scan therefore enforces
-  // its own common-domain policy across every committing port and refuses
-  // distinct roots rather than silently picking one.
+  // The domain this memory's image commits on: its first write port's
+  // (`MemoryDesc.clock`). Cells have a per-port `clock_pin` and one global
+  // `posclk`, and a shared polarity does not imply a shared root, so each port
+  // keeps its own `MemoryPort::clock_ordinal`; write ports on more than one
+  // domain give the memory a DCERT3 commit table (memory_lowering).
   uint32_t                 clock_ordinal = 0;
   bool                     sync = false, is_rom = false;
   std::vector<std::string> rom_contents;

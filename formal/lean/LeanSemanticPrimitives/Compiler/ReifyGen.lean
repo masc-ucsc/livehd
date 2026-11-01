@@ -269,7 +269,13 @@ def elabReifyDesignNamed : CommandElab := fun stx => do
       let cert ← unsafe evalExpr DesignCert (mkConst ``DesignCert) dExpr
       match compileDesign cert with
       | .error _ => throwError "reify_design_named: compileDesign refused {d}"
-      | .ok R    => pure R
+      | .ok R    =>
+        -- The generated memory step is the one-domain rule; a memory on more
+        -- than one clock domain (a DCERT3 commit table) is refused by name.
+        if R.memoryUpdates.any (fun m => !m.commits.isEmpty) then
+          throwError "reify_design_named: {d} has a memory on more than one clock domain \
+                      (a commit table), which D3 does not model yet"
+        pure R
     let nsrc := R.sources.size
     let base := f.getId
     let e0   := mkIdent (Name.mkSimple "e0")
@@ -447,7 +453,12 @@ def residualOf (who : String) (d : Ident) : CommandElabM ResidualProgram :=
     let cert ← unsafe evalExpr DesignCert (mkConst ``DesignCert) dExpr
     match compileDesign cert with
     | .error _ => throwError "{who}: compileDesign refused {d}"
-    | .ok R    => pure R
+    | .ok R    =>
+      -- As `reify_design_named`: the generated memory step is the one-domain rule.
+      if R.memoryUpdates.any (fun m => !m.commits.isEmpty) then
+        throwError "{who}: {d} has a memory on more than one clock domain (a commit table), \
+                    which D3 does not model yet"
+      pure R
 
 @[command_elab reifyDesignChunked]
 def elabReifyDesignChunked : CommandElab := fun stx => do

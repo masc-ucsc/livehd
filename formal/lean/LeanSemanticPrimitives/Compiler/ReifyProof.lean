@@ -262,7 +262,12 @@ def elabProveReified : CommandElab := fun stx => do
       let cert ← unsafe evalExpr DesignCert (mkConst ``DesignCert) dExpr
       match compileDesign cert with
       | .error _ => throwError "prove_reified: compileDesign refused {d}"
-      | .ok R    => pure R
+      | .ok R    =>
+        -- The generated memory step is the one-domain rule (ReifyGen).
+        if R.memoryUpdates.any (fun m => !m.commits.isEmpty) then
+          throwError "prove_reified: {d} has a memory on more than one clock domain \
+                      (a commit table), which D3 does not model yet"
+        pure R
     let bindsLit ← liftTermElabM (qBindings R.bindings)
     let nm  := f.getId
     let rNm       := mkIdent (nm ++ `R)
@@ -330,7 +335,7 @@ def elabProveReified : CommandElab := fun stx => do
              [$f:ident, $d:ident, Compiler.runBindings, Compiler.denoteExpr,
               Compiler.refBV, Compiler.refBVs, Compiler.refMem, Compiler.denoteRef,
               Compiler.sourceEnvArr, Compiler.compileOutput, Compiler.compileFlop,
-              Compiler.compileMemory, Compiler.flopNext_eq,
+              Compiler.compileMemory, Compiler.memNext, Compiler.flopNext_eq,
               Compiler.flopNextV_resize_din, CertVal.asBV, CertVal.asMem]))
     elabCommand (← `(command|
       theorem $corNm : ∀ e i st, $f e i st = Compiler.interpretDesign $d e i st := by
@@ -504,7 +509,11 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
       let cert ← unsafe evalExpr DesignCert (mkConst ``DesignCert) dExpr
       match compileDesign cert with
       | .error _ => throwError "prove_reified_chunked: compileDesign refused {d}"
-      | .ok R    => pure (cert, R)
+      | .ok R    =>
+        if R.memoryUpdates.any (fun m => !m.commits.isEmpty) then
+          throwError "prove_reified_chunked: {d} has a memory on more than one clock domain \
+                      (a commit table), which D3 does not model yet"
+        pure (cert, R)
     markPhase "prover_start"
     let csize := match sz with | some k => max 1 k.getNat | none => 32
     let nb    := R.bindings.size
@@ -761,11 +770,18 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
     elabCommand (← `(command| theorem $dfNm : ($d).flops = $flopsLit := rfl))
     let dmNm := mkIdent (base ++ `D_mems)
     let memsLit ← liftTermElabM do
-      let ms ← R.memoryUpdates.mapM fun mu =>
+      let ms ← R.memoryUpdates.mapM fun mu => do
         -- `MemoryDesc.clock` likewise: omitted, it defaults to 0 and the fact
-        -- holds only for memories on the reference domain.
-        `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
-            clock := $(quote mu.clock) })
+        -- holds only for memories on the reference domain.  `init` (DCERT3) is
+        -- spelled only when present, so a memory without power-on words prints
+        -- exactly as before.
+        if mu.init.isEmpty then
+          `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
+              clock := $(quote mu.clock) })
+        else
+          let ws : Array Term := mu.init.map fun v => quote v
+          `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
+              clock := $(quote mu.clock), init := #[$ws,*] })
       `(#[$ms,*])
     elabCommand (← `(command| theorem $dmNm : ($d).memories = $memsLit := rfl))
     let doNm := mkIdent (base ++ `D_outputs)
@@ -784,7 +800,7 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
         rw [← $envEq:ident $iId $stId]
         simp only [$oProjNm:ident, $fProjNm:ident, $mProjNm:ident]
         simp [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
-              Compiler.compileMemory, Compiler.flopNext_eq,
+              Compiler.compileMemory, Compiler.memNext, Compiler.flopNext_eq,
               $dfNm:ident, $dmNm:ident, $doNm:ident]))
     markPhase "eq_compileAndRun"
     let corNm := mkIdent (base ++ `correct)
@@ -912,7 +928,11 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
       let cert ← unsafe evalExpr DesignCert (mkConst ``DesignCert) dExpr
       match compileDesign cert with
       | .error e => throwError "prove_reified_incr: compileDesign refused {d}"
-      | .ok R    => pure R
+      | .ok R    =>
+        if R.memoryUpdates.any (fun m => !m.commits.isEmpty) then
+          throwError "prove_reified_incr: {d} has a memory on more than one clock domain \
+                      (a commit table), which D3 does not model yet"
+        pure R
     let nsrc  := R.sources.size
     let nb    := R.bindings.size
     let base  := f.getId
@@ -1310,11 +1330,18 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
     elabCommand (← `(command| theorem $dfNm : ($d).flops = $flopsLit := rfl))
     let dmNm := mkIdent (base ++ `D_mems)
     let memsLit ← liftTermElabM do
-      let ms ← R.memoryUpdates.mapM fun mu =>
+      let ms ← R.memoryUpdates.mapM fun mu => do
         -- `MemoryDesc.clock` likewise: omitted, it defaults to 0 and the fact
-        -- holds only for memories on the reference domain.
-        `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
-            clock := $(quote mu.clock) })
+        -- holds only for memories on the reference domain.  `init` (DCERT3) is
+        -- spelled only when present, so a memory without power-on words prints
+        -- exactly as before.
+        if mu.init.isEmpty then
+          `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
+              clock := $(quote mu.clock) })
+        else
+          let ws : Array Term := mu.init.map fun v => quote v
+          `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
+              clock := $(quote mu.clock), init := #[$ws,*] })
       `(#[$ms,*])
     elabCommand (← `(command| theorem $dmNm : ($d).memories = $memsLit := rfl))
     let doNm := mkIdent (base ++ `D_outputs)
@@ -1339,7 +1366,7 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
         rw [$hEq:ident]
         simp only [$oProjNm:ident, $fProjNm:ident, $mProjNm:ident]
         simp [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
-              Compiler.compileMemory, Compiler.flopNext_eq,
+              Compiler.compileMemory, Compiler.memNext, Compiler.flopNext_eq,
               $dfNm:ident, $dmNm:ident, $doNm:ident, $hSimp,*]))
     let corNm := mkIdent (base ++ `correct)
     elabCommand (← `(command|

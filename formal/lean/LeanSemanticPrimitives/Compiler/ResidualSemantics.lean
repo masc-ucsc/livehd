@@ -273,14 +273,27 @@ def flopNext (env : SlotEnv) (e : ClockEdges) (s : RuntimeState) (idx : Nat)
     if edge && en then bv_resize f.width (refBV env f.din)
     else s.flops[idx]?.getD (mk_bv f.width 0)
 
+/-- Memory next image: the post-write image when the memory's domain fires, the
+pre-step image otherwise.  On more than one domain (`commits`): `nextImg` when
+all fire, the commit-table entry naming exactly the ones that fire, or the
+pre-step image when none does. -/
+def memNext (env : SlotEnv) (e : ClockEdges) (s : RuntimeState) (idx : Nat)
+    (m : ResidualMemoryUpdate) : Int → BV :=
+  if m.commits.isEmpty then
+    if fires e m.clock then refMem env m.nextImg
+    else s.mems[idx]?.getD (fun _ => mk_bv 0 0)
+  else if m.toDesc.allFire e then refMem env m.nextImg
+  else
+    match m.commits.find? (m.toDesc.firedIs e) with
+    | some c => refMem env c.nextImg
+    | none   => s.mems[idx]?.getD (fun _ => mk_bv 0 0)
+
 def denoteResidual (R : ResidualProgram) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
     RuntimeResult :=
   let env := runBindings R.bindings.toList (sourceEnvArr R.sources i s)
   { outputs   := R.outputs.map fun o => bv_resize o.width (refBV env o.slot)
     nextState :=
       { flops := R.flopUpdates.mapIdx fun idx f => flopNext env e s idx f
-        mems  := R.memoryUpdates.mapIdx fun idx m =>
-          if fires e m.clock then refMem env m.nextImg
-          else s.mems[idx]?.getD (fun _ => mk_bv 0 0) } }
+        mems  := R.memoryUpdates.mapIdx fun idx m => memNext env e s idx m } }
 
 end Compiler

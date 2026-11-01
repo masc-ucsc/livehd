@@ -2,6 +2,7 @@
 #include "emit_legacy_fast_model.hpp"
 
 #include <algorithm>
+#include <set>
 #include <stdexcept>
 
 #include "lean_format.hpp"
@@ -269,6 +270,40 @@ std::vector<std::optional<uint32_t>> legacy_output_ids(const DesignScan& d, cons
   }
   return ids;
 }
+std::string legacy_memory_next(const MemoryDriver& m, const LegacyNames& n, const std::function<std::string(uint32_t)>& img,
+                               const std::string& held) {
+  if (n.edges.empty()) {
+    return img(m.next_img);
+  }
+  if (m.commits.empty()) {
+    return "if e." + n.edges.at(m.clock) + " then " + img(m.next_img) + " else " + held;
+  }
+  std::set<uint32_t> doms{m.clock};
+  for (const auto& cm : m.commits) {
+    for (uint32_t k = 0; k < 64; ++k) {
+      if (cm.first & (uint64_t{1} << k)) {
+        doms.insert(k);
+      }
+    }
+  }
+  auto fired_is = [&](uint64_t mask) {
+    std::string cond;
+    for (const auto k : doms) {
+      cond += std::string(cond.empty() ? "" : " && ") + ((mask & (uint64_t{1} << k)) ? "" : "!") + "e." + n.edges.at(k);
+    }
+    return cond;
+  };
+  uint64_t all = 0;
+  for (const auto k : doms) {
+    all |= uint64_t{1} << k;
+  }
+  auto next = "if " + fired_is(all) + " then " + img(m.next_img);
+  for (const auto& cm : m.commits) {
+    next += " else if " + fired_is(cm.first) + " then " + img(cm.second);
+  }
+  return next + " else " + held;
+}
+
 void emit_legacy_fast_model(const DesignScan& d, const CertificateIR& c, const LegacyNames& n, bool bridge, std::ostream& os) {
   auto ref  = [&](uint32_t id) { return legacy_fast_ref(c, n, id, bridge); };
   auto lets = [&]() {
@@ -327,10 +362,7 @@ void emit_legacy_fast_model(const DesignScan& d, const CertificateIR& c, const L
   for (const auto& m : c.memories) {
     const auto field = n.memories.at(m.origin);
     fields.push_back(field);
-    auto next = ref(m.next_img);
-    if (!n.edges.empty()) {
-      next = "if e." + n.edges.at(m.clock) + " then " + next + " else s." + field;
-    }
+    const auto next = legacy_memory_next(m, n, ref, "s." + field);
     os << "  let new_" << field << " : (BitVec " << m.addr_w << " -> BitVec " << m.data_w << ") := " << next << '\n';
   }
   os << "  { ";

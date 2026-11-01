@@ -1297,6 +1297,7 @@ theorem SupportedByProjection.conservative {D : Compiler.DesignCert}
     Compiler.interpretDesign D (Compiler.allEdges D) i s
       = Compiler.interpretDesignLegacy D i s :=
   Compiler.interpretDesign_allEdges D h.flopClocks
+    (by intro m hm; rw [h.memFree] at hm; simp at hm)
     (by intro m hm; rw [h.memFree] at hm; simp at hm) i s
 
 /-! ### The predicate is satisfiable, and it bites

@@ -28,6 +28,15 @@ bool needs_mul_bridge(const CertificateIR& c) {
   });
 }
 void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, const LegacyNames& names, std::ostream& ofs) {
+  for (const auto& m : c.memories) {
+    if (!m.commits.empty()) {
+      // The bridge proves `_next` against the certificate's one-domain memory
+      // step; a commit table (DCERT3, decision #9) is not in it yet.
+      throw std::invalid_argument("emit_fast_bridge: memory n_" + std::to_string(m.origin)
+                                  + " is on more than one clock domain (a commit table), which the legacy proof "
+                                    "bridge does not cover yet; emit with emit_fast_bridge=false");
+    }
+  }
   const auto&                     base_name  = names.base;
   const bool                      sequential = names.sequential;
   const bool                      mem_mode   = names.memory_values;

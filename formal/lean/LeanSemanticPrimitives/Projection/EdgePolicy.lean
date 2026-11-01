@@ -51,22 +51,24 @@ theorem certWf_clocks {D : DesignCert} (h : CertIO.certWfError D = none) :
     split at h
     · simp at h  -- a memory uses a field DCERT3 reserves
     · split at h
-      · simp at h
-      · rename_i hf
-        split at h
+      · simp at h  -- a malformed commit-table entry
+      · split at h
         · simp at h
-        · rename_i hm
-          refine ⟨?_, ?_, ?_⟩
-          · have : D.clocks.size ≠ 0 := by simpa using hnz
-            omega
-          · intro f hmem
-            have := (Array.findIdx?_eq_none_iff.mp hf) f hmem
-            simp at this
-            omega
-          · intro m hmem
-            have := (Array.findIdx?_eq_none_iff.mp hm) m hmem
-            simp at this
-            omega
+        · rename_i hf
+          split at h
+          · simp at h
+          · rename_i hm
+            refine ⟨?_, ?_, ?_⟩
+            · have : D.clocks.size ≠ 0 := by simpa using hnz
+              omega
+            · intro f hmem
+              have := (Array.findIdx?_eq_none_iff.mp hf) f hmem
+              simp at this
+              omega
+            · intro m hmem
+              have := (Array.findIdx?_eq_none_iff.mp hm) m hmem
+              simp at this
+              omega
 
 /-- **The bridge.** On a well-formed certificate, the exact-match driver rule
 implies the edge premise of every route:
