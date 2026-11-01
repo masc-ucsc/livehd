@@ -458,6 +458,30 @@ bool mem_is_immutable_rom(const Mem_shape& ms) {
   return true;
 }
 
+// The FALLING write ports of a memory, as (clock pin, commit class): what makes
+// a memory state on the fall, exactly as a negedge flop is. The same port walk
+// and the same classifier as the refusal scan in normalize(), which decides
+// everything else about the cell: one it refuses by shape (unparsed,
+// whole-array, mixed edge) or one that never commits (an immutable ROM)
+// yields nothing here. An invalid clock pin is the implicit module clock.
+std::vector<std::pair<hhds::Pin_class, lc::Commit_class>> mem_fall_ports(const hhds::Node_class&  n,
+                                                                         const lc::Design_clocks& clocks) {
+  std::vector<std::pair<hhds::Pin_class, lc::Commit_class>> out;
+  const auto                                                ms = mem_shape_of(n);
+  if (!ms.parsed || ms.whole_array || ms.mixed_edge || mem_is_immutable_rom(ms)) {
+    return out;
+  }
+  for (const auto& port : ms.ports) {
+    if (port.rdport) {
+      continue;
+    }
+    if (auto cc = lc::commit_class_of_clock(port.clock, ms.rising, &clocks); cc && cc->role == lc::Net_role::Clock && !cc->rising) {
+      out.emplace_back(port.clock, *cc);
+    }
+  }
+  return out;
+}
+
 // The per-port sink pin, by name, at a given port.
 hhds::Pin_class mem_port_driver(const hhds::Node_class& n, std::string_view pin, uint32_t port) {
   const auto stride = static_cast<uint32_t>(Ntype::Memory_port_stride);
@@ -743,7 +767,7 @@ struct Plan {
   std::vector<std::pair<hhds::Node_class, hhds::Node_class>> forwards;
 };
 
-Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_clock) {
+Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_clock, bool negedge_memory) {
   Plan plan;
 
   // 1. Collect every state element with its commit class.
@@ -756,12 +780,37 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_cloc
   // decidable), and the bit itself when decided.
   absl::flat_hash_map<std::string, std::set<std::string>> bus_bits;
   absl::flat_hash_map<std::string, int>                   bus_bit_of;
+  // FALLING memory write ports (mem_fall_ports): state on the fall that is not
+  // an Element, because normalize() lowers a memory by its own rules.
+  std::vector<lc::Commit_class>                           mem_fall;
   for (auto n : g->body().nodes()) {
     const auto op = gu::type_op_of(n);
     if (op == Ntype_op::Memory) {
-      // A memory rides the reference clock. Leaving it untouched is correct at
-      // P = 1 and WRONG at P > 1 (it would commit every sub-step), so it is
-      // allowed here and rejected below once P is known.
+      // A RISING memory rides the reference clock. Leaving it untouched is
+      // correct at P = 1 and WRONG at P > 1 (it would commit every sub-step),
+      // so it is allowed here and gated below once P is known.
+      //
+      // A FALLING write port is state on the fall, as a negedge flop is: its
+      // clock counts toward the reference choice (a design whose only state is
+      // a negedge memory still needs a reference) and it makes P = 2.
+      // normalize() retypes the cell and gates the port to the fall slot.
+      // Without Options::negedge_memory the scan there refuses it instead.
+      if (!negedge_memory) {
+        continue;
+      }
+      for (const auto& [clk, cc] : mem_fall_ports(n, clocks)) {
+        mem_fall.push_back(cc);
+        ++per_net[cc.net_key()];
+        example_on_net.try_emplace(cc.net_key(), label_of(n));
+        // One bit of a multi-bit clock input: record which, as for a flop.
+        if (!cc.implicit_clock && !cc.net.is_invalid() && gu::is_graph_input_pin(cc.net) && gu::bits_of(cc.net) > 1) {
+          const auto bit = clock_bit_on(clk, cc.net, 0, 0);
+          bus_bits[cc.net_key()].insert(bit ? std::to_string(*bit) : "?" + label_of(n));
+          if (bit) {
+            bus_bit_of[cc.net_key()] = *bit;
+          }
+        }
+      }
       continue;
     }
     if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Latch) {
@@ -1072,7 +1121,7 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_cloc
       return plan;
     }
   }
-  if (plan.elems.empty()) {
+  if (plan.elems.empty() && mem_fall.empty()) {
     plan.ok    = true;
     plan.slots = 1;
     return plan;
@@ -1088,6 +1137,11 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_cloc
   for (const auto& e : plan.elems) {
     if (e.cc.role == lc::Net_role::Clock && !e.cc.implicit_clock && !e.cc.rising) {
       needs_divider.insert(e.cc.net_key());
+    }
+  }
+  for (const auto& cc : mem_fall) {
+    if (!cc.implicit_clock) {
+      needs_divider.insert(cc.net_key());
     }
   }
   std::string ref_net;
@@ -1156,6 +1210,11 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_cloc
     if (e.cc.role == lc::Net_role::Clock && !e.cc.implicit_clock && e.cc.net_key() == ref_net) {
       plan.ref_clk_pin = e.cc.net;
       break;
+    }
+  }
+  for (const auto& cc : mem_fall) {  // a negedge memory may be the only state on the reference
+    if (plan.ref_clk_pin.is_invalid() && !cc.implicit_clock && cc.net_key() == ref_net) {
+      plan.ref_clk_pin = cc.net;
     }
   }
 
@@ -1443,6 +1502,11 @@ Plan build_plan(hhds::Graph* g, const lc::Design_clocks& clocks, bool multi_cloc
   int max_slot = 0;
   for (const auto& e : plan.elems) {
     max_slot = std::max(max_slot, e.slot);
+  }
+  for (const auto& cc : mem_fall) {
+    if (cc.net_key() == ref_net) {
+      max_slot = std::max(max_slot, 1);  // its fall slot (off the reference it is refused in normalize)
+    }
   }
   plan.slots = max_slot + 1;
   plan.ok    = true;
@@ -2022,9 +2086,12 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
   // With multi_clock the fold is relative to each element's OWN root, which
   // the certificate then names, so a gate in a second domain is meaningful too.
   const bool icg_foldable = need.n_icg_flops > 0 && (need.n_clock_nets <= 1 || opts.multi_clock);
-  const bool must_fix     = need.n_latches > 0 || need.n_negedge_flops > 0 || icg_foldable || def_needs;
+  const bool mem_fix      = opts.negedge_memory && need.n_negedge_mems > 0;
+  const bool must_fix     = need.n_latches > 0 || need.n_negedge_flops > 0 || mem_fix || icg_foldable || def_needs;
   if (!must_fix && opts.force_slots <= 1) {
-    r.reason = need.needed ? std::format("skipped: {} — no latch or negedge state to lower", need.why)
+    r.reason = need.needed ? std::format("skipped: {} — no latch or negedge state to lower{}",
+                                         need.why,
+                                         need.n_negedge_mems > 0 ? " (a negedge memory is lowered only with negedge_memory)" : "")
                            : "skipped: no latch, no negedge state, one clock net";
     return r;
   }
@@ -2043,7 +2110,7 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     return r;
   }
 
-  auto plan = build_plan(g, clocks, opts.multi_clock);
+  auto plan = build_plan(g, clocks, opts.multi_clock, opts.negedge_memory);
   if (!plan.ok) {
     if (!must_fix) {
       r.reason = std::format("skipped: {}", plan.why);  // nothing owed here; downstream handles it
@@ -2087,6 +2154,9 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
   // `mem_gate_plans` with the facts the gate will use.  The gate below consumes
   // them and recomputes nothing.
   std::vector<Mem_gate_plan> mem_gate_plans;
+  // Memories with a FALLING port, retyped in the rewrite (posclk := 1).
+  std::vector<hhds::Node_class>          retype_mems;
+  absl::flat_hash_set<hhds::Class_index> retype_mem_ids;
   for (auto n : g->body().nodes()) {
     const auto op = gu::type_op_of(n);
     if (op == Ntype_op::Fflop) {
@@ -2232,31 +2302,44 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
             return r;
           }
         }
-        // A FALLING committing edge is REFUSED, not slotted.
+        // A FALLING committing edge is lowered as a negedge flop is: the cell
+        // is RETYPED to posedge, its ports are REBOUND to the reference clock
+        // root, and this port is GATED to the fall slot. Only the three
+        // together are single-edge: gating alone would leave an inverted
+        // memory clock, and a retype alone would move the write half a cycle.
+        // build_plan counted this port (mem_fall_ports), so P = 2 and the fall
+        // slot exists; the check below only keeps that promise checked.
         //
-        // A negedge flop is lowered by RETYPING it to posedge and gating it to
-        // the fall slot; the two together are what make the result
-        // single-edge.  A Memory has no equivalent retype here yet -- this pass
-        // does not touch `clock_pin` or `posclk` on a Memory -- so gating alone
-        // would leave the cell still committing on the fall while ALSO being
-        // slot-gated, i.e. a half-lowering whose emission still carries an
-        // inverted memory clock.  Refuse it by name until the rebinding is
-        // implemented and validated, rather than emit that.
+        // The retype goes by the cell's `posclk` and the rebind removes any
+        // inversion in the clock cone, so after both every port commits on the
+        // reference rise and its slot alone says which half of the period.
         //
-        // This is also what makes the per-port classification load-bearing in
-        // this increment: its job here is to DECIDE ADMISSIBILITY.  Before it,
-        // `commit_class_of` returned nullopt for every Memory and a falling
-        // memory was silently gated to slot 0.
-        if (!cc->rising) {
+        // Without Options::negedge_memory (the formal commands) the port is
+        // REFUSED by name, as before the lowering existed.
+        if (!cc->rising && !opts.negedge_memory) {
           r.error  = true;
           r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port) + " commits on the FALLING edge";
           refuse(quiet,
                  "memory-unsupported",
                  std::format("{}: {}", g->get_name(), r.reason),
-                 "a falling-edge memory would need its clock rebound and its polarity retyped, which this pass "
-                 "does not yet do for a Memory; gating alone would leave an inverted memory clock in a "
-                 "single-edge design");
+                 "a falling-edge memory is lowered only by `lhd pass single_edge` (Options::negedge_memory); the "
+                 "formal commands keep refusing it");
           return r;
+        }
+        if (!cc->rising) {
+          if (plan.slots < 2) {
+            r.error  = true;
+            r.reason = "memory `" + label_of(n) + "` write port " + std::to_string(port.port)
+                       + " commits on the FALLING edge, but the plan has no fall slot";
+            refuse(quiet,
+                   "memory-unsupported",
+                   std::format("{}: {}", g->get_name(), r.reason),
+                   "a falling-edge memory is lowered only on the reference clock, where it gets the fall slot");
+            return r;
+          }
+          if (retype_mem_ids.insert(n.get_class_index()).second) {
+            retype_mems.push_back(n);
+          }
         }
         // A GATED write clock is FOLDED INTO THE WRITE ENABLE, the same move the
         // flop path makes: `commit_class_of_clock` resolves an ICG to its ROOT
@@ -2345,8 +2428,8 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
           }
         }
         // THE SLOT, decided here and FROZEN.  There is no fallback: the class
-        // resolved, is on the reference net and bit, and is rising, so either
-        // the key is in `slot_of_key` or the rise/fall map gives it.
+        // resolved and is on the reference net and bit, so either the key is
+        // in `slot_of_key` or the rise/fall map gives it (1 for a falling port).
         // -1 = NO slot gate: no divider, or a port on a second domain.
         int slot = -1;
         if (plan.slots > 1 && !port_off_ref) {
@@ -2677,8 +2760,12 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
     // a DERIVED clock in a design this pass exists to make single-edge -- the
     // encoder refuses one, so the cell would come back UNKNOWN after a
     // successful lowering. Rebind to the root the gate resolved to.
+    // A RETYPED (falling) memory is rebound too, gate or not: its clock cone
+    // may carry the inversion that made it fall, and after the retype every
+    // port must commit on the reference rise (its slot says which half).
     const auto rebind_to = mp.own_root.is_invalid() ? plan.ref_clk_pin : mp.own_root;
-    if (!mp.gate_ops.empty() && !rebind_to.is_invalid()) {
+    const bool retyped   = retype_mem_ids.contains(mp.node.get_class_index());
+    if ((!mp.gate_ops.empty() || retyped) && !rebind_to.is_invalid()) {
       // REBIND TO THE VALIDATED REFERENCE PIN, not to the gate's bare root.
       // When the reference edge is on bit k>0 of a bus, `plan.ref_clk_pin` has
       // already been replaced by the SELECTED bit above -- every rebound
@@ -2689,7 +2776,9 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
       // is the right one.
       mem_drop_port_sink(mp.node, "clock_pin", mp.port);
       rebind_to.connect_sink(mp.node.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin") + mp.port * stride));
-      ++r.mem_ports_ungated;
+      if (!mp.gate_ops.empty()) {
+        ++r.mem_ports_ungated;
+      }
     }
     if (mp.slot >= 0) {
       ++r.mem_ports_slotted;
@@ -2704,6 +2793,14 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
         ++r.mems_slotted;
       }
     }
+  }
+  // `posclk` is the cell's ONE edge: rising now, with the fall carried by the
+  // slot gate above. An explicit 1, not an absent pin, so no reader's default
+  // decides it.
+  for (const auto& n : retype_mems) {
+    drop_sink(n, "posclk");
+    gu::create_const(*g, *Dlop::create_integer(1)).connect_sink(gu::setup_sink_by_name(n, "posclk"));
+    ++r.mems_retyped;
   }
 
   std::vector<hhds::Pin_class> orphaned_clocks;  // old clock_pin drivers the rebind below disconnects
@@ -3187,7 +3284,9 @@ Result normalize(hhds::Graph* g, const std::vector<hhds::Graph*>& defs, const Op
                  ? std::format(", {} data-gated latch(es) transparent over {} reader input(s)",
                                r.data_latches_transparent,
                                r.data_latch_reads)
-                 : std::string{}),
+                 : std::string{})
+          + (r.mems_retyped > 0 ? std::format(", {} falling-edge memory(ies) moved to the fall slot", r.mems_retyped)
+                                : std::string{}),
       need.why.empty() ? "def-driven" : need.why);
   livehd::diag::info(kPass, "single-edge-applied", "progress")
       .msg("edge normalization on `{}`: {}", g->get_name(), r.reason)
@@ -3218,6 +3317,10 @@ void Pass_single_edge::setup() {
                        "true|false. Give every reader of a DATA-gated latch its open value "
                        "`reset ? RV : (E ? D : Q)` (the latch is level-sensitive); false keeps the "
                        "flop-with-enable lowering, a full cycle late on same-cycle reads",
+                       "true");
+  m.add_label_optional("negedge_memory",
+                       "true|false. Lower a memory written on the FALLING edge as a negedge flop is lowered (retype "
+                       "to posedge, rebind its write clock, gate its write to the fall slot); false refuses it",
                        "true");
   m.add_label_optional("multi_clock",
                        "true|false. Export unrelated clock domains (plain posedge state off the reference clock is "
@@ -3276,6 +3379,7 @@ void Pass_single_edge::work(Eprp_var& var) {
   opts.multi_clock       = std::string{var.get("multi_clock", "false")} == "true";
   opts.forward_same_edge = std::string{var.get("forward_same_edge", "false")} == "true";
   opts.transparent_data_latch = std::string{var.get("transparent_data_latch", "true")} != "false";
+  opts.negedge_memory         = std::string{var.get("negedge_memory", "true")} != "false";
   const auto res         = livehd::single_edge::normalize(g, defs, opts);
   if (res.error) {
     livehd::diag::err("pass.single_edge", "normalize-refused", "unsupported")

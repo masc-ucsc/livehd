@@ -529,6 +529,7 @@ struct Single_edge_need {
   bool        needed          = false;
   int         n_latches       = 0;  // Latch cells
   int         n_negedge_flops = 0;  // Flop/Fflop with posclk known-false
+  int         n_negedge_mems  = 0;  // Memory with a clocked port on the falling edge (never a MIXED one)
   int         n_icg_flops     = 0;  // Flop/Fflop on a recognized `<clock> & <enables>` gate
   int         n_clock_nets    = 0;  // distinct clock roots flops commit on (implicit counts as one)
   std::string why;                  // human-readable trigger reason ("" when not needed)

@@ -1135,6 +1135,21 @@ sh_test(
     ],
 )
 
+# A memory written on the FALLING edge is lowered as a negedge flop is: retyped
+# to posedge, its write clock rebound to the reference root and its write gated
+# to the fall slot; a negedge memory alone still makes P=2. With
+# LHD_EXTERNAL_SIM=1 an Icarus differential against the source, with a P=1
+# time-base control and a rising-memory control.
+sh_test(
+    name = "single_edge_memory_negedge_slot_test",
+    size = "large",
+    srcs = ["single_edge_memory_negedge_slot_test.sh"],
+    data = [
+        "//lhd",
+        "//ware:cgen_memory_rtl",
+    ],
+)
+
 # A full case's "no branch matched" hold arm (yosys `proc -ifx`) is a FALSE
 # combinational cycle: pass.legalize proves it never active and unrolls it; a
 # sparse case's reachable hold is still refused. With LHD_EXTERNAL_SIM=1 an

@@ -3712,6 +3712,36 @@ Single_edge_need needs_single_edge(hhds::Graph* g, const Design_clocks* clocks) 
       ++need.n_latches;
       continue;
     }
+    if (op == Ntype_op::Memory) {
+      // A memory written on the FALLING edge owes the pass a lowering exactly
+      // as a negedge flop does: LEC's encoder and pass.lean model a rising
+      // memory only. Judged per clocked port through the same commit-class
+      // call a flop uses, so an inversion in the clock CONE counts too, not
+      // just the `posclk` pin. A MIXED memory (`Memory_posclk_mixed`) is not
+      // counted: it is refused by name downstream and opted back in there.
+      const auto pc = gu::get_driver_of_sink_name(n, "posclk");
+      if (pc.is_const() && gu::const_of(pc).is_just_i64() && gu::const_of(pc).to_just_i64() == Ntype::Memory_posclk_mixed) {
+        continue;
+      }
+      const bool rising_policy = !pc.is_known_false();
+      const auto stride        = static_cast<uint32_t>(Ntype::Memory_port_stride);
+      const auto clock_pid     = static_cast<uint32_t>(Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin"));
+      bool       clocked       = false;
+      bool       falls         = false;
+      for (const auto& e : gu::inp_sink_drivers(n)) {
+        if (static_cast<uint32_t>(e.get_port_id()) % stride != clock_pid) {
+          continue;
+        }
+        clocked = true;
+        if (auto cc = commit_class_of_clock(e.driver, rising_policy, clocks); cc && !cc->rising) {
+          falls = true;
+        }
+      }
+      if (falls || (!clocked && !rising_policy)) {
+        ++need.n_negedge_mems;
+      }
+      continue;
+    }
     if (op != Ntype_op::Flop && op != Ntype_op::Fflop) {
       continue;
     }
@@ -3741,6 +3771,9 @@ Single_edge_need needs_single_edge(hhds::Graph* g, const Design_clocks* clocks) 
   }
   if (need.n_negedge_flops > 0) {
     why += (why.empty() ? "" : ", ") + std::to_string(need.n_negedge_flops) + " negedge flop(s)";
+  }
+  if (need.n_negedge_mems > 0) {
+    why += (why.empty() ? "" : ", ") + std::to_string(need.n_negedge_mems) + " negedge memory(ies)";
   }
   if (need.n_icg_flops > 0) {
     why += (why.empty() ? "" : ", ") + std::to_string(need.n_icg_flops) + " gated-clock flop(s)";
