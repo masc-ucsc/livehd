@@ -893,8 +893,9 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
   std::sort(design.outputs.begin(), design.outputs.end(), [](const Port& a, const Port& b) { return a.name < b.name; });
   std::map<uint32_t, Node_pin> flop_din, flop_reset, flop_enable;
   for (const auto& node : flop_nodes) {
-    Flop f;
-    f.id       = node_id(node);
+    Flop    f;
+    int64_t depth = 1;
+    f.id          = node_id(node);
     f.raw_name = state_name(node, "flop_");
     f.width    = ctx.flop_width.at(f.id);
     for (const auto& e : inp_edges_ordered(node)) {
@@ -933,10 +934,15 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
           fatal(ctx,
                 "flop n_" + std::to_string(f.id) + " is a NEGEDGE flop (`posclk` = 0). pass.single_edge must normalize it first.");
         }
-      } else if (name == "pipe_min" || name == "pipe_max") {
-        if (const_pin_int_or(e.driver, 1) != 1) {
-          fatal(ctx, "flop n_" + std::to_string(f.id) + " has unsupported pipeline depth `" + name + "`.");
+      } else if (name == "pipe_min") {
+        if (!pin_is_const(e.driver)) {
+          fatal(ctx, "flop n_" + std::to_string(f.id) + " has a non-constant pipeline depth `pipe_min`.");
         }
+        depth = const_pin_int_or(e.driver, 1);
+      } else if (name == "pipe_max") {
+        // The upper bound of a depth RANGE. The realization is the minimum, as
+        // cgen, cgen_sim and LEC build it (cgen_verilog.cpp: "the realization
+        // default at Verilog emission is the declared MINIMUM").
       } else {
         fatal(ctx, "flop n_" + std::to_string(f.id) + " drives unsupported pin `" + name + "`.");
       }
@@ -974,6 +980,35 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
       }
     }
     f.clock_ordinal = intern_domain(clock_table, clock_index, *cc, domain_name(*cc));
+    // A Flop of depth d > 1 is a d-stage shift register (cell.cpp). Stage 0
+    // takes `din`, stage i takes stage i-1, and this flop -- whose output the
+    // graph reads -- takes the last stage. Every stage shares the clock,
+    // enable, reset and reset value, and cgen names them `<q>___pipe<i>_`. The
+    // stages get IDs above every graph node, like the lowered cells below.
+    if (depth > 1) {
+      const bool signed_q = !livehd::graph_util::is_unsign(node.get_driver_pin(0));
+      auto       prev     = f.din;
+      for (int64_t i = 0; i < depth - 1; ++i) {
+        if (next_lowered_id >= 1000000000) {
+          fatal(ctx, "pipeline stages of flop n_" + std::to_string(f.id) + " exhausted the graph-node ID range");
+        }
+        Flop stage     = f;
+        stage.id       = static_cast<uint32_t>(next_lowered_id++);
+        stage.raw_name = f.raw_name + "___pipe" + std::to_string(i) + "_";
+        stage.din      = prev;
+        ctx.flop_width[stage.id] = f.width;
+        PinRef q;
+        q.kind      = PinKind::Flop;
+        q.id        = stage.id;
+        q.width     = f.width;
+        q.is_signed = signed_q;
+        prev        = q;
+        design.flops.push_back(stage);
+      }
+      f.din = prev;
+    } else if (depth < 1) {
+      fatal(ctx, "flop n_" + std::to_string(f.id) + " has pipeline depth " + std::to_string(depth) + "; a depth is at least 1.");
+    }
     design.flops.push_back(f);
   }
   for (const auto& [id, pin] : flop_din) {

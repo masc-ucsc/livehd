@@ -1310,6 +1310,60 @@ TEST(DesignScanClocks, TwoExplicitDomainsDoNotJoinAnImplicitFlop) {
   EXPECT_EQ(std::count_if(design.clocks.begin(), design.clocks.end(), [](const ClockDomain& c) { return c.implicit; }), 1);
 }
 
+// Give the fixture's only Flop the pipeline-depth pins.
+void set_pipe_depth(hhds::Graph& g, int64_t pipe_min, std::optional<int64_t> pipe_max) {
+  for (auto node : g.body().nodes()) {
+    if (livehd::graph_util::type_op_of(node) != Ntype_op::Flop) {
+      continue;
+    }
+    livehd::graph_util::create_const(g, *Dlop::create_integer(pipe_min))
+        .connect_sink(node.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "pipe_min")));
+    if (pipe_max) {
+      livehd::graph_util::create_const(g, *Dlop::create_integer(*pipe_max))
+          .connect_sink(node.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "pipe_max")));
+    }
+  }
+}
+
+// A Flop of depth d is a d-stage shift register, and a depth RANGE builds its
+// minimum, as cgen, cgen_sim and LEC do: pipe_min = 3, pipe_max = 5 is three
+// flops. Stage 0 reads `din`, stage 1 reads stage 0, and the cell's own flop --
+// the one the graph reads -- reads stage 1. Every stage keeps the clock domain
+// and width, and is named as cgen names it.
+TEST(DesignScanFlops, APipelineDepthIsAChainOfItsMinimumStages) {
+  auto f = build_flops("lgdb_pipe_depth", {"clk"});
+  set_pipe_depth(*f.g, 3, 5);
+  const auto design = scan_design(*f.g, {});
+  ASSERT_EQ(design.flops.size(), 3u);
+  const auto& s0 = design.flops[0];
+  const auto& s1 = design.flops[1];
+  const auto& q  = design.flops[2];
+  EXPECT_EQ(s0.raw_name, q.raw_name + "___pipe0_");
+  EXPECT_EQ(s1.raw_name, q.raw_name + "___pipe1_");
+  ASSERT_TRUE(s0.din && s1.din && q.din);
+  EXPECT_EQ(s0.din->kind, PinKind::Input) << "stage 0 reads the cell's din";
+  EXPECT_EQ(s1.din->kind, PinKind::Flop);
+  EXPECT_EQ(s1.din->id, s0.id);
+  EXPECT_EQ(q.din->kind, PinKind::Flop);
+  EXPECT_EQ(q.din->id, s1.id) << "the cell's own flop reads the last stage";
+  EXPECT_GT(s0.id, q.id) << "stage IDs come after every graph node";
+  for (const auto& fl : design.flops) {
+    EXPECT_EQ(fl.width, 8u);
+    EXPECT_EQ(fl.clock_ordinal, q.clock_ordinal);
+  }
+  const auto cert = build_certificate(design, {});
+  EXPECT_EQ(cert.flops.size(), 3u);
+}
+
+TEST(DesignScanFlops, ADepthOfOneIsOneFlopAndADepthOfZeroIsRefused) {
+  auto one = build_flops("lgdb_pipe_depth_one", {"clk"});
+  set_pipe_depth(*one.g, 1, 1);
+  EXPECT_EQ(scan_design(*one.g, {}).flops.size(), 1u);
+  auto zero = build_flops("lgdb_pipe_depth_zero", {"clk"});
+  set_pipe_depth(*zero.g, 0, std::nullopt);
+  expect_refusal(*zero.g, "a depth is at least 1");
+}
+
 // The join must not be ORDER-dependent: the implicit flop declared first must
 // reach the same answer as the implicit flop declared last.
 TEST(DesignScanClocks, JoinIsIndependentOfDeclarationOrder) {
