@@ -62,6 +62,11 @@ struct Legroute_options {
   // the share of a tile's tracks, per direction, that the routes fixed ahead of the SAT (hops, IO pre-routes) may
   // take together; the rest stays for the region's own routes
   double      reserve_share    = .5;
+  // legroute.global: a region-crossing net whose slack rank is under this fraction joins its regions with an L trace
+  // over the tile grid ahead of the regions: every boundary it crosses is a hop, every region it only passes
+  // through keeps the run as a fixed piece (reserved on its edges, routed straight), so the long trace is as short
+  // as the grid allows and the regions' models never see it (0: every crossing joins by the hop chain)
+  double      global_fraction  = .05;
   // chained hops of a pass-through net (hop to hop inside a region) avoid the rows and columns earlier pass-throughs
   // took: this many tile widths of distance per fully loaded edge on the run (0: nearest only)
   double      hop_spread       = 6;
@@ -140,7 +145,8 @@ struct Legroute_report {
   // the SAT placement: regions solved, model size, solves, windows grown or dropped, regions without an answer
   size_t  sat_regions = 0, sat_variables = 0, sat_clauses = 0, sat_solves = 0, sat_relaxed_windows = 0;
   size_t  sat_unsat_regions = 0, sat_unknown_regions = 0, sat_binding_tiles = 0, sat_unjoined_crossings = 0;
-  size_t  sat_hops_over_share = 0;  // hops placed past hop_share (every boundary tile of their pair was at it)
+  size_t  sat_hops_over_share = 0;             // hops placed past hop_share (every boundary tile of their pair was at it)
+  size_t  global_nets = 0, global_pieces = 0;  // legroute.global: nets joined by L traces, their pass-through pieces
   size_t  sat_relaxed_tiles = 0, sat_deficit_tracks = 0;  // sat_relax_rounds: dropped tile bounds, tracks short
   size_t  sat_adjacent_nets = 0;                          // 1-1 nets between neighbor boxes: in-box metal, no lane
   // critical pre-placement: boxes fixed before the SAT, and their nets' weighted star length (tiles) at the placement

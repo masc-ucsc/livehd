@@ -633,7 +633,8 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     }
   }
   if (o.optimization_multirow_eco) {
-    h = hash_text(std::format("optimization-multirow-eco-v1:{}:{}", o.optimization_multirow_eco->shift_sites,
+    h = hash_text(std::format("optimization-multirow-eco-v1:{}:{}",
+                              o.optimization_multirow_eco->shift_sites,
                               o.optimization_multirow_eco->max_displaced),
                   h);
   }
@@ -697,55 +698,56 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.legroute) {
     const auto& l = o.legroute_options;
-    h             = hash_text(
-        std::format("legroute-v3:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
-                    l.box_fill,
-                    l.box_net_max,
-                    l.merge_cost,
-                    l.crit_fraction,
-                    l.crit_window_ps,
-                    l.reserved_tracks,
-                    l.clock_spine,
-                    l.rib_tiles,
-                    l.final,
-                    l.route_passes,
-                    l.cap_scale,
-                    l.window_tiles,
-                    l.crit_boxes,
-                    l.tree_boxes,
-                    l.tree_moves,
-                    l.sat_relax_rounds,
-                    l.inbox_span,
-                    l.tree_load,
-                    l.tree_clauses,
-                    l.tree_by_crit,
-                    l.io_preroute,
-                    l.sat_alt,
-                    l.tree_congestion,
-                    l.steiner_pins,
-                    l.capacity_lazy,
-                    l.freeze,
-                    l.steiner_min,
-                    l.hop_share,
-                    l.reserve_share,
-                    l.hop_spread,
-                    l.sat_seed,
-                    l.tiers,
-                    l.tier_rounds,
-                    l.tier_fraction,
-                    l.tier_batch),
-        h);
-    h             = hash_text(std::format("legroute-budgets:{}:{}:{}:{}:{}:{}:{}:{}:{}",
-                                          l.sat_conflicts,
-                                          l.sat_ms,
-                                          l.tier_ms,
-                                          l.sat_min_fill,
-                                          l.route_access,
-                                          l.route_patterns,
-                                          l.route_ms,
-                                          l.threads,
-                                          o.allow_increase_area),
-                              h);
+    h = hash_text(std::format("legroute-v3:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{"
+                              "}:{}:{}:{}:{}:{}:{}",
+                              l.box_fill,
+                              l.box_net_max,
+                              l.merge_cost,
+                              l.crit_fraction,
+                              l.crit_window_ps,
+                              l.reserved_tracks,
+                              l.clock_spine,
+                              l.rib_tiles,
+                              l.final,
+                              l.route_passes,
+                              l.cap_scale,
+                              l.window_tiles,
+                              l.crit_boxes,
+                              l.tree_boxes,
+                              l.tree_moves,
+                              l.sat_relax_rounds,
+                              l.inbox_span,
+                              l.tree_load,
+                              l.tree_clauses,
+                              l.tree_by_crit,
+                              l.io_preroute,
+                              l.sat_alt,
+                              l.tree_congestion,
+                              l.steiner_pins,
+                              l.capacity_lazy,
+                              l.freeze,
+                              l.steiner_min,
+                              l.hop_share,
+                              l.reserve_share,
+                              l.global_fraction,
+                              l.hop_spread,
+                              l.sat_seed,
+                              l.tiers,
+                              l.tier_rounds,
+                              l.tier_fraction,
+                              l.tier_batch),
+                  h);
+    h = hash_text(std::format("legroute-budgets:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+                              l.sat_conflicts,
+                              l.sat_ms,
+                              l.tier_ms,
+                              l.sat_min_fill,
+                              l.route_access,
+                              l.route_patterns,
+                              l.route_ms,
+                              l.threads,
+                              o.allow_increase_area),
+                  h);
     if (o.legroute_probe.enabled) {
       const auto& q = o.legroute_probe;
       h             = hash_text(std::format("legroute-probe:{}:{}:{}:{}:{}:{}:{}:{}",
@@ -3119,9 +3121,9 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const Geometry_view& geometry, const
     pins.clear();
     uint64_t load_hash = hash_util::kFnv1a64_offset;
     for (int p = begin; p < end; ++p) {
-      const auto   node = design.pin2node[p];
-      const auto   pin_offset = geometry.pin_offset(p);
-      const auto [x, y]       = geometry.pin_position(p, pin_offset);
+      const auto node       = design.pin2node[p];
+      const auto pin_offset = geometry.pin_offset(p);
+      const auto [x, y]     = geometry.pin_position(p, pin_offset);
       pins.emplace_back(v.pins[p].label(), std::pair{x, y});
       if (pin_locations) {
         pin_locations->emplace(pins.back().first, std::pair{x, y});
@@ -4763,9 +4765,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     if (!options.handoff_taps) {
       throw std::invalid_argument("synth.place.pg requires synth.place.handoff.taps=true");
     }
-    pg_profile                        = power_grid_profile(*tech_profile);
-    pg_profile->channels              = options.pg_channels;
-    pg_profile->channel_max_ir_drop_v = options.pg_channel_max_ir_drop_v;
+    pg_profile                             = power_grid_profile(*tech_profile);
+    pg_profile->channels                   = options.pg_channels;
+    pg_profile->channel_max_ir_drop_v      = options.pg_channel_max_ir_drop_v;
+    pg_profile->tolerate_macro_pin_overlap = options.pg_tolerate_macro_pin_overlap;
   }
   if (macro_active && options.metadata && !options.metadata->select("livehd.placement.hints", source.get_name()).empty()) {
     livehd::diag::warn("pass.place", "placement-hint-mode", "placement")
@@ -6278,7 +6281,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   }
   // While optimization is pending (timing-driven placement, resize, repair follow) only the dedicated
   // refine_regions call refines: it runs once on the timing-driven result, then timing gets a chance to react.
-  const bool refine_here = !options.optimization_pending || options.region_refine;
+  const bool refine_here       = !options.optimization_pending || options.region_refine;
   const bool boundary_active   = options.boundarypins.enabled && options.full && !options.fp_place && refine_here
                                  && options.completed_stage == Placement_stage::final && !options.timing_seed
                                  && !options.retain_placement && !options.analyze_colors_only;
@@ -6348,9 +6351,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   // The boundary refinements settle the converged GP placement with more DREAMPlace iterations. They must start
   // from GP's converged density weight: restarted at initial_density_weight, wirelength collapses the spread
   // placement (overflow 5% -> 50%+ within 100 iterations).
-  double                       gp_density_weight       = 0;
+  double                       gp_density_weight = 0;
   // the region mesh's inputs: the fixed macros (not placement masks) and the IO terminals
-  const auto                   region_macros           = [&] {
+  const auto                   region_macros     = [&] {
     std::vector<int> chosen;
     for (size_t i = 0; i < v.cells.size(); ++i) {
       if (!tech.macros.at(v.cells[i].macro).klass.starts_with("CORE") && !v.cells[i].name.starts_with("__lhd_frame_mask_")) {
@@ -6483,11 +6486,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   std::map<std::string, ph::Component, std::less<>>           legroute_cells;
   ph::Route_width_rules                                       legroute_rules;      // the router's wire-width rules
   std::map<std::string, ph::Terminal>                         legroute_terminals;  // the IO pins its wires end on
-  std::optional<Multirow_report>          multirow_report;
-  std::optional<Multirow_eco_report>      multirow_eco_report;
-  std::pair<unsigned, unsigned>           multirow_eco_grid;  // its terminal bin grid
-  std::vector<ph::Component>              handoff_cells;
-  std::vector<ph::Row>                    handoff_rows;
+  std::optional<Multirow_report>                              multirow_report;
+  std::optional<Multirow_eco_report>                          multirow_eco_report;
+  std::pair<unsigned, unsigned>                               multirow_eco_grid;  // its terminal bin grid
+  std::vector<ph::Component>                                  handoff_cells;
+  std::vector<ph::Row>                                        handoff_rows;
   const bool macro_pin_adjust = options.macro_pin_adjust && movable_macros && !options.previous && !options.timing_seed;
   const bool adjustable_io
       = v.centroids && options.fp_pin_adjust
@@ -9168,11 +9171,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
             }
           }
         }
-        const auto* profile = legroute_power(frame, regions);
+        const auto* profile  = legroute_power(frame, regions);
         // too dense for the tile grid or the tracks: on a generated core the placement restarts at a lower
         // utilization (the failing regions' box fill pushed down to what routes), the GP target density with it
-        const bool pushback = options.allow_increase_area && options.generated_core && options.legroute_probe.strict;
-        const auto restart  = [&](double factor, const std::string& why) {
+        const bool  pushback = options.allow_increase_area && options.generated_core && options.legroute_probe.strict;
+        const auto  restart  = [&](double factor, const std::string& why) {
           const double utilization = options.utilization * factor;
           std::fprintf(stderr, "legroute: %s; placement restarts at utilization %.3f\n", why.c_str(), utilization);
           throw Placement_area_restart(utilization, utilization + .05);
@@ -9181,7 +9184,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         // fall elsewhere), then the smaller core
         const auto recut = [&](const std::string& why) {
           if (options.mesh_variant < std::min(2u, options.mesh_variants)) {
-            std::fprintf(stderr, "legroute: %s; placement restarts with region mesh variant %u\n", why.c_str(), options.mesh_variant + 1);
+            std::fprintf(stderr,
+                         "legroute: %s; placement restarts with region mesh variant %u\n",
+                         why.c_str(),
+                         options.mesh_variant + 1);
             throw Placement_area_restart(options.utilization, options.density, options.mesh_variant + 1);
           }
         };

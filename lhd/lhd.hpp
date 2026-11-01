@@ -1408,6 +1408,17 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "with legroute: share of a region-boundary tile's tracks that the hops of region-crossing nets may take; past it "
      "a hop goes to the least loaded tile of its boundary"},
+    {"place.legroute.threads",
+     "0",
+     Synth_set_option::Kind::integer,
+     "with legroute: regions (and policies) solved in parallel, each holding its own SAT model in memory; 0 = every "
+     "hardware thread (a large design may need fewer)"},
+    {"place.legroute.global_fraction",
+     "0.05",
+     Synth_set_option::Kind::file,
+     "legroute.global: a region-crossing net with slack rank under this fraction joins its regions by an L trace over "
+     "the tile grid ahead of the regions (hops at the boundaries it crosses, fixed pieces through the regions it only "
+     "passes); 0 = every crossing joins by the hop chain"},
     {"place.legroute.reserve_share",
      "0.5",
      Synth_set_option::Kind::file,
@@ -1881,6 +1892,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "",
      Synth_set_option::Kind::file,
      "experimental PG channels: semicolon-separated style,layer,xl,yl,xh,yh in microns; style skip or gap; empty disables"},
+    {"place.pg.macro_pin_overlap",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "native power grid: keep a macro whose own power and ground pin shapes overlap in its LEF (generated FakeRAM) "
+     "with a warning instead of failing the export"},
     {"place.pg.channel.max_ir_drop",
      "",
      Synth_set_option::Kind::file,
@@ -2048,6 +2064,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::mapper,
      "abc|usyn: ABC synthesis (pass.abc), or unate synthesis (pass.usyn: a domino-gate LUT cover of every region, "
      "technology-mapped by ABC, with the ABC flow as the fallback)"},
+    {"macro_liberty",
+     "",
+     Synth_set_option::Kind::file,
+     "comma-separated Liberty files of hard macros (blackbox modules with a MACRO in synth.lef), read by the timers "
+     "after synth.liberty"},
     {"liberty",
      "",
      Synth_set_option::Kind::file,

@@ -123,6 +123,7 @@ struct Options {
   Preroute_settings                                         preroute;
   std::vector<Pg_channel>                                   pg_channels;  // Opt-in patches; reference grid by default.
   std::optional<double>                                     pg_channel_max_ir_drop_v;
+  bool                                                      pg_tolerate_macro_pin_overlap = false;
   // Internal host handoff, collected only for a completed final placement.
   bool                                                      retain_preroute_design = false;
   // Internal fused-flow lifetime: intermediate consumers use Result::parasitics.

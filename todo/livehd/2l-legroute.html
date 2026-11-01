@@ -212,6 +212,63 @@ path still to fix): the same path to 0.75 / 0.80, 12 of 12 regions, a 3,499 um&s
 standard flow's default); OpenROAD: zero overflow, one die-edge pin DRC, DR WNS &minus;759.6 ps / TNS
 &minus;251.0k (the standard flow on its 4,770 um&sup2; default die: &minus;694.4 / &minus;226.1k).</p>
 
+<p><strong>Remembered search.</strong> A search writes where it landed to <code>workdir/place_search.txt</code>
+and the next search on that workdir starts there, bracketed by a tenth, so an incremental run confirms its core
+in two or three placements. The next step of that idea is per synthesis color: keep the best routable density
+per color in the incremental cache, so an unchanged color keeps its area budget and only changed colors search.</p>
+
+<h2>Larger designs with macros (cnn, partition_c)</h2>
+<p>The next targets are HighTide's cnn (69 FakeRAM hard macros, four of them 0.3 mm&sup2; each) and NVDLA
+partition_c (two FakeRAM macro types through the NVDLA RAM wrappers, the other RAM sizes as flops), both as
+slang blackbox interfaces with their LEF and Liberty (<code>scratchpad/cpsat/run_design.py</code>). The plan
+as they are iterated, in the order the data will likely ask for it:</p>
+<ol>
+<li><strong>Standard flow and legroute at the same cores</strong>, routed by OpenROAD: where the standard flow
+sits and where the bisection lands, with macros as exclusion areas on the tile grid.</li>
+<li><strong>legroute.global:</strong> the critical paths that cross regions get their long traces reserved on
+the high metal (M6/M7) ahead of the regions, so the per-region SAT sees them as fixed endpoints and the routes
+do not meander around macros.</li>
+<li><strong>Routing speed:</strong> the SAT already runs regions in parallel; the next costs are the hop chaining
+and the fixed-tree pre-placement on designs with thousands of regions, and legroute.final's in-box router.</li>
+<li><strong>Post-route WNS:</strong> the tiers judged by routed timing, the coupling tier for long critical
+traces, and the first and last cell of a critical path at its pins.</li>
+<li><strong>Region boundaries:</strong> pinalign run with busorder as one pass, combined with the SAT alignment
+of boundary cells (satalign), and busorder's pin pitch matched to a tile edge's track capacity, which is what
+limited sha3.</li>
+<li><strong>Region size:</strong> larger regions (or a region grown around a failing one) for the cases a cut
+cannot fix, now that the model is small enough.</li>
+</ol>
+
+<h2>Option sweep at sha3's standard core (2026-11-01)</h2>
+<p>Each variant placed by legroute at utilization 0.70 / density 0.75 and routed by OpenROAD (zero overflow in
+every case; detailed-route WNS / TNS in ps; the clock and reset nets unrouted special nets from here on):</p>
+<table>
+<tr><th>variant</th><th>regions</th><th>SAT s</th><th>DR WNS</th><th>DR TNS</th></tr>
+<tr><td>defaults (tiers adjacent, pins, home; crit_boxes 0.05; trees 0.5; io_preroute)</td><td>12/12</td><td>75</td><td>&minus;350.7</td><td>&minus;444.5k</td></tr>
+<tr><td>tiers off</td><td>12/12</td><td>62</td><td>&minus;352.6</td><td>&minus;441.2k</td></tr>
+<tr><td>tier_fraction 0.1</td><td>12/12</td><td>78</td><td>&minus;360.4</td><td>&minus;445.2k</td></tr>
+<tr><td>tier_fraction 0.02</td><td>12/12</td><td>78</td><td>&minus;365.2</td><td>&minus;446.4k</td></tr>
+<tr><td>crit_boxes 0</td><td>12/12</td><td>167</td><td>&minus;363.3</td><td>&minus;446.5k</td></tr>
+<tr><td>crit_boxes 0.1</td><td>12/12</td><td>110</td><td>&minus;350.5</td><td>&minus;443.9k</td></tr>
+<tr><td>no fixed trees</td><td>12/12</td><td>153</td><td>&minus;350.6</td><td>&minus;437.6k</td></tr>
+<tr><td>no IO pre-routes</td><td>12/12</td><td>122</td><td>&minus;361.6</td><td>&minus;446.4k</td></tr>
+<tr><td>window 3 tiles</td><td>12/12</td><td>170</td><td>&minus;355.5</td><td>&minus;434.1k</td></tr>
+<tr><td>regions of 4,000 cells</td><td>9/9</td><td>141</td><td>&minus;358.8</td><td>&minus;447.5k</td></tr>
+<tr><td>regions of 1,500 cells</td><td>15/16</td><td>181</td><td>&minus;359.6</td><td>&minus;433.1k</td></tr>
+<tr><td>tier near added</td><td>12/12</td><td>158</td><td>&minus;363.7</td><td>&minus;445.7k</td></tr>
+<tr><td>global_fraction 0.05 (two runs)</td><td>12/12</td><td>120&ndash;142</td><td>&minus;348.8 / &minus;354.1</td><td>&minus;432.1k / &minus;435.2k</td></tr>
+<tr><td>defaults again, hop candidates pruned to the nearest 12</td><td>12/12</td><td>120</td><td>&minus;362.9</td><td>&minus;445.3k</td></tr>
+<tr><td>global_fraction 1.0</td><td>12/12</td><td>124</td><td>&minus;354.4</td><td>&minus;445.7k</td></tr>
+</table>
+<p>Reading: the same options place deterministically (two runs of the defaults on one binary are identical), and
+a small change in the hop choice (the pruning to the nearest 12 candidates, done for the large designs) moves
+WNS by 12 ps, so single runs rank variants only beyond about 10 ps and 2% of TNS. Within that, nothing beats
+the defaults: smaller regions lose a region, larger ones gain nothing, and dropping the fixed trees or widening
+the windows costs 2&times; SAT time for a TNS within the spread. legroute.global's traces for the critical 5% of
+crossing nets are better in both runs (9 to 14 ps of WNS, 2 to 3% of TNS against the same binary's defaults),
+so 0.05 is the default now; traced for every net they place hops by geometry instead of room and gain nothing.
+The hop pruning keeps the nearest 32 candidates now.</p>
+
 <h2>Region cuts (busorder regions)</h2>
 <ul>
 <li>No net dips into a region through one side with zero or one cell inside: a cell whose nets all leave

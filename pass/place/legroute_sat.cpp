@@ -1407,6 +1407,12 @@ std::vector<Io_route> io_preroute(const Design& d, const Legroute_options& o, co
   }
   return routes;
 }
+// legroute.global: the run of a critical net through a region holding none of its pins, fixed ahead (an L from a to
+// b, H first or V first) and reserved on the edges it crosses
+struct Global_piece {
+  int  net = -1, region = -1, a = -1, b = -1;
+  bool h_first = true;
+};
 // The tracks the routes fixed ahead (hops, fixed trees, IO pre-routes) take on each tile edge, one per
 // net and edge it crosses (keyed by the left / lower tile), instead of a whole tile per route piece: a hop takes its
 // boundary edge only, a trunk the edges along it
@@ -1414,7 +1420,8 @@ struct Edge_reserve {
   std::vector<int> h, v;
 };
 Edge_reserve edge_reserve(const Grid& g, const std::vector<std::pair<int, int>>& hops, const std::vector<int>& hop_net,
-                          const std::vector<Fixed_tree>& trees, const std::vector<Io_route>& io_routes) {
+                          const std::vector<Fixed_tree>& trees, const std::vector<Io_route>& io_routes,
+                          const std::vector<Global_piece>& global) {
   Edge_reserve                        res{std::vector<int>(g.size(), 0), std::vector<int>(g.size(), 0)};
   std::set<std::tuple<int, int, int>> seen;  // (net, edge tile, h)
   const auto                          take = [&](int n, int t, int h) {
@@ -1446,6 +1453,9 @@ Edge_reserve edge_reserve(const Grid& g, const std::vector<std::pair<int, int>>&
     if (io.box < 0) {
       segment(io.net_a, io.ta, io.tb, io.h_first);
     }  // a pin -> box -> pin route: its box moves on the track, the legs are the region's connections
+  }
+  for (const auto& gp : global) {  // legroute.global: the pass-through runs
+    segment(gp.net, gp.a, gp.b, gp.h_first);
   }
   return res;
 }
@@ -2713,6 +2723,8 @@ struct Crossings {
   std::vector<int>                 hop_net;
   size_t                           unjoined   = 0;
   size_t                           over_share = 0;  // hops placed past hop_share on every tile of their boundary
+  std::vector<Global_piece>        pieces;          // legroute.global: the runs fixed ahead through pass-through regions
+  size_t                           global_nets = 0;
 };
 Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Legroute_regions& regions, std::vector<int>& cap_h,
                     std::vector<int>& cap_v, bool diagnose) {
@@ -2922,11 +2934,133 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
         unite(g.region[hops[k].first], g.region[hops[k].second]);
       }
     }
-    const int root_region = E.driver_region >= 0 ? E.driver_region : E.per_region.begin()->first;
+    const int  root_region = E.driver_region >= 0 ? E.driver_region : E.per_region.begin()->first;
+    // legroute.global: a critical net joins a region with an L over the tile grid from the nearest endpoint of the
+    // joined part (its pins, boxes or earlier hops) to the region's nearest own endpoint. Every boundary the L
+    // crosses is a hop; a region the L only passes through keeps the run as a fixed piece. The orientation with
+    // the lighter edges wins; an L over a blocked edge (a macro) is not taken, and with both blocked the hop chain
+    // below joins the region instead
+    const bool global      = d.opt.global_fraction > 0 && d.nets[n].rank < d.opt.global_fraction;
+    bool       traced      = false;
+    const auto tile_of
+        = [&](const Endpoint& e) { return e.box >= 0 ? g.tile_of(boxes.boxes[e.box].cx, boxes.boxes[e.box].cy) : e.tile; };
+    const auto real_endpoint = [&](const Endpoint& e) { return e.box >= 0 || !hop_tiles.contains(e.tile); };
+    const auto join_global   = [&](int r) {
+      int    ta = -1, tb = -1;  // the nearest pair: an endpoint of the joined part, r's own endpoint
+      double best = INFINITY;
+      for (const auto& er : E.per_region.at(r)) {
+        const int t1 = tile_of(er);
+        if (!real_endpoint(er) || g.region[t1] != r) {  // a box's placement tile can fall outside its region
+          continue;
+        }
+        for (const auto& [q, list] : E.per_region) {
+          if (!comp.contains(q) || find(q) != find(root_region)) {
+            continue;
+          }
+          for (const auto& eq : list) {
+            const int t0 = tile_of(eq);
+            if (g.region[t0] != q) {
+              continue;
+            }
+            const double dd = std::abs(g.col(t0) - g.col(t1)) + std::abs(g.row(t0) - g.row(t1));
+            if (dd < best) {
+              best = dd;
+              ta   = t0;
+              tb   = t1;
+            }
+          }
+        }
+      }
+      if (ta < 0 || ta == tb) {
+        return false;
+      }
+      struct Walk {
+        std::vector<int> tiles;
+        double           load    = 0;
+        bool             blocked = false;
+      };
+      const auto walk = [&](bool h_first) {  // the L's tiles from ta to tb, the worst edge load on the way
+        Walk       w;
+        const auto step = [&](int t) {
+          if (!w.tiles.empty()) {
+            const int p = w.tiles.back(), dir = g.row(p) == g.row(t) ? 0 : 1, lo = std::min(p, t);
+            const int cap = std::min((dir ? cap_v : cap_h)[p], (dir ? cap_v : cap_h)[t]);
+            if (cap <= 0 || g.blocked[t]) {
+              w.blocked = true;
+            }
+            const int used = through[lo][dir] + (g.region[p] != g.region[t] ? std::max(hop_use[p][dir], hop_use[t][dir]) : 0);
+            w.load         = std::max(w.load, double(used) / double(std::max(1, cap)));
+          }
+          w.tiles.push_back(t);
+        };
+        const int hr = h_first ? g.row(ta) : g.row(tb), vc = h_first ? g.col(tb) : g.col(ta);
+        const int dc = g.col(tb) > g.col(ta) ? 1 : -1, dr = g.row(tb) > g.row(ta) ? 1 : -1;
+        step(ta);
+        if (h_first) {
+          for (int i = g.col(ta); i != g.col(tb); i += dc) {
+            step(g.tile(i + dc, hr));
+          }
+          for (int j = g.row(ta); j != g.row(tb); j += dr) {
+            step(g.tile(vc, j + dr));
+          }
+        } else {
+          for (int j = g.row(ta); j != g.row(tb); j += dr) {
+            step(g.tile(vc, j + dr));
+          }
+          for (int i = g.col(ta); i != g.col(tb); i += dc) {
+            step(g.tile(i + dc, hr));
+          }
+        }
+        return w;
+      };
+      const Walk wh = walk(true), wv = walk(false);
+      if (wh.blocked && wv.blocked) {
+        return false;
+      }
+      const bool  h_first = !wh.blocked && (wv.blocked || wh.load <= wv.load);
+      const Walk& W       = h_first ? wh : wv;
+      int         entry   = -1;  // the hop tile the trace entered the current region by (the start region: none)
+      for (size_t i = 0; i + 1 < W.tiles.size(); ++i) {
+        const int p = W.tiles[i], t = W.tiles[i + 1], dir = g.row(p) == g.row(t) ? 0 : 1;
+        ++through[std::min(p, t)][dir];
+        if (g.region[p] == g.region[t]) {
+          continue;
+        }
+        const bool pass = entry >= 0 && std::ranges::none_of(E.per_region[g.region[p]], real_endpoint);
+        if (pass) {  // the region left held none of the net's pins: its run is a fixed piece
+          out.pieces.push_back({int(n), g.region[p], entry, p, h_first});
+        }
+        ++hop_use[p][dir];
+        ++hop_use[t][dir];
+        if (double(hop_use[p][dir]) > d.opt.hop_share * (dir ? cap_v : cap_h)[p]
+            || double(hop_use[t][dir]) > d.opt.hop_share * (dir ? cap_v : cap_h)[t]) {
+          ++out.over_share;
+        }
+        hops.emplace_back(p, t);
+        hop_net.push_back(int(n));
+        hop_tiles.insert(p);
+        hop_tiles.insert(t);
+        for (int x : {p, t}) {
+          auto& list = E.per_region[g.region[x]];
+          if (std::ranges::none_of(list, [&](const Endpoint& o) { return o.tile == x; })) {
+            list.push_back({-1, x});
+          }
+        }
+        unite(g.region[p], g.region[t]);
+        entry = t;
+      }
+      unite(g.region[ta], r);
+      return find(r) == find(root_region);
+    };
     for (bool progress = true; progress;) {
       progress = false;
       for (const auto& [r, _] : std::map<int, std::vector<Endpoint>>(E.per_region)) {
         if (find(r) == find(root_region)) {
+          continue;
+        }
+        if (global && join_global(r)) {
+          traced   = true;
+          progress = true;
           continue;
         }
         // shortest region path from r's component to the root's component
@@ -3017,8 +3151,11 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
             });
             return load;
           };
-          int    bu = -1, bv = -1;
-          double best = INFINITY;
+          int                                       bu = -1, bv = -1;
+          double                                    best = INFINITY;
+          // the candidates with hop room, nearest to the aim first; the spread term (an L walk each) is paid only
+          // for the nearest few, so a long boundary of a large design costs the same as a short one
+          std::vector<std::tuple<double, int, int>> cands;
           for (auto [u, v] : edges.at(key)) {
             if (g.region[u] != a) {
               std::swap(u, v);
@@ -3029,7 +3166,15 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
               continue;
             }
             const double mx = (g.cx(g.col(u)) + g.cx(g.col(v))) / 2.0, my = (g.cy(g.row(u)) + g.cy(g.row(v))) / 2.0;
-            double       cost = std::abs(mx - aim.first) + std::abs(my - aim.second);
+            cands.emplace_back(std::abs(mx - aim.first) + std::abs(my - aim.second), u, v);
+          }
+          constexpr size_t nearest = 32;
+          if (cands.size() > nearest) {
+            std::ranges::partial_sort(cands, cands.begin() + nearest);
+            cands.resize(nearest);
+          }
+          for (const auto& [dist, u, v] : cands) {
+            double cost = dist;
             if (prev >= 0) {
               cost += d.opt.hop_spread * double(g.tile_w) * std::min(run_load(v, true), run_load(v, false));
             }
@@ -3085,6 +3230,7 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
         }
       }
     }
+    out.global_nets += traced;
   }
   for (size_t k = 0; k < hops.size(); ++k) {
     for (int t : {hops[k].first, hops[k].second}) {
@@ -3210,7 +3356,10 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
           Q.pinned_tile[box.tile] = 1;
         }
       }
-      Q.reserve = edge_reserve(g, x.hops, x.hop_net, Q.trees, Q.io_routes);
+      for (const auto& gp : x.pieces) {  // legroute.global: the net is routed ahead through these regions
+        Q.treed.emplace(gp.net, gp.region);
+      }
+      Q.reserve = edge_reserve(g, x.hops, x.hop_net, Q.trees, Q.io_routes, x.pieces);
     }
     // ---- one SAT model per region and policy (the policies in parallel)
     std::vector<std::vector<int>> region_boxes(g.regions), region_tiles(g.regions);
@@ -3251,6 +3400,11 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
           }
         }
       }
+      for (const auto& gp : x.pieces) {  // legroute.global: the pass-through runs through this region
+        if (gp.region == r) {
+          out.conns.push_back({gp.net, gp.a, gp.b, gp.h_first});
+        }
+      }
       for (const auto& io : Q.io_routes) {  // (a box off its lifted track bends to it)
         if (io.region != r) {
           continue;
@@ -3280,6 +3434,8 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
   // ---- the chosen answers: tiles, counters, connections
   rep.sat_unjoined_crossings += x.unjoined;
   rep.sat_hops_over_share    += x.over_share;
+  rep.global_nets            += x.global_nets;
+  rep.global_pieces          += x.pieces.size();
   {  // pre-placement counters: the first policy's
     const auto& q              = P[0].rep;
     rep.crit_pinned           += q.crit_pinned;

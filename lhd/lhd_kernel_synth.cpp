@@ -477,6 +477,8 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_options.reserved_tracks  = integer("place.legroute.reserved_tracks", "1");
   out.legroute_options.hop_share        = number("place.legroute.hop_share", "0.5");
   out.legroute_options.reserve_share    = number("place.legroute.reserve_share", "0.5");
+  out.legroute_options.global_fraction  = number("place.legroute.global_fraction", "0.05");
+  out.legroute_options.threads          = integer("place.legroute.threads", "0");
   out.legroute_options.hop_spread       = number("place.legroute.hop_spread", "6");
   out.legroute_options.sat_ms           = integer("place.legroute.sat_ms", "60000");
   out.legroute_options.capacity_lazy    = integer("place.legroute.capacity_lazy", "2");
@@ -633,6 +635,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   }
   try {
     out.pg_channels = livehd::placement::parse_pg_channels(synth_set(opts, "place.pg.channel.patches", ""));
+    out.pg_tolerate_macro_pin_overlap = truthy(synth_set(opts, "place.pg.macro_pin_overlap", "false"));
   } catch (const std::invalid_argument& e) {
     throw Lhd_error{"usage", std::string("invalid synth.place.pg.channel.patches: ") + e.what(), ""};
   }
@@ -1351,6 +1354,24 @@ void synth_command(Options& opts, Result& res) {
   double         lo         = search ? std::stod(synth_set(opts, "place.area_search.min", "0.4")) : 0;
   double         hi         = search ? std::clamp(std::stod(synth_set(opts, "place.area_search.max", "0.99")), lo, .99) : 1;
   double         cur        = search ? std::clamp(std::stod(synth_set(opts, "place.area_search.start", "0.8")), lo, hi) : 0;
+  // the search remembers where it landed (workdir/place_search.txt): the next search starts there, bracketed by
+  // a tenth, unless a start is given; an incremental run on the same workdir then confirms the core in two or
+  // three placements instead of six
+  const auto memo = fs::path(opts.workdir) / "place_search.txt";
+  if (search && !opts.workdir.empty() && fs::exists(memo)
+      && std::ranges::none_of(opts.sets, [](const auto& kv) { return kv.first == "synth.place.area_search.start"; })) {
+    std::ifstream in(memo);
+    std::string   key;
+    double        value = 0;
+    while (in >> key >> value) {
+      if (key == "utilization" && value > 0 && value < 1) {
+        cur = std::clamp(value, lo, hi);
+        lo  = std::max(lo, cur - .1);
+        hi  = std::min(hi, cur + .1);
+        std::fprintf(stderr, "lhd synth: core search starts from the remembered utilization %.4f (%s)\n", cur, memo.c_str());
+      }
+    }
+  }
   const double   tolerance  = std::stod(synth_set(opts, "place.area_search.tolerance", "0.02"));
   bool           found      = false;  // a routable placement exists at lo
   const double   given      = std::stod(synth_set(opts, "place.density", "0.5"));  // the GP density as asked (0: follows)
@@ -1403,8 +1424,15 @@ void synth_command(Options& opts, Result& res) {
       found = true;
     }
     std::fprintf(stderr, "lhd synth: core search: utilization %.4f %s; routable up to %.4f, fails from %.4f\n", cur, ok ? "routable" : "not routable", found ? lo : 0.0, hi);
+    const auto remember = [&] {  // where the search landed, for the next run on this workdir
+      if (!opts.workdir.empty()) {
+        std::ofstream out(memo);
+        out << "utilization " << std::format("{:.4f}", lo) << "\ndensity " << std::format("{:.4f}", std::min(1.0, lo + .05)) << '\n';
+      }
+    };
     if (restarts + 1 >= limit || hi - lo <= tolerance) {
       if (ok) {
+        remember();
         return;  // the placement kept is this routable one
       }
       if (!found) {
@@ -1414,6 +1442,7 @@ void synth_command(Options& opts, Result& res) {
       }
       set_point(lo, 0, "core search: the best routable point placed once more");  // the last try failed
       synth_command_once(opts, res);
+      remember();
       return;
     }
     cur = std::clamp((lo + hi) / 2, lo, hi);
@@ -1998,6 +2027,15 @@ void synth_command_once(Options& opts, Result& res) {
   }
   // The domino cells' Liberty for OpenTimer (empty without the profile or STA).
   std::string domino_liberty_path;
+  // hard macros (blackbox cells with a LEF MACRO): their Liberty files, read by the timers after synth.liberty
+  const std::string macro_liberty = synth_set(opts, "macro_liberty", "");
+  const auto        extra_libs    = [&] {
+    std::string list = domino_liberty_path;
+    if (!macro_liberty.empty()) {
+      list += (list.empty() ? "" : ",") + macro_liberty;
+    }
+    return list;
+  };
   if (domino) {
     std::string why;
     const auto  sidecar = livehd::domplace::read_domino_sidecar(bundle_path, &why);
@@ -2234,8 +2272,8 @@ void synth_command_once(Options& opts, Result& res) {
           { "hier",                                  "false"}
       };
       merge_sets(opts, "pass.opentimer", timing_options.dict);
-      if (!domino_liberty_path.empty()) {
-        timing_options.dict["extra_libs"] = domino_liberty_path;
+      if (const auto extra = extra_libs(); !extra.empty()) {
+        timing_options.dict["extra_libs"] = extra;
       }
       timing_options.dict["cache_dir"] = "";
       timing_options.dict["qor"]       = "";
@@ -2835,8 +2873,8 @@ void synth_command_once(Options& opts, Result& res) {
     labels["top"] = top;
     labels["qor"] = timing_path;
     merge_sets(opts, "pass.opentimer", labels);
-    if (!domino_liberty_path.empty()) {
-      labels["extra_libs"] = domino_liberty_path;
+    if (const auto extra = extra_libs(); !extra.empty()) {
+      labels["extra_libs"] = extra;
     }
     if (opts.stats) {
       labels["stats"] = "true";
