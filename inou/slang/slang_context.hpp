@@ -100,6 +100,14 @@ struct Slang_module_state {
   Lnast_builder                                                       builder_;
   absl::flat_hash_set<const slang::ast::ValueSymbol*>                 interface_signals_;
   std::vector<std::pair<const slang::ast::ValueSymbol*, std::string>> interface_outputs_;
+  // Hierarchical read into a child (`c.q`): (child instance, path below it) ->
+  // the wire bound from that child's export port (see scan_hier_refs).
+  struct Xmr_net {
+    std::string name;
+    int         bits      = 0;
+    bool        is_signed = false;
+  };
+  absl::flat_hash_map<std::pair<const slang::ast::InstanceSymbol*, std::string>, Xmr_net> xmr_nets_;
 
   const slang::ast::InstanceBodySymbol*                       body_ = nullptr;
   std::optional<slang::ast::EvalContext>                      eval_ctx_;
@@ -564,6 +572,11 @@ private:
 
   // module-definition body -> finished Lnast (nullptr while in flight).
   absl::flat_hash_map<const slang::ast::InstanceBodySymbol*, std::shared_ptr<Lnast>> lowered_;
+  // Signals a parent reads through a hierarchical reference, per child body:
+  // each becomes an extra output port, keyed by its path below the body.
+  absl::flat_hash_map<const slang::ast::InstanceBodySymbol*, std::vector<std::string>> xmr_exports_;
+  absl::flat_hash_map<const slang::ast::InstanceBodySymbol*, absl::flat_hash_map<std::string, const slang::ast::ValueSymbol*>>
+      xmr_index_;
   absl::flat_hash_map<const slang::ast::InstanceBodySymbol*, std::string>            module_names_;
   absl::flat_hash_set<std::string>                                                   module_names_used_;
   std::vector<std::shared_ptr<Lnast>>                                                ordered_lnasts_;
@@ -699,6 +712,14 @@ private:
   void                        prepare_interfaces(const slang::ast::Scope& scope);
   void emit_interface_io(const slang::ast::InterfacePortSymbol& port, const Lnast_nid& inputs, const Lnast_nid& outputs);
   void bind_interface_outputs();
+  // Hierarchical references into child instances (slang_structure.cpp).
+  void scan_hier_refs(const slang::ast::RootSymbol& root);
+  std::optional<std::vector<const slang::ast::InstanceSymbol*>> xmr_hops(const slang::ast::ValueSymbol&        sym,
+                                                                         const slang::ast::InstanceBodySymbol& from) const;
+  const slang::ast::ValueSymbol* xmr_resolve(const slang::ast::InstanceBodySymbol& body, const std::string& rel);
+  void                           declare_xmr_nets(const slang::ast::InstanceBodySymbol& body);
+  void                           bind_xmr_exports(const slang::ast::InstanceBodySymbol& body);
+  std::optional<std::string>     read_xmr(const slang::ast::ValueSymbol& sym, slang::SourceRange range);
   void lower_instance(const slang::ast::InstanceSymbol& inst);
   // Blackbox instance (slang UninstantiatedDef, i.e. --ignore-unknown-modules):
   // no definition, so port directions come from the collect-pass inference

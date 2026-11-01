@@ -2,6 +2,8 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
+#include <optional>
 #include <queue>
 #include <set>
 #include <tuple>
@@ -9,18 +11,42 @@
 #include "inou/lefdef/routing_connectivity.hpp"
 #include "inou/lefdef/routing_geometry.hpp"
 #include "inou/lefdef/signal_via.hpp"
+#include "pin_escape_guard.hpp"
 #include "signal_router.hpp"
 #include "steiner_topology.hpp"
 
 namespace livehd::placement {
 namespace ph = physical;
 Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_route_limits& limits) const {
+  return propose_maze_impl(net, limits, nullptr, nullptr, nullptr);
+}
+Signal_route_trial Signal_router::propose_tap(const ph::Net& net, const Signal_route_limits& limits,
+                                              const std::vector<ph::Shape>&        anchors,
+                                              const std::map<std::string, double>& layer_cost) const {
+  return propose_maze_impl(net, limits, nullptr, &anchors, &layer_cost);
+}
+Signal_route_trial Signal_router::propose_join(const ph::Net& net, const Signal_route_limits& limits,
+                                               const std::vector<ph::Shape>& sources, const std::vector<ph::Shape>& anchors,
+                                               const std::map<std::string, double>& layer_cost) const {
+  return propose_maze_impl(net, limits, &sources, &anchors, &layer_cost);
+}
+Signal_route_trial Signal_router::propose_maze_impl(const ph::Net& net, const Signal_route_limits& limits,
+                                                    const std::vector<ph::Shape>* sources, const std::vector<ph::Shape>* anchors,
+                                                    const std::map<std::string, double>* layer_cost) const {
   Signal_route_trial out;
   const Stage_trial  stage{out, limits.deadline};
   if (stage.expired()) {
     return out;
   }
-  if (!ph::unrouted_signal(net)) {
+  if (sources) {
+    if (sources->empty() || !anchors || anchors->empty() || !net.connections.empty() || !net.wires.empty()) {
+      return stage.fail("join requires its net's source and anchor metal and no pins");
+    }
+  } else if (anchors) {
+    if (anchors->empty() || net.connections.size() != 1 || !net.wires.empty() || (!net.use.empty() && net.use != "SIGNAL")) {
+      return stage.fail("tap requires one unwired signal pin and its net's anchors");
+    }
+  } else if (!ph::unrouted_signal(net)) {
     return stage.fail("maze requires an unwired multi-pin signal net");
   }
   std::set<std::pair<std::string, std::string>> endpoint_ids;
@@ -153,6 +179,61 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
       half[0] = std::max({half[0], p.x - p.escape.rect.xl, p.escape.rect.xh - p.x});
     }
   }
+  // The reference point: the pin's first access point, or (a join) the source metal's point nearest to the anchors.
+  // A tap's or join's window covers each piece's point nearest to it, not the whole (possibly long) piece.
+  const auto maze_layer = [&](const ph::Shape& s) -> std::optional<size_t> {
+    const auto found = std::find(layers.begin(), layers.end(), s.layer);
+    return found == layers.end() ? std::nullopt : std::optional<size_t>(found - layers.begin());
+  };
+  double ref_x = 0, ref_y = 0;
+  if (sources) {
+    double best = std::numeric_limits<double>::infinity();
+    for (const auto& s : *sources) {
+      for (const auto& a : *anchors) {
+        if (!maze_layer(s) || !maze_layer(a)) {
+          continue;
+        }
+        const double ax = (a.rect.xl + a.rect.xh) / 2, ay = (a.rect.yl + a.rect.yh) / 2;
+        const double sx = std::clamp(ax, s.rect.xl, s.rect.xh), sy = std::clamp(ay, s.rect.yl, s.rect.yh);
+        const double d = std::max({a.rect.xl - sx, sx - a.rect.xh, 0.0}) + std::max({a.rect.yl - sy, sy - a.rect.yh, 0.0});
+        if (d < best) {
+          best  = d;
+          ref_x = sx;
+          ref_y = sy;
+        }
+      }
+    }
+    if (!std::isfinite(best)) {
+      return stage.fail("no join piece on a maze layer");
+    }
+  } else if (anchors) {
+    ref_x = double(access[0].points.front().x);
+    ref_y = double(access[0].points.front().y);
+  }
+  std::vector<std::pair<size_t, ph::Rect>> anchor_metal, source_metal;  // (maze layer, metal)
+  const auto                               collect = [&](const std::vector<ph::Shape>& pieces, auto& metal) {
+    for (const auto& a : pieces) {
+      const auto l = maze_layer(a);
+      if (!l) {
+        continue;
+      }
+      metal.emplace_back(*l, a.rect);
+      const double nx = std::clamp(ref_x, a.rect.xl, a.rect.xh), ny = std::clamp(ref_y, a.rect.yl, a.rect.yh);
+      xmin = std::min(xmin, nx);
+      xmax = std::max(xmax, nx);
+      ymin = std::min(ymin, ny);
+      ymax = std::max(ymax, ny);
+    }
+  };
+  if (anchors) {
+    collect(*anchors, anchor_metal);
+    if (anchor_metal.empty()) {
+      return stage.fail("no anchor on a maze layer");
+    }
+  }
+  if (sources) {
+    collect(*sources, source_metal);
+  }
   double pitch = 0;
   for (const auto& t : frame_.tracks) {
     if (std::find(layers.begin(), layers.end(), t.layer) == layers.end()) {
@@ -196,6 +277,20 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
     all.insert(coords.begin(), coords.end());
     if (all.size() > limits.patterns) {
       return stage.fail("maze coordinate budget");
+    }
+  }
+  // A piece's centerline is a track of its layer, and its point nearest to the reference is always a node.
+  for (const auto* metal : {&anchor_metal, &source_metal}) {
+    for (const auto& [l, r] : *metal) {
+      const auto c = std::llround(horizontal[l] ? (r.yl + r.yh) / 2 : (r.xl + r.xh) / 2);
+      if (horizontal[l] ? c < ymin || c > ymax : c < xmin || c > xmax) {
+        continue;
+      }
+      tracks[l].insert(c);
+      (horizontal[l] ? ycoords : xcoords).insert(c);
+      const auto along = std::llround(horizontal[l] ? std::clamp(ref_x, r.xl + half[l], std::max(r.xl + half[l], r.xh - half[l]))
+                                                    : std::clamp(ref_y, r.yl + half[l], std::max(r.yl + half[l], r.yh - half[l])));
+      (horizontal[l] ? xcoords : ycoords).insert(along);
     }
   }
   if (tracks[0].empty() || tracks[1].empty()) {
@@ -292,7 +387,38 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
   };
   std::vector<Branch_search> branches;
   Signal_route_geometry      trial;
-  if (access.size() == 2) {
+  if (anchors) {
+    // the nodes on a piece of metal: its centerline coordinate, every crossing coordinate inside it
+    const auto on_metal = [&](const std::vector<std::pair<size_t, ph::Rect>>& metal, std::vector<Key>& keys) {
+      for (const auto& [l, r] : metal) {
+        const auto  c = std::llround(horizontal[l] ? (r.yl + r.yh) / 2 : (r.xl + r.xh) / 2);
+        const auto& v = horizontal[l] ? ys : xs;
+        const auto  i = std::lower_bound(v.begin(), v.end(), c) - v.begin();
+        if (size_t(i) >= v.size() || v[i] != c) {
+          continue;
+        }
+        const auto& w = horizontal[l] ? xs : ys;
+        for (size_t j = 0; j < w.size(); ++j) {
+          const double at = double(w[j]);
+          if (horizontal[l] ? at >= r.xl && at <= r.xh : at >= r.yl && at <= r.yh) {
+            keys.push_back(horizontal[l] ? Key{j, size_t(i), l} : Key{size_t(i), j, l});
+          }
+        }
+      }
+    };
+    branches.emplace_back();
+    if (sources) {
+      on_metal(source_metal, branches.back().sources);
+    } else {
+      for (const auto& p : access[0].points) {
+        branches.back().sources.push_back(key(p));
+      }
+    }
+    on_metal(anchor_metal, branches.back().targets);
+    if (branches.back().targets.empty() || branches.back().sources.empty()) {
+      return stage.fail("piece outside the maze window");
+    }
+  } else if (access.size() == 2) {
     branches.emplace_back();
     for (const auto& p : access[0].points) {
       branches.back().sources.push_back(key(p));
@@ -376,6 +502,14 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
     // Coincident pins have no topology edges but still need their landing.
     if (branches.empty()) {
       branches.push_back({{*vertices.front()}, {*vertices.front()}});
+    }
+  }
+  std::vector<double> weight(layers.size(), 1);
+  if (layer_cost) {
+    for (size_t l = 0; l < layers.size(); ++l) {
+      if (const auto w = layer_cost->find(layers[l]); w != layer_cost->end()) {
+        weight[l] = std::max(1.0, w->second);
+      }
     }
   }
   std::vector<std::vector<Key>> paths;
@@ -464,8 +598,10 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
         const bool   turn       = next_layer != l;
         const double next_cost
             = cost
-              + (turn ? widths[l] + widths[next_layer]
-                      : std::abs(double(xs[ix]) - xs[std::get<0>(next)]) + std::abs(double(ys[iy]) - ys[std::get<1>(next)]));
+              + (turn
+                     ? widths[l] + widths[next_layer]
+                     : weight[l]
+                           * (std::abs(double(xs[ix]) - xs[std::get<0>(next)]) + std::abs(double(ys[iy]) - ys[std::get<1>(next)])));
         const auto found = reached.find(next);
         if (found != reached.end() && found->second.cost <= next_cost) {
           continue;
@@ -476,14 +612,38 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
         if (turn ? !turn_legal(k, next) : !legal(segment(k, next))) {
           continue;
         }
-        reached.insert_or_assign(next, Record{next_cost, k, reached.at(k).source});
-        queue.emplace(next_cost + heuristic(next), next_cost, next);
+        // escape-layer metal over other pins' access points costs, a pin's last one most (the route's check decides)
+        double total = next_cost;
+        if (pin_escapes_) {
+          std::optional<ph::Shape> on_escape;
+          if (!turn && layers[l] == profile_.access.escape) {
+            on_escape = segment(k, next);
+          } else if (turn && layers[std::min(l, next_layer)] == profile_.access.escape) {
+            const auto landing = via_landings.find({xs[ix], ys[iy], std::min(l, next_layer)});
+            if (landing != via_landings.end() && landing->second) {
+              on_escape = (*landing->second)[0];
+            }
+          }
+          if (on_escape) {
+            const auto c  = pin_escapes_->cost(*on_escape, net.name);
+            total        += double(c.points) * 2 * pitch + (c.fatal ? 20 * pitch : 0);
+            if (found != reached.end() && found->second.cost <= total) {
+              continue;
+            }
+          }
+        }
+        reached.insert_or_assign(next, Record{total, k, reached.at(k).source});
+        queue.emplace(total + heuristic(next), total, next);
       }
     }
     if (!end) {
       return stage.fail("maze exhausted");
     }
-    if (access.size() == 2) {
+    if (sources) {
+      // a join has no pin endpoints
+    } else if (anchors) {
+      trial.endpoints = {access[0].points[reached.at(*end).source]};
+    } else if (access.size() == 2) {
       trial.endpoints = {access[0].points[reached.at(*end).source], access[1].points[targets.at(*end)]};
     }
     auto& path = paths.emplace_back();
@@ -617,6 +777,10 @@ Signal_route_trial Signal_router::propose_maze(const ph::Net& net, const Signal_
     }
   }
   trial.vias = vias.size();
+  if (anchors) {  // a partial net: the caller checks it once every pin is tapped
+    out.geometry = std::move(trial);
+    return out;
+  }
   const auto connected = connectivity(net, trial.paths, &trial.nondefault_rules);
   if (stage.expired()) {
     return out;

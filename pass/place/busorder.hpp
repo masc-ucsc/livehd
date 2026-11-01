@@ -12,12 +12,6 @@
 #include "region_mesh.hpp"
 
 namespace livehd::placement {
-struct Busorder_options {
-  bool     enabled    = false;
-  unsigned iterations = 100, refresh = 20;
-  double   weight = 4, max_displacement_um = 20;
-};
-void validate_busorder_options(const Busorder_options&);
 using Busorder_point = std::pair<double, double>;
 using Busorder_tree  = std::vector<std::pair<Busorder_point, Busorder_point>>;
 using Busorder_route = std::function<Busorder_tree(const std::vector<Busorder_point>&)>;
@@ -27,17 +21,16 @@ struct Busorder_crossing {
 };
 struct Busorder_sample {
   std::string stage;
-  unsigned    iterations = 0, groups = 0, unordered = 0, constraints = 0;
+  unsigned    iterations = 0, groups = 0, unordered = 0;
   unsigned    branching = 0, immovable = 0, high_degree = 0;
   unsigned    initially_unordered = 0, resolved = 0, remaining = 0, ambiguous = 0, no_longer_comparable = 0;
   double      hpwl = 0, overflow = -1, penalty = 0, seconds = 0;
 };
-// Temporary final-GP model. Proxies are pin-coordinate expressions, not nodes.
-// Bus identities and the detail-final region mesh are supplied by LiveHD;
-// net_mask excludes clocks/reset. All geometry is in the native design's
-// coordinate units.
+// Estimated (RSMT) crossing order of each bus on the region edges: the real-net measurement behind the
+// boundary-pin report (boundarypins/rsmt_order). synth.place.region.busorder runs the boundary-pin flow with bus
+// order; this class only observes. Bus identities and the detail-final region mesh are supplied by LiveHD; net_mask
+// excludes clocks/reset. All geometry is in the native design's coordinate units.
 class Busorder {
-  Busorder_options                                     options;
   double                                               dbu;
   std::vector<Bus_bit>                                 bits;
   Busorder_route                                       route;
@@ -51,16 +44,15 @@ class Busorder {
   double                                               density_target      = 0;
   bool                                                 density_scale_macro = false;
   std::vector<Busorder_crossing>                       crossings(const DreamPlace::native::Design&, unsigned&) const;
-  Busorder_sample                                      evaluate(const DreamPlace::native::Design&, const std::string&, unsigned,
-                                                                std::vector<DreamPlace::native::RelativeOrder>*);
+  Busorder_sample                                      evaluate(const DreamPlace::native::Design&, const std::string&);
   void                                                 write() const;
 
 public:
   Busorder(const DreamPlace::native::Design&, const Region_mesh&, const std::vector<Bus_bit>&, Busorder_route, double dbu_per_um,
-           Busorder_options, std::string output_dir = {});
-  void                                           refine(DreamPlace::native::Design&, const DreamPlace::native::Options&);
-  void                                           observe(const DreamPlace::native::Design&, const std::string& stage);
-  const std::vector<Busorder_sample>&            samples() const { return history; }
-  std::vector<DreamPlace::native::RelativeOrder> constraints(const DreamPlace::native::Design&);
+           std::string output_dir = {});
+  // Report the density overflow of each observed stage on this GP grid.
+  void                                measure_density(const DreamPlace::native::Options&);
+  void                                observe(const DreamPlace::native::Design&, const std::string& stage);
+  const std::vector<Busorder_sample>& samples() const { return history; }
 };
 }  // namespace livehd::placement

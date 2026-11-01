@@ -764,8 +764,9 @@ theorem byteArray_toList_loop (b : ByteArray) (i : Nat) (acc : List UInt8) :
       simpa only [Array.length_toList, ByteArray.size] using h
     rw [List.drop_eq_getElem_cons (i := i) (l := b.data.toList) hi]
     congr 1
+    -- No `rfl` after this: on Lean 4.36 the `simp only` closes the goal, and a
+    -- trailing `rfl` is then an error ("No goals to be solved"), not a no-op.
     simp only [ByteArray.get!, getElem!_pos b.data i h, Array.getElem_toList]
-    rfl
   case case2 i acc h =>
     have hi : b.data.toList.length ≤ i := by
       simpa only [Array.length_toList, ByteArray.size] using Nat.le_of_not_lt h

@@ -109,9 +109,20 @@ theorem fragAltsB_find {d : Nat} :
   | (t, k, b) :: as, tag, a, h, hf => by
       simp only [fragAltsB, Bool.and_eq_true] at h
       simp only [findAlt, Alt.tag] at hf
+      -- `split at` the hypothesis rather than `rw [if_pos/if_neg ht] at`. On
+      -- Lean 4.36 those rewrites no longer match: `simp only [Alt.tag]` above
+      -- leaves the `ite` carrying a `Decidable` instance `rw` cannot see
+      -- through, so it reports the pattern as absent while it is plainly
+      -- there. `split` works on the term that is actually in the hypothesis.
+      -- `simp only [ht, reduceIte] at` rather than `rw [if_pos/if_neg ht] at`.
+      -- On Lean 4.36 the rewrite no longer matches: the `simp only [Alt.tag]`
+      -- above leaves the `ite` carrying a `Decidable` instance neither `rw`
+      -- nor `split` can see through -- both report it absent while it is
+      -- plainly in the hypothesis. `simp` reduces the same `ite` from the same
+      -- hypothesis, and each branch is closed by the facts it was before.
       by_cases ht : t = tag
-      · rw [if_pos ht] at hf; cases hf; exact h.1
-      · rw [if_neg ht] at hf; exact fragAltsB_find as tag a h.2 hf
+      · simp only [ht, reduceIte] at hf; cases hf; exact h.1
+      · simp only [ht, reduceIte] at hf; exact fragAltsB_find as tag a h.2 hf
 
 /-- …and its body is no taller than the alternatives block. -/
 theorem heightAlts_find :
@@ -120,9 +131,21 @@ theorem heightAlts_find :
   | [],              _,   _, hf => by simp [findAlt] at hf
   | (t, k, b) :: as, tag, a, hf => by
       simp only [findAlt, Alt.tag] at hf
+      -- `split at` the hypothesis rather than `rw [if_pos/if_neg ht] at`. On
+      -- Lean 4.36 those rewrites no longer match: `simp only [Alt.tag]` above
+      -- leaves the `ite` carrying a `Decidable` instance `rw` cannot see
+      -- through, so it reports the pattern as absent while it is plainly
+      -- there. `split` works on the term that is actually in the hypothesis.
+      -- `simp only [ht, reduceIte] at` rather than `rw [if_pos/if_neg ht] at`.
+      -- On Lean 4.36 the rewrite no longer matches: the `simp only [Alt.tag]`
+      -- above leaves the `ite` carrying a `Decidable` instance neither `rw`
+      -- nor `split` can see through -- both report it absent while it is
+      -- plainly in the hypothesis. `simp` reduces the same `ite` from the same
+      -- hypothesis, and each branch is closed by the facts it was before.
       by_cases ht : t = tag
-      · rw [if_pos ht] at hf; cases hf; simp only [heightAlts, Alt.body]; omega
-      · rw [if_neg ht] at hf
+      · simp only [ht, reduceIte] at hf
+        cases hf; simp only [heightAlts, Alt.body]; omega
+      · simp only [ht, reduceIte] at hf
         have := heightAlts_find as tag a hf
         simp only [heightAlts]
         omega
@@ -274,14 +297,25 @@ theorem fragAltsB_no_outOfFuel {P : Program} :
       simp only [fragAltsB, Bool.and_eq_true] at h
       simp only [findAlt, Alt.tag] at hfa
       simp only [heightAlts] at hn
+      -- `split at` the hypothesis rather than `rw [if_pos/if_neg ht] at`. On
+      -- Lean 4.36 those rewrites no longer match: `simp only [Alt.tag]` above
+      -- leaves the `ite` carrying a `Decidable` instance `rw` cannot see
+      -- through, so it reports the pattern as absent while it is plainly
+      -- there. `split` works on the term that is actually in the hypothesis.
+      -- `simp only [ht, reduceIte] at` rather than `rw [if_pos/if_neg ht] at`.
+      -- On Lean 4.36 the rewrite no longer matches: the `simp only [Alt.tag]`
+      -- above leaves the `ite` carrying a `Decidable` instance neither `rw`
+      -- nor `split` can see through -- both report it absent while it is
+      -- plainly in the hypothesis. `simp` reduces the same `ite` from the same
+      -- hypothesis, and each branch is closed by the facts it was before.
       by_cases ht : t = tag
-      · rw [if_pos ht] at hfa
+      · simp only [ht, reduceIte] at hfa
         cases hfa
         refine fragB_no_outOfFuel b (d + k) (vs ++ ρ) n h.1 ?_ (by omega)
         simp only [List.length_append, hρ]
         simp only [Alt.arity] at hk
         omega
-      · rw [if_neg ht] at hfa
+      · simp only [ht, reduceIte] at hfa
         exact fragAltsB_no_outOfFuel as d ρ n tag a vs h.2 hfa hρ hk (by omega)
 
 end

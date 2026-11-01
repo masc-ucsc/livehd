@@ -195,7 +195,10 @@ TEST(CertificateIR, SetMaskAndSumKeepOperandOrder) {
   d.nodes[0].operands.push_back({2, 2, constant("7", 3)});
   auto c = build_certificate(d, {});
   EXPECT_EQ(c.nodes[0].op.kind, Operation::SetMask);
-  EXPECT_EQ(c.sources[0].width, 8);
+  // The BASE is materialized at the result width (16): bv_set_mask folds
+  // bv_set_bit over it, which keeps its argument's width, so a narrower base
+  // dropped every inserted bit above it (SetMaskBaseIsWidenedToTheResultWidth).
+  EXPECT_EQ(c.sources[0].width, 16);
   EXPECT_EQ(c.sources[1].width, 2);
   // A SECOND addend. Under one-driver-per-sink-pin it cannot reuse pid 0: the
   // adds are the even pids, so this operand stays at pid 2 and is an addend
@@ -460,6 +463,47 @@ TEST(CertificateIR, SraOfAnUnsignedValueShiftsInZeros) {
   c = build_certificate(d, {});
   ASSERT_EQ(c.nodes.size(), 1);
   EXPECT_EQ(c.nodes[0].deps, (std::vector<uint32_t>{2000000000, 2000000001}));
+}
+TEST(CertificateIR, SraOfANonNegativeConstantGainsASignBit) {
+  // A packed ROM table `(10, 20, 30, 40)` is the constant 0x281E140A, whose
+  // intrinsic width is 30 with bit 29 set. bv_sra reads its value operand as
+  // two's complement at the operand's own width, so at 30 bits the table read
+  // as NEGATIVE and `table >> 24` gave 0xE8 instead of 40 (Pyrope equiv corpus:
+  // mem_rom, and tolg_field_read_zero's `33` at 6 bits). A non-negative constant
+  // gets one more bit, as Div already does.
+  auto d = binary(ScanOp::SRA, 30, constant("673059850", 30), input(2000000001, 5));
+  auto c = build_certificate(d, {});
+  ASSERT_GE(c.sources.size(), 1u);
+  EXPECT_EQ(c.sources[0].const_int, "673059850");
+  EXPECT_EQ(c.sources[0].width, 31) << "the value needs a zero sign bit above bit 29";
+  // a NEGATIVE constant keeps its two's-complement width
+  d = binary(ScanOp::SRA, 8, constant("-4", 3), input(2000000001, 3));
+  c = build_certificate(d, {});
+  EXPECT_EQ(c.sources[0].width, 8);
+}
+TEST(CertificateIR, SetMaskBaseIsWidenedToTheResultWidth) {
+  // `o[7:0] = i[7:0]; o[11:4] = i[15:8]`: the second write is
+  // SetMask(base = 8-bit, mask = 0xFF0, value = 8-bit) at width 12. bv_set_mask
+  // folds bv_set_bit over the base, which keeps the base's width, so bits 8..11
+  // of the inserted value were dropped (Pyrope equiv corpus: bitset_gap,
+  // bitset_mut). An UNSIGNED base is zero-extended to the result width first.
+  auto d = binary(ScanOp::SetMask, 12, input(2000000000, 8), constant("4080", 12));
+  d.inputs.push_back({"v", 2000000002, 8, std::nullopt});
+  d.nodes[0].operands.push_back({2, 2, input(2000000002, 8)});
+  auto c = build_certificate(d, {});
+  ASSERT_EQ(c.nodes.size(), 2u);
+  EXPECT_EQ(c.nodes[0].op.kind, Operation::Or);
+  EXPECT_EQ(c.nodes[0].width, 12);
+  EXPECT_EQ(c.nodes[0].deps, (std::vector<uint32_t>{2000000000}));
+  EXPECT_EQ(c.nodes[1].op.kind, Operation::SetMask);
+  ASSERT_EQ(c.nodes[1].deps.size(), 3u);
+  EXPECT_EQ(c.nodes[1].deps[0], c.nodes[0].id) << "the SetMask base is the widened node";
+  // a base already as wide as the result is used directly
+  d.inputs[0].width                   = 12;
+  d.nodes[0].operands[0].driver.width = 12;
+  c                                   = build_certificate(d, {});
+  ASSERT_EQ(c.nodes.size(), 1u);
+  EXPECT_EQ(c.nodes[0].deps[0], 2000000000);
 }
 TEST(CertificateIR, NarrowSignedOperandIsSignExtendedForAZeroExtendingRead) {
   // Sum reads its operands unsigned at the result width: a 3-bit signed -4

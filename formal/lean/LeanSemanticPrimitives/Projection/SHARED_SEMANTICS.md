@@ -15,7 +15,7 @@ which is present in this repository.  On master the shared files are master's
 own; the projection consumes them unchanged.  Against the base:
 
     Translation/GraphRefine.lean      byte-identical
-    Compiler/DesignCert.lean          byte-identical
+    Compiler/DesignCert.lean          COMMENT-ONLY (identical without comments; recorded hash)
     Compiler/Runtime.lean             byte-identical
     Compiler/DesignCertWF.lean        byte-identical
     Compiler/DesignSemantics.lean     byte-identical
@@ -23,6 +23,15 @@ own; the projection consumes them unchanged.  Against the base:
 
     Translation/LGraphModel.lean      MASTER-ADAPTED (operator boundary repairs)
     Translation/OpBridge.lean         MASTER-ADAPTED (bridges re-proved for them)
+
+### `Compiler/DesignCert.lean`
+
+032690762 (D2 audit item C4) corrected the `ClockDesc` docstring: it claimed
+ordinal 0 is the reference clock, "the net carrying the most state", which the
+exporter does not provide (it numbers domains by sorting on a structural key)
+and nothing in the semantics reads. The change is in a comment only, so the
+check compares the file with the base after removing Lean comments, and pins
+the current bytes with a recorded hash.
 
 ### `Translation/LGraphModel.lean`
 
@@ -71,13 +80,14 @@ branch.  The statements are the pinned ones, unchanged.
 
     bash pass/lean/specialization/tests/check_overlay.sh [--semantic]
 
-Runnable from any directory.  It checks the six files against the base (taken
-from THIS repository by default; `BASE_REPO` overrides) and the two adapted
-files against recorded sha256 values.  `--semantic` also rebuilds
+Runnable from any directory.  It checks the five byte-identical files against
+the base (taken from THIS repository by default; `BASE_REPO` overrides),
+`DesignCert.lean` against the base without comments, and the two adapted files
+and `DesignCert.lean` against recorded sha256 values.  `--semantic` also rebuilds
 `OperatorBridge` (no Mathlib) and, under lake, `Translation/OpBridge`, so the
 bridge theorems above are re-checked rather than trusted.
 
-If one of the six must change, change it deliberately and update this document.
+If one of the five must change, change it deliberately and update this document.
 If either adapted file changes, update its recorded hash in the check script in
 the same commit, and say why.
 

@@ -240,7 +240,9 @@ assert macro_trace and len(macro_trace) <= 2, macro_trace
 assert all(sample['stage'] == 'macro' and sample['timing_exponent'] == 3 for sample in macro_trace), macro_trace
 for path in (root/'fp_gated/synth/place').rglob('gp_history.json'):
     history = json.loads(path.read_text())
-    assert history['stop_overflow'] == .08 and history['initial_density_weight'] == .02, (path, history)
+    # the region refinement (bus order, on by default) starts from the placement's converged density weight
+    assert history['stop_overflow'] == .08, (path, history)
+    assert history['initial_density_weight'] == .02 or history.get('density_weight_seeded'), (path, history)
     assert history['timing_spread_weight'] == 1, (path, history)
 
 assert gated['timing_density_schedule'], gated

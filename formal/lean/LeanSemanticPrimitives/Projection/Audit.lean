@@ -4,7 +4,7 @@
   The same gate the manual path uses: every load-bearing theorem must rest on
   the three standard axioms and nothing else.  A `sorry` anywhere shows up here
   as `sorryAx`, and a `native_decide` as an axiom with a `_native` name
-  component (Lean 4.31 mints one per call; `Lean.ofReduceBool` is deprecated)
+  component (one per call; Lean 4.36 removed the older `Lean.ofReduceBool`)
   -- this library must not use it, since these theorems are about all programs
   rather than about one fixed graph.
 

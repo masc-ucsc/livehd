@@ -1429,6 +1429,29 @@ static const slang::ast::InstanceBodySymbol* lowering_body(const slang::ast::Ins
   return canonical ? canonical : &symbol.body;
 }
 
+// Helpers for hierarchical reads into a child instance (see scan_hier_refs).
+static bool is_xmr_kind(const slang::ast::Symbol& sym) {
+  return sym.kind == SymbolKind::Variable || sym.kind == SymbolKind::Net;
+}
+
+// Path of `leaf` below `inst` ("id_stage_i.instr_executing" below ibex_core).
+static std::string xmr_rel(const slang::ast::Symbol& leaf, const slang::ast::InstanceSymbol& inst) {
+  const auto full = leaf.getHierarchicalPath();
+  const auto pre  = inst.getHierarchicalPath();
+  return full.size() > pre.size() && full.starts_with(pre) ? full.substr(pre.size() + 1) : full;
+}
+
+// A path as a plain identifier: every non-alphanumeric character becomes '_'.
+static std::string xmr_ident(std::string_view path) {
+  std::string out;
+  for (const char c : path) {
+    out += std::isalnum(static_cast<unsigned char>(c)) ? c : '_';
+  }
+  return out;
+}
+
+static std::string xmr_port(std::string_view rel) { return "xmr__" + xmr_ident(rel); }
+
 std::string Slang_context::module_name_of(const slang::ast::InstanceSymbol& symbol) {
   const auto* body = lowering_body(symbol);
   auto        it   = module_names_.find(body);
@@ -1702,6 +1725,30 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
       emit_unsupported(p->location,
                        "unsupported-port-kind",
                        std::string("port '") + std::string(p->name) + "' has an unsupported kind");
+    }
+  }
+
+  // One extra output per signal a parent reads hierarchically (bind_xmr_exports drives it).
+  if (auto it = xmr_exports_.find(&body); it != xmr_exports_.end()) {
+    auto& ln = *builder_.lnast;
+    for (const auto& rel : it->second) {
+      const auto* leaf = xmr_resolve(body, rel);
+      const auto  port = xmr_port(rel);
+      if (leaf == nullptr || !leaf->getType().isIntegral() || body.findPort(port) != nullptr) {
+        emit_unsupported(symbol.location,
+                         "unsupported-hierarchical-reference",
+                         "cannot export '" + rel + "' from module '" + std::string(symbol.getDefinition().name) + "' to its parent");
+        continue;
+      }
+      auto ti    = tinfo(leaf->getType());
+      auto entry = ln.add_child(out_tup, Lnast_ntype::create_store());
+      ln.add_child(entry, Lnast_node::create_ref(port));
+      ln.add_child(entry, Lnast_node::create_const("nil"));
+      emit_prim_type_int(entry, ti.bits, ti.is_signed);
+      auto st = ln.add_child(entry, Lnast_ntype::create_stages());
+      ln.add_child(st, Lnast_node::create_const("nil"));
+      ln.add_child(st, Lnast_node::create_const("nil"));
+      used_names_.insert(port);
     }
   }
 }
@@ -2736,6 +2783,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
     }
   };
   predeclare_arrays(*body, /*top=*/true);
+  declare_xmr_nets(*body);
 
   // The X-default poison-init for combinational outputs is emitted inside
   // lower_members (after wire classification: a wire-classified output must
@@ -2748,6 +2796,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
   declare_past_chains(*body);
   lower_members(*body);
   bind_interface_outputs();
+  bind_xmr_exports(*body);
   emit_past_chain_updates();
   past_chain_ = std::move(outer_past);
   finalize_pending_async_resets();
@@ -8108,6 +8157,189 @@ static const slang::syntax::ModuleDeclarationSyntax* other_root_declaration(cons
   return nullptr;
 }
 
+// ── hierarchical reads into a child instance ─────────────────────────────────
+// Each module lowers on its own, so a parent's `c.q` has no net to read: it
+// used to resolve to a never-driven name, i.e. a silent constant. Instead the
+// child exports the signal as an extra output (`xmr__<path>`), every module on
+// the way passes it up, and the parent reads the bound wire.
+
+// Module instances crossed from `from` down to `sym`, outermost first. Empty:
+// sym is local, a package member or an interface signal. nullopt: sym is not
+// below `from` (an upward or sibling reference).
+std::optional<std::vector<const slang::ast::InstanceSymbol*>> Slang_context::xmr_hops(
+    const slang::ast::ValueSymbol& sym, const slang::ast::InstanceBodySymbol& from) const {
+  std::vector<const slang::ast::InstanceSymbol*> hops;
+  const slang::ast::Scope*                       scope = sym.getParentScope();
+  while (scope != nullptr) {
+    const auto& s = scope->asSymbol();
+    if (&s == &from) {
+      std::reverse(hops.begin(), hops.end());
+      return hops;
+    }
+    if (s.kind == SymbolKind::InstanceBody) {
+      const auto* inst = s.as<slang::ast::InstanceBodySymbol>().parentInstance;
+      if (inst == nullptr || !inst->isModule()) {
+        return hops.empty() ? std::optional(hops) : std::nullopt;
+      }
+      hops.push_back(inst);
+      scope = inst->getParentScope();
+      continue;
+    }
+    scope = s.getParentScope();
+  }
+  return hops.empty() ? std::optional(hops) : std::nullopt;
+}
+
+void Slang_context::scan_hier_refs(const slang::ast::RootSymbol& root) {
+  struct Scan : slang::ast::ASTVisitor<Scan, slang::ast::VisitFlags::AllCanonical> {
+    Slang_context&                        ctx;
+    const slang::ast::InstanceBodySymbol* body = nullptr;
+    explicit Scan(Slang_context& c) : ctx(c) {}
+    void handle(const slang::ast::InstanceBodySymbol& b) {
+      if (b.flags.has(slang::ast::InstanceFlags::Uninstantiated)) {
+        return;
+      }
+      auto* outer = std::exchange(body, &b);
+      visitDefault(b);
+      body = outer;
+    }
+    void handle(const slang::ast::HierarchicalValueExpression& e) {
+      if (body != nullptr && is_xmr_kind(e.symbol)) {
+        if (auto hops = ctx.xmr_hops(e.symbol, *body)) {
+          for (const auto* inst : *hops) {
+            auto& rels = ctx.xmr_exports_[lowering_body(*inst)];
+            auto  rel  = xmr_rel(e.symbol, *inst);
+            if (std::find(rels.begin(), rels.end(), rel) == rels.end()) {
+              rels.push_back(std::move(rel));
+            }
+          }
+        }
+      }
+      visitDefault(e);
+    }
+  };
+  Scan scan(*this);
+  root.visit(scan);
+}
+
+const slang::ast::ValueSymbol* Slang_context::xmr_resolve(const slang::ast::InstanceBodySymbol& body, const std::string& rel) {
+  auto [it, fresh] = xmr_index_.try_emplace(&body);
+  if (fresh) {
+    auto&                                         index = it->second;
+    const auto                                    pre   = body.parentInstance->getHierarchicalPath().size() + 1;
+    std::function<void(const slang::ast::Scope&)> walk  = [&](const slang::ast::Scope& sc) {
+      for (const auto& m : sc.members()) {
+        if (is_xmr_kind(m)) {
+          index.emplace(m.getHierarchicalPath().substr(pre), &m.as<slang::ast::ValueSymbol>());
+        } else if (const auto* inst = m.as_if<slang::ast::InstanceSymbol>(); inst && inst->isModule()) {
+          walk(inst->body);
+        } else if (const auto* arr = m.as_if<slang::ast::InstanceArraySymbol>()) {
+          walk(*arr);
+        } else if (const auto* blk = m.as_if<slang::ast::GenerateBlockSymbol>(); blk && !blk->isUninstantiated) {
+          walk(*blk);
+        } else if (const auto* blks = m.as_if<slang::ast::GenerateBlockArraySymbol>()) {
+          for (const auto* entry : blks->entries) {
+            if (!entry->isUninstantiated) {
+              walk(*entry);
+            }
+          }
+        }
+      }
+    };
+    walk(body);
+  }
+  auto found = it->second.find(rel);
+  return found == it->second.end() ? nullptr : found->second;
+}
+
+// Before the body lowers: one wire per child signal this module reads, for its
+// own references and for the exports it passes up from deeper instances.
+void Slang_context::declare_xmr_nets(const slang::ast::InstanceBodySymbol& body) {
+  using Need = std::function<void(const slang::ast::ValueSymbol&, slang::SourceLocation)>;
+  Need need  = [&](const slang::ast::ValueSymbol& leaf, slang::SourceLocation loc) {
+    auto hops = xmr_hops(leaf, body);
+    if (!hops || hops->empty()) {
+      return;  // local, or upward (diagnosed at the read)
+    }
+    const auto* inst = hops->front();
+    auto        key  = std::make_pair(inst, xmr_rel(leaf, *inst));
+    if (xmr_nets_.contains(key)) {
+      return;
+    }
+    const auto& type = leaf.getType();
+    if (!type.isIntegral()) {
+      emit_unsupported(loc,
+                       "unsupported-hierarchical-reference",
+                       "'" + leaf.getHierarchicalPath() + "' is read from another module but is not an integral value");
+      return;
+    }
+    auto ti   = tinfo(type);
+    auto name = ref_name_of_raw(unique_suffixed(absl::StrCat(inst->name, "__", xmr_ident(key.second)), "__xmr"));
+    builder_.create_declare_stmts(name, "wire", int_max_str(ti.bits, ti.is_signed), int_min_str(ti.bits, ti.is_signed));
+    xmr_nets_.emplace(std::move(key), Xmr_net{std::move(name), ti.bits, ti.is_signed});
+  };
+
+  if (auto it = xmr_exports_.find(&body); it != xmr_exports_.end()) {
+    for (const auto& rel : it->second) {
+      if (const auto* leaf = xmr_resolve(body, rel)) {
+        need(*leaf, leaf->location);
+      }
+    }
+  }
+  struct Refs : slang::ast::ASTVisitor<Refs, slang::ast::VisitFlags::AllGood> {
+    const Need& need;
+    explicit Refs(const Need& n) : need(n) {}
+    void handle(const slang::ast::InstanceSymbol&) {}  // a child's own refs are its business
+    void handle(const slang::ast::HierarchicalValueExpression& e) {
+      if (is_xmr_kind(e.symbol)) {
+        need(e.symbol, e.sourceRange.start());
+      }
+      visitDefault(e);
+    }
+  };
+  Refs refs(need);
+  body.visit(refs);
+}
+
+// After the body lowers: drive every export port of this module.
+void Slang_context::bind_xmr_exports(const slang::ast::InstanceBodySymbol& body) {
+  auto it = xmr_exports_.find(&body);
+  if (it == xmr_exports_.end()) {
+    return;
+  }
+  for (const auto& rel : it->second) {
+    const auto* leaf = xmr_resolve(body, rel);
+    if (leaf == nullptr || !leaf->getType().isIntegral()) {
+      continue;  // diagnosed in emit_module_io / declare_xmr_nets
+    }
+    auto ti    = tinfo(leaf->getType());
+    auto value = read_symbol(*leaf, slang::SourceRange(leaf->location, leaf->location));  // a deeper leaf goes via read_xmr
+    builder_.create_assign_stmts(xmr_port(rel), fit_wrap(value, ti.bits, ti.is_signed));
+  }
+}
+
+// A read of a child's signal: the wire declare_xmr_nets bound for it.
+std::optional<std::string> Slang_context::read_xmr(const slang::ast::ValueSymbol& sym, slang::SourceRange range) {
+  if (body_ == nullptr || !is_xmr_kind(sym) || sym.getParentScope() == body_) {
+    return std::nullopt;
+  }
+  auto hops = xmr_hops(sym, *body_);
+  if (hops && hops->empty()) {
+    return std::nullopt;
+  }
+  if (hops) {
+    auto it = xmr_nets_.find(std::make_pair(hops->front(), xmr_rel(sym, *hops->front())));
+    if (it != xmr_nets_.end()) {
+      return read_leaf(it->second.name);
+    }
+  }
+  emit_unsupported(range,
+                   "unsupported-hierarchical-reference",
+                   "'" + sym.getHierarchicalPath() + "' is " + (hops ? "a child signal this module cannot bind" : "not below this module"),
+                   "only downward reads into child module instances are supported");
+  return "0";
+}
+
 void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   // 2c-wire — a cyclic handshake's forward reference to a not-yet-lowered net is
   // handled by declaring that net a `wire` (position-independent reads), so no
@@ -8501,7 +8733,32 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
   // multi-output callees yield a tuple read by field name. A BUNDLE output is
   // per-leaf dotted ports on the Sub, so even a lone bundle output makes the
   // instance result MULTI-output (dotted tuple_get path, never bare result).
+  // The child's xmr exports are outputs too, bound or not.
+  const std::vector<std::string>* xmr_outs = nullptr;
+  if (!liberty_memory) {
+    if (auto it = xmr_exports_.find(lowering_body(inst)); it != xmr_exports_.end()) {
+      xmr_outs = &it->second;
+      n_outputs_total += xmr_outs->size();
+    }
+  }
   const bool single_out = n_outputs_total == 1 && !any_bundle_out;
+  if (xmr_outs != nullptr) {
+    for (const auto& rel : *xmr_outs) {
+      auto it = xmr_nets_.find(std::make_pair(&inst, rel));
+      if (it == xmr_nets_.end()) {
+        continue;  // another parent of this module reads it
+      }
+      auto value = result;
+      if (!single_out) {
+        value = builder_.create_lnast_tmp();
+        auto get = builder_.add_child(Lnast_ntype::create_tuple_get());
+        ln.add_child(get, Lnast_node::create_ref(value));
+        ln.add_child(get, Lnast_node::create_ref(result));
+        ln.add_child(get, Lnast_node::create_const(xmr_port(rel)));
+      }
+      builder_.create_assign_stmts(it->second.name, fit_wrap(value, it->second.bits, it->second.is_signed));
+    }
+  }
   for (const auto& [signal, path] : interface_outs) {
     const auto value = builder_.create_lnast_tmp();
     auto       get   = builder_.add_child(Lnast_ntype::create_tuple_get());

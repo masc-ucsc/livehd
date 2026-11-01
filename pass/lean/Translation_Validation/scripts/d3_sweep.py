@@ -187,6 +187,30 @@ _GROUPS: set[int] = set()
 _GROUPS_LOCK = threading.Lock()
 _SHUTDOWN = threading.Event()
 
+# Every per-probe cgroup this invocation has created and not yet removed.
+#
+# A process group is not the only thing a teardown has to give back. The worker
+# that owns a probe removes its cgroup in `run_one`'s `finally`, and on a signal
+# that `finally` MAY still run -- `_reap_all` sleeps while it waits for the
+# group to die, the worker wakes in that window and cleans up -- but it is a
+# race, and the loser leaves an empty `d3-*` directory in the shared delegated
+# base for good. Measured with the worker held in the post-probe window: the
+# handler's `os._exit` arrives first and the directory survives. Cancelling a
+# sweep is routine, so they accumulated.
+#
+# Keyed by the object, because `destroy()` is the only removal sequence and the
+# teardown must run THAT rather than a second, divergent copy of it.
+#
+# REENTRANT, and that is not a style choice. A signal handler runs in the MAIN
+# thread, and the main thread is one of the threads that takes this lock --
+# `cgroup_base()` builds and removes a detection cgroup during startup. With a
+# plain Lock, a SIGTERM landing in that window would block the handler on a
+# lock only the interrupted frame can release, and the sweep would hang instead
+# of exiting. An RLock lets the handler through, and the critical sections are
+# a single dict insert or pop.
+_LIVE_CGROUPS: dict = {}
+_LIVE_CGROUPS_LOCK = threading.RLock()
+
 # Every probe THIS INVOCATION runs lives under its own run directory, and no
 # other invocation's does.  The final teardown scans /proc for that path,
 # because tracking groups is not enough on its own: a worker thread can be
@@ -241,6 +265,26 @@ def _reap_all() -> int:
     for g in groups:
         _reap(g, grace=1.0)
     return len(groups)
+
+
+def _destroy_live_cgroups() -> int:
+    """Remove every cgroup this invocation still owns; return how many were left.
+
+    Called AFTER the processes are reaped, which is what makes the removal able
+    to succeed: a cgroup with a live process in it cannot be rmdir'd. A cgroup
+    that still refuses stays registered, so a later call tries it again, and the
+    fatal-cleanup path's own retry is unaffected.
+    """
+    with _LIVE_CGROUPS_LOCK:
+        cgs = list(_LIVE_CGROUPS.values())
+    for cg in cgs:
+        try:
+            cg.destroy()
+        except Exception:
+            # A teardown that raises leaves the rest of the list unprocessed and,
+            # on the signal path, replaces the exit code with a traceback.
+            pass
+    return len(cgs)
 
 
 def _marked_pids() -> list:
@@ -301,6 +345,9 @@ def _sweep_orphans(deadline_s: float = 12.0) -> None:
 def _teardown() -> None:
     _reap_all()
     _sweep_orphans()
+    # LAST, and only here: the processes are now certainly dead, which is the
+    # condition under which `rmdir` on a cgroup can succeed at all.
+    _destroy_live_cgroups()
 
 
 atexit.register(_teardown)
@@ -583,6 +630,11 @@ class Cgroup:
         except Exception:
             self.destroy()          # never leave a partially configured child
             raise
+        # Only a fully configured cgroup is registered: the failure path above
+        # has already removed its own, and registering before that point would
+        # hand the teardown an object whose directory is gone.
+        with _LIVE_CGROUPS_LOCK:
+            _LIVE_CGROUPS[id(self)] = self
 
     def _oom_count(self):
         """The kernel's oom_kill counter, or None if it cannot be read.
@@ -638,12 +690,20 @@ class Cgroup:
         for _ in range(50):
             try:
                 self.path.rmdir()
+                self._forget()
                 return True
             except FileNotFoundError:
+                self._forget()
                 return True
             except OSError:
                 time.sleep(0.1)
+        # Still registered on purpose: a cgroup that would not go now is exactly
+        # the one a later teardown should try again.
         return False
+
+    def _forget(self) -> None:
+        with _LIVE_CGROUPS_LOCK:
+            _LIVE_CGROUPS.pop(id(self), None)
 
 
 def _nonneg_int(text: str) -> int:

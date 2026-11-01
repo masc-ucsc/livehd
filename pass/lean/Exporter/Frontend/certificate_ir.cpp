@@ -412,6 +412,14 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
           if (i == 0 && n.op == ScanOp::SRA) {
             // bv_sra reads the value as two's complement at its own width: an
             // UNSIGNED value gains a zero bit, so the shift fills with zeros.
+            // A NON-NEGATIVE constant needs the same zero bit: at its intrinsic
+            // width its top bit can be set, and it then read as negative. A
+            // packed ROM table `(10,20,30,40)` is the constant 0x281E140A at
+            // 30 bits, and `table >> 24` gave 0xE8 instead of 40 (Pyrope equiv
+            // corpus: mem_rom, tolg_field_read_zero). Div does the same.
+            if (p.driver.kind == PinKind::Constant && !p.driver.value.starts_with('-')) {
+              width = std::max(width, p.driver.intrinsic_width + 1);
+            }
             c.deps.push_back(p.driver.kind == PinKind::Constant ? b.dep(p.driver, width) : b.signed_dep(p.driver));
           } else if (i == 0) {
             // SHL reads the value unsigned at the result width; Op_Sext reads its
@@ -522,6 +530,23 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
           const auto& p = n.operands[i];
           if (i == 1) {
             add(p, b.pin_width(p.driver));  // the mask
+          } else if (i == 0) {
+            // The BASE must be materialized at the RESULT width. bv_set_mask
+            // folds bv_set_bit over it, and bv_set_bit keeps its argument's
+            // width, so a narrower base dropped every inserted bit at or above
+            // that width (the final resize comes too late). value_dep does not
+            // widen an UNSIGNED node -- a value read never needs it -- so the
+            // zero extension is emitted here. Pyrope equiv corpus bitset_gap:
+            // `o[7:0] = i[7:0]; o[11:4] = i[15:8]` lost bits 8..11.
+            const auto own = b.pin_width(p.driver);
+            const auto w   = std::max(own, n.width);
+            if (p.driver.kind == PinKind::Constant) {
+              add(p, w);
+            } else if (!p.driver.is_signed && own < w) {
+              c.deps.push_back(b.emit({Operation::Or, 0, {}}, w, {b.dep(p.driver, own)}));
+            } else {
+              vadd(p, w);
+            }
           } else if (p.driver.kind == PinKind::Constant) {
             add(p, b.pin_width(p.driver));
           } else {

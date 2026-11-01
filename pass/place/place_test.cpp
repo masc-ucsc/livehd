@@ -72,16 +72,14 @@ TEST(Placement, ExperimentalBoundaryRefinementsRunOnlyAtTheFinalStage) {
   options.iterations              = 20;
   options.bins                    = 4;
   options.density                 = .5;
-  options.busorder.enabled        = true;
-  options.busorder.iterations     = 20;
-  options.busorder.refresh        = 10;
   options.region.max_cells        = 2;
   options.boundarypins.iterations = 20;
   options.retain_preroute_design  = true;
   for (int mode : {0, 1, 2}) {
-    const bool boundary          = mode != 0;
-    options.busorder.enabled     = mode == 0;
-    options.boundarypins.enabled = mode == 1;
+    // 0: bus order (boundary pins ordered and spaced, as synth.place.region.busorder sets); 1: boundary pins;
+    // 2: pin alignment
+    options.boundarypins.enabled = mode != 2;
+    options.boundarypins.order   = mode == 0;
     options.boundarypins.align   = mode == 2;
     // 0: optimization pending, an ordinary call (never refines); 1: pending, the dedicated refine_regions call;
     // 2: terminal (nothing pending).
@@ -112,7 +110,7 @@ TEST(Placement, ExperimentalBoundaryRefinementsRunOnlyAtTheFinalStage) {
             EXPECT_DOUBLE_EQ(pos.second, snapshot.design.node_y[node] + snapshot.design.pin_offset_y[p]);
           }
         }
-        const auto report_path = options.output_dir + (boundary ? "/boundarypins/report.json" : "/busorder/report.json");
+        const auto report_path = options.output_dir + "/boundarypins/report.json";
         EXPECT_EQ(result.floorplan.components.size(), 4u);
         // The final stage refines in the terminal pass and in the dedicated region_refine call; an ordinary
         // optimization-pending call (first placement, timing round, resize trial) never does.
@@ -126,6 +124,18 @@ TEST(Placement, ExperimentalBoundaryRefinementsRunOnlyAtTheFinalStage) {
           ASSERT_FALSE(report.HasParseError());
           ASSERT_GE(report["history"].Size(), 3u);
           EXPECT_STREQ(report["history"][report["history"].Size() - 1]["stage"].GetString(), "after_legalization");
+          {
+            // the settles keep the converged placement: seeded density weight, fillers in its free space, overflow
+            // held (a restart at the initial weight collapsed it, overflow 5% -> 50%+)
+            const auto&  history = report["history"];
+            const double before  = history[0]["real_overflow"].GetDouble();
+            for (rapidjson::SizeType i = 1; i < history.Size(); ++i) {
+              const std::string_view sample = history[i]["stage"].GetString();
+              if (sample == "settle" || sample == "iteration") {
+                EXPECT_LE(history[i]["real_overflow"].GetDouble(), before + .1) << sample;
+              }
+            }
+          }
         }
       }
     }
@@ -624,7 +634,6 @@ TEST(Placement, TwoRowCellsAreAnchoredBeforeTerminalLegalization) {
     o.macro_legalize_cells = true;
   };
   const std::vector<std::pair<std::function<void(Options&)>, std::string>> refusals{
-      {                 [](Options& o) { o.busorder.enabled = true; },                                 "region mesh"},
       {             [](Options& o) { o.boundarypins.enabled = true; },                                 "region mesh"},
       {               [](Options& o) { o.boundarypins.align = true; },                                 "region mesh"},
       {[](Options& o) { o.satlegalize = o.satlegalize_route = true; },             "satlegalize treats multi-height"},

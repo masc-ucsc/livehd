@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TODO 2l-legroute — Route-aware legalization with a SAT solver</title>
+<link rel="stylesheet" href="../todo.css">
+</head>
+<body>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<main>
+<h1><strong class="item-id">2l-legroute</strong> Route-aware legalization with a SAT solver</h1>
+<p><strong>legroute</strong> is route-aware legalization: it replaces the LiveHD legalizer (opt-in,
+<code>synth.place.legroute=true</code>). Cells are grouped into <em>cell-boxes</em>; a SAT solver places
+the boxes of each region on a tile grid so that the box-to-box routes fit the tracks <em>by
+construction</em>. Routability is guaranteed instead of guessed from density targets, so the design can be
+packed denser and the routes stay simple (straight and L). Quality order, given a routable design:
+<strong>WNS</strong>, then <strong>TNS</strong>, then wire length and vias.</p>
+<p><span class="status">Redesign 2026-10-30: SAT placement replaces the min-cost snap, the bin spill and
+PathFinder</span> The guide lists current decisions only. Partition vocabulary (grid, region, bin) follows
+<a href="3g-partitions.html">3g-partitions</a>.</p>
+
+<h2>Building blocks</h2>
+<table>
+<tr><th>Name</th><th>Definition</th><th>Main properties</th></tr>
+<tr><td><strong>cell-box</strong></td>
+<td>A small group of directly connected cells treated as one custom cell (2 × the widest flop, two
+rows).</td>
+<td><ul>
+<li>A cell never leaves its box. Nets with all pins inside a box are internal: legroute.final routes them,
+and they lower the pins the solver deals with.</li>
+<li>Built by connectivity (agglomeration c1_T20_pa_cd4). Fill is high but not 100%: the leftover space is
+for later sizing.</li>
+</ul></td></tr>
+<tr><td><strong>tile</strong></td>
+<td>One box-sized location of a grid aligned to the rows and sites.</td>
+<td>Holds at most one box. Fixed cells lower its free width; macros (with halo) block whole tiles and snap
+to the tile grid unless they have a custom location.</td></tr>
+<tr><td><strong>track capacity</strong></td>
+<td>Per tile and <em>per direction</em>: the horizontal tracks of all H layers summed, and the vertical
+tracks of all V layers summed.</td>
+<td><ul>
+<li>Layers are not in the SAT model. After placement the track assignment gives each trace its layer and
+track by criticality, inside the space the SAT guaranteed.</li>
+<li>Power stripes and the clock spine take their tracks first (reservations; both get nicer constraints
+later). One track per layer stays free for pin access.</li>
+<li>Each box lowers the capacity over its tile by an approximate in-box demand derived from its internal
+nets (not their plain count: in-box nets can be H or V and discontinuous).</li>
+</ul></td></tr>
+<tr><td><strong>region</strong></td>
+<td>A busorder region. It is the unit of the SAT model.</td>
+<td>The region size comes from the region creation parameter (max cells), not from legroute. It is tuned
+so that legroute.local on sha3 takes about 5 minutes on one thread (soft target; larger regions trade
+time for freedom).</td></tr>
+<tr><td><strong>virtual IO pin</strong></td>
+<td>Where a cross-region net crosses the region boundary.</td>
+<td>Fixed while a region is solved; a route from a box to it ends on its tile.</td></tr>
+</table>
+
+<h2>Passes</h2>
+<table>
+<tr><th>Pass</th><th>What it does</th></tr>
+<tr><td><strong>legroute.local</strong></td>
+<td><ol>
+<li><strong>Boxes.</strong> Build the cell-boxes and their in-box demand.</li>
+<li><strong>Routability (baseline SAT).</strong> Per region, any box may take any free tile. The only
+constraints are placement (one tile per box, one box per tile) and track capacity per tile and direction
+for the chosen route shapes. Any answer is routable.</li>
+<li><strong>Timing tiers (incremental SAT).</strong> Constraints that help timing are added one at a time
+under assumptions and kept only when the solver stays SAT <em>and</em> the timing proxy improves (see
+below). Starting points may change for speed, but every answer keeps the baseline's guarantee.</li>
+<li><strong>Traces.</strong> The chosen shapes become metal with vias: straight and L legs on real tracks
+(layer by criticality), bends and the vias between the legs included.</li>
+</ol></td></tr>
+<tr><td><strong>legroute.final</strong></td>
+<td>Each cell-box alone (independent, so parallel): pick the cell positions inside the box so it routes (a
+small SAT or search), then connect its pins to the lanes that reach or cross the box, one trace at a time,
+adding metal and vias inside the box only. Boxes that fail are placed for real and legroute.local runs again
+with their actual in-box demand.</td></tr>
+<tr><td><strong>legroute.global</strong> (optional, later)</td>
+<td>Whole-chip critical cross-region traces fixed or constrained ahead of the regions.</td></tr>
+</table>
+<p>All or nothing: unless every net closes, no signal wire is written and an external router starts from the
+legal placement.</p>
+
+<h2>SAT model (legroute.local)</h2>
+<ul>
+<li><strong>Solver:</strong> <code>Sat_solver</code> with CaDiCaL (fastest in the 2026-10-29 benchmark),
+incremental, assumptions for the tiers. No flow or CP solver.</li>
+<li><strong>Placement:</strong> a box's column and row in order encoding; a tile literal per (box, free tile);
+exactly one tile per box, at most one box per tile.</li>
+<li><strong>Connections:</strong> a 1-1 net is one connection; a 1-n net is the set of connections from its
+driver to each sink (a Steiner tree approximated by L-shapes). A virtual IO pin or fixed cell is an endpoint
+at a fixed tile.</li>
+<li><strong>Shapes:</strong> each connection picks H-first or V-first (one bit); a straight connection is
+both. Each leg covers every tile from end to end in its row or column, the boxes' own tiles included (an
+external pin always needs a trace in its box).</li>
+<li><strong>Overlap is free within a net:</strong> per tile and direction one literal per net, implied by
+any of its connections' legs covering the tile. Capacity is a cardinality constraint over those literals
+plus the in-box demand of the box on the tile.</li>
+<li><strong>Later, as tiers or exceptions:</strong> trivial Steiner shapes for 1-n nets (all sinks on one
+row or column, or two crossing axes); adjacent 1-1 nets cost no track (in-box metal).</li>
+</ul>
+
+<h2>Pre-placement, policies and density push (experimental options, off by default)</h2>
+<ul>
+<li><strong>Fixed ahead of the SAT:</strong> the top critical boxes on their timing tiles; 1-n trees, highest
+fanout first, skipping a net that would leave a tile with less than half of its tracks free, until the
+region's model estimate is under 10M clauses; IO pre-routes (pin to pin, and pin to one box to pin with the
+box held under the track). Fixed demand over a tile's tracks drops trees, then unpins critical boxes.</li>
+<li><strong>Two policies per region, in parallel:</strong> the options and a second set
+(<code>sat_alt</code>) that fails differently (more fixed: fast UNSAT; fewer fixed: timeouts). A region keeps a
+routable answer, the shorter weighted routes when both are.</li>
+<li><strong>Density push:</strong> a region without a routable answer pushes a fraction of its least critical
+free boxes, nearest first, to neighbor regions with free tiles, and the changed regions solve again. A region
+whose model is unchanged (same clauses) keeps its earlier answer.</li>
+</ul>
+
+<h2>Routability probe (GOALPlace-style inflation, off by default)</h2>
+<ol>
+<li>After GP converges, before bus order: small probe regions (about 1,200 cells, no virtual pins) run
+legroute.local with a short SAT limit; regions at or under 50% box fill are taken as routable.</li>
+<li>Cells of the regions without a routable answer widen in x by r = box fill / target, at most 1.5. The
+target is the median fill of the probe regions that solved, at most 0.6. The top 10% of cells by timing
+weight keep their size (GOALPlace's 10-quantile guard).</li>
+<li>GP resumes from the converged placement (its density weight, fillers in the whitespace) for a bounded
+number of iterations; the widths come back with the cells' centres kept.</li>
+<li>No room for the inflation at the GP target density: a generated core grows
+(<code>place.allow_increase_area</code>, on by default) and <code>lhd synth</code> runs again at the
+utilization that fits, the GP target density lowered with it (utilization + 0.05), at most twice. A fixed
+core (die, core or floorplan given) keeps its size and the inflation scales down.</li>
+<li>Then the real run: bus order and pinalign, critical boxes and 1-n trees pinned (the trees avoid a
+DCGP-style congestion potential: a Poisson-smoothed map of per-tile routing demand over tracks), two policies
+per region in parallel, the better answer kept.</li>
+<li>If that run still leaves a region without a routable answer, placement stops: not routable.</li>
+</ol>
+<p>Measured so far: 1-n nets are typical (61&ndash;88% of boxes sit on a net with 16 or more sinks in every
+design tried). Routability follows box fill: regions under about 65% fill solve, at 75% or more most fail.
+Box fill follows the GP target density (fill is about 1.15 &times; density), not the utilization.</p>
+
+<h2>Region cuts (busorder regions)</h2>
+<ul>
+<li>No net dips into a region through one side with zero or one cell inside: a cell whose nets all leave
+through one side moves across it, and a pinless RSMT piece with all its crossings on one boundary line is
+dropped (<code>place.region.cleancuts</code>).</li>
+<li>Virtual pins on opposite region edges align across zero or one cell (pinalign) and, for a trunk through
+cells, when already within a pin pitch (<code>place.region.pinalign.near</code>); bus order wins over
+alignment.</li>
+</ul>
+
+<h2>Experiments that did not work</h2>
+<p>sha3 and minimax (asap7, 10 GHz SDC), legroute.local at 1&times; tracks unless noted. "Routable" counts
+regions with a SAT answer. Every option below exists, off by default, unless marked removed.</p>
+<table>
+<tr><th>Idea</th><th>What happened</th><th>Why (best reading)</th></tr>
+<tr><td>Fewer clauses through the choice of fixed trees: percent of boxes, the 50% track rule, most
+critical first, 30% or 70% rules, a 5M target (<code>tree_load</code>, <code>tree_by_crit</code>,
+<code>tree_clauses</code>)</td>
+<td>At 1&times; only one sha3 region solves under every rule. At 1.25&times; the 50% rule is best (4 of 9).
+More fixed boxes: fast UNSAT. Fewer: timeouts.</td>
+<td>The tracks run out, not the search; the rule only moves which way a region fails.</td></tr>
+<tr><td>Trees keep the most tracks free instead of the shortest RC (<code>tree_room</code>)</td>
+<td>No change (3 of 9 at 1.25&times;).</td>
+<td>Most regions start under 10M clauses and get no trees at all.</td></tr>
+<tr><td>IO pre-route: pin-to-pin feedthroughs and pin&ndash;box&ndash;pin tracks routed ahead
+(<code>io_preroute</code>)</td>
+<td>About 12% fewer clauses, every region near 10M or less; routability unchanged (within noise).</td>
+<td>Kept as a model-size reduction, not a routability fix.</td></tr>
+<tr><td>Pinalign (and <code>pinalign.near</code>) to straighten feedthroughs</td>
+<td>550 candidates, 390 already aligned, 19 newly aligned, 139 blocked by bus order or spacing; routable
+regions unchanged or one fewer.</td>
+<td>Bus order already lines most feedthroughs up.</td></tr>
+<tr><td>Clean region cuts: no 0/1-cell dips through one side (<code>place.region.cleancuts</code>)</td>
+<td>About 20 boxes moved; no change in which regions solve.</td><td>Rare in practice.</td></tr>
+<tr><td>Two policies per region in parallel (<code>sat_alt</code>)</td>
+<td>The second policy wins 0&ndash;2 regions; a fewer-trees second policy builds 15&ndash;26M-clause models
+that always time out.</td>
+<td>Both policies fail on the same dense regions.</td></tr>
+<tr><td>Density push: boxes of failing regions move to neighbors (<code>push_rounds</code>)</td>
+<td>The neighbors that receive boxes stop solving (sha3 went from 3 routable regions to 2 at 1.25&times;); now
+the best round is kept, so it can only waste time.</td>
+<td>The neighbors are as dense; moving boxes moves the problem.</td></tr>
+<tr><td>Lower utilization alone (0.45&ndash;0.55)</td>
+<td>Most regions stay at 0.75&ndash;0.85 box fill; only sparse leftovers solve.</td>
+<td>GP packs cells to its target density whatever the core size.</td></tr>
+<tr><td>Density aimed straight at the learned target fill on the core-growth restart</td>
+<td>Worse: sha3 0 of 12 routable, minimax 3 of 10 (mostly timeouts), against 2 of 8 and 10 of 13 with
+density = utilization + 0.05.</td>
+<td>Unclear; the lower fill did not make the regions easier. Reverted.</td></tr>
+<tr><td>Congestion-aware trees (<code>tree_congestion</code>, DCGP-style potential)</td>
+<td>No measurable change at a fixed utilization (2 of 10 sha3 regions with and without).</td>
+<td>The fixed trees are a small part of the demand.</td></tr>
+<tr><td>Region size by clause estimate</td>
+<td>Not built: regions are already near 10M clauses, and small ones fail too (68 boxes, 0.8M clauses,
+timeout; 94 boxes, UNSAT in 0.15 s).</td>
+<td>Model size is not what makes a region hard.</td></tr>
+<tr><td>Min-cut sub-regions (VieCut, <code>subregion_cells</code>)</td>
+<td>No routability gain; the work moved to larger regions with more fixed ahead instead.</td>
+<td>Same density, same tracks.</td></tr>
+</table>
+
+<h2>Status (2026-10-31)</h2>
+<ul>
+<li>litedram (utilization 0.45) is fully routable: 8 of 8 regions, SAT 118 s.</li>
+<li>minimax: 10 of 13 regions with the probe, core growth to 0.54 and density lowered with it.</li>
+<li>sha3: 1&ndash;2 of 8&ndash;12 regions in every setting. The best was 6 of 12, at utilization 0.45, density
+0.55, 2,500-cell regions, no probe.</li>
+<li>Lower bound per region (in-box demand plus each net's legs across the gaps between its endpoints'
+windows): failing sha3 regions need only 41&ndash;76% of their H tracks and 31&ndash;47% of V. Regions fail
+well under capacity, so the routes the model allows are long or local.</li>
+<li>H is the binding direction everywhere: in-box demand alone takes 20&ndash;25% of the H tracks.</li>
+<li>The relax diagnostic (drop UNSAT cores of tile bounds) never reaches SAT in three rounds: the shortage is
+spread over the region, not a few tiles at virtual pins or fixed boxes.</li>
+</ul>
+
+<h2>Plan</h2>
+<ol>
+<li><strong>Steiner connections instead of stars.</strong> Every 1-n net becomes one trunk (H or V, on an
+endpoint's row or column) with ribs, the shape the fixed trees already use. Today each sink is its own L from
+the first endpoint. First measure star against trunk H demand on sha3 offline to size the gain.</li>
+<li><strong>Z-shapes.</strong> One extra bend per connection, so a route can step around a full row.</li>
+<li><strong>Tree templates.</strong> sha3's 1-n nets repeat (half of them fall in 19 driver/sink-type
+structures, 88% have a twin): solve each structure's box pattern and trunk once and reuse it.</li>
+<li><strong>In-box demand.</strong> The 20&ndash;25% H share is an estimate (internal-net spans plus a quarter
+of the external pins); calibrate it against legroute.final's in-box routes.</li>
+<li><strong>Then</strong> the timing tiers, legroute.final speed, and partition_m.</li>
+</ol>
+
+<h2>Timing tiers</h2>
+<p>Each tier adds constraints that must stay SAT; it is kept when the proxy improves. The proxy is the
+box-to-box RC only (no in-box taps, no load detail): WNS plus the top x% critical paths, pushed as short as
+possible.</p>
+<ol>
+<li>Critical 1-1 nets adjacent (straight).</li>
+<li>Cells connected to a virtual IO pin next to it.</li>
+<li>Critical boxes near their global-placement location.</li>
+<li>Long critical traces take three tracks (metal plus a free track on each side: coupling K=2 to K=1).</li>
+</ol>
+
+<h2>Removed</h2>
+<p>The min-cost snap (LEMON), the RUDY bin spill and PathFinder pattern routing: density targets and
+negotiation guess routability; the SAT model guarantees it.</p>
+
+<h2>Evaluation</h2>
+<ul>
+<li>Per region: model size (variables, clauses), SAT time, UNSAT regions; per tier: kept or not, proxy WNS
+and top-path delay.</li>
+<li>Designs: lfsr for iteration, sha3 for time (legroute.local about 5 minutes), then partition_m.</li>
+<li>OpenROAD routing of the legal placement stays the external reference until legroute.final closes every
+net.</li>
+</ul>
+</main>
+</body>
+</html>

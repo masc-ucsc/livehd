@@ -28,6 +28,7 @@ void Slang_context::process_root(const slang::ast::RootSymbol& root) {
   for (auto inst : root.topInstances) {
     top_defs_.insert(std::string(inst->getDefinition().name));
   }
+  scan_hier_refs(root);  // a child lowers before its parent reads it
   for (auto inst : root.topInstances) {
     lower_module(*inst);
   }
@@ -353,6 +354,16 @@ std::string Slang_context::lname_of(const slang::ast::Symbol& sym) {
   auto it = sym_lname_.find(&sym);
   if (it != sym_lname_.end()) {
     return it->second;
+  }
+  // A child's signal has no name here; only read_xmr may reach it.
+  if (body_ != nullptr && (sym.kind == slang::ast::SymbolKind::Variable || sym.kind == slang::ast::SymbolKind::Net)) {
+    const auto hops = xmr_hops(sym.as<slang::ast::ValueSymbol>(), *body_);
+    if (!hops || !hops->empty()) {
+      emit_unsupported(sym.location,
+                       "unsupported-hierarchical-reference",
+                       "'" + sym.getHierarchicalPath() + "' is accessed from another module in a form --reader slang cannot lower",
+                       "only whole reads of a child instance's signal are supported");
+    }
   }
 
   // The escape introducer belongs to the RAW symbol name, so it must be dropped

@@ -28,7 +28,7 @@ memory route) stays in `formal/lean`; everything here builds on it.
 
 ## Build
 
-The Lean pin (4.31.0) lives in `formal/lean`, so build from there:
+The Lean pin (4.36.0-rc1) lives in `formal/lean`, so build from there:
 
 ```bash
 cd formal/lean

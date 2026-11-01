@@ -116,16 +116,26 @@ def parseModel (stdout : String) : Std.HashMap Nat Bool := Id.run do
           if z ≠ 0 then m := m.insert z.natAbs (0 < z)
   return m
 
+/-- The AIG node of every atom. Std (Lean 4.36) gives an atom the CNF variable
+of its own node; Lean 4.31's numbering was `atom + decls.size`. The relabelled
+AIG the CNF comes from has the same nodes, so the original one serves. -/
+def atomNodes (aig : Std.Sat.AIG BVBit) : Std.HashMap BVBit Nat := Id.run do
+  let mut m : Std.HashMap BVBit Nat := {}
+  for (d, i) in aig.decls.zipIdx do
+    if let .atom a := d then m := m.insert a i
+  return m
+
 /-- The value the model gives primary variable `var`, `w` bits wide. Bits the
-formula never mentions are 0. -/
-def modelValue (map : Std.HashMap BVBit Nat) (aigSize : Nat) (model : Std.HashMap Nat Bool)
+formula never mentions are 0. `nodes` is `atomNodes` of the obligation's AIG;
+a DIMACS variable is the CNF variable plus one. -/
+def modelValue (nodes : Std.HashMap BVBit Nat) (model : Std.HashMap Nat Bool)
     (var w : Nat) : Nat := Id.run do
   let mut v := 0
   for b in List.range w do
     if h : b < w then
       let bit : BVBit := { var, w, idx := ⟨b, h⟩ }
-      match map[bit]? with
-      | some c => if model.getD (c + aigSize + 1) false then v := v ||| (1 <<< b)
+      match nodes[bit]? with
+      | some i => if model.getD (i + 1) false then v := v ||| (1 <<< b)
       | none   => pure ()
   return v
 
@@ -139,7 +149,7 @@ structure SpecLine where
 def parseSpec (text : String) : Except String (List SpecLine) := do
   let mut out : List SpecLine := []
   for raw in text.splitOn "\n" do
-    let line := ((raw.splitOn "#").headD "").replace "\t" " " |>.trim
+    let line := ((raw.splitOn "#").headD "").replace "\t" " " |>.trimAscii |>.toString
     if line.isEmpty then continue
     match (line.splitOn " ").filter (fun w => !w.isEmpty) with
     | [] => continue
@@ -216,9 +226,8 @@ substitutes takes its constant, or the variable it shares. -/
 def decodeStepT (φ : BVLogicalExpr) (model : Std.HashMap Nat Bool) (L : Shape) (inW : List Nat) (T : Tmpl) :
     StateM × Array RuntimeInput := Id.run do
   let entry := φ.bitblast
-  let (_, map) := entry.relabelNat'
-  let aigSize := entry.aig.decls.size
-  let val (var w : Nat) : Int := Int.ofNat (modelValue map aigSize model var w)
+  let nodes := atomNodes entry.aig
+  let val (var w : Nat) : Int := Int.ofNat (modelValue nodes model var w)
   let flops := (L.fws.zipIdx.map fun (w, f) =>
     match T.find? (fun x => x.key == f) with
     | some (.alias _ g) => mk_bv w (val g w)
@@ -291,7 +300,7 @@ def groupedState (names : Array String) (st : StateM) : List (String × String) 
     let (base, bit) := match parts.getLast? with
       | some r =>
         if parts.length ≥ 2 && r.endsWith "]" then
-          match (r.dropRight 1).toNat? with
+          match (r.dropEnd 1).toString.toNat? with
           | some k => ("[".intercalate parts.dropLast, k)
           | none => (nm, 0)
         else (nm, 0)

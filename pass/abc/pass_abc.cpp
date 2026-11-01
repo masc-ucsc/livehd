@@ -170,7 +170,7 @@ void Pass_abc::add_mapping_labels(Eprp_method& m) {
                        "cap the fanout of every net ABC maps, by appending `buffer -N <n>; dnsize {B}` to the "
                        "built-in flows (0 disables the tail, sizing included). A custom `flow` places `{F}` -- the bare "
                        "number -- and `{B}` itself",
-                       "32");
+                       "16");
   // A delay target is a BUDGET. ABC's own `&nf -D` is a no-op for the mapper
   // (giaNf.c reads MapDelayTarget, which `-D` never writes), so without this the
   // built-in flow always maps for MINIMUM delay -- which is right for a tight
@@ -1056,9 +1056,9 @@ void Pass_abc::map_with(Eprp_var& var, const std::function<void(livehd::abc::Map
       livehd::diag::err("pass.abc", "bad-icg-fanout", "syntax").msg("pass.abc.icg_input_min '{}' is not an integer", s).fatal();
     }
   }
-  uint64_t max_fanout = 32;
+  uint64_t max_fanout = 16;
   {
-    const auto s_mf = std::string{var.get("max_fanout", "32")};
+    const auto s_mf = std::string{var.get("max_fanout", "16")};
     auto*      b    = s_mf.data();
     auto*      e    = s_mf.data() + s_mf.size();
     auto [p, ec]    = std::from_chars(b, e, max_fanout);

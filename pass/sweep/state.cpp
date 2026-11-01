@@ -798,21 +798,71 @@ struct State_sweeper {
       }
       return join(load, hold);
     };
-    const auto fixpoint = [&]() {
+    // Dependents: flop f -> the candidate flops whose next state reads f's Q through combinational logic. A bit that falls out
+    // only invalidates those, so each round re-evaluates the flops downstream of the last round's drops instead of the whole
+    // design (the full re-evaluation per round made a ring of thousands of FIFOs quadratic).
+    std::vector<std::vector<int32_t>> dependents(flops.size());
+    {
+      absl::flat_hash_set<hhds::Class_index> seen;
+      std::vector<hhds::Node_class>          stack;
+      for (size_t f = 0; f < flops.size(); ++f) {
+        seen.clear();
+        stack.clear();
+        const auto push_sink = [&](const char* name) {
+          const auto drv = gu::get_driver_of_sink_name(flops[f].node, name);
+          if (!drv.is_invalid() && !drv.is_const() && !gu::is_graph_input_pin(drv)) {
+            stack.push_back(drv.get_master_node());
+          }
+        };
+        push_sink("din");
+        push_sink("enable");
+        while (!stack.empty()) {
+          const auto node = stack.back();
+          stack.pop_back();
+          if (!seen.insert(node.get_class_index()).second) {
+            continue;
+          }
+          if (gu::type_op_of(node) == Ntype_op::Flop) {
+            if (const auto it = flop_of.find(node.get_class_index()); it != flop_of.end()) {
+              dependents[static_cast<size_t>(it->second)].push_back(static_cast<int32_t>(f));
+            }
+            continue;
+          }
+          for (const auto& sink : node.inp_sorted_pins()) {
+            for (const auto& d : sink.get_driver_pins()) {
+              if (!d.is_const() && !gu::is_graph_input_pin(d)) {
+                stack.push_back(d.get_master_node());
+              }
+            }
+          }
+        }
+      }
+    }
+    const auto fixpoint = [&](std::vector<int32_t> dirty) {
       int rounds = 0;
-      for (int round = 0; round < 100'000; ++round) {
-        bool dropped = false;
+      std::vector<bool> in_dirty(flops.size(), false);
+      for (const auto f : dirty) {
+        in_dirty[static_cast<size_t>(f)] = true;
+      }
+      while (!dirty.empty() && rounds < 100'000) {
         ++rounds;
+        std::vector<int32_t> next_dirty;
+        std::sort(dirty.begin(), dirty.end());
+        for (const auto f : dirty) {
+          in_dirty[static_cast<size_t>(f)] = false;
+        }
         for (size_t gi = 0; gi <= groups.size(); ++gi) {
           absl::flat_hash_map<hhds::Class_index, Val> assumed;
           if (gi > 0) {
             assumed.emplace(groups[gi - 1].reset_net, groups[gi - 1].inactive);
           }
           Evaluator ev(flop_of, flops, 400'000'000, assumed);
-          for (auto& info : flops) {
+          for (const auto f : dirty) {
+            auto& info = flops[static_cast<size_t>(f)];
             if (info.group != static_cast<int32_t>(gi)) {
               continue;
             }
+            bool dropped = false;
             for (int i = 0; i < info.width; ++i) {
               const int8_t k = info.klass[static_cast<size_t>(i)];
               if (k < 0) {
@@ -824,15 +874,29 @@ struct State_sweeper {
                 dropped                            = true;
               }
             }
+            if (dropped) {
+              for (const auto d : dependents[static_cast<size_t>(f)]) {
+                if (!in_dirty[static_cast<size_t>(d)]) {
+                  in_dirty[static_cast<size_t>(d)] = true;
+                  next_dirty.push_back(d);
+                }
+              }
+              if (!in_dirty[static_cast<size_t>(f)]) {  // its own hold value changed
+                in_dirty[static_cast<size_t>(f)] = true;
+                next_dirty.push_back(f);
+              }
+            }
           }
         }
-        if (!dropped) {
-          return rounds;
-        }
+        dirty = std::move(next_dirty);
       }
       return rounds;
     };
-    stats.fix_rounds += static_cast<size_t>(fixpoint());
+    std::vector<int32_t> all_flops(flops.size());
+    for (size_t f = 0; f < flops.size(); ++f) {
+      all_flops[f] = static_cast<int32_t>(f);
+    }
+    stats.fix_rounds += static_cast<size_t>(fixpoint(all_flops));
     // A free bit that fell out of the "starts at 0" hypothesis may be a constant 1.
     std::vector<std::pair<size_t, int>> retry;
     for (size_t f = 0; f < flops.size(); ++f) {
@@ -848,7 +912,7 @@ struct State_sweeper {
       }
     }
     if (!retry.empty()) {
-      stats.fix_rounds += static_cast<size_t>(fixpoint());
+      stats.fix_rounds += static_cast<size_t>(fixpoint(all_flops));
     }
     for (const auto& info : flops) {
       for (int i = 0; i < info.width; ++i) {

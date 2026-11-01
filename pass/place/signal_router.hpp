@@ -55,6 +55,17 @@ struct Signal_route_request {
   // Explicit deeper search for consumers that materialize routes. The default
   // existence query declines detours; this does not relax any acceptance gate.
   bool                           search_detours        = false;
+  // A tap: one pin joins metal of its net already in the occupancy (wires on
+  // signal layers). The maze ends on any anchor; the caller checks the whole
+  // net's connectivity once every pin is tapped.
+  std::vector<physical::Shape>   anchors;
+  // A join: a net without connections whose metal pieces are already in the
+  // occupancy. The maze runs from these pieces to the anchors (only vias and
+  // short wires between them), so a caller's planar wires meet legally.
+  std::vector<physical::Shape>   sources;
+  // Maze wire-length weight per layer (missing: 1, at least 1). A heavier low
+  // layer makes a tap climb early instead of running over other pins.
+  std::map<std::string, double>  layer_cost;
 };
 struct Signal_route_proposals {
   std::vector<Signal_route_geometry> candidates;  // baseline first; not timing-ranked
@@ -94,6 +105,9 @@ class Signal_router {
   Signal_route_trial propose_pattern_impl(const physical::Net&, const Signal_route_limits&, bool simple) const;
   Signal_route_trial propose_span_impl(const physical::Net&, const Signal_route_limits&, const physical::Shape*,
                                        const Pin_escape_guard* = nullptr) const;
+  Signal_route_trial propose_maze_impl(const physical::Net&, const Signal_route_limits&,
+                                       const std::vector<physical::Shape>* sources, const std::vector<physical::Shape>* anchors,
+                                       const std::map<std::string, double>* layer_cost) const;
   // One search stage's result. Past the deadline, expired() marks it timed
   // out with the "route deadline" reason; fail() records any other reason.
   struct Stage_trial {
@@ -138,6 +152,13 @@ public:
   Signal_route_trial propose(const physical::Net&, const Signal_route_limits&) const;
   Signal_route_trial propose_pattern(const physical::Net&, const Signal_route_limits&) const;
   Signal_route_trial propose_maze(const physical::Net&, const Signal_route_limits&) const;
+  // One pin to its net's anchors (Signal_route_request::anchors), weighted per layer.
+  Signal_route_trial     propose_tap(const physical::Net&, const Signal_route_limits&, const std::vector<physical::Shape>& anchors,
+                                     const std::map<std::string, double>& layer_cost) const;
+  // Two pieces of a net's metal (Signal_route_request::sources to anchors).
+  Signal_route_trial     propose_join(const physical::Net&, const Signal_route_limits&, const std::vector<physical::Shape>& sources,
+                                      const std::vector<physical::Shape>&  anchors,
+                                      const std::map<std::string, double>& layer_cost) const;
   Signal_route_trial propose_span(const physical::Net&, const Signal_route_limits&) const;
 };
 }  // namespace livehd::placement

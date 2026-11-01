@@ -726,6 +726,7 @@ cc_library(
         ":prects_networks",
         ":satlegalize",
         ":terminal_legalize",
+        ":legroute",
         "//core",
         "//graph",
         "//inou/lefdef:index_union_find",
@@ -936,6 +937,39 @@ cc_library(
     hdrs = ["satlegalize.hpp"],
     copts = COPTS,
     deps = [":cell_criticality", ":prects_networks", ":sat_solver", ":signal_router", "//core", "//inou/lefdef:inou_lefdef"],
+)
+# legroute: route-aware legalization with 2x2 cell-boxes on a tile grid (todo/livehd/2l-legroute.html)
+cc_library(
+    name = "legroute",
+    srcs = [
+        "legroute.cpp",
+        "legroute_boxes.cpp",
+        "legroute_cut.cpp",
+        "legroute_final.cpp",
+        "legroute_grid.cpp",
+        "legroute_internal.hpp",
+        "legroute_route.cpp",
+        "legroute_sat.cpp",
+    ],
+    hdrs = ["legroute.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":row_occupancy",
+        ":sat_solver",
+        ":signal_router",
+        ":steiner_topology",
+        "//core",
+        "//inou/lefdef:inou_lefdef",
+        "//third_party/viecut",
+    ],
+)
+cc_test(
+    name = "legroute_test",
+    size = "small",
+    srcs = ["legroute_test.cpp", "legroute_internal.hpp"],
+    copts = COPTS,
+    deps = [":legroute", "@googletest//:gtest_main"],
 )
 cc_test(
     name = "sat_solver_test",

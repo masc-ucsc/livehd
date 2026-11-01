@@ -124,7 +124,7 @@ SLANG_LADDER = {
     "operators": "lec",
     "params_submodule": "lec",
     "pick": "lec",
-    "punch": "lec",
+    "punch": "error",  # hier writes, upward and sibling refs are unsupported
     "punching": "lec",
     "punching_3": "lec",
     "random_delay": "lec",

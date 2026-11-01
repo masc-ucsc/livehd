@@ -507,9 +507,39 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
     mi.is_rom = true;
   }
 
-  // type 0/2 = async/array (combinational read); type 1 = sync-read (registered
-  // read data, modeled with a read-data register field + sram_sync_read_reg_next).
-  if (!(mi.type == 0 || mi.type == 1 || mi.type == 2)) {
+  // posclk = 2 (Ntype::Memory_posclk_mixed): the ports commit on DIFFERENT
+  // clock edges. A DesignCert memory commits on one edge, and `posclk != 0`
+  // below would read 2 as rising, moving every falling-edge port to the rising
+  // edge. Measured: a negedge write port fed by a posedge register stored the
+  // previous period's value, 6 of 8 periods wrong against Icarus. pass.single_edge
+  // skips such a memory ("no negedge state"), so nothing upstream normalizes it.
+  if (mi.posclk == Ntype::Memory_posclk_mixed) {
+    fatal(ctx,
+          memory_policy_summary(mi)
+              + ". The memory's ports commit on DIFFERENT clock edges (`posclk` = 2, Memory_posclk_mixed); a certificate "
+                "memory commits on one edge, and reading 2 as rising would silently move the falling-edge ports. "
+                "Split the memory by edge in the RTL, or blackbox it.");
+  }
+
+  // type 2 = a COMBINATIONAL array (Pyrope `mut`/`const`): no clock and no
+  // state across cycles, and every read sees every write of the cycle (upass
+  // lowers it writes-before-reads; its `fwd` = 1 is a placeholder, "the matrix
+  // is irrelevant"). The persistent-RAM model below would keep the array across
+  // cycles and read `fwd` as a per-port matrix, so a second read port missed the
+  // cycle's write: measured 8 of 8 periods wrong on a two-read array that
+  // `lhd sim` gets right. Refused until it has its own lowering.
+  if (mi.type == Ntype::Memory_type_array) {
+    fatal(ctx,
+          memory_policy_summary(mi)
+              + ". type=2 is a COMBINATIONAL array: no state across cycles, and every read sees every write of the "
+                "cycle. pass.lean's memory model is a persistent RAM with a per-port forwarding matrix, which is a "
+                "different function. Refusing until combinational arrays have their own lowering.");
+  }
+
+  // type 0 = async read (combinational read of the stored array); type 1 =
+  // sync-read (registered read data, modeled with a read-data register field +
+  // sram_sync_read_reg_next).
+  if (!(mi.type == 0 || mi.type == 1)) {
     // type 3 is the MIXED sentinel: the read ports disagree, so there is no
     // scalar answer and the per-port `rdport` pins are authoritative. The
     // scanner CARRIES that now (Memory_port_info::rd_sync), but the lowering
@@ -531,9 +561,7 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
       detail = ". Read ports disagree on timing: sync {" + sync_ports + "}, async {" + async_ports
                + "}. The per-port record is present; the lowering is not yet per-port.";
     }
-    fatal(ctx,
-          memory_policy_summary(mi) + ". pass.lean memory supports async/array (type 0/2) and sync-read (type 1) only"
-              + detail);
+    fatal(ctx, memory_policy_summary(mi) + ". pass.lean memory supports async (type 0) and sync-read (type 1) only" + detail);
   }
   if (mi.undef) {
     fatal(ctx,

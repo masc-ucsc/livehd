@@ -4,13 +4,14 @@
 #include <iostream>
 
 #include "certificate_ir.hpp"
+#include "design_io_meta.hpp"
 #include "design_scan.hpp"
 #include "diag.hpp"
-#include "design_io_meta.hpp"
 #include "emit_dcert.hpp"
 #include "emit_design_cert.hpp"
 #include "lean_format.hpp"
 #include "legacy_model.hpp"
+#include "reduce_lower.hpp"
 
 static Pass_plugin pass_plugin_lean("pass_lean", Pass_lean::setup);
 Pass_lean::Pass_lean(const Eprp_var& var) : Pass("pass.lean", var), LeanOptions(var) {}
@@ -53,7 +54,13 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
     livehd::diag::warn("pass.lean", "no-input", "io").msg("received a null Graph instance").emit();
     return;
   }
-  const auto design      = lean_export::scan_design(*graph, {strict, max_width, max_nodes});
+  // Rxor (`^a`) and Popcount have no certificate operator. Expand them in a
+  // private copy into Get_mask bits joined by an Xor / Sum tree, exactly as
+  // pass.isabelle does, so the certificate uses only ops the Lean semantics
+  // already has. A graph with neither cell is returned unchanged (no copy).
+  hhds::GraphLibrary reduction_scratch;
+  const auto         lowered     = livehd::graph_util::lower_counted_reductions_copy(graph, reduction_scratch);
+  const auto         design      = lean_export::scan_design(*lowered, {strict, max_width, max_nodes});
   const auto certificate = lean_export::build_certificate(design, {});
   const auto raw_name    = top.empty() ? design.name : top;
   const auto base_name   = lean_export::sanitize_lean(raw_name);

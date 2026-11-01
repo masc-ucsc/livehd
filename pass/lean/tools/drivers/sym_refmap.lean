@@ -53,7 +53,7 @@ structure RMLine where
 def parseRM (text : String) : List RMLine := Id.run do
   let mut out := []
   for raw in text.splitOn "\n" do
-    let line := ((raw.splitOn "#").headD "").replace "\t" " " |>.trim
+    let line := ((raw.splitOn "#").headD "").replace "\t" " " |>.trimAscii |>.toString
     if line.isEmpty then continue
     match (line.splitOn " ").filter (fun w => !w.isEmpty) with
     | [] => continue
@@ -158,7 +158,7 @@ def parseObsW (N : Names) (tok : String) : Except String ObsW := do
     | [b, g] => (b, some g)
     | _ => (tok, none)
   let (pTxt, slice) := match body.splitOn "[" with
-    | [p, r] => (p, some (r.dropRight 1))
+    | [p, r] => (p, some (r.dropEnd 1).toString)
     | _ => (body, none)
   let port ← parsePort N pTxt
   let (lo, len) ← match slice with

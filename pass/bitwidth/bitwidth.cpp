@@ -1238,8 +1238,24 @@ void Bitwidth::process_concat(hhds::Node_class& node) {
   // Check lane carriers after inference finishes: intermediate ranges can
   // still narrow. The final check is a diagnostic in every build mode.
 
+  // A narrower lane driver is extended to its window with its own sign, so a
+  // non-negative MSB lane leaves every bit above its own width zero: the result
+  // is that much narrower than the window sum. Without this, a value an earlier
+  // pass proved fits a lower lane (aegraph getmask_fits drops the Get_mask) is
+  // stamped wider than that lane and trips concat-lane-width downstream.
+  auto bits = total;
+  if (!lanes.empty() && !lanes[0].value.is_invalid()) {
+    const auto it = bwmap.find(lanes[0].value.get_class_index());
+    if (it != bwmap.end() && it->second.is_always_positive()) {
+      const auto ubits = it->second.get_ubits();
+      if (ubits > 0 && ubits < lanes[0].width) {
+        bits = total - (lanes[0].width - ubits);
+      }
+    }
+  }
+
   Bitwidth_range bw;
-  bw.set_ubits_range(total);
+  bw.set_ubits_range(bits);
   adjust_bw(node.create_driver_pin(0), bw);
 }
 

@@ -6187,6 +6187,7 @@ theorem fast_correct : ∀ e i s, fast i s = denoteResidual R e i s := by
   have hs128 : E128.size = 130 := by rw [hE128, Array.size_push, hs127]
   have hag128 : ∀ j, j < E0.size → refBV E128 j = refBV E0 j :=
     fun j hj => by rw [hE128]; exact srcAgree_push _ (by omega) hag127 j hj
+  clear_value E128 E127 E126 E125 E124 E123 E122 E121 E120 E119 E118 E117 E116 E115 E114 E113 E112 E111 E110 E109 E108 E107 E106 E105 E104 E103 E102 E101 E100 E99 E98 E97 E96 E95 E94 E93 E92 E91 E90 E89 E88 E87 E86 E85 E84 E83 E82 E81 E80 E79 E78 E77 E76 E75 E74 E73 E72 E71 E70 E69 E68 E67 E66 E65 E64 E63 E62 E61 E60 E59 E58 E57 E56 E55 E54 E53 E52 E51 E50 E49 E48 E47 E46 E45 E44 E43 E42 E41 E40 E39 E38 E37 E36 E35 E34 E33 E32 E31 E30 E29 E28 E27 E26 E25 E24 E23 E22 E21 E20 E19 E18 E17 E16 E15 E14 E13 E12 E11 E10 E9 E8 E7 E6 E5 E4 E3 E2 E1 E0
   simp only [runBindings]
   have rout : refBV E128 129 = v127 := by
     rw [hE128, show (129 : Nat) = E127.size from (hs127).symm, refBV_push_self]

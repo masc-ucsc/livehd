@@ -3,8 +3,12 @@
 #
 #   check_overlay.sh [--semantic]
 #
-# Six files must be byte-identical to the semantic base 90583be (present in
-# this repository; BASE_REPO overrides).  Two are MASTER-ADAPTED --
+# Five files must be byte-identical to the semantic base 90583be (present in
+# this repository; BASE_REPO overrides).  One is a COMMENT-ONLY adaptation --
+# Compiler/DesignCert.lean, whose ClockDesc docstring 032690762 corrected -- and
+# must equal the base once Lean comments are removed AND match a recorded
+# sha256, so a code change fails the first test and any further edit, even to a
+# comment, has to update the record.  Two are MASTER-ADAPTED --
 # Translation/LGraphModel.lean (the SHL/SRA/Sext boundary repairs) and
 # Translation/OpBridge.lean (the bridges re-proved for them) -- and are checked
 # against recorded sha256 values.  Changing either is legitimate, but must
@@ -30,26 +34,65 @@ SRC=$ROOT/formal/lean/LeanSemanticPrimitives
 # master-adapted files: path, recorded sha256
 EXPECTED_LGRAPHMODEL_SHA256=432bb98394892ad67d156923197ed90945f57cfbf86f3e6d2b602eead0f173ba
 EXPECTED_OPBRIDGE_SHA256=fc9366004cb12f1d96ae8624aaea4187960939d67c5b2b0c0b3bd3455d853b77
+# comment-only adaptation: path, recorded sha256
+EXPECTED_DESIGNCERT_SHA256=c622029ee92ef9a954af643584bd56a328c759bbf02a344650f90481cb8b13f9
 
 SEMANTIC=0
 [ "${1:-}" = "--semantic" ] && SEMANTIC=1
 
 rc=0
 
-echo "-- six files, expected byte-identical to $BASE_REV"
+# Lean source with every comment removed: `--` to end of line and `/- ... -/`
+# blocks (which nest, docstrings `/-- -/` and `/-! -/` included). String
+# literals are skipped so a `--` inside one is not taken as a comment.
+strip_lean_comments() {
+  python3 -c '
+import sys
+s = sys.stdin.read()
+out, i, depth, n = [], 0, 0, len(s)
+while i < n:
+    if depth == 0 and s[i] == "\"":
+        j = i + 1
+        while j < n and s[j] != "\"":
+            j += 2 if s[j] == "\\" else 1
+        out.append(s[i:j + 1]); i = j + 1
+    elif s.startswith("/-", i):
+        depth += 1; i += 2
+    elif depth > 0 and s.startswith("-/", i):
+        depth -= 1; i += 2
+    elif depth > 0:
+        i += 1
+    elif s.startswith("--", i):
+        while i < n and s[i] != "\n":
+            i += 1
+    else:
+        out.append(s[i]); i += 1
+print("\n".join(l.rstrip() for l in "".join(out).splitlines() if l.strip()))
+'
+}
+
+echo "-- five files, expected byte-identical to $BASE_REV"
 if ! (cd "$BASE_REPO" && git cat-file -e "$BASE_REV^{commit}") 2>/dev/null; then
   echo "  FAIL   base $BASE_REV not found in $BASE_REPO"; rc=1
 else
   for f in Translation/GraphRefine.lean \
-           Compiler/DesignCert.lean Compiler/Runtime.lean \
+           Compiler/Runtime.lean \
            Compiler/DesignCertWF.lean Compiler/DesignSemantics.lean \
            SemanticPrimitives.lean; do
     if (cd "$BASE_REPO" && git show "$BASE_REV:formal/lean/LeanSemanticPrimitives/$f") \
          | cmp -s - "$SRC/$f"; then echo "  ok     $f"; else echo "  DRIFT  $f"; rc=1; fi
   done
+  echo "-- one comment-only adaptation: equal to $BASE_REV without comments, and a recorded hash"
+  f=Compiler/DesignCert.lean
+  if cmp -s <(cd "$BASE_REPO" && git show "$BASE_REV:formal/lean/LeanSemanticPrimitives/$f" | strip_lean_comments) \
+            <(strip_lean_comments < "$SRC/$f"); then
+    echo "  ok     $f (no code change against the base)"
+  else
+    echo "  DRIFT  $f differs from the base OUTSIDE comments"; rc=1
+  fi
 fi
 
-echo "-- two master-adapted files, against recorded hashes"
+echo "-- recorded hashes: two master-adapted files and the comment-only one"
 check_hash() {   # path expected
   local got; got=$(sha256sum "$SRC/$1" | cut -d' ' -f1)
   if [ "$got" = "$2" ]; then
@@ -63,6 +106,7 @@ check_hash() {   # path expected
 }
 check_hash Translation/LGraphModel.lean "$EXPECTED_LGRAPHMODEL_SHA256"
 check_hash Translation/OpBridge.lean    "$EXPECTED_OPBRIDGE_SHA256"
+check_hash Compiler/DesignCert.lean     "$EXPECTED_DESIGNCERT_SHA256"
 
 if [ $SEMANTIC -eq 1 ]; then
   echo "-- the bridge theorems, rebuilt"

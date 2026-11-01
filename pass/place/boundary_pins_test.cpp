@@ -60,6 +60,49 @@ TEST(BoundaryPins, SplitsAtTheOriginalCrossingWithOneSharedTransparentTerminal) 
   }
   EXPECT_EQ(original.pin2node, (std::vector<int>{0, 1}));
 }
+TEST(BoundaryPins, PinlessDipThroughOneSideIsRemoved) {
+  auto d         = fixture();
+  d.node_x[1]    = 40;
+  d.node_y[1]    = 40;
+  const auto dip = [](const std::vector<Busorder_point>&) {
+    return Busorder_tree{
+        {{10, 20}, {60, 20}},
+        {{60, 20}, {60, 40}},
+        {{60, 40}, {40, 40}}
+    };
+  };
+  const auto kept = split_boundary_nets(d, boxes, dip);
+  EXPECT_EQ(kept.anchors.size(), 2u);
+  EXPECT_EQ(kept.dips_removed, 0u);
+  const auto clean = split_boundary_nets(d, boxes, dip, true);
+  EXPECT_TRUE(clean.anchors.empty());
+  EXPECT_EQ(clean.dips_removed, 1u);
+  EXPECT_EQ(clean.design.pin2node, d.pin2node);
+  // a dip that leaves through two sides (here: into the exterior) stays
+  const auto through = [](const std::vector<Busorder_point>&) {
+    return Busorder_tree{
+        { {10, 20},  {60, 20}},
+        { {60, 20}, {60, 120}},
+        {{60, 120}, {40, 120}},
+        {{40, 120},  {40, 40}}
+    };
+  };
+  EXPECT_EQ(split_boundary_nets(d, boxes, through, true).dips_removed, 0u);
+}
+TEST(BoundaryPins, CellWhoseNetsLeaveThroughOneSideMovesAcross) {
+  auto d      = fixture();
+  d.node_x[0] = 45;
+  auto moved  = d;
+  EXPECT_EQ(move_dipping_cells(moved, boxes, 1), 0u);  // too far
+  EXPECT_EQ(move_dipping_cells(moved, boxes, 10), 1u);
+  EXPECT_EQ(moved.node_x[0], 50);
+  EXPECT_EQ(moved.node_y[0], 20);
+  EXPECT_EQ(moved.node_x[1], 90);
+  // a cell with a neighbor inside its rectangle stays
+  auto both      = d;
+  both.node_x[1] = 20;
+  EXPECT_EQ(move_dipping_cells(both, boxes, 10), 0u);
+}
 TEST(BoundaryPins, MaskedControlNetworksAreNeverSplit) {
   auto d           = fixture();
   d.net_mask[0]    = 0;
@@ -193,6 +236,54 @@ TEST(BoundaryPins, OrdersBusOnItsOriginalEdgeWithoutMovingRealCells) {
   EXPECT_EQ(failed.capacity_edges, 1u);
   EXPECT_EQ(failed.unordered_after, 1u);
   EXPECT_EQ(crowded.design.node_y, saved);
+}
+TEST(BoundaryPins, SpacesOrderedPinsAtThePitchAndNarrowsItOnACrowdedEdge) {
+  auto d        = fixture();
+  d.num_movable = 6;
+  d.node_x      = {10, 90, 10, 90, 10, 90};
+  d.node_y      = {20, 20, 80, 80, 50, 50};
+  d.node_size_x.assign(6, 1);
+  d.node_size_y.assign(6, 1);
+  d.pin2node = {0, 1, 2, 3, 4, 5};
+  d.pin_offset_x.assign(6, 0);
+  d.pin_offset_y.assign(6, 0);
+  d.flat_net2pin       = {0, 1, 2, 3, 4, 5};
+  d.flat_net2pin_start = {0, 2, 4, 6};
+  d.net_weights        = {1, 1, 1};
+  d.net_mask.clear();
+  d.build_maps();
+  const std::vector<Bus_bit> bits = {
+      {"data", 0},
+      {"data", 1},
+      {"data", 2}
+  };
+  const auto spacing = [](const Boundary_pin_model& m) {
+    std::vector<double> y;
+    for (const auto& p : m.anchors) {
+      y.push_back(p.y);
+    }
+    std::sort(y.begin(), y.end());
+    double gap = INFINITY;
+    for (size_t i = 1; i < y.size(); ++i) {
+      gap = std::min(gap, y[i] - y[i - 1]);
+    }
+    return gap;
+  };
+  // room for the three pins 20 apart on the 0..100 edge: none narrowed, ordered
+  auto       roomy = split_boundary_nets(d, boxes, rsmt);
+  const auto wide  = order_boundary_pins(roomy, boxes, bits, {}, 20);
+  EXPECT_EQ(wide.unordered_after, 0u);
+  EXPECT_EQ(wide.narrowed_edges, 0u);
+  EXPECT_EQ(wide.min_pitch, 20);
+  EXPECT_GE(spacing(roomy), 20);
+  // one slot at pitch 40: the edge retries at 20 and still keeps the order
+  auto       tight  = split_boundary_nets(d, boxes, rsmt);
+  const auto narrow = order_boundary_pins(tight, boxes, bits, {}, 40);
+  EXPECT_EQ(narrow.capacity_edges, 0u);
+  EXPECT_EQ(narrow.narrowed_edges, 1u);
+  EXPECT_EQ(narrow.min_pitch, 20);
+  EXPECT_EQ(narrow.unordered_after, 0u);
+  EXPECT_GE(spacing(tight), 20);
 }
 TEST(BoundaryPins, OrdersPinsAlongSharedTJunctionEdges) {
   auto d        = fixture();

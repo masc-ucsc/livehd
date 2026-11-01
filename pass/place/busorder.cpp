@@ -12,7 +12,6 @@
 #include <stdexcept>
 #include <tuple>
 
-#include "cell_criticality.hpp"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 
@@ -49,17 +48,9 @@ bool ordered(const std::vector<Busorder_crossing>& rows) {
 }
 }  // namespace
 
-void validate_busorder_options(const Busorder_options& o) {
-  if (!o.iterations || o.iterations > 2000 || !o.refresh || o.refresh > o.iterations || !std::isfinite(o.weight) || o.weight < 0
-      || o.weight > 100 || !std::isfinite(o.max_displacement_um) || o.max_displacement_um <= 0) {
-    throw std::invalid_argument("invalid busorder iterations/refresh/weight/displacement");
-  }
-}
-
 Busorder::Busorder(const dp::Design& d, const Region_mesh& mesh, const std::vector<Bus_bit>& identities, Busorder_route router,
-                   double units, Busorder_options policy, std::string directory)
-    : options(policy), dbu(units), bits(identities), route(std::move(router)), regions(mesh), output(std::move(directory)) {
-  validate_busorder_options(options);
+                   double units, std::string directory)
+    : dbu(units), bits(identities), route(std::move(router)), regions(mesh), output(std::move(directory)) {
   d.validate();
   if (!(std::isfinite(dbu) && dbu > 0) || bits.size() + 1 != d.flat_net2pin_start.size() || !route) {
     throw std::invalid_argument("invalid busorder design/units/router");
@@ -142,12 +133,10 @@ std::vector<Busorder_crossing> Busorder::crossings(const dp::Design& d, unsigned
   return result;
 }
 
-Busorder_sample Busorder::evaluate(const dp::Design& d, const std::string& stage, unsigned iterations,
-                                   std::vector<dp::RelativeOrder>* constraints) {
+Busorder_sample Busorder::evaluate(const dp::Design& d, const std::string& stage) {
   const auto      start = Clock::now();
   Busorder_sample sample;
   sample.stage                                                                 = stage;
-  sample.iterations                                                            = iterations;
   sample.hpwl                                                                  = dp::hpwl(d);
   const auto                                                            points = crossings(d, sample.high_degree);
   std::map<std::pair<int, std::string>, std::vector<Busorder_crossing>> groups;
@@ -222,7 +211,7 @@ Busorder_sample Busorder::evaluate(const dp::Design& d, const std::string& stage
     if (direction->second) {
       std::reverse(rows.begin(), rows.end());
     }
-    bool actionable = false;
+    bool actionable = false;  // some adjacent pair has a movable cell
     for (size_t i = 1; i < rows.size(); ++i) {
       const auto&  a    = rows[i - 1];
       const auto&  b    = rows[i];
@@ -230,27 +219,7 @@ Busorder_sample Busorder::evaluate(const dp::Design& d, const std::string& stage
       const double violation  = std::max(0., a.coordinate + 1 - b.coordinate);
       const double scale      = std::max(d.layout.row_height, boundary.high - boundary.low);
       sample.penalty         += violation * violation / scale;
-      if (from == to || (from >= d.num_movable && to >= d.num_movable)) {
-        continue;
-      }
-      actionable = true;
-      if (constraints) {
-        const auto&  pos        = axis == 0 ? d.node_x : d.node_y;
-        const auto&  size       = axis == 0 ? d.node_size_x : d.node_size_y;
-        // FLUTE coordinates are integer DBU. A one-DBU gap avoids a
-        // zero-force optimum with different bits collapsed at one coordinate;
-        // it is an order margin, not a claim about routing track capacity.
-        const double separation = (a.coordinate - pos[from]) - (b.coordinate - pos[to]) - size[from] + 1;
-        constraints->push_back({
-            from,
-            to,
-            axis == 0 ? dp::Axis::x : dp::Axis::y,
-            separation,
-            {false, options.weight / scale},
-            "busorder"
-        });
-      }
-      ++sample.constraints;
+      actionable              |= from != to && (from < d.num_movable || to < d.num_movable);
     }
     if (!actionable) {
       ++sample.immovable;
@@ -268,96 +237,15 @@ Busorder_sample Busorder::evaluate(const dp::Design& d, const std::string& stage
   return sample;
 }
 
-std::vector<dp::RelativeOrder> Busorder::constraints(const dp::Design& d) {
-  std::vector<dp::RelativeOrder> result;
-  evaluate(d, "", 0, &result);
-  // One cell can support several crossings; normalize duplicate exposure.
-  std::vector<unsigned> degree(d.node_x.size());
-  for (const auto& e : result) {
-    ++degree[e.from];
-    ++degree[e.to];
-  }
-  for (auto& e : result) {
-    e.strength.weight /= std::sqrt(double(std::max(degree[e.from], degree[e.to])));
-  }
-  return result;
-}
-
-void Busorder::refine(dp::Design& physical, const dp::Options& base) {
-  density_bins_x      = base.bins_x;
-  density_bins_y      = base.bins_y;
-  density_target      = base.target_density;
-  density_scale_macro = base.scale_macro_density;
-  const auto start    = Clock::now();
-  auto       before   = evaluate(physical, "before", 0, nullptr);
-  before.overflow     = dp::density_overflow(physical, base.bins_x, base.bins_y, base.target_density, base.scale_macro_density);
-  history.push_back(before);
-  auto work = physical, best = physical;
-  auto best_sample = before;
-  limit_displacement(work, node_weight_criticality(work), options.max_displacement_um * dbu);
-  for (unsigned step = 0; step < options.iterations;) {
-    auto orders = constraints(work);
-    if (orders.empty() && options.weight > 0) {
-      break;
-    }
-    work.order_edges = physical.order_edges;
-    work.order_edges.insert(work.order_edges.end(), orders.begin(), orders.end());
-    auto control                   = base;
-    control.max_iterations         = std::min(options.refresh, options.iterations - step);
-    control.min_iterations         = control.max_iterations;
-    control.post_density_factor    = 0;
-    control.schedule_iterations    = control.max_iterations;
-    // This settling phase starts from an optimized placement: retain the final
-    // wire smoothing rather than replaying the initial broad smoothing ramp.
-    control.wirelength_gamma_end   = base.wirelength_gamma_end;
-    control.wirelength_gamma_start = base.wirelength_gamma_end;
-    control.order_weight           = std::min(1., double(step + control.max_iterations) / std::max(1u, options.iterations / 2));
-    control.order_growth           = 1;
-    control.max_step               = std::min(base.max_step, .05);
-    control.legalize = control.detailed_place  = false;
-    control.before_legalize                    = {};
-    control.after_macro_legalize               = {};
-    control.observer                           = {};
-    control.progress_observer                  = {};
-    control.checkpoint                         = {};
-    control.checkpoint_interval                = 0;
-    control.checkpoint_final                   = false;
-    control.checkpoint_after_density           = false;
-    control.terminal_update                    = {};
-    control.terminal_interval                  = 0;
-    control.macro_pull_update                  = {};
-    control.macro_pull_interval                = 0;
-    const auto result                          = dp::place(work, control);
-    step                                      += result.iterations;
-    auto sample                                = evaluate(work, "iteration_" + std::to_string(step), step, nullptr);
-    sample.overflow = dp::density_overflow(work, base.bins_x, base.bins_y, base.target_density, base.scale_macro_density);
-    history.push_back(sample);
-    // Report actual RSMT order, not whether frozen proxy inequalities improved.
-    const bool better
-        = sample.resolved > best_sample.resolved
-          || (sample.resolved == best_sample.resolved && sample.no_longer_comparable <= best_sample.no_longer_comparable
-              && sample.penalty < best_sample.penalty);
-    if (sample.hpwl <= before.hpwl * 1.02 && sample.overflow <= before.overflow + .01 && (better || options.weight == 0)) {
-      best        = work;
-      best_sample = sample;
-    }
-    if (!result.iterations) {
-      break;
-    }
-  }
-  for (int i = 0; i < physical.num_movable; ++i) {
-    physical.node_x[i] = best.node_x[i];
-    physical.node_y[i] = best.node_y[i];
-  }
-  auto after     = evaluate(physical, "after_gp", best_sample.iterations, nullptr);
-  after.overflow = best_sample.overflow;
-  after.seconds  = elapsed(start);
-  history.push_back(after);
-  write();
+void Busorder::measure_density(const dp::Options& o) {
+  density_bins_x      = o.bins_x;
+  density_bins_y      = o.bins_y;
+  density_target      = o.target_density;
+  density_scale_macro = o.scale_macro_density;
 }
 
 void Busorder::observe(const dp::Design& d, const std::string& stage) {
-  auto sample = evaluate(d, stage, 0, nullptr);
+  auto sample = evaluate(d, stage);
   if (density_bins_x) {
     sample.overflow = dp::density_overflow(d, density_bins_x, density_bins_y, density_target, density_scale_macro);
   }
@@ -373,12 +261,10 @@ void Busorder::write() const {
   rapidjson::StringBuffer                    buffer;
   rapidjson::Writer<rapidjson::StringBuffer> json(buffer);
   json.StartObject();
-  json.Key("enabled");
-  json.Bool(options.enabled);
   json.Key("dbu_per_um");
   json.Double(dbu);
   json.Key("model");
-  json.String("RSMT HV crossing proxies tied to supporting real pin coordinates; soft adjacent-bit order");
+  json.String("RSMT HV crossings of the real bus nets on the region edges (observation only)");
   json.Key("pruning");
   json.String("fixed initial minimum neighbor distance; alternate H then V");
   json.Key("initial_rectangles");
@@ -389,12 +275,6 @@ void Busorder::write() const {
   json.Uint(regions.removed_v);
   json.Key("build_seconds");
   json.Double(regions.build_seconds);
-  json.Key("weight");
-  json.Double(options.weight);
-  json.Key("iterations");
-  json.Uint(options.iterations);
-  json.Key("max_displacement_um");
-  json.Double(options.max_displacement_um);
   json.Key("rectangles");
   json.StartArray();
   for (const auto& r : regions.rects) {
@@ -422,8 +302,6 @@ void Busorder::write() const {
     json.Uint(s.groups);
     json.Key("unordered");
     json.Uint(s.unordered);
-    json.Key("constraints");
-    json.Uint(s.constraints);
     json.Key("branching_groups");
     json.Uint(s.branching);
     json.Key("immovable_groups");
