@@ -135,6 +135,13 @@ struct Options {
   // is pinned by inou/slang/tests/memory_clock_diagnostic.sh); `lhd pass
   // single_edge` turns it on.
   bool negedge_memory         = false;
+  // Fold a gate that reaches state as a `Clock_cell` (Pyrope `Clock(...)`,
+  // tolg's activation gate, a gated `__memory` port) as the inline `clk & en`
+  // gate is folded. The fold already reads a Clock_cell (clock_op_of); this
+  // makes the TRIGGER and the memory port scan see one. Off by default for the
+  // same reason as `negedge_memory`: `lhd lec` keeps its own Clock_cell model
+  // (pass/lec/phase_sched.cpp) until its corpus is measured with this on.
+  bool clock_cell_gates       = false;
 };
 
 // Normalize `g` in place. `defs` (may be empty) are the resolution-library

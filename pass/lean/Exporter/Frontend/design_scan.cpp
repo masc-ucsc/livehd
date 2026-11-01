@@ -865,15 +865,15 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
           cc.rising = (info.posclk != 0) != root.inverted;
         }
         if (!cc.rising) {
-          // Unlike a negedge flop, no pass rewrites a memory's edge:
-          // pass.single_edge never changes a Memory's `clock_pin`/`posclk`.
-          // When it runs it refuses a falling-edge memory by name
-          // ("memory-unsupported"); a design whose only falling-edge state is
-          // a memory is skipped as "no negedge state" and arrives here.
+          // `lhd pass single_edge` lowers a falling-edge memory as it lowers a
+          // negedge flop (retype to posedge, rebind the clock, gate the write
+          // to the fall slot; Options::negedge_memory). A falling memory that
+          // arrives here did not go through it, or went through with
+          // `negedge_memory=false`.
           fatal(ctx,
                 what
-                    + " commits on a FALLING edge. No pass rewrites a memory's edge yet (pass.single_edge never "
-                      "changes a memory's clock); pass.lean models rising-edge memories only.");
+                    + " commits on a FALLING edge; pass.lean models rising-edge memories only. Run `lhd pass "
+                      "single_edge` first (it moves a falling-edge memory to the fall slot of a 2-step clock).");
         }
         p.clock_ordinal = intern_domain(clock_table, clock_index, cc, domain_name(cc));
         p.has_domain    = true;

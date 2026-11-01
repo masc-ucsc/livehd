@@ -588,3 +588,56 @@ TEST(LatchContract, UngatedWindowDoesNotPinTheGatedClock) {
       << "pv open on the raw clk: its window root does not pin `gated`, so el.q still reaches the "
          "data through the gate";
 }
+
+// AN `And` OVER A Clock_cell IS A GATE OF A GATE. `gated = Clock_cell(clk, a)`
+// and the flop clocks on `gated & b`, so it commits iff a AND b. The default
+// phase walk goes THROUGH a Clock_cell to its root, so the And's operand used
+// to read as the bare `clk` (a graph input, which ends the chain) and the
+// cell's own enable `a` was dropped: the flop came out gated by `b` alone.
+TEST(LatchContract, AndOverAClockCellKeepsTheCellsEnable) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_lcontract_and_over_cell");
+  auto  gio = lib.create_io("and_over_cell");
+  gio->add_input("clk", 1);
+  gio->add_input("a", 2);
+  gio->add_input("b", 3);
+  gio->add_output("y", 4);
+  auto g   = gio->create_graph();
+  auto clk = g->get_input_pin("clk");
+  auto a   = g->get_input_pin("a");
+  auto b   = g->get_input_pin("b");
+  for (auto p : {clk, a, b}) {
+    gu::set_bits(p, 1);
+    gu::set_unsign(p);
+  }
+
+  auto cell = gu::create_typed_node(*g, Ntype_op::Clock_cell);
+  clk.connect_sink(gu::setup_sink_by_name(cell, "clk_ref"));
+  a.connect_sink(gu::setup_sink_by_name(cell, "en"));
+  auto gated = cell.create_driver_pin(0);
+  gu::set_bits(gated, 1);
+  gu::set_unsign(gated);
+
+  auto andn = gu::create_typed_node(*g, Ntype_op::And);
+  gated.connect_sink(gu::setup_sink_pid(andn, 0));
+  b.connect_sink(gu::setup_sink_pid(andn, 0));
+  auto gclk = andn.create_driver_pin(0);
+  gu::set_bits(gclk, 1);
+  gu::set_unsign(gclk);
+  add_flop(*g, "f", gclk, /*negedge=*/false);
+
+  const Design_clocks clocks(g.get());
+  for (const bool shared : {false, true}) {
+    const auto cone
+        = shared ? livehd::latch_contract::clock_op_of(gclk, clocks) : livehd::latch_contract::resolve_icg(gclk, clocks);
+    ASSERT_TRUE(cone.has_value()) << (shared ? "clock_op_of" : "resolve_icg") << " did not see the gate";
+    EXPECT_EQ(cone->clock.get_class_index(), clk.get_class_index()) << "the chain's clock is the cell's root";
+    bool has_a = false;
+    bool has_b = false;
+    for (const auto& en : cone->enables) {
+      has_a = has_a || en.get_class_index() == a.get_class_index();
+      has_b = has_b || en.get_class_index() == b.get_class_index();
+    }
+    EXPECT_TRUE(has_a) << (shared ? "clock_op_of" : "resolve_icg") << " dropped the Clock_cell's own enable";
+    EXPECT_TRUE(has_b) << (shared ? "clock_op_of" : "resolve_icg") << " dropped the And's enable";
+  }
+}
