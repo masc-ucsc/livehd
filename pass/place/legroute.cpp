@@ -184,6 +184,7 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
   auto       step_t = lr::Clock::now();
   const auto step   = [&](const char* name) {
     rep.steps.push_back({name, lr::seconds_since(step_t)});
+    std::fprintf(stderr, "legroute step %s: %.1f s\n", name, rep.steps.back().seconds);
     step_t = lr::Clock::now();
   };
   try {

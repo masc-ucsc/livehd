@@ -3144,10 +3144,17 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
               visit(g.tile(vc, j), 1);
             }
           };
-          const auto run_load = [&](int v, bool h_first) {  // the fullest edge on that L
-            double load = 0;
+          // the fullest edge on that L, sampled every few tiles on a long run (a large die's L is thousands of
+          // tiles; the chooser pays this per candidate)
+          const auto run_load = [&](int v, bool h_first) {
+            const int len    = std::abs(g.col(prev) - g.col(v)) + std::abs(g.row(prev) - g.row(v));
+            const int stride = std::max(1, len / 32);
+            double    load   = 0;
+            int       k      = 0;
             run_edges(v, h_first, [&](int t, int dir) {
-              load = std::max(load, double(through[t][dir]) / std::max(1.0, double((dir ? cap_v : cap_h)[t])));
+              if (k++ % stride == 0) {
+                load = std::max(load, double(through[t][dir]) / std::max(1.0, double((dir ? cap_v : cap_h)[t])));
+              }
             });
             return load;
           };
@@ -3369,6 +3376,16 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
     for (int t = 0; t < int(g.size()); ++t) {
       region_tiles[g.region[t]].push_back(t);
     }
+    std::fprintf(stderr,
+                 "legroute sat: %d regions, %zu boxes, %zu hops (%zu over the share, %zu unjoined), %zu global pieces; solving %zu "
+                 "at a time\n",
+                 g.regions,
+                 boxes.boxes.size(),
+                 x.hops.size(),
+                 x.over_share,
+                 x.unjoined,
+                 x.pieces.size(),
+                 size_t(std::max(1u, d.opt.threads)));
     // every (region, policy) solve is a task: the regions are independent once the hops are fixed
     lr::parallel(size_t(g.regions) * policies.size(), d.opt.threads, [&](size_t task) {
       const int    r     = int(task / policies.size());
