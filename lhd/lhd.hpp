@@ -1438,6 +1438,12 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "with legroute.global_route: share of an edge's tracks (the narrower tile's, per direction) the routed trees may "
      "take; the rest stays for the regions' own routes"},
+    {"place.legroute.hop_choice",
+     "0",
+     Synth_set_option::Kind::file,
+     "legroute: a crossing net's hop may move up to this many tiles along its boundary, chosen by the first of its two "
+     "regions to solve; the regions then solve in checkerboard waves, a wave's choices being the next wave's fixed "
+     "endpoints (0: every hop fixed ahead)"},
     {"place.legroute.global_own_share",
      "0",
      Synth_set_option::Kind::file,

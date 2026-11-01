@@ -59,6 +59,10 @@ struct Legroute_options {
   // the share of a boundary tile's tracks the hops of region-crossing nets may take; past it a hop takes the least
   // loaded tile of its boundary (counted as over the share), so every crossing is modeled
   double      hop_share        = .5;
+  // hop_choice: a crossing net's hop may move up to this many tiles along its boundary, chosen by the first of its two
+  // regions to solve: the regions solve in checkerboard waves (no two neighbours in one wave), a wave's choices are the
+  // next wave's fixed endpoints. 0: every hop fixed ahead (the hop chooser's tile)
+  unsigned    hop_choice       = 0;
   // the share of a tile's tracks, per direction, that the routes fixed ahead of the SAT (hops, IO pre-routes) may
   // take together; the rest stays for the region's own routes
   double      reserve_share    = .5;
@@ -167,6 +171,7 @@ struct Legroute_report {
   size_t  sat_unsat_regions = 0, sat_unknown_regions = 0, sat_binding_tiles = 0, sat_unjoined_crossings = 0;
   size_t  sat_cut_regions = 0;  // of the unsat regions, those over the cut bound (nets forced across a tile boundary
                                 // beyond its tracks): unsat before any solving
+  size_t  sat_waves = 0, sat_hops_free = 0, sat_hops_moved = 0;  // hop_choice: solve waves, hops left to a region's SAT, hops it moved
   size_t  sat_hops_over_share = 0;             // hops placed past hop_share (every boundary tile of their pair was at it)
   size_t  global_nets = 0, global_pieces = 0;  // legroute.global: nets joined by L traces, their pass-through pieces
   size_t  global_unrouted = 0, global_full_edges = 0;  // global_route: nets without a path, edges filled to the share

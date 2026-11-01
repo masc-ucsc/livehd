@@ -560,7 +560,16 @@ needing them (deficit 27, worst 17); relaxing those two bounds makes it SAT. One
 converges on the hop chosen ahead: the hop choice is the fix, not capacity. Proposed form: solve the regions in two
 waves of a checkerboard; a region of the first wave chooses each crossing net's hop among a few boundary tiles (tile
 literals on the boundary, the cut bound counting only what no choice avoids), its choice is then the fixed endpoint
-for the neighbour in the second wave.</p>
+for the neighbour in the second wave. <strong>Landed as <code>legroute.hop_choice</code> (off by default): the regions solve
+in checkerboard waves (greedy colouring of the region adjacency in risk order), a hop between two regions is chosen by the
+earlier wave's region among the boundary tiles within hop_choice of the hop chooser's tile (order and tile literals, no
+tile taken, at most hop_share of the boundary tile's tracks as hops), and published to the later region as its fixed
+endpoint before its wave; nets routed ahead (trees, IO pre-routes, global pieces) keep their hops.</strong></p>
+<p><strong>Region selection, the user's direction (2026-11-01):</strong> the rectangle mesh is a convenience; a region could
+be any contiguous set of 2&times;2 tiles, chosen by a systematic policy: a min-cut partitioner (VieCut) over the cell
+graph, density maps, bus cuts, or the capacity ratio above, so that a region's own traffic never crosses a side it
+cannot carry and the boundaries sit where few nets cross. legroute's model already takes regions as tile sets (nothing
+below the mesh reads rectangle bounds); busorder's virtual pins and the dump assume rectangles today.</p>
 
 <p><strong>Next (user, 2026-11-01): spread cell-boxes into the empty tiles as a local path recovery.</strong> A
 placement at utilization 0.50 (sha3 usyn domino, bisection landing) shows it: the boxes are 0.81 full but half the

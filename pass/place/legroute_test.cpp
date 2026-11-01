@@ -541,4 +541,31 @@ TEST(Legroute, TwoRowCellsPlaceAsTileTallBoxes) {
     rects.emplace_back(c.place.x, c.place.y, c.place.x + w, c.place.y + h);
   }
 }
+
+// hop_choice: the hops between two regions are chosen by the first wave's region among a few boundary tiles and are
+// the second wave's fixed endpoints; both regions still have an answer and the report counts the waves and free hops.
+TEST(Legroute, HopChoiceSolvesInTwoWaves) {
+  Fixture f(400, 8);  // a 20 x 2 um core: two regions of 10 um
+  f.random_design(24, 4, 5);
+  Legroute_options opt;
+  opt.threads     = 1;
+  opt.clock_spine = false;
+  opt.hop_choice  = 2;
+  const auto       d = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
+  Legroute_regions regions;
+  regions.rects = {{0, 0, 10000, 2000}, {10000, 0, 20000, 2000}};
+  const auto      g     = lr::build_grid(d, regions);
+  auto            boxes = lr::build_boxes(d, g);
+  lr::Routing     R;
+  Legroute_report rep;
+  lr::sat_place(d, g, boxes, regions, R, rep);
+  EXPECT_EQ(rep.sat_regions, 2u);
+  EXPECT_EQ(rep.sat_waves, 2u);
+  EXPECT_GT(rep.sat_hops_free, 0u);
+  EXPECT_EQ(rep.sat_unsat_regions + rep.sat_unknown_regions, 0u);
+  std::set<int> used;  // the boxes have distinct tiles
+  for (const auto& b : boxes.boxes) {
+    EXPECT_TRUE(used.insert(b.tile).second) << "two boxes on tile " << b.tile;
+  }
+}
 }  // namespace livehd::placement
