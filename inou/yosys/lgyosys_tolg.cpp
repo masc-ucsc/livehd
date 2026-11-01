@@ -2353,10 +2353,48 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       // memory_map and proc put power-on values on Q wires, rather than
       // on the DFF cell. Resolve aliases and slices through FfInitVals.
       // With reset, the initial sink already describes the RESET value.
-      if (!cell->hasPort(ID::SRST) && !cell->hasPort(ID::ARST) && !cell->hasPort(ID::ALOAD) && cell->hasPort(ID::Q)) {
+      const bool has_reset = cell->hasPort(ID::SRST) || cell->hasPort(ID::ARST) || cell->hasPort(ID::ALOAD);
+      if (!has_reset && cell->hasPort(ID::Q)) {
         const auto init = initvals(cell->getPort(ID::Q));
         if (!init.is_fully_undef()) {
           setup_sink_by_name(exit_node, "initial").connect_driver(create_const(*g, *Dlop::from_pyrope("0ub" + init.as_string())));
+        }
+      } else if (has_reset && cell->hasPort(ID::Q)) {
+        // The Flop cell has ONE value pin, `initial`, and with a reset pin it
+        // holds the reset value; every consumer (lhd sim, lec, the Lean
+        // exporter) also starts the flop at it. So an initializer
+        // (`reg q = 5;`) that disagrees with the reset value is lost here. A
+        // warning, not an error: the flop is still read, a reset wins.
+        const auto init = initvals(cell->getPort(ID::Q));
+        if (!init.is_fully_undef()) {
+          std::string reset_bits;  // MSB first; empty when the value is not a constant
+          if (cell->hasPort(ID::ALOAD)) {
+            const auto ad = sigmap(cell->getPort(ID::AD));
+            if (ad.is_fully_const()) {
+              reset_bits = ad.as_const().as_string();
+            }
+          } else {
+            const auto value_id = cell->hasPort(ID::SRST) ? ID::SRST_VALUE : ID::ARST_VALUE;
+            reset_bits          = cell->hasParam(value_id) ? cell->getParam(value_id).as_string()
+                                                           : std::string(static_cast<size_t>(init.size()), '0');
+          }
+          const auto init_bits = init.as_string();
+          // An x bit of the initializer is "any value", so the reset value
+          // keeps it; only a defined bit that differs is lost.
+          bool       lost      = reset_bits.size() != init_bits.size();
+          for (size_t i = 0; !lost && i < init_bits.size(); ++i) {
+            lost = (init_bits[i] == '0' || init_bits[i] == '1') && init_bits[i] != reset_bits[i];
+          }
+          if (lost) {
+            log_warning(
+                "flop '%s' has an initializer (%d'b%s) that differs from its reset value (%s). A LiveHD flop has one "
+                "value, used both as the reset value and as the start value, so the initializer is DROPPED: lhd sim, "
+                "`lhd lec` and the Lean simulators start this flop at its reset value.\n",
+                log_signal(cell->getPort(ID::Q)),
+                init.size(),
+                init_bits.c_str(),
+                reset_bits.empty() ? "the async-load data input" : (std::to_string(reset_bits.size()) + "'b" + reset_bits).c_str());
+          }
         }
       }
       setup_sink_by_name(exit_node, "clock_pin").connect_driver(get_dpin(g, cell, ID::CLK));

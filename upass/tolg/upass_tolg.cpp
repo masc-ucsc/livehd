@@ -2780,6 +2780,28 @@ private:
 
       // Reset wiring. Effective init: an explicit `initial=N` attr overrides
       // the declare's [value]; "nil" (or absent) = NO reset.
+      // A flop has ONE value pin (`initial`, graph/cell.cpp): the reset value,
+      // also used as the start value. `reg q:[initial=5] = 9` gives two; the
+      // attribute wins, and the declared value must not vanish without a word.
+      if (!info.initial_txt.empty() && !info.init_txt.empty() && info.init_txt != "nil") {
+        bool same = false;  // an async-load signal never equals a constant
+        if (!info.initial_is_ref) {
+          const auto attr_v = Dlop::from_pyrope(info.initial_txt);
+          const auto decl_v = Dlop::from_pyrope(info.init_txt);
+          same              = !attr_v->is_invalid() && !decl_v->is_invalid() && attr_v->is_known_eq(*decl_v);
+        }
+        if (!same) {
+          warn_at(info.decl_nid,
+                  {"reset-init-mismatch", "type"},
+                  "reg '{}' has `initial={}` and the declared value {}. A flop has one value, used both as the reset "
+                  "value and as the start value, so `initial={}` is used and the declared value {} is DROPPED",
+                  name,
+                  info.initial_txt,
+                  info.init_txt,
+                  info.initial_txt,
+                  info.init_txt);
+        }
+      }
       const std::string init     = !info.initial_txt.empty() ? info.initial_txt : info.init_txt;
       const bool        has_init = !init.empty() && init != "nil";
       const bool        rp_false = info.reset_pin_name == "false";
