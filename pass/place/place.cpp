@@ -9150,13 +9150,40 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           }
         }
         const auto* profile = legroute_power(frame, regions);
-        legroute_report     = legroute(tech, frame, final_gp_timing, lopt, regions, profile);
+        // too dense for the tile grid or the tracks: on a generated core the placement restarts at a lower
+        // utilization (the failing regions' box fill pushed down to what routes), the GP target density with it
+        const bool pushback = options.allow_increase_area && options.generated_core && options.legroute_probe.strict;
+        const auto restart  = [&](double factor, const std::string& why) {
+          const double utilization = options.utilization * factor;
+          std::fprintf(stderr, "legroute: %s; placement restarts at utilization %.3f\n", why.c_str(), utilization);
+          throw Placement_area_restart(utilization, utilization + .05);
+        };
+        try {
+          legroute_report = legroute(tech, frame, final_gp_timing, lopt, regions, profile);
+        } catch (const Legroute_unfit& e) {
+          if (!pushback) {
+            throw;
+          }
+          restart(.8, e.what());
+        }
         if (const size_t failed = legroute_report->sat_unsat_regions + legroute_report->sat_unknown_regions;
             failed && !options.legroute_probe.strict) {
           std::fprintf(stderr,
                        "legroute: %zu of %zu regions without a routable answer; keeping the placement (legroute.strict=false)\n",
                        failed,
                        legroute_report->sat_regions);
+        } else if (failed && pushback) {
+          double worst = 0;  // the densest failing region's box fill: pushed to about 0.7
+          for (const auto& st : legroute_report->region_stats) {
+            if ((st.status == 1 || st.status == 2) && st.tiles) {
+              worst = std::max(worst, double(st.boxes) / double(st.tiles));
+            }
+          }
+          restart(std::clamp(.7 / std::max(worst, 1e-9), .5, .92),
+                  std::format("{} of {} regions without a routable answer (densest failing region fill {:.2f})",
+                              failed,
+                              legroute_report->sat_regions,
+                              worst));
         } else if (failed) {
           // Stop on an unsuccessful model solve; UNKNOWN is not proof of unroutability.
           const bool fixed_core = !options.generated_core;

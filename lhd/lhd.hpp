@@ -1426,8 +1426,9 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.legroute.strict",
      "true",
      Synth_set_option::Kind::boolean,
-     "with legroute: stop as not routable when a region has no routable answer; false (experiments) keeps the "
-     "placement with a warning"},
+     "with legroute: a region without a routable answer stops the run as not routable, or, on a generated core with "
+     "place.allow_increase_area, restarts placement at a lower utilization; false (experiments) keeps the placement "
+     "with a warning"},
     {"place.legroute.probe.iterations",
      "100",
      Synth_set_option::Kind::integer,

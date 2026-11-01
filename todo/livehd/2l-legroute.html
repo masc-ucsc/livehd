@@ -142,6 +142,27 @@ per region in parallel, the better answer kept.</li>
 design tried). Routability follows box fill: regions under about 65% fill solve, at 75% or more most fail.
 Box fill follows the GP target density (fill is about 1.15 &times; density), not the utilization.</p>
 
+<h2>Density push-back (core growth from an impossible start)</h2>
+<p>With <code>place.allow_increase_area</code> (on by default) and a generated core, placement never stops as
+not routable while it can grow the core. Three signals push the utilization down and placement runs again:
+the legalizer cannot close the global placement (DREAMPlace: insufficient row space; the timing seed and the
+final placement retry in place, utilization times 0.8); legroute's boxes do not fit their tiles (times 0.8);
+a region has no routable answer (the densest failing region's box fill pushed toward 0.7, at most a 0.92
+step). The GP target density follows the utilization (utilization + 0.05). At most eight restarts. A fixed
+core (die, core or floorplan given) still stops as not routable.</p>
+<p>Started from utilization 0.99 and density 1.0 (the densest point the placer accepts): minimax backed off
+0.99 (legalizer) to 0.79 (boxes do not fit) to 0.634 / 0.684, all 11 regions routable at fills 0.64 to 0.86,
+92 s in all; sha3 0.99 to 0.79 to 0.63 (2 of 12 regions fail at fill 0.82) to 0.54 (1 region at 0.72) to
+0.495 / 0.545, 8 of 8 at fills 0.56 to 0.73, 421 s; partition_m 0.99 to 0.792 / 0.842 at the first step, 12
+of 12 routable at fills 0.86 to 0.99, 259 s. OpenROAD routes every pushed-back placement with zero overflow
+and zero DRCs, partition_m's at box fill 0.99 included. Against satlegalize at the same core (DR WNS / TNS):
+sha3 &minus;368.9 ps / &minus;458.2k vs &minus;367.1 / &minus;447.3k; minimax &minus;748.2 / &minus;1,496.8k vs
+&minus;704.0 / &minus;1,395.6k; partition_m &minus;761.0 / &minus;245.5k, where the satlegalize flow has no
+answer at all: its bin cap (0.8) refuses the density, and with the cap raised to 0.95 its terminal
+legalization exhausts the core and commits nothing. The denser
+the core, the more the box snap costs against a cell-level legalizer (minimax 6%), and the push-back lands
+where the SAT says routable, which OpenROAD confirms.</p>
+
 <h2>Region cuts (busorder regions)</h2>
 <ul>
 <li>No net dips into a region through one side with zero or one cell inside: a cell whose nets all leave

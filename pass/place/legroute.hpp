@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -203,6 +204,11 @@ struct Legroute_report {
   };
   std::vector<Box_stat> failure_boxes;
   std::vector<Bucket>   fill_pattern, internal_pattern, external_pattern;
+};
+// The boxes do not fit the free tiles (a region with more boxes than fitting tiles, a box no tile fits): the
+// placement is too dense for the tile grid, and a caller with a generated core may grow it and start over.
+struct Legroute_unfit : std::runtime_error {
+  using std::runtime_error::runtime_error;
 };
 // Legal placement of every movable single-row cell, routed signal wires on the floorplan nets (with `final`).
 // Multi-row cells must be fixed (anchored) by the caller. Throws std::invalid_argument on unsupported frames and

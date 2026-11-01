@@ -103,7 +103,7 @@ size_t balance_regions(const Design& d, const Grid& g, Boxes& boxes) {
       }
     }
     if (!placed) {
-      throw std::runtime_error(std::format("legroute: no free tile fits box {}", b));
+      throw Legroute_unfit(std::format("legroute: no free tile fits box {}", b));
     }
   }
   return moved;
@@ -1613,7 +1613,7 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       nearest(i);
       seen.assign(g.size(), 0);
       if (!augment(int(i))) {
-        throw std::runtime_error(std::format("legroute: region {} has more boxes than fitting tiles", r));
+        throw Legroute_unfit(std::format("legroute: region {} has more boxes than fitting tiles", r));
       }
     }
     std::vector<int> tile(B.size(), -1);
@@ -1709,7 +1709,7 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       any.push_back(p);
     }
     if (any.empty()) {
-      throw std::runtime_error(std::format("legroute: box {} fits no tile of region {}", B[i], r));
+      throw Legroute_unfit(std::format("legroute: box {} fits no tile of region {}", B[i], r));
     }
     cnf.add(any);
   }

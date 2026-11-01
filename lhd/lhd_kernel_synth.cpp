@@ -1311,8 +1311,9 @@ namespace {
 void synth_command_once(Options& opts, Result& res);
 }
 
-// legroute.probe can ask for a larger core from any placement phase (the final legalization runs last): the whole
-// command runs again at the lower utilization, at most twice (synthesis reuses its ABC cache)
+// legroute can ask for a larger core from any placement phase (the probe, or the final placement when a region has
+// no routable answer): the whole command runs again at the lower utilization, at most 8 times (synthesis reuses
+// its ABC cache)
 void synth_command(Options& opts, Result& res) {
   const Result start = res;
   for (unsigned restarts = 0;; ++restarts) {
@@ -1320,9 +1321,9 @@ void synth_command(Options& opts, Result& res) {
       synth_command_once(opts, res);
       return;
     } catch (const livehd::placement::Placement_area_restart& restart) {
-      if (restarts >= 2) {
+      if (restarts >= 8) {
         throw Lhd_error{"unsupported",
-                        "not routable: legroute asked for a larger core a third time",
+                        "not routable: legroute asked for a larger core a ninth time",
                         "lower synth.place.utilization or relax the timing target"};
       }
       res                  = start;
@@ -1339,6 +1340,12 @@ void synth_command(Options& opts, Result& res) {
 }
 
 namespace {
+// A placement the legalizer cannot close (DREAMPlace: insufficient row space) on a generated core with legroute is
+// too dense for the core: placement runs again at a lower utilization, like a region without a routable answer.
+bool density_failure(const std::exception& e, const livehd::placement::Options& po) {
+  return po.legroute && po.allow_increase_area && po.generated_core
+         && std::string_view(e.what()).find("legalization failed") != std::string_view::npos;
+}
 void synth_command_once(Options& opts, Result& res) {
   setup_diag(opts, "synth");
 
@@ -2300,11 +2307,27 @@ void synth_command_once(Options& opts, Result& res) {
         phase_log            = seed_log;
         set_crash_context(phase_step, phase_log);
         livehd::placement::Result seed;
-        try {
-          Stdout_to_log redirect(seed_log);
-          seed = livehd::placement::place(*placement_input, *seed_library, seed_options);
-        } catch (const std::exception& e) {
-          throw Lhd_error{"unsupported", std::string("timing seed placement failed: ") + e.what(), "see " + seed_log};
+        for (unsigned too_dense = 0;; ++too_dense) {
+          try {
+            Stdout_to_log redirect(seed_log);
+            seed = livehd::placement::place(*placement_input, *seed_library, seed_options);
+            break;
+          } catch (const std::exception& e) {
+            if (!density_failure(e, seed_options) || too_dense >= 8) {
+              throw Lhd_error{"unsupported", std::string("timing seed placement failed: ") + e.what(), "see " + seed_log};
+            }
+            // too dense for the core: the seed and the placement after it run at a lower utilization
+            seed_options.utilization *= .8;
+            seed_options.density      = std::min(seed_options.density, seed_options.utilization + .05);
+            place_options.utilization = seed_options.utilization;
+            place_options.density     = seed_options.density;
+            seed_library              = std::make_unique<hhds::GraphLibrary>();
+            std::fprintf(stderr,
+                         "lhd synth: the timing seed placement cannot legalize; utilization %.3f density %.3f\n",
+                         seed_options.utilization,
+                         seed_options.density);
+            res.recipe_steps.emplace_back(std::format("pass.place.area_restart.utilization={:.3f}", seed_options.utilization));
+          }
         }
         phase_step.clear();
         phase_log.clear();
@@ -2356,9 +2379,10 @@ void synth_command_once(Options& opts, Result& res) {
             });
             break;
           } catch (const livehd::placement::Placement_area_restart& restart) {
-            // routability needs a larger core (legroute.probe): place again at the lower utilization
-            if (++area_restarts > 2) {
-              throw std::runtime_error("legroute probe asked for a larger core more than twice");
+            // routability needs a larger core (legroute.probe, or a region without a routable answer): place again
+            // at the lower utilization
+            if (++area_restarts > 8) {
+              throw std::runtime_error("legroute asked for a larger core more than eight times");
             }
             placement_input           = prepare_input();
             retry_library             = std::make_unique<hhds::GraphLibrary>();
@@ -2377,6 +2401,19 @@ void synth_command_once(Options& opts, Result& res) {
             place_options.restart_seed = std::make_shared<livehd::physical::Floorplan>(restart.seed);
             place_options.cache_dir.clear();
             res.recipe_steps.emplace_back("pass.place.io_resynth.restart");
+          } catch (const std::runtime_error& e) {  // the legalizer cannot close it: too dense for the core
+            if (!density_failure(e, place_options) || ++area_restarts > 8) {
+              throw;
+            }
+            const double utilization = place_options.utilization * .8;
+            std::fprintf(stderr, "lhd synth: %s; placement runs again at utilization %.3f\n", e.what(), utilization);
+            placement_input           = prepare_input();
+            retry_library             = std::make_unique<hhds::GraphLibrary>();
+            generation                = retry_library.get();
+            place_options.utilization = utilization;
+            place_options.density     = std::min(place_options.density, utilization + .05);
+            place_options.cache_dir.clear();
+            res.recipe_steps.emplace_back(std::format("pass.place.area_restart.utilization={:.3f}", utilization));
           }
         }
       } catch (const std::exception& e) {
