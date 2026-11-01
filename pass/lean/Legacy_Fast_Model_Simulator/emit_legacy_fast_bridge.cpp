@@ -22,6 +22,11 @@ bool needs_or_bridge(const CertificateIR& c) {
     return n.op.kind == Operation::Or && n.deps.size() > 4;
   });
 }
+bool needs_mul_bridge(const CertificateIR& c) {
+  return std::any_of(c.nodes.begin(), c.nodes.end(), [](const CertNode& n) {
+    return n.op.kind == Operation::Mult && n.deps.size() == 2;
+  });
+}
 void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, const LegacyNames& names, std::ostream& ofs) {
   const auto&                     base_name  = names.base;
   const bool                      sequential = names.sequential;
@@ -223,6 +228,8 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
             "List.drop_zero, List.drop_nil, List.map_cons, List.map_nil, List.foldl_cons, List.foldl_nil, "
             "bv_to_bitvec_bvenc_zext, BitVec.zero_add, BitVec.sub_zero, ofInt_zero_eq, bv_zext_id, "
             "Int.ofNat_eq_natCast, Nat.cast_ofNat, Nat.cast_one";
+    } else if (info.op.kind == Operation::Mult && info.deps.size() == 2) {
+      bridge_call = "mul2_bridge";
     } else {
       supported = false;
     }

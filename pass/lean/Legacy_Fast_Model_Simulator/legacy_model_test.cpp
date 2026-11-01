@@ -254,7 +254,63 @@ TEST(LegacyModel, UnsupportedProofShapeFailsAtomicallyAndRequiresExplicitFallbac
   EXPECT_EQ(out.str().find("by sorry"), std::string::npos);
   o.cert_wf          = LeanCertWFMode::Skip;
   o.emit_fast_bridge = true;
-  EXPECT_THROW(emit_legacy_model(d, c, o, out), std::runtime_error);
+  // A two-operand Mult has a bridge (mul2_bridge); a three-operand one does not.
+  EXPECT_NO_THROW(emit_legacy_model(d, c, o, out));
+  auto d3 = d;
+  d3.inputs.push_back({"c", 2000000002, 8, {}});
+  d3.nodes.front().operands.push_back({2, 2, input(2000000002, 8)});
+  const auto c3 = build_certificate(d3, {});
+  EXPECT_THROW(emit_legacy_model(d3, c3, o, out), std::runtime_error);
+}
+
+TEST(LegacyModel, MulBridgeFixtures) {
+  struct Shape {
+    const char* name;
+    uint32_t    wa, wb, width;
+    uint64_t    a, b, product;  // product mod 2^width
+  };
+  for (const auto& shape : {
+           Shape{"mul_wide", 17, 9, 26, 131071, 511, 66977281}, // no wrap: (2^17-1)(2^9-1) < 2^26
+           Shape{"mul_wrap",  8, 8,  8,    200,   3,       88}, // 600 mod 256
+           Shape{"mul_same",  8, 8, 16,    255, 255,    65025},
+  }) {
+    SCOPED_TRACE(shape.name);
+    DesignScan d;
+    d.name = shape.name;
+    d.inputs.push_back({"x0", 2000000000, shape.wa, {}});
+    d.inputs.push_back({"x1", 2000000001, shape.wb, {}});
+    d.nodes.push_back({
+        10,
+        ScanOp::Mult,
+        shape.width,
+        false,
+        {{0, 0, input(2000000000, shape.wa)}, {1, 1, input(2000000001, shape.wb)}}
+    });
+    d.outputs.push_back({
+        "y",
+        0,
+        shape.width,
+        PinRef{PinKind::Node, 10, 0, shape.width, 0, {}}
+    });
+    const auto        c = build_certificate(d, {});
+    LegacyEmitOptions options;
+    options.emit_fast_bridge = true;
+    options.cert_wf          = LeanCertWFMode::Chunked;
+    options.cert_wf_fallback = LeanCertWFFallback::Eval;  // no simple WF lemma for Mult
+    std::ostringstream out;
+    ASSERT_NO_THROW(emit_legacy_model(d, c, options, out));
+    EXPECT_NE(out.str().find("import LeanSemanticPrimitives.Translation.MulBridge"), std::string::npos);
+    EXPECT_NE(out.str().find("mul2_bridge"), std::string::npos);
+    EXPECT_EQ(out.str().find("by sorry"), std::string::npos);
+    out << "\nnamespace " << d.name << "_Lgraph\n"
+        << "example : (" << d.name << "_comb { (default : " << d.name << "_in) with in_x0 := " << shape.a
+        << ", in_x1 := " << shape.b << " }).out_y = " << shape.product << " := by native_decide\n"
+        << "end " << d.name << "_Lgraph\n";
+    if (const char* destination = std::getenv("LHD_LEAN_MUL_BRIDGE_OUTPUT")) {
+      const auto path = std::filesystem::path(destination) / (d.name + "_Lgraph.lean");
+      write_atomic(path.string(), [&](std::ostream& stream) { stream << out.str(); });
+    }
+  }
 }
 TEST(LegacyModel, PartialChunkExperimentMakesNoWholeGraphClaim) {
   auto d = binary(ScanOp::Or, 8);

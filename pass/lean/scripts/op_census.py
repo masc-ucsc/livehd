@@ -5,7 +5,7 @@ Answers, in seconds, the three questions that otherwise cost hours of discovery
 before starting a step-5 bridge run on a new design:
 
   1. Which `(op, arity)` pairs does this design use, and does the step-5 bridge
-     dispatch in `pass/lean/emit_legacy_fast_bridge.cpp` handle every one of them?  An
+     dispatch in `pass/lean/Legacy_Fast_Model_Simulator/emit_legacy_fast_bridge.cpp` handle every one of them?  An
      unhandled pair is refused atomically by the emitter; this gate reports
      those shapes before a proof queue is started.
   2. How wide are the nodes?  Width is the CVA6 scaling axis (513/576 bits vs
@@ -27,7 +27,7 @@ import sys
 
 # ---------------------------------------------------------------------------
 # The supported set.  This MUST mirror the dispatch chain in
-# pass/lean/emit_legacy_fast_bridge.cpp (the `bridge_call = ..` dispatch).
+# pass/lean/Legacy_Fast_Model_Simulator/emit_legacy_fast_bridge.cpp (the `bridge_call = ..` dispatch).
 # Keep the two in sync: this gate is only as good as its fidelity to the emitter.
 # ---------------------------------------------------------------------------
 
@@ -67,6 +67,8 @@ def dispatch_status(op, arity, dep_widths, out_width=None):
         return ("ok", "mem_write_be_bridge")
     if op == "Op_Sum 2" and arity == 2:
         return ("ok", "sum2_bridge")
+    if op == "Op_Mult" and arity == 2:
+        return ("ok", "mul2_bridge")
     if op == "Op_Sum 1" and arity == 2:
         return ("ok", "sum1_bridge")
     if op == "Op_And" and arity == 2:
@@ -427,7 +429,7 @@ def main():
     for (op, ar, st, note), n in sorted(bad, key=lambda kv: -kv[1]):
         print("  %-22s arity %-3d %6d nodes  [%s] %s (e.g. nid %d)"
               % (op, ar, n, st, note, examples[(op, ar, st, note)]))
-    print("\n'unhandled' -> emitter writes `sorry -- TODO(step5)`.")
+    print("\n'unhandled' -> the bridge emitter refuses the design atomically (nothing is published).")
     print("'trap'      -> emitter writes a bridge call that CANNOT unify; it fails only")
     print("               once the typecheck reaches it. Fix before any long run.")
     return 1
