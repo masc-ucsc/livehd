@@ -595,9 +595,21 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
     detail::lower_memory_writes(b, design.memories.at(id));
   }
   b.lowering_context.clear();
+  // EVERY output is emitted, in port order: the sidecar (`design_io_meta`)
+  // gives output i the ordinal i, so dropping one shifted every later output
+  // against its name (finding V: VX_scheduler's undriven
+  // warp_ctl_if.lsu_sched_drained moved the next output into its place). An
+  // output with no driver reads 0, as the legacy model has always given it
+  // (`lit_zero`) and as the flow's setundef=zero reads an undefined value.
   for (const auto& o : design.outputs) {
     if (o.driver) {
       b.result.outputs.push_back({b.value_dep(*o.driver, o.width), o.width});
+    } else {
+      PinRef zero;
+      zero.kind  = PinKind::Constant;
+      zero.width = o.width;
+      zero.value = "0";
+      b.result.outputs.push_back({b.value_dep(zero, o.width), o.width});
     }
   }
   // The emitted clock table is the scan's, in the scan's ordinal order. Only

@@ -275,13 +275,14 @@ std::string legacy_fast_ref(const CertificateIR& c, const LegacyNames& n, uint32
   return bridge ? "(" + n.base + "_fv" + std::to_string(id) + " " + n.arguments() + ")" : "n_" + std::to_string(id);
 }
 std::vector<std::optional<uint32_t>> legacy_output_ids(const DesignScan& d, const CertificateIR& c) {
-  std::vector<std::optional<uint32_t>> ids;
-  size_t                               next = 0;
-  for (const auto& p : d.outputs) {
-    ids.push_back(p.driver ? std::optional<uint32_t>(c.outputs.at(next++).id) : std::nullopt);
-  }
-  if (next != c.outputs.size()) {
+  // The certificate carries every output in port order (an undriven one as a
+  // constant 0); the legacy model keeps writing `lit_zero` for an undriven one.
+  if (d.outputs.size() != c.outputs.size()) {
     throw std::invalid_argument("scan/certificate output shape mismatch");
+  }
+  std::vector<std::optional<uint32_t>> ids;
+  for (size_t i = 0; i < d.outputs.size(); ++i) {
+    ids.push_back(d.outputs[i].driver ? std::optional<uint32_t>(c.outputs[i].id) : std::nullopt);
   }
   return ids;
 }

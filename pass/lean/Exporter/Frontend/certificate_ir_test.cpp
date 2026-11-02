@@ -658,6 +658,30 @@ TEST(CertificateIR, InputDerivedAsyncResetReadsThroughAnOverride) {
   }
   EXPECT_TRUE(raw_q);
 }
+TEST(CertificateIR, UndrivenOutputKeepsItsPlaceAndReadsZero) {
+  // y (driven), z (no driver), w (driven): the sidecar gives them ordinals
+  // 0, 1, 2, so the certificate must carry all three in that order. Dropping z
+  // put w's value at ordinal 1 (finding V, Vortex VX_scheduler).
+  auto d = binary(ScanOp::Or, 8, input(2000000000, 8), input(2000000001, 8));
+  d.outputs.push_back({"z", 1, 4, std::nullopt});
+  d.outputs.push_back({"w", 2, 8, PinRef{PinKind::Node, 10, 0, 8, 0, {}}});
+  const auto c = build_certificate(d, {});
+  ASSERT_EQ(c.outputs.size(), 3u);
+  EXPECT_EQ(c.outputs[0].id, 10u);
+  EXPECT_EQ(c.outputs[2].id, 10u);
+  EXPECT_EQ(c.outputs[1].width, 4u);
+  bool zero = false;
+  for (const auto& src : c.sources) {
+    if (src.id == c.outputs[1].id) {
+      zero = src.kind == SourceKind::Const && src.const_int == "0" && src.width == 4;
+    }
+  }
+  EXPECT_TRUE(zero) << "the undriven output must read a 4-bit constant 0";
+  const auto meta = build_io_meta(d, c);
+  ASSERT_EQ(meta.outputs.size(), c.outputs.size());
+  EXPECT_EQ(meta.outputs[2].name, "w");
+  EXPECT_EQ(meta.outputs[2].ordinal, 2u);
+}
 TEST(CertificateIR, EmitterAndAtomicFailureNeedNoGraph) {
   const auto         c = build_certificate(binary(ScanOp::Or, 8, constant("3", 2), constant("-1", 1)), {});
   std::ostringstream out;
