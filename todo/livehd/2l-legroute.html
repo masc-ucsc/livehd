@@ -767,7 +767,10 @@ a region out of time at fill 0.73 and cut 0.67 routed from the noise variant in 
 now keeps its homes private, the second round kept every other region's answer. The two regions still out of time sit
 at fill 0.70 and 0.79 with hop loads near 0.6. The box spill re-measured without the handicap stays at 9 of 19 (failing regions 5, 4, 5, 8, 9, 10 over the rounds,
 hops over the share 57 to 1,511): the moved boxes' nets load the boundaries, so the spill is harmful by itself, at
-most one small round helping slightly. It stays off. One mesh idea did not survive: scoring each candidate split by
+most one small round helping slightly. It stays off. On minimax the best flow changes nothing (1 of 2): the probe skips both regions as sparse (fills
+0.33 and 0.39), so no inflation runs, and the macro-pin region is UNSAT for noise and spread as well; that class needs
+pin-access work around the register-file proxy's 118 pins, which none of the levers here touches. One mesh idea did
+not survive: scoring each candidate split by
 its own crossing load as well as the children's internal ratios ended 11 of 18 with five cut-bound regions against one
 on the plain score, because the split term let the children's internal ratios rise; it is reverted, the guard that
 refuses a split leaving a child fuller than nine tenths of its area stays. Running: the families on the 2,500-cell mesh (the timeout regime), the mesh
