@@ -893,7 +893,22 @@ sh_test(
 sh_test(
     name = "lhd_formal_hier_ref_test",
     srcs = ["lhd_formal_hier_ref_test.sh"],
-    data = ["//lhd"],
+    data = [
+        "formal_hier_ref.sv",
+        "formal_hier_ref_up.sv",
+        "//lhd",
+    ],
+    tags = ["no-sandbox"],
+)
+
+# Case equality against an X/Z constant is two-state, not X-as-0.
+sh_test(
+    name = "lhd_formal_xcheck_test",
+    srcs = ["lhd_formal_xcheck_test.sh"],
+    data = [
+        "formal_xcheck.sv",
+        "//lhd",
+    ],
     tags = ["no-sandbox"],
 )
 
