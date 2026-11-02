@@ -742,7 +742,19 @@ capacity, so four regions became cut-bound after the rounds. Landed for that: th
 region-refinement call, before bus order cuts the mesh and places the pins, so the inflation spreads the cells first
 and the boundaries follow; the terminal stage then takes that refinement's mesh and pins and does not probe again.
 A third rescue came from the clean inflation-plus-families run: a region out of time at fill 0.54 and cut 0.73 routed
-from the spread variant in 68 s. Running: the families on the 2,500-cell mesh (the timeout regime), the mesh
+from the spread variant in 68 s. With the inflation ahead of the mesh cut (three rounds), the re-cut mesh has 17
+regions and 11,083 hops instead of 19 and 12,262, and the run ends 12 of 17 with two UNSAT, three out of time and two
+cut-bound, against 13 of 19 with six UNSAT on the fixed mesh: the inflation turns proven UNSATs into timeouts and
+cut-bounds (the regions gain room, the boundaries get busier), so it pairs with the mesh lever and the timeout
+families rather than replacing them. <strong>Following the trait order end to end gives the best point so far:</strong>
+the inflation ahead of the mesh cut, the fan-out trees unpinned, noise and spread on the timeouts: 14 of 16 at 0.60
+on sha3 (no UNSAT, no cut-bound, two regions out of time at fill 0.67 and cut 0.66; 16 regions and 10,392 hops with
+94 over the share), against 13 of 19 with six UNSAT for the plain pinned mesh. The price is QoR: a critical delay of
+184 ps against 85 to 118 and 229k um of wire against 172k to 188k, the unpinned trees and the inflation both paying
+in wire; a 420 s budget is being tried on the two timeouts. One mesh idea did not survive: scoring each candidate split by
+its own crossing load as well as the children's internal ratios ended 11 of 18 with five cut-bound regions against one
+on the plain score, because the split term let the children's internal ratios rise; it is reverted, the guard that
+refuses a split leaving a child fuller than nine tenths of its area stays. Running: the families on the 2,500-cell mesh (the timeout regime), the mesh
 whose splits weigh their own crossing load, and the clean inflation-plus-families run.</p>
 <p><strong>The trial table so far (172 trials over seven runs: sha3 at 0.60 on both meshes, with and without the
 inflation, and minimax at 0.65).</strong> Rescues happened in one group only, regions out of time with fill under

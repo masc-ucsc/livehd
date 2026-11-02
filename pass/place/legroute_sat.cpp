@@ -85,8 +85,9 @@ size_t balance_regions(const Design& d, const Grid& g, Boxes& boxes) {
       left.push_back(b);
     }
   }
-  size_t moved = 0;
-  for (int b : left) {
+  size_t moved = 0, split = 0;
+  for (size_t li = 0; li < left.size(); ++li) {  // the list grows as boxes split
+    const int                           b = left[li];
     std::vector<std::pair<double, int>> order;  // regions by their nearest tile to the box
     for (int r = 0; r < g.regions; ++r) {
       double best = INFINITY;
@@ -105,6 +106,26 @@ size_t balance_regions(const Design& d, const Grid& g, Boxes& boxes) {
         break;
       }
     }
+    if (!placed && boxes.boxes[b].cells.size() > 1) {  // a box no region holds whole splits into its cells
+      auto& box = boxes.boxes[b];
+      for (size_t k = 1; k < box.cells.size(); ++k) {
+        Box single       = box;
+        single.cells     = {box.cells[k]};
+        single.sites     = cell_sites(d, g, box.cells[k]);
+        single.internal  = 0;
+        single.external  = int(d.nets_of[size_t(box.cells[k])].size());
+        boxes.box_of[size_t(box.cells[k])] = int(boxes.boxes.size());
+        left.push_back(int(boxes.boxes.size()));
+        boxes.boxes.push_back(std::move(single));
+      }
+      box.cells.resize(1);
+      box.sites    = cell_sites(d, g, box.cells[0]);
+      box.internal = 0;
+      box.external = int(d.nets_of[size_t(box.cells[0])].size());
+      ++split;
+      left.push_back(b);  // the first cell tries again as a single
+      placed = true;
+    }
     if (!placed) {
       size_t free_tiles = 0, fitting = 0;
       for (int t = 0; t < int(g.size()); ++t) {
@@ -115,6 +136,9 @@ size_t balance_regions(const Design& d, const Grid& g, Boxes& boxes) {
                                        b, boxes.boxes[b].cells.size(), boxes.boxes[b].sites, boxes.boxes[b].region, g.regions, free_tiles,
                                        fitting));
     }
+  }
+  if (split > 0) {
+    std::fprintf(stderr, "legroute: %zu boxes no region held whole split into their cells\n", split);
   }
   return moved;
 }
@@ -1484,6 +1508,7 @@ struct Region_out {
   Sat_status                       status  = Sat_status::unknown;
   bool                             skipped = false;
   std::string                      unfit;    // spill rounds: the region had more boxes than fitting tiles (no model)
+  size_t                           unfit_boxes = 0;  // how many found no tile
   std::vector<Piece>               conns;  // the SAT's connections, then the policy's trees and IO pre-routes here
   std::vector<int>                 local;  // 1-1 nets between neighbor boxes
   std::vector<std::pair<int, int>> tiles;      // (box, tile)
@@ -1713,12 +1738,8 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       }
       return false;
     };
-    for (size_t i = 0; i < B.size(); ++i) {
-      seen.assign(g.size(), 0);
-      if (augment(int(i))) {
-        continue;
-      }
-      const auto& box = boxes.boxes[B[i]];  // its window is full: any tile of the region it fits, nearest first
+    const auto any_tile = [&](size_t i) {  // any tile of the region the box fits, nearest first
+      const auto& box = boxes.boxes[B[i]];
       pref[i].clear();
       for (int t : T) {
         if (!g.blocked[size_t(t)] && (box.fixed || !pinned_tile[size_t(t)]) && box_fits(d, g, box, t)) {
@@ -1726,10 +1747,33 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
         }
       }
       nearest(i);
+    };
+    bool full = false;  // the windows crowd the tiles: every movable box may then take any tile it fits, once
+    for (size_t i = 0; i < B.size(); ++i) {
       seen.assign(g.size(), 0);
-      if (!augment(int(i))) {
-        throw Legroute_unfit(std::format("legroute: region {} has more boxes than fitting tiles", r));
+      if (augment(int(i))) {
+        continue;
       }
+      any_tile(i);  // its window is full
+      seen.assign(g.size(), 0);
+      if (augment(int(i))) {
+        continue;
+      }
+      if (!full) {
+        full = true;
+        for (size_t j = 0; j < B.size(); ++j) {
+          if (!boxes.boxes[B[j]].fixed) {
+            any_tile(j);
+          }
+        }
+        owner.clear();
+        i = size_t(-1);  // the matching starts over with the wide lists
+        continue;
+      }
+      ++out.unfit_boxes;  // counted on, so a spill round knows how many must leave
+    }
+    if (out.unfit_boxes > 0) {
+      throw Legroute_unfit(std::format("legroute: region {} has more boxes than fitting tiles ({} boxes without a tile)", r, out.unfit_boxes));
     }
     std::vector<int> tile(B.size(), -1);
     for (const auto& [t, i] : owner) {
@@ -4439,6 +4483,85 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
     for (int t = 0; t < int(g.size()); ++t) {
       region_tiles[g.region[t]].push_back(t);
     }
+    // a region's movable boxes must each find a tile they fit among its unpinned tiles (the pins took the rest): a
+    // box a matching leaves out splits into its cells, which fit more tiles, until every box has one or none is left
+    // to split (the solve then reports the region unfit and a spill round sheds its excess)
+    {
+      size_t split = 0;
+      for (int r = 0; r < g.regions; ++r) {
+        for (bool again = true; again;) {
+          again = false;
+          std::vector<int> movable, tiles;
+          for (int b : region_boxes[size_t(r)]) {
+            if (!P[0].boxes.boxes[size_t(b)].fixed && !P[0].allowed.contains(b)) {
+              movable.push_back(b);
+            }
+          }
+          for (int t : region_tiles[size_t(r)]) {
+            if (!g.blocked[t] && !P[0].pinned_tile[size_t(t)]) {
+              tiles.push_back(t);
+            }
+          }
+          std::unordered_map<int, int> owner;  // tile -> box
+          std::vector<char>            seen(g.size(), 0);
+          std::function<bool(int)>     augment = [&](int b) {
+            for (int t : tiles) {
+              if (seen[size_t(t)] || !box_fits(d, g, boxes.boxes[size_t(b)], t)) {
+                continue;
+              }
+              seen[size_t(t)] = 1;
+              const auto it   = owner.find(t);
+              if (it == owner.end() || augment(it->second)) {
+                owner[t] = b;
+                return true;
+              }
+            }
+            return false;
+          };
+          for (int b : movable) {
+            seen.assign(g.size(), 0);
+            if (augment(b) || boxes.boxes[size_t(b)].cells.size() < 2) {
+              continue;
+            }
+            auto& box = boxes.boxes[size_t(b)];  // split: the first cell keeps the box, the others get their own
+            for (size_t k = 1; k < box.cells.size(); ++k) {
+              Box single      = box;
+              single.cells    = {box.cells[k]};
+              single.sites    = cell_sites(d, g, box.cells[k]);
+              single.internal = 0;
+              single.external = int(d.nets_of[size_t(box.cells[k])].size());
+              single.fixed    = false;
+              const int id    = int(boxes.boxes.size());
+              boxes.box_of[size_t(box.cells[k])] = id;
+              region_boxes[size_t(r)].push_back(id);
+              for (auto& pol : P) {
+                pol.boxes.boxes.push_back(single);
+                pol.boxes.box_of[size_t(box.cells[k])] = id;
+              }
+              boxes.boxes.push_back(std::move(single));
+            }
+            auto& kept    = boxes.boxes[size_t(b)];
+            kept.cells.resize(1);
+            kept.sites    = cell_sites(d, g, kept.cells[0]);
+            kept.internal = 0;
+            kept.external = int(d.nets_of[size_t(kept.cells[0])].size());
+            for (auto& pol : P) {
+              pol.boxes.boxes[size_t(b)].cells    = kept.cells;
+              pol.boxes.boxes[size_t(b)].sites    = kept.sites;
+              pol.boxes.boxes[size_t(b)].internal = 0;
+              pol.boxes.boxes[size_t(b)].external = kept.external;
+            }
+            ++split;
+            again = true;
+            break;  // the lists changed: match the region again
+          }
+        }
+      }
+      if (split > 0) {
+        std::fprintf(stderr, "legroute sat: round %u: %zu boxes without a fitting tile among their region's unpinned tiles split into their cells\n",
+                     round + 1, split);
+      }
+    }
     // a region whose boxes, fixed boxes, hops, global pieces, trees and IO pre-routes are what they were in the last
     // round keeps its answer (one policy): only the regions a spill touched solve again
     std::vector<char> reuse(size_t(g.regions), 0);
@@ -4777,9 +4900,11 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
         if (round >= d.opt.spill_rounds || policies.size() > 1) {
           throw;
         }
-        out        = Region_out{};
-        out.status = Sat_status::unsatisfiable;
-        out.unfit  = e.what();
+        const size_t without = out.unfit_boxes;
+        out                  = Region_out{};
+        out.status           = Sat_status::unsatisfiable;
+        out.unfit            = e.what();
+        out.unfit_boxes      = std::max<size_t>(1, without);
         std::fprintf(stderr, "legroute sat: %s; a spill round pushes its boxes out\n", e.what());
       }
       out.seconds = seconds_since(start);
@@ -5160,7 +5285,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
       for (int t : region_tiles[size_t(r)]) {
         fit_here += !g.blocked[t] && !P[0].pinned_tile[size_t(t)] && box_fits(d, g, boxes.boxes[size_t(cand[cand.size() / 2])], t);
       }
-      const size_t excess = cand.size() > fit_here ? cand.size() - fit_here : 0;
+      const size_t excess = std::max(cand.size() > fit_here ? cand.size() - fit_here : 0, last[size_t(chosen[r])][size_t(r)].unfit_boxes);
       if (d.opt.spill_fraction <= 0 && excess == 0) {
         continue;  // no box spill: the rounds carry the alternatives, the windows and the shift alone
       }

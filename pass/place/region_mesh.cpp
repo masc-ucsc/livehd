@@ -334,23 +334,9 @@ Region_mesh Region_mesh::build(const dp::Design& d, const std::vector<int>& macr
           if (area_low / area_of(a) > .9 || area_high / area_of(b) > .9) {
             continue;
           }
-          // the split line's own load: the weighted nets crossing it inside the box (pass-throughs included) over the
-          // tracks across it; both children carry those as hops on this boundary
-          double crossing = 0;
-          for (const auto& g0 : gspan) {
-            if (g0.w <= 0) {
-              continue;
-            }
-            const double lo = ax ? g0.xlo : g0.ylo, hi = ax ? g0.xhi : g0.yhi;
-            const double olo = ax ? g0.ylo : g0.xlo, ohi = ax ? g0.yhi : g0.xhi;
-            const double blo = ax ? box.yl : box.xl, bhi = ax ? box.yh : box.xh;
-            if (lo < p && hi > p && olo < bhi && ohi > blo) {
-              crossing += g0.w;
-            }
-          }
-          const double split_len   = (ax ? box.yh - box.yl : box.xh - box.xl) / dbu;
-          const double split_ratio = crossing / std::max(1e-9, split_len * (ax ? h_tracks : v_tracks));
-          const double score = std::max({child_ratio(low, a), child_ratio(high, b), split_ratio})
+          // (scoring the split line's own crossing load too was tried and dropped: it let the children's internal
+          // ratios rise and made five cut-bound regions where the plain score made one)
+          const double score = std::max(child_ratio(low, a), child_ratio(high, b))
                                + 1e-6 * std::abs(p - (lo_side + hi_side) / 2) / std::max(1e-9, hi_side - lo_side);
           if (score < best) {
             best = score;

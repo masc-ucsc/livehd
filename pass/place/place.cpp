@@ -8826,13 +8826,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       };
       const auto prior        = control.before_legalize;
       control.before_legalize = [&, prior](dp::Design& physical) {
-        if (probe_fn && options.legroute && options.legroute_probe.enabled && !multirow_cells) {
-          for (unsigned round = 0; round < std::max(1u, options.legroute_probe.rounds); ++round) {
-            if (probe_fn(physical, round)) {
-              break;
-            }
-          }
-        }
         refine_final_boundaries(physical);
         if (prior) {
           prior(physical);
@@ -9022,8 +9015,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           }
         }
       } else if (real) {  // the real legroute's regions and bus-ordered virtual pins, refined at this round's placement
-        if (metrics.density_weight > 0) {  // inside the GP call (the refinement hook) the observer keeps it current
+        if (metrics.density_weight > 0) {
           gp_density_weight = metrics.density_weight;
+        } else if (gp_density_weight <= 0) {  // before the refinement call's GP: the seed it was given
+          gp_density_weight = control.density_weight_seed.value_or(0);
         }
         refine_final_boundaries(design);
         if (final_regions && final_regions->rects.size() > 1) {
@@ -9266,11 +9261,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
             for (int k = design.flat_node2pin_start[i]; k < design.flat_node2pin_start[i + 1]; ++k) {
               design.pin_offset_x[design.flat_node2pin[k]] += half;
             }
-            if (!design.node_boxes.empty()) {
-              design.node_boxes[i] = {design.node_x[i],
-                                      design.node_y[i],
-                                      design.node_x[i] + design.node_size_x[i],
-                                      design.node_y[i] + design.node_size_y[i]};
+            if (!design.node_boxes.empty()) {  // the movement bounds widen with the cell and narrow back (never its outline)
+              design.node_boxes[i].xl -= half;
+              design.node_boxes[i].xh += half;
             }
           }
         };
@@ -9279,7 +9272,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         }
         widen(1);
         auto ctl = control;
-        if (const double dw = metrics.density_weight > 0 ? metrics.density_weight : gp_density_weight; dw > 0) {
+        if (const double dw = metrics.density_weight > 0   ? metrics.density_weight
+                              : gp_density_weight > 0 ? gp_density_weight
+                                                      : control.density_weight_seed.value_or(0);
+            dw > 0) {
           ctl.density_weight_seed = dw * po.repulsion;
         }
         ctl.target_density         = density;
@@ -9357,6 +9353,19 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       return count[1] + count[2] == 0 || (added <= 0 && anchored.empty());
     };
     probe_fn = run_legroute_probe;
+    // the region-refinement call starts from a converged placement: the probe rounds run here, before its GP call
+    // (never inside DREAMPlace's hooks: the detailed placer keeps its own copy of the cells' sizes and positions),
+    // and the refinement in the call's before-legalize hook then cuts the mesh and places the pins after the inflation
+    if (refinement_active && !terminal_active && options.legroute && options.legroute_probe.enabled && !multirow_cells) {
+      for (unsigned round = 0; round < std::max(1u, options.legroute_probe.rounds); ++round) {
+        if (run_legroute_probe(v.design, round)) {
+          break;
+        }
+      }
+      // DREAMPlace's detailed placer asserts on the cells the probe's resumes leave overlapping; legalization alone
+      // settles them, the terminal stage legalizes again anyway
+      control.detailed_place = false;
+    }
     try {
       metrics = dp::place(v.design, control);
     } catch (const std::runtime_error&) {
