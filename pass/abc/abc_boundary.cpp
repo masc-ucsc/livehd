@@ -2213,13 +2213,7 @@ bool write_io_body(hhds::Graph& source, const Imp_def& imported, const synth::Ce
     }
   }
   std::vector<hhds::Pin_class> signals(net.signals.size());
-  const auto                   readers = net.cell_readers();
-  std::vector<uint32_t>        aliases(net.signals.size(), synth::Cell_netlist::kNone);
-  for (const auto& cell : net.cells) {
-    if (cell.fanins.size() == 1 && cells.is_identity(cell.type) && readers[cell.output] == 0) {
-      aliases[cell.output] = cell.fanins.front();
-    }
-  }
+  const auto                   aliases = net.boundary_buffer_aliases(cells);
   const auto resolve = [&](uint32_t signal) {
     while (aliases.at(signal) != synth::Cell_netlist::kNone) {
       signal = aliases[signal];

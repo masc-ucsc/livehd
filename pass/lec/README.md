@@ -125,8 +125,9 @@ is encoded as usual; the sampler (`effort.cpp`) then works on it in two ways:
   clock and reset inputs keep their roles), but also the power-on state of
   reset-less registers, fresh X values and free memory contents (a seeded
   pseudo-random image) -- and the unrolled terms are EVALUATED natively
-  (`term_sim.hpp`: SMT-LIB semantics, one linear pass over the cone of `bad`
-  through the unrolling's `symbol == term` definitions; any other assertion,
+  (`term_sim.hpp`: SMT-LIB semantics, one linear pass through the unrolling's
+  `symbol == term` definitions, including state outside the output cone so the
+  complete witness can be confirmed without solving that unrolling again; any other assertion,
   e.g. a design assume, is a constraint a trace must satisfy or it is not
   counted). No mismatch: the trace counts `bound` vectors. A mismatch: the
   caller's solver re-derives it with every free symbol pinned (cvc5 first

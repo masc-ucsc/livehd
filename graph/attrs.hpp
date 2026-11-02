@@ -363,6 +363,15 @@ struct ware_module_t {
 };
 inline constexpr ware_module_t ware_module{};
 
+// On a specialized graph's input node: the original concrete definition.
+// Survives cache/IR reload so a rebuilt base used through a retained clone
+// does not become an accidental new root merely because its callers are warm.
+struct specialization_origin_t {
+  using value_type = std::string;
+  using storage    = hhds::flat_storage;
+};
+inline constexpr specialization_origin_t specialization_origin{};
+
 // On a memory implementation graph's input node. Synthesis preserves this
 // module boundary; consumers such as STA may explicitly flatten its body.
 struct memory_module_t {
@@ -525,6 +534,8 @@ inline constexpr Attr_kind attr_kind<runtime_check_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<ware_module_t> = Attr_kind::node;
 template <>
+inline constexpr Attr_kind attr_kind<specialization_origin_t> = Attr_kind::node;
+template <>
 inline constexpr Attr_kind attr_kind<memory_module_t> = Attr_kind::node;
 template <>
 inline constexpr Attr_kind attr_kind<memory_async_reset_t> = Attr_kind::node;
@@ -598,6 +609,7 @@ inline constexpr bool carry_on_rebuild<route_strings_v1_t> = false;
   X(proven)                         \
   X(runtime_check)                  \
   X(ware_module)                    \
+  X(specialization_origin)          \
   X(memory_module)                  \
   X(memory_async_reset)             \
   X(aggregate_origin)               \

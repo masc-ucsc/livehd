@@ -283,7 +283,7 @@ bool Io_timing_flow::check(const std::string& stage, const std::map<std::string,
       store_->used(module, synth::mapped_identity(*graph), environment);
     }
     if (decision.fired && !automatic) {
-      diag::warn("synth", "io-resynth-pending", "timing")
+      diag::warn("synth", "io-resynth-pending", "time")
           .msg("color '{}' would resynthesize after {} (slack {} ps, tightening {} ps); rerun lhd synth on the same workdir",
                module,
                stage,

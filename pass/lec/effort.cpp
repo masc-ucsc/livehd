@@ -294,16 +294,25 @@ Input_sampler::Outcome Input_sampler::run(Solver& solver, const cvc5::Term& bad,
                                           const std::function<bool()>& expired) {
   const auto              build_start = Clock::now();
   Term_sim                sim(tm_);
+  const auto              base = base_assertions(solver);
   std::vector<cvc5::Term> roots{bad};
-  roots.reserve(1 + state_diffs_.size() + out_diffs_.size());
+  roots.reserve(1 + state_diffs_.size() + out_diffs_.size() + base.size());
   for (const auto& d : state_diffs_) {
     roots.push_back(d.diff);
   }
   for (const auto& d : out_diffs_) {
     roots.push_back(d.diff);
   }
+  // A mismatch witness must satisfy the whole base, including state that no output reads. Evaluate its
+  // definitions too: otherwise substitution cannot confirm that base, and replay re-solves the entire
+  // unrolling instead of checking the fully pinned trace. Append after the observed roots to retain their ids.
+  for (const auto& a : base) {
+    if (a.getKind() == cvc5::Kind::EQUAL && a.getNumChildren() == 2 && a[0].getKind() == cvc5::Kind::CONSTANT) {
+      roots.push_back(a[0]);
+    }
+  }
   std::string why;
-  if (!sim.build(base_assertions(solver), roots, why)) {
+  if (!sim.build(base, roots, why)) {
     auto out = run_solver(solver, bad, effort, check, expired);
     out.note = "solver-only sampling: " + why;
     return out;
@@ -454,7 +463,6 @@ Input_sampler::Outcome Input_sampler::run(Solver& solver, const cvc5::Term& bad,
   // CONFIRMS the simulated trace -- every base assertion and `bad`, with the
   // trace substituted, must rewrite to true -- and the witness model comes
   // from the pins alone (Fresh_solver::check_scope).
-  const auto base     = base_assertions(solver);
   auto       confirms = [&]() {
     if constexpr (!std::is_same_v<Solver, Fresh_solver>) {
       return false;
@@ -653,6 +661,8 @@ Input_sampler::Outcome Input_sampler::run(Solver& solver, const cvc5::Term& bad,
   // simulation speed instead of at one capped solve per step.
   constexpr uint64_t kSearchFloorUs = 500000;
   uint64_t           search_us      = 0;
+  uint64_t           prefix_queries = 0;
+  bool               prefix_tried   = false;
   const auto         run_start      = build_start;
   for (uint64_t q = 0; report.vectors < target; ++q) {
     if (timed_out()) {
@@ -693,6 +703,68 @@ Input_sampler::Outcome Input_sampler::run(Solver& solver, const cvc5::Term& bad,
     }
     ++report.traces;
     report.vectors += cycles_;
+
+    // Search observable prefixes before randomized windows. State-watch cones
+    // can dwarf the output cone and force those windows below a pipeline's
+    // latency. Keep the initial state's concrete value, free primary inputs
+    // through a checked cycle, and ask only for its output difference. This
+    // remains sampling: an UNSAT prefix is not a whole-design proof.
+    if (!prefix_tried && windowed && report.vectors < target) {
+      prefix_tried            = true;
+      const auto prefix_start = Clock::now();
+      const int  last_prefix  = std::min(last_cycle, first_checked + std::max(1, horizon_));
+      for (int cycle = first_checked; cycle <= last_prefix; ++cycle) {
+        if (timed_out() || micros(prefix_start) >= kSearchFloorUs) {
+          break;
+        }
+        std::vector<bool> symbolic(leaves.size(), false);
+        for (size_t i = 0; i < leaves.size(); ++i) {
+          symbolic[i] = leaf_cycle[i] >= 0 && leaf_cycle[i] <= cycle;
+        }
+        std::vector<size_t> ids;
+        for (size_t k = 0; k < out_diffs_.size(); ++k) {
+          if (out_diffs_[k].cycle == cycle) {
+            ids.push_back(out_root + k);
+          }
+        }
+        if (ids.empty()) {
+          continue;
+        }
+        sim.eval(true);
+        const auto red = sim.reduce(symbolic, ids);
+        if (trace_steps) {
+          std::fprintf(stderr, "[LEC_SAMPLE] output prefix through %d: %zu term(s), %zu output(s)\n", cycle, red.terms, ids.size());
+        }
+        if (red.vacuous || red.terms > kMaxSearchTerms) {
+          continue;
+        }
+        std::vector<cvc5::Term> goals;
+        for (const auto& term : red.roots) {
+          if (!(term.isBooleanValue() && !term.getBooleanValue())) {
+            goals.push_back(term);
+          }
+        }
+        if (goals.empty()) {
+          continue;
+        }
+        std::unique_ptr<cvc5::Solver> query;
+        ++prefix_queries;
+        const auto result = solve(red, goals.size() == 1 ? goals.front() : tm_.mkTerm(cvc5::Kind::OR, goals), kConfirmCapMs, query);
+        if (result.isSat()) {
+          auto pins = model_pins(*query, symbolic);
+          query.reset();
+          if (replay(std::move(pins))) {
+            break;
+          }
+        } else if (!result.isUnsat()) {
+          ++report.unknown;
+        }
+      }
+      search_us += micros(prefix_start);
+      if (out.mismatch) {
+        break;
+      }
+    }
 
     // 2) Every other step, a search around the same trace.
     if (!searching || q % 2 == 0 || report.vectors >= target
@@ -851,6 +923,9 @@ Input_sampler::Outcome Input_sampler::run(Solver& solver, const cvc5::Term& bad,
       skipped ? std::format(" ({} skipped as too large)", skipped) : std::string{},
       searching ? "" : " (searching stopped: per-query cap)",
       replay_failed ? std::format(", {} mismatch replay(s) the solver did not confirm", replay_failed) : std::string{});
+  if (prefix_queries != 0) {
+    out.note += std::format(", {} output-prefix query(s)", prefix_queries);
+  }
   return out;
 }
 

@@ -56,6 +56,7 @@ struct Clock_gate_stats {
 //
 // A register with a synchronous reset sits behind `common | reset_active`, because the reset wins over the enable and a stopped
 // clock would never load it. Negative-edge registers, pipelined registers and registers with a multi-bit enable are left alone.
+// Reset-only inactivity cannot close that clock: those registers retain their original clock and enable.
 // The Clock_cell is spelled structurally later (design_prepare's expand_plain_clock_cells), so the mappers see the usual
 // `clk & latch(en)` and map it onto a Liberty ICG when the library has one.
 //

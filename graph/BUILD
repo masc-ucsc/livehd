@@ -77,6 +77,7 @@ cc_library(
     "node_count_test",
     "predict_abc_size_smoke",
     "latch_contract_test",
+    "latch_window_smoke",
     "occurrence_materialize_test",
     "port_reach_test",
 ]]

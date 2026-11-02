@@ -1,0 +1,50 @@
+/*
+:name: loop_independent_clock_ports
+:type: simulation
+*/
+
+mod independent_clock_counter(clk:Clock) -> (q:U4@[0]) {
+  reg count:U4:[clock_pin=clk] = 0
+  q = count
+  wrap count += 1
+}
+
+mod independent_clock_lanes(clock_a:Clock, clock_b:Clock) -> (a:U8@[0], b:U8@[0]) {
+  mut total_a:U8 = 0
+  mut total_b:U8 = 0
+  for lane in 0..<2 {
+    const count_a = independent_clock_counter(clk=clock_a)
+    const count_b = independent_clock_counter(clk=clock_b)
+    wrap total_a = total_a + count_a
+    wrap total_b = total_b + count_b
+  }
+  a = total_a
+  b = total_b
+}
+
+pub mod independent_clock_top(clk:Clock, en_a:Bool, en_b:Bool) -> (a:U8@[], b:U8@[]) {
+  const gated_a = Clock(clock_pin=clk, enable=en_a)
+  const gated_b = Clock(clock_pin=clk, enable=en_b)
+  const counts = independent_clock_lanes(clock_a=gated_a, clock_b=gated_b)
+  a = counts.a
+  b = counts.b
+}
+
+test independent_clock_top.each_domain_holds_and_resumes {
+  mut dut = independent_clock_top
+  mut expected_a:U8 = 0
+  mut expected_b:U8 = 0
+  tick 12 {
+    const active_a = (clock < 2) or ((clock >= 5) and (clock < 9))
+    const active_b = ((clock >= 2) and (clock < 6)) or (clock >= 10)
+    dut.en_a = active_a
+    dut.en_b = active_b
+    if active_a { wrap expected_a += 1 }
+    if active_b { wrap expected_b += 1 }
+    step
+    assert(dut.a == 2 * expected_a, "closing clock B must not hold domain A")
+    assert(dut.b == 2 * expected_b, "closing clock A must not hold domain B")
+  }
+  assert(expected_a == 6, "domain A exercised independent clocks")
+  assert(expected_b == 6, "domain B exercised independent clocks")
+}

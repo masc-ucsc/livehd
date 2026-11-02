@@ -169,7 +169,7 @@ L2="tv1:d=on;f=0;lw=256;be=llvm"  # the idle design's trial out of L1
 # Running this script without an argument still exercises every lifecycle.
 group="${1:-all}"
 case "$group" in
-  all|profile|lfsr|pins|unknown_zero|stale|exhaustion|crash|edit|trial_gate|closed|divergence|resetup) ;;
+  all|profile|lfsr|pins|pin_knob|disabled_profile|disabled_incremental|unknown_zero|stale|exhaustion|crash|edit|trial_gate|closed|divergence|resetup) ;;
   *) fail "unknown tuning test group: $group" ;;
 esac
 selected() { [ "$group" = all ] || [ "$group" = "$1" ]; }
@@ -330,7 +330,7 @@ for st in "$L"/incr/scopes/sim/*/tune.jsonl; do
 done
 fi
 
-if selected pins; then
+if selected pins || selected pin_knob; then
 # ---- 4. an explicit --set freezes its knob ------------------------------------------
 P="$W/pin"
 sim "$W/pin.json" "$IDLE" --workdir "$P" +cycles="$N_IDLE" --set sim.tune.profile=on --set sim.tune.dirty=off \
@@ -342,9 +342,12 @@ sim "$W/pin.json" "$IDLE" --workdir "$P" +cycles="$N_IDLE" --set sim.tune.profil
 [ "$(records "$(store_of "$P")" run)" = "1" ] || fail "a pinned run still feeds the ledger"
 fi
 
-if selected pins; then
+if selected pins || selected disabled_profile || selected disabled_incremental; then
 # ---- 5. off / incremental=false read and write nothing -----------------------------
-for how in "sim.tune.profile=off" "lhd.incremental=false"; do
+how_values=("sim.tune.profile=off" "lhd.incremental=false")
+[ "$group" != disabled_profile ] || how_values=("sim.tune.profile=off")
+[ "$group" != disabled_incremental ] || how_values=("lhd.incremental=false")
+for how in "${how_values[@]}"; do
   d="$W/off_${how%%=*}"
   sim "$W/off.json" "$LFSR" --workdir "$d" +cycles=1000 --set "$how" || fail "$how run failed: $(cat "$W/off.json")"
   [ "$(tune "$W/off.json" enabled)" = "false" ] || fail "$how must disable the tuner"

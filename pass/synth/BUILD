@@ -406,3 +406,26 @@ cc_test(
     copts = COPTS,
     deps = [":synth", "@googletest//:gtest_main"],
 )
+
+cc_test(
+    name = "cell_netlist_test",
+    size = "small",
+    srcs = ["cell_netlist_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":synth",
+        "@googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "loop_cleanup_test",
+    size = "small",
+    srcs = ["loop_cleanup_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":synth",
+        "//pass/lec:lec_query",
+        "@googletest//:gtest_main",
+    ],
+)

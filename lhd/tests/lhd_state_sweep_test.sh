@@ -14,6 +14,11 @@ SRC="$PWD/lhd/tests/state_sweep.v"
 LIB="$PWD/lhd/tests/abc_arst_q.lib"
 W="${TEST_TMPDIR:-/tmp/lhd_state_sweep_$$}"
 mkdir -p "$W"
+part="${1:-all}"
+case "$part" in
+  all | registers | compile_sweep | both | flat | usyn | validation | merge | memory | memory_compile) ;;
+  *) echo "FAIL: unknown test part $part" >&2; exit 1 ;;
+esac
 
 fail() {
   echo "FAIL: $*" >&2
@@ -46,6 +51,11 @@ CHECK
 "$LHD" pass liberty gensim "$LIB" --emit-dir lg:"$W/models" --workdir "$W/Wm" -q --result-json "$W/g.json" > "$W/gensim.log" 2>&1 \
   || fail "gensim -> $(cat "$W/g.json")"
 
+OFF=184
+ON=99
+MEM_SRC="$PWD/lhd/tests/state_sweep_mem.v"
+
+if [ "$part" = all ] || [ "$part" = registers ]; then
 # Default: every register of the source is mapped (184 bits: 32+32+8 in the child, 16, 64, 32 here).
 synth off false
 OFF=$(count "$W/off/net.v" '^DFF')
@@ -70,19 +80,30 @@ lec on
 CELLS='^[A-Z][A-Za-z0-9]*x[0-9][0-9]* '
 [ "$(count "$W/on/net.v" "$CELLS")" -lt "$(count "$W/off/net.v" "$CELLS")" ] || fail "on: the swept netlist is not smaller"
 
+fi
+
 # compile.sweep edits the flat compile graphs, synth.state_sweep the mapper's private copy: they overlap and compose. Alone,
 # compile.sweep (no flatten, so no hierarchy to see through) leaves the child's dead bits, which the private-copy sweep takes;
 # together, flat or not, the netlist is the same 99 register bits and the LEC proof against the source still holds.
+if [ "$part" = all ] || [ "$part" = compile_sweep ]; then
 synth csweep false --set compile.sweep=true
 CSWEEP=$(count "$W/csweep/net.v" '^DFF')
 [ "$CSWEEP" -lt "$OFF" ] && [ "$CSWEEP" -gt "$ON" ] || fail "compile.sweep alone: expected between $ON and $OFF register bits, got $CSWEEP"
 lec csweep
+fi
+
+if [ "$part" = all ] || [ "$part" = both ]; then
 synth both true --set compile.sweep=true
 [ "$(count "$W/both/net.v" '^DFF')" = 99 ] || fail "compile.sweep + state_sweep: expected 99 register bits, got $(count "$W/both/net.v" '^DFF')"
 lec both
+fi
+
+if [ "$part" = all ] || [ "$part" = flat ]; then
 synth flat true --set compile.flatten=true --set compile.sweep=true --set compile.unknown_zero=true
 [ "$(count "$W/flat/net.v" '^DFF')" = 99 ] || fail "flatten + sweeps: expected 99 register bits, got $(count "$W/flat/net.v" '^DFF')"
 lec flat
+fi
+
 
 # The native unate mapper shares the sweep: its logical netlist keeps the same registers.
 usyn() { # <tag> <state_sweep>
@@ -92,10 +113,15 @@ usyn() { # <tag> <state_sweep>
     --set synth.mapper=usyn --set pass.usyn.tmap=none --set synth.state_sweep="$2" -- "$SRC" > "$d/synth.log" 2>&1 \
     || fail "usyn $1: synth -> $(cat "$d/r.json" 2>/dev/null)"
 }
+if [ "$part" = all ] || [ "$part" = usyn ]; then
 usyn off false
 usyn on true
 [ "$(count "$W/usyn_off/net.v" '^always @')" = 184 ] || fail "usyn off: expected 184 registers, got $(count "$W/usyn_off/net.v" '^always @')"
 [ "$(count "$W/usyn_on/net.v" '^always @')" = 99 ] || fail "usyn on: expected 99 registers, got $(count "$W/usyn_on/net.v" '^always @')"
+
+fi
+
+if [ "$part" = all ] || [ "$part" = validation ]; then
 
 # A misspelt pass-level switch is an error, not a silent "off" that keeps the dead state.
 for spelling in pass.usyn.state_sweep pass.usyn.merge_registers; do
@@ -104,6 +130,10 @@ for spelling in pass.usyn.state_sweep pass.usyn.merge_registers; do
     fail "$spelling=maybe was accepted"
   fi
 done
+
+fi
+
+if [ "$part" = all ] || [ "$part" = merge ]; then
 
 # synth.merge_registers: twin registers (same clock, enable, reset and D) merge, and the registers fed by
 # them merge in turn; a register with another enable stays. 5 x 8 bits become 3 x 8. The twin of a merged
@@ -130,10 +160,13 @@ if lec.get('verdict') not in ('proven-full', 'proven-bounded') or (lec.get('boun
     raise SystemExit('FAIL: expected a LEC proof of the merged twins, got {}'.format(lec))
 CHECK
 
+fi
+
+if [ "$part" = all ] || [ "$part" = memory ]; then
+
 # A lowered memory is registers behind a read mux: with the sweep, the columns no reader looks at go too
-# (4 entries x 32 bits -> the 8 bits of the byte read). The removed columns have no counterpart left to pair, so
+# (4 entries x 16 bits -> the 8 bits of the byte read). The removed columns have no counterpart left to pair, so
 # the LEC proof is a bounded one.
-MEM_SRC="$PWD/lhd/tests/state_sweep_mem.v"
 for mode in false true; do
   d="$W/mem_$mode"
   mkdir -p "$d"
@@ -142,7 +175,7 @@ for mode in false true; do
     -- "$MEM_SRC" > "$d/synth.log" 2>&1 || fail "mem $mode: synth -> $(cat "$d/r.json" 2>/dev/null)"
   cat "$d/netv/"*.v > "$d/net.v"
 done
-[ "$(count "$W/mem_false/net.v" '^DFF')" = 128 ] || fail "mem off: expected 128 register bits, got $(count "$W/mem_false/net.v" '^DFF')"
+[ "$(count "$W/mem_false/net.v" '^DFF')" = 64 ] || fail "mem off: expected 64 register bits, got $(count "$W/mem_false/net.v" '^DFF')"
 [ "$(count "$W/mem_true/net.v" '^DFF')" = 32 ] || fail "mem on: expected 32 register bits, got $(count "$W/mem_true/net.v" '^DFF')"
 grep -q '"state-swept-memory"' "$W/mem_true/synth.log" || fail "mem on: the sweep of the lowered memory did not report"
 "$LHD" lec --set formal.effort=proof --impl lg:"$W/mem_true/net" --ref lg:"$W/mem_true/W/synth/lg" --lib lg:"$W/models" \
@@ -155,6 +188,10 @@ if lec.get('verdict') not in ('proven-full', 'proven-bounded') or (lec.get('boun
     raise SystemExit('FAIL: expected a LEC proof of the narrowed memory, got {}'.format(lec))
 CHECK
 
+fi
+
+if [ "$part" = all ] || [ "$part" = memory_compile ]; then
+
 # The lowered memory exists only after the compile step: compile.sweep cannot see its unread columns, the private-copy sweep can.
 d="$W/mem_both"
 mkdir -p "$d"
@@ -164,5 +201,7 @@ mkdir -p "$d"
   || fail "mem both: synth -> $(cat "$d/r.json" 2>/dev/null)"
 cat "$d/netv/"*.v > "$d/net.v"
 [ "$(count "$d/net.v" '^DFF')" = 32 ] || fail "mem both: expected 32 register bits, got $(count "$d/net.v" '^DFF')"
+
+fi
 
 echo "PASS: synth.state_sweep drops unobserved registers and register bits, proven against the source"

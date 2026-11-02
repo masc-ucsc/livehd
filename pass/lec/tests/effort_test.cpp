@@ -187,3 +187,70 @@ TEST_F(SamplerFixture, TimeoutBeforeLeadConfirmation) {
   EXPECT_EQ(out.reason, "hit formal.timeout");
   EXPECT_TRUE(solver.checkSat().isSat());
 }
+
+// A decoded selector must also be exercised through a pipeline, rather than
+// independently glitched at every stage. Every selector value is legal here;
+// the difference appears only after eight cycles of coherent nonzero input.
+TEST_F(SamplerFixture, DecodedSelectorsExerciseDelayedStableInputs) {
+  std::vector<cvc5::Term> inputs, conditions;
+  for (int cycle = 0; cycle < 8; ++cycle) {
+    const auto input = variable(5, "selector" + std::to_string(cycle));
+    sampler.add_input(input, cycle, "selector");
+    inputs.push_back(input);
+    std::vector<cvc5::Term> decode;
+    for (uint64_t value = 0; value < 32; ++value) {
+      decode.push_back(tm.mkTerm(Kind::EQUAL, {input, tm.mkBitVector(5, value)}));
+    }
+    conditions.push_back(tm.mkTerm(Kind::OR, decode));
+    if (cycle > 0) {
+      conditions.push_back(tm.mkTerm(Kind::EQUAL, {input, inputs.front()}));
+    }
+  }
+  conditions.push_back(tm.mkTerm(Kind::DISTINCT, {inputs.front(), tm.mkBitVector(5, 0)}));
+  const auto bad = tm.mkTerm(Kind::AND, conditions);
+  sampler.add_output_diff(7, bad);
+  sampler.set_cycles(8);
+  const auto out = sampler.run(solver, bad, Effort::Test);
+  ASSERT_TRUE(out.mismatch) << out.reason << " / " << out.note;
+  ASSERT_TRUE(out.result.isSat());
+  const auto chosen = solver.getValue(inputs.front());
+  EXPECT_NE(chosen, tm.mkBitVector(5, 0));
+  for (const auto& input : inputs) {
+    EXPECT_EQ(solver.getValue(input), chosen);
+  }
+  solver.pop();
+  EXPECT_TRUE(solver.checkSat().isSat());
+}
+
+// Watching a large, equivalent state cone must not prevent a small observable
+// mismatch from being searched across its pipeline latency.
+TEST_F(SamplerFixture, LargeUnobservableStateDoesNotHideDelayedOutput) {
+  std::vector<cvc5::Term> noise;
+  for (int cycle = 0; cycle < 8; ++cycle) {
+    noise.push_back(variable(32, "noise" + std::to_string(cycle)));
+    sampler.add_input(noise.back(), cycle, "noise");
+  }
+  const auto a = variable(32, "a");
+  const auto b = variable(32, "b");
+  sampler.add_input(a, 0, "a");
+  sampler.add_input(b, 1, "b");
+  auto large = noise.front();
+  for (uint32_t i = 0; i < 26000; ++i) {
+    large = tm.mkTerm(Kind::BITVECTOR_ADD, {large, tm.mkBitVector(32, i + 1)});
+    large = tm.mkTerm(Kind::BITVECTOR_XOR, {large, noise[i % 5]});
+  }
+  const auto same = tm.mkTerm(Kind::BITVECTOR_XOR, {tm.mkTerm(Kind::BITVECTOR_XOR, {large, a}), a});
+  sampler.add_state_diff("irrelevant", 4, tm.mkTerm(Kind::DISTINCT, {large, same}));
+  const auto bad = tm.mkTerm(Kind::EQUAL, {tm.mkTerm(Kind::BITVECTOR_ADD, {a, b}), tm.mkBitVector(32, 0xc0ffee11u)});
+  for (int cycle = 0; cycle < 8; ++cycle) {
+    sampler.add_output_diff(cycle, cycle == 4 ? bad : tm.mkFalse());
+  }
+  sampler.set_cycles(8);
+  sampler.set_horizon(5);
+  const auto out = sampler.run(solver, bad, Effort::Test);
+  ASSERT_TRUE(out.mismatch) << out.reason << " / " << out.note;
+  EXPECT_TRUE(out.result.isSat());
+  EXPECT_TRUE(solver.getValue(bad).getBooleanValue());
+  solver.pop();
+  EXPECT_TRUE(solver.checkSat().isSat());
+}

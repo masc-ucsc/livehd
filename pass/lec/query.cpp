@@ -5669,8 +5669,31 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
     // then compares only flushed, input-determined behavior. (Sound either way —
     // the window still exercises `bound` free-running cycles, and UNDER-flushing
     // can only cause a false REFUTE, never a false PROVEN.)
-    int        reset_hold    = phase_run ? (opts.reset_cycles > 0 ? opts.reset_cycles : 1) : 0;
-    if (phase_run) {
+    bool       has_power_on = false, has_state_reset = false;
+    for (auto* graph : {ref, impl}) {
+      for (auto node : graph->occurrences(collapse_gids_ptr).nodes(hhds::Node_order::forward)) {
+        const auto op = graph_util::type_op_of(node);
+        if (op != Ntype_op::Flop && op != Ntype_op::Latch && op != Ntype_op::Memory) {
+          continue;
+        }
+        const auto reset  = graph_util::get_driver_of_sink_name(node, op == Ntype_op::Memory ? "reset" : "reset_pin");
+        const bool resets = !reset.is_invalid() && !reset.is_known_false();
+        has_state_reset   = has_state_reset || resets;
+        // The edge-normalization divider starts concretely only to choose
+        // clock slots. It is not a source power-on guarantee and must not
+        // suppress the design's reset/flush prologue.
+        if ((graph == ref || opts.gold_x == "zero") && !resets && !graph_util::is_single_edge_phase_key(eff(node.get_hier_name()))
+            && graph_util::get_driver_of_sink_name(node, "initial").is_const()) {
+          has_power_on = true;
+        }
+      }
+    }
+    // Without an actual reset, flushing an initialized pipeline can erase the
+    // only observable difference: an unconditional first write replaces s0.
+    // Compare its specified power-on state before advancing a clock instead.
+    const bool check_power_on = phase_run && has_power_on && !has_state_reset;
+    int        reset_hold     = phase_run && !check_power_on ? (opts.reset_cycles > 0 ? opts.reset_cycles : 1) : 0;
+    if (phase_run && !check_power_on) {
       int flush = std::max(pipeline_flush_latency(ref), pipeline_flush_latency(impl));
       if (flush > reset_hold) {
         reset_hold = flush;  // flush the deepest pipeline before checking
@@ -5787,7 +5810,8 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
           // reason: eff() is NOT injective, so plain assignment would make the
           // pinned power-on state of a soundness-critical miter depend on the
           // occurrence walk order.
-          const bool has_reset_pin = !gu::get_driver_of_sink_name(node, "reset_pin").is_invalid();
+          const auto reset_pin     = gu::get_driver_of_sink_name(node, "reset_pin");
+          const bool has_reset_pin = !reset_pin.is_invalid() && !reset_pin.is_known_false();
           if (nop == Ntype_op::Flop && !has_reset_pin && !power_init[side_ix].count(key)) {
             if (auto iv = flop_initial(tm, node, w, opts.gold_x != "zero")) {
               power_init[side_ix][key] = *iv;
@@ -7030,6 +7054,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       const bool ref_use_plan = use_plan && (use_phase || ref_plan.needs_plan());
       enc.set_phase_plan(ref_use_plan ? &ref_plan : nullptr, ms);
       enc.set_memory_x_state(&ref_mem_x);
+      enc.set_initial_read(opts.gold_x == "zero" ? Encoder::Initial_read::zero : Encoder::Initial_read::unknown);
       Encoded re = enc.encode(ref, &sh_ref, "r" + std::to_string(step) + "_", &ref_mem, &ref_reads);
       enc.set_x_dontcare(false);
       enc.set_memory_x_state(nullptr);
@@ -7044,6 +7069,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       const bool impl_use_plan = use_plan && (use_phase || impl_plan.needs_plan());
       enc.set_phase_plan(impl_use_plan ? &impl_plan : nullptr, ms);
       enc.set_undef_read_free(true);  // the implementation's undefined reads are free values
+      enc.set_initial_read(opts.gold_x == "zero" ? Encoder::Initial_read::zero : Encoder::Initial_read::symbolic);
       Encoded ie = enc.encode(impl, &sh_impl, "i" + std::to_string(step) + "_", &impl_mem, &impl_reads);
       enc.set_undef_read_free(false);
       if (!ie.ok) {
@@ -7752,6 +7778,11 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
   // `shared` alone cannot tell "both sides have this key" from "only one does".
   Io_name_map<int>         ind_side[2];
   Io_name_map<std::string> ind_raw[2];  // key -> hierarchical name (see fw_raw)
+  struct Scalar_power_on {
+    std::string bits;  // LSB first, including any literal unknown bits
+    bool        is_signed;
+  };
+  Io_name_map<Scalar_power_on>                        ind_power_on[2];
   int                      ind_side_ix = 0;
   // Reference flops whose `initial` (reset or power-on value) may set a bit:
   // key -> the positions that may be 1 (every position for a non-constant
@@ -7877,6 +7908,16 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
         ind_side[ind_side_ix][key] = w;  // min-wins, exactly like `shared` below
       }
       ind_raw[ind_side_ix].try_emplace(key, node.get_hier_name());
+      const auto reset   = graph_util::get_driver_of_sink_name(node, "reset_pin");
+      const auto initial = graph_util::get_driver_of_sink_name(node, "initial");
+      if (nop == Ntype_op::Flop && (reset.is_invalid() || reset.is_known_false()) && initial.is_const()) {
+        const auto      value = graph_util::const_of(initial);
+        Scalar_power_on init{{}, !graph_util::is_unsign(q)};
+        for (int bit = 0; bit < w; ++bit) {
+          init.bits.push_back(value.unknown_bit_test(bit) ? '?' : value.bit_test(bit) ? '1' : '0');
+        }
+        ind_power_on[ind_side_ix].try_emplace(key, std::move(init));
+      }
       if (ind_side_ix == 0) {
         if (auto init = graph_util::get_driver_of_sink_name(node, "initial"); !init.is_invalid()) {
           ind_ref_init_text[key] = init.is_const() ? graph_util::const_of(init).serialize() : "?" + key;
@@ -8005,7 +8046,69 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       ++ind_packed_scalar_applied;
     }
   }
+  // Check the power-on base of every initialized reference cut after the
+  // sparse/packed correspondence is known. Missing, unobserved reference bits
+  // remain free; only retained implementation storage is assumed equal.
+  const auto initial_bit = [](const Scalar_power_on& value, size_t bit) {
+    return bit < value.bits.size() ? value.bits[bit] : value.is_signed && !value.bits.empty() ? value.bits.back() : '0';
+  };
+  const auto initial_matches = [&](const Scalar_power_on& ref_init, size_t offset, const Scalar_power_on* impl_init, size_t width) {
+    for (size_t bit = 0; bit < width; ++bit) {
+      const char rb = initial_bit(ref_init, offset + bit);
+      if (rb == '?' && opts.gold_x != "zero") {
+        continue;  // a literal reference X permits any implementation value
+      }
+      if (impl_init == nullptr || initial_bit(*impl_init, bit) == '?' || initial_bit(*impl_init, bit) != (rb == '?' ? '0' : rb)) {
+        return false;
+      }
+    }
+    return true;
+  };
+  bool ind_power_on_base_shared = true;
+  for (const auto& [key, value] : ind_power_on[0]) {
+    bool compatible = false;
+    if (const auto it = ind_power_on[1].find(key); it != ind_power_on[1].end()) {
+      compatible = initial_matches(value, 0, &it->second, std::max(value.bits.size(), it->second.bits.size()));
+    } else if (const auto bridge = ind_bitblast.find(key); bridge != ind_bitblast.end()) {
+      compatible    = true;
+      size_t offset = 0;
+      for (const auto& part : bridge->second) {
+        const size_t width = part.empty() ? 1 : static_cast<size_t>(ind_side[1].at(part));
+        if (!part.empty()) {
+          const auto part_init = ind_power_on[1].find(part);
+          compatible = compatible
+                       && initial_matches(value, offset, part_init == ind_power_on[1].end() ? nullptr : &part_init->second, width);
+        }
+        offset += width;
+      }
+    } else if (ind_side[1].contains(key)) {
+      compatible = initial_matches(value, 0, nullptr, value.bits.size());
+    } else {
+      // A one-sided register is not a shared cut. The correspondence and
+      // constant-state checks below must justify it, including its initial
+      // contents, before an unbounded proof can close.
+      continue;
+    }
+    if (!compatible) {
+      ind_power_on_base_shared  = false;
+      res.detail               += "; resetless initial contents lack a shared scalar base at " + key + " (BMC decides)";
+    }
+  }
+  if (opts.gold_x == "zero") {
+    for (const auto& [key, value] : ind_power_on[1]) {
+      (void)value;
+      if (ind_side[0].contains(key) && !ind_power_on[0].contains(key)) {
+        ind_power_on_base_shared = false;
+        res.detail += "; zero-filled reference and initialized scalar need a concrete base at " + key + " (BMC decides)";
+      }
+    }
+  }
   auto gate_packed_scalar_step = [&]() {
+    if (res.verdict == Verdict::Proven && !ind_power_on_base_shared) {
+      res.verdict  = Verdict::Undecided;
+      res.detail  += "; the inductive engine cannot check this functionality without a valid power-on base (BMC decides)";
+      return;
+    }
     if (res.verdict != Verdict::Proven || ind_packed_scalar_applied == 0) {
       return;
     }

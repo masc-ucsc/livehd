@@ -2,6 +2,44 @@
 :name: clock_gate_inferred_cone
 :type: simulation
 */
+
+// A gate's sampled enable must survive an earlier in-place update of the
+// register feeding it. Both writes at one edge read the old seed.
+pub mod sampled_clock_child(clk:Clock, en:Bool, d:U32) -> (value:U32@[1]) {
+  const gated = Clock(clock_pin=clk, enable=en)
+  reg held:U32:[clock_pin=gated] = 0
+  held = d
+  value = held
+}
+
+pub mod sampled_clock_parent(clk:Clock) -> (value:U32@[1], seed_value:U8@[0]) {
+  reg seed:U8 = 1
+  value = sampled_clock_child(clk=clk, en=(seed#[0] != 0), d=U32(seed))
+  seed_value = seed
+  wrap seed = seed + 1
+}
+
+test sampled_clock_parent.uses_pre_edge_activation {
+  mut dut = sampled_clock_parent
+  mut expected_seed:U8 = 1
+  mut expected_value:U32 = 0
+  tick 16 {
+    dut.reset = clock < 2
+    if clock < 2 {
+      expected_seed = 1
+      expected_value = 0
+    } else {
+      if expected_seed#[0] != 0 {
+        expected_value = U32(expected_seed)
+      }
+      wrap expected_seed = expected_seed + 1
+    }
+    step
+    assert(dut.seed_value == expected_seed, "seed control must advance every period")
+    assert(dut.value == expected_value, "gated state must use the pre-edge seed")
+  }
+}
+
 // Registers that share an enable sit behind one inferred clock gate, and the work that feeds only them (their next-state cones)
 // is skipped while the gate is closed. Whatever the schedule skips, the registers must still hold, then load, exactly as the
 // plain enable says: a closed gate keeps the old value, an open one loads the cone's result computed from THIS period's inputs.

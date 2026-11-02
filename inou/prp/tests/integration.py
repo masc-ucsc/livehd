@@ -142,13 +142,19 @@ def main():
     parser.add_argument('source', type=Path)
     # Comma list of technology mappers (`lhd synth --set synth.mapper=`), all run by one target.
     parser.add_argument('mapper', nargs='?', default='abc')
+    parser.add_argument('--lib', help='Select one declared fixture Liberty for an independent test')
     args = parser.parse_args()
     if not all(tech in ('abc', 'usyn') for tech in args.mapper.split(',')):
         parser.error('mapper must be a comma list of abc, usyn: ' + args.mapper)
     lhd = os.environ.get('LHD') or ('./bazel-bin/lhd/lhd' if Path('bazel-bin/lhd/lhd').exists() else './lhd/lhd')
     root = Path(tempfile.mkdtemp(prefix='integration_', dir=os.environ.get('TEST_TMPDIR')))
     try:
-        globals()[args.mode](lhd, args.source, tags(args.source), root, args.mapper)
+        meta = tags(args.source)
+        if args.lib:
+            if args.mode != 'synth' or args.lib not in meta.get('libs', 'test').split():
+                raise RuntimeError('requested Liberty is not declared by this synthesis fixture: ' + args.lib)
+            meta['libs'] = args.lib
+        globals()[args.mode](lhd, args.source, meta, root, args.mapper)
     except (OSError, RuntimeError, subprocess.SubprocessError) as error:
         print('FAIL:', error, '\nArtifacts:', root, file=sys.stderr)
         return 1

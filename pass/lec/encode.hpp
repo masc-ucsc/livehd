@@ -565,6 +565,12 @@ public:
   // undef bit-plane on every Val (see Val::undef) instead of being silently
   // masked to 0. Toggled ON only while encoding the REFERENCE design.
   void set_x_dontcare(bool on) { x_dontcare_ = on; }
+
+  // BMC power-on policy for a threaded synchronous-read output that has not
+  // read yet. Keep induction's arbitrary current-state cuts symbolic. A value
+  // already carried in shared_reads always wins over this initial policy.
+  enum class Initial_read { symbolic, unknown, zero };
+  void set_initial_read(Initial_read policy) { initial_read_ = policy; }
   void set_memory_x_state(const Io_name_map<Mem_x_state>* state) { memory_x_state_ = state; }
   // LEC IMPLEMENTATION side: a read the memory leaves undefined (an
   // ordering="none" collision with a write) returns an UNCONSTRAINED value --
@@ -697,6 +703,7 @@ private:
   const Io_name_map<Mem_x_state>*                      memory_x_state_ = nullptr;
   bool                                                x_dontcare_    = false;  // ref-side X = don't-care (lec.gold_x=ignore)
   bool                                                undef_read_free_ = false;  // impl-side undefined read = free value
+  Initial_read                                         initial_read_    = Initial_read::symbolic;
   bool                                                emit_props_ = false;  // emit fproperty conds as \x04prop: outputs (2f-verify)
   bool                                                force_multi_clock_ = false;  // see set_force_multi_clock
   const absl::flat_hash_set<std::string>*             port_taps_  = nullptr;  // sub instances whose ports get \x05tap: outputs

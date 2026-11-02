@@ -35,6 +35,12 @@ fail() {
   exit 1
 }
 
+MODE=${1:-all}
+case "$MODE" in
+  all|behavior|diagnostics) ;;
+  *) fail "usage: $0 [all|behavior|diagnostics]" ;;
+esac
+
 # Two-deep delay line: ack is req delayed EXACTLY two cycles (outside reset).
 # Exactly-two is what makes the directional claims below decidable — a window
 # that includes cycle 2 must hold and one that excludes it must refute.
@@ -62,6 +68,7 @@ EOF
 # at `a` about ack at a+1 and a+2 needs reset low at a-1, a and a+1, which is
 # exactly nrst(a), nrst(a+1), nrst(a+2), i.e. always(acc.nrst, 0..=2).
 
+if [ "$MODE" != diagnostics ]; then
 # ---- existential: the window that CONTAINS the true latency proves ----------
 cat >"$W/ev_good.verify.prp" <<'EOF'
 const dut = import("dly2.dly2")
@@ -140,6 +147,9 @@ OUT="$W/st_good.out"
   || fail "a true stable() window must prove: $(cat "$OUT")"
 grep -qE "^formal verify: '[^']*' PROVEN-(full|bounded)" "$OUT" || fail "expected PROVEN for stable(): $(cat "$OUT")"
 
+fi
+
+if [ "$MODE" != behavior ]; then
 # ---- a window WIDER than the bound must not read as a proof ------------------
 # The dangerous failure mode: if the unroll is too short to hold any anchor, the
 # obligation is checked nowhere. That must surface as UNKNOWN with the skip
@@ -186,5 +196,7 @@ refuse 'assert(eventually(acc.ack, 3..=1), "x")'   'empty'            'an invert
 refuse 'assert(eventually(acc.ack, 1..=zz), "x")'  'literal cycle'    'a non-literal window bound'
 # `1..2` is not Pyrope range syntax at all, so the PARSER refuses it before the
 # window code is reached — still an error, just not one this layer authors.
+
+fi
 
 echo "PASS: windowed temporal operators (eventually/always/rose/fell/stable/changed)"

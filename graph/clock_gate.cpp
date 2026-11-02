@@ -42,6 +42,21 @@ bool const_known_true(const Pin& p) {
   return p.is_const() && !gu::const_of(p).has_unknowns() && gu::const_of(p).is_numeric() && !gu::const_of(p).is_known_zero();
 }
 
+// EQ(x, 0) is logical negation. A bitwise Not does not carry the same unlimited-integer meaning.
+bool logical_complements(const Pin& a, const Pin& b) {
+  const auto negates = [](const Pin& value, const Pin& other) {
+    if (value.is_invalid() || value.is_const() || gu::is_graph_input_pin(value)
+        || gu::type_op_of(value.get_master_node()) != Ntype_op::EQ) {
+      return false;
+    }
+    const auto inputs = gu::inp_sink_drivers(value.get_master_node());
+    return inputs.size() == 2
+           && ((inputs[0].driver == other && inputs[1].driver.is_known_false())
+               || (inputs[1].driver == other && inputs[0].driver.is_known_false()));
+  };
+  return negates(a, b) || negates(b, a);
+}
+
 // The conjuncts of an enable: the 1-bit operands of an And, else the driver itself. An unset or constant-true enable has none
 // (always enabled). nullopt when the enable cannot be taken apart safely: a constant false, or a driver wider than one bit (it
 // reads as "non-zero", which is not the AND of its bits).
@@ -302,6 +317,13 @@ std::optional<Reg> eligible(const Node& node) {
     return std::nullopt;
   }
   r.conj = std::move(*conj);
+  // A synchronous reset wins over the enable. When reset is the only inactive period, the register
+  // already updates or resets on every clock: its reset-qualified gate would always be open. Keep the
+  // original clock and enable rather than adding a useless gate after the consumer's normal folding.
+  if (!r.reset.is_invalid() && r.conj.size() == 1
+      && (r.negreset ? r.conj.front() == r.reset : logical_complements(r.conj.front(), r.reset))) {
+    return std::nullopt;
+  }
   return r;
 }
 

@@ -6,7 +6,7 @@ W="${TEST_TMPDIR:-/tmp/livehd_readmem_$$}"
 mkdir -p "$W/cwd"
 part="${1:-all}"
 case "$part" in
-  all | native | imports | slang) ;;
+  all | native | runtime | forwarding | external | imports | slang) ;;
   *) echo "unknown readmem part: $part" >&2; exit 1 ;;
 esac
 LIB="$(pwd)/inou/prp/tests/abc/test.lib"
@@ -43,7 +43,7 @@ test preload(expected:U8=0x12) {
 PRP
 # Run from another directory: relative image paths belong to the source file.
 cd "$W/cwd"
-if [ "$part" = all ] || [ "$part" = native ]; then
+if [ "$part" = all ] || [ "$part" = native ] || [ "$part" = runtime ]; then
 "$LHD" sim "$W/load.prp" --workdir "$W/run" --set sim.init_zero=true --set sim.unknown_zero=true --result-json "$W/result.json"
 python3 - "$W/result.json" <<'PY'
 import json,sys
@@ -63,12 +63,12 @@ for image in missing malformed; do
 done
 printf '12 34 @2 ab\n' > "$W/image.hex"
 fi
-if [ "$part" = all ] || [ "$part" = native ] || [ "$part" = imports ]; then
+if [ "$part" = all ] || [ "$part" = native ] || [ "$part" = external ] || [ "$part" = imports ]; then
 "$LHD" compile "$W/load.prp" --top load --workdir "$W/export" --emit verilog:"$W/load.v" --emit-dir lg:"$W/lg" --emit-dir ln:"$W/ln"
 grep -q 'blackbox, keep' "$W/load.v"
 grep -q 'INIT_FILE' "$W/load.v"
 fi
-if [ "$part" = all ] || [ "$part" = native ]; then
+if [ "$part" = all ] || [ "$part" = native ] || [ "$part" = forwarding ]; then
 # The inline image wrapper's body depends on forwarding, so an `old` and a
 # `program` image memory of ONE shape must not share a module name (the first
 # emitted used to decide whether the `.FWD(1)` instance forwarded at all).
@@ -130,7 +130,7 @@ for shape in bounds conditional mixed; do
 done
 fi
 # Even an all-zero image and no RTL writer must remain externally loadable.
-if [ "$part" = all ] || [ "$part" = native ]; then
+if [ "$part" = all ] || [ "$part" = native ] || [ "$part" = external ]; then
 printf '00 00 00 00\n' > "$W/zero.hex"
 printf '01 02 03 04\n' > "$W/other.hex"
 cat > "$W/state.prp" <<'PRP'

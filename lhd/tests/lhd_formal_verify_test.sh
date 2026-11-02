@@ -42,6 +42,10 @@ verify() {
   RC=$?
 }
 
+part="${1:-all}"
+case "$part" in all|core|guards|struct) ;; *) fail "unknown verify group: $part" ;; esac
+
+if [ "$part" = all ] || [ "$part" = core ]; then
 # ---------------------------------------------------------------------------
 # 1. Parity invariant over two registers: TRUE from reset but NOT provable by
 #    the compile-time single-frame induction (pass.formal defers it) — the BMC
@@ -853,7 +857,9 @@ verify ladder ladder --top cnt2
 [ "$RC" -eq 0 ] || fail "ladder design must pass (got rc=$RC): $(cat "$OUT")"
 grep -q "'parity'\": PROVEN-full (inductive" "$OUT" || fail "the inductive invariant must upgrade to unbounded: $(cat "$OUT")"
 grep -q "'bounded only'\": PROVEN-bounded([0-9]*) (no violation through cycle 7)" "$OUT" || fail "a non-inductive fact must STAY bounded: $(cat "$OUT")"
+fi
 
+if [ "$part" = all ] || [ "$part" = guards ]; then
 # ---------------------------------------------------------------------------
 # 9. R1 — a property inside an `if`/`elif`/`else`/`match` arm is GUARDED by
 #    that arm's path condition, i.e. the obligation is `guard implies cond`,
@@ -1178,7 +1184,9 @@ grep -q "block 'blk.bad'" "$OUT" \
   || fail "the fork path must attribute the contradictory assumes to block 'blk.bad' (Prop_result::scope lost in the codec): $(cat "$OUT")"
 grep -q "contradictory assume set in the design" "$OUT" \
   && fail "the fork path blamed the DESIGN for a BLOCK's contradictory assumes: $(cat "$OUT")"
+fi
 
+if [ "$part" = all ] || [ "$part" = struct ]; then
 # ---------------------------------------------------------------------------
 # 15. STRUCT-ported design: the simfail replay must still drive it and reach the
 #     violation. A struct port is not writable from a test (`_dut.io.bits.x = v`
@@ -1224,5 +1232,6 @@ grep -q 'assert(_dut.o != 3' "$WD3/simfail_stp_bound.prp" \
 [ -s "$WD3/simfail_stp_bound.vcd" ] || fail "the replay must dump a VCD: $(cat "$OUT")"
 grep -q 'the replay reproduced the violation' "$OUT" \
   || fail "the replay must re-fire the embedded check: $(cat "$OUT")"
+fi
 
-echo "PASS: 2f-verify V1-V3 + assume discipline (bounded/inductive ladder; refuted-at-cycle + trace; every assume checked-as-assert with the assume_nocheck escape; formal blocks + filter; timeout isolation (TIMEOUT-time exits 0 + warns); vacuous FAILS unconditionally; aliases; no vacuous pass; R1 if/elif/else/match property guards + antecedent vacuity + the 2026-07-26 review fixes)"
+echo "PASS: formal verify ($part)"

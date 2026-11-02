@@ -11,7 +11,7 @@ import subprocess
 import sys
 import time
 
-from generate import CASES, topology
+from generate import CASES, source as fixture_source, topology
 import render
 
 ROOT = Path(__file__).resolve().parent
@@ -38,6 +38,12 @@ def run(case, args, output):
         if (directory/scratch).exists():
             shutil.rmtree(directory/scratch)
     points, edges = topology(case)
+    source_path = ROOT/(case['name']+'.prp')
+    if args.logic_depth is not None:
+        # Keep every macro, edge and hierarchy level, but avoid replicating
+        # benchmark-sized combinational cones in a physical handoff test.
+        source_path = directory/(case['name']+'.prp')
+        source_path.write_text(fixture_source(dict(case, depth=args.logic_depth)))
     render.expected(case, points, edges, directory/'expected.png')
     started = time.monotonic()
     binary_hash = render.digest(args.lhd)
@@ -63,7 +69,7 @@ def run(case, args, output):
         # Keep this fixture's root logic in one synthesis color so the DEF
         # names retain their source call sites instead of generated wrappers.
         settings['pass.color.synth.mode'] = 'synth'
-    cmd = [args.lhd, 'synth', ROOT/(case['name']+'.prp'), f'lg:{directory}/macro_lg',
+    cmd = [args.lhd, 'synth', source_path, f'lg:{directory}/macro_lg',
            '--top', case['name']+'.top', '--seed', '1', '--workdir', directory/'work',
            '--result-json', directory/'result.json', '--emit-dir', f'def:{directory}/physical', '-q']
     for key, value in settings.items():
@@ -84,7 +90,8 @@ def run(case, args, output):
     units, die, cells = render.read_def(place/'out.def')
     macros = sum(c['master'] == 'REG_MACRO' for c in cells.values())
     standard_cells = len(cells)-macros
-    if macros != len(points) or not 10000 <= standard_cells <= 110000:
+    minimum_cells = 32 * len(points) if args.logic_depth is not None else 10000
+    if macros != len(points) or not minimum_cells <= standard_cells <= 110000:
         raise ValueError(f'fixture size outside intended range: {standard_cells} cells, {macros} macros')
     _, _, macro_cells = render.read_def(place/'macro/out.def')
     for name, cell in cells.items():
@@ -119,7 +126,7 @@ def run(case, args, output):
             stage_units, stage_die, stage_cells = render.read_def(source)
             render.actual(case, stage_units, stage_die, stage_cells, directory/(name+'.png'))
             views[name] = render.scores(case, points, edges, stage_cells)
-    inputs = [Path(args.lhd), ROOT/(case['name']+'.prp'), ROOT/'macros.v', ROOT/'fake.lib', ROOT/'fake.lef', ROOT/'timing.sdc', ROOT/'run.py', ROOT/'render.py']
+    inputs = [Path(args.lhd), source_path, ROOT/'macros.v', ROOT/'fake.lib', ROOT/'fake.lef', ROOT/'timing.sdc', ROOT/'run.py', ROOT/'render.py']
     if case.get('fixed_macros'):
         inputs.append(ROOT/(case['name']+'.def'))
     metrics = dict(name=case['name'], standard_cells=standard_cells, macros=macros,
@@ -185,13 +192,16 @@ def main():
     parser.add_argument('--lhd', default='lhd/lhd' if os.environ.get('TEST_SRCDIR') else str(Path(os.environ.get('BUILD_WORKSPACE_DIRECTORY', '.'))/'bazel-bin/lhd/lhd'))
     parser.add_argument('--output', type=Path)
     parser.add_argument('--iterations', type=int, default=1500)
+    parser.add_argument('--logic-depth', type=int,
+                        help='generate a smaller logic cone per tile; topology, state width and physical checks stay unchanged')
     parser.add_argument('--min-macros', type=int, default=0,
                         help='synth.place.fp.min_macros: a hierarchy candidate needs more macros than this; 0 makes each one-macro tile a candidate')
     parser.add_argument('--set', action='append', default=[], help='additional lhd setting KEY=VALUE')
     parser.add_argument('--snap-mode', choices=['alignment', 'symmetry'], help='synth.place.macro.snap_mode (flow default: alignment)')
     parser.add_argument('--max-pattern-rms', type=float)
     args = parser.parse_args()
-    if args.iterations < 1 or (args.max_pattern_rms is not None and (not math.isfinite(args.max_pattern_rms) or args.max_pattern_rms < 0)):
+    if (args.iterations < 1 or (args.logic_depth is not None and args.logic_depth < 1)
+            or (args.max_pattern_rms is not None and (not math.isfinite(args.max_pattern_rms) or args.max_pattern_rms < 0))):
         parser.error('iterations must be positive and pattern threshold must be finite and nonnegative')
     args.lhd = str(Path(args.lhd).resolve())
     output = (args.output or Path(os.environ.get('TEST_UNDECLARED_OUTPUTS_DIR', 'repros/placement_regularity'))).resolve()

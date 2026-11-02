@@ -8,8 +8,8 @@
 #include "attr_carry.hpp"
 #include "bitwidth.hpp"
 #include "color_reduce.hpp"
-#include "fold_body.hpp"
 #include "diag.hpp"
+#include "fold_body.hpp"
 #include "inline_sub.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
@@ -17,6 +17,25 @@
 
 namespace livehd::synth {
 namespace {
+// An interface declaration owns the value's width. A local driver
+// stamp can describe fewer low lanes (the LRU body's two-bit __hoist0 had a
+// one-bit stamp); making that stamp a new port silently truncates the value.
+int parallel_input_bits(const hhds::Graph& body, const hhds::Pin_class& pin) {
+  namespace gu     = livehd::graph_util;
+  const auto node  = pin.get_master_node();
+  const bool input = node == body.get_input_node();
+  const auto io    = input ? body.get_io() : (gu::type_op_of(node) == Ntype_op::Sub ? node.get_subnode_io() : nullptr);
+  if (io) {
+    const auto& ports = input ? io->get_input_pin_decls() : io->get_output_pin_decls();
+    for (const auto& port : ports) {
+      if (port.port_id == pin.get_port_id() && port.bits != 0) {
+        return static_cast<int>(port.bits);
+      }
+    }
+  }
+  return std::max(1, gu::bits_of(pin));
+}
+
 // Lift the carry-independent data computation before expanding a recurrence.
 // The resulting ordinary instance is replicated with each ordinal, while ABC
 // maps its body once. Index-only expressions stay beside the carry so ordinal
@@ -96,11 +115,15 @@ std::shared_ptr<hhds::Graph> extract_parallel_data(const std::shared_ptr<hhds::G
   for (size_t suffix = 1; lib->find_io(name); ++suffix) {
     name = std::string(body->get_name()) + ".__parallel" + std::to_string(suffix);
   }
-  auto io = lib->create_io(name);
+  auto             io = lib->create_io(name);
+  std::vector<int> input_widths;
+  input_widths.reserve(inputs.size());
   for (size_t i = 0; i < inputs.size(); ++i) {
-    const auto port = "i" + std::to_string(i);
+    const auto port  = "i" + std::to_string(i);
+    const auto shape = parallel_input_bits(*body, inputs[i]);
+    input_widths.push_back(shape);
     io->add_input(port, static_cast<hhds::Port_id>(i + 1));
-    io->set_bits(port, std::max(1, gu::bits_of(inputs[i])));
+    io->set_bits(port, shape);
     io->set_unsign(port, gu::is_unsign(inputs[i]));
   }
   for (size_t i = 0; i < outputs.size(); ++i) {
@@ -115,6 +138,10 @@ std::shared_ptr<hhds::Graph> extract_parallel_data(const std::shared_ptr<hhds::G
   for (size_t i = 0; i < inputs.size(); ++i) {
     auto pin = shared->get_input_pin("i" + std::to_string(i));
     gu::carry_pin_attrs(inputs[i], pin);
+    gu::set_bits(pin, input_widths[i]);
+    // The original side now feeds a real interface too. Keep its stamp in
+    // agreement, so later inlining/folding cannot truncate that connection.
+    gu::set_bits(inputs[i], input_widths[i]);
     pins.emplace(inputs[i], pin);
   }
   for (auto node : nodes) {
@@ -265,7 +292,8 @@ bool cleanup_loop_bodies(const std::vector<std::shared_ptr<hhds::Graph>>& graphs
         fold.low_lanes = true;
         fold.cost      = livehd::Fold_cost::synth;
         fold.site      = "synth.loop_cleanup";
-        fold.guard     = [&](const hhds::Node_class& node) { return !before_expansion.contains(static_cast<uint64_t>(node.get_debug_nid())); };
+        fold.guard
+            = [&](const hhds::Node_class& node) { return !before_expansion.contains(static_cast<uint64_t>(node.get_debug_nid())); };
         livehd::fold_body(graph, fold);
         Bitwidth{3}.do_trans(graph);
         livehd::fold_body(graph, fold);

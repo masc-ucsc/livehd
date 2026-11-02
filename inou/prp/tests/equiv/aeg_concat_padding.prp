@@ -1,0 +1,9 @@
+/*
+:name: aeg_concat_padding
+:type: equiv
+*/
+// DecodeUnit's eight-bit reduction: the Verilog side keeps a padded pack inside a low-window OR. Dropping
+// the window must not let the pack's physical width grow beyond its enclosing Concat lane.
+pub comb top(x:U6, y:U6, a:U1, b:U1) -> (o:U8) {
+  o = (b << 7) | (a << 6) | x | y
+}

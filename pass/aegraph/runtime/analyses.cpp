@@ -658,6 +658,120 @@ int64_t unsigned_bits_rec(const Egraph& eg, Class_id c, int depth) {
 
 int64_t unsigned_bits(const Egraph& eg, Class_id cls) { return unsigned_bits_rec(eg, cls, 3); }
 
+namespace {
+
+int64_t storage_bits_rec(const Egraph& eg, Class_id cls, int depth) {
+  auto& cache = eg.analysis_cache().storage_widths;
+  if (const auto it = cache.find(cls); it != cache.end() && it->second.depth >= depth) {
+    return it->second.bits;
+  }
+  int64_t     bits = -1;
+  const auto& cl   = eg.cls(cls);
+  if (cl.kind == Egraph::Kind::leaf || cl.kind == Egraph::Kind::konst) {
+    bits = unsigned_bits_rec(eg, cls, 0);
+  } else if (depth > 0 && cl.kind == Egraph::Kind::uni) {
+    // Extraction may select either equivalent shape, including the wider one.
+    const auto a = storage_bits_rec(eg, cl.alt_a, depth - 1);
+    const auto b = storage_bits_rec(eg, cl.alt_b, depth - 1);
+    if (a >= 0 && b >= 0) {
+      bits = std::max(a, b);
+    }
+  } else if (depth > 0 && cl.kind == Egraph::Kind::node) {
+    const auto& node = eg.enode(cl.first);
+    const auto  ops  = eg.operands(node);
+    switch (node.op) {
+      case Ntype_op::Get_mask: {
+        const auto *lo = by_bank(ops, 2), *hi = by_bank(ops, 3);
+        if (ops.size() != 3 || lo == nullptr || hi == nullptr) {
+          break;
+        }
+        const auto l = const_i64(eg, lo->cls), h = const_i64(eg, hi->cls);
+        if (!l || !h || *l < 0 || *h <= *l || *h - *l > kMaxLaneBit) {
+          break;
+        }
+        bits = *h - *l;
+        break;
+      }
+      case Ntype_op::Concat: {
+        if (ops.empty() || ops.size() % 2 != 0) {
+          break;
+        }
+        int64_t total = 0;
+        bool    valid = true;
+        for (size_t i = 0; i < ops.size(); i += 2) {
+          if (ops[i].bank != i || ops[i + 1].bank != i + 1) {
+            valid = false;
+            break;
+          }
+          const auto width = const_i64(eg, ops[i + 1].cls);
+          if (!width || *width <= 0 || *width > kMaxLaneBit || total > kMaxLaneBit - *width) {
+            valid = false;
+            break;
+          }
+          total += *width;
+        }
+        if (valid) {
+          bits = total;
+        }
+        break;
+      }
+      case Ntype_op::And:
+      case Ntype_op::Or :
+      case Ntype_op::Xor:
+      case Ntype_op::Mux: {
+        int64_t widest = 0;
+        bool    valid  = false;
+        for (const auto& operand : ops) {
+          if (node.op == Ntype_op::Mux && operand.bank == 0) {
+            continue;
+          }
+          const auto width = storage_bits_rec(eg, operand.cls, depth - 1);
+          if (width < 0) {
+            valid = false;
+            break;
+          }
+          valid  = true;
+          widest = std::max(widest, width);
+        }
+        if (valid) {
+          bits = widest;
+        }
+        break;
+      }
+      case Ntype_op::SHL:
+      case Ntype_op::SRA: {
+        const auto *a = by_bank(ops, 0), *b = by_bank(ops, 1);
+        if (ops.size() != 2 || a == nullptr || b == nullptr) {
+          break;
+        }
+        const auto shift = const_i64(eg, b->cls);
+        if (!shift || *shift < 0 || *shift > kMaxLaneBit) {
+          break;
+        }
+        const auto width = storage_bits_rec(eg, a->cls, depth - 1);
+        if (width >= 0 && node.op == Ntype_op::SRA) {
+          bits = std::max<int64_t>(1, width - *shift);
+        } else if (width >= 0 && width <= kMaxLaneBit - *shift) {
+          bits = width + *shift;
+        }
+        break;
+      }
+      case Ntype_op::EQ  :
+      case Ntype_op::LT  :
+      case Ntype_op::GT  :
+      case Ntype_op::Ror :
+      case Ntype_op::Rxor: bits = 1; break;
+      default            : break;  // Unknown geometry retains the mask; no range fact substitutes for a width boundary.
+    }
+  }
+  cache.insert_or_assign(cls, Cached_bits{bits, static_cast<int8_t>(depth)});
+  return bits;
+}
+
+}  // namespace
+
+int64_t storage_unsigned_bits(const Egraph& eg, Class_id cls) { return storage_bits_rec(eg, cls, kDepth); }
+
 Facts facts_of(const Egraph& eg, Class_id cls) {
   return facts_rec(eg, cls, kDepth);
 }

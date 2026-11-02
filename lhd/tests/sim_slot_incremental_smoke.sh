@@ -4,6 +4,8 @@ set -euo pipefail
 LHD="${LHD:-lhd/lhd}"
 W="${TEST_TMPDIR:-/tmp/lhd_sim_slot_incremental_$$}"
 fail() { echo "FAIL: $*" >&2; exit 1; }
+MODE="${1:-all}"
+case "$MODE" in all|growth|recovery) ;; *) fail "unknown scenario: $MODE" ;; esac
 
 # Growing a boundary pool retains live addresses.
 # Two independent cones, split at a tiny live-word budget. Editing the first
@@ -60,10 +62,16 @@ assert common and after.keys() - before.keys(), (before, after)
 assert all(before[key] == after[key] for key in common), (before, after)
 assert len(set((key[:2], index) for key, index in after.items())) == len(after)
 PYCODE
-slot_run oracle "$SW/oracle" 4 --set lhd.incremental=false
-# Allocation metadata may be discarded. Rebuilding from scratch must be safe
-# even though the physical layout can then differ from the incremental one.
-rm "$SW/w/sim/top.top.color-layout.txt"
-slot_run recovered "$SW/w" 4
+# The two Bazel cases each retain the original cold/edit setup. A single
+# case builds at most three simulator hosts; the public suite runs both.
+if [[ "$MODE" != recovery ]]; then
+  slot_run oracle "$SW/oracle" 4 --set lhd.incremental=false
+fi
+if [[ "$MODE" != growth ]]; then
+  # Recover AFTER growing the pool: a cold layout alone would not exercise
+  # stale cached object references to slots retained by an incremental edit.
+  rm "$SW/w/sim/top.top.color-layout.txt"
+  slot_run recovered "$SW/w" 4
+fi
 
-echo "PASS: incremental slot growth and metadata recovery match a fresh build"
+echo "PASS: incremental slot $MODE scenario retains values and stable addresses"

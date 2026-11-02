@@ -108,6 +108,9 @@ class PrpRunner:
         cmd += test.params['files']
         cmd += ['--workdir', self._scratch(test, mode), '-q']
         cmd += ['--set', 'upass.order=noop', '--set', 'upass.verifier=false']
+        # A bare compile now also builds diagnostic graphs. This tier checks
+        # syntax/LNAST before SSA, so it must stop before graph lowering.
+        cmd += ['--set', 'upass.tolg=false']
         return cmd
 
     def lhd_upass(self, test, mode):
@@ -802,7 +805,7 @@ class PrpRunner:
         with open(base, 'rb') as a, open(impl, 'rb') as b:
             return a.read() == b.read()
 
-    def run_yosys_lec(self, test, impl, impl_top, gold, gold_top, odir, expect='proven', strict=False):
+    def run_yosys_lec(self, test, impl, impl_top, gold, gold_top, odir, expect='proven', strict=True):
         """yosys `equiv` on (generated verilog, golden verilog). 1 on a verdict against `expect`.
 
         A `:lec_expect: refuted` pair fails only if yosys PROVES it: the native
@@ -1578,33 +1581,26 @@ class PrpRunner:
         if rc:
             return rc
 
-        # KNOWN GAP (deliberately left as-is): with a multi-mode `:type:` (e.g.
-        # `:type: parsing lnast comptime`) each mode ASSIGNS rc, so an earlier
-        # mode's failure is overwritten by a later mode's success and the test
-        # reports green. Changing these to `rc |=` is a one-line fix, but it
-        # currently turns eight pre-existing product failures red — every one of
-        # them a multi-mode fixture failing in `parsing`/`lnast`:
-        #   assert_ifelse, assert_ifelse2, attributes, enum_types, expressions,
-        #   stmt_kinds, string_format_spec, string_integer
-        # Fix those first, then switch this to `rc |=`.
+        # Every requested mode must pass. A later successful stage must never
+        # overwrite an earlier failure and turn a broken fixture green.
         rc = 0
         for mode in test.params['type']:
             if mode == 'comptime':
-                rc = self.run_comptime(tmp_dir, test)
+                rc |= self.run_comptime(tmp_dir, test)
                 if rc != 0:
                     return rc  # Neither pass may be hidden by a later mode.
                 continue
             if mode == 'error':
-                rc = self.run_error(tmp_dir, test)
+                rc |= self.run_error(tmp_dir, test)
                 continue
             if mode == 'warning':
-                rc = self.run_warning(tmp_dir, test)
+                rc |= self.run_warning(tmp_dir, test)
                 continue
             if mode == 'style':
-                rc = self.run_style(tmp_dir, test)
+                rc |= self.run_style(tmp_dir, test)
                 continue
             if mode == 'equiv':
-                rc = self.run_equiv(tmp_dir, test)
+                rc |= self.run_equiv(tmp_dir, test)
                 if rc:
                     return rc
                 continue
@@ -1615,23 +1611,23 @@ class PrpRunner:
                 # folding the two together would mean tagging the whole pair
                 # `fixme` — dropping a live equivalence proof — every time the
                 # naming is the only thing wrong.
-                rc = self.check_state_match(tmp_dir, test)
+                rc |= self.check_state_match(tmp_dir, test)
                 continue
             if mode == 'lec':
                 # PYROPE-vs-PYROPE equivalence: `foo.prp` against its `foo_<N>.prp`
                 # variants, discovered from the file name (prplec.py). Lazy import
                 # so only the `prp-lec-*` targets stage that module.
                 from prplec import run_prplec
-                rc = run_prplec(self, tmp_dir, test)
+                rc |= run_prplec(self, tmp_dir, test)
                 continue
             if mode == 'equiv_slang':
-                rc = self.run_equiv_slang(tmp_dir, test)
+                rc |= self.run_equiv_slang(tmp_dir, test)
                 continue
             if mode == 'simulation':
                 # The `:type: simulation` flow lives in its own module (prpsim);
                 # import lazily so only the `prp-sim-*` targets need it staged.
                 from prpsim import run_simulation
-                rc = run_simulation(self, tmp_dir, test)
+                rc |= run_simulation(self, tmp_dir, test)
                 continue
             if mode == 'vsim':
                 # The VERILATOR DIFFERENTIAL for a `tests/sim/` fixture: emit the
@@ -1640,17 +1636,17 @@ class PrpRunner:
                 # `simulation`, because the fixtures worth running it on are the
                 # ones `lhd sim` REFUSES — the two must be able to disagree.
                 from prpvsim import run_verilator_diff
-                rc = run_verilator_diff(self, tmp_dir, test)
+                rc |= run_verilator_diff(self, tmp_dir, test)
                 continue
             if mode == 'verify':
-                rc = self.run_verify(tmp_dir, test)
+                rc |= self.run_verify(tmp_dir, test)
                 continue
 
-            rc = self._run_compile(tmp_dir, test, mode)
+            rc |= self._run_compile(tmp_dir, test, mode)
 
         # Structural post-checks, independent of `:type:` so one implementation
         # serves the sim and equiv fixtures alike.
         if rc == 0:
-            rc = self.check_expect_instances(tmp_dir, test)
+            rc |= self.check_expect_instances(tmp_dir, test)
 
         return rc

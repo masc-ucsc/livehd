@@ -98,6 +98,10 @@ struct Cell_netlist {
   [[nodiscard]] std::vector<uint32_t> readers() const;
   // Readers that are cell fanins only.
   [[nodiscard]] std::vector<uint32_t> cell_readers() const;
+  // Alias identity buffers whose entire fanout reaches only region outputs or
+  // latch inputs through other such buffers. Keep every buffer feeding real
+  // combinational logic, including its upstream buffer chain.
+  [[nodiscard]] std::vector<uint32_t> boundary_buffer_aliases(const Cell_library& library) const;
 };
 
 }  // namespace livehd::synth

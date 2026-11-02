@@ -7572,6 +7572,11 @@ bool uPass_runner::check_call_array_arg(const std::shared_ptr<Lnast>& callee, co
 }
 
 bool uPass_runner::try_inline_func_call() {
+  // A no-op front-end walk has no value passes to resolve tuple actuals.
+  // Keep calls intact instead of binding them against incomplete shape facts.
+  if (upasses.size() == 1 && upasses.front().name == "noop") {
+    return false;
+  }
   // A generic body is also visited before any concrete caller exists.
   // Its local comptime expressions may still depend on unbound parameters;
   // specializing/inlining a nested call now mistakes those values for type

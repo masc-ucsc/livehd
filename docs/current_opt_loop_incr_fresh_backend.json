@@ -1,0 +1,172 @@
+{
+  "updated_utc": "2026-11-01T23:17:26.756601+00:00",
+  "classification": "Provisional completed private validations; separate from accepted main ledger aggregates and final all-scope release.",
+  "compiler": "livehd a4804183e+dirty opt sha256:299a8dea6ffa98b7",
+  "backend_compile": {
+    "formal_timeout": 0,
+    "formal_policy": "Deterministic existing per-query rlimit retained; no pass disabled or test timeout increased.",
+    "scope": "Full/cold/comment/real DelayN_6 semantic edit plus cache-disabled edited reference. Both H5 comparisons structurally identical; semantic edit changes cold graph.",
+    "metrics": [
+      {
+        "name": "compile_full_ms",
+        "value": 695686,
+        "unit": "ms"
+      },
+      {
+        "name": "hits_full",
+        "value": 0,
+        "unit": "units"
+      },
+      {
+        "name": "misses_full",
+        "value": 0,
+        "unit": "units"
+      },
+      {
+        "name": "redone_ms_full",
+        "value": 0.0,
+        "unit": "ms"
+      },
+      {
+        "name": "refused_full",
+        "value": 0,
+        "unit": "units"
+      },
+      {
+        "name": "store_failed_full",
+        "value": 0,
+        "unit": "units"
+      },
+      {
+        "name": "workdir_bytes_full",
+        "value": 589824,
+        "unit": "bytes"
+      },
+      {
+        "name": "compile_cold_ms",
+        "value": 679195,
+        "unit": "ms"
+      },
+      {
+        "name": "hits_cold",
+        "value": 0,
+        "unit": "units"
+      },
+      {
+        "name": "misses_cold",
+        "value": 1088,
+        "unit": "units"
+      },
+      {
+        "name": "redone_ms_cold",
+        "value": 631193.354,
+        "unit": "ms"
+      },
+      {
+        "name": "refused_cold",
+        "value": 0,
+        "unit": "units"
+      },
+      {
+        "name": "store_failed_cold",
+        "value": 0,
+        "unit": "units"
+      },
+      {
+        "name": "workdir_bytes_cold",
+        "value": 3423760384,
+        "unit": "bytes"
+      },
+      {
+        "name": "compile_comment_ms",
+        "value": 3184,
+        "unit": "ms"
+      },
+      {
+        "name": "hits_comment",
+        "value": 2254,
+        "unit": "units"
+      },
+      {
+        "name": "misses_comment",
+        "value": 1,
+        "unit": "units"
+      },
+      {
+        "name": "redone_ms_comment",
+        "value": 249.228,
+        "unit": "ms"
+      },
+      {
+        "name": "refused_comment",
+        "value": 0,
+        "unit": "units"
+      },
+      {
+        "name": "store_failed_comment",
+        "value": 0,
+        "unit": "units"
+      },
+      {
+        "name": "workdir_bytes_comment",
+        "value": 3423760384,
+        "unit": "bytes"
+      },
+      {
+        "name": "compile_edit_ms",
+        "value": 586888,
+        "unit": "ms"
+      },
+      {
+        "name": "hits_edit",
+        "value": 1087,
+        "unit": "units"
+      },
+      {
+        "name": "misses_edit",
+        "value": 1,
+        "unit": "units"
+      },
+      {
+        "name": "redone_ms_edit",
+        "value": 535623.57,
+        "unit": "ms"
+      },
+      {
+        "name": "refused_edit",
+        "value": 1,
+        "unit": "units"
+      },
+      {
+        "name": "store_failed_edit",
+        "value": 0,
+        "unit": "units"
+      },
+      {
+        "name": "workdir_bytes_edit",
+        "value": 3424411648,
+        "unit": "bytes"
+      },
+      {
+        "name": "compile_edit_changes_cold",
+        "value": 1,
+        "unit": "bool"
+      },
+      {
+        "name": "compile_warm_equals_cold",
+        "value": 1,
+        "unit": "bool"
+      }
+    ],
+    "source_driver_sha256": "655c1a7bb77d111ff8c8b87cfc54fca7a870cff78cf0e9715ac2027466fa0f0e",
+    "status": "pass"
+  },
+  "cva6_first_synthesis": {
+    "status": "pass",
+    "wall_seconds": 1393.0639786720276,
+    "abc_ms": 468517.761,
+    "sta_ms": 905172.379,
+    "peak_rss_kib": 152984232,
+    "scope": "Whole original first synthesis phase only. Original second synthesis and mapped-vs-source LEC still required; earlier rc137 not reproduced in isolated retry."
+  }
+}

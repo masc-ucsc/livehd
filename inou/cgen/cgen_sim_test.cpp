@@ -499,20 +499,24 @@ TEST(CgenSim, EmitsNativeCountedReductions) {
     io->set_bits("a", width);
     io->set_unsign("a", true);
     auto graph = io->create_graph();
-    for (auto op : {Ntype_op::Rxor, Ntype_op::Popcount}) {
+    uint32_t output_port = 1;
+    for (auto op : {Ntype_op::Ror, Ntype_op::Rxor, Ntype_op::Popcount}) {
       const auto port        = std::string(Ntype::get_name(op));
-      const int  result_bits = op == Ntype_op::Rxor ? 1 : std::bit_width(static_cast<unsigned>(width));
-      io->add_output(port, op == Ntype_op::Rxor ? 1 : 2);
+      const int  result_bits = op == Ntype_op::Popcount ? std::bit_width(static_cast<unsigned>(width)) : 1;
+      io->add_output(port, output_port++);
       io->set_bits(port, result_bits);
       io->set_unsign(port, true);
       auto node = gu::create_typed_node(*graph, op);
       graph->get_input_pin("a").connect_sink(node.create_sink_pin(0));
-      gu::create_const(*graph, *Dlop::create_integer(width)).connect_sink(node.create_sink_pin(1));
+      if (op != Ntype_op::Ror) {
+        gu::create_const(*graph, *Dlop::create_integer(width)).connect_sink(node.create_sink_pin(1));
+      }
       auto output = node.create_driver_pin(0);
       gu::set_ubits(output, result_bits);
       output.connect_sink(graph->get_output_pin(port));
     }
     const auto code = emit(graph, name);
+    EXPECT_NE(code.find("::ror_op<>("), std::string::npos);
     EXPECT_NE(code.find("::rxor_op("), std::string::npos);
     EXPECT_NE(code.find("::popcount_op("), std::string::npos);
     EXPECT_EQ(code.find("UNRESOLVED-CYCLE"), std::string::npos);
@@ -555,14 +559,26 @@ TEST(CgenSim, HugeFlopSetSplitsIntoBoundedStateBases) {
   const auto count = code.find("LHD_SIM_COLD std::size_t huge_flop_set::__tune_count(");
   ASSERT_NE(walk, std::string::npos);
   ASSERT_NE(count, std::string::npos);
-  ASSERT_LT(walk, count);
-  const auto walker = std::string_view(code).substr(walk, count - walk);
+  // Large members may live in separate translation units, whose directory
+  // order does not define the order of member definitions.
+  const auto walk_end = code.find("\n}\n", walk);
+  ASSERT_NE(walk_end, std::string::npos);
+  const auto walker = std::string_view(code).substr(walk, walk_end + 3 - walk);
   size_t     chunks = 0;
   for (auto at = walker.find("[&]() LHD_SIM_COLD {"); at != std::string_view::npos;
        at      = walker.find("[&]() LHD_SIM_COLD {", at + 1)) {
     ++chunks;
   }
   EXPECT_GE(chunks, static_cast<size_t>(kFlops) / 128);
+
+  size_t cold_units = 0;
+  for (const auto& entry : std::filesystem::directory_iterator(name)) {
+    if (entry.path().filename().string().starts_with(name + ".cold-") && entry.path().extension() == ".cpp") {
+      ++cold_units;
+      EXPECT_NE(slurp(entry.path()).find("#include \"" + name + ".hpp\""), std::string::npos);
+    }
+  }
+  EXPECT_GE(cold_units, 2);
 
   std::string header;
   for (const auto& entry : std::filesystem::directory_iterator(name)) {
@@ -576,6 +592,34 @@ TEST(CgenSim, HugeFlopSetSplitsIntoBoundedStateBases) {
   EXPECT_NE(header.find("struct huge_flop_set__state1 {"), std::string::npos);
   EXPECT_EQ(header.find("huge_flop_set__state2"), std::string::npos);
 }
+TEST(CgenSim, RegenerationRemovesObsoleteColdMembers) {
+  const std::string name    = "obsolete_cold_members";
+  auto&             library = livehd::Hhds_graph_library::instance("lgdb_" + name);
+  auto              io      = library.create_io(name);
+  io->add_input("a", 0);
+  io->add_output("y", 1);
+  for (const auto* port : {"a", "y"}) {
+    io->set_bits(port, 1);
+    io->set_unsign(port, true);
+  }
+  auto graph = io->create_graph();
+  graph->get_input_pin("a").connect_sink(graph->get_output_pin("y"));
+  std::filesystem::create_directories(name);
+  for (const auto* category : {"reset", "debug", "tune"}) {
+    std::ofstream(name + "/" + name + ".cold-" + category + "-999.cpp") << "// obsolete helper\n";
+  }
+  // A genuine module with the same filename prefix owns a header as well.
+  const auto sibling = name + "/" + name + ".cold-debug-123";
+  std::ofstream(sibling + ".hpp") << "// module interface\n";
+  std::ofstream(sibling + ".cpp") << "// module body\n";
+  emit(graph, name);
+  for (const auto* category : {"reset", "debug", "tune"}) {
+    EXPECT_FALSE(std::filesystem::exists(name + "/" + name + ".cold-" + category + "-999.cpp"));
+  }
+  EXPECT_TRUE(std::filesystem::exists(sibling + ".cpp"));
+  std::filesystem::remove_all(name);
+}
+
 // ---- sim.tune (sim_profile.md P0/P1) --------------------------------------
 
 // A two-level hierarchy with state on both levels: `<tag>_top` (a flop fed by
@@ -913,6 +957,52 @@ TEST(CgenSim, ClockGatePreparationUsesTheEmitterEnvironmentSnapshot) {
     }
     EXPECT_EQ(gates, disabled ? 0U : 1U);
   }
+}
+
+// The sampled scheduler activation also qualifies the LLVM state ABI. A
+// gated register must not force its entire arithmetic color back to C++.
+TEST(CgenSim, GateOwnedStateUsesLlvmKernel) {
+  const std::string name    = "llvm_gate_owned_state";
+  auto&             library = livehd::Hhds_graph_library::instance("lgdb_" + name);
+  auto              io      = library.create_io(name);
+  io->add_input("clk", 0);
+  io->add_input("en", 1);
+  io->add_input("d", 2);
+  io->add_output("q", 3);
+  for (const char* port : {"clk", "en", "d", "q"}) {
+    io->set_bits(port, std::string_view(port) == "d" || std::string_view(port) == "q" ? 32 : 1);
+    io->set_unsign(port, true);
+  }
+  auto graph = io->create_graph();
+  auto cell  = gu::create_typed_node(*graph, Ntype_op::Clock_cell, 1);
+  graph->get_input_pin("clk").connect_sink(gu::setup_sink_by_name(cell, "clk_ref"));
+  graph->get_input_pin("en").connect_sink(gu::setup_sink_by_name(cell, "en"));
+  auto flop = gu::create_typed_node(*graph, Ntype_op::Flop, 32);
+  cell.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(flop, "clock_pin"));
+  graph->get_input_pin("d").connect_sink(gu::setup_sink_by_name(flop, "din"));
+  flop.create_driver_pin(0).connect_sink(graph->get_output_pin("q"));
+  const auto plan = livehd::sim::Color_plan::discover(graph.get(), false, true);
+  ASSERT_TRUE(plan.complete()) << plan.report();
+  std::filesystem::create_directories(name);
+  Cgen_sim emitter(name, "", name, "false", &plan, false, false, true, true, false, false, false, true);
+  emitter.do_from_graph(graph);
+  const auto code          = slurp(std::filesystem::path(name) / (name + ".cpp"));
+  size_t     owned_updates = 0;
+  for (const auto& color : plan.colors()) {
+    for (const auto member : color.members) {
+      const auto& version = plan.version_sites()[member];
+      if (version.role != livehd::sim::Color_plan::Version_role::state_update) {
+        continue;
+      }
+      ASSERT_NE(version.gate_owner, livehd::sim::Color_plan::invalid_index);
+      ++owned_updates;
+      auto symbol = "__lhd_color_kernel_" + name + "_" + color.storage_id.str();
+      std::replace(symbol.begin(), symbol.end(), ':', '_');
+      EXPECT_NE(code.find(symbol + "_llvm("), std::string::npos) << code;
+    }
+  }
+  EXPECT_EQ(owned_updates, 1U);
+  std::filesystem::remove_all(name);
 }
 
 TEST(CgenSim, TuneEnvSwitchesAreKeyed) {

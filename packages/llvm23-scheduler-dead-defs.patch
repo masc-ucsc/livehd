@@ -1,7 +1,7 @@
 diff --git a/llvm/include/llvm/CodeGen/ScheduleDAGInstrs.h b/llvm/include/llvm/CodeGen/ScheduleDAGInstrs.h
 --- a/llvm/include/llvm/CodeGen/ScheduleDAGInstrs.h
 +++ b/llvm/include/llvm/CodeGen/ScheduleDAGInstrs.h
-@@ -167,6 +167,9 @@
+@@ -169,6 +169,9 @@
      /// of inside BuildSchedGraph to avoid the need for it to be initialized and
      /// destructed for each block.
      RegUnit2SUnitsMap Defs;
@@ -14,7 +14,7 @@ diff --git a/llvm/include/llvm/CodeGen/ScheduleDAGInstrs.h b/llvm/include/llvm/C
 diff --git a/llvm/lib/CodeGen/ScheduleDAGInstrs.cpp b/llvm/lib/CodeGen/ScheduleDAGInstrs.cpp
 --- a/llvm/lib/CodeGen/ScheduleDAGInstrs.cpp
 +++ b/llvm/lib/CodeGen/ScheduleDAGInstrs.cpp
-@@ -329,8 +329,11 @@
+@@ -317,8 +317,11 @@
    // TODO: Using a latency of 1 here for output dependencies assumes
    //       there's no cost for reusing registers.
    SDep::Kind Kind = MO.isUse() ? SDep::Anti : SDep::Output;
@@ -27,7 +27,7 @@ diff --git a/llvm/lib/CodeGen/ScheduleDAGInstrs.cpp b/llvm/lib/CodeGen/ScheduleD
           ++I) {
        SUnit *DefSU = I->SU;
        if (DefSU == &ExitSU)
-@@ -366,8 +369,10 @@
+@@ -354,8 +357,10 @@
      // Clear previous uses and defs of this register and its subregisters.
      for (MCRegUnit Unit : TRI->regunits(Reg)) {
        Uses.eraseAll(Unit);
@@ -39,7 +39,7 @@ diff --git a/llvm/lib/CodeGen/ScheduleDAGInstrs.cpp b/llvm/lib/CodeGen/ScheduleD
      }
  
      if (MO.isDead() && SU->isCall) {
-@@ -384,14 +389,21 @@
+@@ -372,14 +377,21 @@
            isBegin = (--I) == B;
            if (!I->SU->isCall)
              break;
@@ -62,7 +62,7 @@ diff --git a/llvm/lib/CodeGen/ScheduleDAGInstrs.cpp b/llvm/lib/CodeGen/ScheduleD
    }
  }
  
-@@ -808,9 +820,10 @@
+@@ -764,9 +776,10 @@
    DbgValues.clear();
    FirstDbgValue = nullptr;
  
@@ -74,7 +74,7 @@ diff --git a/llvm/lib/CodeGen/ScheduleDAGInstrs.cpp b/llvm/lib/CodeGen/ScheduleD
    Uses.setUniverse(TRI->getNumRegs());
  
    assert(CurrentVRegDefs.empty() && "nobody else should use CurrentVRegDefs");
-@@ -1042,6 +1055,7 @@
+@@ -1007,6 +1020,7 @@
      FirstDbgValue = DbgMI;
  
    Defs.clear();
@@ -85,14 +85,20 @@ diff --git a/llvm/lib/CodeGen/ScheduleDAGInstrs.cpp b/llvm/lib/CodeGen/ScheduleD
 diff --git a/llvm/lib/CodeGen/SelectionDAG/ScheduleDAGRRList.cpp b/llvm/lib/CodeGen/SelectionDAG/ScheduleDAGRRList.cpp
 --- a/llvm/lib/CodeGen/SelectionDAG/ScheduleDAGRRList.cpp
 +++ b/llvm/lib/CodeGen/SelectionDAG/ScheduleDAGRRList.cpp
-@@ -2346,2 +2346,6 @@
+@@ -2320,6 +2320,10 @@
+ /// closestSucc - Returns the scheduled cycle of the successor which is
+ /// closest to the current cycle.
  static unsigned closestSucc(const SUnit *SU) {
 +  // NumSuccs counts data edges; a node with only control edges has no
 +  // register successor, even when its memory-order fanout is enormous.
 +  if (SU->NumSuccs == 0)
 +    return 0;
    unsigned MaxHeight = 0;
-@@ -2364,8 +2368,5 @@
+   for (const SDep &Succ : SU->Succs) {
+     if (Succ.isCtrl()) continue;  // ignore chain succs
+@@ -2338,12 +2342,9 @@
+ /// calcMaxScratches - Returns an cost estimate of the worse case requirement
+ /// for scratch registers, i.e. number of data dependencies.
  static unsigned calcMaxScratches(const SUnit *SU) {
 -  unsigned Scratches = 0;
 -  for (const SDep &Pred : SU->Preds) {
@@ -104,3 +110,5 @@ diff --git a/llvm/lib/CodeGen/SelectionDAG/ScheduleDAGRRList.cpp b/llvm/lib/Code
 +  // rescanning large control-edge sets during every queue comparison.
 +  return SU->NumPreds;
  }
+ 
+ /// hasOnlyLiveInOpers - Return true if SU has only value predecessors that are

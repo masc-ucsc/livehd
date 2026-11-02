@@ -9,22 +9,27 @@ pub mod seed_table::[timecheck = false](clock:Clock, reset:U1, writes:U72) -> (o
   reg old_pdest:U64:[reset_pin=reset, async = true] = 0
   for entry in 0 ..< 1 {
     mut next:U8 = table#[(entry*8) ..+ 8]
-    for lane in 0 ..< 8 {
-      const write = writes#[(lane*9) ..+ 9]
+    for lane in 0 ..< 4 {
+      const column = if lane < 2 { lane } else { lane + 4 }
+      const write = writes#[(column*9) ..+ 9]
       if write#[8] != 0 { next = write#[0 ..< 8] }
     }
     table#[(entry*8) ..+ 8] = next
   }
   old = old_pdest
   table_q = table
-  for lane in 0 ..< 8 {
-    const write     = writes#[(lane*9) ..+ 9]
+  // Four ordered lanes span both host words (0, 1, 6, 7), retaining the
+  // register seed, sparse writes, and forwarding without eight squared work.
+  for lane in 0 ..< 4 {
+    const column = if lane < 2 { lane } else { lane + 4 }
+    const write     = writes#[(column*9) ..+ 9]
     mut previous:U8 = table#[0 ..+ 8]
     for earlier in 0 ..< lane {
-      const older = writes#[(earlier*9) ..+ 9]
+      const older_column = if earlier < 2 { earlier } else { earlier + 4 }
+      const older = writes#[(older_column*9) ..+ 9]
       if older#[8] != 0 { previous = older#[0 ..< 8] }
     }
-    old_pdest#[(lane*8) ..+ 8] = if write#[8] != 0 { previous } else { 0 }
+    old_pdest#[(column*8) ..+ 8] = if write#[8] != 0 { previous } else { 0 }
   }
 }
 

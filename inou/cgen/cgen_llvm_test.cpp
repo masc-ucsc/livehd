@@ -129,6 +129,265 @@ TEST(CgenLlvm, ConcatPreservesExtensionsGapsAndLaneOrder) {
   std::filesystem::remove(object);
 }
 
+TEST(CgenLlvm, StructuredBitMuxesShareWordSelects) {
+  Cgen_llvm::State_layout layout{
+      11,
+      {{0, 512, true}, {8, 4, true}}
+  };
+  Cgen_llvm                     kernel("structured_mux_words", layout);
+  std::vector<Cgen_llvm::Value> selectors;
+  for (unsigned bit = 0; bit < 4; ++bit) {
+    selectors.push_back(kernel.binary(Cgen_llvm::Binary_op::lshr, kernel.input(1), kernel.constant(4, bit), 1, true));
+  }
+  std::vector<Cgen_llvm::Value> lanes, mixed;
+  for (unsigned bit = 32; bit-- > 0;) {
+    std::vector<Cgen_llvm::Value> level;
+    for (unsigned input = 0; input < 16; ++input) {
+      level.push_back(kernel.binary(Cgen_llvm::Binary_op::lshr, kernel.input(0), kernel.constant(512, input * 32 + bit), 1, true));
+    }
+    for (unsigned stage = 0; stage < 4; ++stage) {
+      for (size_t arm = 0; arm < level.size() / 2; ++arm) {
+        level[arm] = kernel.mux(selectors[stage], level[2 * arm], level[2 * arm + 1], 1, true);
+      }
+      level.resize(level.size() / 2);
+    }
+    lanes.push_back(level[0]);
+    // Different source offsets must remain distinct, even with the same guard.
+    const auto shifted = kernel.binary(Cgen_llvm::Binary_op::lshr, kernel.input(0), kernel.constant(512, 32 + 31 - bit), 1, true);
+    mixed.push_back(kernel.mux(selectors[0], level[0], shifted, 1, true));
+  }
+  std::string error;
+  ASSERT_TRUE(kernel.add_state_output(9, 9, kernel.concat(lanes), {}, error)) << error;
+  ASSERT_TRUE(kernel.add_state_output(10, 10, kernel.concat(mixed), {}, error)) << error;
+  const auto dir     = std::filesystem::temp_directory_path();
+  const auto bitcode = dir / "livehd-structured-mux-words.bc";
+  const auto object  = dir / "livehd-structured-mux-words.o";
+  ASSERT_TRUE(kernel.write_bitcode(bitcode.string(), error, false)) << error;
+  auto buffer = llvm::MemoryBuffer::getFile(bitcode.string());
+  ASSERT_TRUE(buffer);
+  llvm::LLVMContext context;
+  auto              module = llvm::parseBitcodeFile((*buffer)->getMemBufferRef(), context);
+  ASSERT_TRUE(module);
+  size_t word_selects = 0, bit_selects = 0, instructions = 0;
+  for (const auto& function : **module) {
+    for (const auto& block : function) {
+      for (const auto& instruction : block) {
+        ++instructions;
+        if (llvm::isa<llvm::SelectInst>(instruction)) {
+          word_selects += instruction.getType()->isIntegerTy(32);
+          bit_selects  += instruction.getType()->isIntegerTy(1);
+        }
+      }
+    }
+  }
+  // The aligned 16-way tree needs 15 word selects. The intentionally reversed
+  // second output may retain scalar selections; it must not block reconstruction.
+  RecordProperty("ir_instructions", instructions);
+  RecordProperty("word_selects", word_selects);
+  RecordProperty("bit_selects", bit_selects);
+  EXPECT_GE(word_selects, 15u);
+  EXPECT_LE(bit_selects, 32u);
+  ASSERT_TRUE(kernel.write_object(object.string(), error, false)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(object.string(), error)) << error;
+  const auto fn = objects.lookup("structured_mux_words", error);
+  ASSERT_NE(fn, nullptr) << error;
+  uint64_t random = 0x243f6a8885a308d3;
+  for (unsigned sample = 0; sample < 64; ++sample) {
+    std::array<uint64_t, 11> state{};
+    std::array<uint32_t, 16> inputs{};
+    for (unsigned input = 0; input < 16; ++input) {
+      random           ^= random << 13;
+      random           ^= random >> 7;
+      random           ^= random << 17;
+      inputs[input]     = static_cast<uint32_t>(random);
+      state[input / 2] |= uint64_t{inputs[input]} << (32 * (input % 2));
+    }
+    for (unsigned select = 0; select < 16; ++select) {
+      state[8] = select;
+      fn(state.data(), nullptr);
+      EXPECT_EQ(state[9], inputs[select]);
+      uint32_t reversed = 0;
+      for (unsigned bit = 0; bit < 32; ++bit) {
+        reversed |= ((inputs[1] >> bit) & 1) << (31 - bit);
+      }
+      EXPECT_EQ(state[10], select & 1 ? reversed : inputs[select]);
+    }
+  }
+  if (HasFailure()) {
+    std::string              text;
+    llvm::raw_string_ostream ir(text);
+    (*module)->print(ir, nullptr);
+    std::ofstream(dir / "livehd-structured-mux-words.ll") << text;
+  } else {
+    std::filesystem::remove(bitcode);
+    std::filesystem::remove(object);
+  }
+}
+
+TEST(CgenLlvm, MuxWordLoadsPreserveTheOriginalAliasedSnapshot) {
+  Cgen_llvm                     kernel("mux_snapshot",
+                                       Cgen_llvm::State_layout{
+                                           5,
+                                           {{0, 128, true, 5}, {3, 1, true}}
+  });
+  std::vector<Cgen_llvm::Value> left, right, lanes;
+  for (unsigned bit = 32; bit-- > 0;) {
+    left.push_back(kernel.binary(Cgen_llvm::Binary_op::lshr, kernel.input(0), kernel.constant(128, bit), 1, true));
+    right.push_back(kernel.binary(Cgen_llvm::Binary_op::lshr, kernel.input(0), kernel.constant(128, bit + 32), 1, true));
+  }
+  Cgen_llvm::Memory memory;
+  memory.data         = 0;
+  memory.bits         = 192;
+  memory.size         = 1;
+  memory.packed_value = true;
+  kernel.bind_memory("alias", memory);
+  // This resource aliases the packed state input. Its write must not move the
+  // previously materialized input's snapshot when later muxes extract words.
+  ASSERT_TRUE(kernel.memory_apply("alias", kernel.constant(192, 0)));
+  for (size_t bit = 0; bit < left.size(); ++bit) {
+    lanes.push_back(kernel.mux(kernel.input(1), left[bit], right[bit], 1, true));
+  }
+  std::string error;
+  ASSERT_TRUE(kernel.add_state_output(4, 4, kernel.concat(lanes), {}, error)) << error;
+  const auto object = std::filesystem::temp_directory_path() / "livehd-mux-snapshot.o";
+  ASSERT_TRUE(kernel.write_object(object.string(), error, false)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(object.string(), error)) << error;
+  const auto fn = objects.lookup("mux_snapshot", error);
+  ASSERT_NE(fn, nullptr) << error;
+  for (const uint32_t a : {0u, 1u, 0xdeadbeefu, 0xffffffffu}) {
+    for (const uint32_t b : {0u, 1u, 0x12345678u, 0xffffffffu}) {
+      for (unsigned select = 0; select < 2; ++select) {
+        uint64_t state[]     = {uint64_t{a} << 5 | uint64_t{b} << 37, uint64_t{b} >> 27, 0, select, 0};
+        void*    resources[] = {state};
+        fn(state, resources);
+        EXPECT_EQ(state[0], 0u);
+        EXPECT_EQ(state[1], 0u);
+        EXPECT_EQ(state[2], 0u);
+        EXPECT_EQ(state[4], select ? b : a);
+      }
+    }
+  }
+  std::filesystem::remove(object);
+}
+
+TEST(CgenLlvm, StructuredRotatedMuxesShareWordSelects) {
+  Cgen_llvm                     kernel("rotated_mux_words",
+                                       {
+                                           {64, true},
+                                           { 1, true},
+                                           { 1, true},
+                                           { 1, true},
+                                           { 1, true}
+  },
+                                       true);
+  std::vector<Cgen_llvm::Value> lanes;
+  for (unsigned bit = 32; bit-- > 0;) {
+    std::vector<Cgen_llvm::Value> level;
+    for (unsigned input = 0; input < 16; ++input) {
+      const unsigned packed     = 4 + input * 32 + bit;
+      const unsigned source_bit = (packed % 64 + 64 - 17 * (packed / 64) % 64) % 64;
+      level.push_back(kernel.binary(Cgen_llvm::Binary_op::lshr, kernel.input(0), kernel.constant(64, source_bit), 1, true));
+    }
+    for (unsigned stage = 0; stage < 4; ++stage) {
+      for (size_t arm = 0; arm < level.size() / 2; ++arm) {
+        level[arm] = kernel.mux(kernel.input(stage + 1), level[2 * arm], level[2 * arm + 1], 1, true);
+      }
+      level.resize(level.size() / 2);
+    }
+    lanes.push_back(level[0]);
+  }
+  std::string error;
+  ASSERT_TRUE(kernel.add_output(0, kernel.concat(lanes), error)) << error;
+  const auto dir     = std::filesystem::temp_directory_path();
+  const auto bitcode = dir / "livehd-rotated-mux-words.bc";
+  const auto object  = dir / "livehd-rotated-mux-words.o";
+  ASSERT_TRUE(kernel.write_bitcode(bitcode.string(), error, false)) << error;
+  auto buffer = llvm::MemoryBuffer::getFile(bitcode.string());
+  ASSERT_TRUE(buffer);
+  llvm::LLVMContext context;
+  auto              module = llvm::parseBitcodeFile((*buffer)->getMemBufferRef(), context);
+  ASSERT_TRUE(module);
+  size_t instructions = 0, bit_selects = 0;
+  for (const auto& function : **module) {
+    for (const auto& block : function) {
+      for (const auto& instruction : block) {
+        ++instructions;
+        bit_selects += llvm::isa<llvm::SelectInst>(instruction) && instruction.getType()->isIntegerTy(1);
+      }
+    }
+  }
+  RecordProperty("ir_instructions", instructions);
+  RecordProperty("bit_selects", bit_selects);
+  EXPECT_LE(instructions, 120u);
+  EXPECT_EQ(bit_selects, 0u);
+  ASSERT_TRUE(kernel.write_object(object.string(), error, false)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(object.string(), error)) << error;
+  using Fn      = uint64_t (*)(uint64_t, uint64_t, uint64_t, uint64_t, uint64_t, void*);
+  const auto fn = std::bit_cast<Fn>(objects.lookup("rotated_mux_words", error));
+  ASSERT_NE(fn, nullptr) << error;
+  uint64_t random = 0x243f6a8885a308d3;
+  for (unsigned sample = 0; sample < 64; ++sample) {
+    random ^= random << 13;
+    random ^= random >> 7;
+    random ^= random << 17;
+    for (unsigned select = 0; select < 16; ++select) {
+      const auto     actual  = fn(random, select & 1, (select >> 1) & 1, (select >> 2) & 1, select >> 3, nullptr);
+      const unsigned start   = 4 + select * 32;
+      const uint64_t low     = std::rotl(random, static_cast<int>(17 * (start / 64)));
+      const uint64_t high    = std::rotl(random, static_cast<int>(17 * (start / 64 + 1)));
+      const uint64_t shifted = (low >> (start % 64)) | (high << (64 - start % 64));
+      EXPECT_EQ(actual, static_cast<uint32_t>(shifted));
+    }
+  }
+  std::filesystem::remove(bitcode);
+  std::filesystem::remove(object);
+}
+
+TEST(CgenLlvm, MuxWordAlignmentPreservesExtensionsAndNonBooleanSelectors) {
+  Cgen_llvm                     kernel("mux_alignment",
+                                       {
+                                           {3, false},
+                                           {3,  true},
+                                           {3,  true}
+  },
+                                       true);
+  const auto                    left  = kernel.resize(kernel.input(0), 7, true);
+  const auto                    right = kernel.resize(kernel.input(1), 7, true);
+  std::vector<Cgen_llvm::Value> lanes;
+  for (unsigned bit = 49; bit-- > 0;) {
+    const auto a = kernel.binary(Cgen_llvm::Binary_op::lshr, left, kernel.constant(7, bit / 7), 1, true);
+    const auto b = kernel.binary(Cgen_llvm::Binary_op::lshr, right, kernel.constant(7, bit % 7), 1, true);
+    lanes.push_back(kernel.mux(kernel.input(2), a, b, 1, true));
+  }
+  std::string error;
+  ASSERT_TRUE(kernel.add_output(0, kernel.concat(lanes), error)) << error;
+  const auto object = std::filesystem::temp_directory_path() / "livehd-mux-alignment.o";
+  ASSERT_TRUE(kernel.write_object(object.string(), error, false)) << error;
+  livehd::sim::Native_objects objects;
+  ASSERT_TRUE(objects.load(object.string(), error)) << error;
+  using Fn      = uint64_t (*)(uint64_t, uint64_t, uint64_t, void*);
+  const auto fn = std::bit_cast<Fn>(objects.lookup("mux_alignment", error));
+  ASSERT_NE(fn, nullptr) << error;
+  for (unsigned a = 0; a < 8; ++a) {
+    for (unsigned b = 0; b < 8; ++b) {
+      for (unsigned select = 0; select < 8; ++select) {
+        const unsigned extended_a = a & 4 ? a | 0x78 : a;
+        uint64_t       expected   = 0;
+        for (unsigned bit = 0; bit < 49; ++bit) {
+          const unsigned value       = select ? b : extended_a;
+          const unsigned source_bit  = select ? bit % 7 : bit / 7;
+          expected                  |= uint64_t{(value >> source_bit) & 1} << bit;
+        }
+        EXPECT_EQ(fn(a, b, select, nullptr), expected);
+      }
+    }
+  }
+  std::filesystem::remove(object);
+}
+
 TEST(CgenLlvm, SharedCodePreservesBindingsAndIndependentState) {
   const auto make = [](std::string_view name, uint64_t increment, size_t input_word) {
     Cgen_llvm   kernel(name, Cgen_llvm::State_layout{3, {{input_word, 64, true}}});
@@ -1099,9 +1358,7 @@ TEST(CgenLlvm, OrderedMemoryAccessesArePlainLoadsAndStores) {
         for (const auto& instruction : block) {
           EXPECT_FALSE(llvm::isa<llvm::CallBase>(instruction));
           EXPECT_FALSE(llvm::isa<llvm::SelectInst>(instruction));
-          if (const auto* branch = llvm::dyn_cast<llvm::BranchInst>(&instruction)) {
-            EXPECT_FALSE(branch->isConditional());
-          }
+          EXPECT_FALSE(llvm::isa<llvm::CondBrInst>(instruction));
           loads  += llvm::isa<llvm::LoadInst>(instruction);
           stores += llvm::isa<llvm::StoreInst>(instruction);
         }
@@ -1387,7 +1644,12 @@ TEST(CgenLlvm, MultipleColorBodiesInlineIntoOneRolledLoop) {
   unsigned rolled = 0;
   for (const auto& block : *fn) {
     for (const auto& instruction : block) {
-      EXPECT_FALSE(llvm::isa<llvm::CallBase>(instruction));
+      if (const auto* call = llvm::dyn_cast<llvm::CallBase>(&instruction)) {
+        // LLVM 23 can vectorize the composed reduction. Its reduction
+        // intrinsic lowers to instructions; color bodies must stay inlined.
+        ASSERT_NE(call->getCalledFunction(), nullptr);
+        EXPECT_EQ(call->getCalledFunction()->getIntrinsicID(), llvm::Intrinsic::vector_reduce_add);
+      }
       EXPECT_FALSE(llvm::isa<llvm::AllocaInst>(instruction));
       if (const auto* md = instruction.getMetadata(llvm::LLVMContext::MD_loop)) {
         for (unsigned i = 1; i < md->getNumOperands(); ++i) {
@@ -1400,7 +1662,9 @@ TEST(CgenLlvm, MultipleColorBodiesInlineIntoOneRolledLoop) {
       }
     }
   }
-  EXPECT_EQ(rolled, 1u);
+  // One rolled loop, optionally paired with a scalar vectorization remainder.
+  EXPECT_GE(rolled, 1u);
+  EXPECT_LE(rolled, 2u);
   const auto object = path.string() + ".o";
   ASSERT_TRUE(body.write_object(object, error, false)) << error;
   livehd::sim::Native_objects objects;

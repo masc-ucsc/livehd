@@ -11,6 +11,11 @@ set -u
 LHD="${LHD:-lhd/lhd}"
 W="${TEST_TMPDIR:-/tmp/lhd_sim_compact_loop_$$}"
 mkdir -p "$W"
+part="${1:-all}"
+case "$part" in
+  all | scaling | runtime | query) ;;
+  *) echo "FAIL: unknown test part $part" >&2; exit 1 ;;
+esac
 
 fail() {
   echo "FAIL: $*" >&2
@@ -55,6 +60,7 @@ EOF
 
 # Warm-workdir digest check and source-size scaling: changing only COUNT must
 # regenerate the wrapper, while the parent module's source size remains flat.
+if [ "$part" = all ] || [ "$part" = scaling ]; then
 write_design 4
 "$LHD" sim "$W/compact.prp" --setup-only --workdir "$W/scale" -q >/dev/null 2>&1 \
   || fail "small compact setup failed"
@@ -80,8 +86,11 @@ LARGE_BYTES=$(( $(wc -c < "$H") + $(wc -c < "$C") ))
 DELTA=$(( LARGE_BYTES > SMALL_BYTES ? LARGE_BYTES - SMALL_BYTES : SMALL_BYTES - LARGE_BYTES ))
 [ "$DELTA" -le 512 ] || fail "generated module source grew with trip count: small=$SMALL_BYTES large=$LARGE_BYTES"
 
+fi
+
 # lhd locates its declared simulator runtime files; a failed build must fail.
 
+if [ "$part" = all ] || [ "$part" = runtime ]; then
 write_design 4
 "$LHD" sim "$W/compact.prp" --workdir "$W/run" --set sim.vcd=true \
   --set sim.checkpoint_every=1 --set sim.checkpoint_max=2 -q >/dev/null 2>&1 || fail "compact host run failed"
@@ -96,6 +105,10 @@ LATEST="$(ls -d "$W/run"/ckpt/top_run/ckp* 2>/dev/null | sort -t p -k3 -n | tail
 grep -Fq 'u_loop_0[0]' "$LATEST/regs.json" || fail "checkpoint lacks occurrence 0 path"
 grep -Fq 'u_loop_0[3]' "$LATEST/regs.json" || fail "checkpoint lacks occurrence 3 path"
 
+fi
+
+if [ "$part" = all ] || [ "$part" = query ]; then
+write_design 4
 "$LHD" sim "$W/compact.prp" top.run --list-signals --result-json "$W/signals.json" --workdir "$W/query" \
   -q >/dev/null 2>&1 || fail "compact list-signals failed"
 python3 - "$W/signals.json" <<'PY' || fail "compact query paths are wrong"
@@ -104,5 +117,7 @@ names = {s["name"] for s in json.load(open(sys.argv[1]))["debug"]["signals"]}
 assert any("dut.u_loop_0[0].lane_state.acc" == n for n in names), sorted(names)
 assert any("dut.u_loop_0[3].lane_state.acc" == n for n in names), sorted(names)
 PY
+
+fi
 
 echo "PASS: compact loop sim (O(1) source, warm digest, VCD/checkpoint/query paths)"

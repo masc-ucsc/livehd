@@ -322,6 +322,7 @@ sh_test(
     data = [
         "tests/sv/scalar_initial_no_reset.v",
         "//inou/prp:tests/lec.py",
+        "//inou/yosys:scripts",
         "//lhd",
     ],
 )

@@ -1754,10 +1754,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       continue;
     }
     const auto enable  = lc::sink_driver_hier(plan.sites_[base].node, "enable");
-    const auto gate    = lc::control_root(enable);
-    // A clock-qualified data enable still has a clock window. In particular,
-    // opposite-phase gated latches may legally feed each other; treating both
-    // as simultaneously transparent invents a combinational cycle.
+    const auto gate    = lc::control_root(enable, /*stop_at_clock_cell=*/true);
+    // Only a plain reference level has an unconditional clock window. A
+    // Clock_cell can hold its output low for the entire period, so its latches
+    // must keep their level-sensitive enable/hold mux in every settle phase.
+    // The guarded latch-input analysis below preserves exclusive feedback.
     latch_settle[base] = gate.net.is_invalid() || !clocks.is_clock(gate.net);
   }
   // A latch-input cone is observed only while its destination is
@@ -1877,6 +1878,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   // bounded formula stays opaque and only loses the proof.
   std::vector<Gate_formula> latch_open_terms(plan.sites_.size());
   std::vector<Gate_formula> latch_demand_terms(plan.sites_.size());
+  std::vector<const Gate_formula*> latch_enable_demand_terms(plan.sites_.size(), &gate_true);
   std::vector<Gate_formula> latch_reset_terms(plan.sites_.size());
   std::vector<bool>         latch_has_reset(plan.sites_.size(), false);
   for (size_t base = 0; base < plan.sites_.size(); ++base) {
@@ -1894,6 +1896,9 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       latch_has_reset[base]   = true;
       const bool negreset     = lc::sink_driver_hier(node, "negreset").is_known_true();
       latch_reset_terms[base] = gate_formula(reset, !negreset, 0);
+      // Enable matters whenever reset is inactive, whether or not the latch
+      // opens. Its own value must not be assumed while analyzing that cone.
+      latch_enable_demand_terms[base] = &gate_formula(reset, negreset, 0);
       // Not-in-reset conjunct; dropping it (on a bound overflow) only
       // enlarges the demand, which can lose a proof but never fake one.
       if (const auto observed = gate_and(latch_open_terms[base], gate_formula(reset, negreset, 0))) {
@@ -2005,7 +2010,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     }
     if (role == Version_role::state_read && gu::type_op_of(plan.sites_[base].node) == Ntype_op::Latch) {
       const auto enable = lc::sink_driver_hier(plan.sites_[base].node, "enable");
-      const auto gate   = lc::control_root(enable);
+      const auto gate         = lc::control_root(enable, /*stop_at_clock_cell=*/true);
       // With multiple input clocks the slot alone does not determine this
       // net's level; its secondary-clock protocol must retain the held read.
       // The gate must be the clock the simulator DRIVES: the flop clock input,
@@ -4030,11 +4035,20 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       const auto target_inputs = incoming_uses[target];
       for (const size_t use_index : target_inputs) {
         const auto use = plan.value_uses_[use_index];
-        if (use.consumer_port != Ntype::get_sink_pid(Ntype_op::Latch, "din") || use.top_input
-            || use.producer_version == Color_plan::invalid_index || !use.literal.empty()) {
+        const bool data_input   = use.consumer_port == Ntype::get_sink_pid(Ntype_op::Latch, "din");
+        const bool enable_input = use.consumer_port == Ntype::get_sink_pid(Ntype_op::Latch, "enable");
+        if ((!data_input && !enable_input) || use.top_input || use.producer_version == Color_plan::invalid_index
+            || !use.literal.empty()) {
           continue;
         }
-        const size_t replacement  = specialize(use.producer_version, latch_demand_terms[target_site.base_site], 0);
+        // The enable cone may feed back through an opposite-phase sampler.
+        // Analyze it under reset-inactive only; guarded_demand then proves
+        // which sampler values are held while its other AND/OR inputs matter.
+        // Using the data's open-window demand here would assume the very
+        // enable value we are computing and could manufacture a false cut.
+        const auto& demand
+            = data_input ? latch_demand_terms[target_site.base_site] : *latch_enable_demand_terms[target_site.base_site];
+        const size_t replacement                      = specialize(use.producer_version, demand, 0);
         specialized_inputs       |= replacement != use.producer_version;
         plan.value_uses_[use_index].producer_version = replacement;
       }
@@ -4236,7 +4250,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   // Clock-gated cones. A flop clocked by a plain Clock_cell commits only while the cell's sampled enable is high, so a version that
   // feeds NOTHING but such flops (all of one cell) is dead while the gate is closed: an emitter may skip its whole color and keep
   // the activation pending. `gate_owner` records the cell's version; the cell's version is ordered before every owned one (the
-  // emitter reads the cell's activation slot when it decides to run the color), and coarsening never mixes owners (below).
+  // emitter reads the cell's activation slot when it decides to run the color). Slop coarsening keeps owners separate; native
+  // updates carry the sampled activation as an operand and can share a color (below).
   {
     const size_t nversions = plan.version_sites_.size();
     std::vector<std::vector<size_t>> consumers(nversions), producers(nversions);
@@ -5239,7 +5254,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     const auto lhs_version = members[lhs].front();
     const auto rhs_version = members[rhs].front();
     return plan.version_sites_[lhs_version].control_owner != plan.version_sites_[rhs_version].control_owner
-           || plan.version_sites_[lhs_version].gate_owner != plan.version_sites_[rhs_version].gate_owner
+           // Native state updates carry their sampled clock activation, so
+           // mixed gate ownership does not require an ABI boundary. Slop
+           // retains whole-color scheduling guards for its runtime updates.
+           || (!separate_runtime_calls
+               && plan.version_sites_[lhs_version].gate_owner != plan.version_sites_[rhs_version].gate_owner)
            || runtime_owner(lhs_version) != runtime_owner(rhs_version)
            || site_module_owner[plan.version_sites_[lhs_version].base_site]
                   != site_module_owner[plan.version_sites_[rhs_version].base_site];

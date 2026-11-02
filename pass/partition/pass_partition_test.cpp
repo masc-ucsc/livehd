@@ -608,3 +608,136 @@ TEST(PartitionAsTop, PassthroughOutputsAreWiredOnceEvenOverAPrewiredBody) {
     EXPECT_EQ(result->get_output_pin("p").get_driver_pin(), result->get_input_pin("b"));
   }
 }
+
+// Anonymous feedback lanes have the same bounded producer shape. Their declared
+// consumers still identify the outputs across a different allocation order.
+TEST(PartitionReuse, NamedConsumersDisambiguateFeedbackOutputs) {
+  namespace gu = livehd::graph_util;
+  std::vector<std::map<std::string, std::string>> runs;
+  for (int reverse = 0; reverse < 2; ++reverse) {
+    hhds::GraphLibrary input, output;
+    auto               io = input.create_io("feedback");
+    io->add_input("clock", 1);
+    io->add_output("left", 2);
+    io->add_output("right", 3);
+    for (const auto* name : {"clock", "left", "right"}) {
+      io->set_bits(name, 1);
+      io->set_unsign(name, true);
+    }
+    auto graph      = io->create_graph();
+    auto clock_node = gu::create_typed_node(*graph, Ntype_op::Not, 1);
+    gu::set_color(clock_node, 1);
+    graph->get_input_pin("clock").connect_sink(clock_node.create_sink_pin(0));
+    auto clock = clock_node.create_driver_pin(0);
+    gu::set_ubits(clock, 1);
+    for (int index = 0; index < 2; ++index) {
+      const int lane = reverse ? 1 - index : index;
+      auto      flop = gu::create_typed_node(*graph, Ntype_op::Flop, 1);
+      gu::set_color(flop, 1);
+      auto pin = flop.create_driver_pin(0);
+      gu::set_ubits(pin, 1);
+      pin.connect_sink(flop.create_sink_pin(3));  // self-retaining anonymous state
+      clock.connect_sink(flop.create_sink_pin(2));
+      for (int depth = 0; depth < 20; ++depth) {
+        auto node = gu::create_typed_node(*graph, Ntype_op::Not, 1);
+        gu::set_color(node, 1);
+        pin.connect_sink(node.create_sink_pin(0));
+        pin = node.create_driver_pin(0);
+        gu::set_ubits(pin, 1);
+      }
+      auto consumer = gu::create_typed_node(*graph, Ntype_op::Not, 1);
+      gu::set_color(consumer, 2);
+      consumer.attr(hhds::attrs::name).set(lane ? "sink_right" : "sink_left");
+      pin.connect_sink(consumer.create_sink_pin(0));
+      auto result = consumer.create_driver_pin(0);
+      gu::set_ubits(result, 1);
+      result.connect_sink(graph->get_output_pin(lane ? "right" : "left"));
+    }
+    std::map<std::string, std::string> names;
+    unsigned                           calls = 0;
+    ASSERT_TRUE(Pass_partition::build_decomposition(
+        {graph},
+        &output,
+        "feedback",
+        false,
+        [&](const livehd::partition::Region_body& region) {
+          if (region.color != 1) {
+            return;
+          }
+          ++calls;
+          EXPECT_TRUE(region.reuse_eligible);
+          ASSERT_EQ(region.outputs.size(), 2U);
+          for (const auto& port : region.outputs) {
+            for (const auto& edge : port.src_driver.out_edges()) {
+              auto consumer = edge.sink.get_master_node();
+              if (gu::node_color_of(consumer) == 2) {
+                names.emplace(std::string{gu::node_name_of(consumer)}, port.name);
+              }
+            }
+          }
+        },
+        livehd::partition::Flatten_mode::off,
+        true));
+    EXPECT_EQ(calls, 1U);
+    EXPECT_EQ(names.size(), 2U);
+    EXPECT_NE(names["sink_left"], names["sink_right"]);
+    runs.push_back(std::move(names));
+  }
+  EXPECT_EQ(runs[0], runs[1]);
+}
+
+// Without named consumers or another stable anchor, feedback lanes remain
+// indistinguishable. A structural cache match cannot justify guessing a stitch.
+TEST(PartitionReuse, AnonymousFeedbackBoundariesRemainIneligible) {
+  namespace gu = livehd::graph_util;
+  hhds::GraphLibrary input, output;
+  auto               io = input.create_io("symmetric_feedback");
+  io->add_input("clock", 1);
+  io->add_output("y", 2);
+  io->set_bits("clock", 1);
+  io->set_bits("y", 1);
+  auto graph = io->create_graph();
+  graph->get_input_pin("clock").connect_sink(graph->get_output_pin("y"));
+  auto clock_node = gu::create_typed_node(*graph, Ntype_op::Not, 1);
+  gu::set_color(clock_node, 1);
+  graph->get_input_pin("clock").connect_sink(clock_node.create_sink_pin(0));
+  auto clock = clock_node.create_driver_pin(0);
+  gu::set_ubits(clock, 1);
+  for (int lane = 0; lane < 2; ++lane) {
+    auto flop = gu::create_typed_node(*graph, Ntype_op::Flop, 1);
+    gu::set_color(flop, 1);
+    auto pin = flop.create_driver_pin(0);
+    gu::set_ubits(pin, 1);
+    pin.connect_sink(flop.create_sink_pin(3));
+    clock.connect_sink(flop.create_sink_pin(2));
+    for (int depth = 0; depth < 20; ++depth) {
+      auto node = gu::create_typed_node(*graph, Ntype_op::Not, 1);
+      gu::set_color(node, 1);
+      pin.connect_sink(node.create_sink_pin(0));
+      pin = node.create_driver_pin(0);
+      gu::set_ubits(pin, 1);
+    }
+    auto consumer = gu::create_typed_node(*graph, Ntype_op::Not, 1);
+    gu::set_color(consumer, 2);
+    pin.connect_sink(consumer.create_sink_pin(0));
+    auto result = consumer.create_driver_pin(0);
+    gu::set_ubits(result, 1);
+    result.connect_sink(flop.create_sink_pin(4));
+  }
+  unsigned refused = 0;
+  ASSERT_TRUE(Pass_partition::build_decomposition(
+      {graph},
+      &output,
+      "symmetric_feedback",
+      false,
+      [&](const livehd::partition::Region_body& region) {
+        if (region.color == 1) {
+          ++refused;
+          EXPECT_FALSE(region.reuse_eligible);
+          EXPECT_EQ(region.pre_body, nullptr);
+        }
+      },
+      livehd::partition::Flatten_mode::off,
+      true));
+  EXPECT_EQ(refused, 1U);
+}

@@ -1,0 +1,10 @@
+/*
+:name: aeg_shared_concat_padding
+:type: equiv
+*/
+// SM4's padded intermediate is read through the same 32-bit slice twice.
+// Repacking a shared producer must preserve the finite width of both lanes.
+pub comb top(x:U8) -> (o:U64) {
+  mut value:U32 = x ^ (x << 8) ^ (x << 2) ^ (x << 18) ^ (x#[0..=5] << 26) ^ (x#[6..=7] << 16)
+  o = (value << 32) | value
+}

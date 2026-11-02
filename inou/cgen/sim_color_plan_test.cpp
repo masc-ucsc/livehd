@@ -2282,6 +2282,61 @@ TEST(SimColorPlan, GatedLatchFeedbackRequiresExclusiveWindows) {
   }
 }
 
+// Minion's resettable commit latch has a low-phase enable sampler without
+// reset. Its enable depends on Q, so the feedback cut belongs in the high
+// latch's enable cone, while Q must still observe an independent async reset.
+TEST(SimColorPlan, ResettableLatchEnableFeedbackUsesClosedSampler) {
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_color_plan_resettable_enable_feedback");
+  auto  io  = lib.create_io("resettable_enable_feedback");
+  io->add_input("clock", 0);
+  io->add_input("run", 1);
+  io->add_input("reset", 2);
+  io->add_input("d", 3);
+  io->add_output("q", 4);
+  auto graph = io->create_graph();
+  for (const auto* name : {"clock", "run", "reset", "d"}) {
+    gu::set_ubits(graph->get_input_pin(name), 1);
+  }
+  const auto constant = [&](int value) { return gu::create_const(*graph, *Dlop::create_integer(value)); };
+  auto       gate     = gu::create_typed_node(*graph, Ntype_op::And, 1);
+  graph->get_input_pin("clock").connect_sink(gate.create_sink_pin(0));
+  graph->get_input_pin("run").connect_sink(gate.create_sink_pin(1));
+  auto gated_clock = gate.create_driver_pin(0);
+  gu::set_ubits(gated_clock, 1);
+  auto low    = gu::create_typed_node(*graph, Ntype_op::Latch, 1);
+  auto high   = gu::create_typed_node(*graph, Ntype_op::Latch, 1);
+  auto low_q  = low.create_driver_pin(0);
+  auto high_q = high.create_driver_pin(0);
+  gu::set_ubits(low_q, 1);
+  gu::set_ubits(high_q, 1);
+  gated_clock.connect_sink(gu::setup_sink_by_name(low, "enable"));
+  constant(0).connect_sink(gu::setup_sink_by_name(low, "posclk"));
+  auto enabled = gu::create_typed_node(*graph, Ntype_op::And, 1);
+  gated_clock.connect_sink(enabled.create_sink_pin(0));
+  low_q.connect_sink(enabled.create_sink_pin(1));
+  gu::set_ubits(enabled.create_driver_pin(0), 1);
+  enabled.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(high, "enable"));
+  graph->get_input_pin("reset").connect_sink(gu::setup_sink_by_name(high, "reset_pin"));
+  constant(1).connect_sink(gu::setup_sink_by_name(high, "async"));
+  constant(0).connect_sink(gu::setup_sink_by_name(high, "initial"));
+  graph->get_input_pin("d").connect_sink(gu::setup_sink_by_name(high, "din"));
+  auto unlocked = gu::create_typed_node(*graph, Ntype_op::EQ, 1);
+  high_q.connect_sink(unlocked.create_sink_pin(0));
+  constant(0).connect_sink(unlocked.create_sink_pin(1));
+  gu::set_ubits(unlocked.create_driver_pin(0), 1);
+  unlocked.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(low, "din"));
+  auto observer = gu::create_typed_node(*graph, Ntype_op::Flop, 1);
+  graph->get_input_pin("clock").connect_sink(gu::setup_sink_by_name(observer, "clock_pin"));
+  high_q.connect_sink(gu::setup_sink_by_name(observer, "din"));
+  auto observed = observer.create_driver_pin(0);
+  gu::set_ubits(observed, 1);
+  observed.connect_sink(graph->get_output_pin("q"));
+  const auto plan = livehd::sim::Color_plan::discover(graph.get());
+  EXPECT_TRUE(plan.complete()) << plan.report();
+  EXPECT_TRUE(plan.summary().versioning_complete) << plan.report();
+  EXPECT_TRUE(plan.summary().version_dag_acyclic) << plan.report();
+}
+
 TEST(SimColorPlan, DataGatedLatchSettlesAtEveryEvaluationBarrier) {
   auto fixture = make_data_gated_latch("latch_settle_barriers");
   auto plan    = livehd::sim::Color_plan::discover(fixture.graph.get());

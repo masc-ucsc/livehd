@@ -1,0 +1,10 @@
+/*
+:name: aeg_sparse_pack_mask
+:type: equiv
+*/
+// Specializing zero padding makes the Verilog child's five-bit window a one-bit value. It must still
+// retain a valid lane carrier when the window is read both whole and through a one-bit slice.
+pub comb top(a:U1, b:U1, c:U1, d:U1, h:U1) -> (o:U7) {
+  const low = b ^ d
+  o = (low << 2) | (h << 1) | low
+}

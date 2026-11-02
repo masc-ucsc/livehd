@@ -2,6 +2,7 @@
 #include "symbol_table.hpp"
 
 #include "bundle.hpp"
+#include "decl_facts.hpp"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include "lrand.hpp"
@@ -330,4 +331,55 @@ TEST_F(Symbol_table_test, function_barrier_read_through_write_block) {
   // ...and leaving the callee restores the caller's value untouched.
   st.leave_scope();
   EXPECT_TRUE(st.get_trivial("outer_var").same_repr(*Dlop::create_integer(7)));
+}
+
+TEST_F(Symbol_table_test, ScalarAliasKeepsTheTargetsDeclaredStorageMode) {
+  for (const auto target_mode :
+       {upass::Mode::mut_kind, upass::Mode::const_kind, upass::Mode::reg_kind, upass::Mode::wire_kind, upass::Mode::unknown}) {
+    Symbol_table st;
+    st.function_scope("aliases");
+    const auto source_mode = target_mode == upass::Mode::const_kind ? upass::Mode::mut_kind : upass::Mode::const_kind;
+    auto       source      = std::make_shared<Bundle>("source");
+    source->set_mode(source_mode);
+    Bundle::Entry entry;
+    entry.trivial  = *Dlop::create_integer(3);
+    entry.kind     = upass::Kind::integer;
+    entry.mode     = source_mode;
+    entry.decl_min = *Dlop::create_integer(0);
+    entry.decl_max = *Dlop::create_integer(15);
+    source->set(bundle_path::of_string("0"), entry);
+    ASSERT_TRUE(st.set("source", source));
+    auto target = std::make_shared<Bundle>("target");
+    target->set_mode(target_mode);
+    ASSERT_TRUE(st.set("target", target));
+    ASSERT_TRUE(st.set("target", st.get_bundle_for_write("source")));
+    const auto facts = upass::decl_facts::lookup(st, nullptr, "target");
+    ASSERT_TRUE(facts);
+    EXPECT_EQ(facts->mode, target_mode);
+    EXPECT_EQ(facts->bits, 4U);
+    EXPECT_EQ(st.get_bundle("source")->get_mode(), source_mode);
+    EXPECT_EQ(st.get_bundle("source")->get_entry(bundle_path::of_string("0")).mode, source_mode);
+    st.leave_scope();
+  }
+}
+
+TEST_F(Symbol_table_test, AggregateFieldsKeepTheirOwnStorageModes) {
+  Symbol_table st;
+  st.function_scope("fields");
+  auto tuple = std::make_shared<Bundle>("tuple");
+  tuple->set_mode(upass::Mode::mut_kind);
+  Bundle::Entry entry;
+  entry.trivial = *Dlop::create_integer(1);
+  entry.mode    = upass::Mode::const_kind;
+  tuple->set(bundle_path::of_string("fixed"), entry);
+  entry.mode = upass::Mode::mut_kind;
+  tuple->set(bundle_path::of_string("variable"), entry);
+  ASSERT_TRUE(st.set("tuple", tuple));
+  const auto fixed    = upass::decl_facts::lookup(st, nullptr, "tuple.fixed");
+  const auto variable = upass::decl_facts::lookup(st, nullptr, "tuple.variable");
+  ASSERT_TRUE(fixed);
+  ASSERT_TRUE(variable);
+  EXPECT_EQ(fixed->mode, upass::Mode::const_kind);
+  EXPECT_EQ(variable->mode, upass::Mode::mut_kind);
+  st.leave_scope();
 }

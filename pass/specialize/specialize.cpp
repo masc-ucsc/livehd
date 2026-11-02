@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "specialize.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <deque>
 #include <format>
@@ -267,6 +268,59 @@ void inherit_colors(hhds::Graph& g, const absl::flat_hash_set<uint64_t>* existed
 }
 
 namespace {
+// A partial rebuild can retain a version with this content-keyed name while re-lowering its caller.
+// Refresh that slot in place: creating another IO of the same name leaves name lookup and Sub gid lookup
+// referring to different bodies. Preserve the graph handle as well, since callers retain their root handles.
+std::shared_ptr<hhds::Graph> copy_specialized_body(std::vector<std::shared_ptr<hhds::Graph>>& graphs,
+                                                   const std::shared_ptr<hhds::Graph>&        body,
+                                                   const std::shared_ptr<hhds::GraphIO>& source_io, std::string_view name) {
+  auto* library = source_io->get_library();
+  auto  io      = library->find_io(name);
+  auto  graph   = io ? io->get_graph() : std::shared_ptr<hhds::Graph>{};
+  if (!io) {
+    io = library->create_io(name);
+  }
+  std::vector<std::string> inputs, outputs;
+  for (const auto& port : io->get_input_pin_decls()) {
+    inputs.emplace_back(port.name);
+  }
+  for (const auto& port : io->get_output_pin_decls()) {
+    outputs.emplace_back(port.name);
+  }
+  if (graph) {
+    graph->clear();
+  }
+  for (const auto& port : inputs) {
+    io->delete_input(port);
+  }
+  for (const auto& port : outputs) {
+    io->delete_output(port);
+  }
+  for (const auto& port : source_io->get_input_pin_decls()) {
+    io->add_input(port.name, port.port_id, port.loop_break);
+    io->set_bits(port.name, port.bits);
+    io->set_unsign(port.name, port.unsign);
+  }
+  for (const auto& port : source_io->get_output_pin_decls()) {
+    io->add_output(port.name, port.port_id);
+    io->set_bits(port.name, port.bits);
+    io->set_unsign(port.name, port.unsign);
+  }
+  if (!graph) {
+    graph = io->create_graph();
+  }
+  if (!library->replace_body_from(name, *body)) {
+    throw std::runtime_error("pass.specialize: could not copy " + std::string{body->get_name()});
+  }
+  const auto origin = body->get_input_node().attr(livehd::attrs::specialization_origin);
+  graph->get_input_node().attr(livehd::attrs::specialization_origin)
+      .set(origin.has() ? origin.get() : std::string(source_io->get_name()));
+  if (std::ranges::none_of(graphs, [&](const auto& existing) { return existing.get() == graph.get(); })) {
+    graphs.push_back(graph);
+  }
+  return graph;
+}
+
 // max_versions > 1: one content-named clone per distinct constant binding, at
 // most `max_versions` per callee (a further binding leaves that instance on the
 // shared definition).
@@ -398,26 +452,11 @@ int specialize_per_binding(std::vector<std::shared_ptr<hhds::Graph>>& graphs, co
           if (auto found = specializations.find(key); found != specializations.end()) {
             body = found->second;
           } else {
-            auto*      library = io->get_library();
             // Named by CONTENT (callee + the constant binding), never by a
             // gid or a counter: stable across runs, so a region/kernel cache
             // keyed on module names keeps hitting.
             const auto name = std::format("{}__k{:016x}", io->get_name(), livehd::hash_util::fnv1a64(key));
-            auto       specialized_io = library->create_io(name);
-            for (const auto& port : io->get_input_pin_decls()) {
-              specialized_io->add_input(port.name, port.port_id, port.loop_break);
-              specialized_io->set_bits(port.name, port.bits);
-              specialized_io->set_unsign(port.name, port.unsign);
-            }
-            for (const auto& port : io->get_output_pin_decls()) {
-              specialized_io->add_output(port.name, port.port_id);
-              specialized_io->set_bits(port.name, port.bits);
-              specialized_io->set_unsign(port.name, port.unsign);
-            }
-            auto specialized = specialized_io->create_graph();
-            if (!library->replace_body_from(name, *body)) {
-              throw std::runtime_error("simulator constant specialization copy failed");
-            }
+            auto       specialized = copy_specialized_body(graphs, body, io, name);
             for (const auto& [pid, value] : constants) {
               const auto constant = gu::create_const(*specialized, gu::const_of(value));
               for (const auto& port : io->get_input_pin_decls()) {
@@ -452,7 +491,6 @@ int specialize_per_binding(std::vector<std::shared_ptr<hhds::Graph>>& graphs, co
               cloned_from[specialized.get()] = body.get();  // a body copy keeps the callee's nids
             }
             specializations.emplace(key, specialized);
-            graphs.push_back(specialized);
             pending_refold.insert(specialized.get());
             body = std::move(specialized);
           }
@@ -944,23 +982,8 @@ int specialize_shared(std::vector<std::shared_ptr<hhds::Graph>>& graphs, const O
         if (auto known = library->find_io(name); known && known->get_graph() && created.contains(known->get_graph().get())) {
           target = known->get_graph();
         } else {
-          auto io = library->create_io(name);
-          for (const auto& port : body->get_io()->get_input_pin_decls()) {
-            io->add_input(port.name, port.port_id, port.loop_break);
-            io->set_bits(port.name, port.bits);
-            io->set_unsign(port.name, port.unsign);
-          }
-          for (const auto& port : body->get_io()->get_output_pin_decls()) {
-            io->add_output(port.name, port.port_id);
-            io->set_bits(port.name, port.bits);
-            io->set_unsign(port.name, port.unsign);
-          }
-          target = io->create_graph();
-          if (!library->replace_body_from(name, *body)) {
-            throw std::runtime_error("pass.specialize: could not copy " + std::string{body->get_name()});
-          }
+          target = copy_specialized_body(graphs, body, body->get_io(), name);
           created.insert(target.get());
-          graphs.push_back(target);
           cloned_from[target.get()] = body.get();
           ++copies;
         }

@@ -28,6 +28,19 @@ fail() {
   exit 1
 }
 
+
+GROUP="${1:-all}"
+case "$GROUP" in
+  all)
+    for group in interface queries catalog_legacy failure; do
+      "$0" "$group" || exit $?
+    done
+    exit 0
+    ;;
+  interface|queries|catalog_legacy|failure) ;;
+  *) fail "unknown check group: $GROUP" ;;
+esac
+
 # A design with all the kinds the catalog must now carry: a flop, a module
 # OUTPUT (absent from the legacy catalog), a MEMORY (likewise), and a stateful
 # sub-instance so hierarchy is exercised.
@@ -52,6 +65,7 @@ test top.run {
 }
 EOF
 
+if [ "$GROUP" = "interface" ]; then
 # ---- structural ------------------------------------------------------------
 "$LHD" sim "$W/q.prp" --setup-only --workdir "$W/s" -q >/dev/null 2>&1 || fail "setup-only failed"
 TOPCPP="$W/s/sim/q.top.cpp"
@@ -122,9 +136,13 @@ echo "$EO" | grep -qi "query" || fail "wrong message rejecting --query + --vcd-f
   --workdir "$W/u2" -q >/dev/null 2>&1
 [ "$?" = "2" ] || fail "unknown schema_version did not exit 2 (usage)"
 
+fi
+
 # lhd locates its declared simulator runtime files; a failed build must fail.
 
 R="$W/r"
+
+if [ "$GROUP" = "queries" ]; then
 Q='{"schema_version":1,"kind":"sim_query","queries":[
   {"id":"cat","op":"signals","kind":"memory"},
   {"id":"pc","op":"value","signal":"acc.acc","at":{"cycle":5}},
@@ -223,6 +241,9 @@ PY
   --query '{"schema_version":1,"kind":"sim_query","queries":[{"id":"x","op":"value","signal":"nope","at":{"cycle":1}}]}' \
   --workdir "$R" -q >/dev/null 2>&1 || fail "an all-errors batch must still exit 0"
 
+fi
+
+if [ "$GROUP" = "catalog_legacy" ]; then
 # The legacy flags still report exactly what they always did.
 "$LHD" sim "$W/q.prp" top.run --probe acc.acc --probe-from 3 --probe-to 5 \
   --workdir "$R" --result-json "$W/legacy.json" -q >/dev/null 2>&1 || fail "legacy --probe run failed"
@@ -260,6 +281,19 @@ for v in r["all"]["values"]:
     assert "dec" in val and "bits" in val, v
 SELFPY
 
+# A failure anchor on a test that PASSES is answered, not guessed at.
+"$LHD" sim "$W/q.prp" top.run --workdir "$R" --result-json "$W/nf.json" -q \
+  --query '{"schema_version":1,"kind":"sim_query","queries":[{"id":"n","op":"value","signal":"acc.acc","at":{"event":"fail"}}]}' \
+  >/dev/null 2>&1 || fail "a no-failure anchored query must still exit 0"
+python3 - "$W/nf.json" <<'NFPY' || fail "no-failure anchor not reported cleanly"
+import json,sys
+r=json.load(open(sys.argv[1]))["query"]["results"][0]
+assert r["ok"] is False and "did not fail" in r["error"]["message"], r
+NFPY
+
+fi
+
+if [ "$GROUP" = "failure" ]; then
 # ---- failure anchors: the headline loop, in ONE invocation ------------------
 cat > "$W/boom.prp" <<'BOOMEOF'
 /*
@@ -290,14 +324,6 @@ assert r["before"]["ok"] and r["before"]["at"]["cycle"]==4, r["before"]
 assert int(r["before"]["value"]["dec"])==5, r["before"]
 BOOMPY
 
-# A failure anchor on a test that PASSES is answered, not guessed at.
-"$LHD" sim "$W/q.prp" top.run --workdir "$R" --result-json "$W/nf.json" -q \
-  --query '{"schema_version":1,"kind":"sim_query","queries":[{"id":"n","op":"value","signal":"acc.acc","at":{"event":"fail"}}]}' \
-  >/dev/null 2>&1 || fail "a no-failure anchored query must still exit 0"
-python3 - "$W/nf.json" <<'NFPY' || fail "no-failure anchor not reported cleanly"
-import json,sys
-r=json.load(open(sys.argv[1]))["query"]["results"][0]
-assert r["ok"] is False and "did not fail" in r["error"]["message"], r
-NFPY
+fi
 
-echo "PASS: lhd sim --query (catalog, five op families, memory words, failure anchors, legacy parity)"
+echo "PASS: lhd sim --query (catalog, five op families, memory words, failure anchors, legacy parity; $GROUP)"

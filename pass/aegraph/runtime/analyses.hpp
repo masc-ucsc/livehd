@@ -62,10 +62,16 @@ struct Cached_facts {
   int8_t depth = 0;  // the recursion budget the fact was computed with
 };
 
+struct Cached_bits {
+  int64_t bits  = -1;
+  int8_t  depth = 0;
+};
+
 struct Analysis_cache {
   absl::flat_hash_map<Class_id, Facts>                        seeds;  // declared bounds of leaf classes (seed_leaf)
   absl::flat_hash_map<Class_id, int64_t>                      wide_seeds;  // unsigned leaves wider than the Facts range (seed_leaf)
   absl::flat_hash_map<Class_id, Cached_facts>                 facts;
+  absl::flat_hash_map<Class_id, Cached_bits>                   storage_widths;
   absl::flat_hash_map<Class_id, std::shared_ptr<const Layout>> layouts;
 };
 
@@ -77,6 +83,10 @@ void seed_leaf(const Egraph& eg, Class_id cls, int bits, bool is_unsigned);
 // 99 bits: a wide unsigned input (a 10400-bit bundle), a Concat, a window and a shifted or OR-ed field of them all
 // carry a width, which is what a packed Or of wide fields needs to prove its fields do not overlap.
 [[nodiscard]] int64_t unsigned_bits(const Egraph& eg, Class_id cls);
+// Conservative unsigned carrier width of the structural realizations of a class, or -1 when unknown.
+// Unlike unsigned_bits, this retains a Concat's declared lane windows and a Get_mask's window even if
+// known zero bits make its VALUE narrower. Mask identities must preserve those boundaries for bitwidth.
+[[nodiscard]] int64_t    storage_unsigned_bits(const Egraph& eg, Class_id cls);
 // Layout lanes and window constants of a packed word stay far below this; it only keeps the offsets in int64 range.
 inline constexpr int64_t kMaxLaneBit = int64_t{1} << 24;
 // The value facts of a class. The class id must be valid.

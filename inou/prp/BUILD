@@ -289,10 +289,13 @@ _ERR_MERGED = {
 # simulated value and reproduces its counts under a fixed stride, the `--set`
 # key classes, and independence of `+set` from `--set`. Hermetic like the
 # prp-sim targets (runfiles hlop/iassert headers + the host C++ compiler).
+[
 sh_test(
-    name = "prp-sim-tune-driver",
+    name = "prp-sim-tune-driver-" + part,
     srcs = ["tests/sim_tune_driver_test.py"],
     args = [
+        "--part",
+        part,
         "-i",
         "$(location //inou/prp:tests/sim/unknown_tb_literal_once.prp)",
     ],
@@ -305,6 +308,13 @@ sh_test(
     ],
 )
 
+    for part in ["fill", "profile"]
+]
+
+test_suite(
+    name = "prp-sim-tune-driver",
+    tests = [":prp-sim-tune-driver-" + part for part in ["fill", "profile"]],
+)
 # Pyrope rejects a statically out-of-range array index in uPass. A dynamic
 # index cannot be decided until execution, so the emitted Verilog keeps a bounds
 # assertion on the index; native simulation checks the in-range values. The
@@ -528,13 +538,8 @@ _SIM_FIXME = [
     # chained_clock_gates_mixed_phase was PROMOTED out (2026-10-05): the active-low
     # cell is `Clock(clock_pin=, enable=, invert=true)` now.
     #
-    # latch_gated_feedback is a genuine `lhd sim` BUG (2026-10-04 pass): a latch
-    # enabled by a same-module gated Clock ignores the gate (iverilog on the
-    # emitted Verilog holds, the sim keeps advancing). Every other former occupant
-    # was ported to the `Clock` type (a latch gated by the clock LEVEL is
-    # `enable=clk, enable_high=false`; a second domain is
-    # `Clock(clock_pin=clk, enable=en)` with the testbench driving `en`).
-    "latch_gated_feedback",
+    # latch_gated_feedback was PROMOTED out: Clock_cell-enabled latches retain
+    # their level-sensitive enable/hold mux through every settling phase.
 ]
 
 [
@@ -558,6 +563,24 @@ _SIM_FIXME = [
     )
     for prp_file in glob(["tests/sim/*.prp"])
 ]
+
+# The same local gated-clock latch windows must hold under the Slop backend.
+# The ordinary fixture target above continues to exercise the default LLVM backend.
+sh_test(
+    name = "prp-sim-latch_gated_feedback_slop",
+    srcs = ["tests/pyrope_test.py"],
+    args = ["-i", "$(location tests/sim/latch_gated_feedback.prp)"],
+    data = [
+        "tests/lec.py",
+        "tests/prplib.py",
+        "tests/prpsim.py",
+        "tests/pyrope_test.py",
+        "tests/sim/latch_gated_feedback.prp",
+        ":sim_runtime_hdrs",
+        "//lhd",
+    ],
+    env = {"LHD_PRP_COMPILE_SETS": "sim.tune.backend=slop"},
+)
 
 # -aegraph TWIN (manual): the same `tests/sim` fixtures with the design under
 # test compiled by the acyclic e-graph engine (`--aegraph` ==
@@ -821,11 +844,12 @@ sh_test(
 _EQUIV_SIM = [
     "matched_filter",
     "mem_partial_write_lanes",
+    "shl_not_wide_amount",
 ]
 
 # Keep the two independent proofs below the per-test runtime budget. The
 # original target remains a suite so requesting it retains both legs.
-_EQUIV_SPLIT_BITFUZZ = ["mem_partial_write_lanes"]
+_EQUIV_SPLIT_BITFUZZ = ["mem_partial_write_lanes", "mem_partial_write_mixed", "shl_not_wide_amount"]
 
 [
     sh_test(
@@ -971,7 +995,8 @@ _EQUIV_SPLIT_BITFUZZ = ["mem_partial_write_lanes"]
 [
     test_suite(
         name = "prp-equiv-%s" % stem,
-        tests = [":prp-equiv-%s-plain" % stem, ":prp-equiv-%s-bitfuzz" % stem],
+        tests = [":prp-equiv-%s-plain" % stem, ":prp-equiv-%s-bitfuzz" % stem]
+                + ([":prp-sim-equiv-%s" % stem] if stem in _EQUIV_SIM else []),
     )
     for stem in _EQUIV_SPLIT_BITFUZZ
 ]
@@ -1645,12 +1670,12 @@ _V2PRP2V_DUP = [
 
 [
     sh_test(
-        name = "prp-v2prp2v-%s" % base,
+        name = "prp-v2prp2v-%s%s" % (base, "-" + part if part != "all" else ""),
         srcs = ["tests/v2prp2v_test.py"],
         args = [
             "-i",
             "$(location //inou/prp:tests/equiv/%s.v)" % base,
-        ],
+        ] + (["--native-only"] if part == "native" else ["--verilog-only"] if part == "verilog" else []),
         # The sibling .prp supplies the headers and is the native LEC reference.
         data = [
             "//inou/prp:tests/lec.py",
@@ -1686,7 +1711,13 @@ _V2PRP2V_DUP = [
             ] + ["tests/equiv/%s.v" % s for s in _V2PRP2V_DUP],
         )
     ]
+    for part in (["native", "verilog"] if base == "mem_partial_write_lanes" else ["all"])
 ]
+
+test_suite(
+    name = "prp-v2prp2v-mem_partial_write_lanes",
+    tests = [":prp-v2prp2v-mem_partial_write_lanes-" + part for part in ["native", "verilog"]],
+)
 
 # lhd-sim known-failing trackers. These are separate from `prp-equiv-*`: the
 # paired .prp/.v files live in tests/equiv and LEC where possible, but these
@@ -2066,6 +2097,12 @@ sh_test(
     data = ["tests/lec.py"],
 )
 
+sh_test(
+    name = "prplib_harness",
+    srcs = ["tests/prplib_test.py"],
+    data = ["tests/lec.py", "tests/prplib.py"],
+)
+
 # Fixture lists are shared by per-case targets and the broad integration suite.
 _ROUNDTRIP_SOURCES = glob(["tests/equiv/roundtrip/*.prp"])
 
@@ -2161,8 +2198,23 @@ _SYNTH_MAPPERS = "abc,usyn"
         "//lhd",
     ] + glob(["tests/abc/*"]),
     env_inherit = ["PATH"],
-    tags = ["exclusive"],  # Serialize synthesis-bearing process trees.
-) for src in _SYNTH_SOURCES]
+) for src in _SYNTH_SOURCES if src.split("/")[-1] != "pipeline.prp"]
+
+# The pipeline fixture covers two libraries and two mappers. Each independent
+# pair retains both graph and emitted-Verilog equivalence obligations.
+[sh_test(
+    name = "prp-synth-pipeline-" + mapper + "-" + lib,
+    srcs = ["tests/integration.py"],
+    args = ["synth", "$(location tests/abc/pipeline.prp)", mapper, "--lib", lib],
+    data = ["tests/lec.py", ":equiv_tests", "//lhd"] + glob(["tests/abc/*"]),
+    env_inherit = ["PATH"],
+) for mapper in ["abc", "usyn"] for lib in ["test", "test_qn"]]
+
+test_suite(
+    name = "prp-synth-pipeline",
+    tests = [":prp-synth-pipeline-" + mapper + "-" + lib for mapper in ["abc", "usyn"] for lib in ["test", "test_qn"]],
+)
+
 
 # Verilog/Pyrope LEC soundness cases use the same numbered-variant harness.
 [

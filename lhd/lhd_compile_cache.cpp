@@ -3012,6 +3012,28 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
           cached[i] = load_compact_lnast(res.compile_cache_scope + "/lg/lowered_ln/" + lowered_lnast_dir(i), name);
         }
       }
+      // Specialization can retire a concrete unit's original GraphIO when
+      // every old caller used a constant-bound copy. Its cached mod/pipe tree
+      // is metadata-only, so restoring that owner would leave a dirty caller
+      // neither the original interface nor a body to lower. Rebuild just such
+      // owners from their source trees; unrelated final graphs remain reusable.
+      bool missing_concrete_body = false;
+      for (const auto& ln : cached) {
+        if (!ln || ln->is_template()) {
+          continue;
+        }
+        const auto kind = ln->get_lambda_kind();
+        if ((kind == "mod" || kind == "pipe")
+            && !cache.find_io(std::string(ln->get_graph_name()))) {
+          const auto owner = owner_of(ln->get_top_module_name(), res);
+          if (!owner.empty() && run_live.insert(owner).second) {
+            missing_concrete_body = true;
+          }
+        }
+      }
+      if (missing_concrete_body) {
+        continue;  // recompute the restored-owner closure before decoding again
+      }
       // A specialization (or lifted loop body) belongs to its CALL SITES, not
       // to the unit that owns its name: a clean generic unit's `sib<W=4>` was
       // minted by a caller that may be dirty now and bind `sib<W=5>`. Keep a
@@ -3093,6 +3115,45 @@ bool compile_cache_restore_graphs(Options& opts, Result& res, Eprp_var& var, con
       if (row.has_body && eligible(expected->rows[i])) {
         eligible_names.insert(row.name);
         restored_names.push_back(row.name);
+      }
+    }
+
+    // A source owner may run live only to recreate its missing original
+    // interface. Its unchanged specialized bodies are still authoritative for
+    // restored callers: close the graph restore over those dependencies before
+    // discarding other cached bodies. Never retain a body from changed source.
+    std::map<std::string, const Graph_row*> rows_by_name;
+    for (const auto& row : actual) {
+      rows_by_name.emplace(row.name, &row);
+    }
+    std::vector<std::string> dependencies(eligible_names.begin(), eligible_names.end());
+    for (size_t i = 0; i < dependencies.size(); ++i) {
+      const auto io = cache.find_io(dependencies[i]);
+      if (!io || !io->has_graph()) {
+        continue;
+      }
+      for (auto node : io->get_graph()->body().nodes()) {
+        if (livehd::graph_util::type_op_of(node) != Ntype_op::Sub) {
+          continue;
+        }
+        const auto child = node.get_subnode_io();
+        if (!child) {
+          continue;
+        }
+        const std::string name(child->get_name());
+        const auto found = rows_by_name.find(name);
+        if (eligible_names.contains(name) || found == rows_by_name.end() || !found->second->has_body) {
+          continue;
+        }
+        const auto& row = *found->second;
+        if (!row.design || row.owner.empty() || !clean.contains(row.owner) || row.unit_key.empty()
+            || row.unit_key != key_of(row.owner, res)) {
+          ++res.compile_cache.refused;
+          return false;  // no destination mutation: the normal full lowering is safe
+        }
+        eligible_names.insert(name);
+        restored_names.push_back(name);
+        dependencies.push_back(name);
       }
     }
 

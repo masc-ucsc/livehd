@@ -1,0 +1,222 @@
+diff --git src/map/scl/sclBufSize.c src/map/scl/sclBufSize.c
+--- src/map/scl/sclBufSize.c
++++ src/map/scl/sclBufSize.c
+@@ -47,6 +47,8 @@
+     Vec_Flt_t *    vLoads;     // loads for all nodes
+     Vec_Flt_t *    vDepts;     // departure times
+     Vec_Ptr_t *    vFanouts;   // fanout array
++    Vec_Int_t *    vFanoutPos; // current source's fanout -> vector slot
++    int            fFastFanouts; // false for duplicate fanout IDs
+ };
+ 
+ 
+@@ -97,6 +99,7 @@
+     if ( p->pWLoadUsed )
+     p->vWireCaps = Abc_SclFindWireCaps( p->pWLoadUsed, Abc_NtkGetFanoutMax(pNtk) );
+     p->vFanouts  = Vec_PtrAlloc( 100 );
++    p->vFanoutPos = Vec_IntStart( Abc_NtkObjNumMax(pNtk) );
+     p->vCins     = Vec_FltAlloc( 2*Abc_NtkObjNumMax(pNtk) + 1000 );
+     p->vETimes   = Vec_FltAlloc( 2*Abc_NtkObjNumMax(pNtk) + 1000 );
+     p->vLoads    = Vec_FltAlloc( 2*Abc_NtkObjNumMax(pNtk) + 1000 );
+@@ -111,6 +114,7 @@
+ void Bus_ManStop( Bus_Man_t * p )
+ {
+     Vec_PtrFreeP( &p->vFanouts );
++    Vec_IntFreeP( &p->vFanoutPos );
+     Vec_FltFreeP( &p->vWireCaps );
+     Vec_FltFreeP( &p->vCins );
+     Vec_FltFreeP( &p->vETimes );
+@@ -301,6 +305,48 @@
+         ABC_SWAP( void *, Vec_PtrArray(vFanouts)[i-1], Vec_PtrArray(vFanouts)[i] );
+     }
+ }
++// Pending fanouts form a minimum heap in the existing departure/cap order.
++// Repeatedly compacting and summing the complete vector for each small buffer
++// batch costs quadratic time on a high-fanout net.
++static Abc_Obj_t * Bus_SclPopFanout( Vec_Ptr_t * vFanouts )
++{
++    Abc_Obj_t * pResult = (Abc_Obj_t *)Vec_PtrEntry( vFanouts, 0 );
++    Abc_Obj_t * pLast = (Abc_Obj_t *)Vec_PtrPop( vFanouts );
++    int i = 0, nSize = Vec_PtrSize( vFanouts );
++    while ( 2*i + 1 < nSize )
++    {
++        int k = 2*i + 1;
++        Abc_Obj_t * pChild = (Abc_Obj_t *)Vec_PtrEntry( vFanouts, k );
++        if ( k + 1 < nSize )
++        {
++            Abc_Obj_t * pRight = (Abc_Obj_t *)Vec_PtrEntry( vFanouts, k + 1 );
++            if ( Bus_SclCompareFanouts( &pRight, &pChild ) < 0 )
++                pChild = pRight, k++;
++        }
++        if ( Bus_SclCompareFanouts( &pLast, &pChild ) < 0 )
++            break;
++        Vec_PtrWriteEntry( vFanouts, i, pChild );
++        i = k;
++    }
++    if ( nSize )
++        Vec_PtrWriteEntry( vFanouts, i, pLast );
++    return pResult;
++}
++static void Bus_SclPushFanout( Vec_Ptr_t * vFanouts, Abc_Obj_t * pObj )
++{
++    int i = Vec_PtrSize( vFanouts );
++    Vec_PtrPush( vFanouts, pObj );
++    while ( i > 0 )
++    {
++        int k = (i - 1) / 2;
++        Abc_Obj_t * pParent = (Abc_Obj_t *)Vec_PtrEntry( vFanouts, k );
++        if ( Bus_SclCompareFanouts( &pParent, &pObj ) < 0 )
++            break;
++        Vec_PtrWriteEntry( vFanouts, i, pParent );
++        i = k;
++    }
++    Vec_PtrWriteEntry( vFanouts, i, pObj );
++}
+ void Bus_SclCheckSortedFanout( Vec_Ptr_t * vFanouts )
+ {
+     Abc_Obj_t * pObj, * pNext;
+@@ -339,6 +385,35 @@
+     printf( "gain =%5d  ",      (int)(100.0 * Bus_SclObjLoad(pObj) / SC_CellPinCapAve(pCell)) );
+     printf( "dept =%7.0f ps  ", Bus_SclObjDept(pObj) );
+     printf( "\n" );
++}
++// Buffering repeatedly removes edges of the same source. Keep back-indices
++// so this does not search and shift its complete fanout list for every edge.
++// Duplicate fanout IDs use the general routine, which preserves parallel edges.
++static void Bus_SclIndexFanouts( Bus_Man_t * p, Abc_Obj_t * pObj )
++{
++    Abc_Obj_t * pFanout;
++    int i;
++    p->fFastFanouts = 1;
++    Abc_ObjForEachFanout( pObj, pFanout, i )
++    {
++        int pos = Vec_IntGetEntry( p->vFanoutPos, Abc_ObjId(pFanout) );
++        if ( pos < i && Vec_IntEntry(&pObj->vFanouts, pos) == (int)Abc_ObjId(pFanout) )
++            p->fFastFanouts = 0;
++        Vec_IntSetEntry( p->vFanoutPos, Abc_ObjId(pFanout), i );
++    }
++}
++static void Bus_SclPatchFanout( Bus_Man_t * p, Abc_Obj_t * pFanout, Abc_Obj_t * pOld, Abc_Obj_t * pNew )
++{
++    int pos, moved;
++    if ( !p->fFastFanouts )
++    {
++        Abc_ObjPatchFanin( pFanout, pOld, pNew );
++        return;
++    }
++    pos = Vec_IntEntry( p->vFanoutPos, Abc_ObjId(pFanout) );
++    moved = Abc_ObjPatchFaninFast( pFanout, pOld, pNew, pos );
++    if ( moved >= 0 )
++        Vec_IntWriteEntry( p->vFanoutPos, moved, pos );
+ }
+ Abc_Obj_t * Abc_SclAddOneInv( Bus_Man_t * p, Abc_Obj_t * pObj, Vec_Ptr_t * vFanouts, float Gain )
+ {
+@@ -377,7 +452,7 @@
+         if ( Abc_ObjFaninNum(pFanout) == 0 )
+             Abc_ObjAddFanin( pFanout, pInv );
+         else
+-            Abc_ObjPatchFanin( pFanout, pObj, pInv );
++            Bus_SclPatchFanout( p, pFanout, pObj, pInv );
+     }
+     // set the gate
+     pCellNew = Abc_SclFindSmallestGate( p->pInv, Load / Gain );
+@@ -411,6 +486,7 @@
+     abctime clk = Abc_Clock();
+     int i, k, nObjsOld = Abc_NtkObjNumMax(p->pNtk);
+     float GainGate, GainInv, Load, Cin, DeptMax = 0;
++    Vec_Ptr_t * vBatch = Vec_PtrAlloc( Abc_MaxInt(p->pPars->nDegree, 2) );
+     GainGate = p->pPars->fAddBufs ? (float)pow( (double)Gain, (double)2.0 ) : Gain;
+     GainInv  = p->pPars->fAddBufs ? (float)pow( (double)Gain, (double)2.0 ) : Gain;
+     Abc_NtkForEachObjReverse( p->pNtk, pObj, i )
+@@ -445,6 +521,7 @@
+             // add one or more inverters
+ //            Abc_NtkPrintFanoutProfile( pObj );
+             Abc_NodeCollectFanouts( pObj, p->vFanouts );
++            Bus_SclIndexFanouts( p, pObj );
+             if ( Abc_ObjIsCi(pObj) )
+                 Abc_SclKeepSameNameCo( pObj, p->vFanouts );
+             Vec_PtrSort( p->vFanouts, (int(*)(const void *, const void *))Bus_SclCompareFanouts );
+@@ -455,11 +532,25 @@
+                     Abc_Obj_t * pInv;
+                     if ( p->pPars->fVeryVerbose )//|| Vec_PtrSize(p->vFanouts) == Abc_ObjFanoutNum(pObj) )
+                         Abc_NtkPrintFanoutProfileVec( pObj, p->vFanouts );
+-                    pInv = Abc_SclAddOneInv( p, pObj, p->vFanouts, GainInv );
++                    int nBatch = Abc_MinInt( Vec_PtrSize(p->vFanouts), Abc_MaxInt(p->pPars->nDegree, 2) );
++                    Vec_PtrClear( vBatch );
++                    for ( k = 0; k < nBatch; k++ )
++                        Vec_PtrPush( vBatch, Bus_SclPopFanout(p->vFanouts) );
++                    pInv = Abc_SclAddOneInv( p, pObj, vBatch, GainInv );
+                     if ( p->pPars->fVeryVerbose )
+                         Abc_SclOneNodePrint( p, pInv );
+-                    Bus_SclInsertFanout( p->vFanouts, pInv );
+-                    Load = Abc_NtkComputeFanoutLoad( p, p->vFanouts );
++                    Vec_PtrForEachEntry( Abc_Obj_t *, vBatch, pFanout, k )
++                        if ( pFanout != NULL )
++                            Bus_SclPushFanout( p->vFanouts, pFanout );
++                    Bus_SclPushFanout( p->vFanouts, pInv );
++                    // Above nDegree another iteration is mandatory regardless
++                    // of load. Once small, sort before summing as before (a
++                    // sorted vector is also a valid minimum heap).
++                    if ( Vec_PtrSize(p->vFanouts) <= p->pPars->nDegree )
++                    {
++                        Vec_PtrSort( p->vFanouts, (int(*)(const void *, const void *))Bus_SclCompareFanouts );
++                        Load = Abc_NtkComputeFanoutLoad( p, p->vFanouts );
++                    }
+                 }
+                 while ( Vec_PtrSize(p->vFanouts) > p->pPars->nDegree || (Vec_PtrSize(p->vFanouts) > 1 && Load > GainGate * Cin) );
+             }
+@@ -482,6 +573,7 @@
+             Abc_SclOneNodePrint( p, pObj );
+         assert( p->pPars->fSizeOnly || Abc_ObjFanoutNum(pObj) <= p->pPars->nDegree );
+     }
++    Vec_PtrFree( vBatch );
+     // compute departure time of the PI
+     if ( i < 0 ) // finished buffering
+     Abc_NtkForEachCi( p->pNtk, pObj, i )
+diff --git src/base/abc/abcFanio.c src/base/abc/abcFanio.c
+--- src/base/abc/abcFanio.c
++++ src/base/abc/abcFanio.c
+@@ -169,6 +169,32 @@
+   SeeAlso     []
+ 
+ ***********************************************************************/
++// Same edge and polarity update as Abc_ObjPatchFanin, given the old
++// source's fanout-vector slot. Swap-remove that entry and return the moved
++// fanout ID (or -1) so a caller maintaining back-indices can update it.
++int Abc_ObjPatchFaninFast( Abc_Obj_t * pObj, Abc_Obj_t * pFaninOld, Abc_Obj_t * pFaninNew, int iFanout )
++{
++    Abc_Obj_t * pFaninNewR = Abc_ObjRegular(pFaninNew);
++    int iFanin = Vec_IntFind( &pObj->vFanins, pFaninOld->Id );
++    int last;
++    assert( !Abc_ObjIsComplement(pObj) && !Abc_ObjIsComplement(pFaninOld) );
++    assert( pFaninOld != pFaninNewR );
++    assert( pObj->pNtk == pFaninOld->pNtk && pObj->pNtk == pFaninNewR->pNtk );
++    assert( iFanin >= 0 );
++    assert( iFanout >= 0 && iFanout < Vec_IntSize(&pFaninOld->vFanouts) );
++    assert( Vec_IntEntry(&pFaninOld->vFanouts, iFanout) == (int)pObj->Id );
++    Vec_IntWriteEntry( &pObj->vFanins, iFanin, pFaninNewR->Id );
++    if ( Abc_ObjIsComplement(pFaninNew) )
++        Abc_ObjXorFaninC( pObj, iFanin );
++    last = Vec_IntPop( &pFaninOld->vFanouts );
++    if ( iFanout < Vec_IntSize(&pFaninOld->vFanouts) )
++        Vec_IntWriteEntry( &pFaninOld->vFanouts, iFanout, last );
++    else
++        last = -1;
++    Vec_IntPushMem( pObj->pNtk->pMmStep, &pFaninNewR->vFanouts, pObj->Id );
++    return last;
++}
++
+ void Abc_ObjPatchFanin( Abc_Obj_t * pObj, Abc_Obj_t * pFaninOld, Abc_Obj_t * pFaninNew )
+ {
+     Abc_Obj_t * pFaninNewR = Abc_ObjRegular(pFaninNew);
+diff --git src/base/abc/abc.h src/base/abc/abc.h
+--- src/base/abc/abc.h
++++ src/base/abc/abc.h
+@@ -660,6 +660,7 @@
+ extern ABC_DLL void               Abc_ObjDeleteFanin( Abc_Obj_t * pObj, Abc_Obj_t * pFanin );
+ extern ABC_DLL void               Abc_ObjRemoveFanins( Abc_Obj_t * pObj );
+ extern ABC_DLL void               Abc_ObjPatchFanin( Abc_Obj_t * pObj, Abc_Obj_t * pFaninOld, Abc_Obj_t * pFaninNew );
++extern ABC_DLL int                Abc_ObjPatchFaninFast( Abc_Obj_t * pObj, Abc_Obj_t * pFaninOld, Abc_Obj_t * pFaninNew, int iFanout );
+ extern ABC_DLL void               Abc_ObjPatchFanoutFanin( Abc_Obj_t * pObj, int iObjNew );
+ extern ABC_DLL Abc_Obj_t *        Abc_ObjInsertBetween( Abc_Obj_t * pNodeIn, Abc_Obj_t * pNodeOut, Abc_ObjType_t Type );
+ extern ABC_DLL void               Abc_ObjTransferFanout( Abc_Obj_t * pObjOld, Abc_Obj_t * pObjNew );

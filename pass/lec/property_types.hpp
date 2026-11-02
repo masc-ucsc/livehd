@@ -202,7 +202,12 @@ struct Outcome_info {
       || has("refused") || has("no encodable driver")) {
     return Outcome::Refuted_unsupported;  // a design-level refusal: every engine fails on it
   }
-  if (has("MEMOUT") || has("out of memory") || has("memory backstop") || has("RLIMIT_AS") || has("bad_alloc")) {
+  // A crash diagnostic can mention the address-space cap to explain that its
+  // RSS was FAR BELOW that cap. That context is not evidence of exhaustion.
+  // Positive allocation failures still take precedence over a crash label.
+  const bool engine_crash = has("engine crash") || has("ENGINE CRASH");
+  if (has("MEMOUT") || has("out of memory") || has("bad_alloc")
+      || (!engine_crash && (has("memory backstop") || has("RLIMIT_AS")))) {
     return Outcome::Timeout_memory;
   }
   if (has("formal.timeout") || has("wall deadline") || has("wall-clock limit") || has("timed out") || has("a resource limit")) {

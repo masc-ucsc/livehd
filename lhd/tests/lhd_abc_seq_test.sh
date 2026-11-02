@@ -89,7 +89,7 @@ fail() {
 # Keep independently useful register, QN-cell, and memory regressions below a
 # minute in debug builds. A direct invocation still runs all three groups.
 group="${1:-all}"
-case "$group" in all|registers|qn|memory) ;; *) fail "unknown test group: $group" ;; esac
+case "$group" in all|registers|qn|memory|memory_native|memory_lowered|memory_auto|memory_limited) ;; *) fail "unknown test group: $group" ;; esac
 selected() { [ "$group" = all ] || [ "$group" = "$1" ]; }
 
 # Library models and the original partition do not depend on the ABC mode.
@@ -159,6 +159,16 @@ run_abc_lec() {
   local fix="$1" top="$2" reg="$3" mem="$4" reg_max="${5:-0}"
   shift $(( $# > 5 ? 5 : $# ))
   local prp="inou/prp/tests/pyrope/${fix}.prp"
+  if [ "$fix" = abc_mem ]; then
+    # Four entries retain every native/blasted/threshold/negative-control case
+    # while halving the equivalence model. Preserve the source's file/top name.
+    local original="$prp"
+    mkdir -p "$W/fixtures"
+    prp="$W/fixtures/abc_mem.prp"
+    if [ ! -f "$prp" ]; then
+      sed -e 's/waddr:U3/waddr:U2/' -e 's/raddr:U3/raddr:U2/' -e 's/\[8\]U8/[4]U8/' "$original" > "$prp"
+    fi
+  fi
   # The extra --set values are part of the run identity: two runs that differ
   # only in them must not share a workdir.
   local extra_tag=""
@@ -231,7 +241,7 @@ run_abc_lec() {
   # LEC: the tech-mapped netlist must equal the original logic in every mode.
   # Two modes that emit a byte-identical (impl, ref) pair pose the SAME query --
   # abc_mem folds to the identical blasted netlist under memory=true, under the
-  # `auto` default and under memory=true with memory_max_bits=63 -- so prove each
+  # `auto` default and under memory=true with memory_max_bits=31 -- so prove each
   # distinct pair once and record the identity for the repeats. The key is the
   # content, so a change that ever makes two modes diverge puts the solver back
   # on both of them automatically.
@@ -561,7 +571,7 @@ if selected registers; then
 
 fi
 
-if selected memory; then
+if selected memory || [[ "$group" = memory_* ]]; then
   # abc_mem's `reg mem:[8]U8 = 0` carries a reset value, i.e. a one-cycle
   # whole-array reset. The default LEC engine compares both graph and Verilog
   # representations against the source memory.
@@ -598,28 +608,35 @@ if selected memory; then
     grep -q '"class":"usage"' "$UMD/r.json" || fail "pass.usyn memory=true is not a usage error: $(cat "$UMD/r.json")"
     echo "PASS: USYN memory stays a native barrier and remains equivalent"
   else
+    if selected memory || selected memory_native; then
     # memory=false: the memory stays
     # a native boundary instance (not bit-blasted).
     run_abc_lec abc_mem abc_mem.abc_mem true false
     has "$NETV" "cgen_memory" || fail "abc_mem memory=false: memory not preserved as a native instance"
     echo "PASS: memory=false keeps the memory as a native instance (abc_mem)"
+    fi
 
+    if selected memory || selected memory_lowered; then
     # memory=true: the instance remains, with mapped gates inside its module.
     run_abc_lec abc_mem abc_mem.abc_mem true true
     has "$NETV" "cgen_memory_.*_blasted" || fail "abc_mem memory=true: lowered memory module missing"
     ! has "$NETV" '`include.*cgen_memory' || fail "abc_mem memory=true: native memory survived"
     echo "PASS: memory=true bit-blasts the memory to gates (abc_mem)"
+    fi
 
-    # The default (`auto`) folds this 8 x 8 = 64-bit memory: it is well within
-    # memory_max_bits, so flops are the realization a 64-bit array would have anyway.
+    if selected memory || selected memory_auto; then
+    # The default (`auto`) folds this 4 x 8 = 32-bit memory: it is well within
+    # memory_max_bits, so flops are the realization a 32-bit array would have anyway.
     run_abc_lec abc_mem abc_mem.abc_mem true default
-    has "$NETV" "cgen_memory_.*_blasted" || fail "abc_mem default (auto): a 64-bit memory was not folded"
+    has "$NETV" "cgen_memory_.*_blasted" || fail "abc_mem default (auto): a 32-bit memory was not folded"
     ! has "$NETV" '`include.*cgen_memory' || fail "abc_mem default (auto): native memory survived"
     echo "PASS: the default memory mode folds a small memory (abc_mem)"
+    fi
 
+    if selected memory || selected memory_limited; then
     # ...and `auto` keeps the SAME memory native once it is over memory_max_bits,
     # with the one-line note naming it. memory=true ignores the threshold entirely.
-    run_abc_lec abc_mem abc_mem.abc_mem true auto 0 --set pass.$MAPPER.memory_max_bits=63
+    run_abc_lec abc_mem abc_mem.abc_mem true auto 0 --set pass.$MAPPER.memory_max_bits=31
     # Native = the shipped wrapper (`include cgen_memory_*.v) for a reset-less
     # memory, or the boundary module a memory with a whole-array reset is enclosed in
     # (the wrappers have no reset port). That boundary module is the macro-instance
@@ -627,15 +644,16 @@ if selected memory; then
     # is what marks the bit-blasted realization.
     { has "$NETV" '`include.*cgen_memory' \
       || { has "$NETV" 'cgen_memory_' && ! has "$NETV" 'cgen_memory_.*_blasted'; }; } \
-      || fail "abc_mem auto/max_bits=63: memory was folded anyway"
-    ! has "$NETV" "cgen_memory_.*_blasted" || fail "abc_mem auto/max_bits=63: unexpectedly lowered"
+      || fail "abc_mem auto/max_bits=31: memory was folded anyway"
+    ! has "$NETV" "cgen_memory_.*_blasted" || fail "abc_mem auto/max_bits=31: unexpectedly lowered"
     grep -q '"code":"memory-max-bits"' "$ABCDIAG" \
-      || fail "abc_mem auto/max_bits=63: no memory-max-bits note: $(cat "$ABCDIAG")"
+      || fail "abc_mem auto/max_bits=31: no memory-max-bits note: $(cat "$ABCDIAG")"
     echo "PASS: auto keeps an over-memory_max_bits memory native with a note (abc_mem)"
 
-    run_abc_lec abc_mem abc_mem.abc_mem true true 0 --set pass.$MAPPER.memory_max_bits=63
+    run_abc_lec abc_mem abc_mem.abc_mem true true 0 --set pass.$MAPPER.memory_max_bits=31
     has "$NETV" "cgen_memory_.*_blasted" || fail "abc_mem memory=true: memory_max_bits was consulted"
     echo "PASS: memory=true folds regardless of memory_max_bits (abc_mem)"
+    fi
 
     echo "PASS: ABC memory bit-blast and native boundary modes remain equivalent"
   fi

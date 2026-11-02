@@ -69,6 +69,12 @@ struct Phase_endpoint {
   // into the enable. AND-ing it evaluates the clock as a free data input once
   // per microstep, which is the measured `always @(posedge 'hx)` failure M8 hit.
   bool        clock_role_latch = false;
+  // A low-window preview latch behind an ordinary ICG can stay transparent
+  // while the gate is off. When every reader is an ungated falling-edge flop,
+  // forward its settled live data at that edge iff the held clock guard is
+  // false, after any high-window latches have closed. This does not admit
+  // primary or same-edge readers.
+  bool        forward_off_at_fall = false;
   // A clock-role latch can also have an ordinary DATA enable in its window
   // (`if !clk && held_en`). Unlike an ICG guard, that value is consumed LIVE at
   // the same close microstep; sampling it into another state cut would insert
@@ -89,6 +95,9 @@ struct Phase_endpoint {
   // when the endpoint's clock is ungated. Ordinary clock-gate consumers read a
   // sampled state cut; `live_guard` latch endpoints read the cone directly.
   std::string guard_key;
+  // Additional DATA terms of an AND-qualified latch window. Read live at the
+  // closing microstep and AND with the separately sampled clock guard.
+  std::string window_guard_key;
 };
 
 struct Phase_plan {
@@ -116,6 +125,8 @@ struct Phase_plan {
   int         n_flop_fall         = 0;
   int         n_latch_low         = 0;  // clock-role, closes before the rise
   int         n_latch_high        = 0;  // clock-role, closes before the fall
+  int         n_latch_off_read      = 0;  // conditional live reads at fall while an ICG is off
+  int         n_latch_window_guards = 0;  // live data qualifiers alongside sampled clock guards
   int         n_latch_data        = 0;  // data-gated: ordinary tick semantics, rise batch
   int         n_latch_transparent = 0;  // always-open: a combinational buffer, not state
   int         n_mem_rise          = 0;

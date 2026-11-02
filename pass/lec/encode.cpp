@@ -1883,6 +1883,46 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     }
     return acc;
   };
+  // Hier-safe transparent arm: latch_contract's version resolves class-local
+  // pins, which carry no hier position and so would miss pin2val for a latch
+  // inside an instance.
+  auto transparent_arm = [&](const hhds::Occurrence_node& n) -> hhds::Occurrence_pin {
+    auto q  = n.get_driver_pin(0);
+    auto dd = livehd::latch_contract::sink_driver_hier(n, "din");
+    if (dd.is_invalid() || dd.is_const() || gu::is_graph_input_pin(dd)) {
+      return {};
+    }
+    auto mux = dd.get_master_node();
+    if (gu::type_op_of(mux) != Ntype_op::Mux) {
+      return {};  // raw yosys D/EN shape: `din` IS already the transparent value
+    }
+    bool                 has_q_arm = false;
+    hhds::Occurrence_pin other;
+    for (const auto& sink : mux.inp_sorted_pins()) {
+      if (sink.get_port_id() == 0) {
+        continue;  // the selector is the gate, not an arm
+      }
+      for (const auto& driver : sink.get_driver_pins()) {
+        if (!driver.is_invalid() && pinkey(driver) == pinkey(q)) {
+          has_q_arm = true;
+        } else if (other.is_invalid()) {
+          other = driver;
+        }
+      }
+    }
+    if (has_q_arm) {
+      return other;
+    }
+    return {};
+  };
+  absl::flat_hash_map<std::string, Val> deferred_preview_state;
+  auto                                  forwards_preview = [&](const hhds::Occurrence_node& node) {
+    if (!phased || single_step() || microstep_ != static_cast<int>(Phase::Fall)) {
+      return false;
+    }
+    auto it = phase_plan_->ep.find(box_node_key(node));
+    return it != phase_plan_->ep.end() && it->second.forward_off_at_fall;
+  };
   for (auto node : fwd_nodes) {
     auto op = gu::type_op_of(node);
     if (op != Ntype_op::Flop && !(phased && op == Ntype_op::Latch)) {
@@ -1927,7 +1967,14 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
                    v.x_mask.isNull() ? 0 : 1,
                    v.term.toString().c_str());
     }
-    pin2val[pinkey(qpin)] = v;
+    // A qualified preview's falling-edge readers need the settled live D when
+    // the ICG is off. Defer Q until D is encoded, so no downstream cone can
+    // cache the stale state value during the combinational fixpoint.
+    if (forwards_preview(node)) {
+      deferred_preview_state[pinkey(qpin)] = v;
+    } else {
+      pin2val[pinkey(qpin)] = v;
+    }
     out.inputs[nm]        = v;
     flops.push_back(node);
 
@@ -2285,6 +2332,15 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           carried_xm = it->second.x_mask;
         }
       }
+      if (fresh.isNull() && sync_threaded && !mc.ignored) {
+        if (initial_read_ == Initial_read::zero) {
+          fresh = bv_const(tm_, mc.sig.bits, 0);
+        } else if (initial_read_ == Initial_read::unknown && x_dontcare_) {
+          // Initial contents define the array, not its latency-1 output
+          // register. That output is undefined until its first actual read.
+          carried_xm = tm_.mkTerm(Kind::BITVECTOR_NOT, {bv_const(tm_, mc.sig.bits, 0)});
+        }
+      }
       if (fresh.isNull()) {
         // BLACKBOXED memory (formal.ignore_memory): mint the dout WITHOUT the
         // per-design `prefix`, so REF and IMPL get the SAME symbol -- the
@@ -2315,7 +2371,7 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         }
       }
       if (!dout_dpin.is_invalid()) {
-        pin2val[pinkey(dout_dpin)] = Val{fresh, mc.sig.bits, sgn};
+        pin2val[pinkey(dout_dpin)] = Val{fresh, mc.sig.bits, sgn, sync_threaded ? carried_xm : Term{}};
       }
       // ordering="none" (the `undef` matrix): this read has no defined value in
       // a collision window. Mint a deferred X bit-plane symbol NOW and tie it to
@@ -2585,7 +2641,8 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         continue;
       }
       if (phased && op == Ntype_op::Latch) {
-        if (!is_transparent_latch(node)) {
+        const bool preview_forward = forwards_preview(node);
+        if (!is_transparent_latch(node) && !preview_forward) {
           continue;  // scheduled state endpoint, cut with the flops above
         }
         if (done.contains(nodekey(node))) {
@@ -2602,8 +2659,13 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           }
           break;  // that `break` left the WHOLE walk
         }
+        if (preview_forward) {
+          if (auto arm = transparent_arm(node); !arm.is_invalid()) {
+            dd = arm;
+          }
+        }
         if (dd.is_invalid()) {
-          return fail("always-transparent latch '" + gu::debug_name(node) + "' has no din");
+          return fail("transparent latch '" + gu::debug_name(node) + "' has no din");
         }
         bool bok = true;
         Val  dv  = driver_val(dd, bok);
@@ -2616,7 +2678,22 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           qw = 1;
         }
         Val qv{fit(dv, qw), qw, !gu::is_unsign(qp)};
-        qv.x_mask           = fit_x_mask_to(tm_, dv, qw);
+        qv.x_mask = fit_x_mask_to(tm_, dv, qw);
+        if (preview_forward) {
+          const auto& pe = phase_plan_->ep.at(box_node_key(node));
+          if (pe.guard_key.empty() || pe.live_guard) {
+            return fail_unsupported("gated-off latch forwarding has no sampled clock guard");
+          }
+          const Val  held    = seed_state(pe.guard_key, 1, false);
+          const Term enabled = tm_.mkTerm(Kind::DISTINCT, {held.term, bv_const(tm_, 1, 0)});
+          const Val& stored  = deferred_preview_state.at(pinkey(qp));
+          qv.term            = tm_.mkTerm(Kind::ITE, {enabled, stored.term, qv.term});
+          if (!stored.x_mask.isNull() || !qv.x_mask.isNull()) {
+            const Term stored_x = stored.x_mask.isNull() ? bv_const(tm_, qw, 0) : stored.x_mask;
+            const Term live_x   = qv.x_mask.isNull() ? bv_const(tm_, qw, 0) : qv.x_mask;
+            qv.x_mask           = tm_.mkTerm(Kind::ITE, {enabled, stored_x, live_x});
+          }
+        }
         pin2val[pinkey(qp)] = qv;
         done.insert(nodekey(node));
         progress = true;
@@ -4611,38 +4688,6 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     // free data input once per microstep -- measured as latch outputs stuck at
     // `x` under iverilog, and as a retyped flop with no clock at all.
     const bool absorb_gate     = pe != nullptr && pe->clock_role_latch;
-    // Hier-safe transparent arm: latch_contract's version resolves class-local
-    // pins, which carry no hier position and so would miss pin2val for a latch
-    // inside an instance.
-    auto       transparent_arm = [&](const hhds::Occurrence_node& n) -> hhds::Occurrence_pin {
-      auto q  = n.get_driver_pin(0);
-      auto dd = hier_sink_driver(n, "din");
-      if (dd.is_invalid() || dd.is_const() || gu::is_graph_input_pin(dd)) {
-        return {};
-      }
-      auto mux = dd.get_master_node();
-      if (gu::type_op_of(mux) != Ntype_op::Mux) {
-        return {};  // raw yosys D/EN shape: `din` IS already the transparent value
-      }
-      bool                 has_q_arm = false;
-      hhds::Occurrence_pin other;
-      for (const auto& sink : mux.inp_sorted_pins()) {
-        if (sink.get_port_id() == 0) {
-          continue;  // the selector is the gate, not an arm
-        }
-        for (const auto& driver : sink.get_driver_pins()) {
-          if (!driver.is_invalid() && driver.get_class_index() == q.get_class_index()) {
-            has_q_arm = true;
-          } else if (other.is_invalid()) {
-            other = driver;
-          }
-        }
-      }
-      if (has_q_arm) {
-        return other;
-      }
-      return {};
-    };
 
     // din: the value the FIRST stage latches each cycle (no enable/reset yet).
     bool                 has_din = false;
@@ -4709,14 +4754,16 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
     bool has_reset = false;
     Term rst_hot;
     Term initv;
-    if (auto rst_d = hier_sink_driver(node, "reset_pin"); !rst_d.is_invalid() && !rst_d.is_const()) {
+    if (auto rst_d = hier_sink_driver(node, "reset_pin"); !rst_d.is_invalid() && !rst_d.is_known_false()) {
       Val rv = driver_val(rst_d, ok);
       if (!ok) {
         return fail("flop '" + gu::debug_name(node) + "' reset not encodable");
       }
       Term rbit     = tm_.mkTerm(Kind::DISTINCT, {rv.term, bv_const(tm_, rv.width, 0)});
       bool negreset = false;
-      if (auto neg_d = hier_sink_driver(node, "negreset"); neg_d.is_const()) {
+      // Constant reset pins are asserted/disabled predicates, as in cgen;
+      // polarity applies only to a dynamically driven reset level.
+      if (auto neg_d = hier_sink_driver(node, "negreset"); !rst_d.is_const() && neg_d.is_const()) {
         negreset = !gu::const_of(neg_d).is_known_false();
       }
       rst_hot = negreset ? tm_.mkTerm(Kind::NOT, {rbit}) : rbit;
@@ -4790,11 +4837,11 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
             acc      = acc.isNull() ? hot : tm_.mkTerm(Kind::AND, {acc, hot});
           }
           commits = acc;
-        } else if (single_step()) {
-          // P == 1: one encoder step IS the reference edge, so the guard is the
-          // enable held at that edge -- exactly M9's fold, but built from the
-          // schedule's CANONICALIZED chain, so a gate of a gate contributes
-          // `en0 & en1` instead of refusing as "clk_ref is itself derived".
+        } else if (single_step() || microstep_ == static_cast<int>(pe->guard_sample)) {
+          // A consumer in the sampling microstep needs the value being sampled
+          // now, not the previous period's guard state. P == 1 likewise reads
+          // the live enable at its reference edge. The canonical chain keeps
+          // every enable of a nested gate.
           commits = guard_term(pe->guard_key, ok);
           if (!ok) {
             return fail_unsupported("flop '" + gu::debug_name(node)
@@ -4809,6 +4856,13 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
           const Val gv = seed_state(pe->guard_key, 1, false);
           commits      = tm_.mkTerm(Kind::DISTINCT, {gv.term, bv_const(tm_, 1, 0)});
         }
+      }
+      if (commit_now && pe != nullptr && !pe->window_guard_key.empty()) {
+        const Term live = guard_term(pe->window_guard_key, ok);
+        if (!ok || live.isNull()) {
+          return fail_unsupported("latch '" + gu::debug_name(node) + "' has no encodable data window qualifier");
+        }
+        commits = commits.isNull() ? live : tm_.mkTerm(Kind::AND, {commits, live});
       }
     } else if (auto clk_d = hier_sink_driver(node, "clock_pin"); !clk_d.is_invalid()) {
       // Dispatch on the clock's SHAPE, with pure width adjustment peeled off
@@ -6003,9 +6057,16 @@ Encoded Encoder::encode(hhds::Graph* g, const Io_name_map<Val>* shared_inputs, s
         // the plane would appear a cycle early or vanish. `is_signed` stays false:
         // the consumer only re-seeds this map and phase 1 re-derives the sign
         // from the dout pin.
-        if (k < mc.rd_xmask.size() && !mc.rd_xmask[k].isNull()) {
-          Term held = (k < mc.rd_xcur.size() && !mc.rd_xcur[k].isNull()) ? mc.rd_xcur[k] : bv_const(tm_, mc.sig.bits, 0);
-          nv.x_mask = rd_commit.isNull() ? mc.rd_xmask[k] : tm_.mkTerm(Kind::ITE, {rd_commit, mc.rd_xmask[k], held});
+        Term       read_x = k < mc.rd_xmask.size() ? mc.rd_xmask[k] : Term{};
+        Term       held_x = k < mc.rd_xcur.size() ? mc.rd_xcur[k] : Term{};
+        if (!read_x.isNull() || !held_x.isNull()) {
+          if (read_x.isNull()) {
+            read_x = bv_const(tm_, mc.sig.bits, 0);
+          }
+          if (held_x.isNull()) {
+            held_x = bv_const(tm_, mc.sig.bits, 0);
+          }
+          nv.x_mask = rd_commit.isNull() ? read_x : tm_.mkTerm(Kind::ITE, {rd_commit, read_x, held_x});
         }
         out.next_read[mc.rd_key[k]] = nv;
       } else {

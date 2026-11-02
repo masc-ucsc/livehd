@@ -40,20 +40,20 @@ if ! grep -q "uPass - add assert" "${OUT_FILE}"; then
   exit 3
 fi
 
-# The reduced order WITH tolg enabled is still a user-reachable configuration, so
-# pin that it fails HONESTLY rather than crashing or silently emitting hardware.
-# (Adding upass.tolg=false above fixed the test but would otherwise have deleted
-# the only coverage of this path.) `cassert` is an elaboration check under the
-# 2026-07-25 ruling: with the folding passes omitted from the order it cannot be
-# discharged, and the contract is a DIRECTED diagnostic naming that, not silence.
-# NB a HARDWARE emit is required: the cassert seam fires at tolg, and "reaching
-# tolg is what says this compilation is producing hardware". Asking only for
-# diagnostics is an LNAST-only flow, which the ruling explicitly exempts — so
-# that spelling exits 0 and would make this case vacuous.
+# A reduced order must still reject a runtime-dependent elaboration assertion.
+# Keep this distinct from simple.prp: its untyped comb is a template whose
+# constant calls can fold once SSA has populated its I/O metadata.
+RUNTIME_PRP="${TEST_TMPDIR}/runtime_cassert.prp"
+cat >"${RUNTIME_PRP}" <<'PRP'
+pub comb runtime_cassert(a:U8) -> (y:U8) {
+  cassert(a == 1)
+  y = a
+}
+PRP
 ERR_OUT="${TEST_TMPDIR}/upass_dependency_tolg.out"
-if "${LHD}" compile "${PRP_FILE}" --set upass.order=assert --workdir "${TEST_TMPDIR}/w2" \
+if "${LHD}" compile "${RUNTIME_PRP}" --set upass.order=assert --workdir "${TEST_TMPDIR}/w2" \
      --emit "verilog:${TEST_TMPDIR}/w2.v" >"${ERR_OUT}" 2>&1; then
-  echo "FAIL: a reduced upass.order that cannot fold a cassert must not exit 0"
+  echo "FAIL: a runtime-dependent cassert must not exit 0"
   cat "${ERR_OUT}"
   exit 4
 fi

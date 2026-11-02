@@ -424,6 +424,13 @@ void cleanup_dead_nodes(hhds::Graph* g) {
 // LSB-first (as tile_pack_lanes leaves it) and the cell is MSB-first, hence the
 // reverse indexing.
 void emit_concat(hhds::Graph& g, hhds::Node_class& node, const std::vector<Pack_lane>& tiled) {
+  const auto output = node.create_driver_pin(0);
+  // The lane rewrite preserves the value. Bitwidth may already have proved
+  // that leading padding is zero, so its settled range remains valid even
+  // when the explicit lane windows occupy more bits. A structural capacity
+  // alone is not such a proof; use only the active range analysis here.
+  const int  proven_width
+      = livehd::cprop_value::active && livehd::cprop_value::active->range ? livehd::cprop_value::active->range(output) : -1;
   clear_all_sinks(node);
   livehd::graph_util::set_type_op(node, Ntype_op::Concat);
 
@@ -455,9 +462,11 @@ void emit_concat(hhds::Graph& g, hhds::Node_class& node, const std::vector<Pack_
     total += w;
   }
 
-  // The explicit lane table establishes this finite result capacity.
+  // Keep a tighter settled bound: restoring the full lane sum after masks
+  // were removed can otherwise widen a shared producer past its consumers'
+  // declared Concat windows.
   auto out = node.create_driver_pin(0);
-  livehd::graph_util::set_ubits(out, total);
+  livehd::graph_util::set_ubits(out, proven_width >= 0 ? std::min(total, std::max(1, proven_width)) : total);
   livehd::cprop_value::remember(node);
 }
 

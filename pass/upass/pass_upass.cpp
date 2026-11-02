@@ -329,10 +329,6 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   capture_opt("dce");     // dce:mark -> runner skips the post-DCE staging rebuild (lg-only flows)
   capture_opt("unroll");  // compile.unroll: one representation switch, false by default
 
-  if (!upass_order.empty()) {
-    return;
-  }
-
   auto verifier_txt = get_label("verifier");
   bool do_verifier  = verifier_txt != "false" && verifier_txt != "0";
 
@@ -376,7 +372,7 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
   auto prov_txt             = get_label("preserve_param_provenance");
   preserve_param_provenance = prov_txt == "true" || prov_txt == "1";
   if (preserve_param_provenance && run_tolg) {
-    livehd::diag::err("pass.upass", "provenance-needs-lnast", "config")
+    livehd::diag::err("pass.upass", "provenance-needs-lnast", "unsupported")
         .msg("upass.preserve_param_provenance=true cannot be combined with tolg:1")
         .hint("symbolic pkg.PARAM refs do not lower to hardware; emit pyrope in a separate invocation")
         .emit();
@@ -391,6 +387,12 @@ Pass_upass::Pass_upass(const Eprp_var& var) : Pass("pass.upass", var) {
 
   auto typecheck_txt = get_label("typecheck");
   bool do_typecheck  = typecheck_txt != "false" && typecheck_txt != "0";
+
+  // An explicit dispatch order still needs structural option initialization:
+  // lambda extraction always runs, and call binding consumes SSA I/O metadata.
+  if (!upass_order.empty()) {
+    return;
+  }
 
   // Generalized warn-and-drop over the DECLARED pass dependency
   // edges (assert→constprop, typecheck→attributes, constprop→{attributes,

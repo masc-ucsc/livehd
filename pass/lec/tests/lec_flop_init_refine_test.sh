@@ -31,6 +31,9 @@ V
 }
 flop f_none "" "if (we) r <= d;"
 flop f_init "initial r = 8'h5a;" "if (we) r <= d;"
+flop f_init_other "initial r = 8'ha5;" "if (we) r <= d;"
+flop f_overwrite_none "" "r <= d;"
+flop f_overwrite_init "initial r = 8'h5a;" "r <= d;"
 flop f_rst "" "if (reset) r <= 8'h0; else if (we) r <= d;"
 flop f_rst_bug "" "if (reset) r <= 8'h0; else if (we) r <= d ^ 8'h01;"
 # reset to a value the inputs choose: the reference IS initialized by reset
@@ -67,15 +70,60 @@ assert verdict.startswith("proven-") if want == "proven-any" else verdict == wan
 PYRESULT
   echo "ok: $tag -> $expected"
 }
+# A reset tied inactive in a child is not a reset prologue for its state.
+# Its power-on value must survive hierarchy and be checked before the first write.
+for value in 90 165; do
+  cat > "$WORK/tied_$value.v" <<VRTL
+module leaf(input clock, input reset, input [7:0] d, output [7:0] q);
+  reg [7:0] r = $value;
+  always @(posedge clock) if (reset) r <= $value; else r <= d;
+  assign q = r;
+endmodule
+module top(input clock, input [7:0] d, output [7:0] q);
+  leaf u(clock, 1'b0, d, q);
+endmodule
+VRTL
+done
+# Array initial contents do not initialize the registered read output. Its
+# first value is undefined; a disabled read must hold that knowledge, and the
+# first enabled read must expose real differences between initialized words.
+for last in 4 5; do
+  mkdir -p "$WORK/read_$last"
+  cat > "$WORK/read_$last/top.prp" <<PROM
+pub mod top(en:Bool, raddr:U2) -> (q:U4@[1]) {
+  mut mem = (
+    const addr = (raddr), const bits = 4, const size = 4,
+    const din = (0), const enable = (en), const fwd = false,
+    const \`type\` = 1, const wensize = 1, const rdport = (1),
+    const initial = (1, 2, 3, $last),
+  )
+  mut res = __memory(mem)
+  q = res[0]
+}
+PROM
+done
 V=verilog:$WORK
 # The induction step cannot see a reset-only-on-one-side pair (a mid-run reset
 # would separate them), so the refinements come from BMC: PROVEN-bounded.
 check flop_none_init "$V/f_none.v" "$V/f_init.v" proven-any
 check flop_none_rst "$V/f_none.v" "$V/f_rst.v" proven-any
 check flop_init_none "$V/f_init.v" "$V/f_none.v" refuted-cex
+check flop_init_same "$V/f_init.v" "$V/f_init.v" proven-any
+check flop_init_other "$V/f_init.v" "$V/f_init_other.v" refuted-cex
+check flop_zero_init "$V/f_none.v" "$V/f_init.v" refuted-cex --set formal.lec.gold_x=zero
+# An unconditional first write must not erase the power-on mismatch before
+# the BMC window, including an explicitly zero-filled uninitialized reference.
+check flop_overwrite_init_none "$V/f_overwrite_init.v" "$V/f_overwrite_none.v" refuted-cex --set formal.engine=bmc
+check flop_overwrite_zero_init "$V/f_overwrite_none.v" "$V/f_overwrite_init.v" refuted-cex --set formal.engine=bmc --set formal.lec.gold_x=zero
+check flop_tied_init_same "$V/tied_90.v" "$V/tied_90.v" proven-any --set formal.engine=bmc --set formal.lec.hier=false
+check flop_tied_init_differs "$V/tied_90.v" "$V/tied_165.v" refuted-cex --set formal.engine=bmc --set formal.lec.hier=false
 check flop_rst_none "$V/f_rst.v" "$V/f_none.v" refuted-cex
 check flop_none_rst_bug "$V/f_none.v" "$V/f_rst_bug.v" refuted-cex
 check flop_rstin_rst "$V/f_rst_in.v" "$V/f_rst.v" refuted-cex
+check read_initial_same "$WORK/read_4/top.prp" "$WORK/read_4/top.prp" proven-any --set formal.engine=bmc
+check read_initial_differs "$WORK/read_4/top.prp" "$WORK/read_5/top.prp" refuted-cex --set formal.engine=bmc
+check read_initial_zero_same "$WORK/read_4/top.prp" "$WORK/read_4/top.prp" proven-any --set formal.engine=bmc --set formal.lec.gold_x=zero
+check read_initial_zero_differs "$WORK/read_4/top.prp" "$WORK/read_5/top.prp" refuted-cex --set formal.engine=bmc --set formal.lec.gold_x=zero
 check mem_nil_rst "$WORK/m_nil/top.prp" "$WORK/m_rst/top.prp" proven-any
 check mem_rst_nil "$WORK/m_rst/top.prp" "$WORK/m_nil/top.prp" refuted-cex
 check mem_nil_rst_bug "$WORK/m_nil/top.prp" "$WORK/m_rst_bug/top.prp" refuted-cex

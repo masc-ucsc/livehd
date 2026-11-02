@@ -27,6 +27,7 @@
 # 3.9-clean (no `X | None`, no match).
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import glob
 import json
 import os
@@ -155,6 +156,7 @@ def check_class_dump(prof, classes, roots, what, all_idle=False):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('-i', '--input', required=True, help='the unknown_tb_literal_once fixture')
+    ap.add_argument("--part", choices=("all", "fill", "profile"), default="all")
     args = ap.parse_args()
     prp = os.path.abspath(args.input)
     lhd = find_lhd()
@@ -179,18 +181,24 @@ def main():
     if rc != 0:
         print(out)
         sys.exit('setup failed')
-    rc, out = setup(lhd, prp, wz, ['--set', 'sim.unknown_zero=true'])
-    if rc != 0:
-        print(out)
-        sys.exit('setup (unknown_zero=true) failed')
+    if args.part != "profile":
+        rc, out = setup(lhd, prp, wz, ['--set', 'sim.unknown_zero=true'])
+        if rc != 0:
+            print(out)
+            sys.exit('setup (unknown_zero=true) failed')
     with open(os.path.join(wr, 'sim', 'drv.cpp')) as f:
         drv_src = f.read()
     check('// driver-set-parser: 1' in drv_src and '// tune-sampler: 1' in drv_src, 'driver carries the sim.tune markers')
     check(re.search(r'__lhd_unknown_literal<65, \d+ull>\("0ub\?{64}"\)', drv_src) is not None,
           'a testbench `?` literal goes through the once-per-program helper')
     check('_tb_unknown_literals = 1;' in drv_src, 'the distinct testbench `?` literal count is baked (two sites, one literal)')
-    exe_r = build(os.path.join(wr, 'sim'), incs)
-    exe_z = build(os.path.join(wz, 'sim'), incs)
+    # Independent host builds can share the two-worker budget without compiling
+    # the two variants serially. Each still uses the same compiler and flags.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        random_build = pool.submit(build, os.path.join(wr, 'sim'), incs)
+        zero_build = pool.submit(build, os.path.join(wz, 'sim'), incs) if args.part != 'profile' else None
+        exe_r = random_build.result()
+        exe_z = zero_build.result() if zero_build else None
     classes = support_classes(os.path.join(wr, 'sim'))
     check(classes is not None, 'the color root has a sim.tune support TU')
 
@@ -206,85 +214,87 @@ def main():
     check(re.fullmatch(r'[0-9a-f]{16}', r_off.get('end_digest', '')) is not None, 'end_digest is 16 hex digits')
     check('profile' not in r_off, 'no profile object when profiling is off')
 
-    # ---- run-time zero fill == generated zero fill ----
-    rj_z1, rj_z2 = os.path.join(tmp, 'z_rt.json'), os.path.join(tmp, 'z_baked.json')
-    rc1, out_z1, _ = run(exe_r, ['--set', 'sim.unknown_zero=true'], rj_z1)
-    rc2, out_z2, _ = run(exe_z, [], rj_z2)
-    check(rc1 == 0 and rc2 == 0, 'zero fill (run-time and baked) passes')
-    check(out_z1 == out_z2, 'run-time `--set sim.unknown_zero=true` stdout == a sim.unknown_zero=true build')
-    z1, z2 = row(rj_z1), row(rj_z2)
-    check(z1['end_digest'] == z2['end_digest'] and z1['out_digest'] == z2['out_digest'],
-          'run-time and baked zero fill give the same end/out digests')
-    rc, _, err = run(exe_z, ['--set', 'sim.unknown_zero=false'])
-    check(rc == 2 and 'sim.unknown_zero=true' in err, '`--set sim.unknown_zero=false` on a baked-zero build is refused')
+    if args.part != "profile":
+        # ---- run-time zero fill == generated zero fill ----
+        rj_z1, rj_z2 = os.path.join(tmp, 'z_rt.json'), os.path.join(tmp, 'z_baked.json')
+        rc1, out_z1, _ = run(exe_r, ['--set', 'sim.unknown_zero=true'], rj_z1)
+        rc2, out_z2, _ = run(exe_z, [], rj_z2)
+        check(rc1 == 0 and rc2 == 0, 'zero fill (run-time and baked) passes')
+        check(out_z1 == out_z2, 'run-time `--set sim.unknown_zero=true` stdout == a sim.unknown_zero=true build')
+        z1, z2 = row(rj_z1), row(rj_z2)
+        check(z1['end_digest'] == z2['end_digest'] and z1['out_digest'] == z2['out_digest'],
+              'run-time and baked zero fill give the same end/out digests')
+        rc, _, err = run(exe_z, ['--set', 'sim.unknown_zero=false'])
+        check(rc == 2 and 'sim.unknown_zero=true' in err, '`--set sim.unknown_zero=false` on a baked-zero build is refused')
 
-    # ---- profiling: no simulated value changes; raw file; fixed-stride repro ----
-    counts = []
-    for i in (1, 2):
-        pdir = os.path.join(tmp, 'prof%d' % i)
-        rj_p = os.path.join(tmp, 'r_on%d.json' % i)
-        rc, out_p, _ = run(exe_r, ['--set', 'sim.tune.profile=on', '--set', 'sim.tune.profile_stride=64',
-                                   '--set=sim.tune.profile_dir=' + pdir], rj_p)
-        check(rc == 0 and out_p == out_r, 'profiling run %d: same verdict and stdout' % i)
-        p = row(rj_p)
-        check(p['end_digest'] == r_off['end_digest'] and p['out_digest'] == r_off['out_digest'],
-              'profiling run %d: digests equal the unprofiled run' % i)
-        prof = p.get('profile') or {}
-        check(prof.get('pairs', 0) > 0, 'profiling run %d samples pairs (%s)' % (i, prof.get('pairs')))
-        check_weights(prof, 'profiling run %d' % i)
-        check('class_dump' not in prof, 'profiling run %d: sim_tests.json rows carry no class_dump' % i)
-        # `acc += a` with `a` a nonzero random draw: the accumulator's classes
-        # are active, so no weight reads fully idle.
-        wc = (prof.get('weights') or {}).get('cost') or {}
-        check(wc.get('idle', 0) < prof.get('pairs', 0) * wc.get('total', 0),
-              'profiling run %d: the moving accumulator is not idle under the cost weight' % i)
-        counts.append((prof.get('pairs'), prof.get('quiescent_pairs'), json.dumps(prof.get('support')),
-                       json.dumps(prof.get('walker')), json.dumps(prof.get('weights'), sort_keys=True),
-                       json.dumps([o.get('active_pairs') for o in prof.get('occ', [])])))
-        raws = glob.glob(os.path.join(pdir, '*.json'))
-        check(len(raws) == 1, 'profiling run %d writes one raw run file' % i)
+    if args.part != "fill":
+        # ---- profiling: no simulated value changes; raw file; fixed-stride repro ----
+        counts = []
+        for i in (1, 2):
+            pdir = os.path.join(tmp, 'prof%d' % i)
+            rj_p = os.path.join(tmp, 'r_on%d.json' % i)
+            rc, out_p, _ = run(exe_r, ['--set', 'sim.tune.profile=on', '--set', 'sim.tune.profile_stride=64',
+                                       '--set=sim.tune.profile_dir=' + pdir], rj_p)
+            check(rc == 0 and out_p == out_r, 'profiling run %d: same verdict and stdout' % i)
+            p = row(rj_p)
+            check(p['end_digest'] == r_off['end_digest'] and p['out_digest'] == r_off['out_digest'],
+                  'profiling run %d: digests equal the unprofiled run' % i)
+            prof = p.get('profile') or {}
+            check(prof.get('pairs', 0) > 0, 'profiling run %d samples pairs (%s)' % (i, prof.get('pairs')))
+            check_weights(prof, 'profiling run %d' % i)
+            check('class_dump' not in prof, 'profiling run %d: sim_tests.json rows carry no class_dump' % i)
+            # `acc += a` with `a` a nonzero random draw: the accumulator's classes
+            # are active, so no weight reads fully idle.
+            wc = (prof.get('weights') or {}).get('cost') or {}
+            check(wc.get('idle', 0) < prof.get('pairs', 0) * wc.get('total', 0),
+                  'profiling run %d: the moving accumulator is not idle under the cost weight' % i)
+            counts.append((prof.get('pairs'), prof.get('quiescent_pairs'), json.dumps(prof.get('support')),
+                           json.dumps(prof.get('walker')), json.dumps(prof.get('weights'), sort_keys=True),
+                           json.dumps([o.get('active_pairs') for o in prof.get('occ', [])])))
+            raws = glob.glob(os.path.join(pdir, '*.json'))
+            check(len(raws) == 1, 'profiling run %d writes one raw run file' % i)
+            if raws:
+                with open(raws[0]) as f:
+                    raw = json.load(f)
+                check(raw.get('schema') == 'lhd-sim-tune-raw-1', 'raw file schema')
+                check(raw.get('fill') == 'random' and raw.get('tb_unknown_literals') == 1, 'raw file: fill + tb literal count')
+                check(len(raw.get('roots', [])) == 1 and raw['roots'][0].get('var') == 'dut', 'raw file: one DUT root')
+                check(raw.get('selected') == ['unknown_tb_literal_once.drawn_once'], 'raw file: ordered selection')
+                rprof = raw['tests'][0].get('profile', {})
+                check(rprof.get('pairs') == prof.get('pairs'), 'raw file row == result row')
+                check(rprof.get('weights') == prof.get('weights'), 'raw file weights == result row weights')
+                check_class_dump(rprof, classes, [r.get('module') for r in raw.get('roots', [])], 'profiling run %d' % i)
+        check(counts[0] == counts[1], 'fixed stride: the activity counts reproduce exactly')
+
+        # Zero fill: `a` is 0 every cycle, so the accumulator never moves -- every
+        # sampled pair is quiescent, inputs included.
+        rj_q = os.path.join(tmp, 'r_q.json')
+        rc, _, _ = run(exe_r, ['--set', 'sim.unknown_zero=true', '--set', 'sim.tune.profile=on',
+                               '--set', 'sim.tune.profile_stride=64', '--set', 'sim.tune.profile_dir=' + os.path.join(tmp, 'profq')],
+                       rj_q)
+        q = row(rj_q).get('profile') or {}
+        check(rc == 0 and q.get('pairs', 0) > 0 and q.get('quiescent_pairs') == q.get('pairs'),
+              'zero fill: every sampled pair is quiescent (%s/%s)' % (q.get('quiescent_pairs'), q.get('pairs')))
+        check_weights(q, 'zero fill', all_idle=True)
+        raws = glob.glob(os.path.join(tmp, 'profq', '*.json'))
         if raws:
             with open(raws[0]) as f:
-                raw = json.load(f)
-            check(raw.get('schema') == 'lhd-sim-tune-raw-1', 'raw file schema')
-            check(raw.get('fill') == 'random' and raw.get('tb_unknown_literals') == 1, 'raw file: fill + tb literal count')
-            check(len(raw.get('roots', [])) == 1 and raw['roots'][0].get('var') == 'dut', 'raw file: one DUT root')
-            check(raw.get('selected') == ['unknown_tb_literal_once.drawn_once'], 'raw file: ordered selection')
-            rprof = raw['tests'][0].get('profile', {})
-            check(rprof.get('pairs') == prof.get('pairs'), 'raw file row == result row')
-            check(rprof.get('weights') == prof.get('weights'), 'raw file weights == result row weights')
-            check_class_dump(rprof, classes, [r.get('module') for r in raw.get('roots', [])], 'profiling run %d' % i)
-    check(counts[0] == counts[1], 'fixed stride: the activity counts reproduce exactly')
+                rawq = json.load(f)
+            check_class_dump(rawq['tests'][0].get('profile', {}), classes, [r.get('module') for r in rawq.get('roots', [])],
+                             'zero fill', all_idle=True)
+        else:
+            check(False, 'zero fill writes a raw run file')
 
-    # Zero fill: `a` is 0 every cycle, so the accumulator never moves -- every
-    # sampled pair is quiescent, inputs included.
-    rj_q = os.path.join(tmp, 'r_q.json')
-    rc, _, _ = run(exe_r, ['--set', 'sim.unknown_zero=true', '--set', 'sim.tune.profile=on',
-                           '--set', 'sim.tune.profile_stride=64', '--set', 'sim.tune.profile_dir=' + os.path.join(tmp, 'profq')],
-                   rj_q)
-    q = row(rj_q).get('profile') or {}
-    check(rc == 0 and q.get('pairs', 0) > 0 and q.get('quiescent_pairs') == q.get('pairs'),
-          'zero fill: every sampled pair is quiescent (%s/%s)' % (q.get('quiescent_pairs'), q.get('pairs')))
-    check_weights(q, 'zero fill', all_idle=True)
-    raws = glob.glob(os.path.join(tmp, 'profq', '*.json'))
-    if raws:
-        with open(raws[0]) as f:
-            rawq = json.load(f)
-        check_class_dump(rawq['tests'][0].get('profile', {}), classes, [r.get('module') for r in rawq.get('roots', [])],
-                         'zero fill', all_idle=True)
-    else:
-        check(False, 'zero fill writes a raw run file')
-
-    # ---- the `--set` key classes ----
-    # the binary was generated with the defaults (dirty on): equal is accepted, different refused
-    for kv, want in (('sim.tune.dirty=on', 0), ('sim.tune.dirty=auto', 0), ('sim.tune.dirty=off', 2),
-                     ('sim.tune.live_words=0', 2), ('lhd.jobs=8', 0), ('sim.tune.file=/nope', 0),
-                     ('compile.cgen.backend=llvm', 2), ('sim.color_dirty=true', 2), ('sim.tune.profile=maybe', 2),
-                     ('lhd.seed=7', 0), ('sim.init_zero=true', 0)):
-        rc, _, err = run(exe_r, ['--set', kv])
-        check(rc == want, '`--set %s` -> exit %d (got %d%s)' % (kv, want, rc, (': ' + err.strip()) if rc != want else ''))
-    rc, _, err = run(exe_r, ['--set', 'sim.tune.profile=on', '--probe', 'dut.r', '--set', 'sim.tune.profile_dir=' + os.path.join(tmp, 'pp')])
-    check('never profiled' in err and not os.path.exists(os.path.join(tmp, 'pp')), 'an observation run is never profiled')
+        # ---- the `--set` key classes ----
+        # the binary was generated with the defaults (dirty on): equal is accepted, different refused
+        for kv, want in (('sim.tune.dirty=on', 0), ('sim.tune.dirty=auto', 0), ('sim.tune.dirty=off', 2),
+                         ('sim.tune.live_words=0', 2), ('lhd.jobs=8', 0), ('sim.tune.file=/nope', 0),
+                         ('compile.cgen.backend=llvm', 2), ('sim.color_dirty=true', 2), ('sim.tune.profile=maybe', 2),
+                         ('lhd.seed=7', 0), ('sim.init_zero=true', 0)):
+            rc, _, err = run(exe_r, ['--set', kv])
+            check(rc == want, '`--set %s` -> exit %d (got %d%s)' % (kv, want, rc, (': ' + err.strip()) if rc != want else ''))
+        rc, _, err = run(exe_r, ['--set', 'sim.tune.profile=on', '--probe', 'dut.r', '--set', 'sim.tune.profile_dir=' + os.path.join(tmp, 'pp')])
+        check('never profiled' in err and not os.path.exists(os.path.join(tmp, 'pp')), 'an observation run is never profiled')
 
     if FAILS:
         print('%d check(s) FAILED' % len(FAILS))

@@ -1895,6 +1895,22 @@ void graph_pipeline_and_emits(Options& opts, Result& res, Eprp_var& var, const s
             }
           }
         }
+        // A partial rebuild can regenerate a base whose unchanged callers
+        // still instantiate a cached specialization. It remains a dependency,
+        // just as before specialization in a cold compile. Use explicit clone
+        // provenance rather than interpreting generated-looking user names.
+        absl::flat_hash_set<std::string> specialized_origins;
+        for (const auto* graph : instantiated) {
+          const auto origin = graph->get_input_node().attr(livehd::attrs::specialization_origin);
+          if (origin.has()) {
+            specialized_origins.insert(origin.get());
+          }
+        }
+        for (const auto& graph : design) {
+          if (specialized_origins.contains(std::string(graph->get_name()))) {
+            instantiated.insert(graph.get());
+          }
+        }
         // A user-selected top (--top / lec --ref-top / --impl-top) is a root even
         // when another unit instantiates it: the Pyrope reader keeps every unit,
         // and the top is picked only later (pick_top_graph). Without this, a

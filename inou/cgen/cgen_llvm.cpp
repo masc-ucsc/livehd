@@ -12,6 +12,7 @@
 #include <optional>
 #include <string_view>
 #include <system_error>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 
@@ -125,6 +126,52 @@ public:
     }
   }
 };
+
+// Recover a slice only through operations that preserve every requested bit.
+// The same representation lets concat join adjacent lanes and lets scalar mux
+// instances share one word select after hierarchy has been expanded.
+struct Integer_slice {
+  llvm::Value* source;
+  uint32_t     lo;
+  uint32_t     width;
+};
+
+Integer_slice integer_slice(llvm::Value* source, uint32_t width) {
+  uint32_t lo = 0;
+  // Only peel operations that preserve the requested bits. In particular,
+  // do not turn an extension's high zero/sign bits into bits of its source.
+  while (true) {
+    // Shift lowering retains an explicit oversized-count select until the
+    // optimization pipeline, even when its predicate is already constant.
+    if (auto* select = llvm::dyn_cast<llvm::SelectInst>(source)) {
+      if (auto* condition = llvm::dyn_cast<llvm::ConstantInt>(select->getCondition())) {
+        source = condition->isZero() ? select->getFalseValue() : select->getTrueValue();
+        continue;
+      }
+    }
+    if (auto* cast = llvm::dyn_cast<llvm::CastInst>(source)) {
+      if ((cast->getOpcode() == llvm::Instruction::Trunc || cast->getOpcode() == llvm::Instruction::ZExt
+           || cast->getOpcode() == llvm::Instruction::SExt)
+          && uint64_t{lo} + width <= cast->getOperand(0)->getType()->getIntegerBitWidth()) {
+        source = cast->getOperand(0);
+        continue;
+      }
+    }
+    if (auto* shift = llvm::dyn_cast<llvm::BinaryOperator>(source); shift && shift->getOpcode() == llvm::Instruction::LShr) {
+      if (auto* amount = llvm::dyn_cast<llvm::ConstantInt>(shift->getOperand(1))) {
+        const auto bits = amount->getValue().getLimitedValue();
+        if (bits < source->getType()->getIntegerBitWidth()
+            && uint64_t{lo} + width + bits <= source->getType()->getIntegerBitWidth()) {
+          lo     += static_cast<uint32_t>(bits);
+          source  = shift->getOperand(0);
+          continue;
+        }
+      }
+    }
+    break;
+  }
+  return {source, lo, width};
+}
 
 constexpr size_t word_count(uint32_t width) { return (static_cast<size_t>(width) + 63) / 64; }
 
@@ -264,13 +311,13 @@ void short_circuit_loop_carries(llvm::Function& function) {
     auto* predecessor = binary->getParent();
     auto* merge       = predecessor->splitBasicBlock(binary->getIterator(), "carry.join");
     auto* evaluate    = llvm::BasicBlock::Create(function.getContext(), "carry.eval", &function, merge);
-    auto* branch      = llvm::BranchInst::Create(merge, evaluate);
+    auto* branch      = llvm::UncondBrInst::Create(merge, evaluate);
     for (auto* inst : slice) {
       inst->moveBefore(branch->getIterator());
     }
     const bool conjunction = binary->getOpcode() == llvm::Instruction::And;
     predecessor->getTerminator()->eraseFromParent();
-    llvm::BranchInst::Create(conjunction ? evaluate : merge, conjunction ? merge : evaluate, carry, predecessor);
+    llvm::CondBrInst::Create(carry, conjunction ? evaluate : merge, conjunction ? merge : evaluate, predecessor);
     auto* result = llvm::PHINode::Create(binary->getType(), 2, "carry.result", binary->getIterator());
     result->addIncoming(llvm::ConstantInt::get(binary->getType(), !conjunction), predecessor);
     result->addIncoming(operand, evaluate);
@@ -305,6 +352,11 @@ public:
   llvm::Value*                            changed       = nullptr;
   llvm::Value*                            owner         = nullptr;
   std::vector<llvm::Value*>               values;
+  // Values are shared only within the current block: cached selections must
+  // dominate every extracted lane, including kernels that contain loop blocks.
+  std::map<std::tuple<llvm::BasicBlock*, llvm::Value*, llvm::Value*, llvm::Value*>, llvm::Value*> word_muxes;
+  std::map<std::tuple<llvm::BasicBlock*, llvm::Value*, uint32_t, uint32_t>, llvm::Value*>         mux_words;
+  std::map<std::tuple<llvm::BasicBlock*, llvm::Value*, uint32_t>, llvm::Value*>                   mux_rotations;
   std::vector<size_t>                     input_word_offsets;
   std::vector<uint32_t>                   input_bits;
   std::vector<std::optional<Value>>       deferred_casts;
@@ -646,12 +698,7 @@ Cgen_llvm::Value Cgen_llvm::resize(Value value, uint32_t result_width, bool resu
 }
 
 Cgen_llvm::Value Cgen_llvm::concat(const std::vector<Value>& lanes) {
-  struct Slice {
-    llvm::Value* source;
-    uint32_t     lo;
-    uint32_t     width;
-  };
-  std::vector<Slice> slices;
+  std::vector<Integer_slice> slices;
   uint64_t           total = 0;
   for (const auto lane : lanes) {
     auto* source = impl_->get(lane);
@@ -662,39 +709,9 @@ Cgen_llvm::Value Cgen_llvm::concat(const std::vector<Value>& lanes) {
     if (total > llvm::IntegerType::MAX_INT_BITS) {
       return {};
     }
-    uint32_t lo = 0;
-    // Only peel operations that preserve the requested bits. In particular,
-    // do not turn an extension's high zero/sign bits into bits of its source.
-    while (true) {
-      // Shift lowering retains an explicit oversized-count select until the
-      // optimization pipeline, even when its predicate is already constant.
-      if (auto* select = llvm::dyn_cast<llvm::SelectInst>(source)) {
-        if (auto* condition = llvm::dyn_cast<llvm::ConstantInt>(select->getCondition())) {
-          source = condition->isZero() ? select->getFalseValue() : select->getTrueValue();
-          continue;
-        }
-      }
-      if (auto* cast = llvm::dyn_cast<llvm::CastInst>(source)) {
-        if ((cast->getOpcode() == llvm::Instruction::Trunc || cast->getOpcode() == llvm::Instruction::ZExt
-             || cast->getOpcode() == llvm::Instruction::SExt)
-            && uint64_t{lo} + lane.width <= cast->getOperand(0)->getType()->getIntegerBitWidth()) {
-          source = cast->getOperand(0);
-          continue;
-        }
-      }
-      if (auto* shift = llvm::dyn_cast<llvm::BinaryOperator>(source); shift && shift->getOpcode() == llvm::Instruction::LShr) {
-        if (auto* amount = llvm::dyn_cast<llvm::ConstantInt>(shift->getOperand(1))) {
-          const auto bits = amount->getValue().getLimitedValue();
-          if (bits < source->getType()->getIntegerBitWidth()
-              && uint64_t{lo} + lane.width + bits <= source->getType()->getIntegerBitWidth()) {
-            lo     += static_cast<uint32_t>(bits);
-            source  = shift->getOperand(0);
-            continue;
-          }
-        }
-      }
-      break;
-    }
+    const auto slice = integer_slice(source, lane.width);
+    source           = slice.source;
+    const auto lo    = slice.lo;
     if (!slices.empty() && slices.back().source == source && slices.back().lo == lo + lane.width) {
       slices.back().lo     = lo;
       slices.back().width += lane.width;
@@ -1070,6 +1087,98 @@ Cgen_llvm::Value Cgen_llvm::mux(Value select, Value when_false, Value when_true,
   auto* on_true   = impl_->get(when_true);
   if (condition == nullptr || on_false == nullptr || on_true == nullptr || result_width == 0) {
     return {};
+  }
+  // Module boundaries can hide a bus-wide mux from graph rewrite rules. Once
+  // those instances are expanded here, aligned scalar arms are slices of the
+  // same words. Share the selection before extracting each bit; LLVM can then
+  // keep a word mux through the whole structured tree instead of hundreds of
+  // independent bit selects. Unequal offsets/types retain ordinary lowering.
+  if (result_width == 1) {
+    const auto left        = integer_slice(on_false, 1);
+    const auto right       = integer_slice(on_true, 1);
+    const auto left_width  = left.source->getType()->getIntegerBitWidth();
+    const auto right_width = right.source->getType()->getIntegerBitWidth();
+    if (left_width == right_width && left_width > 1 && left_width <= 64) {
+      // Scalar slices can be different rotated views of a word. Align the
+      // true arm to the false arm's bit position before sharing the select.
+      // Each returned bit is unchanged; neighboring lanes with the same
+      // relative offset now reuse the whole selection, including wraparound.
+      const uint32_t delta   = (right.lo + left_width - left.lo) % left_width;
+      auto*          aligned = right.source;
+      if (delta) {
+        const auto key      = std::tuple{impl_->builder.GetInsertBlock(), right.source, delta};
+        auto [it, inserted] = impl_->mux_rotations.try_emplace(key, nullptr);
+        if (inserted) {
+          auto* low  = impl_->builder.CreateLShr(aligned, llvm::ConstantInt::get(aligned->getType(), delta));
+          auto* high = impl_->builder.CreateShl(aligned, llvm::ConstantInt::get(aligned->getType(), left_width - delta));
+          it->second = impl_->builder.CreateOr(low, high);
+        }
+        aligned = it->second;
+      }
+      const auto key      = std::tuple{impl_->builder.GetInsertBlock(), condition, left.source, aligned};
+      auto [it, inserted] = impl_->word_muxes.try_emplace(key, nullptr);
+      if (inserted) {
+        auto* enabled = impl_->builder.CreateICmpNE(condition, llvm::ConstantInt::get(condition->getType(), 0));
+        it->second    = impl_->builder.CreateSelect(enabled, aligned, left.source);
+      }
+      auto* selected = it->second;
+      if (left.lo) {
+        selected = impl_->builder.CreateLShr(selected, llvm::ConstantInt::get(selected->getType(), left.lo));
+      }
+      return impl_->remember(cast_integer(impl_->builder, selected, 1, true), 1, result_unsign);
+    }
+    uint32_t width = 64;
+    // Choose aligned machine-word chunks whose lane positions agree. This is
+    // exact for every retained bit, including packed buses with different arm
+    // offsets; no knowledge of module names or declared HDL word sizes is used.
+    while (width > 1
+           && (left.lo % width != right.lo % width || left.lo / width * width + width > left_width
+               || right.lo / width * width + width > right_width)) {
+      width /= 2;
+    }
+    if (width > 1) {
+      auto word = [&](const Integer_slice& slice) {
+        const uint32_t offset = slice.lo / width * width;
+        const auto     key    = std::tuple{impl_->builder.GetInsertBlock(), slice.source, offset, width};
+        auto [it, inserted]   = impl_->mux_words.try_emplace(key, nullptr);
+        if (inserted) {
+          auto* value = slice.source;
+          if (auto* load = llvm::dyn_cast<llvm::LoadInst>(value);
+              load && load->isSimple() && width >= 8 && std::endian::native == std::endian::little) {
+            // A packed input is a wide load. Extract the word at that load's
+            // original position so intervening stores cannot change its
+            // snapshot. Byte-sized aligned chunks need no padding bits and
+            // avoid LLVM turning selected slice offsets into wide shifts.
+            llvm::IRBuilder<> at_load(load);
+            auto*             ptr = at_load.CreateConstGEP1_64(at_load.getInt8Ty(), load->getPointerOperand(), offset / 8);
+            it->second            = at_load.CreateAlignedLoad(at_load.getIntNTy(width),
+                                                              ptr,
+                                                              llvm::commonAlignment(load->getAlign(), offset / 8),
+                                                              "mux.word");
+          } else {
+            if (offset) {
+              value = impl_->builder.CreateLShr(value, llvm::ConstantInt::get(value->getType(), offset));
+            }
+            it->second = cast_integer(impl_->builder, value, width, true);
+          }
+        }
+        return it->second;
+      };
+      auto*      left_word  = word(left);
+      auto*      right_word = word(right);
+      const auto key        = std::tuple{impl_->builder.GetInsertBlock(), condition, left_word, right_word};
+      auto [it, inserted]   = impl_->word_muxes.try_emplace(key, nullptr);
+      if (inserted) {
+        auto* enabled = impl_->builder.CreateICmpNE(condition, llvm::ConstantInt::get(condition->getType(), 0));
+        it->second    = impl_->builder.CreateSelect(enabled, right_word, left_word);
+      }
+      auto*          selected = it->second;
+      const uint32_t bit      = left.lo % width;
+      if (bit) {
+        selected = impl_->builder.CreateLShr(selected, llvm::ConstantInt::get(selected->getType(), bit));
+      }
+      return impl_->remember(cast_integer(impl_->builder, selected, 1, true), 1, result_unsign);
+    }
   }
   condition = impl_->builder.CreateICmpNE(condition, llvm::ConstantInt::get(condition->getType(), 0));
   on_false  = cast_integer(impl_->builder, on_false, result_width, when_false.unsign);
@@ -2545,7 +2654,8 @@ bool Cgen_llvm::link_bitcode_object(std::string_view host_path, const std::vecto
   pass_builder.crossRegisterProxies(loop_analyses, function_analyses, cgscc_analyses, module_analyses);
   llvm::ModulePassManager pipeline;
   pipeline.addPass(llvm::AlwaysInlinerPass());
-  pipeline.addPass(pass_builder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::Os));
+  // LLVM 23 expresses -Os as O2 plus the function optsize attributes above.
+  pipeline.addPass(pass_builder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2));
   pipeline.run(*module, module_analyses);
 
   for (auto& function : module->functions()) {

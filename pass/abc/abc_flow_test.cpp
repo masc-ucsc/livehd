@@ -2,6 +2,8 @@
 #include "abc_flow.hpp"
 
 #include <algorithm>
+#include <cstdlib>
+#include <string>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -11,6 +13,7 @@ extern "C" {
 #include "base/abc/abc.h"
 #include "base/main/main.h"
 #include "base/cmd/cmd.h"
+#include "map/scl/sclSize.h"
 }
 // clang-format on
 
@@ -57,6 +60,132 @@ protected:
     }
   }
 };
+
+TEST_F(AbcFlow, LargeFanoutBufferingPreservesEveryOutputAndDegreeLimit) {
+  // This exercises several heap levels, tied fanout priorities, and both
+  // buffer/inverter realizations. Exhaust all inputs after buffering so an
+  // inverted branch or lost output cannot pass as a mere timing improvement.
+  auto* original = Abc_NtkDup(Abc_FrameReadNtk(frame));
+  for (const bool buffers : {false, true}) {
+    Abc_FrameReplaceCurrentNetwork(frame, Abc_NtkDup(original));
+    auto* network = Abc_FrameReadNtk(frame);
+    auto* gate = Abc_ObjFanin0(Abc_NtkPo(network, 0));
+    for (int i = 0; i < 1024; ++i) {
+      auto* output = Abc_NtkCreatePo(network);
+      Abc_ObjAddFanin(output, gate);
+      const auto name = std::string("fan_") + std::to_string(i);
+      Abc_ObjAssignName(output, const_cast<char*>(name.c_str()), nullptr);
+    }
+    const int degree = buffers ? 4 : 16;
+    const auto command = plan.flow + "; unbuffer -i; buffer " + (buffers ? "-b " : "") + "-N " + std::to_string(degree);
+    ASSERT_EQ(Cmd_CommandExecute(frame, command.c_str()), 0);
+    network = Abc_FrameReadNtk(frame);
+    ASSERT_TRUE(Abc_NtkIsMappedLogic(network));
+    EXPECT_EQ(Abc_NtkPoNum(network), 1025);
+    EXPECT_GT(Abc_NtkNodeNum(network), 16);
+    Abc_Obj_t* node = nullptr;
+    int index = 0;
+    Abc_NtkForEachNode(network, node, index) {
+      EXPECT_LE(Abc_ObjFanoutNum(node), degree);
+    }
+    // ABC's inverter buffering records edge phases out of band. Materialize
+    // those phases before invoking the ordinary AIG simulator.
+    auto* concrete = Abc_SclBufferPhase(network, 0);
+    ASSERT_NE(concrete, nullptr);
+    Abc_FrameReplaceCurrentNetwork(frame, concrete);
+    ASSERT_EQ(Cmd_CommandExecute(frame, "strash"), 0);
+    network = Abc_FrameReadNtk(frame);
+    for (int pattern = 0; pattern < 4; ++pattern) {
+      int inputs[] = {pattern & 1, (pattern >> 1) & 1};
+      auto* values = Abc_NtkVerifySimulatePattern(network, inputs);
+      ASSERT_NE(values, nullptr);
+      int mismatches = 0;
+      for (int output = 0; output < Abc_NtkPoNum(network); ++output) {
+        mismatches += values[output] != (inputs[0] & inputs[1]);
+      }
+      EXPECT_EQ(mismatches, 0) << "buffers=" << buffers << " pattern=" << pattern;
+      std::free(values);
+    }
+  }
+  Abc_NtkDelete(original);
+}
+
+TEST(AbcFanin, IndexedReplacementMatchesOrdinaryPortAndPolarityUpdates) {
+  struct Graph {
+    Abc_Ntk_t* network;
+    Abc_Obj_t* old_driver;
+    Abc_Obj_t* new_driver;
+    std::vector<Abc_Obj_t*> readers;
+    explicit Graph(bool managed) {
+      network = Abc_NtkAlloc(ABC_NTK_LOGIC, ABC_FUNC_SOP, managed);
+      auto* a = Abc_NtkCreatePi(network);
+      auto* b = Abc_NtkCreatePi(network);
+      const auto create = [&] {
+        auto* node = Abc_NtkCreateNode(network);
+        node->pData = Abc_SopRegister(static_cast<Mem_Flex_t*>(network->pManFunc), "11 1\n");
+        return node;
+      };
+      old_driver = create();
+      new_driver = create();
+      for (auto* node : {old_driver, new_driver}) {
+        Abc_ObjAddFanin(node, a);
+        Abc_ObjAddFanin(node, b);
+      }
+      for (int i = 0; i < 6; ++i) {
+        auto* node = create();
+        Abc_ObjAddFanin(node, old_driver);
+        Abc_ObjAddFanin(node, i == 2 ? old_driver : b);  // parallel edge
+        readers.push_back(node);
+        Abc_ObjAddFanin(Abc_NtkCreatePo(network), node);
+      }
+      auto* output = Abc_NtkCreatePo(network);
+      Abc_ObjAddFanin(output, old_driver);
+      readers.push_back(output);
+    }
+    ~Graph() { Abc_NtkDelete(network); }
+  };
+  for (bool managed : {false, true}) {
+    for (bool inverted : {false, true}) {
+      Graph ordinary(managed), indexed(managed);
+      // First/middle/last slots, a CO, and both edges of one repeated input.
+      for (int target : {0, 3, 2, 6, 5, 1, 4, 2}) {
+        auto* object = indexed.readers[target];
+        const int slot = Vec_IntFind(&indexed.old_driver->vFanouts, object->Id);
+        ASSERT_GE(slot, 0);
+        const int size = indexed.old_driver->vFanouts.nSize;
+        const int last = Vec_IntEntry(&indexed.old_driver->vFanouts, size - 1);
+        Abc_ObjPatchFanin(ordinary.readers[target], ordinary.old_driver, Abc_ObjNotCond(ordinary.new_driver, inverted));
+        const int moved = Abc_ObjPatchFaninFast(object, indexed.old_driver, Abc_ObjNotCond(indexed.new_driver, inverted), slot);
+        EXPECT_EQ(moved, slot + 1 < size ? last : -1);
+        ASSERT_EQ(Abc_NtkObjNumMax(ordinary.network), Abc_NtkObjNumMax(indexed.network));
+        for (int id = 0; id < Abc_NtkObjNumMax(ordinary.network); ++id) {
+          auto* a = Abc_NtkObj(ordinary.network, id);
+          auto* b = Abc_NtkObj(indexed.network, id);
+          ASSERT_EQ(bool(a), bool(b));
+          if (!a) {
+            continue;
+          }
+          ASSERT_EQ(a->vFanins.nSize, b->vFanins.nSize);
+          for (int pin = 0; pin < a->vFanins.nSize; ++pin) {
+            EXPECT_EQ(Vec_IntEntry(&a->vFanins, pin), Vec_IntEntry(&b->vFanins, pin));
+          }
+          EXPECT_EQ(a->fCompl0, b->fCompl0);
+          EXPECT_EQ(a->fCompl1, b->fCompl1);
+          std::vector<int> actual, expected;
+          for (int pin = 0; pin < a->vFanouts.nSize; ++pin) {
+            expected.push_back(Vec_IntEntry(&a->vFanouts, pin));
+          }
+          for (int pin = 0; pin < b->vFanouts.nSize; ++pin) {
+            actual.push_back(Vec_IntEntry(&b->vFanouts, pin));
+          }
+          std::sort(actual.begin(), actual.end());
+          std::sort(expected.begin(), expected.end());
+          EXPECT_EQ(actual, expected);
+        }
+      }
+    }
+  }
+}
 
 TEST_F(AbcFlow, EntryRefusalLeavesOriginalNetwork) {
   auto*      original = Abc_FrameReadNtk(frame);

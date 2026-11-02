@@ -4759,7 +4759,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     pg_profile->channel_max_ir_drop_v = options.pg_channel_max_ir_drop_v;
   }
   if (macro_active && options.metadata && !options.metadata->select("livehd.placement.hints", source.get_name()).empty()) {
-    livehd::diag::warn("pass.place", "placement-hint-mode", "placement")
+    livehd::diag::warn("pass.place", "placement-hint-mode", "unsupported")
         .msg("placement metadata hints are supported by native FP/macro GP, not the experimental h2d solver; hints ignored")
         .emit();
   }
@@ -6342,13 +6342,13 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   double                       gp_density_weight       = 0;
   // the region mesh's inputs: the fixed macros (not placement masks) and the IO terminals
   const auto                   region_macros           = [&] {
-    std::vector<int> chosen;
+    std::vector<int> macro_indices;
     for (size_t i = 0; i < v.cells.size(); ++i) {
       if (!tech.macros.at(v.cells[i].macro).klass.starts_with("CORE") && !v.cells[i].name.starts_with("__lhd_frame_mask_")) {
-        chosen.push_back(i);
+        macro_indices.push_back(i);
       }
     }
-    return chosen;
+    return macro_indices;
   };
   const auto region_ios = [&] {
     std::vector<Region_io> ios;
@@ -8911,9 +8911,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         }
       }
       std::vector<double> grow(design.num_movable, 0);  // added width per movable cell
-      double              cell_area = 0, added = 0;
+      double              movable_area = 0, added = 0;
       for (int i = 0; i < design.num_movable; ++i) {
-        cell_area += design.node_size_x[i] * design.node_size_y[i];
+        movable_area += design.node_size_x[i] * design.node_size_y[i];
       }
       for (size_t k = 0; k < probe.unroutable_components.size(); ++k) {
         const size_t i = probe.unroutable_components[k];
@@ -8942,7 +8942,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       // no room for the inflation at the target density: a generated core grows, and placement restarts at the
       // utilization that fits, the GP target density lowered with it (utilization + 0.05) so the cells spread over
       // the new core
-      const double grow_core = free_area > 0 ? (cell_area + wanted) / control.target_density / free_area : 1;
+      const double grow_core = free_area > 0 ? (movable_area + wanted) / control.target_density / free_area : 1;
       if (grow_core > 1.05 && options.allow_increase_area && options.generated_core) {
         const double utilization = options.utilization / grow_core;
         std::fprintf(stderr,
@@ -8951,22 +8951,22 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                      utilization);
         throw Placement_area_restart(utilization, utilization + .05);
       }
-      if (cell_area + added > .95 * free_area) {
-        const double scale = added > 0 ? std::max(0.0, .95 * free_area - cell_area) / added : 0;
+      if (movable_area + added > .95 * free_area) {
+        const double scale = added > 0 ? std::max(0.0, .95 * free_area - movable_area) / added : 0;
         for (auto& g : grow) {
           g *= scale;
         }
         added *= scale;
       }
       const double density
-          = free_area > 0 ? std::max(control.target_density, (cell_area + added) / free_area) : control.target_density;
+          = free_area > 0 ? std::max(control.target_density, (movable_area + added) / free_area) : control.target_density;
       std::fprintf(stderr,
                    "legroute probe: target fill %.3f, movable area %.4g, free core %.4g (fill %.3f), inflation wanted %.4g kept "
                    "%.4g, GP target density %.3f -> %.3f\n",
                    target,
-                   cell_area,
+                   movable_area,
                    free_area,
-                   free_area > 0 ? cell_area / free_area : 0.0,
+                   free_area > 0 ? movable_area / free_area : 0.0,
                    wanted,
                    added,
                    control.target_density,
@@ -9045,7 +9045,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                    count[2],
                    count[3],
                    inflated,
-                   cell_area > 0 ? 100 * added / cell_area : 0.0,
+                   movable_area > 0 ? 100 * added / movable_area : 0.0,
                    iterations,
                    hpwl_before,
                    hpwl_after,
@@ -9061,7 +9061,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
             count[2],
             count[3],
             inflated,
-            cell_area > 0 ? added / cell_area : 0.0,
+            area > 0 ? added / area : 0.0,
             iterations,
             hpwl_before,
             hpwl_after,

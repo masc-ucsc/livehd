@@ -1,6 +1,7 @@
+diff --git a/llvm/lib/Support/KnownBits.cpp b/llvm/lib/Support/KnownBits.cpp
 --- a/llvm/lib/Support/KnownBits.cpp
 +++ b/llvm/lib/Support/KnownBits.cpp
-@@ -285,27 +285,6 @@
+@@ -410,27 +410,6 @@
  KnownBits KnownBits::shl(const KnownBits &LHS, const KnownBits &RHS, bool NUW,
                           bool NSW, bool ShAmtNonZero) {
    unsigned BitWidth = LHS.getBitWidth();
@@ -28,7 +29,7 @@
    // Fast path for a common case when LHS is completely unknown.
    KnownBits Known(BitWidth);
    unsigned MinShiftAmount = RHS.getMinValue().getLimitedValue(BitWidth);
-@@ -348,16 +327,69 @@
+@@ -473,16 +452,69 @@
    // Find the common bits from all possible shifts.
    unsigned ShiftAmtZeroMask = RHS.Zero.zextOrTrunc(32).getZExtValue();
    unsigned ShiftAmtOneMask = RHS.One.zextOrTrunc(32).getZExtValue();

@@ -12,15 +12,16 @@ sh_binary(
     data = [":fixtures", "generate.py", "render.py", "//lhd:lhd"],
 )
 
-# Exercise every physical stage and handoff on the full fixtures. These checks
+# Exercise every physical stage and handoff on every topology. These checks
 # require legal placement, not optimization convergence; keep the optimization
-# budget bounded. The run binary retains the longer measurement settings.
+# budget and replicated logic bounded. The run binary retains the full
+# benchmark fixtures and longer measurement settings.
 [
     sh_test(
         name = case,
         size = "small",
         srcs = ["run.py"],
-        args = ["--case", case, "--iterations", "20"],
+        args = ["--case", case, "--iterations", "20", "--logic-depth", "2"],
         data = [":fixtures", "generate.py", "render.py", "//lhd:lhd"],
         tags = ["placement"],
     )

@@ -45,6 +45,16 @@ LHD="${LHD:-lhd/lhd}"
 work="${TEST_TMPDIR:-/tmp/lhd_sim_live_words_invariance_$$}"
 mkdir -p "$work"
 part="${1:-all}"
+fixture_root="${2:-all}"
+selection=()
+case "$fixture_root" in
+  all) ;;
+  lw_icg_top) selection=(lw_icg_top.gated_state_advances_at_every_budget) ;;
+  lwc_icg_top) selection=(lwc_icg_top.gate_edges_alone_advance_the_flop) ;;
+  lwf_icg) selection=(lwf_icg.enable_edge_alone_loads) ;;
+  lwr_icg) selection=(lwr_icg.reset_opens_the_gate_at_every_budget) ;;
+  *) echo "FAIL: unknown ICG fixture $fixture_root" >&2; exit 1 ;;
+esac
 case "$part" in
   all | clean | dirty | 1 | 2 | 1_dirty | 256_dirty) ;;
   *) echo "FAIL: unknown live-word comparison $part" >&2; exit 1 ;;
@@ -240,7 +250,7 @@ run() {  # run <fixture> <tag> <extra --set args...>
   local tag="$2"
   shift 2
   local st=0
-  "$LHD" sim lg:"$work/lg" "$work/$fixture.prp" --workdir "$work/$fixture/$tag" --set sim.tune.profile=off "$@" -q \
+  "$LHD" sim lg:"$work/lg" "$work/$fixture.prp" "${selection[@]}" --workdir "$work/$fixture/$tag" --set sim.tune.profile=off "$@" -q \
     >"$work/$fixture.$tag.log" 2>&1 || st=$?
   [ "$st" -eq 0 ] || {
     cat "$work/$fixture.$tag.log" >&2
@@ -252,12 +262,12 @@ run() {  # run <fixture> <tag> <extra --set args...>
 compare() {  # compare <fixture> <tag>...
   local fixture="$1"
   shift
-  python3 - "$work/$fixture" "$@" <<'PY' || fail "$fixture: end_digest comparison failed"
+  python3 - "$work/$fixture" "$fixture_root" "$@" <<'PY' || fail "$fixture: end_digest comparison failed"
 import json
 import os
 import sys
 
-work, tags = sys.argv[1], sys.argv[2:]
+work, fixture_root, tags = sys.argv[1], sys.argv[2], sys.argv[3:]
 digests = {}
 expected = {
     "lw_icg_top.gated_state_advances_at_every_budget",
@@ -265,11 +275,14 @@ expected = {
     "lwf_icg.enable_edge_alone_loads",
     "lwr_icg.reset_opens_the_gate_at_every_budget",
 }
+if fixture_root != "all":
+    expected = {name for name in expected if name.startswith(fixture_root + ".")}
+    assert len(expected) == 1, fixture_root
 for tag in tags:
     with open(os.path.join(work, tag, "sim", "sim_tests.json"), encoding="utf-8") as stream:
         tests = json.load(stream)
     if len(tests) != len(expected) or {t["test"] for t in tests} != expected:
-        raise SystemExit(f"{tag}: did not run all four ICG regressions")
+        raise SystemExit(f"{tag}: did not run the selected ICG regressions")
     for test in tests:
         if test.get("status") != "pass":
             raise SystemExit(f"{tag}: {test.get('test')} status={test.get('status')}")
@@ -341,7 +354,9 @@ tags=(lw256)
 if [ "$part" = all ] || [ "$part" = clean ] || [ "$part" = 1 ]; then
   run lw_all lw1 "${FILL[@]}" --set sim.tune.live_words=1 --set sim.tune.dirty=off
   tags+=(lw1)
-  split_guard lw_all lw_icg_top lw1
+  if [ "$fixture_root" = all ] || [ "$fixture_root" = lw_icg_top ]; then
+    split_guard lw_all lw_icg_top lw1
+  fi
 fi
 if [ "$part" = all ] || [ "$part" = clean ] || [ "$part" = 2 ]; then
   run lw_all lw2 "${FILL[@]}" --set sim.tune.live_words=2 --set sim.tune.dirty=off
@@ -352,6 +367,7 @@ if [ "$part" = all ] || [ "$part" = dirty ] || [ "$part" = 1_dirty ]; then
   tags+=(lw1_dirty)
   # Check every fixture, so batching cannot hide a missing cross-color mark.
   for root in lwc_icg_top lwf_icg lwr_icg; do
+    [ "$fixture_root" = all ] || [ "$fixture_root" = "$root" ] || continue
     split_guard lw_all "$root" lw1_dirty
     grep -q 'cross-color `_din` readers' "$work/lw_all/lw1_dirty"/sim/*"$root".cpp \
       || fail "$root: no cross-color dirty mark in the generated evaluator"

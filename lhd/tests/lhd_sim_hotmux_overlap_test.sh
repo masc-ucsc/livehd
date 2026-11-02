@@ -7,14 +7,19 @@ LHD="${LHD:-lhd/lhd}"
 W="${TEST_TMPDIR:-/tmp/lhd_hotmux_overlap_$$}"
 mkdir -p "$W"
 F=lhd/tests/lhd_sim_hotmux_overlap.prp
-for backend in llvm slop; do
-  "$LHD" sim "$F" --workdir "$W/$backend" --set "sim.tune.backend=$backend" --set sim.tune.profile=off \
-    --result-json "$W/$backend.json" --diag-fmt pretty &
-  eval "pid_${backend}=$!"
-done
-for backend in llvm slop; do
-  eval "wait \"\${pid_${backend}}\"" || { echo "FAIL: $backend simulation failed" >&2; exit 1; }
-done
+backend=${1:-all}
+if [[ "$backend" == all ]]; then
+  "$0" llvm
+  "$0" slop
+  exit 0
+fi
+case "$backend" in llvm|slop) ;; *) echo "unknown backend: $backend" >&2; exit 1 ;; esac
+"$LHD" sim "$F" --workdir "$W/$backend" --set "sim.tune.backend=$backend" --set sim.tune.profile=off \
+  --result-json "$W/$backend.json" --diag-fmt pretty
+if [[ "$backend" == llvm ]]; then
+  echo "PASS: overlapping unique-if controls simulate on LLVM"
+  exit 0
+fi
 
 # Raise a deterministic signal: __builtin_trap is SIGTRAP on macOS/ARM and
 # SIGILL on other hosts, so it cannot pin one signal-reporting assertion.

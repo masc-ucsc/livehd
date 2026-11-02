@@ -116,7 +116,8 @@ AEG_NATIVE_RULE(getmask_lane, simplify, 40, Ntype_op::Get_mask) {
   }
   const int64_t s_lo = lane->off + (lo - lane->lo);
   const int64_t s_hi = s_lo + (hi - lo);
-  if (s_lo == 0) {
+  const auto    storage_bits = s_lo == 0 ? storage_unsigned_bits(ctx.eg(), lane->src) : int64_t{-1};
+  if (s_lo == 0 && storage_bits >= 0 && storage_bits <= s_hi) {
     const auto f = facts_of(ctx.eg(), lane->src);
     if (f.nonneg() && f.hi < kInf && f.hi <= ((Wide{1} << std::min<int64_t>(s_hi, 99)) - 1)) {
       out.subsume(lane->src);  // the lane is exactly the window and already fits it
@@ -130,7 +131,8 @@ AEG_NATIVE_RULE(getmask_lane, simplify, 40, Ntype_op::Get_mask) {
   out.subsume(make_get_mask(ctx, lane->src, s_lo, s_hi));
 }
 
-// Get_mask(y, 0, n) = y when 0 <= y < 2^n, with two exceptions that keep the classic shapes the later passes read.
+// Get_mask(y, 0, n) = y when both its value and its structural carrier fit n bits. Two further exceptions keep
+// the classic shapes the later passes read.
 // The mask of a LEAF (an input or a register output) is kept: it is where the width fact of the value is written in
 // the graph, and the region passes that follow (mux sharing, muxctx) read booleans structurally, so dropping it
 // makes them spell a Ror/EQ to get one back (wire_cond_match grew from 5 to 8 nodes). The mask of a Sum is kept
@@ -145,6 +147,12 @@ AEG_NATIVE_RULE(getmask_fits, simplify, 30, Ntype_op::Get_mask) {
   }
   const auto f = facts_of(ctx.eg(), y);
   if (!(f.nonneg() && f.hi < kInf && f.hi <= ((Wide{1} << std::min<int64_t>(hi, 99)) - 1))) {
+    return;
+  }
+  // A sparse pack can have a one-bit VALUE but a five-bit window. Bitwidth gives the retained shape its
+  // structural width again; dropping this mask would make it an invalid one-bit Concat lane (Minion CSR).
+  const auto storage_bits = storage_unsigned_bits(ctx.eg(), y);
+  if (storage_bits < 0 || storage_bits > hi) {
     return;
   }
   if (ctx.eg().cls(y).kind == Egraph::Kind::leaf) {
@@ -369,15 +377,16 @@ AEG_NATIVE_RULE(getmask_sum_chain, simplify, 37, Ntype_op::Get_mask) {
   }
 }
 
-// A window that spans several lanes of a Concat only this Get_mask reads is the Concat of the covered pieces:
+// A window that spans several lanes of a Concat is the Concat of the covered pieces:
 //   Get_mask(Concat(.., v_i, w_i, ..), lo, hi) = Concat(Get_mask(v_i, a_i, b_i), b_i - a_i, ...)
 // over the lanes the window touches (classic indexed_get_mask re-packs a private Concat the same way). The
-// pieces are narrower than the lanes, so what feeds a lane is demanded at the window's width only. A Concat
-// other readers keep alive is left alone: it exists either way and the re-pack would cost its lanes twice.
+// pieces are narrower than the lanes, so what feeds a lane is demanded at the window's width only. Replace a
+// private pack or a read that discards most lanes of a large shared pack. Otherwise offer the re-pack as an
+// alternative: other readers keep the original alive and extraction must price the duplicated lane assembly.
 AEG_NATIVE_RULE(getmask_concat_straddle, simplify, 35, Ntype_op::Get_mask) {
   Class_id x = kNoClass;
   int64_t  lo = 0, hi = 0;
-  if (!get_mask_window(ctx, root, x, lo, hi) || !ctx.single_use(x)) {
+  if (!get_mask_window(ctx, root, x, lo, hi)) {
     return;
   }
   const Enode* concat = nullptr;
@@ -393,7 +402,10 @@ AEG_NATIVE_RULE(getmask_concat_straddle, simplify, 35, Ntype_op::Get_mask) {
     return;
   }
   const auto ops = ctx.operands_of(*concat);
-  if (ops.size() % 2 != 0 || ops.size() < 4 || ops.size() > 128) {
+  // Structured gate arrays pack hundreds of one-bit intermediate results. A 64-lane limit left their
+  // final narrow read attached to the entire pack, forcing every unused lane across the simulator ABI.
+  constexpr size_t kMaxLanes = 4096;
+  if (ops.size() % 2 != 0 || ops.size() < 4 || ops.size() > 2 * kMaxLanes) {
     return;
   }
   std::vector<Lane_in> lanes;
@@ -429,7 +441,15 @@ AEG_NATIVE_RULE(getmask_concat_straddle, simplify, 35, Ntype_op::Get_mask) {
   if (touched < 2 || hi > total) {
     return;
   }
-  out.subsume(ctx.make(Ntype_op::Concat, std::span<const Operand>(pieces.data(), pieces.size())));
+  const auto       narrowed        = ctx.make(Ntype_op::Concat, std::span<const Operand>(pieces.data(), pieces.size()));
+  // Keep small shared packs available to their readers. For a large fan-in, reading a minority of the lanes
+  // directly avoids retaining every unrelated lane as a dependency (as in classic indexed_get_mask).
+  constexpr size_t kSmallPackLanes = 64;
+  if (ctx.single_use(x) || (lanes.size() > kSmallPackLanes && 2 * static_cast<size_t>(touched) <= lanes.size())) {
+    out.subsume(narrowed);
+  } else {
+    out.add(narrowed);
+  }
 }
 
 // The per-lane form of classic vectorize_bit_reductions for its simplest family: an And (Or) with a run of at
@@ -643,6 +663,13 @@ AEG_NATIVE_RULE(or_pack_to_concat, alt, 19, Ntype_op::Or) {
     if (w == 0) {
       continue;  // provably zero: contributes nothing
     }
+    // The value range proves non-overlap, but a padded Get_mask or Concat can still occupy more physical
+    // bits than w after Bitwidth. Preserve the narrow lane boundary instead of attaching that wider carrier
+    // directly (the Booth encoder repacks 23-bit windows whose values need only 22, 20, ... bits).
+    const auto storage_bits = storage_unsigned_bits(ctx.eg(), value);
+    if (storage_bits < 0 || storage_bits > w) {
+      value = make_get_mask(ctx, value, 0, w);
+    }
     fields.push_back({value, shift, w});
   }
   if (fields.size() < kMinFields) {
@@ -817,9 +844,9 @@ AEG_NATIVE_RULE(sra_lane, simplify, 40, Ntype_op::SRA) {
   out.subsume(make_get_mask(ctx, x, *k, n));
 }
 
-// Concat clean-ups on the lane list: a leading constant-zero lane adds nothing (a Concat is non-negative and
-// the zero lane only pads); two adjacent constant lanes are one constant lane; two adjacent windows of the
-// same source, reassembled in order, are one wider window. The partial-constant Concat shapes.
+// Concat clean-ups on the lane list: leading zero padding adds nothing (a Concat is non-negative); two adjacent
+// constant lanes are one constant lane; adjacent windows of the same source, reassembled in order, are one
+// wider window. Only the leading lane can lose padding: every interior width fixes the offsets above it.
 AEG_NATIVE_RULE(concat_lanes, simplify, 30, Ntype_op::Concat) {
   std::vector<Lane_in> lanes;
   if (!concat_lanes(ctx, root, lanes)) {
@@ -829,6 +856,17 @@ AEG_NATIVE_RULE(concat_lanes, simplify, 30, Ntype_op::Concat) {
   while (lanes.size() > 1 && ctx.is_int(lanes.front().value, 0)) {
     lanes.erase(lanes.begin());
     changed = true;
+  }
+  // Range-based mask identities can expose this pack directly to a narrower Concat lane. Bitwidth gives a
+  // Concat its full declared width, even when its leading value occupies fewer bits, so retain that agreement
+  // structurally by removing the redundant leading window bits. Never narrow a negative/sign-extending lane.
+  if (const auto bits = unsigned_bits(ctx.eg(), lanes.front().value); bits >= 0 && bits < lanes.front().width) {
+    const auto width        = std::max<int64_t>(1, bits);
+    const auto storage_bits = storage_unsigned_bits(ctx.eg(), lanes.front().value);
+    if (storage_bits >= 0 && storage_bits <= width) {
+      lanes.front().width = width;
+      changed             = true;
+    }
   }
   for (size_t i = 0; i + 1 < lanes.size();) {
     Lane_in&       hi_lane = lanes[i];

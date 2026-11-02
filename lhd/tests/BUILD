@@ -198,6 +198,14 @@ sh_test(
     data = ["//lhd"],
 )
 
+# A dirty caller can re-enter an unchanged mod whose generic GraphIO was
+# retired after constant specialization in the cached generation.
+sh_test(
+    name = "lhd_compile_cache_specialized_smoke",
+    srcs = ["lhd_compile_cache_specialized_smoke.sh"],
+    data = ["//lhd"],
+)
+
 # `lhd sim` runtime test-parameter flags: each `test name(params)` parameter is a
 # `+<name>=VALUE` flag on the generated driver (+ `--seed`/`--help`/validating
 # parsers); unsafe/reserved parameter names are rejected with a clear message,
@@ -279,11 +287,19 @@ sh_test(
     env_inherit = ["PATH"],
 )
 
-sh_test(
+# Each scenario keeps the cold/edit setup and every value/layout assertion,
+# while limiting an individual test to three simulator host builds.
+test_suite(
     name = "sim_slot_incremental_smoke",
-    srcs = ["sim_slot_incremental_smoke.sh"],
-    data = ["//lhd"],
+    tests = [":sim_slot_growth_smoke", ":sim_slot_recovery_smoke"],
 )
+
+[sh_test(
+    name = "sim_slot_%s_smoke" % scenario,
+    srcs = ["sim_slot_incremental_smoke.sh"],
+    args = [scenario],
+    data = ["//lhd"],
+) for scenario in ["growth", "recovery"]]
 
 # Keep each fixture/backend under the test runtime budget. The Slop leg also
 # checks the backend-independent LEC proof and, with LHD_EXTERNAL_SIM=1 (see
@@ -304,7 +320,7 @@ _ROUNDTRIP_CASES = [
 
 [
     sh_test(
-        name = "sim_rtl_roundtrip_" + case + "_" + backend,
+        name = "sim_rtl_roundtrip_" + case + "_" + backend + "_" + part,
         size = "small",
         srcs = ["sim_rtl_roundtrip.py"],
         args = [
@@ -312,6 +328,8 @@ _ROUNDTRIP_CASES = [
             case,
             "--backend",
             backend,
+            "--part",
+            part,
         ],
         data = ["//lhd"],
     )
@@ -320,6 +338,19 @@ _ROUNDTRIP_CASES = [
         "slop",
         "llvm",
     ]
+    for part in (["verilog", "pyrope", "oracles"] if backend == "slop" else ["verilog", "pyrope"])
+]
+
+[
+    test_suite(
+        name = "sim_rtl_roundtrip_" + case + "_" + backend,
+        tests = [
+            ":sim_rtl_roundtrip_" + case + "_" + backend + "_" + part
+            for part in (["verilog", "pyrope", "oracles"] if backend == "slop" else ["verilog", "pyrope"])
+        ],
+    )
+    for case in _ROUNDTRIP_CASES
+    for backend in ["slop", "llvm"]
 ]
 
 test_suite(
@@ -417,12 +448,21 @@ sh_test(
 # module X instantiates, leaving an ln: dir that could not be linked). Structural
 # checks and runtime checks use declared dependencies; the test runs
 # both IR forms and the plain two-source baseline and requires the same verdict.
+[
 sh_test(
-    name = "lhd_sim_ir_inputs_test",
+    name = "lhd_sim_ir_inputs_test_" + part,
+    args = [part],
     srcs = ["lhd_sim_ir_inputs_test.sh"],
     data = ["//lhd"],
 )
 
+    for part in ["routing", "diagnostics", "hierarchy", "source", "lg", "ln"]
+]
+
+test_suite(
+    name = "lhd_sim_ir_inputs_test",
+    tests = [":lhd_sim_ir_inputs_test_" + part for part in ["routing", "diagnostics", "hierarchy", "source", "lg", "ln"]],
+)
 # `lhd sim` structured + LOCATED assert failures: a failed `assert` prints the
 # source location (prp:line), the cycle (the `clock` value, which survives the
 # tick loop), and both operand VALUES of a top-level comparison (a literal operand
@@ -483,9 +523,33 @@ sh_test(
 # X settle window after each edge; false: plain edge-aligned updates) + the real
 # `clock` label through a flopless pass-through wrapper (the lecfail dut-pair
 # shape). Structural checks run hermetically; runtime checks use declared dependencies.
-sh_test(
+test_suite(
     name = "lhd_sim_vcd_hier_test",
+    tests = [
+        ":lhd_sim_vcd_hier_default_test",
+        ":lhd_sim_vcd_hier_traditional_test",
+        ":lhd_sim_vcd_hier_instances_test",
+    ],
+)
+
+sh_test(
+    name = "lhd_sim_vcd_hier_default_test",
     srcs = ["lhd_sim_vcd_hier_test.sh"],
+    args = ["default"],
+    data = ["//lhd"],
+)
+
+sh_test(
+    name = "lhd_sim_vcd_hier_traditional_test",
+    srcs = ["lhd_sim_vcd_hier_test.sh"],
+    args = ["traditional"],
+    data = ["//lhd"],
+)
+
+sh_test(
+    name = "lhd_sim_vcd_hier_instances_test",
+    srcs = ["lhd_sim_vcd_hier_test.sh"],
+    args = ["instances"],
     data = ["//lhd"],
 )
 
@@ -509,22 +573,63 @@ sh_test(
 # Native compact-loop cgen_sim: COUNT only sizes a std::array and runtime loop;
 # warm digests include the descriptor, and every occurrence-facing surface uses
 # stable `instance[ordinal]` paths.
+[
 sh_test(
-    name = "lhd_sim_compact_loop_test",
+    name = "lhd_sim_compact_loop_test_" + part,
+    args = [part],
     size = "large",
     srcs = ["lhd_sim_compact_loop_test.sh"],
     data = ["//lhd"],
 )
 
+    for part in ["scaling", "runtime", "query"]
+]
+
+test_suite(
+    name = "lhd_sim_compact_loop_test",
+    tests = [":lhd_sim_compact_loop_test_" + part for part in ["scaling", "runtime", "query"]],
+)
 # 2f-sim: the agent-oriented `lhd sim --query` API — cgen_sim's per-module
 # iface.json manifest and lossless observe_signals/observe_mem surface, the
 # per-test sim_catalog.json (now carrying outputs and memories, which the legacy
 # describe_signals catalog never had), the five v1 operation families, and the
 # unchanged legacy --probe/--break-when shapes. Structural checks run
 # hermetically using declared runtime dependencies.
-sh_test(
+test_suite(
     name = "lhd_sim_query_test",
+    tests = [
+        ":lhd_sim_query_interface_test",
+        ":lhd_sim_query_queries_test",
+        ":lhd_sim_query_catalog_legacy_test",
+        ":lhd_sim_query_failure_test",
+    ],
+)
+
+sh_test(
+    name = "lhd_sim_query_interface_test",
     srcs = ["lhd_sim_query_test.sh"],
+    args = ["interface"],
+    data = ["//lhd"],
+)
+
+sh_test(
+    name = "lhd_sim_query_queries_test",
+    srcs = ["lhd_sim_query_test.sh"],
+    args = ["queries"],
+    data = ["//lhd"],
+)
+
+sh_test(
+    name = "lhd_sim_query_catalog_legacy_test",
+    srcs = ["lhd_sim_query_test.sh"],
+    args = ["catalog_legacy"],
+    data = ["//lhd"],
+)
+
+sh_test(
+    name = "lhd_sim_query_failure_test",
+    srcs = ["lhd_sim_query_test.sh"],
+    args = ["failure"],
     data = ["//lhd"],
 )
 
@@ -572,13 +677,22 @@ sh_test(
 # pass/lec engine: per-assert bounded-proven / refuted-at-cycle-with-trace
 # verdict table, assume-as-disclosed-constraint, per-obligation timeout
 # isolation and unconditional UNKNOWN failure, formal.*/lec.* knob aliases, `formal lec` alias.
+[
 sh_test(
-    name = "lhd_formal_verify_test",
+    name = "lhd_formal_verify_" + part + "_test",
+    args = [part],
     size = "large",
     srcs = ["lhd_formal_verify_test.sh"],
     data = ["//lhd"],
 )
 
+    for part in ["core", "guards", "struct"]
+]
+
+test_suite(
+    name = "lhd_formal_verify_test",
+    tests = [":lhd_formal_verify_" + part + "_test" for part in ["core", "guards", "struct"]],
+)
 # `lhd formal verify` test-unit face: a `formal` block is an INDEPENDENT test, so
 # it enumerates and selects exactly like a sim `test`. `--list-tests` is a pure
 # parse of the blocks -> JSON in sim's envelope (no design load, no solver — it
@@ -610,10 +724,43 @@ sh_test(
 # after it, deepest stage first), not a monitor-side trick -- a flop inside a
 # combinational monitor would be a fresh free symbol per step. The depth-2 case
 # is what catches a chain that shifts twice in a cycle or lands one stage short.
-sh_test(
+test_suite(
     name = "lhd_sv_past_test",
-    size = "large",
+    tests = [
+        ":lhd_sv_past_history_test",
+        ":lhd_sv_past_edges_test",
+        ":lhd_sv_past_refusals_test",
+    ],
+)
+
+[
+    sh_test(
+        name = "lhd_sv_past_history_" + part + "_test",
+        size = "medium",
+        srcs = ["lhd_sv_past_test.sh"],
+        args = ["history_" + part],
+        data = ["//lhd"],
+    )
+    for part in ["basic", "multi"]
+]
+
+test_suite(
+    name = "lhd_sv_past_history_test",
+    tests = [":lhd_sv_past_history_" + part + "_test" for part in ["basic", "multi"]],
+)
+sh_test(
+    name = "lhd_sv_past_edges_test",
+    size = "medium",
     srcs = ["lhd_sv_past_test.sh"],
+    args = ["edges"],
+    data = ["//lhd"],
+)
+
+sh_test(
+    name = "lhd_sv_past_refusals_test",
+    size = "medium",
+    srcs = ["lhd_sv_past_test.sh"],
+    args = ["refusals"],
     data = ["//lhd"],
 )
 
@@ -622,11 +769,22 @@ sh_test(
 # RETIMING the statement, so the monitor stays combinational here too. The
 # directional claims in this test hold one way and refute the other, which is
 # what catches a window read backwards or off by one.
-sh_test(
+# Keep all temporal-window checks while each independent group fits the
+# per-test runtime budget. Direct script invocation still runs both groups.
+[
+    sh_test(
+        name = "lhd_formal_window_%s_test" % group,
+        size = "large",
+        srcs = ["lhd_formal_window_test.sh"],
+        args = [group],
+        data = ["//lhd"],
+    )
+    for group in ["behavior", "diagnostics"]
+]
+
+test_suite(
     name = "lhd_formal_window_test",
-    size = "large",
-    srcs = ["lhd_formal_window_test.sh"],
-    data = ["//lhd"],
+    tests = [":lhd_formal_window_behavior_test", ":lhd_formal_window_diagnostics_test"],
 )
 
 # SystemVerilog IMMEDIATE assert/assume become design obligations (the same
@@ -736,6 +894,28 @@ sh_test(
     srcs = ["lhd_formal_hier_ref_test.sh"],
     data = ["//lhd"],
     tags = ["no-sandbox"],
+)
+
+sh_test(
+    name = "lhd_hier_ref_names_smoke",
+    srcs = ["lhd_hier_ref_names_smoke.sh"],
+    data = ["//lhd"],
+)
+
+[sh_test(
+    name = "lhd_loop_independent_clocks_%s_%s_smoke" % (design, backend),
+    srcs = ["lhd_loop_independent_clocks_smoke.sh"],
+    args = [design, backend],
+    data = ["//lhd"],
+) for design in ["twoclk", "twoclk_ungated", "fusedg"] for backend in ["llvm", "slop"]]
+
+test_suite(
+    name = "lhd_loop_independent_clocks_smoke",
+    tests = [
+        ":lhd_loop_independent_clocks_%s_%s_smoke" % (design, backend)
+        for design in ["twoclk", "twoclk_ungated", "fusedg"]
+        for backend in ["llvm", "slop"]
+    ],
 )
 
 sh_test(
@@ -913,13 +1093,21 @@ sh_test(
 # + generate-for reg arrays on a derived clock, HierarchicalValue assignment
 # targets, widening-cast declared-range aliasing, and structs first written
 # inside a unique-case arm (just //lhd).
-sh_test(
+[
+    sh_test(
+        name = "slang_minion_features_" + group + "_test",
+        size = "medium",
+        srcs = ["slang_minion_features_test.sh"],
+        args = [group],
+        data = ["//lhd"],
+        tags = ["cpu:2"],
+    )
+    for group in ["frontend", "unsigned_widen", "dynamic_write", "output_boundary"]
+]
+
+test_suite(
     name = "slang_minion_features_test",
-    size = "large",
-    srcs = ["slang_minion_features_test.sh"],
-    data = ["//lhd"],
-    # Three simulator host builds overlap; reserve their compiler fan-out.
-    tags = ["cpu:6"],
+    tests = [":slang_minion_features_" + group + "_test" for group in ["frontend", "unsigned_widen", "dynamic_write", "output_boundary"]],
 )
 
 # LIVE blast-radius test for todo/livehd/2f-latch M8 (steps 1h + 3a): edge
@@ -1872,8 +2060,10 @@ sh_test(
 
 # synth.state_sweep: unobserved registers and register bits leave the mapper's private
 # copy (across the hierarchy), proven equivalent to the source by the graph-native LEC.
+[
 sh_test(
-    name = "lhd_state_sweep_test",
+    name = "lhd_state_sweep_test_" + part,
+    args = [part],
     size = "small",
     srcs = ["lhd_state_sweep_test.sh"],
     data = _FLOW_DATA + [
@@ -1884,6 +2074,13 @@ sh_test(
     ],
 )
 
+    for part in ["registers", "compile_sweep", "both", "flat", "usyn", "validation", "merge", "memory", "memory_compile"]
+]
+
+test_suite(
+    name = "lhd_state_sweep_test",
+    tests = [":lhd_state_sweep_test_" + part for part in ["registers", "compile_sweep", "both", "flat", "usyn", "validation", "merge", "memory", "memory_compile"]],
+)
 # pass.abc.large_flow_latches (opt-in): a region mapped by the size tier's default flow (large_ge) keeps its
 # latches like the built-in flow, so derived-clock and async-reset registers map to DFF cells instead of native flops.
 sh_test(
@@ -1974,8 +2171,40 @@ sh_test(
 ) for name, group in [
     ("lhd_abc_seq_test", "registers"),
     ("lhd_abc_qn_test", "qn"),
-    ("lhd_abc_memory_modes_test", "memory"),
 ] for suffix, mapper in _MAPPERS]
+
+[sh_test(
+    name = "lhd_abc_memory_" + part + "_test",
+    srcs = ["lhd_abc_seq_test.sh"],
+    args = ["memory_" + part],
+    data = _FLOW_DATA + [
+        "abc_async_reset.prp",
+        "abc_qn_fanout.prp",
+        "abc_qn_twin.prp",
+        "abc_resetless_sync.prp",
+        "//inou/prp:abc_tests",
+    ],
+    env = {"MAPPER": "abc"},
+) for part in ["native", "lowered", "auto", "limited"]]
+
+test_suite(
+    name = "lhd_abc_memory_modes_test",
+    tests = [":lhd_abc_memory_" + part + "_test" for part in ["native", "lowered", "auto", "limited"]],
+)
+
+sh_test(
+    name = "lhd_abc_memory_modes_test_usyn",
+    srcs = ["lhd_abc_seq_test.sh"],
+    args = ["memory"],
+    data = _FLOW_DATA + [
+        "abc_async_reset.prp",
+        "abc_qn_fanout.prp",
+        "abc_qn_twin.prp",
+        "abc_resetless_sync.prp",
+        "//inou/prp:abc_tests",
+    ],
+    env = {"MAPPER": "usyn"},
+)
 
 # pass.abc memory=true (explicitly enabled) bit-blast, on the shapes the constant-
 # address / per-lane mem_lower rework fixed: a constant-index multi-writer tile
@@ -2412,12 +2641,21 @@ sh_test(
 # Design-body assumptions constrain the existing hierarchical LEC translation.
 # Assumption-bearing child cones stay transparent until box-boundary contracts
 # exist; contradictory unchecked contracts are rejected as vacuous.
+[
 sh_test(
-    name = "lec_design_assume_test",
+    name = "lec_design_assume_test_" + part,
+    args = [part],
     srcs = ["lec_design_assume_test.sh"],
     data = ["//lhd"],
 )
 
+    for part in ["hierarchy", "checked_impl", "checked_ref", "sanctioned", "library", "contradictory"]
+]
+
+test_suite(
+    name = "lec_design_assume_test",
+    tests = [":lec_design_assume_test_" + part for part in ["hierarchy", "checked_impl", "checked_ref", "sanctioned", "library", "contradictory"]],
+)
 # A structural RCA with an unchecked carry_in==true top contract must match
 # a flat +1 adder in both hierarchical LEC and verify.  Removing the contract
 # must refute both flows.
@@ -2641,7 +2879,9 @@ sh_test(
 ) for group in [
     "profile",
     "lfsr",
-    "pins",
+    "pin_knob",
+    "disabled_profile",
+    "disabled_incremental",
     "unknown_zero",
     "stale",
     "exhaustion",
@@ -2653,22 +2893,49 @@ sh_test(
     "resetup",
 ]]
 
+test_suite(
+    name = "sim_tune_pins_test",
+    tests = [":sim_tune_" + part + "_test" for part in ["pin_knob", "disabled_profile", "disabled_incremental"]],
+)
+
 # sim.tune.* knobs are speed-only: an ICG-gated design must pass with the same
 # per-test end_digest at live_words 256 / 1 / 2 and with dirty gating. At
 # live_words=1 the ICG latch and the flop whose commit guard reads its `_din`
 # land in different colors; the latch kept a guarded `_din` store and the flop
 # read it stale (SILENT miscompile, 2026-09-18). Inline fixture: just //lhd.
-# Each group shares one baseline compilation across two comparisons.
-_LIVE_WORD_COMPARISONS = ["clean", "dirty"]
+# Each comparison executes its own clean baseline and all four regressions.
+_LIVE_WORD_COMPARISONS = ["1", "2", "1_dirty", "256_dirty"]
+
+_LIVE_WORD_ROOTS = ["lw_icg_top", "lwc_icg_top", "lwf_icg", "lwr_icg"]
 
 [
     sh_test(
-        name = "sim_live_words_invariance_" + part,
+        name = "sim_live_words_invariance_" + part + "_" + root,
         srcs = ["sim_live_words_invariance_test.sh"],
-        args = [part],
+        args = [part, root],
         data = ["//lhd"],
     )
     for part in _LIVE_WORD_COMPARISONS
+    for root in _LIVE_WORD_ROOTS
+]
+
+[
+    test_suite(
+        name = "sim_live_words_invariance_" + part,
+        tests = [":sim_live_words_invariance_" + part + "_" + root for root in _LIVE_WORD_ROOTS],
+    )
+    for part in _LIVE_WORD_COMPARISONS
+]
+
+[
+    test_suite(
+        name = "sim_live_words_invariance_" + group,
+        tests = [":sim_live_words_invariance_" + part for part in comparisons],
+    )
+    for group, comparisons in [
+        ("clean", ["1", "2"]),
+        ("dirty", ["1_dirty", "256_dirty"]),
+    ]
 ]
 
 test_suite(
@@ -2682,16 +2949,24 @@ sh_test(
     data = ["//lhd"],
 )
 
+[
 sh_test(
-    name = "readmem_smoke",
+    name = "readmem_" + part + "_smoke",
     srcs = ["readmem_smoke.sh"],
-    args = ["native"],
+    args = [part],
     data = [
         "//inou/prp:abc_tests",
         "//lhd",
     ],
 )
 
+    for part in ["runtime", "forwarding", "external"]
+]
+
+test_suite(
+    name = "readmem_smoke",
+    tests = [":readmem_" + part + "_smoke" for part in ["runtime", "forwarding", "external"]],
+)
 sh_test(
     name = "readmem_imports_smoke",
     srcs = ["readmem_smoke.sh"],
@@ -3149,15 +3424,21 @@ sh_test(
     env = {"MAPPER": "usyn"},
 )
 
-sh_test(
+[
+    sh_test(
+        name = "lhd_sim_hotmux_overlap_" + backend + "_test",
+        size = "medium",
+        srcs = ["lhd_sim_hotmux_overlap_test.sh"],
+        args = [backend],
+        data = ["lhd_sim_hotmux_overlap.prp", "//lhd"],
+        tags = ["cpu:2"],
+    )
+    for backend in ["llvm", "slop"]
+]
+
+test_suite(
     name = "lhd_sim_hotmux_overlap_test",
-    size = "medium",  # an llvm and a slop simulator build side by side, then one rebuild
-    srcs = ["lhd_sim_hotmux_overlap_test.sh"],
-    data = [
-        "lhd_sim_hotmux_overlap.prp",
-        "//lhd",
-    ],
-    tags = ["cpu:4"],
+    tests = [":lhd_sim_hotmux_overlap_" + backend + "_test" for backend in ["llvm", "slop"]],
 )
 
 sh_test(

@@ -2783,6 +2783,19 @@ private:
       const std::string init     = !info.initial_txt.empty() ? info.initial_txt : info.init_txt;
       const bool        has_init = !init.empty() && init != "nil";
       const bool        rp_false = info.reset_pin_name == "false";
+      // A nil declaration explicitly opts out of reset. An initial attribute
+      // beside reset_pin=false supplies power-on contents instead, matching a
+      // resetless RTL register and the existing memory initialization contract.
+      if (rp_false && has_init && !info.is_latch && (info.init_txt.empty() || info.init_txt == "nil") && !info.initial_txt.empty()
+          && !info.initial_is_ref) {
+        auto value = Dlop::from_pyrope(init);
+        if (!value || value->is_invalid() || value->is_nil()) {
+          error_here("upass.tolg: reg '{}' power-on value is not a compile-time constant", name);
+          return;
+        }
+        setup_sink_by_name(flop, "initial").connect_driver(create_const(*g_, *value));
+        continue;
+      }
       if (rp_false && has_init) {
         error_here(
             "upass.tolg: reg '{}' has a non-nil initializer but "

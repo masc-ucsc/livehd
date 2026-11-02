@@ -124,7 +124,7 @@ void Placement_hints::reject(Hint& h, const std::string& reason) {
   }
   h.status = "discarded";
   h.reason = reason;
-  diag::warn("pass.place", "placement-hint", "placement").msg("placement hint '{}': {}; ignored", h.id, reason).emit();
+  diag::warn("pass.place", "placement-hint", "unsupported").msg("placement hint '{}': {}; ignored", h.id, reason).emit();
 }
 Placement_hints::Placement_hints(std::shared_ptr<const metadata::Bundle> input, std::string design,
                                  const std::vector<Hint_scope>& scopes, std::vector<Hint_object> objects, double dbu)
@@ -676,7 +676,7 @@ void Placement_hints::write(const dp::Design& d, const std::string& filename) {
     if (h.status == "accepted" && residual > std::max(d.layout.site_width, d.layout.row_height)) {
       h.status = "relaxed";
       h.reason = "soft relationship not met within one placement pitch after legalization";
-      diag::warn("pass.place", "placement-hint-relaxed", "placement")
+      diag::warn("pass.place", "placement-hint-relaxed", "unsupported")
           .msg("placement hint '{}': {}; residual {} um", h.id, h.reason, residual / dbu_)
           .emit();
     }

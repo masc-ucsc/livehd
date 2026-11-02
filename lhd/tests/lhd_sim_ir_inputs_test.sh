@@ -35,6 +35,11 @@ set -u
 LHD="${LHD:-lhd/lhd}"
 W="${TEST_TMPDIR:-/tmp/lhd_sim_ir_$$}"
 mkdir -p "$W"
+part="${1:-all}"
+case "$part" in
+  all | routing | diagnostics | hierarchy | source | lg | ln) ;;
+  *) echo "FAIL: unknown IR test part $part" >&2; exit 1 ;;
+esac
 
 fail() {
   echo "FAIL: $*" >&2
@@ -74,15 +79,20 @@ tb "dut.cnt"    "$W/tb_src.prp"   # baseline: co-loaded .prp source
 tb "lg:dut.cnt" "$W/tb_lg.prp"
 tb "ln:dut.cnt" "$W/tb_ln.prp"
 
+if [ "$part" = all ] || [ "$part" = routing ] || [ "$part" = diagnostics ] || [ "$part" = lg ]; then
 # ---- compile the DUT once, into each IR form --------------------------------
 "$LHD" compile "$W/dut.prp" --emit-dir lg:"$W/L/" --workdir "$W/w_lg" -q --result-json "$W/r_lg.json" \
   || fail "dut compile→lg failed: $(cat "$W/r_lg.json" 2>/dev/null)"
 grep -q 'graph_io .* dut.cnt' "$W/L/library.txt" || fail "lg: library misses dut.cnt: $(cat "$W/L/library.txt")"
+fi
 
+if [ "$part" = all ] || [ "$part" = routing ] || [ "$part" = ln ]; then
 "$LHD" compile "$W/dut.prp" --emit-dir ln:"$W/LN/" --workdir "$W/w_ln" -q --result-json "$W/r_ln.json" \
   || fail "dut compile→ln failed: $(cat "$W/r_ln.json" 2>/dev/null)"
 [ -f "$W/LN/forest.txt" ] || fail "ln: dir has no forest.txt"
+fi
 
+if [ "$part" = all ] || [ "$part" = routing ]; then
 # ---- 1. the positional forms set up a driver AND the DUT body ---------------
 # (the DUT body is what proves the lg: library joined the design; a name-only
 # absorb would have left `sim` with nothing synthesizable to emit)
@@ -108,7 +118,9 @@ for kind in lg ln; do
     || fail "sim --in $kind: failed: $(cat "$W/ri_$kind.json" 2>/dev/null)"
   [ -s "$W/i_$kind/sim/dut.cnt.cpp" ] || fail "sim --in $kind: generated no DUT body"
 done
+fi
 
+if [ "$part" = all ] || [ "$part" = diagnostics ]; then
 # ---- 3. an IR positional is NOT swallowed as the test selector ---------------
 # A missing lg: dir must be reported AS a bad lg: input; the old parse turned it
 # into a test name and failed somewhere else entirely.
@@ -141,7 +153,9 @@ grep -q 'auto& acc = \*_dut_storage_acc' "$W/s_cmt/sim/drv.cpp" \
   || fail "driver did not preserve the DUT reference surface: $(grep -n '_dut_storage_acc' "$W/s_cmt/sim/drv.cpp")"
 ! grep -q 'dut_cnt acc;' "$W/s_cmt/sim/drv.cpp" \
   || fail "driver put the DUT back on the thread stack"
+fi
 
+if [ "$part" = all ] || [ "$part" = hierarchy ]; then
 # ---- 5. slang --top publishes the whole forest, so ln: stays linkable --------
 cat > "$W/hier.sv" <<'EOF'
 module leaf(input logic [7:0] a, output logic [7:0] y);
@@ -161,21 +175,24 @@ grep -q '"name":"hier_top"' "$W/HN/manifest.json" || fail "ln: forest misses hie
   || fail "relink of the slang ln: forest failed: $(cat "$W/r_h2.json" 2>/dev/null)"
 grep -qE '^module leaf\('     "$W/hier.v" || fail "relinked Verilog misses module leaf: $(cat "$W/hier.v")"
 grep -qE '^module hier_top\(' "$W/hier.v" || fail "relinked Verilog misses module hier_top"
+fi
 
-# lhd locates its declared simulator runtime files; a failed build must fail.
-
-# The baseline (two .prp positionals) and both IR forms must all pass the same
-# assert — an IR input must not change what is simulated.
+if [ "$part" = all ] || [ "$part" = source ]; then
 "$LHD" sim "$W/dut.prp" "$W/tb_src.prp" --workdir "$W/run_src" --diag-fmt pretty > "$W/run_src.out" 2>&1 \
   || fail "baseline .prp run failed: $(cat "$W/run_src.out")"
 grep -q 'PASS dutmod.held' "$W/run_src.out" || fail "baseline did not pass: $(cat "$W/run_src.out")"
+fi
 
+if [ "$part" = all ] || [ "$part" = lg ]; then
 "$LHD" sim lg:"$W/L/" "$W/tb_lg.prp" --workdir "$W/run_lg" --diag-fmt pretty > "$W/run_lg.out" 2>&1 \
   || fail "lg: run failed: $(cat "$W/run_lg.out")"
 grep -q 'PASS dutmod.held' "$W/run_lg.out" || fail "lg: run did not pass: $(cat "$W/run_lg.out")"
+fi
 
+if [ "$part" = all ] || [ "$part" = ln ]; then
 "$LHD" sim ln:"$W/LN/" "$W/tb_ln.prp" --workdir "$W/run_ln" --diag-fmt pretty > "$W/run_ln.out" 2>&1 \
   || fail "ln: run failed: $(cat "$W/run_ln.out")"
 grep -q 'PASS dutmod.held' "$W/run_ln.out" || fail "ln: run did not pass: $(cat "$W/run_ln.out")"
+fi
 
-echo "PASS: lhd sim ln:/lg: IR inputs (structure + run)"
+echo "PASS: lhd sim ln:/lg: IR inputs ($part)"

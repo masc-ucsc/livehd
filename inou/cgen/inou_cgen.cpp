@@ -193,7 +193,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   bool       bad_flag          = false;
   const auto flag_on           = [&bad_flag](std::string_view label, std::string_view v) {
     if (!v.empty() && v != "true" && v != "1" && v != "on" && v != "false" && v != "0" && v != "off") {
-      livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage").msg("{} expects true|false, got '{}'", label, v).emit();
+      livehd::diag::err("inou.cgen.sim", "bad-flag-value", "syntax").msg("{} expects true|false, got '{}'", label, v).emit();
       bad_flag = true;
     }
     return v == "true" || v == "1" || v == "on";
@@ -210,7 +210,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   // historical `0` = default for live_words (the shared parser starts at 1).
   const auto knob = [&bad_flag](std::string_view label, const auto& parsed) {
     if (!parsed.ok) {
-      livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage").msg("{} {}", label, parsed.err).emit();
+      livehd::diag::err("inou.cgen.sim", "bad-flag-value", "syntax").msg("{} {}", label, parsed.err).emit();
       bad_flag = true;
     }
     return parsed.value;
@@ -235,7 +235,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     const char* end    = unroll_sites_s.data() + unroll_sites_s.size();
     const auto [p, ec] = std::from_chars(unroll_sites_s.data(), end, parsed);
     if (ec != std::errc{} || p != end || parsed > (uint64_t{1} << 20)) {
-      livehd::diag::err("inou.cgen.sim", "bad-flag-value", "usage")
+      livehd::diag::err("inou.cgen.sim", "bad-flag-value", "syntax")
           .msg("sim.unroll_sites expects N in [0, 2^20], got '{}'", unroll_sites_s)
           .emit();
       bad_flag = true;
@@ -543,7 +543,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     // Who gets a plan (the plan loop below) -- and so who is a color root in
     // do_from_graph. The key folds the tune vector for a root only, so this
     // verdict and the plan loop's must stay the same rule.
-    const bool root  = is_selected_root(full, entity) || (llvm && compact_kernel_defs.contains(g.get()));
+    const bool root = is_selected_root(full, entity) || compact_kernel_defs.contains(g.get());
     if (llvm && compact_kernel_defs.contains(g.get())) {
       // A loop definition always re-emits under LLVM: its sealed body is handed to
       // its callers' kernels (Cgen_sim::Native_loop_ir), which a caller regenerated
@@ -574,9 +574,10 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     }
     const auto [full, entity] = split_entity(g->get_name());
     const bool selected       = is_selected_root(full, entity);
-    // A compact body is a separate executable definition. Give LLVM the same
-    // versioned schedule used by the root instead of emitting a Slop body.
-    const bool compact_root   = llvm && compact_kernel_defs.contains(g.get());
+    // A compact body is a separate executable definition. Both backends need
+    // its versioned schedule: the legacy child calls edge-detect secondary
+    // clock levels even though the caller transports independent period events.
+    const bool compact_root   = compact_kernel_defs.contains(g.get());
     if ((!selected && !compact_root) || (!entity.empty() && entity.front() == '%')) {
       continue;
     }
@@ -603,7 +604,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
     wrote_plan = true;
   }
   if (!wrote_plan && !sim_graphs.empty()) {
-    livehd::diag::err("inou.cgen.sim", "color-plan-root", "usage")
+    livehd::diag::err("inou.cgen.sim", "color-plan-root", "name")
         .msg("could not select top '{}' for occurrence-wide simulator discovery", top)
         .emit();
     return;

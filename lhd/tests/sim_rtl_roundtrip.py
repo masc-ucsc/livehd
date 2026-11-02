@@ -18,7 +18,10 @@ CASES = (
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--case", choices=CASES, help="Run one independent regression")
 parser.add_argument("--backend", choices=("slop", "llvm"), help="Run one simulator backend")
+parser.add_argument("--part", choices=("all", "verilog", "pyrope", "oracles"), default="all",
+                    help="Run one input language or the independent equivalence/oracle checks")
 ARGS = parser.parse_args()
+ORACLES = ARGS.backend != "llvm" and ARGS.part in ("all", "oracles")
 
 LHD = str(Path(os.environ.get("LHD", "lhd/lhd")).resolve())
 WORK = Path(os.environ.get("TEST_TMPDIR") or tempfile.mkdtemp(prefix="lhd-rtl-roundtrip-")).resolve()
@@ -26,7 +29,7 @@ WORK = Path(os.environ.get("TEST_TMPDIR") or tempfile.mkdtemp(prefix="lhd-rtl-ro
 # with LHD_EXTERNAL_SIM=1 (see AGENTS.md), and then a missing verilator FAILS.
 EXTERNAL_SIM = bool(os.environ.get("LHD_EXTERNAL_SIM"))
 VERILATOR = (os.environ.get("VERILATOR") or shutil.which("verilator")) if EXTERNAL_SIM else None
-if EXTERNAL_SIM and ARGS.backend != "llvm" and not VERILATOR:
+if EXTERNAL_SIM and ORACLES and not VERILATOR:
     raise SystemExit("FAIL: LHD_EXTERNAL_SIM is set but verilator is not on PATH (or $VERILATOR)")
 
 
@@ -49,7 +52,7 @@ def check(name, rtl, stimulus, checks, cpp):
          "--emit-dir", f"pyrope:{work}/prp", "--workdir", work / "compile", "--set", "compile.upass.inline=false"], work / "compile.log")
     # LEC is independent of the simulator backend; check it once in the Slop
     # leg (or the unsplit manual run), alongside the optional Verilator twin.
-    if ARGS.backend != "llvm":
+    if ORACLES:
         lec = run([LHD, "lec", "--ref", source, "--impl", work / "prp/top.prp", "--top", "top",
                    "--workdir", work / "lec", "--set", "compile.upass.inline=false",
                    "--set", "formal.effort=proof"], work / "lec.log")
@@ -57,6 +60,8 @@ def check(name, rtl, stimulus, checks, cpp):
         if records[-1].get("lec", {}).get("verdict") not in ("proven-full", "proven-bounded"):
             raise RuntimeError(f"round-trip LEC did not prove equivalence:\n{lec}")
     for language in ("verilog", "pyrope"):
+        if ARGS.part not in ("all", language):
+            continue
         entry = 'lg:top' if language == "verilog" else 'prp/top.top'
         tb = work / f"{language}_tb.prp"
         tb.write_text(f'''const design = import("{entry}")
@@ -76,7 +81,7 @@ test top.compare {{
                  "--set", "sim.ninja=false", "--set", "sim.tune.profile=off", "--set", f"sim.tune.backend={backend}",
                  "--set", "compile.upass.inline=false"],
                 work / f"{language}-{backend}.log")
-    if VERILATOR and ARGS.backend != "llvm":
+    if VERILATOR and ORACLES:
         twin = work / "main.cpp"
         twin.write_text('''#include "Vtop.h"
 #include "verilated.h"
@@ -89,10 +94,9 @@ int main(int argc, char **argv) {
         run([VERILATOR, "--cc", "--exe", "--build", "--top-module", "top", "--Mdir", work / "vobj",
              source, twin], work / "verilator-build.log")
         run([work / "vobj/Vtop"], work / "verilator-run.log")
-    elif ARGS.backend != "llvm":
+    elif ORACLES:
         print("note: external-simulator leg skipped (set LHD_EXTERNAL_SIM=1)")
-    print(f"PASS: {name}: RTL and generated Pyrope, "
-          f"{'LEC and ' if ARGS.backend != 'llvm' else ''}{ARGS.backend or 'Slop and LLVM'} simulation")
+    print(f"PASS: {name}: {ARGS.part}, {ARGS.backend or 'Slop and LLVM'}")
 
 
 

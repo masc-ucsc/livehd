@@ -924,9 +924,10 @@ private:
         }
         gu::drop_drivers(node);
       }
-      for (const auto& node : dead) {
-        node.del_node();
-      }
+      // Hierarchical attributes belong to every occurrence of each object.
+      // Erase the whole batch together instead of rescanning every attribute
+      // store separately for each node and pin in the sweep.
+      def.graph->delete_nodes(dead);
     }
     return stats;
   }

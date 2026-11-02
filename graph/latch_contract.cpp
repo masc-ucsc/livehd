@@ -1507,13 +1507,19 @@ bool gated_latch_masked_off_impl(const Node& latch) {
     }
     return -1;  // combinational: what it computes is masked iff all its readers are
   };
-  // Bounded forward walk over the combinational cone: every path out of Q has to
-  // end in a masked reader. Exceeding the bound fails closed.
-  // (Flat graphs dedupe by node; an occurrence walk counts visits instead, since
-  // one class node stands for many instances there.)
+  // Every path out of Q must end in a masked reader. Bound unique combinational
+  // nodes, not reconvergent paths. The occurrence key includes the instance path:
+  // two instances of one definition can have different readers.
+  const auto node_key = [](const Node& node) {
+    if constexpr (std::is_same_v<Node, hhds::Node_class>) {
+      return node.get_class_index();
+    } else {
+      return node.get_occurrence_index();
+    }
+  };
   constexpr int                 kMaxCone = 4096;
   std::vector<Pin>              work{q};
-  absl::flat_hash_set<uint64_t> seen;
+  absl::flat_hash_set<decltype(node_key(latch))> seen;
   int                           visits = 0;
   while (!work.empty()) {
     const Pin from = work.back();
@@ -1527,10 +1533,8 @@ bool gated_latch_masked_off_impl(const Node& latch) {
         return false;
       }
       const auto sn = e.sink.get_master_node();
-      if constexpr (std::is_same_v<Node, hhds::Node_class>) {
-        if (!seen.insert(static_cast<uint64_t>(sn.get_class_index().value)).second) {
-          continue;
-        }
+      if (!seen.insert(node_key(sn)).second) {
+        continue;
       }
       if (++visits > kMaxCone) {
         return false;
@@ -3208,23 +3212,36 @@ int materialize_inline_clock_gates(hhds::Graph* g, std::string_view from_pass) {
     sink.del_sink(h.driver);
     it->second.connect_sink(sink);
   }
-  // 3. A gate (and the identity wrappers between it and the clock sinks) left
-  //    with no reader is dead: drop it, so its enable latch -- now read by
-  //    nothing -- is unobservable and no schedule counts it as a clock-role
-  //    latch. A gate still read as DATA stays, latch and all.
-  for (bool removed = true; removed;) {
-    removed = false;
-    std::vector<hhds::Node_class> dead;
-    for (auto n : g->body().nodes()) {
-      if (path_nodes.contains(n.get_class_index()) && !n.has_out_edges()) {
-        dead.push_back(n);
+  // 3. Retire the old gate and its now-unused fan-in, including its enable
+  // sampler and polarity logic. Keeping a dead latch leaves its !clk cone as
+  // a DATA consumer of the clock; through a parent Clock_cell that cannot be
+  // encoded at P=1 even though no observable endpoint uses it. A gate still
+  // read as DATA keeps every dependency. Stop at other state, hierarchy and
+  // Hotmux obligations, whose checks must survive even without a value reader.
+  std::vector<hhds::Node_class> dead;
+  for (auto node : g->body().nodes()) {
+    if (path_nodes.contains(node.get_class_index())) {
+      dead.push_back(node);
+    }
+  }
+  while (!dead.empty()) {
+    auto node = dead.back();
+    dead.pop_back();
+    path_nodes.erase(node.get_class_index());
+    const auto op = gu::type_op_of(node);
+    if (gu::is_builtin_node(node) || node.has_out_edges() || op == Ntype_op::Hotmux
+        || (Ntype::is_loop_last(op) && op != Ntype_op::Latch)) {
+      continue;
+    }
+    for (const auto& sink : node.inp_sorted_pins()) {
+      for (const auto& driver : sink.get_driver_pins()) {
+        auto producer = driver.get_master_node();
+        if (path_nodes.insert(producer.get_class_index()).second) {
+          dead.push_back(producer);
+        }
       }
     }
-    for (auto& n : dead) {
-      path_nodes.erase(n.get_class_index());
-      n.del_node();
-      removed = true;
-    }
+    node.del_node();
   }
   livehd::diag::info(from_pass, "clock-cell-materialized", "progress")
       .msg("{}: materialized {} inline clock gate(s) as Clock_cell in `{}`", from_pass, cell_of.size(), g->get_name())

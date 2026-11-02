@@ -240,7 +240,20 @@ sh_test(
     name = "yosys_clock_domain_test",
     srcs = ["tests/yosys_clock_domain_test.sh"],
     data = [":scripts"],
-    # Isolate the short solver-budget check from concurrent builds
-    # starving debug Yosys before its bounded check reaches the fallback.
-    tags = ["exclusive"],
+)
+
+# Lower large designs once before the proof budget; changed inputs in the same
+# work directory must still refute rather than reuse stale prepared designs.
+sh_test(
+    name = "lgcheck_prepared_inputs_smoke",
+    srcs = ["tests/yosys_prepared_inputs_smoke.sh"],
+    data = [":scripts"],
+)
+
+# Escaped SV instance delimiters must not become illegal RTLIL characters or
+# collide with nested instance paths and literal occurrence-encoding markers.
+sh_test(
+    name = "yosys_escaped_hierarchy_smoke",
+    srcs = ["tests/yosys_escaped_hierarchy_smoke.sh"],
+    data = [":scripts"],
 )

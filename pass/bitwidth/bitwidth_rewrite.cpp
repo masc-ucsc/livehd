@@ -39,7 +39,8 @@ bool Bitwidth_rewrite::scalar_concat_range(hhds::Node_class& node) {
     offset = lane.offset;
     width  = lane.width;
   }
-  if (value.is_invalid() || !fits_unsigned_window(value, width)) {
+  const int value_width = value.is_invalid() ? -1 : livehd::cprop_value::unsigned_width(value);
+  if (value_width < 0 || value_width > width) {
     return false;
   }
   if (offset == 0) {
@@ -49,8 +50,11 @@ bool Bitwidth_rewrite::scalar_concat_range(hhds::Node_class& node) {
   setup_sink_by_name(shift, "a").connect_driver(value);
   setup_sink_by_name(shift, "b").connect_driver(create_const(*current_graph, *Dlop::create_integer(offset)));
   auto output = shift.create_driver_pin(0);
-  set_ubits(output, width + offset);
-  livehd::cprop_value::active->capacities.insert_or_assign(output.get_class_index(), width + offset);
+  // Padding reserves lane positions; it does not widen the value. A downstream
+  // concat may already rely on this settled bound when it removes its mask.
+  const int result_width = std::max(1, value_width + offset);
+  set_ubits(output, result_width);
+  livehd::cprop_value::active->capacities.insert_or_assign(output.get_class_index(), result_width);
   livehd::cprop_value::remember(shift);
   return collapse_forward_for_pin(node, output);
 }

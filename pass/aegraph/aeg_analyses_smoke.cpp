@@ -52,4 +52,39 @@ TEST(AegAnalyses, DeclarationMatchesRuntimeAndIsSound) {
               static_cast<unsigned long long>(seed));
 }
 
+TEST(AegAnalyses, StorageWidthRetainsPaddingAcrossEquivalentShapes) {
+  using namespace livehd::aegraph;
+  Egraph     eg;
+  const auto leaf = eg.add_leaf();
+  rt::seed_leaf(eg, leaf, 1, true);
+  const auto    zero    = eg.add_const(*Dlop::create_integer(0));
+  const auto    one     = eg.add_const(*Dlop::create_integer(1));
+  const auto    four    = eg.add_const(*Dlop::create_integer(4));
+  const Operand lanes[] = {
+      {0, zero},
+      {1, four},
+      {2, leaf},
+      {3,  one}
+  };
+  bool       created = false;
+  const auto padded  = eg.intern(Ntype_op::Concat, {}, lanes, created);
+  EXPECT_EQ(rt::unsigned_bits(eg, padded), 1);
+  EXPECT_EQ(rt::storage_unsigned_bits(eg, padded), 5);
+
+  const Operand window[] = {
+      {0, padded},
+      {2,   zero},
+      {3,   four}
+  };
+  const auto read = eg.intern(Ntype_op::Get_mask, {}, window, created);
+  EXPECT_EQ(rt::unsigned_bits(eg, read), 1);
+  EXPECT_EQ(rt::storage_unsigned_bits(eg, read), 4);
+
+  // Equal integer values need not have equal physical shapes. Extraction can choose either member.
+  const auto alternatives = eg.add_union(leaf, padded);
+  EXPECT_EQ(rt::unsigned_bits(eg, alternatives), 1);
+  EXPECT_EQ(rt::storage_unsigned_bits(eg, alternatives), 5);
+  EXPECT_EQ(rt::storage_unsigned_bits(eg, eg.add_leaf()), -1);
+}
+
 }  // namespace

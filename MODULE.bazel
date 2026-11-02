@@ -24,28 +24,30 @@ bazel_dep(name = "rules_shell", version = "0.8.0")
 bazel_dep(name = "platforms", version = "1.1.0")
 bazel_dep(name = "rules_foreign_cc", version = "0.17.0")
 bazel_dep(name = "apple_support", version = "2.11.0", repo_name = "build_bazel_apple_support")
+# LLVM 23's Bazel overlay uses @llvm//platforms/config libc settings.
+bazel_dep(name = "llvm", version = "0.8.5")
 bazel_dep(name = "zlib-ng", version = "2.3.3.bcr.2", repo_name = "llvm_zlib")
 bazel_dep(name = "zstd", version = "1.5.7.bcr.3", repo_name = "llvm_zstd")
 
-# LLVM is linked into lhd for the opt-in direct simulator backend. LLVM's
+# LLVM is linked into lhd for the default direct simulator backend. LLVM's
 # official source archive carries its Bazel overlay under utils/bazel; expose
 # the raw tree and instantiate that overlay as @llvm-project. This remains
 # hermetic when LiveHD is consumed as a Bazel dependency and tracks the current
-# LLVM 22.1 patch release without relying on the system toolchain's libraries.
+# LLVM 23.1 patch release without relying on the system toolchain's libraries.
 http_archive(
     name = "llvm-raw",
     build_file_content = "exports_files([\"WORKSPACE\"])",
     patch_args = ["-p1"],
     patches = [
-        "//packages:llvm22-bazel-root.patch",
-        "//packages:llvm22-twoaddr-phys-map.patch",
-        "//packages:llvm22-scheduler-dead-defs.patch",
-        "//packages:llvm22-bt-narrow-count.patch",
-        "//packages:llvm22-known-bits-shifts.patch",
+        "//packages:llvm23-bazel-root.patch",
+        "//packages:llvm23-twoaddr-phys-map.patch",
+        "//packages:llvm23-scheduler-dead-defs.patch",
+        "//packages:llvm23-bt-narrow-count.patch",
+        "//packages:llvm23-known-bits-shifts.patch",
     ],
-    sha256 = "922f1817a0df7b1489272d18134ee0087a8b068828f87ac63b9861b1a9965888",
-    strip_prefix = "llvm-project-22.1.8.src",
-    urls = ["https://github.com/llvm/llvm-project/releases/download/llvmorg-22.1.8/llvm-project-22.1.8.src.tar.xz"],
+    sha256 = "819ecf7351f1a66f76b2d701d8942faaf5faeb324cb90c9d5b090de142434bb2",
+    strip_prefix = "llvm-project-23.1.4.src",
+    urls = ["https://github.com/llvm/llvm-project/releases/download/llvmorg-23.1.4/llvm-project-23.1.4.src.tar.xz"],
 )
 
 llvm_configure = use_repo_rule("@llvm-raw//utils/bazel:configure.bzl", "llvm_configure")
@@ -96,7 +98,7 @@ http_archive(
 # Native CPU placement; the repository uses LiveHD's HHDS/HLOP repositories.
 git_repository(
     name = "dreamplace",
-    commit = "11e40ba5250ace67042dc76678027dbbbbfcae11",
+    commit = "f41986172b596391d1f78c690ae0f128b418a753",
     remote = "https://github.com/masc-ucsc/DREAMPlace.git",
 )
 # For local co-development swap the git_repository above for:
@@ -143,7 +145,7 @@ git_repository(
 # hlop (Dlop value type + slop/dlop execution layer)
 git_repository(
     name = "hlop",
-    commit = "ee410b62213a40e082e9518597d1f2bfc1327c00",
+    commit = "3e90be765a75a5639c31ff08352e6033c0d83007",
     remote = "https://github.com/masc-ucsc/hlop.git",
 )
 # For local co-development swap the git_repository above for:
@@ -197,7 +199,7 @@ http_archive(
 
 git_repository(
     name = "hhds",
-    commit = "b80b2982335a2be1fced960db6e23c10a5816500",
+    commit = "c845095c6e5208a800cd8604ba6b1f7d69f5a022",
     remote = "https://github.com/masc-ucsc/hhds.git",
 )
 # For local co-development swap the git_repository above for:
@@ -232,9 +234,9 @@ http_archive(
 http_archive(
     name = "prpparse",
     build_file = "//packages:prpparse.BUILD",
-    integrity = "sha256-FXnIPlf1L3n9vaLjqUiYBWO0Mm06O9TCZGqUA6qgHuE=",
-    strip_prefix = "tree-sitter-pyrope-64a015dcb3a5b0034ca48b4a1137a26bbc744df8/prpparse",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/64a015dcb3a5b0034ca48b4a1137a26bbc744df8.zip"],
+    integrity = "sha256-0AGEab01h7WgvOfguvT2sQNuqTQxvItZgqsAP4g3xqM=",
+    strip_prefix = "tree-sitter-pyrope-439c9bbbaf0b812189bec9d146ec20da224f5924/prpparse",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/439c9bbbaf0b812189bec9d146ec20da224f5924.zip"],
 )
 
 # Local co-development swap (replace the archive above):
@@ -274,9 +276,9 @@ http_archive(
 http_archive(
     name = "tree_sitter_pyrope",
     build_file = "//packages:prpfmt.BUILD",
-    integrity = "sha256-FXnIPlf1L3n9vaLjqUiYBWO0Mm06O9TCZGqUA6qgHuE=",
-    strip_prefix = "tree-sitter-pyrope-64a015dcb3a5b0034ca48b4a1137a26bbc744df8",
-    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/64a015dcb3a5b0034ca48b4a1137a26bbc744df8.zip"],
+    integrity = "sha256-0AGEab01h7WgvOfguvT2sQNuqTQxvItZgqsAP4g3xqM=",
+    strip_prefix = "tree-sitter-pyrope-439c9bbbaf0b812189bec9d146ec20da224f5924",
+    urls = ["https://github.com/masc-ucsc/tree-sitter-pyrope/archive/439c9bbbaf0b812189bec9d146ec20da224f5924.zip"],
 )
 
 # Local co-development swap (replace the archive above):
@@ -289,7 +291,7 @@ http_archive(
 # OpenTimer: the masc-ucsc fork provides its own BUILD.bazel.
 git_repository(
     name = "opentimer",
-    commit = "763207ca8c1019c82b57fbb76cf702ca8785acf6",
+    commit = "1032de6c250b6187bba112e2689b92d84647c476",
     remote = "https://github.com/masc-ucsc/OpenTimer.git",
 )
 # For local co-development swap the git_repository above for:
@@ -307,10 +309,9 @@ http_archive(
 new_git_repository(
     name = "abc",
     build_file = "//packages:abc.BUILD",  # relative to external path
-    commit = "fbaae01487b05982739a5636df30687f41a10a2d",
-    patches = ["//packages:abc.patch", "//packages:abc-physical.patch"],
+    commit = "b6e16bddb089b3dd386c7c28a4ac26b410076b6f",
+    patches = ["//packages:abc.patch", "//packages:abc-physical.patch", "//packages:abc-buffer-heap.patch"],
     remote = "https://github.com/berkeley-abc/abc.git",
-    shallow_since = "1788673176 -0700",
 )
 
 # Yosys main, including its built-in read_slang frontend. sv-elab and

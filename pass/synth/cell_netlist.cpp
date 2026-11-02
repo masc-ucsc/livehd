@@ -106,4 +106,33 @@ std::vector<uint32_t> Cell_netlist::cell_readers() const {
   return count;
 }
 
+std::vector<uint32_t> Cell_netlist::boundary_buffer_aliases(const Cell_library& library) const {
+  auto                  remaining = cell_readers();
+  std::vector<uint32_t> producer(signals.size(), kNone);
+  std::vector<uint32_t> aliases(signals.size(), kNone);
+  std::vector<uint32_t> pending;
+  for (uint32_t i = 0; i < cells.size(); ++i) {
+    const auto& cell = cells[i];
+    if (cell.fanins.size() == 1 && cell.fanins.front() != kNone && library.is_identity(cell.type)) {
+      producer[cell.output] = i;
+      if (remaining[cell.output] == 0) {
+        pending.push_back(i);
+      }
+    }
+  }
+  // Remove terminal buffers before testing their drivers. Counting the raw
+  // mapped fanouts once retained whole buffer trees when each leaf was a CO
+  // decoupler that read-back itself removed. The queue is independent of cell
+  // order and visits every removed buffer and its one edge exactly once.
+  for (size_t next = 0; next < pending.size(); ++next) {
+    const auto& cell     = cells[pending[next]];
+    const auto  input    = cell.fanins.front();
+    aliases[cell.output] = input;
+    if (--remaining[input] == 0 && producer[input] != kNone) {
+      pending.push_back(producer[input]);
+    }
+  }
+  return aliases;
+}
+
 }  // namespace livehd::synth

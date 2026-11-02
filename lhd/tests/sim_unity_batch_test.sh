@@ -34,9 +34,10 @@ fail() {
   exit 1
 }
 
-# Twenty distinct leaves, kept as separate modules (inline=false) so each is its
-# own small generated TU, chained through one top: o = x + (0 + 1 + ... + 19).
-N=20
+# Fourteen distinct leaves keep more than twelve generated TUs after the
+# identity leaf is removed, enough for two unity buckets and the leaf_7 edit.
+# Keep the same batching, warm-build, dependency, and execution checks.
+N=14
 {
   for k in $(seq 0 $((N - 1))); do
     echo "pub comb leaf_$k(a:U8) -> (s:U8) {"
@@ -91,8 +92,8 @@ objects=$(grep -c '^build .*\.o: cc ' "$S/build.ninja")
 [ "$objects" -lt "$sources" ] || fail "batching did not reduce the TU count ($objects objects for $sources sources)"
 
 # ---- 2. the batched build simulates correctly ---------------------------------
-# 16 + (0 + 1 + ... + 19) = 206
-grep -q 'unity chain: got=206' "$W/run.log" || { cat "$W/run.log" >&2; fail "wrong simulation result from the batched build"; }
+# 16 + (0 + 1 + ... + 13) = 107
+grep -q 'unity chain: got=107' "$W/run.log" || { cat "$W/run.log" >&2; fail "wrong simulation result from the batched build"; }
 
 # ---- 3. a warm built-in rebuild has no work ----------------------------------
 touch "$W/build-marker"
@@ -125,7 +126,7 @@ touch "$W/build-marker"
 run_sim || { cat "$W/run.log" >&2; fail "lhd sim failed after the edit"; }
 [ -n "$(find "$S" -name "$batch_obj" -newer "$W/build-marker")" ] \
   || fail "rewriting $victim_cpp did not rebuild its batch $batch_obj"
-grep -q 'unity chain: got=206' "$W/run.log" || { cat "$W/run.log" >&2; fail "wrong simulation result after the edit"; }
+grep -q 'unity chain: got=107' "$W/run.log" || { cat "$W/run.log" >&2; fail "wrong simulation result after the edit"; }
 
 # ---- 5. the same contract under ninja -----------------------------------------
 if [ -z "${LHD_EXTERNAL_SIM:-}" ]; then
@@ -140,7 +141,7 @@ else
     --diag-fmt pretty --workdir "$NW" >"$W/ninja.log" 2>&1 \
     || { cat "$W/ninja.log" >&2; fail "lhd sim failed under ninja"; }
   [ -f "$NS/.ninja_log" ] || fail "sim.ninja=true did not build with ninja (no $NS/.ninja_log)"
-  grep -q 'unity chain: got=206' "$W/ninja.log" || { cat "$W/ninja.log" >&2; fail "wrong simulation result from the ninja build"; }
+  grep -q 'unity chain: got=107' "$W/ninja.log" || { cat "$W/ninja.log" >&2; fail "wrong simulation result from the ninja build"; }
   plan=$(ninja -C "$NS" -n 2>&1 | grep -v '^ninja: Entering')
   case "$plan" in
   *"no work to do"*) ;;

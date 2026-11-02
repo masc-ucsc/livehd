@@ -1244,18 +1244,27 @@ void Bitwidth::process_concat(hhds::Node_class& node) {
   // pass proved fits a lower lane (aegraph getmask_fits drops the Get_mask) is
   // stamped wider than that lane and trips concat-lane-width downstream.
   auto bits = total;
-  if (!lanes.empty() && !lanes[0].value.is_invalid()) {
-    const auto it = bwmap.find(lanes[0].value.get_class_index());
+  for (const auto& lane : lanes) {
+    if (lane.value.is_const() && const_of(lane.value).is_known_zero()) {
+      // Zero has a one-bit carrier but contributes no significant bits. Drop
+      // its entire leading window from the result bound, then inspect the
+      // next lane. Keeping that carrier bit widened a 25-bit nested pack to
+      // 26 bits when a later compile inferred its range again (Minion CSR).
+      bits -= lane.width;
+      continue;
+    }
+    const auto it = bwmap.find(lane.value.get_class_index());
     if (it != bwmap.end() && it->second.is_always_positive()) {
       const auto ubits = it->second.get_ubits();
-      if (ubits > 0 && ubits < lanes[0].width) {
-        bits = total - (lanes[0].width - ubits);
+      if (ubits > 0 && ubits < lane.width) {
+        bits -= lane.width - ubits;
       }
     }
+    break;  // only leading zero padding can disappear from the value bound
   }
 
   Bitwidth_range bw;
-  bw.set_ubits_range(bits);
+  bw.set_ubits_range(std::max(1, bits));
   adjust_bw(node.create_driver_pin(0), bw);
 }
 
@@ -1914,6 +1923,16 @@ void Bitwidth::bw_pass(hhds::Graph* g) {
       auto op        = type_op_of(node);
 
       if (inp_edges.empty() && op != Ntype_op::Sub && op != Ntype_op::LUT) {
+        // Empty Sum/Or/Xor have value zero, as in the formal encoder and
+        // Verilog emitter. Preserve that value at every reader before retiring
+        // the node; just deleting it leaves live casts and mux arms undriven.
+        if (op == Ntype_op::Sum || op == Ntype_op::Or || op == Ntype_op::Xor) {
+          auto zero = create_const(*current_graph, *Dlop::create_integer(0));
+          bwmap.insert_or_assign(zero.get_class_index(), Bitwidth_range(*Dlop::create_integer(0)));
+          for (const auto& sink : consumer_sinks(node)) {
+            livehd::graph_util::connect_folded_const(*current_graph, zero, sink);
+          }
+        }
         node.del_node();
         continue;
       }

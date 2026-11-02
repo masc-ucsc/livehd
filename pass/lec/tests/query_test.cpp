@@ -5,7 +5,6 @@
 // (and, in the lec.cross path, lgcheck). Graphs are built programmatically so
 // the test needs no reader.
 
-#include "acyclic.hpp"
 #include "query.hpp"
 
 #include <chrono>
@@ -19,6 +18,7 @@
 #include <tuple>
 #include <vector>
 
+#include "acyclic.hpp"
 #include "bitwidth.hpp"
 #include "cell.hpp"
 #include "cprop.hpp"
@@ -29,6 +29,7 @@
 #include "hhds/graph.hpp"
 #include "hlop/dlop.hpp"
 #include "inline_sub.hpp"
+#include "latch_contract.hpp"
 #include "node_util.hpp"
 #include "occurrence_materialize.hpp"
 #include "proof_prep.hpp"
@@ -590,6 +591,42 @@ TEST(LecState, UnknownWriteEnableMergesWriteAndHoldKnowledge) {
     const auto& next = encoded.outputs.at("\x01nxt:state");
     // 10?0 vs 100?: bit 1 differs and bit 0 is unknown; high bits agree.
     EXPECT_EQ(solver.simplify(next.x_mask), tm.mkBitVector(4, 3));
+  }
+}
+
+TEST(LecState, ConstantResetIsAnAssertedOrDisabledPredicate) {
+  for (bool reset : {false, true}) {
+    for (bool negative : {false, true}) {
+      hhds::GraphLibrary lib;
+      auto               io = lib.create_io("constant_reset");
+      io->add_input("clock", 0);
+      io->set_bits("clock", 1);
+      io->add_output("out", 1);
+      io->set_bits("out", 4);
+      auto graph = io->create_graph();
+      auto flop  = graph_util::create_typed_node(*graph, Ntype_op::Flop);
+      flop.set_name("state");
+      auto q = flop.create_driver_pin(0);
+      graph_util::set_ubits(q, 4);
+      q.connect_sink(graph->get_output_pin("out"));
+      graph->get_input_pin("clock").connect_sink(graph_util::setup_sink_by_name(flop, "clock_pin"));
+      for (const auto& [name, value] : std::vector<std::pair<const char*, int>>{
+               {      "din",        3},
+               {  "initial",       10},
+               {"reset_pin",    reset},
+               { "negreset", negative}
+      }) {
+        graph_util::create_const(*graph, *Dlop::create_integer(value)).connect_sink(graph_util::setup_sink_by_name(flop, name));
+      }
+      cvc5::TermManager          tm;
+      cvc5::Solver               solver(tm);
+      lec::Io_name_map<lec::Val> inputs;
+      inputs["state"] = {tm.mkBitVector(4, 7), 4, false};
+      lec::Encoder encoder(tm);
+      auto         encoded = encoder.encode(graph.get(), &inputs);
+      ASSERT_TRUE(encoded.ok) << encoded.error;
+      EXPECT_EQ(solver.simplify(encoded.outputs.at("\x01nxt:state").term), tm.mkBitVector(4, reset ? 10 : 3));
+    }
   }
 }
 
@@ -1769,4 +1806,114 @@ TEST(VerifyEngine, NoObligationRunIsProvenNothingToCheck) {
   EXPECT_TRUE(r.nothing_to_check) << r.detail;
   EXPECT_FALSE(r.cex_free_box);
   EXPECT_EQ(lec::verify_outcome(r, true), lec::Outcome::Refuted_vacuous) << r.detail;
+}
+
+// Recognizing a child ICG removes its enable sampler from the scheduled machine. Its old
+// !clk cone must also disappear when it has no live reader: the parent may supply clk through
+// another Clock_cell, which has no sampled DATA value in the single-period encoding.
+TEST(ClockGatePrep, NestedInlineGateLeavesNoUnobservableClockDataCone) {
+  namespace gu = livehd::graph_util;
+  for (const bool observable_clock : {false, true}) {
+    SCOPED_TRACE(observable_clock);
+    hhds::GraphLibrary lib;
+    auto               child_io = lib.create_io("child_gate");
+    child_io->add_input("clk", 1);
+    child_io->add_input("en", 2);
+    child_io->add_input("d", 3);
+    child_io->add_output("q", 4);
+    for (const char* port : {"clk", "en", "d", "q"}) {
+      child_io->set_bits(port, 1);
+      child_io->set_unsign(port, true);
+    }
+    if (observable_clock) {
+      child_io->add_output("clock_data", 5);
+      child_io->set_bits("clock_data", 1);
+      child_io->set_unsign("clock_data", true);
+    }
+    auto child = child_io->create_graph();
+    auto low   = gu::create_typed_node(*child, Ntype_op::EQ);
+    child->get_input_pin("clk").connect_sink(gu::setup_sink_pid(low, 0));
+    gu::create_const(*child, *Dlop::create_integer(0)).connect_sink(gu::setup_sink_pid(low, 1));
+    gu::set_ubits(low.create_driver_pin(0), 1);
+    auto latch = gu::create_typed_node(*child, Ntype_op::Latch);
+    low.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(latch, "enable"));
+    child->get_input_pin("en").connect_sink(gu::setup_sink_by_name(latch, "din"));
+    gu::set_ubits(latch.create_driver_pin(0), 1);
+    auto gate = gu::create_typed_node(*child, Ntype_op::And);
+    child->get_input_pin("clk").connect_sink(gu::setup_sink_pid(gate, 0));
+    latch.create_driver_pin(0).connect_sink(gu::setup_sink_pid(gate, 0));
+    gu::set_ubits(gate.create_driver_pin(0), 1);
+    auto flop = gu::create_typed_node(*child, Ntype_op::Flop);
+    gate.create_driver_pin(0).connect_sink(gu::setup_sink_by_name(flop, "clock_pin"));
+    child->get_input_pin("d").connect_sink(gu::setup_sink_by_name(flop, "din"));
+    gu::set_ubits(flop.create_driver_pin(0), 1);
+    flop.create_driver_pin(0).connect_sink(child->get_output_pin("q"));
+    if (observable_clock) {
+      gate.create_driver_pin(0).connect_sink(child->get_output_pin("clock_data"));
+    }
+    ASSERT_EQ(livehd::latch_contract::materialize_inline_clock_gates(child.get(), "test"), 1);
+
+    if (observable_clock) {
+      const auto plan = lec::plan_phases(child.get());
+      ASSERT_TRUE(plan.ok) << plan.error;
+      EXPECT_TRUE(plan.multi) << "a clock read as data must keep the latch and its phase schedule";
+      cvc5::TermManager tm;
+      lec::Encoder      encoder(tm);
+      encoder.set_phase_plan(&plan, static_cast<int>(lec::Phase::Rise));
+      const auto encoded = encoder.encode(child.get());
+      ASSERT_TRUE(encoded.ok) << encoded.error;
+      EXPECT_TRUE(encoded.outputs.contains("clock_data"));
+      continue;
+    }
+
+    auto top_io = lib.create_io("top");
+    for (const auto& [name, id] : {
+             std::pair{"clk", 1},
+             {"en0", 2},
+             {"en1", 3},
+             {  "d", 4}
+    }) {
+      top_io->add_input(name, id);
+      top_io->set_bits(name, 1);
+      top_io->set_unsign(name, true);
+    }
+    top_io->add_output("q", 5);
+    top_io->set_bits("q", 1);
+    top_io->set_unsign("q", true);
+    auto top   = top_io->create_graph();
+    auto outer = gu::create_typed_node(*top, Ntype_op::Clock_cell);
+    top->get_input_pin("clk").connect_sink(gu::setup_sink_by_name(outer, "clk_ref"));
+    top->get_input_pin("en0").connect_sink(gu::setup_sink_by_name(outer, "en"));
+    gu::set_ubits(outer.create_driver_pin(0), 1);
+    auto call = gu::create_typed_node(*top, Ntype_op::Sub);
+    call.set_subnode(child_io);
+    outer.create_driver_pin(0).connect_sink(call.create_sink_pin(1));
+    top->get_input_pin("en1").connect_sink(call.create_sink_pin(2));
+    top->get_input_pin("d").connect_sink(call.create_sink_pin(3));
+    gu::set_ubits(call.create_driver_pin(4), 1);
+    call.create_driver_pin(4).connect_sink(top->get_output_pin("q"));
+    const auto plan = lec::plan_phases(top.get());
+    ASSERT_TRUE(plan.ok) << plan.error;
+    ASSERT_TRUE(plan.needs_plan());
+    ASSERT_FALSE(plan.multi);
+    cvc5::TermManager tm;
+    lec::Encoder      encoder(tm);
+    encoder.set_phase_plan(&plan, -1);
+    const auto encoded = encoder.encode(top.get());
+    ASSERT_TRUE(encoded.ok) << encoded.error;
+  }
+}
+
+TEST(LecOutcome, CrashBelowMemoryCapIsNotResourceTimeout) {
+  using lec::Outcome;
+  const std::string detail = "isolated proof worker died: killed by signal 11 (Segmentation fault); engine crash "
+                            "(peak RSS 1052 MiB, far below the 580005 MiB memory backstop): a LiveHD bug to report";
+  EXPECT_EQ(lec::undecided_outcome(detail, false, false), Outcome::Refuted_unexplained);
+  EXPECT_EQ(lec::undecided_outcome("ENGINE CRASH below RLIMIT_AS", false, true), Outcome::Refuted_unexplained);
+  EXPECT_EQ(lec::undecided_outcome("engine crash: out of memory; allocation failed at RLIMIT_AS", false, false),
+            Outcome::Timeout_memory);
+  lec::Query_result result;
+  result.verdict = Verdict::Undecided;
+  result.detail  = detail;
+  EXPECT_EQ(lec::query_outcome(result, false), Outcome::Refuted_unexplained);
 }

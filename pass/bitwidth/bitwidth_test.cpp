@@ -18,6 +18,65 @@
 
 namespace {
 
+// An operand-free OR is the neutral zero value in the graph's formal and
+// Verilog semantics. Deleting it without reconnecting its readers used to
+// leave Sext's data input absent and inflate a five-bit mux to 32769 bits.
+TEST(BitwidthInfer, EmptyZeroValuedOperatorsKeepTheirConsumersConnected) {
+  namespace gu = livehd::graph_util;
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_bitwidth_empty_zero_operators");
+  for (const auto op : {Ntype_op::Or, Ntype_op::Sum, Ntype_op::Xor}) {
+    auto io = lib.create_io("empty_" + std::string(Ntype::get_name(op)));
+    io->add_input("sel", 1);
+    io->set_bits("sel", 1);
+    io->set_unsign("sel", true);
+    io->add_input("data", 2);
+    io->set_bits("data", 5);
+    io->set_unsign("data", true);
+    io->add_output("direct", 3);
+    io->set_bits("direct", 5);
+    io->add_output("extended", 4);
+    io->set_bits("extended", 5);
+    io->add_output("selected", 5);
+    io->set_bits("selected", 5);
+    auto g = io->create_graph();
+    gu::set_ubits(g->get_input_pin("sel"), 1);
+    gu::set_ubits(g->get_input_pin("data"), 5);
+    const auto zero = gu::create_typed_node(*g, op, 5).create_driver_pin(0);
+    zero.connect_sink(g->get_output_pin("direct"));
+    auto sext = gu::create_typed_node(*g, Ntype_op::Sext, 5);
+    zero.connect_sink(gu::setup_sink_by_name(sext, "a"));
+    gu::create_const(*g, *Dlop::create_integer(5)).connect_sink(gu::setup_sink_by_name(sext, "b"));
+    auto extended = sext.create_driver_pin(0);
+    gu::set_sbits(extended, 5);
+    extended.connect_sink(g->get_output_pin("extended"));
+    auto mux = gu::create_typed_node(*g, Ntype_op::Mux, 5);
+    g->get_input_pin("sel").connect_sink(mux.create_sink_pin(0));
+    g->get_input_pin("data").connect_sink(mux.create_sink_pin(1));
+    extended.connect_sink(mux.create_sink_pin(2));
+    mux.create_driver_pin(0).connect_sink(g->get_output_pin("selected"));
+
+    Bitwidth(10).do_trans(g);
+    for (const auto port : {"direct", "extended"}) {
+      const auto driver = g->get_output_pin(port).get_driver_pin();
+      ASSERT_FALSE(driver.is_invalid()) << port;
+      ASSERT_TRUE(driver.is_const()) << port;
+      EXPECT_TRUE(gu::const_of(driver).is_known_zero()) << port;
+    }
+    const auto result = g->get_output_pin("selected").get_driver_pin();
+    ASSERT_FALSE(result.is_invalid());
+    EXPECT_EQ(gu::bits_of(result), 5);
+    // Mux arms have numeric port ids; probe the connected pin directly.
+    bool zero_arm = false;
+    for (const auto sink : result.get_master_node().inp_sorted_pins()) {
+      if (sink.get_port_id() == 2) {
+        const auto driver = sink.get_driver_pin();
+        zero_arm          = driver.is_const() && gu::const_of(driver).is_known_zero();
+      }
+    }
+    EXPECT_TRUE(zero_arm);
+  }
+}
+
 TEST(BitwidthInfer, UnsizedShiftRecoversFromSignedCountRange) {
   namespace gu = livehd::graph_util;
   auto& lib    = livehd::Hhds_graph_library::instance("lgdb_bitwidth_signed_count");
@@ -1001,6 +1060,91 @@ TEST(BitwidthInfer, ConcatWidthIsSumOfDeclaredLanes) {
   EXPECT_EQ(run_and_read_driver(g, op), 8) << "a concat is exactly the sum of its declared lane widths";
   EXPECT_TRUE(livehd::graph_util::is_unsign(op.create_driver_pin(0)))
       << "every lane is masked into its own window, so a concat result is never negative";
+}
+
+// A sparse pack may have a wide declared lane but a much tighter settled
+// value range. Lowering it to SHL must keep that range for narrow consumers.
+TEST(BitwidthInfer, SparseConcatShiftPreservesSettledLaneBound) {
+  namespace gu = livehd::graph_util;
+  auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_sparse_concat_shift");
+  auto io = lib.create_io("sparse_concat_shift");
+  io->add_input("bit", 1);
+  io->set_bits("bit", 1);
+  io->set_unsign("bit", true);
+  io->add_input("data", 2);
+  io->set_bits("data", 8);
+  io->set_unsign("data", true);
+  io->add_output("out", 3);
+  io->set_bits("out", 12);
+  auto g = io->create_graph();
+  auto constant = [&](int value) { return gu::create_const(*g, *Dlop::create_integer(value)); };
+  auto packed = gu::create_typed_node(*g, Ntype_op::Concat);
+  g->get_input_pin("bit").connect_sink(gu::setup_sink_pid(packed, 0));
+  constant(41).connect_sink(gu::setup_sink_pid(packed, 1));
+  constant(0).connect_sink(gu::setup_sink_pid(packed, 2));
+  constant(3).connect_sink(gu::setup_sink_pid(packed, 3));
+  auto outer = gu::create_typed_node(*g, Ntype_op::Concat);
+  packed.create_driver_pin(0).connect_sink(gu::setup_sink_pid(outer, 0));
+  constant(4).connect_sink(gu::setup_sink_pid(outer, 1));
+  g->get_input_pin("data").connect_sink(gu::setup_sink_pid(outer, 2));
+  constant(8).connect_sink(gu::setup_sink_pid(outer, 3));
+  outer.create_driver_pin(0).connect_sink(g->get_output_pin("out"));
+  ASSERT_NO_THROW(Bitwidth{10}.do_trans(g));
+  const auto out = g->get_output_pin("out").get_driver_pin();
+  ASSERT_FALSE(out.is_invalid());
+  EXPECT_EQ(gu::bits_of(out), 12);
+  bool shifted = false;
+  for (auto node : g->body().nodes()) {
+    if (gu::type_op_of(node) == Ntype_op::Concat) {
+      EXPECT_TRUE(gu::concat_lane_violation(gu::concat_lanes(node)).empty());
+    } else if (gu::type_op_of(node) == Ntype_op::SHL) {
+      shifted = true;
+      EXPECT_EQ(gu::bits_of(node.create_driver_pin(0)), 4);
+    }
+  }
+  EXPECT_TRUE(shifted);
+}
+
+TEST(BitwidthInfer, LeadingZeroConcatLanesPreserveValueBound) {
+  namespace gu = livehd::graph_util;
+  for (int zero_lanes : {1, 2}) {
+    auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_leading_zero_concat_" + std::to_string(zero_lanes));
+    auto  io  = lib.create_io("leading_zero_concat");
+    io->add_input("high", 1);
+    io->set_bits("high", 24);
+    io->set_unsign("high", true);
+    io->add_input("low", 2);
+    io->set_bits("low", 1);
+    io->set_unsign("low", true);
+    io->add_output("out", 3);
+    io->set_bits("out", 26);
+    auto       graph    = io->create_graph();
+    const auto constant = [&](int value) { return gu::create_const(*graph, *Dlop::create_integer(value)); };
+    auto       inner    = gu::create_typed_node(*graph, Ntype_op::Concat);
+    uint32_t   port     = 0;
+    for (int i = 0; i < zero_lanes; ++i) {
+      constant(0).connect_sink(inner.create_sink_pin(port++));
+      constant(i + 1).connect_sink(inner.create_sink_pin(port++));
+    }
+    graph->get_input_pin("high").connect_sink(inner.create_sink_pin(port++));
+    constant(24).connect_sink(inner.create_sink_pin(port++));
+    graph->get_input_pin("low").connect_sink(inner.create_sink_pin(port++));
+    constant(1).connect_sink(inner.create_sink_pin(port++));
+    auto outer = gu::create_typed_node(*graph, Ntype_op::Concat);
+    inner.create_driver_pin(0).connect_sink(outer.create_sink_pin(0));
+    constant(25).connect_sink(outer.create_sink_pin(1));
+    graph->get_input_pin("low").connect_sink(outer.create_sink_pin(2));
+    constant(1).connect_sink(outer.create_sink_pin(3));
+    outer.create_driver_pin(0).connect_sink(graph->get_output_pin("out"));
+    ASSERT_NO_THROW(Bitwidth{10}.do_trans(graph));
+    EXPECT_EQ(gu::bits_of(inner.create_driver_pin(0)), 25);
+    EXPECT_EQ(gu::bits_of(graph->get_output_pin("out").get_driver_pin()), 26);
+    for (auto node : graph->body().nodes()) {
+      if (gu::type_op_of(node) == Ntype_op::Concat) {
+        EXPECT_TRUE(gu::concat_lane_violation(gu::concat_lanes(node)).empty());
+      }
+    }
+  }
 }
 
 TEST(BitwidthInfer, OversizedConcatLaneReportsError) {

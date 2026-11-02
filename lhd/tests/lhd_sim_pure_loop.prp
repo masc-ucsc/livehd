@@ -1,5 +1,5 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-pub comb pure_loop(x:U128, select:U4, signed_value:S8) -> (picked:U32, encoded:U2, matrix:U16, shifted:S16, prefix:U8) {
+pub comb pure_loop(x:U128, select:U4, signed_value:S8) -> (picked:U32, encoded:U2, matrix:U8, shifted:S16, prefix:U8) {
   mut value:U32 = 0
   mut index_bits:U2 = 0
   for i in 0..<4 {
@@ -10,8 +10,10 @@ pub comb pure_loop(x:U128, select:U4, signed_value:S8) -> (picked:U32, encoded:U
   }
   picked = value
   encoded = index_bits
+  // Two rows suffice to exercise nested indexed writes; retain all four
+  // columns and the independent 128-bit multihot data-path coverage.
   matrix = 0
-  for row in 0..<4 {
+  for row in 0..<2 {
     for column in 0..<4 { matrix#[row*4 + column] = select#[column] }
   }
   shifted = signed_value << 3
@@ -29,17 +31,17 @@ test pure_loop.corners {
   dut.signed_value = -7
   dut.select = 15
   step
-  assert(dut.picked == 15 and dut.encoded == 3 and dut.matrix == 65535)
+  assert(dut.picked == 15 and dut.encoded == 3 and dut.matrix == 255)
   assert(dut.shifted == -56 and dut.prefix == 0)
   dut.select = 0
   step
   assert(dut.picked == 0 and dut.encoded == 0 and dut.matrix == 0 and dut.prefix == 10)
   dut.select = 8
   step
-  assert(dut.picked == 8 and dut.encoded == 3 and dut.matrix == 34952 and dut.prefix == 6)
+  assert(dut.picked == 8 and dut.encoded == 3 and dut.matrix == 136 and dut.prefix == 6)
   dut.select = 6
   dut.signed_value = -128
   step
-  assert(dut.picked == 6 and dut.encoded == 3 and dut.matrix == 26214 and dut.prefix == 1)
+  assert(dut.picked == 6 and dut.encoded == 3 and dut.matrix == 102 and dut.prefix == 1)
   assert(dut.shifted == -1024)
 }

@@ -13,6 +13,11 @@ LHD="${LHD:-lhd/lhd}"
 [ -x "$LHD" ] || { echo "FAIL: lhd binary not found" >&2; exit 3; }
 W="${TEST_TMPDIR:-/tmp/lhd_lec_design_assume_$$}"
 mkdir -p "$W"
+part="${1:-all}"
+case "$part" in
+  all | hierarchy | checked | checked_impl | checked_ref | sanctioned | library | contradictory) ;;
+  *) echo "FAIL: unknown test part $part" >&2; exit 1 ;;
+esac
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
 cat >"$W/ref_sub.prp" <<'EOF'
@@ -36,6 +41,18 @@ const impl_sub = import("impl_sub")
 pub comb impl_top(a:U8) -> (o:U8) { o = impl_sub.sub(a=a).o }
 EOF
 
+cat >"$W/uncheckable.prp" <<'EOF'
+pub comb dut(a:U8) -> (o:U8) {
+  assume(a < 4)
+  o = a & 3
+}
+EOF
+cat >"$W/golden.v" <<'EOF'
+module dut(input [7:0] a, output [7:0] o);
+  assign o = a;
+endmodule
+EOF
+if [ "$part" = all ] || [ "$part" = hierarchy ]; then
 if ! "$LHD" lec --set formal.effort=proof --ref "$W/ref_top.prp" --impl "$W/impl_top.prp" \
      --ref-top ref_top --impl-top impl_top  \
      --set formal.engine=ind --workdir "$W/assumed_w" >"$W/assumed.out" 2>&1; then
@@ -63,6 +80,9 @@ grep -q 'REFUTED-cex' "$W/plain.out" \
   || { cat "$W/plain.out" >&2; fail "the no-assumption mismatch did not report REFUTED"; }
 echo "PASS: removing the assumption exposes the mismatch"
 
+fi
+
+if [ "$part" = all ] || [ "$part" = checked ] || [ "$part" = checked_impl ]; then
 # A plain `assume` on a selected-top input is a different animal from the
 # assume_nocheck contract above: every plain assume is CHECKED (docs
 # 05-assert), and over a free top input it refutes -- pass.formal reports
@@ -71,17 +91,6 @@ echo "PASS: removing the assumption exposes the mismatch"
 # of a comparison whose ref never made it -- `o = a & 3` vs `o = a` differ at
 # every a >= 4 and would come back "PROVEN equivalent" with exit 0. lec must
 # compare the full input space instead and REFUTE.
-cat >"$W/uncheckable.prp" <<'EOF'
-pub comb dut(a:U8) -> (o:U8) {
-  assume(a < 4)
-  o = a & 3
-}
-EOF
-cat >"$W/golden.v" <<'EOF'
-module dut(input [7:0] a, output [7:0] o);
-  assign o = a;
-endmodule
-EOF
 if "$LHD" lec --set formal.effort=proof --ref "$W/golden.v" --impl "$W/uncheckable.prp" --top dut \
      --workdir "$W/uncheckable_w" >"$W/uncheckable.out" 2>&1; then
   cat "$W/uncheckable.out" >&2
@@ -93,6 +102,9 @@ grep -q 'assume_nocheck' "$W/uncheckable.out" \
   || { cat "$W/uncheckable.out" >&2; fail "the refute must name the sanctioned spelling"; }
 grep -q "^lec: .* REFUTED-cex" "$W/uncheckable.out" \
   || { cat "$W/uncheckable.out" >&2; fail "lec must compare the full input space and refute"; }
+fi
+
+if [ "$part" = all ] || [ "$part" = checked ] || [ "$part" = checked_ref ]; then
 # The same on the --ref side, which is lowered FIRST: its assume-refuted is a
 # deferred error (it fails the run) and must not abort the impl side's
 # lowering before lec has compared the two.
@@ -107,6 +119,9 @@ grep -q "^lec: .* REFUTED-cex" "$W/uncheckable_ref.out" \
   || { cat "$W/uncheckable_ref.out" >&2; fail "lec must compare the full input space and refute with the assume on the ref side"; }
 echo "PASS: lec checks a plain top IO assume instead of proving under it (either side)"
 
+fi
+
+if [ "$part" = all ] || [ "$part" = sanctioned ]; then
 # ...and the refute is about the missing CONTRACT, not about assumptions in
 # lec: either sanctioned spelling of the same constraint still narrows the miter
 # and proves it (a & 3 == a for every a < 4).
@@ -127,6 +142,9 @@ grep -q 'PROVEN under 1 unchecked assume' "$W/nocheck.out" \
   || { cat "$W/nocheck.out" >&2; fail "the assume_check=false run must report its active assumption"; }
 echo "PASS: both sanctioned spellings still constrain the miter"
 
+fi
+
+if [ "$part" = all ] || [ "$part" = library ]; then
 # An `lg:` side is not recompiled by lec, so the CLASS of an active assume comes
 # from its compile-time stamp, not lec's own assume_check: a library built with
 # formal.assume_check=false accepted the constraint without proof, and a later
@@ -148,6 +166,9 @@ grep -q 'proven assume' "$W/lg_nocheck.out" \
   && { cat "$W/lg_nocheck.out" >&2; fail "an unproven lg: assume was labeled proven"; }
 echo "PASS: an lg: side's unproven assume is disclosed as unchecked"
 
+fi
+
+if [ "$part" = all ] || [ "$part" = contradictory ]; then
 # Even a structurally identical self-LEC must check its active environment:
 # two explicit constraints whose conjunction is empty may not be laundered by
 # the hierarchy's no-solver structural-identity shortcut.
@@ -167,3 +188,4 @@ fi
 grep -q 'CONTRADICTORY' "$W/contra.out" \
   || { cat "$W/contra.out" >&2; fail "contradictory assumptions were not diagnosed"; }
 echo "PASS: contradictory design assumptions reject vacuous LEC"
+fi

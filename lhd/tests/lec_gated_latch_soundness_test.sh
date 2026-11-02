@@ -226,6 +226,8 @@ sed 's/(f ^ d)/(f + d)/' "$W/nr_ref.v" > "$W/nr_ref_add.v"
 expect 3a_negedge_vs_cells proven "$W/nr_impl.v" "$W/nr_ref.v" dut
 grep -q "normalization failed" <<<"$O" && fail "3a: still stops at edge normalization"
 expect 3b_negedge_vs_cells_mutant refuted "$W/nr_impl.v" "$W/nr_ref_add.v" dut
+expect 3a_negedge_vs_cells_bmc proven "$W/nr_impl.v" "$W/nr_ref.v" dut --set formal.engine=bmc
+expect 3b_negedge_vs_cells_mutant_bmc refuted "$W/nr_impl.v" "$W/nr_ref_add.v" dut --set formal.engine=bmc
 
 # The reported shape: abc_icg_mix mapped onto ICG + DFF cells (a negedge
 # register behind a gate is an INV after the ICG cell), compared on the Verilog

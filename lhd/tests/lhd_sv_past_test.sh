@@ -29,6 +29,19 @@ fail() {
   exit 1
 }
 
+# Each group keeps the original fixtures, bounds and positive/negative checks.
+GROUP="${1:-all}"
+case "$GROUP" in
+  all)
+    for group in history edges refusals; do
+      "$0" "$group" || exit $?
+    done
+    exit 0
+    ;;
+  history|history_basic|history_multi|edges|refusals) ;;
+  *) fail "unknown check group: $GROUP" ;;
+esac
+
 # A deterministic internal reset from a declared init value, so the design
 # starts in a known state without a free reset input.
 RST='  reg [1:0] rc = 2'"'"'d0;
@@ -41,6 +54,7 @@ RST='  reg [1:0] rc = 2'"'"'d0;
     rst_dd <= rst_d;
   end'
 
+if [ "$GROUP" = history ] || [ "$GROUP" = history_basic ]; then
 # ---- $past at depth 1 and 2 -------------------------------------------------
 cat >"$W/good.sv" <<EOF
 module good(input clk, input [7:0] d, output reg [7:0] q1, output reg [7:0] q2);
@@ -77,6 +91,9 @@ RC=$?
 [ "$RC" -eq 10 ] || fail "a false \$past claim must refute: (rc=$RC, want the counterexample class 10) $(cat "$OUT")"
 grep -q "^formal verify: '[^']*' REFUTED-cex" "$OUT" || fail "expected REFUTED: $(cat "$OUT")"
 
+fi
+
+if [ "$GROUP" = "edges" ]; then
 # ---- the edge functions are sugar over one cycle of history ------------------
 # State the identities and prove them, so a wrong polarity ($rose lowered as
 # $fell) cannot pass.
@@ -109,6 +126,9 @@ RC=$?
 [ "$RC" -eq 10 ] || fail "\$rose == \$fell must refute: (rc=$RC, want the counterexample class 10) $(cat "$OUT")"
 grep -q "^formal verify: '[^']*' REFUTED-cex" "$OUT" || fail "expected REFUTED for rose == fell: $(cat "$OUT")"
 
+fi
+
+if [ "$GROUP" = "refusals" ]; then
 # ---- refused, not guessed ---------------------------------------------------
 # An expression argument would have to be re-lowered in the epilogue where its
 # operands may not be live, so it is refused rather than approximated.
@@ -123,6 +143,9 @@ OUT="$W/expr.out"
 [ $? -ne 0 ] || fail "\$past over an expression must be refused: $(cat "$OUT")"
 grep -qi 'past' "$OUT" || fail "the refusal must name \$past: $(cat "$OUT")"
 
+fi
+
+if [ "$GROUP" = history ] || [ "$GROUP" = history_multi ]; then
 # ---- ONE signal at TWO depths, and TWO signals at once ----------------------
 # The chain is per signal and indexed by depth, so these are where an off-by-one
 # in the indexing or a chain shared between the wrong symbols shows up. The
@@ -170,6 +193,9 @@ RC=$?
 [ "$RC" -eq 10 ] || fail "depth 1 is not depth 3; this must refute: (rc=$RC, want the counterexample class 10) $(cat "$OUT")"
 grep -q "^formal verify: '[^']*' REFUTED-cex" "$OUT" || fail "expected REFUTED for the swapped depth: $(cat "$OUT")"
 
+fi
+
+if [ "$GROUP" = "edges" ]; then
 # ---- $past of a REGISTER, and a WIDE $stable/$changed -----------------------
 # Everything above samples an input. A register is the other source, and its
 # value is settled by the body -- the update must still capture the right one.
@@ -201,6 +227,9 @@ grep -qE "^formal verify: '[^']*' PROVEN-(full|bounded)" "$OUT" || fail "expecte
 # source; it is reachable from the Pyrope side, which lhd_formal_past_test
 # covers.
 
+fi
+
+if [ "$GROUP" = "refusals" ]; then
 # ---- a non-literal depth is refused, not guessed ----------------------------
 # The chain length has to be known before the body is lowered, so a runtime
 # depth cannot be served; refuse rather than silently pick one.
@@ -214,6 +243,9 @@ OUT="$W/dyn.out"
 "$LHD" formal verify "$W/dyn.sv" --top dyn --workdir "$W/wd" --diag-fmt pretty >"$OUT" 2>&1
 [ $? -ne 0 ] || fail "a non-literal \$past depth must be refused: $(cat "$OUT")"
 
+fi
+
+if [ "$GROUP" = "edges" ]; then
 # ---- $rose/$fell read the LSB, not "any bit set" ----------------------------
 # IEEE 1800-2017 16.9.3 defines $rose/$fell on the LEAST SIGNIFICANT BIT of the
 # expression. The two readings agree on a 1-bit operand, which is why every
@@ -237,4 +269,6 @@ OUT="$W/lsb.out"
   || fail "\$rose/\$fell must read the LSB of a wide operand: $(cat "$OUT")"
 grep -qE "^formal verify: '[^']*' PROVEN-(full|bounded)" "$OUT" || fail "expected PROVEN for the LSB case: $(cat "$OUT")"
 
-echo "PASS: SystemVerilog \$past/\$rose/\$fell/\$stable/\$changed lower to a design history chain"
+fi
+
+echo "PASS: SystemVerilog \$past/\$rose/\$fell/\$stable/\$changed lower to a design history chain ($GROUP)"

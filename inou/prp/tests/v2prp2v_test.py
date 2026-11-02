@@ -81,7 +81,10 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-i", "--input", required=True, help="golden .v file")
     ap.add_argument("--native-only", action="store_true", help="check the emitted Pyrope against its handwritten twin")
+    ap.add_argument("--verilog-only", action="store_true", help="check round-trip Verilog, separately from the native Pyrope comparison")
     args = ap.parse_args()
+    if args.native_only and args.verilog_only:
+        ap.error("select at most one independent comparison")
 
     lhd = "./bazel-bin/lhd/lhd" if os.path.exists("./bazel-bin/lhd/lhd") else "./lhd/lhd"
     if not os.path.exists(lhd):
@@ -203,35 +206,37 @@ def main():
             name, emitted_text))
         return 1
 
-    # 1b. Check the emitted Pyrope against the hand-written Pyrope twin. This
-    # is the unique assertion formerly made by every prp-v2prp-* target.
-    impl_arg = "pyrope:" + prpdir + "/" if len(prps) > 1 else "pyrope:" + emitted
-    native = run_lec(
-        [lhd, "lec", "--impl", impl_arg, "--ref", "pyrope:" + ref_prp,
-         "--impl-top", vtop, "--ref-top", ptop,
-         "--workdir", os.path.join(work, "w_native_check")], timeout=native_timeout)
-    # A `:lec_expect: refuted` pair is a MUTATED golden: its round trip must
-    # still differ from the handwritten Pyrope. The Verilog leg below compares
-    # the golden with its OWN round trip, so it must prove either way.
-    # `:v2prp_native_expect:` overrides it for this leg alone: the native leg
-    # runs the handwritten Pyrope as the REFERENCE against the round trip of the
-    # golden, the reverse of the equiv test's direction. A Pyrope twin that
-    # REFINES its golden (power-on contents the golden leaves undefined) proves
-    # there but must refute here: a defined reference against an uninitialized
-    # implementation is REFUTED-cex (LEC initial-state ruling 2026-10-16).
-    expect = (_header(ref_prp, "v2prp_native_expect") or _header(ref_prp, "lec_expect") or "proven").lower()
-    native_status = verdict(native)
-    if expect == "refuted":
-        native_failed = native_status != "refuted"  # REFUTED-cex, exit 10
-    else:
-        native_failed = not acceptable(native_status)
-    if native_failed:
-        print("{} - v2prp2v - FAILED: native Pyrope check did not report {}".format(name, expect.upper()))
-        print(native.stdout.decode("utf-8", "replace"))
-    else:
-        print("{} - v2prp2v - native Pyrope check {}".format(name, "refuted as expected" if expect == "refuted" else native_status))
-    if args.native_only:
-        return int(native_failed)
+    native_failed = False
+    if not args.verilog_only:
+        # 1b. Check the emitted Pyrope against the hand-written Pyrope twin. This
+        # is the unique assertion formerly made by every prp-v2prp-* target.
+        impl_arg = "pyrope:" + prpdir + "/" if len(prps) > 1 else "pyrope:" + emitted
+        native = run_lec(
+            [lhd, "lec", "--impl", impl_arg, "--ref", "pyrope:" + ref_prp,
+             "--impl-top", vtop, "--ref-top", ptop,
+             "--workdir", os.path.join(work, "w_native_check")], timeout=native_timeout)
+        # A `:lec_expect: refuted` pair is a MUTATED golden: its round trip must
+        # still differ from the handwritten Pyrope. The Verilog leg below compares
+        # the golden with its OWN round trip, so it must prove either way.
+        # `:v2prp_native_expect:` overrides it for this leg alone: the native leg
+        # runs the handwritten Pyrope as the REFERENCE against the round trip of the
+        # golden, the reverse of the equiv test's direction. A Pyrope twin that
+        # REFINES its golden (power-on contents the golden leaves undefined) proves
+        # there but must refute here: a defined reference against an uninitialized
+        # implementation is REFUTED-cex (LEC initial-state ruling 2026-10-16).
+        expect = (_header(ref_prp, "v2prp_native_expect") or _header(ref_prp, "lec_expect") or "proven").lower()
+        native_status = verdict(native)
+        if expect == "refuted":
+            native_failed = native_status != "refuted"  # REFUTED-cex, exit 10
+        else:
+            native_failed = not acceptable(native_status)
+        if native_failed:
+            print("{} - v2prp2v - FAILED: native Pyrope check did not report {}".format(name, expect.upper()))
+            print(native.stdout.decode("utf-8", "replace"))
+        else:
+            print("{} - v2prp2v - native Pyrope check {}".format(name, "refuted as expected" if expect == "refuted" else native_status))
+        if args.native_only:
+            return int(native_failed)
 
     # 1c. PYROPE -> LGraph -> Verilog. Emitting every unit at once is the normal
     # case; a design whose units import each other rejects the duplicates, so

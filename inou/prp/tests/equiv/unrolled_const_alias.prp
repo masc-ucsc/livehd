@@ -1,0 +1,12 @@
+/*
+:name: unrolled_const_alias
+:type: lec
+:lec_top: unrolled_const_alias
+*/
+// Independent two-result least-significant-set-bit specification.
+pub comb unrolled_const_alias(x:U4) -> (out:U8) {
+  const first:U4 = x & -x
+  const rest:U4 = x & ~first
+  const second:U4 = rest & -rest
+  out = first | (second << 4)
+}

@@ -6,7 +6,7 @@
 :compile_top: leaf
 */
 
-pub mod leaf<N=1>(a:U8) -> (y:U8@[]) {
+pub mod leaf<N=1>(clk:Clock, a:U8) -> (y:U8@[]) {
   reg value:U8 = nil
   wrap value = a + N
   y = value

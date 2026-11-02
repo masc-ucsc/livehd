@@ -52,7 +52,7 @@ struct Options {
 // instance uses it any more -- a testbench may drive any module directly). Information crosses an instance
 // boundary both ways: a context into the child (constant inputs, narrower
 // input widths) and a constant output, or a copy's narrower output, into the
-// parent. Returns the number of specialized definitions created.
+// parent. Returns the number of specialized definitions created or refreshed.
 int specialize_constants(std::vector<std::shared_ptr<hhds::Graph>>& graphs, const Options& options = {});
 
 // One constant-folding and width round over a private body a structural

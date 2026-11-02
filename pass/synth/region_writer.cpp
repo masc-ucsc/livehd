@@ -346,7 +346,7 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
   };
   // Readers as the backend counts them: every cell fanin, output and latch input.
   const auto readers      = mapped.readers();
-  const auto cell_readers = mapped.cell_readers();
+  const auto buffer_aliases = mapped.boundary_buffer_aliases(lib);
 
   auto const0_pin = [&]() { return gu::create_const(*body, *Dlop::create_integer(0)); };
 
@@ -1075,14 +1075,12 @@ bool Region_writer::write(const livehd::partition::Region_body& rb, const Region
       set_net_driver(onet, gu::create_const(*body, *Dlop::create_integer(one ? 1 : 0)));
       continue;
     }
-    if (cell.fanins.size() == 1 && lib.is_identity(g)) {
-      if (readers[onet] > 0 && cell_readers[onet] == 0) {  // its output feeds only outputs and latch inputs
-        // output net -> input net; mapped_node2sub stays invalid for this cell
-        // (the srcmap attribution walk below guards on it)
-        net_alias[onet] = static_cast<int32_t>(cell.fanins.front());
-        ++bypassed_bufs;
-        continue;
-      }
+    if (buffer_aliases[onet] != Cell_netlist::kNone) {
+      // Resolve the whole terminal buffer tree, not just its decoupling leaves.
+      // mapped_node2sub stays invalid; the attribution walk guards on it.
+      net_alias[onet] = static_cast<int32_t>(buffer_aliases[onet]);
+      ++bypassed_bufs;
+      continue;
     }
     if (qn_dnet.contains(onet)) {
       // The D-cone root of a QN-cell register (see qn_dnet): absorb the

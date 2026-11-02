@@ -1065,17 +1065,20 @@ void Partitioner::name_ports() {
       fwd_roots.push_back(port.driver);
     }
   }
-  admit("forward-signatures", 0);
-  const auto fwd_memo = fwd_cone_signatures(fwd_roots, admission_);
-  admit("forward-signatures-done", 0);
-  auto producer_roots = fwd_roots;
+  // Output ties can also be distinguished by their consumers (for example,
+  // separate declared output ports reached from otherwise identical feedback
+  // lanes). Include them in both direction maps for the external tie breaker.
   for (const auto& ports : module_outputs_) {
     admit("name_ports-step");
     for (const auto& port : ports) {
       admit("name_ports-step");
-      producer_roots.push_back(port.driver);
+      fwd_roots.push_back(port.driver);
     }
   }
+  admit("forward-signatures", 0);
+  const auto fwd_memo = fwd_cone_signatures(fwd_roots, admission_);
+  admit("forward-signatures-done", 0);
+  const auto&                          producer_roots = fwd_roots;
   absl::flat_hash_set<hhds::Pin_class> sig_coarse;  // signature is only op/width/sign (cyclic residue)
   admit("producer-signatures", 0);
   const auto sig_memo = producer_signatures(producer_roots, &sig_coarse, admission_);
@@ -1354,7 +1357,12 @@ void Partitioner::name_ports() {
             }
             if (!tied.empty()) {
               std::sort(tied.begin(), tied.end(), [&](const auto& a, const auto& b) { return sig[a] < sig[b]; });
-              const auto ext = local_signatures(tied, /*with_consumers=*/input, full);
+              // A named consumer can identify an output just as it identifies
+              // an input. Producer-only signatures unnecessarily fall through
+              // to the contentless cyclic residue on parallel feedback lanes.
+              // Full-cone coarse signatures and unresolved input ties still
+              // refuse reuse below.
+              const auto ext = local_signatures(tied, /*with_consumers=*/true, full);
               for (const auto& d : tied) {
                 sig[d] = sig_mix(sig[d], ext.at(d));
               }

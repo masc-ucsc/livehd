@@ -69,6 +69,8 @@ struct Clock_chain {
   // A latch whose own window is `clk & held_en` consumes held_en LIVE; replacing
   // it with the ICG latch's transparent input samples the wrong half-period.
   std::vector<hhds::Occurrence_pin> live_guards;
+  // Data qualifiers of the latch window, separate from the clock gate chain.
+  std::vector<hhds::Occurrence_pin> window_guards;
   // WHICH BIT of a multi-bit root input the chain lands on, as a key suffix:
   // "" for bit 0 (and for any 1-bit input), "[b]" for bit b, and a per-cone
   // "[?id]" when the bit walk cannot tell (never assume bit 0 -- that is the
@@ -80,49 +82,22 @@ struct Clock_chain {
   int         root_bit_index = -1;
 };
 
-// Structural digest of a cone, used to give the SAMPLED GUARD a name. Two
-// front-ends reading the same RTL produce the same shape, so the key matches
-// across the miter whenever the cones really are the same; when they are not,
-// the two sides simply thread separate guard cuts, which is sound because a
-// guard is always SAMPLED before it is READ inside one period (its power-on
-// value is dead).
-// The string also identifies guard state inside one design. Keep an exact
-// canonical representation here; a digest alone could alias different guards.
-std::string cone_digest(const hhds::Occurrence_pin& p, int depth = 0) {
-  if (p.is_invalid()) {
+// A sampled guard belongs to an exact enable pin occurrence. A bounded
+// structural description is not an identity: deeper cones can share its
+// prefix while reading different inputs or state, so storing them under one
+// key makes the last cone control every consumer. Even an unbounded operator
+// tree would need each state cut's identity and the pin's width/sign semantics.
+// Across the miter, differently named guard cuts are safe: each is sampled
+// before it is consumed, so its power-on value is never observed. Within one
+// design, consumers of the same pin still share their sampled guard.
+std::string cone_identity(const hhds::Occurrence_pin& pin) {
+  if (pin.is_invalid()) {
     return "-";
   }
-  if (gu::is_graph_input_pin(p)) {
-    return "i:" + std::string(gu::pin_name_of(p));
+  if (pin.is_const()) {
+    return "k:" + gu::const_of(pin).to_string();
   }
-  if (p.is_const()) {
-    return "k:" + gu::const_of(p).to_string();
-  }
-  if (depth >= 8) {
-    return "...";
-  }
-  auto        n = p.get_master_node();
-  std::string s{Ntype::get_name(gu::type_op_of(n))};
-  s += "(";
-  std::vector<std::string> kids;
-  // Per SINK pin, then per DRIVER of that pin: a sink with two drivers (a compact
-  // loop's carry-in) still contributes one kid EACH, which is what the edge walk
-  // did and what keeps the digest from aliasing a seeded carry with a bare one.
-  // Both readers are load-bearing. inp_SORTED_pins yields the node-as-pin (port
-  // 0) first and then ascending port order; the raw inp_pins() omits port 0
-  // entirely, which would silently drop a banked cell's FIRST operand and make
-  // two different cones digest the same. get_driver_pinS (plural) is what keeps
-  // the second driver of a carry-in; the singular reader returns only front().
-  for (auto sink : n.inp_sorted_pins()) {
-    for (auto driver : sink.get_driver_pins()) {
-      kids.push_back(std::to_string(static_cast<int>(sink.get_port_id())) + "=" + cone_digest(driver, depth + 1));
-    }
-  }
-  std::sort(kids.begin(), kids.end());  // pin-id keyed, so commutative operands still agree
-  for (size_t i = 0; i < kids.size(); ++i) {
-    s += (i != 0 ? "," : "") + kids[i];
-  }
-  return s + ")";
+  return box_node_key(pin.get_master_node()) + ":p" + std::to_string(static_cast<int>(pin.get_port_id()));
 }
 
 Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clocks, int depth = 0);
@@ -369,6 +344,164 @@ Clock_chain resolve_chain(hhds::Occurrence_pin clk, const lc::Design_clocks& clo
   return ch;
 }
 
+// `!G & data_enable` is a qualified latch window, not another ICG.
+// Resolving the And as a clock gate samples data_enable on the opposite edge
+// and can manufacture a mixed-sample chain with G's real Clock_cell. Keep G's
+// sampled clock guard and consume the one-bit data terms live at latch close.
+std::optional<Clock_chain> qualified_window_chain(const hhds::Occurrence_pin& control, const lc::Design_clocks& clocks) {
+  const bool trace  = livehd::debug::env<"LHD_LEC_PHASE_PLAN">() != nullptr;
+  auto       reject = [&](const char* reason) -> std::optional<Clock_chain> {
+    if (trace) {
+      std::fprintf(stderr, "[LEC_WINDOW] qualified-window refused: %s\n", reason);
+    }
+    return std::nullopt;
+  };
+  const auto window = lc::control_root(control, true);
+  if (window.net.is_invalid() || window.net.is_const() || gu::is_graph_input_pin(window.net) || window.inverted
+      || gu::type_op_of(window.net.get_master_node()) != Ntype_op::And) {
+    return reject("not a direct AND window");
+  }
+  hhds::Occurrence_pin              clock;
+  std::vector<hhds::Occurrence_pin> data;
+  for (const auto& sink : window.net.get_master_node().inp_sorted_pins()) {
+    for (const auto& driver : sink.get_driver_pins()) {
+      if (driver.is_const()) {
+        const auto value = gu::const_of(driver);
+        if (value.is_just_i64() && (value.to_just_i64() & 1) != 0) {
+          continue;  // every nonconstant operand is one bit
+        }
+        return reject("constant term masks off or leaves the window unknown");
+      }
+      if (reaches_clock(driver, clocks, 0)) {
+        if (!clock.is_invalid()) {
+          return reject("multiple clock operands");
+        }
+        clock = driver;
+      } else {
+        int width = gu::real_width(driver);
+        if (width == 0 && gu::is_graph_input_pin(driver)) {
+          width = gu::real_width(driver, *driver.get_graph()->get_io(), gu::pin_name_of(driver));
+        }
+        if (width != 1 || reaches_clock(driver, clocks, 0)) {
+          return reject("qualifier not a declared one-bit data term");
+        }
+        data.push_back(driver);
+      }
+    }
+  }
+  if (clock.is_invalid() || data.empty()) {
+    return reject("no clock or no data terms");
+  }
+  auto chain = resolve_chain(clock, clocks);
+  if (chain.refused || !chain.gated || chain.guards.empty()) {
+    return reject("clock factor not a modeled gate chain");
+  }
+  for (const auto& enable : chain.live_guards) {
+    const auto held = lc::control_root(enable, true);
+    if (held.net.is_invalid() || held.net.is_const() || gu::is_graph_input_pin(held.net) || held.inverted
+        || gu::type_op_of(held.net.get_master_node()) != Ntype_op::Latch
+        || !lc::gated_latch_closed_at(held.net.get_master_node(), chain.root, !chain.guard_before_fall)) {
+      return reject("inline clock factor has no correctly phased held enable");
+    }
+  }
+  chain.window_guards = std::move(data);
+  return chain;
+}
+
+// Conditional transparency for a gated-low window observed only at the
+// opposite, ungated edge. With G active, Q holds the value captured before the
+// rise. With G inactive, the latch is still transparent, so those fall readers
+// must see the current half-period's data instead. No other observation is
+// admitted here: in particular, a primary output, another latch or a rising-edge
+// reader needs a more general transparency model.
+bool preview_off_forward(const hhds::Occurrence_node& latch, const Clock_chain& chain, const lc::Design_clocks& clocks,
+                         bool closes_on_rise) {
+  if (!closes_on_rise || chain.guard_before_fall || chain.guards.empty() || !chain.window_guards.empty()) {
+    return false;
+  }
+  const auto reset = lc::sink_driver_hier(latch, "reset_pin");
+  if (!reset.is_invalid() && !reset.is_known_false()) {
+    return false;
+  }
+  const auto window = lc::control_root(lc::sink_driver_hier(latch, "enable"), true);
+  if (window.net.is_invalid() || window.net.is_const() || gu::is_graph_input_pin(window.net)
+      || window.inverted == posclk_is_false(latch)) {
+    return false;
+  }
+  const auto gate = window.net.get_master_node();
+  if (gu::type_op_of(gate) == Ntype_op::Clock_cell) {
+    const auto invert = lc::sink_driver_hier(gate, "invert");
+    const auto div    = lc::sink_driver_hier(gate, "div");
+    if ((!invert.is_invalid() && !invert.is_known_false())
+        || (!div.is_invalid() && (!div.is_const() || !gu::const_of(div).is_just_i64() || gu::const_of(div).to_just_i64() != 1))) {
+      return false;
+    }
+  } else if (gu::type_op_of(gate) == Ntype_op::And && chain.live_guards.size() == 1) {
+    // The native reader can retain an inline ICG. Its enable must actually be
+    // held by a low-window latch; a live AND enable can glitch during high.
+    const auto held = lc::control_root(chain.live_guards.front(), true);
+    if (held.net.is_invalid() || held.net.is_const() || gu::is_graph_input_pin(held.net) || held.inverted
+        || gu::type_op_of(held.net.get_master_node()) != Ntype_op::Latch
+        || !lc::gated_latch_closed_at(held.net.get_master_node(), chain.root, true)) {
+      return false;
+    }
+  } else {
+    return false;
+  }
+  const auto                                  latch_din = lc::sink_driver_hier(latch, "din");
+  const auto                                  open_data = lc::latch_transparent_arm(latch);
+  std::vector<hhds::Occurrence_pin>           work{latch.get_driver_pin(0)};
+  absl::flat_hash_set<hhds::Occurrence_index> seen;
+  bool                                        saw_reader = false;
+  const auto                                  din_pid    = Ntype::get_sink_pid(Ntype_op::Flop, "din");
+  const auto                                  en_pid     = Ntype::get_sink_pid(Ntype_op::Flop, "enable");
+  while (!work.empty()) {
+    const auto from = work.back();
+    work.pop_back();
+    for (auto edge : from.out_edges()) {
+      const auto sink = edge.sink.get_master_node();
+      const auto op   = gu::type_op_of(sink);
+      // The frontend's explicit hold mux feeds Q back only to this latch's
+      // own D. It is storage implementation, not an external observation.
+      if (op == Ntype_op::Latch && sink.get_occurrence_index() == latch.get_occurrence_index()
+          && edge.sink.get_port_id() == Ntype::get_sink_pid(Ntype_op::Latch, "din") && from == latch_din && !open_data.is_invalid()
+          && open_data != latch_din) {
+        continue;
+      }
+      if (op == Ntype_op::Flop) {
+        if (edge.sink.get_port_id() != din_pid && edge.sink.get_port_id() != en_pid) {
+          return false;
+        }
+        const auto pc = lc::sink_driver_hier(sink, "posclk");
+        if (!pc.is_invalid() && !pc.is_const()) {
+          return false;
+        }
+        const auto reader = resolve_chain(lc::sink_driver_hier(sink, "clock_pin"), clocks);
+        const bool rising = !posclk_is_false(sink) != reader.inverted;
+        if (reader.refused || reader.gated || reader.root.is_invalid() || reader.root != chain.root
+            || reader.root_bit != chain.root_bit || rising) {
+          return false;
+        }
+        saw_reader = true;
+        continue;
+      }
+      if (gu::is_graph_output_pin(edge.sink) || op == Ntype_op::Sub || op == Ntype_op::Clock_cell || !Ntype::is_comb(op)) {
+        return false;
+      }
+      if (!seen.insert(sink.get_occurrence_index()).second) {
+        continue;
+      }
+      if (seen.size() > 4096) {
+        return false;
+      }
+      for (auto out : sink.out_sorted_pins()) {
+        work.push_back(out);
+      }
+    }
+  }
+  return saw_reader;
+}
+
 // One canonical name per root net. The CLOCK FOREST is consulted first: it maps
 // a def's clock PORT (and its implicit clock, port "") to the root the design's
 // instance bindings prove it carries, so `clk_i` in one def and `clock` in
@@ -418,15 +551,18 @@ std::string root_key(const hhds::Occurrence_pin& root, const hhds::Occurrence_no
 }  // namespace
 
 std::string Phase_plan::signature() const {
-  return "phase1:" + root_clock + ":" + std::to_string(n_flop_rise) + "/" + std::to_string(n_flop_fall) + "/"
+  return "phase3:" + root_clock + ":" + std::to_string(n_flop_rise) + "/" + std::to_string(n_flop_fall) + "/"
          + std::to_string(n_latch_low) + "/" + std::to_string(n_latch_high) + "/" + std::to_string(n_latch_data) + "/"
-         + std::to_string(n_mem_rise) + "/" + std::to_string(n_mem_fall) + "/" + std::to_string(n_guards);
+         + std::to_string(n_mem_rise) + "/" + std::to_string(n_mem_fall) + "/" + std::to_string(n_guards) + "/"
+         + std::to_string(n_latch_off_read) + "/" + std::to_string(n_latch_window_guards);
 }
 
 std::string Phase_plan::describe() const {
   std::string s  = "root=" + (root_clock.empty() ? std::string("<implicit>") : root_clock);
   s             += ", flops rise/fall=" + std::to_string(n_flop_rise) + "/" + std::to_string(n_flop_fall);
   s             += ", clock latches low/high=" + std::to_string(n_latch_low) + "/" + std::to_string(n_latch_high);
+  s              += ", gated-off fall forwards=" + std::to_string(n_latch_off_read);
+  s              += ", live latch-window qualifiers=" + std::to_string(n_latch_window_guards);
   s             += ", data latches=" + std::to_string(n_latch_data);
   s             += ", transparent latches=" + std::to_string(n_latch_transparent);
   s             += ", mem rise/fall=" + std::to_string(n_mem_rise) + "/" + std::to_string(n_mem_fall);
@@ -539,7 +675,36 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
     const bool     is_latch = op == Ntype_op::Latch;
     // A latch's window is controlled by its ENABLE (its gate IS its enable);
     // everything else by `clock_pin`.
-    const auto     ctrl     = lc::sink_driver_hier(node, is_latch ? "enable" : "clock_pin");
+    auto ctrl = lc::sink_driver_hier(node, is_latch ? "enable" : "clock_pin");
+    if (op == Ntype_op::Memory) {
+      const auto type = lc::sink_driver_hier(node, "type");
+      if (type.is_const() && gu::const_of(type).is_just_i64()
+          && gu::const_of(type).to_just_i64() == Ntype::Memory_type_array) {
+        continue;  // a combinational array has no commit clock
+      }
+      if (ctrl.is_invalid()) {
+        // Port zero can be an asynchronous read. The memory's base clock is
+        // the first driven clock sink, just as in the encoder and cgen; an
+        // absent port-zero clock does not introduce an implicit clock beside
+        // the real write clocks. Other ports still join the root census below.
+        constexpr auto stride = static_cast<int>(Ntype::Memory_port_stride);
+        const auto     ck_pid = static_cast<int>(Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin"));
+        for (const auto& sink : node.inp_sorted_pins()) {
+          if (static_cast<int>(sink.get_port_id()) % stride != ck_pid) {
+            continue;
+          }
+          for (const auto& driver : sink.get_driver_pins()) {
+            if (!driver.is_invalid()) {
+              ctrl = driver;
+              break;
+            }
+          }
+          if (!ctrl.is_invalid()) {
+            break;
+          }
+        }
+      }
+    }
     // An ALWAYS-OPEN latch (no enable pin -- tolg wires none when every path
     // writes the reg -- or a constant-true one) stores nothing. Classify it
     // BEFORE any clock question is asked: it has no window, so it has no closing
@@ -553,6 +718,11 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
       continue;
     }
     Clock_chain ch = resolve_chain(ctrl, clocks);
+    if (is_latch && (ch.gated || ch.refused)) {
+      if (auto qualified = qualified_window_chain(ctrl, clocks)) {
+        ch = std::move(*qualified);
+      }
+    }
     if (ch.refused) {
       refuse("state element `" + gu::debug_name(node) + "` " + ch.why);
       continue;
@@ -598,19 +768,24 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
       // holds for a window with an OR-ed data term (`rst | (clk & en_1p)`,
       // minion's write-commit latch): the Or hop was read as the active-low
       // gate flavour and the window encoded as "commit iff rst & en_1p",
-      // which proved a twin whose reset only fires under en_1p. No microstep
-      // models a window that stays open across both phases, so fail closed
-      // rather than pick a wrong closing edge.
+      // which proved a twin whose reset only fires under en_1p. A hold-only
+      // close cannot model a window open in both phases. Only the qualified
+      // opposite-edge preview below forwards settled data while gated off.
       // (A latch whose every reader is masked by that same gated clock -- an
       // ICG's own enable latch on a gated clock -- is unobservable while gated
       // off, so the hold model stays exact for it.)
       if (ch.gated && !lc::gated_latch_closed_at(node, ch.root, /*closed_level=*/rising)
           && !lc::gated_latch_masked_off(node)) {
-        refuse("latch `" + gu::debug_name(node)
-               + "` has a gated clock window that is not closed for a whole clock phase (it can stay transparent "
-                 "through the phase it would hold in: gated off, or opened by an OR-ed term); the phase schedule "
-                 "cannot model it");
-        continue;
+        if (preview_off_forward(node, ch, clocks, rising)) {
+          e.forward_off_at_fall = true;
+          ++plan.n_latch_off_read;
+        } else {
+          refuse("latch `" + gu::debug_name(node)
+                 + "` has a gated clock window that is not closed for a whole clock phase (it can stay transparent "
+                   "through the phase it would hold in: gated off, or opened by an OR-ed term); the phase schedule "
+                   "cannot model it");
+          continue;
+        }
       }
       // Transparent-LOW closes at the RISE, so it must commit in the microstep
       // IMMEDIATELY BEFORE the rise batch; transparent-HIGH closes at the FALL.
@@ -632,17 +807,27 @@ Phase_plan plan_phases(hhds::Graph* g, const absl::flat_hash_map<std::string, bo
     // UNKNOWN (`phase_clock_gate_invert` is exactly that fixture).
     if (ch.gated && !ch.guards.empty()) {
       e.guard_sample     = ch.guard_before_fall ? Phase::Close_high : Phase::Close_low;
-      e.live_guard       = is_latch && clock_role && !ch.live_guards.empty();
+      e.live_guard       = is_latch && clock_role && !e.forward_off_at_fall && ch.window_guards.empty() && !ch.live_guards.empty();
       const auto& guards = e.live_guard ? ch.live_guards : ch.guards;
       std::string digest = root_key(ch.root, &node, clock_forest, ch.root_bit) + (ch.guard_before_fall ? "-" : "+");
       for (const auto& gp : guards) {
-        digest += "&" + cone_digest(gp);
+        digest += "&" + cone_identity(gp);
       }
       e.guard_key = "\x01" + std::string(e.live_guard ? "latchguard:" : "ckguard:") + digest;
       if (!e.live_guard && guard_keys.insert(e.guard_key).second) {
         (ch.guard_before_fall ? plan.n_guard_high : plan.n_guard_low) += 1;
       }
       plan.guard_cones[e.guard_key] = guards;
+    }
+
+    if (!ch.window_guards.empty()) {
+      std::string digest = root_key(ch.root, &node, clock_forest, ch.root_bit);
+      for (const auto& cone : ch.window_guards) {
+        digest += "&" + cone_identity(cone);
+      }
+      e.window_guard_key                   = "\x01windowguard:" + digest;
+      plan.guard_cones[e.window_guard_key] = ch.window_guards;
+      ++plan.n_latch_window_guards;
     }
 
     // Only a CLOCK-role endpoint contributes a clock root. A DATA-gated latch

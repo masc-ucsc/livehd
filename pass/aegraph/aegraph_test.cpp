@@ -1176,6 +1176,175 @@ TEST(Aegraph, PackedLaneReadsResolveThroughTheLayout) {
       << "a window across two lanes of a private pack is the narrower pack";
 }
 
+// A structured gate array packs more than 64 single-bit results, but only a small window of the pack is read.
+// Keep the lane truncation on each input while dropping the lanes outside the demanded window.
+TEST(Aegraph, NarrowReadOfALargeConcatDropsUnusedLanes) {
+  for (bool shared : {false, true}) {
+    hhds::GraphLibrary lib;
+    constexpr int      kLanes = 80;
+    auto               g      = io_graph(lib, "large_pack", kLanes, shared ? 2 : 1);
+    auto               pack   = gu::create_typed_node(*g, Ntype_op::Concat);
+    for (int lane = 0; lane < kLanes; ++lane) {
+      g->get_input_pin("i" + std::to_string(lane)).connect_sink(pack.create_sink_pin(2 * lane));
+      konst(g, 1).connect_sink(pack.create_sink_pin(2 * lane + 1));
+    }
+    gu::set_ubits(pack.create_driver_pin(0), kLanes);
+    auto read = gu::create_get_mask(*g, pack.create_driver_pin(0), 36, 44);
+    gu::set_ubits(read.create_driver_pin(0), 8);
+    read.create_driver_pin(0).connect_sink(g->get_output_pin("o0"));
+    if (shared) {
+      g->get_io()->set_bits("o1", kLanes);
+      pack.create_driver_pin(0).connect_sink(g->get_output_pin("o1"));
+    }
+
+    livehd::aegraph::optimize(g, {}, checked());
+    const auto result = out_driver(g, "o0").get_master_node();
+    ASSERT_EQ(gu::type_op_of(result), Ntype_op::Concat);
+    const auto lanes = gu::concat_lanes(result);
+    ASSERT_EQ(lanes.size(), 8u);
+    for (size_t lane = 0; lane < lanes.size(); ++lane) {
+      EXPECT_EQ(lanes[lane].width, 1);
+      EXPECT_EQ(lanes[lane].value, g->get_input_pin("i" + std::to_string(36 + lane)));
+    }
+    if (shared) {
+      const auto full = out_driver(g, "o1").get_master_node();
+      EXPECT_EQ(gu::concat_lanes(full).size(), kLanes);
+    }
+  }
+}
+
+// The low five bits of this sparse pack contain only its low bit. That value bound does not make the
+// five-bit Get_mask a valid one-bit lane carrier: Bitwidth keeps its declared window after folding.
+TEST(Aegraph, MaskIdentityRetainsANarrowPhysicalWindow) {
+  for (bool through_or : {false, true}) {
+    hhds::GraphLibrary lib;
+    auto               g    = io_graph(lib, "physical_mask_window", 2, 1);
+    const auto         high = gu::create_get_mask(*g, g->get_input_pin("i0"), 0, 1).create_driver_pin(0);
+    const auto         low  = gu::create_get_mask(*g, g->get_input_pin("i1"), 0, 1).create_driver_pin(0);
+    auto               pack = gu::create_typed_node(*g, Ntype_op::Concat);
+    high.connect_sink(pack.create_sink_pin(0));
+    konst(g, 1).connect_sink(pack.create_sink_pin(1));
+    konst(g, 0).connect_sink(pack.create_sink_pin(2));
+    konst(g, 4).connect_sink(pack.create_sink_pin(3));
+    low.connect_sink(pack.create_sink_pin(4));
+    konst(g, 1).connect_sink(pack.create_sink_pin(5));
+    auto wide = gu::create_get_mask(*g, pack.create_driver_pin(0), 0, 5).create_driver_pin(0);
+    if (through_or) {
+      wide = binop(g, Ntype_op::Or, wide, low);
+    }
+    gu::create_get_mask(*g, wide, 0, 1).create_driver_pin(0).connect_sink(g->get_output_pin("o0"));
+
+    auto options       = checked();
+    options.rules_only = "getmask_fits";
+    livehd::aegraph::optimize(g, {}, options);
+    const auto result = out_driver(g, "o0").get_master_node();
+    ASSERT_EQ(gu::type_op_of(result), Ntype_op::Get_mask);
+    const auto window = gu::bit_range(result);
+    ASSERT_TRUE(window);
+    EXPECT_EQ(window->first, 0);
+    EXPECT_EQ(window->second, 1);
+  }
+}
+
+TEST(Aegraph, OrPackNarrowsPaddedSliceCarriers) {
+  hhds::GraphLibrary lib;
+  auto               g      = io_graph(lib, "or_pack_slice_carriers", 3, 1);
+  auto               packed = gu::create_typed_node(*g, Ntype_op::Or);
+  g->get_io()->set_bits("o0", 68);
+  gu::set_ubits(packed.create_driver_pin(0), 68);
+  for (int field = 0; field < 3; ++field) {
+    const auto low    = gu::create_get_mask(*g, g->get_input_pin("i" + std::to_string(field)), 0, 2).create_driver_pin(0);
+    auto       padded = gu::create_typed_node(*g, Ntype_op::Concat);
+    konst(g, 0).connect_sink(padded.create_sink_pin(0));
+    konst(g, 2).connect_sink(padded.create_sink_pin(1));
+    low.connect_sink(padded.create_sink_pin(2));
+    konst(g, 2).connect_sink(padded.create_sink_pin(3));
+    const auto wide = gu::create_get_mask(*g, padded.create_driver_pin(0), 0, 4).create_driver_pin(0);
+    gu::set_ubits(padded.create_driver_pin(0), 4);
+    gu::set_ubits(wide, 4);
+    auto shift = gu::create_typed_node(*g, Ntype_op::SHL);
+    wide.connect_sink(gu::setup_sink_by_name(shift, "a"));
+    konst(g, field * 32).connect_sink(gu::setup_sink_by_name(shift, "b"));
+    gu::set_ubits(shift.create_driver_pin(0), field * 32 + 4);
+    shift.create_driver_pin(0).connect_sink(packed.create_sink_pin(field));
+  }
+  packed.create_driver_pin(0).connect_sink(g->get_output_pin("o0"));
+
+  auto options       = checked();
+  options.rules_only = "getmask_fits+or_pack_to_concat";
+  livehd::aegraph::optimize(g, {}, options);
+  const auto result = out_driver(g, "o0").get_master_node();
+  ASSERT_EQ(gu::type_op_of(result), Ntype_op::Concat);
+  const auto lanes = gu::concat_lanes(result);
+  ASSERT_EQ(lanes.size(), 5u);
+  for (const auto& lane : lanes) {
+    if (lane.value.is_const()) {
+      continue;
+    }
+    ASSERT_EQ(lane.width, 2);
+    const auto window  = gu::bit_range(lane.value.get_master_node());
+    const auto carrier = window ? window->second - window->first : gu::concat_total_width(lane.value.get_master_node());
+    ASSERT_GT(carrier, 0);
+    EXPECT_LE(carrier, lane.width) << "a value range cannot narrow its structural carrier";
+  }
+}
+
+TEST(Aegraph, ConcatKeepsAPaddedLeadingCarrierWindow) {
+  hhds::GraphLibrary lib;
+  auto               g      = io_graph(lib, "padded_leading_carrier", 2, 1);
+  const auto         high   = gu::create_get_mask(*g, g->get_input_pin("i0"), 0, 1).create_driver_pin(0);
+  const auto         low    = gu::create_get_mask(*g, g->get_input_pin("i1"), 0, 1).create_driver_pin(0);
+  auto               source = gu::create_typed_node(*g, Ntype_op::Concat);
+  high.connect_sink(source.create_sink_pin(0));
+  konst(g, 1).connect_sink(source.create_sink_pin(1));
+  konst(g, 0).connect_sink(source.create_sink_pin(2));
+  konst(g, 4).connect_sink(source.create_sink_pin(3));
+  low.connect_sink(source.create_sink_pin(4));
+  konst(g, 1).connect_sink(source.create_sink_pin(5));
+  auto wide   = gu::create_get_mask(*g, source.create_driver_pin(0), 0, 5).create_driver_pin(0);
+  auto narrow = gu::create_get_mask(*g, wide, 0, 1).create_driver_pin(0);
+  auto pack   = gu::create_typed_node(*g, Ntype_op::Concat);
+  wide.connect_sink(pack.create_sink_pin(0));
+  konst(g, 5).connect_sink(pack.create_sink_pin(1));
+  narrow.connect_sink(pack.create_sink_pin(2));
+  konst(g, 1).connect_sink(pack.create_sink_pin(3));
+  pack.create_driver_pin(0).connect_sink(g->get_output_pin("o0"));
+
+  auto options       = checked();
+  options.rules_only = "concat_lanes+getmask_fits";
+  livehd::aegraph::optimize(g, {}, options);
+  const auto result = out_driver(g, "o0").get_master_node();
+  ASSERT_EQ(gu::type_op_of(result), Ntype_op::Concat);
+  const auto lanes = gu::concat_lanes(result);
+  ASSERT_EQ(lanes.size(), 2u);
+  EXPECT_EQ(lanes[0].width, 5) << "the one-bit value still has a five-bit Get_mask carrier";
+}
+
+// Leading zero padding changes no lane offset below it. A narrow leading value can therefore use a smaller
+// window, while the same padding on an interior lane must stay to preserve the lanes above it.
+TEST(Aegraph, ConcatTrimsOnlyUnsignedLeadingLanePadding) {
+  for (bool negative : {false, true}) {
+    hhds::GraphLibrary lib;
+    auto               g    = io_graph(lib, "leading_lane_padding", 2, 1);
+    auto               high = negative ? konst(g, -1) : gu::create_get_mask(*g, g->get_input_pin("i0"), 0, 2).create_driver_pin(0);
+    auto               low  = gu::create_get_mask(*g, g->get_input_pin("i1"), 0, 2).create_driver_pin(0);
+    auto               pack = gu::create_typed_node(*g, Ntype_op::Concat);
+    high.connect_sink(pack.create_sink_pin(0));
+    konst(g, 4).connect_sink(pack.create_sink_pin(1));
+    low.connect_sink(pack.create_sink_pin(2));
+    konst(g, 4).connect_sink(pack.create_sink_pin(3));
+    pack.create_driver_pin(0).connect_sink(g->get_output_pin("o0"));
+
+    livehd::aegraph::optimize(g, {}, checked());
+    const auto result = out_driver(g, "o0").get_master_node();
+    ASSERT_EQ(gu::type_op_of(result), Ntype_op::Concat);
+    const auto lanes = gu::concat_lanes(result);
+    ASSERT_EQ(lanes.size(), 2u);
+    EXPECT_EQ(lanes[0].width, negative ? 4 : 2);
+    EXPECT_EQ(lanes[1].width, 4) << "interior padding fixes the high lane's offset";
+  }
+}
+
 // Q1: a constant selector that names a disconnected arm (or lies outside the arms) of an n-ary Mux is a '?' the
 // Mux owns; 0 is one legal resolution and the extraction takes it (a constant is cheaper than the Mux). A selector
 // that names a connected arm is that arm.

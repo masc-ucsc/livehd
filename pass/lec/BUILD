@@ -150,6 +150,19 @@ cc_library(
     alwayslink = True,  # static Pass_plugin registration
 )
 
+cc_test(
+    name = "phase_sched_test",
+    srcs = ["phase_sched_test.cpp"],
+    copts = COPTS,
+    deps = [
+        ":lec_encode",
+        ":lec_query",
+        "//graph",
+        "@googletest//:gtest_main",
+        "@hhds//hhds:graph",
+    ],
+)
+
 # cvc5 link smoke check: both vendored CaDiCaL copies coexist and QF_ABV queries run
 # through cvc5's own C++ API (the API pass/lec is built directly on). Standalone
 # (no corresponding cvc5_link.cpp), so no _test suffix.
@@ -268,6 +281,27 @@ sh_test(
     srcs = ["tests/lec_phase_test.sh"],
     data = ["//lhd"],
     tags = ["no-sandbox"],  # invokes the in-process cvc5 BMC engine
+)
+
+sh_test(
+    name = "lec_gated_preview_test",
+    srcs = ["tests/lec_gated_preview_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+sh_test(
+    name = "lec_gated_window_test",
+    srcs = ["tests/lec_gated_window_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
+)
+
+sh_test(
+    name = "lec_gated_high_window_test",
+    srcs = ["tests/lec_gated_high_window_test.sh"],
+    data = ["//lhd"],
+    tags = ["no-sandbox"],
 )
 
 # A reset's NAME carries no polarity (docs 04b): an active-high `if (rst_n)`

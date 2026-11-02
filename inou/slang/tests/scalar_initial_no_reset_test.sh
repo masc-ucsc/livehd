@@ -24,22 +24,19 @@ fail() {
 PRP="$W/prp/$TOP.prp"
 [ -s "$PRP" ] || fail "Pyrope unit was not emitted"
 [ -s "$W/out.v" ] || fail "Verilog was not emitted"
-[ -s "$W/diag.jsonl" ] || fail "diagnostics were not emitted"
+[ -f "$W/diag.jsonl" ] || fail "diagnostics were not emitted"
 
-# A declaration initializer and a simple initial-block assignment both become
-# the register declaration's concrete initializer. tolg turns that into the
-# module's reset rather than leaving the register's power-up state X. The
-# writer binds that reset either implicitly (a `rst:Reset` input) or, when it
-# keeps `rst` a `U1` (ruling 52: resets bind by TYPE), explicitly through
-# `reset_pin=rst`.
-grep -Eq 'reg decl_q:U8(:\[reset_pin=rst\])? = 0xa5' "$PRP" \
-  || fail "declaration initializer was not preserved as the reset value"
-grep -Eq 'reg block_q:U8(:\[reset_pin=rst\])? = 60' "$PRP" \
-  || fail "initial-block assignment was not preserved as the reset value"
-grep -Eq 'decl_q <= .*a5' "$W/out.v" \
-  || fail "declaration-initialized register has no generated reset assignment"
-grep -Eq 'block_q <= .*3c' "$W/out.v" \
-  || fail "initial-block register has no generated reset assignment"
+# A declaration initializer and an initial-block assignment are power-on
+# contents, with no invented reset. Both the Pyrope round trip and Verilog
+# output must retain that distinction from reset_q below.
+grep -Eq 'reg decl_q:U8:\[initial=(165|0xa5), reset_pin=false\]' "$PRP" \
+  || fail "declaration initializer did not remain resetless power-on contents"
+grep -Eq 'reg block_q:U8:\[initial=60, reset_pin=false\]' "$PRP" \
+  || fail "initial-block assignment did not remain resetless power-on contents"
+grep -Eq 'initial decl_q = .*a5' "$W/out.v" \
+  || fail "declaration-initialized register lost its power-on value"
+grep -Eq 'initial block_q = .*3c' "$W/out.v" \
+  || fail "initial-block register lost its power-on value"
 
 # An explicit source reset is preserved as the register's one initial value, and
 # such a register must not receive the no-reset warning.
@@ -50,10 +47,22 @@ grep -Eq 'reset_q <= .*11' "$W/out.v" \
 grep -q 'initial-without-reset.*reset_q' "$W/diag.jsonl" \
   && fail "explicitly reset register received the no-reset warning"
 
-COUNT=$(grep -c '"code":"initial-without-reset"' "$W/diag.jsonl")
-[ "$COUNT" -eq 2 ] || fail "expected two initial-without-reset warnings, got $COUNT"
-grep -q 'formal equivalence may otherwise differ from reset-less hardware' "$W/diag.jsonl" \
-  || fail "warning did not explain the LEC risk"
+grep -q 'initial-without-reset' "$W/diag.jsonl" \
+  && fail "a supported power-on initializer was reported as lossy"
+
+# An independent oracle must actually compare the generated RTL and a Pyrope
+# recompile against the original, including their power-on states.
+CHECK="$(pwd)/inou/yosys/lgcheck"
+YOSYS="$(pwd)/inou/yosys/yosys2"
+SOURCE="$(pwd)/$SRC"
+"$LHD" compile "$PRP" --top "$TOP" --emit verilog:"$W/roundtrip.v" \
+  --workdir "$W/roundtrip-work" -q >"$W/roundtrip.log" 2>&1 \
+  || fail "emitted Pyrope did not recompile"
+for rtl in out roundtrip; do
+  (cd "$W" && LGCHECK_EQUIV_TIMEOUT=5 "$CHECK" --implementation "$W/$rtl.v" \
+    --reference "$SOURCE" --top "$TOP" --yosys "$YOSYS") >"$W/$rtl-oracle.log" 2>&1 \
+    || { cat "$W/$rtl-oracle.log" >&2; fail "$rtl RTL differs from the original power-on behavior"; }
+done
 
 # A register has ONE initial value: its power-on value IS its reset value (they
 # ride the same `initial` pin, the rule upass.tolg already enforces for a reg
@@ -142,4 +151,4 @@ grep -q 'reg en_q:U8$' "$SP" \
 grep -q 'reg dyn:U8$' "$SP" \
   || fail "a runtime `if (rst) q <= e` value was treated as a reset value: $(grep 'reg dyn' "$SP")"
 
-echo "PASS: scalar initial values become implicit reset values with a located warning"
+echo "PASS: scalar power-on values preserve resetless behavior through both outputs"

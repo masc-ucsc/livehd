@@ -2023,7 +2023,7 @@ void synth_command_once(Options& opts, Result& res) {
                     const std::string_view status = h["status"].GetString();
                     if ((status == "discarded" || status == "relaxed") && h.HasMember("id") && h["id"].IsString()
                         && h.HasMember("reason") && h["reason"].IsString()) {
-                      livehd::diag::warn("pass.place", "placement-hint", "placement")
+                      livehd::diag::warn("pass.place", "placement-hint", "unsupported")
                           .msg("placement hint '{}': {} (cached {})", h["id"].GetString(), h["reason"].GetString(), status)
                           .emit();
                     }

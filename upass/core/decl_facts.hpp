@@ -116,20 +116,18 @@ inline std::optional<Facts> lookup(const Symbol_table& st, const Lnast* ln, std:
     ti.is_comptime = true;
     any            = true;
   }
-  // Per-field Entry.mode first; binding-level mode for bare names; bundle-
-  // valued fields carry mode/comptime as per-field attrs (no entry). A bare
-  // ___ tmp is never a DECLARED name — mode riding its binding via value
-  // copies / carrier sharing must not read back as a storage class.
-  // A bare compiler temp (`%`-prefixed; see Lnast::is_tmp).
-  const bool  bare_tmp = field.empty() && !root.empty() && root[0] == '%';
-  upass::Mode m        = bare_tmp ? upass::Mode::unknown : e.mode;
-  if (b && m == upass::Mode::unknown && field.empty() && !bare_tmp) {
-    m = b->get_mode();
-  }
+  // A bare name takes its storage mode from its binding. A copied scalar
+  // Entry may carry its source field's const/mut marker; that describes the
+  // value when embedded in an aggregate, not this destination declaration.
+  // Dotted fields keep their own Entry mode and residual fallback below.
+  // Bare compiler temporaries are never declared storage bindings.
+  const bool bare_tmp = field.empty() && !root.empty() && root[0] == '%';
+  upass::Mode mode = bare_tmp ? upass::Mode::unknown
+                             : field.empty() ? (b ? b->get_mode() : upass::Mode::unknown) : e.mode;
   if (b && !field.empty()) {
-    if (m == upass::Mode::unknown) {
+    if (mode == upass::Mode::unknown) {
       if (const auto& fm = b->get_attr(field, "fmode"); !fm.is_invalid() && fm.is_just_i64()) {
-        m = static_cast<upass::Mode>(fm.to_just_i64());
+        mode = static_cast<upass::Mode>(fm.to_just_i64());
       }
     }
     if (!ti.is_comptime) {
@@ -139,8 +137,8 @@ inline std::optional<Facts> lookup(const Symbol_table& st, const Lnast* ln, std:
       }
     }
   }
-  if (m != upass::Mode::unknown) {
-    ti.mode = m;
+  if (mode != upass::Mode::unknown) {
+    ti.mode = mode;
     any     = true;
   }
   // Not-yet-applied dotted decl facts (dotted type_spec before the field's

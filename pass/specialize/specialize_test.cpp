@@ -4,16 +4,18 @@
 // O(V + E). It must give every node exactly the color the plain sweep gives
 // (the reference below), and a long chain colored from its far end -- one
 // sweep per link for the plain loop, O(L^2) -- must stay linear.
+#include "specialize.hpp"
+
 #include <chrono>
 #include <cstdint>
 #include <random>
+#include <string>
 #include <vector>
 
 #include "absl/container/flat_hash_set.h"
 #include "fold_engine.hpp"
 #include "gtest/gtest.h"
 #include "node_util.hpp"
-#include "specialize.hpp"
 
 namespace {
 namespace gu = livehd::graph_util;
@@ -198,4 +200,70 @@ TEST(SpecializeRefold, FollowsTheProcessWideFoldEngine) {
     }
   }
   livehd::set_fold_engine(livehd::Fold_engine::classic);
+}
+
+// An incremental caller can be re-lowered while its old specialized callee remains in the library.
+// Reusing the same constant binding must refresh that one definition, not create a second IO with its name.
+TEST(SpecializeConstants, RebuiltCallerRefreshesAnExistingVersion) {
+  for (const int max_versions : {1, 64}) {
+    SCOPED_TRACE(max_versions);
+    hhds::GraphLibrary library;
+    auto               child_io = library.create_io("child");
+    child_io->add_input("a", 1);
+    child_io->add_input("cfg", 2);
+    child_io->add_output("y", 3);
+    for (const auto name : {"a", "cfg", "y"}) {
+      child_io->set_bits(name, 8);
+      child_io->set_unsign(name, true);
+    }
+    auto child = child_io->create_graph();
+    auto sum   = gu::create_typed_node(*child, Ntype_op::Sum);
+    child->get_input_pin("a").connect_sink(gu::setup_sink_by_name(sum, "as"));
+    child->get_input_pin("cfg").connect_sink(gu::setup_sink_by_name(sum, "as"));
+    gu::set_ubits(sum.create_driver_pin(0), 8);
+    sum.create_driver_pin(0).connect_sink(child->get_output_pin("y"));
+
+    auto parent_io = library.create_io("parent");
+    parent_io->add_input("a", 1);
+    parent_io->add_output("y", 2);
+    for (const auto name : {"a", "y"}) {
+      parent_io->set_bits(name, 8);
+      parent_io->set_unsign(name, true);
+    }
+    auto parent = parent_io->create_graph();
+    auto call   = gu::create_typed_node(*parent, Ntype_op::Sub);
+    call.set_subnode(child_io);
+    parent->get_input_pin("a").connect_sink(call.create_sink_pin(1));
+    gu::create_const(*parent, *Dlop::create_integer(7)).connect_sink(call.create_sink_pin(2));
+    call.create_driver_pin(3).connect_sink(parent->get_output_pin("y"));
+    std::vector<std::shared_ptr<hhds::Graph>> graphs{child, parent};
+    livehd::specialize::specialize_constants(graphs, {.max_versions = max_versions});
+    auto first = call.get_subnode_graph();
+    ASSERT_TRUE(first);
+    ASSERT_NE(first.get(), child.get());
+    const auto        gid = first->get_gid();
+    const std::string name{first->get_name()};
+
+    call.set_subnode(child_io);
+    sum.del_node();
+    auto changed = gu::create_typed_node(*child, Ntype_op::Xor);
+    child->get_input_pin("a").connect_sink(gu::setup_sink_by_name(changed, "as"));
+    child->get_input_pin("cfg").connect_sink(gu::setup_sink_by_name(changed, "as"));
+    gu::set_ubits(changed.create_driver_pin(0), 8);
+    changed.create_driver_pin(0).connect_sink(child->get_output_pin("y"));
+    livehd::specialize::specialize_constants(graphs, {.max_versions = max_versions});
+    const auto second = call.get_subnode_graph();
+    ASSERT_TRUE(second);
+    EXPECT_EQ(second->get_gid(), gid);
+    EXPECT_EQ(second->get_name(), name);
+    ASSERT_TRUE(library.find_io(name));
+    EXPECT_EQ(library.find_io(name)->get_graph().get(), second.get());
+    EXPECT_EQ(library.all_io_gids().size(), 3u);
+    size_t xors = 0;
+    for (auto node : second->body().nodes()) {
+      xors += gu::type_op_of(node) == Ntype_op::Xor;
+      EXPECT_NE(gu::type_op_of(node), Ntype_op::Sum);
+    }
+    EXPECT_GT(xors, 0u) << "an existing version must be rebuilt from the changed callee";
+  }
 }

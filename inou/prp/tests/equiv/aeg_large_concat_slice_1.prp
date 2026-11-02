@@ -1,0 +1,7 @@
+/*
+:name: aeg_large_concat_slice_1
+:type: lec
+:set: compile.cprop.engine=aegraph
+:compile_grep: aegraph-rule getmask_concat_straddle .*extracted=[1-9]
+*/
+// HEADER-ONLY variant: the same wide pack with the aegraph concat-slice rule.

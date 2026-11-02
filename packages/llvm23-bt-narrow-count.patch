@@ -1,7 +1,7 @@
 diff --git a/llvm/lib/Target/X86/X86ISelLowering.cpp b/llvm/lib/Target/X86/X86ISelLowering.cpp
 --- a/llvm/lib/Target/X86/X86ISelLowering.cpp
 +++ b/llvm/lib/Target/X86/X86ISelLowering.cpp
-@@ -23065,20 +23065,20 @@
+@@ -23284,20 +23284,20 @@
        DAG.MaskedValueIsZero(BitNo, APInt(BitNo.getValueSizeInBits(), 32)))
      Src = DAG.getNode(ISD::TRUNCATE, DL, MVT::i32, Src);
  

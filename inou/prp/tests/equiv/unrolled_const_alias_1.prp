@@ -1,0 +1,17 @@
+/*
+:name: unrolled_const_alias_1
+:set: compile.unroll=true
+*/
+// A copied const value must keep the target variable mutable through both
+// unrolled iterations; its declaration belongs to the target name.
+pub comb unrolled_const_alias(x:U4) -> (out:U8) {
+  const bits:U4 = x
+  mut remaining:U4 = bits
+  mut rows:U8 = 0
+  for k in 0..<2 {
+    const lowest:U4 = remaining & -remaining
+    rows#[(k*4)..+4] = lowest
+    remaining = remaining & ~lowest
+  }
+  out = rows
+}

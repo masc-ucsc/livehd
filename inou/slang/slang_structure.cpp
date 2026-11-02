@@ -1441,16 +1441,32 @@ static std::string xmr_rel(const slang::ast::Symbol& leaf, const slang::ast::Ins
   return full.size() > pre.size() && full.starts_with(pre) ? full.substr(pre.size() + 1) : full;
 }
 
-// A path as a plain identifier: every non-alphanumeric character becomes '_'.
+// Encode a path injectively as a plain identifier. Escape '_' too: flattening
+// punctuation to it aliases a nested `a.q` with an unrelated signal `a_q`.
 static std::string xmr_ident(std::string_view path) {
   std::string out;
-  for (const char c : path) {
-    out += std::isalnum(static_cast<unsigned char>(c)) ? c : '_';
+  constexpr char hex[] = "0123456789abcdef";
+  for (const unsigned char c : path) {
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+      out += static_cast<char>(c);
+    } else {
+      out += '_';
+      out += hex[c >> 4];
+      out += hex[c & 0xf];
+    }
   }
   return out;
 }
 
-static std::string xmr_port(std::string_view rel) { return "xmr__" + xmr_ident(rel); }
+static std::string xmr_port(const slang::ast::InstanceBodySymbol& body, std::string_view rel) {
+  auto port = "xmr__" + xmr_ident(rel);
+  // Encoded paths never end in '_', so this suffix cannot collide with a
+  // different generated export. Real ports retain their names and bindings.
+  while (body.findPort(port) != nullptr) {
+    port += '_';
+  }
+  return port;
+}
 
 std::string Slang_context::module_name_of(const slang::ast::InstanceSymbol& symbol) {
   const auto* body = lowering_body(symbol);
@@ -1733,8 +1749,8 @@ void Slang_context::emit_module_io(const slang::ast::InstanceSymbol& symbol, con
     auto& ln = *builder_.lnast;
     for (const auto& rel : it->second) {
       const auto* leaf = xmr_resolve(body, rel);
-      const auto  port = xmr_port(rel);
-      if (leaf == nullptr || !leaf->getType().isIntegral() || body.findPort(port) != nullptr) {
+      const auto  port = xmr_port(body, rel);
+      if (leaf == nullptr || !leaf->getType().isIntegral()) {
         emit_unsupported(symbol.location,
                          "unsupported-hierarchical-reference",
                          "cannot export '" + rel + "' from module '" + std::string(symbol.getDefinition().name) + "' to its parent");
@@ -2390,9 +2406,8 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
     seed_selfref_vector_nets(*body);
   }
   // Harvest declaration initializers and `initial begin ... end` power-on
-  // contents before state declarations emit. A constant scalar initializer is
-  // attached to the reg declaration; tolg consequently gives that reg the
-  // module's implicit reset and uses the value instead of reset-less X state.
+  // contents before state declarations emit. Scalar initializers become explicit
+  // power-on attributes after source reset recognition, without minting a reset.
   // Walk instantiated generate scopes too: cgen_memory_* guards its constant
   // init loop with `generate if (INIT_EN)`.
   std::function<void(const slang::ast::Scope&)> harvest_initial_values = [&](const slang::ast::Scope& scope) {
@@ -2804,14 +2819,7 @@ bool Slang_context::lower_module(const slang::ast::InstanceSymbol& symbol) {
     if (reset_attr_syms_.contains(sym)) {
       continue;
     }
-    emit_warning(
-        slang::SourceRange(sym->location, sym->location),
-        "initial-without-reset",
-        "time",
-        std::string("register '") + std::string(sym->name)
-            + "' has an initial value but no explicit register reset; inou.slang models it with the module's implicit reset",
-        "add an explicit reset if the initialized state must be portable; formal equivalence may otherwise differ from reset-less "
-        "hardware");
+    emit_reg_reset_attrs(*sym, reg_init_vals_.at(sym), "false", true, false, false);
   }
 
   bool ok = !module_failed_;
@@ -3401,9 +3409,7 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
       // (core/bus_name.hpp): `q[bit]`, quoted as one identifier.
       auto leaf = suffixed_ref_of(name, livehd::bus_name::bit("", bit));
       it->second.push_back(leaf);
-      auto lane_val = splittable ? packed_initial->get_mask_op_opt(bit, bit + 1) : decltype(packed_initial){};
-      auto value    = initial == reg_init_vals_.end() || !lane_val ? std::string("nil") : std::string(lane_val->to_pyrope());
-      builder_.create_declare_stmts(leaf, "reg", "1", "0", value);
+      builder_.create_declare_stmts(leaf, "reg", "1", "0", "nil");
       lanes.push_back({leaf, 1});
     }
     if (initial != reg_init_vals_.end() && splittable) {
@@ -3548,7 +3554,6 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
   std::string initial = "nil";
   if (!latch_syms_.contains(&sym)) {
     if (auto it = reg_init_vals_.find(&sym); it != reg_init_vals_.end()) {
-      initial = it->second;
       reg_init_applied_.insert(&sym);
     }
   }
@@ -3557,7 +3562,7 @@ void Slang_context::declare_reg(const slang::ast::ValueSymbol& sym) {
                                 mode,
                                 int_max_str(ti.bits, ti.is_signed),
                                 int_min_str(ti.bits, ti.is_signed),
-                                initial);  // concrete init requests the implicit reset; async-reset attrs can override it
+                                initial);  // reset/power-on attributes are emitted after the source processes are classified
   if (partial_reg_shadow_.contains(&sym)) {
     // Continuous slices and flop slices form one order-independent value.
     // Keep the write accumulator separate so a clocked reader emitted before
@@ -7476,7 +7481,10 @@ void Slang_context::emit_reg_reset_attrs(const slang::ast::ValueSymbol& sym, std
         emit_attr(target.name, "initial", target.initial, false);
       }
     }
-    emit_attr(target.name, "reset_pin", reset_ref, true);
+    emit_attr(target.name, "reset_pin", reset_ref, reset_ref != "false");
+    if (reset_ref == "false") {
+      continue;  // power-on contents do not create a reset edge or polarity
+    }
     emit_attr(target.name, "sync", async ? "false" : "true", false);
     // The polarity the reader RECOGNISED (the guard / edge), always explicit:
     // left unset, tolg's Verilog-origin `_n` naming default would turn an
@@ -8314,7 +8322,7 @@ void Slang_context::bind_xmr_exports(const slang::ast::InstanceBodySymbol& body)
     }
     auto ti    = tinfo(leaf->getType());
     auto value = read_symbol(*leaf, slang::SourceRange(leaf->location, leaf->location));  // a deeper leaf goes via read_xmr
-    builder_.create_assign_stmts(xmr_port(rel), fit_wrap(value, ti.bits, ti.is_signed));
+    builder_.create_assign_stmts(xmr_port(body, rel), fit_wrap(value, ti.bits, ti.is_signed));
   }
 }
 
@@ -8754,7 +8762,7 @@ void Slang_context::lower_instance(const slang::ast::InstanceSymbol& inst) {
         auto get = builder_.add_child(Lnast_ntype::create_tuple_get());
         ln.add_child(get, Lnast_node::create_ref(value));
         ln.add_child(get, Lnast_node::create_ref(result));
-        ln.add_child(get, Lnast_node::create_const(xmr_port(rel)));
+        ln.add_child(get, Lnast_node::create_const(xmr_port(*lowering_body(inst), rel)));
       }
       builder_.create_assign_stmts(it->second.name, fit_wrap(value, it->second.bits, it->second.is_signed));
     }

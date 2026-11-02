@@ -119,7 +119,7 @@ cc_library(
                ],
                allow_empty = True,
            ),
-    hdrs = glob(["src/**/*.h", "src/**/*.hpp", "src/**/*.tpp"]) + glob([
+    hdrs = glob(["src/**/*.h", "src/**/*.hpp", "src/**/*.tpp", "src/**/*.inc"]) + glob([
         "src/**/**/*Unfold2.c",
         "src/sat/kissat/sort.c"
     ]),

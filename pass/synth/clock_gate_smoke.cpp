@@ -251,6 +251,46 @@ TEST(ClockGate, ASynchronousResetKeepsTheClockRunningForTheReset) {
   EXPECT_TRUE(gu::type_op_of(en.get_master_node()) == Ntype_op::Or);
 }
 
+TEST(ClockGate, ResetOnlyInactivityDoesNotInferAnAlwaysOpenGate) {
+  for (const bool active_low : {false, true}) {
+    for (const bool asynchronous : {false, true}) {
+      for (const bool independent_enable : {false, true}) {
+        SCOPED_TRACE(::testing::Message() << "active_low=" << active_low << " asynchronous=" << asynchronous
+                                          << " independent_enable=" << independent_enable);
+        const auto build = [&](Fixture& f) {
+          const auto zero     = gu::create_const(*f.graph, *Dlop::create_integer(0));
+          const auto inactive = active_low ? f.in("rst") : f.bit(Ntype_op::EQ, {f.in("rst"), zero});
+          const auto enable   = independent_enable ? f.in("a") : inactive;
+          for (int index = 0; index < 2; ++index) {
+            auto reg = f.reg(enable, f.in("clk"), true);
+            gu::create_const(*f.graph, *Dlop::create_integer(active_low)).connect_sink(gu::setup_sink_by_name(reg, "negreset"));
+            gu::create_const(*f.graph, *Dlop::create_integer(asynchronous)).connect_sink(gu::setup_sink_by_name(reg, "async"));
+            f.out(index == 0 ? "q0" : "q1", reg);
+          }
+        };
+        Fixture f;
+        build(f);
+        const bool useful = asynchronous || independent_enable;
+        const auto stats  = infer(f, 8, 1);
+        ASSERT_TRUE(stats);
+        EXPECT_EQ(stats->gates, useful ? 1U : 0U);
+        EXPECT_EQ(f.count(Ntype_op::Clock_cell), useful ? 1U : 0U);
+        EXPECT_EQ(stats->registers, useful ? 2U : 0U);
+        if (!useful) {
+          EXPECT_EQ(f.count(Ntype_op::Or), 0U) << "the reset-qualified gate would always be open";
+          for (auto node : f.graph->body().nodes()) {
+            if (gu::type_op_of(node) == Ntype_op::Flop) {
+              EXPECT_EQ(gu::get_driver_of_sink_name(node, "clock_pin"), f.in("clk"));
+              EXPECT_FALSE(gu::get_driver_of_sink_name(node, "enable").is_invalid());
+            }
+          }
+        }
+        expect_equivalent(build, 8, 1);
+      }
+    }
+  }
+}
+
 TEST(ClockGate, NestedGatesFactorTheNextSharedConjunct) {
   Fixture f;
   auto    ab  = f.bit(Ntype_op::And, {f.in("a"), f.in("b")});

@@ -157,6 +157,9 @@ no external calls or undefined symbols: object emission validates the native sym
 table, including dependencies introduced by instruction selection. Wide division
 uses an internal restoring loop and memory intrinsics expand locally. The C++
 support compiles normally, without host bitcode or cross-language inlining.
+Randomized literal resources are packed lazily on first use after seed setup,
+then shared by every use of that literal and width within a color. Their
+packed buffers stay fixed for the run, like the shared literal values.
 Stateless leaf loops get a native rolled-loop entry when their output
 computation fits one native color or a resource-free pure data DAG of colors.
 For multi-color bodies, the emitter composes the required pre-rise colors,
@@ -277,6 +280,15 @@ and its simulation time from 7.96 to 1.78 seconds. The
 separates this code-generation issue from the remaining state/ABI transport
 costs in source FIFO and sequential netlist simulations.
 
+Scalar mux lowering also reconstructs shared word selections after hierarchy
+expansion. Constant slices with the same selector share their word mux, and
+relative bit offsets can be aligned by constant rotations, including wrapped
+views of a word. This exposes structured mux trees across module occurrences.
+Byte-aligned slices of a wide packed input use narrower loads at the original
+load position on little-endian hosts, preserving the input snapshot across
+intervening writes. Sharing stays within a basic block, and extension bits and
+nonzero selector semantics remain intact.
+
 One-bit data-state commits use a conditional value selection and branchless
 dirty notification. Bits feeding mux selectors or flop/latch controls keep
 conditional stores: control state often remains unchanged for long stretches. LLVM one-bit boundary stores similarly compare, store, and mask
@@ -319,6 +331,11 @@ and never cross a phase or evaluator-shard boundary. They call their local
 evaluator directly, preserving compiler inlining within the translation unit.
 Ninja compiles evaluator shards separately; unity batching is reserved for the
 small support translation units.
+Reset, checkpoint, observation, and tuning members retain bounded cold lambda
+chunks. A member exceeding 512 KiB also gets its own translation unit, so large
+state walkers compile in parallel instead of accumulating in the main host
+source. Regeneration removes obsolete helper units when a design shrinks or
+support is disabled.
 Shared-kernel calls and changed-bit actions use the same emitter in reset
 evaluation and normal scheduling.
 
@@ -471,6 +488,14 @@ edges are retained in the version DAG and in the color DAG after coarsening;
 Slop activation grouping preserves that order for colors containing in-place
 state, including the placement of reset actions. LLVM emits the operations in
 the same order.
+
+A clock gate's activation is sampled before state updates and retained through
+its consumers' commits. Gate chains combine their sampled activations. Native
+LLVM updates qualify both data and synchronous reset with that activation, so
+updates belonging to different gates can share a color. Slop keeps separate
+colors for whole-cone gating. Compact bodies with independent clock ports use
+each port's period tick for its own state commits; a withheld tick holds only
+that domain, and a tick change reawakens a quiescent body.
 
 For rising-edge arrays, a zero forwarding prefix orders a read before the write
 group; a full prefix orders it after the group. This covers old, forwarded, and

@@ -8,14 +8,10 @@
 // the low/high data windows can never be open together. Reset is the latches'
 // async `reset_pin` (the form the Verilog/Pyrope writers emit).
 //
-// SIM BUG TRACKER (fixme, 2026-10-04). Ported from the pre-`Clock`-type Bool
-// form. `local_clock` is a `Clock_cell`; the two latches are enabled by it. The
-// emitted Verilog is right (iverilog: `high` holds at 3 while `run` is low,
-// ticks 5..7), but `lhd sim` ignores the gate for a latch whose enable is a
-// gated Clock built in the SAME module: `high` keeps advancing (4,5,6) while
-// `run` is 0. Moving the two latches into a child module that receives the gated
-// clock as a port (see clock_cell_gated_pair_ring.prp) fixes `high`, but then the
-// negedge `observer` still reads one step ahead (5, expected 4).
+// A local `Clock_cell` is a gated level, not an unconditional reference-clock
+// window: `high` holds at 3 while `run` is low, ticks 5..7. The low latch stays
+// open while the gate is closed, and the falling-edge observer reads settled
+// high Q. Both LLVM and Slop run these same assertions.
 pub mod gated_feedback(clk:Clock, clear:Bool, run:Bool, d:U8) -> (low:U8@[], high:U8@[], sampled:U8@[1], observed:U8@[]) {
   const local_clock = Clock(clock_pin=clk, enable=run)
   reg lo:U8:[latch=true, enable=local_clock, enable_high=false, reset_pin=clear, async=true, initial=0]
@@ -89,5 +85,44 @@ test alternating_phases.edge_then_settle {
     assert(acc.rise_q == previous, "rising-edge flop reads the preceding low window")
     assert(acc.high_q == previous, "high latch settles after the rising-edge commit")
     previous = next_value
+  }
+}
+
+
+
+// Reduced from Minion's resettable write-commit cell. The low-phase enable
+// sampler has no reset; the high-phase data latch resets independently.
+pub mod resettable_enable_feedback(clk:Clock, clear:Bool, run:Bool, d:U1) -> (q:U1@[], sampled:U1@[1]) {
+  const local_clock = Clock(clock_pin=clk, enable=run)
+  reg value:U1:[latch=true, enable=local_clock, reset_pin=clear, async=true, initial=0]
+  reg can_write:U1:[latch=true, enable=local_clock, enable_high=false] = nil
+  reg sample:U1:[clock_pin=clk] = 0
+  can_write = if value == 0 { 1 } else { 0 }
+  if can_write != 0 {
+    value = d
+  }
+  sample = d
+  q = value
+  sampled = sample
+}
+
+test resettable_enable_feedback.reset_pause_and_lock {
+  mut acc = resettable_enable_feedback
+  mut expected:U1 = 0
+  tick 14 {
+    const clearing = (clock < 2) or (clock == 5) or (clock == 9)
+    const running = ((clock >= 2) and (clock < 4)) or ((clock >= 7) and (clock < 11)) or (clock >= 12)
+    const data = if (clock == 3) or (clock == 8) or (clock >= 11) { 0 } else { 1 }
+    acc.clear = clearing
+    acc.run = running
+    acc.d = data
+    if clearing {
+      expected = 0
+    } elif running and (expected == 0) {
+      expected = data
+    }
+    step
+    assert(acc.sampled == data, "ungated reference-clock flop stays active")
+    assert(acc.q == expected, "reset overrides the closed gate; sampled enable prevents overwriting a locked value")
   }
 }

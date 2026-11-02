@@ -7,13 +7,13 @@ LIB=inou/prp/tests/abc/test.lib
 W="${TEST_TMPDIR:-$(mktemp -d)}"
 run() { "$LHD" "$@" -q; }
 cat > "$W/memory_hierarchy.v" <<'SV'
-module bank(input clock, we, input addr, input [3:0] din, output [3:0] dout);
-  reg [3:0] storage [0:1];
+module bank(input clock, we, input addr, input [1:0] din, output [1:0] dout);
+  reg [1:0] storage [0:1];
   initial begin storage[0]=0; storage[1]=1; end
   always @(posedge clock) if(we) storage[addr] <= din;
   assign dout=storage[addr];
 endmodule
-module memory_hierarchy(input clock, we, input addr, input [3:0] din, output [3:0] a, b);
+module memory_hierarchy(input clock, we, input addr, input [1:0] din, output [1:0] a, b);
   bank left(.clock(clock),.we(we),.addr(addr),.din(din),.dout(a));
   bank right(.clock(clock),.we(we),.addr(addr),.din(~din),.dout(b));
 endmodule
@@ -66,7 +66,7 @@ names=[bytes.fromhex(s).decode() for s in ids['true']]
 assert any('left' in s for s in names) and any('right' in s for s in names),names
 assert 'cgen_memory_1rd_1wr #' in texts['false']
 assert '_blasted' not in texts['false']
-# `default` is memory=auto: each bank is 2 x 4 = 8 bits over 2 ports, well
+# `default` is memory=auto: each bank is 2 x 2 = 4 bits over 2 ports, well
 # within memory_max_bits, so it folds exactly like memory=true.
 for m in ('default','true','warm'):
     assert re.search(r'module cgen_memory_.*_blasted',texts[m]),m
@@ -98,9 +98,9 @@ vectors = []
 for k in range(2):
     vectors.append(dict(inputs=dict(we=0, addr=k, din=0), outputs=dict(a=k,b=k)))
 for k in range(16):
-    addr, data, we = (k*3+k//7)%2, (k*37+13)&15, int(k%3 != 0)
+    addr, data, we = (k*3+k//7)%2, (k*37+13)&3, int(k%3 != 0)
     if we:
-        left[addr], right[addr] = data, data ^ 15
+        left[addr], right[addr] = data, data ^ 3
     vectors.append(dict(inputs=dict(we=we, addr=addr, din=data), outputs=dict(a=left[addr],b=right[addr])))
 open(sys.argv[1], 'w').write(json.dumps(vectors))
 PYV
@@ -128,8 +128,8 @@ cat > "$W/tb.v" <<'SV'
 module tb;
   reg clock=0, we=0;
   reg addr=0;
-  reg [3:0] din=0;
-  wire [3:0] a,b,ra,rb;
+  reg [1:0] din=0;
+  wire [1:0] a,b,ra,rb;
   memory_hierarchy dut(.clock(clock),.we(we),.addr(addr),.din(din),.a(a),.b(b));
   reference golden(.clock(clock),.we(we),.addr(addr),.din(din),.a(ra),.b(rb));
   task check;

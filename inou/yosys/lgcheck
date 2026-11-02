@@ -683,7 +683,12 @@ fi
 CLOCK_BLIND_OK=0
 ASYNC_FF=1  # unknown until the helper says otherwise
 clock_domains_tool="${SELF_DIR}/clock_domains.py"
+# Save the complete lowered designs before the clock-only guard removes data logic.
+# Each strategy then reads this fresh snapshot instead of repeating proc/flatten.
+prepared_inputs=lgcheck_prepared.rtlil
+rm -f "$prepared_inputs"
 if [ -f "$clock_domains_tool" ] && ${YOSYS} -p "${yosys_read}; flatten gold gate;
+    write_rtlil ${prepared_inputs};
     select -set lgc_state t:*ff* t:*FF* t:*latch* t:*LATCH* t:\$mem* t:\$_SR_* t:\$sr;
     select -set lgc_clock t:\$not t:\$_NOT_ t:\$buf t:\$pos t:\$_BUF_;
     setattr -set keep 1 @lgc_state; delete c:* @lgc_state %d @lgc_clock %d;
@@ -691,6 +696,10 @@ if [ -f "$clock_domains_tool" ] && ${YOSYS} -p "${yosys_read}; flatten gold gate
     >lgcheck_clock_domains.log 2>&1 \
     && clock_domains=$(python3 "$clock_domains_tool" --json lgcheck_clock_domains.json); then
   echo "INFO: clock domains: ${clock_domains}"
+  if [ -s "$prepared_inputs" ]; then
+    yosys_read="read_rtlil ${prepared_inputs}"
+    echo "INFO: reusing lowered input designs (${prepared_inputs})"
+  fi
   case "$clock_domains" in
   single*) CLOCK_BLIND_OK=1 ;;
   esac
@@ -711,6 +720,24 @@ equiv_start=$SECONDS
 run_clock_blind_yosys() {
   [ "$CLOCK_BLIND_OK" -eq 1 ] || return 125
   run_equiv_yosys "$@"
+}
+
+# The induction and bounded-miter fallbacks prepare each top independently.
+# Start those preparations from the same complete snapshot as the other
+# strategies. Reading the original inputs here would repeat proc/flatten
+# inside the proof budget, which can exhaust it before SAT even starts.
+# Preserve each strategy's memory-lowering and -keepdc order.
+prepared_top_pair() {
+  local memory_cmd=""
+  [ "$1" != memory ] || memory_cmd="memory;"
+  cat <<EOF
+${yosys_read}; design -save lgcheck_pair_inputs;
+hierarchy -top gold; ${memory_cmd} opt -keepdc; flatten; prep -top gold; design -stash gold;
+design -load lgcheck_pair_inputs; design -delete lgcheck_pair_inputs;
+hierarchy -top gate; ${memory_cmd} opt -keepdc; flatten; prep -top gate; design -stash gate;
+design -copy-from gold -as gold gold;
+design -copy-from gate -as gate gate
+EOF
 }
 
 # The engines of stages 1..1c and 4 (equiv_simple/equiv_induct) have no base
@@ -1179,10 +1206,7 @@ fi
 # Primary hardware inputs are defined bit vectors, as in cvc5 and the BMC
 # check below. Allowing X inputs makes equivalent mux/gate implementations
 # disagree only in undefined propagation and prematurely fails the base case.
-run_clock_blind_yosys -p " $(gold_read_cmds); proc; bmuxmap; opt -keepdc; flatten ; rename -top gold; prep -top gold ; design -stash gold;
-              $(gate_read_cmds); proc; bmuxmap; opt -keepdc; flatten ; rename -top gate; prep -top gate ; design -stash gate;
-              design -copy-from gold -as gold gold
-              design -copy-from gate -as gate gate
+run_clock_blind_yosys -p "$(prepared_top_pair '')
 
               miter -equiv -flatten -make_outputs -ignore_gold_x gold gate miter
               hierarchy -top miter
@@ -1329,10 +1353,7 @@ if [[ "${LGCHECK_BMC_STEPS}" =~ ^[0-9]+$ ]] && [ "${LGCHECK_BMC_STEPS}" -gt 0 ];
   # a counterexample (br_amba_axil_msi's pop_data[3:0]).  `-keepdc` keeps the
   # two equivalent machines intact before the shared initialization policy is
   # applied by SAT.
-  run_equiv_yosys --bmc -p "$(gold_read_cmds); proc; bmuxmap; memory; opt -keepdc; flatten ; rename -top gold; prep -top gold ; design -stash gold;
-               $(gate_read_cmds); proc; bmuxmap; memory; opt -keepdc; flatten ; rename -top gate; prep -top gate ; design -stash gate;
-               design -copy-from gold -as gold gold
-               design -copy-from gate -as gate gate
+  run_equiv_yosys --bmc -p "$(prepared_top_pair memory)
                miter -equiv -flatten -make_outputs -ignore_gold_x gold gate miter
                clk2fflogic
                opt_clean

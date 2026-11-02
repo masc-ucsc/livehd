@@ -1,0 +1,16 @@
+diff --git a/WORKSPACE b/WORKSPACE
+--- /dev/null
++++ b/WORKSPACE
+@@ -0,0 +1 @@
++workspace(name = "llvm_raw")
+diff --git a/llvm/lib/Support/ProgramStack.cpp b/llvm/lib/Support/ProgramStack.cpp
+--- a/llvm/lib/Support/ProgramStack.cpp
++++ b/llvm/lib/Support/ProgramStack.cpp
+@@ -9,6 +9,7 @@
+ #include "llvm/Support/ProgramStack.h"
+ #include "llvm/Config/config.h"
+ #include "llvm/Support/Compiler.h"
++#include <cstdlib>
+ 
+ #ifdef LLVM_ON_UNIX
+ # include <sys/resource.h> // for getrlimit

@@ -65,6 +65,38 @@ TEST(SolverProfile, SamplerUsesFreshSolversWithoutChangingCoverage) {
   EXPECT_EQ(out.report.reached, Effort::Quick);
   EXPECT_TRUE(solver.checkSat().isSat());
 }
+
+// State that does not reach an output still belongs to the witness. Leaving its definitions out of the
+// simulated trace makes confirmation fail and reprocesses the whole unrolling in a full SMT replay.
+TEST(SolverProfile, SamplerReplayIncludesDefinitionsOutsideTheOutputCone) {
+  cvc5::TermManager tm;
+  Fresh_solver      solver(tm);
+  solver.setLogic("QF_BV");
+  solver.setOption("produce-models", "true");
+  Input_sampler sampler(tm);
+  const auto    bits = tm.mkBitVectorSort(8);
+  const auto    a = tm.mkConst(bits, "a"), b = tm.mkConst(bits, "b");
+  const auto    state = tm.mkConst(bits, "state"), next = tm.mkConst(bits, "next");
+  const auto    state_def = tm.mkTerm(Kind::EQUAL, {state, tm.mkTerm(Kind::BITVECTOR_MULT, {b, b})});
+  const auto    next_def  = tm.mkTerm(Kind::EQUAL, {next, tm.mkTerm(Kind::BITVECTOR_ADD, {state, a})});
+  solver.assertFormula(state_def);
+  solver.assertFormula(next_def);
+  sampler.add_input(a);
+  sampler.add_input(b);
+  const auto bad         = tm.mkTerm(Kind::DISTINCT, {tm.mkTerm(Kind::BITVECTOR_ADD, {a, tm.mkBitVector(8, 1)}), a});
+  size_t     full_checks = 0;
+  const auto out         = sampler.run(solver, bad, Effort::Quick, [&](long long) {
+    ++full_checks;
+    return solver.checkSat();
+  });
+  ASSERT_TRUE(out.mismatch);
+  EXPECT_EQ(full_checks, 0u) << "the complete trace must confirm without solving the whole base again";
+  EXPECT_TRUE(solver.getValue(bad).getBooleanValue());
+  EXPECT_TRUE(solver.getValue(state_def).getBooleanValue());
+  EXPECT_TRUE(solver.getValue(next_def).getBooleanValue());
+  solver.pop();
+}
+
 TEST(SolverProfile, LazyArithmeticNeverReportsFalseSat) {
   cvc5::TermManager tm;
   cvc5::Solver      solver(tm);
