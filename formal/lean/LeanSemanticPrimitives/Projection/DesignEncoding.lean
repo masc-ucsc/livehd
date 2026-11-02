@@ -411,8 +411,9 @@ def decCommit : Val → Option MemCommit
   simp [encCommit, decCommit, tagCommit]
 
 /-- DCERT3's three memory fields ride along so `decDesign_encDesign` stays a
-round trip for EVERY certificate; the object program reads only `nxt` and `ck`
-(`fMemNext`): `init` is a start-state fact and the other two are reserved. -/
+round trip for EVERY certificate. The object program's `fMemNext` reads `nxt`,
+`ck`, the commit table `cms` (decision #9) and the async-reset image `aimg`
+(decision #2); `init` is a start-state fact. -/
 def encMemory (m : MemoryDesc) : Val :=
   .ctor tagMemory [encNat m.aw, encNat m.dw, encNat m.nextImg, encNat m.clock,
                    encArr encNat m.init, encArr encCommit m.commits, encONat m.asyncImg]

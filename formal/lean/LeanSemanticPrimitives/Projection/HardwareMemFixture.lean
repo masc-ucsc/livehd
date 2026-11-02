@@ -143,7 +143,7 @@ theorem fullG_nextImg : NextImgGeomOK fullDesign fullG := by
   rcases idx with _|idx
   · have hmd' : ({ aw := 5, dw := 32, nextImg := 11, clock := 0 } : MemoryDesc) = md := by
       simpa [fullDesign] using hmd
-    subst hmd'; exact ⟨rfl, by simp⟩
+    subst hmd'; exact ⟨rfl, by simp, by simp⟩
   · simp [fullDesign] at hmd
 
 theorem fullG_prop : ∀ (j : Nat) (c : DenseNodeCert),

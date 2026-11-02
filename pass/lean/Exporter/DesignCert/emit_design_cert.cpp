@@ -107,9 +107,12 @@ void emit_design_cert(const std::string& base, const CertificateIR& d, std::ostr
       }
       commits += "]";
     }
+    // `asyncImg` only when present (an asynchronous whole-array reset).
+    const std::string async_img
+        = m.async_img ? ", asyncImg := some " + std::to_string(d.slot_of.at(*m.async_img)) : std::string();
     mem_lines.push_back("{ aw := " + std::to_string(m.addr_w) + ", dw := " + std::to_string(m.data_w) + ", nextImg := "
                         + std::to_string(d.slot_of.at(m.next_img)) + ", clock := " + std::to_string(m.clock) + init
-                        + commits + " }");
+                        + commits + async_img + " }");
   }
 
   auto emit_array = [&os](const char* field, const std::vector<std::string>& lines, bool) {

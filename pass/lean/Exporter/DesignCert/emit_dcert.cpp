@@ -247,8 +247,8 @@ void render_dcert(const CertificateIR& d, std::ostream& os) {
     r.field(slot(d, m.next_img));
     r.field(m.clock);
     // DCERT3: the power-on words, then the commit table (a memory on more than
-    // one clock domain), then the async-reset image, RESERVED (written empty:
-    // `certWfError` refuses anything else until a route models it).
+    // one clock domain), then the async-reset image of a whole-array cell with
+    // an asynchronous reset (decision #2), as a flop spells `enable`.
     r.field(m.init.size());
     for (const auto& v : m.init) {
       r.field(canonical_decimal(v));
@@ -258,8 +258,8 @@ void render_dcert(const CertificateIR& d, std::ostream& os) {
       r.field(std::to_string(mask));
       r.field(slot(d, img));
     }
-    r.field(size_t{0});  // hasAsync
-    r.field(size_t{0});  // asyncImg
+    r.field(m.async_img ? size_t{1} : size_t{0});                              // hasAsync
+    r.field(m.async_img ? std::to_string(slot(d, *m.async_img)) : std::string("0"));  // asyncImg
     r.finish(os);
   }
 

@@ -141,6 +141,31 @@ TEST(LegacyModel, CommitTableMemoryNextIsTheCertificateRule) {
   n.edges.clear();
   EXPECT_EQ(legacy_memory_next(m, n, img, "held"), "img30");
 }
+// An ASYNCHRONOUS whole-array reset (DCERT3 `asyncImg`, decision #2): a memory
+// that does not commit keeps the image with the reset applied, not the stored
+// one -- `srcMemHeld`. With one domain it commits on every step, so the image
+// is never read.
+TEST(LegacyModel, AsyncResetMemoryHoldsTheResetImage) {
+  LegacyNames n;
+  n.edges = {"edge_a", "edge_b"};
+  MemoryDriver m;
+  m.next_img     = 30;
+  m.clock        = 1;
+  m.async_img    = 33;
+  const auto img = [](uint32_t id) { return "img" + std::to_string(id); };
+  EXPECT_EQ(legacy_memory_next(m, n, img, "stored"), "if e.edge_b then img30 else img33");
+  m.commits = {{uint64_t{1} << 0, 31}};
+  m.clock   = 1;
+  EXPECT_EQ(legacy_memory_next(m, n, img, "stored"),
+            "if e.edge_a && e.edge_b then img30 else if e.edge_a && !e.edge_b then img31 else img33");
+  m.async_img.reset();
+  EXPECT_EQ(legacy_memory_next(m, n, img, "stored"),
+            "if e.edge_a && e.edge_b then img30 else if e.edge_a && !e.edge_b then img31 else stored");
+  m.async_img = 33;
+  m.commits.clear();
+  n.edges.clear();
+  EXPECT_EQ(legacy_memory_next(m, n, img, "stored"), "img30");
+}
 // A whole-array memory (decision #2): the fast model writes `mem_load` and
 // `mem_to_bus` (Translation/WholeArray), and the bridge proves them with
 // `mem_load_bridge` / `mem_to_bus_bridge` (Translation/WholeArrayBridge).

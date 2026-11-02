@@ -76,27 +76,39 @@ def srcFlopNext (rho : Nat → CertVal) (e : ClockEdges) (s : RuntimeState) (idx
     if edge && enabled then bv_resize f.width (rho f.din).asBV
     else s.flops[idx]?.getD (mk_bv f.width 0)
 
+/-- What a memory keeps on a step it does not commit: the stored image, or --
+with an ASYNCHRONOUS whole-array reset (DCERT3 `asyncImg`, decision #2) -- the
+slot holding the stored image with the reset applied, so an asserted reset lands
+even when no clock of the memory fires, as pass/lec applies an async reset with
+no edge. -/
+def srcMemHeld (rho : Nat → CertVal) (s : RuntimeState) (idx : Nat) (m : MemoryDesc) :
+    Int → BV :=
+  match m.asyncImg with
+  | some a => (rho a).asMem
+  | none   => s.mems[idx]?.getD (fun _ => mk_bv 0 0)
+
 /-- Source-side memory rule: the post-write image when the memory's domain
-fires, the pre-step image otherwise.  (A write port whose enable is low already
-leaves the image unchanged; the hold is for the write that WOULD have happened
-had the edge come.)
+fires, and otherwise what it holds, `srcMemHeld` -- the pre-step image, or with
+an asynchronous whole-array reset the image that reset leaves.  (A write port
+whose enable is low already leaves the image unchanged; the hold is for the
+write that WOULD have happened had the edge come.)
 
 A memory on MORE THAN ONE domain (DCERT3 `commits`, decision #9): `nextImg` is
 the chain of every port's writes, taken when ALL its domains fire -- which is
 the one-clock rule's image, so `interpretDesign_allEdges` still holds.  When only
 SOME fire, the image is the entry of the commit table naming exactly those (the
 chain of the writes of the ports on them, in port order); when none fires, or
-the table names no such entry, it holds. -/
+the table names no such entry, it holds: it keeps `srcMemHeld`. -/
 def srcMemNext (rho : Nat → CertVal) (e : ClockEdges) (s : RuntimeState) (idx : Nat)
     (m : MemoryDesc) : Int → BV :=
   if m.commits.isEmpty then
     if fires e m.clock then (rho m.nextImg).asMem
-    else s.mems[idx]?.getD (fun _ => mk_bv 0 0)
+    else srcMemHeld rho s idx m
   else if m.allFire e then (rho m.nextImg).asMem
   else
     match m.commits.find? (m.firedIs e) with
     | some c => (rho c.nextImg).asMem
-    | none   => s.mems[idx]?.getD (fun _ => mk_bv 0 0)
+    | none   => srcMemHeld rho s idx m
 
 /-- A memory's POWER-ON image (DCERT3 `MemoryDesc.init`): word `a` is
 `init[a]`, and 0 past its end or at a negative address, as `lhd sim` fills a
@@ -167,8 +179,20 @@ theorem srcMemNext_of_empty (rho : Nat → CertVal) (e : ClockEdges) (s : Runtim
     (m : MemoryDesc) (hc : m.commits = #[]) :
     srcMemNext rho e s idx m =
       if fires e m.clock then (rho m.nextImg).asMem
-      else s.mems[idx]?.getD (fun _ => mk_bv 0 0) := by
+      else srcMemHeld rho s idx m := by
   simp [srcMemNext, hc]
+
+/-- With no asynchronous reset a memory holds its stored image. -/
+theorem srcMemHeld_of_none (rho : Nat → CertVal) (s : RuntimeState) (idx : Nat)
+    (m : MemoryDesc) (ha : m.asyncImg = none) :
+    srcMemHeld rho s idx m = s.mems[idx]?.getD (fun _ => mk_bv 0 0) := by
+  simp [srcMemHeld, ha]
+
+/-- …and with one, the image with the reset applied. -/
+theorem srcMemHeld_of_some (rho : Nat → CertVal) (s : RuntimeState) (idx : Nat)
+    (m : MemoryDesc) {a : Nat} (ha : m.asyncImg = some a) :
+    srcMemHeld rho s idx m = (rho a).asMem := by
+  simp [srcMemHeld, ha]
 
 /-- Under the all-fire stimulus a memory takes `nextImg`, table or not. -/
 theorem srcMemNext_allEdges {D : DesignCert} (rho : Nat → CertVal) (s : RuntimeState) (idx : Nat)

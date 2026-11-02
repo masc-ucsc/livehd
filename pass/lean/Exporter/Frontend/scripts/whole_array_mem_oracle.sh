@@ -34,6 +34,16 @@ set -euo pipefail
 #   a MemToBus that packs one entry fewer.
 #   IR on each must differ from the golden, and FP on each from IR on the
 #   unchanged certificate.
+# An ASYNCHRONOUS whole-array reset (DCERT3 `asyncImg`, decision #2 stage 3):
+#   reads see the image with the reset applied, and a memory whose clock does
+#   not fire keeps that image, so an asserted reset lands with no edge. The
+#   golden's `always @(posedge clk or negedge rstn)` checks the reads (IR, TV,
+#   legacy, at every cycle). The HOLD needs a quiet step, which only FP's
+#   schedule and cert_trace's `edges:third` have, so its control is: the
+#   certificate with `asyncImg` removed (`0 0`), under `edges:third`, must differ
+#   from the unchanged one, on a stimulus that asserts the reset on at least
+#   one quiet step (counted from the row's `reset_pin=`/`negreset=`); FP on it
+#   must differ from IR on the unchanged certificate too.
 #
 # Rows: mem_whole_reg (a bulk update and read_all, no enable, no reset),
 # mem_bulk_vs_entry_order (update, update enable, port writes and reset on seven
@@ -41,7 +51,7 @@ set -euo pipefail
 # reset restoring a constant that is also the power-on contents),
 # spec_memory_bulk_read_visibility (reads before and after a bulk clear, with
 # three forwarding policies), clocked_array_flags (read_all of a per-port
-# memory).
+# memory), async_mem_reset_demoted (an active-low ASYNCHRONOUS reset).
 #
 # The Lean toolchain pin lives in formal/lean; lean runs from there.
 
@@ -50,7 +60,7 @@ ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
 OUT="${OUT:-$ROOT/generated/master_port/whole_array_mem_oracle}"
 LHD="${LHD:-$ROOT/bazel-bin/lhd/lhd}"
 CYCLES="${CYCLES:-40}"
-ROWS="${ROWS:-mem_whole_reg mem_bulk_vs_entry_order spec_memory_reset_priority spec_memory_poweron_not_reset spec_memory_bulk_read_visibility clocked_array_flags}"
+ROWS="${ROWS:-mem_whole_reg mem_bulk_vs_entry_order spec_memory_reset_priority spec_memory_poweron_not_reset spec_memory_bulk_read_visibility clocked_array_flags async_mem_reset_demoted}"
 [[ -x "$LHD" ]] || { echo "build //lhd:lhd first" >&2; exit 2; }
 command -v iverilog >/dev/null && command -v vvp >/dev/null || { echo "iverilog/vvp not on PATH" >&2; exit 2; }
 rm -rf -- "$OUT"
@@ -158,6 +168,39 @@ elif verb == "mutate":   # mutate <in.dcert> <out.dcert> <opcode> <new count>
     f[1] = new if new != "minus1" else str(int(f[1]) - 1)
     lines[j] = " ".join(f)
     open(dst, "w").write("\n".join(lines))
+
+elif verb == "noasync":   # noasync <in.dcert> <out.dcert>: every memory's asyncImg -> none
+    src, dst = sys.argv[2], sys.argv[3]
+    lines = open(src).read().split("\n")
+    assert lines[0] == "DCERT3", lines[0]
+    i = 1
+    for _ in range(4):            # sources, nodes, outputs, flops: one line each
+        i += 1 + int(lines[i])
+    nmem, hits = int(lines[i]), 0
+    for j in range(i + 1, i + 1 + nmem):
+        f = lines[j].split()
+        if f[-2] == "1":
+            f[-2:] = ["0", "0"]
+            hits += 1
+        lines[j] = " ".join(f)
+    if not hits:
+        sys.exit("no memory with an async-reset image")
+    open(dst, "w").write("\n".join(lines))
+
+elif verb == "quietreset":   # quietreset <row.prp> <io.json> <stim>: quiet steps (k % 3 == 2) with the reset asserted
+    prp, io, stim = sys.argv[2], sys.argv[3], sys.argv[4]
+    text = open(prp).read()
+    pin = re.search(r"reset_pin\s*=\s*(\w+)", text)
+    if not pin:
+        sys.exit("the row names no reset_pin")
+    low = re.search(r"negreset\s*=\s*true", text) is not None
+    ordn = {i["name"]: i["ordinal"] for i in json.load(open(io))["inputs"]}[pin.group(1)]
+    vals = {}
+    for line in open(stim):
+        f = line.split()
+        if f[:1] == ["at"] and int(f[3]) == ordn:
+            vals[int(f[1])] = int(f[5])
+    print(sum(1 for k, v in vals.items() if k % 3 == 2 and (v == 0) == low))
 PY
 }
 
@@ -240,6 +283,19 @@ for row in $ROWS; do
     [[ $nf -gt 0 ]] || { echo "FAIL: $row: FP on the control ($what) matched IR on the design"; exit 1; }
     echo "ok: $row control -- FP on it differs from IR on the design on $nf steps"
   done
+  # the asynchronous reset's held image (decision #2 stage 3)
+  if py noasync "$D" "$R/ctl_noasync.dcert" 2> /dev/null; then
+    nq=$(py quietreset "$EQ/$row.prp" "$IO" "$R/stim.txt")
+    [[ $nq -gt 0 ]] || { echo "FAIL: $row: the stimulus asserts the reset on no quiet step"; exit 1; }
+    ct "$R/ctl_noasync.dcert" "$R/stim.txt" "$R/ctl_noasync.txt" edges:third
+    na=$(diff "$R/ir_third.txt" "$R/ctl_noasync.txt" | grep -c '^<' || true)
+    [[ $na -gt 0 ]] || { echo "FAIL: $row: removing asyncImg changed nothing under edges:third"; exit 1; }
+    echo "ok: $row control -- asyncImg removed: IR (edges:third) differs from the design on $na steps ($nq quiet steps assert the reset)"
+    fp "$R/ctl_noasync.dcert" "$R/fp_ctl_noasync"
+    nf=$(diff "$R/ir_third.txt" "$R/fp_ctl_noasync.txt" | grep -c '^<' || true)
+    [[ $nf -gt 0 ]] || { echo "FAIL: $row: FP without asyncImg matched IR on the design"; exit 1; }
+    echo "ok: $row control -- asyncImg removed: FP differs from IR on the design on $nf steps"
+  fi
 done
 
 # ---- D3: translation validation, with its proof, on every row's certificate ------

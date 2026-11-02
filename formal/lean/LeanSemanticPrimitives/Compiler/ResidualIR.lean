@@ -133,6 +133,9 @@ structure ResidualMemoryUpdate where
   /-- the power-on words (`MemoryDesc.init`): not part of a step, carried so a
   generated restatement of the certificate's memories (D3's `D_mems`) is exact -/
   init    : Array Nat := #[]
+  /-- an asynchronous whole-array reset's image (`MemoryDesc.asyncImg`): what the
+  memory keeps on a step it does not commit -/
+  asyncImg : Option Nat := none
 deriving Repr, Inhabited, DecidableEq
 
 /-- The `MemoryDesc` view of an update: what `MemoryDesc.allFire` / `firedIs`

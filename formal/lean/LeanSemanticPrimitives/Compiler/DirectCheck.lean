@@ -561,10 +561,17 @@ def checkCommits (D : DesignCert) : List MemCommit → Option SimError
   | []      => none
   | c :: cs => (checkRef D true c.nextImg).orElse (fun _ => checkCommits D cs)
 
+/-- An asynchronous whole-array reset's image is a memory slot, as `nextImg` is
+(DCERT3 `asyncImg`, decision #2). -/
+def checkAsync (D : DesignCert) : Option Nat → Option SimError
+  | none   => none
+  | some a => checkRef D true a
+
 def checkMemory (D : DesignCert) (k : Nat) (m : MemoryDesc) : Option SimError :=
   if m.dw == 0 then some (.zeroWidth m.nextImg)
   else if D.clocks.size ≤ m.clock then some (.memClockOutOfRange k m.clock)
-  else (checkRef D true m.nextImg).orElse (fun _ => checkCommits D m.commits.toList)
+  else (checkRef D true m.nextImg).orElse (fun _ =>
+         (checkCommits D m.commits.toList).orElse (fun _ => checkAsync D m.asyncImg))
 
 def memoryErrors (D : DesignCert) : Option SimError :=
   scan D.memories.size (fun k => D.memories[k]?) (checkMemory D)
@@ -669,6 +676,9 @@ structure DesignSemWF (D : DesignCert) : Prop where
   /-- every commit-table entry's image carries a memory image -/
   memCommitKinds : ∀ (k : Nat) (m : MemoryDesc), D.memories[k]? = some m →
                    ∀ c ∈ m.commits, slotIsMem D c.nextImg = some true
+  /-- an asynchronous whole-array reset's image carries a memory image -/
+  memAsyncKinds : ∀ (k : Nat) (m : MemoryDesc), D.memories[k]? = some m →
+                   ∀ a, m.asyncImg = some a → slotIsMem D a = some true
 
 --------------------------------------------------------------------------------
 -- Soundness
@@ -829,7 +839,8 @@ theorem checkDesign_sound {u : Unit} (h : checkDesign D = .ok u) : DesignSemWF D
   -- memories: clock range and image kind, from one scan
   have hmemsAll : ∀ (k : Nat) (m : MemoryDesc), D.memories[k]? = some m →
       m.clock < D.clocks.size ∧ slotIsMem D m.nextImg = some true ∧
-      (∀ c ∈ m.commits, slotIsMem D c.nextImg = some true) := by
+      (∀ c ∈ m.commits, slotIsMem D c.nextImg = some true) ∧
+      (∀ a, m.asyncImg = some a → slotIsMem D a = some true) := by
     intro k m hm
     have hall := scan_none hmem k (lt_of_getElem?_some hm) m hm
     unfold checkMemory at hall
@@ -844,8 +855,16 @@ theorem checkDesign_sound {u : Unit} (h : checkDesign D = .ok u) : DesignSemWF D
         | none =>
             rw [hr] at hall
             simp only [Option.orElse] at hall
-            exact ⟨by omega, checkRef_sound hr,
-                   fun c hcm => checkCommits_sound hall c (Array.mem_def.mp hcm)⟩
+            cases hcs : checkCommits D m.commits.toList with
+            | some e => rw [hcs] at hall; simp at hall
+            | none =>
+                rw [hcs] at hall
+                simp only at hall
+                refine ⟨by omega, checkRef_sound hr,
+                        fun c hcm => checkCommits_sound hcs c (Array.mem_def.mp hcm), ?_⟩
+                intro a ha
+                rw [ha] at hall
+                exact checkRef_sound hall
   have hmems : ∀ (k : Nat) (m : MemoryDesc), D.memories[k]? = some m →
       slotIsMem D m.nextImg = some true :=
     fun k m hm => (hmemsAll k m hm).2.1
@@ -855,7 +874,8 @@ theorem checkDesign_sound {u : Unit} (h : checkDesign D = .ok u) : DesignSemWF D
       inputWidths := ?_, clocksDeclared := hclocks,
       flopClocks := fun k f hf => (hflopsAll k f hf).1,
       memClocks := fun k m hm => (hmemsAll k m hm).1,
-      memCommitKinds := fun k m hm => (hmemsAll k m hm).2.2 }
+      memCommitKinds := fun k m hm => (hmemsAll k m hm).2.2.1,
+      memAsyncKinds := fun k m hm => (hmemsAll k m hm).2.2.2 }
   · -- deps bounded: from `checkDeps`, via the index of each dep
     intro i c hc d hd
     obtain ⟨p, hp⟩ := exists_getElem?_of_mem_toList hd

@@ -70,8 +70,8 @@ rather than defaulted (see `magicBytes`), and would be unreadable here anyway.
 DCERT3 (decisions #5, #9 and #2, one revision) extends ONLY the memory record:
 its power-on words `init` (a count, then the words, as `memConst` spells them),
 then the commit table of a memory on more than one clock (a count, then `mask
-nextImg` pairs), then the async-reset image RESERVED for a whole-array cell
-(`hasAsync asyncImg`, as a flop spells `enable`).  A DCERT2
+nextImg` pairs), then the async-reset image of a whole-array cell with an
+asynchronous reset (`hasAsync asyncImg`, as a flop spells `enable`).  A DCERT2
 stream is refused by magic: its memory record is a different length.
 -/
 
@@ -245,7 +245,7 @@ def memBody (m : MemoryDesc) : List UInt8 :=
     -- DCERT2: the clock every committing port of this memory is on.
     ++ spc (natBytes m.clock)
     -- DCERT3: the power-on words, the commit table and the
-    -- (reserved) async-reset image.
+    -- async-reset image (decision #2).
     ++ spc (natBytes m.init.size) ++ (m.init.toList.map (fun v => spc (natBytes v))).flatten
     ++ spc (natBytes m.commits.size) ++ (m.commits.toList.map commitBody).flatten
     ++ spc (natBytes ha) ++ spc (natBytes a)
@@ -495,12 +495,11 @@ def certWfError (D : DesignCert) : Option String :=
   if nclk == 0 then
     some "no clock domains: a certificate must declare at least one"
   else
-    -- DCERT3 reserves a memory's async-reset image for decision #2; until the
-    -- step semantics reads it, a certificate that uses it would mean something
-    -- no route computes.
-    match D.memories.findIdx? (fun m => !m.reservedFree) with
-    | some k => some s!"memory {k} uses a field DCERT3 reserves (an async-reset image); \
-                        no route models it yet"
+    -- A memory's async-reset image (DCERT3 `asyncImg`, decision #2) names a
+    -- real slot, as a commit-table image does; that it is a memory slot is the
+    -- direct checker's (`Direct.checkAsync`).
+    match D.memories.findIdx? (fun m => m.asyncImg.any (· ≥ D.sources.size + D.nodes.size)) with
+    | some k => some s!"memory {k} keeps an async-reset image at a slot outside the design"
     | none =>
     -- A commit-table entry names a non-empty set of DECLARED clocks and a real
     -- slot (decision #9).

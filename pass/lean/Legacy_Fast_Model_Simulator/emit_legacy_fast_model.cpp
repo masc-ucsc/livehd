@@ -286,10 +286,14 @@ std::vector<std::optional<uint32_t>> legacy_output_ids(const DesignScan& d, cons
   return ids;
 }
 std::string legacy_memory_next(const MemoryDriver& m, const LegacyNames& n, const std::function<std::string(uint32_t)>& img,
-                               const std::string& held) {
+                               const std::string& stored) {
   if (n.edges.empty()) {
     return img(m.next_img);
   }
+  // What the memory keeps when it does not commit: the stored image, or with
+  // an asynchronous whole-array reset (`asyncImg`) that image with the reset
+  // applied -- DesignSemantics.srcMemHeld.
+  const std::string held = m.async_img ? img(*m.async_img) : stored;
   if (m.commits.empty()) {
     return "if e." + n.edges.at(m.clock) + " then " + img(m.next_img) + " else " + held;
   }

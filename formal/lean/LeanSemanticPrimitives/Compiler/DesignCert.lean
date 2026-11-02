@@ -169,14 +169,16 @@ structure MemoryDesc where
   chain of the writes of the ports on those domains.  `nextImg` stays the chain
   of every port, taken when all of them fire.  Empty: one domain, `clock`. -/
   commits  : Array MemCommit := #[]
-  /-- RESERVED (DCERT3) for an ASYNCHRONOUS whole-array reset (decision #2): the
-  slot of the held image with the reset applied, taken when no domain of the
-  memory fires.  No step meaning yet; every loader refuses `some`. -/
+  /-- An ASYNCHRONOUS whole-array reset (DCERT3, decision #2): the slot of the
+  stored image with the reset applied, which the memory keeps on a step where
+  it does not commit (`srcMemHeld`), so an asserted reset acts with no clock
+  edge.  `none`: the memory holds its stored image. -/
   asyncImg : Option Nat := none
 deriving Repr, Inhabited, DecidableEq
 
-/-- The field DCERT3 still reserves (`asyncImg`) is at its default, so the step
-semantics is the whole meaning of the memory. -/
+/-- The memory has no asynchronous whole-array reset (`asyncImg` at its
+default). No longer a loader requirement (decision #2); kept as the name of that
+fact. -/
 def MemoryDesc.reservedFree (m : MemoryDesc) : Bool :=
   m.asyncImg.isNone
 

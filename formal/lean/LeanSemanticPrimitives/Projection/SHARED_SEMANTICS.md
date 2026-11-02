@@ -22,7 +22,7 @@ own; the projection consumes them unchanged.  Against the base:
     Translation/LGraphModel.lean      MASTER-ADAPTED (operator boundary repairs; whole-array memory operators)
     Translation/OpBridge.lean         MASTER-ADAPTED (bridges re-proved for them)
     Compiler/DesignCert.lean          MASTER-ADAPTED (DCERT3 memory fields; recorded hash)
-    Compiler/DesignSemantics.lean     MASTER-ADAPTED (power-on image, commit table; recorded hash)
+    Compiler/DesignSemantics.lean     MASTER-ADAPTED (power-on image, commit table, async reset; recorded hash)
     Compiler/MemDomains.lean          MASTER-ONLY (new; which domains of a memory fire; recorded hash)
 
 ### `Compiler/DesignCert.lean`
@@ -35,13 +35,14 @@ and nothing in the semantics reads. That was a comment-only change.
 DCERT3 (decisions #5, #9 and #2, one revision) is a CODE change: `MemoryDesc`
 gains `init` (a memory's power-on words, entry 0 first, 0 past the end),
 `commits` (a commit table for a memory on more than one clock, decision #9) and
-one RESERVED field, `asyncImg` (an async-reset image for a whole-array cell,
-decision #2), with the `MemCommit` record and the helpers `reservedFree` and
-`initWord`.  Every field defaults to today's meaning.  Admission
-(`certWfError`) refuses a non-default reserved field until a route models it,
-and refuses a commit-table entry whose mask is 0 or names an undeclared clock,
-or whose image slot is out of range.  The check pins the bytes with a recorded
-hash.
+`asyncImg` (the image an asynchronous whole-array reset leaves, decision #2),
+with the `MemCommit` record and the helpers `reservedFree` and `initWord`.
+Every field defaults to today's meaning.  Admission (`certWfError`) refuses a
+commit-table entry whose mask is 0 or names an undeclared clock, or whose image
+slot is out of range, and an `asyncImg` slot out of range.  (Until decision #2
+stage 3 it refused every `asyncImg`; that field had no step meaning then.
+`reservedFree` now only names "no async reset".)  The check pins the bytes with
+a recorded hash.
 
 ### `Compiler/DesignSemantics.lean`
 
@@ -66,8 +67,22 @@ takes the table rule through eight small functions (`HardwareMem`), each proved
 to compute one `MemDomains` definition (`HardwareMemTable`), and admission
 types each table entry's image as the memory's table (`memTyOK`). Its runtime
 edge check also requires `domSpan ≤ e.size`, since the program reads every clock
-in a memory's span.  The check pins the bytes of both files with recorded
-hashes.
+in a memory's span.
+
+Decision #2 stage 3 changes what a memory KEEPS on a step it does not commit
+(both hold cases of `srcMemNext`): `srcMemHeld`, which is the stored image
+when `asyncImg = none` (`srcMemHeld_of_none`, so every certificate without an
+async reset steps exactly as before) and the image at slot `asyncImg` when it
+is set.  The exporter puts there the stored image with the reset applied
+(`Op_MemLoad` of the image, the reset bus or 0, and the reset pin), so an
+asserted reset lands with no clock edge, as `pass/lec` applies an async reset.
+`srcMemNext_allEdges` and `interpretDesign_allEdges` are unchanged: a memory
+whose domains all fire never reads the held image.  The direct checker requires
+the `asyncImg` slot to be a memory slot (`DesignSemWF.memAsyncKinds`).  The
+projection's `memNext` keeps the same image (`heldO`, proved as `heldO_agree`;
+`memNextOf` reads `heldOf`), and admission types the `asyncImg` slot as the
+memory's table (`memTyOK`).  The check pins the bytes of both files with
+recorded hashes.
 
 ### `Compiler/Runtime.lean`
 

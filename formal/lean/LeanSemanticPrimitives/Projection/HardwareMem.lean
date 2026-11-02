@@ -238,9 +238,9 @@ def fFiredIsO : SFun :=
                       (bool false)))
               (bool true) }
 
-/-- `pickO(edges, ck, cms, rest, sp, env, n, ms, idx)` -- the image of the first
-entry of `rest` whose clock set fired exactly (`find? firedIs`); the held image
-when none.
+/-- `pickO(edges, ck, cms, rest, sp, env, n, held)` -- the image of the first
+entry of `rest` whose clock set fired exactly (`find? firedIs`); `held` when
+none.
 
 It returns the IMAGE, reading `slot` at each entry's own (static) index. Returning
 the chosen INDEX instead would make it dynamic (it depends on the edges), and
@@ -248,15 +248,15 @@ binding-time analysis gives `slot` one signature for every call site, so every
 `slot` read in the program would turn dynamic and the specializer could no
 longer unfold it. -/
 def fPickO : SFun :=
-  { name := "pickO", params := ["edges", "ck", "cms", "rest", "sp", "env", "n", "ms", "idx"]
+  { name := "pickO", params := ["edges", "ck", "cms", "rest", "sp", "env", "n", "held"]
   , inline := true
-  , body := .ite (P .isNil [R "rest"]) (C "memAt" [R "ms", R "idx"])
+  , body := .ite (P .isNil [R "rest"]) (R "held")
               (.switch (P .hd [R "rest"])
                 [(tagCommit, ["mask", "nxt"],
                   .ite (C "firedIsO" [R "edges", R "ck", R "cms", R "mask", int 0, R "sp"])
                        (C "slot" [R "env", R "n", R "nxt"])
                        (C "pickO" [R "edges", R "ck", R "cms", P .tl [R "rest"], R "sp",
-                                   R "env", R "n", R "ms", R "idx"]))]) }
+                                   R "env", R "n", R "held"]))]) }
 
 /-! ### Whole-array operators (decision #2)
 
@@ -321,10 +321,20 @@ def fMemToBusO : SFun :=
                 P .bvMk [R "w", C "packW" [R "ws", R "df", int 0, R "n",
                                            C "pow2O" [P .divI [R "w", R "n"]]]])] }
 
+/-- `heldO(aimg, env, n, ms, idx)` -- what a memory keeps on a step it does not
+commit (`srcMemHeld`): the stored image, or with an ASYNCHRONOUS whole-array
+reset (`asyncImg`, decision #2) the image at that slot. `aimg` is the encoded
+`Option Nat` -- static, so the test unfolds. -/
+def fHeldO : SFun :=
+  { name := "heldO", params := ["aimg", "env", "n", "ms", "idx"], inline := true
+  , body := .ite (P .isNil [R "aimg"]) (C "memAt" [R "ms", R "idx"])
+              (C "slot" [R "env", R "n", P .hd [R "aimg"]]) }
+
 /-- One memory's next image (`srcMemNext`). With no commit table: `m.nextImg`'s
-slot when its own clock fires, the exact prior image when quiet. With one: that
-slot when ALL its clocks fired, the entry naming exactly the clocks that fired,
-else the prior image. -/
+slot when its own clock fires, the held image (`heldO`: the exact prior image,
+or an asynchronous reset's image) when quiet. With one: that slot when ALL its
+clocks fired, the entry naming exactly the clocks that fired, else the held
+image. -/
 private def fMemNext : SFun :=
   { name := "memNext", params := ["m", "edges", "env", "n", "ms", "idx"], inline := true
   , body := .switch (R "m")
@@ -332,12 +342,13 @@ private def fMemNext : SFun :=
                 .ite (P .isNil [R "cms"])
                   (.ite (C "firesAt" [R "edges", R "ck"])
                         (C "slot" [R "env", R "n", R "nxt"])
-                        (C "memAt" [R "ms", R "idx"]))
+                        (C "heldO" [R "aimg", R "env", R "n", R "ms", R "idx"]))
                   (lets [("sp", C "spanO" [P .addI [R "ck", int 1], R "cms"])]
                     (.ite (C "allFireO" [R "edges", R "ck", R "cms", int 0, R "sp"])
                           (C "slot" [R "env", R "n", R "nxt"])
                           (C "pickO" [R "edges", R "ck", R "cms", R "cms", R "sp",
-                                      R "env", R "n", R "ms", R "idx"]))))] }
+                                      R "env", R "n",
+                                      C "heldO" [R "aimg", R "env", R "n", R "ms", R "idx"]]))))] }
 
 private def fMemNexts : SFun :=
   { name := "memNexts", params := ["mems", "edges", "env", "n", "ms", "idx"], inline := true
@@ -380,7 +391,9 @@ def hwMemS : SProgram :=
                          -- the commit table (decision #9), after `mainM` so no id moves
                          fBitAt, fLog2O, fSpanO, fAnyBit, fInDomO, fAllFireO, fFiredIsO, fPickO,
                          -- the whole-array operators (decision #2), after them
-                         fPow2O, fLoadW, fMemLoadO, fPackW, fMemToBusO]
+                         fPow2O, fLoadW, fMemLoadO, fPackW, fMemToBusO,
+                         -- the asynchronous reset's held image (decision #2)
+                         fHeldO]
   , entry := "mainM" }
 
 def hwMemResolved : Except String (Program × List Bool) := resolveProgram hwMemS

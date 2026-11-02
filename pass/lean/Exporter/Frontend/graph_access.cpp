@@ -437,12 +437,10 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
     // always), the port writes override it, and `reset` (active high) restores
     // `init` -- a runtime bus or a constant; absent, 0 -- over both. The
     // certificate spells that as image operators (memory_lowering.cpp). An
-    // ASYNCHRONOUS reset also acts with no clock edge (DCERT3's reserved
-    // `asyncImg`), which no route models yet.
+    // ASYNCHRONOUS reset (memory_async_reset) also acts with no clock edge:
+    // DCERT3's `asyncImg` and a reset-applied read (memory_lowering).
     if (const auto a = node.attr(livehd::attrs::memory_async_reset); a.has() && a.get() != 0) {
-      fatal(ctx, memory_policy_summary(mi)
-                     + ". this WHOLE-ARRAY cell's `reset` is ASYNCHRONOUS (memory_async_reset): it restores `init` with "
-                       "no clock edge, which pass.lean does not model yet. A synchronous reset is modeled.");
+      mi.async_reset = !mi.bulk_reset_pin.is_invalid();
     }
     if (!mi.bulk_reset_pin.is_invalid() && !mi.init_pin.is_invalid()) {
       if (livehd::graph_util::memory_image_of(node)) {

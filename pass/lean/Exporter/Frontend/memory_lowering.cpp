@@ -110,6 +110,27 @@ uint32_t bus(CertificateBuilder& b, const Memory& m, const PinRef& pin) {
 }
 uint32_t condition(CertificateBuilder& b, const PinRef& pin) { return resize(b, pin, b.pin_width(pin)); }
 
+// An ASYNCHRONOUS whole-array reset acts at once: cgen's `always @(posedge clk
+// or posedge rst)` resets the array as soon as the reset rises, so while it is
+// asserted every read sees the reset contents. A read therefore takes the
+// image with the reset applied, MemLoad(image, reset bus or 0, reset). The
+// same node is the memory's `asyncImg`: on a step its clock does not fire, the
+// held image with the reset applied (pass/lec applies an async reset with no
+// edge). A synchronous reset, or none, leaves the image as it is.
+uint32_t visible(CertificateBuilder& b, const Memory& m, MemoryLowering& st, uint32_t image) {
+  if (!m.async_reset || !m.bulk_reset) {
+    return image;
+  }
+  if (const auto it = st.reset_applied.find(image); it != st.reset_applied.end()) {
+    return it->second;
+  }
+  const auto n     = static_cast<uint32_t>(m.size);
+  const auto value = m.reset_bus ? bus(b, m, *m.reset_bus) : b.const_dep(0);
+  const auto out   = b.emit({Operation::MemLoad, n, {}}, m.bits, {image, value, condition(b, *m.bulk_reset)});
+  st.reset_applied.emplace(image, out);
+  return out;
+}
+
 // The writes read ordinal `r` forwards, as the certificate defines forwarding:
 // per CELL of the matrix, not per memory.
 std::vector<size_t> forwarded_to(const Memory& m, size_t r) {
@@ -137,7 +158,7 @@ void lower_memory_read(CertificateBuilder& b, const Memory& m, uint32_t r) {
     const auto key = (static_cast<uint64_t>(m.id) << 32) | kMemoryReadAllPid;
     if (!b.memory_reads.contains(key)) {
       const auto n = static_cast<uint32_t>(m.size);
-      b.memory_reads.emplace(key, b.emit({Operation::MemToBus, n, {}}, n * m.bits, {st.image}));
+      b.memory_reads.emplace(key, b.emit({Operation::MemToBus, n, {}}, n * m.bits, {visible(b, m, st, st.image)}));
     }
     return;
   }
@@ -164,7 +185,7 @@ void lower_memory_read(CertificateBuilder& b, const Memory& m, uint32_t r) {
     b.memory_reads.emplace(key, reg.id);
     return;
   }
-  const auto base   = chain(b, m, st, forwarded_to(m, r));
+  const auto base   = visible(b, m, st, chain(b, m, st, forwarded_to(m, r)));
   const auto addr   = resize(b, p.addr, m.addr_width);
   const auto enable = resize(b, p.enable, b.pin_width(p.enable));
   const auto read   = b.emit({Operation::MemRead, 0, {}}, m.bits, {base, addr, enable});
@@ -179,7 +200,7 @@ void lower_memory_writes(CertificateBuilder& b, const Memory& m) {
       continue;  // a registered read whose output nothing consumes
     }
     const auto& p    = m.ports.at(m.read_ports[r]);
-    const auto  base = chain(b, m, st, forwarded_to(m, r));
+    const auto  base = visible(b, m, st, chain(b, m, st, forwarded_to(m, r)));
     const auto  addr = resize(b, p.addr, m.addr_width);
     Source      one;
     one.id              = b.next_id++;
@@ -245,7 +266,10 @@ void lower_memory_writes(CertificateBuilder& b, const Memory& m) {
   } else {
     next = chain(b, m, st, all);
   }
-  MemoryDriver md{m.addr_width, m.bits, next, m.id, m.clock_ordinal, m.init_contents, {}};
+  MemoryDriver md{m.addr_width, m.bits, next, m.id, m.clock_ordinal, m.init_contents, {}, {}};
+  if (m.async_reset && m.bulk_reset) {
+    md.async_img = visible(b, m, st, st.image);
+  }
   // A memory whose write ports sit on MORE THAN ONE clock domain (DCERT3,
   // decision #9): one chain per PROPER non-empty set of those domains, holding
   // the writes of the ports on them in port order; `next` (every port) is the

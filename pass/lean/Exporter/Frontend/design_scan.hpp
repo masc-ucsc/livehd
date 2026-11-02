@@ -176,6 +176,9 @@ struct Memory {
   // reads see the committed image (no forwarding when `update` is driven).
   bool                           whole_array = false;
   std::optional<PinRef>          update, update_enable, bulk_reset, reset_bus;
+  // `bulk_reset` is ASYNCHRONOUS: while it is asserted the memory reads as reset
+  // and, on a step its clock does not fire, becomes reset (DCERT3 `asyncImg`).
+  bool                           async_reset = false;
   // ordering="none" (decision #8): `undef_rows[r][w]` -- read r's bits that
   // write w drives are undefined when w writes r's address this step; read r
   // then takes those bits from its free input `free_value.at(r)`.

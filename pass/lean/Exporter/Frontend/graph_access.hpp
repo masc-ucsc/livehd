@@ -131,6 +131,8 @@ struct Memory_info {
   // runtime bus or a constant; invalid: it resets to 0).
   bool     whole_array = false;
   Node_pin reset_bus_pin;
+  // Its `reset` is ASYNCHRONOUS (memory_async_reset): it acts with no edge.
+  bool     async_reset = false;
 
   // Immutable ROM: `init` is a constant AND no write port is active AND `update`
   // is not driven AND the type is one whose read semantics we model.  A WRITABLE

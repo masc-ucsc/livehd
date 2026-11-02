@@ -819,6 +819,7 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
       m.update_enable = opt(info.update_enable_pin);
       m.bulk_reset    = opt(info.bulk_reset_pin);
       m.reset_bus     = opt(info.reset_bus_pin);
+      m.async_reset   = info.async_reset;
     }
     m.read_ports   = info.read_ports;
     m.write_ports  = info.write_ports;

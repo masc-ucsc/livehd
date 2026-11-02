@@ -455,6 +455,12 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
           next_ids.push_back(cm.second);
         }
       }
+      // ...and the image an asynchronous reset holds (DCERT3 `asyncImg`),
+      // which the next state reads only when there is an edges record: with
+      // one domain the model commits on every step (legacy_memory_next).
+      if (m.async_img && !names.edges.empty() && next_seen.insert(*m.async_img).second) {
+        next_ids.push_back(*m.async_img);
+      }
     }
     for (const auto d : next_ids) {
       if (topo_set.count(d)) {

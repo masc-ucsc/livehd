@@ -560,6 +560,18 @@ theorem admits_commitTy {D : DesignCert} (h : admitsB D = true)
   · unfold tyAt; rw [hts]; simp [hty]
   · rw [← hsz]; exact mem_lt_of_getElem? hty
 
+/-- …and the image an asynchronous whole-array reset leaves (decision #2). -/
+theorem admits_asyncTy {D : DesignCert} (h : admitsB D = true)
+    {idx : Nat} {md : MemoryDesc} (hmd : D.memories[idx]? = some md)
+    {a : Nat} (ha : md.asyncImg = some a) :
+    tyAt D a = some (.tbl md.aw md.dw) ∧ a < D.numSlots := by
+  obtain ⟨ts, hts⟩ := admitsB_infer h
+  have hsz := admitsB_size h hts
+  have hty := memTyOK_async (admits_memTyOK h hts hmd) ha
+  refine ⟨?_, ?_⟩
+  · unfold tyAt; rw [hts]; simp [hty]
+  · rw [← hsz]; exact mem_lt_of_getElem? hty
+
 /-- **The policy is preserved.**  Both branches of the per-memory commit give an
 image of the declared shape: the written table from §6's induction, the quiet
 one from the incoming state. -/
@@ -610,12 +622,21 @@ theorem admits_run_pres {D : DesignCert} {i : RuntimeInput} {st : StateM}
     admits_slot_memwidth hA (stateOKB_word hst) i k hnum (.tbl md.aw md.dw) md.dw hty
       (by simp [tyDW]) x
   -- ... or the held image
-  have hheld : (((StateM.denote st).mems[idx]?.getD (fun _ => mk_bv 0 0)) x).width = md.dw := by
+  have hstored : (((StateM.denote st).mems[idx]?.getD (fun _ => mk_bv 0 0)) x).width = md.dw := by
     obtain ⟨m0, hm0, hsh0⟩ := stateOKB_word hst idx md hmd
     have hq : (StateM.denote st).mems[idx]? = some m0.denote := by
       simp [StateM.denote, Array.getElem?_map, hm0]
     rw [hq, Option.getD_some]
     exact memShape_denote_width hsh0 x
+  -- (an asynchronous reset holds its reset image instead: a slot of this table, decision #2)
+  have hheld : ((Compiler.srcMemHeld (slotValM D i st) (StateM.denote st) idx md) x).width
+      = md.dw := by
+    unfold Compiler.srcMemHeld
+    cases ha : md.asyncImg with
+    | none   => exact hstored
+    | some a =>
+      obtain ⟨hta, hna⟩ := admits_asyncTy hA hmd ha
+      exact hslot _ hta hna
   obtain ⟨hty, hnum⟩ := admits_nextImgTy hA hmd
   unfold Compiler.srcMemNext
   split

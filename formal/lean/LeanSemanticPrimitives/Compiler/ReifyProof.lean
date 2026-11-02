@@ -134,7 +134,8 @@ def terminalRefs (R : ResidualProgram) : Array (ResidualRef × Bool) :=
             ++ (match f.enable with | some e => #[(e, false)] | none => #[])
             ++ (match f.resetPin with | some r => #[(r, false)] | none => #[])))
     ++ (R.memoryUpdates.flatMap (fun m =>
-          #[(m.nextImg, true)] ++ m.commits.map (fun c => (c.nextImg, true))))
+          #[(m.nextImg, true)] ++ m.commits.map (fun c => (c.nextImg, true))
+            ++ (match m.asyncImg with | some a => #[(a, true)] | none => #[])))
 
 /-- `liveAfter R` at index `k` lists the PRODUCED slots that must still be
 readable once step `k` has run: those a later binding reads, plus those any
@@ -342,7 +343,7 @@ def elabProveReified : CommandElab := fun stx => do
              [$f:ident, $d:ident, Compiler.runBindings, Compiler.denoteExpr,
               Compiler.refBV, Compiler.refBVs, Compiler.refMem, Compiler.denoteRef,
               Compiler.sourceEnvArr, Compiler.compileOutput, Compiler.compileFlop,
-              Compiler.compileMemory, $memA:ident, $memB:ident, Compiler.flopNext_eq,
+              Compiler.compileMemory, $memA:ident, $memB:ident, Compiler.memHeld, Compiler.flopNext_eq,
               Compiler.flopNextV_resize_din, CertVal.asBV, CertVal.asMem]))
     elabCommand (← `(command|
       theorem $corNm : ∀ e i st, $f e i st = Compiler.interpretDesign $d e i st := by
@@ -800,6 +801,11 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
         | false, false =>
           `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
               clock := $(quote mu.clock), init := #[$ws,*], commits := #[$cs,*] })
+      -- `asyncImg` (decision #2), only when present
+      let ms ← (R.memoryUpdates.zip ms).mapM fun (mu, t) =>
+        match mu.asyncImg with
+        | none   => pure t
+        | some a => `({ $t with asyncImg := some $(quote a) })
       `(#[$ms,*])
     elabCommand (← `(command| theorem $dmNm : ($d).memories = $memsLit := rfl))
     let doNm := mkIdent (base ++ `D_outputs)
@@ -818,7 +824,7 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
         rw [← $envEq:ident $iId $stId]
         simp only [$oProjNm:ident, $fProjNm:ident, $mProjNm:ident]
         simp [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
-              Compiler.compileMemory, $memA:ident, $memB:ident, Compiler.flopNext_eq,
+              Compiler.compileMemory, $memA:ident, $memB:ident, Compiler.memHeld, Compiler.flopNext_eq,
               $dfNm:ident, $dmNm:ident, $doNm:ident]))
     markPhase "eq_compileAndRun"
     let corNm := mkIdent (base ++ `correct)
@@ -1371,6 +1377,11 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
         | false, false =>
           `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
               clock := $(quote mu.clock), init := #[$ws,*], commits := #[$cs,*] })
+      -- `asyncImg` (decision #2), only when present
+      let ms ← (R.memoryUpdates.zip ms).mapM fun (mu, t) =>
+        match mu.asyncImg with
+        | none   => pure t
+        | some a => `({ $t with asyncImg := some $(quote a) })
       `(#[$ms,*])
     elabCommand (← `(command| theorem $dmNm : ($d).memories = $memsLit := rfl))
     let doNm := mkIdent (base ++ `D_outputs)
@@ -1395,7 +1406,7 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
         rw [$hEq:ident]
         simp only [$oProjNm:ident, $fProjNm:ident, $mProjNm:ident]
         simp [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
-              Compiler.compileMemory, $memA:ident, $memB:ident, Compiler.flopNext_eq,
+              Compiler.compileMemory, $memA:ident, $memB:ident, Compiler.memHeld, Compiler.flopNext_eq,
               $dfNm:ident, $dmNm:ident, $doNm:ident, $hSimp,*]))
     let corNm := mkIdent (base ++ `correct)
     elabCommand (← `(command|

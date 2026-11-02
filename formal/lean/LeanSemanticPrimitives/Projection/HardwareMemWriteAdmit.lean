@@ -765,7 +765,8 @@ theorem admitsW_nextImgGeom {D : DesignCert} (h : admitsWB D = true) :
     unfold geomAtW tyAtW
     rw [hts]
     simp [hk]
-  exact ⟨hg _ (memTyOK_next hok), fun c hc => hg _ (memTyOK_commit hok hc)⟩
+  exact ⟨hg _ (memTyOK_next hok), fun c hc => hg _ (memTyOK_commit hok hc),
+    fun a ha => hg _ (memTyOK_async hok ha)⟩
 
 /-- The memory-type facts of one extended-admitted memory, as `memTyOK`. -/
 theorem admitsW_memTyOK {D : DesignCert} (h : admitsWB D = true) {ts : Array SlotTy}
@@ -1237,6 +1238,18 @@ theorem admitsW_commitTy {D : DesignCert} (h : admitsWB D = true)
   · unfold tyAtW; rw [hts]; simp [hty]
   · rw [← hsz]; exact mem_lt_of_getElem?' hty
 
+/-- …and the image an asynchronous whole-array reset leaves (decision #2). -/
+theorem admitsW_asyncTy {D : DesignCert} (h : admitsWB D = true)
+    {idx : Nat} {md : MemoryDesc} (hmd : D.memories[idx]? = some md)
+    {a : Nat} (ha : md.asyncImg = some a) :
+    tyAtW D a = some (.tbl md.aw md.dw) ∧ a < D.numSlots := by
+  obtain ⟨ts, hts⟩ := admitsWB_infer h
+  have hsz := admitsWB_size h hts
+  have hty := memTyOK_async (admitsW_memTyOK h hts hmd) ha
+  refine ⟨?_, ?_⟩
+  · unfold tyAtW; rw [hts]; simp [hty]
+  · rw [← hsz]; exact mem_lt_of_getElem?' hty
+
 /-- One step under the length-level policy. -/
 theorem admits_runW {D : DesignCert} {i : RuntimeInput} {st : StateM} {e : ClockEdges}
     (hA : admitsWB D = true) (hR : runtimeOKB D i st e = true) :
@@ -1301,12 +1314,21 @@ theorem admits_runW_pres {D : DesignCert} {i : RuntimeInput} {st : StateM}
     admits_slot_memwidthW hA (stateOKB_word hst) i k hnum (.tbl md.aw md.dw) md.dw hty
       (by simp [tyDW]) x
   -- ... or the held image (the QUIET memory: from the incoming state, untouched)
-  have hheld : (((StateM.denote st).mems[idx]?.getD (fun _ => mk_bv 0 0)) x).width = md.dw := by
+  have hstored : (((StateM.denote st).mems[idx]?.getD (fun _ => mk_bv 0 0)) x).width = md.dw := by
     obtain ⟨m0, hm0, hsh0⟩ := stateOKB_word hst idx md hmd
     have hq : (StateM.denote st).mems[idx]? = some m0.denote := by
       simp [StateM.denote, Array.getElem?_map, hm0]
     rw [hq, Option.getD_some]
     exact memShape_denote_width hsh0 x
+  -- (an asynchronous reset holds its reset image instead: a slot of this table, decision #2)
+  have hheld : ((Compiler.srcMemHeld (slotValM D i st) (StateM.denote st) idx md) x).width
+      = md.dw := by
+    unfold Compiler.srcMemHeld
+    cases ha : md.asyncImg with
+    | none   => exact hstored
+    | some a =>
+      obtain ⟨hta, hna⟩ := admitsW_asyncTy hA hmd ha
+      exact hslot _ hta hna
   obtain ⟨hty, hnum⟩ := admitsW_nextImgTy hA hmd
   unfold Compiler.srcMemNext
   split
@@ -1957,6 +1979,7 @@ theorem plainRamSim_runs {sim : MemSimulator} (h : plainRamSim = some sim)
 #audit_axioms admits_node_tyW
 #audit_axioms admitsW_memTyOK
 #audit_axioms admitsW_commitTy
+#audit_axioms admitsW_asyncTy
 #audit_axioms admitsW_nodeAdmitted
 #audit_axioms admitsW_writePropagates
 #audit_axioms admits_slot_widthW

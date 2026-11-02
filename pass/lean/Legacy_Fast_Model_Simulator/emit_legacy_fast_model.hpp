@@ -30,7 +30,9 @@ bool legacy_sext_natural(const CertificateIR&, const CertNode&);
 // With no edges record (one domain), `img(next_img)`. One domain among several:
 // `img(next_img)` when its edge fires. A commit table (DCERT3, decision #9):
 // `img(next_img)` when ALL the memory's domains fire, the entry naming EXACTLY
-// the domains that fire, and `held` otherwise. Both legacy emitters call this.
+// the domains that fire, and `held` otherwise. `held` is the stored image, or
+// with an asynchronous whole-array reset (`async_img`) that image with the
+// reset applied. Both legacy emitters call this.
 std::string legacy_memory_next(const MemoryDriver&, const LegacyNames&, const std::function<std::string(uint32_t)>& img,
                                const std::string& held);
 void emit_legacy_fast_model(const DesignScan&, const CertificateIR&, const LegacyNames&, bool bridge, std::ostream&);

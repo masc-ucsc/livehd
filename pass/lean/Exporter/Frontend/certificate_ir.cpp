@@ -1,5 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <algorithm>
+#include <optional>
 #include <set>
 #include <stdexcept>
 
@@ -173,7 +174,8 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
   // reset's slot before the flop's first reader, but nothing orders a reader
   // after an unrelated reset cone -- so the cones are lowered FIRST. An
   // input-only cone depends on no other node, so moving it ahead of everything
-  // keeps the order topological.
+  // keeps the order topological. A memory's asynchronous whole-array reset is
+  // the same case (below).
   std::vector<const DesignNode*> order;
   {
     std::map<uint32_t, size_t> index_of;
@@ -183,39 +185,64 @@ CertificateIR build_certificate(const DesignScan& design, const CertificateOptio
       }
     }
     std::set<uint32_t> cone_ids;
-    for (const auto& [fid, fp] : b.flops) {
-      const Flop& f = *fp;
-      if (!f.asynchronous || f.reset_input || !f.reset) {
-        continue;
-      }
+    // The nodes `root` reaches, when it reaches only primary inputs and
+    // constants; none when it reaches state.
+    auto input_cone = [&](const PinRef& root) -> std::optional<std::set<uint32_t>> {
       std::set<uint32_t>  cone;
-      bool                input_only = true;
-      std::vector<PinRef> work{*f.reset};
-      while (!work.empty() && input_only) {
+      std::vector<PinRef> work{root};
+      while (!work.empty()) {
         const PinRef p = work.back();
         work.pop_back();
         if (p.kind == PinKind::Input || p.kind == PinKind::Constant) {
           continue;
         }
         if (p.kind != PinKind::Node) {
-          input_only = false;  // a flop or a memory read: state, not an input
-          break;
+          return std::nullopt;  // a flop or a memory read: state, not an input
         }
         if (!cone.insert(p.id).second) {
           continue;
         }
         const auto it = index_of.find(p.id);
         if (it == index_of.end()) {
-          input_only = false;
-          break;
+          return std::nullopt;
         }
         for (const auto& op : design.nodes[it->second].operands) {
           work.push_back(op.driver);
         }
       }
-      if (input_only) {
+      return cone;
+    };
+    for (const auto& [fid, fp] : b.flops) {
+      const Flop& f = *fp;
+      if (!f.asynchronous || f.reset_input || !f.reset) {
+        continue;
+      }
+      if (const auto cone = input_cone(*f.reset)) {
         b.input_reset_flops.insert(f.id);
-        cone_ids.insert(cone.begin(), cone.end());
+        cone_ids.insert(cone->begin(), cone->end());
+      }
+    }
+    // Decision #2: an ASYNCHRONOUS whole-array reset is applied where the
+    // memory is READ (memory_lowering's `visible`), at the memory's own place
+    // in the order, so its reset pin and reset bus need slots before that --
+    // the 2B flop's problem, with the 2B flop's rule: the cones must reach only
+    // primary inputs and constants (a reset computed from state can change
+    // within the step), and they are lowered first.
+    for (const auto& [mid, m] : design.memories) {
+      if (!m.async_reset || !m.bulk_reset) {
+        continue;
+      }
+      for (const auto* root : {&m.bulk_reset, &m.reset_bus}) {
+        if (!*root) {
+          continue;
+        }
+        const auto cone = input_cone(**root);
+        if (!cone) {
+          fail("memory n_" + std::to_string(mid) + " has an ASYNCHRONOUS whole-array reset whose "
+               + (root == &m.bulk_reset ? "reset" : "reset bus")
+               + " is not a combinational function of primary inputs; only an input-derived one is lowered");
+        }
+        cone_ids.insert(cone->begin(), cone->end());
       }
     }
     for (const auto& n : design.nodes) {

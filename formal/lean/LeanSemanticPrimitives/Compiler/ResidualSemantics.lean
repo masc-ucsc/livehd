@@ -286,20 +286,29 @@ def flopNext (env : SlotEnv) (e : ClockEdges) (s : RuntimeState) (idx : Nat)
     if edge && en then bv_resize f.width (refBV env f.din)
     else s.flops[idx]?.getD (mk_bv f.width 0)
 
+/-- What a memory keeps on a step it does not commit: the stored image, or the
+asynchronous whole-array reset's image (`asyncImg`, decision #2) --
+`DesignSemantics.srcMemHeld`. -/
+def memHeld (env : SlotEnv) (s : RuntimeState) (idx : Nat) (m : ResidualMemoryUpdate) :
+    Int → BV :=
+  match m.asyncImg with
+  | some a => refMem env a
+  | none   => s.mems[idx]?.getD (fun _ => mk_bv 0 0)
+
 /-- Memory next image: the post-write image when the memory's domain fires, the
-pre-step image otherwise.  On more than one domain (`commits`): `nextImg` when
-all fire, the commit-table entry naming exactly the ones that fire, or the
-pre-step image when none does. -/
+held image (`memHeld`) otherwise.  On more than one domain (`commits`):
+`nextImg` when all fire, the commit-table entry naming exactly the ones that
+fire, or the held image when none does. -/
 def memNext (env : SlotEnv) (e : ClockEdges) (s : RuntimeState) (idx : Nat)
     (m : ResidualMemoryUpdate) : Int → BV :=
   if m.commits.isEmpty then
     if fires e m.clock then refMem env m.nextImg
-    else s.mems[idx]?.getD (fun _ => mk_bv 0 0)
+    else memHeld env s idx m
   else if m.toDesc.allFire e then refMem env m.nextImg
   else
     match m.commits.find? (m.toDesc.firedIs e) with
     | some c => refMem env c.nextImg
-    | none   => s.mems[idx]?.getD (fun _ => mk_bv 0 0)
+    | none   => memHeld env s idx m
 
 /-- The entry of a commit table whose clock set is exactly the clocks that
 fired, with its image given as a value; `held` when none matches. -/
@@ -348,7 +357,7 @@ theorem memNext_eq_memPick (env : SlotEnv) (e : ClockEdges) (s : RuntimeState) (
     memNext env e s idx m
       = memPick m.clock m.commits e (refMem env m.nextImg)
           (m.commits.toList.map fun c => (c, refMem env c.nextImg))
-          (s.mems[idx]?.getD (fun _ => mk_bv 0 0)) := by
+          (memHeld env s idx m) := by
   have ha : (tableDesc m.clock m.commits).allFire e = m.toDesc.allFire e := rfl
   have hf : (tableDesc m.clock m.commits).firedIs e = m.toDesc.firedIs e := rfl
   unfold memNext memPick
@@ -362,7 +371,7 @@ theorem memNext_of_isEmpty (env : SlotEnv) (e : ClockEdges) (s : RuntimeState) (
     (m : ResidualMemoryUpdate) (hc : m.commits.isEmpty = true) :
     memNext env e s idx m
       = if fires e m.clock then refMem env m.nextImg
-        else s.mems[idx]?.getD (fun _ => mk_bv 0 0) := by
+        else memHeld env s idx m := by
   simp [memNext, hc]
 
 def denoteResidual (R : ResidualProgram) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :

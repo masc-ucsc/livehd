@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <sstream>
 #include <stdexcept>
 
@@ -347,6 +348,135 @@ TEST(CertificateIR, WholeArrayCellLoadsUpdateThenWritesThenReset) {
   const auto  c2 = build_certificate(d, {});
   const auto& n2 = c2.nodes.at(c2.slot_of.at(c2.memories.front().next_img) - c2.sources.size());
   EXPECT_EQ(n2.op.kind, Operation::MemWrite);
+}
+// An ASYNCHRONOUS whole-array reset (decision #2) acts with no clock edge: every
+// read sees the image with the reset applied -- MemLoad(image, reset bus,
+// reset) -- and that same node is the memory's `asyncImg`, the image it keeps
+// on a step it does not commit. The next image is unchanged. A synchronous
+// reset has no `asyncImg`, and reads see the stored image.
+TEST(CertificateIR, WholeArrayCellAsyncResetIsReadAndHeld) {
+  auto  d         = memory_design(false, false);
+  auto& m         = d.memories.at(10);
+  m.whole_array   = true;
+  m.update        = input(2000000000, 24);
+  m.update_enable = input(2000000001, 1);
+  m.bulk_reset    = input(2000000002, 1);
+  m.reset_bus     = constant("197121", 24);  // entries 1, 2, 3
+  m.async_reset   = true;
+  d.inputs        = {
+      {   "upd", 2000000000, 24, std::nullopt},
+      {"upd_en", 2000000001,  1, std::nullopt},
+      {   "rst", 2000000002,  1, std::nullopt}
+  };
+  m.ports.push_back({1, 0, constant("1", 2), constant("42", 8), constant("1", 1), std::nullopt});
+  m.write_ports = {1};
+  m.fwd_rows    = {{false}};
+  d.nodes.push_back({10, ScanOp::Memory, 0, false, {}});
+  d.nodes.back().memory_read = kMemoryReadAll;
+  d.outputs.push_back({
+      "all",
+      1,
+      24,
+      PinRef{PinKind::Memory, 10, kMemoryReadAllPid, 24, 0, {}}
+  });
+  const auto c = build_certificate(d, {});
+  ASSERT_EQ(c.memories.size(), 1);
+  const auto& md    = c.memories.front();
+  const auto  image = c.sources.front().id;
+  ASSERT_EQ(c.sources.front().kind, SourceKind::MemImage);
+  auto node = [&](uint32_t id) -> const CertNode& { return c.nodes.at(c.slot_of.at(id) - c.sources.size()); };
+  // the next image: the reset load over the port write over the update load
+  const auto& reset = node(md.next_img);
+  ASSERT_EQ(reset.op.kind, Operation::MemLoad);
+  const auto& write = node(reset.deps[0]);
+  ASSERT_EQ(write.op.kind, Operation::MemWrite);
+  const auto& update = node(write.deps[0]);
+  ASSERT_EQ(update.op.kind, Operation::MemLoad);
+  EXPECT_EQ(update.deps[0], image);
+  // the held image: the STORED image with the same reset applied
+  ASSERT_TRUE(md.async_img.has_value());
+  const auto& held = node(*md.async_img);
+  ASSERT_EQ(held.op.kind, Operation::MemLoad);
+  EXPECT_EQ(held.op.parameter, 3);
+  EXPECT_EQ(held.width, 8);
+  ASSERT_EQ(held.deps.size(), 3u);
+  EXPECT_EQ(held.deps[0], image);
+  // the same reset bus and pin as the next image's reset: each use emits its
+  // own copy of the nodes and constants, so compare the expressions, not the ids
+  std::function<std::string(uint32_t)> expr = [&](uint32_t id) -> std::string {
+    const auto slot = c.slot_of.at(id);
+    if (slot < c.sources.size()) {
+      const auto& src = c.sources[slot];
+      return src.kind == SourceKind::Const ? "k" + src.const_int + "/" + std::to_string(src.width)
+                                           : "s" + std::to_string(slot);
+    }
+    const auto& x   = node(id);
+    std::string out = std::to_string(static_cast<int>(x.op.kind)) + "/" + std::to_string(x.op.parameter) + "/" + x.op.value
+                      + "/" + std::to_string(x.width) + "(";
+    for (const auto dep : x.deps) {
+      out += expr(dep) + ",";
+    }
+    return out + ")";
+  };
+  EXPECT_EQ(expr(held.deps[1]), expr(reset.deps[1]));  // the reset bus
+  EXPECT_EQ(expr(held.deps[2]), expr(reset.deps[2]));  // the reset pin
+  // the read port and the whole-array read see the held image, through ONE node
+  size_t to_bus = 0, reads = 0, loads = 0;
+  for (const auto& n : c.nodes) {
+    if (n.op.kind == Operation::MemToBus) {
+      ++to_bus;
+      EXPECT_EQ(n.deps, (std::vector<uint32_t>{*md.async_img}));
+    }
+    if (n.op.kind == Operation::MemRead) {
+      ++reads;
+      EXPECT_EQ(n.deps[0], *md.async_img);
+    }
+    if (n.op.kind == Operation::MemLoad) {
+      ++loads;
+    }
+  }
+  EXPECT_EQ(to_bus, 1);
+  EXPECT_EQ(reads, 1);
+  EXPECT_EQ(loads, 3);  // update, reset at the chain's end, reset of the stored image
+  // a SYNCHRONOUS reset: no held image, and reads see the stored image
+  m.async_reset = false;
+  const auto c2 = build_certificate(d, {});
+  EXPECT_FALSE(c2.memories.front().async_img.has_value());
+  for (const auto& n : c2.nodes) {
+    if (n.op.kind == Operation::MemRead) {
+      EXPECT_EQ(n.deps[0], c2.sources.front().id);
+    }
+  }
+  // an active-LOW reset computed from an input by a node the scan orders AFTER
+  // the memory's readers: its cone is lowered first, so the order stays
+  // topological (build_certificate would throw otherwise)
+  m.async_reset = true;
+  DesignNode inv;
+  inv.id       = 30;
+  inv.op       = ScanOp::Not;
+  inv.width    = 1;
+  inv.operands = {
+      {0, 0, input(2000000002, 1)}
+  };
+  d.nodes.push_back(inv);
+  m.bulk_reset  = PinRef{PinKind::Node, 30, 0, 1, 0, {}};
+  const auto c3 = build_certificate(d, {});
+  ASSERT_TRUE(c3.memories.front().async_img.has_value());
+  const auto& held3 = c3.nodes.at(c3.slot_of.at(*c3.memories.front().async_img) - c3.sources.size());
+  // its condition is node 30, directly or through the 1-bit resize
+  const auto cond3 = held3.deps[2];
+  EXPECT_TRUE(cond3 == 30u
+              || (c3.slot_of.at(cond3) >= c3.sources.size()
+                  && c3.nodes.at(c3.slot_of.at(cond3) - c3.sources.size()).deps == std::vector<uint32_t>{30u}));
+  EXPECT_LT(c3.slot_of.at(30), c3.slot_of.at(*c3.memories.front().async_img));
+  // a reset computed from STATE is refused: it can change within the step
+  Flop g;
+  g.id    = 11;
+  g.width = 1;
+  g.din   = constant("1", 1);
+  d.flops.push_back(g);
+  m.bulk_reset = PinRef{PinKind::Flop, 11, 0, 1, 0, {}};
+  EXPECT_THROW(build_certificate(d, {}), std::runtime_error);
 }
 // ordering="none" (decision #8): a read whose address a write on an `undef`
 // column writes this step takes the bits that write drives from the read's

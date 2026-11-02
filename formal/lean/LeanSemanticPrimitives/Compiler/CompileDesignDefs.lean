@@ -32,7 +32,7 @@ def compileFlop (f : FlopDesc) : ResidualFlopUpdate :=
 
 def compileMemory (m : MemoryDesc) : ResidualMemoryUpdate :=
   { aw := m.aw, dw := m.dw, nextImg := m.nextImg, clock := m.clock, commits := m.commits,
-    init := m.init }
+    init := m.init, asyncImg := m.asyncImg }
 
 /-- First dependency that is not strictly earlier, if any.  Checking this inside
 `compileDesign` rather than assuming it means `hc : compileDesign D = .ok R`

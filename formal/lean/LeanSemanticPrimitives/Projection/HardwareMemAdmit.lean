@@ -148,8 +148,10 @@ def geomAt (D : DesignCert) (k : Nat) : Option Nat :=
 /-! ## 2. The executable checker
 
 Every image a memory can take must type as THAT memory's table: its `nextImg`,
-and, for a memory on more than one clock, each commit-table entry's image
-(`MemoryDesc.commits`, decision #9). Each test is named once (`imgTyOK`,
+for a memory on more than one clock each commit-table entry's image
+(`MemoryDesc.commits`, decision #9), and the image an asynchronous whole-array
+reset leaves when the memory does not commit (`MemoryDesc.asyncImg`, decision
+#2). Each test is named once (`imgTyOK`,
 `memTyOK`) so the extended checker and the support report read the same
 function. -/
 
@@ -172,18 +174,25 @@ theorem imgTyOK_eq {ts : Array SlotTy} {aw dw k : Nat} (h : imgTyOK ts aw dw k =
 def memTyOK (ts : Array SlotTy) (md : MemoryDesc) : Bool :=
   imgTyOK ts md.aw md.dw md.nextImg
   && md.commits.toList.all (fun c => imgTyOK ts md.aw md.dw c.nextImg)
+  && md.asyncImg.all (imgTyOK ts md.aw md.dw)
 
 theorem memTyOK_next {ts : Array SlotTy} {md : MemoryDesc} (h : memTyOK ts md = true) :
     ts[md.nextImg]? = some (.tbl md.aw md.dw) := by
   unfold memTyOK at h
   simp only [Bool.and_eq_true] at h
-  exact imgTyOK_eq h.1
+  exact imgTyOK_eq h.1.1
 
 theorem memTyOK_commit {ts : Array SlotTy} {md : MemoryDesc} (h : memTyOK ts md = true)
     {c : MemCommit} (hc : c ∈ md.commits) : ts[c.nextImg]? = some (.tbl md.aw md.dw) := by
   unfold memTyOK at h
   simp only [Bool.and_eq_true, List.all_eq_true] at h
-  exact imgTyOK_eq (h.2 c (Array.mem_def.mp hc))
+  exact imgTyOK_eq (h.1.2 c (Array.mem_def.mp hc))
+
+theorem memTyOK_async {ts : Array SlotTy} {md : MemoryDesc} (h : memTyOK ts md = true)
+    {a : Nat} (ha : md.asyncImg = some a) : ts[a]? = some (.tbl md.aw md.dw) := by
+  unfold memTyOK at h
+  simp only [Bool.and_eq_true, ha, Option.all_some] at h
+  exact imgTyOK_eq h.2
 
 def admitsB (D : DesignCert) : Bool :=
   Direct.acceptsDesign D
@@ -311,7 +320,8 @@ theorem admits_nextImgGeom {D : DesignCert} (h : admitsB D = true) :
     unfold geomAt tyAt
     rw [hts]
     simp [hk]
-  exact ⟨hg _ (memTyOK_next hok), fun c hc => hg _ (memTyOK_commit hok hc)⟩
+  exact ⟨hg _ (memTyOK_next hok), fun c hc => hg _ (memTyOK_commit hok hc),
+    fun a ha => hg _ (memTyOK_async hok ha)⟩
 
 /-- The memory-type facts of one admitted memory, as `memTyOK`. -/
 theorem admits_memTyOK {D : DesignCert} (h : admitsB D = true) {ts : Array SlotTy}
@@ -706,6 +716,20 @@ def loadDesign : DesignCert :=
           memories := #[ { aw := 5, dw := 32, nextImg := 7, clock := 0,
                            commits := #[{ mask := 1, nextImg := 6 }] } ] })
 
+/- AN ASYNCHRONOUS RESET'S IMAGE (decision #2): one at a slot that types as the
+   memory's own table is admitted; one at a scalar slot (6, the `Op_And`) is
+   refused, and so is one of another table's geometry -/
+#guard admitsB { mixedDesign with
+          memories := #[ { aw := 5, dw := 32, nextImg := 7, clock := 0,
+                           asyncImg := some 0 } ] }
+#guard !(admitsB { mixedDesign with
+          memories := #[ { aw := 5, dw := 32, nextImg := 7, clock := 0,
+                           asyncImg := some 6 } ] })
+#guard memTyOK #[.tbl 5 32, .tbl 6 32] { aw := 5, dw := 32, nextImg := 0, clock := 0,
+                                          asyncImg := some 0 }
+#guard !(memTyOK #[.tbl 5 32, .tbl 6 32] { aw := 5, dw := 32, nextImg := 0, clock := 0,
+                                            asyncImg := some 1 })
+
 /- the unimplemented plain `Op_MemWrite` -/
 #guard !(admitsB { mixedDesign with
           nodes := #[ { op := .Op_MemRead,  width := 32, deps := #[0, 1, 3] }
@@ -793,6 +817,7 @@ theorem laneDesign_static : StaticPremises laneDesign :=
 
 #audit_axioms admits_semwf
 #audit_axioms memTyOK_commit
+#audit_axioms memTyOK_async
 #audit_axioms admits_memTyOK
 #audit_axioms admits_wf
 #audit_axioms admits_geom_src
