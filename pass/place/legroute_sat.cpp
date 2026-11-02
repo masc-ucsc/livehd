@@ -4444,7 +4444,9 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
         }
       }
     }
-    x = crossings(d, g, boxes, regions, cap_h, cap_v, true);
+    cap_h = cap_h0;  // the crossings take the hops' tracks off these: a fresh copy each round, not a cumulative one
+    cap_v = cap_v0;
+    x     = crossings(d, g, boxes, regions, cap_h, cap_v, true);
     P.assign(policies.size(), {});
     for (size_t p = 0; p < policies.size(); ++p) {  // the policy's pre-placement on its own copy
       const auto& o = policies[p];
@@ -5181,14 +5183,8 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
                      round + 1, r, trial.fill, trial.cut, trial.hops, trial.boundary_tracks, trial.status.c_str(), line.c_str(),
                      winner >= 0 ? std::format(" -> {} adopted", cands[size_t(winner)].kind).c_str() : " -> none routed");
         rep.alt_trials.push_back(std::move(trial));
-        if (winner >= 0) {  // the candidate's homes and answer stand; no spill for this region
-          for (const auto& h : cands[size_t(winner)].homes) {
-            for (Boxes* set : {&boxes, &P[0].boxes}) {
-              set->boxes[size_t(h.box)].cx     = h.cx;
-              set->boxes[size_t(h.box)].cy     = h.cy;
-              set->boxes[size_t(h.box)].window = h.window;
-            }
-          }
+        if (winner >= 0) {  // the candidate's answer stands; its homes stay private (the crossings and the neighbours'
+                            // hops come from the homes, and the answer was solved with this round's hops); no spill here
           last[0][size_t(r)] = std::move(outs[size_t(winner)]);
           ++rep.alt_rescued;
           ++grown;  // the round changed something: it goes on

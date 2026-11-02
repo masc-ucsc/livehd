@@ -8816,6 +8816,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     // bus-ordered pins are cut, so the inflation spreads the cells first and the boundaries follow; the terminal
     // stage then takes the refinement's mesh and pins (region_seed_dir) and does not probe again
     std::function<bool(dp::Design&, unsigned)> probe_fn;
+    size_t                                     probe_failing = 0;  // the regions the last probe round found unroutable
     if (refinement_active && !terminal_active) {
       const auto prior_progress = control.progress_observer;
       control.progress_observer = [&, prior_progress](const dp::GpSample& sample) {
@@ -9350,6 +9351,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
             seconds)
                << '\n';
       }
+      probe_failing = count[1] + count[2];
       return count[1] + count[2] == 0 || (added <= 0 && anchored.empty());
     };
     probe_fn = run_legroute_probe;
@@ -9357,10 +9359,38 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     // (never inside DREAMPlace's hooks: the detailed placer keeps its own copy of the cells' sizes and positions),
     // and the refinement in the call's before-legalize hook then cuts the mesh and places the pins after the inflation
     if (refinement_active && !terminal_active && options.legroute && options.legroute_probe.enabled && !multirow_cells) {
+      // the rounds keep the best placement: a round that leaves more regions failing than the best so far is undone
+      // (its inflation moved cells past the point of need) and the rounds stop
+      std::vector<double> best_x = v.design.node_x, best_y = v.design.node_y;
+      size_t              best_failing = std::numeric_limits<size_t>::max();
+      bool                measured     = false;  // the placement now in v.design was measured by the last round
       for (unsigned round = 0; round < std::max(1u, options.legroute_probe.rounds); ++round) {
-        if (run_legroute_probe(v.design, round)) {
+        const auto before_x = v.design.node_x;
+        const auto before_y = v.design.node_y;
+        const bool done     = run_legroute_probe(v.design, round);
+        if (probe_failing > best_failing) {
+          std::fprintf(stderr, "legroute probe: round %u left %zu regions failing, the best was %zu: that placement is kept\n", round,
+                       probe_failing, best_failing);
+          v.design.node_x = best_x;
+          v.design.node_y = best_y;
+          measured        = true;
           break;
         }
+        if (probe_failing < best_failing) {
+          best_failing = probe_failing;
+          best_x       = before_x;  // the placement the probe measured, before this round's inflation moved it
+          best_y       = before_y;
+        }
+        measured = done;  // a round that changed nothing ends with the placement it measured
+        if (done) {
+          break;
+        }
+      }
+      if (!measured && best_failing > 0 && best_failing != std::numeric_limits<size_t>::max()) {
+        // the last round's inflation was never measured: the best measured placement is the one to keep unless the
+        // rounds ran out while improving (then the latest inflation stands, as the terminal legroute measures it)
+        std::fprintf(stderr, "legroute probe: %zu regions failing at the best measured round; the latest inflation stands for the terminal run\n",
+                     best_failing);
       }
       // DREAMPlace's detailed placer asserts on the cells the probe's resumes leave overlapping; legalization alone
       // settles them, the terminal stage legalizes again anyway

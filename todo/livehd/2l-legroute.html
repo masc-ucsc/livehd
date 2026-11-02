@@ -751,7 +751,21 @@ the inflation ahead of the mesh cut, the fan-out trees unpinned, noise and sprea
 on sha3 (no UNSAT, no cut-bound, two regions out of time at fill 0.67 and cut 0.66; 16 regions and 10,392 hops with
 94 over the share), against 13 of 19 with six UNSAT for the plain pinned mesh. The price is QoR: a critical delay of
 184 ps against 85 to 118 and 229k um of wire against 172k to 188k, the unpinned trees and the inflation both paying
-in wire; a 420 s budget is being tried on the two timeouts. One mesh idea did not survive: scoring each candidate split by
+in wire; a 420 s budget changes nothing for the two timeouts (204 and 222 boxes; their noise and spread variants time out
+too), so they are large hard instances rather than budget cases. With 1,000-cell regions the same flow ends 23 of 25 (no
+UNSAT; two regions out of time at fill 0.72 and 0.76 with hop loads near 0.6), in 833 s: smaller regions raise the
+routable share from 88% to 92%, at 242k um of wire; five inflation rounds at a 90 s probe budget are being tried on
+the last two. <strong>A bug in the round loop surfaced while reading that run (2026-11-02):</strong> the crossings
+take the hops' tracks off the capacity vectors in place, and the loop reused the same vectors every round, so the
+capacities shrank round after round (hops over the share went 94, 2,231, 5,225 across three rounds), the hops drifted
+and every region solved again handicapped. Every multi-round result above (the box spill, the shift, the window
+widening, the alternatives' later rounds, the five inflation rounds) carries that handicap in its rounds after the
+first; the capacities now reset each round, an adopted alternative keeps its homes private so the neighbours' hops
+stay, and the probe rounds keep the best measured placement. With the loop fixed, the five-round inflation keeps its best round (round four left four regions failing against two
+at round three, and the round-three placement was kept) and ends 23 of 25 again, with a fifth rescue on the way:
+a region out of time at fill 0.73 and cut 0.67 routed from the noise variant in 108 s, and since an adopted answer
+now keeps its homes private, the second round kept every other region's answer. The two regions still out of time sit
+at fill 0.70 and 0.79 with hop loads near 0.6. The box spill is being re-measured. One mesh idea did not survive: scoring each candidate split by
 its own crossing load as well as the children's internal ratios ended 11 of 18 with five cut-bound regions against one
 on the plain score, because the split term let the children's internal ratios rise; it is reverted, the guard that
 refuses a split leaving a child fuller than nine tenths of its area stays. Running: the families on the 2,500-cell mesh (the timeout regime), the mesh
