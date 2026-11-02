@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "legacy_model.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 
@@ -37,6 +38,11 @@ void emit_legacy_model(const DesignScan& design, const CertificateIR& cert, cons
   }
   if (options.emit_fast_bridge && needs_sext_bridge(cert)) {
     out << "import LeanSemanticPrimitives.Translation.SextBridge\n";
+  }
+  // A byte-enable write: the compiled form that reads the image below it once
+  // per read (finding Q; a `@[csimp]` lemma, proofs unchanged).
+  if (std::any_of(cert.nodes.begin(), cert.nodes.end(), [](const CertNode& n) { return n.op.kind == Operation::MemWriteBE; })) {
+    out << "import LeanSemanticPrimitives.Translation.LegacyFast\n";
   }
   // A whole-array memory (decision #2): the fast `mem_load` / `mem_to_bus`,
   // and with the bridge their lemmas (which import the fast forms).
