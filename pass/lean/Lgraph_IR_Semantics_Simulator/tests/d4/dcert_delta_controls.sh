@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-# Controls for the DCERT1 delta analyzer.
+# Controls for the DCERT3 delta analyzer.
+#
+# The hand-written fixtures below are DCERT3: a flop record ends in `clock
+# asyncReset`, and the clocks section comes last. They were DCERT1 until
+# 2026-11-02: once the reader moved to DCERT3 (de854cb69) each was refused for
+# its magic before the check it targets, and 18 controls failed.
 #
 # The measurement this analyzer feeds is a SINGLE NUMBER -- "how much of the
 # certificate changed" -- and a wrong number in either direction would be
@@ -59,7 +64,7 @@ EOF
 # nodes so the renumbering control has a legal swap.
 # --------------------------------------------------------------------------
 TINY="$WORK/tiny.dcert"
-printf 'DCERT1\n3\n0 0 8\n0 1 8\n1 8 5\n3\n7 0 8 2 0 1 100\n9 0 8 2 0 2 101\n8 0 8 2 3 4 102\n1\n5 8\n1\n8 5 0 0 0 0 0 0\n0\n' > "$TINY"
+printf 'DCERT3\n3\n0 0 8\n0 1 8\n1 8 5\n3\n7 0 8 2 0 1 100\n9 0 8 2 0 2 101\n8 0 8 2 3 4 102\n1\n5 8\n1\n8 5 0 0 0 0 0 0 0 0\n0\n1\n5 clock\n' > "$TINY"
 
 run()  { "$PY" "$DELTA" "$1" "$2" --json > "$3" 2>"$3.err"; echo $?; }
 mut()  { "$PY" "$MUT" "$1" "$2" --kind "$3" > "$WORK/mut.log" 2>&1; echo $?; }
@@ -161,7 +166,7 @@ for spec in "truncate:truncated:a truncated certificate" \
             "count:declares:a section count with no records behind it" \
             "oor-dep:outside the:a dependency naming a slot outside the design" \
             "token:not a decimal integer:a non-decimal token" \
-            "trailing:trailing token:a trailing token after the last record" \
+            "trailing:trailing byte:a trailing token after the last record" \
             "cycle:dependency cycle:a dependency cycle"; do
   k="${spec%%:*}"; rest="${spec#*:}"; needle="${rest%%:*}"; label="${rest#*:}"
   if [[ "$(mut "$TINY" "$WORK/$k.dcert" "$k")" != 0 ]]; then
@@ -172,12 +177,12 @@ done
 
 # Byte-level shapes the mutator deliberately cannot make.
 printf 'NOTDCERT\n0\n0\n0\n0\n0\n' > "$WORK/magic.dcert"
-refuse "a file without the DCERT1 magic" "$WORK/magic.dcert" "bad magic"
+refuse "a file without the DCERT3 magic" "$WORK/magic.dcert" "bad magic"
 
-printf 'DCERT1\n1\n6 0 8\n0\n0\n0\n0\n' > "$WORK/tag.dcert"
+printf 'DCERT3\n1\n6 0 8\n0\n0\n0\n0\n1\n5 clock\n' > "$WORK/tag.dcert"
 refuse "an unknown source tag" "$WORK/tag.dcert" "unknown tag"
 
-printf 'DCERT1\n1\n0 0 8\n1\n29 0 8 1 0 100\n0\n0\n0\n' > "$WORK/op.dcert"
+printf 'DCERT3\n1\n0 0 8\n1\n31 0 8 1 0 100\n0\n0\n0\n1\n5 clock\n' > "$WORK/op.dcert"
 refuse "an operator code the format does not define" "$WORK/op.dcert" "is not an operator"
 
 refuse "a certificate that is not there at all" "$WORK/no-such-file.dcert" "cannot read"
@@ -189,32 +194,32 @@ refuse "a certificate that is not there at all" "$WORK/no-such-file.dcert" "cann
 # `opOfCode` would push through `Int.toNat` to the SAME operator.  Review found
 # the first three accepted; each is now a control with its own diagnostic.
 
-printf 'DCERT1\n1\n0 -1 8\n0\n0\n0\n0\n' > "$WORK/negnat.dcert"
+printf 'DCERT3\n1\n0 -1 8\n0\n0\n0\n0\n1\n5 clock\n' > "$WORK/negnat.dcert"
 refuse "a Nat field written negative" "$WORK/negnat.dcert" "is a Nat"
 
-printf 'DCERT1\n1\n0 0 8\n1\n7 99 8 1 0 100\n0\n0\n0\n' > "$WORK/stray.dcert"
+printf 'DCERT3\n1\n0 0 8\n1\n7 99 8 1 0 100\n0\n0\n0\n1\n5 clock\n' > "$WORK/stray.dcert"
 refuse "a payload on an operator that carries none" "$WORK/stray.dcert" "carries no payload"
 
-printf 'DCERT1\n1\n0 0 8\n1\n1 -1 8 1 0 100\n0\n0\n0\n' > "$WORK/negarg.dcert"
+printf 'DCERT3\n1\n0 0 8\n1\n1 -1 8 1 0 100\n0\n0\n0\n1\n5 clock\n' > "$WORK/negarg.dcert"
 refuse "a negative payload on a Nat-typed operator" "$WORK/negarg.dcert" "is a Nat"
 
-printf 'DCERT1\n1\n0 0 08\n0\n0\n0\n0\n' > "$WORK/lead.dcert"
+printf 'DCERT3\n1\n0 0 08\n0\n0\n0\n0\n1\n5 clock\n' > "$WORK/lead.dcert"
 refuse "a field with a leading zero" "$WORK/lead.dcert" "leading zero"
 
-printf 'DCERT1\n1\n1 8 -0\n0\n0\n0\n0\n' > "$WORK/negzero.dcert"
+printf 'DCERT3\n1\n1 8 -0\n0\n0\n0\n0\n1\n5 clock\n' > "$WORK/negzero.dcert"
 refuse "a value spelled -0" "$WORK/negzero.dcert" "not canonical"
 
-printf 'DCERT1\n1\n0 0 8\n0\n0\n1\n8 0 2 0 0 0 0 0\n0\n' > "$WORK/bit.dcert"
+printf 'DCERT3\n1\n0 0 8\n0\n0\n1\n8 0 2 0 0 0 0 0 0 0\n0\n1\n5 clock\n' > "$WORK/bit.dcert"
 refuse "a boolean field that is not 0 or 1" "$WORK/bit.dcert" "boolean field"
 
-printf 'DCERT1\n2\n0 0 8\n0 1 8\n0\n0\n1\n8 0 0 1 0 0 0 0\n0\n' > "$WORK/absent.dcert"
+printf 'DCERT3\n2\n0 0 8\n0 1 8\n0\n0\n1\n8 0 0 1 0 0 0 0 0 0\n0\n1\n5 clock\n' > "$WORK/absent.dcert"
 refuse "an absent pin whose slot is not the canonical 0" "$WORK/absent.dcert" "absent pin"
 
 # A separator the writer does not emit: every field rule above could pass and
 # this would still not be a file `renderCert` produced.  The byte-exact
 # re-render is what closes that, and it is the only guard that catches this.
-printf 'DCERT1\n1\n0  0 8\n0\n0\n0\n0\n' > "$WORK/space.dcert"
-refuse "a record with a separator renderCert never writes" "$WORK/space.dcert" "not canonical DCERT1"
+printf 'DCERT3\n1\n0  0 8\n0\n0\n0\n0\n1\n5 clock\n' > "$WORK/space.dcert"
+refuse "a record with a separator renderCert never writes" "$WORK/space.dcert" "not canonical DCERT3"
 
 # --------------------------------------------------------------------------
 if [[ "$fail" -eq 0 ]]; then
