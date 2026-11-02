@@ -20,8 +20,8 @@ py_test(
 
 cc_library(
     name = "lean_graph_scan",
-    srcs = ["Exporter/Frontend/graph_access.cpp", "Exporter/Frontend/design_scan.cpp"],
-    hdrs = ["Exporter/Frontend/graph_access.hpp", "Exporter/Frontend/design_scan.hpp"],
+    srcs = ["Exporter/Frontend/graph_access.cpp", "Exporter/Frontend/design_scan.cpp", "Exporter/Frontend/loop_realize.cpp"],
+    hdrs = ["Exporter/Frontend/graph_access.hpp", "Exporter/Frontend/design_scan.hpp", "Exporter/Frontend/loop_realize.hpp"],
     copts = COPTS,
     includes = ["Exporter/Frontend"],
     visibility = ["//visibility:public"],

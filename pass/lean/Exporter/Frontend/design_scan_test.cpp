@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iterator>
 #include <map>
 #include <set>
@@ -18,6 +19,7 @@
 #include "graph_library_singleton.hpp"
 #include "gtest/gtest.h"
 #include "lean_format.hpp"
+#include "loop_realize.hpp"
 #include "node_util.hpp"
 #include "reduce_lower.hpp"
 
@@ -3992,6 +3994,247 @@ TEST(CertificateIr, MemoryWriteDataFromAnotherMemorysReadConsumerBuiltFirst) {
   auto& lib = livehd::Hhds_graph_library::instance("lgdb_cert_mem_chain_rev");
   auto  g   = build_chained_memories(lib, "mem_chain_rev", /*consumer_first=*/true);
   EXPECT_NO_THROW(scan_and_build(*g)) << "the schedule must not depend on which memory node was created first";
+}
+
+// ── rolled loops ────────────────────────────────────────────────────────────
+//
+// A loop with a run-time `break` stays ROLLED even under compile.unroll: one
+// compact loop Sub stands for every iteration, and its carry feeds itself.
+// Hand-built here in the shape the front end gives
+//   for i in 0..<count { if stop#[i] != 0 { break }  acc = acc + 1 }
+// The body takes the index `i`, the activation `__valid`, the invariant `stop`
+// and the carry `acc_in`; it returns `__next_active` (no break in this
+// iteration) and the next carry.
+constexpr hhds::Port_id kLoopI      = 1;
+constexpr hhds::Port_id kLoopValid  = 2;
+constexpr hhds::Port_id kLoopStop   = 3;
+constexpr hhds::Port_id kLoopAccIn  = 4;
+constexpr hhds::Port_id kLoopNext   = 5;
+constexpr hhds::Port_id kLoopAccOut = 6;
+
+std::shared_ptr<hhds::GraphIO> build_break_body(hhds::GraphLibrary& lib, const std::string& name) {
+  using namespace livehd::graph_util;
+  auto io = lib.create_io(name);
+  io->add_input("i", kLoopI);
+  io->add_input("__valid", kLoopValid);
+  io->add_input("stop", kLoopStop);
+  io->add_input("acc_in", kLoopAccIn);
+  io->add_output("__next_active", kLoopNext);
+  io->add_output("acc_out", kLoopAccOut);
+  for (const auto& [port, bits] : std::vector<std::pair<std::string, uint32_t>>{
+           {            "i",  4},
+           {      "__valid",  1},
+           {         "stop",  8},
+           {       "acc_in", 12},
+           {"__next_active",  1},
+           {      "acc_out", 12}
+  }) {
+    io->set_bits(port, bits);
+    io->set_unsign(port, true);
+  }
+  auto body   = io->create_graph();
+  auto stop   = body->get_input_pin("stop");
+  auto i      = body->get_input_pin("i");
+  auto acc_in = body->get_input_pin("acc_in");
+  set_ubits(stop, 8);
+  set_ubits(i, 4);
+  set_ubits(acc_in, 12);
+  // bit = (stop >> i) & 1
+  auto sra = create_typed_node(*body, Ntype_op::SRA);
+  stop.connect_sink(sra.create_sink_pin(0));
+  i.connect_sink(sra.create_sink_pin(1));
+  auto shifted = sra.create_driver_pin(0);
+  set_ubits(shifted, 8);
+  auto bit = create_typed_node(*body, Ntype_op::And);
+  shifted.connect_sink(setup_sink_pid(bit, 0));
+  create_const(*body, *Dlop::create_integer(1)).connect_sink(setup_sink_pid(bit, 0));
+  auto brk = bit.create_driver_pin(0);
+  set_ubits(brk, 1);
+  // __next_active = !bit
+  auto keep_going = create_typed_node(*body, Ntype_op::Not);
+  brk.connect_sink(keep_going.create_sink_pin(0));
+  set_ubits(keep_going.create_driver_pin(0), 1);
+  keep_going.create_driver_pin(0).connect_sink(body->get_output_pin("__next_active"));
+  // acc_out = bit ? acc_in : acc_in + 1
+  auto inc = create_typed_node(*body, Ntype_op::Sum);
+  acc_in.connect_sink(inc.create_sink_pin(0));
+  create_const(*body, *Dlop::create_integer(1)).connect_sink(inc.create_sink_pin(2));
+  set_ubits(inc.create_driver_pin(0), 12);
+  auto pick = create_typed_node(*body, Ntype_op::Mux);
+  brk.connect_sink(pick.create_sink_pin(0));
+  inc.create_driver_pin(0).connect_sink(pick.create_sink_pin(1));
+  acc_in.connect_sink(pick.create_sink_pin(2));
+  set_ubits(pick.create_driver_pin(0), 12);
+  pick.create_driver_pin(0).connect_sink(body->get_output_pin("acc_out"));
+  return io;
+}
+
+// One compact loop Sub of `body` in `parent`: `stop` and the carry seed come
+// from `stop` / `seed`, the carried result goes to `result`. The activation of
+// the first iteration is the constant 1 (the loop is always entered); HHDS
+// wants exactly one external driver on it.
+hhds::Node_class add_break_loop(hhds::Graph& parent, const std::shared_ptr<hhds::GraphIO>& body, uint64_t count,
+                                const hhds::Pin_class& stop, const hhds::Pin_class& seed, const hhds::Pin_class& result) {
+  auto loop = create_typed_node(parent, Ntype_op::Sub);
+  loop.set_subnode(body);
+  loop.set_name("u_loop_0");
+  stop.connect_sink(loop.create_sink_pin(kLoopStop));
+  seed.connect_sink(loop.create_sink_pin(kLoopAccIn));
+  livehd::graph_util::create_const(parent, *Dlop::create_integer(1)).connect_sink(loop.create_sink_pin(kLoopValid));
+  loop.create_driver_pin(kLoopAccOut).connect_sink(result);
+  hhds::Subnode_loop d;
+  d.first              = 0;
+  d.step               = 1;
+  d.count              = count;
+  d.index_input        = kLoopI;
+  d.activation_input   = kLoopValid;
+  d.next_active_output = kLoopNext;
+  loop.set_subnode(body, d);
+  loop.create_driver_pin(kLoopAccOut).connect_sink(loop.create_sink_pin(kLoopAccIn));  // the carry
+  return loop;
+}
+
+std::shared_ptr<hhds::Graph> make_loop_parent(hhds::GraphLibrary& lib, const std::string& name) {
+  auto io = lib.create_io(name);
+  io->add_input("stop", 1);
+  io->add_output("total", 2);
+  io->set_bits("stop", 8);
+  io->set_unsign("stop", true);
+  io->set_bits("total", 12);
+  io->set_unsign("total", true);
+  auto g = io->create_graph();
+  livehd::graph_util::set_ubits(g->get_input_pin("stop"), 8);
+  return g;
+}
+
+size_t count_nodes(const hhds::Graph& g, const std::function<bool(const hhds::Node_class&)>& pred) {
+  size_t n = 0;
+  for (auto node : g.body().nodes()) {
+    n += pred(node) ? 1 : 0;
+  }
+  return n;
+}
+
+size_t count_ops(const DesignScan& design, ScanOp op) {
+  return static_cast<size_t>(std::ranges::count_if(design.nodes, [op](const auto& n) { return n.op == op; }));
+}
+
+const auto is_sub      = [](const hhds::Node_class& n) { return livehd::graph_util::type_op_of(n) == Ntype_op::Sub; };
+const auto is_loop_sub = [](const hhds::Node_class& n) { return n.is_loop_subnode(); };
+
+// The negative control and the fix, on one graph. Unrealized, the scan refuses
+// the loop by name (this is what keeps a skipped realization from passing);
+// realized, every iteration is its own logic in a private copy, the copy
+// exports, and the source graph still holds its one compact loop.
+TEST(LoopRealize, RolledLoopWithRuntimeBreakExportsOnlyAfterRealization) {
+  auto& lib    = livehd::Hhds_graph_library::instance("lgdb_loop_realize_break");
+  auto  body   = build_break_body(lib, "lrb.__loop0");
+  auto  parent = make_loop_parent(lib, "lrb");
+  (void)add_break_loop(*parent,
+                       body,
+                       4,
+                       parent->get_input_pin("stop"),
+                       livehd::graph_util::create_const(*parent, *Dlop::create_integer(0)),
+                       parent->get_output_pin("total"));
+  const auto body_nodes = count_nodes(*body->get_graph(), [](const auto&) { return true; });
+
+  try {
+    (void)scan_design(*parent, {});
+    ADD_FAILURE() << "a rolled loop must be refused when it is not realized first";
+  } catch (const std::runtime_error& e) {
+    EXPECT_NE(std::string(e.what()).find("ROLLED loop"), std::string::npos) << e.what();
+  }
+
+  hhds::GraphLibrary scratch;
+  const auto         flat = realize_rolled_loops_copy(parent, scratch);
+  ASSERT_TRUE(flat);
+  ASSERT_NE(flat.get(), parent.get()) << "the loop is realized in a private copy";
+  EXPECT_EQ(count_nodes(*flat, is_sub), 0u) << "every iteration is spliced into the top";
+
+  // The source graphs are untouched.
+  EXPECT_EQ(count_nodes(*parent, is_loop_sub), 1u);
+  EXPECT_EQ(count_nodes(*parent, is_sub), 1u);
+  EXPECT_EQ(count_nodes(*body->get_graph(), [](const auto&) { return true; }), body_nodes);
+
+  DesignScan design;
+  ASSERT_NO_THROW(design = scan_design(*flat, {}));
+  ASSERT_EQ(design.inputs.size(), 1u);
+  ASSERT_EQ(design.outputs.size(), 1u);
+  // One body per iteration: four shifts, four increments, four carry selects
+  // of the body plus the three activation bypasses between iterations.
+  EXPECT_EQ(count_ops(design, ScanOp::SRA), 4u);
+  EXPECT_EQ(count_ops(design, ScanOp::Sum), 4u);
+  EXPECT_EQ(count_ops(design, ScanOp::Mux), 4u + 3u);
+  const auto cert = build_certificate(design, {});
+  EXPECT_FALSE(render_dcert(cert).empty());
+
+  // A graph with no rolled loop is returned as is: no copy.
+  hhds::GraphLibrary again;
+  EXPECT_EQ(realize_rolled_loops_copy(flat, again).get(), flat.get());
+}
+
+// A rolled loop inside a rolled loop's body: splicing an outer iteration brings
+// the inner loop into the top, and the next round realizes it.
+TEST(LoopRealize, NestedRolledLoopsAreRealizedLevelByLevel) {
+  auto& lib   = livehd::Hhds_graph_library::instance("lgdb_loop_realize_nested");
+  auto  inner = build_break_body(lib, "nest.__loop0.__loop0");
+
+  // The outer body: index `o` (unused), invariant `stop`, carry `acc_in` ->
+  // `acc_out` through the inner loop.
+  auto oio = lib.create_io("nest.__loop0");
+  oio->add_input("o", 1);
+  oio->add_input("stop", 2);
+  oio->add_input("acc_in", 3);
+  oio->add_output("acc_out", 4);
+  for (const auto& [port, bits] : std::vector<std::pair<std::string, uint32_t>>{
+           {      "o",  2},
+           {   "stop",  8},
+           { "acc_in", 12},
+           {"acc_out", 12}
+  }) {
+    oio->set_bits(port, bits);
+    oio->set_unsign(port, true);
+  }
+  auto outer_body = oio->create_graph();
+  livehd::graph_util::set_ubits(outer_body->get_input_pin("stop"), 8);
+  livehd::graph_util::set_ubits(outer_body->get_input_pin("acc_in"), 12);
+  (void)add_break_loop(*outer_body,
+                       inner,
+                       4,
+                       outer_body->get_input_pin("stop"),
+                       outer_body->get_input_pin("acc_in"),
+                       outer_body->get_output_pin("acc_out"));
+
+  auto parent = make_loop_parent(lib, "nest");
+  auto outer  = create_typed_node(*parent, Ntype_op::Sub);
+  outer.set_subnode(oio);
+  outer.set_name("u_loop_0");
+  parent->get_input_pin("stop").connect_sink(outer.create_sink_pin(2));
+  livehd::graph_util::create_const(*parent, *Dlop::create_integer(0)).connect_sink(outer.create_sink_pin(3));
+  outer.create_driver_pin(4).connect_sink(parent->get_output_pin("total"));
+  hhds::Subnode_loop d;
+  d.count       = 2;
+  d.index_input = static_cast<hhds::Port_id>(1);
+  outer.set_subnode(oio, d);
+  outer.create_driver_pin(4).connect_sink(outer.create_sink_pin(3));
+
+  EXPECT_THROW((void)scan_design(*parent, {}), std::runtime_error);
+
+  hhds::GraphLibrary scratch;
+  const auto         flat = realize_rolled_loops_copy(parent, scratch);
+  ASSERT_TRUE(flat);
+  EXPECT_EQ(count_nodes(*flat, is_sub), 0u) << "both levels are spliced into the top";
+  EXPECT_EQ(count_nodes(*parent, is_loop_sub), 1u);
+  EXPECT_EQ(count_nodes(*outer_body, is_loop_sub), 1u);
+
+  DesignScan design;
+  ASSERT_NO_THROW(design = scan_design(*flat, {}));
+  EXPECT_EQ(count_ops(design, ScanOp::SRA), 2u * 4u) << "one inner body per (outer, inner) iteration";
+
+  // Both bodies get no certificate of their own; the top does.
+  EXPECT_EQ(loop_body_only({parent, outer_body, inner->get_graph()}), (std::vector<bool>{false, true, true}));
+  // A body whose parent is not in the set is a design in its own right.
+  EXPECT_EQ(loop_body_only({inner->get_graph()}), (std::vector<bool>{false}));
 }
 }  // namespace
 }  // namespace lean_export
