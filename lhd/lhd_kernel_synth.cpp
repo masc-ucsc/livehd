@@ -487,6 +487,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_options.spill_fraction   = number("place.legroute.spill_fraction", "0.2");
   out.legroute_options.window_grow      = static_cast<unsigned>(integer("place.legroute.window_grow", "0"));
   out.legroute_options.spill_shift      = truthy(synth_set(opts, "place.legroute.spill_shift", "false"));
+  out.legroute_options.mesh_join        = truthy(synth_set(opts, "place.legroute.mesh_join", "false"));
   out.legroute_options.alternatives     = synth_set(opts, "place.legroute.alternatives", "");
   out.legroute_options.alt_ms           = static_cast<unsigned>(integer("place.legroute.alt_ms", "0"));
   out.legroute_options.region_pins      = truthy(synth_set(opts, "place.legroute.region_pins", "true"));

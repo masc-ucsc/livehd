@@ -79,6 +79,10 @@ struct Legroute_options {
   // connected body) goes to that neighbour with the boxes on it, so the crossing nets' endpoints become the
   // neighbour's without raising its fill
   bool        spill_shift      = false;
+  // mesh_join: in a spill round a region without a routable answer joins a neighbour and their union splits the other
+  // way: across the boundary its crossings overload (a row boundary bad: a column split, and the reverse), or beside
+  // the line inside it the cut bound names (the split parallel to that line gives it the union's tracks)
+  bool        mesh_join        = false;
   // alternatives: in a spill round, a region without a routable answer first tries alternative placements of its boxes,
   // each solved in parallel with the round's fixed hops, the first routable one in this order adopted: "noise" (every
   // box's home jittered by up to window_tiles tiles), "anchor" (a few boxes of the densest patch moved to the sparsest
@@ -266,6 +270,7 @@ struct Legroute_report {
   size_t  frozen_boxes        = 0;  // freeze: boxes pinned on their fallback tiles
   size_t  legal_boxes         = 0;  // legal_boxes: boxes built from the legal placement, fixed on their tiles
   size_t  legal_shuffled      = 0;  // legal_shuffle: legal boxes freed at the global router's overflowed edges
+  size_t  mesh_joins          = 0;  // mesh_join: region pairs joined and resplit
   size_t  sat_seeded          = 0;  // sat_seed: regions whose answer is the fallback placement
   size_t  sat_skipped_regions = 0;  // sat_min_fill: regions taken as routable without a solve
   // timing tiers: constraints kept, dropped (UNSAT cores), tiers dropped whole (out of time), solves, and the

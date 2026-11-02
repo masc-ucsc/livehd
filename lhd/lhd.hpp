@@ -1479,6 +1479,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::boolean,
      "legroute: a spill round moves a failing region's boundary instead of its boxes: the tile strip next to the "
      "neighbour its nets reach most goes to that neighbour with the boxes on it"},
+    {"place.legroute.mesh_join",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "legroute: in a spill round a region without a routable answer joins a neighbour and their union splits the other "
+     "way (across the boundary its crossings overload, or beside the line inside it the cut bound names)"},
     {"place.legroute.alternatives",
      "",
      Synth_set_option::Kind::file,

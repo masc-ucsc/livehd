@@ -1517,6 +1517,8 @@ struct Region_out {
   std::vector<int>                 local;  // 1-1 nets between neighbor boxes
   std::vector<std::pair<int, int>> tiles;      // (box, tile)
   std::vector<std::tuple<int, int, int>> hop_tiles;  // (net, the hop chooser's tile, the tile chosen) per free hop
+  int                              cut_at = -1;      // cut bound: the column (cut_h) or row boundary the placement overloads
+  bool                             cut_h  = true;
   Legroute_report                  rep;        // the sat_* counters
   double                           cost = 0, seconds = 0;
 };
@@ -1958,6 +1960,8 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
                    secs,
                    tag.c_str());
       out.status       = Sat_status::unsatisfiable;
+      out.cut_at       = worst.at;
+      out.cut_h        = worst.h;
       const auto tiles = fallback_tiles(window_tiles);  // the region keeps its boxes on fitting tiles (not routable)
       for (size_t i = 0; i < B.size(); ++i) {
         if (tiles[i] >= 0) {
@@ -4448,6 +4452,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
   std::vector<uint64_t> sig_prev(size_t(g.regions), 0);
   std::vector<unsigned> region_extra(size_t(g.regions), 0);  // window_grow: extra window tiles of a region that failed
   std::vector<int>      gave_to(size_t(g.regions), -1);      // spill_shift: the region each region last handed a strip to
+  std::set<std::pair<int, int>> joined_pairs;                 // mesh_join: region pairs joined and resplit once
   for (unsigned round = 0;; ++round) {
     // spill rounds: the region adjacency (a boundary shift changes it)
     std::vector<std::set<int>> region_adj(size_t(g.regions));
@@ -5085,6 +5090,129 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
       }
       kinds.push_back(kind);
       at = comma == std::string::npos ? d.opt.alternatives.size() : comma + 1;
+    }
+    // mesh_join (user, 2026-11-02): a boundary the crossings overload, or a line inside a region its own placement
+    // overloads (the cut bound), is fixed by the mesh, not the placement: the two regions across the boundary join and
+    // their union splits the other way (a row boundary bad: split by a column line, and the reverse), so the nets that
+    // crossed it stay inside one half; a cut-bound line inside a region joins the region with a neighbour beside the
+    // line (across a boundary perpendicular to it) and splits parallel to the line, so the line gets the union's width
+    // of tracks. The split balances the boxes. Each pair joins once; the next round solves what changed.
+    if (d.opt.mesh_join) {
+      size_t joins = 0;
+      for (int r : failed) {
+        const auto& own = last[size_t(chosen[r])][size_t(r)];
+        // the boundary to join across: (neighbour, its boundary is a row line)
+        int  nb = -1;
+        bool row_boundary = false;
+        if (own.status == Sat_status::unsatisfiable && own.cut_at >= 0) {  // a line inside r: join beside it
+          // a row line (cut_h false) needs width: the neighbour across a column boundary (left or right) with the
+          // longest shared side; a column line needs height: the neighbour above or below
+          std::map<int, int> shared;
+          for (int t : region_tiles[size_t(r)]) {
+            for (int q : tile_neighbours(g, t)) {
+              const bool row_side = g.col(q) == g.col(t);  // q above or below t: a row boundary between them
+              if (g.region[q] != r && row_side == own.cut_h) {
+                ++shared[g.region[q]];
+              }
+            }
+          }
+          for (const auto& [q, n] : shared) {
+            if (nb < 0 || n > shared[nb]) {
+              nb = q;
+            }
+          }
+          row_boundary = own.cut_h;
+        } else {  // the boundary of r the hops load most against its tracks
+          std::map<int, std::pair<double, double>> load;  // neighbour -> (hops, tracks)
+          for (const auto& [a, b] : x.hops) {
+            if ((g.region[a] == r) != (g.region[b] == r)) {
+              load[g.region[a] == r ? g.region[b] : g.region[a]].first += 1;
+            }
+          }
+          for (int t : region_tiles[size_t(r)]) {
+            for (int q : tile_neighbours(g, t)) {
+              if (g.region[q] != r) {
+                const bool h = g.row(q) == g.row(t);
+                load[g.region[q]].second += std::max(0, std::min((h ? cap_h0 : cap_v0)[t], (h ? cap_h0 : cap_v0)[q]));
+              }
+            }
+          }
+          double worst = 0;
+          for (const auto& [q, hv] : load) {
+            const double ratio = hv.first / std::max(1.0, hv.second);
+            if (ratio > worst) {
+              worst = ratio;
+              nb    = q;
+            }
+          }
+          if (nb >= 0) {  // the boundary's orientation: a row line when the neighbour is above or below
+            int rows = 0, cols = 0;
+            for (int t : region_tiles[size_t(r)]) {
+              for (int q : tile_neighbours(g, t)) {
+                if (g.region[q] == nb) {
+                  (g.col(q) == g.col(t) ? rows : cols) += 1;
+                }
+              }
+            }
+            row_boundary = rows >= cols;
+          }
+        }
+        if (nb < 0 || joined_pairs.contains({std::min(r, nb), std::max(r, nb)})) {
+          continue;
+        }
+        joined_pairs.insert({std::min(r, nb), std::max(r, nb)});
+        // the union, split the other way: by a column line for a row boundary joined, by a row line otherwise, at the
+        // line that balances the boxes (the regions keep their ids: r the lower / left part)
+        std::vector<int> U = region_tiles[size_t(r)];
+        U.insert(U.end(), region_tiles[size_t(nb)].begin(), region_tiles[size_t(nb)].end());
+        std::map<int, int> boxes_at;  // column (or row) -> boxes homed there
+        for (int b : region_boxes[size_t(r)]) {
+          const int t = g.tile_of(boxes.boxes[size_t(b)].cx, boxes.boxes[size_t(b)].cy);
+          ++boxes_at[row_boundary ? g.col(t) : g.row(t)];
+        }
+        for (int b : region_boxes[size_t(nb)]) {
+          const int t = g.tile_of(boxes.boxes[size_t(b)].cx, boxes.boxes[size_t(b)].cy);
+          ++boxes_at[row_boundary ? g.col(t) : g.row(t)];
+        }
+        int total = 0;
+        for (const auto& [k, n] : boxes_at) {
+          total += n;
+        }
+        int line = -1, acc = 0;  // the first column / row of the upper part
+        for (const auto& [k, n] : boxes_at) {
+          if (acc >= total / 2) {
+            line = k;
+            break;
+          }
+          acc += n;
+        }
+        if (line < 0 || acc == 0) {
+          continue;  // every box on one side: nothing to balance
+        }
+        for (int t : U) {
+          g.region[size_t(t)] = (row_boundary ? g.col(t) : g.row(t)) < line ? r : nb;
+        }
+        for (int b : region_boxes[size_t(r)]) {
+          boxes.boxes[size_t(b)].region = g.region[size_t(g.tile_of(boxes.boxes[size_t(b)].cx, boxes.boxes[size_t(b)].cy))];
+        }
+        for (int b : region_boxes[size_t(nb)]) {
+          boxes.boxes[size_t(b)].region = g.region[size_t(g.tile_of(boxes.boxes[size_t(b)].cx, boxes.boxes[size_t(b)].cy))];
+        }
+        ++joins;
+        std::fprintf(stderr,
+                     "legroute sat: spill round %u: region %d (%s) joins region %d across their %s boundary; the union splits at %s %d\n",
+                     round + 1, r,
+                     own.cut_at >= 0 ? "cut-bound" : "hops over its boundary", nb, row_boundary ? "row" : "column",
+                     row_boundary ? "column" : "row", line);
+      }
+      if (joins > 0) {
+        rep.mesh_joins += joins;
+        g.region_tiles.assign(size_t(g.regions), {});
+        for (size_t t = 0; t < g.size(); ++t) {
+          g.region_tiles[size_t(g.region[t])].push_back(int(t));
+        }
+        continue;  // the next round redoes the crossings on the new mesh and solves what changed
+      }
     }
     for (int r : failed) {
       if (!kinds.empty()) {  // alternative placements of the region's boxes, solved in parallel with the round's hops fixed

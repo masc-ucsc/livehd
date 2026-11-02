@@ -859,6 +859,10 @@ region, 18 threads; OpenROAD routes the same placement with 0 DRCs in every row)
 <tr><td>2500, global router for the crossings</td><td>10</td><td>9</td><td>1 UNSAT (9)</td><td>218 s</td><td><code>global_route=true</code>: 3372 crossing nets routed over the grid ahead (330 without a path, 1306 edges at the share); regions 1, 3 and 6 route, region 9 (routable before) loses to the fixed pieces through it</td></tr>
 <tr><td><strong>2500, negotiated global router</strong> (<code>global_route=true</code>, <code>global_rounds=16</code>)</td><td>10</td><td><strong>10</strong></td><td>none</td><td>73 s</td><td>the router with rip-up and reroute under present-plus-history congestion cost: 3702 crossing nets, 0 without a path (330 before), 6.9 s; the regions then route with the crossings where the global route put them</td></tr>
 <tr><td><strong>1000, negotiated global router</strong></td><td>22</td><td><strong>21</strong></td><td>1 cut-bound</td><td>12 s</td><td>4688 crossing nets, 0 without a path, 7.4 s; the one failure is an 81-tile region whose own placement forces 110 nets across a row of 106 tracks (a mesh artefact: not a crossing, not the router)</td></tr>
+<tr><td>1000, negotiated router + <code>legal_shuffle=2</code></td><td>22</td><td>21</td><td>1 cut-bound</td><td>22 s</td><td>907 legal boxes freed at the 492 edges still over the share: harmless, and no help for a line inside a region (the cut bound is the mesh's)</td></tr>
+<tr><td>free SAT placement, 2500, no router</td><td>10</td><td>8</td><td>2 UNSAT (3, 6)</td><td>85 s</td><td>the same two regions the legal flow lost without the router</td></tr>
+<tr><td><strong>free SAT placement, 2500, negotiated router</strong></td><td>10</td><td><strong>10</strong></td><td>none</td><td>145 s</td><td>the router helps the SAT placement the same way (0 nets without a path); <code>global_route</code> stays opt-in until a large design (partition_c) measures its cost</td></tr>
+<tr><td><strong>1000, negotiated router + <code>mesh_join</code></strong> (spill_rounds 2, no box spill)</td><td>22</td><td><strong>22</strong></td><td>none</td><td>19 s</td><td>the cut-bound region joins its neighbour across their column boundary and the union splits at a row line (the bad row gets the union's width of tracks); the next round routes both: every mesh of sha3 at 0.60 now routes with the ordinary legalization</td></tr>
 <tr><td>2500, global router + hops free along 6 tiles</td><td>10</td><td>8</td><td>1 UNSAT (9), 1 timeout (6)</td><td>341 s</td><td>the two levers do not add up: region 9 stays with the global router's pieces, region 6 runs out of time with the hop literals on top</td></tr>
 <tr><td>2500, boxes free to move one tile (<code>legal_window=1</code>)</td><td>10</td><td>7</td><td>2 UNSAT (3, 6), 1 timeout (1)</td><td>368 s</td><td>the placement literals over 3&times;3 windows slow every region (region 1 runs out of time where fixed it took 0.3 s) and the UNSAT regions stay UNSAT: a local repair must free only the boxes of the UNSAT core, not the region; the moved boxes' cells repack legally (the straddling parts of the legal cells block their neighbour tile's sites)</td></tr>
 <tr><td>5000</td><td>5</td><td>5</td><td>none</td><td>57 s</td><td>every region in 2.5&ndash;23 s, 1.3&ndash;2.4M clauses, no crossing over the hop share</td></tr>
@@ -881,6 +885,18 @@ stay fixed): the shuffle at the router's word, not at the region's. The rows abo
 mesh routes whole and the 1000-cell mesh all but a thin region, both in well under two minutes of SAT, against 7 of
 10 and 17 of 22 with hops chosen tile by tile. Copying FastRoute itself (20k lines on OpenROAD's database) stays the
 fallback if this router falls short of OpenROAD's zero overflow on a design; on sha3 it does not.</p>
+<p><strong>Mesh repair at the router's word (user, 2026-11-02): when some crossings of a boundary are bad, join the
+two regions across it and split their union the other way; the global router finds the conflicting boundaries, so
+this is an easy fix.</strong> Landed as <code>mesh_join</code> (a spill-round lever, first in the order): a failing
+region whose verdict is a cut bound joins the neighbour beside the bad line (across a boundary perpendicular to it)
+and the union splits parallel to the line at the row or column that balances the boxes, so the line gets the union's
+width of tracks; any other failing region joins the neighbour whose boundary its hops load most against its tracks
+and the union splits across that boundary (a row boundary bad: a column split), so the nets that crossed it stay in
+one half. Regions keep their ids, each pair joins once, the virtual pins on a boundary that became interior simply
+stop being hops, and the next round redoes the crossings and solves what changed. Result above: the 1000-cell mesh
+routes 22 of 22. The flow the user described is complete on sha3: ordinary legalization, global route, region pins
+from its crossings, mesh repair where it says a boundary is wrong, per-region SAT routes; every mesh routes at 0.60 in
+under 80 s of SAT with the placer's QoR untouched.</p>
 <p><strong>What the failures were before the router.</strong> Region 3 of the 2500 mesh routed alone as a chip (its hops as die pins,
 <code>route_region.py</code>) overflows OpenROAD's global router too (581 overflow at 64% use): with the boxes fixed,
 the per-region decomposition with hops fixed on the boundary is what fails, not the model's counting rules. OpenROAD

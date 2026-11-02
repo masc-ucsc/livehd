@@ -699,8 +699,8 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.legroute) {
     const auto& l = o.legroute_options;
-    h = hash_text(std::format("legroute-v13:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{"
-                              "}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+    h = hash_text(std::format("legroute-v14:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{"
+                              "}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                               l.box_fill,
                               l.box_net_max,
                               l.merge_cost,
@@ -742,6 +742,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               l.spill_fraction,
                               l.window_grow,
                               l.spill_shift,
+                              l.mesh_join,
                               l.alternatives,
                               l.alt_ms,
                               l.region_pins,
