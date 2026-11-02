@@ -1351,6 +1351,16 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
           reader                = ", which is read by n_" + std::to_string(node_id(parent_nd)) + " ("
                    + std::string(livehd::graph_util::debug_name(parent_nd)) + ")";
         }
+        if (node.is_loop_subnode()) {
+          // A ROLLED loop: one compact instance standing for every iteration,
+          // whose carry feeds itself. That is not a design loop, and the
+          // generic message below sent readers hunting for one.
+          fatal(ctx,
+                "node n_" + std::to_string(id) + " (" + std::string(livehd::graph_util::debug_name(node))
+                    + ") is a ROLLED loop: one compact instance whose carry feeds itself" + reader
+                    + ". pass.lean needs every iteration as its own logic. Compile with `--set compile.unroll=true`; "
+                      "a loop with a run-time `break` or `continue` stays rolled even then, and is not supported.");
+        }
         fatal(ctx,
               "combinational cycle at node n_" + std::to_string(id) + " ("
                   + std::string(livehd::graph_util::debug_name(node)) + ")"
