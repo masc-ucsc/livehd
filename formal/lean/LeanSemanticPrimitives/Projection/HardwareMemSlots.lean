@@ -1178,8 +1178,15 @@ theorem applyOpM_scalar_mixed {vals : List Val} {arg : Nat → BV}
       (encBV (eval_op op w (deps.map arg))) := by
   obtain ⟨h26, h28⟩ := OpSupported_code_ne hsup
   have h27 := OpSupported_code_ne27 hsup
+  obtain ⟨h29, h30⟩ := OpSupported_code_ne_wa hsup
   refine SEval_call5 hop hw hdv henv hlen rfl rfl ?_
   refine SEval_switch_of_tag (.ref rfl) rfl rfl ?_
+  refine SEval.iteF (SEval_prim2 (.ref rfl) .lit ?_) ?_
+  · simp [evalPrim, encNat]
+    omega
+  refine SEval.iteF (SEval_prim2 (.ref rfl) .lit ?_) ?_
+  · simp [evalPrim, encNat]
+    omega
   refine SEval.iteF (SEval_prim2 (.ref rfl) .lit ?_) ?_
   · simp [evalPrim, encNat]
     omega

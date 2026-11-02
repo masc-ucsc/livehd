@@ -295,6 +295,24 @@ theorem memRead_deps {D : DesignCert} (hsem : Direct.DesignSemWF D)
   simp only [Direct.opArity, beq_iff_eq] at h
   exact Hw.list_len_three (by simpa using h)
 
+theorem memLoad_deps {D : DesignCert} (hsem : Direct.DesignSemWF D)
+    {j : Nat} {c : DenseNodeCert} {k : Nat} (hc : D.nodes[j]? = some c)
+    (hop : c.op = .Op_MemLoad k) :
+    ∃ d0 d1 d2, c.deps.toList = [d0, d1, d2] := by
+  have h := opArity_of_semwf hsem hc
+  rw [hop] at h
+  simp only [Direct.opArity, Bool.and_eq_true, beq_iff_eq] at h
+  exact Hw.list_len_three (by simpa using h.1)
+
+theorem memToBus_deps {D : DesignCert} (hsem : Direct.DesignSemWF D)
+    {j : Nat} {c : DenseNodeCert} {k : Nat} (hc : D.nodes[j]? = some c)
+    (hop : c.op = .Op_MemToBus k) :
+    ∃ d0, c.deps.toList = [d0] := by
+  have h := opArity_of_semwf hsem hc
+  rw [hop] at h
+  simp only [Direct.opArity, Bool.and_eq_true, beq_iff_eq] at h
+  exact Hw.list_len_one (by simpa using h.1)
+
 theorem memWriteBE_deps {D : DesignCert} (hsem : Direct.DesignSemWF D)
     {j : Nat} {c : DenseNodeCert} {bw : Nat} (hc : D.nodes[j]? = some c)
     (hop : c.op = .Op_MemWriteBE bw) :
@@ -394,12 +412,33 @@ denotation, which `MemImg.denote_does_not_determine_geometry` shows is false. -/
 theorem deps_get (c : DenseNodeCert) {l : List Nat} (h : c.deps.toList = l) (p : Nat) :
     c.deps[p]? = l[p]? := by rw [← h]; simp
 
-/-- A write hands its output slot the geometry of the image it updates.  A
-static fact about the slot assignment; nothing about runtime values. -/
+/-- A write -- or a whole-array load (decision #2), which also returns the image
+it updates -- hands its output slot the geometry of that image.  A static fact
+about the slot assignment; nothing about runtime values. -/
 def WritePropagates (D : DesignCert) (G : Nat → Option Nat) (j : Nat)
     (c : DenseNodeCert) : Prop :=
-  ∀ bw, c.op = .Op_MemWriteBE bw → ∀ d0, c.deps[0]? = some d0 →
+  ∀ bw, (c.op = .Op_MemWriteBE bw ∨ c.op = .Op_MemLoad bw) → ∀ d0, c.deps[0]? = some d0 →
     G (D.sources.size + j) = G d0
+
+/-- What a whole-array LOAD needs (decision #2): the image it loads is a
+declared MUTABLE table holding every entry it loads.  Static -- it mentions no
+runtime value -- and needed enabled or not, since `denote_memLoadImg` is stated
+once for both. -/
+def LoadFits (G : Nat → Option Nat) (c : DenseNodeCert) : Prop :=
+  ∀ k, c.op = .Op_MemLoad k → ∀ d0, c.deps[0]? = some d0 →
+    ∃ aw, G d0 = some aw ∧ k ≤ 2 ^ aw
+
+/-- A design with no load satisfies `LoadFits` at every node, by a check. -/
+def noLoads (D : DesignCert) : Bool :=
+  D.nodes.toList.all (fun c => match c.op with | .Op_MemLoad _ => false | _ => true)
+
+theorem loadFits_of_noLoads {D : DesignCert} (h : noLoads D = true) (G : Nat → Option Nat)
+    {c : DenseNodeCert} (hc : c ∈ D.nodes.toList) : LoadFits G c := by
+  intro k hop
+  unfold noLoads at h
+  have := List.all_eq_true.mp h c hc
+  rw [hop] at this
+  simp at this
 
 /-- What an ENABLED byte-enabled write needs, and **only** an enabled write:
 the slot it updates is a declared MUTABLE table and the address is no wider
@@ -407,10 +446,11 @@ than that table's address width.  Reads, scalars and DISABLED writes do not
 consume this and are not required to satisfy it. -/
 def WriteAddrFits (D : DesignCert) (i : RuntimeInput) (st : StateM)
     (G : Nat → Option Nat) (c : DenseNodeCert) : Prop :=
-  ∀ bw, c.op = .Op_MemWriteBE bw → ∀ d0 d1 d3,
+  (∀ bw, c.op = .Op_MemWriteBE bw → ∀ d0 d1 d3,
     c.deps[0]? = some d0 → c.deps[1]? = some d1 → c.deps[3]? = some d3 →
     bv_nonzero (slotValM D i st d3).asBV = true →
-    ∃ aw, G d0 = some aw ∧ (slotValM D i st d1).asBV.width ≤ aw
+    ∃ aw, G d0 = some aw ∧ (slotValM D i st d1).asBV.width ≤ aw)
+  ∧ LoadFits G c
 
 theorem node_step_memRead {D : DesignCert} {i : RuntimeInput} {st : StateM}
     {G : Nat → Option Nat}
@@ -488,10 +528,10 @@ theorem node_step_memWriteBE {D : DesignCert} {i : RuntimeInput} {st : StateM}
   rw [hop, hdeps] at hrec
   have hkindnode : Direct.slotIsMem D (D.sources.size + j) = some true := by
     rw [nodeSlot_slotIsMem hc, hop]; rfl
-  have hGout : G (D.sources.size + j) = G d0 := hprop bw hop d0 hp0
+  have hGout : G (D.sources.size + j) = G d0 := hprop bw (Or.inl hop) d0 hp0
   by_cases hen : bv_nonzero (slotValM D i st d3).asBV
   · -- ENABLED: InRange comes from the ACTUAL witness's admitted geometry
-    obtain ⟨aw, hG0, hwid⟩ := hfits bw hop d0 d1 d3 hp0 hp1 hp3 hen
+    obtain ⟨aw, hG0, hwid⟩ := hfits.1 bw hop d0 d1 d3 hp0 hp1 hp3 hen
     have hfull : MemImg.FullTable aw img := hpre.geom d0 hb0 img hslot0 aw hG0
     have hr : MemImg.InRange img (bv_uint (slotValM D i st d1).asBV) :=
       MemImg.InRange_of_FullTable_le hfull hwid
@@ -530,6 +570,95 @@ theorem node_step_memWriteBE {D : DesignCert} {i : RuntimeInput} {st : StateM}
         (by simpa using hb1) (by simpa using hb2) (by simpa using hb3)
         henc0 henc1 henc2 henc3 hen hnd henv (by simpa using hlen)
 
+/-! ## 7b. The whole-array operators' steps (decision #2)
+
+The load returns the image it updates, so its geometry propagates as a write's
+does (`WritePropagates`), and the table contract `k ≤ words.length` comes from
+the actual witness's admitted geometry (`LoadFits`), exactly as an enabled
+write's `InRange` does. The whole-array read returns a bit vector and needs
+neither. -/
+
+theorem node_step_memLoad {D : DesignCert} {i : RuntimeInput} {st : StateM}
+    {G : Nat → Option Nat}
+    (hwf : DesignCert.DesignCertWF D) (hsem : Direct.DesignSemWF D)
+    {j : Nat} {c : DenseNodeCert} {k : Nat}
+    (hc : D.nodes[j]? = some c) (hj : j < D.nodes.size)
+    (hop : c.op = .Op_MemLoad k)
+    (hprop : WritePropagates D G j c) (hfits : WriteAddrFits D i st G c)
+    {ss : List SlotV} (hpre : PrefixRelM D i st G (D.sources.size + j) ss) :
+    ∃ v : SlotV, NodeStepOK D i st G j c ss v := by
+  obtain ⟨d0, d1, d2, hdeps⟩ := memLoad_deps hsem hc hop
+  have hm0 : d0 ∈ c.deps.toList := by rw [hdeps]; simp
+  have hm1 : d1 ∈ c.deps.toList := by rw [hdeps]; simp
+  have hm2 : d2 ∈ c.deps.toList := by rw [hdeps]; simp
+  have hb0 := deps_bound hwf hc hpre d0 hm0
+  have hb1 := deps_bound hwf hc hpre d1 hm1
+  have hb2 := deps_bound hwf hc hpre d2 hm2
+  have hp0 : c.deps[0]? = some d0 := by rw [deps_get c hdeps 0]; rfl
+  have hp1 : c.deps[1]? = some d1 := by rw [deps_get c hdeps 1]; rfl
+  have hp2 : c.deps[2]? = some d2 := by rw [deps_get c hdeps 2]; rfl
+  have hk0 : Direct.slotIsMem D d0 = some true := by
+    have := dep_kind_of_semwf hsem hc hp0; rwa [hop] at this
+  have hk1 : Direct.slotIsMem D d1 = some false := by
+    have := dep_kind_of_semwf hsem hc hp1; rwa [hop] at this
+  have hk2 : Direct.slotIsMem D d2 = some false := by
+    have := dep_kind_of_semwf hsem hc hp2; rwa [hop] at this
+  obtain ⟨img, hslot0, henc0, hden0⟩ := dep_mem hpre hb0 hk0
+  have henc1 := dep_scalar hpre hb1 hk1
+  have henc2 := dep_scalar hpre hb2 hk2
+  have hrec := nodeValM_rec (i := i) (st := st) hwf hj hc
+  rw [hop, hdeps] at hrec
+  have hkindnode : Direct.slotIsMem D (D.sources.size + j) = some true := by
+    rw [nodeSlot_slotIsMem hc, hop]; rfl
+  have hGout : G (D.sources.size + j) = G d0 := hprop k (Or.inr hop) d0 hp0
+  obtain ⟨aw, hG0, hkaw⟩ := hfits.2 k hop d0 hp0
+  have hfull : MemImg.FullTable aw img := hpre.geom d0 hb0 img hslot0 aw hG0
+  have hk : k ≤ img.words.length := by
+    have : img.words.length = 2 ^ aw := hfull
+    omega
+  refine ⟨.img (memLoadImg c.width k img (slotValM D i st d1).asBV
+      (slotValM D i st d2).asBV), ?_, ?_, ?_, ?_⟩
+  · rw [← hrec, SlotV.denote, denote_memLoadImg _ _ _ _ _ hk, hden0]
+    rfl
+  · rw [hkindnode]; rfl
+  · intro g hg aw' hGaw'
+    simp only [SlotV.img.injEq] at hg
+    rw [hGout, hG0] at hGaw'
+    have : aw' = aw := (Option.some.inj hGaw').symm
+    subst this
+    rw [← hg]
+    show (memLoadImg _ _ _ _ _).words.length = 2 ^ aw'
+    rw [memLoadImg_length]
+    exact hfull
+  · intro σ end_ eenv en hnd henv hlen
+    exact evalNodeM_memLoad hop hdeps (by simpa using hb0) (by simpa using hb1)
+      (by simpa using hb2) henc0 henc1 henc2 hnd henv (by simpa using hlen)
+
+theorem node_step_memToBus {D : DesignCert} {i : RuntimeInput} {st : StateM}
+    {G : Nat → Option Nat}
+    (hwf : DesignCert.DesignCertWF D) (hsem : Direct.DesignSemWF D)
+    {j : Nat} {c : DenseNodeCert} {k : Nat}
+    (hc : D.nodes[j]? = some c) (hj : j < D.nodes.size)
+    (hop : c.op = .Op_MemToBus k)
+    {ss : List SlotV} (hpre : PrefixRelM D i st G (D.sources.size + j) ss) :
+    ∃ v : SlotV, NodeStepOK D i st G j c ss v := by
+  obtain ⟨d0, hdeps⟩ := memToBus_deps hsem hc hop
+  have hm0 : d0 ∈ c.deps.toList := by rw [hdeps]; simp
+  have hb0 := deps_bound hwf hc hpre d0 hm0
+  have hp0 : c.deps[0]? = some d0 := by rw [deps_get c hdeps 0]; rfl
+  have hk0 : Direct.slotIsMem D d0 = some true := by
+    have := dep_kind_of_semwf hsem hc hp0; rwa [hop] at this
+  obtain ⟨img, -, henc0, hden0⟩ := dep_mem hpre hb0 hk0
+  have hrec := nodeValM_rec (i := i) (st := st) hwf hj hc
+  rw [hop, hdeps] at hrec
+  refine ⟨.bv (memToBusBV c.width k img), ?_, ?_, ?_, ?_⟩
+  · rw [← hrec, SlotV.denote, memToBusBV_eq, hden0]
+    rfl
+  · rw [nodeSlot_slotIsMem hc, hop]; rfl
+  · intro g hg; exact absurd hg (by simp)
+  · intro σ end_ eenv en hnd henv hlen
+    exact evalNodeM_memToBus hop hdeps (by simpa using hb0) henc0 hnd henv (by simpa using hlen)
+
 /-! ## 8. One admitted node, whichever kind it is -/
 
 theorem node_step {D : DesignCert} {i : RuntimeInput} {st : StateM}
@@ -540,10 +669,12 @@ theorem node_step {D : DesignCert} {i : RuntimeInput} {st : StateM}
     (hprop : WritePropagates D G j c) (hfits : WriteAddrFits D i st G c)
     {ss : List SlotV} (hpre : PrefixRelM D i st G (D.sources.size + j) ss) :
     ∃ v : SlotV, NodeStepOK D i st G j c ss v := by
-  rcases hadm with hsup | hop | ⟨bw, hop⟩
+  rcases hadm with hsup | hop | ⟨bw, hop⟩ | ⟨k, hop⟩ | ⟨k, hop⟩
   · exact node_step_scalar hwf hsem hc hj hsup harity hpre
   · exact node_step_memRead hwf hsem hc hj hop hpre
   · exact node_step_memWriteBE hwf hsem hc hj hop hprop hfits hpre
+  · exact node_step_memLoad hwf hsem hc hj hop hprop hfits hpre
+  · exact node_step_memToBus hwf hsem hc hj hop hpre
 
 /-! ## 9. Extending the invariant, and the object's environment step -/
 
@@ -930,7 +1061,9 @@ theorem mixed_addr_width (i : RuntimeInput) (st : StateM) :
 
 theorem mixedG_fits (i : RuntimeInput) (st : StateM) :
     ∀ c ∈ mixedDesign.nodes.toList, WriteAddrFits mixedDesign i st mixedG c := by
-  intro c hc bw hop d0 d1 d3 hd0 hd1 hd3 _hen
+  intro c hc
+  refine ⟨?_, loadFits_of_noLoads (by decide) _ hc⟩
+  intro bw hop d0 d1 d3 hd0 hd1 hd3 _hen
   have hc3 : c = ({ op := .Op_MemRead, width := 32, deps := #[0, 1, 3] } : DenseNodeCert)
            ∨ c = ({ op := .Op_And, width := 32, deps := #[5, 4] } : DenseNodeCert)
            ∨ c = ({ op := .Op_MemWriteBE 1, width := 32, deps := #[0, 1, 6, 2] } : DenseNodeCert) := by

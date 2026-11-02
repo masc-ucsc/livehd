@@ -57,6 +57,12 @@ theorem OpSupported_code_ne27 {op : LGraphOp} (h : OpSupported op = true) :
     opCode op ≠ 27 := by
   cases op <;> simp_all [OpSupported, opCode]
 
+/-- …and 29 / 30, the whole-array operators (decision #2), which `applyOpM`
+dispatches before it delegates. -/
+theorem OpSupported_code_ne_wa {op : LGraphOp} (h : OpSupported op = true) :
+    opCode op ≠ 29 ∧ opCode op ≠ 30 := by
+  cases op <;> simp_all [OpSupported, opCode]
+
 /-! ## 2. Delegation: every supported operator still runs the original `applyOp` -/
 
 theorem applyOpM_scalar {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)
@@ -72,8 +78,15 @@ theorem applyOpM_scalar {vals : List Val} {arg : Nat → BV} (hsv : SlotVals val
       (encBV (eval_op op w (deps.map arg))) := by
   obtain ⟨h26, h28⟩ := OpSupported_code_ne hsup
   have h27 := OpSupported_code_ne27 hsup
+  obtain ⟨h29, h30⟩ := OpSupported_code_ne_wa hsup
   refine SEval_call5 hop hw hdv henv hlen rfl rfl ?_
   refine SEval_switch_of_tag (.ref rfl) rfl rfl ?_
+  refine SEval.iteF (SEval_prim2 (.ref rfl) .lit ?_) ?_
+  · simp [evalPrim, encNat]
+    omega
+  refine SEval.iteF (SEval_prim2 (.ref rfl) .lit ?_) ?_
+  · simp [evalPrim, encNat]
+    omega
   refine SEval.iteF (SEval_prim2 (.ref rfl) .lit ?_) ?_
   · simp [evalPrim, encNat]
     omega
@@ -313,6 +326,7 @@ private def applyOpMId : Nat := (idOf "applyOpM").getD 999
 `Classical.choice` are Lean's own. -/
 
 #audit_axioms OpSupported_code_ne
+#audit_axioms OpSupported_code_ne_wa
 #audit_axioms OpSupported_not_mem
 #audit_axioms applyOpM_scalar
 #audit_axioms applyOpM_scalar_cert

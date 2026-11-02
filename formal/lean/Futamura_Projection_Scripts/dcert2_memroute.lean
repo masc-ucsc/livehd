@@ -245,8 +245,8 @@ def untypedReport (D : DesignCert) : String :=
   | none        => "no node refused (the failure is elsewhere)"
   | some (k, c) =>
       s!"node {k} ({repr c.op}, width {c.width}, {c.deps.size} operand(s)) \
-has no slot type: the memory route implements Op_MemWriteBE and Op_MemRead, \
-and every scalar operator OpSupported admits"
+has no slot type: the memory route implements Op_MemRead, Op_MemWriteBE, \
+Op_MemLoad and Op_MemToBus (decision #2), and every scalar operator OpSupported admits"
 
 /-! ## Comparison against the independent reference
 

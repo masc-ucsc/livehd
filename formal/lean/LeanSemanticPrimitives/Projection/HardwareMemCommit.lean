@@ -645,7 +645,9 @@ theorem twoMemG_prop : ∀ (j : Nat) (c : DenseNodeCert),
 
 theorem twoMemG_fits (i : RuntimeInput) (st : StateM) :
     ∀ c ∈ twoMemDesign.nodes.toList, WriteAddrFits twoMemDesign i st twoMemG c := by
-  intro c hc bw hop d0 d1 d3 hd0 hd1 hd3 _hen
+  intro c hc
+  refine ⟨?_, loadFits_of_noLoads (by decide) _ hc⟩
+  intro bw hop d0 d1 d3 hd0 hd1 hd3 _hen
   have hc4 : c = ({ op := .Op_MemRead, width := 32, deps := #[0, 2, 4] } : DenseNodeCert)
            ∨ c = ({ op := .Op_And, width := 32, deps := #[6, 5] } : DenseNodeCert)
            ∨ c = ({ op := .Op_MemWriteBE 1, width := 32, deps := #[0, 2, 7, 3] } : DenseNodeCert)

@@ -82,6 +82,7 @@ MODULES=(
   Projection/HardwareMem
   Projection/HardwareMemSource
   Projection/HardwareMemOp
+  Projection/HardwareMemLoad
   Projection/HardwareMemSlots
   Compiler/DirectCheck
   Projection/HardwareMemTraversal

@@ -356,29 +356,42 @@ theorem nodeTy_write_dw {ty : Nat → Option SlotTy} {c : DenseNodeCert}
     · simp at h
   · simp at h
 
-/-- Only a byte-enabled write can type as a TABLE: every other arm of `nodeTy`
-returns `.bv` or nothing. -/
+/-- Only a byte-enabled write or a whole-array load (decision #2) can type as a
+TABLE: every other arm of `nodeTy` returns `.bv` or nothing. -/
 theorem nodeTy_tbl_op {ty : Nat → Option SlotTy} {c : DenseNodeCert} {aw dw : Nat}
-    (h : nodeTy ty c = some (.tbl aw dw)) : ∃ bw, c.op = .Op_MemWriteBE bw := by
+    (h : nodeTy ty c = some (.tbl aw dw)) :
+    (∃ bw, c.op = .Op_MemWriteBE bw) ∨ (∃ k, c.op = .Op_MemLoad k) := by
   unfold nodeTy at h
   split at h
   · simp at h
   · split at h
     · -- Op_MemRead: every result is a bit vector
       exfalso
-      split at h
-      · split at h
-        · split at h
-          · simp at h
-          · simp at h
-        · simp at h
-        · simp at h
-      · simp at h
+      (repeat' split at h) <;> simp at h
     · -- Op_MemWriteBE
-      exact ⟨_, by assumption⟩
+      exact Or.inl ⟨_, by assumption⟩
+    · -- Op_MemLoad
+      exact Or.inr ⟨_, by assumption⟩
+    · -- Op_MemToBus: a bit vector
+      exfalso
+      (repeat' split at h) <;> simp at h
     · -- every other operator
       exfalso
       split at h <;> simp at h
+
+/-- A whole-array load keeps every word at the table's width when the node
+width is that width (decision #2). -/
+theorem cert_mem_load_width {w k dw : Nat} {m : Int → BV} {bus en : BV}
+    (hw : w = dw) (hf : ∀ y, (m y).width = dw) :
+    ∀ x, ((cert_mem_load w k m bus en) x).width = dw := by
+  intro x
+  unfold cert_mem_load
+  by_cases hen : bv_nonzero en
+  · simp only [hen, if_true]
+    split
+    · simp [mk_bv, hw]
+    · exact hf x
+  · simp only [hen, Bool.false_eq_true, if_false]; exact hf x
 
 /-! ### The induction
 
@@ -453,7 +466,25 @@ theorem admits_slot_memwidth {D : DesignCert} (h : admitsB D = true)
         · exact hx
       subst hteq
       have hdw0 : dw0 = dw := by simpa [tyDW] using hdw
-      obtain ⟨bw, hop⟩ := nodeTy_tbl_op hres
+      rcases (nodeTy_tbl_op hres).symm with ⟨kk, hop⟩ | ⟨bw, hop⟩
+      · -- a whole-array LOAD (decision #2): loaded words at the node width,
+        -- every other word the image's own
+        obtain ⟨d0, d1, d2, hdeps⟩ := memLoad_deps (admits_semwf h) hc hop
+        obtain ⟨aw1, dw1, htbl, hd0ty, hwid, -⟩ := nodeTy_load_geom hop hdeps hres
+        have hx : aw0 = aw1 ∧ dw0 = dw1 := by simpa [SlotTy.tbl.injEq] using htbl
+        have hwid' : c.width = dw := by rw [hwid, ← hx.2]; exact hdw0
+        have hd0lt : d0 < D.sources.size + (k - D.sources.size) :=
+          (admits_wf h).depsBounded _ _ hc d0 (by rw [hdeps]; simp)
+        have hd0k : d0 < k := by omega
+        have hd0num : d0 < D.numSlots := by unfold DesignCert.numSlots; omega
+        have hd0tyAt : tyAt D d0 = some (.tbl aw1 dw1) := by
+          unfold tyAt; rw [hts]; simpa using hd0ty
+        have hIH := ih d0 hd0k hd0num (.tbl aw1 dw1) dw1 hd0tyAt (by simp [tyDW])
+        have hIH' : ∀ y : Int, ((slotValM D i st d0).asMem y).width = dw := by
+          intro y; rw [← hdw0, hx.2]; exact hIH y
+        rw [hk', ← nodeValM_rec (i := i) (st := st) (admits_wf h) hj hc, hop]
+        simp only [hdeps, List.map_cons, List.map_nil, eval_op_cert, CertVal.asMem]
+        exact cert_mem_load_width hwid' hIH' x
       obtain ⟨d0, d1, d2, d3, hdeps⟩ := memWriteBE_deps (admits_semwf h) hc hop
       obtain ⟨aw1, dw1, htbl, hd0ty, hwid⟩ := nodeTy_write_dw hop hdeps hres
       have hx : aw0 = aw1 ∧ dw0 = dw1 := by simpa [SlotTy.tbl.injEq] using htbl

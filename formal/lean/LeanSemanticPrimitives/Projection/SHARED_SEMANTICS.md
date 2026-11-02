@@ -104,9 +104,13 @@ and `Op_MemToBus n`, with `cert_mem_load`, `cert_mem_pack` and
 are unchanged (both end in a wildcard), and every other operator's
 `eval_op_cert` case is unchanged, so no existing bridge or theorem about an
 operator changes; `eval_op_cert_bv` takes the two new operators in its
-"not a memory operator" hypothesis. FP's own operator lists
-(`Projection/DesignEncoding`, `HardwareAdequacy`, `HardwareMemSlots`) name them
-and refuse them at admission until FP models them.
+"not a memory operator" hypothesis. FP models both: `applyOpM` dispatches
+opcodes 29 and 30 to the object functions `memLoadO` / `memToBusO`
+(`HardwareMem`), whose results are proved equal to `cert_mem_load` /
+`cert_mem_to_bus` in `Projection/HardwareMemLoad` (the load given the table
+contract `n ≤ words.length`, which admission's `n ≤ 2 ^ aw` and the table's
+geometry supply). FP's scalar operator lists (`HardwareAdequacy`,
+`HardwareMemSlots`) still exclude them, as they exclude every memory operator.
 
 Commits: 0143ea8cc, f3678b423, 9ca8cf8ed (the repairs), 39f118b05
 (`bv_shl_step` with master's body), and the docstring correction that records

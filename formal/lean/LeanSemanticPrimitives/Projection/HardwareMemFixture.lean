@@ -194,7 +194,9 @@ theorem full_fits_checked (i : RuntimeInput) (st : StateM) :
 
 theorem fullG_fits (i : RuntimeInput) (st : StateM) :
     ∀ c ∈ fullDesign.nodes.toList, WriteAddrFits fullDesign i st fullG c := by
-  intro c hc bw hop d0 d1 d3 hd0 hd1 hd3 _hen
+  intro c hc
+  refine ⟨?_, loadFits_of_noLoads (by decide) _ hc⟩
+  intro bw hop d0 d1 d3 hd0 hd1 hd3 _hen
   have hc4 : c = ({ op := .Op_MemRead, width := 32, deps := #[0, 2, 4] } : DenseNodeCert)
            ∨ c = ({ op := .Op_MemRead, width := 32, deps := #[1, 2, 4] } : DenseNodeCert)
            ∨ c = ({ op := .Op_Xor, width := 32, deps := #[8, 9] } : DenseNodeCert)

@@ -22,12 +22,18 @@ set -euo pipefail
 #   legacy   the legacy model, with its proof bridge (`_next_refines_fast`,
 #            elaborated without sorry; Translation/WholeArrayBridge), equals
 #            iverilog at every cycle.
+#   FP       admits the certificate, specializes and executes it and compares
+#            it with the reference itself (RESULT MEMROUTE OK), and its trace
+#            equals IR's under FP's own schedule (FP `edges:all` = cert_trace
+#            `edges:third`: every third cycle quiet; FP has no every-cycle mode).
 #   D3       translation validation (d3_sweep.py, its default generator) passes
 #            every gate on every row's certificate, the proof included, and
 #            rejects a memory mutation.
-# Controls (a wrong certificate must differ from the golden):
+# Controls (a wrong certificate must differ):
 #   a MemLoad that loads entry 0 only (its count set to 1);
 #   a MemToBus that packs one entry fewer.
+#   IR on each must differ from the golden, and FP on each from IR on the
+#   unchanged certificate.
 #
 # Rows: mem_whole_reg (a bulk update and read_all, no enable, no reset),
 # mem_bulk_vs_entry_order (update, update enable, port writes and reset on seven
@@ -206,6 +212,19 @@ for row in $ROWS; do
   diff "$R/rtl.txt" "$L/legacy.txt" > "$L/diff.txt" \
     || { head -4 "$L/diff.txt"; echo "FAIL: $row legacy differs from the golden"; exit 1; }
   echo "ok: $row legacy (bridge proofs elaborated) equals iverilog at all $CYCLES cycles"
+  # FP: admitted, specialized, executed and compared with its own reference
+  fp() { # <dcert> <out prefix>
+    (ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run Futamura_Projection_Scripts/dcert2_memroute.lean \
+       "$1" 20000 200 "$CYCLES" zero edges:all "stim:$R/stim.txt" outputs > "$2.log" 2> "$2.err") \
+      || { tail -5 "$2.log"; cat "$2.err"; echo "FAIL: $row FP runner on $1"; exit 1; }
+    grep -q 'RESULT: MEMROUTE OK' "$2.log" || { grep RESULT "$2.log"; echo "FAIL: $row FP did not run the memory"; exit 1; }
+    grep '^STEP' "$2.log" > "$2.txt"
+  }
+  fp "$D" "$R/fp"
+  ct "$D" "$R/stim.txt" "$R/ir_third.txt" edges:third
+  diff "$R/ir_third.txt" "$R/fp.txt" > "$R/diff_fp.txt" \
+    || { head -4 "$R/diff_fp.txt"; echo "FAIL: $row FP differs from IR"; exit 1; }
+  echo "ok: $row FP (MEMROUTE OK) equals IR at all $CYCLES steps of FP's schedule"
   # controls
   for c in "29 1 a MemLoad that loads entry 0 only" "30 minus1 a MemToBus that packs one entry fewer"; do
     set -- $c; opc=$1; new=$2; shift 2; what="$*"
@@ -216,6 +235,10 @@ for row in $ROWS; do
     nd=$(diff "$R/rtl.txt" "$R/ctl_$opc.txt" | grep -c '^<' || true)
     [[ $nd -gt 0 ]] || { echo "FAIL: $row: control ($what) matched the golden"; exit 1; }
     echo "ok: $row control -- $what differs from the golden on $nd cycles"
+    fp "$R/ctl_$opc.dcert" "$R/fp_ctl_$opc"
+    nf=$(diff "$R/ir_third.txt" "$R/fp_ctl_$opc.txt" | grep -c '^<' || true)
+    [[ $nf -gt 0 ]] || { echo "FAIL: $row: FP on the control ($what) matched IR on the design"; exit 1; }
+    echo "ok: $row control -- FP on it differs from IR on the design on $nf steps"
   done
 done
 
