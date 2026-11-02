@@ -186,11 +186,15 @@ struct Global_tree {
 struct Global_routes {
   std::vector<Global_tree> trees;  // per Global_net
   size_t                   unrouted = 0, edges_full = 0;  // nets without a path; edges filled to their share
+  size_t                   overflow_edges = 0, overflow_tracks = 0;  // edges over their share after the rounds, by how much
+  std::vector<std::pair<int, int>> over;  // those edges: (lower / left tile, h)
+  unsigned                 rounds   = 0;                             // negotiation rounds run
   double                   seconds  = 0;
 };
-// cap_h[t], cap_v[t]: the tile's tracks per direction; margin_tiles: the search box around a net's endpoints
+// cap_h[t], cap_v[t]: the tile's tracks per direction; margin_tiles: the search box around a net's endpoints; rounds:
+// negotiation rounds (rip-up and reroute of the nets on edges over their share; 0: a full edge is closed, one pass)
 Global_routes global_route(const Grid&, const std::vector<int>& cap_h, const std::vector<int>& cap_v, double share, double own_share,
-                           const std::vector<Global_net>&, unsigned margin_tiles);
+                           const std::vector<Global_net>&, unsigned margin_tiles, unsigned rounds);
 
 // ---------------------------------------------------------------- L3 SAT placement
 void                     pack_cells(const Design&, const Grid&, const Boxes&);  // trivial in-box packing (F1 refines)

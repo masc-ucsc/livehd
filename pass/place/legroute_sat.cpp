@@ -3025,6 +3025,9 @@ struct Crossings {
   std::vector<Global_piece>        pieces;          // legroute.global: the runs fixed ahead through pass-through regions
   size_t                           global_nets = 0;
   size_t                           global_unrouted = 0, global_full = 0;  // global_route: nets without a path, edges at the share
+  size_t                           global_overflow_edges = 0, global_overflow_tracks = 0;  // edges over the share after the rounds
+  unsigned                         global_rounds = 0;
+  std::vector<std::pair<int, int>> global_over;  // those edges (lower / left tile, h): where the cells should give way
   double                           global_seconds = 0;
 };
 Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Legroute_regions& regions, std::vector<int>& cap_h,
@@ -3249,15 +3252,23 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
       gr_index[n] = gnets.size();
       gnets.push_back(std::move(gn));
     }
-    GR                  = global_route(g, cap_h, cap_v, d.opt.global_share, d.opt.global_own_share, gnets, d.opt.global_margin);
+    GR = global_route(g, cap_h, cap_v, d.opt.global_share, d.opt.global_own_share, gnets, d.opt.global_margin, d.opt.global_rounds);
     out.global_unrouted = GR.unrouted;
     out.global_full     = GR.edges_full;
-    out.global_seconds  = GR.seconds;
+    out.global_overflow_edges  = GR.overflow_edges;
+    out.global_overflow_tracks = GR.overflow_tracks;
+    out.global_rounds          = GR.rounds;
+    out.global_over            = GR.over;
+    out.global_seconds         = GR.seconds;
     std::fprintf(stderr,
-                 "legroute global: %zu crossing nets routed over the grid, %zu without a path, %zu edges at the share, %.1f s\n",
+                 "legroute global: %zu crossing nets routed over the grid, %zu without a path, %zu edges at the share, %zu over it by %zu "
+                 "tracks after %u negotiation rounds, %.1f s\n",
                  gnets.size() - GR.unrouted,
                  GR.unrouted,
                  GR.edges_full,
+                 GR.overflow_edges,
+                 GR.overflow_tracks,
+                 GR.rounds,
                  GR.seconds);
   }
   const auto t_start    = Clock::now();
@@ -4451,6 +4462,30 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
     cap_h = cap_h0;  // the crossings take the hops' tracks off these: a fresh copy each round, not a cumulative one
     cap_v = cap_v0;
     x     = crossings(d, g, boxes, regions, cap_h, cap_v, true);
+    // legal_shuffle: the legal boxes on the tiles of an edge the global router left over its share may move (the
+    // router's congestion says where the legalization's luck ran out); every other legal box stays fixed
+    if (d.opt.legal_boxes && d.opt.legal_shuffle > 0 && !x.global_over.empty()) {
+      std::vector<int> box_at(g.size(), -1);
+      for (size_t b = 0; b < boxes.boxes.size(); ++b) {
+        if (boxes.boxes[b].placed && boxes.boxes[b].fixed) {
+          box_at[size_t(g.tile_of(boxes.boxes[b].cx, boxes.boxes[b].cy))] = int(b);
+        }
+      }
+      size_t freed = 0;
+      for (const auto& [t, h] : x.global_over) {
+        for (int q : {t, h ? t + 1 : t + g.cols}) {
+          if (q >= 0 && q < int(g.size()) && box_at[size_t(q)] >= 0 && boxes.boxes[size_t(box_at[size_t(q)])].fixed) {
+            auto& bx  = boxes.boxes[size_t(box_at[size_t(q)])];
+            bx.fixed  = false;
+            bx.window = int(d.opt.legal_shuffle);
+            ++freed;
+          }
+        }
+      }
+      rep.legal_shuffled += freed;
+      std::fprintf(stderr, "legroute: %zu legal boxes freed to move %u tiles at the %zu edges the global router left over\n", freed,
+                   d.opt.legal_shuffle, x.global_over.size());
+    }
     P.assign(policies.size(), {});
     for (size_t p = 0; p < policies.size(); ++p) {  // the policy's pre-placement on its own copy
       const auto& o = policies[p];
@@ -5414,6 +5449,9 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
   rep.global_pieces          += x.pieces.size();
   rep.global_unrouted        += x.global_unrouted;
   rep.global_full_edges      += x.global_full;
+  rep.global_overflow_edges  += x.global_overflow_edges;
+  rep.global_overflow_tracks += x.global_overflow_tracks;
+  rep.global_rounds           = std::max(rep.global_rounds, x.global_rounds);
   rep.global_seconds         += x.global_seconds;
   {  // pre-placement counters: the first policy's
     const auto& q              = P[0].rep;

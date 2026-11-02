@@ -493,6 +493,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_options.alt_all          = truthy(synth_set(opts, "place.legroute.alt_all", "false"));
   out.legroute_options.checker_window   = static_cast<unsigned>(integer("place.legroute.checker_window", "8"));
   out.legroute_options.global_margin    = integer("place.legroute.global_margin", "8");
+  out.legroute_options.global_rounds    = static_cast<unsigned>(integer("place.legroute.global_rounds", "16"));
   out.legroute_options.dump_regions     = synth_set(opts, "place.legroute.dump_regions", "");
   out.legroute_options.threads          = integer("place.legroute.threads", "0");
   out.legroute_options.hop_spread       = number("place.legroute.hop_spread", "6");
@@ -501,6 +502,7 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_options.freeze           = truthy(synth_set(opts, "place.legroute.freeze", "false"));
   out.legroute_options.legal_boxes      = truthy(synth_set(opts, "place.legroute.legal_boxes", "false"));
   out.legroute_options.legal_window     = static_cast<unsigned>(integer("place.legroute.legal_window", "0"));
+  out.legroute_options.legal_shuffle    = static_cast<unsigned>(integer("place.legroute.legal_shuffle", "0"));
   out.legroute_options.sat_seed         = truthy(synth_set(opts, "place.legroute.sat_seed", "true"));
   out.legroute_options.tiers            = synth_set(opts, "place.legroute.tiers", "adjacent,pins,home");
   out.legroute_options.tier_rounds      = integer("place.legroute.tier_rounds", "8");

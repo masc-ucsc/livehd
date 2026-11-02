@@ -1412,6 +1412,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::integer,
      "with legroute.legal_boxes: a cell-box may move up to this many tiles from its legal tile where the routes need "
      "it (its cells repacked on the tile it takes); 0 = every box fixed"},
+    {"place.legroute.legal_shuffle",
+     "0",
+     Synth_set_option::Kind::integer,
+     "with legroute.legal_boxes and global_route: the cell-boxes on the tiles of an edge the global router leaves over "
+     "its share may move this many tiles (their cells repacked); the other legal boxes stay fixed; 0 = none"},
     {"place.legroute.sat_ms",
      "60000",
      Synth_set_option::Kind::integer,
@@ -1506,6 +1511,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "8",
      Synth_set_option::Kind::integer,
      "with legroute.global_route: tiles around a net's bounding box the path search covers (grown when no path fits)"},
+    {"place.legroute.global_rounds",
+     "16",
+     Synth_set_option::Kind::integer,
+     "with legroute.global_route: negotiation rounds (the nets on an edge over its share reroute under a congestion "
+     "cost that doubles each round plus the edge's overuse history); 0 = one pass with full edges closed"},
     {"place.legroute.dump_regions",
      "",
      Synth_set_option::Kind::file,

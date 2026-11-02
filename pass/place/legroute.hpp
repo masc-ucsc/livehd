@@ -116,6 +116,9 @@ struct Legroute_options {
   // see that load
   double      global_own_share = 0;
   unsigned    global_margin    = 8;
+  // negotiation rounds of the router: the nets on an edge over its share reroute under a present-congestion cost
+  // that doubles each round plus the edge's overuse history (PathFinder / FastRoute); 0: one pass, a full edge closed
+  unsigned    global_rounds    = 16;
   // chained hops of a pass-through net (hop to hop inside a region) avoid the rows and columns earlier pass-throughs
   // took: this many tile widths of distance per fully loaded edge on the run (0: nearest only)
   double      hop_spread       = 6;
@@ -132,6 +135,9 @@ struct Legroute_options {
   // with legal_boxes: a box may move up to this many tiles from its legal tile (its cells repacked on the tile it
   // takes), so the SAT repairs the legalization locally where the routes need it; 0: every box fixed
   unsigned    legal_window     = 0;
+  // with legal_boxes and global_route: the boxes on the tiles of an edge the global router leaves over its share may
+  // move this many tiles (their cells repacked), the other legal boxes stay fixed; 0: none
+  unsigned    legal_shuffle    = 0;
   // the fallback placement (boxes on their nearest fitting tiles) is tried first, as assumptions: a routable answer
   // there is kept, otherwise the free model continues with what the solver learned
   bool        sat_seed         = true;
@@ -232,6 +238,8 @@ struct Legroute_report {
   size_t  sat_hops_over_share = 0;             // hops placed past hop_share (every boundary tile of their pair was at it)
   size_t  global_nets = 0, global_pieces = 0;  // legroute.global: nets joined by L traces, their pass-through pieces
   size_t  global_unrouted = 0, global_full_edges = 0;  // global_route: nets without a path, edges filled to the share
+  size_t  global_overflow_edges = 0, global_overflow_tracks = 0;  // edges still over their share after the negotiation
+  unsigned global_rounds        = 0;                              // negotiation rounds the router ran
   size_t  sat_fail_fast_skipped = 0;                    // fail_fast: regions left unsolved after the first failure
   double  global_seconds  = 0;
   size_t  sat_relaxed_tiles = 0, sat_deficit_tracks = 0;  // sat_relax_rounds: dropped tile bounds, tracks short
@@ -257,6 +265,7 @@ struct Legroute_report {
   size_t  lazy_rounds = 0, lazy_bounds = 0, lazy_skipped = 0;
   size_t  frozen_boxes        = 0;  // freeze: boxes pinned on their fallback tiles
   size_t  legal_boxes         = 0;  // legal_boxes: boxes built from the legal placement, fixed on their tiles
+  size_t  legal_shuffled      = 0;  // legal_shuffle: legal boxes freed at the global router's overflowed edges
   size_t  sat_seeded          = 0;  // sat_seed: regions whose answer is the fallback placement
   size_t  sat_skipped_regions = 0;  // sat_min_fill: regions taken as routable without a solve
   // timing tiers: constraints kept, dropped (UNSAT cores), tiers dropped whole (out of time), solves, and the

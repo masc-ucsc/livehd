@@ -857,16 +857,31 @@ region, 18 threads; OpenROAD routes the same placement with 0 DRCs in every row)
 <tr><td>2500</td><td>10</td><td>7</td><td>3 UNSAT</td><td>20 s</td><td>region 1 cut-bound (4 tiles wide: 233 nets across a row boundary of 227 tracks); region 6: the UNSAT core relaxed (<code>sat_relax_rounds=3</code>) = 6 boundary tiles under hops, 224 H tracks short (worst tile 98), 807 routes on them, SAT once relaxed; region 3 (263 pass-through nets, 1936 hops on 330 tiles) stays UNSAT after three rounds of relaxing its cores</td></tr>
 <tr><td>2500, hops free along 6 tiles</td><td>10</td><td>8</td><td>2 UNSAT (3, 6)</td><td>47 s</td><td><code>hop_choice=6</code>: region 1 routes once its crossings spread along the boundary</td></tr>
 <tr><td>2500, global router for the crossings</td><td>10</td><td>9</td><td>1 UNSAT (9)</td><td>218 s</td><td><code>global_route=true</code>: 3372 crossing nets routed over the grid ahead (330 without a path, 1306 edges at the share); regions 1, 3 and 6 route, region 9 (routable before) loses to the fixed pieces through it</td></tr>
+<tr><td><strong>2500, negotiated global router</strong> (<code>global_route=true</code>, <code>global_rounds=16</code>)</td><td>10</td><td><strong>10</strong></td><td>none</td><td>73 s</td><td>the router with rip-up and reroute under present-plus-history congestion cost: 3702 crossing nets, 0 without a path (330 before), 6.9 s; the regions then route with the crossings where the global route put them</td></tr>
+<tr><td><strong>1000, negotiated global router</strong></td><td>22</td><td><strong>21</strong></td><td>1 cut-bound</td><td>12 s</td><td>4688 crossing nets, 0 without a path, 7.4 s; the one failure is an 81-tile region whose own placement forces 110 nets across a row of 106 tracks (a mesh artefact: not a crossing, not the router)</td></tr>
 <tr><td>2500, global router + hops free along 6 tiles</td><td>10</td><td>8</td><td>1 UNSAT (9), 1 timeout (6)</td><td>341 s</td><td>the two levers do not add up: region 9 stays with the global router's pieces, region 6 runs out of time with the hop literals on top</td></tr>
 <tr><td>2500, boxes free to move one tile (<code>legal_window=1</code>)</td><td>10</td><td>7</td><td>2 UNSAT (3, 6), 1 timeout (1)</td><td>368 s</td><td>the placement literals over 3&times;3 windows slow every region (region 1 runs out of time where fixed it took 0.3 s) and the UNSAT regions stay UNSAT: a local repair must free only the boxes of the UNSAT core, not the region; the moved boxes' cells repack legally (the straddling parts of the legal cells block their neighbour tile's sites)</td></tr>
 <tr><td>5000</td><td>5</td><td>5</td><td>none</td><td>57 s</td><td>every region in 2.5&ndash;23 s, 1.3&ndash;2.4M clauses, no crossing over the hop share</td></tr>
-<tr><td>5000, Steiner trunks (<code>steiner_pins=8</code>)</td><td>5</td><td>3</td><td>2 timeouts</td><td>390 s</td><td>the single-trunk encoding for nets of 3&ndash;8 endpoints halves the route wire proxy (128k vs 257k &micro;m, crit 68 vs 205 ps: the star-of-L inflation measured) at twice the clauses (20M vs 10M); the two 660-tile regions run out of 180 s</td></tr>
+<tr><td>5000, Steiner trunks (<code>steiner_pins=8</code>)</td><td>5</td><td>3 (5 at 600 s)</td><td>2 timeouts at 180 s</td><td>390 s (545 s at 600 s)</td><td>the single-trunk encoding for nets of 3&ndash;8 endpoints: twice the clauses (20M vs 10M), the two 660-tile regions need 182 and 351 s; with all five solved the wire proxy is 234k vs the star's 257k &micro;m (9% less, not the halving the partial run suggested: unsolved regions contribute no wire)</td></tr>
 <tr><td>5000, Steiner trunks for 3&ndash;4 endpoints (<code>steiner_pins=4</code>)</td><td>5</td><td>4</td><td>1 timeout</td><td>271 s</td><td>wire proxy 192k &micro;m, 13.8M clauses: between the star and the full trunk model; the 660-tile region with 138 pass-throughs runs out of 180 s</td></tr>
 <tr><td>one region (20000)</td><td>1</td><td>1</td><td>none</td><td>301 s</td><td>3003 boxes, 12217 nets, 11.0M clauses after 26 lazy rounds (eager estimate 21M), 239 of 344 adjacent-tier constraints kept: the whole chip as one routing model, single-threaded</td></tr>
 <tr><td>free SAT placement, 5000 (same mesh)</td><td>5</td><td>5</td><td>none</td><td>391 s</td><td>the SAT placing its clustered boxes (fill 0.78) routes too on this mesh: 3.2&ndash;6.2M clauses per region, 43&ndash;174 s each; the proxies match the legal run's (crit 207 ps, wire 253k &micro;m); the region size, not the placement, was behind the small-mesh failures</td></tr>
 <tr><td>free SAT placement, 1000 (same day, for scale)</td><td>19</td><td>13</td><td>6 UNSAT</td><td>1800+ s</td><td>the best flow (inflation, unpinned trees, noise/spread) reaches 23 of 25 in 833 s at a QoR cost</td></tr>
 </table>
-<p><strong>What the failures are.</strong> Region 3 of the 2500 mesh routed alone as a chip (its hops as die pins,
+<p><strong>The user's direction (2026-11-02, after these rows): a global router, not detailed routing, that finds the
+paths and pins across regions, like FastRoute; its crossings become the region pins and its congestion moves the cells
+of unroutable areas (localized density, or the legalization's luck) before the cell-boxes and legroute.</strong>
+Built on the tile-grid router of legroute.global v2: negotiated congestion (<code>global_rounds</code>, default 16):
+after a pass every edge over its share adds its relative overuse to a history cost, the present-congestion factor
+doubles, the nets through those edges are ripped up and rerouted most critical first; with 0 rounds a full edge is
+closed and a net without a path keeps the hop chain (the old one-pass router). Where edges remain over the share
+after the rounds the router reports them (<code>global_overflow_edges/tracks</code>, log line), and
+<code>legal_shuffle=n</code> frees only the legal boxes on those edges' tiles to move n tiles (the other legal boxes
+stay fixed): the shuffle at the router's word, not at the region's. The rows above are the result: the 2500-cell
+mesh routes whole and the 1000-cell mesh all but a thin region, both in well under two minutes of SAT, against 7 of
+10 and 17 of 22 with hops chosen tile by tile. Copying FastRoute itself (20k lines on OpenROAD's database) stays the
+fallback if this router falls short of OpenROAD's zero overflow on a design; on sha3 it does not.</p>
+<p><strong>What the failures were before the router.</strong> Region 3 of the 2500 mesh routed alone as a chip (its hops as die pins,
 <code>route_region.py</code>) overflows OpenROAD's global router too (581 overflow at 64% use): with the boxes fixed,
 the per-region decomposition with hops fixed on the boundary is what fails, not the model's counting rules. OpenROAD
 routes the full chip because its nets cross a region side anywhere and detour through the neighbours. So with legal
@@ -877,7 +892,8 @@ size for this flow is a parallelism choice, not a solver limit: 5000-cell region
 <p><strong>Proxies across meshes are not comparable.</strong> The SAT's route wire grows with the region size (167k
 &micro;m at 2500 cells, 257k at 5000) because a net inside a region is a star of L-shapes from its first endpoint,
 while a net cut by hops is a chain of short pieces (closer to a Steiner tree); the critical-delay proxy follows (101 vs
-205 ps). The routed timing of the placement (OpenROAD, signal-only) is the arbiter and is the ordinary flow's own:
+205 ps). The trunk encoding recovers only 9% of it on the 5000 mesh at ten times the solve time, so the star stays;
+regions without an answer contribute no wire, which makes a partial run's proxy look better than a complete one. The routed timing of the placement (OpenROAD, signal-only) is the arbiter and is the ordinary flow's own:
 legal boxes change nothing in the placement. Open: <code>steiner_pins</code> for the big regions, the single-region
 case, the global router choosing the crossings, <code>legal_window=1</code> for the two UNSAT regions, and the free
 model on the same 5000-cell mesh (rows to be added).</p>

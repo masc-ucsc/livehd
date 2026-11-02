@@ -699,8 +699,8 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.legroute) {
     const auto& l = o.legroute_options;
-    h = hash_text(std::format("legroute-v12:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{"
-                              "}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+    h = hash_text(std::format("legroute-v13:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{"
+                              "}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                               l.box_fill,
                               l.box_net_max,
                               l.merge_cost,
@@ -729,6 +729,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               l.freeze,
                               l.legal_boxes,
                               l.legal_window,
+                              l.legal_shuffle,
                               l.steiner_min,
                               l.hop_share,
                               l.reserve_share,
@@ -747,6 +748,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               l.alt_all,
                               l.checker_window,
                               l.global_margin,
+                              l.global_rounds,
                               l.hop_spread,
                               l.sat_seed,
                               l.tiers,

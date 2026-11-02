@@ -6,7 +6,9 @@
 // costlier, most critical nets first. The regions then see the tree's boundary crossings as hops and its runs through
 // the regions holding none of the net's pins as fixed pieces, so a thin region between two macros is never asked to
 // carry what its tracks cannot: the paths go around it here.
+#include <algorithm>
 #include <cmath>
+#include <numeric>
 #include <queue>
 #include <unordered_set>
 
@@ -24,13 +26,18 @@ struct Search {  // the per-tile state of one search, valid for the stamp of tha
 }  // namespace
 
 Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const std::vector<int>& cap_v, double share, double own_share,
-                           const std::vector<Global_net>& nets, unsigned margin_tiles) {
+                           const std::vector<Global_net>& nets, unsigned margin_tiles, unsigned rounds) {
   const auto    start = Clock::now();
   Global_routes out;
   out.trees.resize(nets.size());
   const size_t     N = g.size();
   // the room of each edge (keyed by its left / lower tile): the share of the narrower tile's tracks
   std::vector<int> lim_h(N, 0), lim_v(N, 0), use_h(N, 0), use_v(N, 0);
+  // negotiated congestion: an edge over its room costs its overuse times a present factor that doubles every round,
+  // plus the history of its overuse in the rounds before, so the nets that can detour do and the ones that cannot keep
+  // the edge (PathFinder / FastRoute). With rounds == 0 a full edge is closed and a net without a path keeps the chain
+  std::vector<double> hist_h(N, 0), hist_v(N, 0);
+  double              pres = 1;
   for (size_t t = 0; t < N; ++t) {
     const int c = g.col(int(t)), r = g.row(int(t));
     if (c + 1 < g.cols) {
@@ -66,12 +73,31 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
   std::vector<unsigned> pend(N, 0);  // pending endpoint: pend[t] == this net's mark
   std::vector<unsigned> own(size_t(g.regions), 0);  // own region of the net: own[r] == mark
   unsigned              mark = 0;
-  for (const size_t k : order) {
+  // an edge inside a region of the net's own pins takes no room (the region routes it) unless own_share counts it
+  const auto counted = [&](const Global_net& net, int a, int b) {
+    return own_share > 0 || g.region[a] != g.region[b] || std::ranges::find(net.own_regions, g.region[a]) == net.own_regions.end();
+  };
+  const auto unroute = [&](size_t k) {
+    auto& tree = out.trees[k];
+    for (const auto& [a, b] : tree.edges) {
+      if (counted(nets[k], a, b)) {
+        --(g.row(a) == g.row(b) ? use_h : use_v)[size_t(a)];
+      }
+    }
+    tree.edges.clear();
+    tree.routed = false;
+  };
+  // the net's tree: a search joins the nearest pending endpoint to the tree; the box grows twice (4x and 16x the
+  // margin, plus a quarter then all of the net's span) before the net is given up: a whole-die search per
+  // unroutable net cost a large design its minutes
+  const auto route_one = [&](size_t k, bool allow_over) {
     const auto& net  = nets[k];
     auto&       tree = out.trees[k];
+    tree.edges.clear();
+    tree.routed = false;
     if (net.endpoints.size() < 2) {
       tree.routed = true;
-      continue;
+      return true;
     }
     ++mark;
     for (int r : net.own_regions) {
@@ -83,7 +109,6 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
       free_edges.insert(int64_t(lo) * 2 + (g.row(a) == g.row(b) ? 1 : 0));
     }
     const auto sp = span(net);
-    // the net's endpoints still to join: the first (the driver's region's first endpoint) seeds the tree
     for (int t : net.endpoints) {
       pend[size_t(t)] = mark;
     }
@@ -91,9 +116,6 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
     pend[size_t(net.endpoints.front())] = 0;
     std::vector<std::pair<int, int>> edges;
     bool                             ok = true;
-    // a search joins the nearest pending endpoint to the tree; the box grows twice (4x and 16x the margin, plus
-    // a quarter then all of the net's span) before the net is left to the hop chain: a whole-die search per
-    // unroutable net cost a large design its minutes
     for (size_t left = net.endpoints.size() - 1; left && ok;) {
       bool joined = false;
       for (int grow = 0; grow < 3 && !joined; ++grow) {
@@ -149,11 +171,15 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
               }
             } else {
               const int lim = (h ? lim_h : lim_v)[size_t(e)], use = (h ? use_h : use_v)[size_t(e)];
-              if (lim <= 0 || use >= lim) {
-                continue;  // no room on the edge
+              if (lim <= 0 || (!allow_over && use >= lim)) {
+                continue;  // no tracks at all, or no room and no negotiation
               }
               // a boundary crossing costs one more: a path hugging a boundary should not hop back and forth
               cost = 1 + 2.0 * double(use + 1) / double(lim) + (g.region[t] != g.region[q] ? 1 : 0);
+              if (const int over = use + 1 - lim; over > 0) {
+                cost += pres * double(over);
+              }
+              cost += (h ? hist_h : hist_v)[size_t(e)];
             }
             const double nd = dd + cost;
             if (S.stamp[size_t(q)] != S.gen || nd < S.dist[size_t(q)]) {
@@ -179,20 +205,78 @@ Global_routes global_route(const Grid& g, const std::vector<int>& cap_h, const s
       }
       ok = joined;
     }
+    for (int t : net.endpoints) {  // a net given up leaves no pending marks behind
+      pend[size_t(t)] = 0;
+    }
     if (!ok) {
-      ++out.unrouted;
-      continue;
+      return false;
     }
     tree.routed = true;
     tree.edges  = std::move(edges);
-    for (const auto& [a, b] : tree.edges) {  // the hops and the pass-through runs take room; own regions only with own_share
-      if (g.region[a] == g.region[b] && own[size_t(g.region[a])] == mark && own_share <= 0) {
-        continue;
+    for (const auto& [a, b] : tree.edges) {  // the hops and the pass-through runs take room
+      if (counted(net, a, b)) {
+        ++(g.row(a) == g.row(b) ? use_h : use_v)[size_t(a)];
       }
-      const bool h   = g.row(a) == g.row(b);
-      auto&      use = (h ? use_h : use_v)[size_t(a)];
-      ++use;
-      out.edges_full += use >= (h ? lim_h : lim_v)[size_t(a)];
+    }
+    return true;
+  };
+  for (const size_t k : order) {
+    route_one(k, rounds > 0);
+  }
+  // negotiation: the nets through an edge over its room reroute under the raised cost, until no edge is over
+  std::vector<char> rip(nets.size(), 0);
+  for (unsigned round = 1; round <= rounds; ++round) {
+    size_t over_edges = 0;
+    for (size_t t = 0; t < N; ++t) {
+      if (use_h[t] > lim_h[t]) {
+        hist_h[t] += double(use_h[t] - lim_h[t]) / double(std::max(1, lim_h[t]));
+        ++over_edges;
+      }
+      if (use_v[t] > lim_v[t]) {
+        hist_v[t] += double(use_v[t] - lim_v[t]) / double(std::max(1, lim_v[t]));
+        ++over_edges;
+      }
+    }
+    if (over_edges == 0) {
+      break;
+    }
+    out.rounds = round;
+    pres       = std::min(pres * 2, 4096.0);
+    std::ranges::fill(rip, 0);
+    for (size_t k = 0; k < nets.size(); ++k) {
+      for (const auto& [a, b] : out.trees[k].edges) {
+        const bool h = g.row(a) == g.row(b);
+        if ((h ? use_h : use_v)[size_t(a)] > (h ? lim_h : lim_v)[size_t(a)] && counted(nets[k], a, b)) {
+          rip[k] = 1;
+          break;
+        }
+      }
+    }
+    for (const size_t k : order) {
+      if (rip[k]) {
+        unroute(k);
+      }
+    }
+    for (const size_t k : order) {
+      if (rip[k]) {
+        route_one(k, true);
+      }
+    }
+  }
+  for (size_t k = 0; k < nets.size(); ++k) {
+    out.unrouted += !out.trees[k].routed;
+  }
+  for (size_t t = 0; t < N; ++t) {
+    for (int h : {1, 0}) {
+      const int lim = (h ? lim_h : lim_v)[t], use = (h ? use_h : use_v)[t];
+      if (lim > 0 && use >= lim) {
+        ++out.edges_full;
+      }
+      if (use > lim) {
+        ++out.overflow_edges;
+        out.overflow_tracks += size_t(use - lim);
+        out.over.emplace_back(int(t), h);
+      }
     }
   }
   out.seconds = seconds_since(start);
