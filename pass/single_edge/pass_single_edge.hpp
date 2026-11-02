@@ -59,6 +59,9 @@ struct Result {
   // clock_pin was rebound to the gate root.
   int  mem_ports_ungated = 0;
   int  mems_slotted      = 0;  // memories with at least one gated write port
+  // FALLING-edge memories retyped to posedge, their ports rebound to the
+  // reference clock and gated to the fall slot (as a negedge flop is).
+  int  mems_retyped      = 0;
   int  icg_folded      = 0;  // gated clocks rewritten into a flop enable
   // Consumers served by a SAMPLED gate guard: a falling consumer of a
   // low-transparent ICG, whose gate condition is the value held across the high
@@ -125,6 +128,20 @@ struct Options {
   // retyped flop keeps. On by default; `false` restores the flop-with-enable
   // lowering, which is a full cycle late on every same-cycle read.
   bool transparent_data_latch = true;
+  // Lower a memory written on the FALLING edge as a negedge flop is lowered:
+  // retype it to posedge, rebind its write clock to the reference root and
+  // gate its write to the fall slot. Off by default, so `lhd lec` and `lhd
+  // formal` keep refusing a falling-edge memory exactly as before (that verdict
+  // is pinned by inou/slang/tests/memory_clock_diagnostic.sh); `lhd pass
+  // single_edge` turns it on.
+  bool negedge_memory         = false;
+  // Fold a gate that reaches state as a `Clock_cell` (Pyrope `Clock(...)`,
+  // tolg's activation gate, a gated `__memory` port) as the inline `clk & en`
+  // gate is folded. The fold already reads a Clock_cell (clock_op_of); this
+  // makes the TRIGGER and the memory port scan see one. Off by default for the
+  // same reason as `negedge_memory`: `lhd lec` keeps its own Clock_cell model
+  // (pass/lec/phase_sched.cpp) until its corpus is measured with this on.
+  bool clock_cell_gates       = false;
 };
 
 // Normalize `g` in place. `defs` (may be empty) are the resolution-library

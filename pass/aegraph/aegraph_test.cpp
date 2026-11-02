@@ -1345,6 +1345,40 @@ TEST(Aegraph, ConcatTrimsOnlyUnsignedLeadingLanePadding) {
   }
 }
 
+// getmask_fits merges Get_mask(y, 0, n) into a y that fits n bits but is DECLARED wider. A Concat lane's driver may
+// be narrower than its window, never wider (graph/node_util.hpp, the Concat contract; pass.bitwidth refuses it as
+// "concat-lane-width"), so the lane keeps a mask: no Concat leaves the engine with a lane wider than its window.
+TEST(Aegraph, AConcatLaneIsNeverDrivenWiderThanItsWindow) {
+  hhds::GraphLibrary lib;
+  auto               g = io_graph(lib, "lane_window", 2, 1);
+  // y fits three bits; binop declares it eight.
+  auto lo0 = gu::create_get_mask(*g, g->get_input_pin("i0"), 0, 3).create_driver_pin(0);
+  auto lo1 = gu::create_get_mask(*g, g->get_input_pin("i1"), 0, 3).create_driver_pin(0);
+  gu::set_ubits(lo0, 3);
+  gu::set_ubits(lo1, 3);
+  const auto y   = binop(g, Ntype_op::Xor, lo0, lo1);
+  auto       low = gu::create_get_mask(*g, y, 0, 4).create_driver_pin(0);
+  auto       top = gu::create_get_mask(*g, g->get_input_pin("i1"), 4, 8).create_driver_pin(0);
+  gu::set_ubits(low, 4);
+  gu::set_ubits(top, 4);
+  // {top, low}: lane 0 (port 0) is the high lane, each four bits wide.
+  auto pack = gu::create_typed_node(*g, Ntype_op::Concat);
+  top.connect_sink(pack.create_sink_pin(0));
+  konst(g, 4).connect_sink(pack.create_sink_pin(1));
+  low.connect_sink(pack.create_sink_pin(2));
+  konst(g, 4).connect_sink(pack.create_sink_pin(3));
+  gu::set_ubits(pack.create_driver_pin(0), 8);
+  pack.create_driver_pin(0).connect_sink(g->get_output_pin("o0"));
+
+  livehd::aegraph::optimize(g, {}, checked());
+  EXPECT_GE(count_op(g, Ntype_op::Concat), 1u) << "the pack survives, so the check below reads its lanes";
+  for (auto node : g->body().nodes()) {
+    if (gu::type_op_of(node) == Ntype_op::Concat) {
+      EXPECT_EQ(gu::concat_lane_violation(gu::concat_lanes(node)), "") << gu::node_name_of(node);
+    }
+  }
+}
+
 // Q1: a constant selector that names a disconnected arm (or lies outside the arms) of an n-ary Mux is a '?' the
 // Mux owns; 0 is one legal resolution and the extraction takes it (a constant is cheaper than the Mux). A selector
 // that names a connected arm is that arm.

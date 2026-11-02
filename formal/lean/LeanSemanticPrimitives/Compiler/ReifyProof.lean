@@ -111,14 +111,15 @@ def exprRefsTyped : ResidualExpr → Array (ResidualRef × Bool)
   | .rredOr _ a | .req _ a | .rshl _ a | .rmuxN _ a => a.map (fun r => (r, false))
   | .rnot _ a => #[(a, false)]
   | .rult _ a b | .rugt _ a b | .rslt _ a b | .rsgt _ a b
-  | .rsra _ a b | .rsext _ a b | .rgetMask _ a b => #[(a, false), (b, false)]
-  | .rmux _ s f t => #[(s, false), (f, false), (t, false)]
+  | .rsra _ a b | .rsext _ a b | .rgetMask _ a b
+  | .rudiv _ a b | .rsdiv _ a b => #[(a, false), (b, false)]
+  | .rmux _ s f t | .rsetMask _ s f t => #[(s, false), (f, false), (t, false)]
   | .rmemRead _ m a e => #[(m, true), (a, false), (e, false)]
   | .rmemWrite m a d e => #[(m, true), (a, false), (d, false), (e, false)]
   | .rmemWriteBE _ _ m a d be => #[(m, true), (a, false), (d, false), (be, false)]
 
 /-- Slots read by something OTHER than a binding: the outputs, the flop update
-fields and the memory next-images.
+fields and the memory next-images (a commit table's images included).
 
 Missing these is the subtle half of the analysis.  A value whose only consumer is
 an output is read by no later binding at all, so a last-use computed from binding
@@ -130,7 +131,8 @@ def terminalRefs (R : ResidualProgram) : Array (ResidualRef × Bool) :=
           #[(f.din, false)]
             ++ (match f.enable with | some e => #[(e, false)] | none => #[])
             ++ (match f.resetPin with | some r => #[(r, false)] | none => #[])))
-    ++ (R.memoryUpdates.map (fun m => (m.nextImg, true)))
+    ++ (R.memoryUpdates.flatMap (fun m =>
+          #[(m.nextImg, true)] ++ m.commits.map (fun c => (c.nextImg, true))))
 
 /-- `liveAfter R` at index `k` lists the PRODUCED slots that must still be
 readable once step `k` has run: those a later binding reads, plus those any
@@ -179,6 +181,10 @@ def qExpr : ResidualExpr → MetaM Term
   | .rsra w a b     => do `(Compiler.ResidualExpr.rsra $(qNat w) $(qNat a) $(qNat b))
   | .rsext w a m    => do `(Compiler.ResidualExpr.rsext $(qNat w) $(qNat a) $(qNat m))
   | .rgetMask w a m => do `(Compiler.ResidualExpr.rgetMask $(qNat w) $(qNat a) $(qNat m))
+  | .rudiv w a b    => do `(Compiler.ResidualExpr.rudiv $(qNat w) $(qNat a) $(qNat b))
+  | .rsdiv w a b    => do `(Compiler.ResidualExpr.rsdiv $(qNat w) $(qNat a) $(qNat b))
+  | .rsetMask w a m v => do
+      `(Compiler.ResidualExpr.rsetMask $(qNat w) $(qNat a) $(qNat m) $(qNat v))
   | .rmux w s f t   => do
       `(Compiler.ResidualExpr.rmux $(qNat w) $(qNat s) $(qNat f) $(qNat t))
   | .rmemRead w m a e => do
@@ -259,6 +265,11 @@ def elabProveReified : CommandElab := fun stx => do
       | .error _ => throwError "prove_reified: compileDesign refused {d}"
       | .ok R    => pure R
     let bindsLit ← liftTermElabM (qBindings R.bindings)
+    -- A memory WITH a commit table (decision #9) is rewritten to `memPick`, the
+    -- form the generated model has; without one, `memNext` unfolds as before.
+    let hasTable := R.memoryUpdates.any (fun m => !m.commits.isEmpty)
+    let memA := mkIdent (if hasTable then ``Compiler.memNext_eq_memPick else ``Compiler.memNext)
+    let memB := mkIdent (if hasTable then ``Compiler.memNext_of_isEmpty else ``Compiler.memNext)
     let nm  := f.getId
     let rNm       := mkIdent (nm ++ `R)
     let okNm      := mkIdent (nm ++ `compilesOk)
@@ -325,7 +336,7 @@ def elabProveReified : CommandElab := fun stx => do
              [$f:ident, $d:ident, Compiler.runBindings, Compiler.denoteExpr,
               Compiler.refBV, Compiler.refBVs, Compiler.refMem, Compiler.denoteRef,
               Compiler.sourceEnvArr, Compiler.compileOutput, Compiler.compileFlop,
-              Compiler.compileMemory, Compiler.flopNext_eq,
+              Compiler.compileMemory, $memA:ident, $memB:ident, Compiler.flopNext_eq,
               Compiler.flopNextV_resize_din, CertVal.asBV, CertVal.asMem]))
     elabCommand (← `(command|
       theorem $corNm : ∀ e i st, $f e i st = Compiler.interpretDesign $d e i st := by
@@ -501,6 +512,11 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
       | .error _ => throwError "prove_reified_chunked: compileDesign refused {d}"
       | .ok R    => pure (cert, R)
     markPhase "prover_start"
+    -- A memory WITH a commit table (decision #9) is rewritten to `memPick`, the
+    -- form the generated model has; without one, `memNext` unfolds as before.
+    let hasTable := R.memoryUpdates.any (fun m => !m.commits.isEmpty)
+    let memA := mkIdent (if hasTable then ``Compiler.memNext_eq_memPick else ``Compiler.memNext)
+    let memB := mkIdent (if hasTable then ``Compiler.memNext_of_isEmpty else ``Compiler.memNext)
     let csize := match sz with | some k => max 1 k.getNat | none => 32
     let nb    := R.bindings.size
     let nseg  := if nb == 0 then 1 else (nb + csize - 1) / csize
@@ -756,11 +772,28 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
     elabCommand (← `(command| theorem $dfNm : ($d).flops = $flopsLit := rfl))
     let dmNm := mkIdent (base ++ `D_mems)
     let memsLit ← liftTermElabM do
-      let ms ← R.memoryUpdates.mapM fun mu =>
+      let ms ← R.memoryUpdates.mapM fun mu => do
         -- `MemoryDesc.clock` likewise: omitted, it defaults to 0 and the fact
-        -- holds only for memories on the reference domain.
-        `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
-            clock := $(quote mu.clock) })
+        -- holds only for memories on the reference domain.  `init` (DCERT3) is
+        -- spelled only when present, so a memory without power-on words prints
+        -- exactly as before.
+        -- `commits` (decision #9) likewise, only when present.
+        let ws : Array Term := mu.init.map fun v => quote v
+        let cs ← mu.commits.mapM fun c =>
+          `({ mask := $(quote c.mask), nextImg := $(quote c.nextImg) })
+        match mu.init.isEmpty, mu.commits.isEmpty with
+        | true, true =>
+          `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
+              clock := $(quote mu.clock) })
+        | false, true =>
+          `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
+              clock := $(quote mu.clock), init := #[$ws,*] })
+        | true, false =>
+          `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
+              clock := $(quote mu.clock), commits := #[$cs,*] })
+        | false, false =>
+          `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
+              clock := $(quote mu.clock), init := #[$ws,*], commits := #[$cs,*] })
       `(#[$ms,*])
     elabCommand (← `(command| theorem $dmNm : ($d).memories = $memsLit := rfl))
     let doNm := mkIdent (base ++ `D_outputs)
@@ -779,7 +812,7 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
         rw [← $envEq:ident $iId $stId]
         simp only [$oProjNm:ident, $fProjNm:ident, $mProjNm:ident]
         simp [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
-              Compiler.compileMemory, Compiler.flopNext_eq,
+              Compiler.compileMemory, $memA:ident, $memB:ident, Compiler.flopNext_eq,
               $dfNm:ident, $dmNm:ident, $doNm:ident]))
     markPhase "eq_compileAndRun"
     let corNm := mkIdent (base ++ `correct)
@@ -915,6 +948,11 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
     let iId   := mkIdent (Name.mkSimple "i")
     let stId  := mkIdent (Name.mkSimple "st")
     let live  := ReifyProof.liveAfter R
+    -- A memory WITH a commit table (decision #9) is rewritten to `memPick`, the
+    -- form the generated model has; without one, `memNext` unfolds as before.
+    let hasTable := R.memoryUpdates.any (fun m => !m.commits.isEmpty)
+    let memA := mkIdent (if hasTable then ``Compiler.memNext_eq_memPick else ``Compiler.memNext)
+    let memB := mkIdent (if hasTable then ``Compiler.memNext_of_isEmpty else ``Compiler.memNext)
     -- The model is NOT emitted here. `reify_design_named` emits it, in the
     -- Mathlib-free layer, and BOTH probes use that one reifier -- otherwise the
     -- simulation probe would run one function and the proof probe would prove a
@@ -1305,11 +1343,28 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
     elabCommand (← `(command| theorem $dfNm : ($d).flops = $flopsLit := rfl))
     let dmNm := mkIdent (base ++ `D_mems)
     let memsLit ← liftTermElabM do
-      let ms ← R.memoryUpdates.mapM fun mu =>
+      let ms ← R.memoryUpdates.mapM fun mu => do
         -- `MemoryDesc.clock` likewise: omitted, it defaults to 0 and the fact
-        -- holds only for memories on the reference domain.
-        `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
-            clock := $(quote mu.clock) })
+        -- holds only for memories on the reference domain.  `init` (DCERT3) is
+        -- spelled only when present, so a memory without power-on words prints
+        -- exactly as before.
+        -- `commits` (decision #9) likewise, only when present.
+        let ws : Array Term := mu.init.map fun v => quote v
+        let cs ← mu.commits.mapM fun c =>
+          `({ mask := $(quote c.mask), nextImg := $(quote c.nextImg) })
+        match mu.init.isEmpty, mu.commits.isEmpty with
+        | true, true =>
+          `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
+              clock := $(quote mu.clock) })
+        | false, true =>
+          `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
+              clock := $(quote mu.clock), init := #[$ws,*] })
+        | true, false =>
+          `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
+              clock := $(quote mu.clock), commits := #[$cs,*] })
+        | false, false =>
+          `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
+              clock := $(quote mu.clock), init := #[$ws,*], commits := #[$cs,*] })
       `(#[$ms,*])
     elabCommand (← `(command| theorem $dmNm : ($d).memories = $memsLit := rfl))
     let doNm := mkIdent (base ++ `D_outputs)
@@ -1334,7 +1389,7 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
         rw [$hEq:ident]
         simp only [$oProjNm:ident, $fProjNm:ident, $mProjNm:ident]
         simp [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
-              Compiler.compileMemory, Compiler.flopNext_eq,
+              Compiler.compileMemory, $memA:ident, $memB:ident, Compiler.flopNext_eq,
               $dfNm:ident, $dmNm:ident, $doNm:ident, $hSimp,*]))
     let corNm := mkIdent (base ++ `correct)
     elabCommand (← `(command|

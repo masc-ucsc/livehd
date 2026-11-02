@@ -235,11 +235,11 @@ run it on both shared certificates, so the theorem is not the only evidence. -/
 computation: both are one-domain designs with every ordinal 0. -/
 theorem tiny_conservative (i : RuntimeInput) (s : RuntimeState) :
     interpretDesign tinyD (allEdges tinyD) i s = interpretDesignLegacy tinyD i s :=
-  interpretDesign_allEdges tinyD (by decide) (by decide) i s
+  interpretDesign_allEdges tinyD (by decide) (by decide) (by simp [tinyD]) i s
 
 theorem seq_conservative (i : RuntimeInput) (s : RuntimeState) :
     interpretDesign seqD (allEdges seqD) i s = interpretDesignLegacy seqD i s :=
-  interpretDesign_allEdges seqD (by decide) (by decide) i s
+  interpretDesign_allEdges seqD (by decide) (by decide) (by simp [seqD]) i s
 
 end Acceptance
 

@@ -41,6 +41,9 @@ std::vector<double> merge_lines(std::vector<double> values, double low, double h
 }  // namespace
 
 void validate_region_options(const Region_options& o) {
+  if (o.cut != "macro" && o.cut != "mincut" && o.cut != "ratio" && o.cut != "ratio_through") {
+    throw std::invalid_argument("region cut must be macro, mincut, ratio or ratio_through");
+  }
   if (!o.max_cells || o.max_cells > 1000000 || !std::isfinite(o.merge_um) || o.merge_um < 0) {
     throw std::invalid_argument("invalid region cell cap/merge distance");
   }
@@ -137,13 +140,18 @@ Region_mesh Region_mesh::build(const dp::Design& d, const std::vector<int>& macr
   auto&       members   = result.members;
   result.options        = options;
   const auto&         l = d.layout;
+  const bool          ratio   = options.cut == "ratio" || options.cut == "ratio_through";
+  const bool          through = options.cut == "ratio_through";  // the nets crossing a child end to end load its cuts too
+  const bool          mincut  = options.cut == "mincut" || ratio;  // no forced line in either
   std::vector<double> raw[2];
   for (int i : macros) {
     if (i < d.num_movable || i >= int(d.node_x.size())) {
       throw std::invalid_argument("invalid region mesh fixed macro index");
     }
-    raw[0].insert(raw[0].end(), {d.node_x[i], d.node_x[i] + d.node_size_x[i]});
-    raw[1].insert(raw[1].end(), {d.node_y[i], d.node_y[i] + d.node_size_y[i]});
+    if (!mincut) {
+      raw[0].insert(raw[0].end(), {d.node_x[i], d.node_x[i] + d.node_size_x[i]});
+      raw[1].insert(raw[1].end(), {d.node_y[i], d.node_y[i] + d.node_size_y[i]});
+    }
   }
   std::map<std::pair<std::string, int>, std::pair<double, double>> buses;
   for (const auto& io : ios) {
@@ -160,7 +168,9 @@ Region_mesh Region_mesh::build(const dp::Design& d, const std::vector<int>& macr
   }
   for (const auto& [key, span] : buses) {
     const int axis = key.second < 2 ? 1 : 0;
-    raw[axis].insert(raw[axis].end(), {span.first, span.second});
+    if (!mincut) {
+      raw[axis].insert(raw[axis].end(), {span.first, span.second});
+    }
   }
   const auto                    xs = merge_lines(raw[0], l.xl, l.xh, options.merge_um * dbu);
   const auto                    ys = merge_lines(raw[1], l.yl, l.yh, options.merge_um * dbu);
@@ -172,6 +182,10 @@ Region_mesh Region_mesh::build(const dp::Design& d, const std::vector<int>& macr
     const size_t iy = std::clamp<std::ptrdiff_t>(std::upper_bound(ys.begin(), ys.end(), y) - ys.begin() - 1, 0, ny - 1);
     initial[iy * nx + ix].push_back(i);
   }
+  struct Span_g {
+    double xlo, xhi, ylo, yhi, w;
+  };
+  std::vector<Span_g>              gspan;  // ratio cuts: every net's span over the chip, built on first use
   std::set<std::pair<int, double>> candidates;
   for (size_t i = 1; i + 1 < xs.size(); ++i) {
     candidates.emplace(0, xs[i]);
@@ -189,8 +203,222 @@ Region_mesh Region_mesh::build(const dp::Design& d, const std::vector<int>& macr
     if (depth >= 48) {
       throw std::runtime_error("region mesh cannot split coincident cell centers below the cell cap");
     }
-    const bool       x   = box.xh - box.xl >= box.yh - box.yl;
-    const double     mid = x ? (box.xl + box.xh) / 2 : (box.yl + box.yh) / 2;
+    bool             x   = box.xh - box.xl >= box.yh - box.yl;
+    double           mid = x ? (box.xl + box.xh) / 2 : (box.yl + box.yh) / 2;
+    if (ratio && !d.flat_net2pin_start.empty()) {
+      // both axes, several positions: the split whose children have the lowest worst internal cut ratio. A child's
+      // internal cut ratio along an axis is the most nets (cells on both sides, weighted) any line inside it along
+      // that axis is forced across, over the tracks across that line (its length times the tracks per micron)
+      const double h_tracks = options.h_tracks_per_um > 0 ? options.h_tracks_per_um : 1;
+      const double v_tracks = options.v_tracks_per_um > 0 ? options.v_tracks_per_um : 1;
+      const auto   pos_x    = [&](int i) { return d.node_x[i] + d.node_size_x[i] / 2; };
+      const auto   pos_y    = [&](int i) { return d.node_y[i] + d.node_size_y[i] / 2; };
+      std::vector<int> stamp(d.flat_net2pin_start.size(), 0);
+      int              gen = 0;
+      using Span = Span_g;
+      // every net's span over all its cells (the chip), once: a net with cells beyond a child on both sides crosses
+      // every cut inside the child, whether or not it has a cell there (the pass-throughs a middle column carries)
+      if (gspan.empty()) {
+        gspan.assign(d.flat_net2pin_start.size() - 1, Span_g{INFINITY, -INFINITY, INFINITY, -INFINITY, 0});
+        for (size_t n = 0; n + 1 < d.flat_net2pin_start.size(); ++n) {
+          if (!d.net_mask.empty() && !d.net_mask[n]) {
+            continue;
+          }
+          int cnt = 0;
+          for (int q = d.flat_net2pin_start[n]; q < d.flat_net2pin_start[n + 1]; ++q) {
+            const int node = d.pin2node[size_t(d.flat_net2pin[size_t(q)])];
+            if (node >= 0 && node < d.num_movable) {
+              auto& sp = gspan[n];
+              sp.xlo   = std::min(sp.xlo, pos_x(node));
+              sp.xhi   = std::max(sp.xhi, pos_x(node));
+              sp.ylo   = std::min(sp.ylo, pos_y(node));
+              sp.yhi   = std::max(sp.yhi, pos_y(node));
+              ++cnt;
+            }
+          }
+          gspan[n].w = cnt >= 2 ? (d.net_weights.empty() ? 1.0 : std::max(1.0, d.net_weights[n])) : 0;
+        }
+      }
+      std::vector<char> member(size_t(d.num_movable), 0);
+      // the spans inside a child box b: a net touching the child's cells spans its chip span clipped to the box (its
+      // cells beyond the box extend it to the box's edge); a net crossing the box with no cell in it spans it whole
+      const auto spans_of = [&](const std::vector<int>& cs, const Region_rect& b) {
+        std::vector<Span> out;
+        ++gen;
+        for (int i : cs) {
+          member[size_t(i)] = 1;
+        }
+        const auto clipped = [&](const Span& g0) {
+          return Span{std::max(g0.xlo, b.xl), std::min(g0.xhi, b.xh), std::max(g0.ylo, b.yl), std::min(g0.yhi, b.yh), g0.w};
+        };
+        for (int i : cs) {
+          for (int k = d.flat_node2pin_start[size_t(i)]; k < d.flat_node2pin_start[size_t(i) + 1]; ++k) {
+            const int n = d.pin2net[size_t(d.flat_node2pin[size_t(k)])];
+            if (n < 0 || stamp[size_t(n)] == gen || gspan[size_t(n)].w <= 0) {
+              continue;
+            }
+            stamp[size_t(n)] = gen;
+            out.push_back(clipped(gspan[size_t(n)]));
+          }
+        }
+        for (size_t n = 0; through && n < gspan.size(); ++n) {
+          const auto& g0 = gspan[n];
+          if (stamp[n] == gen || g0.w <= 0) {
+            continue;
+          }
+          const bool across_x = g0.xlo < b.xl && g0.xhi > b.xh && g0.ylo < b.yh && g0.yhi > b.yl;
+          const bool across_y = g0.ylo < b.yl && g0.yhi > b.yh && g0.xlo < b.xh && g0.xhi > b.xl;
+          if (across_x || across_y) {
+            out.push_back(clipped(g0));
+          }
+        }
+        for (int i : cs) {
+          member[size_t(i)] = 0;
+        }
+        return out;
+      };
+      // the most weighted spans open at any point along an axis (a sweep), over the tracks across a line there
+      const auto worst = [&](const std::vector<Span>& sp, bool along_x, double across_um) {
+        std::vector<std::pair<double, double>> ev;
+        for (const auto& s : sp) {
+          const double lo = along_x ? s.xlo : s.ylo, hi = along_x ? s.xhi : s.yhi;
+          if (hi > lo) {
+            ev.emplace_back(lo, s.w);
+            ev.emplace_back(hi, -s.w);
+          }
+        }
+        std::sort(ev.begin(), ev.end());
+        double open = 0, peak = 0;
+        for (const auto& [p, w] : ev) {
+          open += w;
+          peak  = std::max(peak, open);
+        }
+        return peak / std::max(1e-9, across_um * (along_x ? h_tracks : v_tracks));
+      };
+      const auto child_ratio = [&](const std::vector<int>& cs, const Region_rect& b) {
+        const auto sp = spans_of(cs, b);
+        return std::max(worst(sp, true, (b.yh - b.yl) / dbu), worst(sp, false, (b.xh - b.xl) / dbu));
+      };
+      double best = INFINITY;
+      for (const bool ax : {true, false}) {
+        std::vector<double> ps;
+        for (int i : cells) {
+          ps.push_back(ax ? pos_x(i) : pos_y(i));
+        }
+        std::sort(ps.begin(), ps.end());
+        const double lo_side = ax ? box.xl : box.yl, hi_side = ax ? box.xh : box.yh;
+        for (int q = 1; q < 12; ++q) {
+          const size_t k = std::min(ps.size() - 2, size_t(q) * ps.size() / 12);
+          if (ps[k] == ps[k + 1]) {
+            continue;
+          }
+          const double p = (ps[k] + ps[k + 1]) / 2;
+          if (p < lo_side + 0.25 * (hi_side - lo_side) || p > lo_side + 0.75 * (hi_side - lo_side)) {
+            continue;
+          }
+          std::vector<int> low, high;
+          double           area_low = 0, area_high = 0;
+          for (int i : cells) {
+            const bool is_low = (ax ? pos_x(i) : pos_y(i)) < p;
+            (is_low ? low : high).push_back(i);
+            (is_low ? area_low : area_high) += d.node_size_x[i] * d.node_size_y[i];
+          }
+          if (low.empty() || high.empty()) {
+            continue;
+          }
+          auto a = box, b = box;
+          (ax ? a.xh : a.yh) = p;
+          (ax ? b.xl : b.yl) = p;
+          // a child must hold its cells: a split that leaves one side fuller than nine tenths of its area is no split
+          const auto area_of = [](const Region_rect& rc) { return std::max(1e-9, (rc.xh - rc.xl) * (rc.yh - rc.yl)); };
+          if (area_low / area_of(a) > .9 || area_high / area_of(b) > .9) {
+            continue;
+          }
+          // (scoring the split line's own crossing load too was tried and dropped: it let the children's internal
+          // ratios rise and made five cut-bound regions where the plain score made one)
+          const double score = std::max(child_ratio(low, a), child_ratio(high, b))
+                               + 1e-6 * std::abs(p - (lo_side + hi_side) / 2) / std::max(1e-9, hi_side - lo_side);
+          if (score < best) {
+            best = score;
+            x    = ax;
+            mid  = p;
+          }
+        }
+      }
+    } else if (mincut && !d.flat_net2pin_start.empty()) {
+      // the cut that the fewest nets cross, within the middle half of the side: a net's cells inside the box span
+      // [lo, hi] along the axis; it crosses a cut at p iff lo < p <= hi. The crossings over p come from a sweep of
+      // those spans, sampled at the cells' positions (a cut lands between two cells)
+      std::vector<char> in_box(size_t(d.num_movable), 0);
+      for (int i : cells) {
+        in_box[size_t(i)] = 1;
+      }
+      const auto pos = [&](int i) { return x ? d.node_x[i] + d.node_size_x[i] / 2 : d.node_y[i] + d.node_size_y[i] / 2; };
+      std::vector<std::pair<double, double>> spans;  // (lo, hi) per net with two or more cells in the box, weighted below
+      std::vector<double>                    weights;
+      {
+        std::vector<int> seen(d.flat_net2pin_start.size(), 0);
+        for (int i : cells) {
+          for (int k = d.flat_node2pin_start[size_t(i)]; k < d.flat_node2pin_start[size_t(i) + 1]; ++k) {
+            const int n = d.pin2net[size_t(d.flat_node2pin[size_t(k)])];
+            if (n < 0 || seen[size_t(n)] || (!d.net_mask.empty() && !d.net_mask[size_t(n)])) {
+              continue;
+            }
+            seen[size_t(n)] = 1;
+            double lo = INFINITY, hi = -INFINITY;
+            int    inside = 0;
+            for (int q = d.flat_net2pin_start[size_t(n)]; q < d.flat_net2pin_start[size_t(n) + 1]; ++q) {
+              const int node = d.pin2node[size_t(d.flat_net2pin[size_t(q)])];
+              if (node >= 0 && node < d.num_movable && in_box[size_t(node)]) {
+                const double p = pos(node);
+                lo             = std::min(lo, p);
+                hi             = std::max(hi, p);
+                ++inside;
+              }
+            }
+            if (inside >= 2 && hi > lo) {
+              spans.emplace_back(lo, hi);
+              weights.push_back(d.net_weights.empty() ? 1.0 : std::max(1.0, d.net_weights[size_t(n)]));
+            }
+          }
+        }
+      }
+      // candidate cuts: between consecutive cell positions inside the middle half of the side
+      std::vector<double> ps;
+      for (int i : cells) {
+        ps.push_back(pos(i));
+      }
+      std::sort(ps.begin(), ps.end());
+      const double lo_side = x ? box.xl : box.yl, hi_side = x ? box.xh : box.yh;
+      const double a = lo_side + 0.25 * (hi_side - lo_side), b = lo_side + 0.75 * (hi_side - lo_side);
+      std::vector<std::tuple<double, double, int>> events;  // (position, weight, +1 open / -1 close)
+      for (size_t k = 0; k < spans.size(); ++k) {
+        events.emplace_back(spans[k].first, weights[k], 1);
+        events.emplace_back(spans[k].second, weights[k], -1);
+      }
+      std::sort(events.begin(), events.end());
+      double best = INFINITY, open = 0;
+      size_t e    = 0;
+      for (size_t k = 0; k + 1 < ps.size(); ++k) {
+        if (ps[k] == ps[k + 1]) {
+          continue;
+        }
+        const double p = (ps[k] + ps[k + 1]) / 2;  // the cut between two cells: lo < p <= hi counts
+        if (p < a || p > b) {
+          continue;
+        }
+        while (e < events.size() && std::get<0>(events[e]) < p) {
+          open += std::get<2>(events[e]) * std::get<1>(events[e]);
+          ++e;
+        }
+        // the spans closed exactly at p stay crossed (lo < p <= hi): open counts them until the sweep passes hi
+        const double cost = open + 1e-3 * std::abs(p - (lo_side + hi_side) / 2) / std::max(1e-9, hi_side - lo_side);
+        if (cost < best) {
+          best = cost;
+          mid  = p;
+        }
+      }
+    }
     std::vector<int> low, high;
     for (int i : cells) {
       const double p = x ? d.node_x[i] + d.node_size_x[i] / 2 : d.node_y[i] + d.node_size_y[i] / 2;

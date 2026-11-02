@@ -214,10 +214,7 @@ def tysOK (D : DesignCert) : Option (Array SlotTy) → Bool
   | none    => false
   | some ts =>
       ts.size == D.numSlots
-      && D.memories.toList.all (fun md =>
-           match ts[md.nextImg]? with
-           | some (.tbl aw dw) => aw == md.aw && dw == md.dw
-           | _                 => false)
+      && D.memories.toList.all (memTyOK ts)
 
 theorem admitsB_tysOK (D : DesignCert) :
     admitsB D = (Direct.acceptsDesign D && tysOK D (inferTys D)) := by
@@ -758,23 +755,30 @@ theorem admitsW_nextImgGeom {D : DesignCert} (h : admitsWB D = true) :
     obtain ⟨h1, h2⟩ := List.getElem?_eq_some_iff.mp
       (show D.memories.toList[idx]? = some md by rw [← hmd]; simp)
     exact h2 ▸ List.getElem_mem h1
+  have hok : memTyOK ts md = true := by
+    unfold admitsWB at h
+    rw [hts] at h
+    simp only [tysOK, Bool.and_eq_true] at h
+    exact List.all_eq_true.mp h.2.2 md hmem
+  have hg : ∀ k, ts[k]? = some (.tbl md.aw md.dw) → geomAtW D k = some md.aw := by
+    intro k hk
+    unfold geomAtW tyAtW
+    rw [hts]
+    simp [hk]
+  exact ⟨hg _ (memTyOK_next hok), fun c hc => hg _ (memTyOK_commit hok hc)⟩
+
+/-- The memory-type facts of one extended-admitted memory, as `memTyOK`. -/
+theorem admitsW_memTyOK {D : DesignCert} (h : admitsWB D = true) {ts : Array SlotTy}
+    (hts : inferTysW D = some ts) {idx : Nat} {md : MemoryDesc}
+    (hmd : D.memories[idx]? = some md) : memTyOK ts md = true := by
+  have hmem : md ∈ D.memories.toList := by
+    obtain ⟨h1, h2⟩ := List.getElem?_eq_some_iff.mp
+      (show D.memories.toList[idx]? = some md by rw [← hmd]; simp)
+    exact h2 ▸ List.getElem_mem h1
   unfold admitsWB at h
   rw [hts] at h
   simp only [tysOK, Bool.and_eq_true] at h
-  have hthis := List.all_eq_true.mp h.2.2 md hmem
-  unfold geomAtW tyAtW
-  rw [hts]
-  simp only [Option.bind_some]
-  cases hty : ts[md.nextImg]? with
-  | none => rw [hty] at hthis; simp at hthis
-  | some t =>
-      cases t with
-      | bv w     => rw [hty] at hthis; simp at hthis
-      | rom dw n => rw [hty] at hthis; simp at hthis
-      | tbl aw dw =>
-          rw [hty] at hthis
-          simp only [Bool.and_eq_true, beq_iff_eq] at hthis
-          rw [hthis.1]
+  exact List.all_eq_true.mp h.2.2 md hmem
 
 /-- **Every node of an extended-admitted design is admitted by the EXTENDED
 predicate.**  Note what this does NOT say: it does not say `NodeAdmitted`, and
@@ -978,6 +982,7 @@ theorem admitsW_mainM_resolved {D : DesignCert} {i : RuntimeInput} {st : StateM}
     (hstb : ∀ sd ∈ D.sources.toList, SourceFlopBound sd st.flops.size)
     (hfclk : ∀ f ∈ D.flops.toList, f.clock < e.size)
     (hmclk : ∀ md ∈ D.memories.toList, md.clock < e.size)
+    (hmspan : ∀ md ∈ D.memories.toList, md.domSpan ≤ e.size)
     (hfsize : D.flops.size ≤ st.flops.size) :
     ∃ r : StateM.ResultM,
       Eval hwMemP []
@@ -999,7 +1004,7 @@ theorem admitsW_mainM_resolved {D : DesignCert} {i : RuntimeInput} {st : StateM}
       (fun j c hcj hj hmemc ss hpre =>
         node_stepW hwf hsem hcj hj (hadm _ hmemc) (harit _ hmemc)
           (hprop j _ hcj) (hfits _ hmemc) hpre)
-      hin hstb hfclk hmclk hfsize
+      hin hstb hfclk hmclk hmspan hfsize
   exact ⟨r, hev, hden, hpres hpol⟩
 
 /-! ## 3h. The FULL runtime policy on the extended route
@@ -1155,23 +1160,22 @@ theorem admitsW_nextImgTy {D : DesignCert} (h : admitsWB D = true)
       (show D.memories.toList[idx]? = some md by rw [← hmd]; simp)
     exact h2 ▸ List.getElem_mem h1
   have hsz := admitsWB_size h hts
-  unfold admitsWB at h
-  rw [hts] at h
-  simp only [tysOK, Bool.and_eq_true] at h
-  have hthis := List.all_eq_true.mp h.2.2 md hmem
-  cases hty : ts[md.nextImg]? with
-  | none   => rw [hty] at hthis; simp at hthis
-  | some t =>
-      cases t with
-      | bv w     => rw [hty] at hthis; simp at hthis
-      | rom dw n => rw [hty] at hthis; simp at hthis
-      | tbl aw dw =>
-          rw [hty] at hthis
-          simp only [Bool.and_eq_true, beq_iff_eq] at hthis
-          constructor
-          · unfold tyAtW; rw [hts]
-            simp only [Option.bind_some, hty, hthis.1, hthis.2]
-          · rw [← hsz]; exact mem_lt_of_getElem?' hty
+  have hty := memTyOK_next (admitsW_memTyOK h hts hmd)
+  refine ⟨?_, ?_⟩
+  · unfold tyAtW; rw [hts]; simp [hty]
+  · rw [← hsz]; exact mem_lt_of_getElem?' hty
+
+/-- …and each commit-table entry's image slot too (decision #9). -/
+theorem admitsW_commitTy {D : DesignCert} (h : admitsWB D = true)
+    {idx : Nat} {md : MemoryDesc} (hmd : D.memories[idx]? = some md)
+    {c : MemCommit} (hc : c ∈ md.commits) :
+    tyAtW D c.nextImg = some (.tbl md.aw md.dw) ∧ c.nextImg < D.numSlots := by
+  obtain ⟨ts, hts⟩ := admitsWB_infer h
+  have hsz := admitsWB_size h hts
+  have hty := memTyOK_commit (admitsW_memTyOK h hts hmd) hc
+  refine ⟨?_, ?_⟩
+  · unfold tyAtW; rw [hts]; simp [hty]
+  · rw [← hsz]; exact mem_lt_of_getElem?' hty
 
 /-- One step under the length-level policy. -/
 theorem admits_runW {D : DesignCert} {i : RuntimeInput} {st : StateM} {e : ClockEdges}
@@ -1187,7 +1191,7 @@ theorem admits_runW {D : DesignCert} {i : RuntimeInput} {st : StateM} {e : Clock
   simp only [Bool.and_eq_true] at hR
   obtain ⟨⟨⟨hst, hin⟩, hfb⟩, hed⟩ := hR
   exact admitsW_mainM_resolved hA (stateOKB_shape hst) (inputOKB_sound hin)
-    (flopBoundOKB_sound hfb) (edgesOKB_flops hed) (edgesOKB_mems hed)
+    (flopBoundOKB_sound hfb) (edgesOKB_flops hed) (edgesOKB_mems hed) (edgesOKB_span hed)
     (stateOKB_flopSize hst)
 
 /-- **The word/default policy is preserved**, through an ordinary write too. -/
@@ -1231,19 +1235,32 @@ theorem admits_runW_pres {D : DesignCert} {i : RuntimeInput} {st : StateM}
       = Compiler.srcMemNext (slotValM D i st) e (StateM.denote st) idx md :=
     Option.some.inj hx
   rw [hmden]
-  unfold Compiler.srcMemNext
-  by_cases hf : fires e md.clock
-  · simp only [hf, if_true]
-    obtain ⟨hty, hnum⟩ := admitsW_nextImgTy hA hmd
-    exact admits_slot_memwidthW hA (stateOKB_word hst) i md.nextImg hnum
-      (.tbl md.aw md.dw) md.dw hty (by simp [tyDW]) x
-  · -- the QUIET memory: its image comes from the incoming state, untouched
-    simp only [hf, Bool.false_eq_true, if_false]
+  -- an image the commit can take: a slot typed as this memory's table ...
+  have hslot : ∀ k, tyAtW D k = some (.tbl md.aw md.dw) → k < D.numSlots →
+      ((slotValM D i st k).asMem x).width = md.dw := fun k hty hnum =>
+    admits_slot_memwidthW hA (stateOKB_word hst) i k hnum (.tbl md.aw md.dw) md.dw hty
+      (by simp [tyDW]) x
+  -- ... or the held image (the QUIET memory: from the incoming state, untouched)
+  have hheld : (((StateM.denote st).mems[idx]?.getD (fun _ => mk_bv 0 0)) x).width = md.dw := by
     obtain ⟨m0, hm0, hsh0⟩ := stateOKB_word hst idx md hmd
     have hq : (StateM.denote st).mems[idx]? = some m0.denote := by
       simp [StateM.denote, Array.getElem?_map, hm0]
     rw [hq, Option.getD_some]
     exact memShape_denote_width hsh0 x
+  obtain ⟨hty, hnum⟩ := admitsW_nextImgTy hA hmd
+  unfold Compiler.srcMemNext
+  split
+  · split
+    · exact hslot _ hty hnum
+    · exact hheld
+  · split
+    · exact hslot _ hty hnum
+    · cases hf : md.commits.find? (md.firedIs e) with
+      | some c =>
+        simp only [hf]
+        obtain ⟨htc, hnc⟩ := admitsW_commitTy hA hmd (Array.mem_of_find?_eq_some hf)
+        exact hslot _ htc hnc
+      | none => simp only [hf]; exact hheld
 
 /-- **The strengthened policy**, including declared flop widths. -/
 theorem admits_runW_full {D : DesignCert} {i : RuntimeInput} {st : StateM}
@@ -1878,6 +1895,8 @@ theorem plainRamSim_runs {sim : MemSimulator} (h : plainRamSim = some sim)
 #audit_axioms node_step_memWrite
 #audit_axioms node_stepW
 #audit_axioms admits_node_tyW
+#audit_axioms admitsW_memTyOK
+#audit_axioms admitsW_commitTy
 #audit_axioms admitsW_nodeAdmitted
 #audit_axioms admitsW_writePropagates
 #audit_axioms admits_slot_widthW

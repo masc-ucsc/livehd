@@ -2401,6 +2401,10 @@ Repair_result finalize_placement(const Result& initial, const Options& requested
   options.boundarypins.enabled = options.boundarypins.align = false;
   options.output_dir  = requested.output_dir + "/final";
   fs::create_directories(options.output_dir);
+  // the refinement's mesh and virtual pins, for legroute in this stage
+  if (fs::exists(requested.output_dir + "/regions/boundarypins/pins.tsv")) {
+    options.region_seed_dir = requested.output_dir + "/regions";
+  }
   auto frame = initial.floorplan;
   // Preserve IO locations while rebuilding RC and legalizing the repaired cells.
   for (auto& terminal : frame.terminals) {

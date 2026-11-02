@@ -4,7 +4,7 @@
 # On master FP's codec is Compiler/CertIOV1.lean (namespace Compiler.CertIO.V1):
 # the FP branch's Compiler/CertIO.lean, verbatim apart from the namespace and a
 # §7 proving the V1 renderer is not injective over clock metadata.  The
-# unqualified Compiler.CertIO is DCERT2 (CertIOCodec + CertIO), a different
+# unqualified Compiler.CertIO is DCERT3 (CertIOCodec + CertIO), a different
 # codec.  Checked here:
 #
 #   1. LOCAL, always: the V1 codec does not contain d4's compiler path

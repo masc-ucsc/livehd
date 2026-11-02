@@ -128,6 +128,9 @@ struct Memory_info {
   // and is refused rather than silently treated as constant.
   bool                     is_rom = false;
   std::vector<std::string> rom_contents;  // `size` entries, each `bits` wide, entry 0 first
+  // A WRITABLE memory's power-on words (DCERT3 `MemoryDesc.init`), in the same
+  // spelling as `rom_contents`. Empty: it powers on all zero.
+  std::vector<std::string> init_contents;
 };
 
 struct LeanCtx {

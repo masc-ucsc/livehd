@@ -2,6 +2,7 @@
 #include "emit_legacy_fast_model.hpp"
 
 #include <algorithm>
+#include <set>
 #include <stdexcept>
 
 #include "lean_format.hpp"
@@ -269,6 +270,40 @@ std::vector<std::optional<uint32_t>> legacy_output_ids(const DesignScan& d, cons
   }
   return ids;
 }
+std::string legacy_memory_next(const MemoryDriver& m, const LegacyNames& n, const std::function<std::string(uint32_t)>& img,
+                               const std::string& held) {
+  if (n.edges.empty()) {
+    return img(m.next_img);
+  }
+  if (m.commits.empty()) {
+    return "if e." + n.edges.at(m.clock) + " then " + img(m.next_img) + " else " + held;
+  }
+  std::set<uint32_t> doms{m.clock};
+  for (const auto& cm : m.commits) {
+    for (uint32_t k = 0; k < 64; ++k) {
+      if (cm.first & (uint64_t{1} << k)) {
+        doms.insert(k);
+      }
+    }
+  }
+  auto fired_is = [&](uint64_t mask) {
+    std::string cond;
+    for (const auto k : doms) {
+      cond += std::string(cond.empty() ? "" : " && ") + ((mask & (uint64_t{1} << k)) ? "" : "!") + "e." + n.edges.at(k);
+    }
+    return cond;
+  };
+  uint64_t all = 0;
+  for (const auto k : doms) {
+    all |= uint64_t{1} << k;
+  }
+  auto next = "if " + fired_is(all) + " then " + img(m.next_img);
+  for (const auto& cm : m.commits) {
+    next += " else if " + fired_is(cm.first) + " then " + img(cm.second);
+  }
+  return next + " else " + held;
+}
+
 void emit_legacy_fast_model(const DesignScan& d, const CertificateIR& c, const LegacyNames& n, bool bridge, std::ostream& os) {
   auto ref  = [&](uint32_t id) { return legacy_fast_ref(c, n, id, bridge); };
   auto lets = [&]() {
@@ -304,7 +339,7 @@ void emit_legacy_fast_model(const DesignScan& d, const CertificateIR& c, const L
   if (!n.sequential) {
     return;
   }
-  os << "def " << n.base << "_next " << n.parameters() << " : " << n.base << "_state :=\n";
+  os << "def " << n.base << "_next " << n.edge_parameter() << n.parameters() << " : " << n.base << "_state :=\n";
   if (!bridge) {
     lets();
   }
@@ -314,14 +349,21 @@ void emit_legacy_fast_model(const DesignScan& d, const CertificateIR& c, const L
     fields.push_back(field);
     const auto reset  = f.reset_pin ? reset_predicate("(bitvec_nonzero " + ref(*f.reset_pin) + ")", f.reset_active_low) : "false";
     const auto enable = f.enable ? "(bitvec_nonzero " + ref(*f.enable) + ")" : "true";
-    os << "  let new_" << field << " : BitVec " << f.width << " := flop_next " << reset << " "
-       << lit_bv(f.width, lean_integer(f.reset_value)) << " " << enable << " " << cast(ref(f.din), f.width) << " s." << field
-       << '\n';
+    const auto value  = lit_bv(f.width, lean_integer(f.reset_value));
+    const auto din    = cast(ref(f.din), f.width);
+    auto       next   = "flop_next " + reset + " " + value + " " + enable + " " + din + " s." + field;
+    if (!n.edges.empty()) {
+      // Off its domain's edge a flop holds; an asynchronous reset still acts.
+      const auto quiet = f.async_reset ? "flop_next " + reset + " " + value + " false " + din + " s." + field : "s." + field;
+      next             = "if e." + n.edges.at(f.clock) + " then " + next + " else " + quiet;
+    }
+    os << "  let new_" << field << " : BitVec " << f.width << " := " << next << '\n';
   }
   for (const auto& m : c.memories) {
     const auto field = n.memories.at(m.origin);
     fields.push_back(field);
-    os << "  let new_" << field << " : (BitVec " << m.addr_w << " -> BitVec " << m.data_w << ") := " << ref(m.next_img) << '\n';
+    const auto next = legacy_memory_next(m, n, ref, "s." + field);
+    os << "  let new_" << field << " : (BitVec " << m.addr_w << " -> BitVec " << m.data_w << ") := " << next << '\n';
   }
   os << "  { ";
   for (size_t i = 0; i < fields.size(); ++i) {
@@ -331,7 +373,7 @@ void emit_legacy_fast_model(const DesignScan& d, const CertificateIR& c, const L
     os << fields[i] << " := new_" << fields[i];
   }
   os << " }\n\n";
-  os << "def " << n.base << "_step " << n.parameters() << " : " << n.base << "_state × " << n.base << "_out :=\n  (" << n.base
-     << "_next i s, " << n.base << "_comb i s)\n\n";
+  os << "def " << n.base << "_step " << n.edge_parameter() << n.parameters() << " : " << n.base << "_state × " << n.base
+     << "_out :=\n  (" << n.base << "_next " << n.edge_argument() << "i s, " << n.base << "_comb i s)\n\n";
 }
 }  // namespace lean_export

@@ -20,26 +20,62 @@ module memory_clock(input clk, clk_b, we_a, we_b, input [1:0] a, b,
   assign q = mem[a];
 endmodule
 EOF
-  emits=(--emit-dir "lg:$W/$kind-lg")
-  [ "$kind" = opposite ] || emits+=(--emit "verilog:$W/$kind-out.v")
+  emits=(--emit-dir "lg:$W/$kind-lg" --emit "verilog:$W/$kind-out.v")
   "$LHD" compile "$W/$kind.v" --top memory_clock \
     "${emits[@]}" \
     --result-json "$W/$kind.json" --workdir "$W/$kind" > "$W/$kind.log" 2>&1 \
     || { cat "$W/$kind.log"; exit 1; }
   if [ "$kind" = opposite ]; then
+    # Write ports on opposite edges (decision #9): the cell is marked rising
+    # and the falling port is clocked by the inverted clock, so each port
+    # keeps its own edge and the memory regenerates with per-port clocks.
     grep -q 'mixes clock edges' "$W/$kind.log"
+    grep -q '\.wr_clock_0(clk)' "$W/$kind-out.v"
+    if grep -q '\.wr_clock_1(clk)' "$W/$kind-out.v"; then
+      echo 'FAIL: the falling write port regenerated on the rising clock'; exit 1
+    fi
+    # Formal cannot model the derived memory clock: against a NON-equivalent
+    # variant (both writes rising) it must not decide (exit 7), never prove (0)
+    # and never report a counterexample (10).
+    sed 's/negedge clk/posedge clk/' "$W/$kind.v" > "$W/$kind-rise.v"
     set +e
-    "$LHD" lec --set formal.effort=proof --impl "lg:$W/$kind-lg" --ref "$W/$kind.v" --top memory_clock \
+    "$LHD" lec --set formal.effort=proof --impl "$W/$kind-rise.v" --ref "lg:$W/$kind-lg" --top memory_clock \
       --workdir "$W/$kind-lec" -q > "$W/$kind-lec.log" 2>&1
     rc=$?
     set -e
     [ "$rc" -eq 7 ] || { cat "$W/$kind-lec.log"; exit 1; }
-    grep -q 'PER-PORT clock edge polarity' "$W/$kind-lec.log"
-    if "$LHD" compile "lg:$W/$kind-lg" --top memory_clock --emit verilog:"$W/$kind-out.v" \
-        --workdir "$W/$kind-emit" > "$W/$kind-emit.log" 2>&1; then
-      echo 'FAIL: emitted mixed-edge memory as a uniform-edge memory'; exit 1
+    grep -q 'derived clock the encoder cannot model' "$W/$kind-lec.log"
+    if [ -n "${LHD_EXTERNAL_SIM:-}" ]; then
+      # Event level: the regenerated Verilog against the source, before and
+      # after each edge.
+      sed 's/module memory_clock/module reference_clock/' "$W/$kind.v" > "$W/$kind-ref.v"
+      cat > "$W/$kind-tb.v" <<'SV'
+module tb;
+  reg clk=1, clk_b=0, we_a=1, we_b=0;
+  reg [1:0] a=0, b=0;
+  reg [7:0] d_a=0, d_b=0;
+  wire [7:0] q, ref_q;
+  memory_clock dut(.*);
+  reference_clock gold(.clk(clk),.clk_b(clk_b),.we_a(we_a),.we_b(we_b),.a(a),.b(b),.d_a(d_a),.d_b(d_b),.q(ref_q));
+  initial begin
+    for (integer k=0; k<4; k=k+1) begin
+      a=k; d_a=k; #1; clk=0; #1; clk=1;
+    end
+    for (integer k=0; k<64; k=k+1) begin
+      a=k%4; b=(k+1)%4; d_a=k*3; d_b=k*5; we_a=k&1; we_b=(k>>1)&1; #1;
+      if (q !== ref_q) $fatal(1,"mixed memory before falling edge %d",k);
+      clk=0; #1;
+      if (q !== ref_q) $fatal(1,"mixed memory after falling edge %d",k);
+      d_a=k*7; clk=1; #1;
+      if (q !== ref_q) $fatal(1,"mixed memory after rising edge %d",k);
+    end
+    $finish;
+  end
+endmodule
+SV
+      iverilog -g2012 -I ware/rtl -s tb -o "$W/$kind-sim" "$W/$kind-out.v" "$W/$kind-ref.v" "$W/$kind-tb.v"
+      vvp -n "$W/$kind-sim"
     fi
-    grep -q 'requires per-port clock edge polarity' "$W/$kind-emit.log"
   elif [ "$kind" = different ]; then
     grep -q '\.wr_clock_0(clk)' "$W/$kind-out.v"
     grep -q '\.wr_clock_1(clk_b)' "$W/$kind-out.v"
@@ -145,4 +181,4 @@ EOF
     grep -q 'bulk and entry writes require one shared clock' "$W/bulk_$kind.log"
   fi
 done
-echo 'PASS: native memory clocks survive; mixed edges are diagnosed and refused by formal'
+echo 'PASS: native memory clocks survive; mixed edges keep per-port clocks and formal does not decide them'

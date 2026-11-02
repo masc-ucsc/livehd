@@ -944,8 +944,9 @@ cc_library(
     srcs = [
         "legroute.cpp",
         "legroute_boxes.cpp",
-        "legroute_cut.cpp",
+        "legroute_dump.cpp",
         "legroute_final.cpp",
+        "legroute_global.cpp",
         "legroute_grid.cpp",
         "legroute_internal.hpp",
         "legroute_route.cpp",
@@ -962,6 +963,7 @@ cc_library(
         "//core",
         "//inou/lefdef:inou_lefdef",
         "//third_party/viecut",
+        "@rapidjson",
     ],
 )
 cc_test(

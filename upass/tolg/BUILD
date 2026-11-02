@@ -67,3 +67,12 @@ sh_test(
     srcs = ["tests/loop_window_width_test.sh"],
     data = ["//lhd"],
 )
+
+# `reg q:[initial=5] = 9` names two values for a flop that holds one: the
+# attribute wins and the dropped declared value is a `reset-init-mismatch`
+# warning (tests/reg_initial_attr_warning_test.sh).
+sh_test(
+    name = "reg_initial_attr_warning_test",
+    srcs = ["tests/reg_initial_attr_warning_test.sh"],
+    data = ["//lhd"],
+)

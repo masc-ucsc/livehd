@@ -141,6 +141,14 @@ structure FlopDesc where
   asyncReset     : Bool := false
 deriving Repr, Inhabited, DecidableEq
 
+/-- One entry of a memory's commit table (DCERT3, decision #9): when exactly the
+clock domains in `mask` (bit `k` = clock ordinal `k`) fire among the memory's
+own domains, the image becomes slot `nextImg` (`srcMemNext`). -/
+structure MemCommit where
+  mask    : Nat
+  nextImg : Nat
+deriving Repr, Inhabited, DecidableEq
+
 /-- A memory's next image is the slot holding the last write of its write chain.
 Reads are ordinary graph nodes, so nothing about them appears here. -/
 structure MemoryDesc where
@@ -152,7 +160,29 @@ structure MemoryDesc where
   refuses a memory whose committing ports disagree (`memory-mixed-edge`), so a
   per-port ordinal could only ever be replicated. -/
   clock   : Nat := 0
+  /-- POWER-ON contents (DCERT3), entry 0 first; an entry past the end is 0, as
+  `lhd sim` fills a memory before it loads a file.  Not a step: the step
+  semantics never read it.  Every runner's START state does (`initMemsOf`). -/
+  init     : Array Nat := #[]
+  /-- A memory on more than one clock domain (DCERT3, decision #9): one entry
+  per PROPER non-empty set of its domains that can fire together, naming the
+  chain of the writes of the ports on those domains.  `nextImg` stays the chain
+  of every port, taken when all of them fire.  Empty: one domain, `clock`. -/
+  commits  : Array MemCommit := #[]
+  /-- RESERVED (DCERT3) for an ASYNCHRONOUS whole-array reset (decision #2): the
+  slot of the held image with the reset applied, taken when no domain of the
+  memory fires.  No step meaning yet; every loader refuses `some`. -/
+  asyncImg : Option Nat := none
 deriving Repr, Inhabited, DecidableEq
+
+/-- The field DCERT3 still reserves (`asyncImg`) is at its default, so the step
+semantics is the whole meaning of the memory. -/
+def MemoryDesc.reservedFree (m : MemoryDesc) : Bool :=
+  m.asyncImg.isNone
+
+/-- Power-on word `a`: the `init` entry, or 0 past its end. -/
+def MemoryDesc.initWord (m : MemoryDesc) (a : Nat) : Nat :=
+  m.init.getD a 0
 
 /-- The whole design. -/
 structure DesignCert where

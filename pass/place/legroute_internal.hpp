@@ -9,6 +9,7 @@
 #include <exception>
 #include <limits>
 #include <map>
+#include <numeric>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -74,10 +75,11 @@ struct Design {
   const Legroute_options&             opt;
   const physical::Tech_profile*       profile = nullptr;
   std::vector<const physical::Macro*> macro;    // per component
-  std::vector<int>                    movable;  // component ids of movable single-row cells
+  std::vector<int>                    movable;  // component ids of movable cells (one row, or two rows: a tile's height)
   std::vector<int>                    cell;     // component -> movable index, -1 otherwise
   std::vector<int64_t>                width;    // per movable (DBU)
   std::vector<bool>                   flop;     // per movable: has a clock pin
+  std::vector<char>                   tall;     // per movable: a two-row cell, taking the same sites in both rows of its tile
   std::vector<Net>                    nets;
   std::vector<std::vector<int>>       nets_of;  // per movable: its net ids (each once)
   double                              wns    = 0;
@@ -149,7 +151,9 @@ struct Box {
   double           ramp     = 0;    // max rank ramp of its nets
   bool             critical = false, clock = false, fixed = false;
   int              external = 0, internal = 0;
-  int              sites = 0;  // total cell width in sites
+  int              sites = 0;    // total cell width in sites
+  int              window = -1;  // alternatives: this box moves at most this many tiles from its home (-1: window_tiles)
+  bool             placed = false;  // legal_boxes: its cells sit legally on its home tile (cx, cy): that tile fits by construction
 };
 struct Boxes {
   std::vector<Box> boxes;
@@ -161,10 +165,40 @@ Boxes build_boxes(const Design&, const Grid&, const std::map<int, int>& fixed_sl
 int   cell_sites(const Design&, const Grid&, int movable);
 bool  box_fits(const Design&, const Grid&, const Box&, int tile);
 
+// ---------------------------------------------------------------- L3 legroute.global: the crossing nets' trees
+// A region-crossing net routed over the tile grid ahead of the regions: a tree of tile edges joining its endpoint
+// tiles (its boxes' placement tiles, its fixed pins, the hop tiles of its fixed virtual pins) by shortest paths on
+// the edges with room: an edge carries at most a share of the narrower tile's tracks in its direction, the fuller
+// an edge the costlier, most critical nets first. The fixed edges of a net (a virtual pin's hop) cost it nothing.
+struct Global_net {
+  int                              net  = -1;
+  double                           crit = 0;  // order: highest first, then the short nets
+  std::vector<int>                 endpoints;  // distinct tiles, the driver's first
+  std::vector<std::pair<int, int>> fixed_edges;
+  // the regions holding the net's own pins: the region's model routes the net there itself, so the tree's edges
+  // inside them cost length only and take no room (only the boundary crossings and the pass-through runs do)
+  std::vector<int>                 own_regions;
+};
+struct Global_tree {
+  bool                             routed = false;
+  std::vector<std::pair<int, int>> edges;  // adjacent tile pairs, lower tile first
+};
+struct Global_routes {
+  std::vector<Global_tree> trees;  // per Global_net
+  size_t                   unrouted = 0, edges_full = 0;  // nets without a path; edges filled to their share
+  size_t                   overflow_edges = 0, overflow_tracks = 0;  // edges over their share after the rounds, by how much
+  std::vector<std::pair<int, int>> over;  // those edges: (lower / left tile, h)
+  unsigned                 rounds   = 0;                             // negotiation rounds run
+  double                   seconds  = 0;
+};
+// cap_h[t], cap_v[t]: the tile's tracks per direction; margin_tiles: the search box around a net's endpoints; rounds:
+// negotiation rounds (rip-up and reroute of the nets on edges over their share; 0: a full edge is closed, one pass)
+Global_routes global_route(const Grid&, const std::vector<int>& cap_h, const std::vector<int>& cap_v, double share, double own_share,
+                           const std::vector<Global_net>&, unsigned margin_tiles, unsigned rounds);
+
 // ---------------------------------------------------------------- L3 SAT placement
-// experiment (Legroute_options::subregion_cells): min-cut sub-regions replace the regions of the grid and boxes
-void subdivide_regions(const Design&, Grid&, Boxes&, Legroute_report&);
-void pack_cells(const Design&, const Grid&, const Boxes&);  // trivial in-box packing (F1 refines)
+void                     pack_cells(const Design&, const Grid&, const Boxes&);  // trivial in-box packing (F1 refines)
+std::vector<std::string> tier_names(const std::string& tiers);                  // Legroute_options::tiers split, blanks dropped
 
 // ---------------------------------------------------------------- routing model
 struct Vpin {  // a virtual IO pin pair on a boundary tile edge: inside node (tile) -> outside node (tile)
@@ -226,7 +260,7 @@ struct Routing {
 void             box_demand(const Design&, const Grid&, const Boxes&, Routing&);
 // L3: per region, boxes on tiles and connection shapes (straight or L) whose legs fit the tracks of every tile;
 // fills the trees and connections of R.
-void             sat_place(const Design&, const Grid&, Boxes&, const Legroute_regions&, Routing&, Legroute_report&);
+void             sat_place(const Design&, Grid&, Boxes&, const Legroute_regions&, Routing&, Legroute_report&);
 // the second SAT policy: the options with Legroute_options::sat_alt's overrides (std::invalid_argument on a bad one)
 Legroute_options sat_alt_options(const Legroute_options&);
 void             clock_spines(const Design&, const Grid&, const Boxes&, Routing&);       // L4
@@ -237,6 +271,9 @@ double           wire_um(const Grid&, const Conn&);
 double           net_delay_ps(const Design&, const Grid&, const Boxes&, const Routing&, int net);
 
 // ---------------------------------------------------------------- legroute.final
+// legroute.dump_regions: each chosen region ("all", "failed" or ids) as a DEF of its own in dir (region_<r>.def/.json)
+void dump_regions(const Design&, const Grid&, const Boxes&, const Routing&, const Legroute_regions&, const Legroute_report&,
+                  const std::string& dir, const std::string& which);
 void final_place(const Design&, const Grid&, const Boxes&, const Routing&, unsigned threads);                           // F1
 void final_wires(const Design&, const Grid&, const Boxes&, const Routing&, const Legroute_regions&, Legroute_report&);  // F2-F4
 }  // namespace livehd::placement::lr

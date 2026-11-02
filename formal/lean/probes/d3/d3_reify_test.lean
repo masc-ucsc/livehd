@@ -42,6 +42,10 @@ private def rhsSyntax (nsrc : Nat) : ResidualExpr → MetaM Term
   | .rsra w a b     => do `(rsraV $(quote w) $(slotIdent nsrc a) $(slotIdent nsrc b))
   | .rsext w a m    => do `(rsextV $(quote w) $(slotIdent nsrc a) $(slotIdent nsrc m))
   | .rgetMask w a m => do `(rgetMaskV $(quote w) $(slotIdent nsrc a) $(slotIdent nsrc m))
+  | .rudiv w a b    => do `(rudivV $(quote w) $(slotIdent nsrc a) $(slotIdent nsrc b))
+  | .rsdiv w a b    => do `(rsdivV $(quote w) $(slotIdent nsrc a) $(slotIdent nsrc b))
+  | .rsetMask w a m v => do
+      `(rsetMaskV $(quote w) $(slotIdent nsrc a) $(slotIdent nsrc m) $(slotIdent nsrc v))
   | .rmux w s f t   => do
       `(rmuxV $(quote w) $(slotIdent nsrc s) $(slotIdent nsrc f) $(slotIdent nsrc t))
   | .rmemRead w m a e => do

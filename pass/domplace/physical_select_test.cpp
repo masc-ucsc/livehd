@@ -192,7 +192,7 @@ TEST(PhysicalSelect, AndOrEndpointConvertsWithRecheckedMetrics) {
   EXPECT_EQ(s.formula->nodes.size(), 7U);  // the frozen formula is reused as is
   EXPECT_EQ(s.metrics.transistors, 4U);
   EXPECT_EQ(s.metrics.stack, 2U);
-  EXPECT_EQ(s.a_domino, (4 + 4) / 2.0 * 1 + 10);
+  EXPECT_DOUBLE_EQ(s.a_domino, (2 * 4 + 3 * 4) / 6.0 * 1 + 10);  // a third of a NOT per pull-down device, half per auxiliary one
   EXPECT_EQ(s.a_rail_not, 0.0);
   EXPECT_FALSE(s.a_cmos);  // not priced under select=all
   ASSERT_EQ(s.rails.size(), 4U);
@@ -386,30 +386,31 @@ TEST(PhysicalSelect, AreaPolicyComparesBothSidesAndATieConverts) {
   // (a & c) | (d & e): its OR and the d & e gate are exclusive, a & c is shared.
   b.next(1, formula({lit(0), lit(1), series(0, 1), lit(2), lit(3), series(3, 4), parallel(2, 5)}), {a, c, d, e});
   Select_options area;
-  // a_domino(shared) = (2 + 4) / 2 * 1 + 10 = 13: equal to the CMOS register.
-  const auto     tie = select(b, area, 13);
+  // a_domino(shared) = (2 * 2 + 3 * 4) / 6 * 1 + 10 = 12.667: equal to the CMOS register.
+  const double   even = (2 * 2 + 3 * 4) / 6.0 * 1 + 10;
+  const auto     tie  = select(b, area, even);
   ASSERT_TRUE(tie.emission);
   const auto& s = tie.emission->states[0];
-  EXPECT_EQ(s.a_domino, 13.0);
+  EXPECT_DOUBLE_EQ(s.a_domino, even);
   ASSERT_TRUE(s.a_cmos);
-  EXPECT_EQ(*s.a_cmos, 13.0);
+  EXPECT_DOUBLE_EQ(*s.a_cmos, even);
   // U25: at equal size the domino wins, with its own code.
   EXPECT_EQ(s.reason, "domino-tie");
   EXPECT_EQ(s.decision, usyn::Physical_decision::domino);
   const auto& cone = tie.emission->states[1];
   ASSERT_TRUE(cone.a_cmos);
-  EXPECT_GT(*cone.a_cmos, 13.0);  // the exclusive OR and d & e gates are priced
-  EXPECT_LT(*cone.a_cmos, 13.0 + 3 * 2 + 3);
-  const auto wins = select(b, area, 13.5);
+  EXPECT_GT(*cone.a_cmos, even);  // the exclusive OR and d & e gates are priced
+  EXPECT_LT(*cone.a_cmos, even + 3 * 2 + 3);
+  const auto wins = select(b, area, even + .5);
   ASSERT_TRUE(wins.emission);
   EXPECT_EQ(wins.emission->states[0].reason, "domino-area");
   EXPECT_EQ(wins.emission->states[0].decision, usyn::Physical_decision::domino);
   // Within the tie tolerance either way is still a tie; beyond it, a strict
   // win or a loss. A strictly worse domino retains CMOS.
-  EXPECT_EQ(select(b, area, 13 + kAreaTieUm2 / 2).emission->states[0].reason, "domino-tie");
-  EXPECT_EQ(select(b, area, 13 - kAreaTieUm2 / 2).emission->states[0].reason, "domino-tie");
-  EXPECT_EQ(select(b, area, 13 + 4 * kAreaTieUm2).emission->states[0].reason, "domino-area");
-  const auto loses = select(b, area, 13 - 4 * kAreaTieUm2);
+  EXPECT_EQ(select(b, area, even + kAreaTieUm2 / 2).emission->states[0].reason, "domino-tie");
+  EXPECT_EQ(select(b, area, even - kAreaTieUm2 / 2).emission->states[0].reason, "domino-tie");
+  EXPECT_EQ(select(b, area, even + 4 * kAreaTieUm2).emission->states[0].reason, "domino-area");
+  const auto loses = select(b, area, even - 4 * kAreaTieUm2);
   ASSERT_TRUE(loses.emission);
   EXPECT_EQ(loses.emission->states[0].reason, "area");
   EXPECT_EQ(loses.emission->states[0].decision, usyn::Physical_decision::retained_cmos);
@@ -420,13 +421,13 @@ TEST(PhysicalSelect, AreaMarginConvertsWithinItsShareOnTopOfTheTie) {
   const auto a = b.input("a"), c = b.input("c");
   b.state("q");
   // a & c is also an output, so only the 12-unit register is saved; the
-  // domino side is (2 + 4) / 2 * 1 + 10 = 13.
+  // domino side is (2 * 2 + 3 * 4) / 6 * 1 + 10 = 12.667.
   b.net().outputs.push_back({"y", b.next(0, formula({lit(0), lit(1), series(0, 1)}), {a, c})});
   Select_options options;
   for (const auto& [margin, reason] : {
-           std::pair{ 0U,        "area"},
-           { 8U,        "area"}, // 12.96
-           {10U, "domino-area"}  // 13.2
+           std::pair{0U,        "area"},
+           {5U,        "area"}, // 12.6
+           {6U, "domino-area"}  // 12.72
   }) {
     options.area_margin_pct = margin;
     const auto run          = select(b, options, 12);
@@ -437,10 +438,11 @@ TEST(PhysicalSelect, AreaMarginConvertsWithinItsShareOnTopOfTheTie) {
   // The margin is a share of CMOS on top of the U25 tie: at margin 0 a tie
   // converts as domino-tie, and a margin that makes the domino strictly
   // smaller than the raised threshold converts as domino-area.
+  const double even       = (2 * 2 + 3 * 4) / 6.0 * 1 + 10;
   options.area_margin_pct = 0;
-  EXPECT_EQ(select(b, options, 13).emission->states[0].reason, "domino-tie");
+  EXPECT_EQ(select(b, options, even).emission->states[0].reason, "domino-tie");
   options.area_margin_pct = 1;
-  EXPECT_EQ(select(b, options, 13).emission->states[0].reason, "domino-area");
+  EXPECT_EQ(select(b, options, even).emission->states[0].reason, "domino-area");
 }
 
 TEST(PhysicalSelect, LogicARailProducerStillNeedsIsNotSaved) {

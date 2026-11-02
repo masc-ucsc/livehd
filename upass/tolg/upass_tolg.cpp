@@ -2780,6 +2780,28 @@ private:
 
       // Reset wiring. Effective init: an explicit `initial=N` attr overrides
       // the declare's [value]; "nil" (or absent) = NO reset.
+      // A flop has ONE value pin (`initial`, graph/cell.cpp): the reset value,
+      // also used as the start value. `reg q:[initial=5] = 9` gives two; the
+      // attribute wins, and the declared value must not vanish without a word.
+      if (!info.initial_txt.empty() && !info.init_txt.empty() && info.init_txt != "nil") {
+        bool same = false;  // an async-load signal never equals a constant
+        if (!info.initial_is_ref) {
+          const auto attr_v = Dlop::from_pyrope(info.initial_txt);
+          const auto decl_v = Dlop::from_pyrope(info.init_txt);
+          same              = !attr_v->is_invalid() && !decl_v->is_invalid() && attr_v->is_known_eq(*decl_v);
+        }
+        if (!same) {
+          warn_at(info.decl_nid,
+                  {"reset-init-mismatch", "type"},
+                  "reg '{}' has `initial={}` and the declared value {}. A flop has one value, used both as the reset "
+                  "value and as the start value, so `initial={}` is used and the declared value {} is DROPPED",
+                  name,
+                  info.initial_txt,
+                  info.init_txt,
+                  info.initial_txt,
+                  info.init_txt);
+        }
+      }
       const std::string init     = !info.initial_txt.empty() ? info.initial_txt : info.init_txt;
       const bool        has_init = !init.empty() && init != "nil";
       const bool        rp_false = info.reset_pin_name == "false";
@@ -3713,6 +3735,9 @@ private:
     bool                 has_store_clock    = false;
     bool                 first_store_posclk = true;
     bool                 mixed_store_edges  = false;
+    // (clock_pin sink pid, clock) of every FALLING store: rewired through an
+    // inverter at finalize when the memory mixes edges.
+    std::vector<std::pair<uint64_t, Pin>> fall_store_clocks;
     Pin                  update_clock;
     bool                 update_posclk = true;
     int                  rd_next       = 0;
@@ -5591,12 +5616,15 @@ private:
           livehd::graph_util::setup_sink_pid(mi.node, static_cast<hhds::Port_id>(base + 2)).connect_driver(cp);
           const auto pos      = pit->second.find("__store_posclk");
           const bool positive = pos == pit->second.end() || (pos->second != "false" && pos->second != "0");
+          if (!positive) {
+            mi.fall_store_clocks.emplace_back(static_cast<uint64_t>(base + 2), cp);
+          }
           if (mi.has_store_clock && positive != mi.first_store_posclk && !mi.mixed_store_edges) {
             mi.mixed_store_edges = true;
             warn_at(lhs,
-                    {"mixed-memory-clock-edges", "unsupported"},
-                    "memory '{}' mixes clock edges: write port {} differs from write port 0; formal checking requires per-port "
-                    "edge support",
+                    {"mixed-memory-clock-edges", "time"},
+                    "memory '{}' mixes clock edges: write port {} differs from write port 0; each falling port is clocked "
+                    "through an inverter and the memory is marked rising",
                     lhs_name,
                     mi.wr_next);
           }
@@ -6839,7 +6867,32 @@ private:
         }
         setup_sink_by_name(mi.node, "posclk").connect_driver(create_const(*g_, *Dlop::create_integer(mi.update_posclk ? 1 : 0)));
       } else if (mi.has_store_clock) {
-        const int polarity = mi.mixed_store_edges ? Ntype::Memory_posclk_mixed : (mi.first_store_posclk ? 1 : 0);
+        // Write ports on BOTH edges (decision #9): one cell-wide `posclk` cannot
+        // say which port is which, so the cell is marked rising and each falling
+        // port's clock pin is driven by the inverted clock, i.e. `posedge ~clk`.
+        // Every consumer reads a port's edge from its own clock pin (the commit
+        // class walks the inversion; cgen emits per-port clocks).
+        if (mi.mixed_store_edges) {
+          std::vector<std::pair<Pin, Pin>> inverted;  // clock -> its inverse, one per clock
+          for (const auto& [pid, clk] : mi.fall_store_clocks) {
+            Pin inv;
+            for (const auto& [c, i] : inverted) {
+              if (c == clk) {
+                inv = i;
+              }
+            }
+            if (inv.is_invalid()) {
+              inv = not1(clk);
+              inverted.emplace_back(clk, inv);
+              mixed_edge_inverters_.push_back(inv);
+            }
+            if (auto sink = driven_sink_at(mi.node, pid); !sink.is_invalid()) {
+              sink.del_sink();
+            }
+            livehd::graph_util::setup_sink_pid(mi.node, static_cast<hhds::Port_id>(pid)).connect_driver(inv);
+          }
+        }
+        const int polarity = (mi.mixed_store_edges || mi.first_store_posclk) ? 1 : 0;
         setup_sink_by_name(mi.node, "posclk").connect_driver(create_const(*g_, *Dlop::create_integer(polarity)));
       } else if (!mi.is_array) {
         // A file preload initializes persistent contents, but an unwritten
@@ -8261,7 +8314,13 @@ private:
           if (static_cast<int>(sink.get_port_id()) % kMemPortStride != clock_pid) {
             continue;
           }
-          if (const auto how = derived(sink.get_driver_pin(), 0); !how.empty() && !mem_clock_users(n, sink.get_port_id()).empty()) {
+          // A falling port of a mixed-edge memory is `negedge clk` through the
+          // inverter finalize_mems() put there, not a derived clock.
+          const auto drv = sink.get_driver_pin();
+          if (std::ranges::find(mixed_edge_inverters_, drv) != mixed_edge_inverters_.end() && derived(drv, 0) == kInverted) {
+            continue;
+          }
+          if (const auto how = derived(drv, 0); !how.empty() && !mem_clock_users(n, sink.get_port_id()).empty()) {
             report(n, clocked_state_label("memory", gu::node_name_of(n), mem_clock_port(n, sink.get_port_id())), how);
           }
         }
@@ -12520,6 +12579,10 @@ private:
   absl::flat_hash_map<std::string, Mem_result>                                    mem_results_;
   // attr_set seen before its target's declare (memory fwd overrides etc).
   absl::flat_hash_map<std::string, absl::flat_hash_map<std::string, std::string>> pending_attrs_;
+  // The inverted clocks finalize_mems() put on the falling ports of a
+  // mixed-edge memory: each is exactly `negedge clk`, so the derived-clock
+  // check accepts them there.
+  std::vector<Pin>                                                                mixed_edge_inverters_;
   // Every `attr_set(<var>, "reset_pin", <val>)` in the tree, collected BEFORE
   // the body walk. A source-spelled reset_pin normally reaches pending_attrs_
   // only AFTER the declare it belongs to (both the hand-written Pyrope form and

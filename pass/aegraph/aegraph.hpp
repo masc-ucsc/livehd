@@ -135,6 +135,7 @@ struct Stats {
   size_t const_folded   = 0;  // nodes replaced by a fully known constant
   size_t forwarded      = 0;  // nodes replaced by an existing operand (const-selector Mux, identity folds)
   size_t kept_twin      = 0;  // merges declined: both twins are named, or a loop-carry/parallel-edge guard
+  size_t lane_masked    = 0;  // Concat lanes read through a Get_mask: the representative was declared wider
   size_t dead_removed   = 0;  // dead pure nodes deleted
   size_t consts_created = 0;  // constants the elaborator had to create
   size_t rules_fired    = 0;  // rewrite-rule firings (applied results)
@@ -161,6 +162,7 @@ struct Stats {
     const_folded   += o.const_folded;
     forwarded      += o.forwarded;
     kept_twin      += o.kept_twin;
+    lane_masked    += o.lane_masked;
     dead_removed   += o.dead_removed;
     consts_created += o.consts_created;
     rules_fired    += o.rules_fired;

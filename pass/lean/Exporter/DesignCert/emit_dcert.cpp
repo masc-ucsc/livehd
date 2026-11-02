@@ -141,7 +141,7 @@ std::string dcert_oparg(const Op& op) {
 }
 
 void render_dcert(const CertificateIR& d, std::ostream& os) {
-  os << "DCERT2\n";
+  os << "DCERT3\n";
 
   section_count(os, d.sources.size());
   for (const auto& s : d.sources) {
@@ -242,6 +242,20 @@ void render_dcert(const CertificateIR& d, std::ostream& os) {
     r.field(m.data_w);
     r.field(slot(d, m.next_img));
     r.field(m.clock);
+    // DCERT3: the power-on words, then the commit table (a memory on more than
+    // one clock domain), then the async-reset image, RESERVED (written empty:
+    // `certWfError` refuses anything else until a route models it).
+    r.field(m.init.size());
+    for (const auto& v : m.init) {
+      r.field(canonical_decimal(v));
+    }
+    r.field(m.commits.size());
+    for (const auto& [mask, img] : m.commits) {
+      r.field(std::to_string(mask));
+      r.field(slot(d, img));
+    }
+    r.field(size_t{0});  // hasAsync
+    r.field(size_t{0});  // asyncImg
     r.finish(os);
   }
 

@@ -118,6 +118,15 @@ theorem rsraV_correct (w : Nat) (a b : BV) :
 theorem rgetMaskV_correct (w : Nat) (a m : BV) :
     rgetMaskV w a m = eval_op LGraphOp.Op_GetMask w [a, m] := rfl
 
+theorem rudivV_correct (w : Nat) (a b : BV) :
+    rudivV w a b = eval_op LGraphOp.Op_UDiv w [a, b] := rfl
+
+theorem rsdivV_correct (w : Nat) (a b : BV) :
+    rsdivV w a b = eval_op LGraphOp.Op_SDiv w [a, b] := rfl
+
+theorem rsetMaskV_correct (w : Nat) (a m v : BV) :
+    rsetMaskV w a m v = eval_op LGraphOp.Op_SetMask w [a, m, v] := rfl
+
 /-- `Op_MuxBool`: the operand ORDER check.  Deps are `[sel, falseVal, trueVal]`;
 if `compileOp` swapped the last two this would not be provable. -/
 theorem rmuxV_correct (w : Nat) (sel fv tv : BV) :
@@ -402,10 +411,26 @@ theorem compileOp_correct (nid : Nat) (c : DenseNodeCert) (env : SlotEnv)
       exact absurd hc (by simp)
   | Op_UDiv =>
       simp only [compileOp, hop, if_neg hw] at hc
-      exact absurd hc (by simp)
+      split at hc
+      case _ a b hd =>
+        injection hc with he; subst he
+        rw [hd]
+        simp only [denoteExpr, refBV,
+        hagree a (by rw [hd]; simp),
+        hagree b (by rw [hd]; simp),
+          List.map_cons, List.map_nil, rudivV_correct, eval_op_cert]
+      case _ => exact absurd hc (by simp)
   | Op_SDiv =>
       simp only [compileOp, hop, if_neg hw] at hc
-      exact absurd hc (by simp)
+      split at hc
+      case _ a b hd =>
+        injection hc with he; subst he
+        rw [hd]
+        simp only [denoteExpr, refBV,
+        hagree a (by rw [hd]; simp),
+        hagree b (by rw [hd]; simp),
+          List.map_cons, List.map_nil, rsdivV_correct, eval_op_cert]
+      case _ => exact absurd hc (by simp)
   | Op_LT =>
       simp only [compileOp, hop, if_neg hw] at hc
       exact absurd hc (by simp)
@@ -414,6 +439,15 @@ theorem compileOp_correct (nid : Nat) (c : DenseNodeCert) (env : SlotEnv)
       exact absurd hc (by simp)
   | Op_SetMask =>
       simp only [compileOp, hop, if_neg hw] at hc
-      exact absurd hc (by simp)
+      split at hc
+      case _ a m v hd =>
+        injection hc with he; subst he
+        rw [hd]
+        simp only [denoteExpr, refBV,
+        hagree a (by rw [hd]; simp),
+        hagree m (by rw [hd]; simp),
+        hagree v (by rw [hd]; simp),
+          List.map_cons, List.map_nil, rsetMaskV_correct, eval_op_cert]
+      case _ => exact absurd hc (by simp)
 
 end Compiler

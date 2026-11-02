@@ -70,9 +70,9 @@ be unreachable:
     division whose signedness is ungrounded.
 
 Accepting an operator here does not make the direct compiler LOWER it:
-`compileOp` refuses `Op_UDiv`, `Op_SDiv` and `Op_SetMask` itself, while the
-projection's memory route admits through this checker and executes the
-operators its own `OpSupported` names.
+`compileOp` keeps its own list (it lowers `Op_UDiv`, `Op_SDiv` and `Op_SetMask`
+too, which it once refused), while the projection's memory route admits through
+this checker and executes the operators its own `OpSupported` names.
 
 Refusing an operator whose Lean equation is not grounded in the exporter is the
 whole point of a fail-closed checker; accepting it because the equation happens
@@ -547,10 +547,16 @@ def checkFlopSlot (D : DesignCert) (k : Nat) (f : FlopDesc) : Option SimError :=
 def flopErrors (D : DesignCert) : Option SimError :=
   scan D.flops.size (fun k => D.flops[k]?) (checkFlopSlot D)
 
+/-- Each commit-table entry's image is a memory slot, as `nextImg` is (DCERT3,
+decision #9). -/
+def checkCommits (D : DesignCert) : List MemCommit → Option SimError
+  | []      => none
+  | c :: cs => (checkRef D true c.nextImg).orElse (fun _ => checkCommits D cs)
+
 def checkMemory (D : DesignCert) (k : Nat) (m : MemoryDesc) : Option SimError :=
   if m.dw == 0 then some (.zeroWidth m.nextImg)
   else if D.clocks.size ≤ m.clock then some (.memClockOutOfRange k m.clock)
-  else checkRef D true m.nextImg
+  else (checkRef D true m.nextImg).orElse (fun _ => checkCommits D m.commits.toList)
 
 def memoryErrors (D : DesignCert) : Option SimError :=
   scan D.memories.size (fun k => D.memories[k]?) (checkMemory D)
@@ -652,6 +658,9 @@ structure DesignSemWF (D : DesignCert) : Prop where
   /-- every memory commits on a DECLARED clock -/
   memClocks    : ∀ (k : Nat) (m : MemoryDesc), D.memories[k]? = some m →
                    m.clock < D.clocks.size
+  /-- every commit-table entry's image carries a memory image -/
+  memCommitKinds : ∀ (k : Nat) (m : MemoryDesc), D.memories[k]? = some m →
+                   ∀ c ∈ m.commits, slotIsMem D c.nextImg = some true
 
 --------------------------------------------------------------------------------
 -- Soundness
@@ -713,6 +722,21 @@ theorem checkRef_sound {needMem : Bool} {r : Nat} (h : checkRef D needMem r = no
       · exact congrArg some (by simpa using hb)
       · simp only [if_neg hb] at h
         cases needMem <;> simp at h
+
+theorem checkCommits_sound :
+    ∀ {cs : List MemCommit}, checkCommits D cs = none →
+      ∀ c ∈ cs, slotIsMem D c.nextImg = some true
+  | [],      _, _, hc  => absurd hc (by simp)
+  | c :: cs, h, c', hc' => by
+      unfold checkCommits at h
+      cases hr : checkRef D true c.nextImg with
+      | some e => rw [hr] at h; simp at h
+      | none =>
+          rw [hr] at h
+          simp only [Option.orElse] at h
+          rcases List.mem_cons.mp hc' with rfl | hin
+          · exact checkRef_sound hr
+          · exact checkCommits_sound h c' hin
 
 theorem designErrors_parts (h : designErrors D = none) :
     clockErrors D = none ∧ sourceErrors D = none ∧ inputWidthErrors D = none ∧
@@ -796,7 +820,8 @@ theorem checkDesign_sound {u : Unit} (h : checkDesign D = .ok u) : DesignSemWF D
     fun k f hf => (hflopsAll k f hf).2
   -- memories: clock range and image kind, from one scan
   have hmemsAll : ∀ (k : Nat) (m : MemoryDesc), D.memories[k]? = some m →
-      m.clock < D.clocks.size ∧ slotIsMem D m.nextImg = some true := by
+      m.clock < D.clocks.size ∧ slotIsMem D m.nextImg = some true ∧
+      (∀ c ∈ m.commits, slotIsMem D c.nextImg = some true) := by
     intro k m hm
     have hall := scan_none hmem k (lt_of_getElem?_some hm) m hm
     unfold checkMemory at hall
@@ -806,16 +831,23 @@ theorem checkDesign_sound {u : Unit} (h : checkDesign D = .ok u) : DesignSemWF D
       by_cases hc : D.clocks.size ≤ m.clock
       · simp only [if_pos hc] at hall; exact absurd hall (by simp)
       · simp only [if_neg hc] at hall
-        exact ⟨by omega, checkRef_sound hall⟩
+        cases hr : checkRef D true m.nextImg with
+        | some e => rw [hr] at hall; simp at hall
+        | none =>
+            rw [hr] at hall
+            simp only [Option.orElse] at hall
+            exact ⟨by omega, checkRef_sound hr,
+                   fun c hcm => checkCommits_sound hall c (Array.mem_def.mp hcm)⟩
   have hmems : ∀ (k : Nat) (m : MemoryDesc), D.memories[k]? = some m →
       slotIsMem D m.nextImg = some true :=
-    fun k m hm => (hmemsAll k m hm).2
+    fun k m hm => (hmemsAll k m hm).2.1
   refine
     { depsBounded := ?_, slotsInRange := ?_, nodeShapes := hshape, nodeKinds := ?_,
       outputKinds := houts, flopKinds := hflops, memKinds := hmems, sourceOK := ?_,
       inputWidths := ?_, clocksDeclared := hclocks,
       flopClocks := fun k f hf => (hflopsAll k f hf).1,
-      memClocks := fun k m hm => (hmemsAll k m hm).1 }
+      memClocks := fun k m hm => (hmemsAll k m hm).1,
+      memCommitKinds := fun k m hm => (hmemsAll k m hm).2.2 }
   · -- deps bounded: from `checkDeps`, via the index of each dep
     intro i c hc d hd
     obtain ⟨p, hp⟩ := exists_getElem?_of_mem_toList hd

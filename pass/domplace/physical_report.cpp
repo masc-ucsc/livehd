@@ -215,7 +215,7 @@ std::string physical_report(const usyn::Logical_design& design, const Physical_r
         number(w, "n_pdn", s.metrics.transistors);
         number(w, "stack", s.metrics.stack);
         number(w, "branches", s.metrics.branches);
-        real(w, "x", static_cast<double>(domino_proxy_devices(s.metrics, reference)) / 2);
+        real(w, "x", static_cast<double>(domino_proxy_sixths(s.metrics, reference)) / 6);
         real(w, "a_domino", s.a_domino);
         real(w, "a_rail", s.a_rail_not);
         real(w, "a_cmos", s.a_cmos);

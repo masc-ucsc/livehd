@@ -1310,6 +1310,60 @@ TEST(DesignScanClocks, TwoExplicitDomainsDoNotJoinAnImplicitFlop) {
   EXPECT_EQ(std::count_if(design.clocks.begin(), design.clocks.end(), [](const ClockDomain& c) { return c.implicit; }), 1);
 }
 
+// Give the fixture's only Flop the pipeline-depth pins.
+void set_pipe_depth(hhds::Graph& g, int64_t pipe_min, std::optional<int64_t> pipe_max) {
+  for (auto node : g.body().nodes()) {
+    if (livehd::graph_util::type_op_of(node) != Ntype_op::Flop) {
+      continue;
+    }
+    livehd::graph_util::create_const(g, *Dlop::create_integer(pipe_min))
+        .connect_sink(node.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "pipe_min")));
+    if (pipe_max) {
+      livehd::graph_util::create_const(g, *Dlop::create_integer(*pipe_max))
+          .connect_sink(node.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Flop, "pipe_max")));
+    }
+  }
+}
+
+// A Flop of depth d is a d-stage shift register, and a depth RANGE builds its
+// minimum, as cgen, cgen_sim and LEC do: pipe_min = 3, pipe_max = 5 is three
+// flops. Stage 0 reads `din`, stage 1 reads stage 0, and the cell's own flop --
+// the one the graph reads -- reads stage 1. Every stage keeps the clock domain
+// and width, and is named as cgen names it.
+TEST(DesignScanFlops, APipelineDepthIsAChainOfItsMinimumStages) {
+  auto f = build_flops("lgdb_pipe_depth", {"clk"});
+  set_pipe_depth(*f.g, 3, 5);
+  const auto design = scan_design(*f.g, {});
+  ASSERT_EQ(design.flops.size(), 3u);
+  const auto& s0 = design.flops[0];
+  const auto& s1 = design.flops[1];
+  const auto& q  = design.flops[2];
+  EXPECT_EQ(s0.raw_name, q.raw_name + "___pipe0_");
+  EXPECT_EQ(s1.raw_name, q.raw_name + "___pipe1_");
+  ASSERT_TRUE(s0.din && s1.din && q.din);
+  EXPECT_EQ(s0.din->kind, PinKind::Input) << "stage 0 reads the cell's din";
+  EXPECT_EQ(s1.din->kind, PinKind::Flop);
+  EXPECT_EQ(s1.din->id, s0.id);
+  EXPECT_EQ(q.din->kind, PinKind::Flop);
+  EXPECT_EQ(q.din->id, s1.id) << "the cell's own flop reads the last stage";
+  EXPECT_GT(s0.id, q.id) << "stage IDs come after every graph node";
+  for (const auto& fl : design.flops) {
+    EXPECT_EQ(fl.width, 8u);
+    EXPECT_EQ(fl.clock_ordinal, q.clock_ordinal);
+  }
+  const auto cert = build_certificate(design, {});
+  EXPECT_EQ(cert.flops.size(), 3u);
+}
+
+TEST(DesignScanFlops, ADepthOfOneIsOneFlopAndADepthOfZeroIsRefused) {
+  auto one = build_flops("lgdb_pipe_depth_one", {"clk"});
+  set_pipe_depth(*one.g, 1, 1);
+  EXPECT_EQ(scan_design(*one.g, {}).flops.size(), 1u);
+  auto zero = build_flops("lgdb_pipe_depth_zero", {"clk"});
+  set_pipe_depth(*zero.g, 0, std::nullopt);
+  expect_refusal(*zero.g, "a depth is at least 1");
+}
+
 // The join must not be ORDER-dependent: the implicit flop declared first must
 // reach the same answer as the implicit flop declared last.
 TEST(DesignScanClocks, JoinIsIndependentOfDeclarationOrder) {
@@ -1801,7 +1855,11 @@ std::shared_ptr<hhds::Graph> build_mem_fixture(std::string_view lgdb, bool read_
                                               // existing caller on `clk_a`; `swap_mem_clock` puts the
                                               // RAM on `clk_b` and the ROM on `clk_a`, which is the
                                               // only way to get a MemoryDesc off ordinal 0.
-                                              bool swap_mem_clock = false) {
+                                              bool swap_mem_clock = false,
+                                              // Number the read port 0 and the write port 1, so a
+                                              // memory clock taken from the first port with a domain
+                                              // (not the first WRITE port) is caught.
+                                              bool read_port_first = false) {
   auto& lib = livehd::Hhds_graph_library::instance(std::string(lgdb));
   auto  io  = lib.create_io("memfix");
   uint32_t pid = 1;
@@ -1827,7 +1885,11 @@ std::shared_ptr<hhds::Graph> build_mem_fixture(std::string_view lgdb, bool read_
 
   // -- the RAM: write port 0, synchronous read port 1, both on clk_a ---------
   auto ram = create_typed_node(*g, Ntype_op::Memory);
-  set_bits(ram.create_driver_pin(1), 8);  // read port 1's data output
+  const uint32_t wport = read_port_first ? 1 : 0;
+  const uint32_t rport = 1 - wport;
+  // The read port's data output: pin (#write ports + read ordinal) = 1, which
+  // does not depend on the port numbering (graph_access).
+  set_bits(ram.create_driver_pin(1), 8);
   // Memory pins are PER PORT: pid = base + port * Memory_port_stride, which is
   // how parse_memory_info recovers the port id (raw_pid / stride).
   const auto mstride = static_cast<uint32_t>(Ntype::Memory_port_stride);
@@ -1843,19 +1905,19 @@ std::shared_ptr<hhds::Graph> build_mem_fixture(std::string_view lgdb, bool read_
   rconst("wensize", wensize);
   rconst("fwd", fwd);      // 0 = no forwarding: a read sees committed contents
   rconst("posclk", 1);
-  // port 0 = WRITE, port 1 = synchronous READ.
-  rconst("rdport", 0, 0);
-  rconst("rdport", 1, 1);
-  g->get_input_pin("waddr").connect_sink(rsink("addr", 0));
-  g->get_input_pin("wdata").connect_sink(rsink("din", 0));
-  g->get_input_pin("we").connect_sink(rsink("enable", 0));
-  g->get_input_pin("raddr").connect_sink(rsink("addr", 1));
-  g->get_input_pin("re").connect_sink(rsink("enable", 1));
+  // port 0 = WRITE, port 1 = synchronous READ (swapped by read_port_first).
+  rconst("rdport", 0, wport);
+  rconst("rdport", 1, rport);
+  g->get_input_pin("waddr").connect_sink(rsink("addr", wport));
+  g->get_input_pin("wdata").connect_sink(rsink("din", wport));
+  g->get_input_pin("we").connect_sink(rsink("enable", wport));
+  g->get_input_pin("raddr").connect_sink(rsink("addr", rport));
+  g->get_input_pin("re").connect_sink(rsink("enable", rport));
   const char* ram_clk = swap_mem_clock ? "clk_b" : "clk_a";
   const char* rom_clk = swap_mem_clock ? "clk_a" : "clk_b";
-  g->get_input_pin(ram_clk).connect_sink(rsink("clock_pin", 0));
+  g->get_input_pin(ram_clk).connect_sink(rsink("clock_pin", wport));
   if (read_port_clocked) {
-    g->get_input_pin(ram_clk).connect_sink(rsink("clock_pin", 1));
+    g->get_input_pin(ram_clk).connect_sink(rsink("clock_pin", rport));
   }
   ram.create_driver_pin(1).connect_sink(g->get_output_pin("rdata"));
 
@@ -1879,23 +1941,57 @@ std::shared_ptr<hhds::Graph> build_mem_fixture(std::string_view lgdb, bool read_
   return g;
 }
 
-// A memory whose ports land on DIFFERENT domains is refused, not merged.
+// A memory whose ports land on DIFFERENT domains keeps each port's domain; none
+// is merged into another.
 //
 // Here the write port is explicitly on `clk_a` while the synchronous read port
 // carries no clock pin, so it resolves to the implicit domain. The design-wide
 // join (R15.2) would fold an implicit element into a UNIQUE explicit domain --
-// but this design has two, `clk_a` and the ROM's `clk_b`, so there is nothing to
-// join it to without guessing which. One `MemoryDesc` carries one clock, and
-// guessing would put two time bases in one ordinal.
-TEST(DesignScanClocks, MixedDomainMemoryIsRefused) {
-  auto g = build_mem_fixture("lgdb_clk_mem_mixed", /*read_port_clocked=*/false);
-  try {
-    scan_design(*g, {});
-    ADD_FAILURE() << "a memory with ports on two domains was accepted";
-  } catch (const std::exception& e) {
-    const std::string what = e.what();
-    EXPECT_NE(what.find("more than one clock domain"), std::string::npos) << what;
-    EXPECT_NE(what.find("ONE MemoryDesc.clock"), std::string::npos) << what;
+// but this design has two, `clk_a` and the ROM's `clk_b`, so the implicit
+// domain stays its own entry rather than a guess. Before decision #9 the memory
+// was refused, because one `MemoryDesc` carried one clock. Now the IMAGE
+// commits on the write port's domain and the read port's register on its own.
+// Both port orders are checked: with the read port numbered first, a memory
+// clock taken from the first port with a domain would be the READ clock.
+TEST(DesignScanClocks, MixedDomainMemoryKeepsEachPortsDomain) {
+  for (const bool read_first : {false, true}) {
+    SCOPED_TRACE(read_first ? "read port 0, write port 1" : "write port 0, read port 1");
+    auto g = build_mem_fixture(read_first ? "lgdb_clk_mem_mixed_rw" : "lgdb_clk_mem_mixed",
+                               /*read_port_clocked=*/false, /*wensize=*/1, /*fwd=*/0,
+                               /*swap_mem_clock=*/false, read_first);
+    DesignScan design;
+    try {
+      design = scan_design(*g, {});
+    } catch (const std::exception& e) {
+      FAIL() << "a memory with ports on two domains was refused: " << e.what();
+    }
+    const Memory* ram = nullptr;
+    for (const auto& [id, m] : design.memories) {
+      if (!m.is_rom) {
+        ram = &m;
+      }
+    }
+    ASSERT_NE(ram, nullptr);
+    ASSERT_EQ(ram->write_ports.size(), 1u);
+    ASSERT_EQ(ram->read_ports.size(), 1u);
+    const auto& wp = ram->ports.at(ram->write_ports[0]);
+    const auto& rp = ram->ports.at(ram->read_ports[0]);
+    ASSERT_TRUE(wp.has_domain);
+    ASSERT_TRUE(rp.has_domain) << "a synchronous read commits, so it has a domain";
+    EXPECT_EQ(rp.port_id < wp.port_id, read_first);
+    EXPECT_NE(wp.clock_ordinal, rp.clock_ordinal) << "the two ports were merged onto one domain";
+    EXPECT_EQ(design.clocks.at(wp.clock_ordinal).name, "clk_a");
+    EXPECT_EQ(ram->clock_ordinal, wp.clock_ordinal) << "the image must commit on the WRITE port's domain";
+
+    const auto cert = build_certificate(design, {});
+    ASSERT_EQ(cert.memories.size(), 1u) << "the ROM carries no MemoryDesc";
+    EXPECT_EQ(cert.memories[0].clock, wp.clock_ordinal);
+    EXPECT_TRUE(cert.memories[0].commits.empty()) << "one write domain needs no commit table";
+    bool read_reg = false;
+    for (const auto& f : cert.flops) {
+      read_reg = read_reg || f.clock == rp.clock_ordinal;
+    }
+    EXPECT_TRUE(read_reg) << "no register on the read port's domain";
   }
 }
 

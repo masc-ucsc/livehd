@@ -15,23 +15,59 @@ which is present in this repository.  On master the shared files are master's
 own; the projection consumes them unchanged.  Against the base:
 
     Translation/GraphRefine.lean      byte-identical
-    Compiler/DesignCert.lean          COMMENT-ONLY (identical without comments; recorded hash)
     Compiler/Runtime.lean             IMPORT-ONLY (identical without one added import; recorded hash)
     Compiler/DesignCertWF.lean        byte-identical
-    Compiler/DesignSemantics.lean     byte-identical
     SemanticPrimitives.lean           byte-identical
 
     Translation/LGraphModel.lean      MASTER-ADAPTED (operator boundary repairs)
     Translation/OpBridge.lean         MASTER-ADAPTED (bridges re-proved for them)
+    Compiler/DesignCert.lean          MASTER-ADAPTED (DCERT3 memory fields; recorded hash)
+    Compiler/DesignSemantics.lean     MASTER-ADAPTED (power-on image, commit table; recorded hash)
+    Compiler/MemDomains.lean          MASTER-ONLY (new; which domains of a memory fire; recorded hash)
 
 ### `Compiler/DesignCert.lean`
 
 032690762 (D2 audit item C4) corrected the `ClockDesc` docstring: it claimed
 ordinal 0 is the reference clock, "the net carrying the most state", which the
 exporter does not provide (it numbers domains by sorting on a structural key)
-and nothing in the semantics reads. The change is in a comment only, so the
-check compares the file with the base after removing Lean comments, and pins
-the current bytes with a recorded hash.
+and nothing in the semantics reads. That was a comment-only change.
+
+DCERT3 (decisions #5, #9 and #2, one revision) is a CODE change: `MemoryDesc`
+gains `init` (a memory's power-on words, entry 0 first, 0 past the end),
+`commits` (a commit table for a memory on more than one clock, decision #9) and
+one RESERVED field, `asyncImg` (an async-reset image for a whole-array cell,
+decision #2), with the `MemCommit` record and the helpers `reservedFree` and
+`initWord`.  Every field defaults to today's meaning.  Admission
+(`certWfError`) refuses a non-default reserved field until a route models it,
+and refuses a commit-table entry whose mask is 0 or names an undeclared clock,
+or whose image slot is out of range.  The check pins the bytes with a recorded
+hash.
+
+### `Compiler/DesignSemantics.lean`
+
+DCERT3 adds `MemoryDesc.powerOnImg` (word `a` is `init[a]`, 0 past its end):
+the start image every runner takes a memory from (`DirectTrace.resetState`,
+cert_trace's `resetState`).  FP's start state builds the same table as
+`MemImg.ofInit` (`initMemsOf`).
+
+Decision #9 changes the memory step, `srcMemNext`.  A memory with an EMPTY
+commit table steps exactly as before; `srcMemNext_of_empty` states it, and every
+certificate exported before #9 has an empty table.  A memory with a table takes
+`nextImg` when all its domains fire, the table entry naming exactly the domains
+that fired when only some do, and holds otherwise.  Which domains fired is
+decided in the new `Compiler/MemDomains.lean` (`allFire`, `firedIs`), so the
+source rule and the compiler's target rule read one definition.
+`interpretDesign_allEdges` gains one hypothesis: every commit-table mask is
+below `2 ^ clocks.size`, so it names only declared clocks (the same test
+admission makes; an emitted certificate proves it in `_clock_bounds`).
+
+The projection models the commit table too: its object program's `memNext`
+takes the table rule through eight small functions (`HardwareMem`), each proved
+to compute one `MemDomains` definition (`HardwareMemTable`), and admission
+types each table entry's image as the memory's table (`memTyOK`). Its runtime
+edge check also requires `domSpan ≤ e.size`, since the program reads every clock
+in a memory's span.  The check pins the bytes of both files with recorded
+hashes.
 
 ### `Compiler/Runtime.lean`
 
@@ -98,16 +134,16 @@ branch.  The statements are the pinned ones, unchanged.
 
     bash pass/lean/specialization/tests/check_overlay.sh [--semantic]
 
-Runnable from any directory.  It checks the four byte-identical files against
+Runnable from any directory.  It checks the three byte-identical files against
 the base (taken from THIS repository by default; `BASE_REPO` overrides),
-`DesignCert.lean` against the base without comments, `Runtime.lean` against
-the base without its one added import, and the two adapted files,
-`DesignCert.lean` and `Runtime.lean` against recorded sha256 values.  `--semantic` also rebuilds
+`Runtime.lean` against the base without its one added import, and the four
+adapted files, the new `MemDomains.lean` and `Runtime.lean` against recorded
+sha256 values.  `--semantic` also rebuilds
 `OperatorBridge` (no Mathlib) and, under lake, `Translation/OpBridge`, so the
 bridge theorems above are re-checked rather than trusted.
 
-If one of the four must change, change it deliberately and update this document.
-If either adapted file changes, update its recorded hash in the check script in
+If one of the three must change, change it deliberately and update this document.
+If an adapted file changes, update its recorded hash in the check script in
 the same commit, and say why.
 
 ## What the projection imports from the rest of the tree
@@ -121,8 +157,9 @@ the same commit, and say why.
 | `Compiler/Runtime.lean` | `RuntimeInput` / `RuntimeState` / `RuntimeResult`, `ClockEdges` |
 | `Compiler/DesignCertWF.lean` | well-formedness |
 | `Compiler/DesignSemantics.lean` | **`interpretDesign`** — the reference one-cycle semantics |
+| `Compiler/MemDomains.lean` | which clock domains of a memory fire (read by `srcMemNext`) |
 | `Compiler/DirectCheck.lean` | the checker's slot kinds (memory route only) |
-| `Compiler/CertIOV1` / `CertIOCodec` / `CertIORoute` | the DCERT1 and DCERT2 codecs and the router |
+| `Compiler/CertIOV1` / `CertIOCodec` / `CertIORoute` | the DCERT1 and DCERT3 codecs and the router |
 | `Compiler/ResetPolarity` / `RunAdmission` | the drivers' run-admission checks |
 
 `Translation/OpBridge.lean` needs Mathlib and is not imported by any Projection

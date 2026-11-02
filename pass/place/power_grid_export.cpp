@@ -1,8 +1,10 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <format>
 #include <fstream>
+#include <map>
 #include <set>
 #include <stdexcept>
 #include <tuple>
@@ -30,11 +32,17 @@ ph::Route_path         wire_path(const Pg_metal& s, const ph::Technology& tech, 
   if (horizontal) {
     p.width      = std::llround(s.rect.yh - s.rect.yl);
     const auto y = std::llround((s.rect.yh + s.rect.yl) / 2);
-    p.steps      = {ph::Route_point{std::llround(s.rect.xl), y, {}}, ph::Route_point{std::llround(s.rect.xh), y, {}}};
+    p.steps      = {
+        ph::Route_point{std::llround(s.rect.xl), y, {}},
+        ph::Route_point{std::llround(s.rect.xh), y, {}}
+    };
   } else {
     p.width      = std::llround(s.rect.xh - s.rect.xl);
     const auto x = std::llround((s.rect.xh + s.rect.xl) / 2);
-    p.steps      = {ph::Route_point{x, std::llround(s.rect.yl), {}}, ph::Route_point{x, std::llround(s.rect.yh), {}}};
+    p.steps      = {
+        ph::Route_point{x, std::llround(s.rect.yl), {}},
+        ph::Route_point{x, std::llround(s.rect.yh), {}}
+    };
   }
   return p;
 }
@@ -69,6 +77,8 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
   // Pin shapes participate in via intersections, but remain LEF geometry: never
   // re-emit them as modifiable stripes or trim them to their contacts.
   std::map<std::string, std::vector<size_t>> macro_pins;
+  std::map<size_t, std::string>              shape_cell;  // plan.metal id -> the macro whose pin it is
+  std::set<std::string>                      warned;      // macros whose own PG pins overlap each other (the LEF's fault)
   for (const auto& cell : input.components) {
     const auto& master = tech.macros.at(cell.macro);
     if (!master.klass.starts_with("BLOCK")) {
@@ -91,9 +101,9 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
           }
           // Snap the oriented contact to DBU before placing it.
           const auto     local = ph::orient_rect(shape.rect.translated(master.origin_x, master.origin_y),
-                                             master.width,
-                                             master.height,
-                                             cell.place.orientation);
+                                                 master.width,
+                                                 master.height,
+                                                 cell.place.orientation);
           const ph::Rect rect{double(cell.place.x) + std::llround(local.xl * input.dbu),
                               double(cell.place.y) + std::llround(local.yl * input.dbu),
                               double(cell.place.x) + std::llround(local.xh * input.dbu),
@@ -104,10 +114,24 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
           for (size_t id = grid_shapes; id < plan.metal.size(); ++id) {
             const auto& other = plan.metal[id];
             if (other.net != profile.nets[n] && other.layer == shape.layer && other.rect.overlaps(rect)) {
+              // the same macro's power and ground pins drawn on each other (a generated LEF, FakeRAM): kept as the
+              // LEF says, the grid still contacts each pin on its own stripes; between two macros it is an overlap
+              if (const auto owner = shape_cell.find(id);
+                  profile.tolerate_macro_pin_overlap && owner != shape_cell.end() && owner->second == cell.name) {
+                if (warned.insert(cell.name).second) {
+                  std::fprintf(stderr,
+                               "power grid: macro %s: its %s and %s pin shapes overlap in the LEF; kept\n",
+                               cell.name.c_str(),
+                               profile.nets[0].c_str(),
+                               profile.nets[1].c_str());
+                }
+                continue;
+              }
               throw std::invalid_argument("overlapping macro power/ground pins: " + cell.name + "/" + pin_name);
             }
           }
           ids.push_back(plan.metal.size());
+          shape_cell.emplace(plan.metal.size(), cell.name);
           plan.metal.push_back({profile.nets[n], shape.layer, rect, false});
         }
         if (ids.empty()) {
@@ -288,7 +312,10 @@ static ph::Floorplan make_grid(const ph::Technology& tech, const ph::Floorplan& 
           p.layer = array.layers[0];
           p.width = 0;
           p.shape = "STRIPE";
-          p.steps = {ph::Route_point{x, y, {}}, ph::Route_via{via_name}};
+          p.steps = {
+              ph::Route_point{x, y, {}},
+              ph::Route_via{via_name}
+          };
           paths(a.net).push_back(std::move(p));
           for (const auto& pad : pads.at(via_name)) {
             const auto r = pad.rect.translated(x, y);
@@ -421,7 +448,7 @@ std::map<std::string, uint64_t> count_channel_tracks(const ph::Technology& tech,
     throw std::invalid_argument("channel track comparison requires matching frame and tracks");
   }
   ph::Signal_metal_rules rules(tech, patched);
-  std::set<std::string> channel_layers;
+  std::set<std::string>  channel_layers;
   for (const auto& channel : channels) {
     if (!rules.clearance(channel.layer)) {
       throw std::invalid_argument("unsupported channel track rules on " + channel.layer);
@@ -445,11 +472,11 @@ std::map<std::string, uint64_t> count_channel_tracks(const ph::Technology& tech,
       throw std::invalid_argument("unsupported channel signal width/direction");
     }
     const double width = *nominal;
-    const auto reach = *rules.clearance(channel.layer);
-    ph::Rect   region{channel.region.xl * patched.dbu,
-                    channel.region.yl * patched.dbu,
-                    channel.region.xh * patched.dbu,
-                    channel.region.yh * patched.dbu};
+    const auto   reach = *rules.clearance(channel.layer);
+    ph::Rect     region{channel.region.xl * patched.dbu,
+                        channel.region.yl * patched.dbu,
+                        channel.region.xh * patched.dbu,
+                        channel.region.yh * patched.dbu};
     for (const auto value : {region.xl, region.yl, region.xh, region.yh}) {
       if (!std::isfinite(value) || value < INT32_MIN || value > INT32_MAX) {
         throw std::invalid_argument("invalid channel accounting extent");
@@ -482,7 +509,9 @@ std::map<std::string, uint64_t> count_channel_tracks(const ph::Technology& tech,
         }
         const ph::Shape wire{
             channel.layer,
-            horizontal ? ph::Rect{start, c - width / 2, end, c + width / 2} : ph::Rect{c - width / 2, start, c + width / 2, end}};
+            horizontal ? ph::Rect{        start, c - width / 2,           end, c + width / 2}
+              : ph::Rect{c - width / 2,         start, c + width / 2,           end}
+        };
         if (!rules.rectangle(wire).legal) {
           continue;
         }
@@ -551,10 +580,11 @@ Pg_profile reserve_power_grid_channels(const ph::Technology& tech, const ph::Flo
     }
     // Keep the complete stripe cross-section and extent. Cutting only at the
     // signal crossing could create isolated islands or inadequate end spacing.
-    reserved.channels.push_back(
-        {metal.layer,
-         "skip",
-         {metal.rect.xl / input.dbu, metal.rect.yl / input.dbu, metal.rect.xh / input.dbu, metal.rect.yh / input.dbu}});
+    reserved.channels.push_back({
+        metal.layer,
+        "skip",
+        {metal.rect.xl / input.dbu, metal.rect.yl / input.dbu, metal.rect.xh / input.dbu, metal.rect.yh / input.dbu}
+    });
   }
   return reserved;
 }
@@ -580,7 +610,7 @@ ph::Floorplan make_power_grid(const ph::Technology& tech, const ph::Floorplan& i
     const auto                   check = [&](const ph::Shape& shape, const std::string& name) {
       const auto cut   = tech.cut_layers.find(shape.layer);
       const auto reach = cut == tech.cut_layers.end() ? rules.clearance(shape.layer)
-                                                                        : std::optional<int64_t>{ph::signal_cut_spacing(cut->second, out.dbu)};
+                                                      : std::optional<int64_t>{ph::signal_cut_spacing(cut->second, out.dbu)};
       if (!reach) {
         throw std::invalid_argument("unsupported retained signal/PG spacing on " + shape.layer);
       }
@@ -658,8 +688,7 @@ ph::Floorplan make_power_grid(const ph::Technology& tech, const ph::Floorplan& i
 }
 void write_power_grid_report(const ph::Floorplan& fp, const Pg_profile& profile, const std::string& output_path,
                              const Pg_channel_stats* stats) {
-  if (profile.channel_max_ir_drop_v
-      && (!std::isfinite(*profile.channel_max_ir_drop_v) || *profile.channel_max_ir_drop_v < 0)) {
+  if (profile.channel_max_ir_drop_v && (!std::isfinite(*profile.channel_max_ir_drop_v) || *profile.channel_max_ir_drop_v < 0)) {
     throw std::invalid_argument("PG channel IR-drop limit must be finite and nonnegative (volts)");
   }
   std::map<std::string, double> length;

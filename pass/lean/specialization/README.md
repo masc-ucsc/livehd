@@ -9,7 +9,7 @@ This folder holds the simulator's scripts, tests and evidence. Its Lean code
 stays in the Lean project ([Code layout](#code-layout)).
 
 **Terms used below:**
-- **Certificate** (`<top>.dcert`, format DCERT2): the design as LiveHD exports it.
+- **Certificate** (`<top>.dcert`, format DCERT3): the design as LiveHD exports it.
   It lists the sources, nodes, flops, memories and clocks. In Lean it is a `DesignCert`.
 - **Reference semantics** (`Compiler.interpretDesign`, `Compiler/DesignSemantics.lean`):
   the meaning of one clock cycle of a certificate.

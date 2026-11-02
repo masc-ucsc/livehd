@@ -1,6 +1,6 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 //
-// The C++ side of DCERT2 parity.
+// The C++ side of DCERT3 parity.
 //
 // Three different things are checked here, and they are NOT the same check:
 //
@@ -147,6 +147,10 @@ CertificateIR full_fixture() {
   m.data_w   = 16;
   m.next_img = 201;
   m.clock    = 1;
+  m.init     = {"5", "0", "65535"};  // DCERT3 power-on words, 0 past the end
+  // DCERT3 commit table (decision #9): the memory on domains 1 and 2, one entry
+  // per proper non-empty subset -- {1} -> node 200, {2} -> node 202.
+  m.commits  = {{uint64_t{1} << 1, 200}, {uint64_t{1} << 2, 202}};
   c.memories.push_back(m);
 
   c.clocks = {{"clock"}, {""}, {"two words\nand a newline"}, {"clk_\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e"}};
@@ -156,7 +160,7 @@ CertificateIR full_fixture() {
 }
 
 const char* const kGolden =
-    "DCERT2\n"
+    "DCERT3\n"
     "7\n"
     "0 0 8\n"
     "1 16 -42\n"
@@ -177,7 +181,7 @@ const char* const kGolden =
     "8 7 0 0 0 0 0 0 0 0\n"
     "4 1 1 2 1 3 -5 1 2 1\n"
     "1\n"
-    "3 16 8 1\n"
+    "3 16 8 1 3 5 0 65535 2 2 7 4 9 0 0\n"
     "4\n"
     "5 clock\n"
     "0 \n"
@@ -194,7 +198,7 @@ public:
   explicit Reader(std::string_view text) : text_(text) {}
 
   void expect_magic() {
-    ASSERT_EQ(text_.substr(0, 7), "DCERT2\n");
+    ASSERT_EQ(text_.substr(0, 7), "DCERT3\n");
     at_ = 7;
   }
   // Numbers are whitespace-delimited; a leading '-' is part of the number.
@@ -321,6 +325,19 @@ TEST(DcertParity, IndependentReaderAgreesFieldByField) {
     EXPECT_EQ(r.count(), m.data_w);
     EXPECT_EQ(r.count(), c.slot_of.at(m.next_img));
     EXPECT_EQ(r.count(), m.clock);
+    // DCERT3: the power-on words, the commit table (mask, image slot), then
+    // the reserved async-reset image, written empty.
+    ASSERT_EQ(r.count(), m.init.size());
+    for (const auto& v : m.init) {
+      EXPECT_EQ(r.number(), canonical_decimal(v));
+    }
+    ASSERT_EQ(r.count(), m.commits.size());
+    for (const auto& [mask, img] : m.commits) {
+      EXPECT_EQ(r.count(), mask);
+      EXPECT_EQ(r.count(), c.slot_of.at(img));
+    }
+    EXPECT_EQ(r.count(), 0u);  // hasAsync
+    EXPECT_EQ(r.count(), 0u);  // asyncImg
   }
 
   ASSERT_EQ(r.count(), c.clocks.size());
@@ -357,6 +374,18 @@ TEST(DcertParity, ClockMetadataIsCarriedNotDefaulted) {
   CertificateIR f = full_fixture();
   f.clocks.push_back({"second"});
   EXPECT_NE(render_dcert(f), a) << "the clock table does not reach the certificate";
+
+  CertificateIR g     = full_fixture();
+  g.memories[0].init[2] = "65534";
+  EXPECT_NE(render_dcert(g), a) << "a memory's power-on words do not reach the certificate";
+
+  CertificateIR h                = full_fixture();
+  h.memories[0].commits[1].first = uint64_t{1} << 3;
+  EXPECT_NE(render_dcert(h), a) << "a commit-table mask does not reach the certificate";
+
+  CertificateIR k                 = full_fixture();
+  k.memories[0].commits[0].second = 201;
+  EXPECT_NE(render_dcert(k), a) << "a commit-table image does not reach the certificate";
 }
 
 TEST(DcertParity, DecimalsAreCanonicalisedNotGuessed) {
@@ -385,12 +414,12 @@ TEST(DcertParity, UnresolvableIdIsRefused) {
 TEST(DcertParity, EmptyCertificateStillStatesEverySection) {
   CertificateIR c;  // default: no records, one clock named "clock"
   index_certificate(c);
-  EXPECT_EQ(render_dcert(c), "DCERT2\n0\n0\n0\n0\n0\n1\n5 clock\n");
+  EXPECT_EQ(render_dcert(c), "DCERT3\n0\n0\n0\n0\n0\n1\n5 clock\n");
 }
 
 // The two emitters walk the same IR; where they both carry a field, they must
 // say the same thing. Checked on the values most likely to drift -- the ones
-// DCERT2 added.
+// DCERT2 and DCERT3 added.
 TEST(DcertParity, AgreesWithTheLeanLiteralEmitterOnClockMetadata) {
   const CertificateIR c = full_fixture();
   std::ostringstream  literal;
@@ -399,10 +428,12 @@ TEST(DcertParity, AgreesWithTheLeanLiteralEmitterOnClockMetadata) {
 
   EXPECT_NE(lit.find("clock := 2, asyncReset := true"), std::string::npos);
   EXPECT_NE(lit.find("clock := 0, asyncReset := false"), std::string::npos);
-  EXPECT_NE(lit.find("nextImg := 8, clock := 1"), std::string::npos);
+  EXPECT_NE(lit.find("nextImg := 8, clock := 1, init := #[5, 0, 65535], "
+                     "commits := #[{ mask := 2, nextImg := 7 }, { mask := 4, nextImg := 9 }] }"),
+            std::string::npos);
   EXPECT_NE(lit.find("{ name := \"clock\" }"), std::string::npos);
   EXPECT_NE(lit.find("{ name := \"\" }"), std::string::npos);
-  // The literal emitter ESCAPES; DCERT2 does not, and carries the raw bytes.
+  // The literal emitter ESCAPES; DCERT3 does not, and carries the raw bytes.
   EXPECT_NE(lit.find("two words\\nand a newline"), std::string::npos);
   EXPECT_NE(render_dcert(c).find("two words\nand a newline"), std::string::npos);
 }

@@ -302,16 +302,16 @@ theorem directFlopNext_agree (rho : Nat → CertVal) (env : SlotEnv)
 
 /-- One transition of the post-lowering IR, unchecked, in a step where the
 clocks `e` fire.  `directStep` is the public entry point; this is the body its
-theorem is about.  A memory whose domain is quiet keeps its pre-step image. -/
+theorem is about.  A memory steps by the source rule (`srcMemNext`) read off the
+dense environment: a quiet domain keeps its pre-step image, and a memory on more
+than one domain takes its commit-table entry (DCERT3, decision #9). -/
 def directStepRaw (D : DesignCert) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
     RuntimeResult :=
   let env := evalDense D.nodes (sourceEnvArr D.sources i s)
   { outputs   := D.outputs.map fun o => bv_resize o.width (denoteRef env o.slot).asBV
     nextState :=
       { flops := D.flops.mapIdx fun idx f => directFlopNext env e s idx f
-        mems  := D.memories.mapIdx fun idx m =>
-          if fires e m.clock then (denoteRef env m.nextImg).asMem
-          else s.mems[idx]?.getD (fun _ => mk_bv 0 0) } }
+        mems  := D.memories.mapIdx fun idx m => srcMemNext (denoteRef env) e s idx m } }
 
 /-- **The public one-step API.**  Fail-closed: a certificate outside the
 accepted fragment, or an edge vector / input / state of the wrong shape, is
@@ -337,7 +337,7 @@ theorem directStepRaw_correct (D : DesignCert) (hdb : DesignCert.DepsBounded D)
   have hrho : evalGraphG D.toGraphCert.topo D.toGraphCert (srcEnv D i s)
       = denoteRef (evalDenseList D.nodes.toList (sourceEnvArr D.sources i s)) := by
     funext k; exact evalDense_slot_agree D hdb i s k
-  simp only [directStepRaw, interpretDesign, evalDense_eq_list, hrho, srcMemNext]
+  simp only [directStepRaw, interpretDesign, evalDense_eq_list, hrho]
   congr 1
   congr 1
   apply Array.ext
@@ -391,10 +391,12 @@ theorem directStepRaw_sizes (D : DesignCert) (e : ClockEdges) (i : RuntimeInput)
 
 /-- A certificate the checker accepts means, under the one-clock stimulus,
 exactly what it meant before clocks existed (`interpretDesign_allEdges`, with
-its range hypotheses discharged by `DesignSemWF`).  Every route theorem about a
+its range hypotheses discharged by `DesignSemWF`, and the clocks a memory's
+commit table names given as `hc`).  Every route theorem about a
 pre-provenance certificate therefore still holds of it, verbatim, under
 `allEdges`. -/
 theorem interpretDesign_allEdges_of_wf (D : DesignCert) (hwf : DesignSemWF D)
+    (hc : ∀ m ∈ D.memories, ∀ c ∈ m.commits, c.mask < 2 ^ D.clocks.size)
     (i : RuntimeInput) (s : RuntimeState) :
     interpretDesign D (allEdges D) i s = interpretDesignLegacy D i s := by
   apply interpretDesign_allEdges
@@ -404,6 +406,7 @@ theorem interpretDesign_allEdges_of_wf (D : DesignCert) (hwf : DesignSemWF D)
   · intro m hm
     obtain ⟨k, hk⟩ := exists_getElem?_of_mem_toList (Array.mem_def.mp hm)
     exact hwf.memClocks k m hk
+  · exact hc
 
 end Direct
 end Compiler

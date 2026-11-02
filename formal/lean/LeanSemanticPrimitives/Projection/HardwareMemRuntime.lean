@@ -83,10 +83,12 @@ def flopBoundOKB (D : DesignCert) (n : Nat) : Bool :=
   D.sources.toList.all (fun sd => decide (SourceFlopBound sd n))
 
 /-- Every flop and every memory commits on an ordinal the edge vector actually
-carries, so `firesAt` is not reading past it. -/
+carries, so `firesAt` is not reading past it. A memory's whole clock span counts:
+its commit table's clocks too (decision #9), which `allFireO` / `firedIsO` read. -/
 def edgesOKB (D : DesignCert) (e : ClockEdges) : Bool :=
   D.flops.toList.all (fun f => decide (f.clock < e.size))
   && D.memories.toList.all (fun md => decide (md.clock < e.size))
+  && D.memories.toList.all (fun md => decide (md.domSpan ≤ e.size))
 
 def runtimeOKB (D : DesignCert) (i : RuntimeInput) (st : StateM)
     (e : ClockEdges) : Bool :=
@@ -145,10 +147,16 @@ theorem edgesOKB_flops {D : DesignCert} {e : ClockEdges} (h : edgesOKB D e = tru
     ∀ f ∈ D.flops.toList, f.clock < e.size := by
   unfold edgesOKB at h
   simp only [Bool.and_eq_true, List.all_eq_true, decide_eq_true_eq] at h
-  exact h.1
+  exact h.1.1
 
 theorem edgesOKB_mems {D : DesignCert} {e : ClockEdges} (h : edgesOKB D e = true) :
     ∀ md ∈ D.memories.toList, md.clock < e.size := by
+  unfold edgesOKB at h
+  simp only [Bool.and_eq_true, List.all_eq_true, decide_eq_true_eq] at h
+  exact h.1.2
+
+theorem edgesOKB_span {D : DesignCert} {e : ClockEdges} (h : edgesOKB D e = true) :
+    ∀ md ∈ D.memories.toList, md.domSpan ≤ e.size := by
   unfold edgesOKB at h
   simp only [Bool.and_eq_true, List.all_eq_true, decide_eq_true_eq] at h
   exact h.2
@@ -172,7 +180,7 @@ theorem admits_run {D : DesignCert} {i : RuntimeInput} {st : StateM} {e : ClockE
   simp only [Bool.and_eq_true] at hR
   obtain ⟨⟨⟨hst, hin⟩, hfb⟩, hed⟩ := hR
   exact admits_mainM_resolved hA (stateOKB_shape hst) (inputOKB_sound hin)
-    (flopBoundOKB_sound hfb) (edgesOKB_flops hed) (edgesOKB_mems hed)
+    (flopBoundOKB_sound hfb) (edgesOKB_flops hed) (edgesOKB_mems hed) (edgesOKB_span hed)
     (stateOKB_flopSize hst)
 
 /-! ## 5. Executed: the policy accepts the fixtures and REFUSES the near misses
@@ -504,23 +512,22 @@ theorem admits_nextImgTy {D : DesignCert} (h : admitsB D = true)
       (show D.memories.toList[idx]? = some md by rw [← hmd]; simp)
     exact h2 ▸ List.getElem_mem h1
   have hsz := admitsB_size h hts
-  unfold admitsB at h
-  rw [hts] at h
-  simp only [Bool.and_eq_true] at h
-  have hthis := List.all_eq_true.mp h.2.2 md hmem
-  cases hty : ts[md.nextImg]? with
-  | none   => rw [hty] at hthis; simp at hthis
-  | some t =>
-      cases t with
-      | bv w     => rw [hty] at hthis; simp at hthis
-      | rom dw n => rw [hty] at hthis; simp at hthis
-      | tbl aw dw =>
-          rw [hty] at hthis
-          simp only [Bool.and_eq_true, beq_iff_eq] at hthis
-          constructor
-          · unfold tyAt; rw [hts]
-            simp only [Option.bind_some, hty, hthis.1, hthis.2]
-          · rw [← hsz]; exact mem_lt_of_getElem? hty
+  have hty := memTyOK_next (admits_memTyOK h hts hmd)
+  refine ⟨?_, ?_⟩
+  · unfold tyAt; rw [hts]; simp [hty]
+  · rw [← hsz]; exact mem_lt_of_getElem? hty
+
+/-- …and each commit-table entry's image slot too (decision #9). -/
+theorem admits_commitTy {D : DesignCert} (h : admitsB D = true)
+    {idx : Nat} {md : MemoryDesc} (hmd : D.memories[idx]? = some md)
+    {c : MemCommit} (hc : c ∈ md.commits) :
+    tyAt D c.nextImg = some (.tbl md.aw md.dw) ∧ c.nextImg < D.numSlots := by
+  obtain ⟨ts, hts⟩ := admitsB_infer h
+  have hsz := admitsB_size h hts
+  have hty := memTyOK_commit (admits_memTyOK h hts hmd) hc
+  refine ⟨?_, ?_⟩
+  · unfold tyAt; rw [hts]; simp [hty]
+  · rw [← hsz]; exact mem_lt_of_getElem? hty
 
 /-- **The policy is preserved.**  Both branches of the per-memory commit give an
 image of the declared shape: the written table from §6's induction, the quiet
@@ -566,18 +573,32 @@ theorem admits_run_pres {D : DesignCert} {i : RuntimeInput} {st : StateM}
       = Compiler.srcMemNext (slotValM D i st) e (StateM.denote st) idx md :=
     Option.some.inj hx
   rw [hmden]
-  unfold Compiler.srcMemNext
-  by_cases hf : fires e md.clock
-  · simp only [hf, if_true]
-    obtain ⟨hty, hnum⟩ := admits_nextImgTy hA hmd
-    exact admits_slot_memwidth hA (stateOKB_word hst) i md.nextImg hnum
-      (.tbl md.aw md.dw) md.dw hty (by simp [tyDW]) x
-  · simp only [hf, Bool.false_eq_true, if_false]
+  -- an image the commit can take: a slot typed as this memory's table ...
+  have hslot : ∀ k, tyAt D k = some (.tbl md.aw md.dw) → k < D.numSlots →
+      ((slotValM D i st k).asMem x).width = md.dw := fun k hty hnum =>
+    admits_slot_memwidth hA (stateOKB_word hst) i k hnum (.tbl md.aw md.dw) md.dw hty
+      (by simp [tyDW]) x
+  -- ... or the held image
+  have hheld : (((StateM.denote st).mems[idx]?.getD (fun _ => mk_bv 0 0)) x).width = md.dw := by
     obtain ⟨m0, hm0, hsh0⟩ := stateOKB_word hst idx md hmd
     have hq : (StateM.denote st).mems[idx]? = some m0.denote := by
       simp [StateM.denote, Array.getElem?_map, hm0]
     rw [hq, Option.getD_some]
     exact memShape_denote_width hsh0 x
+  obtain ⟨hty, hnum⟩ := admits_nextImgTy hA hmd
+  unfold Compiler.srcMemNext
+  split
+  · split
+    · exact hslot _ hty hnum
+    · exact hheld
+  · split
+    · exact hslot _ hty hnum
+    · cases hf : md.commits.find? (md.firedIs e) with
+      | some c =>
+        simp only [hf]
+        obtain ⟨htc, hnc⟩ := admits_commitTy hA hmd (Array.mem_of_find?_eq_some hf)
+        exact hslot _ htc hnc
+      | none => simp only [hf]; exact hheld
 
 /-- The flop-vector bound is not an independent fact: `checkSource` already
 pins every `flopQ`/`flopQAsync` source to a DECLARED flop, so a state with at
@@ -652,14 +673,15 @@ theorem admits_run_two {D : DesignCert} {i₁ i₂ : RuntimeInput} {st : StateM}
 
 Checking a state is only half of a policy.  If no state passed, `admits_run`
 would be vacuous.  `initStateOf` builds one from the design alone — each flop at
-its declared reset value, each memory a zero table of its declared geometry —
-and it passes. -/
+its declared reset value, each memory a full table of its declared geometry
+holding its power-on words (`MemoryDesc.init`, 0 past its end) — and it
+passes. -/
 
 def initFlopsOf (D : DesignCert) : Array BV :=
   D.flops.map (fun f => mk_bv f.width f.resetValue)
 
 def initMemsOf (D : DesignCert) : Array MemImg :=
-  D.memories.map (fun md => MemImg.zeroImg md.aw md.dw)
+  D.memories.map (fun md => MemImg.ofInit md.aw md.dw md.init)
 
 def initStateOf (D : DesignCert) : StateM :=
   { flops := initFlopsOf D, mems := initMemsOf D }
@@ -678,12 +700,23 @@ theorem zeroImg_shape (md : MemoryDesc) :
     simpa [MemImg.zeroImg] using hw
   rw [List.eq_of_mem_replicate hmem]; simp [mk_bv]
 
+/-- The power-on image has the declared geometry whatever `init` holds: a
+longer `init` is cut at `2 ^ aw`, a shorter one padded with 0, and every word is
+built at width `dw`. -/
+theorem ofInit_shape (md : MemoryDesc) :
+    MemShapeOK md (MemImg.ofInit md.aw md.dw md.init) := by
+  refine ⟨by simp [MemImg.ofInit], ?_, by simp [MemImg.ofInit, mk_bv]⟩
+  intro w hw
+  simp only [MemImg.ofInit, List.mem_map, List.mem_range] at hw
+  obtain ⟨a, -, rfl⟩ := hw
+  simp [mk_bv]
+
 theorem initStateOf_word (D : DesignCert) : StateWordOK D (initStateOf D) := by
   intro idx md hmd
   have hlt : idx < D.memories.size := mem_lt_of_getElem? hmd
   have hmd' : D.memories[idx] = md := by
     rw [Array.getElem?_eq_getElem hlt] at hmd; exact Option.some.inj hmd
-  refine ⟨MemImg.zeroImg md.aw md.dw, ?_, zeroImg_shape md⟩
+  refine ⟨MemImg.ofInit md.aw md.dw md.init, ?_, ofInit_shape md⟩
   simp [initStateOf, initMemsOf, hlt, hmd']
 
 /-- **The canonical state passes.** -/

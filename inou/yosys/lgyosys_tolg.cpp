@@ -2353,10 +2353,48 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       // memory_map and proc put power-on values on Q wires, rather than
       // on the DFF cell. Resolve aliases and slices through FfInitVals.
       // With reset, the initial sink already describes the RESET value.
-      if (!cell->hasPort(ID::SRST) && !cell->hasPort(ID::ARST) && !cell->hasPort(ID::ALOAD) && cell->hasPort(ID::Q)) {
+      const bool has_reset = cell->hasPort(ID::SRST) || cell->hasPort(ID::ARST) || cell->hasPort(ID::ALOAD);
+      if (!has_reset && cell->hasPort(ID::Q)) {
         const auto init = initvals(cell->getPort(ID::Q));
         if (!init.is_fully_undef()) {
           setup_sink_by_name(exit_node, "initial").connect_driver(create_const(*g, *Dlop::from_pyrope("0ub" + init.as_string())));
+        }
+      } else if (has_reset && cell->hasPort(ID::Q)) {
+        // The Flop cell has ONE value pin, `initial`, and with a reset pin it
+        // holds the reset value; every consumer (lhd sim, lec, the Lean
+        // exporter) also starts the flop at it. So an initializer
+        // (`reg q = 5;`) that disagrees with the reset value is lost here. A
+        // warning, not an error: the flop is still read, a reset wins.
+        const auto init = initvals(cell->getPort(ID::Q));
+        if (!init.is_fully_undef()) {
+          std::string reset_bits;  // MSB first; empty when the value is not a constant
+          if (cell->hasPort(ID::ALOAD)) {
+            const auto ad = sigmap(cell->getPort(ID::AD));
+            if (ad.is_fully_const()) {
+              reset_bits = ad.as_const().as_string();
+            }
+          } else {
+            const auto value_id = cell->hasPort(ID::SRST) ? ID::SRST_VALUE : ID::ARST_VALUE;
+            reset_bits          = cell->hasParam(value_id) ? cell->getParam(value_id).as_string()
+                                                           : std::string(static_cast<size_t>(init.size()), '0');
+          }
+          const auto init_bits = init.as_string();
+          // An x bit of the initializer is "any value", so the reset value
+          // keeps it; only a defined bit that differs is lost.
+          bool       lost      = reset_bits.size() != init_bits.size();
+          for (size_t i = 0; !lost && i < init_bits.size(); ++i) {
+            lost = (init_bits[i] == '0' || init_bits[i] == '1') && init_bits[i] != reset_bits[i];
+          }
+          if (lost) {
+            log_warning(
+                "flop '%s' has an initializer (%d'b%s) that differs from its reset value (%s). A LiveHD flop has one "
+                "value, used both as the reset value and as the start value, so the initializer is DROPPED: lhd sim, "
+                "`lhd lec` and the Lean simulators start this flop at its reset value.\n",
+                log_signal(cell->getPort(ID::Q)),
+                init.size(),
+                init_bits.c_str(),
+                reset_bits.empty() ? "the async-load data input" : (std::to_string(reset_bits.size()) + "'b" + reset_bits).c_str());
+          }
         }
       }
       setup_sink_by_name(exit_node, "clock_pin").connect_driver(get_dpin(g, cell, ID::CLK));
@@ -2873,14 +2911,13 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       // imported as NEGEDGE. Both silent. The polarity is derived from every
       // CLOCKED port now, read ports included, which fixes both.
       //
-      // A memory whose ports DISAGREE is a shape LiveHD does not model. It is
-      // NOT a read error -- the language allows it, so
-      // parse it, keep it, let it regenerate -- it is a FORMAL error. The
-      // sentinel below carries "mixed" downstream; pass/lec refuses such a memory
-      // BY NAME and the user opts back in per memory with
-      // `--set formal.ignore_memory=<name>`, which blackboxes it. A WARNING here
-      // (not silence) because everything downstream of this point sees a single
-      // edge, so the loss has to be visible at the moment it happens.
+      // A memory whose ports DISAGREE (decision #9) keeps every port's edge on
+      // that port's own clock pin: the cell is marked rising, and a falling
+      // port's clock pin is driven by `clk == 0`, i.e. `posedge ~clk`. Every
+      // consumer reads a port's edge from its clock pin (the commit class walks
+      // the inversion; cgen emits per-port clocks), so nothing is lost. A
+      // WARNING still names the memory, because `lhd lec`/`lhd formal` refuse
+      // a derived memory clock.
       const auto param_bit = [&](const RTLIL::IdString& id, int i) {
         if (!cell->hasParam(id)) {
           return false;
@@ -2904,8 +2941,8 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           mem_mixed = true;
           log_warning(
               "memory '%s' mixes clock edges across its ports (%s, but %s port %d is %s). The Memory cell has ONE "
-              "global posclk, so the per-port edges are NOT represented: it is kept and will regenerate on a single "
-              "edge, and `lhd lec`/`lhd formal` REFUSE it by name (opt back in with "
+              "global posclk, so it is marked rising and each falling port is clocked through an inverter; "
+              "`lhd lec`/`lhd formal` refuse the derived clock (opt back in with "
               "--set formal.ignore_memory=<name>, which blackboxes it).\n",
               cell->name.c_str(),
               edge_why.c_str(),
@@ -2927,7 +2964,28 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       // A memory with no clocked port (async ROM, comb read) has no edge to record: keep the default
       // posedge. Marking it negedge made an undriven clock look like a falling-edge state element, so
       // the phase schedule saw a second root clock next to the design's real one.
-      const int wr_clkp = mem_mixed ? Ntype::Memory_posclk_mixed : ((!have_edge || mem_pos) ? 1 : 0);
+      const int wr_clkp = (mem_mixed || !have_edge || mem_pos) ? 1 : 0;
+
+      // A port's clock pin. On a MIXED memory a falling port's pin is `clk == 0`
+      // (one inverter per clock net), so its own pin carries its edge.
+      std::vector<std::pair<hhds::Pin_class, hhds::Pin_class>> inverted_clocks;
+
+      const auto port_clock = [&](hhds::Pin_class clk, bool pos) {
+        if (!mem_mixed || pos) {
+          return clk;
+        }
+        for (const auto& [c, inv] : inverted_clocks) {
+          if (c == clk) {
+            return inv;
+          }
+        }
+        auto eq = create_typed_node(*g, Ntype_op::EQ, 1);
+        livehd::graph_util::setup_sink_pid(eq, 0).connect_driver(clk);
+        livehd::graph_util::setup_sink_pid(eq, 0).connect_driver(create_const(*g, *Dlop::create_integer(0)));
+        auto inv = eq.create_driver_pin(0);
+        inverted_clocks.emplace_back(clk, inv);
+        return inv;
+      };
 
       setup_sink_by_name(exit_node, "bits").connect_driver(create_const(*g, *Dlop::create_integer(width)));
       setup_sink_by_name(exit_node, "fwd").connect_driver(create_const(*g, transp ? *transp : *Dlop::create_integer(0)));
@@ -3026,7 +3084,9 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
         livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(0 + port_n))
             .connect_driver(mem_index(wr_addr_dpin));
         livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(2 + port_n))
-            .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::WR_CLK).extract(i, 1), false));
+            .connect_driver(port_clock(
+                create_pick_concat_dpin(g, cell->getPort(ID::WR_CLK).extract(i, 1), false),
+                (cell->hasParam(ID::WR_CLK_ENABLE) && !param_bit(ID::WR_CLK_ENABLE, i)) || param_bit(ID::WR_CLK_POLARITY, i)));
       }
       for (int i = 0; i < rdports; i++) {
         auto port_n = (wrports + i) * static_cast<int>(Ntype::Memory_port_stride);
@@ -3061,7 +3121,8 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
           setup_sink_by_name(zero_mux, "s").connect_driver(sel);
         }
         livehd::graph_util::setup_sink_pid(exit_node, static_cast<hhds::Port_id>(2 + port_n))
-            .connect_driver(create_pick_concat_dpin(g, cell->getPort(ID::RD_CLK).extract(i, 1), false));
+            .connect_driver(port_clock(create_pick_concat_dpin(g, cell->getPort(ID::RD_CLK).extract(i, 1), false),
+                                       !param_bit(ID::RD_CLK_ENABLE, i) || param_bit(ID::RD_CLK_POLARITY, i)));
       }
     } else if (cell->type.in(ID($memrd), ID($memrd_v2), ID($memwr), ID($memwr_v2), ID($meminit), ID($meminit_v2))) {
       // A memory port cell is only representable once `memory_collect` packs it

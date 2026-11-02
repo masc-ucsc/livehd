@@ -400,8 +400,11 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
   ofs << "  simp only [bv_to_bitvec_bvenc_zext, bv_to_bitvec_bvenc, bv_zext_id]\n\n";
 
   if (sequential) {
-    ofs << "theorem " << base_name << "_next_refines_fast " << P << " : " << base_name << "_next " << A << " = " << base_name
-        << "_next_cert " << A << " := by\n";
+    // Per-domain edges (two or more clocks) are one more argument of the
+    // next-state functions; the proof body does not change.
+    const auto EP = names.edge_parameter(), EA = names.edge_argument();
+    ofs << "theorem " << base_name << "_next_refines_fast " << EP << P << " : " << base_name << "_next " << EA << A << " = "
+        << base_name << "_next_cert " << EA << A << " := by\n";
     ofs << "  have hb := GraphRefine." << (mem_mode ? "evalGraphC_of_localAgree " : "evalGraph_of_localAgree ") << G << " ("
         << base_name << "_phi " << A << ") (" << base_name << "_sourceEnv " << A << ")\n";
     ofs << "    " << base_name << "_bridge_nodup " << base_name << "_bridge_depord " << base_name << "_bridge_some (" << base_name
@@ -417,9 +420,17 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
         }
       }
     }
+    // A memory's next state reads its image, and each commit-table entry's
+    // image too (DCERT3, decision #9); both sides choose among them by the same
+    // edge test (legacy_memory_next), so rewriting the images is the proof.
     for (const auto& m : c.memories) {
       if (next_seen.insert(m.next_img).second) {
         next_ids.push_back(m.next_img);
+      }
+      for (const auto& cm : m.commits) {
+        if (next_seen.insert(cm.second).second) {
+          next_ids.push_back(cm.second);
+        }
       }
     }
     for (const auto d : next_ids) {
@@ -448,10 +459,10 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
     }
     ofs << "\n";
 
-    ofs << "theorem " << base_name << "_step_refines_fast " << P << " : " << base_name << "_step " << A << " = " << base_name
-        << "_step_cert " << A << " := by\n";
+    ofs << "theorem " << base_name << "_step_refines_fast " << EP << P << " : " << base_name << "_step " << EA << A << " = "
+        << base_name << "_step_cert " << EA << A << " := by\n";
     ofs << "  unfold " << base_name << "_step " << base_name << "_step_cert\n";
-    ofs << "  rw [" << base_name << "_next_refines_fast " << A << ", " << base_name << "_comb_refines_fast " << A << "]\n\n";
+    ofs << "  rw [" << base_name << "_next_refines_fast " << EA << A << ", " << base_name << "_comb_refines_fast " << A << "]\n\n";
   }
 
   ofs << "\n-- Axiom audit: sorryAx or a missing name is a failure.\n";

@@ -87,7 +87,7 @@ struct Domino_variant_geometry {
 // inverter's edge rails at 0, H and 2H over the full width in the rail stack
 // of `rail_template` (template_rails): t0 and t1 differ only there, so one
 // fits each start-row parity with the same function, pins and drive.
-// A_domino(s) = x * A_NOT + A_register(s) with 2x = domino_proxy_devices, as
+// A_domino(s) = x * A_NOT + A_register(s) with 6x = domino_proxy_sixths, as
 // in domino_area, here on the LEF footprint (placement) basis: A_NOT is the
 // reference inverter's footprint and A_register(s) the footprint of
 // reference.registers[variant], charged once. Variants share the PDN term.

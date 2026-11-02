@@ -127,7 +127,45 @@ def geomAt (D : DesignCert) (k : Nat) : Option Nat :=
   | some (.tbl aw _) => some aw
   | _                => none
 
-/-! ## 2. The executable checker -/
+/-! ## 2. The executable checker
+
+Every image a memory can take must type as THAT memory's table: its `nextImg`,
+and, for a memory on more than one clock, each commit-table entry's image
+(`MemoryDesc.commits`, decision #9). Each test is named once (`imgTyOK`,
+`memTyOK`) so the extended checker and the support report read the same
+function. -/
+
+/-- Slot `k` types as an `aw × dw` table. -/
+def imgTyOK (ts : Array SlotTy) (aw dw k : Nat) : Bool :=
+  match ts[k]? with
+  | some (.tbl a d) => a == aw && d == dw
+  | _               => false
+
+theorem imgTyOK_eq {ts : Array SlotTy} {aw dw k : Nat} (h : imgTyOK ts aw dw k = true) :
+    ts[k]? = some (.tbl aw dw) := by
+  unfold imgTyOK at h
+  split at h
+  · rename_i a d hk
+    simp only [Bool.and_eq_true, beq_iff_eq] at h
+    rw [hk, h.1, h.2]
+  · simp at h
+
+/-- A memory's images all type as ITS table. -/
+def memTyOK (ts : Array SlotTy) (md : MemoryDesc) : Bool :=
+  imgTyOK ts md.aw md.dw md.nextImg
+  && md.commits.toList.all (fun c => imgTyOK ts md.aw md.dw c.nextImg)
+
+theorem memTyOK_next {ts : Array SlotTy} {md : MemoryDesc} (h : memTyOK ts md = true) :
+    ts[md.nextImg]? = some (.tbl md.aw md.dw) := by
+  unfold memTyOK at h
+  simp only [Bool.and_eq_true] at h
+  exact imgTyOK_eq h.1
+
+theorem memTyOK_commit {ts : Array SlotTy} {md : MemoryDesc} (h : memTyOK ts md = true)
+    {c : MemCommit} (hc : c ∈ md.commits) : ts[c.nextImg]? = some (.tbl md.aw md.dw) := by
+  unfold memTyOK at h
+  simp only [Bool.and_eq_true, List.all_eq_true] at h
+  exact imgTyOK_eq (h.2 c (Array.mem_def.mp hc))
 
 def admitsB (D : DesignCert) : Bool :=
   Direct.acceptsDesign D
@@ -135,10 +173,7 @@ def admitsB (D : DesignCert) : Bool :=
       | none    => false
       | some ts =>
           ts.size == D.numSlots
-          && D.memories.toList.all (fun md =>
-               match ts[md.nextImg]? with
-               | some (.tbl aw dw) => aw == md.aw && dw == md.dw
-               | _                 => false))
+          && D.memories.toList.all (memTyOK ts))
 
 /-! ## 3. Soundness: what a successful check gives
 
@@ -248,23 +283,30 @@ theorem admits_nextImgGeom {D : DesignCert} (h : admitsB D = true) :
     obtain ⟨h1, h2⟩ := List.getElem?_eq_some_iff.mp
       (show D.memories.toList[idx]? = some md by rw [← hmd]; simp)
     exact h2 ▸ List.getElem_mem h1
+  have hok : memTyOK ts md = true := by
+    unfold admitsB at h
+    rw [hts] at h
+    simp only [Bool.and_eq_true] at h
+    exact List.all_eq_true.mp h.2.2 md hmem
+  have hg : ∀ k, ts[k]? = some (.tbl md.aw md.dw) → geomAt D k = some md.aw := by
+    intro k hk
+    unfold geomAt tyAt
+    rw [hts]
+    simp [hk]
+  exact ⟨hg _ (memTyOK_next hok), fun c hc => hg _ (memTyOK_commit hok hc)⟩
+
+/-- The memory-type facts of one admitted memory, as `memTyOK`. -/
+theorem admits_memTyOK {D : DesignCert} (h : admitsB D = true) {ts : Array SlotTy}
+    (hts : inferTys D = some ts) {idx : Nat} {md : MemoryDesc}
+    (hmd : D.memories[idx]? = some md) : memTyOK ts md = true := by
+  have hmem : md ∈ D.memories.toList := by
+    obtain ⟨h1, h2⟩ := List.getElem?_eq_some_iff.mp
+      (show D.memories.toList[idx]? = some md by rw [← hmd]; simp)
+    exact h2 ▸ List.getElem_mem h1
   unfold admitsB at h
   rw [hts] at h
   simp only [Bool.and_eq_true] at h
-  have hthis := List.all_eq_true.mp h.2.2 md hmem
-  unfold geomAt tyAt
-  rw [hts]
-  simp only [Option.bind_some]
-  cases hty : ts[md.nextImg]? with
-  | none => rw [hty] at hthis; simp at hthis
-  | some t =>
-      cases t with
-      | bv w     => rw [hty] at hthis; simp at hthis
-      | rom dw n => rw [hty] at hthis; simp at hthis
-      | tbl aw dw =>
-          rw [hty] at hthis
-          simp only [Bool.and_eq_true, beq_iff_eq] at hthis
-          rw [hthis.1]
+  exact List.all_eq_true.mp h.2.2 md hmem
 
 /-! ### The per-node recurrence
 
@@ -552,6 +594,16 @@ def laneDesign : DesignCert :=
                     , { op := .Op_And,          width := 32, deps := #[5, 4] }
                     , { op := .Op_MemWriteBE 1, width := 16, deps := #[0, 1, 6, 2] } ] })
 
+/- A COMMIT TABLE (decision #9): an entry whose image types as the memory's own
+   table is admitted; one whose image is a scalar slot (6, the `Op_And`) is
+   refused. -/
+#guard admitsB { mixedDesign with
+          memories := #[ { aw := 5, dw := 32, nextImg := 7, clock := 0,
+                           commits := #[{ mask := 1, nextImg := 7 }] } ] }
+#guard !(admitsB { mixedDesign with
+          memories := #[ { aw := 5, dw := 32, nextImg := 7, clock := 0,
+                           commits := #[{ mask := 1, nextImg := 6 }] } ] })
+
 /- the unimplemented plain `Op_MemWrite` -/
 #guard !(admitsB { mixedDesign with
           nodes := #[ { op := .Op_MemRead,  width := 32, deps := #[0, 1, 3] }
@@ -638,6 +690,8 @@ theorem laneDesign_static : StaticPremises laneDesign :=
   admits_static_premises laneDesign_admits
 
 #audit_axioms admits_semwf
+#audit_axioms memTyOK_commit
+#audit_axioms admits_memTyOK
 #audit_axioms admits_wf
 #audit_axioms admits_geom_src
 #audit_axioms admits_nextImgGeom

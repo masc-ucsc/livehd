@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""DCERT2 delta analyzer -- READ-ONLY and FAIL-CLOSED.
+"""DCERT3 delta analyzer -- READ-ONLY and FAIL-CLOSED.
 
 Measures how much a certificate changed between two emissions.  It exists to
 answer ONE question that `DIRECTION4_INCREMENTAL.md` section 6 item 6 left
@@ -9,7 +9,7 @@ it only measures churn.
 THE GRAMMAR IS THE NORMATIVE ONE.  `Compiler.CertIO.renderCert` defines the
 wire format and this reader follows it field for field:
 
-    DCERT2
+    DCERT3
     <nSources>  then per source, a tag and its fields:
        0 idx width                                   input
        1 width value                                 const
@@ -21,14 +21,17 @@ wire format and this reader follows it field for field:
     <nOutputs>  then per output:  slot width
     <nFlops>    then per flop:
                   width din hasEn en hasRst rst resetValue activeLow clock asyncReset
-    <nMemories> then per memory:  aw dw nextImg clock
+    <nMemories> then per memory:
+                  aw dw nextImg clock nInit i0 .. nCommits (mask nextImg).. hasAsync asyncImg
     <nClocks>   then per clock:   <nameBytes> <name>
 
 RESTORED from pinned D4 f6ad1fe29f8f15aeda045115864fd81a34c33aef and adapted to
 DCERT2. The flop record gained `clock` and `asyncReset`, the memory record
 gained `clock`, and the clocks section is new. A historical DCERT1 file is
 REFUSED by magic -- never re-read as a one-clock design, which would invent a
-domain the bytes do not state.
+domain the bytes do not state. DCERT3 extends only the memory record (its
+power-on words, then a commit table for a memory on more than one clock, then an
+async-reset image that is reserved); a DCERT2 file is refused by magic too.
 
 The clock NAME forced one structural change: it is a byte count, one space and
 exactly that many raw bytes, so a name may contain a space or a newline and the
@@ -68,7 +71,7 @@ import json
 import sys
 from collections import Counter
 
-MAGIC = b"DCERT2\n"
+MAGIC = b"DCERT3\n"
 MAX_OPCODE = 28  # Op_MemWriteBE; `CertIO.opOfCode` returns none above this.
 
 
@@ -92,8 +95,8 @@ class Cursor:
         self.path = path
         self.blob = blob
         if not blob.startswith(MAGIC):
-            raise Refused(f"{path}: bad magic: expected DCERT2")
-        # Past "DCERT2"; the magic's newline is leading whitespace to the first
+            raise Refused(f"{path}: bad magic: expected DCERT3")
+        # Past "DCERT3"; the magic's newline is leading whitespace to the first
         # read, which is how the Lean reader starts too.
         self.i = len(MAGIC) - 1
 
@@ -307,9 +310,20 @@ def read_cert(path: str) -> dict:
         flops.append((width, din, has_en, en, has_rst, rst, rv, alow, clk, arst))
 
     n_mem = c.count("nMemories")
-    mems = [(c.nat(f"memory {k} aw"), c.nat(f"memory {k} dw"), slot(f"memory {k} nextImg"),
-             c.nat(f"memory {k} clock"))
-            for k in range(n_mem)]
+    mems = []
+    for k in range(n_mem):
+        aw, dw = c.nat(f"memory {k} aw"), c.nat(f"memory {k} dw")
+        nxt, mclk = slot(f"memory {k} nextImg"), c.nat(f"memory {k} clock")
+        # DCERT3: the power-on words, the commit table, the async-reset image.
+        init = tuple(c.nat(f"memory {k} init {j}") for j in range(c.count(f"memory {k} nInit")))
+        commits = tuple((c.nat(f"memory {k} commit {j} mask"), slot(f"memory {k} commit {j} nextImg"))
+                        for j in range(c.count(f"memory {k} nCommits")))
+        has_async = c.bit(f"memory {k} hasAsync")
+        async_img = slot(f"memory {k} asyncImg")
+        if has_async == 0 and async_img != 0:
+            raise Refused(f"{path}: memory {k}: asyncImg is {async_img} with its presence flag 0; "
+                          f"renderCert writes slot 0 for an absent image")
+        mems.append((aw, dw, nxt, mclk, init, commits, has_async, async_img))
 
     # DCERT2's new section, LAST because it is the one this version added.
     n_clk = c.count("nClocks")
@@ -346,7 +360,7 @@ def read_cert(path: str) -> dict:
         n = min(len(again), len(blob))
         at = next((j for j in range(n) if again[j] != blob[j]), n)
         raise Refused(
-            f"{path}: not canonical DCERT2: re-rendering the parsed certificate "
+            f"{path}: not canonical DCERT3: re-rendering the parsed certificate "
             f"differs from the input at byte {at} "
             f"({len(blob)} bytes in, {len(again)} out)"
         )
@@ -379,8 +393,9 @@ def render_cert(c: dict) -> bytes:
     for f in c["flops"]:
         rec(*f)
     out.append(f"{len(c['memories'])}\n".encode())
-    for m in c["memories"]:
-        rec(*m)
+    for (aw, dw, nxt, mclk, init, commits, has_async, async_img) in c["memories"]:
+        rec(aw, dw, nxt, mclk, len(init), *init, len(commits), *[x for cm in commits for x in cm],
+            has_async, async_img)
     out.append(f"{len(c['clocks'])}\n".encode())
     for nm in c["clocks"]:
         # Raw, by count: no escaping and no re-encoding, so a name containing a
@@ -468,8 +483,9 @@ def structural_multiset(cert: dict, sig: list) -> Counter:
     for (w, din, he, en, hr, rst, rv, alow, clk, arst) in cert["flops"]:
         c[_h("F", w, sig[din], he, sig[en] if he else "-", hr,
              sig[rst] if hr else "-", rv, alow, ck(clk), arst)] += 1
-    for (aw, dw, nxt, mclk) in cert["memories"]:
-        c[_h("M", aw, dw, sig[nxt], ck(mclk))] += 1
+    for (aw, dw, nxt, mclk, init, commits, has_async, async_img) in cert["memories"]:
+        c[_h("M", aw, dw, sig[nxt], ck(mclk), init,
+             tuple((mask, sig[img]) for mask, img in commits), has_async, sig[async_img] if has_async else "-")] += 1
     # The table itself is records too: a design that declares a domain nothing
     # commits on still declares it, and losing one is a change.
     for nm in cert["clocks"]:
@@ -572,7 +588,7 @@ def analyze(pa: str, pb: str) -> dict:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="DCERT2 A/B delta (read-only, fail-closed)")
+    ap = argparse.ArgumentParser(description="DCERT3 A/B delta (read-only, fail-closed)")
     ap.add_argument("a")
     ap.add_argument("b")
     ap.add_argument("--json", action="store_true", help="machine-readable output")

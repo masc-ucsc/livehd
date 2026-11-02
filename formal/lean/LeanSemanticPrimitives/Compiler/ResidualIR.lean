@@ -24,18 +24,21 @@ prove regardless of how refs are represented.
 
 ## Constructor set
 
-One constructor per LGraph operator family found REACHABLE by the census over
-all 123 generated designs.  Eight operators appear nowhere and get no
-constructor, so `compileOp` must return `CompileError` for them:
+One constructor per LGraph operator family the exporter emits.  Five operators
+get no constructor, so `compileOp` returns `CompileError` for them:
 
-    Op_Const  Op_Sub  Op_Div  Op_UDiv  Op_SDiv  Op_LT  Op_GT  Op_SetMask
+    Op_Const  Op_Sub  Op_Div  Op_LT  Op_GT
 
 (`Op_Const` is absent as a *node* op because constants are certificate SOURCES.
 `Op_Sub`/`Op_LT`/`Op_GT` are normalised away by cprop into `Op_Sum` with
-subtrahends and `Op_ULT`/`Op_SLT`.)  A refusal is loud, so if one of the eight
-ever appears the sweep reports a `CompileError`, never a wrong proof.
+subtrahends and `Op_ULT`/`Op_SLT`; a division is exported as `Op_UDiv` or
+`Op_SDiv` by operand signedness, never as the signless `Op_Div`.)  A refusal is
+loud, so if one ever appears the sweep reports a `CompileError`, never a wrong
+proof.  `Op_UDiv`, `Op_SDiv` (b6d917c25, 0143ea8cc) and `Op_SetMask` were once
+listed here as unreachable; the exporter emits all three, so they compile.
 -/
 import LeanSemanticPrimitives.Compiler.Runtime
+import LeanSemanticPrimitives.Compiler.MemDomains
 
 namespace Compiler
 
@@ -75,6 +78,12 @@ inductive ResidualExpr where
   /-- general sign extension: keep `amt` bits, sign bit at `amt-1` -/
   | rsext       (w : Nat) (a amt : ResidualRef)
   | rgetMask    (w : Nat) (a m : ResidualRef)
+  /-- `Op_UDiv`: unsigned quotient; a zero divisor gives 0 -/
+  | rudiv       (w : Nat) (a b : ResidualRef)
+  /-- `Op_SDiv`: two's-complement quotient truncated toward zero -/
+  | rsdiv       (w : Nat) (a b : ResidualRef)
+  /-- `Op_SetMask`, deps `[a, mask, value]` -/
+  | rsetMask    (w : Nat) (a m v : ResidualRef)
   /-- `Op_MuxBool`, deps `[sel, falseVal, trueVal]` — order matters and is checked -/
   | rmux        (w : Nat) (sel fv tv : ResidualRef)
   -- ── memory (item 1: in the IR from the start, before step 5) ──────────────
@@ -114,7 +123,18 @@ structure ResidualMemoryUpdate where
   nextImg : Nat
   /-- ordinal of the clock domain this memory commits on (`MemoryDesc.clock`) -/
   clock   : Nat
+  /-- the commit table of a memory on more than one domain (`MemoryDesc.commits`) -/
+  commits : Array MemCommit := #[]
+  /-- the power-on words (`MemoryDesc.init`): not part of a step, carried so a
+  generated restatement of the certificate's memories (D3's `D_mems`) is exact -/
+  init    : Array Nat := #[]
 deriving Repr, Inhabited, DecidableEq
+
+/-- The `MemoryDesc` view of an update: what `MemoryDesc.allFire` / `firedIs`
+read (its `clock` and `commits`), so the target asks "which domains fired" with
+the same predicates as the source. -/
+def ResidualMemoryUpdate.toDesc (m : ResidualMemoryUpdate) : MemoryDesc :=
+  { aw := m.aw, dw := m.dw, nextImg := m.nextImg, clock := m.clock, commits := m.commits }
 
 /-- The compiled program.  `sources` is carried so `denoteResidual` needs no
 `DesignCert` at all — the target is executable on its own. -/

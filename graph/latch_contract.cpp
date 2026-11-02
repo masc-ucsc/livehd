@@ -2020,6 +2020,22 @@ std::optional<Icg_cone> resolve_icg_depth(const hhds::Pin_class& clock_pin, cons
     if (drv.is_const()) {
       continue;
     }
+    // A Clock_cell OPERAND is a gated clock: a gate of a gate, whose cell
+    // enable must join this cone's. The default phase walk below goes THROUGH a
+    // Clock_cell to its root, so it would see the bare clock (a graph input,
+    // which ends the chain) and drop the cell's enable -- a flop on
+    // `Clock_cell(clk, a) & b` came out gated by `b` alone. Stop at the cell
+    // and absorb it, as the non-clock branch further down does for an inline
+    // inner gate.
+    if (const auto at_cell = resolve_phase(drv, /*stop_at_clock_cell=*/true);
+        depth < kMaxGateChain && !at_cell.net.is_invalid() && !at_cell.net.is_const() && !gu::is_graph_input_pin(at_cell.net)
+        && gu::type_op_of(at_cell.net.get_master_node()) == Ntype_op::Clock_cell) {
+      if (auto inner = clock_op_depth(drv, clocks, depth + 1)) {
+        ++n_clock;
+        absorb_chain(icg, *inner, outer.inverted);
+        continue;
+      }
+    }
     const auto ph = resolve_phase(drv);
     if (!ph.net.is_invalid() && clocks.is_clock(ph.net)) {
       ++n_clock;
@@ -3722,11 +3738,63 @@ Single_edge_need needs_single_edge(hhds::Graph* g, const Design_clocks* clocks) 
     clocks = &*owned;
   }
 
+  // A control cone whose first clock operator is a `Clock_cell`: the same
+  // test build_plan uses to send an element down the Clock_cell fold.
+  const auto through_clock_cell = [](const hhds::Pin_class& control) {
+    if (control.is_invalid()) {
+      return false;
+    }
+    const auto cr = control_root(control, /*stop_at_clock_cell=*/true);
+    return !cr.net.is_invalid() && !gu::is_graph_input_pin(cr.net) && !cr.net.is_const()
+           && gu::type_op_of(cr.net.get_master_node()) == Ntype_op::Clock_cell;
+  };
   absl::flat_hash_set<std::string> clock_nets;
   for (auto n : g->body().nodes()) {
     const auto op = gu::type_op_of(n);
     if (op == Ntype_op::Latch) {
       ++need.n_latches;
+      if (through_clock_cell(gu::get_driver_of_sink_name(n, "enable"))) {
+        ++need.n_clock_cell_gated;
+      }
+      continue;
+    }
+    if (op == Ntype_op::Memory) {
+      {
+        const auto stride    = static_cast<uint32_t>(Ntype::Memory_port_stride);
+        const auto clock_pid = static_cast<uint32_t>(Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin"));
+        for (const auto& e : gu::inp_sink_drivers(n)) {
+          if (static_cast<uint32_t>(e.get_port_id()) % stride == clock_pid && through_clock_cell(e.driver)) {
+            ++need.n_clock_cell_gated;
+          }
+        }
+      }
+      // A memory written on the FALLING edge owes the pass a lowering exactly
+      // as a negedge flop does: LEC's encoder and pass.lean model a rising
+      // memory only. Judged per clocked port through the same commit-class
+      // call a flop uses, so an inversion in the clock CONE counts too, not
+      // just the `posclk` pin. A MIXED memory (`Memory_posclk_mixed`) is not
+      // counted: it is refused by name downstream and opted back in there.
+      const auto pc = gu::get_driver_of_sink_name(n, "posclk");
+      if (pc.is_const() && gu::const_of(pc).is_just_i64() && gu::const_of(pc).to_just_i64() == Ntype::Memory_posclk_mixed) {
+        continue;
+      }
+      const bool rising_policy = !pc.is_known_false();
+      const auto stride        = static_cast<uint32_t>(Ntype::Memory_port_stride);
+      const auto clock_pid     = static_cast<uint32_t>(Ntype::get_sink_pid(Ntype_op::Memory, "clock_pin"));
+      bool       clocked       = false;
+      bool       falls         = false;
+      for (const auto& e : gu::inp_sink_drivers(n)) {
+        if (static_cast<uint32_t>(e.get_port_id()) % stride != clock_pid) {
+          continue;
+        }
+        clocked = true;
+        if (auto cc = commit_class_of_clock(e.driver, rising_policy, clocks); cc && !cc->rising) {
+          falls = true;
+        }
+      }
+      if (falls || (!clocked && !rising_policy)) {
+        ++need.n_negedge_mems;
+      }
       continue;
     }
     if (op != Ntype_op::Flop && op != Ntype_op::Fflop) {
@@ -3740,6 +3808,9 @@ Single_edge_need needs_single_edge(hhds::Graph* g, const Design_clocks* clocks) 
     // skipped depending on which reader produced it.
     if (resolve_icg(gu::get_driver_of_sink_name(n, "clock_pin"), *clocks)) {
       ++need.n_icg_flops;
+    }
+    if (through_clock_cell(gu::get_driver_of_sink_name(n, "clock_pin"))) {
+      ++need.n_clock_cell_gated;
     }
     if (auto cc = commit_class_of(n, clocks)) {
       clock_nets.insert(cc->net_key());
@@ -3759,8 +3830,14 @@ Single_edge_need needs_single_edge(hhds::Graph* g, const Design_clocks* clocks) 
   if (need.n_negedge_flops > 0) {
     why += (why.empty() ? "" : ", ") + std::to_string(need.n_negedge_flops) + " negedge flop(s)";
   }
+  if (need.n_negedge_mems > 0) {
+    why += (why.empty() ? "" : ", ") + std::to_string(need.n_negedge_mems) + " negedge memory(ies)";
+  }
   if (need.n_icg_flops > 0) {
     why += (why.empty() ? "" : ", ") + std::to_string(need.n_icg_flops) + " gated-clock flop(s)";
+  }
+  if (need.n_clock_cell_gated > 0) {
+    why += (why.empty() ? "" : ", ") + std::to_string(need.n_clock_cell_gated) + " Clock_cell-gated element(s)";
   }
   if (need.n_clock_nets >= 2) {
     why += (why.empty() ? "" : ", ") + std::to_string(need.n_clock_nets) + " clock nets";

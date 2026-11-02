@@ -1,4 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
+#include <array>
+#include <string_view>
+#include <utility>
+
 #include "blast.hpp"
 #include "gtest/gtest.h"
 
@@ -101,5 +105,75 @@ TEST(BlastMux, TreePreservesDenseSparseAliasedAndWidePredicateSemantics) {
     check_mux({0, 1, 4, 5}, 2, constant);
     check_mux({0, 1}, 4, constant);
   }
+}
+
+// A Hotmux's controls are one-hot by contract. When two are active anyway, the
+// blaster ORs the active arms' values: each output bit is the OR over the arms of
+// (control AND value bit). `lhd sim` and the Lean simulators take the FIRST
+// active arm instead (lhd/tests/lhd_sim_hotmux_overlap_test.sh,
+// pass/lean/Exporter/Frontend/scripts/hotmux_overlap_oracle.sh). This records
+// the blaster's answer, so a change to either side is seen.
+TEST(BlastMux, HotmuxWithTwoActiveArmsOrsTheirValues) {
+  hhds::GraphLibrary library;
+  auto               io = library.create_io("hot");
+  const std::array<std::pair<const char*, int>, 5> ports{{{"p", 1}, {"q", 1}, {"a", 4}, {"b", 4}, {"c", 4}}};
+  for (size_t i = 0; i < ports.size(); ++i) {
+    io->add_input(ports[i].first, static_cast<int>(i) + 1);
+    io->set_bits(ports[i].first, ports[i].second);
+    io->set_unsign(ports[i].first, true);
+  }
+  auto graph = io->create_graph();
+  auto pin   = [&](const char* name) {
+    auto p = graph->get_input_pin(name);
+    for (const auto& [port, bits] : ports) {
+      if (std::string_view{port} == name) {
+        gu::set_ubits(p, bits);
+      }
+    }
+    return p;
+  };
+  const auto p = pin("p"), q = pin("q"), a = pin("a"), b = pin("b"), c = pin("c");
+  // (p, a), (q, b), then the default c.
+  auto hot = gu::create_typed_node(*graph, Ntype_op::Hotmux);
+  gu::setup_sink_pid(hot, 0).connect_driver(p);
+  gu::setup_sink_pid(hot, 1).connect_driver(a);
+  gu::setup_sink_pid(hot, 2).connect_driver(q);
+  gu::setup_sink_pid(hot, 3).connect_driver(b);
+  gu::setup_sink_pid(hot, 4).connect_driver(c);
+  gu::set_ubits(hot.create_driver_pin(0), 4);
+
+  constexpr int va = 5, vb = 9, vc = 7;
+  for (int pv : {0, 1}) {
+    for (int qv : {0, 1}) {
+      const auto read = [&](hhds::Pin_class in, int bit) -> Bit {
+        const int value = in == p ? pv : in == q ? qv : in == a ? va : in == b ? vb : in == c ? vc : -1;
+        if (value < 0) {
+          ADD_FAILURE() << "unexpected input";
+          return 0;
+        }
+        return (value >> bit) & 1;
+      };
+      Bit_ops                               ops;
+      std::vector<Bit>                      output(4);
+      livehd::partition::Region_body        body;
+      absl::flat_hash_set<hhds::Node_class> region{hot};
+      const auto                            refuse       = [](hhds::Node_class,
+                                                              std::string_view,
+                                                              std::string_view,
+                                                              std::string_view message,
+                                                              std::string_view,
+                                                              hhds::Pin_class  = {},
+                                                              std::string_view = {}) { ADD_FAILURE() << message; };
+      const auto                            refuse_shift = [](const auto&...) { ADD_FAILURE() << "unexpected shift refusal"; };
+      livehd::synth::blast_comb(hot, 4, output, ops, read, {}, body, region, refuse, refuse_shift);
+      int got = 0;
+      for (int bit = 0; bit < 4; ++bit) {
+        got |= output[bit] << bit;
+      }
+      const int expected = pv && qv ? (va | vb) : pv ? va : qv ? vb : vc;
+      EXPECT_EQ(got, expected) << "p=" << pv << " q=" << qv;
+    }
+  }
+  EXPECT_EQ(va | vb, 13) << "the overlap case tells OR (13) from the first arm (5) and the second (9)";
 }
 }  // namespace

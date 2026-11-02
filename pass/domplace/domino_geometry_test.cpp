@@ -150,17 +150,17 @@ TEST(DominoGeometry, AreaWidthIsExactWholeSitesAndDriveChangesOnlyTheRegister) {
   const auto x1 = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSky130Cells, 0, in);
   const auto x2 = generate_domino_macro(pins("__lhd_domino_ab", 4, 1), pdn(4), kSky130Cells, 1, in);
   const auto x4 = generate_domino_macro(pins("__lhd_domino_ab", 4, 2), pdn(4), kSky130Cells, 2, in);
-  // x = 4: 4 * 3.7536 + 20.0192 = 35.0336 um^2 = exactly 14 two-row sites.
-  EXPECT_DOUBLE_EQ(x1.x, 4);
+  // x = 4/3 + 2 = 10/3: 10/3 * 3.7536 + 20.0192 = 32.5312 um^2 = exactly 13 two-row sites.
+  EXPECT_DOUBLE_EQ(x1.x, 10 / 3.0);
   EXPECT_NEAR(x1.a_not_um2, 1.38 * 2.72, 1e-12);
-  EXPECT_NEAR(x1.a_estimate_um2, 35.0336, 1e-9);
-  EXPECT_EQ(x1.w_area, 14 * 460);
+  EXPECT_NEAR(x1.a_estimate_um2, 32.5312, 1e-9);
+  EXPECT_EQ(x1.w_area, 13 * 460);
   EXPECT_EQ(x1.w_pin, 7 * 460);
-  EXPECT_EQ(x1.width, 6440);
+  EXPECT_EQ(x1.width, 5980);
   EXPECT_EQ(x1.height, 5440);
-  EXPECT_NEAR(x1.a_footprint_um2, 6.44 * 5.44, 1e-9);
-  EXPECT_EQ(x2.width, 15 * 460);
-  EXPECT_EQ(x4.width, 16 * 460);
+  EXPECT_NEAR(x1.a_footprint_um2, 5.98 * 5.44, 1e-9);
+  EXPECT_EQ(x2.width, 14 * 460);
+  EXPECT_EQ(x4.width, 15 * 460);
   for (const auto* v : {&x2, &x4}) {
     // The PDN term is shared; only the register area grows with drive.
     EXPECT_EQ(v->x, x1.x);
@@ -169,11 +169,11 @@ TEST(DominoGeometry, AreaWidthIsExactWholeSitesAndDriveChangesOnlyTheRegister) {
     EXPECT_NEAR(v->a_estimate_um2 - x1.a_estimate_um2, v->a_register_um2 - x1.a_register_um2, 1e-9);
     EXPECT_EQ(v->w_pin, x1.w_pin);
   }
-  // Fractional inverter equivalents round only the total: 13.25 -> 14 sites.
+  // Fractional inverter equivalents round only the total: x = 1 + 2 = 3, 12.5 -> 13 sites.
   const auto odd = generate_domino_macro(pins("__lhd_domino_odd", 3), pdn(3), kSky130Cells, 0, in);
-  EXPECT_DOUBLE_EQ(odd.x, 3.5);
-  EXPECT_NEAR(odd.a_estimate_um2, 3.5 * 3.7536 + 20.0192, 1e-9);
-  EXPECT_EQ(odd.w_area, 14 * 460);
+  EXPECT_DOUBLE_EQ(odd.x, 3.0);
+  EXPECT_NEAR(odd.a_estimate_um2, 3.0 * 3.7536 + 20.0192, 1e-9);
+  EXPECT_EQ(odd.w_area, 13 * 460);
 }
 TEST(DominoGeometry, PairAreaPercentKeepsExactSitesAndTheDefaultBytes) {
   const auto in        = geometry_inputs(sky130(), kInv, kSky130Route);
@@ -190,11 +190,11 @@ TEST(DominoGeometry, PairAreaPercentKeepsExactSitesAndTheDefaultBytes) {
   },
                 sky130().dbu),
             ph::write_lef_macros({{baseline.name, baseline.macro}}, sky130().dbu));
-  // 4 * 3.7536 * {0.75, 1.25} + 20.0192 = 31.28 and 38.7872 um^2: exactly 12.5
-  // and 15.5 two-row sites of 2.5024 um^2, so 13 and 16 sites.
+  // 10/3 * 3.7536 * {0.75, 1.25} + 20.0192 = 29.4032 and 35.6592 um^2: 11.75
+  // and 14.25 two-row sites of 2.5024 um^2, so 12 and 15 sites.
   for (const auto& [pct, estimate, sites] : {
-           std::tuple{ 75U,   31.28, 13},
-           {125U, 38.7872, 16}
+           std::tuple{ 75U, 29.4032, 12},
+           {125U, 35.6592, 15}
   }) {
     scaled.pair_area_pct = pct;
     const auto g         = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), scaled, 0, in);
@@ -232,7 +232,7 @@ TEST(DominoGeometry, RoutePolicyFallsBackToTheLefStackWithoutAProfile) {
 TEST(DominoGeometry, PinTermWidensWideInputMasters) {
   const auto in = geometry_inputs(sky130(), kInv, kSky130Route);
   const auto g  = generate_domino_macro(pins("__lhd_domino_wide", 14), pdn(4), kSky130Cells, 0, in);
-  EXPECT_EQ(g.w_area, 14 * 460);
+  EXPECT_EQ(g.w_area, 13 * 460);
   EXPECT_EQ(g.w_pin, 17 * 460);
   EXPECT_EQ(g.width, 17 * 460);
   EXPECT_GT(g.a_footprint_um2, g.a_estimate_um2);
@@ -274,7 +274,7 @@ TEST(DominoGeometry, TwoRowCoreAbstractWithEdgeRailsAndTrackStrips) {
     std::vector<double> centers;
     for (const auto& shape : m.pins.at(pin).shapes) {
       EXPECT_EQ(shape.rect.xl, 0);
-      EXPECT_DOUBLE_EQ(shape.rect.xh, 6.44);
+      EXPECT_DOUBLE_EQ(shape.rect.xh, 5.98);
       centers.push_back((shape.rect.yl + shape.rect.yh) / 2);
     }
     return centers;
@@ -389,7 +389,7 @@ TEST(DominoGeometry, SyntheticAccessHoldsForBothParitiesFlipsPhasesAndDrives) {
   }
   // A wide master is pin-limited, still accessible.
   const auto wide = generate_domino_macro(pins("__lhd_domino_wide", 13), pdn(13), kSyntheticCells, 0, in);
-  EXPECT_EQ(wide.w_area, 21 * 54);
+  EXPECT_EQ(wide.w_area, 17 * 54);  // x = 13/3 + 2
   EXPECT_EQ(wide.w_pin, 16 * 72);
   EXPECT_EQ(wide.width, 22 * 54);
   EXPECT_TRUE(check(in, wide.macro, wide.halves).ok);
@@ -433,7 +433,7 @@ TEST(DominoGeometry, TooNarrowLayoutIsRefusedNamingThePin) {
   const auto tech = synthetic();
   const auto in   = geometry_inputs(tech, "INVx1", kSyntheticRoute);
   const auto fit  = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSyntheticCells, 0, in);
-  EXPECT_EQ(fit.width, 14 * 54);
+  EXPECT_EQ(fit.width, 13 * 54);
   const auto narrow = generate_domino_macro(pins("__lhd_domino_ab", 4), pdn(4), kSyntheticCells, 0, in, 6 * 54);
   EXPECT_EQ(narrow.width, 6 * 54);
   const auto c = check(in, narrow.macro, narrow.halves);

@@ -46,27 +46,100 @@ TEST(LegacyModel, UsesOwnedCertificateRatherThanScanNodeSemantics) {
   EXPECT_NE(os.str().find("LGraphOp.Op_Xor"), std::string::npos);
   EXPECT_EQ(os.str().find("LGraphOp.Op_Sum"), std::string::npos);
 }
-// The legacy step advances every state element on every call and never reads a
-// clock, so it can only model ONE clock domain. Two domains are refused rather
-// than stepped together; one is accepted.
-TEST(LegacyModel, MoreThanOneClockDomainIsRefused) {
-  auto d   = binary(ScanOp::Sum, 8);
+// Two clock domains: `_next`/`_step` take a `<Top>_edges` record, and each flop
+// is guarded by its OWN domain's edge. Off its edge a flop holds, except that an
+// asserted asynchronous reset still resets it (DesignSemantics.srcFlopNext). One
+// domain emits no edges record and no extra argument, i.e. exactly what it did
+// before multi-domain support.
+DesignScan two_domain_counter() {
+  DesignScan d;
+  d.name   = "twoclk";
+  d.inputs = {
+      {"rst", 2000000000, 1, {}},
+      {  "a", 2000000001, 8, {}}
+  };
   d.clocks = {
       {"k_a", "clk_a", true, false},
       {"k_b", "clk_b", true, false}
   };
-  const auto         c = build_certificate(d, {});
+  Flop qa;
+  qa.id            = 10;
+  qa.width         = 8;
+  qa.raw_name      = "qa";
+  qa.din           = input(2000000001, 8);
+  qa.reset         = input(2000000000, 1);
+  qa.asynchronous  = true;
+  qa.initial       = "5";
+  qa.reset_input   = 2000000000;
+  qa.clock_ordinal = 0;
+  Flop qb;
+  qb.id            = 11;
+  qb.width         = 8;
+  qb.raw_name      = "qb";
+  qb.din           = input(2000000001, 8);
+  qb.clock_ordinal = 1;
+  d.flops          = {qa, qb};
+  d.outputs        = {
+      {"ya", 0, 8, PinRef{PinKind::Flop, 10, 0, 8, 0, {}}},
+      {"yb", 1, 8, PinRef{PinKind::Flop, 11, 0, 8, 0, {}}}
+  };
+  return d;
+}
+TEST(LegacyModel, TwoClockDomainsGuardEachFlopByItsOwnEdge) {
+  auto              d = two_domain_counter();
+  const auto        c = build_certificate(d, {});
+  LegacyEmitOptions o;
+  o.emit_cert        = true;
+  o.emit_fast_bridge = true;
+  o.cert_wf          = LeanCertWFMode::Chunked;
   std::ostringstream os;
-  try {
-    emit_legacy_model(d, c, {}, os);
-    ADD_FAILURE() << "a two-domain design was emitted as a one-step legacy model";
-  } catch (const std::invalid_argument& e) {
-    EXPECT_NE(std::string(e.what()).find("legacy mode models one clock domain"), std::string::npos) << e.what();
-    EXPECT_NE(std::string(e.what()).find("clk_a, clk_b"), std::string::npos) << e.what();
+  ASSERT_NO_THROW(emit_legacy_model(d, c, o, os));
+  const auto text = os.str();
+  EXPECT_NE(text.find("structure twoclk_edges where\n  edge_clk_a : Bool\n  edge_clk_b : Bool\n"), std::string::npos);
+  EXPECT_NE(text.find("def twoclk_next (e : twoclk_edges) (i : twoclk_in) (s : twoclk_state)"), std::string::npos);
+  EXPECT_NE(text.find("def twoclk_nextStateFromCert (e : twoclk_edges)"), std::string::npos);
+  EXPECT_NE(text.find("theorem twoclk_next_refines_fast (e : twoclk_edges)"), std::string::npos);
+  // qa (async, domain a): reset still acts off-edge; qb (sync, domain b): holds.
+  EXPECT_NE(text.find(":= if e.edge_clk_a then flop_next"), std::string::npos);
+  EXPECT_NE(text.find(" false ((bv_zext"), std::string::npos) << "the async off-edge form forces the enable false";
+  EXPECT_NE(text.find(":= if e.edge_clk_b then flop_next"), std::string::npos);
+  EXPECT_NE(text.find(" else s.st_qb\n"), std::string::npos);
+  EXPECT_EQ(text.find("by sorry"), std::string::npos);
+  if (const char* destination = std::getenv("LHD_LEAN_MULTICLOCK_OUTPUT")) {
+    const auto path = std::filesystem::path(destination) / "twoclk_Lgraph.lean";
+    write_atomic(path.string(), [&](std::ostream& stream) { stream << text; });
   }
   d.clocks.pop_back();
+  for (auto& f : d.flops) {
+    f.clock_ordinal = 0;
+  }
   std::ostringstream one;
-  EXPECT_NO_THROW(emit_legacy_model(d, build_certificate(d, {}), {}, one));
+  ASSERT_NO_THROW(emit_legacy_model(d, build_certificate(d, {}), o, one));
+  EXPECT_EQ(one.str().find("_edges"), std::string::npos);
+  EXPECT_EQ(one.str().find("(e : "), std::string::npos);
+  EXPECT_EQ(one.str().find("if e."), std::string::npos);
+}
+// A memory on more than one domain (DCERT3 commit table, decision #9): both
+// legacy emitters take its next image from `legacy_memory_next`, which is the
+// certificate's `srcMemNext`. Here the memory is on domains 0 and 2 of three, so
+// domain 1 must not appear in any condition.
+TEST(LegacyModel, CommitTableMemoryNextIsTheCertificateRule) {
+  LegacyNames n;
+  n.edges = {"edge_a", "edge_b", "edge_c"};
+  MemoryDriver m;
+  m.next_img     = 30;
+  m.clock        = 0;
+  m.commits      = {{uint64_t{1} << 0, 31}, {uint64_t{1} << 2, 32}};
+  const auto img = [](uint32_t id) { return "img" + std::to_string(id); };
+  EXPECT_EQ(legacy_memory_next(m, n, img, "held"),
+            "if e.edge_a && e.edge_c then img30 else if e.edge_a && !e.edge_c then img31 "
+            "else if !e.edge_a && e.edge_c then img32 else held");
+  // No commit table: the one-domain rule on the memory's clock.
+  m.commits.clear();
+  EXPECT_EQ(legacy_memory_next(m, n, img, "held"), "if e.edge_a then img30 else held");
+  // One domain in the design: no edges record, no guard.
+  n.edges.clear();
+  EXPECT_EQ(legacy_memory_next(m, n, img, "held"), "img30");
 }
 TEST(LegacyModel, PreservesGlobalSelectorUniquenessAndEscapesMappingComments) {
   auto d            = binary(ScanOp::Or, 8);

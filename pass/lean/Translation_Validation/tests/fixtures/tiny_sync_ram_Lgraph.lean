@@ -60,7 +60,8 @@ theorem tiny_sync_ram_compiles : compilesOk tiny_sync_ram_designCert = true := b
 /-- Declared clock bounds, checked independently of compiler acceptance. -/
 theorem tiny_sync_ram_clock_bounds :
     (∀ f ∈ tiny_sync_ram_designCert.flops, f.clock < tiny_sync_ram_designCert.clocks.size) ∧
-    (∀ m ∈ tiny_sync_ram_designCert.memories, m.clock < tiny_sync_ram_designCert.clocks.size) := by
+    (∀ m ∈ tiny_sync_ram_designCert.memories, m.clock < tiny_sync_ram_designCert.clocks.size) ∧
+    (∀ m ∈ tiny_sync_ram_designCert.memories, ∀ c ∈ m.commits, c.mask < 2 ^ tiny_sync_ram_designCert.clocks.size) := by
   native_decide
 
 /-- The all-fire instance of arbitrary-edge compiler correctness. -/
@@ -74,7 +75,7 @@ theorem tiny_sync_ram_step_legacy_correct : ∀ inp st,
     tiny_sync_ram_step inp st = interpretDesignLegacy tiny_sync_ram_designCert inp st := by
   intro inp st
   exact (tiny_sync_ram_step_correct inp st).trans
-    (interpretDesign_allEdges tiny_sync_ram_designCert tiny_sync_ram_clock_bounds.1 tiny_sync_ram_clock_bounds.2 inp st)
+    (interpretDesign_allEdges tiny_sync_ram_designCert tiny_sync_ram_clock_bounds.1 tiny_sync_ram_clock_bounds.2.1 tiny_sync_ram_clock_bounds.2.2 inp st)
 
 /-- For evaluation only.  Deliberately NOT mentioned in any theorem
 statement -- see the comment above. -/

@@ -212,8 +212,9 @@ theorem zeroState_flops (D : DesignCert) : (zeroState D).flops.size = D.flops.si
 theorem zeroState_mems (D : DesignCert) : (zeroState D).mems.size = D.memories.size := by
   simp [zeroState]
 
-/-- Every flop at its declared reset value and every memory word zero: the start
-the runners use by default.  It is the only start that matches the RTL for a flop
+/-- Every flop at its declared reset value and every memory at its power-on image
+(`MemoryDesc.powerOnImg`: its `init` words, 0 past them): the start the runners
+use by default.  It is the only start that matches the RTL for a flop
 whose Verilog declaration gives a power-on value and no reset (`reg r = 5`): the
 exporter carries that value as `FlopDesc.resetValue` with `resetPin = none`, so
 `zeroState` would start it at 0 and every later cycle would be off.  It is also
@@ -221,7 +222,7 @@ the start the Futamura runner uses (`Projection.initStateOf`).  For a flop with 
 reset pin the RTL starts at x, and either start is one legal choice. -/
 def resetState (D : DesignCert) : RuntimeState :=
   { flops := D.flops.map fun f => mk_bv f.width f.resetValue
-    mems  := D.memories.map fun m => (fun _ => mk_bv m.dw 0) }
+    mems  := D.memories.map fun m => m.powerOnImg }
 
 theorem resetState_flops (D : DesignCert) : (resetState D).flops.size = D.flops.size := by
   simp [resetState]

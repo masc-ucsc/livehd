@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Controls-only DCERT2 mutator.  NOT part of the measurement path.
+"""Controls-only DCERT3 mutator.  NOT part of the measurement path.
 
 `dcert_delta.py` is read-only by contract, so the negative controls need a
 separate tool to produce the inputs they assert on.  This is that tool, and it
@@ -74,7 +74,9 @@ def remap(c: dict, f) -> dict:
     # space must leave the domain a record commits on exactly where it was.
     c["flops"] = [(w, f(din), he, f(en), hr, f(rst), rv, al, ck, ar)
                   for (w, din, he, en, hr, rst, rv, al, ck, ar) in c["flops"]]
-    c["memories"] = [(aw, dw, f(nxt), ck) for (aw, dw, nxt, ck) in c["memories"]]
+    # DCERT3: a commit's image and the async image are slots too.
+    c["memories"] = [(aw, dw, f(nxt), ck, init, tuple((mk, f(img)) for mk, img in cms), ha, f(ai) if ha else ai)
+                     for (aw, dw, nxt, ck, init, cms, ha, ai) in c["memories"]]
     return c
 
 
@@ -191,8 +193,8 @@ def mutate(c: dict, kind: str) -> bytes:
             raise Refused("no memory whose commit domain can be moved")
         if len(c["clocks"]) < 2:
             raise Refused("needs at least two declared clocks to move a memory between them")
-        aw, dw, nxt, ck = c["memories"][0]
-        c["memories"][0] = (aw, dw, nxt, (ck + 1) % len(c["clocks"]))
+        aw, dw, nxt, ck, *rest = c["memories"][0]
+        c["memories"][0] = (aw, dw, nxt, (ck + 1) % len(c["clocks"]), *rest)
         return render(c)
 
     if kind == "oor-clock":
@@ -250,7 +252,7 @@ def mutate(c: dict, kind: str) -> bytes:
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Controls-only DCERT2 mutator")
+    ap = argparse.ArgumentParser(description="Controls-only DCERT3 mutator")
     ap.add_argument("src")
     ap.add_argument("dst")
     ap.add_argument("--kind", required=True)

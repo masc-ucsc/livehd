@@ -227,6 +227,18 @@ theorem compileDesign_parts (D : DesignCert) (R : ResidualProgram)
 -- The theorem
 --------------------------------------------------------------------------------
 
+/-- One memory: the compiled update steps exactly as the source rule, commit
+table included.  "Which domains fired" is the same predicate on both sides
+(`MemDomains`), read off the same `clock` and `commits`. -/
+theorem memNext_compileMemory (env : SlotEnv) (e : ClockEdges) (s : RuntimeState) (idx : Nat)
+    (m : MemoryDesc) :
+    memNext env e s idx (compileMemory m) = srcMemNext (denoteRef env) e s idx m := by
+  have ha : (compileMemory m).toDesc.allFire e = m.allFire e := rfl
+  have hf : (compileMemory m).toDesc.firedIs e = m.firedIs e := rfl
+  unfold memNext srcMemNext
+  rw [ha, hf]
+  rfl
+
 /-- **`compileDesign_correct`.**  For every `DesignCert` the compiler ACCEPTS,
 the compiled program means exactly what the certificate means — at every input
 and every state.
@@ -262,7 +274,8 @@ theorem compileDesign_correct (D : DesignCert) (R : ResidualProgram)
       apply Array.ext
       · simp
       · intro i h1 h2
-        simp only [Array.getElem_mapIdx, Array.getElem_map, compileMemory, refMem, srcMemNext]
+        simp only [Array.getElem_mapIdx, Array.getElem_map]
+        exact memNext_compileMemory env e st i _
   · -- outputs
     apply Array.ext
     · simp

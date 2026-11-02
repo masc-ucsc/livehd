@@ -28,6 +28,7 @@ MODULES=(
   Translation/GraphRefine
   Compiler/DesignCert
   Compiler/Runtime
+  Compiler/MemDomains
   Compiler/DesignCertWF
   Compiler/DesignSemantics
   # Compiler/CertIO itself is NOT built here: its verified entry point
@@ -87,6 +88,7 @@ MODULES=(
   Projection/HardwareMemShapes
   Projection/HardwareMemNodes
   Projection/HardwareMemFold
+  Projection/HardwareMemTable
   Projection/HardwareMemCommit
   Projection/HardwareMemOutFlop
   Projection/HardwareMemMain

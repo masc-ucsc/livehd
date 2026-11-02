@@ -19,5 +19,13 @@ std::string   legacy_source_value(const CertificateIR&, const LegacyNames&, cons
 std::string   legacy_value_wrap(const LegacyNames&, std::string inner, bool memory);
 std::string   legacy_fast_ref(const CertificateIR&, const LegacyNames&, uint32_t id, bool bridge);
 std::vector<std::optional<uint32_t>> legacy_output_ids(const DesignScan&, const CertificateIR&);
+// A memory's next image, the certificate's `srcMemNext`, as one Lean expression.
+// `img` renders an image slot and `held` is the image kept when nothing commits.
+// With no edges record (one domain), `img(next_img)`. One domain among several:
+// `img(next_img)` when its edge fires. A commit table (DCERT3, decision #9):
+// `img(next_img)` when ALL the memory's domains fire, the entry naming EXACTLY
+// the domains that fire, and `held` otherwise. Both legacy emitters call this.
+std::string legacy_memory_next(const MemoryDriver&, const LegacyNames&, const std::function<std::string(uint32_t)>& img,
+                               const std::string& held);
 void emit_legacy_fast_model(const DesignScan&, const CertificateIR&, const LegacyNames&, bool bridge, std::ostream&);
 }  // namespace lean_export

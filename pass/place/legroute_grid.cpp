@@ -70,15 +70,19 @@ Design build_design(const ph::Technology& tech, ph::Floorplan& fp, const timing:
     if (frame_role(tech, c) != Frame_role::movable) {
       continue;
     }
-    if (std::llround(m->second.height * fp.dbu) > row_h) {
+    // a two-row cell (a domino master) is a tile tall and moves like any other cell: its box takes the same sites
+    // in both rows; taller cells must be anchored (fixed) first
+    const auto height = std::llround(m->second.height * fp.dbu);
+    if (height > row_h && height != 2 * row_h) {
       throw std::invalid_argument("legroute: multi-row cell " + c.name + " must be anchored (fixed) first");
     }
     d.cell[i] = int(d.movable.size());
     d.movable.push_back(int(i));
     d.width.push_back(std::llround(m->second.width * fp.dbu));
     d.flop.push_back(has_clock_pin(m->second));
+    d.tall.push_back(height == 2 * row_h);
     d.widest = std::max(d.widest, d.width.back());
-    if (d.flop.back()) {
+    if (d.flop.back() && !d.tall.back()) {  // the tile is two flops wide: single-row flops set it
       d.flop_w = std::max(d.flop_w, d.width.back());
     }
   }
@@ -252,6 +256,39 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
     const auto offset = (r.x - g.x0) / g.site;
     for (auto [lo, hi] : r.free) {
       free[k].emplace_back(lo + offset, hi + offset);
+    }
+  }
+  if (d.opt.legal_boxes) {  // a cell's extent beyond its home tile (the tile its centre is on) takes those sites of
+    // the neighbour tile, so a box moving there (legal_window) packs around it; its home tile stays as the rows say
+    const auto cut = [&](int k, int64_t a, int64_t b) {
+      if (k < 0 || k >= int(free.size()) || a >= b) {
+        return;
+      }
+      std::vector<std::pair<int64_t, int64_t>> out;
+      for (auto [lo, hi] : free[size_t(k)]) {
+        if (hi <= a || lo >= b) {
+          out.emplace_back(lo, hi);
+          continue;
+        }
+        if (lo < a) {
+          out.emplace_back(lo, a);
+        }
+        if (b < hi) {
+          out.emplace_back(b, hi);
+        }
+      }
+      free[size_t(k)] = std::move(out);
+    };
+    for (size_t i = 0; i < d.movable.size(); ++i) {
+      const auto&   p  = fp.components[size_t(d.movable[i])].place;
+      const int64_t s0 = (p.x - g.x0) / g.site, s1 = s0 + (d.width[i] + g.site - 1) / g.site;
+      const int     c  = g.col_of(double(p.x) + d.width[i] / 2.0);
+      const int64_t lo = int64_t(c) * g.sites, hi = lo + g.sites;
+      const int     k  = int((p.y - g.y0) / g.row_h);
+      for (int kk = k; kk < k + (d.tall[i] ? 2 : 1); ++kk) {
+        cut(kk, s0, std::min(s1, lo));
+        cut(kk, std::max(s0, hi), s1);
+      }
     }
   }
   std::map<std::vector<Seg>, uint32_t> key_of;
@@ -497,16 +534,27 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
     for (const auto& s : regions.obstacles) {
       add_rail(s);
     }
+    // the rails by tile row (a rail's spacing band reaches the rows it touches): a tile checks its own row's rails.
+    // Every rail of the die per tile and track was hours on a large design
+    std::vector<std::vector<int>> rails_by_row(g.rows);
+    for (int k = 0; k < int(rails.size()); ++k) {
+      const auto& q = rails[k];
+      for (int rr = g.row_of(q.yl - double(keep)); rr <= g.row_of(q.yh + double(keep)); ++rr) {
+        rails_by_row[rr].push_back(k);
+      }
+    }
     g.box_cap.assign(g.size(), 0);
     for (int tr = 0; tr < g.rows; ++tr) {
-      const auto lo = std::lower_bound(ys_all.begin(), ys_all.end(), g.bottom(tr));
-      const auto hi = std::lower_bound(ys_all.begin(), ys_all.end(), g.bottom(tr) + g.tile_h);
+      const auto  lo   = std::lower_bound(ys_all.begin(), ys_all.end(), g.bottom(tr));
+      const auto  hi   = std::lower_bound(ys_all.begin(), ys_all.end(), g.bottom(tr) + g.tile_h);
+      const auto& near = rails_by_row[tr];
       for (int tc = 0; tc < g.cols; ++tc) {
         const double txl = double(g.left(tc)), txh = txl + double(g.tile_w);
         int          n = 0;
         for (auto it = lo; it != hi; ++it) {
           const double y  = double(*it);
-          n              += std::none_of(rails.begin(), rails.end(), [&](const ph::Rect& q) {
+          n              += std::none_of(near.begin(), near.end(), [&](int k) {
+            const auto& q = rails[k];
             return q.xl < txh && q.xh > txl && y > q.yl - double(keep) && y < q.yh + double(keep);
           });
         }

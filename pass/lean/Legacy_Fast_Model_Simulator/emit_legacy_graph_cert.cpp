@@ -62,7 +62,8 @@ void emit_legacy_graph_cert(const DesignScan& d, const CertificateIR& c, const L
   }
   os << " }\n\n";
   if (n.sequential) {
-    os << "def " << b << "_nextStateFromCert (rho : Nat -> " << val << ") (s : " << b << "_state) : " << b << "_state :=\n";
+    os << "def " << b << "_nextStateFromCert " << n.edge_parameter() << "(rho : Nat -> " << val << ") (s : " << b
+       << "_state) : " << b << "_state :=\n";
     std::vector<std::string> fields;
     for (const auto& f : c.flops) {
       const auto field = n.flop_field(f);
@@ -72,14 +73,25 @@ void emit_legacy_graph_cert(const DesignScan& d, const CertificateIR& c, const L
         reset = "(!" + reset + ")";
       }
       const auto enable = f.enable ? "(bv_nonzero " + bv(*f.enable) + ")" : "true";
-      os << "  let new_" << field << " : BitVec " << f.width << " := flop_next " << reset << " "
-         << lit_bv(f.width, lean_integer(f.reset_value)) << " " << enable << " " << word(f.din, f.width) << " s." << field << '\n';
+      const auto value  = lit_bv(f.width, lean_integer(f.reset_value));
+      const auto din    = word(f.din, f.width);
+      auto       next   = "flop_next " + reset + " " + value + " " + enable + " " + din + " s." + field;
+      if (!n.edges.empty()) {
+        // The same guard as the fast model's `_next`.
+        const auto quiet = f.async_reset ? "flop_next " + reset + " " + value + " false " + din + " s." + field : "s." + field;
+        next             = "if e." + n.edges.at(f.clock) + " then " + next + " else " + quiet;
+      }
+      os << "  let new_" << field << " : BitVec " << f.width << " := " << next << '\n';
     }
     for (const auto& m : c.memories) {
       const auto field = n.memories.at(m.origin);
       fields.push_back(field);
-      os << "  let new_" << field << " : (BitVec " << m.addr_w << " -> BitVec " << m.data_w << ") := memdec " << m.addr_w << " "
-         << m.data_w << " (rho " << m.next_img << ").asMem\n";
+      // The same rule as the fast model's `_next` (legacy_memory_next).
+      const auto img  = [&](uint32_t id) {
+        return "memdec " + std::to_string(m.addr_w) + " " + std::to_string(m.data_w) + " (rho " + std::to_string(id) + ").asMem";
+      };
+      const auto next = legacy_memory_next(m, n, img, "s." + field);
+      os << "  let new_" << field << " : (BitVec " << m.addr_w << " -> BitVec " << m.data_w << ") := " << next << "\n";
     }
     os << "  { ";
     for (size_t i = 0; i < fields.size(); ++i) {
@@ -97,18 +109,21 @@ void emit_legacy_graph_cert(const DesignScan& d, const CertificateIR& c, const L
   os << "theorem " << b << "_comb_cert_refines_cert " << n.parameters() << " : " << b << "_comb_cert " << args << " = " << b
      << "_outputsFromCert (" << eval << ") := rfl\n\n";
   if (n.sequential) {
-    os << "def " << b << "_next_cert " << n.parameters() << " : " << b << "_state :=\n  " << b << "_nextStateFromCert (" << eval
-       << ") s\n\n";
-    os << "def " << b << "_step_cert " << n.parameters() << " : " << b << "_state × " << b << "_out :=\n  (" << b
-       << "_next_cert i s, " << b << "_comb_cert i s)\n\n";
-    os << "theorem " << b << "_step_cert_eq " << n.parameters() << " : " << b << "_step_cert i s = (" << b << "_next_cert i s, "
-       << b << "_comb_cert i s) := rfl\n\n";
+    const auto ep = n.edge_parameter(), ea = n.edge_argument();
+    os << "def " << b << "_next_cert " << ep << n.parameters() << " : " << b << "_state :=\n  " << b << "_nextStateFromCert " << ea
+       << "(" << eval << ") s\n\n";
+    os << "def " << b << "_step_cert " << ep << n.parameters() << " : " << b << "_state × " << b << "_out :=\n  (" << b
+       << "_next_cert " << ea << "i s, " << b << "_comb_cert i s)\n\n";
+    os << "theorem " << b << "_step_cert_eq " << ep << n.parameters() << " : " << b << "_step_cert " << ea << "i s = (" << b
+       << "_next_cert " << ea << "i s, " << b << "_comb_cert i s) := rfl\n\n";
   }
   if (n.sequential) {
-    os << "theorem " << b << "_next_cert_refines_cert " << n.parameters() << " : " << b << "_next_cert i s = " << b
-       << "_nextStateFromCert (" << eval << ") s := rfl\n\n";
-    os << "theorem " << b << "_step_cert_refines_lgraph_certificate " << n.parameters() << " : " << b << "_step_cert i s = (" << b
-       << "_nextStateFromCert (" << eval << ") s, " << b << "_outputsFromCert (" << eval << ")) := rfl\n\n";
+    const auto ep = n.edge_parameter(), ea = n.edge_argument();
+    os << "theorem " << b << "_next_cert_refines_cert " << ep << n.parameters() << " : " << b << "_next_cert " << ea
+       << "i s = " << b << "_nextStateFromCert " << ea << "(" << eval << ") s := rfl\n\n";
+    os << "theorem " << b << "_step_cert_refines_lgraph_certificate " << ep << n.parameters() << " : " << b << "_step_cert " << ea
+       << "i s = (" << b << "_nextStateFromCert " << ea << "(" << eval << ") s, " << b << "_outputsFromCert (" << eval
+       << ")) := rfl\n\n";
   }
   if (!n.memory_values) {
     os << "theorem " << b << "_evalGraph_correct " << n.parameters() << " :\n    envCorrectOn " << b << "_graphCert.topo\n      ("

@@ -125,6 +125,13 @@ def rsextV (w : Nat) (a amt : BV) : BV :=
 
 def rgetMaskV (w : Nat) (a m : BV) : BV := bv_get_mask w a m
 
+/-- Spelled exactly as `eval_op`'s `Op_UDiv`, `Op_SDiv` and `Op_SetMask` cases, so
+each `*_correct` lemma is `rfl`. -/
+def rudivV (w : Nat) (a b : BV) : BV :=
+  mk_bv w (if bv_uint b = 0 then 0 else bv_uint a / bv_uint b)
+def rsdivV (w : Nat) (a b : BV) : BV := bv_sdiv w a b
+def rsetMaskV (w : Nat) (a m v : BV) : BV := bv_set_mask w a m v
+
 /-- Deps are `[sel, falseVal, trueVal]`.  Swapping the last two here is exactly
 what `compile_mux_correct` refuses to prove. -/
 def rmuxV (w : Nat) (sel fv tv : BV) : BV :=
@@ -194,6 +201,9 @@ def denoteExpr (env : SlotEnv) : ResidualExpr → CertVal
   | .rsra w a b           => .bv (rsraV w (refBV env a) (refBV env b))
   | .rsext w a amt        => .bv (rsextV w (refBV env a) (refBV env amt))
   | .rgetMask w a m       => .bv (rgetMaskV w (refBV env a) (refBV env m))
+  | .rudiv w a b          => .bv (rudivV w (refBV env a) (refBV env b))
+  | .rsdiv w a b          => .bv (rsdivV w (refBV env a) (refBV env b))
+  | .rsetMask w a m v     => .bv (rsetMaskV w (refBV env a) (refBV env m) (refBV env v))
   | .rmux w sel fv tv     => .bv (rmuxV w (refBV env sel) (refBV env fv) (refBV env tv))
   | .rmemRead w m a en    => .bv (rmemReadV w (refMem env m) (refBV env a) (refBV env en))
   | .rmemWrite m a d en   => .mem (rmemWriteV (refMem env m) (refBV env a) (refBV env d)
@@ -263,14 +273,91 @@ def flopNext (env : SlotEnv) (e : ClockEdges) (s : RuntimeState) (idx : Nat)
     if edge && en then bv_resize f.width (refBV env f.din)
     else s.flops[idx]?.getD (mk_bv f.width 0)
 
+/-- Memory next image: the post-write image when the memory's domain fires, the
+pre-step image otherwise.  On more than one domain (`commits`): `nextImg` when
+all fire, the commit-table entry naming exactly the ones that fire, or the
+pre-step image when none does. -/
+def memNext (env : SlotEnv) (e : ClockEdges) (s : RuntimeState) (idx : Nat)
+    (m : ResidualMemoryUpdate) : Int → BV :=
+  if m.commits.isEmpty then
+    if fires e m.clock then refMem env m.nextImg
+    else s.mems[idx]?.getD (fun _ => mk_bv 0 0)
+  else if m.toDesc.allFire e then refMem env m.nextImg
+  else
+    match m.commits.find? (m.toDesc.firedIs e) with
+    | some c => refMem env c.nextImg
+    | none   => s.mems[idx]?.getD (fun _ => mk_bv 0 0)
+
+/-- The entry of a commit table whose clock set is exactly the clocks that
+fired, with its image given as a value; `held` when none matches. -/
+def pickCommit (d : MemoryDesc) (e : ClockEdges) (held : Int → BV) :
+    List (MemCommit × (Int → BV)) → (Int → BV)
+  | []             => held
+  | (c, v) :: rest => if d.firedIs e c then v else pickCommit d e held rest
+
+/-- The descriptor the commit-table rule reads: `allFire` and `firedIs` read a
+memory's `clock` and `commits` and nothing else. -/
+def tableDesc (ck : Nat) (cs : Array MemCommit) : MemoryDesc :=
+  { aw := 0, dw := 0, nextImg := 0, clock := ck, commits := cs }
+
+/-- A memory with a commit table, its clock and table as LITERALS and its images
+as VALUES: `all` when every clock of the memory fired, else the matching entry,
+else `held`. This is what a generated (D3) model computes;
+`memNext_eq_memPick` ties it to `memNext`. -/
+def memPick (ck : Nat) (cs : Array MemCommit) (e : ClockEdges) (all : Int → BV)
+    (entries : List (MemCommit × (Int → BV))) (held : Int → BV) : Int → BV :=
+  if (tableDesc ck cs).allFire e then all else pickCommit (tableDesc ck cs) e held entries
+
+theorem pickCommit_find (d : MemoryDesc) (e : ClockEdges) (held : Int → BV)
+    (img : MemCommit → (Int → BV)) :
+    ∀ cs : List MemCommit,
+      pickCommit d e held (cs.map fun c => (c, img c))
+        = match cs.find? (d.firedIs e) with
+          | some c => img c
+          | none   => held
+  | []      => rfl
+  | c :: cs => by
+      simp only [List.map_cons, pickCommit, List.find?_cons]
+      cases h : d.firedIs e c
+      · simp [pickCommit_find d e held img cs]
+      · simp
+
+/-- `pickCommit` reads its descriptor only through `firedIs`. -/
+theorem pickCommit_congr {d₁ d₂ : MemoryDesc} {e : ClockEdges} (held : Int → BV)
+    (h : d₁.firedIs e = d₂.firedIs e) :
+    ∀ l, pickCommit d₁ e held l = pickCommit d₂ e held l
+  | []             => rfl
+  | (c, v) :: rest => by simp only [pickCommit, h, pickCommit_congr held h rest]
+
+/-- With a commit table, `memNext` IS `memPick` over the table's images. -/
+theorem memNext_eq_memPick (env : SlotEnv) (e : ClockEdges) (s : RuntimeState) (idx : Nat)
+    (m : ResidualMemoryUpdate) (hc : m.commits.isEmpty = false) :
+    memNext env e s idx m
+      = memPick m.clock m.commits e (refMem env m.nextImg)
+          (m.commits.toList.map fun c => (c, refMem env c.nextImg))
+          (s.mems[idx]?.getD (fun _ => mk_bv 0 0)) := by
+  have ha : (tableDesc m.clock m.commits).allFire e = m.toDesc.allFire e := rfl
+  have hf : (tableDesc m.clock m.commits).firedIs e = m.toDesc.firedIs e := rfl
+  unfold memNext memPick
+  rw [hc, ha, pickCommit_congr _ hf]
+  simp only [Bool.false_eq_true, ite_false]
+  congr 1
+  rw [pickCommit_find, ← Array.find?_toList]
+
+/-- Without one, `memNext` is the one-domain rule. -/
+theorem memNext_of_isEmpty (env : SlotEnv) (e : ClockEdges) (s : RuntimeState) (idx : Nat)
+    (m : ResidualMemoryUpdate) (hc : m.commits.isEmpty = true) :
+    memNext env e s idx m
+      = if fires e m.clock then refMem env m.nextImg
+        else s.mems[idx]?.getD (fun _ => mk_bv 0 0) := by
+  simp [memNext, hc]
+
 def denoteResidual (R : ResidualProgram) (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
     RuntimeResult :=
   let env := runBindings R.bindings.toList (sourceEnvArr R.sources i s)
   { outputs   := R.outputs.map fun o => bv_resize o.width (refBV env o.slot)
     nextState :=
       { flops := R.flopUpdates.mapIdx fun idx f => flopNext env e s idx f
-        mems  := R.memoryUpdates.mapIdx fun idx m =>
-          if fires e m.clock then refMem env m.nextImg
-          else s.mems[idx]?.getD (fun _ => mk_bv 0 0) } }
+        mems  := R.memoryUpdates.mapIdx fun idx m => memNext env e s idx m } }
 
 end Compiler

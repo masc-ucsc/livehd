@@ -141,8 +141,60 @@ void lower_memory_writes(CertificateBuilder& b, const Memory& m) {
     all.push_back(w);
   }
   const auto next = chain(b, m, st, all);
-  if (!m.is_rom) {
-    b.memory_drivers.emplace(m.id, MemoryDriver{m.addr_width, m.bits, next, m.id, m.clock_ordinal});
+  if (m.is_rom) {
+    return;
   }
+  MemoryDriver md{m.addr_width, m.bits, next, m.id, m.clock_ordinal, m.init_contents, {}};
+  // A memory whose write ports sit on MORE THAN ONE clock domain (DCERT3,
+  // decision #9): one chain per PROPER non-empty set of those domains, holding
+  // the writes of the ports on them in port order; `next` (every port) is the
+  // image when all of them fire. A read that FORWARDS a same-step write must
+  // be sure that write happened: a registered read forwards only writes on its
+  // own domain (it commits only when that domain fires), and an asynchronous
+  // read forwards none.
+  auto domain_of = [&](const MemoryPort& p) { return p.has_domain ? p.clock_ordinal : m.clock_ordinal; };
+  std::vector<uint32_t> doms;
+  for (const auto ord : m.write_ports) {
+    doms.push_back(domain_of(m.ports.at(ord)));
+  }
+  std::sort(doms.begin(), doms.end());
+  doms.erase(std::unique(doms.begin(), doms.end()), doms.end());
+  if (doms.size() > 1) {
+    const auto what = "memory n_" + std::to_string(m.id) + " (`" + m.raw_name + "`)";
+    if (doms.size() > 8 || doms.back() >= 63) {
+      throw std::runtime_error("[ERROR] pass.lean: " + what + " is written on " + std::to_string(doms.size())
+                               + " clock domains; a commit table is built for at most 8, on ordinals below 63.");
+    }
+    for (size_t r = 0; r < m.read_ports.size(); ++r) {
+      const auto& rp = m.ports.at(m.read_ports[r]);
+      for (const auto w : forwarded_to(m, r)) {
+        const auto wd = domain_of(m.ports.at(m.write_ports.at(w)));
+        if (!m.sync || wd != domain_of(rp)) {
+          throw std::runtime_error("[ERROR] pass.lean: " + what + " is written on more than one clock domain and read port "
+                                   + std::to_string(rp.port_id) + " forwards a same-step write from port "
+                                   + std::to_string(m.ports.at(m.write_ports.at(w)).port_id)
+                                   + " on another domain (or is an asynchronous read); whether that write happened "
+                                     "depends on which clocks fire, which a forwarding chain cannot see.");
+        }
+      }
+    }
+    const uint32_t k = static_cast<uint32_t>(doms.size());
+    for (uint32_t sub = 1; sub + 1 < (1U << k); ++sub) {
+      uint64_t            mask = 0;
+      std::vector<size_t> ords;
+      for (uint32_t j = 0; j < k; ++j) {
+        if (sub & (1U << j)) {
+          mask |= uint64_t{1} << doms[j];
+        }
+      }
+      for (size_t w = 0; w < m.write_ports.size(); ++w) {
+        if (mask & (uint64_t{1} << domain_of(m.ports.at(m.write_ports[w])))) {
+          ords.push_back(w);
+        }
+      }
+      md.commits.emplace_back(mask, chain(b, m, st, ords));
+    }
+  }
+  b.memory_drivers.emplace(m.id, md);
 }
 }  // namespace lean_export::detail

@@ -212,6 +212,16 @@ sh_test(
     deps = [":scripts"],
 )
 
+# A flop with an initializer AND a reset keeps one value (the reset value): the
+# reader warns when the initializer differs and is dropped, and stays quiet when
+# nothing is lost (same value, x bits, or a sync reset that stays a data mux).
+sh_test(
+    name = "yosys_init_reset_warning_test",
+    srcs = ["tests/yosys_init_reset_warning_test.sh"],
+    data = ["//lhd"],
+    deps = [":scripts"],
+)
+
 # Bounded-check reset protocol: the reset window must clock the design and
 # un-reset power-on state is X (a don't-care on gold), so a QN-flop netlist of
 # a synchronous-reset design is not falsely refuted while real post-reset

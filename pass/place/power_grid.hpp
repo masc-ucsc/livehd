@@ -17,6 +17,9 @@ struct Pg_profile : physical::Pg_strategy {
   std::vector<Pg_channel> channels;  // Empty in reference profiles.
   // Acceptance policy only: geometry generation does not perform IR analysis.
   std::optional<double>   channel_max_ir_drop_v;
+  // A macro whose own power and ground pin shapes overlap in its LEF (generated FakeRAM) is kept as the LEF says,
+  // with a warning, instead of failing the export; between two macros an overlap always fails
+  bool                    tolerate_macro_pin_overlap = false;
 };
 // The profile's reference strategy; profiles without one fail.
 Pg_profile power_grid_profile(const physical::Tech_profile&);

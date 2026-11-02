@@ -11,6 +11,8 @@ std::string LegacyNames::flop_field(const FlopDriver& f) const {
 }
 std::string LegacyNames::parameters() const { return "(i : " + base + "_in)" + (sequential ? " (s : " + base + "_state)" : ""); }
 std::string LegacyNames::arguments() const { return sequential ? "i s" : "i"; }
+std::string LegacyNames::edge_parameter() const { return edges.empty() ? "" : "(e : " + base + "_edges) "; }
+std::string LegacyNames::edge_argument() const { return edges.empty() ? "" : "e "; }
 LegacyNames legacy_names(const DesignScan& d, std::string_view top) {
   LegacyNames n;
   n.base = sanitize_lean(top.empty() ? d.name : top);
@@ -56,6 +58,19 @@ LegacyNames legacy_names(const DesignScan& d, std::string_view top) {
   }
   n.sequential    = !n.flops.empty() || !n.memories.empty() || !n.read_registers.empty();
   n.memory_values = !d.memories.empty();
+  // Per-domain edges, only when there is more than one domain. The fields live
+  // in their own record, so they are uniquified among themselves.
+  if (n.sequential && d.clocks.size() > 1) {
+    std::set<std::string> edge_used;
+    for (const auto& c : d.clocks) {
+      const auto base = "edge_" + sanitize_lean(c.name);
+      auto       name = base;
+      for (size_t suffix = 0; !edge_used.insert(name).second;) {
+        name = base + "_" + std::to_string(++suffix);
+      }
+      n.edges.push_back(name);
+    }
+  }
   return n;
 }
 void emit_legacy_schema(const DesignScan& d, const LegacyNames& n, std::ostream& os) {
@@ -93,8 +108,19 @@ void emit_legacy_schema(const DesignScan& d, const LegacyNames& n, std::ostream&
     }
   }
   os << (n.memories.empty() ? "deriving Repr, Inhabited\n\n" : "deriving Inhabited\n\n");
+  if (!n.edges.empty()) {
+    // Which clock domains edge on this step: `true` fires the domain. A flop or
+    // memory whose domain does not fire holds; an asserted ASYNCHRONOUS reset
+    // still resets its flop (DesignSemantics.srcFlopNext / srcMemNext).
+    os << "structure " << n.base << "_edges where\n";
+    for (const auto& e : n.edges) {
+      os << "  " << e << " : Bool\n";
+    }
+    os << "deriving Repr, Inhabited\n\n";
+  }
   // The start state a runner uses by default: every flop at its reset value,
-  // every memory word and read register at 0. A Verilog power-on value with no
+  // every memory at its power-on words (DCERT3 `MemoryDesc.init`, 0 past them),
+  // every read register at 0. A Verilog power-on value with no
   // reset (`reg r = 5`) reaches the scan as the flop's reset value, so starting
   // from `default` (all zero) would start such a flop at 0 and every later cycle
   // would be off. The certificate runners start the same way (`resetState`,
@@ -106,6 +132,19 @@ void emit_legacy_schema(const DesignScan& d, const LegacyNames& n, std::ostream&
       fields += std::string(fields.empty() ? "" : ",\n    ") + n.flops.at(id) + " := BitVec.ofInt " + std::to_string(f->width)
                 + " (" + f->initial + ")";
     }
+  }
+  // A WRITABLE memory's power-on words (DCERT3 `MemoryDesc.init`): word `a` is
+  // the table entry, 0 past its end -- the start the certificate runners take.
+  for (const auto& [id, m] : d.memories) {
+    if (m.is_rom || m.init_contents.empty()) {
+      continue;
+    }
+    std::string table;
+    for (size_t k = 0; k < m.init_contents.size(); ++k) {
+      table += (k == 0 ? "" : ", ") + std::string("BitVec.ofNat ") + std::to_string(m.bits) + " " + m.init_contents[k];
+    }
+    fields += std::string(fields.empty() ? "" : ",\n    ") + n.memories.at(id) + " := fun a => (#[" + table + "] : Array (BitVec "
+              + std::to_string(m.bits) + ")).getD a.toNat 0";
   }
   os << (fields.empty() ? std::string("  default") : "  { (default : " + n.base + "_state) with\n    " + fields + " }") << "\n\n";
 }

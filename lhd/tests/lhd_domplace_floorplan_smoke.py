@@ -6,6 +6,7 @@ atomically, naming the cell."""
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 
@@ -58,8 +59,14 @@ widths = {v['name']: v['width_dbu'] // site for m in sidecar['masters'] for v in
 widest = max(widths[m] for m in instances.values())
 assert sorted(instances) == ['q1', 'q2', 'q4'] and widths[instances['q2']] == widest, (instances, widths)
 # A row pair of widest + 2 * padding sites holds q2 alone, and no two anchors
-# side by side, each with its own padding.
-columns = widest + 2 * padding
+# side by side, each with its own padding. The single-row DFF q3 keeps is wider
+# than the two-row domino masters (a third of a NOT per pull-down device), so
+# the frame is as wide as it needs with its padding.
+lef_text = (libdir / 'sky130hd.lef').read_text()
+dff_lef = lef_text[lef_text.index('MACRO sky130_fd_sc_hd__dfxtp_1'):]
+dff_sites = round(float(re.search(r'SIZE\s+([0-9.]+)\s+BY', dff_lef).group(1)) * dbu / site)
+columns = max(widest, dff_sites) + 2 * padding
+tight_columns = widest + 2 * padding - 1  # one site narrower than q2 with its padding
 assert 2 * min(widths[m] for m in instances.values()) + 4 * padding > columns, widths
 
 
@@ -88,14 +95,13 @@ for state, (master, x, y, orientation) in anchors.items():
     assert y % row_height == 0 and y + row_height in rows, (state, anchors[state])
     assert orientation == rows[y], (state, orientation, rows[y])
     assert padding * site <= x and x + widths[master] * site <= (columns - padding) * site, (state, x)
-# Every anchor takes a row pair of its own; q2 has exactly one legal x.
+# Every anchor takes a row pair of its own.
 starts = sorted(y // row_height for _, _, y, _ in anchors.values())
 assert all(b - a >= 2 for a, b in zip(starts, starts[1:])), starts
-assert anchors['q2'][1] == padding * site, anchors['q2']
 
 # One site narrower: no row pair holds q2 with its padding. The packer
 # refuses atomically, naming the cell, and nothing is written.
-error = run('tight', ['--set', 'synth.place=true', '--set', f'synth.place.floorplan={frame("tight", columns - 1)}',
+error = run('tight', ['--set', 'synth.place=true', '--set', f'synth.place.floorplan={frame("tight", tight_columns)}',
                       '--emit-dir', f'def:{root}/tight'], False)['error']
 assert 'multirow packing cannot anchor ' in error['message'], error
 assert f'q2 ({instances["q2"]}): no free interval' in error['message'], error

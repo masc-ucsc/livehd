@@ -248,7 +248,7 @@ TEST(Legroute, TileGridCapacityStripesMacrosAndRegions) {
       {4000, 2000, 10000, 4000}
   };
   regions.rect_region = {0, 1, 0};  // region 0 is L-shaped
-  const auto g        = lr::build_grid(d, regions);
+  auto g        = lr::build_grid(d, regions);
   EXPECT_EQ(g.tile_w, 800);  // two flops wide
   EXPECT_EQ(g.tile_h, 500);  // two rows
   EXPECT_EQ(g.cols, 13);
@@ -287,7 +287,7 @@ TEST(Legroute, BoxesMergeConnectedNeighborsAndStopAtTheCostCap) {
   });
   Legroute_options opt;
   const auto       d     = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
-  const auto       g     = lr::build_grid(d, {});
+  auto       g     = lr::build_grid(d, {});
   const auto       boxes = lr::build_boxes(d, g);
   EXPECT_EQ(boxes.box_of[d.cell[a]], boxes.box_of[d.cell[b]]);
   EXPECT_NE(boxes.box_of[d.cell[a]], boxes.box_of[d.cell[far]]);  // 100+ tile widths away: above the cost cap
@@ -343,6 +343,66 @@ TEST(Legroute, EndToEndLegalRoutedAndConnected) {
       }
     }
     EXPECT_EQ(wired, r.wires_emitted ? r.routed_nets : 0u);
+  }
+}
+
+TEST(Legroute, LegalBoxesRouteTheGivenPlacementUnmoved) {
+  Fixture f;
+  f.random_design(12, 4);
+  // a legal placement by hand: each row's cells packed left to right in their x order, on sites
+  std::map<int64_t, std::vector<size_t>> rows;
+  for (size_t i = 0; i < f.fp.components.size(); ++i) {
+    rows[f.fp.components[i].place.y].push_back(i);
+  }
+  for (auto& [y, cells] : rows) {
+    std::ranges::sort(cells, [&](size_t a, size_t b) { return f.fp.components[a].place.x < f.fp.components[b].place.x; });
+    int64_t x = 0;
+    for (size_t i : cells) {
+      auto& p       = f.fp.components[i].place;
+      p.x           = std::max(x, p.x / 50 * 50);
+      p.orientation = (y / 250) % 2 ? ph::Orientation::FS : ph::Orientation::N;
+      x             = p.x + std::llround(f.tech.macros.at(f.fp.components[i].macro).width * 1000);
+    }
+  }
+  f.expect_legal();
+  const auto before = f.fp.components;
+  for (unsigned window : {0u, 1u}) {  // fixed on their tiles; free to move a tile (the cells repacked where they land)
+    f.fp.components = before;
+    for (auto& n : f.fp.nets) {
+      n.wires.clear();
+    }
+    Legroute_options opt;
+    opt.threads      = 2;
+    opt.legal_boxes  = true;
+    opt.legal_window = window;
+    opt.final        = false;  // legroute.final would move cells inside their boxes
+    Legroute_regions regions;
+    regions.rects = {
+        {   0, 0,  5000, 4000},
+        {5000, 0, 10000, 4000}
+    };
+    const auto      profile = Fixture::profile();
+    Legroute_report r;
+    try {
+      r = legroute(f.tech, f.fp, f.timing, opt, regions, &profile);
+    } catch (const std::exception& e) {
+      FAIL() << e.what() << " window " << window;
+    }
+    EXPECT_GT(r.boxes, 0u);
+    EXPECT_EQ(r.legal_boxes, r.boxes) << window;  // every box is a tile of the legal placement
+    EXPECT_EQ(r.sat_regions, 2u);
+    EXPECT_EQ(r.sat_unsat_regions + r.sat_unknown_regions, 0u) << window;
+    EXPECT_GT(r.connections, 0u);
+    ASSERT_EQ(f.fp.components.size(), before.size());
+    f.expect_legal();
+    if (window > 0) {
+      continue;
+    }
+    EXPECT_EQ(r.displacement_um, 0) << "a fixed legal box is on its own tile";
+    for (size_t i = 0; i < before.size(); ++i) {  // the cells stay where the legalization left them
+      EXPECT_EQ(f.fp.components[i].place.x, before[i].place.x) << before[i].name;
+      EXPECT_EQ(f.fp.components[i].place.y, before[i].place.y) << before[i].name;
+    }
   }
 }
 
@@ -403,7 +463,8 @@ TEST(Legroute, FailureLeavesTheFloorplanUnchanged) {
   EXPECT_EQ(f.fp.components, before.components);
 }
 
-// The SAT placement's guarantee: per tile and direction, the nets whose chosen legs cover the tile fit its tracks.
+// The SAT placement's guarantee: per tile edge and direction, the nets whose chosen legs cross the edge fit the tracks
+// of the narrower tile beside it.
 TEST(Legroute, SatPlacementFitsTheTracks) {
   for (unsigned reserved : {1u, 7u}) {  // 7 of the fixture's 8-10 tracks per layer reserved: the capacity binds
     Fixture f;
@@ -413,7 +474,7 @@ TEST(Legroute, SatPlacementFitsTheTracks) {
     opt.reserved_tracks   = reserved;
     opt.clock_spine       = false;
     const auto      d     = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
-    const auto      g     = lr::build_grid(d, {});
+    auto      g     = lr::build_grid(d, {});
     auto            boxes = lr::build_boxes(d, g);
     lr::Routing     R;
     Legroute_report rep;
@@ -426,25 +487,320 @@ TEST(Legroute, SatPlacementFitsTheTracks) {
     for (const auto& b : boxes.boxes) {
       EXPECT_TRUE(used.insert(b.tile).second) << "two boxes on tile " << b.tile;
     }
-    std::map<std::pair<int, bool>, std::set<int>> cover;  // (tile, horizontal) -> nets
+    std::map<std::pair<int, bool>, std::set<int>> cross;  // (edge: its left / lower tile, horizontal) -> nets
     for (const auto& c : R.conns) {
       for (size_t k = 0; k + 1 < c.poly.size(); ++k) {
         const auto [c0, r0] = c.poly[k];
         const auto [c1, r1] = c.poly[k + 1];
-        for (int cc = std::min(c0, c1); cc <= std::max(c0, c1); ++cc) {
-          for (int rr = std::min(r0, r1); rr <= std::max(r0, r1); ++rr) {
-            cover[{g.tile(cc, rr), r0 == r1}].insert(c.net);
+        if (r0 == r1) {
+          for (int cc = std::min(c0, c1); cc < std::max(c0, c1); ++cc) {
+            cross[{g.tile(cc, r0), true}].insert(c.net);
+          }
+        } else {
+          for (int rr = std::min(r0, r1); rr < std::max(r0, r1); ++rr) {
+            cross[{g.tile(c0, rr), false}].insert(c.net);
           }
         }
       }
     }
-    for (const auto& [key, nets] : cover) {
-      int cap = key.second ? g.box_cap[key.first] : 0;  // the box layer's tracks count as H
+    const auto tracks = [&](int t, bool h) {
+      int cap = h ? g.box_cap[t] : 0;  // the box layer's tracks count as H
       for (size_t l = 0; l < g.layers.size(); ++l) {
-        cap += g.layers[l].horizontal == key.second ? g.cap[l][key.first] : 0;
+        cap += g.layers[l].horizontal == h ? g.cap[l][t] : 0;
       }
-      EXPECT_LE(int(nets.size()), cap) << "tile " << key.first << (key.second ? " H" : " V");
+      return cap;
+    };
+    for (const auto& [key, nets] : cross) {
+      const int t = key.first, q = key.second ? t + 1 : t + g.cols;
+      EXPECT_LE(int(nets.size()), std::min(tracks(t, key.second), tracks(q, key.second)))
+          << "edge of tile " << t << (key.second ? " H" : " V");
     }
   }
+}
+
+// The cut bound: nets whose endpoints are held on both sides of a tile boundary beyond the tracks of its edges make the
+// region unsat before any solving (16 flop-to-flop nets end to end across a strip two tile rows tall, with most tracks
+// reserved).
+TEST(Legroute, CutBoundIsUnsatBeforeSolving) {
+  Fixture             f(240, 4);  // a 12 um strip: 15 tile columns of 0.8 um, 2 tile rows
+  std::vector<size_t> left, right;
+  for (int row = 0; row < 4; ++row) {
+    for (int k = 0; k < 4; ++k) {
+      left.push_back(f.cell("dff", 400 * k, 250 * row));
+      right.push_back(f.cell("dff", 10400 + 400 * k, 250 * row));
+    }
+  }
+  for (size_t k = 0; k < left.size(); ++k) {
+    f.net({
+        { left[k], "Q"},
+        {right[k], "D"}
+    });
+  }
+  Legroute_options opt;
+  opt.threads           = 1;
+  opt.reserved_tracks   = 7;  // 3 tracks left per 10-track layer, none on the 5-track one
+  opt.clock_spine       = false;
+  opt.merge_cost        = 2;  // a flop never joins its partner's box across the strip (cost 8); neighbors pack as usual
+  const auto      d     = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
+  auto      g     = lr::build_grid(d, {});
+  auto            boxes = lr::build_boxes(d, g);
+  lr::Routing     R;
+  Legroute_report rep;
+  lr::sat_place(d, g, boxes, {}, R, rep);
+  EXPECT_EQ(rep.sat_regions, 1u);
+  EXPECT_EQ(rep.sat_unsat_regions, 1u);
+  EXPECT_EQ(rep.sat_cut_regions, 1u) << "the bound, not a solver run, must reject it";
+  EXPECT_EQ(rep.sat_solves, 0u);
+  std::set<int> used;  // the boxes still have distinct tiles (the fallback placement)
+  for (const auto& b : boxes.boxes) {
+    EXPECT_TRUE(used.insert(b.tile).second) << "two boxes on tile " << b.tile;
+  }
+}
+
+// A two-row cell (a domino master, a tile tall) moves as a box like any cell: it lands on a tile's bottom row with
+// that row's orientation, takes the same sites in both rows, and the single-row cells of its box pack beside it.
+TEST(Legroute, TwoRowCellsPlaceAsTileTallBoxes) {
+  Fixture f(200, 8);
+  f.tech.macros["dom"]        = f.tech.macros.at("dff");  // 0.8 um wide (a tile), two rows tall
+  f.tech.macros["dom"].width  = .8;
+  f.tech.macros["dom"].height = .5;
+  std::vector<size_t> doms, invs;
+  for (int k = 0; k < 6; ++k) {
+    doms.push_back(f.cell("dom", 1000 + 1200 * k, 500 * (k % 3)));
+    invs.push_back(f.cell("inv", 1100 + 1200 * k, 250 + 500 * (k % 3)));
+    f.net({
+        {doms[k], "Q"},
+        {invs[k], "A"}
+    });
+  }
+  Legroute_options opt;
+  opt.threads     = 1;
+  opt.clock_spine = false;
+  const auto d    = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
+  ASSERT_EQ(d.movable.size(), 12u);
+  EXPECT_EQ(std::count(d.tall.begin(), d.tall.end(), 1), 6);
+  auto g = lr::build_grid(d, {});
+  EXPECT_EQ(g.tile_w, 800) << "two single-row flops wide, not the two-row cell";
+  auto            boxes = lr::build_boxes(d, g);
+  lr::Routing     R;
+  Legroute_report rep;
+  lr::sat_place(d, g, boxes, {}, R, rep);
+  ASSERT_EQ(rep.sat_unsat_regions + rep.sat_unknown_regions, 0u);
+  lr::pack_cells(d, g, boxes);
+  std::vector<std::tuple<int64_t, int64_t, int64_t, int64_t>> rects;  // every movable cell's placed rectangle
+  for (int m : d.movable) {
+    const auto& c = f.fp.components[size_t(m)];
+    const auto  w = std::llround(f.tech.macros.at(c.macro).width * 1000), h = std::llround(f.tech.macros.at(c.macro).height * 1000);
+    if (h > 250) {
+      EXPECT_EQ((c.place.y - g.y0) % g.tile_h, 0) << c.name << " starts at a tile's bottom row";
+      EXPECT_EQ(c.place.orientation, g.row_orient[size_t(2 * g.row(g.tile_of(double(c.place.x + 1), double(c.place.y + 1))))]) << c.name;
+    }
+    for (const auto& [x0, y0, x1, y1] : rects) {
+      EXPECT_FALSE(c.place.x < x1 && x0 < c.place.x + w && c.place.y < y1 && y0 < c.place.y + h) << c.name << " overlaps a cell";
+    }
+    rects.emplace_back(c.place.x, c.place.y, c.place.x + w, c.place.y + h);
+  }
+}
+
+// hop_choice: the hops between two regions are chosen by the first wave's region among a few boundary tiles and are
+// the second wave's fixed endpoints; both regions still have an answer and the report counts the waves and free hops.
+TEST(Legroute, HopChoiceSolvesInTwoWaves) {
+  Fixture f(400, 8);  // a 20 x 2 um core: two regions of 10 um
+  f.random_design(24, 4, 5);
+  Legroute_options opt;
+  opt.threads     = 1;
+  opt.clock_spine = false;
+  opt.hop_choice  = 2;
+  const auto       d = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
+  Legroute_regions regions;
+  regions.rects = {{0, 0, 10000, 2000}, {10000, 0, 20000, 2000}};
+  auto      g     = lr::build_grid(d, regions);
+  auto            boxes = lr::build_boxes(d, g);
+  lr::Routing     R;
+  Legroute_report rep;
+  lr::sat_place(d, g, boxes, regions, R, rep);
+  EXPECT_EQ(rep.sat_regions, 2u);
+  EXPECT_EQ(rep.sat_waves, 2u);
+  EXPECT_GT(rep.sat_hops_free, 0u);
+  EXPECT_EQ(rep.sat_unsat_regions + rep.sat_unknown_regions, 0u);
+  std::set<int> used;  // the boxes have distinct tiles
+  for (const auto& b : boxes.boxes) {
+    EXPECT_TRUE(used.insert(b.tile).second) << "two boxes on tile " << b.tile;
+  }
+}
+
+// A region whose boxes all talk to fixed cells in the neighbour cannot route (more hops than the boundary has
+// tracks) until the spill rounds push boxes out: min cuts inside the failing region (VieCut) pick the boxes and the
+// neighbour they go to (the one their nets reach), and the regions that changed solve again.
+TEST(Legroute, SpillRoundsPushAFailingRegionsBoxesOut) {
+  Fixture             f(400, 8);  // a 20 x 2 um core: two regions of 10 um (96 and 104 tiles), a 4-tile boundary
+  std::vector<size_t> movable, fixed;
+  for (int col = 0; col < 6; ++col) {
+    for (int row = 0; row < 4; ++row) {
+      movable.push_back(f.cell("dff", 800 * col + 200, 500 * row));              // the left region's flops
+      fixed.push_back(f.cell("dff", 10400 + 1600 * col + 200, 500 * row + 250));  // fixed flops spread over the right one
+      f.fp.components[fixed.back()].place.status = ph::Status::FIXED;
+    }
+  }
+  for (size_t k = 0; k < movable.size(); ++k) {  // 24 nets across the boundary: 4 tiles x 6 tracks cannot take them
+    f.net({
+        {movable[k], "Q"},
+        {  fixed[k], "D"}
+    });
+  }
+  Legroute_options opt;
+  opt.threads         = 1;
+  opt.clock_spine     = false;
+  opt.reserved_tracks = 7;  // 3 tracks left per 10-track layer, none on the 5-track one
+  opt.spill_rounds    = 6;
+  opt.spill_fraction  = .2;
+  const auto       d = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
+  Legroute_regions regions;
+  regions.rects = {{0, 0, 10000, 2000}, {10000, 0, 20000, 2000}};
+  auto      g     = lr::build_grid(d, regions);
+  auto            boxes = lr::build_boxes(d, g);
+  lr::Routing     R;
+  Legroute_report rep;
+  lr::sat_place(d, g, boxes, regions, R, rep);
+  EXPECT_EQ(rep.sat_regions, 2u);
+  EXPECT_GE(rep.spill_rounds, 1u) << boxes.boxes.size() << " boxes";
+  EXPECT_GT(rep.spilled_boxes, 0u);
+  EXPECT_EQ(rep.sat_unsat_regions + rep.sat_unknown_regions, 0u);
+  std::set<int> used;
+  std::set<int> in_region;
+  for (const auto& b : boxes.boxes) {
+    EXPECT_TRUE(used.insert(b.tile).second) << "two boxes on tile " << b.tile;
+    in_region.insert(g.region[size_t(b.tile)]);
+  }
+  EXPECT_EQ(in_region.size(), 2u) << "the right region took boxes";
+}
+
+// The same failure, mended by moving the boundary: the failing region hands the tile strip next to the neighbour its
+// nets reach to it, boxes included, so those nets' endpoints become the neighbour's without touching its fill.
+TEST(Legroute, SpillShiftMovesTheBoundaryWithItsBoxes) {
+  Fixture             f(400, 8);
+  std::vector<size_t> movable, fixed;
+  for (int col = 6; col < 12; ++col) {  // the left region's flops sit next to the boundary
+    for (int row = 0; row < 4; ++row) {
+      movable.push_back(f.cell("dff", 800 * col + 200, 500 * row));
+      fixed.push_back(f.cell("dff", 10400 + 1600 * (col - 6) + 200, 500 * row + 250));
+      f.fp.components[fixed.back()].place.status = ph::Status::FIXED;
+    }
+  }
+  for (size_t k = 0; k < movable.size(); ++k) {
+    f.net({
+        {movable[k], "Q"},
+        {  fixed[k], "D"}
+    });
+  }
+  Legroute_options opt;
+  opt.threads         = 1;
+  opt.clock_spine     = false;
+  opt.reserved_tracks = 7;
+  opt.spill_rounds    = 6;
+  opt.spill_fraction  = .2;
+  opt.spill_shift     = true;
+  const auto       d = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
+  Legroute_regions regions;
+  regions.rects = {{0, 0, 10000, 2000}, {10000, 0, 20000, 2000}};
+  auto            g     = lr::build_grid(d, regions);
+  auto            boxes = lr::build_boxes(d, g);
+  lr::Routing     R;
+  Legroute_report rep;
+  lr::sat_place(d, g, boxes, regions, R, rep);
+  EXPECT_EQ(rep.sat_regions, 2u);
+  EXPECT_GE(rep.spill_rounds, 1u);
+  EXPECT_GT(rep.shifted_tiles, 0u);
+  EXPECT_EQ(rep.sat_unsat_regions + rep.sat_unknown_regions, 0u);
+  EXPECT_GT(g.region_tiles[0].size(), 48u) << "the failing right region handed its strip to the left one";
+  EXPECT_EQ(g.region_tiles[0].size() + g.region_tiles[1].size(), 100u);
+  std::set<int> used;
+  for (const auto& b : boxes.boxes) {
+    EXPECT_TRUE(used.insert(b.tile).second) << "two boxes on tile " << b.tile;
+    EXPECT_EQ(g.region[size_t(b.tile)], b.region);
+  }
+}
+
+// The failing region first tries alternative placements of its boxes (noise, anchors, the orthogonal drawing), solved
+// in parallel; whichever routes is adopted, else the spill goes on.
+TEST(Legroute, AlternativePlacementsRunBeforeTheSpill) {
+  Fixture             f(400, 8);
+  std::vector<size_t> movable, fixed;
+  for (int col = 0; col < 6; ++col) {
+    for (int row = 0; row < 4; ++row) {
+      movable.push_back(f.cell("dff", 800 * col + 200, 500 * row));
+      fixed.push_back(f.cell("dff", 10400 + 1600 * col + 200, 500 * row + 250));
+      f.fp.components[fixed.back()].place.status = ph::Status::FIXED;
+    }
+  }
+  for (size_t k = 0; k < movable.size(); ++k) {
+    f.net({
+        {movable[k], "Q"},
+        {  fixed[k], "D"}
+    });
+  }
+  Legroute_options opt;
+  opt.threads         = 1;
+  opt.clock_spine     = false;
+  opt.reserved_tracks = 7;
+  opt.spill_rounds    = 6;
+  opt.spill_fraction  = .2;
+  opt.alternatives    = "noise,anchor,spread,tsm";
+  const auto       d = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
+  Legroute_regions regions;
+  regions.rects = {{0, 0, 10000, 2000}, {10000, 0, 20000, 2000}};
+  auto            g     = lr::build_grid(d, regions);
+  auto            boxes = lr::build_boxes(d, g);
+  lr::Routing     R;
+  Legroute_report rep;
+  lr::sat_place(d, g, boxes, regions, R, rep);
+  EXPECT_EQ(rep.sat_regions, 2u);
+  EXPECT_GE(rep.alt_tried, 4u) << "four kinds tried for the failing region";
+  EXPECT_EQ(rep.sat_unsat_regions + rep.sat_unknown_regions, 0u);
+  std::set<int> used;
+  for (const auto& b : boxes.boxes) {
+    EXPECT_TRUE(used.insert(b.tile).second) << "two boxes on tile " << b.tile;
+  }
+}
+
+// The checker alternative: a relaxed model (no capacity on a checkerboard of tiles, wide windows) finds far tiles the
+// windows of two never reach, and the full model from its answer routes the region the cut bound rejected.
+TEST(Legroute, CheckerAlternativeReachesFarTiles) {
+  Fixture             f(400, 8);
+  std::vector<size_t> movable, fixed;
+  for (int col = 0; col < 6; ++col) {
+    for (int row = 0; row < 4; ++row) {
+      movable.push_back(f.cell("dff", 800 * col + 200, 500 * row));
+      fixed.push_back(f.cell("dff", 10400 + 1600 * col + 200, 500 * row + 250));
+      f.fp.components[fixed.back()].place.status = ph::Status::FIXED;
+    }
+  }
+  for (size_t k = 0; k < movable.size(); ++k) {
+    f.net({
+        {movable[k], "Q"},
+        {  fixed[k], "D"}
+    });
+  }
+  Legroute_options opt;
+  opt.threads         = 1;
+  opt.clock_spine     = false;
+  opt.reserved_tracks = 7;
+  opt.spill_rounds    = 1;
+  opt.alternatives    = "checker";
+  const auto       d = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
+  Legroute_regions regions;
+  regions.rects = {{0, 0, 10000, 2000}, {10000, 0, 20000, 2000}};
+  auto            g     = lr::build_grid(d, regions);
+  auto            boxes = lr::build_boxes(d, g);
+  lr::Routing     R;
+  Legroute_report rep;
+  lr::sat_place(d, g, boxes, regions, R, rep);
+  EXPECT_GE(rep.alt_tried, 1u);
+  EXPECT_GE(rep.alt_rescued, 1u) << "the left region routes from the relaxed answer's tiles";
+  int near = 0;  // the relaxed answer moved most boxes next to the boundary, past the windows of two; the rest stay
+  for (const auto& b : boxes.boxes) {
+    near += g.region[size_t(b.tile)] == 0 && g.col(b.tile) >= 6;
+  }
+  EXPECT_GE(near, 3) << "boxes next to the boundary";
 }
 }  // namespace livehd::placement

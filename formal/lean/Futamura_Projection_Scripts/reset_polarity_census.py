@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reset-polarity census over DCERT1 and DCERT2 certificates.
+"""Reset-polarity census over DCERT1, DCERT2 and DCERT3 certificates.
 
 `DirectCheck.lean` declines to cross-check reset polarity, and states why:
 
@@ -47,9 +47,10 @@ def sha256(p):
 
 def parse(path):
     """(magic, sources, nNodes, nOutputs, flops).  DCERT1 flops have 8 fields,
-    DCERT2 has 10 -- the two extra are `clock` and `asyncReset`."""
+    DCERT2 and DCERT3 have 10 -- the two extra are `clock` and `asyncReset`.
+    (DCERT3 changed only the memory record, which comes after the flops.)"""
     t = open(path).read().split()
-    if not t or t[0] not in ('DCERT1', 'DCERT2'):
+    if not t or t[0] not in ('DCERT1', 'DCERT2', 'DCERT3'):
         raise ValueError(f'{path}: bad magic')
     magic, i = t[0], [1]
 
@@ -75,7 +76,7 @@ def parse(path):
         nx()
     no = nx()
     for _ in range(no): nx(); nx()
-    nf = 10 if magic == 'DCERT2' else 8
+    nf = 8 if magic == 'DCERT1' else 10
     flops = [dict(zip(FLOP_KEYS[:nf], [nx() for _ in range(nf)]))
              for _ in range(nx())]
     return magic, srcs, nn, no, flops

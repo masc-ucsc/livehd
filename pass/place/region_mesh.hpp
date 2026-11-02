@@ -14,8 +14,21 @@ namespace livehd::placement {
 // virtual pins and bus order live on its edges. Built once per detail-final
 // phase and shared by bus order, boundary pins and pin alignment.
 struct Region_options {
-  unsigned max_cells = 10000;  // split along the longest side until met, then merge back under the cap
-  double   merge_um  = 5;      // macro-edge/IO-span cut lines closer than this merge
+  unsigned    max_cells = 10000;  // split along the longest side until met, then merge back under the cap
+  double      merge_um  = 5;      // macro-edge/IO-span cut lines closer than this merge
+  // cut = "macro": the cut lines start from every macro edge and IO bus span (the rectangles merge back under the
+  // cap), then the longest side splits at its middle. "mincut": no line is forced; each split takes the position in
+  // the middle half of the longest side that the fewest nets cross (the nets with cells on both sides, weighted),
+  // so a boundary never sits in a macro's channel and a thin region between macros does not exist; a macro is
+  // simply inside the region whose cut lines surround it. "ratio": no line is forced either; each split tries both
+  // axes and several positions and keeps the one whose two children have the lowest worst internal cut ratio (the
+  // nets forced across a line inside the child over the tracks across that line), so a region is never a strip
+  // whose own traffic crosses its narrow side. "ratio_through": the same, counting also the nets that cross a child
+  // end to end (the pass-throughs a middle column carries)
+  std::string cut = "macro";
+  // for "ratio": the tracks a vertical line crosses per micron of height (the horizontal routing layers legroute
+  // routes on) and a horizontal line per micron of width; 0: both axes count the same per micron
+  double      h_tracks_per_um = 0, v_tracks_per_um = 0;
 };
 void validate_region_options(const Region_options&);
 struct Bus_bit {

@@ -308,6 +308,21 @@ lake env lean --run LegacySims/<Top>_LegacySim.lean <stim file>
 Checked on B11 (`minion_tlb`) and B12 (`picorv32`): 20 steps, byte-identical to
 `cert_trace` on the same certificate and stimulus.
 
+**Two or more clock domains.** The model then has a `<Top>_edges` record with
+one `Bool` per domain (`edge_<clock>`), and `<Top>_next` and `<Top>_step` take
+it as their first argument. A flop or memory whose domain does not fire on a
+step holds its value; an asserted asynchronous reset still resets its flop.
+With `--stim`, the driver takes an optional second file: an `edges v1` schedule
+(`at <cycle> <one bit per clock>`), the format of cert_trace's
+`edges:file:<path>`. Without it, every domain fires on every step (cert_trace's
+`edges:all`). A design with one clock domain emits exactly what it did before.
+
+Checked on B05 (`shirecache_mesh_master`, clocks `clk_i` and `noc_clk_i`): 20
+steps, identical to `cert_trace` both with every clock firing and with an
+independent random schedule per clock. B05 is emitted without
+`emit_fast_bridge`: the bridge accepts a `Sext` only when its sign position is
+the operand's full width, and B05 has one with the sign bit inside the operand.
+
 ---
 
 ## 5. The constructor field limit

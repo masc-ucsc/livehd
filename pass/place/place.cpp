@@ -633,7 +633,8 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     }
   }
   if (o.optimization_multirow_eco) {
-    h = hash_text(std::format("optimization-multirow-eco-v1:{}:{}", o.optimization_multirow_eco->shift_sites,
+    h = hash_text(std::format("optimization-multirow-eco-v1:{}:{}",
+                              o.optimization_multirow_eco->shift_sites,
                               o.optimization_multirow_eco->max_displaced),
                   h);
   }
@@ -680,7 +681,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     h = hash_text(std::format("gp-post-density:{}:{}", o.post_density_factor, o.convergence_tolerance), h);
   }
   if (o.boundarypins.enabled) {
-    h = hash_text(std::format("boundarypins:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+    h = hash_text(std::format("boundarypins:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                               o.boundarypins.split,
                               o.boundarypins.order,
                               o.boundarypins.align,
@@ -689,7 +690,8 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               o.boundarypins.settle_iterations,
                               o.boundarypins.pitch_um,
                               o.region.merge_um,
-                              o.region.max_cells),
+                              o.region.max_cells,
+                              o.region.cut),
                   h);
   }
   if (o.boundarypins.enabled && (o.boundarypins.clean_cuts || o.boundarypins.align_near > 0)) {
@@ -697,49 +699,85 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.legroute) {
     const auto& l = o.legroute_options;
-    h             = hash_text(std::format("legroute-v2:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:"
-                                          "{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
-                                          l.box_fill,
-                                          l.box_net_max,
-                                          l.merge_cost,
-                                          l.crit_fraction,
-                                          l.crit_window_ps,
-                                          l.reserved_tracks,
-                                          l.clock_spine,
-                                          l.rib_tiles,
-                                          l.final,
-                                          l.route_passes,
-                                          l.subregion_cells,
-                                          l.cap_scale,
-                                          l.window_tiles,
-                                          l.crit_boxes,
-                                          l.tree_boxes,
-                                          l.tree_moves,
-                                          l.sat_relax_rounds,
-                                          l.inbox_span,
-                                          l.tree_load,
-                                          l.tree_clauses,
-                                          l.tree_by_crit,
-                                          l.io_preroute,
-                                          l.sat_alt,
-                                          l.push_rounds,
-                                          l.push_fraction,
-                                          l.tree_room,
-                                          l.tree_congestion),
-                              h);
-    h             = hash_text(std::format("legroute-budgets:{}:{}:{}:{}:{}:{}:{}:{}",
-                                          l.sat_conflicts,
-                                          l.sat_ms,
-                                          l.sat_min_fill,
-                                          l.route_access,
-                                          l.route_patterns,
-                                          l.route_ms,
-                                          l.threads,
-                                          o.allow_increase_area),
-                              h);
+    h = hash_text(std::format("legroute-v14:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{"
+                              "}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+                              l.box_fill,
+                              l.box_net_max,
+                              l.merge_cost,
+                              l.crit_fraction,
+                              l.crit_window_ps,
+                              l.reserved_tracks,
+                              l.clock_spine,
+                              l.rib_tiles,
+                              l.final,
+                              l.route_passes,
+                              l.cap_scale,
+                              l.window_tiles,
+                              l.crit_boxes,
+                              l.tree_boxes,
+                              l.tree_moves,
+                              l.sat_relax_rounds,
+                              l.inbox_span,
+                              l.tree_load,
+                              l.tree_clauses,
+                              l.tree_by_crit,
+                              l.io_preroute,
+                              l.sat_alt,
+                              l.tree_congestion,
+                              l.steiner_pins,
+                              l.capacity_lazy,
+                              l.freeze,
+                              l.legal_boxes,
+                              l.legal_window,
+                              l.legal_shuffle,
+                              l.steiner_min,
+                              l.hop_share,
+                              l.reserve_share,
+                              l.global_fraction,
+                              l.global_route,
+                              l.global_share,
+                              l.global_own_share,
+                              l.hop_choice,
+                              l.spill_rounds,
+                              l.spill_fraction,
+                              l.window_grow,
+                              l.spill_shift,
+                              l.mesh_join,
+                              l.alternatives,
+                              l.alt_ms,
+                              l.region_pins,
+                              l.alt_all,
+                              l.checker_window,
+                              l.global_margin,
+                              l.global_rounds,
+                              l.hop_spread,
+                              l.sat_seed,
+                              l.tiers,
+                              l.tier_rounds,
+                              l.tier_fraction,
+                              l.tier_batch),
+                  h);
+    h = hash_text(std::format("legroute-budgets:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+                              l.sat_conflicts,
+                              l.sat_ms,
+                              l.tier_ms,
+                              l.sat_min_fill,
+                              l.route_access,
+                              l.route_patterns,
+                              l.route_ms,
+                              l.threads,
+                              o.allow_increase_area),
+                  h);
+    if (!o.region_seed_dir.empty()) {  // the virtual pins legroute takes from the region refinement
+      for (const char* name : {"/boundarypins/pins.tsv", "/region_mesh.json"}) {
+        std::ifstream file(o.region_seed_dir + name, std::ios::binary);
+        std::string   text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        h = hash_text("region-seed:" + text, h);
+      }
+    }
     if (o.legroute_probe.enabled) {
       const auto& q = o.legroute_probe;
-      h             = hash_text(std::format("legroute-probe:{}:{}:{}:{}:{}:{}:{}:{}",
+      h             = hash_text(std::format("legroute-probe:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                                             q.cells,
                                             q.sat_ms,
                                             q.iterations,
@@ -747,7 +785,11 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                                             q.target,
                                             q.max_inflate,
                                             l.sat_min_fill,
-                                            q.tree_congestion),
+                                            q.tree_congestion,
+                                            q.rounds,
+                                            q.real,
+                                            q.repulsion,
+                                            q.shuffle),
                                 h);
     }
   }
@@ -3110,9 +3152,9 @@ std::shared_ptr<ph::Parasitics> estimate_rc(const Geometry_view& geometry, const
     pins.clear();
     uint64_t load_hash = hash_util::kFnv1a64_offset;
     for (int p = begin; p < end; ++p) {
-      const auto   node = design.pin2node[p];
-      const auto   pin_offset = geometry.pin_offset(p);
-      const auto [x, y]       = geometry.pin_position(p, pin_offset);
+      const auto node       = design.pin2node[p];
+      const auto pin_offset = geometry.pin_offset(p);
+      const auto [x, y]     = geometry.pin_position(p, pin_offset);
       pins.emplace_back(v.pins[p].label(), std::pair{x, y});
       if (pin_locations) {
         pin_locations->emplace(pins.back().first, std::pair{x, y});
@@ -3556,6 +3598,29 @@ void take_rail_twin(View& v, size_t i, const std::string& macro) {
     c.macro = macro;
   }
 }
+// Region_options for the mesh: with cut = "ratio", the tracks a cut line crosses per micron come from the routing
+// stack legroute routes on (the horizontal layers above the box layer for a vertical line, the vertical ones for a
+// horizontal line), so a split weighs the two axes by what the region can carry.
+Region_options region_options_with_tracks(const ph::Technology& tech, const Region_options& o) {
+  Region_options ro = o;
+  if (ro.cut == "ratio" && ro.h_tracks_per_um <= 0 && ro.v_tracks_per_um <= 0) {
+    size_t k = 0;
+    for (const auto& name : tech.routing_layers) {
+      ++k;
+      const auto it = tech.layers.find(name);
+      if (it == tech.layers.end() || k <= 2 || k > 7) {
+        continue;  // M1 holds the pins, M2 is legroute's box layer; the stack above M7 is not routed
+      }
+      const auto&  L     = it->second;
+      const bool   h     = L.direction == "HORIZONTAL";
+      const double pitch = h ? (L.pitch_y > 0 ? L.pitch_y : L.pitch_x) : (L.pitch_x > 0 ? L.pitch_x : L.pitch_y);
+      if (pitch > 0) {
+        (h ? ro.h_tracks_per_um : ro.v_tracks_per_um) += 1.0 / pitch;
+      }
+    }
+  }
+  return ro;
+}
 // Each cell takes the master its component in frame has: the anchor prepass
 // and the two-row ECO pick the rail twin a start needs. frame lists v.cells
 // first, in order.
@@ -3563,6 +3628,55 @@ void adopt_rail_twins(View& v, const ph::Floorplan& frame) {
   for (size_t i = 0; i < v.cells.size(); ++i) {
     take_rail_twin(v, i, frame.components.at(i).macro);
   }
+}
+// The same on a frame legroute placed: each two-row cell with a rail twin
+// takes the master the PG rails of its rows need, before the frame is checked
+// or cached. Returns the cells switched.
+size_t sync_rail_twins(const ph::Technology& tech, ph::Floorplan& frame, const Options& options) {
+  if (options.multirow_templates.empty() || frame.rows.empty()) {
+    return 0;
+  }
+  const Pg_rail_model rails(tech);
+  const auto          rh       = std::llround(tech.sites.at(frame.rows.front().site).height * tech.dbu);
+  size_t              switched = 0, tall = 0, unmatched = 0;
+  for (auto& c : frame.components) {
+    const auto t = options.multirow_templates.find(c.macro);
+    const auto m = tech.macros.find(c.macro);
+    const auto h = m == tech.macros.end() ? int64_t{0} : std::llround(m->second.height * tech.dbu);  // the master's, not the pose's
+    if (t == options.multirow_templates.end() || t->second.rail_twin.empty() || c.place.status == Status::UNPLACED || h <= rh) {
+      continue;
+    }
+    ++tall;
+    std::vector<Orientation> rows;
+    for (int64_t y = c.place.y; y < c.place.y + h; y += rh) {
+      const auto row = std::find_if(frame.rows.begin(), frame.rows.end(), [&](const ph::Row& r) {
+        return r.y == y && c.place.x >= r.x && c.place.x < r.x + r.count * r.step;
+      });
+      if (row == frame.rows.end()) {
+        break;
+      }
+      rows.push_back(row->orientation);
+    }
+    if (rows.size() * rh != size_t(h)) {
+      ++unmatched;
+      continue;
+    }
+    if (rails.fit(c.macro, c.place.orientation, rows) == Rail_fit::mismatch) {
+      if (rails.fit(t->second.rail_twin, c.place.orientation, rows) == Rail_fit::fit) {
+        c.macro = t->second.rail_twin;
+        ++switched;
+      } else {
+        ++unmatched;
+      }
+    }
+  }
+  std::fprintf(stderr,
+               "legroute: rail twins: %zu of %zu two-row cells switched to the twin their rows need, %zu without a fit (%zu templates)\n",
+               switched,
+               tall,
+               unmatched,
+               options.multirow_templates.size());
+  return switched;
 }
 // Every placed multi-row cell with a rail twin takes the master the PG rails
 // of its rows need (a restored placement keeps the netlist's template).
@@ -4754,9 +4868,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     if (!options.handoff_taps) {
       throw std::invalid_argument("synth.place.pg requires synth.place.handoff.taps=true");
     }
-    pg_profile                        = power_grid_profile(*tech_profile);
-    pg_profile->channels              = options.pg_channels;
-    pg_profile->channel_max_ir_drop_v = options.pg_channel_max_ir_drop_v;
+    pg_profile                             = power_grid_profile(*tech_profile);
+    pg_profile->channels                   = options.pg_channels;
+    pg_profile->channel_max_ir_drop_v      = options.pg_channel_max_ir_drop_v;
+    pg_profile->tolerate_macro_pin_overlap = options.pg_tolerate_macro_pin_overlap;
   }
   if (macro_active && options.metadata && !options.metadata->select("livehd.placement.hints", source.get_name()).empty()) {
     livehd::diag::warn("pass.place", "placement-hint-mode", "unsupported")
@@ -5204,9 +5319,13 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         throw std::runtime_error("a mapped cell or macro halo does not fit in the fixed core");
       }
     }
-    // Alternating N/FS rows require X-symmetric cells, as in sky130HD.
-    const bool flip
-        = std::all_of(v.cells.begin(), v.cells.end(), [&](const auto& c) { return tech.macros.at(c.macro).symmetry_x; });
+    // Alternating N/FS rows require X-symmetric row cells, as in sky130HD. A block
+    // macro (a memory, a hard macro) never sits in a row, so it does not decide
+    // the flip: all-N rows would leave every two-row cell without shared rails.
+    const bool flip = std::all_of(v.cells.begin(), v.cells.end(), [&](const auto& c) {
+      const auto& m = tech.macros.at(c.macro);
+      return !m.klass.starts_with("CORE") || m.symmetry_x;
+    });
     for (int64_t row = 0; row < rows; ++row) {
       v.fp.rows.push_back({"ROW_" + std::to_string(row),
                            site_name,
@@ -5235,7 +5354,12 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       auto& c = *it->second;
       if (imported.macro != c.macro) {
-        throw std::runtime_error("floorplan cell master mismatch: " + c.name);
+        // a two-row cell's rail twin (the frame's rows decided it in an earlier stage): the same cell, taken as is
+        const auto t = options.multirow_templates.find(c.macro);
+        if (t == options.multirow_templates.end() || t->second.rail_twin != imported.macro) {
+          throw std::runtime_error("floorplan cell master mismatch: " + c.name);
+        }
+        take_rail_twin(v, size_t(&c - v.cells.data()), imported.macro);
       }
       if (imported.place.status == Status::FIXED) {
         auto p   = imported.place;
@@ -6269,7 +6393,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   }
   // While optimization is pending (timing-driven placement, resize, repair follow) only the dedicated
   // refine_regions call refines: it runs once on the timing-driven result, then timing gets a chance to react.
-  const bool refine_here = !options.optimization_pending || options.region_refine;
+  const bool refine_here       = !options.optimization_pending || options.region_refine;
   const bool boundary_active   = options.boundarypins.enabled && options.full && !options.fp_place && refine_here
                                  && options.completed_stage == Placement_stage::final && !options.timing_seed
                                  && !options.retain_placement && !options.analyze_colors_only;
@@ -6307,8 +6431,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     if (options.satlegalize) {
       refuse("satlegalize treats multi-height cells as immutable");
     }
-    if (options.boundarypins.enabled || options.boundarypins.align) {
-      refuse("the detail-final region mesh (busorder, boundarypins) needs single-row cells");
+    if ((options.boundarypins.enabled || options.boundarypins.align) && !options.legroute) {
+      refuse("the detail-final region mesh (busorder, boundarypins) needs single-row cells");  // legroute places them
     }
     if (!options.multirow_eco) {
       if (options.previous || !options.changed_cells.empty() || options.legalize_cells) {
@@ -6339,7 +6463,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   // The boundary refinements settle the converged GP placement with more DREAMPlace iterations. They must start
   // from GP's converged density weight: restarted at initial_density_weight, wirelength collapses the spread
   // placement (overflow 5% -> 50%+ within 100 iterations).
-  double                       gp_density_weight       = 0;
+  double                       gp_density_weight = 0;
   // the region mesh's inputs: the fixed macros (not placement masks) and the IO terminals
   const auto                   region_macros           = [&] {
     std::vector<int> macro_indices;
@@ -6413,7 +6537,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       return segments;
     };
-    const auto regions = Region_mesh::build(physical, bus_macros, ios, options.region, tech.dbu);
+    const auto regions = Region_mesh::build(physical, bus_macros, ios, region_options_with_tracks(tech, options.region), tech.dbu);
     regions.write(options.output_dir);
     final_regions = regions;
     if (regions.rects.size() < 2) {
@@ -6462,6 +6586,75 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       control.observer(physical, dp::PlacementStage::global_placement, control.max_iterations);
     }
   };
+  // The region refinement's mesh and bus-ordered virtual pins from an earlier placement call (options.region_seed_dir):
+  // a terminal stage without its own refinement gives them to legroute. Pins map to this stage's nets by driver.
+  struct Region_seed {
+    Region_mesh                        mesh;
+    std::vector<Legroute_boundary_pin> pins;
+  };
+  std::optional<Region_seed> region_seed;
+  bool                       region_seed_failed = false;
+  const auto                 load_region_seed   = [&]() -> const std::optional<Region_seed>& {
+    if (region_seed || region_seed_failed || options.region_seed_dir.empty()) {
+      return region_seed;
+    }
+    try {
+      std::ifstream       mesh_file(options.region_seed_dir + "/region_mesh.json");
+      std::string         text((std::istreambuf_iterator<char>(mesh_file)), std::istreambuf_iterator<char>());
+      rapidjson::Document doc;
+      doc.Parse(text.c_str());
+      if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("rectangles") || !doc["rectangles"].IsArray()) {
+        throw std::runtime_error("region_mesh.json unreadable");
+      }
+      std::vector<Region_rect> rects;
+      for (const auto& r : doc["rectangles"].GetArray()) {
+        const auto& b = r["bounds_dbu"];
+        rects.push_back({b[0].GetDouble(), b[1].GetDouble(), b[2].GetDouble(), b[3].GetDouble(), r["initial_cells"].GetUint()});
+      }
+      std::map<std::string, size_t> by_driver;  // the net index is the nets' iteration order (the refinement's too)
+      size_t                        index = 0;
+      for (const auto& [driver, sinks] : v.nets) {
+        by_driver.emplace(driver.instance == "PIN" ? driver.pin : driver.instance + "/" + driver.pin, index++);
+      }
+      std::ifstream pins_file(options.region_seed_dir + "/boundarypins/pins.tsv");
+      std::string   line;
+      Region_seed   seed{Region_mesh::from_rects(std::move(rects)), {}};
+      size_t        unmatched = 0;
+      std::getline(pins_file, line);  // the header
+      while (std::getline(pins_file, line)) {
+        std::vector<std::string> col;
+        for (size_t at = 0;;) {
+          const size_t tab = line.find('\t', at);
+          col.push_back(line.substr(at, tab == std::string::npos ? std::string::npos : tab - at));
+          if (tab == std::string::npos) {
+            break;
+          }
+          at = tab + 1;
+        }
+        if (col.size() < 8) {
+          continue;
+        }
+        const auto it = by_driver.find(col[7]);
+        if (it == by_driver.end()) {
+          ++unmatched;
+          continue;
+        }
+        seed.pins.push_back({it->second, std::stod(col[2]), std::stod(col[3])});
+      }
+      std::fprintf(stderr,
+                   "legroute: region seed from %s: %zu rectangles, %zu virtual pins (%zu without a net here)\n",
+                   options.region_seed_dir.c_str(),
+                   seed.mesh.rects.size(),
+                   seed.pins.size(),
+                   unmatched);
+      region_seed = std::move(seed);
+    } catch (const std::exception& e) {
+      std::fprintf(stderr, "legroute: region seed %s unusable (%s); the mesh is rebuilt without virtual pins\n",
+                   options.region_seed_dir.c_str(), e.what());
+      region_seed_failed = true;
+    }
+    return region_seed;
+  };
   std::optional<Terminal_legalize_report> terminal_report;
   std::optional<Legroute_report>          legroute_report;
   // legroute's routed signal wires by driver (instance, pin), with the connections and cells they were routed for:
@@ -6474,11 +6667,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   std::map<std::string, ph::Component, std::less<>>           legroute_cells;
   ph::Route_width_rules                                       legroute_rules;      // the router's wire-width rules
   std::map<std::string, ph::Terminal>                         legroute_terminals;  // the IO pins its wires end on
-  std::optional<Multirow_report>          multirow_report;
-  std::optional<Multirow_eco_report>      multirow_eco_report;
-  std::pair<unsigned, unsigned>           multirow_eco_grid;  // its terminal bin grid
-  std::vector<ph::Component>              handoff_cells;
-  std::vector<ph::Row>                    handoff_rows;
+  std::optional<Multirow_report>                              multirow_report;
+  std::optional<Multirow_eco_report>                          multirow_eco_report;
+  std::pair<unsigned, unsigned>                               multirow_eco_grid;  // its terminal bin grid
+  std::vector<ph::Component>                                  handoff_cells;
+  std::vector<ph::Row>                                        handoff_rows;
   const bool macro_pin_adjust = options.macro_pin_adjust && movable_macros && !options.previous && !options.timing_seed;
   const bool adjustable_io
       = v.centroids && options.fp_pin_adjust
@@ -8624,6 +8817,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       placement_hints->rebind(hint_objects());
       placement_hints->attach(control, hint_objects);
     }
+    // the routability probe (defined below) runs here, in the region-refinement call, before the mesh and the
+    // bus-ordered pins are cut, so the inflation spreads the cells first and the boundaries follow; the terminal
+    // stage then takes the refinement's mesh and pins (region_seed_dir) and does not probe again
+    std::function<bool(dp::Design&, unsigned)> probe_fn;
+    size_t                                     probe_failing = 0;  // the regions the last probe round found unroutable
     if (refinement_active && !terminal_active) {
       const auto prior_progress = control.progress_observer;
       control.progress_observer = [&, prior_progress](const dp::GpSample& sample) {
@@ -8737,55 +8935,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         throw std::runtime_error("cannot write relative filler budget");
       }
     }
-    try {
-      metrics = dp::place(v.design, control);
-    } catch (const std::runtime_error&) {
-      if (sat_gp) {
-        v.design                 = *sat_gp;
-        auto fallback            = control;
-        fallback.max_iterations  = 0;
-        fallback.before_legalize = {};
-        sat_retained             = 0;
-        metrics                  = dp::place(v.design, fallback);
-      } else {
-        if (cache.reused == 0) {
-          throw;
-        }
-        // Changed blocks may need whitespace outside their old anchors. Retry
-        // with reusable blocks movable; imported FIXED cells remain fixed.
-        for (auto& c : v.cells) {
-          c.locked = false;
-        }
-        cache = {0, hashes.size(), false};
-        make_arrays(v, tech);
-        // The retry is a fresh solve: restart the macro timing budget and trace.
-        macro_checkpoints       = 0;
-        macro_checkpoint_forced = false;
-        macro_timed_positions.clear();
-        metrics = dp::place(v.design, control);
-      }
-    }
-#if defined(DREAMPLACE_NATIVE_PIN_TIMING_API) && DREAMPLACE_NATIVE_PIN_TIMING_API >= 2
-    if (options.native_gp_timing && options.native_gp_timing->continuing_rollback) {
-      std::ofstream report(options.output_dir + "/native_gp_transactions.json");
-      report << std::format(R"({{"iterations":{},"selected_iteration":{},"rollback_history":[)",
-                            metrics.iterations,
-                            metrics.selected_iteration);
-      bool first = true;
-      for (const auto& event : metrics.rollback_history) {
-        report << (first ? "" : ",")
-               << std::format(R"({{"iteration":{},"restored_iteration":{}}})", event.iteration, event.restored_iteration);
-        first = false;
-      }
-      report << "]}";
-      if (!report) {
-        throw std::runtime_error("cannot write native GP transaction report");
-      }
-    }
-#endif
-    if (macro_warp) {
-      macro_warp->finish(metrics.iterations);
-    }
     // legroute's frame additions: the handoff taps and end caps (rows cut under macros), and the planned power grid
     // (obstacles, power nets and vias; the IO pins as the handoff exports them). Returns the routing profile.
     const auto add_handoff_taps = [&](ph::Floorplan& frame) {
@@ -8842,36 +8991,100 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     // legroute.probe: a quick legroute on small regions (no virtual pins) finds the regions it cannot route; their
     // cells widen (GOALPlace-style inflation, x only: r = fill / target, less for timing-critical cells) and GP resumes
     // from the converged placement until it settles; the widths come back before bus order and the real legroute.
-    const auto run_legroute_probe = [&](dp::Design& design) {
-      const auto&    po    = options.legroute_probe;
-      const auto     start = std::chrono::steady_clock::now();
-      Region_options ro    = options.region;
-      ro.max_cells         = po.cells;
-      const auto mesh      = Region_mesh::build(design, region_macros(), region_ios(), ro, tech.dbu);
-      auto       frame     = sat_frame(design, false);
+    // one probe round: legroute on the converged GP, the unroutable regions' cells widened, GP resumed; true when
+    // every region routed (or nothing could be widened)
+    const auto run_legroute_probe = [&](dp::Design& design, unsigned round) {
+      const auto&      po    = options.legroute_probe;
+      const auto       start = std::chrono::steady_clock::now();
+      const bool       seeded = po.real && !refinement_active && load_region_seed().has_value();
+      const bool       real   = po.real && (refinement_active || seeded);
+      if (po.real && !real) {
+        std::fprintf(stderr,
+                     "legroute probe: probe.real asked but the boundary refinement is inactive here (boundary pins %d, full %d, "
+                     "fp_place %d, optimization pending %d, region_refine %d, stage final %d): small regions without pins\n",
+                     options.boundarypins.enabled,
+                     options.full,
+                     options.fp_place,
+                     options.optimization_pending,
+                     options.region_refine,
+                     options.completed_stage == Placement_stage::final);
+      }
+      Legroute_regions regions;
+      if (seeded) {  // the refinement's mesh and pins (fixed through the rounds)
+        const auto& seed = *load_region_seed();
+        if (seed.mesh.rects.size() > 1) {
+          for (const auto& r : seed.mesh.rects) {
+            regions.rects.push_back({r.xl, r.yl, r.xh, r.yh});
+          }
+          if (options.legroute_options.region_pins) {
+            regions.pins = seed.pins;
+          }
+        }
+      } else if (real) {  // the real legroute's regions and bus-ordered virtual pins, refined at this round's placement
+        if (metrics.density_weight > 0) {
+          gp_density_weight = metrics.density_weight;
+        } else if (gp_density_weight <= 0) {  // before the refinement call's GP: the seed it was given
+          gp_density_weight = control.density_weight_seed.value_or(0);
+        }
+        refine_final_boundaries(design);
+        if (final_regions && final_regions->rects.size() > 1) {
+          for (const auto& r : final_regions->rects) {
+            regions.rects.push_back({r.xl, r.yl, r.xh, r.yh});
+          }
+          if (boundary_pins) {
+            for (const auto& a : boundary_pins->pin_model().anchors) {
+              if (a.original_net >= 0) {
+                regions.pins.push_back({size_t(a.original_net), a.x, a.y});
+              }
+            }
+          }
+        }
+      } else {
+        Region_options ro = region_options_with_tracks(tech, options.region);
+        ro.max_cells      = po.cells ? po.cells : options.region.max_cells;
+        const auto mesh   = Region_mesh::build(design, region_macros(), region_ios(), ro, tech.dbu);
+        if (mesh.rects.size() > 1) {
+          for (const auto& r : mesh.rects) {
+            regions.rects.push_back({r.xl, r.yl, r.xh, r.yh});
+          }
+        }
+      }
+      auto frame = sat_frame(design, false);
       if (options.handoff_taps) {
         add_handoff_taps(frame);
       }
-      Legroute_regions regions;
-      if (mesh.rects.size() > 1) {
-        for (const auto& r : mesh.rects) {
-          regions.rects.push_back({r.xl, r.yl, r.xh, r.yh});
-        }
+      if (real) {  // the virtual pins name frame nets
+        std::erase_if(regions.pins, [&](const auto& p) { return p.net >= frame.nets.size(); });
       }
       const auto* profile = legroute_power(frame, regions);
       auto        lopt    = options.legroute_options;
       lopt.final          = false;
+      lopt.legal_boxes    = false;  // the probe judges the GP placement's regions with the SAT placement (nothing is legal yet)
       lopt.sat_ms         = po.sat_ms;
       lopt.sat_min_fill   = po.fill;
+      lopt.spill_rounds   = 0;  // the probe is the density signal: the moves and the alternatives belong to the real run
+      lopt.alternatives.clear();
+      // a failing probe restarts the placement: no need to solve the other regions; the real twin solves them all,
+      // every failing region's cells widen
+      lopt.fail_fast      = po.strict && !real;
       lopt.sat_alt.clear();
-      lopt.push_rounds      = 0;
       lopt.macro_halo_x_dbu = v.halo_x;
       lopt.macro_halo_y_dbu = v.halo_y;
-      lopt.output_dir       = options.output_dir.empty() ? "" : options.output_dir + "/legroute_probe";
+      lopt.output_dir       = options.output_dir.empty() ? "" : options.output_dir + std::format("/legroute_probe{}", round);
       if (!lopt.output_dir.empty()) {
         std::filesystem::create_directories(lopt.output_dir);
       }
-      const auto          probe = legroute(tech, frame, final_gp_timing, lopt, regions, profile);
+      Legroute_report probe;
+      try {
+        probe = legroute(tech, frame, final_gp_timing, lopt, regions, profile);
+      } catch (const Legroute_unfit& e) {  // too dense for the tile grid: the core grows before any inflation
+        if (!options.allow_increase_area || !options.generated_core) {
+          throw;
+        }
+        const double utilization = options.utilization * options.area_step;
+        std::fprintf(stderr, "legroute probe: %s; placement restarts at utilization %.3f\n", e.what(), utilization);
+        throw Placement_area_restart(utilization, utilization + .05);
+      }
       // per cell of an unroutable region: r = its region's box fill / target, at most max_inflate; the most timing-critical
       // cells (top 10% by timing weight, GOALPlace's 10-quantile guard) keep their size
       std::vector<double> fill(probe.region_stats.size(), 0), solved;
@@ -8910,6 +9123,74 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           guard = INFINITY;
         }
       }
+      // shuffle: a few cells of each unroutable region's densest patch (a 4x4 grid over the region) move to its
+      // sparsest patch and anchor there for the resume (their movement box shrinks to the cell): the noise the
+      // user asked for, since the SAT's limited movement wants a slightly different placement, and the anchors
+      // pull their nets toward the empty area. Timing-critical cells stay.
+      struct Anchor {
+        int                   node;
+        dp::PositionBox       box;
+      };
+      std::vector<Anchor> anchored;
+      std::set<int>       anchored_set;
+      if (po.shuffle > 0) {
+        std::map<int, std::vector<int>> cells_of;  // failing region -> its movable cells
+        for (size_t k = 0; k < probe.unroutable_components.size(); ++k) {
+          const size_t i = probe.unroutable_components[k];
+          const int    r = probe.unroutable_regions[k];
+          if (i < size_t(design.num_movable) && r >= 0 && size_t(r) < fill.size()) {
+            cells_of[r].push_back(int(i));
+          }
+        }
+        if (design.node_boxes.empty()) {
+          design.node_boxes.assign(design.node_x.size(), {design.layout.xl, design.layout.yl, design.layout.xh, design.layout.yh});
+        }
+        for (const auto& [r, cells] : cells_of) {
+          double xl = design.layout.xl, yl = design.layout.yl, xh = design.layout.xh, yh = design.layout.yh;
+          if (size_t(r) < regions.rects.size()) {
+            xl = regions.rects[size_t(r)].xl;
+            yl = regions.rects[size_t(r)].yl;
+            xh = regions.rects[size_t(r)].xh;
+            yh = regions.rects[size_t(r)].yh;
+          }
+          const int           nb = 4;
+          std::vector<double> bin_area(size_t(nb * nb), 0);
+          const auto          bin_of = [&](int i) {
+            const double cx = design.node_x[i] + design.node_size_x[i] / 2, cy = design.node_y[i] + design.node_size_y[i] / 2;
+            const int    bx = std::clamp(int((cx - xl) / std::max(1.0, xh - xl) * nb), 0, nb - 1);
+            const int    by = std::clamp(int((cy - yl) / std::max(1.0, yh - yl) * nb), 0, nb - 1);
+            return by * nb + bx;
+          };
+          for (int i : cells) {
+            bin_area[size_t(bin_of(i))] += design.node_size_x[i] * design.node_size_y[i];
+          }
+          const int densest  = int(std::max_element(bin_area.begin(), bin_area.end()) - bin_area.begin());
+          const int sparsest = int(std::min_element(bin_area.begin(), bin_area.end()) - bin_area.begin());
+          if (densest == sparsest || bin_area[size_t(densest)] <= 0) {
+            continue;
+          }
+          const double tx = xl + (sparsest % nb + .5) * (xh - xl) / nb, ty = yl + (sparsest / nb + .5) * (yh - yl) / nb;
+          unsigned     picked = 0;
+          for (int i : cells) {
+            if (picked >= po.shuffle) {
+              break;
+            }
+            if (bin_of(i) != densest || weight[i] >= guard || anchored_set.contains(i)) {
+              continue;
+            }
+            anchored.push_back({i, design.node_boxes[i]});
+            anchored_set.insert(i);
+            // the anchors spread along x inside the sparse patch, a cell width apart
+            const double x = std::clamp(tx + (double(picked) - double(po.shuffle - 1) / 2) * 2 * design.node_size_x[i] - design.node_size_x[i] / 2,
+                                        xl, xh - design.node_size_x[i]);
+            const double y = std::clamp(ty - design.node_size_y[i] / 2, yl, yh - design.node_size_y[i]);
+            design.node_x[i]     = x;
+            design.node_y[i]     = y;
+            design.node_boxes[i] = {x, y, x + design.node_size_x[i], y + design.node_size_y[i]};
+            ++picked;
+          }
+        }
+      }
       std::vector<double> grow(design.num_movable, 0);  // added width per movable cell
       double              movable_area = 0, added = 0;
       for (int i = 0; i < design.num_movable; ++i) {
@@ -8918,7 +9199,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       for (size_t k = 0; k < probe.unroutable_components.size(); ++k) {
         const size_t i = probe.unroutable_components[k];
         const int    r = probe.unroutable_regions[k];
-        if (i >= size_t(design.num_movable) || r < 0 || size_t(r) >= fill.size()) {
+        if (i >= size_t(design.num_movable) || r < 0 || size_t(r) >= fill.size() || anchored_set.contains(int(i))) {
           continue;
         }
         const double ratio = std::clamp(fill[r] / target, 1.0, po.max_inflate);
@@ -8974,7 +9255,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       const double hpwl_before = dp::hpwl(design);
       size_t       inflated    = 0;
       unsigned     iterations  = 0;
-      if (added > 0) {
+      if (added > 0 || !anchored.empty()) {
         // widen around the centre (pins keep their absolute positions), GP from the converged placement, narrow back
         const auto widen = [&](double sign) {
           for (int i = 0; i < design.num_movable; ++i) {
@@ -8987,11 +9268,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
             for (int k = design.flat_node2pin_start[i]; k < design.flat_node2pin_start[i + 1]; ++k) {
               design.pin_offset_x[design.flat_node2pin[k]] += half;
             }
-            if (!design.node_boxes.empty()) {
-              design.node_boxes[i] = {design.node_x[i],
-                                      design.node_y[i],
-                                      design.node_x[i] + design.node_size_x[i],
-                                      design.node_y[i] + design.node_size_y[i]};
+            if (!design.node_boxes.empty()) {  // the movement bounds widen with the cell and narrow back (never its outline)
+              design.node_boxes[i].xl -= half;
+              design.node_boxes[i].xh += half;
             }
           }
         };
@@ -9000,8 +9279,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         }
         widen(1);
         auto ctl = control;
-        if (metrics.density_weight > 0) {
-          ctl.density_weight_seed = metrics.density_weight;
+        if (const double dw = metrics.density_weight > 0   ? metrics.density_weight
+                              : gp_density_weight > 0 ? gp_density_weight
+                                                      : control.density_weight_seed.value_or(0);
+            dw > 0) {
+          ctl.density_weight_seed = dw * po.repulsion;
         }
         ctl.target_density         = density;
         ctl.fillers_in_whitespace  = true;
@@ -9028,6 +9310,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         const auto  placed = dp::place(design, ctl, &state);
         iterations         = unsigned(placed.iterations);
         widen(-1);
+        for (const auto& a : anchored) {  // the anchors move freely again
+          design.node_boxes[a.node] = a.box;
+        }
         design.validate();
       }
       const double          hpwl_after = dp::hpwl(design);
@@ -9037,8 +9322,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
       std::fprintf(stderr,
-                   "legroute probe: %zu regions (routable %zu, unsat %zu, no answer %zu, sparse %zu), %zu cells widened "
-                   "(+%.1f%% area), GP %u iterations, HPWL %.4g -> %.4g, %.1f s\n",
+                   "legroute probe round %u%s: %zu regions (routable %zu, unsat %zu, no answer %zu, sparse %zu), %zu cells widened "
+                   "(+%.1f%% area), %zu shuffled, GP %u iterations, HPWL %.4g -> %.4g, %.1f s\n",
+                   round,
+                   seeded ? " (the refinement's regions and pins)" : real ? " (real regions and pins)" : "",
                    probe.region_stats.size(),
                    count[0],
                    count[1],
@@ -9046,6 +9333,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                    count[3],
                    inflated,
                    movable_area > 0 ? 100 * added / movable_area : 0.0,
+                   anchored.size(),
                    iterations,
                    hpwl_before,
                    hpwl_after,
@@ -9069,9 +9357,107 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
             seconds)
                << '\n';
       }
+      probe_failing = count[1] + count[2];
+      return count[1] + count[2] == 0 || (added <= 0 && anchored.empty());
     };
-    if (terminal_active && options.legroute && options.legroute_probe.enabled && !multirow_cells) {
-      run_legroute_probe(v.design);
+    probe_fn = run_legroute_probe;
+    // the region-refinement call starts from a converged placement: the probe rounds run here, before its GP call
+    // (never inside DREAMPlace's hooks: the detailed placer keeps its own copy of the cells' sizes and positions),
+    // and the refinement in the call's before-legalize hook then cuts the mesh and places the pins after the inflation
+    if (refinement_active && !terminal_active && options.legroute && options.legroute_probe.enabled && !multirow_cells) {
+      // the rounds keep the best placement: a round that leaves more regions failing than the best so far is undone
+      // (its inflation moved cells past the point of need) and the rounds stop
+      std::vector<double> best_x = v.design.node_x, best_y = v.design.node_y;
+      size_t              best_failing = std::numeric_limits<size_t>::max();
+      bool                measured     = false;  // the placement now in v.design was measured by the last round
+      for (unsigned round = 0; round < std::max(1u, options.legroute_probe.rounds); ++round) {
+        const auto before_x = v.design.node_x;
+        const auto before_y = v.design.node_y;
+        const bool done     = run_legroute_probe(v.design, round);
+        if (probe_failing > best_failing) {
+          std::fprintf(stderr, "legroute probe: round %u left %zu regions failing, the best was %zu: that placement is kept\n", round,
+                       probe_failing, best_failing);
+          v.design.node_x = best_x;
+          v.design.node_y = best_y;
+          measured        = true;
+          break;
+        }
+        if (probe_failing < best_failing) {
+          best_failing = probe_failing;
+          best_x       = before_x;  // the placement the probe measured, before this round's inflation moved it
+          best_y       = before_y;
+        }
+        measured = done;  // a round that changed nothing ends with the placement it measured
+        if (done) {
+          break;
+        }
+      }
+      if (!measured && best_failing > 0 && best_failing != std::numeric_limits<size_t>::max()) {
+        // the last round's inflation was never measured: the best measured placement is the one to keep unless the
+        // rounds ran out while improving (then the latest inflation stands, as the terminal legroute measures it)
+        std::fprintf(stderr, "legroute probe: %zu regions failing at the best measured round; the latest inflation stands for the terminal run\n",
+                     best_failing);
+      }
+      // DREAMPlace's detailed placer asserts on the cells the probe's resumes leave overlapping; legalization alone
+      // settles them, the terminal stage legalizes again anyway
+      control.detailed_place = false;
+    }
+    try {
+      metrics = dp::place(v.design, control);
+    } catch (const std::runtime_error&) {
+      if (sat_gp) {
+        v.design                 = *sat_gp;
+        auto fallback            = control;
+        fallback.max_iterations  = 0;
+        fallback.before_legalize = {};
+        sat_retained             = 0;
+        metrics                  = dp::place(v.design, fallback);
+      } else {
+        if (cache.reused == 0) {
+          throw;
+        }
+        // Changed blocks may need whitespace outside their old anchors. Retry
+        // with reusable blocks movable; imported FIXED cells remain fixed.
+        for (auto& c : v.cells) {
+          c.locked = false;
+        }
+        cache = {0, hashes.size(), false};
+        make_arrays(v, tech);
+        // The retry is a fresh solve: restart the macro timing budget and trace.
+        macro_checkpoints       = 0;
+        macro_checkpoint_forced = false;
+        macro_timed_positions.clear();
+        metrics = dp::place(v.design, control);
+      }
+    }
+#if defined(DREAMPLACE_NATIVE_PIN_TIMING_API) && DREAMPLACE_NATIVE_PIN_TIMING_API >= 2
+    if (options.native_gp_timing && options.native_gp_timing->continuing_rollback) {
+      std::ofstream report(options.output_dir + "/native_gp_transactions.json");
+      report << std::format(R"({{"iterations":{},"selected_iteration":{},"rollback_history":[)",
+                            metrics.iterations,
+                            metrics.selected_iteration);
+      bool first = true;
+      for (const auto& event : metrics.rollback_history) {
+        report << (first ? "" : ",")
+               << std::format(R"({{"iteration":{},"restored_iteration":{}}})", event.iteration, event.restored_iteration);
+        first = false;
+      }
+      report << "]}";
+      if (!report) {
+        throw std::runtime_error("cannot write native GP transaction report");
+      }
+    }
+#endif
+    if (macro_warp) {
+      macro_warp->finish(metrics.iterations);
+    }
+    // a terminal stage with a region seed had its probe in the refinement call
+    if (terminal_active && options.legroute && options.legroute_probe.enabled && !multirow_cells && options.region_seed_dir.empty()) {
+      for (unsigned round = 0; round < std::max(1u, options.legroute_probe.rounds); ++round) {
+        if (run_legroute_probe(v.design, round)) {
+          break;
+        }
+      }
     }
     if (refinement_active && terminal_active) {
       gp_density_weight = metrics.density_weight;
@@ -9115,8 +9501,14 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                         terminal_options);
       // Anchor the two-row cells first; terminal legalization packs the
       // single-row cells around them as fixed obstacles, then they are released.
-      if (multirow_cells) {
+      // legroute places them itself (a two-row cell is a tile tall), and
+      // sync_rail_twins gives each the master its rows' rails need.
+      const bool legal_boxes = options.legroute && options.legroute_options.legal_boxes;
+      if (multirow_cells && (!options.legroute || legal_boxes)) {
         multirow_report = anchor_multirow_cells(tech, frame, anchor_controls(options, terminal_options, core_origins));
+      }
+      if (legal_boxes) {  // legroute.legal_boxes: the ordinary terminal legalization first; legroute routes it as it stands
+        terminal_report = terminal_legalize(tech, frame, final_gp_timing, terminal_options);
       }
       if (options.legroute) {
         auto lopt = options.legroute_options;
@@ -9126,9 +9518,13 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         lopt.macro_halo_x_dbu = v.halo_x;
         lopt.macro_halo_y_dbu = v.halo_y;
         lopt.output_dir       = options.output_dir;
+        lopt.fail_fast        = options.legroute_probe.strict;  // strict: any failure restarts or stops the run
         Legroute_regions regions;
+        if (!final_regions && !boundary_pins && load_region_seed()) {  // the refinement's mesh and virtual pins
+          final_regions = load_region_seed()->mesh;
+        }
         if (!final_regions) {  // a final stage without the boundary refinement: the same mesh, without virtual pins
-          final_regions = Region_mesh::build(v.design, region_macros(), region_ios(), options.region, tech.dbu);
+          final_regions = Region_mesh::build(v.design, region_macros(), region_ios(), region_options_with_tracks(tech, options.region), tech.dbu);
         }
         if (final_regions->rects.size() > 1) {
           for (const auto& r : final_regions->rects) {
@@ -9140,11 +9536,65 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                 regions.pins.push_back({size_t(a.original_net), a.x, a.y});
               }
             }
+          } else if (region_seed && options.legroute_options.region_pins) {
+            for (const auto& pin : region_seed->pins) {
+              if (pin.net < frame.nets.size()) {
+                regions.pins.push_back(pin);
+              }
+            }
+          }
+          if (!options.legroute_options.region_pins) {
+            regions.pins.clear();
           }
         }
-        const auto* profile = legroute_power(frame, regions);
-        legroute_report     = legroute(tech, frame, final_gp_timing, lopt, regions, profile);
-        if (const size_t failed = legroute_report->sat_unsat_regions + legroute_report->sat_unknown_regions) {
+        const auto* profile  = legroute_power(frame, regions);
+        // too dense for the tile grid or the tracks: on a generated core the placement restarts at a lower
+        // utilization (the failing regions' box fill pushed down to what routes), the GP target density with it
+        const bool  pushback = options.allow_increase_area && options.generated_core && options.legroute_probe.strict;
+        const auto  restart  = [&](double factor, const std::string& why) {
+          const double utilization = options.utilization * factor;
+          std::fprintf(stderr, "legroute: %s; placement restarts at utilization %.3f\n", why.c_str(), utilization);
+          throw Placement_area_restart(utilization, utilization + .05);
+        };
+        // a region without a routable answer: other region meshes at the same core first (the failing crossings
+        // fall elsewhere), then the smaller core
+        const auto recut = [&](const std::string& why) {
+          if (options.mesh_variant < std::min(2u, options.mesh_variants)) {
+            std::fprintf(stderr,
+                         "legroute: %s; placement restarts with region mesh variant %u\n",
+                         why.c_str(),
+                         options.mesh_variant + 1);
+            throw Placement_area_restart(options.utilization, options.density, options.mesh_variant + 1);
+          }
+        };
+        try {
+          legroute_report = legroute(tech, frame, final_gp_timing, lopt, regions, profile);
+        } catch (const Legroute_unfit& e) {
+          if (!pushback) {
+            throw;
+          }
+          restart(options.area_step, e.what());
+        }
+        if (const size_t failed = legroute_report->sat_unsat_regions + legroute_report->sat_unknown_regions;
+            failed && !options.legroute_probe.strict) {
+          std::fprintf(stderr,
+                       "legroute: %zu of %zu regions without a routable answer; keeping the placement (legroute.strict=false)\n",
+                       failed,
+                       legroute_report->sat_regions);
+        } else if (failed && pushback) {
+          double worst = 0;  // the densest failing region's box fill: pushed to about 0.7
+          for (const auto& st : legroute_report->region_stats) {
+            if ((st.status == 1 || st.status == 2) && st.tiles) {
+              worst = std::max(worst, double(st.boxes) / double(st.tiles));
+            }
+          }
+          const auto why = std::format("{} of {} regions without a routable answer (densest failing region fill {:.2f})",
+                                       failed,
+                                       legroute_report->sat_regions,
+                                       worst);
+          recut(why);
+          restart(std::clamp(.7 / std::max(worst, 1e-9), .5, options.area_step), why);
+        } else if (failed) {
           // Stop on an unsuccessful model solve; UNKNOWN is not proof of unroutability.
           const bool fixed_core = !options.generated_core;
           throw std::runtime_error(
@@ -9159,6 +9609,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                           : !options.allow_increase_area  ? "; allow_increase_area is off"
                           : fixed_core                    ? "; the core is fixed (die, core, floorplan or previous placement given)"
                                                           : ""));
+        }
+        if (multirow_cells && !legal_boxes) {  // the two-row cells legroute placed take the rail twin their rows need
+          sync_rail_twins(tech, frame, options);
         }
         for (const auto& n : frame.nets) {
           if (!n.wires.empty() && !n.connections.empty()) {
@@ -9178,11 +9631,14 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       if (multirow_report) {
         release_multirow_anchors(frame, *multirow_report);
         adopt_rail_twins(v, frame);
+      } else if (multirow_cells && options.legroute) {
+        adopt_rail_twins(v, frame);
       }
       sat_install(v.design, frame);
       metrics.legal                               = dp::is_legal(v.design);
       metrics.hpwl                                = dp::hpwl(v.design);
-      metrics.alignment.cell_legalization_seconds = terminal_report ? terminal_report->seconds : legroute_report->seconds;
+      metrics.alignment.cell_legalization_seconds
+          = (terminal_report ? terminal_report->seconds : 0) + (legroute_report ? legroute_report->seconds : 0);
       if (!metrics.legal) {
         throw std::runtime_error(options.legroute ? "legroute failed independent native geometry validation"
                                                   : "terminal legalization failed independent native geometry validation");

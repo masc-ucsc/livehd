@@ -162,7 +162,7 @@ std::optional<Domino_reference> resolve_domino_reference(const std::string& libe
 
 Domino_area domino_area(const usyn::Gate_formula::Metrics& metrics, const Domino_reference& reference, size_t variant, bool reset) {
   Domino_area area;
-  area.x          = static_cast<double>(domino_proxy_devices(metrics, reference)) / 2;
+  area.x          = static_cast<double>(domino_proxy_sixths(metrics, reference)) / 6;
   area.a_not      = reference.inverter.area;
   area.a_register = reference.registers.at(variant).area;
   area.a_reset    = reset ? reference.reset_area : 0;

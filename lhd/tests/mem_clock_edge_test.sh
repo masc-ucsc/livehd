@@ -1,8 +1,9 @@
 #!/bin/bash
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
-# ONE EDGE PER MEMORY -- a mixed-edge memory must PARSE but be refused by FORMAL
-# by name, and a single-edge memory must take its edge from EVERY clocked port.
+# ONE EDGE PER MEMORY CELL -- a mixed-edge memory keeps each port's edge on its
+# own clock pin and is refused by FORMAL by name, and a single-edge memory must
+# take its edge from EVERY clocked port.
 #
 # The Memory cell carries a SINGLE global `posclk`. Yosys keeps a bit per port
 # (WR_CLK_POLARITY / RD_CLK_POLARITY), and the reader used to take the write
@@ -15,11 +16,14 @@
 #     `as_int()` returned 0 and every such ROM imported as NEGEDGE.
 #
 # User ruling 2026-08-02: a memory whose ports do not all commit on the same
-# edge is a shape LiveHD does not model, but the LANGUAGE allows it -- so it is
-# a FORMAL error, not a read error. It parses into a graph with a mixed-edge
-# marker. Verilog emission must refuse it instead of silently emitting every
-# port on posedge; `lhd lec` refuses it BY NAME, and the user opts back in
-# per memory with `--set formal.ignore_memory=<name>`, which blackboxes it: the
+# edge is allowed by the LANGUAGE, so it is a FORMAL error, not a read error.
+# Ruling 2026-11-01 (decision #9): the readers no longer collapse it to a
+# mixed-edge marker (posclk 2). The cell is marked rising and each FALLING
+# port's clock pin is the inverted clock, so every port keeps its edge: Verilog
+# emission regenerates per-port clocks, and pass.single_edge lowers it for the
+# Lean routes. `lhd lec` cannot model the derived memory clock and refuses it
+# BY NAME whenever it has to model the memory; the user opts back in per
+# memory with `--set formal.ignore_memory=<name>`, which blackboxes it: the
 # reads become one shared free symbol per (port, cycle) across the two designs
 # and the contents are never compared. (A latch may mix phases -- that is what
 # the formal phase schedule is for; see todo/livehd/2f-latch M10.)
@@ -50,15 +54,14 @@ fail() {
 # Compile through native Slang; emit representable edges to inspect them.
 compile_emit() { # <name> <src> <top> -> $W/<name>.log, $W/emit_<name>/ (Verilog), $W/lg_<name>/ (IR)
   rm -rf "$W/emit_$1" "$W/lg_$1"
-  local emits=(--emit-dir "lg:$W/lg_$1")
-  [[ "$1" == mixed* ]] || emits+=(--emit-dir "verilog:$W/emit_$1")
+  local emits=(--emit-dir "lg:$W/lg_$1" --emit-dir "verilog:$W/emit_$1")
   "$LHD" compile "$2" --top "$3" \
     "${emits[@]}" --workdir "$W/w_$1" >"$W/$1.log" 2>&1
   return $?
 }
 
 # ---------------------------------------------------------------------------
-# 1. Mixed WRITE edges remain on the Memory cell and must be refused by name.
+# 1. Mixed WRITE edges stay on ONE Memory cell, each port with its own edge.
 # ---------------------------------------------------------------------------
 # `dbg` is deliberate: it is logic OUTSIDE the memory, so case 1d can introduce a
 # real difference that the ignored memory must NOT swallow.
@@ -79,27 +82,28 @@ grep -qa "mixes clock edges" "$W/mixed.log" \
 grep -qa "write port 1" "$W/mixed.log" \
   || { tail -8 "$W/mixed.log"; fail "case 1: the warning does not name the offending port"; }
 echo "ok: a mixed-edge memory parses, with a warning naming the disagreeing ports"
-if "$LHD" compile "lg:$W/lg_mixed" --top mixed --emit-dir "verilog:$W/emit_mixed" \
-    --workdir "$W/w_mixed_emit" > "$W/mixed_emit.log" 2>&1; then
-  fail "case 1: emitted mixed-edge memory without per-port edge support"
-fi
-grep -q 'requires per-port clock edge polarity' "$W/mixed_emit.log" \
-  || { cat "$W/mixed_emit.log"; fail "case 1: emission failed without a clock-edge diagnostic"; }
+grep -qa '\.wr_clock_0(clk)' "$W/emit_mixed"/*.v \
+  || fail "case 1: the rising write port does not regenerate on clk"
+grep -qa '\.wr_clock_1(clk)' "$W/emit_mixed"/*.v \
+  && fail "case 1: the falling write port regenerated on the RISING clock"
+echo "ok: the memory regenerates with per-port clocks (the falling port on the inverted clock)"
 
 # ---------------------------------------------------------------------------
-# 1b. ...and FORMAL refuses it by name, at exit 7 (could-not-decide), never 10.
+# 1b. ...and FORMAL refuses it by name, at exit 7 (could-not-decide), never 10,
+#     whenever it has to model the memory: here against the same memory with
+#     both ports rising, which it must neither prove nor refute.
 # ---------------------------------------------------------------------------
-sed 's/dbg = d ^ 8.hFF/dbg = ~(~(d ^ 8\x27hFF))/' "$W/mixed.v" > "$W/mixed_eq.v"
-compile_emit mixed_eq "$W/mixed_eq.v" mixed \
-  || { tail -8 "$W/mixed_eq.log"; fail "case 1b: the equivalent variant must compile"; }
-LOUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/lg_mixed" --impl "lg:$W/lg_mixed_eq" --top mixed \
+sed 's/always @(negedge clk)/always @(posedge clk)/' "$W/mixed.v" > "$W/mixed_rise.v"
+compile_emit mixed_rise "$W/mixed_rise.v" mixed \
+  || { tail -8 "$W/mixed_rise.log"; fail "case 1b: the rising variant must compile"; }
+LOUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/lg_mixed" --impl "lg:$W/lg_mixed_rise" --top mixed \
        --workdir "$W/lw1" 2>&1); LRC=$?
 if [ "$LRC" -eq 0 ]; then
   fail "case 1b: formal PASSED a memory whose per-port clock edges it cannot model"
 elif [ "$LRC" -eq 10 ]; then
   fail "case 1b: formal reported exit 10 (a counterexample) for a shape it merely cannot MODEL; rc 7 and rc 10 must never be conflated"
 fi
-grep -qa "PER-PORT clock edge polarity" <<<"$LOUT" \
+grep -qa "memory 'memory_[0-9]*:m' has a derived clock the encoder cannot model" <<<"$LOUT" \
   || { tail -8 <<<"$LOUT"; fail "case 1b: refused, but not BY NAME"; }
 echo "ok: formal refuses a mixed-edge memory by name at rc=$LRC (not a counterexample)"
 
@@ -109,7 +113,7 @@ echo "ok: formal refuses a mixed-edge memory by name at rc=$LRC (not a counterex
 # ---------------------------------------------------------------------------
 SUG=$(grep -oaE "formal.ignore_memory=[A-Za-z0-9_:.]+" <<<"$LOUT" | head -1)
 [ -n "$SUG" ] || fail "case 1c: the refusal does not tell the user how to proceed"
-IOUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/lg_mixed" --impl "lg:$W/lg_mixed_eq" --top mixed \
+IOUT=$("$LHD" lec --set formal.effort=proof --ref "lg:$W/lg_mixed" --impl "lg:$W/lg_mixed_rise" --top mixed \
        --workdir "$W/lw2" --set "$SUG" 2>&1); IRC=$?
 [ "$IRC" -eq 0 ] \
   || { tail -8 <<<"$IOUT"; fail "case 1c: '--set $SUG' -- the tool's OWN suggestion -- did not let the run proceed (rc=$IRC)"; }

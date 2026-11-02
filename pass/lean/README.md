@@ -80,7 +80,7 @@ the legacy route and now lives in `Legacy_Fast_Model_Simulator/tests/`.
 - `lean_format.*` — shared literals, collections, lookup trees, operation
   spelling, and atomic file publication.
 - `emit_design_cert.*` — `verified_compiler`: the `<Top>_designCert` literal.
-  `emit_dcert.*` — the same certificate in the DCERT2 wire format read by the
+  `emit_dcert.*` — the same certificate in the DCERT3 wire format read by the
   verified Lean codec `Compiler.CertIO`.
 - `legacy_model.*` (`emit_legacy_model`) coordinates the legacy emitters:
   `emit_legacy_schema.*` (named ports/state, RTL mapping comments),
@@ -465,7 +465,7 @@ lake build
 ```
 
 Build the pass and CLI, and run the pass's unit tests (scan, certificate IR,
-DCERT2 and legacy emitter):
+DCERT3 and legacy emitter):
 
 ```bash
 cd <livehd>

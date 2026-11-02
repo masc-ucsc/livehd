@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -45,27 +46,126 @@ struct Legroute_options {
   double      tree_load        = 0;
   double      tree_clauses     = 10e6;
   bool        tree_by_crit     = false;
-  // tree moves (within tree_moves) keep the most tracks free on the tiles they touch first, the tree length second
-  bool        tree_room        = false;
   // tree moves and trunk axes also avoid congestion: a Poisson potential of the per-tile routing demand over the tracks
   // (DCGP-style), this many tile lengths per tile at full potential, times 4 (0: off)
   double      tree_congestion  = 0;
+  // experiment: a net with 3 to this many endpoints in a region is one single-trunk Steiner tree in the SAT (a trunk on
+  // a row or column, ribs to it) instead of a star of L-shapes from its first endpoint (below 3: stars only; no gain
+  // measured on sha3 and minimax)
+  unsigned    steiner_pins     = 0;
+  // the fewest endpoints a net needs for the trunk encoding (2: a 2-pin net is a Z-shape, its trunk on any row or
+  // column between its endpoints, instead of an L)
+  unsigned    steiner_min      = 3;
+  // the share of a boundary tile's tracks the hops of region-crossing nets may take; past it a hop takes the least
+  // loaded tile of its boundary (counted as over the share), so every crossing is modeled
+  double      hop_share        = .5;
+  // hop_choice: a crossing net's hop may move up to this many tiles along its boundary, chosen by the first of its two
+  // regions to solve: the regions solve in checkerboard waves (no two neighbours in one wave), a wave's choices are the
+  // next wave's fixed endpoints. 0: every hop fixed ahead (the hop chooser's tile)
+  unsigned    hop_choice       = 0;
+  // spill_rounds: after the regions solve, a region without a routable answer pushes about spill_fraction of its boxes
+  // into the regions around it with room (up to the fill that evens them with it; the next ring too when the
+  // neighbours are short of room): min cuts inside the region, the neighbours its terminals, pick the boxes and where
+  // each goes (spill_cut). The crossings are redone and only the regions whose boxes, hops or fixed routes changed
+  // solve again; up to spill_rounds times. A pathological placement spreads out until it routes. 0: off
+  unsigned    spill_rounds     = 0;
+  double      spill_fraction   = .2;  // 0: the rounds run the alternatives, the windows and the shift, no box spill
+  // window_grow: in a spill round, a region without a routable answer first widens its boxes' windows by this many
+  // tiles (twice at most) and solves again before it spills: more freedom of movement where the routing is tight,
+  // bigger models only there. 0: off
+  unsigned    window_grow      = 0;
+  // spill_shift: a failing region moves its boundary instead of its boxes: the tile strip next to the neighbour its
+  // nets reach most (one to four tiles deep, enough to hold spill_fraction of its boxes, the region keeping a
+  // connected body) goes to that neighbour with the boxes on it, so the crossing nets' endpoints become the
+  // neighbour's without raising its fill
+  bool        spill_shift      = false;
+  // mesh_join: in a spill round a region without a routable answer joins a neighbour and their union splits the other
+  // way: across the boundary its crossings overload (a row boundary bad: a column split, and the reverse), or beside
+  // the line inside it the cut bound names (the split parallel to that line gives it the union's tracks)
+  bool        mesh_join        = false;
+  // alternatives: in a spill round, a region without a routable answer first tries alternative placements of its boxes,
+  // each solved in parallel with the round's fixed hops, the first routable one in this order adopted: "noise" (every
+  // box's home jittered by up to window_tiles tiles), "anchor" (a few boxes of the densest patch moved to the sparsest
+  // patch and held within a tile), "tsm" (an orthogonal drawing of the box graph reduced to four edges per node:
+  // connected boxes adjacent). Comma-separated; empty: off. alt_ms: SAT time per alternative (0: sat_ms)
+  std::string alternatives;
+  unsigned    alt_ms           = 0;
+  bool        alt_all          = false;  // solve every alternative even after one routes (the trial log then compares them)
+  // the "checker" alternative: a relaxed model first (no capacity bound on the edges a checkerboard of tiles owns, the
+  // boxes homed on those tiles free to move checker_window tiles, the others twice the window), then the full model
+  // from the relaxed answer's tiles with windows of four; an UNSAT relaxed model says the region needs less density
+  unsigned    checker_window   = 8;
+  // untracked: per tile, the capacity bounds of the edges it owns are skipped (set by the checker alternative only)
+  const std::vector<char>* untracked = nullptr;
+  // region_pins: the bus-ordered virtual pins of the region refinement are fixed endpoints of the crossing nets;
+  // false keeps the refinement's mesh but lets every crossing hop be chosen (hop_choice) or chained instead
+  bool        region_pins      = true;
+  // the share of a tile's tracks, per direction, that the routes fixed ahead of the SAT (hops, IO pre-routes) may
+  // take together; the rest stays for the region's own routes
+  double      reserve_share    = .5;
+  // legroute.global: a region-crossing net whose slack rank is under this fraction joins its regions with an L trace
+  // over the tile grid ahead of the regions: every boundary it crosses is a hop, every region it only passes
+  // through keeps the run as a fixed piece (reserved on its edges, routed straight), so the long trace is as short
+  // as the grid allows and the regions' models never see it (0: every crossing joins by the hop chain)
+  double      global_fraction  = .05;
+  // legroute.global (global_route): every region-crossing net is routed over the tile grid ahead of the regions, a
+  // tree of tile edges by shortest paths on the edges with room (at most global_share of the narrower tile's tracks
+  // per edge, the fuller the costlier, most critical nets first; the search box is the net's bounding box plus
+  // global_margin tiles, grown when no path is found): its boundary crossings are the hops, its runs through the
+  // regions holding none of the net's pins are fixed pieces. A net without a path keeps the hop chain
+  bool        global_route     = false;
+  double      global_share     = .5;
+  // experiment: the router charges a net's own-region edges against this share of their tracks too (0: free, as the
+  // region routes them), so a net picks the exit that loads its region's internal cuts least and the pass-throughs
+  // see that load
+  double      global_own_share = 0;
+  unsigned    global_margin    = 8;
+  // negotiation rounds of the router: the nets on an edge over its share reroute under a present-congestion cost
+  // that doubles each round plus the edge's overuse history (PathFinder / FastRoute); 0: one pass, a full edge closed
+  unsigned    global_rounds    = 16;
+  // chained hops of a pass-through net (hop to hop inside a region) avoid the rows and columns earlier pass-throughs
+  // took: this many tile widths of distance per fully loaded edge on the run (0: nearest only)
+  double      hop_spread       = 6;
+  // experiment: capacity bounds added only when an answer overflows them, the model solved again incrementally until
+  // none does (0: every bound up front; 1: the V bounds lazily; 2: every bound lazily)
+  unsigned    capacity_lazy    = 2;
+  // calibration: every box pinned on the tile the fallback placement gives it (the placement a run without an answer
+  // keeps); the SAT decides the route shapes only, so a region's verdict tests the model's rules, not the placement
+  bool        freeze           = false;
+  // legal_boxes: the cell-boxes are the tiles of the legal placement legroute is given (the cells on one tile are that
+  // tile's box, fixed there; no cell moves): the SAT routes the placement the ordinary legalization made instead of
+  // placing boxes of its own. The terminal stage runs that legalization first
+  bool        legal_boxes      = false;
+  // with legal_boxes: a box may move up to this many tiles from its legal tile (its cells repacked on the tile it
+  // takes), so the SAT repairs the legalization locally where the routes need it; 0: every box fixed
+  unsigned    legal_window     = 0;
+  // with legal_boxes and global_route: the boxes on the tiles of an edge the global router leaves over its share may
+  // move this many tiles (their cells repacked), the other legal boxes stay fixed; 0: none
+  unsigned    legal_shuffle    = 0;
+  // the fallback placement (boxes on their nearest fitting tiles) is tried first, as assumptions: a routable answer
+  // there is kept, otherwise the free model continues with what the solver learned
+  bool        sat_seed         = true;
   // a second policy (comma-separated overrides of crit_boxes, tree_boxes, tree_moves, tree_load, tree_clauses,
-  // tree_by_crit, tree_room, tree_congestion, io_preroute, window_tiles, e.g. "tree_load=0.3,io_preroute=false"): each region
+  // tree_by_crit, tree_congestion, io_preroute, window_tiles, e.g. "tree_load=0.3,io_preroute=false"): each region
   // solves under both in parallel and keeps a routable answer, the lower weighted route length when both are (empty:
   // one policy)
   std::string sat_alt;
-  // density push: after a pass, push_fraction of the boxes of each region without a routable answer move to
-  // neighbor regions with free tiles (least critical, nearest first), and the changed regions solve again, at most
-  // push_rounds times (0: off)
-  unsigned    push_rounds     = 0;
-  double      push_fraction   = 0.05;
   // a region whose boxes fill at most this fraction of its free tiles is taken as routable without a solve (0: every
   // region solves); the routability probe skips the sparse regions
   double      sat_min_fill    = 0;
-  // experiment: bisect each region by minimum cuts (VieCut) into sub-regions of about this many cells (0: off)
-  unsigned    subregion_cells = 0;
-  unsigned    reserved_tracks = 1;  // per layer and tile: pin access, clock and power drops
+  // timing tiers after a routable answer, in this order, each tried in batches of tier_batch constraints, most
+  // critical first, every box held on its tile so the answer moves only where a constraint needs it (an UNSAT core
+  // frees the boxes in it, or drops the constraints in it, at most tier_rounds times per batch): adjacent = a
+  // critical 1-1 net's boxes are neighbors (in-box metal, no lane); pins = the box of a critical net on or next to
+  // the net's fixed tile (virtual pin, hop, fixed cell); home = a critical box within one tile of its placement
+  // tile; near = a critical connection's two boxes within one tile of each other. Critical: a net's slack rank
+  // under tier_fraction. Comma-separated names; empty: no tier
+  std::string tiers           = "adjacent,pins,home";
+  double      tier_fraction   = .05;
+  unsigned    tier_batch      = 8;
+  unsigned    tier_rounds     = 8;
+  unsigned    tier_ms         = 30000;  // per region, all tiers together (within sat_ms)
+  unsigned    reserved_tracks = 1;      // per layer and tile: pin access, clock and power drops
   bool        clock_spine     = true;
   unsigned    rib_tiles       = 4;  // clock rib pitch in tile rows
   // legroute.final: in-box placement, in-box routes, taps and routed wires
@@ -76,6 +176,14 @@ struct Legroute_options {
   unsigned    threads          = 0;  // 0: hardware concurrency
   int64_t     macro_halo_x_dbu = 0, macro_halo_y_dbu = 0;
   std::string output_dir;  // legroute.json when set
+  // with output_dir: regions written as chips of their own (region_<r>.def: the region's cells at their tiles, a die
+  // pin per hop on its track, the power grid and macros inside), for an external router to judge the region alone:
+  // "all", "failed" (regions without a routable answer) or comma-separated region ids; empty: none
+  std::string dump_regions;
+  // the regions solve most at risk first (box fill plus the share of their tracks the routes fixed ahead took), so
+  // a failing design fails early; with fail_fast the first region without a routable answer ends the solve (the
+  // callers that restart the placement on any failure set it; a run that keeps the placement solves every region)
+  bool        fail_fast = false;
 };
 void validate_legroute_options(const Legroute_options&);
 // Region rectangles (DBU) of the busorder region mesh and its fixed virtual IO pins. Empty: one region.
@@ -111,6 +219,33 @@ struct Legroute_report {
   // the SAT placement: regions solved, model size, solves, windows grown or dropped, regions without an answer
   size_t  sat_regions = 0, sat_variables = 0, sat_clauses = 0, sat_solves = 0, sat_relaxed_windows = 0;
   size_t  sat_unsat_regions = 0, sat_unknown_regions = 0, sat_binding_tiles = 0, sat_unjoined_crossings = 0;
+  size_t  sat_cut_regions = 0;  // of the unsat regions, those over the cut bound (nets forced across a tile boundary
+                                // beyond its tracks): unsat before any solving
+  size_t  sat_waves = 0, sat_hops_free = 0, sat_hops_moved = 0;  // hop_choice: solve waves, hops left to a region's SAT, hops it moved
+  size_t  spill_rounds = 0, spilled_boxes = 0;                    // spill: rounds run, boxes pushed out of failing regions
+  size_t  windows_grown = 0;                                       // window_grow: regions that widened their windows
+  size_t  shifted_tiles = 0;                                       // spill_shift: tiles handed to a neighbour
+  size_t  alt_tried = 0, alt_rescued = 0;                          // alternatives: candidates solved, regions rescued
+  double  alt_seconds = 0;
+  // alternatives: one trial per failing region and round: the region's traits and each family's outcome
+  struct Alt_trial {
+    int         region = 0;
+    unsigned    round  = 0;
+    double      fill = 0, cut = 0;  // movable boxes over free tiles; the placement cut ratio (risk order)
+    size_t      boxes = 0, hops = 0, pinned = 0;
+    size_t      boundary_tracks = 0;  // tracks across the region's boundary edges (the hops' capacity)
+    std::string status;  // the region's own answer: unsat, cut or unknown
+    std::vector<std::tuple<std::string, std::string, double>> families;  // (kind, status, seconds)
+    std::string adopted;
+  };
+  std::vector<Alt_trial> alt_trials;
+  size_t  sat_hops_over_share = 0;             // hops placed past hop_share (every boundary tile of their pair was at it)
+  size_t  global_nets = 0, global_pieces = 0;  // legroute.global: nets joined by L traces, their pass-through pieces
+  size_t  global_unrouted = 0, global_full_edges = 0;  // global_route: nets without a path, edges filled to the share
+  size_t  global_overflow_edges = 0, global_overflow_tracks = 0;  // edges still over their share after the negotiation
+  unsigned global_rounds        = 0;                              // negotiation rounds the router ran
+  size_t  sat_fail_fast_skipped = 0;                    // fail_fast: regions left unsolved after the first failure
+  double  global_seconds  = 0;
   size_t  sat_relaxed_tiles = 0, sat_deficit_tracks = 0;  // sat_relax_rounds: dropped tile bounds, tracks short
   size_t  sat_adjacent_nets = 0;                          // 1-1 nets between neighbor boxes: in-box metal, no lane
   // critical pre-placement: boxes fixed before the SAT, and their nets' weighted star length (tiles) at the placement
@@ -128,10 +263,21 @@ struct Legroute_report {
   size_t  tree_load_skipped = 0, tree_clauses_before = 0, tree_clauses_after = 0;
   // io_preroute: feedthroughs and pin -> box -> pin pairs routed ahead, candidates without room, boxes freed off a track
   size_t  io_feedthroughs = 0, io_boxes = 0, io_skipped = 0, io_lifted = 0;
-  // policies and density push: regions that kept the second policy, regions both solved, push rounds, boxes pushed
-  size_t  sat_alt_regions = 0, sat_both_regions = 0, push_rounds = 0, push_moved = 0;
-  size_t  push_kept_round     = 0;  // the round whose answers were kept (the most routable regions)
+  // policies: regions that kept the second policy, regions both policies solved
+  size_t  sat_alt_regions = 0, sat_both_regions = 0;
+  // capacity_lazy: re-solves, bounds added because an answer overflowed them, bounds never needed
+  size_t  lazy_rounds = 0, lazy_bounds = 0, lazy_skipped = 0;
+  size_t  frozen_boxes        = 0;  // freeze: boxes pinned on their fallback tiles
+  size_t  legal_boxes         = 0;  // legal_boxes: boxes built from the legal placement, fixed on their tiles
+  size_t  legal_shuffled      = 0;  // legal_shuffle: legal boxes freed at the global router's overflowed edges
+  size_t  mesh_joins          = 0;  // mesh_join: region pairs joined and resplit
+  size_t  sat_seeded          = 0;  // sat_seed: regions whose answer is the fallback placement
   size_t  sat_skipped_regions = 0;  // sat_min_fill: regions taken as routable without a solve
+  // timing tiers: constraints kept, dropped (UNSAT cores), tiers dropped whole (out of time), solves, and the
+  // weighted route length (tiles) of the routable answers before and after the tiers
+  size_t  tier_kept = 0, tier_dropped = 0, tier_timeouts = 0, tier_solves = 0;
+  double  tier_cost_before = 0, tier_cost_after = 0;
+  double  tier_crit_before = 0, tier_crit_after = 0;  // the tier nets' connection length (tiles) before and after
   // per region (grid region id): 0 routable, 1 UNSAT, 2 no answer in time, 3 skipped (sat_min_fill); its boxes and
   // free tiles. unroutable_components: the floorplan components of the regions with status 1 or 2
   struct Region_stat {
@@ -141,11 +287,6 @@ struct Legroute_report {
   std::vector<Region_stat>      region_stats;
   std::vector<size_t>           unroutable_components;
   std::vector<int>              unroutable_regions;  // per unroutable component: its region
-  // sub-regions (experiment): crossings (pieces per net beyond the first) for the regions, the min-cut sub-regions
-  // and a geometric bisection to the same size
-  size_t                        cut_subregions = 0, cut_unbalanced = 0, cut_crossings_regions = 0, cut_crossings_mincut = 0;
-  size_t                        cut_crossings_geometric = 0;
-  double                        cut_seconds             = 0;
   double                        sat_seconds = 0, sat_seconds_max = 0;
   size_t                        clock_domains = 0, clock_ribs = 0;
   double                        wire_um = 0, critical_wire_um = 0;
@@ -175,6 +316,11 @@ struct Legroute_report {
   };
   std::vector<Box_stat> failure_boxes;
   std::vector<Bucket>   fill_pattern, internal_pattern, external_pattern;
+};
+// The boxes do not fit the free tiles (a region with more boxes than fitting tiles, a box no tile fits): the
+// placement is too dense for the tile grid, and a caller with a generated core may grow it and start over.
+struct Legroute_unfit : std::runtime_error {
+  using std::runtime_error::runtime_error;
 };
 // Legal placement of every movable single-row cell, routed signal wires on the floorplan nets (with `final`).
 // Multi-row cells must be fixed (anchored) by the caller. Throws std::invalid_argument on unsupported frames and

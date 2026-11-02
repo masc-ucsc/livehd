@@ -53,6 +53,7 @@ the dense slot order.  It is carried as a premise here rather than asserted,
 and the checker extension is not claimed to exist yet.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemFold
+import LeanSemanticPrimitives.Projection.HardwareMemTable
 import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
@@ -111,31 +112,111 @@ theorem slot_readImg {D : DesignCert} {i : RuntimeInput} {st : StateM}
 
 /-! ## 2. One memory's next image -/
 
-/-- The typed next image: the `nextImg` slot's ACTUAL image on an active clock,
-the EXACT prior image when the clock is quiet. -/
+/-- The typed next image (`srcMemNext`). With no commit table: the `nextImg`
+slot's ACTUAL image on an active clock, the EXACT prior image when the clock is
+quiet. With one (DCERT3, decision #9): the `nextImg` slot's image when ALL the
+memory's clocks fired, the image of the entry naming EXACTLY the clocks that
+fired, else the prior image. -/
 def memNextOf (e : ClockEdges) (st : StateM) (ss : List SlotV) (idx : Nat)
     (md : MemoryDesc) : MemImg :=
-  Hardware.memCommit (fires e md.clock) (slotImg ss md.nextImg)
-    (Hardware.srcMemImg st idx)
+  if md.commits.isEmpty then
+    Hardware.memCommit (fires e md.clock) (slotImg ss md.nextImg)
+      (Hardware.srcMemImg st idx)
+  else if md.allFire e then slotImg ss md.nextImg
+  else
+    match md.commits.find? (md.firedIs e) with
+    | some c => slotImg ss c.nextImg
+    | none   => Hardware.srcMemImg st idx
 
 @[simp] theorem memNextOf_quiet (e : ClockEdges) (st : StateM) (ss : List SlotV)
-    (idx : Nat) (md : MemoryDesc) (hq : fires e md.clock = false) :
+    (idx : Nat) (md : MemoryDesc) (hc : md.commits.isEmpty = true)
+    (hq : fires e md.clock = false) :
     memNextOf e st ss idx md = Hardware.srcMemImg st idx := by
-  simp [memNextOf, hq]
+  simp [memNextOf, hc, hq]
 
 @[simp] theorem memNextOf_active (e : ClockEdges) (st : StateM) (ss : List SlotV)
-    (idx : Nat) (md : MemoryDesc) (ha : fires e md.clock = true) :
+    (idx : Nat) (md : MemoryDesc) (hc : md.commits.isEmpty = true)
+    (ha : fires e md.clock = true) :
     memNextOf e st ss idx md = slotImg ss md.nextImg := by
-  simp [memNextOf, ha]
+  simp [memNextOf, hc, ha]
+
+/-- A nine-argument call (`pickO`'s arity). -/
+theorem SEval_call9 {P : SProgram} {σ : SEnv} {f : String}
+    {e₁ e₂ e₃ e₄ e₅ e₆ e₇ e₈ e₉ : SExp} {a b c d g k m n o v : Val} {fd : SFun}
+    (h₁ : SEval P σ e₁ a) (h₂ : SEval P σ e₂ b) (h₃ : SEval P σ e₃ c)
+    (h₄ : SEval P σ e₄ d) (h₅ : SEval P σ e₅ g) (h₆ : SEval P σ e₆ k)
+    (h₇ : SEval P σ e₇ m) (h₈ : SEval P σ e₈ n) (h₉ : SEval P σ e₉ o)
+    (hf : sFn P f = some fd) (hp : fd.params.length = 9)
+    (hb : SEval P (fd.params.zip [a, b, c, d, g, k, m, n, o]) fd.body v) :
+    SEval P σ (.call f [e₁, e₂, e₃, e₄, e₅, e₆, e₇, e₈, e₉]) v :=
+  .call (.cons h₁ (.cons h₂ (.cons h₃ (.cons h₄ (.cons h₅ (.cons h₆ (.cons h₇
+    (.cons h₈ (.cons h₉ .nil))))))))) hf (by simpa using hp) hb
+
+/-- **`pickO` reads the entry naming exactly the clocks that fired** (decision
+#9): the image of the first entry of `rest` with `firedIs`, else the held
+image. -/
+theorem pickO_agree {D : DesignCert} {i : RuntimeInput} {st : StateM}
+    {G : Nat → Option Nat} {m : Nat} {ss : List SlotV} {e : ClockEdges}
+    (hpre : PrefixRelM D i st G m ss) {idx : Nat} {md : MemoryDesc}
+    (hspan : md.domSpan ≤ e.size)
+    (hcnext : ∀ c ∈ md.commits, c.nextImg < ss.length)
+    (hckind : ∀ c ∈ md.commits, Direct.slotIsMem D c.nextImg = some true) :
+    ∀ (rest : List MemCommit), (∀ c ∈ rest, c ∈ md.commits) →
+    ∀ {σ : SEnv} {ee eck ec er esp eenv en ems eidx : SExp},
+    SEval hwMemS σ ee (encEdges e) →
+    SEval hwMemS σ eck (.int (Int.ofNat md.clock)) →
+    SEval hwMemS σ ec (encListG encCommit md.commits.toList) →
+    SEval hwMemS σ er (encListG encCommit rest) →
+    SEval hwMemS σ esp (.int (Int.ofNat md.domSpan)) →
+    SEval hwMemS σ eenv (objEnv (ss.map SlotV.enc)) →
+    SEval hwMemS σ en (.int (Int.ofNat ss.length)) →
+    SEval hwMemS σ ems (encListG MemImg.encMemImg st.mems.toList) →
+    SEval hwMemS σ eidx (encNat idx) →
+    SEval hwMemS σ (.call "pickO" [ee, eck, ec, er, esp, eenv, en, ems, eidx])
+      (MemImg.encMemImg (match rest.find? (md.firedIs e) with
+                         | some c => slotImg ss c.nextImg
+                         | none   => Hardware.srcMemImg st idx))
+  | [], _, _, _, _, _, _, _, _, _, _, _, he, hck, hc, hr, hs, hv, hn, hms, hi => by
+      refine SEval_call9 he hck hc hr hs hv hn hms hi rfl rfl ?_
+      refine SEval.iteT (SEval_isNil_nil (.ref rfl)) ?_
+      have hx : MemImg.encMemImg (Hardware.srcMemImg st idx)
+          = MemImg.encMemImg (if (0:Int) ≤ (Int.ofNat idx)
+              then st.mems.toList[(Int.ofNat idx).toNat]?.getD Hardware.absentImg
+              else Hardware.absentImg) := by
+        simp [Hardware.srcMemImg]
+      simp only [List.find?_nil]
+      rw [hx]
+      exact memAt_sound st.mems.toList (Int.ofNat idx) (.ref rfl) (.ref rfl)
+  | c :: rest, hsub, _, _, _, _, _, _, _, _, _, _, he, hck, hc, hr, hs, hv, hn, hms, hi => by
+      refine SEval_call9 he hck hc hr hs hv hn hms hi rfl rfl ?_
+      refine SEval.iteF (SEval_isNil_cons (.ref rfl)) ?_
+      refine SEval_switch_of_tag (SEval_hd (.ref rfl)) rfl rfl ?_
+      have hcm : c ∈ md.commits := hsub c List.mem_cons_self
+      refine SEval_ite_of_bool (bb := md.firedIs e c) ?hfi ?_ ?_
+      case hfi =>
+        rw [firedIs_eq]
+        exact firedIsO_agree md e c.mask md.domSpan hspan md.domSpan 0 (by omega)
+          (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl) .lit (.ref rfl)
+      · intro h
+        simp only [List.find?_cons, h]
+        exact slot_readImg hpre (hcnext c hcm) (hckind c hcm) (.ref rfl) (.ref rfl) (.ref rfl)
+      · intro h
+        simp only [List.find?_cons, h]
+        exact pickO_agree hpre hspan hcnext hckind rest
+          (fun x hx => hsub x (List.mem_cons_of_mem _ hx))
+          (.ref rfl) (.ref rfl) (.ref rfl) (SEval_tl (.ref rfl)) (.ref rfl)
+          (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl)
 
 /-- **`memNext` computes it**, on the real program. -/
 theorem memNext_agree {D : DesignCert} {i : RuntimeInput} {st : StateM}
     {G : Nat → Option Nat} {m : Nat} {ss : List SlotV} {e : ClockEdges}
     (hpre : PrefixRelM D i st G m ss)
     {idx : Nat} {md : MemoryDesc}
-    (hclk : md.clock < e.size)
+    (hclk : md.clock < e.size) (hspan : md.domSpan ≤ e.size)
     (hnext : md.nextImg < ss.length)
     (hkind : Direct.slotIsMem D md.nextImg = some true)
+    (hcnext : ∀ c ∈ md.commits, c.nextImg < ss.length)
+    (hckind : ∀ c ∈ md.commits, Direct.slotIsMem D c.nextImg = some true)
     {σ : SEnv} {em ee eenv en ems eidx : SExp}
     (h1 : SEval hwMemS σ em (encMemory md))
     (h2 : SEval hwMemS σ ee (encEdges e))
@@ -147,22 +228,69 @@ theorem memNext_agree {D : DesignCert} {i : RuntimeInput} {st : StateM}
       (MemImg.encMemImg (memNextOf e st ss idx md)) := by
   refine SEval_call6 h1 h2 h3 h4 h5 h6 rfl rfl ?_
   refine SEval_switch_of_tag (.ref rfl) rfl rfl ?_
-  refine SEval_ite_of_bool (bb := fires e md.clock)
-    (lift (firesAt_agree hclk (.ref rfl) (.ref rfl))) ?_ ?_
-  · -- ACTIVE: the nextImg slot's actual image
-    intro ha
-    rw [memNextOf_active e st ss idx md ha]
-    exact slot_readImg hpre hnext hkind (.ref rfl) (.ref rfl) (.ref rfl)
-  · -- QUIET: the exact prior image
-    intro hq
-    rw [memNextOf_quiet e st ss idx md hq]
-    have hx : MemImg.encMemImg (Hardware.srcMemImg st idx)
-        = MemImg.encMemImg (if (0:Int) ≤ (Int.ofNat idx)
-            then st.mems.toList[(Int.ofNat idx).toNat]?.getD Hardware.absentImg
-            else Hardware.absentImg) := by
-      simp [Hardware.srcMemImg]
-    rw [hx]
-    exact memAt_sound st.mems.toList (Int.ofNat idx) (.ref rfl) (.ref rfl)
+  -- the held image, read by `memAt`
+  have hheld : MemImg.encMemImg (Hardware.srcMemImg st idx)
+      = MemImg.encMemImg (if (0:Int) ≤ (Int.ofNat idx)
+          then st.mems.toList[(Int.ofNat idx).toNat]?.getD Hardware.absentImg
+          else Hardware.absentImg) := by
+    simp [Hardware.srcMemImg]
+  -- the `cms` field, read as stored and then rewritten by the table's shape
+  have hcmsV : ∀ {σ' : SEnv} {v : Val}, slookup σ' "cms" = some (encArr encCommit md.commits) →
+      encListG encCommit md.commits.toList = v → SEval hwMemS σ' (.ref "cms") v :=
+    fun h hv => hv ▸ .ref h
+  cases hcs : md.commits.toList with
+  | nil =>
+    -- NO COMMIT TABLE: the one-domain rule
+    have hc : md.commits.isEmpty = true := by
+      simp [← Array.toList_eq_nil_iff, hcs]
+    refine SEval.iteT (SEval_isNil_nil (hcmsV rfl (by rw [hcs]; rfl))) ?_
+    refine SEval_ite_of_bool (bb := fires e md.clock)
+      (lift (firesAt_agree hclk (.ref rfl) (.ref rfl))) ?_ ?_
+    · -- ACTIVE: the nextImg slot's actual image
+      intro ha
+      rw [memNextOf_active e st ss idx md hc ha]
+      exact slot_readImg hpre hnext hkind (.ref rfl) (.ref rfl) (.ref rfl)
+    · -- QUIET: the exact prior image
+      intro hq
+      rw [memNextOf_quiet e st ss idx md hc hq, hheld]
+      exact memAt_sound st.mems.toList (Int.ofNat idx) (.ref rfl) (.ref rfl)
+  | cons c0 cs0 =>
+    -- A COMMIT TABLE (decision #9)
+    have hc : md.commits.isEmpty = false := by
+      cases h : md.commits.isEmpty
+      · rfl
+      · simp [Array.isEmpty_iff] at h; simp [h] at hcs
+    have hcms : ∀ {σ' : SEnv}, slookup σ' "cms" = some (encArr encCommit md.commits) →
+        SEval hwMemS σ' (.ref "cms") (encListG encCommit md.commits.toList) :=
+      fun h => .ref h
+    refine SEval.iteF (SEval_isNil_cons (hcmsV rfl (by rw [hcs]; rfl))) ?_
+    refine SEval.letN (d := .int (Int.ofNat md.domSpan)) ?_ ?_
+    · rw [domSpan_eq]
+      exact spanO_agree _ _ (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim, encNat])) (hcms rfl)
+    refine SEval_ite_of_bool (bb := md.allFire e) ?hall ?_ ?_
+    case hall =>
+      rw [allFire_eq]
+      exact allFireO_agree md e md.domSpan hspan md.domSpan 0 (by omega)
+        (.ref rfl) (.ref rfl) (hcms rfl) .lit (.ref rfl)
+    · -- every clock of the memory fired: the nextImg slot's image
+      intro ha
+      have : memNextOf e st ss idx md = slotImg ss md.nextImg := by
+        simp [memNextOf, hc, ha]
+      rw [this]
+      exact slot_readImg hpre hnext hkind (.ref rfl) (.ref rfl) (.ref rfl)
+    · intro ha
+      -- only some fired: the entry naming exactly those, else the held image
+      have : memNextOf e st ss idx md
+          = (match md.commits.toList.find? (md.firedIs e) with
+             | some c => slotImg ss c.nextImg
+             | none   => Hardware.srcMemImg st idx) := by
+        unfold memNextOf
+        rw [if_neg (by simp [hc]), if_neg (by simp [ha]), Array.find?_toList]
+      rw [this]
+      exact pickO_agree hpre hspan hcnext hckind md.commits.toList
+        (fun c hc' => Array.mem_def.mpr hc')
+        (.ref rfl) (.ref rfl) (hcms rfl) (hcms rfl) (.ref rfl)
+        (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl)
 
 /-! ## 3. The whole memory array -/
 
@@ -186,8 +314,11 @@ theorem memNexts_agree {D : DesignCert} {i : RuntimeInput} {st : StateM}
     (hpre : PrefixRelM D i st G m ss) :
     ∀ (mems : List MemoryDesc) (idx : Nat) (σ : SEnv) (eml ee eenv en ems eidx : SExp),
       (∀ md ∈ mems, md.clock < e.size) →
+      (∀ md ∈ mems, md.domSpan ≤ e.size) →
       (∀ md ∈ mems, md.nextImg < ss.length) →
       (∀ md ∈ mems, Direct.slotIsMem D md.nextImg = some true) →
+      (∀ md ∈ mems, ∀ c ∈ md.commits, c.nextImg < ss.length) →
+      (∀ md ∈ mems, ∀ c ∈ md.commits, Direct.slotIsMem D c.nextImg = some true) →
       SEval hwMemS σ eml (encListG encMemory mems) →
       SEval hwMemS σ ee (encEdges e) →
       SEval hwMemS σ eenv (objEnv (ss.map SlotV.enc)) →
@@ -196,20 +327,26 @@ theorem memNexts_agree {D : DesignCert} {i : RuntimeInput} {st : StateM}
       SEval hwMemS σ eidx (encNat idx) →
       SEval hwMemS σ (.call "memNexts" [eml, ee, eenv, en, ems, eidx])
         (encListG MemImg.encMemImg (memNextsOf e st ss idx mems))
-  | [],         _,   _, _, _, _, _, _, _, _,     _,     _,     hl, he, hv, hn, hms, hi => by
+  | [],         _,   _, _, _, _, _, _, _, _, _, _, _, _, _,
+      hl, he, hv, hn, hms, hi => by
       refine SEval_call6 hl he hv hn hms hi rfl rfl ?_
       exact SEval.iteT (SEval_prim1 (.ref rfl) rfl) .lit
-  | md :: rest, idx, _, _, _, _, _, _, _, hclk, hnext, hkind, hl, he, hv, hn, hms, hi => by
+  | md :: rest, idx, _, _, _, _, _, _, _, hclk, hspan, hnext, hkind, hcnext, hckind,
+      hl, he, hv, hn, hms, hi => by
       refine SEval_call6 hl he hv hn hms hi rfl rfl ?_
       refine SEval.iteF (SEval_prim1 (.ref rfl) rfl) ?_
       refine SEval_consP ?_ ?_
-      · exact memNext_agree hpre (hclk md List.mem_cons_self)
+      · exact memNext_agree hpre (hclk md List.mem_cons_self) (hspan md List.mem_cons_self)
           (hnext md List.mem_cons_self) (hkind md List.mem_cons_self)
+          (hcnext md List.mem_cons_self) (hckind md List.mem_cons_self)
           (SEval_hd (.ref rfl)) (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl)
       · exact memNexts_agree hpre rest (idx + 1) _ _ _ _ _ _ _
           (fun x hx => hclk x (List.mem_cons_of_mem _ hx))
+          (fun x hx => hspan x (List.mem_cons_of_mem _ hx))
           (fun x hx => hnext x (List.mem_cons_of_mem _ hx))
           (fun x hx => hkind x (List.mem_cons_of_mem _ hx))
+          (fun x hx => hcnext x (List.mem_cons_of_mem _ hx))
+          (fun x hx => hckind x (List.mem_cons_of_mem _ hx))
           (SEval_tl (.ref rfl)) (.ref rfl) (.ref rfl) (.ref rfl) (.ref rfl)
           (SEval_prim2 (.ref rfl) .lit (by simp [evalPrim, encNat] <;> omega))
 
@@ -223,13 +360,26 @@ theorem memNextOf_denote {D : DesignCert} {i : RuntimeInput} {st : StateM}
     (hpre : PrefixRelM D i st G m ss)
     {idx : Nat} {md : MemoryDesc}
     (hnext : md.nextImg < ss.length)
-    (hkind : Direct.slotIsMem D md.nextImg = some true) :
+    (hkind : Direct.slotIsMem D md.nextImg = some true)
+    (hcnext : ∀ c ∈ md.commits, c.nextImg < ss.length)
+    (hckind : ∀ c ∈ md.commits, Direct.slotIsMem D c.nextImg = some true) :
     MemImg.denote (memNextOf e st ss idx md)
       = Compiler.srcMemNext (slotValM D i st) e (StateM.denote st) idx md := by
   obtain ⟨-, hden⟩ := memSlot_img hpre hnext hkind
   unfold memNextOf Compiler.srcMemNext
-  rw [Hardware.memCommit_denote e st idx md (slotImg ss md.nextImg)
-        ((slotValM D i st md.nextImg).asMem) hden]
+  by_cases hc : md.commits.isEmpty = true
+  · rw [if_pos hc, if_pos hc]
+    exact Hardware.memCommit_denote e st idx md (slotImg ss md.nextImg)
+      ((slotValM D i st md.nextImg).asMem) hden
+  · rw [if_neg hc, if_neg hc]
+    by_cases ha : md.allFire e = true
+    · rw [if_pos ha, if_pos ha]; exact hden
+    · rw [if_neg ha, if_neg ha]
+      cases hf : md.commits.find? (md.firedIs e) with
+      | none   => simpa using Hardware.srcMemImg_denote st idx
+      | some c =>
+          have hcm : c ∈ md.commits := Array.mem_of_find?_eq_some hf
+          exact (memSlot_img hpre (hcnext c hcm) (hckind c hcm)).2
 
 /-- …and the whole array, element by element and therefore address by address. -/
 theorem memNextsOf_denote {D : DesignCert} {i : RuntimeInput} {st : StateM}
@@ -238,24 +388,29 @@ theorem memNextsOf_denote {D : DesignCert} {i : RuntimeInput} {st : StateM}
     ∀ (mems : List MemoryDesc) (idx p : Nat) (md : MemoryDesc),
       (∀ md' ∈ mems, md'.nextImg < ss.length) →
       (∀ md' ∈ mems, Direct.slotIsMem D md'.nextImg = some true) →
+      (∀ md' ∈ mems, ∀ c ∈ md'.commits, c.nextImg < ss.length) →
+      (∀ md' ∈ mems, ∀ c ∈ md'.commits, Direct.slotIsMem D c.nextImg = some true) →
       mems[p]? = some md →
       ∃ g, (memNextsOf e st ss idx mems)[p]? = some g
          ∧ MemImg.denote g
              = Compiler.srcMemNext (slotValM D i st) e (StateM.denote st) (idx + p) md
-  | [],         _,   p, _,  _,     _,     hp => by simp at hp
-  | md' :: rest, idx, p, md, hnext, hkind, hp => by
+  | [],         _,   p, _,  _,     _,     _,      _,      hp => by simp at hp
+  | md' :: rest, idx, p, md, hnext, hkind, hcnext, hckind, hp => by
       cases p with
       | zero =>
           have hmd : md' = md := by simpa using hp
           subst hmd
           refine ⟨memNextOf e st ss idx md', by simp [memNextsOf], ?_⟩
           simpa using memNextOf_denote hpre (hnext md' List.mem_cons_self)
-            (hkind md' List.mem_cons_self)
+            (hkind md' List.mem_cons_self) (hcnext md' List.mem_cons_self)
+            (hckind md' List.mem_cons_self)
       | succ q =>
           have hq : rest[q]? = some md := by simpa using hp
           obtain ⟨g, hg, hd⟩ := memNextsOf_denote hpre rest (idx + 1) q md
             (fun x hx => hnext x (List.mem_cons_of_mem _ hx))
-            (fun x hx => hkind x (List.mem_cons_of_mem _ hx)) hq
+            (fun x hx => hkind x (List.mem_cons_of_mem _ hx))
+            (fun x hx => hcnext x (List.mem_cons_of_mem _ hx))
+            (fun x hx => hckind x (List.mem_cons_of_mem _ hx)) hq
           refine ⟨g, by simpa [memNextsOf] using hg, ?_⟩
           rw [hd]
           congr 1
@@ -288,7 +443,7 @@ declared address width.  See the header for how an admission checker is meant
 to establish it; it is a premise here, not a claim. -/
 def NextImgGeomOK (D : DesignCert) (G : Nat → Option Nat) : Prop :=
   ∀ (idx : Nat) (md : MemoryDesc), D.memories[idx]? = some md →
-    G md.nextImg = some md.aw
+    G md.nextImg = some md.aw ∧ ∀ c ∈ md.commits, G c.nextImg = some md.aw
 
 /-- **The committed image still has the admitted table shape**, on either
 branch: from the invariant's geometry when the clock fires, from the incoming
@@ -299,17 +454,32 @@ theorem memNextOf_FullTable {D : DesignCert} {i : RuntimeInput} {st : StateM}
     (hstate : StateShapeOK D st) (hpol : NextImgGeomOK D G)
     {idx : Nat} {md : MemoryDesc} (hmd : D.memories[idx]? = some md)
     (hnext : md.nextImg < ss.length)
-    (hkind : Direct.slotIsMem D md.nextImg = some true) :
+    (hkind : Direct.slotIsMem D md.nextImg = some true)
+    (hcnext : ∀ c ∈ md.commits, c.nextImg < ss.length)
+    (hckind : ∀ c ∈ md.commits, Direct.slotIsMem D c.nextImg = some true) :
     MemImg.FullTable md.aw (memNextOf e st ss idx md) := by
-  unfold memNextOf Hardware.memCommit
-  cases hf : fires e md.clock
-  · simp only [Bool.false_eq_true, if_false]
+  have hheld : MemImg.FullTable md.aw (Hardware.srcMemImg st idx) := by
     obtain ⟨g, hg, hfull⟩ := hstate idx md hmd
     have hsm : Hardware.srcMemImg st idx = g := by simp [Hardware.srcMemImg, hg]
     rw [hsm]; exact hfull
-  · simp only [if_true]
+  have hnew : MemImg.FullTable md.aw (slotImg ss md.nextImg) := by
     obtain ⟨hv, -⟩ := memSlot_img hpre hnext hkind
-    exact hpre.geom md.nextImg hnext (slotImg ss md.nextImg) hv md.aw (hpol idx md hmd)
+    exact hpre.geom md.nextImg hnext (slotImg ss md.nextImg) hv md.aw (hpol idx md hmd).1
+  unfold memNextOf
+  split
+  · unfold Hardware.memCommit
+    cases fires e md.clock
+    · simpa using hheld
+    · simpa using hnew
+  · split
+    · exact hnew
+    · split
+      · rename_i c hf
+        have hcm : c ∈ md.commits := Array.mem_of_find?_eq_some hf
+        obtain ⟨hv, -⟩ := memSlot_img hpre (hcnext c hcm) (hckind c hcm)
+        exact hpre.geom c.nextImg (hcnext c hcm) (slotImg ss c.nextImg) hv md.aw
+          ((hpol idx md hmd).2 c hcm)
+      · exact hheld
 
 /-- …so the state built from the commit is admissible again, and the design can
 take another step. -/
@@ -319,6 +489,9 @@ theorem stepState_shape {D : DesignCert} {i : RuntimeInput} {st : StateM}
     (hstate : StateShapeOK D st) (hpol : NextImgGeomOK D G)
     (hnext : ∀ md ∈ D.memories.toList, md.nextImg < ss.length)
     (hkind : ∀ md ∈ D.memories.toList, Direct.slotIsMem D md.nextImg = some true)
+    (hcnext : ∀ md ∈ D.memories.toList, ∀ c ∈ md.commits, c.nextImg < ss.length)
+    (hckind : ∀ md ∈ D.memories.toList, ∀ c ∈ md.commits,
+      Direct.slotIsMem D c.nextImg = some true)
     (nf : Array BV) :
     StateShapeOK D
       { flops := nf
@@ -333,6 +506,7 @@ theorem stepState_shape {D : DesignCert} {i : RuntimeInput} {st : StateM}
   refine ⟨memNextOf e st ss idx md, ?_, ?_⟩
   · simpa using hget
   · exact memNextOf_FullTable hpre hstate hpol hmd (hnext md hmem) (hkind md hmem)
+      (hcnext md hmem) (hckind md hmem)
 
 /-! ## 7. Two memories on DISTINCT clocks
 
@@ -435,10 +609,10 @@ theorem twoMemG_nextImg : NextImgGeomOK twoMemDesign twoMemG := by
   rcases idx with _|_|idx
   · have hmd' : ({ aw := 5, dw := 32, nextImg := 8, clock := 0 } : MemoryDesc) = md := by
       simpa [twoMemDesign] using hmd
-    subst hmd'; rfl
+    subst hmd'; exact ⟨rfl, by simp⟩
   · have hmd' : ({ aw := 5, dw := 32, nextImg := 9, clock := 1 } : MemoryDesc) = md := by
       simpa [twoMemDesign] using hmd
-    subst hmd'; rfl
+    subst hmd'; exact ⟨rfl, by simp⟩
   · simp [twoMemDesign] at hmd
 
 theorem twoMem_addr_width (i : RuntimeInput) (st : StateM) :
@@ -537,11 +711,31 @@ theorem twoMem_commit (i : RuntimeInput) (e : ClockEdges) (he : 2 ≤ e.size) :
          ∨ md = { aw := 5, dw := 32, nextImg := 9, clock := 1 } := by
       simpa [twoMemDesign] using hmd
     rcases this with h | h <;> subst h <;> decide
+  -- neither memory has a commit table: its clock span is its clock + 1
+  have hspan : ∀ md ∈ twoMemDesign.memories.toList, md.domSpan ≤ e.size := by
+    intro md hmd
+    have hc := hclk md hmd
+    have : md = { aw := 5, dw := 32, nextImg := 8, clock := 0 }
+         ∨ md = { aw := 5, dw := 32, nextImg := 9, clock := 1 } := by
+      simpa [twoMemDesign] using hmd
+    rcases this with h | h <;> subst h <;> simp [MemoryDesc.domSpan] at hc ⊢ <;> omega
+  have hnone : ∀ md ∈ twoMemDesign.memories.toList, md.commits = #[] := by
+    intro md hmd
+    have : md = { aw := 5, dw := 32, nextImg := 8, clock := 0 }
+         ∨ md = { aw := 5, dw := 32, nextImg := 9, clock := 1 } := by
+      simpa [twoMemDesign] using hmd
+    rcases this with h | h <;> subst h <;> rfl
+  have hcnext : ∀ md ∈ twoMemDesign.memories.toList, ∀ c ∈ md.commits,
+      c.nextImg < ss'.length := by
+    intro md hmd c hc; rw [hnone md hmd] at hc; simp at hc
+  have hckind : ∀ md ∈ twoMemDesign.memories.toList, ∀ c ∈ md.commits,
+      Direct.slotIsMem twoMemDesign c.nextImg = some true := by
+    intro md hmd c hc; rw [hnone md hmd] at hc; simp at hc
   refine ⟨ss', hss', ?_, ?_⟩
   · intro σ eml ee eenv en ems eidx hl hev hv hn hms hi
     exact memNexts_agree hss' twoMemDesign.memories.toList 0 σ eml ee eenv en ems eidx
-      hclk hnext hkind hl hev hv hn hms hi
-  · exact stepState_shape hss' twoMemState_shape twoMemG_nextImg hnext hkind #[]
+      hclk hspan hnext hkind hcnext hckind hl hev hv hn hms hi
+  · exact stepState_shape hss' twoMemState_shape twoMemG_nextImg hnext hkind hcnext hckind #[]
 
 /-! ### Executed clock controls
 
@@ -631,6 +825,7 @@ private def inNoWrite : RuntimeInput :=
 #audit_axioms memSlot_img
 #audit_axioms slot_readImg
 #audit_axioms memNextsOf_get
+#audit_axioms pickO_agree
 #audit_axioms memNext_agree
 #audit_axioms memNexts_agree
 #audit_axioms memNextOf_denote

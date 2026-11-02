@@ -49,7 +49,8 @@ structure Report where
   typed    : Bool
   /-- …and typed every slot -/
   sized    : Bool
-  /-- every memory's next image types as THAT memory's table -/
+  /-- every memory's images type as THAT memory's table: its next image and
+  each commit-table entry's image (decision #9) -/
   nextImgs : Bool
 deriving Repr
 
@@ -62,10 +63,7 @@ def report (D : DesignCert) : Report where
               | some ts => ts.size == D.numSlots
               | none    => false
   nextImgs := match inferTys D with
-              | some ts => D.memories.toList.all (fun md =>
-                  match ts[md.nextImg]? with
-                  | some (.tbl aw dw) => aw == md.aw && dw == md.dw
-                  | _                 => false)
+              | some ts => D.memories.toList.all (memTyOK ts)
               | none    => false
 
 /-- The memory route's verdict. -/
@@ -79,7 +77,6 @@ theorem admitOK_eq (D : DesignCert) : (report D).admitOK = admitsB D := by
   | none      => simp [hts]
   | some ts   =>
       simp only [hts, Bool.and_assoc]
-      all_goals rfl
 
 theorem report_admits {D : DesignCert} (h : (report D).admitOK = true) :
     admitsB D = true := by rw [← admitOK_eq]; exact h

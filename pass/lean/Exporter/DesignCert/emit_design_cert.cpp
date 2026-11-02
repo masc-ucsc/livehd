@@ -87,9 +87,29 @@ void emit_design_cert(const std::string& base, const CertificateIR& d, std::ostr
 
   std::vector<std::string> mem_lines;
   for (const auto& m : d.memories) {
-    mem_lines.push_back("{ aw := " + std::to_string(m.addr_w) + ", dw := " + std::to_string(m.data_w)
-                        + ", nextImg := " + std::to_string(d.slot_of.at(m.next_img))
-                        + ", clock := " + std::to_string(m.clock) + " }");
+    // `init` only when present: an empty one is the field's default, so a
+    // memory with no power-on words prints exactly as before DCERT3.
+    std::string init;
+    if (!m.init.empty()) {
+      init = ", init := #[";
+      for (size_t k = 0; k < m.init.size(); ++k) {
+        init += (k == 0 ? "" : ", ") + m.init[k];
+      }
+      init += "]";
+    }
+    // `commits` likewise only when present (a memory on more than one domain).
+    std::string commits;
+    if (!m.commits.empty()) {
+      commits = ", commits := #[";
+      for (size_t k = 0; k < m.commits.size(); ++k) {
+        commits += std::string(k == 0 ? "" : ", ") + "{ mask := " + std::to_string(m.commits[k].first)
+                   + ", nextImg := " + std::to_string(d.slot_of.at(m.commits[k].second)) + " }";
+      }
+      commits += "]";
+    }
+    mem_lines.push_back("{ aw := " + std::to_string(m.addr_w) + ", dw := " + std::to_string(m.data_w) + ", nextImg := "
+                        + std::to_string(d.slot_of.at(m.next_img)) + ", clock := " + std::to_string(m.clock) + init
+                        + commits + " }");
   }
 
   auto emit_array = [&os](const char* field, const std::vector<std::string>& lines, bool) {
@@ -147,10 +167,14 @@ void emit_design_cert(const std::string& base, const CertificateIR& d, std::ostr
   os << "  native_decide\n\n";
   // Compiler acceptance does not establish clock bounds. Check those
   // independently before invoking the all-fire compatibility theorem.
+  // The third part bounds every clock a memory's commit table names (DCERT3,
+  // decision #9); it holds trivially for a memory without a table.
   os << "/-- Declared clock bounds, checked independently of compiler acceptance. -/\n";
   os << "theorem " << base << "_clock_bounds :\n";
   os << "    (∀ f ∈ " << base << "_designCert.flops, f.clock < " << base << "_designCert.clocks.size) ∧\n";
-  os << "    (∀ m ∈ " << base << "_designCert.memories, m.clock < " << base << "_designCert.clocks.size) := by\n";
+  os << "    (∀ m ∈ " << base << "_designCert.memories, m.clock < " << base << "_designCert.clocks.size) ∧\n";
+  os << "    (∀ m ∈ " << base << "_designCert.memories, ∀ c ∈ m.commits, c.mask < 2 ^ " << base
+     << "_designCert.clocks.size) := by\n";
   os << "  native_decide\n\n";
   os << "/-- The all-fire instance of arbitrary-edge compiler correctness. -/\n";
   os << "theorem " << base << "_step_correct : ∀ inp st,\n";
@@ -164,7 +188,7 @@ void emit_design_cert(const std::string& base, const CertificateIR& d, std::ostr
   os << "  intro inp st\n";
   os << "  exact (" << base << "_step_correct inp st).trans\n";
   os << "    (interpretDesign_allEdges " << base << "_designCert " << base << "_clock_bounds.1 " << base
-     << "_clock_bounds.2 inp st)\n\n";
+     << "_clock_bounds.2.1 " << base << "_clock_bounds.2.2 inp st)\n\n";
   os << "/-- For evaluation only.  Deliberately NOT mentioned in any theorem\n";
   os << "statement -- see the comment above. -/\n";
   os << "def " << base << "_residual : ResidualProgram :=\n";
