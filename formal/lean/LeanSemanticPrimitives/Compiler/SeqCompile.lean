@@ -140,3 +140,58 @@ theorem compileDesignL_ok_witness (D : DesignCert) (h : okL D = true) :
 
 end Seq
 end Compiler
+
+namespace Compiler
+namespace Seq
+
+/-- `compileFrom_walk` with the lookup hypothesis needed only BELOW the list's
+length, so the list may be a slice of the node list. -/
+theorem compileFrom_walk_lt (D : DesignCert) :
+    ∀ (l : List DenseNodeCert) (i : Nat) (acc : Array ResidualBinding),
+    (∀ j, j < l.length → D.nodes[i + j]? = l[j]?) →
+    compileFrom D i l.length acc = compileL D.sources.size i l acc := by
+  intro l
+  induction l with
+  | nil => intro i acc _; rfl
+  | cons c cs ih =>
+    intro i acc h
+    have hc : D.nodes[i]? = some c := by simpa using h 0 (by simp)
+    have htl : ∀ j, j < cs.length → D.nodes[(i + 1) + j]? = cs[j]? := by
+      intro j hj
+      have := h (j + 1) (by simp; omega)
+      simpa [Nat.add_assoc, Nat.add_comm 1 j] using this
+    rw [List.length_cons]
+    simp only [compileFrom, hc, compileL, DesignCert.slotOfNode]
+    cases compileOp (D.sources.size + i) c with
+    | error e => rfl
+    | ok e    => exact ih (i + 1) _ htl
+
+/-- One CHUNK of the compiler as a sequential walk over the slice
+`[lo, lo + len)` of the node list. The kernel reaches the slice with one
+`List.drop` (O(lo)), where `compileFrom` pays O(start) for EVERY node through
+`D.nodes[start]?`: O(N^2) over a design, and the bulk of B12's chunk facts. -/
+theorem compileFrom_eq_slice (D : DesignCert) (lo len : Nat) (acc : Array ResidualBinding)
+    (h : lo + len ≤ D.nodes.size) :
+    compileFrom D lo len acc
+      = compileL D.sources.size lo ((D.nodes.toList.drop lo).take len) acc := by
+  have hlen : ((D.nodes.toList.drop lo).take len).length = len := by
+    simp only [List.length_take, List.length_drop, Array.length_toList]; omega
+  have hw := compileFrom_walk_lt D ((D.nodes.toList.drop lo).take len) lo acc (by
+    intro j hj
+    rw [hlen] at hj
+    simp only [List.getElem?_take, List.getElem?_drop, Array.getElem?_toList, hj, ite_true])
+  rw [hlen] at hw
+  exact hw
+
+/-- `compileAndRun` on a design whose compile result is NAMED: one rewrite,
+proved once for every design. Unfolding `compileAndRun` in a per-design proof
+instead left `match compileDesign D with ...` for the KERNEL to reduce, which
+evaluates the index-based compiler over the whole design (measured on a
+500-node slice of picorv32: 125,250 `List.get` steps, 11.5 s; O(N^2)). -/
+theorem compileAndRun_of_ok {D : DesignCert} {R : ResidualProgram}
+    (h : compileDesign D = .ok R) (e : ClockEdges) (i : RuntimeInput) (st : RuntimeState) :
+    compileAndRun D e i st = denoteResidual R e i st := by
+  unfold compileAndRun; rw [h]
+
+end Seq
+end Compiler

@@ -682,11 +682,18 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
           | .mem a w => `(Compiler.ValueType.mem $(quote a) $(quote w)))
         let rhsQ ← liftTermElabM (ReifyProof.qExpr b.rhs)
         rhs ← `(($rhs).push { ty := $tyQ, rhs := $rhsQ })
+      -- Through the SEQUENTIAL walk of the chunk's slice of the node list
+      -- (`Seq.compileFrom_eq_slice`), not `compileFrom` directly: that reads
+      -- `D.nodes[start]?`, which costs the kernel O(start) per node, so the
+      -- chunk facts together cost O(N^2) (picorv32: 364-450 s).
       elabCommand (← `(command|
         theorem $(cfNm j) ($accId : Array Compiler.ResidualBinding) :
             Compiler.compileFrom $d $(quote lo') $(quote (hi' - lo')) $accId
               = .ok $rhs := by
-          rfl))
+          rw [Compiler.Seq.compileFrom_eq_slice $d $(quote lo') $(quote (hi' - lo')) $accId
+                (by rw [$covNm:ident]; all_goals decide)]
+          -- `all_goals`: harmless if the `rfl` that `rw` tries already closed it.
+          all_goals rfl))
       markPhase s!"compile_chunk {j}"
     -- NAMED PREFIXES. Chaining the chunks directly made `compileGraph_eq`
     -- rewrite 38 times through an ever-growing push chain, so its proof term
@@ -849,7 +856,12 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
           ($stId : Compiler.RuntimeState),
           $f $eId $iId $stId = Compiler.compileAndRun $d $eId $iId $stId := by
         intro $eId:ident $iId:ident $stId:ident
-        simp only [Compiler.compileAndRun, $hRNm:ident, Compiler.denoteResidual, $sNm:ident]
+        -- `compileAndRun_of_ok`, NOT `simp only [compileAndRun, hR]`: unfolding
+        -- left `match compileDesign D` for the kernel to reduce, which runs the
+        -- index-based compiler over the whole design, O(N^2) -- the step that
+        -- took picorv32 past 20 GB.
+        rw [Compiler.Seq.compileAndRun_of_ok $hRNm:ident]
+        simp only [Compiler.denoteResidual, $sNm:ident]
         rw [← $envEq:ident $iId $stId]
         simp only [$oProjNm:ident, $fProjNm:ident, $mProjNm:ident]
         simp [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
