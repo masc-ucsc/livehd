@@ -478,9 +478,11 @@ TEST_F(PassSynth, DominoProfileEmitsCellInstancesAndPublishesTheBundle) {
     EXPECT_TRUE(std::string_view{endpoint["master"].GetString()}.starts_with("__lhd_domino_"));
     EXPECT_EQ(endpoint["n_pdn"].GetUint(), 2U);
     EXPECT_EQ(endpoint["rails"].Size(), 2U);
-    // a & b: x = (2 + 4) / 2 inverters of 0.2 plus the 4.0 register, against
-    // the register plus a NAND+INV for the exclusive AND.
-    EXPECT_DOUBLE_EQ(endpoint["a_domino"].GetDouble(), 4.6);
+    // a & b: two pull-down devices at 1/3 inverter each plus four auxiliary
+    // devices at 1/2 each, times INV area 0.2, plus the 4.0 register. The CMOS
+    // alternative is the register plus a NAND+INV for the exclusive AND.
+    constexpr double expected_domino_area = (2.0 / 3 + 4.0 / 2) * 0.2 + 4.0;
+    EXPECT_DOUBLE_EQ(endpoint["a_domino"].GetDouble(), expected_domino_area);
     if (std::string_view{select} == "all") {
       EXPECT_STREQ(endpoint["reason"].GetString(), "domino-all");
       EXPECT_TRUE(endpoint["a_cmos"].IsNull());
@@ -490,8 +492,8 @@ TEST_F(PassSynth, DominoProfileEmitsCellInstancesAndPublishesTheBundle) {
     }
     // The converted register is a body-less domino cell instance, not a Flop,
     // and both area bases are reported.
-    EXPECT_DOUBLE_EQ(physical["totals"]["a_domino_estimate"].GetDouble(), 4.6);
-    EXPECT_GT(physical["totals"]["a_footprint_um2"].GetDouble(), 4.6);
+    EXPECT_DOUBLE_EQ(physical["totals"]["a_domino_estimate"].GetDouble(), expected_domino_area);
+    EXPECT_GT(physical["totals"]["a_footprint_um2"].GetDouble(), expected_domino_area);
     EXPECT_EQ(endpoint["a_footprint_um2"].GetDouble(), physical["totals"]["a_footprint_um2"].GetDouble());
     const auto io = Registry::instance(output).find_io("top");
     ASSERT_TRUE(io && io->get_graph());
