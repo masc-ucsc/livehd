@@ -385,6 +385,61 @@ TEST(LegacyModel, MulBridgeFixtures) {
     }
   }
 }
+// A Sext at any sign position has a bridge (decision #21). Before, the bridge
+// refused every position but the operand's (or node's) width, so a design that
+// sign-extends the low bits of a wider value (B05, the yosys-slang mixed-edge
+// memory) had no fast-model proof.
+TEST(LegacyModel, SextBridgeFixtures) {
+  struct Shape {
+    const char*        name;
+    uint32_t           width;
+    std::optional<int> position;  // a constant sign position; none: the amount is input b
+    uint64_t           a, b, result;
+  };
+  for (const auto& shape : {
+           Shape{     "sext_interior",  8,            3, 0x0C, 0,   0xFC}, // low 3 bits 100: negative
+           Shape{"sext_interior_wide", 16,            5, 0x10, 0, 0xFFF0}, // low 5 bits 10000, to 16 bits
+           Shape{     "sext_zero_pos",  8,            0, 0xFF, 0,      0}, // position 0 gives 0
+           Shape{        "sext_above", 16,           12, 0xFF, 0,   0xFF}, // sign bit above the operand: zero-extend
+           Shape{      "sext_runtime",  8, std::nullopt, 0x0C, 3,   0xFC},
+  }) {
+    SCOPED_TRACE(shape.name);
+    auto d                              = binary(ScanOp::Sext, shape.width);
+    d.name                              = shape.name;
+    d.inputs[1].width                   = 4;
+    d.nodes[0].operands[1].driver.width = 4;
+    if (shape.position) {
+      d.nodes[0].operands[1].driver = constant(std::to_string(*shape.position), 4);
+    }
+    const auto        c = build_certificate(d, {});
+    LegacyEmitOptions options;
+    options.emit_fast_bridge = true;
+    options.cert_wf          = LeanCertWFMode::Chunked;
+    std::ostringstream out;
+    ASSERT_NO_THROW(emit_legacy_model(d, c, options, out));
+    EXPECT_NE(out.str().find("import LeanSemanticPrimitives.Translation.SextBridge"), std::string::npos);
+    EXPECT_NE(out.str().find("sext_bridge_any"), std::string::npos);
+    EXPECT_EQ(out.str().find("by sorry"), std::string::npos);
+    out << "\nnamespace " << d.name << "_Lgraph\n"
+        << "example : (" << d.name << "_comb { (default : " << d.name << "_in) with in_a := " << shape.a << ", in_b := " << shape.b
+        << " }).out_y = " << shape.result << " := by native_decide\n"
+        << "end " << d.name << "_Lgraph\n";
+    if (const char* destination = std::getenv("LHD_LEAN_SEXT_BRIDGE_OUTPUT")) {
+      const auto path = std::filesystem::path(destination) / (d.name + "_Lgraph.lean");
+      write_atomic(path.string(), [&](std::ostream& stream) { stream << out.str(); });
+    }
+  }
+  // The operand's own width keeps the OpBridge lemmas and needs no new import.
+  auto d                        = binary(ScanOp::Sext, 16);
+  d.nodes[0].operands[1].driver = constant("8", 4);
+  const auto        c           = build_certificate(d, {});
+  LegacyEmitOptions options;
+  options.emit_fast_bridge = true;
+  std::ostringstream out;
+  ASSERT_NO_THROW(emit_legacy_model(d, c, options, out));
+  EXPECT_EQ(out.str().find("SextBridge"), std::string::npos);
+  EXPECT_NE(out.str().find("sext_bridge "), std::string::npos);
+}
 TEST(LegacyModel, PartialChunkExperimentMakesNoWholeGraphClaim) {
   auto d = binary(ScanOp::Or, 8);
   d.nodes.push_back({11, ScanOp::Or, 8, false, {{0, 0, PinRef{PinKind::Node, 10, 0, 8, 0, {}}}}});

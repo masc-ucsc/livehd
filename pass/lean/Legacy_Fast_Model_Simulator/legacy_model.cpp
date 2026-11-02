@@ -35,6 +35,9 @@ void emit_legacy_model(const DesignScan& design, const CertificateIR& cert, cons
   if (options.emit_fast_bridge && needs_mul_bridge(cert)) {
     out << "import LeanSemanticPrimitives.Translation.MulBridge\n";
   }
+  if (options.emit_fast_bridge && needs_sext_bridge(cert)) {
+    out << "import LeanSemanticPrimitives.Translation.SextBridge\n";
+  }
   if (wf) {
     out << "import LeanSemanticPrimitives.Translation.LegacyCertWF\n\nopen OpBridge\n\n";
   } else if (names.memory_values || options.emit_fast_bridge) {

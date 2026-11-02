@@ -19,6 +19,12 @@ std::string   legacy_source_value(const CertificateIR&, const LegacyNames&, cons
 std::string   legacy_value_wrap(const LegacyNames&, std::string inner, bool memory);
 std::string   legacy_fast_ref(const CertificateIR&, const LegacyNames&, uint32_t id, bool bridge);
 std::vector<std::optional<uint32_t>> legacy_output_ids(const DesignScan&, const CertificateIR&);
+// A Sext whose sign position is the constant operand width (or the node width,
+// if smaller): the fast model writes `bv_sext a`. At any other position it
+// writes `bv_sext (BitVec.ofNat amt a)` (the low `amt` bits, sign-extended).
+// The bridge proves the first form by `sext_bridge`/`sext_bridge_low` and the
+// second by `sext_bridge_any`. Both legacy emitters call this.
+bool legacy_sext_natural(const CertificateIR&, const CertNode&);
 // A memory's next image, the certificate's `srcMemNext`, as one Lean expression.
 // `img` renders an image slot and `held` is the image kept when nothing commits.
 // With no edges record (one domain), `img(next_img)`. One domain among several:

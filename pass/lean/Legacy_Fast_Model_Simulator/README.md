@@ -319,9 +319,20 @@ With `--stim`, the driver takes an optional second file: an `edges v1` schedule
 
 Checked on B05 (`shirecache_mesh_master`, clocks `clk_i` and `noc_clk_i`): 20
 steps, identical to `cert_trace` both with every clock firing and with an
-independent random schedule per clock. B05 is emitted without
-`emit_fast_bridge`: the bridge accepts a `Sext` only when its sign position is
-the operand's full width, and B05 has one with the sign bit inside the operand.
+independent random schedule per clock. That run emitted B05 without
+`emit_fast_bridge`: the bridge then accepted a `Sext` only when its sign
+position was the operand's (or the node's) width, and B05 has 20 with the sign
+bit inside the operand.
+
+Since decision #21 the bridge accepts a `Sext` at ANY sign position, constant or
+not. The fast model writes `bv_sext a` at the operand's (or node's) width and
+`bv_sext (BitVec.ofNat amt a)` elsewhere (`legacy_sext_natural` picks the form;
+both emitters call it). `sext_bridge`/`sext_bridge_low` (OpBridge) prove the
+first form, and `sext_bridge_any` (`Translation/SextBridge.lean`, imported only
+by a design that needs it) proves the second with no side condition. Checked by
+`LegacyModel.SextBridgeFixtures` (an interior position, an interior position
+widened, position 0, a position above the operand, a run-time amount), which
+`scripts/nary_bridge_check.sh` elaborates with their proofs.
 
 ---
 
@@ -599,7 +610,7 @@ name this folder.
 | what | where | why it is not here |
 |---|---|---|
 | the exporter front half | `pass/lean/Exporter/Frontend/` | every route uses it: pass entry, options, `scan_design`, `build_certificate`, memory lowering, the `_io.json` sidecar |
-| the Lean support library | `formal/lean/LeanSemanticPrimitives/` | `evalGraphC`, `OpBridge`, `NaryBridge`, `OrBridge`, `LegacyCertWF` — shared, not generated per design |
+| the Lean support library | `formal/lean/LeanSemanticPrimitives/` | `evalGraphC`, `OpBridge`, `NaryBridge`, `OrBridge`, `MulBridge`, `SextBridge`, `LegacyCertWF` — shared, not generated per design |
 | shared gates | `pass/lean/scripts/` | `op_census.py`, `const_parity.py` and `axiom_audit.py` with their controls; three routes and the repo-level runners call them |
 | the 12×5 coverage harness | `pass/lean/scripts/` | `fp_cov_run.sh` and the `fp_cov_queue_*.sh` queues both take `legacy` or `verified_compiler` |
 

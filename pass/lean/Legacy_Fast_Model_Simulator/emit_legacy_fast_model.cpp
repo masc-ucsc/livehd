@@ -48,6 +48,15 @@ uint32_t address_width(const CertificateIR& c, uint32_t id) {
 }
 std::string reset_predicate(std::string predicate, bool active_low) { return active_low ? "(!" + predicate + ")" : predicate; }
 }  // namespace
+bool legacy_sext_natural(const CertificateIR& c, const CertNode& n) {
+  if (n.op.kind != Operation::Sext || n.deps.size() != 2) {
+    return false;
+  }
+  const auto* amount = certificate_source(c, n.deps[1]);
+  const auto  wa     = certificate_width(c, n.deps[0]);
+  return amount && amount->kind == SourceKind::Const
+         && (amount->const_int == std::to_string(std::min(n.width, wa)) || amount->const_int == std::to_string(wa));
+}
 FastExpr lower_fast_expr(const CertificateIR& c, const CertNode& n) {
   const auto               w     = n.width;
   auto                     dep   = [&](size_t i) { return "@" + std::to_string(i) + "@"; };
@@ -162,10 +171,7 @@ FastExpr lower_fast_expr(const CertificateIR& c, const CertNode& n) {
       break;
     case Operation::Sext:
       if (arity(2)) {
-        const auto* amount  = certificate_source(c, n.deps[1]);
-        const auto  natural = std::to_string(std::min(w, width(0)));
-        if (amount && amount->kind == SourceKind::Const
-            && (amount->const_int == natural || amount->const_int == std::to_string(width(0)))) {
+        if (legacy_sext_natural(c, n)) {
           e.text = "((bv_sext " + dep(0) + ") : BitVec " + std::to_string(w) + ")";
         } else {
           e.text = "((bv_sext (BitVec.ofNat (BitVec.toNat " + dep(1) + ") (BitVec.toNat " + dep(0) + "))) : BitVec "
