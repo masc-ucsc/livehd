@@ -705,18 +705,11 @@ inline void debug_check_pin_hint([[maybe_unused]] const hhds::Pin_class& dpin) {
                   is_uns ? "un" : "")
           .c_str());
   } else if (op == Ntype_op::Concat) {
-    // >= , not ==: an OVER-stamped concat pin is legal and every consumer
-    // already models it (encode.cpp widens W to sum(w) and treats the bits
-    // above as known zero; abc_map fills `max(out_bits,total)`). Only an
-    // UNDER-stamped pin is the miscompile -- it drops the top lanes.
-    const int total = concat_total_width(dpin.get_master_node());
-    I(total <= 0 || (is_uns && nbits >= total),
-      std::format("concat pin '{}' must be an unsigned hint of at least {} bits, got {} {}signed bits",
-                  wire_name(dpin),
-                  total,
-                  nbits,
-                  is_uns ? "un" : "")
-          .c_str());
+    // The lane table fixes bit positions, while the pin is a realization
+    // hint like any other result. Bitwidth may omit proven-zero TOP bits.
+    // A concat remains non-negative even when its realized width is smaller
+    // than the sum of the declared windows.
+    I(is_uns, std::format("concat pin '{}' must be unsigned", wire_name(dpin)).c_str());
   } else if (op == Ntype_op::Get_mask) {
     const auto lo = get_driver_of_sink_name(dpin.get_master_node(), "lo");
     const auto hi = get_driver_of_sink_name(dpin.get_master_node(), "hi");
@@ -1920,10 +1913,11 @@ struct Concat_lane {
 
 // ── The Concat lane contract ────────────────────────────────────────────────
 //
-// A Concat's output width is ALWAYS sum(declared lane widths). The interleaved
-// const sinks carry the INTENDED bit spacing, and no consumer may re-derive the
-// width from the driver pin's stamped `bits` -- `concat(a,8,b,4)` is 12 bits
-// even after the optimizer proves `a` fits in 3.
+// A Concat's natural width is sum(declared lane widths). The interleaved
+// const sinks fix the INTENDED bit spacing, and no consumer may re-derive a
+// lane offset from the driver pin's stamped `bits`. The result's realization
+// hint may be narrower when bitwidth proves its omitted TOP bits are zero;
+// every lane still occupies its original window.
 //
 // That is the whole point of the const sinks: LGraph passes are free to narrow
 // the REAL width of a variable, while the concat keeps the spacing the source

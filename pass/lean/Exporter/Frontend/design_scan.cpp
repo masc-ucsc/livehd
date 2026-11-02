@@ -2,6 +2,7 @@
 #include "design_scan.hpp"
 
 #include <algorithm>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -145,18 +146,22 @@ void lower_concat(const LeanCtx& ctx, const Node& node, DesignScan& design, uint
     }
     const auto lane_width = pin_const_value(edge.driver);
     if (!lane_width.is_integer() || lane_width.has_unknowns() || !lane_width.is_just_i64() || lane_width.to_just_i64() <= 0
-        || lane_width.to_just_i64() > width) {
+        || lane_width.to_just_i64() > std::numeric_limits<int32_t>::max()) {
       fatal(ctx, "Concat has an invalid or excessive lane width");
     }
     total += static_cast<uint64_t>(lane_width.to_just_i64());
-    if (total > width) {
-      fatal(ctx, "Concat lane widths exceed its result width");
+    if (total > static_cast<uint64_t>(std::numeric_limits<int32_t>::max())) {
+      fatal(ctx, "Concat lane layout exceeds the supported width");
     }
   }
   const auto lanes = livehd::graph_util::concat_lanes(node);
-  if (lanes.empty() || total != width) {
-    fatal(ctx, "Concat requires a complete MSB-first lane table matching its result width");
+  if (lanes.empty()) {
+    fatal(ctx, "Concat requires a complete MSB-first lane table");
   }
+  // Lane positions use the natural layout width. The result pin is a
+  // realization hint: bitwidth may have proved its omitted TOP bits zero.
+  const auto layout_width = std::max(width, static_cast<uint32_t>(total));
+  check_width(ctx, node, layout_width, "Concat lane layout");
   const auto violation = livehd::graph_util::concat_lane_violation(lanes);
   if (!violation.empty()) {
     fatal(ctx, violation);
@@ -222,7 +227,7 @@ void lower_concat(const LeanCtx& ctx, const Node& node, DesignScan& design, uint
     }
     if (lane.offset != 0) {
       value = emit(ScanOp::SHL,
-                   width,
+                   layout_width,
                    {
                        {0, 0,                                               value},
                        {1, 1, natural_operand(static_cast<uint32_t>(lane.offset))}

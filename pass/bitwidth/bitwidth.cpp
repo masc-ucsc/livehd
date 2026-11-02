@@ -235,9 +235,9 @@ void Bitwidth::set_bits_sign(const hhds::Pin_class& dpin, const Bitwidth_range& 
   // their widest bus. Keep its full mathematical range in bwmap, but do not
   // materialize unobservable high bits (e.g. a 1024-bit SRA driving out:u64).
   // An internal consumer or an unsized output still needs the inferred range.
-  // Concat's width describes its lane layout; unlike an arithmetic result it
-  // cannot be narrowed without rewriting the lanes themselves. State and
-  // multi-output cells likewise retain their own realization contracts.
+  // Concat narrows only from a proven value range: an output-port limit must
+  // not truncate its lane layout. State and multi-output cells likewise retain
+  // their own realization contracts.
   // Guarded like the Get_mask ceiling above: a driver pin's master can be the
   // IO / CONST singleton (or invalid), whose stored type is not a cell op.
   const auto master = dpin.get_master_node();
@@ -1198,29 +1198,12 @@ void Bitwidth::process_get_mask(hhds::Node_class& node) {
   adjust_bw(node.create_driver_pin(0), Bitwidth_range(res_min, res_max));
 }
 
-// Concat's range is a pure function of the DECLARED lane widths, and of
-// nothing else -- not of the lane values' own ranges.
-//
-// Every lane occupies its own window, so a lane's sign never escapes: a driver
-// NARROWER than its window sign-extends into it (-1 at 3 bits is 0b111), and a
-// driver WIDER than its window is an internal compile error, not a truncation
-// (graph_util::concat_lane_violation -- truncating would shift every lane above
-// it). The result therefore saturates the full magnitude (any lane can be
-// all-ones) and is never negative: exactly [0, 2^sum(w_i)-1].
-// set_ubits_range spells that, and set_bits_sign then stamps the exact literal
-// bits = sum(w_i) width and `unsign`.
-//
-// Two traps live here, which is why the lane table only ever comes from
-// graph_util::concat_lanes:
-//   - The odd sink pids hold the WIDTH constants, not data. The generic
-//     operand seeding above puts them in bwmap like any other const, so a
-//     process_* that folded all its operands' ranges together would widen the
-//     result by the width NUMBER (an 8-lane concat carries an operand holding
-//     8). Nothing but the lane table is read below.
-//   - A lane's declared window is NOT recoverable from its driver. bits_of on
-//     the value is an upper bound that this very pass is free to narrow, and
-//     the significant bits are narrower still; re-deriving a width from it
-//     shifts every lane ABOVE the one that got it wrong.
+// The declared windows fix every lane's offset, even when inference narrows
+// its driver. Only redundant TOP bits of the result may disappear: skip
+// proven-zero leading lanes, then use the first nonzero lane's non-negative
+// range. A possibly negative lane can fill its whole window with sign bits.
+// Interior padding still contributes to the offsets and must never be removed.
+// Width operands (odd sink pids) are layout metadata, never data ranges.
 void Bitwidth::process_concat(hhds::Node_class& node) {
   const auto lanes = livehd::graph_util::concat_lanes(node);
   const auto total = livehd::graph_util::concat_total_width(lanes);
@@ -1238,8 +1221,29 @@ void Bitwidth::process_concat(hhds::Node_class& node) {
   // Check lane carriers after inference finishes: intermediate ranges can
   // still narrow. The final check is a diagnostic in every build mode.
 
+  auto bits = int32_t{1};
+  for (const auto& lane : lanes) {
+    const auto it = bwmap.find(lane.value.get_class_index());
+    if (it == bwmap.end()) {
+      // Do not seed the full layout width here: ranges only widen during the
+      // fixed point, so that would prevent a later proven top-bit narrowing.
+      not_finished = true;
+      return;
+    }
+    const auto& range = it->second;
+    if (!range.is_always_positive()) {
+      bits = lane.offset + lane.width;
+      break;
+    }
+    if (!range.is_overflow() && range.max == 0) {
+      continue;
+    }
+    bits = lane.offset + std::min(lane.width, range.get_ubits());
+    break;
+  }
+
   Bitwidth_range bw;
-  bw.set_ubits_range(total);
+  bw.set_ubits_range(bits);
   adjust_bw(node.create_driver_pin(0), bw);
 }
 

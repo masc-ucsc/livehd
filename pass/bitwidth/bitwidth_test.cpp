@@ -1147,6 +1147,49 @@ TEST(BitwidthInfer, LeadingZeroConcatLanesPreserveValueBound) {
   }
 }
 
+// Padding inside a concat fixes the positions above it. Only the top lane's
+// proven zero extension may disappear; a negative top lane needs its full
+// two's-complement window because the packed result itself is unsigned.
+TEST(BitwidthInfer, ConcatNarrowsOnlyProvenTopPadding) {
+  namespace gu = livehd::graph_util;
+  for (bool signed_high : {false, true}) {
+    auto& lib = livehd::Hhds_graph_library::instance("lgdb_bitwidth_concat_top_" + std::to_string(signed_high));
+    SCOPED_TRACE(signed_high);
+    auto  io  = lib.create_io("top_padding");
+    io->add_input("high", 1);
+    io->set_bits("high", 2);
+    io->set_unsign("high", !signed_high);
+    io->add_input("low", 2);
+    io->set_bits("low", 3);
+    io->set_unsign("low", true);
+    io->add_output("out", 3);
+    auto       graph    = io->create_graph();
+    auto       concat   = gu::create_typed_node(*graph, Ntype_op::Concat);
+    const auto constant = [&](int port, int value) {
+      gu::create_const(*graph, *Dlop::create_integer(value)).connect_sink(concat.create_sink_pin(port));
+    };
+    graph->get_input_pin("high").connect_sink(concat.create_sink_pin(0));
+    constant(1, 8);
+    constant(2, 0);
+    constant(3, 40);
+    graph->get_input_pin("low").connect_sink(concat.create_sink_pin(4));
+    constant(5, 7);
+    concat.create_driver_pin(0).connect_sink(graph->get_output_pin("out"));
+    ASSERT_NO_THROW(Bitwidth{10}.do_trans(graph));
+    const auto driver = graph->get_output_pin("out").get_driver_pin();
+    EXPECT_EQ(gu::bits_of(driver), signed_high ? 55 : 49);
+    EXPECT_TRUE(gu::is_unsign(driver));
+    gu::debug_check_pin_hint(driver);
+    const auto lanes = gu::concat_lanes(concat);
+    ASSERT_EQ(lanes.size(), 3);
+    EXPECT_EQ(lanes[0].width, 8);
+    EXPECT_EQ(lanes[0].offset, 47);
+    EXPECT_EQ(lanes[1].width, 40);
+    EXPECT_EQ(lanes[1].offset, 7);
+    EXPECT_EQ(lanes[2].width, 7);
+  }
+}
+
 TEST(BitwidthInfer, OversizedConcatLaneReportsError) {
   auto g      = bounded_inputs("bw_concat_invalid", 8, 1);
   auto select = livehd::graph_util::create_typed_node(*g, Ntype_op::Get_mask);

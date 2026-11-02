@@ -671,13 +671,17 @@ TEST(DesignScan, ConcatLowersDeclaredWindowsWithoutMutatingGraph) {
     int         a_bits, a_window;
     bool        signed_a;
     int         constant, constant_window, b_bits, b_window;
+    int         result_bits = 0;
   };
   for (const auto& c : std::vector<Case>{
            {          "padding", 3,  8, false,   4, 8, 4, 4},
            {           "signed", 3,  8,  true,  -1, 3, 4, 4},
            {      "wide_signed", 8, 72,  true, -64, 7, 1, 1},
            {    "wide_unsigned", 8, 72, false,   4, 4, 4, 4},
-           {"negative_constant", 1,  1, false,  -1, 8, 3, 3}
+           {"negative_constant", 1,  1, false,  -1, 8, 3, 3},
+           {       "narrow_top", 3,  8, false,   4, 8, 4, 4, 15},
+           {  "narrow_wide_top", 8, 72, false,   4, 4, 4, 4, 16},
+           {      "wide_result", 3,  8, false,   4, 8, 4, 4, 24}
   }) {
     SCOPED_TRACE(c.name);
     const auto name         = std::string("concat_") + c.name;
@@ -688,7 +692,7 @@ TEST(DesignScan, ConcatLowersDeclaredWindowsWithoutMutatingGraph) {
     io->set_bits("a", c.a_bits);
     io->add_input("b", 2);
     io->set_bits("b", c.b_bits);
-    const auto width = c.a_window + c.constant_window + c.b_window;
+    const auto width = c.result_bits > 0 ? c.result_bits : c.a_window + c.constant_window + c.b_window;
     io->add_output("y", 1);
     io->set_bits("y", width);
     auto       g = io->create_graph();
@@ -722,6 +726,12 @@ TEST(DesignScan, ConcatLowersDeclaredWindowsWithoutMutatingGraph) {
     ASSERT_FALSE(design.nodes.empty());
     EXPECT_EQ(design.nodes.back().id, concat.get_debug_nid());
     EXPECT_EQ(design.nodes.back().op, ScanOp::Or);
+    EXPECT_EQ(design.nodes.back().width, width);
+    const auto lanes = concat_lanes(concat);
+    ASSERT_EQ(lanes.size(), 3);
+    EXPECT_EQ(lanes[0].offset, c.constant_window + c.b_window);
+    EXPECT_EQ(lanes[1].offset, c.b_window);
+    EXPECT_EQ(lanes[2].offset, 0);
     std::set<uint32_t> ids;
     for (const auto& n : design.nodes) {
       EXPECT_TRUE(n.op == ScanOp::Or || n.op == ScanOp::SHL || n.op == ScanOp::Sext);
@@ -780,7 +790,7 @@ TEST(DesignScan, MalformedConcatIsRefused) {
       g->get_input_pin("a").connect_sink(concat.create_sink_pin(1));
     } else if (kind != 1) {
       const auto lane_width = kind == 2 ? 0 : kind == 3 ? -1 : kind == 4 ? 4 : 7;
-      create_const(*g, *Dlop::create_integer(lane_width)).connect_sink(concat.create_sink_pin(1));
+      create_const(*g, *Dlop::create_integer(lane_width)).connect_sink(concat.create_sink_pin(kind == 5 ? 3 : 1));
     }
     set_bits(concat.create_driver_pin(0), kind == 4 ? 4 : 8);
     concat.create_driver_pin(0).connect_sink(g->get_output_pin("y"));
