@@ -17,6 +17,17 @@ set -euo pipefail
 #   IR, TV   the certificate built after single_edge equals iverilog on the
 #            source at every period boundary (what single_edge promises).
 #   control  the same design with every port on the rising edge differs.
+#   legacy   the legacy model, with its proof bridge (`_next_refines_fast`,
+#            elaborated without sorry), equals IR at every step, so it also
+#            equals the source at every period boundary.
+#   FP       admits the memory, executes it and compares it with the reference
+#            itself (RESULT MEMROUTE OK), and its trace equals IR's under FP's
+#            own schedule (FP `edges:all` = cert_trace `edges:third`: every
+#            third step quiet; FP has no every-step mode).
+#   D3       translation validation (d3_sweep.py, its default generator) passes
+#            every gate, the proof included, and rejects a memory mutation.
+# So all five Lean simulators (IR, TV, legacy, FP, D3) agree with each other and
+# with the source on the same certificate and the same stimulus.
 #
 # Lean step 2p is the RISE sub-step of source period p and step 2p+1 its FALL
 # sub-step; both take period p's inputs (as negedge_mem_oracle.sh).
@@ -142,6 +153,66 @@ sim() { # <dir> <name> <testbench> <rtl files...>
   vvp "$d/$n.vvp" | grep '^STEP' > "$d/$n.txt"
 }
 even() { awk '$2 % 2 == 0' "$1"; }
+ct() { # <dir> <name> <cert_trace options...>
+  local d=$1 n=$2; shift 2
+  (ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run Futamura_Projection_Scripts/cert_trace.lean \
+     "$d/vc/$top.dcert" "$STEPS" "$d/stim.txt" "$@" > "$d/$n.txt" 2> "$d/$n.err") \
+    || { cat "$d/$n.err"; echo "FAIL: cert_trace $n"; exit 1; }
+}
+
+# legacy, FP and D3 on the certificate of <dir>, the same one IR and TV ran.
+others() { # <dir> <legacy module prefix>
+  local R=$1 mod=$2 L="$1/legacy"
+  mkdir -p "$L"
+  (cd "$L" && "$LHD" compile lg:../s2 --top "$top" --emit-dir lean:model --set formal.lean.emit_cert=true \
+     --set formal.lean.emit_fast_bridge=true --workdir lw > model.log 2>&1) \
+    || { grep -o '"message":"[^"]*' "$L/model.log" | head -2; echo "FAIL: $top legacy emission"; exit 1; }
+  local LR="$L/lroot" OL="$L/olean"
+  mkdir -p "$LR/$mod" "$OL/$mod"
+  cp "$L/model/${top}_Lgraph.lean" "$LR/$mod/"
+  python3 -I "$ROOT/pass/lean/Legacy_Fast_Model_Simulator/scripts/make_legacy_sim.py" "$LR/$mod/${top}_Lgraph.lean" \
+    --cycles "$STEPS" --stim --out "$LR/$mod" --module-prefix "$mod" > "$L/gen.log" 2>&1 \
+    || { tail -3 "$L/gen.log"; echo "FAIL: $top make_legacy_sim"; exit 1; }
+  (ulimit -s unlimited && LEAN_PATH="$LP:$OL" lean -R "$LR" -o "$OL/$mod/${top}_Lgraph.olean" \
+     "$LR/$mod/${top}_Lgraph.lean" > "$L/build.log" 2>&1) \
+    || { grep -m5 error "$L/build.log"; echo "FAIL: $top legacy elaboration (bridge proofs)"; exit 1; }
+  grep -q sorry "$L/build.log" && { echo "FAIL: $top sorry in the legacy model"; exit 1; }
+  grep -q "theorem ${top}_next_refines_fast" "$LR/$mod/${top}_Lgraph.lean" \
+    || { echo "FAIL: $top the bridge theorem for the next state was not emitted"; exit 1; }
+  (ulimit -s unlimited && LEAN_PATH="$LP:$OL" lean --run "$LR/$mod/${top}_LegacySim.lean" "$R/stim.txt" \
+     > "$L/legacy.txt" 2> "$L/legacy.err") || { cat "$L/legacy.err"; echo "FAIL: $top legacy run"; exit 1; }
+  diff "$R/ir.txt" "$L/legacy.txt" > "$L/diff.txt" \
+    || { head -4 "$L/diff.txt"; echo "FAIL: $top legacy differs from IR"; exit 1; }
+  echo "ok: $top legacy (bridge proofs elaborated) == IR at all $STEPS steps"
+
+  (ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run Futamura_Projection_Scripts/dcert2_memroute.lean \
+     "$R/vc/$top.dcert" 20000 200 "$STEPS" zero edges:all "stim:$R/stim.txt" outputs > "$R/fp.log" 2> "$R/fp.err") \
+    || { tail -5 "$R/fp.log"; cat "$R/fp.err"; echo "FAIL: $top FP runner"; exit 1; }
+  grep -q 'RESULT: MEMROUTE OK' "$R/fp.log" || { grep RESULT "$R/fp.log"; echo "FAIL: $top FP did not run the memory"; exit 1; }
+  grep '^STEP' "$R/fp.log" > "$R/fp.txt"
+  ct "$R" ir_third edges:third
+  diff "$R/ir_third.txt" "$R/fp.txt" > "$R/diff_fp.txt" \
+    || { head -4 "$R/diff_fp.txt"; echo "FAIL: $top FP differs from IR"; exit 1; }
+  echo "ok: $top FP (MEMROUTE OK) == IR at all $STEPS steps of FP's schedule"
+
+  local D3="$R/d3"
+  mkdir -p "$D3/certs"
+  cp "$R/vc/${top}_Lgraph.lean" "$D3/certs/"
+  (cd "$ROOT" && env -u OUT -u TMPDIR python3 -I pass/lean/Translation_Validation/scripts/d3_sweep.py \
+     --certs "$D3/certs" --out "$D3/out" --jobs 1 --timeout 900 --prove > "$D3/sweep.log" 2>&1) \
+    || { tail -5 "$D3/sweep.log"; echo "FAIL: $top D3 sweep"; exit 1; }
+  python3 -I - "$D3/out" "$top" <<'PY'
+import csv, sys
+rows = list(csv.DictReader(open(sys.argv[1]), delimiter="\t"))
+if len(rows) != 1:
+    sys.exit(f"FAIL: {sys.argv[2]} D3 wrote {len(rows)} rows")
+r = rows[0]
+gates = "".join(r[k] for k in ("cert", "compile", "reify", "typecheck", "sim", "checker", "agree", "proof"))
+if gates != "11111111" or r["mut_mem"] != "rejected" or r["drift"]:
+    sys.exit(f"FAIL: {sys.argv[2]} D3 {r['verdict']}: gates {gates}, mut_mem {r['mut_mem']}, drift {r['drift'] or '-'}")
+print(f"ok: {sys.argv[2]} D3 -- every gate passes, the proof included; a memory mutation is rejected")
+PY
+}
 
 STEPS=$((2 * PERIODS))
 for d in "${DESIGNS[@]}"; do
@@ -178,9 +249,7 @@ for d in "${DESIGNS[@]}"; do
     echo "ok: $top ($reader) lhd's emitted Verilog == source at all $STEPS steps ($nx steps still show x)"
     for route in ir tv; do
       opts=(edges:all); [[ $route == tv ]] && opts+=(route:tv)
-      (ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run Futamura_Projection_Scripts/cert_trace.lean \
-         "$R/vc/$top.dcert" "$STEPS" "$R/stim.txt" "${opts[@]}" > "$R/$route.txt" 2> "$R/$route.err") \
-        || { cat "$R/$route.err"; echo "FAIL: cert_trace $route"; exit 1; }
+      ct "$R" "$route" "${opts[@]}"
       diff <(even "$R/rtl.txt") <(even "$R/$route.txt") > "$R/diff_$route.txt" \
         || { head -4 "$R/diff_$route.txt"; echo "FAIL: $top ($reader) $route differs from the source at a period boundary"; exit 1; }
       mid=$(diff "$R/rtl.txt" "$R/$route.txt" | grep -c '^<' || true)
@@ -191,6 +260,7 @@ for d in "${DESIGNS[@]}"; do
     nb=$(diff <(even "$R/ctl.txt") <(even "$R/ir.txt") | grep -c '^<' || true)
     [[ $nb -gt 0 ]] || { echo "FAIL: $top ($reader): the all-rising control agreed at every period boundary"; exit 1; }
     echo "ok: $top ($reader) control $ctl differs at $nb of $PERIODS period boundaries"
+    others "$R" "Legacy${top^}${reader//-/}"
   done
 done
 echo "PASS: mixed_edge_mem_oracle"
