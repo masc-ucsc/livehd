@@ -84,6 +84,10 @@ struct Port {
   uint32_t              id    = 0;
   uint32_t              width = 0;
   std::optional<PinRef> driver;
+  // An input that is not a port of the RTL (decision #8): the free value an
+  // `ordering="none"` read takes where the design leaves it undefined. The
+  // sidecar marks it `free_value`; a testbench of the RTL has no such port.
+  bool                  free_value = false;
 };
 // An OWNED clock domain. The scan resolves every committing state element to one
 // of these and stores only the resolved result -- no graph handle, no pin, no
@@ -172,6 +176,11 @@ struct Memory {
   // reads see the committed image (no forwarding when `update` is driven).
   bool                           whole_array = false;
   std::optional<PinRef>          update, update_enable, bulk_reset, reset_bus;
+  // ordering="none" (decision #8): `undef_rows[r][w]` -- read r's bits that
+  // write w drives are undefined when w writes r's address this step; read r
+  // then takes those bits from its free input `free_value.at(r)`.
+  std::vector<std::vector<bool>> undef_rows;
+  std::map<size_t, PinRef>       free_value;
   std::vector<MemoryPort>  ports;
   std::vector<size_t>      read_ports, write_ports;
   std::string              raw_name;

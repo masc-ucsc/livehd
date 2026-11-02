@@ -266,6 +266,8 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
   // means read-first, which is an all-clear matrix, not an unreadable one.
   Dlop fwd_const;
   bool fwd_seen = false;
+  Dlop undef_const;
+  bool undef_seen = false;
 
   const auto stride = static_cast<size_t>(Ntype::Memory_port_stride);
   for (const auto& e : inp_edges_ordered(node)) {
@@ -314,18 +316,15 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
         mi.fwd_known = false;
       }
     } else if (pname == "undef") {
-      // ordering="none": the read-during-write window is UNDEFINED. The policy
-      // tuple below only knows the two DEFINED answers (write_first from a set
-      // `fwd` bit, read_first from a clear one), so a certificate about such a
-      // memory asserts a concrete value in a window the emitted RTL leaves x.
-      // Refuse it below rather than export a proof of a different design.
-      //
-      // Tested with is_known_false() rather than the i64 window so a matrix
-      // wider than 62 bits still registers as set, and a non-const driver on
-      // this comptime pin refuses instead of guessing.
+      // ordering="none": the read-during-write window is UNDEFINED (graph/cell.cpp
+      // pid 15). Kept WHOLE, like `fwd`, and shaped into per-read rows after the
+      // walk; the lowering reads the undefined bits from a free input (decision
+      // #8). A non-constant driver on this comptime pin is refused below.
       mi.undef = true;
       if (pin_is_const(e.driver)) {
-        mi.undef = !pin_const_value(e.driver).is_known_false();
+        undef_const = pin_const_value(e.driver);
+        undef_seen  = true;
+        mi.undef    = !undef_const.is_known_false();
       }
     } else if (pname == "posclk") {
       mi.posclk = const_pin_int_or(e.driver, 1);  // unused in async emission; tolerate non-const
@@ -630,12 +629,29 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
     }
     fatal(ctx, memory_policy_summary(mi) + ". pass.lean memory supports async (type 0) and sync-read (type 1) only" + detail);
   }
+  // ordering="none" (decision #8): an undefined read-during-write window is
+  // not a value the certificate may pick. The lowering gives each affected
+  // read a FREE INPUT and takes the undefined bits from it, so the certificate
+  // covers every legal answer, as pass/lec's don't-care does.
+  mi.undef_rows.assign(mi.read_ports.size(), std::vector<bool>(mi.write_ports.size(), false));
   if (mi.undef) {
-    fatal(ctx,
-          memory_policy_summary(mi)
-              + ". pass.lean cannot model ordering=\"none\" (the `undef` matrix): sram_1r1w_{read,write}_first only express "
-                "the two DEFINED collision answers, so the certificate would assert a value in a window the emitted RTL "
-                "leaves x. Use ordering=\"old\"/\"fwd\"/\"program\" to export this design.");
+    if (!undef_seen) {
+      fatal(ctx, memory_policy_summary(mi) + ". the `undef` matrix (ordering=\"none\") is not a constant.");
+    }
+    const auto n_rd = mi.read_ports.size();
+    const auto n_wr = mi.write_ports.size();
+    if (static_cast<uint64_t>(n_rd) * static_cast<uint64_t>(n_wr) > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+      fatal(ctx, memory_policy_summary(mi) + ". the `undef` matrix overflows the bit position `Dlop::bit_test` accepts.");
+    }
+    for (size_t r = 0; r < n_rd; ++r) {
+      for (size_t w = 0; w < n_wr; ++w) {
+        const auto pos = static_cast<int>(r * n_wr + w);
+        if (undef_const.unknown_bit_test(pos)) {
+          fatal(ctx, memory_policy_summary(mi) + ". the `undef` matrix has an unknown cell.");
+        }
+        mi.undef_rows[r][w] = undef_const.bit_test(pos);
+      }
+    }
   }
   // Shape the forwarding matrix into PER-READ ROWS, now that both port counts
   // are known.  This is where the i64 window used to refuse the design: a

@@ -807,6 +807,7 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
     m.rom_contents = info.rom_contents;
     m.init_contents = info.init_contents;
     m.whole_array   = info.whole_array;
+    m.undef_rows    = info.undef_rows;
     if (info.whole_array) {
       const auto opt = [&](const Node_pin& pin) -> std::optional<PinRef> {
         if (pin.is_invalid()) {
@@ -892,6 +893,25 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
         p.has_domain    = true;
       }
       m.ports.push_back(p);
+    }
+    // A free input per read with an undefined window (decision #8), named after
+    // the memory and the read ordinal. Appended after every RTL port, so the
+    // RTL's own inputs keep their ordinals.
+    for (size_t r = 0; r < m.undef_rows.size(); ++r) {
+      if (std::find(m.undef_rows[r].begin(), m.undef_rows[r].end(), true) == m.undef_rows[r].end()) {
+        continue;
+      }
+      Port free;
+      free.name       = m.raw_name + "__undef_read" + std::to_string(r);
+      free.id         = next_input++;
+      free.width      = m.bits;
+      free.free_value = true;
+      design.inputs.push_back(free);
+      PinRef ref;
+      ref.kind  = PinKind::Input;
+      ref.id    = free.id;
+      ref.width = m.bits;
+      m.free_value.emplace(r, ref);
     }
     design.memories.emplace(m.id, std::move(m));
     ctx.memory_info.emplace(info.nid, info);
@@ -1099,6 +1119,13 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
     enqueue(p.addr);
     enqueue(p.enable);
     for (size_t w = 0; w < mi.write_ports.size(); ++w) {
+      // An undefined window (decision #8) reads the colliding write's address
+      // and enable to find its undefined bits.
+      if (r < mi.undef_rows.size() && w < mi.undef_rows[r].size() && mi.undef_rows[r][w]) {
+        const auto& wp = mi.ports.at(mi.write_ports[w]);
+        enqueue(wp.addr);
+        enqueue(wp.enable);
+      }
       if (!lean_pass::memory_fwd_bit(mi, r, w)) {
         continue;
       }

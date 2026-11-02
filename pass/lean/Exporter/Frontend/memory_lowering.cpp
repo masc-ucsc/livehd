@@ -57,6 +57,53 @@ uint32_t chain(CertificateBuilder& b, const Memory& m, MemoryLowering& st, const
   return current;
 }
 
+// ordering="none" (decision #8): the bits of read `r` that a colliding write
+// on one of its `undef` columns drives this step are UNDEFINED -- the RTL reads
+// x there, pass/lec a don't-care -- so they come from the read's free input and
+// every other bit is `value`. A write collides when it is enabled and its
+// address equals the read's; with byte lanes (`wensize` > 1) only the lanes it
+// enables are undefined, as the cell's per-lane `undef` plane says.
+uint32_t undefined_bits(CertificateBuilder& b, const Memory& m, uint32_t r, uint32_t value) {
+  const auto free = m.free_value.find(r);
+  if (free == m.free_value.end()) {
+    return value;
+  }
+  const auto&    rp     = m.ports.at(m.read_ports.at(r));
+  const auto     raddr  = resize(b, rp.addr, m.addr_width);
+  const uint32_t lanes  = std::max<uint32_t>(1, m.wensize);
+  const uint32_t lane_w = m.bits / lanes;
+  if (lanes > 31) {
+    throw std::runtime_error("[ERROR] pass.lean: memory n_" + std::to_string(m.id) + " (`" + m.raw_name
+                             + "`) has ordering=\"none\" with " + std::to_string(lanes)
+                             + " write-enable lanes; an undefined window is built for at most 31.");
+  }
+  std::vector<uint32_t> masks;
+  for (size_t w = 0; w < m.write_ports.size(); ++w) {
+    if (r >= m.undef_rows.size() || w >= m.undef_rows[r].size() || !m.undef_rows[r][w]) {
+      continue;
+    }
+    const auto& wp  = m.ports.at(m.write_ports[w]);
+    const auto  hit = b.emit({Operation::EQ, 0, {}}, 1, {resize(b, wp.addr, m.addr_width), raddr});
+    const auto  en  = resize(b, wp.enable, lanes);
+    for (uint32_t l = 0; l < lanes; ++l) {
+      // lane l's enable bit, then "this write drives lane l of read r's entry"
+      const auto on   = b.emit({Operation::Ror, 0, {}}, 1, {b.emit({Operation::And, 0, {}}, lanes, {en, b.const_dep(1U << l)})});
+      const auto sel  = b.emit({Operation::And, 0, {}}, 1, {hit, on});
+      // lane l's bits: all-ones of the lane width, shifted to its place
+      const auto ones = b.emit({Operation::Not, 0, {}}, lane_w, {b.const_dep(0)});
+      const auto lane = b.emit({Operation::SHL, 0, {}}, m.bits, {ones, b.const_dep(l * lane_w)});
+      masks.push_back(b.emit({Operation::MuxBool, 0, {}}, m.bits, {sel, b.const_dep(0), lane}));
+    }
+  }
+  if (masks.empty()) {
+    return value;
+  }
+  const auto undefined = masks.size() == 1 ? masks.front() : b.emit({Operation::Or, 0, {}}, m.bits, masks);
+  const auto kept      = b.emit({Operation::And, 0, {}}, m.bits, {value, b.emit({Operation::Not, 0, {}}, m.bits, {undefined})});
+  const auto freed     = b.emit({Operation::And, 0, {}}, m.bits, {resize(b, free->second, m.bits), undefined});
+  return b.emit({Operation::Or, 0, {}}, m.bits, {kept, freed});
+}
+
 // A whole-array cell's bulk operand presented as an `n * bits` bus.
 uint32_t bus(CertificateBuilder& b, const Memory& m, const PinRef& pin) {
   return resize(b, pin, static_cast<uint32_t>(m.size) * m.bits);
@@ -121,7 +168,7 @@ void lower_memory_read(CertificateBuilder& b, const Memory& m, uint32_t r) {
   const auto addr   = resize(b, p.addr, m.addr_width);
   const auto enable = resize(b, p.enable, b.pin_width(p.enable));
   const auto read   = b.emit({Operation::MemRead, 0, {}}, m.bits, {base, addr, enable});
-  b.memory_reads.emplace(key, read);
+  b.memory_reads.emplace(key, undefined_bits(b, m, r, read));
 }
 
 void lower_memory_writes(CertificateBuilder& b, const Memory& m) {
@@ -141,7 +188,8 @@ void lower_memory_writes(CertificateBuilder& b, const Memory& m) {
     one.const_int       = "1";
     one.implicit_enable = true;
     b.sources.emplace(one.id, one);
-    const auto raw    = b.emit({Operation::MemRead, 0, {}}, m.bits, {base, addr, one.id});
+    const auto raw
+        = undefined_bits(b, m, static_cast<uint32_t>(r), b.emit({Operation::MemRead, 0, {}}, m.bits, {base, addr, one.id}));
     const auto enable = resize(b, p.enable, b.pin_width(p.enable));
     const auto next   = b.emit({Operation::MuxBool, 0, {}}, m.bits, {enable, it->second, raw});
     FlopDriver f;

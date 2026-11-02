@@ -106,6 +106,11 @@ struct Memory_info {
   // window undefined? Kept as a bool, not the matrix — the emitter refuses the
   // whole memory on the first set bit, and a wide matrix does not fit an i64.
   bool                          undef      = false;
+  // The same matrix as PER-READ ROWS (decision #8), shaped like `fwd_rows`:
+  // `undef_rows[r][w]` means read ordinal r's bits that write ordinal w drives
+  // this step are UNDEFINED when w writes r's address. The certificate gives
+  // them a free input (memory_lowering).
+  std::vector<std::vector<bool>> undef_rows;
   std::vector<Memory_port_info> ports;
   std::vector<size_t>           read_ports;
   std::vector<size_t>           write_ports;

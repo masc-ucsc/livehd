@@ -29,6 +29,9 @@ struct IoPortMeta {
   // as a `flopQAsync` reset ordinal? An input the design ignores still occupies
   // its ordinal; dropping it would renumber every later port.
   bool        used_by_model = false;
+  // Not a port of the RTL (decision #8): the free value of an
+  // `ordering="none"` read's undefined window. Written only when true.
+  bool        free_value    = false;
 };
 
 struct ClockMeta {

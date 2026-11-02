@@ -7,6 +7,7 @@
 #include <sstream>
 #include <stdexcept>
 
+#include "design_io_meta.hpp"
 #include "emit_design_cert.hpp"
 #include "gtest/gtest.h"
 #include "lean_format.hpp"
@@ -346,6 +347,58 @@ TEST(CertificateIR, WholeArrayCellLoadsUpdateThenWritesThenReset) {
   const auto  c2 = build_certificate(d, {});
   const auto& n2 = c2.nodes.at(c2.slot_of.at(c2.memories.front().next_img) - c2.sources.size());
   EXPECT_EQ(n2.op.kind, Operation::MemWrite);
+}
+// ordering="none" (decision #8): a read whose address a write on an `undef`
+// column writes this step takes the bits that write drives from the read's
+// free input; every other bit is the committed read. With byte lanes only the
+// enabled lanes are undefined. The sidecar marks the free input.
+TEST(CertificateIR, UndefinedReadTakesItsFreeInput) {
+  auto  d    = memory_design(false, false);
+  auto& m    = d.memories.at(10);
+  m.wensize  = 2;
+  m.ports[0] = {0, 0, input(2000000000, 2), {}, constant("1", 1), std::nullopt};
+  m.ports.push_back({1, 0, input(2000000001, 2), constant("42", 8), input(2000000002, 2), std::nullopt});
+  m.write_ports = {1};
+  m.fwd_rows    = {{false}};
+  m.undef_rows  = {{true}};
+  d.inputs      = {
+      {"ra", 2000000000, 2, std::nullopt},
+      {"wa", 2000000001, 2, std::nullopt},
+      {"wen", 2000000002, 2, std::nullopt},
+      {"mem__undef_read0", 2000000003, 8, std::nullopt, true}
+  };
+  m.free_value.emplace(0, input(2000000003, 8));
+  const auto  c    = build_certificate(d, {});
+  auto        node = [&](uint32_t id) -> const CertNode& { return c.nodes.at(c.slot_of.at(id) - c.sources.size()); };
+  // y = Or(And(read, Not(undefined)), And(free, undefined))
+  const auto& y    = node(c.outputs.front().id);
+  ASSERT_EQ(y.op.kind, Operation::Or);
+  ASSERT_EQ(y.deps.size(), 2u);
+  const auto& kept  = node(y.deps[0]);
+  const auto& freed = node(y.deps[1]);
+  ASSERT_EQ(kept.op.kind, Operation::And);
+  EXPECT_EQ(node(kept.deps[0]).op.kind, Operation::MemRead);
+  ASSERT_EQ(freed.op.kind, Operation::And);
+  // one mask per lane, joined
+  const auto& undefined = node(freed.deps[1]);
+  ASSERT_EQ(undefined.op.kind, Operation::Or);
+  EXPECT_EQ(undefined.deps.size(), 2u);
+  for (const auto lane : undefined.deps) {
+    EXPECT_EQ(node(lane).op.kind, Operation::MuxBool);
+  }
+  // the free input is the last runtime input, and the sidecar says so
+  const auto meta = build_io_meta(d, c);
+  ASSERT_EQ(meta.inputs.size(), 4u);
+  EXPECT_TRUE(meta.inputs.back().free_value);
+  EXPECT_FALSE(meta.inputs.front().free_value);
+  const auto json = io_meta_json(meta);
+  EXPECT_NE(json.find("\"mem__undef_read0\", \"ordinal\": 3, \"width\": 8, \"used_by_model\": true, \"free_value\": true}"),
+            std::string::npos);
+  // a memory with no undefined window is unchanged: no free input is read
+  m.undef_rows = {{false}};
+  m.free_value.clear();
+  const auto c2 = build_certificate(d, {});
+  EXPECT_EQ(c2.nodes.at(c2.slot_of.at(c2.outputs.front().id) - c2.sources.size()).op.kind, Operation::MemRead);
 }
 // A whole-array cell needs ONE clock: its update and reset have no per-port domain.
 TEST(CertificateIR, WholeArrayCellOnTwoClocksIsRefused) {
