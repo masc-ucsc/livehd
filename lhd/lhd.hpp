@@ -1454,6 +1454,16 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "0.2",
      Synth_set_option::Kind::file,
      "legroute: the share of a failing region's boxes one spill round pushes out"},
+    {"place.legroute.window_grow",
+     "0",
+     Synth_set_option::Kind::integer,
+     "legroute: in a spill round, a region without a routable answer first widens its boxes' windows by this many "
+     "tiles (twice at most) and solves again before it spills (0: off)"},
+    {"place.legroute.spill_shift",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "legroute: a spill round moves a failing region's boundary instead of its boxes: the tile strip next to the "
+     "neighbour its nets reach most goes to that neighbour with the boxes on it"},
     {"place.legroute.global_own_share",
      "0",
      Synth_set_option::Kind::file,

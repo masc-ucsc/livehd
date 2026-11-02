@@ -3864,9 +3864,110 @@ std::vector<std::pair<int, int>> spill_cut(const Design& d, const Boxes& boxes, 
   return out;
 }
 
+// ---------------------------------------------------------------- spill by boundary shift
+// The pull of region r toward each region of `to`: the weight of the nets with an endpoint in r (a box or a fixed
+// pin) and one in that region.
+std::vector<uint64_t> spill_pulls(const Design& d, const std::vector<Net_ends>& ends, int r, const std::vector<int>& to) {
+  std::vector<uint64_t> pull(to.size(), 0);
+  std::map<int, size_t> jof;
+  for (size_t j = 0; j < to.size(); ++j) {
+    jof[to[j]] = j;
+  }
+  for (size_t n = 0; n < d.nets.size(); ++n) {
+    const auto& per = ends[n].per_region;
+    if (!per.contains(r)) {
+      continue;
+    }
+    for (const auto& [rr, _] : per) {
+      if (const auto j = jof.find(rr); j != jof.end()) {
+        pull[j->second] += 100 * uint64_t(d.nets[n].weight);
+      }
+    }
+  }
+  return pull;
+}
+// The four tile neighbours of t.
+std::vector<int> tile_neighbours(const Grid& g, int t) {
+  std::vector<int> out;
+  if (g.col(t) > 0) {
+    out.push_back(t - 1);
+  }
+  if (g.col(t) + 1 < g.cols) {
+    out.push_back(t + 1);
+  }
+  if (g.row(t) > 0) {
+    out.push_back(t - g.cols);
+  }
+  if (g.row(t) + 1 < g.rows) {
+    out.push_back(t + g.cols);
+  }
+  return out;
+}
+// The tile strip of region r next to region s, k tiles deep (breadth-first from s through r's tiles).
+std::vector<int> boundary_strip(const Grid& g, int r, int s, int k) {
+  std::vector<int> depth(g.size(), 0), frontier;
+  for (int t = 0; t < int(g.size()); ++t) {
+    if (g.region[t] == r && std::ranges::any_of(tile_neighbours(g, t), [&](int q) { return g.region[q] == s; })) {
+      depth[size_t(t)] = 1;
+      frontier.push_back(t);
+    }
+  }
+  for (int dpt = 1; dpt < k && !frontier.empty(); ++dpt) {
+    std::vector<int> next;
+    for (int t : frontier) {
+      for (int q : tile_neighbours(g, t)) {
+        if (g.region[q] == r && depth[size_t(q)] == 0) {
+          depth[size_t(q)] = dpt + 1;
+          next.push_back(q);
+        }
+      }
+    }
+    frontier = std::move(next);
+  }
+  std::vector<int> strip;
+  for (int t = 0; t < int(g.size()); ++t) {
+    if (depth[size_t(t)] > 0) {
+      strip.push_back(t);
+    }
+  }
+  return strip;
+}
+// Whether region r's tiles outside `strip` stay one connected piece (and there is one).
+bool connected_without(const Grid& g, int r, const std::vector<int>& strip) {
+  const std::set<int> gone(strip.begin(), strip.end());
+  std::vector<char>   seen(g.size(), 0);
+  int                 start = -1, left = 0;
+  for (int t = 0; t < int(g.size()); ++t) {
+    if (g.region[t] == r && !gone.contains(t)) {
+      ++left;
+      if (start < 0) {
+        start = t;
+      }
+    }
+  }
+  if (left == 0) {
+    return false;
+  }
+  std::vector<int> stack{start};
+  seen[size_t(start)] = 1;
+  int reached         = 0;
+  while (!stack.empty()) {
+    const int t = stack.back();
+    stack.pop_back();
+    ++reached;
+    for (int q : tile_neighbours(g, t)) {
+      if (g.region[q] == r && !gone.contains(q) && !seen[size_t(q)]) {
+        seen[size_t(q)] = 1;
+        stack.push_back(q);
+      }
+    }
+  }
+  return reached == left;
+}
+
 }  // namespace
 
-void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regions& regions, Routing& R, Legroute_report& rep) {
+void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& regions, Routing& R, Legroute_report& rep) {
   rep.spilled_regions = balance_regions(d, g, boxes);
   // per box: in-box demand per direction, approximate (refined from legroute.final's results later): taps of the
   // external pins and the internal nets that leave the box layer
@@ -3953,20 +4054,19 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
   std::vector<int>                     chosen(g.regions, 0);
   std::vector<Policy>                  P;
   Crossings                            x;
-  // spill rounds: the region adjacency and the free tiles per region, for pushing a failing region's boxes out
-  std::vector<std::set<int>> region_adj(size_t(g.regions));
-  std::vector<int>           region_free(size_t(g.regions), 0);
-  for (int t = 0; t < int(g.size()); ++t) {
-    region_free[size_t(g.region[t])] += !g.blocked[t];
-    for (int q : {g.col(t) + 1 < g.cols ? t + 1 : -1, t + g.cols < int(g.size()) ? t + g.cols : -1}) {
-      if (q >= 0 && g.region[t] != g.region[q]) {
-        region_adj[size_t(g.region[t])].insert(g.region[q]);
-        region_adj[size_t(g.region[q])].insert(g.region[t]);
+  std::vector<uint64_t> sig_prev(size_t(g.regions), 0);
+  std::vector<unsigned> region_extra(size_t(g.regions), 0);  // window_grow: extra window tiles of a region that failed
+  for (unsigned round = 0;; ++round) {
+    // spill rounds: the region adjacency (a boundary shift changes it)
+    std::vector<std::set<int>> region_adj(size_t(g.regions));
+    for (int t = 0; t < int(g.size()); ++t) {
+      for (int q : {g.col(t) + 1 < g.cols ? t + 1 : -1, t + g.cols < int(g.size()) ? t + g.cols : -1}) {
+        if (q >= 0 && g.region[t] != g.region[q]) {
+          region_adj[size_t(g.region[t])].insert(g.region[q]);
+          region_adj[size_t(g.region[q])].insert(g.region[t]);
+        }
       }
     }
-  }
-  std::vector<uint64_t> sig_prev(size_t(g.regions), 0);
-  for (unsigned round = 0;; ++round) {
     x = crossings(d, g, boxes, regions, cap_h, cap_v, true);
     P.assign(policies.size(), {});
     for (size_t p = 0; p < policies.size(); ++p) {  // the policy's pre-placement on its own copy
@@ -4013,6 +4113,7 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
       std::vector<uint64_t> sig(size_t(g.regions), 0x9e3779b97f4a7c15ull);
       const auto            mix = [](uint64_t& h, uint64_t v) { h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2); };
       for (int r = 0; r < g.regions; ++r) {
+        mix(sig[size_t(r)], region_extra[size_t(r)]);
         for (int b : region_boxes[size_t(r)]) {
           mix(sig[size_t(r)], uint64_t(b) * 3 + (boxes.boxes[size_t(b)].fixed ? 1 : 0));
           mix(sig[size_t(r)], uint64_t(boxes.boxes[size_t(b)].tile + 1));
@@ -4317,9 +4418,11 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
         out.status  = Sat_status::unknown;
         ++out.rep.sat_fail_fast_skipped;
       }
+      auto po = policies[p];
+      po.window_tiles += region_extra[size_t(r)];
       try {
         solve_region(d,
-                     policies[p],
+                     po,
                      g,
                      r,
                      region_boxes[r],
@@ -4462,29 +4565,117 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
     // region (spill_cut), each box onto the nearest free tile it fits in its new region; the boxes keep their cells,
     // the next round redoes the crossings and solves what changed. A failing neighbour receives too: the two sides
     // of a hot boundary fail together, and a box crossing it toward its nets takes its hops with it
+    // a box the policy pinned (critical, tree, IO pre-route) is fixed on the policy's copy of the boxes
+    const auto       is_fixed = [&](int b) { return P[0].boxes.boxes[size_t(b)].fixed || P[0].allowed.contains(b); };
     std::vector<int> boxes_in(size_t(g.regions), 0), fit_tiles(size_t(g.regions), 0);
-    for (const auto& bx : boxes.boxes) {
-      boxes_in[size_t(bx.region)] += !bx.fixed;
+    for (int b = 0; b < int(boxes.boxes.size()); ++b) {
+      boxes_in[size_t(boxes.boxes[size_t(b)].region)] += !is_fixed(b);
     }
     for (int t = 0; t < int(g.size()); ++t) {  // tiles a movable box can take: unblocked and not pinned by a fixed box
       fit_tiles[size_t(g.region[t])] += !g.blocked[t] && !P[0].pinned_tile[size_t(t)];
     }
     std::set<int> taken;  // tiles given to boxes this round
-    size_t        moved = 0;
+    size_t        moved = 0, grown = 0;
     for (int r : failed) {
+      // window_grow: freedom of movement first; the region spills once its windows are grown twice
+      if (d.opt.window_grow > 0 && region_extra[size_t(r)] < 2 * d.opt.window_grow) {
+        region_extra[size_t(r)] += d.opt.window_grow;
+        ++grown;
+        std::fprintf(stderr, "legroute sat: spill round %u: region %d widens its windows to %u tiles\n", round + 1, r,
+                     d.opt.window_tiles + region_extra[size_t(r)]);
+        continue;
+      }
       std::vector<int> cand;
       for (int b : region_boxes[size_t(r)]) {
-        if (!boxes.boxes[size_t(b)].fixed && !P[0].allowed.contains(b)) {
+        if (!is_fixed(b)) {
           cand.push_back(b);
         }
       }
       const size_t want
           = std::min(cand.size(), std::max<size_t>(1, size_t(std::ceil(d.opt.spill_fraction * double(region_boxes[size_t(r)].size())))));
+      if (d.opt.spill_shift) {  // the boundary moves: the strip next to the neighbour the nets reach most, boxes included
+        const std::vector<int> around(region_adj[size_t(r)].begin(), region_adj[size_t(r)].end());
+        const auto             pulls = spill_pulls(d, x.ends, r, around);
+        size_t                 best  = 0;
+        for (size_t j = 0; j < pulls.size(); ++j) {
+          if (pulls[j] > pulls[best]) {
+            best = j;
+          }
+        }
+        if (around.empty() || pulls[best] == 0) {
+          std::fprintf(stderr, "legroute sat: spill round %u: region %d has no neighbour its nets reach\n", round + 1, r);
+          continue;
+        }
+        const int        s2 = around[best];
+        std::vector<int> strip;
+        size_t           on_strip = 0;
+        int              deep     = 0;
+        for (int k = 1; k <= 4; ++k) {  // the smallest depth holding the wanted boxes; r keeps a connected quarter at least
+          const auto try_strip = boundary_strip(g, r, s2, k);
+          if (try_strip.size() * 4 > region_tiles[size_t(r)].size() * 3 || !connected_without(g, r, try_strip)) {
+            break;
+          }
+          const std::set<int> in_strip(try_strip.begin(), try_strip.end());
+          size_t              n = 0;
+          for (int b : region_boxes[size_t(r)]) {
+            n += in_strip.contains(boxes.boxes[size_t(b)].tile);
+          }
+          strip    = try_strip;
+          on_strip = n;
+          deep     = k;
+          if (n >= std::max<size_t>(1, want)) {
+            break;
+          }
+        }
+        if (strip.empty()) {
+          std::fprintf(stderr, "legroute sat: spill round %u: region %d cannot hand a strip to region %d (it would split or empty)\n",
+                       round + 1, r, s2);
+          continue;
+        }
+        const std::set<int> in_strip(strip.begin(), strip.end());
+        for (int t : strip) {
+          g.region[t] = s2;
+        }
+        for (int b : region_boxes[size_t(r)]) {
+          if (in_strip.contains(boxes.boxes[size_t(b)].tile)) {
+            boxes.boxes[size_t(b)].region = s2;
+          }
+        }
+        g.region_tiles.assign(size_t(g.regions), {});
+        for (int t = 0; t < int(g.size()); ++t) {
+          g.region_tiles[size_t(g.region[t])].push_back(t);
+        }
+        moved += on_strip + 1;  // the tiles moved even when no box did
+        rep.shifted_tiles += strip.size();
+        std::fprintf(stderr, "legroute sat: spill round %u: region %d hands %zu tiles (%d deep, %zu boxes) next to region %d to it\n",
+                     round + 1, r, strip.size(), deep, on_strip, s2);
+        continue;
+      }
+      if (cand.empty()) {
+        std::fprintf(stderr, "legroute sat: spill round %u: region %d has no movable box\n", round + 1, r);
+        continue;
+      }
       // a region's room: up to the fill that evens it with the failing region, and never past nine tenths of its
-      // tiles (the solver needs slack)
+      // tiles (the solver needs slack); its tiles counted as those a typical box leaving (the median width) fits (a
+      // tile a tap or an obstacle narrows takes no full box); the balance after the round catches the rest
+      std::vector<int> by_sites = cand;
+      std::ranges::sort(by_sites, [&](int a, int b) { return boxes.boxes[size_t(a)].sites < boxes.boxes[size_t(b)].sites; });
+      const int          typical = by_sites.empty() ? -1 : by_sites[by_sites.size() / 2];
+      std::map<int, int> fits_in;  // per region: tiles the typical box fits
+      const auto         fit_count = [&](int s2) {
+        auto it = fits_in.find(s2);
+        if (it == fits_in.end()) {
+          int n = 0;
+          for (int t : region_tiles[size_t(s2)]) {
+            n += !g.blocked[t] && !P[0].pinned_tile[size_t(t)] && (typical < 0 || box_fits(d, g, boxes.boxes[size_t(typical)], t));
+          }
+          it = fits_in.emplace(s2, n).first;
+        }
+        return it->second;
+      };
       const auto room_of = [&](int s2) {
-        const double fill = double(boxes_in[size_t(r)] + boxes_in[size_t(s2)]) / std::max(1, fit_tiles[size_t(r)] + fit_tiles[size_t(s2)]);
-        return int(std::floor(std::min(0.9, fill) * double(fit_tiles[size_t(s2)]))) - boxes_in[size_t(s2)];
+        const double fill = double(boxes_in[size_t(r)] + boxes_in[size_t(s2)]) / std::max(1, fit_tiles[size_t(r)] + fit_count(s2));
+        return int(std::floor(std::min(0.9, fill) * double(fit_count(s2)))) - boxes_in[size_t(s2)];
       };
       std::vector<Spill_target> to;
       int                       room_sum = 0;
@@ -4556,8 +4747,15 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
       std::fprintf(stderr, "legroute sat: spill round %u: region %d (%zu boxes, %zu wanted) pushes%s\n", round + 1, r,
                    region_boxes[size_t(r)].size(), want, where.c_str());
     }
-    if (moved == 0) {
+    rep.windows_grown += grown;
+    if (moved == 0 && grown == 0) {
       break;
+    }
+    // a receiver that cannot hold what it took (the room is an estimate): its extra boxes go to the nearest region
+    // with a fitting tile, as before the first round
+    if (const size_t bounced = moved && !d.opt.spill_shift ? balance_regions(d, g, boxes) : 0; bounced > 0) {
+      std::fprintf(stderr, "legroute sat: spill round %u: %zu boxes bounced to the nearest region with a fitting tile\n", round + 1,
+                   bounced);
     }
     ++rep.spill_rounds;
     rep.spilled_boxes += moved;

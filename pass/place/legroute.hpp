@@ -70,6 +70,15 @@ struct Legroute_options {
   // solve again; up to spill_rounds times. A pathological placement spreads out until it routes. 0: off
   unsigned    spill_rounds     = 0;
   double      spill_fraction   = .2;
+  // window_grow: in a spill round, a region without a routable answer first widens its boxes' windows by this many
+  // tiles (twice at most) and solves again before it spills: more freedom of movement where the routing is tight,
+  // bigger models only there. 0: off
+  unsigned    window_grow      = 0;
+  // spill_shift: a failing region moves its boundary instead of its boxes: the tile strip next to the neighbour its
+  // nets reach most (one to four tiles deep, enough to hold spill_fraction of its boxes, the region keeping a
+  // connected body) goes to that neighbour with the boxes on it, so the crossing nets' endpoints become the
+  // neighbour's without raising its fill
+  bool        spill_shift      = false;
   // the share of a tile's tracks, per direction, that the routes fixed ahead of the SAT (hops, IO pre-routes) may
   // take together; the rest stays for the region's own routes
   double      reserve_share    = .5;
@@ -180,6 +189,8 @@ struct Legroute_report {
                                 // beyond its tracks): unsat before any solving
   size_t  sat_waves = 0, sat_hops_free = 0, sat_hops_moved = 0;  // hop_choice: solve waves, hops left to a region's SAT, hops it moved
   size_t  spill_rounds = 0, spilled_boxes = 0;                    // spill: rounds run, boxes pushed out of failing regions
+  size_t  windows_grown = 0;                                       // window_grow: regions that widened their windows
+  size_t  shifted_tiles = 0;                                       // spill_shift: tiles handed to a neighbour
   size_t  sat_hops_over_share = 0;             // hops placed past hop_share (every boundary tile of their pair was at it)
   size_t  global_nets = 0, global_pieces = 0;  // legroute.global: nets joined by L traces, their pass-through pieces
   size_t  global_unrouted = 0, global_full_edges = 0;  // global_route: nets without a path, edges filled to the share

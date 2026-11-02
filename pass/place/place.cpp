@@ -699,7 +699,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.legroute) {
     const auto& l = o.legroute_options;
-    h = hash_text(std::format("legroute-v5:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{"
+    h = hash_text(std::format("legroute-v7:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{"
                               "}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                               l.box_fill,
                               l.box_net_max,
@@ -737,6 +737,8 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               l.hop_choice,
                               l.spill_rounds,
                               l.spill_fraction,
+                              l.window_grow,
+                              l.spill_shift,
                               l.global_margin,
                               l.hop_spread,
                               l.sat_seed,

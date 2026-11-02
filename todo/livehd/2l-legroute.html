@@ -615,9 +615,33 @@ pushes the other cells away, and the loop repeats; DREAMPlace's cell repulsion c
 for it: <code>legroute.probe.real</code> makes the probe the real legroute's twin (the real region mesh with
 bus-ordered virtual pins, refined at each round's placement, every region solved, the probe SAT limit), so the regions
 it inflates are the ones the real run would fail, and <code>legroute.probe.repulsion</code> multiplies the converged
-density weight for the GP resume after the inflation. Status: sha3 usyn CMOS at utilization 0.70 runs both ways (the
-min-cut spill rounds, and the real probe with three inflation rounds; the first probe round asked for 18% more core,
-so the generated core grew and placement restarted at utilization 0.59).</p>
+density weight for the GP resume after the inflation. Measured on sha3 usyn CMOS from utilization 0.70: the real
+probe (three rounds, 60 s per region) grew the core twice (0.70, 0.59, 0.56; the inflated cells needed 18% then 6%
+more core), its rounds went 10 of 25, 6 of 22 and 5 of 23 regions failing, and the real legroute at 0.56 ended 10 of
+12 (one region UNSAT in 2 s at fill 0.72, one out of time at fill 0.65): the loop converges slowly and the failures it
+leaves are boundary-driven, not fill-driven. The min-cut spill at 0.70 found the failing regions at 0.91 to 0.96
+fill next to neighbours at 0.75 to 0.87, so the even-fill room let round one move only 9, 23 and 24 boxes of the 60
+to 70 wanted, and a receiver's room must be counted in tiles that fit a full box (a tap or an obstacle narrows a tile):
+the room now uses the widest leaving box's fit, and the regions re-balance after each round.</p>
+<p><strong>The user's three directions (2026-11-01, late): repulsion, region boundaries that handle the constraints,
+and more freedom of movement for the congested cell-box areas.</strong> Repulsion runs through
+<code>probe.repulsion</code> (the pin refine works on a copy with the split nets and anchors and copies only cell
+positions back, so the inflation GP resume runs on the pinless design and the virtual pins cannot hold cells in their
+regions, as the user warned). Freedom of movement landed as <code>legroute.window_grow</code>: in a spill round a
+region without a routable answer first widens its boxes' windows by that many tiles (twice at most) and solves again
+before it spills, so the bigger models come only where the routing is tight. Boundaries: the ratio cut places them
+once; <code>legroute.spill_shift</code> now moves one after a failure: the failing region hands the tile strip next
+to the neighbour its nets reach most (one to four tiles deep, enough to hold spill_fraction of its boxes, the region
+keeping a connected body of at least a quarter of its tiles) to that neighbour with the boxes on it, so the crossing
+nets' endpoints become the neighbour's without raising its fill. Regions are tile sets below the mesh, so the grid's
+region map changes in place (sat_place takes a mutable grid), the crossings and hops follow, and a bus-order pin of a
+net that became internal stays as a waypoint one strip inside the receiver. Unit test
+<code>SpillShiftMovesTheBoundaryWithItsBoxes</code>: the region whose fixed cells draw 24 hops over a 22-track
+boundary hands 16 tiles (4 deep) to its neighbour and both solve. Why the box spill runs out: at utilization 0.70
+the min-cut spill evened sha3's regions to 0.83 to 0.85 fill within four rounds and then found no room anywhere (the
+chip is that full), and at 0.60 three regions (2, 6, 8) keep failing with the neighbours at 0.53 to 0.74 fill while the
+room, counted in tiles that fit a full box, is small; widening those regions' windows to 4 and 6 tiles did not solve
+them either. The box spill and the boundary shift are compared on the same 0.60 placement.</p>
 <p><strong>Region selection, the user's direction (2026-11-01):</strong> the rectangle mesh is a convenience; a region could
 be any contiguous set of 2&times;2 tiles, chosen by a systematic policy: a min-cut partitioner (VieCut) over the cell
 graph, density maps, bus cuts, or the capacity ratio above, so that a region's own traffic never crosses a side it

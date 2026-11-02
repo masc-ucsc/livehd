@@ -254,7 +254,7 @@ struct Routing {
 void             box_demand(const Design&, const Grid&, const Boxes&, Routing&);
 // L3: per region, boxes on tiles and connection shapes (straight or L) whose legs fit the tracks of every tile;
 // fills the trees and connections of R.
-void             sat_place(const Design&, const Grid&, Boxes&, const Legroute_regions&, Routing&, Legroute_report&);
+void             sat_place(const Design&, Grid&, Boxes&, const Legroute_regions&, Routing&, Legroute_report&);
 // the second SAT policy: the options with Legroute_options::sat_alt's overrides (std::invalid_argument on a bad one)
 Legroute_options sat_alt_options(const Legroute_options&);
 void             clock_spines(const Design&, const Grid&, const Boxes&, Routing&);       // L4

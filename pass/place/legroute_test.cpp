@@ -248,7 +248,7 @@ TEST(Legroute, TileGridCapacityStripesMacrosAndRegions) {
       {4000, 2000, 10000, 4000}
   };
   regions.rect_region = {0, 1, 0};  // region 0 is L-shaped
-  const auto g        = lr::build_grid(d, regions);
+  auto g        = lr::build_grid(d, regions);
   EXPECT_EQ(g.tile_w, 800);  // two flops wide
   EXPECT_EQ(g.tile_h, 500);  // two rows
   EXPECT_EQ(g.cols, 13);
@@ -287,7 +287,7 @@ TEST(Legroute, BoxesMergeConnectedNeighborsAndStopAtTheCostCap) {
   });
   Legroute_options opt;
   const auto       d     = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
-  const auto       g     = lr::build_grid(d, {});
+  auto       g     = lr::build_grid(d, {});
   const auto       boxes = lr::build_boxes(d, g);
   EXPECT_EQ(boxes.box_of[d.cell[a]], boxes.box_of[d.cell[b]]);
   EXPECT_NE(boxes.box_of[d.cell[a]], boxes.box_of[d.cell[far]]);  // 100+ tile widths away: above the cost cap
@@ -414,7 +414,7 @@ TEST(Legroute, SatPlacementFitsTheTracks) {
     opt.reserved_tracks   = reserved;
     opt.clock_spine       = false;
     const auto      d     = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
-    const auto      g     = lr::build_grid(d, {});
+    auto      g     = lr::build_grid(d, {});
     auto            boxes = lr::build_boxes(d, g);
     lr::Routing     R;
     Legroute_report rep;
@@ -482,7 +482,7 @@ TEST(Legroute, CutBoundIsUnsatBeforeSolving) {
   opt.clock_spine       = false;
   opt.merge_cost        = 2;  // a flop never joins its partner's box across the strip (cost 8); neighbors pack as usual
   const auto      d     = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
-  const auto      g     = lr::build_grid(d, {});
+  auto      g     = lr::build_grid(d, {});
   auto            boxes = lr::build_boxes(d, g);
   lr::Routing     R;
   Legroute_report rep;
@@ -519,7 +519,7 @@ TEST(Legroute, TwoRowCellsPlaceAsTileTallBoxes) {
   const auto d    = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
   ASSERT_EQ(d.movable.size(), 12u);
   EXPECT_EQ(std::count(d.tall.begin(), d.tall.end(), 1), 6);
-  const auto g = lr::build_grid(d, {});
+  auto g = lr::build_grid(d, {});
   EXPECT_EQ(g.tile_w, 800) << "two single-row flops wide, not the two-row cell";
   auto            boxes = lr::build_boxes(d, g);
   lr::Routing     R;
@@ -554,7 +554,7 @@ TEST(Legroute, HopChoiceSolvesInTwoWaves) {
   const auto       d = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
   Legroute_regions regions;
   regions.rects = {{0, 0, 10000, 2000}, {10000, 0, 20000, 2000}};
-  const auto      g     = lr::build_grid(d, regions);
+  auto      g     = lr::build_grid(d, regions);
   auto            boxes = lr::build_boxes(d, g);
   lr::Routing     R;
   Legroute_report rep;
@@ -597,7 +597,7 @@ TEST(Legroute, SpillRoundsPushAFailingRegionsBoxesOut) {
   const auto       d = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
   Legroute_regions regions;
   regions.rects = {{0, 0, 10000, 2000}, {10000, 0, 20000, 2000}};
-  const auto      g     = lr::build_grid(d, regions);
+  auto      g     = lr::build_grid(d, regions);
   auto            boxes = lr::build_boxes(d, g);
   lr::Routing     R;
   Legroute_report rep;
@@ -613,5 +613,51 @@ TEST(Legroute, SpillRoundsPushAFailingRegionsBoxesOut) {
     in_region.insert(g.region[size_t(b.tile)]);
   }
   EXPECT_EQ(in_region.size(), 2u) << "the right region took boxes";
+}
+
+// The same failure, mended by moving the boundary: the failing region hands the tile strip next to the neighbour its
+// nets reach to it, boxes included, so those nets' endpoints become the neighbour's without touching its fill.
+TEST(Legroute, SpillShiftMovesTheBoundaryWithItsBoxes) {
+  Fixture             f(400, 8);
+  std::vector<size_t> movable, fixed;
+  for (int col = 6; col < 12; ++col) {  // the left region's flops sit next to the boundary
+    for (int row = 0; row < 4; ++row) {
+      movable.push_back(f.cell("dff", 800 * col + 200, 500 * row));
+      fixed.push_back(f.cell("dff", 10400 + 1600 * (col - 6) + 200, 500 * row + 250));
+      f.fp.components[fixed.back()].place.status = ph::Status::FIXED;
+    }
+  }
+  for (size_t k = 0; k < movable.size(); ++k) {
+    f.net({
+        {movable[k], "Q"},
+        {  fixed[k], "D"}
+    });
+  }
+  Legroute_options opt;
+  opt.threads         = 1;
+  opt.clock_spine     = false;
+  opt.reserved_tracks = 7;
+  opt.spill_rounds    = 6;
+  opt.spill_fraction  = .2;
+  opt.spill_shift     = true;
+  const auto       d = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
+  Legroute_regions regions;
+  regions.rects = {{0, 0, 10000, 2000}, {10000, 0, 20000, 2000}};
+  auto            g     = lr::build_grid(d, regions);
+  auto            boxes = lr::build_boxes(d, g);
+  lr::Routing     R;
+  Legroute_report rep;
+  lr::sat_place(d, g, boxes, regions, R, rep);
+  EXPECT_EQ(rep.sat_regions, 2u);
+  EXPECT_GE(rep.spill_rounds, 1u);
+  EXPECT_GT(rep.shifted_tiles, 0u);
+  EXPECT_EQ(rep.sat_unsat_regions + rep.sat_unknown_regions, 0u);
+  EXPECT_GT(g.region_tiles[0].size(), 48u) << "the failing right region handed its strip to the left one";
+  EXPECT_EQ(g.region_tiles[0].size() + g.region_tiles[1].size(), 100u);
+  std::set<int> used;
+  for (const auto& b : boxes.boxes) {
+    EXPECT_TRUE(used.insert(b.tile).second) << "two boxes on tile " << b.tile;
+    EXPECT_EQ(g.region[size_t(b.tile)], b.region);
+  }
 }
 }  // namespace livehd::placement

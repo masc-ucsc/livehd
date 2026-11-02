@@ -485,6 +485,8 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_options.hop_choice       = static_cast<unsigned>(integer("place.legroute.hop_choice", "0"));
   out.legroute_options.spill_rounds     = static_cast<unsigned>(integer("place.legroute.spill_rounds", "0"));
   out.legroute_options.spill_fraction   = number("place.legroute.spill_fraction", "0.2");
+  out.legroute_options.window_grow      = static_cast<unsigned>(integer("place.legroute.window_grow", "0"));
+  out.legroute_options.spill_shift      = truthy(synth_set(opts, "place.legroute.spill_shift", "false"));
   out.legroute_options.global_margin    = integer("place.legroute.global_margin", "8");
   out.legroute_options.dump_regions     = synth_set(opts, "place.legroute.dump_regions", "");
   out.legroute_options.threads          = integer("place.legroute.threads", "0");
