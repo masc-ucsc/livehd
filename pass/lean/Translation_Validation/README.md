@@ -131,7 +131,7 @@ use the same one.
    cd formal/lean && lake exe cache get
    ```
 
-3. **The fourteen compiler modules, built by explicit name.** A default
+3. **The sixteen compiler modules, built by explicit name.** A default
    `lake build` does not cover them, so its success says nothing about them.
 
    ```sh
@@ -139,7 +139,7 @@ use the same one.
    ```
 
    Run it from outside the checkout, and keep `<out-dir>` outside the checkout
-   too. It prints `VALIDATED` when all 14 artifacts were rebuilt and an
+   too. It prints `VALIDATED` when all 16 artifacts were rebuilt and an
    explicit `--no-build` pass agrees. A manifest run refuses to start when
    one of them is missing.
 

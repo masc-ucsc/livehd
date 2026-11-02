@@ -71,6 +71,7 @@ emitting a weaker theorem.
 import LeanSemanticPrimitives.Compiler.CompileDesign
 import LeanSemanticPrimitives.Compiler.ReifyGen
 import LeanSemanticPrimitives.Compiler.Reify
+import LeanSemanticPrimitives.Compiler.SeqCompile
 
 open Lean Elab Command Meta
 
@@ -290,16 +291,19 @@ def elabProveReified : CommandElab := fun stx => do
     let corNm     := mkIdent (nm ++ `correct)
     elabCommand (← `(command|
       def $rNm : Compiler.ResidualProgram :=
-        match Compiler.compileDesign $d with
+        match Compiler.Seq.compileDesignL $d with
         | .ok R => R
         | .error _ => default))
     -- `rfl`, NOT `native_decide`: see the module header.  This is what keeps
     -- `ofReduceBool` out of every theorem below.
     elabCommand (← `(command|
-      theorem $okNm : Compiler.compilesOk $d = true := by rfl))
+      theorem $okNm : Compiler.compilesOk $d = true := by
+        -- two SEQUENTIAL walks of the node list, kernel only: the index-based
+        -- `compilesOk` is O(N^2) in the kernel (`Seq.compilesOk_eq_okL`)
+        rw [Compiler.Seq.compilesOk_eq_okL]; decide +kernel))
     elabCommand (← `(command|
       theorem $hRNm : Compiler.compileDesign $d = .ok $rNm :=
-        Compiler.compileDesign_ok_witness $d $okNm))
+        Compiler.Seq.compileDesignL_ok_witness $d ((Compiler.Seq.compilesOk_eq_okL $d).symm.trans $okNm)))
     -- Projections only.  Evaluating the maps is left to `simp`, which can do it
     -- on a literal array; the kernel cannot, because `Array.map` is well-founded.
     elabCommand (← `(command|
@@ -450,11 +454,14 @@ def emitDesignFacts (d : Ident) (base : Name) : CommandElabM Unit := do
   let partsNm := mkIdent (base ++ `parts)
   elabCommand (← `(command|
     def $rNm : Compiler.ResidualProgram :=
-      match Compiler.compileDesign $d with | .ok R => R | .error _ => default))
-  elabCommand (← `(command| theorem $okNm : Compiler.compilesOk $d = true := by rfl))
+      match Compiler.Seq.compileDesignL $d with | .ok R => R | .error _ => default))
+  elabCommand (← `(command| theorem $okNm : Compiler.compilesOk $d = true := by
+        -- two SEQUENTIAL walks of the node list, kernel only: the index-based
+        -- `compilesOk` is O(N^2) in the kernel (`Seq.compilesOk_eq_okL`)
+        rw [Compiler.Seq.compilesOk_eq_okL]; decide +kernel))
   elabCommand (← `(command|
     theorem $hRNm : Compiler.compileDesign $d = .ok $rNm :=
-      Compiler.compileDesign_ok_witness $d $okNm))
+      Compiler.Seq.compileDesignL_ok_witness $d ((Compiler.Seq.compilesOk_eq_okL $d).symm.trans $okNm)))
   -- The four projections come from the GENERIC `compileDesign_parts`,
   -- instantiated at `hR`, rather than from four `rfl`s. Each `rfl` made the
   -- KERNEL evaluate `compileDesign D` and force the whole residual, once per
@@ -735,9 +742,25 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
         rw [$cgNm:ident] at h
         exact (Except.ok.inj h).symm))
     markPhase "R_bindings_eq"
+    -- One step per chunk, by REWRITING (`Array.toList_push`), never by
+    -- evaluation: `rfl` on the whole `pre{nseg}.toList` rebuilt every push
+    -- chain in the kernel, O(N^2), and ran out of 20 GB on picorv32 (B12).
+    let preLNm : Nat → Ident := fun j => mkIdent (base ++ Name.mkSimple s!"preL{j}")
+    for j in [0 : nseg] do
+      elabCommand (← `(command|
+        theorem $(preLNm j) : ($(preNm (j+1))).toList = ($(preNm j)).toList ++ $(segNm j) := by
+          delta $(preNm (j+1)):ident $(segNm j):ident
+          simp only [Array.toList_push, List.append_assoc, List.cons_append, List.nil_append]))
+    let mut srules : Array (TSyntax `Lean.Parser.Tactic.rwRule) :=
+      #[← `(Lean.Parser.Tactic.rwRule| $rbNm:ident)]
+    for j' in [0 : nseg] do
+      let j := nseg - 1 - j'
+      srules := srules.push (← `(Lean.Parser.Tactic.rwRule| $(preLNm j):ident))
     elabCommand (← `(command|
       theorem $segsEq : ($rNm).bindings.toList = $appTerm := by
-        rw [$rbNm:ident]; rfl))
+        rw [$srules,*]
+        all_goals rw [show ($(preNm 0)).toList = [] from rfl, List.nil_append]
+        all_goals simp only [List.append_assoc]))
     markPhase "segs_eq"
     -- 3. compose the chunks into ONE environment equality
     let srcEnv ← liftTermElabM `(Compiler.sourceEnvArr ($d).sources $iId $stId)
@@ -995,13 +1018,16 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
     let rNm := mkIdent (base ++ `R)
     elabCommand (← `(command|
       def $rNm : Compiler.ResidualProgram :=
-        match Compiler.compileDesign $d with | .ok R => R | .error _ => default))
+        match Compiler.Seq.compileDesignL $d with | .ok R => R | .error _ => default))
     let okNm := mkIdent (base ++ `compilesOk)
-    elabCommand (← `(command| theorem $okNm : Compiler.compilesOk $d = true := by rfl))
+    elabCommand (← `(command| theorem $okNm : Compiler.compilesOk $d = true := by
+        -- two SEQUENTIAL walks of the node list, kernel only: the index-based
+        -- `compilesOk` is O(N^2) in the kernel (`Seq.compilesOk_eq_okL`)
+        rw [Compiler.Seq.compilesOk_eq_okL]; decide +kernel))
     let hRNm := mkIdent (base ++ `hR)
     elabCommand (← `(command|
       theorem $hRNm : Compiler.compileDesign $d = .ok $rNm :=
-        Compiler.compileDesign_ok_witness $d $okNm))
+        Compiler.Seq.compileDesignL_ok_witness $d ((Compiler.Seq.compilesOk_eq_okL $d).symm.trans $okNm)))
     let bindsLit ← liftTermElabM (ReifyProof.qBindings R.bindings)
     let bindsList ← liftTermElabM (ReifyProof.qBindingsList R.bindings)
     let bNm := mkIdent (base ++ `R_bindings)
