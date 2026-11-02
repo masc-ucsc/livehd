@@ -418,7 +418,7 @@ void write_legroute_report(const Legroute_report& r, const std::string& path) {
       R"({{"schema_version":2,"tile_um":[{},{}],"grid":[{},{}],"regions":{},"tiles_free":{},"cells":{},"boxes":{},)"
       R"("mean_cells_per_box":{:.3f},"max_cells_per_box":{},"fill":{:.3f},"internal_nets":{},"external_nets":{},)"
       R"("displacement_um":{:.1f},"max_displacement_um":{:.2f},"spilled_regions":{},"sat_regions":{},"sat_variables":{},)"
-      R"("sat_clauses":{},"sat_solves":{},"sat_relaxed_windows":{},"sat_unsat_regions":{},"sat_unknown_regions":{},"sat_cut_regions":{},"sat_waves":{},"sat_hops_free":{},"sat_hops_moved":{},"spill_rounds":{},"spilled_boxes":{},"windows_grown":{},"shifted_tiles":{},)"
+      R"("sat_clauses":{},"sat_solves":{},"sat_relaxed_windows":{},"sat_unsat_regions":{},"sat_unknown_regions":{},"sat_cut_regions":{},"sat_waves":{},"sat_hops_free":{},"sat_hops_moved":{},"spill_rounds":{},"spilled_boxes":{},"windows_grown":{},"shifted_tiles":{},"alt_tried":{},"alt_rescued":{},"alt_seconds":{:.1f},)"
       R"("sat_binding_tiles":{},"sat_unjoined_crossings":{},"sat_hops_over_share":{},"global_nets":{},"global_pieces":{},"global_unrouted":{},"global_full_edges":{},"global_seconds":{:.1f},"sat_adjacent_nets":{},"sat_relaxed_tiles":{},"sat_deficit_tracks":{},"crit_pinned":{},"crit_unpinned_regions":{},"crit_cost_before":{:.1f},"crit_cost_after":{:.1f},"tree_nets":{},"tree_boxes":{},"tree_skipped_nets":{},"tree_dropped_regions":{},"tree_tiles_over_half":{},"tree_um_before":{:.1f},"tree_um_after":{:.1f},"tree_max_load":{:.3f},"forced_trees_dropped":{},"forced_crit_unpinned":{},"tree_load_skipped":{},"tree_clauses_before":{},"tree_clauses_after":{},"io_feedthroughs":{},"io_boxes":{},"io_skipped":{},"io_lifted":{},"sat_alt_regions":{},"sat_both_regions":{},"sat_skipped_regions":{},"sat_fail_fast_skipped":{},"tier_kept":{},"tier_dropped":{},"tier_timeouts":{},"tier_solves":{},"tier_cost_before":{:.1f},"tier_cost_after":{:.1f},"tier_crit_before":{:.1f},"tier_crit_after":{:.1f},"lazy_rounds":{},"lazy_bounds":{},"lazy_skipped":{},"frozen_boxes":{},"sat_seeded":{},"unroutable_cells":{},)"
       R"("sat_seconds":{:.3f},"sat_seconds_max":{:.3f},)"
       R"("connections":{},"critical_connections":{},"unassigned_segments":{},)"
@@ -457,6 +457,9 @@ void write_legroute_report(const Legroute_report& r, const std::string& path) {
       r.spilled_boxes,
       r.windows_grown,
       r.shifted_tiles,
+      r.alt_tried,
+      r.alt_rescued,
+      r.alt_seconds,
       r.sat_binding_tiles,
       r.sat_unjoined_crossings,
       r.sat_hops_over_share,

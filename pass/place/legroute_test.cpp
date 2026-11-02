@@ -660,4 +660,46 @@ TEST(Legroute, SpillShiftMovesTheBoundaryWithItsBoxes) {
     EXPECT_EQ(g.region[size_t(b.tile)], b.region);
   }
 }
+
+// The failing region first tries alternative placements of its boxes (noise, anchors, the orthogonal drawing), solved
+// in parallel; whichever routes is adopted, else the spill goes on.
+TEST(Legroute, AlternativePlacementsRunBeforeTheSpill) {
+  Fixture             f(400, 8);
+  std::vector<size_t> movable, fixed;
+  for (int col = 0; col < 6; ++col) {
+    for (int row = 0; row < 4; ++row) {
+      movable.push_back(f.cell("dff", 800 * col + 200, 500 * row));
+      fixed.push_back(f.cell("dff", 10400 + 1600 * col + 200, 500 * row + 250));
+      f.fp.components[fixed.back()].place.status = ph::Status::FIXED;
+    }
+  }
+  for (size_t k = 0; k < movable.size(); ++k) {
+    f.net({
+        {movable[k], "Q"},
+        {  fixed[k], "D"}
+    });
+  }
+  Legroute_options opt;
+  opt.threads         = 1;
+  opt.clock_spine     = false;
+  opt.reserved_tracks = 7;
+  opt.spill_rounds    = 6;
+  opt.spill_fraction  = .2;
+  opt.alternatives    = "noise,anchor,tsm";
+  const auto       d = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
+  Legroute_regions regions;
+  regions.rects = {{0, 0, 10000, 2000}, {10000, 0, 20000, 2000}};
+  auto            g     = lr::build_grid(d, regions);
+  auto            boxes = lr::build_boxes(d, g);
+  lr::Routing     R;
+  Legroute_report rep;
+  lr::sat_place(d, g, boxes, regions, R, rep);
+  EXPECT_EQ(rep.sat_regions, 2u);
+  EXPECT_GE(rep.alt_tried, 3u) << "three kinds tried for the failing region";
+  EXPECT_EQ(rep.sat_unsat_regions + rep.sat_unknown_regions, 0u);
+  std::set<int> used;
+  for (const auto& b : boxes.boxes) {
+    EXPECT_TRUE(used.insert(b.tile).second) << "two boxes on tile " << b.tile;
+  }
+}
 }  // namespace livehd::placement

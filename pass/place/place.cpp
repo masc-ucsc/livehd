@@ -699,7 +699,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.legroute) {
     const auto& l = o.legroute_options;
-    h = hash_text(std::format("legroute-v7:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{"
+    h = hash_text(std::format("legroute-v9:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{"
                               "}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                               l.box_fill,
                               l.box_net_max,
@@ -739,6 +739,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               l.spill_fraction,
                               l.window_grow,
                               l.spill_shift,
+                              l.alternatives,
+                              l.alt_ms,
+                              l.region_pins,
                               l.global_margin,
                               l.hop_spread,
                               l.sat_seed,
@@ -758,9 +761,16 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               l.threads,
                               o.allow_increase_area),
                   h);
+    if (!o.region_seed_dir.empty()) {  // the virtual pins legroute takes from the region refinement
+      for (const char* name : {"/boundarypins/pins.tsv", "/region_mesh.json"}) {
+        std::ifstream file(o.region_seed_dir + name, std::ios::binary);
+        std::string   text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        h = hash_text("region-seed:" + text, h);
+      }
+    }
     if (o.legroute_probe.enabled) {
       const auto& q = o.legroute_probe;
-      h             = hash_text(std::format("legroute-probe:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+      h             = hash_text(std::format("legroute-probe:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                                             q.cells,
                                             q.sat_ms,
                                             q.iterations,
@@ -771,7 +781,8 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                                             q.tree_congestion,
                                             q.rounds,
                                             q.real,
-                                            q.repulsion),
+                                            q.repulsion,
+                                            q.shuffle),
                                 h);
     }
   }
@@ -6568,6 +6579,75 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       control.observer(physical, dp::PlacementStage::global_placement, control.max_iterations);
     }
   };
+  // The region refinement's mesh and bus-ordered virtual pins from an earlier placement call (options.region_seed_dir):
+  // a terminal stage without its own refinement gives them to legroute. Pins map to this stage's nets by driver.
+  struct Region_seed {
+    Region_mesh                        mesh;
+    std::vector<Legroute_boundary_pin> pins;
+  };
+  std::optional<Region_seed> region_seed;
+  bool                       region_seed_failed = false;
+  const auto                 load_region_seed   = [&]() -> const std::optional<Region_seed>& {
+    if (region_seed || region_seed_failed || options.region_seed_dir.empty()) {
+      return region_seed;
+    }
+    try {
+      std::ifstream       mesh_file(options.region_seed_dir + "/region_mesh.json");
+      std::string         text((std::istreambuf_iterator<char>(mesh_file)), std::istreambuf_iterator<char>());
+      rapidjson::Document doc;
+      doc.Parse(text.c_str());
+      if (doc.HasParseError() || !doc.IsObject() || !doc.HasMember("rectangles") || !doc["rectangles"].IsArray()) {
+        throw std::runtime_error("region_mesh.json unreadable");
+      }
+      std::vector<Region_rect> rects;
+      for (const auto& r : doc["rectangles"].GetArray()) {
+        const auto& b = r["bounds_dbu"];
+        rects.push_back({b[0].GetDouble(), b[1].GetDouble(), b[2].GetDouble(), b[3].GetDouble(), r["initial_cells"].GetUint()});
+      }
+      std::map<std::string, size_t> by_driver;  // the net index is the nets' iteration order (the refinement's too)
+      size_t                        index = 0;
+      for (const auto& [driver, sinks] : v.nets) {
+        by_driver.emplace(driver.instance == "PIN" ? driver.pin : driver.instance + "/" + driver.pin, index++);
+      }
+      std::ifstream pins_file(options.region_seed_dir + "/boundarypins/pins.tsv");
+      std::string   line;
+      Region_seed   seed{Region_mesh::from_rects(std::move(rects)), {}};
+      size_t        unmatched = 0;
+      std::getline(pins_file, line);  // the header
+      while (std::getline(pins_file, line)) {
+        std::vector<std::string> col;
+        for (size_t at = 0;;) {
+          const size_t tab = line.find('\t', at);
+          col.push_back(line.substr(at, tab == std::string::npos ? std::string::npos : tab - at));
+          if (tab == std::string::npos) {
+            break;
+          }
+          at = tab + 1;
+        }
+        if (col.size() < 8) {
+          continue;
+        }
+        const auto it = by_driver.find(col[7]);
+        if (it == by_driver.end()) {
+          ++unmatched;
+          continue;
+        }
+        seed.pins.push_back({it->second, std::stod(col[2]), std::stod(col[3])});
+      }
+      std::fprintf(stderr,
+                   "legroute: region seed from %s: %zu rectangles, %zu virtual pins (%zu without a net here)\n",
+                   options.region_seed_dir.c_str(),
+                   seed.mesh.rects.size(),
+                   seed.pins.size(),
+                   unmatched);
+      region_seed = std::move(seed);
+    } catch (const std::exception& e) {
+      std::fprintf(stderr, "legroute: region seed %s unusable (%s); the mesh is rebuilt without virtual pins\n",
+                   options.region_seed_dir.c_str(), e.what());
+      region_seed_failed = true;
+    }
+    return region_seed;
+  };
   std::optional<Terminal_legalize_report> terminal_report;
   std::optional<Legroute_report>          legroute_report;
   // legroute's routed signal wires by driver (instance, pin), with the connections and cells they were routed for:
@@ -8953,9 +9033,31 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     const auto run_legroute_probe = [&](dp::Design& design, unsigned round) {
       const auto&      po    = options.legroute_probe;
       const auto       start = std::chrono::steady_clock::now();
-      const bool       real  = po.real && refinement_active;
+      const bool       seeded = po.real && !refinement_active && load_region_seed().has_value();
+      const bool       real   = po.real && (refinement_active || seeded);
+      if (po.real && !real) {
+        std::fprintf(stderr,
+                     "legroute probe: probe.real asked but the boundary refinement is inactive here (boundary pins %d, full %d, "
+                     "fp_place %d, optimization pending %d, region_refine %d, stage final %d): small regions without pins\n",
+                     options.boundarypins.enabled,
+                     options.full,
+                     options.fp_place,
+                     options.optimization_pending,
+                     options.region_refine,
+                     options.completed_stage == Placement_stage::final);
+      }
       Legroute_regions regions;
-      if (real) {  // the real legroute's regions and bus-ordered virtual pins, refined at this round's placement
+      if (seeded) {  // the refinement's mesh and pins (fixed through the rounds)
+        const auto& seed = *load_region_seed();
+        if (seed.mesh.rects.size() > 1) {
+          for (const auto& r : seed.mesh.rects) {
+            regions.rects.push_back({r.xl, r.yl, r.xh, r.yh});
+          }
+          if (options.legroute_options.region_pins) {
+            regions.pins = seed.pins;
+          }
+        }
+      } else if (real) {  // the real legroute's regions and bus-ordered virtual pins, refined at this round's placement
         gp_density_weight = metrics.density_weight;
         refine_final_boundaries(design);
         if (final_regions && final_regions->rects.size() > 1) {
@@ -9051,6 +9153,74 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           guard = INFINITY;
         }
       }
+      // shuffle: a few cells of each unroutable region's densest patch (a 4x4 grid over the region) move to its
+      // sparsest patch and anchor there for the resume (their movement box shrinks to the cell): the noise the
+      // user asked for, since the SAT's limited movement wants a slightly different placement, and the anchors
+      // pull their nets toward the empty area. Timing-critical cells stay.
+      struct Anchor {
+        int                   node;
+        dp::PositionBox       box;
+      };
+      std::vector<Anchor> anchored;
+      std::set<int>       anchored_set;
+      if (po.shuffle > 0) {
+        std::map<int, std::vector<int>> cells_of;  // failing region -> its movable cells
+        for (size_t k = 0; k < probe.unroutable_components.size(); ++k) {
+          const size_t i = probe.unroutable_components[k];
+          const int    r = probe.unroutable_regions[k];
+          if (i < size_t(design.num_movable) && r >= 0 && size_t(r) < fill.size()) {
+            cells_of[r].push_back(int(i));
+          }
+        }
+        if (design.node_boxes.empty()) {
+          design.node_boxes.assign(design.node_x.size(), {design.layout.xl, design.layout.yl, design.layout.xh, design.layout.yh});
+        }
+        for (const auto& [r, cells] : cells_of) {
+          double xl = design.layout.xl, yl = design.layout.yl, xh = design.layout.xh, yh = design.layout.yh;
+          if (size_t(r) < regions.rects.size()) {
+            xl = regions.rects[size_t(r)].xl;
+            yl = regions.rects[size_t(r)].yl;
+            xh = regions.rects[size_t(r)].xh;
+            yh = regions.rects[size_t(r)].yh;
+          }
+          const int           nb = 4;
+          std::vector<double> bin_area(size_t(nb * nb), 0);
+          const auto          bin_of = [&](int i) {
+            const double cx = design.node_x[i] + design.node_size_x[i] / 2, cy = design.node_y[i] + design.node_size_y[i] / 2;
+            const int    bx = std::clamp(int((cx - xl) / std::max(1.0, xh - xl) * nb), 0, nb - 1);
+            const int    by = std::clamp(int((cy - yl) / std::max(1.0, yh - yl) * nb), 0, nb - 1);
+            return by * nb + bx;
+          };
+          for (int i : cells) {
+            bin_area[size_t(bin_of(i))] += design.node_size_x[i] * design.node_size_y[i];
+          }
+          const int densest  = int(std::max_element(bin_area.begin(), bin_area.end()) - bin_area.begin());
+          const int sparsest = int(std::min_element(bin_area.begin(), bin_area.end()) - bin_area.begin());
+          if (densest == sparsest || bin_area[size_t(densest)] <= 0) {
+            continue;
+          }
+          const double tx = xl + (sparsest % nb + .5) * (xh - xl) / nb, ty = yl + (sparsest / nb + .5) * (yh - yl) / nb;
+          unsigned     picked = 0;
+          for (int i : cells) {
+            if (picked >= po.shuffle) {
+              break;
+            }
+            if (bin_of(i) != densest || weight[i] >= guard || anchored_set.contains(i)) {
+              continue;
+            }
+            anchored.push_back({i, design.node_boxes[i]});
+            anchored_set.insert(i);
+            // the anchors spread along x inside the sparse patch, a cell width apart
+            const double x = std::clamp(tx + (double(picked) - double(po.shuffle - 1) / 2) * 2 * design.node_size_x[i] - design.node_size_x[i] / 2,
+                                        xl, xh - design.node_size_x[i]);
+            const double y = std::clamp(ty - design.node_size_y[i] / 2, yl, yh - design.node_size_y[i]);
+            design.node_x[i]     = x;
+            design.node_y[i]     = y;
+            design.node_boxes[i] = {x, y, x + design.node_size_x[i], y + design.node_size_y[i]};
+            ++picked;
+          }
+        }
+      }
       std::vector<double> grow(design.num_movable, 0);  // added width per movable cell
       double              cell_area = 0, added = 0;
       for (int i = 0; i < design.num_movable; ++i) {
@@ -9059,7 +9229,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       for (size_t k = 0; k < probe.unroutable_components.size(); ++k) {
         const size_t i = probe.unroutable_components[k];
         const int    r = probe.unroutable_regions[k];
-        if (i >= size_t(design.num_movable) || r < 0 || size_t(r) >= fill.size()) {
+        if (i >= size_t(design.num_movable) || r < 0 || size_t(r) >= fill.size() || anchored_set.contains(int(i))) {
           continue;
         }
         const double ratio = std::clamp(fill[r] / target, 1.0, po.max_inflate);
@@ -9115,7 +9285,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       const double hpwl_before = dp::hpwl(design);
       size_t       inflated    = 0;
       unsigned     iterations  = 0;
-      if (added > 0) {
+      if (added > 0 || !anchored.empty()) {
         // widen around the centre (pins keep their absolute positions), GP from the converged placement, narrow back
         const auto widen = [&](double sign) {
           for (int i = 0; i < design.num_movable; ++i) {
@@ -9169,6 +9339,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         const auto  placed = dp::place(design, ctl, &state);
         iterations         = unsigned(placed.iterations);
         widen(-1);
+        for (const auto& a : anchored) {  // the anchors move freely again
+          design.node_boxes[a.node] = a.box;
+        }
         design.validate();
       }
       const double          hpwl_after = dp::hpwl(design);
@@ -9179,9 +9352,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
       std::fprintf(stderr,
                    "legroute probe round %u%s: %zu regions (routable %zu, unsat %zu, no answer %zu, sparse %zu), %zu cells widened "
-                   "(+%.1f%% area), GP %u iterations, HPWL %.4g -> %.4g, %.1f s\n",
+                   "(+%.1f%% area), %zu shuffled, GP %u iterations, HPWL %.4g -> %.4g, %.1f s\n",
                    round,
-                   real ? " (real regions and pins)" : "",
+                   seeded ? " (the refinement's regions and pins)" : real ? " (real regions and pins)" : "",
                    probe.region_stats.size(),
                    count[0],
                    count[1],
@@ -9189,6 +9362,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                    count[3],
                    inflated,
                    cell_area > 0 ? 100 * added / cell_area : 0.0,
+                   anchored.size(),
                    iterations,
                    hpwl_before,
                    hpwl_after,
@@ -9212,7 +9386,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
             seconds)
                << '\n';
       }
-      return count[1] + count[2] == 0 || added <= 0;
+      return count[1] + count[2] == 0 || (added <= 0 && anchored.empty());
     };
     if (terminal_active && options.legroute && options.legroute_probe.enabled && !multirow_cells) {
       for (unsigned round = 0; round < std::max(1u, options.legroute_probe.rounds); ++round) {
@@ -9278,6 +9452,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         lopt.output_dir       = options.output_dir;
         lopt.fail_fast        = options.legroute_probe.strict;  // strict: any failure restarts or stops the run
         Legroute_regions regions;
+        if (!final_regions && !boundary_pins && load_region_seed()) {  // the refinement's mesh and virtual pins
+          final_regions = load_region_seed()->mesh;
+        }
         if (!final_regions) {  // a final stage without the boundary refinement: the same mesh, without virtual pins
           final_regions = Region_mesh::build(v.design, region_macros(), region_ios(), region_options_with_tracks(tech, options.region), tech.dbu);
         }
@@ -9291,6 +9468,15 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                 regions.pins.push_back({size_t(a.original_net), a.x, a.y});
               }
             }
+          } else if (region_seed && options.legroute_options.region_pins) {
+            for (const auto& pin : region_seed->pins) {
+              if (pin.net < frame.nets.size()) {
+                regions.pins.push_back(pin);
+              }
+            }
+          }
+          if (!options.legroute_options.region_pins) {
+            regions.pins.clear();
           }
         }
         const auto* profile  = legroute_power(frame, regions);

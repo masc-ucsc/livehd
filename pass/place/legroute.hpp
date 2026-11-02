@@ -79,6 +79,16 @@ struct Legroute_options {
   // connected body) goes to that neighbour with the boxes on it, so the crossing nets' endpoints become the
   // neighbour's without raising its fill
   bool        spill_shift      = false;
+  // alternatives: in a spill round, a region without a routable answer first tries alternative placements of its boxes,
+  // each solved in parallel with the round's fixed hops, the first routable one in this order adopted: "noise" (every
+  // box's home jittered by up to window_tiles tiles), "anchor" (a few boxes of the densest patch moved to the sparsest
+  // patch and held within a tile), "tsm" (an orthogonal drawing of the box graph reduced to four edges per node:
+  // connected boxes adjacent). Comma-separated; empty: off. alt_ms: SAT time per alternative (0: sat_ms)
+  std::string alternatives;
+  unsigned    alt_ms           = 0;
+  // region_pins: the bus-ordered virtual pins of the region refinement are fixed endpoints of the crossing nets;
+  // false keeps the refinement's mesh but lets every crossing hop be chosen (hop_choice) or chained instead
+  bool        region_pins      = true;
   // the share of a tile's tracks, per direction, that the routes fixed ahead of the SAT (hops, IO pre-routes) may
   // take together; the rest stays for the region's own routes
   double      reserve_share    = .5;
@@ -191,6 +201,8 @@ struct Legroute_report {
   size_t  spill_rounds = 0, spilled_boxes = 0;                    // spill: rounds run, boxes pushed out of failing regions
   size_t  windows_grown = 0;                                       // window_grow: regions that widened their windows
   size_t  shifted_tiles = 0;                                       // spill_shift: tiles handed to a neighbour
+  size_t  alt_tried = 0, alt_rescued = 0;                          // alternatives: candidates solved, regions rescued
+  double  alt_seconds = 0;
   size_t  sat_hops_over_share = 0;             // hops placed past hop_share (every boundary tile of their pair was at it)
   size_t  global_nets = 0, global_pieces = 0;  // legroute.global: nets joined by L traces, their pass-through pieces
   size_t  global_unrouted = 0, global_full_edges = 0;  // global_route: nets without a path, edges filled to the share

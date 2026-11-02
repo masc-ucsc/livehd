@@ -151,7 +151,8 @@ struct Box {
   double           ramp     = 0;    // max rank ramp of its nets
   bool             critical = false, clock = false, fixed = false;
   int              external = 0, internal = 0;
-  int              sites = 0;  // total cell width in sites
+  int              sites = 0;    // total cell width in sites
+  int              window = -1;  // alternatives: this box moves at most this many tiles from its home (-1: window_tiles)
 };
 struct Boxes {
   std::vector<Box> boxes;

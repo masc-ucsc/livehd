@@ -209,6 +209,10 @@ struct Options {
     // repulsion: the GP resume after the inflation runs at this multiple of the converged density weight (above one
     // the cells spread harder around the widened ones)
     double   repulsion = 1;
+    // shuffle: this many cells of each unroutable region move from its densest patch to its sparsest one and anchor
+    // there for the GP resume (a slightly different placement for the SAT's limited movement; the anchors pull their
+    // nets toward the empty area). 0: off
+    unsigned shuffle = 0;
     double   fill = 0.5, target = 0.6, max_inflate = 1.5;
     double   tree_congestion = 1;  // the real legroute's tree congestion weight once the probe ran
     // false (experiments): a legroute run with regions left without a routable answer keeps its placement (boxes on
@@ -278,6 +282,10 @@ struct Options {
   // pending only this call runs bus ordering / boundary pins / pin alignment, so they run once, on the
   // timing-driven result, instead of in every first-placement, timing-round and resize-trial call.
   bool                                                       region_refine = false;
+  // region_seed_dir: the region refinement's outputs (region_mesh.json, boundarypins/pins.tsv) of an earlier placement
+  // call; a terminal stage without its own refinement takes its mesh and bus-ordered virtual pins from there, so
+  // legroute (and the real probe) see the pins the refinement placed the cells toward
+  std::string                                                region_seed_dir;
   // Internal: this call is the dedicated SAT-legalization step (sat_align_placed), run after resize/repair and
   // immediately before final legalization. While optimization is pending only this call runs the SAT pass.
   bool                                                       region_sat    = false;

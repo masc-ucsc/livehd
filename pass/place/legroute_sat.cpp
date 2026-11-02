@@ -18,6 +18,7 @@
 #include <map>
 #include <numeric>
 #include <optional>
+#include <random>
 #include <set>
 #include <stdexcept>
 #include <thread>
@@ -1643,7 +1644,7 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
                   std::max(win[i].r1, g.row(t))};
       }
     }
-    for (int w = int(o.window_tiles); !box.fixed && al == allowed.end(); ++w) {
+    for (int w = box.window >= 0 ? box.window : int(o.window_tiles); !box.fixed && al == allowed.end(); ++w) {
       win[i]   = {std::max(c0, c - w), std::min(c1, c + w), std::max(r0, rr - w), std::min(r1, rr + w)};
       int fits = 0;
       for (int t : T) {
@@ -3965,6 +3966,271 @@ bool connected_without(const Grid& g, int r, const std::vector<int>& strip) {
   return reached == left;
 }
 
+// ---------------------------------------------------------------- alternative placements of a failing region
+// A candidate: new homes (and windows) for the region's movable boxes.
+struct Alt_home {
+  int    box;
+  double cx, cy;
+  int    window;  // -1: the default
+};
+struct Alternative {
+  std::string           kind;
+  std::vector<Alt_home> homes;
+};
+// noise: every movable box's home moves by a uniform random offset of up to `reach` tiles, inside the region's bounds.
+Alternative alt_noise(const Grid& g, const Boxes& boxes, const std::vector<int>& movable, const std::vector<int>& tiles, int reach,
+                      unsigned seed) {
+  Alternative out{"noise", {}};
+  int         c0 = g.cols, c1 = -1, r0 = g.rows, r1 = -1;
+  for (int t : tiles) {
+    c0 = std::min(c0, g.col(t));
+    c1 = std::max(c1, g.col(t));
+    r0 = std::min(r0, g.row(t));
+    r1 = std::max(r1, g.row(t));
+  }
+  std::mt19937                           rng(seed);
+  std::uniform_real_distribution<double> u(-double(reach), double(reach));
+  for (int b : movable) {
+    const auto&  bx = boxes.boxes[size_t(b)];
+    const double cx = std::clamp(bx.cx + u(rng) * double(g.tile_w), double(g.cx(c0)), double(g.cx(c1)));
+    const double cy = std::clamp(bx.cy + u(rng) * double(g.tile_h), double(g.cy(r0)), double(g.cy(r1)));
+    out.homes.push_back({b, cx, cy, -1});
+  }
+  return out;
+}
+// anchor: a few boxes of the region's densest 4x4 patch (non-critical first) move to the centre of its sparsest patch
+// and keep a one-tile window there.
+Alternative alt_anchor(const Grid& g, const Boxes& boxes, const std::vector<int>& movable, const std::vector<int>& tiles) {
+  Alternative out{"anchor", {}};
+  int         c0 = g.cols, c1 = -1, r0 = g.rows, r1 = -1;
+  for (int t : tiles) {
+    c0 = std::min(c0, g.col(t));
+    c1 = std::max(c1, g.col(t));
+    r0 = std::min(r0, g.row(t));
+    r1 = std::max(r1, g.row(t));
+  }
+  const int  nb     = 4;
+  const auto bin_of = [&](double cx, double cy) {
+    const int bx = std::clamp(int((cx - g.cx(c0)) / std::max(1.0, double(g.cx(c1) - g.cx(c0))) * nb), 0, nb - 1);
+    const int by = std::clamp(int((cy - g.cy(r0)) / std::max(1.0, double(g.cy(r1) - g.cy(r0))) * nb), 0, nb - 1);
+    return by * nb + bx;
+  };
+  std::vector<int> count(size_t(nb * nb), 0), free_tiles(size_t(nb * nb), 0);
+  for (int b : movable) {
+    ++count[size_t(bin_of(boxes.boxes[size_t(b)].cx, boxes.boxes[size_t(b)].cy))];
+  }
+  for (int t : tiles) {
+    free_tiles[size_t(bin_of(double(g.cx(g.col(t))), double(g.cy(g.row(t)))))] += !g.blocked[t];
+  }
+  int densest = 0, sparsest = 0;
+  for (int k = 0; k < nb * nb; ++k) {  // fill = boxes over free tiles
+    const auto fill = [&](int q) { return free_tiles[size_t(q)] ? double(count[size_t(q)]) / double(free_tiles[size_t(q)]) : 2.0; };
+    if (fill(k) > fill(densest)) {
+      densest = k;
+    }
+    if (free_tiles[size_t(k)] > 0 && fill(k) < fill(sparsest)) {
+      sparsest = k;
+    }
+  }
+  if (densest == sparsest || count[size_t(densest)] == 0) {
+    return out;
+  }
+  const double tx = double(g.cx(c0)) + (sparsest % nb + .5) * double(g.cx(c1) - g.cx(c0)) / nb;
+  const double ty = double(g.cy(r0)) + (sparsest / nb + .5) * double(g.cy(r1) - g.cy(r0)) / nb;
+  const size_t want = std::max<size_t>(3, (movable.size() + 19) / 20);
+  std::vector<int> pick;
+  for (int pass = 0; pass < 2 && pick.size() < want; ++pass) {  // non-critical boxes first
+    for (int b : movable) {
+      const auto& bx = boxes.boxes[size_t(b)];
+      if (pick.size() < want && bin_of(bx.cx, bx.cy) == densest && (pass == 1 || !bx.critical)
+          && std::ranges::find(pick, b) == pick.end()) {
+        pick.push_back(b);
+      }
+    }
+  }
+  for (size_t k = 0; k < pick.size(); ++k) {  // spread along x, a tile apart
+    const double cx = std::clamp(tx + (double(k) - double(pick.size() - 1) / 2) * double(g.tile_w), double(g.cx(c0)), double(g.cx(c1)));
+    out.homes.push_back({pick[k], cx, ty, 1});
+  }
+  return out;
+}
+// tsm: the region's box graph (a star per net) loses edges, highest degree first and never those of nets with an
+// endpoint outside the region's movable boxes, until every node has four or fewer; the reduced graph is drawn
+// breadth first from its highest-degree node, each box on the free tile nearest the centroid of its placed
+// neighbours (ports north, east, south and west: connected boxes adjacent), and the drawing is the new homes.
+Alternative alt_tsm(const Design& d, const Grid& g, const Boxes& boxes, const std::vector<Net_ends>& ends, const std::vector<int>& movable,
+                    const std::vector<int>& tiles, int r, const std::vector<char>& pinned_tile) {
+  Alternative            out{"tsm", {}};
+  const size_t           B = movable.size();
+  std::vector<int>       node_of(boxes.boxes.size(), -1);
+  for (size_t i = 0; i < B; ++i) {
+    node_of[size_t(movable[i])] = int(i);
+  }
+  struct Edge {
+    int  a, b;
+    bool kept = true, held = false;  // held: the net has an endpoint past the movable boxes (a fixed pin, a hop, another region)
+  };
+  std::vector<Edge> edges;
+  for (size_t n = 0; n < d.nets.size(); ++n) {
+    const auto& per = ends[n].per_region;
+    const auto  it  = per.find(r);
+    if (it == per.end()) {
+      continue;
+    }
+    std::vector<int> mine;
+    bool             held = per.size() > 1;
+    for (const auto& e : it->second) {
+      if (e.box >= 0 && node_of[size_t(e.box)] >= 0) {
+        mine.push_back(node_of[size_t(e.box)]);
+      } else {
+        held = true;
+      }
+    }
+    std::ranges::sort(mine);
+    mine.erase(std::unique(mine.begin(), mine.end()), mine.end());
+    for (size_t q = 1; q < mine.size(); ++q) {
+      edges.push_back({mine[0], mine[q], true, held});
+    }
+  }
+  std::vector<std::vector<int>> adj(B);  // edge ids
+  std::vector<int>              degree(B, 0);
+  for (size_t e = 0; e < edges.size(); ++e) {
+    adj[size_t(edges[e].a)].push_back(int(e));
+    adj[size_t(edges[e].b)].push_back(int(e));
+    ++degree[size_t(edges[e].a)];
+    ++degree[size_t(edges[e].b)];
+  }
+  for (bool again = true; again;) {  // reduce: the highest-degree node drops its free edge to its busiest neighbour
+    again   = false;
+    int top = -1;
+    for (size_t i = 0; i < B; ++i) {
+      if (degree[i] > 4 && (top < 0 || degree[i] > degree[size_t(top)])) {
+        top = int(i);
+      }
+    }
+    if (top < 0) {
+      break;
+    }
+    int drop = -1;
+    for (int e : adj[size_t(top)]) {
+      if (!edges[size_t(e)].kept || edges[size_t(e)].held) {
+        continue;
+      }
+      const int other = edges[size_t(e)].a == top ? edges[size_t(e)].b : edges[size_t(e)].a;
+      if (drop < 0 || degree[size_t(other)] > degree[size_t(edges[size_t(drop)].a == top ? edges[size_t(drop)].b : edges[size_t(drop)].a)]) {
+        drop = e;
+      }
+    }
+    if (drop < 0) {  // every edge held: this node keeps its degree, the others go on
+      degree[size_t(top)] = -degree[size_t(top)];  // marked done
+      again               = true;
+      continue;
+    }
+    edges[size_t(drop)].kept = false;
+    --degree[size_t(edges[size_t(drop)].a)];
+    --degree[size_t(edges[size_t(drop)].b)];
+    again = true;
+  }
+  for (auto& dg : degree) {
+    dg = std::abs(dg);
+  }
+  // the drawing: breadth first from the busiest node
+  std::vector<int> free;
+  for (int t : tiles) {
+    if (!g.blocked[t] && !pinned_tile[size_t(t)]) {
+      free.push_back(t);
+    }
+  }
+  if (free.empty() || B == 0) {
+    return out;
+  }
+  std::vector<char>   placed(B, 0), taken(g.size(), 0);
+  std::vector<double> px(B, 0), py(B, 0);
+  std::vector<int>    order;
+  std::vector<int>    queue;
+  std::vector<char>   seen(B, 0);
+  while (order.size() < B) {  // one component after another, busiest node first
+    int root = -1;
+    for (size_t i = 0; i < B; ++i) {
+      if (!seen[i] && (root < 0 || degree[i] > degree[size_t(root)])) {
+        root = int(i);
+      }
+    }
+    queue.assign(1, root);
+    seen[size_t(root)] = 1;
+    for (size_t q = 0; q < queue.size(); ++q) {
+      const int i = queue[q];
+      order.push_back(i);
+      std::vector<int> next;
+      for (int e : adj[size_t(i)]) {
+        if (!edges[size_t(e)].kept) {
+          continue;
+        }
+        const int other = edges[size_t(e)].a == i ? edges[size_t(e)].b : edges[size_t(e)].a;
+        if (!seen[size_t(other)]) {
+          seen[size_t(other)] = 1;
+          next.push_back(other);
+        }
+      }
+      std::ranges::sort(next, [&](int x, int y) { return degree[size_t(x)] > degree[size_t(y)]; });
+      queue.insert(queue.end(), next.begin(), next.end());
+    }
+  }
+  double rcx = 0, rcy = 0;  // the region's centre
+  for (int t : tiles) {
+    rcx += double(g.cx(g.col(t)));
+    rcy += double(g.cy(g.row(t)));
+  }
+  rcx /= double(tiles.size());
+  rcy /= double(tiles.size());
+  for (int i : order) {
+    double tx = 0, ty = 0;
+    int    n = 0;
+    for (int e : adj[size_t(i)]) {
+      if (!edges[size_t(e)].kept) {
+        continue;
+      }
+      const int other = edges[size_t(e)].a == i ? edges[size_t(e)].b : edges[size_t(e)].a;
+      if (placed[size_t(other)]) {
+        tx += px[size_t(other)];
+        ty += py[size_t(other)];
+        ++n;
+      }
+    }
+    if (n == 0) {  // a root: its own home, pulled to the region's centre
+      tx = (boxes.boxes[size_t(movable[size_t(i)])].cx + rcx) / 2;
+      ty = (boxes.boxes[size_t(movable[size_t(i)])].cy + rcy) / 2;
+    } else {
+      tx /= n;
+      ty /= n;
+    }
+    const auto& bx     = boxes.boxes[size_t(movable[size_t(i)])];
+    int         best_t = -1;
+    double      best_d = INFINITY;
+    for (int t : free) {
+      if (taken[size_t(t)]) {
+        continue;
+      }
+      const double dd = std::abs(double(g.cx(g.col(t))) - tx) + std::abs(double(g.cy(g.row(t))) - ty);
+      if (dd < best_d && box_fits(d, g, bx, t)) {
+        best_d = dd;
+        best_t = t;
+      }
+    }
+    if (best_t < 0) {
+      px[size_t(i)] = bx.cx;
+      py[size_t(i)] = bx.cy;
+    } else {
+      taken[size_t(best_t)] = 1;
+      px[size_t(i)]         = double(g.cx(g.col(best_t)));
+      py[size_t(i)]         = double(g.cy(g.row(best_t)));
+      out.homes.push_back({movable[size_t(i)], px[size_t(i)], py[size_t(i)], -1});
+    }
+    placed[size_t(i)] = 1;
+  }
+  return out;
+}
+
 }  // namespace
 
 void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& regions, Routing& R, Legroute_report& rep) {
@@ -4056,6 +4322,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
   Crossings                            x;
   std::vector<uint64_t> sig_prev(size_t(g.regions), 0);
   std::vector<unsigned> region_extra(size_t(g.regions), 0);  // window_grow: extra window tiles of a region that failed
+  std::vector<int>      gave_to(size_t(g.regions), -1);      // spill_shift: the region each region last handed a strip to
   for (unsigned round = 0;; ++round) {
     // spill rounds: the region adjacency (a boundary shift changes it)
     std::vector<std::set<int>> region_adj(size_t(g.regions));
@@ -4146,9 +4413,10 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
       sig_prev = sig;
     }
     std::fprintf(stderr,
-                 "legroute sat: %d regions, %zu boxes, %zu hops (%zu over the share, %zu unjoined), %zu global pieces; solving %zu "
-                 "at a time\n",
+                 "legroute sat: %d regions, %zu virtual pins, %zu boxes, %zu hops (%zu over the share, %zu unjoined), %zu global "
+                 "pieces; solving %zu at a time\n",
                  g.regions,
+                 regions.pins.size(),
                  boxes.boxes.size(),
                  x.hops.size(),
                  x.over_share,
@@ -4576,7 +4844,90 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
     }
     std::set<int> taken;  // tiles given to boxes this round
     size_t        moved = 0, grown = 0;
+    std::vector<std::string> kinds;  // alternatives, in priority order
+    for (size_t at = 0; at < d.opt.alternatives.size();) {
+      const size_t comma = d.opt.alternatives.find(',', at);
+      const auto   kind  = d.opt.alternatives.substr(at, comma == std::string::npos ? std::string::npos : comma - at);
+      if (kind != "noise" && kind != "anchor" && kind != "tsm") {
+        throw std::invalid_argument("legroute: unknown alternative placement '" + kind + "' (noise, anchor, tsm)");
+      }
+      kinds.push_back(kind);
+      at = comma == std::string::npos ? d.opt.alternatives.size() : comma + 1;
+    }
     for (int r : failed) {
+      if (!kinds.empty()) {  // alternative placements of the region's boxes, solved in parallel with the round's hops fixed
+        std::vector<int> movable;
+        for (int b : region_boxes[size_t(r)]) {
+          if (!P[0].boxes.boxes[size_t(b)].fixed && !P[0].allowed.contains(b)) {
+            movable.push_back(b);
+          }
+        }
+        std::vector<Alternative> cands;
+        for (const auto& kind : kinds) {
+          if (kind == "noise") {
+            cands.push_back(alt_noise(g, boxes, movable, region_tiles[size_t(r)], int(d.opt.window_tiles), 1234u + round * 131u + unsigned(r)));
+          } else if (kind == "anchor") {
+            cands.push_back(alt_anchor(g, boxes, movable, region_tiles[size_t(r)]));
+          } else {
+            cands.push_back(alt_tsm(d, g, boxes, x.ends, movable, region_tiles[size_t(r)], r, P[0].pinned_tile));
+          }
+        }
+        std::erase_if(cands, [](const Alternative& a) { return a.homes.empty(); });
+        std::vector<Region_out>              outs(cands.size());
+        std::vector<std::thread>             pool;
+        const std::vector<std::vector<int>>  no_free_hops(hop_tiles.size());
+        const auto                           t0 = Clock::now();
+        for (size_t c = 0; c < cands.size(); ++c) {
+          pool.emplace_back([&, c] {
+            Boxes bx = P[0].boxes;
+            for (const auto& h : cands[c].homes) {
+              bx.boxes[size_t(h.box)].cx     = h.cx;
+              bx.boxes[size_t(h.box)].cy     = h.cy;
+              bx.boxes[size_t(h.box)].window = h.window;
+            }
+            auto po = policies[0];
+            po.window_tiles += region_extra[size_t(r)];
+            if (d.opt.alt_ms > 0) {
+              po.sat_ms = d.opt.alt_ms;
+            }
+            try {
+              solve_region(d, po, g, r, region_boxes[size_t(r)], region_tiles[size_t(r)], bx, x.ends, P[0].treed, P[0].allowed, P[0].pinned_tile,
+                           " alternative " + cands[c].kind, cap_h0, cap_v0, P[0].reserve, no_free_hops, hop_room, outs[c]);
+            } catch (const Legroute_unfit&) {
+              outs[c].status = Sat_status::unsatisfiable;
+            }
+          });
+        }
+        for (auto& th : pool) {
+          th.join();
+        }
+        rep.alt_tried += cands.size();
+        rep.alt_seconds += seconds_since(t0);
+        std::string line;
+        int         winner = -1;
+        for (size_t c = 0; c < cands.size(); ++c) {
+          const auto st = outs[c].status == Sat_status::satisfiable ? "sat" : outs[c].status == Sat_status::unsatisfiable ? "unsat" : "unknown";
+          line += std::format(" {} {} {:.1f} s", cands[c].kind, st, outs[c].seconds);
+          if (winner < 0 && outs[c].status == Sat_status::satisfiable) {
+            winner = int(c);
+          }
+        }
+        std::fprintf(stderr, "legroute sat: spill round %u: region %d alternatives:%s%s\n", round + 1, r, line.c_str(),
+                     winner >= 0 ? std::format(" -> {} adopted", cands[size_t(winner)].kind).c_str() : " -> none routed");
+        if (winner >= 0) {  // the candidate's homes and answer stand; no spill for this region
+          for (const auto& h : cands[size_t(winner)].homes) {
+            for (Boxes* set : {&boxes, &P[0].boxes}) {
+              set->boxes[size_t(h.box)].cx     = h.cx;
+              set->boxes[size_t(h.box)].cy     = h.cy;
+              set->boxes[size_t(h.box)].window = h.window;
+            }
+          }
+          last[0][size_t(r)] = std::move(outs[size_t(winner)]);
+          ++rep.alt_rescued;
+          ++grown;  // the round changed something: it goes on
+          continue;
+        }
+      }
       // window_grow: freedom of movement first; the region spills once its windows are grown twice
       if (d.opt.window_grow > 0 && region_extra[size_t(r)] < 2 * d.opt.window_grow) {
         region_extra[size_t(r)] += d.opt.window_grow;
@@ -4594,9 +4945,14 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
       const size_t want
           = std::min(cand.size(), std::max<size_t>(1, size_t(std::ceil(d.opt.spill_fraction * double(region_boxes[size_t(r)].size())))));
       if (d.opt.spill_shift) {  // the boundary moves: the strip next to the neighbour the nets reach most, boxes included
-        const std::vector<int> around(region_adj[size_t(r)].begin(), region_adj[size_t(r)].end());
-        const auto             pulls = spill_pulls(d, x.ends, r, around);
-        size_t                 best  = 0;
+        std::vector<int> around;  // never straight back to a region that just handed r a strip (no ping-pong)
+        for (int s2 : region_adj[size_t(r)]) {
+          if (gave_to[size_t(s2)] != r) {
+            around.push_back(s2);
+          }
+        }
+        const auto pulls = spill_pulls(d, x.ends, r, around);
+        size_t     best  = 0;
         for (size_t j = 0; j < pulls.size(); ++j) {
           if (pulls[j] > pulls[best]) {
             best = j;
@@ -4617,8 +4973,8 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
           }
           const std::set<int> in_strip(try_strip.begin(), try_strip.end());
           size_t              n = 0;
-          for (int b : region_boxes[size_t(r)]) {
-            n += in_strip.contains(boxes.boxes[size_t(b)].tile);
+          for (int b : region_boxes[size_t(r)]) {  // a box's tile is set by the answer: its home is its centroid's tile
+            n += in_strip.contains(g.tile_of(boxes.boxes[size_t(b)].cx, boxes.boxes[size_t(b)].cy));
           }
           strip    = try_strip;
           on_strip = n;
@@ -4637,7 +4993,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
           g.region[t] = s2;
         }
         for (int b : region_boxes[size_t(r)]) {
-          if (in_strip.contains(boxes.boxes[size_t(b)].tile)) {
+          if (in_strip.contains(g.tile_of(boxes.boxes[size_t(b)].cx, boxes.boxes[size_t(b)].cy))) {
             boxes.boxes[size_t(b)].region = s2;
           }
         }
@@ -4646,6 +5002,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
           g.region_tiles[size_t(g.region[t])].push_back(t);
         }
         moved += on_strip + 1;  // the tiles moved even when no box did
+        gave_to[size_t(r)] = s2;
         rep.shifted_tiles += strip.size();
         std::fprintf(stderr, "legroute sat: spill round %u: region %d hands %zu tiles (%d deep, %zu boxes) next to region %d to it\n",
                      round + 1, r, strip.size(), deep, on_strip, s2);

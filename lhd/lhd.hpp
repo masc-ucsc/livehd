@@ -1464,6 +1464,18 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::boolean,
      "legroute: a spill round moves a failing region's boundary instead of its boxes: the tile strip next to the "
      "neighbour its nets reach most goes to that neighbour with the boxes on it"},
+    {"place.legroute.alternatives",
+     "",
+     Synth_set_option::Kind::file,
+     "legroute: in a spill round a failing region first tries alternative placements of its boxes, solved in parallel, "
+     "the first routable one in this order adopted: a comma-separated list of noise (homes jittered), anchor (a few "
+     "boxes of the densest patch held in the sparsest one), tsm (an orthogonal drawing of the degree-4 box graph)"},
+    {"place.legroute.alt_ms", "0", Synth_set_option::Kind::integer, "legroute: SAT time per alternative placement (ms; 0: sat_ms)"},
+    {"place.legroute.region_pins",
+     "true",
+     Synth_set_option::Kind::boolean,
+     "legroute: the region refinement's bus-ordered virtual pins are fixed endpoints of the crossing nets; false keeps "
+     "its mesh but lets every crossing hop be chosen or chained"},
     {"place.legroute.global_own_share",
      "0",
      Synth_set_option::Kind::file,
@@ -1558,6 +1570,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "1",
      Synth_set_option::Kind::file,
      "with legroute.probe: the GP resume after the inflation runs at this multiple of the converged density weight"},
+    {"place.legroute.probe.shuffle",
+     "0",
+     Synth_set_option::Kind::integer,
+     "with legroute.probe: this many cells of each unroutable region move from its densest patch to its sparsest one "
+     "and anchor there for the GP resume (0: off)"},
     {"place.legroute.io_preroute",
      "false",
      Synth_set_option::Kind::boolean,

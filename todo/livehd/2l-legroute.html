@@ -642,6 +642,68 @@ the min-cut spill evened sha3's regions to 0.83 to 0.85 fill within four rounds 
 chip is that full), and at 0.60 three regions (2, 6, 8) keep failing with the neighbours at 0.53 to 0.74 fill while the
 room, counted in tiles that fit a full box, is small; widening those regions' windows to 4 and 6 tiles did not solve
 them either. The box spill and the boundary shift are compared on the same 0.60 placement.</p>
+<h2>Alternative placements for a failing region (plan, 2026-11-01)</h2>
+<p><strong>Found while measuring (2026-11-01, late): the final legroute runs without bus-order virtual pins.</strong>
+The kernel runs the region refinement (bus order, boundary pins, pin alignment) as its own placement call
+(<code>refine_regions</code>: optimization pending, region_refine) and the terminal placement that runs legroute is a
+later call where <code>boundarypins.enabled</code> is off, so <code>refine_final_boundaries</code> never runs there,
+<code>boundary_pins</code> is empty and legroute's <code>regions.pins</code> is empty ("2 regions, 0 virtual pins" on
+lfsr with busorder on; the sha3 runs show the same path). Bus order therefore shapes the placement (cells settle toward
+ordered pins during the refinement) but legroute's crossings are plain hops chained through the regions, and
+<code>probe.real</code> fell back to the small pinless probe in every run so far (the "real probe" results above are
+really the old probe with the real-run budget). Fix, before any pin-dependent conclusion: carry the refinement's mesh
+and pins to the terminal stage (the refinement writes <code>regions/region_mesh.json</code> and
+<code>regions/boundarypins/pins.tsv</code>; the terminal placement reads them into <code>final_regions</code> and
+<code>regions.pins</code>, and the probe's real mode uses them too), with the hash covering the pin set.</p>
+<p><strong>The user's plan (2026-11-01, latest): per failing region, several ways to make an alternative placement,
+tried while the SAT works on the region, measured on average across designs, then ordered.</strong> Three families
+plus the density lever:</p>
+<ol>
+<li><strong>Noise:</strong> every movable box's home moves by a uniform random offset of up to window_tiles tiles
+inside the region (a new seed per round). Cheap, no model of why it failed.</li>
+<li><strong>Shuffle with anchors:</strong> a few boxes of the region's densest 4&times;4 patch move to the centre of
+its sparsest patch and keep a one-tile window (anchors), so the SAT must build around them; at the GP level the same
+with the cells anchored for a resume (<code>probe.shuffle</code>, landed).</li>
+<li><strong>Topology-shape-metrics stretch:</strong> the region's box graph loses edges (never those of nets with a
+fixed endpoint, a hop or an IO pin) until every node has four or fewer, highest degree first; the reduced graph is
+drawn orthogonally on the region's free tiles (breadth first from the node of highest degree, each node on the free
+tile nearest the centroid of its placed neighbours: ports north, east, south and west, so connected boxes sit
+adjacent and 1-1 nets go free), and the drawing's tiles are the new homes. If the SAT still fails: the drawing seeds a
+region-local GP resume (the other cells boxed in place) for a few iterations and the result is tried; if it fails
+again, the removed edges return and GP iterates once more before the last try.</li>
+<li><strong>Density:</strong> the GOALPlace inflation brings a region from about 0.8 toward 0.6 fill step by step
+(<code>probe.real</code> once the pins are carried over), and at each step a failing region tries the families above
+before the next step down.</li>
+</ol>
+<p><strong>Orchestration.</strong> In legroute's round loop a region without a routable answer generates its
+candidates (box homes, per-box windows) and solves each with the round's fixed hops (no hop choice, so the neighbours'
+answers stay consistent), in parallel threads within the round's budget, the first routable candidate in priority
+order being adopted (its homes replace the boxes' homes, its answer stands); only then the spill or the shift. Later,
+speculatively: the candidates start when the region's own solve starts, so a failure costs no extra wall time.
+Options: <code>legroute.alternatives=noise,anchor,tsm</code> (the order is the priority), <code>alt_ms</code> (budget
+per candidate, default the region budget); report fields per family: tried, rescued, seconds.</p>
+<p><strong>Evaluation.</strong> On sha3, minimax and partition_m at the utilization where the plain run leaves regions
+failing, count per family the regions it rescued, the time it cost and the WNS/wire of the result; separate proven
+UNSAT from running out of time (the latter moves with machine load: compare at a generous budget or by solver
+conflicts). Average across designs, pick the order, and keep only the families that rescue something nothing else
+does.</p>
+<p><strong>Order of work.</strong> (1) carry the refinement's pins and mesh into the terminal stage: landed
+(<code>region_seed_dir</code> set by the terminal stage, <code>region_mesh.json</code> and <code>pins.tsv</code> read
+back, pins matched to nets by driver; sha3 at 0.60 now solves with 7,287 virtual pins and no hop over the share);
+(2) the candidate harness with noise and anchors and (3) the orthogonal drawing: landed as
+<code>legroute.alternatives=noise,anchor,tsm</code> (box level, parallel threads, the round's hops fixed, per-box
+windows for the anchors; report alt_tried / alt_rescued / alt_seconds); (4) the region-local GP seed and the edge
+return; (5) the measurements and the order; (6) speculative candidates.</p>
+<p><strong>Noise (user, 2026-11-01, latest): the inflation and the cell moves are complementary, and a slight
+shuffle of a failing region's cells before more GOALPlace iterations can turn it routable</strong>, because the SAT's
+movement is limited (a solver free to move cells anywhere in the region would not need it): pick the sparser area
+inside the region and anchor two or three cells from the denser area there, so the resume spreads the cells into
+slightly different locations. Landed as <code>legroute.probe.shuffle</code>: per unroutable region, that many
+non-critical cells of its densest 4&times;4 patch move to the centre of its sparsest patch, their movement boxes
+shrink to the cell for the GP resume (anchors) and open again after, and they skip the inflation;
+<code>probe.max_inflate=1</code> makes a shuffle-only round. Measured baseline at utilization 0.60 (180 s per region):
+8 of 10, the two failures timeouts at fill 0.79 and 0.83, no UNSAT, so at this budget the comparisons separate proven
+UNSAT from running out of time, and the latter moves with machine load.</p>
 <p><strong>Region selection, the user's direction (2026-11-01):</strong> the rectangle mesh is a convenience; a region could
 be any contiguous set of 2&times;2 tiles, chosen by a systematic policy: a min-cut partitioner (VieCut) over the cell
 graph, density maps, bus cuts, or the capacity ratio above, so that a region's own traffic never crosses a side it
