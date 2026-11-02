@@ -96,8 +96,8 @@ std::string canonical_decimal(std::string_view value) {
 }
 
 uint32_t dcert_opcode(const Op& op) {
-  // The numbering is `Compiler.CertIO.opCode`'s, which covers 29 operators.
-  // `Operation` names 25 of them: the LGraph front end never builds Sub (2),
+  // The numbering is `Compiler.CertIO.opCode`'s, which covers 31 operators.
+  // `Operation` names 27 of them: the LGraph front end never builds Sub (2),
   // Div (4), LT (12) or GT (13), so those codes are reachable only from a
   // hand-written certificate. Listed here as a comment rather than as dead
   // cases, so the switch stays exhaustive over `Operation`.
@@ -127,6 +127,8 @@ uint32_t dcert_opcode(const Op& op) {
     case Operation::MemRead   : return 26;
     case Operation::MemWrite  : return 27;
     case Operation::MemWriteBE: return 28;
+    case Operation::MemLoad   : return 29;
+    case Operation::MemToBus  : return 30;
   }
   throw std::invalid_argument("dcert: unknown certificate operation");
 }
@@ -136,6 +138,8 @@ std::string dcert_oparg(const Op& op) {
     case Operation::Const     : return canonical_decimal(op.value);
     case Operation::Sum       : return std::to_string(op.parameter);
     case Operation::MemWriteBE: return std::to_string(op.parameter);
+    case Operation::MemLoad   : return std::to_string(op.parameter);
+    case Operation::MemToBus  : return std::to_string(op.parameter);
     default                   : return "0";
   }
 }

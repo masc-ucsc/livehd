@@ -121,6 +121,11 @@ struct Memory_info {
   Node_pin update_pin;
   Node_pin update_enable_pin;
   Node_pin bulk_reset_pin;
+  // A WHOLE-ARRAY cell (`update`, `update_enable` or `reset` driven; decision
+  // #2), and the reset bus it restores (`init` when a `reset` is driven: a
+  // runtime bus or a constant; invalid: it resets to 0).
+  bool     whole_array = false;
+  Node_pin reset_bus_pin;
 
   // Immutable ROM: `init` is a constant AND no write port is active AND `update`
   // is not driven AND the type is one whose read semantics we model.  A WRITABLE

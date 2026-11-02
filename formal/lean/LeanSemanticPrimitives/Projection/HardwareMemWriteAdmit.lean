@@ -889,8 +889,11 @@ theorem admits_slot_widthW {D : DesignCert} (h : admitsWB D = true)
       obtain ⟨d0, d1, d2, d3, hdeps⟩ := memWriteBE_deps (admitsW_semwf h) hc hbw
       obtain ⟨aw', dw', wa', hr, -, -, -⟩ := nodeTy_write_geom hbw hdeps hres
       simp at hr
+    have hne3 : ∀ n, c.op ≠ .Op_MemLoad n := by
+      rw [nodeTyW_eq_of_ne hne1] at hres
+      exact NodeAdmitted_ne_memLoad (nodeTy_admits hres)
     rw [hk', ← nodeValM_rec (i := i) (st := st) (admitsW_wf h) hj hc, hw]
-    exact eval_op_cert_width_nonMem c.op c.width _ hne1 hne2
+    exact eval_op_cert_width_nonMem c.op c.width _ hne1 hne2 hne3
 
 theorem admits_writeAddrFitsW {D : DesignCert} (h : admitsWB D = true)
     (i : RuntimeInput) (st : StateM) :

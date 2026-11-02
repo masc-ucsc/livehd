@@ -9,7 +9,8 @@
 # in it and in every module that imports it uses the proved @[csimp] fast
 # forms -- and must equal the base once that one import line is removed AND
 # match a recorded sha256, the same way.  Four are MASTER-ADAPTED --
-# Translation/LGraphModel.lean (the SHL/SRA/Sext boundary repairs),
+# Translation/LGraphModel.lean (the SHL/SRA/Sext boundary repairs, and the
+# whole-array memory operators of decision #2),
 # Translation/OpBridge.lean (the bridges re-proved for them), and
 # Compiler/DesignCert.lean and Compiler/DesignSemantics.lean (DCERT3: the
 # memory record's power-on words, commit table and reserved async field; the
@@ -38,7 +39,8 @@ BASE_REPO=${BASE_REPO:-$ROOT}
 SRC=$ROOT/formal/lean/LeanSemanticPrimitives
 
 # master-adapted files: path, recorded sha256
-EXPECTED_LGRAPHMODEL_SHA256=432bb98394892ad67d156923197ed90945f57cfbf86f3e6d2b602eead0f173ba
+# decision #2 added the whole-array operators Op_MemLoad / Op_MemToBus
+EXPECTED_LGRAPHMODEL_SHA256=23aba7149ad83b2e38a1455ca745038199dea971aed269474a73cc4d3e5c73dc
 EXPECTED_OPBRIDGE_SHA256=fc9366004cb12f1d96ae8624aaea4187960939d67c5b2b0c0b3bd3455d853b77
 # DCERT3 (decisions #5, #9, #2): MemoryDesc.init/commits/asyncImg,
 # MemoryDesc.powerOnImg, and srcMemNext's commit-table rule (#9; a memory with

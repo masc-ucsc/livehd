@@ -184,6 +184,15 @@ theorem rmemWriteV_correct (m : Int → BV) (a d en : BV) :
 theorem rMaskedUpdateV_correct (w : Nat) (old new bev : BV) (byteW : Nat) :
     rMaskedUpdateV w old new bev byteW = cert_masked_update w old new bev byteW := rfl
 
+theorem rmemLoadV_correct (w n : Nat) (m : Int → BV) (bus en : BV) :
+    rmemLoadV w n m bus en = cert_mem_load w n m bus en := by
+  funext x
+  simp only [rmemLoadV, cert_mem_load, bv_nonzero]
+  by_cases h : bv_uint en = 0 <;> simp [h]
+
+theorem rmemToBusV_correct (w n : Nat) (m : Int → BV) :
+    rmemToBusV w n m = cert_mem_to_bus w n m := rfl
+
 theorem rmemWriteBEV_correct (w : Nat) (m : Int → BV) (a d bev : BV) (byteW : Nat) :
     rmemWriteBEV w m a d bev byteW = cert_mem_write_be w m a d bev byteW := by
   funext x
@@ -403,6 +412,28 @@ theorem compileOp_correct (nid : Nat) (c : DenseNodeCert) (env : SlotEnv)
   | Op_Const cst =>
       simp only [compileOp, hop, if_neg hw] at hc
       exact absurd hc (by simp)
+  | Op_MemLoad k =>
+      simp only [compileOp, hop, if_neg hw] at hc
+      split at hc
+      case _ m bus en hd =>
+        injection hc with he; subst he
+        rw [hd]
+        simp only [denoteExpr, refMem, refBV,
+        hagree m (by rw [hd]; simp),
+        hagree bus (by rw [hd]; simp),
+        hagree en (by rw [hd]; simp),
+          List.map_cons, List.map_nil, rmemLoadV_correct, eval_op_cert]
+      case _ => exact absurd hc (by simp)
+  | Op_MemToBus k =>
+      simp only [compileOp, hop, if_neg hw] at hc
+      split at hc
+      case _ m hd =>
+        injection hc with he; subst he
+        rw [hd]
+        simp only [denoteExpr, refMem,
+        hagree m (by rw [hd]; simp),
+          List.map_cons, List.map_nil, rmemToBusV_correct, eval_op_cert]
+      case _ => exact absurd hc (by simp)
   | Op_Sub =>
       simp only [compileOp, hop, if_neg hw] at hc
       exact absurd hc (by simp)

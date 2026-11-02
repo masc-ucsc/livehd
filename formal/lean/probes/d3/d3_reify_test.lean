@@ -56,6 +56,9 @@ private def rhsSyntax (nsrc : Nat) : ResidualExpr → MetaM Term
   | .rmemWriteBE w bw m a d be => do
       `(rmemWriteBEV $(quote w) $(slotIdent nsrc m) $(slotIdent nsrc a) $(slotIdent nsrc d)
          $(slotIdent nsrc be) $(quote bw))
+  | .rmemLoad w n m b e => do
+      `(rmemLoadV $(quote w) $(quote n) $(slotIdent nsrc m) $(slotIdent nsrc b) $(slotIdent nsrc e))
+  | .rmemToBus w n m => do `(rmemToBusV $(quote w) $(quote n) $(slotIdent nsrc m))
 
 /-- `reify_design <designCert> as <name>` -/
 syntax (name := reifyDesign) "reify_design " ident " as " ident : command

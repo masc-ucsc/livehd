@@ -223,7 +223,8 @@ helpers.  `SrcRel` carries the KIND: the read answers a bit vector, the write
 answers an encoded image whose `MemImg.denote` is the reference memory. -/
 
 theorem OpSupported_not_mem {op : LGraphOp} (h : OpSupported op = true) :
-    ∀ b, op ≠ .Op_MemRead ∧ op ≠ .Op_MemWrite ∧ op ≠ .Op_MemWriteBE b := by
+    ∀ b, op ≠ .Op_MemRead ∧ op ≠ .Op_MemWrite ∧ op ≠ .Op_MemWriteBE b ∧
+      op ≠ .Op_MemLoad b ∧ op ≠ .Op_MemToBus b := by
   intro b; cases op <;> simp_all [OpSupported]
 
 theorem applyOpM_scalar_cert {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals arg)

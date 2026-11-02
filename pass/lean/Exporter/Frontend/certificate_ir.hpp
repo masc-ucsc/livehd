@@ -30,11 +30,16 @@ enum class Operation {
   SetMask,
   MemRead,
   MemWrite,
-  MemWriteBE
+  MemWriteBE,
+  // Whole-array memory operators (decision #2), one node for any entry count:
+  // MemLoad [image, bus, enable] -> image (entries 0..n-1 from the bus when the
+  // enable is set) and MemToBus [image] -> the n entries as one bus (`read_all`).
+  MemLoad,
+  MemToBus
 };
 struct Op {
   Operation   kind      = Operation::Or;
-  uint32_t    parameter = 0;  // Sum add count or MemWriteBE lane width
+  uint32_t    parameter = 0;  // Sum add count, MemWriteBE lane width, MemLoad/MemToBus entry count
   std::string value;          // Const decimal integer
 };
 enum class SourceKind { Input, Const, Flop, MemImage, RomConst };

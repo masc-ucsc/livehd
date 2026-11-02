@@ -20,7 +20,7 @@ bool certificate_memory_value(const CertificateIR& c, uint32_t id) {
     return s->kind == SourceKind::MemImage || s->kind == SourceKind::RomConst;
   }
   const auto op = c.nodes.at(c.slot_of.at(id) - c.sources.size()).op.kind;
-  return op == Operation::MemWrite || op == Operation::MemWriteBE;
+  return op == Operation::MemWrite || op == Operation::MemWriteBE || op == Operation::MemLoad;
 }
 namespace {
 std::string cast(const std::string& x, uint32_t w) { return "((bv_zext " + x + ") : BitVec " + std::to_string(w) + ")"; }
@@ -202,6 +202,15 @@ FastExpr lower_fast_expr(const CertificateIR& c, const CertNode& n) {
         e.text = "(if bitvec_nonzero " + dep(3) + " then mem_write_be " + dep(0) + " " + dep(1) + " " + dep(2) + " " + dep(3)
                  + " " + std::to_string(n.op.parameter) + " else " + dep(0) + ")";
       }
+      break;
+    case Operation::MemLoad:
+      // A whole-array load (decision #2; Translation/WholeArray.lean).
+      e.type = "(BitVec " + std::to_string(address_width(c, n.deps.at(0))) + " -> BitVec " + std::to_string(w) + ")";
+      e.text = "(if bitvec_nonzero " + dep(2) + " then mem_load " + dep(0) + " " + dep(1) + " " + std::to_string(n.op.parameter)
+               + " else " + dep(0) + ")";
+      break;
+    case Operation::MemToBus:
+      e.text = "(mem_to_bus " + dep(0) + " " + std::to_string(n.op.parameter) + " " + std::to_string(w) + ")";
       break;
   }
   return e;

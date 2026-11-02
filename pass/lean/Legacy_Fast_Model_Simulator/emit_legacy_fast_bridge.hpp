@@ -8,5 +8,8 @@ bool needs_mul_bridge(const CertificateIR& certificate);
 // A Sext at a sign position other than the operand's (or node's) width: its
 // bridge lemma, `sext_bridge_any`, is in Translation/SextBridge.
 bool needs_sext_bridge(const CertificateIR& certificate);
+// A whole-array memory operator (decision #2): its fast forms are in
+// Translation/WholeArray, its bridge lemmas in Translation/WholeArrayBridge.
+bool needs_whole_array(const CertificateIR& certificate);
 void emit_legacy_fast_bridge(const DesignScan&, const CertificateIR&, const LegacyNames&, std::ostream&);
 }  // namespace lean_export

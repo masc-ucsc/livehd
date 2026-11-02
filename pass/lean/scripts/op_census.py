@@ -65,6 +65,14 @@ def dispatch_status(op, arity, dep_widths, out_width=None):
         if arity != 4:
             return ("trap", "mem_write_be_bridge takes [mem, addr, data, byte_enable]")
         return ("ok", "mem_write_be_bridge")
+    if op.startswith("Op_MemLoad"):
+        if arity != 3:
+            return ("trap", "mem_load_bridge takes [mem, bus, enable]")
+        return ("ok", "mem_load_bridge")
+    if op.startswith("Op_MemToBus"):
+        if arity != 1:
+            return ("trap", "mem_to_bus_bridge takes [mem]")
+        return ("ok", "mem_to_bus_bridge")
     if op == "Op_Sum 2" and arity == 2:
         return ("ok", "sum2_bridge")
     if op == "Op_Mult" and arity == 2:

@@ -107,6 +107,14 @@ def compileOp (nid : Nat) (c : DenseNodeCert) : Except CompileError ResidualExpr
       match c.deps.toList with
       | [m, a, d, be] => .ok (.rmemWriteBE c.width bw m a d be)
       | l             => .error (.badArity c.op l.length)
+  | .Op_MemLoad n =>
+      match c.deps.toList with
+      | [m, bus, en] => .ok (.rmemLoad c.width n m bus en)
+      | l            => .error (.badArity c.op l.length)
+  | .Op_MemToBus n =>
+      match c.deps.toList with
+      | [m] => .ok (.rmemToBus c.width n m)
+      | l   => .error (.badArity c.op l.length)
   -- Op_Const (a source, never a node), and Op_Sub / Op_Div / Op_LT / Op_GT, which
   -- the exporter never emits (see ResidualIR's header)
   | op => .error (.unsupportedOp op)

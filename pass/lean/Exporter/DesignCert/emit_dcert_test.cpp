@@ -28,11 +28,12 @@
 #include "emit_dcert.hpp"
 
 #include <sstream>
-#include <streambuf>
 #include <stdexcept>
+#include <streambuf>
 
 #include "emit_design_cert.hpp"
 #include "gtest/gtest.h"
+#include "lean_format.hpp"
 
 namespace lean_export {
 namespace {
@@ -403,6 +404,18 @@ TEST(DcertParity, DecimalsAreCanonicalisedNotGuessed) {
   EXPECT_THROW(canonical_decimal("12a"), std::invalid_argument);
   EXPECT_THROW(canonical_decimal("0x10"), std::invalid_argument);
   EXPECT_THROW(canonical_decimal(" 1"), std::invalid_argument);
+}
+
+// The whole-array operators (decision #2) take codes 29 and 30, their entry
+// count in the payload slot -- `Compiler.CertIO.opCode`'s numbering -- and the
+// Lean literal spells the same constructor.
+TEST(DcertParity, WholeArrayOperatorsCarryTheirEntryCount) {
+  EXPECT_EQ(dcert_opcode({Operation::MemLoad, 16, {}}), 29u);
+  EXPECT_EQ(dcert_oparg({Operation::MemLoad, 16, {}}), "16");
+  EXPECT_EQ(dcert_opcode({Operation::MemToBus, 8, {}}), 30u);
+  EXPECT_EQ(dcert_oparg({Operation::MemToBus, 8, {}}), "8");
+  EXPECT_EQ(format_op({Operation::MemLoad, 16, {}}), "LGraphOp.Op_MemLoad 16");
+  EXPECT_EQ(format_op({Operation::MemToBus, 8, {}}), "LGraphOp.Op_MemToBus 8");
 }
 
 TEST(DcertParity, UnresolvableIdIsRefused) {

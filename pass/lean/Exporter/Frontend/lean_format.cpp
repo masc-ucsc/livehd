@@ -327,6 +327,8 @@ std::string format_op(const Op& op) {
     case Operation::MemRead   : return std::string("LGraphOp.Op_MemRead");
     case Operation::MemWrite  : return std::string("LGraphOp.Op_MemWrite");
     case Operation::MemWriteBE: return std::string("LGraphOp.Op_MemWriteBE") + " " + std::to_string(op.parameter);
+    case Operation::MemLoad   : return std::string("LGraphOp.Op_MemLoad") + " " + std::to_string(op.parameter);
+    case Operation::MemToBus  : return std::string("LGraphOp.Op_MemToBus") + " " + std::to_string(op.parameter);
   }
   throw std::invalid_argument("unknown certificate operation");
 }

@@ -49,15 +49,26 @@ theorem eval_op_cert_memRead_width (w : Nat) (vs : List CertVal) :
   | [_, _]                    => rfl
   | _ :: _ :: _ :: _ :: _     => rfl
 
-/-- The two WRITE operators return a `.mem`, so they are excluded; every other
-operator returns a `.bv` of the node width, at ANY argument list. -/
+theorem eval_op_cert_memToBus_width (n w : Nat) (vs : List CertVal) :
+    (eval_op_cert (.Op_MemToBus n) w vs).asBV.width = w := by
+  match vs with
+  | [_]               => rfl
+  | []                => rfl
+  | _ :: _ :: _       => rfl
+
+/-- The two WRITE operators and the whole-array load return a `.mem`, so they
+are excluded; every other operator returns a `.bv` of the node width, at ANY
+argument list. -/
 theorem eval_op_cert_width_nonMem (op : LGraphOp) (w : Nat) (vs : List CertVal)
-    (h1 : op ≠ .Op_MemWrite) (h2 : ∀ bw, op ≠ .Op_MemWriteBE bw) :
+    (h1 : op ≠ .Op_MemWrite) (h2 : ∀ bw, op ≠ .Op_MemWriteBE bw)
+    (h3 : ∀ n, op ≠ .Op_MemLoad n) :
     (eval_op_cert op w vs).asBV.width = w := by
   cases op
   case Op_MemRead      => exact eval_op_cert_memRead_width w vs
   case Op_MemWrite     => exact absurd rfl h1
   case Op_MemWriteBE bw => exact absurd rfl (h2 bw)
+  case Op_MemLoad n    => exact absurd rfl (h3 n)
+  case Op_MemToBus n   => exact eval_op_cert_memToBus_width n w vs
   all_goals (simp only [eval_op_cert, CertVal.asBV]; exact eval_op_width _ _ _)
 
 /-! ## 2. A scalar source returns its declared width -/
@@ -162,7 +173,7 @@ theorem admits_slot_width {D : DesignCert} (h : admitsB D = true)
         simp at hr
       · simp at h'
     rw [hk', ← nodeValM_rec (i := i) (st := st) (admits_wf h) hj hc, hw]
-    exact eval_op_cert_width_nonMem c.op c.width _ hne1 hne2
+    exact eval_op_cert_width_nonMem c.op c.width _ hne1 hne2 (NodeAdmitted_ne_memLoad hadm)
 
 /-! ## 5. `WriteAddrFits`, DERIVED from the checked inference
 

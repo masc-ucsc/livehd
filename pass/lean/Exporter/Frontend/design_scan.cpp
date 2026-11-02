@@ -806,6 +806,19 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
     m.is_rom       = info.is_rom;
     m.rom_contents = info.rom_contents;
     m.init_contents = info.init_contents;
+    m.whole_array   = info.whole_array;
+    if (info.whole_array) {
+      const auto opt = [&](const Node_pin& pin) -> std::optional<PinRef> {
+        if (pin.is_invalid()) {
+          return std::nullopt;
+        }
+        return capture_pin(ctx, pin);
+      };
+      m.update        = opt(info.update_pin);
+      m.update_enable = opt(info.update_enable_pin);
+      m.bulk_reset    = opt(info.bulk_reset_pin);
+      m.reset_bus     = opt(info.reset_bus_pin);
+    }
     m.read_ports   = info.read_ports;
     m.write_ports  = info.write_ports;
     for (const auto& port : info.ports) {
@@ -1021,7 +1034,14 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
     roots.push_back(pin);
   }
   for (const auto& node : memory_nodes) {
-    for (const auto& p : ctx.memory_info.at(node_id(node)).ports) {
+    const auto& mi = ctx.memory_info.at(node_id(node));
+    // A whole-array cell's bulk pins feed its next image, as a port's do.
+    for (const auto& pin : {mi.update_pin, mi.update_enable_pin, mi.bulk_reset_pin, mi.reset_bus_pin}) {
+      if (!pin.is_invalid()) {
+        roots.push_back(pin);
+      }
+    }
+    for (const auto& p : mi.ports) {
       if (!p.addr.is_invalid()) {
         roots.push_back(p.addr);
       }
@@ -1071,7 +1091,8 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
   // `fwd_rows[r][w]`, so asking the shared helper here would invent a cycle for
   // a READ-FIRST port that merely shares an array with a forwarding one.
   const auto read_deps = [&](const lean_pass::Memory_info& mi, size_t r, const auto& enqueue) {
-    if (mi.sync) {
+    // The whole-array read is the committed contents: no combinational operand.
+    if (mi.sync || r == kMemoryReadAll) {
       return;
     }
     const auto& p = mi.ports.at(mi.read_ports.at(r));
@@ -1106,10 +1127,15 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
           return static_cast<int>(r);
         }
       }
+      // cgen's `read_all` (decision #2): the whole committed array as one bus.
+      static_assert(kMemoryReadAllPid == static_cast<uint32_t>(Ntype::Memory_readall_pid));
+      if (pid == kMemoryReadAllPid) {
+        return static_cast<int>(kMemoryReadAll);
+      }
     }
-    // A memory OUTPUT that is not a decoded read port -- `readall`, or a pin
-    // the cell grew. There is no certificate value to bind it to, so refuse it
-    // by name rather than join every input and emit something unrelated.
+    // A memory OUTPUT that is neither a decoded read port nor `read_all` -- a
+    // pin the cell grew. There is no certificate value to bind it to, so refuse
+    // it by name rather than join every input and emit something unrelated.
     fatal(ctx,
           "memory n_" + std::to_string(id) + " drives output pin " + std::to_string(pin.get_port_id())
               + ", which is not a decoded read port. A certificate binds a value per READ PORT.");

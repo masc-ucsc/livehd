@@ -42,6 +42,8 @@ the exporter actually implements it (`pass/lean/Exporter/Frontend/pass_lean.cpp`
   Op_MuxN         3            any               `Ntype_op::Mux`, otherwise
   Op_MemRead      3            any               `cert_memory_expand`
   Op_MemWriteBE b 4 (b=1)      any               `cert_memory_expand`
+  Op_MemLoad n    3 (n>0)      entry width       memory lowering, a whole-array cell (#2)
+  Op_MemToBus n   1 (n>0)      n * entry width   memory lowering, `read_all` (#2)
 
 Operators the exporter CAN emit that were not observed in the census are
 grounded by their exporter site, so they are accepted rather than refused:
@@ -284,11 +286,13 @@ def sourceKind : SourceDesc → SlotKind
   | .memImg _ _ _         => .mem
   | .memConst _ _ _       => .mem
 
-/-- A node's result kind.  Only the two write operators produce a memory image;
-`Op_MemRead` produces the read DATA, which is a bit vector. -/
+/-- A node's result kind.  The two write operators and the whole-array load
+produce a memory image; `Op_MemRead` produces the read DATA and `Op_MemToBus`
+the whole-array bus, which are bit vectors. -/
 def opKind : LGraphOp → Nat → SlotKind
   | .Op_MemWrite,     _ => .mem
   | .Op_MemWriteBE _, _ => .mem
+  | .Op_MemLoad _,    _ => .mem
   | _,                w => .bv w
 
 /-- The static kind of any slot, or `none` when the slot does not exist. -/
@@ -374,6 +378,8 @@ def opArity : LGraphOp → Nat → Bool
   | .Op_MemRead,      n => n == 3        -- *
   | .Op_MemWrite,     n => n == 4        -- *
   | .Op_MemWriteBE b, n => n == 4 && 0 < b   -- * (b = 0 would divide by zero)
+  | .Op_MemLoad e,    n => n == 3 && 0 < e   -- *
+  | .Op_MemToBus e,   n => n == 1 && 0 < e   -- * (e = 0 would divide by zero)
   -- the four refusals never reach here; `opAccepted` rejects them first
   | .Op_Sub,  _ => false
   | .Op_Div,  _ => false
@@ -397,6 +403,8 @@ def depIsMem : LGraphOp → Nat → Bool
   | .Op_MemRead,      0 => true
   | .Op_MemWrite,     0 => true
   | .Op_MemWriteBE _, 0 => true
+  | .Op_MemLoad _,    0 => true
+  | .Op_MemToBus _,   0 => true
   | _,                _ => false
 
 /-- One node's whole shape obligation. -/
@@ -1066,6 +1074,13 @@ theorem sem_memWrite (m : Int → BV) (a d en : BV) :
 theorem sem_memWriteBE (bw : Nat) (m : Int → BV) (a d be : BV) :
     eval_op_cert (.Op_MemWriteBE bw) w [.mem m, .bv a, .bv d, .bv be]
       = .mem (cert_mem_write_be w m a d be bw) := rfl
+
+theorem sem_memLoad (n : Nat) (m : Int → BV) (bus en : BV) :
+    eval_op_cert (.Op_MemLoad n) w [.mem m, .bv bus, .bv en]
+      = .mem (cert_mem_load w n m bus en) := rfl
+
+theorem sem_memToBus (n : Nat) (m : Int → BV) :
+    eval_op_cert (.Op_MemToBus n) w [.mem m] = .bv (cert_mem_to_bus w n m) := rfl
 
 end OpEquations
 

@@ -1121,6 +1121,8 @@ theorem applyOp_agreeOn {vals : List Val} {arg : Nat → BV}
   | Op_MemRead => exact absurd hsup (by simp [OpSupported])
   | Op_MemWrite => exact absurd hsup (by simp [OpSupported])
   | Op_MemWriteBE b => exact absurd hsup (by simp [OpSupported])
+  | Op_MemLoad k => exact absurd hsup (by simp [OpSupported])
+  | Op_MemToBus k => exact absurd hsup (by simp [OpSupported])
 
 /-! ## The originals are corollaries
 

@@ -117,6 +117,8 @@ def exprRefsTyped : ResidualExpr → Array (ResidualRef × Bool)
   | .rmemRead _ m a e => #[(m, true), (a, false), (e, false)]
   | .rmemWrite m a d e => #[(m, true), (a, false), (d, false), (e, false)]
   | .rmemWriteBE _ _ m a d be => #[(m, true), (a, false), (d, false), (be, false)]
+  | .rmemLoad _ _ m b e => #[(m, true), (b, false), (e, false)]
+  | .rmemToBus _ _ m => #[(m, true)]
 
 /-- Slots read by something OTHER than a binding: the outputs, the flop update
 fields and the memory next-images (a commit table's images included).
@@ -194,6 +196,10 @@ def qExpr : ResidualExpr → MetaM Term
   | .rmemWriteBE w bw m a d be => do
       `(Compiler.ResidualExpr.rmemWriteBE $(qNat w) $(qNat bw) $(qNat m) $(qNat a)
          $(qNat d) $(qNat be))
+  | .rmemLoad w n m b e => do
+      `(Compiler.ResidualExpr.rmemLoad $(qNat w) $(qNat n) $(qNat m) $(qNat b) $(qNat e))
+  | .rmemToBus w n m => do
+      `(Compiler.ResidualExpr.rmemToBus $(qNat w) $(qNat n) $(qNat m))
 
 private def qBinding (b : ResidualBinding) : MetaM Term := do
   `({ ty := $(← qValueType b.ty), rhs := $(← qExpr b.rhs) })

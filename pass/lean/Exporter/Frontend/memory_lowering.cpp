@@ -33,6 +33,16 @@ MemoryLowering& state_of(CertificateBuilder& b, const Memory& m) {
   return st;
 }
 
+// Write port `ordinal`'s write on top of image `current`.
+uint32_t write_step(CertificateBuilder& b, const Memory& m, uint32_t current, size_t ordinal) {
+  const auto& p      = m.ports.at(m.write_ports.at(ordinal));
+  const auto  addr   = resize(b, p.addr, m.addr_width);
+  const auto  data   = resize(b, p.din, m.bits);
+  const auto  enable = resize(b, p.enable, std::max<uint32_t>(1, m.wensize));
+  const Op    op     = m.wensize <= 1 ? Op{Operation::MemWrite, 0, {}} : Op{Operation::MemWriteBE, m.bits / m.wensize, {}};
+  return b.emit(op, m.bits, {current, addr, data, enable});
+}
+
 // Share chains by the set of writes forwarded to each read port. A later
 // write wins a collision; the all-writes chain becomes the next image.
 uint32_t chain(CertificateBuilder& b, const Memory& m, MemoryLowering& st, const std::vector<size_t>& ords) {
@@ -41,16 +51,17 @@ uint32_t chain(CertificateBuilder& b, const Memory& m, MemoryLowering& st, const
   }
   auto current = st.image;
   for (auto ordinal : ords) {
-    const auto& p      = m.ports.at(m.write_ports.at(ordinal));
-    const auto  addr   = resize(b, p.addr, m.addr_width);
-    const auto  data   = resize(b, p.din, m.bits);
-    const auto  enable = resize(b, p.enable, std::max<uint32_t>(1, m.wensize));
-    const Op    op     = m.wensize <= 1 ? Op{Operation::MemWrite, 0, {}} : Op{Operation::MemWriteBE, m.bits / m.wensize, {}};
-    current            = b.emit(op, m.bits, {current, addr, data, enable});
+    current = write_step(b, m, current, ordinal);
   }
   st.chains.emplace(ords, current);
   return current;
 }
+
+// A whole-array cell's bulk operand presented as an `n * bits` bus.
+uint32_t bus(CertificateBuilder& b, const Memory& m, const PinRef& pin) {
+  return resize(b, pin, static_cast<uint32_t>(m.size) * m.bits);
+}
+uint32_t condition(CertificateBuilder& b, const PinRef& pin) { return resize(b, pin, b.pin_width(pin)); }
 
 // The writes read ordinal `r` forwards, as the certificate defines forwarding:
 // per CELL of the matrix, not per memory.
@@ -72,6 +83,17 @@ std::vector<size_t> forwarded_to(const Memory& m, size_t r) {
 
 void lower_memory_read(CertificateBuilder& b, const Memory& m, uint32_t r) {
   auto& st = state_of(b, m);
+  if (r == kMemoryReadAll) {
+    // cgen's `read_all` (decision #2): the COMMITTED contents as one bus, entry
+    // 0 in the low bits, for a registered memory with or without a sync read
+    // (cgen `assign <mem>_dout_1048576 = <array>`; pass/lec reads `a_cur`).
+    const auto key = (static_cast<uint64_t>(m.id) << 32) | kMemoryReadAllPid;
+    if (!b.memory_reads.contains(key)) {
+      const auto n = static_cast<uint32_t>(m.size);
+      b.memory_reads.emplace(key, b.emit({Operation::MemToBus, n, {}}, n * m.bits, {st.image}));
+    }
+    return;
+  }
   if (r >= m.read_ports.size()) {
     throw std::runtime_error("[ERROR] pass.lean: memory n_" + std::to_string(m.id) + " has no read port ordinal "
                              + std::to_string(r));
@@ -140,9 +162,40 @@ void lower_memory_writes(CertificateBuilder& b, const Memory& m) {
   for (size_t w = 0; w < m.write_ports.size(); ++w) {
     all.push_back(w);
   }
-  const auto next = chain(b, m, st, all);
   if (m.is_rom) {
+    chain(b, m, st, all);
     return;
+  }
+  uint32_t next = 0;
+  if (m.whole_array) {
+    // A WHOLE-ARRAY cell (decision #2): the bulk update, then every port's
+    // write over it, then the reset over all of it -- reset wins, then a port
+    // write, then the update (cgen_verilog.cpp's always block; pass/lec
+    // encode.cpp: "bulk update is the BASE next-state ... Reset (highest
+    // priority) tops the next-state"). One clock: cgen clocks the cell on its
+    // first port's clock and pass/lec refuses ports on different clocks.
+    for (const auto& p : m.ports) {
+      if (p.has_domain && p.clock_ordinal != m.clock_ordinal) {
+        throw std::runtime_error("[ERROR] pass.lean: memory n_" + std::to_string(m.id) + " (`" + m.raw_name
+                                 + "`) is a whole-array cell (`update`/`reset`) whose ports commit on more than one "
+                                   "clock domain; the cell has one bulk update and one reset, so it needs one clock.");
+      }
+    }
+    const auto n = static_cast<uint32_t>(m.size);
+    next         = st.image;
+    if (m.update) {
+      const auto en = m.update_enable ? condition(b, *m.update_enable) : b.const_dep(1);
+      next          = b.emit({Operation::MemLoad, n, {}}, m.bits, {next, bus(b, m, *m.update), en});
+    }
+    for (const auto w : all) {
+      next = write_step(b, m, next, w);
+    }
+    if (m.bulk_reset) {
+      const auto value = m.reset_bus ? bus(b, m, *m.reset_bus) : b.const_dep(0);
+      next             = b.emit({Operation::MemLoad, n, {}}, m.bits, {next, value, condition(b, *m.bulk_reset)});
+    }
+  } else {
+    next = chain(b, m, st, all);
   }
   MemoryDriver md{m.addr_width, m.bits, next, m.id, m.clock_ordinal, m.init_contents, {}};
   // A memory whose write ports sit on MORE THAN ONE clock domain (DCERT3,

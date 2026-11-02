@@ -431,18 +431,35 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
   // walk, the port split and `addr_width`, so every diagnostic below can report
   // the real shape.
   // ---------------------------------------------------------------------------
+  mi.whole_array = whole_array;
   if (whole_array) {
-    // A WHOLE-ARRAY cell: one bulk next-state bus instead of N per-entry write
-    // ports, and `reset` restores `init` at runtime (graph/cell.cpp:234-241).
-    // None of that is modeled; `init` is a RUNTIME bus in this shape, not
-    // contents, so it must not be mistaken for a ROM table.
-    fatal(ctx, memory_policy_summary(mi)
-                   + ". this is a WHOLE-ARRAY Memory cell (`update`/`update_enable`/`reset` driven): one bulk "
-                     "next-state bus instead of per-entry write ports, and `init` carries the runtime reset-value "
-                     "bus rather than contents. pass.lean models per-entry ports only.");
+    // A WHOLE-ARRAY cell (decision #2; graph/cell.cpp pins 11-14): `update` is
+    // one bulk next-state bus loaded when `update_enable` is set (absent:
+    // always), the port writes override it, and `reset` (active high) restores
+    // `init` -- a runtime bus or a constant; absent, 0 -- over both. The
+    // certificate spells that as image operators (memory_lowering.cpp). An
+    // ASYNCHRONOUS reset also acts with no clock edge (DCERT3's reserved
+    // `asyncImg`), which no route models yet.
+    if (const auto a = node.attr(livehd::attrs::memory_async_reset); a.has() && a.get() != 0) {
+      fatal(ctx, memory_policy_summary(mi)
+                     + ". this WHOLE-ARRAY cell's `reset` is ASYNCHRONOUS (memory_async_reset): it restores `init` with "
+                       "no clock edge, which pass.lean does not model yet. A synchronous reset is modeled.");
+    }
+    if (!mi.bulk_reset_pin.is_invalid() && !mi.init_pin.is_invalid()) {
+      if (livehd::graph_util::memory_image_of(node)) {
+        fatal(ctx, memory_policy_summary(mi)
+                       + ". this WHOLE-ARRAY cell restores a FILE PRELOAD on `reset`; pass.lean reads a preload as "
+                         "power-on contents only.");
+      }
+      mi.reset_bus_pin = mi.init_pin;
+    }
   }
 
-  if (!mi.init_pin.is_invalid()) {
+  // A runtime `init` is a whole-array cell's reset bus and nothing else (cgen
+  // and pass/lec read it only under `reset`; with no `reset` they ignore it).
+  // Only a CONSTANT one is also power-on contents, read below.
+  const bool init_is_contents = !mi.init_pin.is_invalid() && !(whole_array && !pin_is_const(mi.init_pin));
+  if (init_is_contents) {
     // A FILE PRELOAD: `initial` is a constant STRING, the memory image command
     // (`$readmemh`/`$readmemb`, Pyrope's readmem; graph/node_util.hpp
     // memory_image_of). The file is read HERE, at export, into the same packed
@@ -454,7 +471,7 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
     // the same way, become its POWER-ON image (DCERT3 `MemoryDesc.init`), which
     // every runner's start state takes (`initMemsOf`). Not a step value: a
     // Memory `initial` is power-on contents, never a reset (graph/cell.cpp).
-    const bool writable = !mi.write_ports.empty();
+    const bool writable = !mi.write_ports.empty() || whole_array;  // a whole-array cell is never a ROM
     if (!pin_is_const(mi.init_pin)) {
       fatal(ctx, memory_policy_summary(mi)
                      + ". `init` is driven by a NON-CONSTANT pin; contents must be comptime for the immutable-table "
@@ -651,6 +668,14 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
           mi.fwd_rows[r][w] = fwd_const.bit_test(pos);
         }
       }
+    }
+    // A cell with a bulk `update` reads its COMMITTED contents: cgen builds the
+    // forwarding chain only when there is no `update`, and pass/lec forces
+    // `fwd` to 0 for such a cell (encode.cpp, "fwd is forced 0 for
+    // whole-arrays"). Clear the rows so the lowering forwards nothing.
+    if (!mi.update_pin.is_invalid()) {
+      mi.fwd_rows.assign(n_rd, std::vector<bool>(n_wr, false));
+      mi.fwd_known = true;
     }
   }
 

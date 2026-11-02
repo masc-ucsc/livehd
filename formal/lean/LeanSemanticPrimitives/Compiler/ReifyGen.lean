@@ -135,6 +135,9 @@ private def rhsSyntax (nsrc : Nat) : ResidualExpr → MetaM Term
   | .rmemWriteBE w bw m a d be => do
       `(rmemWriteBEV $(quote w) $(slotIdent nsrc m) $(slotIdent nsrc a) $(slotIdent nsrc d)
          $(slotIdent nsrc be) $(quote bw))
+  | .rmemLoad w n m b e => do
+      `(rmemLoadV $(quote w) $(quote n) $(slotIdent nsrc m) $(slotIdent nsrc b) $(slotIdent nsrc e))
+  | .rmemToBus w n m => do `(rmemToBusV $(quote w) $(quote n) $(slotIdent nsrc m))
 
 --------------------------------------------------------------------------------
 -- The NAMED fast model
@@ -222,6 +225,10 @@ private def valSyntaxG (ref : Bool → ResidualRef → MetaM Term) :
   | .rmemWriteBE w bw m a d be => do
       `(Residual.rmemWriteBEV $(quote w) $(← ref true m) $(← ref false a)
          $(← ref false d) $(← ref false be) $(quote bw))
+  | .rmemLoad w n m b e => do
+      `(Residual.rmemLoadV $(quote w) $(quote n) $(← ref true m) $(← ref false b)
+         $(← ref false e))
+  | .rmemToBus w n m => do `(Residual.rmemToBusV $(quote w) $(quote n) $(← ref true m))
 
 /-- Named-call form. -/
 def valSyntax (base : Name) (nsrc : Nat) (loc : Bool) : ResidualExpr → MetaM Term :=

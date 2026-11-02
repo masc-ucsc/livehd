@@ -35,6 +35,8 @@ bool simple_shape(const CertNode& n) {
     case Operation::MuxN      : return arity > 1;
     case Operation::MemWrite  :
     case Operation::MemWriteBE: return arity == 4;
+    case Operation::MemLoad   : return arity == 3;
+    case Operation::MemToBus  : return arity == 1 && n.op.parameter > 0;
     case Operation::Mult      :
     case Operation::UDiv      :
     case Operation::SDiv      :

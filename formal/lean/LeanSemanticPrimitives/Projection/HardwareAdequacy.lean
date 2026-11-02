@@ -1628,6 +1628,8 @@ theorem applyOp_agree {vals : List Val} {arg : Nat → BV} (hsv : SlotVals vals 
   | Op_MemRead => exact absurd hsup (by simp [OpSupported])
   | Op_MemWrite => exact absurd hsup (by simp [OpSupported])
   | Op_MemWriteBE b => exact absurd hsup (by simp [OpSupported])
+  | Op_MemLoad k => exact absurd hsup (by simp [OpSupported])
+  | Op_MemToBus k => exact absurd hsup (by simp [OpSupported])
 
 /-! ## Group 4: the node fold
 

@@ -222,6 +222,13 @@ theorem NodeAdmitted_ne_memWrite {c : DenseNodeCert} (h : NodeAdmitted c) :
   · intro hc; rw [hc] at h; exact absurd h (by simp)
   · intro hc; rw [hc] at h; exact absurd h (by simp)
 
+/-- …and the whole-array load (decision #2), which this route does not run
+yet: `OpSupported` refuses it and it is neither read nor byte-enabled write. -/
+theorem NodeAdmitted_ne_memLoad {c : DenseNodeCert} (h : NodeAdmitted c) (n : Nat) :
+    c.op ≠ .Op_MemLoad n := by
+  rcases h with h | h | ⟨bw, h⟩ <;> intro hc <;> rw [hc] at h <;>
+    first | simp [OpSupported] at h | exact absurd h (by simp)
+
 /-- …and so are the five refused scalar operators, by `OpSupported`. -/
 theorem NodeAdmitted_ne_sub {c : DenseNodeCert} (h : NodeAdmitted c) :
     c.op ≠ .Op_Sub := by

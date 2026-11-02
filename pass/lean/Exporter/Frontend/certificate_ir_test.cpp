@@ -276,6 +276,91 @@ TEST(CertificateIR, ReadForwardingSelectsWriteChainAndByteLanes) {
   EXPECT_EQ(forwarded.nodes.back().op.kind, Operation::MemRead);
   EXPECT_EQ(forwarded.nodes.back().deps[0], forwarded.memories[0].next_img);
 }
+// A WHOLE-ARRAY cell (decision #2): the next image is the bulk update, then
+// the port write over it, then the reset over both -- reset wins, then a port
+// write, then the update, as cgen and pass/lec order them. Reads, and the
+// whole-array read (`read_all`), see the COMMITTED image.
+TEST(CertificateIR, WholeArrayCellLoadsUpdateThenWritesThenReset) {
+  auto  d         = memory_design(false, false);
+  auto& m         = d.memories.at(10);
+  m.whole_array   = true;
+  m.update        = input(2000000000, 24);
+  m.update_enable = input(2000000001, 1);
+  m.bulk_reset    = input(2000000002, 1);
+  m.reset_bus     = constant("197121", 24);  // entries 1, 2, 3
+  m.init_contents = {"1", "2", "3"};         // a constant reset bus is also power-on contents
+  d.inputs        = {
+      {   "upd", 2000000000, 24, std::nullopt},
+      {"upd_en", 2000000001,  1, std::nullopt},
+      {   "rst", 2000000002,  1, std::nullopt}
+  };
+  m.ports.push_back({1, 0, constant("1", 2), constant("42", 8), constant("1", 1), std::nullopt});
+  m.write_ports = {1};
+  m.fwd_rows    = {{false}};
+  d.nodes.push_back({10, ScanOp::Memory, 0, false, {}});
+  d.nodes.back().memory_read = kMemoryReadAll;
+  d.outputs.push_back({
+      "all",
+      1,
+      24,
+      PinRef{PinKind::Memory, 10, kMemoryReadAllPid, 24, 0, {}}
+  });
+  const auto c = build_certificate(d, {});
+  ASSERT_EQ(c.memories.size(), 1);
+  const auto& md    = c.memories.front();
+  const auto  image = c.sources.front().id;
+  ASSERT_EQ(c.sources.front().kind, SourceKind::MemImage);
+  EXPECT_EQ(md.init, (std::vector<std::string>{"1", "2", "3"}));
+  auto        node  = [&](uint32_t id) -> const CertNode& { return c.nodes.at(c.slot_of.at(id) - c.sources.size()); };
+  // the reset load is the next image, over the port write, over the update load
+  const auto& reset = node(md.next_img);
+  ASSERT_EQ(reset.op.kind, Operation::MemLoad);
+  EXPECT_EQ(reset.op.parameter, 3);
+  EXPECT_EQ(reset.width, 8);
+  const auto& write = node(reset.deps[0]);
+  ASSERT_EQ(write.op.kind, Operation::MemWrite);
+  const auto& update = node(write.deps[0]);
+  ASSERT_EQ(update.op.kind, Operation::MemLoad);
+  EXPECT_EQ(update.op.parameter, 3);
+  EXPECT_EQ(update.deps[0], image);
+  // the read port and the whole-array read see the committed image
+  size_t to_bus = 0, reads = 0;
+  for (const auto& n : c.nodes) {
+    if (n.op.kind == Operation::MemToBus) {
+      ++to_bus;
+      EXPECT_EQ(n.op.parameter, 3);
+      EXPECT_EQ(n.width, 24);
+      EXPECT_EQ(n.deps, (std::vector<uint32_t>{image}));
+    }
+    if (n.op.kind == Operation::MemRead) {
+      ++reads;
+      EXPECT_EQ(n.deps[0], image);
+    }
+  }
+  EXPECT_EQ(to_bus, 1);
+  EXPECT_EQ(reads, 1);
+  // without a reset the next image is the port write over the update; without
+  // an update enable the update always loads (a constant enable)
+  m.bulk_reset.reset();
+  m.update_enable.reset();
+  const auto  c2 = build_certificate(d, {});
+  const auto& n2 = c2.nodes.at(c2.slot_of.at(c2.memories.front().next_img) - c2.sources.size());
+  EXPECT_EQ(n2.op.kind, Operation::MemWrite);
+}
+// A whole-array cell needs ONE clock: its update and reset have no per-port domain.
+TEST(CertificateIR, WholeArrayCellOnTwoClocksIsRefused) {
+  auto  d       = memory_design(false, false);
+  auto& m       = d.memories.at(10);
+  m.whole_array = true;
+  m.bulk_reset  = constant("1", 1);
+  m.ports.push_back({1, 0, constant("1", 2), constant("42", 8), constant("1", 1), std::nullopt});
+  m.write_ports            = {1};
+  m.ports[1].has_domain    = true;
+  m.ports[1].clock_ordinal = 1;
+  m.ports[0].has_domain    = true;
+  m.ports[0].clock_ordinal = 0;
+  EXPECT_THROW(build_certificate(d, {}), std::runtime_error);
+}
 TEST(CertificateIR, AsyncResetSourceAndFlopControlsRemainDistinct) {
   DesignScan d;
   d.name   = "async";

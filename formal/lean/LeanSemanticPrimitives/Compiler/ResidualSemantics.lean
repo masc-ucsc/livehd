@@ -166,6 +166,16 @@ def rmemWriteBEV (w : Nat) (m : Int → BV) (a d bev : BV) (byteW : Nat) : Int �
     if bv_uint bev = 0 then m x
     else if x = bv_uint a then rMaskedUpdateV w (m (bv_uint a)) d bev byteW else m x
 
+/-- Whole-array load (decision #2), the enable test inside the lambda as for
+the writes: entry `x < n` takes bits `[x*w, (x+1)*w)` of the bus. -/
+def rmemLoadV (w n : Nat) (m : Int → BV) (bus en : BV) : Int → BV :=
+  fun x =>
+    if bv_uint en = 0 then m x
+    else if 0 ≤ x ∧ x < n then mk_bv w (bv_uint bus / 2 ^ (x.toNat * w)) else m x
+
+/-- Whole-array read: the certificate's own packing (`cert_mem_to_bus`). -/
+def rmemToBusV (w n : Nat) (m : Int → BV) : BV := cert_mem_to_bus w n m
+
 end Residual
 
 --------------------------------------------------------------------------------
@@ -210,6 +220,9 @@ def denoteExpr (env : SlotEnv) : ResidualExpr → CertVal
                                               (refBV env en))
   | .rmemWriteBE w bw m a d be =>
       .mem (rmemWriteBEV w (refMem env m) (refBV env a) (refBV env d) (refBV env be) bw)
+  | .rmemLoad w n m bus en =>
+      .mem (rmemLoadV w n (refMem env m) (refBV env bus) (refBV env en))
+  | .rmemToBus w n m      => .bv (rmemToBusV w n (refMem env m))
 
 --------------------------------------------------------------------------------
 -- `denoteResidual`

@@ -141,6 +141,55 @@ TEST(LegacyModel, CommitTableMemoryNextIsTheCertificateRule) {
   n.edges.clear();
   EXPECT_EQ(legacy_memory_next(m, n, img, "held"), "img30");
 }
+// A whole-array memory (decision #2): the fast model writes `mem_load` and
+// `mem_to_bus` (Translation/WholeArray), and the bridge proves them with
+// `mem_load_bridge` / `mem_to_bus_bridge` (Translation/WholeArrayBridge).
+TEST(LegacyModel, WholeArrayMemoryUsesLoadAndToBus) {
+  DesignScan d;
+  d.name   = "wa";
+  d.inputs = {
+      {"upd", 2000000000, 24, {}},
+      {"rst", 2000000001,  1, {}}
+  };
+  Memory m;
+  m.id          = 10;
+  m.bits        = 8;
+  m.addr_width  = 2;
+  m.size        = 3;
+  m.whole_array = true;
+  m.update      = input(2000000000, 24);
+  m.bulk_reset  = input(2000000001, 1);
+  m.ports.push_back({0, 0, constant("1", 2), {}, constant("1", 1), std::nullopt});
+  m.read_ports = {0};
+  m.fwd_rows   = {{}};
+  d.memories.emplace(10, m);
+  d.nodes.push_back({10, ScanOp::Memory, 0, false, {}});
+  d.nodes.push_back({10, ScanOp::Memory, 0, false, {}});
+  d.nodes.back().memory_read = kMemoryReadAll;
+  d.outputs                  = {
+      {  "q", 0,  8,                  PinRef{PinKind::Memory, 10, 0, 8, 0, {}}},
+      {"all", 1, 24, PinRef{PinKind::Memory, 10, kMemoryReadAllPid, 24, 0, {}}}
+  };
+  const auto c = build_certificate(d, {});
+  for (const bool bridge : {false, true}) {
+    LegacyEmitOptions o;
+    o.emit_cert        = bridge;
+    o.emit_fast_bridge = bridge;
+    std::ostringstream out;
+    ASSERT_NO_THROW(emit_legacy_model(d, c, o, out));
+    const auto text = out.str();
+    EXPECT_NE(text.find(bridge ? "import LeanSemanticPrimitives.Translation.WholeArrayBridge"
+                               : "import LeanSemanticPrimitives.Translation.WholeArray\n"),
+              std::string::npos);
+    EXPECT_NE(text.find("then mem_load "), std::string::npos);
+    EXPECT_NE(text.find("(mem_to_bus "), std::string::npos);
+    if (bridge) {
+      EXPECT_NE(text.find("mem_load_bridge"), std::string::npos);
+      EXPECT_NE(text.find("mem_to_bus_bridge"), std::string::npos);
+      EXPECT_EQ(text.find("by sorry"), std::string::npos);
+    }
+  }
+}
 TEST(LegacyModel, PreservesGlobalSelectorUniquenessAndEscapesMappingComments) {
   auto d            = binary(ScanOp::Or, 8);
   d.inputs[0].name  = "a-b";

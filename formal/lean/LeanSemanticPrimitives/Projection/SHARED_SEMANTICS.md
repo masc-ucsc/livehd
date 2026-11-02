@@ -19,7 +19,7 @@ own; the projection consumes them unchanged.  Against the base:
     Compiler/DesignCertWF.lean        byte-identical
     SemanticPrimitives.lean           byte-identical
 
-    Translation/LGraphModel.lean      MASTER-ADAPTED (operator boundary repairs)
+    Translation/LGraphModel.lean      MASTER-ADAPTED (operator boundary repairs; whole-array memory operators)
     Translation/OpBridge.lean         MASTER-ADAPTED (bridges re-proved for them)
     Compiler/DesignCert.lean          MASTER-ADAPTED (DCERT3 memory fields; recorded hash)
     Compiler/DesignSemantics.lean     MASTER-ADAPTED (power-on image, commit table; recorded hash)
@@ -97,6 +97,16 @@ them directly: `ObjectLanguageSemantics` evaluates `.bvSra` / `.bvShl` with
 with MASTER's guarded body.  The patch was not applied: its body is the
 unguarded `2 ^ k`, and taking it would delete a proved repair (regression R46).
 The patch file is kept as a historical record only.
+
+Decision #2 (whole-array memories) added two memory operators, `Op_MemLoad n`
+and `Op_MemToBus n`, with `cert_mem_load`, `cert_mem_pack` and
+`cert_mem_to_bus` and their `eval_op_cert` cases. `eval_op` and `denote_op`
+are unchanged (both end in a wildcard), and every other operator's
+`eval_op_cert` case is unchanged, so no existing bridge or theorem about an
+operator changes; `eval_op_cert_bv` takes the two new operators in its
+"not a memory operator" hypothesis. FP's own operator lists
+(`Projection/DesignEncoding`, `HardwareAdequacy`, `HardwareMemSlots`) name them
+and refuse them at admission until FP models them.
 
 Commits: 0143ea8cc, f3678b423, 9ca8cf8ed (the repairs), 39f118b05
 (`bv_shl_step` with master's body), and the docstring correction that records
