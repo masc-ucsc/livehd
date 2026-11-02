@@ -623,7 +623,13 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
         elabCommand (← `(command|
           theorem $(eqNmJ j) ($eArg : Compiler.SlotEnv) :
               $(chkNm j) $eArg = Compiler.runBindings $(segNm j) $eArg := by
-            simp only [$(chkNm j):ident, $(segNm j):ident, Compiler.runBindings,
+            -- `delta`, NOT `simp only [chunk_j]`: naming the chunk in `simp`
+            -- makes Lean generate `chunk_j.eq_1`; on the pinned Lean 4.36 that runs
+            -- `inferDefEqAttr`, a Meta `isDefEq` of the chunk against its own
+            -- `have` chain that costs 2x per binding (measured: 22 bindings,
+            -- 236 s). `delta` unfolds without an equation lemma.
+            delta $(chkNm j):ident
+            simp only [$(segNm j):ident, Compiler.runBindings,
                        Compiler.denoteExpr, Compiler.refBVs,
                        List.map_cons, List.map_nil]))
         markPhase s!"chunk_eq {j}"
@@ -905,7 +911,9 @@ def elabProveModelFactsSlice : CommandElab := fun stx => do
       elabCommand (← `(command|
         theorem $(eqNmJ j) ($eArg : Compiler.SlotEnv) :
             $(chkNm j) $eArg = Compiler.runBindings $(segNm j) $eArg := by
-          simp only [$(chkNm j):ident, $(segNm j):ident, Compiler.runBindings,
+          -- `delta`, not `simp only [chunk_j]`: see `prove_reified_chunked`.
+          delta $(chkNm j):ident
+          simp only [$(segNm j):ident, Compiler.runBindings,
                      Compiler.denoteExpr, Compiler.refBVs,
                      List.map_cons, List.map_nil]))
     logInfo m!"prove_model_facts_slice: {f} model facts [{lo'}, {hi'}) of {nseg} emitted"
