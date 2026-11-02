@@ -962,6 +962,7 @@ cc_library(
         ":steiner_topology",
         "//core",
         "//inou/lefdef:inou_lefdef",
+        "//third_party/viecut",
         "@rapidjson",
     ],
 )

@@ -483,6 +483,8 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_options.global_share     = number("place.legroute.global_share", "0.5");
   out.legroute_options.global_own_share = number("place.legroute.global_own_share", "0");
   out.legroute_options.hop_choice       = static_cast<unsigned>(integer("place.legroute.hop_choice", "0"));
+  out.legroute_options.spill_rounds     = static_cast<unsigned>(integer("place.legroute.spill_rounds", "0"));
+  out.legroute_options.spill_fraction   = number("place.legroute.spill_fraction", "0.2");
   out.legroute_options.global_margin    = integer("place.legroute.global_margin", "8");
   out.legroute_options.dump_regions     = synth_set(opts, "place.legroute.dump_regions", "");
   out.legroute_options.threads          = integer("place.legroute.threads", "0");
@@ -505,6 +507,8 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_probe.sat_ms             = integer("place.legroute.probe.sat_ms", "20000");
   out.legroute_probe.iterations         = integer("place.legroute.probe.iterations", "100");
   out.legroute_probe.rounds             = integer("place.legroute.probe.rounds", "1");
+  out.legroute_probe.real               = truthy(synth_set(opts, "place.legroute.probe.real", "false"));
+  out.legroute_probe.repulsion          = number("place.legroute.probe.repulsion", "1");
   out.legroute_probe.strict             = truthy(synth_set(opts, "place.legroute.strict", "true"));
   if (out.legroute_probe.enabled
       && (!(out.legroute_probe.fill >= 0 && out.legroute_probe.fill < 1)

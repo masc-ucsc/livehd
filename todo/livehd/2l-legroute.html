@@ -126,7 +126,9 @@ routable answer, the shorter weighted routes when both are.</li>
 <h2>Routability probe (GOALPlace-style inflation, off by default)</h2>
 <ol>
 <li>After GP converges, before bus order: small probe regions (about 1,200 cells, no virtual pins) run
-legroute.local with a short SAT limit; regions at or under 50% box fill are taken as routable.</li>
+legroute.local with a short SAT limit; regions at or under 50% box fill are taken as routable. With
+<code>probe.real</code> the probe is the real legroute's twin instead: the real region mesh with bus-ordered
+virtual pins, refined at each round's placement, every region solved.</li>
 <li>Cells of the regions without a routable answer widen in x by r = box fill / target, at most 1.5. The
 target is the median fill of the probe regions that solved, at most 0.6. The top 10% of cells by timing
 weight keep their size (GOALPlace's 10-quantile guard).</li>
@@ -564,7 +566,58 @@ for the neighbour in the second wave. <strong>Landed as <code>legroute.hop_choic
 in checkerboard waves (greedy colouring of the region adjacency in risk order), a hop between two regions is chosen by the
 earlier wave's region among the boundary tiles within hop_choice of the hop chooser's tile (order and tile literals, no
 tile taken, at most hop_share of the boundary tile's tracks as hops), and published to the later region as its fixed
-endpoint before its wave; nets routed ahead (trees, IO pre-routes, global pieces) keep their hops.</strong></p>
+endpoint before its wave; nets routed ahead (trees, IO pre-routes, global pieces) keep their hops.</strong> Measured on sha3
+usyn CMOS at 0.45 with the ratio cut: 3 waves, 5,778 of 10,115 hops free, 4,410 moved, every solved region faster;
+two regions still unsat, and the relax diagnostic names two boundary tiles holding fixed endpoints with 163 routes
+through them (47 tracks short): the hops of the global router's pieces, which stay fixed. With the router off
+(<code>global_route=false</code>: pass-throughs become region nets with free hops) 11 of 12 regions solve and the last, a
+6-wide middle column carrying 323 pass-through nets, is only out of time at 420 s (5.9M clauses). Lowering the router's
+share to 0.4 does not help (the nets fall to the chain but their hops stay fixed through the pieces). The middle
+column stays out of time at 900 s too; 1,500-cell regions are worse (narrow 4-wide columns overload their row cuts,
+155 nets per column-tile edge against ~118 tracks); counting the pass-throughs in the ratio criterion
+(<code>region.cut=ratio_through</code>) gives fewer, bigger regions and a 4-wide full-height column over the cut bound on
+its row cuts, 7 of 10 SAT: a greedy bisection cannot foresee its later splits with either score. The density searches
+run with ratio + hop_choice 2 + no router. The systematic policy the user asked for (regions as any contiguous set of
+2&times;2 tiles from a partitioner such as VieCut, density maps or bus cuts) is the path past the rectangle mesh.</p>
+<p><strong>Robust by construction (user, 2026-11-01): whatever the mesh deals a region, the algorithm must adjust: push
+cells out of a region that does not route, or reshape it; a pathological placement that puts everything in one region
+should still end in a routed design, only a worse one.</strong> Landed as <code>legroute.spill_rounds</code> (off by
+default): after the regions solve, each region without a routable answer (a model UNSAT, no answer in time, or more
+boxes than fitting tiles) pushes about <code>spill_fraction</code> (0.2) of its boxes into the regions around it, the
+crossings are redone and only the regions whose boxes, fixed boxes, hops, global pieces, trees or IO pre-routes changed
+solve again (a per-region signature keeps the others' answers), up to spill_rounds times. <strong>Which boxes leave and
+where they go is a min cut, as the user asked (2026-11-01, "a very fast approximate that runs only inside the region"),
+with the refinement that the region and its neighbours form one graph so the cut also decides the neighbour:</strong>
+the region's movable boxes are the nodes, each receiving neighbour is contracted to a terminal T<sub>j</sub>, and a
+terminal S stands for what stays. A net is a star of edges from its first box to its other boxes (weight 100 &times;
+the net's timing weight over its endpoint count less one, so a net costs about the same however many boxes it joins);
+a net reaching neighbour j pulls its boxes to T<sub>j</sub>, a net with a fixed endpoint in the region or an endpoint
+past the neighbours pulls them to S. Each neighbour's side is its isolating s-t min cut (VieCut's push-relabel,
+<code>third_party/viecut</code>, T<sub>j</sub> against S and the other terminals), so the netlist decides which boxes
+leave and to which neighbour, connected clusters together. A uniform pull of every box to the neighbours is bisected to
+the smallest value that moves at least the wanted count; a box two cuts claim goes to the neighbour its nets reach
+most, and a neighbour takes at most its room: the fill that evens it with the failing region (never past nine tenths
+of its tiles), the next ring of regions joining when the neighbours are short of room. A failing neighbour receives
+too: the two sides of a hot boundary fail together (the hops are the same on both sides), and a box crossing it
+toward its nets takes its hops with it. Each moved box lands on the nearest free tile it fits in its new region (the
+SAT then places it within its window). The data behind the mechanism: abc and usyn CMOS sha3 have the same fan-out
+mix and net reach, usyn is only 20% larger and its mesh has 25% more regions and 46% more hops; what fails is
+region-scale (cut bounds, boundary tiles), never the cell-boxes. Unit test
+<code>SpillRoundsPushAFailingRegionsBoxesOut</code>: six boxes whose nets all go to fixed cells past a 22-track
+boundary (24 hops) fail on both sides by the cut bound; one round moves three boxes toward their nets and both regions
+solve.</p>
+<p><strong>The user's framing (2026-11-01):</strong> there are many ways to pick the min cut, and when the imbalance
+is small it may not be worth pushing cells to a neighbour at all; the options have to be explored and the best chosen
+under constraints, and the placer most likely has to run again afterwards so it balances across the regions, in a way
+that does not collapse everything into the same region again (a changed density, or more spread). <strong>The
+GOALPlace path is the easier one:</strong> only the cells of the too-congested regions get extra spacing, the placer
+pushes the other cells away, and the loop repeats; DREAMPlace's cell repulsion can be raised for that resume. Landed
+for it: <code>legroute.probe.real</code> makes the probe the real legroute's twin (the real region mesh with
+bus-ordered virtual pins, refined at each round's placement, every region solved, the probe SAT limit), so the regions
+it inflates are the ones the real run would fail, and <code>legroute.probe.repulsion</code> multiplies the converged
+density weight for the GP resume after the inflation. Status: sha3 usyn CMOS at utilization 0.70 runs both ways (the
+min-cut spill rounds, and the real probe with three inflation rounds; the first probe round asked for 18% more core,
+so the generated core grew and placement restarted at utilization 0.59).</p>
 <p><strong>Region selection, the user's direction (2026-11-01):</strong> the rectangle mesh is a convenience; a region could
 be any contiguous set of 2&times;2 tiles, chosen by a systematic policy: a min-cut partitioner (VieCut) over the cell
 graph, density maps, bus cuts, or the capacity ratio above, so that a region's own traffic never crosses a side it

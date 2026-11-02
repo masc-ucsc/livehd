@@ -1256,7 +1256,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "region cut lines: macro = every macro edge and IO bus span first, then the longest side split at its middle; ratio = "
      "no forced line, each split takes the axis and position whose children have the lowest worst internal cut over the "
-     "tracks across it; "
+     "tracks across it; ratio_through = the same, counting the nets that cross a child end to end as well; "
      "mincut = no forced line, each split takes the position in the middle half of the longest side that the fewest "
      "nets cross (a macro sits inside its region, no boundary runs along its channel)"},
     {"place.region.boundarypins",
@@ -1444,6 +1444,16 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "legroute: a crossing net's hop may move up to this many tiles along its boundary, chosen by the first of its two "
      "regions to solve; the regions then solve in checkerboard waves, a wave's choices being the next wave's fixed "
      "endpoints (0: every hop fixed ahead)"},
+    {"place.legroute.spill_rounds",
+     "0",
+     Synth_set_option::Kind::file,
+     "legroute: a region without a routable answer pushes spill_fraction of its boxes into the regions around it with "
+     "room, the boxes and their destinations picked by min cuts inside the region (VieCut), and the regions that "
+     "changed solve again, up to this many rounds (0: off)"},
+    {"place.legroute.spill_fraction",
+     "0.2",
+     Synth_set_option::Kind::file,
+     "legroute: the share of a failing region's boxes one spill round pushes out"},
     {"place.legroute.global_own_share",
      "0",
      Synth_set_option::Kind::file,
@@ -1529,6 +1539,15 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::integer,
      "with legroute.probe: probe, widen the unroutable regions' cells and resume GP this many times, until every region "
      "routes (a different density per region instead of a smaller core)"},
+    {"place.legroute.probe.real",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "with legroute.probe: the probe is the real legroute's twin (its region mesh with bus-ordered virtual pins, "
+     "refined at each round's placement, every region solved) instead of small regions without pins"},
+    {"place.legroute.probe.repulsion",
+     "1",
+     Synth_set_option::Kind::file,
+     "with legroute.probe: the GP resume after the inflation runs at this multiple of the converged density weight"},
     {"place.legroute.io_preroute",
      "false",
      Synth_set_option::Kind::boolean,

@@ -23,7 +23,8 @@ struct Region_options {
   // simply inside the region whose cut lines surround it. "ratio": no line is forced either; each split tries both
   // axes and several positions and keeps the one whose two children have the lowest worst internal cut ratio (the
   // nets forced across a line inside the child over the tracks across that line), so a region is never a strip
-  // whose own traffic crosses its narrow side
+  // whose own traffic crosses its narrow side. "ratio_through": the same, counting also the nets that cross a child
+  // end to end (the pass-throughs a middle column carries)
   std::string cut = "macro";
   // for "ratio": the tracks a vertical line crosses per micron of height (the horizontal routing layers legroute
   // routes on) and a horizontal line per micron of width; 0: both axes count the same per micron

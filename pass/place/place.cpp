@@ -699,7 +699,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.legroute) {
     const auto& l = o.legroute_options;
-    h = hash_text(std::format("legroute-v4:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{"
+    h = hash_text(std::format("legroute-v5:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{"
                               "}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                               l.box_fill,
                               l.box_net_max,
@@ -735,6 +735,8 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               l.global_share,
                               l.global_own_share,
                               l.hop_choice,
+                              l.spill_rounds,
+                              l.spill_fraction,
                               l.global_margin,
                               l.hop_spread,
                               l.sat_seed,
@@ -756,7 +758,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                   h);
     if (o.legroute_probe.enabled) {
       const auto& q = o.legroute_probe;
-      h             = hash_text(std::format("legroute-probe:{}:{}:{}:{}:{}:{}:{}:{}",
+      h             = hash_text(std::format("legroute-probe:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                                             q.cells,
                                             q.sat_ms,
                                             q.iterations,
@@ -764,7 +766,10 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                                             q.target,
                                             q.max_inflate,
                                             l.sat_min_fill,
-                                            q.tree_congestion),
+                                            q.tree_congestion,
+                                            q.rounds,
+                                            q.real,
+                                            q.repulsion),
                                 h);
     }
   }
@@ -8944,27 +8949,50 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     // one probe round: legroute on the converged GP, the unroutable regions' cells widened, GP resumed; true when
     // every region routed (or nothing could be widened)
     const auto run_legroute_probe = [&](dp::Design& design, unsigned round) {
-      const auto&    po    = options.legroute_probe;
-      const auto     start = std::chrono::steady_clock::now();
-      Region_options ro    = region_options_with_tracks(tech, options.region);
-      ro.max_cells         = po.cells ? po.cells : options.region.max_cells;
-      const auto mesh      = Region_mesh::build(design, region_macros(), region_ios(), ro, tech.dbu);
-      auto       frame     = sat_frame(design, false);
+      const auto&      po    = options.legroute_probe;
+      const auto       start = std::chrono::steady_clock::now();
+      const bool       real  = po.real && refinement_active;
+      Legroute_regions regions;
+      if (real) {  // the real legroute's regions and bus-ordered virtual pins, refined at this round's placement
+        gp_density_weight = metrics.density_weight;
+        refine_final_boundaries(design);
+        if (final_regions && final_regions->rects.size() > 1) {
+          for (const auto& r : final_regions->rects) {
+            regions.rects.push_back({r.xl, r.yl, r.xh, r.yh});
+          }
+          if (boundary_pins) {
+            for (const auto& a : boundary_pins->pin_model().anchors) {
+              if (a.original_net >= 0) {
+                regions.pins.push_back({size_t(a.original_net), a.x, a.y});
+              }
+            }
+          }
+        }
+      } else {
+        Region_options ro = region_options_with_tracks(tech, options.region);
+        ro.max_cells      = po.cells ? po.cells : options.region.max_cells;
+        const auto mesh   = Region_mesh::build(design, region_macros(), region_ios(), ro, tech.dbu);
+        if (mesh.rects.size() > 1) {
+          for (const auto& r : mesh.rects) {
+            regions.rects.push_back({r.xl, r.yl, r.xh, r.yh});
+          }
+        }
+      }
+      auto frame = sat_frame(design, false);
       if (options.handoff_taps) {
         add_handoff_taps(frame);
       }
-      Legroute_regions regions;
-      if (mesh.rects.size() > 1) {
-        for (const auto& r : mesh.rects) {
-          regions.rects.push_back({r.xl, r.yl, r.xh, r.yh});
-        }
+      if (real) {  // the virtual pins name frame nets
+        std::erase_if(regions.pins, [&](const auto& p) { return p.net >= frame.nets.size(); });
       }
       const auto* profile = legroute_power(frame, regions);
       auto        lopt    = options.legroute_options;
       lopt.final          = false;
       lopt.sat_ms         = po.sat_ms;
       lopt.sat_min_fill   = po.fill;
-      lopt.fail_fast      = po.strict;  // a failing probe restarts the placement: no need to solve the other regions
+      // a failing probe restarts the placement: no need to solve the other regions; the real twin solves them all,
+      // every failing region's cells widen
+      lopt.fail_fast      = po.strict && !real;
       lopt.sat_alt.clear();
       lopt.macro_halo_x_dbu = v.halo_x;
       lopt.macro_halo_y_dbu = v.halo_y;
@@ -9112,7 +9140,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         widen(1);
         auto ctl = control;
         if (metrics.density_weight > 0) {
-          ctl.density_weight_seed = metrics.density_weight;
+          ctl.density_weight_seed = metrics.density_weight * po.repulsion;
         }
         ctl.target_density         = density;
         ctl.fillers_in_whitespace  = true;
@@ -9148,9 +9176,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
       std::fprintf(stderr,
-                   "legroute probe round %u: %zu regions (routable %zu, unsat %zu, no answer %zu, sparse %zu), %zu cells widened "
+                   "legroute probe round %u%s: %zu regions (routable %zu, unsat %zu, no answer %zu, sparse %zu), %zu cells widened "
                    "(+%.1f%% area), GP %u iterations, HPWL %.4g -> %.4g, %.1f s\n",
                    round,
+                   real ? " (real regions and pins)" : "",
                    probe.region_stats.size(),
                    count[0],
                    count[1],

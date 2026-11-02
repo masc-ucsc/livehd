@@ -41,8 +41,8 @@ std::vector<double> merge_lines(std::vector<double> values, double low, double h
 }  // namespace
 
 void validate_region_options(const Region_options& o) {
-  if (o.cut != "macro" && o.cut != "mincut" && o.cut != "ratio") {
-    throw std::invalid_argument("region cut must be macro, mincut or ratio");
+  if (o.cut != "macro" && o.cut != "mincut" && o.cut != "ratio" && o.cut != "ratio_through") {
+    throw std::invalid_argument("region cut must be macro, mincut, ratio or ratio_through");
   }
   if (!o.max_cells || o.max_cells > 1000000 || !std::isfinite(o.merge_um) || o.merge_um < 0) {
     throw std::invalid_argument("invalid region cell cap/merge distance");
@@ -140,8 +140,9 @@ Region_mesh Region_mesh::build(const dp::Design& d, const std::vector<int>& macr
   auto&       members   = result.members;
   result.options        = options;
   const auto&         l = d.layout;
-  const bool          ratio  = options.cut == "ratio";
-  const bool          mincut = options.cut == "mincut" || ratio;  // no forced line in either
+  const bool          ratio   = options.cut == "ratio" || options.cut == "ratio_through";
+  const bool          through = options.cut == "ratio_through";  // the nets crossing a child end to end load its cuts too
+  const bool          mincut  = options.cut == "mincut" || ratio;  // no forced line in either
   std::vector<double> raw[2];
   for (int i : macros) {
     if (i < d.num_movable || i >= int(d.node_x.size())) {
@@ -181,6 +182,10 @@ Region_mesh Region_mesh::build(const dp::Design& d, const std::vector<int>& macr
     const size_t iy = std::clamp<std::ptrdiff_t>(std::upper_bound(ys.begin(), ys.end(), y) - ys.begin() - 1, 0, ny - 1);
     initial[iy * nx + ix].push_back(i);
   }
+  struct Span_g {
+    double xlo, xhi, ylo, yhi, w;
+  };
+  std::vector<Span_g>              gspan;  // ratio cuts: every net's span over the chip, built on first use
   std::set<std::pair<int, double>> candidates;
   for (size_t i = 1; i + 1 < xs.size(); ++i) {
     candidates.emplace(0, xs[i]);
@@ -210,38 +215,61 @@ Region_mesh Region_mesh::build(const dp::Design& d, const std::vector<int>& macr
       const auto   pos_y    = [&](int i) { return d.node_y[i] + d.node_size_y[i] / 2; };
       std::vector<int> stamp(d.flat_net2pin_start.size(), 0);
       int              gen = 0;
-      struct Span {
-        double xlo, xhi, ylo, yhi, w;
-      };
+      using Span = Span_g;
+      // every net's span over all its cells (the chip), once: a net with cells beyond a child on both sides crosses
+      // every cut inside the child, whether or not it has a cell there (the pass-throughs a middle column carries)
+      if (gspan.empty()) {
+        gspan.assign(d.flat_net2pin_start.size() - 1, Span_g{INFINITY, -INFINITY, INFINITY, -INFINITY, 0});
+        for (size_t n = 0; n + 1 < d.flat_net2pin_start.size(); ++n) {
+          if (!d.net_mask.empty() && !d.net_mask[n]) {
+            continue;
+          }
+          int cnt = 0;
+          for (int q = d.flat_net2pin_start[n]; q < d.flat_net2pin_start[n + 1]; ++q) {
+            const int node = d.pin2node[size_t(d.flat_net2pin[size_t(q)])];
+            if (node >= 0 && node < d.num_movable) {
+              auto& sp = gspan[n];
+              sp.xlo   = std::min(sp.xlo, pos_x(node));
+              sp.xhi   = std::max(sp.xhi, pos_x(node));
+              sp.ylo   = std::min(sp.ylo, pos_y(node));
+              sp.yhi   = std::max(sp.yhi, pos_y(node));
+              ++cnt;
+            }
+          }
+          gspan[n].w = cnt >= 2 ? (d.net_weights.empty() ? 1.0 : std::max(1.0, d.net_weights[n])) : 0;
+        }
+      }
       std::vector<char> member(size_t(d.num_movable), 0);
-      const auto        spans_of = [&](const std::vector<int>& cs) {
+      // the spans inside a child box b: a net touching the child's cells spans its chip span clipped to the box (its
+      // cells beyond the box extend it to the box's edge); a net crossing the box with no cell in it spans it whole
+      const auto spans_of = [&](const std::vector<int>& cs, const Region_rect& b) {
         std::vector<Span> out;
         ++gen;
         for (int i : cs) {
           member[size_t(i)] = 1;
         }
+        const auto clipped = [&](const Span& g0) {
+          return Span{std::max(g0.xlo, b.xl), std::min(g0.xhi, b.xh), std::max(g0.ylo, b.yl), std::min(g0.yhi, b.yh), g0.w};
+        };
         for (int i : cs) {
           for (int k = d.flat_node2pin_start[size_t(i)]; k < d.flat_node2pin_start[size_t(i) + 1]; ++k) {
             const int n = d.pin2net[size_t(d.flat_node2pin[size_t(k)])];
-            if (n < 0 || stamp[size_t(n)] == gen || (!d.net_mask.empty() && !d.net_mask[size_t(n)])) {
+            if (n < 0 || stamp[size_t(n)] == gen || gspan[size_t(n)].w <= 0) {
               continue;
             }
             stamp[size_t(n)] = gen;
-            Span sp{INFINITY, -INFINITY, INFINITY, -INFINITY, d.net_weights.empty() ? 1.0 : std::max(1.0, d.net_weights[size_t(n)])};
-            int  inside = 0;
-            for (int q = d.flat_net2pin_start[size_t(n)]; q < d.flat_net2pin_start[size_t(n) + 1]; ++q) {
-              const int node = d.pin2node[size_t(d.flat_net2pin[size_t(q)])];
-              if (node >= 0 && node < d.num_movable && member[size_t(node)]) {
-                sp.xlo = std::min(sp.xlo, pos_x(node));
-                sp.xhi = std::max(sp.xhi, pos_x(node));
-                sp.ylo = std::min(sp.ylo, pos_y(node));
-                sp.yhi = std::max(sp.yhi, pos_y(node));
-                ++inside;
-              }
-            }
-            if (inside >= 2) {
-              out.push_back(sp);
-            }
+            out.push_back(clipped(gspan[size_t(n)]));
+          }
+        }
+        for (size_t n = 0; through && n < gspan.size(); ++n) {
+          const auto& g0 = gspan[n];
+          if (stamp[n] == gen || g0.w <= 0) {
+            continue;
+          }
+          const bool across_x = g0.xlo < b.xl && g0.xhi > b.xh && g0.ylo < b.yh && g0.yhi > b.yl;
+          const bool across_y = g0.ylo < b.yl && g0.yhi > b.yh && g0.xlo < b.xh && g0.xhi > b.xl;
+          if (across_x || across_y) {
+            out.push_back(clipped(g0));
           }
         }
         for (int i : cs) {
@@ -268,7 +296,7 @@ Region_mesh Region_mesh::build(const dp::Design& d, const std::vector<int>& macr
         return peak / std::max(1e-9, across_um * (along_x ? h_tracks : v_tracks));
       };
       const auto child_ratio = [&](const std::vector<int>& cs, const Region_rect& b) {
-        const auto sp = spans_of(cs);
+        const auto sp = spans_of(cs, b);
         return std::max(worst(sp, true, (b.yh - b.yl) / dbu), worst(sp, false, (b.xh - b.xl) / dbu));
       };
       double best = INFINITY;

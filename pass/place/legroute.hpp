@@ -63,6 +63,13 @@ struct Legroute_options {
   // regions to solve: the regions solve in checkerboard waves (no two neighbours in one wave), a wave's choices are the
   // next wave's fixed endpoints. 0: every hop fixed ahead (the hop chooser's tile)
   unsigned    hop_choice       = 0;
+  // spill_rounds: after the regions solve, a region without a routable answer pushes about spill_fraction of its boxes
+  // into the regions around it with room (up to the fill that evens them with it; the next ring too when the
+  // neighbours are short of room): min cuts inside the region, the neighbours its terminals, pick the boxes and where
+  // each goes (spill_cut). The crossings are redone and only the regions whose boxes, hops or fixed routes changed
+  // solve again; up to spill_rounds times. A pathological placement spreads out until it routes. 0: off
+  unsigned    spill_rounds     = 0;
+  double      spill_fraction   = .2;
   // the share of a tile's tracks, per direction, that the routes fixed ahead of the SAT (hops, IO pre-routes) may
   // take together; the rest stays for the region's own routes
   double      reserve_share    = .5;
@@ -172,6 +179,7 @@ struct Legroute_report {
   size_t  sat_cut_regions = 0;  // of the unsat regions, those over the cut bound (nets forced across a tile boundary
                                 // beyond its tracks): unsat before any solving
   size_t  sat_waves = 0, sat_hops_free = 0, sat_hops_moved = 0;  // hop_choice: solve waves, hops left to a region's SAT, hops it moved
+  size_t  spill_rounds = 0, spilled_boxes = 0;                    // spill: rounds run, boxes pushed out of failing regions
   size_t  sat_hops_over_share = 0;             // hops placed past hop_share (every boundary tile of their pair was at it)
   size_t  global_nets = 0, global_pieces = 0;  // legroute.global: nets joined by L traces, their pass-through pieces
   size_t  global_unrouted = 0, global_full_edges = 0;  // global_route: nets without a path, edges filled to the share

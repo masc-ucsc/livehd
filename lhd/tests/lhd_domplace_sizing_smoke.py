@@ -79,7 +79,7 @@ base = [lhd, 'synth', str(source), '--top', 'doms', '-q',
         '--set', 'synth.mapper=usyn', '--set', 'pass.usyn.clock_phases=1', '--set', 'pass.usyn.tmap=abc',
         '--set', f'synth.liberty={two_rung_lib}', '--set', f'synth.lef={libdir}/sky130hd.tlef,{two_rung_lef}',
         '--set', f'synth.sdc={sdc}', '--set', 'pass.usyn.physical=domino_provisional', '--set', 'synth.opentimer=false',
-        '--set', 'pass.usyn.domino_area_margin_pct=13',
+        '--set', 'pass.usyn.domino_area_margin_pct=5',
         '--set', 'synth.place=true', '--set', 'synth.place.timing_driven=false', '--set', 'synth.place.iterations=80',
         '--set', 'synth.place.grid.density=8', '--set', 'synth.place.stage_timing=true']
 # Explicit test coefficients (they override the built-in logical-effort
@@ -129,7 +129,7 @@ def without(args, *settings):
 
 # Usage: sizing needs the profile and stage timing; its knobs need sizing.
 for name, command, extra, needle in (
-        ('noprofile', without(base, 'pass.usyn.physical=domino_provisional', 'pass.usyn.domino_area_margin_pct=13'), sizing,
+        ('noprofile', without(base, 'pass.usyn.physical=domino_provisional', 'pass.usyn.domino_area_margin_pct=5'), sizing,
          'needs pass.usyn.physical=domino_provisional'),
         ('nostage', without(base, 'synth.place.stage_timing=true'), coefficients + sizing, 'synth.place.stage_timing=true'),
         ('knob', base, coefficients + ['--set', 'synth.place.domino_sizing.buffers=false'], 'need synth.place.domino_sizing=true'),
@@ -142,8 +142,9 @@ estimated = run('estimated', sizing + ['--set', 'synth.place.domino_sizing.trial
 assert estimated['stage_timing']['unmeasured'] == [] and estimated['stage_timing']['period_ps'] > 0, estimated['stage_timing']
 assert estimated['domino_sizing']['before']['delay_ps'] > 0, estimated['domino_sizing']
 
-# Up-size: q1 steps to its dfxtp_2 variant in place and displaces the
-# single-row cell its wider footprint covers; the period improves.
+# Up-size: q1 steps to its dfxtp_2 variant, in place (displacing the
+# single-row cell its wider footprint covers) or shifted along its row pair;
+# the period improves.
 plain = run('plain', coefficients + ['--set', 'synth.place.utilization=0.4'])
 grown = run('grown', coefficients + sizing + ['--set', 'synth.place.utilization=0.4', '--emit-dir', f'report:{root}/grown_report'])
 place = grown['qor']['place']
@@ -155,7 +156,8 @@ assert str(root / 'grown_report/domino_sizing.json') in grown['outputs'] and str
 assert [(t['move'], t['outcome']) for t in report['trials']] == [('up', 'accepted')], report['trials']
 assert report['counts']['up_accepted'] == 1 and report['after']['delay_ps'] < report['before']['delay_ps'], report
 eco = place['multirow_eco']
-assert eco['cells'] == 1 and eco['displaced'] == 1 and eco['displaced_cells'] == 1 and eco['grown_sites'] > 0, eco
+assert eco['cells'] == 1 and eco['in_place'] + eco['shifted'] == 1 and eco['grown_sites'] > 0, eco
+assert eco['displaced'] == eco['displaced_cells'] and (eco['shifted'] or eco['displaced'] == 1), eco
 assert place['legal'] and place['multirow']['cells'] == 1, place
 assert place['stage_timing']['period_ps'] == report['after']['delay_ps'], (place['stage_timing'], report['after'])
 assert report['clock']['delta_ff'] > 0, report['clock']  # the dfxtp_2 variant's CK load
@@ -173,7 +175,10 @@ v0, v1 = sorted((n for n in variants if n.endswith('_t' + template)), key=lambda
 assert variants[v1]['register'] == 'sky130_fd_sc_hd__dfxtp_2' and variants[v1]['width_dbu'] > variants[v0]['width_dbu']
 assert variants[v0]['rail_twin'] in variants and variants[variants[v0]['rail_twin']]['register'] == variants[v0]['register']
 assert before.components[q1].macro == v0 and after.components[q1].macro == v1, (before.components[q1], after.components[q1])
-assert after.components[q1][1:4] == before.components[q1][1:4]  # grown in place, same rows and orientation
+if eco['in_place']:
+    assert after.components[q1][1:4] == before.components[q1][1:4]  # grown in place, same rows and orientation
+else:  # shifted along its row pair
+    assert after.components[q1][2:4] == before.components[q1][2:4], (before.components[q1], after.components[q1])
 assert after.components[q1].orientation == after.rows[after.components[q1].y]
 moved = sorted(n for n, c in after.components.items() if n != q1 and c != before.components[n])
 assert len(moved) == eco['displaced_cells'], moved
@@ -194,8 +199,10 @@ assert warm['qor']['place']['domino_sizing']['trials'] == report['trials']
 # A dense core cannot pack the wider variant anywhere: the rejected trial
 # leaves the placement exactly as an unsized run places it. The core is sized
 # by the density target (the bins are two rows tall, so the hard cap averages
-# over the row pair; a utilization above the target alone does not shrink it).
-dense = ['--set', 'synth.place.utilization=0.75', '--set', 'synth.place.density=0.7']
+# over the row pair; a utilization above the target alone does not shrink it);
+# 0.79 sits just under the hard bin cap, where the 13-site domino masters
+# leave no row pair for the wider rung.
+dense = ['--set', 'synth.place.utilization=0.79', '--set', 'synth.place.density=0.79']
 tight = run('tight', coefficients + sizing + dense)['qor']['place']['domino_sizing']
 assert [(t['move'], t['outcome']) for t in tight['trials']] == [('up', 'rejected_packing')], tight['trials']
 failure = tight['trials'][0]['failure']  # the two-row ECO's refusal, not the widest-row pre-check

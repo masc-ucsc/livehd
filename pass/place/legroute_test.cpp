@@ -568,4 +568,50 @@ TEST(Legroute, HopChoiceSolvesInTwoWaves) {
     EXPECT_TRUE(used.insert(b.tile).second) << "two boxes on tile " << b.tile;
   }
 }
+
+// A region whose boxes all talk to fixed cells in the neighbour cannot route (more hops than the boundary has
+// tracks) until the spill rounds push boxes out: min cuts inside the failing region (VieCut) pick the boxes and the
+// neighbour they go to (the one their nets reach), and the regions that changed solve again.
+TEST(Legroute, SpillRoundsPushAFailingRegionsBoxesOut) {
+  Fixture             f(400, 8);  // a 20 x 2 um core: two regions of 10 um (96 and 104 tiles), a 4-tile boundary
+  std::vector<size_t> movable, fixed;
+  for (int col = 0; col < 6; ++col) {
+    for (int row = 0; row < 4; ++row) {
+      movable.push_back(f.cell("dff", 800 * col + 200, 500 * row));              // the left region's flops
+      fixed.push_back(f.cell("dff", 10400 + 1600 * col + 200, 500 * row + 250));  // fixed flops spread over the right one
+      f.fp.components[fixed.back()].place.status = ph::Status::FIXED;
+    }
+  }
+  for (size_t k = 0; k < movable.size(); ++k) {  // 24 nets across the boundary: 4 tiles x 6 tracks cannot take them
+    f.net({
+        {movable[k], "Q"},
+        {  fixed[k], "D"}
+    });
+  }
+  Legroute_options opt;
+  opt.threads         = 1;
+  opt.clock_spine     = false;
+  opt.reserved_tracks = 7;  // 3 tracks left per 10-track layer, none on the 5-track one
+  opt.spill_rounds    = 6;
+  opt.spill_fraction  = .2;
+  const auto       d = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
+  Legroute_regions regions;
+  regions.rects = {{0, 0, 10000, 2000}, {10000, 0, 20000, 2000}};
+  const auto      g     = lr::build_grid(d, regions);
+  auto            boxes = lr::build_boxes(d, g);
+  lr::Routing     R;
+  Legroute_report rep;
+  lr::sat_place(d, g, boxes, regions, R, rep);
+  EXPECT_EQ(rep.sat_regions, 2u);
+  EXPECT_GE(rep.spill_rounds, 1u) << boxes.boxes.size() << " boxes";
+  EXPECT_GT(rep.spilled_boxes, 0u);
+  EXPECT_EQ(rep.sat_unsat_regions + rep.sat_unknown_regions, 0u);
+  std::set<int> used;
+  std::set<int> in_region;
+  for (const auto& b : boxes.boxes) {
+    EXPECT_TRUE(used.insert(b.tile).second) << "two boxes on tile " << b.tile;
+    in_region.insert(g.region[size_t(b.tile)]);
+  }
+  EXPECT_EQ(in_region.size(), 2u) << "the right region took boxes";
+}
 }  // namespace livehd::placement

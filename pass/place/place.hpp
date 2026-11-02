@@ -202,6 +202,13 @@ struct Options {
     bool     enabled = false;
     unsigned cells = 1200, sat_ms = 20000, iterations = 100;  // cells 0: the region mesh's own size
     unsigned rounds = 1;  // probe, inflate and resume GP this many times, until every region routes
+    // real: the probe is the real legroute's twin (its region mesh with bus-ordered virtual pins, refined at the
+    // placement of each round, every region solved), so the regions it finds unroutable are the ones the real run
+    // would fail; false: small regions without virtual pins
+    bool     real = false;
+    // repulsion: the GP resume after the inflation runs at this multiple of the converged density weight (above one
+    // the cells spread harder around the widened ones)
+    double   repulsion = 1;
     double   fill = 0.5, target = 0.6, max_inflate = 1.5;
     double   tree_congestion = 1;  // the real legroute's tree congestion weight once the probe ran
     // false (experiments): a legroute run with regions left without a routable answer keeps its placement (boxes on

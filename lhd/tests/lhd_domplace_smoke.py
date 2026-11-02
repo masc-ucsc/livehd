@@ -84,9 +84,10 @@ assert reasons == {'q1': 'domino-all', 'q2': 'domino-all', 'q3': 'identity-endpo
 totals = physical['totals']
 assert totals['converted'] == 2 and totals['eligible'] == 4, totals
 q1 = next(e for r in physical['regions'] for e in r['endpoints'] if e['name'] == 'q1')
-# (a&b)|(c&d) with four domino-only devices: x = 4, 4 * A(inv_1) + A(dfxtp_1)
-# = 35.0336 um^2, exactly 14 two-row sites of 0.46 x 5.44 um.
-assert abs(q1['a_domino'] - 35.0336) < 1e-9 and abs(q1['a_footprint_um2'] - 6.44 * 5.44) < 1e-9, q1
+# (a&b)|(c&d) with four domino-only devices: x = 4/3 (a pull-down device is a
+# third of the NOT), 4/3 * A(inv_1) + A(dfxtp_1) = 32.53 um^2, snapped to the
+# 600 x A grid: exactly 13 two-row sites of 0.46 x 5.44 um.
+assert abs(q1['a_domino'] - 32.5312) < 1e-9 and abs(q1['a_footprint_um2'] - 5.98 * 5.44) < 1e-9, q1
 
 # Logical output (tmap=none) still hands the profile its Liberty.
 logical = [a if a != 'pass.usyn.tmap=abc' else 'pass.usyn.tmap=none' for a in base]

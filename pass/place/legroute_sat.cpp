@@ -24,6 +24,8 @@
 #include <tuple>
 #include <unordered_map>
 
+#include "algorithms/flow/push_relabel.h"  // VieCut: the s-t min cuts that pick a failing region's spill
+#include "data_structure/mutable_graph.h"
 #include "legroute_internal.hpp"
 #include "sat_solver.hpp"
 
@@ -1473,10 +1475,11 @@ struct Region_out {
   };
   Sat_status                       status  = Sat_status::unknown;
   bool                             skipped = false;
+  std::string                      unfit;    // spill rounds: the region had more boxes than fitting tiles (no model)
   std::vector<Piece>               conns;  // the SAT's connections, then the policy's trees and IO pre-routes here
   std::vector<int>                 local;  // 1-1 nets between neighbor boxes
   std::vector<std::pair<int, int>> tiles;      // (box, tile)
-  std::vector<std::pair<int, int>> hop_tiles;  // (hop id, the tile chosen) for the free hops
+  std::vector<std::tuple<int, int, int>> hop_tiles;  // (net, the hop chooser's tile, the tile chosen) per free hop
   Legroute_report                  rep;        // the sat_* counters
   double                           cost = 0, seconds = 0;
 };
@@ -1523,7 +1526,7 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
   // literals over the candidates' hull and a tile literal per candidate (no tile is taken by it), and at most
   // hop_room hops on one boundary tile
   struct Free_hop {
-    int                              id = -1, c0 = 0, c1 = 0, r0 = 0, r1 = 0;
+    int                              id = -1, net = -1, def = -1, c0 = 0, c1 = 0, r0 = 0, r1 = 0;
     std::vector<int>                 X, Y;
     std::vector<std::pair<int, int>> tiles;  // (tile, literal)
   };
@@ -1541,7 +1544,9 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
           continue;
         }
         Free_hop fh;
-        fh.id = e.hop;
+        fh.id  = e.hop;
+        fh.net = int(n);
+        fh.def = e.tile;
         fh.c0 = g.cols;
         fh.c1 = -1;
         fh.r0 = g.rows;
@@ -1778,6 +1783,21 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       }
     }
     rep.frozen_boxes += B.size();
+  }
+  if (out.skipped) {  // fail_fast skipped this region: its boxes take fitting tiles (the fallback), nothing is solved
+    const auto tiles = fallback_tiles(window_tiles);
+    for (size_t i = 0; i < B.size(); ++i) {
+      if (tiles[i] >= 0) {
+        boxes.boxes[B[i]].tile = tiles[i];
+      }
+    }
+    for (int b : B) {
+      out.tiles.emplace_back(b, boxes.boxes[b].tile);
+    }
+    rep.sat_regions += 1;
+    ++rep.sat_skipped_regions;
+    out.status = Sat_status::unknown;
+    return;
   }
   for (size_t i = 0; i < B.size(); ++i) {
     const Endpoint e{B[i], -1};
@@ -2499,7 +2519,7 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       for (const auto& [t, p] : fh.tiles) {
         if (cnf.solver.value(p)) {
           hop_at[fh.id] = t;
-          out.hop_tiles.emplace_back(fh.id, t);
+          out.hop_tiles.emplace_back(fh.net, fh.def, t);
           break;
         }
       }
@@ -3646,6 +3666,204 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
   return out;
 }
 
+// ---------------------------------------------------------------- spill selection: min cuts inside a failing region
+// The boxes of a failing region r to push out, and where: the region and its receiving neighbours as one graph, the
+// region's movable boxes its nodes, each neighbour contracted to a terminal T_j, one terminal S for what stays. A net
+// is a star of edges from its first box to its other boxes (weight 100 x the net's weight over its endpoint count
+// less one: a net costs about the same however many boxes it joins); a net reaching neighbour j also pulls its boxes
+// to T_j, a net with a fixed endpoint in r or an endpoint past the neighbours pulls them to S. Each neighbour's side
+// is its isolating s-t min cut (VieCut's push-relabel: T_j against S and the other terminals), so the netlist decides
+// which boxes leave and to which neighbour, connected clusters together. A uniform pull a of every box to the
+// neighbours is bisected to the smallest value that moves at least `want` boxes; a box two cuts claim goes to the
+// neighbour its nets reach most (the roomier one when tied), and a neighbour takes at most its room (the boxes its
+// nets reach most first). Returns (box, region) pairs.
+struct Spill_target {
+  int region = -1, room = 0;
+};
+std::vector<std::pair<int, int>> spill_cut(const Design& d, const Boxes& boxes, const std::vector<Net_ends>& ends,
+                                           const std::vector<int>& cand, int r, const std::vector<Spill_target>& to, size_t want) {
+  const size_t B = cand.size(), M = to.size();
+  if (B == 0 || M == 0 || want == 0) {
+    return {};
+  }
+  want = std::min(want, B);
+  std::vector<int>      node_of(boxes.boxes.size(), -1);
+  std::map<int, size_t> jof;  // region -> terminal
+  for (size_t i = 0; i < B; ++i) {
+    node_of[size_t(cand[i])] = int(i);
+  }
+  for (size_t j = 0; j < M; ++j) {
+    jof[to[j].region] = j;
+  }
+  std::vector<uint64_t>                   to_s(B, 0);
+  std::vector<std::vector<uint64_t>>      to_t(M, std::vector<uint64_t>(B, 0));
+  std::map<std::pair<int, int>, uint64_t> bb;  // box-box star edges (lower node first)
+  for (size_t n = 0; n < d.nets.size(); ++n) {
+    const auto& per = ends[n].per_region;
+    const auto  it  = per.find(r);
+    if (it == per.end()) {
+      continue;
+    }
+    std::vector<int> mine;
+    bool             anchored = false;
+    for (const auto& e : it->second) {
+      if (e.box >= 0 && node_of[size_t(e.box)] >= 0) {
+        mine.push_back(node_of[size_t(e.box)]);
+      } else {
+        anchored = true;  // a fixed tile, or a box of r that stays
+      }
+    }
+    if (mine.empty()) {
+      continue;
+    }
+    std::ranges::sort(mine);
+    mine.erase(std::unique(mine.begin(), mine.end()), mine.end());
+    std::vector<size_t> reach;  // the receiving neighbours the net reaches
+    for (const auto& [rr, _] : per) {
+      if (rr == r) {
+        continue;
+      }
+      if (const auto j = jof.find(rr); j != jof.end()) {
+        reach.push_back(j->second);
+      } else {
+        anchored = true;
+      }
+    }
+    const size_t   k = mine.size() + reach.size() + (anchored ? 1 : 0);
+    const uint64_t w = std::max<uint64_t>(1, 100 * uint64_t(d.nets[n].weight) / std::max<size_t>(1, k - 1));
+    for (int i : mine) {
+      if (anchored) {
+        to_s[size_t(i)] += w;
+      }
+      for (size_t j : reach) {
+        to_t[j][size_t(i)] += w;
+      }
+    }
+    for (size_t q = 1; q < mine.size(); ++q) {
+      bb[{mine[0], mine[q]}] += w;
+    }
+  }
+  std::vector<uint64_t> hold(B, 0);  // the most a box can be held back: a pull above it leaves for sure
+  for (size_t i = 0; i < B; ++i) {
+    hold[i] = to_s[i];
+    for (size_t j = 0; j < M; ++j) {
+      hold[i] += to_t[j][i];
+    }
+  }
+  for (const auto& [e, w] : bb) {
+    hold[size_t(e.first)] += w;
+    hold[size_t(e.second)] += w;
+  }
+  const NodeID U = NodeID(B), T = NodeID(B + 1);
+  const auto   side = [&](size_t j, uint64_t a) {  // the boxes on neighbour j's side of its isolating cut at pull a
+    auto G = std::make_shared<mutable_graph>();
+    G->start_construction(NodeID(B + 2));
+    for (size_t i = 0; i < B + 2; ++i) {
+      G->new_node();
+    }
+    for (const auto& [e, w] : bb) {
+      G->new_edge(NodeID(e.first), NodeID(e.second), w);
+    }
+    for (size_t i = 0; i < B; ++i) {
+      uint64_t u = to_s[i];
+      for (size_t k = 0; k < M; ++k) {
+        if (k != j) {
+          u += to_t[k][i];
+        }
+      }
+      if (u > 0) {
+        G->new_edge(NodeID(i), U, u);
+      }
+      if (to_t[j][i] + a > 0) {
+        G->new_edge(NodeID(i), T, to_t[j][i] + a);
+      }
+    }
+    G->finish_construction();
+    push_relabel<>    pr;
+    const auto        stay = pr.solve_max_flow_min_cut(G, {U, T}, 0, true).second;
+    std::vector<char> on(B, 1);
+    for (NodeID v : stay) {
+      if (v < B) {
+        on[v] = 0;
+      }
+    }
+    return on;
+  };
+  const auto claim = [&](uint64_t a) {  // per box: the neighbours whose cuts claim it
+    std::vector<std::vector<size_t>> who(B);
+    for (size_t j = 0; j < M; ++j) {
+      const auto on = side(j, a);
+      for (size_t i = 0; i < B; ++i) {
+        if (on[i]) {
+          who[i].push_back(j);
+        }
+      }
+    }
+    return who;
+  };
+  // the assignment at pull a: a box two cuts claim goes to the neighbour its nets reach most (the roomier one when
+  // tied), each neighbour keeps the boxes its nets reach most, at most its room
+  const auto assign = [&](uint64_t a) {
+    const auto                                         who = claim(a);
+    std::vector<std::vector<std::pair<uint64_t, int>>> take(M);  // per neighbour: (pull, box)
+    for (size_t i = 0; i < B; ++i) {
+      if (who[i].empty()) {
+        continue;
+      }
+      size_t pick = who[i][0];
+      for (size_t j : who[i]) {
+        if (to_t[j][i] > to_t[pick][i] || (to_t[j][i] == to_t[pick][i] && to[j].room > to[pick].room)) {
+          pick = j;
+        }
+      }
+      take[pick].emplace_back(to_t[pick][i], cand[i]);
+    }
+    for (size_t j = 0; j < M; ++j) {
+      std::ranges::sort(take[j], std::greater<>());
+      take[j].resize(std::min(take[j].size(), size_t(std::max(0, to[j].room))));
+    }
+    return take;
+  };
+  const auto moved = [&](const std::vector<std::vector<std::pair<uint64_t, int>>>& take) {
+    size_t n = 0;
+    for (const auto& t : take) {
+      n += t.size();
+    }
+    return n;
+  };
+  size_t room_sum = 0;
+  for (const auto& t : to) {
+    room_sum += size_t(std::max(0, t.room));
+  }
+  want = std::min(want, room_sum);
+  uint64_t lo = 0, hi = 1;
+  for (size_t i = 0; i < B; ++i) {
+    hi = std::max(hi, hold[i] + 1);
+  }
+  auto best = assign(0);
+  if (moved(best) < want) {  // the smallest uniform pull that moves enough: a bisection (the claims grow with it)
+    auto top = assign(hi);
+    while (hi - lo > 1) {
+      const uint64_t mid = lo + (hi - lo) / 2;
+      auto           c   = assign(mid);
+      if (moved(c) >= want) {
+        hi  = mid;
+        top = std::move(c);
+      } else {
+        lo = mid;
+      }
+    }
+    best = std::move(top);
+  }
+  std::vector<std::pair<int, int>> out;
+  for (size_t j = 0; j < M; ++j) {
+    for (const auto& [_, b] : best[j]) {
+      out.emplace_back(b, to[j].region);
+    }
+  }
+  return out;
+}
+
 }  // namespace
 
 void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regions& regions, Routing& R, Legroute_report& rep) {
@@ -3735,7 +3953,20 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
   std::vector<int>                     chosen(g.regions, 0);
   std::vector<Policy>                  P;
   Crossings                            x;
-  {
+  // spill rounds: the region adjacency and the free tiles per region, for pushing a failing region's boxes out
+  std::vector<std::set<int>> region_adj(size_t(g.regions));
+  std::vector<int>           region_free(size_t(g.regions), 0);
+  for (int t = 0; t < int(g.size()); ++t) {
+    region_free[size_t(g.region[t])] += !g.blocked[t];
+    for (int q : {g.col(t) + 1 < g.cols ? t + 1 : -1, t + g.cols < int(g.size()) ? t + g.cols : -1}) {
+      if (q >= 0 && g.region[t] != g.region[q]) {
+        region_adj[size_t(g.region[t])].insert(g.region[q]);
+        region_adj[size_t(g.region[q])].insert(g.region[t]);
+      }
+    }
+  }
+  std::vector<uint64_t> sig_prev(size_t(g.regions), 0);
+  for (unsigned round = 0;; ++round) {
     x = crossings(d, g, boxes, regions, cap_h, cap_v, true);
     P.assign(policies.size(), {});
     for (size_t p = 0; p < policies.size(); ++p) {  // the policy's pre-placement on its own copy
@@ -3774,6 +4005,44 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
     }
     for (int t = 0; t < int(g.size()); ++t) {
       region_tiles[g.region[t]].push_back(t);
+    }
+    // a region whose boxes, fixed boxes, hops, global pieces, trees and IO pre-routes are what they were in the last
+    // round keeps its answer (one policy): only the regions a spill touched solve again
+    std::vector<char> reuse(size_t(g.regions), 0);
+    {
+      std::vector<uint64_t> sig(size_t(g.regions), 0x9e3779b97f4a7c15ull);
+      const auto            mix = [](uint64_t& h, uint64_t v) { h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2); };
+      for (int r = 0; r < g.regions; ++r) {
+        for (int b : region_boxes[size_t(r)]) {
+          mix(sig[size_t(r)], uint64_t(b) * 3 + (boxes.boxes[size_t(b)].fixed ? 1 : 0));
+          mix(sig[size_t(r)], uint64_t(boxes.boxes[size_t(b)].tile + 1));
+          if (P[0].allowed.contains(b)) {
+            mix(sig[size_t(r)], 7);
+          }
+        }
+      }
+      for (size_t k = 0; k < x.hops.size(); ++k) {
+        const auto [a, b] = x.hops[k];
+        for (int r : {g.region[a], g.region[b]}) {
+          mix(sig[size_t(r)], (uint64_t(x.hop_net[k]) << 32) ^ (uint64_t(a) << 16) ^ uint64_t(b));
+        }
+      }
+      for (const auto& gp : x.pieces) {
+        mix(sig[size_t(gp.region)], (uint64_t(gp.net) << 32) ^ (uint64_t(gp.a) << 16) ^ uint64_t(gp.b));
+      }
+      for (const auto& ft : P[0].trees) {
+        for (const auto& piece : ft.pieces) {
+          mix(sig[size_t(piece.region)], (uint64_t(piece.net) << 32) ^ (uint64_t(piece.a) << 16) ^ uint64_t(piece.b) ^ (ft.dropped ? 1 : 0));
+        }
+      }
+      for (const auto& io : P[0].io_routes) {
+        mix(sig[size_t(io.region)], (uint64_t(io.net_a) << 32) ^ (uint64_t(io.ta) << 16) ^ uint64_t(io.tb));
+      }
+      for (int r = 0; r < g.regions; ++r) {
+        reuse[size_t(r)] = round > 0 && policies.size() == 1 && sig[size_t(r)] == sig_prev[size_t(r)]
+                           && last[0][size_t(r)].status == Sat_status::satisfiable;
+      }
+      sig_prev = sig;
     }
     std::fprintf(stderr,
                  "legroute sat: %d regions, %zu boxes, %zu hops (%zu over the share, %zu unjoined), %zu global pieces; solving %zu "
@@ -3961,6 +4230,7 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
       }
       std::vector<int>  fixed_hops(g.size(), 0), default_hops(g.size(), 0);
       std::vector<char> hop_free(x.hops.size(), 0);
+      size_t            hops_free = 0;  // this round's
       for (size_t k = 0; k < x.hops.size(); ++k) {
         const auto [a, b] = x.hops[k];
         hop_free[k] = !net_fixed[size_t(x.hop_net[k])] && g.region[a] != g.region[b] && wave[size_t(g.region[a])] != wave[size_t(g.region[b])];
@@ -4011,8 +4281,9 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
             break;
           }
         }
-        ++rep.sat_hops_free;
+        ++hops_free;
       }
+      rep.sat_hops_free += hops_free;
       for (size_t t = 0; t < g.size(); ++t) {  // the hops already there stay possible
         hop_room[t] = std::max(hop_room[t], default_hops[t]);
       }
@@ -4020,7 +4291,7 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
                    "legroute sat: hop_choice %u: %u waves, %zu of %zu hops free (within %u tiles of their chooser's tile)\n",
                    d.opt.hop_choice,
                    waves,
-                   rep.sat_hops_free,
+                   hops_free,
                    x.hops.size(),
                    d.opt.hop_choice);
     }
@@ -4034,30 +4305,46 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
       auto&        Q     = P[p];
       auto&        out   = last[p][r];
       const auto   start = Clock::now();
-      if (failed_fast.load()) {  // fail_fast: the placement restarts anyway; the region keeps its boxes unsolved
+      if (reuse[size_t(r)]) {  // a spill round: nothing of this region changed, its answer stands
+        for (const auto& [b, t] : out.tiles) {
+          Q.boxes.boxes[size_t(b)].tile = t;
+        }
+        return;
+      }
+      out = Region_out{};
+      if (failed_fast.load()) {  // fail_fast: the placement restarts anyway; the region's boxes take fitting tiles, no model
         out.skipped = true;
         out.status  = Sat_status::unknown;
         ++out.rep.sat_fail_fast_skipped;
-        return;
       }
-      solve_region(d,
-                   policies[p],
-                   g,
-                   r,
-                   region_boxes[r],
-                   region_tiles[r],
-                   Q.boxes,
-                   x.ends,
-                   Q.treed,
-                   Q.allowed,
-                   Q.pinned_tile,
-                   policies.size() > 1 ? std::format(" policy {}", p) : "",
-                   cap_h0,
-                   cap_v0,
-                   Q.reserve,
-                   hop_tiles,
-                   hop_room,
-                   out);
+      try {
+        solve_region(d,
+                     policies[p],
+                     g,
+                     r,
+                     region_boxes[r],
+                     region_tiles[r],
+                     Q.boxes,
+                     x.ends,
+                     Q.treed,
+                     Q.allowed,
+                     Q.pinned_tile,
+                     policies.size() > 1 ? std::format(" policy {}", p) : "",
+                     cap_h0,
+                     cap_v0,
+                     Q.reserve,
+                     hop_tiles,
+                     hop_room,
+                     out);
+      } catch (const Legroute_unfit& e) {  // more boxes than fitting tiles: a spill round pushes boxes out first
+        if (round >= d.opt.spill_rounds || policies.size() > 1) {
+          throw;
+        }
+        out        = Region_out{};
+        out.status = Sat_status::unsatisfiable;
+        out.unfit  = e.what();
+        std::fprintf(stderr, "legroute sat: %s; a spill round pushes its boxes out\n", e.what());
+      }
       out.seconds = seconds_since(start);
       if (d.opt.fail_fast && out.status != Sat_status::satisfiable && !out.skipped) {
         if (!failed_fast.exchange(true)) {
@@ -4109,8 +4396,8 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
           const int   ao     = g.region[a] == hop_owner[k] ? a : b;
           int         picked = -1;
           if (res.status == Sat_status::satisfiable) {
-            for (const auto& [id, t] : res.hop_tiles) {
-              if (id == int(k)) {
+            for (const auto& [nn, dt, t] : res.hop_tiles) {
+              if (nn == x.hop_net[k] && dt == ao) {
                 picked = t;
                 break;
               }
@@ -4160,6 +4447,124 @@ void sat_place(const Design& d, const Grid& g, Boxes& boxes, const Legroute_regi
         }
       }
       chosen[r] = std::max(best, 0);
+    }
+    std::vector<int> failed;
+    for (int r = 0; r < g.regions; ++r) {
+      if (last[size_t(chosen[r])][size_t(r)].status != Sat_status::satisfiable) {
+        failed.push_back(r);
+      }
+    }
+    if (failed.empty() || round >= d.opt.spill_rounds || policies.size() > 1) {
+      break;
+    }
+    // spill: each failing region pushes about spill_fraction of its boxes into its neighbours with room (the next ring
+    // of regions too when the neighbours' room is short), the boxes and their neighbours chosen by min cuts inside the
+    // region (spill_cut), each box onto the nearest free tile it fits in its new region; the boxes keep their cells,
+    // the next round redoes the crossings and solves what changed. A failing neighbour receives too: the two sides
+    // of a hot boundary fail together, and a box crossing it toward its nets takes its hops with it
+    std::vector<int> boxes_in(size_t(g.regions), 0), fit_tiles(size_t(g.regions), 0);
+    for (const auto& bx : boxes.boxes) {
+      boxes_in[size_t(bx.region)] += !bx.fixed;
+    }
+    for (int t = 0; t < int(g.size()); ++t) {  // tiles a movable box can take: unblocked and not pinned by a fixed box
+      fit_tiles[size_t(g.region[t])] += !g.blocked[t] && !P[0].pinned_tile[size_t(t)];
+    }
+    std::set<int> taken;  // tiles given to boxes this round
+    size_t        moved = 0;
+    for (int r : failed) {
+      std::vector<int> cand;
+      for (int b : region_boxes[size_t(r)]) {
+        if (!boxes.boxes[size_t(b)].fixed && !P[0].allowed.contains(b)) {
+          cand.push_back(b);
+        }
+      }
+      const size_t want
+          = std::min(cand.size(), std::max<size_t>(1, size_t(std::ceil(d.opt.spill_fraction * double(region_boxes[size_t(r)].size())))));
+      // a region's room: up to the fill that evens it with the failing region, and never past nine tenths of its
+      // tiles (the solver needs slack)
+      const auto room_of = [&](int s2) {
+        const double fill = double(boxes_in[size_t(r)] + boxes_in[size_t(s2)]) / std::max(1, fit_tiles[size_t(r)] + fit_tiles[size_t(s2)]);
+        return int(std::floor(std::min(0.9, fill) * double(fit_tiles[size_t(s2)]))) - boxes_in[size_t(s2)];
+      };
+      std::vector<Spill_target> to;
+      int                       room_sum = 0;
+      const auto                add_ring = [&](const std::set<int>& ring) {
+        for (int s2 : ring) {
+          const int room = room_of(s2);
+          if (s2 == r || room <= 0 || std::ranges::any_of(to, [&](const auto& x2) { return x2.region == s2; })) {
+            continue;
+          }
+          to.push_back({s2, room});
+          room_sum += room;
+        }
+      };
+      add_ring(region_adj[size_t(r)]);
+      if (size_t(room_sum) < want) {  // the neighbours are short of room: their neighbours too
+        std::set<int> ring2;
+        for (int s2 : region_adj[size_t(r)]) {
+          for (int s3 : region_adj[size_t(s2)]) {
+            if (!region_adj[size_t(r)].contains(s3)) {
+              ring2.insert(s3);
+            }
+          }
+        }
+        add_ring(ring2);
+      }
+      if (to.empty()) {
+        std::string around;
+        for (int s2 : region_adj[size_t(r)]) {
+          around += std::format(" {} (fill {:.2f}, room {})", s2, double(boxes_in[size_t(s2)]) / std::max(1, fit_tiles[size_t(s2)]), room_of(s2));
+        }
+        std::fprintf(stderr, "legroute sat: spill round %u: region %d (%zu boxes, fill %.2f) has no region around it with room:%s\n",
+                     round + 1, r, region_boxes[size_t(r)].size(), double(boxes_in[size_t(r)]) / std::max(1, fit_tiles[size_t(r)]),
+                     around.c_str());
+        continue;
+      }
+      const auto         picks = spill_cut(d, boxes, x.ends, cand, r, to, want);
+      std::map<int, int> per_target;
+      for (const auto& [b, s2] : picks) {
+        auto&  bx     = boxes.boxes[size_t(b)];
+        int    best_t = -1;
+        double best_d = INFINITY;
+        for (int t : region_tiles[size_t(s2)]) {
+          if (g.blocked[t] || taken.contains(t) || P[0].pinned_tile[size_t(t)] || !box_fits(d, g, bx, t)) {
+            continue;
+          }
+          const double dd = std::abs(double(g.cx(g.col(t))) - bx.cx) + std::abs(double(g.cy(g.row(t))) - bx.cy);
+          if (dd < best_d) {
+            best_d = dd;
+            best_t = t;
+          }
+        }
+        if (best_t < 0) {
+          continue;
+        }
+        taken.insert(best_t);
+        bx.region = s2;
+        bx.tile   = best_t;
+        bx.cx     = double(g.cx(g.col(best_t)));
+        bx.cy     = double(g.cy(g.row(best_t)));
+        ++boxes_in[size_t(s2)];
+        --boxes_in[size_t(r)];
+        ++per_target[s2];
+        ++moved;
+      }
+      std::string where;
+      for (const auto& tg : to) {
+        where += std::format(" {} -> region {} (room {})", per_target.contains(tg.region) ? per_target[tg.region] : 0, tg.region, tg.room);
+      }
+      std::fprintf(stderr, "legroute sat: spill round %u: region %d (%zu boxes, %zu wanted) pushes%s\n", round + 1, r,
+                   region_boxes[size_t(r)].size(), want, where.c_str());
+    }
+    if (moved == 0) {
+      break;
+    }
+    ++rep.spill_rounds;
+    rep.spilled_boxes += moved;
+  }
+  for (int r = 0; r < g.regions; ++r) {  // a region the spill rounds left with more boxes than tiles: the usual error
+    if (!last[size_t(chosen[r])][size_t(r)].unfit.empty()) {
+      throw Legroute_unfit(last[size_t(chosen[r])][size_t(r)].unfit);
     }
   }
   // ---- the chosen answers: tiles, counters, connections
