@@ -2463,13 +2463,13 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       }
     }
     const auto ep_tile = [&](const Endpoint& e) { return e.box >= 0 ? at_box[size_t(slot.at(e.box))] : e.tile; };
-    const auto hcover  = [&](int n, int c1, int c2, int rr) {
-      for (int i = std::min(c1, c2); i <= std::max(c1, c2); ++i) {
+    const auto hcover  = [&](int n, int col_start, int col_end, int rr) {
+      for (int i = std::min(col_start, col_end); i <= std::max(col_start, col_end); ++i) {
         covers[{g.tile(i, rr), 1}].insert(n);
       }
     };
-    const auto vcover = [&](int n, int cc, int r1, int r2) {
-      for (int j = std::min(r1, r2); j <= std::max(r1, r2); ++j) {
+    const auto vcover = [&](int n, int cc, int row_start, int row_end) {
+      for (int j = std::min(row_start, row_end); j <= std::max(row_start, row_end); ++j) {
         covers[{g.tile(cc, j), 0}].insert(n);
       }
     };
@@ -3631,8 +3631,8 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
           // v's row): the edges it crosses
           const auto run_edges = [&](int v, bool h_first, const auto& visit) {
             const int hr = h_first ? g.row(prev) : g.row(v), vc = h_first ? g.col(v) : g.col(prev);
-            for (int i = std::min(g.col(prev), g.col(v)); i < std::max(g.col(prev), g.col(v)); ++i) {
-              visit(g.tile(i, hr), 0);
+            for (int col = std::min(g.col(prev), g.col(v)); col < std::max(g.col(prev), g.col(v)); ++col) {
+              visit(g.tile(col, hr), 0);
             }
             for (int j = std::min(g.row(prev), g.row(v)); j < std::max(g.row(prev), g.row(v)); ++j) {
               visit(g.tile(vc, j), 1);
