@@ -1598,6 +1598,18 @@ sh_test(
     ],
 )
 
+# A register an async-reset block writes only outside its reset branch (yosys
+# $dffe, EN = reset, EN_POLARITY 0) must hold while reset is high. The importer
+# inverted a SIGNED pick of EN, so the enable stayed on during reset. Icarus
+# compares source and emitted netlist through a reset window, for both Verilog
+# readers (LHD_EXTERNAL_SIM=1); verified to fail before the fix.
+sh_test(
+    name = "yosys_inverted_enable_reset_test",
+    size = "small",
+    srcs = ["yosys_inverted_enable_reset_test.sh"],
+    data = ["//lhd"],
+)
+
 # `lhd lec` soundness around gated latches and the edge-normalization time
 # base: a latch transparent while its gated clock is off (or opened by an OR-ed
 # reset) is refused instead of refuted/proved as a hold, an ICG enable latch

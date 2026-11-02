@@ -2335,8 +2335,16 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       if (cell->hasPort(ID::EN)) {
         auto enable_dpin = get_dpin(g, cell, ID::EN);
         if (cell->hasParam(ID::EN_POLARITY) && !cell->getParam(ID::EN_POLARITY).as_bool()) {
+          // Invert an UNSIGNED pick of EN. get_dpin reads every port but A/B as
+          // signed, so a high 1-bit EN is -1, and -1 ^ 1 = -2 is nonzero: the
+          // inverted enable stayed on while EN was high. That is the register
+          // an async-reset block writes only outside its reset branch (yosys
+          // $dffe, EN = reset, EN_POLARITY 0): it updated during reset instead
+          // of holding. The $adlatch path below already picks its gates
+          // unsigned (gate_dpin).
           auto not_node = create_typed_node(*g, Ntype_op::Xor, 1);
-          livehd::graph_util::setup_sink_pid(not_node, 0).connect_driver(enable_dpin);
+          livehd::graph_util::setup_sink_pid(not_node, 0).connect_driver(
+              create_pick_concat_dpin(g, cell->getPort(ID::EN), false));
           livehd::graph_util::setup_sink_pid(not_node, 0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
           set_ubits(not_node.create_driver_pin(0), 1);
           explicit_pin_signs.insert(not_node.create_driver_pin(0).get_class_index());
