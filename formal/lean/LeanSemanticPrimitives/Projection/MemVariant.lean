@@ -678,11 +678,11 @@ theorem admits_run_seval {D : DesignCert} {i : RuntimeInput} {st : StateM} {e : 
   unfold runtimeOKB at hR
   simp only [Bool.and_eq_true] at hR
   obtain ⟨⟨⟨hst, hin⟩, hfb⟩, hed⟩ := hR
-  obtain ⟨hwf, hsem, hgsrc, hadm, harity, hprop, -, hmcm⟩ := admits_static_premises hA
+  obtain ⟨hwf, hsem, hgsrc, hadm, harity, hprop, -⟩ := admits_static_premises hA
   obtain ⟨r, hev, -, -⟩ :=
     mainM_adequate (G := geomAt D) hwf hsem (stateOKB_shape hst) hgsrc hadm harity hprop
       (admits_writeAddrFits hA i st) (inputOKB_sound hin) (flopBoundOKB_sound hfb)
-      (edgesOKB_flops hed) (edgesOKB_mems hed) hmcm (stateOKB_flopSize hst)
+      (edgesOKB_flops hed) (edgesOKB_mems hed) (edgesOKB_span hed) (stateOKB_flopSize hst)
   exact ⟨r, hev⟩
 
 /-- The same, on the plain-write route (`admitsWB`, `HardwareMemWriteAdmit`). -/
@@ -708,7 +708,7 @@ theorem admits_run_sevalW {D : DesignCert} {i : RuntimeInput} {st : StateM} {e :
         node_stepW hwf hsem hcj hj (hadm _ hmemc) (harit _ hmemc)
           (hprop j _ hcj) (hfits _ hmemc) hpre)
       (inputOKB_sound hin) (flopBoundOKB_sound hfb) (edgesOKB_flops hed) (edgesOKB_mems hed)
-      (admitsW_noCommits hA) (stateOKB_flopSize hst)
+      (edgesOKB_span hed) (stateOKB_flopSize hst)
   exact ⟨r, hev⟩
 
 /-- From ONE `SEval` derivation of `hwMemS`'s `mainM`: the two resolved entries

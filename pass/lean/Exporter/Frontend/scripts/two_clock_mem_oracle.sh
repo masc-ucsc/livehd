@@ -19,8 +19,10 @@ set -euo pipefail
 #   legacy   the legacy model, with its proof bridge (`_next_refines_fast`,
 #            elaborated without sorry), equals iverilog under the random
 #            schedule.
-#   FP       refuses admission (`oneDomain false`): it does not model a commit
-#            table yet.
+#   FP       admits the memory, executes it and compares it with the reference
+#            itself (RESULT MEMROUTE OK), and its trace equals IR under its own
+#            independent schedule (`edges:indep`: clock j fires on step k unless
+#            (k + j) is a multiple of (j + 2)), given to cert_trace as a file.
 #   D3       translation validation (d3_sweep.py, its default generator) passes
 #            every gate, the proof included, and rejects a memory mutation.
 # Controls:
@@ -209,15 +211,25 @@ grep -q 'theorem ram2c_next_refines_fast' "$LR/LegacyRam2c/ram2c_Lgraph.lean" \
 diff "$OUT/rtl_tb.txt" "$L/legacy.txt" > "$L/diff.txt" || { head -4 "$L/diff.txt"; echo "FAIL: legacy differs from the source"; exit 1; }
 echo "ok: the legacy model (bridge proofs elaborated) equals iverilog on all $STEPS steps under the random schedule"
 
-# ---- FP: refuses admission --------------------------------------------------------
-rc=0
+# ---- FP: admitted, executed, equal to IR ---------------------------------------------
+python3 -I - "$OUT/edges_indep.txt" "$STEPS" <<'PY'
+import sys
+out, n = sys.argv[1], int(sys.argv[2])
+with open(out, "w") as f:
+    f.write("edges v1\n")
+    for k in range(n):
+        f.write(f"at {k} {int((k + 0) % 2 != 0)} {int((k + 1) % 3 != 0)}\n")
+PY
 (cd "$ROOT/formal/lean" && ulimit -s unlimited && LEAN_PATH="$LP" lean --tstack=1048576 --run \
-   Futamura_Projection_Scripts/dcert2_memroute.lean "$D" 20000 200 "$STEPS" zero edges:all \
-   "stim:$OUT/stim.txt" outputs nocompare > "$OUT/fp.log" 2> "$OUT/fp.err") || rc=$?
-[[ $rc -eq 6 ]] || { tail -5 "$OUT/fp.log"; cat "$OUT/fp.err"; echo "FAIL: FP runner exit $rc, expected 6 (admission refused)"; exit 1; }
-grep -q 'oneDomain false' "$OUT/fp.log" && grep -q 'MEMROUTE ADMISSION REFUSED' "$OUT/fp.log" \
-  || { tail -5 "$OUT/fp.log"; cat "$OUT/fp.err"; echo "FAIL: FP did not refuse on oneDomain"; exit 1; }
-echo "ok: FP refuses admission (oneDomain false)"
+   Futamura_Projection_Scripts/dcert2_memroute.lean "$D" 20000 200 "$STEPS" zero edges:indep \
+   "stim:$OUT/stim.txt" outputs > "$OUT/fp.log" 2> "$OUT/fp.err") \
+  || { tail -5 "$OUT/fp.log"; cat "$OUT/fp.err"; echo "FAIL: FP runner"; exit 1; }
+grep -q 'RESULT: MEMROUTE OK' "$OUT/fp.log" || { grep RESULT "$OUT/fp.log"; echo "FAIL: FP did not run the memory"; exit 1; }
+grep '^STEP' "$OUT/fp.log" > "$OUT/fp.txt"
+ct "$D" ir_indep edges:file:"$OUT/edges_indep.txt"
+diff "$OUT/ir_indep.txt" "$OUT/fp.txt" > "$OUT/diff_fp.txt" \
+  || { head -4 "$OUT/diff_fp.txt"; echo "FAIL: FP differs from IR"; exit 1; }
+echo "ok: FP admits and runs the memory (MEMROUTE OK) and equals IR on all $STEPS steps"
 
 # ---- D3: translation validation, with its proof -------------------------------------
 D3="$OUT/d3"

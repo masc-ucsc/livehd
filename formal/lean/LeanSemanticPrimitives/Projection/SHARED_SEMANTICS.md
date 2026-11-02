@@ -61,9 +61,12 @@ source rule and the compiler's target rule read one definition.
 below `2 ^ clocks.size`, so it names only declared clocks (the same test
 admission makes; an emitted certificate proves it in `_clock_bounds`).
 
-The projection does not model a commit table yet: its admission (`admitsB`,
-`admitsWB`) refuses one, and its proofs take the empty-table rule from there
-(`admits_noCommits`).  The check pins the bytes of both files with recorded
+The projection models the commit table too: its object program's `memNext`
+takes the table rule through eight small functions (`HardwareMem`), each proved
+to compute one `MemDomains` definition (`HardwareMemTable`), and admission
+types each table entry's image as the memory's table (`memTyOK`). Its runtime
+edge check also requires `domSpan ≤ e.size`, since the program reads every clock
+in a memory's span.  The check pins the bytes of both files with recorded
 hashes.
 
 ### `Compiler/Runtime.lean`

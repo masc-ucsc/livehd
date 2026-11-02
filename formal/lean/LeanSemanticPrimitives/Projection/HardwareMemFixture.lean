@@ -143,7 +143,7 @@ theorem fullG_nextImg : NextImgGeomOK fullDesign fullG := by
   rcases idx with _|idx
   · have hmd' : ({ aw := 5, dw := 32, nextImg := 11, clock := 0 } : MemoryDesc) = md := by
       simpa [fullDesign] using hmd
-    subst hmd'; rfl
+    subst hmd'; exact ⟨rfl, by simp⟩
   · simp [fullDesign] at hmd
 
 theorem fullG_prop : ∀ (j : Nat) (c : DenseNodeCert),
@@ -249,10 +249,14 @@ theorem fullStep (i : RuntimeInput) (hi : i.size = 5)
     intro md hmd
     rw [he]
     revert hmd; revert md; decide
+  have hmspan : ∀ md ∈ fullDesign.memories.toList, md.domSpan ≤ e.size := by
+    intro md hmd
+    rw [he]
+    revert hmd; revert md; decide
   have hfsize : fullDesign.flops.size ≤ st.flops.size := by
     simpa [fullDesign] using hfl
   -- the write-fit is now the GENERIC checker-derived theorem, not a hand proof
-  exact admits_mainM_resolved fullDesign_admits hshape hin hstb hfclk hmclk hfsize
+  exact admits_mainM_resolved fullDesign_admits hshape hin hstb hfclk hmclk hmspan hfsize
 
 /-! ## 4. A state, and two steps -/
 

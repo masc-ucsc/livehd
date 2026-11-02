@@ -156,15 +156,113 @@ private def fEvalNodesM : SFun :=
                  , cons (C "evalNodeM" [P .hd [R "nodes"], R "env", R "n"]) (R "env")
                  , P .addI [R "n", int 1] ]) }
 
-/-- One memory's next image: `m.nextImg`'s slot when its own clock fires, the
-exact prior image when quiet. -/
+/-! ### A memory's commit table (DCERT3, decision #9)
+
+A memory on more than one clock carries a commit table. Each function below
+mirrors ONE definition of `Compiler.MemDomains` / `srcMemNext`, so each proof is
+structural: `bitAt` is `Nat.testBit`, `log2O` is `Nat.log2`, `spanO` is the
+`domSpan` fold, `inDomO` is `inDom`, and `allFireO` / `firedIsO` walk
+`List.range domSpan` from `k` on. -/
+
+/-- `bitAt(m, k)` -- bit `k` of `m` (`Nat.testBit`, for `m, k ≥ 0`). -/
+def fBitAt : SFun :=
+  { name := "bitAt", params := ["m", "k"], inline := true
+  , body := .ite (P .eqI [R "k", int 0])
+              (P .eqI [P .modI [R "m", int 2], int 1])
+              (C "bitAt" [P .divI [R "m", int 2], P .subI [R "k", int 1]]) }
+
+/-- `log2O(n)` -- `Nat.log2`. -/
+def fLog2O : SFun :=
+  { name := "log2O", params := ["n"], inline := true
+  , body := .ite (P .ltI [R "n", int 2]) (int 0)
+              (P .addI [C "log2O" [P .divI [R "n", int 2]], int 1]) }
+
+/-- `spanO(a, cms)` -- `domSpan`: the fold `max a (mask.log2 + 1)` over the
+table, from `a`. -/
+def fSpanO : SFun :=
+  { name := "spanO", params := ["a", "cms"], inline := true
+  , body := .ite (P .isNil [R "cms"]) (R "a")
+              (.switch (P .hd [R "cms"])
+                [(tagCommit, ["mask", "nxt"],
+                  lets [("b", P .addI [C "log2O" [R "mask"], int 1])]
+                    (C "spanO" [.ite (P .leI [R "a", R "b"]) (R "b") (R "a"),
+                                P .tl [R "cms"]]))]) }
+
+/-- `anyBit(cms, k)` -- some table entry's mask has bit `k`. -/
+def fAnyBit : SFun :=
+  { name := "anyBit", params := ["cms", "k"], inline := true
+  , body := .ite (P .isNil [R "cms"]) (bool false)
+              (.switch (P .hd [R "cms"])
+                [(tagCommit, ["mask", "nxt"],
+                  .ite (C "bitAt" [R "mask", R "k"]) (bool true)
+                       (C "anyBit" [P .tl [R "cms"], R "k"]))]) }
+
+/-- `inDomO(ck, cms, k)` -- `inDom`: clock `k` is one of the memory's. -/
+def fInDomO : SFun :=
+  { name := "inDomO", params := ["ck", "cms", "k"], inline := true
+  , body := .ite (P .eqI [R "k", R "ck"]) (bool true) (C "anyBit" [R "cms", R "k"]) }
+
+/-- `allFireO(edges, ck, cms, k, sp)` -- `allFire`, from clock `k` up to `sp`:
+every clock of the memory fired. -/
+def fAllFireO : SFun :=
+  { name := "allFireO", params := ["edges", "ck", "cms", "k", "sp"], inline := true
+  , body := .ite (P .ltI [R "k", R "sp"])
+              (.ite (.ite (C "inDomO" [R "ck", R "cms", R "k"])
+                          (C "firesAt" [R "edges", R "k"]) (bool true))
+                    (C "allFireO" [R "edges", R "ck", R "cms", P .addI [R "k", int 1], R "sp"])
+                    (bool false))
+              (bool true) }
+
+/-- `firedIsO(edges, ck, cms, mask, k, sp)` -- `firedIs`, from clock `k` up to
+`sp`: the clocks that fired are exactly the mask's. -/
+def fFiredIsO : SFun :=
+  { name := "firedIsO", params := ["edges", "ck", "cms", "mask", "k", "sp"], inline := true
+  , body := .ite (P .ltI [R "k", R "sp"])
+              (lets [("f", .ite (C "inDomO" [R "ck", R "cms", R "k"])
+                                (C "firesAt" [R "edges", R "k"]) (bool false))]
+                (.ite (.ite (C "bitAt" [R "mask", R "k"]) (R "f") (P .notB [R "f"]))
+                      (C "firedIsO" [R "edges", R "ck", R "cms", R "mask",
+                                     P .addI [R "k", int 1], R "sp"])
+                      (bool false)))
+              (bool true) }
+
+/-- `pickO(edges, ck, cms, rest, sp, env, n, ms, idx)` -- the image of the first
+entry of `rest` whose clock set fired exactly (`find? firedIs`); the held image
+when none.
+
+It returns the IMAGE, reading `slot` at each entry's own (static) index. Returning
+the chosen INDEX instead would make it dynamic (it depends on the edges), and
+binding-time analysis gives `slot` one signature for every call site, so every
+`slot` read in the program would turn dynamic and the specializer could no
+longer unfold it. -/
+def fPickO : SFun :=
+  { name := "pickO", params := ["edges", "ck", "cms", "rest", "sp", "env", "n", "ms", "idx"]
+  , inline := true
+  , body := .ite (P .isNil [R "rest"]) (C "memAt" [R "ms", R "idx"])
+              (.switch (P .hd [R "rest"])
+                [(tagCommit, ["mask", "nxt"],
+                  .ite (C "firedIsO" [R "edges", R "ck", R "cms", R "mask", int 0, R "sp"])
+                       (C "slot" [R "env", R "n", R "nxt"])
+                       (C "pickO" [R "edges", R "ck", R "cms", P .tl [R "rest"], R "sp",
+                                   R "env", R "n", R "ms", R "idx"]))]) }
+
+/-- One memory's next image (`srcMemNext`). With no commit table: `m.nextImg`'s
+slot when its own clock fires, the exact prior image when quiet. With one: that
+slot when ALL its clocks fired, the entry naming exactly the clocks that fired,
+else the prior image. -/
 private def fMemNext : SFun :=
   { name := "memNext", params := ["m", "edges", "env", "n", "ms", "idx"], inline := true
   , body := .switch (R "m")
               [(tagMemory, ["aw", "dw", "nxt", "ck", "init", "cms", "aimg"],
-                .ite (C "firesAt" [R "edges", R "ck"])
-                     (C "slot" [R "env", R "n", R "nxt"])
-                     (C "memAt" [R "ms", R "idx"]))] }
+                .ite (P .isNil [R "cms"])
+                  (.ite (C "firesAt" [R "edges", R "ck"])
+                        (C "slot" [R "env", R "n", R "nxt"])
+                        (C "memAt" [R "ms", R "idx"]))
+                  (lets [("sp", C "spanO" [P .addI [R "ck", int 1], R "cms"])]
+                    (.ite (C "allFireO" [R "edges", R "ck", R "cms", int 0, R "sp"])
+                          (C "slot" [R "env", R "n", R "nxt"])
+                          (C "pickO" [R "edges", R "ck", R "cms", R "cms", R "sp",
+                                      R "env", R "n", R "ms", R "idx"]))))] }
 
 private def fMemNexts : SFun :=
   { name := "memNexts", params := ["mems", "edges", "env", "n", "ms", "idx"], inline := true
@@ -203,7 +301,9 @@ existing function is edited, so the memory-free route is literally the same
 code, and `resolveProgram` assigns every id afresh. -/
 def hwMemS : SProgram :=
   { funs := hwS.funs ++ [fMemAt, fRomWords, fSrcValM, fApplyOpM,
-                         fMkSourcesM, fEvalNodeM, fEvalNodesM, fMemNext, fMemNexts, fMainM]
+                         fMkSourcesM, fEvalNodeM, fEvalNodesM, fMemNext, fMemNexts, fMainM,
+                         -- the commit table (decision #9), after `mainM` so no id moves
+                         fBitAt, fLog2O, fSpanO, fAnyBit, fInDomO, fAllFireO, fFiredIsO, fPickO]
   , entry := "mainM" }
 
 def hwMemResolved : Except String (Program × List Bool) := resolveProgram hwMemS

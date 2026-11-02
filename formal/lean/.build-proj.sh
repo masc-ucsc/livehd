@@ -88,6 +88,7 @@ MODULES=(
   Projection/HardwareMemShapes
   Projection/HardwareMemNodes
   Projection/HardwareMemFold
+  Projection/HardwareMemTable
   Projection/HardwareMemCommit
   Projection/HardwareMemOutFlop
   Projection/HardwareMemMain

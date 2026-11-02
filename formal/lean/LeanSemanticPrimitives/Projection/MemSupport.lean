@@ -49,9 +49,8 @@ structure Report where
   typed    : Bool
   /-- …and typed every slot -/
   sized    : Bool
-  /-- every memory is on ONE clock domain: no commit table (decision #9) -/
-  oneDomain : Bool
-  /-- every memory's next image types as THAT memory's table -/
+  /-- every memory's images type as THAT memory's table: its next image and
+  each commit-table entry's image (decision #9) -/
   nextImgs : Bool
 deriving Repr
 
@@ -63,36 +62,21 @@ def report (D : DesignCert) : Report where
   sized    := match inferTys D with
               | some ts => ts.size == D.numSlots
               | none    => false
-  oneDomain := D.memories.toList.all (fun md => md.commits.isEmpty)
   nextImgs := match inferTys D with
-              | some ts => D.memories.toList.all (fun md =>
-                  match ts[md.nextImg]? with
-                  | some (.tbl aw dw) => aw == md.aw && dw == md.dw
-                  | _                 => false)
+              | some ts => D.memories.toList.all (memTyOK ts)
               | none    => false
 
 /-- The memory route's verdict. -/
-def Report.admitOK (r : Report) : Bool := r.accepts && r.sized && r.oneDomain && r.nextImgs
+def Report.admitOK (r : Report) : Bool := r.accepts && r.sized && r.nextImgs
 
-/-- `List.all` of a conjunction is the conjunction of the two `List.all`s. -/
-theorem all_and_split {α : Type} (l : List α) (p q : α → Bool) :
-    l.all (fun a => p a && q a) = (l.all p && l.all q) := by
-  apply Bool.eq_iff_iff.mpr
-  simp only [Bool.and_eq_true, List.all_eq_true]
-  exact ⟨fun h => ⟨fun x hx => (h x hx).1, fun x hx => (h x hx).2⟩,
-         fun h x hx => ⟨h.1 x hx, h.2 x hx⟩⟩
-
-/-- **The report is faithful**: its four admission fields ARE the check, not a
+/-- **The report is faithful**: its three admission fields ARE the check, not a
 summary of it. -/
 theorem admitOK_eq (D : DesignCert) : (report D).admitOK = admitsB D := by
   unfold Report.admitOK report admitsB
   cases hts : inferTys D with
   | none      => simp [hts]
   | some ts   =>
-      simp only [hts]
-      rw [all_and_split]
-      simp only [Bool.and_assoc]
-      all_goals rfl
+      simp only [hts, Bool.and_assoc]
 
 theorem report_admits {D : DesignCert} (h : (report D).admitOK = true) :
     admitsB D = true := by rw [← admitOK_eq]; exact h
@@ -279,7 +263,6 @@ private def romOnlyDesign : DesignCert :=
 #audit_axioms memFree_mem_scalarFailures
 #audit_axioms sources_mem_scalarFailures
 #audit_axioms scalarFailures_ne_nil
-#audit_axioms all_and_split
 #audit_axioms admitOK_eq
 #audit_axioms scalar_refuses_memory
 #audit_axioms run_of_report

@@ -603,7 +603,7 @@ ops {sr.ops} arities {sr.arities} flopClocks {sr.flopClocks} | ALL {sr.allOK}"
     say s!"  scalar refused on: {String.intercalate "," (MemSupport.scalarFailures D)}"
   let mr := MemSupport.report D
   say s!"  memory route: accepts {mr.accepts} typed {mr.typed} sized {mr.sized} \
-oneDomain {mr.oneDomain} nextImgs {mr.nextImgs} | ADMITTED {mr.admitOK}"
+nextImgs {mr.nextImgs} | ADMITTED {mr.admitOK}"
   say s!"  verdict: {MemSupport.verdict D}"
   unless mr.typed && mr.sized do
     say s!"  memory route typing FALSE: {untypedReport D}"

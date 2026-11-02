@@ -70,6 +70,24 @@ theorem certWf_clocks {D : DesignCert} (h : CertIO.certWfError D = none) :
               simp at this
               omega
 
+/-- …and every commit-table mask names declared clocks only (decision #9). -/
+theorem certWf_commits {D : DesignCert} (h : CertIO.certWfError D = none) :
+    ∀ m ∈ D.memories, ∀ c ∈ m.commits, c.mask < 2 ^ D.clocks.size := by
+  unfold CertIO.certWfError at h
+  simp only at h
+  split at h
+  · simp at h
+  · split at h
+    · simp at h
+    · split at h
+      · simp at h
+      · rename_i hcm
+        intro m hm c hc
+        have hno := (Array.findIdx?_eq_none_iff.mp hcm) m hm
+        simp at hno
+        obtain ⟨j, hj, rfl⟩ := Array.mem_iff_getElem.mp hc
+        exact (hno j hj).1.2
+
 /-- **The bridge.** On a well-formed certificate, the exact-match driver rule
 implies the edge premise of every route:
 
@@ -84,9 +102,12 @@ theorem edges_exact_sound {D : DesignCert} {e : ClockEdges}
   refine ⟨by omega, he, ?_⟩
   unfold HwMem.edgesOKB
   simp only [Bool.and_eq_true, List.all_eq_true, decide_eq_true_eq]
-  refine ⟨fun f hfm => ?_, fun m hmm => ?_⟩
+  refine ⟨⟨fun f hfm => ?_, fun m hmm => ?_⟩, fun m hmm => ?_⟩
   · rw [he]; exact hf f (Array.mem_toList_iff.mp hfm)
   · rw [he]; exact hm m (Array.mem_toList_iff.mp hmm)
+  · rw [he]
+    exact HwMem.domSpan_le (hm m (Array.mem_toList_iff.mp hmm))
+      (certWf_commits hwf m (Array.mem_toList_iff.mp hmm))
 
 /-! ## Controls -/
 
