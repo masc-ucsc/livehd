@@ -641,3 +641,90 @@ TEST(LatchContract, AndOverAClockCellKeepsTheCellsEnable) {
     EXPECT_TRUE(has_b) << (shared ? "clock_op_of" : "resolve_icg") << " dropped the And's enable";
   }
 }
+
+// ---------------------------------------------------------------------------
+// The open value by EVALUATION (decision #20). aegraph rewrites a gated latch's
+// hold mux `gated ? 0 : f` (open while the gated clock is 0) into
+// `Sext(Or(Shl(Mux(gated, x, 0), 1), And(gated == 0, f)), 1)` -- CORE-ET B08's
+// `mdctl_add_bin_sl_1p[0]` -- which is `(!gated) & f`: no Mux to peel, yet the
+// latch passes `f` while open. Evaluating din with the window open finds `f`.
+// The two controls must NOT find a pin: the window open on the other level
+// (din is then 0 while open), and an open value that is two pins (`f & x`).
+namespace {
+enum class Open_shape { B08, WrongPolarity, TwoPins };
+
+hhds::Pin_class pin_of(hhds::Graph& g, Ntype_op op, const std::vector<hhds::Pin_class>& in, int bits) {
+  auto n = gu::create_typed_node(g, op);
+  for (size_t k = 0; k < in.size(); ++k) {
+    in[k].connect_sink(gu::setup_sink_pid(n, static_cast<int>(k)));
+  }
+  auto o = n.create_driver_pin(0);
+  gu::set_bits(o, bits);
+  gu::set_unsign(o);
+  return o;
+}
+
+hhds::Node_class build_open_shape(hhds::Graph& g, Open_shape shape, hhds::Pin_class& f_out) {
+  auto clk = g.get_input_pin("clk");
+  auto f   = g.get_input_pin("f");
+  auto x   = g.get_input_pin("x");
+  auto en  = g.get_input_pin("en");
+  for (auto p : {clk, f, x, en}) {
+    gu::set_ubits(p, 1);
+  }
+  auto k    = [&](int64_t v) { return gu::create_const(g, *Dlop::create_integer(v)); };
+  // the gate's enable latch, open while clk == 0, and the gated clock
+  auto nclk = pin_of(g, Ntype_op::Not, {clk}, 1);
+  auto en_l = add_latch(g, "en_l", nclk, /*active_low=*/false);
+  en.connect_sink(gu::setup_sink_by_name(en_l, "din"));
+  auto en_q = en_l.get_driver_pin(0);
+  gu::set_bits(en_q, 1);
+  auto       gated    = pin_of(g, Ntype_op::And, {clk, en_q}, 1);
+  // the latch: open while gated == 0 (`Mux(gated, 1, 0)`), or, for the
+  // polarity control, while gated == 1 (`Mux(gated, 0, 1)`)
+  const bool open_low = shape != Open_shape::WrongPolarity;
+  auto       win      = pin_of(g, Ntype_op::Mux, {gated, k(open_low ? 1 : 0), k(open_low ? 0 : 1)}, 1);
+  auto       l        = add_latch(g, "l", win, /*active_low=*/false);
+  gu::set_bits(l.get_driver_pin(0), 1);
+  auto            is_closed = pin_of(g, Ntype_op::EQ, {gated, k(0)}, 1);
+  hhds::Pin_class din;
+  if (shape == Open_shape::TwoPins) {
+    din = pin_of(g, Ntype_op::And, {is_closed, f, x}, 1);
+  } else {
+    auto hold = pin_of(g, Ntype_op::Mux, {gated, x, k(0)}, 1);
+    auto hi   = pin_of(g, Ntype_op::SHL, {hold, k(1)}, 2);
+    auto lo   = pin_of(g, Ntype_op::And, {is_closed, f}, 1);
+    auto both = pin_of(g, Ntype_op::Or, {hi, lo}, 2);
+    din       = pin_of(g, Ntype_op::Sext, {both, k(1)}, 1);
+  }
+  din.connect_sink(gu::setup_sink_by_name(l, "din"));
+  f_out = f;
+  return l;
+}
+}  // namespace
+
+TEST(LatchContract, OpenValueIsFoundByEvaluation) {
+  for (const auto shape : {Open_shape::B08, Open_shape::WrongPolarity, Open_shape::TwoPins}) {
+    const auto tag = std::to_string(static_cast<int>(shape));
+    auto&      lib = livehd::Hhds_graph_library::instance("lgdb_lcontract_open_eval" + tag);
+    auto       gio = lib.create_io("open_eval" + tag);
+    for (const char* in : {"clk", "f", "x", "en"}) {
+      gio->add_input(in, 1);
+    }
+    auto            g = gio->create_graph();
+    hhds::Pin_class f;
+    auto            l   = build_open_shape(*g, shape, f);
+    const auto      din = gu::get_driver_of_sink_name(l, "din");
+    const auto      arm = livehd::latch_contract::latch_transparent_arm(l);
+    if (shape == Open_shape::B08) {
+      ASSERT_FALSE(arm.is_invalid());
+      EXPECT_EQ(arm.get_class_index(), f.get_class_index()) << "`(gated == 0) & f`, open while gated == 0: the latch passes f";
+    } else {
+      EXPECT_EQ(arm.get_class_index(), din.get_class_index())
+          << (shape == Open_shape::WrongPolarity ? "open while gated == 1, din is 0 while open: no pin is the open value"
+                                                 : "the open value is f & x, two pins: not one existing pin")
+          << "; din comes back unchanged, as before";
+      EXPECT_NE(arm.get_class_index(), f.get_class_index());
+    }
+  }
+}
