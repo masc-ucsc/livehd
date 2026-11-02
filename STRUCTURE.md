@@ -9,6 +9,7 @@ duplicating content. Read this first on a cold start.
 | Layer | Lives in | Format | Read it when… |
 |---|---|---|---|
 | **Current work** | [`todo/`](todo/index.html) | HTML | you want the open task list, a task's design, or to record/close a task |
+| **Default algorithm reference (draft)** | external `../docs/docs/lhd/` | Markdown → mkdocs | you need the current synthesis algorithm, conditional physical flow, reuse policy and research references |
 | **LiveHD & Pyrope reference** | external `../docs` → [masc-ucsc.github.io/docs](https://masc-ucsc.github.io/docs/) | Markdown → mkdocs | you need the "why/what": language semantics, IR concepts, CLI usage, architecture |
 | **Agent how-to + rules** | [`AGENTS.md`](AGENTS.md) | Markdown | you are building/testing/debugging, or need the change-gated coding rules |
 | **Directory orientation** | `<dir>/README.md` | Markdown | you are editing a specific directory and need its layout / gotchas |
@@ -72,12 +73,18 @@ same letter; delete the whole page only once the task is fully complete. Skeleto
 </ul>
 ```
 
-### `../docs` — the human-readable contract (Markdown → mkdocs)
+### `../docs` — reference and algorithm methodology (Markdown → mkdocs)
+- The draft algorithm reference (`../docs/docs/lhd/`) describes the implemented
+  default flow for expert readers and agents, with a separate conditional
+  physical-flow chapter. Its maintenance appendix maps source evidence and
+  local-document retirement candidates. Experimental algorithms, option
+  catalogs and evaluation histories remain in their dedicated references.
 - The LiveHD guide (`../docs/docs/livehd/*`) and the Pyrope language reference
   (`../docs/docs/pyrope/*`) are the canonical "why/what". The Pyrope pages are the
   de-facto language contract.
-- **Conceptual only** — no references to specific source files or implementation
-  details. **Change-gated:** content changes need human confirmation.
+- The language/IR contract stays conceptual. The algorithm reference may link
+  to source evidence and component READMEs without duplicating their details.
+  **Change-gated:** content changes need human confirmation.
 
 ### `AGENTS.md` — agent how-to + change-gated rules
 - Build/test commands, sibling-repo paths, running Pyrope/Yosys tests, debugging
