@@ -553,6 +553,18 @@ void write_legroute_report(const Legroute_report& r, const std::string& path) {
     const auto& st = r.region_stats[i];
     out << std::format("{}[{},{},{}]", i ? "," : "", st.status, st.boxes, st.tiles);
   }
+  out << R"(],"alt_trials":[)";
+  for (size_t i = 0; i < r.alt_trials.size(); ++i) {
+    const auto& trial = r.alt_trials[i];
+    out << std::format(R"({}{{"region":{},"round":{},"fill":{:.3f},"cut":{:.3f},"boxes":{},"hops":{},"boundary_tracks":{},"pinned":{},"status":"{}","adopted":"{}","families":{{)",
+                       i ? "," : "", trial.region, trial.round, trial.fill, trial.cut, trial.boxes, trial.hops, trial.boundary_tracks, trial.pinned,
+                       trial.status, trial.adopted);
+    for (size_t fi = 0; fi < trial.families.size(); ++fi) {
+      const auto& [fam_kind, fam_status, fam_seconds] = trial.families[fi];
+      out << std::format(R"({}"{}":["{}",{:.1f}])", fi ? "," : "", fam_kind, fam_status, fam_seconds);
+    }
+    out << "}}";
+  }
   out << R"(],"failure_boxes":[)";
   for (size_t i = 0; i < r.failure_boxes.size(); ++i) {
     const auto& b = r.failure_boxes[i];

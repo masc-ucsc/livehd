@@ -490,6 +490,8 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_options.alternatives     = synth_set(opts, "place.legroute.alternatives", "");
   out.legroute_options.alt_ms           = static_cast<unsigned>(integer("place.legroute.alt_ms", "0"));
   out.legroute_options.region_pins      = truthy(synth_set(opts, "place.legroute.region_pins", "true"));
+  out.legroute_options.alt_all          = truthy(synth_set(opts, "place.legroute.alt_all", "false"));
+  out.legroute_options.checker_window   = static_cast<unsigned>(integer("place.legroute.checker_window", "8"));
   out.legroute_options.global_margin    = integer("place.legroute.global_margin", "8");
   out.legroute_options.dump_regions     = synth_set(opts, "place.legroute.dump_regions", "");
   out.legroute_options.threads          = integer("place.legroute.threads", "0");

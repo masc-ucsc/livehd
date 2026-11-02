@@ -671,6 +671,14 @@ tile nearest the centroid of its placed neighbours: ports north, east, south and
 adjacent and 1-1 nets go free), and the drawing's tiles are the new homes. If the SAT still fails: the drawing seeds a
 region-local GP resume (the other cells boxed in place) for a few iterations and the result is tried; if it fails
 again, the removed edges return and GP iterates once more before the last try.</li>
+<li><strong>Checkerboard relaxation (user, 2026-11-01, latest):</strong> a relaxed model of the failing region first:
+the edges a checkerboard of tiles owns carry no capacity bound (half the capacity clauses gone, the metal over or
+into those boxes untracked) and the boxes homed on those tiles may move <code>checker_window</code> tiles (8), the
+others twice the window, so the solver explores far positions without the clauses blowing up. An UNSAT relaxed model
+says the region needs less density, not another placement. A SAT one seeds the full model: its tiles become the
+homes, every box gets a window of four, and capacity counts on every tile. Landed as the <code>checker</code> family;
+in the unit test it moves four of six boxes next to the boundary, past the windows of two, and routes a region the
+cut bound rejected.</li>
 <li><strong>Density:</strong> the GOALPlace inflation brings a region from about 0.8 toward 0.6 fill step by step
 (<code>probe.real</code> once the pins are carried over), and at each step a failing region tries the families above
 before the next step down.</li>
@@ -682,6 +690,70 @@ order being adopted (its homes replace the boxes' homes, its answer stands); onl
 speculatively: the candidates start when the region's own solve starts, so a failure costs no extra wall time.
 Options: <code>legroute.alternatives=noise,anchor,tsm</code> (the order is the priority), <code>alt_ms</code> (budget
 per candidate, default the region budget); report fields per family: tried, rescued, seconds.</p>
+<p><strong>First measurements (sha3 usyn CMOS, utilization 0.60, 180 s per region).</strong> With the refinement's
+mesh (11 regions) and its 7,287 pins: 7 of 11 (one UNSAT at fill 0.79, three out of time); the same mesh without the
+pins: 6 of 11 (one cut-bound UNSAT, four out of time); the mesh the terminal stage builds itself (10 regions, no
+pins): 8 of 10. So the mesh weighs more than the pins, and the pins help a little on the same mesh. The alternatives
+on the pinned run: noise and anchors time out like the original placement, and the breadth-first drawing fails the
+cut bound at once (624 nets across a row boundary of 397 tracks; 768 across 512): packing connected boxes adjacent
+crowds one boundary, so the drawing needs a capacity-aware spread before it is a candidate. The timeouts sit in the
+lazy capacity loop of the base solve (two or three rounds, a third of the bounds added, then out of time), not in the
+quality tiers: at this utilization the lever is solver time (budget, eager bounds, smaller regions), and the
+perturbations only pay where a region is UNSAT for its placement. The boundary shift, run pinless on the same
+placement, ended at 4 of 10 with five cut-bound UNSATs: the strips cycled through three regions (2, 4, 5) and the
+receivers' cuts got worse each time, so moving strips is off unless a capacity-aware choice (the depth that lowers
+the new boundary's cut ratio, never above one) is added. Pinless at 0.60 and 180 s the plain run (8 of 10) beats
+every perturbation tried: box spill 7, window widening 7, shuffle 5, shift 4. <strong>Smaller regions change the
+regime:</strong> the pinned mesh at 1,500 cells (19 regions) ends 13 of 19 with six UNSATs proven in 3 to 20 s and no
+timeout, in half the time (256 s): a region at 93 boxes on 93 tiles is simply unroutable for its placement, and that
+is where the candidates and the spill can be evaluated in seconds rather than minutes. The alternatives and the box
+spill are being measured on that mesh. <strong>The user's direction (2026-11-01, latest): keep trying shuffles
+combined with the GOALPlace inflation, find which works for which region issue, then fix an order, possibly one per
+region density or trait.</strong> For that every trial is now recorded: <code>legroute.alt_all</code> solves every
+family even after one routes, and legroute.json's <code>alt_trials</code> holds, per failing region and round, its
+fill, placement cut ratio, hops, pinned tiles and own outcome (cut, UNSAT or out of time) with each family's outcome
+and time; a fourth family, <code>spread</code>, steps the boxes of the denser patches toward the sparsest one (a
+legroute-level inflation); the probe keeps the moves and the alternatives out of its rounds (it is the density
+signal). <code>scratchpad/cpsat/alt_table.py</code> groups the trials by fill bin and outcome and counts what each
+family rescued. The 420 s budget on the 2,500-cell mesh changes nothing (the same three regions time out), so the
+exploration runs on the 1,500-cell mesh: alternatives first-adopt, all families logged, spill only, and three
+inflation rounds plus all families. The spill alone on that mesh ends 9 of 19 against 13 of 19 plain: 1,005 boxes
+moved over six rounds and the failing count climbed from 7 to 10, because the arrivals land on the receiver's
+nearest boundary tiles, where its capacity is tightest, and their nets add hops. The box spill is harmful at every
+setting tried; an arrival would need a receiver-side re-placement with wide windows (the checker relaxation) to
+pay. <strong>The clean trial on that mesh (every family, no spill) answers the first question:</strong> the six
+failing regions tried all five families and none rescued any. Noise, anchors and spread end UNSAT in 4 to 106 s (every
+local perturbation of the placement is unroutable), the drawing is cut-bound UNSAT every time, and the checker's
+relaxed model is itself UNSAT on three regions (fill 0.89; fill 0.63 with 27 pinned tiles; fill 0.68 with about 1,560
+hops on 114 tiles) and out of time on the other three. At this utilization the failing regions are capacity problems,
+the boundary crossings against the perimeter's tracks or the fill, not placement-local ones, so the levers are
+density (the inflation rounds) and the mesh (fewer crossings per region); the trial rows now carry each region's
+boundary tracks so the hop load reads directly. <strong>The first rescues came from the timeouts:</strong> a region that ran out
+of time on its own placement (fill 0.59, cut 0.42) routed from the noise variant in 4 s, from spread in 12 s and from
+the drawing in 13 s, and another (fill 0.61, cut 0.86, after the inflation rounds) from noise in 120 s, while every
+proven-UNSAT or cut-bound region refused every family. minimax adds a third class: its failing region is sparse (fill
+0.33, cut 0.15, 472 hops over 2,725 boundary tracks) and UNSAT for every family including the relaxed checker, with
+the register-file proxy's 118 pins inside it: macro pin access. <strong>The order by trait, so far:</strong> a region
+out of time with a cut ratio under about 0.9 tries noise first (cheap and fast), then spread and the drawing, anchors
+last; a cut-bound region (ratio above one) gets nothing in-region, only the mesh or the density; a proven-UNSAT region
+gets the inflation (its own fill) or the mesh (its boundary load, hops over perimeter tracks); a macro-pin region
+needs pin-access work. The inflation itself also moves cells across the fixed mesh boundaries without regard to their
+capacity, so four regions became cut-bound after the rounds. Landed for that: the probe now runs inside the
+region-refinement call, before bus order cuts the mesh and places the pins, so the inflation spreads the cells first
+and the boundaries follow; the terminal stage then takes that refinement's mesh and pins and does not probe again.
+A third rescue came from the clean inflation-plus-families run: a region out of time at fill 0.54 and cut 0.73 routed
+from the spread variant in 68 s. Running: the families on the 2,500-cell mesh (the timeout regime), the mesh
+whose splits weigh their own crossing load, and the clean inflation-plus-families run.</p>
+<p><strong>The trial table so far (172 trials over seven runs: sha3 at 0.60 on both meshes, with and without the
+inflation, and minimax at 0.65).</strong> Rescues happened in one group only, regions out of time with fill under
+0.70: noise 2 of 35 (median 62 s), spread 2 of 35 (40 s), the drawing 1 of 34 (13 s), anchors 0 of 35, the checker 0
+of 11. Every cut-bound group, every proven-UNSAT group and every denser group scored zero for every family. Unpinning
+the fan-out trees rescued one more timeout region on the 2,500-cell mesh (124 pinned tiles; 8 of 11 against 7), at
+the cost of wire. The checker's relaxed model was itself UNSAT on four of six failing regions, which by its own logic
+says those regions need less density. <strong>The order by trait, as it stands:</strong> out of time and sparse: noise,
+then spread, then the drawing (anchors and the checker last); out of time with a high pinned share: unpin its trees
+first; proven UNSAT: the inflation for its fill or the mesh for its boundary load; cut-bound: the mesh only; macro-pin
+regions: pin access. The box spill stays off.</p>
 <p><strong>Evaluation.</strong> On sha3, minimax and partition_m at the utilization where the plain run leaves regions
 failing, count per family the regions it rescued, the time it cost and the WNS/wire of the result; separate proven
 UNSAT from running out of time (the latter moves with machine load: compare at a generous budget or by solver

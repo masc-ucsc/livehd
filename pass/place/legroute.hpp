@@ -69,7 +69,7 @@ struct Legroute_options {
   // each goes (spill_cut). The crossings are redone and only the regions whose boxes, hops or fixed routes changed
   // solve again; up to spill_rounds times. A pathological placement spreads out until it routes. 0: off
   unsigned    spill_rounds     = 0;
-  double      spill_fraction   = .2;
+  double      spill_fraction   = .2;  // 0: the rounds run the alternatives, the windows and the shift, no box spill
   // window_grow: in a spill round, a region without a routable answer first widens its boxes' windows by this many
   // tiles (twice at most) and solves again before it spills: more freedom of movement where the routing is tight,
   // bigger models only there. 0: off
@@ -86,6 +86,13 @@ struct Legroute_options {
   // connected boxes adjacent). Comma-separated; empty: off. alt_ms: SAT time per alternative (0: sat_ms)
   std::string alternatives;
   unsigned    alt_ms           = 0;
+  bool        alt_all          = false;  // solve every alternative even after one routes (the trial log then compares them)
+  // the "checker" alternative: a relaxed model first (no capacity bound on the edges a checkerboard of tiles owns, the
+  // boxes homed on those tiles free to move checker_window tiles, the others twice the window), then the full model
+  // from the relaxed answer's tiles with windows of four; an UNSAT relaxed model says the region needs less density
+  unsigned    checker_window   = 8;
+  // untracked: per tile, the capacity bounds of the edges it owns are skipped (set by the checker alternative only)
+  const std::vector<char>* untracked = nullptr;
   // region_pins: the bus-ordered virtual pins of the region refinement are fixed endpoints of the crossing nets;
   // false keeps the refinement's mesh but lets every crossing hop be chosen (hop_choice) or chained instead
   bool        region_pins      = true;
@@ -203,6 +210,18 @@ struct Legroute_report {
   size_t  shifted_tiles = 0;                                       // spill_shift: tiles handed to a neighbour
   size_t  alt_tried = 0, alt_rescued = 0;                          // alternatives: candidates solved, regions rescued
   double  alt_seconds = 0;
+  // alternatives: one trial per failing region and round: the region's traits and each family's outcome
+  struct Alt_trial {
+    int         region = 0;
+    unsigned    round  = 0;
+    double      fill = 0, cut = 0;  // movable boxes over free tiles; the placement cut ratio (risk order)
+    size_t      boxes = 0, hops = 0, pinned = 0;
+    size_t      boundary_tracks = 0;  // tracks across the region's boundary edges (the hops' capacity)
+    std::string status;  // the region's own answer: unsat, cut or unknown
+    std::vector<std::tuple<std::string, std::string, double>> families;  // (kind, status, seconds)
+    std::string adopted;
+  };
+  std::vector<Alt_trial> alt_trials;
   size_t  sat_hops_over_share = 0;             // hops placed past hop_share (every boundary tile of their pair was at it)
   size_t  global_nets = 0, global_pieces = 0;  // legroute.global: nets joined by L traces, their pass-through pieces
   size_t  global_unrouted = 0, global_full_edges = 0;  // global_route: nets without a path, edges filled to the share

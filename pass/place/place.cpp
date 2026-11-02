@@ -699,7 +699,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.legroute) {
     const auto& l = o.legroute_options;
-    h = hash_text(std::format("legroute-v9:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{"
+    h = hash_text(std::format("legroute-v11:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{"
                               "}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                               l.box_fill,
                               l.box_net_max,
@@ -742,6 +742,8 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               l.alternatives,
                               l.alt_ms,
                               l.region_pins,
+                              l.alt_all,
+                              l.checker_window,
                               l.global_margin,
                               l.hop_spread,
                               l.sat_seed,
@@ -8810,6 +8812,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       placement_hints->rebind(hint_objects());
       placement_hints->attach(control, hint_objects);
     }
+    // the routability probe (defined below) runs here, in the region-refinement call, before the mesh and the
+    // bus-ordered pins are cut, so the inflation spreads the cells first and the boundaries follow; the terminal
+    // stage then takes the refinement's mesh and pins (region_seed_dir) and does not probe again
+    std::function<bool(dp::Design&, unsigned)> probe_fn;
     if (refinement_active && !terminal_active) {
       const auto prior_progress = control.progress_observer;
       control.progress_observer = [&, prior_progress](const dp::GpSample& sample) {
@@ -8820,6 +8826,13 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       };
       const auto prior        = control.before_legalize;
       control.before_legalize = [&, prior](dp::Design& physical) {
+        if (probe_fn && options.legroute && options.legroute_probe.enabled && !multirow_cells) {
+          for (unsigned round = 0; round < std::max(1u, options.legroute_probe.rounds); ++round) {
+            if (probe_fn(physical, round)) {
+              break;
+            }
+          }
+        }
         refine_final_boundaries(physical);
         if (prior) {
           prior(physical);
@@ -8923,55 +8936,6 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         throw std::runtime_error("cannot write relative filler budget");
       }
     }
-    try {
-      metrics = dp::place(v.design, control);
-    } catch (const std::runtime_error&) {
-      if (sat_gp) {
-        v.design                 = *sat_gp;
-        auto fallback            = control;
-        fallback.max_iterations  = 0;
-        fallback.before_legalize = {};
-        sat_retained             = 0;
-        metrics                  = dp::place(v.design, fallback);
-      } else {
-        if (cache.reused == 0) {
-          throw;
-        }
-        // Changed blocks may need whitespace outside their old anchors. Retry
-        // with reusable blocks movable; imported FIXED cells remain fixed.
-        for (auto& c : v.cells) {
-          c.locked = false;
-        }
-        cache = {0, hashes.size(), false};
-        make_arrays(v, tech);
-        // The retry is a fresh solve: restart the macro timing budget and trace.
-        macro_checkpoints       = 0;
-        macro_checkpoint_forced = false;
-        macro_timed_positions.clear();
-        metrics = dp::place(v.design, control);
-      }
-    }
-#if defined(DREAMPLACE_NATIVE_PIN_TIMING_API) && DREAMPLACE_NATIVE_PIN_TIMING_API >= 2
-    if (options.native_gp_timing && options.native_gp_timing->continuing_rollback) {
-      std::ofstream report(options.output_dir + "/native_gp_transactions.json");
-      report << std::format(R"({{"iterations":{},"selected_iteration":{},"rollback_history":[)",
-                            metrics.iterations,
-                            metrics.selected_iteration);
-      bool first = true;
-      for (const auto& event : metrics.rollback_history) {
-        report << (first ? "" : ",")
-               << std::format(R"({{"iteration":{},"restored_iteration":{}}})", event.iteration, event.restored_iteration);
-        first = false;
-      }
-      report << "]}";
-      if (!report) {
-        throw std::runtime_error("cannot write native GP transaction report");
-      }
-    }
-#endif
-    if (macro_warp) {
-      macro_warp->finish(metrics.iterations);
-    }
     // legroute's frame additions: the handoff taps and end caps (rows cut under macros), and the planned power grid
     // (obstacles, power nets and vias; the IO pins as the handoff exports them). Returns the routing profile.
     const auto add_handoff_taps = [&](ph::Floorplan& frame) {
@@ -9058,7 +9022,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           }
         }
       } else if (real) {  // the real legroute's regions and bus-ordered virtual pins, refined at this round's placement
-        gp_density_weight = metrics.density_weight;
+        if (metrics.density_weight > 0) {  // inside the GP call (the refinement hook) the observer keeps it current
+          gp_density_weight = metrics.density_weight;
+        }
         refine_final_boundaries(design);
         if (final_regions && final_regions->rects.size() > 1) {
           for (const auto& r : final_regions->rects) {
@@ -9094,6 +9060,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       lopt.final          = false;
       lopt.sat_ms         = po.sat_ms;
       lopt.sat_min_fill   = po.fill;
+      lopt.spill_rounds   = 0;  // the probe is the density signal: the moves and the alternatives belong to the real run
+      lopt.alternatives.clear();
       // a failing probe restarts the placement: no need to solve the other regions; the real twin solves them all,
       // every failing region's cells widen
       lopt.fail_fast      = po.strict && !real;
@@ -9311,8 +9279,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         }
         widen(1);
         auto ctl = control;
-        if (metrics.density_weight > 0) {
-          ctl.density_weight_seed = metrics.density_weight * po.repulsion;
+        if (const double dw = metrics.density_weight > 0 ? metrics.density_weight : gp_density_weight; dw > 0) {
+          ctl.density_weight_seed = dw * po.repulsion;
         }
         ctl.target_density         = density;
         ctl.fillers_in_whitespace  = true;
@@ -9388,7 +9356,58 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       return count[1] + count[2] == 0 || (added <= 0 && anchored.empty());
     };
-    if (terminal_active && options.legroute && options.legroute_probe.enabled && !multirow_cells) {
+    probe_fn = run_legroute_probe;
+    try {
+      metrics = dp::place(v.design, control);
+    } catch (const std::runtime_error&) {
+      if (sat_gp) {
+        v.design                 = *sat_gp;
+        auto fallback            = control;
+        fallback.max_iterations  = 0;
+        fallback.before_legalize = {};
+        sat_retained             = 0;
+        metrics                  = dp::place(v.design, fallback);
+      } else {
+        if (cache.reused == 0) {
+          throw;
+        }
+        // Changed blocks may need whitespace outside their old anchors. Retry
+        // with reusable blocks movable; imported FIXED cells remain fixed.
+        for (auto& c : v.cells) {
+          c.locked = false;
+        }
+        cache = {0, hashes.size(), false};
+        make_arrays(v, tech);
+        // The retry is a fresh solve: restart the macro timing budget and trace.
+        macro_checkpoints       = 0;
+        macro_checkpoint_forced = false;
+        macro_timed_positions.clear();
+        metrics = dp::place(v.design, control);
+      }
+    }
+#if defined(DREAMPLACE_NATIVE_PIN_TIMING_API) && DREAMPLACE_NATIVE_PIN_TIMING_API >= 2
+    if (options.native_gp_timing && options.native_gp_timing->continuing_rollback) {
+      std::ofstream report(options.output_dir + "/native_gp_transactions.json");
+      report << std::format(R"({{"iterations":{},"selected_iteration":{},"rollback_history":[)",
+                            metrics.iterations,
+                            metrics.selected_iteration);
+      bool first = true;
+      for (const auto& event : metrics.rollback_history) {
+        report << (first ? "" : ",")
+               << std::format(R"({{"iteration":{},"restored_iteration":{}}})", event.iteration, event.restored_iteration);
+        first = false;
+      }
+      report << "]}";
+      if (!report) {
+        throw std::runtime_error("cannot write native GP transaction report");
+      }
+    }
+#endif
+    if (macro_warp) {
+      macro_warp->finish(metrics.iterations);
+    }
+    // a terminal stage with a region seed had its probe in the refinement call
+    if (terminal_active && options.legroute && options.legroute_probe.enabled && !multirow_cells && options.region_seed_dir.empty()) {
       for (unsigned round = 0; round < std::max(1u, options.legroute_probe.rounds); ++round) {
         if (run_legroute_probe(v.design, round)) {
           break;

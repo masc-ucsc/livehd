@@ -1469,8 +1469,19 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "legroute: in a spill round a failing region first tries alternative placements of its boxes, solved in parallel, "
      "the first routable one in this order adopted: a comma-separated list of noise (homes jittered), anchor (a few "
-     "boxes of the densest patch held in the sparsest one), tsm (an orthogonal drawing of the degree-4 box graph)"},
+     "boxes of the densest patch held in the sparsest one), spread (the boxes of the denser patches step toward the "
+     "sparsest one), tsm (an orthogonal drawing of the degree-4 box graph), checker (a relaxed model without capacity on "
+     "a checkerboard of tiles and wide windows, then the full model from its answer with windows of four)"},
+    {"place.legroute.checker_window",
+     "8",
+     Synth_set_option::Kind::integer,
+     "legroute: the checker alternative's window (tiles) for the boxes homed on the untracked checkerboard tiles"},
     {"place.legroute.alt_ms", "0", Synth_set_option::Kind::integer, "legroute: SAT time per alternative placement (ms; 0: sat_ms)"},
+    {"place.legroute.alt_all",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "legroute: solve every alternative placement even after one routes, so the trial log (legroute.json alt_trials) "
+     "compares the families per failing region"},
     {"place.legroute.region_pins",
      "true",
      Synth_set_option::Kind::boolean,
