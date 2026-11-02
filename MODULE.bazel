@@ -197,7 +197,7 @@ http_archive(
 
 git_repository(
     name = "hhds",
-    commit = "b80b2982335a2be1fced960db6e23c10a5816500",
+    commit = "c845095c6e5208a800cd8604ba6b1f7d69f5a022",
     remote = "https://github.com/masc-ucsc/hhds.git",
 )
 # For local co-development swap the git_repository above for:
