@@ -499,6 +499,8 @@ livehd::placement::Options placement_options(const Options& opts) {
   out.legroute_options.sat_ms           = integer("place.legroute.sat_ms", "60000");
   out.legroute_options.capacity_lazy    = integer("place.legroute.capacity_lazy", "2");
   out.legroute_options.freeze           = truthy(synth_set(opts, "place.legroute.freeze", "false"));
+  out.legroute_options.legal_boxes      = truthy(synth_set(opts, "place.legroute.legal_boxes", "false"));
+  out.legroute_options.legal_window     = static_cast<unsigned>(integer("place.legroute.legal_window", "0"));
   out.legroute_options.sat_seed         = truthy(synth_set(opts, "place.legroute.sat_seed", "true"));
   out.legroute_options.tiers            = synth_set(opts, "place.legroute.tiers", "adjacent,pins,home");
   out.legroute_options.tier_rounds      = integer("place.legroute.tier_rounds", "8");

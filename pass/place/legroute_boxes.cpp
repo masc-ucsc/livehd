@@ -179,6 +179,9 @@ bool tall_layout(const Design& d, const Grid& g, const Box& b, int tile, std::ve
 }
 
 bool box_fits(const Design& d, const Grid& g, const Box& b, int tile) {
+  if (b.placed && tile == g.tile_of(b.cx, b.cy)) {  // legal_boxes: its cells are there already
+    return true;
+  }
   if (g.blocked[tile]) {
     return false;
   }
@@ -279,116 +282,125 @@ Boxes build_boxes(const Design& d, const Grid& g, const std::map<int, int>& fixe
       b.join(b.find(it->second), b.find(cell));
     }
   }
-  // connected pairs in one region, nets of at most box_net_max cells, any distance
-  using Item = std::tuple<double, int, int>;
-  std::vector<Item> items;
-  std::vector<int>  cells;
-  for (const auto& N : d.nets) {
-    if (N.clock || N.power) {
-      continue;
-    }
-    cells.clear();
-    for (const auto& p : N.pins) {
-      if (p.comp >= 0 && d.cell[p.comp] >= 0) {
-        cells.push_back(d.cell[p.comp]);
+  Boxes out;
+  if (d.opt.legal_boxes) {  // the tiles of the legal placement are the boxes: the cells on one tile join
+    std::unordered_map<int, int> root;  // tile -> the first cell on it
+    for (int i = 0; i < n; ++i) {
+      if (const auto [it, fresh] = root.try_emplace(g.tile_of(b.cx[i], b.cy[i]), i); !fresh) {
+        b.join(b.find(it->second), i);
       }
     }
-    std::ranges::sort(cells);
-    cells.erase(std::unique(cells.begin(), cells.end()), cells.end());
-    if (cells.size() < 2 || cells.size() > d.opt.box_net_max) {
-      continue;
-    }
-    for (size_t x = 0; x < cells.size(); ++x) {
-      for (size_t y = x + 1; y < cells.size(); ++y) {
-        if (region[cells[x]] == region[cells[y]]) {
-          items.emplace_back(0, cells[x], cells[y]);
+  } else {
+    // connected pairs in one region, nets of at most box_net_max cells, any distance
+    using Item = std::tuple<double, int, int>;
+    std::vector<Item> items;
+    std::vector<int>  cells;
+    for (const auto& N : d.nets) {
+      if (N.clock || N.power) {
+        continue;
+      }
+      cells.clear();
+      for (const auto& p : N.pins) {
+        if (p.comp >= 0 && d.cell[p.comp] >= 0) {
+          cells.push_back(d.cell[p.comp]);
+        }
+      }
+      std::ranges::sort(cells);
+      cells.erase(std::unique(cells.begin(), cells.end()), cells.end());
+      if (cells.size() < 2 || cells.size() > d.opt.box_net_max) {
+        continue;
+      }
+      for (size_t x = 0; x < cells.size(); ++x) {
+        for (size_t y = x + 1; y < cells.size(); ++y) {
+          if (region[cells[x]] == region[cells[y]]) {
+            items.emplace_back(0, cells[x], cells[y]);
+          }
         }
       }
     }
-  }
-  std::ranges::sort(items);
-  items.erase(std::unique(items.begin(), items.end()), items.end());
-  for (auto& [c, u, v] : items) {
-    c = b.cost(b.find(u), b.find(v));
-  }
-  std::priority_queue<Item, std::vector<Item>, std::greater<>> heap(std::greater<>(), std::move(items));
-  Boxes                                                        out;
-  while (!heap.empty()) {
-    const auto [c0, u, v] = heap.top();
-    heap.pop();
-    const int ru = b.find(u), rv = b.find(v);
-    if (ru == rv) {
-      continue;
+    std::ranges::sort(items);
+    items.erase(std::unique(items.begin(), items.end()), items.end());
+    for (auto& [c, u, v] : items) {
+      c = b.cost(b.find(u), b.find(v));
     }
-    const double c1 = b.cost(ru, rv);
-    if (c1 > c0 + 1e-9) {  // stale: one of the boxes grew since this pair was scored
-      heap.emplace(c1, u, v);
-      continue;
-    }
-    if (c1 > d.opt.merge_cost) {
-      break;
-    }
-    if (!b.fits(ru, rv)) {
-      continue;  // boxes only grow: never fits again
-    }
-    b.join(ru, rv);
-    ++out.merges;
-  }
-  // pack-all: part-full boxes merge with the box of their nearest member cell; each radius repeats while it
-  // still merges, then grows by 1.5 up to 5 box widths
-  for (double cell = 1.5 * g.tile_w; cell < 5.0 * g.tile_w;) {
-    std::unordered_map<int64_t, std::vector<int>> grid;
-    const auto                                    key = [&](int64_t gx, int64_t gy) { return gx * 1000003 + gy; };
-    std::vector<std::vector<int>>                 members(n);
-    for (int i = 0; i < n; ++i) {
-      members[b.find(i)].push_back(i);
-      grid[key(int64_t(b.cx[i] / cell), int64_t(b.cy[i] / cell))].push_back(i);
-    }
-    std::vector<int> roots;
-    for (int i = 0; i < n; ++i) {
-      if (b.find(i) == i) {
-        roots.push_back(i);
-      }
-    }
-    std::ranges::stable_sort(roots, [&](int x, int y) { return b.sites[x] < b.sites[y]; });
-    std::vector<char> merged(n, 0);
-    bool              any = false;
-    for (int r : roots) {
-      if (merged[r] || b.find(r) != r) {
+    std::priority_queue<Item, std::vector<Item>, std::greater<>> heap(std::greater<>(), std::move(items));
+    while (!heap.empty()) {
+      const auto [c0, u, v] = heap.top();
+      heap.pop();
+      const int ru = b.find(u), rv = b.find(v);
+      if (ru == rv) {
         continue;
       }
-      double best = INFINITY;
-      int    to   = -1;
-      for (int i : members[r]) {
-        const auto ix = int64_t(b.cx[i] / cell), iy = int64_t(b.cy[i] / cell);
-        for (auto ax = ix - 1; ax <= ix + 1; ++ax) {
-          for (auto ay = iy - 1; ay <= iy + 1; ++ay) {
-            const auto it = grid.find(key(ax, ay));
-            if (it == grid.end()) {
-              continue;
-            }
-            for (int j : it->second) {
-              const int q = b.find(j);
-              if (q == r || merged[q] || q == to || region[j] != region[i]) {
+      const double c1 = b.cost(ru, rv);
+      if (c1 > c0 + 1e-9) {  // stale: one of the boxes grew since this pair was scored
+        heap.emplace(c1, u, v);
+        continue;
+      }
+      if (c1 > d.opt.merge_cost) {
+        break;
+      }
+      if (!b.fits(ru, rv)) {
+        continue;  // boxes only grow: never fits again
+      }
+      b.join(ru, rv);
+      ++out.merges;
+    }
+    // pack-all: part-full boxes merge with the box of their nearest member cell; each radius repeats while it
+    // still merges, then grows by 1.5 up to 5 box widths
+    for (double cell = 1.5 * g.tile_w; cell < 5.0 * g.tile_w;) {
+      std::unordered_map<int64_t, std::vector<int>> grid;
+      const auto                                    key = [&](int64_t gx, int64_t gy) { return gx * 1000003 + gy; };
+      std::vector<std::vector<int>>                 members(n);
+      for (int i = 0; i < n; ++i) {
+        members[b.find(i)].push_back(i);
+        grid[key(int64_t(b.cx[i] / cell), int64_t(b.cy[i] / cell))].push_back(i);
+      }
+      std::vector<int> roots;
+      for (int i = 0; i < n; ++i) {
+        if (b.find(i) == i) {
+          roots.push_back(i);
+        }
+      }
+      std::ranges::stable_sort(roots, [&](int x, int y) { return b.sites[x] < b.sites[y]; });
+      std::vector<char> merged(n, 0);
+      bool              any = false;
+      for (int r : roots) {
+        if (merged[r] || b.find(r) != r) {
+          continue;
+        }
+        double best = INFINITY;
+        int    to   = -1;
+        for (int i : members[r]) {
+          const auto ix = int64_t(b.cx[i] / cell), iy = int64_t(b.cy[i] / cell);
+          for (auto ax = ix - 1; ax <= ix + 1; ++ax) {
+            for (auto ay = iy - 1; ay <= iy + 1; ++ay) {
+              const auto it = grid.find(key(ax, ay));
+              if (it == grid.end()) {
                 continue;
               }
-              const double dd = std::abs(b.cx[i] - b.cx[j]) + std::abs(b.cy[i] - b.cy[j]);
-              if (dd <= cell && dd < best && b.fits(q, r)) {
-                best = dd;
-                to   = q;
+              for (int j : it->second) {
+                const int q = b.find(j);
+                if (q == r || merged[q] || q == to || region[j] != region[i]) {
+                  continue;
+                }
+                const double dd = std::abs(b.cx[i] - b.cx[j]) + std::abs(b.cy[i] - b.cy[j]);
+                if (dd <= cell && dd < best && b.fits(q, r)) {
+                  best = dd;
+                  to   = q;
+                }
               }
             }
           }
         }
+        if (to >= 0) {
+          b.join(to, r);
+          merged[to] = merged[r] = 1;
+          any                    = true;
+        }
       }
-      if (to >= 0) {
-        b.join(to, r);
-        merged[to] = merged[r] = 1;
-        any                    = true;
+      if (!any) {
+        cell *= 1.5;
       }
-    }
-    if (!any) {
-      cell *= 1.5;
     }
   }
   std::vector<int> id(n, -1);
@@ -420,6 +432,13 @@ Boxes build_boxes(const Design& d, const Grid& g, const std::map<int, int>& fixe
     box.cx     /= ws;
     box.cy     /= ws;
     box.region  = g.region[g.tile_of(box.cx, box.cy)];
+    if (d.opt.legal_boxes) {  // where the legalization put its cells: fixed there, or within legal_window tiles of it
+      box.tile   = g.tile_of(b.cx[box.cells[0]], b.cy[box.cells[0]]);
+      box.region = g.region[box.tile];
+      box.placed = true;
+      box.fixed  = d.opt.legal_window == 0;
+      box.window = d.opt.legal_window == 0 ? -1 : int(d.opt.legal_window);
+    }
     std::unordered_map<int, int> count;
     for (int i : box.cells) {
       for (int net : d.nets_of[i]) {
@@ -449,6 +468,9 @@ Boxes build_boxes(const Design& d, const Grid& g, const std::map<int, int>& fixe
 
 void pack_cells(const Design& d, const Grid& g, const Boxes& boxes) {
   for (const auto& b : boxes.boxes) {
+    if (b.placed && b.tile == g.tile_of(b.cx, b.cy)) {  // legal_boxes: on its legal tile, the cells stay as they are
+      continue;
+    }
     const int        c = g.col(b.tile), r = g.row(b.tile);
     std::vector<int> tall_at;
     std::vector<Seg> segs;  // the free segments left once the two-row cells have their spans

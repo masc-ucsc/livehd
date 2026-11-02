@@ -258,6 +258,39 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
       free[k].emplace_back(lo + offset, hi + offset);
     }
   }
+  if (d.opt.legal_boxes) {  // a cell's extent beyond its home tile (the tile its centre is on) takes those sites of
+    // the neighbour tile, so a box moving there (legal_window) packs around it; its home tile stays as the rows say
+    const auto cut = [&](int k, int64_t a, int64_t b) {
+      if (k < 0 || k >= int(free.size()) || a >= b) {
+        return;
+      }
+      std::vector<std::pair<int64_t, int64_t>> out;
+      for (auto [lo, hi] : free[size_t(k)]) {
+        if (hi <= a || lo >= b) {
+          out.emplace_back(lo, hi);
+          continue;
+        }
+        if (lo < a) {
+          out.emplace_back(lo, a);
+        }
+        if (b < hi) {
+          out.emplace_back(b, hi);
+        }
+      }
+      free[size_t(k)] = std::move(out);
+    };
+    for (size_t i = 0; i < d.movable.size(); ++i) {
+      const auto&   p  = fp.components[size_t(d.movable[i])].place;
+      const int64_t s0 = (p.x - g.x0) / g.site, s1 = s0 + (d.width[i] + g.site - 1) / g.site;
+      const int     c  = g.col_of(double(p.x) + d.width[i] / 2.0);
+      const int64_t lo = int64_t(c) * g.sites, hi = lo + g.sites;
+      const int     k  = int((p.y - g.y0) / g.row_h);
+      for (int kk = k; kk < k + (d.tall[i] ? 2 : 1); ++kk) {
+        cut(kk, s0, std::min(s1, lo));
+        cut(kk, std::max(s0, hi), s1);
+      }
+    }
+  }
   std::map<std::vector<Seg>, uint32_t> key_of;
   g.key.resize(g.size());
   g.blocked.assign(g.size(), 0);

@@ -125,6 +125,13 @@ struct Legroute_options {
   // calibration: every box pinned on the tile the fallback placement gives it (the placement a run without an answer
   // keeps); the SAT decides the route shapes only, so a region's verdict tests the model's rules, not the placement
   bool        freeze           = false;
+  // legal_boxes: the cell-boxes are the tiles of the legal placement legroute is given (the cells on one tile are that
+  // tile's box, fixed there; no cell moves): the SAT routes the placement the ordinary legalization made instead of
+  // placing boxes of its own. The terminal stage runs that legalization first
+  bool        legal_boxes      = false;
+  // with legal_boxes: a box may move up to this many tiles from its legal tile (its cells repacked on the tile it
+  // takes), so the SAT repairs the legalization locally where the routes need it; 0: every box fixed
+  unsigned    legal_window     = 0;
   // the fallback placement (boxes on their nearest fitting tiles) is tried first, as assumptions: a routable answer
   // there is kept, otherwise the free model continues with what the solver learned
   bool        sat_seed         = true;
@@ -249,6 +256,7 @@ struct Legroute_report {
   // capacity_lazy: re-solves, bounds added because an answer overflowed them, bounds never needed
   size_t  lazy_rounds = 0, lazy_bounds = 0, lazy_skipped = 0;
   size_t  frozen_boxes        = 0;  // freeze: boxes pinned on their fallback tiles
+  size_t  legal_boxes         = 0;  // legal_boxes: boxes built from the legal placement, fixed on their tiles
   size_t  sat_seeded          = 0;  // sat_seed: regions whose answer is the fallback placement
   size_t  sat_skipped_regions = 0;  // sat_min_fill: regions taken as routable without a solve
   // timing tiers: constraints kept, dropped (UNSAT cores), tiers dropped whole (out of time), solves, and the

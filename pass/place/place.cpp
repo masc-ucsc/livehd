@@ -699,8 +699,8 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.legroute) {
     const auto& l = o.legroute_options;
-    h = hash_text(std::format("legroute-v11:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{"
-                              "}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+    h = hash_text(std::format("legroute-v12:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{"
+                              "}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                               l.box_fill,
                               l.box_net_max,
                               l.merge_cost,
@@ -727,6 +727,8 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               l.steiner_pins,
                               l.capacity_lazy,
                               l.freeze,
+                              l.legal_boxes,
+                              l.legal_window,
                               l.steiner_min,
                               l.hop_share,
                               l.reserve_share,
@@ -9054,6 +9056,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       const auto* profile = legroute_power(frame, regions);
       auto        lopt    = options.legroute_options;
       lopt.final          = false;
+      lopt.legal_boxes    = false;  // the probe judges the GP placement's regions with the SAT placement (nothing is legal yet)
       lopt.sat_ms         = po.sat_ms;
       lopt.sat_min_fill   = po.fill;
       lopt.spill_rounds   = 0;  // the probe is the density signal: the moves and the alternatives belong to the real run
@@ -9497,8 +9500,12 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       // single-row cells around them as fixed obstacles, then they are released.
       // legroute places them itself (a two-row cell is a tile tall), and
       // sync_rail_twins gives each the master its rows' rails need.
-      if (multirow_cells && !options.legroute) {
+      const bool legal_boxes = options.legroute && options.legroute_options.legal_boxes;
+      if (multirow_cells && (!options.legroute || legal_boxes)) {
         multirow_report = anchor_multirow_cells(tech, frame, anchor_controls(options, terminal_options, core_origins));
+      }
+      if (legal_boxes) {  // legroute.legal_boxes: the ordinary terminal legalization first; legroute routes it as it stands
+        terminal_report = terminal_legalize(tech, frame, final_gp_timing, terminal_options);
       }
       if (options.legroute) {
         auto lopt = options.legroute_options;
@@ -9600,7 +9607,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                           : fixed_core                    ? "; the core is fixed (die, core, floorplan or previous placement given)"
                                                           : ""));
         }
-        if (multirow_cells) {  // the two-row cells legroute placed take the rail twin their rows need
+        if (multirow_cells && !legal_boxes) {  // the two-row cells legroute placed take the rail twin their rows need
           sync_rail_twins(tech, frame, options);
         }
         for (const auto& n : frame.nets) {
@@ -9627,7 +9634,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       sat_install(v.design, frame);
       metrics.legal                               = dp::is_legal(v.design);
       metrics.hpwl                                = dp::hpwl(v.design);
-      metrics.alignment.cell_legalization_seconds = terminal_report ? terminal_report->seconds : legroute_report->seconds;
+      metrics.alignment.cell_legalization_seconds
+          = (terminal_report ? terminal_report->seconds : 0) + (legroute_report ? legroute_report->seconds : 0);
       if (!metrics.legal) {
         throw std::runtime_error(options.legroute ? "legroute failed independent native geometry validation"
                                                   : "terminal legalization failed independent native geometry validation");

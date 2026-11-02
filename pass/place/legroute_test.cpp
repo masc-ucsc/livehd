@@ -346,6 +346,66 @@ TEST(Legroute, EndToEndLegalRoutedAndConnected) {
   }
 }
 
+TEST(Legroute, LegalBoxesRouteTheGivenPlacementUnmoved) {
+  Fixture f;
+  f.random_design(12, 4);
+  // a legal placement by hand: each row's cells packed left to right in their x order, on sites
+  std::map<int64_t, std::vector<size_t>> rows;
+  for (size_t i = 0; i < f.fp.components.size(); ++i) {
+    rows[f.fp.components[i].place.y].push_back(i);
+  }
+  for (auto& [y, cells] : rows) {
+    std::ranges::sort(cells, [&](size_t a, size_t b) { return f.fp.components[a].place.x < f.fp.components[b].place.x; });
+    int64_t x = 0;
+    for (size_t i : cells) {
+      auto& p       = f.fp.components[i].place;
+      p.x           = std::max(x, p.x / 50 * 50);
+      p.orientation = (y / 250) % 2 ? ph::Orientation::FS : ph::Orientation::N;
+      x             = p.x + std::llround(f.tech.macros.at(f.fp.components[i].macro).width * 1000);
+    }
+  }
+  f.expect_legal();
+  const auto before = f.fp.components;
+  for (unsigned window : {0u, 1u}) {  // fixed on their tiles; free to move a tile (the cells repacked where they land)
+    f.fp.components = before;
+    for (auto& n : f.fp.nets) {
+      n.wires.clear();
+    }
+    Legroute_options opt;
+    opt.threads      = 2;
+    opt.legal_boxes  = true;
+    opt.legal_window = window;
+    opt.final        = false;  // legroute.final would move cells inside their boxes
+    Legroute_regions regions;
+    regions.rects = {
+        {   0, 0,  5000, 4000},
+        {5000, 0, 10000, 4000}
+    };
+    const auto      profile = Fixture::profile();
+    Legroute_report r;
+    try {
+      r = legroute(f.tech, f.fp, f.timing, opt, regions, &profile);
+    } catch (const std::exception& e) {
+      FAIL() << e.what() << " window " << window;
+    }
+    EXPECT_GT(r.boxes, 0u);
+    EXPECT_EQ(r.legal_boxes, r.boxes) << window;  // every box is a tile of the legal placement
+    EXPECT_EQ(r.sat_regions, 2u);
+    EXPECT_EQ(r.sat_unsat_regions + r.sat_unknown_regions, 0u) << window;
+    EXPECT_GT(r.connections, 0u);
+    ASSERT_EQ(f.fp.components.size(), before.size());
+    f.expect_legal();
+    if (window > 0) {
+      continue;
+    }
+    EXPECT_EQ(r.displacement_um, 0) << "a fixed legal box is on its own tile";
+    for (size_t i = 0; i < before.size(); ++i) {  // the cells stay where the legalization left them
+      EXPECT_EQ(f.fp.components[i].place.x, before[i].place.x) << before[i].name;
+      EXPECT_EQ(f.fp.components[i].place.y, before[i].place.y) << before[i].name;
+    }
+  }
+}
+
 TEST(Legroute, WorkerExceptionsReachTheCaller) {
   EXPECT_THROW(lr::parallel(1, 2, [](size_t) { throw std::runtime_error("worker failure"); }), std::runtime_error);
   std::atomic<size_t> completed = 0;

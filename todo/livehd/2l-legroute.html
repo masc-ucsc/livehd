@@ -835,6 +835,71 @@ first/last cell of a critical path at its IO pins, each judged by the routed tim
 <li><strong>Then</strong> legroute.final speed and partition_m.</li>
 </ol>
 
+<h2 id="legal-boxes">Legal boxes: routing the ordinary legalization (2026-11-02)</h2>
+<p><strong>The user's proposal:</strong> run the legalization the flow already has (DREAMPlace's legalizer, then the
+terminal legalizer: row packing with the capacity bins, critical-pair alignment, timing corrections), build the
+cell-boxes out of that legal placement and let legroute route them. <strong>Landed as
+<code>synth.place.legroute.legal_boxes=true</code>:</strong> the terminal stage runs <code>terminal_legalize</code> first
+(the multi-row anchors as in the plain flow), then legroute builds one box per tile out of the cells whose centres fall
+on it (<code>Box::placed</code>: the box's own tile fits by construction, the clustering, the fill cap and the pin
+limit do not apply), every box is fixed on that tile, so the per-region SAT has no placement literals and decides the
+route shapes only, and <code>pack_cells</code>, the critical-box pinning, the forced-demand repair and the alternatives
+leave a placed box alone; the cells leave the stage exactly where the legalizer put them (the displacement metric
+counts the placed boxes as 0). <code>legal_window=n</code> keeps the boxes but lets each move up to n tiles from its
+legal tile, its cells repacked on the tile it takes (a local SAT repair of the legalization). The probe keeps the SAT
+placement model (no legal placement exists at its point). Options hash <code>legroute-v12</code>; unit test
+<code>LegalBoxesRouteTheGivenPlacementUnmoved</code> (both windows).</p>
+<p><strong>Measured, sha3 at utilization 0.60 (density 0.65, power grid, bus order with the ratio cut, 180 s per
+region, 18 threads; OpenROAD routes the same placement with 0 DRCs in every row):</strong></p>
+<table>
+<tr><th>mesh (max cells)</th><th>regions</th><th>routable</th><th>failures</th><th>SAT wall</th><th>notes</th></tr>
+<tr><td>1000</td><td>22</td><td>17</td><td>4 UNSAT (2 cut-bound), 1 timeout</td><td>236 s</td><td>the timeout a 1.3M-clause region with 310 pass-through nets</td></tr>
+<tr><td>2500</td><td>10</td><td>7</td><td>3 UNSAT</td><td>20 s</td><td>region 1 cut-bound (4 tiles wide: 233 nets across a row boundary of 227 tracks); region 6: the UNSAT core relaxed (<code>sat_relax_rounds=3</code>) = 6 boundary tiles under hops, 224 H tracks short (worst tile 98), 807 routes on them, SAT once relaxed; region 3 (263 pass-through nets, 1936 hops on 330 tiles) stays UNSAT after three rounds of relaxing its cores</td></tr>
+<tr><td>2500, hops free along 6 tiles</td><td>10</td><td>8</td><td>2 UNSAT (3, 6)</td><td>47 s</td><td><code>hop_choice=6</code>: region 1 routes once its crossings spread along the boundary</td></tr>
+<tr><td>2500, global router for the crossings</td><td>10</td><td>9</td><td>1 UNSAT (9)</td><td>218 s</td><td><code>global_route=true</code>: 3372 crossing nets routed over the grid ahead (330 without a path, 1306 edges at the share); regions 1, 3 and 6 route, region 9 (routable before) loses to the fixed pieces through it</td></tr>
+<tr><td>2500, global router + hops free along 6 tiles</td><td>10</td><td>8</td><td>1 UNSAT (9), 1 timeout (6)</td><td>341 s</td><td>the two levers do not add up: region 9 stays with the global router's pieces, region 6 runs out of time with the hop literals on top</td></tr>
+<tr><td>2500, boxes free to move one tile (<code>legal_window=1</code>)</td><td>10</td><td>7</td><td>2 UNSAT (3, 6), 1 timeout (1)</td><td>368 s</td><td>the placement literals over 3&times;3 windows slow every region (region 1 runs out of time where fixed it took 0.3 s) and the UNSAT regions stay UNSAT: a local repair must free only the boxes of the UNSAT core, not the region; the moved boxes' cells repack legally (the straddling parts of the legal cells block their neighbour tile's sites)</td></tr>
+<tr><td>5000</td><td>5</td><td>5</td><td>none</td><td>57 s</td><td>every region in 2.5&ndash;23 s, 1.3&ndash;2.4M clauses, no crossing over the hop share</td></tr>
+<tr><td>5000, Steiner trunks (<code>steiner_pins=8</code>)</td><td>5</td><td>3</td><td>2 timeouts</td><td>390 s</td><td>the single-trunk encoding for nets of 3&ndash;8 endpoints halves the route wire proxy (128k vs 257k &micro;m, crit 68 vs 205 ps: the star-of-L inflation measured) at twice the clauses (20M vs 10M); the two 660-tile regions run out of 180 s</td></tr>
+<tr><td>5000, Steiner trunks for 3&ndash;4 endpoints (<code>steiner_pins=4</code>)</td><td>5</td><td>4</td><td>1 timeout</td><td>271 s</td><td>wire proxy 192k &micro;m, 13.8M clauses: between the star and the full trunk model; the 660-tile region with 138 pass-throughs runs out of 180 s</td></tr>
+<tr><td>one region (20000)</td><td>1</td><td>1</td><td>none</td><td>301 s</td><td>3003 boxes, 12217 nets, 11.0M clauses after 26 lazy rounds (eager estimate 21M), 239 of 344 adjacent-tier constraints kept: the whole chip as one routing model, single-threaded</td></tr>
+<tr><td>free SAT placement, 5000 (same mesh)</td><td>5</td><td>5</td><td>none</td><td>391 s</td><td>the SAT placing its clustered boxes (fill 0.78) routes too on this mesh: 3.2&ndash;6.2M clauses per region, 43&ndash;174 s each; the proxies match the legal run's (crit 207 ps, wire 253k &micro;m); the region size, not the placement, was behind the small-mesh failures</td></tr>
+<tr><td>free SAT placement, 1000 (same day, for scale)</td><td>19</td><td>13</td><td>6 UNSAT</td><td>1800+ s</td><td>the best flow (inflation, unpinned trees, noise/spread) reaches 23 of 25 in 833 s at a QoR cost</td></tr>
+</table>
+<p><strong>What the failures are.</strong> Region 3 of the 2500 mesh routed alone as a chip (its hops as die pins,
+<code>route_region.py</code>) overflows OpenROAD's global router too (581 overflow at 64% use): with the boxes fixed,
+the per-region decomposition with hops fixed on the boundary is what fails, not the model's counting rules. OpenROAD
+routes the full chip because its nets cross a region side anywhere and detour through the neighbours. So with legal
+boxes the failure classes are boundary artefacts of the mesh: thin regions whose cut is bound by the placement, and
+hops concentrating on a few boundary tiles; freedom along the boundary (<code>hop_choice</code>) fixes the first,
+larger regions remove both. The routing-only model is small (2M clauses for a 660-tile region) and fast, so the region
+size for this flow is a parallelism choice, not a solver limit: 5000-cell regions route sha3 whole.</p>
+<p><strong>Proxies across meshes are not comparable.</strong> The SAT's route wire grows with the region size (167k
+&micro;m at 2500 cells, 257k at 5000) because a net inside a region is a star of L-shapes from its first endpoint,
+while a net cut by hops is a chain of short pieces (closer to a Steiner tree); the critical-delay proxy follows (101 vs
+205 ps). The routed timing of the placement (OpenROAD, signal-only) is the arbiter and is the ordinary flow's own:
+legal boxes change nothing in the placement. Open: <code>steiner_pins</code> for the big regions, the single-region
+case, the global router choosing the crossings, <code>legal_window=1</code> for the two UNSAT regions, and the free
+model on the same 5000-cell mesh (rows to be added).</p>
+<p><strong>Routed timing of the legal placement (OpenROAD, signal-only, 10 GHz SDC, utilization 0.60):</strong> DR WNS
+&minus;367.3 ps / TNS &minus;459.0k, GR overflow 0 at 49.5% use, 1 DRC (die edge), route wall 209 s. This is the
+ordinary flow's own number at 0.60 (legal boxes move nothing); the same session's SAT placements at this core were
+not routed (their proxies: crit 143&ndash;150 ps, wire 242&ndash;245k &micro;m under the best flow); the standard
+flow at 0.70 gave &minus;397.1/&minus;483.1k and the SAT placement at 0.70 &minus;356.2/&minus;442.9k (earlier
+sessions, same SDC). The best free flow of the alternatives work at 0.60 (inflation rounds, unpinned trees,
+noise/spread, 23 of 25 regions) routed by OpenROAD: DR WNS &minus;846.0 / TNS &minus;1274.7k (0 overflow, 0 DRC,
+GR wire 227k vs 180k &micro;m): the inflated SAT placement costs 2.3&times; the WNS of the ordinary legalization at
+the same core. The plain SAT placement on the same 5000-cell mesh (no probe, clustered boxes at fill 0.78) routed:
+DR WNS &minus;375.6 / TNS &minus;470.1k (0 overflow, 1 die-edge DRC, GR wire 188k &micro;m): the box snap itself
+costs 2.3% WNS and 2.4% TNS against the ordinary legalization (inside the user's 4% equivalence band), the inflation
+flow cost the rest. At equal core and mesh the legal flow is equal-or-better in QoR and seven times faster in SAT
+(57 s vs 391 s).</p>
+<p><strong>Why this matters for the plan:</strong> the flow the user asked for gives, today, a routable sha3 at 0.60
+with the placer's QoR untouched in about a minute of SAT, where the SAT placement needs 15&ndash;30 minutes and loses
+QoR; legroute.local's job in this flow is a routability proof plus the track-level routes of the legal placement,
+with the SAT's own box placement kept for the regions the legalizer leaves unroutable (<code>legal_window</code>,
+or the full model on those regions only).</p>
+
 <h2>Timing tiers (built 2026-10-31)</h2>
 <p>After a region's routable answer, each tier's constraints are tried in batches of 8, most critical first (a
 net is critical for the tiers when its slack rank is under <code>tier_fraction</code>, 5%), with every box held

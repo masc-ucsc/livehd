@@ -1402,6 +1402,16 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "with legroute (calibration): every cell-box pinned on the tile the fallback placement gives it; the SAT decides "
      "the route shapes only, so a region's verdict tests the model's rules against a placement an external router can "
      "be given"},
+    {"place.legroute.legal_boxes",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "with legroute: the ordinary terminal legalization runs first and its tiles are the cell-boxes, fixed where they "
+     "are; the SAT routes that placement instead of placing boxes of its own (no cell moves)"},
+    {"place.legroute.legal_window",
+     "0",
+     Synth_set_option::Kind::integer,
+     "with legroute.legal_boxes: a cell-box may move up to this many tiles from its legal tile where the routes need "
+     "it (its cells repacked on the tile it takes); 0 = every box fixed"},
     {"place.legroute.sat_ms",
      "60000",
      Synth_set_option::Kind::integer,

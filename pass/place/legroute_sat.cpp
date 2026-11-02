@@ -81,6 +81,10 @@ size_t balance_regions(const Design& d, const Grid& g, Boxes& boxes) {
   };
   std::vector<int> left;
   for (int b = 0; b < int(boxes.boxes.size()); ++b) {
+    if (boxes.boxes[b].placed) {  // legal_boxes: on its legal tile, which no other box gets
+      owner[boxes.boxes[b].region][g.tile_of(boxes.boxes[b].cx, boxes.boxes[b].cy)] = b;
+      continue;
+    }
     if (!try_region(boxes.boxes[b].region, b)) {
       left.push_back(b);
     }
@@ -347,7 +351,7 @@ void place_critical(const Design& d, const Legroute_options& o, const Grid& g, B
                     Legroute_report& rep) {
   std::vector<int> order;
   for (int b = 0; b < int(boxes.boxes.size()); ++b) {
-    if (boxes.boxes[b].crit > 0) {
+    if (boxes.boxes[b].crit > 0 && !boxes.boxes[b].fixed) {  // a box fixed already (legal_boxes, a global slot) keeps its tile
       order.push_back(b);
     }
   }
@@ -1253,7 +1257,7 @@ void repair_forced(const Design& d, const Legroute_options& o, const Grid& g, Bo
             tree_crit = c;
             tree      = it->second;
           }
-        } else if (boxes.boxes[b].fixed && boxes.boxes[b].crit < box_crit) {
+        } else if (boxes.boxes[b].fixed && !boxes.boxes[b].placed && boxes.boxes[b].crit < box_crit) {  // a placed box stays
           box_crit = boxes.boxes[b].crit;
           box      = b;
         }
@@ -5085,6 +5089,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
           pool.emplace_back([&, c] {
             Boxes bx = P[0].boxes;
             for (const auto& h : cands[c].homes) {
+              bx.boxes[size_t(h.box)].placed = false;  // a legal box off its legal tile is an ordinary box
               bx.boxes[size_t(h.box)].cx     = h.cx;
               bx.boxes[size_t(h.box)].cy     = h.cy;
               bx.boxes[size_t(h.box)].window = h.window;
@@ -5116,6 +5121,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
                     }
                   }
                   for (const auto& h : cands[c].homes) {
+                    bx.boxes[size_t(h.box)].placed = false;
                     bx.boxes[size_t(h.box)].cx     = h.cx;
                     bx.boxes[size_t(h.box)].cy     = h.cy;
                     bx.boxes[size_t(h.box)].window = h.window;
@@ -5368,6 +5374,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
         taken.insert(best_t);
         bx.region = s2;
         bx.tile   = best_t;
+        bx.placed = false;  // a legal box spilled elsewhere is an ordinary box there
         bx.cx     = double(g.cx(g.col(best_t)));
         bx.cy     = double(g.cy(g.row(best_t)));
         ++boxes_in[size_t(s2)];
