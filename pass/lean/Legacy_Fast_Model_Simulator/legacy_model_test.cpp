@@ -190,6 +190,40 @@ TEST(LegacyModel, WholeArrayMemoryUsesLoadAndToBus) {
     }
   }
 }
+// A memory nothing reads has no certificate driver, but it keeps a state
+// field; both next-state functions must hold it, or the record literal is
+// missing a field and the model does not compile (mem_write_only).
+TEST(LegacyModel, UnreadMemoryHoldsItsField) {
+  DesignScan d;
+  d.name   = "wro";
+  d.inputs = {
+      {"p", 2000000000, 8, {}}
+  };
+  Memory m;
+  m.id         = 10;
+  m.bits       = 8;
+  m.addr_width = 2;
+  m.size       = 4;
+  m.raw_name   = "t";
+  m.ports.push_back({0, 0, constant("1", 2), constant("5", 8), constant("1", 1), std::nullopt});
+  m.write_ports = {0};
+  d.memories.emplace(10, m);
+  d.outputs = {
+      {"z", 0, 8, input(2000000000, 8)}
+  };
+  const auto c = build_certificate(d, {});
+  ASSERT_TRUE(c.memories.empty()) << "the unread memory got a certificate driver after all";
+  LegacyEmitOptions o;
+  o.emit_cert = true;
+  std::ostringstream out;
+  ASSERT_NO_THROW(emit_legacy_model(d, c, o, out));
+  const auto text = out.str();
+  size_t     held = 0;
+  for (size_t at = text.find("let new_st_t := s.st_t"); at != std::string::npos; at = text.find("let new_st_t := s.st_t", at + 1)) {
+    ++held;
+  }
+  EXPECT_EQ(held, 2u) << "both _next and _nextStateFromCert hold the field";
+}
 TEST(LegacyModel, PreservesGlobalSelectorUniquenessAndEscapesMappingComments) {
   auto d            = binary(ScanOp::Or, 8);
   d.inputs[0].name  = "a-b";

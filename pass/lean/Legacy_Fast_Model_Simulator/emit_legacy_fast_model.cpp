@@ -380,6 +380,21 @@ void emit_legacy_fast_model(const DesignScan& d, const CertificateIR& c, const L
     const auto next = legacy_memory_next(m, n, ref, "s." + field);
     os << "  let new_" << field << " : (BitVec " << m.addr_w << " -> BitVec " << m.data_w << ") := " << next << '\n';
   }
+  // A memory nothing reads has no certificate driver (the scan never reaches
+  // its write cone) but still has a state field: it holds, unobservably.
+  // Without this the record literal below missed the field (mem_write_only).
+  {
+    std::set<uint32_t> driven;
+    for (const auto& m : c.memories) {
+      driven.insert(m.origin);
+    }
+    for (const auto& [id, field] : n.memories) {
+      if (!driven.contains(id)) {
+        fields.push_back(field);
+        os << "  let new_" << field << " := s." << field << '\n';
+      }
+    }
+  }
   os << "  { ";
   for (size_t i = 0; i < fields.size(); ++i) {
     if (i) {
