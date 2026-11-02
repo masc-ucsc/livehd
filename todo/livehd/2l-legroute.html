@@ -932,6 +932,96 @@ QoR; legroute.local's job in this flow is a routability proof plus the track-lev
 with the SAT's own box placement kept for the regions the legalizer leaves unroutable (<code>legal_window</code>,
 or the full model on those regions only).</p>
 
+<h2 id="regions-from-route">Plan: regions and pins from a global route of the legal placement (2026-11-02, to evaluate and decide; not implemented)</h2>
+<p><strong>The user's restructured flow.</strong> The experiments above say the SAT placement buys nothing on sha3
+that the ordinary legalization does not give, and that what makes a region unroutable is where its boundary was cut
+and where its crossings were pinned. So the step that is missing sits <em>before</em> legroute.local (and before or
+together with legroute.global): from a pre-legalized placement (Abacus and the terminal legalizer), run a global
+router, and let its routes decide the regions and the pins: regions of similar (or smaller) size whose cut lines do
+not go through problematic paths, so the area and the freedom go to legroute.local's solver; pins fixed where the
+routes cross, for parallel solving, except in the most congested regions, which solve first with their pins free to
+move a few tiles and then hand the chosen positions to their neighbours as fixed. The old overall sequence (global
+placement, cell-boxes, grid, coordinated regions, SAT placement and routing per region, capacity, timing, finish)
+becomes:</p>
+<ol>
+<li><strong>Legal placement:</strong> global placement, then the ordinary legalization (the placement to keep;
+<code>legal_boxes</code> routes it as it stands).</li>
+<li><strong>Global route</strong> of every signal net over the tile grid (the negotiated router of legroute.global;
+FastRoute imported only if it falls short, see E6): per net a tree of tile edges, per edge its use and overuse.</li>
+<li><strong>Regions from density and the route:</strong> cut lines chosen where few routed trees cross and where the
+line's tracks carry what does cross (the cut bound holds by construction), balanced in cells to max_cells, never
+through an edge the router left over its share nor through a critical net's tree; regions may be smaller than today
+where the routes allow it. The pins are the routed trees' crossings of the chosen lines (bus order then orders only
+along a side, it no longer invents positions).</li>
+<li><strong>Congestion classes and the schedule:</strong> regions ranked by the router's overuse inside them and on
+their boundary; the most congested, as a disjoint set (no two neighbours), solve first with their pins free
+(<code>hop_choice</code> X tiles along the boundary, <code>mesh_join</code> allowed); their answers fix the pins of
+the surrounding regions, which solve next in parallel (the two-wave checkerboard already does this for hop_choice).</li>
+<li><strong>legroute.local per region, cheapest lever first, local levers only:</strong> boxes fixed on the legal
+tiles (routing only); then the levers that do not touch a neighbour: free the boxes of the UNSAT core
+(<code>legal_window</code> on those boxes only, not the region), the alternative placements of those boxes,
+<code>mesh_join</code> with the neighbour the verdict names; the pins of a region never move once a neighbour used
+them.</li>
+<li><strong>Inflation as the last resort, localized:</strong> a region that fails even with free pins gets GOALPlace
+inflation and the chain runs again from step 1; global today (the whole placement re-legalized), to be localized to
+the failing region and its ring (the union re-placed with everything else fixed, re-legalized, re-routed, re-cut) if
+E5 shows it keeps the rescue rate.</li>
+<li><strong>Finish:</strong> layers and tracks, legroute.final (in-box placement, taps, local routes).</li>
+</ol>
+<p><strong>What exists, what is missing.</strong> Exists: the legal placement as boxes (<code>legal_boxes</code>,
+<code>legal_window</code>), the negotiated tile-grid router (<code>global_route</code>, <code>global_rounds</code>,
+its overuse map), hops free along a boundary in two waves (<code>hop_choice</code>), the mesh repair
+(<code>mesh_join</code>), the per-region alternatives, the spill rounds as the retry loop, the GOALPlace probe (global),
+the region mesh (ratio cut, bus-order pins). Missing: (M1) the cut chooser driven by the route map; (M2) pins from the
+routed crossings instead of the refinement's pins.tsv; (M3) the congestion ranking and the disjoint-first schedule
+with free pins only there; (M4) the UNSAT-core-only freeing of legal boxes (today <code>legal_window</code> frees a
+whole region and <code>legal_shuffle</code> the boxes at the router's overflowed edges); (M5) the localized
+inflation (a sub-placement with the rest fixed); (M6) the FastRoute import, gated.</p>
+<p><strong>Open questions the evaluation must settle (do not decide ahead):</strong> whether cutting on the route map
+beats the ratio cut at all once the router and mesh_join exist (on sha3 every mesh already routes: the question is
+time and the larger designs); whether the routed crossings make better pins than bus order for timing (bus order
+aligns buses, the router balances tracks; the routed timing decides); whether free pins in the congested regions are
+worth the two-wave dependency or whether mesh_join alone covers it; whether a localized re-placement can be made
+legal and routable at its seam without the global pass; and whether our router's overflow matches OpenROAD's on the
+macro designs.</p>
+<p><strong>Experiments (sha3, minimax and partition_m at 0.60 and 0.70, then partition_c and cnn; every row routed by
+OpenROAD for DRC and signal-only timing; the metrics: regions routable at the first pass, SAT wall, mesh joins and
+pin moves needed, routed WNS/TNS, wire, time per stage):</strong></p>
+<ol>
+<li><strong>E1, the cut:</strong> three region makers on the same legal placement and route: (a) today's ratio cut
+with bus-order pins; (b) recursive bisection on the tile grid where each candidate line costs its routed-tree
+crossings over the line's tracks (the cut ratio) plus the cell imbalance, lines through overused edges or critical
+trees forbidden, recursion to max_cells; (c) a min cut (VieCut) over the routed trees' edge graph. Decide by regions
+routable first pass and SAT wall at 1000 and 2500 cells; a maker that needs mesh_join less is better.</li>
+<li><strong>E2, the pins:</strong> for the winner of E1, pins at the routed crossings vs the refinement's bus-order
+pins (with and without ordering along the side): first-pass routability, then routed timing; keep bus order only if
+its timing wins.</li>
+<li><strong>E3, free pins where congested:</strong> hop_choice 0 / 2 / 6 for the top-k congested disjoint regions only
+(k = 10%, 25%) against hop_choice for all and for none; measure the rescue rate and the wall time the two waves
+cost.</li>
+<li><strong>E4, the local lever order:</strong> on regions that fail the first pass (force failures at density 0.70
+and 0.75, and on partition_c), the rescue rate and time of: freeing the UNSAT core's boxes (M4), the noise/spread
+alternatives of those boxes, mesh_join; order the levers by rescues per second, per region trait (cut-bound, hop
+overload, dense core), as the trait table above was built.</li>
+<li><strong>E5, localized inflation:</strong> the failing region plus its ring re-placed with everything else fixed
+(the GP's movement boxes restricted to the union, the terminal legalizer on the union only) versus the global probe:
+regions fixed, routed timing, wall time; keep the localized form if it rescues as much at a third of the time; the
+seam (cells at the union's edge) must legalize without pushing the fixed outside.</li>
+<li><strong>E6, the router gate:</strong> our negotiated router's overflow against OpenROAD's global route on the same
+legal placement (route_region.py and post_route.py exist) on all five designs; import FastRoute only where ours
+leaves overflow that OpenROAD does not; otherwise keep the tile-grid router (6&ndash;8 s on sha3).</li>
+<li><strong>E7, scale:</strong> partition_c and cnn through the chain (the first partition_c run is in flight): time
+per stage, memory with 8 threads, failing regions; the negotiation rounds' cost at 632 regions decides whether
+<code>global_route</code> becomes the default.</li>
+</ol>
+<p><strong>Order of work (each step measurable on its own; nothing is built before its experiment is due):</strong>
+S1 pins from the routed crossings (M2) and E2, since the crossings already exist as hops; S2 the route-driven cut
+(M1, variant b first, c if b loses) and E1; S3 the congestion ranking and the disjoint-first schedule (M3) and E3;
+S4 the UNSAT-core-only freeing (M4) and E4, which also orders the existing levers; S5 the localized inflation (M5)
+and E5; S6 the router gate (E6) on the macro designs; S7 the scale runs (E7) and the defaults. Decision at the end:
+one flow per region trait, the defaults flipped only where every design agrees within the 4% band (WNS first, then
+TNS, then wire, then the simplest).</p>
+
 <h2>Timing tiers (built 2026-10-31)</h2>
 <p>After a region's routable answer, each tier's constraints are tried in batches of 8, most critical first (a
 net is critical for the tiers when its slack rank is under <code>tier_fraction</code>, 5%), with every box held
