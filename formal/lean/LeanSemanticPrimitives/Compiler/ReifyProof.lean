@@ -754,10 +754,19 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
     -- chain in the kernel, O(N^2), and ran out of 20 GB on picorv32 (B12).
     let preLNm : Nat → Ident := fun j => mkIdent (base ++ Name.mkSimple s!"preL{j}")
     for j in [0 : nseg] do
-      elabCommand (← `(command|
-        theorem $(preLNm j) : ($(preNm (j+1))).toList = ($(preNm j)).toList ++ $(segNm j) := by
-          delta $(preNm (j+1)):ident $(segNm j):ident
-          simp only [Array.toList_push, List.append_assoc, List.cons_append, List.nil_append]))
+      -- An EMPTY chunk (a design with no bindings still has one: `nseg` = 1)
+      -- leaves `pre0.toList = pre0.toList ++ []`, which no push lemma touches,
+      -- so `simp` failed with "no progress" (all 7 zero-node Vortex blocks).
+      if bnd (j+1) == bnd j then
+        elabCommand (← `(command|
+          theorem $(preLNm j) : ($(preNm (j+1))).toList = ($(preNm j)).toList ++ $(segNm j) := by
+            delta $(preNm (j+1)):ident $(segNm j):ident
+            simp only [List.append_nil]))
+      else
+        elabCommand (← `(command|
+          theorem $(preLNm j) : ($(preNm (j+1))).toList = ($(preNm j)).toList ++ $(segNm j) := by
+            delta $(preNm (j+1)):ident $(segNm j):ident
+            simp only [Array.toList_push, List.append_assoc, List.cons_append, List.nil_append]))
     let mut srules : Array (TSyntax `Lean.Parser.Tactic.rwRule) :=
       #[← `(Lean.Parser.Tactic.rwRule| $rbNm:ident)]
     for j' in [0 : nseg] do
