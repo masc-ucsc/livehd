@@ -8,7 +8,8 @@
 # parallel-lane scheduler. Nothing here may include or link ABC
 # (abc_cleanup.md).
 
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("//tools:regression.bzl", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//tools:copt_default.bzl", "COPTS")
 
 # `synth_salt.hpp` is excluded from the glob because it is this rule's own

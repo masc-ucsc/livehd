@@ -586,7 +586,7 @@ static hhds::Pin_class create_pick_concat_dpin(hhds::Graph* g, const RTLIL::SigS
   // `mux_94508` into lane 0 of `concat_264964`, the same defect by two routes).
   //
   // A SINGLE chunk keeps its signed read: there is no Concat and no outer Sext
-  // to carry the sign, and that sign is observable -- `inou/yosys/tests/
+  // to carry the sign, and that sign is observable -- `inou/slang/tests/reader/
   // issue_047.v` exists for it (`input signed [0:0] a; y = b ^ (a|a)` must
   // sign-extend a to 'b11).
   const bool sign_on_assembled_result = chunk_list.size() > 1;

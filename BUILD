@@ -1,4 +1,12 @@
-# Empty BUILD file, just to make this directory a Bazel package.
+# Root package and regression-selection smoke check.
+
+load("//tools:regression.bzl", "sh_test")
+
+sh_test(
+    name = "regression_selection_smoke",
+    srcs = ["scripts/regression_smoke.py"],
+    data = ["scripts/regression.py"],
+)
 
 exports_files(["MODULE.bazel"])
 

@@ -1,7 +1,8 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+load("//tools:regression.bzl", "sh_test")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
 load("//inou/slang:slang_ladder.bzl", "SLANG_LADDER")
 load("//tools:copt_default.bzl", "COPTS")
 load("//inou/prp:tests/equiv/fixtures.bzl", "LEGACY_YOSYS_PAIRS")
@@ -151,7 +152,7 @@ sh_test(
 )
 
 # The --reader slang coverage ladder (todo/ 2s subtask E): one slang_compile-*
-# target per ladder entry (an inou/yosys/tests/*.v source not subsumed by a
+# target per ladder entry (a tests/reader/*.v source not subsumed by a
 # larger sibling), pinned to its strongest passing tier
 # in slang_ladder.bzl (lec > verilog > lnast > error — see
 # inou/slang/README.md). tests/slang_compile.sh enforces the expectation both
@@ -167,11 +168,11 @@ sh_test(
     srcs = ["tests/slang_compile.sh"],
     args = [
         SLANG_LADDER[t],
-        "$(location //inou/yosys:tests/%s.v)" % t,
+        "$(location tests/reader/%s.v)" % t,
     ],
     data = [
         "//inou/prp:tests/lec.py",
-        "//inou/yosys:tests/%s.v" % t,
+        "tests/reader/%s.v" % t,
         "//lhd",
     ],
     tags = [
@@ -427,3 +428,6 @@ sh_test(
         "//inou/yosys:yosys2",
     ],
 )
+
+# HDL-only parser fixtures live here; behavioral HDL/Pyrope pairs live in inou/prp.
+exports_files(glob(["tests/reader/*.v"]))

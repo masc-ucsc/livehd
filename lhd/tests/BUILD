@@ -15,7 +15,8 @@
 #  - lhd_equiv_test: prp->ln->lg->v1, prp->lg->v2, verilog0->lg->v3, then
 #    LEC of each against the golden verilog0.
 
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+load("//tools:regression.bzl", "sh_test")
 load("//tools:lhd.bzl", "lhd_verilog")
 
 # The technology mappers `lhd synth --set synth.mapper=` / `lhd pass <mapper>`
@@ -2441,7 +2442,7 @@ sh_test(
 
 # --reader slang|yosys|yosys-slang|yosys-verilog (slang = direct inou.slang
 # SV->LNAST front-end; yosys/yosys-slang = yosys's built-in read_slang). The
-# latch leg reuses the shared inou/yosys/tests/latch_async.v fixture.
+# latch leg reuses the shared inou/slang/tests/reader/latch_async.v fixture.
 sh_test(
     name = "lhd_reader_test",
     srcs = ["lhd_reader_test.sh"],

@@ -1,5 +1,6 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("//tools:regression.bzl", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//tools:copt_default.bzl", "COPTS")
 
 # Post-freeze provisional domino code (todo/livehd/2d-domplace.html). It lives

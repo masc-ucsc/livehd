@@ -139,12 +139,12 @@ grep -q "undeclared identifier 'missing_function'" "$W/bad.log" \
 # Async-reset latches imported with read_slang must reparse as strict SV and
 # retain reset values. Check each reset polarity with its own reset sequence.
 #
-# NOT the shared inou/yosys/tests/latch_async.v fixture: this leg compares a
+# NOT the shared inou/slang/tests/reader/latch_async.v fixture: this leg compares a
 # yosys-read implementation against a SLANG-read reference, and that fixture's
 # 3-bit `qn` latch is split into three independent 1-bit latches by the yosys
 # path but kept whole by slang, so the two disagree from unconstrained latch
 # state before any input is applied. latch_async.v is covered like-for-like by
-# yosys_compile-latch_async and slang_compile-latch_async instead.
+# slang_compile-latch_async instead.
 for polarity in pos neg; do
   if [ "$polarity" = pos ]; then
     reset_port=rst

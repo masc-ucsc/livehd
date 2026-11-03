@@ -1,12 +1,15 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//tools:regression.bzl", "cc_test", "sh_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+
 load("//tools:cc_headers.bzl", "cc_direct_headers")
 load("//tools:copt_default.bzl", "COPTS")
 load("//inou/prp:tests/equiv/fixtures.bzl", "hdl_sources")
 
 _EQUIV_HDL = hdl_sources()
+
+exports_files(["tests/yvr_test.py"], visibility = ["//inou/yosys:__pkg__"])
 
 exports_files([
     "tests/equiv/ready_signal_chain.v",

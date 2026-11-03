@@ -1,5 +1,6 @@
+load("//tools:regression.bzl", "sh_test")
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
 
 filegroup(
     name = "fixtures",

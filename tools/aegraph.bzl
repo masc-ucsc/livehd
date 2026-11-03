@@ -27,9 +27,10 @@ the graph, a fresh `?`, a choice arm without an assignment, an unregistered {att
 unknown cost profile) fails the genrule, i.e. the build.
 """
 
-load("@rules_cc//cc:defs.bzl", "cc_test")
+
+load("//tools:regression.bzl", "cc_test", "sh_test")
 load("@rules_shell//shell:sh_binary.bzl", "sh_binary")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
 load("//tools:copt_default.bzl", "COPTS")
 
 def aeg_rules(

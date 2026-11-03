@@ -1,7 +1,7 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #
 # The --reader slang coverage ladder (todo/ 2s subtask E): each listed
-# inou/yosys/tests/*.v source (those not subsumed by a larger sibling fixture)
+# inou/slang/tests/reader/*.v source (those not subsumed by a larger sibling fixture)
 # appears here with its strongest passing tier
 # (lec > verilog > lnast > error). tests/slang_compile.sh enforces the
 # expectation BOTH ways, so promotions/regressions are explicit edits.

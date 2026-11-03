@@ -1,7 +1,8 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//tools:regression.bzl", "cc_test", "sh_test")
+load("@rules_cc//cc:defs.bzl", "cc_library")
+
 load("//tools:copt_default.bzl", "COPTS")
 
 # Reusable engine: structural_match(a, b) stamps the `match` attribute. Free of

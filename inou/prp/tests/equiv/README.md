@@ -150,7 +150,7 @@ width/sign annotations after lowering, before cprop. IO, constants, register
 and memory outputs, and instance boundaries are preserved. Cprop must preserve
 integer semantics without consulting annotations; the ordinary bitwidth pass
 recovers them. The fuzz pass does not infer or restore missing annotations.
-Both legs run under `bazel test //...` with the same equivalence
+Both legs run under `bazel test --config=frontend //...` with the same equivalence
 expectations. A bitfuzz-leg failure fails the target.
 
 Run one manually with:

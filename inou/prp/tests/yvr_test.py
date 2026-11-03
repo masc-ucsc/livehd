@@ -28,6 +28,7 @@ def _modules(vpath):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("-i", "--input", required=True, help="golden .v file")
+    ap.add_argument("--yosys-oracle", action="store_true", help="also require the independent Yosys text proof")
     args = ap.parse_args()
 
     lhd = "./bazel-bin/lhd/lhd" if os.path.exists("./bazel-bin/lhd/lhd") else "./lhd/lhd"
@@ -64,6 +65,19 @@ def main():
         for path in sorted(gen):
             with open(path) as source:
                 output.write(source.read() + "\n")
+    if args.yosys_oracle:
+        oracle = subprocess.run(
+            [os.path.abspath("inou/yosys/lgcheck"), "--yosys", os.path.abspath("inou/yosys/yosys2"),
+             "--reference", os.path.abspath(v),
+             "--implementation", os.path.abspath(impl), "--top", top],
+            cwd=work, env=dict(os.environ, LGCHECK_EQUIV_TIMEOUT="20"),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        with open(os.path.join(work, "yosys_oracle.log"), "wb") as log:
+            log.write(oracle.stdout)
+        if oracle.returncode:
+            print("{} - yvr - FAILED: independent Yosys proof".format(name))
+            print(oracle.stdout.decode("utf-8", "replace"))
+            return 1
     for label, side, selected_top in [("graph", "lg:" + os.path.join(work, "lg"), top),
                                       ("verilog", impl, impl_top)]:
         chk = run_lec(

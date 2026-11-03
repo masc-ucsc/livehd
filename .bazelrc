@@ -85,7 +85,13 @@ build:prof --linkopt -pg
 #build:prof --cxxopt -ftest-coverage
 #build:prof --linkopt -ftest-coverage
 
-test --test_tag_filters "-manual,-fixme"
+# Both domains always retain their representative smoke tests.
+test --test_tag_filters "regression-smoke,-manual,-fixme"
+test:frontend --test_tag_filters "frontend,-manual,-fixme"
+test:backend --test_tag_filters "backend,-manual,-fixme"
+test:all --test_tag_filters "-manual,-fixme"
+# Compatibility with the earlier language-only command.
+test:pyrope --config=frontend
 # Soft target: every test under ~30s. 300s (bazel's medium default) is only a
 # safety net against hangs, not a goal; slow tests get optimized, never skipped.
 test --test_timeout=300

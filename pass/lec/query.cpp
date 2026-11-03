@@ -5894,7 +5894,7 @@ static Query_result prove_equal_impl(hhds::Graph* ref, hhds::Graph* impl, const 
       // bit-index contract, so the suffix bridge above cannot relate them.
       // The reset prologue does not repair it either: a latch whose reset
       // polarity the prologue never asserts simply HOLDS its arbitrary
-      // power-on value (inou/yosys/tests/latch_async.v, `qn` vs
+      // power-on value (inou/slang/tests/reader/latch_async.v, `qn` vs
       // `qn_cgen1..3`, refuted at checked step 1 on state neither side ever
       // wrote). Seed such state exactly as a reset-less design's power-on
       // state is seeded -- tracked '?' (or a shared canonical zero under
