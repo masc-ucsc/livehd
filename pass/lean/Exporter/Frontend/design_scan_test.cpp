@@ -231,6 +231,61 @@ TEST(DesignScan, RemByConstantLowersToDivMultSum) {
   }
 }
 
+// `a % (s ? k1 : k2)` with an UNSIGNED Mux of positive constants can never
+// divide by zero, so it lowers like a constant divisor (SoomRV PrefetchIssuer:
+// `addr % (c ? 1 : 2)`). A Mux with a zero arm, or a signed one, stays refused.
+TEST(DesignScan, RemByMuxOfPositiveConstantsLowers) {
+  struct Case {
+    int  k1, k2;
+    bool is_signed;
+    bool lowers;
+  };
+  for (const auto& c : {Case{1, 2, false, true}, Case{0, 2, false, false}, Case{1, 2, true, false}}) {
+    SCOPED_TRACE(std::to_string(c.k1) + "," + std::to_string(c.k2) + (c.is_signed ? ",signed" : ""));
+    auto& lib = livehd::Hhds_graph_library::instance("lgdb_scan_remmux_" + std::to_string(c.k1) + std::to_string(c.k2)
+                                                      + (c.is_signed ? "s" : "u"));
+    auto  io  = lib.create_io("remmux");
+    io->add_input("a", 1);
+    io->set_bits("a", 8);
+    io->add_input("s", 2);
+    io->set_bits("s", 1);
+    io->add_output("y", 3);
+    io->set_bits("y", 8);
+    auto g   = io->create_graph();
+    auto mux = create_typed_node(*g, Ntype_op::Mux);
+    auto md  = mux.create_driver_pin(0);
+    set_bits(md, 3);
+    if (c.is_signed) {
+      livehd::graph_util::set_sign(md);
+    }
+    g->get_input_pin("s").connect_sink(mux.create_sink_pin(0));
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(c.k1)).connect_sink(mux.create_sink_pin(1));
+    livehd::graph_util::create_const(*g, *Dlop::create_integer(c.k2)).connect_sink(mux.create_sink_pin(2));
+    auto rem = create_typed_node(*g, Ntype_op::Rem);
+    set_bits(rem.create_driver_pin(0), 8);
+    g->get_input_pin("a").connect_sink(rem.create_sink_pin(0));
+    md.connect_sink(rem.create_sink_pin(1));
+    rem.create_driver_pin(0).connect_sink(g->get_output_pin("y"));
+    if (!c.lowers) {
+      try {
+        scan_design(*g, {});
+        FAIL() << "a divisor that can be zero (or a signed mux) must be refused";
+      } catch (const std::runtime_error& e) {
+        EXPECT_NE(std::string(e.what()).find("only a nonzero CONSTANT divisor"), std::string::npos) << e.what();
+      }
+      continue;
+    }
+    const auto design = scan_design(*g, {});
+    const auto div    = std::find_if(design.nodes.begin(), design.nodes.end(), [](const DesignNode& n) { return n.op == ScanOp::Div; });
+    const auto sum    = std::find_if(design.nodes.begin(), design.nodes.end(), [](const DesignNode& n) { return n.op == ScanOp::Sum; });
+    ASSERT_NE(div, design.nodes.end());
+    ASSERT_NE(sum, design.nodes.end());
+    EXPECT_EQ(sum->id, static_cast<uint32_t>(rem.get_debug_nid()));
+    ASSERT_EQ(div->operands.size(), 2u);
+    EXPECT_EQ(div->operands[1].driver.id, static_cast<uint32_t>(mux.get_debug_nid()));  // the Mux is the divisor
+  }
+}
+
 namespace {
 // Build `arms` (control, value) pairs at dense ascending pids, plus an optional
 // trailing default. `hotmux_inputs` asserts that density, so the fixture must

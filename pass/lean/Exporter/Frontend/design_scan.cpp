@@ -350,16 +350,52 @@ void lower_hotmux(const LeanCtx& ctx, const Node& node, DesignScan& design, uint
   }
 }
 
-// Rem is supported only with a nonzero CONSTANT divisor. `x % 0` is X in
+// Rem is supported only with a divisor that can never be 0. `x % 0` is X in
 // Verilog and undefined in every LiveHD executor, so no certificate value is
-// right; a variable divisor can be zero at run time.
-bool rem_constant_divisor(const Node& node) {
-  const auto b = livehd::graph_util::get_driver_of_sink_name(node, "b");
-  if (b.is_invalid() || !pin_is_const(b)) {
+// right; a general variable divisor can be zero at run time.
+//
+// Never 0: a nonzero constant, or an UNSIGNED Mux whose every data input is
+// (recursively) a positive constant -- `addr % (c ? 1 : 2)` (SoomRV
+// PrefetchIssuer). Whichever arm the selector picks, the divisor is one of
+// those constants, so `a - (a / b) * b` (lower_rem) is exact there too.
+bool positive_const(const Node_pin& pin) {
+  if (!pin_is_const(pin)) {
     return false;
   }
-  const auto v = pin_const_value(b);
-  return v.is_integer() && !v.has_unknowns() && !(v.is_just_i64() && v.to_just_i64() == 0);
+  const auto v = pin_const_value(pin);
+  return v.is_integer() && !v.has_unknowns() && !v.is_negative() && !v.is_known_zero();
+}
+
+bool never_zero(const Node_pin& pin, int depth) {
+  if (pin.is_invalid()) {
+    return false;
+  }
+  if (pin_is_const(pin)) {
+    const auto v = pin_const_value(pin);
+    return v.is_integer() && !v.has_unknowns() && !(v.is_just_i64() && v.to_just_i64() == 0);
+  }
+  if (depth == 0 || pin_is_input(pin) || node_is_flop(pin_node(pin)) || node_is_memory(pin_node(pin))) {
+    return false;
+  }
+  const auto n = pin_node(pin);
+  if (node_op(n) != Ntype_op::Mux || node_output_is_signed(n)) {
+    return false;
+  }
+  bool any = false;
+  for (const auto& e : inp_edges_ordered(n)) {
+    if (e.sink.get_port_id() == 0) {
+      continue;  // the selector
+    }
+    if (!(positive_const(e.driver) || never_zero(e.driver, depth - 1))) {
+      return false;
+    }
+    any = true;
+  }
+  return any;
+}
+
+bool rem_constant_divisor(const Node& node) {
+  return never_zero(livehd::graph_util::get_driver_of_sink_name(node, "b"), 4);
 }
 
 // Lower `a % c` (c a nonzero constant) to `a - (a / c) * c`.
@@ -1421,8 +1457,8 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
         {       "sub", "flatten the hierarchy first (the Yosys readers flatten; native slang keeps Sub instances)"},
         {"clock_cell",                              "a Clock_cell outside a clock pin has no value semantics here"},
         {       "rem",
-         "only a nonzero CONSTANT divisor is supported; `x % 0` is X in Verilog, so a variable or zero divisor has no certificate "
-         "value"                                                                                                  },
+         "only a nonzero CONSTANT divisor is supported (or an unsigned mux whose every data input is a positive constant); "
+         "`x % 0` is X in Verilog, so a divisor that can be zero has no certificate value"                                                                                                  },
         {      "rxor",                                                    "reduce-xor has no certificate encoding"},
         {  "popcount",                                                      "popcount has no certificate encoding"},
     };
