@@ -159,6 +159,19 @@ sh_test(
     deps = [":scripts"],
 )
 
+# Overlapping items of a plain case/casez/casex keep first-match priority through
+# `proc -ifx` (packages/yosys.patch, proc_mux): the netlist is equivalent to the
+# source read by the native reader.
+sh_test(
+    name = "yosys_casez_priority_test",
+    srcs = ["tests/yosys_casez_priority_test.sh"],
+    data = [
+        "tests/casez_priority.sv",
+        "//lhd",
+    ],
+    deps = [":scripts"],
+)
+
 # A flop with an initializer AND a reset keeps one value (the reset value): the
 # reader warns when the initializer differs and is dropped, and stays quiet when
 # nothing is lost (same value, x bits, or a sync reset that stays a data mux).
