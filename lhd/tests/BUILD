@@ -1339,6 +1339,17 @@ sh_test(
     ],
 )
 
+# A register array of structs written field by field becomes one wide memory
+# word with merged ports: its never-written write lanes are zeroed after
+# memory_share (setundef), and each read-data piece gets its own slice
+# (lgyosys_tolg resolve_memory). The Lean export accepts it and lec passes.
+sh_test(
+    name = "yosys_memory_share_undef_test",
+    size = "medium",
+    srcs = ["yosys_memory_share_undef_test.sh"],
+    data = ["//lhd"],
+)
+
 # A gate that reaches state as a Clock_cell (Pyrope `Clock(...)`, a chain of
 # them, tolg's activation gate, a gated `__memory` clock with a registered read)
 # folds into the enables, and the export accepts the result;

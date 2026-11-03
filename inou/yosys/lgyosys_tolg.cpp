@@ -944,16 +944,22 @@ static hhds::Node_class resolve_memory(hhds::Graph* g, RTLIL::Cell* cell) {
       if (chunk.width == wire->width) {
         if (wire2pin.find(wire) != wire2pin.end()) {
           const auto& or_dpin = wire2pin[wire];
+          // A known wire (a module output, or a placeholder a reader made) that
+          // is ONE piece of a wider read port gets its slice, not the whole port:
+          // `RD_DATA = {x[35:27], \q, \v, ...}` (memory_share merged a struct
+          // array's ports) wired all 36 bits to the 8-bit output q, which then
+          // read the low bits -- another entry's lanes.
+          const auto src = chunk.width == ss.size() ? dpin : create_pick_operator(dpin, offset, chunk.width, false);
           if (is_graph_output_pin(or_dpin)) {
             auto out_name = or_dpin.get_pin_name();
             auto out_sink = g->get_output_pin(out_name);
-            dpin.connect_sink(out_sink);
+            src.connect_sink(out_sink);
           } else {
             auto or_node = master_node(or_dpin);
             I(type_op_of(or_node) == Ntype_op::Or);
             I(!or_node.has_inp_edges());
 
-            livehd::graph_util::setup_sink_pid(or_node, 0).connect_driver(dpin);
+            livehd::graph_util::setup_sink_pid(or_node, 0).connect_driver(src);
             I((int)bits_of(or_dpin) == wire->width);
           }
         } else if (chunk.width == ss.size()) {
