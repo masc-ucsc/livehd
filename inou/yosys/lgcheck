@@ -701,7 +701,10 @@ if [ -f "$clock_domains_tool" ] && ${YOSYS} -p "${yosys_read}; flatten gold gate
     echo "INFO: reusing lowered input designs (${prepared_inputs})"
   fi
   case "$clock_domains" in
-  single*) CLOCK_BLIND_OK=1 ;;
+  # SAT's clock-blind engines cannot model asynchronous FFs (notably $adffe).
+  # Send these designs directly to clk2fflogic instead of spending the proof
+  # budget on unsupported correspondence attempts before reaching stage 1c.
+  "single "*) CLOCK_BLIND_OK=1 ;;
   esac
   case "$clock_domains" in
   single+async* | multi+async*) ;;
@@ -711,7 +714,7 @@ else
   echo "WARN: could not extract the clock domains (see lgcheck_clock_domains.log)"
 fi
 if [ "$CLOCK_BLIND_OK" -eq 0 ]; then
-  echo "INFO: state is not a single primary-input clock edge; clock-blind engines (1/1n/1r/1p/1m/2/4) skipped"
+  echo "INFO: state has asynchronous control or is not a single primary-input clock edge; clock-blind engines (1/1n/1r/1p/1m/2/4) skipped"
 fi
 # The guard is preparation, not an equivalence strategy: restart the budget.
 equiv_start=$SECONDS

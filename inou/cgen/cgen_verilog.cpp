@@ -1746,6 +1746,9 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     bool            single_clock = true;
     hhds::Pin_class base_clock_dpin;
     for (const auto& p : port_vector) {
+      if (p.rdport && mem_type == 0 && !p.clock.is_invalid() && p.clock.is_const()) {
+        continue;  // Yosys marks an unused asynchronous read clock with X
+      }
       if (!p.clock.is_invalid()) {
         base_clock_dpin = p.clock;
         break;
@@ -1753,6 +1756,10 @@ void Cgen_verilog::process_memory(std::shared_ptr<File_output> fout, const hhds:
     }
     for (auto& p : port_vector) {
       auto& dpin = p.clock;
+      if (p.rdport && mem_type == 0 && !dpin.is_invalid() && dpin.is_const()) {
+        dpin = base_clock_dpin;
+        continue;
+      }
       if (dpin.is_invalid()) {
         dpin = base_clock_dpin;
         continue;

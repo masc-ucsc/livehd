@@ -310,7 +310,7 @@ new_git_repository(
     name = "abc",
     build_file = "//packages:abc.BUILD",  # relative to external path
     commit = "b6e16bddb089b3dd386c7c28a4ac26b410076b6f",
-    patches = ["//packages:abc.patch", "//packages:abc-physical.patch", "//packages:abc-buffer-heap.patch"],
+    patches = ["//packages:abc.patch", "//packages:abc-physical.patch", "//packages:abc-buffer-heap.patch", "//packages:abc-bitcount-init.patch"],
     remote = "https://github.com/berkeley-abc/abc.git",
 )
 
