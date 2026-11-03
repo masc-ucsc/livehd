@@ -1,0 +1,29 @@
+/*
+:name: basic_wiring
+:type: equiv
+:reader_matrix: true
+:verilog_top: basic_wiring
+:pyrope_top: basic_wiring
+*/
+// Net aliases, scattered assignments, offset ports, and context-sized masks.
+pub comb basic_wiring(a:U64, b:U1, low:U4) -> (
+  alias_bit:U1, doubled:U64, identity32:U32,
+  joined:U2, low32:U64, mask16:U32,
+  offset_word:U32, scattered:U5, truncated:U6,
+  widened:U64
+) {
+  alias_bit = a#[0]
+  scattered = 21
+  offset_word = a#[0..<32]
+  const first:U1 = a#[0]
+  const inverted:U1 = ~b
+  joined = (first, inverted)#[..]
+  const bit_not:U1 = ~a#[0]
+  const bit_add:U1 = ~a#[0]
+  truncated = (low, bit_add, bit_not)#[..]
+  mask16 = a#[0..<16]
+  identity32 = a#[0..<32]
+  low32 = identity32
+  doubled = (identity32, identity32)#[..]
+  widened = identity32
+}

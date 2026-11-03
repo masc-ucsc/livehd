@@ -1,0 +1,15 @@
+/*
+:name: inc_after_nb
+:type: equiv
+:reader_matrix: true
+:verilog_top: inc_after_nb
+:pyrope_top: inc_after_nb
+*/
+// A blocking temporary counts errors after the same process schedules q's update.
+pub mod inc_after_nb(a:Bool, b:Bool, clk:Clock, st:U2) -> (reg ecount:U8@[0]=nil, reg q:U8@[0]=nil) {
+  wrap q += 1
+  if st == 0 {
+    const errors = U2(a) + U2(b)
+    wrap ecount += errors
+  }
+}

@@ -250,6 +250,11 @@ file lists, determinism, and other behavior a value comparison cannot check.
 
 ## The coverage ladder (todo/ 2s subtask E)
 
+Paired behavior fixtures live in `../prp/tests/equiv`, beside their handwritten
+Pyrope models. The legacy `slang_compile-*` names listed in that directory's
+`fixtures.bzl` resolve to the shared reader matrix, so they do not create a
+second compilation/test action. The ladder below covers backend-only cases.
+
 `slang_ladder.bzl` pins each listed `inou/yosys/tests/*.v` source (those not
 subsumed by a larger sibling fixture) to its strongest passing tier;
 `tests/slang_compile.sh <tier> <file>...` enforces it

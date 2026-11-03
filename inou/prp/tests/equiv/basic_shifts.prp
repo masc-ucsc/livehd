@@ -1,0 +1,22 @@
+/*
+:name: basic_shifts
+:type: equiv
+:reader_matrix: true
+:verilog_top: basic_shifts
+:pyrope_top: basic_shifts
+*/
+// Verilog masks a narrow negative shift count to its unsigned bit pattern.
+pub comb basic_shifts(a:U8) -> (
+  left_one:U8, left_six:U8, right_five:U8,
+  right_one:U8, right_seven:U8, signed_arithmetic:U8,
+  signed_four:U8, unsigned_arithmetic:U8
+) {
+  right_one = a >> 1
+  wrap left_one = a << 1
+  unsigned_arithmetic = a >> 1
+  wrap signed_arithmetic = a#sext[..] >> 1
+  right_seven = a >> 7
+  wrap left_six = a << 6
+  right_five = a >> 5
+  wrap signed_four = a#sext[..] >> 4
+}

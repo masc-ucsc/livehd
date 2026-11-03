@@ -1,0 +1,37 @@
+/*
+:name: basic_addition
+:type: equiv
+:reader_matrix: true
+:verilog_top: basic_addition
+:pyrope_top: basic_addition
+*/
+// Arithmetic wraps at the destination; mixed-sign Verilog addition zero-extends.
+pub comb basic_addition(a:U8, b:U8) -> (
+  canceled:U8, dead_term:S8, difference:U8,
+  mixed_five:U5, mixed_six:S6, mixed_three:U3,
+  narrow_signed:S6, negated:U8, sign_extended_bits:U9,
+  signed_canceled:S8, signed_difference:S8, signed_negated:S8,
+  signed_sum:S8, sum:U8, wide_signed:S10,
+  wide_unsigned:U10
+) {
+  wrap sum = a + b
+  wrap difference = a - b
+  canceled = b
+  wrap negated = -a - b
+  const sa = a#sext[..]
+  const sb = b#sext[..]
+  wrap signed_sum = sa + sb
+  wrap signed_difference = sa - sb
+  signed_canceled = sb
+  wrap signed_negated = -sa - sb
+  const mixed = a#[0..<4] + b#[0..<4]
+  mixed_five = mixed
+  mixed_six = mixed
+  wrap mixed_three = mixed
+  const short_a = a#sext[0..<7]
+  wrap narrow_signed = sb
+  wrap wide_unsigned = (short_a + sb) - short_a
+  wide_signed = short_a + sb
+  wrap sign_extended_bits = short_a + sb
+  dead_term = sb
+}

@@ -79,7 +79,7 @@ def _check_timeout(prp_path, key, default):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("-i", "--input", required=True, help="golden .v file")
+    ap.add_argument("-i", "--input", required=True, help="golden .v or .sv file")
     ap.add_argument("--native-only", action="store_true", help="check the emitted Pyrope against its handwritten twin")
     ap.add_argument("--verilog-only", action="store_true", help="check round-trip Verilog, separately from the native Pyrope comparison")
     args = ap.parse_args()

@@ -9,9 +9,6 @@
 
 SLANG_LADDER = {
     "Snxn1k": "lec",
-    "add": "lec",
-    "add1": "lec",  # mixed signed+unsigned add (signed->unsigned widening = zero-extend, not sign-extend)
-    "add2": "lec",
     "aldff": "lec",
     "arith": "lec",
     # PROMOTED: `aoi12 p [31:0] (a, b, c, y)` — slang expands an arrayed
@@ -20,17 +17,12 @@ SLANG_LADDER = {
     # so collect() walks into that scope and every element lowers as an
     # ordinary instance.
     "arraycells": "lec",
-    "assigns": "lec",
     "async_localdecl": "lec",  # async-reset always_ff w/ a block-local temp before the if/else
-    "common_sub": "lec",
     "compare2": "lec",
-    "consts": "lec",
     "cprop": "lec",
     "cse_basic": "lec",
-    "dce1": "lec",
     "dce2": "lec",
     "dce3": "lec",
-    "empty_task": "lec",  # structural no-op task used by synthesis assertion macros
     "expression_00002": "lec",
     "fflop": "lec",
     "fixme_array": "lec",
@@ -58,7 +50,6 @@ SLANG_LADDER = {
     # Promote to `lec` once slang lowers DefParam.
     "fixme_paramods": "verilog",
     "fixme_sha256": "verilog",  # compiles to verilog (1-bit-cond + bool-net fixes); LEC gap on the wide reduction
-    "fn_ret_bool": "lec",  # logic-returning fn whose body returns a bool, then compared to a literal
     "flop": "lec",
     "gates": "lec",
     "graphtest": "lec",
@@ -68,10 +59,8 @@ SLANG_LADDER = {
     "hierarchy": "lec",
     "generate_reverse_tree": "lec",  # array dependencies, root-first generated tree
     "hier_generate_slice": "lec",  # packed writes through sibling generate scopes
-    "inc_after_nb": "lec",  # x++ is blocking even after a nonblocking <= in the same process
     "issue_047": "lec",  # narrow signed port range: signed[1:0] is {-2..1}, signed[0:0] is {-1,0}
     "issue_057": "lec",
-    "logic_bitwise_op_gld": "lec",
     "long_BTBsa": "lnast",  # Yosys netlist; LNAST round-trips (escaped-id `\…[1:0]` names SSA-version + serialize) — tolg stops verilog: "mixes values at different cycles"
     "long_gcd": "lec",
     "long_gcd_small": "error",  # duplicate definition; slang rejects per 1800
@@ -92,8 +81,6 @@ SLANG_LADDER = {
     "mem_reset": "lec",
     "mem_sync_init": "verilog",  # initial-block ROM contents lower correctly in LNAST (init tuple) but the read-only `mut` array zero-fills in tolg instead of becoming a Memory with INIT
     "mismatch": "lec",
-    "multiassign": "lec",  # ordinary concurrent slice assigns are resolved together; only generated-loop cross-iteration drivers are refused
-    "nshift": "lec",  # Verilog shift count is unsigned; negative-constant count masks to unsigned (no nil/error)
     # Per-BIT dependency tracking through an unpacked array of packed wires: a
     # word-granular reader sees each generate level depend on itself and reports
     # a false combinational loop (a hard error, not a wrong answer).
@@ -132,10 +119,8 @@ SLANG_LADDER = {
     "satlarge": "lec",
     "satpick": "lec",
     "satsmall": "lec",
-    "shift": "lec",
     "shiftx": "lec",
     "shiftx_simple": "lec",
-    "signs": "lec",
     "simple_hier_test": "lec",
     "simple_rf1": "lec",
     "simple_rf2": "lec",
@@ -145,13 +130,10 @@ SLANG_LADDER = {
     "submodule2": "lec",
     "submodule_offset": "lec",
     "test": "lec",
-    "trivial1": "lec",
     "trivial2": "lec",
     "trivial2a": "lec",
     "trivial3": "lec",
-    "trivial_join": "lec",
     "trivial_offset": "lec",
-    "trivial_reduce": "lec",
     "tuplish": "lec",
     "unconnected": "lec",
     "wires": "lec",

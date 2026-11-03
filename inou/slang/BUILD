@@ -4,6 +4,7 @@ load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load("@rules_shell//shell:sh_test.bzl", "sh_test")
 load("//inou/slang:slang_ladder.bzl", "SLANG_LADDER")
 load("//tools:copt_default.bzl", "COPTS")
+load("//inou/prp:tests/equiv/fixtures.bzl", "LEGACY_YOSYS_PAIRS")
 
 cc_library(
     name = "inou_slang",
@@ -177,6 +178,13 @@ sh_test(
         "slang_compile",
     ],
 ) for t in SLANG_LADDER.keys()]
+
+# Paired sources live beside their Pyrope models; old names reuse the matrix.
+[test_suite(
+    name = "slang_compile-" + old,
+    tests = ["//inou/prp:prp-equiv-" + pair],
+) for old, pair in LEGACY_YOSYS_PAIRS.items()]
+
 
 # Fully defined ready chains must not pass LEC by turning a forward read into X.
 # One target runs the `lec_no_x` tier on every fixture in turn (a failure still

@@ -13,6 +13,16 @@ import sys
 
 from lec import acceptable, run_lec, final_verdict as final_lec_verdict, verdict as lec_verdict
 
+
+def golden_hdl(prp_file):
+    """Resolve the one HDL source belonging to a Pyrope equivalence fixture."""
+    stem = os.path.splitext(prp_file)[0]
+    candidates = [stem + suffix for suffix in ('.v', '.sv') if os.path.isfile(stem + suffix)]
+    if len(candidates) > 1:
+        raise ValueError('ambiguous HDL pair: both {}.v and {}.sv exist'.format(stem, stem))
+    return candidates[0] if candidates else stem + '.v'
+
+
 class PrpTest:
     """
     Pyrope Test Object
@@ -611,7 +621,7 @@ class PrpRunner:
         # declare the same module name so LEC selects the same top.
         name = test.params['name']
         prp  = test.params['files'][0]
-        gold = os.path.splitext(prp)[0] + '.v'
+        gold = golden_hdl(prp)
         gold_abs = gold if os.path.isabs(gold) else os.path.join(tmp_dir, gold)
 
         if not os.path.exists(gold_abs):
@@ -724,6 +734,10 @@ class PrpRunner:
         if not lec_ok:
             return 1
 
+        if test.params.get('reader_matrix', 'false').strip().lower() == 'true' and self.run_hdl_reader_pair(
+                tmp_dir, test, gold_abs, verilog_top, pyrope_top, odir, expect):
+            return 1
+
         # `:equiv_lec_grep:` / `:equiv_lec_grep_not:` (repeatable) pin HOW this
         # Verilog pair was proven. Their own names: the base `:lec_grep:` tags
         # belong to the Pyrope-vs-Pyrope prp-lec groups (prplec.py).
@@ -750,6 +764,71 @@ class PrpRunner:
         print('{} - equiv - success (lhd lec {}; verilog_top:{} pyrope_top:{})'.format(
             name, expect, verilog_top, pyrope_top))
         return 0
+
+    def run_hdl_reader_pair(self, tmp_dir, test, source, source_top, reference_top, odir, expect):
+        """Read Verilog through Yosys-Slang and compare with the same Pyrope model.
+
+        The native proof above covers direct Slang for both .v and .sv. A .v
+        also exercises the Yosys bridge; .sv is the direct-Slang dialect.
+        """
+        if source.endswith('.sv'):
+            return 0
+        reader = 'yosys-slang'
+        work = os.path.join(odir, reader)
+        library = os.path.join(work, 'lg')
+        emitted = os.path.join(work, 'reader.v')
+        modules = self._verilog_modules(source)
+        selected = source_top
+        if selected not in modules and selected.rsplit('.', 1)[-1] in modules:
+            selected = selected.rsplit('.', 1)[-1]
+        cmd = [self.lhd, 'compile', source, '--reader', reader,
+               '--emit-dir', 'lg:' + library, '--emit', 'verilog:' + emitted,
+               '--workdir', os.path.join(work, 'compile')]
+        # Slang's --top parser treats a dot as a hierarchy separator, including
+        # when it belongs to an escaped Verilog identifier. Auto selection keeps
+        # that source spelling intact; resolve its actual graph below.
+        if re.fullmatch(r'[a-zA-Z_][a-zA-Z0-9_$]*', selected):
+            cmd += ['--top', selected]
+        cmd += self._extra_sets(test)
+        compiled = subprocess.run(cmd, cwd=tmp_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        log = compiled.stdout.decode('utf-8', 'replace')
+        os.makedirs(work, exist_ok=True)
+        with open(os.path.join(work, 'compile.log'), 'w') as output:
+            output.write(log)
+        if compiled.returncode:
+            print('{} - {} - FAILED: compile'.format(test.params['name'], reader))
+            print(log)
+            return 1
+        with open(os.path.join(library, 'library.txt')) as metadata:
+            names = [line.split(maxsplit=2)[2].strip() for line in metadata if line.startswith('graph_io ')]
+        tops = [name for name in names if name == selected or name.startswith(selected + '$')]
+        if len(tops) != 1:
+            print('{} - {} - FAILED: ambiguous/missing top {} in {}'.format(
+                test.params['name'], reader, selected, names))
+            return 1
+        emitted_modules = self._verilog_modules(emitted)
+        flat_top = tops[0].rsplit('.', 1)[-1]
+        emitted_top = tops[0] if tops[0] in emitted_modules else flat_top
+        if emitted_top not in emitted_modules:
+            print('{} - {} - FAILED: emitted top {} missing from {}'.format(
+                test.params['name'], reader, emitted_top, emitted_modules))
+            return 1
+        pyrope_source = test.params['files'][0]
+        checked = run_lec(
+            [self.lhd, 'lec', '--ref', 'verilog:' + emitted, '--impl', 'pyrope:' + pyrope_source,
+             '--ref-top', emitted_top, '--impl-top', reference_top,
+             '--workdir', os.path.join(work, 'lec'), '--set', 'pass.satopt=false']
+            + self._extra_sets(test), cwd=tmp_dir, timeout=20)
+        with open(os.path.join(work, 'lec.log'), 'wb') as output:
+            output.write(checked.stdout)
+        status = lec_verdict(checked)
+        ok = status == 'refuted' if expect == 'refuted' else acceptable(status)
+        if ok:
+            print('{} - {} - success ({})'.format(test.params['name'], reader, status))
+            return 0
+        print('{} - {} - FAILED: expected {}, got {}'.format(test.params['name'], reader, expect, status))
+        print(checked.stdout.decode('utf-8', 'replace'))
+        return 1
 
     # ── the yosys/lgcheck cross-oracle (`lgyosys`) ───────────────────────────
     #
@@ -939,7 +1018,7 @@ class PrpRunner:
         # Check the two emitted Verilog sides through native Slang and default LEC.
         name = test.params['name']
         prp  = test.params['files'][0]
-        vfile = os.path.splitext(prp)[0] + '.v'
+        vfile = golden_hdl(prp)
         v_abs = vfile if os.path.isabs(vfile) else os.path.join(tmp_dir, vfile)
         if not os.path.exists(v_abs):
             print('{} - equiv_slang - FAILED: no golden verilog {}'.format(name, vfile))
@@ -985,6 +1064,10 @@ class PrpRunner:
             cwd=tmp_dir, timeout=20)
         crc, clog = check.returncode, check.stdout
         if acceptable(lec_verdict(check)):
+            source_top = (test.params.get('verilog_top') or '').strip() or self._verilog_top_module(v_abs)
+            if test.params.get('reader_matrix', 'false').strip().lower() == 'true' and self.run_hdl_reader_pair(
+                    tmp_dir, test, v_abs, source_top, pyrope_top, ref_odir, 'proven'):
+                return 1
             print('{} - equiv_slang - success (verilog_top:{} pyrope_top:{})'.format(name, verilog_top, pyrope_top))
             return 0
         print('{} - equiv_slang - FAILED: lhd lec did not prove equivalence (verilog_top:{} pyrope_top:{})'.format(
@@ -1351,7 +1434,7 @@ class PrpRunner:
         precisely the kind of hole this check exists to expose.
         """
         prp  = test.params['files'][0]
-        gold = os.path.splitext(prp)[0] + '.v'
+        gold = golden_hdl(prp)
         lg_ref  = os.path.join(workdir, 'ref_lg')
         lg_impl = os.path.join(workdir, 'impl_lg')
 
@@ -1445,7 +1528,7 @@ class PrpRunner:
         """
         name = test.params['name']
         prp  = test.params['files'][0]
-        gold = os.path.splitext(prp)[0] + '.v'
+        gold = golden_hdl(prp)
         if not os.path.exists(gold if os.path.isabs(gold) else os.path.join(tmp_dir, gold)):
             print('{} - state_match - failed: no golden {}'.format(name, gold))
             return 1
