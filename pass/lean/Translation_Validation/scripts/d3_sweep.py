@@ -1765,6 +1765,14 @@ def _cert_body(cert: pathlib.Path, head: str) -> str:
         # ReifyGen and D3Harness, both of which import it transitively.
         if line.startswith("import "):
             continue
+        # The certificate is ONE closed constant; Lean's closed-term extraction
+        # still hoists every closed sub-term of its literal into an auxiliary
+        # definition, and that is most of the time it takes to load a big one
+        # (l2_cache_tag_stage 2.5 MB: 328 s -> 128 s; nyuzi core 5.2 MB spent
+        # 617 s + 600 s of 1,473 s in those passes). Code generation only: the
+        # value, the kernel term and every proof are unchanged.
+        if line.startswith("def ") and line.rstrip().endswith("_designCert : DesignCert :="):
+            body.append("set_option compiler.extract_closed false in")
         body.append(line)
 
     # Drop the doc comment that belonged to the theorem we just cut.  A `/-- -/`
