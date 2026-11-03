@@ -776,7 +776,12 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
       theorem $segsEq : ($rNm).bindings.toList = $appTerm := by
         rw [$srules,*]
         all_goals rw [show ($(preNm 0)).toList = [] from rfl, List.nil_append]
-        all_goals simp only [List.append_assoc]))
+        -- Re-associating a left-nested append of one segment per chunk takes
+        -- about chunks^2 / 2 rewrites: past roughly 150 chunks that is over
+        -- simp's default 100,000 steps (int_execute_stage, 282 chunks: this
+        -- theorem was the only one left with sorryAx). The explicit budget of
+        -- `prove_reified` (see there).
+        all_goals simp (maxSteps := 4000000) only [List.append_assoc]))
     markPhase "segs_eq"
     -- 3. compose the chunks into ONE environment equality
     let srcEnv ← liftTermElabM `(Compiler.sourceEnvArr ($d).sources $iId $stId)
@@ -873,7 +878,12 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
         simp only [Compiler.denoteResidual, $sNm:ident]
         rw [← $envEq:ident $iId $stId]
         simp only [$oProjNm:ident, $fProjNm:ident, $mProjNm:ident]
-        simp [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
+        -- The same explicit, finite budget as `prove_reified` (see there).
+        -- Without it this `simp` ran at the default 100,000 steps, and a design
+        -- with a few hundred flops and memories stopped on that limit with
+        -- every chunk proved (ifetch_tag_stage: 359 flops, 9 memories).
+        simp (maxSteps := 4000000)
+             [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
               Compiler.compileMemory, $memA:ident, $memB:ident, Compiler.memHeld, Compiler.flopNext_eq,
               $dfNm:ident, $dmNm:ident, $doNm:ident]))
     markPhase "eq_compileAndRun"
@@ -1460,7 +1470,9 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
                    $sNm:ident, $btlNm:ident]
         rw [$hEq:ident]
         simp only [$oProjNm:ident, $fProjNm:ident, $mProjNm:ident]
-        simp [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
+        -- The same explicit budget as `prove_reified_chunked`'s final `simp`.
+        simp (maxSteps := 4000000)
+             [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
               Compiler.compileMemory, $memA:ident, $memB:ident, Compiler.memHeld, Compiler.flopNext_eq,
               $dfNm:ident, $dmNm:ident, $doNm:ident, $hSimp,*]))
     let corNm := mkIdent (base ++ `correct)
