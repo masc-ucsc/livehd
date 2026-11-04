@@ -141,6 +141,117 @@ TEST(LegacyModel, CommitTableMemoryNextIsTheCertificateRule) {
   n.edges.clear();
   EXPECT_EQ(legacy_memory_next(m, n, img, "held"), "img30");
 }
+// An ASYNCHRONOUS whole-array reset (DCERT3 `asyncImg`, decision #2): a memory
+// that does not commit keeps the image with the reset applied, not the stored
+// one -- `srcMemHeld`. With one domain it commits on every step, so the image
+// is never read.
+TEST(LegacyModel, AsyncResetMemoryHoldsTheResetImage) {
+  LegacyNames n;
+  n.edges = {"edge_a", "edge_b"};
+  MemoryDriver m;
+  m.next_img     = 30;
+  m.clock        = 1;
+  m.async_img    = 33;
+  const auto img = [](uint32_t id) { return "img" + std::to_string(id); };
+  EXPECT_EQ(legacy_memory_next(m, n, img, "stored"), "if e.edge_b then img30 else img33");
+  m.commits = {{uint64_t{1} << 0, 31}};
+  m.clock   = 1;
+  EXPECT_EQ(legacy_memory_next(m, n, img, "stored"),
+            "if e.edge_a && e.edge_b then img30 else if e.edge_a && !e.edge_b then img31 else img33");
+  m.async_img.reset();
+  EXPECT_EQ(legacy_memory_next(m, n, img, "stored"),
+            "if e.edge_a && e.edge_b then img30 else if e.edge_a && !e.edge_b then img31 else stored");
+  m.async_img = 33;
+  m.commits.clear();
+  n.edges.clear();
+  EXPECT_EQ(legacy_memory_next(m, n, img, "stored"), "img30");
+}
+// A whole-array memory (decision #2): the fast model writes `mem_load` and
+// `mem_to_bus` (Translation/WholeArray), and the bridge proves them with
+// `mem_load_bridge` / `mem_to_bus_bridge` (Translation/WholeArrayBridge).
+TEST(LegacyModel, WholeArrayMemoryUsesLoadAndToBus) {
+  DesignScan d;
+  d.name   = "wa";
+  d.inputs = {
+      {"upd", 2000000000, 24, {}},
+      {"rst", 2000000001,  1, {}}
+  };
+  Memory m;
+  m.id          = 10;
+  m.bits        = 8;
+  m.addr_width  = 2;
+  m.size        = 3;
+  m.whole_array = true;
+  m.update      = input(2000000000, 24);
+  m.bulk_reset  = input(2000000001, 1);
+  m.ports.push_back({0, 0, constant("1", 2), {}, constant("1", 1), std::nullopt});
+  m.read_ports = {0};
+  m.fwd_rows   = {{}};
+  d.memories.emplace(10, m);
+  d.nodes.push_back({10, ScanOp::Memory, 0, false, {}});
+  d.nodes.push_back({10, ScanOp::Memory, 0, false, {}});
+  d.nodes.back().memory_read = kMemoryReadAll;
+  d.outputs                  = {
+      {  "q", 0,  8,                  PinRef{PinKind::Memory, 10, 0, 8, 0, {}}},
+      {"all", 1, 24, PinRef{PinKind::Memory, 10, kMemoryReadAllPid, 24, 0, {}}}
+  };
+  const auto c = build_certificate(d, {});
+  for (const bool bridge : {false, true}) {
+    LegacyEmitOptions o;
+    o.emit_cert        = bridge;
+    o.emit_fast_bridge = bridge;
+    std::ostringstream out;
+    ASSERT_NO_THROW(emit_legacy_model(d, c, o, out));
+    const auto text = out.str();
+    EXPECT_NE(text.find(bridge ? "import LeanSemanticPrimitives.Translation.WholeArrayBridge"
+                               : "import LeanSemanticPrimitives.Translation.WholeArray\n"),
+              std::string::npos);
+    // The let chain writes each mux as an `lmux` call; the bridge's per-node
+    // functions keep the inline `if` (finding AC).
+    EXPECT_NE(text.find(bridge ? "then mem_load " : ") (mem_load "), std::string::npos);
+    EXPECT_EQ(text.find("(lmux ") == std::string::npos, bridge);
+    EXPECT_NE(text.find("(mem_to_bus "), std::string::npos);
+    if (bridge) {
+      EXPECT_NE(text.find("mem_load_bridge"), std::string::npos);
+      EXPECT_NE(text.find("mem_to_bus_bridge"), std::string::npos);
+      EXPECT_EQ(text.find("by sorry"), std::string::npos);
+    }
+  }
+}
+// A memory nothing reads has no certificate driver, but it keeps a state
+// field; both next-state functions must hold it, or the record literal is
+// missing a field and the model does not compile (mem_write_only).
+TEST(LegacyModel, UnreadMemoryHoldsItsField) {
+  DesignScan d;
+  d.name   = "wro";
+  d.inputs = {
+      {"p", 2000000000, 8, {}}
+  };
+  Memory m;
+  m.id         = 10;
+  m.bits       = 8;
+  m.addr_width = 2;
+  m.size       = 4;
+  m.raw_name   = "t";
+  m.ports.push_back({0, 0, constant("1", 2), constant("5", 8), constant("1", 1), std::nullopt});
+  m.write_ports = {0};
+  d.memories.emplace(10, m);
+  d.outputs = {
+      {"z", 0, 8, input(2000000000, 8)}
+  };
+  const auto c = build_certificate(d, {});
+  ASSERT_TRUE(c.memories.empty()) << "the unread memory got a certificate driver after all";
+  LegacyEmitOptions o;
+  o.emit_cert = true;
+  std::ostringstream out;
+  ASSERT_NO_THROW(emit_legacy_model(d, c, o, out));
+  const auto text = out.str();
+  size_t     held = 0;
+  for (size_t at = text.find("let new_st_t := s.st_t"); at != std::string::npos; at = text.find("let new_st_t := s.st_t", at + 1)) {
+    ++held;
+  }
+  EXPECT_EQ(held, 2u) << "both _next and _nextStateFromCert hold the field";
+}
 TEST(LegacyModel, PreservesGlobalSelectorUniquenessAndEscapesMappingComments) {
   auto d            = binary(ScanOp::Or, 8);
   d.inputs[0].name  = "a-b";
@@ -384,6 +495,61 @@ TEST(LegacyModel, MulBridgeFixtures) {
       write_atomic(path.string(), [&](std::ostream& stream) { stream << out.str(); });
     }
   }
+}
+// A Sext at any sign position has a bridge (decision #21). Before, the bridge
+// refused every position but the operand's (or node's) width, so a design that
+// sign-extends the low bits of a wider value (B05, the yosys-slang mixed-edge
+// memory) had no fast-model proof.
+TEST(LegacyModel, SextBridgeFixtures) {
+  struct Shape {
+    const char*        name;
+    uint32_t           width;
+    std::optional<int> position;  // a constant sign position; none: the amount is input b
+    uint64_t           a, b, result;
+  };
+  for (const auto& shape : {
+           Shape{     "sext_interior",  8,            3, 0x0C, 0,   0xFC}, // low 3 bits 100: negative
+           Shape{"sext_interior_wide", 16,            5, 0x10, 0, 0xFFF0}, // low 5 bits 10000, to 16 bits
+           Shape{     "sext_zero_pos",  8,            0, 0xFF, 0,      0}, // position 0 gives 0
+           Shape{        "sext_above", 16,           12, 0xFF, 0,   0xFF}, // sign bit above the operand: zero-extend
+           Shape{      "sext_runtime",  8, std::nullopt, 0x0C, 3,   0xFC},
+  }) {
+    SCOPED_TRACE(shape.name);
+    auto d                              = binary(ScanOp::Sext, shape.width);
+    d.name                              = shape.name;
+    d.inputs[1].width                   = 4;
+    d.nodes[0].operands[1].driver.width = 4;
+    if (shape.position) {
+      d.nodes[0].operands[1].driver = constant(std::to_string(*shape.position), 4);
+    }
+    const auto        c = build_certificate(d, {});
+    LegacyEmitOptions options;
+    options.emit_fast_bridge = true;
+    options.cert_wf          = LeanCertWFMode::Chunked;
+    std::ostringstream out;
+    ASSERT_NO_THROW(emit_legacy_model(d, c, options, out));
+    EXPECT_NE(out.str().find("import LeanSemanticPrimitives.Translation.SextBridge"), std::string::npos);
+    EXPECT_NE(out.str().find("sext_bridge_any"), std::string::npos);
+    EXPECT_EQ(out.str().find("by sorry"), std::string::npos);
+    out << "\nnamespace " << d.name << "_Lgraph\n"
+        << "example : (" << d.name << "_comb { (default : " << d.name << "_in) with in_a := " << shape.a << ", in_b := " << shape.b
+        << " }).out_y = " << shape.result << " := by native_decide\n"
+        << "end " << d.name << "_Lgraph\n";
+    if (const char* destination = std::getenv("LHD_LEAN_SEXT_BRIDGE_OUTPUT")) {
+      const auto path = std::filesystem::path(destination) / (d.name + "_Lgraph.lean");
+      write_atomic(path.string(), [&](std::ostream& stream) { stream << out.str(); });
+    }
+  }
+  // The operand's own width keeps the OpBridge lemmas and needs no new import.
+  auto d                        = binary(ScanOp::Sext, 16);
+  d.nodes[0].operands[1].driver = constant("8", 4);
+  const auto        c           = build_certificate(d, {});
+  LegacyEmitOptions options;
+  options.emit_fast_bridge = true;
+  std::ostringstream out;
+  ASSERT_NO_THROW(emit_legacy_model(d, c, options, out));
+  EXPECT_EQ(out.str().find("SextBridge"), std::string::npos);
+  EXPECT_NE(out.str().find("sext_bridge "), std::string::npos);
 }
 TEST(LegacyModel, PartialChunkExperimentMakesNoWholeGraphClaim) {
   auto d = binary(ScanOp::Or, 8);

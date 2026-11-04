@@ -24,7 +24,7 @@
 # lane really is an internal compile error
 # (BitwidthInfer.OversizedConcatLaneReportsError). A SINGLE-chunk signed read
 # also keeps its sign, because there is no assembled result to carry it and the
-# sign is observable -- inou/yosys/tests/issue_047.v is that case.
+# sign is observable -- inou/slang/tests/reader/issue_047.v is that case.
 #
 # This test reads the EMITTED netlist, where cgen prints a signed net as
 # `reg signed` and an unsigned finite selection with cgen's `_u` suffix, so the

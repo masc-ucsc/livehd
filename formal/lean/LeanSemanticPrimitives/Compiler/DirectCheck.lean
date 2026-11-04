@@ -42,6 +42,8 @@ the exporter actually implements it (`pass/lean/Exporter/Frontend/pass_lean.cpp`
   Op_MuxN         3            any               `Ntype_op::Mux`, otherwise
   Op_MemRead      3            any               `cert_memory_expand`
   Op_MemWriteBE b 4 (b=1)      any               `cert_memory_expand`
+  Op_MemLoad n    3 (n>0)      entry width       memory lowering, a whole-array cell (#2)
+  Op_MemToBus n   1 (n>0)      n * entry width   memory lowering, `read_all` (#2)
 
 Operators the exporter CAN emit that were not observed in the census are
 grounded by their exporter site, so they are accepted rather than refused:
@@ -284,11 +286,13 @@ def sourceKind : SourceDesc → SlotKind
   | .memImg _ _ _         => .mem
   | .memConst _ _ _       => .mem
 
-/-- A node's result kind.  Only the two write operators produce a memory image;
-`Op_MemRead` produces the read DATA, which is a bit vector. -/
+/-- A node's result kind.  The two write operators and the whole-array load
+produce a memory image; `Op_MemRead` produces the read DATA and `Op_MemToBus`
+the whole-array bus, which are bit vectors. -/
 def opKind : LGraphOp → Nat → SlotKind
   | .Op_MemWrite,     _ => .mem
   | .Op_MemWriteBE _, _ => .mem
+  | .Op_MemLoad _,    _ => .mem
   | _,                w => .bv w
 
 /-- The static kind of any slot, or `none` when the slot does not exist. -/
@@ -374,6 +378,8 @@ def opArity : LGraphOp → Nat → Bool
   | .Op_MemRead,      n => n == 3        -- *
   | .Op_MemWrite,     n => n == 4        -- *
   | .Op_MemWriteBE b, n => n == 4 && 0 < b   -- * (b = 0 would divide by zero)
+  | .Op_MemLoad e,    n => n == 3 && 0 < e   -- *
+  | .Op_MemToBus e,   n => n == 1 && 0 < e   -- * (e = 0 would divide by zero)
   -- the four refusals never reach here; `opAccepted` rejects them first
   | .Op_Sub,  _ => false
   | .Op_Div,  _ => false
@@ -397,6 +403,8 @@ def depIsMem : LGraphOp → Nat → Bool
   | .Op_MemRead,      0 => true
   | .Op_MemWrite,     0 => true
   | .Op_MemWriteBE _, 0 => true
+  | .Op_MemLoad _,    0 => true
+  | .Op_MemToBus _,   0 => true
   | _,                _ => false
 
 /-- One node's whole shape obligation. -/
@@ -553,10 +561,17 @@ def checkCommits (D : DesignCert) : List MemCommit → Option SimError
   | []      => none
   | c :: cs => (checkRef D true c.nextImg).orElse (fun _ => checkCommits D cs)
 
+/-- An asynchronous whole-array reset's image is a memory slot, as `nextImg` is
+(DCERT3 `asyncImg`, decision #2). -/
+def checkAsync (D : DesignCert) : Option Nat → Option SimError
+  | none   => none
+  | some a => checkRef D true a
+
 def checkMemory (D : DesignCert) (k : Nat) (m : MemoryDesc) : Option SimError :=
   if m.dw == 0 then some (.zeroWidth m.nextImg)
   else if D.clocks.size ≤ m.clock then some (.memClockOutOfRange k m.clock)
-  else (checkRef D true m.nextImg).orElse (fun _ => checkCommits D m.commits.toList)
+  else (checkRef D true m.nextImg).orElse (fun _ =>
+         (checkCommits D m.commits.toList).orElse (fun _ => checkAsync D m.asyncImg))
 
 def memoryErrors (D : DesignCert) : Option SimError :=
   scan D.memories.size (fun k => D.memories[k]?) (checkMemory D)
@@ -661,6 +676,9 @@ structure DesignSemWF (D : DesignCert) : Prop where
   /-- every commit-table entry's image carries a memory image -/
   memCommitKinds : ∀ (k : Nat) (m : MemoryDesc), D.memories[k]? = some m →
                    ∀ c ∈ m.commits, slotIsMem D c.nextImg = some true
+  /-- an asynchronous whole-array reset's image carries a memory image -/
+  memAsyncKinds : ∀ (k : Nat) (m : MemoryDesc), D.memories[k]? = some m →
+                   ∀ a, m.asyncImg = some a → slotIsMem D a = some true
 
 --------------------------------------------------------------------------------
 -- Soundness
@@ -821,7 +839,8 @@ theorem checkDesign_sound {u : Unit} (h : checkDesign D = .ok u) : DesignSemWF D
   -- memories: clock range and image kind, from one scan
   have hmemsAll : ∀ (k : Nat) (m : MemoryDesc), D.memories[k]? = some m →
       m.clock < D.clocks.size ∧ slotIsMem D m.nextImg = some true ∧
-      (∀ c ∈ m.commits, slotIsMem D c.nextImg = some true) := by
+      (∀ c ∈ m.commits, slotIsMem D c.nextImg = some true) ∧
+      (∀ a, m.asyncImg = some a → slotIsMem D a = some true) := by
     intro k m hm
     have hall := scan_none hmem k (lt_of_getElem?_some hm) m hm
     unfold checkMemory at hall
@@ -836,8 +855,16 @@ theorem checkDesign_sound {u : Unit} (h : checkDesign D = .ok u) : DesignSemWF D
         | none =>
             rw [hr] at hall
             simp only [Option.orElse] at hall
-            exact ⟨by omega, checkRef_sound hr,
-                   fun c hcm => checkCommits_sound hall c (Array.mem_def.mp hcm)⟩
+            cases hcs : checkCommits D m.commits.toList with
+            | some e => rw [hcs] at hall; simp at hall
+            | none =>
+                rw [hcs] at hall
+                simp only at hall
+                refine ⟨by omega, checkRef_sound hr,
+                        fun c hcm => checkCommits_sound hcs c (Array.mem_def.mp hcm), ?_⟩
+                intro a ha
+                rw [ha] at hall
+                exact checkRef_sound hall
   have hmems : ∀ (k : Nat) (m : MemoryDesc), D.memories[k]? = some m →
       slotIsMem D m.nextImg = some true :=
     fun k m hm => (hmemsAll k m hm).2.1
@@ -847,7 +874,8 @@ theorem checkDesign_sound {u : Unit} (h : checkDesign D = .ok u) : DesignSemWF D
       inputWidths := ?_, clocksDeclared := hclocks,
       flopClocks := fun k f hf => (hflopsAll k f hf).1,
       memClocks := fun k m hm => (hmemsAll k m hm).1,
-      memCommitKinds := fun k m hm => (hmemsAll k m hm).2.2 }
+      memCommitKinds := fun k m hm => (hmemsAll k m hm).2.2.1,
+      memAsyncKinds := fun k m hm => (hmemsAll k m hm).2.2.2 }
   · -- deps bounded: from `checkDeps`, via the index of each dep
     intro i c hc d hd
     obtain ⟨p, hp⟩ := exists_getElem?_of_mem_toList hd
@@ -1066,6 +1094,13 @@ theorem sem_memWrite (m : Int → BV) (a d en : BV) :
 theorem sem_memWriteBE (bw : Nat) (m : Int → BV) (a d be : BV) :
     eval_op_cert (.Op_MemWriteBE bw) w [.mem m, .bv a, .bv d, .bv be]
       = .mem (cert_mem_write_be w m a d be bw) := rfl
+
+theorem sem_memLoad (n : Nat) (m : Int → BV) (bus en : BV) :
+    eval_op_cert (.Op_MemLoad n) w [.mem m, .bv bus, .bv en]
+      = .mem (cert_mem_load w n m bus en) := rfl
+
+theorem sem_memToBus (n : Nat) (m : Int → BV) :
+    eval_op_cert (.Op_MemToBus n) w [.mem m] = .bv (cert_mem_to_bus w n m) := rfl
 
 end OpEquations
 

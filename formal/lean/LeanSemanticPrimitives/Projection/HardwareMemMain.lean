@@ -92,7 +92,10 @@ theorem memNextsOf_denote_array {D : DesignCert} {i : RuntimeInput} {st : StateM
                Direct.slotIsMem D md.nextImg = some true)
     (hcnext : ∀ md ∈ D.memories.toList, ∀ c ∈ md.commits, c.nextImg < ss.length)
     (hckind : ∀ md ∈ D.memories.toList, ∀ c ∈ md.commits,
-               Direct.slotIsMem D c.nextImg = some true) :
+               Direct.slotIsMem D c.nextImg = some true)
+    (hanext : ∀ md ∈ D.memories.toList, ∀ a, md.asyncImg = some a → a < ss.length)
+    (hakind : ∀ md ∈ D.memories.toList, ∀ a, md.asyncImg = some a →
+               Direct.slotIsMem D a = some true) :
     ((memNextsOf e st ss 0 D.memories.toList).toArray).map MemImg.denote
       = D.memories.mapIdx
           (fun idx md => Compiler.srcMemNext (slotValM D i st) e (StateM.denote st) idx md) := by
@@ -115,6 +118,7 @@ theorem memNextsOf_denote_array {D : DesignCert} {i : RuntimeInput} {st : StateM
     rw [hval]
     simp only [Array.getElem_mapIdx]
     exact memNextOf_denote hpre (hnext _ hmem) (hkind _ hmem) (hcnext _ hmem) (hckind _ hmem)
+      (hanext _ hmem) (hakind _ hmem)
 
 /-! ## 3. The whole cycle
 
@@ -175,6 +179,16 @@ theorem mainM_adequate_gen {D : DesignCert} {i : RuntimeInput} {st : StateM}
     intro md hmd c hc
     rw [hlen]
     simpa [DesignCert.numSlots] using Direct.slotIsMem_lt (hmckind md hmd c hc)
+  -- an asynchronous reset's image (decision #2), from the checker
+  have hmakind : ∀ md ∈ D.memories.toList, ∀ a, md.asyncImg = some a →
+      Direct.slotIsMem D a = some true := by
+    intro md hmd a ha
+    obtain ⟨k, hk⟩ := array_mem_getElem? hmd
+    exact hsem.memAsyncKinds k md hk a ha
+  have hmanext : ∀ md ∈ D.memories.toList, ∀ a, md.asyncImg = some a → a < ss.length := by
+    intro md hmd a ha
+    rw [hlen]
+    simpa [DesignCert.numSlots] using Direct.slotIsMem_lt (hmakind md hmd a ha)
   -- the reference, piece by piece
   refine ⟨{ nextState :=
               { flops := (flopNextsFrom (slotValM D i st) e (StateM.denote st) 0
@@ -214,7 +228,7 @@ theorem mainM_adequate_gen {D : DesignCert} {i : RuntimeInput} {st : StateM}
       (.ref rfl) (.ref rfl) (.ref rfl) (by rw [hlenMap]; exact .ref rfl)
       (.ref rfl) .lit)) ?_
     refine SEval.letN (memNexts_agree hss D.memories.toList 0 _ _ _ _ _ _ _
-      hmclk hmspan hmnext hmkind hmcnext hmckind (.ref rfl) (.ref rfl) (.ref rfl)
+      hmclk hmspan hmnext hmkind hmcnext hmckind hmanext hmakind (.ref rfl) (.ref rfl) (.ref rfl)
       (by rw [hlen]; exact .ref rfl) (.ref rfl) .lit) ?_
     exact SEval.mk (.cons (SEval.mk (.cons (.ref rfl) (.cons (.ref rfl) .nil)))
       (.cons (.ref rfl) .nil))
@@ -229,6 +243,7 @@ theorem mainM_adequate_gen {D : DesignCert} {i : RuntimeInput} {st : StateM}
             (fun idx f => srcFlopNext (slotValM D i st) e (StateM.denote st) idx f) := by
       rw [flopNextsFrom_mapIdx]
     have hmems := memNextsOf_denote_array (e := e) hss hmnext hmkind hmcnext hmckind
+      hmanext hmakind
     have href : Compiler.interpretDesign D e i (StateM.denote st)
         = { outputs := D.outputs.map
               (fun o => bv_resize o.width ((slotValM D i st) o.slot).asBV)
@@ -253,7 +268,7 @@ theorem mainM_adequate_gen {D : DesignCert} {i : RuntimeInput} {st : StateM}
     rw [hns, houts]
   · -- REACHABLE-STATE PRESERVATION
     intro hpol
-    exact stepState_shape hss hstate hpol hmnext hmkind hmcnext hmckind _
+    exact stepState_shape hss hstate hpol hmnext hmkind hmcnext hmckind hmanext hmakind _
 
 /-- **The original whole-cycle adequacy, statement unchanged.** -/
 theorem mainM_adequate {D : DesignCert} {i : RuntimeInput} {st : StateM}

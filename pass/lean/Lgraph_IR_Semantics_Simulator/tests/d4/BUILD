@@ -6,8 +6,7 @@
 # runfile declaration, and a shell test that cannot find the analyzer exits
 # `FAIL: cannot find emission_fanout.py` rather than quietly skipping the leg.
 
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
-
+load("//tools:regression.bzl", "sh_test")
 filegroup(
     name = "emission_fanout",
     srcs = ["emission_fanout.py"],

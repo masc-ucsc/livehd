@@ -132,9 +132,10 @@ def main : IO UInt32 := do
     let extra := { D with clocks := D.clocks.push { name := "extra" } }
     if renderCert extra == raw then bad lg "adding a clock left the bytes identical"
       else ok lg "sensitive to the clock table"
-    -- DCERT3: the power-on words and the commit table reach the bytes; a
-    -- RESERVED field (the async image) is a good record (the codec reads it)
-    -- and a refused design (admission); so is a malformed commit-table entry.
+    -- DCERT3: the power-on words, the commit table and the async-reset image
+    -- (decision #2) reach the bytes; an async image or a commit-table entry
+    -- that names no slot of the design, or a malformed commit-table entry, is
+    -- a good record (the codec reads it) and a refused design (admission).
     if D.memories.isEmpty then
       IO.println "  --   no memories: DCERT3 memory controls skipped"
     else
@@ -146,9 +147,15 @@ def main : IO UInt32 := do
       if renderCert ct == raw then bad lg "adding a commit-table entry left the bytes identical"
         else ok lg "sensitive to a memory's commit table"
       expectOk    lg "admission accepts a well-formed commit-table entry" (readCertChecked (renderCert ct))
-      let rsv := renderCert (mem0 (fun m => { m with asyncImg := some m.nextImg }))
-      expectOk    lg "codec reads a memory with an async image (it judges nothing)" (parseCert rsv)
-      expectError lg "admission refuses that reserved field" (readCertChecked rsv)
+      let ai := mem0 (fun m => { m with asyncImg := match m.asyncImg with
+                                                   | some _ => none
+                                                   | none   => some m.nextImg })
+      if renderCert ai == raw then bad lg "changing a memory's async-reset image left the bytes identical"
+        else ok lg "sensitive to a memory's async-reset image"
+      expectOk    lg "admission accepts an async-reset image inside the design" (readCertChecked (renderCert ai))
+      let far := renderCert (mem0 (fun m => { m with asyncImg := some D.numSlots }))
+      expectOk    lg "codec reads an async-reset image out of range (it judges nothing)" (parseCert far)
+      expectError lg "admission refuses that same certificate" (readCertChecked far)
       let entry := fun (c : MemCommit) => renderCert (mem0 (fun m => { m with commits := #[c] }))
       let img := D.memories[0]!.nextImg
       expectError lg "admission refuses a commit-table entry with mask 0"

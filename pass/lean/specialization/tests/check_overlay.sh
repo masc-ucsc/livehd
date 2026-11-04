@@ -9,12 +9,13 @@
 # in it and in every module that imports it uses the proved @[csimp] fast
 # forms -- and must equal the base once that one import line is removed AND
 # match a recorded sha256, the same way.  Four are MASTER-ADAPTED --
-# Translation/LGraphModel.lean (the SHL/SRA/Sext boundary repairs),
+# Translation/LGraphModel.lean (the SHL/SRA/Sext boundary repairs, and the
+# whole-array memory operators of decision #2),
 # Translation/OpBridge.lean (the bridges re-proved for them), and
 # Compiler/DesignCert.lean and Compiler/DesignSemantics.lean (DCERT3: the
-# memory record's power-on words, commit table and reserved async field; the
+# memory record's power-on words, commit table and async-reset image; the
 # power-on image every runner starts from, and the memory step for a commit
-# table) -- and are checked against recorded sha256 values.  One is
+# table and for an asynchronous whole-array reset) -- and are checked against recorded sha256 values.  One is
 # MASTER-ONLY -- Compiler/MemDomains.lean, new with decision #9 (which clock
 # domains of a memory fire), absent from the base -- and is checked against a
 # recorded sha256 too.  Changing one is legitimate, but must update the record
@@ -38,13 +39,16 @@ BASE_REPO=${BASE_REPO:-$ROOT}
 SRC=$ROOT/formal/lean/LeanSemanticPrimitives
 
 # master-adapted files: path, recorded sha256
-EXPECTED_LGRAPHMODEL_SHA256=432bb98394892ad67d156923197ed90945f57cfbf86f3e6d2b602eead0f173ba
+# decision #2 added the whole-array operators Op_MemLoad / Op_MemToBus
+EXPECTED_LGRAPHMODEL_SHA256=23aba7149ad83b2e38a1455ca745038199dea971aed269474a73cc4d3e5c73dc
 EXPECTED_OPBRIDGE_SHA256=fc9366004cb12f1d96ae8624aaea4187960939d67c5b2b0c0b3bd3455d853b77
 # DCERT3 (decisions #5, #9, #2): MemoryDesc.init/commits/asyncImg,
-# MemoryDesc.powerOnImg, and srcMemNext's commit-table rule (#9; a memory with
-# an empty table steps as before, srcMemNext_of_empty)
-EXPECTED_DESIGNCERT_SHA256=10f89e546b62172d78f088bab2895cc6abdc4d16f08603feb17f27ba0d1773ef
-EXPECTED_DESIGNSEMANTICS_SHA256=64f9753161fd660aaabcaadaeb0c7cfd005c8bf4304966c5c61c629b08ed6507
+# MemoryDesc.powerOnImg, srcMemNext's commit-table rule (#9; a memory with
+# an empty table steps as before, srcMemNext_of_empty), and the async
+# whole-array reset (#2 stage 3: a memory that does not commit keeps
+# srcMemHeld, the asyncImg slot when present; srcMemHeld_of_none)
+EXPECTED_DESIGNCERT_SHA256=17f25c67a3139f33e9984b018c0d32d412138929f122df4cd33b732d8d6d47a8
+EXPECTED_DESIGNSEMANTICS_SHA256=5cc0e84870cdf026271aea38725d06ea19a408df1e8f451000c83cbddb798e34
 # master-only file (not in the base): recorded sha256
 EXPECTED_MEMDOMAINS_SHA256=72ede618a667aec0ec885e58934999dd68f64af3f480819983eb76b4fee70858
 # import-only adaptation: the one added line, recorded sha256

@@ -1,9 +1,15 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
+load("//tools:regression.bzl", "cc_test", "sh_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+
 load("//tools:cc_headers.bzl", "cc_direct_headers")
 load("//tools:copt_default.bzl", "COPTS")
+load("//inou/prp:tests/equiv/fixtures.bzl", "hdl_sources")
+
+_EQUIV_HDL = hdl_sources()
+
+exports_files(["tests/yvr_test.py"], visibility = ["//inou/yosys:__pkg__"])
 
 exports_files([
     "tests/equiv/ready_signal_chain.v",
@@ -688,7 +694,7 @@ _VERIFY_FIXME = []
 # tags (`:lec_expect:`, `:lec_sweep:`, `:lec_grep:`, …).
 _EQUIV_PRP_STEMS = [f.split("/")[-1][:-len(".prp")] for f in glob(["tests/equiv/*.prp"])]
 
-_EQUIV_V_STEMS = [f.split("/")[-1][:-len(".v")] for f in glob(["tests/equiv/*.v"])]
+_EQUIV_HDL_STEMS = _EQUIV_HDL.keys()
 
 # A numbered sibling with its OWN golden `.v` is an ordinary Pyrope↔Verilog pair
 # that merely happens to be named `foo_2`, not a LEC variant of `foo`: claiming
@@ -699,7 +705,7 @@ _EQUIV_V_STEMS = [f.split("/")[-1][:-len(".v")] for f in glob(["tests/equiv/*.v"
 _PRPLEC_VARIANTS = [
     s
     for s in _EQUIV_PRP_STEMS
-    if "_" in s and s.rsplit("_", 1)[1].isdigit() and s.rsplit("_", 1)[0] in _EQUIV_PRP_STEMS and s not in _EQUIV_V_STEMS
+    if "_" in s and s.rsplit("_", 1)[1].isdigit() and s.rsplit("_", 1)[0] in _EQUIV_PRP_STEMS and s not in _EQUIV_HDL_STEMS
 ]
 
 # What the Pyrope↔Verilog tiers below must skip: every variant (a variant states
@@ -709,7 +715,7 @@ _PRPLEC_VARIANTS = [
 _PRPLEC_SKIP = ["tests/equiv/%s.prp" % s for s in _PRPLEC_VARIANTS] + [
     "tests/equiv/%s.prp" % s.rsplit("_", 1)[0]
     for s in _PRPLEC_VARIANTS
-    if s.rsplit("_", 1)[0] not in _EQUIV_V_STEMS
+    if s.rsplit("_", 1)[0] not in _EQUIV_HDL_STEMS
 ]
 
 # Bases whose variants are each a few seconds of solver work run as ONE
@@ -878,7 +884,7 @@ _EQUIV_SPLIT_BITFUZZ = ["mem_partial_write_lanes", "mem_partial_write_mixed", "s
             "//inou/prp:tests/prpsim.py",
             "//inou/prp:tests/pyrope_test.py",
             "//inou/prp:%s" % prp_file,
-            "//inou/prp:%s" % (prp_file[:-len(".prp")] + ".v"),
+            "//inou/prp:%s" % _EQUIV_HDL[prp_file.split("/")[-1][:-len(".prp")]],
             "//lhd",
         ] + glob(
             [prp_file[:-len(".prp")] + "/*.prp"],
@@ -984,7 +990,7 @@ _EQUIV_SPLIT_BITFUZZ = ["mem_partial_write_lanes", "mem_partial_write_mixed", "s
             "tests/prpsim.py",
             "tests/pyrope_test.py",
             "tests/equiv/%s.prp" % stem,
-            "tests/equiv/%s.v" % stem,
+            _EQUIV_HDL[stem],
             "//lhd",
         ],
         deps = ["//inou/yosys:scripts"],
@@ -1071,6 +1077,10 @@ sh_test(
 # a new equiv fixture then defaults to COVERED rather than silently uncovered.
 # A pair whose claim IS that no state appears stays OUT of this list.
 _STATEMATCH_COMB = [
+    "basic_addition",
+    "basic_logic",
+    "basic_shifts",
+    "basic_wiring",
     "module_cycle_context",
     "and_zero_annihilator",
     "arr2d_dyn_sel",
@@ -1429,7 +1439,7 @@ _STATEMATCH_REDUNDANT = [
             "//inou/prp:tests/prplib.py",
             "//inou/prp:tests/pyrope_test.py",
             "//inou/prp:%s" % prp_file,
-            "//inou/prp:%s" % (prp_file[:-len(".prp")] + ".v"),
+            "//inou/prp:%s" % _EQUIV_HDL[prp_file.split("/")[-1][:-len(".prp")]],
             "//lhd",
         ] + glob(
             [prp_file[:-len(".prp")] + "/*.prp"],
@@ -1557,12 +1567,12 @@ _V2PRP2V_NATIVE_FIXME = [
         args = [
             "--native-only",
             "-i",
-            "$(location //inou/prp:tests/equiv/%s.v)" % base,
+            "$(location //inou/prp:%s)" % _EQUIV_HDL[base],
         ],
         data = [
             "//inou/prp:tests/lec.py",
             "//inou/prp:tests/v2prp2v_test.py",
-            "//inou/prp:tests/equiv/%s.v" % base,
+            "//inou/prp:%s" % _EQUIV_HDL[base],
             "//inou/prp:tests/equiv/%s.prp" % base,
             "//lhd",
         ],
@@ -1674,13 +1684,13 @@ _V2PRP2V_DUP = [
         srcs = ["tests/v2prp2v_test.py"],
         args = [
             "-i",
-            "$(location //inou/prp:tests/equiv/%s.v)" % base,
+            "$(location //inou/prp:%s)" % _EQUIV_HDL[base],
         ] + (["--native-only"] if part == "native" else ["--verilog-only"] if part == "verilog" else []),
         # The sibling .prp supplies the headers and is the native LEC reference.
         data = [
             "//inou/prp:tests/lec.py",
             "//inou/prp:tests/v2prp2v_test.py",
-            "//inou/prp:tests/equiv/%s.v" % base,
+            "//inou/prp:%s" % _EQUIV_HDL[base],
             "//inou/prp:tests/equiv/%s.prp" % base,
             "//lhd",
         ] + glob(
@@ -1694,12 +1704,13 @@ _V2PRP2V_DUP = [
         deps = ["//inou/yosys:scripts"],
     )
     for base in [
-        f.split("/")[-1][:-2]
+        f.split("/")[-1].rsplit(".", 1)[0]
         for f in glob(
-            ["tests/equiv/*.v"],
+            ["tests/equiv/*.v", "tests/equiv/*.sv"],
             exclude = [
                 # generated differential-sim golden drivers, not equiv goldens
                 "tests/equiv/*_tb.v",
+                "tests/equiv/*_tb.sv",
                 # No available reference reader can ingest these two goldens:
                 # yosys read_verilog hard-errors on the compound async-reset
                 # edge list ('Multiple edge sensitive events'), and yosys-slang
@@ -1778,11 +1789,11 @@ test_suite(
         srcs = ["tests/yvr_test.py"],
         args = [
             "-i",
-            "$(location //inou/prp:tests/equiv/%s.v)" % base,
+            "$(location //inou/prp:%s)" % _EQUIV_HDL[base],
         ],
         data = [
             "//inou/prp:tests/yvr_test.py",
-            "//inou/prp:tests/equiv/%s.v" % base,
+            "//inou/prp:%s" % _EQUIV_HDL[base],
             "//lhd",
         ],
         deps = ["//inou/yosys:scripts"],
@@ -1888,7 +1899,7 @@ _P2P_GROUPS = {
             "//inou/prp:tests/equiv/%s.prp" % base
             for base in bases
         ] + [
-            "//inou/prp:tests/equiv/%s.v" % base
+            "//inou/prp:%s" % _EQUIV_HDL[base]
             for base in bases
         ],
         deps = ["//inou/yosys:scripts"],

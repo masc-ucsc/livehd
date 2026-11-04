@@ -55,7 +55,7 @@ DesignIoMeta build_io_meta(const DesignScan& design, const CertificateIR& cert) 
   // and silently misalign the caller's array.
   for (uint32_t i = 0; i < design.inputs.size(); ++i) {
     const auto& p = design.inputs[i];
-    meta.inputs.push_back({p.name, i, p.width, used.count(i) != 0});
+    meta.inputs.push_back({p.name, i, p.width, used.count(i) != 0, p.free_value});
   }
 
   // Outputs are positional in the emitted `outputs` array, so their order IS
@@ -124,9 +124,9 @@ std::string json_str(std::string_view s) {
 void emit_ports(std::ostringstream& o, const char* field, const std::vector<IoPortMeta>& ports) {
   o << "  \"" << field << "\": [";
   for (size_t i = 0; i < ports.size(); ++i) {
-    o << (i ? ",\n    " : "\n    ") << "{\"name\": " << json_str(ports[i].name)
-      << ", \"ordinal\": " << ports[i].ordinal << ", \"width\": " << ports[i].width
-      << ", \"used_by_model\": " << (ports[i].used_by_model ? "true" : "false") << "}";
+    o << (i ? ",\n    " : "\n    ") << "{\"name\": " << json_str(ports[i].name) << ", \"ordinal\": " << ports[i].ordinal
+      << ", \"width\": " << ports[i].width << ", \"used_by_model\": " << (ports[i].used_by_model ? "true" : "false")
+      << (ports[i].free_value ? ", \"free_value\": true" : "") << "}";
   }
   o << (ports.empty() ? "]" : "\n  ]");
 }

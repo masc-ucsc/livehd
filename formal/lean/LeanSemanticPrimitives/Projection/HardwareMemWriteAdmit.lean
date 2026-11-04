@@ -765,7 +765,8 @@ theorem admitsW_nextImgGeom {D : DesignCert} (h : admitsWB D = true) :
     unfold geomAtW tyAtW
     rw [hts]
     simp [hk]
-  exact ⟨hg _ (memTyOK_next hok), fun c hc => hg _ (memTyOK_commit hok hc)⟩
+  exact ⟨hg _ (memTyOK_next hok), fun c hc => hg _ (memTyOK_commit hok hc),
+    fun a ha => hg _ (memTyOK_async hok ha)⟩
 
 /-- The memory-type facts of one extended-admitted memory, as `memTyOK`. -/
 theorem admitsW_memTyOK {D : DesignCert} (h : admitsWB D = true) {ts : Array SlotTy}
@@ -817,21 +818,35 @@ theorem admitsW_writePropagates {D : DesignCert} (h : admitsWB D = true) :
   have hty := admits_node_tyW hts (admitsW_wf h) hc
   rw [Array.getElem?_eq_getElem hlt] at hty
   constructor
-  · -- the ORIGINAL byte-enabled obligation
-    intro bw hop d0 hd0
-    obtain ⟨e0, e1, e2, e3, hdeps⟩ := memWriteBE_deps hsem hc hop
-    have hne : c.op ≠ .Op_MemWrite := by rw [hop]; simp
-    rw [nodeTyW_eq_of_ne hne] at hty
-    obtain ⟨aw, dw, wa, hres, hop0, -, -⟩ := nodeTy_write_geom hop hdeps hty
-    have he0 : e0 = d0 := by
-      have : c.deps[0]? = some e0 := by rw [deps_get c hdeps 0]; rfl
-      rw [this] at hd0
-      exact (Option.some.inj hd0)
-    subst he0
-    unfold geomAtW tyAtW
-    rw [hts]
-    simp only [Option.bind_some]
-    rw [hop0, Array.getElem?_eq_getElem hlt, hres]
+  · -- the ORIGINAL byte-enabled obligation, and the whole-array load's (#2)
+    intro bw hop' d0 hd0
+    rcases hop' with hop | hop
+    · obtain ⟨e0, e1, e2, e3, hdeps⟩ := memWriteBE_deps hsem hc hop
+      have hne : c.op ≠ .Op_MemWrite := by rw [hop]; simp
+      rw [nodeTyW_eq_of_ne hne] at hty
+      obtain ⟨aw, dw, wa, hres, hop0, -, -⟩ := nodeTy_write_geom hop hdeps hty
+      have he0 : e0 = d0 := by
+        have : c.deps[0]? = some e0 := by rw [deps_get c hdeps 0]; rfl
+        rw [this] at hd0
+        exact (Option.some.inj hd0)
+      subst he0
+      unfold geomAtW tyAtW
+      rw [hts]
+      simp only [Option.bind_some]
+      rw [hop0, Array.getElem?_eq_getElem hlt, hres]
+    · obtain ⟨e0, e1, e2, hdeps⟩ := memLoad_deps hsem hc hop
+      have hne : c.op ≠ .Op_MemWrite := by rw [hop]; simp
+      rw [nodeTyW_eq_of_ne hne] at hty
+      obtain ⟨aw, dw, hres, hop0, -, -⟩ := nodeTy_load_geom hop hdeps hty
+      have he0 : e0 = d0 := by
+        have : c.deps[0]? = some e0 := by rw [deps_get c hdeps 0]; rfl
+        rw [this] at hd0
+        exact (Option.some.inj hd0)
+      subst he0
+      unfold geomAtW tyAtW
+      rw [hts]
+      simp only [Option.bind_some]
+      rw [hop0, Array.getElem?_eq_getElem hlt, hres]
   · -- the PLAIN write's own obligation
     intro hop d0 hd0
     obtain ⟨e0, e1, e2, e3, hdeps⟩ := memWrite_deps hsem hc hop
@@ -889,8 +904,14 @@ theorem admits_slot_widthW {D : DesignCert} (h : admitsWB D = true)
       obtain ⟨d0, d1, d2, d3, hdeps⟩ := memWriteBE_deps (admitsW_semwf h) hc hbw
       obtain ⟨aw', dw', wa', hr, -, -, -⟩ := nodeTy_write_geom hbw hdeps hres
       simp at hr
+    have hne3 : ∀ n, c.op ≠ .Op_MemLoad n := by
+      intro n hn
+      rw [nodeTyW_eq_of_ne hne1] at hres
+      obtain ⟨d0, d1, d2, hdeps⟩ := memLoad_deps (admitsW_semwf h) hc hn
+      obtain ⟨aw', dw', hr, -⟩ := nodeTy_load_geom hn hdeps hres
+      simp at hr
     rw [hk', ← nodeValM_rec (i := i) (st := st) (admitsW_wf h) hj hc, hw]
-    exact eval_op_cert_width_nonMem c.op c.width _ hne1 hne2
+    exact eval_op_cert_width_nonMem c.op c.width _ hne1 hne2 hne3
 
 theorem admits_writeAddrFitsW {D : DesignCert} (h : admitsWB D = true)
     (i : RuntimeInput) (st : StateM) :
@@ -910,8 +931,26 @@ theorem admits_writeAddrFitsW {D : DesignCert} (h : admitsWB D = true)
       ts[D.sources.size + j]? = some (.tbl aw wa) →
       (fun d => ts[d]?) e0 = some (.tbl aw wa) →
       (fun d => ts[d]?) e1 = some (.bv wa) → True := fun _ _ _ _ _ _ _ _ _ => trivial
+  -- the whole-array load's table holds every entry it loads (decision #2)
+  have hload : LoadFits (geomAtW D) c := by
+    intro k hop d0 hd0
+    obtain ⟨e0, e1, e2, hdeps⟩ := memLoad_deps hsem hj hop
+    have hne : c.op ≠ .Op_MemWrite := by rw [hop]; simp
+    have hty' := hty
+    rw [nodeTyW_eq_of_ne hne] at hty'
+    obtain ⟨aw, dw, -, hop0, -, hkaw⟩ := nodeTy_load_geom hop hdeps hty'
+    have he0 : e0 = d0 := by
+      have hx : c.deps[0]? = some e0 := by rw [deps_get c hdeps 0]; rfl
+      rw [hx] at hd0; exact Option.some.inj hd0
+    subst he0
+    refine ⟨aw, ?_, hkaw⟩
+    unfold geomAtW tyAtW
+    rw [hts]
+    simp only [Option.bind_some]
+    rw [hop0]
   constructor
   · -- the ORIGINAL byte-enabled obligation
+    refine ⟨?_, hload⟩
     intro bw hop d0 d1 d3 hd0 hd1 hd3 _hen
     obtain ⟨e0, e1, e2, e3, hdeps⟩ := memWriteBE_deps hsem hj hop
     have hne : c.op ≠ .Op_MemWrite := by rw [hop]; simp
@@ -1023,14 +1062,17 @@ theorem mem_lt_of_getElem?' {α : Type _} {a : Array α} {idx : Nat} {v : α}
   · exact hlt
   · rw [Array.getElem?_eq_none hge] at h; exact absurd h (by simp)
 
-/-- A TABLE result means the operator is a write — now EITHER write. -/
+/-- A TABLE result means the operator is a write — now EITHER write — or a
+whole-array load (decision #2). -/
 theorem nodeTyW_tbl_op {ty : Nat → Option SlotTy} {c : DenseNodeCert} {aw dw : Nat}
     (h : nodeTyW ty c = some (.tbl aw dw)) :
-    (∃ bw, c.op = .Op_MemWriteBE bw) ∨ c.op = .Op_MemWrite := by
+    (∃ bw, c.op = .Op_MemWriteBE bw) ∨ c.op = .Op_MemWrite ∨ (∃ k, c.op = .Op_MemLoad k) := by
   by_cases hop : c.op = .Op_MemWrite
-  · exact Or.inr hop
+  · exact Or.inr (Or.inl hop)
   · rw [nodeTyW_eq_of_ne hop] at h
-    exact Or.inl (nodeTy_tbl_op h)
+    rcases nodeTy_tbl_op h with hw | hl
+    · exact Or.inl hw
+    · exact Or.inr (Or.inr hl)
 
 /-- **Every word of every table slot has the declared data width**, on the
 extended route.
@@ -1104,7 +1146,7 @@ theorem admits_slot_memwidthW {D : DesignCert} (h : admitsWB D = true)
         · exact hx
       subst hteq
       have hdw0 : dw0 = dw := by simpa [tyDW] using hdw
-      rcases nodeTyW_tbl_op hres with ⟨bw, hop⟩ | hop
+      rcases nodeTyW_tbl_op hres with ⟨bw, hop⟩ | hop | ⟨kk, hop⟩
       · -- the BYTE-ENABLED write: the original argument, unchanged
         have hne : c.op ≠ .Op_MemWrite := by rw [hop]; simp
         rw [nodeTyW_eq_of_ne hne] at hres
@@ -1150,6 +1192,25 @@ theorem admits_slot_memwidthW {D : DesignCert} (h : admitsWB D = true)
         rw [hk', ← nodeValM_rec (i := i) (st := st) (admitsW_wf h) hj hc, hop]
         simp only [hdeps, List.map_cons, List.map_nil, eval_op_cert, CertVal.asMem]
         exact cert_mem_write_width hIH' hd2w x
+      · -- a whole-array LOAD (decision #2)
+        have hne : c.op ≠ .Op_MemWrite := by rw [hop]; simp
+        rw [nodeTyW_eq_of_ne hne] at hres
+        obtain ⟨d0, d1, d2, hdeps⟩ := memLoad_deps (admitsW_semwf h) hc hop
+        obtain ⟨aw1, dw1, htbl, hd0ty, hwid, -⟩ := nodeTy_load_geom hop hdeps hres
+        have hx : aw0 = aw1 ∧ dw0 = dw1 := by simpa [SlotTy.tbl.injEq] using htbl
+        have hwid' : c.width = dw := by rw [hwid, ← hx.2]; exact hdw0
+        have hd0lt : d0 < D.sources.size + (k - D.sources.size) :=
+          (admitsW_wf h).depsBounded _ _ hc d0 (by rw [hdeps]; simp)
+        have hd0k : d0 < k := by omega
+        have hd0num : d0 < D.numSlots := by unfold DesignCert.numSlots; omega
+        have hd0tyAt : tyAtW D d0 = some (.tbl aw1 dw1) := by
+          unfold tyAtW; rw [hts]; simpa using hd0ty
+        have hIH := ih d0 hd0k hd0num (.tbl aw1 dw1) dw1 hd0tyAt (by simp [tyDW])
+        have hIH' : ∀ y : Int, ((slotValM D i st d0).asMem y).width = dw := by
+          intro y; rw [← hdw0, hx.2]; exact hIH y
+        rw [hk', ← nodeValM_rec (i := i) (st := st) (admitsW_wf h) hj hc, hop]
+        simp only [hdeps, List.map_cons, List.map_nil, eval_op_cert, CertVal.asMem]
+        exact cert_mem_load_width hwid' hIH' x
 
 theorem admitsW_nextImgTy {D : DesignCert} (h : admitsWB D = true)
     {idx : Nat} {md : MemoryDesc} (hmd : D.memories[idx]? = some md) :
@@ -1173,6 +1234,18 @@ theorem admitsW_commitTy {D : DesignCert} (h : admitsWB D = true)
   obtain ⟨ts, hts⟩ := admitsWB_infer h
   have hsz := admitsWB_size h hts
   have hty := memTyOK_commit (admitsW_memTyOK h hts hmd) hc
+  refine ⟨?_, ?_⟩
+  · unfold tyAtW; rw [hts]; simp [hty]
+  · rw [← hsz]; exact mem_lt_of_getElem?' hty
+
+/-- …and the image an asynchronous whole-array reset leaves (decision #2). -/
+theorem admitsW_asyncTy {D : DesignCert} (h : admitsWB D = true)
+    {idx : Nat} {md : MemoryDesc} (hmd : D.memories[idx]? = some md)
+    {a : Nat} (ha : md.asyncImg = some a) :
+    tyAtW D a = some (.tbl md.aw md.dw) ∧ a < D.numSlots := by
+  obtain ⟨ts, hts⟩ := admitsWB_infer h
+  have hsz := admitsWB_size h hts
+  have hty := memTyOK_async (admitsW_memTyOK h hts hmd) ha
   refine ⟨?_, ?_⟩
   · unfold tyAtW; rw [hts]; simp [hty]
   · rw [← hsz]; exact mem_lt_of_getElem?' hty
@@ -1241,12 +1314,21 @@ theorem admits_runW_pres {D : DesignCert} {i : RuntimeInput} {st : StateM}
     admits_slot_memwidthW hA (stateOKB_word hst) i k hnum (.tbl md.aw md.dw) md.dw hty
       (by simp [tyDW]) x
   -- ... or the held image (the QUIET memory: from the incoming state, untouched)
-  have hheld : (((StateM.denote st).mems[idx]?.getD (fun _ => mk_bv 0 0)) x).width = md.dw := by
+  have hstored : (((StateM.denote st).mems[idx]?.getD (fun _ => mk_bv 0 0)) x).width = md.dw := by
     obtain ⟨m0, hm0, hsh0⟩ := stateOKB_word hst idx md hmd
     have hq : (StateM.denote st).mems[idx]? = some m0.denote := by
       simp [StateM.denote, Array.getElem?_map, hm0]
     rw [hq, Option.getD_some]
     exact memShape_denote_width hsh0 x
+  -- (an asynchronous reset holds its reset image instead: a slot of this table, decision #2)
+  have hheld : ((Compiler.srcMemHeld (slotValM D i st) (StateM.denote st) idx md) x).width
+      = md.dw := by
+    unfold Compiler.srcMemHeld
+    cases ha : md.asyncImg with
+    | none   => exact hstored
+    | some a =>
+      obtain ⟨hta, hna⟩ := admitsW_asyncTy hA hmd ha
+      exact hslot _ hta hna
   obtain ⟨hty, hnum⟩ := admitsW_nextImgTy hA hmd
   unfold Compiler.srcMemNext
   split
@@ -1897,6 +1979,7 @@ theorem plainRamSim_runs {sim : MemSimulator} (h : plainRamSim = some sim)
 #audit_axioms admits_node_tyW
 #audit_axioms admitsW_memTyOK
 #audit_axioms admitsW_commitTy
+#audit_axioms admitsW_asyncTy
 #audit_axioms admitsW_nodeAdmitted
 #audit_axioms admitsW_writePropagates
 #audit_axioms admits_slot_widthW

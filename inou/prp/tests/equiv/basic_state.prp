@@ -1,0 +1,29 @@
+/*
+:name: basic_state
+:type: equiv
+:reader_matrix: true
+:verilog_top: basic_state
+:pyrope_top: basic_state
+:name_match_only: false
+*/
+// Signed growth and shifts feed a pipeline register beside an enabled counter.
+// The independent flat model matches both registers structurally; the HDL keeps
+// its original child modules to retain hierarchy and empty-task parser coverage.
+pub mod basic_state(
+  clk:Clock, sa:S4, sb:S4, ua:U4, ub:U4, sh:U3, en:Bool, d:U4
+) -> (
+  sadd:S8@[0], uadd:U8@[0], smul:S8@[0], slt:Bool@[0], ult:Bool@[0],
+  sshr:S4@[0], ushr:U4@[0], extended:S8@[0],
+  reg sreg:S8@[1] = nil, reg empty_q:U4@[0] = nil
+) {
+  sadd = sa + sb
+  uadd = ua + ub
+  smul = sa * sb
+  slt = sa < sb
+  ult = ua < ub
+  sshr = sa >> sh
+  ushr = ua >> sh
+  extended = sa
+  sreg = sa + sb
+  if en { wrap empty_q = d + 1 }
+}

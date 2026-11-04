@@ -18,6 +18,10 @@
 # Env:
 #   LAKE         lake executable (default $HOME/.elan/bin/lake, else PATH)
 #   RUN_TIMEOUT  per-certificate timeout, seconds (default 900)
+#   CERT_STORE   a certificate store the sweep filled (<sha256>.dcert files;
+#                decision #15). A row whose recorded path is gone is replayed
+#                from <CERT_STORE>/<cert_sha256>.dcert, after the same sha256
+#                check.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -120,6 +124,7 @@ N_RECORDED="$(( $(wc -l < "$RECORDED") - 1 ))"
   echo "d4_head_subject=$(cd "$ROOT" && git log -1 --format=%s)"
   echo "d4_tracked_dirty=$(cd "$ROOT" && [ -z "$(git status --porcelain --untracked-files=no)" ] && echo no || echo YES)"
   echo "worktree=$ROOT"
+  echo "cert_store=${CERT_STORE:--}"
   echo "recorded_rows=$RECORDED"
   echo "recorded_rows_sha256=$(sha256sum "$RECORDED" | cut -d' ' -f1)"
   echo "recorded_total=$N_RECORDED"
@@ -145,10 +150,15 @@ for rec in "${CERTROWS[@]}"; do
   # A certificate that moved, vanished or changed is NOT the thing that was
   # measured, so it is never run: a replay that silently measures a different
   # input is worse than a replay that refuses.
+  # Looked up by sha256 in the store when the recorded path is gone; the sha256
+  # check below applies to it exactly as to the recorded path.
+  if [[ ! -r "$cert" && -n "${CERT_STORE:-}" && -r "$CERT_STORE/$sha.dcert" ]]; then
+    cert="$CERT_STORE/$sha.dcert"
+  fi
   if [[ ! -r "$cert" ]]; then
     wall=$(echo "$(date +%s.%N) - $t_start" | bc)
     row "$corpus" "$m" "$emit" "$cert" "$sha" - - - - NOT_REPLAYED - - NOT_RUN - - \
-        "certificate is gone or unreadable" "$wall" - >> "$ROWS"
+        "certificate is gone or unreadable${CERT_STORE:+ (and not in $CERT_STORE)}" "$wall" - >> "$ROWS"
     printf '%s\t%s\t-\tCERT_MISSING\n' "$m" "$old_digest" >> "$CMP"
     badsha=$((badsha + 1)); continue
   fi

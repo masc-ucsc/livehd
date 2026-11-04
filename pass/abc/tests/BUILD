@@ -1,4 +1,4 @@
-load("@rules_cc//cc:defs.bzl", "cc_test")
+load("//tools:regression.bzl", "cc_test")
 load("//tools:copt_default.bzl", "COPTS")
 
 cc_test(

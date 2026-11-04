@@ -135,6 +135,9 @@ private def rhsSyntax (nsrc : Nat) : ResidualExpr → MetaM Term
   | .rmemWriteBE w bw m a d be => do
       `(rmemWriteBEV $(quote w) $(slotIdent nsrc m) $(slotIdent nsrc a) $(slotIdent nsrc d)
          $(slotIdent nsrc be) $(quote bw))
+  | .rmemLoad w n m b e => do
+      `(rmemLoadV $(quote w) $(quote n) $(slotIdent nsrc m) $(slotIdent nsrc b) $(slotIdent nsrc e))
+  | .rmemToBus w n m => do `(rmemToBusV $(quote w) $(quote n) $(slotIdent nsrc m))
 
 --------------------------------------------------------------------------------
 -- The NAMED fast model
@@ -222,6 +225,10 @@ private def valSyntaxG (ref : Bool → ResidualRef → MetaM Term) :
   | .rmemWriteBE w bw m a d be => do
       `(Residual.rmemWriteBEV $(quote w) $(← ref true m) $(← ref false a)
          $(← ref false d) $(← ref false be) $(quote bw))
+  | .rmemLoad w n m b e => do
+      `(Residual.rmemLoadV $(quote w) $(quote n) $(← ref true m) $(← ref false b)
+         $(← ref false e))
+  | .rmemToBus w n m => do `(Residual.rmemToBusV $(quote w) $(quote n) $(← ref true m))
 
 /-- Named-call form. -/
 def valSyntax (base : Name) (nsrc : Nat) (loc : Bool) : ResidualExpr → MetaM Term :=
@@ -328,13 +335,16 @@ def elabReifyDesignNamed : CommandElab := fun stx => do
     -- A MEMORY HOLDS ON A QUIET DOMAIN. `denoteResidual` commits only when
     -- `fires e m.clock`; the generated model committed unconditionally, which
     -- is wrong for every step in which that memory's clock does not fire.
+    -- …or, with an ASYNCHRONOUS whole-array reset (`asyncImg`, decision #2),
+    -- keeps the image with the reset applied (`memHeld`).
     let mems : Array Term ← R.memoryUpdates.mapIdxM fun k mu => do
       let t ← liftTermElabM (NamedModel.valRefAtTyped base nsrc true mu.nextImg envT)
+      let held ← match mu.asyncImg with
+        | some a => liftTermElabM (NamedModel.valRefAtTyped base nsrc true a envT)
+        | none   => `((($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
       if mu.commits.isEmpty then
-        liftTermElabM `(if Compiler.fires $eId $(quote mu.clock) then $t
-                        else (($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
+        liftTermElabM `(if Compiler.fires $eId $(quote mu.clock) then $t else $held)
       else
-        let held ← `((($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
         liftTermElabM (memPickSyntax eId mu t held
           (fun r => NamedModel.valRefAtTyped base nsrc true r envT))
     elabCommand (← `(command|
@@ -439,11 +449,12 @@ def emitChunkedModel (R : ResidualProgram) (d f : Ident) (csize : Nat) :
           (Compiler.fires $eId $(quote fu.clock)) $aRl)
   let mems : Array Term ← R.memoryUpdates.mapIdxM fun k mu => do
     let t ← liftTermElabM (rootRef true mu.nextImg)
+    let held ← match mu.asyncImg with
+      | some a => liftTermElabM (rootRef true a)
+      | none   => `((($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
     if mu.commits.isEmpty then
-      liftTermElabM `(if Compiler.fires $eId $(quote mu.clock) then $t
-                      else (($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
+      liftTermElabM `(if Compiler.fires $eId $(quote mu.clock) then $t else $held)
     else
-      let held ← `((($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
       liftTermElabM (memPickSyntax eId mu t held (rootRef true))
   let mut mbody ← `({ outputs := #[$outs,*],
                       nextState := { flops := #[$flops,*], mems := #[$mems,*] } })
@@ -638,11 +649,12 @@ def elabReifyDesignShared : CommandElab := fun stx => do
             (Compiler.fires $eId $(quote fu.clock)) $aRl)
     let mems : Array Term ← R.memoryUpdates.mapIdxM fun k mu => do
       let t ← liftTermElabM (rootRef true mu.nextImg)
+      let held ← match mu.asyncImg with
+        | some a => liftTermElabM (rootRef true a)
+        | none   => `((($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
       if mu.commits.isEmpty then
-        liftTermElabM `(if Compiler.fires $eId $(quote mu.clock) then $t
-                        else (($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
+        liftTermElabM `(if Compiler.fires $eId $(quote mu.clock) then $t else $held)
       else
-        let held ← `((($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
         liftTermElabM (memPickSyntax eId mu t held (rootRef true))
     -- innermost first, then wrap one `let` per binding, outermost = binding 0
     let mut body ← `({ outputs := #[$outs,*],
@@ -686,13 +698,15 @@ def elabReifyDesign : CommandElab := fun stx => do
       let outs : Array Term ← R.outputs.mapM fun o =>
         `(bv_resize $(quote o.width) $(slotIdent nsrc o.slot))
       -- A MEMORY HOLDS ON A QUIET DOMAIN (see `denoteResidual`).
-      let mems : Array Term ← R.memoryUpdates.mapIdxM fun k m =>
+      let mems : Array Term ← R.memoryUpdates.mapIdxM fun k m => do
+        -- the held image: the async reset's (decision #2), else the stored one
+        let held ← match m.asyncImg with
+          | some a => pure (slotIdent nsrc a)
+          | none   => `((st.mems[$(quote k)]?).getD (fun _ => mk_bv 0 0))
         if m.commits.isEmpty then
-          `(if Compiler.fires e $(quote m.clock) then $(slotIdent nsrc m.nextImg)
-            else (st.mems[$(quote k)]?).getD (fun _ => mk_bv 0 0))
-        else do
-          memPickSyntax (← `(e)) m (slotIdent nsrc m.nextImg)
-            (← `((st.mems[$(quote k)]?).getD (fun _ => mk_bv 0 0)))
+          `(if Compiler.fires e $(quote m.clock) then $(slotIdent nsrc m.nextImg) else $held)
+        else
+          memPickSyntax (← `(e)) m (slotIdent nsrc m.nextImg) held
             (fun r => pure (slotIdent nsrc r))
       -- THE HAND-ROLLED FLOP UPDATE WAS CLOCKLESS, and could not be repaired
       -- in place: it applied the reset whenever the pin was asserted and

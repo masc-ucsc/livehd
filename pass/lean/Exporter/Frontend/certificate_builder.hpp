@@ -13,6 +13,9 @@ struct MemoryLowering {
   uint32_t                                image = 0;
   std::map<std::vector<size_t>, uint32_t> chains;
   std::map<size_t, uint32_t>              read_registers;
+  // An asynchronous whole-array reset: each image a read sees, with the reset
+  // applied (decision #2), shared per image.
+  std::map<uint32_t, uint32_t>            reset_applied;
 };
 struct CertificateBuilder {
   explicit CertificateBuilder(const DesignScan& scan);

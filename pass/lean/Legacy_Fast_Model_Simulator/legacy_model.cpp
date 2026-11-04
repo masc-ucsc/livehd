@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "legacy_model.hpp"
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 
@@ -34,6 +35,19 @@ void emit_legacy_model(const DesignScan& design, const CertificateIR& cert, cons
   }
   if (options.emit_fast_bridge && needs_mul_bridge(cert)) {
     out << "import LeanSemanticPrimitives.Translation.MulBridge\n";
+  }
+  if (options.emit_fast_bridge && needs_sext_bridge(cert)) {
+    out << "import LeanSemanticPrimitives.Translation.SextBridge\n";
+  }
+  // Every model: `lmux`, the mux as a call (finding AC), and for a byte-enable
+  // write the compiled form that reads the image below it once per read
+  // (finding Q; a `@[csimp]` lemma, proofs unchanged).
+  out << "import LeanSemanticPrimitives.Translation.LegacyFast\n";
+  // A whole-array memory (decision #2): the fast `mem_load` / `mem_to_bus`,
+  // and with the bridge their lemmas (which import the fast forms).
+  if (needs_whole_array(cert)) {
+    out << (options.emit_fast_bridge ? "import LeanSemanticPrimitives.Translation.WholeArrayBridge\n"
+                                     : "import LeanSemanticPrimitives.Translation.WholeArray\n");
   }
   if (wf) {
     out << "import LeanSemanticPrimitives.Translation.LegacyCertWF\n\nopen OpBridge\n\n";

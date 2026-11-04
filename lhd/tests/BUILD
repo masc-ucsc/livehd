@@ -15,7 +15,8 @@
 #  - lhd_equiv_test: prp->ln->lg->v1, prp->lg->v2, verilog0->lg->v3, then
 #    LEC of each against the golden verilog0.
 
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
+load("//tools:regression.bzl", "sh_test")
 load("//tools:lhd.bzl", "lhd_verilog")
 
 # The technology mappers `lhd synth --set synth.mapper=` / `lhd pass <mapper>`
@@ -892,7 +893,22 @@ sh_test(
 sh_test(
     name = "lhd_formal_hier_ref_test",
     srcs = ["lhd_formal_hier_ref_test.sh"],
-    data = ["//lhd"],
+    data = [
+        "formal_hier_ref.sv",
+        "formal_hier_ref_up.sv",
+        "//lhd",
+    ],
+    tags = ["no-sandbox"],
+)
+
+# Case equality against an X/Z constant is two-state, not X-as-0.
+sh_test(
+    name = "lhd_formal_xcheck_test",
+    srcs = ["lhd_formal_xcheck_test.sh"],
+    data = [
+        "formal_xcheck.sv",
+        "//lhd",
+    ],
     tags = ["no-sandbox"],
 )
 
@@ -1323,6 +1339,17 @@ sh_test(
     ],
 )
 
+# A register array of structs written field by field becomes one wide memory
+# word with merged ports: its never-written write lanes are zeroed after
+# memory_share (setundef), and each read-data piece gets its own slice
+# (lgyosys_tolg resolve_memory). The Lean export accepts it and lec passes.
+sh_test(
+    name = "yosys_memory_share_undef_test",
+    size = "medium",
+    srcs = ["yosys_memory_share_undef_test.sh"],
+    data = ["//lhd"],
+)
+
 # A gate that reaches state as a Clock_cell (Pyrope `Clock(...)`, a chain of
 # them, tolg's activation gate, a gated `__memory` clock with a registered read)
 # folds into the enables, and the export accepts the result;
@@ -1596,6 +1623,18 @@ sh_test(
         "//inou/yosys:scripts",  # lgcheck, for the round-trip LEC leg
         "//lhd",
     ],
+)
+
+# A register an async-reset block writes only outside its reset branch (yosys
+# $dffe, EN = reset, EN_POLARITY 0) must hold while reset is high. The importer
+# inverted a SIGNED pick of EN, so the enable stayed on during reset. Icarus
+# compares source and emitted netlist through a reset window, for both Verilog
+# readers (LHD_EXTERNAL_SIM=1); verified to fail before the fix.
+sh_test(
+    name = "yosys_inverted_enable_reset_test",
+    size = "small",
+    srcs = ["yosys_inverted_enable_reset_test.sh"],
+    data = ["//lhd"],
 )
 
 # `lhd lec` soundness around gated latches and the edge-normalization time
@@ -2429,7 +2468,7 @@ sh_test(
 
 # --reader slang|yosys|yosys-slang|yosys-verilog (slang = direct inou.slang
 # SV->LNAST front-end; yosys/yosys-slang = yosys's built-in read_slang). The
-# latch leg reuses the shared inou/yosys/tests/latch_async.v fixture.
+# latch leg reuses the shared inou/slang/tests/reader/latch_async.v fixture.
 sh_test(
     name = "lhd_reader_test",
     srcs = ["lhd_reader_test.sh"],

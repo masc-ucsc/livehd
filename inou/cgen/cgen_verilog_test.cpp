@@ -350,4 +350,79 @@ TEST(CgenVerilog, MixedReadTimingMemoryIsRefused) {
       << "a mixed-timing memory must be refused, not emitted as a combinational array";
 }
 
+TEST(CgenVerilog, AsyncReadClockDoesNotSplitWriteDomain) {
+  for (const auto& [distinct_write_clock, shared_clock_on_read] : {
+           std::tuple{false, false},
+           std::tuple{ true, false},
+           std::tuple{false,  true}
+  }) {
+    SCOPED_TRACE(distinct_write_clock);
+    SCOPED_TRACE(shared_clock_on_read);
+    const std::string name = distinct_write_clock   ? "async_read_two_write_clocks"
+                             : shared_clock_on_read ? "async_read_carries_array_clock"
+                                                    : "async_read_shared_write_clock";
+    auto&             lib  = livehd::Hhds_graph_library::instance("lgdb_" + name);
+    auto              io   = lib.create_io(name);
+    int               port = 0;
+    for (const auto& [input, bits] : {
+             std::tuple{ "clk", 1},
+             std::tuple{"clk2", 1},
+             std::tuple{  "we", 1},
+             std::tuple{  "wa", 2},
+             std::tuple{  "ra", 2},
+             std::tuple{ "din", 8}
+    }) {
+      io->add_input(input, port++);
+      io->set_bits(input, bits);
+      io->set_unsign(input, true);
+    }
+    io->add_output("dout", port++);
+    io->set_bits("dout", 8);
+    io->set_unsign("dout", true);
+    auto      graph  = io->create_graph();
+    auto      mem    = gu::create_typed_node(*graph, Ntype_op::Memory);
+    const int stride = static_cast<int>(Ntype::Memory_port_stride);
+    auto      konst  = [&](int64_t v) { return gu::create_const(*graph, *Dlop::create_integer(v)); };
+    auto pin = [&](const char* n, int idx) { return mem.create_sink_pin(Ntype::get_sink_pid(Ntype_op::Memory, n) + idx * stride); };
+    for (const auto& [field, value] : {
+             std::tuple{   "bits", 8},
+             std::tuple{   "size", 4},
+             std::tuple{"wensize", 1},
+             std::tuple{    "fwd", 0},
+             std::tuple{ "posclk", 1},
+             std::tuple{   "type", 0}
+    }) {
+      konst(value).connect_sink(pin(field, 0));
+    }
+    // Put the async read first: its unused clock must neither become the base
+    // nor turn two writes on clk into separately scheduled write processes.
+    graph->get_input_pin("ra").connect_sink(pin("addr", 0));
+    konst(1).connect_sink(pin("enable", 0));
+    if (shared_clock_on_read) {
+      graph->get_input_pin("clk").connect_sink(pin("clock_pin", 0));
+    } else {
+      konst(0).connect_sink(pin("clock_pin", 0));
+    }
+    konst(Ntype::Memory_rdport_async).connect_sink(pin("rdport", 0));
+    auto dout = mem.create_driver_pin(0);
+    gu::set_ubits(dout, 8);
+    dout.connect_sink(graph->get_output_pin("dout"));
+    for (int w = 1; w <= 2; ++w) {
+      graph->get_input_pin("wa").connect_sink(pin("addr", w));
+      graph->get_input_pin("din").connect_sink(pin("din", w));
+      graph->get_input_pin("we").connect_sink(pin("enable", w));
+      if (!shared_clock_on_read) {
+        graph->get_input_pin(distinct_write_clock && w == 2 ? "clk2" : "clk").connect_sink(pin("clock_pin", w));
+      }
+      konst(Ntype::Memory_rdport_write).connect_sink(pin("rdport", w));
+    }
+    std::filesystem::create_directories(name);
+    ASSERT_NO_THROW(Cgen_verilog{name}.do_from_graph(graph));
+    std::ifstream     input(name + "/" + name + ".v");
+    const std::string text{std::istreambuf_iterator<char>(input), {}};
+    ASSERT_FALSE(text.empty());
+    EXPECT_EQ(text.find("cgen_memory_multiclock_") != std::string::npos, distinct_write_clock);
+  }
+}
+
 }  // namespace

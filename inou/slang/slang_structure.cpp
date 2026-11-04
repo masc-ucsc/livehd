@@ -1819,7 +1819,7 @@ void Slang_context::emit_local_param_consts(const slang::ast::Scope& body) {
       // this body is concrete, so it does not need the deferred-template flag.
       //
       // A RESERVED-WORD parameter (`parameter step = 1`, a legal Verilog name and
-      // a real shape -- see inou/yosys/tests/fixme_paramods.v) is excluded: the
+      // a real shape -- see inou/slang/tests/reader/fixme_paramods.v) is excluded: the
       // writer would have to emit it backtick-escaped (`` <`step`=1> ``), and
       // prp2lnast registers a generic under that RAW spelling while body reads
       // canonicalize to the bare name, so the emitted file no longer re-parses

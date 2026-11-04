@@ -235,7 +235,7 @@ theorem memNext_compileMemory (env : SlotEnv) (e : ClockEdges) (s : RuntimeState
     memNext env e s idx (compileMemory m) = srcMemNext (denoteRef env) e s idx m := by
   have ha : (compileMemory m).toDesc.allFire e = m.allFire e := rfl
   have hf : (compileMemory m).toDesc.firedIs e = m.firedIs e := rfl
-  unfold memNext srcMemNext
+  unfold memNext srcMemNext memHeld srcMemHeld
   rw [ha, hf]
   rfl
 

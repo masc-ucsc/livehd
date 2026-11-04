@@ -1,6 +1,7 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
-load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//tools:regression.bzl", "py_test")
+load("@rules_python//python:defs.bzl", "py_library")
 load("//tools:copt_default.bzl", "COPTS")
 
 config_setting(

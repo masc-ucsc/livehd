@@ -11,6 +11,7 @@
 #include "emit_design_cert.hpp"
 #include "lean_format.hpp"
 #include "legacy_model.hpp"
+#include "loop_realize.hpp"
 #include "reduce_lower.hpp"
 
 static Pass_plugin pass_plugin_lean("pass_lean", Pass_lean::setup);
@@ -43,9 +44,18 @@ void Pass_lean::setup() {
 }
 
 void Pass_lean::work(Eprp_var& var) {
-  Pass_lean pass(var);
-  for (const auto& g : var.graphs) {
-    pass.emit_for_graph(g);
+  Pass_lean  pass(var);
+  // A loop body the front end lifted out of a rolled loop is not a design of
+  // its own: emit_for_graph realizes its iterations inside the certificate of
+  // the graph that holds the loop. Emitted on its own it would be a second
+  // certificate, and under a `top` override it would take the same file name
+  // as the real top's and replace it.
+  const auto body_only = lean_export::loop_body_only(var.graphs);
+  for (size_t i = 0; i < var.graphs.size(); ++i) {
+    if (body_only[i]) {
+      continue;
+    }
+    pass.emit_for_graph(var.graphs[i]);
   }
 }
 
@@ -58,8 +68,17 @@ void Pass_lean::emit_for_graph(const std::shared_ptr<hhds::Graph>& graph) const 
   // private copy into Get_mask bits joined by an Xor / Sum tree, exactly as
   // pass.isabelle does, so the certificate uses only ops the Lean semantics
   // already has. A graph with neither cell is returned unchanged (no copy).
+  //
+  // A loop the front end left ROLLED (one compact instance standing for every
+  // iteration; always the case for a run-time `break` or `continue`) is first
+  // realized in its own private copy: one instance per iteration, each spliced
+  // into the top (loop_realize.hpp). It runs first, so a reduction inside a
+  // loop body is in the top by the time the reductions are expanded. A graph
+  // without a rolled loop is returned unchanged (no copy).
+  hhds::GraphLibrary loop_scratch;
+  const auto         realized = lean_export::realize_rolled_loops_copy(graph, loop_scratch);
   hhds::GraphLibrary reduction_scratch;
-  const auto         lowered     = livehd::graph_util::lower_counted_reductions_copy(graph, reduction_scratch);
+  const auto         lowered     = livehd::graph_util::lower_counted_reductions_copy(realized, reduction_scratch);
   const auto         design      = lean_export::scan_design(*lowered, {strict, max_width, max_nodes});
   const auto certificate = lean_export::build_certificate(design, {});
   const auto raw_name    = top.empty() ? design.name : top;

@@ -87,9 +87,9 @@ PY
 # A high-window producer settles at Close_high. Sampling preview D in the
 # same batch would see its old Q; forwarding at Fall must see its new Q.
 sed -e 's/reg value;/reg value; reg produced; always_latch if (clk) produced = d;/' \
-    -e 's/value = d;/value = produced;/' "$WORK/reference.v" >"$WORK/reference_high.v"
-# The second substitution also touches the inserted producer: keep its D live.
-sed -i 's/if (clk) produced = produced;/if (clk) produced = d;/' "$WORK/reference_high.v"
+    -e 's/value = d;/value = produced;/' \
+    -e 's/if (clk) produced = produced;/if (clk) produced = d;/' \
+    "$WORK/reference.v" >"$WORK/reference_high.v"
 sed -e 's/reg sampled_data;/reg sampled_data; reg produced; always @(negedge clk) produced <= d;/' \
     -e 's/sampled_data <= d;/sampled_data <= produced;/' "$WORK/good.v" >"$WORK/good_high.v"
 

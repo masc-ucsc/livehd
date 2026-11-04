@@ -48,9 +48,17 @@ inductive LGraphOp where
   -- A multi-write memory becomes a CHAIN of write nodes, each taking the previous
   -- node's image as its `mem` dep, so the later (higher port_id) write wins a
   -- same-cycle same-address collision exactly as `memory_write_fold` does.
+  -- Whole-array operators (decision #2), one node for any number of entries:
+  --   Op_MemLoad n    [mem, bus, enable]             -> mem  (entries 0..n-1 from the bus)
+  --   Op_MemToBus n   [mem]                          -> bv   (entries 0..n-1 as one bus)
+  -- A whole-array cell's next image is MemLoad(update, update_enable), then the
+  -- port writes, then MemLoad(init, reset): reset wins, and a port write wins
+  -- over the bulk update, as cgen and pass/lec define the cell.
   | Op_MemRead
   | Op_MemWrite
   | Op_MemWriteBE (byte_w : Nat)
+  | Op_MemLoad (n : Nat)
+  | Op_MemToBus (n : Nat)
 deriving Repr, Inhabited, DecidableEq
 
 --------------------------------------------------------------------------------
@@ -414,6 +422,25 @@ def cert_mem_write_be (w : Nat) (m : Int → BV) (a d bev : BV) (byte_w : Nat) :
     (fun x => if x = bv_uint a then cert_masked_update w (m (bv_uint a)) d bev byte_w else m x)
   else m
 
+/-- Whole-array load (decision #2): when `en` is nonzero, entry `i < n` becomes
+bits `[i*w, (i+1)*w)` of `bus`, entry 0 in the low bits (a bus narrower than
+`n*w` reads 0 above its top, as cgen and pass/lec zero-extend it); every other
+entry is unchanged.  `w` is the entry width. -/
+def cert_mem_load (w n : Nat) (m : Int → BV) (bus en : BV) : Int → BV :=
+  if bv_nonzero en then
+    (fun x => if 0 ≤ x ∧ x < n then mk_bv w (bv_uint bus / 2 ^ (x.toNat * w)) else m x)
+  else m
+
+/-- Entries `0 .. k-1`, each `d` bits, packed with entry 0 in the low bits. -/
+def cert_mem_pack (d : Nat) (m : Int → BV) : Nat → Int
+  | 0 => 0
+  | k + 1 => cert_mem_pack d m k + (bv_uint (m k) % 2 ^ d) * 2 ^ (k * d)
+
+/-- Whole-array read (cgen's `read_all`): entries `0 .. n-1` as one `w`-bit bus,
+each `w / n` bits, entry 0 in the low bits. -/
+def cert_mem_to_bus (w n : Nat) (m : Int → BV) : BV :=
+  mk_bv w (cert_mem_pack (w / n) m n)
+
 --------------------------------------------------------------------------------
 -- The certificate-value evaluator, LAYERED over `eval_op`.
 --
@@ -435,18 +462,23 @@ def eval_op_cert : LGraphOp → Nat → List CertVal → CertVal
   | LGraphOp.Op_MemWrite, _w, [m, a, d, en] => .mem (cert_mem_write m.asMem a.asBV d.asBV en.asBV)
   | LGraphOp.Op_MemWriteBE byte_w, w, [m, a, d, be] =>
     .mem (cert_mem_write_be w m.asMem a.asBV d.asBV be.asBV byte_w)
+  | LGraphOp.Op_MemLoad n, w, [m, bus, en] => .mem (cert_mem_load w n m.asMem bus.asBV en.asBV)
+  | LGraphOp.Op_MemToBus n, w, [m] => .bv (cert_mem_to_bus w n m.asMem)
   -- Wrong arity on a memory op: a defined, obviously-wrong value rather than a
   -- partial function.  The emitter never produces it; the census gate catches it.
   | LGraphOp.Op_MemRead, w, _ => .bv (mk_bv w 0)
   | LGraphOp.Op_MemWrite, _w, _ => .mem (fun _ => mk_bv 0 0)
   | LGraphOp.Op_MemWriteBE _, _w, _ => .mem (fun _ => mk_bv 0 0)
+  | LGraphOp.Op_MemLoad _, _w, _ => .mem (fun _ => mk_bv 0 0)
+  | LGraphOp.Op_MemToBus _, w, _ => .bv (mk_bv w 0)
   | op, w, vs => .bv (eval_op op w (vs.map CertVal.asBV))
 
 /-- Every non-memory operator delegates to `eval_op` unchanged.  Stated with an
 explicit hypothesis so it applies uniformly; for a concrete operator literal the
 goal also closes by `rfl`, which is what the emitted per-node proofs rely on. -/
 theorem eval_op_cert_bv (op : LGraphOp) (w : Nat) (l : List BV)
-    (h : ∀ b, op ≠ LGraphOp.Op_MemRead ∧ op ≠ LGraphOp.Op_MemWrite ∧ op ≠ LGraphOp.Op_MemWriteBE b) :
+    (h : ∀ b, op ≠ LGraphOp.Op_MemRead ∧ op ≠ LGraphOp.Op_MemWrite ∧ op ≠ LGraphOp.Op_MemWriteBE b ∧
+      op ≠ LGraphOp.Op_MemLoad b ∧ op ≠ LGraphOp.Op_MemToBus b) :
     eval_op_cert op w (l.map CertVal.bv) = .bv (eval_op op w l) := by
   have hmap : (l.map CertVal.bv).map CertVal.asBV = l := by
     induction l with
@@ -455,7 +487,9 @@ theorem eval_op_cert_bv (op : LGraphOp) (w : Nat) (l : List BV)
   cases op <;> first
     | (exact absurd rfl (h 0).1)
     | (exact absurd rfl (h 0).2.1)
-    | (exact absurd rfl (h _).2.2)
+    | (exact absurd rfl (h _).2.2.1)
+    | (exact absurd rfl (h _).2.2.2.1)
+    | (exact absurd rfl (h _).2.2.2.2)
     | (simp only [eval_op_cert, hmap])
 
 --------------------------------------------------------------------------------
@@ -573,6 +607,8 @@ def simpleOpCertWfBool (opc : LGraphOp) (w : Nat) (ds : List Nat) : Bool :=
   | LGraphOp.Op_MemRead => ds.length = 3
   | LGraphOp.Op_MemWrite => ds.length = 4
   | LGraphOp.Op_MemWriteBE _ => ds.length = 4
+  | LGraphOp.Op_MemLoad _ => ds.length = 3
+  | LGraphOp.Op_MemToBus n => ds.length = 1 && n > 0
   | _ => false
 
 def simpleNodeCertShapeWfBool (c : NodeCert) : Bool :=

@@ -28,10 +28,20 @@
 #   CVA6_WRAP_DIR <mod>_gate.sv wrappers (no default -- required for cva6)
 #   EMIT_TIMEOUT  per-block emission timeout, seconds (default 1800)
 #   RUN_TIMEOUT   per-block runtime timeout, seconds  (default 900)
+#   CERT_STORE    where every emitted certificate is kept, as
+#                 <CERT_STORE>/<sha256>.dcert (default <outdir>/certs). Keep it
+#                 OUTSIDE git: a row's `cert_sha256` is the key, so a committed
+#                 row needs no committed certificate, and replay_d4_certs.sh
+#                 finds it by that sha256 (decision #15). Without it a run's
+#                 digests could not be reproduced once its work directory went.
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+# The CORE-ET front-end scripts moved with the IR-semantics simulator
+# (0e245b04e); this script kept the old `scripts/` paths and failed its own
+# preflight ("missing .../scripts/coreet_preflight.sh").
+IRS_SCRIPTS="$ROOT/pass/lean/Lgraph_IR_Semantics_Simulator/scripts"
 
 die() { printf 'FATAL: %s\n' "$*" >&2; exit 2; }
 
@@ -197,7 +207,7 @@ if [[ "$CORPUS" == "coreet" ]]; then
   # `intpipe_mul_div_ctl.sv`, 26 blocks that DO emit are reported as emission
   # failures, and the denominator is wrong: measured 63 NO_CERT without them,
   # 37 with, against a historical 37.
-  COREET_PREFLIGHT="$SCRIPT_DIR/coreet_preflight.sh"
+  COREET_PREFLIGHT="$IRS_SCRIPTS/coreet_preflight.sh"
   [[ -x "$COREET_PREFLIGHT" ]] || die "missing $COREET_PREFLIGHT"
   # `--publish`: the four derived sources are FRESHLY DERIVED into the exact
   # directory the filelist consumes, then verified byte-for-byte against a
@@ -205,7 +215,7 @@ if [[ "$CORPUS" == "coreet" ]]; then
   # alone was not enough -- a derived BODY can be edited with that header intact.
   COREET_PROV="$("$COREET_PREFLIGHT" "$COREET_ROOT" \
                    "$ROOT/generated/core-et/patched_src" \
-                   "$SCRIPT_DIR/coreet_patch_srcs.py" --publish)" \
+                   "$IRS_SCRIPTS/coreet_patch_srcs.py" --publish)" \
     || die "CORE-ET preflight failed; refusing to measure an unpinned corpus"
   # The canonical tech, passed EXPLICITLY rather than inherited.  The preflight
   # has already refused any other value.
@@ -396,12 +406,27 @@ PARTS="$OUTDIR/rowparts"
 mkdir -p "$PARTS"
 ROWS="$OUTDIR/rows.tsv"
 PROV="$OUTDIR/provenance.txt"
+CERT_STORE="${CERT_STORE:-$OUTDIR/certs}"
+mkdir -p "$CERT_STORE" || die "cannot create the certificate store $CERT_STORE"
+CERT_STORE="$(cd "$CERT_STORE" && pwd)"
+
+# Keep one certificate in the store under its sha256, atomically, and say so.
+# An existing entry is checked, never overwritten: same name, same bytes.
+store_cert() { # <cert> <sha256>
+  local dst="$CERT_STORE/$2.dcert"
+  if [[ -e "$dst" ]]; then
+    [[ "$(sha256sum "$dst" | cut -d' ' -f1)" == "$2" ]] || die "certificate store entry $dst does not hash to its name"
+    return 0
+  fi
+  cp "$1" "$dst.tmp.$$" && mv -f "$dst.tmp.$$" "$dst" || die "cannot store $1 as $dst"
+}
 
 {
   echo "d4_head=$(cd "$ROOT" && git rev-parse HEAD)"
   echo "d4_head_subject=$(cd "$ROOT" && git log -1 --format=%s)"
   echo "d4_tracked_dirty=$(cd "$ROOT" && [ -z "$(git status --porcelain --untracked-files=no)" ] && echo no || echo YES)"
   echo "worktree=$ROOT"
+  echo "cert_store=$CERT_STORE"
   echo "lhd=$LHD"
   echo "lhd_sha256=$(sha256sum "$LHD" | cut -d' ' -f1)"
   echo "lhd_bytes=$(stat -c%s "$LHD")"
@@ -508,7 +533,7 @@ one() {
   elif [[ "$CORPUS" == "coreet" ]]; then
     COREET_ROOT="$COREET_ROOT" COREET_TECH="$COREET_TECH" COREET_TOP="$m" LEAN_MODE=verified_compiler \
       RUN_LEAN=false RUN_LEC_GATE=false OUT="$work" \
-      emit_guarded timeout "$EMIT_TIMEOUT" bash "$SCRIPT_DIR/run_coreet_module_lean.sh" \
+      emit_guarded timeout "$EMIT_TIMEOUT" bash "$IRS_SCRIPTS/run_coreet_module_lean.sh" \
       > "$work/emit.log" 2>&1
     emit_rc=$?
   else
@@ -655,6 +680,7 @@ one() {
   fi
 
   local sha; sha="$(sha256sum "$cert" | cut -d' ' -f1)"
+  store_cert "$cert" "$sha"
   local tf="$work/run.time"
   # Ordinary stack: deliberately NOT raised.  slotsFrom is tail-recursive now.
   # THE CHILD'S EXIT STATUS, CAPTURED AND REQUIRED.

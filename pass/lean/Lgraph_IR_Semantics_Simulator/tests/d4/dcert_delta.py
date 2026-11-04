@@ -72,7 +72,7 @@ import sys
 from collections import Counter
 
 MAGIC = b"DCERT3\n"
-MAX_OPCODE = 28  # Op_MemWriteBE; `CertIO.opOfCode` returns none above this.
+MAX_OPCODE = 30  # Op_MemToBus; `CertIO.opOfCode` returns none above this.
 
 
 class Refused(Exception):
@@ -207,7 +207,7 @@ SRC_FIELDS = {0: ("input", "nn"), 1: ("const", "ni"), 2: ("flopQ", "nn"),
 # `Int.toNat` for the two Nat-typed ones -- so a negative there is a record
 # that means something different to the reader than to the writer.
 OP_ARG_SIGNED = {0}            # Op_Const c      : Int
-OP_ARG_NAT = {1, 28}           # Op_Sum n, Op_MemWriteBE b : Nat
+OP_ARG_NAT = {1, 28, 29, 30}   # Op_Sum n, Op_MemWriteBE b, Op_MemLoad n, Op_MemToBus n : Nat
 
 
 def read_cert(path: str) -> dict:

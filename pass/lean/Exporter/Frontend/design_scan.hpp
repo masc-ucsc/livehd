@@ -72,11 +72,22 @@ struct DesignNode {
   // chain, stay ONE identity per memory.
   uint32_t             memory_read = 0;
 };
+// `DesignNode::memory_read` of a memory's WHOLE-ARRAY read (cgen's `read_all`,
+// driver pid `Ntype::Memory_readall_pid`): the committed contents as one bus,
+// entry 0 in the low bits. Not a read-port ordinal.
+inline constexpr uint32_t kMemoryReadAll    = 0x40000000;
+// Its driver pid, `Ntype::Memory_readall_pid` (graph/cell.hpp), spelled here so
+// this header stays free of HHDS; design_scan.cpp asserts the two agree.
+inline constexpr uint32_t kMemoryReadAllPid = uint32_t{1} << 20;
 struct Port {
   std::string           name;
   uint32_t              id    = 0;
   uint32_t              width = 0;
   std::optional<PinRef> driver;
+  // An input that is not a port of the RTL (decision #8): the free value an
+  // `ordering="none"` read takes where the design leaves it undefined. The
+  // sidecar marks it `free_value`; a testbench of the RTL has no such port.
+  bool                  free_value = false;
 };
 // An OWNED clock domain. The scan resolves every committing state element to one
 // of these and stores only the resolved result -- no graph handle, no pin, no
@@ -157,6 +168,22 @@ struct Memory {
   bool                     sync = false, is_rom = false;
   std::vector<std::string> rom_contents;
   std::vector<std::string> init_contents;  // a WRITABLE memory's power-on words (DCERT3 `init`)
+  // A WHOLE-ARRAY cell (decision #2; graph/cell.cpp pins 12-14). Its next image
+  // is: `update` (one bus, entry 0 in the low `bits`) when `update_enable` is set
+  // (absent: always), then the port writes over it, then, when `bulk_reset`
+  // (active high) is set, `reset_bus` (absent: 0) -- reset wins, then a port
+  // write, then the bulk update, as cgen and pass/lec define the cell. Its
+  // reads see the committed image (no forwarding when `update` is driven).
+  bool                           whole_array = false;
+  std::optional<PinRef>          update, update_enable, bulk_reset, reset_bus;
+  // `bulk_reset` is ASYNCHRONOUS: while it is asserted the memory reads as reset
+  // and, on a step its clock does not fire, becomes reset (DCERT3 `asyncImg`).
+  bool                           async_reset = false;
+  // ordering="none" (decision #8): `undef_rows[r][w]` -- read r's bits that
+  // write w drives are undefined when w writes r's address this step; read r
+  // then takes those bits from its free input `free_value.at(r)`.
+  std::vector<std::vector<bool>> undef_rows;
+  std::map<size_t, PinRef>       free_value;
   std::vector<MemoryPort>  ports;
   std::vector<size_t>      read_ports, write_ports;
   std::string              raw_name;

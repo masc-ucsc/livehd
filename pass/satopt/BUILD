@@ -5,7 +5,8 @@
 # opt-in and pass.abc's synthesis copy. It calls no ABC: pass/abc registers its
 # bit-level mux-fact prover (satopt_mux.hpp) when it is linked.
 
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("//tools:regression.bzl", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_library")
 load("//tools:copt_default.bzl", "COPTS")
 
 # `satopt_salt.hpp` is excluded from the glob because it is this rule's own

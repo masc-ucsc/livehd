@@ -20,7 +20,7 @@ bool certificate_memory_value(const CertificateIR& c, uint32_t id) {
     return s->kind == SourceKind::MemImage || s->kind == SourceKind::RomConst;
   }
   const auto op = c.nodes.at(c.slot_of.at(id) - c.sources.size()).op.kind;
-  return op == Operation::MemWrite || op == Operation::MemWriteBE;
+  return op == Operation::MemWrite || op == Operation::MemWriteBE || op == Operation::MemLoad;
 }
 namespace {
 std::string cast(const std::string& x, uint32_t w) { return "((bv_zext " + x + ") : BitVec " + std::to_string(w) + ")"; }
@@ -48,8 +48,28 @@ uint32_t address_width(const CertificateIR& c, uint32_t id) {
 }
 std::string reset_predicate(std::string predicate, bool active_low) { return active_low ? "(!" + predicate + ")" : predicate; }
 }  // namespace
-FastExpr lower_fast_expr(const CertificateIR& c, const CertNode& n) {
+bool legacy_sext_natural(const CertificateIR& c, const CertNode& n) {
+  if (n.op.kind != Operation::Sext || n.deps.size() != 2) {
+    return false;
+  }
+  const auto* amount = certificate_source(c, n.deps[1]);
+  const auto  wa     = certificate_width(c, n.deps[0]);
+  return amount && amount->kind == SourceKind::Const
+         && (amount->const_int == std::to_string(std::min(n.width, wa)) || amount->const_int == std::to_string(wa));
+}
+FastExpr lower_fast_expr(const CertificateIR& c, const CertNode& n, bool mux_as_call) {
   const auto               w     = n.width;
+  // A mux: in a `let` chain (`mux_as_call`) a call to `lmux` with a Bool test,
+  // otherwise an inline `if` on the Prop. Thousands of inline ifs in one long
+  // chain of live lets are nested join points in Lean's compiler, which then
+  // takes hours (finding AC); a call is not. `lmux` evaluates both arms, which
+  // costs nothing in a let chain (each arm is a let already computed) but is
+  // exponential where each node is its own function of (i, s) (the bridge
+  // model's `_fv` functions call their operands' functions again), so those
+  // keep the `if`.
+  auto sel = [&](const std::string& test, const std::string& prop, const std::string& a, const std::string& b) {
+    return mux_as_call ? "(lmux (" + test + ") (" + a + ") (" + b + "))" : "(if " + prop + " then " + a + " else " + b + ")";
+  };
   auto                     dep   = [&](size_t i) { return "@" + std::to_string(i) + "@"; };
   auto                     ext   = [&](size_t i, uint32_t width) { return cast(dep(i), width); };
   auto                     width = [&](size_t i) { return certificate_width(c, n.deps.at(i)); };
@@ -84,8 +104,7 @@ FastExpr lower_fast_expr(const CertificateIR& c, const CertNode& n) {
         // gives 0.
         const auto a = "(BitVec.toInt " + dep(0) + ")";
         const auto b = "(BitVec.toInt " + dep(1) + ")";
-        e.text       = "(if " + b + " = 0 then " + lit_zero(w) + " else BitVec.ofInt " + std::to_string(w) + " (trunc_div_int " + a
-                 + " " + b + "))";
+        e.text = sel(b + " == 0", b + " = 0", lit_zero(w), "BitVec.ofInt " + std::to_string(w) + " (trunc_div_int " + a + " " + b + ")");
       }
       break;
     case Operation::And: e.text = fold("&&&", terms, lit_zero(w)); break;
@@ -148,24 +167,29 @@ FastExpr lower_fast_expr(const CertificateIR& c, const CertNode& n) {
       break;
     case Operation::MuxBool:
       if (arity(3)) {
-        e.text = "(if bitvec_nonzero " + dep(0) + " then " + ext(2, w) + " else " + ext(1, w) + ")";
+        e.text = sel("bitvec_nonzero " + dep(0), "bitvec_nonzero " + dep(0), ext(2, w), ext(1, w));
       }
       break;
     case Operation::MuxN:
       if (!n.deps.empty()) {
-        e.text = "(";
-        for (size_t i = 1; i < n.deps.size(); ++i) {
-          e.text += "if BitVec.toNat " + dep(0) + " = " + std::to_string(i - 1) + " then " + ext(i, w) + " else ";
+        if (mux_as_call) {
+          e.text.clear();
+          for (size_t i = 1; i < n.deps.size(); ++i) {
+            e.text += "(lmux (BitVec.toNat " + dep(0) + " == " + std::to_string(i - 1) + ") (" + ext(i, w) + ") ";
+          }
+          e.text += lit_zero(w) + std::string(n.deps.size() - 1, ')');
+        } else {
+          e.text = "(";
+          for (size_t i = 1; i < n.deps.size(); ++i) {
+            e.text += "if BitVec.toNat " + dep(0) + " = " + std::to_string(i - 1) + " then " + ext(i, w) + " else ";
+          }
+          e.text += lit_zero(w) + ")";
         }
-        e.text += lit_zero(w) + ")";
       }
       break;
     case Operation::Sext:
       if (arity(2)) {
-        const auto* amount  = certificate_source(c, n.deps[1]);
-        const auto  natural = std::to_string(std::min(w, width(0)));
-        if (amount && amount->kind == SourceKind::Const
-            && (amount->const_int == natural || amount->const_int == std::to_string(width(0)))) {
+        if (legacy_sext_natural(c, n)) {
           e.text = "((bv_sext " + dep(0) + ") : BitVec " + std::to_string(w) + ")";
         } else {
           e.text = "((bv_sext (BitVec.ofNat (BitVec.toNat " + dep(1) + ") (BitVec.toNat " + dep(0) + "))) : BitVec "
@@ -184,18 +208,28 @@ FastExpr lower_fast_expr(const CertificateIR& c, const CertNode& n) {
       }
       break;
     case Operation::MemRead:
-      e.text = "(if bitvec_nonzero " + dep(2) + " then mem_read " + dep(0) + " " + dep(1) + " else " + lit_zero(w) + ")";
+      e.text = sel("bitvec_nonzero " + dep(2), "bitvec_nonzero " + dep(2), "mem_read " + dep(0) + " " + dep(1), lit_zero(w));
       break;
     case Operation::MemWrite:
     case Operation::MemWriteBE:
       e.type = "(BitVec " + std::to_string(address_width(c, n.deps.at(0))) + " -> BitVec " + std::to_string(w) + ")";
       if (n.op.kind == Operation::MemWrite) {
-        e.text
-            = "(if bitvec_nonzero " + dep(3) + " then mem_write " + dep(0) + " " + dep(1) + " " + dep(2) + " else " + dep(0) + ")";
+        e.text = sel("bitvec_nonzero " + dep(3), "bitvec_nonzero " + dep(3), "mem_write " + dep(0) + " " + dep(1) + " " + dep(2),
+                     dep(0));
       } else {
-        e.text = "(if bitvec_nonzero " + dep(3) + " then mem_write_be " + dep(0) + " " + dep(1) + " " + dep(2) + " " + dep(3)
-                 + " " + std::to_string(n.op.parameter) + " else " + dep(0) + ")";
+        e.text = sel("bitvec_nonzero " + dep(3), "bitvec_nonzero " + dep(3),
+                     "mem_write_be " + dep(0) + " " + dep(1) + " " + dep(2) + " " + dep(3) + " " + std::to_string(n.op.parameter),
+                     dep(0));
       }
+      break;
+    case Operation::MemLoad:
+      // A whole-array load (decision #2; Translation/WholeArray.lean).
+      e.type = "(BitVec " + std::to_string(address_width(c, n.deps.at(0))) + " -> BitVec " + std::to_string(w) + ")";
+      e.text = sel("bitvec_nonzero " + dep(2), "bitvec_nonzero " + dep(2),
+                   "mem_load " + dep(0) + " " + dep(1) + " " + std::to_string(n.op.parameter), dep(0));
+      break;
+    case Operation::MemToBus:
+      e.text = "(mem_to_bus " + dep(0) + " " + std::to_string(n.op.parameter) + " " + std::to_string(w) + ")";
       break;
   }
   return e;
@@ -260,21 +294,26 @@ std::string legacy_fast_ref(const CertificateIR& c, const LegacyNames& n, uint32
   return bridge ? "(" + n.base + "_fv" + std::to_string(id) + " " + n.arguments() + ")" : "n_" + std::to_string(id);
 }
 std::vector<std::optional<uint32_t>> legacy_output_ids(const DesignScan& d, const CertificateIR& c) {
-  std::vector<std::optional<uint32_t>> ids;
-  size_t                               next = 0;
-  for (const auto& p : d.outputs) {
-    ids.push_back(p.driver ? std::optional<uint32_t>(c.outputs.at(next++).id) : std::nullopt);
-  }
-  if (next != c.outputs.size()) {
+  // The certificate carries every output in port order (an undriven one as a
+  // constant 0); the legacy model keeps writing `lit_zero` for an undriven one.
+  if (d.outputs.size() != c.outputs.size()) {
     throw std::invalid_argument("scan/certificate output shape mismatch");
+  }
+  std::vector<std::optional<uint32_t>> ids;
+  for (size_t i = 0; i < d.outputs.size(); ++i) {
+    ids.push_back(d.outputs[i].driver ? std::optional<uint32_t>(c.outputs[i].id) : std::nullopt);
   }
   return ids;
 }
 std::string legacy_memory_next(const MemoryDriver& m, const LegacyNames& n, const std::function<std::string(uint32_t)>& img,
-                               const std::string& held) {
+                               const std::string& stored) {
   if (n.edges.empty()) {
     return img(m.next_img);
   }
+  // What the memory keeps when it does not commit: the stored image, or with
+  // an asynchronous whole-array reset (`asyncImg`) that image with the reset
+  // applied -- DesignSemantics.srcMemHeld.
+  const std::string held = m.async_img ? img(*m.async_img) : stored;
   if (m.commits.empty()) {
     return "if e." + n.edges.at(m.clock) + " then " + img(m.next_img) + " else " + held;
   }
@@ -308,7 +347,7 @@ void emit_legacy_fast_model(const DesignScan& d, const CertificateIR& c, const L
   auto ref  = [&](uint32_t id) { return legacy_fast_ref(c, n, id, bridge); };
   auto lets = [&]() {
     for (const auto& node : c.nodes) {
-      const auto expr = lower_fast_expr(c, node);
+      const auto expr = lower_fast_expr(c, node, /*mux_as_call=*/true);
       os << "  let n_" << node.id << " : " << expr.type << " := " << render_fast_expr(expr, node, ref) << '\n';
     }
   };
@@ -364,6 +403,21 @@ void emit_legacy_fast_model(const DesignScan& d, const CertificateIR& c, const L
     fields.push_back(field);
     const auto next = legacy_memory_next(m, n, ref, "s." + field);
     os << "  let new_" << field << " : (BitVec " << m.addr_w << " -> BitVec " << m.data_w << ") := " << next << '\n';
+  }
+  // A memory nothing reads has no certificate driver (the scan never reaches
+  // its write cone) but still has a state field: it holds, unobservably.
+  // Without this the record literal below missed the field (mem_write_only).
+  {
+    std::set<uint32_t> driven;
+    for (const auto& m : c.memories) {
+      driven.insert(m.origin);
+    }
+    for (const auto& [id, field] : n.memories) {
+      if (!driven.contains(id)) {
+        fields.push_back(field);
+        os << "  let new_" << field << " := s." << field << '\n';
+      }
+    }
   }
   os << "  { ";
   for (size_t i = 0; i < fields.size(); ++i) {

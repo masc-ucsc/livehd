@@ -596,9 +596,13 @@ def evalOpCertFast : LGraphOp → Nat → List CertVal → CertVal
   | LGraphOp.Op_MemWrite, _w, [m, a, d, en] => .mem (cert_mem_write m.asMem a.asBV d.asBV en.asBV)
   | LGraphOp.Op_MemWriteBE byte_w, w, [m, a, d, be] =>
     .mem (cert_mem_write_be w m.asMem a.asBV d.asBV be.asBV byte_w)
+  | LGraphOp.Op_MemLoad n, w, [m, bus, en] => .mem (cert_mem_load w n m.asMem bus.asBV en.asBV)
+  | LGraphOp.Op_MemToBus n, w, [m] => .bv (cert_mem_to_bus w n m.asMem)
   | LGraphOp.Op_MemRead, w, _ => .bv (mk_bv w 0)
   | LGraphOp.Op_MemWrite, _w, _ => .mem (fun _ => mk_bv 0 0)
   | LGraphOp.Op_MemWriteBE _, _w, _ => .mem (fun _ => mk_bv 0 0)
+  | LGraphOp.Op_MemLoad _, _w, _ => .mem (fun _ => mk_bv 0 0)
+  | LGraphOp.Op_MemToBus _, w, _ => .bv (mk_bv w 0)
   | op, w, vs => .bv (eval_op op w (vs.map CertVal.asBV))
 
 @[csimp] theorem eval_op_cert_eq_fast : @eval_op_cert = @evalOpCertFast := by

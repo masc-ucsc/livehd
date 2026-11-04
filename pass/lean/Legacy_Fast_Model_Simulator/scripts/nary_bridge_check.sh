@@ -12,17 +12,18 @@ CASE_DIR="$(mktemp -d "$OUT/fixtures.XXXXXXXX")"
 export TMPDIR="$CASE_DIR/runtime_tmp" TMP="$CASE_DIR/runtime_tmp" TEMP="$CASE_DIR/runtime_tmp"
 mkdir -p "$TMPDIR"
 LHD_LEAN_NARY_BRIDGE_OUTPUT="$CASE_DIR" LHD_LEAN_OR_BRIDGE_OUTPUT="$CASE_DIR" LHD_LEAN_MUL_BRIDGE_OUTPUT="$CASE_DIR" \
+  LHD_LEAN_SEXT_BRIDGE_OUTPUT="$CASE_DIR" \
   "$TEST_BIN" \
-  --gtest_filter=LegacyModel.NaryMixedWidthBridgeFixtures:LegacyModel.LargeOrBridgeFixtures:LegacyModel.MulBridgeFixtures >"$CASE_DIR/generate.log" 2>&1
+  --gtest_filter=LegacyModel.NaryMixedWidthBridgeFixtures:LegacyModel.LargeOrBridgeFixtures:LegacyModel.MulBridgeFixtures:LegacyModel.SextBridgeFixtures >"$CASE_DIR/generate.log" 2>&1
 fixtures=("$CASE_DIR/"*_Lgraph.lean)
-if [[ "${#fixtures[@]}" != 17 ]]; then
-  echo "FAIL: expected 17 fresh fold fixtures; see $CASE_DIR/generate.log" >&2
+if [[ "${#fixtures[@]}" != 22 ]]; then
+  echo "FAIL: expected 22 fresh fold fixtures; see $CASE_DIR/generate.log" >&2
   exit 1
 fi
 cd "$ROOT/formal/lean"
 LEAN_NUM_THREADS="${LEAN_NUM_THREADS:-8}" "$LAKE" build \
   LeanSemanticPrimitives.Translation.NaryBridge LeanSemanticPrimitives.Translation.OrBridge \
-  LeanSemanticPrimitives.Translation.MulBridge \
+  LeanSemanticPrimitives.Translation.MulBridge LeanSemanticPrimitives.Translation.SextBridge \
   LeanSemanticPrimitives.Translation.LegacyCertWF \
   >"$CASE_DIR/library.log" 2>&1
 for fixture in "${fixtures[@]}"; do
@@ -44,5 +45,5 @@ for fixture in "${fixtures[@]}"; do
   done
   echo "PASS: $base (full WF and all-input bridge)"
 done
-echo "All 17 fold fixtures passed; logs and time/RSS: $CASE_DIR"
+echo "All 22 fold fixtures passed; logs and time/RSS: $CASE_DIR"
 echo "WF/graph checks use native_decide; the general fold lemmas use no additional axioms."

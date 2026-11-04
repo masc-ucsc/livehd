@@ -28,11 +28,12 @@
 #include "emit_dcert.hpp"
 
 #include <sstream>
-#include <streambuf>
 #include <stdexcept>
+#include <streambuf>
 
 #include "emit_design_cert.hpp"
 #include "gtest/gtest.h"
+#include "lean_format.hpp"
 
 namespace lean_export {
 namespace {
@@ -326,7 +327,7 @@ TEST(DcertParity, IndependentReaderAgreesFieldByField) {
     EXPECT_EQ(r.count(), c.slot_of.at(m.next_img));
     EXPECT_EQ(r.count(), m.clock);
     // DCERT3: the power-on words, the commit table (mask, image slot), then
-    // the reserved async-reset image, written empty.
+    // the async-reset image (decision #2): hasAsync, then its slot (0 if none).
     ASSERT_EQ(r.count(), m.init.size());
     for (const auto& v : m.init) {
       EXPECT_EQ(r.number(), canonical_decimal(v));
@@ -336,8 +337,8 @@ TEST(DcertParity, IndependentReaderAgreesFieldByField) {
       EXPECT_EQ(r.count(), mask);
       EXPECT_EQ(r.count(), c.slot_of.at(img));
     }
-    EXPECT_EQ(r.count(), 0u);  // hasAsync
-    EXPECT_EQ(r.count(), 0u);  // asyncImg
+    EXPECT_EQ(r.count(), m.async_img ? 1u : 0u);                    // hasAsync
+    EXPECT_EQ(r.count(), m.async_img ? c.slot_of.at(*m.async_img) : 0u);  // asyncImg
   }
 
   ASSERT_EQ(r.count(), c.clocks.size());
@@ -403,6 +404,39 @@ TEST(DcertParity, DecimalsAreCanonicalisedNotGuessed) {
   EXPECT_THROW(canonical_decimal("12a"), std::invalid_argument);
   EXPECT_THROW(canonical_decimal("0x10"), std::invalid_argument);
   EXPECT_THROW(canonical_decimal(" 1"), std::invalid_argument);
+}
+
+// The whole-array operators (decision #2) take codes 29 and 30, their entry
+// count in the payload slot -- `Compiler.CertIO.opCode`'s numbering -- and the
+// Lean literal spells the same constructor.
+TEST(DcertParity, WholeArrayOperatorsCarryTheirEntryCount) {
+  EXPECT_EQ(dcert_opcode({Operation::MemLoad, 16, {}}), 29u);
+  EXPECT_EQ(dcert_oparg({Operation::MemLoad, 16, {}}), "16");
+  EXPECT_EQ(dcert_opcode({Operation::MemToBus, 8, {}}), 30u);
+  EXPECT_EQ(dcert_oparg({Operation::MemToBus, 8, {}}), "8");
+  EXPECT_EQ(format_op({Operation::MemLoad, 16, {}}), "LGraphOp.Op_MemLoad 16");
+  EXPECT_EQ(format_op({Operation::MemToBus, 8, {}}), "LGraphOp.Op_MemToBus 8");
+}
+
+// An ASYNCHRONOUS whole-array reset (decision #2): the memory record ends
+// `1 <slot>` -- hasAsync, then the slot of the image with the reset applied --
+// and the Lean literal spells `asyncImg := some <slot>`. Without one it ends
+// `0 0` and the literal has no `asyncImg`.
+TEST(DcertParity, AsyncResetImageIsCarried) {
+  CertificateIR c         = full_fixture();
+  c.memories[0].async_img = 201;  // the MemWriteBE node, slot 8
+  EXPECT_NE(render_dcert(c).find("\n3 16 8 1 3 5 0 65535 2 2 7 4 9 1 8\n"), std::string::npos);
+  EXPECT_NE(render_dcert(full_fixture()).find("\n3 16 8 1 3 5 0 65535 2 2 7 4 9 0 0\n"), std::string::npos);
+  std::ostringstream literal;
+  emit_design_cert("fixture", c, literal);
+  EXPECT_NE(literal.str().find("commits := #[{ mask := 2, nextImg := 7 }, { mask := 4, nextImg := 9 }], "
+                               "asyncImg := some 8 }"),
+            std::string::npos);
+  std::ostringstream plain;
+  emit_design_cert("fixture", full_fixture(), plain);
+  EXPECT_EQ(plain.str().find("asyncImg"), std::string::npos);
+  c.memories[0].async_img = 9999;  // never declared
+  EXPECT_THROW(render_dcert(c), std::invalid_argument);
 }
 
 TEST(DcertParity, UnresolvableIdIsRefused) {

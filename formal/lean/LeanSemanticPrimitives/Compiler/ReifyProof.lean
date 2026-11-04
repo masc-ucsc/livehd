@@ -71,6 +71,7 @@ emitting a weaker theorem.
 import LeanSemanticPrimitives.Compiler.CompileDesign
 import LeanSemanticPrimitives.Compiler.ReifyGen
 import LeanSemanticPrimitives.Compiler.Reify
+import LeanSemanticPrimitives.Compiler.SeqCompile
 
 open Lean Elab Command Meta
 
@@ -117,6 +118,8 @@ def exprRefsTyped : ResidualExpr → Array (ResidualRef × Bool)
   | .rmemRead _ m a e => #[(m, true), (a, false), (e, false)]
   | .rmemWrite m a d e => #[(m, true), (a, false), (d, false), (e, false)]
   | .rmemWriteBE _ _ m a d be => #[(m, true), (a, false), (d, false), (be, false)]
+  | .rmemLoad _ _ m b e => #[(m, true), (b, false), (e, false)]
+  | .rmemToBus _ _ m => #[(m, true)]
 
 /-- Slots read by something OTHER than a binding: the outputs, the flop update
 fields and the memory next-images (a commit table's images included).
@@ -132,7 +135,8 @@ def terminalRefs (R : ResidualProgram) : Array (ResidualRef × Bool) :=
             ++ (match f.enable with | some e => #[(e, false)] | none => #[])
             ++ (match f.resetPin with | some r => #[(r, false)] | none => #[])))
     ++ (R.memoryUpdates.flatMap (fun m =>
-          #[(m.nextImg, true)] ++ m.commits.map (fun c => (c.nextImg, true))))
+          #[(m.nextImg, true)] ++ m.commits.map (fun c => (c.nextImg, true))
+            ++ (match m.asyncImg with | some a => #[(a, true)] | none => #[])))
 
 /-- `liveAfter R` at index `k` lists the PRODUCED slots that must still be
 readable once step `k` has run: those a later binding reads, plus those any
@@ -194,6 +198,10 @@ def qExpr : ResidualExpr → MetaM Term
   | .rmemWriteBE w bw m a d be => do
       `(Compiler.ResidualExpr.rmemWriteBE $(qNat w) $(qNat bw) $(qNat m) $(qNat a)
          $(qNat d) $(qNat be))
+  | .rmemLoad w n m b e => do
+      `(Compiler.ResidualExpr.rmemLoad $(qNat w) $(qNat n) $(qNat m) $(qNat b) $(qNat e))
+  | .rmemToBus w n m => do
+      `(Compiler.ResidualExpr.rmemToBus $(qNat w) $(qNat n) $(qNat m))
 
 private def qBinding (b : ResidualBinding) : MetaM Term := do
   `({ ty := $(← qValueType b.ty), rhs := $(← qExpr b.rhs) })
@@ -283,16 +291,19 @@ def elabProveReified : CommandElab := fun stx => do
     let corNm     := mkIdent (nm ++ `correct)
     elabCommand (← `(command|
       def $rNm : Compiler.ResidualProgram :=
-        match Compiler.compileDesign $d with
+        match Compiler.Seq.compileDesignL $d with
         | .ok R => R
         | .error _ => default))
     -- `rfl`, NOT `native_decide`: see the module header.  This is what keeps
     -- `ofReduceBool` out of every theorem below.
     elabCommand (← `(command|
-      theorem $okNm : Compiler.compilesOk $d = true := by rfl))
+      theorem $okNm : Compiler.compilesOk $d = true := by
+        -- two SEQUENTIAL walks of the node list, kernel only: the index-based
+        -- `compilesOk` is O(N^2) in the kernel (`Seq.compilesOk_eq_okL`)
+        rw [Compiler.Seq.compilesOk_eq_okL]; decide +kernel))
     elabCommand (← `(command|
       theorem $hRNm : Compiler.compileDesign $d = .ok $rNm :=
-        Compiler.compileDesign_ok_witness $d $okNm))
+        Compiler.Seq.compileDesignL_ok_witness $d ((Compiler.Seq.compilesOk_eq_okL $d).symm.trans $okNm)))
     -- Projections only.  Evaluating the maps is left to `simp`, which can do it
     -- on a literal array; the kernel cannot, because `Array.map` is well-founded.
     elabCommand (← `(command|
@@ -336,7 +347,7 @@ def elabProveReified : CommandElab := fun stx => do
              [$f:ident, $d:ident, Compiler.runBindings, Compiler.denoteExpr,
               Compiler.refBV, Compiler.refBVs, Compiler.refMem, Compiler.denoteRef,
               Compiler.sourceEnvArr, Compiler.compileOutput, Compiler.compileFlop,
-              Compiler.compileMemory, $memA:ident, $memB:ident, Compiler.flopNext_eq,
+              Compiler.compileMemory, $memA:ident, $memB:ident, Compiler.memHeld, Compiler.flopNext_eq,
               Compiler.flopNextV_resize_din, CertVal.asBV, CertVal.asMem]))
     elabCommand (← `(command|
       theorem $corNm : ∀ e i st, $f e i st = Compiler.interpretDesign $d e i st := by
@@ -443,11 +454,14 @@ def emitDesignFacts (d : Ident) (base : Name) : CommandElabM Unit := do
   let partsNm := mkIdent (base ++ `parts)
   elabCommand (← `(command|
     def $rNm : Compiler.ResidualProgram :=
-      match Compiler.compileDesign $d with | .ok R => R | .error _ => default))
-  elabCommand (← `(command| theorem $okNm : Compiler.compilesOk $d = true := by rfl))
+      match Compiler.Seq.compileDesignL $d with | .ok R => R | .error _ => default))
+  elabCommand (← `(command| theorem $okNm : Compiler.compilesOk $d = true := by
+        -- two SEQUENTIAL walks of the node list, kernel only: the index-based
+        -- `compilesOk` is O(N^2) in the kernel (`Seq.compilesOk_eq_okL`)
+        rw [Compiler.Seq.compilesOk_eq_okL]; decide +kernel))
   elabCommand (← `(command|
     theorem $hRNm : Compiler.compileDesign $d = .ok $rNm :=
-      Compiler.compileDesign_ok_witness $d $okNm))
+      Compiler.Seq.compileDesignL_ok_witness $d ((Compiler.Seq.compilesOk_eq_okL $d).symm.trans $okNm)))
   -- The four projections come from the GENERIC `compileDesign_parts`,
   -- instantiated at `hR`, rather than from four `rfl`s. Each `rfl` made the
   -- KERNEL evaluate `compileDesign D` and force the whole residual, once per
@@ -616,7 +630,13 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
         elabCommand (← `(command|
           theorem $(eqNmJ j) ($eArg : Compiler.SlotEnv) :
               $(chkNm j) $eArg = Compiler.runBindings $(segNm j) $eArg := by
-            simp only [$(chkNm j):ident, $(segNm j):ident, Compiler.runBindings,
+            -- `delta`, NOT `simp only [chunk_j]`: naming the chunk in `simp`
+            -- makes Lean generate `chunk_j.eq_1`; on the pinned Lean 4.36 that runs
+            -- `inferDefEqAttr`, a Meta `isDefEq` of the chunk against its own
+            -- `have` chain that costs 2x per binding (measured: 22 bindings,
+            -- 236 s). `delta` unfolds without an equation lemma.
+            delta $(chkNm j):ident
+            simp only [$(segNm j):ident, Compiler.runBindings,
                        Compiler.denoteExpr, Compiler.refBVs,
                        List.map_cons, List.map_nil]))
         markPhase s!"chunk_eq {j}"
@@ -662,11 +682,18 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
           | .mem a w => `(Compiler.ValueType.mem $(quote a) $(quote w)))
         let rhsQ ← liftTermElabM (ReifyProof.qExpr b.rhs)
         rhs ← `(($rhs).push { ty := $tyQ, rhs := $rhsQ })
+      -- Through the SEQUENTIAL walk of the chunk's slice of the node list
+      -- (`Seq.compileFrom_eq_slice`), not `compileFrom` directly: that reads
+      -- `D.nodes[start]?`, which costs the kernel O(start) per node, so the
+      -- chunk facts together cost O(N^2) (picorv32: 364-450 s).
       elabCommand (← `(command|
         theorem $(cfNm j) ($accId : Array Compiler.ResidualBinding) :
             Compiler.compileFrom $d $(quote lo') $(quote (hi' - lo')) $accId
               = .ok $rhs := by
-          rfl))
+          rw [Compiler.Seq.compileFrom_eq_slice $d $(quote lo') $(quote (hi' - lo')) $accId
+                (by rw [$covNm:ident]; all_goals decide)]
+          -- `all_goals`: harmless if the `rfl` that `rw` tries already closed it.
+          all_goals rfl))
       markPhase s!"compile_chunk {j}"
     -- NAMED PREFIXES. Chaining the chunks directly made `compileGraph_eq`
     -- rewrite 38 times through an ever-growing push chain, so its proof term
@@ -722,9 +749,39 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
         rw [$cgNm:ident] at h
         exact (Except.ok.inj h).symm))
     markPhase "R_bindings_eq"
+    -- One step per chunk, by REWRITING (`Array.toList_push`), never by
+    -- evaluation: `rfl` on the whole `pre{nseg}.toList` rebuilt every push
+    -- chain in the kernel, O(N^2), and ran out of 20 GB on picorv32 (B12).
+    let preLNm : Nat → Ident := fun j => mkIdent (base ++ Name.mkSimple s!"preL{j}")
+    for j in [0 : nseg] do
+      -- An EMPTY chunk (a design with no bindings still has one: `nseg` = 1)
+      -- leaves `pre0.toList = pre0.toList ++ []`, which no push lemma touches,
+      -- so `simp` failed with "no progress" (all 7 zero-node Vortex blocks).
+      if bnd (j+1) == bnd j then
+        elabCommand (← `(command|
+          theorem $(preLNm j) : ($(preNm (j+1))).toList = ($(preNm j)).toList ++ $(segNm j) := by
+            delta $(preNm (j+1)):ident $(segNm j):ident
+            simp only [List.append_nil]))
+      else
+        elabCommand (← `(command|
+          theorem $(preLNm j) : ($(preNm (j+1))).toList = ($(preNm j)).toList ++ $(segNm j) := by
+            delta $(preNm (j+1)):ident $(segNm j):ident
+            simp only [Array.toList_push, List.append_assoc, List.cons_append, List.nil_append]))
+    let mut srules : Array (TSyntax `Lean.Parser.Tactic.rwRule) :=
+      #[← `(Lean.Parser.Tactic.rwRule| $rbNm:ident)]
+    for j' in [0 : nseg] do
+      let j := nseg - 1 - j'
+      srules := srules.push (← `(Lean.Parser.Tactic.rwRule| $(preLNm j):ident))
     elabCommand (← `(command|
       theorem $segsEq : ($rNm).bindings.toList = $appTerm := by
-        rw [$rbNm:ident]; rfl))
+        rw [$srules,*]
+        all_goals rw [show ($(preNm 0)).toList = [] from rfl, List.nil_append]
+        -- Re-associating a left-nested append of one segment per chunk takes
+        -- about chunks^2 / 2 rewrites: past roughly 150 chunks that is over
+        -- simp's default 100,000 steps (int_execute_stage, 282 chunks: this
+        -- theorem was the only one left with sorryAx). The explicit budget of
+        -- `prove_reified` (see there).
+        all_goals simp (maxSteps := 4000000) only [List.append_assoc]))
     markPhase "segs_eq"
     -- 3. compose the chunks into ONE environment equality
     let srcEnv ← liftTermElabM `(Compiler.sourceEnvArr ($d).sources $iId $stId)
@@ -794,6 +851,11 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
         | false, false =>
           `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
               clock := $(quote mu.clock), init := #[$ws,*], commits := #[$cs,*] })
+      -- `asyncImg` (decision #2), only when present
+      let ms ← (R.memoryUpdates.zip ms).mapM fun (mu, t) =>
+        match mu.asyncImg with
+        | none   => pure t
+        | some a => `({ $t with asyncImg := some $(quote a) })
       `(#[$ms,*])
     elabCommand (← `(command| theorem $dmNm : ($d).memories = $memsLit := rfl))
     let doNm := mkIdent (base ++ `D_outputs)
@@ -808,11 +870,21 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
           ($stId : Compiler.RuntimeState),
           $f $eId $iId $stId = Compiler.compileAndRun $d $eId $iId $stId := by
         intro $eId:ident $iId:ident $stId:ident
-        simp only [Compiler.compileAndRun, $hRNm:ident, Compiler.denoteResidual, $sNm:ident]
+        -- `compileAndRun_of_ok`, NOT `simp only [compileAndRun, hR]`: unfolding
+        -- left `match compileDesign D` for the kernel to reduce, which runs the
+        -- index-based compiler over the whole design, O(N^2) -- the step that
+        -- took picorv32 past 20 GB.
+        rw [Compiler.Seq.compileAndRun_of_ok $hRNm:ident]
+        simp only [Compiler.denoteResidual, $sNm:ident]
         rw [← $envEq:ident $iId $stId]
         simp only [$oProjNm:ident, $fProjNm:ident, $mProjNm:ident]
-        simp [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
-              Compiler.compileMemory, $memA:ident, $memB:ident, Compiler.flopNext_eq,
+        -- The same explicit, finite budget as `prove_reified` (see there).
+        -- Without it this `simp` ran at the default 100,000 steps, and a design
+        -- with a few hundred flops and memories stopped on that limit with
+        -- every chunk proved (ifetch_tag_stage: 359 flops, 9 memories).
+        simp (maxSteps := 4000000)
+             [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
+              Compiler.compileMemory, $memA:ident, $memB:ident, Compiler.memHeld, Compiler.flopNext_eq,
               $dfNm:ident, $dmNm:ident, $doNm:ident]))
     markPhase "eq_compileAndRun"
     let corNm := mkIdent (base ++ `correct)
@@ -893,7 +965,9 @@ def elabProveModelFactsSlice : CommandElab := fun stx => do
       elabCommand (← `(command|
         theorem $(eqNmJ j) ($eArg : Compiler.SlotEnv) :
             $(chkNm j) $eArg = Compiler.runBindings $(segNm j) $eArg := by
-          simp only [$(chkNm j):ident, $(segNm j):ident, Compiler.runBindings,
+          -- `delta`, not `simp only [chunk_j]`: see `prove_reified_chunked`.
+          delta $(chkNm j):ident
+          simp only [$(segNm j):ident, Compiler.runBindings,
                      Compiler.denoteExpr, Compiler.refBVs,
                      List.map_cons, List.map_nil]))
     logInfo m!"prove_model_facts_slice: {f} model facts [{lo'}, {hi'}) of {nseg} emitted"
@@ -975,13 +1049,16 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
     let rNm := mkIdent (base ++ `R)
     elabCommand (← `(command|
       def $rNm : Compiler.ResidualProgram :=
-        match Compiler.compileDesign $d with | .ok R => R | .error _ => default))
+        match Compiler.Seq.compileDesignL $d with | .ok R => R | .error _ => default))
     let okNm := mkIdent (base ++ `compilesOk)
-    elabCommand (← `(command| theorem $okNm : Compiler.compilesOk $d = true := by rfl))
+    elabCommand (← `(command| theorem $okNm : Compiler.compilesOk $d = true := by
+        -- two SEQUENTIAL walks of the node list, kernel only: the index-based
+        -- `compilesOk` is O(N^2) in the kernel (`Seq.compilesOk_eq_okL`)
+        rw [Compiler.Seq.compilesOk_eq_okL]; decide +kernel))
     let hRNm := mkIdent (base ++ `hR)
     elabCommand (← `(command|
       theorem $hRNm : Compiler.compileDesign $d = .ok $rNm :=
-        Compiler.compileDesign_ok_witness $d $okNm))
+        Compiler.Seq.compileDesignL_ok_witness $d ((Compiler.Seq.compilesOk_eq_okL $d).symm.trans $okNm)))
     let bindsLit ← liftTermElabM (ReifyProof.qBindings R.bindings)
     let bindsList ← liftTermElabM (ReifyProof.qBindingsList R.bindings)
     let bNm := mkIdent (base ++ `R_bindings)
@@ -1365,6 +1442,11 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
         | false, false =>
           `({ aw := $(quote mu.aw), dw := $(quote mu.dw), nextImg := $(quote mu.nextImg),
               clock := $(quote mu.clock), init := #[$ws,*], commits := #[$cs,*] })
+      -- `asyncImg` (decision #2), only when present
+      let ms ← (R.memoryUpdates.zip ms).mapM fun (mu, t) =>
+        match mu.asyncImg with
+        | none   => pure t
+        | some a => `({ $t with asyncImg := some $(quote a) })
       `(#[$ms,*])
     elabCommand (← `(command| theorem $dmNm : ($d).memories = $memsLit := rfl))
     let doNm := mkIdent (base ++ `D_outputs)
@@ -1388,8 +1470,10 @@ def elabProveReifiedIncr : CommandElab := fun stx => do
                    $sNm:ident, $btlNm:ident]
         rw [$hEq:ident]
         simp only [$oProjNm:ident, $fProjNm:ident, $mProjNm:ident]
-        simp [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
-              Compiler.compileMemory, $memA:ident, $memB:ident, Compiler.flopNext_eq,
+        -- The same explicit budget as `prove_reified_chunked`'s final `simp`.
+        simp (maxSteps := 4000000)
+             [$f:ident, Compiler.compileOutput, Compiler.compileFlop,
+              Compiler.compileMemory, $memA:ident, $memB:ident, Compiler.memHeld, Compiler.flopNext_eq,
               $dfNm:ident, $dmNm:ident, $doNm:ident, $hSimp,*]))
     let corNm := mkIdent (base ++ `correct)
     elabCommand (← `(command|

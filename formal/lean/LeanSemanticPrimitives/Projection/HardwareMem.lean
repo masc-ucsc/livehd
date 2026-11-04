@@ -19,9 +19,11 @@ function id is reused.
       zero default, so the word count is `contents.size` and the contents are
       preserved -- matching the reference bound, which is NOT `2 ^ aw`.
 * `applyOpM` dispatches the real opcodes 26 (`Op_MemRead`), 27 (`Op_MemWrite`)
-  and 28 (`Op_MemWriteBE`) to the corresponding object primitives, reading operands in
-  certificate dependency order and taking the node width and the payload
-  (`byte_w`) from the certificate; every other opcode DELEGATES to the original
+  and 28 (`Op_MemWriteBE`) to the corresponding object primitives, and 29
+  (`Op_MemLoad n`) and 30 (`Op_MemToBus n`, decision #2) to the object
+  functions `memLoadO` / `memToBusO`, reading operands in certificate dependency
+  order and taking the node width and the payload (`byte_w`, the entry count
+  `n`) from the certificate; every other opcode DELEGATES to the original
   `applyOp`.
 
 ## What is STAGED and not claimed
@@ -112,7 +114,17 @@ private def fApplyOpM : SFun :=
             , C "slot" [R "env", R "n", P .hd [P .tl [P .tl [R "deps"]]]]
             , C "slot" [R "env", R "n", P .hd [P .tl [P .tl [P .tl [R "deps"]]]]]
             , R "pay" ])
-          (C "applyOp" [R "op", R "w", R "deps", R "env", R "n"]))))] }
+        (.ite (P .eqI [R "code", int 29])
+          -- Op_MemLoad n [mem, bus, enable] -> mem (decision #2)
+          (C "memLoadO"
+            [ R "w", R "pay"
+            , C "slot" [R "env", R "n", P .hd [R "deps"]]
+            , C "slot" [R "env", R "n", P .hd [P .tl [R "deps"]]]
+            , C "slot" [R "env", R "n", P .hd [P .tl [P .tl [R "deps"]]]] ])
+        (.ite (P .eqI [R "code", int 30])
+          -- Op_MemToBus n [mem] -> bv (decision #2)
+          (C "memToBusO" [R "w", R "pay", C "slot" [R "env", R "n", P .hd [R "deps"]]])
+          (C "applyOp" [R "op", R "w", R "deps", R "env", R "n"]))))))] }
 
 /-! ## The whole-cycle caller layer
 
@@ -226,9 +238,9 @@ def fFiredIsO : SFun :=
                       (bool false)))
               (bool true) }
 
-/-- `pickO(edges, ck, cms, rest, sp, env, n, ms, idx)` -- the image of the first
-entry of `rest` whose clock set fired exactly (`find? firedIs`); the held image
-when none.
+/-- `pickO(edges, ck, cms, rest, sp, env, n, held)` -- the image of the first
+entry of `rest` whose clock set fired exactly (`find? firedIs`); `held` when
+none.
 
 It returns the IMAGE, reading `slot` at each entry's own (static) index. Returning
 the chosen INDEX instead would make it dynamic (it depends on the edges), and
@@ -236,20 +248,93 @@ binding-time analysis gives `slot` one signature for every call site, so every
 `slot` read in the program would turn dynamic and the specializer could no
 longer unfold it. -/
 def fPickO : SFun :=
-  { name := "pickO", params := ["edges", "ck", "cms", "rest", "sp", "env", "n", "ms", "idx"]
+  { name := "pickO", params := ["edges", "ck", "cms", "rest", "sp", "env", "n", "held"]
   , inline := true
-  , body := .ite (P .isNil [R "rest"]) (C "memAt" [R "ms", R "idx"])
+  , body := .ite (P .isNil [R "rest"]) (R "held")
               (.switch (P .hd [R "rest"])
                 [(tagCommit, ["mask", "nxt"],
                   .ite (C "firedIsO" [R "edges", R "ck", R "cms", R "mask", int 0, R "sp"])
                        (C "slot" [R "env", R "n", R "nxt"])
                        (C "pickO" [R "edges", R "ck", R "cms", P .tl [R "rest"], R "sp",
-                                   R "env", R "n", R "ms", R "idx"]))]) }
+                                   R "env", R "n", R "held"]))]) }
+
+/-! ### Whole-array operators (decision #2)
+
+`Op_MemLoad n` loads entries `0 .. n-1` of an image from one bus and
+`Op_MemToBus n` packs them into one bus (`cert_mem_load`, `cert_mem_to_bus`).
+Each recursion is bounded by the STATIC entry count `n` (the index is tested
+against `n` before the dynamic word list is), so the specializer unfolds it `n`
+times and no further. -/
+
+/-- `pow2O(k)` -- `2 ^ k` for `k ≥ 0`. -/
+def fPow2O : SFun :=
+  { name := "pow2O", params := ["k"], inline := true
+  , body := .ite (P .leI [R "k", int 0]) (int 1)
+              (P .mulI [int 2, C "pow2O" [P .subI [R "k", int 1]]]) }
+
+/-- `loadW(ws, rest, i, n, dw, p)` -- the loaded word list: from index `i`, while
+`i < n`, word `i` becomes the low `dw` bits of `rest` (the bus shifted right by
+`i * dw`, `p = 2 ^ dw`); from `n` on the words are unchanged. -/
+def fLoadW : SFun :=
+  { name := "loadW", params := ["ws", "rest", "i", "n", "dw", "p"], inline := true
+  , body := .ite (P .ltI [R "i", R "n"])
+              (.ite (P .isNil [R "ws"]) nil
+                 (cons (P .bvMk [R "dw", R "rest"])
+                       (C "loadW" [P .tl [R "ws"], P .divI [R "rest", R "p"],
+                                   P .addI [R "i", int 1], R "n", R "dw", R "p"])))
+              (R "ws") }
+
+/-- `memLoadO(w, n, img, bus, en)` -- `Op_MemLoad n`: when the enable is nonzero,
+the image with entries `0 .. n-1` loaded from the bus (`w`-bit entries); else
+the image itself. -/
+def fMemLoadO : SFun :=
+  { name := "memLoadO", params := ["w", "n", "img", "bus", "en"], inline := true
+  , body := .ite (C "nz" [R "en"])
+              (.switch (R "img")
+                [(memImgTag, ["ws", "df"],
+                  .mk memImgTag
+                    [C "loadW" [R "ws", P .bvUint [R "bus"], int 0, R "n", R "w",
+                                C "pow2O" [R "w"]],
+                     R "df"])])
+              (R "img") }
+
+/-- `packW(ws, df, i, n, p)` -- entries `i .. n-1` (a missing word reads `df`),
+each cut by `p = 2 ^ d`, packed with entry `i` lowest (Horner form). -/
+def fPackW : SFun :=
+  { name := "packW", params := ["ws", "df", "i", "n", "p"], inline := true
+  , body := .ite (P .ltI [R "i", R "n"])
+              (.ite (P .isNil [R "ws"])
+                 (P .addI [P .modI [P .bvUint [R "df"], R "p"],
+                           P .mulI [R "p", C "packW" [R "ws", R "df", P .addI [R "i", int 1],
+                                                       R "n", R "p"]]])
+                 (P .addI [P .modI [P .bvUint [P .hd [R "ws"]], R "p"],
+                           P .mulI [R "p", C "packW" [P .tl [R "ws"], R "df",
+                                                       P .addI [R "i", int 1], R "n", R "p"]]]))
+              (int 0) }
+
+/-- `memToBusO(w, n, img)` -- `Op_MemToBus n`: entries `0 .. n-1`, each `w / n`
+bits, as one `w`-bit bus, entry 0 lowest. -/
+def fMemToBusO : SFun :=
+  { name := "memToBusO", params := ["w", "n", "img"], inline := true
+  , body := .switch (R "img")
+              [(memImgTag, ["ws", "df"],
+                P .bvMk [R "w", C "packW" [R "ws", R "df", int 0, R "n",
+                                           C "pow2O" [P .divI [R "w", R "n"]]]])] }
+
+/-- `heldO(aimg, env, n, ms, idx)` -- what a memory keeps on a step it does not
+commit (`srcMemHeld`): the stored image, or with an ASYNCHRONOUS whole-array
+reset (`asyncImg`, decision #2) the image at that slot. `aimg` is the encoded
+`Option Nat` -- static, so the test unfolds. -/
+def fHeldO : SFun :=
+  { name := "heldO", params := ["aimg", "env", "n", "ms", "idx"], inline := true
+  , body := .ite (P .isNil [R "aimg"]) (C "memAt" [R "ms", R "idx"])
+              (C "slot" [R "env", R "n", P .hd [R "aimg"]]) }
 
 /-- One memory's next image (`srcMemNext`). With no commit table: `m.nextImg`'s
-slot when its own clock fires, the exact prior image when quiet. With one: that
-slot when ALL its clocks fired, the entry naming exactly the clocks that fired,
-else the prior image. -/
+slot when its own clock fires, the held image (`heldO`: the exact prior image,
+or an asynchronous reset's image) when quiet. With one: that slot when ALL its
+clocks fired, the entry naming exactly the clocks that fired, else the held
+image. -/
 private def fMemNext : SFun :=
   { name := "memNext", params := ["m", "edges", "env", "n", "ms", "idx"], inline := true
   , body := .switch (R "m")
@@ -257,12 +342,13 @@ private def fMemNext : SFun :=
                 .ite (P .isNil [R "cms"])
                   (.ite (C "firesAt" [R "edges", R "ck"])
                         (C "slot" [R "env", R "n", R "nxt"])
-                        (C "memAt" [R "ms", R "idx"]))
+                        (C "heldO" [R "aimg", R "env", R "n", R "ms", R "idx"]))
                   (lets [("sp", C "spanO" [P .addI [R "ck", int 1], R "cms"])]
                     (.ite (C "allFireO" [R "edges", R "ck", R "cms", int 0, R "sp"])
                           (C "slot" [R "env", R "n", R "nxt"])
                           (C "pickO" [R "edges", R "ck", R "cms", R "cms", R "sp",
-                                      R "env", R "n", R "ms", R "idx"]))))] }
+                                      R "env", R "n",
+                                      C "heldO" [R "aimg", R "env", R "n", R "ms", R "idx"]]))))] }
 
 private def fMemNexts : SFun :=
   { name := "memNexts", params := ["mems", "edges", "env", "n", "ms", "idx"], inline := true
@@ -303,7 +389,11 @@ def hwMemS : SProgram :=
   { funs := hwS.funs ++ [fMemAt, fRomWords, fSrcValM, fApplyOpM,
                          fMkSourcesM, fEvalNodeM, fEvalNodesM, fMemNext, fMemNexts, fMainM,
                          -- the commit table (decision #9), after `mainM` so no id moves
-                         fBitAt, fLog2O, fSpanO, fAnyBit, fInDomO, fAllFireO, fFiredIsO, fPickO]
+                         fBitAt, fLog2O, fSpanO, fAnyBit, fInDomO, fAllFireO, fFiredIsO, fPickO,
+                         -- the whole-array operators (decision #2), after them
+                         fPow2O, fLoadW, fMemLoadO, fPackW, fMemToBusO,
+                         -- the asynchronous reset's held image (decision #2)
+                         fHeldO]
   , entry := "mainM" }
 
 def hwMemResolved : Except String (Program × List Bool) := resolveProgram hwMemS

@@ -27,6 +27,9 @@ MODULES=(
   # through Projection/CertLoadAny: DCERT1 exactly as before (CertIOV1),
   # DCERT2 via readCertChecked. Dependency ORDER and the invalidation rule
   # below are unchanged; nothing is deleted.
+  # MemDomains (decision #9: which clock domains of a memory fire) before the
+  # step semantics that reads it.
+  Compiler/MemDomains
   Compiler/DesignSemantics Compiler/CertIOV1 Compiler/CertIOCodec Compiler/CertIORoute
   Compiler/ResetPolarity Compiler/RunAdmission
   Projection/ObjectLanguage Projection/ObjectLanguageSemantics
@@ -46,8 +49,11 @@ MODULES=(
   Projection/AxiomGate
   Projection/MemImage Projection/HardwareMem Projection/HardwareMemSource
   Projection/HardwareMemOp Projection/HardwareMemSlots Compiler/DirectCheck
+  # the whole-array load and read (decision #2), before the nodes that admit them
+  Projection/HardwareMemLoad
   Projection/HardwareMemTraversal Projection/HardwareMemShapes
-  Projection/HardwareMemNodes Projection/HardwareMemFold Projection/HardwareMemCommit
+  # the commit table's evaluation lemmas (decision #9), before the commit proofs
+  Projection/HardwareMemNodes Projection/HardwareMemFold Projection/HardwareMemTable Projection/HardwareMemCommit
   Projection/HardwareMemOutFlop Projection/HardwareMemMain Projection/HardwareMemWidth
   Projection/HardwareMemAdmit Projection/HardwareMemSlotTy Projection/HardwareMemRuntime
   Projection/HardwareMemFixture Projection/HardwareMemWrite Projection/MemSupport
@@ -79,7 +85,9 @@ TOOL_MODULES=(
   # refinement maps (sym_refmap): theory, kit, checker, spec facts, composition
   HDLProof/Theory/Channels HDLProof/Theory/Stutter HDLProof/Theory/Compose HDLProof/Theory/Progress
   HDLProof/Kit/Norm HDLProof/Kit/BitE HDLProof/Check/RefMap HDLProof/Check/RefMapSound
-  HDLProof/Check/SpecFacts HDLProof/Check/RefMapCompose
+  HDLProof/Check/SpecFacts HDLProof/Check/RefMapCompose HDLProof/Check/RefMapRef
+  # the judge (sym_refmap judge): every stuttering alignment on one concrete run
+  HDLProof/Kit/Judge
   # the drivers' shared IO helpers
   HDLProof/Kit/Driver
 )

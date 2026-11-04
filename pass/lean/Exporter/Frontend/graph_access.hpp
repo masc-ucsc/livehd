@@ -106,6 +106,11 @@ struct Memory_info {
   // window undefined? Kept as a bool, not the matrix — the emitter refuses the
   // whole memory on the first set bit, and a wide matrix does not fit an i64.
   bool                          undef      = false;
+  // The same matrix as PER-READ ROWS (decision #8), shaped like `fwd_rows`:
+  // `undef_rows[r][w]` means read ordinal r's bits that write ordinal w drives
+  // this step are UNDEFINED when w writes r's address. The certificate gives
+  // them a free input (memory_lowering).
+  std::vector<std::vector<bool>> undef_rows;
   std::vector<Memory_port_info> ports;
   std::vector<size_t>           read_ports;
   std::vector<size_t>           write_ports;
@@ -121,6 +126,13 @@ struct Memory_info {
   Node_pin update_pin;
   Node_pin update_enable_pin;
   Node_pin bulk_reset_pin;
+  // A WHOLE-ARRAY cell (`update`, `update_enable` or `reset` driven; decision
+  // #2), and the reset bus it restores (`init` when a `reset` is driven: a
+  // runtime bus or a constant; invalid: it resets to 0).
+  bool     whole_array = false;
+  Node_pin reset_bus_pin;
+  // Its `reset` is ASYNCHRONOUS (memory_async_reset): it acts with no edge.
+  bool     async_reset = false;
 
   // Immutable ROM: `init` is a constant AND no write port is active AND `update`
   // is not driven AND the type is one whose read semantics we model.  A WRITABLE

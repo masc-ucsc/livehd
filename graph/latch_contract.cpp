@@ -3,6 +3,7 @@
 #include "latch_contract.hpp"
 
 #include <algorithm>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -758,6 +759,416 @@ template <typename Node, typename Pin>
   return Pin{};
 }
 
+namespace {
+// ---------------------------------------------------------------------------
+// The OPEN value by evaluation (decision #20).
+//
+// latch_transparent_arm recognizes a hold mux by its SHAPE. An upstream
+// rewrite is free to change that shape while keeping the value: aegraph turns
+// CORE-ET B08's `if (!clock) q = f` hold mux into
+// `Sext(Or(Shl(Mux(clock, x, 0), 1), And(clock == 0, f)), 1)`, which is
+// `(!clock) & f` and passes `f` while the latch is open, yet has no Mux to peel.
+// Returning din for it left the retyped flop reading the clock as data, and
+// rule 4 charged the latch with reading its gate's enable latch
+// (`coincident-commit-edge`).
+//
+// So when no hold mux is found and din still reads the window's root net, din
+// is EVALUATED, bit by bit, with the root at its open level. A bit is a known
+// constant, a bit of an existing pin that does not depend on the root, or
+// unknown. When every bit of the result is bit i of ONE existing pin of the
+// latch's width, that pin is the value the latch passes while open, exactly.
+// Anything else -- an unknown bit, two pins, a shifted bit, a different width,
+// a node this does not model on a path to the root -- returns invalid, and the
+// caller keeps din (today's answer). Fail closed.
+struct Open_bit {
+  enum Kind : uint8_t { Zero, One, Ref, Unknown };
+  Kind               kind = Unknown;
+  hhds::Pin_class    pin;      // Ref: the pin
+  int                idx = 0;  // Ref: its bit
+  [[nodiscard]] bool same(const Open_bit& o) const { return kind == o.kind && (kind != Ref || (pin == o.pin && idx == o.idx)); }
+};
+using Open_bits = std::vector<Open_bit>;
+
+Open_bit open_and(const Open_bit& a, const Open_bit& b) {
+  if (a.kind == Open_bit::Zero || b.kind == Open_bit::Zero) {
+    return {Open_bit::Zero, {}, 0};
+  }
+  if (a.kind == Open_bit::One) {
+    return b;
+  }
+  if (b.kind == Open_bit::One) {
+    return a;
+  }
+  return a.same(b) ? a : Open_bit{};
+}
+Open_bit open_or(const Open_bit& a, const Open_bit& b) {
+  if (a.kind == Open_bit::One || b.kind == Open_bit::One) {
+    return {Open_bit::One, {}, 0};
+  }
+  if (a.kind == Open_bit::Zero) {
+    return b;
+  }
+  if (b.kind == Open_bit::Zero) {
+    return a;
+  }
+  return a.same(b) ? a : Open_bit{};
+}
+Open_bit open_xor(const Open_bit& a, const Open_bit& b) {
+  if (a.kind == Open_bit::Zero) {
+    return b;
+  }
+  if (b.kind == Open_bit::Zero) {
+    return a;
+  }
+  if ((a.kind == Open_bit::One || a.kind == Open_bit::Zero) && (b.kind == Open_bit::One || b.kind == Open_bit::Zero)) {
+    return {a.kind == b.kind ? Open_bit::Zero : Open_bit::One, {}, 0};
+  }
+  if (a.kind == Open_bit::Ref && a.same(b)) {
+    return {Open_bit::Zero, {}, 0};
+  }
+  return {};
+}
+Open_bit open_not(const Open_bit& a) {
+  if (a.kind == Open_bit::Zero) {
+    return {Open_bit::One, {}, 0};
+  }
+  if (a.kind == Open_bit::One) {
+    return {Open_bit::Zero, {}, 0};
+  }
+  return {};
+}
+// `v` holds a value's low bits; read it at `width`, sign-extended when `is_signed`.
+Open_bits open_ext(Open_bits v, bool is_signed, int width) {
+  if (static_cast<int>(v.size()) >= width) {
+    v.resize(static_cast<size_t>(width));
+    return v;
+  }
+  const Open_bit fill = (is_signed && !v.empty()) ? v.back() : Open_bit{Open_bit::Zero, {}, 0};
+  v.resize(static_cast<size_t>(width), fill);
+  return v;
+}
+
+class Open_eval {
+public:
+  Open_eval(hhds::Pin_class root, bool open_level) : root_(std::move(root)), open_level_(open_level) {}
+
+  // Does `p`'s value depend combinationally on the root? A flop's or latch's Q
+  // is state and stops the walk (the convention of rule 4's comb_state_reach);
+  // everything else, an instance and a memory read included, is followed.
+  // Over budget the answer is "yes", which can only make the result unknown.
+  bool depends(const hhds::Pin_class& p) {
+    if (p.is_invalid() || p.is_const()) {
+      return false;
+    }
+    if (p == root_) {
+      return true;
+    }
+    if (gu::is_graph_input_pin(p)) {
+      return false;
+    }
+    const auto key = p.get_class_index();
+    if (const auto it = dep_.find(key); it != dep_.end()) {
+      return it->second;
+    }
+    if (--budget_ < 0) {
+      return true;
+    }
+    dep_[key]     = false;  // a combinational cycle reads as independent; budget still bounds it
+    const auto n  = p.get_master_node();
+    const auto op = gu::type_op_of(n);
+    bool       d  = false;
+    if (op != Ntype_op::Flop && op != Ntype_op::Fflop && op != Ntype_op::Latch) {
+      for (auto sink : n.inp_sorted_pins()) {  // read-only walk
+        for (const auto& drv : sink.get_driver_pins()) {
+          if (depends(drv)) {
+            d = true;
+            break;
+          }
+        }
+        if (d) {
+          break;
+        }
+      }
+    }
+    dep_[key] = d;
+    return d;
+  }
+
+  // `p`'s integer value (signed when the pin is signed), as `width` bits.
+  Open_bits eval(const hhds::Pin_class& p, int width) {
+    if (width <= 0) {
+      return {};
+    }
+    if (p.is_invalid()) {
+      return Open_bits(static_cast<size_t>(width));
+    }
+    if (p.is_const()) {
+      const auto& c = gu::const_of(p);
+      Open_bits   v(static_cast<size_t>(width));
+      for (int i = 0; i < width; ++i) {
+        if (!c.unknown_bit_test(i)) {
+          v[static_cast<size_t>(i)] = {c.bit_test(i) ? Open_bit::One : Open_bit::Zero, {}, 0};
+        }
+      }
+      return v;
+    }
+    const int  own       = gu::bits_of(p);
+    const bool is_signed = !gu::is_unsign(p);
+    if (own <= 0) {
+      return Open_bits(static_cast<size_t>(width));
+    }
+    if (p == root_) {
+      Open_bits v(static_cast<size_t>(own));
+      if (own == 1) {
+        v[0] = {open_level_ ? Open_bit::One : Open_bit::Zero, {}, 0};
+      }
+      return open_ext(std::move(v), is_signed, width);
+    }
+    if (!depends(p)) {
+      Open_bits v(static_cast<size_t>(own));
+      for (int i = 0; i < own; ++i) {
+        v[static_cast<size_t>(i)] = {Open_bit::Ref, p, i};
+      }
+      return open_ext(std::move(v), is_signed, width);
+    }
+    const auto key = std::make_pair(p.get_class_index().value, own);
+    if (const auto it = memo_.find(key); it != memo_.end()) {
+      return open_ext(it->second, is_signed, width);
+    }
+    if (--budget_ < 0) {
+      return Open_bits(static_cast<size_t>(width));
+    }
+    auto v     = node_value(p, own);
+    memo_[key] = v;
+    return open_ext(std::move(v), is_signed, width);
+  }
+
+private:
+  // The value of the node driving `p`, at its own width `w`. Only nodes on a
+  // path to the root get here.
+  Open_bits node_value(const hhds::Pin_class& p, int w) {
+    Open_bits  unknown(static_cast<size_t>(w));
+    const auto n  = p.get_master_node();
+    const auto op = gu::type_op_of(n);
+    if (p.get_port_id() != 0) {
+      return unknown;
+    }
+    std::vector<hhds::Pin_class> ops;
+    for (const auto& in : gu::inp_sink_drivers(n)) {
+      ops.push_back(in.driver);
+    }
+    auto const_amount = [&](size_t k) -> std::optional<int> {
+      if (ops.size() != 2 || !ops[k].is_const()) {
+        return std::nullopt;
+      }
+      const auto& c = gu::const_of(ops[k]);
+      if (c.has_unknowns() || !c.is_just_i64() || c.to_just_i64() < 0 || c.to_just_i64() > (1 << 20)) {
+        return std::nullopt;
+      }
+      return static_cast<int>(c.to_just_i64());
+    };
+    switch (op) {
+      case Ntype_op::And:
+      case Ntype_op::Or:
+      case Ntype_op::Xor: {
+        if (ops.empty()) {
+          return unknown;
+        }
+        Open_bits v = eval(ops[0], w);
+        for (size_t k = 1; k < ops.size(); ++k) {
+          const auto o = eval(ops[k], w);
+          for (int i = 0; i < w; ++i) {
+            auto&       b = v[static_cast<size_t>(i)];
+            const auto& c = o[static_cast<size_t>(i)];
+            b             = op == Ntype_op::And ? open_and(b, c) : op == Ntype_op::Or ? open_or(b, c) : open_xor(b, c);
+          }
+        }
+        return v;
+      }
+      case Ntype_op::Not: {
+        if (ops.size() != 1) {
+          return unknown;
+        }
+        auto v = eval(ops[0], w);
+        for (auto& b : v) {
+          b = open_not(b);
+        }
+        return v;
+      }
+      case Ntype_op::Mux: {
+        if (ops.size() < 2) {
+          return unknown;
+        }
+        const int  sw  = gu::bits_of(ops[0]);
+        const auto sel = eval(ops[0], sw > 0 ? std::min(sw, 30) : 0);
+        if (sw <= 0 || sw > 30) {
+          return unknown;
+        }
+        uint64_t idx = 0;
+        for (int i = 0; i < sw; ++i) {
+          const auto& b = sel[static_cast<size_t>(i)];
+          if (b.kind == Open_bit::One) {
+            idx |= uint64_t{1} << i;
+          } else if (b.kind != Open_bit::Zero) {
+            return unknown;  // the selector is not known with the latch open
+          }
+        }
+        if (idx + 1 >= ops.size()) {
+          return unknown;
+        }
+        return eval(ops[idx + 1], w);
+      }
+      case Ntype_op::SHL: {
+        const auto k = const_amount(1);
+        if (!k) {
+          return unknown;
+        }
+        const auto a = eval(ops[0], w);
+        Open_bits  v(static_cast<size_t>(w), Open_bit{Open_bit::Zero, {}, 0});
+        for (int i = *k; i < w; ++i) {
+          v[static_cast<size_t>(i)] = a[static_cast<size_t>(i - *k)];
+        }
+        return v;
+      }
+      case Ntype_op::SRA: {
+        const auto k = const_amount(1);
+        if (!k) {
+          return unknown;
+        }
+        const auto a = eval(ops[0], w + *k);
+        return Open_bits(a.begin() + *k, a.end());
+      }
+      case Ntype_op::Sext: {
+        // Op_Sext's meaning (LGraphModel `eval_op`): keep bits [0, pos) of the
+        // operand's own bits and replicate bit pos-1; pos 0 is 0, and a pos past
+        // the operand zero-extends it.
+        const auto pos = const_amount(1);
+        const int  aw  = gu::bits_of(ops.empty() ? hhds::Pin_class{} : ops[0]);
+        if (!pos || aw <= 0) {
+          return unknown;
+        }
+        Open_bits v(static_cast<size_t>(w), Open_bit{Open_bit::Zero, {}, 0});
+        if (*pos == 0) {
+          return v;
+        }
+        const auto a = eval(ops[0], aw);
+        for (int i = 0; i < w; ++i) {
+          if (*pos > aw) {
+            v[static_cast<size_t>(i)] = i < aw ? a[static_cast<size_t>(i)] : Open_bit{Open_bit::Zero, {}, 0};
+          } else {
+            v[static_cast<size_t>(i)] = a[static_cast<size_t>(std::min(i, *pos - 1))];
+          }
+        }
+        return v;
+      }
+      case Ntype_op::Get_mask: {
+        const auto rng = gu::bit_range(n);
+        if (!rng || ops.empty() || rng->first < 0 || rng->second <= rng->first) {
+          return unknown;
+        }
+        const auto a = eval(ops[0], rng->second);
+        Open_bits  v(static_cast<size_t>(w), Open_bit{Open_bit::Zero, {}, 0});
+        for (int i = 0; i < w && rng->first + i < rng->second; ++i) {
+          v[static_cast<size_t>(i)] = a[static_cast<size_t>(rng->first + i)];
+        }
+        return v;
+      }
+      case Ntype_op::EQ: {
+        // Known only when every operand bit is a known constant.
+        if (ops.size() < 2) {
+          return unknown;
+        }
+        int cw = 1;
+        for (const auto& o : ops) {
+          cw = std::max(cw, o.is_const() ? 64 : gu::bits_of(o));
+        }
+        cw               += 1;  // room for a sign bit, so signed and unsigned operands compare as integers
+        const auto first  = eval(ops[0], cw);
+        bool       equal  = true;
+        for (size_t k = 0; k < ops.size(); ++k) {
+          const auto o = eval(ops[k], cw);
+          for (int i = 0; i < cw; ++i) {
+            const auto& b = o[static_cast<size_t>(i)];
+            if (b.kind != Open_bit::Zero && b.kind != Open_bit::One) {
+              return unknown;
+            }
+            if (b.kind != first[static_cast<size_t>(i)].kind) {
+              equal = false;
+            }
+          }
+        }
+        Open_bits v(static_cast<size_t>(w), Open_bit{Open_bit::Zero, {}, 0});
+        v[0] = {equal ? Open_bit::One : Open_bit::Zero, {}, 0};
+        return v;
+      }
+      case Ntype_op::Ror: {
+        Open_bit acc{Open_bit::Zero, {}, 0};
+        for (const auto& o : ops) {
+          const int ow = gu::bits_of(o);
+          if (ow <= 0 && !o.is_const()) {
+            return unknown;
+          }
+          for (const auto& b : eval(o, ow > 0 ? ow : 64)) {
+            acc = open_or(acc, b);
+          }
+        }
+        Open_bits v(static_cast<size_t>(w), Open_bit{Open_bit::Zero, {}, 0});
+        v[0] = acc;
+        return v;
+      }
+      default: return unknown;  // not modeled, and on a path to the root
+    }
+  }
+
+  hhds::Pin_class                               root_;
+  bool                                          open_level_;
+  int                                           budget_ = 20000;
+  absl::flat_hash_map<hhds::Class_index, bool>  dep_;
+  std::map<std::pair<uint64_t, int>, Open_bits> memo_;
+};
+
+// The value latch `n` passes while open, found by evaluating `din` with the
+// window's root at its open level; invalid unless it is exactly one existing
+// pin of the latch's width that does not depend on the root.
+hhds::Pin_class open_value_by_evaluation(const hhds::Node_class& n, const hhds::Pin_class& din, const hhds::Pin_class& q) {
+  const auto win = sink_driver_hier(n, "enable");
+  if (win.is_invalid() || din.is_invalid() || din.is_const()) {
+    return {};
+  }
+  const auto wr = resolve_phase(win, /*stop_at_clock_cell=*/true);
+  if (wr.net.is_invalid() || wr.net.is_const() || gu::bits_of(wr.net) != 1) {
+    return {};
+  }
+  // The window's OPEN level in the root's terms, the active-low flavour folded
+  // in exactly as x_arm_is_the_hold_arm does.
+  const bool active_low = sink_driver_hier(n, "posclk").is_known_false();
+  const bool open_level = active_low ? wr.inverted : !wr.inverted;
+  Open_eval  ev(wr.net, open_level);
+  if (!ev.depends(din)) {
+    return {};  // din does not read the window: it is already the through-value
+  }
+  const int w = gu::bits_of(q.is_invalid() ? din : q);
+  if (w <= 0 || gu::bits_of(din) != w) {
+    return {};
+  }
+  const auto v = ev.eval(din, w);
+  if (v.empty() || v[0].kind != Open_bit::Ref) {
+    return {};
+  }
+  const auto pin = v[0].pin;
+  for (int i = 0; i < w; ++i) {
+    const auto& b = v[static_cast<size_t>(i)];
+    if (b.kind != Open_bit::Ref || !(b.pin == pin) || b.idx != i) {
+      return {};
+    }
+  }
+  if (pin == q || pin == din || gu::bits_of(pin) != w) {
+    return {};
+  }
+  return pin;
+}
+}  // namespace
+
 hhds::Pin_class latch_transparent_arm(const hhds::Node_class& n) {
   if (gu::type_op_of(n) != Ntype_op::Latch) {
     return {};
@@ -843,6 +1254,13 @@ hhds::Pin_class latch_transparent_arm(const hhds::Node_class& n) {
         return other;  // invalid `other` fails closed, as before
       }
     }
+  }
+  // A din that still reads the window after the shape match: evaluate it with
+  // the window open (decision #20; see open_value_by_evaluation). Exact or
+  // nothing: when it does not reduce to one existing pin, din is returned as
+  // before.
+  if (const auto open = open_value_by_evaluation(n, din, q); !open.is_invalid()) {
+    return open;
   }
   // After cprop::canonicalize_latch_holds the hold mux is stripped and the open
   // condition lives on `enable`, so din -- including a graph input, a const, a

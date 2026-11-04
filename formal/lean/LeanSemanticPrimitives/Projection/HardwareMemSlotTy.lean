@@ -49,15 +49,26 @@ theorem eval_op_cert_memRead_width (w : Nat) (vs : List CertVal) :
   | [_, _]                    => rfl
   | _ :: _ :: _ :: _ :: _     => rfl
 
-/-- The two WRITE operators return a `.mem`, so they are excluded; every other
-operator returns a `.bv` of the node width, at ANY argument list. -/
+theorem eval_op_cert_memToBus_width (n w : Nat) (vs : List CertVal) :
+    (eval_op_cert (.Op_MemToBus n) w vs).asBV.width = w := by
+  match vs with
+  | [_]               => rfl
+  | []                => rfl
+  | _ :: _ :: _       => rfl
+
+/-- The two WRITE operators and the whole-array load return a `.mem`, so they
+are excluded; every other operator returns a `.bv` of the node width, at ANY
+argument list. -/
 theorem eval_op_cert_width_nonMem (op : LGraphOp) (w : Nat) (vs : List CertVal)
-    (h1 : op ≠ .Op_MemWrite) (h2 : ∀ bw, op ≠ .Op_MemWriteBE bw) :
+    (h1 : op ≠ .Op_MemWrite) (h2 : ∀ bw, op ≠ .Op_MemWriteBE bw)
+    (h3 : ∀ n, op ≠ .Op_MemLoad n) :
     (eval_op_cert op w vs).asBV.width = w := by
   cases op
   case Op_MemRead      => exact eval_op_cert_memRead_width w vs
   case Op_MemWrite     => exact absurd rfl h1
   case Op_MemWriteBE bw => exact absurd rfl (h2 bw)
+  case Op_MemLoad n    => exact absurd rfl (h3 n)
+  case Op_MemToBus n   => exact eval_op_cert_memToBus_width n w vs
   all_goals (simp only [eval_op_cert, CertVal.asBV]; exact eval_op_width _ _ _)
 
 /-! ## 2. A scalar source returns its declared width -/
@@ -88,29 +99,12 @@ theorem nodeTy_result {ty : Nat → Option SlotTy} {c : DenseNodeCert} {t : Slot
   unfold nodeTy at h
   split at h
   · simp at h
-  · split at h
-    · -- Op_MemRead
-      split at h
-      · split at h
-        · split at h
-          · exact Or.inl (Option.some.inj h).symm
-          · simp at h
-        · exact Or.inl (Option.some.inj h).symm
-        · simp at h
-      · simp at h
-    · -- Op_MemWriteBE
-      split at h
-      · split at h
-        · split at h
-          · rename_i aw' dw' _ _
-            exact Or.inr ⟨aw', dw', (Option.some.inj h).symm⟩
-          · simp at h
-        · simp at h
-      · simp at h
-    · -- everything else
-      split at h
-      · exact Or.inl (Option.some.inj h).symm
-      · simp at h
+  · -- every arm returns `.bv c.width`, a table, or nothing
+    split at h <;> (repeat' split at h) <;>
+      first
+        | exact Or.inl (Option.some.inj h).symm
+        | exact Or.inr ⟨_, _, (Option.some.inj h).symm⟩
+        | simp at h
 
 theorem nodeTy_bv_width {ty : Nat → Option SlotTy} {c : DenseNodeCert} {w : Nat}
     (h : nodeTy ty c = some (.bv w)) : w = c.width := by
@@ -161,8 +155,14 @@ theorem admits_slot_width {D : DesignCert} (h : admitsB D = true)
         obtain ⟨aw', dw', wa', hr, -, -, -⟩ := nodeTy_write_geom hbw hdeps hres
         simp at hr
       · simp at h'
+    -- …and so does the whole-array load, which types a table too
+    have hne3 : ∀ k, c.op ≠ .Op_MemLoad k := by
+      intro k hk
+      obtain ⟨d0, d1, d2, hdeps⟩ := memLoad_deps (admits_semwf h) hc hk
+      obtain ⟨aw', dw', hr, -⟩ := nodeTy_load_geom hk hdeps hres
+      simp at hr
     rw [hk', ← nodeValM_rec (i := i) (st := st) (admits_wf h) hj hc, hw]
-    exact eval_op_cert_width_nonMem c.op c.width _ hne1 hne2
+    exact eval_op_cert_width_nonMem c.op c.width _ hne1 hne2 hne3
 
 /-! ## 5. `WriteAddrFits`, DERIVED from the checked inference
 
@@ -175,10 +175,31 @@ never used, which is exactly the "enabled-only" discipline. -/
 theorem admits_writeAddrFits {D : DesignCert} (h : admitsB D = true)
     (i : RuntimeInput) (st : StateM) :
     ∀ c ∈ D.nodes.toList, WriteAddrFits D i st (geomAt D) c := by
-  intro c hc bw hop d0 d1 d3 hd0 hd1 hd3 _hen
+  intro c hc
   obtain ⟨ts, hts⟩ := admitsB_infer h
   obtain ⟨j, hj⟩ := array_mem_getElem? hc
   have hsem := admits_semwf h
+  -- the load's table holds every entry it loads (decision #2)
+  have hload : LoadFits (geomAt D) c := by
+    intro k hop d0 hd0
+    obtain ⟨e0, e1, e2, hdeps⟩ := memLoad_deps hsem hj hop
+    have hjlt : j < D.nodes.size := Direct.lt_of_getElem?_some hj
+    have hlt : D.sources.size + j < ts.size := by
+      rw [admitsB_size h hts]; unfold DesignCert.numSlots; omega
+    have hty := admits_node_ty hts (admits_wf h) hj
+    rw [Array.getElem?_eq_getElem hlt] at hty
+    obtain ⟨aw, dw, -, hop0, -, hkaw⟩ := nodeTy_load_geom hop hdeps hty
+    have he0 : e0 = d0 := by
+      have hx : c.deps[0]? = some e0 := by rw [deps_get c hdeps 0]; rfl
+      rw [hx] at hd0; exact Option.some.inj hd0
+    subst he0
+    refine ⟨aw, ?_, hkaw⟩
+    unfold geomAt tyAt
+    rw [hts]
+    simp only [Option.bind_some]
+    rw [hop0]
+  refine ⟨?_, hload⟩
+  intro bw hop d0 d1 d3 hd0 hd1 hd3 _hen
   obtain ⟨e0, e1, e2, e3, hdeps⟩ := memWriteBE_deps hsem hj hop
   have hjlt : j < D.nodes.size := Direct.lt_of_getElem?_some hj
   have hlt : D.sources.size + j < ts.size := by

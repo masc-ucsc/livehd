@@ -32,6 +32,7 @@ def opValueType (c : DenseNodeCert) : ValueType :=
   match c.op with
   | .Op_MemWrite     => .mem 0 c.width
   | .Op_MemWriteBE _ => .mem 0 c.width
+  | .Op_MemLoad _    => .mem 0 c.width
   | _                => .bv c.width
 
 /-- Compile `n` nodes starting at dense index `start`, appending to `acc`.

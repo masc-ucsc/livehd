@@ -586,7 +586,7 @@ static hhds::Pin_class create_pick_concat_dpin(hhds::Graph* g, const RTLIL::SigS
   // `mux_94508` into lane 0 of `concat_264964`, the same defect by two routes).
   //
   // A SINGLE chunk keeps its signed read: there is no Concat and no outer Sext
-  // to carry the sign, and that sign is observable -- `inou/yosys/tests/
+  // to carry the sign, and that sign is observable -- `inou/slang/tests/reader/
   // issue_047.v` exists for it (`input signed [0:0] a; y = b ^ (a|a)` must
   // sign-extend a to 'b11).
   const bool sign_on_assembled_result = chunk_list.size() > 1;
@@ -944,16 +944,22 @@ static hhds::Node_class resolve_memory(hhds::Graph* g, RTLIL::Cell* cell) {
       if (chunk.width == wire->width) {
         if (wire2pin.find(wire) != wire2pin.end()) {
           const auto& or_dpin = wire2pin[wire];
+          // A known wire (a module output, or a placeholder a reader made) that
+          // is ONE piece of a wider read port gets its slice, not the whole port:
+          // `RD_DATA = {x[35:27], \q, \v, ...}` (memory_share merged a struct
+          // array's ports) wired all 36 bits to the 8-bit output q, which then
+          // read the low bits -- another entry's lanes.
+          const auto src = chunk.width == ss.size() ? dpin : create_pick_operator(dpin, offset, chunk.width, false);
           if (is_graph_output_pin(or_dpin)) {
             auto out_name = or_dpin.get_pin_name();
             auto out_sink = g->get_output_pin(out_name);
-            dpin.connect_sink(out_sink);
+            src.connect_sink(out_sink);
           } else {
             auto or_node = master_node(or_dpin);
             I(type_op_of(or_node) == Ntype_op::Or);
             I(!or_node.has_inp_edges());
 
-            livehd::graph_util::setup_sink_pid(or_node, 0).connect_driver(dpin);
+            livehd::graph_util::setup_sink_pid(or_node, 0).connect_driver(src);
             I((int)bits_of(or_dpin) == wire->width);
           }
         } else if (chunk.width == ss.size()) {
@@ -2335,8 +2341,16 @@ static void process_cells(RTLIL::Module* mod, hhds::Graph* g) {
       if (cell->hasPort(ID::EN)) {
         auto enable_dpin = get_dpin(g, cell, ID::EN);
         if (cell->hasParam(ID::EN_POLARITY) && !cell->getParam(ID::EN_POLARITY).as_bool()) {
+          // Invert an UNSIGNED pick of EN. get_dpin reads every port but A/B as
+          // signed, so a high 1-bit EN is -1, and -1 ^ 1 = -2 is nonzero: the
+          // inverted enable stayed on while EN was high. That is the register
+          // an async-reset block writes only outside its reset branch (yosys
+          // $dffe, EN = reset, EN_POLARITY 0): it updated during reset instead
+          // of holding. The $adlatch path below already picks its gates
+          // unsigned (gate_dpin).
           auto not_node = create_typed_node(*g, Ntype_op::Xor, 1);
-          livehd::graph_util::setup_sink_pid(not_node, 0).connect_driver(enable_dpin);
+          livehd::graph_util::setup_sink_pid(not_node, 0).connect_driver(
+              create_pick_concat_dpin(g, cell->getPort(ID::EN), false));
           livehd::graph_util::setup_sink_pid(not_node, 0).connect_driver(create_const(*g, *Dlop::create_integer(1)));
           set_ubits(not_node.create_driver_pin(0), 1);
           explicit_pin_signs.insert(not_node.create_driver_pin(0).get_class_index());

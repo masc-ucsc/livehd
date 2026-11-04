@@ -4,15 +4,53 @@ Two axes live here, and a design can sit on both:
 
 | axis | files | target |
 | --- | --- | --- |
-| Pyrope ↔ **Verilog** | `foo.prp` + hand-written `foo.v` | `prp-equiv-foo` |
+| Pyrope ↔ **HDL** | `foo.prp` + hand-written `foo.v` or `foo.sv` | `prp-equiv-foo` |
 | Pyrope ↔ **Pyrope** | `foo.prp` + `foo_1.prp`, `foo_2.prp`, … | `prp-lec-foo_1`, … (`prp-lec-foo` if grouped) |
 
-For the Verilog axis, `prp-equiv-foo` lowers the Pyrope to Verilog and proves the
+For the HDL axis, `prp-equiv-foo` lowers the Pyrope to Verilog and proves the
 two equivalent with the default `lhd lec` solver and native Slang reader, then
 asks a SECOND, independent engine the same question (see [Two engines, one
 pair](#two-engines-one-pair)). The golden is written by hand
 from the same specification, never generated, so it is an independent statement
 of what the design must compute.
+
+## One source pair, one reader matrix
+
+This directory is the canonical location for paired HDL/Pyrope behavior tests.
+Give a stem exactly one HDL source: `foo.v` or `foo.sv`, alongside `foo.prp`.
+Both Bazel discovery and the harness reject ambiguous `.v`/`.sv` twins.
+
+Shared backend fixtures declare `:reader_matrix: true` in their Pyrope header.
+The consolidated legacy fixtures below use this matrix inside their existing
+`prp-equiv-*` target. Ordinary language fixtures retain their existing checks;
+they do not pay for an additional backend compilation.
+
+| HDL suffix | frontend coverage inside `prp-equiv-foo` |
+| --- | --- |
+| `.v` | direct `slang`, plus `yosys-slang` → LGraph → Verilog → LEC against the handwritten Pyrope |
+| `.sv` | direct `slang` |
+
+The Yosys leg compiles the original HDL, with its original parser constructs;
+it does not read Verilog regenerated from Pyrope. The extra leg checks the
+reader pipeline with the default SAT optimization setting; the original native
+proof continues to run its existing full SAT optimization sweep. The bitfuzz
+leg continues to exercise the native implementation while the reader matrix
+uses the unmodified HDL/Pyrope sources. Every leg checks the fixture's decided
+`proven`/`refuted` expectation; an inconclusive result is reported as such.
+Its compile and LEC logs live under the fixture's `yosys-slang/` scratch directory.
+Escaped dotted module names retain their source spelling: automatic elaboration
+selects them, and the harness resolves their actual graph name from `library.txt`.
+
+The `basic_logic`, `basic_addition`, `basic_shifts`, `basic_wiring`, `basic_state`,
+and `inc_after_nb` pairs consolidate 25 former `inou/yosys/tests/*.v` fixtures.
+Their HDL retains the original module bodies and parser forms; the Pyrope is
+an independent model. `fixtures.bzl` maps the old `yosys_compile-*` and
+`slang_compile-*` target names to these shared tests, so requesting an old name
+does not duplicate compilation or create another test action. Specialized
+backend-only fixtures remain in `inou/yosys/tests`.
+
+Moving syntax-only snippets into the external docs repository is a separate
+follow-up. This repository's regression never reads sibling snippet files.
 
 A pair whose `:type:` also carries `simulation` has its own `test` block. When
 its stem is on `_EQUIV_SIM` in `inou/prp/BUILD` (matched_filter), that block runs
@@ -112,7 +150,7 @@ width/sign annotations after lowering, before cprop. IO, constants, register
 and memory outputs, and instance boundaries are preserved. Cprop must preserve
 integer semantics without consulting annotations; the ordinary bitwidth pass
 recovers them. The fuzz pass does not infer or restore missing annotations.
-Both legs run under `bazel test //...` with the same equivalence
+Both legs run under `bazel test --config=frontend //...` with the same equivalence
 expectations. A bitfuzz-leg failure fails the target.
 
 Run one manually with:

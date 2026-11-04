@@ -4,7 +4,8 @@
 # Contract: the LiveHD docs. lhd links the pass/inou registry
 # and drives it via argv; the legacy lgshell REPL was removed 2026-06-04.
 
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
+load("//tools:regression.bzl", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load("//tools:copt_default.bzl", "COPTS")
 
 # Formal-source content salt (2f-fcore ruling 2026-07-10): hash every prover

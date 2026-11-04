@@ -39,6 +39,11 @@ lhd_full_case
 hierarchy {{top}}
 {{/hierarchy}}
 
+# A variable written by two clocked processes (IEEE-illegal for always_ff) gets one flop per process from
+# both front ends, and the importer kept only one of them. Merge them before proc: the later process in the
+# source wins in a cycle where both write (the native reader's rule), with a warning naming the variable.
+lhd_ff_merge
+
 flatten
 chformal -remove
 
@@ -73,6 +78,13 @@ bmuxmap
 # latency; memory_dff can merge a mixture of synchronous/asynchronous reads
 # (and read reset/enable policies) that cannot be represented by that field.
 memory -nomap -nordff
+{{#setundef_zero}}
+# memory_share (inside `memory`) merges write ports and fills the lanes a port never
+# writes with 'x data (WR_EN 0 there, so any value is the same). Those bits appear
+# after the setundef above; replace them too (SoomRV pipeline arrays of structs
+# written field by field: the Lean export refused "Const node has X/Z bits").
+setundef -zero
+{{/setundef_zero}}
 {{/memory_collect}}
 
 #flatten

@@ -623,7 +623,7 @@ benchmark was resumed for these extraction checks. No complete U0-U7 milestone
 is claimed.
 
 Additional real pretraining coverage now includes the unchanged repository
-36-bit GCD (`inou/yosys/tests/long_gcd.v`). The successful source placement used
+36-bit GCD (`inou/slang/tests/reader/long_gcd.v`). The successful source placement used
 one timing round, no I/O resynthesis, 100 GP iterations, a 20x20 um die and an
 explicit 3 um core margin. It is legal but not GP-converged. The routing handoff
 re-places I/O on M4/M5; before/after DEFs are retained. Optional post-CTS timing

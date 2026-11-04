@@ -33,6 +33,16 @@ MemoryLowering& state_of(CertificateBuilder& b, const Memory& m) {
   return st;
 }
 
+// Write port `ordinal`'s write on top of image `current`.
+uint32_t write_step(CertificateBuilder& b, const Memory& m, uint32_t current, size_t ordinal) {
+  const auto& p      = m.ports.at(m.write_ports.at(ordinal));
+  const auto  addr   = resize(b, p.addr, m.addr_width);
+  const auto  data   = resize(b, p.din, m.bits);
+  const auto  enable = resize(b, p.enable, std::max<uint32_t>(1, m.wensize));
+  const Op    op     = m.wensize <= 1 ? Op{Operation::MemWrite, 0, {}} : Op{Operation::MemWriteBE, m.bits / m.wensize, {}};
+  return b.emit(op, m.bits, {current, addr, data, enable});
+}
+
 // Share chains by the set of writes forwarded to each read port. A later
 // write wins a collision; the all-writes chain becomes the next image.
 uint32_t chain(CertificateBuilder& b, const Memory& m, MemoryLowering& st, const std::vector<size_t>& ords) {
@@ -41,15 +51,84 @@ uint32_t chain(CertificateBuilder& b, const Memory& m, MemoryLowering& st, const
   }
   auto current = st.image;
   for (auto ordinal : ords) {
-    const auto& p      = m.ports.at(m.write_ports.at(ordinal));
-    const auto  addr   = resize(b, p.addr, m.addr_width);
-    const auto  data   = resize(b, p.din, m.bits);
-    const auto  enable = resize(b, p.enable, std::max<uint32_t>(1, m.wensize));
-    const Op    op     = m.wensize <= 1 ? Op{Operation::MemWrite, 0, {}} : Op{Operation::MemWriteBE, m.bits / m.wensize, {}};
-    current            = b.emit(op, m.bits, {current, addr, data, enable});
+    current = write_step(b, m, current, ordinal);
   }
   st.chains.emplace(ords, current);
   return current;
+}
+
+// ordering="none" (decision #8): the bits of read `r` that a colliding write
+// on one of its `undef` columns drives this step are UNDEFINED -- the RTL reads
+// x there, pass/lec a don't-care -- so they come from the read's free input and
+// every other bit is `value`. A write collides when it is enabled and its
+// address equals the read's; with byte lanes (`wensize` > 1) only the lanes it
+// enables are undefined, as the cell's per-lane `undef` plane says.
+uint32_t undefined_bits(CertificateBuilder& b, const Memory& m, uint32_t r, uint32_t value) {
+  const auto free = m.free_value.find(r);
+  if (free == m.free_value.end()) {
+    return value;
+  }
+  const auto&    rp     = m.ports.at(m.read_ports.at(r));
+  const auto     raddr  = resize(b, rp.addr, m.addr_width);
+  const uint32_t lanes  = std::max<uint32_t>(1, m.wensize);
+  const uint32_t lane_w = m.bits / lanes;
+  if (lanes > 31) {
+    throw std::runtime_error("[ERROR] pass.lean: memory n_" + std::to_string(m.id) + " (`" + m.raw_name
+                             + "`) has ordering=\"none\" with " + std::to_string(lanes)
+                             + " write-enable lanes; an undefined window is built for at most 31.");
+  }
+  std::vector<uint32_t> masks;
+  for (size_t w = 0; w < m.write_ports.size(); ++w) {
+    if (r >= m.undef_rows.size() || w >= m.undef_rows[r].size() || !m.undef_rows[r][w]) {
+      continue;
+    }
+    const auto& wp  = m.ports.at(m.write_ports[w]);
+    const auto  hit = b.emit({Operation::EQ, 0, {}}, 1, {resize(b, wp.addr, m.addr_width), raddr});
+    const auto  en  = resize(b, wp.enable, lanes);
+    for (uint32_t l = 0; l < lanes; ++l) {
+      // lane l's enable bit, then "this write drives lane l of read r's entry"
+      const auto on   = b.emit({Operation::Ror, 0, {}}, 1, {b.emit({Operation::And, 0, {}}, lanes, {en, b.const_dep(1U << l)})});
+      const auto sel  = b.emit({Operation::And, 0, {}}, 1, {hit, on});
+      // lane l's bits: all-ones of the lane width, shifted to its place
+      const auto ones = b.emit({Operation::Not, 0, {}}, lane_w, {b.const_dep(0)});
+      const auto lane = b.emit({Operation::SHL, 0, {}}, m.bits, {ones, b.const_dep(l * lane_w)});
+      masks.push_back(b.emit({Operation::MuxBool, 0, {}}, m.bits, {sel, b.const_dep(0), lane}));
+    }
+  }
+  if (masks.empty()) {
+    return value;
+  }
+  const auto undefined = masks.size() == 1 ? masks.front() : b.emit({Operation::Or, 0, {}}, m.bits, masks);
+  const auto kept      = b.emit({Operation::And, 0, {}}, m.bits, {value, b.emit({Operation::Not, 0, {}}, m.bits, {undefined})});
+  const auto freed     = b.emit({Operation::And, 0, {}}, m.bits, {resize(b, free->second, m.bits), undefined});
+  return b.emit({Operation::Or, 0, {}}, m.bits, {kept, freed});
+}
+
+// A whole-array cell's bulk operand presented as an `n * bits` bus.
+uint32_t bus(CertificateBuilder& b, const Memory& m, const PinRef& pin) {
+  return resize(b, pin, static_cast<uint32_t>(m.size) * m.bits);
+}
+uint32_t condition(CertificateBuilder& b, const PinRef& pin) { return resize(b, pin, b.pin_width(pin)); }
+
+// An ASYNCHRONOUS whole-array reset acts at once: cgen's `always @(posedge clk
+// or posedge rst)` resets the array as soon as the reset rises, so while it is
+// asserted every read sees the reset contents. A read therefore takes the
+// image with the reset applied, MemLoad(image, reset bus or 0, reset). The
+// same node is the memory's `asyncImg`: on a step its clock does not fire, the
+// held image with the reset applied (pass/lec applies an async reset with no
+// edge). A synchronous reset, or none, leaves the image as it is.
+uint32_t visible(CertificateBuilder& b, const Memory& m, MemoryLowering& st, uint32_t image) {
+  if (!m.async_reset || !m.bulk_reset) {
+    return image;
+  }
+  if (const auto it = st.reset_applied.find(image); it != st.reset_applied.end()) {
+    return it->second;
+  }
+  const auto n     = static_cast<uint32_t>(m.size);
+  const auto value = m.reset_bus ? bus(b, m, *m.reset_bus) : b.const_dep(0);
+  const auto out   = b.emit({Operation::MemLoad, n, {}}, m.bits, {image, value, condition(b, *m.bulk_reset)});
+  st.reset_applied.emplace(image, out);
+  return out;
 }
 
 // The writes read ordinal `r` forwards, as the certificate defines forwarding:
@@ -72,6 +151,17 @@ std::vector<size_t> forwarded_to(const Memory& m, size_t r) {
 
 void lower_memory_read(CertificateBuilder& b, const Memory& m, uint32_t r) {
   auto& st = state_of(b, m);
+  if (r == kMemoryReadAll) {
+    // cgen's `read_all` (decision #2): the COMMITTED contents as one bus, entry
+    // 0 in the low bits, for a registered memory with or without a sync read
+    // (cgen `assign <mem>_dout_1048576 = <array>`; pass/lec reads `a_cur`).
+    const auto key = (static_cast<uint64_t>(m.id) << 32) | kMemoryReadAllPid;
+    if (!b.memory_reads.contains(key)) {
+      const auto n = static_cast<uint32_t>(m.size);
+      b.memory_reads.emplace(key, b.emit({Operation::MemToBus, n, {}}, n * m.bits, {visible(b, m, st, st.image)}));
+    }
+    return;
+  }
   if (r >= m.read_ports.size()) {
     throw std::runtime_error("[ERROR] pass.lean: memory n_" + std::to_string(m.id) + " has no read port ordinal "
                              + std::to_string(r));
@@ -95,11 +185,11 @@ void lower_memory_read(CertificateBuilder& b, const Memory& m, uint32_t r) {
     b.memory_reads.emplace(key, reg.id);
     return;
   }
-  const auto base   = chain(b, m, st, forwarded_to(m, r));
+  const auto base   = visible(b, m, st, chain(b, m, st, forwarded_to(m, r)));
   const auto addr   = resize(b, p.addr, m.addr_width);
   const auto enable = resize(b, p.enable, b.pin_width(p.enable));
   const auto read   = b.emit({Operation::MemRead, 0, {}}, m.bits, {base, addr, enable});
-  b.memory_reads.emplace(key, read);
+  b.memory_reads.emplace(key, undefined_bits(b, m, r, read));
 }
 
 void lower_memory_writes(CertificateBuilder& b, const Memory& m) {
@@ -110,7 +200,7 @@ void lower_memory_writes(CertificateBuilder& b, const Memory& m) {
       continue;  // a registered read whose output nothing consumes
     }
     const auto& p    = m.ports.at(m.read_ports[r]);
-    const auto  base = chain(b, m, st, forwarded_to(m, r));
+    const auto  base = visible(b, m, st, chain(b, m, st, forwarded_to(m, r)));
     const auto  addr = resize(b, p.addr, m.addr_width);
     Source      one;
     one.id              = b.next_id++;
@@ -119,7 +209,8 @@ void lower_memory_writes(CertificateBuilder& b, const Memory& m) {
     one.const_int       = "1";
     one.implicit_enable = true;
     b.sources.emplace(one.id, one);
-    const auto raw    = b.emit({Operation::MemRead, 0, {}}, m.bits, {base, addr, one.id});
+    const auto raw
+        = undefined_bits(b, m, static_cast<uint32_t>(r), b.emit({Operation::MemRead, 0, {}}, m.bits, {base, addr, one.id}));
     const auto enable = resize(b, p.enable, b.pin_width(p.enable));
     const auto next   = b.emit({Operation::MuxBool, 0, {}}, m.bits, {enable, it->second, raw});
     FlopDriver f;
@@ -140,11 +231,45 @@ void lower_memory_writes(CertificateBuilder& b, const Memory& m) {
   for (size_t w = 0; w < m.write_ports.size(); ++w) {
     all.push_back(w);
   }
-  const auto next = chain(b, m, st, all);
   if (m.is_rom) {
+    chain(b, m, st, all);
     return;
   }
-  MemoryDriver md{m.addr_width, m.bits, next, m.id, m.clock_ordinal, m.init_contents, {}};
+  uint32_t next = 0;
+  if (m.whole_array) {
+    // A WHOLE-ARRAY cell (decision #2): the bulk update, then every port's
+    // write over it, then the reset over all of it -- reset wins, then a port
+    // write, then the update (cgen_verilog.cpp's always block; pass/lec
+    // encode.cpp: "bulk update is the BASE next-state ... Reset (highest
+    // priority) tops the next-state"). One clock: cgen clocks the cell on its
+    // first port's clock and pass/lec refuses ports on different clocks.
+    for (const auto& p : m.ports) {
+      if (p.has_domain && p.clock_ordinal != m.clock_ordinal) {
+        throw std::runtime_error("[ERROR] pass.lean: memory n_" + std::to_string(m.id) + " (`" + m.raw_name
+                                 + "`) is a whole-array cell (`update`/`reset`) whose ports commit on more than one "
+                                   "clock domain; the cell has one bulk update and one reset, so it needs one clock.");
+      }
+    }
+    const auto n = static_cast<uint32_t>(m.size);
+    next         = st.image;
+    if (m.update) {
+      const auto en = m.update_enable ? condition(b, *m.update_enable) : b.const_dep(1);
+      next          = b.emit({Operation::MemLoad, n, {}}, m.bits, {next, bus(b, m, *m.update), en});
+    }
+    for (const auto w : all) {
+      next = write_step(b, m, next, w);
+    }
+    if (m.bulk_reset) {
+      const auto value = m.reset_bus ? bus(b, m, *m.reset_bus) : b.const_dep(0);
+      next             = b.emit({Operation::MemLoad, n, {}}, m.bits, {next, value, condition(b, *m.bulk_reset)});
+    }
+  } else {
+    next = chain(b, m, st, all);
+  }
+  MemoryDriver md{m.addr_width, m.bits, next, m.id, m.clock_ordinal, m.init_contents, {}, {}};
+  if (m.async_reset && m.bulk_reset) {
+    md.async_img = visible(b, m, st, st.image);
+  }
   // A memory whose write ports sit on MORE THAN ONE clock domain (DCERT3,
   // decision #9): one chain per PROPER non-empty set of those domains, holding
   // the writes of the ports on them in port order; `next` (every port) is the

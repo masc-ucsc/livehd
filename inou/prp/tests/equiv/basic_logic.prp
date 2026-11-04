@@ -1,0 +1,42 @@
+/*
+:name: basic_logic
+:type: equiv
+:reader_matrix: true
+:verilog_top: basic_logic
+:pyrope_top: basic_logic
+*/
+// Boolean reductions, bitwise logic, and assignment order share unrestricted inputs.
+pub comb basic_logic(a:U8, b:U8, c:U8, d:U8) -> (
+  all_bits:U1, any_bit:U1, bits_and:U2,
+  is_zero:Bool, less:Bool, logic_c:Bool,
+  logic_d:Bool, mask_and:U8, mask_or:U8,
+  function_value:U8, nand_bits:U1, nor_bits:U1,
+  overwritten:U1, parity:U1, reduce_and:U1,
+  reduce_or:U1, reduce_xor:U1, repeated:U1,
+  shared_or:U1, shared_xor:U1, x:U1,
+  xnor_bits:U1
+) {
+  x = a#[0] ^ b#[0]
+  repeated = (a#[0] & b#[0]) & c#[0]
+  bits_and = a#[0..<2] & b#[0..<2]
+  all_bits = a#&[..]
+  any_bit = a#|[..]
+  parity = a#^[..]
+  nand_bits = ~all_bits
+  nor_bits = ~any_bit
+  xnor_bits = ~parity
+  reduce_and = all_bits
+  reduce_or = any_bit
+  reduce_xor = parity
+  is_zero = a == 0
+  less = a#[0..<4] < b#[0..<4]
+  overwritten = a#[0] ^ b#[0]
+  const shared = a#[0] & d#[0]
+  shared_or = shared | c#[0]
+  shared_xor = shared ^ b#[0]
+  logic_c = a != 0 and b != 0
+  logic_d = logic_c
+  mask_and = a & b
+  mask_or = a | b
+  function_value = if a#[7] == 1 { b } else { 0 }
+}

@@ -11,6 +11,20 @@
 
 - **Build**: `bazel build -c dbg //...`
 - **Test**: `bazel test //...`
+- **Parallel regression**: Use Bazel's normal CPU/memory scheduling across all
+  available CPUs. Keep jobs/test concurrency automatic (or use
+  `--jobs=HOST_CPUS --local_test_jobs=0`); do not impose blanket one-test or
+  one-synthesis caps on regressions. Preserve per-test resource accounting.
+- **Required regression groups**: Frontend covers Pyrope/Verilog parsing and
+  semantics, uPass, LGraph/IR, simulation, and pre-placement logic. Backend
+  covers placement, physical data, timing, and routing. Synthesis belongs to
+  **both**, including pre-placement synthesis and post-placement resynthesis.
+  When changing or evaluating a group, add `--config=frontend` or
+  `--config=backend` to the regression; use `--config=all` for synthesis or
+  changes spanning both. This applies to evaluation-only work with no edits:
+  select the config explicitly. About 10% of the most important tests from
+  **each** group always run, including when the other group is selected.
+  Plain `bazel test //...` runs both smoke sets. See `tools/regression.md`.
 - **Test runtime**: Aim for at most 30 seconds per test (soft target, any
   build mode). It is machine-dependent, not a failure threshold. Bazel keeps
   its 300 second timeout (`.bazelrc`) only as a hang safety net; never raise it
@@ -223,16 +237,26 @@ false loop is a structural repair, not a default, and stays.)
 ## Debugging Yosys-to-LGraph Flow
 
 ### Running Yosys tests
-- **Single test**: `./inou/yosys/tests/yosys_compile.sh ./inou/yosys/tests/<test>.v` (or `bazel test //inou/yosys:yosys_compile-<test>`; fixtures named in `_YOSYS_COMPILE_SKIP` in `inou/yosys/BUILD` are subsumed by a kept fixture or only regress the slang reader, so they have no bazel target — run the script on them directly)
-- **Full suite**: `./inou/yosys/tests/yosys_compile.sh`
-- The script drives `lhd compile`/`lhd lec`; each test gets a fresh scratch
-  `--workdir` (no shared `lgdb` state to clean — the kernel is stateless).
-  Per-step logs (yosys chatter included) are under `tmp_yosys/<top>/logs/`.
+- **Paired HDL/Pyrope corpus**: `bazel test --config=frontend //inou/prp:all`.
+  General reader/round-trip checks share `inou/prp/tests/equiv`; the old
+  `yosys_compile.sh` sweep is removed.
+- **Importer and solver checks**: `bazel test --config=frontend //inou/yosys:all`. The dedicated
+  `yosys_import-*` cases share `inou/prp/tests/yvr_test.py`; they require both
+  native LEC and an independent Yosys proof. Parser-only fixtures live under
+  `inou/slang/tests/reader` and retain their Slang ladder checks.
+- **Routine versus full groups**: `bazel test //...` runs the unconditional
+  frontend and backend smoke sets. `--config=frontend` selects the complete
+  frontend plus both smoke sets; `--config=backend` does the same for backend.
+  `--config=all` runs both complete groups. Focused non-smoke targets also need
+  their group's config. `python3 scripts/regression.py -- -c opt` selects
+  groups from local changes; `--base REV --head HEAD` selects committed changes
+  in CI. Explicit `--frontend`, `--backend`, or `--all` supports evaluation-only
+  work. Missing history selects both groups; see `tools/regression.md`.
 
 ### Inspecting intermediates
 - **Yosys RTLIL dump**: After running tolg, check `pp.il` for what Yosys produced (cell types, port connections, parameters).
 - **LGraph dump**: `./bazel-bin/lhd/lhd compile <file> --reader yosys-verilog --top <top> --emit-dir verilog:out/ --workdir w` then read the per-step logs in `w/logs/` and grep the cgen output in `out/*.v` for cell types (e.g., `grep -i mem`). (The REPL-only `lgraph.dump` text dump has no lhd emit yet.)
-- **Generated Verilog**: Check the `--emit-dir verilog:` per-module output; `tmp_yosys_mix/all_<top>.v` is the concatenated file used by LEC in `yosys_compile.sh`.
+- **Generated Verilog**: Check the `--emit-dir verilog:` per-module output; `tmp_yvr_<fixture>/all_impl.v` is the concatenated file used by `yvr_test.py`.
 
 ### Yosys memory pass
 - `inou/yosys/inou_yosys_read.ys` controls the Yosys script. The `memory -nomap` pass collects `$memrd`/`$memwr`/`$meminit` into `$mem_v2` cells without decomposing into DFFs. Using plain `memory` decomposes small memories into DFFs+muxes, bypassing LGraph memory handling.

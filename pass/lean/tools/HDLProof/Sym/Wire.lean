@@ -139,36 +139,42 @@ def shrBits (m k : Nat) (a : Array WBit) : Array WBit :=
 def sarBits (m k : Nat) (a : Array WBit) : Array WBit :=
   mkBits m fun i => if k + i < m then bitAt a (k + i) else bitAt a (m - 1)
 
+/-- `acc`, then the bits of `e` (LOWEST first), when `e` is wiring. An `append` reads its low part
+into `acc` and then its high part into the result, so a chain of appends -- as `runsExpr` builds
+it, nested in the high part, or LiveHD's concatenations -- is read into ONE array, in time linear
+in its width (a fresh array per append node made a k-run chain cost k times its width). Every
+other node reads its operands into fresh arrays and appends its own bits to `acc`. -/
+def wiresA : {w : Nat} → BVExpr w → Array WBit → Option (Array WBit)
+  | w, .var idx, acc => some (acc ++ mkBits w fun i => .v idx w i false)
+  | w, .const c, acc => some (acc ++ mkBits w fun i => .c (c.getLsbD i))
+  | _, .extract start len e, acc => do
+      let a ← wiresA e #[]
+      pure (acc ++ mkBits len fun i => bitAt a (start + i))
+  | _, .append hi lo _, acc => do
+      let acc ← wiresA lo acc
+      wiresA hi acc
+  | w, .un .not e, acc => do
+      let a ← wiresA e #[]
+      pure (acc ++ mkBits w fun i => (bitAt a i).flip)
+  | w, .un (.arithShiftRightConst k) e, acc => do
+      let a ← wiresA e #[]
+      pure (acc ++ sarBits w k a)
+  | _, .bin x .and y, acc => do pure (acc ++ (← zipBits WBit.and2 (← wiresA x #[]) (← wiresA y #[])))
+  | _, .bin x .or y, acc => do pure (acc ++ (← zipBits WBit.or2 (← wiresA x #[]) (← wiresA y #[])))
+  | _, .bin x .xor y, acc => do pure (acc ++ (← zipBits WBit.xor2 (← wiresA x #[]) (← wiresA y #[])))
+  | m, .shiftLeft x (.const c), acc => do
+      let a ← wiresA x #[]
+      pure (acc ++ shlBits m c.toNat a)
+  | m, .shiftRight x (.const c), acc => do
+      let a ← wiresA x #[]
+      pure (acc ++ shrBits m c.toNat a)
+  | m, .arithShiftRight x (.const c), acc => do
+      let a ← wiresA x #[]
+      pure (acc ++ sarBits m c.toNat a)
+  | _, _, _ => none
+
 /-- The bits of `e`, LOWEST first, when `e` is wiring. -/
-def wires : {w : Nat} → BVExpr w → Option (Array WBit)
-  | w, .var idx => some (mkBits w fun i => .v idx w i false)
-  | w, .const c => some (mkBits w fun i => .c (c.getLsbD i))
-  | _, .extract start len e => do
-      let a ← wires e
-      pure (mkBits len fun i => bitAt a (start + i))
-  | _, .append (l := l) (r := r) hi lo _ => do
-      let a ← wires hi
-      let b ← wires lo
-      pure (mkBits (l + r) fun i => if i < r then bitAt b i else bitAt a (i - r))
-  | w, .un .not e => do
-      let a ← wires e
-      pure (mkBits w fun i => (bitAt a i).flip)
-  | w, .un (.arithShiftRightConst k) e => do
-      let a ← wires e
-      pure (sarBits w k a)
-  | _, .bin x .and y => do zipBits WBit.and2 (← wires x) (← wires y)
-  | _, .bin x .or y => do zipBits WBit.or2 (← wires x) (← wires y)
-  | _, .bin x .xor y => do zipBits WBit.xor2 (← wires x) (← wires y)
-  | m, .shiftLeft x (.const c) => do
-      let a ← wires x
-      pure (shlBits m c.toNat a)
-  | m, .shiftRight x (.const c) => do
-      let a ← wires x
-      pure (shrBits m c.toNat a)
-  | m, .arithShiftRight x (.const c) => do
-      let a ← wires x
-      pure (sarBits m c.toNat a)
-  | _, _ => none
+def wires {w : Nat} (e : BVExpr w) : Option (Array WBit) := wiresA e #[]
 
 /-! ### Soundness of `wires` -/
 
@@ -268,103 +274,134 @@ theorem wspec_sar {σ : Asg} {m : Nat} {x : BVExpr m} {a : Array WBit} (k : Nat)
     · rw [BitVec.msb_eq_getLsbD_last, ha.2]
   · simp [hi, show m ≤ i by omega]
 
-/-- Reading `e` as wiring is exact. -/
-theorem wires_spec (σ : Asg) : ∀ {w : Nat} (e : BVExpr w) {a : Array WBit},
-    wires e = some a → WSpec σ e a
-  | w, .var idx, a, h => by
-      simp only [wires, Option.some.injEq] at h; subst h
-      refine ⟨by simp, fun i => ?_⟩
+theorem bitAt_append (a b : Array WBit) (i : Nat) :
+    bitAt (a ++ b) i = if i < a.size then bitAt a i else bitAt b (i - a.size) := by
+  unfold bitAt
+  rw [Array.getD_eq_getD_getElem?, Array.getD_eq_getD_getElem?, Array.getD_eq_getD_getElem?]
+  by_cases h : i < a.size
+  · rw [if_pos h, Array.getElem?_append_left h]
+  · rw [if_neg h, Array.getElem?_append_right (by omega)]
+
+/-- Reading `e` as wiring onto `acc` is exact: the result is `acc` followed by an array that
+meets `e`. -/
+theorem wiresA_spec (σ : Asg) : ∀ {w : Nat} (e : BVExpr w) (acc : Array WBit) {res : Array WBit},
+    wiresA e acc = some res → ∃ a, res = acc ++ a ∧ WSpec σ e a
+  | w, .var idx, acc, res, h => by
+      simp only [wiresA, Option.some.injEq] at h; subst h
+      refine ⟨_, rfl, by simp, fun i => ?_⟩
       rw [bitAt_mkBits]
       by_cases hi : i < w
       · simp [hi, WBit.eval]
       · simp [hi, BitVec.getLsbD_of_ge _ _ (by omega : w ≤ i)]
-  | w, .const c, a, h => by
-      simp only [wires, Option.some.injEq] at h; subst h
-      refine ⟨by simp, fun i => ?_⟩
+  | w, .const c, acc, res, h => by
+      simp only [wiresA, Option.some.injEq] at h; subst h
+      refine ⟨_, rfl, by simp, fun i => ?_⟩
       rw [bitAt_mkBits, BVExpr.eval_const]
       by_cases hi : i < w
       · simp [hi]
       · simp [hi, BitVec.getLsbD_of_ge _ _ (by omega : w ≤ i)]
-  | _, .extract start len e, a, h => by
-      simp only [wires, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+  | _, .extract start len e, acc, res, h => by
+      simp only [wiresA, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
         Option.some.injEq] at h
       obtain ⟨b, hb, rfl⟩ := h
-      have hs := wires_spec σ e hb
-      refine ⟨by simp, fun i => ?_⟩
+      obtain ⟨b', hb', hs⟩ := wiresA_spec σ e #[] hb
+      simp only [Array.empty_append] at hb'; subst hb'
+      refine ⟨_, rfl, by simp, fun i => ?_⟩
       rw [BVExpr.eval_extract, BitVec.getLsbD_extractLsb', bitAt_mkBits]
       by_cases hi : i < len
       · simp [hi, hs.2]
       · simp [hi]
-  | _, .append (l := l) (r := r) hi lo hw, a, h => by
-      simp only [wires, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
-        Option.some.injEq] at h
-      obtain ⟨x, hx, y, hy, rfl⟩ := h
-      have sx := wires_spec σ hi hx
-      have sy := wires_spec σ lo hy
-      refine ⟨by simp; omega, fun i => ?_⟩
-      rw [eval_append' σ hi lo hw, getLsbD_cast_eq hw, BitVec.getLsbD_append, bitAt_mkBits]
+  | _, .append (l := l) (r := r) hi lo hw, acc, res, h => by
+      simp only [wiresA, Option.bind_eq_bind, Option.bind_eq_some_iff] at h
+      obtain ⟨acc1, h1, h2⟩ := h
+      obtain ⟨y, rfl, sy⟩ := wiresA_spec σ lo acc h1
+      obtain ⟨x, rfl, sx⟩ := wiresA_spec σ hi (acc ++ y) h2
+      refine ⟨y ++ x, by simp [Array.append_assoc], by simp [sx.1, sy.1]; omega, fun i => ?_⟩
+      rw [eval_append' σ hi lo hw, getLsbD_cast_eq hw, BitVec.getLsbD_append, bitAt_append, sy.1]
       by_cases h1 : i < r
-      · rw [if_pos h1, if_pos (show i < l + r by omega), if_pos h1, sy.2]
-      · by_cases h2 : i < l + r
-        · rw [if_neg h1, if_pos h2, if_neg h1, sx.2]
-        · rw [if_neg h1, if_neg h2, sx.2, bitAt_of_ge (by rw [sx.1]; omega)]
-  | w, .un .not e, a, h => by
-      simp only [wires, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+      · rw [if_pos h1, if_pos h1, sy.2]
+      · rw [if_neg h1, if_neg h1, sx.2]
+  | w, .un .not e, acc, res, h => by
+      simp only [wiresA, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
         Option.some.injEq] at h
       obtain ⟨b, hb, rfl⟩ := h
-      have hs := wires_spec σ e hb
-      refine ⟨by simp, fun i => ?_⟩
+      obtain ⟨b', hb', hs⟩ := wiresA_spec σ e #[] hb
+      simp only [Array.empty_append] at hb'; subst hb'
+      refine ⟨_, rfl, by simp, fun i => ?_⟩
       rw [BVExpr.eval_un, BVUnOp.eval_not, BitVec.getLsbD_not, bitAt_mkBits]
       by_cases hi : i < w
       · rw [if_pos hi, WBit.eval_flip, ← hs.2]; simp only [hi, decide_true, Bool.true_and]
       · rw [if_neg hi]; simp only [hi, decide_false, Bool.false_and, WBit.eval_c]
-  | w, .un (.arithShiftRightConst k) e, a, h => by
-      simp only [wires, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+  | w, .un (.arithShiftRightConst k) e, acc, res, h => by
+      simp only [wiresA, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
         Option.some.injEq] at h
       obtain ⟨b, hb, rfl⟩ := h
-      have hs := wires_spec σ e hb
-      refine ⟨by simp [sarBits], fun i => ?_⟩
+      obtain ⟨b', hb', hs⟩ := wiresA_spec σ e #[] hb
+      simp only [Array.empty_append] at hb'; subst hb'
+      refine ⟨_, rfl, by simp [sarBits], fun i => ?_⟩
       rw [BVExpr.eval_un]
       exact wspec_sar k hs i
-  | _, .bin x .and y, a, h => by
-      simp only [wires, Option.bind_eq_bind, Option.bind_eq_some_iff] at h
-      obtain ⟨p, hp, q, hq, h⟩ := h
-      exact wspec_zip (fun _ _ _ hs => WBit.eval_and2 hs)
-        (fun i => by simp [BVExpr.eval_bin]) (wires_spec σ x hp) (wires_spec σ y hq) h
-  | _, .bin x .or y, a, h => by
-      simp only [wires, Option.bind_eq_bind, Option.bind_eq_some_iff] at h
-      obtain ⟨p, hp, q, hq, h⟩ := h
-      exact wspec_zip (fun _ _ _ hs => WBit.eval_or2 hs)
-        (fun i => by simp [BVExpr.eval_bin]) (wires_spec σ x hp) (wires_spec σ y hq) h
-  | _, .bin x .xor y, a, h => by
-      simp only [wires, Option.bind_eq_bind, Option.bind_eq_some_iff] at h
-      obtain ⟨p, hp, q, hq, h⟩ := h
-      exact wspec_zip (fun _ _ _ hs => WBit.eval_xor2 hs)
-        (fun i => by simp [BVExpr.eval_bin]) (wires_spec σ x hp) (wires_spec σ y hq) h
-  | m, .shiftLeft x (.const c), a, h => by
-      simp only [wires, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+  | _, .bin x .and y, acc, res, h => by
+      simp only [wiresA, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+        Option.some.injEq] at h
+      obtain ⟨p, hp, q, hq, r, hr, rfl⟩ := h
+      obtain ⟨p', hp', sp⟩ := wiresA_spec σ x #[] hp
+      obtain ⟨q', hq', sq⟩ := wiresA_spec σ y #[] hq
+      simp only [Array.empty_append] at hp' hq'; subst hp' hq'
+      exact ⟨r, rfl, wspec_zip (fun _ _ _ hs => WBit.eval_and2 hs)
+        (fun i => by simp [BVExpr.eval_bin]) sp sq hr⟩
+  | _, .bin x .or y, acc, res, h => by
+      simp only [wiresA, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+        Option.some.injEq] at h
+      obtain ⟨p, hp, q, hq, r, hr, rfl⟩ := h
+      obtain ⟨p', hp', sp⟩ := wiresA_spec σ x #[] hp
+      obtain ⟨q', hq', sq⟩ := wiresA_spec σ y #[] hq
+      simp only [Array.empty_append] at hp' hq'; subst hp' hq'
+      exact ⟨r, rfl, wspec_zip (fun _ _ _ hs => WBit.eval_or2 hs)
+        (fun i => by simp [BVExpr.eval_bin]) sp sq hr⟩
+  | _, .bin x .xor y, acc, res, h => by
+      simp only [wiresA, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+        Option.some.injEq] at h
+      obtain ⟨p, hp, q, hq, r, hr, rfl⟩ := h
+      obtain ⟨p', hp', sp⟩ := wiresA_spec σ x #[] hp
+      obtain ⟨q', hq', sq⟩ := wiresA_spec σ y #[] hq
+      simp only [Array.empty_append] at hp' hq'; subst hp' hq'
+      exact ⟨r, rfl, wspec_zip (fun _ _ _ hs => WBit.eval_xor2 hs)
+        (fun i => by simp [BVExpr.eval_bin]) sp sq hr⟩
+  | m, .shiftLeft x (.const c), acc, res, h => by
+      simp only [wiresA, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
         Option.some.injEq] at h
       obtain ⟨b, hb, rfl⟩ := h
-      have hs := wires_spec σ x hb
-      refine ⟨by simp [shlBits], fun i => ?_⟩
+      obtain ⟨b', hb', hs⟩ := wiresA_spec σ x #[] hb
+      simp only [Array.empty_append] at hb'; subst hb'
+      refine ⟨_, rfl, by simp [shlBits], fun i => ?_⟩
       rw [BVExpr.eval_shiftLeft, BVExpr.eval_const, BitVec.shiftLeft_eq']
       exact wspec_shl _ hs i
-  | m, .shiftRight x (.const c), a, h => by
-      simp only [wires, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+  | m, .shiftRight x (.const c), acc, res, h => by
+      simp only [wiresA, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
         Option.some.injEq] at h
       obtain ⟨b, hb, rfl⟩ := h
-      have hs := wires_spec σ x hb
-      refine ⟨by simp [shrBits], fun i => ?_⟩
+      obtain ⟨b', hb', hs⟩ := wiresA_spec σ x #[] hb
+      simp only [Array.empty_append] at hb'; subst hb'
+      refine ⟨_, rfl, by simp [shrBits], fun i => ?_⟩
       rw [BVExpr.eval_shiftRight, BVExpr.eval_const, BitVec.ushiftRight_eq']
       exact wspec_shr _ hs i
-  | m, .arithShiftRight x (.const c), a, h => by
-      simp only [wires, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
+  | m, .arithShiftRight x (.const c), acc, res, h => by
+      simp only [wiresA, Option.bind_eq_bind, Option.bind_eq_some_iff, Option.pure_def,
         Option.some.injEq] at h
       obtain ⟨b, hb, rfl⟩ := h
-      have hs := wires_spec σ x hb
-      refine ⟨by simp [sarBits], fun i => ?_⟩
+      obtain ⟨b', hb', hs⟩ := wiresA_spec σ x #[] hb
+      simp only [Array.empty_append] at hb'; subst hb'
+      refine ⟨_, rfl, by simp [sarBits], fun i => ?_⟩
       rw [BVExpr.eval_arithShiftRight, BVExpr.eval_const, BitVec.sshiftRight_eq']
       exact wspec_sar _ hs i
+
+/-- Reading `e` as wiring is exact. -/
+theorem wires_spec (σ : Asg) {w : Nat} (e : BVExpr w) {a : Array WBit}
+    (h : wires e = some a) : WSpec σ e a := by
+  obtain ⟨a', ha', hs⟩ := wiresA_spec σ e #[] h
+  simp only [Array.empty_append] at ha'
+  subst ha'; exact hs
 
 /-! ## Rebuilding a compact expression -/
 

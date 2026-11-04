@@ -79,6 +79,25 @@ A `<bool>` has no spaces: `!`, `&`, `\|`, parentheses; atoms `<port>` (nonzero),
 A `<word>` is `<port>`, or a slice `<port>[lo:len]`, optionally guarded: `<word>?<port>.<bit>`
 reads 0 unless that bit is set.
 
+### Lines read only by the judge and the product search
+
+`refmap` and `specfacts` ignore these. `sym_refmap judge` (one concrete run: does ANY stuttering
+alignment of the spec match the implementation?) and `scripts/mk_product.py` (the product model
+for a bounded search) read them, with `impl`, `spec`, the one `chan`, the one `slot` and `asm`.
+They need no `alpha`, `init`, `group` or `inv`.
+
+| directive | meaning |
+|---|---|
+| `xfer <bool>` | an implementation transfer (repeatable): the spec may not hold (stutter) in a step where one is true |
+| `maxstall <n>` | at most `n` holds in a row, in steps (default 0: lockstep) |
+| `period <P> [<k>]` | random runs only: inputs change only at steps `t` with `t % P = k` (default `k` = 1 when `P` > 1: the real clock's input timing on a `single_edge` certificate with P slots); the product adds the same rule for P = 2 to `env_ok` |
+| `drive <input> <v0> <n> <v1>` | random runs only: the input is `v0` before step `n` and `v1` from step `n` on (a schedule `asm` requires, e.g. a reset) |
+
+The judge's results: `NO MATCH at step n` (no alignment exists on the run: the implementation does
+not refine the spec, whatever the map; the report lists every last candidate and why it fails),
+`MATCH FOUND` (and, if the slot's own stall choice fails on the run, the step where it does:
+STALL CHOICE WRONG), `ENVIRONMENT VIOLATED` (a random run broke `asm`).
+
 ## Example
 
 ```

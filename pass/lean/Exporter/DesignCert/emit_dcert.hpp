@@ -41,8 +41,9 @@ std::string canonical_decimal(std::string_view value);
 // string.
 uint32_t dcert_opcode(const Op& op);
 
-// The opcode PAYLOAD, as a canonical decimal string.  `Op_Sum` and
-// `Op_MemWriteBE` carry a `Nat` that rides in the record's `Int` slot; Lean's
+// The opcode PAYLOAD, as a canonical decimal string.  `Op_Sum`,
+// `Op_MemWriteBE`, `Op_MemLoad` and `Op_MemToBus` carry a `Nat` that rides in
+// the record's `Int` slot; Lean's
 // reader takes `Int.toNat` of it, so a negative payload would be read back as
 // `0`.  The payload is a `uint32_t` here and can never be negative, which is
 // why the round trip survives -- NOT because the slot is canonical in general.

@@ -9,7 +9,7 @@
 #      then miscounted under a field whose name said "untracked".
 #   2. NO PROOF THE DERIVED FILES CAME FROM THE RECORDED PATCHER.  Checking the
 #      16-hex source-hash header the generator embeds is not enough: a derived
-#      BODY can be edited with that header left intact.  The four files are now
+#      BODY can be edited with that header left intact.  The derived files are now
 #      regenerated into fresh staging and compared BYTE FOR BYTE.
 #   3. AN AMBIENT, UNRECORDED CORPUS INPUT.  `COREET_TECH` selects which tech
 #      cells the filelist picks (`generic` vs `xilinx` change the prim_clk_gate
@@ -74,7 +74,12 @@ OUT_TRACKED="$(grep -cv '^??' <<<"${OUT_ALL:-}" || true)"
 # --- derive FRESH, then compare byte for byte ------------------------------
 [[ -r "$PATCHER" ]] || die "missing patch script $PATCHER"
 DERIVED="$(readlink -f "$DERIVED_IN" 2>/dev/null || echo "$DERIVED_IN")"
-EXPECTED=(intpipe_mul_div_ctl.sv txfmactl_top.sv txfmaexp_top.sv vpu_defs_pkg.sv)
+# The patcher's outputs. It gained the two B05 (shirecache) files after this
+# list was written, and the list then refused every --publish run ("does not
+# hold exactly the four outputs"); it must name what the patcher derives.
+EXPECTED=(intpipe_mul_div_ctl.sv shirecache_mesh_master_axi_port.sv shirecache_pkg.sv txfmactl_top.sv txfmaexp_top.sv
+          vpu_defs_pkg.sv)
+N_EXPECTED=${#EXPECTED[@]}
 
 if [[ "$MODE" == "--publish" ]]; then
   # The generator targets the EXACT directory the filelist consumes.
@@ -90,11 +95,11 @@ trap 'rm -rf "$STAGE"' EXIT
 COREET_ROOT="$ROOT" COREET_PATCHED_OUTDIR="$STAGE" python3 -B "$PATCHER" >/dev/null 2>&1 \
   || die "coreet_patch_srcs.py failed deriving into staging from $ROOT"
 
-# EXACTLY the four outputs plus the map -- no more, no fewer.
+# EXACTLY the outputs plus the map -- no more, no fewer.
 mapfile -t PRESENT < <(cd "$DERIVED" && ls -1 | sort)
 WANT="$(printf '%s\n' "${EXPECTED[@]}" map.tsv | sort)"
 [[ "$(printf '%s\n' "${PRESENT[@]}")" == "$WANT" ]] \
-  || die "derived dir $DERIVED does not hold exactly the four outputs plus map.tsv:
+  || die "derived dir $DERIVED does not hold exactly the $N_EXPECTED outputs plus map.tsv:
        present: $(printf '%s ' "${PRESENT[@]}")
        wanted:  $(tr '\n' ' ' <<<"$WANT")"
 
@@ -109,9 +114,9 @@ done
 MAP="$DERIVED/map.tsv"
 [[ -r "$MAP" ]] || die "map $MAP is unreadable"
 n_map="$(grep -cv '^[[:space:]]*$' "$MAP")"
-[[ "$n_map" -eq 4 ]] || die "map has $n_map entries, expected 4"
-[[ "$(cut -f1 "$MAP" | sort -u | wc -l)" -eq 4 ]] || die "map sources are not unique"
-[[ "$(cut -f2 "$MAP" | sort -u | wc -l)" -eq 4 ]] || die "map outputs are not unique"
+[[ "$n_map" -eq "$N_EXPECTED" ]] || die "map has $n_map entries, expected $N_EXPECTED"
+[[ "$(cut -f1 "$MAP" | sort -u | wc -l)" -eq "$N_EXPECTED" ]] || die "map sources are not unique"
+[[ "$(cut -f2 "$MAP" | sort -u | wc -l)" -eq "$N_EXPECTED" ]] || die "map outputs are not unique"
 [[ "$(awk -F'\t' 'NF!=2' "$MAP" | wc -l)" -eq 0 ]] || die "map has a line that is not exactly two tab-separated fields"
 while IFS=$'\t' read -r src out; do
   [[ -n "$src" && -n "$out" ]] || die "map has an empty field"
@@ -136,7 +141,7 @@ STAGE_MAP="$STAGE/map.tsv"
 #
 # Structure alone is not enough.  A clean, byte-identical COPY of a mapped
 # source at another path inside the checkout satisfies every structural check --
-# four unique two-field rows, readable paths, containment, a matching
+# unique two-field rows, readable paths, containment, a matching
 # source-hash header -- while the association it records is not the generator's.
 # That matters concretely: `coreet_filelist.sh::subst_of` looks up the EXACT
 # original filelist path, so a forged key silently skips the substitution and
@@ -172,7 +177,7 @@ coreet_clean_scope=tracked AND untracked under ${RELEVANT[*]} only; the checkout
 coreet_patch_script=$PATCHER
 coreet_patch_script_sha256=$(sha256sum < "$PATCHER" | cut -d' ' -f1)
 coreet_derived_dir=$DERIVED
-coreet_derived_mode=$([[ "$MODE" == "--publish" ]] && echo "regenerated in place; four outputs AND map then authenticated against a second fresh derivation" || echo "four outputs AND map authenticated byte-for-byte against a fresh derivation")
+coreet_derived_mode=$([[ "$MODE" == "--publish" ]] && echo "regenerated in place; the $N_EXPECTED outputs AND map then authenticated against a second fresh derivation" || echo "the $N_EXPECTED outputs AND map authenticated byte-for-byte against a fresh derivation")
 coreet_derived_map_sha256=$(sha256sum < "$MAP" | cut -d' ' -f1)
 coreet_derived_aggregate_sha256=$AGG
 coreet_derived_count=${#EXPECTED[@]}

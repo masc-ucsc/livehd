@@ -291,3 +291,59 @@ index be2355e00..808fdef3f 100644
  					ff.sig_q = new_q;
  					ff.has_aload = false;
  					ff.has_arst = false;
+diff --git passes/proc/proc_mux.cc passes/proc/proc_mux.cc
+--- passes/proc/proc_mux.cc
++++ passes/proc/proc_mux.cc
+@@ -362,6 +362,27 @@
+ 
+ 		if (!is_simple_parallel_case) {
+ 			BitPatternPool pool(sw->signal.size());
++			// LiveHD: -ifx mode never takes from the pool (it fragments into
++			// millions of cubes on wide casex/casez decoders), so `has_all`
++			// alone put every item in ONE parallel group: two overlapping
++			// items were both selected and first-match priority was lost
++			// (casez 5'b???1? before 5'b????1: the $pmux gave x, pmuxtree the
++			// LAST item). In -ifx mode the same rule is applied without the
++			// pool: an item starts a new group when it overlaps an earlier
++			// item of the current group, i.e. no bit is fixed to different
++			// values in both (`-` is don't-care; x and z are values, as for
++			// $eqx). That is the grouping the pool gives without -ifx.
++			std::vector<RTLIL::Const> ifx_group;
++			auto ifx_overlaps = [&](const RTLIL::Const &p) {
++				for (auto &q : ifx_group) {
++					bool disjoint = false;
++					for (int b = 0; b < GetSize(p) && !disjoint; b++)
++						disjoint = p[b] != RTLIL::State::Sa && q[b] != RTLIL::State::Sa && p[b] != q[b];
++					if (!disjoint)
++						return true;
++				}
++				return false;
++			};
+ 			bool extra_group_for_next_case = false;
+ 			for (size_t i = 0; i < sw->cases.size(); i++) {
+ 				RTLIL::CaseRule *cs2 = sw->cases[i];
+@@ -372,18 +393,22 @@
+ 						extra_group_for_next_case = false;
+ 					}
+ 					for (auto pat : cs2->compare)
+-						if (!pat.is_fully_const() || !pool.has_all(pat))
++						if (!pat.is_fully_const() || (ifxmode ? ifx_overlaps(pat.as_const()) : !pool.has_all(pat)))
+ 							pgroups[i] = pgroups[i-1]+1;
+ 					if (cs2->compare.empty())
+ 						pgroups[i] = pgroups[i-1]+1;
+-					if (pgroups[i] != pgroups[i-1])
++					if (pgroups[i] != pgroups[i-1]) {
+ 						pool = BitPatternPool(sw->signal.size());
++						ifx_group.clear();
++					}
+ 				}
+ 				for (auto pat : cs2->compare)
+ 					if (!pat.is_fully_const())
+ 						extra_group_for_next_case = true;
+ 					else if (!ifxmode)
+ 						pool.take(pat);
++					else
++						ifx_group.push_back(pat.as_const());
+ 			}
+ 		}
+ 

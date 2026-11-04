@@ -350,16 +350,52 @@ void lower_hotmux(const LeanCtx& ctx, const Node& node, DesignScan& design, uint
   }
 }
 
-// Rem is supported only with a nonzero CONSTANT divisor. `x % 0` is X in
+// Rem is supported only with a divisor that can never be 0. `x % 0` is X in
 // Verilog and undefined in every LiveHD executor, so no certificate value is
-// right; a variable divisor can be zero at run time.
-bool rem_constant_divisor(const Node& node) {
-  const auto b = livehd::graph_util::get_driver_of_sink_name(node, "b");
-  if (b.is_invalid() || !pin_is_const(b)) {
+// right; a general variable divisor can be zero at run time.
+//
+// Never 0: a nonzero constant, or an UNSIGNED Mux whose every data input is
+// (recursively) a positive constant -- `addr % (c ? 1 : 2)` (SoomRV
+// PrefetchIssuer). Whichever arm the selector picks, the divisor is one of
+// those constants, so `a - (a / b) * b` (lower_rem) is exact there too.
+bool positive_const(const Node_pin& pin) {
+  if (!pin_is_const(pin)) {
     return false;
   }
-  const auto v = pin_const_value(b);
-  return v.is_integer() && !v.has_unknowns() && !(v.is_just_i64() && v.to_just_i64() == 0);
+  const auto v = pin_const_value(pin);
+  return v.is_integer() && !v.has_unknowns() && !v.is_negative() && !v.is_known_zero();
+}
+
+bool never_zero(const Node_pin& pin, int depth) {
+  if (pin.is_invalid()) {
+    return false;
+  }
+  if (pin_is_const(pin)) {
+    const auto v = pin_const_value(pin);
+    return v.is_integer() && !v.has_unknowns() && !(v.is_just_i64() && v.to_just_i64() == 0);
+  }
+  if (depth == 0 || pin_is_input(pin) || node_is_flop(pin_node(pin)) || node_is_memory(pin_node(pin))) {
+    return false;
+  }
+  const auto n = pin_node(pin);
+  if (node_op(n) != Ntype_op::Mux || node_output_is_signed(n)) {
+    return false;
+  }
+  bool any = false;
+  for (const auto& e : inp_edges_ordered(n)) {
+    if (e.sink.get_port_id() == 0) {
+      continue;  // the selector
+    }
+    if (!(positive_const(e.driver) || never_zero(e.driver, depth - 1))) {
+      return false;
+    }
+    any = true;
+  }
+  return any;
+}
+
+bool rem_constant_divisor(const Node& node) {
+  return never_zero(livehd::graph_util::get_driver_of_sink_name(node, "b"), 4);
 }
 
 // Lower `a % c` (c a nonzero constant) to `a - (a / c) * c`.
@@ -806,6 +842,21 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
     m.is_rom       = info.is_rom;
     m.rom_contents = info.rom_contents;
     m.init_contents = info.init_contents;
+    m.whole_array   = info.whole_array;
+    m.undef_rows    = info.undef_rows;
+    if (info.whole_array) {
+      const auto opt = [&](const Node_pin& pin) -> std::optional<PinRef> {
+        if (pin.is_invalid()) {
+          return std::nullopt;
+        }
+        return capture_pin(ctx, pin);
+      };
+      m.update        = opt(info.update_pin);
+      m.update_enable = opt(info.update_enable_pin);
+      m.bulk_reset    = opt(info.bulk_reset_pin);
+      m.reset_bus     = opt(info.reset_bus_pin);
+      m.async_reset   = info.async_reset;
+    }
     m.read_ports   = info.read_ports;
     m.write_ports  = info.write_ports;
     for (const auto& port : info.ports) {
@@ -879,6 +930,25 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
         p.has_domain    = true;
       }
       m.ports.push_back(p);
+    }
+    // A free input per read with an undefined window (decision #8), named after
+    // the memory and the read ordinal. Appended after every RTL port, so the
+    // RTL's own inputs keep their ordinals.
+    for (size_t r = 0; r < m.undef_rows.size(); ++r) {
+      if (std::find(m.undef_rows[r].begin(), m.undef_rows[r].end(), true) == m.undef_rows[r].end()) {
+        continue;
+      }
+      Port free;
+      free.name       = m.raw_name + "__undef_read" + std::to_string(r);
+      free.id         = next_input++;
+      free.width      = m.bits;
+      free.free_value = true;
+      design.inputs.push_back(free);
+      PinRef ref;
+      ref.kind  = PinKind::Input;
+      ref.id    = free.id;
+      ref.width = m.bits;
+      m.free_value.emplace(r, ref);
     }
     design.memories.emplace(m.id, std::move(m));
     ctx.memory_info.emplace(info.nid, info);
@@ -1021,7 +1091,14 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
     roots.push_back(pin);
   }
   for (const auto& node : memory_nodes) {
-    for (const auto& p : ctx.memory_info.at(node_id(node)).ports) {
+    const auto& mi = ctx.memory_info.at(node_id(node));
+    // A whole-array cell's bulk pins feed its next image, as a port's do.
+    for (const auto& pin : {mi.update_pin, mi.update_enable_pin, mi.bulk_reset_pin, mi.reset_bus_pin}) {
+      if (!pin.is_invalid()) {
+        roots.push_back(pin);
+      }
+    }
+    for (const auto& p : mi.ports) {
       if (!p.addr.is_invalid()) {
         roots.push_back(p.addr);
       }
@@ -1071,13 +1148,21 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
   // `fwd_rows[r][w]`, so asking the shared helper here would invent a cycle for
   // a READ-FIRST port that merely shares an array with a forwarding one.
   const auto read_deps = [&](const lean_pass::Memory_info& mi, size_t r, const auto& enqueue) {
-    if (mi.sync) {
+    // The whole-array read is the committed contents: no combinational operand.
+    if (mi.sync || r == kMemoryReadAll) {
       return;
     }
     const auto& p = mi.ports.at(mi.read_ports.at(r));
     enqueue(p.addr);
     enqueue(p.enable);
     for (size_t w = 0; w < mi.write_ports.size(); ++w) {
+      // An undefined window (decision #8) reads the colliding write's address
+      // and enable to find its undefined bits.
+      if (r < mi.undef_rows.size() && w < mi.undef_rows[r].size() && mi.undef_rows[r][w]) {
+        const auto& wp = mi.ports.at(mi.write_ports[w]);
+        enqueue(wp.addr);
+        enqueue(wp.enable);
+      }
       if (!lean_pass::memory_fwd_bit(mi, r, w)) {
         continue;
       }
@@ -1106,10 +1191,15 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
           return static_cast<int>(r);
         }
       }
+      // cgen's `read_all` (decision #2): the whole committed array as one bus.
+      static_assert(kMemoryReadAllPid == static_cast<uint32_t>(Ntype::Memory_readall_pid));
+      if (pid == kMemoryReadAllPid) {
+        return static_cast<int>(kMemoryReadAll);
+      }
     }
-    // A memory OUTPUT that is not a decoded read port -- `readall`, or a pin
-    // the cell grew. There is no certificate value to bind it to, so refuse it
-    // by name rather than join every input and emit something unrelated.
+    // A memory OUTPUT that is neither a decoded read port nor `read_all` -- a
+    // pin the cell grew. There is no certificate value to bind it to, so refuse
+    // it by name rather than join every input and emit something unrelated.
     fatal(ctx,
           "memory n_" + std::to_string(id) + " drives output pin " + std::to_string(pin.get_port_id())
               + ", which is not a decoded read port. A certificate binds a value per READ PORT.");
@@ -1298,6 +1388,16 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
           reader                = ", which is read by n_" + std::to_string(node_id(parent_nd)) + " ("
                    + std::string(livehd::graph_util::debug_name(parent_nd)) + ")";
         }
+        if (node.is_loop_subnode()) {
+          // A ROLLED loop: one compact instance standing for every iteration,
+          // whose carry feeds itself. That is not a design loop, and the
+          // generic message below sent readers hunting for one.
+          fatal(ctx,
+                "node n_" + std::to_string(id) + " (" + std::string(livehd::graph_util::debug_name(node))
+                    + ") is a ROLLED loop: one compact instance whose carry feeds itself" + reader
+                    + ". pass.lean needs every iteration as its own logic. Compile with `--set compile.unroll=true`; "
+                      "a loop with a run-time `break` or `continue` stays rolled even then, and is not supported.");
+        }
         fatal(ctx,
               "combinational cycle at node n_" + std::to_string(id) + " ("
                   + std::string(livehd::graph_util::debug_name(node)) + ")"
@@ -1357,8 +1457,8 @@ DesignScan scan_design(hhds::Graph& graph, const ScanOptions& options) {
         {       "sub", "flatten the hierarchy first (the Yosys readers flatten; native slang keeps Sub instances)"},
         {"clock_cell",                              "a Clock_cell outside a clock pin has no value semantics here"},
         {       "rem",
-         "only a nonzero CONSTANT divisor is supported; `x % 0` is X in Verilog, so a variable or zero divisor has no certificate "
-         "value"                                                                                                  },
+         "only a nonzero CONSTANT divisor is supported (or an unsigned mux whose every data input is a positive constant); "
+         "`x % 0` is X in Verilog, so a divisor that can be zero has no certificate value"                                                                                                  },
         {      "rxor",                                                    "reduce-xor has no certificate encoding"},
         {  "popcount",                                                      "popcount has no certificate encoding"},
     };

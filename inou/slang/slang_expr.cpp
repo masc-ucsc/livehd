@@ -950,11 +950,25 @@ std::string Slang_context::lower_binary(const slang::ast::BinaryExpression& expr
     case BinaryOperator::Equality  : return mark_bool(builder_.create_eq_stmts(lhs, rhs));
     case BinaryOperator::Inequality: return mark_bool(builder_.create_ne_stmts(lhs, rhs));
     case BinaryOperator::CaseEquality:
-      emit_warning(expr.sourceRange, "case-eq-two-state", "unsupported", "=== is lowered as == (two-state)");
-      return mark_bool(builder_.create_eq_stmts(lhs, rhs));
-    case BinaryOperator::CaseInequality:
-      emit_warning(expr.sourceRange, "case-eq-two-state", "unsupported", "!== is lowered as != (two-state)");
-      return mark_bool(builder_.create_ne_stmts(lhs, rhs));
+    case BinaryOperator::CaseInequality: {
+      const bool eq = expr.op == BinaryOperator::CaseEquality;
+      if (auto cv = try_eval(expr); cv && cv->isInteger() && !cv->integer().hasUnknown()) {
+        return mark_bool(builder_.create_ne_stmts(cv->isTrue() ? "1" : "0", "0"));  // both sides constant
+      }
+      // Two-state signals never hold X/Z, so they never match a constant with
+      // X/Z bits: `a === 'x` is false, `a !== 'x` is true. Lowering the X as 0
+      // would check a different property.
+      auto has_xz = [&](const slang::ast::Expression& e) {
+        auto c = try_eval(e);
+        return c && c->isInteger() && c->integer().hasUnknown();
+      };
+      if (has_xz(le) || has_xz(re)) {
+        return mark_bool(builder_.create_ne_stmts(eq ? "0" : "1", "0"));  // constant; cprop folds it
+      }
+      emit_warning(expr.sourceRange, "case-eq-two-state", "unsupported",
+                   eq ? "=== is lowered as == (two-state)" : "!== is lowered as != (two-state)");
+      return mark_bool(eq ? builder_.create_eq_stmts(lhs, rhs) : builder_.create_ne_stmts(lhs, rhs));
+    }
     case BinaryOperator::GreaterThan        : return mark_bool(builder_.create_gt_stmts(lhs, rhs));
     case BinaryOperator::GreaterThanEqual   : return mark_bool(builder_.create_ge_stmts(lhs, rhs));
     case BinaryOperator::LessThan           : return mark_bool(builder_.create_lt_stmts(lhs, rhs));

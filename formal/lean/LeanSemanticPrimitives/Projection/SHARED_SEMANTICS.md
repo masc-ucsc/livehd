@@ -19,10 +19,10 @@ own; the projection consumes them unchanged.  Against the base:
     Compiler/DesignCertWF.lean        byte-identical
     SemanticPrimitives.lean           byte-identical
 
-    Translation/LGraphModel.lean      MASTER-ADAPTED (operator boundary repairs)
+    Translation/LGraphModel.lean      MASTER-ADAPTED (operator boundary repairs; whole-array memory operators)
     Translation/OpBridge.lean         MASTER-ADAPTED (bridges re-proved for them)
     Compiler/DesignCert.lean          MASTER-ADAPTED (DCERT3 memory fields; recorded hash)
-    Compiler/DesignSemantics.lean     MASTER-ADAPTED (power-on image, commit table; recorded hash)
+    Compiler/DesignSemantics.lean     MASTER-ADAPTED (power-on image, commit table, async reset; recorded hash)
     Compiler/MemDomains.lean          MASTER-ONLY (new; which domains of a memory fire; recorded hash)
 
 ### `Compiler/DesignCert.lean`
@@ -35,13 +35,14 @@ and nothing in the semantics reads. That was a comment-only change.
 DCERT3 (decisions #5, #9 and #2, one revision) is a CODE change: `MemoryDesc`
 gains `init` (a memory's power-on words, entry 0 first, 0 past the end),
 `commits` (a commit table for a memory on more than one clock, decision #9) and
-one RESERVED field, `asyncImg` (an async-reset image for a whole-array cell,
-decision #2), with the `MemCommit` record and the helpers `reservedFree` and
-`initWord`.  Every field defaults to today's meaning.  Admission
-(`certWfError`) refuses a non-default reserved field until a route models it,
-and refuses a commit-table entry whose mask is 0 or names an undeclared clock,
-or whose image slot is out of range.  The check pins the bytes with a recorded
-hash.
+`asyncImg` (the image an asynchronous whole-array reset leaves, decision #2),
+with the `MemCommit` record and the helpers `reservedFree` and `initWord`.
+Every field defaults to today's meaning.  Admission (`certWfError`) refuses a
+commit-table entry whose mask is 0 or names an undeclared clock, or whose image
+slot is out of range, and an `asyncImg` slot out of range.  (Until decision #2
+stage 3 it refused every `asyncImg`; that field had no step meaning then.
+`reservedFree` now only names "no async reset".)  The check pins the bytes with
+a recorded hash.
 
 ### `Compiler/DesignSemantics.lean`
 
@@ -66,8 +67,22 @@ takes the table rule through eight small functions (`HardwareMem`), each proved
 to compute one `MemDomains` definition (`HardwareMemTable`), and admission
 types each table entry's image as the memory's table (`memTyOK`). Its runtime
 edge check also requires `domSpan ≤ e.size`, since the program reads every clock
-in a memory's span.  The check pins the bytes of both files with recorded
-hashes.
+in a memory's span.
+
+Decision #2 stage 3 changes what a memory KEEPS on a step it does not commit
+(both hold cases of `srcMemNext`): `srcMemHeld`, which is the stored image
+when `asyncImg = none` (`srcMemHeld_of_none`, so every certificate without an
+async reset steps exactly as before) and the image at slot `asyncImg` when it
+is set.  The exporter puts there the stored image with the reset applied
+(`Op_MemLoad` of the image, the reset bus or 0, and the reset pin), so an
+asserted reset lands with no clock edge, as `pass/lec` applies an async reset.
+`srcMemNext_allEdges` and `interpretDesign_allEdges` are unchanged: a memory
+whose domains all fire never reads the held image.  The direct checker requires
+the `asyncImg` slot to be a memory slot (`DesignSemWF.memAsyncKinds`).  The
+projection's `memNext` keeps the same image (`heldO`, proved as `heldO_agree`;
+`memNextOf` reads `heldOf`), and admission types the `asyncImg` slot as the
+memory's table (`memTyOK`).  The check pins the bytes of both files with
+recorded hashes.
 
 ### `Compiler/Runtime.lean`
 
@@ -97,6 +112,20 @@ them directly: `ObjectLanguageSemantics` evaluates `.bvSra` / `.bvShl` with
 with MASTER's guarded body.  The patch was not applied: its body is the
 unguarded `2 ^ k`, and taking it would delete a proved repair (regression R46).
 The patch file is kept as a historical record only.
+
+Decision #2 (whole-array memories) added two memory operators, `Op_MemLoad n`
+and `Op_MemToBus n`, with `cert_mem_load`, `cert_mem_pack` and
+`cert_mem_to_bus` and their `eval_op_cert` cases. `eval_op` and `denote_op`
+are unchanged (both end in a wildcard), and every other operator's
+`eval_op_cert` case is unchanged, so no existing bridge or theorem about an
+operator changes; `eval_op_cert_bv` takes the two new operators in its
+"not a memory operator" hypothesis. FP models both: `applyOpM` dispatches
+opcodes 29 and 30 to the object functions `memLoadO` / `memToBusO`
+(`HardwareMem`), whose results are proved equal to `cert_mem_load` /
+`cert_mem_to_bus` in `Projection/HardwareMemLoad` (the load given the table
+contract `n ≤ words.length`, which admission's `n ≤ 2 ^ aw` and the table's
+geometry supply). FP's scalar operator lists (`HardwareAdequacy`,
+`HardwareMemSlots`) still exclude them, as they exclude every memory operator.
 
 Commits: 0143ea8cc, f3678b423, 9ca8cf8ed (the repairs), 39f118b05
 (`bv_shl_step` with master's body), and the docstring correction that records

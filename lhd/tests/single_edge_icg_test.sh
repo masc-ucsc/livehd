@@ -737,9 +737,9 @@ echo "ok: a memory with a gated write clock is accepted and slot-gated"
 "$LHD" compile "lg:$W/lg_mg_norm" --top memg --emit-dir "verilog:$W/v_mg" --workdir "$W/vw_mg" \
   >"$W/e_mg.log" 2>&1 || { tail -6 "$W/e_mg.log"; fail "verilog emission of the gated memory failed"; }
 mgv="$(ls "$W"/v_mg/*.v | head -1)"
-# The write clock must be the ROOT, not the gated net.
-grep -qE "\.wr_clock_0\(clk\)" "$mgv" \
-  || { grep -nE "wr_clock_0|wr_enable_0" "$mgv"; fail "the write clock was not rebound to the gate root"; }
+# The write clock must be the ROOT, with either a shared or per-write clock port.
+grep -qE "\.(clk|wr_clock_0)\(clk\)" "$mgv" \
+  || { grep -nE "\.clk\(|wr_clock_0|wr_enable_0" "$mgv"; fail "the write clock was not rebound to the gate root"; }
 # The widened enable must be a FULL-WIDTH vector, not a 1-bit predicate.
 wnet="$(sed -n 's/^  *,\.wr_enable_0(\([A-Za-z_][A-Za-z0-9_]*\))$/\1/p' "$mgv" | head -1)"
 [ -n "$wnet" ] || fail "could not find the memory's write-enable net"

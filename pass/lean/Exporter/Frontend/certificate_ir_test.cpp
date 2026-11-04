@@ -4,9 +4,11 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <sstream>
 #include <stdexcept>
 
+#include "design_io_meta.hpp"
 #include "emit_design_cert.hpp"
 #include "gtest/gtest.h"
 #include "lean_format.hpp"
@@ -276,6 +278,272 @@ TEST(CertificateIR, ReadForwardingSelectsWriteChainAndByteLanes) {
   EXPECT_EQ(forwarded.nodes.back().op.kind, Operation::MemRead);
   EXPECT_EQ(forwarded.nodes.back().deps[0], forwarded.memories[0].next_img);
 }
+// A WHOLE-ARRAY cell (decision #2): the next image is the bulk update, then
+// the port write over it, then the reset over both -- reset wins, then a port
+// write, then the update, as cgen and pass/lec order them. Reads, and the
+// whole-array read (`read_all`), see the COMMITTED image.
+TEST(CertificateIR, WholeArrayCellLoadsUpdateThenWritesThenReset) {
+  auto  d         = memory_design(false, false);
+  auto& m         = d.memories.at(10);
+  m.whole_array   = true;
+  m.update        = input(2000000000, 24);
+  m.update_enable = input(2000000001, 1);
+  m.bulk_reset    = input(2000000002, 1);
+  m.reset_bus     = constant("197121", 24);  // entries 1, 2, 3
+  m.init_contents = {"1", "2", "3"};         // a constant reset bus is also power-on contents
+  d.inputs        = {
+      {   "upd", 2000000000, 24, std::nullopt},
+      {"upd_en", 2000000001,  1, std::nullopt},
+      {   "rst", 2000000002,  1, std::nullopt}
+  };
+  m.ports.push_back({1, 0, constant("1", 2), constant("42", 8), constant("1", 1), std::nullopt});
+  m.write_ports = {1};
+  m.fwd_rows    = {{false}};
+  d.nodes.push_back({10, ScanOp::Memory, 0, false, {}});
+  d.nodes.back().memory_read = kMemoryReadAll;
+  d.outputs.push_back({
+      "all",
+      1,
+      24,
+      PinRef{PinKind::Memory, 10, kMemoryReadAllPid, 24, 0, {}}
+  });
+  const auto c = build_certificate(d, {});
+  ASSERT_EQ(c.memories.size(), 1);
+  const auto& md    = c.memories.front();
+  const auto  image = c.sources.front().id;
+  ASSERT_EQ(c.sources.front().kind, SourceKind::MemImage);
+  EXPECT_EQ(md.init, (std::vector<std::string>{"1", "2", "3"}));
+  auto        node  = [&](uint32_t id) -> const CertNode& { return c.nodes.at(c.slot_of.at(id) - c.sources.size()); };
+  // the reset load is the next image, over the port write, over the update load
+  const auto& reset = node(md.next_img);
+  ASSERT_EQ(reset.op.kind, Operation::MemLoad);
+  EXPECT_EQ(reset.op.parameter, 3);
+  EXPECT_EQ(reset.width, 8);
+  const auto& write = node(reset.deps[0]);
+  ASSERT_EQ(write.op.kind, Operation::MemWrite);
+  const auto& update = node(write.deps[0]);
+  ASSERT_EQ(update.op.kind, Operation::MemLoad);
+  EXPECT_EQ(update.op.parameter, 3);
+  EXPECT_EQ(update.deps[0], image);
+  // the read port and the whole-array read see the committed image
+  size_t to_bus = 0, reads = 0;
+  for (const auto& n : c.nodes) {
+    if (n.op.kind == Operation::MemToBus) {
+      ++to_bus;
+      EXPECT_EQ(n.op.parameter, 3);
+      EXPECT_EQ(n.width, 24);
+      EXPECT_EQ(n.deps, (std::vector<uint32_t>{image}));
+    }
+    if (n.op.kind == Operation::MemRead) {
+      ++reads;
+      EXPECT_EQ(n.deps[0], image);
+    }
+  }
+  EXPECT_EQ(to_bus, 1);
+  EXPECT_EQ(reads, 1);
+  // without a reset the next image is the port write over the update; without
+  // an update enable the update always loads (a constant enable)
+  m.bulk_reset.reset();
+  m.update_enable.reset();
+  const auto  c2 = build_certificate(d, {});
+  const auto& n2 = c2.nodes.at(c2.slot_of.at(c2.memories.front().next_img) - c2.sources.size());
+  EXPECT_EQ(n2.op.kind, Operation::MemWrite);
+}
+// An ASYNCHRONOUS whole-array reset (decision #2) acts with no clock edge: every
+// read sees the image with the reset applied -- MemLoad(image, reset bus,
+// reset) -- and that same node is the memory's `asyncImg`, the image it keeps
+// on a step it does not commit. The next image is unchanged. A synchronous
+// reset has no `asyncImg`, and reads see the stored image.
+TEST(CertificateIR, WholeArrayCellAsyncResetIsReadAndHeld) {
+  auto  d         = memory_design(false, false);
+  auto& m         = d.memories.at(10);
+  m.whole_array   = true;
+  m.update        = input(2000000000, 24);
+  m.update_enable = input(2000000001, 1);
+  m.bulk_reset    = input(2000000002, 1);
+  m.reset_bus     = constant("197121", 24);  // entries 1, 2, 3
+  m.async_reset   = true;
+  d.inputs        = {
+      {   "upd", 2000000000, 24, std::nullopt},
+      {"upd_en", 2000000001,  1, std::nullopt},
+      {   "rst", 2000000002,  1, std::nullopt}
+  };
+  m.ports.push_back({1, 0, constant("1", 2), constant("42", 8), constant("1", 1), std::nullopt});
+  m.write_ports = {1};
+  m.fwd_rows    = {{false}};
+  d.nodes.push_back({10, ScanOp::Memory, 0, false, {}});
+  d.nodes.back().memory_read = kMemoryReadAll;
+  d.outputs.push_back({
+      "all",
+      1,
+      24,
+      PinRef{PinKind::Memory, 10, kMemoryReadAllPid, 24, 0, {}}
+  });
+  const auto c = build_certificate(d, {});
+  ASSERT_EQ(c.memories.size(), 1);
+  const auto& md    = c.memories.front();
+  const auto  image = c.sources.front().id;
+  ASSERT_EQ(c.sources.front().kind, SourceKind::MemImage);
+  auto node = [&](uint32_t id) -> const CertNode& { return c.nodes.at(c.slot_of.at(id) - c.sources.size()); };
+  // the next image: the reset load over the port write over the update load
+  const auto& reset = node(md.next_img);
+  ASSERT_EQ(reset.op.kind, Operation::MemLoad);
+  const auto& write = node(reset.deps[0]);
+  ASSERT_EQ(write.op.kind, Operation::MemWrite);
+  const auto& update = node(write.deps[0]);
+  ASSERT_EQ(update.op.kind, Operation::MemLoad);
+  EXPECT_EQ(update.deps[0], image);
+  // the held image: the STORED image with the same reset applied
+  ASSERT_TRUE(md.async_img.has_value());
+  const auto& held = node(*md.async_img);
+  ASSERT_EQ(held.op.kind, Operation::MemLoad);
+  EXPECT_EQ(held.op.parameter, 3);
+  EXPECT_EQ(held.width, 8);
+  ASSERT_EQ(held.deps.size(), 3u);
+  EXPECT_EQ(held.deps[0], image);
+  // the same reset bus and pin as the next image's reset: each use emits its
+  // own copy of the nodes and constants, so compare the expressions, not the ids
+  std::function<std::string(uint32_t)> expr = [&](uint32_t id) -> std::string {
+    const auto slot = c.slot_of.at(id);
+    if (slot < c.sources.size()) {
+      const auto& src = c.sources[slot];
+      return src.kind == SourceKind::Const ? "k" + src.const_int + "/" + std::to_string(src.width)
+                                           : "s" + std::to_string(slot);
+    }
+    const auto& x   = node(id);
+    std::string out = std::to_string(static_cast<int>(x.op.kind)) + "/" + std::to_string(x.op.parameter) + "/" + x.op.value
+                      + "/" + std::to_string(x.width) + "(";
+    for (const auto dep : x.deps) {
+      out += expr(dep) + ",";
+    }
+    return out + ")";
+  };
+  EXPECT_EQ(expr(held.deps[1]), expr(reset.deps[1]));  // the reset bus
+  EXPECT_EQ(expr(held.deps[2]), expr(reset.deps[2]));  // the reset pin
+  // the read port and the whole-array read see the held image, through ONE node
+  size_t to_bus = 0, reads = 0, loads = 0;
+  for (const auto& n : c.nodes) {
+    if (n.op.kind == Operation::MemToBus) {
+      ++to_bus;
+      EXPECT_EQ(n.deps, (std::vector<uint32_t>{*md.async_img}));
+    }
+    if (n.op.kind == Operation::MemRead) {
+      ++reads;
+      EXPECT_EQ(n.deps[0], *md.async_img);
+    }
+    if (n.op.kind == Operation::MemLoad) {
+      ++loads;
+    }
+  }
+  EXPECT_EQ(to_bus, 1);
+  EXPECT_EQ(reads, 1);
+  EXPECT_EQ(loads, 3);  // update, reset at the chain's end, reset of the stored image
+  // a SYNCHRONOUS reset: no held image, and reads see the stored image
+  m.async_reset = false;
+  const auto c2 = build_certificate(d, {});
+  EXPECT_FALSE(c2.memories.front().async_img.has_value());
+  for (const auto& n : c2.nodes) {
+    if (n.op.kind == Operation::MemRead) {
+      EXPECT_EQ(n.deps[0], c2.sources.front().id);
+    }
+  }
+  // an active-LOW reset computed from an input by a node the scan orders AFTER
+  // the memory's readers: its cone is lowered first, so the order stays
+  // topological (build_certificate would throw otherwise)
+  m.async_reset = true;
+  DesignNode inv;
+  inv.id       = 30;
+  inv.op       = ScanOp::Not;
+  inv.width    = 1;
+  inv.operands = {
+      {0, 0, input(2000000002, 1)}
+  };
+  d.nodes.push_back(inv);
+  m.bulk_reset  = PinRef{PinKind::Node, 30, 0, 1, 0, {}};
+  const auto c3 = build_certificate(d, {});
+  ASSERT_TRUE(c3.memories.front().async_img.has_value());
+  const auto& held3 = c3.nodes.at(c3.slot_of.at(*c3.memories.front().async_img) - c3.sources.size());
+  // its condition is node 30, directly or through the 1-bit resize
+  const auto cond3 = held3.deps[2];
+  EXPECT_TRUE(cond3 == 30u
+              || (c3.slot_of.at(cond3) >= c3.sources.size()
+                  && c3.nodes.at(c3.slot_of.at(cond3) - c3.sources.size()).deps == std::vector<uint32_t>{30u}));
+  EXPECT_LT(c3.slot_of.at(30), c3.slot_of.at(*c3.memories.front().async_img));
+  // a reset computed from STATE is refused: it can change within the step
+  Flop g;
+  g.id    = 11;
+  g.width = 1;
+  g.din   = constant("1", 1);
+  d.flops.push_back(g);
+  m.bulk_reset = PinRef{PinKind::Flop, 11, 0, 1, 0, {}};
+  EXPECT_THROW(build_certificate(d, {}), std::runtime_error);
+}
+// ordering="none" (decision #8): a read whose address a write on an `undef`
+// column writes this step takes the bits that write drives from the read's
+// free input; every other bit is the committed read. With byte lanes only the
+// enabled lanes are undefined. The sidecar marks the free input.
+TEST(CertificateIR, UndefinedReadTakesItsFreeInput) {
+  auto  d    = memory_design(false, false);
+  auto& m    = d.memories.at(10);
+  m.wensize  = 2;
+  m.ports[0] = {0, 0, input(2000000000, 2), {}, constant("1", 1), std::nullopt};
+  m.ports.push_back({1, 0, input(2000000001, 2), constant("42", 8), input(2000000002, 2), std::nullopt});
+  m.write_ports = {1};
+  m.fwd_rows    = {{false}};
+  m.undef_rows  = {{true}};
+  d.inputs      = {
+      {"ra", 2000000000, 2, std::nullopt},
+      {"wa", 2000000001, 2, std::nullopt},
+      {"wen", 2000000002, 2, std::nullopt},
+      {"mem__undef_read0", 2000000003, 8, std::nullopt, true}
+  };
+  m.free_value.emplace(0, input(2000000003, 8));
+  const auto  c    = build_certificate(d, {});
+  auto        node = [&](uint32_t id) -> const CertNode& { return c.nodes.at(c.slot_of.at(id) - c.sources.size()); };
+  // y = Or(And(read, Not(undefined)), And(free, undefined))
+  const auto& y    = node(c.outputs.front().id);
+  ASSERT_EQ(y.op.kind, Operation::Or);
+  ASSERT_EQ(y.deps.size(), 2u);
+  const auto& kept  = node(y.deps[0]);
+  const auto& freed = node(y.deps[1]);
+  ASSERT_EQ(kept.op.kind, Operation::And);
+  EXPECT_EQ(node(kept.deps[0]).op.kind, Operation::MemRead);
+  ASSERT_EQ(freed.op.kind, Operation::And);
+  // one mask per lane, joined
+  const auto& undefined = node(freed.deps[1]);
+  ASSERT_EQ(undefined.op.kind, Operation::Or);
+  EXPECT_EQ(undefined.deps.size(), 2u);
+  for (const auto lane : undefined.deps) {
+    EXPECT_EQ(node(lane).op.kind, Operation::MuxBool);
+  }
+  // the free input is the last runtime input, and the sidecar says so
+  const auto meta = build_io_meta(d, c);
+  ASSERT_EQ(meta.inputs.size(), 4u);
+  EXPECT_TRUE(meta.inputs.back().free_value);
+  EXPECT_FALSE(meta.inputs.front().free_value);
+  const auto json = io_meta_json(meta);
+  EXPECT_NE(json.find("\"mem__undef_read0\", \"ordinal\": 3, \"width\": 8, \"used_by_model\": true, \"free_value\": true}"),
+            std::string::npos);
+  // a memory with no undefined window is unchanged: no free input is read
+  m.undef_rows = {{false}};
+  m.free_value.clear();
+  const auto c2 = build_certificate(d, {});
+  EXPECT_EQ(c2.nodes.at(c2.slot_of.at(c2.outputs.front().id) - c2.sources.size()).op.kind, Operation::MemRead);
+}
+// A whole-array cell needs ONE clock: its update and reset have no per-port domain.
+TEST(CertificateIR, WholeArrayCellOnTwoClocksIsRefused) {
+  auto  d       = memory_design(false, false);
+  auto& m       = d.memories.at(10);
+  m.whole_array = true;
+  m.bulk_reset  = constant("1", 1);
+  m.ports.push_back({1, 0, constant("1", 2), constant("42", 8), constant("1", 1), std::nullopt});
+  m.write_ports            = {1};
+  m.ports[1].has_domain    = true;
+  m.ports[1].clock_ordinal = 1;
+  m.ports[0].has_domain    = true;
+  m.ports[0].clock_ordinal = 0;
+  EXPECT_THROW(build_certificate(d, {}), std::runtime_error);
+}
 TEST(CertificateIR, AsyncResetSourceAndFlopControlsRemainDistinct) {
   DesignScan d;
   d.name   = "async";
@@ -389,6 +657,30 @@ TEST(CertificateIR, InputDerivedAsyncResetReadsThroughAnOverride) {
     }
   }
   EXPECT_TRUE(raw_q);
+}
+TEST(CertificateIR, UndrivenOutputKeepsItsPlaceAndReadsZero) {
+  // y (driven), z (no driver), w (driven): the sidecar gives them ordinals
+  // 0, 1, 2, so the certificate must carry all three in that order. Dropping z
+  // put w's value at ordinal 1 (finding V, Vortex VX_scheduler).
+  auto d = binary(ScanOp::Or, 8, input(2000000000, 8), input(2000000001, 8));
+  d.outputs.push_back({"z", 1, 4, std::nullopt});
+  d.outputs.push_back({"w", 2, 8, PinRef{PinKind::Node, 10, 0, 8, 0, {}}});
+  const auto c = build_certificate(d, {});
+  ASSERT_EQ(c.outputs.size(), 3u);
+  EXPECT_EQ(c.outputs[0].id, 10u);
+  EXPECT_EQ(c.outputs[2].id, 10u);
+  EXPECT_EQ(c.outputs[1].width, 4u);
+  bool zero = false;
+  for (const auto& src : c.sources) {
+    if (src.id == c.outputs[1].id) {
+      zero = src.kind == SourceKind::Const && src.const_int == "0" && src.width == 4;
+    }
+  }
+  EXPECT_TRUE(zero) << "the undriven output must read a 4-bit constant 0";
+  const auto meta = build_io_meta(d, c);
+  ASSERT_EQ(meta.outputs.size(), c.outputs.size());
+  EXPECT_EQ(meta.outputs[2].name, "w");
+  EXPECT_EQ(meta.outputs[2].ordinal, 2u);
 }
 TEST(CertificateIR, EmitterAndAtomicFailureNeedNoGraph) {
   const auto         c = build_certificate(binary(ScanOp::Or, 8, constant("3", 2), constant("-1", 1)), {});

@@ -29,7 +29,8 @@ TMP="$(mktemp -d "$ROOT/temp/coreet_ctl.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 
 # ---------------------------------------------------------------- the mirror
-# A real git checkout holding COPIES of exactly the four mapped sources, at
+# A real git checkout holding COPIES of the mapped sources (and the packages
+# they wildcard-import), at
 # their original relative paths.  Same bytes, so the hashes the generator
 # embedded still match and the derived copies are legitimately current.
 MIRROR="$TMP/mirror"
@@ -42,6 +43,19 @@ while IFS=$'\t' read -r src out; do
   mkdir -p "$MIRROR/$(dirname "$rel")"
   cp "$src" "$MIRROR/$rel"
 done < <(grep -v '^[[:space:]]*$' "$REAL_DERIVED/map.tsv")
+# The patcher also READS every package a mapped source wildcard-imports (the
+# explicit-import alias check, coreet_patch_srcs.py `find_pkg_file`). B05's
+# shirecache_mesh_master_axi_port.sv imports axi_pkg and etlink_pkg, which are
+# not mapped; without them the patcher stopped ("expected exactly 1 file for
+# package axi_pkg") and 13 controls failed for that reason since 071067ec5.
+while read -r pkg; do
+  hit="$(find "$REAL_ROOT/hw" -name "$pkg.sv" | head -2)"
+  [[ -n "$hit" && "$(wc -l <<<"$hit")" == 1 ]] || continue
+  rel="${hit#"$REAL_ROOT/"}"
+  [[ -e "$MIRROR/$rel" ]] && continue
+  mkdir -p "$MIRROR/$(dirname "$rel")"
+  cp "$hit" "$MIRROR/$rel"
+done < <(cut -f1 "$REAL_DERIVED/map.tsv" | xargs grep -ohP '^\s*import\s+\K\w+(?=::\*;)' | sort -u)
 # `mk/` is a RELEVANT input: every dv/rtlcosim Makefile includes
 # mk/rtlcosim.mk, which includes mk/prim.mk, to derive NEW_RTL_FINAL.
 mkdir -p "$MIRROR/mk" "$MIRROR/dv"
@@ -93,11 +107,11 @@ fi
 
 # --- 1. a MISSING derived output ------------------------------------------
 D1="$TMP/d1"; mk_derived "$D1"; rm -f "$D1/vpu_defs_pkg.sv"
-expect_fail "missing derived output" "does not hold exactly the four outputs" "$MIRROR" "$D1"
+expect_fail "missing derived output" "does not hold exactly the 6 outputs" "$MIRROR" "$D1"
 
 # --- 2. an EXTRA file in the derived dir ----------------------------------
 D2="$TMP/d2"; mk_derived "$D2"; echo "// leftover" > "$D2/stale_from_an_older_run.sv"
-expect_fail "extra/leftover derived file" "does not hold exactly the four outputs" "$MIRROR" "$D2"
+expect_fail "extra/leftover derived file" "does not hold exactly the 6 outputs" "$MIRROR" "$D2"
 
 # --- 3. a STALE derived output (source moved on) --------------------------
 D3="$TMP/d3"; mk_derived "$D3"
@@ -255,14 +269,14 @@ if [[ "$rc" -ne 0 ]]; then
   bad "--publish into an empty consumed dir failed: $(head -1 <<<"$out")"
 elif [[ "$(grep -m1 '^coreet_derived_dir=' <<<"$out" | cut -d= -f2)" != "$(readlink -f "$D16")" ]]; then
   bad "--publish reported a different derived dir than the one consumed"
-elif [[ "$(cut -f2 "$D16/map.tsv" | grep -c "^$D16/")" -ne 4 ]]; then
+elif [[ "$(cut -f2 "$D16/map.tsv" | grep -c "^$D16/")" -ne "$(grep -cv '^[[:space:]]*$' "$REAL_DERIVED/map.tsv")" ]]; then
   bad "the map does not point at the consumed directory: $(head -1 "$D16/map.tsv")"
 elif ! grep -q 'regenerated in place' <<<"$out"; then
   bad "--publish did not record that it regenerated in place"
 else
   # and the published bytes survive a plain verify
   "$PRE" "$MIRROR" "$D16" "$PATCHER" >/dev/null 2>&1 \
-    && ok "--publish derives the four files into the exact consumed dir; verify then passes" \
+    && ok "--publish derives every mapped file into the exact consumed dir; verify then passes" \
     || bad "the published set does not pass a plain verify"
 fi
 

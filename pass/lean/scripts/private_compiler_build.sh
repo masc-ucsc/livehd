@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# PRIVATE, EXPLICIT build of the fourteen canonical Compiler targets the D3
+# PRIVATE, EXPLICIT build of the sixteen canonical Compiler targets the D3
 # probes load -- the step that the default `lake build` does NOT cover.
 #
 # WHY THIS EXISTS.  `lake build` with no target builds the library root's import
-# closure (7 jobs here).  The fourteen `Compiler/*` modules in `CRITICAL_OLEANS`
+# closure (7 jobs here).  The sixteen `Compiler/*` modules in `CRITICAL_OLEANS`
 # are NOT in that closure, so a default build succeeding -- and a default
 # `--no-build` reporting "All targets up-to-date" -- says nothing about them.
 # Measured in the private checkout: the explicit 14-target `lake --no-build
@@ -30,8 +30,8 @@ L=$PABS/formal/lean
 
 TARGETS=(CompileDesignDefs CompileGraphDefs CompileOpDefs CompileDesign CompileGraph
          CompileOp D3Harness ReifyGen Reify ReifyProof Runtime DesignCert
-         ResidualIR ResidualSemantics)
-[ "${#TARGETS[@]}" = 14 ] || { echo "REFUSING: target list is ${#TARGETS[@]}, expected 14"; exit 2; }
+         ResidualIR ResidualSemantics MemDomains SeqCompile)
+[ "${#TARGETS[@]}" = 16 ] || { echo "REFUSING: target list is ${#TARGETS[@]}, expected 16"; exit 2; }
 MODS=(); for t in "${TARGETS[@]}"; do MODS+=("LeanSemanticPrimitives.Compiler.$t"); done
 ARTDIR=$L/.lake/build/lib/lean/LeanSemanticPrimitives/Compiler
 
@@ -254,20 +254,20 @@ done > "$OUT/artifacts.after"
 # what it affects; nothing that already passed is blindly re-run.
 diff "$OUT/artifacts.before" "$OUT/artifacts.after" > "$OUT/artifacts.diff"
 chg=$(grep -c '^>' "$OUT/artifacts.diff" 2>/dev/null || echo 0)
-echo "build rc=$rcb; $chg of 14 artifact identities changed"
+echo "build rc=$rcb; $chg of 16 artifact identities changed"
 
 [ "$rcb" = 0 ] || { echo "REFUSED build exit=$rcb" | tee "$OUT/DISPOSITION.txt"; exit "$rcb"; }
 
-# ---- the required explicit 14-target freshness check ----------------------
+# ---- the required explicit 16-target freshness check ----------------------
 ( cd "$L" && /usr/bin/time -f 'wall %e\nuser %U\nsys %S\nmaxrss_kib %M\nexit %x' -o "$OUT/nobuild.time" \
     nice -n19 lake --no-build build "${MODS[@]}" ) \
   > "$OUT/nobuild.stdout" 2> "$OUT/nobuild.stderr"
 rcn=$?; echo "$rcn" > "$OUT/nobuild.exit"
 if [ "$rcn" != 0 ]; then
-  echo "NOT VALIDATED: the explicit 14-target --no-build exited $rcn, not 0" | tee "$OUT/DISPOSITION.txt"
+  echo "NOT VALIDATED: the explicit 16-target --no-build exited $rcn, not 0" | tee "$OUT/DISPOSITION.txt"
   grep -m3 'out-of-date\|Building' "$OUT/nobuild.stdout" 2>/dev/null
   exit "$rcn"
 fi
-echo "VALIDATED: build exit 0 and the explicit 14-target --no-build exit 0 ($chg/14 artifacts changed)" \
+echo "VALIDATED: build exit 0 and the explicit 16-target --no-build exit 0 ($chg/16 artifacts changed)" \
   | tee "$OUT/DISPOSITION.txt"
 exit 0

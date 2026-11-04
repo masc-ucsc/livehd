@@ -221,7 +221,16 @@ def mutate(c: dict, kind: str) -> bytes:
     # different file from the one the control names. Each edit below is
     # located structurally instead.
     if kind == "truncate":
-        return blob[:-max(1, len(blob) // 100)]
+        # Cut the file where its LAST section (clocks) begins, so the reader runs
+        # out of input reading that section's count. Cutting the last 1% did
+        # this on a large certificate, but a small one ends in a clock NAME,
+        # and clipping that name's newline is a canonical-form refusal, not a
+        # truncation.
+        empty = dict(c)
+        empty["clocks"] = []
+        pref = render(empty)
+        assert pref.endswith(b"0\n")
+        return pref[:-2]
 
     if kind == "count":
         # The LAST section's count -- now `clocks` -- inflated with no record
@@ -235,7 +244,11 @@ def mutate(c: dict, kind: str) -> bytes:
         head = pref[:-2]
         tail = blob[len(head):]
         records = tail.split(b"\n", 1)[1] if b"\n" in tail else b""
-        return head + str(len(c["clocks"]) + 1).encode() + b"\n" + records
+        # More records than the WHOLE FILE has bytes, so certainly more than
+        # remain behind the count: the count's own guard ("declares"). One more
+        # than the real count would instead run out of input inside the extra
+        # record (the truncation guard).
+        return head + str(len(blob) + 1).encode() + b"\n" + records
 
     if kind == "token":
         # The first token after the magic is `nSources`; a non-decimal there is

@@ -30,6 +30,12 @@ never written: the write rule demands `tbl` at operand 0.
   `dw = 32`, needing a 32-bit mask.  At `bw = 8` it is `dw ≤ 8 * wb`, the lane
   case, needing only 4 mask bits for 32-bit data.  The result propagates the
   image's own `tbl aw dw`, which is `WritePropagates`.
+* **`Op_MemLoad k [m, bus, en]`** (decision #2) — `m` must be `tbl aw dw`, the
+  bus and the enable are scalars, the node width is `dw`, and `0 < k ≤ 2 ^ aw`:
+  the table holds every entry the load writes. The result propagates the
+  image's own `tbl aw dw`, as a write does.
+* **`Op_MemToBus k [m]`** (decision #2) — `m` is an image (either kind) and
+  `0 < k`; the result is `bv` at the node width.
 * **Any other operator** — admitted only when `OpSupported` holds and every
   dependency is a scalar; the result is `bv` at the node width.  `Op_MemWrite`
   and `Op_Sub` are not `OpSupported` and have no rule here, so they are
@@ -104,6 +110,18 @@ def nodeTy (ty : Nat → Option SlotTy) (c : DenseNodeCert) : Option SlotTy :=
             then some (.tbl aw dw) else none
         | _ => none
       else none
+  | .Op_MemLoad k, [tm, tb, ten] =>
+      if isBvTy tb && isBvTy ten then
+        match tm with
+        | some (.tbl aw dw) =>
+            if c.width == dw && 0 < k && k ≤ 2 ^ aw then some (.tbl aw dw) else none
+        | _ => none
+      else none
+  | .Op_MemToBus k, [tm] =>
+      match tm with
+      | some (.tbl _ _) => if 0 < k then some (.bv c.width) else none
+      | some (.rom _ _) => if 0 < k then some (.bv c.width) else none
+      | _               => none
   | op, tys =>
       if OpSupported op && tys.all isBvTy then some (.bv c.width) else none
 
@@ -130,8 +148,10 @@ def geomAt (D : DesignCert) (k : Nat) : Option Nat :=
 /-! ## 2. The executable checker
 
 Every image a memory can take must type as THAT memory's table: its `nextImg`,
-and, for a memory on more than one clock, each commit-table entry's image
-(`MemoryDesc.commits`, decision #9). Each test is named once (`imgTyOK`,
+for a memory on more than one clock each commit-table entry's image
+(`MemoryDesc.commits`, decision #9), and the image an asynchronous whole-array
+reset leaves when the memory does not commit (`MemoryDesc.asyncImg`, decision
+#2). Each test is named once (`imgTyOK`,
 `memTyOK`) so the extended checker and the support report read the same
 function. -/
 
@@ -154,18 +174,25 @@ theorem imgTyOK_eq {ts : Array SlotTy} {aw dw k : Nat} (h : imgTyOK ts aw dw k =
 def memTyOK (ts : Array SlotTy) (md : MemoryDesc) : Bool :=
   imgTyOK ts md.aw md.dw md.nextImg
   && md.commits.toList.all (fun c => imgTyOK ts md.aw md.dw c.nextImg)
+  && md.asyncImg.all (imgTyOK ts md.aw md.dw)
 
 theorem memTyOK_next {ts : Array SlotTy} {md : MemoryDesc} (h : memTyOK ts md = true) :
     ts[md.nextImg]? = some (.tbl md.aw md.dw) := by
   unfold memTyOK at h
   simp only [Bool.and_eq_true] at h
-  exact imgTyOK_eq h.1
+  exact imgTyOK_eq h.1.1
 
 theorem memTyOK_commit {ts : Array SlotTy} {md : MemoryDesc} (h : memTyOK ts md = true)
     {c : MemCommit} (hc : c ∈ md.commits) : ts[c.nextImg]? = some (.tbl md.aw md.dw) := by
   unfold memTyOK at h
   simp only [Bool.and_eq_true, List.all_eq_true] at h
-  exact imgTyOK_eq (h.2 c (Array.mem_def.mp hc))
+  exact imgTyOK_eq (h.1.2 c (Array.mem_def.mp hc))
+
+theorem memTyOK_async {ts : Array SlotTy} {md : MemoryDesc} (h : memTyOK ts md = true)
+    {a : Nat} (ha : md.asyncImg = some a) : ts[a]? = some (.tbl md.aw md.dw) := by
+  unfold memTyOK at h
+  simp only [Bool.and_eq_true, ha, Option.all_some] at h
+  exact imgTyOK_eq h.2
 
 def admitsB (D : DesignCert) : Bool :=
   Direct.acceptsDesign D
@@ -293,7 +320,8 @@ theorem admits_nextImgGeom {D : DesignCert} (h : admitsB D = true) :
     unfold geomAt tyAt
     rw [hts]
     simp [hk]
-  exact ⟨hg _ (memTyOK_next hok), fun c hc => hg _ (memTyOK_commit hok hc)⟩
+  exact ⟨hg _ (memTyOK_next hok), fun c hc => hg _ (memTyOK_commit hok hc),
+    fun a ha => hg _ (memTyOK_async hok ha)⟩
 
 /-- The memory-type facts of one admitted memory, as `memTyOK`. -/
 theorem admits_memTyOK {D : DesignCert} (h : admitsB D = true) {ts : Array SlotTy}
@@ -452,6 +480,35 @@ theorem nodeTy_write_geom {ty : Nat → Option SlotTy} {c : DenseNodeCert}
     · simp at h
   · simp at h
 
+/-- A whole-array LOAD that types consumed a MUTABLE image at operand 0, returns
+that image's own geometry, and loads no more entries than the table holds --
+what `WritePropagates` and `LoadFits` need (decision #2). -/
+theorem nodeTy_load_geom {ty : Nat → Option SlotTy} {c : DenseNodeCert}
+    {k d0 d1 d2 : Nat} {t : SlotTy}
+    (hop : c.op = .Op_MemLoad k) (hdeps : c.deps.toList = [d0, d1, d2])
+    (h : nodeTy ty c = some t) :
+    ∃ aw dw, t = .tbl aw dw ∧ ty d0 = some (.tbl aw dw) ∧ c.width = dw ∧ k ≤ 2 ^ aw := by
+  have hb : nodeAdmittedB c = true := by
+    cases hbb : nodeAdmittedB c with
+    | false => exfalso; unfold nodeTy at h; rw [hbb] at h; simp at h
+    | true  => rfl
+  unfold nodeTy at h
+  rw [hb] at h
+  simp only [Bool.not_true, Bool.false_eq_true, if_false] at h
+  rw [hop, hdeps] at h
+  simp only [List.map_cons, List.map_nil] at h
+  split at h
+  · split at h
+    · rename_i aw' dw' heq
+      split at h
+      · rename_i hcond
+        simp only [Bool.and_eq_true, decide_eq_true_eq, beq_iff_eq] at hcond
+        simp only [Option.some.injEq] at h
+        exact ⟨aw', dw', h.symm, heq, hcond.1.1, hcond.2⟩
+      · simp at h
+    · simp at h
+  · simp at h
+
 /-! ### The general checker-to-static-premises theorems -/
 
 theorem admitsB_size {D : DesignCert} {ts : Array SlotTy}
@@ -479,25 +536,37 @@ theorem admits_nodeAdmitted {D : DesignCert} (h : admitsB D = true) :
 theorem admits_writePropagates {D : DesignCert} (h : admitsB D = true) :
     ∀ (j : Nat) (c : DenseNodeCert), D.nodes[j]? = some c →
       WritePropagates D (geomAt D) j c := by
-  intro j c hc bw hop d0 hd0
+  intro j c hc bw hop' d0 hd0
   obtain ⟨ts, hts⟩ := admitsB_infer h
   have hsem := admits_semwf h
-  obtain ⟨e0, e1, e2, e3, hdeps⟩ := memWriteBE_deps hsem hc hop
   have hjlt : j < D.nodes.size := Direct.lt_of_getElem?_some hc
   have hlt : D.sources.size + j < ts.size := by
     rw [admitsB_size h hts]; unfold DesignCert.numSlots; omega
   have hty := admits_node_ty hts (admits_wf h) hc
   rw [Array.getElem?_eq_getElem hlt] at hty
-  obtain ⟨aw, dw, wa, hres, hop0, -, -⟩ := nodeTy_write_geom hop hdeps hty
-  have he0 : e0 = d0 := by
-    have : c.deps[0]? = some e0 := by rw [deps_get c hdeps 0]; rfl
-    rw [this] at hd0
-    exact (Option.some.inj hd0)
-  subst he0
-  unfold geomAt tyAt
-  rw [hts]
-  simp only [Option.bind_some]
-  rw [hop0, Array.getElem?_eq_getElem hlt, hres]
+  rcases hop' with hop | hop
+  · obtain ⟨e0, e1, e2, e3, hdeps⟩ := memWriteBE_deps hsem hc hop
+    obtain ⟨aw, dw, wa, hres, hop0, -, -⟩ := nodeTy_write_geom hop hdeps hty
+    have he0 : e0 = d0 := by
+      have : c.deps[0]? = some e0 := by rw [deps_get c hdeps 0]; rfl
+      rw [this] at hd0
+      exact (Option.some.inj hd0)
+    subst he0
+    unfold geomAt tyAt
+    rw [hts]
+    simp only [Option.bind_some]
+    rw [hop0, Array.getElem?_eq_getElem hlt, hres]
+  · obtain ⟨e0, e1, e2, hdeps⟩ := memLoad_deps hsem hc hop
+    obtain ⟨aw, dw, hres, hop0, -, -⟩ := nodeTy_load_geom hop hdeps hty
+    have he0 : e0 = d0 := by
+      have : c.deps[0]? = some e0 := by rw [deps_get c hdeps 0]; rfl
+      rw [this] at hd0
+      exact (Option.some.inj hd0)
+    subst he0
+    unfold geomAt tyAt
+    rw [hts]
+    simp only [Option.bind_some]
+    rw [hop0, Array.getElem?_eq_getElem hlt, hres]
 
 /-- **The arity the interpreter requires follows from the arity the CHECKER
 already verified.**  `Direct.opArity` and `Hw.RequiredArity` agree wherever the
@@ -561,7 +630,50 @@ def laneDesign : DesignCert :=
                     , { op := .Op_And,          width := 32, deps := #[5, 4] }
                     , { op := .Op_MemWriteBE 1, width := 32, deps := #[0, 1, 6, 2] } ] })
 
+/-- A WHOLE-ARRAY design (decision #2): a 4 x 8 image loaded from a 32-bit bus
+(the update, 3 entries) and read whole (`Op_MemToBus 3`), the load's output
+the memory's next image. -/
+def loadDesign : DesignCert :=
+  { sources  := #[ .memImg 0 2 8          -- slot 0: the mutable image
+                 , .input 0 32           -- slot 1: the bus
+                 , .input 1 1 ]          -- slot 2: the load enable
+  , nodes    := #[ { op := .Op_MemLoad 3,  width := 8,  deps := #[0, 1, 2] }
+                 , { op := .Op_MemToBus 3, width := 24, deps := #[0] } ]
+  , outputs  := #[ { slot := 4, width := 24 } ]
+  , flops    := #[]
+  , memories := #[ { aw := 2, dw := 8, nextImg := 3, clock := 0 } ]
+  , clocks   := #[{ name := "clock" }] }
+
+#guard admitsB loadDesign
+/- …and the whole-array read of a ROM is admitted too -/
+#guard admitsB { loadDesign with
+          sources := #[ .memImg 0 2 8, .input 0 32, .input 1 1, .memConst 2 8 #[1, 2, 3] ]
+          nodes   := #[ { op := .Op_MemLoad 3,  width := 8,  deps := #[0, 1, 2] }
+                      , { op := .Op_MemToBus 3, width := 24, deps := #[3] } ]
+          outputs := #[ { slot := 5, width := 24 } ]
+          memories := #[ { aw := 2, dw := 8, nextImg := 4, clock := 0 } ] }
+
 /-! ### Rejection controls -/
+
+/- a whole-array LOAD whose operand 0 is a SCALAR slot (the bus), not an image -/
+#guard !(admitsB { loadDesign with
+          nodes := #[ { op := .Op_MemLoad 3,  width := 8,  deps := #[1, 1, 2] }
+                    , { op := .Op_MemToBus 3, width := 24, deps := #[0] } ] })
+
+/- a LOAD of more entries than the table holds (5 > 2 ^ 2) -/
+#guard !(admitsB { loadDesign with
+          nodes := #[ { op := .Op_MemLoad 5,  width := 8,  deps := #[0, 1, 2] }
+                    , { op := .Op_MemToBus 3, width := 24, deps := #[0] } ] })
+
+/- a LOAD whose node width is not the memory's word width -/
+#guard !(admitsB { loadDesign with
+          nodes := #[ { op := .Op_MemLoad 3,  width := 16, deps := #[0, 1, 2] }
+                    , { op := .Op_MemToBus 3, width := 24, deps := #[0] } ] })
+
+/- a whole-array READ of a scalar slot -/
+#guard !(admitsB { loadDesign with
+          nodes := #[ { op := .Op_MemLoad 3,  width := 8,  deps := #[0, 1, 2] }
+                    , { op := .Op_MemToBus 3, width := 24, deps := #[1] } ] })
 
 /- a ROM as the write target: operand 0 is a `memConst`, which types `rom` -/
 #guard !(admitsB { mixedDesign with
@@ -603,6 +715,20 @@ def laneDesign : DesignCert :=
 #guard !(admitsB { mixedDesign with
           memories := #[ { aw := 5, dw := 32, nextImg := 7, clock := 0,
                            commits := #[{ mask := 1, nextImg := 6 }] } ] })
+
+/- AN ASYNCHRONOUS RESET'S IMAGE (decision #2): one at a slot that types as the
+   memory's own table is admitted; one at a scalar slot (6, the `Op_And`) is
+   refused, and so is one of another table's geometry -/
+#guard admitsB { mixedDesign with
+          memories := #[ { aw := 5, dw := 32, nextImg := 7, clock := 0,
+                           asyncImg := some 0 } ] }
+#guard !(admitsB { mixedDesign with
+          memories := #[ { aw := 5, dw := 32, nextImg := 7, clock := 0,
+                           asyncImg := some 6 } ] })
+#guard memTyOK #[.tbl 5 32, .tbl 6 32] { aw := 5, dw := 32, nextImg := 0, clock := 0,
+                                          asyncImg := some 0 }
+#guard !(memTyOK #[.tbl 5 32, .tbl 6 32] { aw := 5, dw := 32, nextImg := 0, clock := 0,
+                                            asyncImg := some 1 })
 
 /- the unimplemented plain `Op_MemWrite` -/
 #guard !(admitsB { mixedDesign with
@@ -691,6 +817,7 @@ theorem laneDesign_static : StaticPremises laneDesign :=
 
 #audit_axioms admits_semwf
 #audit_axioms memTyOK_commit
+#audit_axioms memTyOK_async
 #audit_axioms admits_memTyOK
 #audit_axioms admits_wf
 #audit_axioms admits_geom_src

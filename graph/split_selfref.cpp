@@ -1182,7 +1182,12 @@ static int split_selfref_pass(hhds::Graph* g, int& unresolved_out, unsigned& sto
     // of the forward-traversal caches on the now-acyclic graph (same effect the
     // node/pin creation in flatten_false_loop_subs has for free), so the scheduler
     // re-derives a correct topological order.
-    auto& R = gm_rewires.empty() ? std::get<0>(and_rewires.front()) : std::get<0>(gm_rewires.front());
+    // Any rewired reader will do -- including a SIGNED-field (Sext) one: a round
+    // whose only rewires are Sext readers left both other lists empty, and
+    // `and_rewires.front()` on an empty vector crashed in get_type() (SoomRV SoC).
+    auto R = !gm_rewires.empty()    ? std::get<0>(gm_rewires.front())
+             : !and_rewires.empty() ? std::get<0>(and_rewires.front())
+                                    : std::get<0>(sext_rewires.front());
     R.set_type(R.get_type());
   }
   return nrew;

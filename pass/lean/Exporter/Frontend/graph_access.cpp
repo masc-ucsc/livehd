@@ -266,6 +266,8 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
   // means read-first, which is an all-clear matrix, not an unreadable one.
   Dlop fwd_const;
   bool fwd_seen = false;
+  Dlop undef_const;
+  bool undef_seen = false;
 
   const auto stride = static_cast<size_t>(Ntype::Memory_port_stride);
   for (const auto& e : inp_edges_ordered(node)) {
@@ -314,18 +316,15 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
         mi.fwd_known = false;
       }
     } else if (pname == "undef") {
-      // ordering="none": the read-during-write window is UNDEFINED. The policy
-      // tuple below only knows the two DEFINED answers (write_first from a set
-      // `fwd` bit, read_first from a clear one), so a certificate about such a
-      // memory asserts a concrete value in a window the emitted RTL leaves x.
-      // Refuse it below rather than export a proof of a different design.
-      //
-      // Tested with is_known_false() rather than the i64 window so a matrix
-      // wider than 62 bits still registers as set, and a non-const driver on
-      // this comptime pin refuses instead of guessing.
+      // ordering="none": the read-during-write window is UNDEFINED (graph/cell.cpp
+      // pid 15). Kept WHOLE, like `fwd`, and shaped into per-read rows after the
+      // walk; the lowering reads the undefined bits from a free input (decision
+      // #8). A non-constant driver on this comptime pin is refused below.
       mi.undef = true;
       if (pin_is_const(e.driver)) {
-        mi.undef = !pin_const_value(e.driver).is_known_false();
+        undef_const = pin_const_value(e.driver);
+        undef_seen  = true;
+        mi.undef    = !undef_const.is_known_false();
       }
     } else if (pname == "posclk") {
       mi.posclk = const_pin_int_or(e.driver, 1);  // unused in async emission; tolerate non-const
@@ -431,18 +430,33 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
   // walk, the port split and `addr_width`, so every diagnostic below can report
   // the real shape.
   // ---------------------------------------------------------------------------
+  mi.whole_array = whole_array;
   if (whole_array) {
-    // A WHOLE-ARRAY cell: one bulk next-state bus instead of N per-entry write
-    // ports, and `reset` restores `init` at runtime (graph/cell.cpp:234-241).
-    // None of that is modeled; `init` is a RUNTIME bus in this shape, not
-    // contents, so it must not be mistaken for a ROM table.
-    fatal(ctx, memory_policy_summary(mi)
-                   + ". this is a WHOLE-ARRAY Memory cell (`update`/`update_enable`/`reset` driven): one bulk "
-                     "next-state bus instead of per-entry write ports, and `init` carries the runtime reset-value "
-                     "bus rather than contents. pass.lean models per-entry ports only.");
+    // A WHOLE-ARRAY cell (decision #2; graph/cell.cpp pins 11-14): `update` is
+    // one bulk next-state bus loaded when `update_enable` is set (absent:
+    // always), the port writes override it, and `reset` (active high) restores
+    // `init` -- a runtime bus or a constant; absent, 0 -- over both. The
+    // certificate spells that as image operators (memory_lowering.cpp). An
+    // ASYNCHRONOUS reset (memory_async_reset) also acts with no clock edge:
+    // DCERT3's `asyncImg` and a reset-applied read (memory_lowering).
+    if (const auto a = node.attr(livehd::attrs::memory_async_reset); a.has() && a.get() != 0) {
+      mi.async_reset = !mi.bulk_reset_pin.is_invalid();
+    }
+    if (!mi.bulk_reset_pin.is_invalid() && !mi.init_pin.is_invalid()) {
+      if (livehd::graph_util::memory_image_of(node)) {
+        fatal(ctx, memory_policy_summary(mi)
+                       + ". this WHOLE-ARRAY cell restores a FILE PRELOAD on `reset`; pass.lean reads a preload as "
+                         "power-on contents only.");
+      }
+      mi.reset_bus_pin = mi.init_pin;
+    }
   }
 
-  if (!mi.init_pin.is_invalid()) {
+  // A runtime `init` is a whole-array cell's reset bus and nothing else (cgen
+  // and pass/lec read it only under `reset`; with no `reset` they ignore it).
+  // Only a CONSTANT one is also power-on contents, read below.
+  const bool init_is_contents = !mi.init_pin.is_invalid() && !(whole_array && !pin_is_const(mi.init_pin));
+  if (init_is_contents) {
     // A FILE PRELOAD: `initial` is a constant STRING, the memory image command
     // (`$readmemh`/`$readmemb`, Pyrope's readmem; graph/node_util.hpp
     // memory_image_of). The file is read HERE, at export, into the same packed
@@ -454,7 +468,7 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
     // the same way, become its POWER-ON image (DCERT3 `MemoryDesc.init`), which
     // every runner's start state takes (`initMemsOf`). Not a step value: a
     // Memory `initial` is power-on contents, never a reset (graph/cell.cpp).
-    const bool writable = !mi.write_ports.empty();
+    const bool writable = !mi.write_ports.empty() || whole_array;  // a whole-array cell is never a ROM
     if (!pin_is_const(mi.init_pin)) {
       fatal(ctx, memory_policy_summary(mi)
                      + ". `init` is driven by a NON-CONSTANT pin; contents must be comptime for the immutable-table "
@@ -613,12 +627,29 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
     }
     fatal(ctx, memory_policy_summary(mi) + ". pass.lean memory supports async (type 0) and sync-read (type 1) only" + detail);
   }
+  // ordering="none" (decision #8): an undefined read-during-write window is
+  // not a value the certificate may pick. The lowering gives each affected
+  // read a FREE INPUT and takes the undefined bits from it, so the certificate
+  // covers every legal answer, as pass/lec's don't-care does.
+  mi.undef_rows.assign(mi.read_ports.size(), std::vector<bool>(mi.write_ports.size(), false));
   if (mi.undef) {
-    fatal(ctx,
-          memory_policy_summary(mi)
-              + ". pass.lean cannot model ordering=\"none\" (the `undef` matrix): sram_1r1w_{read,write}_first only express "
-                "the two DEFINED collision answers, so the certificate would assert a value in a window the emitted RTL "
-                "leaves x. Use ordering=\"old\"/\"fwd\"/\"program\" to export this design.");
+    if (!undef_seen) {
+      fatal(ctx, memory_policy_summary(mi) + ". the `undef` matrix (ordering=\"none\") is not a constant.");
+    }
+    const auto n_rd = mi.read_ports.size();
+    const auto n_wr = mi.write_ports.size();
+    if (static_cast<uint64_t>(n_rd) * static_cast<uint64_t>(n_wr) > static_cast<uint64_t>(std::numeric_limits<int>::max())) {
+      fatal(ctx, memory_policy_summary(mi) + ". the `undef` matrix overflows the bit position `Dlop::bit_test` accepts.");
+    }
+    for (size_t r = 0; r < n_rd; ++r) {
+      for (size_t w = 0; w < n_wr; ++w) {
+        const auto pos = static_cast<int>(r * n_wr + w);
+        if (undef_const.unknown_bit_test(pos)) {
+          fatal(ctx, memory_policy_summary(mi) + ". the `undef` matrix has an unknown cell.");
+        }
+        mi.undef_rows[r][w] = undef_const.bit_test(pos);
+      }
+    }
   }
   // Shape the forwarding matrix into PER-READ ROWS, now that both port counts
   // are known.  This is where the i64 window used to refuse the design: a
@@ -651,6 +682,14 @@ Memory_info parse_memory_info(LeanCtx& ctx, const Node& node) {
           mi.fwd_rows[r][w] = fwd_const.bit_test(pos);
         }
       }
+    }
+    // A cell with a bulk `update` reads its COMMITTED contents: cgen builds the
+    // forwarding chain only when there is no `update`, and pass/lec forces
+    // `fwd` to 0 for such a cell (encode.cpp, "fwd is forced 0 for
+    // whole-arrays"). Clear the rows so the lowering forwards nothing.
+    if (!mi.update_pin.is_invalid()) {
+      mi.fwd_rows.assign(n_rd, std::vector<bool>(n_wr, false));
+      mi.fwd_known = true;
     }
   }
 

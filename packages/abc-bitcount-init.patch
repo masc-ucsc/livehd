@@ -1,0 +1,8 @@
+diff --git src/base/exor/exorBits.c src/base/exor/exorBits.c
+--- src/base/exor/exorBits.c
++++ src/base/exor/exorBits.c
+@@ -138,1 +138,3 @@
+-unsigned char BitCount[FULL16BITS];
++// An explicit initializer avoids an oversized Mach-O common-symbol alignment
++// for this lookup table; its contents are populated by PrepareBitSetModule.
++unsigned char BitCount[FULL16BITS] = {0};

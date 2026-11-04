@@ -90,6 +90,11 @@ inductive ResidualExpr where
   | rmemRead    (w : Nat) (m a en : ResidualRef)
   | rmemWrite   (m a d en : ResidualRef)
   | rmemWriteBE (w : Nat) (byteW : Nat) (m a d be : ResidualRef)
+  /-- `Op_MemLoad n` (decision #2), deps `[image, bus, enable]`: entries `0..n-1`
+  from the bus when enabled; `w` is the entry width -/
+  | rmemLoad    (w n : Nat) (m bus en : ResidualRef)
+  /-- `Op_MemToBus n`: entries `0..n-1` as one `w`-bit bus, entry 0 lowest -/
+  | rmemToBus   (w n : Nat) (m : ResidualRef)
 deriving Repr, Inhabited, DecidableEq
 
 /-- One compiled binding.  Its slot is its POSITION: binding `i` occupies slot
@@ -128,6 +133,9 @@ structure ResidualMemoryUpdate where
   /-- the power-on words (`MemoryDesc.init`): not part of a step, carried so a
   generated restatement of the certificate's memories (D3's `D_mems`) is exact -/
   init    : Array Nat := #[]
+  /-- an asynchronous whole-array reset's image (`MemoryDesc.asyncImg`): what the
+  memory keeps on a step it does not commit -/
+  asyncImg : Option Nat := none
 deriving Repr, Inhabited, DecidableEq
 
 /-- The `MemoryDesc` view of an update: what `MemoryDesc.allFire` / `firedIs`

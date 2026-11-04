@@ -163,10 +163,11 @@ def decONat : Val → Option (Option Nat)
 /-! ## Operators
 
 A flat code plus a payload slot, in the shape `primCode`/`primOfCode` already
-established for `Prim` -- rather than 29 tags.  Three operators carry data
-(`Op_Const`, `Op_Sum`, `Op_MemWriteBE`); the payload is `nil` for the other 26,
+established for `Prim` -- rather than 31 tags.  Five operators carry data
+(`Op_Const`, `Op_Sum`, `Op_MemWriteBE`, `Op_MemLoad`, `Op_MemToBus`); the payload
+is `nil` for the other 26,
 so every operator has the same two-field shape and `I_hw`'s dispatch is one
-`ctorTagP` plus one integer compare rather than a 29-deep tag chain. -/
+`ctorTagP` plus one integer compare rather than a 31-deep tag chain. -/
 
 def opCode : LGraphOp → Nat
   | .Op_Const _      => 0
@@ -198,12 +199,16 @@ def opCode : LGraphOp → Nat
   | .Op_MemRead      => 26
   | .Op_MemWrite     => 27
   | .Op_MemWriteBE _ => 28
+  | .Op_MemLoad _    => 29
+  | .Op_MemToBus _   => 30
 
 /-- The payload of an operator that has one; `nil` otherwise. -/
 def opPayload : LGraphOp → Val
   | .Op_Const c      => encInt c
   | .Op_Sum n        => encNat n
   | .Op_MemWriteBE b => encNat b
+  | .Op_MemLoad n    => encNat n
+  | .Op_MemToBus n   => encNat n
   | _                => .nil
 
 def opOfCode : Nat → Val → Option LGraphOp
@@ -236,6 +241,8 @@ def opOfCode : Nat → Val → Option LGraphOp
   | 26, _ => some .Op_MemRead
   | 27, _ => some .Op_MemWrite
   | 28, v => (decNat v).map .Op_MemWriteBE
+  | 29, v => (decNat v).map .Op_MemLoad
+  | 30, v => (decNat v).map .Op_MemToBus
   | _,  _ => none
 
 /-! ## The tag table
@@ -404,8 +411,9 @@ def decCommit : Val → Option MemCommit
   simp [encCommit, decCommit, tagCommit]
 
 /-- DCERT3's three memory fields ride along so `decDesign_encDesign` stays a
-round trip for EVERY certificate; the object program reads only `nxt` and `ck`
-(`fMemNext`): `init` is a start-state fact and the other two are reserved. -/
+round trip for EVERY certificate. The object program's `fMemNext` reads `nxt`,
+`ck`, the commit table `cms` (decision #9) and the async-reset image `aimg`
+(decision #2); `init` is a start-state fact. -/
 def encMemory (m : MemoryDesc) : Val :=
   .ctor tagMemory [encNat m.aw, encNat m.dw, encNat m.nextImg, encNat m.clock,
                    encArr encNat m.init, encArr encCommit m.commits, encONat m.asyncImg]

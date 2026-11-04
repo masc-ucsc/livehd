@@ -27,7 +27,8 @@ this module adds are the facts that connect it to the interpreter:
 
 ## Admission, and what is refused
 
-`NodeAdmitted` is `OpSupported ∨ Op_MemRead ∨ Op_MemWriteBE _`.  **`Op_MemWrite`
+`NodeAdmitted` is `OpSupported ∨ Op_MemRead ∨ Op_MemWriteBE _ ∨ Op_MemLoad _ ∨
+Op_MemToBus _` (the last two since decision #2).  **`Op_MemWrite`
 (opcode 27) is refused**: there is no implementation bridge for it — no
 primitive, no `applyOpM` case — and `NodeAdmitted_ne_memWrite` proves an
 admitted node is never it.  Nothing is admitted by default; `OpSupported`,
@@ -49,6 +50,7 @@ NOT a full table.
 -/
 import LeanSemanticPrimitives.Projection.HardwareMemTraversal
 import LeanSemanticPrimitives.Projection.HardwareMemShapes
+import LeanSemanticPrimitives.Projection.HardwareMemLoad
 import LeanSemanticPrimitives.Projection.AxiomGate
 
 namespace Projection
@@ -118,6 +120,45 @@ theorem evalNodeM_memWriteBE {vals : List Val} {c : DenseNodeCert}
   · refine .ref ?_
     simp [slookup, encArr, hdeps]
 
+/-- The whole-array load (decision #2) at node level, enabled or not: the image
+`memLoadImg` computes. Its reference equality needs `k ≤ words.length`
+(`denote_memLoadImg`); the evaluation itself needs nothing. -/
+theorem evalNodeM_memLoad {vals : List Val} {c : DenseNodeCert}
+    {σ : SEnv} {end_ eenv en : SExp} {k d0 d1 d2 : Nat} {m : MemImg} {bus enb : BV}
+    (hop : c.op = .Op_MemLoad k) (hdeps : c.deps.toList = [d0, d1, d2])
+    (hb0 : d0 < vals.length) (hb1 : d1 < vals.length) (hb2 : d2 < vals.length)
+    (hv0 : vals[d0]'hb0 = MemImg.encMemImg m)
+    (hv1 : vals[d1]'hb1 = encBV bus)
+    (hv2 : vals[d2]'hb2 = encBV enb)
+    (hnd : SEval hwMemS σ end_ (encNode c))
+    (henv : SEval hwMemS σ eenv (objEnv vals))
+    (hlen : SEval hwMemS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwMemS σ (.call "evalNodeM" [end_, eenv, en])
+      (MemImg.encMemImg (memLoadImg c.width k m bus enb)) := by
+  refine SEval_call3 hnd henv hlen rfl rfl ?_
+  refine SEval_switch_of_tag (.ref rfl) rfl rfl ?_
+  refine applyOpM_memLoad hb0 hb1 hb2 hv0 hv1 hv2 ?_ (.ref rfl) ?_ (.ref rfl) (.ref rfl)
+  · rw [← hop]; exact .ref rfl
+  · refine .ref ?_
+    simp [slookup, encArr, hdeps]
+
+/-- The whole-array read (decision #2) at node level. -/
+theorem evalNodeM_memToBus {vals : List Val} {c : DenseNodeCert}
+    {σ : SEnv} {end_ eenv en : SExp} {k d0 : Nat} {m : MemImg}
+    (hop : c.op = .Op_MemToBus k) (hdeps : c.deps.toList = [d0])
+    (hb0 : d0 < vals.length)
+    (hv0 : vals[d0]'hb0 = MemImg.encMemImg m)
+    (hnd : SEval hwMemS σ end_ (encNode c))
+    (henv : SEval hwMemS σ eenv (objEnv vals))
+    (hlen : SEval hwMemS σ en (.int (Int.ofNat vals.length))) :
+    SEval hwMemS σ (.call "evalNodeM" [end_, eenv, en]) (encBV (memToBusBV c.width k m)) := by
+  refine SEval_call3 hnd henv hlen rfl rfl ?_
+  refine SEval_switch_of_tag (.ref rfl) rfl rfl ?_
+  refine applyOpM_memToBus hb0 hv0 ?_ (.ref rfl) ?_ (.ref rfl) (.ref rfl)
+  · rw [← hop]; exact .ref rfl
+  · refine .ref ?_
+    simp [slookup, encArr, hdeps]
+
 /-- The DISABLED byte-enabled write at node level: the image comes back
 exactly, and no range premise is needed. -/
 theorem evalNodeM_memWriteBE_disabled {vals : List Val} {c : DenseNodeCert}
@@ -167,6 +208,17 @@ theorem depIsMem_memRead_succ (p : Nat) :
 theorem depIsMem_memWriteBE_succ (bw p : Nat) :
     Direct.depIsMem (.Op_MemWriteBE bw) (p + 1) = false := rfl
 
+/-- `Op_MemLoad`: position 0 is the image, 1 and 2 are bit vectors. -/
+@[simp] theorem depIsMem_memLoad_zero (k : Nat) :
+    Direct.depIsMem (.Op_MemLoad k) 0 = true := rfl
+
+theorem depIsMem_memLoad_succ (k p : Nat) :
+    Direct.depIsMem (.Op_MemLoad k) (p + 1) = false := rfl
+
+/-- `Op_MemToBus`: position 0 is the image. -/
+@[simp] theorem depIsMem_memToBus_zero (k : Nat) :
+    Direct.depIsMem (.Op_MemToBus k) 0 = true := rfl
+
 /-- A supported operator's RESULT is a bit vector. -/
 theorem opKind_isMem_of_supported {op : LGraphOp} (h : OpSupported op = true)
     (w : Nat) : (Direct.opKind op w).isMem = false := by
@@ -177,6 +229,12 @@ theorem opKind_isMem_of_supported {op : LGraphOp} (h : OpSupported op = true)
 
 @[simp] theorem opKind_isMem_memWriteBE (bw w : Nat) :
     (Direct.opKind (.Op_MemWriteBE bw) w).isMem = true := rfl
+
+@[simp] theorem opKind_isMem_memLoad (k w : Nat) :
+    (Direct.opKind (.Op_MemLoad k) w).isMem = true := rfl
+
+@[simp] theorem opKind_isMem_memToBus (k w : Nat) :
+    (Direct.opKind (.Op_MemToBus k) w).isMem = false := rfl
 
 /-- **The node's own slot carries its result kind.**  Read off `slotKind`'s
 definition at a node index, so it is the checker's notion, not a parallel one. -/
@@ -191,9 +249,11 @@ theorem nodeSlot_slotIsMem {D : DesignCert} {j : Nat} {c : DenseNodeCert}
 
 /-- What this route can discharge for one node.  `Op_MemWrite` is NOT here: it
 has no primitive and no `applyOpM` case, so it is refused rather than given a
-defined-and-unproved answer. -/
+defined-and-unproved answer.  The whole-array operators (decision #2) are: each
+has an `applyOpM` case (`memLoadO`, `memToBusO`). -/
 def NodeAdmitted (c : DenseNodeCert) : Prop :=
-  OpSupported c.op = true ∨ c.op = .Op_MemRead ∨ ∃ bw, c.op = .Op_MemWriteBE bw
+  OpSupported c.op = true ∨ c.op = .Op_MemRead ∨ (∃ bw, c.op = .Op_MemWriteBE bw)
+  ∨ (∃ k, c.op = .Op_MemLoad k) ∨ (∃ k, c.op = .Op_MemToBus k)
 
 /-- The same policy as a decidable CHECK, so admission can be run, not just
 stated.  `Op_MemWrite` falls through to `OpSupported`, which refuses it. -/
@@ -201,6 +261,8 @@ def nodeAdmittedB (c : DenseNodeCert) : Bool :=
   match c.op with
   | .Op_MemRead      => true
   | .Op_MemWriteBE _ => true
+  | .Op_MemLoad _    => true
+  | .Op_MemToBus _   => true
   | op               => OpSupported op
 
 theorem nodeAdmittedB_iff (c : DenseNodeCert) : nodeAdmittedB c = true ↔ NodeAdmitted c := by
@@ -213,19 +275,23 @@ theorem nodeAdmittedB_iff (c : DenseNodeCert) : nodeAdmittedB c = true ↔ NodeA
 #guard nodeAdmittedB { op := .Op_MemWriteBE 1, width := 32, deps := #[0,1,2,3], origin := 0 } = true
 #guard nodeAdmittedB { op := .Op_SRA, width := 32, deps := #[0,1], origin := 0 } = true
 #guard nodeAdmittedB { op := .Op_Sub, width := 32, deps := #[0,1], origin := 0 } = false
+#guard nodeAdmittedB { op := .Op_MemLoad 4, width := 8, deps := #[0,1,2], origin := 0 } = true
+#guard nodeAdmittedB { op := .Op_MemToBus 4, width := 32, deps := #[0], origin := 0 } = true
 
 /-- **`Op_MemWrite` is refused.** -/
 theorem NodeAdmitted_ne_memWrite {c : DenseNodeCert} (h : NodeAdmitted c) :
     c.op ≠ .Op_MemWrite := by
-  rcases h with h | h | ⟨bw, h⟩
+  rcases h with h | h | ⟨bw, h⟩ | ⟨k, h⟩ | ⟨k, h⟩
   · intro hc; rw [hc] at h; simp [OpSupported] at h
+  · intro hc; rw [hc] at h; exact absurd h (by simp)
+  · intro hc; rw [hc] at h; exact absurd h (by simp)
   · intro hc; rw [hc] at h; exact absurd h (by simp)
   · intro hc; rw [hc] at h; exact absurd h (by simp)
 
 /-- …and so are the five refused scalar operators, by `OpSupported`. -/
 theorem NodeAdmitted_ne_sub {c : DenseNodeCert} (h : NodeAdmitted c) :
     c.op ≠ .Op_Sub := by
-  rcases h with h | h | ⟨bw, h⟩ <;> intro hc <;> rw [hc] at h <;>
+  rcases h with h | h | ⟨bw, h⟩ | ⟨k, h⟩ | ⟨k, h⟩ <;> intro hc <;> rw [hc] at h <;>
     first | simp [OpSupported] at h | exact absurd h (by simp)
 
 /-! ## 4. The write's range obligation, named and discharged from shapes -/
@@ -263,6 +329,8 @@ theorem rom_not_admitted_write : ¬ MemImg.FullTable 5 (MemImg.ofMemConst 32 #[1
 #audit_axioms evalNodeM_memRead
 #audit_axioms evalNodeM_memWriteBE
 #audit_axioms evalNodeM_memWriteBE_disabled
+#audit_axioms evalNodeM_memLoad
+#audit_axioms evalNodeM_memToBus
 #audit_axioms depIsMem_false_of_supported
 #audit_axioms opKind_isMem_of_supported
 #audit_axioms nodeSlot_slotIsMem

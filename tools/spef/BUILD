@@ -1,4 +1,5 @@
-load("@rules_python//python:defs.bzl", "py_library", "py_test")
+load("//tools:regression.bzl", "py_test")
+load("@rules_python//python:defs.bzl", "py_library")
 
 py_library(
     name = "connectivity",

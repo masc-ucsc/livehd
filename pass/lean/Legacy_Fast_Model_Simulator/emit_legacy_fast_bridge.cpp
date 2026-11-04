@@ -27,6 +27,16 @@ bool needs_mul_bridge(const CertificateIR& c) {
     return n.op.kind == Operation::Mult && n.deps.size() == 2;
   });
 }
+bool needs_whole_array(const CertificateIR& c) {
+  return std::any_of(c.nodes.begin(), c.nodes.end(), [](const CertNode& n) {
+    return n.op.kind == Operation::MemLoad || n.op.kind == Operation::MemToBus;
+  });
+}
+bool needs_sext_bridge(const CertificateIR& c) {
+  return std::any_of(c.nodes.begin(), c.nodes.end(), [&](const CertNode& n) {
+    return n.op.kind == Operation::Sext && n.deps.size() == 2 && !legacy_sext_natural(c, n);
+  });
+}
 void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, const LegacyNames& names, std::ostream& ofs) {
   const auto&                     base_name  = names.base;
   const bool                      sequential = names.sequential;
@@ -126,7 +136,8 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
       deplist += phi_dep(info.deps[k]);
     }
     std::string bridge_call;
-    bool        sext_mode = false;
+    bool        sext_mode    = false;
+    bool        sext_natural = false;
     std::string sext_a, sext_amt;
     bool        getmask_allones_mode = false;
     std::string getmask_allones_call;
@@ -206,15 +217,10 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
       bridge_call = "@" + base_lemma + " " + std::to_string(w0) + " " + std::to_string(w1) + " " + std::to_string(cw)
                     + " _ _ (by decide) (by decide)";
     } else if (info.op.kind == Operation::Sext && info.deps.size() == 2) {
-      const auto* amount = certificate_source(c, info.deps[1]);
-      if (!amount || amount->kind != SourceKind::Const
-          || (amount->const_int != std::to_string(std::min(info.width, width_of(info.deps[0])))
-              && amount->const_int != std::to_string(width_of(info.deps[0])))) {
-        throw std::runtime_error("legacy Sext bridge requires a constant natural sign position at node " + std::to_string(info.id));
-      }
-      sext_mode = true;
-      sext_a    = raw_dep(info.deps[0]);
-      sext_amt  = raw_dep(info.deps[1]);
+      sext_mode    = true;
+      sext_natural = legacy_sext_natural(c, info);
+      sext_a       = raw_dep(info.deps[0]);
+      sext_amt     = raw_dep(info.deps[1]);
     } else if (info.op.kind == Operation::SLT && info.deps.size() == 2) {
       bridge_call = width_of(info.deps[0]) == width_of(info.deps[1]) ? "slt_bridge" : "slt_widths_bridge";
     } else if (info.op.kind == Operation::SGT && info.deps.size() == 2) {
@@ -245,6 +251,14 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
       bridge_call = "mem_write_be_bridge _ _ _ _ _ (by decide)";
       supported   = true;
       mem_result  = true;
+    } else if (info.op.kind == Operation::MemLoad) {
+      // `n ≤ 2^a`: a memory has no more entries than addresses.
+      bridge_call = "mem_load_bridge _ _ _ _ (by decide)";
+      supported   = true;
+      mem_result  = true;
+    } else if (info.op.kind == Operation::MemToBus) {
+      bridge_call = "mem_to_bus_bridge";
+      supported   = true;
     }
     std::string srcfacts;
     for (const auto d : info.deps) {
@@ -308,6 +322,12 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
         } else if (info.op.kind == Operation::MemWrite) {
           ofs << "  show CertVal.mem (memenc (" << base_name << "_fv" << info.id << " " << A << ")) = CertVal.mem (cert_mem_write "
               << op_arg(0) << " " << op_arg(1) << " " << op_arg(2) << " " << op_arg(3) << ")\n";
+        } else if (info.op.kind == Operation::MemLoad) {
+          ofs << "  show CertVal.mem (memenc (" << base_name << "_fv" << info.id << " " << A << ")) = CertVal.mem (cert_mem_load "
+              << info.width << " " << info.op.parameter << " " << op_arg(0) << " " << op_arg(1) << " " << op_arg(2) << ")\n";
+        } else if (info.op.kind == Operation::MemToBus) {
+          ofs << "  show CertVal.bv (bvenc (" << base_name << "_fv" << info.id << " " << A << ")) = CertVal.bv (cert_mem_to_bus "
+              << info.width << " " << info.op.parameter << " " << op_arg(0) << ")\n";
         } else if (mem_result) {
           const std::string byte_w = std::to_string(info.op.parameter);
           ofs << "  show CertVal.mem (memenc (" << base_name << "_fv" << info.id << " " << A
@@ -333,10 +353,13 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
         ofs << "\n";
         continue;
       }
-      if (sext_mode) {
+      if (sext_mode && sext_natural) {
         ofs << "  first\n";
         ofs << "  | rw [" << srcfacts << "sext_bridge " << sext_a << " " << sext_amt << " (by decide)]\n";
         ofs << "  | rw [" << srcfacts << "sext_bridge_low " << sext_a << " " << sext_amt << " (by decide) (by decide)]\n";
+      } else if (sext_mode) {
+        // Any other sign position, constant or not (decision #21).
+        ofs << "  rw [" << srcfacts << "sext_bridge_any " << sext_a << " " << sext_amt << "]\n";
       } else if (getmask_allones_mode) {
         ofs << "  first\n";
         ofs << "  | rw [" << srcfacts << getmask_allones_call << "]\n";
@@ -431,6 +454,12 @@ void emit_legacy_fast_bridge(const DesignScan& design, const CertificateIR& c, c
         if (next_seen.insert(cm.second).second) {
           next_ids.push_back(cm.second);
         }
+      }
+      // ...and the image an asynchronous reset holds (DCERT3 `asyncImg`),
+      // which the next state reads only when there is an edges record: with
+      // one domain the model commits on every step (legacy_memory_next).
+      if (m.async_img && !names.edges.empty() && next_seen.insert(*m.async_img).second) {
+        next_ids.push_back(*m.async_img);
       }
     }
     for (const auto d : next_ids) {

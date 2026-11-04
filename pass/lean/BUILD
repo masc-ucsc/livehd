@@ -1,6 +1,7 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
-load("@rules_python//python:defs.bzl", "py_test")
+load("//tools:regression.bzl", "cc_test", "py_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
+
 load("//tools:copt_default.bzl", "COPTS")
 
 py_test(
@@ -20,8 +21,8 @@ py_test(
 
 cc_library(
     name = "lean_graph_scan",
-    srcs = ["Exporter/Frontend/graph_access.cpp", "Exporter/Frontend/design_scan.cpp"],
-    hdrs = ["Exporter/Frontend/graph_access.hpp", "Exporter/Frontend/design_scan.hpp"],
+    srcs = ["Exporter/Frontend/graph_access.cpp", "Exporter/Frontend/design_scan.cpp", "Exporter/Frontend/loop_realize.cpp"],
+    hdrs = ["Exporter/Frontend/graph_access.hpp", "Exporter/Frontend/design_scan.hpp", "Exporter/Frontend/loop_realize.hpp"],
     copts = COPTS,
     includes = ["Exporter/Frontend"],
     visibility = ["//visibility:public"],

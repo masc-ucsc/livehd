@@ -102,7 +102,7 @@ both accepted; at least one must supply sources). lhd hands the args to
 `+incdir+a,b` survive). An existing `+incdir+PATH` directory is treated literally,
 including `+` characters in Bazel canonical repository names. Otherwise the
 standard `+incdir+dir1+dir2` list syntax applies; `-I PATH` is unambiguous. Covered by `tests/slang_filelist.sh`
-(`bazel test //inou/slang:slang_filelist`).
+(`bazel test --config=frontend //inou/slang:slang_filelist`).
 
 Fixed unpacked structs with integral leaves lower to a deterministic bitstream
 layout (declaration order, most significant field first). Nested structs, fixed
@@ -250,7 +250,12 @@ file lists, determinism, and other behavior a value comparison cannot check.
 
 ## The coverage ladder (todo/ 2s subtask E)
 
-`slang_ladder.bzl` pins each listed `inou/yosys/tests/*.v` source (those not
+Paired behavior fixtures live in `../prp/tests/equiv`, beside their handwritten
+Pyrope models. The legacy `slang_compile-*` names listed in that directory's
+`fixtures.bzl` resolve to the shared reader matrix, so they do not create a
+second compilation/test action. The ladder below covers backend-only cases.
+
+`slang_ladder.bzl` pins each listed `inou/slang/tests/reader/*.v` source (those not
 subsumed by a larger sibling fixture) to its strongest passing tier;
 `tests/slang_compile.sh <tier> <file>...` enforces it
 both ways (a regression fails, and an outgrown `error` entry fails until the
@@ -268,21 +273,16 @@ ladder is promoted). Tiers:
 - `error` — must fail cleanly with a structured diagnostic (used for the
   non-LRM sources slang correctly rejects, e.g. procedural writes to nets).
 
-Run one: `bazel test //inou/slang:slang_compile-<name>`; all:
-`bazel test //inou/slang:all`.
+Run one: `bazel test --config=frontend //inou/slang:slang_compile-<name>`; all:
+`bazel test --config=frontend //inou/slang:all`.
 
-Current tally (2026-06-17, 116 sources): **86 lec**, 6 verilog, 2 lnast,
-21 error (9 of those are non-LRM sources slang correctly rejects, e.g.
-procedural writes to nets; the rest are tracked feature gaps: instance arrays,
-hierarchical punch-through references, `'bx` golden arms, dynamic
-mem-element part-selects). The 6 `verilog`-capped entries are LEC-slow or
-genuine gaps: two big-memory / wide-arith tests (`long_mem3`,
-`long_nocheck_iwls_square`) and `fixme_sha256`'s wide
-reduction are deliberately capped because LEC is slow there (the small-array
-coverage simple_rf1/rf2, tuplish, fixme_array carries the memory guarantee);
-`mem_sync_init` and `nocheck_slang_foreach` are real memory-lowering gaps.
-`long_nocheck_iwls_square` now attempts LEC with the five-second budget and
-accepts an explicit timeout as described above.
+The ladder currently contains 91 sources: 77 LEC, 6 Verilog,
+2 LNAST, and 6 expected-error cases. The exact expectations live
+in `slang_ladder.bzl`. General Yosys round trips share the paired corpus in
+`../prp/tests/equiv`; the old `yosys_compile.sh` sweep is removed. Dedicated
+Yosys importer regressions reuse `../prp/tests/yvr_test.py` and these reader
+fixtures, while solver soundness tests remain in `../yosys`.
+
 Correct mixed signed/unsigned arithmetic and narrow (1- and 2-bit) signed
 port/temp ranges (`add1`, `issue_047`, …) are now LEC-verified — a signed
 operand in an unsigned expression zero-extends, and `materialize_conversion`

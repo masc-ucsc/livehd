@@ -30,11 +30,16 @@ enum class Operation {
   SetMask,
   MemRead,
   MemWrite,
-  MemWriteBE
+  MemWriteBE,
+  // Whole-array memory operators (decision #2), one node for any entry count:
+  // MemLoad [image, bus, enable] -> image (entries 0..n-1 from the bus when the
+  // enable is set) and MemToBus [image] -> the n entries as one bus (`read_all`).
+  MemLoad,
+  MemToBus
 };
 struct Op {
   Operation   kind      = Operation::Or;
-  uint32_t    parameter = 0;  // Sum add count or MemWriteBE lane width
+  uint32_t    parameter = 0;  // Sum add count, MemWriteBE lane width, MemLoad/MemToBus entry count
   std::string value;          // Const decimal integer
 };
 enum class SourceKind { Input, Const, Flop, MemImage, RomConst };
@@ -88,6 +93,10 @@ struct MemoryDriver {
   // the image after the writes of the ports on those domains. `next_img` stays
   // the image after every port's write. Empty: one domain, `clock`.
   std::vector<std::pair<uint64_t, uint32_t>> commits;
+  // An ASYNCHRONOUS whole-array reset (DCERT3 `asyncImg`, decision #2): the
+  // image with the reset applied to the held one, taken when the memory's
+  // clock does not fire. Absent: the memory holds.
+  std::optional<uint32_t> async_img;
 };
 // One emitted clock. Mirrors DesignScan::ClockDomain, minus the structural key:
 // the key is the scan's grouping identity and has no meaning in the certificate,

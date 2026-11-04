@@ -1,9 +1,11 @@
 # This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
+load("//tools:regression.bzl", "sh_test")
 load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library")
 load("@rules_shell//shell:sh_library.bzl", "sh_library")
-load("@rules_shell//shell:sh_test.bzl", "sh_test")
+
 load("//tools:copt_default.bzl", "COPTS")
+load("//inou/prp:tests/equiv/fixtures.bzl", "LEGACY_YOSYS_PAIRS")
 
 cc_library(
     name = "lgyosys",
@@ -67,80 +69,25 @@ cc_binary(
     ],
 )
 
-VERILOG_TESTS = glob(
-    [
-        "tests/*.v",
-    ],
-    exclude = [
-        "tests/fixme*.v",
-        "tests/nocheck*.v",
-    ],
-)
-
-ALL_VERILOG_TESTS = glob(["tests/*.v"])
-
-filegroup(
-    name = "verilog_tests",
-    srcs = VERILOG_TESTS,
-    visibility = ["//visibility:public"],
-)
-
-_YOSYS_TEST_PREFIX = "tests/"
-
-_YOSYS_TEST_SUFFIX = ".v"
-
-# Fixtures that stay in verilog_tests (the slang ladder still compiles each one)
-# but get no yosys_compile target of their own: each is a strict sub-case of a
-# kept yosys_compile fixture, or only regresses the native slang reader.
-_YOSYS_COMPILE_SKIP = [
-    # Identical operator cells to a kept, richer fixture. Only shift: the slang
-    # ladder keeps its slang_compile twin, while trivial_and/compare/reduce/
-    # simple_add/trivial keep their yosys_compile target because the slang
-    # ladder dropped theirs.
-    "tests/shift.v",
-    # Regressions for the native slang reader; yosys elaborates them away.
-    "tests/fn_ret_bool.v",
-    "tests/generate_reverse_tree.v",
-    "tests/hier_generate_slice.v",
-    "tests/empty_task.v",
-    "tests/inc_after_nb.v",
-    # inou_yosys_read.ys flattens the hierarchy, leaving a subset of a kept case.
-    "tests/submodule.v",
-    "tests/submodule2.v",
-    "tests/params_submodule.v",
-    "tests/trivial2.v",
-    # Weaker member of a pair of overlapping small cases.
-    "tests/simple_flop.v",
-    "tests/trivial_offset.v",
-    "tests/simple_weird2.v",
-]
-
-YOSYS_COMPILE_TESTS = [
-    (
-        t[len(_YOSYS_TEST_PREFIX):-len(_YOSYS_TEST_SUFFIX)],
-        t,
-    )
-    for t in VERILOG_TESTS
-    if t not in _YOSYS_COMPILE_SKIP
-]
-
+# General HDL round trips are covered by the canonical Pyrope/HDL pairs.
+# Keep dedicated regressions for importer-specific operand and memory lowering.
 [sh_test(
-    name = "yosys_compile-%s" % t[0],
-    srcs = ["tests/yosys_compile.sh"],
-    args = ["$(location %s)" % t[1]],
+    name = "yosys_import-" + stem,
+    srcs = ["//inou/prp:tests/yvr_test.py"],
+    args = ["--yosys-oracle", "-i", "$(location //inou/slang:tests/reader/%s.v)" % stem],
     data = [
-        t[1],
+        "//inou/slang:tests/reader/%s.v" % stem,
         "//inou/prp:tests/lec.py",
         "//lhd",
     ],
-    tags = [
-    ],
-    deps = [
-        ":scripts",
-    ],
-) for t in YOSYS_COMPILE_TESTS]
+    deps = [":scripts"],
+) for stem in ["bitwise_extension", "packed_byte_ram_write", "memory_mixed_read_latency"]]
 
-exports_files(ALL_VERILOG_TESTS)
+# Compatibility names reuse the canonical paired tests; no duplicate actions.
+[test_suite(
+    name = "yosys_compile-" + old,
+    tests = ["//inou/prp:prp-equiv-" + pair],
+) for old, pair in LEGACY_YOSYS_PAIRS.items()]
 
 filegroup(
     name = "memory_import_srcs",
@@ -207,6 +154,34 @@ sh_test(
         "tests/full_case_dontcare.sv",
         "tests/full_case_hold.sv",
         "tests/full_case_incomplete.sv",
+        "//lhd",
+    ],
+    deps = [":scripts"],
+)
+
+# Overlapping items of a plain case/casez/casex keep first-match priority through
+# `proc -ifx` (packages/yosys.patch, proc_mux): the netlist is equivalent to the
+# source read by the native reader.
+sh_test(
+    name = "yosys_casez_priority_test",
+    srcs = ["tests/yosys_casez_priority_test.sh"],
+    data = [
+        "tests/casez_priority.sv",
+        "//lhd",
+    ],
+    deps = [":scripts"],
+)
+
+# A variable written by several clocked processes keeps every write; the later
+# process in the source wins in a cycle where several write (the native slang
+# reader's rule), with a warning. Writers on different clocks are refused
+# (lhd_ff_merge).
+sh_test(
+    name = "yosys_ff_merge_test",
+    srcs = ["tests/yosys_ff_merge_test.sh"],
+    data = [
+        "tests/ff_merge.sv",
+        "tests/ff_merge_two_clocks.sv",
         "//lhd",
     ],
     deps = [":scripts"],

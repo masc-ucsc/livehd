@@ -104,6 +104,8 @@ def opCode : LGraphOp → Nat × Int
   | .Op_MemRead      => (26, 0)
   | .Op_MemWrite     => (27, 0)
   | .Op_MemWriteBE b => (28, Int.ofNat b)
+  | .Op_MemLoad n    => (29, Int.ofNat n)
+  | .Op_MemToBus n   => (30, Int.ofNat n)
 
 def opOfCode (c : Nat) (arg : Int) : Option LGraphOp :=
   match c with
@@ -123,6 +125,8 @@ def opOfCode (c : Nat) (arg : Int) : Option LGraphOp :=
   | 24 => some .Op_GetMask  | 25 => some .Op_SetMask
   | 26 => some .Op_MemRead  | 27 => some .Op_MemWrite
   | 28 => some (.Op_MemWriteBE arg.toNat)
+  | 29 => some (.Op_MemLoad arg.toNat)
+  | 30 => some (.Op_MemToBus arg.toNat)
   | _  => none
 
 --------------------------------------------------------------------------------
