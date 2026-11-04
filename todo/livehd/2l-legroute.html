@@ -7,11 +7,12 @@
 <link rel="stylesheet" href="../todo.css">
 </head>
 <body>
-<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a><a href="../../repros/2l-legroute-history.html">History</a></nav>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
 <main>
 <h1><strong class="item-id">2l-legroute</strong> Native routing closure in two steps</h1>
 
-<p><span class="status">Plan for offline review — implementation pending</span></p>
+<p><span class="status">Plan and local pass. Final does not close cellboxes. Current work: per-class cellbox
+reservations (milestone 2), iterated by agents.</span></p>
 <p><strong>Goal.</strong> Make LiveHD legalize and route without requiring OpenROAD. Joint regional SAT placement
 and routing should reach at least the density OpenROAD can route, with substantially lower total runtime and
 comparable routed timing: WNS within about 4%, then TNS, wire length and vias. OpenROAD supplies comparison
@@ -19,16 +20,37 @@ results and known routable references. The production flow remains native.</p>
 <p><strong>Immediate objective.</strong> Make <code>legroute.final</code> close ordinary connections through a
 consistent plan → local → final handoff. Build cellboxes, predict their individual routing reservations, find a
 feasible coarse placement and route, materialize routes to box edges, then move cells inside each box to finish
-its connections. This page defines the proposed work; historical run logs and superseded experiments belong in
-<a href="../../repros/2l-legroute-history.html">the history</a> and <a href="../../feedback.md">feedback.md</a>.</p>
+its connections. This page defines the proposed work and the iteration loop; run logs and superseded experiments
+belong in the git history of this page and of <code>pass/place/README.md</code>.</p>
+
+<h2 id="blocker">Where the flow stands and what blocks it</h2>
+<p><strong>Working.</strong> <code>legroute.plan</code> admits a placement with a connected global route witness;
+<code>legroute.local</code> moves cellboxes among their admitted tiles, picks regional routes, and L5 assigns
+layers and tracks. Both pass their checks and the committed metal reaches the cellbox tiles.</p>
+<p><strong>Failing.</strong> <code>legroute.final</code> cannot find legal in-box routes for the box's
+connections, internal and external alike, even though every incident net has metal at the tile. The box's own
+metal supply is exhausted: its internal nets and the stubs from its pins to the arriving metal need more tracks
+than were held back for it.</p>
+<p><strong>Root cause.</strong> The reservation is one uniform allowance for every box. <code>box_reserve</code>
+(default <code>M2:1,M3:1</code>) subtracts the same track count from every tile of each layer and records it as
+the tile's <code>cellbox_budget</code>; <code>build_boxes</code> only caps a box's signal pins against the
+horizontal tracks over the tile (its <code>pin_limit</code>). Nothing in that budget depends on how many internal
+nets the box has, how its pins are arranged, or how its cells can move. One count is too small for most boxes
+that have internal nets; raising it for everyone takes tracks from the global route and breaks plan admission.
+Both failure modes were observed; neither is a usable setting.</p>
+<p><strong>Position.</strong> There is no solution in hand. The path is known: size the reservation by cellbox
+class so a box routes on the first attempt almost always, keep each reservation as small as that allows, shape
+boxes at construction time so cheap reservations suffice, and repair the rare failure by moving cells rather
+than by over-reserving everywhere. Agents iterate on this loop; the sections below define it.</p>
 
 <h2 id="stages">Two steps to closure</h2>
 <table>
 <tr><th>Step</th><th>Routing scope</th><th>Completion condition</th></tr>
 <tr><td><strong>1. Ordinary connections</strong></td><td>Connect every required internal cellbox net, external
-cell pin and die IO except the explicitly deferred clock/reset connections.</td><td>Every participating net is
-connected in the emitted native geometry; placement, metal, vias and PG interactions pass physical checks.
-Report this as ordinary-net closure, with the deferred set visible.</td></tr>
+cell pin and die IO. Clock and reset terminals are <em>not connected at all</em> in this step, in any pass: they
+are left for a pre-pass similar to OpenROAD's CTS in step 2.</td><td>Every participating net is connected in the
+emitted native geometry; placement, metal, vias and PG interactions pass physical checks. Report this as
+ordinary-net closure, with the deferred set visible.</td></tr>
 <tr><td><strong>2. Clock and reset</strong></td><td>Add clock/reset distribution and all deferred pins using the
 same reservation and access contract, including their actual layer and spacing requirements.</td><td>Recheck
 every ordinary, clock and reset connection together. Only this complete result qualifies for the final
@@ -38,9 +60,9 @@ all-net density, routed WNS and runtime comparison.</td></tr>
 declared clock/reset roots, timing constraints and connectivity through the distribution cells. Record exact
 names and reasons; a broad name regex must not silently exclude functional logic. Mixed-use nets retain their
 non-exempt terminal obligations. Preserve the netlist and cells. In step 1, deferred routing is omitted
-consistently from plan demand, local allocation and Final closure accounting. Any retained clock/reset metal
-in a control remains a physical obstacle and is reported explicitly. PG, fixed obstacles and technology rules
-remain active in both steps.</p>
+consistently from plan demand, local allocation, the cellbox reservation and Final closure accounting. Any
+retained clock/reset metal in a control remains a physical obstacle and is reported explicitly. PG, fixed
+obstacles and technology rules remain active in both steps.</p>
 <p>Reset stays false-pathed for timing. This timing exception does not remove its physical connection requirement
 in step 2. Step-1 timing comparisons use the same declared clock model and reset exceptions on both flows;
 they are provisional until clocks are physically routed.</p>
@@ -65,20 +87,36 @@ placements and connected detailed geometry, or a localized failure with the requ
 </table>
 <p>Current L5 layer/track assignment belongs to local's physical handoff: coarse directional capacity alone is
 insufficient to declare local complete. Final must receive metal and access resources that agree with the
-solution admitted by plan and local.</p>
+solution admitted by plan and local. L5 already reports when shared metal took tracks that the cellbox budget
+had promised (<code>cellbox_allowance_short_tiles</code>); that count must be zero for a handoff to count.</p>
 
-<h2 id="reservation">A different reservation for each cellbox</h2>
-<p><strong>Build the box first, then estimate its demand.</strong> Start from small connectivity groups that fit
-the legal rows/sites and retain room for cell movement. Use internal-net topology, internal and external pin
-counts, external pin multiplicity, cell types and pin shapes, possible cell arrangements, box fill, and
-candidate arrival layers to predict routing demand. A universal M2+M3 allowance is only a calibration control.</p>
-<p>The reservation starts as per-layer capacity budgets plus candidate routing and access domains. Plan uses
-their capacity summary; local and Final refine the domains into compatible physical intervals. Local commits
-crossing metal and edge ports while preserving choices for Final's exact interior allocation. The budget
-protects space for internal wiring and for external pins to reach box-edge ports, including via cuts, landing
-widths and intermediate-layer links. Upper-metal arrivals may need
-staggered vias and short lower-metal wires. Demand follows the actual arrival layer and pin access; a clock or
-reset label alone does not determine the layer chain.</p>
+<h2 id="classes">Reservation by cellbox class</h2>
+<p>Three objectives, in this priority order. They are the acceptance criteria for every iteration.</p>
+<ol>
+<li><strong>Rare failure.</strong> Find the smallest <em>set</em> of constraints under which a box fails its
+first Final attempt rarely. The target is about 99% first-attempt completion per class on held-out boxes, not
+100%: a reservation that never fails is too conservative and its cost shows up as global overflow.</li>
+<li><strong>Small reservations.</strong> Among constraint sets reaching the target, take the one that holds
+back the fewest tracks. Measure the cost as reserved tracks over usable tracks per layer, and as the change in
+plan admission (overflow edges, density) on the same design.</li>
+<li><strong>Easy shapes.</strong> Constrain cellbox construction so the cheap reservation is the common case.
+A box whose internal nets each live on a single row of the tile needs one horizontal track per internal net,
+shareable along the row when intervals are disjoint. Prefer building such boxes over predicting demand for
+awkward ones.</li>
+</ol>
+<p><strong>Class features.</strong> Classify a box after grouping, before any reservation, from data the
+builder already has: member count and total sites, one- or two-row members, number of internal nets and the
+rows their pins occupy, external pin count and multiplicity per net, pin shapes and their accessible layers,
+box fill, and the arrival layers and sides local commits for its external nets. The class key should be
+coarse (a handful of buckets per feature) so a table of per-class reservations can be learned from a few
+hundred boxes and read by a person.</p>
+<p><strong>Constraint form.</strong> A reservation is per box and per layer: a track count on the box layer
+and on each routed layer over the tile, plus the orientation rule below. It is derived from the class, not
+from a global constant. The uniform <code>box_reserve</code> remains only as the calibration control. The
+demand model stays simple: internal nets on one row cost one horizontal track each unless their intervals
+can share; internal nets spanning both rows cost a horizontal track per row plus a vertical link; each
+external pin costs a stub from its arrival to the pin, whose layer chain follows the actual arrival layer and
+pin access (staggered vias for upper arrivals). Add a small per-class margin and nothing else.</p>
 <table>
 <tr><th>Use relative to the requesting connection</th><th>Accounting</th></tr>
 <tr><td>Own destination metal</td><td>Reuse already connected own-net geometry and charge its union once.
@@ -95,24 +133,103 @@ track subject to spacing rules. Protect the required landing/link footprints rat
 track to every destination. Candidate access windows must be mutually compatible across the box's connections,
 not just individually reachable. Deduct PG and fixed obstacles once; preserve layer direction, width, spacing,
 cut rules and any active nondefault routing rules in every pass.</p>
-<p><strong>Shared contract.</strong> Store stable box membership/version, legal placement domain, participating
-pins/nets, per-layer reservation, candidate edge-port/access domains and selected geometry. Plan, local/L5 and
-Final consume the same resolved contract and occupancy accounting. Moving a box re-evaluates it against the
-destination tile; changing membership, cell types, port choices or arrival layers invalidates affected demand
-and access estimates. Internal nets consume real resources even though they do not cross a box boundary.</p>
-<p><strong>Calibration target.</strong> Seek at least 99% first-attempt cellbox completion on held-out samples
+<p><strong>Shared contract.</strong> Store stable box membership/version, class, legal placement domain,
+participating pins/nets, per-layer reservation, candidate edge-port/access domains and selected geometry. Plan,
+local/L5 and Final consume the same resolved contract and occupancy accounting. Moving a box re-evaluates it
+against the destination tile; changing membership, cell types, port choices or arrival layers invalidates
+affected demand and access estimates. Internal nets consume real resources even though they do not cross a box
+boundary. Recorded OpenROAD track usage is a successful reference footprint, not the minimum number of extra
+tracks Final needs.</p>
+
+<h2 id="orientation">Option: vertical arrivals, one horizontal track inside</h2>
+<p>A candidate rule to evaluate early, because it changes both the reservation and the box builder.
+<strong>External nets should arrive at the box on the vertical layer and land on a horizontal track inside the
+box; cells then move horizontally along the row to meet that track.</strong></p>
+<p><strong>Why.</strong> Cells inside a box move only along the row. A horizontal track inside the box runs the
+whole box width, so a pin can meet it from any horizontal position: the placement freedom and the track are
+aligned. One horizontal track can therefore serve several cells of the same net, and several nets on disjoint
+intervals, with the arrival landing anywhere along it. The opposite arrangement, a horizontal arrival that turns
+vertical inside the box to reach a pin, pins the cell to the few vertical track positions that cross a cell
+(a cell a few sites wide is crossed by only about two vertical tracks) and consumes one of the scarce horizontal
+positions across the entire row width for a single connection.</p>
+<p><strong>What to measure.</strong> Per technology, count the horizontal track positions over a tile row after
+PG rails and pin shapes and the vertical positions across typical cell and box widths; confirm the asymmetry
+before relying on it. Then compare, on the same boxes, first-attempt completion and reserved tracks with and
+without the rule. If it holds, plan and local prefer vertical destination branches into boxes, the per-class
+reservation counts one horizontal internal track per net (shared when intervals permit) plus vertical landings,
+and the builder prefers box widths that leave enough vertical landing positions.</p>
+
+<h2 id="construction">Constrain cellbox construction so reservations stay cheap</h2>
+<ul>
+<li><strong>Single-row internals.</strong> Prefer groupings where each internal net's pins fit in one row of
+the tile. A net that must span both rows is allowed but counts as the expensive class; the builder should not
+create it when a single-row alternative exists.</li>
+<li><strong>Bound internal nets per box</strong> by the horizontal tracks a row can supply after PG, pin shapes
+and the arrivals; today's <code>pin_limit</code> bounds signal pins only, which is the wrong quantity.</li>
+<li><strong>Leave room to move.</strong> Keep <code>box_fill</code> low enough that cells can shift and reorder
+along the row; a full row removes the freedom the horizontal track relies on.</li>
+<li><strong>Width and landing positions.</strong> Choose box widths that admit at least as many vertical landing
+positions as the box has distinct external nets, counting interval sharing from above and below.</li>
+<li><strong>Keep two-row cells rare per box</strong> and place them first; they block vertical positions in both
+rows.</li>
+<li><strong>Report the class mix</strong> after every build: boxes per class, expected reservation per class, and
+the boxes the builder could not shape into a cheap class with the reason.</li>
+</ul>
+
+<h2 id="repair">Repair ladder when a box still fails</h2>
+<p>Failures are expected at about the 1% level by design. The ladder keeps them local and never answers a
+local failure with a global reservation increase.</p>
+<ol>
+<li><strong>In-box retry.</strong> Different cell order, shifts and legal orientations; different access window
+or landing position within the box's own reservation. Bounded budget per box.</li>
+<li><strong>Move one cell to a neighbor box.</strong> Allowed when the neighbor's tile has room, its
+reservation absorbs the extra pins (re-evaluate its class), and every affected net's committed metal still
+reaches a supported port of both boxes. This changes box membership, so both contracts are re-versioned and
+their Final results are discarded.</li>
+<li><strong>Evict and rerun local.</strong> Move the cells that cannot be served out of the box to a free tile or
+a neighbor and rerun <code>legroute.local</code> for the affected region with the updated boxes and
+reservations. Neighbors whose interfaces change are invalidated transactionally, as in local's own repair.</li>
+<li><strong>Return to plan</strong> only when the region cannot absorb the change: regroup, recover placement,
+rerun FastRoute. A whole-net maze fallback stays a diagnostic escape; routinely losing the planned tree is a
+handoff bug, not something to hide behind larger global search budgets.</li>
+</ol>
+<p>Every rung records the box, class, the failing pin or join, layer, blocker ownership and rule, the
+alternatives tried and the measured shortfall. Distinguish budget exhaustion, exhaustion of the represented
+candidate graph, malformed geometry and physical conflicts. These records feed the next calibration round.</p>
+
+<h2 id="loop">The iteration loop for agents</h2>
+<p>Each round is self-contained and ends with a measurement table that is committed with the change. Do not
+move to the next round on an unmeasured hunch.</p>
+<ol>
+<li><strong>Collect failing and passing boxes.</strong> Run step-1 Final with <code>final_box_dump</code> on
+LFSR and SHA3; keep the per-box report (members, budgets per layer, phases, failed nets) and the dumped boxes.</li>
+<li><strong>Find each box's minimum.</strong> Drive <code>tools/legroute_box_probe</code> over each dumped box
+with a shrinking track menu per layer to find the smallest menu under which it still routes, with the
+orientation rule on and off. This is the ground truth for the class table.</li>
+<li><strong>Fit the class table.</strong> Bucket by the class features, take the per-class quantile that meets
+the first-attempt target, and record the margin. Report the cost of that table versus the uniform control.</li>
+<li><strong>Replace the uniform budget.</strong> Make the builder emit the per-box reservation, make the grid
+charge it per tile from the box that sits there (instead of the constant in <code>box_reserve</code>), and make
+FastRoute, local/L5 and Final read the same numbers. Keep <code>box_reserve</code> as the control.</li>
+<li><strong>Rerun plan → local → Final</strong> on the same designs. Report: boxes per class, first-attempt and
+repaired completion per class, reserved-track cost per layer, plan admission (overflow edges, density), L5
+allowance shortfall, Final failure reasons, and elapsed time per pass.</li>
+<li><strong>Adjust one thing.</strong> Change the class features, the builder constraints or the orientation
+rule, not several at once, and repeat. Retain failing boxes as fixtures for the next round.</li>
+</ol>
+<p><strong>Calibration target.</strong> At least 99% first-attempt cellbox completion on held-out samples
 covering different designs, pin/topology classes and densities, with small reservations. Measure failure tails
 by class as well as the aggregate. This is a predictor target to validate, not an achieved guarantee: every
-remaining failure still needs repair before a design passes. Recorded OpenROAD track usage is a successful
-reference footprint, not the minimum number of extra tracks Final needs.</p>
+remaining failure still needs repair before a design passes. An aggregate 99% box rate is insufficient for
+design acceptance.</p>
 
 <h2 id="plan">Plan: placement, cellboxes and FastRoute iterate together</h2>
 <ol>
 <li><strong>Prepare the physical frame.</strong> Load the scope manifest, rows/sites, macros, PG, pin geometry
 and technology constraints. Keep the DREAMPlace/DREAMGoal session alive for timing-aware recovery.</li>
-<li><strong>Build cellboxes and reservations.</strong> Group the current cells, check box fit, and estimate
-internal/external routing and access demand. Provide plausible edge-port domains rather than committing early
-to an arbitrary pin position.</li>
+<li><strong>Build cellboxes and reservations.</strong> Group the current cells under the construction
+constraints above, check box fit, classify, and look up the per-class reservation. Provide plausible edge-port
+domains rather than committing early to an arbitrary pin position.</li>
 <li><strong>Route the current candidate.</strong> Use native FastRoute-derived routing on the current box pose
 and port domains, with the per-box reservations reflected in directional, layer-aware capacity. Return connected
 per-net corridors, branches, attachments, arrival layers, edge loads and localized failures. FastRoute guides
@@ -143,8 +260,9 @@ and selects connected routes inside plan's corridors. Preserve the freedom to ar
 inside their boxes; regrouping belongs to plan.</li>
 <li><strong>Respect the reservation while choosing metal.</strong> Materialize and check physical track
 intervals, layer transitions and landing footprints. Foreign transit may cross a box only through allowed
-space. A destination branch stops at a cellbox edge port with a compatible reserved path to its pins. A mixed
-branch may both cross and serve the box. Layer assignment cannot consume access space promised to Final.</li>
+space. A destination branch stops at a cellbox edge port with a compatible reserved path to its pins, on the
+preferred arrival layer when the orientation rule is active. A mixed branch may both cross and serve the box.
+Layer assignment cannot consume access space promised to Final.</li>
 <li><strong>Repair movable interfaces transactionally.</strong> First solve with the current region pins;
 if needed, jointly move eligible pins and boxes. Send new interfaces to unsolved neighbors and invalidate all
 affected solved neighbors. Re-solve the dependent neighborhood and restore poses, pins, metal and reservations
@@ -171,16 +289,8 @@ crossings and committed boundary geometry valid while moving cells.</li>
 <li><strong>Validate and commit.</strong> Check cell legality, PG/obstruction clearance, full metal/via rules,
 same-net physical unions and complete connectivity before committing a box's contribution. Revalidate the
 assembled net across all boxes and interfaces. Pending taps that later roll back are not successful connections.</li>
-<li><strong>Return precise repair information.</strong> Report the pin or join, layer, candidate and blocker
-ownership, rule, attempted placement/access alternatives and any measured resource shortfall. Distinguish
-budget exhaustion, exhaustion of the represented candidate graph, malformed geometry and physical conflicts.</li>
+<li><strong>Fail through the repair ladder</strong> with the precise record defined above.</li>
 </ol>
-<p>Final first retries in-box placement/access choices within its budget. Needing a different edge port,
-crossing route or larger reservation sends a request to local and invalidates affected neighbors. Needing a
-different membership, more placement room or a new global corridor returns to plan for regrouping or placement
-recovery and another FastRoute check. Reuse unaffected results only while their versions remain valid. A
-whole-net maze fallback remains a diagnostic escape path; routinely losing the planned tree must be repaired
-at the handoff rather than hidden by increasing global search budgets.</p>
 
 <h2 id="work">Implementation and evaluation order</h2>
 <table>
@@ -188,18 +298,19 @@ at the handoff rather than hidden by increasing global search budgets.</p>
 <tr><td>1. Scope and reproducible references</td><td>One clock/reset exemption manifest across all passes;
 immutable fully placed/routed OpenROAD references; faithful PG, pin and routing-rule import. Resolve active
 NDR import before calling a replay of those final checkpoints faithful.</td></tr>
-<tr><td>2. Cellbox demand and calibration</td><td>Per-box/per-layer reservations and access alternatives after
-grouping; bounded in-box search on representative boxes. Compare a uniform control against adaptive demand,
-measure first-attempt completion and reservation cost, and retain failing examples.</td></tr>
-<tr><td>3. Plan and local share the contract</td><td>FastRoute consumes the same resources local/L5 materialize.
-Exercise placement recovery, regrouping, port movement and neighbor invalidation. Require valid global routing
-before regional SAT and a physically supported handoff before Final.</td></tr>
-<tr><td>4. Step-1 Final closure</td><td>Joint in-box placement/routing plus structured repair closes every
+<tr><td><strong>2. Cellbox classes and calibration (current)</strong></td><td>Per-box/per-layer reservations
+from a class table, construction constraints, the orientation rule evaluated, and the agent loop above run
+on LFSR and SHA3. Compare the uniform control against the class table, measure first-attempt completion and
+reservation cost per class, and retain failing examples.</td></tr>
+<tr><td>3. Plan and local share the contract</td><td>FastRoute consumes the same per-box resources local/L5
+materialize. Exercise placement recovery, regrouping, port movement and neighbor invalidation. Require valid
+global routing before regional SAT and a physically supported handoff before Final.</td></tr>
+<tr><td>4. Step-1 Final closure</td><td>Joint in-box placement/routing plus the repair ladder closes every
 ordinary connection. Check emitted geometry independently; report first-attempt and repaired box success,
-remaining failures, area and time per stage. An aggregate 99% box rate is insufficient for design acceptance.</td></tr>
-<tr><td>5. Step-2 full closure and QoR</td><td>Enable clock/reset, recalibrate affected reservations, and rerun
-plan/local/Final as needed. Recheck all connections and measure complete routed WNS/TNS, density and total runtime
-against matched OpenROAD runs.</td></tr>
+remaining failures, area and time per stage.</td></tr>
+<tr><td>5. Step-2 full closure and QoR</td><td>Enable clock/reset through the pre-pass, recalibrate affected
+reservations, and rerun plan/local/Final as needed. Recheck all connections and measure complete routed
+WNS/TNS, density and total runtime against matched OpenROAD runs.</td></tr>
 </table>
 <p>Use LFSR for fast iteration, then SHA3 and minimax, followed by partition_m, partition_c/o/p, CNN and other
 HighTide designs below 60k cells. Compare identical netlists, physical constraints, PG, timing policy and thread
@@ -210,9 +321,12 @@ for complete routed designs.</p>
 
 <h2 id="evidence">Evidence motivating this plan</h2>
 <ul>
-<li><strong>Scope reduction alone is insufficient.</strong> Recent SHA3/minimax diagnostics that skipped only
+<li><strong>Uniform reservations do not close boxes.</strong> With plan and local passing, step-1 Final fails
+boxes whose internal nets and pin stubs exceed the one-track-per-layer allowance, while a larger uniform
+allowance removes global capacity and fails plan admission. The reservation has to depend on the box.</li>
+<li><strong>Scope reduction alone is insufficient.</strong> Earlier SHA3/minimax diagnostics that skipped only
 clock/reset in Final did not close the remaining signals. Many failures lost the planned tree and fell back to
-expensive whole-net search. The proposed step 1 applies its scope and resource contract throughout the flow.</li>
+expensive whole-net search. Step 1 applies its scope and resource contract throughout the flow.</li>
 <li><strong>Reserve intervals and access, not just whole tracks.</strong> On fully routed OpenROAD SHA3,
 2,628 of 2,880 occupied analysis tiles share M3 track positions between destination and foreign metal. A sampled
 tile uses 22 destination + 39 foreign − 9 shared = 52 of 60 raw positions, with disjoint occupied intervals.</li>
@@ -222,9 +336,8 @@ M5 and one from M6. All selected paths stagger via coordinates. These are succes
 minimum reserves; two reach pins of cells whose centers lie in neighboring tiles.</li>
 </ul>
 <p>The SHA3 study used native-sized analysis tiles over unchanged OpenROAD final geometry, preserving clock NDR
-and PG. It did not demonstrate native plan/local/Final closure. Evidence and reproducible artifacts are indexed
-in <a href="../../feedback.md">feedback.md</a> under
-<code>sha3_final_cellbox_roles_20261104</code>. The next action is offline review of this page.</p>
+and PG. It did not demonstrate native plan/local/Final closure. Its artifacts are tagged
+<code>sha3_final_cellbox_roles_20261104</code>. The next action is round 1 of the iteration loop.</p>
 </main>
 </body>
 </html>
