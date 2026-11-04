@@ -3,7 +3,7 @@
 residual (M3).
 
     sym_verify <cert> [!]<output>[,[!]<output>...] [asm:[!]<output>] [in:<input>=<value>]...
-               [k:<n>[,<n>...]] [closed|rebuild] [route:fused|var|plain] [emit:<file>] [sf:<n>] [wf:<n>]
+               [k:<n>[,<n>...]] [base] [closed|rebuild] [route:fused|var|plain] [emit:<file>] [sf:<n>] [wf:<n>]
                [solver:<cadical>] [work:<dir>]
 
 The specializer is `MemFused.projectMemFDesignAt`: the memory interpreter
@@ -34,6 +34,15 @@ evaluates `runInvKOf` itself (repeats the symbolic evaluation), `closed` the
 closed `Sym.runInvK` (also re-specializes; `runInvK_sound`). A satisfiable BASE obligation is a counterexample from the initial
 state, replayed on the projection's simulator; a satisfiable STEP obligation
 only says the property is not k-inductive.
+
+Every replayed base counterexample is also written to `<work>/[<tag>_k<k>_]cex_inputs.tsv`:
+one row per cycle of the obligation (`cycle` then one column per input, named from the
+certificate's `_io.json`, unsigned decimal values) and a last line `# fails at cycle <j>`.
+
+`base` builds and solves the BASE obligation only (no step obligation): a bounded search from the
+initial state over the cycles 0..k-1. Its results are `COUNTEREXAMPLE (base, replayed)` (exit 1)
+or `NO COUNTEREXAMPLE UP TO k = <k>` (exit 8), a search result and not a proof: with several k
+values the search deepens until a counterexample.
 
 RESULT lines: `INVARIANT PROVED (k=…)`, `COUNTEREXAMPLE (base)`,
 `NOT K-INDUCTIVE (step)`, or a refusal with its reason. With several
@@ -147,7 +156,7 @@ once for all attempts. Returns the exit code and the verdict. -/
 def attempt (cert : String) (solver : String) (work : System.FilePath) (sf wf : Nat)
     (D : DesignCert) (R : Program) (bound : Nat) (s0 : StateM) (tag : String) (prop : PropSpec)
     (asmOut : Option PropSpec) (asmIn : List (Nat × Int)) (kd : Nat) (closed rebuild : Bool) (route : String)
-    (emit : Option String) : IO (UInt32 × String) := do
+    (emit : Option String) (baseOnly : Bool := false) : IO (UInt32 × String) := do
   let pre := if tag.isEmpty then "" else s!"[{tag} k={kd}] "
   let fin (code : UInt32) (v : String) : IO (UInt32 × String) := do
     say s!"  {pre}RESULT: {v}"; return (code, v)
@@ -164,7 +173,7 @@ def attempt (cert : String) (solver : String) (work : System.FilePath) (sf wf : 
         let why := match baseRun D R sp s0 with
           | .error m => m | .ok (_, st) => if scopedB st then "?" else "definitions not scoped"
         return ← fin 4 s!"REFUSED (base obligation: {why})"
-  let φS ← match stepObl D R sp with
+  let φS ← if baseOnly then pure (.const true) else match stepObl D R sp with
     | some φ => pure φ
     | none => do
         let why := match stepRun D R sp with
@@ -175,7 +184,7 @@ def attempt (cert : String) (solver : String) (work : System.FilePath) (sf wf : 
               else if stateShapeOf s.2.2 != some sp.L then "the next state leaves the layout" else "?"
         return ← fin 4 s!"REFUSED (step obligation: {why})"
   let t3 ← IO.monoMsNow
-  say s!"  {pre}obligations built in {t3 - t2} ms (symbolic evaluation of {kd} + {kd + 1} steps)"
+  say s!"  {pre}obligations built in {t3 - t2} ms (symbolic evaluation of {if baseOnly then s!"{kd} steps, base only" else s!"{kd} + {kd + 1} steps"})"
   let wtag := if tag.isEmpty then "" else s!"{tag.map fun c => if c.isAlphanum then c else '_'}_k{kd}_"
   let (aB, bbB, satB, ncB) ← solve solver work s!"{wtag}base" φB
   say s!"  {pre}base: {ncB} clauses; bit-blast+CNF+write {bbB} ms, solver {satB} ms"
@@ -186,10 +195,20 @@ def attempt (cert : String) (solver : String) (work : System.FilePath) (sf wf : 
         match replay D R sp s0 ins with
         | some j =>
             say s!"  {pre}counterexample inputs (cycle: ordinal values): {(ins.toList.take (j + 1)).zipIdx.map fun (i, c) => (c, i.toList.map bv_uint)}"
+            let names ← ioNames cert "inputs"
+            let nameOf (t : Nat) : String := (names[t]?.filter (!·.isEmpty)).getD s!"in{t}"
+            let hdr := "\t".intercalate ("cycle" :: (List.range nIn).map nameOf)
+            let rows := ins.toList.zipIdx.map fun (i, c) =>
+              "\t".intercalate (toString c :: i.toList.map fun b => toString (bv_uint b))
+            let tsv := work / s!"{wtag}cex_inputs.tsv"
+            IO.FS.writeFile tsv ("\n".intercalate (hdr :: rows) ++ s!"\n# fails at cycle {j}\n")
+            say s!"  {pre}counterexample inputs written to {tsv}"
             return ← fin 1 s!"COUNTEREXAMPLE (base, replayed): the projection's simulator from the initial state fails the property at cycle {j} with assumptions holding"
         | none =>
             return ← fin 7 "COUNTEREXAMPLE NOT REPLAYED (base): the solver's model did not reproduce on the simulator"
     | .failed w => return ← fin 5 s!"SOLVER FAILED (base): {w}"
+  if baseOnly then
+    return ← fin 8 s!"NO COUNTEREXAMPLE UP TO k = {kd} (base only: a search result over cycles 0..{kd - 1}, not a proof)"
   let (aS, bbS, satS, ncS) ← solve solver work s!"{wtag}step" φS
   say s!"  {pre}step: {ncS} clauses; bit-blast+CNF+write {bbS} ms, solver {satS} ms"
   let pfS ← match aS with
@@ -585,11 +604,16 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
       for (tok, prop) in cands do
         let (code, v) ← attempt cert solver work sf wf D R bound s0 (if single then "" else tok) prop
           asmOut asmIn kd (rest.contains "closed") (rest.contains "rebuild") route (opt "emit")
+          (rest.contains "base")
         verdicts := verdicts ++ [s!"{tok} k={kd}: {(v.splitOn " --").head!}"]
         last := code
         if code == 0 then
           unless single do say s!"  SUMMARY: {tok} PROVED at k={kd} after {verdicts.length} attempt(s)"
           return 0
+        -- base-only: a counterexample ends the search, none at this k deepens it
+        if rest.contains "base" && code == 1 then
+          unless single do say s!"  SUMMARY: {tok} COUNTEREXAMPLE at k={kd}"
+          return 1
         -- a refusal or a solver failure not tied to the property repeats for every candidate
         if code == 4 || code == 5 then
           unless single do say s!"  SUMMARY: stopped ({v})"
@@ -597,5 +621,5 @@ flops {D.flops.size} memories {D.memories.size} clocks {D.clocks.size}"
     unless single do say s!"  SUMMARY: none proved: {verdicts}"
     return last
   | _ =>
-    IO.eprintln "usage: sym_verify <cert> [!]<out>[,[!]<out>...] [asm:<output>] [in:<input>=<value>]... [k:<n>[,<n>...]] [closed|rebuild] [route:fused|var|plain] [emit:<file>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]"
+    IO.eprintln "usage: sym_verify <cert> [!]<out>[,[!]<out>...] [asm:<output>] [in:<input>=<value>]... [k:<n>[,<n>...]] [base] [closed|rebuild] [route:fused|var|plain] [emit:<file>] [sf:<n>] [wf:<n>] [solver:<cadical>] [work:<dir>]"
     return 2
