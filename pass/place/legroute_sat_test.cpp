@@ -2,8 +2,9 @@
 // Exercise the actual private regional model without relying on the public hop
 // chooser to select a particular boundary domain. The test links statically so
 // this translation unit supplies the SAT implementation exactly once.
-#include <numeric>
 #include "legroute_sat.cpp"
+
+#include <numeric>
 
 #include "gtest/gtest.h"
 
@@ -22,10 +23,10 @@ struct Moved_hop_fixture {
   Edge_reserve          reserve;
 
   explicit Moved_hop_fixture(int vertical_capacity) {
-    options.sat_ms    = 1000;
-    options.cap_scale = 1;
+    options.sat_ms          = 1000;
+    options.cap_scale       = 1;
     options.density_ceiling = 1;  // unit-capacity edges: the .90 ceiling is tested on its own
-    options.sat_seed  = false;
+    options.sat_seed        = false;
     options.tiers.clear();
     grid.cols    = 4;
     grid.rows    = 3;
@@ -606,6 +607,8 @@ TEST(LegrouteSat, SharedInterfaceRecountUsesBothSidesAndDistinctNetIdentity) {
   ten.pop_back();
   nets.pop_back();
   EXPECT_NO_THROW(validate_crossing_edges(f.grid, ten, nets, f.horizontal, f.vertical, 1));
+  // A large valid experiment scale still admits the same nine tracks under the ceiling.
+  EXPECT_NO_THROW(validate_crossing_edges(f.grid, ten, nets, f.horizontal, f.vertical, 1, std::numeric_limits<double>::max()));
   // cap_scale .8 keeps 8 of 10, under the ceiling
   EXPECT_THROW(validate_crossing_edges(f.grid, ten, nets, f.horizontal, f.vertical, 1, .8), std::runtime_error);
 }

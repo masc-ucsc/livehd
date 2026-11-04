@@ -23,7 +23,7 @@ from .episodes import ImportanceSampler
 from .coarse import eligible_metrics, POLICIES
 from .export_weights import LIMIT
 from .features import NETWORK_BINS
-from .pool import VERSIONS, _atomic, canonical, inside, load_sample, publish_weights, read_manifest, sha
+from .pool import VERSIONS, _atomic, canonical, inside, load_calibration, load_sample, publish_weights, read_manifest, sha
 
 
 def normalized_label_tensor(labels, metric):
@@ -46,6 +46,7 @@ class Dataset:
             raise ValueError("validation data cannot be an excluded evaluation design")
         self.manifest = read_manifest(root)
         self.records = {}
+        self.calibration_designs = set()
         self.train, self.validation = defaultdict(list), defaultdict(list)
         for record in self.manifest["samples"]:
             if not eligible_metrics(record, label_policy) or any(type(record.get(k)) is not int or record[k] != v for k, v in VERSIONS.items()):
@@ -54,6 +55,12 @@ class Dataset:
                 raise ValueError("sample is missing task identity")
             if record["top"] in excluded_designs:
                 continue
+            calibration = load_calibration(self.root, record)
+            if calibration is not None:
+                designs = set(calibration['fit_designs']) | set(calibration['heldout_designs'])
+                if designs & excluded_designs:
+                    raise ValueError('label calibration used an excluded evaluation design')
+                self.calibration_designs.update(designs)
             self.records[record["id"]] = record
             for metric in eligible_metrics(record, label_policy):
                 task = (record["top"], record["technology"], metric)
@@ -291,7 +298,9 @@ def train(args):
                       "initial_weights_sha256": initial_hash, "holdout_design": args.holdout,
                       "training_designs": sorted({task[0] for task in dataset.train}),
                       "validation_task": args.validation_task, "excluded_designs": sorted(set(args.exclude_design)),
-                      "seen_designs": sorted(inherited_designs | {record["top"] for record in dataset.records.values()}),
+                      "seen_designs": sorted(inherited_designs | dataset.calibration_designs
+                                             | {record["top"] for record in dataset.records.values()}),
+                      "calibration_designs": sorted(dataset.calibration_designs),
                       "lineage_complete": args.from_scratch or previous.get("lineage_complete") is True,
                       "sample_ids": sorted(dataset.records), "best_validation_loss": best,
                       "epochs_completed": epoch + 1, "device": device, "torch_version": torch.__version__,

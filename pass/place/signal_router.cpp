@@ -403,17 +403,17 @@ Signal_route_trial Signal_router::propose(const ph::Net& net, const Signal_route
     if (result.geometry || result.timed_out) {
       break;
     }
-    const auto                remaining_stages = stages - i;
+    const auto remaining_stages = stages - i;
     // Reserve work and access enumeration for every remaining strategy. Any
     // unused allowance carries forward; the net's total limits never grow.
-    const auto                work             = (limits.patterns - result.patterns_examined) / remaining_stages;
-    const auto                access           = (limits.access_candidates - result.access_examined) / remaining_stages;
-    auto slice              = limits;  // the caller's limits (maze_labels included), with this stage's share of work
-    slice.access_candidates = access;
-    slice.patterns          = work;
-    auto next = i == 0   ? (guard ? propose_span_impl(net, slice, nullptr, guard) : propose_span(net, slice))
-                : i == 1 ? propose_pattern(net, slice)
-                         : propose_maze(net, slice, prior);
+    const auto work             = (limits.patterns - result.patterns_examined) / remaining_stages;
+    const auto access           = (limits.access_candidates - result.access_examined) / remaining_stages;
+    auto       slice            = limits;  // the caller's limits (maze_labels included), with this stage's share of work
+    slice.access_candidates     = access;
+    slice.patterns              = work;
+    auto next                   = i == 0   ? (guard ? propose_span_impl(net, slice, nullptr, guard) : propose_span(net, slice))
+                                  : i == 1 ? propose_pattern(net, slice)
+                                           : propose_maze(net, slice, prior);
     if (i != 2 && next.geometry) {
       if (auto error = check_prior_cuts(*next.geometry, prior, limits.deadline); !error.empty()) {
         next.geometry.reset();
@@ -424,7 +424,8 @@ Signal_route_trial Signal_router::propose(const ph::Net& net, const Signal_route
     }
     if (i != 2 && next.geometry && guard) {  // an access-damaging span/pattern candidate: try the remaining strategies
       const auto expired = [&] { return std::chrono::steady_clock::now() >= limits.deadline; };
-      const auto verdict = guard->check(proposal_shapes(net, next.geometry->paths, &next.geometry->nondefault_rules), net.name, expired);
+      const auto verdict
+          = guard->check(proposal_shapes(net, next.geometry->paths, &next.geometry->nondefault_rules), net.name, expired);
       if (!verdict.legal) {
         next.geometry.reset();
         next.reason     = "escape: " + verdict.reason;

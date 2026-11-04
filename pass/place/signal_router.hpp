@@ -173,19 +173,19 @@ public:
   Signal_route_trial     propose_straight(const physical::Net&, const physical::Shape& corridor, const Signal_route_limits&) const;
   // Staged span -> pattern -> maze. With a guard, a span/pattern candidate that would take another pin's protected
   // access is set aside and the later strategies still run (same deadline and remaining allowance).
-  Signal_route_trial propose(const physical::Net&, const Signal_route_limits&, std::span<const Signal_route_via> prior = {},
-                             const Pin_escape_guard* guard = nullptr) const;
+  Signal_route_trial     propose(const physical::Net&, const Signal_route_limits&, std::span<const Signal_route_via> prior = {},
+                                 const Pin_escape_guard* guard = nullptr) const;
   Signal_route_trial propose_pattern(const physical::Net&, const Signal_route_limits&) const;
-  Signal_route_trial propose_maze(const physical::Net&, const Signal_route_limits&,
-                                  std::span<const Signal_route_via> prior = {}) const;
+  Signal_route_trial     propose_maze(const physical::Net&, const Signal_route_limits&,
+                                      std::span<const Signal_route_via> prior = {}) const;
   // One pin to its net's anchors (Signal_route_request::anchors), weighted per layer.
-  Signal_route_trial propose_tap(const physical::Net&, const Signal_route_limits&, const std::vector<physical::Shape>& anchors,
-                                 const std::map<std::string, double>& layer_cost,
-                                 std::span<const Signal_route_via>    prior = {}) const;
+  Signal_route_trial     propose_tap(const physical::Net&, const Signal_route_limits&, const std::vector<physical::Shape>& anchors,
+                                     const std::map<std::string, double>& layer_cost,
+                                     std::span<const Signal_route_via>    prior = {}) const;
   // Two pieces of a net's metal (Signal_route_request::sources to anchors).
-  Signal_route_trial propose_join(const physical::Net&, const Signal_route_limits&, const std::vector<physical::Shape>& sources,
-                                  const std::vector<physical::Shape>& anchors, const std::map<std::string, double>& layer_cost,
-                                  std::span<const Signal_route_via> prior = {}) const;
+  Signal_route_trial     propose_join(const physical::Net&, const Signal_route_limits&, const std::vector<physical::Shape>& sources,
+                                      const std::vector<physical::Shape>& anchors, const std::map<std::string, double>& layer_cost,
+                                      std::span<const Signal_route_via> prior = {}) const;
   Signal_route_trial propose_span(const physical::Net&, const Signal_route_limits&) const;
   // Bounded alternatives for a joint SAT consumer: one checked pin-to-pin span
   // per common access track. Occupancy is unchanged; an incomplete menu is not

@@ -272,8 +272,8 @@ Signal_metal_rules::Signal_metal_rules(const Technology& tech, const Floorplan& 
               const auto par_space = t.value();
               t.need("WITHIN");
               const auto par_within = t.value();
-              keepout = std::max({keepout, par_space, par_within});
-              extension.lateral = std::max({extension.lateral, par_space, par_within});
+              keepout               = std::max({keepout, par_space, par_within});
+              extension.lateral     = std::max({extension.lateral, par_space, par_within});
             }
             t.finish();
           } else if (key == "LEF58_EOLKEEPOUT") {

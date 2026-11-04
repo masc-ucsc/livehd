@@ -84,7 +84,7 @@ Pin_escape_guard::Pin_escape_guard(const ph::Technology& tech, const ph::Floorpl
         supported = false;
       }
     }
-    const auto value          = supported && std::isfinite(margin) && margin >= 0 && margin <= INT32_MAX ? int64_t(std::ceil(margin)) : -1;
+    const auto value = supported && std::isfinite(margin) && margin >= 0 && margin <= INT32_MAX ? int64_t(std::ceil(margin)) : -1;
     uncertainty_margin_[name] = {value, value};
   }
   const auto reserve_unknown = [&](const ph::Component& cell, const ph::Net& net, const std::string& pin_name) {

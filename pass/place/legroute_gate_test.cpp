@@ -255,8 +255,8 @@ TEST(LegrouteGate, BoxFitRejectsCollidingFixedBoxesAndPigeonholeCounts) {
   EXPECT_EQ(fit.movable_boxes, 0u);
   // Two movable boxes on a one-tile-free grid: a pigeonhole, rejected without search.
   boxes.boxes[0].fixed = boxes.boxes[1].fixed = false;
-  f.grid.blocked       = {0, 1};
-  fit                  = match_box_fit(f.design, f.grid, boxes, false);
+  f.grid.blocked                              = {0, 1};
+  fit                                         = match_box_fit(f.design, f.grid, boxes, false);
   EXPECT_EQ(fit.reason, "count");
   EXPECT_EQ(fit.movable_boxes, 2u);
   EXPECT_EQ(fit.free_tiles, 1u);
@@ -272,7 +272,7 @@ TEST(LegrouteGate, BoxFitRescuesAtFourWindowsWhatTwoCannotPlaceWithinTheQuota) {
   f.grid.placeable_sites.assign(110, 100);
   f.grid.blocked.assign(110, 0);
   f.grid.blocked[1] = f.grid.blocked[2] = 1;  // the two tiles next to home 0
-  Boxes boxes;
+  Boxes      boxes;
   const auto add = [&](int home) {
     f.cell(10);
     boxes.box_of.push_back(int(boxes.boxes.size()));
@@ -309,6 +309,12 @@ TEST(LegrouteGate, EdgeLimitIsTheNarrowerOfCapScaleAndTheCeiling) {
   o.global_share = .5;
   EXPECT_DOUBLE_EQ(admission_share(o), .5);  // a more conservative share stays itself, not .45
   EXPECT_EQ(edge_limit(1, o), 0);
+  o.cap_scale = std::numeric_limits<double>::max();
+  EXPECT_NO_THROW(validate_legroute_options(o));
+  EXPECT_EQ(edge_limit(20, o), 18);
+  EXPECT_EQ(edge_limit(std::numeric_limits<int>::max(), o), int(std::floor(std::numeric_limits<int>::max() * .9)));
+  o.density_ceiling = 1;
+  EXPECT_EQ(edge_limit(std::numeric_limits<int>::max(), o), std::numeric_limits<int>::max());
 }
 
 TEST(LegrouteGate, ClockTreeChargeMatchesTheTreeClockSpinesBuilds) {
@@ -317,7 +323,10 @@ TEST(LegrouteGate, ClockTreeChargeMatchesTheTreeClockSpinesBuilds) {
   f.grid.rows    = 5;
   f.grid.region  = std::vector<int>(10, 0);
   f.grid.regions = 1;
-  f.grid.layers  = {{.name = "M2", .horizontal = false}, {.name = "M3", .horizontal = true}};
+  f.grid.layers  = {
+      {.name = "M2", .horizontal = false},
+      {.name = "M3",  .horizontal = true}
+  };
   f.options.rib_tiles = 4;
   Net clk;
   clk.clock = true;
@@ -363,8 +372,8 @@ TEST(LegrouteGate, ClockTreeChargeMatchesTheTreeClockSpinesBuilds) {
   }
   // unplaced boxes are charged at their centroid tiles
   for (auto& box : boxes.boxes) {
-    box.cx  = double(f.grid.cx(f.grid.col(box.tile)));
-    box.cy  = double(f.grid.cy(f.grid.row(box.tile)));
+    box.cx   = double(f.grid.cx(f.grid.col(box.tile)));
+    box.cy   = double(f.grid.cy(f.grid.row(box.tile)));
     box.tile = -1;
   }
   EXPECT_EQ(clock_tree_charge(f.design, f.grid, &boxes, 4).v, charge.v);

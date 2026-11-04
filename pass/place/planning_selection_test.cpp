@@ -157,51 +157,58 @@ TEST(PlanningSelection, PowerAwareIoPoseDrivesTimingAndOptimizerRollback) {
   ph::Technology tech;
   tech.manufacturing_grid = .001;
   for (const auto& name : {"M4", "M5"}) {
-    auto& layer = tech.layers[name];
-    layer.width = .020;
-    layer.direction = name == std::string("M4") ? "HORIZONTAL" : "VERTICAL";
-    layer.rules.loaded = true;
-    layer.rules.area = .002;
-    layer.rules.spacing = {{.020, {}, {}}};
+    auto& layer         = tech.layers[name];
+    layer.width         = .020;
+    layer.direction     = name == std::string("M4") ? "HORIZONTAL" : "VERTICAL";
+    layer.rules.loaded  = true;
+    layer.rules.area    = .002;
+    layer.rules.spacing = {
+        {.020, {}, {}}
+    };
   }
   ph::Floorplan frame;
-  frame.die = {0, 0, 1000, 1000};
-  frame.tracks = {{"Y", "M4", 10, 10, 100}, {"X", "M5", 10, 10, 100}};
-  frame.terminals = {{.name = "a", .net = "logical_a", .x = 105, .y = 0, .status = ph::Status::PLACED},
-                     {.name = "z", .net = "logical_z", .x = 805, .y = 0, .status = ph::Status::PLACED}};
+  frame.die    = {0, 0, 1000, 1000};
+  frame.tracks = {
+      {"Y", "M4", 10, 10, 100},
+      {"X", "M5", 10, 10, 100}
+  };
+  frame.terminals = {
+      {.name = "a", .net = "logical_a", .x = 105, .y = 0, .status = ph::Status::PLACED},
+      {.name = "z", .net = "logical_z", .x = 805, .y = 0, .status = ph::Status::PLACED}
+  };
   auto signal_pins = frame.terminals;
   // A real supply obstruction makes legal handoff IO differ from the GP IO.
-  frame.terminals.push_back({.name = "VDD", .net = "VDD", .status = ph::Status::FIXED,
-                              .shapes = {{"M5", {100, 0, 120, 200}}}, .use = "POWER"});
+  frame.terminals.push_back(
+      {.name = "VDD", .net = "VDD", .status = ph::Status::FIXED, .shapes = {{"M5", {100, 0, 120, 200}}}, .use = "POWER"});
   const auto measured = handoff_pins(tech, frame, "M4", "M5");
   ASSERT_NE(measured[0].x, signal_pins[0].x);
 
   dp::Design d;
-  d.layout = {0, 0, 1000, 1000, 1, 1};
+  d.layout      = {0, 0, 1000, 1000, 1, 1};
   d.num_movable = 1;
   // A fixed placement-only object sits between cells and signal IOs. Supply
   // terminals must not become new nodes or overwrite that object.
-  d.node_x = {200, 500, 105, 805};
-  d.node_y = {200, 500, 0, 0};
+  d.node_x      = {200, 500, 105, 805};
+  d.node_y      = {200, 500, 0, 0};
   d.node_size_x = d.node_size_y = {2, 20, 0, 0};
-  d.pin2node = {2, 0, 0, 3};
+  d.pin2node                    = {2, 0, 0, 3};
   d.pin_offset_x = d.pin_offset_y = {0, 0, 0, 0};
-  d.flat_net2pin = {0, 1, 2, 3};
-  d.flat_net2pin_start = {0, 2, 4};
+  d.flat_net2pin                  = {0, 1, 2, 3};
+  d.flat_net2pin_start            = {0, 2, 4};
   d.build_maps();
   dp::Options controls;
   controls.max_iterations = 2;
   controls.min_iterations = 0;
-  controls.num_threads = 1;
+  controls.num_threads    = 1;
   controls.bins_x = controls.bins_y = 8;
-  controls.filler_max_count = 16;
+  controls.filler_max_count         = 16;
   controls.legalize = controls.detailed_place = false;
-  Placement_session session;
+  Placement_session              session;
   const std::vector<std::string> names{"cell:a", "mask:0", "io:a", "io:z"};
   session.advance(d, controls, names, "initial", 2);
-  const auto old_timing = feedback(-std::abs(d.node_x[0] - d.node_x[2]));
-  auto routed_names = measured;
-  routed_names[0].net = "sat_net_0";
+  const auto old_timing   = feedback(-std::abs(d.node_x[0] - d.node_x[2]));
+  auto       routed_names = measured;
+  routed_names[0].net     = "sat_net_0";
   detail::install_handoff_io(d, signal_pins, 2, routed_names);
   EXPECT_EQ(d.node_x.size(), 4u);
   EXPECT_EQ(d.node_x[1], 500);
@@ -219,8 +226,8 @@ TEST(PlanningSelection, PowerAwareIoPoseDrivesTimingAndOptimizerRollback) {
   Planning_selection selection(25);
   ASSERT_TRUE(selection.consider(0, 100, refreshed));
   const auto accepted_pins = signal_pins;
-  auto losing = routed_names;
-  losing[0].x = 999;
+  auto       losing        = routed_names;
+  losing[0].x              = 999;
   detail::install_handoff_io(d, signal_pins, 2, losing);
   session.synchronize(d, controls, names, "candidate");
   ASSERT_FALSE(selection.consider(1, 90, feedback(*refreshed.pins.at("capture:D").slack - 26)));

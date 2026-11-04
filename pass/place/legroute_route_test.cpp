@@ -158,11 +158,20 @@ TEST(LegrouteRoute, FixedVerticalArrivalsDefineTheirNodeRisers) {
 }
 TEST(LegrouteRoute, WideWireQueryRadiusDoesNotRejectLegalThinParallelWires) {
   Track_fixture f(false);
-  f.grid.tile_w = 200;  // Two tracks, 100 DBU apart, for ten-DBU wires.
-  f.tech.layers["M3"].rules.parallel = {{{0, .1}, {0}, {{.01}, {.25}}}};
+  f.grid.tile_w                      = 200;  // Two tracks, 100 DBU apart, for ten-DBU wires.
+  f.tech.layers["M3"].rules.parallel = {
+      {{0, .1}, {0}, {{.01}, {.25}}}
+  };
   const physical::Signal_metal_rules rules(f.tech, f.fp);
   ASSERT_EQ(rules.clearance("M3"), 250);
-  ASSERT_TRUE(rules.spacing({"M3", {145, 90, 155, 310}}, {"M3", {245, 190, 255, 410}}).legal);
+  ASSERT_TRUE(rules
+                  .spacing(
+                      {
+                          "M3",
+                          {145, 90, 155, 310}
+  },
+                      {"M3", {245, 190, 255, 410}})
+                  .legal);
   assign_tracks(f.design, f.grid, f.routes, 2);
   EXPECT_EQ(f.routes.unassigned, 0u);
   EXPECT_NE(f.routes.segments[0].track, f.routes.segments[1].track);
@@ -170,13 +179,19 @@ TEST(LegrouteRoute, WideWireQueryRadiusDoesNotRejectLegalThinParallelWires) {
 
 TEST(LegrouteRoute, EqualParallelEndsStillRespectEndOfLineKeepouts) {
   Track_fixture f(false);
-  f.grid.tile_w = 200;
-  f.routes.segments[1].lo = f.routes.segments[0].lo;
-  f.routes.segments[1].hi = f.routes.segments[0].hi;
-  f.tech.layers["M3"].rules.properties["LEF58_EOLKEEPOUT"] = {
-      "EOLKEEPOUT .020 EXTENSION .020 .100 .020 CORNERONLY ;"};
+  f.grid.tile_w                                            = 200;
+  f.routes.segments[1].lo                                  = f.routes.segments[0].lo;
+  f.routes.segments[1].hi                                  = f.routes.segments[0].hi;
+  f.tech.layers["M3"].rules.properties["LEF58_EOLKEEPOUT"] = {"EOLKEEPOUT .020 EXTENSION .020 .100 .020 CORNERONLY ;"};
   const physical::Signal_metal_rules rules(f.tech, f.fp);
-  ASSERT_FALSE(rules.spacing({"M3", {145, 90, 155, 310}}, {"M3", {245, 90, 255, 310}}).legal);
+  ASSERT_FALSE(rules
+                   .spacing(
+                       {
+                           "M3",
+                           {145, 90, 155, 310}
+  },
+                       {"M3", {245, 90, 255, 310}})
+                   .legal);
   assign_tracks(f.design, f.grid, f.routes, 2);
   EXPECT_GT(f.routes.unassigned, 0u);
 }
@@ -277,10 +292,10 @@ TEST(LegrouteRoute, RuleReachLimitsTheEndEnvelopeToOffsetsTheExactRulesCanViolat
   // two equal-span nets share the two tracks; by default the second one stays unassigned.
   for (bool reach : {false, true}) {
     Track_fixture f(false);
-    f.options.l5_rule_reach = reach;
-    f.grid.tile_w           = 200;
-    f.routes.segments[1].lo = f.routes.segments[0].lo;
-    f.routes.segments[1].hi = f.routes.segments[0].hi;
+    f.options.l5_rule_reach                                  = reach;
+    f.grid.tile_w                                            = 200;
+    f.routes.segments[1].lo                                  = f.routes.segments[0].lo;
+    f.routes.segments[1].hi                                  = f.routes.segments[0].hi;
     f.tech.layers["M3"].rules.properties["LEF58_EOLKEEPOUT"] = {"EOLKEEPOUT .020 EXTENSION .020 .020 .200 CORNERONLY ;"};
     const physical::Signal_metal_rules rules(f.tech, f.fp);
     ASSERT_EQ(rules.clearance("M3"), 260);
@@ -299,17 +314,26 @@ TEST(LegrouteRoute, RuleReachKeepsALongParallelRunSpacingThatShortSamplesMiss) {
   // lengths never overlap that far, but the analytic lateral reach (120) keeps the adjacent track (gap 90): two
   // equal 2000+ DBU spans cannot share the two tracks.
   Track_fixture f(false);
-  f.options.l5_rule_reach = true;
-  f.grid.tile_w           = 200;
-  f.grid.tile_h           = 3000;
-  f.routes.segments[1].lo = f.routes.segments[0].lo;
-  f.routes.segments[1].hi = f.routes.segments[0].hi;
-  f.tech.layers["M3"].rules.parallel = {{{0}, {0, 2}, {{.01, .12}}}};
+  f.options.l5_rule_reach            = true;
+  f.grid.tile_w                      = 200;
+  f.grid.tile_h                      = 3000;
+  f.routes.segments[1].lo            = f.routes.segments[0].lo;
+  f.routes.segments[1].hi            = f.routes.segments[0].hi;
+  f.tech.layers["M3"].rules.parallel = {
+      {{0}, {0, 2}, {{.01, .12}}}
+  };
   f.tech.layers["M3"].rules.properties["LEF58_RECTONLY"] = {"RECTONLY ;"};
   const physical::Signal_metal_rules rules(f.tech, f.fp);
   ASSERT_TRUE(rules.clearance("M3"));
   EXPECT_EQ(rules.lateral_reach("M3"), 120);
-  ASSERT_FALSE(rules.spacing({"M3", {145, 0, 155, 2100}}, {"M3", {245, 0, 255, 2100}}).legal);
+  ASSERT_FALSE(rules
+                   .spacing(
+                       {
+                           "M3",
+                           {145, 0, 155, 2100}
+  },
+                       {"M3", {245, 0, 255, 2100}})
+                   .legal);
   assign_tracks(f.design, f.grid, f.routes, 1);
   EXPECT_EQ(f.routes.track_fallback_shadow["rule_reach:M3"], 1u);
   EXPECT_GT(f.routes.unassigned, 0u);

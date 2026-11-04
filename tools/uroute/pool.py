@@ -133,6 +133,21 @@ def _shape(maps, channels, normalized):
         raise ValueError(f"expected {channels}x{NETWORK_BINS}x{NETWORK_BINS} maps with normalized={normalized}")
 
 
+def load_calibration(root, record):
+    """Read validated calibration evidence, including every design it has seen."""
+    if record.get('status') != 'coarse' or 'calibration_sha256' not in record:
+        return None
+    from .coarse import validate_calibration
+    directory = inside(root, record['directory'])
+    path = inside(directory, 'calibration.json')
+    data = path.read_bytes() if path.stat().st_size <= MANIFEST_LIMIT else b''
+    if not data or sha(data) != record['calibration_sha256']:
+        raise ValueError('calibration digest mismatch')
+    calibration = json.loads(data)
+    validate_calibration(calibration, record)
+    return calibration
+
+
 def load_sample(root, record):
     """Digest-checked routed support pair, decoded from the bytes that were hashed.
 
@@ -150,13 +165,9 @@ def load_sample(root, record):
         maps.append(decode(data))
     features, labels = maps
     if record.get('status') == 'coarse':
-        from .coarse import validate_metadata, validate_calibration
+        from .coarse import validate_metadata
         validate_metadata(record)
-        if 'calibration_sha256' in record:
-            data = inside(directory, 'calibration.json').read_bytes()
-            if sha(data) != record['calibration_sha256']:
-                raise ValueError('calibration digest mismatch')
-            validate_calibration(json.loads(data), record)
+        load_calibration(root, record)
     _shape(features, 4, True)
     _shape(labels, 1 if record.get("status") == "coarse" else 3, False)
     if any(lo < 0 for lo, _ in labels.ranges):

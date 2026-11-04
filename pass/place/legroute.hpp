@@ -33,7 +33,7 @@ struct Legroute_options {
   // the one density ceiling (user policy 0.90): regional cell density, edge admission and every SAT/recount edge
   // bound; more conservative shares and cap_scale apply under it
   double      density_ceiling  = .90;
-  double      cap_scale        = 1;         // experiment: scales every tile's tracks in the SAT model (how far from routable)
+  double      cap_scale        = 1;  // experiment: scales every tile's tracks in the SAT model (how far from routable)
   // in-box H demand of the internal nets: false = one box-layer track each; true = the most internal-net spans that
   // overlap at one x of the packed box (nets end to end share a track)
   bool        inbox_span       = false;
@@ -221,44 +221,44 @@ struct Legroute_options {
   // out of coarse capacity, the same in plan, global and local; Final allocates the actual tracks. The box layer
   // entry comes off the box-layer capacity, upper layers off their own (layer identity is preserved).
   std::string              box_reserve;  // lhd default "M2:1,M3:1"; empty here so unit fixtures keep their tiny capacities
-  // Diagnostic: tiles "col:row;col:row..." (or "all": every placed box) whose box is exported after F1 (output_dir/box_dump: a full post-F1 DEF
-  // with the planned PG merged, and one JSON per box: cells, free row segments, incident nets, pins and the L5
-  // metal reaching the tile, marked valid or a failed fallback proposal). Empty: off.
+  // Diagnostic: tiles "col:row;col:row..." (or "all": every placed box) whose box is exported after F1 (output_dir/box_dump: a full
+  // post-F1 DEF with the planned PG merged, and one JSON per box: cells, free row segments, incident nets, pins and the L5 metal
+  // reaching the tile, marked valid or a failed fallback proposal). Empty: off.
   std::string              final_box_dump;
   bool                     final_box_dump_stop = false;  // diagnostic: return right after the dump (no F2-F4)
-  bool                     clock_spine  = true;
-  unsigned                 rib_tiles    = 4;  // clock rib pitch in tile rows
+  bool                     clock_spine         = true;
+  unsigned                 rib_tiles           = 4;  // clock rib pitch in tile rows
   // legroute.final: in-box placement, in-box routes, taps and routed wires
-  bool                     final        = true;
+  bool                     final               = true;
   // per router call (one local net or one pin tap): access candidates, search nodes and wall-clock budget
   unsigned                 route_access = 2048, route_patterns = 8192, route_ms = 100;
   // Opt-in: when > 0, a Final piece request's TOTAL shared access allowance is max(route_access, this x its pins); it is
   // not a per-pin allocation or guarantee. 0 (default): route_access is the exact per-call cap.
-  unsigned                 route_access_per_pin = 0;
+  unsigned                 route_access_per_pin         = 0;
   // Opt-in experiment: Final does not admit planned paths drawn on L5 fallback tracks (tracks that failed every L5
   // check) as fixed planned metal; default false keeps every planned path.
-  bool                     final_drop_fallback_planned = false;
+  bool                     final_drop_fallback_planned  = false;
   // Opt-in L5 diagnostic: a contribution ledger of every track occupancy plus a shadow occupancy without the FALLBACK
   // contributions; every failed pick is re-run with the same predicates on the shadow (assignment is unchanged).
-  bool                     l5_fallback_shadow = false;
+  bool                     l5_fallback_shadow           = false;
   // Opt-in L5 experiment: limit the conservative end envelope against signal neighbors to the track offsets where the
   // exact rules find an illegal nominal-width pair (hard/reserved neighbors keep the full query reach).
-  bool                     l5_rule_reach = false;
+  bool                     l5_rule_reach                = false;
   // Opt-in: Final admits clock nets' planned metal before every signal net (default: critical, then criticality).
-  bool                     final_clock_first = false;
+  bool                     final_clock_first            = false;
   // Opt-in: Final checks the complete net's connectivity (retained + pending metal) before committing it.
   bool                     final_precommit_connectivity = false;
   // Opt-in: when > 0, every Final router call for a clock net uses this wall budget (ms) instead of route_ms.
-  unsigned                 final_clock_route_ms = 0;
+  unsigned                 final_clock_route_ms         = 0;
   // Opt-in: when > 0, every Final router call for a clock net uses this search-node budget instead of route_patterns.
-  unsigned                 final_clock_route_patterns = 0;
+  unsigned                 final_clock_route_patterns   = 0;
   // Opt-in diagnostic: Final writes final_boxes.tsv, final_box_events.tsv and final_box_usage.tsv (retained pass).
-  bool                     final_box_report = false;
+  bool                     final_box_report             = false;
   // Opt-in: Final's detailed routing order puts clock nets before every signal net (ahead of retry priority).
-  bool                     final_clock_detail_first = false;
+  bool                     final_clock_detail_first     = false;
   // Opt-in diagnostic: Final leaves clock nets (final_skip_clock) and nets whose name matches final_skip_nets
   // (ECMAScript regex, case-insensitive) out entirely: nothing admitted or routed, not counted.
-  bool                     final_skip_clock = false;
+  bool                     final_skip_clock             = false;
   std::string              final_skip_nets;
   unsigned                 route_passes          = 3;  // routing passes, failed nets first in the next (the router has no rip-up)
   // API/replay diagnostic: stop after this many detailed nets in the first pass, retaining all global metal.
@@ -318,10 +318,10 @@ struct Legroute_report {
   // displacement_um / max_displacement_um above are box-centre to selected-tile moves (after any fit_first anchor).
   // These are actual movable-cell moves from the poses legroute was given to the poses it leaves (Manhattan, um).
   double                        cell_max_displacement_um = 0, cell_p95_displacement_um = 0;
-  size_t                        cells_moved = 0;
+  size_t                        cells_moved     = 0;
   size_t                        spilled_regions = 0;
   size_t                        connections = 0, critical_connections = 0, unassigned_segments = 0;
-  std::map<std::string, size_t> track_failures;  // assignment failures by wire/attachment kind
+  std::map<std::string, size_t> track_failures;         // assignment failures by wire/attachment kind
   std::map<std::string, size_t> track_pick_rejections;  // L5 failed pick attempts by LAYER:filter stage
   std::map<std::string, size_t> track_fallback_shadow;  // l5_fallback_shadow: LAYER:kind:{failed,shadow_free} counts
   std::vector<std::string>      track_failure_samples;  // l5_fallback_shadow: per-track blockers of failed final requests
@@ -365,8 +365,8 @@ struct Legroute_report {
   double   corridor_seed_seconds = 0;
   size_t   coarse_backbone_parts = 0, coarse_backbone_edges = 0, coarse_attachment_stubs = 0;
   size_t   coarse_attachment_choices = 0, coarse_attachments_changed = 0;
-  bool     fit_matched_boxes = false;  // local routed and cut from the fit-first matched box tiles
-  size_t   fit_max_move      = 0;
+  bool     fit_matched_boxes   = false;  // local routed and cut from the fit-first matched box tiles
+  size_t   fit_max_move        = 0;
   size_t   partition_oversized = 0, partition_max_cells = 0, partition_route_calls = 0, partition_rejected_repairs = 0;
   size_t   partition_indivisible_cells = 0;
   size_t   partition_timeout_rounds = 0, partition_timeout_regions = 0, sat_reused_regions = 0;
@@ -428,7 +428,7 @@ struct Legroute_report {
   // legacy fixed-IO path: SAT rounds whose published boundary crossings exceeded the density policy
   // Final: each clock net's first planned-metal conflict per pass, in full (phase, offending shape, blocker, rule)
   std::vector<std::string>      clock_conflicts;
-  size_t                        crossing_over_policy = 0;
+  size_t                        crossing_over_policy          = 0;
   // after L5: (tile, budgeted layer) pairs where shared metal left fewer usable tracks than the cellbox budget
   size_t                        cellbox_allowance_short_tiles = 0, cellbox_allowance_short_tracks = 0;
   bool                          crossing_policy_invalid = false;  // then the result does not meet density_ceiling
@@ -447,7 +447,8 @@ struct Legroute_report {
   // passes. Search avoidance is distinct from the two transactional backstops.
   size_t                        final_prior_cut_rejections = 0, final_pending_cut_rejections = 0, final_union_cut_rejections = 0;
   size_t                        final_precommit_disconnected = 0;
-  size_t                        final_skipped_nets = 0;  // final_skip_clock / final_skip_nets diagnostic  // opt-in final_precommit_connectivity rejections
+  size_t                        final_skipped_nets
+      = 0;  // final_skip_clock / final_skip_nets diagnostic  // opt-in final_precommit_connectivity rejections
   size_t                        disconnected_nets = 0;
   std::map<std::string, size_t> failure_reasons;        // reason -> nets
   double                        critical_delay_ps = 0;  // worst Elmore wire delay over the critical nets' routed trees (diagnostic)
@@ -531,15 +532,15 @@ struct Legroute_plan_report {
   double               fit_max_density = 0;
   // With boxes: whole-core joint box-to-tile matching near the box centres (local's own fit model). Far boxes
   // moved beyond window_tiles; the fit holds when matched, at most 1% far and none beyond twice the window.
-  bool                 fit_matched   = false;
-  bool                 fit_applied   = false;  // the route and cuts used the matched tiles as box positions
+  bool                 fit_matched     = false;
+  bool                 fit_applied     = false;  // the route and cuts used the matched tiles as box positions
   size_t               fit_far_boxes = 0, fit_max_move = 0;
   std::string          fit_reason;
   // no POWER/GROUND special-net geometry in the floorplan: the routing capacities carry no power budget, so a
   // passing route is optimistic for a design that will get a power grid
   bool                 pg_missing = false;
-  size_t               fit_movable_boxes = 0, fit_free_tiles = 0;  // count | budget | domains | far (see lr::Fit_match), empty when it fits
-  const char*          route_skip_name() const {
+  size_t      fit_movable_boxes = 0, fit_free_tiles = 0;  // count | budget | domains | far (see lr::Fit_match), empty when it fits
+  const char* route_skip_name() const {
     return route_skip_reason == Route_skip_reason::physical_density ? "physical_density"
            : route_skip_reason == Route_skip_reason::window_density ? "window_density"
                                                                     : "none";

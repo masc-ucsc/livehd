@@ -225,19 +225,19 @@ struct Options {
     bool     strict          = true;
   } legroute_probe;
   struct Legroute_plan {
-    bool     enabled     = false;
+    bool        enabled        = false;
     // With legal_boxes=false the ordinary plan retains the exact raw frame and
     // PG resources for movable local routing. This switch instead measures a
     // legalized diagnostic handoff and requires legal_boxes=true.
-    bool     handoff     = false;
+    bool        handoff        = false;
     std::string route_model    = "legacy";  // coarse: actual local H/V pressure replaces whole-tree inflation in recovery
     unsigned    route_interval = 50, route_net_pops = 2000;
     bool        export_coarse = false;  // provenance-tagged utilization-only learning samples
-    unsigned local_tiles = 0;  // bounded hotspot movement radius; 0 keeps whole-placement movement during a local recovery slice
-    unsigned rounds = 3, iterations = 100, net_pops = 100000;
-    unsigned min_iterations = 0, timing_interval = 0;  // recovery: at least 50 steps; timing provider defaults to 5-step refresh
-    double   max_inflate        = 1.5;
-    double   max_degradation_ps = -1;  // estimated data-pin slack versus first candidate; -1 disables
+    unsigned    local_tiles = 0;  // bounded hotspot movement radius; 0 keeps whole-placement movement during a local recovery slice
+    unsigned    rounds = 3, iterations = 100, net_pops = 100000;
+    unsigned    min_iterations = 0, timing_interval = 0;  // recovery: at least 50 steps; timing provider defaults to 5-step refresh
+    double      max_inflate        = 1.5;
+    double      max_degradation_ps = -1;  // estimated data-pin slack versus first candidate; -1 disables
   } legroute_plan;
   // Runtime owner shared across final-cell placement/refinement/finalization.
   // Not serialized or hashed: it is state of this execution, not configuration.

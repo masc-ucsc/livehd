@@ -25,7 +25,7 @@ int Track_resource_layer::represented_capacity(size_t tile) const {
     throw std::logic_error("legroute resource catalog has too many track exclusions");
   }
   const auto remaining = count - resource.exclusions.size();
-  const auto kept = size_t(resource.anonymous_headroom) + resource.cellbox_budget;
+  const auto kept      = size_t(resource.anonymous_headroom) + resource.cellbox_budget;
   return remaining <= kept ? 0 : int(remaining - kept);
 }
 

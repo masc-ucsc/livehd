@@ -209,8 +209,8 @@ struct Fixture {
 TEST(Legroute, PackSegmentsWidestFirstIntoRoomiestSegment) {
   EXPECT_EQ(lr::pack_segments({3, 2, 1}, {4, 3}), (std::vector<int>{0, 1, 0}));
   EXPECT_EQ(lr::pack_segments({3, 2, 2}, {4, 3}), (std::vector<int>{1, 0, 0}));  // exact fallback: {3} + {2, 2}
-  EXPECT_EQ(lr::pack_segments({3, 3, 2, 2, 2}, {6, 6}).size(), 5u);                  // 3+3 / 2+2+2
-  EXPECT_TRUE(lr::pack_segments({4, 4, 1}, {4, 4}).empty());                          // genuinely impossible
+  EXPECT_EQ(lr::pack_segments({3, 3, 2, 2, 2}, {6, 6}).size(), 5u);              // 3+3 / 2+2+2
+  EXPECT_TRUE(lr::pack_segments({4, 4, 1}, {4, 4}).empty());                     // genuinely impossible
   EXPECT_TRUE(lr::pack_segments({3, 3}, {4, 2}).empty());
   const std::vector<int> prefer{1, -1};
   EXPECT_EQ(lr::pack_segments({2, 1}, {4, 3}, &prefer), (std::vector<int>{1, 0}));
@@ -282,7 +282,9 @@ TEST(Legroute, CellboxBudgetComesOffUsableTracksPerLayerAndShortTilesHostNoBox) 
   f.cell("dff", 0, 0);
   Legroute_options opt;
   Legroute_regions regions;
-  regions.rects       = {{0, 0, 10000, 4000}};
+  regions.rects = {
+      {0, 0, 10000, 4000}
+  };
   regions.rect_region = {0};
   const auto base_d   = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
   const auto base     = lr::build_grid(base_d, regions);
@@ -295,16 +297,16 @@ TEST(Legroute, CellboxBudgetComesOffUsableTracksPerLayerAndShortTilesHostNoBox) 
   }
   ASSERT_GE(m3, 0);
   const int t = g.tile(2, 2);
-  EXPECT_EQ(g.cap[m3][t], base.cap[m3][t] - 2);                  // layer identity: only M3 loses M3's share
+  EXPECT_EQ(g.cap[m3][t], base.cap[m3][t] - 2);  // layer identity: only M3 loses M3's share
   EXPECT_EQ(g.resources.layers[size_t(m3)].tiles[size_t(t)].cellbox_budget, 2u);
   if (g.box_layer == "M2") {
     EXPECT_EQ(g.box_cap[t], base.box_cap[t] - 1);
   }
   EXPECT_FALSE(g.box_short[t]);
   // a budget no tile can keep: every free tile is short and hosts no box
-  opt.box_reserve      = "M3:1000";
-  const auto d_short   = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
-  const auto g_short   = lr::build_grid(d_short, regions);
+  opt.box_reserve    = "M3:1000";
+  const auto d_short = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
+  const auto g_short = lr::build_grid(d_short, regions);
   EXPECT_TRUE(g_short.box_short[t]);
   EXPECT_EQ(g_short.cap[m3][t], 0);
   lr::Box box;
@@ -316,7 +318,7 @@ TEST(Legroute, CellboxBudgetComesOffUsableTracksPerLayerAndShortTilesHostNoBox) 
   box.cx     = double(g_short.cx(g_short.col(t)));
   box.cy     = double(g_short.cy(g_short.row(t)));
   EXPECT_FALSE(lr::box_fits(d_short, g_short, box, t));
-  opt.box_reserve = "M3";
+  opt.box_reserve  = "M3";
   const auto d_bad = lr::build_design(f.tech, f.fp, f.timing, opt, nullptr);
   EXPECT_THROW(lr::build_grid(d_bad, regions), std::invalid_argument);
 }
@@ -1631,7 +1633,7 @@ TEST(Legroute, MixedMeshComponentUsesAJointlySupportedMovableStarRoot) {
 }
 
 TEST(Legroute, StarFallbackRequiresOneRootPositionForEveryNeighbor) {
-  Fixture f(96, 10);
+  Fixture    f(96, 10);
   const auto a = f.cell("dff", 100, 500), moving = f.cell("dff", 900, 1000);
   const auto b = f.cell("dff", 2500, 1500), c = f.cell("dff", 1700, 1500);
   f.net({
@@ -2135,7 +2137,7 @@ TEST(Legroute, RejectsInvalidPolicyNumbers) {
     opt.cap_scale = value;
     EXPECT_THROW(validate_legroute_options(opt), std::invalid_argument);
   }
-  opt.cap_scale                = 1;
+  opt.cap_scale = 1;
   for (double value : {-2.0, -.5, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
     opt.reserved_tracks_per_um = value;
     EXPECT_THROW(validate_legroute_options(opt), std::invalid_argument);
@@ -3244,7 +3246,7 @@ TEST(Legroute, PlanningRejectsWholeCoreDensityWithoutPublishingAMeasuredMap) {
 TEST(Legroute, PlanningRejectsALocallyOverfullWindowBeforeRoutingWithLocalPressure) {
   // A 10 x 4 um core at about 6% overall density, with one fully packed 1.6 x 1.5 um corner: the whole-core and
   // region screens pass, but the route would start from cells that cannot legally sit there.
-  Fixture f(200, 16);
+  Fixture             f(200, 16);
   std::vector<size_t> packed;
   for (int y = 0; y < 6; ++y) {
     for (int x = 0; x < 4; ++x) {
@@ -3257,11 +3259,11 @@ TEST(Legroute, PlanningRejectsALocallyOverfullWindowBeforeRoutingWithLocalPressu
       {           far, "A"}
   });
   Legroute_options options;
-  options.clock_spine     = false;
-  options.global_route    = true;
-  options.region_pins     = false;
-  const auto before       = f.fp.components;  // physical pins, no boxes: window density decides
-  const auto rejected     = legroute_plan(f.tech, f.fp, f.timing, options);
+  options.clock_spine  = false;
+  options.global_route = true;
+  options.region_pins  = false;
+  const auto before    = f.fp.components;  // physical pins, no boxes: window density decides
+  const auto rejected  = legroute_plan(f.tech, f.fp, f.timing, options);
   EXPECT_FALSE(rejected.route_attempted);
   EXPECT_EQ(rejected.route_skip_reason, Legroute_plan_report::Route_skip_reason::window_density);
   EXPECT_STREQ(rejected.route_skip_name(), "window_density");
@@ -3286,8 +3288,8 @@ TEST(Legroute, PlanningRejectsALocallyOverfullWindowBeforeRoutingWithLocalPressu
   EXPECT_GE(boxed.fit_dense_windows, 1u);
   options.partition_cells = 0;
   // Disabled, the same pose proceeds to the route.
-  options.fit_density = 0;
-  const auto routed   = legroute_plan(f.tech, f.fp, f.timing, options);
+  options.fit_density     = 0;
+  const auto routed       = legroute_plan(f.tech, f.fp, f.timing, options);
   EXPECT_TRUE(routed.route_attempted);
   EXPECT_EQ(routed.fit_windows, 0u);
   // Invalid settings are configuration errors.

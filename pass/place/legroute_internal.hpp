@@ -131,7 +131,7 @@ struct Grid {
   std::vector<uint32_t>                      key;   // per tile: free-segment pattern
   std::vector<std::vector<Seg>>              keys;  // pattern -> segments (sorted)
   std::vector<uint8_t>                       blocked;
-  std::vector<uint8_t>                       box_short;  // free tile short of the cellbox budget: hosts no box
+  std::vector<uint8_t>                       box_short;    // free tile short of the cellbox budget: hosts no box
   std::vector<physical::Orientation>         row_orient;   // per placement row (2 per tile row)
   std::vector<uint8_t>                       row_present;  // per placement row
   // Free physical placement sites after fixed obstacles, before legal-box overhang reservations.
@@ -145,7 +145,7 @@ struct Grid {
   std::vector<Layer>                         layers;
   std::vector<std::vector<int16_t>>          cap;
   std::vector<int16_t>                       box_cap;    // per tile: usable box-layer tracks (in-box routes and local nets only)
-  Track_resource_catalog                    resources;  // physical identities underlying coarse counts; not a DRC certificate
+  Track_resource_catalog                     resources;  // physical identities underlying coarse counts; not a DRC certificate
   std::vector<std::vector<physical::Rect>>   obstacles;  // per layer: power metal and macro bodies (DBU)
   std::vector<std::vector<std::vector<int>>> obstacle_band;  // [layer][band]: obstacles near that band's tracks
   int                                        tile(int c, int r) const { return r * cols + c; }
@@ -279,30 +279,31 @@ struct Global_routes {
   double                   seconds  = 0;
 };
 struct Box_route_seed_result {
-  bool accepted = false;
+  bool          accepted = false;
   // Separate endpoint view: the original Boxes still define placement domains and physical cell membership.
-  Boxes boxes;
+  Boxes         boxes;
   Global_routes routes;  // native Design net indices
-  size_t matched = 0, moved = 0;
-  double matching_seconds = 0, seconds = 0;
-  std::string reason;
+  size_t        matched = 0, moved = 0;
+  double        matching_seconds = 0, seconds = 0;
+  std::string   reason;
 };
 Box_route_seed_result prepare_box_route_seed(const Design&, const Grid&, const Boxes&, const std::vector<int>& cap_h,
                                              const std::vector<int>& cap_v, std::string_view stage);
 // cap_h[t], cap_v[t]: the tile's tracks per direction; margin_tiles: the search box around a net's endpoints; rounds:
 // negotiation rounds (rip-up and reroute of the nets on edges over their share; 0: a full edge is closed, one pass)
-Global_routes    global_route(const Grid&, const std::vector<int>& cap_h, const std::vector<int>& cap_v, double share,
-                              double own_share, const std::vector<Global_net>&, unsigned margin_tiles, unsigned rounds,
-                              size_t net_pops = 0, double astar_weight = 1, bool pattern_seed = false);
+Global_routes         global_route(const Grid&, const std::vector<int>& cap_h, const std::vector<int>& cap_v, double share,
+                                   double own_share, const std::vector<Global_net>&, unsigned margin_tiles, unsigned rounds,
+                                   size_t net_pops = 0, double astar_weight = 1, bool pattern_seed = false);
 // The density ceiling (Legroute_options::density_ceiling, user policy 0.90): physical cell density per region
 // and the share of an edge's tracks any admitted, SAT or recounted demand may use. More conservative shares
 // (global_share, hop_share) and the cap_scale experiment apply under it; neither multiplies it again.
 inline double admission_share(const Legroute_options& options) { return std::min(options.global_share, options.density_ceiling); }
 // Distinct nets an edge (or tile direction) of physical capacity C may carry: the narrower of the cap_scale
 // experiment and the ceiling.
-inline int edge_limit(int capacity, const Legroute_options& options) {
-  return std::max(0,
-                  std::min(int(std::floor(capacity * options.cap_scale)), int(std::floor(capacity * options.density_ceiling))));
+inline int    edge_limit(int capacity, const Legroute_options& options) {
+  // Apply the ceiling before multiplying: a valid experimental scale can
+  // exceed the integer range even though the admitted capacity never does.
+  return std::max(0, int(std::floor(capacity * std::min(options.cap_scale, options.density_ceiling))));
 }
 inline bool movable_route_partition(const Legroute_options& options) { return options.partition_cells && !options.legal_boxes; }
 
@@ -436,7 +437,7 @@ struct Segment {
   int     lo = 0, hi = 0;              // tile range along the segment, inclusive
   int     node_lo = -1, node_hi = -1;  // the node an end attaches to (-1: a bend or a clock spine joint)
   int64_t track  = -1;                 // track index (L7)
-  uint8_t track_state = 0;             // Track_state: none / checked / prescribed / fallback
+  uint8_t track_state = 0;                  // Track_state: none / checked / prescribed / fallback
   int64_t jog_lo = -1, jog_hi = -1;    // L7: lowest horizontal layer track of the jog to a node's riser, per end
   uint8_t jog_lo_state = 0, jog_hi_state = 0;
   bool    critical = false, clock = false;
@@ -469,9 +470,9 @@ struct Routing {
   // the clock tracks local reserved per tile (H, V) before SAT, checked against the tree L4 builds afterwards
   std::vector<int> clock_reserved_h, clock_reserved_v;
   std::map<std::string, size_t> track_failures;
-  std::map<std::string, size_t> track_pick_rejections;  // LAYER:filter -> failed pick attempts
-  std::map<std::string, size_t> track_fallback_shadow;  // l5_fallback_shadow diagnostic counts
-  std::vector<std::string>      track_failure_samples;  // l5_fallback_shadow: per-track blockers of failed final requests
+  std::map<std::string, size_t> track_pick_rejections;           // LAYER:filter -> failed pick attempts
+  std::map<std::string, size_t> track_fallback_shadow;           // l5_fallback_shadow diagnostic counts
+  std::vector<std::string>      track_failure_samples;           // l5_fallback_shadow: per-track blockers of failed final requests
   size_t layer_overflow_segments = 0, layer_overflow_tiles = 0;  // assign_layers: segments placed on an overfull layer
 };
 // In-box demand: local nets and pin taps per box, charged to the box layer first; the excess and the vertical part
@@ -513,7 +514,7 @@ public:
   Final_cut_state(const physical::Technology&, const physical::Floorplan&);
   ~Final_cut_state();
   // Empty on success. Failure leaves every earlier accepted piece unchanged.
-  std::string add(std::span<const physical::Route_path>);
+  std::string                   add(std::span<const physical::Route_path>);
   // Exact retained/pending identities for a non-mutating route request.
   std::vector<Signal_route_via> vias() const;
 };

@@ -353,17 +353,21 @@ TEST(SignalRouter, OrdinaryDetourRoutingAlsoContinuesPastAProtectedClockEscape) 
   // committed to the occupancy. With a borrowed guard and with a locally built one.
   for (bool borrowed : {false, true}) {
     Fixture f;
-    f.tech.macros["cell"].pins["CLK"] = {"INPUT", "CLOCK", {{"M1", {.072, .027, .090, .063}}}};
+    f.tech.macros["cell"].pins["CLK"]           = {"INPUT", "CLOCK", {{"M1", {.072, .027, .090, .063}}}};
     auto                              occupancy = routing_occupancy(f.tech, f.fp, 64);
     std::unique_ptr<Pin_escape_guard> guard;
     const auto                        profile = f.profile();
     if (borrowed) {
-      guard = std::make_unique<Pin_escape_guard>(f.tech, f.fp, occupancy, f.limits.access_candidates, std::function<void()>{},
+      guard = std::make_unique<Pin_escape_guard>(f.tech,
+                                                 f.fp,
+                                                 occupancy,
+                                                 f.limits.access_candidates,
+                                                 std::function<void()>{},
                                                  profile.access);
     }
-    Signal_router            router(f.tech, f.fp, occupancy, profile, guard.get());
-    const auto               before = occupancy.size();
-    Signal_route_request     request{f.limits, {}, false, false};
+    Signal_router        router(f.tech, f.fp, occupancy, profile, guard.get());
+    const auto           before = occupancy.size();
+    Signal_route_request request{f.limits, {}, false, false};
     request.search_detours = true;
     const auto result      = router.try_route(f.net, request);
     ASSERT_EQ(result.candidates.size(), 1) << (borrowed ? "borrowed: " : "local: ") << result.reason;

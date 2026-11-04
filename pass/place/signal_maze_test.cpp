@@ -326,12 +326,15 @@ TEST(SignalMaze, ProposedCutsForceALegalUpperLayerDetour) {
 TEST(SignalMaze, AnchorsOutsideTheWindowDoNotShapeTheSearch) {
   // A join with one anchor inside the die and a remote piece outside it gives exactly the result without the remote
   // piece; with only the remote piece there is no target in the window.
-  Maze_fixture f;
-  const ph::Shape remote{"horizontal", {12000, 990, 12100, 1010}};  // die is [0,10000]^2
+  Maze_fixture    f;
+  const ph::Shape remote{
+      "horizontal",
+      {12000, 990, 12100, 1010}
+  };  // die is [0,10000]^2
   ph::Routing_occupancy     occupancy(1000);
   Signal_router             router(f.tech, f.frame, occupancy, f.profile);
   const Signal_route_limits limits{0, 8192, std::chrono::steady_clock::now() + std::chrono::seconds(5)};
-  const auto                plain = router.propose_join(f.net, limits, f.sources, f.targets, {});
+  const auto                plain         = router.propose_join(f.net, limits, f.sources, f.targets, {});
   auto                      mixed_targets = f.targets;
   mixed_targets.push_back(remote);
   auto mixed_sources = f.sources;
@@ -349,12 +352,18 @@ TEST(SignalMaze, AnchorsOutsideTheWindowDoNotShapeTheSearch) {
 TEST(SignalMaze, PartlyOutsidePiecesSearchLikeTheirInWindowPart) {
   // Pieces that reach past the die behave exactly like their clipped part: the window reference, extent and goals all
   // come from the trimmed view.
-  Maze_fixture f;
-  ph::Routing_occupancy     occupancy(1000);
-  Signal_router             router(f.tech, f.frame, occupancy, f.profile);
-  const Signal_route_limits limits{0, 8192, std::chrono::steady_clock::now() + std::chrono::seconds(5)};
-  const std::vector<ph::Shape> clipped_s{{"horizontal", {980, 990, 10000, 1010}}}, clipped_t{{"horizontal", {4980, 2990, 10000, 3010}}};
-  const std::vector<ph::Shape> long_s{{"horizontal", {980, 990, 50000, 1010}}}, long_t{{"horizontal", {4980, 2990, 50000, 3010}}};
+  Maze_fixture                 f;
+  ph::Routing_occupancy        occupancy(1000);
+  Signal_router                router(f.tech, f.frame, occupancy, f.profile);
+  const Signal_route_limits    limits{0, 8192, std::chrono::steady_clock::now() + std::chrono::seconds(5)};
+  const std::vector<ph::Shape> clipped_s{
+      {"horizontal", {980, 990, 10000, 1010}}
+  },
+      clipped_t{{"horizontal", {4980, 2990, 10000, 3010}}};
+  const std::vector<ph::Shape> long_s{
+      {"horizontal", {980, 990, 50000, 1010}}
+  },
+      long_t{{"horizontal", {4980, 2990, 50000, 3010}}};
   const auto a = router.propose_join(f.net, limits, clipped_s, clipped_t, {});
   const auto b = router.propose_join(f.net, limits, long_s, long_t, {});
   ASSERT_TRUE(a.geometry) << a.reason;
@@ -392,7 +401,7 @@ TEST(SignalMaze, KeptCutHistoriesRecoverAPathTheSingleBestLabelLoses) {
   };
   const auto single = run(1);
   EXPECT_FALSE(single.geometry);
-  EXPECT_EQ(single.reason, "maze exhausted");  // lost during the search, not a later geometry rejection
+  EXPECT_EQ(single.reason, "maze exhausted");                     // lost during the search, not a later geometry rejection
   EXPECT_LT(single.patterns_examined, 100000u) << single.reason;  // exhausted, not out of budget
   EXPECT_FALSE(single.timed_out);
   const auto kept = run(4);

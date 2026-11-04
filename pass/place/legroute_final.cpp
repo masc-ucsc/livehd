@@ -25,7 +25,6 @@
 #include <unordered_map>
 
 #include "inou/lefdef/cut_rules.hpp"
-#include "steiner_topology.hpp"
 #include "inou/lefdef/routing_connectivity.hpp"
 #include "inou/lefdef/routing_geometry.hpp"
 #include "inou/lefdef/routing_occupancy.hpp"
@@ -34,6 +33,7 @@
 #include "legroute_internal.hpp"
 #include "pin_escape_guard.hpp"
 #include "signal_router.hpp"
+#include "steiner_topology.hpp"
 
 namespace livehd::placement::lr {
 namespace ph = livehd::physical;
@@ -255,8 +255,7 @@ void final_place(const Design& d, const Grid& g, const Boxes& boxes, const Routi
     // Row assignment first: the cells' rows minimize the box nets split across the two rows (a cross-row net needs
     // an extra M2 track and an M3 one; a same-row one usually a single M2), under the rows' segment capacity, then
     // the fewest cells moved. Exhaustive up to 14 single-row cells; boxes with two-row cells keep their rows.
-    if (!in.empty() && b.cells.size() <= 14
-        && std::ranges::none_of(b.cells, [&](int i) { return d.tall[size_t(i)]; })) {
+    if (!in.empty() && b.cells.size() <= 14 && std::ranges::none_of(b.cells, [&](int i) { return d.tall[size_t(i)]; })) {
       std::vector<int> cells, rows_now;
       for (const auto& [sg, members] : in) {
         for (int i : members) {
@@ -283,10 +282,10 @@ void final_place(const Design& d, const Grid& g, const Boxes& boxes, const Routi
           nets.push_back(std::move(v));
         }
       }
-      const size_t n          = cells.size();
-      auto         best_key   = std::pair{std::numeric_limits<int>::max(), std::numeric_limits<int>::max()};
-      uint32_t     best_mask  = 0;
-      bool         found      = false;
+      const size_t                    n         = cells.size();
+      auto                            best_key  = std::pair{std::numeric_limits<int>::max(), std::numeric_limits<int>::max()};
+      uint32_t                        best_mask = 0;
+      bool                            found     = false;
       std::array<std::vector<int>, 2> best_pack;
       for (uint32_t mask = 0; mask < (uint32_t{1} << n); ++mask) {
         int cut = 0, moved = 0;
@@ -499,7 +498,7 @@ Final_planned_geometry final_planned_geometry(const Design& d, const Grid& g, co
             ends[e]       = yj;
             // the recorded provenance, also when the pick failed (track -1, fallback): the default track drawn here is not checked
             geo.state = (e ? s.jog_hi_state : s.jog_lo_state) != uint8_t(Track_state::none) ? (e ? s.jog_hi_state : s.jog_lo_state)
-                                                                                          : uint8_t(Track_state::none);
+                                                                                            : uint8_t(Track_state::none);
             geo.wire_on(lname(low_h), true, at, riser_x(node), yj);
             geo.stack(lname(s.layer), lname(low_h), at, yj);
             geo.stack(lname(low_h), lname(T.nodes[node].riser_layer), riser_x(node), yj);
@@ -591,7 +590,7 @@ Final_planned_geometry final_planned_geometry(const Design& d, const Grid& g, co
       const int  tile     = T.nodes[node].tile;
       const auto ylo      = std::min(*lo, g.bottom(g.row(tile)) + g.tile_h / 4),
                  yhi      = std::max(*hi, g.bottom(g.row(tile)) + 3 * g.tile_h / 4);
-      geo.state = T.nodes[node].riser_state;
+      geo.state           = T.nodes[node].riser_state;
       geo.wire_on(lname(T.nodes[node].riser_layer), false, ylo, yhi, riser_x(node));
     }
     // clock spines of this net
@@ -676,8 +675,8 @@ Final_planned_geometry final_planned_geometry(const Design& d, const Grid& g, co
   out.path_state.resize(d.nets.size());
   for (size_t n = 0; n < d.nets.size(); ++n) {
     out.path_state[n] = std::move(net_geo[n].path_state);
-    out.paths[n] = std::move(net_geo[n].paths);
-    out.joins[n] = std::move(net_geo[n].joins);
+    out.paths[n]      = std::move(net_geo[n].paths);
+    out.joins[n]      = std::move(net_geo[n].joins);
   }
   out.io_stub_failure = std::move(io_stub_failure);
   return out;
@@ -697,7 +696,7 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
     }
     return 0;
   }();
-  const auto lname = [&](int l) -> const std::string& { return g.layers[l].name; };
+  const auto       lname   = [&](int l) -> const std::string& { return g.layers[l].name; };
   // the planned global metal (segments, bends, risers, jogs, stubs, clock spines) and its layer joins
   auto             planned = final_planned_geometry(d, g, boxes, R);
   std::vector<Geo> net_geo;
@@ -708,8 +707,8 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
     if (d.opt.final_drop_fallback_planned) {
       // opt-in: a path drawn on an L5 fallback proposal (a track that failed every L5 check) is not admitted as planned
       // metal; the net's checked pieces stay and its pins tap/join around the gap
-      auto& paths  = planned.paths[n];
-      auto& states = planned.path_state[n];
+      auto&                       paths  = planned.paths[n];
+      auto&                       states = planned.path_state[n];
       std::vector<ph::Route_path> kept;
       for (size_t k = 0; k < paths.size(); ++k) {
         if (k < states.size() && states[k] == uint8_t(Track_state::fallback)) {
@@ -724,10 +723,11 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
     net_geo[n].joins = std::move(planned.joins[n]);
   }
   if (d.opt.final_drop_fallback_planned) {
-    std::fprintf(stderr, "legroute final: %zu planned paths on L5 fallback tracks not admitted (final_drop_fallback_planned)\n",
+    std::fprintf(stderr,
+                 "legroute final: %zu planned paths on L5 fallback tracks not admitted (final_drop_fallback_planned)\n",
                  dropped_fallback);
   }
-  const auto io_stub_failure = std::move(planned.io_stub_failure);
+  const auto                io_stub_failure = std::move(planned.io_stub_failure);
   // ---- routing with the shared signal router (satlegalize.route) on the placed cells. The global metal goes in
   // first and is checked against the cells, the power grid and each other; then, critical nets first, every box pin
   // of a routed net taps onto its net's metal (the low layers weigh more, so a tap climbs early instead of running
@@ -753,7 +753,10 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
       if ((d.opt.final_skip_clock && N.clock) || (skip_re && std::regex_search(d.fp.nets[N.frame].name, *skip_re))) {
         job[n] = 0;
         ++skipped;
-        std::fprintf(stderr, "legroute final: skipping %s%s (diagnostic)\n", d.fp.nets[N.frame].name.c_str(), N.clock ? " [clock]" : "");
+        std::fprintf(stderr,
+                     "legroute final: skipping %s%s (diagnostic)\n",
+                     d.fp.nets[N.frame].name.c_str(),
+                     N.clock ? " [clock]" : "");
       }
     }
   }
@@ -799,14 +802,14 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
     size_t      net = 0;
     std::string layer;
     bool        local = false;  // the net has a cell pin in this box (a destination here), else transit through it
-    std::string metal;  // "new" detailed metal, "retained" planned metal of a closed tree, or "abandoned" planned
-                        // metal of a tree that fell back to a whole route (still occupancy, no longer the net's path)
-    ph::Rect    rect;   // clipped to the box's tile
+    std::string metal;          // "new" detailed metal, "retained" planned metal of a closed tree, or "abandoned" planned
+                                // metal of a tree that fell back to a whole route (still occupancy, no longer the net's path)
+    ph::Rect    rect;           // clipped to the box's tile
   };
-  const bool                 box_report = d.opt.final_box_report && !d.opt.output_dir.empty();
-  std::vector<Box_event>     box_ev, best_box_ev;
-  std::vector<Box_usage>     box_use, best_box_use;
-  std::vector<int>           box_in_tile(size_t(g.cols * g.rows), -1);
+  const bool             box_report = d.opt.final_box_report && !d.opt.output_dir.empty();
+  std::vector<Box_event> box_ev, best_box_ev;
+  std::vector<Box_usage> box_use, best_box_use;
+  std::vector<int>       box_in_tile(size_t(g.cols * g.rows), -1);
   for (size_t b = 0; b < boxes.boxes.size(); ++b) {
     if (boxes.boxes[b].tile >= 0 && size_t(boxes.boxes[b].tile) < box_in_tile.size()) {
       box_in_tile[size_t(boxes.boxes[b].tile)] = int(b);
@@ -836,8 +839,8 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
     }
     return out;
   };
-  const auto xy_box  = [&](double x, double y) { return box_in_tile[size_t(g.tile_of(x, y))]; };
-  size_t     attempt = 0;  // first event of the current net attempt
+  const auto xy_box       = [&](double x, double y) { return box_in_tile[size_t(g.tile_of(x, y))]; };
+  size_t     attempt      = 0;  // first event of the current net attempt
   // phase of the current attempt's open events: every "ok" event becomes committed or rolled_back
   const auto close_events = [&](const std::string& phase, const std::string& reason) {
     for (size_t i = attempt; i < box_ev.size(); ++i) {
@@ -976,9 +979,12 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
         entry[n] = "planned_metal_conflict: " + why[n].substr(0, why[n].find(" ("));
         ++rep.global_conflict_nets;
         if (d.nets[n].clock) {  // the full first conflict of a clock, kept apart from the five-entry failure sample
-          rep.clock_conflicts.push_back(std::format("pass {} {}: {}: {}", pass + 1, name,
-                                                    precheck ? "initial occupancy (PG, fixed metal, pins)" : "planned-net admission",
-                                                    why[n]));
+          rep.clock_conflicts.push_back(
+              std::format("pass {} {}: {}: {}",
+                          pass + 1,
+                          name,
+                          precheck ? "initial occupancy (PG, fixed metal, pins)" : "planned-net admission",
+                          why[n]));
         }
         if (rep.failure_sample.size() < 5) {
           rep.failure_sample.push_back(name + ": rerouted whole, " + why[n]);
@@ -1030,7 +1036,7 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
       req.prior_vias        = pend.cuts->vias();
       // route_access is the per-call cap. Opt-in experiment (route_access_per_pin > 0): a high-fanout request gets at least
       // that many access trials per pin, since every accepted pin needs one; off by default, so the cap is unchanged.
-      const size_t access   = d.opt.route_access_per_pin
+      const size_t   access = d.opt.route_access_per_pin
                                   ? std::max<size_t>(d.opt.route_access, size_t(d.opt.route_access_per_pin) * q.connections.size())
                                   : size_t(d.opt.route_access);
       // opt-in final_clock_route_ms: a clock net's pieces (joins, taps, whole/maze retries) get their own wall budget
@@ -1103,7 +1109,9 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
         ph::Net trial = d.fp.nets[d.nets[n].frame];
         auto    paths = net_geo[n].paths;
         paths.insert(paths.end(), pend.paths.begin(), pend.paths.end());
-        trial.wires = {{"ROUTED", std::move(paths)}};
+        trial.wires = {
+            {"ROUTED", std::move(paths)}
+        };
         try {
           const auto c = ph::check_route_connectivity(d.tech, work, trial, &work_comps, &pend.rules);
           if (!c.connected) {
@@ -1215,8 +1223,15 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
           if (box_report) {
             for (const auto& p : N.pins) {
               if (cell_pin(p)) {
-                box_ev.push_back({n, pin_box(p), d.fp.components[p.comp].name + "/" + std::string(p.name), "tap", "", 0, 0,
-                                  "unattempted", "tree stopped at a join"});
+                box_ev.push_back({n,
+                                  pin_box(p),
+                                  d.fp.components[p.comp].name + "/" + std::string(p.name),
+                                  "tap",
+                                  "",
+                                  0,
+                                  0,
+                                  "unattempted",
+                                  "tree stopped at a join"});
               }
             }
           }
@@ -1249,8 +1264,8 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
         }
         const auto tap_event = [&](const std::string& phase, const std::string& reason) {
           if (box_report) {
-            box_ev.push_back({n, pin_box(p), d.fp.components[p.comp].name + "/" + std::string(p.name), "tap", "", 0, 0, phase,
-                              reason});
+            box_ev.push_back(
+                {n, pin_box(p), d.fp.components[p.comp].name + "/" + std::string(p.name), "tap", "", 0, 0, phase, reason});
           }
         };
         if (tap_failed) {
@@ -1289,8 +1304,15 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
           continue;
         }
         if (box_report) {
-          box_ev.push_back({n, pin_box(p), d.fp.components[p.comp].name + "/" + std::string(p.name), "tap",
-                            via_chain(pend.paths, tap_from), 0, 0, "ok", ""});
+          box_ev.push_back({n,
+                            pin_box(p),
+                            d.fp.components[p.comp].name + "/" + std::string(p.name),
+                            "tap",
+                            via_chain(pend.paths, tap_from),
+                            0,
+                            0,
+                            "ok",
+                            ""});
         }
       }
       return tap_reason;
@@ -1380,8 +1402,15 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
         if (box_report) {  // a whole/local request covers every cell pin of the net at once (a net-level outcome)
           for (const auto& p : d.nets[n].pins) {
             if (cell_pin(p)) {
-              box_ev.push_back({n, pin_box(p), d.fp.components[p.comp].name + "/" + std::string(p.name),
-                                is_local(n) ? "local" : "whole", "", 0, 0, w.empty() ? "ok" : "failed", w});
+              box_ev.push_back({n,
+                                pin_box(p),
+                                d.fp.components[p.comp].name + "/" + std::string(p.name),
+                                is_local(n) ? "local" : "whole",
+                                "",
+                                0,
+                                0,
+                                w.empty() ? "ok" : "failed",
+                                w});
             }
           }
         }
@@ -1403,8 +1432,13 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
                 if (b < 0) {
                   continue;
                 }
-                const ph::Rect t{double(g.left(c)), double(g.bottom(r)), double(g.left(c) + g.tile_w), double(g.bottom(r) + g.tile_h)};
-                const ph::Rect clip{std::max(sh.rect.xl, t.xl), std::max(sh.rect.yl, t.yl), std::min(sh.rect.xh, t.xh),
+                const ph::Rect t{double(g.left(c)),
+                                 double(g.bottom(r)),
+                                 double(g.left(c) + g.tile_w),
+                                 double(g.bottom(r) + g.tile_h)};
+                const ph::Rect clip{std::max(sh.rect.xl, t.xl),
+                                    std::max(sh.rect.yl, t.yl),
+                                    std::min(sh.rect.xh, t.xh),
                                     std::min(sh.rect.yh, t.yh)};
                 if (clip.xl < clip.xh && clip.yl < clip.yh) {
                   box_use.push_back({b, n, sh.layer, net_boxes[n].contains(b), kind, clip});
@@ -1616,8 +1650,8 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
     usage << "box\tnet\tlayer\trole\tmetal\txl\tyl\txh\tyh\n";
     for (const auto& u : best_box_use) {
       usage << u.box << '\t' << std::quoted(d.fp.nets[d.nets[u.net].frame].name) << '\t' << u.layer << '\t'
-            << (u.local ? "destination" : "transit") << '\t' << u.metal << '\t' << u.rect.xl << '\t' << u.rect.yl << '\t' << u.rect.xh << '\t' << u.rect.yh
-            << '\n';
+            << (u.local ? "destination" : "transit") << '\t' << u.metal << '\t' << u.rect.xl << '\t' << u.rect.yl << '\t'
+            << u.rect.xh << '\t' << u.rect.yh << '\n';
     }
   }
   if (d.opt.final_net_limit && !d.opt.output_dir.empty()) {

@@ -1528,3 +1528,8 @@ physical pairs reject. Both directional map hashes and reference capacity hashes
 are retained in the report. The second command accepts only a passed
 **detailed-reference** calibration. OpenROAD global-reference reports remain
 usable diagnostics but cannot manufacture detailed DRC or detour labels.
+
+Calibration fit and held-out designs participate in label construction and
+selection. Training records both sets in checkpoint lineage and rejects samples
+whose calibration used an excluded evaluation design. Unseen-design evaluation
+also checks the calibration evidence of its query and selected supports.

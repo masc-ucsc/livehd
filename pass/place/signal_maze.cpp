@@ -283,8 +283,8 @@ Signal_route_trial Signal_router::propose_maze_impl(const ph::Net& net, const Si
     if (!l) {
       return false;
     }
-    const auto&  r  = a.rect;
-    const double c  = horizontal[*l] ? (r.yl + r.yh) / 2 : (r.xl + r.xh) / 2;
+    const auto&  r = a.rect;
+    const double c = horizontal[*l] ? (r.yl + r.yh) / 2 : (r.xl + r.xh) / 2;
     return horizontal[*l] ? c >= frame_.die.yl && c <= frame_.die.yh && r.xh >= frame_.die.xl && r.xl <= frame_.die.xh
                           : c >= frame_.die.xl && c <= frame_.die.xh && r.yh >= frame_.die.yl && r.yl <= frame_.die.yh;
   };
@@ -337,7 +337,7 @@ Signal_route_trial Signal_router::propose_maze_impl(const ph::Net& net, const Si
     ref_y = double(access[0].points.front().y);
   }
   std::vector<std::pair<size_t, ph::Rect>> anchor_metal, source_metal;  // (maze layer, metal)
-  size_t                                   outside_window = 0;  // pieces with no landing inside frame_.die
+  size_t                                   outside_window = 0;          // pieces with no landing inside frame_.die
   const auto                               collect = [&](const std::vector<ph::Shape>& pieces, auto& metal) {
     for (const auto& a : pieces) {
       const auto l = maze_layer(a);
@@ -912,22 +912,22 @@ Signal_route_trial Signal_router::propose_maze_impl(const ph::Net& net, const Si
     // physical UNSAT. Immutable parent IDs keep checked prefixes unchanged
     // when a coordinate later receives a cheaper label. At most four labels
     // are inserted per charged expansion, in addition to bounded sources.
-    std::vector<Record>   labels;
+    std::vector<Record>                labels;
     // live labels per coordinate: at most K (limits.maze_labels, default 1 = the single best label). With K > 1 a
     // costlier label survives when its cut history differs, so a cheaper prefix whose via blocks a later one does not
     // erase it. Still a bounded heuristic: exhaustion is not physical UNSAT.
     const size_t                       K = std::max<size_t>(1, limits.maze_labels);
     std::map<Key, std::vector<size_t>> reached;
-    const auto live = [&](const Key& at, size_t id) {
+    const auto                         live = [&](const Key& at, size_t id) {
       const auto it = reached.find(at);
       return it != reached.end() && std::ranges::find(it->second, id) != it->second.end();
     };
     // A search state is (source access, the exact set of new cuts on its prefix): the same cut set reached by different
     // paths is the same state; different sources stay distinct. Cut sets are canonicalized (sorted, interned).
-    std::vector<size_t>                  hist_canon;  // per history node: interned cut-set id (SIZE_MAX: not yet)
+    std::vector<size_t>                    hist_canon;  // per history node: interned cut-set id (SIZE_MAX: not yet)
     std::map<std::vector<Via_key>, size_t> interned;
     std::vector<std::vector<Via_key>>      cut_sets{{}};  // id 0: no new cuts
-    interned[{}] = 0;
+    interned[{}]                                             = 0;
     const std::function<size_t(std::optional<size_t>)> canon = [&](std::optional<size_t> h) -> size_t {
       if (!h) {
         return 0;
@@ -1266,7 +1266,7 @@ Signal_route_trial Signal_router::propose_maze_impl(const ph::Net& net, const Si
       if (!legal(s)) {
         // the same predicate, rerun to name the first rejecting rule and blocker (in parentheses: callers group reasons by
         // the text before " (")
-        const auto box = [](const ph::Rect& r) { return std::format("[{} {} {} {}]", r.xl, r.yl, r.xh, r.yh); };
+        const auto  box = [](const ph::Rect& r) { return std::format("[{} {} {} {}]", r.xl, r.yl, r.xh, r.yh); };
         std::string why;
         if (const auto own = rules_.rectangle(s); !own.legal) {
           why = "shape: " + own.reason;
@@ -1278,8 +1278,11 @@ Signal_route_trial Signal_router::propose_maze_impl(const ph::Net& net, const Si
           for (auto id : occupancy_.query(s.layer, s.rect, *rules_.clearance(s.layer), net.name)) {
             const auto& o = occupancy_.at(id);
             if (const auto check = rules_.spacing(s, o.shape); !check.legal) {
-              why = std::format("vs {} {} {}: {}", o.net.empty() ? std::string("blockage") : o.net,
-                                o.routed ? "routed" : "pin/obstruction", box(o.shape.rect), check.reason);
+              why = std::format("vs {} {} {}: {}",
+                                o.net.empty() ? std::string("blockage") : o.net,
+                                o.routed ? "routed" : "pin/obstruction",
+                                box(o.shape.rect),
+                                check.reason);
               break;
             }
           }
@@ -1292,10 +1295,20 @@ Signal_route_trial Signal_router::propose_maze_impl(const ph::Net& net, const Si
             // Two of this candidate's own merged lines that touch or overlap (e.g. a widened line covering the adjacent
             // track the path also used) form a non-rectangular union: rejected as an overlap, not a spacing violation.
             // The rejected pair stays in parentheses: callers group reasons by the text before " (".
-            const bool overlap = old.rect.xl <= s.rect.xh && s.rect.xl <= old.rect.xh && old.rect.yl <= s.rect.yh && s.rect.yl <= old.rect.yh;
-            return fail(std::format("{} ({} [{} {} {} {}] vs [{} {} {} {}]: {})", overlap ? "maze self overlap" : "maze self spacing",
-                                    s.layer, old.rect.xl, old.rect.yl, old.rect.xh, old.rect.yh, s.rect.xl, s.rect.yl, s.rect.xh,
-                                    s.rect.yh, overlap ? "own lines merge into a non-rectangular shape" : check.reason));
+            const bool overlap
+                = old.rect.xl <= s.rect.xh && s.rect.xl <= old.rect.xh && old.rect.yl <= s.rect.yh && s.rect.yl <= old.rect.yh;
+            return fail(std::format("{} ({} [{} {} {} {}] vs [{} {} {} {}]: {})",
+                                    overlap ? "maze self overlap" : "maze self spacing",
+                                    s.layer,
+                                    old.rect.xl,
+                                    old.rect.yl,
+                                    old.rect.xh,
+                                    old.rect.yh,
+                                    s.rect.xl,
+                                    s.rect.yl,
+                                    s.rect.xh,
+                                    s.rect.yh,
+                                    overlap ? "own lines merge into a non-rectangular shape" : check.reason));
           }
         }
       }

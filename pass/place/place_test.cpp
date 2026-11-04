@@ -476,11 +476,11 @@ TEST(Placement, MovablePlanningPassesItsExactOverlappingFrameToLocalRouting) {
   hhds::GraphLibrary placed;
   options.legroute_plan.handoff = true;
   EXPECT_THROW(place(*graph, placed, options), std::invalid_argument);
-  options.legroute_plan.handoff = false;
+  options.legroute_plan.handoff       = false;
   options.legroute_plan.export_coarse = true;
-  const auto result             = place(*graph, placed, options);
-  const auto measured           = physical::read_def(options.output_dir + "/legroute_plan0/input.def");
-  const auto local              = physical::read_def(options.output_dir + "/legroute_handoff/input.def");
+  const auto result                   = place(*graph, placed, options);
+  const auto measured                 = physical::read_def(options.output_dir + "/legroute_plan0/input.def");
+  const auto local                    = physical::read_def(options.output_dir + "/legroute_handoff/input.def");
   EXPECT_EQ(measured.components, local.components);
   EXPECT_EQ(measured.terminals, local.terminals);
   EXPECT_EQ(measured.nets, local.nets);
@@ -542,7 +542,7 @@ TEST(Placement, MovablePlanningPassesItsExactOverlappingFrameToLocalRouting) {
 
   // The same feasible coarse/SAT input must not become a successful placement
   // result when only a prefix of its physical nets was checked.
-  options.output_dir                        += "_incomplete";
+  options.output_dir                       += "_incomplete";
   options.legroute_options.final            = true;
   options.legroute_options.final_net_limit  = 1;
   options.legroute_probe.strict             = true;

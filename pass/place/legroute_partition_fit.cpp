@@ -26,7 +26,7 @@ struct Region_fit {
   std::map<int, int> assignment;  // valid previous matching, box -> tile
   size_t             cells = 0, missing = 0;
   double             cell_area = 0, free_area = 0;
-  double             ceiling   = .90;  // Legroute_options::density_ceiling
+  double             ceiling = .90;  // Legroute_options::density_ceiling
 };
 double excess_area(const Region_fit& region) { return std::max(0., region.cell_area - region.ceiling * region.free_area); }
 size_t excess_cells(const Region_fit& region, unsigned target) {
@@ -57,9 +57,9 @@ Partition_fit_report repair_partition_fit(const Design& d, Grid& g, Boxes& boxes
   // The cap covers matching and mesh checks, not SAT. An interrupted candidate
   // is private; only fully assessed improvements commit.
   Work       work{0, std::max(size_t(1'000'000), std::min(size_t(500'000'000), g.size() * size_t(262144)))};
-  report.work_limit                           = work.limit;
-  const size_t                  attempt_limit = std::min(size_t(32'768), std::max(size_t(256), g.size() * size_t(8)));
-  std::vector<Region_fit>       state(size_t(g.regions));
+  report.work_limit                     = work.limit;
+  const size_t            attempt_limit = std::min(size_t(32'768), std::max(size_t(256), g.size() * size_t(8)));
+  std::vector<Region_fit> state(size_t(g.regions));
   for (auto& region : state) {
     region.ceiling = d.opt.density_ceiling;
   }

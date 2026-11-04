@@ -4,9 +4,9 @@
 #include "legroute.hpp"
 
 #include <algorithm>
-#include <filesystem>
 #include <charconv>
 #include <cmath>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <limits>
@@ -214,7 +214,6 @@ void validate_legroute_options(const Legroute_options& o) {
   }
 }
 
-
 namespace {
 // Post-F1 export of selected boxes (Legroute_options::final_box_dump), for offline in-box experiments. Coordinates
 // are DBU; L5 metal is exported as assigned tracks and spans, with node/joint/jog data, not as Final's materialized
@@ -227,12 +226,12 @@ void dump_final_boxes(const lr::Design& d, const lr::Grid& g, const lr::Boxes& b
   work.vias.insert(work.vias.end(), regions.power_vias.begin(), regions.power_vias.end());
   physical::write_def(work, dir + "/post_f1.def");
   // Final's own planned geometry (exact wire rectangles and layer joins), not a tile-span approximation
-  const auto planned = lr::final_planned_geometry(d, g, boxes, R);
+  const auto                         planned = lr::final_planned_geometry(d, g, boxes, R);
   const physical::Signal_metal_rules metal_rules(d.tech, d.fp);
   // one net's planned shapes within [x0,x1]x[y0,y1], each with the state of the L5 track its path was drawn on
-  const auto planned_near = [&](int n, double x0, double y0, double x1, double y1) {
+  const auto                         planned_near = [&](int n, double x0, double y0, double x1, double y1) {
     std::vector<std::pair<physical::Shape, uint8_t>> out;
-    const auto&                                       paths = planned.paths[size_t(n)];
+    const auto&                                      paths = planned.paths[size_t(n)];
     for (size_t k = 0; k < paths.size(); ++k) {
       physical::Net one{d.fp.nets[d.nets[size_t(n)].frame].name, {}, {physical::Wire{"ROUTED", {paths[k]}}}};
       for (const auto& sh : physical::route_geometry(d.tech, d.fp, one)) {
@@ -268,8 +267,8 @@ void dump_final_boxes(const lr::Design& d, const lr::Grid& g, const lr::Boxes& b
     spec             = semi == std::string_view::npos ? std::string_view{} : spec.substr(semi + 1);
     const auto colon = item.find(':');
     int        col = -1, row = -1;
-    if (colon == std::string_view::npos || !number(item.substr(0, colon), col) || !number(item.substr(colon + 1), row)
-        || col < 0 || row < 0 || col >= g.cols || row >= g.rows) {
+    if (colon == std::string_view::npos || !number(item.substr(0, colon), col) || !number(item.substr(colon + 1), row) || col < 0
+        || row < 0 || col >= g.cols || row >= g.rows) {
       throw std::invalid_argument(std::format("legroute final_box_dump entry '{}' must be col:row inside the grid", item));
     }
     const int tile = g.tile(col, row);
@@ -280,9 +279,17 @@ void dump_final_boxes(const lr::Design& d, const lr::Grid& g, const lr::Boxes& b
       }
     }
     std::ofstream out(std::format("{}/box_c{}_r{}.json", dir, col, row));
-    out << std::format(R"({{"col":{},"row":{},"tile":{},"box":{},"rect_dbu":[{},{},{},{}],"blocked":{},"box_short":{},)", col, row,
-                       tile, box, g.left(col), g.bottom(row), g.left(col) + g.tile_w, g.bottom(row) + g.tile_h,
-                       int(g.blocked[size_t(tile)]), int(size_t(tile) < g.box_short.size() && g.box_short[size_t(tile)]));
+    out << std::format(R"({{"col":{},"row":{},"tile":{},"box":{},"rect_dbu":[{},{},{},{}],"blocked":{},"box_short":{},)",
+                       col,
+                       row,
+                       tile,
+                       box,
+                       g.left(col),
+                       g.bottom(row),
+                       g.left(col) + g.tile_w,
+                       g.bottom(row) + g.tile_h,
+                       int(g.blocked[size_t(tile)]),
+                       int(size_t(tile) < g.box_short.size() && g.box_short[size_t(tile)]));
     out << R"("free_segments":[)";
     for (size_t k = 0; k < g.segs(tile).size(); ++k) {
       const auto& sg = g.segs(tile)[k];
@@ -294,8 +301,13 @@ void dump_final_boxes(const lr::Design& d, const lr::Grid& g, const lr::Boxes& b
       size_t k = 0;
       for (int m : boxes.boxes[size_t(box)].cells) {
         const auto& comp = d.fp.components[size_t(d.movable[size_t(m)])];
-        out << std::format(R"({}{{"name":{},"macro":{},"x":{},"y":{},"orient":{},"width_dbu":{}}})", k++ ? "," : "", q(comp.name),
-                           q(comp.macro), comp.place.x, comp.place.y, q(physical::orientation_name(comp.place.orientation)),
+        out << std::format(R"({}{{"name":{},"macro":{},"x":{},"y":{},"orient":{},"width_dbu":{}}})",
+                           k++ ? "," : "",
+                           q(comp.name),
+                           q(comp.macro),
+                           comp.place.x,
+                           comp.place.y,
+                           q(physical::orientation_name(comp.place.orientation)),
                            d.width[size_t(m)]);
         for (int n : d.nets_of[size_t(m)]) {
           incident.insert(n);
@@ -312,16 +324,26 @@ void dump_final_boxes(const lr::Design& d, const lr::Grid& g, const lr::Boxes& b
     size_t k = 0;
     for (int n : incident) {
       const auto& N = d.nets[size_t(n)];
-      out << std::format(R"({}{{"net":{},"name":{},"clock":{},"power":{},"routed":{},"pins":[)", k++ ? "," : "", n,
-                         q(d.fp.nets[N.frame].name), int(N.clock), int(N.power), int(N.routed));
+      out << std::format(R"({}{{"net":{},"name":{},"clock":{},"power":{},"routed":{},"pins":[)",
+                         k++ ? "," : "",
+                         n,
+                         q(d.fp.nets[N.frame].name),
+                         int(N.clock),
+                         int(N.power),
+                         int(N.routed));
       for (size_t p = 0; p < N.pins.size(); ++p) {
         const auto& P      = N.pins[p];
         const bool  in_box = box >= 0 && P.comp >= 0 && d.cell[P.comp] >= 0 && boxes.box_of[size_t(d.cell[P.comp])] == box;
-        const auto  owner  = P.comp >= 0 ? d.fp.components[size_t(P.comp)].name
+        const auto  owner  = P.comp >= 0   ? d.fp.components[size_t(P.comp)].name
                              : P.term >= 0 ? d.fp.terminals[size_t(P.term)].name
                                            : std::string{};
-        out << std::format(R"({}{{"owner":{},"pin":{},"terminal":{},"in_box":{},"driver":{}}})", p ? "," : "", q(owner), q(P.name),
-                           int(P.term >= 0), int(in_box), int(int(p) == N.driver));
+        out << std::format(R"({}{{"owner":{},"pin":{},"terminal":{},"in_box":{},"driver":{}}})",
+                           p ? "," : "",
+                           q(owner),
+                           q(P.name),
+                           int(P.term >= 0),
+                           int(in_box),
+                           int(int(p) == N.driver));
       }
       out << R"(],"nodes":[)";  // the net's tree nodes in the tile: box node, riser and stub with provenance
       size_t m = 0;
@@ -332,11 +354,16 @@ void dump_final_boxes(const lr::Design& d, const lr::Grid& g, const lr::Boxes& b
         }
         out << std::format(R"({}{{"node":{},"box":{},"term":{},"vpin":{},"riser_layer":{},"riser_coord":{},"riser_state":{},)"
                            R"("stub_coord":{},"stub_state":{}}})",
-                           m++ ? "," : "", v, node.box, node.term, node.vpin,
+                           m++ ? "," : "",
+                           v,
+                           node.box,
+                           node.term,
+                           node.vpin,
                            q(node.riser_layer >= 0 ? g.layers[size_t(node.riser_layer)].name : ""),
                            node.riser_layer >= 0 && node.riser_track >= 0 ? g.track_coord(node.riser_layer, node.riser_track) : -1,
                            q(state(node.riser_state)),
-                           node.stub_track >= 0 ? g.track_coord(low_h, node.stub_track) : -1, q(state(node.stub_state)));
+                           node.stub_track >= 0 ? g.track_coord(low_h, node.stub_track) : -1,
+                           q(state(node.stub_state)));
       }
       // the net's planned metal near the tile (tile plus one-tile halo): exact rectangles and joins
       const double hx0 = double(g.left(col) - g.tile_w), hy0 = double(g.bottom(row) - g.tile_h);
@@ -344,8 +371,14 @@ void dump_final_boxes(const lr::Design& d, const lr::Grid& g, const lr::Boxes& b
       out << std::format(R"(],"io_stub_failure":{},"planned_shapes":[)", q(planned.io_stub_failure[size_t(n)]));
       size_t ps = 0;
       for (const auto& [sh, st] : planned_near(n, hx0, hy0, hx1, hy1)) {
-        out << std::format(R"({}{{"layer":{},"rect":[{},{},{},{}],"state":{}}})", ps++ ? "," : "", q(sh.layer), sh.rect.xl,
-                           sh.rect.yl, sh.rect.xh, sh.rect.yh, q(state(st)));
+        out << std::format(R"({}{{"layer":{},"rect":[{},{},{},{}],"state":{}}})",
+                           ps++ ? "," : "",
+                           q(sh.layer),
+                           sh.rect.xl,
+                           sh.rect.yl,
+                           sh.rect.xh,
+                           sh.rect.yh,
+                           q(state(st)));
       }
       out << R"(],"planned_joins":[)";
       size_t pj = 0;
@@ -373,10 +406,24 @@ void dump_final_boxes(const lr::Design& d, const lr::Grid& g, const lr::Boxes& b
       out << std::format(R"({}{{"segment":{},"net":{},"incident":{},"layer":{},"horizontal":{},"band":{},"tiles":[{},{}],)"
                          R"("track_coord":{},"state":{},"clock":{},"node_lo":{},"node_hi":{},)"
                          R"("jog_lo_coord":{},"jog_lo_state":{},"jog_hi_coord":{},"jog_hi_state":{}}})",
-                         k++ ? "," : "", si, sg.net, int(incident.contains(sg.net)), q(L.name), int(L.horizontal), sg.band, sg.lo,
-                         sg.hi, sg.track >= 0 ? g.track_coord(sg.layer, sg.track) : -1, q(state(sg.track_state)), int(sg.clock),
-                         sg.node_lo, sg.node_hi, sg.jog_lo >= 0 ? g.track_coord(low_h, sg.jog_lo) : -1, q(state(sg.jog_lo_state)),
-                         sg.jog_hi >= 0 ? g.track_coord(low_h, sg.jog_hi) : -1, q(state(sg.jog_hi_state)));
+                         k++ ? "," : "",
+                         si,
+                         sg.net,
+                         int(incident.contains(sg.net)),
+                         q(L.name),
+                         int(L.horizontal),
+                         sg.band,
+                         sg.lo,
+                         sg.hi,
+                         sg.track >= 0 ? g.track_coord(sg.layer, sg.track) : -1,
+                         q(state(sg.track_state)),
+                         int(sg.clock),
+                         sg.node_lo,
+                         sg.node_hi,
+                         sg.jog_lo >= 0 ? g.track_coord(low_h, sg.jog_lo) : -1,
+                         q(state(sg.jog_lo_state)),
+                         sg.jog_hi >= 0 ? g.track_coord(low_h, sg.jog_hi) : -1,
+                         q(state(sg.jog_hi_state)));
     }
     // every other net's planned metal over the tile and its one-tile halo, grown by the largest routing pitch so that
     // spacing context at the halo edge is kept (exact rectangles, with track states)
@@ -387,8 +434,8 @@ void dump_final_boxes(const lr::Design& d, const lr::Grid& g, const lr::Boxes& b
       for (const auto& L : g.layers) {
         margin = std::max({margin, L.pitch, metal_rules.clearance(L.name).value_or(L.pitch)});
       }
-      const double hx0 = double(g.left(col) - g.tile_w - margin), hy0 = double(g.bottom(row) - g.tile_h - margin);
-      const double hx1 = double(g.left(col) + 2 * g.tile_w + margin), hy1 = double(g.bottom(row) + 2 * g.tile_h + margin);
+      const double  hx0 = double(g.left(col) - g.tile_w - margin), hy0 = double(g.bottom(row) - g.tile_h - margin);
+      const double  hx1 = double(g.left(col) + 2 * g.tile_w + margin), hy1 = double(g.bottom(row) + 2 * g.tile_h + margin);
       std::set<int> near;
       for (const auto& sg : R.segments) {
         if (sg.net >= 0 && sg.layer >= 0 && !incident.contains(sg.net)) {
@@ -412,9 +459,16 @@ void dump_final_boxes(const lr::Design& d, const lr::Grid& g, const lr::Boxes& b
       size_t fk = 0;
       for (int n2 : near) {
         for (const auto& [sh, st] : planned_near(n2, hx0, hy0, hx1, hy1)) {
-          out << std::format(R"({}{{"net":{},"name":{},"layer":{},"rect":[{},{},{},{}],"state":{}}})", fk++ ? "," : "", n2,
-                             q(d.fp.nets[d.nets[size_t(n2)].frame].name), q(sh.layer), sh.rect.xl, sh.rect.yl, sh.rect.xh,
-                             sh.rect.yh, q(state(st)));
+          out << std::format(R"({}{{"net":{},"name":{},"layer":{},"rect":[{},{},{},{}],"state":{}}})",
+                             fk++ ? "," : "",
+                             n2,
+                             q(d.fp.nets[d.nets[size_t(n2)].frame].name),
+                             q(sh.layer),
+                             sh.rect.xl,
+                             sh.rect.yl,
+                             sh.rect.xh,
+                             sh.rect.yh,
+                             q(state(st)));
         }
       }
       // their deferred layer joins near the tile (requests; Final's router realizes the vias)
@@ -423,8 +477,14 @@ void dump_final_boxes(const lr::Design& d, const lr::Grid& g, const lr::Boxes& b
       for (int n2 : near) {
         for (const auto& [from, to, x, y] : planned.joins[size_t(n2)]) {
           if (double(x) >= hx0 && double(x) <= hx1 && double(y) >= hy0 && double(y) <= hy1) {
-            out << std::format(R"({}{{"net":{},"name":{},"from":{},"to":{},"x":{},"y":{}}})", fj++ ? "," : "", n2,
-                               q(d.fp.nets[d.nets[size_t(n2)].frame].name), q(from), q(to), x, y);
+            out << std::format(R"({}{{"net":{},"name":{},"from":{},"to":{},"x":{},"y":{}}})",
+                               fj++ ? "," : "",
+                               n2,
+                               q(d.fp.nets[d.nets[size_t(n2)].frame].name),
+                               q(from),
+                               q(to),
+                               x,
+                               y);
           }
         }
       }
@@ -440,9 +500,15 @@ void dump_final_boxes(const lr::Design& d, const lr::Grid& g, const lr::Boxes& b
           }
           const auto& tap = R.segments[size_t(ts)];
           out << std::format(R"({}{{"net":{},"name":{},"segment":{},"layer":{},"track_coord":{},"state":{},"tiles":[{},{}]}})",
-                             ck++ ? "," : "", sp.net, q(d.fp.nets[d.nets[size_t(sp.net)].frame].name), ts,
-                             q(g.layers[size_t(tap.layer)].name), tap.track >= 0 ? g.track_coord(tap.layer, tap.track) : -1,
-                             q(state(tap.track_state)), tap.lo, tap.hi);
+                             ck++ ? "," : "",
+                             sp.net,
+                             q(d.fp.nets[d.nets[size_t(sp.net)].frame].name),
+                             ts,
+                             q(g.layers[size_t(tap.layer)].name),
+                             tap.track >= 0 ? g.track_coord(tap.layer, tap.track) : -1,
+                             q(state(tap.track_state)),
+                             tap.lo,
+                             tap.hi);
         }
       }
     }
@@ -577,7 +643,7 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
       // the tree is built from the final regions and box tiles; the reservation came from the poses before SAT
       const auto built = lr::clock_tree_charge(d, g, &boxes, opt.rib_tiles);
       for (size_t t = 0; t < g.size(); ++t) {
-        const int over = std::max(0, built.v[t] - R.clock_reserved_v[t]) + std::max(0, built.h[t] - R.clock_reserved_h[t]);
+        const int over          = std::max(0, built.v[t] - R.clock_reserved_v[t]) + std::max(0, built.h[t] - R.clock_reserved_h[t]);
         rep.clock_excess_tiles += over > 0;
         rep.clock_excess_tracks += size_t(over);
       }
@@ -638,7 +704,7 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
       }
     }
     rep.unassigned_segments = R.unassigned;
-    rep.track_failures      = R.track_failures;
+    rep.track_failures        = R.track_failures;
     rep.track_pick_rejections = R.track_pick_rejections;
     rep.track_fallback_shadow = R.track_fallback_shadow;
     rep.track_failure_samples = R.track_failure_samples;
@@ -799,9 +865,9 @@ Legroute_report legroute(const physical::Technology& tech, physical::Floorplan& 
     {  // actual cell motion against the given poses (not the box-centre metric)
       std::vector<double> moves;
       for (int c : d.movable) {
-        const auto& from = components[size_t(c)].place;
-        const auto& to   = fp.components[size_t(c)].place;
-        const double dd  = (std::abs(double(to.x - from.x)) + std::abs(double(to.y - from.y))) / fp.dbu;
+        const auto&  from = components[size_t(c)].place;
+        const auto&  to   = fp.components[size_t(c)].place;
+        const double dd   = (std::abs(double(to.x - from.x)) + std::abs(double(to.y - from.y))) / fp.dbu;
         moves.push_back(dd);
         rep.cells_moved += dd > 0;
       }

@@ -83,4 +83,20 @@ TEST(LegrouteCongestion, ResamplingPreservesPeaksAndRecordsDirectionalMeans) {
   maps.horizontal[0] = -1;
   EXPECT_THROW(resample_legroute_congestion(maps, maps.bounds, 2, 2), std::invalid_argument);
 }
+TEST(LegrouteCongestion, WideDestinationClampsIndicesBeforeIntegerConversion) {
+  Legroute_congestion maps;
+  maps.cols = maps.rows = 1;
+  maps.bounds           = {0, 0, 1, 1};
+  maps.horizontal       = {7};
+  maps.vertical         = {3};
+  maps.pin_utilization = maps.unresolved_horizontal = maps.unresolved_vertical = {0};
+  const auto wide = resample_legroute_congestion(maps, {-1e12, -1e12, 1e12, 1e12}, 1, 1);
+  EXPECT_EQ(wide.horizontal, (std::vector<double>{7}));
+  EXPECT_EQ(wide.vertical, (std::vector<double>{3}));
+  EXPECT_DOUBLE_EQ(wide.mean_horizontal[0], 7. / 4e24);
+  const auto remote = resample_legroute_congestion(maps, {1e12, 1e12, 1e12 + 1, 1e12 + 1}, 1, 1);
+  EXPECT_EQ(remote.horizontal, (std::vector<double>{0}));
+  EXPECT_EQ(remote.vertical, (std::vector<double>{0}));
+  EXPECT_THROW(resample_legroute_congestion(maps, {-1e308, 0, 1e308, 1}, 1, 1), std::invalid_argument);
+}
 }  // namespace livehd::placement

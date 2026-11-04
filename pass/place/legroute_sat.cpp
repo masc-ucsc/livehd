@@ -1881,8 +1881,8 @@ struct Crossing_capacity_error : std::runtime_error {
   using std::runtime_error::runtime_error;
 };
 void validate_crossing_edges(const Grid& g, const std::vector<std::pair<int, int>>& hops, const std::vector<int>& hop_net,
-                             const std::vector<int>& cap_h, const std::vector<int>& cap_v, double share,
-                             double cap_scale = 1, double ceiling = .90) {
+                             const std::vector<int>& cap_h, const std::vector<int>& cap_v, double share, double cap_scale = 1,
+                             double ceiling = .90) {
   if (hops.size() != hop_net.size() || cap_h.size() != g.size() || cap_v.size() != g.size()) {
     throw std::logic_error("legroute shared interface check has inconsistent arrays");
   }
@@ -1900,7 +1900,7 @@ void validate_crossing_edges(const Grid& g, const std::vector<std::pair<int, int
     const int   q     = t + (h ? 1 : g.cols);
     const auto& cap   = h ? cap_h : cap_v;
     const int   room  = std::min(cap[t], cap[q]);
-    const int   limit = std::max(0, std::min(int(std::floor(room * cap_scale)), int(std::floor(room * std::min(ceiling, share)))));
+    const int   limit = std::max(0, int(std::floor(room * std::min({cap_scale, ceiling, share}))));
     if (int(nets.size()) > limit) {
       throw Crossing_capacity_error(std::format(
           "legroute shared interface repair required: {} boundary edge {} -> {} uses {} distinct nets, admitted capacity {}",
@@ -3152,12 +3152,12 @@ void solve_region_model(const Design& d, const Legroute_options& o, const Grid& 
         continue;  // the checker alternative: no bound on the edges this tile owns
       }
       // the edge's tracks: the physical tracks of the narrower tile less the routes fixed ahead that cross the edge
-      const int k  = std::max(0,
-                              edge_limit(std::min((h ? cap_h0 : cap_v0)[t], (h ? cap_h0 : cap_v0)[q]), o)
-                                  - (h ? reserve.h : reserve.v)[size_t(t)]);
-      binding     += int(xs.size()) > k;
-      cap_in      += xs.size();
-      cap_k       += k;
+      const int k = std::max(
+          0,
+          edge_limit(std::min((h ? cap_h0 : cap_v0)[t], (h ? cap_h0 : cap_v0)[q]), o) - (h ? reserve.h : reserve.v)[size_t(t)]);
+      binding += int(xs.size()) > k;
+      cap_in  += xs.size();
+      cap_k   += k;
       ++cap_n;
       cap_est += at_most_clauses(int(xs.size()), k);
       if (lazy_dir(h)) {
@@ -4566,16 +4566,16 @@ struct Crossings {
   size_t                              unjoined   = 0;
   size_t                              over_share = 0;  // hops placed past hop_share on every tile of their boundary
   std::vector<Global_piece>           pieces;          // legroute.global: the runs fixed ahead through pass-through regions
-  size_t                              global_nets  = 0;
+  size_t                              global_nets     = 0;
   size_t                           global_unrouted = 0, global_full = 0;  // global_route: nets without a path, edges at the share
-  size_t                           global_topology_disconnected = 0;
+  size_t                              global_topology_disconnected = 0;
   size_t                           global_overflow_edges = 0, global_overflow_tracks = 0;  // edges over the share after the rounds
   unsigned                         global_rounds = 0;
   std::vector<std::pair<int, int>> global_over;  // those edges (lower / left tile, h): where the cells should give way
-  double                           global_seconds     = 0;
-  size_t                           global_search_pops = 0, global_search_limited = 0;
-  size_t                           pattern_attempts = 0, pattern_completed = 0, pattern_fallbacks = 0;
-  size_t                           pattern_work = 0, pattern_work_limited = 0;
+  double                              global_seconds     = 0;
+  size_t                              global_search_pops = 0, global_search_limited = 0;
+  size_t                              pattern_attempts = 0, pattern_completed = 0, pattern_fallbacks = 0;
+  size_t                              pattern_work = 0, pattern_work_limited = 0;
 };
 Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Legroute_regions& regions, std::vector<int>& cap_h,
                     std::vector<int>& cap_v, bool diagnose, const Global_routes* all_routes = nullptr) {
@@ -6289,14 +6289,14 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
   // matching (Hall repair inside each region) may still give every box a distinct tile; it is checked again on
   // the seed's own boxes.
   const auto require_admission = [&](bool regions_ready, bool allow_unfit = false) {
-    auto       gates = assess_legroute_gates(d, g, routing_boxes ? &*routing_boxes : &boxes, all_routes, {}, cap_h0, cap_v0,
-                                       regions_ready);
+    auto gates
+        = assess_legroute_gates(d, g, routing_boxes ? &*routing_boxes : &boxes, all_routes, {}, cap_h0, cap_v0, regions_ready);
     // Before proposed cuts, only the global route screen can stop admission.
     // Existing seed regions may be replaced by a feasible route-driven mesh.
     const bool unfit_only = allow_unfit && gates.unfittable_regions && !gates.oversized_regions && !gates.cell_dense_regions
                             && !gates.routing_dense_edges && !gates.overflow_tracks && !gates.unrouted;
-    const bool blocked
-        = regions_ready ? gates.requires_replan() && !unfit_only : gates.unrouted || gates.routing_dense_edges || gates.overflow_tracks;
+    const bool blocked    = regions_ready ? gates.requires_replan() && !unfit_only
+                                          : gates.unrouted || gates.routing_dense_edges || gates.overflow_tracks;
     if (!d.opt.output_dir.empty()) {
       std::filesystem::create_directories(d.opt.output_dir);
       std::ofstream report(d.opt.output_dir + "/pre_sat.json");
@@ -6858,9 +6858,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
             for (int j = rc.r0; j <= rc.r1; ++j) {
               const int t = g.tile(c - 1, j), q = g.tile(c, j);
               if (g.region[t] == r && g.region[q] == r) {
-                tracks
-                    += std::max(0,
-                                edge_limit(std::min(cap_h0[t], cap_h0[q]), policies[0]) - Q0.reserve.h[size_t(t)]);
+                tracks += std::max(0, edge_limit(std::min(cap_h0[t], cap_h0[q]), policies[0]) - Q0.reserve.h[size_t(t)]);
               }
             }
             cut_ratio[size_t(r)] = std::max(cut_ratio[size_t(r)], double(run) / std::max(1.0, double(tracks)));
@@ -6871,9 +6869,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
             for (int i = rc.c0; i <= rc.c1; ++i) {
               const int t = g.tile(i, j - 1), q = g.tile(i, j);
               if (g.region[t] == r && g.region[q] == r) {
-                tracks
-                    += std::max(0,
-                                edge_limit(std::min(cap_v0[t], cap_v0[q]), policies[0]) - Q0.reserve.v[size_t(t)]);
+                tracks += std::max(0, edge_limit(std::min(cap_v0[t], cap_v0[q]), policies[0]) - Q0.reserve.v[size_t(t)]);
               }
             }
             cut_ratio[size_t(r)] = std::max(cut_ratio[size_t(r)], double(run) / std::max(1.0, double(tracks)));
@@ -6979,8 +6975,8 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
           }
           // the crossing uses the edge t-q: the narrower endpoint bounds it, under the share and the policy ceiling
           const int edge = std::min((h ? cap_h0 : cap_v0)[size_t(t)], (h ? cap_h0 : cap_v0)[size_t(q)]);
-          const int room = std::min(int(std::floor(d.opt.hop_share * double(edge))), edge_limit(edge, d.opt))
-                           - fixed_hops[size_t(t)];
+          const int room
+              = std::min(int(std::floor(d.opt.hop_share * double(edge))), edge_limit(edge, d.opt)) - fixed_hops[size_t(t)];
           if (room <= 0 && t != ao) {
             continue;  // no room there; the chooser's own tile stays a candidate
           }
@@ -7629,10 +7625,9 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
           for (int t : region_tiles[size_t(r)]) {  // the boundary's tracks: the edges to the tiles of other regions
             for (int q : tile_neighbours(g, t)) {
               if (g.region[q] != r) {
-                const bool h           = g.row(q) == g.row(t);
-                trial.boundary_tracks += size_t(std::max(
-                    0,
-                    edge_limit(std::min((h ? cap_h0 : cap_v0)[t], (h ? cap_h0 : cap_v0)[q]), policies[0])));
+                const bool h = g.row(q) == g.row(t);
+                trial.boundary_tracks
+                    += size_t(std::max(0, edge_limit(std::min((h ? cap_h0 : cap_v0)[t], (h ? cap_h0 : cap_v0)[q]), policies[0])));
               }
             }
           }

@@ -545,11 +545,11 @@ livehd::placement::Options placement_options(const Options& opts) {
   if (out.legroute_plan.enabled) {
     out.placement_session = std::make_shared<livehd::placement::Placement_session>();
   }
-  out.legroute_plan.local_tiles        = integer("place.legroute.plan.local_tiles", "0");
-  out.legroute_plan.route_model        = synth_set(opts, "place.legroute.plan.route_model", "legacy");
-  out.legroute_plan.route_interval     = integer("place.legroute.plan.route_interval", "50");
-  out.legroute_plan.route_net_pops     = integer("place.legroute.plan.route_net_pops", "2000");
-  out.legroute_plan.export_coarse      = truthy(synth_set(opts, "place.legroute.plan.export_coarse", "false"));
+  out.legroute_plan.local_tiles    = integer("place.legroute.plan.local_tiles", "0");
+  out.legroute_plan.route_model    = synth_set(opts, "place.legroute.plan.route_model", "legacy");
+  out.legroute_plan.route_interval = integer("place.legroute.plan.route_interval", "50");
+  out.legroute_plan.route_net_pops = integer("place.legroute.plan.route_net_pops", "2000");
+  out.legroute_plan.export_coarse  = truthy(synth_set(opts, "place.legroute.plan.export_coarse", "false"));
   if ((out.legroute_plan.route_model != "legacy" && out.legroute_plan.route_model != "coarse") || !out.legroute_plan.route_interval
       || !out.legroute_plan.route_net_pops) {
     throw Lhd_error{"usage", "legroute.plan route_model must be legacy or coarse with positive route budgets", ""};
@@ -585,8 +585,9 @@ livehd::placement::Options placement_options(const Options& opts) {
   }
   out.legroute_options.inbox_span = truthy(synth_set(opts, "place.legroute.inbox_span", "false"));
   // auto (default): the validated box seed whenever the configuration supports it
-  out.legroute_options.box_route_seed
-      = box_route_seed == "auto" ? livehd::placement::legroute_box_route_seed_compatible(out.legroute_options) : truthy(box_route_seed);
+  out.legroute_options.box_route_seed = box_route_seed == "auto"
+                                            ? livehd::placement::legroute_box_route_seed_compatible(out.legroute_options)
+                                            : truthy(box_route_seed);
   livehd::placement::validate_legroute_options(out.legroute_options);
   auto& terminal                  = out.terminal_legalize_options;
   terminal.remainder_warp.enabled = truthy(synth_set(opts, "place.legalize.warpspace", "false"));

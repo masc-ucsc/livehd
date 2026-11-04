@@ -18,7 +18,7 @@ from .export_weights import LIMIT
 from .coarse import POLICIES, eligible_metrics
 from .features import NETWORK_BINS
 from .maps import read
-from .pool import VERSIONS, _atomic, _identity, canonical, inside, lineage_status, load_sample, read_manifest, sha
+from .pool import VERSIONS, _atomic, _identity, canonical, inside, lineage_status, load_calibration, load_sample, read_manifest, sha
 from .score import METRICS, absolute_channel, defined_mean, metrics
 
 
@@ -45,14 +45,22 @@ class Pool:
     def load(self, key):
         return load_sample(self.root, self.compatible[key])
 
-    def unseen(self, top):
+    @lru_cache(maxsize=16)
+    def calibration_designs(self, key):
+        calibration = load_calibration(self.root, self.compatible[key])
+        return (set(calibration['fit_designs']) | set(calibration['heldout_designs'])) if calibration else set()
+
+    def unseen(self, top, samples=()):
         provenance = self.manifest.get('provenance', {})
         status = lineage_status(provenance, top)
         if status == 'incomplete':
             return {'verified': False, 'reason': 'checkpoint training/model-selection lineage is incomplete'}
         if status == 'seen':
             return {'verified': False, 'reason': 'query design participated in gradients, model selection or an ancestor checkpoint'}
-        return {'verified': True, 'reason': '', 'seen_designs': sorted(set(provenance['seen_designs']))}
+        calibration_designs = set().union(*(self.calibration_designs(key) for key in samples if key in self.compatible))
+        if top in calibration_designs:
+            return {'verified': False, 'reason': 'query design participated in query/support label calibration'}
+        return {'verified': True, 'reason': '', 'seen_designs': sorted(set(provenance['seen_designs']) | calibration_designs)}
 
     def select(self, key, mode, shots, minimum, fallback, chosen=()):
         if not 1 <= minimum <= shots <= 16 or fallback not in ('nearest', 'skip'):
@@ -134,7 +142,7 @@ def evaluate(args):
         raise ValueError('no evaluation queries match')
     if args.require_unseen_design:
         for key in selected:
-            identity = pool.unseen(pool.records[key]['top'])
+            identity = pool.unseen(pool.records[key]['top'], (key,))
             if not identity['verified']:
                 raise ValueError(f'unseen-design evaluation rejected for {key}: {identity["reason"]}')
     args.output.mkdir(parents=True, exist_ok=True)
@@ -152,7 +160,7 @@ def evaluate(args):
               'trained_on': pool.manifest.get('trained_on'), 'provenance': pool.manifest.get('provenance'), 'queries': []}
     for index, key in enumerate(selected):
         record = pool.records[key]
-        result = {'id': key, 'top': record['top'], 'unseen_design': pool.unseen(record['top']),
+        result = {'id': key, 'top': record['top'], 'unseen_design': pool.unseen(record['top'], (key,)),
                   'status': 'skipped', 'support_ids': []}
         report['queries'].append(result)
         if key not in pool.compatible:
@@ -164,6 +172,9 @@ def evaluate(args):
         if reason:
             result['reason'] = reason
             continue
+        result['unseen_design'] = pool.unseen(record['top'], (key, *support))
+        if args.require_unseen_design and not result['unseen_design']['verified']:
+            raise ValueError(f'unseen-design evaluation rejected for {key}: {result["unseen_design"]["reason"]}')
         features, labels, paths = pool.load(key)
         directory = run / f'query_{index:06d}'
         directory.mkdir(exist_ok=True)

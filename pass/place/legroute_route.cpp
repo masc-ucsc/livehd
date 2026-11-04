@@ -3,7 +3,6 @@
 // the SAT placement chose (legroute_sat.cpp).
 #include <algorithm>
 #include <atomic>
-#include <unordered_set>
 #include <cmath>
 #include <map>
 #include <mutex>
@@ -12,6 +11,7 @@
 #include <stdexcept>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "inou/lefdef/routing_rules.hpp"
 #include "legroute_internal.hpp"
@@ -321,7 +321,7 @@ Clock_charge clock_tree_charge(const Design& d, const Grid& g, const Boxes* boxe
     if (!net.clock || net.power || net.pins.size() < 2) {
       continue;
     }
-    std::map<int, std::vector<int>> per;   // region -> flop unit tiles (boxes once each)
+    std::map<int, std::vector<int>> per;    // region -> flop unit tiles (boxes once each)
     std::vector<int>                nodes;  // tree nodes as clock_spines adds them: driver first, unboxed sinks
     std::set<int>                   seen;
     for (size_t k = 0; k < net.pins.size(); ++k) {
@@ -537,7 +537,7 @@ struct Track {
 struct Band {
   std::vector<int>         segs;
   std::map<int64_t, Track> busy;
-  std::map<int64_t, Spans> hard;  // power metal and macros (never shared)
+  std::map<int64_t, Spans> hard;              // power metal and macros (never shared)
   Band*                    shadow = nullptr;  // l5_fallback_shadow: every contribution except FALLBACK ones
   Band*                    ledger = nullptr;  // l5_fallback_shadow: every contribution (checked against busy)
   struct Contribution {
@@ -658,17 +658,18 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
   }
   // per layer: the reach of its spacing rules (end of line included) from a wire edge
   std::vector<int64_t> keep(g.layers.size());
-  std::vector<char> ordinary_spacing(g.layers.size(), 0);
+  std::vector<char>                  ordinary_spacing(g.layers.size(), 0);
   const physical::Signal_metal_rules rules(d.tech, d.fp);
   for (size_t l = 0; l < g.layers.size(); ++l) {
     const auto clearance = rules.clearance(g.layers[l].name);
-    keep[l] = std::max(g.layers[l].pitch - g.layers[l].width, clearance.value_or(g.layers[l].pitch));
+    keep[l]              = std::max(g.layers[l].pitch - g.layers[l].width, clearance.value_or(g.layers[l].pitch));
     if (const auto layer = d.tech.layers.find(g.layers[l].name); layer != d.tech.layers.end()) {
       // Without end-specific rules, containment is conservative for spacing/PRL. EOL/corner rules keep the
       // whole-reach endpoint envelope until the joints are placed: an exact check on a provisional span does not
       // certify the shorter base metal final emits (a measured A/B on sha3 also showed no final-closure gain).
-      ordinary_spacing[l] = clearance && layer->second.rules.properties.empty()
-                            && std::ranges::none_of(layer->second.rules.spacing, [](const auto& rule) { return rule.eol.has_value(); });
+      ordinary_spacing[l]
+          = clearance && layer->second.rules.properties.empty()
+            && std::ranges::none_of(layer->second.rules.spacing, [](const auto& rule) { return rule.eol.has_value(); });
     }
   }
   // Opt-in l5_rule_reach: the end envelope against signal neighbors only scans the track offsets whose edge gap is
@@ -686,8 +687,11 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
       const int64_t k = keep[l], w = L.width;
       const auto    wire = [&](int64_t at, int64_t a, int64_t b) {
         const double half = w / 2.;
-        return physical::Shape{L.name, L.horizontal ? physical::Rect{double(a), at - half, double(b), at + half}
-                                                    : physical::Rect{at - half, double(a), at + half, double(b)}};
+        return physical::Shape{
+            L.name,
+            L.horizontal ? physical::Rect{double(a), at - half, double(b), at + half}
+                         : physical::Rect{at - half, double(a), at + half, double(b)}
+        };
       };
       // L5 metal is a centerline span extended by a wire width at each end: never shorter than 2w
       const std::array<int64_t, 7> lens{2 * w, 3 * w, std::max<int64_t>(2 * w, k / 2), k, 2 * k, 4 * k, 10 * k};
@@ -710,7 +714,7 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
           reach = dt;
         }
       }
-      signal_reach[l] = reach;
+      signal_reach[l]                                               = reach;
       R.track_fallback_shadow[std::format("rule_reach:{}", L.name)] = size_t(reach);
     }
   }
@@ -722,57 +726,60 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
     bool    rules = false;  // exact spacing rules (true) or the conservative end envelope (false)
   };
   // exact: evaluate signal neighbors with the full Signal_metal_rules check even on EOL layers (diagnostic only)
-  const auto ends_free = [&](const Band& B, int l, int64_t t, int64_t lo, int64_t hi, End_blocker* why = nullptr,
-                             bool exact = false) {
-    const auto&   L = g.layers[l];
-    const int64_t k = keep[l], ext = L.width;
-    const int64_t a0 = lo - ext, b0 = hi + ext;
-    for (int64_t dt = 1; dt * L.pitch - L.width < k; ++dt) {
-      for (auto u : {t - dt, t + dt}) {
-        const auto it = B.busy.find(u);
-        if (it == B.busy.end()) {
-          continue;
-        }
-        // Same-net sharing is only collinear on this track. Parallel shapes still obey line-end rules.
-        for (const auto& [owner, m] : it->second.owners) {
-          auto q = m.upper_bound(a0 - k - ext);
-          if (q != m.begin()) {
-            --q;
-          }
-          for (; q != m.end() && q->first - ext <= b0 + k; ++q) {
-            const int64_t a = q->first - ext, b = q->second + ext;
-            if (owner >= 0 && dt > signal_reach[l] && !ordinary_spacing[l] && !exact) {
-              continue;  // l5_rule_reach: no nominal signal pair at this offset is illegal
-            }
-            if (owner >= 0 && (ordinary_spacing[l] || exact)) {
-              const auto wire = [&](int64_t track, int64_t begin, int64_t end) {
-                const double at = g.track_coord(l, track), half = L.width / 2.;
-                return physical::Shape{L.name, L.horizontal ? physical::Rect{double(begin), at - half, double(end), at + half}
-                                                            : physical::Rect{at - half, double(begin), at + half, double(end)}};
-              };
-              if (!rules.spacing(wire(t, a0, b0), wire(u, a, b)).legal) {
-                if (why) {
-                  *why = {u, q->first, q->second, owner, true};
+  const auto ends_free
+      = [&](const Band& B, int l, int64_t t, int64_t lo, int64_t hi, End_blocker* why = nullptr, bool exact = false) {
+          const auto&   L = g.layers[l];
+          const int64_t k = keep[l], ext = L.width;
+          const int64_t a0 = lo - ext, b0 = hi + ext;
+          for (int64_t dt = 1; dt * L.pitch - L.width < k; ++dt) {
+            for (auto u : {t - dt, t + dt}) {
+              const auto it = B.busy.find(u);
+              if (it == B.busy.end()) {
+                continue;
+              }
+              // Same-net sharing is only collinear on this track. Parallel shapes still obey line-end rules.
+              for (const auto& [owner, m] : it->second.owners) {
+                auto q = m.upper_bound(a0 - k - ext);
+                if (q != m.begin()) {
+                  --q;
                 }
-                return false;
+                for (; q != m.end() && q->first - ext <= b0 + k; ++q) {
+                  const int64_t a = q->first - ext, b = q->second + ext;
+                  if (owner >= 0 && dt > signal_reach[l] && !ordinary_spacing[l] && !exact) {
+                    continue;  // l5_rule_reach: no nominal signal pair at this offset is illegal
+                  }
+                  if (owner >= 0 && (ordinary_spacing[l] || exact)) {
+                    const auto wire = [&](int64_t track, int64_t begin, int64_t end) {
+                      const double at = g.track_coord(l, track), half = L.width / 2.;
+                      return physical::Shape{
+                          L.name,
+                          L.horizontal ? physical::Rect{double(begin),     at - half, double(end),   at + half}
+                                       : physical::Rect{    at - half, double(begin),   at + half, double(end)}
+                      };
+                    };
+                    if (!rules.spacing(wire(t, a0, b0), wire(u, a, b)).legal) {
+                      if (why) {
+                        *why = {u, q->first, q->second, owner, true};
+                      }
+                      return false;
+                    }
+                  } else if ((a <= a0 && b > a0 - k) || (b >= b0 && a < b0 + k) || (a0 <= a && b0 > a - k)
+                             || (b0 >= b && a0 < b + k)) {
+                    // Equal ends are still neighboring ends, including their EOL keepouts.
+                    if (why) {
+                      *why = {u, q->first, q->second, owner, false};
+                    }
+                    return false;
+                  }
+                }
               }
-            } else if ((a <= a0 && b > a0 - k) || (b >= b0 && a < b0 + k) || (a0 <= a && b0 > a - k)
-                       || (b0 >= b && a0 < b + k)) {
-              // Equal ends are still neighboring ends, including their EOL keepouts.
-              if (why) {
-                *why = {u, q->first, q->second, owner, false};
-              }
-              return false;
             }
           }
-        }
-      }
-    }
-    return true;
-  };
+          return true;
+        };
   std::vector<std::array<std::atomic<size_t>, 5>> rejects(g.layers.size());
-  const auto pick = [&](Band& B, int l, int64_t lo, int64_t hi, int net, bool critical, int64_t pref,
-                        bool telemetry = true) -> std::pair<int64_t, bool> {
+  const auto pick = [&](Band& B, int l, int64_t lo, int64_t hi, int net, bool critical, int64_t pref, bool telemetry = true)
+      -> std::pair<int64_t, bool> {
     const auto&                       L      = g.layers[l];
     const auto                        margin = std::max(L.pitch, keep[l] + 2 * L.width);
     int64_t                           best   = -1;
@@ -793,9 +800,11 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
         }
       }
       // Collinear sharing with the same net's existing span costs no new track: prefer it first.
-      const auto mine  = net >= 0 ? m.owners.find(net) : m.owners.end();
-      const bool share = mine != m.owners.end() && !free_on(mine->second, lo, hi);
-      const std::tuple<int, int64_t, int64_t> k{share ? -1 : nb * (critical ? 10 : 1), -std::min<int64_t>(near, 3), std::abs(t - pref)};
+      const auto                              mine  = net >= 0 ? m.owners.find(net) : m.owners.end();
+      const bool                              share = mine != m.owners.end() && !free_on(mine->second, lo, hi);
+      const std::tuple<int, int64_t, int64_t> k{share ? -1 : nb * (critical ? 10 : 1),
+                                                -std::min<int64_t>(near, 3),
+                                                std::abs(t - pref)};
       if (k < key) {
         key  = k;
         best = t;
@@ -814,9 +823,9 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
       for (const auto& [t, m] : B.busy) {
         const auto ob = m.owners.find(-1);
         const int  c  = ob != m.owners.end() && !free_on(ob->second, lo, hi) ? 1
-                        : !free_on(m, lo, hi, net)                         ? 2
-                        : !free_on(m, lo - margin, hi + margin, net)       ? 3
-                                                                           : 4;
+                        : !free_on(m, lo, hi, net)                           ? 2
+                        : !free_on(m, lo - margin, hi + margin, net)         ? 3
+                                                                             : 4;
         cls           = std::max(cls, c);
       }
       ++rejects[size_t(l)][size_t(cls)];
@@ -867,11 +876,11 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
     if (!B.shadow) {
       return;
     }
-    const bool ok = pick(*B.shadow, l, lo, hi, net, critical, pref, false).second;
+    const bool  ok            = pick(*B.shadow, l, lo, hi, net, critical, pref, false).second;
     // the same real band: is some track rejected only by the end envelope, would it pass the exact rules, and does
     // the first envelope blocker share an end with the request (coincident provisional ends)
-    const auto& L      = g.layers[l];
-    const auto  margin = std::max(L.pitch, keep[l] + 2 * L.width);
+    const auto& L             = g.layers[l];
+    const auto  margin        = std::max(L.pitch, keep[l] + 2 * L.width);
     bool        envelope_only = false, exact_ok = false, coincident = false;
     for (const auto& [t, m] : B.busy) {
       if (!free_on(m, lo - margin, hi + margin, net)) {
@@ -884,26 +893,26 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
       if (e.rules) {
         continue;
       }
-      envelope_only = true;
-      coincident |= e.a == lo || e.b == hi || e.a == hi || e.b == lo;
-      exact_ok |= ends_free(B, l, t, lo, hi, nullptr, true);
+      envelope_only  = true;
+      coincident    |= e.a == lo || e.b == hi || e.a == hi || e.b == lo;
+      exact_ok      |= ends_free(B, l, t, lo, hi, nullptr, true);
     }
     std::lock_guard lock(shadow_mutex);
     ++R.track_fallback_shadow[std::format("{}:{}:failed", g.layers[l].name, kind)];
-    R.track_fallback_shadow[std::format("{}:{}:shadow_free", g.layers[l].name, kind)] += ok;
-    R.track_fallback_shadow[std::format("{}:{}:envelope_only", g.layers[l].name, kind)] += envelope_only;
+    R.track_fallback_shadow[std::format("{}:{}:shadow_free", g.layers[l].name, kind)]         += ok;
+    R.track_fallback_shadow[std::format("{}:{}:envelope_only", g.layers[l].name, kind)]       += envelope_only;
     R.track_fallback_shadow[std::format("{}:{}:envelope_coincident", g.layers[l].name, kind)] += coincident;
-    R.track_fallback_shadow[std::format("{}:{}:exact_rules_free", g.layers[l].name, kind)] += exact_ok;
+    R.track_fallback_shadow[std::format("{}:{}:exact_rules_free", g.layers[l].name, kind)]    += exact_ok;
   };
   // l5_fallback_shadow: per candidate track of a failed final request, the deciding predicate and its blocker, with
   // the blocker's contribution provenance (sequential kinds only, the first few per layer and kind: deterministic)
   const auto state_name = [](uint8_t st) -> const char* {
     switch (st) {
-      case uint8_t(Track_state::checked): return "checked";
+      case uint8_t(Track_state::checked)   : return "checked";
       case uint8_t(Track_state::prescribed): return "prescribed";
-      case uint8_t(Track_state::fallback): return "fallback";
-      case 255: return "hard";
-      default: return "none";
+      case uint8_t(Track_state::fallback)  : return "fallback";
+      case 255                             : return "hard";
+      default                              : return "none";
     }
   };
   std::map<std::string, int> sampled;
@@ -913,9 +922,15 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
     }
     const auto& L      = g.layers[l];
     const auto  margin = std::max(L.pitch, keep[l] + 2 * L.width);
-    std::string out    = std::format("{} {} net {} tracks {}..{} span [{},{}] ends {}:", g.layers[l].name, kind, net,
-                                          B.busy.empty() ? 0 : B.busy.begin()->first, B.busy.empty() ? 0 : B.busy.rbegin()->first,
-                                          lo, hi, ends);
+    std::string out    = std::format("{} {} net {} tracks {}..{} span [{},{}] ends {}:",
+                                     g.layers[l].name,
+                                     kind,
+                                     net,
+                                     B.busy.empty() ? 0 : B.busy.begin()->first,
+                                     B.busy.empty() ? 0 : B.busy.rbegin()->first,
+                                     lo,
+                                     hi,
+                                     ends);
     for (const auto& [t, m] : B.busy) {
       std::string why;
       if (const auto c = B.ledger->contributions.find(t); c != B.ledger->contributions.end()) {
@@ -969,10 +984,10 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
       if (!ok) {
         probe(B, s.layer, lo, hi, s.net, true, (g.tracks(s.layer, s.band).first + g.tracks(s.layer, s.band).second) / 2, "fixed");
       }
-      s.track      = t;
-      s.track_state = track_state(ok);
-      unassigned  += !ok;
-      failures[0] += !ok;
+      s.track        = t;
+      s.track_state  = track_state(ok);
+      unassigned    += !ok;
+      failures[0]   += !ok;
     } else {
       s.track_state = uint8_t(Track_state::prescribed);  // a virtual pin hop's fixed track: not checked by pick
     }
@@ -1060,14 +1075,14 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
                                        : std::llround(physical_pin_access(d, g, p).x);
             }
           }
-          const auto pref      = int64_t(std::lround(double(px - g.layers[l].offset) / g.layers[l].pitch));
-          const auto [t, ok]   = pick(B, l, g.bottom(row), g.bottom(row) + g.tile_h, risers[ri].net, false, pref);
+          const auto pref    = int64_t(std::lround(double(px - g.layers[l].offset) / g.layers[l].pitch));
+          const auto [t, ok] = pick(B, l, g.bottom(row), g.bottom(row) + g.tile_h, risers[ri].net, false, pref);
           if (!ok) {
             probe(B, l, g.bottom(row), g.bottom(row) + g.tile_h, risers[ri].net, false, pref, "riser");
           }
           node.riser_layer    = l;
           node.riser_track    = t;
-          node.riser_state    = track_state(ok);
+          node.riser_state     = track_state(ok);
           unassigned         += !ok;
           failures[1]         += !ok;
           occupy(B, t, g.bottom(row), g.bottom(row) + g.tile_h, risers[ri].net, node.riser_state);
@@ -1140,7 +1155,7 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
         const auto [a, e]  = g.tracks(l, s.band);
         const auto [t, ok] = pick(B, l, lo, hi, s.net, s.critical, (a + e) / 2);
         if (ok) {
-          s.layer    = l;
+          s.layer       = l;
           s.track       = t;
           s.track_state = uint8_t(Track_state::checked);
           occupy(B, t, lo, hi, s.net, s.track_state);
@@ -1150,9 +1165,9 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
         probe(B, l, lo, hi, s.net, s.critical, (a + e) / 2, "segment_other_layer");
       }
       if (!placed) {
-        auto& B                       = band_of(s.layer, s.band);
-        const auto [a, e]             = g.tracks(s.layer, s.band);
-        const auto [t, ok]            = pick(B, s.layer, lo, hi, s.net, s.critical, (a + e) / 2);
+        auto& B            = band_of(s.layer, s.band);
+        const auto [a, e]  = g.tracks(s.layer, s.band);
+        const auto [t, ok] = pick(B, s.layer, lo, hi, s.net, s.critical, (a + e) / 2);
         if (!ok) {
           probe(B, s.layer, lo, hi, s.net, s.critical, (a + e) / 2, "segment_final");
           if (B.ledger) {
@@ -1205,14 +1220,19 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
       auto&      B   = band_of(low_h, row);
       const auto xv = g.track_coord(s.layer, s.track), xr = g.track_coord(nd.riser_layer, nd.riser_track);
       const auto [a, b]   = g.tracks(low_h, row);
-      const auto [t, ok]   = pick(B, low_h, std::min(xv, xr), std::max(xv, xr), s.net, false, (a + b) / 2);
+      const auto [t, ok]  = pick(B, low_h, std::min(xv, xr), std::max(xv, xr), s.net, false, (a + b) / 2);
       if (!ok) {
         probe(B, low_h, std::min(xv, xr), std::max(xv, xr), s.net, false, (a + b) / 2, "jog");
-        sample(B, low_h, std::min(xv, xr), std::max(xv, xr), s.net, "jog",
+        sample(B,
+               low_h,
+               std::min(xv, xr),
+               std::max(xv, xr),
+               s.net,
+               "jog",
                std::format("seg-{}/riser-{}", state_name(s.track_state), state_name(nd.riser_state)));
       }
       unassigned         += !ok;
-      failures[4]         += !ok;
+      failures[4]        += !ok;
       occupy(B, t, std::min(xv, xr), std::max(xv, xr), s.net, track_state(ok));
       (e ? s.jog_hi : s.jog_lo)             = t;
       (e ? s.jog_hi_state : s.jog_lo_state) = track_state(ok);
@@ -1237,13 +1257,13 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
         const auto   xr  = g.track_coord(nd.riser_layer, nd.riser_track);
         const auto lo = std::min(int64_t(px), xr), hi = std::max(int64_t(px), xr);
         const auto pref     = int64_t(std::lround((py - g.layers[low_h].offset) / g.layers[low_h].pitch));
-        const auto [t, ok]   = pick(B, low_h, lo, hi, n, false, pref);
+        const auto [t, ok]    = pick(B, low_h, lo, hi, n, false, pref);
         if (!ok) {
           probe(B, low_h, lo, hi, n, false, pref, "io_stub");
           sample(B, low_h, lo, hi, n, "io_stub", std::format("pin/riser-{}", state_name(nd.riser_state)));
         }
         unassigned         += !ok;
-        failures[5]         += !ok;
+        failures[5]        += !ok;
         occupy(B, t, lo, hi, n, track_state(ok));
         nd.stub_track = t;
         nd.stub_state = track_state(ok);
@@ -1261,7 +1281,7 @@ void assign_tracks(const Design& d, const Grid& g, Routing& R, unsigned threads)
         bool same = B.ledger && B.ledger->busy.size() == B.busy.size();
         for (auto it = B.busy.begin(); same && it != B.busy.end(); ++it) {
           const auto q = B.ledger->busy.find(it->first);
-          same = q != B.ledger->busy.end() && q->second.all == it->second.all && q->second.owners == it->second.owners;
+          same         = q != B.ledger->busy.end() && q->second.all == it->second.all && q->second.owners == it->second.owners;
         }
         mismatched += !same;
       }

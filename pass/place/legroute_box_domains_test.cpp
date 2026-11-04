@@ -154,7 +154,7 @@ TEST(LegrouteBoxDomains, FixedCollisionsCannotGrowOrAcquireAnotherTile) {
   for (auto& box : f.boxes.boxes) {
     box.fixed = true;
   }
-  f.allowed[0] = {0, 1, 2, 3};  // a track hull cannot widen an immutable placement
+  f.allowed[0]      = {0, 1, 2, 3};  // a track hull cannot widen an immutable placement
   const auto result = f.prepare();
   EXPECT_TRUE(result.matching.empty());
   EXPECT_EQ(result.relaxed_windows, 0u);

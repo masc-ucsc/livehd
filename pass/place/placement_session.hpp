@@ -22,9 +22,9 @@ public:
     int         begin = 0, end = 0;
     size_t      fillers = 0;
     bool        rebind = false, restore = false;
-    double      density_weight = 0;
-    bool        density_reset  = false;
-    bool        macro_replan   = false;
+    double      density_weight          = 0;
+    bool        density_reset           = false;
+    bool        macro_replan            = false;
     bool        wirelength_restart      = false;
     int         wirelength_epoch        = 0;
     bool        routing_inflation_reset = false;

@@ -130,13 +130,13 @@ int main(int argc, char** argv) {
         net.wires.clear();
       }
     }
-    const auto box     = read_json(str("box"));
+    const auto               box  = read_json(str("box"));
     // scratch die: the tile itself by default, so no new wiring leaves the box
-    const int  halo    = config.HasMember("halo_tiles") ? config["halo_tiles"].GetInt() : 0;
+    const int                halo = config.HasMember("halo_tiles") ? config["halo_tiles"].GetInt() : 0;
     std::vector<std::string> signal_layers{"M2", "M3"};  // new wiring may use only these (config "layers")
     // planar layers (config "planar", default M2/M3): any other allowed layer costs upper_cost per unit length, so the
     // maze uses it for access stacks to higher anchors; its wire length is reported per net
-    std::set<std::string> planar{"M2", "M3"};
+    std::set<std::string>    planar{"M2", "M3"};
     if (config.HasMember("planar")) {
       planar.clear();
       for (const auto& l : config["planar"].GetArray()) {
@@ -150,39 +150,39 @@ int main(int argc, char** argv) {
         signal_layers.emplace_back(l.GetString());
       }
     }
-    const auto net_ms  = config.HasMember("net_ms") ? config["net_ms"].GetUint() : 5000u;
-    const auto patterns = config.HasMember("patterns") ? config["patterns"].GetUint() : 8192u;  // per-search state budget
-    const auto maze_labels = config.HasMember("maze_labels") ? config["maze_labels"].GetUint() : 1u;  // live labels per coordinate
+    const auto net_ms       = config.HasMember("net_ms") ? config["net_ms"].GetUint() : 5000u;
+    const auto patterns     = config.HasMember("patterns") ? config["patterns"].GetUint() : 8192u;     // per-search state budget
+    const auto maze_labels  = config.HasMember("maze_labels") ? config["maze_labels"].GetUint() : 1u;  // live labels per coordinate
     // same-context retry: a request that ends "maze exhausted" is retried once with this many labels (0: off). A
     // failed request commits nothing, so the retry sees exactly the context the first attempt saw.
     const auto retry_labels = config.HasMember("retry_labels") ? config["retry_labels"].GetUint() : 0u;
     // strict witness mode: an off-menu or outside-box shape fails its net before commit (default: tallied only)
-    const bool strict = config.HasMember("strict") && config["strict"].GetBool();
+    const bool strict       = config.HasMember("strict") && config["strict"].GetBool();
     // fixed-context domain diagnostic: every job routes in the halo_tiles window; the job named focus_net is attempted
     // first there, then again with a focus_halo window and its anchors clipped to the tile, so the wider domain adds
     // search space but no easier outside target. Its context (earlier commits) is identical in both attempts.
-    const std::string focus_net  = config.HasMember("focus_net") ? config["focus_net"].GetString() : "";
+    const std::string focus_net    = config.HasMember("focus_net") ? config["focus_net"].GetString() : "";
     // Alternate-cost experiment (external taps only: layer_cost does not reach the internal-net search path). A boundary
     // net that fails its taps under the configured costs is retried once from the identical committed prefix with flat
     // costs. With job_patterns > 0 every job shares ONE allowance (that many patterns and job_ms of wall time, charged
     // for every call, successful or not, no refunds) across both attempts.
-    const bool alt_flat     = config.HasMember("alt_flat") && config["alt_flat"].GetBool();
-    const auto job_patterns = config.HasMember("job_patterns") ? config["job_patterns"].GetUint64() : uint64_t(0);
-    const auto job_ms       = config.HasMember("job_ms") ? config["job_ms"].GetUint() : 0u;
-    const int         focus_halo = config.HasMember("focus_halo") ? config["focus_halo"].GetInt() : 1;
-    const auto box_ms   = config.HasMember("box_ms") ? config["box_ms"].GetUint() : 0u;       // whole-box deadline (0: none)
-    const auto box_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(box_ms ? box_ms : 1u << 30);
+    const bool        alt_flat     = config.HasMember("alt_flat") && config["alt_flat"].GetBool();
+    const auto        job_patterns = config.HasMember("job_patterns") ? config["job_patterns"].GetUint64() : uint64_t(0);
+    const auto        job_ms       = config.HasMember("job_ms") ? config["job_ms"].GetUint() : 0u;
+    const int         focus_halo   = config.HasMember("focus_halo") ? config["focus_halo"].GetInt() : 1;
+    const auto        box_ms       = config.HasMember("box_ms") ? config["box_ms"].GetUint() : 0u;  // whole-box deadline (0: none)
+    const auto        box_deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(box_ms ? box_ms : 1u << 30);
     // Conditional model (off by default): a net that leaves the box may tap its OWN fallback-proposed L5 metal at the
     // tile (the boundary the global route chose but L5 could not check), as if that track were made available. Foreign
     // fallback proposals are never obstacles either way.
-    const bool anchor_fallback = config.HasMember("anchor_fallback") && config["anchor_fallback"].GetBool();
-    const auto& rect   = box["rect_dbu"].GetArray();
-    const int64_t xl = rect[0].GetInt64(), yl = rect[1].GetInt64(), xh = rect[2].GetInt64(), yh = rect[3].GetInt64();
-    const int64_t tw = xh - xl, th = yh - yl;
-    const int     col = box["col"].GetInt(), row = box["row"].GetInt();
-    const auto    tile_x = [&](int c) { return xl + int64_t(c - col) * tw; };
-    const auto    tile_y = [&](int r) { return yl + int64_t(r - row) * th; };
-    const auto*   profile = ph::detect_tech_profile(tech);
+    const bool        anchor_fallback = config.HasMember("anchor_fallback") && config["anchor_fallback"].GetBool();
+    const auto&       rect            = box["rect_dbu"].GetArray();
+    const int64_t     xl = rect[0].GetInt64(), yl = rect[1].GetInt64(), xh = rect[2].GetInt64(), yh = rect[3].GetInt64();
+    const int64_t     tw = xh - xl, th = yh - yl;
+    const int         col = box["col"].GetInt(), row = box["row"].GetInt();
+    const auto        tile_x  = [&](int c) { return xl + int64_t(c - col) * tw; };
+    const auto        tile_y  = [&](int r) { return yl + int64_t(r - row) * th; };
+    const auto*       profile = ph::detect_tech_profile(tech);
     if (!profile) {
       throw std::invalid_argument("no technology profile for these LEFs");
     }
@@ -191,8 +191,8 @@ int main(int argc, char** argv) {
       return it == tech.layers.end() ? int64_t(0) : std::llround(it->second.width * fp.dbu);
     };
     // the occupancy: DEF (PG, pins, obstructions), then exported foreign metal and the incident nets' anchors
-    auto occ = ph::routing_occupancy(tech, fp, std::max<int64_t>(1, tw));
-    std::set<int> incident;
+    auto                       occ = ph::routing_occupancy(tech, fp, std::max<int64_t>(1, tw));
+    std::set<int>              incident;
     std::map<int, std::string> net_name;
     for (const auto& n : box["nets"].GetArray()) {
       incident.insert(n["net"].GetInt());
@@ -203,7 +203,7 @@ int main(int argc, char** argv) {
            foreign_joins_skipped = 0;
     std::vector<ph::Occupied_shape> add;
     // Exact planned geometry (Final's own materialization) when the dump has it; else the older track/tile-span records
-    const bool exact = box.HasMember("foreign_planned") && box["nets"].Size() > 0 && box["nets"][0].HasMember("planned_shapes");
+    const bool exact  = box.HasMember("foreign_planned") && box["nets"].Size() > 0 && box["nets"][0].HasMember("planned_shapes");
     const auto usable = [&](const std::string& state, bool own) {
       return state == "checked" || state == "prescribed" || (own && anchor_fallback && (state == "fallback" || state == "none"));
     };
@@ -216,7 +216,11 @@ int main(int argc, char** argv) {
           fallback_skipped += std::string(f["state"].GetString()) == "fallback";
           continue;
         }
-        add.push_back({{f["layer"].GetString(), rect_of(f["rect"])}, f["name"].GetString(), true});
+        add.push_back({
+            {f["layer"].GetString(), rect_of(f["rect"])},
+            f["name"].GetString(),
+            true
+        });
         ++foreign;
       }
       for (const auto& n : box["nets"].GetArray()) {
@@ -233,7 +237,7 @@ int main(int argc, char** argv) {
       // foreign joins: for each layer step of the stack, the union of every default LEF via defined for that pair (pads
       // and cut, as Final's router may pick any of them); a step with no such via fails the box closed
       if (box.HasMember("foreign_joins")) {
-        const auto& metals = tech.routing_layers;
+        const auto&                                   metals = tech.routing_layers;
         // joins follow their wires: a join counts only where the same net has a usable (checked/prescribed) foreign
         // wire under its point on one of its two layers; others belong to omitted fallback geometry
         std::map<std::string, std::vector<ph::Shape>> usable_foreign;
@@ -272,10 +276,12 @@ int main(int argc, char** argv) {
               }
               found = true;
               for (const auto& v : via.shapes) {
-                add.push_back({{v.layer, ph::Rect{x + v.rect.xl * fp.dbu, y + v.rect.yl * fp.dbu, x + v.rect.xh * fp.dbu,
-                                                  y + v.rect.yh * fp.dbu}},
-                               j["name"].GetString(),
-                               true});
+                add.push_back({
+                    {v.layer,
+                     ph::Rect{x + v.rect.xl * fp.dbu, y + v.rect.yl * fp.dbu, x + v.rect.xh * fp.dbu, y + v.rect.yh * fp.dbu}},
+                    j["name"].GetString(),
+                    true
+                });
               }
             }
             foreign_join_unresolved += !found;
@@ -288,7 +294,7 @@ int main(int argc, char** argv) {
       if (exact) {
         break;
       }
-      const std::string state = m["state"].GetString();
+      const std::string state        = m["state"].GetString();
       const bool        own_fallback = anchor_fallback && state == "fallback" && m["incident"].GetInt() != 0;
       if (state != "checked" && state != "prescribed" && !own_fallback) {
         fallback_skipped += state == "fallback";
@@ -296,13 +302,15 @@ int main(int argc, char** argv) {
       }
       const std::string layer = m["layer"].GetString();
       const bool        h     = m["horizontal"].GetInt() != 0;
-      const int64_t     c     = m["track_coord"].GetInt64(), half = layer_width(layer) / 2;
+      const int64_t     c = m["track_coord"].GetInt64(), half = layer_width(layer) / 2;
       const int         lo = m["tiles"][0].GetInt(), hi = m["tiles"][1].GetInt();
-      ph::Shape         s{layer,
-                  h ? ph::Rect{double(tile_x(lo)), double(c - half), double(tile_x(hi) + tw), double(c + half)}
-                            : ph::Rect{double(c - half), double(tile_y(lo)), double(c + half), double(tile_y(hi) + th)}};
-      const int  net = m["net"].GetInt();
-      const bool own = m["incident"].GetInt() != 0;
+      ph::Shape         s{
+          layer,
+          h ? ph::Rect{double(tile_x(lo)),   double(c - half), double(tile_x(hi) + tw),        double(c + half)}
+            : ph::Rect{  double(c - half), double(tile_y(lo)),        double(c + half), double(tile_y(hi) + th)}
+      };
+      const int         net  = m["net"].GetInt();
+      const bool        own  = m["incident"].GetInt() != 0;
       const std::string name = own ? net_name.at(net) : "legroute_net_" + std::to_string(net);
       if (own) {  // the anchor is the part over this tile
         ph::Shape clip = s;
@@ -330,7 +338,10 @@ int main(int argc, char** argv) {
           continue;
         }
         const int64_t c = node["riser_coord"].GetInt64(), half = layer_width(layer) / 2;
-        ph::Shape     s{layer, ph::Rect{double(c - half), double(yl), double(c + half), double(yh)}};
+        ph::Shape     s{
+            layer,
+            ph::Rect{double(c - half), double(yl), double(c + half), double(yh)}
+        };
         anchors[n["name"].GetString()].push_back(s);
         add.push_back({s, n["name"].GetString(), true});
       }
@@ -352,10 +363,13 @@ int main(int argc, char** argv) {
       for (const int64_t c : coords) {
         if (!menu[layer].contains(c)) {
           ++blocked_tracks[layer];
-          add.push_back({{layer, h ? ph::Rect{double(xl), double(c - half), double(xh), double(c + half)}
-                                   : ph::Rect{double(c - half), double(yl), double(c + half), double(yh)}},
-                         {},
-                         false});
+          add.push_back({
+              {layer,
+               h ? ph::Rect{double(xl), double(c - half), double(xh), double(c + half)}
+                 : ph::Rect{double(c - half), double(yl), double(c + half), double(yh)}},
+              {},
+              false
+          });
         }
       }
     }
@@ -365,14 +379,14 @@ int main(int argc, char** argv) {
     const ph::Signal_metal_rules rules(tech, fp);
     pl::Pin_escape_guard         escapes(tech, fp, occ, 2048, {}, profile->route.access, &rules, true);
     auto                         search = fp;
-    search.die = {double(xl - halo * tw), double(yl - halo * th), double(xh + halo * tw), double(yh + halo * th)};
+    search.die           = {double(xl - halo * tw), double(yl - halo * th), double(xh + halo * tw), double(yh + halo * th)};
     auto policy          = pl::signal_route_profile(*profile, tech);
     policy.signal_layers = signal_layers;
-    pl::Signal_router            router(tech, search, occ, rules, policy, &escapes);
-    auto                         wide = fp;  // the focus window (same occupancy, rules and escape guard)
-    wide.die = {double(xl - focus_halo * tw), double(yl - focus_halo * th), double(xh + focus_halo * tw),
-                double(yh + focus_halo * th)};
-    pl::Signal_router            wide_router(tech, wide, occ, rules, policy, &escapes);
+    pl::Signal_router router(tech, search, occ, rules, policy, &escapes);
+    auto              wide = fp;  // the focus window (same occupancy, rules and escape guard)
+    wide.die
+        = {double(xl - focus_halo * tw), double(yl - focus_halo * th), double(xh + focus_halo * tw), double(yh + focus_halo * th)};
+    pl::Signal_router             wide_router(tech, wide, occ, rules, policy, &escapes);
     std::map<std::string, double> layer_cost;
     for (const auto& l : signal_layers) {
       if (!planar.contains(l)) {
@@ -381,9 +395,9 @@ int main(int argc, char** argv) {
     }
     // incident signal nets, most in-box pins first
     struct Job {
-      std::string    name;
-      ph::Net        inside;
-      bool           leaves = false;
+      std::string name;
+      ph::Net     inside;
+      bool        leaves = false;
     };
     std::vector<Job>         jobs;
     std::vector<std::string> unfulfilled;  // box obligations this probe does not route (clock attachments)
@@ -417,14 +431,15 @@ int main(int argc, char** argv) {
         jobs.push_back(std::move(job));
       }
     }
-    std::ranges::stable_sort(jobs, [](const Job& a, const Job& b) { return a.inside.connections.size() > b.inside.connections.size(); });
+    std::ranges::stable_sort(jobs,
+                             [](const Job& a, const Job& b) { return a.inside.connections.size() > b.inside.connections.size(); });
     rapidjson::StringBuffer                    buffer;
     rapidjson::Writer<rapidjson::StringBuffer> w(buffer);
     std::map<std::string, std::set<int64_t>>   used, owned_used;
     size_t                                     routed = 0, off_menu = 0, outside_box = 0;
-    std::map<std::string, std::set<int64_t>>   excluded;  // layer -> track centres new metal excludes (rule-expanded)
+    std::map<std::string, std::set<int64_t>>   excluded;              // layer -> track centres new metal excludes (rule-expanded)
     std::map<std::string, std::set<int64_t>>   excluded_incremental;  // ... beyond the net's owned metal on that track
-    std::string                                focus_report;  // the focus net's fixed-context comparison (never committed)
+    std::string                                focus_report;          // the focus net's fixed-context comparison (never committed)
     std::vector<ph::Route_path>                focus_paths;
     ph::Route_width_rules                      focus_rules;  // the witness's own width rules (decoding only)
     std::map<std::string, std::set<int64_t>>   focus_excluded;
@@ -433,16 +448,16 @@ int main(int argc, char** argv) {
     w.Key("nets");
     w.StartArray();
     for (auto& job : jobs) {
-      std::vector<ph::Route_path> paths;
-      std::string                 why;
-      std::string                 retry;  // "", "recovered" or the retry's own failure reason
-      auto&                       own = anchors[job.name];
+      std::vector<ph::Route_path>        paths;
+      std::string                        why;
+      std::string                        retry;  // "", "recovered" or the retry's own failure reason
+      auto&                              own          = anchors[job.name];
       // One pending transaction per net: its cut state (every accepted piece's vias, exact reuse allowed, distinct vias
       // spaced), its width rules (staged; restored if the net fails) and its paths. Nothing is shared until commit.
-      const auto          rules_before = fp.nondefault_rules;
+      const auto                         rules_before = fp.nondefault_rules;
       std::optional<lr::Final_cut_state> cut_state;
       cut_state.emplace(tech, fp);
-      const auto          stage_rules = [&](const ph::Route_width_rules& staged) -> std::string {
+      const auto stage_rules = [&](const ph::Route_width_rules& staged) -> std::string {
         for (const auto& [name, widths] : staged) {
           if (const auto it = fp.nondefault_rules.find(name); it != fp.nondefault_rules.end() && it->second != widths) {
             return "conflicting width rule " + name;
@@ -456,14 +471,15 @@ int main(int argc, char** argv) {
       // the job ledger (job_patterns > 0): remaining work and one absolute deadline for every call of this net
       uint64_t   job_left        = job_patterns;
       uint64_t   job_access_left = 2048;  // access enumeration shared by the job's calls (with job_patterns > 0)
-      const auto job_deadline = std::min(box_deadline, std::chrono::steady_clock::now() + std::chrono::milliseconds(job_ms ? job_ms : net_ms));
+      const auto job_deadline
+          = std::min(box_deadline, std::chrono::steady_clock::now() + std::chrono::milliseconds(job_ms ? job_ms : net_ms));
       const auto limits = [&](size_t labels = 0) {
         pl::Signal_route_limits l;
         l.access_candidates = job_patterns ? size_t(job_access_left) : 2048;
         l.patterns          = job_patterns ? size_t(job_left) : patterns;
         l.maze_labels       = labels ? labels : maze_labels;
-        l.deadline          = job_patterns ? job_deadline
-                                           : std::min(box_deadline, std::chrono::steady_clock::now() + std::chrono::milliseconds(net_ms));
+        l.deadline = job_patterns ? job_deadline
+                                  : std::min(box_deadline, std::chrono::steady_clock::now() + std::chrono::milliseconds(net_ms));
         return l;
       };
       const auto charge = [&](size_t work, size_t access = 0) {
@@ -488,7 +504,7 @@ int main(int argc, char** argv) {
       // the non-mutating whole-attempt acceptance: menu/box gates (strict), then the pin-escape guard under the job
       // deadline; the physical commit happens once, after the attempts
       std::optional<pl::Pin_escape_trial> accepted;
-      const auto accept = [&] {
+      const auto                          accept = [&] {
         job_off_menu = job_outside = 0;
         accepted.reset();
         ph::Net whole{job.name, {}, {ph::Wire{"ROUTED", paths}}};
@@ -498,10 +514,10 @@ int main(int argc, char** argv) {
           if (!tech.layers.contains(sh.layer)) {
             continue;
           }
-          const bool hz = tech.layers.at(sh.layer).direction == "HORIZONTAL";
-          const auto c  = std::llround(hz ? (sh.rect.yl + sh.rect.yh) / 2 : (sh.rect.xl + sh.rect.xh) / 2);
-          job_off_menu += (sh.layer == "M2" || sh.layer == "M3") && !menu[sh.layer].contains(c) && !on_own_track(sh);
-          job_outside += sh.rect.xl < double(xl) || sh.rect.xh > double(xh) || sh.rect.yl < double(yl) || sh.rect.yh > double(yh);
+          const bool hz  = tech.layers.at(sh.layer).direction == "HORIZONTAL";
+          const auto c   = std::llround(hz ? (sh.rect.yl + sh.rect.yh) / 2 : (sh.rect.xl + sh.rect.xh) / 2);
+          job_off_menu  += (sh.layer == "M2" || sh.layer == "M3") && !menu[sh.layer].contains(c) && !on_own_track(sh);
+          job_outside   += sh.rect.xl < double(xl) || sh.rect.xh > double(xh) || sh.rect.yl < double(yl) || sh.rect.yh > double(yh);
         }
         if (strict && (job_off_menu || job_outside)) {
           why = std::format("strict: {} off-menu and {} outside-box shapes", job_off_menu, job_outside);
@@ -529,7 +545,7 @@ int main(int argc, char** argv) {
           request.limits = limits(retry_labels);
           auto again     = router.try_route(job.inside, request);
           charge(again.patterns_examined, again.access_examined);
-          retry          = again.candidates.empty() ? (again.reason.empty() ? "no candidate" : again.reason) : "recovered";
+          retry = again.candidates.empty() ? (again.reason.empty() ? "no candidate" : again.reason) : "recovered";
           if (!again.candidates.empty()) {
             result = std::move(again);
           }
@@ -559,135 +575,149 @@ int main(int argc, char** argv) {
           policies.push_back({});  // flat: every allowed layer at unit cost
         }
         for (size_t attempt = 0; attempt < policies.size(); ++attempt) {
-        if (attempt) {  // restart from the identical committed prefix: nothing pending survives the first attempt
-          if (job_patterns && job_left == 0) {
-            alt_note = "alternate skipped: job allowance spent";
-            break;
-          }
-          alt_note = "alternate (flat) after: " + why;
-          why.clear();
-          paths.clear();
-          fp.nondefault_rules     = rules_before;
-          search.nondefault_rules = rules_before;
-          cut_state.emplace(tech, fp);
-        }
-        const auto& cost = policies[attempt];
-        auto taps = own;
-        for (const auto& c : job.inside.connections) {
-          ph::Net one;
-          one.name        = job.name;
-          one.connections = {c};
-          // every tap sees the net's pending vias (exact reuse allowed, new cuts spaced against them)
-          const auto prior = cut_state->vias();
-          // the focus net's targets are clipped to the tile once, for both its narrow and wide attempts
-          std::vector<ph::Shape> clipped;
-          if (job.name == focus_net) {
-            for (auto a : taps) {
-              a.rect.xl = std::max(a.rect.xl, double(xl));
-              a.rect.xh = std::min(a.rect.xh, double(xh));
-              a.rect.yl = std::max(a.rect.yl, double(yl));
-              a.rect.yh = std::min(a.rect.yh, double(yh));
-              if (a.rect.xl < a.rect.xh && a.rect.yl < a.rect.yh) {
-                clipped.push_back(a);
-              }
+          if (attempt) {  // restart from the identical committed prefix: nothing pending survives the first attempt
+            if (job_patterns && job_left == 0) {
+              alt_note = "alternate skipped: job allowance spent";
+              break;
             }
+            alt_note = "alternate (flat) after: " + why;
+            why.clear();
+            paths.clear();
+            fp.nondefault_rules     = rules_before;
+            search.nondefault_rules = rules_before;
+            cut_state.emplace(tech, fp);
           }
-          const auto& targets = job.name == focus_net ? clipped : taps;
-          auto        trial   = router.propose_tap(one, limits(), targets, cost, prior);
-          charge(trial.patterns_examined, trial.access_examined);
-          if (!trial.geometry && retry_labels > 1 && trial.reason == "maze exhausted") {
-            auto again = router.propose_tap(one, limits(retry_labels), targets, cost, prior);
-            charge(again.patterns_examined, again.access_examined);
-            retry      = again.geometry ? "recovered" : (again.reason.empty() ? "no witness" : again.reason);
-            if (again.geometry) {
-              trial = std::move(again);
-            }
-          }
-          if (!trial.geometry && job.name == focus_net) {
-            wide.nondefault_rules = fp.nondefault_rules;  // the job's current staged rules
-            auto again   = wide_router.propose_tap(one, limits(), clipped, cost, prior);
-            charge(again.patterns_examined, again.access_examined);
-            focus_report = std::format("{}/{}: tile window: {}; focus_halo {} window (in-tile targets {}): {} (work {})", c.instance,
-                                       c.pin, trial.reason, focus_halo, clipped.size(),
-                                       again.geometry ? "found" : again.reason, again.patterns_examined);
-            if (again.geometry) {
-              focus_paths = again.geometry->paths;
-              focus_rules = again.geometry->nondefault_rules;
-              // non-mutating acceptance of pending + witness: rule conflicts, the cut union, then the pin-escape guard
-              std::string verdict;
-              for (const auto& [name, widths] : focus_rules) {
-                if (const auto it = fp.nondefault_rules.find(name); it != fp.nondefault_rules.end() && it->second != widths) {
-                  verdict = "conflicting width rule " + name;
+          const auto& cost = policies[attempt];
+          auto        taps = own;
+          for (const auto& c : job.inside.connections) {
+            ph::Net one;
+            one.name                     = job.name;
+            one.connections              = {c};
+            // every tap sees the net's pending vias (exact reuse allowed, new cuts spaced against them)
+            const auto             prior = cut_state->vias();
+            // the focus net's targets are clipped to the tile once, for both its narrow and wide attempts
+            std::vector<ph::Shape> clipped;
+            if (job.name == focus_net) {
+              for (auto a : taps) {
+                a.rect.xl = std::max(a.rect.xl, double(xl));
+                a.rect.xh = std::min(a.rect.xh, double(xh));
+                a.rect.yl = std::max(a.rect.yl, double(yl));
+                a.rect.yh = std::min(a.rect.yh, double(yh));
+                if (a.rect.xl < a.rect.xh && a.rect.yl < a.rect.yh) {
+                  clipped.push_back(a);
                 }
               }
-              auto all = paths;
-              all.insert(all.end(), focus_paths.begin(), focus_paths.end());
-              if (verdict.empty()) {
-                lr::Final_cut_state check(tech, fp);
-                if (auto e = check.add(all); !e.empty()) {
-                  verdict = "cuts: " + e;
-                }
+            }
+            const auto& targets = job.name == focus_net ? clipped : taps;
+            auto        trial   = router.propose_tap(one, limits(), targets, cost, prior);
+            charge(trial.patterns_examined, trial.access_examined);
+            if (!trial.geometry && retry_labels > 1 && trial.reason == "maze exhausted") {
+              auto again = router.propose_tap(one, limits(retry_labels), targets, cost, prior);
+              charge(again.patterns_examined, again.access_examined);
+              retry = again.geometry ? "recovered" : (again.reason.empty() ? "no witness" : again.reason);
+              if (again.geometry) {
+                trial = std::move(again);
               }
-              if (verdict.empty()) {
-                auto decode = fp;
-                decode.nondefault_rules.insert(focus_rules.begin(), focus_rules.end());
-                ph::Net    whole{job.name, {}, {ph::Wire{"ROUTED", all}}};
-                const auto esc = escapes.check(ph::route_geometry(tech, decode, whole), job.name);
-                verdict        = esc.legal ? "accepted" : "escape: " + esc.reason;
-              }
-              // connectivity: the real cell pin to ONE target rectangle at a time (a synthetic fixed terminal holding
-              // that rectangle only, so unrelated same-net islands are never made equivalent)
-              if (verdict == "accepted") {
-                size_t reached = 0;
-                for (size_t ti = 0; ti < clipped.size(); ++ti) {
-                  auto trial_fp = fp;
-                  trial_fp.nondefault_rules.insert(focus_rules.begin(), focus_rules.end());
-                  ph::Terminal target;
-                  target.name   = "__probe_target__";
-                  target.net    = job.name;
-                  target.status = ph::Status::FIXED;
-                  target.shapes = {clipped[ti]};
-                  trial_fp.terminals.push_back(target);
-                  ph::Net routed_net{job.name, {c, {"PIN", "__probe_target__"}}, {ph::Wire{"ROUTED", all}}};
-                  if (ph::check_route_connectivity(tech, trial_fp, routed_net, nullptr, &trial_fp.nondefault_rules).connected) {
-                    ++reached;
-                    focus_report += std::format("; pin connects to target {} {}[{},{},{},{}]", ti, clipped[ti].layer,
-                                                clipped[ti].rect.xl, clipped[ti].rect.yl, clipped[ti].rect.xh, clipped[ti].rect.yh);
+            }
+            if (!trial.geometry && job.name == focus_net) {
+              wide.nondefault_rules = fp.nondefault_rules;  // the job's current staged rules
+              auto again            = wide_router.propose_tap(one, limits(), clipped, cost, prior);
+              charge(again.patterns_examined, again.access_examined);
+              focus_report = std::format("{}/{}: tile window: {}; focus_halo {} window (in-tile targets {}): {} (work {})",
+                                         c.instance,
+                                         c.pin,
+                                         trial.reason,
+                                         focus_halo,
+                                         clipped.size(),
+                                         again.geometry ? "found" : again.reason,
+                                         again.patterns_examined);
+              if (again.geometry) {
+                focus_paths = again.geometry->paths;
+                focus_rules = again.geometry->nondefault_rules;
+                // non-mutating acceptance of pending + witness: rule conflicts, the cut union, then the pin-escape guard
+                std::string verdict;
+                for (const auto& [name, widths] : focus_rules) {
+                  if (const auto it = fp.nondefault_rules.find(name); it != fp.nondefault_rules.end() && it->second != widths) {
+                    verdict = "conflicting width rule " + name;
                   }
                 }
-                if (!reached) {
-                  focus_report += "; connectivity: the pin reaches no single target rectangle";
+                auto all = paths;
+                all.insert(all.end(), focus_paths.begin(), focus_paths.end());
+                if (verdict.empty()) {
+                  lr::Final_cut_state check(tech, fp);
+                  if (auto e = check.add(all); !e.empty()) {
+                    verdict = "cuts: " + e;
+                  }
                 }
+                if (verdict.empty()) {
+                  auto decode = fp;
+                  decode.nondefault_rules.insert(focus_rules.begin(), focus_rules.end());
+                  ph::Net    whole{job.name, {}, {ph::Wire{"ROUTED", all}}};
+                  const auto esc = escapes.check(ph::route_geometry(tech, decode, whole), job.name);
+                  verdict        = esc.legal ? "accepted" : "escape: " + esc.reason;
+                }
+                // connectivity: the real cell pin to ONE target rectangle at a time (a synthetic fixed terminal holding
+                // that rectangle only, so unrelated same-net islands are never made equivalent)
+                if (verdict == "accepted") {
+                  size_t reached = 0;
+                  for (size_t ti = 0; ti < clipped.size(); ++ti) {
+                    auto trial_fp = fp;
+                    trial_fp.nondefault_rules.insert(focus_rules.begin(), focus_rules.end());
+                    ph::Terminal target;
+                    target.name   = "__probe_target__";
+                    target.net    = job.name;
+                    target.status = ph::Status::FIXED;
+                    target.shapes = {clipped[ti]};
+                    trial_fp.terminals.push_back(target);
+                    ph::Net routed_net{
+                        job.name,
+                        {c, {"PIN", "__probe_target__"}},
+                        {ph::Wire{"ROUTED", all}}
+                    };
+                    if (ph::check_route_connectivity(tech, trial_fp, routed_net, nullptr, &trial_fp.nondefault_rules).connected) {
+                      ++reached;
+                      focus_report += std::format("; pin connects to target {} {}[{},{},{},{}]",
+                                                  ti,
+                                                  clipped[ti].layer,
+                                                  clipped[ti].rect.xl,
+                                                  clipped[ti].rect.yl,
+                                                  clipped[ti].rect.xh,
+                                                  clipped[ti].rect.yh);
+                    }
+                  }
+                  if (!reached) {
+                    focus_report += "; connectivity: the pin reaches no single target rectangle";
+                  }
+                }
+                focus_report += "; acceptance (cut union, escape guard): " + verdict;
               }
-              focus_report += "; acceptance (cut union, escape guard): " + verdict;
             }
+            if (!trial.geometry) {
+              why = std::format("tap {}/{}: {}", c.instance, c.pin, trial.reason.empty() ? "no witness" : trial.reason);
+              break;
+            }
+            if (why = stage_rules(trial.geometry->nondefault_rules); !why.empty()) {
+              break;
+            }
+            if (auto e = cut_state->add(trial.geometry->paths); !e.empty()) {
+              why = std::format("tap {}/{}: cuts: {}", c.instance, c.pin, e);
+              break;
+            }
+            ph::Net piece{job.name, {}, {ph::Wire{"ROUTED", trial.geometry->paths}}};
+            for (const auto& s : ph::route_geometry(tech, fp, piece)) {
+              taps.push_back(s);
+            }
+            paths.insert(paths.end(), trial.geometry->paths.begin(), trial.geometry->paths.end());
           }
-          if (!trial.geometry) {
-            why = std::format("tap {}/{}: {}", c.instance, c.pin, trial.reason.empty() ? "no witness" : trial.reason);
+          if (why.empty()) {
+            accept();  // gates and escape guard per attempt, so a rejected attempt can still take the alternate policy
+          }
+          if (why.empty()) {
+            if (attempt) {
+              alt_note += "; recovered";
+            }
             break;
           }
-          if (why = stage_rules(trial.geometry->nondefault_rules); !why.empty()) {
-            break;
-          }
-          if (auto e = cut_state->add(trial.geometry->paths); !e.empty()) {
-            why = std::format("tap {}/{}: cuts: {}", c.instance, c.pin, e);
-            break;
-          }
-          ph::Net piece{job.name, {}, {ph::Wire{"ROUTED", trial.geometry->paths}}};
-          for (const auto& s : ph::route_geometry(tech, fp, piece)) {
-            taps.push_back(s);
-          }
-          paths.insert(paths.end(), trial.geometry->paths.begin(), trial.geometry->paths.end());
-        }
-        if (why.empty()) {
-          accept();  // gates and escape guard per attempt, so a rejected attempt can still take the alternate policy
-        }
-        if (why.empty()) {
-          if (attempt) {
-            alt_note += "; recovered";
-          }
-          break;
-        }
         }
       }
       if (why.empty() && !accepted) {  // an internal net's acceptance (external nets were accepted per attempt)
@@ -707,7 +737,7 @@ int main(int argc, char** argv) {
         fp.nondefault_rules     = rules_before;
         search.nondefault_rules = rules_before;
       } else {
-        off_menu += job_off_menu;
+        off_menu    += job_off_menu;
         outside_box += job_outside;
       }
       w.StartObject();
@@ -749,7 +779,7 @@ int main(int argc, char** argv) {
         // = what (owned + new) covers beyond what the net's owned metal already covers, so widening or extending an
         // owned track still counts
         {
-          using Intervals = std::map<std::pair<std::string, int64_t>, std::vector<std::pair<double, double>>>;
+          using Intervals    = std::map<std::pair<std::string, int64_t>, std::vector<std::pair<double, double>>>;
           const auto project = [&](const std::vector<ph::Shape>& from, Intervals& into) {
             for (const auto& sh : from) {
               if (!tech.layers.contains(sh.layer)) {
@@ -763,7 +793,8 @@ int main(int argc, char** argv) {
               const double centre  = hz ? (sh.rect.yl + sh.rect.yh) / 2 : (sh.rect.xl + sh.rect.xh) / 2;
               const auto   space = parallel_spacing(L, std::max(across, nominal) / double(fp.dbu), along / double(fp.dbu), fp.dbu);
               const double reach = across / 2 + nominal / 2 + double(space);
-              for (const auto t : track_coords(fp, sh.layer, hz, int64_t(std::floor(centre - reach)), int64_t(std::ceil(centre + reach)) + 1)) {
+              for (const auto t :
+                   track_coords(fp, sh.layer, hz, int64_t(std::floor(centre - reach)), int64_t(std::ceil(centre + reach)) + 1)) {
                 if (std::abs(double(t) - centre) < reach) {
                   into[{sh.layer, t}].emplace_back(hz ? sh.rect.xl : sh.rect.yl, hz ? sh.rect.xh : sh.rect.yh);
                 }
@@ -776,8 +807,8 @@ int main(int argc, char** argv) {
             for (const auto& [a, b] : v) {
               if (a > hi) {
                 total += hi > lo ? hi - lo : 0;
-                lo = a;
-                hi = b;
+                lo     = a;
+                hi     = b;
               } else {
                 hi = std::max(hi, b);
               }
@@ -872,8 +903,12 @@ int main(int argc, char** argv) {
     w.Key("layers_used");  // every layer: distinct new / owned-reused coordinates
     w.StartObject();
     std::set<std::string> layers_seen;
-    for (const auto& [l, _] : used) layers_seen.insert(l);
-    for (const auto& [l, _] : owned_used) layers_seen.insert(l);
+    for (const auto& [l, _] : used) {
+      layers_seen.insert(l);
+    }
+    for (const auto& [l, _] : owned_used) {
+      layers_seen.insert(l);
+    }
     for (const auto& l : layers_seen) {
       w.Key(l.c_str());
       w.StartArray();
@@ -926,9 +961,10 @@ int main(int argc, char** argv) {
           const double along   = hz ? sh.rect.xh - sh.rect.xl : sh.rect.yh - sh.rect.yl;
           const double nominal = L.width * double(fp.dbu);
           const double centre  = hz ? (sh.rect.yl + sh.rect.yh) / 2 : (sh.rect.xl + sh.rect.xh) / 2;
-          const auto   space = parallel_spacing(L, std::max(across, nominal) / double(fp.dbu), along / double(fp.dbu), fp.dbu);
-          const double reach = across / 2 + nominal / 2 + double(space);
-          for (const auto t : track_coords(fp, sh.layer, hz, int64_t(std::floor(centre - reach)), int64_t(std::ceil(centre + reach)) + 1)) {
+          const auto   space   = parallel_spacing(L, std::max(across, nominal) / double(fp.dbu), along / double(fp.dbu), fp.dbu);
+          const double reach   = across / 2 + nominal / 2 + double(space);
+          for (const auto t :
+               track_coords(fp, sh.layer, hz, int64_t(std::floor(centre - reach)), int64_t(std::ceil(centre + reach)) + 1)) {
             if (std::abs(double(t) - centre) < reach) {
               focus_excluded[sh.layer].insert(t);
             }

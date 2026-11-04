@@ -55,8 +55,7 @@ struct Builder {
       }
     }
     // the same packing predicate as box_fits and pack_cells (greedy, then the bounded exact fallback)
-    return sorted.empty()
-           || !pack_segments(sorted, {int(std::floor(room[0] + 1e-9)), int(std::floor(room[1] + 1e-9))}).empty();
+    return sorted.empty() || !pack_segments(sorted, {int(std::floor(room[0] + 1e-9)), int(std::floor(room[1] + 1e-9))}).empty();
   }
   bool fits(int a, int b) const {
     if (sites[a] + sites[b] > 2 * g.sites * fill + 1e-9 || pins[a] + pins[b] > pin_limit || (slot[a] >= 0 && slot[b] >= 0)) {
@@ -277,8 +276,8 @@ Box_fit_repair repair_box_slots(const Design& d, const Grid& g, Boxes& boxes, do
   // Beyond a zero deficit, keep slack: a box count at the free-tile count leaves the near-home matching no room
   // (sha3 0.85: 2100 boxes on 2116 tiles, far_bound). Eliminate small boxes while the movable boxes exceed
   // (1 - slack) of the free tiles and the deficit does not grow.
-  constexpr double slack = .02;
-  size_t           free_tiles = 0;
+  constexpr double slack       = .02;
+  size_t           free_tiles  = 0;
   for (const auto& r : resources) {
     free_tiles += size_t(r.count);
   }
@@ -339,7 +338,7 @@ Box_fit_repair repair_box_slots(const Design& d, const Grid& g, Boxes& boxes, do
     }
   };
   Builder fill_check(d, g);
-  fill_check.fill = d.opt.box_fill;
+  fill_check.fill               = d.opt.box_fill;
   // Only slot-deficient groupings enter this bounded pass. Eliminate a small
   // box by distributing its cells to nearby compatible boxes. Exact resource
   // matching must improve before committing any grouping change.
@@ -703,15 +702,15 @@ Boxes build_boxes(const Design& d, const Grid& g, const std::map<int, int>& fixe
     }
   }
   if (movable_route_partition(d.opt)) {
-    const auto fit = repair_box_slots(d, g, out, b.pin_limit);
+    const auto            fit = repair_box_slots(d, g, out, b.pin_limit);
     // where the fill goes: box fill histogram and the boxes the pin limit closed
     std::array<size_t, 4> hist{};  // <50%, 50-80%, 80-95%, >=95%
     size_t                pin_full = 0, sites = 0;
     for (const auto& box : out.boxes) {
       const double f = double(box.sites) / double(2 * g.sites);
       ++hist[f < .5 ? 0 : f < .8 ? 1 : f < .95 ? 2 : 3];
-      sites += size_t(box.sites);
-      double pins = 0;  // from the current members: the repair moved cells between the builder's groups
+      sites       += size_t(box.sites);
+      double pins  = 0;  // from the current members: the repair moved cells between the builder's groups
       for (int c : box.cells) {
         size_t signal = 0;
         for (const auto& [_, pin] : d.macro[size_t(d.movable[size_t(c)])]->pins) {

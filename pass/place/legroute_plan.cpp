@@ -38,9 +38,8 @@ Legroute_plan_report legroute_plan(const physical::Technology& tech, physical::F
   // PG geometry comes from the DEF's special nets, or from the generated grid legroute_power stored in the
   // regions (its shapes in regions.obstacles, which build_grid deducts; ownership in regions.power_nets)
   const auto has_pg = [](const std::vector<physical::Net>& nets) {
-    return std::ranges::any_of(nets, [](const auto& net) {
-      return (net.use == "POWER" || net.use == "GROUND") && !net.wires.empty();
-    });
+    return std::ranges::any_of(nets,
+                               [](const auto& net) { return (net.use == "POWER" || net.use == "GROUND") && !net.wires.empty(); });
   };
   out.pg_missing = !has_pg(fp.special_nets) && regions.power_nets.empty();  // generated nets are PG by construction
   if (out.pg_missing) {
@@ -84,22 +83,22 @@ Legroute_plan_report legroute_plan(const physical::Technology& tech, physical::F
     // The cells must fit at the route's own granularity before the route can mean anything: a coarse window
     // over fit_density cannot hold the cells the route would start from. Local pressure, no route.
     if (options.fit_density > 0) {
-      auto fit = lr::assess_window_fit(d, g, options.fit_density, options.fit_window);
-      out.fit_windows       = fit.windows;
-      out.fit_dense_windows = fit.dense_windows;
-      out.fit_max_density   = fit.max_density;
-      bool fits             = fit.dense_windows == 0;
+      auto fit                 = lr::assess_window_fit(d, g, options.fit_density, options.fit_window);
+      out.fit_windows          = fit.windows;
+      out.fit_dense_windows    = fit.dense_windows;
+      out.fit_max_density      = fit.max_density;
+      bool                fits = fit.dense_windows == 0;
       // With boxes, the authoritative fit test is local's own: every box on a distinct fitting tile near its
       // centre (the native windows, grown only as the joint matching needs). Window density is then a report.
       std::vector<double> box_pressure;
       std::vector<int>    pressed_cells;  // members of the boxes the matching names (movable ids)
       if (boxes) {
-        const auto match = lr::match_box_fit(d, g, *boxes, options.fit_first);
-        out.fit_matched   = match.matched;
-        out.fit_far_boxes = match.far_boxes;
-        out.fit_max_move  = match.max_move;
-        out.fit_applied   = match.applied;
-        out.fit_reason    = match.reason;
+        const auto match      = lr::match_box_fit(d, g, *boxes, options.fit_first);
+        out.fit_matched       = match.matched;
+        out.fit_far_boxes     = match.far_boxes;
+        out.fit_max_move      = match.max_move;
+        out.fit_applied       = match.applied;
+        out.fit_reason        = match.reason;
         out.fit_movable_boxes = match.movable_boxes;
         out.fit_free_tiles    = match.free_tiles;
         if (match.reason != "budget") {  // a stopped search is a computational unknown: no located pressure
@@ -111,7 +110,7 @@ Legroute_plan_report legroute_plan(const physical::Technology& tech, physical::F
           fit.tile_pressure.assign(g.size(), 1);
         }
         // a stopped search (budget) is a computational unknown, not a density failure: the window check decides
-        fits              = match.reason == "budget" ? fit.dense_windows == 0 : match.fits;
+        fits = match.reason == "budget" ? fit.dense_windows == 0 : match.fits;
         if (match.reason != "budget") {
           if (!match.pressure_boxes.empty()) {
             std::fprintf(stderr, "legroute plan: box fit names %zu boxes to spread\n", match.pressure_boxes.size());
@@ -149,7 +148,7 @@ Legroute_plan_report legroute_plan(const physical::Technology& tech, physical::F
         std::vector<unsigned> distance(g.size(), std::numeric_limits<unsigned>::max());
         std::vector<int>      queue;
         // a box's own cells, by their own centres: a grouped box can straddle an empty centroid tile
-        const auto cell_tile = [&](int c) {
+        const auto            cell_tile = [&](int c) {
           const auto& component = fp.components[size_t(c)];
           const auto& macro     = *d.macro[size_t(c)];
           return g.tile_of(component.place.x + macro.width * fp.dbu / 2, component.place.y + macro.height * fp.dbu / 2);
@@ -188,9 +187,9 @@ Legroute_plan_report legroute_plan(const physical::Technology& tech, physical::F
           out.component_hot_distance[size_t(c)] = distance[size_t(tile)];
         }
         for (int m : pressed_cells) {
-          const auto c                          = size_t(d.movable[size_t(m)]);
-          out.component_pressure[c]             = std::max(out.component_pressure[c], 1.1);
-          out.component_hot_distance[c]         = 0;
+          const auto c                  = size_t(d.movable[size_t(m)]);
+          out.component_pressure[c]     = std::max(out.component_pressure[c], 1.1);
+          out.component_hot_distance[c] = 0;
         }
         if (!out.hot_tiles) {  // an incomplete matching with no dense window names no place: spread everything a little
           for (int c : d.movable) {
@@ -231,17 +230,18 @@ Legroute_plan_report legroute_plan(const physical::Technology& tech, physical::F
     for (size_t t = 0; t < g.size(); ++t) {
       charged_v += std::max(1, clock.v[t]);
       charged_h += std::max(int(g.row(int(t)) % std::max(1u, options.rib_tiles) == 0), clock.h[t]);
-      tree_v += clock.v[t];
-      tree_h += clock.h[t];
-      left_v += cap_v[t];
+      tree_v    += clock.v[t];
+      tree_h    += clock.h[t];
+      left_v    += cap_v[t];
     }
-    std::fprintf(stderr,
-                 "legroute plan: clock budget %lld V / %lld H tile-tracks (tree estimate %lld V / %lld H; %.1f%% of the remaining V)\n",
-                 static_cast<long long>(charged_v),
-                 static_cast<long long>(charged_h),
-                 static_cast<long long>(tree_v),
-                 static_cast<long long>(tree_h),
-                 left_v > 0 ? 100.0 * double(charged_v) / double(left_v) : 0.0);
+    std::fprintf(
+        stderr,
+        "legroute plan: clock budget %lld V / %lld H tile-tracks (tree estimate %lld V / %lld H; %.1f%% of the remaining V)\n",
+        static_cast<long long>(charged_v),
+        static_cast<long long>(charged_h),
+        static_cast<long long>(tree_v),
+        static_cast<long long>(tree_h),
+        left_v > 0 ? 100.0 * double(charged_v) / double(left_v) : 0.0);
   }
   std::vector<lr::Global_net> nets;
   if (box_endpoints) {
@@ -347,8 +347,8 @@ Legroute_plan_report legroute_plan(const physical::Technology& tech, physical::F
   // A box-fit deficit alone is the seed's job (joint matching with Hall repair inside each region).
   const auto& gate          = out.gates;
   const bool  seed_eligible = !gate.requires_replan()
-                             || (gate.unfittable_regions && !gate.oversized_regions && !gate.cell_dense_regions
-                                 && !gate.routing_dense_edges && !gate.overflow_tracks && !gate.unrouted);
+                              || (gate.unfittable_regions && !gate.oversized_regions && !gate.cell_dense_regions
+                                  && !gate.routing_dense_edges && !gate.overflow_tracks && !gate.unrouted);
   if (options.box_route_seed && boxes && !measure_only && seed_eligible) {
     out.box_route_seed_attempted = true;
     auto seed                    = lr::prepare_box_route_seed(d, g, *boxes, cap_h, cap_v, "plan");

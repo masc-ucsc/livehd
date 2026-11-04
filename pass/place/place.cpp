@@ -9233,14 +9233,14 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
     };
     Legroute_gate_report measured_gates;
-    bool                 measured_local_scope = false;
-    bool                 measured_fit_unknown = false;  // the near-home box matching stopped on its budget
+    bool                 measured_local_scope  = false;
+    bool                 measured_fit_unknown  = false;  // the near-home box matching stopped on its budget
     bool                 plan_recovery_started = false;
-    const bool           planning             = options.legroute_plan.enabled;
+    const bool           planning              = options.legroute_plan.enabled;
     const bool           coarse_feedback       = planning && options.legroute_plan.route_model == "coarse";
     // A movable flow retains its raw physical frame; the legacy handoff switch
     // additionally legalizes that frame as a fixed-placement diagnostic.
-    const bool           capture_handoff      = options.legroute_plan.handoff || !options.legroute_options.legal_boxes;
+    const bool           capture_handoff       = options.legroute_plan.handoff || !options.legroute_options.legal_boxes;
     const bool           boxed_plan
         = options.legroute_plan.handoff || (!options.legroute_options.legal_boxes && options.legroute_options.partition_cells);
     const unsigned feedback_rounds    = planning ? options.legroute_plan.rounds : options.legroute_probe.rounds;
@@ -9593,8 +9593,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                        local_scope ? "local" : "whole-placement");
         }
         measured_local_scope = local_scope;
-        window_fit           = !plan.route_attempted && plan.route_skip_reason == Legroute_plan_report::Route_skip_reason::window_density;
-        fill                 = plan.component_pressure;
+        window_fit = !plan.route_attempted && plan.route_skip_reason == Legroute_plan_report::Route_skip_reason::window_density;
+        fill       = plan.component_pressure;
         for (size_t i = 0; i < fill.size(); ++i) {
           if (fill[i] > 1) {
             affected_components.push_back(i);
@@ -9608,8 +9608,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         // computational unknown and never counts as progress.
         constexpr size_t fit_stage = size_t{1} << 40;
         if (!plan.route_attempted && plan.route_skip_reason == Legroute_plan_report::Route_skip_reason::window_density) {
-          probe_failing = plan.fit_reason == "budget" ? std::numeric_limits<size_t>::max() - 1
-                                                      : fit_stage + plan.gates.cell_dense_regions;
+          probe_failing
+              = plan.fit_reason == "budget" ? std::numeric_limits<size_t>::max() - 1 : fit_stage + plan.gates.cell_dense_regions;
         } else if (plan.fit_reason == "budget") {
           // routed on the window fallback: an observation, not a near-home fit witness; behind every measured fit
           // deficit, ahead only of an unknown that did not route
@@ -9618,7 +9618,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         if (!plan.route_attempted) {
           std::fprintf(stderr,
                        "legroute plan %u: routing not attempted (%s), %zu signals unchecked, physical cell density %.6f, "
-                       "%zu of %zu fit windows over the cap, box matching %s%s%s (%zu boxes / %zu free tiles, %zu far, max move %zu), %.3f s\n",
+                       "%zu of %zu fit windows over the cap, box matching %s%s%s (%zu boxes / %zu free tiles, %zu far, max move "
+                       "%zu), %.3f s\n",
                        round,
                        plan.route_skip_name(),
                        plan.unchecked_signals,
@@ -9984,8 +9985,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         const unsigned minimum_steps     = planning ? std::max(50u, options.legroute_plan.min_iterations) : 0;
         // the real cell sizes and pin offsets, captured before widen(1): STA, coarse routing and coarse feature
         // exports all see the physical pose (the optimization's origin moved left by grow / 2)
-        const auto physical_template = timing_interval || coarse_feedback ? std::optional{design} : std::nullopt;
-        const auto to_physical       = [&](const dp::Design& snapshot) {
+        const auto     physical_template = timing_interval || coarse_feedback ? std::optional{design} : std::nullopt;
+        const auto     to_physical       = [&](const dp::Design& snapshot) {
           auto actual        = *physical_template;
           actual.node_x      = snapshot.node_x;
           actual.node_y      = snapshot.node_y;
@@ -10062,15 +10063,15 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         if (coarse_feedback) {
           ctl.routability = ctl.improved_routability = true;
           ctl.route.model                            = dp::RouteModel::external;
-          ctl.route.probe = false;
+          ctl.route.probe                            = false;
           ctl.route_external_interval                = int(options.legroute_plan.route_interval);
           ctl.route_external                         = [&](const dp::Design& optimized, int bins_x, int bins_y) {
-            const auto snapshot = to_physical(optimized);
+            const auto snapshot     = to_physical(optimized);
             // Keep the measured PG, row cuts, fixed cells and IO geometry. Only
             // movable physical component poses change; no virtual widths or
             // newly legalized IOs enter this in-flight routing observation.
-            auto current      = sat_frame(snapshot, false);
-            auto routed_frame = frame;
+            auto       current      = sat_frame(snapshot, false);
+            auto       routed_frame = frame;
             if (current.components.size() > routed_frame.components.size()) {
               throw std::logic_error("coarse GP snapshot changed the measured component topology");
             }
@@ -10182,7 +10183,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                                                                   false,
                                                                   (global_recovery || coarse_feedback) && !plan_recovery_started)
                                           : dp::place(design, ctl, ctl.checkpoint ? nullptr : &state);
-        iterations        = unsigned(placed.iterations);
+        iterations         = unsigned(placed.iterations);
         plan_recovery_started |= global_recovery || coarse_feedback;
         if (planning && iterations < minimum_steps) {
           throw std::runtime_error("planning GP stopped before its requested minimum iteration count");
@@ -10515,9 +10516,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         }
         // Large remaps are not settled placements: new cells need full motion
         // and a fresh smoothing/penalty schedule in the same live optimizer.
-        gp.fillers_in_whitespace  = true;
-        gp.hold_overflow          = !remap_recovery;
-        gp.post_density_factor    = 0;
+        gp.fillers_in_whitespace = true;
+        gp.hold_overflow         = !remap_recovery;
+        gp.post_density_factor   = 0;
         if (!remap_recovery) {
           gp.wirelength_gamma_start = gp.wirelength_gamma_end;
           gp.max_step               = std::min(gp.max_step, .05);
@@ -10860,11 +10861,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         if (legroute_report->crossing_policy_invalid) {
           // a legacy fixed-IO result whose published boundary crossings exceed the density ceiling: kept as a
           // diagnostic in legroute.json, never accepted as a placement
-          throw std::runtime_error(std::format(
-              "legroute: {} SAT round(s) published boundary crossings over the density ceiling {} (legacy fixed-IO "
-              "construction); result not accepted",
-              legroute_report->crossing_over_policy,
-              lopt.density_ceiling));
+          throw std::runtime_error(
+              std::format("legroute: {} SAT round(s) published boundary crossings over the density ceiling {} (legacy fixed-IO "
+                          "construction); result not accepted",
+                          legroute_report->crossing_over_policy,
+                          lopt.density_ceiling));
         }
         if (options.legroute_probe.strict && lopt.final
             && (!legroute_report->wires_emitted || legroute_report->connected_nets != legroute_report->routed_nets

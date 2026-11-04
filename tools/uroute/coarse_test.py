@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: BSD-3-Clause
 """Coarse labels cannot become fabricated DRC or silently mix label sources."""
+import argparse
 import copy
 import json
 from pathlib import Path
@@ -10,6 +11,7 @@ import unittest
 
 from tools.uroute.calibrate import calibrate
 from tools.uroute.coarse import eligible_metrics, ingest, validate_metadata
+from tools.uroute.evaluate import Pool, evaluate
 from tools.uroute.export_weights import encode_tensors
 from tools.uroute.features import Maps
 from tools.uroute.fixture import tensors
@@ -115,6 +117,14 @@ class CoarseTest(unittest.TestCase):
             self.assertFalse(result['drc_available'])
             self.assertEqual(result['utilization_first'], 1.)
             self.assertFalse(self.select(export, pool, 'coarse-only')['usable'])
+            detailed_metadata = {key: record[key] for key in ('top', 'technology', 'floorplan')}
+            detailed_metadata.update(status='routed', source='external', label_source='openroad_detailed')
+            detailed = publish_sample(pool, detailed_metadata, read(export / 'features.bin'),
+                                      raw([[1.] * N, [.25] * N, [1.] * N], 256, 256))
+            mixed = self.select(export, pool, 'calibrated-mixed', 1)
+            self.assertTrue(mixed['usable'], mixed)
+            self.assertTrue(mixed['drc_available'])
+            self.assertEqual(set(mixed['sample_ids']), {record['id'], detailed['id']})
             with self.assertRaisesRegex(ValueError, 'fit and all held-out'):
                 calibrate(pairs, ['fit', 'held'], .01)
             # Holdout cannot modify fitted coefficients; only acceptance changes.
@@ -152,6 +162,45 @@ class CoarseTest(unittest.TestCase):
             dataset = Dataset(pool, 'held', label_policy='coarse-only')
             self.assertEqual(len(dataset.train), 2)
             self.assertTrue(all(task[2] == 0 for task in (*dataset.train, *dataset.validation)))
+
+    def test_calibration_designs_are_part_of_training_and_support_lineage(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            pairs = [self.paired(root, name) for name in ('fit_reference', 'held_reference')]
+            calibration = root / 'calibration.json'
+            calibration.write_bytes(canonical(calibrate(pairs, ['held_reference'], .01)))
+            export = Path(pairs[0]['coarse'])
+            base = json.loads((export / 'metadata.json').read_text())
+            pool = root / 'pool'
+            records = []
+            for name in ('A', 'B', 'validation'):
+                for iteration in range(2):
+                    metadata = dict(base, top=name, pose_sha256=sha(f'{name}{iteration}'.encode()))
+                    (export / 'metadata.json').write_bytes(canonical(metadata))
+                    records.append(ingest(export, pool, calibration))
+            dataset = Dataset(pool, 'validation', label_policy='calibrated-mixed')
+            self.assertEqual(dataset.calibration_designs, {'fit_reference', 'held_reference'})
+            for excluded in ('fit_reference', 'held_reference'):
+                with self.assertRaisesRegex(ValueError, 'calibration used an excluded'):
+                    Dataset(pool, 'validation', [excluded], label_policy='calibrated-mixed')
+
+            # Even weights with clean lineage can leak the query through their
+            # selected support's calibration evidence, including its holdout.
+            publish_weights(pool, self.weights, trained_on='synthetic-test-only',
+                            provenance={'seen_designs': ['A', 'B'], 'lineage_complete': True})
+            detailed_metadata = {key: base[key] for key in ('top', 'technology', 'floorplan')}
+            detailed_metadata.update(top='held_reference', status='routed', source='external')
+            query = publish_sample(pool, detailed_metadata, read(export / 'features.bin'),
+                                   raw([[1.] * N, [0.] * N, [1.] * N], 256, 256))
+            selected = Pool(pool, 'calibrated-mixed')
+            self.assertTrue(selected.unseen('held_reference')['verified'])
+            self.assertFalse(selected.unseen('held_reference', (records[0]['id'],))['verified'])
+            args = argparse.Namespace(pool=pool, output=root / 'evaluation', query=[query['id']], query_top=None,
+                                      label_policy='calibrated-mixed', require_unseen_design=True, mode='chosen',
+                                      shots=1, min_shots=1, fallback='nearest', support=[records[0]['id']],
+                                      native=Path(BINARY), timeout=10, rudy_metrics=None)
+            with self.assertRaisesRegex(ValueError, 'unseen-design.*label calibration'):
+                evaluate(args)
 
 
 if __name__ == '__main__':

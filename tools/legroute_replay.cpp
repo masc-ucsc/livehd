@@ -29,9 +29,15 @@ int main(int argc, char** argv) {
     if (config.HasParseError() || !config.IsObject()) {
       throw std::invalid_argument("invalid configuration JSON");
     }
-    std::set<std::string> known{"lefs", "def", "timing", "output", "power_grid", "reserved_layers", "final_box_dump",
+    std::set<std::string> known{"lefs",
+                                "def",
+                                "timing",
+                                "output",
+                                "power_grid",
+                                "reserved_layers",
+                                "final_box_dump",
                                 "box_reserve"};  // keys read directly below; the typed helpers add theirs
-    const auto string = [&](const char* key) -> std::string {
+    const auto            string = [&](const char* key) -> std::string {
       known.insert(key);
       if (!config.HasMember(key) || !config[key].IsString()) {
         throw std::invalid_argument(std::string("missing string: ") + key);
@@ -134,7 +140,7 @@ int main(int argc, char** argv) {
       options.legal_boxes = options.global_keep = false;
       options.box_route_seed = options.fit_first = true;
     }
-    options.region_pins                                                                   = false;
+    options.region_pins = false;
     boolean("final", options.final);
     boolean("global_keep", options.global_keep);
     boolean("global_pattern", options.global_pattern);
@@ -280,10 +286,10 @@ int main(int argc, char** argv) {
       if (movable) {  // the plan verdict on this pose first, exactly as the flow would see it
         plan = pl::legroute_plan(tech, fp, timing, options, {}, profile, plan_net_pops, false);
         std::cout << "Plan: route " << (plan.route_attempted ? "attempted" : plan.route_skip_name()) << "; fit matched "
-                  << plan.fit_matched << " far " << plan.fit_far_boxes << " max move " << plan.fit_max_move
-                  << "; dense windows " << plan.fit_dense_windows << "/" << plan.fit_windows << " max " << plan.fit_max_density
-                  << "; unresolved " << plan.unrouted << "; overflow tracks " << plan.overflow_tracks << "; replan "
-                  << plan.gates.requires_replan() << "; seconds " << plan.seconds << '\n';
+                  << plan.fit_matched << " far " << plan.fit_far_boxes << " max move " << plan.fit_max_move << "; dense windows "
+                  << plan.fit_dense_windows << "/" << plan.fit_windows << " max " << plan.fit_max_density << "; unresolved "
+                  << plan.unrouted << "; overflow tracks " << plan.overflow_tracks << "; replan " << plan.gates.requires_replan()
+                  << "; seconds " << plan.seconds << '\n';
         if (plan.gates.requires_replan()) {
           std::cout << "Plan gates: " << pl::legroute_gate_json(plan.gates).substr(0, 600) << '\n';
           return 1;
@@ -296,7 +302,7 @@ int main(int argc, char** argv) {
     }
     ph::write_def(fp, output + "/out.def");
     std::ofstream audit(output + "/placement_audit.json");
-    size_t moved_xy = 0, reoriented = 0;
+    size_t        moved_xy = 0, reoriented = 0;
     for (size_t c = 0; c < components.size() && c < fp.components.size(); ++c) {
       const auto& a = components[c].place;
       const auto& b = fp.components[c].place;
@@ -309,9 +315,9 @@ int main(int argc, char** argv) {
     const bool unchanged = fp.components == components && fp.terminals == routing_terminals;
     audit << "{\"unchanged\":" << (unchanged ? "true" : "false") << ",\"xy_moved\":" << moved_xy
           << ",\"orientation_only\":" << reoriented << ",\"cells_moved\":" << report.cells_moved
-          << ",\"cell_max_displacement_um\":" << report.cell_max_displacement_um << ",\"cell_p95_displacement_um\":"
-          << report.cell_p95_displacement_um << ",\"components\":" << components.size() << ",\"terminals\":" << terminals.size()
-          << ",\"routing_terminals\":" << routing_terminals.size()
+          << ",\"cell_max_displacement_um\":" << report.cell_max_displacement_um
+          << ",\"cell_p95_displacement_um\":" << report.cell_p95_displacement_um << ",\"components\":" << components.size()
+          << ",\"terminals\":" << terminals.size() << ",\"routing_terminals\":" << routing_terminals.size()
           << ",\"power_grid_generated\":" << (config.HasMember("power_grid") ? "true" : "false")
           << ",\"pg_tolerate_macro_pin_overlap\":" << (pg_tolerate_macro_pin_overlap ? "true" : "false")
           << ",\"protect_supply_access\":" << (options.protect_supply_access ? "true" : "false")
@@ -326,8 +332,8 @@ int main(int argc, char** argv) {
       } else {
         std::cout << "Planning routing not attempted: " << plan.route_skip_name() << "; unchecked signals "
                   << plan.unchecked_signals << "; fit " << (plan.fit_reason.empty() ? "ok" : plan.fit_reason) << " boxes "
-                  << plan.fit_movable_boxes << " free tiles " << plan.fit_free_tiles << " dense windows "
-                  << plan.fit_dense_windows << "/" << plan.fit_windows << "; seconds " << plan.seconds << '\n';
+                  << plan.fit_movable_boxes << " free tiles " << plan.fit_free_tiles << " dense windows " << plan.fit_dense_windows
+                  << "/" << plan.fit_windows << "; seconds " << plan.seconds << '\n';
       }
       return plan.gates.requires_replan() ? 1 : 0;
     }

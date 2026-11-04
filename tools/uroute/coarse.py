@@ -65,7 +65,10 @@ def validate_calibration(c, metadata):
     if not isinstance(scales, list) or len(scales) != 2 or any(not isinstance(v, (int, float)) or not math.isfinite(v) or v <= 0 for v in scales):
         raise ValueError('invalid directional calibration scales')
     fit, held = c.get('fit_designs'), c.get('heldout_designs')
-    if not fit or not held or set(fit) & set(held):
+    if (any(not isinstance(names, list) or not names
+            or any(not isinstance(name, str) or not name or '\0' in name for name in names)
+            or len(set(names)) != len(names) for names in (fit, held))
+            or set(fit) & set(held)):
         raise ValueError('calibration requires disjoint fit/held-out designs')
     return scales
 

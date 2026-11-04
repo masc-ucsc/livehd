@@ -107,7 +107,12 @@ Legroute_congestion resample_legroute_congestion(const Legroute_congestion& sour
   const double sx     = (source.bounds.xh - source.bounds.xl) / source.cols;
   const double sy     = (source.bounds.yh - source.bounds.yl) / source.rows;
   const double dx = (bounds.xh - bounds.xl) / cols, dy = (bounds.yh - bounds.yl) / rows;
-  const auto   sample = [&](const auto& input, auto& output, bool peak, std::vector<double>* means = nullptr) {
+  for (double step : {sx, sy, dx, dy}) {
+    if (!std::isfinite(step) || step <= 0) {
+      throw std::invalid_argument("invalid coarse congestion cell dimensions");
+    }
+  }
+  const auto sample = [&](const auto& input, auto& output, bool peak, std::vector<double>* means = nullptr) {
     if (input.size() != size_t(source.cols) * source.rows
         || std::ranges::any_of(input, [](double v) { return !std::isfinite(v) || v < 0; })) {
       throw std::invalid_argument("invalid coarse congestion map");
@@ -118,12 +123,12 @@ Legroute_congestion resample_legroute_congestion(const Legroute_congestion& sour
     }
     for (int x = 0; x < cols; ++x) {
       const double xl = bounds.xl + x * dx, xh = xl + dx;
-      const int    first_x = std::clamp(int(std::floor((xl - source.bounds.xl) / sx)), 0, source.cols);
-      const int    last_x  = std::clamp(int(std::ceil((xh - source.bounds.xl) / sx)), 0, source.cols);
+      const int    first_x = int(std::clamp(std::floor((xl - source.bounds.xl) / sx), 0., double(source.cols)));
+      const int    last_x  = int(std::clamp(std::ceil((xh - source.bounds.xl) / sx), 0., double(source.cols)));
       for (int y = 0; y < rows; ++y) {
         const double yl = bounds.yl + y * dy, yh = yl + dy;
-        const int    first_y = std::clamp(int(std::floor((yl - source.bounds.yl) / sy)), 0, source.rows);
-        const int    last_y  = std::clamp(int(std::ceil((yh - source.bounds.yl) / sy)), 0, source.rows);
+        const int    first_y = int(std::clamp(std::floor((yl - source.bounds.yl) / sy), 0., double(source.rows)));
+        const int    last_y  = int(std::clamp(std::ceil((yh - source.bounds.yl) / sy), 0., double(source.rows)));
         double       sum = 0, maximum = 0;
         for (int xx = first_x; xx < last_x; ++xx) {
           const double overlap_x

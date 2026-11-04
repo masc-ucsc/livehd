@@ -163,18 +163,22 @@ TEST(RoutingRules, EolKeepoutUsesBackwardSideForwardOrderAndBothDirections) {
 
 namespace livehd::physical {
 TEST(RoutingRules, ExistingSourceUsesEveryExactEolFootprintAndPreservesOtherChecks) {
-  auto tech = technology();
+  auto tech                                                 = technology();
   tech.layers.at("M2").rules.properties["LEF58_EOLKEEPOUT"] = {"EOLKEEPOUT .01825 EXTENSION 0 0 .031 ;"};
-  Floorplan fp;
-  const auto source = metal(720, 3814, 738, 3836);
-  const auto target = metal(63, 3771, 11925, 3789);
+  Floorplan                fp;
+  const auto               source = metal(720, 3814, 738, 3836);
+  const auto               target = metal(63, 3771, 11925, 3789);
   const Signal_metal_rules rules(tech, fp);
   EXPECT_EQ(rules.spacing(source, target).reason, "LEF58 EOL keepout");
   std::vector<Rect> footprints;
-  EXPECT_TRUE(rules.spacing_with_existing_source(source, target, [&](const Rect& footprint) {
-    footprints.push_back(footprint);
-    return true;
-  }).legal);
+  EXPECT_TRUE(rules
+                  .spacing_with_existing_source(source,
+                                                target,
+                                                [&](const Rect& footprint) {
+                                                  footprints.push_back(footprint);
+                                                  return true;
+                                                })
+                  .legal);
   ASSERT_EQ(footprints.size(), 1);
   EXPECT_EQ(footprints.front(), (Rect{720, 3783, 738, 3789}));
   EXPECT_GT(*rules.clearance("M2"), 31);  // a query bound is not the directional influence
@@ -182,18 +186,26 @@ TEST(RoutingRules, ExistingSourceUsesEveryExactEolFootprintAndPreservesOtherChec
   // The callback cannot erase target-to-source EOL checks or ordinary spacing.
   EXPECT_FALSE(rules.spacing_with_existing_source(target, source, [](const Rect&) { return true; }).legal);
   bool called = false;
-  EXPECT_FALSE(rules.spacing_with_existing_source(source, metal(63, 3771, 11925, 3797), [&](const Rect&) {
-    called = true;
-    return true;
-  }).legal);
+  EXPECT_FALSE(rules
+                   .spacing_with_existing_source(source,
+                                                 metal(63, 3771, 11925, 3797),
+                                                 [&](const Rect&) {
+                                                   called = true;
+                                                   return true;
+                                                 })
+                   .legal);
   EXPECT_FALSE(called);
   tech.layers.at("M2").rules.properties.at("LEF58_EOLKEEPOUT").push_back("EOLKEEPOUT .01825 EXTENSION 0 .010 .035 ;");
   const Signal_metal_rules two_rules(tech, fp);
   footprints.clear();
-  EXPECT_FALSE(two_rules.spacing_with_existing_source(source, target, [&](const Rect& footprint) {
-    footprints.push_back(footprint);
-    return footprint.xl >= 720 && footprint.xh <= 738;
-  }).legal);
+  EXPECT_FALSE(two_rules
+                   .spacing_with_existing_source(source,
+                                                 target,
+                                                 [&](const Rect& footprint) {
+                                                   footprints.push_back(footprint);
+                                                   return footprint.xl >= 720 && footprint.xh <= 738;
+                                                 })
+                   .legal);
   ASSERT_EQ(footprints.size(), 2);
   EXPECT_EQ(footprints.back(), (Rect{710, 3779, 748, 3789}));
 }

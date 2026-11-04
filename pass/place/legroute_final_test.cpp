@@ -505,7 +505,7 @@ TEST(LegrouteFinal, AnIoStubOnThePinRowJoinsThePinDirectlyWithoutAPhantomLowerLa
   // drawn. The planned joins must not record M4->M3 and M3->M4 at that point (there is no M3 metal to land on).
   Final_io f(0, 0);
   f.routes.trees[0].nodes[0].stub_track = 7;  // y 375: the clk_in pin row
-  const auto geo = final_planned_geometry(f.design, f.grid, {}, f.routes);
+  const auto geo                        = final_planned_geometry(f.design, f.grid, {}, f.routes);
   ASSERT_EQ(geo.joins.size(), 1u);
   for (const auto& [a, b, x, y] : geo.joins[0]) {
     // x125 is the pin access column; the riser join at x225 (M4 stub -> M3 riser) is real
@@ -523,7 +523,7 @@ TEST(LegrouteFinal, ASingleRibClockSpineRecordsNoJoinToItsUndrawnTrunk) {
   // minimax witness ("join: no M7 metal"): a spine with one drawn rib draws no trunk wire (ylo == yhi), so its
   // rib->trunk join would name trunk metal that does not exist. With two ribs the trunk and both joins remain.
   for (int ribs : {1, 2}) {
-    Final_io f(0, 0);
+    Final_io  f(0, 0);
     const int trunk = int(f.routes.segments.size());
     f.routes.segments.push_back({.net = 0, .layer = 0, .band = 0, .lo = 0, .hi = 2, .track = 5, .clock = true});
     Spine sp{.net = 0, .region = 0, .trunk = trunk, .node = -1};
@@ -532,8 +532,8 @@ TEST(LegrouteFinal, ASingleRibClockSpineRecordsNoJoinToItsUndrawnTrunk) {
       f.routes.segments.push_back({.net = 0, .layer = 1, .band = r * 2, .lo = 0, .hi = 1, .track = 5 + 20 * r, .clock = true});
     }
     f.routes.spines.push_back(sp);
-    const auto geo = final_planned_geometry(f.design, f.grid, {}, f.routes);
-    const auto tx  = f.grid.track_coord(0, 5);
+    const auto geo         = final_planned_geometry(f.design, f.grid, {}, f.routes);
+    const auto tx          = f.grid.track_coord(0, 5);
     size_t     trunk_joins = 0;
     for (const auto& [a, b, x, y] : geo.joins[0]) {
       trunk_joins += a == "M4" && b == "M3" && x == tx;

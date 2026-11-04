@@ -2,12 +2,12 @@
 // legroute L1: the netlist view, the tile grid, per-tile free row segments, per-layer track capacity and the
 // region tile sets.
 #include <algorithm>
-#include <map>
 #include <cctype>
-#include <cmath>
 #include <charconv>
+#include <cmath>
 #include <format>
 #include <functional>
+#include <map>
 #include <numeric>
 #include <set>
 #include <stdexcept>
@@ -270,7 +270,7 @@ std::vector<int> exact_pack_segments(const std::vector<int>& widths, const std::
   if (need > have) {
     return {};
   }
-  size_t                          nodes = 0;
+  size_t                            nodes = 0;
   const std::function<bool(size_t)> place = [&](size_t k) {
     if (k == order.size()) {
       return true;
@@ -307,7 +307,7 @@ Clock_domain plan_clock_domain(const Grid& g, int region, const std::vector<int>
   }
   std::ranges::sort(cols);
   const int rmin = *std::ranges::min_element(rows), rmax = *std::ranges::max_element(rows);
-  out.trunk_c    = cols[cols.size() / 2];
+  out.trunk_c = cols[cols.size() / 2];
   // ribs every `pitch` tile rows, centered so every flop row is within pitch / 2 of one
   for (int r = rmin + pitch / 2; r <= rmax + pitch / 2; r += pitch) {
     out.ribs.push_back(std::min(r, rmax));
@@ -897,15 +897,17 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
       const bool box   = layer == g.box_layer;
       const auto found = std::ranges::find(g.layers, layer, &Layer::name);
       if (!box && found == g.layers.end()) {
-        std::fprintf(stderr, "legroute grid: box_reserve layer %.*s is not a routing layer here; ignored\n", int(layer.size()),
+        std::fprintf(stderr,
+                     "legroute grid: box_reserve layer %.*s is not a routing layer here; ignored\n",
+                     int(layer.size()),
                      layer.data());
         continue;
       }
       if (box && (g.box_cap.size() != g.size() || g.resources.layers.back().tiles.size() != g.size())) {
         continue;  // no box-layer capacity model here
       }
-      const size_t l       = box ? g.layers.size() : size_t(found - g.layers.begin());
-      auto&        catalog = g.resources.layers[l];
+      const size_t l           = box ? g.layers.size() : size_t(found - g.layers.begin());
+      auto&        catalog     = g.resources.layers[l];
       size_t       short_tiles = 0;
       for (size_t t = 0; t < g.size(); ++t) {
         if (g.blocked[t]) {
@@ -921,8 +923,12 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
         catalog.tiles[t].coarse_capacity  = cap;
       }
       if (short_tiles) {
-        std::fprintf(stderr, "legroute grid: box_reserve %.*s:%d exceeds the usable tracks of %zu free tiles; they host no box\n",
-                     int(layer.size()), layer.data(), n, short_tiles);
+        std::fprintf(stderr,
+                     "legroute grid: box_reserve %.*s:%d exceeds the usable tracks of %zu free tiles; they host no box\n",
+                     int(layer.size()),
+                     layer.data(),
+                     n,
+                     short_tiles);
       }
     }
     std::map<uint32_t, uint32_t> short_key;

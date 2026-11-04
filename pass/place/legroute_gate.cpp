@@ -2,26 +2,26 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <unordered_map>
-#include <limits>
 #include <deque>
 #include <format>
 #include <functional>
 #include <iomanip>
+#include <limits>
 #include <sstream>
+#include <unordered_map>
 
 #include "legroute_internal.hpp"
 
 namespace livehd::placement {
 Legroute_replan::Legroute_replan(Legroute_gate_report report)
-    : std::runtime_error(std::format(
-          "legroute: pre-SAT planning required: {} oversized regions, {} regions above {} physical cell density, "
-          "{} edges above {} routing density, {} coarse overflow tracks, {} unresolved nets "
-          "({} search-limited, {} topology-disconnected), {} regions with {} boxes lacking distinct fitting tiles; "
-          "candidate was not admitted to SAT",
-          report.oversized_regions, report.cell_dense_regions, report.density_limit, report.routing_dense_edges,
-          report.density_limit, report.overflow_tracks, report.unrouted,
-          report.search_limited, report.topology_disconnected, report.unfittable_regions, report.unfittable_boxes))
+    : std::runtime_error(
+          std::format("legroute: pre-SAT planning required: {} oversized regions, {} regions above {} physical cell density, "
+                      "{} edges above {} routing density, {} coarse overflow tracks, {} unresolved nets "
+                      "({} search-limited, {} topology-disconnected), {} regions with {} boxes lacking distinct fitting tiles; "
+                      "candidate was not admitted to SAT",
+                      report.oversized_regions, report.cell_dense_regions, report.density_limit, report.routing_dense_edges,
+                      report.density_limit, report.overflow_tracks, report.unrouted, report.search_limited,
+                      report.topology_disconnected, report.unfittable_regions, report.unfittable_boxes))
     , gates(std::move(report)) {}
 
 std::string legroute_gate_json(const Legroute_gate_report& r) {
@@ -35,8 +35,8 @@ std::string legroute_gate_json(const Legroute_gate_report& r) {
     }
   };
   out << "{\"stage\":\"" << (r.stage == Legroute_gate_report::Stage::primary ? "primary" : "secondary")
-      << "\",\"requires_replan\":" << (r.requires_replan() ? "true" : "false")
-      << ",\"density_limit\":" << r.density_limit << ",\"cell_density_basis\":\"movable_CORE_LEF_area_over_free_fixed_obstacle_subtracted_row_sites\""
+      << "\",\"requires_replan\":" << (r.requires_replan() ? "true" : "false") << ",\"density_limit\":" << r.density_limit
+      << ",\"cell_density_basis\":\"movable_CORE_LEF_area_over_free_fixed_obstacle_subtracted_row_sites\""
       << ",\"max_cell_density\":";
   number(r.max_cell_density);
   out << ",\"max_routing_density\":";
@@ -98,10 +98,10 @@ Window_fit assess_window_fit(const Design& d, const Grid& g, double cap, unsigne
     free_area[t] = double(sites) * double(g.site) * double(g.row_h);
   }
   for (size_t i = 0; i < d.movable.size(); ++i) {
-    const auto  component = size_t(d.movable[i]);
-    const auto& pose      = d.fp.components[component].place;
-    const auto& macro     = *d.macro[component];
-    const int   tile = g.tile_of(double(pose.x) + macro.width * d.fp.dbu / 2, double(pose.y) + macro.height * d.fp.dbu / 2);
+    const auto  component    = size_t(d.movable[i]);
+    const auto& pose         = d.fp.components[component].place;
+    const auto& macro        = *d.macro[component];
+    const int   tile         = g.tile_of(double(pose.x) + macro.width * d.fp.dbu / 2, double(pose.y) + macro.height * d.fp.dbu / 2);
     cell_area[size_t(tile)] += macro.width * macro.height * double(d.fp.dbu) * double(d.fp.dbu);
   }
   // Roughly square windows in DBU: tiles are usually much wider than tall.
@@ -113,9 +113,9 @@ Window_fit assess_window_fit(const Design& d, const Grid& g, double cap, unsigne
     std::vector<double> p(size_t(g.cols + 1) * size_t(g.rows + 1), 0);
     for (int y = 0; y < g.rows; ++y) {
       for (int x = 0; x < g.cols; ++x) {
-        p[size_t(y + 1) * size_t(g.cols + 1) + size_t(x + 1)] = v[size_t(g.tile(x, y))] + p[size_t(y) * size_t(g.cols + 1) + size_t(x + 1)]
-                                                               + p[size_t(y + 1) * size_t(g.cols + 1) + size_t(x)]
-                                                               - p[size_t(y) * size_t(g.cols + 1) + size_t(x)];
+        p[size_t(y + 1) * size_t(g.cols + 1) + size_t(x + 1)]
+            = v[size_t(g.tile(x, y))] + p[size_t(y) * size_t(g.cols + 1) + size_t(x + 1)]
+              + p[size_t(y + 1) * size_t(g.cols + 1) + size_t(x)] - p[size_t(y) * size_t(g.cols + 1) + size_t(x)];
       }
     }
     return p;
@@ -163,7 +163,7 @@ Window_fit assess_window_fit(const Design& d, const Grid& g, double cap, unsigne
 
 Fit_match match_box_fit(const Design& d, const Grid& g, Boxes& boxes, bool apply) {
   // the movement policy: at most 1% of the movable boxes beyond the window, none beyond far_reach windows
-  constexpr int far_reach = 4;
+  constexpr int    far_reach = 4;
   Fit_match        out;
   std::vector<int> B(boxes.boxes.size()), T;
   out.tile_pressure.assign(g.size(), 1);
@@ -211,7 +211,7 @@ Fit_match match_box_fit(const Design& d, const Grid& g, Boxes& boxes, bool apply
     out.reason = "count";
     return out;
   }
-  const int limit = int(std::max(1u, d.opt.window_tiles));
+  const int                          limit = int(std::max(1u, d.opt.window_tiles));
   // box_fits depends on the box and the tile's free-segment pattern (plus the placed-home exception, which is not
   // cached): memoize per (box, pattern) instead of repeating identical packing searches.
   std::unordered_map<uint64_t, bool> fit_memo;
@@ -220,8 +220,8 @@ Fit_match match_box_fit(const Design& d, const Grid& g, Boxes& boxes, bool apply
     if (box.placed || g.key.size() != g.size()) {
       return box_fits(d, g, box, t);
     }
-    const uint64_t k             = (uint64_t(b) << 32) | g.key[size_t(t)];
-    const auto [it, fresh]       = fit_memo.try_emplace(k, false);
+    const uint64_t k       = (uint64_t(b) << 32) | g.key[size_t(t)];
+    const auto [it, fresh] = fit_memo.try_emplace(k, false);
     if (fresh) {
       it->second = box_fits(d, g, box, t);
     }
@@ -254,7 +254,8 @@ Fit_match match_box_fit(const Design& d, const Grid& g, Boxes& boxes, bool apply
           }
         }
       }
-      const auto distance = [&](int t) { return std::abs(double(g.cx(g.col(t))) - box.cx) + std::abs(double(g.cy(g.row(t))) - box.cy); };
+      const auto distance
+          = [&](int t) { return std::abs(double(g.cx(g.col(t))) - box.cx) + std::abs(double(g.cy(g.row(t))) - box.cy); };
       std::ranges::sort(near[b], [&](int a, int e) { return std::pair{distance(a), a} < std::pair{distance(e), e}; });
     }
     std::vector<int>               owner(g.size(), -1), strict(B.size(), -1);
@@ -305,7 +306,7 @@ Fit_match match_box_fit(const Design& d, const Grid& g, Boxes& boxes, bool apply
       }
       touched.clear();
     }
-    bool complete = unmatched == 0;
+    bool         complete = unmatched == 0;
     // each reach rematches from this strict witness
     const auto   strict0 = strict, owner0 = owner;
     const size_t unmatched0 = unmatched;
@@ -329,116 +330,117 @@ Fit_match match_box_fit(const Design& d, const Grid& g, Boxes& boxes, bool apply
         // 2r first; when it leaves boxes unplaced, or completes over the far quota, rematch from the strict witness
         // once at 4r (more candidates can need fewer far moves), under the same 1% quota
         for (const int reach : {2, far_reach}) {
-        strict    = strict0;
-        owner     = owner0;
-        unmatched = unmatched0;
-        out.pressure_boxes.clear();  // pressure from the final pass only
-        std::ranges::fill(pressed, 0);
-        out.tile_pressure.assign(g.size(), 1);
-        const int                     wide = reach * limit;
-        std::vector<std::vector<int>> cand(B.size());
-        for (size_t b = 0; b < B.size(); ++b) {
-          const auto& box = boxes.boxes[b];
-          if (box.fixed) {
-            continue;
-          }
-          const int c = g.col(home[b]), r = g.row(home[b]);
-          for (int y = std::max(0, r - wide); y <= std::min(g.rows - 1, r + wide); ++y) {
-            check();
-            for (int x = std::max(0, c - wide); x <= std::min(g.cols - 1, c + wide); ++x) {
-              const int t = g.tile(x, y);
-              if (!g.blocked[size_t(t)] && !taken[size_t(t)] && fits_cached(b, t)) {
-                cand[b].push_back(t);
-              }
-            }
-          }
-        }
-        const auto far = [&](size_t b, int t) {
-          return std::max(std::abs(g.col(t) - g.col(home[b])), std::abs(g.row(t) - g.row(home[b]))) > limit;
-        };
-        constexpr int                       inf = std::numeric_limits<int>::max();
-        std::vector<int>                    dist(B.size(), inf);
-        std::vector<std::pair<int, int>>    via(B.size(), {-1, -1});  // box -> (previous box, tile it takes)
-        std::vector<size_t>                 visited;
-        for (size_t u = 0; u < B.size() && unmatched; ++u) {
-          if (boxes.boxes[u].fixed || strict[u] >= 0) {
-            continue;
-          }
-          for (size_t v : visited) {
-            dist[v] = inf;
-            via[v]  = {-1, -1};
-          }
-          visited.clear();
-          std::deque<size_t> queue{u};
-          dist[u] = 0;
-          visited.push_back(u);
-          int best = inf, end_box = -1, end_tile = -1;
-          while (!queue.empty()) {
-            check();
-            const size_t bx = queue.front();
-            queue.pop_front();
-            if (dist[bx] >= best) {
+          strict    = strict0;
+          owner     = owner0;
+          unmatched = unmatched0;
+          out.pressure_boxes.clear();  // pressure from the final pass only
+          std::ranges::fill(pressed, 0);
+          out.tile_pressure.assign(g.size(), 1);
+          const int                     wide = reach * limit;
+          std::vector<std::vector<int>> cand(B.size());
+          for (size_t b = 0; b < B.size(); ++b) {
+            const auto& box = boxes.boxes[b];
+            if (box.fixed) {
               continue;
             }
-            for (int t : cand[bx]) {
-              const int w = far(bx, t) ? 1 : 0, nd = dist[bx] + w;
-              const int o = owner[size_t(t)];
-              if (o < 0) {
-                if (nd < best) {
-                  best     = nd;
-                  end_box  = int(bx);
-                  end_tile = t;
+            const int c = g.col(home[b]), r = g.row(home[b]);
+            for (int y = std::max(0, r - wide); y <= std::min(g.rows - 1, r + wide); ++y) {
+              check();
+              for (int x = std::max(0, c - wide); x <= std::min(g.cols - 1, c + wide); ++x) {
+                const int t = g.tile(x, y);
+                if (!g.blocked[size_t(t)] && !taken[size_t(t)] && fits_cached(b, t)) {
+                  cand[b].push_back(t);
                 }
-                continue;
-              }
-              if (size_t(o) == bx || nd >= dist[size_t(o)]) {
-                continue;
-              }
-              if (dist[size_t(o)] == inf) {
-                visited.push_back(size_t(o));
-              }
-              dist[size_t(o)] = nd;
-              via[size_t(o)]  = {int(bx), t};
-              w ? queue.push_back(size_t(o)) : queue.push_front(size_t(o));
-            }
-          }
-          if (end_box < 0) {
-            // No alternating path to a free tile within this reach: this box stays unmatched in every maximum
-            // matching of the enumerated graph. Press its home (only the last pass's presses are kept).
-            out.tile_pressure[size_t(home[u])] = std::max(out.tile_pressure[size_t(home[u])], 1.1);
-            for (size_t v : visited) {  // u and the matched owners its search reached near u: those compete for its tiles
-              if (std::max(std::abs(g.col(home[v]) - g.col(home[u])), std::abs(g.row(home[v]) - g.row(home[u]))) <= wide) {
-                press(v);
               }
             }
-            continue;
           }
-          // augment: end_box takes end_tile, each predecessor takes the tile its successor vacated
-          int bx = end_box, t = end_tile;
-          while (true) {
-            const int old           = strict[size_t(bx)];
-            owner[size_t(t)]        = bx;
-            strict[size_t(bx)]      = t;
-            if (size_t(bx) == u) {
+          const auto far = [&](size_t b, int t) {
+            return std::max(std::abs(g.col(t) - g.col(home[b])), std::abs(g.row(t) - g.row(home[b]))) > limit;
+          };
+          constexpr int                    inf = std::numeric_limits<int>::max();
+          std::vector<int>                 dist(B.size(), inf);
+          std::vector<std::pair<int, int>> via(B.size(), {-1, -1});  // box -> (previous box, tile it takes)
+          std::vector<size_t>              visited;
+          for (size_t u = 0; u < B.size() && unmatched; ++u) {
+            if (boxes.boxes[u].fixed || strict[u] >= 0) {
+              continue;
+            }
+            for (size_t v : visited) {
+              dist[v] = inf;
+              via[v]  = {-1, -1};
+            }
+            visited.clear();
+            std::deque<size_t> queue{u};
+            dist[u] = 0;
+            visited.push_back(u);
+            int best = inf, end_box = -1, end_tile = -1;
+            while (!queue.empty()) {
+              check();
+              const size_t bx = queue.front();
+              queue.pop_front();
+              if (dist[bx] >= best) {
+                continue;
+              }
+              for (int t : cand[bx]) {
+                const int w = far(bx, t) ? 1 : 0, nd = dist[bx] + w;
+                const int o = owner[size_t(t)];
+                if (o < 0) {
+                  if (nd < best) {
+                    best     = nd;
+                    end_box  = int(bx);
+                    end_tile = t;
+                  }
+                  continue;
+                }
+                if (size_t(o) == bx || nd >= dist[size_t(o)]) {
+                  continue;
+                }
+                if (dist[size_t(o)] == inf) {
+                  visited.push_back(size_t(o));
+                }
+                dist[size_t(o)] = nd;
+                via[size_t(o)]  = {int(bx), t};
+                w ? queue.push_back(size_t(o)) : queue.push_front(size_t(o));
+              }
+            }
+            if (end_box < 0) {
+              // No alternating path to a free tile within this reach: this box stays unmatched in every maximum
+              // matching of the enumerated graph. Press its home (only the last pass's presses are kept).
+              out.tile_pressure[size_t(home[u])] = std::max(out.tile_pressure[size_t(home[u])], 1.1);
+              for (size_t v : visited) {  // u and the matched owners its search reached near u: those compete for its tiles
+                if (std::max(std::abs(g.col(home[v]) - g.col(home[u])), std::abs(g.row(home[v]) - g.row(home[u]))) <= wide) {
+                  press(v);
+                }
+              }
+              continue;
+            }
+            // augment: end_box takes end_tile, each predecessor takes the tile its successor vacated
+            int bx = end_box, t = end_tile;
+            while (true) {
+              const int old      = strict[size_t(bx)];
+              owner[size_t(t)]   = bx;
+              strict[size_t(bx)] = t;
+              if (size_t(bx) == u) {
+                break;
+              }
+              const auto [prev, prev_tile] = via[size_t(bx)];
+              (void)prev_tile;  // == old: the tile bx gives up
+              bx = prev;
+              t  = old;
+            }
+            --unmatched;
+          }
+          if (!unmatched) {  // accept this reach's witness only within the far quota; otherwise try the wider one
+            size_t far_count = 0;
+            for (size_t b = 0; b < B.size(); ++b) {
+              far_count
+                  += !boxes.boxes[b].fixed
+                     && std::max(std::abs(g.col(strict[b]) - g.col(home[b])), std::abs(g.row(strict[b]) - g.row(home[b]))) > limit;
+            }
+            if (far_count * 100 <= out.movable_boxes) {
               break;
             }
-            const auto [prev, prev_tile] = via[size_t(bx)];
-            (void)prev_tile;  // == old: the tile bx gives up
-            bx = prev;
-            t  = old;
           }
-          --unmatched;
-        }
-        if (!unmatched) {  // accept this reach's witness only within the far quota; otherwise try the wider one
-          size_t far_count = 0;
-          for (size_t b = 0; b < B.size(); ++b) {
-            far_count += !boxes.boxes[b].fixed
-                         && std::max(std::abs(g.col(strict[b]) - g.col(home[b])), std::abs(g.row(strict[b]) - g.row(home[b]))) > limit;
-          }
-          if (far_count * 100 <= out.movable_boxes) {
-            break;
-          }
-        }
         }
       } catch (const Budget_exhausted&) {
         out.reason = "budget";
@@ -461,9 +463,9 @@ Fit_match match_box_fit(const Design& d, const Grid& g, Boxes& boxes, bool apply
       out.pressure_boxes.clear();  // a complete witness names only its far boxes
       std::ranges::fill(pressed, 0);
       for (size_t b = 0; b < B.size(); ++b) {
-        const int move = std::max(std::abs(g.col(strict[b]) - g.col(home[b])), std::abs(g.row(strict[b]) - g.row(home[b])));
-        out.max_move   = std::max(out.max_move, size_t(move));
-        out.far_boxes += move > limit;
+        const int move  = std::max(std::abs(g.col(strict[b]) - g.col(home[b])), std::abs(g.row(strict[b]) - g.row(home[b])));
+        out.max_move    = std::max(out.max_move, size_t(move));
+        out.far_boxes  += move > limit;
         if (move > limit) {
           press(b);
         }
@@ -587,7 +589,7 @@ Legroute_gate_report assess_legroute_gates(const Design& d, const Grid& g, const
                                            const std::vector<int>& tree_nets, const std::vector<int>& cap_h,
                                            const std::vector<int>& cap_v, bool regions_ready, std::vector<char>* hot_tiles) {
   Legroute_gate_report out;
-  out.density_limit = d.opt.density_ceiling;
+  out.density_limit   = d.opt.density_ceiling;
   out.region_target   = d.opt.partition_cells ? d.opt.partition_cells : d.opt.region_cell_limit;
   out.unrouted        = routes.unrouted;
   out.overflow_edges  = routes.overflow_edges;
