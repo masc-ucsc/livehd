@@ -2,8 +2,12 @@
 #include "emit_legacy_fast_model.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <set>
+#include <sstream>
 #include <stdexcept>
+#include <string>
+#include <unordered_map>
 
 #include "lean_format.hpp"
 namespace lean_export {
@@ -343,13 +347,106 @@ std::string legacy_memory_next(const MemoryDriver& m, const LegacyNames& n, cons
   return next + " else " + held;
 }
 
-void emit_legacy_fast_model(const DesignScan& d, const CertificateIR& c, const LegacyNames& n, bool bridge, std::ostream& os) {
-  auto ref  = [&](uint32_t id) { return legacy_fast_ref(c, n, id, bridge); };
-  auto lets = [&]() {
-    for (const auto& node : c.nodes) {
-      const auto expr = lower_fast_expr(c, node, /*mux_as_call=*/true);
-      os << "  let n_" << node.id << " : " << expr.type << " := " << render_fast_expr(expr, node, ref) << '\n';
+// The node ids a text refers to as `n_<id>` (the let-chain names of legacy_fast_ref).
+static std::set<uint32_t> let_refs(std::string_view text) {
+  std::set<uint32_t> ids;
+  for (size_t p = text.find("n_"); p != std::string_view::npos; p = text.find("n_", p + 2)) {
+    const bool word_start = p == 0 || !(std::isalnum(static_cast<unsigned char>(text[p - 1])) || text[p - 1] == '_');
+    size_t     q          = p + 2;
+    while (q < text.size() && std::isdigit(static_cast<unsigned char>(text[q]))) {
+      ++q;
     }
+    if (word_start && q > p + 2) {
+      ids.insert(static_cast<uint32_t>(std::stoul(std::string(text.substr(p + 2, q - p - 2)))));
+    }
+  }
+  return ids;
+}
+
+// Lets per part of a split let chain (finding AI): Lean's elaboration of ONE let chain grows about
+// quadratically with its length (1,250 / 2,500 / 5,000 / 10,000 lets: 2.9 / 9.8 / 45 / 221 s), so a
+// 50,000-let `_comb` did not elaborate in 3 h. Parts of this size elaborate in 10-16 s each (VX_core:
+// 52 parts, 631 s for the whole fast model).
+constexpr size_t kLegacyLetsPerPart = 2000;
+
+void emit_legacy_fast_model(const DesignScan& d, const CertificateIR& c, const LegacyNames& n, bool bridge, std::ostream& os) {
+  auto                  ref = [&](uint32_t id) { return legacy_fast_ref(c, n, id, bridge); };
+  std::vector<FastExpr> exprs;  // the let chain's expressions, lowered once for `_comb` and `_next`
+  if (!bridge) {
+    for (const auto& node : c.nodes) {
+      exprs.push_back(lower_fast_expr(c, node, /*mux_as_call=*/true));
+    }
+  }
+  auto let_line = [&](size_t k) {
+    return "  let n_" + std::to_string(c.nodes[k].id) + " : " + exprs[k].type + " := " + render_fast_expr(exprs[k], c.nodes[k], ref)
+           + '\n';
+  };
+  // One function of the fast model: `def <name> <params> : <ret> :=`, the node lets, then `tail` (the
+  // result, and for `_next` the state lets before it). Up to kLegacyLetsPerPart nodes it is one let chain.
+  // A longer chain is cut into parts `<name>_p<k>`: each part is its own `@[noinline]` function that takes
+  // `params` plus the values of earlier parts that it or a later part still reads, computes its lets, and
+  // calls the next part; the last part ends with `tail`. Same values; only where the lets live changes.
+  auto emit_def = [&](const std::string& name, const std::string& params, const std::string& args, const std::string& ret,
+                      const std::string& tail) {
+    if (bridge || c.nodes.size() <= kLegacyLetsPerPart) {
+      os << "def " << name << " " << params << " : " << ret << " :=\n";
+      for (size_t k = 0; !bridge && k < c.nodes.size(); ++k) {
+        os << let_line(k);
+      }
+      os << tail << '\n';
+      return;
+    }
+    const size_t parts = (c.nodes.size() + kLegacyLetsPerPart - 1) / kLegacyLetsPerPart;
+    // live_in[p]: the node values defined before part p that part p, a later part or the tail reads.
+    std::vector<std::set<uint32_t>> live_in(parts);
+    std::set<uint32_t>              needed = let_refs(tail);
+    for (size_t p = parts; p-- > 0;) {
+      const size_t lo = p * kLegacyLetsPerPart;
+      const size_t hi = std::min(lo + kLegacyLetsPerPart, c.nodes.size());
+      for (size_t k = hi; k-- > lo;) {
+        needed.erase(c.nodes[k].id);
+        for (const auto dep : c.nodes[k].deps) {
+          if (certificate_source(c, dep) == nullptr) {
+            needed.insert(dep);
+          }
+        }
+      }
+      live_in[p] = needed;
+    }
+    if (!live_in[0].empty()) {
+      throw std::invalid_argument("legacy let chain reads a node before it is defined");
+    }
+    std::unordered_map<uint32_t, size_t> index;
+    for (size_t k = 0; k < c.nodes.size(); ++k) {
+      index.emplace(c.nodes[k].id, k);
+    }
+    auto in_order = [&](const std::set<uint32_t>& ids) {
+      std::vector<uint32_t> v(ids.begin(), ids.end());
+      std::sort(v.begin(), v.end(), [&](uint32_t a, uint32_t b) { return index.at(a) < index.at(b); });
+      return v;
+    };
+    // Parts are defined before the part that calls them: last first.
+    for (size_t p = parts; p-- > 0;) {
+      os << "@[noinline] def " << name << "_p" << p << " " << params;
+      for (const auto id : in_order(live_in[p])) {
+        os << " (n_" << id << " : " << exprs[index.at(id)].type << ")";
+      }
+      os << " : " << ret << " :=\n";
+      const size_t lo = p * kLegacyLetsPerPart;
+      for (size_t k = lo; k < std::min(lo + kLegacyLetsPerPart, c.nodes.size()); ++k) {
+        os << let_line(k);
+      }
+      if (p + 1 == parts) {
+        os << tail << "\n\n";
+      } else {
+        os << "  " << name << "_p" << p + 1 << " " << args;
+        for (const auto id : in_order(live_in[p + 1])) {
+          os << " n_" << id;
+        }
+        os << "\n\n";
+      }
+    }
+    os << "def " << name << " " << params << " : " << ret << " :=\n  " << name << "_p0 " << args << "\n\n";
   };
   if (bridge) {
     for (const auto& node : c.nodes) {
@@ -359,29 +456,24 @@ void emit_legacy_fast_model(const DesignScan& d, const CertificateIR& c, const L
     }
     os << '\n';
   }
-  os << "def " << n.base << "_comb " << n.parameters() << " : " << n.base << "_out :=\n";
-  if (!bridge) {
-    lets();
-  }
-  const auto outputs = legacy_output_ids(d, c);
-  os << "  { ";
+  const auto         outputs = legacy_output_ids(d, c);
+  std::ostringstream comb;
+  comb << "  { ";
   if (outputs.empty()) {
-    os << "out_dummy := " << lit_zero(1);
+    comb << "out_dummy := " << lit_zero(1);
   }
   for (size_t i = 0; i < outputs.size(); ++i) {
     if (i) {
-      os << ", ";
+      comb << ", ";
     }
-    os << n.outputs[i] << " := " << (outputs[i] ? cast(ref(*outputs[i]), d.outputs[i].width) : lit_zero(d.outputs[i].width));
+    comb << n.outputs[i] << " := " << (outputs[i] ? cast(ref(*outputs[i]), d.outputs[i].width) : lit_zero(d.outputs[i].width));
   }
-  os << " }\n\n";
+  comb << " }\n";
+  emit_def(n.base + "_comb", n.parameters(), n.arguments(), n.base + "_out", comb.str());
   if (!n.sequential) {
     return;
   }
-  os << "def " << n.base << "_next " << n.edge_parameter() << n.parameters() << " : " << n.base << "_state :=\n";
-  if (!bridge) {
-    lets();
-  }
+  std::ostringstream       next;  // the state lets and the record, after the node lets
   std::vector<std::string> fields;
   for (const auto& f : c.flops) {
     const auto field = n.flop_field(f);
@@ -390,19 +482,19 @@ void emit_legacy_fast_model(const DesignScan& d, const CertificateIR& c, const L
     const auto enable = f.enable ? "(bitvec_nonzero " + ref(*f.enable) + ")" : "true";
     const auto value  = lit_bv(f.width, lean_integer(f.reset_value));
     const auto din    = cast(ref(f.din), f.width);
-    auto       next   = "flop_next " + reset + " " + value + " " + enable + " " + din + " s." + field;
+    auto       value_next = "flop_next " + reset + " " + value + " " + enable + " " + din + " s." + field;
     if (!n.edges.empty()) {
       // Off its domain's edge a flop holds; an asynchronous reset still acts.
       const auto quiet = f.async_reset ? "flop_next " + reset + " " + value + " false " + din + " s." + field : "s." + field;
-      next             = "if e." + n.edges.at(f.clock) + " then " + next + " else " + quiet;
+      value_next       = "if e." + n.edges.at(f.clock) + " then " + value_next + " else " + quiet;
     }
-    os << "  let new_" << field << " : BitVec " << f.width << " := " << next << '\n';
+    next << "  let new_" << field << " : BitVec " << f.width << " := " << value_next << '\n';
   }
   for (const auto& m : c.memories) {
     const auto field = n.memories.at(m.origin);
     fields.push_back(field);
-    const auto next = legacy_memory_next(m, n, ref, "s." + field);
-    os << "  let new_" << field << " : (BitVec " << m.addr_w << " -> BitVec " << m.data_w << ") := " << next << '\n';
+    next << "  let new_" << field << " : (BitVec " << m.addr_w << " -> BitVec " << m.data_w
+         << ") := " << legacy_memory_next(m, n, ref, "s." + field) << '\n';
   }
   // A memory nothing reads has no certificate driver (the scan never reaches
   // its write cone) but still has a state field: it holds, unobservably.
@@ -415,18 +507,19 @@ void emit_legacy_fast_model(const DesignScan& d, const CertificateIR& c, const L
     for (const auto& [id, field] : n.memories) {
       if (!driven.contains(id)) {
         fields.push_back(field);
-        os << "  let new_" << field << " := s." << field << '\n';
+        next << "  let new_" << field << " := s." << field << '\n';
       }
     }
   }
-  os << "  { ";
+  next << "  { ";
   for (size_t i = 0; i < fields.size(); ++i) {
     if (i) {
-      os << ", ";
+      next << ", ";
     }
-    os << fields[i] << " := new_" << fields[i];
+    next << fields[i] << " := new_" << fields[i];
   }
-  os << " }\n\n";
+  next << " }\n";
+  emit_def(n.base + "_next", n.edge_parameter() + n.parameters(), n.edge_argument() + n.arguments(), n.base + "_state", next.str());
   os << "def " << n.base << "_step " << n.edge_parameter() << n.parameters() << " : " << n.base << "_state × " << n.base
      << "_out :=\n  (" << n.base << "_next " << n.edge_argument() << "i s, " << n.base << "_comb i s)\n\n";
 }

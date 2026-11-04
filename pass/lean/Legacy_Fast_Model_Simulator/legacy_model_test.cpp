@@ -221,6 +221,50 @@ TEST(LegacyModel, WholeArrayMemoryUsesLoadAndToBus) {
 // A memory nothing reads has no certificate driver, but it keeps a state
 // field; both next-state functions must hold it, or the record literal is
 // missing a field and the model does not compile (mem_write_only).
+// A let chain longer than one part (finding AI): the fast model is cut into
+// `@[noinline]` parts, each passing on exactly the values a later part or the
+// result reads; the main definition calls part 0. A short chain is one def.
+TEST(LegacyModel, LongLetChainIsSplitIntoParts) {
+  DesignScan d;
+  d.name         = "chain";
+  d.inputs       = {
+      {"a", 2000000000, 8, {}}
+  };
+  const uint32_t len = 4100;
+  for (uint32_t k = 0; k < len; ++k) {
+    const PinRef prev = k == 0 ? input(2000000000, 8) : PinRef{PinKind::Node, 10 + k - 1, 0, 8, 0, {}};
+    d.nodes.push_back({10 + k, ScanOp::Sum, 8, false, {{0, 0, prev}, {1, 1, input(2000000000, 8)}}});
+  }
+  d.outputs = {
+      {"y", 0, 8, PinRef{PinKind::Node, 10 + len - 1, 0, 8, 0, {}}},
+      {"z", 1, 8,                 PinRef{PinKind::Node, 15, 0, 8, 0, {}}}
+  };
+  const auto        c = build_certificate(d, {});
+  LegacyEmitOptions o;
+  o.emit_cert = false;
+  std::ostringstream out;
+  ASSERT_NO_THROW(emit_legacy_model(d, c, o, out));
+  const auto text = out.str();
+  EXPECT_NE(text.find("@[noinline] def chain_comb_p2 "), std::string::npos) << text.substr(0, 2000);
+  EXPECT_EQ(text.find("chain_comb_p3"), std::string::npos);
+  EXPECT_NE(text.find(" :=\n  chain_comb_p0 i"), std::string::npos);
+  // n_15 is read only by the result, so parts 1 and 2 both receive it; part 0 passes it on.
+  for (const auto* part : {"@[noinline] def chain_comb_p1 ", "@[noinline] def chain_comb_p2 "}) {
+    const auto at = text.find(part);
+    ASSERT_NE(at, std::string::npos);
+    EXPECT_NE(text.substr(at, text.find('\n', at) - at).find("(n_15 : BitVec 8)"), std::string::npos) << part;
+  }
+  EXPECT_NE(text.find("  chain_comb_p1 i n_15 "), std::string::npos);
+
+  // The same design 100 nodes long stays one definition.
+  d.nodes.resize(100);
+  d.outputs = {
+      {"y", 0, 8, PinRef{PinKind::Node, 109, 0, 8, 0, {}}}
+  };
+  std::ostringstream short_out;
+  ASSERT_NO_THROW(emit_legacy_model(d, build_certificate(d, {}), o, short_out));
+  EXPECT_EQ(short_out.str().find("_p0"), std::string::npos);
+}
 TEST(LegacyModel, UnreadMemoryHoldsItsField) {
   DesignScan d;
   d.name   = "wro";
