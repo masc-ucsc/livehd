@@ -83,6 +83,7 @@ import LeanSemanticPrimitives.Projection.MemFused
 import LeanSemanticPrimitives.Projection.Proto.RunnerSupport
 import LeanSemanticPrimitives.Compiler.CertIORoute   -- DCERT2 + DCERT1, routed by magic (Mathlib-free)
 import LeanSemanticPrimitives.Compiler.RunAdmission   -- C3 edges / C4 reset polarity
+import LeanSemanticPrimitives.Compiler.DirectSemantics -- the reference step, computed in one dense pass
 
 open Compiler Projection Projection.Hw Projection.HwMem Projection.MemProjection
 open Projection.Runner
@@ -307,6 +308,18 @@ def memsCheck (D : DesignCert) (st : StateM) (ref : RuntimeState) : CmpStatus :=
                 | _, _             => true) with
         | some k => .failed s!"memory {k} disagrees with the reference"
         | none   => .complete
+
+/-- **The reference step this driver compares against is `interpretDesign`.**  It is
+COMPUTED by `directStepRaw` -- one left-to-right pass over a dense array -- which
+is proved equal to `interpretDesign` for every design whose dependencies point
+backwards, and every design the memory route admits is one.  Evaluated
+directly, `interpretDesign`'s environment is a chain of closures, so one cycle
+costs O(N^2) in the slot count: that, not the residual, was where FP spent its
+time on SoomRV's MemRTL (10,348 nodes; profile: `envSetG`, `lean_apply_1`). -/
+theorem refStep_eq_interpretDesign {D : DesignCert} (h : admitsB D = true)
+    (e : ClockEdges) (i : RuntimeInput) (s : RuntimeState) :
+    Direct.directStepRaw D e i s = Compiler.interpretDesign D e i s :=
+  Direct.directStepRaw_correct D (designCertWF_of_semwf (admits_semwf h)).depsBounded e i s
 
 def cycleCheck (D : DesignCert) (r : StateM.ResultM) (ref : RuntimeResult) : CmpStatus :=
   if r.outputs != ref.outputs then .failed "outputs"
@@ -767,7 +780,8 @@ effEn {ws.effEn} origEn {ws.origEn} mask {ws.mask} pred {ws.pred} phaseSrc {ws.p
               prevOuts := r.outputs
               flops := r.nextState.flops :: flops
               if cfg.compare then
-                let ref := Compiler.interpretDesign D e i (StateM.denote st)
+                -- `interpretDesign`, computed as `directStepRaw` (`refStep_eq_interpretDesign`)
+                let ref := Direct.directStepRaw D e i (StateM.denote st)
                 cmp := cmp.meet (cycleCheck D r ref)
               if cfg.trace then
                 -- the memory's own commit condition for this step, read from
