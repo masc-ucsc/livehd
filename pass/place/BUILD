@@ -303,6 +303,13 @@ cc_test(
     deps = [":signal_router", ":routed_rc", "@googletest//:gtest_main"],
 )
 
+cc_test(
+    name = "signal_maze_test",
+    srcs = ["signal_maze_test.cpp"],
+    copts = COPTS,
+    deps = [":signal_router", "@googletest//:gtest_main"],
+)
+
 cc_library(
     name = "power_grid",
     srcs = ["power_grid.cpp", "power_grid_profiles.cpp", "power_grid_vias.cpp", "power_grid_export.cpp"],
@@ -374,9 +381,13 @@ filegroup(
         "power_grid_export.cpp",
         "power_grid_vias.cpp",
         "power_grid_vias.hpp",
+        "placement_session.cpp",
+        "planning_selection.cpp",
         "boundary_pins.cpp",
         "pinalign.cpp",
         "busorder.cpp",
+        "placement_session.hpp",
+        "planning_selection.hpp",
         "boundary_pins.hpp",
         "busorder.hpp",
         "region_mesh.cpp",
@@ -468,6 +479,29 @@ filegroup(
         "satlegalize.hpp",
         "sat_solver.cpp",
         "sat_solver.hpp",
+        "legroute.cpp",
+        "legroute.hpp",
+        "legroute_boxes.cpp",
+        "legroute_box_domains.cpp",
+        "legroute_box_seed.cpp",
+        "legroute_coalesce.cpp",
+        "legroute_dump.cpp",
+        "legroute_final.cpp",
+        "legroute_global.cpp",
+        "legroute_gate.cpp",
+        "fast_route_pattern.cpp",
+        "fast_route_pattern.hpp",
+        "legroute_grid.cpp",
+        "legroute_resources.cpp",
+        "legroute_resources.hpp",
+        "legroute_internal.hpp",
+        "legroute_partition.cpp",
+        "legroute_partition_mesh.cpp",
+        "legroute_partition_fit.cpp",
+        "legroute_plan.cpp",
+        "legroute_congestion.cpp",
+        "legroute_route.cpp",
+        "legroute_sat.cpp",
         "resynthesize.cpp",
         "steiner_repair.cpp",
         "steiner_repair.hpp",
@@ -651,6 +685,8 @@ cc_library(
     name = "place",
     srcs = [
         "cell_jump.cpp",
+        "placement_session.cpp",
+        "planning_selection.cpp",
         "boundary_pins.cpp",
         "pinalign.cpp",
         "busorder.cpp",
@@ -678,6 +714,8 @@ cc_library(
     ],
     hdrs = [
         "cell_jump.hpp",
+        "placement_session.hpp",
+        "planning_selection.hpp",
         "boundary_pins.hpp",
         "busorder.hpp",
         "color_centroids.hpp",
@@ -944,18 +982,29 @@ cc_library(
     srcs = [
         "legroute.cpp",
         "legroute_boxes.cpp",
+        "legroute_box_domains.cpp",
+        "legroute_box_seed.cpp",
+        "legroute_coalesce.cpp",
         "legroute_dump.cpp",
         "legroute_final.cpp",
         "legroute_global.cpp",
+        "legroute_gate.cpp",
+        "legroute_partition.cpp",
+        "legroute_partition_mesh.cpp",
+        "legroute_partition_fit.cpp",
+        "legroute_plan.cpp",
+        "legroute_congestion.cpp",
         "legroute_grid.cpp",
+        "legroute_resources.cpp",
         "legroute_internal.hpp",
         "legroute_route.cpp",
         "legroute_sat.cpp",
     ],
-    hdrs = ["legroute.hpp"],
+    hdrs = ["legroute.hpp", "legroute_resources.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
     deps = [
+        ":fast_route_pattern",
         ":row_occupancy",
         ":sat_solver",
         ":signal_router",
@@ -967,9 +1016,107 @@ cc_library(
     ],
 )
 cc_test(
+    name = "legroute_resources_test",
+    size = "small",
+    srcs = ["legroute_resources_test.cpp", "legroute_internal.hpp"],
+    copts = COPTS,
+    deps = [":legroute", "@googletest//:gtest_main"],
+)
+cc_test(
     name = "legroute_test",
     size = "small",
     srcs = ["legroute_test.cpp", "legroute_internal.hpp"],
+    copts = COPTS,
+    deps = [":legroute", "@googletest//:gtest_main"],
+)
+cc_library(
+    name = "legroute_sat_test_access",
+    testonly = True,
+    hdrs = ["legroute_sat.cpp", "legroute_internal.hpp"],
+    deps = [":legroute"],
+)
+cc_test(
+    name = "legroute_sat_test",
+    size = "small",
+    srcs = ["legroute_sat_test.cpp"],
+    copts = COPTS,
+    linkstatic = True,
+    deps = [":legroute_sat_test_access", "@googletest//:gtest_main"],
+)
+cc_test(
+    name = "legroute_coalesce_test",
+    size = "small",
+    srcs = ["legroute_coalesce_test.cpp", "legroute_internal.hpp"],
+    copts = COPTS,
+    deps = [":legroute", "@googletest//:gtest_main"],
+)
+cc_test(
+    name = "legroute_box_domains_test",
+    size = "small",
+    srcs = ["legroute_box_domains_test.cpp", "legroute_internal.hpp"],
+    copts = COPTS,
+    deps = [":legroute", "@googletest//:gtest_main"],
+)
+cc_test(
+    name = "legroute_box_seed_test",
+    size = "small",
+    srcs = ["legroute_box_seed_test.cpp", "legroute_internal.hpp"],
+    copts = COPTS,
+    deps = [":legroute", "@googletest//:gtest_main"],
+)
+cc_test(
+    name = "legroute_boxes_test",
+    size = "small",
+    srcs = ["legroute_boxes_test.cpp", "legroute_internal.hpp"],
+    copts = COPTS,
+    deps = [":legroute", "@googletest//:gtest_main"],
+)
+cc_test(
+    name = "legroute_partition_test",
+    size = "small",
+    srcs = ["legroute_partition_test.cpp", "legroute_internal.hpp"],
+    copts = COPTS,
+    deps = [":legroute", "@googletest//:gtest_main"],
+)
+cc_test(
+    name = "legroute_partition_fit_test",
+    size = "small",
+    srcs = ["legroute_partition_fit_test.cpp", "legroute_internal.hpp"],
+    copts = COPTS,
+    deps = [":legroute", "@googletest//:gtest_main"],
+)
+cc_test(
+    name = "legroute_congestion_test",
+    size = "small",
+    srcs = ["legroute_congestion_test.cpp", "legroute_internal.hpp"],
+    copts = COPTS,
+    deps = [":legroute", "@googletest//:gtest_main"],
+)
+cc_test(
+    name = "legroute_gate_test",
+    size = "small",
+    srcs = ["legroute_gate_test.cpp", "legroute_internal.hpp"],
+    copts = COPTS,
+    deps = [":legroute", "@googletest//:gtest_main", "@rapidjson"],
+)
+cc_test(
+    name = "legroute_global_test",
+    size = "small",
+    srcs = ["legroute_global_test.cpp", "legroute_internal.hpp"],
+    copts = COPTS,
+    deps = [":legroute", "@googletest//:gtest_main"],
+)
+cc_test(
+    name = "legroute_final_test",
+    size = "small",
+    srcs = ["legroute_final_test.cpp", "legroute_internal.hpp"],
+    copts = COPTS,
+    deps = [":legroute", "@googletest//:gtest_main"],
+)
+cc_test(
+    name = "legroute_route_test",
+    size = "small",
+    srcs = ["legroute_route_test.cpp", "legroute_internal.hpp"],
     copts = COPTS,
     deps = [":legroute", "@googletest//:gtest_main"],
 )
@@ -1065,6 +1212,23 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = ["//inou/lefdef:index_union_find", "@dreamplace//thirdparty/flute", "@rules_cc//cc/runfiles"],
 )
+
+cc_library(
+    name = "fast_route_pattern",
+    srcs = ["fast_route_pattern.cpp"],
+    hdrs = ["fast_route_pattern.hpp"],
+    copts = COPTS,
+    visibility = ["//visibility:public"],
+)
+
+cc_test(
+    name = "fast_route_pattern_test",
+    size = "small",
+    srcs = ["fast_route_pattern_test.cpp"],
+    copts = COPTS,
+    deps = [":fast_route_pattern", "@googletest//:gtest_main"],
+)
+
 cc_test(
     name = "steiner_topology_test",
     srcs = ["steiner_topology_test.cpp"],
@@ -1125,4 +1289,18 @@ py_test(
         "//lhd:lhd",
         "//pass/place/tests/regularity:hint_fixtures",
     ],
+)
+
+cc_test(
+    name = "planning_selection_test",
+    srcs = ["planning_selection_test.cpp"],
+    copts = COPTS,
+    deps = [":place", "@googletest//:gtest_main", "@rapidjson"],
+)
+
+cc_test(
+    name = "placement_session_test",
+    srcs = ["placement_session_test.cpp"],
+    copts = COPTS,
+    deps = [":place", "@googletest//:gtest_main"],
 )

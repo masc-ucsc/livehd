@@ -2885,8 +2885,13 @@ in `legroute*.cpp` and `todo/livehd/2l-legroute.html`. legroute.local builds 2x2
 (two widest-flop widths by two rows), merging connected cells before packing partially
 filled boxes. A per-region SAT model places boxes and constrains routing demand against
 tile track capacity. Optional fixed trees, critical-box placement and IO prerouting reduce
-the model; `sat_alt` compares two policies, and `push_rounds` can redistribute boxes between
-regions. Clock spines and track assignment follow. A SAT answer is a capacity-model result,
+the model; `sat_alt` compares two policies, and `spill_rounds` can redistribute boxes between
+regions. With `legal_boxes=true`, boxes preserve an already legalized placement. With
+`global_route=true, region_pins=false`, the global router's crossings supply boundary pins.
+Window-growth and local-alternative retries reuse those crossings while the region mesh and
+box homes stay unchanged; geometric changes rebuild them. `crossings_built` and
+`crossings_reused` count that work in `legroute.json`, and `global_seconds` sums actual router
+calls across retries. Clock spines and track assignment follow. A SAT answer is a capacity-model result,
 not proof of detailed routability or DRC closure. legroute.final places the cells inside each box and
 writes the global metal as planar wires only; the shared signal router (the one
 `satlegalize.route` uses, `signal_router.hpp`) then makes every via: it joins each layer change of
@@ -2906,6 +2911,441 @@ boxes with a failed net. `final/legroute_eco.json` lists the nets changed after 
 stays external: `pass/place/legroute_drc.tcl` runs OpenROAD's checker on `out.def` without
 rerouting. With legroute enabled, movable macros (memories included) snap their halo frame
 to the legroute tile grid before routing-track alignment when the snapped position fits.
+
+The global search retains its shortest-path frontier while attaching a net's sinks.
+Each attached path becomes a set of zero-distance sources; edge costs remain fixed
+until the whole net is committed. Search-window expansion rebuilds the frontier.
+This avoids repeatedly scanning the growing tree on high-fanout nets. Capacity
+shares and congestion negotiation are unchanged; equal-cost tree choices may differ.
+Long searches report the current net, pending pins and cumulative queue pops.
+
+`place.legroute.plan=true` enables experimental cell-level routing feedback before
+cellboxes and route-driven region cuts, after ordinary GP and region refinement.
+It currently requires `partition_cells>0` and `region_pins=false`, ensuring the cuts
+are rebuilt from the planned placement. The initial backend is the native negotiated global
+router with optional FastRoute-style pattern seeding. Physical cell-pin coordinates,
+macro/PG obstructions and clock reservations build the demand map without requiring
+a legal placement. Overloaded routes and hot transit tiles identify cells for
+temporary width inflation; GP resumes with timing-critical cells excluded from inflation, then
+physical widths return. Timing priorities refresh at each planning measurement;
+the terminal refresh also reevaluates a restored candidate before downstream routing.
+Each candidate is rerouted, including the last GP update,
+and a regression restores the best measured placement. The shared pre-SAT screen
+requires no oversized regions, cell and routing densities at most 0.95, and no
+unresolved coarse routes at the capped 0.95 routing share. A blocked candidate
+returns to planning before SAT; this conservative policy is not proof of physical
+UNSAT or detailed routing closure. Normal native routing still checks the selected placement.
+
+The opt-in controls are `plan.rounds=3`, `plan.iterations=100`,
+`plan.max_inflate=1.5` and `plan.net_pops=100000` under `place.legroute`.
+`plan.min_iterations` (default 0) can raise the recovery floor of 50 actual GP
+steps; the effective iteration budget is at least 50. `plan.timing_interval`
+(default 0) selects in-loop physical timing refresh; with a timing provider,
+recovery uses five steps when no interval is configured. STA sees real cell dimensions and offsets at the
+current coordinates, excluding virtual width inflation. `feedback.json` records
+actual steps and timing checkpoint counts. Planning timing refresh currently
+rejects topology or cell-size replacement during the inflated solve.
+`plan.route_model=coarse` opts into actual coarse H/V utilization during GP
+recovery. It replaces the legacy whole-tree width inflation and the GP estimator
+for that slice, clearing stale estimator inflation at the first switch. Sampling
+uses `plan.route_interval=50` lifetime steps and `plan.route_net_pops=2000` per net;
+the outer acceptance route retains `plan.net_pops=100000`. A sample with no
+capacity overflow and at most 1% budget-limited connections retries at the outer
+budget before those missing paths can inflate cells. Search-limited requests
+add spatial demand penalties and remain unresolved, never a feasible certificate.
+Measured PG, fixed geometry, clock reservations and IOs stay fixed during a slice.
+Each map divides by the admitted residual edge capacity. Incident tiles retain
+edge peaks, and GP bins retain overlapping tile peaks; area-weighted tile means
+are reported separately. Pin utilization is explicitly zero because the coarse
+model does not certify pin/via access. Native inflation uses the maximum H/V
+pressure as a local area factor; anisotropic inflation is not implemented.
+`plan.export_coarse=true` exports feature/label pairs for every plan observation
+and sampled GP route. Labels contain raw H/V utilization, never missing-route
+penalties or invented DRC. Incomplete routes remain auditable but ineligible for
+training. `place.uroute.label_policy=coarse-only` explicitly selects utilization-only
+coarse support; the default remains detailed labels, and calibrated mixing requires
+compatible held-out calibration evidence. Outer candidate routing/timing rollback
+still decides acceptance; no sample authorizes SAT or final routing by itself.
+
+With planning enabled, LiveHD owns one `Placement_session` across final-cell GP,
+timing placement, bus-order/boundary refinement and legroute planning. The local
+DREAMPlace dependency in `MODULE.bazel` provides explicit geometry/topology
+rebinding: inflation and temporary region anchors retain private filler particles
+and density normalization while invalidating stale momentum/gradient samples.
+Explicit rebinding also replenishes filler particles for added whitespace, keeping
+existing particles and respecting the configured count cap; a near-full initial
+core must not leave later solves with a few heavily charged particles. Core growth
+requests fresh gradient-based density-penalty calibration on the retained model;
+ordinary same-core edits keep their normalization. Broad routing-pressure recovery
+and large remaps explicitly restart the wirelength smoothing epoch, recalibrate
+density and clear stale estimator-only cell inflation while preserving the live
+session, fixed geometry and physical constraints. Adaptive density stops increasing
+its penalty once the overflow target is met, including during forced timed steps.
+The optimizer history records the penalty, reset flags and smoothing epoch.
+The per-slice minimum enforces the requested additional 20/50 steps even after an
+earlier solve converged. Boundary STA sees the physical unsplit netlist and maps
+net weights back to its temporary pieces; pin-pair timing/topology edits during
+that boundary slice are currently rejected. Callbacks never outlive their calls.
+
+Measured candidates retain their design, timing and optimizer together. Rejecting
+a candidate restores that complete snapshot, and a candidate already worse than
+the incumbent consumes no additional GP slice. `placement_session.json` records
+cold starts, steps from completed slices (including rejected candidates), selected
+optimizer iteration, filler counts and
+stage/rebind/restore events. Native legalization/local-routing poses are rebound
+into the same owner before returning. With a generated core and automatic growth,
+monotonic area/mesh retries also retain this owner. Retained cell centers spread
+proportionally into the new core by identity, IOs use the new perimeter, and each
+retry uses timed planning slices (at least 20 steps, or the requested planning
+minimum). A retry with a fresh macro plan instead retains that plan's cell seed
+around the new macro frame. Only the completed macro-plan handoff authorizes
+fixed hard macros to move or mirror in the existing optimizer; macro master
+identity and dimensions, fixed standard cells and placement masks stay protected.
+The optimizer keeps private fillers and its iteration clock, discards old
+gradients/momentum, and records `macro_replan` on that single rebind event.
+Ordinary retries retain their stricter fixed-body invariant. Planning first tries
+the virtual inflation that fits, then remeasures.
+Growth follows remaining routing/legalization failures, bounded by
+`place.area_step` per retry; an oversized inflation proposal alone does not
+request more area. Optimization-stage legalization failure follows the same automatic growth policy. Bisection area
+search still uses independent solves because it can shrink the core.
+
+Strict mode also rejects remaining global unrouted nets or overflow even if all
+regional models are SAT; independently validated native wire closure supersedes
+that estimate. A soft boundary-hop share excess alone does not imply physical
+capacity failure. Per-retry optimizer reports are written to the workdir as
+`placement_area_retry<N>.json`; the final report contains the cumulative session.
+These policies remain heuristic: a SAT timeout is not proof of insufficient area.
+An endpoint below a matched clean OpenROAD density is a diagnostic failure to meet
+the target, even when coarse routing succeeds.
+
+This is in-memory reuse; saved DEF/cache files alone do not contain a full optimizer session. See the
+[legroute plan](../../todo/livehd/2l-legroute.html) for benchmark evidence.
+The per-net search budget reports unresolved nets separately and budget exhaustion
+alone creates no inflation pressure. The existing `global_share`, `global_rounds`
+and `global_margin` control the routing estimate. `plan` and the earlier SAT
+`probe` are mutually exclusive. Reports are `legroute_planN/plan.json`,
+`legroute_planN/feedback.json` when placement changes, and
+`legroute_plan_selection.json`; the selected round is always measured. Generated
+core growth uses the existing area-growth controls for remaining routing or
+legalization failures. Planning currently rebuilds trees after movement; persistent tree reuse,
+FastRoute, and feedback from failed neighborhood solves remain pending.
+`plan.max_degradation_ps=N` optionally limits degradation of the worst finite
+nonclock data-pin slack against the first measured candidate (for example, 25 ps).
+The default -1 disables this guard and retains routing-only selection. Candidate
+slacks are converted from feedback units to ps and must use the same ranking or
+detailed timing view and finite physical pin identities. These are placement
+timing estimates, not routed WNS. A lower routing score cannot replace the
+incumbent if it exceeds the timing limit or lacks comparable timing; the selected
+pose, timing, and optimizer snapshot are restored together. An initial candidate
+without finite data timing fails explicitly instead of requesting area growth.
+The reference never advances, so successive small regressions cannot accumulate.
+`legroute_plan_timing.json` records every measured candidate's routing score,
+estimated worst data-pin slack, acceptance/rejection reason, immutable reference,
+and selected round, including when the guard is disabled.
+`plan.local_tiles=N` (default 0, local movement bounds disabled) limits a small
+repair to cells within N Manhattan routing tiles of a hotspot when positive.
+With zero, classification uses one tile but the GP slice keeps its original
+whole-placement movement freedom. The neighborhood must
+contain at most `partition_cells` and 25% of movable cells. With positive N, GP holds other cells
+at their current coordinates and bounds selected cells to N tiles in each
+direction, preserving existing movement fences. Unresolved search endpoints
+also seed hotspots: missing paths trigger 50 timed GP steps even without a
+congestion inflation estimate. Larger routing-pressure sets use the configured
+unpinned global GP rounds with normal movement and a restarted smoothing schedule
+before requesting area growth. Physical cell density above 0.95 still requests
+room immediately. After the round budget is exhausted, a blocked measured candidate
+requests area recovery; it never enters SAT.
+Area recovery invalidates stale region seeds and checks the actual DREAMPlace
+nodes and connectivity against the original physical topology. Split regional
+nets and virtual region IOs cannot remain in that input. Physical top-level IOs,
+PG-aware pin locations, masks and user movement bounds remain intact. Only known
+temporary local bounds are restored; arbitrary node constraints are not cleared. The
+planner reports hot tiles, neighborhood size, chosen scope and actual local
+movement; it checks the movement bounds before accepting a GP update. With the
+default `plan.handoff=false`, these bounds apply only to planning movement.
+
+`plan.handoff=true` additionally legalizes every candidate with the native
+terminal legalizer before scoring the exact boxed all-signal global prepass.
+The same local origin bounds constrain legalization, and cells outside the
+neighborhood retain their entire pose. A failed bounded search rejects that
+candidate and preserves the incumbent; it does not prove the neighborhood
+infeasible. The selected native placement, orientations and timing priorities
+are retained together and passed to regional routing without another
+legalization. This avoids accepting a low-overflow overlapping placement that
+becomes congested when packed. Per-round `handoff.json` reports legalization,
+including held and bounded cell counts; `plan.json` records `boxed_handoff`
+and `legalize_seconds`. Coordinate bounds refer to inclusive lower-left
+origins, not cell footprints. Boundary-pin repair and interface backtracking
+still need coordinated neighborhood constraints.
+The replay tool's optional `plan_only=true` measures the cell-level estimator
+on a saved DEF and audits unchanged cells/IOs, without regional SAT. Add
+`boxed_handoff=true` to score a legal DEF with the boxed prepass instead.
+With `place.snapshots=true`, each `legroute_planN/` also contains `input.def`
+and `timing.tsv` for the exact measured candidate; `legroute_handoff/` saves
+the corresponding input after terminal legalization, before regional routing.
+The DEF includes generated power resources and exported IO shapes. The timing
+file stores quoted physical pin names, slack in ps and clock flags for routing
+priorities, not sign-off timing. Supply it as the replay tool's `timing` input
+and retain the original routing controls when comparing geometry across stages.
+
+With `hop_choice>0`, regions choose movable boundary crossings in descending risk
+order: every lower-priority neighbor waits for the earlier region's interface
+choice, while independent regions can run together. This fixes greedy coloring
+which could put an easier region back in the first wave. Backtracking previously
+chosen interfaces remains pending; fixed global pieces still hold their hops.
+
+`partition_cells=N` enables an experimental route-driven partition before regional SAT.
+It requires `global_route=true` and `region_pins=false`. Every signal
+net is routed with uniform edge accounting, independent of the seed mesh; `global_share`
+applies to all signal edges in this mode. Recursive rectangular cuts minimize routed load
+over capacity plus cell imbalance, targeting at most N cells. A cut is forbidden if any
+edge exceeds its share. By default, trees below the `partition_critical` slack-rank
+fraction (0.05; 0 disables classification) cannot be cut. Set `partition_critical_cost`
+to a nonnegative value to allow these crossings and add that weight times their count
+over the cut's capacity to the cut cost; -1 retains the hard prohibition. If no cut is admissible, the region remains
+oversized; missing signal routes reject the partition rather than certify an incomplete
+demand map. Reports include `partition_oversized`, `partition_max_cells`, cut time in
+`partition_seconds`, and actual all-signal searches in `partition_route_calls`.
+`partition_indivisible_cells` is the largest cell count connected by forbidden edges:
+no cut geometry can split that component while respecting the constraints. Mesh joins
+and boundary shifts use the same edge constraints and count rejected attempts in
+`partition_rejected_repairs`.
+With explicit `legal_boxes=false`, planning and local placement build identical
+movable connectivity boxes from the same unlegalized frame before route cuts;
+legacy seed divisions do not constrain grouping. Boxes remain free within their
+new region. Local SAT refines both owned and pass-through components of each
+global tree in a tile corridor, sharing one capacity charge per net and edge.
+Original paths provide a seed; fixed boundary crossings preserve neighbor identity.
+Conditional connectivity cuts permit arbitrary connected paths within the corridor.
+A bounded fixed-backbone proposal runs first, then the full graph uses the same
+regional deadline if that proposal fails. Acceptance independently checks actual
+edge unions, endpoint connectivity, placement domains and fixed interfaces;
+restricted proposal failure is never an infeasibility verdict. Physical layer and
+track assignment remains a separate required check. A post-cut matching checks that every box has a distinct
+fitting tile without silently changing its region or home. Failed matches report
+`unfittable_regions` and `unfittable_boxes` with affected regions and hotspots.
+This intermediate handoff uses `endpoint_basis="box_centroids"`; ordinary
+physical-pin planning reports `"physical_pins"`. It does not yet implement the
+planned cell-pin-first partition algorithm. The legalized `boxed_handoff`
+diagnostic and `global_keep` still require `legal_boxes=true`; movable
+`global_all` without route-driven cuts remains unsupported.
+`box_route_seed=true` (default false; CLI `place.legroute.box_route_seed`)
+adds an optional final planning proposal after all admission gates pass. The
+native adaptive box domains are prepared around the original centers, then a
+nearest-first matching picks distinct fitting tiles and all signals are routed
+from those provisional anchors. A stalled matching grows the alternating
+deficient set of movable boxes; fixed boxes never move. The original physical
+frame and box membership are unchanged. Complete endpoint connectivity, capacity,
+critical-cut rules and the existing mesh gates must pass before adopting the
+candidate. `endpoint_basis="provisional_box_tiles"` distinguishes this estimate.
+Local reconstructs the candidate and tests its point assignment under the same
+regional deadline, then independently checks it against the original movement
+domains. Rejected proposals retain the full corridor search. No persistent box
+freeze is introduced. Matching has a one-second optional-work allowance; routing
+retains `global_net_pops`. Plan and local revalidate their own attempts, so a
+proposal can be skipped under different load; exact saved-forest reuse is not yet
+implemented. The `box_route_seed_plan.json` / `box_route_seed_local.json` sidecars
+record acceptance and assignments. This option currently excludes freeze,
+pre-placement policies and `sat_alt`. It establishes aggregate feasibility only;
+physical tracks, final pin access and routed timing still require validation.
+Every SAT entry now requires an all-signal coarse screen, including seed meshes.
+Its capacity share is `min(global_share, 0.95)`. Any missing coarse path, coarse
+share overflow, edge use above 95% of raw directional track capacity, physical
+cell density above 95%, or oversized proposed region returns `Legroute_replan`
+before model construction. Critical protection does not exempt oversized regions.
+The cell target is `partition_cells` when enabled; otherwise the owner passes its
+existing `place.region.max_cells` as `region_cell_limit` (also an explicit replay
+key). Route-driven planning assesses the proposed cuts after its coarse screen
+passes, so a whole-design planning mesh is not mistaken for one oversized SAT region.
+Cell density is the assigned movable CORE cells' actual LEF area divided by free
+placement-site area after fixed CORE cells, macros, halos, taps and blockages are
+subtracted. Missing rows contribute no area. Movable overhang reservations used
+for legal-box packing are excluded from this denominator adjustment, preventing
+their area being counted twice. Assigned box tiles determine region membership.
+`pre_sat.json` and the planning report's `pre_sat` object record these metrics,
+per-region cell/free areas, affected component IDs and the union of hotspot tile
+footprints. Search-limited, disconnected and capacity failures stay distinct;
+they direct planning recovery and do not constitute a physical UNSAT proof.
+`partition_crossings` and `partition_critical_crossings` count net-edge crossings of
+the initial mesh. `partition_mesh=true` replaces straight cuts with route-weighted
+source/sink minimum cuts, allowing connected nonrectangular tile sets. Connected terminal
+patches encourage balance; both resulting regions are checked for four-neighbour
+connectivity before recursion, and mesh repairs cannot disconnect a region.
+Mesh changes recompute crossings from the retained trees; only endpoint movement reruns
+the global search. This option defaults to 0, retaining the existing seed mesh.
+`partition_timeout_rounds=N` (default 0) retries timed-out regions inside legroute
+before the outer placement loop considers area growth. Each retry halves the
+configured partition cell target, refining only regions that actually returned
+UNKNOWN; UNSAT regions and fail-fast omissions are not selected. The existing
+`partition_mesh` setting chooses straight or connected cuts. Unrelated tile
+ownership and outer boundaries remain unchanged, new cuts obey the same capacity
+and critical-net rules, and the global trees are retained. Regional answers are
+reused when their complete routing signatures still match. The retry budget is
+independent of `spill_rounds` and currently requires fixed legal boxes, fixed hops
+and one policy without pre-placement. Reports count `partition_timeout_rounds`,
+`partition_timeout_regions` and `sat_reused_regions`. A recut may still fail or
+introduce a local capacity contradiction; neither outcome establishes physical
+infeasibility.
+For a comparison using the same routing model, `global_all=true` runs the all-signal
+prepass while retaining the original region mesh when `partition_cells=0`. It requires
+the same legal-box/routed-pin options and reports searches in `partition_route_calls`.
+`global_keep=true` retains every prepass tree inside the regions as well as at their
+boundaries. With `global_keep=false`, local SAT connects each component of the
+global tree restricted to that region independently. A tree can leave and re-enter
+a connected region without an extra connection between its separate pieces;
+interior routes remain SAT choices. Cut bounds count the union of each net's
+component crossings, and region cache signatures include component membership.
+Retaining every interior route with `global_keep=true` requires fixed
+legal boxes and hops, a complete all-signal prepass, and no pre-placement policies.
+Regional SAT still checks fixed interior demand against capacity; `sat_fixed_overflow`
+counts fixed interior edges exceeding that capacity. Boundary capacity remains the
+global router's responsibility. `global_retained_parts` counts retained net/region
+parts, including parts consisting only of boundary endpoints. This is a coarse routing
+check; it does not establish detailed-routing closure or a routed-timing improvement.
+In strict mode, retained-tree overflow rejects the attempt before regional SAT:
+changing a cut cannot fix those fixed routes. Missing trees needed by partitioning
+or retention also report a recoverable routing failure. With a generated core and
+`allow_increase_area=true`, these failures and terminal packing/density-cap failures
+request a lower utilization and a fresh placement. Fixed cores and invalid controls
+remain errors; the hard density cap and mandatory cell padding are preserved.
+Automatic core search, or `density=0` with legroute, requests utilization plus
+0.05 up to the representable value immediately below the terminal hard bin cap.
+Retry and remembered-density text preserve that strict inequality. Explicit
+density settings remain subject to the existing validation. This allows a dense
+search point to reach packing/routing and request area growth instead of failing
+because its computed target equals the hard cap.
+
+Fixed cell and macro endpoints use their transformed LEF pin shapes, including
+master origin and instance orientation. Planning, region crossings and final tap
+neighborhoods share this attachment; movable cells retain their box centers.
+A macro pin touching its body's boundary may attach to the exterior tile only
+along a same-layer track that fits the pin and has a clear geometric span.
+Interior or obstructed pins retain their actual pin tile, and no macro capacity
+is opened for access. Rotated macro footprints reserve their rotated area.
+These coarse attachments still require successful detailed pin/via access.
+
+`legal_boxes` also preserves cells inside unchanged boxes during `legroute.final`.
+Boxes moved by an explicitly enabled local repair may still be repacked. Track
+reservations retain their owning net, so collinear branches of one net may share
+metal; obstacles, other nets and parallel line-end spacing remain exclusions.
+`track_failures` splits `unassigned_segments` into fixed wires, risers, vertical
+and horizontal segments, jogs, and IO stubs. Final routing accounts for every
+selected signal, including signals whose global geometry is missing.
+
+`bazel build -c opt //tools:legroute_replay` builds a diagnostic for a saved legal
+placement. Its JSON configuration requires `def`, `lefs` (array), and a fresh
+`output` directory. It enables fixed legal boxes and retained all-signal trees,
+without synthesis, GP or legalization. `final`, `clock_spine`, `partition_cells`,
+`partition_mesh`, `partition_critical_cost`, `global_keep`, `global_share`, `global_rounds`,
+`global_net_pops`, `global_astar_weight`, `global_pattern`,
+`reserved_tracks`, `reserved_tracks_per_um`, `reserved_layers`, `threads`, and the `route_access`, `route_patterns`, `route_ms`,
+`route_passes` budgets accept explicit overrides (`route_access` is the exact per-call cap). The opt-in
+`route_access_per_pin` (default 0, off) raises a Final piece request's TOTAL shared access allowance to
+max(`route_access`, `route_access_per_pin` x its pins); it is not a per-pin allocation or guarantee. Other values
+retain production defaults. `legroute.json` lists each clock net's first planned-metal conflict per pass in full under
+`clock_conflicts` (phase, offending shape, blocker, rule), separately from the five-entry `failure_sample`. `clock_spine:false` disables spine geometry; final routing still must
+connect every signal and clock net. The `clock_required_nets`, `clock_connected_nets`,
+`clock_failed_nets` and `clock_unchecked_nets` report clock subsets of the total
+final net counters. Physical clock connectivity does not imply CTS or skew closure.
+
+`reserved_tracks_per_um` is an opt-in reservation density on each selected layer,
+measured perpendicular to routing travel. Its default `-1` retains the existing
+per-tile `reserved_tracks` count. A nonnegative value replaces that count; `0`
+removes only the heuristic reservation. `reserved_layers` is a comma-separated
+layer whitelist (empty means all). These controls preserve physical PG metal,
+obstacle spacing and the separate clock reservation. Upper-layer capacity and
+trunk track assignment use the same physical track selection, so rectangular tiles
+do not multiply the per-micron reservation in one direction. On the box/escape
+layer (M2 in ASAP7), the policy reduces the coarse capacity budget to retain access
+headroom; final pin access and local routing may use those tracks when physically
+legal. Detailed fallback is also not a universal exclusion of heuristic-reserved
+tracks. A coarse improvement still requires native detailed signal/clock closure
+before it can justify changing defaults.
+`final_net_limit` (API/replay only, default 0) bounds the detailed first-pass
+net prefix while preserving the full netlist, global routing and congestion.
+The prefix counts both signal and clock jobs. A partial run reports
+`unchecked_nets`, emits no signal or clock wires and returns
+incomplete; `final_diagnostic.tsv` lists each attempted net, endpoints and reason.
+`synth.place.legroute.global_net_pops` bounds each global net routing attempt,
+including enlarged search windows (default 0: unbounded). Exhausted attempts
+remain unresolved, release partial reservations, and return to planning before SAT.
+The report records cumulative `global_search_pops` and `global_search_limited`;
+coarse-only replay also rejects missing global paths or capacity overflow.
+Before searching, a shared component map of positive-capacity coarse edges
+rejects endpoints in disconnected components with zero queue pops. Nets with
+fixed edges or their own region capacity exemptions bypass this check. Searches
+for connected nets retain their existing costs and ordering. Planning reports
+`topology_disconnected`; routing reports `global_topology_disconnected`, separate
+from budget exhaustion. This is a verdict about the current coarse model, not
+physical unroutability: planning can move endpoints and measure again. A remaining
+disconnection returns typed planning feedback before SAT, including its affected
+endpoints; the owner chooses local timed movement or global area/GP recovery.
+For `plan_only:true`, `plan_net_pops` selects the corresponding planning budget
+(default 100000, 0 unbounded).
+`place.legroute.global_astar_weight` (replay key `global_astar_weight`) is an
+opt-in coarse-search experiment, shared by planning and routing. Its default 1
+preserves the existing A* order; finite values above 1 favor proximity to the
+remaining goals over shortest path cost. Fixed-edge nets and nets with more than
+32 endpoint tiles retain Dijkstra, since zero-cost edges invalidate Manhattan
+distance and large broadcasts make per-goal scans expensive. The same obstacle,
+capacity, complete-tree and queue-budget checks apply at every weight. Plan and
+route reports record the resolved weight beside the search-work counters; faster
+coarse search alone is not evidence of detailed routing closure or better QoR.
+`place.legroute.global_pattern` (default false, replay key `global_pattern`)
+tries a FastRoute-derived L/Z pattern stage before the existing maze search.
+LiveHD supplies the rooted timing topology, physical tile aspect ratio and
+capacity/history costs; this stage has no OpenDB, OpenSTA or OpenROAD runtime
+dependency. It first compares the two L paths, then tries bounded Z paths when
+both L paths are blocked; a feasible L path can cost more than an unexamined Z
+path. Nets with fixed pieces, own-region exemptions or more
+than 32 endpoint tiles retain the existing search. Only a complete connected
+result is converted to an endpoint-spanning tree and reserved; unsuccessful
+attempts leave no reservations and fall back to maze routing. Planning records
+`pattern_attempts`, `pattern_completed`, `pattern_fallbacks`, `pattern_work` and
+`pattern_work_limited`; routing prefixes these names with `global_`. Pattern work
+is separate from maze queue pops. The adapted code retains its OpenROAD revision
+and BSD attribution in `fast_route_pattern.cpp`; it is not the complete FastRoute
+algorithm or its layer assignment. Admission and physical closure checks still
+apply to every result.
+Planning snapshots and coarse-only replay also write `plan_failures.tsv`, one row
+per unresolved signal (a header alone means none). Rows retain the original
+floorplan net index and name, physical pin count, distinct routing-endpoint tile
+count, endpoint bounding-box width/height/Manhattan span in tiles, search-budget
+and `topology_disconnected` verdicts, last-attempt and cumulative queue pops,
+and routing-attempt count. A topology rejection counts as one zero-pop attempt.
+Attempt counts include negotiation reroutes; each attempt's pops include all
+search-window growth. Names escape backslash, tab, newline and carriage return
+as `\\`, `\t`, `\n`, `\r`. Complete trees with overflow remain in the aggregate
+overflow counts, not this unresolved-net list. Input hashes belong to the
+experiment manifest, so comparisons can verify the same placement and timing.
+Set `global_keep:false` to exercise regional SAT routing on the saved placement
+instead of retaining its entire global tree. This still audits fixed cell geometry;
+it is not a joint placement and detailed-routing closure result.
+An optional `timing` text file supplies `instance:pin slack_ps clock_0_or_1` per
+line; without it, routing has no timing ranking. Existing signal wires are cleared
+before replay. The tool checks exact cell and IO preservation, emits the native
+report and an audited DEF, and returns 1 for incomplete routing (2 for errors).
+Use OpenROAD-clean placements as routability witnesses for native regressions;
+an OpenROAD failure is not proof that legroute cannot route that placement.
+Every replay also writes `input.def` for an independent router to consume the
+same physical input. Optional `power_grid:"pg_asap7"` (or another registered
+strategy) generates the native PG first and checks that existing cells and IOs
+are unchanged; generated PG terminals are included in the subsequent audit.
+Generation fails if the saved placement lacks the required core inset or its
+fixed signal IOs conflict with the PG. The existing FakeRAM abstract exception
+can be explicitly selected with `pg_tolerate_macro_pin_overlap:true` (default
+false); it records the same warning as production `place.pg.macro_pin_overlap`
+and does not excuse overlap between different macros. For a signal-only diagnostic,
+`protect_supply_access:false` omits reservations for future supply-pin access;
+physical supply pins and wires remain obstacles, and clock access remains
+protected. The API and replay default is `true`. This explicit diagnostic does
+not establish routability with a future PG. Its setting is recorded in
+`placement_audit.json` along with whether a power grid was generated.
+Final connectivity verification includes placed rectangular die terminals,
+using their DEF orientation. Missing, unplaced, duplicate or malformed terminals
+fail explicitly; IO nets are no longer accepted as unchecked. Connectivity is
+separate from the independent detailed DRC check.
 
 ## Terminal legalization
 

@@ -14,6 +14,7 @@
 #include "cell_criticality.hpp"
 #include "inou/lefdef/index_union_find.hpp"
 #include "pin_adjust.hpp"
+#include "placement_session.hpp"
 #include "rapidjson/stringbuffer.h"
 #include "rapidjson/writer.h"
 
@@ -152,6 +153,7 @@ Boundary_pin_model split_boundary_nets(const dp::Design& original, const Region_
   Boundary_pin_model result;
   result.design = original;
   auto& d       = result.design;
+  d.pin_timing.reset();  // Physical pin indices do not name pins in the temporary split topology.
   d.pin2node.clear();
   d.pin2net.clear();
   d.pin_offset_x.clear();
@@ -617,7 +619,8 @@ Boundary_pins::Boundary_pins(const Region_mesh& regions, Busorder_route router, 
   }
 }
 
-void Boundary_pins::refine(dp::Design& physical, const dp::Options& base) {
+void Boundary_pins::refine(dp::Design& physical, const dp::Options& base, Placement_session* session,
+                           const std::vector<std::string>& node_names) {
   const auto start = Clock::now();
   measure_options  = base;
   original_nodes   = physical.node_x.size();
@@ -674,11 +677,48 @@ void Boundary_pins::refine(dp::Design& physical, const dp::Options& base) {
                        dp::hpwl(snapshot),
                        elapsed(start)});
   };
+  auto temporary_names = node_names;
+  if (session) {
+    if (node_names.size() != physical.node_x.size()) {
+      throw std::invalid_argument("boundary session identities mismatch");
+    }
+    for (size_t i = physical.node_x.size(); i < work.node_x.size(); ++i) {
+      temporary_names.push_back("region:" + std::to_string(i));
+    }
+    if (base.checkpoint && base.checkpoint_interval > 0) {
+      control.checkpoint_interval = base.checkpoint_interval;
+      control.checkpoint_overflow_milestones.clear();
+      control.checkpoint_start = 0;
+      control.checkpoint_final = true;
+      control.checkpoint       = [&](const dp::Design& snapshot, int iteration) {
+        for (int i = 0; i < actual.num_movable; ++i) {
+          actual.node_x[i] = snapshot.node_x[i];
+          actual.node_y[i] = snapshot.node_y[i];
+        }
+        auto update = base.checkpoint(actual, iteration);
+        if (update.replacement || !update.node_size_x.empty() || !update.node_size_y.empty() || !update.pin_offset_x.empty()
+            || !update.pin_offset_y.empty() || (update.pin_timing && update.pin_timing->enabled())) {
+          throw std::runtime_error("boundary session timing requires physical net-weight updates without topology edits");
+        }
+        if (!update.net_weights.empty()) {
+          actual.net_weights = update.net_weights;
+          if (options.split) {
+            update.net_weights.clear();
+            for (int net : model.parent_net) {
+              update.net_weights.push_back(actual.net_weights.at(net));
+            }
+          }
+        }
+        return update;
+      };
+    }
+  }
   // GP with every virtual pin fixed; the pins never move.
   const auto settle = [&](unsigned iterations) {
     control.max_iterations = control.min_iterations = control.schedule_iterations = iterations;
     dp::GpState state;
-    const auto  result = dp::place(work, control, &state);
+    const auto  result = session ? session->advance(work, control, temporary_names, "boundary_" + phase, iterations)
+                                 : dp::place(work, control, &state);
     for (const auto& pin : model.anchors) {
       if (work.node_x[pin.node] != pin.x || work.node_y[pin.node] != pin.y) {
         throw std::runtime_error("virtual boundary pin moved");
@@ -706,6 +746,10 @@ void Boundary_pins::refine(dp::Design& physical, const dp::Options& base) {
   for (int i = 0; i < physical.num_movable; ++i) {
     physical.node_x[i] = work.node_x[i];
     physical.node_y[i] = work.node_y[i];
+  }
+  if (session) {
+    physical.net_weights = actual.net_weights;
+    session->synchronize(physical, base, node_names, "boundary_release");
   }
   observe(physical, "after_gp");
   history.back().iteration  = result.iterations;

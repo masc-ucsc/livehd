@@ -1,5 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
+#include <functional>
+
 #include "physical.hpp"
 
 namespace livehd::physical {
@@ -39,6 +41,7 @@ class Signal_metal_rules {
     std::vector<Eol_keepout> keepouts;
     std::vector<double>      corner_spacing;
     double                   query_radius = 0;
+    double                   lateral      = 0;  // largest across-track extent of any parsed extension rule
     std::vector<double>      widths;
     std::vector<Track>       tracks;
     bool                     right_way = false, explicit_tracks = false;
@@ -56,8 +59,19 @@ public:
   // still requires rectangle()/spacing() validation.
   std::vector<int64_t>   candidate_widths(const std::string& layer) const;
   Rule_check             spacing(const Shape&, const Shape&) const;
+  // Existing-source metal has no independent EOL at an interior via-pad edge.
+  // The caller must prove the source is contained in its original pin metal
+  // and that every supplied target footprint was also already present. Each
+  // footprint is the exact active directional EOL influence, not the broader
+  // query radius. Ordinary, reverse-direction and corner checks still run.
+  Rule_check             spacing_with_existing_source(const Shape&, const Shape&,
+                                                      const std::function<bool(const Rect&)>& existing_target) const;
   // Conservative query radius for every spacing rule on this layer; missing
   // or unsupported rules return nullopt instead of an unsafe zero radius.
   std::optional<int64_t> clearance(const std::string& layer) const;
+  // Conservative across-track bound: the largest edge-to-edge distance perpendicular to a wire at which any rule
+  // on this layer can apply (ordinary and every PRL table spacing for any width/length, EOL spacing/WITHIN and
+  // parallel-edge values, keepout side extension, corner spacing). nullopt when clearance() is nullopt.
+  std::optional<int64_t> lateral_reach(const std::string& layer) const;
 };
 }  // namespace livehd::physical

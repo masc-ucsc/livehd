@@ -114,6 +114,72 @@ TEST(TerminalLegalize, PaddedCellsUseWholeRowWithoutFragmentingRemainingCapacity
   EXPECT_EQ(positions, (std::set<int64_t>{100, 400, 700}));
 }
 
+TEST(TerminalLegalize, NeighborhoodBoundsHoldOutsideCellsAndConstrainOriginNotFootprint) {
+  Fixture f(12, 2);
+  f.options.padding_sites = 0;
+  f.options.bins_x = f.options.bins_y = 1;
+  const auto a = f.cell(0, 0), b = f.cell(0, 0), outside = f.cell(7, 0);
+  f.net(a, b, -1);
+  f.net(b, outside, -1);
+  const auto held = f.fp.components[outside];
+  f.options.domains.resize(f.fp.components.size());
+  f.options.domains[a].origins    = physical::Rect{200, 0, 200, 0};
+  f.options.domains[b].origins    = physical::Rect{300, 0, 400, 0};
+  f.options.domains[outside].hold = true;
+  const auto report               = terminal_legalize(f.tech, f.fp, f.timing, f.options);
+  f.check(report);
+  EXPECT_EQ(f.fp.components[a].place.x, 200);
+  EXPECT_EQ(f.fp.components[a].place.y, 0);
+  EXPECT_GE(f.fp.components[b].place.x, 300);
+  EXPECT_LE(f.fp.components[b].place.x, 400);
+  EXPECT_EQ(f.fp.components[b].place.y, 0);
+  EXPECT_EQ(f.fp.components[outside], held);
+  EXPECT_EQ(report.held_cells, 1u);
+  EXPECT_EQ(report.bounded_cells, 2u);
+}
+
+TEST(TerminalLegalize, ExhaustedNeighborhoodDoesNotEscapeOrCommitEvenWithFreeCoreSites) {
+  Fixture f(12, 2);
+  f.options.padding_sites = 0;
+  f.options.bins_x = f.options.bins_y = 1;
+  const auto a = f.cell(0, 0), b = f.cell(1, 0);
+  f.options.domains.resize(f.fp.components.size());
+  f.options.domains[a].origins = physical::Rect{100, 0, 100, 0};
+  f.options.domains[b].hold    = true;
+  const auto before            = f.fp.components;
+  EXPECT_THROW(terminal_legalize(f.tech, f.fp, f.timing, f.options), Terminal_legalize_unfit);
+  EXPECT_EQ(f.fp.components, before);
+  // A farther row is legal and deliberately remains outside the failed domain.
+  f.options.domains[a].origins = physical::Rect{100, 100, 100, 100};
+  const auto report            = terminal_legalize(f.tech, f.fp, f.timing, f.options);
+  f.check(report);
+  EXPECT_EQ(f.fp.components[a].place.y, 100);
+  EXPECT_EQ(f.fp.components[b], before[b]);
+}
+
+TEST(TerminalLegalize, InvalidNeighborhoodDomainsFailAtomically) {
+  Fixture f;
+  f.cell(1, 0);
+  const auto before = f.fp.components;
+  f.options.domains.resize(2);
+  EXPECT_THROW(terminal_legalize(f.tech, f.fp, f.timing, f.options), std::invalid_argument);
+  f.options.domains.resize(1);
+  for (const auto& bounds : {
+           physical::Rect{200, 0,      100, 100},
+           physical::Rect{  0, 0, INFINITY, 100}
+  }) {
+    f.options.domains[0].origins = bounds;
+    EXPECT_THROW(terminal_legalize(f.tech, f.fp, f.timing, f.options), std::invalid_argument);
+    EXPECT_EQ(f.fp.components, before);
+  }
+  f.options.domains[0] = {
+      true,
+      physical::Rect{200, 0, 200, 0}
+  };
+  EXPECT_THROW(terminal_legalize(f.tech, f.fp, f.timing, f.options), std::invalid_argument);
+  EXPECT_EQ(f.fp.components, before);
+}
+
 TEST(TerminalLegalize, GapPackingPreservesPreviouslyLockedCriticalCells) {
   Fixture f(11, 1);
   f.options.bins_x = f.options.bins_y = 1;
@@ -437,7 +503,7 @@ TEST(TerminalLegalize, FailureIsAtomicAndDoesNotRelaxPaddingOrDensity) {
     f.cell(1, 0);
   }
   const auto before = f.fp;
-  EXPECT_THROW(terminal_legalize(f.tech, f.fp, f.timing, f.options), std::runtime_error);
+  EXPECT_THROW(terminal_legalize(f.tech, f.fp, f.timing, f.options), Terminal_legalize_unfit);
   EXPECT_EQ(f.fp.components, before.components);
   f.options.padding_sites = 0;
   const auto report       = terminal_legalize(f.tech, f.fp, f.timing, f.options);
@@ -511,7 +577,7 @@ TEST(TerminalLegalize, FixedLogicStillCannotExceedTheHardDensityCap) {
   const auto i                    = f.cell(0, 0);
   f.fp.components[i].place.status = physical::Status::FIXED;
   const auto before               = f.fp.components;
-  EXPECT_THROW(terminal_legalize(f.tech, f.fp, f.timing, f.options), std::runtime_error);
+  EXPECT_THROW(terminal_legalize(f.tech, f.fp, f.timing, f.options), Terminal_legalize_unfit);
   EXPECT_EQ(f.fp.components, before);
 }
 

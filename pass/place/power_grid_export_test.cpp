@@ -5,6 +5,7 @@
 
 #include "gtest/gtest.h"
 #include "inou/lefdef/routing_geometry.hpp"
+#include "inou/lefdef/routing_rules.hpp"
 #include "power_grid.hpp"
 #include "rapidjson/document.h"
 #include "rapidjson/istreamwrapper.h"
@@ -402,5 +403,142 @@ TEST(PowerGridExport, RegenerationChecksOrientedSignalIosWithoutMovingThem) {
   EXPECT_EQ(output.terminals.front(), input.terminals.front());
   input.terminals.front().status = ph::Status::UNPLACED;
   EXPECT_THROW(make_power_grid(tech, input, profile(tech), nullptr, true), std::invalid_argument);
+}
+}  // namespace livehd::placement
+
+namespace livehd::placement {
+TEST(PowerGridExport, ContainedPinLandingDoesNotInventAnEndOfLineInsideExistingMetal) {
+  auto tech               = technology();
+  tech.manufacturing_grid = .001;
+  for (const auto& name : tech.routing_layers) {
+    auto& layer         = tech.layers.at(name);
+    layer.width         = .018;
+    layer.rules.loaded  = true;
+    layer.rules.spacing = {
+        {.018, {}, {}}
+    };
+  }
+  tech.layers.at("M1").rules.properties["LEF58_EOLKEEPOUT"] = {"EOLKEEPOUT 0.01825 EXTENSION 0.0 0.0 0.031 ;"};
+  auto& master                                              = tech.macros.at("cell");
+  master.width                                              = .594;
+  master.pins.at("VDD").shapes.front().rect.xh              = .594;
+  master.pins.at("VSS").shapes.front().rect.xh              = .594;
+  // The wide end of this L-shaped pin belongs to the LEF. A via's lower pad
+  // lies inside its vertical rectangle; that pad has no independent EOL.
+  master.pins["A"]                                          = {
+      "INPUT",
+      "SIGNAL",
+      {{"M1", {.261, .225, .440, .243}}, {"M1", {.261, .183, .279, .243}}}
+  };
+  tech.vias["CONTACT"].shapes = {
+      {"M1", {-.009, -.011, .009, .011}},
+      {"M2", {-.011, -.009, .011, .009}},
+      {"V1", {-.009, -.009, .009, .009}}
+  };
+  auto input                                 = frame();
+  input.components.front().place.width       = 594;
+  input.components.front().place.orientation = ph::Orientation::FS;
+  for (auto& row : input.rows) {
+    row.orientation = row.orientation == ph::Orientation::N ? ph::Orientation::FS : ph::Orientation::N;
+  }
+  input.nets.push_back({"signal", {{"u0", "A"}}, {{"ROUTED", {ph::via_path("M1", 3186, 2745, "CONTACT")}}}, "SIGNAL"});
+  const ph::Signal_metal_rules rules(tech, input);
+  const ph::Shape              landing{
+      "M1",
+      {3177, 2734, 3195, 2756}
+  };
+  const ph::Shape rail{
+      "M1",
+      {2709, 2691, 4851, 2709}
+  };
+  EXPECT_EQ(rules.spacing(landing, rail).reason, "LEF58 EOL keepout");
+  EXPECT_NO_THROW(make_power_grid(tech, input, profile(tech)));
+
+  auto unmatched = input;
+  unmatched.nets.front().connections.clear();
+  EXPECT_THROW(make_power_grid(tech, unmatched, profile(tech)), std::invalid_argument);
+  // Same geometry but the rail near the pad is not pre-existing supply-pin
+  // metal of this cell. Other supply pins cannot stand in for this ownership.
+  auto extended_pg                                                    = tech;
+  extended_pg.macros.at("cell").pins.at("VDD").shapes.front().rect.xh = .278;
+  const auto rejected_signal_pg                                       = [&](const ph::Technology& candidate) {
+    try {
+      (void)make_power_grid(candidate, input, profile(candidate));
+      FAIL() << "accepted new signal/PG spacing violation";
+    } catch (const std::invalid_argument& e) {
+      EXPECT_NE(std::string(e.what()).find("power grid conflicts with retained signal signal on M1"), std::string::npos);
+    }
+  };
+  rejected_signal_pg(extended_pg);
+  // Removing one DBU of the original pin leaves ordinary spacing legal but
+  // makes the same landing new metal: the isolated EOL must now be rejected.
+  auto uncontained                                                 = tech;
+  uncontained.macros.at("cell").pins.at("A").shapes.back().rect.xl = .262;
+  rejected_signal_pg(uncontained);
+  for (const auto* use : {"POWER", "GROUND"}) {
+    auto invalid_source                               = tech;
+    invalid_source.macros.at("cell").pins.at("A").use = use;
+    rejected_signal_pg(invalid_source);
+  }
+  for (const auto* use : {"CLOCK", "SIGNAL", ""}) {
+    auto source                               = tech;
+    source.macros.at("cell").pins.at("A").use = use;
+    EXPECT_NO_THROW(make_power_grid(source, input, profile(source)));
+  }
+  auto unplaced_source                            = input;
+  unplaced_source.components.front().place.status = ph::Status::UNPLACED;
+  EXPECT_THROW(make_power_grid(tech, unplaced_source, profile(tech)), std::invalid_argument);
+  auto virtual_source                            = tech;
+  virtual_source.macros.at("cell").virtual_proxy = true;
+  EXPECT_THROW(make_power_grid(virtual_source, input, profile(virtual_source)), std::invalid_argument);
+  // A second row's supply pin can cover the rest of the same physical rail.
+  // The coverage is a union: neither individual pin covers the whole footprint.
+  auto adjacent_tech               = extended_pg;
+  adjacent_tech.macros["neighbor"] = technology().macros.at("cell");
+  auto adjacent                    = input;
+  adjacent.rows.insert(adjacent.rows.begin(), {"below", "site", 2700, 2430, 40, 54, ph::Orientation::N});
+  Ann_place neighbor(3186, 2430, 108, 270);
+  neighbor.status = ph::Status::PLACED;
+  adjacent.components.push_back({"u1", "neighbor", neighbor});
+  EXPECT_NO_THROW(make_power_grid(adjacent_tech, adjacent, profile(adjacent_tech)));
+  auto  wrong_owner              = adjacent_tech;
+  auto& neighbor_pins            = wrong_owner.macros.at("neighbor").pins;
+  neighbor_pins.at("VSS").shapes = neighbor_pins.at("VDD").shapes;
+  neighbor_pins.erase("VDD");
+  try {
+    (void)make_power_grid(wrong_owner, adjacent, profile(wrong_owner));
+    FAIL() << "used the other supply net to cover original PG metal";
+  } catch (const std::invalid_argument& e) {
+    EXPECT_NE(std::string(e.what()).find("power grid conflicts with retained signal signal on M1"), std::string::npos);
+  }
+  // A one-DBU hole must not disappear into the supply-pin bounding hull.
+  adjacent_tech.macros.at("neighbor").pins.at("VDD").shapes.front().rect.xl = .009;
+  try {
+    (void)make_power_grid(adjacent_tech, adjacent, profile(adjacent_tech));
+    FAIL() << "accepted a gap in original supply-pin metal";
+  } catch (const std::invalid_argument& e) {
+    EXPECT_NE(std::string(e.what()).find("power grid conflicts with retained signal signal on M1"), std::string::npos);
+  }
+  auto extended_landing                                      = tech;
+  extended_landing.vias.at("CONTACT").shapes.front().rect.yl = -.019;
+  EXPECT_THROW(make_power_grid(extended_landing, input, profile(extended_landing)), std::invalid_argument);
+  // Even declared pin containment never excuses overlap or ordinary spacing.
+  auto shorted                                                 = extended_landing;
+  shorted.macros.at("cell").pins.at("A").shapes.back().rect.yh = .290;
+  shorted.vias.at("CONTACT").shapes.front().rect.yl            = -.045;
+  EXPECT_THROW(make_power_grid(shorted, input, profile(shorted)), std::invalid_argument);
+  auto ordinary_spacing                          = tech;
+  ordinary_spacing.layers.at("M1").rules.spacing = {
+      {.026, {}, {}}
+  };
+  EXPECT_THROW(make_power_grid(ordinary_spacing, input, profile(ordinary_spacing)), std::invalid_argument);
+  auto cut_collision                                  = tech;
+  cut_collision.vias.at("CONTACT").shapes.back().rect = {-.009, -.054, .009, -.036};
+  try {
+    (void)make_power_grid(cut_collision, input, profile(cut_collision));
+    FAIL() << "accepted signal cut at a supply cut";
+  } catch (const std::invalid_argument& e) {
+    EXPECT_NE(std::string(e.what()).find(" on V1 "), std::string::npos);
+  }
 }
 }  // namespace livehd::placement

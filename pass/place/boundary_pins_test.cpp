@@ -383,4 +383,48 @@ TEST(BoundaryPins, RepeatedBitCrossingsRemainFixedAndAreReported) {
   EXPECT_EQ(stats.moved, 0u);
   EXPECT_EQ(model.design.node_y, saved);
 }
+TEST(BoundaryPins, LiveSessionPreservesFillersAcrossOrderingAndRelease) {
+  auto                           d        = fixture();
+  const auto                     topology = d.pin2node;
+  const std::vector<std::string> names{"cell:left", "cell:right", "io:out"};
+  dp::Options                    base;
+  base.max_iterations = 20;
+  base.min_iterations = 0;
+  base.bins_x = base.bins_y = 8;
+  base.filler_max_count     = 32;
+  base.max_step             = 1e-5;  // keep the two cells on opposite sides of the cut
+  base.legalize = base.detailed_place = false;
+  Placement_session session;
+  session.advance(d, base, names, "initial", 20);
+  const auto saved     = session.snapshot();
+  const auto particles = saved.optimizer.x.size() - d.node_x.size();
+  ASSERT_GT(particles, 0u);
+  unsigned timing_calls    = 0;
+  base.checkpoint_interval = 5;
+  base.checkpoint          = [&](const dp::Design& physical, int) {
+    EXPECT_EQ(physical.pin2node, topology);
+    EXPECT_EQ(physical.node_x.size(), 3u);
+    ++timing_calls;
+    dp::GpUpdate update;
+    update.net_weights = {4};
+    return update;
+  };
+  Boundary_pin_options options;
+  options.order             = true;
+  options.settle_iterations = 20;
+  options.iterations        = 50;
+  Boundary_pins boundary(boxes, rsmt, 1, options);
+  boundary.refine(d, base, &session, names);
+  EXPECT_GT(boundary.pin_model().anchors.size(), 0u);
+  EXPECT_EQ(timing_calls, 14u);
+  EXPECT_EQ(session.iteration(), 90);
+  EXPECT_EQ(session.cold_starts(), 1u);
+  EXPECT_EQ(session.snapshot().optimizer.x.size() - d.node_x.size(), particles);
+  EXPECT_EQ(session.snapshot().optimizer.physical.pin2node, topology);
+  EXPECT_EQ(d.net_weights, (std::vector<double>{4}));
+  for (const auto& pin : boundary.pin_model().anchors) {
+    EXPECT_EQ(boundary.pin_model().design.node_x[pin.node], pin.x);
+    EXPECT_EQ(boundary.pin_model().design.node_y[pin.node], pin.y);
+  }
+}
 }  // namespace livehd::placement

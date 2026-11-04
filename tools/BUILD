@@ -151,6 +151,13 @@ cc_binary(
 )
 
 cc_binary(
+    name = "legroute_replay",
+    srcs = ["legroute_replay.cpp"],
+    copts = COPTS,
+    deps = ["//pass/place:legroute", "//pass/place:power_grid", "//inou/lefdef:inou_lefdef", "@rapidjson"],
+)
+
+cc_binary(
     name = "placement_metrics",
     srcs = ["placement_metrics.cpp"],
     copts = COPTS,
@@ -247,4 +254,11 @@ cc_binary(
     srcs = ["signal_route_bench.cpp"],
     copts = COPTS,
     deps = ["//pass/place:signal_router", "//inou/lefdef:inou_lefdef", "@rapidjson"],
+)
+
+cc_binary(
+    name = "legroute_box_probe",
+    srcs = ["legroute_box_probe.cpp"],
+    copts = COPTS,
+    deps = ["//pass/place:legroute", "//pass/place:signal_router", "//inou/lefdef:inou_lefdef", "@rapidjson"],
 )

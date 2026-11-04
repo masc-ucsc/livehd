@@ -69,6 +69,12 @@ void lhd_sat_xor(void* opaque, const unsigned* vars, unsigned count, int rhs) {
   }
   s.cms->add_xor_clause(clause, rhs != 0);
 }
+void lhd_sat_prefer(void* opaque, int literal) {
+  auto& s = *static_cast<Lhd_sat*>(opaque);
+  if (s.cad) {
+    s.cad->phase(literal);
+  }
+}
 int lhd_sat_solve(void* opaque, const int* assumptions, unsigned count, unsigned conflicts, unsigned milliseconds) {
   auto& s = *static_cast<Lhd_sat*>(opaque);
   if (s.cad) {

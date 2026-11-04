@@ -28,6 +28,9 @@ public:
   void        clause(std::initializer_list<int> literals) { clause(std::span(literals.begin(), literals.size())); }
   void        parity(std::span<const int> positive_variables, bool odd);
   Sat_status  solve(std::span<const int> assumptions = {}, unsigned conflicts = 10000, unsigned milliseconds = 50);
+  // Nonbinding decision-phase hint, applied by CaDiCaL; other backends may ignore it.
+  // Positive prefers true, negative prefers false. Does not change clauses or invalidate a model.
+  void        prefer(int literal);
   bool        value(int variable) const;
   // Valid only after UNSAT; identifies assumptions in the conflict core.
   bool        failed(int literal) const;

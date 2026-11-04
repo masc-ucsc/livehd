@@ -508,6 +508,10 @@ struct Lhd_error {
 void    load_metadata(Options& opts);
 Options parse_args(int argc, char** argv);
 
+// Computed GP density for a legroute core search. Stay strictly below the
+// terminal hard cap; explicit user densities are validated separately.
+double placement_search_density(double utilization, double max_density);
+
 // Resolve an abbreviated --set/--config key to its canonical
 // "<passtoken>.<flag>" form (2h-set_path), given the command-path context
 // (the dotted command words to the LEFT of the flag, e.g. "pass.abc"; "" when
@@ -789,7 +793,10 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "cell area / generated core area, in (0,1); 0 with legroute: bisection search for the densest core that routes, "
      "from area_search.start between area_search.min and area_search.max, at most area_restarts placements"},
-    {"place.area_search", "false", Synth_set_option::Kind::boolean, "core search state, set by the driver: failures go back to the search"},
+    {"place.area_search",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "core search state, set by the driver: failures go back to the search"},
     {"place.area_search.start", "0.8", Synth_set_option::Kind::file, "core search: the first utilization tried"},
     {"place.area_search.min", "0.4", Synth_set_option::Kind::file, "core search: the lowest utilization considered"},
     {"place.area_search.max", "0.99", Synth_set_option::Kind::file, "core search: the highest utilization considered"},
@@ -1420,7 +1427,8 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
     {"place.legroute.sat_ms",
      "60000",
      Synth_set_option::Kind::integer,
-     "with legroute: wall-clock limit of one region's SAT solve (ms; the lazy re-solves share it)"},
+     "with legroute: wall-clock budget for one unchanged-geometry regional attempt (ms; model construction, policies "
+     "and internal retries share it; 0 expires before construction)"},
     {"place.legroute.hop_spread",
      "6",
      Synth_set_option::Kind::file,
@@ -1457,7 +1465,7 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "0",
      Synth_set_option::Kind::file,
      "legroute: a crossing net's hop may move up to this many tiles along its boundary, chosen by the first of its two "
-     "regions to solve; the regions then solve in checkerboard waves, a wave's choices being the next wave's fixed "
+     "regions to solve; harder adjacent regions solve first, passing their choices as the next wave's fixed "
      "endpoints (0: every hop fixed ahead)"},
     {"place.legroute.spill_rounds",
      "0",
@@ -1496,7 +1504,11 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "8",
      Synth_set_option::Kind::integer,
      "legroute: the checker alternative's window (tiles) for the boxes homed on the untracked checkerboard tiles"},
-    {"place.legroute.alt_ms", "0", Synth_set_option::Kind::integer, "legroute: SAT time per alternative placement (ms; 0: sat_ms)"},
+    {"place.legroute.alt_ms",
+     "0",
+     Synth_set_option::Kind::integer,
+     "legroute: per-alternative time cap within the remaining shared regional budget (ms; 0: sat_ms); never refreshes "
+     "an expired attempt"},
     {"place.legroute.alt_all",
      "false",
      Synth_set_option::Kind::boolean,
@@ -1507,6 +1519,101 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::boolean,
      "legroute: the region refinement's bus-ordered virtual pins are fixed endpoints of the crossing nets; false keeps "
      "its mesh but lets every crossing hop be chosen or chained"},
+    {"place.legroute.plan",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "experimental routing feedback and placement before route-driven cuts; requires partition_cells>0 and region_pins=false; "
+     "legal_boxes=false preserves the measured unlegalized placement for movable-box SAT; native router backend"},
+    {"place.legroute.plan.rounds",
+     "3",
+     Synth_set_option::Kind::integer,
+     "maximum routing-feedback placement rounds; each candidate is rerouted before acceptance"},
+    {"place.legroute.plan.iterations",
+     "100",
+     Synth_set_option::Kind::integer,
+     "GP iteration budget per planning feedback round; pre-SAT recovery runs at least 50"},
+    {"place.legroute.plan.min_iterations",
+     "0",
+     Synth_set_option::Kind::integer,
+     "minimum GP iterations per planning update; pre-SAT recovery has a 50-step floor"},
+    {"place.legroute.plan.timing_interval",
+     "0",
+     Synth_set_option::Kind::integer,
+     "refresh physical timing weights every N planning GP steps; recovery uses 5 when a timing provider exists and N is 0"},
+    {"place.legroute.plan.route_model",
+     "legacy",
+     Synth_set_option::Kind::file,
+     "planning GP congestion feedback: legacy (whole-tree pressure plus configured estimator) or coarse (native H/V maps)"},
+    {"place.legroute.plan.route_interval",
+     "50",
+     Synth_set_option::Kind::integer,
+     "GP steps between coarse route model samples during planning recovery"},
+    {"place.legroute.plan.route_net_pops",
+     "2000",
+     Synth_set_option::Kind::integer,
+     "per-net search budget for GP coarse feedback; unresolved requests remain penalties; final plan uses plan.net_pops"},
+    {"place.legroute.plan.export_coarse",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "export planning placements and coarse directional utilization with explicit source and unresolved-route provenance"},
+    {"place.legroute.plan.handoff",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "legalized witness mode: requires legal_boxes=true; measure native legalization and boxed all-signal routing before "
+     "accepting a candidate, preserving local domains"},
+    {"place.legroute.plan.max_degradation_ps",
+     "-1",
+     Synth_set_option::Kind::file,
+     "maximum estimated worst data-pin slack degradation versus the first measured planning candidate, in ps; "
+     "-1 disables; requires comparable finite timing feedback, not routed WNS"},
+    {"place.legroute.plan.local_tiles",
+     "0",
+     Synth_set_option::Kind::integer,
+     "bounded hotspot movement within this tile distance when at most partition_cells and 25% of movable cells are affected; "
+     "broader pressure requests area growth and unpinned GP; 0 keeps whole-placement movement"},
+    {"place.legroute.plan.net_pops",
+     "100000",
+     Synth_set_option::Kind::integer,
+     "queue-pop budget per net search in planning; exhaustion is reported as unresolved routing"},
+    {"place.legroute.plan.max_inflate",
+     "1.5",
+     Synth_set_option::Kind::file,
+     "maximum virtual cell-width inflation per planning round"},
+    {"place.legroute.global_keep",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "retain all-signal trees inside regions, including paths that leave and re-enter a region; requires "
+     "global_all or partition_cells and fixed legal boxes without free hops or pre-placement policies"},
+    {"place.legroute.global_all",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "route all signals with uniform edge accounting while keeping the seed mesh; requires legal_boxes=true, "
+     "global_route=true and region_pins=false; used to compare cuts on identical all-signal routes"},
+    {"place.legroute.partition_cells",
+     "0",
+     Synth_set_option::Kind::integer,
+     "experimental all-signal route followed by rectangular cuts targeting this many cells (0 = keep seed mesh); "
+     "requires legal_boxes=true, global_route=true and region_pins=false; global_share applies to every signal edge"},
+    {"place.legroute.partition_critical",
+     "0.05",
+     Synth_set_option::Kind::file,
+     "with partition_cells: forbid cuts through trees below this slack-rank fraction; no admissible cut leaves an "
+     "explicitly reported oversized region (0 = no protected trees)"},
+    {"place.legroute.partition_mesh",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "with partition_cells: allow connected nonrectangular tile regions using route-weighted source/sink cuts; "
+     "every region remains connected and every tile has one owner"},
+    {"place.legroute.partition_critical_cost",
+     "-1",
+     Synth_set_option::Kind::file,
+     "with partition_cells: -1 forbids critical crossings; a nonnegative value penalizes each critical crossing "
+     "divided by cut capacity; capacity limits remain hard"},
+    {"place.legroute.partition_timeout_rounds",
+     "0",
+     Synth_set_option::Kind::integer,
+     "retry timed-out regions with the partition cell target halved each round, reusing global trees and unchanged "
+     "regional answers (0 = disabled); requires partition_cells, fixed legal boxes/hops and one policy without pre-placement"},
     {"place.legroute.global_own_share",
      "0",
      Synth_set_option::Kind::file,
@@ -1521,6 +1628,46 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::integer,
      "with legroute.global_route: negotiation rounds (the nets on an edge over its share reroute under a congestion "
      "cost that doubles each round plus the edge's overuse history); 0 = one pass with full edges closed"},
+    {"place.legroute.global_net_pops",
+     "0",
+     Synth_set_option::Kind::integer,
+     "with legroute.global_route: queue pops per net routing attempt including window growth (0 = unlimited); "
+     "exhaustion is unresolved search and returns to planning before SAT; it does not prove physical infeasibility"},
+    {"place.legroute.box_route_seed",
+     "auto",
+     Synth_set_option::Kind::file,
+     "with legroute movable route partitions: match provisional box tiles inside the native placement domains and reroute "
+     "from them, offering local a validated witness (full local search remains the fallback); auto (default) enables it "
+     "whenever the legroute configuration supports it"},
+    {"place.legroute.density_ceiling",
+     "0.9",
+     Synth_set_option::Kind::file,
+     "legroute density ceiling in (0,1]: the most regional cell density and the largest share of an edge's tracks that "
+     "admission, SAT and recount checks accept (more conservative shares apply under it)"},
+    {"place.legroute.fit_density",
+     "0.9",
+     Synth_set_option::Kind::file,
+     "legroute planning precondition: the most movable cell area any coarse window may hold over its free row sites, in "
+     "[0,1]; a denser window returns to placement with local pressure before any global route (0 disables)"},
+    {"place.legroute.fit_first",
+     "true",
+     Synth_set_option::Kind::boolean,
+     "with legroute cell-boxes: planning and local route and cut from the whole-core matched box tiles (every box on a "
+     "distinct fitting tile near its centre), so region fit holds by construction; physical cells are not moved"},
+    {"place.legroute.fit_window",
+     "2",
+     Synth_set_option::Kind::integer,
+     "with fit_density: window side in multiples of the longer coarse-tile side (whole tiles, half-window overlap)"},
+    {"place.legroute.global_pattern",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "experimental FastRoute-derived L/Z pattern seed using native timing topology and remaining edge capacity; "
+     "bounded unsuccessful attempts fall back to the native maze router"},
+    {"place.legroute.global_astar_weight",
+     "1",
+     Synth_set_option::Kind::file,
+     "coarse routing A* heuristic weight (finite, >=1); 1 preserves shortest-path ordering, >1 favors faster "
+     "goal-directed search without relaxing capacity or connectivity checks; fixed-edge and large-fanout nets use Dijkstra"},
     {"place.legroute.dump_regions",
      "",
      Synth_set_option::Kind::file,
@@ -1532,10 +1679,25 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::file,
      "with legroute: share of a tile's tracks, per direction, that the routes fixed ahead of the SAT (hops, IO "
      "pre-routes) may take together; the rest stays for the region's own routes"},
+    {"place.legroute.box_reserve",
+     "M2:1,M3:1",
+     Synth_set_option::Kind::file,
+     "per-cellbox track budget LAYER:N,...: usable tracks of each layer every free tile keeps for Final's in-box "
+     "routing, subtracted identically in plan, global and local (empty disables)"},
     {"place.legroute.reserved_tracks",
      "1",
      Synth_set_option::Kind::integer,
      "with legroute: tracks per routing layer and tile kept out of the SAT model (pin access, clock and power drops)"},
+    {"place.legroute.reserved_tracks_per_um",
+     "-1",
+     Synth_set_option::Kind::file,
+     "with legroute: reservation density per micron perpendicular to travel on each selected layer; "
+     "-1 keeps reserved_tracks, 0 disables the heuristic reservation"},
+    {"place.legroute.reserved_layers",
+     "",
+     Synth_set_option::Kind::file,
+     "with legroute: comma-separated layers for heuristic track reservations; empty applies to all routing layers; "
+     "physical PG and obstacle exclusions remain in effect"},
     {"place.legroute.steiner_min",
      "3",
      Synth_set_option::Kind::integer,
@@ -1776,6 +1938,10 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      Synth_set_option::Kind::integer,
      "minimum same-design support before nearest fallback (1..shots)"},
     {"place.uroute.fallback", "nearest", Synth_set_option::Kind::file, "support fallback: nearest or skip"},
+    {"place.uroute.label_policy",
+     "detailed",
+     Synth_set_option::Kind::file,
+     "support label source: detailed, coarse-only (utilization only), or calibrated-mixed (validated calibration required)"},
     {"place.uroute.drc_level", "0", Synth_set_option::Kind::file, "DRC overflow threshold; zero keeps DRC report-only"},
     {"place.final.route.uroute_switch",
      "0.01",

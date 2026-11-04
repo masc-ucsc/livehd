@@ -26,6 +26,7 @@
 #include "legroute.hpp"
 #include "multirow.hpp"
 #include "multirow_eco.hpp"
+#include "placement_session.hpp"
 #include "power_grid.hpp"
 #include "prects_networks.hpp"
 #include "preroute_design.hpp"
@@ -41,6 +42,10 @@ struct Gp_timing_settings;
 }
 namespace detail {
 struct Resize_library;
+// Install the measured signal-IO prefix without importing generated supply
+// terminals into the placer. Logical net names belong to the graph view.
+void install_handoff_io(DreamPlace::native::Design&, std::vector<physical::Terminal>& signal_pins, size_t terminal_begin,
+                        const std::vector<physical::Terminal>& measured_pins);
 }
 namespace buffering {
 struct Checkpoint_settings;
@@ -219,8 +224,28 @@ struct Options {
     // their nearest tiles) with a warning instead of stopping as not routable
     bool     strict          = true;
   } legroute_probe;
-  int    fp_timing_max_updates = 10;
-  bool   fp_resize             = false;
+  struct Legroute_plan {
+    bool     enabled     = false;
+    // With legal_boxes=false the ordinary plan retains the exact raw frame and
+    // PG resources for movable local routing. This switch instead measures a
+    // legalized diagnostic handoff and requires legal_boxes=true.
+    bool     handoff     = false;
+    std::string route_model    = "legacy";  // coarse: actual local H/V pressure replaces whole-tree inflation in recovery
+    unsigned    route_interval = 50, route_net_pops = 2000;
+    bool        export_coarse = false;  // provenance-tagged utilization-only learning samples
+    unsigned local_tiles = 0;  // bounded hotspot movement radius; 0 keeps whole-placement movement during a local recovery slice
+    unsigned rounds = 3, iterations = 100, net_pops = 100000;
+    unsigned min_iterations = 0, timing_interval = 0;  // recovery: at least 50 steps; timing provider defaults to 5-step refresh
+    double   max_inflate        = 1.5;
+    double   max_degradation_ps = -1;  // estimated data-pin slack versus first candidate; -1 disables
+  } legroute_plan;
+  // Runtime owner shared across final-cell placement/refinement/finalization.
+  // Not serialized or hashed: it is state of this execution, not configuration.
+  std::shared_ptr<Placement_session> placement_session;
+  bool                               placement_area_resume  = false;  // runtime-only retry of a generated core
+  bool                               placement_macro_replan = false;  // trusted fresh macro frame after an area retry, runtime-only
+  int                                fp_timing_max_updates  = 10;
+  bool                               fp_resize              = false;
   // Resolved by the driver: enabled with resize unless explicitly disabled.
   bool   gp_resize             = false;
   int    gp_buffer_trials      = 4;    // maximum attempts per insertion/removal phase
@@ -453,6 +478,9 @@ Result       place(hhds::Graph& source, hhds::GraphLibrary& flat_library, const 
 // Mark a final/placed context without losing the original macro spacing request.
 Options      final_cell_options(const Options& options);
 // Regenerate native memory geometry as well as external LEFs for placed-API checks.
+// An optimization-pending movable legroute stage checks macros and fixed cells;
+// its movable CORE legality is deferred to local SAT. check_legality always
+// checks the complete physical frame independently of that stage policy.
 void         check_placed_legality(const Result& result, const Options& options);
 // Independent physical check against the LEF/DEF model, after DBU rounding.
 void         check_legality(const physical::Technology& tech, const physical::Floorplan& fp, double halo_x = 0, double halo_y = 0);

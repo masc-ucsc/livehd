@@ -3,9 +3,14 @@
 // nets made internal), no merge above the cost cap; then part-full boxes pack with the box of their nearest member
 // cell, the radius growing from 1.5 to 5 box widths (prototype variant c1_T20_pa_cd4).
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <cstdio>
+#include <fstream>
+#include <functional>
 #include <numeric>
 #include <queue>
+#include <set>
 #include <unordered_map>
 
 #include "legroute_internal.hpp"
@@ -49,15 +54,9 @@ struct Builder {
         sorted.push_back(x);
       }
     }
-    std::ranges::sort(sorted, std::greater<>());
-    for (int x : sorted) {
-      auto& r = room[0] >= room[1] ? room[0] : room[1];
-      if (r < x) {
-        return false;
-      }
-      r -= x;
-    }
-    return true;
+    // the same packing predicate as box_fits and pack_cells (greedy, then the bounded exact fallback)
+    return sorted.empty()
+           || !pack_segments(sorted, {int(std::floor(room[0] + 1e-9)), int(std::floor(room[1] + 1e-9))}).empty();
   }
   bool fits(int a, int b) const {
     if (sites[a] + sites[b] > 2 * g.sites * fill + 1e-9 || pins[a] + pins[b] > pin_limit || (slot[a] >= 0 && slot[b] >= 0)) {
@@ -179,6 +178,9 @@ bool tall_layout(const Design& d, const Grid& g, const Box& b, int tile, std::ve
 }
 
 bool box_fits(const Design& d, const Grid& g, const Box& b, int tile) {
+  if (size_t(tile) < g.box_short.size() && g.box_short[size_t(tile)]) {  // the cellbox budget is a promise even at home
+    return false;
+  }
   if (b.placed && tile == g.tile_of(b.cx, b.cy)) {  // legal_boxes: its cells are there already
     return true;
   }
@@ -200,6 +202,243 @@ bool box_fits(const Design& d, const Grid& g, const Box& b, int tile) {
     room.push_back(s.hi - s.lo);
   }
   return ws.empty() || !pack_segments(ws, room).empty();
+}
+
+Box_fit_repair repair_box_slots(const Design& d, const Grid& g, Boxes& boxes, double pin_limit) {
+  struct Resource {
+    int region = 0, tile = 0, count = 0;
+  };
+  std::vector<Resource>                      resources;
+  std::map<std::pair<int, uint32_t>, size_t> resource_of;
+  std::set<int>                              fixed_tiles;
+  size_t                                     fixed_conflicts = 0;
+  for (const auto& box : boxes.boxes) {
+    if (box.fixed) {
+      fixed_conflicts += !fixed_tiles.insert(box.tile).second;
+    }
+  }
+  for (int t = 0; size_t(t) < g.size(); ++t) {
+    if (g.blocked[size_t(t)] || fixed_tiles.contains(t)) {
+      continue;
+    }
+    const auto [it, fresh] = resource_of.try_emplace({g.region[size_t(t)], g.key[size_t(t)]}, resources.size());
+    if (fresh) {
+      resources.push_back({g.region[size_t(t)], t, 0});
+    }
+    ++resources[it->second].count;
+  }
+  const auto deficit = [&](const std::vector<Box>& members) {
+    std::vector<std::vector<int>> domains(members.size()), owners(resources.size());
+    std::vector<int>              order;
+    size_t                        missing = fixed_conflicts;
+    for (size_t b = 0; b < members.size(); ++b) {
+      if (members[b].fixed) {
+        missing += members[b].tile < 0 || size_t(members[b].tile) >= g.size() || !box_fits(d, g, members[b], members[b].tile);
+        continue;
+      }
+      for (size_t r = 0; r < resources.size(); ++r) {
+        if (members[b].region == resources[r].region && box_fits(d, g, members[b], resources[r].tile)) {
+          domains[b].push_back(int(r));
+        }
+      }
+      order.push_back(int(b));
+    }
+    std::ranges::stable_sort(order, [&](int a, int b) { return domains[a].size() < domains[b].size(); });
+    std::vector<char>              seen(resources.size());
+    const std::function<bool(int)> augment = [&](int b) {
+      for (int r : domains[size_t(b)]) {
+        if (!seen[size_t(r)] && owners[size_t(r)].size() < size_t(resources[size_t(r)].count)) {
+          owners[size_t(r)].push_back(b);
+          return true;
+        }
+      }
+      for (int r : domains[size_t(b)]) {
+        if (seen[size_t(r)]) {
+          continue;
+        }
+        seen[size_t(r)] = 1;
+        for (auto& owner : owners[size_t(r)]) {
+          if (augment(owner)) {
+            owner = b;
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+    for (int b : order) {
+      std::fill(seen.begin(), seen.end(), 0);
+      missing += !augment(b);
+    }
+    return missing;
+  };
+  Box_fit_repair report;
+  report.before = report.after = deficit(boxes.boxes);
+  // Beyond a zero deficit, keep slack: a box count at the free-tile count leaves the near-home matching no room
+  // (sha3 0.85: 2100 boxes on 2116 tiles, far_bound). Eliminate small boxes while the movable boxes exceed
+  // (1 - slack) of the free tiles and the deficit does not grow.
+  constexpr double slack = .02;
+  size_t           free_tiles = 0;
+  for (const auto& r : resources) {
+    free_tiles += size_t(r.count);
+  }
+  const auto movable_count = [&](const std::vector<Box>& members) {
+    return size_t(std::ranges::count_if(members, [](const Box& b) { return !b.fixed && !b.placed; }));
+  };
+  // resources already exclude the fixed boxes' tiles
+  const size_t target  = size_t(std::floor(double(free_tiles) * (1 - slack)));
+  const auto   crowded = [&](const std::vector<Box>& members) { return movable_count(members) > target; };
+  if (!report.before && !crowded(boxes.boxes)) {
+    return report;
+  }
+  std::vector<double> pin_cost(d.movable.size());
+  for (size_t c = 0; c < d.movable.size(); ++c) {
+    size_t signal = 0;
+    for (const auto& [_, pin] : d.macro[size_t(d.movable[c])]->pins) {
+      signal += pin.use != "CLOCK" && pin.use != "POWER" && pin.use != "GROUND";
+    }
+    pin_cost[c] = std::ceil(.5 * signal) / 2;
+  }
+  const auto refresh = [&](Box& box) {
+    auto      cells           = std::move(box.cells);
+    const int region          = box.region;
+    box                       = {};
+    box.cells                 = std::move(cells);
+    box.region                = region;
+    double             weight = 0;
+    std::map<int, int> pins;
+    for (int c : box.cells) {
+      const auto& pose  = d.fp.components[size_t(d.movable[size_t(c)])].place;
+      box.cx           += (pose.x + d.width[size_t(c)] / 2.) * d.width[size_t(c)];
+      box.cy           += (pose.y + g.row_h / 2.) * d.width[size_t(c)];
+      weight           += d.width[size_t(c)];
+      box.sites        += cell_sites(d, g, c) * (d.tall[size_t(c)] ? 2 : 1);
+      box.clock         = box.clock || d.flop[size_t(c)];
+      for (int n : d.nets_of[size_t(c)]) {
+        const auto& net = d.nets[size_t(n)];
+        if (net.clock || net.power) {
+          continue;
+        }
+        for (const auto& pin : net.pins) {
+          pins[n] += pin.comp == d.movable[size_t(c)];
+        }
+      }
+    }
+    box.cx /= weight;
+    box.cy /= weight;
+    for (const auto& [n, count] : pins) {
+      const auto& net = d.nets[size_t(n)];
+      box.crit        = std::max(box.crit, net.crit);
+      box.ramp        = std::max(box.ramp, net.ramp);
+      box.critical    = box.critical || net.critical;
+      if (count == int(net.pins.size())) {
+        ++box.internal;
+      } else {
+        ++box.external;
+      }
+    }
+  };
+  Builder fill_check(d, g);
+  fill_check.fill = d.opt.box_fill;
+  // Only slot-deficient groupings enter this bounded pass. Eliminate a small
+  // box by distributing its cells to nearby compatible boxes. Exact resource
+  // matching must improve before committing any grouping change.
+  constexpr size_t max_attempts = 4096;
+  while ((report.after || crowded(boxes.boxes)) && report.attempts < max_attempts) {
+    std::vector<int> donors;
+    for (size_t b = 0; b < boxes.boxes.size(); ++b) {
+      if (!boxes.boxes[b].fixed && !boxes.boxes[b].placed) {
+        donors.push_back(int(b));
+      }
+    }
+    std::ranges::stable_sort(donors, [&](int a, int b) { return boxes.boxes[a].sites < boxes.boxes[b].sites; });
+    bool changed = false;
+    for (int donor : donors) {
+      if (++report.attempts > max_attempts) {
+        break;
+      }
+      auto candidate = boxes.boxes;
+      auto cells     = candidate[size_t(donor)].cells;
+      std::ranges::stable_sort(cells, [&](int a, int b) { return d.width[size_t(a)] > d.width[size_t(b)]; });
+      bool fits = true;
+      for (int cell : cells) {
+        int         best     = -1;
+        double      distance = INFINITY;
+        Box         chosen;
+        const auto& origin = d.fp.components[size_t(d.movable[size_t(cell)])].place;
+        for (size_t b = 0; b < candidate.size(); ++b) {
+          const auto& box = candidate[b];
+          if (int(b) == donor || box.fixed || box.placed || box.region != candidate[size_t(donor)].region) {
+            continue;
+          }
+          const double delta
+              = std::abs(origin.x + d.width[size_t(cell)] / 2. - box.cx) + std::abs(origin.y + g.row_h / 2. - box.cy);
+          if (delta >= distance || delta > 5 * g.tile_w) {
+            continue;
+          }
+          double pins = pin_cost[size_t(cell)];
+          for (int c : box.cells) {
+            pins += pin_cost[size_t(c)];
+          }
+          if (pins > pin_limit) {
+            continue;
+          }
+          auto joined = box;
+          joined.cells.push_back(cell);
+          refresh(joined);
+          if (joined.sites > 2 * g.sites * d.opt.box_fill + 1e-9
+              || g.region[size_t(g.tile_of(joined.cx, joined.cy))] != joined.region) {
+            continue;
+          }
+          std::vector<int> widths;
+          for (int c : joined.cells) {
+            widths.push_back(cell_sites(d, g, c) * (d.tall[size_t(c)] ? -1 : 1));
+          }
+          if (!fill_check.packs(widths)) {
+            continue;
+          }
+          if (!std::ranges::any_of(resources,
+                                   [&](const auto& r) { return joined.region == r.region && box_fits(d, g, joined, r.tile); })) {
+            continue;
+          }
+          best     = int(b);
+          chosen   = std::move(joined);
+          distance = delta;
+        }
+        if (best < 0) {
+          fits = false;
+          break;
+        }
+        candidate[size_t(best)] = std::move(chosen);
+      }
+      if (!fits) {
+        continue;
+      }
+      candidate.erase(candidate.begin() + donor);
+      const auto missing = deficit(candidate);
+      if (report.after ? missing >= report.after : missing > 0) {  // a deficit must shrink; slack must not create one
+        continue;
+      }
+      boxes.boxes  = std::move(candidate);
+      report.after = missing;
+      ++report.eliminated_boxes;
+      report.moved_cells += cells.size();
+      changed             = true;
+      break;
+    }
+    if (!changed) {
+      break;
+    }
+  }
+  if (report.eliminated_boxes) {
+    std::fill(boxes.box_of.begin(), boxes.box_of.end(), -1);
+    for (size_t b = 0; b < boxes.boxes.size(); ++b) {
+      for (int c : boxes.boxes[b].cells) {
+        boxes.box_of[size_t(c)] = int(b);
+      }
+    }
+  }
+  return report;
 }
 
 Boxes build_boxes(const Design& d, const Grid& g, const std::map<int, int>& fixed_slot) {
@@ -460,6 +699,54 @@ Boxes build_boxes(const Design& d, const Grid& g, const std::map<int, int>& fixe
         ++box.internal;
       } else {
         ++box.external;
+      }
+    }
+  }
+  if (movable_route_partition(d.opt)) {
+    const auto fit = repair_box_slots(d, g, out, b.pin_limit);
+    // where the fill goes: box fill histogram and the boxes the pin limit closed
+    std::array<size_t, 4> hist{};  // <50%, 50-80%, 80-95%, >=95%
+    size_t                pin_full = 0, sites = 0;
+    for (const auto& box : out.boxes) {
+      const double f = double(box.sites) / double(2 * g.sites);
+      ++hist[f < .5 ? 0 : f < .8 ? 1 : f < .95 ? 2 : 3];
+      sites += size_t(box.sites);
+      double pins = 0;  // from the current members: the repair moved cells between the builder's groups
+      for (int c : box.cells) {
+        size_t signal = 0;
+        for (const auto& [_, pin] : d.macro[size_t(d.movable[size_t(c)])]->pins) {
+          signal += pin.use != "CLOCK" && pin.use != "POWER" && pin.use != "GROUND";
+        }
+        pins += std::ceil(.5 * double(signal)) / 2;
+      }
+      pin_full += pins + 2 > b.pin_limit;
+    }
+    std::fprintf(stderr,
+                 "legroute boxing: %zu boxes, mean fill %.3f; fill <50%% %zu, 50-80%% %zu, 80-95%% %zu, >=95%% %zu; %zu near the "
+                 "pin limit %.0f\n",
+                 out.boxes.size(),
+                 out.boxes.empty() ? 0. : double(sites) / double(2 * g.sites * out.boxes.size()),
+                 hist[0],
+                 hist[1],
+                 hist[2],
+                 hist[3],
+                 pin_full,
+                 b.pin_limit);
+    if (fit.before) {
+      std::fprintf(stderr,
+                   "legroute boxing: slot deficit %zu -> %zu, %zu boxes eliminated, %zu cells regrouped, %zu attempts\n",
+                   fit.before,
+                   fit.after,
+                   fit.eliminated_boxes,
+                   fit.moved_cells,
+                   fit.attempts);
+      if (!d.opt.output_dir.empty()) {
+        std::ofstream report(d.opt.output_dir + "/box_fit_repair.json");
+        report << "{\"before\":" << fit.before << ",\"after\":" << fit.after << ",\"eliminated_boxes\":" << fit.eliminated_boxes
+               << ",\"regrouped_cells\":" << fit.moved_cells << ",\"attempts\":" << fit.attempts << "}\n";
+        if (!report) {
+          throw std::runtime_error("cannot write box-fit repair report");
+        }
       }
     }
   }

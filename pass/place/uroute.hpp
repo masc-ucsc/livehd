@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -13,14 +14,17 @@
 
 namespace DreamPlace::native {
 struct Options;
-}
+struct RudyResult;
+}  // namespace DreamPlace::native
 namespace livehd::placement {
 struct Uroute_options {
   std::string dir             = "@pretrained";
   bool        export_features = true;
   int         shots = 5, min_shots = 1;
-  std::string fallback  = "nearest";
-  double      drc_level = 0;
+  std::string fallback     = "nearest";
+  double      drc_level    = 0;
+  // Explicit source policy. Coarse-only is uncalibrated utilization research.
+  std::string label_policy = "detailed";  // detailed | coarse-only | calibrated-mixed
   // drc_level compares by bit pattern, exactly as the pool identity hashes it.
   bool        operator==(const Uroute_options&) const;
 };
@@ -59,6 +63,20 @@ void        validate_uroute_options(const Uroute_options&);
 // last, so an offline reader can verify hashes before ingesting an export.
 void export_uroute(const std::filesystem::path&, const DreamPlace::native::Design&, const Uroute_identity&, int bins_x, int bins_y,
                    double capacity_h, double capacity_v);
+// Coarse maps are observations, never detailed-route or DRC witnesses. Hashes
+// identify the exact physical pose, complete routing netlist and capacity model.
+struct Uroute_coarse_provenance {
+  std::string   pose_sha256, netlist_sha256, capacity_sha256;
+  std::string   endpoint_basis  = "physical_pins";
+  double        admission_share = .95;
+  bool          complete        = false;
+  std::uint64_t unrouted = 0, search_limited = 0;
+};
+// raw must contain unpenalized H/V utilization. Overflowing complete routes are
+// useful labels; incomplete routes are exported for audit but are ineligible.
+void export_uroute_coarse(const std::filesystem::path&, const DreamPlace::native::Design&, const Uroute_identity&, int bins_x,
+                          int bins_y, double capacity_h, double capacity_v, const DreamPlace::native::RudyResult& raw,
+                          const Uroute_coarse_provenance&);
 // Native route-probe observer exporting each probed physical snapshot to
 // directory. The stage identity is evaluated when the probe fires.
 std::function<void(const DreamPlace::native::Design&, int, int)> uroute_probe_exporter(std::filesystem::path            directory,

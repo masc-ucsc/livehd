@@ -107,6 +107,32 @@ TEST(PinEscapeGuard, PartialWiringDoesNotRetireUnconnectedPin) {
                    .legal);
 }
 
+TEST(PinEscapeGuard, ExplicitSignalOnlyScopeKeepsClockAccessAndPhysicalSupplyPins) {
+  for (const auto* use : {"CLOCK", "POWER", "GROUND"}) {
+    for (int mode = 0; mode < 3; ++mode) {
+      auto tech                         = technology();
+      tech.macros["cell"].pins["A"].use = use;
+      auto fp                           = frame();
+      if (mode != 0) {
+        fp.special_nets.push_back({"control", {{mode == 2 ? "*" : "u0", "A"}}, {}, use});
+      }
+      const auto       occupied = routing_occupancy(tech, fp, fp.dbu);
+      Pin_escape_guard guard(tech, fp, occupied, 1000, {}, asap7_access(), nullptr, false);
+      const bool       clock = std::string_view(use) == "CLOCK";
+      EXPECT_EQ(guard.protected_pins(), size_t(clock));
+      EXPECT_EQ(guard.unresolved_pins(), 0u);
+      const auto trial = guard.check(
+          {
+              {"M2", {900, 1027, 1200, 1261}}
+      },
+          "foreign");
+      EXPECT_EQ(trial.legal, !clock);
+      // The physical M1 pin is still an obstacle regardless of access scope.
+      EXPECT_FALSE(occupied.query("M1", {1018, 1027, 1036, 1243}, 0, "foreign").empty());
+    }
+  }
+}
+
 TEST(PinEscapeGuard, ExhaustedAccessSearchCannotSilentlyDropProtection) {
   auto tech = technology();
   auto fp   = frame();
@@ -288,6 +314,25 @@ TEST(PinEscapeGuard, CumulativeBlocksRollbackAndLastAccess) {
   EXPECT_FALSE(guard.check({all.back()}, "last_blocker").legal);
   EXPECT_TRUE(guard.check(all, net.name).legal);  // Its own connection may use it.
   EXPECT_FALSE(guard.check({}, "timeout", [] { return true; }).legal);
+}
+
+TEST(PinEscapeGuard, CostDoesNotCountOneAccessThroughEachIndexedShape) {
+  auto tech = technology();
+  auto fp   = frame();
+  fp.nets.push_back({"unrouted", {{"u0", "A"}}, {}, "SIGNAL"});
+  const auto       occupied = routing_occupancy(tech, fp, fp.dbu);
+  Pin_escape_guard guard(tech, fp, occupied, 1000, {}, asap7_access());
+  // Two of the six access tracks are covered, with two directional escapes
+  // per track. Escape, landing and probe records refer to those same points.
+  const Shape      partial{
+      "M2",
+      {1000, 1036, 1100, 1090}
+  };
+  ASSERT_TRUE(guard.check({partial}, "foreign").legal);
+  const auto cost = guard.cost(partial, "foreign");
+  EXPECT_EQ(cost.points, 4u);
+  EXPECT_FALSE(cost.fatal);
+  EXPECT_EQ(guard.cost(partial, "unrouted").points, 0u);
 }
 TEST(PinEscapeGuard, PreserveEitherDirectionalRouterEscape) {
   auto tech = technology();

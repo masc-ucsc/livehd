@@ -1,11 +1,26 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 #include <array>
+#include <span>
 
 #include "routing_occupancy.hpp"
 #include "routing_rules.hpp"
 
 namespace livehd::physical {
+struct Signal_via_intrinsic_check {
+  Rule_check check;
+  // Valid only when check.legal. The index addresses the supplied via shapes.
+  size_t     cut_index   = 0;
+  int64_t    cut_spacing = 0;
+};
+// Check only translation-independent via/landing geometry and cut rules.
+// Shapes must be decoded by via_geometry() in DEF DBU; both the via shapes and
+// complete landing rectangles are relative to the same origin. A legal result
+// is not a site certificate: grid/position, DEF overrides, tracks, metal rules,
+// die bounds and occupancy still require check_signal_via(). This permits a
+// caller to cache impossible landing variants without constructing a floorplan.
+Signal_via_intrinsic_check check_signal_via_intrinsics(const Technology&, int64_t dbu, std::span<const Shape> via_shapes,
+                                                       const std::array<Shape, 2>& landings);
 // Validate a single-cut LEF via between adjacent routing layers, enclosed in
 // two complete rectangular route landings (global DEF DBU). Landings include
 // the wire extensions needed for area/minsize rules. Checks existing metal

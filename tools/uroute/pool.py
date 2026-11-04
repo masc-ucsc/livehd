@@ -113,8 +113,8 @@ def _identity(metadata):
         raise ValueError("invalid floorplan utilization")
     if type(metadata.get("created_at")) is not int or metadata["created_at"] < 0:
         raise ValueError("created_at must be a nonnegative integer timestamp")
-    if metadata.get("status") not in ("routed", "unrouted"):
-        raise ValueError("status must be routed or unrouted")
+    if metadata.get("status") not in ("routed", "unrouted", "coarse"):
+        raise ValueError("status must be routed, unrouted or coarse")
     if metadata.get("source") not in ("livehd", "external"):
         raise ValueError("source must be livehd or external")
 
@@ -149,8 +149,16 @@ def load_sample(root, record):
             raise ValueError(f"URoute sample digest mismatch: {record['id']}/{path.name}")
         maps.append(decode(data))
     features, labels = maps
+    if record.get('status') == 'coarse':
+        from .coarse import validate_metadata, validate_calibration
+        validate_metadata(record)
+        if 'calibration_sha256' in record:
+            data = inside(directory, 'calibration.json').read_bytes()
+            if sha(data) != record['calibration_sha256']:
+                raise ValueError('calibration digest mismatch')
+            validate_calibration(json.loads(data), record)
     _shape(features, 4, True)
-    _shape(labels, 3, False)
+    _shape(labels, 1 if record.get("status") == "coarse" else 3, False)
     if any(lo < 0 for lo, _ in labels.ranges):
         raise ValueError("URoute sample labels must be nonnegative")
     return features, labels, paths
@@ -249,6 +257,9 @@ def publish_sample(root, metadata, features, labels=None, *, last_global_overflo
         raise ValueError("unsupported sample feature/label/architecture version")
     metadata.update(VERSIONS)
     _identity(metadata)
+    if metadata["status"] == "coarse":
+        from .coarse import validate_metadata
+        validate_metadata(metadata)
     if overflow_unavailable is not None:
         if (metadata["status"] != "unrouted" or last_global_overflow is not None or not isinstance(overflow_unavailable, str)
                 or not overflow_unavailable.strip() or len(overflow_unavailable) > 4096 or "\0" in overflow_unavailable):
@@ -257,10 +268,10 @@ def publish_sample(root, metadata, features, labels=None, *, last_global_overflo
         metadata["last_global_overflow_reason"] = overflow_unavailable
     _shape(features, 4, True)
     files = {"features.bin": encode(features)}
-    if metadata["status"] == "routed":
+    if metadata["status"] in ("routed", "coarse"):
         if labels is None:
             raise ValueError("routed samples require labels")
-        _shape(labels, 3, False)
+        _shape(labels, 1 if metadata["status"] == "coarse" else 3, False)
         files["labels.bin"] = encode(labels)
     else:
         if last_global_overflow is None and overflow_unavailable is None:

@@ -25,9 +25,9 @@ struct Route_connectivity {
   std::string reason;
 };
 // Checks rectangular routed metal and explicit via cuts against every cell pin
-// in a net. Same-layer edge contact connects, point contact does not; a cut
+// and placed die terminal in a net. Same-layer edge contact connects, point contact does not; a cut
 // connects only the metal landings of its own via with positive-area overlap.
-// Multiple shapes of one LEF pin are electrically equivalent. Unsupported IO,
+// Multiple shapes of one pin are electrically equivalent. Missing/unplaced IO,
 // polygon pins and malformed geometry fail closed. This is not a DRC check.
 Route_connectivity check_route_connectivity(const Technology&, const Floorplan&, const Net&, const Route_components* = nullptr,
                                             const Route_width_rules* trial_rules = nullptr);

@@ -4,6 +4,7 @@
 #include <cvc5/cvc5.h>
 
 #include <array>
+#include <limits>
 
 #include "gtest/gtest.h"
 #include "sat/cadical/ccadical.h"
@@ -41,6 +42,31 @@ TEST(SatSolver, IncrementalAssumptionsModelsAndPrivateState) {
       EXPECT_EQ(ccadical_solve(abc), 10);
       ccadical_release(abc);
     }
+  }
+}
+TEST(SatSolver, DecisionPreferencesDoNotRestrictSolutionsOrInvalidateModels) {
+  for (auto backend : {Sat_backend::cadical, Sat_backend::cms_cnf, Sat_backend::cms_xor}) {
+    Sat_solver solver(backend);
+    const int  a = solver.new_variable(), b = solver.new_variable();
+    solver.clause({-a, b});
+    solver.clause({a, -b});
+    solver.prefer(a);
+    solver.prefer(-b);
+    // Conflicting phase hints must not become constraints; both solutions remain expressible.
+    EXPECT_EQ(solver.solve(std::array{-a}), Sat_status::satisfiable);
+    EXPECT_FALSE(solver.value(b));
+    solver.prefer(b);
+    EXPECT_FALSE(solver.value(b));
+    EXPECT_EQ(solver.solve(std::array{a}), Sat_status::satisfiable);
+    EXPECT_TRUE(solver.value(b));
+    solver.prefer(-a);
+    EXPECT_TRUE(solver.value(a));
+    EXPECT_EQ(solver.solve(std::array{a, -b}), Sat_status::unsatisfiable);
+    EXPECT_TRUE(solver.failed(a));
+    EXPECT_TRUE(solver.failed(-b));
+    EXPECT_THROW(solver.prefer(0), std::invalid_argument);
+    EXPECT_THROW(solver.prefer(b + 1), std::invalid_argument);
+    EXPECT_THROW(solver.prefer(std::numeric_limits<int>::min()), std::invalid_argument);
   }
 }
 TEST(SatSolver, ParityIsNotCoordinateEquality) {

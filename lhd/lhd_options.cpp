@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -18,6 +19,19 @@
 namespace lhd {
 
 Diag_fmt default_diag_fmt() { return ::isatty(STDOUT_FILENO) != 0 ? Diag_fmt::pretty : Diag_fmt::jsonl; }
+
+double placement_search_density(double utilization, double max_density) {
+  if (!(utilization > 0 && utilization < 1) || !(max_density > 0 && max_density <= 1)) {
+    throw Lhd_error{"usage", "invalid automatic placement density", "utilization must be in (0,1), hard bin cap in (0,1]"};
+  }
+  const double target = std::min(utilization + .05, std::nextafter(max_density, 0.0));
+  if (!(target > 0)) {
+    throw Lhd_error{"usage",
+                    "hard bin cap is too small for a positive target density",
+                    "increase synth.place.legalize.bin.max_density"};
+  }
+  return target;
+}
 
 namespace {
 

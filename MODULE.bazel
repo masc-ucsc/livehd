@@ -96,13 +96,9 @@ http_archive(
     patch_args = ["-p1"],
 )
 # Native CPU placement; the repository uses LiveHD's HHDS/HLOP repositories.
-git_repository(
-    name = "dreamplace",
-    commit = "f41986172b596391d1f78c690ae0f128b418a753",
-    remote = "https://github.com/masc-ucsc/DREAMPlace.git",
-)
-# For local co-development swap the git_repository above for:
-# local_repository(name = "dreamplace", path = "../DREAMPlace")
+# Local co-development authorized for the placement/legroute session integration.
+# Published baseline: f41986172b596391d1f78c690ae0f128b418a753.
+local_repository(name = "dreamplace", path = "../DREAMPlace")
 bazel_dep(name = "openmp", version = "21.1.5.bcr.3")
 # Plain-repository fetch: Bzlmod root-only overrides would break LiveHD consumers.
 http_archive(

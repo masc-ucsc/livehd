@@ -4,6 +4,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <unordered_map>
 
 #include "inou/lefdef/pin_access.hpp"
@@ -16,6 +17,16 @@ class Pin_escape_guard;
 struct Signal_route_limits {
   size_t                                access_candidates = 0, patterns = 0;
   std::chrono::steady_clock::time_point deadline;
+  // Live maze labels kept per coordinate (1: the single best label, the default). More keep costlier labels whose
+  // cut history differs, within the same pattern/state budgets and deadline.
+  size_t                                maze_labels = 1;
+};
+// Exact same-net via already retained or pending in the caller's transaction.
+// Context constrains new cuts; it is neither occupancy nor newly emitted wiring.
+struct Signal_route_via {
+  physical::Route_via via;
+  int64_t             x = 0, y = 0;
+  friend bool         operator==(const Signal_route_via&, const Signal_route_via&) = default;
 };
 struct Signal_route_geometry {
   std::optional<physical::Shape> straight_corridor;
@@ -37,6 +48,7 @@ struct Signal_route_trial {
   size_t                               access_examined = 0, patterns_examined = 0;
   bool                                 timed_out = false;
   std::string                          reason;
+  size_t                               prior_cut_rejections = 0;
 };
 // One bounded, non-mutating net request. A corridor restricts the request to
 // an aligned straight trunk; compare_layers adds same-center alternatives.
@@ -66,12 +78,17 @@ struct Signal_route_request {
   // Maze wire-length weight per layer (missing: 1, at least 1). A heavier low
   // layer makes a tap climb early instead of running over other pins.
   std::map<std::string, double>  layer_cost;
+  // Same-net retained/pending context. Returned geometry omits exact reused
+  // vias and is connected only together with the caller's retained geometry.
+  // Context never grants clearance against foreign metal or relaxes cut rules.
+  std::vector<Signal_route_via>  prior_vias;
 };
 struct Signal_route_proposals {
   std::vector<Signal_route_geometry> candidates;  // baseline first; not timing-ranked
   size_t                             access_examined = 0, patterns_examined = 0;
   bool                               timed_out = false;
   std::string                        reason;
+  size_t                             prior_cut_rejections = 0;
 };
 // Non-mutating existence query. A negative result means no witness was found
 // within the supplied budget, not a proof that moving a cell cannot help.
@@ -104,10 +121,15 @@ class Signal_router {
   Signal_route_trial propose_simple(const physical::Net&, const Signal_route_limits&) const;
   Signal_route_trial propose_pattern_impl(const physical::Net&, const Signal_route_limits&, bool simple) const;
   Signal_route_trial propose_span_impl(const physical::Net&, const Signal_route_limits&, const physical::Shape*,
-                                       const Pin_escape_guard* = nullptr) const;
+                                       const Pin_escape_guard* = nullptr, std::vector<Signal_route_geometry>* = nullptr,
+                                       size_t max_candidates = 1) const;
   Signal_route_trial propose_maze_impl(const physical::Net&, const Signal_route_limits&,
                                        const std::vector<physical::Shape>* sources, const std::vector<physical::Shape>* anchors,
-                                       const std::map<std::string, double>* layer_cost) const;
+                                       const std::map<std::string, double>* layer_cost, std::span<const Signal_route_via>) const;
+  // Validate the exact union and omit reused standalone via paths only on
+  // success. Failure leaves geometry unchanged; the host still checks its union.
+  std::string        check_prior_cuts(Signal_route_geometry&, std::span<const Signal_route_via>,
+                                      std::chrono::steady_clock::time_point deadline) const;
   // One search stage's result. Past the deadline, expired() marks it timed
   // out with the "route deadline" reason; fail() records any other reason.
   struct Stage_trial {
@@ -143,22 +165,31 @@ public:
   // Shares access, work and deadline budgets across all search stages.
   // Stay inside the retained corridor. An escape-layer witness may use legal
   // pin-access vias while retaining one horizontal signal trunk and no detour.
-  Signal_route_trial propose_aligned(const physical::Net&, const physical::Shape& corridor, const Signal_route_limits&) const;
+  Signal_route_trial     propose_aligned(const physical::Net&, const physical::Shape& corridor, const Signal_route_limits&) const;
   // Lift a checked alignment without moving its endpoint centers. One
   // same-direction trunk plus local endpoint via landings; never a detour.
-  Signal_route_trial propose_aligned_layer(const physical::Net&, const Signal_route_geometry&, const std::string& layer,
-                                           const Signal_route_limits&) const;
-  Signal_route_trial propose_straight(const physical::Net&, const physical::Shape& corridor, const Signal_route_limits&) const;
-  Signal_route_trial propose(const physical::Net&, const Signal_route_limits&) const;
+  Signal_route_trial     propose_aligned_layer(const physical::Net&, const Signal_route_geometry&, const std::string& layer,
+                                               const Signal_route_limits&) const;
+  Signal_route_trial     propose_straight(const physical::Net&, const physical::Shape& corridor, const Signal_route_limits&) const;
+  // Staged span -> pattern -> maze. With a guard, a span/pattern candidate that would take another pin's protected
+  // access is set aside and the later strategies still run (same deadline and remaining allowance).
+  Signal_route_trial propose(const physical::Net&, const Signal_route_limits&, std::span<const Signal_route_via> prior = {},
+                             const Pin_escape_guard* guard = nullptr) const;
   Signal_route_trial propose_pattern(const physical::Net&, const Signal_route_limits&) const;
-  Signal_route_trial propose_maze(const physical::Net&, const Signal_route_limits&) const;
+  Signal_route_trial propose_maze(const physical::Net&, const Signal_route_limits&,
+                                  std::span<const Signal_route_via> prior = {}) const;
   // One pin to its net's anchors (Signal_route_request::anchors), weighted per layer.
-  Signal_route_trial     propose_tap(const physical::Net&, const Signal_route_limits&, const std::vector<physical::Shape>& anchors,
-                                     const std::map<std::string, double>& layer_cost) const;
+  Signal_route_trial propose_tap(const physical::Net&, const Signal_route_limits&, const std::vector<physical::Shape>& anchors,
+                                 const std::map<std::string, double>& layer_cost,
+                                 std::span<const Signal_route_via>    prior = {}) const;
   // Two pieces of a net's metal (Signal_route_request::sources to anchors).
-  Signal_route_trial     propose_join(const physical::Net&, const Signal_route_limits&, const std::vector<physical::Shape>& sources,
-                                      const std::vector<physical::Shape>&  anchors,
-                                      const std::map<std::string, double>& layer_cost) const;
+  Signal_route_trial propose_join(const physical::Net&, const Signal_route_limits&, const std::vector<physical::Shape>& sources,
+                                  const std::vector<physical::Shape>& anchors, const std::map<std::string, double>& layer_cost,
+                                  std::span<const Signal_route_via> prior = {}) const;
   Signal_route_trial propose_span(const physical::Net&, const Signal_route_limits&) const;
+  // Bounded alternatives for a joint SAT consumer: one checked pin-to-pin span
+  // per common access track. Occupancy is unchanged; an incomplete menu is not
+  // proof that no other route exists. Candidates share one request budget.
+  Signal_route_proposals propose_spans(const physical::Net&, const Signal_route_limits&, size_t max_candidates) const;
 };
 }  // namespace livehd::placement

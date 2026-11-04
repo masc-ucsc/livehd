@@ -48,14 +48,14 @@ Signal_router::Signal_router(const ph::Technology& tech, const ph::Floorplan& fr
 ph::Pin_access_result Signal_router::endpoint_access(const ph::Component& cell, const std::string& pin, const ph::Net& net,
                                                      const Signal_route_limits& limits, Signal_route_trial& trial) const {
   auto result            = ph::enumerate_pin_access(tech_,
-                                         frame_,
-                                         cell,
-                                         pin,
-                                         occupancy_,
-                                         rules_,
-                                         limits.access_candidates - trial.access_examined,
-                                         net.name,
-                                         profile_.access);
+                                                    frame_,
+                                                    cell,
+                                                    pin,
+                                                    occupancy_,
+                                                    rules_,
+                                                    limits.access_candidates - trial.access_examined,
+                                                    net.name,
+                                                    profile_.access);
   trial.access_examined += result.examined;
   return result;
 }
@@ -94,6 +94,63 @@ bool Signal_router::Stage_trial::expired() const {
 Signal_route_trial Signal_router::Stage_trial::fail(std::string reason) const {
   out.reason = std::move(reason);
   return out;
+}
+std::string Signal_router::check_prior_cuts(Signal_route_geometry& geometry, std::span<const Signal_route_via> prior,
+                                            std::chrono::steady_clock::time_point deadline) const {
+  if (prior.empty()) {
+    return {};
+  }
+  using Key = std::tuple<std::string, ph::Orientation, int64_t, int64_t>;
+  std::set<Key>       previous, seen;
+  ph::Signal_cut_set  cuts(tech_, frame_);
+  std::vector<size_t> reused_paths;
+  try {
+    for (const auto& p : prior) {
+      if (std::chrono::steady_clock::now() >= deadline) {
+        return "route prior cuts deadline";
+      }
+      const Key key{p.via.name, p.via.orientation, p.x, p.y};
+      previous.insert(key);
+      if (seen.insert(key).second && !cuts.add(p.via, p.x, p.y)) {
+        return "invalid prior same-net cut spacing";
+      }
+    }
+    for (size_t i = 0; i < geometry.paths.size(); ++i) {
+      const auto&                    path = geometry.paths[i];
+      std::optional<ph::Route_point> at;
+      for (const auto& step : path.steps) {
+        if (std::chrono::steady_clock::now() >= deadline) {
+          return "route prior cuts deadline";
+        }
+        if (const auto* point = std::get_if<ph::Route_point>(&step)) {
+          at = *point;
+        } else if (const auto* via = std::get_if<ph::Route_via>(&step)) {
+          if (!at) {
+            return "route cut via without a preceding point";
+          }
+          const Key key{via->name, via->orientation, at->x, at->y};
+          if (previous.contains(key)) {
+            // All native proposal stages emit separate two-step via paths.
+            // Never erase a layer transition from an unfamiliar mixed path.
+            if (path.steps.size() != 2) {
+              return "unsupported mixed path for prior via reuse";
+            }
+            reused_paths.push_back(i);
+          }
+          if (seen.insert(key).second && !cuts.add(*via, at->x, at->y)) {
+            return "same-net cut spacing against prior route pieces";
+          }
+        }
+      }
+    }
+  } catch (const std::exception& e) {
+    return std::string("route prior cuts: ") + e.what();
+  }
+  for (auto it = reused_paths.rbegin(); it != reused_paths.rend(); ++it) {
+    geometry.paths.erase(geometry.paths.begin() + *it);
+  }
+  geometry.vias -= std::min(geometry.vias, reused_paths.size());
+  return {};
 }
 Signal_route_proposals Signal_router::try_route(const ph::Net& net, const Signal_route_request& request) const {
   Signal_route_proposals result;
@@ -149,19 +206,25 @@ Signal_route_proposals Signal_router::try_route(const ph::Net& net, const Signal
     }
     return true;
   };
-  if (request.straight_span && !prepare_escapes()) {
+  // the ordinary staged path (span, pattern, maze) gets the resolved guard too, so a candidate that would take a pin's
+  // last access is set aside and the remaining strategies still run within the same allowance
+  const bool ordinary = request.sources.empty() && request.anchors.empty() && !request.corridor && !request.straight_span
+                        && (request.search_detours || net.connections.size() > 9);
+  if ((request.straight_span || ordinary) && !prepare_escapes()) {
     return result;
   }
-  auto base = !request.sources.empty()   ? propose_join(net, request.limits, request.sources, request.anchors, request.layer_cost)
-              : !request.anchors.empty() ? propose_tap(net, request.limits, request.anchors, request.layer_cost)
+  auto base = !request.sources.empty()
+                  ? propose_join(net, request.limits, request.sources, request.anchors, request.layer_cost, request.prior_vias)
+              : !request.anchors.empty() ? propose_tap(net, request.limits, request.anchors, request.layer_cost, request.prior_vias)
               : request.corridor         ? propose_aligned(net, *request.corridor, request.limits)
               : request.straight_span    ? propose_span_impl(net, request.limits, nullptr, escapes)
               : !request.search_detours && net.connections.size() <= 9 ? propose_simple(net, request.limits)
-                                                                       : propose(net, request.limits);
-  result.access_examined   = base.access_examined;
-  result.patterns_examined = base.patterns_examined;
-  result.timed_out         = base.timed_out;
-  result.reason            = base.reason;
+                                                                       : propose(net, request.limits, request.prior_vias, escapes);
+  result.access_examined      = base.access_examined;
+  result.patterns_examined    = base.patterns_examined;
+  result.timed_out            = base.timed_out;
+  result.reason               = base.reason;
+  result.prior_cut_rejections = base.prior_cut_rejections;
   if (!base.geometry) {
     return result;
   }
@@ -194,6 +257,12 @@ Signal_route_proposals Signal_router::try_route(const ph::Net& net, const Signal
   const auto  rejected          = [&](Signal_route_geometry& candidate) {
     if (expired()) {
       result.timed_out = true;
+      return true;
+    }
+    if (auto error = check_prior_cuts(candidate, request.prior_vias, request.limits.deadline); !error.empty()) {
+      result.timed_out            |= expired();
+      result.prior_cut_rejections += !result.timed_out;
+      access_rejection             = std::move(error);
       return true;
     }
     const auto shapes = proposal_shapes(net, candidate.paths, &candidate.nondefault_rules);
@@ -270,7 +339,33 @@ Signal_route_probe Signal_router::probe_route(const ph::Net& net, const Signal_r
   // Span construction validates its vias/trunk incrementally. A predicate
   // must also certify the complete net before reporting a routing witness.
   if (request.straight_span && !request.corridor) {
-    const auto connected = connectivity(net, candidate.paths);
+    auto context_net = net;
+    // Reused via paths are intentionally absent from the returned proposal.
+    // The complete witness includes the caller's exact retained instances.
+    try {
+      for (const auto& p : request.prior_vias) {
+        if (std::chrono::steady_clock::now() >= request.limits.deadline) {
+          result.timed_out = result.budget_exhausted = true;
+          result.reason                              = "route connectivity deadline";
+          return result;
+        }
+        const auto shapes = ph::via_geometry(tech_, frame_, p.via);
+        const auto layer  = std::find_if(tech_.routing_layers.begin(), tech_.routing_layers.end(), [&](const auto& name) {
+          return std::any_of(shapes.begin(), shapes.end(), [&](const auto& shape) { return shape.layer == name; });
+        });
+        if (layer == tech_.routing_layers.end()) {
+          result.reason = "prior via has no routing layer";
+          return result;
+        }
+        auto path                                  = ph::via_path(*layer, p.x, p.y, p.via.name);
+        std::get<ph::Route_via>(path.steps.back()) = p.via;
+        context_net.wires.push_back({"FIXED", {std::move(path)}});
+      }
+    } catch (const std::exception& e) {
+      result.reason = std::string("route prior connectivity: ") + e.what();
+      return result;
+    }
+    const auto connected = connectivity(context_net, candidate.paths);
     if (!connected.connected) {
       result.reason = connected.reason;
       return result;
@@ -300,22 +395,46 @@ Signal_route_trial Signal_router::propose_simple(const ph::Net& net, const Signa
   pattern.patterns_examined += span.patterns_examined;
   return pattern;
 }
-Signal_route_trial Signal_router::propose(const ph::Net& net, const Signal_route_limits& limits) const {
+Signal_route_trial Signal_router::propose(const ph::Net& net, const Signal_route_limits& limits,
+                                          std::span<const Signal_route_via> prior, const Pin_escape_guard* guard) const {
   Signal_route_trial result;
-  const std::array   searches{&Signal_router::propose_span, &Signal_router::propose_pattern, &Signal_router::propose_maze};
-  for (size_t i = 0; i < searches.size(); ++i) {
+  constexpr size_t   stages = 3;
+  for (size_t i = 0; i < stages; ++i) {
     if (result.geometry || result.timed_out) {
       break;
     }
-    const auto remaining_stages   = searches.size() - i;
+    const auto                remaining_stages = stages - i;
     // Reserve work and access enumeration for every remaining strategy. Any
     // unused allowance carries forward; the net's total limits never grow.
-    const auto work               = (limits.patterns - result.patterns_examined) / remaining_stages;
-    const auto access             = (limits.access_candidates - result.access_examined) / remaining_stages;
-    auto       next              = (this->*searches[i])(net, {access, work, limits.deadline});
-    next.access_examined        += result.access_examined;
-    next.patterns_examined      += result.patterns_examined;
-    result                       = std::move(next);
+    const auto                work             = (limits.patterns - result.patterns_examined) / remaining_stages;
+    const auto                access           = (limits.access_candidates - result.access_examined) / remaining_stages;
+    auto slice              = limits;  // the caller's limits (maze_labels included), with this stage's share of work
+    slice.access_candidates = access;
+    slice.patterns          = work;
+    auto next = i == 0   ? (guard ? propose_span_impl(net, slice, nullptr, guard) : propose_span(net, slice))
+                : i == 1 ? propose_pattern(net, slice)
+                         : propose_maze(net, slice, prior);
+    if (i != 2 && next.geometry) {
+      if (auto error = check_prior_cuts(*next.geometry, prior, limits.deadline); !error.empty()) {
+        next.geometry.reset();
+        next.reason                = std::move(error);
+        next.timed_out            |= std::chrono::steady_clock::now() >= limits.deadline;
+        next.prior_cut_rejections += !next.timed_out;
+      }
+    }
+    if (i != 2 && next.geometry && guard) {  // an access-damaging span/pattern candidate: try the remaining strategies
+      const auto expired = [&] { return std::chrono::steady_clock::now() >= limits.deadline; };
+      const auto verdict = guard->check(proposal_shapes(net, next.geometry->paths, &next.geometry->nondefault_rules), net.name, expired);
+      if (!verdict.legal) {
+        next.geometry.reset();
+        next.reason     = "escape: " + verdict.reason;
+        next.timed_out |= expired();
+      }
+    }
+    next.access_examined      += result.access_examined;
+    next.patterns_examined    += result.patterns_examined;
+    next.prior_cut_rejections += result.prior_cut_rejections;
+    result                     = std::move(next);
   }
   return result;
 }
@@ -400,7 +519,7 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
       ph::Shape   shape{
           *layer,
           h ? ph::Rect{     point.x - half, point.y - width / 2,      point.x + half, point.y + width / 2}
-              : ph::Rect{point.x - width / 2,      point.y - half, point.x + width / 2,      point.y + half}
+            : ph::Rect{point.x - width / 2,      point.y - half, point.x + width / 2,      point.y + half}
       };
       if (layer == start && !point.via.empty()) {
         shape.rect = shape.rect.hull(point.escape.rect);
@@ -618,7 +737,8 @@ Signal_route_trial Signal_router::propose_span(const ph::Net& net, const Signal_
   return propose_span_impl(net, limits, nullptr);
 }
 Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Signal_route_limits& limits,
-                                                    const ph::Shape* corridor, const Pin_escape_guard* escapes) const {
+                                                    const ph::Shape* corridor, const Pin_escape_guard* escapes,
+                                                    std::vector<Signal_route_geometry>* candidates, size_t max_candidates) const {
   Signal_route_trial out;
   const Stage_trial  stage{out, limits.deadline};
   if (stage.expired()) {
@@ -794,6 +914,13 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
           }
         }
         if (preserves_access) {
+          if (candidates) {
+            candidates->push_back(std::move(trial));
+            if (candidates->size() >= max_candidates) {
+              return out;
+            }
+            break;  // expose another track before variants of the same span
+          }
           out.geometry = std::move(trial);
           return out;
         }
@@ -810,7 +937,21 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
       }
     }
   }
-  return out.reason.empty() ? stage.fail(profile_.access.escape + " span blocked") : out;
+  return out.reason.empty() && (!candidates || candidates->empty()) ? stage.fail(profile_.access.escape + " span blocked") : out;
+}
+
+Signal_route_proposals Signal_router::propose_spans(const ph::Net& net, const Signal_route_limits& limits,
+                                                    size_t max_candidates) const {
+  if (!max_candidates) {
+    throw std::invalid_argument("span candidate limit must be positive");
+  }
+  Signal_route_proposals result;
+  const auto             trial = propose_span_impl(net, limits, nullptr, pin_escapes_, &result.candidates, max_candidates);
+  result.access_examined       = trial.access_examined;
+  result.patterns_examined     = trial.patterns_examined;
+  result.timed_out             = trial.timed_out;
+  result.reason                = trial.reason;
+  return result;
 }
 
 Signal_route_trial Signal_router::propose_pattern(const ph::Net& net, const Signal_route_limits& limits) const {

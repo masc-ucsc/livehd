@@ -17,6 +17,7 @@ void  lhd_sat_xor(void*, const unsigned*, unsigned, int);
 int   lhd_sat_solve(void*, const int*, unsigned, unsigned, unsigned);
 int   lhd_sat_value(void*, unsigned);
 int   lhd_sat_failed(void*, int);
+void  lhd_sat_prefer(void*, int);
 }
 namespace livehd::placement {
 Sat_backend sat_backend(const std::string& name) {
@@ -94,6 +95,12 @@ Sat_status Sat_solver::solve(std::span<const int> assumptions, unsigned conflict
   }
   int result    = lhd_sat_solve(solver, assumptions.data(), static_cast<unsigned>(assumptions.size()), conflicts, milliseconds);
   return status = result == 10 ? Sat_status::satisfiable : result == 20 ? Sat_status::unsatisfiable : Sat_status::unknown;
+}
+void Sat_solver::prefer(int literal) {
+  if (literal == 0 || literal == std::numeric_limits<int>::min() || static_cast<unsigned>(std::abs(literal)) > variables) {
+    throw std::invalid_argument("invalid SAT preference literal");
+  }
+  lhd_sat_prefer(solver, literal);
 }
 bool Sat_solver::failed(int literal) const {
   if (status != Sat_status::unsatisfiable || literal == 0 || literal == std::numeric_limits<int>::min()

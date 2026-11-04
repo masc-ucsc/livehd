@@ -1,7 +1,10 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 
 #include <algorithm>
+#include <cmath>
+#include <format>
 #include <fstream>
+#include <limits>
 #include <regex>
 #include <string>
 #include <utility>
@@ -13,6 +16,29 @@
 #include "lhd_kernel_internal.hpp"
 #include "pass.hpp"
 #include "synth_policy.hpp"
+
+TEST(LhdOptions, AutomaticPlacementDensityStaysBelowHardCapAfterRestartSerialization) {
+  EXPECT_DOUBLE_EQ(lhd::placement_search_density(.6, .8), .65);
+  for (double cap : {.8, .999, 1.0}) {
+    for (double utilization : {.7, .95, .99}) {
+      const auto target   = lhd::placement_search_density(utilization, cap);
+      // The kernel feeds this text back through --set for each core-search step.
+      const auto restored = std::stod(std::format("{:.17g}", target));
+      EXPECT_DOUBLE_EQ(restored, target);
+      EXPECT_GT(restored, 0);
+      EXPECT_LT(restored, cap);
+      EXPECT_LE(restored, utilization + .05);
+      if (utilization + .05 >= cap) {
+        EXPECT_DOUBLE_EQ(std::nextafter(restored, cap), cap);
+      }
+    }
+  }
+  for (double invalid : {0.0, -1.0, 1.01, std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN()}) {
+    EXPECT_THROW(lhd::placement_search_density(.99, invalid), lhd::Lhd_error);
+    EXPECT_THROW(lhd::placement_search_density(invalid, 1), lhd::Lhd_error);
+  }
+  EXPECT_THROW(lhd::placement_search_density(.99, std::numeric_limits<double>::denorm_min()), lhd::Lhd_error);
+}
 
 // satopt is opt-in for every command. An explicit pass.satopt always wins;
 // mappers get no satopt labels (they map what compile produced).

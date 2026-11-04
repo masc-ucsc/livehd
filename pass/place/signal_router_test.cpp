@@ -347,6 +347,32 @@ TEST(SignalRouter, SpanSearchContinuesAfterAProtectedClockEscapeRejectsFirstTrac
   EXPECT_GT(result.patterns_examined, 1);
 }
 
+TEST(SignalRouter, OrdinaryDetourRoutingAlsoContinuesPastAProtectedClockEscape) {
+  // The same protected-clock fixture through the ordinary staged path (no straight-span request, detours allowed):
+  // an access-damaging first candidate does not end the search, the router still returns a legal route, and nothing is
+  // committed to the occupancy. With a borrowed guard and with a locally built one.
+  for (bool borrowed : {false, true}) {
+    Fixture f;
+    f.tech.macros["cell"].pins["CLK"] = {"INPUT", "CLOCK", {{"M1", {.072, .027, .090, .063}}}};
+    auto                              occupancy = routing_occupancy(f.tech, f.fp, 64);
+    std::unique_ptr<Pin_escape_guard> guard;
+    const auto                        profile = f.profile();
+    if (borrowed) {
+      guard = std::make_unique<Pin_escape_guard>(f.tech, f.fp, occupancy, f.limits.access_candidates, std::function<void()>{},
+                                                 profile.access);
+    }
+    Signal_router            router(f.tech, f.fp, occupancy, profile, guard.get());
+    const auto               before = occupancy.size();
+    Signal_route_request     request{f.limits, {}, false, false};
+    request.search_detours = true;
+    const auto result      = router.try_route(f.net, request);
+    ASSERT_EQ(result.candidates.size(), 1) << (borrowed ? "borrowed: " : "local: ") << result.reason;
+    EXPECT_LE(result.patterns_examined, f.limits.patterns);
+    EXPECT_LE(result.access_examined, f.limits.access_candidates);
+    EXPECT_EQ(occupancy.size(), before);
+  }
+}
+
 TEST(SignalRouter, StraightSatWitnessChecksMetalAndConnectionOrder) {
   Fixture f;
   f.tech.layers["M1"].direction          = "HORIZONTAL";
@@ -358,7 +384,7 @@ TEST(SignalRouter, StraightSatWitnessChecksMetalAndConnectionOrder) {
   Signal_router router(f.tech, f.fp, occupancy, f.profile());
   const Shape   witness{
       "M1",
-        {1041, 1041, 1559, 1059}
+      {1041, 1041, 1559, 1059}
   };
   const auto before = occupancy.size();
   auto       result = router.propose_straight(f.net, witness, f.limits);
@@ -393,7 +419,7 @@ TEST(SignalRouter, AlignedM2WitnessUsesViasWithoutEscapingItsTrackOrExtent) {
   Signal_router router(f.tech, f.fp, occupancy, f.profile());
   const Shape   corridor{
       "M2",
-        {1000, 1036, 1550, 1054}
+      {1000, 1036, 1550, 1054}
   };
   auto result = router.propose_aligned(f.net, corridor, f.limits);
   ASSERT_TRUE(result.geometry) << result.reason;
@@ -450,10 +476,10 @@ TEST(SignalRouter, AlignedLiftPreservesCentersAndUsesOnlyOneUpperTrunk) {
   Signal_router router(f.tech, f.fp, occupancy, f.profile());
   auto          base = router.propose_aligned(f.net,
                                               {
-                                         "M2",
-                                         {1000, 1036, 1550, 1054}
+                                                  "M2",
+                                                  {1000, 1036, 1550, 1054}
   },
-                                     f.limits);
+                                              f.limits);
   ASSERT_TRUE(base.geometry) << base.reason;
   const auto before = occupancy.size();
   auto       lifted = router.propose_aligned_layer(f.net, *base.geometry, "M4", f.limits);
@@ -576,6 +602,37 @@ TEST(SignalRouter, AvoidsObstaclesBetweenEndpointsAndRejectsBlockedSpan) {
   EXPECT_FALSE(result.geometry);
   EXPECT_EQ(result.reason, "M2 span blocked");
 }
+
+TEST(SignalRouter, SpanMenuProvidesDistinctLegalTracksWithoutCommitting) {
+  Fixture       f;
+  const auto    occupancy = routing_occupancy(f.tech, f.fp, f.fp.dbu);
+  const auto    size      = occupancy.size();
+  const auto    before    = f.fp;
+  Signal_router router(f.tech, f.fp, occupancy, f.profile());
+  const auto    result = router.propose_spans(f.net, f.limits, 4);
+  ASSERT_EQ(result.candidates.size(), 4u);
+  std::set<int64_t> tracks;
+  for (const auto& route : result.candidates) {
+    ASSERT_TRUE(route.straight_corridor);
+    ASSERT_FALSE(route.endpoints.empty());
+    EXPECT_TRUE(tracks.insert(route.endpoints.front().y).second);
+    auto net  = f.net;
+    net.wires = {
+        {"ROUTED", route.paths}
+    };
+    EXPECT_TRUE(check_route_connectivity(f.tech, f.fp, net).connected);
+  }
+  EXPECT_EQ(occupancy.size(), size);
+  EXPECT_EQ(f.fp.components, before.components);
+  EXPECT_EQ(f.fp.nets, before.nets);
+  auto budget        = f.limits;
+  budget.patterns    = 1;
+  const auto bounded = router.propose_spans(f.net, budget, 4);
+  EXPECT_EQ(bounded.candidates.size(), 1u);
+  EXPECT_EQ(bounded.patterns_examined, 1u);
+  EXPECT_EQ(bounded.reason, "pattern budget");
+  EXPECT_THROW(router.propose_spans(f.net, f.limits, 0), std::invalid_argument);
+}
 TEST(SignalRouter, BoundsSearchAndRejectsIneligibleEndpoints) {
   Fixture       f;
   auto          occupancy = routing_occupancy(f.tech, f.fp, 64);
@@ -603,6 +660,43 @@ TEST(SignalRouter, NewSameNetCutsMustRespectSpacing) {
   auto    result    = Signal_router(f.tech, f.fp, occupancy, f.profile()).propose_span(f.net, f.limits);
   EXPECT_FALSE(result.geometry);
   EXPECT_EQ(result.reason, "M2 span blocked");
+}
+TEST(SignalRouter, PriorViaReuseIsIncrementalButProbeChecksTheCompleteUnion) {
+  Fixture              f;
+  auto                 occupancy = routing_occupancy(f.tech, f.fp, 64);
+  Signal_router        router(f.tech, f.fp, occupancy, f.profile());
+  Signal_route_request request{f.limits, {}, false, true};
+  const auto           baseline = router.try_route(f.net, request);
+  ASSERT_EQ(baseline.candidates.size(), 1u) << baseline.reason;
+  for (const auto& path : baseline.candidates.front().paths) {
+    Route_point point;
+    for (const auto& step : path.steps) {
+      if (const auto* at = std::get_if<Route_point>(&step)) {
+        point = *at;
+      } else if (const auto* via = std::get_if<Route_via>(&step)) {
+        request.prior_vias.push_back({*via, point.x, point.y});
+      }
+    }
+  }
+  ASSERT_EQ(request.prior_vias.size(), 2u);
+  const auto count  = occupancy.size();
+  const auto reused = router.try_route(f.net, request);
+  ASSERT_EQ(reused.candidates.size(), 1u) << reused.reason;
+  EXPECT_EQ(reused.candidates.front().vias, 0u);
+  EXPECT_EQ(reused.patterns_examined, baseline.patterns_examined);
+  for (const auto& path : reused.candidates.front().paths) {
+    for (const auto& step : path.steps) {
+      EXPECT_FALSE(std::holds_alternative<Route_via>(step));
+    }
+  }
+  const auto probe = router.probe_route(f.net, request);
+  EXPECT_TRUE(probe.routable) << probe.reason;
+  EXPECT_EQ(occupancy.size(), count);
+  request.prior_vias[0].via.orientation = Orientation::S;
+  const auto rejected                   = router.try_route(f.net, request);
+  EXPECT_TRUE(rejected.candidates.empty());
+  EXPECT_GT(rejected.prior_cut_rejections, 0u);
+  EXPECT_EQ(occupancy.size(), count);
 }
 TEST(SignalRouter, RoutesDifferentRowsThroughM3AndAvoidsBlockedTrunk) {
   Fixture f;
@@ -893,14 +987,14 @@ TEST(SignalRouter, MazeUsesUpperLayersAcrossLowerLayerBarrier) {
   }
   const auto& accesses = result.geometry->endpoints;
   const auto  rc       = routed_rc(f.tech,
-                            f.fp,
-                            routed,
-                            "u0:A",
+                                   f.fp,
+                                   routed,
+                                   "u0:A",
                                    {
-                                {"u0:A", "M1", accesses[0].x, accesses[0].y},
-                                {"u1:A", "M1", accesses[1].x, accesses[1].y}
+                                       {"u0:A", "M1", accesses[0].x, accesses[0].y},
+                                       {"u1:A", "M1", accesses[1].x, accesses[1].y}
   },
-                            rc_model);
+                                   rc_model);
   double      actual_c = 0, actual_r = 0;
   for (const auto& node : rc.nodes) {
     actual_c += node.capacitance_ff;

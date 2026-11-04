@@ -58,6 +58,7 @@
 #include "pin_escape_guard.hpp"
 #include "placement_hints.hpp"
 #include "placement_technology.hpp"
+#include "planning_selection.hpp"
 #include "power_grid.hpp"
 #include "provisional_cell.hpp"
 #include "rapidjson/document.h"
@@ -92,6 +93,23 @@ using Status      = ph::Status;
 // follows the density grid in use.
 int auxiliary_route_bins(const Options& o) { return o.route_bins ? o.route_bins : o.dynamic_bins ? o.bins : 0; }
 int route_grid_bins(int auxiliary_bins, int density_bins) { return auxiliary_bins ? auxiliary_bins : density_bins; }
+
+// The movable route-driven flow legalizes CORE cells in local SAT. Intermediate
+// timing/repair stages must retain the GP pose until that measured handoff.
+// Macro placement and every other full-placement mode keep their own policy.
+bool deferred_legroute_cells(const Options& o) {
+  return o.full && o.optimization_pending && o.legroute && o.legroute_plan.enabled && !o.legroute_options.legal_boxes
+         && o.completed_stage == Placement_stage::final && !o.fp_place && !o.timing_seed && !o.retain_placement
+         && !o.analyze_colors_only;
+}
+void check_fixed_and_macro_legality(const ph::Technology& tech, const ph::Floorplan& fp, const Options& options) {
+  auto frame = fp;
+  std::erase_if(frame.components, [&](const auto& cell) {
+    return tech.macros.at(cell.macro).klass.starts_with("CORE") && cell.place.status != Status::FIXED
+           && cell.place.status != Status::LOCKED;
+  });
+  check_legality(tech, frame, options);
+}
 
 std::string memory_proxy_lef(const std::map<uint64_t, std::string>& memories, const ph::Technology& tech) {
   if (memories.empty()) {
@@ -699,7 +717,25 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
   }
   if (o.legroute) {
     const auto& l = o.legroute_options;
-    h = hash_text(std::format("legroute-v14:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{"
+    h             = hash_text(std::format("legroute-global-keep:{}", l.global_keep), h);
+    h             = hash_text(std::format("legroute-global-net-pops:{}", l.global_net_pops), h);
+    h             = hash_text(std::format("legroute-global-astar-weight:{}", l.global_astar_weight), h);
+    h             = hash_text(std::format("legroute-global-pattern:{}", l.global_pattern), h);
+    h             = hash_text(std::format("legroute-box-route-seed:{}", l.box_route_seed), h);
+    h             = hash_text(std::format("legroute-fit:{}:{}:{}", l.fit_density, l.fit_window, l.fit_first), h);
+    h             = hash_text(std::format("legroute-ceiling:{}", l.density_ceiling), h);
+    h             = hash_text(std::format("legroute-box-reserve:{}", l.box_reserve), h);
+    h             = hash_text(std::format("legroute-reservations:{}:{}", l.reserved_tracks_per_um, l.reserved_layers), h);
+    h             = hash_text(std::format("legroute-partition:{}:{}:{}:{}:{}:{}",
+                                          l.partition_cells,
+                                          l.partition_critical,
+                                          l.partition_critical_cost,
+                                          l.partition_mesh,
+                                          l.global_all,
+                                          l.partition_timeout_rounds),
+                              h);
+    h = hash_text(std::format("legroute-v14:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:"
+                              "{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{"
                               "}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                               l.box_fill,
                               l.box_net_max,
@@ -790,6 +826,24 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                                             q.real,
                                             q.repulsion,
                                             q.shuffle),
+                                h);
+    }
+    if (o.legroute_plan.enabled) {
+      const auto& p = o.legroute_plan;
+      h             = hash_text(std::format("legroute-plan:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+                                            p.rounds,
+                                            p.iterations,
+                                            p.net_pops,
+                                            p.max_inflate,
+                                            p.local_tiles,
+                                            p.handoff,
+                                            p.min_iterations,
+                                            p.timing_interval,
+                                            p.max_degradation_ps,
+                                            p.route_model,
+                                            p.route_interval,
+                                            p.route_net_pops,
+                                            p.export_coarse),
                                 h);
     }
   }
@@ -958,13 +1012,14 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                               o.macro_snap_weight),
                   h);
   }
-  h = hash_text(std::format("uroute:{}:{}:{}:{}:{}:{}",
+  h = hash_text(std::format("uroute:{}:{}:{}:{}:{}:{}:{}",
                             o.uroute.dir,
                             o.uroute.export_features,
                             o.uroute.shots,
                             o.uroute.min_shots,
                             o.uroute.fallback,
-                            o.uroute.drc_level),
+                            o.uroute.drc_level,
+                            o.uroute.label_policy),
                 h);
   h = hash_text(std::format("route-model:{}:{}:{}", o.route_model, o.route_degree, o.route_accuracy), h);
   for (const auto* stage : {&o.fp_route, &o.macro_route, &o.final_route}) {
@@ -2771,6 +2826,34 @@ dp::RoutePolicy route_policy(const Options& options, const Stage_route& stage) {
   return policy;
 }
 }  // namespace
+void detail::install_handoff_io(dp::Design& design, std::vector<ph::Terminal>& signal_pins, size_t terminal_begin,
+                                const std::vector<ph::Terminal>& measured_pins) {
+  if (measured_pins.size() < signal_pins.size() || terminal_begin > design.node_x.size()
+      || signal_pins.size() > design.node_x.size() - terminal_begin || design.node_y.size() != design.node_x.size()) {
+    throw std::logic_error("planning handoff IOs do not match the placer terminal suffix");
+  }
+  for (size_t i = 0; i < measured_pins.size(); ++i) {
+    const auto& pin = measured_pins[i];
+    if (i < signal_pins.size()) {
+      if (pin.name != signal_pins[i].name || pin.use == "POWER" || pin.use == "GROUND") {
+        throw std::logic_error("planning handoff changed the signal IO prefix");
+      }
+    } else if (pin.use != "POWER" && pin.use != "GROUND") {
+      throw std::logic_error("planning handoff appended an unmodelled signal IO");
+    }
+  }
+  for (size_t i = 0; i < signal_pins.size(); ++i) {
+    auto&       signal                = signal_pins[i];
+    const auto& measured              = measured_pins[i];
+    signal.x                          = measured.x;
+    signal.y                          = measured.y;
+    signal.orientation                = measured.orientation;
+    signal.status                     = measured.status;
+    signal.shapes                     = measured.shapes;
+    design.node_x[terminal_begin + i] = measured.x;
+    design.node_y[terminal_begin + i] = measured.y;
+  }
+}
 DreamPlace::native::RoutePolicy resolve_route_policy(const Options& options, const Stage_route& stage) {
   return route_policy(options, stage);
 }
@@ -3670,12 +3753,13 @@ size_t sync_rail_twins(const ph::Technology& tech, ph::Floorplan& frame, const O
       }
     }
   }
-  std::fprintf(stderr,
-               "legroute: rail twins: %zu of %zu two-row cells switched to the twin their rows need, %zu without a fit (%zu templates)\n",
-               switched,
-               tall,
-               unmatched,
-               options.multirow_templates.size());
+  std::fprintf(
+      stderr,
+      "legroute: rail twins: %zu of %zu two-row cells switched to the twin their rows need, %zu without a fit (%zu templates)\n",
+      switched,
+      tall,
+      unmatched,
+      options.multirow_templates.size());
   return switched;
 }
 // Every placed multi-row cell with a rail twin takes the master the PG rails
@@ -4414,7 +4498,12 @@ void check_placed_legality(const Result& result, const Options& options) {
     memory_proxies(*result.graph, tech, options.liberty);
     align_memory_proxy_pins(tech, result.floorplan);
   }
-  check_legality(tech, result.floorplan, final_cell_options(options));
+  const auto resolved = final_cell_options(options);
+  if (deferred_legroute_cells(resolved)) {
+    check_fixed_and_macro_legality(tech, result.floorplan, resolved);
+  } else {
+    check_legality(tech, result.floorplan, resolved);
+  }
 }
 void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, const Options& requested) {
   const auto options = resolve_macro_halo(requested, fp.rows.empty() ? 0 : tech.sites.at(fp.rows.front().site).height);
@@ -5276,16 +5365,33 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       const double core_area = std::max(area / options.utilization, occupancy_area / options.density);
       columns                = std::max<int64_t>(std::ceil(std::sqrt(core_area * options.aspect) / sw), (max_width + sw - 1) / sw);
       rows = std::max<int64_t>({2, static_cast<int64_t>(std::ceil(core_area / (columns * sw * rh))), (max_height + rh - 1) / rh});
-      v.fp.die = {0, 0, double(columns * sw), double(rows * rh)};
       if (pg_profile) {
         // Keep the same usable core area, but reserve a site/row of die margin
         // for physical edge rails and via enclosures. Explicit frames are never
         // resized and must supply their own inset.
-        origin_x     = sw;
-        origin_y     = rh;
-        v.fp.die.xh += 2 * sw;
-        v.fp.die.yh += 2 * rh;
+        origin_x = sw;
+        origin_y = rh;
       }
+      // IO resynthesis may reduce mapped area after an area-resume slice has
+      // advanced the retained optimizer. Regenerating solely from that smaller
+      // area would shrink its frame. Keep each generated extent monotonic;
+      // imported/explicit frames below still follow their original contract.
+      const bool has_movable_macro = std::ranges::any_of(v.cells, [&](const auto& cell) {
+        return !cell.locked && cell.place.status != Status::FIXED && cell.place.status != Status::LOCKED
+               && !tech.macros.at(cell.macro).klass.starts_with("CORE");
+      });
+      if (options.legroute_plan.enabled && options.placement_session && options.completed_stage == Placement_stage::final
+          && !options.fp_place && !has_movable_macro && !options.timing_seed && !options.retain_placement
+          && !options.analyze_colors_only) {
+        if (const auto retained = options.placement_session->current_layout()) {
+          if (retained->xl != origin_x || retained->yl != origin_y || retained->site_width != sw || retained->row_height != rh) {
+            throw std::runtime_error("retained generated placement requires unchanged core origin and site/row lattice");
+          }
+          columns = std::max(columns, int64_t(std::ceil((retained->xh - origin_x) / sw)));
+          rows    = std::max(rows, int64_t(std::ceil((retained->yh - origin_y) / rh)));
+        }
+      }
+      v.fp.die = {0, 0, double(columns * sw + 2 * origin_x), double(rows * rh + 2 * origin_y)};
     } else {
       // A benchmark-fixed frame (ORFS DIE_AREA/CORE_AREA, microns). The core snaps inward to the
       // site/row grid like OpenROAD's initialize_floorplan; utilization and aspect do not apply.
@@ -5419,7 +5525,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   // Pin alignment determines the generated LEF contents. Use those exact
   // bytes for both inference/export identity and the later routed handoff.
   const auto proxy_lef = memory_proxy_lef(memories, tech);
-  if (uroute_requested || resolved_uroute.export_features) {
+  if (uroute_requested || resolved_uroute.export_features || options.legroute_plan.export_coarse) {
     uroute_tech = uroute_technology(options.lefs, proxy_lef);
   }
   std::unordered_map<std::string, ph::Terminal> imported_terms;
@@ -6375,8 +6481,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     throw std::invalid_argument("macro magnet requires movable macros");
   }
   // Taps are inserted by the terminal legalization alone. A call with optimization pending (first placement,
-  // timing round, resize/repair trial) legalizes natively without them and is followed by finalize_placement,
-  // which inserts the taps in its fresh final solve; any other non-fresh call is refused.
+  // timing round, resize/repair trial) is followed by finalize_placement, which inserts the taps in its fresh
+  // final solve. It legalizes natively unless movable legroute owns cell legalization; other non-fresh calls are refused.
   if (options.handoff_taps && !options.timing_seed && !options.retain_placement && options.completed_stage == Placement_stage::final
       && (!options.full || macro_active || (options.previous && !options.optimization_pending))) {
     throw std::invalid_argument("handoff taps require fresh final terminal legalization with fixed macros");
@@ -6388,6 +6494,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   // cell legalization or discard the selected GP timing used by resynthesis.
   const bool defer_macro_cells = options.full && !options.macro_legalize_cells && options.completed_stage == Placement_stage::macro
                                  && !options.timing_seed && !options.retain_placement && !options.analyze_colors_only;
+  const bool defer_legroute_cells = deferred_legroute_cells(options);
+  const bool defer_cells          = defer_macro_cells || defer_legroute_cells;
   if (terminal_active && movable_macros) {
     throw std::invalid_argument("terminal legalization requires the final cell stage with fixed macros");
   }
@@ -6395,6 +6503,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   // refine_regions call refines: it runs once on the timing-driven result, then timing gets a chance to react.
   const bool refine_here       = !options.optimization_pending || options.region_refine;
   const bool boundary_active   = options.boundarypins.enabled && options.full && !options.fp_place && refine_here
+                                 && !(options.placement_area_resume && options.legroute_plan.enabled)
                                  && options.completed_stage == Placement_stage::final && !options.timing_seed
                                  && !options.retain_placement && !options.analyze_colors_only;
   const bool refinement_active = boundary_active;
@@ -6457,6 +6566,30 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       make_arrays(v, tech);
     }
   }
+  auto* live_session = options.legroute_plan.enabled && options.completed_stage == Placement_stage::final && !options.fp_place
+                               && !movable_macros && !options.timing_seed && !options.retain_placement
+                               && !options.analyze_colors_only
+                           ? options.placement_session.get()
+                           : nullptr;
+  dp::GpCheckpoint session_checkpoint;
+  const auto       session_identities = [&] {
+    std::vector<std::string> names(v.design.node_x.size());
+    for (size_t i = 0; i < v.cells.size(); ++i) {
+      const auto& cell = v.cells[i];
+      // Macro master changes require a new identity; standard cells may resize
+      // in place during timing repair while retaining their optimizer particle.
+      names[i]         = tech.macros.at(cell.macro).klass.starts_with("CORE")
+                             ? "cell:" + cell.name
+                             : "macro:" + std::to_string(cell.name.size()) + ":" + cell.name + ":" + cell.macro;
+    }
+    for (size_t i = v.cells.size(); i < v.terminal_begin; ++i) {
+      names[i] = "mask:" + std::to_string(i - v.cells.size());
+    }
+    for (const auto& [name, index] : v.terminal) {
+      names[v.terminal_begin + index] = "io:" + name;
+    }
+    return names;
+  };
   std::optional<Busorder>      bus_order;
   std::optional<Boundary_pins> boundary_pins;
   std::optional<Region_mesh>   final_regions;  // the detail-final region mesh (legroute's regions)
@@ -6465,7 +6598,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   // placement (overflow 5% -> 50%+ within 100 iterations).
   double                       gp_density_weight = 0;
   // the region mesh's inputs: the fixed macros (not placement masks) and the IO terminals
-  const auto                   region_macros           = [&] {
+  const auto                   region_macros     = [&] {
     std::vector<int> macro_indices;
     for (size_t i = 0; i < v.cells.size(); ++i) {
       if (!tech.macros.at(v.cells[i].macro).klass.starts_with("CORE") && !v.cells[i].name.starts_with("__lhd_frame_mask_")) {
@@ -6483,6 +6616,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   };
   const auto refine_final_boundaries = [&](dp::Design& physical) {
     auto refine_control = control;
+    if (live_session && session_checkpoint) {
+      refine_control.checkpoint = session_checkpoint;
+    }
     if (gp_density_weight > 0) {
       refine_control.density_weight_seed = gp_density_weight;
     }
@@ -6579,7 +6715,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                             identities,
                             bus_macros,
                             std::move(drivers));
-      boundary_pins->refine(physical, refine_control);
+      if (live_session && options.legroute_plan.timing_interval) {
+        refine_control.checkpoint_interval = int(options.legroute_plan.timing_interval);
+      }
+      boundary_pins->refine(physical, refine_control, live_session, session_identities());
       bus_order->observe(physical, "after_gp");
     }
     if (control.observer) {
@@ -6595,7 +6734,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   std::optional<Region_seed> region_seed;
   bool                       region_seed_failed = false;
   const auto                 load_region_seed   = [&]() -> const std::optional<Region_seed>& {
-    if (region_seed || region_seed_failed || options.region_seed_dir.empty()) {
+    if (region_seed || region_seed_failed || options.region_seed_dir.empty() || options.placement_area_resume) {
       return region_seed;
     }
     try {
@@ -6649,8 +6788,10 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                    unmatched);
       region_seed = std::move(seed);
     } catch (const std::exception& e) {
-      std::fprintf(stderr, "legroute: region seed %s unusable (%s); the mesh is rebuilt without virtual pins\n",
-                   options.region_seed_dir.c_str(), e.what());
+      std::fprintf(stderr,
+                   "legroute: region seed %s unusable (%s); the mesh is rebuilt without virtual pins\n",
+                   options.region_seed_dir.c_str(),
+                   e.what());
       region_seed_failed = true;
     }
     return region_seed;
@@ -6794,7 +6935,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     metrics       = macro_run->result.placement;
     metrics.legal = dp::is_legal(v.design);
     metrics.hpwl  = dp::hpwl(v.design);
-  } else if (!cache.hit && previous && options.full && !adjustable_io && !macro_pin_adjust
+  } else if (!cache.hit && previous && options.full && !defer_legroute_cells && !adjustable_io && !macro_pin_adjust
              && macro_tracks_valid(v, tech, v.design)) {
     // The ECO path keeps imported IO positions; slot only the new terminals,
     // treating the imported ones as fixed obstacles for assign_io.
@@ -6944,10 +7085,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       make_arrays(v, tech);
     }
-    control.legalize            = options.full && !terminal_active;
+    control.legalize            = options.full && !terminal_active && !defer_legroute_cells;
     control.macro_only_legalize = defer_macro_cells;
-    control.detailed_place
-        = options.full && !terminal_active && !defer_macro_cells && (!movable_macros || options.macro_detailed_place);
+    control.detailed_place = options.full && !terminal_active && !defer_cells && (!movable_macros || options.macro_detailed_place);
     if (options.snapshots || v.centroids) {
       control.observer_interval = options.iterations + 1;
       control.observer          = [&](const dp::Design& snapshot, dp::PlacementStage stage, int iteration) {
@@ -6967,7 +7107,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
             }
             if (i < static_cast<size_t>(snapshot.num_movable)) {
               place.status = Status::PLACED;
-              if (!defer_macro_cells && stage != dp::PlacementStage::global_placement
+              if (!defer_cells && stage != dp::PlacementStage::global_placement
                   && tech.macros.at(cell.macro).klass.starts_with("CORE")) {
                 // capture() applies physical CORE row flips after the native
                 // solver. Export the same legal orientation without mutating it.
@@ -7904,18 +8044,12 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       auto frame = view.fp;
       restore_imported_rows(frame, view);
       frame.components.clear();
-      frame.nets.clear();
       for (const auto& c : view.cells) {
         frame.components.push_back({c.name, c.macro, c.place});
       }
-      size_t serial = 0;
-      for (const auto& [driver, sinks] : v.nets) {
-        ph::Net net{"sat_net_" + std::to_string(serial++), {{driver.instance, driver.pin}}};
-        for (const auto& sink : sinks) {
-          net.connections.push_back({sink.instance, sink.pin});
-        }
-        frame.nets.push_back(std::move(net));
-      }
+      // DEF PINS and NETS must name the same connection. In particular, a
+      // renamed clock net must not leave its top-level terminal on an empty net.
+      snapshot_nets(frame, view);
       return frame;
     };
     auto sat_install = [&](dp::Design& physical, const ph::Floorplan& frame) {
@@ -7926,7 +8060,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       physical.validate();
     };
-    if (final_timing && options.satlegalize && !terminal_active && (!options.optimization_pending || options.region_sat)) {
+    if (final_timing && options.satlegalize && !terminal_active && !defer_legroute_cells
+        && (!options.optimization_pending || options.region_sat)) {
       if (!options.fp_evaluate || !control.checkpoint) {
         throw std::invalid_argument("satlegalize requires timing feedback and a positive timing interval");
       }
@@ -8820,9 +8955,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     // the routability probe (defined below) runs here, in the region-refinement call, before the mesh and the
     // bus-ordered pins are cut, so the inflation spreads the cells first and the boundaries follow; the terminal
     // stage then takes the refinement's mesh and pins (region_seed_dir) and does not probe again
-    std::function<bool(dp::Design&, unsigned)> probe_fn;
-    size_t                                     probe_failing = 0;  // the regions the last probe round found unroutable
-    if (refinement_active && !terminal_active) {
+    size_t probe_failing = 0;  // the regions the last probe round found unroutable
+    if (refinement_active && !terminal_active && !live_session) {
       const auto prior_progress = control.progress_observer;
       control.progress_observer = [&, prior_progress](const dp::GpSample& sample) {
         gp_density_weight = sample.density_weight;  // the latest GP density weight seeds the refinement
@@ -8958,7 +9092,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         profile = nullptr;  // an unregistered technology: legroute takes the LEF routing stack
       }
       if (pg_profile) {
-        auto grid = make_power_grid(tech, frame, *pg_profile);
+        auto grid      = make_power_grid(tech, frame, *pg_profile);
+        auto terminals = grid.terminals;
         if (profile && !profile->io_pin_layers[0].empty() && !profile->io_pin_layers[1].empty()) {
           // the IO pins the handoff exports (their layer, shape and track), so legroute's wires end on them; the
           // handoff sees each pin's status as the export does (a stage freeze is not a user constraint)
@@ -8968,16 +9103,18 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
               t.status = it->second;
             }
           }
-          auto pins = handoff_pins(tech, pin_frame, profile->io_pin_layers[0], profile->io_pin_layers[1]);
-          for (size_t i = 0; i < pins.size() && i < frame.terminals.size(); ++i) {
-            pins[i].status = frame.terminals[i].status;
-          }
-          for (size_t i = 0; i < frame.terminals.size() && i < pins.size(); ++i) {
-            if (pins[i].name == frame.terminals[i].name) {
-              frame.terminals[i] = pins[i];
-            }
-          }
+          terminals = handoff_pins(tech, pin_frame, profile->io_pin_layers[0], profile->io_pin_layers[1]);
         }
+        for (size_t i = 0; i < frame.terminals.size(); ++i) {
+          if (i >= terminals.size() || terminals[i].name != frame.terminals[i].name) {
+            throw std::runtime_error("legroute power-grid generation reordered signal IOs");
+          }
+          terminals[i].status = frame.terminals[i].status;
+        }
+        // Retain the supply terminals referenced by SPECIALNETS as well as the
+        // PG-aware signal IOs. This routing frame is separate from v.fp and its
+        // original signal-only placement/RC arrays.
+        frame.terminals = std::move(terminals);
         for (const auto& net : grid.special_nets) {
           for (auto& shape : ph::route_geometry(tech, grid, net, true)) {
             regions.obstacles.push_back(std::move(shape));
@@ -8988,16 +9125,145 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       }
       return profile;
     };
+    const auto terminal_controls = [&](const ph::Floorplan& frame) {
+      auto terminal_config             = options.terminal_legalize_options;
+      terminal_config.prects           = v.prects;
+      terminal_config.route_drc        = options.satlegalize_route;
+      terminal_config.route_vias       = options.satlegalize_route_vias ? tech_profile : nullptr;
+      terminal_config.target_density   = options.density;
+      terminal_config.macro_halo_x_dbu = v.halo_x;
+      terminal_config.macro_halo_y_dbu = v.halo_y;
+      set_terminal_grid(tech,
+                        frame,
+                        options,
+                        route_grid_bins(control.auxiliary_bins, metrics.bins_x),
+                        route_grid_bins(control.auxiliary_bins, metrics.bins_y),
+                        terminal_config);
+      return terminal_config;
+    };
+    struct Planned_handoff {
+      dp::Design                                 design;
+      ph::Floorplan                              frame;
+      Legroute_regions                           resources;
+      const ph::Tech_profile*                    profile = nullptr;
+      std::optional<Terminal_legalize_report>    report;
+      timing::Feedback                           timing;
+      std::optional<Placement_session::Snapshot> optimizer;
+    };
+    struct Plan_snapshot {
+      dp::Design                                 design;
+      std::vector<ph::Terminal>                  signal_pins;
+      timing::Feedback                           timing;
+      std::optional<Placement_session::Snapshot> optimizer;
+    };
+    std::optional<Plan_snapshot>          measured_plan;
+    std::optional<Planned_handoff>        measured_handoff, chosen_handoff;
+    std::optional<Planning_selection>     plan_selection;
+    std::vector<Terminal_legalize_domain> plan_domains;
+    const auto                            install_planned_pose = [&](dp::Design& design, const ph::Floorplan& frame) {
+      sat_install(design, frame);
+      // capture(false) and ordinary timing snapshots retain the view's CORE
+      // orientations. Keep that view in sync with the native pose, including
+      // when a later candidate is rejected and the measured incumbent returns.
+      for (size_t i = 0; i < v.cells.size(); ++i) {
+        v.cells[i].place = frame.components[i].place;
+      }
+      detail::install_handoff_io(design, v.fp.terminals, v.terminal_begin, frame.terminals);
+    };
+    const auto write_legroute_input
+        = [&](const ph::Floorplan& frame, const Legroute_regions& regions, const std::string& directory) {
+            if (!options.snapshots) {
+              return;
+            }
+            // Keep the exact geometry and timing used by this routing measurement.
+            // The regular GP snapshot precedes the planning updates, and final STA
+            // need not retain the same routing priorities after legalization.
+            fs::create_directories(directory);
+            auto saved = frame;
+            saved.special_nets.insert(saved.special_nets.end(), regions.power_nets.begin(), regions.power_nets.end());
+            saved.vias.insert(saved.vias.end(), regions.power_vias.begin(), regions.power_vias.end());
+            ph::write_def(saved, directory + "/input.def");
+            std::ofstream timing_file(directory + "/timing.tsv");
+            timing_file << "# physical_pin slack_ps clock_bit; routing priorities, not sign-off timing\n" << std::setprecision(17);
+            std::set<std::string> written;
+            for (const auto& net : frame.nets) {
+              for (const auto& pin : net.connections) {
+                const auto rank = final_gp_timing.pin_rank(pin.instance, pin.pin);
+                const auto name = pin.instance == "PIN" ? pin.pin : pin.instance + ":" + pin.pin;
+                if ((std::isfinite(rank.slack) || rank.clock) && written.insert(name).second) {
+                  timing_file << std::quoted(name) << '\t'
+                              << (std::isfinite(rank.slack) ? rank.slack * final_gp_timing.time_unit_ps : 0) << '\t' << rank.clock
+                              << '\n';
+                }
+              }
+            }
+            if (!timing_file) {
+              throw std::runtime_error("cannot write legroute input timing");
+            }
+          };
     // legroute.probe: a quick legroute on small regions (no virtual pins) finds the regions it cannot route; their
     // cells widen (GOALPlace-style inflation, x only: r = fill / target, less for timing-critical cells) and GP resumes
     // from the converged placement until it settles; the widths come back before bus order and the real legroute.
     // one probe round: legroute on the converged GP, the unroutable regions' cells widened, GP resumed; true when
     // every region routed (or nothing could be widened)
-    const auto run_legroute_probe = [&](dp::Design& design, unsigned round) {
-      const auto&      po    = options.legroute_probe;
-      const auto       start = std::chrono::steady_clock::now();
-      const bool       seeded = po.real && !refinement_active && load_region_seed().has_value();
-      const bool       real   = po.real && (refinement_active || seeded);
+    // Boundary refinement operates on a separate split-net Design and releases
+    // it before returning. Recovery must receive the physical topology itself,
+    // not just an estimator with its boundary-pin vector cleared.
+    const auto verify_physical_gp_input = [&](const dp::Design& design) {
+      if (design.node_x.size() != v.terminal_begin + v.fp.terminals.size() || design.pin2node.size() != v.pins.size()
+          || design.flat_net2pin_start.size() != v.nets.size() + 1) {
+        throw std::logic_error("legroute recovery GP still contains virtual region nodes or split nets");
+      }
+      size_t net = 0, pin_index = 0;
+      for (const auto& [driver, sinks] : v.nets) {
+        (void)driver;
+        if (size_t(design.flat_net2pin_start[net]) != pin_index
+            || size_t(design.flat_net2pin_start[net + 1]) != pin_index + 1 + sinks.size()) {
+          throw std::logic_error("legroute recovery GP retained split region connectivity");
+        }
+        pin_index += 1 + sinks.size();
+        ++net;
+      }
+      for (size_t i = 0; i < v.pins.size(); ++i) {
+        const auto&  pin  = v.pins[i];
+        const size_t node = pin.instance == "PIN" ? v.terminal_begin + v.terminal.at(pin.pin) : v.cell.at(pin.instance);
+        if (size_t(design.pin2node[i]) != node || size_t(design.flat_net2pin[i]) != i) {
+          throw std::logic_error("legroute recovery GP retained a virtual region endpoint");
+        }
+      }
+    };
+    Legroute_gate_report measured_gates;
+    bool                 measured_local_scope = false;
+    bool                 measured_fit_unknown = false;  // the near-home box matching stopped on its budget
+    bool                 plan_recovery_started = false;
+    const bool           planning             = options.legroute_plan.enabled;
+    const bool           coarse_feedback       = planning && options.legroute_plan.route_model == "coarse";
+    // A movable flow retains its raw physical frame; the legacy handoff switch
+    // additionally legalizes that frame as a fixed-placement diagnostic.
+    const bool           capture_handoff      = options.legroute_plan.handoff || !options.legroute_options.legal_boxes;
+    const bool           boxed_plan
+        = options.legroute_plan.handoff || (!options.legroute_options.legal_boxes && options.legroute_options.partition_cells);
+    const unsigned feedback_rounds    = planning ? options.legroute_plan.rounds : options.legroute_probe.rounds;
+    const auto     run_legroute_probe = [&](dp::Design& design,
+                                            unsigned    round,
+                                            bool        measure_only    = false,
+                                            size_t      incumbent_limit = std::numeric_limits<size_t>::max()) {
+      measured_handoff.reset();
+      measured_plan.reset();
+      measured_gates       = {};
+      measured_local_scope = false;
+      measured_fit_unknown = false;
+      auto po              = options.legroute_probe;
+      if (planning) {
+        po.real        = false;
+        po.shuffle     = 0;
+        po.target      = 1;
+        po.max_inflate = options.legroute_plan.max_inflate;
+        po.iterations  = std::max(50u, options.legroute_plan.iterations);
+      }
+      const auto start  = std::chrono::steady_clock::now();
+      const bool seeded = po.real && !refinement_active && load_region_seed().has_value();
+      const bool real   = po.real && (refinement_active || seeded);
       if (po.real && !real) {
         std::fprintf(stderr,
                      "legroute probe: probe.real asked but the boundary refinement is inactive here (boundary pins %d, full %d, "
@@ -9039,7 +9305,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
             }
           }
         }
-      } else {
+      } else if (!planning) {
         Region_options ro = region_options_with_tracks(tech, options.region);
         ro.max_cells      = po.cells ? po.cells : options.region.max_cells;
         const auto mesh   = Region_mesh::build(design, region_macros(), region_ios(), ro, tech.dbu);
@@ -9049,6 +9315,14 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           }
         }
       }
+      if (planning && control.checkpoint) {
+        // The terminal refresh otherwise happens only after planning. Using an
+        // empty or stale ranking here changes routing order and can hide the
+        // very congestion the timed global pass will encounter.
+        macro_checkpoint_forced = true;
+        const auto update       = control.checkpoint(design, control.max_iterations);
+        design.net_weights      = update.net_weights;
+      }
       auto frame = sat_frame(design, false);
       if (options.handoff_taps) {
         add_handoff_taps(frame);
@@ -9056,34 +9330,228 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       if (real) {  // the virtual pins name frame nets
         std::erase_if(regions.pins, [&](const auto& p) { return p.net >= frame.nets.size(); });
       }
+      std::optional<Terminal_legalize_report> handoff_legalized;
+      if (planning && options.legroute_plan.handoff) {
+        auto controls    = terminal_controls(frame);
+        controls.domains = plan_domains;
+        Terminal_legalize_report legalized;
+        try {
+          legalized = terminal_legalize(tech, frame, final_gp_timing, controls);
+        } catch (const Terminal_legalize_unfit& e) {
+          std::fprintf(stderr, "legroute plan %u: native handoff failed: %s\n", round, e.what());
+          if (round) {
+            probe_failing = std::numeric_limits<size_t>::max();
+            return true;  // retain the measured legal incumbent; this is a bounded search failure
+          }
+          if (!options.allow_increase_area || !options.generated_core) {
+            throw;
+          }
+          const double utilization = options.utilization * options.area_step;
+          throw Placement_area_restart(utilization, std::min(options.density, utilization + .05));
+        }
+        install_planned_pose(design, frame);
+        handoff_legalized = std::move(legalized);
+      } else if (planning && capture_handoff) {
+        // sat_frame rounds into physical DBU coordinates without legalizing.
+        // Refresh the placer and timer at exactly that raw, possibly
+        // overlapping pose before measuring the movable-box handoff.
+        install_planned_pose(design, frame);
+      }
       const auto* profile = legroute_power(frame, regions);
-      auto        lopt    = options.legroute_options;
-      lopt.final          = false;
-      lopt.legal_boxes    = false;  // the probe judges the GP placement's regions with the SAT placement (nothing is legal yet)
-      lopt.sat_ms         = po.sat_ms;
-      lopt.sat_min_fill   = po.fill;
-      lopt.spill_rounds   = 0;  // the probe is the density signal: the moves and the alternatives belong to the real run
+      if (planning) {
+        // Power-aware IO legalization can change both track and layer. STA,
+        // later GP and rollback must all observe this measured signal pose;
+        // appended supply terminals are outside the placement arrays.
+        detail::install_handoff_io(design, v.fp.terminals, v.terminal_begin, frame.terminals);
+        if (control.checkpoint && (capture_handoff || pg_profile)) {
+          macro_checkpoint_forced = true;
+          const auto update       = control.checkpoint(design, control.max_iterations);
+          design.net_weights      = update.net_weights;
+        }
+        if (live_session) {
+          live_session->synchronize(design, control, session_identities(), "plan_measure");
+        }
+        if (capture_handoff) {
+          measured_handoff.emplace(Planned_handoff{design,
+                                                   frame,
+                                                   regions,
+                                                   profile,
+                                                   std::move(handoff_legalized),
+                                                   final_gp_timing,
+                                                   live_session ? std::optional{live_session->snapshot()} : std::nullopt});
+        }
+      }
+      auto lopt              = options.legroute_options;
+      lopt.region_cell_limit = options.region.max_cells;
+      lopt.final             = false;
+      if (!planning) {
+        lopt.legal_boxes = false;  // the probe judges the GP placement's regions with the SAT placement (nothing is legal yet)
+      }
+      lopt.sat_ms       = po.sat_ms;
+      lopt.sat_min_fill = po.fill;
+      lopt.spill_rounds = 0;  // the probe is the density signal: the moves and the alternatives belong to the real run
       lopt.alternatives.clear();
       // a failing probe restarts the placement: no need to solve the other regions; the real twin solves them all,
       // every failing region's cells widen
-      lopt.fail_fast      = po.strict && !real;
+      lopt.fail_fast = po.strict && !real;
       lopt.sat_alt.clear();
       lopt.macro_halo_x_dbu = v.halo_x;
       lopt.macro_halo_y_dbu = v.halo_y;
-      lopt.output_dir       = options.output_dir.empty() ? "" : options.output_dir + std::format("/legroute_probe{}", round);
+      lopt.output_dir       = options.output_dir.empty()
+                                  ? ""
+                                  : options.output_dir + std::format("/legroute_{}{}", planning ? "plan" : "probe", round);
       if (!lopt.output_dir.empty()) {
+        // An outer area retry replays round 0 into the same workdir: archive every earlier attempt's plan rounds and
+        // its timing/selection reports whole (legroute_attempts/<k>/legroute_plan*), so no file mixes two attempts.
+        if (planning && round == 0 && std::filesystem::exists(lopt.output_dir)) {
+          namespace fs        = std::filesystem;
+          const fs::path base = options.output_dir;
+          size_t         k    = 0;
+          while (fs::exists(base / "legroute_attempts" / std::to_string(k))) {
+            ++k;
+          }
+          const fs::path archive = base / "legroute_attempts" / std::to_string(k);
+          fs::create_directories(archive);
+          for (const auto& entry : fs::directory_iterator(base)) {
+            // the round directories plus the attempt's legroute_plan_timing.json / legroute_plan_selection.json
+            if (entry.path().filename().string().starts_with("legroute_plan")) {
+              fs::rename(entry.path(), archive / entry.path().filename());
+            }
+          }
+        }
         std::filesystem::create_directories(lopt.output_dir);
+        if (planning) {
+          write_legroute_input(frame, regions, lopt.output_dir);
+          if (measured_handoff && measured_handoff->report) {
+            write_terminal_legalize_report(*measured_handoff->report,
+                                           frame,
+                                           terminal_controls(frame),
+                                           lopt.output_dir + "/handoff");
+          }
+        }
       }
-      Legroute_report probe;
+      const auto export_coarse_sample = [&](const dp::Design&           snapshot,
+                                            const ph::Floorplan&        physical,
+                                            const Legroute_congestion&  tiles,
+                                            const Legroute_plan_report& measured,
+                                            int                         bins_x,
+                                            int                         bins_y,
+                                            const fs::path&             directory) {
+        if (!options.legroute_plan.export_coarse || !measured.route_attempted) {
+          return;
+        }
+        const auto&    layout = snapshot.layout;
+        const auto     maps   = resample_legroute_congestion(tiles, {layout.xl, layout.yl, layout.xh, layout.yh}, bins_x, bins_y);
+        dp::RudyResult labels;
+        labels.horizontal      = maps.horizontal;
+        labels.vertical        = maps.vertical;
+        labels.pin_utilization = maps.pin_utilization;
+        labels.measured_nets   = int(maps.signals);
+        labels.unroutable_nets = int(maps.unrouted);
+        dp::detail::accumulate_overflow(labels);
+        std::ostringstream pose, topology, capacity;
+        pose << std::setprecision(17);
+        capacity << std::setprecision(17) << tiles.bounds.xl << ' ' << tiles.bounds.yl << ' ' << tiles.bounds.xh << ' '
+                 << tiles.bounds.yh << ' ' << tiles.cols << ' ' << tiles.rows << ' ' << tiles.admission_share << '\n';
+        for (const auto& component : physical.components) {
+          pose << std::quoted(component.name) << ' ' << component.place.x << ' ' << component.place.y << ' '
+               << int(component.place.orientation) << '\n';
+          topology << std::quoted(component.name) << ' ' << std::quoted(component.macro) << '\n';
+        }
+        for (const auto& terminal : physical.terminals) {
+          pose << std::quoted(terminal.name) << ' ' << terminal.x << ' ' << terminal.y << '\n';
+        }
+        for (const auto& net : physical.nets) {
+          topology << std::quoted(net.name) << ' ' << std::quoted(net.use);
+          for (const auto& pin : net.connections) {
+            topology << ' ' << std::quoted(pin.instance) << ' ' << std::quoted(pin.pin);
+          }
+          topology << '\n';
+        }
+        for (size_t k = 0; k < tiles.limit_h.size(); ++k) {
+          capacity << tiles.limit_h[k] << ' ' << tiles.limit_v[k] << '\n';
+        }
+        Uroute_coarse_provenance provenance;
+        provenance.pose_sha256     = uroute_digest(pose.str());
+        provenance.netlist_sha256  = uroute_digest(topology.str());
+        provenance.capacity_sha256 = uroute_digest(capacity.str());
+        provenance.endpoint_basis  = measured.endpoint_basis;
+        provenance.admission_share = tiles.admission_share;
+        provenance.complete        = measured.unrouted == 0;
+        provenance.unrouted        = measured.unrouted;
+        provenance.search_limited  = measured.search_limited;
+        // A later area/recovery pass can reuse this round directory. Preserve
+        // every distinct observation instead of replacing a previous sample.
+        std::ostringstream observation;
+        observation << std::setprecision(17) << kPlaceSalt << ':' << provenance.pose_sha256 << ':' << provenance.netlist_sha256
+                    << ':' << provenance.capacity_sha256 << ':' << uroute_tech << ':' << bins_x << ':' << bins_y << ':'
+                    << measured.unrouted << ':' << measured.search_limited;
+        for (size_t i = 0; i < snapshot.node_x.size(); ++i) {
+          observation << ':' << snapshot.node_x[i] << ':' << snapshot.node_y[i];
+        }
+        for (size_t k = 0; k < maps.horizontal.size(); ++k) {
+          observation << ':' << maps.horizontal[k] << ':' << maps.vertical[k];
+        }
+        const auto destination = directory / uroute_digest(observation.str());
+        export_uroute_coarse(destination,
+                             snapshot,
+                             uroute_id(v),
+                             bins_x,
+                             bins_y,
+                             feature_capacity_h,
+                             feature_capacity_v,
+                             labels,
+                             provenance);
+        std::ofstream means(destination / "tile_means.json");
+        means << std::setprecision(17);
+        means << "{\"aggregation\":\"area_weighted_incident_edge_max\",\"horizontal\":[";
+        for (size_t k = 0; k < maps.mean_horizontal.size(); ++k) {
+          means << (k ? "," : "") << maps.mean_horizontal[k];
+        }
+        means << "],\"vertical\":[";
+        for (size_t k = 0; k < maps.mean_vertical.size(); ++k) {
+          means << (k ? "," : "") << maps.mean_vertical[k];
+        }
+        means << "]}\n";
+        if (!means) {
+          throw std::runtime_error("cannot write coarse congestion tile means");
+        }
+      };
+      Legroute_report      probe;
+      Legroute_plan_report plan;
+      Legroute_congestion  congestion;
       try {
-        probe = legroute(tech, frame, final_gp_timing, lopt, regions, profile);
+        if (planning) {
+          plan = legroute_plan(tech,
+                               frame,
+                               final_gp_timing,
+                               lopt,
+                               regions,
+                               profile,
+                               options.legroute_plan.net_pops,
+                               options.legroute_plan.handoff,
+                               options.legroute_plan.export_coarse ? &congestion : nullptr);
+        } else {
+          probe = legroute(tech, frame, final_gp_timing, lopt, regions, profile);
+        }
       } catch (const Legroute_unfit& e) {  // too dense for the tile grid: the core grows before any inflation
+        if (planning && capture_handoff && round) {
+          measured_handoff.reset();
+          probe_failing = std::numeric_limits<size_t>::max();
+          std::fprintf(stderr, "legroute plan %u: candidate cannot form a routable handoff: %s\n", round, e.what());
+          return true;
+        }
         if (!options.allow_increase_area || !options.generated_core) {
           throw;
         }
         const double utilization = options.utilization * options.area_step;
         std::fprintf(stderr, "legroute probe: %s; placement restarts at utilization %.3f\n", e.what(), utilization);
         throw Placement_area_restart(utilization, utilization + .05);
+      }
+      if (planning && options.legroute_plan.export_coarse) {
+        const int nx = route_grid_bins(control.auxiliary_bins, metrics.bins_x ? metrics.bins_x : options.bins);
+        const int ny = route_grid_bins(control.auxiliary_bins, metrics.bins_y ? metrics.bins_y : options.bins);
+        export_coarse_sample(design, frame, congestion, plan, nx, ny, fs::path(lopt.output_dir) / "uroute_coarse");
       }
       // per cell of an unroutable region: r = its region's box fill / target, at most max_inflate; the most timing-critical
       // cells (top 10% by timing weight, GOALPlace's 10-quantile guard) keep their size
@@ -9095,13 +9563,199 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           solved.push_back(fill[r]);
         }
       }
+      auto              affected_components = probe.unroutable_components;
+      auto              affected_regions    = probe.unroutable_regions;
+      std::vector<char> local_cells(size_t(design.num_movable), 0);
+      size_t            nearby_cells = 0;
+      bool              local_scope  = false;
+      // The window fit precondition failed: a placement-quality problem at the route's granularity, not a
+      // shortage of core area. It is answered by spreading the cells of the dense windows, never by growth.
+      bool              window_fit   = false;
+      const unsigned    local_tiles  = std::max(1u, options.legroute_plan.local_tiles);
+      if (planning) {
+        measured_gates       = plan.gates;
+        measured_fit_unknown = plan.fit_reason == "budget";
+        if (plan.gates.requires_replan()) {
+          for (size_t i = 0; i < local_cells.size(); ++i) {
+            local_cells[i]  = plan.component_hot_distance[i] <= local_tiles;
+            nearby_cells   += local_cells[i];
+          }
+          // A small absolute patch may still cover most of a small design.
+          // Treat it as localized only when both the region target and a
+          // quarter of movable cells bound the affected neighborhood.
+          local_scope = nearby_cells > 0 && (!plan.gates.region_target || nearby_cells <= plan.gates.region_target)
+                        && nearby_cells <= size_t(design.num_movable) / 4;
+          std::fprintf(stderr,
+                       "legroute plan %u: %zu hot tiles, %zu nearby cells, %s feedback\n",
+                       round,
+                       plan.hot_tiles,
+                       nearby_cells,
+                       local_scope ? "local" : "whole-placement");
+        }
+        measured_local_scope = local_scope;
+        window_fit           = !plan.route_attempted && plan.route_skip_reason == Legroute_plan_report::Route_skip_reason::window_density;
+        fill                 = plan.component_pressure;
+        for (size_t i = 0; i < fill.size(); ++i) {
+          if (fill[i] > 1) {
+            affected_components.push_back(i);
+            affected_regions.push_back(int(i));
+          }
+        }
+        probe_failing = plan.unrouted + plan.overflow_tracks + plan.gates.oversized_regions + plan.gates.cell_dense_regions
+                        + plan.gates.routing_dense_edges + plan.gates.unfittable_regions;
+        // Stages rank before residuals: a candidate whose cells do not fit their coarse tiles ranks behind every
+        // candidate that reached the route, then by its matching deficit; a stopped matching search (budget) is a
+        // computational unknown and never counts as progress.
+        constexpr size_t fit_stage = size_t{1} << 40;
+        if (!plan.route_attempted && plan.route_skip_reason == Legroute_plan_report::Route_skip_reason::window_density) {
+          probe_failing = plan.fit_reason == "budget" ? std::numeric_limits<size_t>::max() - 1
+                                                      : fit_stage + plan.gates.cell_dense_regions;
+        } else if (plan.fit_reason == "budget") {
+          // routed on the window fallback: an observation, not a near-home fit witness; behind every measured fit
+          // deficit, ahead only of an unknown that did not route
+          probe_failing = fit_stage + (size_t{1} << 30) + probe_failing;
+        }
+        if (!plan.route_attempted) {
+          std::fprintf(stderr,
+                       "legroute plan %u: routing not attempted (%s), %zu signals unchecked, physical cell density %.6f, "
+                       "%zu of %zu fit windows over the cap, box matching %s%s%s (%zu boxes / %zu free tiles, %zu far, max move %zu), %.3f s\n",
+                       round,
+                       plan.route_skip_name(),
+                       plan.unchecked_signals,
+                       plan.gates.max_cell_density,
+                       plan.fit_dense_windows,
+                       plan.fit_windows,
+                       plan.fit_matched ? "complete" : "incomplete",
+                       plan.fit_reason.empty() ? "" : " ",
+                       plan.fit_reason.c_str(),
+                       plan.fit_movable_boxes,
+                       plan.fit_free_tiles,
+                       plan.fit_far_boxes,
+                       plan.fit_max_move,
+                       plan.seconds);
+        } else {
+          std::fprintf(stderr,
+                       "legroute plan %u: %zu signals (%zu timed), %zu unresolved (%zu search-limited, %zu topology-disconnected), "
+                       "%zu overflow edges / %zu tracks, %zu "
+                       "pops, %.3f s\n",
+                       round,
+                       plan.signals,
+                       plan.timed_signals,
+                       plan.unrouted,
+                       plan.search_limited,
+                       plan.topology_disconnected,
+                       plan.overflow_edges,
+                       plan.overflow_tracks,
+                       plan.search_pops,
+                       plan.seconds);
+        }
+        if (!lopt.output_dir.empty()) {
+          write_legroute_plan_failures(plan, lopt.output_dir + "/plan_failures.tsv");
+          std::ofstream report(lopt.output_dir + "/plan.json");
+          report << std::format(
+              R"({{"backend":"native","route_attempted":{},"route_skip_reason":"{}","unchecked_signals":{},"fit_windows":{},"fit_dense_windows":{},"fit_max_density":{},"fit_matched":{},"fit_reason":"{}","fit_movable_boxes":{},"fit_free_tiles":{},"fit_applied":{},"fit_far_boxes":{},"fit_max_move":{},"fit_unknown":{},"pg_missing":{},"signals":{},"timed_signals":{},"unrouted":{},"search_limited":{},"topology_disconnected":{},"overflow_edges":{},"overflow_tracks":{},"search_pops":{},"global_astar_weight":{},"global_pattern":{},"pattern_attempts":{},"pattern_completed":{},"pattern_fallbacks":{},"pattern_work":{},"pattern_work_limited":{},"seconds":{},"measure_only":{},"hot_tiles":{},"nearby_cells":{},"local_scope":{},"boxed_handoff":{},"endpoint_basis":"{}","box_route_seed_attempted":{},"box_route_seed_accepted":{},"handoff_legalized":{},"legalize_seconds":{},"pre_sat":{}}})",
+              plan.route_attempted,
+              plan.route_skip_name(),
+              plan.unchecked_signals,
+              plan.fit_windows,
+              plan.fit_dense_windows,
+              std::isfinite(plan.fit_max_density) ? std::format("{}", plan.fit_max_density) : std::string("null"),
+              plan.fit_matched,
+              plan.fit_reason,
+              plan.fit_movable_boxes,
+              plan.fit_free_tiles,
+              plan.fit_applied,
+              plan.fit_far_boxes,
+              plan.fit_max_move,
+              plan.fit_reason == "budget",
+              plan.pg_missing,
+              plan.signals,
+              plan.timed_signals,
+              plan.unrouted,
+              plan.search_limited,
+              plan.topology_disconnected,
+              plan.overflow_edges,
+              plan.overflow_tracks,
+              plan.search_pops,
+              plan.global_astar_weight,
+              options.legroute_options.global_pattern,
+              plan.pattern_attempts,
+              plan.pattern_completed,
+              plan.pattern_fallbacks,
+              plan.pattern_work,
+              plan.pattern_work_limited,
+              plan.seconds,
+              measure_only,
+              plan.hot_tiles,
+              nearby_cells,
+              local_scope,
+              boxed_plan,
+              plan.endpoint_basis,
+              plan.box_route_seed_attempted,
+              plan.box_route_seed_accepted,
+              measured_handoff && measured_handoff->report.has_value(),
+              measured_handoff && measured_handoff->report ? measured_handoff->report->seconds : 0,
+              legroute_gate_json(plan.gates))
+                 << '\n';
+        }
+        if (!capture_handoff) {
+          measured_plan.emplace(Plan_snapshot{design,
+                                              v.fp.terminals,
+                                              final_gp_timing,
+                                              live_session ? std::optional{live_session->snapshot()} : std::nullopt});
+        }
+        if (plan_selection) {
+          const auto report_selection = [&] {
+            if (!options.output_dir.empty()) {
+              std::ofstream report(options.output_dir + "/legroute_plan_timing.json");
+              plan_selection->write(report);
+              if (!report) {
+                throw std::runtime_error("cannot write legroute planning timing decisions");
+              }
+            }
+          };
+          bool accepted = false;
+          try {
+            accepted = plan_selection->consider(round,
+                                                probe_failing,
+                                                measured_handoff ? measured_handoff->timing : measured_plan->timing);
+          } catch (...) {
+            report_selection();
+            throw;
+          }
+          report_selection();
+          const auto& decision = plan_selection->last();
+          std::fprintf(stderr,
+                       "legroute plan %u: candidate %s (%s), estimated worst data-pin slack %s ps\n",
+                       round,
+                       accepted ? "accepted" : "rejected",
+                       decision.reason.c_str(),
+                       decision.worst_data_slack_ps ? std::format("{:.3f}", *decision.worst_data_slack_ps).c_str() : "unavailable");
+          if (!accepted) {
+            return true;  // restore the measured incumbent without another GP slice
+          }
+        }
+        // Excess physical occupancy needs room. Routing pressure alone may
+        // instead be a poor placement (especially after remapping), so spend
+        // the configured unpinned GP rounds before asking for more area.
+        if (plan.gates.cell_dense_regions && !local_scope && !window_fit) {
+          std::fprintf(stderr, "legroute plan %u: cell density exceeds the ceiling; request area recovery\n", round);
+          return true;
+        }
+        // Do not spend another GP slice on a candidate already worse than the incumbent.
+        if (measure_only || !probe_failing || probe_failing > incumbent_limit) {
+          return true;
+        }
+      }
+      const bool local_bounds = local_scope && options.legroute_plan.local_tiles > 0;
       // the target fill this design routes at: the median fill of the regions the probe solved, else just under the
       // emptiest region it tried (all failed); never above probe.target
-      double target = po.target;
+      // A window fit pressure is already the window's density over its cap: inflate by exactly that ratio.
+      double     target       = window_fit ? 1. : po.target;
       if (solved.size() >= 2) {
         std::ranges::nth_element(solved, solved.begin() + solved.size() / 2);
         target = std::min(target, solved[solved.size() / 2]);
-      } else if (solved.empty()) {
+      } else if (!planning && solved.empty()) {
         double lowest = INFINITY;
         for (size_t r = 0; r < fill.size(); ++r) {
           if (probe.region_stats[r].status == 1 || probe.region_stats[r].status == 2) {
@@ -9128,16 +9782,16 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       // user asked for, since the SAT's limited movement wants a slightly different placement, and the anchors
       // pull their nets toward the empty area. Timing-critical cells stay.
       struct Anchor {
-        int                   node;
-        dp::PositionBox       box;
+        int             node;
+        dp::PositionBox box;
       };
       std::vector<Anchor> anchored;
       std::set<int>       anchored_set;
       if (po.shuffle > 0) {
         std::map<int, std::vector<int>> cells_of;  // failing region -> its movable cells
-        for (size_t k = 0; k < probe.unroutable_components.size(); ++k) {
-          const size_t i = probe.unroutable_components[k];
-          const int    r = probe.unroutable_regions[k];
+        for (size_t k = 0; k < affected_components.size(); ++k) {
+          const size_t i = affected_components[k];
+          const int    r = affected_regions[k];
           if (i < size_t(design.num_movable) && r >= 0 && size_t(r) < fill.size()) {
             cells_of[r].push_back(int(i));
           }
@@ -9181,9 +9835,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
             anchored.push_back({i, design.node_boxes[i]});
             anchored_set.insert(i);
             // the anchors spread along x inside the sparse patch, a cell width apart
-            const double x = std::clamp(tx + (double(picked) - double(po.shuffle - 1) / 2) * 2 * design.node_size_x[i] - design.node_size_x[i] / 2,
-                                        xl, xh - design.node_size_x[i]);
-            const double y = std::clamp(ty - design.node_size_y[i] / 2, yl, yh - design.node_size_y[i]);
+            const double x = std::clamp(
+                tx + (double(picked) - double(po.shuffle - 1) / 2) * 2 * design.node_size_x[i] - design.node_size_x[i] / 2,
+                xl,
+                xh - design.node_size_x[i]);
+            const double y       = std::clamp(ty - design.node_size_y[i] / 2, yl, yh - design.node_size_y[i]);
             design.node_x[i]     = x;
             design.node_y[i]     = y;
             design.node_boxes[i] = {x, y, x + design.node_size_x[i], y + design.node_size_y[i]};
@@ -9196,10 +9852,16 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       for (int i = 0; i < design.num_movable; ++i) {
         movable_area += design.node_size_x[i] * design.node_size_y[i];
       }
-      for (size_t k = 0; k < probe.unroutable_components.size(); ++k) {
-        const size_t i = probe.unroutable_components[k];
-        const int    r = probe.unroutable_regions[k];
+      for (size_t k = 0; k < affected_components.size(); ++k) {
+        const size_t i = affected_components[k];
+        const int    r = affected_regions[k];
         if (i >= size_t(design.num_movable) || r < 0 || size_t(r) >= fill.size() || anchored_set.contains(int(i))) {
+          continue;
+        }
+        // actual route maps replace whole-tree width inflation, except for a fit failure: the cells did not fit
+        // their coarse tiles, which no route map shows, so the named boxes' cells still spread; a distant endpoint
+        // of a congested net does not widen the repair neighborhood
+        if ((coarse_feedback && !window_fit) || (local_scope && !local_cells[i])) {
           continue;
         }
         const double ratio = std::clamp(fill[r] / target, 1.0, po.max_inflate);
@@ -9209,7 +9871,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         grow[i]  = design.node_size_x[i] * (ratio - 1);
         added   += grow[i] * design.node_size_y[i];
       }
-      // the widened cells must fit the core: the GP target density rises up to 0.95 of the free core area (fixed
+      // the widened cells must fit the core: the GP target density rises up to 0.90 of the free core area (fixed
       // nodes clipped to the core), beyond that the inflation scales down
       const auto& l          = design.layout;
       double      fixed_area = 0;
@@ -9224,7 +9886,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       // utilization that fits, the GP target density lowered with it (utilization + 0.05) so the cells spread over
       // the new core
       const double grow_core = free_area > 0 ? (movable_area + wanted) / control.target_density / free_area : 1;
-      if (grow_core > 1.05 && options.allow_increase_area && options.generated_core) {
+      if (!planning && grow_core > 1.05 && options.allow_increase_area && options.generated_core) {
         const double utilization = options.utilization / grow_core;
         std::fprintf(stderr,
                      "legroute probe: the inflated cells need %.0f%% more core; placement restarts at utilization %.3f\n",
@@ -9232,8 +9894,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                      utilization);
         throw Placement_area_restart(utilization, utilization + .05);
       }
-      if (movable_area + added > .95 * free_area) {
-        const double scale = added > 0 ? std::max(0.0, .95 * free_area - movable_area) / added : 0;
+      // A localized repair tries only the inflation that fits, then remeasures.
+      // Broad gate failures already returned to area recovery above. An
+      // oversized virtual proposal alone is not a physical capacity proof.
+      if (movable_area + added > .90 * free_area) {  // the legroute density ceiling (0.90)
+        const double scale = added > 0 ? std::max(0.0, .90 * free_area - movable_area) / added : 0;
         for (auto& g : grow) {
           g *= scale;
         }
@@ -9252,10 +9917,45 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                    added,
                    control.target_density,
                    density);
-      const double hpwl_before = dp::hpwl(design);
-      size_t       inflated    = 0;
-      unsigned     iterations  = 0;
-      if (added > 0 || !anchored.empty()) {
+      const double hpwl_before        = dp::hpwl(design);
+      const auto   before_x           = local_scope ? design.node_x : std::vector<double>{};
+      const auto   before_y           = local_scope ? design.node_y : std::vector<double>{};
+      const auto   saved_boxes        = local_bounds ? design.node_boxes : std::vector<dp::PositionBox>{};
+      size_t       inflated           = 0;
+      size_t       local_moved        = 0;
+      unsigned     iterations         = 0;
+      unsigned     timing_checkpoints = 0;
+      if (added > 0 || !anchored.empty() || (planning && probe_failing)) {
+        if (planning && options.legroute_plan.handoff) {
+          plan_domains.clear();
+        }
+        if (local_bounds) {
+          if (design.node_boxes.empty()) {
+            design.node_boxes.assign(design.node_x.size(), {l.xl, l.yl, l.xh, l.yh});
+          }
+          for (int i = 0; i < design.num_movable; ++i) {
+            const double dx  = local_cells[size_t(i)] ? double(plan.tile_width_dbu) * local_tiles : 0;
+            const double dy  = local_cells[size_t(i)] ? double(plan.tile_height_dbu) * local_tiles : 0;
+            auto&        box = design.node_boxes[size_t(i)];
+            box              = {std::max(box.xl, design.node_x[i] - dx),
+                                std::max(box.yl, design.node_y[i] - dy),
+                                std::min(box.xh, design.node_x[i] + dx),
+                                std::min(box.yh, design.node_y[i] + dy)};
+          }
+          if (options.legroute_plan.handoff) {
+            plan_domains.resize(frame.components.size());
+            for (int i = 0; i < design.num_movable; ++i) {
+              const auto& bounds      = design.node_boxes[size_t(i)];
+              plan_domains[size_t(i)] = {
+                  !local_cells[size_t(i)],
+                  ph::Rect{bounds.xl, bounds.yl, bounds.xh, bounds.yh}
+              };
+            }
+          }
+        }
+        verify_physical_gp_input(design);
+        // Known local bounds above are temporary; saved_boxes is restored
+        // after the slice. Physical/user node constraints are never cleared.
         // widen around the centre (pins keep their absolute positions), GP from the converged placement, narrow back
         const auto widen = [&](double sign) {
           for (int i = 0; i < design.num_movable; ++i) {
@@ -9268,29 +9968,52 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
             for (int k = design.flat_node2pin_start[i]; k < design.flat_node2pin_start[i + 1]; ++k) {
               design.pin_offset_x[design.flat_node2pin[k]] += half;
             }
-            if (!design.node_boxes.empty()) {  // the movement bounds widen with the cell and narrow back (never its outline)
+            if (!design.node_boxes.empty()) {  // origin bounds shift with the center-preserving width change
               design.node_boxes[i].xl -= half;
-              design.node_boxes[i].xh += half;
+              design.node_boxes[i].xh -= half;
             }
           }
         };
         for (double g : grow) {
           inflated += g > 0;
         }
+        const unsigned timing_interval
+            = planning && control.checkpoint
+                  ? std::max(1u, options.legroute_plan.timing_interval ? options.legroute_plan.timing_interval : 5u)
+                  : 0;
+        const unsigned minimum_steps     = planning ? std::max(50u, options.legroute_plan.min_iterations) : 0;
+        // the real cell sizes and pin offsets, captured before widen(1): STA, coarse routing and coarse feature
+        // exports all see the physical pose (the optimization's origin moved left by grow / 2)
+        const auto physical_template = timing_interval || coarse_feedback ? std::optional{design} : std::nullopt;
+        const auto to_physical       = [&](const dp::Design& snapshot) {
+          auto actual        = *physical_template;
+          actual.node_x      = snapshot.node_x;
+          actual.node_y      = snapshot.node_y;
+          actual.net_weights = snapshot.net_weights;
+          for (int i = 0; i < actual.num_movable; ++i) {
+            actual.node_x[size_t(i)] += grow[size_t(i)] / 2;
+          }
+          return actual;
+        };
         widen(1);
         auto ctl = control;
-        if (const double dw = metrics.density_weight > 0   ? metrics.density_weight
-                              : gp_density_weight > 0 ? gp_density_weight
-                                                      : control.density_weight_seed.value_or(0);
+        if (const double dw = metrics.density_weight > 0 ? metrics.density_weight
+                              : gp_density_weight > 0    ? gp_density_weight
+                                                         : control.density_weight_seed.value_or(0);
             dw > 0) {
           ctl.density_weight_seed = dw * po.repulsion;
         }
+        const bool global_recovery = planning && !local_scope;
         ctl.target_density         = density;
         ctl.fillers_in_whitespace  = true;
-        ctl.hold_overflow          = true;
+        ctl.hold_overflow          = !global_recovery;
         ctl.post_density_factor    = 0;
-        ctl.wirelength_gamma_start = ctl.wirelength_gamma_end;
-        ctl.max_step               = std::min(ctl.max_step, .05);
+        if (!global_recovery) {
+          ctl.wirelength_gamma_start = ctl.wirelength_gamma_end;
+          ctl.max_step               = std::min(ctl.max_step, .05);
+        } else {
+          ctl.density_weight_seed.reset();
+        }
         ctl.legalize = ctl.detailed_place = false;
         ctl.before_legalize               = {};
         ctl.after_macro_legalize          = {};
@@ -9306,14 +10029,192 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         ctl.macro_pull_interval           = 0;
         ctl.max_iterations = ctl.schedule_iterations = int(po.iterations);
         ctl.min_iterations                           = std::min<int>(ctl.min_iterations, int(po.iterations));
+        if (minimum_steps) {
+          if (minimum_steps > po.iterations) {
+            throw std::invalid_argument("legroute.plan.min_iterations exceeds the planning iteration budget");
+          }
+          ctl.min_iterations = int(minimum_steps);
+        }
+        if (timing_interval) {
+          if (!control.checkpoint) {
+            throw std::invalid_argument("legroute.plan.timing_interval requires a timing checkpoint provider");
+          }
+          ctl.checkpoint_interval = int(timing_interval);
+          ctl.checkpoint_start    = 0;
+          ctl.checkpoint_final    = true;
+          ctl.checkpoint_overflow_milestones.clear();
+          ctl.checkpoint = [&](const dp::Design& snapshot, int iteration) {
+            // Inflation is optimization geometry. STA sees the real cell sizes
+            // and pin offsets at the corresponding physical lower-left origins.
+            auto actual             = to_physical(snapshot);
+            macro_checkpoint_forced = true;
+            auto update             = control.checkpoint(actual, iteration);
+            if (update.replacement || !update.node_size_x.empty() || !update.node_size_y.empty() || !update.pin_offset_x.empty()
+                || !update.pin_offset_y.empty()) {
+              throw std::runtime_error("planning timing feedback cannot resize or replace the inflated optimization topology");
+            }
+            ++timing_checkpoints;
+            std::fprintf(stderr, "legroute plan feedback %u: physical timing refreshed at GP step %d\n", round, iteration);
+            return update;
+          };
+        }
+        size_t coarse_sample = 0;
+        if (coarse_feedback) {
+          ctl.routability = ctl.improved_routability = true;
+          ctl.route.model                            = dp::RouteModel::external;
+          ctl.route.probe = false;
+          ctl.route_external_interval                = int(options.legroute_plan.route_interval);
+          ctl.route_external                         = [&](const dp::Design& optimized, int bins_x, int bins_y) {
+            const auto snapshot = to_physical(optimized);
+            // Keep the measured PG, row cuts, fixed cells and IO geometry. Only
+            // movable physical component poses change; no virtual widths or
+            // newly legalized IOs enter this in-flight routing observation.
+            auto current      = sat_frame(snapshot, false);
+            auto routed_frame = frame;
+            if (current.components.size() > routed_frame.components.size()) {
+              throw std::logic_error("coarse GP snapshot changed the measured component topology");
+            }
+            for (size_t i = 0; i < current.components.size(); ++i) {
+              if (current.components[i].name != routed_frame.components[i].name
+                  || current.components[i].macro != routed_frame.components[i].macro) {
+                throw std::logic_error("coarse GP snapshot changed a measured component identity");
+              }
+              routed_frame.components[i].place = current.components[i].place;
+            }
+            Legroute_congestion tiles;
+            auto                route_options = lopt;
+            route_options.output_dir.clear();
+            auto         measured               = legroute_plan(tech,
+                                                                routed_frame,
+                                                                final_gp_timing,
+                                                                route_options,
+                                                                regions,
+                                                                profile,
+                                                                options.legroute_plan.route_net_pops,
+                                                                false,
+                                                                &tiles,
+                                                                true);
+            const size_t initial_search_limited = measured.search_limited;
+            double       sample_seconds         = measured.seconds;
+            unsigned     sample_net_pops        = options.legroute_plan.route_net_pops;
+            // A few budget-limited connections on an otherwise clear map are
+            // not evidence for spreading a previously routable placement.
+            // Resolve that ambiguity before their estimated demand inflates it.
+            if (measured.search_limited && measured.unrouted == measured.search_limited && !measured.topology_disconnected
+                && !measured.overflow_tracks && measured.unrouted <= std::max(size_t(1), measured.signals / 100)
+                && sample_net_pops < options.legroute_plan.net_pops) {
+              sample_net_pops  = options.legroute_plan.net_pops;
+              measured         = legroute_plan(tech,
+                                               routed_frame,
+                                               final_gp_timing,
+                                               route_options,
+                                               regions,
+                                               profile,
+                                               sample_net_pops,
+                                               false,
+                                               &tiles,
+                                               true);
+              sample_seconds  += measured.seconds;
+            }
+            if (options.legroute_plan.export_coarse) {
+              export_coarse_sample(snapshot,
+                                   routed_frame,
+                                   tiles,
+                                   measured,
+                                   bins_x,
+                                   bins_y,
+                                   fs::path(lopt.output_dir) / std::format("uroute_coarse_gp_{:04}", coarse_sample));
+            }
+            ++coarse_sample;
+            const auto&    layout = snapshot.layout;
+            const auto     maps = resample_legroute_congestion(tiles, {layout.xl, layout.yl, layout.xh, layout.yh}, bins_x, bins_y);
+            dp::RudyResult route_result;
+            route_result.horizontal      = maps.horizontal;
+            route_result.vertical        = maps.vertical;
+            route_result.pin_utilization = maps.pin_utilization;
+            route_result.measured_nets   = int(maps.signals);
+            route_result.unroutable_nets = int(maps.unrouted);
+            for (size_t k = 0; k < route_result.horizontal.size(); ++k) {
+              route_result.horizontal[k] += maps.unresolved_horizontal[k];
+              route_result.vertical[k]   += maps.unresolved_vertical[k];
+            }
+            dp::detail::accumulate_overflow(route_result);
+            route_result.overflow += double(maps.unrouted) / std::max(size_t(1), maps.signals);
+            std::fprintf(stderr,
+                         "legroute plan feedback %u: coarse sample %zu signals, %zu unresolved, %zu excess tracks, %.3fs\n",
+                         round,
+                         measured.signals,
+                         measured.unrouted,
+                         measured.overflow_tracks,
+                         sample_seconds);
+            if (!lopt.output_dir.empty()) {
+              std::ofstream log(lopt.output_dir + "/coarse_gp.jsonl", std::ios::app);
+              log << std::format(
+                  R"({{"signals":{},"unrouted":{},"search_limited":{},"overflow_tracks":{},"bins_x":{},"bins_y":{},"overflow":{},"max_utilization":{},"tile_mean_h":{},"tile_mean_v":{},"seconds":{},"net_pops":{},"initial_search_limited":{}}})",
+                  measured.signals,
+                  measured.unrouted,
+                  measured.search_limited,
+                  measured.overflow_tracks,
+                  bins_x,
+                  bins_y,
+                  route_result.overflow,
+                  route_result.max_utilization,
+                  std::accumulate(maps.mean_horizontal.begin(), maps.mean_horizontal.end(), 0.) / maps.mean_horizontal.size(),
+                  std::accumulate(maps.mean_vertical.begin(), maps.mean_vertical.end(), 0.) / maps.mean_vertical.size(),
+                  sample_seconds,
+                  sample_net_pops,
+                  initial_search_limited)
+                  << '\n';
+              if (!log) {
+                throw std::runtime_error("cannot write coarse GP observations");
+              }
+            }
+            return route_result;
+          };
+        }
         dp::GpState state;
-        const auto  placed = dp::place(design, ctl, &state);
-        iterations         = unsigned(placed.iterations);
+        const auto  placed = live_session ? live_session->advance(design,
+                                                                  ctl,
+                                                                  session_identities(),
+                                                                  "plan_rebalance",
+                                                                  minimum_steps,
+                                                                  {},
+                                                                  false,
+                                                                  (global_recovery || coarse_feedback) && !plan_recovery_started)
+                                          : dp::place(design, ctl, ctl.checkpoint ? nullptr : &state);
+        iterations        = unsigned(placed.iterations);
+        plan_recovery_started |= global_recovery || coarse_feedback;
+        if (planning && iterations < minimum_steps) {
+          throw std::runtime_error("planning GP stopped before its requested minimum iteration count");
+        }
         widen(-1);
+        if (local_bounds) {
+          for (int i = 0; i < design.num_movable; ++i) {
+            const double dx    = std::abs(design.node_x[i] - before_x[size_t(i)]);
+            const double dy    = std::abs(design.node_y[i] - before_y[size_t(i)]);
+            const double max_x = local_cells[size_t(i)] ? double(plan.tile_width_dbu) * local_tiles : 0;
+            const double max_y = local_cells[size_t(i)] ? double(plan.tile_height_dbu) * local_tiles : 0;
+            if (dx > max_x + 1e-6 || dy > max_y + 1e-6) {
+              throw std::runtime_error(
+                  std::format("legroute plan cell {} moved ({}, {}) beyond local bounds ({}, {})", i, dx, dy, max_x, max_y));
+            }
+            local_moved += dx + dy > 1e-6;
+          }
+          design.node_boxes = saved_boxes;
+        } else if (local_scope) {
+          for (int i = 0; i < design.num_movable; ++i) {
+            local_moved
+                += local_cells[size_t(i)]
+                   && std::abs(design.node_x[i] - before_x[size_t(i)]) + std::abs(design.node_y[i] - before_y[size_t(i)]) > 1e-6;
+          }
+        }
         for (const auto& a : anchored) {  // the anchors move freely again
           design.node_boxes[a.node] = a.box;
         }
         design.validate();
+        if (live_session) {
+          live_session->synchronize(design, control, session_identities(), "plan_physical");
+        }
       }
       const double          hpwl_after = dp::hpwl(design);
       std::array<size_t, 4> count{};
@@ -9321,46 +10222,218 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         ++count[size_t(std::clamp(st.status, 0, 3))];
       }
       const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-      std::fprintf(stderr,
-                   "legroute probe round %u%s: %zu regions (routable %zu, unsat %zu, no answer %zu, sparse %zu), %zu cells widened "
-                   "(+%.1f%% area), %zu shuffled, GP %u iterations, HPWL %.4g -> %.4g, %.1f s\n",
-                   round,
-                   seeded ? " (the refinement's regions and pins)" : real ? " (real regions and pins)" : "",
-                   probe.region_stats.size(),
-                   count[0],
-                   count[1],
-                   count[2],
-                   count[3],
-                   inflated,
-                   movable_area > 0 ? 100 * added / movable_area : 0.0,
-                   anchored.size(),
-                   iterations,
-                   hpwl_before,
-                   hpwl_after,
-                   seconds);
-      if (!lopt.output_dir.empty()) {
-        std::ofstream report(lopt.output_dir + "/probe.json");
-        report << std::format(
-            R"({{"regions":{},"routable":{},"unsat":{},"no_answer":{},"sparse":{},"inflated_cells":{},"added_area_ratio":{:.4f},)"
-            R"("gp_iterations":{},"hpwl_before":{},"hpwl_after":{},"probe_seconds":{:.2f},"seconds":{:.2f}}})",
+      if (planning) {
+        std::fprintf(stderr,
+                     "legroute plan feedback %u: %zu cells inflated (+%.1f%% area), GP %u iterations, HPWL %.4g -> %.4g, %.1f s\n",
+                     round,
+                     inflated,
+                     movable_area > 0 ? 100 * added / movable_area : 0.0,
+                     iterations,
+                     hpwl_before,
+                     hpwl_after,
+                     seconds);
+      } else {
+        std::fprintf(
+            stderr,
+            "legroute probe round %u%s: %zu regions (routable %zu, unsat %zu, no answer %zu, sparse %zu), %zu cells widened "
+            "(+%.1f%% area), %zu shuffled, GP %u iterations, HPWL %.4g -> %.4g, %.1f s\n",
+            round,
+            seeded ? " (the refinement's regions and pins)"
+            : real ? " (real regions and pins)"
+                   : "",
             probe.region_stats.size(),
             count[0],
             count[1],
             count[2],
             count[3],
             inflated,
-            area > 0 ? added / area : 0.0,
+            movable_area > 0 ? 100 * added / movable_area : 0.0,
+            anchored.size(),
             iterations,
             hpwl_before,
             hpwl_after,
-            probe.seconds,
-            seconds)
+            seconds);
+      }
+      if (!lopt.output_dir.empty()) {
+        std::ofstream report(lopt.output_dir + (planning ? "/feedback.json" : "/probe.json"));
+        if (planning) {
+          report << std::format(
+              R"({{"inflated_cells":{},"added_area_ratio":{},"gp_iterations":{},"timing_checkpoints":{},"hpwl_before":{},"hpwl_after":{},"seconds":{},"local_scope":{},"local_movable_cells":{},"local_moved_cells":{},"bounded_local_motion":{},"gp_virtual_region_nodes":0,"gp_physical_nodes":{},"gp_original_nets":{},"gp_node_bounds":{}}})",
+              inflated,
+              movable_area > 0 ? added / movable_area : 0.0,
+              iterations,
+              timing_checkpoints,
+              hpwl_before,
+              hpwl_after,
+              seconds,
+              local_scope,
+              local_scope ? nearby_cells : 0,
+              local_moved,
+              local_bounds,
+              design.node_x.size(),
+              design.flat_net2pin_start.size() - 1,
+              design.node_boxes.size())
+                 << '\n';
+        } else {
+          report << std::format(
+              R"({{"regions":{},"routable":{},"unsat":{},"no_answer":{},"sparse":{},"inflated_cells":{},"added_area_ratio":{:.4f},)"
+              R"("gp_iterations":{},"hpwl_before":{},"hpwl_after":{},"probe_seconds":{:.2f},"seconds":{:.2f}}})",
+              probe.region_stats.size(),
+              count[0],
+              count[1],
+              count[2],
+              count[3],
+              inflated,
+              area > 0 ? added / area : 0.0,
+              iterations,
+              hpwl_before,
+              hpwl_after,
+              probe.seconds,
+              seconds)
+                 << '\n';
+        }
+      }
+      if (!planning) {
+        probe_failing = count[1] + count[2];
+      }
+      return probe_failing == 0 || (!planning && added <= 0 && anchored.empty());
+    };
+    const auto run_plan_rounds = [&](dp::Design& design) {
+      plan_recovery_started = false;
+      plan_selection.emplace(options.legroute_plan.max_degradation_ps);
+      const auto           original_x = design.node_x, original_y = design.node_y;
+      size_t               best     = std::numeric_limits<size_t>::max();
+      unsigned             selected = 0;
+      Legroute_gate_report selected_gates;
+      bool                 selected_local_scope = false;
+      bool                 selected_fit_unknown = false;
+      if (capture_handoff) {
+        for (unsigned round = 0; round <= feedback_rounds; ++round) {
+          const bool done = run_legroute_probe(design, round, round == feedback_rounds, best);
+          if (!measured_handoff || probe_failing > best || !plan_selection->last().accepted) {
+            break;
+          }
+          best                 = probe_failing;
+          selected             = round;
+          chosen_handoff       = std::move(measured_handoff);
+          selected_gates       = measured_gates;
+          selected_local_scope = measured_local_scope;
+          selected_fit_unknown = measured_fit_unknown;
+          if (done) {
+            break;
+          }
+        }
+        if (!chosen_handoff) {
+          throw std::logic_error("legroute planning did not retain its initial measured handoff");
+        }
+        design          = chosen_handoff->design;
+        final_gp_timing = chosen_handoff->timing;
+        install_planned_pose(design, chosen_handoff->frame);
+        if (live_session && chosen_handoff->optimizer) {
+          live_session->restore(*chosen_handoff->optimizer);
+        }
+      } else {
+        std::optional<Plan_snapshot> best_plan;
+        for (unsigned round = 0; round <= feedback_rounds; ++round) {
+          const bool done = run_legroute_probe(design, round, round == feedback_rounds, best);
+          if (!measured_plan || probe_failing > best || !plan_selection->last().accepted) {
+            break;
+          }
+          best                 = probe_failing;
+          selected             = round;
+          best_plan            = std::move(measured_plan);
+          selected_gates       = measured_gates;
+          selected_local_scope = measured_local_scope;
+          selected_fit_unknown = measured_fit_unknown;
+          if (done) {
+            break;
+          }
+        }
+        if (!best_plan) {
+          throw std::logic_error("legroute plan did not retain its initial measured pose");
+        }
+        design          = best_plan->design;
+        final_gp_timing = best_plan->timing;
+        detail::install_handoff_io(design, v.fp.terminals, v.terminal_begin, best_plan->signal_pins);
+        if (live_session && best_plan->optimizer) {
+          live_session->restore(*best_plan->optimizer);
+        }
+      }
+      size_t moved        = 0;
+      double displacement = 0;
+      for (int i = 0; i < design.num_movable; ++i) {
+        const double distance  = std::abs(design.node_x[i] - original_x[i]) + std::abs(design.node_y[i] - original_y[i]);
+        moved                 += distance > 1e-6;
+        displacement          += distance;
+      }
+      std::fprintf(stderr,
+                   "legroute plan: selected measured round %u, planning gate score %zu, %zu cells moved, displacement %.3f DBU\n",
+                   selected,
+                   best,
+                   moved,
+                   displacement);
+      // The ranking penalty of an unknown fit is not a physical failure: when the selected candidate's measured gates
+      // pass, it goes on to local (which repeats a complete regional matching) instead of growing area.
+      const bool fit_unknown_only = best != 0 && selected_fit_unknown && !selected_gates.requires_replan()
+                                    && selected_gates.unrouted == 0 && selected_gates.overflow_tracks == 0;
+      const bool requires_replan  = best != 0 && !fit_unknown_only;
+      if (fit_unknown_only) {
+        std::fprintf(stderr,
+                     "legroute plan: selected round %u passes its measured gates; its near-home fit is unknown (matching "
+                     "budget), so local decides\n",
+                     selected);
+      }
+      if (!options.output_dir.empty()) {
+        std::ofstream report(options.output_dir + "/legroute_plan_selection.json");
+        report << std::format(
+            R"({{"selected_round":{},"routing_gate_score":{},"unresolved_and_overflow":{},"moved_cells":{},"displacement_dbu":{},"boxed_handoff":{},"handoff_legalized":{},"requires_replan":{},"fit_unknown":{},"local_scope":{},"pre_sat":{}}})",
+            selected,
+            best,
+            selected_gates.unrouted + selected_gates.overflow_tracks,
+            moved,
+            displacement,
+            boxed_plan,
+            chosen_handoff && chosen_handoff->report.has_value(),
+            requires_replan,
+            selected_fit_unknown,
+            selected_local_scope,
+            legroute_gate_json(selected_gates))
                << '\n';
       }
-      probe_failing = count[1] + count[2];
-      return count[1] + count[2] == 0 || (added <= 0 && anchored.empty());
+      if (requires_replan) {
+        verify_physical_gp_input(design);
+        // Local movement bounds have already been restored. Invalidate only
+        // computed region state; preserve physical IOs, masks and user bounds.
+        plan_domains.clear();
+        boundary_pins.reset();
+        final_regions.reset();
+        region_seed.reset();
+        region_seed_failed = true;
+        const auto why     = std::format(
+            "pre-SAT planning screen still blocked after {}: {} oversized regions, {} unfittable regions ({} boxes), {} dense cell "
+            "regions, "
+            "{} dense routing edges, {} overflow tracks, {} unresolved ({} search-limited, {} topology-disconnected)",
+            selected_local_scope ? "localized timed movement" : "broad pressure",
+            selected_gates.oversized_regions,
+            selected_gates.unfittable_regions,
+            selected_gates.unfittable_boxes,
+            selected_gates.cell_dense_regions,
+            selected_gates.routing_dense_edges,
+            selected_gates.overflow_tracks,
+            selected_gates.unrouted,
+            selected_gates.search_limited,
+            selected_gates.topology_disconnected);
+        if (!options.allow_increase_area || !options.generated_core) {
+          throw std::runtime_error(why + "; area recovery is unavailable; SAT was not attempted");
+        }
+        const double utilization = options.utilization * options.area_step;
+        std::fprintf(stderr,
+                     "legroute plan: %s; retained global placement retries at utilization %.3f without region IO pins\n",
+                     why.c_str(),
+                     utilization);
+        throw Placement_area_restart(utilization, std::min(options.density, utilization + .05));
+      }
     };
-    probe_fn = run_legroute_probe;
     // the region-refinement call starts from a converged placement: the probe rounds run here, before its GP call
     // (never inside DREAMPlace's hooks: the detailed placer keeps its own copy of the cells' sizes and positions),
     // and the refinement in the call's before-legalize hook then cuts the mesh and places the pins after the inflation
@@ -9370,13 +10443,16 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       std::vector<double> best_x = v.design.node_x, best_y = v.design.node_y;
       size_t              best_failing = std::numeric_limits<size_t>::max();
       bool                measured     = false;  // the placement now in v.design was measured by the last round
-      for (unsigned round = 0; round < std::max(1u, options.legroute_probe.rounds); ++round) {
+      for (unsigned round = 0; round < std::max(1u, feedback_rounds); ++round) {
         const auto before_x = v.design.node_x;
         const auto before_y = v.design.node_y;
         const bool done     = run_legroute_probe(v.design, round);
         if (probe_failing > best_failing) {
-          std::fprintf(stderr, "legroute probe: round %u left %zu regions failing, the best was %zu: that placement is kept\n", round,
-                       probe_failing, best_failing);
+          std::fprintf(stderr,
+                       "legroute probe: round %u left %zu regions failing, the best was %zu: that placement is kept\n",
+                       round,
+                       probe_failing,
+                       best_failing);
           v.design.node_x = best_x;
           v.design.node_y = best_y;
           measured        = true;
@@ -9395,15 +10471,90 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       if (!measured && best_failing > 0 && best_failing != std::numeric_limits<size_t>::max()) {
         // the last round's inflation was never measured: the best measured placement is the one to keep unless the
         // rounds ran out while improving (then the latest inflation stands, as the terminal legroute measures it)
-        std::fprintf(stderr, "legroute probe: %zu regions failing at the best measured round; the latest inflation stands for the terminal run\n",
-                     best_failing);
+        std::fprintf(
+            stderr,
+            "legroute probe: %zu regions failing at the best measured round; the latest inflation stands for the terminal run\n",
+            best_failing);
       }
       // DREAMPlace's detailed placer asserts on the cells the probe's resumes leave overlapping; legalization alone
       // settles them, the terminal stage legalizes again anyway
       control.detailed_place = false;
     }
+    if (live_session && control.checkpoint) {
+      session_checkpoint = [&](const dp::Design& physical, int iteration) {
+        macro_checkpoint_forced = true;
+        return control.checkpoint(physical, iteration);
+      };
+    }
+    const auto run_main_gp = [&] {
+      if (!live_session) {
+        return dp::place(v.design, control);
+      }
+      auto gp     = control;
+      gp.legalize = gp.detailed_place = false;
+      const bool resume               = options.placement_area_resume && live_session->live() && !terminal_active;
+      unsigned   minimum              = 0;
+      bool       remap_recovery       = false;
+      if (resume) {
+        // A new macro plan already supplied cells spread around its new fixed
+        // bodies. Keep that candidate; ordinary core growth spreads old cells.
+        const auto seeded = options.placement_macro_replan ? 0 : live_session->seed_movable(v.design, session_identities());
+        remap_recovery    = !options.placement_macro_replan && seeded * 10 < size_t(v.design.num_movable) * 7;
+        minimum           = std::max(50u, options.legroute_plan.min_iterations);
+        gp.max_iterations = gp.schedule_iterations = int(std::max(minimum, options.legroute_plan.iterations));
+        gp.min_iterations                          = int(minimum);
+        verify_physical_gp_input(v.design);
+        if (!options.output_dir.empty()) {
+          std::ofstream report(options.output_dir + "/legroute_area_gp_input.json");
+          report << std::format(
+              R"({{"virtual_region_nodes":0,"physical_nodes":{},"original_nets":{},"node_bounds":{},"region_seed_ignored":true,"minimum_steps":{}}})",
+              v.design.node_x.size(),
+              v.design.flat_net2pin_start.size() - 1,
+              v.design.node_boxes.size(),
+              minimum);
+        }
+        // Large remaps are not settled placements: new cells need full motion
+        // and a fresh smoothing/penalty schedule in the same live optimizer.
+        gp.fillers_in_whitespace  = true;
+        gp.hold_overflow          = !remap_recovery;
+        gp.post_density_factor    = 0;
+        if (!remap_recovery) {
+          gp.wirelength_gamma_start = gp.wirelength_gamma_end;
+          gp.max_step               = std::min(gp.max_step, .05);
+        } else {
+          gp.density_weight_seed.reset();
+        }
+        if (session_checkpoint) {
+          gp.checkpoint               = session_checkpoint;
+          gp.checkpoint_interval      = int(options.legroute_plan.timing_interval ? options.legroute_plan.timing_interval : 5u);
+          gp.checkpoint_start         = 0;
+          gp.checkpoint_final         = true;
+          // A warm recovery slice needs periodic ranking even if the original
+          // solve consumed its density milestones or still exceeds them.
+          gp.checkpoint_after_density = false;
+          gp.checkpoint_overflow_milestones.clear();
+        }
+        std::fprintf(stderr,
+                     "legroute area resume: %zu cells seeded, %d GP steps, utilization %.4f density %.4f\n",
+                     seeded,
+                     gp.max_iterations,
+                     options.utilization,
+                     gp.target_density);
+        if (options.placement_macro_replan) {
+          std::fprintf(stderr, "legroute area resume: retaining the fresh macro-plan cell seed\n");
+        }
+      }
+      return live_session->advance(v.design,
+                                   gp,
+                                   session_identities(),
+                                   resume ? "area_resume" : "global_placement",
+                                   minimum,
+                                   session_identities,
+                                   options.placement_area_resume && options.placement_macro_replan,
+                                   remap_recovery);
+    };
     try {
-      metrics = dp::place(v.design, control);
+      metrics = run_main_gp();
     } catch (const std::runtime_error&) {
       if (sat_gp) {
         v.design                 = *sat_gp;
@@ -9427,7 +10578,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         macro_checkpoints       = 0;
         macro_checkpoint_forced = false;
         macro_timed_positions.clear();
-        metrics = dp::place(v.design, control);
+        metrics = run_main_gp();
       }
     }
 #if defined(DREAMPLACE_NATIVE_PIN_TIMING_API) && DREAMPLACE_NATIVE_PIN_TIMING_API >= 2
@@ -9452,16 +10603,35 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       macro_warp->finish(metrics.iterations);
     }
     // a terminal stage with a region seed had its probe in the refinement call
-    if (terminal_active && options.legroute && options.legroute_probe.enabled && !multirow_cells && options.region_seed_dir.empty()) {
-      for (unsigned round = 0; round < std::max(1u, options.legroute_probe.rounds); ++round) {
+    if (terminal_active && options.legroute && options.legroute_probe.enabled && !multirow_cells
+        && options.region_seed_dir.empty()) {
+      for (unsigned round = 0; round < std::max(1u, feedback_rounds); ++round) {
         if (run_legroute_probe(v.design, round)) {
           break;
         }
       }
     }
-    if (refinement_active && terminal_active) {
+    if (refinement_active && (terminal_active || live_session)) {
       gp_density_weight = metrics.density_weight;
       refine_final_boundaries(v.design);
+    }
+    if (live_session && !terminal_active && control.legalize) {
+      auto finish           = control;
+      finish.max_iterations = finish.min_slice_iterations = 0;
+      // Boundary refinement already ran with the retained session.
+      const auto settled                                  = dp::place(v.design, finish);
+      metrics.legal                                       = settled.legal;
+      metrics.hpwl                                        = settled.hpwl;
+      live_session->synchronize(v.design, control, session_identities(), "stage_legal_pose");
+    }
+    // Planning runs after all ordinary GP/refinement, outside DREAMPlace hooks.
+    // Region-driven legroute then builds fresh cuts after terminal placement;
+    // stale refinement pins never constrain the plan or its regional SAT.
+    if (terminal_active && options.legroute && planning && !multirow_cells) {
+      run_plan_rounds(v.design);
+    }
+    if (live_session && !options.output_dir.empty()) {
+      live_session->write(options.output_dir + "/placement_session.json");
     }
     if (terminal_active) {
       if (options.snapshots && control.max_iterations == 0 && !zero_gp_snapshot_emitted && control.observer) {
@@ -9474,6 +10644,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         macro_checkpoint_forced = true;
         const auto update       = control.checkpoint(v.design, control.max_iterations);
         v.design.net_weights    = update.net_weights;
+        if (chosen_handoff) {
+          // Preserve the routing order used to score the exact accepted pose.
+          final_gp_timing      = chosen_handoff->timing;
+          v.design.net_weights = chosen_handoff->design.net_weights;
+        }
         write_legalize_timing("global_placement");
       }
       auto       frame        = sat_frame(v.design, false);
@@ -9486,32 +10661,42 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         handoff_cells.assign(frame.components.begin() + original_count, frame.components.end());
         handoff_rows = frame.rows;
       }
-      auto terminal_options             = options.terminal_legalize_options;
-      terminal_options.prects           = v.prects;
-      terminal_options.route_drc        = options.satlegalize_route;
-      terminal_options.route_vias       = options.satlegalize_route_vias ? tech_profile : nullptr;
-      terminal_options.target_density   = options.density;
-      terminal_options.macro_halo_x_dbu = v.halo_x;
-      terminal_options.macro_halo_y_dbu = v.halo_y;
-      set_terminal_grid(tech,
-                        frame,
-                        options,
-                        route_grid_bins(control.auxiliary_bins, metrics.bins_x),
-                        route_grid_bins(control.auxiliary_bins, metrics.bins_y),
-                        terminal_options);
+      auto       terminal_options = terminal_controls(frame);
       // Anchor the two-row cells first; terminal legalization packs the
       // single-row cells around them as fixed obstacles, then they are released.
       // legroute places them itself (a two-row cell is a tile tall), and
       // sync_rail_twins gives each the master its rows' rails need.
-      const bool legal_boxes = options.legroute && options.legroute_options.legal_boxes;
+      const bool legal_boxes      = options.legroute && options.legroute_options.legal_boxes;
       if (multirow_cells && (!options.legroute || legal_boxes)) {
         multirow_report = anchor_multirow_cells(tech, frame, anchor_controls(options, terminal_options, core_origins));
       }
-      if (legal_boxes) {  // legroute.legal_boxes: the ordinary terminal legalization first; legroute routes it as it stands
-        terminal_report = terminal_legalize(tech, frame, final_gp_timing, terminal_options);
+      if (chosen_handoff) {
+        const auto& accepted = chosen_handoff->frame;
+        if (frame.components != accepted.components || frame.nets != accepted.nets || frame.rows != accepted.rows
+            || frame.terminals.size() > accepted.terminals.size()
+            || !std::equal(frame.terminals.begin(), frame.terminals.end(), accepted.terminals.begin())) {
+          throw std::logic_error("legroute's measured handoff changed before regional routing");
+        }
+        // Raw movable and legalized diagnostic handoffs both consume the exact
+        // measured frame, including PG-aware IOs and appended supply pins.
+        frame           = std::move(chosen_handoff->frame);
+        terminal_report = std::move(chosen_handoff->report);
+      }
+      if (legal_boxes && !chosen_handoff) {  // the optional fixed-placement witness legalizes before routing
+        try {
+          terminal_report = terminal_legalize(tech, frame, final_gp_timing, terminal_options);
+        } catch (const Terminal_legalize_unfit& e) {
+          if (!options.allow_increase_area || !options.generated_core) {
+            throw;
+          }
+          const double utilization = options.utilization * options.area_step;
+          std::fprintf(stderr, "legroute: %s; placement restarts at utilization %.3f\n", e.what(), utilization);
+          throw Placement_area_restart(utilization, std::min(options.density, utilization + .05));
+        }
       }
       if (options.legroute) {
-        auto lopt = options.legroute_options;
+        auto lopt              = options.legroute_options;
+        lopt.region_cell_limit = options.region.max_cells;
         if (options.legroute_probe.enabled) {  // the second pass: the fixed trees avoid the congestion
           lopt.tree_congestion = std::max(lopt.tree_congestion, options.legroute_probe.tree_congestion);
         }
@@ -9524,7 +10709,11 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           final_regions = load_region_seed()->mesh;
         }
         if (!final_regions) {  // a final stage without the boundary refinement: the same mesh, without virtual pins
-          final_regions = Region_mesh::build(v.design, region_macros(), region_ios(), region_options_with_tracks(tech, options.region), tech.dbu);
+          final_regions = Region_mesh::build(v.design,
+                                             region_macros(),
+                                             region_ios(),
+                                             region_options_with_tracks(tech, options.region),
+                                             tech.dbu);
         }
         if (final_regions->rects.size() > 1) {
           for (const auto& r : final_regions->rects) {
@@ -9547,12 +10736,25 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
             regions.pins.clear();
           }
         }
-        const auto* profile  = legroute_power(frame, regions);
+        const ph::Tech_profile* profile = nullptr;
+        if (chosen_handoff) {
+          // The selected frame already has PG-aware IOs and supply terminals.
+          // Reuse the exact measured grid rather than append a second grid or
+          // legalize its IOs again after timing selection.
+          auto& saved = chosen_handoff->resources;
+          regions.obstacles.insert(regions.obstacles.end(), saved.obstacles.begin(), saved.obstacles.end());
+          regions.power_nets = std::move(saved.power_nets);
+          regions.power_vias = std::move(saved.power_vias);
+          profile            = chosen_handoff->profile;
+        } else {
+          profile = legroute_power(frame, regions);
+        }
+        write_legroute_input(frame, regions, options.output_dir + "/legroute_handoff");
         // too dense for the tile grid or the tracks: on a generated core the placement restarts at a lower
         // utilization (the failing regions' box fill pushed down to what routes), the GP target density with it
-        const bool  pushback = options.allow_increase_area && options.generated_core && options.legroute_probe.strict;
-        const auto  restart  = [&](double factor, const std::string& why) {
-          const double utilization = options.utilization * factor;
+        const bool pushback = options.allow_increase_area && options.generated_core && options.legroute_probe.strict;
+        const auto restart  = [&](double factor, const std::string& why) {
+          const double utilization = options.utilization * (planning ? std::max(factor, options.area_step) : factor);
           std::fprintf(stderr, "legroute: %s; placement restarts at utilization %.3f\n", why.c_str(), utilization);
           throw Placement_area_restart(utilization, utilization + .05);
         };
@@ -9569,11 +10771,31 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         };
         try {
           legroute_report = legroute(tech, frame, final_gp_timing, lopt, regions, profile);
+        } catch (const Legroute_replan& e) {
+          if (!pushback) {
+            throw;
+          }
+          restart(options.area_step, std::string("pre-SAT conservative planning screen: ") + e.what());
         } catch (const Legroute_unfit& e) {
           if (!pushback) {
             throw;
           }
           restart(options.area_step, e.what());
+        }
+        if (options.legroute_probe.strict && !legroute_report->wires_emitted && legroute_report->global_unrouted
+            && legroute_report->global_search_limited) {
+          throw std::runtime_error(
+              std::format("legroute: global search exhausted its budget ({} attempts, {} queue pops); "
+                          "{} nets remain unresolved; area growth requires routing evidence",
+                          legroute_report->global_search_limited,
+                          legroute_report->global_search_pops,
+                          legroute_report->global_unrouted));
+        }
+        if (options.legroute_probe.strict && !legroute_report->wires_emitted && legroute_report->global_topology_disconnected) {
+          throw std::runtime_error(
+              std::format("legroute: coarse capacity graph disconnects {} signals; repair endpoint access or placement; "
+                          "this model alone does not justify automatic area growth",
+                          legroute_report->global_topology_disconnected));
         }
         if (const size_t failed = legroute_report->sat_unsat_regions + legroute_report->sat_unknown_regions;
             failed && !options.legroute_probe.strict) {
@@ -9581,17 +10803,30 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                        "legroute: %zu of %zu regions without a routable answer; keeping the placement (legroute.strict=false)\n",
                        failed,
                        legroute_report->sat_regions);
+        } else if (failed && !legroute_report->sat_unsat_regions) {
+          // Internal timeout recuts have already run at this same density.
+          // UNKNOWN is a search limit, not evidence that the core is too small.
+          throw std::runtime_error(
+              std::format("legroute: SAT search budget exhausted for {} of {} regions after {} same-density partition recut rounds "
+                          "at utilization {:.3f}; no model UNSAT result justifies area growth",
+                          legroute_report->sat_unknown_regions,
+                          legroute_report->sat_regions,
+                          legroute_report->partition_timeout_rounds,
+                          options.utilization));
         } else if (failed && pushback) {
           double worst = 0;  // the densest failing region's box fill: pushed to about 0.7
           for (const auto& st : legroute_report->region_stats) {
-            if ((st.status == 1 || st.status == 2) && st.tiles) {
+            if (st.status == 1 && st.tiles) {
               worst = std::max(worst, double(st.boxes) / double(st.tiles));
             }
           }
-          const auto why = std::format("{} of {} regions without a routable answer (densest failing region fill {:.2f})",
-                                       failed,
-                                       legroute_report->sat_regions,
-                                       worst);
+          const auto why = std::format(
+              "{} model UNSAT and {} budget-exhausted regions of {} "
+              "(densest model-UNSAT region fill {:.2f})",
+              legroute_report->sat_unsat_regions,
+              legroute_report->sat_unknown_regions,
+              legroute_report->sat_regions,
+              worst);
           recut(why);
           restart(std::clamp(.7 / std::max(worst, 1e-9), .5, options.area_step), why);
         } else if (failed) {
@@ -9609,6 +10844,49 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                           : !options.allow_increase_area  ? "; allow_increase_area is off"
                           : fixed_core                    ? "; the core is fixed (die, core, floorplan or previous placement given)"
                                                           : ""));
+        }
+        if (options.legroute_probe.strict && !legroute_report->wires_emitted
+            && (legroute_report->global_unrouted || legroute_report->global_overflow_tracks)) {
+          const auto why = std::format("coarse routing still has {} unrouted nets and {} overflow tracks",
+                                       legroute_report->global_unrouted,
+                                       legroute_report->global_overflow_tracks);
+          if (pushback) {
+            // Regional SAT success does not discharge the global capacity check.
+            // Grow heuristically after the timed planning budget has been used.
+            restart(options.area_step, why);
+          }
+          throw std::runtime_error("legroute: " + why);
+        }
+        if (legroute_report->crossing_policy_invalid) {
+          // a legacy fixed-IO result whose published boundary crossings exceed the density ceiling: kept as a
+          // diagnostic in legroute.json, never accepted as a placement
+          throw std::runtime_error(std::format(
+              "legroute: {} SAT round(s) published boundary crossings over the density ceiling {} (legacy fixed-IO "
+              "construction); result not accepted",
+              legroute_report->crossing_over_policy,
+              lopt.density_ceiling));
+        }
+        if (options.legroute_probe.strict && lopt.final
+            && (!legroute_report->wires_emitted || legroute_report->connected_nets != legroute_report->routed_nets
+                || legroute_report->failed_nets || legroute_report->unchecked_nets
+                || legroute_report->clock_connected_nets != legroute_report->clock_required_nets
+                || legroute_report->clock_failed_nets || legroute_report->clock_unchecked_nets)) {
+          // A SAT placement and a clean coarse graph do not establish physical
+          // closure. Preserve legroute.json, but do not publish an unrouted
+          // final DEF or infer that search exhaustion requires more area.
+          throw std::runtime_error(std::format(
+              "legroute: strict detailed closure incomplete: {} of {} signal/clock nets connected, {} failed, {} unchecked; "
+              "clocks {} of {} connected, {} failed, {} unchecked; wires_emitted={}; "
+              "unresolved detailed searches do not establish insufficient area",
+              legroute_report->connected_nets,
+              legroute_report->routed_nets,
+              legroute_report->failed_nets,
+              legroute_report->unchecked_nets,
+              legroute_report->clock_connected_nets,
+              legroute_report->clock_required_nets,
+              legroute_report->clock_failed_nets,
+              legroute_report->clock_unchecked_nets,
+              legroute_report->wires_emitted));
         }
         if (multirow_cells && !legal_boxes) {  // the two-row cells legroute placed take the rail twin their rows need
           sync_rail_twins(tech, frame, options);
@@ -9635,13 +10913,20 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         adopt_rail_twins(v, frame);
       }
       sat_install(v.design, frame);
-      metrics.legal                               = dp::is_legal(v.design);
-      metrics.hpwl                                = dp::hpwl(v.design);
+      metrics.legal = dp::is_legal(v.design);
+      metrics.hpwl  = dp::hpwl(v.design);
       metrics.alignment.cell_legalization_seconds
           = (terminal_report ? terminal_report->seconds : 0) + (legroute_report ? legroute_report->seconds : 0);
       if (!metrics.legal) {
         throw std::runtime_error(options.legroute ? "legroute failed independent native geometry validation"
                                                   : "terminal legalization failed independent native geometry validation");
+      }
+      if (live_session) {
+        install_planned_pose(v.design, frame);
+        live_session->synchronize(v.design, control, session_identities(), "legroute_local_pose");
+        if (!options.output_dir.empty()) {
+          live_session->write(options.output_dir + "/placement_session.json");
+        }
       }
       if (terminal_report) {
         write_terminal_legalize_report(*terminal_report, frame, terminal_options, options.output_dir + "/terminal_legalize");
@@ -9664,7 +10949,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         control.observer(v.design, dp::PlacementStage::legalization, metrics.iterations);
       }
     }
-    if (final_timing && options.legalize_timing_strength > 0 && !options.satlegalize && !terminal_active) {
+    if (final_timing && options.legalize_timing_strength > 0 && !options.satlegalize && !terminal_active && !defer_legroute_cells) {
       for (unsigned attempt = 0; attempt < options.legalize_timing_corrections; ++attempt) {
         const auto before         = v.design;
         const auto before_metrics = metrics;
@@ -9874,15 +11159,15 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       control.checkpoint(v.design, control.max_iterations);
       legal_timing_snapshot = false;
     }
-    capture(v, tech, options.full && !defer_macro_cells);
+    capture(v, tech, options.full && !defer_cells);
   } else {
     metrics.legal     = dp::is_legal(v.design);
     metrics.converged = false;
-    capture(v, tech, options.full && !defer_macro_cells);
+    capture(v, tech, options.full && !defer_cells);
   }
   if (options.full && !options.timing_seed && !options.retain_placement && !options.analyze_colors_only && !terminal_active) {
     align_macro_geometry(v, tech, v.design, false, true);
-    if (!defer_macro_cells) {
+    if (!defer_cells) {
       localize_tie_sites(v, tech, options.technology().cells, options.preserve_imported_ties);
     }
     metrics.legal = dp::is_legal(v.design);
@@ -10731,13 +12016,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     v.fp.rows = handoff_rows;
   }
   if (options.full && !options.timing_seed && !options.retain_placement) {
-    if (defer_macro_cells) {
-      auto frame = v.fp;
-      std::erase_if(frame.components, [&](const auto& cell) {
-        return tech.macros.at(cell.macro).klass.starts_with("CORE") && cell.place.status != Status::FIXED
-               && cell.place.status != Status::LOCKED;
-      });
-      check_legality(tech, frame, options);
+    if (defer_cells) {
+      check_fixed_and_macro_legality(tech, v.fp, options);
     } else {
       check_legality(tech, v.fp, options);
     }
@@ -10750,7 +12030,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   } else {
     result.parasitics = estimate_rc(v, tech, options, &result.pin_locations);
   }
-  if (native_session && options.native_gp_timing->legal_output_guard) {
+  if (native_session && options.native_gp_timing->legal_output_guard && !defer_legroute_cells) {
     // This follows actual final-frame legality and fresh final RC construction.
     // The independently frozen legal baseline is never replaced by GP timing.
     const auto acceptance = native_session->check_legal_output(*result.parasitics, true);
@@ -10797,6 +12077,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     json.Int(resolved_uroute.min_shots);
     json.Key("fallback");
     json.String(resolved_uroute.fallback.c_str());
+    json.Key("label_policy");
+    json.String(resolved_uroute.label_policy.c_str());
     json.Key("drc_level");
     json.Double(resolved_uroute.drc_level);
     json.Key("cache_identity");
@@ -11442,9 +12724,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       : options.timing_seed    ? "post_synthesis_zero_wire"
       : options.full           ? "full"
                                : "gp",
-      (options.timing_seed || options.retain_placement) ? "false"
-      : options.full && !defer_macro_cells              ? "true"
-                                                        : (metrics.legal ? "true" : "false"),
+      (options.timing_seed || options.retain_placement || defer_legroute_cells) ? "false"
+      : options.full && !defer_macro_cells                                      ? "true"
+                                                                                : (metrics.legal ? "true" : "false"),
       metrics.converged ? "true" : "false",
       cache.hit ? "null" : std::format("{:.9g}", metrics.overflow),
       [&] {
@@ -11496,9 +12778,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         "route_model",
         cache.hit ? rapidjson::Value(rapidjson::kNullType) : rapidjson::Value(dp::route_model_name(metrics.route_model), allocator),
         allocator);
-    json.AddMember("cells_legalized",
-                   options.full && !defer_macro_cells && !options.timing_seed && !options.retain_placement,
-                   allocator);
+    json.AddMember("cells_legalized", options.full && !defer_cells && !options.timing_seed && !options.retain_placement, allocator);
+    json.AddMember("cell_legalization_deferred", defer_legroute_cells, allocator);
     json.AddMember("macro_gp_timing_for_resynthesis", bool(result.macro_gp_timing), allocator);
     json["virtual_fillers"].SetBool(options.virtual_fillers);
     json.AddMember("fp_warpspace", options.fp_warp.enabled, allocator);
@@ -11970,6 +13251,13 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
 
 Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& requested,
              const std::function<void()>& release_source) {
+  if ((requested.legroute_plan.route_model != "legacy" && requested.legroute_plan.route_model != "coarse")
+      || !requested.legroute_plan.route_interval || !requested.legroute_plan.route_net_pops) {
+    throw std::invalid_argument("legroute.plan route_model must be legacy or coarse with positive route budgets");
+  }
+  if (requested.legroute_plan.enabled && requested.legroute_plan.handoff && !requested.legroute_options.legal_boxes) {
+    throw std::invalid_argument("legroute plan.handoff is a legalized diagnostic and requires legal_boxes=true");
+  }
   if (release_source && source.get_io() && source.get_io()->get_library() == &library) {
     throw std::invalid_argument("releasing placement input requires a separate destination library");
   }
@@ -12023,7 +13311,7 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
     }
   }
   // the staged final-cell pass imports the macro pass's frame: whether the core may grow is decided here
-  if (requested.allow_increase_area && requested.legroute_probe.enabled) {
+  if (requested.allow_increase_area && (requested.legroute_probe.enabled || requested.legroute_plan.enabled)) {
     if (!resolved_options) {
       resolved_options = requested;
     }
@@ -12031,6 +13319,12 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
     resolved_options->generated_core = requested.generated_core
                                        || (requested.floorplan.empty() && requested.die.empty() && requested.core.empty()
                                            && !requested.previous && !requested.timing_seed);
+  }
+  if (requested.legroute_plan.enabled && !requested.placement_session) {
+    if (!resolved_options) {
+      resolved_options = requested;
+    }
+    resolved_options->placement_session = std::make_shared<Placement_session>();
   }
   const auto& options = resolved_options ? *resolved_options : requested;
   if (options.final_iterations < 0) {
@@ -12133,15 +13427,18 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
   if (!options.final_independent_timing) {
     cell_options.net_weights = macro.net_weights;
   }
-  cell_options.fp_place              = false;
+  cell_options.fp_place               = false;
   // FP centroids and macro warp pulls end at the fixed-macro handoff.
-  cell_options.fp_warp.enabled       = false;
-  cell_options.macro_warp.enabled    = false;
-  cell_options.macro_filler_fraction = 0;
-  cell_options.macro_fill_cell_space = false;
-  cell_options.macro_magnet.enabled  = false;
-  cell_options.completed_stage       = Placement_stage::final;
-  cell_options.restart_seed          = cell_seed;
+  cell_options.fp_warp.enabled        = false;
+  cell_options.macro_warp.enabled     = false;
+  cell_options.macro_filler_fraction  = 0;
+  cell_options.macro_fill_cell_space  = false;
+  cell_options.macro_magnet.enabled   = false;
+  cell_options.completed_stage        = Placement_stage::final;
+  cell_options.restart_seed           = cell_seed;
+  // Only this completed macro-plan handoff may replace fixed macro poses in
+  // the retained cell optimizer. Ordinary rebinds keep fixed bodies immutable.
+  cell_options.placement_macro_replan = options.placement_area_resume;
   rapidjson::Document macro_seed_qor;
   macro_seed_qor.Parse(macro.qor.c_str());
   if (macro_seed_qor.HasMember("gp_converged") && macro_seed_qor["gp_converged"].GetBool()) {

@@ -12,6 +12,7 @@
 #include <stdexcept>
 
 #include "dreamplace/native/placement.hpp"
+#include "dreamplace/native/rudy.hpp"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/SHA256.h"
 #include "rapidjson/document.h"
@@ -20,12 +21,12 @@
 
 namespace livehd::placement {
 namespace {
-namespace dp = DreamPlace::native;
-namespace fs = std::filesystem;
-using Json   = rapidjson::Value;
+namespace dp                       = DreamPlace::native;
+namespace fs                       = std::filesystem;
+using Json                         = rapidjson::Value;
 // Input size limits, mirrored by the offline tools.
 constexpr std::uintmax_t map_limit = 8ULL << 20, manifest_limit = 64ULL << 20, weights_limit = 256ULL << 20, lef_limit = 1ULL << 30;
-std::string digest(llvm::SHA256& hash) {
+std::string              digest(llvm::SHA256& hash) {
   constexpr char hex[] = "0123456789abcdef";
   std::string    out;
   for (auto byte : hash.final()) {
@@ -165,6 +166,7 @@ struct Uroute_pool::Data {
     Uroute_identity identity;
     std::uint64_t   created = 0;
     fs::path        features, labels;
+    bool            utilization_only = false;
   };
   Uroute_options                           options;
   std::string                              identity, skipped, manifest_sha256, weights_sha256;
@@ -192,8 +194,11 @@ std::string uroute_technology(const std::vector<std::string>& lefs, std::string_
 }
 void validate_uroute_options(const Uroute_options& o) {
   if (o.shots < 1 || o.shots > 16 || o.min_shots < 1 || o.min_shots > o.shots || (o.fallback != "nearest" && o.fallback != "skip")
-      || !std::isfinite(o.drc_level) || o.drc_level < 0) {
-    throw std::invalid_argument("URoute expects shots 1..16, min_shots 1..shots, fallback nearest/skip and nonnegative drc_level");
+      || !std::isfinite(o.drc_level) || o.drc_level < 0
+      || (o.label_policy != "detailed" && o.label_policy != "coarse-only" && o.label_policy != "calibrated-mixed")) {
+    throw std::invalid_argument(
+        "URoute expects shots 1..16, min_shots 1..shots, fallback nearest/skip and nonnegative drc_level and label_policy "
+        "detailed/coarse-only/calibrated-mixed");
   }
 }
 Uroute_pool::Uroute_pool(Uroute_options options) {
@@ -203,7 +208,7 @@ Uroute_pool::Uroute_pool(Uroute_options options) {
   data_         = d;
   const auto& o = d->options;
   d->identity   = sha("uroute-v1:" + std::to_string(o.shots) + ":" + std::to_string(o.min_shots) + ":" + o.fallback + ":"
-                      + std::to_string(std::bit_cast<std::uint64_t>(o.drc_level)));
+                      + std::to_string(std::bit_cast<std::uint64_t>(o.drc_level)) + ":" + o.label_policy);
   if (o.dir.empty()) {
     d->skipped = "disabled (empty uroute.dir)";
     return;
@@ -243,13 +248,53 @@ Uroute_pool::Uroute_pool(Uroute_options options) {
       if (id.empty() || !ids.insert(id).second) {
         throw std::runtime_error("empty/duplicate URoute sample id");
       }
-      if (!versions(record) || text(record, "status") != "routed") {
+      if (!versions(record)) {
         continue;
       }
+      const auto status = text(record, "status");
+      const bool coarse = status == "coarse" && text(record, "label_source") == "legroute_coarse";
+      const bool detailed
+          = status == "routed" && (!record.HasMember("label_source") || text(record, "label_source") == "openroad_detailed");
+      if ((!coarse && !detailed) || (o.label_policy == "detailed" && !detailed) || (o.label_policy == "coarse-only" && !coarse)) {
+        continue;
+      }
+      if (coarse) {
+        const auto& tasks = field(record, "eligible_tasks");
+        if (!tasks.IsArray() || tasks.Size() != 1 || !tasks[0].IsString() || std::string_view(tasks[0].GetString()) != "utilization"
+            || !field(record, "complete").IsTrue() || !field(record, "unrouted").IsUint64() || record["unrouted"].GetUint64()
+            || !field(record, "search_limited").IsUint64() || record["search_limited"].GetUint64()
+            || text(record, "map_semantics") != "raw_unpenalized") {
+          continue;
+        }
+        if (o.label_policy == "calibrated-mixed") {
+          if (!record.HasMember("calibration_sha256")) {
+            continue;
+          }
+          const auto path = inside(inside(root, text(record, "directory")), "calibration.json");
+          if (file_sha(path, manifest_limit) != text(record, "calibration_sha256")) {
+            throw std::runtime_error("URoute calibration digest mismatch");
+          }
+          std::ifstream       stream(path);
+          const std::string   calibration_bytes((std::istreambuf_iterator<char>(stream)), {});
+          rapidjson::Document calibration;
+          calibration.Parse(calibration_bytes.c_str());
+          if (calibration.HasParseError() || !field(calibration, "accepted").IsTrue()
+              || text(calibration, "reference_label_source") != "openroad_detailed"
+              || text(field(calibration, "domain"), "technology") != text(record, "technology")
+              || text(field(calibration, "domain"), "capacity_sha256") != text(record, "capacity_sha256")
+              || text(field(calibration, "domain"), "endpoint_basis") != text(record, "endpoint_basis")
+              || number(field(calibration, "domain"), "admission_share") != number(record, "admission_share")) {
+            throw std::runtime_error("URoute calibration domain mismatch");
+          }
+        } else if (record.HasMember("calibration_sha256")) {
+          continue;
+        }
+      }
       Data::Sample sample;
-      sample.id           = id;
-      sample.identity     = identity(record);
-      const auto& created = field(record, "created_at");
+      sample.id               = id;
+      sample.utilization_only = coarse;
+      sample.identity         = identity(record);
+      const auto& created     = field(record, "created_at");
       if (!created.IsUint64()) {
         throw std::runtime_error("URoute created_at must be an integer timestamp");
       }
@@ -264,9 +309,9 @@ Uroute_pool::Uroute_pool(Uroute_options options) {
       sample.labels   = labels;
       check_features(dp::read_uroute_maps(features));
       const auto label_maps = dp::read_uroute_maps(labels);
-      if (label_maps.channels != dp::uroute_label_channels || label_maps.normalized || label_maps.bins_x != dp::uroute_network_bins
-          || label_maps.bins_y != dp::uroute_network_bins) {
-        throw std::runtime_error("URoute labels must contain three raw 256x256 maps");
+      if (label_maps.channels != (coarse ? 1 : dp::uroute_label_channels) || label_maps.normalized
+          || label_maps.bins_x != dp::uroute_network_bins || label_maps.bins_y != dp::uroute_network_bins) {
+        throw std::runtime_error("URoute labels have incompatible task channels/grid");
       }
       d->samples.push_back(std::move(sample));
     }
@@ -299,17 +344,18 @@ Uroute_pool::Uroute_pool(Uroute_options options) {
 }
 bool Uroute_options::operator==(const Uroute_options& other) const {
   return dir == other.dir && export_features == other.export_features && shots == other.shots && min_shots == other.min_shots
-         && fallback == other.fallback && std::bit_cast<std::uint64_t>(drc_level) == std::bit_cast<std::uint64_t>(other.drc_level);
+         && fallback == other.fallback && label_policy == other.label_policy
+         && std::bit_cast<std::uint64_t>(drc_level) == std::bit_cast<std::uint64_t>(other.drc_level);
 }
 void Uroute_selection::apply(dp::Options& options) const {
   options.uroute          = context;
   options.uroute_identity = cache_identity;
   options.uroute_skipped  = skipped;
 }
-const std::string& Uroute_pool::cache_identity() const { return data_->identity; }
-const std::string& Uroute_pool::skipped() const { return data_->skipped; }
+const std::string&    Uroute_pool::cache_identity() const { return data_->identity; }
+const std::string&    Uroute_pool::skipped() const { return data_->skipped; }
 const Uroute_options& Uroute_pool::options() const { return data_->options; }
-Uroute_selection   Uroute_pool::select(const dp::UrouteMaps& query, const Uroute_identity& id) const {
+Uroute_selection      Uroute_pool::select(const dp::UrouteMaps& query, const Uroute_identity& id) const {
   const auto&      d = *data_;
   Uroute_selection result;
   result.skipped         = d.skipped;
@@ -378,7 +424,8 @@ Uroute_selection   Uroute_pool::select(const dp::UrouteMaps& query, const Uroute
     std::string                    selection_hash = d.identity;
     for (size_t i : selected) {
       const auto& sample = d.samples[i];
-      support.push_back({sample.id, dp::read_uroute_maps(sample.features), dp::read_uroute_maps(sample.labels)});
+      support.push_back(
+          {sample.id, dp::read_uroute_maps(sample.features), dp::read_uroute_maps(sample.labels), sample.utilization_only});
       result.sample_ids.push_back(sample.id);
       selection_hash += ":" + sample.id;
     }
@@ -505,6 +552,92 @@ void export_uroute(const fs::path& directory, const dp::Design& design, const Ur
   metadata.close();
   if (!metadata) {
     throw std::runtime_error("cannot write URoute export metadata");
+  }
+  fs::rename(directory / "metadata.json.tmp", directory / "metadata.json");
+}
+void export_uroute_coarse(const fs::path& directory, const dp::Design& design, const Uroute_identity& id, int nx, int ny,
+                          double capacity_h, double capacity_v, const dp::RudyResult& raw, const Uroute_coarse_provenance& p) {
+  const auto hash = [](const std::string& value) {
+    return value.size() == 64
+           && std::all_of(value.begin(), value.end(), [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+  };
+  if (!hash(p.pose_sha256) || !hash(p.netlist_sha256) || !hash(p.capacity_sha256) || p.endpoint_basis.empty()
+      || !std::isfinite(p.admission_share) || p.admission_share <= 0 || p.admission_share > .95 || nx <= 0 || ny <= 0
+      || raw.horizontal.size() != size_t(nx) * ny || raw.vertical.size() != size_t(nx) * ny
+      || (p.complete && (p.unrouted || p.search_limited))) {
+    throw std::invalid_argument("invalid URoute coarse provenance/map");
+  }
+  dp::UrouteMaps directional{2, dp::uroute_network_bins, dp::uroute_network_bins, false, {}, {}};
+  for (const auto* channel : {&raw.horizontal, &raw.vertical}) {
+    for (double value : *channel) {
+      if (!std::isfinite(value) || value < 0) {
+        throw std::invalid_argument("nonfinite/negative coarse utilization");
+      }
+    }
+    // Peak-preserving reduction: any positive source-bin overlap contributes.
+    // This is a utilization hotspot label, not conserved wirelength density.
+    std::vector<double> values(size_t(directional.bins_x) * directional.bins_y);
+    for (int x = 0; x < directional.bins_x; ++x) {
+      const int xl = int(int64_t(x) * nx / directional.bins_x);
+      const int xh = int((int64_t(x + 1) * nx + directional.bins_x - 1) / directional.bins_x);
+      for (int y = 0; y < directional.bins_y; ++y) {
+        const int yl = int(int64_t(y) * ny / directional.bins_y);
+        const int yh = int((int64_t(y + 1) * ny + directional.bins_y - 1) / directional.bins_y);
+        for (int sx = xl; sx < xh; ++sx) {
+          for (int sy = yl; sy < yh; ++sy) {
+            auto& peak = values[size_t(x) * directional.bins_y + y];
+            peak       = std::max(peak, (*channel)[size_t(sx) * ny + sy]);
+          }
+        }
+      }
+    }
+    std::vector<float> f32(values.begin(), values.end());
+    const auto [lo, hi] = std::minmax_element(f32.begin(), f32.end());
+    if (!std::isfinite(*hi)) {
+      throw std::invalid_argument("coarse utilization exceeds f32 range");
+    }
+    directional.ranges.push_back({*lo, *hi});
+    directional.values.insert(directional.values.end(), f32.begin(), f32.end());
+  }
+  export_uroute(directory, design, id, nx, ny, capacity_h, capacity_v);
+  dp::write_uroute_maps(directory / "directional_labels.bin.tmp", directional);
+  fs::rename(directory / "directional_labels.bin.tmp", directory / "directional_labels.bin");
+  std::ifstream       input(directory / "metadata.json");
+  const std::string   bytes((std::istreambuf_iterator<char>(input)), {});
+  rapidjson::Document doc;
+  doc.Parse(bytes.c_str());
+  auto&      a      = doc.GetAllocator();
+  const auto string = [&](const char* key, const std::string& value) {
+    doc.AddMember(rapidjson::Value(key, a), rapidjson::Value(value.c_str(), a), a);
+  };
+  string("status", "coarse");
+  string("source", "livehd");
+  string("label_source", "legroute_coarse");
+  string("map_semantics", "raw_unpenalized");
+  string("directional_definition", "incident_edge_max_then_overlapping_tile_max");
+  string("pose_sha256", p.pose_sha256);
+  string("netlist_sha256", p.netlist_sha256);
+  string("capacity_sha256", p.capacity_sha256);
+  string("endpoint_basis", p.endpoint_basis);
+  string("directional_labels_sha256", file_sha(directory / "directional_labels.bin", map_limit));
+  doc.AddMember("admission_share", p.admission_share, a);
+  doc.AddMember("complete", p.complete, a);
+  doc.AddMember("physically_routed", false, a);
+  doc.AddMember("unrouted", p.unrouted, a);
+  doc.AddMember("search_limited", p.search_limited, a);
+  rapidjson::Value tasks(rapidjson::kArrayType);
+  if (p.complete) {
+    tasks.PushBack(rapidjson::Value("utilization", a), a);
+  }
+  doc.AddMember("eligible_tasks", tasks, a);
+  rapidjson::StringBuffer                    buffer;
+  rapidjson::Writer<rapidjson::StringBuffer> writer(buffer);
+  doc.Accept(writer);
+  std::ofstream metadata(directory / "metadata.json.tmp", std::ios::binary);
+  metadata << buffer.GetString() << '\n';
+  metadata.close();
+  if (!metadata) {
+    throw std::runtime_error("cannot write URoute coarse metadata");
   }
   fs::rename(directory / "metadata.json.tmp", directory / "metadata.json");
 }

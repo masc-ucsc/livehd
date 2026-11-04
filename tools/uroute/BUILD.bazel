@@ -19,6 +19,8 @@ py_library(
     srcs = [
         "__init__.py",
         "baseline.py",
+        "coarse.py",
+        "calibrate.py",
         "cross_validate.py",
         "episodes.py",
         "evaluate.py",
@@ -201,6 +203,16 @@ py_test(
     name = "odb_test",
     timeout = "short",
     srcs = ["odb_test.py"],
+    legacy_create_init = 0,
+    deps = [":data"],
+)
+
+py_test(
+    name = "coarse_test",
+    timeout = "short",
+    srcs = ["coarse_test.py"],
+    args = ["$(location :pool_smoke)"],
+    data = [":pool_smoke"],
     legacy_create_init = 0,
     deps = [":data"],
 )

@@ -143,6 +143,10 @@ def ingest(args, odb_provenance=None):
         drc = text_file(args.drc)
         labels, groups, report = extract(geometry, definition, drc, json.loads(lengths.read_text()), bins, route_y)
         metadata['drc_sha256'] = sha(drc.encode())
+        metadata['label_source'] = 'openroad_detailed'
+        metadata['eligible_tasks'] = ['utilization', 'drc', 'detour']
+        metadata['directional_definition'] = 'max_group_centerline_utilization_M2M3_M4M5_M6plus'
+        metadata['capacity_sha256'] = sha(canonical(report['nominal_group_capacity_per_dbu']))
         if args.wirelength_report:
             reference = text_file(args.wirelength_report)
             metadata['wirelength_verification'] = verify_lengths(report, reference, geometry['dbu'])

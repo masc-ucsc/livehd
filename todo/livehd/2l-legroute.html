@@ -3,1070 +3,228 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TODO 2l-legroute — Route-aware legalization with a SAT solver</title>
+<title>TODO 2l-legroute — Native routing closure in two steps</title>
 <link rel="stylesheet" href="../todo.css">
 </head>
 <body>
-<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a></nav>
+<nav><span class="brand">LiveHD TODO</span><a href="../index.html">← All tasks</a><a href="../../repros/2l-legroute-history.html">History</a></nav>
 <main>
-<h1><strong class="item-id">2l-legroute</strong> Route-aware legalization with a SAT solver</h1>
-<p><strong>legroute</strong> is route-aware legalization: it replaces the LiveHD legalizer (opt-in,
-<code>synth.place.legroute=true</code>). Cells are grouped into <em>cell-boxes</em>; a SAT solver places
-the boxes of each region on a tile grid so that the box-to-box routes fit the tracks <em>by
-construction</em>. Routability is guaranteed instead of guessed from density targets, so the design can be
-packed denser and the routes stay simple (straight and L). Quality order, given a routable design:
-<strong>WNS</strong>, then <strong>TNS</strong>, then wire length and vias.</p>
-<p><span class="status">Redesign 2026-10-30: SAT placement replaces the min-cost snap, the bin spill and
-PathFinder</span> The guide lists current decisions only. Partition vocabulary (grid, region, bin) follows
-<a href="3g-partitions.html">3g-partitions</a>.</p>
+<h1><strong class="item-id">2l-legroute</strong> Native routing closure in two steps</h1>
 
-<h2>Building blocks</h2>
+<p><span class="status">Plan for offline review — implementation pending</span></p>
+<p><strong>Goal.</strong> Make LiveHD legalize and route without requiring OpenROAD. Joint regional SAT placement
+and routing should reach at least the density OpenROAD can route, with substantially lower total runtime and
+comparable routed timing: WNS within about 4%, then TNS, wire length and vias. OpenROAD supplies comparison
+results and known routable references. The production flow remains native.</p>
+<p><strong>Immediate objective.</strong> Make <code>legroute.final</code> close ordinary connections through a
+consistent plan → local → final handoff. Build cellboxes, predict their individual routing reservations, find a
+feasible coarse placement and route, materialize routes to box edges, then move cells inside each box to finish
+its connections. This page defines the proposed work; historical run logs and superseded experiments belong in
+<a href="../../repros/2l-legroute-history.html">the history</a> and <a href="../../feedback.md">feedback.md</a>.</p>
+
+<h2 id="stages">Two steps to closure</h2>
 <table>
-<tr><th>Name</th><th>Definition</th><th>Main properties</th></tr>
-<tr><td><strong>cell-box</strong></td>
-<td>A small group of directly connected cells treated as one custom cell (2 × the widest flop, two
-rows).</td>
-<td><ul>
-<li>A cell never leaves its box. Nets with all pins inside a box are internal: legroute.final routes them,
-and they lower the pins the solver deals with.</li>
-<li>Built by connectivity (agglomeration c1_T20_pa_cd4). Fill is high but not 100%: the leftover space is
-for later sizing.</li>
-</ul></td></tr>
-<tr><td><strong>tile</strong></td>
-<td>One box-sized location of a grid aligned to the rows and sites.</td>
-<td>Holds at most one box. Fixed cells lower its free width; macros (with halo) block whole tiles and snap
-to the tile grid unless they have a custom location.</td></tr>
-<tr><td><strong>track capacity</strong></td>
-<td>Per tile and <em>per direction</em>: the horizontal tracks of all H layers summed, and the vertical
-tracks of all V layers summed.</td>
-<td><ul>
-<li>Layers are not in the SAT model. After placement the track assignment gives each trace its layer and
-track by criticality, inside the space the SAT guaranteed.</li>
-<li>Power stripes and the clock spine take their tracks first (reservations; both get nicer constraints
-later). One track per layer stays free for pin access.</li>
-<li>Each box lowers the capacity over its tile by an approximate in-box demand derived from its internal
-nets (not their plain count: in-box nets can be H or V and discontinuous).</li>
-</ul></td></tr>
-<tr><td><strong>region</strong></td>
-<td>A busorder region. It is the unit of the SAT model.</td>
-<td>The region size comes from the region creation parameter (max cells), not from legroute. It is tuned
-so that legroute.local on sha3 takes about 5 minutes on one thread (soft target; larger regions trade
-time for freedom).</td></tr>
-<tr><td><strong>virtual IO pin</strong></td>
-<td>Where a cross-region net crosses the region boundary.</td>
-<td>Fixed while a region is solved; a route from a box to it ends on its tile.</td></tr>
+<tr><th>Step</th><th>Routing scope</th><th>Completion condition</th></tr>
+<tr><td><strong>1. Ordinary connections</strong></td><td>Connect every required internal cellbox net, external
+cell pin and die IO except the explicitly deferred clock/reset connections.</td><td>Every participating net is
+connected in the emitted native geometry; placement, metal, vias and PG interactions pass physical checks.
+Report this as ordinary-net closure, with the deferred set visible.</td></tr>
+<tr><td><strong>2. Clock and reset</strong></td><td>Add clock/reset distribution and all deferred pins using the
+same reservation and access contract, including their actual layer and spacing requirements.</td><td>Recheck
+every ordinary, clock and reset connection together. Only this complete result qualifies for the final
+all-net density, routed WNS and runtime comparison.</td></tr>
 </table>
+<p><strong>One scope manifest for every pass.</strong> Identify deferred terminals and distribution nets from
+declared clock/reset roots, timing constraints and connectivity through the distribution cells. Record exact
+names and reasons; a broad name regex must not silently exclude functional logic. Mixed-use nets retain their
+non-exempt terminal obligations. Preserve the netlist and cells. In step 1, deferred routing is omitted
+consistently from plan demand, local allocation and Final closure accounting. Any retained clock/reset metal
+in a control remains a physical obstacle and is reported explicitly. PG, fixed obstacles and technology rules
+remain active in both steps.</p>
+<p>Reset stays false-pathed for timing. This timing exception does not remove its physical connection requirement
+in step 2. Step-1 timing comparisons use the same declared clock model and reset exceptions on both flows;
+they are provisional until clocks are physically routed.</p>
 
-<h2>Passes</h2>
+<h2 id="handoff">Pass responsibilities and handoff</h2>
 <table>
-<tr><th>Pass</th><th>What it does</th></tr>
-<tr><td><strong>legroute.local</strong></td>
-<td><ol>
-<li><strong>Boxes.</strong> Build the cell-boxes and their in-box demand.</li>
-<li><strong>Routability (baseline SAT).</strong> Per region, any box may take any free tile. The only
-constraints are placement (one tile per box, one box per tile) and track capacity per tile and direction
-for the chosen route shapes. Any answer is routable.</li>
-<li><strong>Timing tiers (incremental SAT).</strong> Constraints that help timing are added one at a time
-under assumptions and kept only when the solver stays SAT <em>and</em> the timing proxy improves (see
-below). Starting points may change for speed, but every answer keeps the baseline's guarantee.</li>
-<li><strong>Traces.</strong> The chosen shapes become metal with vias: straight and L legs on real tracks
-(layer by criticality), bends and the vias between the legs included.</li>
-</ol></td></tr>
-<tr><td><strong>legroute.final</strong></td>
-<td>Each cell-box alone (independent, so parallel): pick the cell positions inside the box so it routes (a
-small SAT or search), then connect its pins to the lanes that reach or cross the box, one trace at a time,
-adding metal and vias inside the box only. Boxes that fail are placed for real and legroute.local runs again
-with their actual in-box demand.</td></tr>
-<tr><td><strong>legroute.global</strong> (<code>global_route</code>, built 2026-11-01)</td>
-<td>Every region-crossing net routed over the tile grid ahead of the regions: a tree of tile edges by shortest
-paths on the edges with room, most critical nets first. Its boundary crossings become the regions' hops, its
-runs through the regions holding none of the net's pins become fixed pieces; the regions holding its pins route
-it themselves. See <a href="#global">legroute.global</a>.</td></tr>
+<tr><th>Pass</th><th>Work</th><th>Required output</th></tr>
+<tr><td><strong>legroute.plan</strong></td><td>Keep global placement active; build or rebuild cellboxes and their
+reservations; use FastRoute to guide placement recovery and find a feasible coarse route; then choose regions
+and interface domains.</td><td>A versioned placement, cellbox membership, per-box resource/access contract,
+connected route witness, region mesh and movable interface domains.</td></tr>
+<tr><td><strong>legroute.global</strong> (optional helper)</td><td>Retain compatible coarse route pieces and
+coordinate region crossings from plan's witness.</td><td>The same witness and reservations, refined without
+introducing a separate routing problem.</td></tr>
+<tr><td><strong>legroute.local</strong></td><td>Jointly choose cellbox locations and regional routes with SAT;
+assign and validate physical layers, tracks, bends and vias; route transit through boxes and destination
+branches to supported box-edge ports.</td><td>Committed regional metal, consistent shared region interfaces,
+and exact cellbox edge ports with protected access space for Final.</td></tr>
+<tr><td><strong>legroute.final</strong></td><td>Jointly search legal cell positions and detailed connections
+inside each cellbox; extend its destination metal, add vias, and route internal nets.</td><td>Checked cell
+placements and connected detailed geometry, or a localized failure with the required repair.</td></tr>
 </table>
-<p>All or nothing: unless every net closes, no signal wire is written and an external router starts from the
-legal placement.</p>
+<p>Current L5 layer/track assignment belongs to local's physical handoff: coarse directional capacity alone is
+insufficient to declare local complete. Final must receive metal and access resources that agree with the
+solution admitted by plan and local.</p>
 
-<h2>SAT model (legroute.local)</h2>
-<ul>
-<li><strong>Solver:</strong> <code>Sat_solver</code> with CaDiCaL (fastest in the 2026-10-29 benchmark),
-incremental, assumptions for the tiers. No flow or CP solver.</li>
-<li><strong>Placement:</strong> a box's column and row in order encoding; a tile literal per (box, free tile);
-exactly one tile per box, at most one box per tile.</li>
-<li><strong>Connections:</strong> a 1-1 net is one connection; a 1-n net is the set of connections from its
-driver to each sink (a Steiner tree approximated by L-shapes). A virtual IO pin or fixed cell is an endpoint
-at a fixed tile.</li>
-<li><strong>Shapes:</strong> each connection picks H-first or V-first (one bit); a straight connection is
-both. Each leg covers every tile from end to end in its row or column, the boxes' own tiles included (an
-external pin always needs a trace in its box).</li>
-<li><strong>Overlap is free within a net:</strong> per tile and direction one literal per net, implied by
-any of its connections' legs covering the tile.</li>
-<li><strong>Capacity per tile edge:</strong> a cardinality constraint per edge between two neighbor tiles over
-the nets whose covers hold on both (the nets crossing it), against the physical tracks of the narrower tile
-less the edges the routes fixed ahead cross. The in-box wires stay off the edge counters (the boxing pin
-limit and legroute.final's job). The bounds are lazy: an edge's constraint is added only when an answer
-overflows it, and the model is solved again incrementally (<code>capacity_lazy</code>).</li>
-<li><strong>Seeded search:</strong> the fallback placement (boxes on their nearest fitting tiles) is tried
-first as assumptions (<code>sat_seed</code>); an UNSAT there drops them and the free model continues with
-what the solver learned.</li>
-<li><strong>Later, as tiers or exceptions:</strong> trivial Steiner shapes for 1-n nets (all sinks on one
-row or column, or two crossing axes); adjacent 1-1 nets cost no track (in-box metal).</li>
-</ul>
-
-<h2>Pre-placement and policies (options, off by default)</h2>
-<ul>
-<li><strong>Fixed ahead of the SAT:</strong> the top critical boxes on their timing tiles; 1-n trees, highest
-fanout first, skipping a net that would leave a tile with less than half of its tracks free, until the
-region's model estimate is under 10M clauses; IO pre-routes (pin to pin, and pin to one box to pin with the
-box held under the track). Fixed demand over a tile's tracks drops trees, then unpins critical boxes.</li>
-<li><strong>Two policies per region, in parallel:</strong> the options and a second set
-(<code>sat_alt</code>) that fails differently (more fixed: fast UNSAT; fewer fixed: timeouts). A region keeps a
-routable answer, the shorter weighted routes when both are.</li>
-</ul>
-
-<h2>Routability probe (GOALPlace-style inflation, off by default)</h2>
-<ol>
-<li>After GP converges, before bus order: small probe regions (about 1,200 cells, no virtual pins) run
-legroute.local with a short SAT limit; regions at or under 50% box fill are taken as routable. With
-<code>probe.real</code> the probe is the real legroute's twin instead: the real region mesh with bus-ordered
-virtual pins, refined at each round's placement, every region solved.</li>
-<li>Cells of the regions without a routable answer widen in x by r = box fill / target, at most 1.5. The
-target is the median fill of the probe regions that solved, at most 0.6. The top 10% of cells by timing
-weight keep their size (GOALPlace's 10-quantile guard).</li>
-<li>GP resumes from the converged placement (its density weight, fillers in the whitespace) for a bounded
-number of iterations; the widths come back with the cells' centres kept.</li>
-<li>No room for the inflation at the GP target density: a generated core grows
-(<code>place.allow_increase_area</code>, on by default) and <code>lhd synth</code> runs again at the
-utilization that fits, the GP target density lowered with it (utilization + 0.05), at most twice. A fixed
-core (die, core or floorplan given) keeps its size and the inflation scales down.</li>
-<li>Then the real run: bus order and pinalign, critical boxes and 1-n trees pinned (the trees avoid a
-DCGP-style congestion potential: a Poisson-smoothed map of per-tile routing demand over tracks), two policies
-per region in parallel, the better answer kept.</li>
-<li>If that run still leaves a region without a routable answer, placement stops: not routable.</li>
-</ol>
-<p>Measured so far: 1-n nets are typical (61&ndash;88% of boxes sit on a net with 16 or more sinks in every
-design tried). Routability follows box fill: regions under about 65% fill solve, at 75% or more most fail.
-Box fill follows the GP target density (fill is about 1.15 &times; density), not the utilization.</p>
-
-<h2>Density push-back (core growth from an impossible start)</h2>
-<p>With <code>place.allow_increase_area</code> (on by default) and a generated core, placement never stops as
-not routable while it can grow the core. Three signals push the utilization down and placement runs again:
-the legalizer cannot close the global placement (DREAMPlace: insufficient row space; the timing seed and the
-final placement retry in place, utilization times 0.8); legroute's boxes do not fit their tiles (times 0.8);
-a region has no routable answer (the densest failing region's box fill pushed toward 0.7, at most a 0.92
-step). The GP target density follows the utilization (utilization + 0.05). At most eight restarts. A fixed
-core (die, core or floorplan given) still stops as not routable.</p>
-<p>Started from utilization 0.99 and density 1.0 (the densest point the placer accepts): minimax backed off
-0.99 (legalizer) to 0.79 (boxes do not fit) to 0.634 / 0.684, all 11 regions routable at fills 0.64 to 0.86,
-92 s in all; sha3 0.99 to 0.79 to 0.63 (2 of 12 regions fail at fill 0.82) to 0.54 (1 region at 0.72) to
-0.495 / 0.545, 8 of 8 at fills 0.56 to 0.73, 421 s; partition_m 0.99 to 0.792 / 0.842 at the first step, 12
-of 12 routable at fills 0.86 to 0.99, 259 s. OpenROAD routes every pushed-back placement with zero overflow
-and zero DRCs, partition_m's at box fill 0.99 included. Against satlegalize at the same core (DR WNS / TNS):
-sha3 &minus;368.9 ps / &minus;458.2k vs &minus;367.1 / &minus;447.3k; minimax &minus;748.2 / &minus;1,496.8k vs
-&minus;704.0 / &minus;1,395.6k; partition_m &minus;761.0 / &minus;245.5k, where the satlegalize flow has no
-answer at all: its bin cap (0.8) refuses the density, and with the cap raised to 0.95 its terminal
-legalization exhausts the core and commits nothing. The denser
-the core, the more the box snap costs against a cell-level legalizer (minimax 6%), and the push-back lands
-where the SAT says routable, which OpenROAD confirms.</p>
-
-<p><strong>Iterating on sha3's push-back (2026-10-31, later).</strong> Where sha3 stops is not a fill problem: at
-utilization 0.634 the whole chip sits at box fill 0.78 to 0.87, regions at 0.86 route and two at 0.82 fail, and
-four rounds of per-region inflation (the probe on the real region size, the unroutable regions' cells widened,
-GP resumed in place: <code>legroute.probe.rounds</code>) move the fills by a hundredth and change nothing,
-because GP packs every region to its target density and the pushed cells have nowhere to go. The UNSAT cores
-say what it is: four or five boundary tile edges per failing region, each holding a fixed endpoint, with 180 to
-360 nets asked to cross 31 to 37 tracks left. The routes fixed ahead of the SAT were eating those edges: IO
-pre-routes stopped only at zero tracks (1,338 feedthroughs on sha3) and hops filled a boundary tile to its
-whole capacity (<code>hop_share</code> 1). Now the routes fixed ahead may take at most half of a tile's tracks
-per direction (<code>reserve_share</code>, 0.5; <code>hop_share</code> 0.5, a hop past it going to the least
-loaded tile of its boundary so every crossing is still modeled): at 0.634 that takes sha3 from 10 to 11 of 12
-regions (147 feedthroughs kept, 1,705 refused). The last region is the most connected one (173 boxes, 1,396
-nets, 2,556 connections) and stays UNSAT: too many crossings for its boundary under a model that pins each
-crossing to one tile and each net to an L inside its region, which is where OpenROAD, free to spread
-crossings along a boundary and detour, routes the standard flow's placement at utilization 0.70. The search
-from utilization 0 (<code>place.utilization=0</code>) lands at 0.488 either way, because the region mesh
-changes with the core and a different pair of regions fails at 0.538. The proof that the cut, not the density,
-decides: at the standard flow's own utilization 0.70 / density 0.75 the model routes all 12 regions (fills 0.80
-to 0.95, slowest region 119 s), and OpenROAD routes that placement with zero overflow (one die-edge pin DRC)
-at DR WNS &minus;356.2 ps / TNS &minus;442.9k, against the standard flow's &minus;397.1 / &minus;483.1k on the
-same 3,043 um&sup2; die: 10% better WNS and 8% better TNS at equal area. So the push-back now retries other
-region meshes at the same core first (regions a quarter larger, then a fifth smaller) and grows the core only
-after both fail, and its step is <code>place.area_step</code> (0.92) with up to <code>place.area_restarts</code>
-(12) placements. The search from utilization 0 then goes 0.99, 0.91, 0.84, 0.77, 0.71 (boxes do not fit the
-tiles each time) to 0.6525 / 0.7025, where all 15 regions route at fills 0.78 to 0.84: a 3,283 um&sup2; die in
-407 s, 8% above the standard flow's default and 25% below the first push-back's landing; OpenROAD routes it
-with zero overflow and zero DRCs at DR WNS &minus;346.8 ps / TNS &minus;455.1k, the best sha3 timing of the
-session (the standard flow: &minus;397.1 / &minus;483.1k on its 3,043 um&sup2; default die). With the coarse 0.8
-step it had landed at 0.545 (3,930 um&sup2;, DR WNS &minus;385.2 / TNS &minus;495.4k), worse than the 0.70
-placement on the smaller die: feasibility and quality follow the region cut more than the density. The next
-lever beyond that is the one in the plan: let the SAT choose among a few boundary tiles per crossing, and
-space busorder's pins to the track capacity of a tile edge.</p>
-<p><strong>Bisection (the user's divide and conquer).</strong> <code>place.utilization=0</code> now bisects: the
-first point is <code>area_search.start</code> (0.8); a routable placement raises the lower bound and the next
-point is the middle of what is left above it, a failure lowers the upper bound and the next point is the middle
-below; it stops after <code>area_restarts</code> (12) placements or when the bounds are
-<code>area_search.tolerance</code> (0.02) apart, and the placement kept is routable (the best point placed once
-more when the last try failed). During a search no failure retries inside placement, so every point counts
-once. sha3: 0.8 fails, 0.6 and 0.7 route, 0.75, 0.725 and 0.7125 fail; kept 0.70 / 0.75, 12 of 12 regions, a
-3,067 um&sup2; die (the standard flow's default is 3,043) in seven placements. minimax: 0.8 fails, 0.6, 0.7 and
-0.75 route, 0.775 and 0.7625 fail; kept 0.75 / 0.80, 16 of 16 regions,
-a 2,798 um&sup2; die (13% below the standard flow's default) in 472 s and seven placements; OpenROAD: zero
-overflow, zero DRCs, DR WNS &minus;755.5 ps / TNS &minus;1,474.1k (the standard flow on its 3,218 um&sup2;
-default die: &minus;716.7 / &minus;1,425.5k). partition_m, bisected one <code>lhd</code> process per point
-(its clock-gate subs come back unmapped when the command re-synthesizes in one process, a bug in the restart
-path still to fix): the same path to 0.75 / 0.80, 12 of 12 regions, a 3,499 um&sup2; die (27% below the
-standard flow's default); OpenROAD: zero overflow, one die-edge pin DRC, DR WNS &minus;759.6 ps / TNS
-&minus;251.0k (the standard flow on its 4,770 um&sup2; default die: &minus;694.4 / &minus;226.1k).</p>
-
-<p><strong>Remembered search.</strong> A search writes where it landed to <code>workdir/place_search.txt</code>
-and the next search on that workdir starts there, bracketed by a tenth, so an incremental run confirms its core
-in two or three placements. The next step of that idea is per synthesis color: keep the best routable density
-per color in the incremental cache, so an unchanged color keeps its area budget and only changed colors search.</p>
-
-<h2 id="global">legroute.global: the crossing nets routed ahead (2026-11-01)</h2>
-<p>What partition_c showed (328k cells, 632 regions, 274 regions without an answer): the regions that fail are
-<em>pass-through</em> regions, thin slivers between macros that hold two boxes and carry two thousand nets of
-other regions. The hop chain chooses a boundary tile with hop room for every crossing, but room on a boundary
-tile says nothing about the tracks across the region behind it, so a 6-tile channel was asked to carry what
-only a 60-tile one could; the IO pre-route ran out of room (263k feedthroughs skipped) and the SAT got the rest.
-The fix is a global router for the crossing nets (<code>pass/place/legroute_global.cpp</code>,
-<code>synth.place.legroute.global_route=true</code>):</p>
-<ul>
-<li><strong>Graph:</strong> the tile grid; an edge between two neighbor tiles carries at most
-<code>global_share</code> (0.5) of the narrower tile's tracks in its direction, so the regions keep the other
-half for their own routes. The edges inside a region holding one of the net's own pins cost length only and take
-no room: that region's SAT routes the net there, nothing is reserved. A boundary crossing costs one extra tile,
-so a path along an irregular boundary does not hop back and forth.</li>
-<li><strong>Nets:</strong> every net with endpoints in two or more regions (its boxes' placement tiles, its fixed
-pins, the hop tiles of its busorder virtual pins, which it crosses for free). Most critical first, then the short
-nets (few ways to go) before the long ones (they detour). Each net is a tree grown by multi-source Dijkstra from
-the driver's tile to the nearest pending endpoint, within the bounding box plus <code>global_margin</code> (8)
-tiles, grown four times and then to the die when no path fits; the cost of an edge is 1 + 2&middot;use/limit.
-A net without a path keeps the hop chain (counted as <code>global_unrouted</code>).</li>
-<li><strong>Hand-off:</strong> a tree edge between two regions is a hop (both tiles are endpoints of their
-regions, as before); the tree's edges inside a region without any of the net's pins are split at hop and branch
-tiles into straight runs, two runs make an L piece (<code>Global_piece</code>, reserved on its edges by
-<code>edge_reserve</code>, emitted as a fixed connection, the region's model skips the net).</li>
-<li><strong>Cost:</strong> 0.3 s for sha3's 3,951 crossing nets; seconds on partition_c.</li>
-</ul>
-<p>Results: sha3 @0.70 samples in the option sweep table (rows <code>global_route</code>). partition_c (328k cells,
-632 regions, 8 threads): 163 regions without an answer against 274 with the hop chain, 437M clauses against 1.05G,
-147k cells unroutable against 191k, the IO pre-route skipped 58k feedthroughs against 263k; the router itself took
-1,092 s on the first binary (a whole-die retry per unroutable net; bounded since) and left 3,420 nets to the chain,
-which is where the remaining failures sit: macro-channel regions with 0 to 30 boxes and hundreds of chained
-pass-through nets.</p>
-
-<h2 id="regions-as-chips">Iterating on one region, and on regular blocks (2026-11-01)</h2>
-<p>Two shortcuts, both from the review: a region as a chip of its own, and synthetic regular blocks.</p>
-<ul>
-<li><strong><code>synth.place.legroute.dump_regions=all|failed|ids</code></strong> writes
-<code>final/region_&lt;r&gt;.def</code> (+ <code>.json</code>): the region's cells at the tiles legroute gave
-them, one die pin per hop of a crossing net on the layer and track its hop took (a free track of the hop tile's
-row or column, over every layer of that direction and the bands beside it, when the region has no answer), the
-rows clipped, the power grid clipped from the planned grid, the fixed cells and the macros reaching in (the die
-grows to hold a macro whole). <code>scratchpad/cpsat/route_region.py RUN [ids]</code> routes them with OpenROAD
-in parallel and prints the SAT verdict against OpenROAD's overflow and DRC count, in minutes instead of a
-whole-chip run; the failing partition_c regions are the first use.</li>
-<li><strong>Synthetic blocks</strong> (<code>scratchpad/cpsat/synthetic.py</code>, <code>syn_run.sh</code>): a
-16&times;16 mesh of 8-bit nodes mixed from their four neighbors (36k cells), a 12&times;12 systolic array (10.6k),
-64 drivers each fanning out to 32 sinks, and a 32&times;32 crossbar; each through the standard flow and legroute
-with the router at the same core, routed by OpenROAD. First results: mesh, standard &minus;280.1 / &minus;320.6k
-(wire 180k um) against legroute 28/28 regions in 6 s, &minus;266.0 / &minus;330.3k (191.5k um); systolic,
-standard &minus;300.5 / &minus;34.9k (42.0k um) against legroute 6/6 in 31 s, &minus;300.9 / &minus;36.0k
-(47.6k um): the regular lattices route in both flows, legroute's wire is 6 to 13% longer (the box snap), WNS
-equal or better, TNS 3% worse.</li>
-</ul>
-
-<h2 id="risk-order">Regions most at risk first, and cuts by net cut (2026-11-01)</h2>
-<ul>
-<li><strong>Risk order and fail-fast.</strong> The regions solve in order of risk (box fill plus the share of the
-region's tracks that the routes fixed ahead took: hops, pieces, trees, IO pre-routes), so the long solves start
-first and the threads end together; with <code>fail_fast</code> (set when the caller restarts the placement on any
-failure: the probe and the strict push-back) the first region without an answer ends the solve and the density
-push-back iterates at once instead of after every region.</li>
-<li><strong><code>synth.place.region.cut=mincut</code>.</strong> The macro mesh forced a cut line at every macro
-edge and IO bus span: partition_c started from 1,959 rectangles, merged back to 670, 300 of them under 50 cells,
-and the thin channel regions between macros are exactly the ones the SAT cannot route, since a boundary along a
-macro's channel leaves the channel's routes to two regions and hops. With <code>mincut</code> no line is forced;
-each split takes the position in the middle half of the longest side that the fewest nets cross (nets with cells
-on both sides, weighted), so a macro sits inside the region whose cuts surround it and its channel is one
-region's problem. The boundary pins already keep off macro interiors. partition_c with it: pending.</li>
-</ul>
-
-<h2 id="cut-bound">The cut bound, regions as chips (results), domino cells (2026-11-01, later)</h2>
-<p><strong>Regions as chips: the dump had a bug, now fixed.</strong> Nine of sha3's twelve region DEFs aborted in
-OpenROAD's detailed router ("Maze Route cannot find path") on a boundary net: the hop pin sat within half a pin width of a
-die corner and its rectangle left the die, so it had no access point. The dump now treats a track whose pin would leave
-the die (two pitches clear of a corner) like a taken track and moves the pin inward. With that, every sha3 region routes
-as a chip of its own (pin access + global route 5 s, detailed route 3 to 11 minutes per region, a few end-of-line
-violations at the edge pins); the chip-level detailed route of the same placement is 285 s for all twelve, so the
-region-as-chip time is inflated by the fixed edge pins and is not the number to quote.</p>
-<p><strong>The cut bound: unsat before any solving.</strong> With a window of two tiles, a net whose endpoints are held
-on both sides of a tile-column (row) boundary must cover one of that boundary's edges, so the nets forced across a
-boundary cannot exceed the summed tracks of its edges (the model's own k per edge; a 2-pin net between boxes that may
-sit side by side across the boundary takes no track and does not count). <code>solve_region</code> checks every
-boundary after the windows are final and returns unsat with the boundary named; the same bound from the placement
-windows is the leading term of the risk order (cut ratio, then box fill, then the fixed routes' share). On the
-crossbar it rejects the three unsat stripes in 0.01&ndash;0.02 s instead of 2.5&ndash;8.3 s of solving ("359 nets
-forced across column boundary 10, 153 tracks"); the three timeouts stay timeouts (their demand is just over the tracks and
-the windows leave the bound unprovable). Unit test <code>CutBoundIsUnsatBeforeSolving</code>; report field
-<code>sat_cut_regions</code>. <code>scratchpad/cpsat/region_cut.py</code> prints the same demand per cut for any
-dumped run.</p>
-<p><strong>Why the crossbar fails: region shape, not the model.</strong> syn_xbar32x8 cut into full-width
-horizontal stripes (20&times;12 tiles) puts every input bus across each stripe: the worst vertical cut of stripe 2 is
-crossed by 542 nets against 12 rows &times; 19 H tracks (M4+M6; 34 with M2), stripes 0 and 4 need 31&ndash;33 per
-row-tile edge, the three unknown stripes 22&ndash;23. sha3's regions sit at 10&ndash;20 (all SAT). The min-cut region cut
-does not help here (7 of 11 regions fail against 6 of 14), because a bus crosses every cut equally; the next criterion is
-the cut <em>ratio</em> (forced nets over the tracks across the cut) when choosing where and in which direction to split,
-so a bus becomes pass-through traffic for narrow regions instead of internal traffic for wide ones.</p>
-<p><strong>partition_c with min-cut cuts:</strong> 343 regions (670 with the macro cuts), 212 SAT / 57 unsat / 74
-unknown (131 failures, 38%, against 163 of 632, 26%), L3 5,060 s against 2,951 s, 179k unroutable cells against 147k.
-Fewer, larger regions in the macro channels time out more. Cuts stay <code>macro</code> by default; the ratio criterion
-above is the follow-up.</p>
-<p><strong>Domino cells through legroute.</strong> The provisional domino profile (<code>pass.usyn.physical=domino_provisional</code>)
-emits two-row masters (0.54 &micro;m tall, 1.0&ndash;1.1 &micro;m wide on asap7: half a tile). legroute now takes a
-two-row movable cell as a tile-tall box: it takes the same sites in both rows of its tile (<code>tall_layout</code> in
-<code>legroute_boxes.cpp</code>: widest first into the leftmost span free in both rows, the single-row cells of the box
-pack beside it), lands on the tile's bottom row with that row's orientation (the rail-twin sync at the end of placement
-picks the master its rows need), and single-row flops alone set the tile width. The placement no longer refuses
-busorder regions or anchors the two-row cells ahead when legroute is on (<code>place.cpp</code>, the kernel's usage
-check); satlegalize still refuses them, so these runs use <code>synth.place.satlegalize=false</code>. Unit test
-<code>TwoRowCellsPlaceAsTileTallBoxes</code>. Two macro-design fixes came with it: the generated core flipped rows (N/FS)
-only when every cell was X-symmetric, and a memory block (minimax's register file, one block under USYN) is not, so its
-rows were all N and no two-row cell could match shared rails (block macros no longer decide the flip); and the final
-stage's frame import now accepts a two-row cell's rail twin as the same cell (the macro stage had already switched it).
-The area rule of the provisional cells changed at the same time:
-<code>x = N_PDN / 3 + aux / 2</code> instead of <code>(N_PDN + aux) / 2</code> (a pull-down device is a third of the
-reference inverter, the P/N auxiliary devices half of one, the register keeps its own area), which takes the sky130
-reference master from 14 to 13 two-row sites. Driver: <code>scratchpad/cpsat/dom_run.sh DESIGN cmos|dom</code> (usyn
-CMOS or usyn + domino, busorder, legroute, OpenROAD route with the domino Liberty); results in
-<code>repros/domino_vs_cmos.html</code>.</p>
-<h2>Larger designs with macros (cnn, partition_c)</h2>
-<p>The next targets are HighTide's cnn (69 FakeRAM hard macros, four of them 0.3 mm&sup2; each) and NVDLA
-partition_c (two FakeRAM macro types through the NVDLA RAM wrappers, the other RAM sizes as flops), both as
-slang blackbox interfaces with their LEF and Liberty (<code>scratchpad/cpsat/run_design.py</code>). The plan
-as they are iterated, in the order the data will likely ask for it:</p>
-<ol>
-<li><strong>Standard flow and legroute at the same cores</strong>, routed by OpenROAD: where the standard flow
-sits and where the bisection lands, with macros as exclusion areas on the tile grid.</li>
-<li><strong>legroute.global:</strong> the critical paths that cross regions get their long traces reserved on
-the high metal (M6/M7) ahead of the regions, so the per-region SAT sees them as fixed endpoints and the routes
-do not meander around macros.</li>
-<li><strong>Routing speed:</strong> the SAT already runs regions in parallel; the next costs are the hop chaining
-and the fixed-tree pre-placement on designs with thousands of regions, and legroute.final's in-box router.</li>
-<li><strong>Post-route WNS:</strong> the tiers judged by routed timing, the coupling tier for long critical
-traces, and the first and last cell of a critical path at its pins.</li>
-<li><strong>Region boundaries:</strong> pinalign run with busorder as one pass, combined with the SAT alignment
-of boundary cells (satalign), and busorder's pin pitch matched to a tile edge's track capacity, which is what
-limited sha3.</li>
-<li><strong>Region size:</strong> larger regions (or a region grown around a failing one) for the cases a cut
-cannot fix, now that the model is small enough.</li>
-</ol>
-
-<h2>Option sweep at sha3's standard core (2026-11-01)</h2>
-<p>Each variant placed by legroute at utilization 0.70 / density 0.75 and routed by OpenROAD (zero overflow in
-every case; detailed-route WNS / TNS in ps; the clock and reset nets unrouted special nets from here on):</p>
+<h2 id="reservation">A different reservation for each cellbox</h2>
+<p><strong>Build the box first, then estimate its demand.</strong> Start from small connectivity groups that fit
+the legal rows/sites and retain room for cell movement. Use internal-net topology, internal and external pin
+counts, external pin multiplicity, cell types and pin shapes, possible cell arrangements, box fill, and
+candidate arrival layers to predict routing demand. A universal M2+M3 allowance is only a calibration control.</p>
+<p>The reservation starts as per-layer capacity budgets plus candidate routing and access domains. Plan uses
+their capacity summary; local and Final refine the domains into compatible physical intervals. Local commits
+crossing metal and edge ports while preserving choices for Final's exact interior allocation. The budget
+protects space for internal wiring and for external pins to reach box-edge ports, including via cuts, landing
+widths and intermediate-layer links. Upper-metal arrivals may need
+staggered vias and short lower-metal wires. Demand follows the actual arrival layer and pin access; a clock or
+reset label alone does not determine the layer chain.</p>
 <table>
-<tr><th>variant</th><th>regions</th><th>SAT s</th><th>DR WNS</th><th>DR TNS</th></tr>
-<tr><td>defaults (tiers adjacent, pins, home; crit_boxes 0.05; trees 0.5; io_preroute)</td><td>12/12</td><td>75</td><td>&minus;350.7</td><td>&minus;444.5k</td></tr>
-<tr><td>tiers off</td><td>12/12</td><td>62</td><td>&minus;352.6</td><td>&minus;441.2k</td></tr>
-<tr><td>tier_fraction 0.1</td><td>12/12</td><td>78</td><td>&minus;360.4</td><td>&minus;445.2k</td></tr>
-<tr><td>tier_fraction 0.02</td><td>12/12</td><td>78</td><td>&minus;365.2</td><td>&minus;446.4k</td></tr>
-<tr><td>crit_boxes 0</td><td>12/12</td><td>167</td><td>&minus;363.3</td><td>&minus;446.5k</td></tr>
-<tr><td>crit_boxes 0.1</td><td>12/12</td><td>110</td><td>&minus;350.5</td><td>&minus;443.9k</td></tr>
-<tr><td>no fixed trees</td><td>12/12</td><td>153</td><td>&minus;350.6</td><td>&minus;437.6k</td></tr>
-<tr><td>no IO pre-routes</td><td>12/12</td><td>122</td><td>&minus;361.6</td><td>&minus;446.4k</td></tr>
-<tr><td>window 3 tiles</td><td>12/12</td><td>170</td><td>&minus;355.5</td><td>&minus;434.1k</td></tr>
-<tr><td>regions of 4,000 cells</td><td>9/9</td><td>141</td><td>&minus;358.8</td><td>&minus;447.5k</td></tr>
-<tr><td>regions of 1,500 cells</td><td>15/16</td><td>181</td><td>&minus;359.6</td><td>&minus;433.1k</td></tr>
-<tr><td>tier near added</td><td>12/12</td><td>158</td><td>&minus;363.7</td><td>&minus;445.7k</td></tr>
-<tr><td>global_fraction 0.05 (two runs)</td><td>12/12</td><td>120&ndash;142</td><td>&minus;348.8 / &minus;354.1</td><td>&minus;432.1k / &minus;435.2k</td></tr>
-<tr><td>defaults again, hop candidates pruned to the nearest 12</td><td>12/12</td><td>120</td><td>&minus;362.9</td><td>&minus;445.3k</td></tr>
-<tr><td>global_fraction 1.0</td><td>12/12</td><td>124</td><td>&minus;354.4</td><td>&minus;445.7k</td></tr>
-<tr><td>global_route, share 0.5 (865 nets without a path keep the chain)</td><td>12/12</td><td>75</td><td>&minus;352.8</td><td>&minus;434.5k</td></tr>
-<tr><td>global_route, share 0.75 (111 without a path)</td><td>11/12</td><td>181</td><td>&minus;358.5</td><td>&minus;447.7k</td></tr>
-<tr><td>global_route, share 0.5, own-region edges free (691 without a path)</td><td>12/12</td><td>158</td><td>&minus;359.1</td><td>&minus;439.2k</td></tr>
-<tr><td>global_route, share 0.6, own-region edges free (387 without a path)</td><td>12/12</td><td>87</td><td>&minus;348.1</td><td>&minus;434.8k</td></tr>
+<tr><th>Use relative to the requesting connection</th><th>Accounting</th></tr>
+<tr><td>Own destination metal</td><td>Reuse already connected own-net geometry and charge its union once.
+A disconnected piece of the same net still needs a connection.</td></tr>
+<tr><td>Other local destinations</td><td>Preserve their access windows; their metal blocks conflicting
+connections just as other foreign metal does.</td></tr>
+<tr><td>Foreign transit</td><td>Account for the occupied intervals and physical clearances while leaving
+compatible access alternatives for the box's pins.</td></tr>
+<tr><td>Mixed transit and destination branches</td><td>Track the role of each piece; serving a local pin does
+not make every segment of that net free to use.</td></tr>
 </table>
-<p>Reading: the same options place deterministically (two runs of the defaults on one binary are identical), and
-a small change in the hop choice (the pruning to the nearest 12 candidates, done for the large designs) moves
-WNS by 12 ps, so single runs rank variants only beyond about 10 ps and 2% of TNS. Within that, nothing beats
-the defaults: smaller regions lose a region, larger ones gain nothing, and dropping the fixed trees or widening
-the windows costs 2&times; SAT time for a TNS within the spread. legroute.global's traces for the critical 5% of
-crossing nets are better in both runs (9 to 14 ps of WNS, 2 to 3% of TNS against the same binary's defaults),
-so 0.05 is the default now; traced for every net they place hops by geometry instead of room and gain nothing.
-The hop pruning keeps the nearest 32 candidates now.</p>
+<p><strong>Share positions when intervals permit.</strong> Different nets can use different lengths of the same
+track subject to spacing rules. Protect the required landing/link footprints rather than dedicating a whole
+track to every destination. Candidate access windows must be mutually compatible across the box's connections,
+not just individually reachable. Deduct PG and fixed obstacles once; preserve layer direction, width, spacing,
+cut rules and any active nondefault routing rules in every pass.</p>
+<p><strong>Shared contract.</strong> Store stable box membership/version, legal placement domain, participating
+pins/nets, per-layer reservation, candidate edge-port/access domains and selected geometry. Plan, local/L5 and
+Final consume the same resolved contract and occupancy accounting. Moving a box re-evaluates it against the
+destination tile; changing membership, cell types, port choices or arrival layers invalidates affected demand
+and access estimates. Internal nets consume real resources even though they do not cross a box boundary.</p>
+<p><strong>Calibration target.</strong> Seek at least 99% first-attempt cellbox completion on held-out samples
+covering different designs, pin/topology classes and densities, with small reservations. Measure failure tails
+by class as well as the aggregate. This is a predictor target to validate, not an achieved guarantee: every
+remaining failure still needs repair before a design passes. Recorded OpenROAD track usage is a successful
+reference footprint, not the minimum number of extra tracks Final needs.</p>
 
-<h2>Region cuts (busorder regions)</h2>
-<ul>
-<li>No net dips into a region through one side with zero or one cell inside: a cell whose nets all leave
-through one side moves across it, and a pinless RSMT piece with all its crossings on one boundary line is
-dropped (<code>place.region.cleancuts</code>).</li>
-<li>Virtual pins on opposite region edges align across zero or one cell (pinalign) and, for a trunk through
-cells, when already within a pin pitch (<code>place.region.pinalign.near</code>); bus order wins over
-alignment.</li>
-</ul>
-
-<h2>Rules validated against a routed witness (2026-10-31)</h2>
-<p>The method: route a legroute placement with OpenROAD (same core, M2&ndash;M7), count its wires in the tile grid
-(<code>scratchpad/cal/route_census.py</code>), apply our counting rules to those wires
-(<code>rules_check.py</code>), and solve the SAT with every box frozen on that placement
-(<code>legroute.freeze=true</code>). A rule that rejects a routing that exists is wrong; simplifying a wrong
-model is pointless. On sha3 at utilization 0.52 OpenROAD routes legroute's own fallback placement with zero
-overflow and zero DRCs; the old model said 0 of 8 regions, UNSAT in under a second even frozen. Three rules
-were wrong, each about 2&times;:</p>
+<h2 id="plan">Plan: placement, cellboxes and FastRoute iterate together</h2>
 <ol>
-<li><strong>Count per tile edge, not per tile.</strong> 73% of the real H runs stay inside one tile (pin stubs);
-per-tile distinct nets are 2.3&times; the per-edge count. (Now the only counting; the per-tile model is
-gone.)</li>
-<li><strong>The in-box charge stays off the edge counters.</strong> The wires that stay inside a tile (mean
-14.5 nets, max 42) fit on their own; adding our in-box charge (mean 6, max 14) to the edge count rejected
-1,275 of 3,094 edges of the real routing. The in-box budget is a boxing rule (pin limit) and legroute.final's
-job. (The option to charge them on the edges is gone.)</li>
-<li><strong>Fixed routes reserve the edges they cross, not whole tiles.</strong> A hop, a fixed tree or an IO
-pre-route took one track from every tile of its path, i.e. two or three edges per crossing; at the boundary
-tiles the hops cluster (up to 15 per tile) and left 0&ndash;5 tracks for the region. The UNSAT cores of the
-frozen model were all region-edge tiles with a fixed endpoint. Now a hop takes its boundary edge only and a
-trunk the edges along it.</li>
+<li><strong>Prepare the physical frame.</strong> Load the scope manifest, rows/sites, macros, PG, pin geometry
+and technology constraints. Keep the DREAMPlace/DREAMGoal session alive for timing-aware recovery.</li>
+<li><strong>Build cellboxes and reservations.</strong> Group the current cells, check box fit, and estimate
+internal/external routing and access demand. Provide plausible edge-port domains rather than committing early
+to an arbitrary pin position.</li>
+<li><strong>Route the current candidate.</strong> Use native FastRoute-derived routing on the current box pose
+and port domains, with the per-box reservations reflected in directional, layer-aware capacity. Return connected
+per-net corridors, branches, attachments, arrival layers, edge loads and localized failures. FastRoute guides
+placement; the placer or a bounded cell-movement heuristic changes the pose.</li>
+<li><strong>Repair and repeat.</strong> Localized pressure triggers targeted cell movement, spacing or
+inflation. Broad pressure triggers wider spreading or permitted core-area growth. Run at least 20–50 meaningful
+global-placement steps with timing feedback per recovery slice; use 50 as the initial evaluation setting.
+Release region IO constraints for broad redistribution, and retain only compatible ones for localized repair.
+Rebuild affected cellboxes when regrouping is beneficial, recompute reservations, and rerun FastRoute after
+placement, membership, area or resource changes. Area growth beyond a configured threshold also reruns
+<code>macro_plan</code>; smaller changes still require macro-fit checks.</li>
+<li><strong>Admit and partition.</strong> Require every participating global route to be resolved, every edge
+within capacity, and cell/routing density at or below the default <strong>0.90</strong> ceiling. Screen box fit,
+access support and region size before SAT. Any failing global edge blocks admission; an average cannot hide it.
+The ceiling is an admission policy, not a routing proof or a second deduction of the same reserve. Only then
+cut connected regions along the routed trees and seed their interface domains.</li>
 </ol>
-<p>A fourth, in the hop chaining: a region-crossing net joined a region to the net through the first adjacent
-region already joined, in region-id order, so chip-spanning nets (minimax's 17-pin buffer trees) were pulled
-through regions holding none of their pins, stacking 30+ hop-to-hop straight runs on one row (minimax region 7:
-UNSAT in 0.5 s while OpenROAD used 8&ndash;12 nets there). The join now prefers regions holding the net's own
-endpoints, nearest first.</p>
-<p>Search: the fallback placement (boxes on their nearest fitting tiles) is tried first as assumptions
-(<code>sat_seed</code>); the dense sha3 regions that timed out at 180 s are SAT on it in 5&ndash;13 s, and an
-UNSAT costs little while the solver keeps what it learned. OpenROAD on the resulting sha3 placement: zero
-overflow, zero DRCs, WNS &minus;392.7 ps / TNS &minus;470k against the satlegalize baseline's &minus;394.5 /
-&minus;466k on the same core (10 GHz SDC): timing competitive before any timing tier.</p>
-<p>With the fixes the frozen witness placement is SAT in every sha3 region (1&ndash;13 s each), the
-unfrozen SAT routes 8 of 8 sha3 regions and 11 of 11 minimax regions (every crossing modeled), and lazy bounds
-(<code>capacity_lazy=2</code>: a tile edge's bound is added only when an answer overflows it, re-solving
-incrementally) cut the model from 74M to 13M clauses. Every region-boundary crossing is modeled
-(<code>hop_share</code> 1): a pass-through net's chained hops avoid the rows and columns earlier
-pass-throughs loaded (<code>hop_spread</code>, either L orientation), which is what let the last dense sha3
-region solve. Still open: the in-box routing is no longer checked by the SAT; shapes (Z, trunks) made no
-difference once the counting was right.</p>
+<p>Regions may be nonrectangular connected meshes. Penalize critical crossings while allowing necessary cuts;
+size regions for short useful searches. Preserve the route witness through refinement while allowing bounded
+alternatives inside its corridors. A cellbox edge port terminates a connection at a box; a region virtual IO
+joins two regional solves. Both carry stable net identity, layer/geometry or candidate interval, access support
+and dependency versions.</p>
 
-<h2>Experiments that did not work</h2>
-<p>sha3 and minimax (asap7, 10 GHz SDC), legroute.local at 1&times; tracks unless noted. "Routable" counts
-regions with a SAT answer. Every option below exists, off by default, unless marked removed.</p>
+<h2 id="local">Local: movable boxes, real routes and supported edge ports</h2>
+<ol>
+<li><strong>Solve the hardest regions first.</strong> SAT jointly moves cellboxes among their admitted tiles
+and selects connected routes inside plan's corridors. Preserve the freedom to arrange member cells later
+inside their boxes; regrouping belongs to plan.</li>
+<li><strong>Respect the reservation while choosing metal.</strong> Materialize and check physical track
+intervals, layer transitions and landing footprints. Foreign transit may cross a box only through allowed
+space. A destination branch stops at a cellbox edge port with a compatible reserved path to its pins. A mixed
+branch may both cross and serve the box. Layer assignment cannot consume access space promised to Final.</li>
+<li><strong>Repair movable interfaces transactionally.</strong> First solve with the current region pins;
+if needed, jointly move eligible pins and boxes. Send new interfaces to unsolved neighbors and invalidate all
+affected solved neighbors. Re-solve the dependent neighborhood and restore poses, pins, metal and reservations
+together if the repair fails. Box-edge port changes also invalidate their access contracts.</li>
+<li><strong>Validate the handoff.</strong> Independently check decoded connectivity, capacities, physical
+occupancy and mutual access support before committing regional routes. Return named blockers to plan when
+bounded local repair cannot resolve them.</li>
+</ol>
+<p>Keep iterative regional feasibility attempts, including model construction and retries, below 60 seconds;
+start with a roughly 10-second probe. About 10 million clauses is a soft complexity goal, not a hard cutoff.
+Record SAT, UNSAT, UNKNOWN and model errors separately. A timeout does not establish unroutability and does
+not, by itself, justify area growth.</p>
+
+<h2 id="final">Final: move cells to complete the box</h2>
+<ol>
+<li><strong>Search placement and access together.</strong> Within the box's legal rows and sites, try cell
+shifts, reordering and legal orientations to bring pins near their assigned edge ports and usable tracks.
+Use a small bounded joint search; exhaustive arrangements are useful for tiny boxes and calibration. Optimize
+successful connection first, then timing and wire cost.</li>
+<li><strong>Complete internal and external wiring.</strong> Extend the arriving destination metal toward the
+chosen pin positions, reuse connected own-net pieces, and add the needed short wires and vias, including
+staggered layer transitions. Route every participating internal net under the same reservation. Keep foreign
+crossings and committed boundary geometry valid while moving cells.</li>
+<li><strong>Validate and commit.</strong> Check cell legality, PG/obstruction clearance, full metal/via rules,
+same-net physical unions and complete connectivity before committing a box's contribution. Revalidate the
+assembled net across all boxes and interfaces. Pending taps that later roll back are not successful connections.</li>
+<li><strong>Return precise repair information.</strong> Report the pin or join, layer, candidate and blocker
+ownership, rule, attempted placement/access alternatives and any measured resource shortfall. Distinguish
+budget exhaustion, exhaustion of the represented candidate graph, malformed geometry and physical conflicts.</li>
+</ol>
+<p>Final first retries in-box placement/access choices within its budget. Needing a different edge port,
+crossing route or larger reservation sends a request to local and invalidates affected neighbors. Needing a
+different membership, more placement room or a new global corridor returns to plan for regrouping or placement
+recovery and another FastRoute check. Reuse unaffected results only while their versions remain valid. A
+whole-net maze fallback remains a diagnostic escape path; routinely losing the planned tree must be repaired
+at the handoff rather than hidden by increasing global search budgets.</p>
+
+<h2 id="work">Implementation and evaluation order</h2>
 <table>
-<tr><th>Idea</th><th>What happened</th><th>Why (best reading)</th></tr>
-<tr><td>Fewer clauses through the choice of fixed trees: percent of boxes, the 50% track rule, most
-critical first, 30% or 70% rules, a 5M target (<code>tree_load</code>, <code>tree_by_crit</code>,
-<code>tree_clauses</code>)</td>
-<td>At 1&times; only one sha3 region solves under every rule. At 1.25&times; the 50% rule is best (4 of 9).
-More fixed boxes: fast UNSAT. Fewer: timeouts.</td>
-<td>The tracks run out, not the search; the rule only moves which way a region fails.</td></tr>
-<tr><td>Trees keep the most tracks free instead of the shortest RC (<code>tree_room</code>, removed)</td>
-<td>No change (3 of 9 at 1.25&times;).</td>
-<td>Most regions start under 10M clauses and get no trees at all.</td></tr>
-<tr><td>IO pre-route: pin-to-pin feedthroughs and pin&ndash;box&ndash;pin tracks routed ahead
-(<code>io_preroute</code>)</td>
-<td>About 12% fewer clauses, every region near 10M or less; routability unchanged (within noise).</td>
-<td>Kept as a model-size reduction, not a routability fix.</td></tr>
-<tr><td>Pinalign (and <code>pinalign.near</code>) to straighten feedthroughs</td>
-<td>550 candidates, 390 already aligned, 19 newly aligned, 139 blocked by bus order or spacing; routable
-regions unchanged or one fewer.</td>
-<td>Bus order already lines most feedthroughs up.</td></tr>
-<tr><td>Clean region cuts: no 0/1-cell dips through one side (<code>place.region.cleancuts</code>)</td>
-<td>About 20 boxes moved; no change in which regions solve.</td><td>Rare in practice.</td></tr>
-<tr><td>Two policies per region in parallel (<code>sat_alt</code>)</td>
-<td>The second policy wins 0&ndash;2 regions; a fewer-trees second policy builds 15&ndash;26M-clause models
-that always time out.</td>
-<td>Both policies fail on the same dense regions.</td></tr>
-<tr><td>Density push: boxes of failing regions move to neighbors (<code>push_rounds</code>, removed)</td>
-<td>The neighbors that receive boxes stop solving (sha3 went from 3 routable regions to 2 at 1.25&times;).</td>
-<td>The neighbors are as dense; moving boxes moves the problem.</td></tr>
-<tr><td>Lower utilization alone (0.45&ndash;0.55)</td>
-<td>Most regions stay at 0.75&ndash;0.85 box fill; only sparse leftovers solve.</td>
-<td>GP packs cells to its target density whatever the core size.</td></tr>
-<tr><td>Density aimed straight at the learned target fill on the core-growth restart</td>
-<td>Worse: sha3 0 of 12 routable, minimax 3 of 10 (mostly timeouts), against 2 of 8 and 10 of 13 with
-density = utilization + 0.05.</td>
-<td>Unclear; the lower fill did not make the regions easier. Reverted.</td></tr>
-<tr><td>Congestion-aware trees (<code>tree_congestion</code>, DCGP-style potential)</td>
-<td>No measurable change at a fixed utilization (2 of 10 sha3 regions with and without).</td>
-<td>The fixed trees are a small part of the demand.</td></tr>
-<tr><td>Region size by clause estimate</td>
-<td>Not built: regions are already near 10M clauses, and small ones fail too (68 boxes, 0.8M clauses,
-timeout; 94 boxes, UNSAT in 0.15 s).</td>
-<td>Model size is not what makes a region hard.</td></tr>
-<tr><td>Min-cut sub-regions (VieCut, <code>subregion_cells</code>, removed)</td>
-<td>No routability gain; the work moved to larger regions with more fixed ahead instead.</td>
-<td>Same density, same tracks.</td></tr>
-<tr><td>Rigid templates: repeated 1-n structures boxed alike and placed as a whole
-(<code>templates</code>, removed)</td>
-<td>11% more boxes (the first copy's grouping rarely fits the others), no routability gain.</td>
-<td>The structures repeat in cell types, not in geometry; the solver places the copies well enough one box
-at a time.</td></tr>
-<tr><td>Z-shapes and single-trunk Steiner trees in the model (<code>steiner_min</code>,
-<code>steiner_pins</code>, kept as options)</td>
-<td>No change once the counting was per edge.</td>
-<td>A net's L-shapes already overlap for free, so a star is close to a tree where it counts.</td></tr>
-<tr><td>Per-tile capacity with the in-box demand on the counters (the first model)</td>
-<td>Rejected a placement OpenROAD routed with zero overflow (see the witness section). Removed.</td>
-<td>About 2&times; pessimistic per rule.</td></tr>
+<tr><th>Milestone</th><th>Deliverable and check</th></tr>
+<tr><td>1. Scope and reproducible references</td><td>One clock/reset exemption manifest across all passes;
+immutable fully placed/routed OpenROAD references; faithful PG, pin and routing-rule import. Resolve active
+NDR import before calling a replay of those final checkpoints faithful.</td></tr>
+<tr><td>2. Cellbox demand and calibration</td><td>Per-box/per-layer reservations and access alternatives after
+grouping; bounded in-box search on representative boxes. Compare a uniform control against adaptive demand,
+measure first-attempt completion and reservation cost, and retain failing examples.</td></tr>
+<tr><td>3. Plan and local share the contract</td><td>FastRoute consumes the same resources local/L5 materialize.
+Exercise placement recovery, regrouping, port movement and neighbor invalidation. Require valid global routing
+before regional SAT and a physically supported handoff before Final.</td></tr>
+<tr><td>4. Step-1 Final closure</td><td>Joint in-box placement/routing plus structured repair closes every
+ordinary connection. Check emitted geometry independently; report first-attempt and repaired box success,
+remaining failures, area and time per stage. An aggregate 99% box rate is insufficient for design acceptance.</td></tr>
+<tr><td>5. Step-2 full closure and QoR</td><td>Enable clock/reset, recalibrate affected reservations, and rerun
+plan/local/Final as needed. Recheck all connections and measure complete routed WNS/TNS, density and total runtime
+against matched OpenROAD runs.</td></tr>
 </table>
+<p>Use LFSR for fast iteration, then SHA3 and minimax, followed by partition_m, partition_c/o/p, CNN and other
+HighTide designs below 60k cells. Compare identical netlists, physical constraints, PG, timing policy and thread
+counts. Push requested density upward and measure where automatic recovery settles; the eventual full-route
+point must be at least as dense as the matched OpenROAD reference. Include every placement/reboxing/recovery
+iteration in elapsed time. Final emits explicit scope and closure counts so partial runs cannot be mistaken
+for complete routed designs.</p>
 
-<h2>Status (2026-10-31)</h2>
+<h2 id="evidence">Evidence motivating this plan</h2>
 <ul>
-<li>sha3 (utilization 0.52, density 0.57, 2,500-cell regions): 8 of 8 regions routable, SAT 62 s in all (the
-densest region 34 s), 11.1M clauses, every boundary crossing modeled, 7 of 8 regions on their seeded
-placement; 656 edge bounds added over 51 re-solves.</li>
-<li>minimax (utilization 0.54, density 0.59): 11 of 11 regions, SAT 5 s wall with the tiers (866 of 1,087
-kept), 7.0M clauses. OpenROAD on it: zero overflow, zero DRCs, DR WNS &minus;726.7 ps / TNS &minus;1,423.9k
-against satlegalize's &minus;717.6 / &minus;1,389.1k on the same core (1.3% and 2.5% worse).</li>
-<li>litedram (utilization 0.45): 8 of 8 regions (earlier model, 118 s).</li>
-<li>partition_m (20.5k cells, utilization 0.52, density 0.57): 12 of 12 regions, SAT 1.3 s wall with the tiers
-(344 of 383 kept), the whole <code>lhd synth</code> run 86 s. OpenROAD on it: zero overflow, DR WNS &minus;735.5
-ps / TNS &minus;261.5k against satlegalize's &minus;719.3 / &minus;257.1k on the same core (2.3% and 1.7%
-worse; one die-edge DRC each): on a sparse design the box snap costs what the tiers do not recover.</li>
-<li>OpenROAD on the sha3 SAT placement with the default tiers: zero overflow, zero DRCs, DR WNS &minus;383.6 ps
-/ TNS &minus;469.7k against a same-session satlegalize run's &minus;382.4 / &minus;466.6k on the same core
-(equal within 1%; an earlier session's baseline of &minus;394.5 was a different placement run). Over the
-three designs legroute.local is within 3% of satlegalize + OpenROAD on the same core, with routability by
-construction, and its routed wire is 5 to 12% longer (the box snap).</li>
-<li>Against the standard flow at HighTide's default densities (satlegalize + OpenROAD, zero overflow): sha3 at
-utilization 0.70 routes clean on a 3,043 um&sup2; die, 30% smaller than where legroute's push-back lands
-(0.495, 4,333 um&sup2;), at DR WNS &minus;397.1 / TNS &minus;483.1k; minimax at 0.65 (3,218 um&sup2;,
-&minus;716.7 / &minus;1,425.5k) matches legroute's 0.634 (3,307 um&sup2;); partition_m at 0.55 (4,770
-um&sup2;, &minus;694.4 / &minus;226.1k) is 44% larger than legroute's 0.792 (3,314 um&sup2;). So the SAT's
-capacity model is conservative on sha3's dense regions (OpenROAD routes a denser standard placement clean)
-and permissive where the cell-level legalizer gives up (partition_m).</li>
-<li>Route guides (<code>legroute.guide</code>: per net the corridor of tiles its SAT route covers, on every
-routing layer, M1 on the pin tiles; OpenROAD <code>read_guides</code> then <code>detailed_route</code>):
-TritonRoute accepts them, but the guided detailed route converges slowly (77k violations after its first
-iteration, 11k after three, where OpenROAD's own global route reaches zero on the same placement). The
-corridors are one tile wide and the SAT's shapes allow no detours; the guides need width, or a global-route
-pass constrained to them, before the detailed route is a fair test of the routes themselves.</li>
-<li>H is the binding direction everywhere; V never binds.</li>
+<li><strong>Scope reduction alone is insufficient.</strong> Recent SHA3/minimax diagnostics that skipped only
+clock/reset in Final did not close the remaining signals. Many failures lost the planned tree and fell back to
+expensive whole-net search. The proposed step 1 applies its scope and resource contract throughout the flow.</li>
+<li><strong>Reserve intervals and access, not just whole tracks.</strong> On fully routed OpenROAD SHA3,
+2,628 of 2,880 occupied analysis tiles share M3 track positions between destination and foreign metal. A sampled
+tile uses 22 destination + 39 foreign − 9 shared = 52 of 60 raw positions, with disjoint occupied intervals.</li>
+<li><strong>Upper arrivals need connected lower-layer access.</strong> Twelve random SHA3 tiles contain 36
+observed pin/upper-layer connection pairs with complete via footprints inside the tile: 30 from M4, five from
+M5 and one from M6. All selected paths stagger via coordinates. These are successful-route examples, not
+minimum reserves; two reach pins of cells whose centers lie in neighboring tiles.</li>
 </ul>
-
-<h2>Plan</h2>
-<p><strong>Measured 2026-11-01 (sha3, usyn CMOS, utilization 0.45): the model rejects what OpenROAD routes clean.</strong>
-Two regions unsat by the cut bound (278 nets forced across one internal column boundary with 263 tracks; 378 with
-336), both full-width strips (24 tiles wide, 12&ndash;16 tall) because the IO bus spans cut the die into bands. OpenROAD
-routes the placement with zero overflow and zero DRC, and crosses that boundary inside the region's rows only 146 times
-(M2 62, M4 67, M6 19). Of the region's nets with cells on both sides, 30 are internal, 145 leave through a hop, 3 pass
-through: the hop tile chosen ahead of the SAT decides whether a leaving net crosses inside the region, OpenROAD decides
-it per net. Charging own-region edges in the global router (<code>legroute.global_own_share</code>, off by default) did
-not help. The fixes, in order: (1) the SAT chooses each crossing net's hop among a few boundary tiles (the plan item
-below), with the cut bound counting only what no choice avoids; (2) <code>region.cut=ratio</code> (landed, off by default):
-no forced lines, each split picks the axis and position whose children have the lowest worst internal cut over the
-tracks across it, from the routing stack's pitches; (3) more of M2 credited to the global routes. With the ratio cut the
-searches still find no all-regions point for either usyn flavour: the relax diagnostic on the domino run at 0.50 (region
-2, 16&times;62 tiles, 746 boxes, 2,139 nets, 9 pass-throughs, unsat in 365 s while the other 8 regions solve in 32&ndash;139
-s) names two horizontal edges at tiles holding a fixed endpoint, 7 tracks left after the routes fixed ahead and 34 nets
-needing them (deficit 27, worst 17); relaxing those two bounds makes it SAT. One hot boundary tile where a fan-out
-converges on the hop chosen ahead: the hop choice is the fix, not capacity. Proposed form: solve the regions in two
-waves of a checkerboard; a region of the first wave chooses each crossing net's hop among a few boundary tiles (tile
-literals on the boundary, the cut bound counting only what no choice avoids), its choice is then the fixed endpoint
-for the neighbour in the second wave. <strong>Landed as <code>legroute.hop_choice</code> (off by default): the regions solve
-in checkerboard waves (greedy colouring of the region adjacency in risk order), a hop between two regions is chosen by the
-earlier wave's region among the boundary tiles within hop_choice of the hop chooser's tile (order and tile literals, no
-tile taken, at most hop_share of the boundary tile's tracks as hops), and published to the later region as its fixed
-endpoint before its wave; nets routed ahead (trees, IO pre-routes, global pieces) keep their hops.</strong> Measured on sha3
-usyn CMOS at 0.45 with the ratio cut: 3 waves, 5,778 of 10,115 hops free, 4,410 moved, every solved region faster;
-two regions still unsat, and the relax diagnostic names two boundary tiles holding fixed endpoints with 163 routes
-through them (47 tracks short): the hops of the global router's pieces, which stay fixed. With the router off
-(<code>global_route=false</code>: pass-throughs become region nets with free hops) 11 of 12 regions solve and the last, a
-6-wide middle column carrying 323 pass-through nets, is only out of time at 420 s (5.9M clauses). Lowering the router's
-share to 0.4 does not help (the nets fall to the chain but their hops stay fixed through the pieces). The middle
-column stays out of time at 900 s too; 1,500-cell regions are worse (narrow 4-wide columns overload their row cuts,
-155 nets per column-tile edge against ~118 tracks); counting the pass-throughs in the ratio criterion
-(<code>region.cut=ratio_through</code>) gives fewer, bigger regions and a 4-wide full-height column over the cut bound on
-its row cuts, 7 of 10 SAT: a greedy bisection cannot foresee its later splits with either score. The density searches
-run with ratio + hop_choice 2 + no router. The systematic policy the user asked for (regions as any contiguous set of
-2&times;2 tiles from a partitioner such as VieCut, density maps or bus cuts) is the path past the rectangle mesh.</p>
-<p><strong>Robust by construction (user, 2026-11-01): whatever the mesh deals a region, the algorithm must adjust: push
-cells out of a region that does not route, or reshape it; a pathological placement that puts everything in one region
-should still end in a routed design, only a worse one.</strong> Landed as <code>legroute.spill_rounds</code> (off by
-default): after the regions solve, each region without a routable answer (a model UNSAT, no answer in time, or more
-boxes than fitting tiles) pushes about <code>spill_fraction</code> (0.2) of its boxes into the regions around it, the
-crossings are redone and only the regions whose boxes, fixed boxes, hops, global pieces, trees or IO pre-routes changed
-solve again (a per-region signature keeps the others' answers), up to spill_rounds times. <strong>Which boxes leave and
-where they go is a min cut, as the user asked (2026-11-01, "a very fast approximate that runs only inside the region"),
-with the refinement that the region and its neighbours form one graph so the cut also decides the neighbour:</strong>
-the region's movable boxes are the nodes, each receiving neighbour is contracted to a terminal T<sub>j</sub>, and a
-terminal S stands for what stays. A net is a star of edges from its first box to its other boxes (weight 100 &times;
-the net's timing weight over its endpoint count less one, so a net costs about the same however many boxes it joins);
-a net reaching neighbour j pulls its boxes to T<sub>j</sub>, a net with a fixed endpoint in the region or an endpoint
-past the neighbours pulls them to S. Each neighbour's side is its isolating s-t min cut (VieCut's push-relabel,
-<code>third_party/viecut</code>, T<sub>j</sub> against S and the other terminals), so the netlist decides which boxes
-leave and to which neighbour, connected clusters together. A uniform pull of every box to the neighbours is bisected to
-the smallest value that moves at least the wanted count; a box two cuts claim goes to the neighbour its nets reach
-most, and a neighbour takes at most its room: the fill that evens it with the failing region (never past nine tenths
-of its tiles), the next ring of regions joining when the neighbours are short of room. A failing neighbour receives
-too: the two sides of a hot boundary fail together (the hops are the same on both sides), and a box crossing it
-toward its nets takes its hops with it. Each moved box lands on the nearest free tile it fits in its new region (the
-SAT then places it within its window). The data behind the mechanism: abc and usyn CMOS sha3 have the same fan-out
-mix and net reach, usyn is only 20% larger and its mesh has 25% more regions and 46% more hops; what fails is
-region-scale (cut bounds, boundary tiles), never the cell-boxes. Unit test
-<code>SpillRoundsPushAFailingRegionsBoxesOut</code>: six boxes whose nets all go to fixed cells past a 22-track
-boundary (24 hops) fail on both sides by the cut bound; one round moves three boxes toward their nets and both regions
-solve.</p>
-<p><strong>The user's framing (2026-11-01):</strong> there are many ways to pick the min cut, and when the imbalance
-is small it may not be worth pushing cells to a neighbour at all; the options have to be explored and the best chosen
-under constraints, and the placer most likely has to run again afterwards so it balances across the regions, in a way
-that does not collapse everything into the same region again (a changed density, or more spread). <strong>The
-GOALPlace path is the easier one:</strong> only the cells of the too-congested regions get extra spacing, the placer
-pushes the other cells away, and the loop repeats; DREAMPlace's cell repulsion can be raised for that resume. Landed
-for it: <code>legroute.probe.real</code> makes the probe the real legroute's twin (the real region mesh with
-bus-ordered virtual pins, refined at each round's placement, every region solved, the probe SAT limit), so the regions
-it inflates are the ones the real run would fail, and <code>legroute.probe.repulsion</code> multiplies the converged
-density weight for the GP resume after the inflation. Measured on sha3 usyn CMOS from utilization 0.70: the real
-probe (three rounds, 60 s per region) grew the core twice (0.70, 0.59, 0.56; the inflated cells needed 18% then 6%
-more core), its rounds went 10 of 25, 6 of 22 and 5 of 23 regions failing, and the real legroute at 0.56 ended 10 of
-12 (one region UNSAT in 2 s at fill 0.72, one out of time at fill 0.65): the loop converges slowly and the failures it
-leaves are boundary-driven, not fill-driven. The min-cut spill at 0.70 found the failing regions at 0.91 to 0.96
-fill next to neighbours at 0.75 to 0.87, so the even-fill room let round one move only 9, 23 and 24 boxes of the 60
-to 70 wanted, and a receiver's room must be counted in tiles that fit a full box (a tap or an obstacle narrows a tile):
-the room now uses the widest leaving box's fit, and the regions re-balance after each round.</p>
-<p><strong>The user's three directions (2026-11-01, late): repulsion, region boundaries that handle the constraints,
-and more freedom of movement for the congested cell-box areas.</strong> Repulsion runs through
-<code>probe.repulsion</code> (the pin refine works on a copy with the split nets and anchors and copies only cell
-positions back, so the inflation GP resume runs on the pinless design and the virtual pins cannot hold cells in their
-regions, as the user warned). Freedom of movement landed as <code>legroute.window_grow</code>: in a spill round a
-region without a routable answer first widens its boxes' windows by that many tiles (twice at most) and solves again
-before it spills, so the bigger models come only where the routing is tight. Boundaries: the ratio cut places them
-once; <code>legroute.spill_shift</code> now moves one after a failure: the failing region hands the tile strip next
-to the neighbour its nets reach most (one to four tiles deep, enough to hold spill_fraction of its boxes, the region
-keeping a connected body of at least a quarter of its tiles) to that neighbour with the boxes on it, so the crossing
-nets' endpoints become the neighbour's without raising its fill. Regions are tile sets below the mesh, so the grid's
-region map changes in place (sat_place takes a mutable grid), the crossings and hops follow, and a bus-order pin of a
-net that became internal stays as a waypoint one strip inside the receiver. Unit test
-<code>SpillShiftMovesTheBoundaryWithItsBoxes</code>: the region whose fixed cells draw 24 hops over a 22-track
-boundary hands 16 tiles (4 deep) to its neighbour and both solve. Why the box spill runs out: at utilization 0.70
-the min-cut spill evened sha3's regions to 0.83 to 0.85 fill within four rounds and then found no room anywhere (the
-chip is that full), and at 0.60 three regions (2, 6, 8) keep failing with the neighbours at 0.53 to 0.74 fill while the
-room, counted in tiles that fit a full box, is small; widening those regions' windows to 4 and 6 tiles did not solve
-them either. The box spill and the boundary shift are compared on the same 0.60 placement.</p>
-<h2>Alternative placements for a failing region (plan, 2026-11-01)</h2>
-<p><strong>Found while measuring (2026-11-01, late): the final legroute runs without bus-order virtual pins.</strong>
-The kernel runs the region refinement (bus order, boundary pins, pin alignment) as its own placement call
-(<code>refine_regions</code>: optimization pending, region_refine) and the terminal placement that runs legroute is a
-later call where <code>boundarypins.enabled</code> is off, so <code>refine_final_boundaries</code> never runs there,
-<code>boundary_pins</code> is empty and legroute's <code>regions.pins</code> is empty ("2 regions, 0 virtual pins" on
-lfsr with busorder on; the sha3 runs show the same path). Bus order therefore shapes the placement (cells settle toward
-ordered pins during the refinement) but legroute's crossings are plain hops chained through the regions, and
-<code>probe.real</code> fell back to the small pinless probe in every run so far (the "real probe" results above are
-really the old probe with the real-run budget). Fix, before any pin-dependent conclusion: carry the refinement's mesh
-and pins to the terminal stage (the refinement writes <code>regions/region_mesh.json</code> and
-<code>regions/boundarypins/pins.tsv</code>; the terminal placement reads them into <code>final_regions</code> and
-<code>regions.pins</code>, and the probe's real mode uses them too), with the hash covering the pin set.</p>
-<p><strong>The user's plan (2026-11-01, latest): per failing region, several ways to make an alternative placement,
-tried while the SAT works on the region, measured on average across designs, then ordered.</strong> Three families
-plus the density lever:</p>
-<ol>
-<li><strong>Noise:</strong> every movable box's home moves by a uniform random offset of up to window_tiles tiles
-inside the region (a new seed per round). Cheap, no model of why it failed.</li>
-<li><strong>Shuffle with anchors:</strong> a few boxes of the region's densest 4&times;4 patch move to the centre of
-its sparsest patch and keep a one-tile window (anchors), so the SAT must build around them; at the GP level the same
-with the cells anchored for a resume (<code>probe.shuffle</code>, landed).</li>
-<li><strong>Topology-shape-metrics stretch:</strong> the region's box graph loses edges (never those of nets with a
-fixed endpoint, a hop or an IO pin) until every node has four or fewer, highest degree first; the reduced graph is
-drawn orthogonally on the region's free tiles (breadth first from the node of highest degree, each node on the free
-tile nearest the centroid of its placed neighbours: ports north, east, south and west, so connected boxes sit
-adjacent and 1-1 nets go free), and the drawing's tiles are the new homes. If the SAT still fails: the drawing seeds a
-region-local GP resume (the other cells boxed in place) for a few iterations and the result is tried; if it fails
-again, the removed edges return and GP iterates once more before the last try.</li>
-<li><strong>Checkerboard relaxation (user, 2026-11-01, latest):</strong> a relaxed model of the failing region first:
-the edges a checkerboard of tiles owns carry no capacity bound (half the capacity clauses gone, the metal over or
-into those boxes untracked) and the boxes homed on those tiles may move <code>checker_window</code> tiles (8), the
-others twice the window, so the solver explores far positions without the clauses blowing up. An UNSAT relaxed model
-says the region needs less density, not another placement. A SAT one seeds the full model: its tiles become the
-homes, every box gets a window of four, and capacity counts on every tile. Landed as the <code>checker</code> family;
-in the unit test it moves four of six boxes next to the boundary, past the windows of two, and routes a region the
-cut bound rejected.</li>
-<li><strong>Density:</strong> the GOALPlace inflation brings a region from about 0.8 toward 0.6 fill step by step
-(<code>probe.real</code> once the pins are carried over), and at each step a failing region tries the families above
-before the next step down.</li>
-</ol>
-<p><strong>Orchestration.</strong> In legroute's round loop a region without a routable answer generates its
-candidates (box homes, per-box windows) and solves each with the round's fixed hops (no hop choice, so the neighbours'
-answers stay consistent), in parallel threads within the round's budget, the first routable candidate in priority
-order being adopted (its homes replace the boxes' homes, its answer stands); only then the spill or the shift. Later,
-speculatively: the candidates start when the region's own solve starts, so a failure costs no extra wall time.
-Options: <code>legroute.alternatives=noise,anchor,tsm</code> (the order is the priority), <code>alt_ms</code> (budget
-per candidate, default the region budget); report fields per family: tried, rescued, seconds.</p>
-<p><strong>First measurements (sha3 usyn CMOS, utilization 0.60, 180 s per region).</strong> With the refinement's
-mesh (11 regions) and its 7,287 pins: 7 of 11 (one UNSAT at fill 0.79, three out of time); the same mesh without the
-pins: 6 of 11 (one cut-bound UNSAT, four out of time); the mesh the terminal stage builds itself (10 regions, no
-pins): 8 of 10. So the mesh weighs more than the pins, and the pins help a little on the same mesh. The alternatives
-on the pinned run: noise and anchors time out like the original placement, and the breadth-first drawing fails the
-cut bound at once (624 nets across a row boundary of 397 tracks; 768 across 512): packing connected boxes adjacent
-crowds one boundary, so the drawing needs a capacity-aware spread before it is a candidate. The timeouts sit in the
-lazy capacity loop of the base solve (two or three rounds, a third of the bounds added, then out of time), not in the
-quality tiers: at this utilization the lever is solver time (budget, eager bounds, smaller regions), and the
-perturbations only pay where a region is UNSAT for its placement. The boundary shift, run pinless on the same
-placement, ended at 4 of 10 with five cut-bound UNSATs: the strips cycled through three regions (2, 4, 5) and the
-receivers' cuts got worse each time, so moving strips is off unless a capacity-aware choice (the depth that lowers
-the new boundary's cut ratio, never above one) is added. Pinless at 0.60 and 180 s the plain run (8 of 10) beats
-every perturbation tried: box spill 7, window widening 7, shuffle 5, shift 4. <strong>Smaller regions change the
-regime:</strong> the pinned mesh at 1,500 cells (19 regions) ends 13 of 19 with six UNSATs proven in 3 to 20 s and no
-timeout, in half the time (256 s): a region at 93 boxes on 93 tiles is simply unroutable for its placement, and that
-is where the candidates and the spill can be evaluated in seconds rather than minutes. The alternatives and the box
-spill are being measured on that mesh. <strong>The user's direction (2026-11-01, latest): keep trying shuffles
-combined with the GOALPlace inflation, find which works for which region issue, then fix an order, possibly one per
-region density or trait.</strong> For that every trial is now recorded: <code>legroute.alt_all</code> solves every
-family even after one routes, and legroute.json's <code>alt_trials</code> holds, per failing region and round, its
-fill, placement cut ratio, hops, pinned tiles and own outcome (cut, UNSAT or out of time) with each family's outcome
-and time; a fourth family, <code>spread</code>, steps the boxes of the denser patches toward the sparsest one (a
-legroute-level inflation); the probe keeps the moves and the alternatives out of its rounds (it is the density
-signal). <code>scratchpad/cpsat/alt_table.py</code> groups the trials by fill bin and outcome and counts what each
-family rescued. The 420 s budget on the 2,500-cell mesh changes nothing (the same three regions time out), so the
-exploration runs on the 1,500-cell mesh: alternatives first-adopt, all families logged, spill only, and three
-inflation rounds plus all families. The spill alone on that mesh ends 9 of 19 against 13 of 19 plain: 1,005 boxes
-moved over six rounds and the failing count climbed from 7 to 10, because the arrivals land on the receiver's
-nearest boundary tiles, where its capacity is tightest, and their nets add hops. The box spill is harmful at every
-setting tried; an arrival would need a receiver-side re-placement with wide windows (the checker relaxation) to
-pay. <strong>The clean trial on that mesh (every family, no spill) answers the first question:</strong> the six
-failing regions tried all five families and none rescued any. Noise, anchors and spread end UNSAT in 4 to 106 s (every
-local perturbation of the placement is unroutable), the drawing is cut-bound UNSAT every time, and the checker's
-relaxed model is itself UNSAT on three regions (fill 0.89; fill 0.63 with 27 pinned tiles; fill 0.68 with about 1,560
-hops on 114 tiles) and out of time on the other three. At this utilization the failing regions are capacity problems,
-the boundary crossings against the perimeter's tracks or the fill, not placement-local ones, so the levers are
-density (the inflation rounds) and the mesh (fewer crossings per region); the trial rows now carry each region's
-boundary tracks so the hop load reads directly. <strong>The first rescues came from the timeouts:</strong> a region that ran out
-of time on its own placement (fill 0.59, cut 0.42) routed from the noise variant in 4 s, from spread in 12 s and from
-the drawing in 13 s, and another (fill 0.61, cut 0.86, after the inflation rounds) from noise in 120 s, while every
-proven-UNSAT or cut-bound region refused every family. minimax adds a third class: its failing region is sparse (fill
-0.33, cut 0.15, 472 hops over 2,725 boundary tracks) and UNSAT for every family including the relaxed checker, with
-the register-file proxy's 118 pins inside it: macro pin access. <strong>The order by trait, so far:</strong> a region
-out of time with a cut ratio under about 0.9 tries noise first (cheap and fast), then spread and the drawing, anchors
-last; a cut-bound region (ratio above one) gets nothing in-region, only the mesh or the density; a proven-UNSAT region
-gets the inflation (its own fill) or the mesh (its boundary load, hops over perimeter tracks); a macro-pin region
-needs pin-access work. The inflation itself also moves cells across the fixed mesh boundaries without regard to their
-capacity, so four regions became cut-bound after the rounds. Landed for that: the probe now runs inside the
-region-refinement call, before bus order cuts the mesh and places the pins, so the inflation spreads the cells first
-and the boundaries follow; the terminal stage then takes that refinement's mesh and pins and does not probe again.
-A third rescue came from the clean inflation-plus-families run: a region out of time at fill 0.54 and cut 0.73 routed
-from the spread variant in 68 s. With the inflation ahead of the mesh cut (three rounds), the re-cut mesh has 17
-regions and 11,083 hops instead of 19 and 12,262, and the run ends 12 of 17 with two UNSAT, three out of time and two
-cut-bound, against 13 of 19 with six UNSAT on the fixed mesh: the inflation turns proven UNSATs into timeouts and
-cut-bounds (the regions gain room, the boundaries get busier), so it pairs with the mesh lever and the timeout
-families rather than replacing them. <strong>Following the trait order end to end gives the best point so far:</strong>
-the inflation ahead of the mesh cut, the fan-out trees unpinned, noise and spread on the timeouts: 14 of 16 at 0.60
-on sha3 (no UNSAT, no cut-bound, two regions out of time at fill 0.67 and cut 0.66; 16 regions and 10,392 hops with
-94 over the share), against 13 of 19 with six UNSAT for the plain pinned mesh. The price is QoR: a critical delay of
-184 ps against 85 to 118 and 229k um of wire against 172k to 188k, the unpinned trees and the inflation both paying
-in wire; a 420 s budget changes nothing for the two timeouts (204 and 222 boxes; their noise and spread variants time out
-too), so they are large hard instances rather than budget cases. With 1,000-cell regions the same flow ends 23 of 25 (no
-UNSAT; two regions out of time at fill 0.72 and 0.76 with hop loads near 0.6), in 833 s: smaller regions raise the
-routable share from 88% to 92%, at 242k um of wire; five inflation rounds at a 90 s probe budget are being tried on
-the last two. <strong>A bug in the round loop surfaced while reading that run (2026-11-02):</strong> the crossings
-take the hops' tracks off the capacity vectors in place, and the loop reused the same vectors every round, so the
-capacities shrank round after round (hops over the share went 94, 2,231, 5,225 across three rounds), the hops drifted
-and every region solved again handicapped. Every multi-round result above (the box spill, the shift, the window
-widening, the alternatives' later rounds, the five inflation rounds) carries that handicap in its rounds after the
-first; the capacities now reset each round, an adopted alternative keeps its homes private so the neighbours' hops
-stay, and the probe rounds keep the best measured placement. With the loop fixed, the five-round inflation keeps its best round (round four left four regions failing against two
-at round three, and the round-three placement was kept) and ends 23 of 25 again, with a fifth rescue on the way:
-a region out of time at fill 0.73 and cut 0.67 routed from the noise variant in 108 s, and since an adopted answer
-now keeps its homes private, the second round kept every other region's answer. The two regions still out of time sit
-at fill 0.70 and 0.79 with hop loads near 0.6. The box spill re-measured without the handicap stays at 9 of 19 (failing regions 5, 4, 5, 8, 9, 10 over the rounds,
-hops over the share 57 to 1,511): the moved boxes' nets load the boundaries, so the spill is harmful by itself, at
-most one small round helping slightly. It stays off. On minimax the best flow changes nothing (1 of 2): the probe skips both regions as sparse (fills
-0.33 and 0.39), so no inflation runs, and the macro-pin region is UNSAT for noise and spread as well; that class needs
-pin-access work around the register-file proxy's 118 pins, which none of the levers here touches. One mesh idea did
-not survive: scoring each candidate split by
-its own crossing load as well as the children's internal ratios ended 11 of 18 with five cut-bound regions against one
-on the plain score, because the split term let the children's internal ratios rise; it is reverted, the guard that
-refuses a split leaving a child fuller than nine tenths of its area stays. Running: the families on the 2,500-cell mesh (the timeout regime), the mesh
-whose splits weigh their own crossing load, and the clean inflation-plus-families run.</p>
-<p><strong>The trial table so far (172 trials over seven runs: sha3 at 0.60 on both meshes, with and without the
-inflation, and minimax at 0.65).</strong> Rescues happened in one group only, regions out of time with fill under
-0.70: noise 2 of 35 (median 62 s), spread 2 of 35 (40 s), the drawing 1 of 34 (13 s), anchors 0 of 35, the checker 0
-of 11. Every cut-bound group, every proven-UNSAT group and every denser group scored zero for every family. Unpinning
-the fan-out trees rescued one more timeout region on the 2,500-cell mesh (124 pinned tiles; 8 of 11 against 7), at
-the cost of wire. The checker's relaxed model was itself UNSAT on four of six failing regions, which by its own logic
-says those regions need less density. <strong>The order by trait, as it stands:</strong> out of time and sparse: noise,
-then spread, then the drawing (anchors and the checker last); out of time with a high pinned share: unpin its trees
-first; proven UNSAT: the inflation for its fill or the mesh for its boundary load; cut-bound: the mesh only; macro-pin
-regions: pin access. The box spill stays off.</p>
-<p><strong>Evaluation.</strong> On sha3, minimax and partition_m at the utilization where the plain run leaves regions
-failing, count per family the regions it rescued, the time it cost and the WNS/wire of the result; separate proven
-UNSAT from running out of time (the latter moves with machine load: compare at a generous budget or by solver
-conflicts). Average across designs, pick the order, and keep only the families that rescue something nothing else
-does.</p>
-<p><strong>Order of work.</strong> (1) carry the refinement's pins and mesh into the terminal stage: landed
-(<code>region_seed_dir</code> set by the terminal stage, <code>region_mesh.json</code> and <code>pins.tsv</code> read
-back, pins matched to nets by driver; sha3 at 0.60 now solves with 7,287 virtual pins and no hop over the share);
-(2) the candidate harness with noise and anchors and (3) the orthogonal drawing: landed as
-<code>legroute.alternatives=noise,anchor,tsm</code> (box level, parallel threads, the round's hops fixed, per-box
-windows for the anchors; report alt_tried / alt_rescued / alt_seconds); (4) the region-local GP seed and the edge
-return; (5) the measurements and the order; (6) speculative candidates.</p>
-<p><strong>Noise (user, 2026-11-01, latest): the inflation and the cell moves are complementary, and a slight
-shuffle of a failing region's cells before more GOALPlace iterations can turn it routable</strong>, because the SAT's
-movement is limited (a solver free to move cells anywhere in the region would not need it): pick the sparser area
-inside the region and anchor two or three cells from the denser area there, so the resume spreads the cells into
-slightly different locations. Landed as <code>legroute.probe.shuffle</code>: per unroutable region, that many
-non-critical cells of its densest 4&times;4 patch move to the centre of its sparsest patch, their movement boxes
-shrink to the cell for the GP resume (anchors) and open again after, and they skip the inflation;
-<code>probe.max_inflate=1</code> makes a shuffle-only round. Measured baseline at utilization 0.60 (180 s per region):
-8 of 10, the two failures timeouts at fill 0.79 and 0.83, no UNSAT, so at this budget the comparisons separate proven
-UNSAT from running out of time, and the latter moves with machine load.</p>
-<p><strong>Region selection, the user's direction (2026-11-01):</strong> the rectangle mesh is a convenience; a region could
-be any contiguous set of 2&times;2 tiles, chosen by a systematic policy: a min-cut partitioner (VieCut) over the cell
-graph, density maps, bus cuts, or the capacity ratio above, so that a region's own traffic never crosses a side it
-cannot carry and the boundaries sit where few nets cross. legroute's model already takes regions as tile sets (nothing
-below the mesh reads rectangle bounds); busorder's virtual pins and the dump assume rectangles today.</p>
-
-<p><strong>Next (user, 2026-11-01): spread cell-boxes into the empty tiles as a local path recovery.</strong> A
-placement at utilization 0.50 (sha3 usyn domino, bisection landing) shows it: the boxes are 0.81 full but half the
-tiles are empty, so the cells sit in dense 2&times;2 clumps with white space around them. After legroute.local has its
-SAT answer and before the final route, a local pass should split the boxes that hold critical cells into the empty
-tiles around them (rounding out the empty area, re-deriving those nets' routes within the tracks the capacity
-guarantees), as a WNS recovery on the critical paths. Even where WNS and routing come out the same, spreading is
-worth keeping: it leaves room for ECOs and lowers the local power density. Evaluate on sha3 and minimax, both
-flavours, after the domino runs finish: WNS / TNS, routed wire, and a measure of spread (cells per occupied tile,
-largest empty run).</p>
-
-<ol>
-<li><strong>Boundary crossings:</strong> done (every crossing modeled, hops spread off loaded rows and
-columns). Next is letting the SAT choose among a few boundary tiles per net when a region still times out.</li>
-<li><strong>In-box check.</strong> The SAT no longer bounds in-box wires: validate with legroute.final (or the
-OpenROAD witness) that the boxing pin limit is enough; tighten boxing if not.</li>
-<li><strong>In-box demand.</strong> The 20&ndash;25% H share is an estimate (internal-net spans plus a quarter
-of the external pins); calibrate it against legroute.final's in-box routes.</li>
-<li><strong>Timing tiers:</strong> built (three on by default, see below); next are the coupling tier and the
-first/last cell of a critical path at its IO pins, each judged by the routed timing.</li>
-<li><strong>Then</strong> legroute.final speed and partition_m.</li>
-</ol>
-
-<h2 id="legal-boxes">Legal boxes: routing the ordinary legalization (2026-11-02)</h2>
-<p><strong>The user's proposal:</strong> run the legalization the flow already has (DREAMPlace's legalizer, then the
-terminal legalizer: row packing with the capacity bins, critical-pair alignment, timing corrections), build the
-cell-boxes out of that legal placement and let legroute route them. <strong>Landed as
-<code>synth.place.legroute.legal_boxes=true</code>:</strong> the terminal stage runs <code>terminal_legalize</code> first
-(the multi-row anchors as in the plain flow), then legroute builds one box per tile out of the cells whose centres fall
-on it (<code>Box::placed</code>: the box's own tile fits by construction, the clustering, the fill cap and the pin
-limit do not apply), every box is fixed on that tile, so the per-region SAT has no placement literals and decides the
-route shapes only, and <code>pack_cells</code>, the critical-box pinning, the forced-demand repair and the alternatives
-leave a placed box alone; the cells leave the stage exactly where the legalizer put them (the displacement metric
-counts the placed boxes as 0). <code>legal_window=n</code> keeps the boxes but lets each move up to n tiles from its
-legal tile, its cells repacked on the tile it takes (a local SAT repair of the legalization). The probe keeps the SAT
-placement model (no legal placement exists at its point). Options hash <code>legroute-v12</code>; unit test
-<code>LegalBoxesRouteTheGivenPlacementUnmoved</code> (both windows).</p>
-<p><strong>Measured, sha3 at utilization 0.60 (density 0.65, power grid, bus order with the ratio cut, 180 s per
-region, 18 threads; OpenROAD routes the same placement with 0 DRCs in every row):</strong></p>
-<table>
-<tr><th>mesh (max cells)</th><th>regions</th><th>routable</th><th>failures</th><th>SAT wall</th><th>notes</th></tr>
-<tr><td>1000</td><td>22</td><td>17</td><td>4 UNSAT (2 cut-bound), 1 timeout</td><td>236 s</td><td>the timeout a 1.3M-clause region with 310 pass-through nets</td></tr>
-<tr><td>2500</td><td>10</td><td>7</td><td>3 UNSAT</td><td>20 s</td><td>region 1 cut-bound (4 tiles wide: 233 nets across a row boundary of 227 tracks); region 6: the UNSAT core relaxed (<code>sat_relax_rounds=3</code>) = 6 boundary tiles under hops, 224 H tracks short (worst tile 98), 807 routes on them, SAT once relaxed; region 3 (263 pass-through nets, 1936 hops on 330 tiles) stays UNSAT after three rounds of relaxing its cores</td></tr>
-<tr><td>2500, hops free along 6 tiles</td><td>10</td><td>8</td><td>2 UNSAT (3, 6)</td><td>47 s</td><td><code>hop_choice=6</code>: region 1 routes once its crossings spread along the boundary</td></tr>
-<tr><td>2500, global router for the crossings</td><td>10</td><td>9</td><td>1 UNSAT (9)</td><td>218 s</td><td><code>global_route=true</code>: 3372 crossing nets routed over the grid ahead (330 without a path, 1306 edges at the share); regions 1, 3 and 6 route, region 9 (routable before) loses to the fixed pieces through it</td></tr>
-<tr><td><strong>2500, negotiated global router</strong> (<code>global_route=true</code>, <code>global_rounds=16</code>)</td><td>10</td><td><strong>10</strong></td><td>none</td><td>73 s</td><td>the router with rip-up and reroute under present-plus-history congestion cost: 3702 crossing nets, 0 without a path (330 before), 6.9 s; the regions then route with the crossings where the global route put them</td></tr>
-<tr><td><strong>1000, negotiated global router</strong></td><td>22</td><td><strong>21</strong></td><td>1 cut-bound</td><td>12 s</td><td>4688 crossing nets, 0 without a path, 7.4 s; the one failure is an 81-tile region whose own placement forces 110 nets across a row of 106 tracks (a mesh artefact: not a crossing, not the router)</td></tr>
-<tr><td>1000, negotiated router + <code>legal_shuffle=2</code></td><td>22</td><td>21</td><td>1 cut-bound</td><td>22 s</td><td>907 legal boxes freed at the 492 edges still over the share: harmless, and no help for a line inside a region (the cut bound is the mesh's)</td></tr>
-<tr><td>free SAT placement, 2500, no router</td><td>10</td><td>8</td><td>2 UNSAT (3, 6)</td><td>85 s</td><td>the same two regions the legal flow lost without the router</td></tr>
-<tr><td><strong>free SAT placement, 2500, negotiated router</strong></td><td>10</td><td><strong>10</strong></td><td>none</td><td>145 s</td><td>the router helps the SAT placement the same way (0 nets without a path); <code>global_route</code> stays opt-in until a large design (partition_c) measures its cost</td></tr>
-<tr><td><strong>1000, negotiated router + <code>mesh_join</code></strong> (spill_rounds 2, no box spill)</td><td>22</td><td><strong>22</strong></td><td>none</td><td>19 s</td><td>the cut-bound region joins its neighbour across their column boundary and the union splits at a row line (the bad row gets the union's width of tracks); the next round routes both: every mesh of sha3 at 0.60 now routes with the ordinary legalization</td></tr>
-<tr><td>2500, global router + hops free along 6 tiles</td><td>10</td><td>8</td><td>1 UNSAT (9), 1 timeout (6)</td><td>341 s</td><td>the two levers do not add up: region 9 stays with the global router's pieces, region 6 runs out of time with the hop literals on top</td></tr>
-<tr><td>2500, boxes free to move one tile (<code>legal_window=1</code>)</td><td>10</td><td>7</td><td>2 UNSAT (3, 6), 1 timeout (1)</td><td>368 s</td><td>the placement literals over 3&times;3 windows slow every region (region 1 runs out of time where fixed it took 0.3 s) and the UNSAT regions stay UNSAT: a local repair must free only the boxes of the UNSAT core, not the region; the moved boxes' cells repack legally (the straddling parts of the legal cells block their neighbour tile's sites)</td></tr>
-<tr><td>5000</td><td>5</td><td>5</td><td>none</td><td>57 s</td><td>every region in 2.5&ndash;23 s, 1.3&ndash;2.4M clauses, no crossing over the hop share</td></tr>
-<tr><td>5000, Steiner trunks (<code>steiner_pins=8</code>)</td><td>5</td><td>3 (5 at 600 s)</td><td>2 timeouts at 180 s</td><td>390 s (545 s at 600 s)</td><td>the single-trunk encoding for nets of 3&ndash;8 endpoints: twice the clauses (20M vs 10M), the two 660-tile regions need 182 and 351 s; with all five solved the wire proxy is 234k vs the star's 257k &micro;m (9% less, not the halving the partial run suggested: unsolved regions contribute no wire)</td></tr>
-<tr><td>5000, Steiner trunks for 3&ndash;4 endpoints (<code>steiner_pins=4</code>)</td><td>5</td><td>4</td><td>1 timeout</td><td>271 s</td><td>wire proxy 192k &micro;m, 13.8M clauses: between the star and the full trunk model; the 660-tile region with 138 pass-throughs runs out of 180 s</td></tr>
-<tr><td>one region (20000)</td><td>1</td><td>1</td><td>none</td><td>301 s</td><td>3003 boxes, 12217 nets, 11.0M clauses after 26 lazy rounds (eager estimate 21M), 239 of 344 adjacent-tier constraints kept: the whole chip as one routing model, single-threaded</td></tr>
-<tr><td>free SAT placement, 5000 (same mesh)</td><td>5</td><td>5</td><td>none</td><td>391 s</td><td>the SAT placing its clustered boxes (fill 0.78) routes too on this mesh: 3.2&ndash;6.2M clauses per region, 43&ndash;174 s each; the proxies match the legal run's (crit 207 ps, wire 253k &micro;m); the region size, not the placement, was behind the small-mesh failures</td></tr>
-<tr><td>free SAT placement, 1000 (same day, for scale)</td><td>19</td><td>13</td><td>6 UNSAT</td><td>1800+ s</td><td>the best flow (inflation, unpinned trees, noise/spread) reaches 23 of 25 in 833 s at a QoR cost</td></tr>
-</table>
-<p><strong>The user's direction (2026-11-02, after these rows): a global router, not detailed routing, that finds the
-paths and pins across regions, like FastRoute; its crossings become the region pins and its congestion moves the cells
-of unroutable areas (localized density, or the legalization's luck) before the cell-boxes and legroute.</strong>
-Built on the tile-grid router of legroute.global v2: negotiated congestion (<code>global_rounds</code>, default 16):
-after a pass every edge over its share adds its relative overuse to a history cost, the present-congestion factor
-doubles, the nets through those edges are ripped up and rerouted most critical first; with 0 rounds a full edge is
-closed and a net without a path keeps the hop chain (the old one-pass router). Where edges remain over the share
-after the rounds the router reports them (<code>global_overflow_edges/tracks</code>, log line), and
-<code>legal_shuffle=n</code> frees only the legal boxes on those edges' tiles to move n tiles (the other legal boxes
-stay fixed): the shuffle at the router's word, not at the region's. The rows above are the result: the 2500-cell
-mesh routes whole and the 1000-cell mesh all but a thin region, both in well under two minutes of SAT, against 7 of
-10 and 17 of 22 with hops chosen tile by tile. Copying FastRoute itself (20k lines on OpenROAD's database) stays the
-fallback if this router falls short of OpenROAD's zero overflow on a design; on sha3 it does not.</p>
-<p><strong>Mesh repair at the router's word (user, 2026-11-02): when some crossings of a boundary are bad, join the
-two regions across it and split their union the other way; the global router finds the conflicting boundaries, so
-this is an easy fix.</strong> Landed as <code>mesh_join</code> (a spill-round lever, first in the order): a failing
-region whose verdict is a cut bound joins the neighbour beside the bad line (across a boundary perpendicular to it)
-and the union splits parallel to the line at the row or column that balances the boxes, so the line gets the union's
-width of tracks; any other failing region joins the neighbour whose boundary its hops load most against its tracks
-and the union splits across that boundary (a row boundary bad: a column split), so the nets that crossed it stay in
-one half. Regions keep their ids, each pair joins once, the virtual pins on a boundary that became interior simply
-stop being hops, and the next round redoes the crossings and solves what changed. Result above: the 1000-cell mesh
-routes 22 of 22. The flow the user described is complete on sha3: ordinary legalization, global route, region pins
-from its crossings, mesh repair where it says a boundary is wrong, per-region SAT routes; every mesh routes at 0.60 in
-under 80 s of SAT with the placer's QoR untouched.</p>
-<p><strong>What the failures were before the router.</strong> Region 3 of the 2500 mesh routed alone as a chip (its hops as die pins,
-<code>route_region.py</code>) overflows OpenROAD's global router too (581 overflow at 64% use): with the boxes fixed,
-the per-region decomposition with hops fixed on the boundary is what fails, not the model's counting rules. OpenROAD
-routes the full chip because its nets cross a region side anywhere and detour through the neighbours. So with legal
-boxes the failure classes are boundary artefacts of the mesh: thin regions whose cut is bound by the placement, and
-hops concentrating on a few boundary tiles; freedom along the boundary (<code>hop_choice</code>) fixes the first,
-larger regions remove both. The routing-only model is small (2M clauses for a 660-tile region) and fast, so the region
-size for this flow is a parallelism choice, not a solver limit: 5000-cell regions route sha3 whole.</p>
-<p><strong>Proxies across meshes are not comparable.</strong> The SAT's route wire grows with the region size (167k
-&micro;m at 2500 cells, 257k at 5000) because a net inside a region is a star of L-shapes from its first endpoint,
-while a net cut by hops is a chain of short pieces (closer to a Steiner tree); the critical-delay proxy follows (101 vs
-205 ps). The trunk encoding recovers only 9% of it on the 5000 mesh at ten times the solve time, so the star stays;
-regions without an answer contribute no wire, which makes a partial run's proxy look better than a complete one. The routed timing of the placement (OpenROAD, signal-only) is the arbiter and is the ordinary flow's own:
-legal boxes change nothing in the placement. Open: <code>steiner_pins</code> for the big regions, the single-region
-case, the global router choosing the crossings, <code>legal_window=1</code> for the two UNSAT regions, and the free
-model on the same 5000-cell mesh (rows to be added).</p>
-<p><strong>Routed timing of the legal placement (OpenROAD, signal-only, 10 GHz SDC, utilization 0.60):</strong> DR WNS
-&minus;367.3 ps / TNS &minus;459.0k, GR overflow 0 at 49.5% use, 1 DRC (die edge), route wall 209 s. This is the
-ordinary flow's own number at 0.60 (legal boxes move nothing); the same session's SAT placements at this core were
-not routed (their proxies: crit 143&ndash;150 ps, wire 242&ndash;245k &micro;m under the best flow); the standard
-flow at 0.70 gave &minus;397.1/&minus;483.1k and the SAT placement at 0.70 &minus;356.2/&minus;442.9k (earlier
-sessions, same SDC). The best free flow of the alternatives work at 0.60 (inflation rounds, unpinned trees,
-noise/spread, 23 of 25 regions) routed by OpenROAD: DR WNS &minus;846.0 / TNS &minus;1274.7k (0 overflow, 0 DRC,
-GR wire 227k vs 180k &micro;m): the inflated SAT placement costs 2.3&times; the WNS of the ordinary legalization at
-the same core. The plain SAT placement on the same 5000-cell mesh (no probe, clustered boxes at fill 0.78) routed:
-DR WNS &minus;375.6 / TNS &minus;470.1k (0 overflow, 1 die-edge DRC, GR wire 188k &micro;m): the box snap itself
-costs 2.3% WNS and 2.4% TNS against the ordinary legalization (inside the user's 4% equivalence band), the inflation
-flow cost the rest. At equal core and mesh the legal flow is equal-or-better in QoR and seven times faster in SAT
-(57 s vs 391 s).</p>
-<p><strong>Why this matters for the plan:</strong> the flow the user asked for gives, today, a routable sha3 at 0.60
-with the placer's QoR untouched in about a minute of SAT, where the SAT placement needs 15&ndash;30 minutes and loses
-QoR; legroute.local's job in this flow is a routability proof plus the track-level routes of the legal placement,
-with the SAT's own box placement kept for the regions the legalizer leaves unroutable (<code>legal_window</code>,
-or the full model on those regions only).</p>
-
-<h2 id="regions-from-route">Plan: regions and pins from a global route of the legal placement (2026-11-02, to evaluate and decide; not implemented)</h2>
-<p><strong>The user's restructured flow.</strong> The experiments above say the SAT placement buys nothing on sha3
-that the ordinary legalization does not give, and that what makes a region unroutable is where its boundary was cut
-and where its crossings were pinned. So the step that is missing sits <em>before</em> legroute.local (and before or
-together with legroute.global): from a pre-legalized placement (Abacus and the terminal legalizer), run a global
-router, and let its routes decide the regions and the pins: regions of similar (or smaller) size whose cut lines do
-not go through problematic paths, so the area and the freedom go to legroute.local's solver; pins fixed where the
-routes cross, for parallel solving, except in the most congested regions, which solve first with their pins free to
-move a few tiles and then hand the chosen positions to their neighbours as fixed. The old overall sequence (global
-placement, cell-boxes, grid, coordinated regions, SAT placement and routing per region, capacity, timing, finish)
-becomes:</p>
-<ol>
-<li><strong>Legal placement:</strong> global placement, then the ordinary legalization (the placement to keep;
-<code>legal_boxes</code> routes it as it stands).</li>
-<li><strong>Global route</strong> of every signal net over the tile grid (the negotiated router of legroute.global;
-FastRoute imported only if it falls short, see E6): per net a tree of tile edges, per edge its use and overuse.</li>
-<li><strong>Regions from density and the route:</strong> cut lines chosen where few routed trees cross and where the
-line's tracks carry what does cross (the cut bound holds by construction), balanced in cells to max_cells, never
-through an edge the router left over its share nor through a critical net's tree; regions may be smaller than today
-where the routes allow it. The pins are the routed trees' crossings of the chosen lines (bus order then orders only
-along a side, it no longer invents positions).</li>
-<li><strong>Congestion classes and the schedule:</strong> regions ranked by the router's overuse inside them and on
-their boundary; the most congested, as a disjoint set (no two neighbours), solve first with their pins free
-(<code>hop_choice</code> X tiles along the boundary, <code>mesh_join</code> allowed); their answers fix the pins of
-the surrounding regions, which solve next in parallel (the two-wave checkerboard already does this for hop_choice).</li>
-<li><strong>legroute.local per region, cheapest lever first, local levers only:</strong> boxes fixed on the legal
-tiles (routing only); then the levers that do not touch a neighbour: free the boxes of the UNSAT core
-(<code>legal_window</code> on those boxes only, not the region), the alternative placements of those boxes,
-<code>mesh_join</code> with the neighbour the verdict names; the pins of a region never move once a neighbour used
-them.</li>
-<li><strong>Inflation as the last resort, localized:</strong> a region that fails even with free pins gets GOALPlace
-inflation and the chain runs again from step 1; global today (the whole placement re-legalized), to be localized to
-the failing region and its ring (the union re-placed with everything else fixed, re-legalized, re-routed, re-cut) if
-E5 shows it keeps the rescue rate.</li>
-<li><strong>Finish:</strong> layers and tracks, legroute.final (in-box placement, taps, local routes).</li>
-</ol>
-<p><strong>What exists, what is missing.</strong> Exists: the legal placement as boxes (<code>legal_boxes</code>,
-<code>legal_window</code>), the negotiated tile-grid router (<code>global_route</code>, <code>global_rounds</code>,
-its overuse map), hops free along a boundary in two waves (<code>hop_choice</code>), the mesh repair
-(<code>mesh_join</code>), the per-region alternatives, the spill rounds as the retry loop, the GOALPlace probe (global),
-the region mesh (ratio cut, bus-order pins). Missing: (M1) the cut chooser driven by the route map; (M2) pins from the
-routed crossings instead of the refinement's pins.tsv; (M3) the congestion ranking and the disjoint-first schedule
-with free pins only there; (M4) the UNSAT-core-only freeing of legal boxes (today <code>legal_window</code> frees a
-whole region and <code>legal_shuffle</code> the boxes at the router's overflowed edges); (M5) the localized
-inflation (a sub-placement with the rest fixed); (M6) the FastRoute import, gated.</p>
-<p><strong>Open questions the evaluation must settle (do not decide ahead):</strong> whether cutting on the route map
-beats the ratio cut at all once the router and mesh_join exist (on sha3 every mesh already routes: the question is
-time and the larger designs); whether the routed crossings make better pins than bus order for timing (bus order
-aligns buses, the router balances tracks; the routed timing decides); whether free pins in the congested regions are
-worth the two-wave dependency or whether mesh_join alone covers it; whether a localized re-placement can be made
-legal and routable at its seam without the global pass; and whether our router's overflow matches OpenROAD's on the
-macro designs.</p>
-<p><strong>Experiments (sha3, minimax and partition_m at 0.60 and 0.70, then partition_c and cnn; every row routed by
-OpenROAD for DRC and signal-only timing; the metrics: regions routable at the first pass, SAT wall, mesh joins and
-pin moves needed, routed WNS/TNS, wire, time per stage):</strong></p>
-<ol>
-<li><strong>E1, the cut:</strong> three region makers on the same legal placement and route: (a) today's ratio cut
-with bus-order pins; (b) recursive bisection on the tile grid where each candidate line costs its routed-tree
-crossings over the line's tracks (the cut ratio) plus the cell imbalance, lines through overused edges or critical
-trees forbidden, recursion to max_cells; (c) a min cut (VieCut) over the routed trees' edge graph. Decide by regions
-routable first pass and SAT wall at 1000 and 2500 cells; a maker that needs mesh_join less is better.</li>
-<li><strong>E2, the pins:</strong> for the winner of E1, pins at the routed crossings vs the refinement's bus-order
-pins (with and without ordering along the side): first-pass routability, then routed timing; keep bus order only if
-its timing wins.</li>
-<li><strong>E3, free pins where congested:</strong> hop_choice 0 / 2 / 6 for the top-k congested disjoint regions only
-(k = 10%, 25%) against hop_choice for all and for none; measure the rescue rate and the wall time the two waves
-cost.</li>
-<li><strong>E4, the local lever order:</strong> on regions that fail the first pass (force failures at density 0.70
-and 0.75, and on partition_c), the rescue rate and time of: freeing the UNSAT core's boxes (M4), the noise/spread
-alternatives of those boxes, mesh_join; order the levers by rescues per second, per region trait (cut-bound, hop
-overload, dense core), as the trait table above was built.</li>
-<li><strong>E5, localized inflation:</strong> the failing region plus its ring re-placed with everything else fixed
-(the GP's movement boxes restricted to the union, the terminal legalizer on the union only) versus the global probe:
-regions fixed, routed timing, wall time; keep the localized form if it rescues as much at a third of the time; the
-seam (cells at the union's edge) must legalize without pushing the fixed outside.</li>
-<li><strong>E6, the router gate:</strong> our negotiated router's overflow against OpenROAD's global route on the same
-legal placement (route_region.py and post_route.py exist) on all five designs; import FastRoute only where ours
-leaves overflow that OpenROAD does not; otherwise keep the tile-grid router (6&ndash;8 s on sha3).</li>
-<li><strong>E7, scale:</strong> partition_c and cnn through the chain (the first partition_c run is in flight): time
-per stage, memory with 8 threads, failing regions; the negotiation rounds' cost at 632 regions decides whether
-<code>global_route</code> becomes the default.</li>
-</ol>
-<p><strong>Order of work (each step measurable on its own; nothing is built before its experiment is due):</strong>
-S1 pins from the routed crossings (M2) and E2, since the crossings already exist as hops; S2 the route-driven cut
-(M1, variant b first, c if b loses) and E1; S3 the congestion ranking and the disjoint-first schedule (M3) and E3;
-S4 the UNSAT-core-only freeing (M4) and E4, which also orders the existing levers; S5 the localized inflation (M5)
-and E5; S6 the router gate (E6) on the macro designs; S7 the scale runs (E7) and the defaults. Decision at the end:
-one flow per region trait, the defaults flipped only where every design agrees within the 4% band (WNS first, then
-TNS, then wire, then the simplest).</p>
-
-<h2>Timing tiers (built 2026-10-31)</h2>
-<p>After a region's routable answer, each tier's constraints are tried in batches of 8, most critical first (a
-net is critical for the tiers when its slack rank is under <code>tier_fraction</code>, 5%), with every box held
-on its tile by assumptions, so the answer moves only where a constraint needs it. An UNSAT core loosens the
-held boxes in it (first to within one tile, then free inside their windows); a core with no box drops the
-constraints in it; a batch out of rounds (<code>tier_rounds</code>, 8) is dropped. Kept constraints become
-units for the batches and tiers after, the lazy capacity bounds keep every answer routable, and all tiers
-share <code>tier_ms</code> (30 s) per region, so a dense region keeps its base answer. The tiers
-(<code>place.legroute.tiers</code>, in order; the first three are the default):</p>
-<ol>
-<li><code>adjacent</code>: a critical 1-1 net's two boxes are neighbors (in-box metal, no lane).</li>
-<li><code>pins</code>: a critical net's box on or beside the net's fixed tile (virtual pin, hop, fixed cell).</li>
-<li><code>home</code>: a critical box within one tile of its placement tile.</li>
-<li><code>near</code> (off): a critical connection's two boxes within one tile of each other.</li>
-</ol>
-<p>Measured on sha3 (OpenROAD detailed route of the placement, zero DRCs in every case; the satlegalize
-baseline on the same core is &minus;394.5 ps / &minus;466k): no tiers WNS &minus;395.0 ps / TNS &minus;473.8k;
-adjacent + pins + home with the boxes freed outright on a core and no budget (446 of 675 kept, the densest
-region spending its whole 180 s) &minus;388.0 / &minus;472.0k; the same three tiers with the two-stage
-loosening and the 30 s budget (518 of 675 kept, 67 s wall) &minus;383.6 / &minus;469.7k, the default; with
-<code>near</code> added (1,193 more candidates, 197 kept, the batches starving the tiers after it)
-&minus;415.1 / &minus;478.8k. The proxy (the tier nets' length, &minus;1.1% with near, flat without) did not
-predict any of this: the boxes a batch loosens drift inside their windows, and what they lengthen is not in
-the proxy. So a tier earns its place by the routed timing, not the proxy.</p>
-<p>Still to try as tiers: long critical traces with a free track on each side (coupling), and the first and
-last cell of a critical path aligned with its IO pins. The regions solve in parallel now (one task per region
-and policy), so legroute.local's wall time is the slowest region's (sha3 69 s, minimax 6 s).</p>
-
-<h2>Removed</h2>
-<p>The min-cost snap (LEMON), the RUDY bin spill and PathFinder pattern routing: density targets and
-negotiation guess routability; the SAT model guarantees it. From the SAT experiments (2026-10-31): the
-per-tile capacity model and the in-box charge on the counters, density push, rigid templates, VieCut
-sub-regions, <code>tree_room</code>, and the model-hash answer reuse across push rounds. What stays: the
-per-edge lazy bounds, the seeded search, edge reservations of the fixed routes, the hop join preference and
-spread, the fixed trees and IO pre-routes, two policies, the relax and freeze diagnostics, and the
-routability probe.</p>
-
-<h2>Evaluation</h2>
-<ul>
-<li>Per region: model size (variables, clauses), SAT time, UNSAT regions; per tier: kept or not, proxy WNS
-and top-path delay.</li>
-<li>Designs: lfsr for iteration, sha3 for time (legroute.local about 5 minutes), then partition_m.</li>
-<li>OpenROAD routing of the legal placement stays the external reference until legroute.final closes every
-net.</li>
-</ul>
+<p>The SHA3 study used native-sized analysis tiles over unchanged OpenROAD final geometry, preserving clock NDR
+and PG. It did not demonstrate native plan/local/Final closure. Evidence and reproducible artifacts are indexed
+in <a href="../../feedback.md">feedback.md</a> under
+<code>sha3_final_cellbox_roles_20261104</code>. The next action is offline review of this page.</p>
 </main>
 </body>
 </html>

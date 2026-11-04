@@ -267,10 +267,13 @@ Signal_metal_rules::Signal_metal_rules(const Technology& tech, const Floorplan& 
             const auto end_to_end = t.value();
             extension.eol.push_back({eol_width, spacing, within, end_to_end});
             keepout = std::max({spacing, eol_width, within, end_to_end});
+            extension.lateral = std::max({extension.lateral, spacing, within});
             if (t.take("PARALLELEDGE")) {
-              keepout = std::max(keepout, t.value());
+              const auto par_space = t.value();
               t.need("WITHIN");
-              keepout = std::max(keepout, t.value());
+              const auto par_within = t.value();
+              keepout = std::max({keepout, par_space, par_within});
+              extension.lateral = std::max({extension.lateral, par_space, par_within});
             }
             t.finish();
           } else if (key == "LEF58_EOLKEEPOUT") {
@@ -282,6 +285,7 @@ Signal_metal_rules::Signal_metal_rules(const Technology& tech, const Floorplan& 
             const bool corner_only = t.take("CORNERONLY");
             extension.keepouts.push_back({eol_width, backward, side, forward, corner_only});
             keepout = eol_width + backward + side + forward;
+            extension.lateral = std::max(extension.lateral, side);
             t.finish();
           } else if (key == "LEF58_CORNERSPACING") {
             t.need("CORNERSPACING");
@@ -295,6 +299,7 @@ Signal_metal_rules::Signal_metal_rules(const Technology& tech, const Floorplan& 
             const auto spacing = t.value();
             extension.corner_spacing.push_back(spacing);
             keepout = std::max(keepout, spacing);
+            extension.lateral = std::max(extension.lateral, keepout);
             t.finish();
           } else if (key == "LEF58_WIDTHTABLE") {
             t.need("WIDTHTABLE");
@@ -417,7 +422,9 @@ Rule_check Signal_metal_rules::rectangle(const Shape& shape) const {
   }
   return {true, {}};
 }
-Rule_check Signal_metal_rules::spacing(const Shape& a, const Shape& b) const {
+Rule_check Signal_metal_rules::spacing(const Shape& a, const Shape& b) const { return spacing_with_existing_source(a, b, {}); }
+Rule_check Signal_metal_rules::spacing_with_existing_source(const Shape& a, const Shape& b,
+                                                            const std::function<bool(const Rect&)>& existing_target) const {
   for (const auto* shape : {&a, &b}) {
     const auto it = extensions_.find(shape->layer);
     if (it == extensions_.end()) {
@@ -432,7 +439,7 @@ Rule_check Signal_metal_rules::spacing(const Shape& a, const Shape& b) const {
     return ordinary;
   }
   const auto& extension = extensions_.at(a.layer);
-  const auto  directed  = [&](const Rect& source, const Rect& target) -> Rule_check {
+  const auto  directed  = [&](const Rect& source, const Rect& target, bool existing_source) -> Rule_check {
     const auto source_edges = edges(source), target_edges = edges(target);
     for (const auto& rule : extension.eol) {
       for (const auto& edge : source_edges) {
@@ -453,6 +460,10 @@ Rule_check Signal_metal_rules::spacing(const Shape& a, const Shape& b) const {
             continue;
           }
           if (distance < rule_dbu(both_eol ? rule.end_to_end : rule.spacing, dbu_)) {
+            const auto region = edge_region(edge, 0, rule_dbu(both_eol ? rule.end_to_end : rule.spacing, dbu_), within);
+            if (existing_source && existing_target && existing_target(region.intersection(target))) {
+              continue;
+            }
             return reject("LEF58 facing EOL spacing");
           }
         }
@@ -466,6 +477,9 @@ Rule_check Signal_metal_rules::spacing(const Shape& a, const Shape& b) const {
         const auto region
             = edge_region(edge, rule_dbu(rule.backward, dbu_), rule_dbu(rule.forward, dbu_), rule_dbu(rule.side, dbu_));
         if (rule.corner_only ? corner_inside(region, target) : region.overlaps(target)) {
+          if (existing_source && existing_target && existing_target(region.intersection(target))) {
+            continue;
+          }
           return reject("LEF58 EOL keepout");
         }
       }
@@ -474,11 +488,11 @@ Rule_check Signal_metal_rules::spacing(const Shape& a, const Shape& b) const {
   };
   // Evaluate lazily: an initializer list runs both directional checks even
   // when the first already rejects this candidate.
-  auto check = directed(a.rect, b.rect);
+  auto check = directed(a.rect, b.rect, true);
   if (!check.legal) {
     return check;
   }
-  check = directed(b.rect, a.rect);
+  check = directed(b.rect, a.rect, false);
   if (!check.legal) {
     return check;
   }
@@ -560,5 +574,31 @@ std::optional<int64_t> Signal_metal_rules::clearance(const std::string& name) co
     return {};
   }
   return int64_t(bound);
+}
+std::optional<int64_t> Signal_metal_rules::lateral_reach(const std::string& name) const {
+  if (!clearance(name)) {
+    return {};
+  }
+  const auto& rules = rules_.layers.at(name).rules;
+  double      bound = extensions_.at(name).lateral;
+  for (const auto& spacing : rules.spacing) {
+    bound = std::max(bound, spacing.distance);
+    if (spacing.eol) {
+      bound = std::max(bound, spacing.eol->within);
+      if (spacing.eol->parallel_edge) {
+        for (auto v : *spacing.eol->parallel_edge) {
+          bound = std::max(bound, v);
+        }
+      }
+    }
+  }
+  for (const auto& table : rules.parallel) {
+    for (const auto& row : table.spacing) {
+      for (auto v : row) {
+        bound = std::max(bound, v);
+      }
+    }
+  }
+  return int64_t(rule_dbu(bound, dbu_));
 }
 }  // namespace livehd::physical

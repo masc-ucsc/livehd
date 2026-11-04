@@ -114,7 +114,40 @@ Route_connectivity check_route_connectivity(const Technology& tech, const Floorp
       throw std::invalid_argument("component index does not match routing floorplan");
     }
     const auto& cells = *components;
+    const auto  append_pin = [&](const std::vector<Shape>& shapes, const auto& transform) {
+      if (shapes.empty()) {
+        throw std::runtime_error("empty endpoint pin");
+      }
+      const auto pin_node = graph.add();
+      for (const auto& s : shapes) {
+        if (!tech.layers.contains(s.layer) || s.rect.empty()) {
+          throw std::runtime_error("unsupported endpoint pin shape");
+        }
+        const auto r = snapped_dbu(transform(s.rect), 1e-6);
+        if (!r) {
+          throw std::runtime_error("fractional endpoint geometry");
+        }
+        graph.merge(pin_node, append({s.layer, *r}));
+      }
+    };
     for (const auto& endpoint : net.connections) {
+      if (endpoint.instance == "PIN") {
+        const Terminal* terminal = nullptr;
+        for (const auto& candidate : fp.terminals) {
+          if (candidate.name == endpoint.pin) {
+            if (terminal) {
+              throw std::runtime_error("duplicate terminal name");
+            }
+            terminal = &candidate;
+          }
+        }
+        if (!terminal || terminal->status == Status::UNPLACED) {
+          throw std::runtime_error("missing or unplaced terminal endpoint");
+        }
+        append_pin(terminal->shapes,
+                   [&](const Rect& r) { return orient_rect(r, 0, 0, terminal->orientation).translated(terminal->x, terminal->y); });
+        continue;
+      }
       const auto found = cells.find(endpoint.instance);
       if (found == cells.end()) {
         throw std::runtime_error("unsupported non-cell endpoint");
@@ -125,20 +158,7 @@ Route_connectivity check_route_connectivity(const Technology& tech, const Floorp
         throw std::runtime_error("unphysical endpoint");
       }
       const auto& pin = master.pins.at(endpoint.pin);
-      if (pin.shapes.empty()) {
-        throw std::runtime_error("empty endpoint pin");
-      }
-      const auto pin_node = graph.add();
-      for (const auto& s : pin.shapes) {
-        if (!tech.layers.contains(s.layer) || s.rect.empty()) {
-          throw std::runtime_error("unsupported endpoint pin shape");
-        }
-        const auto r = snapped_dbu(placed_rect(master, cell.place, fp.dbu, s.rect), 1e-6);
-        if (!r) {
-          throw std::runtime_error("fractional endpoint geometry");
-        }
-        graph.merge(pin_node, append({s.layer, *r}));
-      }
+      append_pin(pin.shapes, [&](const Rect& r) { return placed_rect(master, cell.place, fp.dbu, r); });
     }
     std::set<size_t> roots;
     for (size_t i = 0; i < graph.size(); ++i) {

@@ -1,21 +1,26 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 // legroute.local placement: per region, a SAT model places every cell-box on a free tile so that the box-to-box
-// routes fit the tracks by construction. Each connection is straight or one of its two L-shapes (one bit); a leg
+// routes fit the tracks by construction. Movable route-driven placement chooses an arbitrary connected subgraph
+// inside each admitted coarse corridor, sharing actual net-edge literals across its regional parts. Conditional
+// connectivity cuts and edge-capacity constraints are checked before any candidate is published. Legacy modes
+// use straight connections or one of their two L-shapes (one bit); a leg
 // covers every tile from end to end in its row or column; a tile counts a net once per direction however many of
 // its legs cover it; and per tile edge and direction the nets crossing the edge stay within the tracks of the
 // narrower tile less the edges the routes fixed ahead (hops, trees, IO pre-routes) cross. The in-box wires keep to
 // their own tile (the boxing pin limit and legroute.final bound them). The bounds are lazy (added when an answer
-// overflows them) and the fallback placement is tried first as assumptions. Any answer is routable. Each box
+// overflows them) and the fallback placement is tried first as assumptions. This certifies coarse capacity only. Each box
 // stays in a window around its placement position (window_tiles), which keeps the model linear in the region size.
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdio>
 #include <exception>
+#include <filesystem>
 #include <format>
 #include <fstream>
 #include <functional>
 #include <map>
+#include <mutex>
 #include <numeric>
 #include <optional>
 #include <random>
@@ -31,6 +36,34 @@
 #include "sat_solver.hpp"
 
 namespace livehd::placement::lr {
+std::vector<unsigned> region_solve_waves(const Grid& g, const std::vector<size_t>& priority) {
+  if (priority.size() != size_t(g.regions)) {
+    throw std::invalid_argument("region priority must contain every region");
+  }
+  std::vector<std::set<int>> adjacent(size_t(g.regions));
+  for (int t = 0; t < int(g.size()); ++t) {
+    for (int q : {g.col(t) + 1 < g.cols ? t + 1 : -1, t + g.cols < int(g.size()) ? t + g.cols : -1}) {
+      if (q >= 0 && g.region[t] != g.region[q]) {
+        adjacent[size_t(g.region[t])].insert(g.region[q]);
+        adjacent[size_t(g.region[q])].insert(g.region[t]);
+      }
+    }
+  }
+  std::vector<unsigned> wave(size_t(g.regions));
+  std::vector<char>     scheduled(size_t(g.regions));
+  for (size_t r : priority) {
+    if (r >= wave.size() || scheduled[r]) {
+      throw std::invalid_argument("region priority must be a permutation");
+    }
+    for (int neighbor : adjacent[r]) {
+      if (scheduled[size_t(neighbor)]) {
+        wave[r] = std::max(wave[r], wave[size_t(neighbor)] + 1);
+      }
+    }
+    scheduled[r] = 1;
+  }
+  return wave;
+}
 namespace {
 // Packing first: every region must hold its boxes on tiles they fit (taps and fixed cells narrow tiles, so a count
 // is not enough; an infeasible packing would leave the SAT a pigeonhole proof). Per region a bipartite matching of
@@ -113,11 +146,11 @@ size_t balance_regions(const Design& d, const Grid& g, Boxes& boxes) {
     if (!placed && boxes.boxes[b].cells.size() > 1) {  // a box no region holds whole splits into its cells
       auto& box = boxes.boxes[b];
       for (size_t k = 1; k < box.cells.size(); ++k) {
-        Box single       = box;
-        single.cells     = {box.cells[k]};
-        single.sites     = cell_sites(d, g, box.cells[k]);
-        single.internal  = 0;
-        single.external  = int(d.nets_of[size_t(box.cells[k])].size());
+        Box single                         = box;
+        single.cells                       = {box.cells[k]};
+        single.sites                       = cell_sites(d, g, box.cells[k]);
+        single.internal                    = 0;
+        single.external                    = int(d.nets_of[size_t(box.cells[k])].size());
         boxes.box_of[size_t(box.cells[k])] = int(boxes.boxes.size());
         left.push_back(int(boxes.boxes.size()));
         boxes.boxes.push_back(std::move(single));
@@ -134,11 +167,17 @@ size_t balance_regions(const Design& d, const Grid& g, Boxes& boxes) {
       size_t free_tiles = 0, fitting = 0;
       for (int t = 0; t < int(g.size()); ++t) {
         free_tiles += !g.blocked[t];
-        fitting += !g.blocked[t] && box_fits(d, g, boxes.boxes[b], t);
+        fitting    += !g.blocked[t] && box_fits(d, g, boxes.boxes[b], t);
       }
-      throw Legroute_unfit(std::format("legroute: no free tile fits box {} ({} cells, {} sites, region {} of {}; {} free tiles, {} fit it)",
-                                       b, boxes.boxes[b].cells.size(), boxes.boxes[b].sites, boxes.boxes[b].region, g.regions, free_tiles,
-                                       fitting));
+      throw Legroute_unfit(
+          std::format("legroute: no free tile fits box {} ({} cells, {} sites, region {} of {}; {} free tiles, {} fit it)",
+                      b,
+                      boxes.boxes[b].cells.size(),
+                      boxes.boxes[b].sites,
+                      boxes.boxes[b].region,
+                      g.regions,
+                      free_tiles,
+                      fitting));
     }
   }
   if (split > 0) {
@@ -147,20 +186,42 @@ size_t balance_regions(const Design& d, const Grid& g, Boxes& boxes) {
   return moved;
 }
 
+struct Region_budget_expired {};
+struct Region_budget {
+  Clock::time_point         start, deadline;
+  size_t                    checkpoints = 0;
+  bool                      decoded     = false;  // a complete capacity-checked answer, safe to keep if a timing tier expires
+  std::vector<int>          fallback;
+  double                    build_seconds = -1, initial_seconds = 0;
+  std::optional<Sat_status> initial_status, seed_status;
+  unsigned                  remaining_ms(Clock::time_point now = Clock::now()) const {
+    const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count();
+    return left > 0 ? unsigned(std::min<long long>(left, std::numeric_limits<unsigned>::max())) : 0;
+  }
+  void check(bool force = false) {
+    if ((force || (++checkpoints & 255u) == 0) && Clock::now() >= deadline) {
+      throw Region_budget_expired{};
+    }
+  }
+};
+
 // CNF with a constant-true literal: clauses fold constants away.
 struct Cnf {
-  Sat_solver solver;
-  int        t;  // the true literal
-  size_t     clauses = 0, variables = 1;
-  Cnf() : solver(Sat_backend::cadical) {
+  Region_budget& budget;
+  Sat_solver     solver;
+  int            t;  // the true literal
+  size_t         clauses = 0, variables = 1;
+  explicit Cnf(Region_budget& b) : budget(b), solver(Sat_backend::cadical) {
     t = solver.new_variable();
     solver.clause({t});
   }
   int var() {
+    budget.check();
     ++variables;
     return solver.new_variable();
   }
   void add(std::initializer_list<int> lits) {
+    budget.check();
     int    buf[8];
     size_t n = 0;
     for (int l : lits) {
@@ -175,6 +236,7 @@ struct Cnf {
     ++clauses;
   }
   void add(const std::vector<int>& lits) {
+    budget.check();
     std::vector<int> c;
     for (int l : lits) {
       if (l == t) {
@@ -291,16 +353,358 @@ size_t at_most_clauses(int n, int k) {
 
 struct Endpoint {
   int box = -1, tile = -1;  // a box of the region (placed by the solver) or a fixed tile
-  int hop = -1;             // hop_choice: a free hop, its tile chosen by this region's SAT among the hop's candidates
+  int hop           = -1;   // hop_choice: a free hop, its tile chosen by this region's SAT among the hop's candidates
                             // (tile stays the hop chooser's tile for every reader outside the model)
+  int part          = -1;   // connected component of the global tree inside this region; -1 without a routed tree
+  int anchor        = -1;   // immutable attachment to an admitted coarse backbone
+  int interface_id  = -1;   // stable crossing identity, distinct from a coincident pin or another crossing
+  int anchor_choice = -1;   // model-local bounded choice among existing nodes of the same coarse component
 };
 struct Region_conn {
   int net = -1, a = -1, b = -1;  // endpoint ids of the region
+  int part = -1;                 // >=0: a charged attachment stub within this coarse component's corridor
 };
 struct Net_ends {
-  std::map<int, std::vector<Endpoint>> per_region;
-  int                                  driver_region = -1;
+  std::map<int, std::vector<Endpoint>>         per_region;
+  int                                          driver_region = -1;
+  // Exact connected coarse components containing real endpoints. Pass-through
+  // components remain the existing retained pieces. An isolated attachment is
+  // represented by a singleton set, never by an invented interior connection.
+  std::map<std::pair<int, int>, std::set<int>> coarse_parts;      // (region, part) -> backbone tiles
+  std::map<std::pair<int, int>, std::set<int>> coarse_junctions;  // existing piece ends; selecting one preserves graph attachment
+  std::map<std::pair<int, int>, std::set<std::pair<int, int>>>
+       coarse_edges;  // exact seed edges, never inferred from adjacent tiles
+  bool preserve_coarse = false;
+  bool refine_corridor = false;  // production movable route-driven flow; old backbone model remains a reference
 };
+
+// A limitation of the optional fixed-backbone proposal, not a failure of the
+// complete corridor model. Other malformed-witness/model errors still escape.
+struct Coarse_stub_unsupported : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+
+// A selectable graph for one connected component of the admitted regional
+// forest. Edge literals are shared by physical net/edge across components;
+// connectivity is always checked within this component's permitted graph.
+struct Corridor_model {
+  int                                           net = -1, part = -1;
+  std::set<int>                                 tiles;
+  std::vector<std::vector<std::pair<int, int>>> terminals;  // endpoint domain: (tile, selected literal)
+  std::vector<std::tuple<int, int, int>>        edges;      // adjacent (a, b, selected net-edge literal)
+  std::set<std::pair<int, int>>                 seed;
+  bool                                          identity = false;
+  // These definitions belong to this model's Cnf and stay valid across all
+  // endpoint choices. Never copy this cache into a model with another solver.
+  mutable std::set<std::vector<int>>            connectivity_cuts;
+};
+
+std::vector<std::pair<int, int>> corridor_selected_terminals(const Cnf& cnf, const Corridor_model& model) {
+  std::vector<std::pair<int, int>> result;
+  for (const auto& domain : model.terminals) {
+    std::optional<std::pair<int, int>> selected;
+    for (const auto& candidate : domain) {
+      if (cnf.solver.value(candidate.second)) {
+        if (selected) {
+          throw std::logic_error("legroute corridor endpoint has multiple selected tiles");
+        }
+        selected = candidate;
+      }
+    }
+    if (!selected || !model.tiles.contains(selected->first)) {
+      throw std::logic_error("legroute corridor endpoint has no selected permitted tile");
+    }
+    result.push_back(*selected);
+  }
+  return result;
+}
+
+size_t add_corridor_connectivity_cuts(Cnf& cnf, const std::vector<Corridor_model>& models, Region_budget& budget) {
+  struct Cut {
+    const Corridor_model* model;
+    std::vector<int>      subset, crossing, inside, outside;
+    bool                  always_inside = false, always_outside = false;
+  };
+  std::vector<Cut> pending;
+  for (const auto& model : models) {
+    budget.check();
+    const auto terminals = corridor_selected_terminals(cnf, model);
+    if (terminals.size() < 2) {
+      continue;
+    }
+    std::map<int, std::vector<int>> adjacency;
+    for (const auto& [a, b, lit] : model.edges) {
+      budget.check();
+      if (cnf.solver.value(lit)) {
+        adjacency[a].push_back(b);
+        adjacency[b].push_back(a);
+      }
+    }
+    std::set<int>              visited;
+    std::vector<std::set<int>> components;
+    for (const auto& [tile, literal] : terminals) {
+      (void)literal;
+      if (visited.contains(tile)) {
+        continue;
+      }
+      auto& reached = components.emplace_back();
+      reached.insert(tile);
+      visited.insert(tile);
+      std::vector<int> queue{tile};
+      for (size_t at = 0; at < queue.size(); ++at) {
+        for (int q : adjacency[queue[at]]) {
+          budget.check();
+          if (reached.insert(q).second) {
+            visited.insert(q);
+            queue.push_back(q);
+          }
+        }
+      }
+    }
+    if (components.size() < 2) {
+      continue;
+    }
+    std::set<std::vector<int>> batch;
+    for (const auto& reached : components) {
+      std::vector<int> subset(reached.begin(), reached.end()), complement;
+      for (int t : model.tiles) {
+        budget.check();
+        if (!reached.contains(t)) {
+          complement.push_back(t);
+        }
+      }
+      // S and its complement define the same cut. Canonicalize before
+      // allocating membership variables or duplicating any clauses.
+      if (complement.size() < subset.size() || (complement.size() == subset.size() && complement < subset)) {
+        subset.swap(complement);
+      }
+      if (!batch.insert(subset).second) {
+        continue;
+      }
+      if (model.connectivity_cuts.contains(subset)) {
+        throw std::logic_error("legroute corridor assignment violates an already imposed connectivity cut");
+      }
+      const auto inside = [&](int t) { return std::binary_search(subset.begin(), subset.end(), t); };
+      Cut        cut{&model, subset};
+      for (const auto& [a, b, lit] : model.edges) {
+        budget.check();
+        if (inside(a) != inside(b)) {
+          cut.crossing.push_back(lit);
+        }
+      }
+      for (const auto& domain : model.terminals) {
+        bool all_inside = !domain.empty(), all_outside = !domain.empty();
+        for (const auto& [tile, literal] : domain) {
+          budget.check();
+          const bool in = inside(tile);
+          (in ? cut.inside : cut.outside).push_back(literal);
+          all_inside  &= in;
+          all_outside &= !in;
+        }
+        // Exactly one position of each endpoint is selected. An endpoint
+        // whose whole domain is on one side makes that membership constant.
+        cut.always_inside  |= all_inside;
+        cut.always_outside |= all_outside;
+      }
+      pending.push_back(std::move(cut));
+    }
+  }
+  // Finish reading every SAT value before allocating variables or adding a
+  // clause invalidates the current assignment. Membership ranges over ALL
+  // endpoint positions, so a cut survives later movement of root and leaves.
+  const auto membership = [&](std::vector<int>& literals, bool always) {
+    std::ranges::sort(literals);
+    literals.erase(std::unique(literals.begin(), literals.end()), literals.end());
+    if (always || std::binary_search(literals.begin(), literals.end(), cnf.t)) {
+      return cnf.t;
+    }
+    if (literals.empty()) {
+      return -cnf.t;
+    }
+    if (literals.size() == 1) {
+      return literals.front();
+    }
+    const int result = cnf.var();
+    for (int literal : literals) {
+      cnf.add({-literal, result});
+    }
+    std::vector<int> reverse{-result};
+    reverse.insert(reverse.end(), literals.begin(), literals.end());
+    cnf.add(reverse);
+    return result;
+  };
+  for (auto& cut : pending) {
+    const int inside  = membership(cut.inside, cut.always_inside);
+    const int outside = membership(cut.outside, cut.always_outside);
+    cut.crossing.push_back(-inside);
+    cut.crossing.push_back(-outside);
+    std::ranges::sort(cut.crossing);
+    cut.crossing.erase(std::unique(cut.crossing.begin(), cut.crossing.end()), cut.crossing.end());
+    cnf.add(cut.crossing);
+    cut.model->connectivity_cuts.insert(std::move(cut.subset));
+  }
+  return pending.size();
+}
+
+std::set<std::pair<int, int>> decode_corridor_edges(const Cnf& cnf, const Corridor_model& model, Region_budget& budget) {
+  const auto terminals = corridor_selected_terminals(cnf, model);
+  if (terminals.empty()) {
+    throw std::logic_error("legroute corridor component has no attachments");
+  }
+  std::map<int, std::vector<int>> adjacency;
+  std::set<std::pair<int, int>>   selected;
+  for (const auto& [a, b, lit] : model.edges) {
+    budget.check();
+    if (cnf.solver.value(lit)) {
+      adjacency[a].push_back(b);
+      adjacency[b].push_back(a);
+      selected.emplace(a, b);
+    }
+  }
+  std::map<int, int> parent{
+      {terminals.front().first, -1}
+  };
+  std::vector<int> queue{terminals.front().first};
+  for (size_t at = 0; at < queue.size(); ++at) {
+    for (int q : adjacency[queue[at]]) {
+      budget.check();
+      if (parent.emplace(q, queue[at]).second) {
+        queue.push_back(q);
+      }
+    }
+  }
+  std::set<std::pair<int, int>> result;
+  for (const auto& [terminal, lit] : terminals) {
+    (void)lit;
+    if (!parent.contains(terminal)) {
+      throw std::runtime_error("legroute corridor connectivity model error: decoded attachments disconnected");
+    }
+    for (int t = terminal; parent.at(t) >= 0; t = parent.at(t)) {
+      budget.check();
+      const int q = parent.at(t);
+      result.emplace(std::min(t, q), std::max(t, q));
+    }
+  }
+  // In the explicit radius-zero identity diagnostic, preserve every original
+  // edge. Otherwise remove disconnected/cyclic/unused selected geometry only
+  // by taking a connected endpoint-spanning subset; the emitted union is then
+  // independently recounted against capacity before commit.
+  if (model.identity) {
+    if (selected != model.seed) {
+      throw std::runtime_error("legroute corridor identity model error: original edges changed");
+    }
+    return selected;
+  }
+  return result;
+}
+
+std::set<int> coarse_corridor(const Grid& g, int region, const std::set<int>& backbone, unsigned radius) {
+  std::set<int>    result = backbone;
+  std::vector<int> frontier(backbone.begin(), backbone.end());
+  for (int t : frontier) {
+    if (t < 0 || size_t(t) >= g.size() || g.region[size_t(t)] != region) {
+      throw std::runtime_error("legroute coarse witness repair required: backbone attachment leaves its region");
+    }
+  }
+  for (unsigned step = 0; step < radius && !frontier.empty(); ++step) {
+    std::vector<int> next;
+    for (int t : frontier) {
+      for (int q : {g.col(t) > 0 ? t - 1 : -1, g.col(t) + 1 < g.cols ? t + 1 : -1, t - g.cols, t + g.cols}) {
+        if (q >= 0 && size_t(q) < g.size() && g.region[size_t(q)] == region && result.insert(q).second) {
+          next.push_back(q);
+        }
+      }
+    }
+    frontier = std::move(next);
+  }
+  return result;
+}
+
+std::vector<int> coarse_anchor_candidates(const Grid& g, const std::set<int>& backbone, const std::set<int>& junctions,
+                                          int original, unsigned radius) {
+  if (!backbone.contains(original)) {
+    throw std::runtime_error("legroute coarse witness repair required: original attachment is outside its backbone");
+  }
+  std::vector<int> result{original};
+  for (int tile : junctions) {
+    if (!backbone.contains(tile)) {
+      throw std::runtime_error("legroute coarse witness repair required: attachment junction is outside its backbone");
+    }
+    if (tile != original && unsigned(std::abs(g.col(tile) - g.col(original)) + std::abs(g.row(tile) - g.row(original))) <= radius) {
+      result.push_back(tile);
+    }
+  }
+  std::ranges::sort(result, [&](int a, int b) {
+    const auto distance = [&](int t) { return std::abs(g.col(t) - g.col(original)) + std::abs(g.row(t) - g.row(original)); };
+    return std::pair{distance(a), a} < std::pair{distance(b), b};
+  });
+  // A bounded optional extension of the original witness, not a wider global
+  // route search. Existing nodes avoid implicit junctions inside emitted runs.
+  constexpr size_t limit = 8;
+  if (result.size() > limit) {
+    result.resize(limit);
+  }
+  return result;
+}
+
+bool coarse_stub_inside(const Grid& g, const std::set<int>& corridor, int a, int b, bool horizontal_first, Region_budget& budget) {
+  const int hr = g.row(horizontal_first ? a : b), vc = g.col(horizontal_first ? b : a);
+  for (int c = std::min(g.col(a), g.col(b)); c <= std::max(g.col(a), g.col(b)); ++c) {
+    budget.check();
+    if (!corridor.contains(g.tile(c, hr))) {
+      return false;
+    }
+  }
+  for (int r = std::min(g.row(a), g.row(b)); r <= std::max(g.row(a), g.row(b)); ++r) {
+    budget.check();
+    if (!corridor.contains(g.tile(vc, r))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+std::map<int, std::vector<Endpoint>> endpoint_groups(const std::vector<Endpoint>& endpoints) {
+  std::map<int, std::vector<Endpoint>> groups;
+  for (const auto& e : endpoints) {
+    groups[e.part].push_back(e);
+  }
+  return groups;
+}
+
+// Components of one net may merge or share a track inside the region. Count the
+// union of their forced cuts, once per net, rather than summing their demands.
+void add_forced_cuts(std::vector<std::pair<int, int>>& ranges, std::vector<int>& forced, int origin,
+                     const std::set<int>* reserved = nullptr) {
+  std::ranges::sort(ranges);
+  int        lo = -1, hi = -1;
+  const auto add = [&] {
+    if (hi > lo) {
+      ++forced[size_t(lo + 1 - origin)];
+      --forced[size_t(hi + 1 - origin)];
+      // A fixed piece of this same net already pays for crossing this cut.
+      // This is an optimistic lower bound; the edge rows below still enforce
+      // the exact union of fixed and variable usage.
+      if (reserved) {
+        for (auto it = reserved->upper_bound(lo); it != reserved->end() && *it <= hi; ++it) {
+          --forced[size_t(*it - origin)];
+          ++forced[size_t(*it + 1 - origin)];
+        }
+      }
+    }
+  };
+  for (const auto& [a, b] : ranges) {
+    if (b <= a) {
+      continue;
+    }
+    if (a > hi) {
+      add();
+      lo = a;
+    }
+    hi = std::max(hi, b);
+  }
+  add();
+}
 
 // Bipartite matching of items to their candidate tiles (augmenting paths, candidates in preference order). The
 // tile of each item, or empty when some item finds none.
@@ -715,7 +1119,7 @@ std::vector<Fixed_tree> place_trees(const Design& d, const Legroute_options& o, 
     size_t total = 0;
     for (int t : g.region_tiles[r]) {
       for (int h : {1, 0}) {
-        const int k  = std::max(0, int(std::floor(((h ? cap_h : cap_v)[t] - (h ? load_h : load_v)[t]) * o.cap_scale)));
+        const int k  = std::max(0, edge_limit((h ? cap_h : cap_v)[t], o) - (h ? load_h : load_v)[t]);
         total       += at_most_clauses(inputs[2 * t + h] + top[t][h], k);
       }
     }
@@ -1244,7 +1648,7 @@ void repair_forced(const Design& d, const Legroute_options& o, const Grid& g, Bo
     }
     std::set<int> drop_trees, unpin;
     for (const auto& [key, v] : forced) {
-      const int k = std::max(0, int(std::floor((key.second ? cap_h : cap_v)[key.first] * o.cap_scale)));
+      const int k = edge_limit((key.second ? cap_h : cap_v)[key.first], o);
       if (v <= k) {
         continue;
       }
@@ -1453,22 +1857,75 @@ std::vector<Io_route> io_preroute(const Design& d, const Legroute_options& o, co
 // b, H first or V first) and reserved on the edges it crosses
 struct Global_piece {
   int  net = -1, region = -1, a = -1, b = -1;
-  bool h_first = true;
+  bool h_first   = true;
+  int  part      = -1;     // a retained component, or -1 for the legacy whole-region policy
+  bool backbone  = false;  // coarse witness metadata
+  bool refinable = false;  // seed geometry consumed by the corridor model, never fixed demand or appended after solving
 };
 // The tracks the routes fixed ahead (hops, fixed trees, IO pre-routes) take on each tile edge, one per
 // net and edge it crosses (keyed by the left / lower tile), instead of a whole tile per route piece: a hop takes its
 // boundary edge only, a trunk the edges along it
 struct Edge_reserve {
-  std::vector<int> h, v;
+  std::vector<int>                                   h, v;
+  std::set<std::tuple<int, int, int>>                edges;  // (net, edge tile, h), including fixed/local sharing
+  std::map<std::tuple<int, int, int>, std::set<int>> cuts;   // (net, region, h) -> boundaries already crossed
+
+  const std::set<int>* cuts_of(int net, int region, int horizontal) const {
+    const auto it = cuts.find({net, region, horizontal});
+    return it == cuts.end() ? nullptr : &it->second;
+  }
 };
+
+// A published boundary edge above the admitted capacity (the structural checks throw runtime_error/logic_error).
+struct Crossing_capacity_error : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
+void validate_crossing_edges(const Grid& g, const std::vector<std::pair<int, int>>& hops, const std::vector<int>& hop_net,
+                             const std::vector<int>& cap_h, const std::vector<int>& cap_v, double share,
+                             double cap_scale = 1, double ceiling = .90) {
+  if (hops.size() != hop_net.size() || cap_h.size() != g.size() || cap_v.size() != g.size()) {
+    throw std::logic_error("legroute shared interface check has inconsistent arrays");
+  }
+  std::map<std::pair<int, int>, std::set<int>> use;
+  for (size_t i = 0; i < hops.size(); ++i) {
+    const auto [a, b] = hops[i];
+    if (a < 0 || b < 0 || size_t(a) >= g.size() || size_t(b) >= g.size()
+        || std::abs(g.col(a) - g.col(b)) + std::abs(g.row(a) - g.row(b)) != 1 || g.region[a] == g.region[b]) {
+      throw std::runtime_error("legroute shared interface repair required: crossing is not an adjacent two-region edge");
+    }
+    use[{std::min(a, b), int(g.row(a) == g.row(b))}].insert(hop_net[i]);
+  }
+  for (const auto& [edge, nets] : use) {
+    const auto [t, h] = edge;
+    const int   q     = t + (h ? 1 : g.cols);
+    const auto& cap   = h ? cap_h : cap_v;
+    const int   room  = std::min(cap[t], cap[q]);
+    const int   limit = std::max(0, std::min(int(std::floor(room * cap_scale)), int(std::floor(room * std::min(ceiling, share)))));
+    if (int(nets.size()) > limit) {
+      throw Crossing_capacity_error(std::format(
+          "legroute shared interface repair required: {} boundary edge {} -> {} uses {} distinct nets, admitted capacity {}",
+          h ? 'H' : 'V',
+          t,
+          q,
+          nets.size(),
+          limit));
+    }
+  }
+}
+
 Edge_reserve edge_reserve(const Grid& g, const std::vector<std::pair<int, int>>& hops, const std::vector<int>& hop_net,
                           const std::vector<Fixed_tree>& trees, const std::vector<Io_route>& io_routes,
                           const std::vector<Global_piece>& global) {
-  Edge_reserve                        res{std::vector<int>(g.size(), 0), std::vector<int>(g.size(), 0)};
-  std::set<std::tuple<int, int, int>> seen;  // (net, edge tile, h)
-  const auto                          take = [&](int n, int t, int h) {
-    if (seen.emplace(n, t, h).second) {
+  Edge_reserve res;
+  res.h.assign(g.size(), 0);
+  res.v.assign(g.size(), 0);
+  const auto take = [&](int n, int t, int h) {
+    if (res.edges.emplace(n, t, h).second) {
       ++(h ? res.h : res.v)[size_t(t)];
+      const int q = h ? t + 1 : t + g.cols;
+      if (g.region[size_t(t)] == g.region[size_t(q)]) {
+        res.cuts[{n, g.region[size_t(t)], h}].insert((h ? g.col(t) : g.row(t)) + 1);
+      }
     }
   };
   const auto segment = [&](int n, int ta, int tb, bool h_first) {  // an L from ta to tb: the edges its legs cross
@@ -1497,7 +1954,9 @@ Edge_reserve edge_reserve(const Grid& g, const std::vector<std::pair<int, int>>&
     }  // a pin -> box -> pin route: its box moves on the track, the legs are the region's connections
   }
   for (const auto& gp : global) {  // legroute.global: the pass-through runs
-    segment(gp.net, gp.a, gp.b, gp.h_first);
+    if (!gp.refinable) {
+      segment(gp.net, gp.a, gp.b, gp.h_first);
+    }
   }
   return res;
 }
@@ -1505,31 +1964,142 @@ Edge_reserve edge_reserve(const Grid& g, const std::vector<std::pair<int, int>>&
 // One region's SAT placement under one policy's options and pre-placement (boxes, edge reservations, nets routed ahead,
 // boxes held to a track): the boxes' tiles land in boxes, the connections, adjacent nets and counters in out.
 struct Region_out {
-  struct Piece {
-    int  net = -1, ta = -1, tb = -1;
-    bool h_first = true;
-  };
-  Sat_status                       status  = Sat_status::unknown;
-  bool                             skipped = false;
-  std::string                      unfit;    // spill rounds: the region had more boxes than fitting tiles (no model)
-  size_t                           unfit_boxes = 0;  // how many found no tile
-  std::vector<Piece>               conns;  // the SAT's connections, then the policy's trees and IO pre-routes here
-  std::vector<int>                 local;  // 1-1 nets between neighbor boxes
-  std::vector<std::pair<int, int>> tiles;      // (box, tile)
-  std::vector<std::tuple<int, int, int>> hop_tiles;  // (net, the hop chooser's tile, the tile chosen) per free hop
-  int                              cut_at = -1;      // cut bound: the column (cut_h) or row boundary the placement overloads
-  bool                             cut_h  = true;
-  Legroute_report                  rep;        // the sat_* counters
-  double                           cost = 0, seconds = 0;
+  using Piece                                    = Route_piece;
+  Sat_status                             status  = Sat_status::unknown;
+  bool                                   skipped = false;
+  std::string                            unfit;            // spill rounds: the region had more boxes than fitting tiles (no model)
+  size_t                                 unfit_boxes = 0;  // how many found no tile
+  std::vector<Piece>                     conns;            // the SAT's connections, then the policy's trees and IO pre-routes here
+  std::vector<int>                       local;            // 1-1 nets between neighbor boxes
+  std::vector<std::pair<int, int>>       tiles;            // (box, tile)
+  std::vector<std::tuple<int, int, int>> hop_tiles;        // (net, the hop chooser's tile, the tile chosen) per free hop
+  std::map<int, int>                     hop_choices;      // stable hop id -> selected tile (coincident interfaces must not alias)
+  int                                    cut_at = -1;      // cut bound: the column (cut_h) or row boundary the placement overloads
+  bool                                   cut_h  = true;
+  Legroute_report                        rep;  // the sat_* counters
+  double                                 cost = 0, seconds = 0;
+  bool                                   capture_seed_domains = false;
+  std::map<int, std::vector<int>>        seed_box_domains;  // exact placement domains, only for a private seed proposal
 };
-void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int r, const std::vector<int>& B,
-                  const std::vector<int>& T, Boxes& boxes, const std::vector<Net_ends>& ends,
-                  const std::set<std::pair<int, int>>& treed, const std::unordered_map<int, std::vector<int>>& allowed,
-                  const std::vector<char>& pinned_tile, const std::string& tag, const std::vector<int>& cap_h0,
-                  const std::vector<int>& cap_v0, const Edge_reserve& reserve, const std::vector<std::vector<int>>& hop_tiles,
-                  const std::vector<int>& hop_room, Region_out& out) {
+
+bool contains_global_piece(const Region_out& out, const Global_piece& piece) {
+  return std::ranges::any_of(out.conns, [&](const auto& candidate) {
+    return candidate.net == piece.net && candidate.ta == piece.a && candidate.tb == piece.b && candidate.h_first == piece.h_first;
+  });
+}
+
+void append_global_pieces(Region_out& out, int region, const std::vector<Global_piece>& pieces) {
+  for (const auto& piece : pieces) {
+    if (!piece.refinable && piece.region == region && !contains_global_piece(out, piece)) {
+      out.conns.push_back({piece.net, piece.a, piece.b, piece.h_first});
+    }
+  }
+}
+
+void adopt_region_alternative(Region_out& target, Region_out&& candidate, int region, const std::vector<Global_piece>& pieces) {
+  // An alternative solve emits its variable connections only. The immutable
+  // global geometry is still reserved and must accompany the adopted answer.
+  append_global_pieces(candidate, region, pieces);
+  target = std::move(candidate);
+}
+
+// Acceptance check over the geometry that will actually leave the regional solver. Do not use the model's
+// cover literals or lazy decoder here: a wrong endpoint/shape decode must not certify its own capacity usage.
+// Separate components of one net can connect outside this region, so check each piece's mesh path rather than
+// requiring the union of that net's regional pieces to be connected.
+void validate_region_edges(const Grid& g, int r, const std::vector<Region_out::Piece>& pieces, const Edge_reserve& reserve,
+                           const std::vector<int>& cap_h0, const std::vector<int>& cap_v0, const Legroute_options& o,
+                           Region_budget* budget = nullptr) {
+  const auto check_budget = [&] {
+    if (budget) {
+      budget->check();
+    }
+  };
+  if (budget) {
+    budget->check(true);
+  }
+  if (cap_h0.size() != g.size() || cap_v0.size() != g.size() || reserve.h.size() != g.size() || reserve.v.size() != g.size()
+      || (o.untracked && o.untracked->size() != g.size())) {
+    throw std::logic_error("legroute: decoded regional capacity check has inconsistent grid arrays");
+  }
+  std::vector<int>                    use_h = reserve.h, use_v = reserve.v;
+  std::set<std::tuple<int, int, int>> local_edges;
+  const auto                          in_region = [&](int t) { return t >= 0 && size_t(t) < g.size() && g.region[size_t(t)] == r; };
+  const auto                          take      = [&](int net, int t, bool h) {
+    check_budget();
+    const int q = h ? (g.col(t) + 1 < g.cols ? t + 1 : -1) : (g.row(t) + 1 < g.rows ? t + g.cols : -1);
+    if (!in_region(t) || !in_region(q)) {
+      throw std::runtime_error(
+          std::format("legroute: decoded regional model error: net {} region {} {} edge at tile {} leaves mesh",
+                      net,
+                      r,
+                      h ? 'H' : 'V',
+                      t));
+    }
+    const auto key = std::tuple{net, t, int(h)};
+    if (local_edges.insert(key).second && !reserve.edges.contains(key)) {
+      ++(h ? use_h : use_v)[size_t(t)];
+    }
+  };
+  for (const auto& pc : pieces) {
+    check_budget();
+    if (pc.net < 0 || !in_region(pc.ta) || !in_region(pc.tb)) {
+      throw std::runtime_error(
+          std::format("legroute: decoded regional model error: net {} region {} has invalid endpoints {} -> {}",
+                      pc.net,
+                      r,
+                      pc.ta,
+                      pc.tb));
+    }
+    const int hr = pc.h_first ? g.row(pc.ta) : g.row(pc.tb), vc = pc.h_first ? g.col(pc.tb) : g.col(pc.ta);
+    for (int col = std::min(g.col(pc.ta), g.col(pc.tb)); col < std::max(g.col(pc.ta), g.col(pc.tb)); ++col) {
+      take(pc.net, g.tile(col, hr), true);
+    }
+    for (int row = std::min(g.row(pc.ta), g.row(pc.tb)); row < std::max(g.row(pc.ta), g.row(pc.tb)); ++row) {
+      take(pc.net, g.tile(vc, row), false);
+    }
+  }
+  // Include reserved-only demand too. Boundary edges are checked by the global crossing model, not this region.
+  for (size_t t = 0; t < g.size(); ++t) {
+    check_budget();
+    if (g.region[t] != r) {
+      continue;
+    }
+    for (bool h : {true, false}) {
+      const int q = h ? (g.col(int(t)) + 1 < g.cols ? int(t) + 1 : -1) : (g.row(int(t)) + 1 < g.rows ? int(t) + g.cols : -1);
+      if (!in_region(q) || (o.untracked && (*o.untracked)[t])) {
+        continue;  // An untracked checker proposal still needs a subsequent full-capacity solve.
+      }
+      const auto& cap   = h ? cap_h0 : cap_v0;
+      const int   limit = std::max(0, edge_limit(std::min(cap[t], cap[size_t(q)]), o));
+      const int   use   = (h ? use_h : use_v)[t];
+      if (use > limit) {
+        throw std::runtime_error(std::format(
+            "legroute: decoded regional capacity model error: region {} {} edge ({},{}) -> ({},{}) uses {} tracks, capacity {}",
+            r,
+            h ? 'H' : 'V',
+            g.col(int(t)),
+            g.row(int(t)),
+            g.col(q),
+            g.row(q),
+            use,
+            limit));
+      }
+    }
+  }
+  if (budget) {
+    budget->check(true);
+  }
+}
+
+void solve_region_model(const Design& d, const Legroute_options& o, const Grid& g, int r, const std::vector<int>& B,
+                        const std::vector<int>& T, Boxes& boxes, const std::vector<Net_ends>& ends,
+                        const std::set<std::pair<int, int>>& treed, const std::unordered_map<int, std::vector<int>>& allowed,
+                        const std::vector<char>& pinned_tile, const std::string& tag, const std::vector<int>& cap_h0,
+                        const std::vector<int>& cap_v0, const Edge_reserve& reserve, const std::vector<std::vector<int>>& hop_tiles,
+                        const std::vector<int>& hop_room, Region_out& out, Region_budget& budget, Cnf& cnf) {
   auto&      rep   = out.rep;
-  const auto start = Clock::now();
+  const auto start = budget.start;
   if (T.empty()) {
     return;
   }
@@ -1540,7 +2110,22 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
     r0 = std::min(r0, g.row(t));
     r1 = std::max(r1, g.row(t));
   }
-  Cnf                          cnf;
+  // Fixed demand inside this region is still a hard capacity constraint, even when there are no variable routes.
+  // Boundary edges belong to the global crossing check, as with the variable-route capacity rows below.
+  // Clamping negative residual capacity to zero would otherwise certify an already-overflowed fixed route.
+  for (int t : T) {
+    for (bool h : {true, false}) {
+      const int q = h ? (g.col(t) + 1 < g.cols ? t + 1 : -1) : (g.row(t) + 1 < g.rows ? t + g.cols : -1);
+      if (q < 0 || g.region[size_t(q)] != r || (o.untracked && (*o.untracked)[size_t(t)])) {
+        continue;
+      }
+      const int tracks = std::max(0, edge_limit(std::min((h ? cap_h0 : cap_v0)[t], (h ? cap_h0 : cap_v0)[q]), o));
+      if ((h ? reserve.h : reserve.v)[size_t(t)] > tracks) {
+        cnf.add({});
+        ++rep.sat_fixed_overflow;
+      }
+    }
+  }
   // order literals of a box: col >= k for k in (c0, c1], row >= k for k in (r0, r1]
   std::unordered_map<int, int> slot;  // box -> index
   for (int i = 0; i < int(B.size()); ++i) {
@@ -1570,26 +2155,28 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
     std::vector<std::pair<int, int>> tiles;  // (tile, literal)
   };
   std::vector<Free_hop>        hops_free;
-  std::unordered_map<int, int> hslot;  // hop id -> index in hops_free
+  std::vector<Free_hop>        anchors_free;  // finite-point choices without interface capacity/ownership
+  std::unordered_map<int, int> hslot;         // hop id -> index in hops_free
   {
     std::map<int, std::vector<int>> hops_at;  // boundary tile -> the free hops' literals there
     for (size_t n = 0; n < d.nets.size(); ++n) {
       const auto it = ends[n].per_region.find(r);
-      if (it == ends[n].per_region.end() || it->second.size() < 2 || treed.contains({int(n), r})) {
+      if (it == ends[n].per_region.end() || (it->second.size() < 2 && !ends[n].preserve_coarse) || treed.contains({int(n), r})) {
         continue;
       }
       for (const auto& e : it->second) {
-        if (e.box >= 0 || e.hop < 0 || size_t(e.hop) >= hop_tiles.size() || hop_tiles[size_t(e.hop)].size() < 2 || hslot.contains(e.hop)) {
+        if (e.box >= 0 || e.hop < 0 || size_t(e.hop) >= hop_tiles.size() || hop_tiles[size_t(e.hop)].size() < 2
+            || hslot.contains(e.hop)) {
           continue;
         }
         Free_hop fh;
         fh.id  = e.hop;
         fh.net = int(n);
         fh.def = e.tile;
-        fh.c0 = g.cols;
-        fh.c1 = -1;
-        fh.r0 = g.rows;
-        fh.r1 = -1;
+        fh.c0  = g.cols;
+        fh.c1  = -1;
+        fh.r0  = g.rows;
+        fh.r1  = -1;
         for (int t : hop_tiles[size_t(e.hop)]) {
           fh.c0 = std::min(fh.c0, g.col(t));
           fh.c1 = std::max(fh.c1, g.col(t));
@@ -1608,8 +2195,8 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
             cnf.add({-fh.Y.back(), fh.Y[fh.Y.size() - 2]});
           }
         }
-        const auto cge = [&](int k) { return k <= fh.c0 ? cnf.t : k > fh.c1 ? -cnf.t : fh.X[size_t(k - fh.c0 - 1)]; };
-        const auto rge = [&](int k) { return k <= fh.r0 ? cnf.t : k > fh.r1 ? -cnf.t : fh.Y[size_t(k - fh.r0 - 1)]; };
+        const auto       cge = [&](int k) { return k <= fh.c0 ? cnf.t : k > fh.c1 ? -cnf.t : fh.X[size_t(k - fh.c0 - 1)]; };
+        const auto       rge = [&](int k) { return k <= fh.r0 ? cnf.t : k > fh.r1 ? -cnf.t : fh.Y[size_t(k - fh.r0 - 1)]; };
         std::vector<int> any;
         for (int t : hop_tiles[size_t(e.hop)]) {
           const int p = cnf.var();
@@ -1634,11 +2221,55 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
     }
   }
   const auto free_hop = [&](const Endpoint& e) -> const Free_hop* {
+    if (e.anchor_choice >= 0) {
+      return &anchors_free.at(size_t(e.anchor_choice));
+    }
     if (e.box >= 0 || e.hop < 0) {
       return nullptr;
     }
     const auto hs = hslot.find(e.hop);
     return hs == hslot.end() ? nullptr : &hops_free[size_t(hs->second)];
+  };
+  const auto add_anchor_choice = [&](const std::vector<int>& candidates) {
+    Free_hop point;
+    point.c0 = g.cols;
+    point.c1 = -1;
+    point.r0 = g.rows;
+    point.r1 = -1;
+    for (int t : candidates) {
+      point.c0 = std::min(point.c0, g.col(t));
+      point.c1 = std::max(point.c1, g.col(t));
+      point.r0 = std::min(point.r0, g.row(t));
+      point.r1 = std::max(point.r1, g.row(t));
+    }
+    for (int k = point.c0 + 1; k <= point.c1; ++k) {
+      point.X.push_back(cnf.var());
+      if (point.X.size() > 1) {
+        cnf.add({-point.X.back(), point.X[point.X.size() - 2]});
+      }
+    }
+    for (int k = point.r0 + 1; k <= point.r1; ++k) {
+      point.Y.push_back(cnf.var());
+      if (point.Y.size() > 1) {
+        cnf.add({-point.Y.back(), point.Y[point.Y.size() - 2]});
+      }
+    }
+    const auto       cge = [&](int k) { return k <= point.c0 ? cnf.t : k > point.c1 ? -cnf.t : point.X[size_t(k - point.c0 - 1)]; };
+    const auto       rge = [&](int k) { return k <= point.r0 ? cnf.t : k > point.r1 ? -cnf.t : point.Y[size_t(k - point.r0 - 1)]; };
+    std::vector<int> any;
+    for (int t : candidates) {
+      const int lit = cnf.var();
+      cnf.add({-lit, cge(g.col(t))});
+      cnf.add({-lit, -cge(g.col(t) + 1)});
+      cnf.add({-lit, rge(g.row(t))});
+      cnf.add({-lit, -rge(g.row(t) + 1)});
+      point.tiles.emplace_back(t, lit);
+      any.push_back(lit);
+    }
+    cnf.add(any);
+    const int id = int(anchors_free.size());
+    anchors_free.push_back(std::move(point));
+    return id;
   };
   const auto col_ge = [&](const Endpoint& e, int k) {
     if (e.box < 0) {
@@ -1660,62 +2291,29 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
     const int i = slot.at(e.box);
     return k <= r0 ? cnf.t : k > r1 ? -cnf.t : Y[size_t(i)][size_t(k - r0 - 1)];
   };
-  // each box stays in a window of window_tiles around its placement tile (grown until it holds a few tiles the box
-  // fits): the window bounds every leg and capacity term, so the model grows with the region, not its square
-  struct Win {
-    int c0, c1, r0, r1;
-  };
-  std::vector<Win> win(B.size());
-  for (size_t i = 0; i < B.size(); ++i) {
-    const auto& box = boxes.boxes[B[i]];
-    const int   c = std::clamp(g.col_of(box.cx), c0, c1), rr = std::clamp(g.row_of(box.cy), r0, r1);
-    if (box.fixed) {  // a pinned box: its tile
-      win[i] = {g.col(box.tile), g.col(box.tile), g.row(box.tile), g.row(box.tile)};
-    }
-    const auto al = allowed.find(B[i]);
-    if (al != allowed.end()) {  // on an IO pre-route's track: its tiles
-      win[i] = {g.cols, -1, g.rows, -1};
-      for (int t : al->second) {
-        win[i] = {std::min(win[i].c0, g.col(t)),
-                  std::max(win[i].c1, g.col(t)),
-                  std::min(win[i].r0, g.row(t)),
-                  std::max(win[i].r1, g.row(t))};
-      }
-    }
-    for (int w = box.window >= 0 ? box.window : int(o.window_tiles); !box.fixed && al == allowed.end(); ++w) {
-      win[i]   = {std::max(c0, c - w), std::min(c1, c + w), std::max(r0, rr - w), std::min(r1, rr + w)};
-      int fits = 0;
-      for (int t : T) {
-        fits += g.col(t) >= win[i].c0 && g.col(t) <= win[i].c1 && g.row(t) >= win[i].r0 && g.row(t) <= win[i].r1 && !g.blocked[t]
-                && !pinned_tile[t] && box_fits(d, g, box, t);
-      }
-      if (fits >= 4 || (win[i].c0 == c0 && win[i].c1 == c1 && win[i].r0 == r0 && win[i].r1 == r1)) {
-        break;
-      }
-    }
+  // Shared native preparation also supplies the global witness proposal; both
+  // consumers keep the same original-center windows and adaptive matching.
+  auto prepared            = prepare_box_domains(d, o, g, r, B, T, boxes, allowed, pinned_tile, [&] { budget.check(true); });
+  auto win                 = std::move(prepared.windows);
+  auto lifted              = std::move(prepared.lifted);
+  rep.io_lifted           += lifted.size();
+  rep.sat_relaxed_windows += prepared.relaxed_windows;
+  if (!prepared.matching.empty()) {
+    budget.fallback = std::move(prepared.matching);
   }
-  std::set<int> lifted;  // boxes taken off their IO track (the track stays reserved, the box is free again)
-  const auto    on_track = [&](int b, int t) {
+  using Win           = Box_window;
+  const auto on_track = [&](int b, int t) {
     const auto it = allowed.find(b);
     return it == allowed.end() || lifted.contains(b) || std::ranges::find(it->second, t) != it->second.end();
   };
-  // the windows together must hold the boxes (fixed boxes take tiles in clusters, so a few free tiles per window are
-  // not enough): grow the windows of the boxes a matching leaves out until every box has a tile
   const auto window_tiles = [&](size_t i) {
-    std::vector<int> list;
-    const auto&      box = boxes.boxes[B[i]];
-    for (int t : T) {
-      if (g.col(t) >= win[i].c0 && g.col(t) <= win[i].c1 && g.row(t) >= win[i].r0 && g.row(t) <= win[i].r1 && !g.blocked[t]
-          && (box.fixed || !pinned_tile[t]) && box_fits(d, g, box, t) && on_track(B[i], t)) {
-        list.push_back(t);
-      }
-    }
-    return list;
+    return box_domain_tiles(d, g, B[i], win[i], boxes, allowed, lifted, pinned_tile, T, [&] { budget.check(true); });
   };
   // the fallback placement: boxes on fitting tiles of their windows, nearest first, by a bipartite matching
   // (augmenting paths, so a box with few fitting tiles still gets one); a box whose window is full takes any fitting
   // tile of the region. Used for a region without a routable answer, and by freeze for every region.
   const auto fallback_tiles = [&](const std::function<std::vector<int>(size_t)>& candidates) {
+    budget.check(true);
     std::unordered_map<int, int>  owner;  // tile -> box index
     std::vector<std::vector<int>> pref(B.size());
     const auto                    nearest = [&](size_t i) {
@@ -1731,6 +2329,7 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
     }
     std::vector<char>        seen;
     std::function<bool(int)> augment = [&](int i) {
+      budget.check();
       for (int t : pref[size_t(i)]) {
         if (seen[size_t(t)]) {
           continue;
@@ -1748,7 +2347,8 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       const auto& box = boxes.boxes[B[i]];
       pref[i].clear();
       for (int t : T) {
-        if (!g.blocked[size_t(t)] && (box.fixed || !pinned_tile[size_t(t)]) && box_fits(d, g, box, t)) {
+        if ((!box.fixed || t == box.tile) && !g.blocked[size_t(t)] && (box.fixed || !pinned_tile[size_t(t)])
+            && box_fits(d, g, box, t)) {
           pref[i].push_back(t);
         }
       }
@@ -1779,59 +2379,16 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       ++out.unfit_boxes;  // counted on, so a spill round knows how many must leave
     }
     if (out.unfit_boxes > 0) {
-      throw Legroute_unfit(std::format("legroute: region {} has more boxes than fitting tiles ({} boxes without a tile)", r, out.unfit_boxes));
+      throw Legroute_unfit(
+          std::format("legroute: region {} has more boxes than fitting tiles ({} boxes without a tile)", r, out.unfit_boxes));
     }
     std::vector<int> tile(B.size(), -1);
     for (const auto& [t, i] : owner) {
       tile[size_t(i)] = t;
     }
+    budget.fallback = tile;
     return tile;
   };
-  for (int round = 0;; ++round) {
-    std::vector<std::vector<int>> pref(B.size());
-    for (size_t i = 0; i < B.size(); ++i) {
-      pref[i] = window_tiles(i);
-    }
-    // a maximum matching: the boxes left out grow
-    std::unordered_map<int, int> owner;
-    std::vector<char>            seen(g.size(), 0);
-    std::vector<int>             seen_list;
-    std::function<bool(int)>     augment = [&](int i) {
-      for (int t : pref[i]) {
-        if (seen[t]) {
-          continue;
-        }
-        seen[t] = 1;
-        seen_list.push_back(t);
-        const auto it = owner.find(t);
-        if (it == owner.end() || augment(it->second)) {
-          owner[t] = i;
-          return true;
-        }
-      }
-      return false;
-    };
-    std::vector<size_t> left;
-    for (size_t i = 0; i < B.size(); ++i) {
-      if (!augment(int(i))) {
-        left.push_back(i);
-      }
-      for (int t : seen_list) {
-        seen[t] = 0;
-      }
-      seen_list.clear();
-    }
-    if (left.empty() || round > g.cols + g.rows) {
-      break;
-    }
-    for (size_t i : left) {
-      if (allowed.contains(B[i]) && lifted.insert(B[i]).second) {  // off its IO track
-        ++rep.io_lifted;
-      }
-      win[i] = {std::max(c0, win[i].c0 - 1), std::min(c1, win[i].c1 + 1), std::max(r0, win[i].r0 - 1), std::min(r1, win[i].r1 + 1)};
-      ++rep.sat_relaxed_windows;
-    }
-  }
   if (o.freeze) {  // every box on the tile the fallback gives it (the placement a run without an answer keeps and an
     // external router can be given): the SAT decides the route shapes only
     const auto tiles = fallback_tiles(window_tiles);
@@ -1885,43 +2442,45 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       if (it == ends[n].per_region.end() || it->second.size() < 2 || treed.contains({int(n), r})) {
         continue;
       }
-      int lo_c = g.cols, hi_c = -1, lo_r = g.rows, hi_r = -1;  // the leftmost endpoint's last column, the rightmost's first
-      for (const auto& e : it->second) {
-        const auto wn = win_of(e);
-        lo_c          = std::min(lo_c, std::clamp(wn.c1, c0, c1));
-        hi_c          = std::max(hi_c, std::clamp(wn.c0, c0, c1));
-        lo_r          = std::min(lo_r, std::clamp(wn.r1, r0, r1));
-        hi_r          = std::max(hi_r, std::clamp(wn.r0, r0, r1));
-      }
-      if (it->second.size() == 2 && d.nets[n].pins.size() == 2 && it->second[0].box >= 0 && it->second[1].box >= 0) {
-        const auto wa = win_of(it->second[0]), wb = win_of(it->second[1]);
-        if (hi_c == lo_c + 1 && wa.r0 <= wb.r1 && wb.r0 <= wa.r1) {
-          hi_c = lo_c;  // side by side across its one forced column boundary
+      std::vector<std::pair<int, int>> cols, rows;
+      for (const auto& [part, group] : endpoint_groups(it->second)) {
+        if (group.size() < 2) {
+          continue;
         }
-        if (hi_r == lo_r + 1 && wa.c0 <= wb.c1 && wb.c0 <= wa.c1) {
-          hi_r = lo_r;
+        int lo_c = g.cols, hi_c = -1, lo_r = g.rows, hi_r = -1;  // leftmost endpoint's last column, rightmost's first
+        for (const auto& e : group) {
+          const auto wn = win_of(e);
+          lo_c          = std::min(lo_c, std::clamp(wn.c1, c0, c1));
+          hi_c          = std::max(hi_c, std::clamp(wn.c0, c0, c1));
+          lo_r          = std::min(lo_r, std::clamp(wn.r1, r0, r1));
+          hi_r          = std::max(hi_r, std::clamp(wn.r0, r0, r1));
         }
+        if (group.size() == 2 && d.nets[n].pins.size() == 2 && group[0].box >= 0 && group[1].box >= 0) {
+          const auto wa = win_of(group[0]), wb = win_of(group[1]);
+          if (hi_c == lo_c + 1 && wa.r0 <= wb.r1 && wb.r0 <= wa.r1) {
+            hi_c = lo_c;  // side by side across its one forced column boundary
+          }
+          if (hi_r == lo_r + 1 && wa.c0 <= wb.c1 && wb.c0 <= wa.c1) {
+            hi_r = lo_r;
+          }
+        }
+        cols.emplace_back(lo_c, hi_c);
+        rows.emplace_back(lo_r, hi_r);
       }
-      if (hi_c > lo_c) {  // forced across the column boundaries c with lo_c < c <= hi_c
-        ++fc[size_t(lo_c + 1 - c0)];
-        --fc[size_t(hi_c + 1 - c0)];
-      }
-      if (hi_r > lo_r) {
-        ++fr[size_t(lo_r + 1 - r0)];
-        --fr[size_t(hi_r + 1 - r0)];
-      }
+      add_forced_cuts(cols, fc, c0, reserve.cuts_of(int(n), r, 1));
+      add_forced_cuts(rows, fr, r0, reserve.cuts_of(int(n), r, 0));
     }
     struct Cut {
       int  at = -1, forced = 0, tracks = 0;
       bool h = true;  // a column boundary (H edges cross it) or a row boundary (V edges)
     } worst;
     for (int c = c0 + 1, run = 0; c <= c1; ++c) {
-      run += fc[size_t(c - c0)];
-      int tracks = 0;
+      run        += fc[size_t(c - c0)];
+      int tracks  = 0;
       for (int j = r0; j <= r1; ++j) {
         const int t = g.tile(c - 1, j), q = g.tile(c, j);
         if (here.contains(t) && here.contains(q)) {
-          tracks += std::max(0, int(std::floor(std::min(cap_h0[t], cap_h0[q]) * o.cap_scale)) - reserve.h[size_t(t)]);
+          tracks += std::max(0, edge_limit(std::min(cap_h0[t], cap_h0[q]), o) - reserve.h[size_t(t)]);
         }
       }
       if (run - tracks > worst.forced - worst.tracks) {
@@ -1929,12 +2488,12 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       }
     }
     for (int j = r0 + 1, run = 0; j <= r1; ++j) {
-      run += fr[size_t(j - r0)];
-      int tracks = 0;
+      run        += fr[size_t(j - r0)];
+      int tracks  = 0;
       for (int i = c0; i <= c1; ++i) {
         const int t = g.tile(i, j - 1), q = g.tile(i, j);
         if (here.contains(t) && here.contains(q)) {
-          tracks += std::max(0, int(std::floor(std::min(cap_v0[t], cap_v0[q]) * o.cap_scale)) - reserve.v[size_t(t)]);
+          tracks += std::max(0, edge_limit(std::min(cap_v0[t], cap_v0[q]), o) - reserve.v[size_t(t)]);
         }
       }
       if (run - tracks > worst.forced - worst.tracks) {
@@ -1999,6 +2558,13 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       throw Legroute_unfit(std::format("legroute: box {} fits no tile of region {}", B[i], r));
     }
     cnf.add(any);
+    if (out.capture_seed_domains) {
+      auto& domain = out.seed_box_domains[B[i]];
+      for (const auto& [tile, literal] : tiles_of[i]) {
+        (void)literal;
+        domain.push_back(tile);
+      }
+    }
   }
   for (auto& [t, list] : at_tile) {
     std::vector<int> xs;
@@ -2007,36 +2573,300 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
     }
     cnf.at_most(xs, 1);
   }
-  // connections: from the net's first endpoint in the region (its driver when here) to each other endpoint; a net
-  // with 3..steiner_pins endpoints here is one single-trunk Steiner tree instead (below)
+  // Connect each component of a net's regional tree independently: separate
+  // components are already joined outside this region. Each component uses a
+  // star or a single-trunk Steiner tree, with its interior chosen by SAT.
   struct Steiner {
     int              net = -1, first = -1, count = 0;
     int              h_trunk = 0;     // true: an H trunk on a row (rib V), false: a V trunk on a column (ribs H)
     std::vector<int> row_ge, col_ge;  // the trunk's row / column, order encoded over the endpoints' window hull
     int              x0 = 0, x1 = 0, y0 = 0, y1 = 0;
   };
-  std::vector<Endpoint>    eps;
-  std::vector<Region_conn> conns;
-  std::vector<Steiner>     steiner;
-  std::vector<int>         nets_here;
+  std::vector<Endpoint>                        eps;
+  std::vector<Region_conn>                     conns;
+  std::vector<Steiner>                         steiner;
+  std::vector<int>                             nets_here;
+  std::map<std::pair<int, int>, std::set<int>> corridors;  // (net, part), clipped to this region
+  std::vector<Corridor_model>                  corridor_models;
+  std::map<std::tuple<int, int, int>, int>     corridor_edges;  // one physical net-edge charge across every part
+  std::set<int>                                corridor_seed_literals;
+  size_t                                       unsupported_stub_homes = 0;
   for (size_t n = 0; n < d.nets.size(); ++n) {
     const auto it = ends[n].per_region.find(r);
-    if (it == ends[n].per_region.end() || it->second.size() < 2 || treed.contains({int(n), r})) {
+    if (it == ends[n].per_region.end() || (it->second.size() < 2 && !ends[n].preserve_coarse) || treed.contains({int(n), r})) {
       continue;
     }
-    nets_here.push_back(int(n));
-    const int first = int(eps.size());
-    eps.insert(eps.end(), it->second.begin(), it->second.end());
-    if (it->second.size() >= std::max(2u, o.steiner_min) && it->second.size() <= o.steiner_pins) {
-      steiner.push_back({int(n), first, int(it->second.size())});
-      continue;
+    for (const auto& [part, group] : endpoint_groups(it->second)) {
+      if (ends[n].preserve_coarse) {
+        const auto forest = ends[n].coarse_parts.find({r, part});
+        if (part < 0 || forest == ends[n].coarse_parts.end() || forest->second.empty()) {
+          throw std::runtime_error(
+              std::format("legroute coarse witness repair required: net {} region {} part {} has no represented backbone",
+                          n,
+                          r,
+                          part));
+        }
+        corridors[{int(n), part}] = coarse_corridor(g, r, forest->second, o.window_tiles);
+        if (ends[n].refine_corridor) {
+          Corridor_model model;
+          model.net      = int(n);
+          model.part     = part;
+          model.tiles    = corridors.at({int(n), part});
+          model.identity = o.window_tiles == 0;
+          if (const auto seed = ends[n].coarse_edges.find({r, part}); seed != ends[n].coarse_edges.end()) {
+            model.seed = seed->second;
+          }
+          for (const auto& endpoint : group) {
+            if (endpoint.anchor < 0 || !forest->second.contains(endpoint.anchor)) {
+              throw std::runtime_error("legroute corridor has a stale coarse endpoint attachment");
+            }
+            std::vector<std::pair<int, int>> domain;
+            if (endpoint.box >= 0) {
+              domain = tiles_of[size_t(slot.at(endpoint.box))];
+            } else if (const auto* point = free_hop(endpoint)) {
+              domain = point->tiles;
+            } else {
+              domain.emplace_back(endpoint.tile, cnf.t);
+            }
+            std::vector<std::pair<int, int>> permitted;
+            for (const auto& [tile, lit] : domain) {
+              if (model.tiles.contains(tile)) {
+                permitted.emplace_back(tile, lit);
+              } else {
+                cnf.add({-lit});
+              }
+            }
+            if (permitted.empty()) {
+              cnf.add({});
+            }
+            model.terminals.push_back(std::move(permitted));
+          }
+          for (int t : model.tiles) {
+            for (int q : {g.col(t) + 1 < g.cols ? t + 1 : -1, g.row(t) + 1 < g.rows ? t + g.cols : -1}) {
+              budget.check();
+              if (q < 0 || !model.tiles.contains(q) || (model.identity && !model.seed.contains({t, q}))) {
+                continue;
+              }
+              const int  h       = g.row(t) == g.row(q);
+              const auto key     = std::tuple{int(n), t, h};
+              auto [edge, fresh] = corridor_edges.try_emplace(key, 0);
+              if (fresh) {
+                edge->second = reserve.edges.contains(key) ? cnf.t : cnf.var();
+                if (edge->second != cnf.t) {
+                  cnf.solver.prefer(-edge->second);
+                }
+              }
+              model.edges.emplace_back(t, q, edge->second);
+              if (model.seed.contains({t, q})) {
+                corridor_seed_literals.insert(edge->second);
+                // Preference only: every other corridor edge remains available.
+                // Shared edges prefer true if any part's witness used them.
+                if (edge->second != cnf.t) {
+                  cnf.solver.prefer(edge->second);
+                }
+              }
+              if (model.identity) {
+                cnf.add({edge->second});
+              }
+            }
+          }
+          for (auto [a, b] : model.seed) {
+            if (a < 0 || b <= a || !model.tiles.contains(a) || !model.tiles.contains(b)
+                || std::abs(g.col(a) - g.col(b)) + std::abs(g.row(a) - g.row(b)) != 1) {
+              throw std::runtime_error("legroute corridor seed contains an invalid edge");
+            }
+          }
+          corridor_models.push_back(std::move(model));
+          continue;
+        }
+
+        if (nets_here.empty() || nets_here.back() != int(n)) {
+          nets_here.push_back(int(n));
+        }
+        for (const auto& endpoint : group) {
+          if (endpoint.anchor < 0 || !forest->second.contains(endpoint.anchor)) {
+            throw std::runtime_error(
+                std::format("legroute coarse witness repair required: net {} region {} part {} has a stale attachment",
+                            n,
+                            r,
+                            part));
+          }
+          std::vector<int> anchors{endpoint.anchor};
+          if ((endpoint.box >= 0 && !boxes.boxes[size_t(endpoint.box)].fixed) || endpoint.interface_id >= 0 || endpoint.hop >= 0) {
+            const auto nodes = ends[n].coarse_junctions.find({r, part});
+            if (nodes != ends[n].coarse_junctions.end()) {
+              anchors = coarse_anchor_candidates(g, forest->second, nodes->second, endpoint.anchor, o.window_tiles);
+            }
+          }
+          std::vector<int> domain;
+          if (endpoint.box >= 0) {
+            for (const auto& [tile, lit] : tiles_of[size_t(slot.at(endpoint.box))]) {
+              (void)lit;
+              domain.push_back(tile);
+            }
+          } else if (const auto* point = free_hop(endpoint)) {
+            for (const auto& [tile, lit] : point->tiles) {
+              (void)lit;
+              domain.push_back(tile);
+            }
+          } else {
+            domain.push_back(endpoint.tile);
+          }
+          const auto& corridor  = corridors.at({int(n), part});
+          const auto  supported = [&](int tile) {
+            return std::ranges::any_of(anchors, [&](int anchor) {
+              return coarse_stub_inside(g, corridor, tile, anchor, true, budget)
+                     || coarse_stub_inside(g, corridor, tile, anchor, false, budget);
+            });
+          };
+          // Empty placement domains belong to the existing placement constraints,
+          // not to the corridor representation failure reported here.
+          if (!domain.empty() && !std::ranges::any_of(domain, supported)) {
+            throw Coarse_stub_unsupported(std::format(
+                "legroute coarse stub construction blocker: net {} region {} part {} endpoint box {} has no corridor-valid L over "
+                "{} legal endpoint tiles and {} anchor choices; route repair required, not an area proof",
+                n,
+                r,
+                part,
+                endpoint.box,
+                domain.size(),
+                anchors.size()));
+          }
+          const int home = endpoint.box >= 0 ? g.tile_of(boxes.boxes[size_t(endpoint.box)].cx, boxes.boxes[size_t(endpoint.box)].cy)
+                                             : endpoint.tile;
+          unsupported_stub_homes += !domain.empty() && !supported(home);
+          Endpoint attachment{-1, endpoint.anchor};
+          if (anchors.size() > 1) {
+            attachment.anchor_choice = add_anchor_choice(anchors);
+            ++rep.coarse_attachment_choices;
+          }
+          const int first = int(eps.size());
+          eps.push_back(endpoint);
+          eps.push_back(attachment);
+          conns.push_back({int(n), first, first + 1, part});
+          ++rep.coarse_attachment_stubs;
+        }
+        continue;
+      }
+      if (group.size() < 2) {
+        continue;
+      }
+      if (nets_here.empty() || nets_here.back() != int(n)) {
+        nets_here.push_back(int(n));
+      }
+      const int first = int(eps.size());
+      eps.insert(eps.end(), group.begin(), group.end());
+      if (group.size() >= std::max(2u, o.steiner_min) && group.size() <= o.steiner_pins) {
+        steiner.push_back({int(n), first, int(group.size())});
+        continue;
+      }
+      const auto fixed_tile = [&](const Endpoint& e) {
+        return e.box >= 0 ? (boxes.boxes[size_t(e.box)].fixed ? boxes.boxes[size_t(e.box)].tile : -1) : (free_hop(e) ? -1 : e.tile);
+      };
+      const auto inside = [&](int ta, int tb, bool horizontal_first) {
+        budget.check();
+        const int hr = horizontal_first ? g.row(ta) : g.row(tb), vc = horizontal_first ? g.col(tb) : g.col(ta);
+        for (int c = std::min(g.col(ta), g.col(tb)); c <= std::max(g.col(ta), g.col(tb)); ++c) {
+          if (!here.contains(g.tile(c, hr))) {
+            return false;
+          }
+        }
+        for (int rr = std::min(g.row(ta), g.row(tb)); rr <= std::max(g.row(ta), g.row(tb)); ++rr) {
+          if (!here.contains(g.tile(vc, rr))) {
+            return false;
+          }
+        }
+        return true;
+      };
+      const int  original_root          = fixed_tile(eps[size_t(first)]);
+      const bool unsupported_fixed_pair = original_root >= 0 && std::ranges::any_of(group, [&](const Endpoint& e) {
+                                            const int t = fixed_tile(e);
+                                            return t >= 0 && !inside(original_root, t, true) && !inside(original_root, t, false);
+                                          });
+      if (unsupported_fixed_pair) {
+        // A fixed IO need not be a usable star center in a connected mesh.
+        // Try another existing endpoint of this same component, using the
+        // actual fitted domains. One root position must support every leg;
+        // independently supported pairs at incompatible root positions do
+        // not suffice. Capacity and simultaneous placement remain SAT's job.
+        std::vector<std::vector<int>> domains(group.size());
+        for (size_t i = 0; i < group.size(); ++i) {
+          const auto& e = group[i];
+          if (e.box >= 0) {
+            for (const auto& [t, lit] : tiles_of[slot.at(e.box)]) {
+              (void)lit;
+              domains[i].push_back(t);
+            }
+          } else if (const auto* hop = free_hop(e)) {
+            for (const auto& [t, lit] : hop->tiles) {
+              (void)lit;
+              domains[i].push_back(t);
+            }
+          } else {
+            domains[i].push_back(e.tile);
+          }
+        }
+        for (size_t root = 1; root < group.size(); ++root) {
+          const bool supported = std::ranges::any_of(domains[root], [&](int ta) {
+            for (size_t i = 0; i < group.size(); ++i) {
+              if (i == root) {
+                continue;
+              }
+              const bool distinct_boxes = group[root].box >= 0 && group[i].box >= 0 && group[root].box != group[i].box;
+              if (!std::ranges::any_of(domains[i], [&](int tb) {
+                    return !(distinct_boxes && ta == tb) && (inside(ta, tb, true) || inside(ta, tb, false));
+                  })) {
+                return false;
+              }
+            }
+            return true;
+          });
+          if (supported) {
+            std::swap(eps[size_t(first)], eps[size_t(first) + root]);
+            ++rep.sat_root_fallbacks;
+            break;
+          }
+        }
+      }
+      for (int k = first + 1; k < int(eps.size()); ++k) {
+        const int ta = fixed_tile(eps[size_t(first)]), tb = fixed_tile(eps[size_t(k)]);
+        if (unsupported_fixed_pair && ta >= 0 && tb >= 0) {
+          if (!inside(ta, tb, true) && !inside(ta, tb, false)) {
+            // This proves a limitation of the chosen two-L encoding, not
+            // physical unroutability. Never request more area for it. Movable
+            // domains and free hops must still be decided by the actual model.
+            throw std::runtime_error(
+                std::format("legroute local model cannot represent fixed connection: net {} ({}), region {}, part {}, tiles {} "
+                            "({},{}) -> {} ({},{}); "
+                            "neither L lies inside the region; routing decomposition must be repaired, not area grown{}",
+                            n,
+                            d.fp.nets[d.nets[n].frame].name,
+                            r,
+                            part,
+                            ta,
+                            g.col(ta),
+                            g.row(ta),
+                            tb,
+                            g.col(tb),
+                            g.row(tb),
+                            tag));
+          }
+        }
+        conns.push_back({int(n), first, k});
+      }
     }
-    for (int k = first + 1; k < int(eps.size()); ++k) {
-      conns.push_back({int(n), first, k});
-    }
+  }
+  if (unsupported_stub_homes) {
+    std::fprintf(stderr,
+                 "legroute sat region %d: %zu home stubs lack a corridor L, but every legal endpoint domain has support\n",
+                 r,
+                 unsupported_stub_homes);
   }
   // per (net, tile, direction): the net covers the tile
   std::map<std::tuple<int, int, int>, int> cover;
+  // Coarse attachment stubs use actual edge literals. Combining two independent
+  // tile covers would invent an edge between disjoint pieces of the same net.
+  std::map<std::tuple<int, int, int>, int> stub_edges;
   const auto                               cover_lit = [&](int n, int t, bool h) {
     auto [it, fresh] = cover.try_emplace({n, t, h ? 1 : 0}, 0);
     if (fresh) {
@@ -2054,9 +2884,53 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
     // the legs stay inside the hull of the two endpoints' windows
     const auto wa = win_of(a), wb = win_of(b);
     const int  x0 = std::min(wa.c0, wb.c0), x1 = std::max(wa.c1, wb.c1), y0 = std::min(wa.r0, wb.r0), y1 = std::max(wa.r1, wb.r1);
+    if (cn.part >= 0) {
+      const auto& corridor = corridors.at({cn.net, cn.part});
+      const auto  edge_lit = [&](int t, bool h) {
+        const int q = t + (h ? 1 : g.cols);
+        if (!corridor.contains(t) || !corridor.contains(q)) {
+          return -cnf.t;
+        }
+        if (reserve.edges.contains({cn.net, t, int(h)})) {
+          return cnf.t;  // the same physical net already paid for this exact edge
+        }
+        auto [it, fresh] = stub_edges.try_emplace({cn.net, t, int(h)}, 0);
+        if (fresh) {
+          it->second = cnf.var();
+        }
+        return it->second;
+      };
+      for (const auto& [e, w, first] : {
+               std::tuple{&a, wa,  true},
+               std::tuple{&b, wb, false}
+      }) {
+        const int sel = first ? -ori : ori;
+        for (int j = w.r0; j <= w.r1; ++j) {
+          for (int i = x0; i < x1; ++i) {
+            const int edge = edge_lit(g.tile(i, j), true);
+            cnf.add({sel, -row_ge(*e, j), row_ge(*e, j + 1), col_ge(a, i + 1), -col_ge(b, i + 1), edge});
+            cnf.add({sel, -row_ge(*e, j), row_ge(*e, j + 1), col_ge(b, i + 1), -col_ge(a, i + 1), edge});
+          }
+        }
+      }
+      for (const auto& [e, w, first] : {
+               std::tuple{&b, wb,  true},
+               std::tuple{&a, wa, false}
+      }) {
+        const int sel = first ? -ori : ori;
+        for (int i = w.c0; i <= w.c1; ++i) {
+          for (int j = y0; j < y1; ++j) {
+            const int edge = edge_lit(g.tile(i, j), false);
+            cnf.add({sel, -col_ge(*e, i), col_ge(*e, i + 1), row_ge(a, j + 1), -row_ge(b, j + 1), edge});
+            cnf.add({sel, -col_ge(*e, i), col_ge(*e, i + 1), row_ge(b, j + 1), -row_ge(a, j + 1), edge});
+          }
+        }
+      }
+      continue;
+    }
     // a 1-1 net between two boxes costs no track when the boxes are neighbors (in-box metal): lone may hold only
     // then (columns or rows equal, the other off by one)
-    int        lone = -cnf.t;
+    int lone = -cnf.t;
     if (a.box >= 0 && b.box >= 0 && d.nets[cn.net].pins.size() == 2) {
       lone          = cnf.var();
       const int eqc = cnf.var(), eqr = cnf.var();
@@ -2223,14 +3097,14 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
   // to their own tile (charging them on the edges rejected a placement OpenROAD routed), and two nets that end in a
   // tile from opposite sides share a track, each on its own edge
   std::map<std::pair<int, int>, std::vector<int>> inputs;  // (left / lower tile, h) -> the crossing literals
-  const auto next_tile = [&](int t, int h) {  // the neighbor across the right (H) or upper (V) edge, -1 if outside
+  const auto next_tile = [&](int t, int h) {               // the neighbor across the right (H) or upper (V) edge, -1 if outside
     const int q = h ? (g.col(t) + 1 < g.cols ? t + 1 : -1) : (t + g.cols < int(g.size()) ? t + g.cols : -1);
     return q >= 0 && here.contains(q) ? q : -1;
   };
   for (const auto& [key, lit] : cover) {
     const auto [n, t, h] = key;
     const int q          = next_tile(t, h);
-    if (q < 0) {
+    if (q < 0 || reserve.edges.contains({n, t, h})) {
       continue;
     }
     if (const auto it = cover.find({n, q, h}); it != cover.end()) {
@@ -2239,8 +3113,21 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       inputs[{t, h}].push_back(e);
     }
   }
-  size_t       binding = 0;
-  const size_t cl_conn = cnf.clauses;
+  for (const auto& [key, lit] : stub_edges) {
+    const auto [n, t, h] = key;
+    (void)n;
+    inputs[{t, h}].push_back(lit);
+  }
+  for (const auto& [key, lit] : corridor_edges) {
+    const auto [n, t, h] = key;
+    if (!reserve.edges.contains(key)) {
+      inputs[{t, h}].push_back(lit);
+    }
+  }
+  rep.corridor_components      = corridor_models.size();
+  rep.corridor_candidate_edges = corridor_edges.size();
+  size_t       binding         = 0;
+  const size_t cl_conn         = cnf.clauses;
   size_t       cap_in = 0, cap_k = 0, cap_n = 0, cap_est = 0;
   struct Bound {
     int t, h, k, over;
@@ -2260,17 +3147,17 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       if (q < 0) {
         continue;  // no edge of the region to the right / above
       }
-      auto&     xs  = inputs[{t, h}];
+      auto& xs = inputs[{t, h}];
       if (o.untracked && (*o.untracked)[size_t(t)]) {
         continue;  // the checker alternative: no bound on the edges this tile owns
       }
       // the edge's tracks: the physical tracks of the narrower tile less the routes fixed ahead that cross the edge
-      const int k   = std::max(0,
-                               int(std::floor(std::min((h ? cap_h0 : cap_v0)[t], (h ? cap_h0 : cap_v0)[q]) * o.cap_scale))
-                                   - (h ? reserve.h : reserve.v)[size_t(t)]);
-      binding      += int(xs.size()) > k;
-      cap_in       += xs.size();
-      cap_k        += k;
+      const int k  = std::max(0,
+                              edge_limit(std::min((h ? cap_h0 : cap_v0)[t], (h ? cap_h0 : cap_v0)[q]), o)
+                                  - (h ? reserve.h : reserve.v)[size_t(t)]);
+      binding     += int(xs.size()) > k;
+      cap_in      += xs.size();
+      cap_k       += k;
       ++cap_n;
       cap_est += at_most_clauses(int(xs.size()), k);
       if (lazy_dir(h)) {
@@ -2307,11 +3194,15 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       if (pass) {
         if (g.row(ta) == g.row(tb)) {
           for (int i = std::min(g.col(ta), g.col(tb)); i < std::max(g.col(ta), g.col(tb)); ++i) {
-            ++through[{g.tile(i, g.row(ta)), 1}];
+            if (!reserve.edges.contains({cn.net, g.tile(i, g.row(ta)), 1})) {
+              ++through[{g.tile(i, g.row(ta)), 1}];
+            }
           }
         } else {
           for (int j = std::min(g.row(ta), g.row(tb)); j < std::max(g.row(ta), g.row(tb)); ++j) {
-            ++through[{g.tile(g.col(ta), j), 0}];
+            if (!reserve.edges.contains({cn.net, g.tile(g.col(ta), j), 0})) {
+              ++through[{g.tile(g.col(ta), j), 0}];
+            }
           }
         }
       }
@@ -2321,11 +3212,15 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       }
       if (g.row(ta) == g.row(tb)) {
         for (int i = std::min(g.col(ta), g.col(tb)); i < std::max(g.col(ta), g.col(tb)); ++i) {
-          ++straight[{g.tile(i, g.row(ta)), 1}];
+          if (!reserve.edges.contains({cn.net, g.tile(i, g.row(ta)), 1})) {
+            ++straight[{g.tile(i, g.row(ta)), 1}];
+          }
         }
       } else {
         for (int j = std::min(g.row(ta), g.row(tb)); j < std::max(g.row(ta), g.row(tb)); ++j) {
-          ++straight[{g.tile(g.col(ta), j), 0}];
+          if (!reserve.edges.contains({cn.net, g.tile(g.col(ta), j), 0})) {
+            ++straight[{g.tile(g.col(ta), j), 0}];
+          }
         }
       }
     }
@@ -2339,7 +3234,7 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
         if (q < 0) {
           continue;
         }
-        const int tracks = std::max(0, int(std::floor(std::min((h ? cap_h0 : cap_v0)[t], (h ? cap_h0 : cap_v0)[q]) * o.cap_scale)));
+        const int tracks = std::max(0, edge_limit(std::min((h ? cap_h0 : cap_v0)[t], (h ? cap_h0 : cap_v0)[q]), o));
         const int res = (h ? reserve.h : reserve.v)[size_t(t)], st = straight[{t, h}];
         if (res + st > tracks) {
           over.push_back({t, h, res, st, tracks});
@@ -2412,7 +3307,8 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
   // sat_min_fill: a region this empty is taken as routable without a solve (its boxes on their nearest tiles)
   const auto free_tiles     = std::ranges::count_if(T, [&](int t) { return !g.blocked[t]; });
   out.skipped               = o.sat_min_fill > 0 && double(B.size()) <= o.sat_min_fill * double(free_tiles);
-  auto             deadline = Clock::now() + std::chrono::milliseconds(o.sat_ms);
+  budget.build_seconds      = seconds_since(start);
+  auto&            deadline = budget.deadline;
   // sat_seed: the fallback placement is tried first (its tile literals assumed); a routable answer there is kept,
   // an UNSAT drops the assumptions and the free model continues with what the solver learned
   std::vector<int> seed;
@@ -2430,10 +3326,10 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       }
     }
   }
-  bool       seeded  = !seed.empty();
-  const auto left_ms = [&] {
-    return unsigned(std::max<long long>(1, std::chrono::duration_cast<std::chrono::milliseconds>(deadline - Clock::now()).count()));
-  };
+  if (o.sat_seed && !out.skipped) {
+    seed.insert(seed.end(), corridor_seed_literals.begin(), corridor_seed_literals.end());
+  }
+  bool       seeded     = !seed.empty();
   // one solve under the bounds' assumptions, the seed (dropped on its first UNSAT) and extra assumptions
   const auto solve_with = [&](const std::vector<int>& extra) {
     std::vector<int> a = assume;
@@ -2441,19 +3337,44 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
     if (seeded) {
       std::vector<int> b = a;
       b.insert(b.end(), seed.begin(), seed.end());
-      const auto st = cnf.solver.solve(b, o.sat_conflicts, left_ms());
+      const auto left = budget.remaining_ms();
+      if (!left) {
+        return Sat_status::unknown;
+      }
+      const auto st = cnf.solver.solve(b, o.sat_conflicts, left);
+      if (!budget.seed_status) {
+        budget.seed_status = st;
+      }
       ++rep.sat_solves;
       if (st != Sat_status::unsatisfiable) {
         return st;
       }
       seeded = false;
     }
+    const auto left = budget.remaining_ms();
+    if (!left) {
+      return Sat_status::unknown;
+    }
     ++rep.sat_solves;
-    return cnf.solver.solve(a, o.sat_conflicts, left_ms());
+    return cnf.solver.solve(a, o.sat_conflicts, left);
+  };
+  // Both lazy capacity checks and route emission must use the same selected
+  // boundary tile. Endpoint::tile remains the pre-SAT chooser's position.
+  const auto chosen_hop_tile = [&](const Endpoint& e) {
+    if (const auto* fh = free_hop(e)) {
+      for (const auto& [t, p] : fh->tiles) {
+        if (cnf.solver.value(p)) {
+          return t;
+        }
+      }
+      throw std::logic_error("legroute: SAT answer has no selected tile for a free endpoint");
+    }
+    return e.tile;
   };
   // the answer's decoded legs (connections, Steiner trunks and ribs) per tile and direction
   const auto decoded = [&] {
-    std::map<std::pair<int, int>, std::set<int>> covers;  // (tile, h) -> nets whose legs cover it
+    std::map<std::pair<int, int>, std::set<int>> covers;       // (tile, h) -> nets whose legs cover it
+    std::map<std::pair<int, int>, std::set<int>> exact_edges;  // new stubs, deduplicated per physical net
     std::vector<int>                             at_box(B.size(), -1);
     for (size_t i = 0; i < B.size(); ++i) {
       for (const auto& [t, p] : tiles_of[i]) {
@@ -2462,7 +3383,7 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
         }
       }
     }
-    const auto ep_tile = [&](const Endpoint& e) { return e.box >= 0 ? at_box[size_t(slot.at(e.box))] : e.tile; };
+    const auto ep_tile = [&](const Endpoint& e) { return e.box >= 0 ? at_box[size_t(slot.at(e.box))] : chosen_hop_tile(e); };
     const auto hcover  = [&](int n, int col_start, int col_end, int rr) {
       for (int i = std::min(col_start, col_end); i <= std::max(col_start, col_end); ++i) {
         covers[{g.tile(i, rr), 1}].insert(n);
@@ -2480,6 +3401,15 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       const int  ta = ep_tile(eps[size_t(conns[k].a)]), tb = ep_tile(eps[size_t(conns[k].b)]);
       const bool hf = cnf.solver.value(orient[k]);
       const int  hr = hf ? g.row(ta) : g.row(tb), vc = hf ? g.col(tb) : g.col(ta);
+      if (conns[k].part >= 0) {
+        for (int c = std::min(g.col(ta), g.col(tb)); c < std::max(g.col(ta), g.col(tb)); ++c) {
+          exact_edges[{g.tile(c, hr), 1}].insert(conns[k].net);
+        }
+        for (int rr = std::min(g.row(ta), g.row(tb)); rr < std::max(g.row(ta), g.row(tb)); ++rr) {
+          exact_edges[{g.tile(vc, rr), 0}].insert(conns[k].net);
+        }
+        continue;
+      }
       if (g.col(ta) != g.col(tb)) {
         hcover(conns[k].net, g.col(ta), g.col(tb), hr);
       }
@@ -2515,7 +3445,27 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
         }
       }
     }
-    return std::pair{covers, at_box};
+    // Legacy star/Steiner models keep their tile-cover semantics. New coarse
+    // stubs never enter this intersection and cannot acquire fictitious edges.
+    for (const auto& [key, nets] : covers) {
+      const auto [t, h] = key;
+      const auto other  = covers.find({next_tile(t, h), h});
+      if (other != covers.end()) {
+        for (int n : nets) {
+          if (other->second.contains(n)) {
+            exact_edges[{t, h}].insert(n);
+          }
+        }
+      }
+    }
+    for (const auto& [key, lit] : corridor_edges) {
+      budget.check();
+      if (cnf.solver.value(lit)) {
+        const auto [net, t, h] = key;
+        exact_edges[{t, h}].insert(net);
+      }
+    }
+    return exact_edges;
   };
   unsigned   lazy_rounds = 0;
   size_t     lazy_added  = 0;
@@ -2523,21 +3473,26 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
   // incrementally, until no bound overflows, UNSAT or the time is out. The answer kept is overflow-free on every
   // bound, lazy or not
   const auto settle      = [&](const std::vector<int>& extra) {
-    Sat_status st = solve_with(extra);
-    while (st == Sat_status::satisfiable && !lazy.empty()) {
-      const auto  dec    = decoded();
-      const auto& covers = dec.first;
-      size_t      added  = 0;
+    const auto initial_start = Clock::now();
+    Sat_status st            = solve_with(extra);
+    if (!budget.initial_status) {
+      budget.initial_status  = st;
+      budget.initial_seconds = seconds_since(initial_start);
+    }
+    while (st == Sat_status::satisfiable) {
+      const auto   edges                = decoded();
+      const size_t connectivity         = add_corridor_connectivity_cuts(cnf, corridor_models, budget);
+      rep.corridor_connectivity_cuts   += connectivity;
+      rep.corridor_connectivity_rounds += connectivity > 0;
+      size_t added                      = 0;
       for (auto& L : lazy) {
         if (L.xs.empty()) {
           continue;  // added in an earlier round
         }
-        int        use = 0;  // the nets crossing the edge: covering both its tiles
-        const auto a   = covers.find({L.t, L.h});
-        const auto b   = covers.find({next_tile(L.t, L.h), L.h});
-        if (a != covers.end() && b != covers.end()) {
-          for (int n : a->second) {
-            use += b->second.contains(n);
+        int use = 0;
+        if (const auto edge = edges.find({L.t, L.h}); edge != edges.end()) {
+          for (int n : edge->second) {
+            use += !reserve.edges.contains({n, L.t, L.h});
           }
         }
         if (use > L.k) {
@@ -2547,7 +3502,7 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
           ++added;
         }
       }
-      if (!added) {
+      if (!added && !connectivity) {
         break;
       }
       lazy_added += added;
@@ -2565,49 +3520,74 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
   // solve, so a tier that fails later leaves the last routable answer
   size_t     adjacent_nets = 0;
   const auto decode_answer = [&] {
-    out.conns.clear();
-    out.local.clear();
-    out.hop_tiles.clear();
-    adjacent_nets = 0;
+    // Keep the last verified answer intact until this candidate's actual geometry passes the independent check.
+    // In particular, deadline expiry while recounting a later tier must not publish an unchecked new pose.
+    Region_out       candidate;
+    size_t           changed_attachments = 0;
+    std::vector<int> at_box(B.size(), -1);
     for (size_t i = 0; i < B.size(); ++i) {
       for (const auto& [t, p] : tiles_of[i]) {
         if (cnf.solver.value(p)) {
-          boxes.boxes[B[i]].tile = t;
+          at_box[i] = t;
           break;
         }
+      }
+      if (at_box[i] < 0) {
+        throw std::logic_error("legroute: SAT answer has no selected tile for a box");
       }
     }
-    std::unordered_map<int, int> hop_at;  // hop id -> the tile chosen
     for (const auto& fh : hops_free) {
-      for (const auto& [t, p] : fh.tiles) {
-        if (cnf.solver.value(p)) {
-          hop_at[fh.id] = t;
-          out.hop_tiles.emplace_back(fh.net, fh.def, t);
-          break;
-        }
-      }
+      const int chosen = chosen_hop_tile({-1, fh.def, fh.id});
+      candidate.hop_tiles.emplace_back(fh.net, fh.def, chosen);
+      candidate.hop_choices.emplace(fh.id, chosen);
     }
     const auto ep_tile = [&](const Endpoint& e) {
       if (e.box >= 0) {
-        return boxes.boxes[e.box].tile;
+        return at_box[size_t(slot.at(e.box))];
       }
-      if (e.hop >= 0) {
-        if (const auto h = hop_at.find(e.hop); h != hop_at.end()) {
-          return h->second;
-        }
-      }
-      return e.tile;
+      return chosen_hop_tile(e);
     };
     for (size_t k = 0; k < conns.size(); ++k) {
       const auto& cn = conns[k];
       const auto  ta = ep_tile(eps[cn.a]);
       const auto  tb = ep_tile(eps[cn.b]);
       if (adjacent[k] && cnf.solver.value(adjacent[k])) {
-        out.local.push_back(cn.net);
-        ++adjacent_nets;
+        candidate.local.push_back(cn.net);
         continue;
       }
-      out.conns.push_back({cn.net, ta, tb, static_cast<bool>(cnf.solver.value(orient[k]))});
+      const bool hf = cnf.solver.value(orient[k]);
+      if (cn.part >= 0) {
+        const auto& attachment = eps[size_t(cn.b)];
+        const auto& backbone   = ends[size_t(cn.net)].coarse_parts.at({r, cn.part});
+        if (!backbone.contains(tb)) {
+          throw std::runtime_error(std::format(
+              "legroute coarse witness repair required: selected net {} region {} part {} attachment is outside its backbone",
+              cn.net,
+              r,
+              cn.part));
+        }
+        changed_attachments  += attachment.anchor_choice >= 0 && tb != attachment.tile;
+        const auto& corridor  = corridors.at({cn.net, cn.part});
+        const int   hr = hf ? g.row(ta) : g.row(tb), vc = hf ? g.col(tb) : g.col(ta);
+        const auto  check = [&](int t) {
+          budget.check();
+          if (!corridor.contains(t)) {
+            throw std::runtime_error(std::format(
+                "legroute coarse witness repair required: decoded net {} region {} part {} leaves its corridor at tile {}",
+                cn.net,
+                r,
+                cn.part,
+                t));
+          }
+        };
+        for (int c = std::min(g.col(ta), g.col(tb)); c <= std::max(g.col(ta), g.col(tb)); ++c) {
+          check(g.tile(c, hr));
+        }
+        for (int rr = std::min(g.row(ta), g.row(tb)); rr <= std::max(g.row(ta), g.row(tb)); ++rr) {
+          check(g.tile(vc, rr));
+        }
+      }
+      candidate.conns.push_back({cn.net, ta, tb, hf});
     }
     for (const auto& st : steiner) {
       const bool  ht   = cnf.solver.value(st.h_trunk);
@@ -2622,7 +3602,7 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
         const int   t    = ep_tile(e);
         const int   foot = ht ? g.tile(g.col(t), axis) : g.tile(axis, g.row(t));
         if (foot != t) {
-          out.conns.push_back({st.net, t, foot, ht});
+          candidate.conns.push_back({st.net, t, foot, ht});
         }
         feet.push_back(ht ? g.col(t) : g.row(t));
       }
@@ -2631,9 +3611,33 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
       for (size_t k = 1; k < feet.size(); ++k) {
         const int ta = ht ? g.tile(feet[k - 1], axis) : g.tile(axis, feet[k - 1]);
         const int tb = ht ? g.tile(feet[k], axis) : g.tile(axis, feet[k]);
-        out.conns.push_back({st.net, ta, tb, ht});
+        candidate.conns.push_back({st.net, ta, tb, ht});
       }
     }
+    std::set<std::tuple<int, int, int>> emitted_edges;
+    for (const auto& model : corridor_models) {
+      const auto selected = decode_corridor_edges(cnf, model, budget);
+      // Independent endpoint connectivity was checked from decoded geometry;
+      // exact net-edge union is emitted once even if multiple parts overlap.
+      for (const auto& [a, b] : selected) {
+        if (emitted_edges.emplace(model.net, a, b).second) {
+          candidate.conns.push_back({model.net, a, b, g.row(a) == g.row(b)});
+        }
+      }
+    }
+    validate_region_edges(g, r, candidate.conns, reserve, cap_h0, cap_v0, o, &budget);
+    rep.corridor_checked_components = corridor_models.size();
+    rep.corridor_selected_edges     = emitted_edges.size();
+    for (size_t i = 0; i < B.size(); ++i) {
+      boxes.boxes[B[i]].tile = at_box[i];
+    }
+    rep.coarse_attachments_changed = changed_attachments;
+    adjacent_nets                  = candidate.local.size();
+    out.conns                      = std::move(candidate.conns);
+    out.local                      = std::move(candidate.local);
+    out.hop_tiles                  = std::move(candidate.hop_tiles);
+    out.hop_choices                = std::move(candidate.hop_choices);
+    budget.decoded                 = true;
   };
   // the timing proxy: weighted route length (tiles) of the answer's connections, and the plain length of the tier
   // nets' connections (slack rank under tier_fraction)
@@ -2647,6 +3651,14 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
     }
     return c;
   };
+  if (!corridor_models.empty()) {
+    std::fprintf(stderr,
+                 "legroute sat region %d corridor: %zu components, %zu selectable net-edges, fixed interfaces, radius %u\n",
+                 r,
+                 corridor_models.size(),
+                 corridor_edges.size(),
+                 o.window_tiles);
+  }
   Sat_status status = out.skipped ? Sat_status::unknown : settle({});
   out.status        = status;
   if (status == Sat_status::satisfiable) {
@@ -2663,6 +3675,16 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
                  cnf.clauses,
                  cl_conn + cap_est,
                  tag.c_str());
+  }
+  if (!corridor_models.empty()) {
+    std::fprintf(
+        stderr,
+        "legroute sat region %d corridor: %zu connectivity cuts in %zu rounds, %zu checked components, %zu emitted net-edges\n",
+        r,
+        rep.corridor_connectivity_cuts,
+        rep.corridor_connectivity_rounds,
+        rep.corridor_checked_components,
+        rep.corridor_selected_edges);
   }
   // ---- timing tiers: on a routable answer, each tier's constraints are tried in batches, most critical first, with
   // every box held on its tile by assumptions, so the answer moves only where a constraint needs it: an UNSAT core
@@ -2880,7 +3902,12 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
           assume.push_back(-bounds[i].over);
         }
       }
-      relaxed = cnf.solver.solve(assume, o.sat_conflicts, o.sat_ms);
+      const auto left = budget.remaining_ms();
+      if (!left) {
+        break;
+      }
+      relaxed = cnf.solver.solve(assume, o.sat_conflicts, left);
+      ++rep.sat_solves;
       ++round;
     }
     size_t        tiles = 0, short_h = 0, short_v = 0, deficit_h = 0, deficit_v = 0, worst = 0, demand = 0, tracks = 0;
@@ -2961,12 +3988,12 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
                  over_routes,
                  over_inbox);
   }
-  rep.sat_variables     += cnf.variables;
-  rep.sat_clauses       += cnf.clauses;
-  rep.sat_binding_tiles += binding;
-  rep.sat_regions       += 1;
-  const double secs      = seconds_since(start);
-  size_t pass_nets = 0;  // nets with no box in the region: hop to hop (or pin) runs the region only carries
+  rep.sat_variables      += cnf.variables;
+  rep.sat_clauses        += cnf.clauses;
+  rep.sat_binding_tiles  += binding;
+  rep.sat_regions        += 1;
+  const double secs       = seconds_since(start);
+  size_t       pass_nets  = 0;  // nets with no box in the region: hop to hop (or pin) runs the region only carries
   for (int n : nets_here) {
     pass_nets += std::ranges::none_of(ends[n].per_region.at(r), [](const Endpoint& e) { return e.box >= 0; });
   }
@@ -2994,7 +4021,7 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
        : status == Sat_status::unsatisfiable ? rep.sat_unsat_regions
                                              : rep.sat_unknown_regions);
     // the region keeps its boxes on fitting tiles, nearest first (not routable by construction)
-    const auto tiles = fallback_tiles([&](size_t i) {
+    const auto tiles = !budget.remaining_ms() ? budget.fallback : fallback_tiles([&](size_t i) {
       std::vector<int> list;
       for (const auto& [t, _] : tiles_of[i]) {
         list.push_back(t);
@@ -3018,39 +4045,563 @@ void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int
   }
 }
 
+void solve_region_once(const Design& d, const Legroute_options& o, const Grid& g, int r, const std::vector<int>& B,
+                       const std::vector<int>& T, Boxes& boxes, const std::vector<Net_ends>& ends,
+                       const std::set<std::pair<int, int>>& treed, const std::unordered_map<int, std::vector<int>>& allowed,
+                       const std::vector<char>& pinned_tile, const std::string& tag, const std::vector<int>& cap_h0,
+                       const std::vector<int>& cap_v0, const Edge_reserve& reserve, const std::vector<std::vector<int>>& hop_tiles,
+                       const std::vector<int>& hop_room, Region_out& out, Clock::time_point shared_deadline) {
+  const auto    start = Clock::now();
+  Region_budget budget{start, std::min(shared_deadline, start + std::chrono::milliseconds(o.sat_ms))};
+  for (int b : B) {
+    const auto& box = boxes.boxes[size_t(b)];
+    budget.fallback.push_back(box.tile >= 0 ? box.tile : g.tile_of(box.cx, box.cy));
+  }
+  std::optional<Cnf> cnf;
+  try {
+    budget.check(true);
+    cnf.emplace(budget);
+    solve_region_model(d,
+                       o,
+                       g,
+                       r,
+                       B,
+                       T,
+                       boxes,
+                       ends,
+                       treed,
+                       allowed,
+                       pinned_tile,
+                       tag,
+                       cap_h0,
+                       cap_v0,
+                       reserve,
+                       hop_tiles,
+                       hop_room,
+                       out,
+                       budget,
+                       *cnf);
+  } catch (const Region_budget_expired&) {
+    // Setup expiry is UNKNOWN, never density evidence. A later optimization
+    // timeout may retain only an already decoded, capacity-checked answer;
+    // incoming or merely matched placement is not a routing witness.
+    if (budget.decoded) {
+      out.status = Sat_status::satisfiable;
+      ++out.rep.tier_timeouts;
+    } else {
+      if (out.status != Sat_status::unsatisfiable) {
+        out.status      = Sat_status::unknown;
+        out.unfit_boxes = 0;  // incomplete matching is not an area-deficit proof
+        out.unfit.clear();
+      }
+      out.conns.clear();
+      out.local.clear();
+      out.hop_tiles.clear();
+      out.hop_choices.clear();
+      for (size_t i = 0; i < B.size(); ++i) {
+        boxes.boxes[size_t(B[i])].tile = budget.fallback[i];
+      }
+    }
+    out.tiles.clear();
+    for (int b : B) {
+      out.tiles.emplace_back(b, boxes.boxes[size_t(b)].tile);
+    }
+    auto& rep       = out.rep;
+    rep.sat_regions = std::max<size_t>(1, rep.sat_regions);
+    if (out.status == Sat_status::unknown) {
+      if (out.skipped) {
+        rep.sat_skipped_regions = std::max<size_t>(1, rep.sat_skipped_regions);
+      } else {
+        rep.sat_unknown_regions = std::max<size_t>(1, rep.sat_unknown_regions);
+      }
+    }
+    if (out.status == Sat_status::unsatisfiable) {
+      rep.sat_unsat_regions = std::max<size_t>(1, rep.sat_unsat_regions);
+    }
+    if (cnf) {
+      rep.sat_variables = std::max(rep.sat_variables, cnf->variables);
+      rep.sat_clauses   = std::max(rep.sat_clauses, cnf->clauses);
+    }
+    const auto seconds  = seconds_since(start);
+    rep.sat_seconds_max = std::max(rep.sat_seconds_max, seconds);
+    std::fprintf(stderr,
+                 "legroute sat region %d: shared attempt deadline, status %s, %zu solves, %.3f s%s\n",
+                 r,
+                 budget.decoded                            ? "sat retained"
+                 : out.status == Sat_status::unsatisfiable ? "unsat retained"
+                                                           : "unknown",
+                 rep.sat_solves,
+                 seconds,
+                 tag.c_str());
+  } catch (...) {
+    // Keep construction-work telemetry for an optional proposal that reaches
+    // a recognized template limitation. Preserve the original exception.
+    if (cnf) {
+      out.rep.sat_variables = std::max(out.rep.sat_variables, cnf->variables);
+      out.rep.sat_clauses   = std::max(out.rep.sat_clauses, cnf->clauses);
+    }
+    throw;
+  }
+  const auto status_name = [](const std::optional<Sat_status>& status) {
+    return !status                                ? "not-run"
+           : *status == Sat_status::satisfiable   ? "sat"
+           : *status == Sat_status::unsatisfiable ? "unsat"
+                                                  : "unknown";
+  };
+  std::fprintf(stderr,
+               "legroute sat region %d timing: build %.3f s (complete %d), initial model %s %.3f s, seed %s, "
+               "capacity_lazy %u, total %.3f s%s; initial model includes fixed and any eager constraints\n",
+               r,
+               budget.build_seconds >= 0 ? budget.build_seconds : seconds_since(start),
+               budget.build_seconds >= 0,
+               status_name(budget.initial_status),
+               budget.initial_seconds,
+               status_name(budget.seed_status),
+               o.capacity_lazy,
+               seconds_since(start),
+               tag.c_str());
+}
+
+// Independent acceptance of an optional restricted proposal. The full graph's
+// domains and every per-part corridor remain authoritative; a rejected proposal
+// says nothing about their satisfiability.
+bool validate_corridor_seed(const Design& d, const Legroute_options& o, const Grid& g, int r, const std::vector<int>& B,
+                            const std::vector<int>& T, const Boxes& original, const std::vector<Net_ends>& ends,
+                            const std::set<std::pair<int, int>>& treed, const std::vector<char>& pinned_tile,
+                            const Edge_reserve& reserve, const std::vector<int>& cap_h0, const std::vector<int>& cap_v0,
+                            Region_out& candidate, Region_budget& budget) {
+  budget.check(true);
+  if (candidate.status != Sat_status::satisfiable || candidate.skipped || !candidate.local.empty() || !candidate.hop_choices.empty()
+      || !candidate.hop_tiles.empty() || candidate.tiles.size() != B.size()) {
+    return false;
+  }
+  const std::set<int> here(T.begin(), T.end()), members(B.begin(), B.end());
+  std::map<int, int>  placement;
+  std::set<int>       occupied;
+  for (const auto& [b, t] : candidate.tiles) {
+    budget.check();
+    if (!members.contains(b) || !here.contains(t) || !occupied.insert(t).second || !placement.emplace(b, t).second
+        || g.blocked[size_t(t)]) {
+      return false;
+    }
+    const auto& box    = original.boxes[size_t(b)];
+    const auto  domain = candidate.seed_box_domains.find(b);
+    if ((box.fixed && box.tile != t) || (!box.fixed && !pinned_tile.empty() && pinned_tile[size_t(t)]) || !box_fits(d, g, box, t)
+        || domain == candidate.seed_box_domains.end() || std::ranges::find(domain->second, t) == domain->second.end()) {
+      return false;
+    }
+  }
+  std::map<int, std::set<std::pair<int, int>>> edges;
+  const auto                                   take = [&](int n, int a, int b) {
+    budget.check();
+    if (n < 0 || size_t(n) >= ends.size() || !here.contains(a) || !here.contains(b)) {
+      return false;
+    }
+    edges[n].emplace(std::min(a, b), std::max(a, b));
+    return true;
+  };
+  for (const auto& pc : candidate.conns) {
+    budget.check();
+    if (pc.net < 0 || size_t(pc.net) >= ends.size() || !here.contains(pc.ta) || !here.contains(pc.tb)) {
+      return false;
+    }
+    const int hr = g.row(pc.h_first ? pc.ta : pc.tb), vc = g.col(pc.h_first ? pc.tb : pc.ta);
+    for (int c = std::min(g.col(pc.ta), g.col(pc.tb)); c < std::max(g.col(pc.ta), g.col(pc.tb)); ++c) {
+      if (!take(pc.net, g.tile(c, hr), g.tile(c + 1, hr))) {
+        return false;
+      }
+    }
+    for (int y = std::min(g.row(pc.ta), g.row(pc.tb)); y < std::max(g.row(pc.ta), g.row(pc.tb)); ++y) {
+      if (!take(pc.net, g.tile(vc, y), g.tile(vc, y + 1))) {
+        return false;
+      }
+    }
+  }
+  size_t                                       checked = 0, selected_edges = 0;
+  std::map<int, std::set<std::pair<int, int>>> permitted_edges;
+  for (size_t n = 0; n < ends.size(); ++n) {
+    budget.check();
+    if (!ends[n].refine_corridor || treed.contains({int(n), r})) {
+      continue;
+    }
+    const auto found = ends[n].per_region.find(r);
+    if (found == ends[n].per_region.end()) {
+      continue;
+    }
+    auto& permitted_union = permitted_edges[int(n)];
+    for (const auto& [part, group] : endpoint_groups(found->second)) {
+      const auto forest = ends[n].coarse_parts.find({r, part});
+      if (forest == ends[n].coarse_parts.end() || forest->second.empty()) {
+        throw std::logic_error("legroute seed validation has missing coarse part");
+      }
+      const auto       corridor = coarse_corridor(g, r, forest->second, o.window_tiles);
+      std::vector<int> terminals;
+      for (const auto& endpoint : group) {
+        if (endpoint.hop >= 0) {
+          return false;  // fixed interfaces in this first fast path
+        }
+        const int t = endpoint.box >= 0 ? placement.at(endpoint.box) : endpoint.tile;
+        if (!corridor.contains(t)) {
+          return false;
+        }
+        terminals.push_back(t);
+      }
+      std::map<int, std::vector<int>> adjacent;
+      for (const auto& [a, b] : edges[int(n)]) {
+        budget.check();
+        if (!corridor.contains(a) || !corridor.contains(b)) {
+          continue;
+        }
+        if (!o.window_tiles) {
+          const auto seed = ends[n].coarse_edges.find({r, part});
+          if (seed == ends[n].coarse_edges.end() || !seed->second.contains({a, b})) {
+            continue;
+          }
+        }
+        permitted_union.emplace(a, b);
+        adjacent[a].push_back(b);
+        adjacent[b].push_back(a);
+      }
+      if (!terminals.empty()) {
+        std::set<int>    seen{terminals.front()};
+        std::vector<int> pending{terminals.front()};
+        for (size_t i = 0; i < pending.size(); ++i) {
+          budget.check();
+          for (int q : adjacent[pending[i]]) {
+            if (seen.insert(q).second) {
+              pending.push_back(q);
+            }
+          }
+        }
+        if (!std::ranges::all_of(terminals, [&](int t) { return seen.contains(t); })) {
+          return false;
+        }
+      }
+      ++checked;
+    }
+    selected_edges += edges[int(n)].size();
+  }
+  // A valid net id is not enough: nets without an applicable corridor may
+  // contribute only geometry that was already immutable in the full model.
+  for (const auto& [n, es] : edges) {
+    for (const auto& [a, b] : es) {
+      if (!permitted_edges[n].contains({a, b}) && !reserve.edges.contains({n, a, int(g.row(a) == g.row(b))})) {
+        return false;
+      }
+    }
+  }
+  // Explicitly recount actual distinct-net edges against the original reserve,
+  // not the proposal's privately reintroduced backbone demand.
+  auto used_h = reserve.h, used_v = reserve.v;
+  for (const auto& [n, es] : edges) {
+    for (const auto& [a, b] : es) {
+      budget.check();
+      const bool h = g.row(a) == g.row(b);
+      if (!reserve.edges.contains({n, a, int(h)})) {
+        ++(h ? used_h : used_v)[size_t(a)];
+      }
+    }
+  }
+  for (int t : T) {
+    for (bool h : {true, false}) {
+      budget.check();
+      const int q = h ? (g.col(t) + 1 < g.cols ? t + 1 : -1) : (g.row(t) + 1 < g.rows ? t + g.cols : -1);
+      if (!here.contains(q)) {
+        continue;
+      }
+      const auto& cap = h ? cap_h0 : cap_v0;
+      if ((h ? used_h : used_v)[size_t(t)] > std::max(0, edge_limit(std::min(cap[size_t(t)], cap[size_t(q)]), o))) {
+        return false;
+      }
+    }
+  }
+  validate_region_edges(g, r, candidate.conns, reserve, cap_h0, cap_v0, o, &budget);
+  // Publish only canonical actual edges, including the proposal's original
+  // forest, once per net. The caller must never append refinable seed pieces.
+  candidate.conns.clear();
+  for (const auto& [n, es] : edges) {
+    for (const auto& [a, b] : es) {
+      candidate.conns.push_back({n, a, b, g.row(a) == g.row(b)});
+    }
+  }
+  candidate.rep.corridor_components         = checked;
+  candidate.rep.corridor_checked_components = checked;
+  candidate.rep.corridor_selected_edges     = selected_edges;
+  budget.check(true);
+  return true;
+}
+
+void solve_region(const Design& d, const Legroute_options& o, const Grid& g, int r, const std::vector<int>& B,
+                  const std::vector<int>& T, Boxes& boxes, const std::vector<Net_ends>& ends,
+                  const std::set<std::pair<int, int>>& treed, const std::unordered_map<int, std::vector<int>>& allowed,
+                  const std::vector<char>& pinned_tile, const std::string& tag, const std::vector<int>& cap_h0,
+                  const std::vector<int>& cap_v0, const Edge_reserve& reserve, const std::vector<std::vector<int>>& hop_tiles,
+                  const std::vector<int>& hop_room, Region_out& out, Clock::time_point shared_deadline,
+                  const Boxes* route_seed = nullptr) {
+  const auto     start    = Clock::now();
+  const auto     deadline = std::min(shared_deadline, start + std::chrono::milliseconds(o.sat_ms));
+  const auto     left     = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - start).count();
+  const unsigned seed_ms  = left > 0 ? unsigned(std::min<long long>(1000, left / 4)) : 0;
+  bool eligible = movable_route_partition(o) && o.window_tiles > 0 && seed_ms && !out.skipped && !o.untracked && !o.sat_relax_rounds
+                  && !o.sat_min_fill;
+  bool has_corridor = false;
+  for (const auto& net : ends) {
+    const auto region = net.per_region.find(r);
+    if (!net.refine_corridor || region == net.per_region.end()) {
+      continue;
+    }
+    has_corridor = true;
+    for (const auto& endpoint : region->second) {
+      if (endpoint.hop >= 0) {
+        eligible = false;
+      }
+    }
+  }
+  Legroute_report seed_report;
+  if (eligible && has_corridor) {
+    const auto    seed_start = Clock::now();
+    Region_budget proposal_budget{seed_start, std::min(deadline, start + std::chrono::milliseconds(seed_ms))};
+    Region_out    candidate;
+    candidate.capture_seed_domains = true;
+    ++seed_report.corridor_seed_attempts;
+    try {
+      // Only B-owned fields may be read while neighboring region workers mutate
+      // their own .tile fields. Other entries remain inaccessible sentinels.
+      Boxes proposed;
+      proposed.boxes.resize(boxes.boxes.size());
+      for (int b : B) {
+        proposal_budget.check();
+        proposed.boxes[size_t(b)] = boxes.boxes[size_t(b)];
+      }
+      std::map<int, std::vector<int>> point_domains;
+      bool                            point_proposal = false;
+      if (route_seed && route_seed->boxes.size() == boxes.boxes.size()) {
+        // The point proposal is private. Its domain certificate comes from the
+        // original boxes, never from the singleton domains used to test it.
+        const auto domains
+            = prepare_box_domains(d, o, g, r, B, T, proposed, allowed, pinned_tile, [&] { proposal_budget.check(true); });
+        bool valid = domains.matching.size() == B.size();
+        for (size_t i = 0; valid && i < B.size(); ++i) {
+          const int b = B[i], t = route_seed->boxes[size_t(b)].tile;
+          auto candidates = box_domain_tiles(d, g, b, domains.windows[i], proposed, allowed, domains.lifted, pinned_tile, T, [&] {
+            proposal_budget.check(true);
+          });
+          valid           = std::ranges::find(candidates, t) != candidates.end();
+          point_domains.emplace(b, std::move(candidates));
+        }
+        if (valid) {
+          point_proposal = true;
+          for (int b : B) {
+            proposed.boxes[size_t(b)].tile  = route_seed->boxes[size_t(b)].tile;
+            proposed.boxes[size_t(b)].fixed = true;
+          }
+        } else {
+          point_domains.clear();  // ordinary fixed-backbone proposal remains available
+        }
+      }
+      auto seed_options = o;
+      seed_options.tiers.clear();
+      seed_options.sat_ms = seed_ms;
+      if (point_proposal) {
+        // Verify the supplied point, including its interface attachments.
+        // Reattachment choices can add useless cycles to an already valid
+        // forest. The complete fallback retains the original corridor radius.
+        seed_options.window_tiles = 0;
+      }
+      std::vector<Net_ends>               seed_ends(ends.size());
+      auto                                seed_reserve = reserve;
+      std::set<std::tuple<int, int, int>> backbone;
+      for (size_t n = 0; n < ends.size(); ++n) {
+        proposal_budget.check();
+        const auto region = ends[n].per_region.find(r);
+        if (region == ends[n].per_region.end()) {
+          continue;
+        }
+        auto& seed = seed_ends[n];
+        seed.per_region.emplace(r, region->second);
+        seed.preserve_coarse = ends[n].preserve_coarse;
+        seed.driver_region   = ends[n].driver_region;
+        for (const auto& [key, tiles] : ends[n].coarse_parts) {
+          if (key.first == r) {
+            seed.coarse_parts.emplace(key, tiles);
+          }
+        }
+        for (const auto& [key, tiles] : ends[n].coarse_junctions) {
+          if (key.first == r) {
+            seed.coarse_junctions.emplace(key, tiles);
+          }
+        }
+        if (!ends[n].refine_corridor || treed.contains({int(n), r})) {
+          continue;
+        }
+        for (const auto& [key, edges] : ends[n].coarse_edges) {
+          if (key.first != r) {
+            continue;
+          }
+          for (const auto& [a, b] : edges) {
+            proposal_budget.check();
+            if (a < 0 || b <= a || size_t(b) >= g.size() || g.region[size_t(a)] != r || g.region[size_t(b)] != r
+                || std::abs(g.col(a) - g.col(b)) + std::abs(g.row(a) - g.row(b)) != 1) {
+              throw std::logic_error("legroute seed contains an invalid original edge");
+            }
+            const int h = g.row(a) == g.row(b);
+            backbone.emplace(int(n), a, b);
+            if (seed_reserve.edges.emplace(int(n), a, h).second) {
+              ++(h ? seed_reserve.h : seed_reserve.v)[size_t(a)];
+            }
+            seed_reserve.cuts[{int(n), r, h}].insert((h ? g.col(a) : g.row(a)) + 1);
+          }
+        }
+      }
+      proposal_budget.check(true);
+      solve_region_once(d,
+                        seed_options,
+                        g,
+                        r,
+                        B,
+                        T,
+                        proposed,
+                        seed_ends,
+                        treed,
+                        allowed,
+                        pinned_tile,
+                        tag + " corridor-proposal",
+                        cap_h0,
+                        cap_v0,
+                        seed_reserve,
+                        hop_tiles,
+                        hop_room,
+                        candidate,
+                        proposal_budget.deadline);
+      if (candidate.status == Sat_status::satisfiable) {
+        if (!point_domains.empty()) {
+          candidate.seed_box_domains = std::move(point_domains);
+        }
+        for (const auto& [n, a, b] : backbone) {
+          candidate.conns.push_back({n, a, b, g.row(a) == g.row(b)});
+        }
+        if (validate_corridor_seed(d,
+                                   o,
+                                   g,
+                                   r,
+                                   B,
+                                   T,
+                                   boxes,
+                                   ends,
+                                   treed,
+                                   pinned_tile,
+                                   reserve,
+                                   cap_h0,
+                                   cap_v0,
+                                   candidate,
+                                   proposal_budget)) {
+          for (const auto& [b, t] : candidate.tiles) {
+            boxes.boxes[size_t(b)].tile = t;
+          }
+          ++seed_report.corridor_seed_successes;
+        }
+      }
+    } catch (const Region_budget_expired&) {
+      // Proposal setup/validation uses the same small allowance; no partial
+      // answer or narrowed domains survive into the complete model.
+    } catch (const Coarse_stub_unsupported&) {
+    } catch (const Legroute_unfit&) {
+    }
+    seed_report.corridor_seed_seconds   = seconds_since(seed_start);
+    seed_report.corridor_seed_solves    = candidate.rep.sat_solves;
+    seed_report.corridor_seed_variables = candidate.rep.sat_variables;
+    seed_report.corridor_seed_clauses   = candidate.rep.sat_clauses;
+    std::fprintf(stderr,
+                 "legroute sat region %d corridor proposal: %s, %zu solves, %.3f s, allowance %u ms%s\n",
+                 r,
+                 seed_report.corridor_seed_successes ? "verified" : "inconclusive; full graph follows",
+                 seed_report.corridor_seed_solves,
+                 seed_report.corridor_seed_seconds,
+                 seed_ms,
+                 tag.c_str());
+    if (seed_report.corridor_seed_successes) {
+      candidate.capture_seed_domains = false;
+      candidate.seed_box_domains.clear();
+      out = std::move(candidate);
+    }
+  }
+  if (!seed_report.corridor_seed_successes) {
+    solve_region_once(d,
+                      o,
+                      g,
+                      r,
+                      B,
+                      T,
+                      boxes,
+                      ends,
+                      treed,
+                      allowed,
+                      pinned_tile,
+                      tag,
+                      cap_h0,
+                      cap_v0,
+                      reserve,
+                      hop_tiles,
+                      hop_room,
+                      out,
+                      deadline);
+  }
+  out.rep.corridor_seed_attempts  += seed_report.corridor_seed_attempts;
+  out.rep.corridor_seed_successes += seed_report.corridor_seed_successes;
+  out.rep.corridor_seed_solves    += seed_report.corridor_seed_solves;
+  out.rep.corridor_seed_variables += seed_report.corridor_seed_variables;
+  out.rep.corridor_seed_clauses   += seed_report.corridor_seed_clauses;
+  out.rep.corridor_seed_seconds   += seed_report.corridor_seed_seconds;
+  out.rep.sat_seconds_max          = std::max(out.rep.sat_seconds_max, seconds_since(start));
+}
+
 // The routed nets' endpoints per region (boxes, fixed tiles) and the hops that join their regions: one per fixed
 // virtual pin, then chains through the regions between those the pins leave unjoined. The hops take their tracks.
 struct Crossings {
-  std::vector<Net_ends>            ends;
-  std::vector<std::pair<int, int>> hops;  // tile pairs across region boundaries
-  std::vector<int>                 hop_net;
-  size_t                           unjoined   = 0;
-  size_t                           over_share = 0;  // hops placed past hop_share on every tile of their boundary
-  std::vector<Global_piece>        pieces;          // legroute.global: the runs fixed ahead through pass-through regions
-  size_t                           global_nets = 0;
+  std::vector<Net_ends>               ends;
+  std::vector<std::pair<int, int>>    hops;  // tile pairs across region boundaries
+  std::vector<int>                    hop_net;
+  std::set<std::pair<int, int>>       retained;        // complete (net, region) pieces, including parts with no interior edge
+  std::set<std::tuple<int, int, int>> retained_parts;  // (net, region, part), only pass-through components
+  size_t                              unjoined   = 0;
+  size_t                              over_share = 0;  // hops placed past hop_share on every tile of their boundary
+  std::vector<Global_piece>           pieces;          // legroute.global: the runs fixed ahead through pass-through regions
+  size_t                              global_nets  = 0;
   size_t                           global_unrouted = 0, global_full = 0;  // global_route: nets without a path, edges at the share
+  size_t                           global_topology_disconnected = 0;
   size_t                           global_overflow_edges = 0, global_overflow_tracks = 0;  // edges over the share after the rounds
   unsigned                         global_rounds = 0;
   std::vector<std::pair<int, int>> global_over;  // those edges (lower / left tile, h): where the cells should give way
-  double                           global_seconds = 0;
+  double                           global_seconds     = 0;
+  size_t                           global_search_pops = 0, global_search_limited = 0;
+  size_t                           pattern_attempts = 0, pattern_completed = 0, pattern_fallbacks = 0;
+  size_t                           pattern_work = 0, pattern_work_limited = 0;
 };
 Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Legroute_regions& regions, std::vector<int>& cap_h,
-                    std::vector<int>& cap_v, bool diagnose) {
-  Crossings  out;
-  auto&      ends        = out.ends;
-  auto&      hops        = out.hops;
-  auto&      hop_net     = out.hop_net;
+                    std::vector<int>& cap_v, bool diagnose, const Global_routes* all_routes = nullptr) {
+  Crossings                     out;
+  auto&                         ends    = out.ends;
+  auto&                         hops    = out.hops;
+  auto&                         hop_net = out.hop_net;
   std::vector<std::vector<int>> net_hops(d.nets.size());  // per net: its hops (a scan of every hop per net was quadratic)
-  const auto add_hop     = [&](int n, int a, int b) {
-    net_hops[n].push_back(int(hops.size()));
+  const auto                    add_hop = [&](int n, int a, int b) {
+    const int id = int(hops.size());
+    net_hops[n].push_back(id);
     hops.emplace_back(a, b);
     hop_net.push_back(n);
+    return id;
   };
+  const bool preserve_coarse = movable_route_partition(d.opt);
+  if (preserve_coarse && !all_routes) {
+    throw std::runtime_error("legroute coarse witness repair required: movable regional routing has no admitted global forest");
+  }
   const auto box_of_comp = [&](int comp) { return comp >= 0 && d.cell[comp] >= 0 ? boxes.box_of[d.cell[comp]] : -1; };
   ends.resize(d.nets.size());
   std::unordered_map<size_t, std::vector<std::pair<double, double>>> fixed_pins;
-  for (const auto& p : regions.pins) {
-    fixed_pins[p.net].emplace_back(p.x, p.y);
+  if (d.opt.region_pins) {
+    for (const auto& p : regions.pins) {
+      fixed_pins[p.net].emplace_back(p.x, p.y);
+    }
   }
   for (size_t n = 0; n < d.nets.size(); ++n) {
     const auto& N = d.nets[n];
@@ -3067,16 +4618,7 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
         e.box  = box;
         region = boxes.boxes[box].region;
       } else {
-        double x = 0, y = 0;
-        if (p.comp >= 0) {
-          const auto& c = d.fp.components[p.comp];
-          x             = double(c.place.x) + d.macro[p.comp]->width * double(d.fp.dbu) / 2;
-          y             = double(c.place.y) + d.macro[p.comp]->height * double(d.fp.dbu) / 2;
-        } else if (p.term >= 0) {
-          x = double(d.fp.terminals[p.term].x);
-          y = double(d.fp.terminals[p.term].y);
-        }
-        e.tile = g.tile_of(x, y);
+        e.tile = physical_pin_access(d, g, p).tile;
         region = g.region[e.tile];
       }
       if (int(k) == N.driver) {
@@ -3200,7 +4742,7 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
   std::vector<std::array<int, 2>> through(g.size(), {0, 0});
   std::vector<size_t>             order;
   for (size_t n = 0; n < d.nets.size(); ++n) {
-    if (ends[n].per_region.size() >= 2) {
+    if (ends[n].per_region.size() >= 2 || (all_routes && !ends[n].per_region.empty())) {
       order.push_back(n);
     }
   }
@@ -3214,11 +4756,23 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
     }
     return std::pair{x / double(list.size()), y / double(list.size())};
   };
-  // legroute.global (global_route): every crossing net's tree over the tile grid ahead of the chains below; a net
-  // the router finds no path for keeps the chain
+  // legroute.global: route crossing nets with their actual fixed interfaces. A failed secondary route returns
+  // to planning before fallback chains or any regional SAT model can consume it.
   Global_routes       GR;
   std::vector<size_t> gr_index(d.nets.size(), SIZE_MAX);
-  if (d.opt.global_route) {
+  if (all_routes) {
+    for (const size_t n : order) {
+      gr_index[n] = n;
+    }
+    out.global_unrouted              = all_routes->unrouted;
+    out.global_topology_disconnected = all_routes->topology_disconnected;
+    out.global_full                  = all_routes->edges_full;
+    out.global_overflow_edges        = all_routes->overflow_edges;
+    out.global_overflow_tracks       = all_routes->overflow_tracks;
+    out.global_rounds                = all_routes->rounds;
+    out.global_over                  = all_routes->over;
+    // The owner accounts for router time once; recutting crossings performs no global search.
+  } else if (d.opt.global_route) {
     std::vector<Global_net> gnets;
     for (const size_t n : order) {
       Global_net  gn;
@@ -3256,28 +4810,130 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
       gr_index[n] = gnets.size();
       gnets.push_back(std::move(gn));
     }
-    GR = global_route(g, cap_h, cap_v, d.opt.global_share, d.opt.global_own_share, gnets, d.opt.global_margin, d.opt.global_rounds);
-    out.global_unrouted = GR.unrouted;
-    out.global_full     = GR.edges_full;
-    out.global_overflow_edges  = GR.overflow_edges;
-    out.global_overflow_tracks = GR.overflow_tracks;
-    out.global_rounds          = GR.rounds;
-    out.global_over            = GR.over;
-    out.global_seconds         = GR.seconds;
-    std::fprintf(stderr,
-                 "legroute global: %zu crossing nets routed over the grid, %zu without a path, %zu edges at the share, %zu over it by %zu "
-                 "tracks after %u negotiation rounds, %.1f s\n",
-                 gnets.size() - GR.unrouted,
-                 GR.unrouted,
-                 GR.edges_full,
-                 GR.overflow_edges,
-                 GR.overflow_tracks,
-                 GR.rounds,
-                 GR.seconds);
+    GR                               = global_route(g,
+                                                    cap_h,
+                                                    cap_v,
+                                                    d.opt.global_share,
+                                                    d.opt.global_own_share,
+                                                    gnets,
+                                                    d.opt.global_margin,
+                                                    d.opt.global_rounds,
+                                                    d.opt.global_net_pops,
+                                                    d.opt.global_astar_weight,
+                                                    d.opt.global_pattern);
+    // The initial all-signal screen did not include these fixed virtual IOs or
+    // own-region route choices. Screen the actual secondary problem as well.
+    // Fixed hops are emitted even when the router connects their endpoints by
+    // another path, so include their union exactly once per net and edge.
+    auto             screened_routes = GR;
+    std::vector<int> tree_nets;
+    for (size_t k = 0; k < gnets.size(); ++k) {
+      tree_nets.push_back(gnets[k].net);
+      if (!gnets[k].fixed_edges.empty()) {
+        auto&                         tree = screened_routes.trees[k];
+        std::set<std::pair<int, int>> net_edges(tree.edges.begin(), tree.edges.end());
+        for (const auto& [a, b] : gnets[k].fixed_edges) {
+          net_edges.emplace(std::min(a, b), std::max(a, b));
+        }
+        tree.edges.assign(net_edges.begin(), net_edges.end());
+      }
+    }
+    // Recompute share overflow for the union using the secondary router's
+    // accounting policy. Own-region interiors remain exempt when own_share is
+    // zero; the independent raw 95% screen below still checks every edge.
+    std::vector<int> screened_h(g.size()), screened_v(g.size());
+    for (size_t k = 0; k < gnets.size(); ++k) {
+      for (const auto& [a, b] : screened_routes.trees[k].edges) {
+        if (d.opt.global_own_share > 0 || g.region[a] != g.region[b]
+            || std::ranges::find(gnets[k].own_regions, g.region[a]) == gnets[k].own_regions.end()) {
+          ++(g.row(a) == g.row(b) ? screened_h : screened_v)[size_t(a)];
+        }
+      }
+    }
+    screened_routes.edges_full = screened_routes.overflow_edges = screened_routes.overflow_tracks = 0;
+    screened_routes.over.clear();
+    for (size_t t = 0; t < g.size(); ++t) {
+      for (bool horizontal : {true, false}) {
+        const bool exists = horizontal ? g.col(int(t)) + 1 < g.cols : g.row(int(t)) + 1 < g.rows;
+        if (!exists) {
+          continue;
+        }
+        const size_t q              = t + (horizontal ? 1 : size_t(g.cols));
+        const auto&  cap            = horizontal ? cap_h : cap_v;
+        const int    limit          = int(std::floor(d.opt.global_share * double(std::min(cap[t], cap[q]))));
+        const int    use            = (horizontal ? screened_h : screened_v)[t];
+        screened_routes.edges_full += limit > 0 && use >= limit;
+        if (use > limit) {
+          ++screened_routes.overflow_edges;
+          screened_routes.overflow_tracks += size_t(use - limit);
+          screened_routes.over.emplace_back(int(t), horizontal);
+        }
+      }
+    }
+    std::vector<char> hot;
+    auto              gates = assess_legroute_gates(d, g, &boxes, screened_routes, tree_nets, cap_h, cap_v, false, &hot);
+    gates.stage             = Legroute_gate_report::Stage::secondary;
+    if (gates.unrouted || gates.routing_dense_edges || gates.overflow_tracks) {
+      // Generic failed-net feedback includes physical pins. These requests also
+      // contain virtual anchors, which must appear in the repair footprint.
+      for (size_t k = 0; k < gnets.size(); ++k) {
+        if (GR.trees[k].routed) {
+          continue;
+        }
+        for (int tile : gnets[k].endpoints) {
+          if (!hot[size_t(tile)]) {
+            hot[size_t(tile)] = true;
+            gates.hotspots.push_back({double(g.left(g.col(tile))),
+                                      double(g.bottom(g.row(tile))),
+                                      double(g.left(g.col(tile)) + g.tile_w),
+                                      double(g.bottom(g.row(tile)) + g.tile_h)});
+          }
+        }
+      }
+      if (!d.opt.output_dir.empty()) {
+        std::filesystem::create_directories(d.opt.output_dir);
+        std::ofstream report(d.opt.output_dir + "/pre_sat.json");
+        report << legroute_gate_json(gates) << '\n';
+        if (!report) {
+          throw std::runtime_error("legroute: cannot write secondary global admission report");
+        }
+      }
+      std::fprintf(stderr, "legroute: fixed-interface global reroute failed admission; return to planning before SAT\n");
+      throw Legroute_replan(std::move(gates));
+    }
+    out.global_unrouted              = GR.unrouted;
+    out.global_topology_disconnected = GR.topology_disconnected;
+    out.global_full                  = GR.edges_full;
+    out.global_overflow_edges        = GR.overflow_edges;
+    out.global_overflow_tracks       = GR.overflow_tracks;
+    out.global_rounds                = GR.rounds;
+    out.global_over                  = GR.over;
+    out.global_seconds               = GR.seconds;
+    out.global_search_pops           = GR.search_pops;
+    out.global_search_limited        = GR.search_limited;
+    out.pattern_attempts             = GR.pattern_attempts;
+    out.pattern_completed            = GR.pattern_completed;
+    out.pattern_fallbacks            = GR.pattern_fallbacks;
+    out.pattern_work                 = GR.pattern_work;
+    out.pattern_work_limited         = GR.pattern_work_limited;
+    std::fprintf(
+        stderr,
+        "legroute global: %zu crossing nets routed over the grid, %zu without a path, %zu edges at the share, %zu over it by %zu "
+        "tracks after %u negotiation rounds, %zu queue pops, %zu search-limited attempts, %.1f s\n",
+        gnets.size() - GR.unrouted,
+        GR.unrouted,
+        GR.edges_full,
+        GR.overflow_edges,
+        GR.overflow_tracks,
+        GR.rounds,
+        GR.search_pops,
+        GR.search_limited,
+        GR.seconds);
   }
-  const auto t_start    = Clock::now();
-  double     next_print = 30;
-  size_t     done       = 0;
+  const auto  t_start      = Clock::now();
+  const auto& global_trees = all_routes ? all_routes->trees : GR.trees;
+  double      next_print   = 30;
+  size_t      done         = 0;
   for (const size_t n : order) {
     if (++done % 256 == 0 && seconds_since(t_start) >= next_print) {  // a large design: where the crossings are
       std::fprintf(stderr,
@@ -3314,10 +4970,8 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
         comp[a] = b;
       }
     };
-    for (size_t k = 0; k < hops.size(); ++k) {  // the fixed pins already joined
-      if (hop_net[k] == int(n)) {
-        unite(g.region[hops[k].first], g.region[hops[k].second]);
-      }
+    for (int k : net_hops[n]) {  // the fixed pins already joined
+      unite(g.region[hops[k].first], g.region[hops[k].second]);
     }
     const int  root_region = E.driver_region >= 0 ? E.driver_region : E.per_region.begin()->first;
     // legroute.global: a critical net joins a region with an L over the tile grid from the nearest endpoint of the
@@ -3327,14 +4981,60 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
     // below joins the region instead
     const bool global      = d.opt.global_fraction > 0 && d.nets[n].rank < d.opt.global_fraction;
     bool       traced      = false;
-    if (const size_t gi = gr_index[n]; gi != SIZE_MAX && GR.trees[gi].routed) {
+    if (const size_t gi = gr_index[n]; gi != SIZE_MAX && global_trees[gi].routed) {
       // the routed tree: its boundary crossings are the net's hops, its runs through the regions holding none of
       // the net's own endpoints are fixed pieces (an L each), the regions it touches are joined
-      const auto&   tedges = GR.trees[gi].edges;
-      std::set<int> own;  // regions with an endpoint of the net itself (a box, a pin, a fixed cell)
-      for (const auto& [r, list] : E.per_region) {
-        if (std::ranges::any_of(list, [&](const Endpoint& e) { return e.box >= 0 || !hop_tiles.contains(e.tile); })) {
-          own.insert(r);
+      const auto&   tedges = global_trees[gi].edges;
+      // Keep real endpoints distinct from synthetic hops, including a fixed
+      // physical pin that happens to coincide with a boundary hop.
+      std::set<int> own_tiles;
+      for (const auto& pin : d.nets[n].pins) {
+        const int b = box_of_comp(pin.comp);
+        own_tiles.insert(b >= 0 ? g.tile_of(boxes.boxes[size_t(b)].cx, boxes.boxes[size_t(b)].cy)
+                                : physical_pin_access(d, g, pin).tile);
+      }
+      if (preserve_coarse) {
+        E.preserve_coarse = true;
+        E.refine_corridor = true;
+        std::set<int>                   witnessed;
+        std::map<int, std::vector<int>> adjacency;
+        for (const auto& [a, b] : tedges) {
+          if (a < 0 || b < 0 || size_t(a) >= g.size() || size_t(b) >= g.size()
+              || std::abs(g.col(a) - g.col(b)) + std::abs(g.row(a) - g.row(b)) != 1) {
+            throw std::runtime_error(std::format("legroute coarse witness repair required: net {} has a non-grid edge", n));
+          }
+          witnessed.insert(a);
+          witnessed.insert(b);
+          adjacency[a].push_back(b);
+          adjacency[b].push_back(a);
+        }
+        if (tedges.empty() && own_tiles.size() == 1) {
+          witnessed.insert(*own_tiles.begin());
+        }
+        for (int t : own_tiles) {
+          if (!witnessed.contains(t)) {
+            throw std::runtime_error(
+                std::format("legroute coarse witness repair required: net {} has a stale or missing endpoint attachment at tile {}",
+                            n,
+                            t));
+          }
+        }
+        std::set<int>    reached;
+        std::vector<int> queue;
+        if (!own_tiles.empty()) {
+          reached.insert(*own_tiles.begin());
+          queue.push_back(*own_tiles.begin());
+        }
+        for (size_t at = 0; at < queue.size(); ++at) {
+          for (int q : adjacency[queue[at]]) {
+            if (reached.insert(q).second) {
+              queue.push_back(q);
+            }
+          }
+        }
+        if (reached != witnessed) {
+          throw std::runtime_error(
+              std::format("legroute coarse witness repair required: net {} marked routed has disconnected original geometry", n));
         }
       }
       std::set<std::pair<int, int>> had;  // the net's hops so far (its fixed virtual pins)
@@ -3359,16 +5059,70 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
             || double(hop_use[b][dir]) > d.opt.hop_share * (dir ? cap_v : cap_h)[b]) {
           ++out.over_share;
         }
-        add_hop(int(n), a, b);
+        const int interface_id = add_hop(int(n), a, b);
         for (int x : {a, b}) {
           auto& list = E.per_region[g.region[x]];
-          if (std::ranges::none_of(list, [&](const Endpoint& o) { return o.tile == x; })) {
-            list.push_back({-1, x});
+          if (preserve_coarse || std::ranges::none_of(list, [&](const Endpoint& o) { return o.tile == x; })) {
+            Endpoint endpoint{-1, x};
+            endpoint.interface_id = preserve_coarse ? interface_id : -1;
+            list.push_back(endpoint);
           }
           hop_tiles.insert(x);
         }
       }
-      // a path of the tree inside a pass-through region, split into straight runs; two runs make an L piece
+      // Removing boundary edges can split a global tree into several components
+      // of the same region, including isolated hop tiles. Preserve that required
+      // connectivity without fixing the interior paths chosen by local SAT.
+      std::map<int, int> parent;
+      const auto         root = [&](auto&& self, int t) -> int {
+        const auto it = parent.try_emplace(t, t).first;
+        if (it->second != t) {
+          it->second = self(self, it->second);
+        }
+        return it->second;
+      };
+      for (const auto& [r, ie] : interior) {
+        for (const auto& [a, b] : ie) {
+          const int ra = root(root, a), rb = root(root, b);
+          parent[std::max(ra, rb)] = std::min(ra, rb);
+        }
+      }
+      for (auto& [r, list] : E.per_region) {
+        for (auto& e : list) {
+          const int t = e.box >= 0 ? g.tile_of(boxes.boxes[size_t(e.box)].cx, boxes.boxes[size_t(e.box)].cy) : e.tile;
+          e.part      = root(root, t);
+        }
+      }
+      std::set<int> own_parts;
+      for (int t : own_tiles) {
+        own_parts.insert(root(root, t));
+      }
+      if (preserve_coarse) {
+        for (auto& [r, list] : E.per_region) {
+          for (auto& e : list) {
+            if (E.refine_corridor || own_parts.contains(e.part)) {
+              const int t = e.box >= 0 ? g.tile_of(boxes.boxes[size_t(e.box)].cx, boxes.boxes[size_t(e.box)].cy) : e.tile;
+              e.anchor    = t;
+              E.coarse_parts[{r, e.part}].insert(t);
+              E.coarse_junctions[{r, e.part}].insert(t);
+            } else {
+              out.retained_parts.emplace(int(n), r, e.part);
+            }
+          }
+        }
+        for (const auto& [r, ie] : interior) {
+          for (const auto& [a, b] : ie) {
+            const int part = root(root, a);
+            if (E.refine_corridor || own_parts.contains(part)) {
+              E.coarse_edges[{r, part}].emplace(std::min(a, b), std::max(a, b));
+              auto& tiles = E.coarse_parts[{r, part}];
+              tiles.insert(a);
+              tiles.insert(b);
+            }
+          }
+        }
+      }
+      // a path of the tree inside a pass-through component, split into straight runs; two runs make an L piece
       const auto emit = [&](int r, const std::vector<int>& path) {
         std::vector<int> corner{0};
         for (size_t i = 1; i + 1 < path.size(); ++i) {
@@ -3377,21 +5131,46 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
           }
         }
         corner.push_back(int(path.size()) - 1);
-        for (size_t k = 0; k + 1 < corner.size(); k += 2) {
-          const size_t e = std::min(k + 2, corner.size() - 1);
-          out.pieces.push_back({int(n), r, path[corner[k]], path[corner[e]], g.row(path[corner[k]]) == g.row(path[corner[k] + 1])});
+        const bool   backbone = preserve_coarse && (E.refine_corridor || own_parts.contains(root(root, path.front())));
+        // The original route is always expressible: split owned backbones at
+        // every bend, branch and attachment rather than replacing them by an L.
+        const size_t stride   = backbone ? 1 : 2;
+        for (size_t k = 0; k + 1 < corner.size(); k += stride) {
+          const size_t e    = std::min(k + stride, corner.size() - 1);
+          const int    part = d.opt.global_keep ? -1 : root(root, path.front());
+          out.pieces.push_back({int(n),
+                                r,
+                                path[corner[k]],
+                                path[corner[e]],
+                                g.row(path[corner[k]]) == g.row(path[corner[k] + 1]),
+                                part,
+                                backbone,
+                                E.refine_corridor});
+          if (backbone) {
+            auto& nodes = E.coarse_junctions[{r, part}];
+            nodes.insert(path[corner[k]]);
+            nodes.insert(path[corner[e]]);
+          }
+          if (part >= 0 && !backbone) {
+            out.retained_parts.emplace(int(n), r, part);
+          }
         }
       };
       for (const auto& [r, ie] : interior) {
-        if (own.contains(r)) {
-          continue;  // the region's model routes the net among its endpoints itself
-        }
         std::map<int, std::vector<int>> adj_t;
         for (const auto& [a, b] : ie) {
+          if (!preserve_coarse && !d.opt.global_keep && own_parts.contains(root(root, a))) {
+            continue;  // only this component's real endpoints are routed by local SAT
+          }
           adj_t[a].push_back(b);
           adj_t[b].push_back(a);
         }
         std::set<int> node;  // piece ends: hop tiles and branch tiles (a tree: every path ends at one)
+        if (d.opt.global_keep || preserve_coarse) {
+          for (const auto& e : E.per_region[r]) {
+            node.insert(e.box >= 0 ? g.tile_of(boxes.boxes[size_t(e.box)].cx, boxes.boxes[size_t(e.box)].cy) : e.tile);
+          }
+        }
         for (const auto& [t, nb] : adj_t) {
           if (nb.size() != 2 || hop_tiles.contains(t)) {
             node.insert(t);
@@ -3399,6 +5178,9 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
         }
         std::set<std::pair<int, int>> walked;
         for (int s0 : node) {
+          if (!adj_t.contains(s0)) {
+            continue;  // this endpoint connects only through hops outside the region
+          }
           for (int q : adj_t.at(s0)) {
             if (!walked.emplace(std::min(s0, q), std::max(s0, q)).second) {
               continue;
@@ -3416,7 +5198,15 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
           }
         }
       }
+      if (d.opt.global_keep) {
+        for (const auto& [r, list] : E.per_region) {
+          out.retained.emplace(int(n), r);
+        }
+      }
       traced = true;
+    }
+    if (preserve_coarse && !traced) {
+      throw std::runtime_error(std::format("legroute coarse witness repair required: net {} has no admitted global tree", n));
     }
     const auto tile_of
         = [&](const Endpoint& e) { return e.box >= 0 ? g.tile_of(boxes.boxes[e.box].cx, boxes.boxes[e.box].cy) : e.tile; };
@@ -3456,7 +5246,7 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
         bool             blocked = false;
       };
       const auto walk = [&](bool h_first) {  // the L's tiles from ta to tb, the worst edge load on the way
-        Walk       w;
+        Walk w;
         w.tiles.reserve(size_t(std::abs(g.col(ta) - g.col(tb)) + std::abs(g.row(ta) - g.row(tb))) + 1);
         const auto step = [&](int t) {
           if (!w.tiles.empty()) {
@@ -3737,6 +5527,13 @@ Crossings crossings(const Design& d, const Grid& g, const Boxes& boxes, const Le
       (g.row(hops[k].first) == g.row(hops[k].second) ? cap_h : cap_v)[t] -= 1;
     }
   }
+  // The model and its pre-placement policies see only local components.
+  // Retained components keep their original hops and geometry in pieces;
+  // another component of the same net/region must remain movable in SAT.
+  for (const auto& [n, r, part] : out.retained_parts) {
+    auto& list = ends[size_t(n)].per_region.at(r);
+    std::erase_if(list, [&](const Endpoint& e) { return e.part == part; });
+  }
   return out;
 }
 
@@ -3825,7 +5622,7 @@ std::vector<std::pair<int, int>> spill_cut(const Design& d, const Boxes& boxes, 
     }
   }
   for (const auto& [e, w] : bb) {
-    hold[size_t(e.first)] += w;
+    hold[size_t(e.first)]  += w;
     hold[size_t(e.second)] += w;
   }
   const NodeID U = NodeID(B), T = NodeID(B + 1);
@@ -3909,7 +5706,7 @@ std::vector<std::pair<int, int>> spill_cut(const Design& d, const Boxes& boxes, 
   for (const auto& t : to) {
     room_sum += size_t(std::max(0, t.room));
   }
-  want = std::min(want, room_sum);
+  want        = std::min(want, room_sum);
   uint64_t lo = 0, hi = 1;
   for (size_t i = 0; i < B; ++i) {
     hi = std::max(hi, hold[i] + 1);
@@ -4108,9 +5905,9 @@ Alternative alt_anchor(const Grid& g, const Boxes& boxes, const std::vector<int>
   if (densest == sparsest || count[size_t(densest)] == 0) {
     return out;
   }
-  const double tx = double(g.cx(c0)) + (sparsest % nb + .5) * double(g.cx(c1) - g.cx(c0)) / nb;
-  const double ty = double(g.cy(r0)) + (sparsest / nb + .5) * double(g.cy(r1) - g.cy(r0)) / nb;
-  const size_t want = std::max<size_t>(3, (movable.size() + 19) / 20);
+  const double     tx   = double(g.cx(c0)) + (sparsest % nb + .5) * double(g.cx(c1) - g.cx(c0)) / nb;
+  const double     ty   = double(g.cy(r0)) + (sparsest / nb + .5) * double(g.cy(r1) - g.cy(r0)) / nb;
+  const size_t     want = std::max<size_t>(3, (movable.size() + 19) / 20);
   std::vector<int> pick;
   for (int pass = 0; pass < 2 && pick.size() < want; ++pass) {  // non-critical boxes first
     for (int b : movable) {
@@ -4122,7 +5919,8 @@ Alternative alt_anchor(const Grid& g, const Boxes& boxes, const std::vector<int>
     }
   }
   for (size_t k = 0; k < pick.size(); ++k) {  // spread along x, a tile apart
-    const double cx = std::clamp(tx + (double(k) - double(pick.size() - 1) / 2) * double(g.tile_w), double(g.cx(c0)), double(g.cx(c1)));
+    const double cx
+        = std::clamp(tx + (double(k) - double(pick.size() - 1) / 2) * double(g.tile_w), double(g.cx(c0)), double(g.cx(c1)));
     out.homes.push_back({pick[k], cx, ty, 1});
   }
   return out;
@@ -4151,8 +5949,8 @@ Alternative alt_spread(const Grid& g, const Boxes& boxes, const std::vector<int>
   for (int t : tiles) {
     free_tiles[size_t(bin_of(double(g.cx(g.col(t))), double(g.cy(g.row(t)))))] += !g.blocked[t];
   }
-  const auto fill = [&](int q) { return free_tiles[size_t(q)] ? count[size_t(q)] / free_tiles[size_t(q)] : 2.0; };
-  double     mean = 0;
+  const auto fill     = [&](int q) { return free_tiles[size_t(q)] ? count[size_t(q)] / free_tiles[size_t(q)] : 2.0; };
+  double     mean     = 0;
   int        sparsest = 0, with_tiles = 0;
   for (int k = 0; k < nb * nb; ++k) {
     if (free_tiles[size_t(k)] > 0) {
@@ -4166,9 +5964,9 @@ Alternative alt_spread(const Grid& g, const Boxes& boxes, const std::vector<int>
   if (with_tiles == 0) {
     return out;
   }
-  mean /= with_tiles;
-  const double tx = double(g.cx(c0)) + (sparsest % nb + .5) * double(g.cx(c1) - g.cx(c0)) / nb;
-  const double ty = double(g.cy(r0)) + (sparsest / nb + .5) * double(g.cy(r1) - g.cy(r0)) / nb;
+  mean            /= with_tiles;
+  const double tx  = double(g.cx(c0)) + (sparsest % nb + .5) * double(g.cx(c1) - g.cx(c0)) / nb;
+  const double ty  = double(g.cy(r0)) + (sparsest / nb + .5) * double(g.cy(r1) - g.cy(r0)) / nb;
   for (int b : movable) {
     const auto& bx = boxes.boxes[size_t(b)];
     if (fill(bin_of(bx.cx, bx.cy)) <= mean) {
@@ -4187,11 +5985,11 @@ Alternative alt_spread(const Grid& g, const Boxes& boxes, const std::vector<int>
 // endpoint outside the region's movable boxes, until every node has four or fewer; the reduced graph is drawn
 // breadth first from its highest-degree node, each box on the free tile nearest the centroid of its placed
 // neighbours (ports north, east, south and west: connected boxes adjacent), and the drawing is the new homes.
-Alternative alt_tsm(const Design& d, const Grid& g, const Boxes& boxes, const std::vector<Net_ends>& ends, const std::vector<int>& movable,
-                    const std::vector<int>& tiles, int r, const std::vector<char>& pinned_tile) {
-  Alternative            out{"tsm", {}};
-  const size_t           B = movable.size();
-  std::vector<int>       node_of(boxes.boxes.size(), -1);
+Alternative alt_tsm(const Design& d, const Grid& g, const Boxes& boxes, const std::vector<Net_ends>& ends,
+                    const std::vector<int>& movable, const std::vector<int>& tiles, int r, const std::vector<char>& pinned_tile) {
+  Alternative      out{"tsm", {}};
+  const size_t     B = movable.size();
+  std::vector<int> node_of(boxes.boxes.size(), -1);
   for (size_t i = 0; i < B; ++i) {
     node_of[size_t(movable[i])] = int(i);
   }
@@ -4246,11 +6044,12 @@ Alternative alt_tsm(const Design& d, const Grid& g, const Boxes& boxes, const st
         continue;
       }
       const int other = edges[size_t(e)].a == top ? edges[size_t(e)].b : edges[size_t(e)].a;
-      if (drop < 0 || degree[size_t(other)] > degree[size_t(edges[size_t(drop)].a == top ? edges[size_t(drop)].b : edges[size_t(drop)].a)]) {
+      if (drop < 0
+          || degree[size_t(other)] > degree[size_t(edges[size_t(drop)].a == top ? edges[size_t(drop)].b : edges[size_t(drop)].a)]) {
         drop = e;
       }
     }
-    if (drop < 0) {  // every edge held: this node keeps its degree, the others go on
+    if (drop < 0) {                                // every edge held: this node keeps its degree, the others go on
       degree[size_t(top)] = -degree[size_t(top)];  // marked done
       again               = true;
       continue;
@@ -4363,7 +6162,17 @@ Alternative alt_tsm(const Design& d, const Grid& g, const Boxes& boxes, const st
 }  // namespace
 
 void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& regions, Routing& R, Legroute_report& rep) {
-  rep.spilled_regions = balance_regions(d, g, boxes);
+  rep.regions         = size_t(g.regions);
+  // Route-driven movable boxes acquire their ownership from the new cuts.
+  // Reassigning a region without moving its home would invalidate the coarse
+  // endpoints; the shared post-cut fitting screen checks room without moving it.
+  rep.spilled_regions = movable_route_partition(d.opt) ? 0 : balance_regions(d, g, boxes);
+  // fit_first: the same deterministic whole-core matching planning applied before its route and cuts.
+  if (movable_route_partition(d.opt) && d.opt.fit_first && d.opt.fit_density > 0) {
+    const auto match      = match_box_fit(d, g, boxes, true);
+    rep.fit_matched_boxes = match.applied;
+    rep.fit_max_move      = match.max_move;
+  }
   // per box: in-box demand per direction, approximate (refined from legroute.final's results later): taps of the
   // external pins and the internal nets that leave the box layer
   std::vector<int> dem_h(boxes.boxes.size(), 0), dem_v(boxes.boxes.size(), 0);
@@ -4419,15 +6228,201 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
   for (size_t t = 0; t < g.size(); ++t) {  // no layer is reserved for the boxes: the box layer's tracks are H too
     cap_h[t] += g.box_cap[t];
   }
-  if (d.opt.clock_spine) {
+  if (d.opt.clock_spine) {  // the same clock budget as planning: the flat floor and the L4 tree estimate
+    const auto clock = clock_tree_charge(d, g, &boxes, d.opt.rib_tiles);
+    R.clock_reserved_h.clear();
+    R.clock_reserved_v.clear();
     for (size_t t = 0; t < g.size(); ++t) {
-      cap_v[t] -= 1;
-      cap_h[t] -= g.row(int(t)) % std::max(1u, d.opt.rib_tiles) == 0;
+      const int v = std::max(1, clock.v[t]), h = std::max(int(g.row(int(t)) % std::max(1u, d.opt.rib_tiles) == 0), clock.h[t]);
+      cap_v[t] -= v;
+      cap_h[t] -= h;
+      R.clock_reserved_v.push_back(v);
+      R.clock_reserved_h.push_back(h);
     }
   }
   // endpoints of every routed signal net, per region
-  const auto box_of_comp = [&](int comp) { return comp >= 0 && d.cell[comp] >= 0 ? boxes.box_of[d.cell[comp]] : -1; };
-  const auto cap_h0 = cap_h, cap_v0 = cap_v;  // the tracks before hops and pre-placement
+  const auto           box_of_comp = [&](int comp) { return comp >= 0 && d.cell[comp] >= 0 ? boxes.box_of[d.cell[comp]] : -1; };
+  const auto           cap_h0 = cap_h, cap_v0 = cap_v;  // the tracks before hops and pre-placement
+  const bool           all_signals = d.opt.partition_cells || d.opt.global_all;
+  Global_routes        all_routes;
+  std::optional<Boxes> routing_boxes;
+  std::vector<int>     seed_regions;
+  Route_cuts           partition_cuts;
+  std::vector<char>    partition_critical(d.nets.size());
+  for (size_t n = 0; n < d.nets.size(); ++n) {
+    partition_critical[n] = d.nets[n].rank < d.opt.partition_critical;
+  }
+  std::vector<std::pair<double, double>> routed_homes;
+  const auto                             route_all = [&] {
+    routing_boxes.reset();
+    seed_regions.clear();
+    if (d.opt.global_keep && std::ranges::any_of(boxes.boxes, [&](const Box& b) {
+          return !b.fixed || !b.placed || b.tile != g.tile_of(b.cx, b.cy);
+        })) {
+      throw std::invalid_argument("legroute.global_keep requires every box fixed on its legal home tile");
+    }
+    all_routes = route_all_signals(d, g, boxes, cap_h0, cap_v0);
+    if (d.opt.partition_cells && !all_routes.unrouted) {
+      partition_cuts = route_cuts(g,
+                                  all_routes,
+                                  partition_critical,
+                                  cap_h0,
+                                  cap_v0,
+                                  admission_share(d.opt),
+                                  d.opt.partition_critical_cost < 0);
+    }
+    rep.global_seconds              += all_routes.seconds;
+    rep.global_search_pops          += all_routes.search_pops;
+    rep.global_search_limited       += all_routes.search_limited;
+    rep.global_pattern_attempts     += all_routes.pattern_attempts;
+    rep.global_pattern_completed    += all_routes.pattern_completed;
+    rep.global_pattern_fallbacks    += all_routes.pattern_fallbacks;
+    rep.global_pattern_work         += all_routes.pattern_work;
+    rep.global_pattern_work_limited += all_routes.pattern_work_limited;
+    ++rep.partition_route_calls;
+    routed_homes.clear();
+    for (const auto& b : boxes.boxes) {
+      routed_homes.emplace_back(b.cx, b.cy);
+    }
+  };
+  // allow_unfit: a box-fit deficit alone does not stop admission yet because the box route seed's joint
+  // matching (Hall repair inside each region) may still give every box a distinct tile; it is checked again on
+  // the seed's own boxes.
+  const auto require_admission = [&](bool regions_ready, bool allow_unfit = false) {
+    auto       gates = assess_legroute_gates(d, g, routing_boxes ? &*routing_boxes : &boxes, all_routes, {}, cap_h0, cap_v0,
+                                       regions_ready);
+    // Before proposed cuts, only the global route screen can stop admission.
+    // Existing seed regions may be replaced by a feasible route-driven mesh.
+    const bool unfit_only = allow_unfit && gates.unfittable_regions && !gates.oversized_regions && !gates.cell_dense_regions
+                            && !gates.routing_dense_edges && !gates.overflow_tracks && !gates.unrouted;
+    const bool blocked
+        = regions_ready ? gates.requires_replan() && !unfit_only : gates.unrouted || gates.routing_dense_edges || gates.overflow_tracks;
+    if (!d.opt.output_dir.empty()) {
+      std::filesystem::create_directories(d.opt.output_dir);
+      std::ofstream report(d.opt.output_dir + "/pre_sat.json");
+      report << legroute_gate_json(gates) << '\n';
+      if (!report) {
+        throw std::runtime_error("legroute: cannot write pre-SAT admission report");
+      }
+    }
+    if (blocked) {
+      throw Legroute_replan(std::move(gates));
+    }
+  };
+  // Every SAT entry has an all-signal necessary screen, including legacy seed meshes.
+  // Only configured all-signal flows consume these trees in the regional crossing model.
+  route_all();
+  require_admission(false);
+  if (d.opt.partition_cells) {
+    const auto          started = Clock::now();
+    std::vector<size_t> cells(g.size());
+    for (const auto& b : boxes.boxes) {
+      cells[size_t(b.tile >= 0 ? b.tile : g.tile_of(b.cx, b.cy))] += b.cells.size();
+    }
+    auto partition = partition_routes(g,
+                                      cells,
+                                      all_routes,
+                                      partition_critical,
+                                      cap_h0,
+                                      cap_v0,
+                                      admission_share(d.opt),
+                                      d.opt.partition_cells,
+                                      d.opt.partition_critical_cost,
+                                      d.opt.partition_mesh);
+    g.region       = std::move(partition.region);
+    g.regions      = partition.regions;
+    if (movable_route_partition(d.opt)) {
+      const auto fitting = repair_partition_fit(d, g, boxes, partition_cuts);
+      if (fitting.transfers) {
+        // Report the ownership actually handed to SAT after the fitting repair.
+        std::vector<size_t> counts(size_t(g.regions));
+        partition.oversized = partition.max_cells = partition.crossings = partition.critical_crossings = 0;
+        for (size_t t = 0; t < g.size(); ++t) {
+          counts[size_t(g.region[t])] += cells[t];
+          for (bool h : {true, false}) {
+            if (h ? g.col(int(t)) + 1 >= g.cols : g.row(int(t)) + 1 >= g.rows) {
+              continue;
+            }
+            const size_t q = t + (h ? 1 : size_t(g.cols));
+            if (g.region[t] != g.region[q]) {
+              partition.crossings          += (h ? partition_cuts.load_h : partition_cuts.load_v)[t];
+              partition.critical_crossings += (h ? partition_cuts.critical_h : partition_cuts.critical_v)[t];
+            }
+          }
+        }
+        for (size_t count : counts) {
+          partition.oversized += count > d.opt.partition_cells;
+          partition.max_cells  = std::max(partition.max_cells, count);
+        }
+      }
+    }
+    g.region_tiles.assign(size_t(g.regions), {});
+    for (size_t t = 0; t < g.size(); ++t) {
+      g.region_tiles[size_t(g.region[t])].push_back(int(t));
+    }
+    for (auto& b : boxes.boxes) {
+      b.region = g.region[size_t(b.tile >= 0 ? b.tile : g.tile_of(b.cx, b.cy))];
+    }
+    rep.regions                      = size_t(g.regions);
+    rep.partition_oversized          = partition.oversized;
+    rep.partition_indivisible_cells  = partition.indivisible_cells;
+    rep.partition_crossings          = partition.crossings;
+    rep.partition_critical_crossings = partition.critical_crossings;
+    rep.partition_max_cells          = partition.max_cells;
+    rep.partition_seconds            = seconds_since(started);
+    std::fprintf(
+        stderr,
+        "legroute partition: %d regions, %zu oversized, largest %zu cells (target %u, indivisible component %zu), %.3f s\n",
+        g.regions,
+        partition.oversized,
+        partition.max_cells,
+        d.opt.partition_cells,
+        partition.indivisible_cells,
+        rep.partition_seconds);
+  }
+  require_admission(true, d.opt.box_route_seed);
+  if (d.opt.box_route_seed) {
+    ++rep.box_route_seed_attempts;
+    auto seed                        = prepare_box_route_seed(d, g, boxes, cap_h0, cap_v0, "local");
+    rep.global_seconds              += seed.routes.seconds;
+    rep.global_search_pops          += seed.routes.search_pops;
+    rep.global_search_limited       += seed.routes.search_limited;
+    rep.global_pattern_attempts     += seed.routes.pattern_attempts;
+    rep.global_pattern_completed    += seed.routes.pattern_completed;
+    rep.global_pattern_fallbacks    += seed.routes.pattern_fallbacks;
+    rep.global_pattern_work         += seed.routes.pattern_work;
+    rep.global_pattern_work_limited += seed.routes.pattern_work_limited;
+    rep.partition_route_calls       += !seed.routes.trees.empty();
+    if (seed.accepted) {
+      ++rep.box_route_seed_successes;
+      routing_boxes           = std::move(seed.boxes);
+      seed_regions            = g.region;
+      all_routes              = std::move(seed.routes);
+      partition_cuts          = route_cuts(g,
+                                           all_routes,
+                                           partition_critical,
+                                           cap_h0,
+                                           cap_v0,
+                                           admission_share(d.opt),
+                                           d.opt.partition_critical_cost < 0);
+      rep.partition_crossings = rep.partition_critical_crossings = 0;
+      for (size_t t = 0; t < g.size(); ++t) {
+        for (bool h : {true, false}) {
+          if (h ? g.col(int(t)) + 1 >= g.cols : g.row(int(t)) + 1 >= g.rows) {
+            continue;
+          }
+          const size_t q = t + (h ? 1 : size_t(g.cols));
+          if (g.region[t] != g.region[q]) {
+            rep.partition_crossings          += (h ? partition_cuts.load_h : partition_cuts.load_v)[t];
+            rep.partition_critical_crossings += (h ? partition_cuts.critical_h : partition_cuts.critical_v)[t];
+          }
+        }
+      }
+      require_admission(true);
+    } else {
+      require_admission(true);  // no seed: a box-fit deficit stops admission as before
+    }
+  }
   // the policies: the options, and with sat_alt a second set; each region solves under both at once and keeps the
   // better answer
   std::vector<Legroute_options> policies{d.opt};
@@ -4449,11 +6444,33 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
   std::vector<int>                     chosen(g.regions, 0);
   std::vector<Policy>                  P;
   Crossings                            x;
-  std::vector<uint64_t> sig_prev(size_t(g.regions), 0);
-  std::vector<unsigned> region_extra(size_t(g.regions), 0);  // window_grow: extra window tiles of a region that failed
-  std::vector<int>      gave_to(size_t(g.regions), -1);      // spill_shift: the region each region last handed a strip to
-  std::set<std::pair<int, int>> joined_pairs;                 // mesh_join: region pairs joined and resplit once
+  std::vector<uint64_t>                sig_prev(size_t(g.regions), 0);
+  std::vector<unsigned>         region_extra(size_t(g.regions), 0);  // window_grow: extra window tiles of a region that failed
+  std::vector<int>              gave_to(size_t(g.regions), -1);      // spill_shift: the region each region last handed a strip to
+  std::set<std::pair<int, int>> joined_pairs;                        // mesh_join: region pairs joined and resplit once
+  // Window growth and local alternatives do not change the crossing problem. Cache its pristine answer, before
+  // hop_choice annotates/moves endpoints, and the capacities after the hops. Compare actual geometry, not a hash:
+  // a spill or mesh repair invalidates it; box tile/fixed/window changes do not affect crossings' home endpoints.
+  Crossings                     cached_crossings;
+  std::vector<int>              cached_regions, cached_cap_h, cached_cap_v;
+  std::vector<std::tuple<int, double, double>>  cached_homes;
+  std::mutex                                    deadline_mutex;
+  std::vector<std::optional<Clock::time_point>> region_deadlines(size_t(g.regions));
+  const auto                                    deadline_for = [&](int r) {
+    std::lock_guard lock(deadline_mutex);
+    auto&           end = region_deadlines[size_t(r)];
+    if (!end) {
+      end = Clock::now() + std::chrono::milliseconds(d.opt.sat_ms);
+    }
+    return *end;
+  };
+  unsigned spill_round = 0, timeout_round = 0;
   for (unsigned round = 0;; ++round) {
+    // A new mesh invalidates the provisional endpoint ownership. Rebuild the
+    // original-center forest before considering any cached crossings.
+    if (routing_boxes && seed_regions != g.region) {
+      route_all();
+    }
     // spill rounds: the region adjacency (a boundary shift changes it)
     std::vector<std::set<int>> region_adj(size_t(g.regions));
     for (int t = 0; t < int(g.size()); ++t) {
@@ -4466,7 +6483,55 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
     }
     cap_h = cap_h0;  // the crossings take the hops' tracks off these: a fresh copy each round, not a cumulative one
     cap_v = cap_v0;
-    x     = crossings(d, g, boxes, regions, cap_h, cap_v, true);
+    std::vector<std::tuple<int, double, double>> homes;
+    if (d.opt.spill_rounds > 0 || d.opt.partition_timeout_rounds > 0) {
+      homes.reserve(boxes.boxes.size());
+      for (const auto& b : boxes.boxes) {
+        homes.emplace_back(b.region, b.cx, b.cy);
+      }
+    }
+    if (round > 0 && cached_regions == g.region && cached_homes == homes) {
+      x     = cached_crossings;
+      cap_h = cached_cap_h;
+      cap_v = cached_cap_v;
+      ++rep.crossings_reused;
+    } else {
+      // A genuine change of regional geometry starts a separately reported
+      // attempt. Window growth alone reuses crossings and the old deadline.
+      region_deadlines.assign(size_t(g.regions), {});
+      bool changed = routed_homes.size() != boxes.boxes.size();
+      for (size_t b = 0; !changed && b < boxes.boxes.size(); ++b) {
+        changed = routed_homes[b] != std::pair{boxes.boxes[b].cx, boxes.boxes[b].cy};
+      }
+      if (changed) {
+        route_all();
+      }
+      require_admission(true);
+      x = crossings(d,
+                    g,
+                    routing_boxes ? *routing_boxes : boxes,
+                    regions,
+                    cap_h,
+                    cap_v,
+                    round == 0,
+                    all_signals ? &all_routes : nullptr);
+      ++rep.crossings_built;
+      rep.global_seconds              += x.global_seconds;
+      rep.global_search_pops          += x.global_search_pops;
+      rep.global_search_limited       += x.global_search_limited;
+      rep.global_pattern_attempts     += x.pattern_attempts;
+      rep.global_pattern_completed    += x.pattern_completed;
+      rep.global_pattern_fallbacks    += x.pattern_fallbacks;
+      rep.global_pattern_work         += x.pattern_work;
+      rep.global_pattern_work_limited += x.pattern_work_limited;
+      if (d.opt.spill_rounds > 0 || d.opt.partition_timeout_rounds > 0) {
+        cached_crossings = x;
+        cached_regions   = g.region;
+        cached_homes     = std::move(homes);
+        cached_cap_h     = cap_h;
+        cached_cap_v     = cap_v;
+      }
+    }
     // legal_shuffle: the legal boxes on the tiles of an edge the global router left over its share may move (the
     // router's congestion says where the legalization's luck ran out); every other legal box stays fixed
     if (d.opt.legal_boxes && d.opt.legal_shuffle > 0 && !x.global_over.empty()) {
@@ -4488,18 +6553,28 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
         }
       }
       rep.legal_shuffled += freed;
-      std::fprintf(stderr, "legroute: %zu legal boxes freed to move %u tiles at the %zu edges the global router left over\n", freed,
-                   d.opt.legal_shuffle, x.global_over.size());
+      std::fprintf(stderr,
+                   "legroute: %zu legal boxes freed to move %u tiles at the %zu edges the global router left over\n",
+                   freed,
+                   d.opt.legal_shuffle,
+                   x.global_over.size());
     }
     P.assign(policies.size(), {});
     for (size_t p = 0; p < policies.size(); ++p) {  // the policy's pre-placement on its own copy
       const auto& o = policies[p];
-      auto&       Q = P[p];
-      Q.boxes       = boxes;
-      Q.cap_h       = cap_h;
-      Q.cap_v       = cap_v;
-      for (const auto& gp : x.pieces) {  // legroute.global: the net is routed ahead through these regions
-        Q.treed.emplace(gp.net, gp.region);
+      if (movable_route_partition(d.opt) && (o.tree_boxes > 0 || o.tree_load > 0 || o.io_preroute)) {
+        throw std::runtime_error(
+            "legroute coarse witness repair required: legacy tree/IO pre-routing cannot replace a preserved movable backbone");
+      }
+      auto& Q = P[p];
+      Q.boxes = boxes;
+      Q.cap_h = cap_h;
+      Q.cap_v = cap_v;
+      Q.treed.insert(x.retained.begin(), x.retained.end());
+      for (const auto& gp : x.pieces) {  // legacy whole-region routes; partial retention already filtered its endpoints
+        if (gp.part < 0) {
+          Q.treed.emplace(gp.net, gp.region);
+        }
       }
       if (o.crit_boxes > 0) {
         place_critical(d, o, g, Q.boxes, x.ends, Q.rep);
@@ -4569,15 +6644,21 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
             if (augment(b) || boxes.boxes[size_t(b)].cells.size() < 2) {
               continue;
             }
+            if (movable_route_partition(d.opt)) {
+              throw std::runtime_error(std::format(
+                  "legroute coarse witness repair required: box {} in region {} needs regrouping; rebuild its global attachments",
+                  b,
+                  r));
+            }
             auto& box = boxes.boxes[size_t(b)];  // split: the first cell keeps the box, the others get their own
             for (size_t k = 1; k < box.cells.size(); ++k) {
-              Box single      = box;
-              single.cells    = {box.cells[k]};
-              single.sites    = cell_sites(d, g, box.cells[k]);
-              single.internal = 0;
-              single.external = int(d.nets_of[size_t(box.cells[k])].size());
-              single.fixed    = false;
-              const int id    = int(boxes.boxes.size());
+              Box single                         = box;
+              single.cells                       = {box.cells[k]};
+              single.sites                       = cell_sites(d, g, box.cells[k]);
+              single.internal                    = 0;
+              single.external                    = int(d.nets_of[size_t(box.cells[k])].size());
+              single.fixed                       = false;
+              const int id                       = int(boxes.boxes.size());
               boxes.box_of[size_t(box.cells[k])] = id;
               region_boxes[size_t(r)].push_back(id);
               for (auto& pol : P) {
@@ -4586,7 +6667,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
               }
               boxes.boxes.push_back(std::move(single));
             }
-            auto& kept    = boxes.boxes[size_t(b)];
+            auto& kept = boxes.boxes[size_t(b)];
             kept.cells.resize(1);
             kept.sites    = cell_sites(d, g, kept.cells[0]);
             kept.internal = 0;
@@ -4604,8 +6685,11 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
         }
       }
       if (split > 0) {
-        std::fprintf(stderr, "legroute sat: round %u: %zu boxes without a fitting tile among their region's unpinned tiles split into their cells\n",
-                     round + 1, split);
+        std::fprintf(
+            stderr,
+            "legroute sat: round %u: %zu boxes without a fitting tile among their region's unpinned tiles split into their cells\n",
+            round + 1,
+            split);
       }
     }
     // a region whose boxes, fixed boxes, hops, global pieces, trees and IO pre-routes are what they were in the last
@@ -4616,9 +6700,15 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
       const auto            mix = [](uint64_t& h, uint64_t v) { h ^= v + 0x9e3779b97f4a7c15ull + (h << 6) + (h >> 2); };
       for (int r = 0; r < g.regions; ++r) {
         mix(sig[size_t(r)], region_extra[size_t(r)]);
+        // A repaired boundary can remove routing tiles without moving any box or hop. Such a region's previous
+        // routes are no longer a proof for its new domain, even if all endpoint signatures still match.
+        for (int t : region_tiles[size_t(r)]) {
+          mix(sig[size_t(r)], uint64_t(t) + 1);
+        }
         for (int b : region_boxes[size_t(r)]) {
           mix(sig[size_t(r)], uint64_t(b) * 3 + (boxes.boxes[size_t(b)].fixed ? 1 : 0));
           mix(sig[size_t(r)], uint64_t(boxes.boxes[size_t(b)].tile + 1));
+          mix(sig[size_t(r)], routing_boxes ? uint64_t(routing_boxes->boxes[size_t(b)].tile + 1) : 0);
           if (P[0].allowed.contains(b)) {
             mix(sig[size_t(r)], 7);
           }
@@ -4630,12 +6720,35 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
           mix(sig[size_t(r)], (uint64_t(x.hop_net[k]) << 32) ^ (uint64_t(a) << 16) ^ uint64_t(b));
         }
       }
+      for (size_t n = 0; n < x.ends.size(); ++n) {
+        for (const auto& [r, list] : x.ends[n].per_region) {
+          mix(sig[size_t(r)], n);
+          mix(sig[size_t(r)], list.size());
+          for (const auto& e : list) {
+            mix(sig[size_t(r)], uint64_t(e.box + 1));
+            mix(sig[size_t(r)], uint64_t(e.tile + 1));
+            mix(sig[size_t(r)], uint64_t(e.part + 1));
+            mix(sig[size_t(r)], uint64_t(e.anchor + 1));
+            mix(sig[size_t(r)], uint64_t(e.interface_id + 1));
+          }
+        }
+      }
       for (const auto& gp : x.pieces) {
         mix(sig[size_t(gp.region)], (uint64_t(gp.net) << 32) ^ (uint64_t(gp.a) << 16) ^ uint64_t(gp.b));
+        mix(sig[size_t(gp.region)], uint64_t(gp.part + 1) * 2 + gp.h_first);
+        mix(sig[size_t(gp.region)], gp.backbone);
+        mix(sig[size_t(gp.region)], gp.refinable);
+      }
+      for (const auto& [net, region] : x.retained) {
+        mix(sig[size_t(region)], 0x47b6d90000000000ull ^ uint64_t(net));
+      }
+      for (const auto& [net, region, part] : x.retained_parts) {
+        mix(sig[size_t(region)], 0x47b6d90000000000ull ^ (uint64_t(net) << 32) ^ uint64_t(part));
       }
       for (const auto& ft : P[0].trees) {
         for (const auto& piece : ft.pieces) {
-          mix(sig[size_t(piece.region)], (uint64_t(piece.net) << 32) ^ (uint64_t(piece.a) << 16) ^ uint64_t(piece.b) ^ (ft.dropped ? 1 : 0));
+          mix(sig[size_t(piece.region)],
+              (uint64_t(piece.net) << 32) ^ (uint64_t(piece.a) << 16) ^ uint64_t(piece.b) ^ (ft.dropped ? 1 : 0));
         }
       }
       for (const auto& io : P[0].io_routes) {
@@ -4647,6 +6760,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
       }
       sig_prev = sig;
     }
+    rep.sat_reused_regions += size_t(std::ranges::count(reuse, char(1)));
     std::fprintf(stderr,
                  "legroute sat: %d regions, %zu virtual pins, %zu boxes, %zu hops (%zu over the share, %zu unjoined), %zu global "
                  "pieces; solving %zu at a time\n",
@@ -4695,73 +6809,79 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
           if (eps_r.size() < 2 || rc.c1 < 0 || Q0.treed.contains({int(n), r})) {
             continue;
           }
-          int lo_c = g.cols, hi_c = -1, lo_r = g.rows, hi_r = -1;
-          for (const auto& ep : eps_r) {
-            int ec0, ec1, er0, er1;
-            if (ep.box >= 0 && !Q0.boxes.boxes[size_t(ep.box)].fixed) {
-              const auto& bx = Q0.boxes.boxes[size_t(ep.box)];
-              const int   cc = std::clamp(g.col_of(bx.cx), rc.c0, rc.c1), rr = std::clamp(g.row_of(bx.cy), rc.r0, rc.r1);
-              ec0 = std::max(rc.c0, cc - win_t);
-              ec1 = std::min(rc.c1, cc + win_t);
-              er0 = std::max(rc.r0, rr - win_t);
-              er1 = std::min(rc.r1, rr + win_t);
-            } else {
-              const int t = ep.box >= 0 ? Q0.boxes.boxes[size_t(ep.box)].tile : ep.tile;
-              ec0 = ec1 = std::clamp(g.col(t), rc.c0, rc.c1);
-              er0 = er1 = std::clamp(g.row(t), rc.r0, rc.r1);
+          std::vector<std::pair<int, int>> cols, rows;
+          for (const auto& [part, group] : endpoint_groups(eps_r)) {
+            if (group.size() < 2) {
+              continue;
             }
-            lo_c = std::min(lo_c, ec1);
-            hi_c = std::max(hi_c, ec0);
-            lo_r = std::min(lo_r, er1);
-            hi_r = std::max(hi_r, er0);
-          }
-          if (eps_r.size() == 2 && d.nets[n].pins.size() == 2 && eps_r[0].box >= 0 && eps_r[1].box >= 0) {
-            if (hi_c == lo_c + 1) {  // may sit side by side: no track
-              hi_c = lo_c;
+            int lo_c = g.cols, hi_c = -1, lo_r = g.rows, hi_r = -1;
+            for (const auto& ep : group) {
+              int ec0, ec1, er0, er1;
+              if (ep.box >= 0 && !Q0.boxes.boxes[size_t(ep.box)].fixed) {
+                const auto& bx = Q0.boxes.boxes[size_t(ep.box)];
+                const int   cc = std::clamp(g.col_of(bx.cx), rc.c0, rc.c1), rr = std::clamp(g.row_of(bx.cy), rc.r0, rc.r1);
+                ec0 = std::max(rc.c0, cc - win_t);
+                ec1 = std::min(rc.c1, cc + win_t);
+                er0 = std::max(rc.r0, rr - win_t);
+                er1 = std::min(rc.r1, rr + win_t);
+              } else {
+                const int t = ep.box >= 0 ? Q0.boxes.boxes[size_t(ep.box)].tile : ep.tile;
+                ec0 = ec1 = std::clamp(g.col(t), rc.c0, rc.c1);
+                er0 = er1 = std::clamp(g.row(t), rc.r0, rc.r1);
+              }
+              lo_c = std::min(lo_c, ec1);
+              hi_c = std::max(hi_c, ec0);
+              lo_r = std::min(lo_r, er1);
+              hi_r = std::max(hi_r, er0);
             }
-            if (hi_r == lo_r + 1) {
-              hi_r = lo_r;
+            if (group.size() == 2 && d.nets[n].pins.size() == 2 && group[0].box >= 0 && group[1].box >= 0) {
+              if (hi_c == lo_c + 1) {  // may sit side by side: no track
+                hi_c = lo_c;
+              }
+              if (hi_r == lo_r + 1) {
+                hi_r = lo_r;
+              }
             }
+            cols.emplace_back(lo_c, hi_c);
+            rows.emplace_back(lo_r, hi_r);
           }
-          if (hi_c > lo_c) {
-            ++fc[size_t(r)][size_t(lo_c + 1 - rc.c0)];
-            --fc[size_t(r)][size_t(hi_c + 1 - rc.c0)];
-          }
-          if (hi_r > lo_r) {
-            ++fr[size_t(r)][size_t(lo_r + 1 - rc.r0)];
-            --fr[size_t(r)][size_t(hi_r + 1 - rc.r0)];
-          }
+          add_forced_cuts(cols, fc[size_t(r)], rc.c0, Q0.reserve.cuts_of(int(n), r, 1));
+          add_forced_cuts(rows, fr[size_t(r)], rc.r0, Q0.reserve.cuts_of(int(n), r, 0));
         }
       }
       for (int r = 0; r < g.regions; ++r) {
         const auto& rc = rect[size_t(r)];
         if (rc.c1 >= 0) {
           for (int c = rc.c0 + 1, run = 0; c <= rc.c1; ++c) {
-            run += fc[size_t(r)][size_t(c - rc.c0)];
-            int tracks = 0;
+            run        += fc[size_t(r)][size_t(c - rc.c0)];
+            int tracks  = 0;
             for (int j = rc.r0; j <= rc.r1; ++j) {
               const int t = g.tile(c - 1, j), q = g.tile(c, j);
               if (g.region[t] == r && g.region[q] == r) {
-                tracks += std::max(0, int(std::floor(std::min(cap_h0[t], cap_h0[q]) * policies[0].cap_scale)) - Q0.reserve.h[size_t(t)]);
+                tracks
+                    += std::max(0,
+                                edge_limit(std::min(cap_h0[t], cap_h0[q]), policies[0]) - Q0.reserve.h[size_t(t)]);
               }
             }
             cut_ratio[size_t(r)] = std::max(cut_ratio[size_t(r)], double(run) / std::max(1.0, double(tracks)));
           }
           for (int j = rc.r0 + 1, run = 0; j <= rc.r1; ++j) {
-            run += fr[size_t(r)][size_t(j - rc.r0)];
-            int tracks = 0;
+            run        += fr[size_t(r)][size_t(j - rc.r0)];
+            int tracks  = 0;
             for (int i = rc.c0; i <= rc.c1; ++i) {
               const int t = g.tile(i, j - 1), q = g.tile(i, j);
               if (g.region[t] == r && g.region[q] == r) {
-                tracks += std::max(0, int(std::floor(std::min(cap_v0[t], cap_v0[q]) * policies[0].cap_scale)) - Q0.reserve.v[size_t(t)]);
+                tracks
+                    += std::max(0,
+                                edge_limit(std::min(cap_v0[t], cap_v0[q]), policies[0]) - Q0.reserve.v[size_t(t)]);
               }
             }
             cut_ratio[size_t(r)] = std::max(cut_ratio[size_t(r)], double(run) / std::max(1.0, double(tracks)));
           }
         }
-        over_cut       += cut_ratio[size_t(r)] > 1;
-        risk[size_t(r)] = cut_ratio[size_t(r)] + double(region_boxes[r].size()) / std::max(1.0, free_t[size_t(r)])
-                          + taken[size_t(r)] / std::max(1.0, cap[size_t(r)]);
+        over_cut        += cut_ratio[size_t(r)] > 1;
+        risk[size_t(r)]  = cut_ratio[size_t(r)] + double(region_boxes[r].size()) / std::max(1.0, free_t[size_t(r)])
+                           + taken[size_t(r)] / std::max(1.0, cap[size_t(r)]);
       }
     }
     std::vector<size_t> task_order(size_t(g.regions) * policies.size());
@@ -4770,8 +6890,8 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
     {
       std::string head;
       for (size_t k = 0; k < std::min<size_t>(8, task_order.size()); k += policies.size()) {
-        const auto r = task_order[k] / policies.size();
-        head += std::format(" {}({:.2f}, cut {:.2f})", r, risk[r], cut_ratio[r]);
+        const auto r  = task_order[k] / policies.size();
+        head         += std::format(" {}({:.2f}, cut {:.2f})", r, risk[r], cut_ratio[r]);
       }
       std::fprintf(stderr,
                    "legroute sat: regions by risk (cut ratio + fill + fixed share), %zu over the cut bound by the placement, "
@@ -4779,47 +6899,39 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
                    over_cut,
                    head.c_str());
     }
-    // hop_choice: the regions solve in checkerboard waves (a greedy colouring of the region adjacency, in risk
-    // order, so the riskiest regions choose first); a hop between two regions is chosen by the earlier wave's region
-    // among the boundary tiles within hop_choice of the hop chooser's tile, and is the later region's fixed
-    // endpoint. A net routed ahead (a tree, an IO pre-route, a global piece) keeps its hops, and so does every hop
-    // when a second policy runs (the policies would disagree)
+    // Interface choices flow from higher-risk regions to all lower-risk neighbors.
+    // Ordinary graph coloring can put a low-risk region back in wave zero and
+    // accidentally let it constrain a harder neighbor. Independent regions still
+    // solve together; every shared interface follows the risk order.
     std::vector<unsigned>                         wave(size_t(g.regions), 0);
     unsigned                                      waves = 1;
     std::vector<std::vector<int>>                 hop_tiles(x.hops.size());   // per hop: the owner's candidate tiles
     std::vector<std::vector<std::pair<int, int>>> hop_across(x.hops.size());  // per hop: (owner tile, the tile across)
     std::vector<int>                              hop_owner(x.hops.size(), -1), hop_other_tile(x.hops.size(), -1);
     std::vector<int>                              hop_room(g.size(), 0);  // per boundary tile: hops it may still take
-    if (d.opt.hop_choice > 0 && policies.size() == 1) {
-      std::vector<std::set<int>> adj(size_t(g.regions));
-      for (int t = 0; t < int(g.size()); ++t) {
-        for (int q : {g.col(t) + 1 < g.cols ? t + 1 : -1, t + g.cols < int(g.size()) ? t + g.cols : -1}) {
-          if (q >= 0 && g.region[t] != g.region[q]) {
-            adj[size_t(g.region[t])].insert(g.region[q]);
-            adj[size_t(g.region[q])].insert(g.region[t]);
-          }
-        }
-      }
-      std::vector<char> colored(size_t(g.regions), 0);
+    // First corridor solve frees routes and cells with the admitted crossings fixed.
+    // A failed solve can request interface repair; it does not silently move a neighbor.
+    if (d.opt.hop_choice > 0 && policies.size() == 1 && !movable_route_partition(d.opt)) {
+      std::vector<size_t> priority;
       for (size_t k = 0; k < task_order.size(); k += policies.size()) {
-        const auto         rr = task_order[k] / policies.size();
-        std::set<unsigned> used;
-        for (int s2 : adj[rr]) {
-          if (colored[size_t(s2)]) {
-            used.insert(wave[size_t(s2)]);
-          }
-        }
-        unsigned w = 0;
-        while (used.contains(w)) {
-          ++w;
-        }
-        wave[rr]    = w;
-        colored[rr] = 1;
-        waves       = std::max(waves, w + 1);
+        priority.push_back(task_order[k] / policies.size());
+      }
+      wave = region_solve_waves(g, priority);
+      for (unsigned w : wave) {
+        waves = std::max(waves, w + 1);
       }
       std::vector<char> net_fixed(d.nets.size(), 0);  // nets with routes fixed ahead keep their hops
+      if (movable_route_partition(d.opt)) {
+        for (const auto& [n, region, part] : x.retained_parts) {
+          (void)region;
+          (void)part;
+          net_fixed[size_t(n)] = 1;  // includes isolated retained components with no emitted interior piece
+        }
+      }
       for (const auto& gp : x.pieces) {
-        net_fixed[size_t(gp.net)] = 1;
+        if (!gp.backbone) {
+          net_fixed[size_t(gp.net)] = 1;
+        }
       }
       for (const auto& [nr, rr] : P[0].treed) {
         net_fixed[size_t(nr)] = 1;
@@ -4837,7 +6949,8 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
       size_t            hops_free = 0;  // this round's
       for (size_t k = 0; k < x.hops.size(); ++k) {
         const auto [a, b] = x.hops[k];
-        hop_free[k] = !net_fixed[size_t(x.hop_net[k])] && g.region[a] != g.region[b] && wave[size_t(g.region[a])] != wave[size_t(g.region[b])];
+        hop_free[k]       = !net_fixed[size_t(x.hop_net[k])] && g.region[a] != g.region[b]
+                            && wave[size_t(g.region[a])] != wave[size_t(g.region[b])];
         if (!hop_free[k]) {
           ++fixed_hops[size_t(a)];
           ++fixed_hops[size_t(b)];
@@ -4847,23 +6960,27 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
         if (!hop_free[k]) {
           continue;
         }
-        const auto [a, b]  = x.hops[k];
+        const auto [a, b] = x.hops[k];
         const int  ra = g.region[a], rb = g.region[b];
-        const bool a_owns  = wave[size_t(ra)] < wave[size_t(rb)];
+        const bool a_owns = wave[size_t(ra)] < wave[size_t(rb)];
         const int  ao = a_owns ? a : b, bo = a_owns ? b : a, owner = a_owns ? ra : rb, other = a_owns ? rb : ra;
-        const bool h       = g.row(a) == g.row(b);  // across a vertical boundary: the candidates run along the rows
+        const bool h  = g.row(a) == g.row(b);  // across a vertical boundary: the candidates run along the rows
         const int  dc = g.col(bo) - g.col(ao), dr = g.row(bo) - g.row(ao), hc = int(d.opt.hop_choice);
         ++default_hops[size_t(ao)];
         for (int i = -hc; i <= hc; ++i) {
           const int c = g.col(ao) + (h ? 0 : i), rr = g.row(ao) + (h ? i : 0);
-          if (c < 0 || c >= g.cols || rr < 0 || rr >= g.rows || c + dc < 0 || c + dc >= g.cols || rr + dr < 0 || rr + dr >= g.rows) {
+          if (c < 0 || c >= g.cols || rr < 0 || rr >= g.rows || c + dc < 0 || c + dc >= g.cols || rr + dr < 0
+              || rr + dr >= g.rows) {
             continue;
           }
           const int t = g.tile(c, rr), q = g.tile(c + dc, rr + dr);
           if (g.region[t] != owner || g.region[q] != other || g.blocked[t] || g.blocked[q]) {
             continue;
           }
-          const int room = int(std::floor(d.opt.hop_share * double((h ? cap_h0 : cap_v0)[size_t(t)]))) - fixed_hops[size_t(t)];
+          // the crossing uses the edge t-q: the narrower endpoint bounds it, under the share and the policy ceiling
+          const int edge = std::min((h ? cap_h0 : cap_v0)[size_t(t)], (h ? cap_h0 : cap_v0)[size_t(q)]);
+          const int room = std::min(int(std::floor(d.opt.hop_share * double(edge))), edge_limit(edge, d.opt))
+                           - fixed_hops[size_t(t)];
           if (room <= 0 && t != ao) {
             continue;  // no room there; the chooser's own tile stays a candidate
           }
@@ -4880,7 +6997,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
         hop_other_tile[k] = bo;
         auto& eps_o       = x.ends[size_t(x.hop_net[k])].per_region[owner];
         for (auto& e : eps_o) {  // the owner's endpoint is free (its tile stays the default for every other reader)
-          if (e.box < 0 && e.tile == ao && e.hop < 0) {
+          if (e.box < 0 && e.hop < 0 && (movable_route_partition(d.opt) ? e.interface_id == int(k) : e.tile == ao)) {
             e.hop = int(k);
             break;
           }
@@ -4901,8 +7018,10 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
     }
     rep.sat_waves += waves;
     std::atomic<bool> failed_fast{false};
+    // Policies, checker phases and alternatives share this geometry's
+    // deadline; initialization occurs only when its first worker starts.
     // every (region, policy) solve is a task: the regions of one wave are independent once the hops are fixed
-    const auto solve_task = [&](size_t slot) {
+    const auto        solve_task = [&](size_t slot) {
       const size_t task  = task_order[slot];
       const int    r     = int(task / policies.size());
       const size_t p     = task % policies.size();
@@ -4921,7 +7040,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
         out.status  = Sat_status::unknown;
         ++out.rep.sat_fail_fast_skipped;
       }
-      auto po = policies[p];
+      auto po          = policies[p];
       po.window_tiles += region_extra[size_t(r)];
       try {
         solve_region(d,
@@ -4941,9 +7060,11 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
                      Q.reserve,
                      hop_tiles,
                      hop_room,
-                     out);
+                     out,
+                     deadline_for(r),
+                     routing_boxes ? &*routing_boxes : nullptr);
       } catch (const Legroute_unfit& e) {  // more boxes than fitting tiles: a spill round pushes boxes out first
-        if (round >= d.opt.spill_rounds || policies.size() > 1) {
+        if (spill_round >= d.opt.spill_rounds || policies.size() > 1) {
           throw;
         }
         const size_t without = out.unfit_boxes;
@@ -4966,11 +7087,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
           }
         }
       }
-      for (const auto& gp : x.pieces) {  // legroute.global: the pass-through runs through this region
-        if (gp.region == r) {
-          out.conns.push_back({gp.net, gp.a, gp.b, gp.h_first});
-        }
-      }
+      append_global_pieces(out, r, x.pieces);
       for (const auto& io : Q.io_routes) {  // (a box off its lifted track bends to it)
         if (io.region != r) {
           continue;
@@ -4999,16 +7116,13 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
           if (hop_owner[k] < 0 || wave[size_t(hop_owner[k])] != w) {
             continue;
           }
-          const auto& res    = last[0][size_t(hop_owner[k])];
-          const auto [a, b]  = x.hops[k];
-          const int   ao     = g.region[a] == hop_owner[k] ? a : b;
-          int         picked = -1;
+          const auto& res   = last[0][size_t(hop_owner[k])];
+          const auto [a, b] = x.hops[k];
+          const int ao      = g.region[a] == hop_owner[k] ? a : b;
+          int       picked  = -1;
           if (res.status == Sat_status::satisfiable) {
-            for (const auto& [nn, dt, t] : res.hop_tiles) {
-              if (nn == x.hop_net[k] && dt == ao) {
-                picked = t;
-                break;
-              }
+            if (const auto found = res.hop_choices.find(int(k)); found != res.hop_choices.end()) {
+              picked = found->second;
             }
           }
           if (picked < 0) {
@@ -5031,19 +7145,52 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
           if (across < 0 || picked == ao) {
             continue;
           }
-          ++rep.sat_hops_moved;
-          x.hops[k]       = {picked, across};
           const int other = g.region[across];
+          if (wave[size_t(other)] <= w) {
+            throw std::runtime_error(
+                std::format("legroute shared interface repair required: hop {} changes already solved region {}; rerun affected "
+                            "placement and routing",
+                            k,
+                            other));
+          }
+          reuse[size_t(other)] = 0;  // an earlier spill round's answer used the old interface
+          ++rep.sat_hops_moved;
+          x.hops[k]     = {picked, across};
+          bool remapped = false;
           for (auto& e : x.ends[size_t(n)].per_region[other]) {
-            if (e.box < 0 && e.hop < 0 && e.tile == hop_other_tile[k]) {
-              e.tile = across;
+            if (e.box < 0 && e.hop < 0
+                && (movable_route_partition(d.opt) ? e.interface_id == int(k) : e.tile == hop_other_tile[k])) {
+              e.tile   = across;
+              remapped = true;
               break;
             }
           }
+          if (!remapped && movable_route_partition(d.opt)) {
+            throw std::runtime_error(
+                std::format("legroute shared interface repair required: hop {} lost its neighbor attachment", k));
+          }
         }
+        // every moved crossing, in either mode (the legacy chooser is the one that moves hops), against the
+        // narrower endpoint before publication
+        validate_crossing_edges(g, x.hops, x.hop_net, cap_h0, cap_v0, d.opt.global_share, d.opt.cap_scale, d.opt.density_ceiling);
         for (auto& Q : P) {
           Q.reserve = edge_reserve(g, x.hops, x.hop_net, Q.trees, Q.io_routes, x.pieces);
         }
+      }
+    }
+    // every published crossing, whatever chose it (one wave, several policies, the movable forest or the legacy
+    // construction's own boundary choice): the union against the narrower endpoint before any answer is accepted
+    // The movable modes publish only screened crossings: a violation is a repair. The legacy fixed-IO construction
+    // may still pick a least-loaded boundary above the share: recorded and reported, not yet repaired.
+    try {
+      validate_crossing_edges(g, x.hops, x.hop_net, cap_h0, cap_v0, d.opt.global_share, d.opt.cap_scale, d.opt.density_ceiling);
+    } catch (const Crossing_capacity_error& e) {  // structural crossing errors always propagate
+      if (movable_route_partition(d.opt)) {
+        throw;
+      }
+      rep.crossing_policy_invalid = true;  // a legacy diagnostic result: not a passing density gate
+      if (!rep.crossing_over_policy++) {
+        std::fprintf(stderr, "legroute sat: legacy crossing over the density policy (reported, not repaired): %s\n", e.what());
       }
     }
     for (int r = 0; r < g.regions; ++r) {  // a routable answer first, then the lower cost; none: the first policy's
@@ -5062,7 +7209,88 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
         failed.push_back(r);
       }
     }
-    if (failed.empty() || round >= d.opt.spill_rounds || policies.size() > 1) {
+    if (!failed.empty() && timeout_round < d.opt.partition_timeout_rounds) {
+      std::vector<size_t> cells(g.size());
+      for (const auto& b : boxes.boxes) {
+        cells[size_t(g.tile_of(b.cx, b.cy))] += b.cells.size();
+      }
+      std::vector<unsigned> targets(size_t(g.regions), 0);
+      unsigned              nominal_target = d.opt.partition_cells;
+      for (unsigned attempt = 0; attempt <= timeout_round && nominal_target > 1; ++attempt) {
+        nominal_target = std::max(1u, nominal_target / 2);
+      }
+      for (int r : failed) {
+        const auto& out = last[size_t(chosen[r])][size_t(r)];
+        if (out.status != Sat_status::unknown || out.skipped) {
+          continue;  // UNSAT and fail-fast omissions are not timed-out searches.
+        }
+        size_t count = 0;
+        for (int t : region_tiles[size_t(r)]) {
+          count += cells[size_t(t)];
+        }
+        if (count > 1) {
+          targets[size_t(r)] = unsigned(std::min<size_t>(count - 1, nominal_target));
+        }
+      }
+      const auto started = Clock::now();
+      auto refined = refine_route_regions(g, cells, partition_cuts, d.opt.partition_critical_cost, targets, d.opt.partition_mesh);
+      rep.partition_seconds += seconds_since(started);
+      if (refined != g.region) {
+        const int before = g.regions;
+        size_t    split  = 0;
+        for (int r = 0; r < before; ++r) {
+          split += std::ranges::any_of(region_tiles[size_t(r)], [&](int t) { return refined[size_t(t)] != r; });
+        }
+        g.region  = std::move(refined);
+        g.regions = *std::max_element(g.region.begin(), g.region.end()) + 1;
+        g.region_tiles.assign(size_t(g.regions), {});
+        std::vector<size_t> counts(size_t(g.regions), 0);
+        for (size_t t = 0; t < g.size(); ++t) {
+          g.region_tiles[size_t(g.region[t])].push_back(int(t));
+          counts[size_t(g.region[t])] += cells[t];
+        }
+        for (auto& b : boxes.boxes) {
+          b.region = g.region[size_t(g.tile_of(b.cx, b.cy))];
+        }
+        for (auto& answers : last) {
+          answers.resize(size_t(g.regions));
+        }
+        chosen.resize(size_t(g.regions), 0);
+        sig_prev.resize(size_t(g.regions), 0);
+        region_extra.resize(size_t(g.regions), 0);
+        gave_to.resize(size_t(g.regions), -1);
+        rep.regions = size_t(g.regions);
+        rep.partition_oversized
+            = size_t(std::ranges::count_if(counts, [&](size_t count) { return count > d.opt.partition_cells; }));
+        rep.partition_max_cells = *std::max_element(counts.begin(), counts.end());
+        rep.partition_crossings = rep.partition_critical_crossings = 0;
+        for (size_t t = 0; t < g.size(); ++t) {
+          for (bool h : {true, false}) {
+            if (h ? g.col(int(t)) + 1 >= g.cols : g.row(int(t)) + 1 >= g.rows) {
+              continue;
+            }
+            if (g.region[t] != g.region[t + (h ? 1 : size_t(g.cols))]) {
+              rep.partition_crossings          += (h ? partition_cuts.load_h : partition_cuts.load_v)[t];
+              rep.partition_critical_crossings += (h ? partition_cuts.critical_h : partition_cuts.critical_v)[t];
+            }
+          }
+        }
+        ++timeout_round;
+        ++rep.partition_timeout_rounds;
+        rep.partition_timeout_regions += split;
+        std::fprintf(stderr,
+                     "legroute partition: timeout recut %u: split %zu regions, %d -> %d regions; global trees retained\n",
+                     timeout_round,
+                     split,
+                     before,
+                     g.regions);
+        continue;
+      }
+      if (std::ranges::any_of(targets, [](unsigned target) { return target != 0; })) {
+        std::fprintf(stderr, "legroute partition: no admissible refinement of timed-out regions; current boundaries retained\n");
+      }
+    }
+    if (failed.empty() || spill_round >= d.opt.spill_rounds || policies.size() > 1) {
       break;
     }
     // spill: each failing region pushes about spill_fraction of its boxes into its neighbours with room (the next ring
@@ -5079,8 +7307,8 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
     for (int t = 0; t < int(g.size()); ++t) {  // tiles a movable box can take: unblocked and not pinned by a fixed box
       fit_tiles[size_t(g.region[t])] += !g.blocked[t] && !P[0].pinned_tile[size_t(t)];
     }
-    std::set<int> taken;  // tiles given to boxes this round
-    size_t        moved = 0, grown = 0;
+    std::set<int>            taken;  // tiles given to boxes this round
+    size_t                   moved = 0, grown = 0;
     std::vector<std::string> kinds;  // alternatives, in priority order
     for (size_t at = 0; at < d.opt.alternatives.size();) {
       const size_t comma = d.opt.alternatives.find(',', at);
@@ -5098,12 +7326,18 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
     // line (across a boundary perpendicular to it) and splits parallel to the line, so the line gets the union's width
     // of tracks. The split balances the boxes. Each pair joins once; the next round solves what changed.
     if (d.opt.mesh_join) {
-      size_t joins = 0;
+      size_t            joins = 0;
+      // region_tiles/region_boxes and the verdicts describe the mesh at the start of this round. A region can
+      // participate in only one repair until those lists and the crossings have been rebuilt.
+      std::vector<char> paired(size_t(g.regions), 0);
       for (int r : failed) {
-        const auto& own = last[size_t(chosen[r])][size_t(r)];
+        if (paired[size_t(r)]) {
+          continue;
+        }
+        const auto& own          = last[size_t(chosen[r])][size_t(r)];
         // the boundary to join across: (neighbour, its boundary is a row line)
-        int  nb = -1;
-        bool row_boundary = false;
+        int         nb           = -1;
+        bool        row_boundary = false;
         if (own.status == Sat_status::unsatisfiable && own.cut_at >= 0) {  // a line inside r: join beside it
           // a row line (cut_h false) needs width: the neighbour across a column boundary (left or right) with the
           // longest shared side; a column line needs height: the neighbour above or below
@@ -5111,7 +7345,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
           for (int t : region_tiles[size_t(r)]) {
             for (int q : tile_neighbours(g, t)) {
               const bool row_side = g.col(q) == g.col(t);  // q above or below t: a row boundary between them
-              if (g.region[q] != r && row_side == own.cut_h) {
+              if (g.region[q] != r && !paired[size_t(g.region[q])] && row_side == own.cut_h) {
                 ++shared[g.region[q]];
               }
             }
@@ -5122,7 +7356,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
             }
           }
           row_boundary = own.cut_h;
-        } else {  // the boundary of r the hops load most against its tracks
+        } else {                                          // the boundary of r the hops load most against its tracks
           std::map<int, std::pair<double, double>> load;  // neighbour -> (hops, tracks)
           for (const auto& [a, b] : x.hops) {
             if ((g.region[a] == r) != (g.region[b] == r)) {
@@ -5132,13 +7366,16 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
           for (int t : region_tiles[size_t(r)]) {
             for (int q : tile_neighbours(g, t)) {
               if (g.region[q] != r) {
-                const bool h = g.row(q) == g.row(t);
+                const bool h              = g.row(q) == g.row(t);
                 load[g.region[q]].second += std::max(0, std::min((h ? cap_h0 : cap_v0)[t], (h ? cap_h0 : cap_v0)[q]));
               }
             }
           }
           double worst = 0;
           for (const auto& [q, hv] : load) {
+            if (paired[size_t(q)]) {
+              continue;
+            }
             const double ratio = hv.first / std::max(1.0, hv.second);
             if (ratio > worst) {
               worst = ratio;
@@ -5160,7 +7397,6 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
         if (nb < 0 || joined_pairs.contains({std::min(r, nb), std::max(r, nb)})) {
           continue;
         }
-        joined_pairs.insert({std::min(r, nb), std::max(r, nb)});
         // the union, split the other way: by a column line for a row boundary joined, by a row line otherwise, at the
         // line that balances the boxes (the regions keep their ids: r the lower / left part)
         std::vector<int> U = region_tiles[size_t(r)];
@@ -5189,9 +7425,22 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
         if (line < 0 || acc == 0) {
           continue;  // every box on one side: nothing to balance
         }
+        auto candidate = g.region;
         for (int t : U) {
-          g.region[size_t(t)] = (row_boundary ? g.col(t) : g.row(t)) < line ? r : nb;
+          candidate[size_t(t)] = (row_boundary ? g.col(t) : g.row(t)) < line ? r : nb;
         }
+        if (!connected_regions(g, candidate) || (d.opt.partition_cells && !partition_cuts.allows(g, candidate))) {
+          ++rep.partition_rejected_repairs;
+          std::fprintf(
+              stderr,
+              "legroute partition: rejected repair of regions %d and %d across a forbidden edge or with a disconnected region\n",
+              r,
+              nb);
+          continue;
+        }
+        joined_pairs.insert({std::min(r, nb), std::max(r, nb)});
+        paired[size_t(r)] = paired[size_t(nb)] = 1;
+        g.region                               = std::move(candidate);
         for (int b : region_boxes[size_t(r)]) {
           boxes.boxes[size_t(b)].region = g.region[size_t(g.tile_of(boxes.boxes[size_t(b)].cx, boxes.boxes[size_t(b)].cy))];
         }
@@ -5199,14 +7448,21 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
           boxes.boxes[size_t(b)].region = g.region[size_t(g.tile_of(boxes.boxes[size_t(b)].cx, boxes.boxes[size_t(b)].cy))];
         }
         ++joins;
-        std::fprintf(stderr,
-                     "legroute sat: spill round %u: region %d (%s) joins region %d across their %s boundary; the union splits at %s %d\n",
-                     round + 1, r,
-                     own.cut_at >= 0 ? "cut-bound" : "hops over its boundary", nb, row_boundary ? "row" : "column",
-                     row_boundary ? "column" : "row", line);
+        std::fprintf(
+            stderr,
+            "legroute sat: spill round %u: region %d (%s) joins region %d across their %s boundary; the union splits at %s %d\n",
+            round + 1,
+            r,
+            own.cut_at >= 0 ? "cut-bound" : "hops over its boundary",
+            nb,
+            row_boundary ? "row" : "column",
+            row_boundary ? "column" : "row",
+            line);
       }
       if (joins > 0) {
         rep.mesh_joins += joins;
+        ++rep.spill_rounds;
+        ++spill_round;
         g.region_tiles.assign(size_t(g.regions), {});
         for (size_t t = 0; t < g.size(); ++t) {
           g.region_tiles[size_t(g.region[t])].push_back(int(t));
@@ -5215,7 +7471,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
       }
     }
     for (int r : failed) {
-      if (!kinds.empty()) {  // alternative placements of the region's boxes, solved in parallel with the round's hops fixed
+      if (!kinds.empty() && Clock::now() < deadline_for(r)) {  // alternatives share the current regional allowance
         std::vector<int> movable;
         for (int b : region_boxes[size_t(r)]) {
           if (!P[0].boxes.boxes[size_t(b)].fixed && !P[0].allowed.contains(b)) {
@@ -5225,7 +7481,8 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
         std::vector<Alternative> cands;
         for (const auto& kind : kinds) {
           if (kind == "noise") {
-            cands.push_back(alt_noise(g, boxes, movable, region_tiles[size_t(r)], int(d.opt.window_tiles), 1234u + round * 131u + unsigned(r)));
+            cands.push_back(
+                alt_noise(g, boxes, movable, region_tiles[size_t(r)], int(d.opt.window_tiles), 1234u + round * 131u + unsigned(r)));
           } else if (kind == "anchor") {
             cands.push_back(alt_anchor(g, boxes, movable, region_tiles[size_t(r)]));
           } else if (kind == "spread") {
@@ -5244,68 +7501,115 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
           }
         }
         std::erase_if(cands, [](const Alternative& a) { return a.homes.empty(); });
-        std::vector<Region_out>              outs(cands.size());
-        std::vector<std::thread>             pool;
-        const std::vector<std::vector<int>>  no_free_hops(hop_tiles.size());
-        const auto                           t0 = Clock::now();
-        for (size_t c = 0; c < cands.size(); ++c) {
-          pool.emplace_back([&, c] {
-            Boxes bx = P[0].boxes;
-            for (const auto& h : cands[c].homes) {
-              bx.boxes[size_t(h.box)].placed = false;  // a legal box off its legal tile is an ordinary box
-              bx.boxes[size_t(h.box)].cx     = h.cx;
-              bx.boxes[size_t(h.box)].cy     = h.cy;
-              bx.boxes[size_t(h.box)].window = h.window;
-            }
-            auto po = policies[0];
-            po.window_tiles += region_extra[size_t(r)];
-            if (d.opt.alt_ms > 0) {
-              po.sat_ms = d.opt.alt_ms;
-            }
-            const auto started = Clock::now();
-            try {
-              if (cands[c].kind == "checker") {  // the relaxed model first; its answer seeds the full one
-                std::vector<char> board(g.size(), 0);
-                for (int t : region_tiles[size_t(r)]) {
-                  board[size_t(t)] = (g.col(t) + g.row(t) + int(round)) % 2 == 0;
-                }
-                auto relaxed      = po;
-                relaxed.untracked = &board;
-                Region_out phase;
-                solve_region(d, relaxed, g, r, region_boxes[size_t(r)], region_tiles[size_t(r)], bx, x.ends, P[0].treed, P[0].allowed,
-                             P[0].pinned_tile, " alternative checker (relaxed)", cap_h0, cap_v0, P[0].reserve, no_free_hops, hop_room, phase);
-                if (phase.status != Sat_status::satisfiable) {
-                  outs[c] = std::move(phase);  // UNSAT relaxed: the region needs less density, not another placement
-                } else {
-                  cands[c].homes.clear();
-                  for (const auto& [b, t] : phase.tiles) {
-                    if (!bx.boxes[size_t(b)].fixed && !P[0].allowed.contains(b)) {
-                      cands[c].homes.push_back({b, double(g.cx(g.col(t))), double(g.cy(g.row(t))), 4});
-                    }
-                  }
-                  for (const auto& h : cands[c].homes) {
-                    bx.boxes[size_t(h.box)].placed = false;
-                    bx.boxes[size_t(h.box)].cx     = h.cx;
-                    bx.boxes[size_t(h.box)].cy     = h.cy;
-                    bx.boxes[size_t(h.box)].window = h.window;
-                  }
-                  solve_region(d, po, g, r, region_boxes[size_t(r)], region_tiles[size_t(r)], bx, x.ends, P[0].treed, P[0].allowed, P[0].pinned_tile,
-                               " alternative checker", cap_h0, cap_v0, P[0].reserve, no_free_hops, hop_room, outs[c]);
-                }
-              } else {
-                solve_region(d, po, g, r, region_boxes[size_t(r)], region_tiles[size_t(r)], bx, x.ends, P[0].treed, P[0].allowed, P[0].pinned_tile,
-                             " alternative " + cands[c].kind, cap_h0, cap_v0, P[0].reserve, no_free_hops, hop_room, outs[c]);
+        std::vector<Region_out>             outs(cands.size());
+        const std::vector<std::vector<int>> no_free_hops(hop_tiles.size());
+        const auto                          t0 = Clock::now();
+        // Preserve one worker per alternative, but join every worker and
+        // propagate model/construction errors to the transactional caller.
+        parallel(cands.size(), unsigned(cands.size()), [&](size_t c) {
+          Boxes bx = P[0].boxes;
+          for (const auto& h : cands[c].homes) {
+            bx.boxes[size_t(h.box)].placed = false;  // a legal box off its legal tile is an ordinary box
+            bx.boxes[size_t(h.box)].cx     = h.cx;
+            bx.boxes[size_t(h.box)].cy     = h.cy;
+            bx.boxes[size_t(h.box)].window = h.window;
+          }
+          auto po          = policies[0];
+          po.window_tiles += region_extra[size_t(r)];
+          if (d.opt.alt_ms > 0) {
+            po.sat_ms = d.opt.alt_ms;
+          }
+          const auto started = Clock::now();
+          try {
+            if (cands[c].kind == "checker") {  // the relaxed model first; its answer seeds the full one
+              std::vector<char> board(g.size(), 0);
+              for (int t : region_tiles[size_t(r)]) {
+                board[size_t(t)] = (g.col(t) + g.row(t) + int(round)) % 2 == 0;
               }
-            } catch (const Legroute_unfit&) {
-              outs[c].status = Sat_status::unsatisfiable;
+              auto relaxed      = po;
+              relaxed.untracked = &board;
+              Region_out phase;
+              solve_region(d,
+                           relaxed,
+                           g,
+                           r,
+                           region_boxes[size_t(r)],
+                           region_tiles[size_t(r)],
+                           bx,
+                           x.ends,
+                           P[0].treed,
+                           P[0].allowed,
+                           P[0].pinned_tile,
+                           " alternative checker (relaxed)",
+                           cap_h0,
+                           cap_v0,
+                           P[0].reserve,
+                           no_free_hops,
+                           hop_room,
+                           phase,
+                           deadline_for(r));
+              if (phase.status != Sat_status::satisfiable) {
+                outs[c] = std::move(phase);  // UNSAT relaxed: the region needs less density, not another placement
+              } else {
+                cands[c].homes.clear();
+                for (const auto& [b, t] : phase.tiles) {
+                  if (!bx.boxes[size_t(b)].fixed && !P[0].allowed.contains(b)) {
+                    cands[c].homes.push_back({b, double(g.cx(g.col(t))), double(g.cy(g.row(t))), 4});
+                  }
+                }
+                for (const auto& h : cands[c].homes) {
+                  bx.boxes[size_t(h.box)].placed = false;
+                  bx.boxes[size_t(h.box)].cx     = h.cx;
+                  bx.boxes[size_t(h.box)].cy     = h.cy;
+                  bx.boxes[size_t(h.box)].window = h.window;
+                }
+                solve_region(d,
+                             po,
+                             g,
+                             r,
+                             region_boxes[size_t(r)],
+                             region_tiles[size_t(r)],
+                             bx,
+                             x.ends,
+                             P[0].treed,
+                             P[0].allowed,
+                             P[0].pinned_tile,
+                             " alternative checker",
+                             cap_h0,
+                             cap_v0,
+                             P[0].reserve,
+                             no_free_hops,
+                             hop_room,
+                             outs[c],
+                             deadline_for(r));
+              }
+            } else {
+              solve_region(d,
+                           po,
+                           g,
+                           r,
+                           region_boxes[size_t(r)],
+                           region_tiles[size_t(r)],
+                           bx,
+                           x.ends,
+                           P[0].treed,
+                           P[0].allowed,
+                           P[0].pinned_tile,
+                           " alternative " + cands[c].kind,
+                           cap_h0,
+                           cap_v0,
+                           P[0].reserve,
+                           no_free_hops,
+                           hop_room,
+                           outs[c],
+                           deadline_for(r));
             }
-            outs[c].seconds = seconds_since(started);
-          });
-        }
-        for (auto& th : pool) {
-          th.join();
-        }
-        rep.alt_tried += cands.size();
+          } catch (const Legroute_unfit&) {
+            outs[c].status = Sat_status::unsatisfiable;
+          }
+          outs[c].seconds = seconds_since(started);
+        });
+        rep.alt_tried   += cands.size();
         rep.alt_seconds += seconds_since(t0);
         Legroute_report::Alt_trial trial;
         trial.region = r;
@@ -5314,7 +7618,7 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
         {
           size_t free_here = 0;
           for (int t : region_tiles[size_t(r)]) {
-            free_here += !g.blocked[t];
+            free_here    += !g.blocked[t];
             trial.pinned += P[0].pinned_tile[size_t(t)] != 0;
           }
           trial.fill = free_here ? double(movable.size()) / double(free_here) : 0;
@@ -5325,8 +7629,10 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
           for (int t : region_tiles[size_t(r)]) {  // the boundary's tracks: the edges to the tiles of other regions
             for (int q : tile_neighbours(g, t)) {
               if (g.region[q] != r) {
-                const bool h = g.row(q) == g.row(t);
-                trial.boundary_tracks += size_t(std::max(0, int(std::floor(std::min((h ? cap_h0 : cap_v0)[t], (h ? cap_h0 : cap_v0)[q]) * policies[0].cap_scale))));
+                const bool h           = g.row(q) == g.row(t);
+                trial.boundary_tracks += size_t(std::max(
+                    0,
+                    edge_limit(std::min((h ? cap_h0 : cap_v0)[t], (h ? cap_h0 : cap_v0)[q]), policies[0])));
               }
             }
           }
@@ -5336,10 +7642,10 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
         std::string line;
         int         winner = -1;
         for (size_t c = 0; c < cands.size(); ++c) {
-          const auto st = outs[c].status == Sat_status::satisfiable ? "sat"
-                          : outs[c].status == Sat_status::unsatisfiable ? (outs[c].rep.sat_cut_regions ? "cut" : "unsat")
-                                                                        : "unknown";
-          line += std::format(" {} {} {:.1f} s", cands[c].kind, st, outs[c].seconds);
+          const auto st  = outs[c].status == Sat_status::satisfiable     ? "sat"
+                           : outs[c].status == Sat_status::unsatisfiable ? (outs[c].rep.sat_cut_regions ? "cut" : "unsat")
+                                                                         : "unknown";
+          line          += std::format(" {} {} {:.1f} s", cands[c].kind, st, outs[c].seconds);
           trial.families.emplace_back(cands[c].kind, st, outs[c].seconds);
           if (winner < 0 && outs[c].status == Sat_status::satisfiable) {
             winner = int(c);
@@ -5348,13 +7654,22 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
         if (winner >= 0) {
           trial.adopted = cands[size_t(winner)].kind;
         }
-        std::fprintf(stderr, "legroute sat: spill round %u: region %d (fill %.2f, cut %.2f, %zu hops over %zu boundary tracks, %s) alternatives:%s%s\n",
-                     round + 1, r, trial.fill, trial.cut, trial.hops, trial.boundary_tracks, trial.status.c_str(), line.c_str(),
+        std::fprintf(stderr,
+                     "legroute sat: spill round %u: region %d (fill %.2f, cut %.2f, %zu hops over %zu boundary tracks, %s) "
+                     "alternatives:%s%s\n",
+                     round + 1,
+                     r,
+                     trial.fill,
+                     trial.cut,
+                     trial.hops,
+                     trial.boundary_tracks,
+                     trial.status.c_str(),
+                     line.c_str(),
                      winner >= 0 ? std::format(" -> {} adopted", cands[size_t(winner)].kind).c_str() : " -> none routed");
         rep.alt_trials.push_back(std::move(trial));
         if (winner >= 0) {  // the candidate's answer stands; its homes stay private (the crossings and the neighbours'
                             // hops come from the homes, and the answer was solved with this round's hops); no spill here
-          last[0][size_t(r)] = std::move(outs[size_t(winner)]);
+          adopt_region_alternative(last[0][size_t(r)], std::move(outs[size_t(winner)]), r, x.pieces);
           ++rep.alt_rescued;
           ++grown;  // the round changed something: it goes on
           continue;
@@ -5364,7 +7679,10 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
       if (d.opt.window_grow > 0 && region_extra[size_t(r)] < 2 * d.opt.window_grow) {
         region_extra[size_t(r)] += d.opt.window_grow;
         ++grown;
-        std::fprintf(stderr, "legroute sat: spill round %u: region %d widens its windows to %u tiles\n", round + 1, r,
+        std::fprintf(stderr,
+                     "legroute sat: spill round %u: region %d widens its windows to %u tiles\n",
+                     round + 1,
+                     r,
                      d.opt.window_tiles + region_extra[size_t(r)]);
         continue;
       }
@@ -5374,9 +7692,9 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
           cand.push_back(b);
         }
       }
-      size_t want
-          = std::min(cand.size(), std::max<size_t>(1, size_t(std::ceil(d.opt.spill_fraction * double(region_boxes[size_t(r)].size())))));
-      if (d.opt.spill_shift) {  // the boundary moves: the strip next to the neighbour the nets reach most, boxes included
+      size_t want = std::min(cand.size(),
+                             std::max<size_t>(1, size_t(std::ceil(d.opt.spill_fraction * double(region_boxes[size_t(r)].size())))));
+      if (d.opt.spill_shift) {    // the boundary moves: the strip next to the neighbour the nets reach most, boxes included
         std::vector<int> around;  // never straight back to a region that just handed r a strip (no ping-pong)
         for (int s2 : region_adj[size_t(r)]) {
           if (gave_to[size_t(s2)] != r) {
@@ -5416,14 +7734,28 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
           }
         }
         if (strip.empty()) {
-          std::fprintf(stderr, "legroute sat: spill round %u: region %d cannot hand a strip to region %d (it would split or empty)\n",
-                       round + 1, r, s2);
+          std::fprintf(stderr,
+                       "legroute sat: spill round %u: region %d cannot hand a strip to region %d (it would split or empty)\n",
+                       round + 1,
+                       r,
+                       s2);
           continue;
         }
-        const std::set<int> in_strip(strip.begin(), strip.end());
+        auto candidate = g.region;
         for (int t : strip) {
-          g.region[t] = s2;
+          candidate[size_t(t)] = s2;
         }
+        if (!connected_regions(g, candidate) || (d.opt.partition_cells && !partition_cuts.allows(g, candidate))) {
+          ++rep.partition_rejected_repairs;
+          std::fprintf(
+              stderr,
+              "legroute partition: rejected shift from region %d to %d across a forbidden edge or with a disconnected region\n",
+              r,
+              s2);
+          continue;
+        }
+        g.region = std::move(candidate);
+        const std::set<int> in_strip(strip.begin(), strip.end());
         for (int b : region_boxes[size_t(r)]) {
           if (in_strip.contains(g.tile_of(boxes.boxes[size_t(b)].cx, boxes.boxes[size_t(b)].cy))) {
             boxes.boxes[size_t(b)].region = s2;
@@ -5433,11 +7765,17 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
         for (int t = 0; t < int(g.size()); ++t) {
           g.region_tiles[size_t(g.region[t])].push_back(t);
         }
-        moved += on_strip + 1;  // the tiles moved even when no box did
-        gave_to[size_t(r)] = s2;
-        rep.shifted_tiles += strip.size();
-        std::fprintf(stderr, "legroute sat: spill round %u: region %d hands %zu tiles (%d deep, %zu boxes) next to region %d to it\n",
-                     round + 1, r, strip.size(), deep, on_strip, s2);
+        moved              += on_strip + 1;  // the tiles moved even when no box did
+        gave_to[size_t(r)]  = s2;
+        rep.shifted_tiles  += strip.size();
+        std::fprintf(stderr,
+                     "legroute sat: spill round %u: region %d hands %zu tiles (%d deep, %zu boxes) next to region %d to it\n",
+                     round + 1,
+                     r,
+                     strip.size(),
+                     deep,
+                     on_strip,
+                     s2);
         continue;
       }
       if (cand.empty()) {
@@ -5450,14 +7788,20 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
       for (int t : region_tiles[size_t(r)]) {
         fit_here += !g.blocked[t] && !P[0].pinned_tile[size_t(t)] && box_fits(d, g, boxes.boxes[size_t(cand[cand.size() / 2])], t);
       }
-      const size_t excess = std::max(cand.size() > fit_here ? cand.size() - fit_here : 0, last[size_t(chosen[r])][size_t(r)].unfit_boxes);
+      const size_t excess
+          = std::max(cand.size() > fit_here ? cand.size() - fit_here : 0, last[size_t(chosen[r])][size_t(r)].unfit_boxes);
       if (d.opt.spill_fraction <= 0 && excess == 0) {
         continue;  // no box spill: the rounds carry the alternatives, the windows and the shift alone
       }
       if (excess > 0) {
         want = std::max(want, excess);
-        std::fprintf(stderr, "legroute sat: spill round %u: region %d holds %zu movable boxes for %zu fitting tiles: %zu must leave\n",
-                     round + 1, r, cand.size(), fit_here, excess);
+        std::fprintf(stderr,
+                     "legroute sat: spill round %u: region %d holds %zu movable boxes for %zu fitting tiles: %zu must leave\n",
+                     round + 1,
+                     r,
+                     cand.size(),
+                     fit_here,
+                     excess);
       }
       // a region's room: up to the fill that evens it with the failing region, and never past nine tenths of its
       // tiles (the solver needs slack); its tiles counted as those a typical box leaving (the median width) fits (a
@@ -5508,10 +7852,17 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
       if (to.empty()) {
         std::string around;
         for (int s2 : region_adj[size_t(r)]) {
-          around += std::format(" {} (fill {:.2f}, room {})", s2, double(boxes_in[size_t(s2)]) / std::max(1, fit_tiles[size_t(s2)]), room_of(s2));
+          around += std::format(" {} (fill {:.2f}, room {})",
+                                s2,
+                                double(boxes_in[size_t(s2)]) / std::max(1, fit_tiles[size_t(s2)]),
+                                room_of(s2));
         }
-        std::fprintf(stderr, "legroute sat: spill round %u: region %d (%zu boxes, fill %.2f) has no region around it with room:%s\n",
-                     round + 1, r, region_boxes[size_t(r)].size(), double(boxes_in[size_t(r)]) / std::max(1, fit_tiles[size_t(r)]),
+        std::fprintf(stderr,
+                     "legroute sat: spill round %u: region %d (%zu boxes, fill %.2f) has no region around it with room:%s\n",
+                     round + 1,
+                     r,
+                     region_boxes[size_t(r)].size(),
+                     double(boxes_in[size_t(r)]) / std::max(1, fit_tiles[size_t(r)]),
                      around.c_str());
         continue;
       }
@@ -5547,10 +7898,18 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
       }
       std::string where;
       for (const auto& tg : to) {
-        where += std::format(" {} -> region {} (room {})", per_target.contains(tg.region) ? per_target[tg.region] : 0, tg.region, tg.room);
+        where += std::format(" {} -> region {} (room {})",
+                             per_target.contains(tg.region) ? per_target[tg.region] : 0,
+                             tg.region,
+                             tg.room);
       }
-      std::fprintf(stderr, "legroute sat: spill round %u: region %d (%zu boxes, %zu wanted) pushes%s\n", round + 1, r,
-                   region_boxes[size_t(r)].size(), want, where.c_str());
+      std::fprintf(stderr,
+                   "legroute sat: spill round %u: region %d (%zu boxes, %zu wanted) pushes%s\n",
+                   round + 1,
+                   r,
+                   region_boxes[size_t(r)].size(),
+                   want,
+                   where.c_str());
     }
     rep.windows_grown += grown;
     if (moved == 0 && grown == 0) {
@@ -5559,10 +7918,13 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
     // a receiver that cannot hold what it took (the room is an estimate): its extra boxes go to the nearest region
     // with a fitting tile, as before the first round
     if (const size_t bounced = moved && !d.opt.spill_shift ? balance_regions(d, g, boxes) : 0; bounced > 0) {
-      std::fprintf(stderr, "legroute sat: spill round %u: %zu boxes bounced to the nearest region with a fitting tile\n", round + 1,
+      std::fprintf(stderr,
+                   "legroute sat: spill round %u: %zu boxes bounced to the nearest region with a fitting tile\n",
+                   round + 1,
                    bounced);
     }
     ++rep.spill_rounds;
+    ++spill_round;
     rep.spilled_boxes += moved;
   }
   for (int r = 0; r < g.regions; ++r) {  // a region the spill rounds left with more boxes than tiles: the usual error
@@ -5575,12 +7937,23 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
   rep.sat_hops_over_share    += x.over_share;
   rep.global_nets            += x.global_nets;
   rep.global_pieces          += x.pieces.size();
-  rep.global_unrouted        += x.global_unrouted;
-  rep.global_full_edges      += x.global_full;
-  rep.global_overflow_edges  += x.global_overflow_edges;
-  rep.global_overflow_tracks += x.global_overflow_tracks;
-  rep.global_rounds           = std::max(rep.global_rounds, x.global_rounds);
-  rep.global_seconds         += x.global_seconds;
+  rep.global_retained_parts  += x.retained.size() + x.retained_parts.size();
+  rep.coarse_backbone_fixed   = false;
+  rep.coarse_corridor_free    = movable_route_partition(d.opt);
+  for (const auto& ends : x.ends) {
+    rep.coarse_backbone_parts += ends.coarse_parts.size();
+  }
+  for (const auto& piece : x.pieces) {
+    if (piece.backbone) {
+      rep.coarse_backbone_edges += size_t(std::abs(g.col(piece.a) - g.col(piece.b)) + std::abs(g.row(piece.a) - g.row(piece.b)));
+    }
+  }
+  rep.global_unrouted              += x.global_unrouted;
+  rep.global_topology_disconnected += x.global_topology_disconnected;
+  rep.global_full_edges            += x.global_full;
+  rep.global_overflow_edges        += x.global_overflow_edges;
+  rep.global_overflow_tracks       += x.global_overflow_tracks;
+  rep.global_rounds                 = std::max(rep.global_rounds, x.global_rounds);
   {  // pre-placement counters: the first policy's
     const auto& q              = P[0].rep;
     rep.crit_pinned           += q.crit_pinned;
@@ -5605,6 +7978,53 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
     rep.io_skipped            += q.io_skipped;
   }
 
+  // The accepted corridor model is an exact edge union. Its pinless degree-2
+  // transit tiles are not physical attachments: keeping them as nodes would
+  // create extra risers/jogs and make every unit segment exempt from layer load.
+  std::set<std::pair<int, int>> protected_nodes;
+  if (movable_route_partition(d.opt)) {
+    std::vector<int> selected_tiles;
+    selected_tiles.reserve(boxes.boxes.size());
+    for (const auto& box : boxes.boxes) {
+      selected_tiles.push_back(box.tile);
+    }
+    for (int r = 0; r < g.regions; ++r) {
+      for (const auto& [b, t] : last[chosen[r]][r].tiles) {
+        selected_tiles[size_t(b)] = t;
+      }
+    }
+    for (size_t n = 0; n < d.nets.size(); ++n) {
+      // Preserve the exact attachment sites used by crossing construction,
+      // including physical fixed-pin access and coincident interfaces.
+      for (const auto& [r, endpoints] : x.ends[n].per_region) {
+        for (const auto& endpoint : endpoints) {
+          protected_nodes.emplace(int(n), endpoint.box >= 0 ? selected_tiles[size_t(endpoint.box)] : endpoint.tile);
+        }
+      }
+      // Also preserve every site consumed by the final pin bookkeeping below.
+      for (const auto& pin : d.nets[n].pins) {
+        const int box  = box_of_comp(pin.comp);
+        int       tile = -1;
+        if (box >= 0) {
+          tile = selected_tiles[size_t(box)];
+        } else if (pin.comp >= 0) {
+          const auto& component = d.fp.components[pin.comp];
+          const auto& master    = *d.macro[pin.comp];
+          tile                  = g.tile_of(double(component.place.x) + master.width * d.fp.dbu / 2,
+                                            double(component.place.y) + master.height * d.fp.dbu / 2);
+        } else if (pin.term >= 0) {
+          tile = g.tile_of(double(d.fp.terminals[pin.term].x), double(d.fp.terminals[pin.term].y));
+        }
+        if (tile >= 0) {
+          protected_nodes.emplace(int(n), tile);
+        }
+      }
+    }
+    for (size_t k = 0; k < x.hops.size(); ++k) {
+      protected_nodes.emplace(x.hop_net[k], x.hops[k].first);
+      protected_nodes.emplace(x.hop_net[k], x.hops[k].second);
+    }
+  }
   R.trees.assign(d.nets.size(), {});
   R.local.assign(d.nets.size(), 0);
   std::vector<std::map<int, int>> node_at(d.nets.size());  // per net: tile -> node
@@ -5640,43 +8060,79 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
   };
   for (int r = 0; r < g.regions; ++r) {
     const auto& out = last[chosen[r]][r];
+    if (out.status == Sat_status::satisfiable) {
+      // The accepted union also contains the policy's retained trees/IO pieces. Recount that complete geometry
+      // before extraction, including reused answers and alternatives; a checker-only waiver cannot escape here.
+      auto accepted      = policies[size_t(chosen[r])];
+      accepted.untracked = nullptr;
+      for (const auto& piece : x.pieces) {
+        if (!piece.refinable && piece.region == r && !contains_global_piece(out, piece)) {
+          throw std::runtime_error(
+              std::format("legroute coarse witness repair required: accepted region {} omitted net {} part {} backbone geometry",
+                          r,
+                          piece.net,
+                          piece.part));
+        }
+      }
+      validate_region_edges(g, r, out.conns, P[size_t(chosen[r])].reserve, cap_h0, cap_v0, accepted);
+    }
     for (const auto& [b, t] : out.tiles) {
       boxes.boxes[b].tile  = t;
       boxes.boxes[b].fixed = P[chosen[r]].boxes.boxes[b].fixed;
     }
-    for (const auto& c : out.conns) {
+    const auto paths = movable_route_partition(d.opt) && out.status == Sat_status::satisfiable
+                           ? coalesce_region_routes(g, r, out.conns, protected_nodes)
+                           : out.conns;
+    for (const auto& c : paths) {
       add_conn(c.net, c.ta, c.tb, c.h_first, r);
     }
     for (int n : out.local) {
       R.local[n] = 1;
     }
-    const auto& q            = out.rep;
-    rep.sat_regions         += q.sat_regions;
-    rep.sat_variables       += q.sat_variables;
-    rep.sat_clauses         += q.sat_clauses;
-    rep.sat_solves          += q.sat_solves;
-    rep.sat_binding_tiles   += q.sat_binding_tiles;
-    rep.sat_relaxed_windows += q.sat_relaxed_windows;
-    rep.sat_relaxed_tiles   += q.sat_relaxed_tiles;
-    rep.sat_deficit_tracks  += q.sat_deficit_tracks;
-    rep.sat_unsat_regions   += q.sat_unsat_regions;
-    rep.sat_cut_regions     += q.sat_cut_regions;
-    rep.sat_unknown_regions += q.sat_unknown_regions;
-    rep.sat_skipped_regions += q.sat_skipped_regions;
-    rep.sat_fail_fast_skipped += q.sat_fail_fast_skipped;
-    rep.lazy_rounds         += q.lazy_rounds;
-    rep.lazy_bounds         += q.lazy_bounds;
-    rep.lazy_skipped        += q.lazy_skipped;
-    rep.frozen_boxes        += q.frozen_boxes;
-    rep.sat_seeded          += q.sat_seeded;
-    rep.tier_kept           += q.tier_kept;
-    rep.tier_dropped        += q.tier_dropped;
-    rep.tier_timeouts       += q.tier_timeouts;
-    rep.tier_solves         += q.tier_solves;
-    rep.tier_cost_before    += q.tier_cost_before;
-    rep.tier_cost_after     += q.tier_cost_after;
-    rep.tier_crit_before    += q.tier_crit_before;
-    rep.tier_crit_after     += q.tier_crit_after;
+    const auto& q                     = out.rep;
+    rep.corridor_components          += q.corridor_components;
+    rep.corridor_candidate_edges     += q.corridor_candidate_edges;
+    rep.corridor_connectivity_cuts   += q.corridor_connectivity_cuts;
+    rep.corridor_connectivity_rounds += q.corridor_connectivity_rounds;
+    rep.corridor_checked_components  += q.corridor_checked_components;
+    rep.corridor_selected_edges      += q.corridor_selected_edges;
+    rep.corridor_seed_attempts       += q.corridor_seed_attempts;
+    rep.corridor_seed_successes      += q.corridor_seed_successes;
+    rep.corridor_seed_solves         += q.corridor_seed_solves;
+    rep.corridor_seed_variables      += q.corridor_seed_variables;
+    rep.corridor_seed_clauses        += q.corridor_seed_clauses;
+    rep.corridor_seed_seconds        += q.corridor_seed_seconds;
+    rep.coarse_attachment_stubs      += q.coarse_attachment_stubs;
+    rep.coarse_attachment_choices    += q.coarse_attachment_choices;
+    rep.coarse_attachments_changed   += q.coarse_attachments_changed;
+    rep.sat_regions                  += q.sat_regions;
+    rep.sat_variables                += q.sat_variables;
+    rep.sat_clauses                  += q.sat_clauses;
+    rep.sat_solves                   += q.sat_solves;
+    rep.sat_binding_tiles            += q.sat_binding_tiles;
+    rep.sat_fixed_overflow           += q.sat_fixed_overflow;
+    rep.sat_relaxed_windows          += q.sat_relaxed_windows;
+    rep.sat_root_fallbacks           += q.sat_root_fallbacks;
+    rep.sat_relaxed_tiles            += q.sat_relaxed_tiles;
+    rep.sat_deficit_tracks           += q.sat_deficit_tracks;
+    rep.sat_unsat_regions            += q.sat_unsat_regions;
+    rep.sat_cut_regions              += q.sat_cut_regions;
+    rep.sat_unknown_regions          += q.sat_unknown_regions;
+    rep.sat_skipped_regions          += q.sat_skipped_regions;
+    rep.sat_fail_fast_skipped        += q.sat_fail_fast_skipped;
+    rep.lazy_rounds                  += q.lazy_rounds;
+    rep.lazy_bounds                  += q.lazy_bounds;
+    rep.lazy_skipped                 += q.lazy_skipped;
+    rep.frozen_boxes                 += q.frozen_boxes;
+    rep.sat_seeded                   += q.sat_seeded;
+    rep.tier_kept                    += q.tier_kept;
+    rep.tier_dropped                 += q.tier_dropped;
+    rep.tier_timeouts                += q.tier_timeouts;
+    rep.tier_solves                  += q.tier_solves;
+    rep.tier_cost_before             += q.tier_cost_before;
+    rep.tier_cost_after              += q.tier_cost_after;
+    rep.tier_crit_before             += q.tier_crit_before;
+    rep.tier_crit_after              += q.tier_crit_after;
     {  // per region: its answer, and the cells of a region without a routable answer
       Legroute_report::Region_stat st;
       st.status = out.skipped ? 3 : out.status == Sat_status::satisfiable ? 0 : out.status == Sat_status::unsatisfiable ? 1 : 2;
@@ -5751,7 +8207,9 @@ void sat_place(const Design& d, Grid& g, Boxes& boxes, const Legroute_regions& r
       if (box >= 0) {
         t = boxes.boxes[box].tile;
       } else if (p.comp >= 0) {
-        t = g.tile_of(double(d.fp.components[p.comp].place.x), double(d.fp.components[p.comp].place.y));
+        const auto& c = d.fp.components[p.comp];
+        const auto& m = *d.macro[p.comp];
+        t             = g.tile_of(double(c.place.x) + m.width * d.fp.dbu / 2, double(c.place.y) + m.height * d.fp.dbu / 2);
       } else if (p.term >= 0) {
         t = g.tile_of(double(d.fp.terminals[p.term].x), double(d.fp.terminals[p.term].y));
       } else {

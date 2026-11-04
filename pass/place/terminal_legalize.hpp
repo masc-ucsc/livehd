@@ -2,6 +2,8 @@
 #pragma once
 #include <cstddef>
 #include <cstdint>
+#include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -14,19 +16,30 @@
 #include "warpspace.hpp"
 
 namespace livehd::placement {
+// This attempt could not satisfy the hard density/padding constraints or exhaustively place a cell.
+// The generated-core owner may retry with more area. Invalid controls and implementation errors remain distinct.
+struct Terminal_legalize_unfit : std::runtime_error {
+  using std::runtime_error::runtime_error;
+};
 // Final LiveHD placement operation. Locks exist only during this transaction;
 // successful output retains ordinary PLACED status for the OpenROAD handoff.
+struct Terminal_legalize_domain {
+  bool                          hold = false;  // retain the complete input pose and status
+  std::optional<physical::Rect> origins;       // inclusive lower-left coordinate bounds, not footprint bounds
+};
 struct Terminal_legalize_options {
-  Prects_library prects;
-  Warp_options   remainder_warp{.weight = 1};
-  unsigned       bins_x = 64, bins_y = 64;
-  bool           route_drc   = false;  // Full rectangular trace checks for the signal-routing experiment.
-  double         max_density = .8, target_density = .5;
-  double         remainder_wire_weight = 4;
-  double         critical_fraction = .1, local_pair_fraction = .5;
-  bool           joint_minimize_total   = true;
-  unsigned       critical_padding_sites = 0, critical_fanin_depth = 0;
-  unsigned       padding_max_extra_rows = 0;  // zero keeps mandatory per-cell padding
+  // Empty leaves existing behavior unchanged; otherwise one domain per component.
+  std::vector<Terminal_legalize_domain> domains;
+  Prects_library                        prects;
+  Warp_options                          remainder_warp{.weight = 1};
+  unsigned                              bins_x = 64, bins_y = 64;
+  bool                                  route_drc   = false;  // Full rectangular trace checks for the signal-routing experiment.
+  double                                max_density = .8, target_density = .5;
+  double                                remainder_wire_weight = 4;
+  double                                critical_fraction = .1, local_pair_fraction = .5;
+  bool                                  joint_minimize_total   = true;
+  unsigned                              critical_padding_sites = 0, critical_fanin_depth = 0;
+  unsigned                              padding_max_extra_rows = 0;  // zero keeps mandatory per-cell padding
   unsigned       padding_sites = 1, candidates = 12, pair_move_sites = 4, pair_move_rows = 1;
   unsigned       sat_conflicts = 10000000, sat_milliseconds = 1000;
   std::string    backend          = "cadical";
@@ -48,6 +61,7 @@ struct Terminal_legalize_cell {
   unsigned  padding_sites = 0;
 };
 struct Terminal_legalize_report {
+  size_t                              held_cells = 0, bounded_cells = 0;
   unsigned                            bins_x = 0, bins_y = 0;
   bool                                joint_feasible = false, joint_max_optimized = false, joint_total_optimized = false;
   // Accepted alignments across critical/local stages, classified by whether

@@ -41,8 +41,8 @@ struct Net {
   std::vector<Satlegalize_alignment> pairs;
   std::vector<size_t>                cells;
 };
-struct Packing_failure : std::runtime_error {
-  using std::runtime_error::runtime_error;
+struct Packing_failure : Terminal_legalize_unfit {
+  using Terminal_legalize_unfit::Terminal_legalize_unfit;
 };
 struct Model {
   const ph::Technology&                 tech;
@@ -290,10 +290,10 @@ struct Model {
       }
     }
     if (total_area > options.max_density * total_capacity + epsilon) {
-      throw std::runtime_error("terminal legalization: total CORE area exceeds the hard density capacity");
+      throw Terminal_legalize_unfit("terminal legalization: total CORE area exceeds the hard density capacity");
     }
     if (!grid.within_cap(options.max_density)) {
-      throw std::runtime_error("terminal legalization: input fixed cells exceed a bin's hard density capacity");
+      throw Terminal_legalize_unfit("terminal legalization: input fixed cells exceed a bin's hard density capacity");
     }
     for (size_t i : obstacles) {
       grid.each(box(fp.components[i].place), [&](size_t b, double) { bin_obstacles[b].push_back(i); });
@@ -312,6 +312,13 @@ struct Model {
   unsigned padding(size_t cell) const {
     return critical[cell] ? options.critical_padding_sites : (compact[cell] ? 0 : options.padding_sites);
   }
+  const ph::Rect* origin_bounds(size_t cell) const {
+    return !options.domains.empty() && options.domains[cell].origins ? &*options.domains[cell].origins : nullptr;
+  }
+  bool origin_allowed(size_t cell, double x, double y) const {
+    const auto* b = origin_bounds(cell);
+    return !b || (x >= b->xl && x <= b->xh && y >= b->yl && y <= b->yh);
+  }
   void candidate(size_t cell, size_t row, int64_t start, std::vector<Candidate>& result, double limit, bool nearest_only,
                  bool complete_menu = false) {
     const auto& r = rows[row];
@@ -320,6 +327,9 @@ struct Model {
     p.y           = r.y;
     p.orientation = fp.rows[r.source].orientation;
     p.status      = ph::Status::PLACED;
+    if (!origin_allowed(cell, p.x, p.y)) {
+      return;
+    }
     if (nearest_only && !result.empty() && placement_cost(cell, p) > placement_cost(cell, result.front().place)) {
       return;
     }
@@ -382,6 +392,16 @@ struct Model {
       return;
     }
     const auto& r = rows[row];
+    if (const auto* b = origin_bounds(cell)) {
+      if (r.y < b->yl || r.y > b->yh) {
+        return;
+      }
+      low  = std::max(low, b->xl);
+      high = std::min(high, b->xh);
+      if (high < low) {
+        return;
+      }
+    }
     if (dense_menu) {
       if (std::abs(double(r.y) - original[cell].y) > options.pair_move_rows * r.height) {
         return;
@@ -598,9 +618,23 @@ struct Model {
             continue;
           }
           const auto&   row   = rows[r];
-          const int64_t width = (original[cell].width + row.step - 1) / row.step + 2 * padding(cell);
+          const int64_t width  = (original[cell].width + row.step - 1) / row.step + 2 * padding(cell);
+          const auto*   bounds = origin_bounds(cell);
+          if (bounds && (row.y < bounds->yl || row.y > bounds->yh)) {
+            continue;
+          }
           for (const auto& [lo, hi] : row.free) {
-            for (int64_t start = lo; start + width <= hi; ++start) {
+            auto first = lo, last = hi - width;
+            if (bounds) {
+              const double a = std::max(double(first), std::ceil((bounds->xl - row.x) / row.step) - padding(cell));
+              const double b = std::min(double(last), std::floor((bounds->xh - row.x) / row.step) - padding(cell));
+              if (a > b) {
+                continue;
+              }
+              first = int64_t(a);
+              last  = int64_t(b);
+            }
+            for (int64_t start = first; start <= last; ++start) {
               candidate(cell, r, start, choices, -1, true);
             }
           }
@@ -627,7 +661,7 @@ struct Model {
       }
     }
     if (choices.empty()) {
-      throw Packing_failure("terminal legalization exhausted the full-core destination search for " + fp.components[cell].name
+      throw Packing_failure("terminal legalization exhausted the permitted destination search for " + fp.components[cell].name
                             + "; critical locks and density cap were preserved; no output committed");
     }
     if (stage == 5 && options.remainder_wire_weight > 0 && distance(choices.front().place, original[cell]) > 0) {
@@ -1732,7 +1766,10 @@ struct Model {
         }
         continue;
       }
-      const auto&    p     = fp.components[i].place;
+      const auto& p = fp.components[i].place;
+      if (!origin_allowed(i, p.x, p.y)) {
+        throw std::logic_error("terminal legalization escaped a component origin domain");
+      }
       const double   moved = distance(p, original[i]);
       const auto     a = grid.bin_xy(original[i]), b = grid.bin_xy(p);
       const unsigned hops            = std::abs(a.first - b.first) + std::abs(a.second - b.second);
@@ -1812,8 +1849,39 @@ Terminal_legalize_report terminal_legalize(const physical::Technology& tech, phy
   (void)sat_backend(options.backend);
   const auto start    = std::chrono::steady_clock::now();
   auto       proposal = fp;
-  Model      model(tech, proposal, options);
+  if (!options.domains.empty() && options.domains.size() != fp.components.size()) {
+    throw std::invalid_argument("terminal legalization domains must match the component count");
+  }
+  for (size_t i = 0; i < options.domains.size(); ++i) {
+    const auto& domain = options.domains[i];
+    if (domain.origins) {
+      const auto& b = *domain.origins;
+      if (!std::isfinite(b.xl) || !std::isfinite(b.yl) || !std::isfinite(b.xh) || !std::isfinite(b.yh) || b.xh < b.xl
+          || b.yh < b.yl) {
+        throw std::invalid_argument("terminal legalization requires finite ordered origin bounds");
+      }
+      const auto& p = fp.components[i].place;
+      if ((domain.hold || frame_role(tech, fp.components[i]) != Frame_role::movable)
+          && (p.x < b.xl || p.x > b.xh || p.y < b.yl || p.y > b.yh)) {
+        throw std::invalid_argument("terminal legalization held component is outside its origin bounds");
+      }
+    }
+    if (domain.hold && frame_role(tech, proposal.components[i]) == Frame_role::movable) {
+      proposal.components[i].place.status = ph::Status::FIXED;
+    }
+  }
+  Model model(tech, proposal, options);
   model.run(timing);
+  for (size_t i = 0; i < options.domains.size(); ++i) {
+    model.report.bounded_cells += options.domains[i].origins.has_value();
+    if (options.domains[i].hold) {
+      ++model.report.held_cells;
+      proposal.components[i].place.status = fp.components[i].place.status;
+      if (proposal.components[i].place != fp.components[i].place) {
+        throw std::logic_error("terminal legalization moved a held component");
+      }
+    }
+  }
   model.report.bins       = std::move(model.grid.bins);
   model.report.alignments = std::move(model.alignments);
   model.report.seconds    = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
@@ -1835,6 +1903,8 @@ void write_terminal_legalize_report(const Terminal_legalize_report& r, const phy
     w.Uint64(value);
   };
   count("schema", 1);
+  count("held_cells", r.held_cells);
+  count("bounded_cells", r.bounded_cells);
   count("bins_x", r.bins_x);
   count("bins_y", r.bins_y);
   number("max_density", o.max_density);

@@ -142,6 +142,519 @@ TEST(Placement, ExperimentalBoundaryRefinementsRunOnlyAtTheFinalStage) {
   }
 }
 
+TEST(Placement, PreSatRejectsMissingGlobalPathsRegardlessOfStrictness) {
+  hhds::GraphLibrary source;
+  auto               io  = source.create_io("strict_global_capacity");
+  auto               inv = source.create_io("sky130_fd_sc_hd__inv_1");
+  inv->add_input("A", 0);
+  inv->add_output("Y", 0);
+  constexpr int pairs = 12;
+  for (int i = 0; i < pairs; ++i) {
+    io->add_input("a" + std::to_string(i), i);
+    io->set_bits("a" + std::to_string(i), 1);
+    io->add_output("y" + std::to_string(i), i);
+    io->set_bits("y" + std::to_string(i), 1);
+  }
+  auto graph = io->create_graph();
+  auto seed  = std::make_shared<physical::Floorplan>();
+  for (int i = 0; i < pairs; ++i) {
+    auto signal = graph->get_input_pin("a" + std::to_string(i));
+    gu::set_bits(signal, 1);
+    for (int side = 0; side < 2; ++side) {
+      const auto name = std::format("inv{}_{}", i, side);
+      auto       node = gu::create_typed_node(*graph, Ntype_op::Sub);
+      node.set_subnode(inv);
+      node.set_name(name);
+      node.create_sink_pin("A").connect_driver(signal);
+      signal = node.create_driver_pin("Y");
+      gu::set_bits(signal, 1);
+      Ann_place pose(side ? 40020 : 1380, i * 2720, 1380, 2720);
+      pose.status = Ann_place::Status::PLACED;
+      seed->components.push_back({name, "sky130_fd_sc_hd__inv_1", pose});
+    }
+    graph->get_output_pin("y" + std::to_string(i)).connect_driver(signal);
+  }
+  auto options = plain_options();
+  options.lefs = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.core = options.die           = {0, 0, 55.2, 43.52};
+  options.density                      = .5;
+  options.iterations                   = 0;
+  options.bins                         = 4;
+  options.optimization_pending         = false;
+  options.restart_seed                 = seed;
+  options.legroute                     = true;
+  options.allow_increase_area          = false;
+  options.legroute_probe.strict        = false;
+  options.legroute_options.legal_boxes = true;
+  options.legroute_options.global_all = options.legroute_options.global_route = true;
+  options.legroute_options.region_pins                                        = false;
+  options.legroute_options.global_share                                       = .01;
+  options.legroute_options.global_rounds                                      = 1;
+  options.legroute_options.final = options.legroute_options.clock_spine = false;
+  options.legroute_options.spill_rounds                                 = 0;
+  options.legroute_options.threads                                      = 1;
+  options.snapshots                                                     = true;
+  for (bool strict : {false, true}) {
+    options.legroute_probe.strict = strict;
+    options.output_dir
+        = std::string(std::getenv("TEST_TMPDIR")) + (strict ? "/strict_global_capacity" : "/relaxed_global_capacity");
+    hhds::GraphLibrary placed_library;
+    try {
+      (void)place(*graph, placed_library, options);
+      FAIL() << "missing global paths entered regional SAT, strict=" << strict;
+    } catch (const Legroute_replan& e) {
+      EXPECT_GT(e.gates.unrouted, 0u);
+      EXPECT_EQ(e.gates.topology_disconnected, e.gates.unrouted);
+      EXPECT_EQ(e.gates.search_limited, 0u);
+      EXPECT_NE(std::string_view(e.what()).find("not admitted to SAT"), std::string_view::npos);
+    }
+    std::ifstream       input(options.output_dir + "/pre_sat.json");
+    const std::string   text{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+    rapidjson::Document report;
+    report.Parse(text.c_str());
+    ASSERT_FALSE(report.HasParseError());
+    EXPECT_TRUE(report["requires_replan"].GetBool());
+    EXPECT_GT(report["unrouted"].GetUint64(), 0u);
+    EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/legroute.json"));
+    const auto handoff = physical::read_def(options.output_dir + "/legroute_handoff/input.def");
+    ASSERT_EQ(handoff.terminals.size(), 2 * pairs);
+    for (const auto& terminal : handoff.terminals) {
+      const auto net = std::ranges::find(handoff.nets, terminal.net, &physical::Net::name);
+      ASSERT_NE(net, handoff.nets.end()) << terminal.name;
+      EXPECT_TRUE(std::ranges::any_of(net->connections, [&](const auto& endpoint) {
+        return endpoint.instance == "PIN" && endpoint.pin == terminal.name;
+      })) << terminal.name;
+      EXPECT_TRUE(std::ranges::any_of(net->connections, [](const auto& endpoint) { return endpoint.instance != "PIN"; }))
+          << terminal.name;
+    }
+  }
+}
+
+TEST(Placement, GeneratedPlanningFrameDoesNotShrinkAfterResynthesis) {
+  const auto chain = [](hhds::GraphLibrary& library, int count) {
+    auto io  = library.create_io("retained_generated_frame");
+    auto inv = library.create_io("sky130_fd_sc_hd__inv_1");
+    inv->add_input("A", 0);
+    inv->add_output("Y", 0);
+    io->add_input("a", 0);
+    io->add_output("y", 0);
+    io->set_bits("a", 1);
+    io->set_bits("y", 1);
+    auto graph  = io->create_graph();
+    auto signal = graph->get_input_pin("a");
+    gu::set_bits(signal, 1);
+    for (int i = 0; i < count; ++i) {
+      auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+      node.set_subnode(inv);
+      node.set_name("inv" + std::to_string(i));
+      node.create_sink_pin("A").connect_driver(signal);
+      signal = node.create_driver_pin("Y");
+      gu::set_bits(signal, 1);
+    }
+    graph->get_output_pin("y").connect_driver(signal);
+    return graph;
+  };
+  hhds::GraphLibrary original_library, remapped_library;
+  const auto         original              = chain(original_library, 16);
+  const auto         remapped              = chain(remapped_library, 4);
+  auto               options               = plain_options();
+  options.lefs                             = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.iterations                       = 1;
+  options.bins                             = 4;
+  options.utilization                      = .5;
+  options.density                          = .5;
+  options.optimization_pending             = true;
+  options.legroute                         = true;
+  options.legroute_plan.enabled            = true;
+  options.legroute_plan.iterations         = 50;
+  options.legroute_plan.min_iterations     = 50;
+  options.legroute_options.partition_cells = 32;
+  options.legroute_options.global_route    = true;
+  options.legroute_options.region_pins     = false;
+  options.placement_session                = std::make_shared<Placement_session>();
+  EXPECT_FALSE(options.placement_session->current_layout());
+  options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/retained_generated_frame_initial";
+  hhds::GraphLibrary initial_output;
+  const auto         initial = place(*original, initial_output, options);
+  ASSERT_TRUE(options.placement_session->current_layout());
+  const auto first = *options.placement_session->current_layout();
+
+  options.utilization            = .2;
+  options.placement_area_resume  = true;
+  options.output_dir            += "_grown";
+  hhds::GraphLibrary grown_output;
+  const auto         grown    = place(*original, grown_output, options);
+  const auto         retained = *options.placement_session->current_layout();
+  EXPECT_GT(retained.xh, first.xh);
+  EXPECT_GE(retained.yh, first.yh);
+  const auto before = options.placement_session->spent_iterations();
+
+  // The smaller mapped implementation keeps four physical identities and drops
+  // twelve cells. It must continue the existing optimizer on the grown frame.
+  options.restart_seed  = std::make_shared<physical::Floorplan>(grown.floorplan);
+  options.output_dir   += "_remapped";
+  hhds::GraphLibrary remapped_output;
+  const auto         result = place(*remapped, remapped_output, options);
+  const auto         after  = *options.placement_session->current_layout();
+  EXPECT_DOUBLE_EQ(after.xl, retained.xl);
+  EXPECT_DOUBLE_EQ(after.yl, retained.yl);
+  EXPECT_DOUBLE_EQ(after.site_width, retained.site_width);
+  EXPECT_DOUBLE_EQ(after.row_height, retained.row_height);
+  EXPECT_DOUBLE_EQ(after.xh, retained.xh);
+  EXPECT_DOUBLE_EQ(after.yh, retained.yh);
+  EXPECT_EQ(result.floorplan.rows, grown.floorplan.rows);
+  EXPECT_EQ(result.floorplan.die, grown.floorplan.die);
+  EXPECT_EQ(result.floorplan.components.size(), 4u);
+  EXPECT_EQ(options.placement_session->cold_starts(), 1u);
+  EXPECT_GE(options.placement_session->spent_iterations() - before, 50u);
+
+  // An independent solve still chooses the smaller generated frame. An explicit
+  // smaller frame is not silently enlarged to make retained rebind succeed.
+  auto independent                  = options;
+  independent.placement_session     = std::make_shared<Placement_session>();
+  independent.placement_area_resume = false;
+  independent.restart_seed.reset();
+  independent.output_dir += "_independent";
+  hhds::GraphLibrary independent_output;
+  const auto         smaller = place(*remapped, independent_output, independent);
+  const auto         small   = *independent.placement_session->current_layout();
+  EXPECT_LT(small.xh, retained.xh);
+  EXPECT_LT(small.yh, retained.yh);
+  auto nonplan     = independent;
+  nonplan.legroute = nonplan.legroute_plan.enabled  = false;
+  nonplan.placement_session                         = options.placement_session;
+  nonplan.output_dir                               += "_nonplan";
+  hhds::GraphLibrary nonplan_output;
+  const auto         without_planning = place(*remapped, nonplan_output, nonplan);
+  EXPECT_EQ(without_planning.floorplan.rows, smaller.floorplan.rows);
+  EXPECT_EQ(without_planning.floorplan.die, smaller.floorplan.die);
+  EXPECT_DOUBLE_EQ(options.placement_session->current_layout()->xh, retained.xh);
+  auto explicit_frame = options;
+  explicit_frame.core = explicit_frame.die  = {small.xl / 1000, small.yl / 1000, small.xh / 1000, small.yh / 1000};
+  explicit_frame.output_dir                += "_explicit";
+  hhds::GraphLibrary explicit_output;
+  EXPECT_THROW(place(*remapped, explicit_output, explicit_frame), std::invalid_argument);
+  EXPECT_DOUBLE_EQ(options.placement_session->current_layout()->xh, retained.xh);
+}
+
+TEST(Placement, MovablePlanningPassesItsExactOverlappingFrameToLocalRouting) {
+  hhds::GraphLibrary source;
+  auto               io  = source.create_io("raw_legroute_handoff");
+  auto               inv = source.create_io("sky130_fd_sc_hd__inv_1");
+  inv->add_input("A", 0);
+  inv->add_output("Y", 0);
+  io->add_input("a", 0);
+  io->add_output("y", 0);
+  io->set_bits("a", 1);
+  io->set_bits("y", 1);
+  auto graph  = io->create_graph();
+  auto seed   = std::make_shared<physical::Floorplan>();
+  auto signal = graph->get_input_pin("a");
+  gu::set_bits(signal, 1);
+  for (int i = 0; i < 4; ++i) {
+    const auto name = "inv" + std::to_string(i);
+    auto       node = gu::create_typed_node(*graph, Ntype_op::Sub);
+    node.set_subnode(inv);
+    node.set_name(name);
+    node.create_sink_pin("A").connect_driver(signal);
+    signal = node.create_driver_pin("Y");
+    gu::set_bits(signal, 1);
+    Ann_place pose(1401, 21, 1380, 2720);  // deliberately overlapping and off site/row
+    pose.status = Ann_place::Status::PLACED;
+    seed->components.push_back({name, "sky130_fd_sc_hd__inv_1", pose});
+  }
+  graph->get_output_pin("y").connect_driver(signal);
+  auto options = plain_options();
+  options.lefs = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.core = options.die               = {0, 0, 55.2, 43.52};
+  options.iterations                       = 0;
+  options.bins                             = 4;
+  options.optimization_pending             = false;
+  options.restart_seed                     = seed;
+  options.legroute                         = true;
+  options.allow_increase_area              = false;
+  options.legroute_plan.enabled            = true;
+  options.legroute_options.partition_cells = 8;
+  options.legroute_options.global_route    = true;
+  options.legroute_options.region_pins     = false;
+  options.legroute_options.global_share    = .9;
+  options.legroute_options.final = options.legroute_options.clock_spine = false;
+  options.legroute_options.threads                                      = 1;
+  options.snapshots                                                     = true;
+  options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/raw_legroute_handoff";
+  const auto tech    = physical::read_lef(options.lefs);
+
+  // A real optimization-pending solve must preserve this overlapping GP pose.
+  // The retained-session finish used to legalize here, before planning had any
+  // chance to measure or move these boxes, and could request needless area.
+  options.placement_session                  = std::make_shared<Placement_session>();
+  auto intermediate_options                  = options;
+  intermediate_options.optimization_pending  = true;
+  intermediate_options.iterations            = 1;  // initialize a live optimizer for the area-resume leg
+  intermediate_options.output_dir           += "_intermediate";
+  hhds::GraphLibrary intermediate_library;
+  const auto         intermediate = place(*graph, intermediate_library, intermediate_options);
+  bool               raw_overlap  = false;
+  for (size_t i = 0; i < intermediate.floorplan.components.size(); ++i) {
+    const auto& a = intermediate.floorplan.components[i].place;
+    for (size_t j = i + 1; j < intermediate.floorplan.components.size(); ++j) {
+      const auto& b  = intermediate.floorplan.components[j].place;
+      raw_overlap   |= a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+    }
+  }
+  ASSERT_TRUE(raw_overlap) << "the intermediate fixture must still require CORE legalization";
+  EXPECT_THROW(check_legality(tech, intermediate.floorplan), std::runtime_error);
+  EXPECT_NO_THROW(check_placed_legality(intermediate, intermediate_options));
+  rapidjson::Document intermediate_qor;
+  intermediate_qor.Parse(intermediate.qor.c_str());
+  ASSERT_FALSE(intermediate_qor.HasParseError());
+  EXPECT_FALSE(intermediate_qor["legal"].GetBool());
+  EXPECT_FALSE(intermediate_qor["cells_legalized"].GetBool());
+  EXPECT_TRUE(intermediate_qor["cell_legalization_deferred"].GetBool());
+  EXPECT_FALSE(std::filesystem::exists(intermediate_options.output_dir + "/after_legalization.def"));
+  EXPECT_FALSE(std::filesystem::exists(intermediate_options.output_dir + "/after_detailed.def"));
+  EXPECT_FALSE(std::filesystem::exists(intermediate_options.output_dir + "/legroute.json"));
+  std::ifstream session_file(intermediate_options.output_dir + "/placement_session.json");
+  ASSERT_TRUE(session_file.is_open());
+  const std::string session_text{std::istreambuf_iterator<char>(session_file), std::istreambuf_iterator<char>()};
+  EXPECT_EQ(session_text.find("stage_legal_pose"), std::string::npos);
+  auto bad_fixed = intermediate;
+  for (auto& cell : bad_fixed.floorplan.components) {
+    cell.place.status = physical::Status::FIXED;
+  }
+  EXPECT_THROW(check_placed_legality(bad_fixed, intermediate_options), std::runtime_error);
+
+  // The explicit legalized-witness mode keeps its existing intermediate
+  // legalization policy, even when planning and the retained optimizer are on.
+  auto legal_options                          = intermediate_options;
+  legal_options.legroute_options.legal_boxes  = true;
+  legal_options.placement_session             = std::make_shared<Placement_session>();
+  legal_options.output_dir                   += "_legal";
+  hhds::GraphLibrary legal_library;
+  const auto         legal = place(*graph, legal_library, legal_options);
+  EXPECT_NO_THROW(check_legality(tech, legal.floorplan));
+  rapidjson::Document legal_qor;
+  legal_qor.Parse(legal.qor.c_str());
+  ASSERT_FALSE(legal_qor.HasParseError());
+  EXPECT_TRUE(legal_qor["legal"].GetBool());
+  EXPECT_TRUE(legal_qor["cells_legalized"].GetBool());
+  EXPECT_FALSE(legal_qor["cell_legalization_deferred"].GetBool());
+
+  // A core-growth continuation still performs its required GP work without
+  // inserting stage legalization. Restoring the selected optimizer afterward
+  // must not change the exact overlapping pose eventually measured by plan.
+  const auto raw_optimizer            = options.placement_session->snapshot();
+  const auto spent_before             = options.placement_session->spent_iterations();
+  auto       grown_options            = intermediate_options;
+  grown_options.placement_area_resume = true;
+  grown_options.core = grown_options.die  = {0, 0, 66.24, 54.4};
+  grown_options.restart_seed              = std::make_shared<physical::Floorplan>(intermediate.floorplan);
+  grown_options.output_dir               += "_area";
+  hhds::GraphLibrary grown_library;
+  const auto         grown = place(*graph, grown_library, grown_options);
+  EXPECT_GE(options.placement_session->spent_iterations() - spent_before, 50u);
+  rapidjson::Document grown_qor;
+  grown_qor.Parse(grown.qor.c_str());
+  ASSERT_FALSE(grown_qor.HasParseError());
+  EXPECT_FALSE(grown_qor["cells_legalized"].GetBool());
+  EXPECT_TRUE(grown_qor["cell_legalization_deferred"].GetBool());
+  EXPECT_FALSE(std::filesystem::exists(grown_options.output_dir + "/after_legalization.def"));
+  EXPECT_FALSE(std::filesystem::exists(grown_options.output_dir + "/after_detailed.def"));
+  EXPECT_FALSE(std::filesystem::exists(grown_options.output_dir + "/terminal_legalize.json"));
+  std::ifstream       grown_history_file(grown_options.output_dir + "/gp_history.json");
+  const std::string   grown_history_text{std::istreambuf_iterator<char>(grown_history_file), std::istreambuf_iterator<char>()};
+  rapidjson::Document grown_history;
+  grown_history.Parse(grown_history_text.c_str());
+  ASSERT_FALSE(grown_history.HasParseError());
+  EXPECT_DOUBLE_EQ(grown_history["cell_legalization_seconds"].GetDouble(), 0);
+  EXPECT_DOUBLE_EQ(grown_history["detailed_placement_seconds"].GetDouble(), 0);
+  EXPECT_TRUE(std::ranges::none_of(options.placement_session->history(),
+                                   [](const auto& event) { return event.phase == "stage_legal_pose"; }));
+  options.placement_session->restore(raw_optimizer);
+
+  options.restart_seed = std::make_shared<physical::Floorplan>(intermediate.floorplan);
+  hhds::GraphLibrary placed;
+  options.legroute_plan.handoff = true;
+  EXPECT_THROW(place(*graph, placed, options), std::invalid_argument);
+  options.legroute_plan.handoff = false;
+  options.legroute_plan.export_coarse = true;
+  const auto result             = place(*graph, placed, options);
+  const auto measured           = physical::read_def(options.output_dir + "/legroute_plan0/input.def");
+  const auto local              = physical::read_def(options.output_dir + "/legroute_handoff/input.def");
+  EXPECT_EQ(measured.components, local.components);
+  EXPECT_EQ(measured.terminals, local.terminals);
+  EXPECT_EQ(measured.nets, local.nets);
+  EXPECT_EQ(measured.rows, local.rows);
+  EXPECT_EQ(measured.special_nets, local.special_nets);
+  EXPECT_EQ(measured.vias, local.vias);
+  // DEF omits LEF-derived width/height; compare the same serialized form.
+  EXPECT_EQ(measured.components, physical::read_def(intermediate_options.output_dir + "/out.def").components);
+  EXPECT_THROW(check_legality(tech, measured), std::runtime_error);
+  EXPECT_NO_THROW(check_legality(tech, result.floorplan));
+  EXPECT_NE(measured.components, result.floorplan.components) << "local SAT must actually move and legalize the overlapping cells";
+  std::ifstream       input(options.output_dir + "/legroute_plan0/plan.json");
+  const std::string   text{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+  rapidjson::Document report;
+  report.Parse(text.c_str());
+  ASSERT_FALSE(report.HasParseError());
+  EXPECT_STREQ(report["endpoint_basis"].GetString(), "box_centroids");
+  EXPECT_FALSE(report["handoff_legalized"].GetBool());
+  EXPECT_DOUBLE_EQ(report["legalize_seconds"].GetDouble(), 0);
+  EXPECT_FALSE(report["pre_sat"]["requires_replan"].GetBool());
+  EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/terminal_legalize.json"));
+  size_t coarse_samples = 0;
+  for (const auto& sample : std::filesystem::directory_iterator(options.output_dir + "/legroute_plan0/uroute_coarse")) {
+    ASSERT_TRUE(sample.is_directory());
+    EXPECT_EQ(sample.path().filename().string().size(), 64u);
+    EXPECT_TRUE(std::filesystem::exists(sample.path() / "directional_labels.bin"));
+    EXPECT_TRUE(std::filesystem::exists(sample.path() / "tile_means.json"));
+    ++coarse_samples;
+  }
+  EXPECT_GT(coarse_samples, 0u);
+
+  // A whole-core density rejection must preserve its report while suppressing
+  // training exports: an unattempted route is not an uncongested observation.
+  auto dense_options = options;
+  dense_options.core = dense_options.die = {0, 0, 5.52, 2.72};
+  dense_options.placement_session        = std::make_shared<Placement_session>();
+  auto dense_seed                        = std::make_shared<physical::Floorplan>(*seed);
+  for (auto& cell : dense_seed->components) {
+    cell.place.x = cell.place.y = 0;
+  }
+  dense_options.restart_seed          = dense_seed;
+  dense_options.legroute_plan.rounds  = 0;
+  dense_options.output_dir           += "_density";
+  hhds::GraphLibrary dense_library;
+  EXPECT_THROW(place(*graph, dense_library, dense_options), std::runtime_error);
+  std::ifstream dense_report_file(dense_options.output_dir + "/legroute_plan0/plan.json");
+  ASSERT_TRUE(dense_report_file.is_open());
+  const std::string   dense_report_text{std::istreambuf_iterator<char>(dense_report_file), std::istreambuf_iterator<char>()};
+  rapidjson::Document dense_report;
+  dense_report.Parse(dense_report_text.c_str());
+  ASSERT_FALSE(dense_report.HasParseError());
+  EXPECT_FALSE(dense_report["route_attempted"].GetBool());
+  EXPECT_STREQ(dense_report["route_skip_reason"].GetString(), "physical_density");
+  EXPECT_GT(dense_report["unchecked_signals"].GetUint64(), 0u);
+  EXPECT_EQ(dense_report["unchecked_signals"].GetUint64(), dense_report["signals"].GetUint64());
+  EXPECT_TRUE(dense_report["pre_sat"]["max_routing_density"].IsNull());
+  EXPECT_FALSE(std::filesystem::exists(dense_options.output_dir + "/legroute_plan0/uroute_coarse"));
+  EXPECT_FALSE(std::filesystem::exists(dense_options.output_dir + "/legroute.json"));
+
+  // The same feasible coarse/SAT input must not become a successful placement
+  // result when only a prefix of its physical nets was checked.
+  options.output_dir                        += "_incomplete";
+  options.legroute_options.final            = true;
+  options.legroute_options.final_net_limit  = 1;
+  options.legroute_probe.strict             = true;
+  hhds::GraphLibrary incomplete;
+  try {
+    (void)place(*graph, incomplete, options);
+    FAIL() << "strict final routing accepted unchecked physical nets";
+  } catch (const std::runtime_error& e) {
+    EXPECT_NE(std::string_view(e.what()).find("strict detailed closure incomplete"), std::string_view::npos);
+    EXPECT_NE(std::string_view(e.what()).find("do not establish insufficient area"), std::string_view::npos);
+  }
+  std::ifstream       failed_input(options.output_dir + "/legroute.json");
+  const std::string   failed_text{std::istreambuf_iterator<char>(failed_input), std::istreambuf_iterator<char>()};
+  rapidjson::Document failed;
+  failed.Parse(failed_text.c_str());
+  ASSERT_FALSE(failed.HasParseError());
+  EXPECT_EQ(failed["sat_unsat_regions"].GetUint64(), 0u);
+  EXPECT_EQ(failed["sat_unknown_regions"].GetUint64(), 0u);
+  EXPECT_GT(failed["unchecked_nets"].GetUint64(), 0u);
+  EXPECT_FALSE(failed["wires_emitted"].GetBool());
+  EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/out.def"));
+  EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/after_legalization.def"));
+}
+
+TEST(Placement, UnknownSatSearchDoesNotGrowAGeneratedCore) {
+  hhds::GraphLibrary source;
+  auto               io  = source.create_io("unknown_sat_recovery");
+  auto               inv = source.create_io("sky130_fd_sc_hd__inv_1");
+  inv->add_input("A", 0);
+  inv->add_output("Y", 0);
+  for (int i = 0; i < 4; ++i) {
+    io->add_input("a" + std::to_string(i), i);
+    io->add_output("y" + std::to_string(i), i);
+    io->set_bits("a" + std::to_string(i), 1);
+    io->set_bits("y" + std::to_string(i), 1);
+  }
+  auto graph = io->create_graph();
+  auto seed  = std::make_shared<physical::Floorplan>();
+  for (int i = 0; i < 4; ++i) {
+    auto node = gu::create_typed_node(*graph, Ntype_op::Sub);
+    node.set_subnode(inv);
+    node.set_name("inv" + std::to_string(i));
+    auto input = graph->get_input_pin("a" + std::to_string(i));
+    gu::set_bits(input, 1);
+    node.create_sink_pin("A").connect_driver(input);
+    auto output = node.create_driver_pin("Y");
+    gu::set_bits(output, 1);
+    graph->get_output_pin("y" + std::to_string(i)).connect_driver(output);
+    Ann_place pose(1401, 21, 1380, 2720);
+    pose.status = Ann_place::Status::PLACED;
+    seed->components.push_back({"inv" + std::to_string(i), "sky130_fd_sc_hd__inv_1", pose});
+  }
+  auto options       = plain_options();
+  options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.iterations = options.min_iterations = 0;
+  options.bins                                = 4;
+  options.utilization                         = .02;
+  options.optimization_pending                = false;
+  options.restart_seed                        = seed;
+  options.allow_increase_area                 = true;
+  options.legroute                            = true;
+  options.legroute_probe.strict               = true;
+  options.legroute_plan.enabled               = true;
+  options.legroute_options.partition_cells    = 8;
+  options.legroute_options.global_route       = true;
+  options.legroute_options.region_pins        = false;
+  options.legroute_options.global_share       = .9;
+  options.legroute_options.final = options.legroute_options.clock_spine = false;
+  options.legroute_options.threads                                      = 1;
+  options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/generated_core_sat_budget_control";
+  hhds::GraphLibrary control_library;
+  const auto         control = place(*graph, control_library, options);
+  EXPECT_NO_THROW(check_legality(options.technology().lef, control.floorplan));
+  const auto read_report = [](const std::string& path) {
+    std::ifstream       input(path);
+    std::string         text{std::istreambuf_iterator<char>(input), {}};
+    rapidjson::Document report;
+    report.Parse(text.c_str());
+    return report;
+  };
+  const auto good = read_report(options.output_dir + "/legroute.json");
+  ASSERT_FALSE(good.HasParseError());
+  ASSERT_GT(good["sat_regions"].GetUint64(), 0u);
+  ASSERT_EQ(good["sat_unsat_regions"].GetUint64(), 0u);
+  ASSERT_EQ(good["sat_unknown_regions"].GetUint64(), 0u);
+
+  options.output_dir                     += "_limited";
+  // Zero is Sat_solver's explicit exhausted budget. A positive conflict
+  // limit can still solve the preserved-backbone model without any conflict.
+  options.legroute_options.sat_conflicts  = 0;
+  hhds::GraphLibrary limited_library;
+  try {
+    (void)place(*graph, limited_library, options);
+    FAIL() << "the deliberately exhausted SAT search must not produce a successful placement";
+  } catch (const Placement_area_restart&) {
+    FAIL() << "UNKNOWN-only SAT results must not request a mesh or area restart";
+  } catch (const std::runtime_error& e) {
+    EXPECT_NE(std::string_view(e.what()).find("SAT search budget exhausted"), std::string_view::npos);
+    EXPECT_NE(std::string_view(e.what()).find("no model UNSAT result justifies area growth"), std::string_view::npos);
+  }
+  const auto failed = read_report(options.output_dir + "/legroute.json");
+  ASSERT_FALSE(failed.HasParseError());
+  EXPECT_GT(failed["sat_unknown_regions"].GetUint64(), 0u);
+  EXPECT_EQ(failed["sat_unsat_regions"].GetUint64(), 0u);
+  EXPECT_EQ(failed["global_unrouted"].GetUint64(), 0u);
+  EXPECT_EQ(failed["global_overflow_tracks"].GetUint64(), 0u);
+  const auto plan = read_report(options.output_dir + "/legroute_plan0/plan.json");
+  ASSERT_FALSE(plan.HasParseError());
+  EXPECT_FALSE(plan["pre_sat"]["requires_replan"].GetBool());
+  EXPECT_FALSE(std::filesystem::exists(options.output_dir + "/out.def"));
+}
+
 TEST(Placement, RowLegalityAcceptsOnlyTechnologyPermittedHorizontalMirrors) {
   auto                tech = physical::read_lef({"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"});
   physical::Floorplan fp;
@@ -199,13 +712,13 @@ TEST(Placement, RowLegalityChecksEveryBandOfTwoRowCells) {
   // A two-row CORE cell (a domino abstract) on the single-height core site is
   // legal at both start parities with the start row's orientation and the
   // rail template of that parity, and every row band it spans is checked.
-  auto        tech          = physical::read_lef({"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"});
-  const auto  sw            = std::llround(tech.sites.at("unithd").width * tech.dbu);
-  const auto  rh            = std::llround(tech.sites.at("unithd").height * tech.dbu);
-  const auto& inv           = tech.macros.at("sky130_fd_sc_hd__inv_1");
+  auto        tech = physical::read_lef({"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"});
+  const auto  sw   = std::llround(tech.sites.at("unithd").width * tech.dbu);
+  const auto  rh   = std::llround(tech.sites.at("unithd").height * tech.dbu);
+  const auto& inv  = tech.macros.at("sky130_fd_sc_hd__inv_1");
   tech.macros["__lhd_domino_two_row"]    = two_row_template(inv, 0);
   tech.macros["__lhd_domino_two_row_t1"] = two_row_template(inv, 1);
-  const auto          width = std::llround(inv.width * tech.dbu);
+  const auto          width              = std::llround(inv.width * tech.dbu);
   physical::Floorplan fp;
   for (int r = 0; r < 4; ++r) {
     fp.rows.push_back(
@@ -268,7 +781,7 @@ TEST(Placement, RowLegalityChecksEveryBandOfTwoRowCells) {
   EXPECT_NO_THROW(check_legality(tech, fp));
   fp.components[even].macro = "__lhd_domino_two_row";
   // A single-row cell in the upper band of the even-start cell overlaps it.
-  const auto upper = add("sky130_fd_sc_hd__inv_1", 0, rh, Ann_place::Orientation::FS);
+  const auto upper          = add("sky130_fd_sc_hd__inv_1", 0, rh, Ann_place::Orientation::FS);
   EXPECT_THROW(check_legality(tech, fp), std::runtime_error);
   fp.components[upper].place.x = 10 * sw;
   EXPECT_NO_THROW(check_legality(tech, fp));
@@ -309,13 +822,13 @@ TEST(Placement, LegalStageSnapshotsUsePhysicalRowsAndPreserveFixedMirrors) {
     }
   }
   graph->get_output_pin("y").connect_driver(signal);
-  auto options       = plain_options();
-  options.lefs       = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
-  options.output_dir = std::string(std::getenv("TEST_TMPDIR")) + "/snapshot_rows";
-  options.iterations = 0;
-  options.snapshots  = true;
-  options.bins       = 2;
-  options.core       = {0, 0, 2.76, 5.44};
+  auto options                  = plain_options();
+  options.lefs                  = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.output_dir            = std::string(std::getenv("TEST_TMPDIR")) + "/snapshot_rows";
+  options.iterations            = 0;
+  options.snapshots             = true;
+  options.bins                  = 2;
+  options.core                  = {0, 0, 2.76, 5.44};
   options.die                   = {0, 0, 5.52, 10.88};
   const auto tech               = physical::read_lef(options.lefs);
   unsigned   legal_checkpoints  = 0;
@@ -478,10 +991,10 @@ TEST(Placement, TerminalLegalizerIsLastAndPreservesItsExactOutput) {
 constexpr const char* kDominoTwoRow = "__lhd_domino_two_row";
 const std::string     kDominoTwin   = std::string(kDominoTwoRow) + "_t1";
 struct Two_row_chain {
-  std::vector<std::string>     lefs{"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
-  hhds::GraphLibrary           source;
-  std::shared_ptr<hhds::Graph> graph;
-  Options                      options = plain_options();
+  std::vector<std::string>       lefs{"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  hhds::GraphLibrary             source;
+  std::shared_ptr<hhds::Graph>   graph;
+  Options                        options = plain_options();
   // place() flattens into a caller-owned library that must not already hold
   // the design; every placement gets its own, alive as long as the chain.
   std::deque<hhds::GraphLibrary> placements;
@@ -502,7 +1015,7 @@ struct Two_row_chain {
     io->set_bits("a", 1);
     io->add_output("y", 0);
     io->set_bits("y", 1);
-    graph    = io->create_graph();
+    graph = io->create_graph();
     std::map<std::string, std::shared_ptr<hhds::GraphIO>> masters;
     const auto                                            declare = [&](const std::string& name) {
       auto& cell = masters[name];
@@ -634,19 +1147,19 @@ TEST(Placement, TwoRowCellsAreAnchoredBeforeTerminalLegalization) {
     o.macro_legalize_cells = true;
   };
   const std::vector<std::pair<std::function<void(Options&)>, std::string>> refusals{
-      {             [](Options& o) { o.boundarypins.enabled = true; },                                 "region mesh"},
-      {               [](Options& o) { o.boundarypins.align = true; },                                 "region mesh"},
-      {[](Options& o) { o.satlegalize = o.satlegalize_route = true; },             "satlegalize treats multi-height"},
-      {                   [](Options& o) { o.legalize_cells = true; },              "ECO legalization is single-row"},
-      {                  [](Options& o) { o.changed_cells = {"c1"}; },              "ECO legalization is single-row"},
-      {                    [&](Options& o) { o.previous = previous; },              "ECO legalization is single-row"},
-      {                                                           h2d,                       "macro placement stage"},
+      {             [](Options& o) { o.boundarypins.enabled = true; },                     "region mesh"},
+      {               [](Options& o) { o.boundarypins.align = true; },                     "region mesh"},
+      {[](Options& o) { o.satlegalize = o.satlegalize_route = true; }, "satlegalize treats multi-height"},
+      {                   [](Options& o) { o.legalize_cells = true; },  "ECO legalization is single-row"},
+      {                  [](Options& o) { o.changed_cells = {"c1"}; },  "ECO legalization is single-row"},
+      {                    [&](Options& o) { o.previous = previous; },  "ECO legalization is single-row"},
+      {                                                           h2d,           "macro placement stage"},
   };
   // Optimization pending defers the packing to finalize_placement: the placement itself is accepted.
   {
-    auto o                = options;
-    o.optimization_pending = true;
-    o.output_dir          += "_pending";
+    auto o                  = options;
+    o.optimization_pending  = true;
+    o.output_dir           += "_pending";
     EXPECT_NO_THROW((void)place(*chain.graph, chain.next_flat(), o));
   }
   for (const auto& [mutate, expected] : refusals) {
@@ -1282,8 +1795,8 @@ TEST(Placement, MacroCellWorkCanBeDeferredWithoutSkippingGpTimingOrFinalLegaliza
       }
       return false;
     };
-    hhds::GraphLibrary  placed;
-    const auto          result = place(*graph, placed, options, [&] { ++source_releases; });
+    hhds::GraphLibrary placed;
+    const auto         result = place(*graph, placed, options, [&] { ++source_releases; });
     EXPECT_EQ(source_releases, 1U);
     rapidjson::Document final_qor;
     final_qor.Parse(result.qor.c_str());
@@ -5349,6 +5862,61 @@ TEST(Placement, MacroRankingUpdatesOnlyAtDensityMilestones) {
   ASSERT_TRUE(handoff.macro_gp_timing);
   EXPECT_FALSE(handoff.macro_gp_timing->pin_locations.empty());
   EXPECT_NE(handoff.macro_gp_timing->parasitics, nullptr);
+}
+
+TEST(Placement, WarmAreaRecoveryRanksPeriodicallyAfterDensityMilestonesAreConsumed) {
+  hhds::GraphLibrary source, initial_library, resumed_library;
+  const auto         graph   = tie_graph(source, false);
+  auto               options = plain_options();
+  options.lefs               = {"inou/lefdef/tests/data/sky130hd.tlef", "inou/lefdef/tests/data/sky130hd.lef"};
+  options.liberty            = "inou/lefdef/tests/data/sky130hd.lib";
+  options.output_dir         = std::string(std::getenv("TEST_TMPDIR")) + "/warm_area_timing_milestones";
+  options.core               = {0, 0, 30, 30};
+  options.bins               = 2;
+  options.iterations = options.min_iterations = 50;
+  options.final_timing_start                  = 0;
+  options.macro_timing_interval               = 5;
+  options.legroute                            = true;
+  options.legroute_plan.enabled               = true;
+  options.legroute_plan.iterations            = 50;
+  options.legroute_plan.min_iterations        = 50;
+  options.legroute_plan.timing_interval       = 5;
+  options.legroute_options.partition_cells    = 32;
+  options.legroute_options.global_route       = true;
+  options.placement_session                   = std::make_shared<Placement_session>();
+  unsigned rankings                           = 0;
+  options.fp_evaluate                         = [](const Result&) { return Timing_feedback{}; };
+  options.gp_rank                             = [&](const Ranking_view& state) {
+    EXPECT_NE(state.graph, nullptr);
+    EXPECT_NE(state.parasitics, nullptr);
+    ++rankings;
+    Timing_feedback feedback;
+    feedback.ranking_only        = true;
+    feedback.pins["inv:A"].slack = -10;
+    return feedback;  // Criticality feedback does not require a WNS result.
+  };
+  const auto initial = place(*graph, initial_library, options);
+  const auto before  = options.placement_session->snapshot();
+  ASSERT_TRUE(options.placement_session->live());
+  ASSERT_EQ(before.optimizer.convergence.checkpoint_milestone, 2u);
+  ASSERT_GT(rankings, 0u);
+  ASSERT_LE(rankings, 2u);
+  const auto spent               = options.placement_session->spent_iterations();
+  rankings                       = 0;
+  options.core                   = {0, 0, 40, 40};
+  options.output_dir            += "_resumed";
+  options.placement_area_resume  = true;
+  options.restart_seed           = std::make_shared<physical::Floorplan>(initial.floorplan);
+  const auto resumed             = place(*graph, resumed_library, options);
+  const auto after               = options.placement_session->snapshot();
+  EXPECT_GE(rankings, 10u);
+  EXPECT_EQ(options.placement_session->spent_iterations() - spent, 50u);
+  EXPECT_EQ(options.placement_session->cold_starts(), 1u);
+  EXPECT_EQ(after.identities, before.identities);
+  EXPECT_GT(after.physical.layout.xh, before.physical.layout.xh);
+  EXPECT_GT(after.physical.layout.yh, before.physical.layout.yh);
+  EXPECT_EQ(resumed.floorplan.components.size(), initial.floorplan.components.size());
+  EXPECT_FALSE(after.optimizer.convergence.timing_observed);
 }
 
 TEST(Placement, ObservationalGpSamplingPreservesPlacementAndTimingSchedule) {

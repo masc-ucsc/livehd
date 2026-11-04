@@ -66,12 +66,16 @@ class Pin_escape_guard {
 public:
   // Layers come from the technology profile. An optional compiled rule oracle
   // must match this frame and outlive the guard.
+  // Signal-only diagnostics may omit future supply-access reservations. This
+  // never removes physical supply pins or wires from the router's occupancy.
   Pin_escape_guard(const physical::Technology&, const physical::Floorplan&, const physical::Routing_occupancy&,
                    size_t access_budget, const std::function<void()>& checkpoint, physical::Pin_access_layers layers,
-                   const physical::Signal_metal_rules* rules = nullptr);
+                   const physical::Signal_metal_rules* rules = nullptr, bool protect_supply_access = true);
   Pin_escape_trial check(const std::vector<physical::Shape>&, const std::string& net,
                          const std::function<bool()>& expired = {}) const;
-  void             commit(const Pin_escape_trial&);
+  // retire_net=false: apply the consumed access choices without marking the whole net routed (a partial attachment
+  // whose other pins still need their protected access)
+  void             commit(const Pin_escape_trial&, bool retire_net = true);
   // One candidate shape alone: the protected access points of other nets it collides with, and whether it takes the
   // last one of some pin. A search cost, not an acceptance check (check() sees the whole route).
   struct Cost {

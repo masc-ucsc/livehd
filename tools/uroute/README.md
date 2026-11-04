@@ -1431,3 +1431,100 @@ remained unchanged; the full command took 3591.5 seconds, peaked at 5558 MiB and
 retained at least 21.46 GiB OS reserve. Evidence is retained in
 `repros/uroute_postfix_full_regression_20261025/summary.json`. This is local
 validation, not published-dependency or remote-CI evidence.
+
+## Coarse observations and explicit label-source policies
+
+`legroute.plan` can export its unpenalized directional congestion maps through
+`export_uroute_coarse`. This is a coarse routing observation, not a physical
+routing or DRC witness. `metadata.json` records `label_source=legroute_coarse`,
+`status=coarse`, `physically_routed=false`, the pose/netlist/capacity hashes,
+endpoint basis, admission share, unresolved counts, and map hashes. H/V values
+are utilization against the caller's admission capacity. The reduction is
+`incident_edge_max_then_overlapping_tile_max`: every positive overlap with a
+source bin contributes to the destination maximum. This preserves hotspots;
+it is not area-conserved wire demand. Directional means remain separate caller
+telemetry and are not substituted for these peak labels.
+
+`directional_labels.bin` contains raw H and V channels. Offline ingestion
+creates a **one-channel** utilization label, `max(H,V)`. It never fills missing
+DRC or detour channels with zeros. A complete coarse observation may have
+positive overflow and still teach utilization; unresolved/search-limited
+observations are retained with an empty `eligible_tasks` list and cannot become
+support or gradient-training tasks. Penalty-augmented recovery maps are rejected.
+
+```sh
+python -m tools.uroute.coarse --export /run/uroute_coarse --pool /project/coarse_pool
+```
+
+Selection/training/evaluation have three explicit `label_policy` values:
+
+- `detailed` is the unchanged default: existing routed three-channel samples.
+- `coarse-only` admits uncalibrated utilization-only coarse samples for explicitly
+  requested same-source experiments. It excludes detailed and calibrated maps.
+- `calibrated-mixed` admits detailed samples and coarse utilization samples whose
+  stored, hash-checked calibration passed a held-out acceptance criterion against
+  the detailed-reference definition. Only detailed samples support the DRC task.
+
+Native inference returns an empty DRC vector when no detailed DRC support was
+selected. A positive DRC-feedback threshold then rejects the context instead of
+interpreting unknown DRC as a clean route. The source policy participates in the
+pool/cache identity. Python training and evaluation expose `--label-policy` with
+the same default and task eligibility; existing model architecture and map
+versions are unchanged. A utilization-only evaluation reports no DRC score.
+
+```sh
+python -m tools.uroute.train --pool /project/coarse_pool --holdout heldout_design \
+  --label-policy coarse-only --from-scratch
+python -m tools.uroute.evaluate --pool /project/coarse_pool --output /results \
+  --label-policy coarse-only --mode zero-shot
+```
+
+These commands still require a real support corpus and trained weights. The
+unit tests use explicitly synthetic weights only to verify task isolation and
+reader behavior; they do not establish learned accuracy or placement QoR.
+
+### Paired directional calibration
+
+`calibrate.py` fits separate positive H/V scale factors through the origin and
+reports relative RMSE on entire held-out designs. The acceptance threshold is
+an explicit command argument; failed held-out checks never authorize mixing.
+Each pair must have equal top, pose hash, netlist hash, technology, core and DBU.
+A matching design name or feature image alone is insufficient. Provide those
+identities from an independently verified unchanged-placement/netlist replay;
+the tool checks the recorded identities and map hashes, not the external router.
+
+The reference may be either:
+
+- A detailed pool sample with `label_source=openroad_detailed`,
+  `status=routed`, `layer_groups.bin`, and its exact capacity/reduction metadata.
+  H/V references are the respective maxima across M2–M3, M4–M5 and M6+ groups,
+  so `max(H,V)` reproduces the existing detailed aggregate utilization label.
+- A complete OpenROAD global-route export with `label_source=openroad_global`,
+  `status=global`, `complete=true`, raw two-channel `directional_labels.bin`,
+  its SHA256, and exact capacity/reduction metadata. This is a directional
+  comparison only: passing it does **not** authorize mixing with detailed labels.
+  Capped positive-only congestion-marker reports are not complete maps and are
+  not eligible references.
+
+The pair JSON uses absolute or working-directory-relative export directories:
+
+```json
+{"pairs":[{"coarse":"/coarse/fit","detailed":"/reference/fit"},
+          {"coarse":"/coarse/held","detailed":"/reference/held"}]}
+```
+
+```sh
+python -m tools.uroute.calibrate --pairs pairs.json --holdout held_design \
+  --max-relative-rmse 0.15 --output calibration.json
+python -m tools.uroute.coarse --export /coarse/next --pool /project/mixed \
+  --calibration calibration.json
+```
+
+Calibration currently binds to one exact technology/capacity hash/endpoint
+basis/admission-share domain. Samples outside that domain require new evidence;
+there is no automatic technology or grid transfer. Fit and held-out designs
+must be disjoint, every listed held-out design must be present, and duplicate
+physical pairs reject. Both directional map hashes and reference capacity hashes
+are retained in the report. The second command accepts only a passed
+**detailed-reference** calibration. OpenROAD global-reference reports remain
+usable diagnostics but cannot manufacture detailed DRC or detour labels.

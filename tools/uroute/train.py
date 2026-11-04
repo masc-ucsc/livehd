@@ -20,6 +20,7 @@ import tempfile
 import time
 
 from .episodes import ImportanceSampler
+from .coarse import eligible_metrics, POLICIES
 from .export_weights import LIMIT
 from .features import NETWORK_BINS
 from .pool import VERSIONS, _atomic, canonical, inside, load_sample, publish_weights, read_manifest, sha
@@ -36,7 +37,7 @@ def normalized_label_tensor(labels, metric):
 
 
 class Dataset:
-    def __init__(self, root, holdout, excluded_designs=(), validation_task=None):
+    def __init__(self, root, holdout, excluded_designs=(), validation_task=None, label_policy="detailed"):
         self.root = Path(root)
         excluded_designs = set(excluded_designs)
         if (holdout is None) == (validation_task is None):
@@ -47,14 +48,14 @@ class Dataset:
         self.records = {}
         self.train, self.validation = defaultdict(list), defaultdict(list)
         for record in self.manifest["samples"]:
-            if record.get("status") != "routed" or any(type(record.get(k)) is not int or record[k] != v for k, v in VERSIONS.items()):
+            if not eligible_metrics(record, label_policy) or any(type(record.get(k)) is not int or record[k] != v for k, v in VERSIONS.items()):
                 continue
             if not isinstance(record.get("top"), str) or not isinstance(record.get("technology"), str):
                 raise ValueError("sample is missing task identity")
             if record["top"] in excluded_designs:
                 continue
             self.records[record["id"]] = record
-            for metric in (0, 1):
+            for metric in eligible_metrics(record, label_policy):
                 task = (record["top"], record["technology"], metric)
                 (self.validation if record["top"] == holdout or task == validation_task else self.train)[task].append(record["id"])
         for groups in (self.train, self.validation):
@@ -66,7 +67,7 @@ class Dataset:
             raise ValueError("validation design/task has no compatible routed samples")
         if len({task[0] for task in self.train}) < 2:
             raise ValueError("universal training requires at least two gradient-training designs and a held-out validation task")
-        self.identity = sha(canonical({"versions": VERSIONS, "holdout": holdout,
+        self.identity = sha(canonical({"versions": VERSIONS, "label_policy": label_policy, "holdout": holdout,
                                       "validation_task": validation_task, "excluded_designs": sorted(excluded_designs),
                                       "samples": [{k: record[k] for k in ("id", "features_sha256", "labels_sha256")}
                                                   for record in sorted(self.records.values(), key=lambda r: r["id"])]}))
@@ -143,7 +144,7 @@ def training_lock(root):
 def training_implementation(log_dir):
     """Retain exact local training sources, independently of git publication."""
     names = ('train.py', 'episodes.py', 'model.py', 'export_weights.py',
-             'features.py', 'maps.py', 'pool.py')
+             'features.py', 'maps.py', 'pool.py', 'coarse.py')
     sources = {name: (Path(__file__).parent / name).read_bytes() for name in names}
     hashes = {name: sha(data) for name, data in sources.items()}
     identity = sha(canonical(hashes))
@@ -208,7 +209,7 @@ def train(args):
     rng = random.Random(args.seed)
     device, device_runtime = configure_device(torch, args.device, getattr(args, 'mps_memory_limit_gib', None))
     with training_lock(args.pool) as log_dir:
-        dataset = Dataset(args.pool, args.holdout, args.exclude_design, args.validation_task)
+        dataset = Dataset(args.pool, args.holdout, args.exclude_design, args.validation_task, getattr(args, "label_policy", "detailed"))
         initial = dataset.manifest.get("weights")
         previous = dataset.manifest.get("provenance", {}) if initial and not args.from_scratch else {}
         inherited_designs = set(previous.get("seen_designs", []))
@@ -294,7 +295,9 @@ def train(args):
                       "lineage_complete": args.from_scratch or previous.get("lineage_complete") is True,
                       "sample_ids": sorted(dataset.records), "best_validation_loss": best,
                       "epochs_completed": epoch + 1, "device": device, "torch_version": torch.__version__,
-                      "source": "routed-pool", "training_log": str(log_path.relative_to(args.pool)),
+                      "source": {"detailed": "routed-pool", "coarse-only": "coarse-pool", "calibrated-mixed": "calibrated-mixed-pool"}[getattr(args, "label_policy", "detailed")],
+                      "label_sources": sorted({record.get("label_source", "openroad_detailed") for record in dataset.records.values()}),
+                      "training_log": str(log_path.relative_to(args.pool)),
                       "training_log_sha256": sha(log_path.read_bytes()),
                       "input_manifest": str(input_snapshot.relative_to(args.pool)),
                       "input_manifest_sha256": sha(input_manifest),
@@ -351,6 +354,7 @@ def training_options(args, **fields):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pool", required=True, type=Path)
+    parser.add_argument("--label-policy", choices=POLICIES, default="detailed")
     validation = parser.add_mutually_exclusive_group(required=True)
     validation.add_argument("--holdout", help="validation design used for early stopping; this is not an unseen test design")
     validation.add_argument("--validation-task", type=parse_task, help='held-out [top,technology,metric] JSON task; metric 0=utilization, 1=DRC')

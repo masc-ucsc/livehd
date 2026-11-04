@@ -135,4 +135,52 @@ TEST(RoutingConnectivity, UnsupportedAndMissingEndpointsFailClosed) {
   f.tech.macros["cell"].pins["A"].shapes[0].rect.xh = .09;
   EXPECT_FALSE(check_route_connectivity(f.tech, f.fp, f.net).connected);
 }
+
+TEST(RoutingConnectivity, RotatedDieTerminalMustTouchTheRoute) {
+  Fixture  f;
+  Terminal terminal;
+  terminal.name        = "out";
+  terminal.x           = 1100;
+  terminal.y           = 150;
+  terminal.status      = Status::FIXED;
+  terminal.orientation = Orientation::E;
+  terminal.shapes      = {
+      {"M2", {40, -10, 60, 10}}
+  };
+  f.fp.terminals.push_back(terminal);
+  f.net.connections[1] = {"PIN", "out"};
+  f.net.wires[0].paths.erase(f.net.wires[0].paths.begin() + 1);
+  EXPECT_TRUE(check_route_connectivity(f.tech, f.fp, f.net).connected);
+  // Without the rotation, the pin sits above the wire and must not connect.
+  f.fp.terminals[0].orientation = Orientation::N;
+  EXPECT_FALSE(check_route_connectivity(f.tech, f.fp, f.net).connected);
+  f.fp.terminals[0].orientation  = Orientation::E;
+  f.fp.terminals[0].x           += 100;
+  EXPECT_FALSE(check_route_connectivity(f.tech, f.fp, f.net).connected);
+}
+
+TEST(RoutingConnectivity, DieTerminalRequiresUniquePlacedRectangularGeometry) {
+  Fixture  f;
+  Terminal terminal;
+  terminal.name   = "out";
+  terminal.x      = 1100;
+  terminal.y      = 100;
+  terminal.status = Status::FIXED;
+  terminal.shapes = {
+      {"M1", {-10, -10, 10, 10}}
+  };
+  f.fp.terminals.push_back(terminal);
+  f.net.connections[1] = {"PIN", "out"};
+  EXPECT_TRUE(check_route_connectivity(f.tech, f.fp, f.net).connected);
+  f.fp.terminals[0].status = Status::UNPLACED;
+  EXPECT_FALSE(check_route_connectivity(f.tech, f.fp, f.net).connected);
+  f.fp.terminals[0] = terminal;
+  f.fp.terminals.push_back(terminal);
+  EXPECT_FALSE(check_route_connectivity(f.tech, f.fp, f.net).connected);
+  f.fp.terminals.pop_back();
+  f.fp.terminals[0].shapes[0].rect.xh = -10;
+  EXPECT_FALSE(check_route_connectivity(f.tech, f.fp, f.net).connected);
+  f.fp.terminals[0].shapes.clear();
+  EXPECT_FALSE(check_route_connectivity(f.tech, f.fp, f.net).connected);
+}
 }  // namespace livehd::physical

@@ -232,14 +232,18 @@ int main(int argc, char** argv) {
       const auto                     query   = dp::read_uroute_maps(argv[3]);
       std::vector<dp::UrouteSupport> support;
       for (int i = 5; i < argc; i += 2) {
-        support.push_back({std::to_string(i), dp::read_uroute_maps(argv[i]), dp::read_uroute_maps(argv[i + 1])});
+        auto       labels           = dp::read_uroute_maps(argv[i + 1]);
+        const bool utilization_only = labels.channels == 1;
+        support.push_back({std::to_string(i), dp::read_uroute_maps(argv[i]), std::move(labels), utilization_only});
       }
       const dp::UrouteContext context(weights, std::move(support));
       const auto              prediction = context.predict(query);
       const auto f32 = [](const std::vector<double>& values) { return std::vector<float>(values.begin(), values.end()); };
-      dp::write_uroute_maps(
-          argv[4],
-          raw_maps(prediction.bins_x, prediction.bins_y, {f32(prediction.utilization), f32(prediction.drc_density)}));
+      std::vector<std::vector<float>> channels{f32(prediction.utilization)};
+      if (context.has_drc()) {
+        channels.push_back(f32(prediction.drc_density));
+      }
+      dp::write_uroute_maps(argv[4], raw_maps(prediction.bins_x, prediction.bins_y, channels));
       return 0;
     }
     if (argc == 4 && std::string(argv[1]) == "trees") {

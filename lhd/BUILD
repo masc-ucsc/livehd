@@ -153,6 +153,7 @@ genrule(
         "export_file.hpp",
         "lhd.hpp",
         "lhd_kernel_synth.cpp",
+        "lhd_options.cpp",  # automatic core-search density policy
         "physical_cache.cpp",
         "physical_cache.hpp",
         ":compile_salt",

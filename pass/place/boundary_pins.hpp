@@ -3,6 +3,7 @@
 #include "busorder.hpp"
 
 namespace livehd::placement {
+class Placement_session;
 struct Boundary_pin_options {
   bool     enabled = false, split = true, order = false, align = false;
   unsigned iterations          = 50;
@@ -103,7 +104,8 @@ class Boundary_pins {
 public:
   Boundary_pins(const Region_mesh&, Busorder_route, double, Boundary_pin_options, std::string output_dir = {},
                 std::vector<Bus_bit> bus_bits = {}, std::vector<int> macro_nodes = {}, std::vector<std::string> net_drivers = {});
-  void                                    refine(DreamPlace::native::Design&, const DreamPlace::native::Options&);
+  void refine(DreamPlace::native::Design&, const DreamPlace::native::Options&, Placement_session* session = nullptr,
+              const std::vector<std::string>& identities = {});
   void                                    observe(const DreamPlace::native::Design&, const std::string& stage);
   const std::vector<Boundary_pin_sample>& samples() const { return history; }
   // The fixed virtual pins (anchors) with their original nets, as refined: legroute cuts region routes there.

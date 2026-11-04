@@ -606,8 +606,122 @@ ph::Floorplan make_power_grid(const ph::Technology& tech, const ph::Floorplan& i
         supply.insert({shape, net.name});
       }
     }
-    const ph::Signal_metal_rules rules(tech, out);
-    const auto                   check = [&](const ph::Shape& shape, const std::string& name) {
+    const ph::Signal_metal_rules                rules(tech, out);
+    std::map<std::string, const ph::Component*> cells;
+    for (const auto& cell : input.components) {
+      cells.emplace(cell.name, &cell);
+    }
+    std::map<std::pair<std::string, std::string>, std::string> supply_owners;
+    for (const auto& net : out.special_nets) {
+      for (const auto& pin : net.connections) {
+        supply_owners.emplace(std::pair{pin.instance, pin.pin}, net.name);
+      }
+    }
+    std::optional<ph::Routing_occupancy> original_supply;
+    const auto                           original_supply_covers = [&](const ph::Shape& shape, const std::string& owner) {
+      if (!original_supply) {
+        original_supply.emplace(input.dbu);
+        for (const auto& cell : input.components) {
+          const auto& master = tech.macros.at(cell.macro);
+          if (!master.klass.starts_with("CORE") || master.virtual_proxy || cell.place.status == ph::Status::UNPLACED) {
+            continue;
+          }
+          for (const auto& [name, pin] : master.pins) {
+            const auto found = supply_owners.find({cell.name, name});
+            if ((pin.use != "POWER" && pin.use != "GROUND") || found == supply_owners.end()) {
+              continue;
+            }
+            for (const auto& original : pin.shapes) {
+              const auto placed = ph::snapped_dbu(ph::placed_rect(master, cell.place, input.dbu, original.rect), 1e-6);
+              if (placed && !placed->empty()) {
+                original_supply->insert({
+                    {original.layer, *placed},
+                    found->second
+                });
+              }
+            }
+          }
+        }
+      }
+      // Subtract exact rectangles; a bounding hull would hide gaps between
+      // abutting supply pins. Every remaining positive-area piece is new PG.
+      std::vector<ph::Rect> remaining{shape.rect};
+      for (const auto id : original_supply->query(shape.layer, shape.rect, 0)) {
+        const auto pin = original_supply->at(id);
+        if (pin.net != owner) {
+          continue;
+        }
+        std::vector<ph::Rect> next;
+        for (const auto& rect : remaining) {
+          const auto overlap = rect.intersection(pin.shape.rect);
+          if (overlap.empty()) {
+            next.push_back(rect);
+            continue;
+          }
+          for (const ph::Rect piece : {
+                   ph::Rect{   rect.xl,    rect.yl,    rect.xh, overlap.yl},
+                   ph::Rect{   rect.xl, overlap.yh,    rect.xh,    rect.yh},
+                   ph::Rect{   rect.xl, overlap.yl, overlap.xl, overlap.yh},
+                   ph::Rect{overlap.xh, overlap.yl,    rect.xh, overlap.yh}
+          }) {
+            if (!piece.empty()) {
+              next.push_back(piece);
+            }
+          }
+        }
+        remaining = std::move(next);
+        if (remaining.empty()) {
+          return true;
+        }
+      }
+      return false;
+    };
+    const auto existing_pin_metal
+        = [&](const ph::Shape& shape, const ph::Occupied_shape& obstacle, const ph::Rect& nearby, const ph::Net* net) {
+            if (!net || shape.rect.overlaps(obstacle.shape.rect)) {
+              return false;
+            }
+            // A lower via landing wholly inside its own LEF pin adds no metal there
+            // (the same containment required by enumerate_pin_access). Its isolated
+            // rectangle can nevertheless invent an EOL inside the pin's polygon.
+            // The rule checker supplies the COMPLETE active directional EOL
+            // footprint in the PG metal. The spatial query radius is broader
+            // and includes irrelevant sides (e.g. an EOL with zero side reach).
+            // Require that footprint in the exact union of original standard-
+            // cell supply pins on this PG net. Adjoining rows can share a rail.
+            // A new PG extension, short, or unmatched owner cannot use this
+            // proof; all ordinary, reverse-direction, corner and cut checks run.
+            if (nearby.empty()) {
+              return false;
+            }
+            for (const auto& connection : net->connections) {
+              const auto cell = cells.find(connection.instance);
+              if (cell == cells.end()) {
+                continue;
+              }
+              const auto& master = tech.macros.at(cell->second->macro);
+              const auto  pin    = master.pins.find(connection.pin);
+              if (!master.klass.starts_with("CORE") || master.virtual_proxy || cell->second->place.status == ph::Status::UNPLACED
+                  || pin == master.pins.end() || pin->second.use == "POWER" || pin->second.use == "GROUND") {
+                continue;
+              }
+              const auto contains = [&](const ph::Shape& original, const ph::Rect& rect) {
+                if (original.layer != shape.layer) {
+                  return false;
+                }
+                const auto placed = ph::snapped_dbu(ph::placed_rect(master, cell->second->place, input.dbu, original.rect), 1e-6);
+                return placed && placed->contains(rect);
+              };
+              if (std::none_of(pin->second.shapes.begin(), pin->second.shapes.end(), [&](const auto& original) {
+                    return contains(original, shape.rect);
+                  })) {
+                continue;
+              }
+              return original_supply_covers({shape.layer, nearby}, obstacle.net);
+            }
+            return false;
+          };
+    const auto check = [&](const ph::Shape& shape, const std::string& name, const ph::Net* net = nullptr) {
       const auto cut   = tech.cut_layers.find(shape.layer);
       const auto reach = cut == tech.cut_layers.end() ? rules.clearance(shape.layer)
                                                       : std::optional<int64_t>{ph::signal_cut_spacing(cut->second, out.dbu)};
@@ -618,7 +732,12 @@ ph::Floorplan make_power_grid(const ph::Technology& tech, const ph::Floorplan& i
         const auto& obstacle = supply.at(id);
         bool        legal;
         if (cut == tech.cut_layers.end()) {
-          legal = rules.spacing(shape, obstacle.shape).legal;
+          legal = rules
+                      .spacing_with_existing_source(
+                          shape,
+                          obstacle.shape,
+                          [&](const ph::Rect& nearby) { return existing_pin_metal(shape, obstacle, nearby, net); })
+                      .legal;
         } else {
           legal = !ph::violates_cut_spacing(shape.rect, obstacle.shape.rect, *reach);
         }
@@ -642,7 +761,7 @@ ph::Floorplan make_power_grid(const ph::Technology& tech, const ph::Floorplan& i
     };
     for (const auto& net : input.nets) {
       for (const auto& shape : ph::route_geometry(tech, input, net)) {
-        check(shape, net.name);
+        check(shape, net.name, &net);
       }
     }
     if (preserve_signal_terminals) {

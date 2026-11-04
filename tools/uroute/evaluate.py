@@ -15,6 +15,7 @@ import tempfile
 import time
 
 from .export_weights import LIMIT
+from .coarse import POLICIES, eligible_metrics
 from .features import NETWORK_BINS
 from .maps import read
 from .pool import VERSIONS, _atomic, _identity, canonical, inside, lineage_status, load_sample, read_manifest, sha
@@ -22,14 +23,14 @@ from .score import METRICS, absolute_channel, defined_mean, metrics
 
 
 class Pool:
-    def __init__(self, root):
+    def __init__(self, root, label_policy="detailed"):
         self.root = Path(root).resolve()
         self.manifest = read_manifest(root)
         self.manifest_sha256 = sha(canonical(self.manifest))
         self.records = {r['id']: r for r in self.manifest['samples']}
         self.compatible = {}
         for key, record in self.records.items():
-            if record.get('status') == 'routed' and all(type(record.get(k)) is int and record[k] == v for k, v in VERSIONS.items()):
+            if eligible_metrics(record, label_policy) and all(type(record.get(k)) is int and record[k] == v for k, v in VERSIONS.items()):
                 _identity(record)
                 self.compatible[key] = record
         weights = self.manifest.get('weights')
@@ -109,7 +110,7 @@ def metric_average(values):
 
 def averages(records):
     """Macro average defined metrics; retain each denominator and missing count."""
-    return {metric: metric_average([r['metrics'][metric] for r in records if r['status'] == 'scored'])
+    return {metric: metric_average([r['metrics'][metric] for r in records if r['status'] == 'scored' and metric in r['metrics']])
             for metric in ('utilization', 'drc')}
 
 
@@ -123,7 +124,7 @@ def evaluate(args):
     args.output = Path(args.output).resolve()
     if not 1 <= args.min_shots <= args.shots <= 16 or args.fallback not in ('nearest', 'skip'):
         raise ValueError('invalid evaluation shots/min_shots/fallback')
-    pool = Pool(args.pool)
+    pool = Pool(args.pool, getattr(args, "label_policy", "detailed"))
     selected = args.query or sorted(pool.records)
     if len(set(selected)) != len(selected) or any(key not in pool.records for key in selected):
         raise ValueError('queries must be distinct pool IDs')
@@ -142,7 +143,7 @@ def evaluate(args):
     run = Path(tempfile.mkdtemp(prefix='run_', dir=runs))
     snapshot = run / 'manifest_snapshot.json'
     _atomic(snapshot, canonical(pool.manifest))
-    report = {'evaluation_version': 1, **VERSIONS, 'mode': args.mode, 'shots': args.shots, 'min_shots': args.min_shots,
+    report = {'evaluation_version': 1, **VERSIONS, 'label_policy': getattr(args, 'label_policy', 'detailed'), 'mode': args.mode, 'shots': args.shots, 'min_shots': args.min_shots,
               'fallback': args.fallback, 'requires_unseen_design': args.require_unseen_design,
               'manifest_snapshot_sha256': pool.manifest_sha256, 'weights_sha256': pool.weights_sha256,
               'manifest_snapshot': str(snapshot.relative_to(args.output)),
@@ -174,10 +175,10 @@ def evaluate(args):
         subprocess.run(command, check=True, timeout=args.timeout)
         result['native_seconds'] = time.monotonic() - start
         prediction = read(prediction_path)
-        if (prediction.channels, prediction.bins_x, prediction.bins_y, prediction.normalized) != (2, NETWORK_BINS, NETWORK_BINS, False):
+        if prediction.channels not in (1, 2) or (prediction.bins_x, prediction.bins_y, prediction.normalized) != (NETWORK_BINS, NETWORK_BINS, False):
             raise ValueError('native evaluation prediction shape mismatch')
         result['metrics'] = {name: metrics(absolute_channel(labels, metric), absolute_channel(prediction, metric), NETWORK_BINS, NETWORK_BINS)
-                             for metric, name in enumerate(('utilization', 'drc'))}
+                             for metric, name in enumerate(('utilization', 'drc')) if metric < labels.channels and metric < prediction.channels}
         result.update(status='scored', reason='', prediction=str(prediction_path.relative_to(args.output)),
                       prediction_sha256=sha(prediction_path.read_bytes()),
                       features_sha256=record['features_sha256'], labels_sha256=record['labels_sha256'])
@@ -204,6 +205,7 @@ def evaluate(args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--pool', type=Path, required=True)
+    parser.add_argument('--label-policy', choices=POLICIES, default='detailed')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--native', type=Path, default=Path('bazel-bin/tools/uroute/native'))
     parser.add_argument('--query', action='append', default=[])

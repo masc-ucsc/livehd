@@ -14,7 +14,7 @@ namespace livehd::placement {
 namespace ph = physical;
 Pin_escape_guard::Pin_escape_guard(const ph::Technology& tech, const ph::Floorplan& frame, const ph::Routing_occupancy& occupancy,
                                    size_t access_budget, const std::function<void()>& checkpoint, ph::Pin_access_layers layers,
-                                   const ph::Signal_metal_rules* rules)
+                                   const ph::Signal_metal_rules* rules, bool protect_supply_access)
     : layers_(std::move(layers))
     , owned_rules_(rules ? nullptr : std::make_unique<ph::Signal_metal_rules>(tech, frame))
     , rules_(rules ? *rules : *owned_rules_)
@@ -73,10 +73,18 @@ Pin_escape_guard::Pin_escape_guard(const ph::Technology& tech, const ph::Floorpl
     for (double spacing : layer.spacing) {
       margin = std::max(margin, via_reach[name] + spacing * frame.dbu);
     }
-    const auto value
-        = layer.unsupported.empty() && layer.properties.empty() && std::isfinite(margin) && margin >= 0 && margin <= INT32_MAX
-              ? int64_t(std::ceil(margin))
-              : -1;
+    // Cut layers with properties: the signal-via cut spacing (scalar SPACING and supported LEF58 cut-class/table
+    // spacing) bounds the reach when every property is supported; any unsupported one still fails closed (-1).
+    bool supported = layer.unsupported.empty() && layer.properties.empty();
+    if (!supported) {
+      try {
+        margin    = std::max(margin, via_reach[name] + double(ph::signal_cut_spacing(layer, frame.dbu)));
+        supported = true;
+      } catch (const std::invalid_argument&) {
+        supported = false;
+      }
+    }
+    const auto value          = supported && std::isfinite(margin) && margin >= 0 && margin <= INT32_MAX ? int64_t(std::ceil(margin)) : -1;
     uncertainty_margin_[name] = {value, value};
   }
   const auto reserve_unknown = [&](const ph::Component& cell, const ph::Net& net, const std::string& pin_name) {
@@ -218,6 +226,17 @@ Pin_escape_guard::Pin_escape_guard(const ph::Technology& tech, const ph::Floorpl
       // attachment. Do not confuse its own LEF rectangle in occupancy with a
       // connection, or require a second hypothetical via through the PG cuts.
       const auto master          = tech.macros.find(cell->second->macro);
+      if (!protect_supply_access) {
+        const bool supply_net = net.use == "POWER" || net.use == "GROUND";
+        bool       supply_pin = false;
+        if (master != tech.macros.end()) {
+          const auto pin = master->second.pins.find(connection.pin);
+          supply_pin     = pin != master->second.pins.end() && (pin->second.use == "POWER" || pin->second.use == "GROUND");
+        }
+        if (supply_net || supply_pin) {
+          continue;
+        }
+      }
       bool       supply_attached = false;
       if (!net.name.empty() && master != tech.macros.end() && !master->second.virtual_proxy
           && cell->second->place.status != ph::Status::UNPLACED) {
@@ -454,7 +473,7 @@ Pin_escape_trial Pin_escape_guard::check(const std::vector<ph::Shape>& shapes, c
     if (uncertain_index_.size()) {
       const auto margin = uncertainty_margin_.find(shape.layer);
       if (margin == uncertainty_margin_.end() || margin->second.first < 0 || margin->second.second < 0) {
-        out.reason = "unsupported clearance around unresolved pin access";
+        out.reason = "unsupported clearance around unresolved pin access on " + shape.layer;
         return out;
       }
       for (auto id : uncertain_index_.query("unresolved", shape.rect, std::max(margin->second.first, margin->second.second), net)) {
@@ -533,11 +552,12 @@ Pin_escape_guard::Cost Pin_escape_guard::cost(const ph::Shape& shape, const std:
   }
   const auto               clearance = shape.layer == layers_.escape ? metal_clearance_ : cut_clearance_;
   std::map<size_t, size_t> lost;
+  std::set<size_t>         examined;
   for (const auto index : index_.query(shape.layer, shape.rect, clearance, net)) {
     const auto  id    = indexed_points_.at(index);
     const auto& point = points_.at(id);
     const auto& pin   = pins_.at(point.pin);
-    if (!point.active || routed_.contains(pin.net)) {
+    if (!point.active || routed_.contains(pin.net) || !examined.insert(id).second) {
       continue;
     }
     const bool collides = shape.layer == layers_.escape
@@ -552,7 +572,7 @@ Pin_escape_guard::Cost Pin_escape_guard::cost(const ph::Shape& shape, const std:
   }
   return out;
 }
-void Pin_escape_guard::commit(const Pin_escape_trial& trial) {
+void Pin_escape_guard::commit(const Pin_escape_trial& trial, bool retire_net) {
   if (!trial.legal || trial.owner != this || trial.generation != generation_) {
     throw std::invalid_argument("invalid or stale pin escape trial");
   }
@@ -561,7 +581,9 @@ void Pin_escape_guard::commit(const Pin_escape_trial& trial) {
     point.active = false;
     --pins_.at(point.pin).remaining;
   }
-  routed_.insert(trial.net);
+  if (retire_net) {
+    routed_.insert(trial.net);
+  }
   ++generation_;
 }
 }  // namespace livehd::placement
