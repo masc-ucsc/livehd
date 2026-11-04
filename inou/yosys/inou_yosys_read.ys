@@ -32,6 +32,10 @@ read_slang {{slang_top}} --ignore-timing --no-proc {{slang_flags}} {{files_str}}
 # unmatched path of every case. A case that lists all values of a narrow selector has no such path; mark it
 # full_case so the hold is not built (otherwise it is a false combinational loop through the mux).
 lhd_full_case
+# The same start value is also why a combinational block that leaves a variable unassigned on some path (a
+# latch: IEEE keeps the value, simulators hold it) never became a latch: proc only builds one from a
+# `sync always` update. Give such a bit that form, if something reads it; nothing else changes.
+lhd_comb_latch
 {{/use_slang}}
 
 # single file, no hierarchy needed

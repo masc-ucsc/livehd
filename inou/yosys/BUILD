@@ -159,6 +159,20 @@ sh_test(
     deps = [":scripts"],
 )
 
+# A combinational block that leaves a variable unassigned on some path is a latch
+# (IEEE keeps the value). read_slang --no-proc starts the block from a hold, which
+# made it a combinational loop; lhd_comb_latch builds the latch (SoomRV SoC).
+sh_test(
+    name = "yosys_comb_latch_test",
+    srcs = ["tests/yosys_comb_latch_test.sh"],
+    data = [
+        "tests/comb_latch.sv",
+        "tests/comb_latch_ref.sv",
+        "//lhd",
+    ],
+    deps = [":scripts"],
+)
+
 # Overlapping items of a plain case/casez/casex keep first-match priority through
 # `proc -ifx` (packages/yosys.patch, proc_mux): the netlist is equivalent to the
 # source read by the native reader.
