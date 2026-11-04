@@ -206,7 +206,10 @@ TEST(LegacyModel, WholeArrayMemoryUsesLoadAndToBus) {
     EXPECT_NE(text.find(bridge ? "import LeanSemanticPrimitives.Translation.WholeArrayBridge"
                                : "import LeanSemanticPrimitives.Translation.WholeArray\n"),
               std::string::npos);
-    EXPECT_NE(text.find("then mem_load "), std::string::npos);
+    // The let chain writes each mux as an `lmux` call; the bridge's per-node
+    // functions keep the inline `if` (finding AC).
+    EXPECT_NE(text.find(bridge ? "then mem_load " : ") (mem_load "), std::string::npos);
+    EXPECT_EQ(text.find("(lmux ") == std::string::npos, bridge);
     EXPECT_NE(text.find("(mem_to_bus "), std::string::npos);
     if (bridge) {
       EXPECT_NE(text.find("mem_load_bridge"), std::string::npos);

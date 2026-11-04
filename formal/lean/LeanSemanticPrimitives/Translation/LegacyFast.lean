@@ -31,3 +31,29 @@ def mem_write_be_fast {addr data be : Nat} (m : (BitVec addr) → (BitVec data))
   by_cases h : x = a
   · subst h; simp
   · simp [h]
+
+universe u
+
+/-- A mux as a CALL, not an inline `if` (finding AC). Lean's compiler turns each
+`if` inside a long chain of live lets into a join point nested in the previous
+one: a 10,000-let `next` with 3,863 of them (VX_operands) did not compile in
+36 min; the same body with every mux written as `lmux` compiled in under 2 s.
+`noinline` keeps it a call. The condition is a `Bool`, never a `Prop` with a
+`Decidable` instance: the compiler inlines that instance at every call (for a
+Bool condition `c`, `Decidable (c = true)` is a `match` on `c`), which puts one
+branch per mux back into the body (measured: the VX_operands build was again in
+the same LCNF pass after 77 min). Both arms are values the model computes anyway
+(a let, a memory read of a total function, a division that is total in Lean), so
+evaluating them eagerly changes no result -- in a let chain. Only the fast
+model's let chain uses `lmux`: where each node is its own function of the inputs
+and state (the bridge model), evaluating both arms calls the operands' functions
+again, which is exponential, so those keep the `if`. `lmux_eq` unfolds it to the
+`if` it names; `lmux_beq` turns the emitter's `==` tests into `if x = y`. -/
+@[noinline] def lmux {α : Sort u} (c : Bool) (a b : α) : α := if c then a else b
+
+@[simp] theorem lmux_eq {α : Sort u} (c : Bool) (a b : α) :
+    lmux c a b = if c then a else b := rfl
+
+@[simp] theorem lmux_beq {α : Sort u} {β : Type} [BEq β] [LawfulBEq β] [DecidableEq β] (x y : β) (a b : α) :
+    lmux (x == y) a b = if x = y then a else b := by
+  unfold lmux; by_cases h : x = y <;> simp [h]

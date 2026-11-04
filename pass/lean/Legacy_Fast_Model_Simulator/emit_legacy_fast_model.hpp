@@ -12,7 +12,9 @@ struct FastExpr {
 const Source* certificate_source(const CertificateIR&, uint32_t id);
 uint32_t      certificate_width(const CertificateIR&, uint32_t id);
 bool          certificate_memory_value(const CertificateIR&, uint32_t id);
-FastExpr      lower_fast_expr(const CertificateIR&, const CertNode&);
+// `mux_as_call`: write each mux as an `lmux` call (a let chain), not an inline
+// `if` (a per-node function); see the definition.
+FastExpr      lower_fast_expr(const CertificateIR&, const CertNode&, bool mux_as_call = false);
 std::string   render_fast_expr(const FastExpr&, const CertNode&, const std::function<std::string(uint32_t)>&);
 std::string   legacy_source_leaf(const CertificateIR&, const LegacyNames&, const Source&);
 std::string   legacy_source_value(const CertificateIR&, const LegacyNames&, const Source&);
