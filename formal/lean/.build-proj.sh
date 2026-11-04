@@ -169,6 +169,8 @@ TOOL_MODULES=(
   HDLProof/Check/SpecFacts
   HDLProof/Check/RefMapCompose
   HDLProof/Check/RefMapRef
+  # the judge (sym_refmap judge): every stuttering alignment on one concrete run
+  HDLProof/Kit/Judge
   # the drivers' shared IO helpers (untrusted: no theorems)
   HDLProof/Kit/Driver
   # the tools' audit: fails the build on a non-standard axiom

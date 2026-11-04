@@ -85,7 +85,9 @@ TOOL_MODULES=(
   # refinement maps (sym_refmap): theory, kit, checker, spec facts, composition
   HDLProof/Theory/Channels HDLProof/Theory/Stutter HDLProof/Theory/Compose HDLProof/Theory/Progress
   HDLProof/Kit/Norm HDLProof/Kit/BitE HDLProof/Check/RefMap HDLProof/Check/RefMapSound
-  HDLProof/Check/SpecFacts HDLProof/Check/RefMapCompose
+  HDLProof/Check/SpecFacts HDLProof/Check/RefMapCompose HDLProof/Check/RefMapRef
+  # the judge (sym_refmap judge): every stuttering alignment on one concrete run
+  HDLProof/Kit/Judge
   # the drivers' shared IO helpers
   HDLProof/Kit/Driver
 )

@@ -6,6 +6,34 @@ stuttering, and the spec's own facts.
                     [cache] [solver:<cadical>] [work:<dir>]
   sym_refmap specfacts <file.refmap> [jobs:<n>] [sf:<n>] [wf:<n>] [emit:[f1:|f2:]<file>]
                     [cache] [solver:<cadical>] [work:<dir>]
+  sym_refmap judge <file.refmap> trace:<file.tsv> | random:<steps>,<runs>[,<seed>]
+                    [sim:fp|ir|tv] [check:<steps>] [sf:<n>] [wf:<n>] [work:<dir>] [label:<name>]
+
+`judge` decides, on concrete runs from the all-zero state, whether ANY stuttering alignment of
+the spec matches the implementation (`Kit.Judge`): no map, no invariant, no solver. It reads only
+`impl`, `spec`, the one `chan` and the one `slot` (their response and observed words), `asm`
+(the environment's protocol, checked on random runs), and three lines the other modes ignore:
+`xfer <bool>` (an implementation transfer: no hold in a step where one is true; repeatable),
+`maxstall <R>` (at most R holds in a row, in steps, as the refinement's stutters are; default 0)
+and `period <P> [<k>]` (random runs only: a P-slot certificate's inputs change only at steps n
+with n % P = k, default k = 1 when P > 1, the real clock's input timing; default P = 1).
+Inputs: a `trace:` TSV (`cycle` then one column per implementation input, as `sym_verify` writes
+for a counterexample; `#` lines skipped; a missing input reads 0), or `random:` runs (1-bit
+inputs fair coins; wider inputs drawn from 4 values per input, 0 always one of them, so addresses
+repeat and configuration words often take their default; a line
+`drive <input> <v0> <n> <v1>` fixes an input of random runs to v0 before step n and v1 from step
+n on, e.g. a reset schedule the environment monitor `asm` requires).
+Results: `NO MATCH at step n` (exit 1: no alignment exists on this run; the report gives every
+last candidate and why each fails), `MATCH FOUND` (exit 0; the report adds where the slot's own
+stall choice fails, if it does), `ENVIRONMENT VIOLATED at step n` (exit 3: a random run broke
+`asm`). The simulator route (`sim:`), each with its theorem relating it to `interpretDesign`:
+`fp` the projection's specialized residual (`runMemSim`, `runMemSim_correct`; the default), `ir`
+the post-lowering IR stepped directly (`directStepRaw` after one `checkDesign`,
+`directStepRaw_correct`), `tv` the translation-validation compiler's straight-line program
+(`compileDesign` once, `denoteResidual` every step, `compileDesign_correct`). `ir` and `tv` need a
+memory-free certificate. With `ir` or `tv` every run is also cross-checked against `fp` on its
+first `check:` steps (default 4; outputs and next state), and a NO MATCH is re-run on `fp` alone
+before it is reported, so the verdict always rests on `runMemSim`.
 
 The `.refmap` file names both certificates and everything else by the names in their
 `_io.json` sidecars; its grammar is in `pass/lean/tools/formats/refmap.md`.
@@ -40,6 +68,9 @@ and the nonzero inputs. Untrusted diagnostics: no verdict uses it.
 -/
 import HDLProof.Check.RefMapCompose
 import HDLProof.Kit.Driver
+import HDLProof.Kit.Judge
+import LeanSemanticPrimitives.Compiler.DirectSemantics
+import LeanSemanticPrimitives.Compiler.CompileDesignDefs
 
 open Compiler Projection HDLProof HDLProof.Sym HDLProof.Kit HDLProof.Check HDLProof.Driver
 open Projection.MemProjection Projection.HwMem Std.Tactic.BVDecide
@@ -875,10 +906,273 @@ the map refines the spec with stuttering from the first refined cycle on"
     say "  RESULT: CHECK REJECTED (the verified checker did not accept the proofs)"
     return 6
 
+
+/-! ## The judge: one concrete run, every stuttering alignment -/
+
+/-- The judge's contract from a `.refmap`: the one channel, the one slot, `xfer`, `maxstall`, `period`. -/
+def buildJudge (lines : List RMLine) (NI NS : Names) (DS : DesignCert) :
+    Except String (Judge.JSpec × Option PropSpec) := do
+  let get (k : String) : List (List String) := (lines.filter (·.key == k)).map (·.args)
+  let chanLines := get "chan"
+  let slotLines := get "slot"
+  unless chanLines.length == 1 && slotLines.length == 1 do
+    throw s!"judge: exactly one chan and one slot (got {chanLines.length} and {slotLines.length})"
+  let chan ← match chanLines.head! with
+    | nm :: rest => do
+        let some al := argOf rest "allow" | throw s!"chan {nm}: no allow:"
+        let allow ← specProp NS al
+        let mut sel : List (Nat × Int) := []
+        for x in listArg rest "sel" do
+          match x.splitOn "=" with
+          | [i, v] =>
+              let some k := NS.ins[i]? | throw s!"chan {nm}: no spec input {repr i}"
+              let some z := v.toInt? | throw s!"chan {nm}: bad value {repr v}"
+              sel := sel ++ [(k, z)]
+          | _ => throw s!"chan {nm}: sel:<input>=<value>,..."
+        let mut respIn : List Nat := []
+        for i in listArg rest "resp" do
+          let some k := NS.ins[i]? | throw s!"chan {nm}: no spec input {repr i}"
+          respIn := respIn ++ [k]
+        let mut obsOut : List Nat := []
+        for o in listArg rest "obs" do
+          let some k := NS.outs[o]? | throw s!"chan {nm}: no spec output {repr o}"
+          obsOut := obsOut ++ [k]
+        pure ({ sel, respIn, allow, obsOut } : ChanS)
+    | _ => throw "chan <name> allow:<out> ..."
+  let (slot, obsTxt) ← match slotLines.head! with
+    | _ :: kindTxt :: rest => do
+        let kind ← parseBitE NI kindTxt
+        let mut resp : List PortW := []
+        for x in listArg rest "resp" do resp := resp ++ [← parsePort NI x]
+        let mut obs : List ObsW := []
+        for w in listArg rest "obs" do obs := obs ++ [← parseObsW NI w]
+        pure (({ chan := 0, kind, resp, obs } : SlotS), listArg rest "obs")
+    | _ => throw "slot <chan> <kind> [resp:..] [obs:..]"
+  let xferTxt := (get "xfer").map (" ".intercalate ·)
+  let mut xfer : List BitE := []
+  for x in xferTxt do xfer := xfer ++ [← parseBitE NI x]
+  let natLine (k : String) (d : Nat) : Except String Nat :=
+    match (get k).head? with
+    | none => pure d
+    | some [v] => match v.toNat? with | some n => pure n | none => throw s!"{k}: bad value {repr v}"
+    | some _ => throw s!"{k} <n>"
+  let maxStall ← natLine "maxstall" 0
+  let asm ← match (get "asm").head? with
+    | some [tok] => pure (some (← implProp NI tok))
+    | none => pure none
+    | some _ => throw "asm <implementation-output>"
+  pure ({ chan, slot, xfer, maxStall, specInW := inputWidths DS (inputCount DS)
+        , obsName := obsTxt.toArray, xferName := xferTxt.toArray }, asm)
+
+/-- The input vectors of a `trace:` TSV, by implementation input name. -/
+def readTrace (path : String) (NI : Names) (inW : List Nat) : IO (Except String (Array RuntimeInput)) := do
+  let rows := ((← IO.FS.readFile path).splitOn "\n").filter fun l => !l.isEmpty && !l.startsWith "#"
+  let some hdr := rows.head? | return .error s!"{path}: empty"
+  let cols := (hdr.splitOn "\t").drop 1
+  let idx := cols.map fun nm => NI.ins[nm]?
+  let mut out : Array RuntimeInput := #[]
+  for r in rows.drop 1 do
+    let vs := (r.splitOn "\t").drop 1
+    let mut v : Array BV := (inW.map fun w => mk_bv w 0).toArray
+    for (ko, x) in idx.zip vs do
+      if let some k := ko then
+        let some n := x.toNat? | return .error s!"{path}: bad value {repr x}"
+        v := v.set! k (mk_bv (inW.getD k 1) n)
+    out := out.push v
+  return .ok out
+
+/-- A random run: `steps` input vectors; new values only at steps n with n % period = phase. -/
+def randomRun (inW : List Nat) (period phase steps seed : Nat) : Array RuntimeInput := Id.run do
+  let mut g := mkStdGen seed
+  -- four values per wide input, drawn once per run; 0 (the reset and default value of most
+  -- configuration words: a bare translation mode, no fault, no error) is always one of them
+  let mut pools : Array (Array Nat) := #[]
+  for w in inW do
+    let mut pool : Array Nat := #[0]
+    for _ in [0:3] do
+      let (x, g') := randNat g 0 (2 ^ w - 1); g := g'; pool := pool.push x
+    pools := pools.push pool
+  let P := max 1 period
+  let mut out : Array RuntimeInput := #[]
+  let mut cur : Array BV := (inW.map fun w => mk_bv w 0).toArray
+  for n in [0:steps] do
+    if n == 0 || n % P == phase % P then
+      let mut v : Array BV := #[]
+      for (w, k) in inW.zipIdx do
+        if w == 1 then
+          let (x, g') := randNat g 0 1; g := g'; v := v.push (mk_bv 1 x)
+        else
+          let (c, g') := randNat g 0 3; g := g'
+          let (i, g'') := randNat g 0 3; g := g''
+          if c == 0 then
+            let (y, g3) := randNat g 0 (2 ^ w - 1); g := g3
+            v := v.push (mk_bv w y)
+          else
+            v := v.push (mk_bv w ((pools.getD k #[]).getD i 0))
+      cur := v
+    out := out.push cur
+  return out
+
+def judgeMain (path : String) (rest : List String) : IO UInt32 := do
+  let opt (k : String) : Option String := rest.findSome? (fun t => (t.dropPrefix? (k ++ ":")).map (·.toString))
+  let sf := ((opt "sf").bind (·.toNat?)).getD 20000
+  let wf := ((opt "wf").bind (·.toNat?)).getD 200
+  let work := System.FilePath.mk ((opt "work").getD "judge_work")
+  IO.FS.createDirAll work
+  let label := (opt "label").getD "judge"
+  let dir := (System.FilePath.mk path).parent.getD "."
+  let lines := parseRM (← IO.FS.readFile path)
+  let pathOf (k : String) : Option String :=
+    ((lines.find? (·.key == k)).bind (·.args.head?)).map fun p =>
+      if p.startsWith "/" then p else (dir / p).toString
+  let some specCert := pathOf "spec" | IO.eprintln "no spec <certificate>"; return 2
+  let some implCert := pathOf "impl" | IO.eprintln "no impl <certificate>"; return 2
+  let (_, DS) ← Projection.CertLoadAny.loadAny specCert
+  let (_, DI) ← Projection.CertLoadAny.loadAny implCert
+  say s!"judge {path}"
+  say s!"  spec {specCert}: flops {DS.flops.size} outputs {DS.outputs.size} memories {DS.memories.size}"
+  say s!"  impl {implCert}: flops {DI.flops.size} outputs {DI.outputs.size} memories {DI.memories.size}"
+  unless HwMem.admitsWB DS && HwMem.admitsWB DI do
+    say "  RESULT: REFUSED (the memory route does not admit a certificate)"; return 4
+  let t0 ← IO.monoMsNow
+  let (RS, _) ← match ← specialize DS sf wf with
+    | .ok x => pure x | .error e => do say s!"  RESULT: REFUSED (spec: {e})"; return 4
+  let (RI, _) ← match ← specialize DI sf wf with
+    | .ok x => pure x | .error e => do say s!"  RESULT: REFUSED (implementation: {e})"; return 4
+  let some simS := mkMemSimOfW DS RS | say "  RESULT: REFUSED (no simulator for the spec)"; return 4
+  let some simI := mkMemSimOfW DI RI | say "  RESULT: REFUSED (no simulator for the implementation)"; return 4
+  let t1 ← IO.monoMsNow
+  say s!"  specialized both and built the simulators in {t1 - t0} ms (route fp: runMemSim)"
+  let NI ← loadNames implCert
+  let NS ← loadNames specCert
+  let (J, asm) ← match buildJudge lines NI NS DS with
+    | .ok x => pure x | .error e => do IO.eprintln s!"{path}: {e}"; return 2
+  let (period, phase) : Nat × Nat := match (lines.find? (·.key == "period")).map (·.args) with
+    | some [p] => let P := p.toNat?.getD 1; (P, if P > 1 then 1 else 0)
+    | some [p, k] => (p.toNat?.getD 1, k.toNat?.getD 0)
+    | _ => (1, 0)
+  say s!"  contract: {J.slot.obs.length} observed words, {J.xfer.length} xfer, maxstall {J.maxStall}; random inputs change at steps n % {period} = {phase}"
+  let fpS : Judge.Sim := fun i st => runMemSim simS (edgesAll DS) i st
+  let fpI : Judge.Sim := fun i st => runMemSim simI (edgesAll DI) i st
+  let route := (opt "sim").getD "fp"
+  let check := ((opt "check").bind (·.toNat?)).getD 4
+  let ofRT (r : RuntimeResult) : StateM.ResultM := { nextState := { flops := r.nextState.flops, mems := #[] }, outputs := r.outputs }
+  let mkRoute (D : DesignCert) (fp : Judge.Sim) : IO (Option Judge.Sim) := do
+    if route == "fp" then return some fp
+    unless D.memories.size == 0 do say s!"  route {route} needs a memory-free certificate"; return none
+    if route == "ir" then
+      match Compiler.Direct.checkDesign D with
+      | .error _ => say "  route ir: checkDesign refused the certificate"; return none
+      | .ok _ => return some fun i st =>
+          match Compiler.Direct.checkRuntime D (edgesAll D) i (StateM.denote st) with
+          | .ok _ => some (ofRT (Compiler.Direct.directStepRaw D (edgesAll D) i (StateM.denote st)))
+          | .error _ => none
+    if route == "tv" then
+      match compileDesign D with
+      | .error e => say s!"  route tv: compileDesign refused the certificate: {repr e}"; return none
+      | .ok R => return some fun i st => some (ofRT (denoteResidual R (edgesAll D) i (StateM.denote st)))
+    say s!"  sim:{route} is not one of fp | ir | tv"; return none
+  let tr0 ← IO.monoMsNow
+  let some stepS ← mkRoute DS fpS | return 2
+  let some stepI ← mkRoute DI fpI | return 2
+  let tr1 ← IO.monoMsNow
+  if route != "fp" then say s!"  route {route} built in {tr1 - tr0} ms; cross-checked against fp on the first {check} steps of every run"
+  let inW := inputWidths DI (inputCount DI)
+  -- `drive <input> <v0> <n> <v1>`: a fixed schedule of an input on random runs
+  let mut drives : List (Nat × Int × Nat × Int) := []
+  for a in (lines.filter (·.key == "drive")).map (·.args) do
+    match a with
+    | [nm, v0, n, v1] =>
+        match NI.ins[nm]?, v0.toInt?, n.toNat?, v1.toInt? with
+        | some k, some x, some m, some y => drives := drives ++ [(k, x, m, y)]
+        | _, _, _, _ => IO.eprintln s!"drive: cannot read {a}"; return 2
+    | _ => IO.eprintln "drive <input> <v0> <n> <v1>"; return 2
+  let applyDrives (ins : Array RuntimeInput) : Array RuntimeInput :=
+    ins.mapIdx fun n v => drives.foldl (fun v (k, x, m, y) =>
+      v.set! k (mk_bv (inW.getD k 1) (if n < m then x else y))) v
+  let runs : List (String × Array RuntimeInput) ← match opt "trace", opt "random" with
+    | some t, _ => do
+        match ← readTrace t NI inW with
+        | .ok ins => pure [(s!"trace {t}", ins)]
+        | .error e => do IO.eprintln e; return 2
+    | none, some r =>
+        match (r.splitOn ",").map (·.toNat?) with
+        | [some steps, some n] => pure ((List.range n).map fun k => (s!"random seed {k + 1}", applyDrives (randomRun inW period phase steps (k + 1))))
+        | [some steps, some n, some s0] => pure ((List.range n).map fun k => (s!"random seed {s0 + k}", applyDrives (randomRun inW period phase steps (s0 + k))))
+        | _ => do IO.eprintln "random:<steps>,<runs>[,<seed>]"; return 2
+    | none, none => do IO.eprintln "judge: trace:<file.tsv> or random:<steps>,<runs>[,<seed>]"; return 2
+  let report := work / s!"{label}.txt"
+  IO.FS.writeFile report s!"judge {path}\n"
+  let addR (l : String) : IO Unit := do
+    let h ← IO.FS.Handle.mk report .append; h.putStrLn l
+  let inName (k : Nat) : String := (NI.inW.getD k (s!"in{k}", 0)).1
+  for (what, ins) in runs do
+    let ta ← IO.monoMsNow
+    let some ports ← IO.lazyPure (fun _ => Judge.implPorts stepI (zeroState DI) ins)
+      | say s!"  [{what}] RESULT: REFUSED (the implementation simulator refused a step)"; return 4
+    let tb ← IO.monoMsNow
+    -- the environment's protocol, on random runs
+    if (opt "random").isSome then
+      if let some a := asm then
+        if let some n := ports.toList.zipIdx.findSome? (fun (C, n) => if propBit C.outs a then none else some n) then
+          say s!"  [{what}] RESULT: ENVIRONMENT VIOLATED at step {n} (the random inputs broke asm)"
+          addR s!"{what}: ENVIRONMENT VIOLATED at step {n}"
+          return 3
+    -- the route against fp: the implementation's first `check` steps, outputs and next state
+    if route != "fp" then
+      let ok ← IO.lazyPure fun _ => Id.run do
+        let mut a := zeroState DI
+        let mut b := zeroState DI
+        for i in ins.toList.take check do
+          match stepI i a, fpI i b with
+          | some r, some q =>
+              if !(decide ((r.outputs.map normBV) = (q.outputs.map normBV)) &&
+                   decide (Judge.normState r.nextState = Judge.normState q.nextState)) then return false
+              a := r.nextState; b := q.nextState
+          | _, _ => return false
+        return true
+      unless ok do
+        say s!"  [{what}] RESULT: ROUTE DISAGREES: {route} and fp differ within the first {check} steps"; return 5
+    let v ← IO.lazyPure (fun _ => Judge.run J stepS (zeroState DS) ports)
+    -- a NO MATCH on a faster route is re-run on fp alone before it is reported
+    let v ← match v with
+      | .noMatch _ _ =>
+          if route == "fp" then pure v else do
+            say s!"  [{what}] NO MATCH on route {route}: re-running this run on fp"
+            let some portsF ← IO.lazyPure (fun _ => Judge.implPorts fpI (zeroState DI) ins)
+              | say s!"  [{what}] RESULT: REFUSED (fp refused a step)"; return 4
+            IO.lazyPure (fun _ => Judge.run J fpS (zeroState DS) portsF)
+      | _ => pure v
+    let tc ← IO.monoMsNow
+    let simMs := if ports.size == 0 then 0 else (tb - ta) / ports.size
+    say s!"  [{what}] {ports.size} steps: implementation simulated in {tb - ta} ms ({simMs} ms/step), search {tc - tb} ms"
+    match v with
+    | .noMatch n whys =>
+        say s!"  [{what}] RESULT: NO MATCH at step {n}: no stuttering alignment of the spec matches the implementation on this run"
+        addR s!"{what}: NO MATCH at step {n}"
+        addR "inputs of steps 0..n (nonzero only):"
+        for (i, j) in (ins.toList.take (n + 1)).zipIdx do
+          let nz := (i.toList.zipIdx.filter fun (b, _) => bv_uint b != 0).map fun (b, k) => s!"{inName k}={bv_uint b}"
+          addR s!"  step {j}: {" ".intercalate nz}"
+        addR "the last candidates of the spec, and why each fails at that step:"
+        for (w, c) in whys.zipIdx do addR s!"  candidate {c}: {"; ".intercalate w}"
+        say s!"  report: {report}"
+        return 1
+    | .matched steps slotFail maxF =>
+        let slotTxt := match slotFail with
+          | some (m, w) => s!"; the slot's own stall choice fails at step {m}: {w} (STALL CHOICE WRONG on this run)"
+          | none => "; the slot's own stall choice also matches"
+        say s!"  [{what}] MATCH FOUND over {steps} steps (largest candidate set {maxF}){slotTxt}"
+        addR s!"{what}: MATCH FOUND over {steps} steps (largest candidate set {maxF}){slotTxt}"
+  say s!"  RESULT: MATCH FOUND on every run ({runs.length})"
+  say s!"  report: {report}"
+  return 0
+
 def main (args : List String) : IO UInt32 := do
   match args with
   | "refmap" :: path :: rest => refmapMain path rest false
   | "specfacts" :: path :: rest => refmapMain path rest true
+  | "judge" :: path :: rest => judgeMain path rest
   | _ =>
-    IO.eprintln "usage: sym_refmap refmap|specfacts <file.refmap> [jobs:<n>] [runs:<n>] [sf:<n>] [wf:<n>] [emit:[f1:|f2:]<file>] [cache] [solver:<cadical>] [work:<dir>]"
+    IO.eprintln "usage: sym_refmap refmap|specfacts <file.refmap> [jobs:<n>] [runs:<n>] [sf:<n>] [wf:<n>] [emit:[f1:|f2:]<file>] [cache] [solver:<cadical>] [work:<dir>]\n       sym_refmap judge <file.refmap> trace:<file.tsv> | random:<steps>,<runs>[,<seed>] [sf:<n>] [wf:<n>] [work:<dir>] [label:<name>]"
     return 2
