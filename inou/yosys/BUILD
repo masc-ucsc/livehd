@@ -172,6 +172,21 @@ sh_test(
     deps = [":scripts"],
 )
 
+# A variable written by several clocked processes keeps every write; the later
+# process in the source wins in a cycle where several write (the native slang
+# reader's rule), with a warning. Writers on different clocks are refused
+# (lhd_ff_merge).
+sh_test(
+    name = "yosys_ff_merge_test",
+    srcs = ["tests/yosys_ff_merge_test.sh"],
+    data = [
+        "tests/ff_merge.sv",
+        "tests/ff_merge_two_clocks.sv",
+        "//lhd",
+    ],
+    deps = [":scripts"],
+)
+
 # A flop with an initializer AND a reset keeps one value (the reset value): the
 # reader warns when the initializer differs and is dropped, and stays quiet when
 # nothing is lost (same value, x bits, or a sync reset that stays a data mux).
