@@ -10,12 +10,50 @@ std::string legacy_node_cert(const CertNode& n) {
   return "{ nid := " + std::to_string(n.id) + ", op := " + format_op(n.op) + ", width := " + std::to_string(n.width)
          + ", deps := " + nat_list(n.deps) + " }";
 }
+// Above this many sources or nodes the certificate part takes the form that scales (finding AK). Its
+// `if n = <id> then .. else` source chain (37,613 branches on VX_core) did not compile in 57 min at
+// 20 GB (the compiler's FloatLetIn on the case tree). Instead: the lookup trees the bridge model already
+// uses (`_srcTree`, `_nodesTree`: BT.find, O(log N) per lookup), written one tree node or a few list items
+// per line (one 6 MB line made Lean's parser crawl), with closed-term extraction off for those large
+// literals (it was 989 of 1,428 s). VX_core: 435 s, 15.6 GB, the same theorems. Smaller designs keep the
+// chain, so their files stay byte-identical.
+constexpr size_t kLegacyTreeAbove = 2000;
+
+// `[a, b, ...]` with a line break every 16 items.
+static std::string nat_list_lines(const std::vector<uint32_t>& xs) {
+  std::string out = "[";
+  for (size_t i = 0; i < xs.size(); ++i) {
+    out += (i == 0 ? "" : (i % 16 == 0 ? ",\n    " : ", ")) + std::to_string(xs[i]);
+  }
+  return out + "]";
+}
+
+// A bst_literal with each subtree on its own line.
+static std::string tree_lines(std::string literal) {
+  std::string out;
+  out.reserve(literal.size() + literal.size() / 16);
+  for (size_t p = 0; p < literal.size(); ++p) {
+    if (literal.compare(p, 8, " (BT.nd ") == 0) {
+      out += "\n    (BT.nd ";
+      p += 7;
+      continue;
+    }
+    out += literal[p];
+  }
+  return out;
+}
+
 void emit_legacy_graph_cert(const DesignScan& d, const CertificateIR& c, const LegacyNames& n, bool bridge, std::ostream& os) {
-  const auto&           b    = n.base;
-  const auto            val  = n.memory_values ? "CertVal" : "BV";
-  const auto            args = n.arguments();
+  const auto&           b     = n.base;
+  const auto            val   = n.memory_values ? "CertVal" : "BV";
+  const auto            args  = n.arguments();
+  const bool            large = c.sources.size() > kLegacyTreeAbove || c.nodes.size() > kLegacyTreeAbove;
+  const bool            tree  = bridge || large;
+  const std::string     no_extract = large ? "set_option compiler.extract_closed false in\n" : "";
+  auto                  lines      = [&](std::string literal) { return large ? tree_lines(std::move(literal)) : literal; };
+  auto                  nats       = [&](const std::vector<uint32_t>& xs) { return large ? nat_list_lines(xs) : nat_list(xs); };
   std::vector<uint32_t> topo, sources;
-  os << "def " << b << "_nodeCerts : List NodeCert := [\n";
+  os << no_extract << "def " << b << "_nodeCerts : List NodeCert := [\n";
   for (size_t i = 0; i < c.nodes.size(); ++i) {
     topo.push_back(c.nodes[i].id);
     os << "  " << legacy_node_cert(c.nodes[i]) << (i + 1 == c.nodes.size() ? "" : ",") << '\n';
@@ -25,20 +63,20 @@ void emit_legacy_graph_cert(const DesignScan& d, const CertificateIR& c, const L
     sources.push_back(s.id);
   }
   const auto zero = n.memory_values ? "CertVal.bv (mk_bv 0 0)" : "mk_bv 0 0";
-  if (bridge) {
+  if (tree) {
     std::vector<std::pair<uint32_t, std::string>> entries;
     for (const auto& s : c.sources) {
       entries.emplace_back(s.id, "fun " + args + " => " + legacy_source_value(c, n, s));
     }
-    os << "def " << b << "_srcTree : BT (" << b << "_in → " << (n.sequential ? b + "_state → " : "") << val << ") :=\n  "
-       << bst_literal(entries) << "\n\n";
+    os << no_extract << "def " << b << "_srcTree : BT (" << b << "_in → " << (n.sequential ? b + "_state → " : "") << val
+       << ") :=\n  " << lines(bst_literal(entries)) << "\n\n";
     os << "def " << b << "_sourceEnv " << n.parameters() << " : Nat -> " << val << " := fun n =>\n  (BT.find " << b
        << "_srcTree n).elim (" << zero << ") (fun f => f " << args << ")\n\n";
     entries.clear();
     for (const auto& node : c.nodes) {
       entries.emplace_back(node.id, "(" + legacy_node_cert(node) + " : NodeCert)");
     }
-    os << "def " << b << "_nodesTree : BT NodeCert :=\n  " << bst_literal(entries) << "\n\n";
+    os << no_extract << "def " << b << "_nodesTree : BT NodeCert :=\n  " << lines(bst_literal(entries)) << "\n\n";
     os << "def " << b << "_nodesFn : Nat → Option NodeCert := fun n => BT.find " << b << "_nodesTree n\n\n";
   } else {
     os << "def " << b << "_sourceEnv " << n.parameters() << " : Nat -> " << val << " := fun n =>\n";
@@ -47,8 +85,8 @@ void emit_legacy_graph_cert(const DesignScan& d, const CertificateIR& c, const L
     }
     os << "  " << zero << "\n\n";
   }
-  os << "def " << b << "_graphCert : GraphCert :=\n  { topo := " << nat_list(topo) << ", sources := " << nat_list(sources)
-     << ", nodes := " << (bridge ? b + "_nodesFn" : "nodes_of_list " + b + "_nodeCerts") << " }\n\n";
+  os << no_extract << "def " << b << "_graphCert : GraphCert :=\n  { topo := " << nats(topo) << ", sources := " << nats(sources)
+     << ", nodes := " << (tree ? b + "_nodesFn" : "nodes_of_list " + b + "_nodeCerts") << " }\n\n";
   auto       bv      = [&](uint32_t id) { return "(rho " + std::to_string(id) + ")" + (n.memory_values ? ".asBV" : ""); };
   auto       word    = [&](uint32_t id, uint32_t width) { return "(bv_to_bitvec " + std::to_string(width) + " " + bv(id) + ")"; };
   const auto outputs = legacy_output_ids(d, c);

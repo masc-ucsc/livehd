@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #include "legacy_model.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -264,6 +265,49 @@ TEST(LegacyModel, LongLetChainIsSplitIntoParts) {
   std::ostringstream short_out;
   ASSERT_NO_THROW(emit_legacy_model(d, build_certificate(d, {}), o, short_out));
   EXPECT_EQ(short_out.str().find("_p0"), std::string::npos);
+}
+// Above 2,000 nodes or sources the certificate part takes the form that scales
+// (finding AK): lookup trees for the sources and nodes, written a subtree per
+// line, with closed-term extraction off for the large literals. A small design
+// keeps the `if n = ..` source chain and the node list.
+TEST(LegacyModel, LargeCertificateUsesLookupTrees) {
+  DesignScan d;
+  d.name   = "big";
+  d.inputs = {
+      {"a", 2000000000, 8, {}}
+  };
+  for (uint32_t k = 0; k < 2100; ++k) {
+    const PinRef prev = k == 0 ? input(2000000000, 8) : PinRef{PinKind::Node, 10 + k - 1, 0, 8, 0, {}};
+    d.nodes.push_back({10 + k, ScanOp::Sum, 8, false, {{0, 0, prev}, {1, 1, input(2000000000, 8)}}});
+  }
+  d.outputs = {
+      {"y", 0, 8, PinRef{PinKind::Node, 10 + 2099, 0, 8, 0, {}}}
+  };
+  std::ostringstream big;
+  ASSERT_NO_THROW(emit_legacy_model(d, build_certificate(d, {}), {}, big));
+  const auto text = big.str();
+  EXPECT_NE(text.find("def big_srcTree : BT"), std::string::npos);
+  EXPECT_NE(text.find("nodes := big_nodesFn"), std::string::npos);
+  EXPECT_EQ(text.find("nodes_of_list"), std::string::npos);
+  EXPECT_EQ(text.find("if n = "), std::string::npos);
+  EXPECT_NE(text.find("set_option compiler.extract_closed false in\ndef big_nodesTree"), std::string::npos);
+  size_t longest = 0;
+  for (size_t at = 0, end; at < text.size(); at = end + 1) {
+    end     = text.find('\n', at);
+    end     = end == std::string::npos ? text.size() : end;
+    longest = std::max(longest, end - at);
+  }
+  EXPECT_LT(longest, 20000u) << "a literal was written on one long line";
+
+  d.nodes.resize(100);
+  d.outputs = {
+      {"y", 0, 8, PinRef{PinKind::Node, 109, 0, 8, 0, {}}}
+  };
+  std::ostringstream small;
+  ASSERT_NO_THROW(emit_legacy_model(d, build_certificate(d, {}), {}, small));
+  EXPECT_NE(small.str().find("nodes := nodes_of_list big_nodeCerts"), std::string::npos);
+  EXPECT_NE(small.str().find("if n = "), std::string::npos);
+  EXPECT_EQ(small.str().find("extract_closed"), std::string::npos);
 }
 TEST(LegacyModel, UnreadMemoryHoldsItsField) {
   DesignScan d;
