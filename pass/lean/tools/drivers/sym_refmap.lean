@@ -33,7 +33,10 @@ the post-lowering IR stepped directly (`directStepRaw` after one `checkDesign`,
 (`compileDesign` once, `denoteResidual` every step, `compileDesign_correct`). `ir` and `tv` need a
 memory-free certificate. With `ir` or `tv` every run is also cross-checked against `fp` on its
 first `check:` steps (default 4; outputs and next state), and a NO MATCH is re-run on `fp` alone
-before it is reported, so the verdict always rests on `runMemSim`.
+before it is reported, so the verdict always rests on `runMemSim` (a different answer on fp is
+ROUTE DISAGREES, exit 5). The implementation is simulated one step ahead of the search, so a run
+stops at its first NO MATCH: its cost is the steps up to it, whatever the run's length, and the
+remaining runs are skipped.
 
 The `.refmap` file names both certificates and everything else by the names in their
 `_io.json` sidecars; its grammar is in `pass/lean/tools/formats/refmap.md`.
@@ -1108,16 +1111,10 @@ def judgeMain (path : String) (rest : List String) : IO UInt32 := do
   let inName (k : Nat) : String := (NI.inW.getD k (s!"in{k}", 0)).1
   for (what, ins) in runs do
     let ta ← IO.monoMsNow
-    let some ports ← IO.lazyPure (fun _ => Judge.implPorts stepI (zeroState DI) ins)
-      | say s!"  [{what}] RESULT: REFUSED (the implementation simulator refused a step)"; return 4
-    let tb ← IO.monoMsNow
-    -- the environment's protocol, on random runs
-    if (opt "random").isSome then
-      if let some a := asm then
-        if let some n := ports.toList.zipIdx.findSome? (fun (C, n) => if propBit C.outs a then none else some n) then
-          say s!"  [{what}] RESULT: ENVIRONMENT VIOLATED at step {n} (the random inputs broke asm)"
-          addR s!"{what}: ENVIRONMENT VIOLATED at step {n}"
-          return 3
+    -- the environment's protocol, on random runs: checked at each step, before it is searched
+    let env : Ports → Bool := match (opt "random").isSome, asm with
+      | true, some a => fun C => propBit C.outs a
+      | _, _ => fun _ => true
     -- the route against fp: the implementation's first `check` steps, outputs and next state
     if route != "fp" then
       let ok ← IO.lazyPure fun _ => Id.run do
@@ -1133,20 +1130,35 @@ def judgeMain (path : String) (rest : List String) : IO UInt32 := do
         return true
       unless ok do
         say s!"  [{what}] RESULT: ROUTE DISAGREES: {route} and fp differ within the first {check} steps"; return 5
-    let v ← IO.lazyPure (fun _ => Judge.run J stepS (zeroState DS) ports)
-    -- a NO MATCH on a faster route is re-run on fp alone before it is reported
+    -- D1 and D0 together, D1 one step ahead: the search stops at the first NO MATCH
+    let v ← IO.lazyPure (fun _ => Judge.run J stepS (zeroState DS) stepI (zeroState DI) ins env)
+    let tb ← IO.monoMsNow
+    -- a NO MATCH on a faster route is re-run on fp alone before it is reported (it stops at the
+    -- same step when fp agrees)
     let v ← match v with
-      | .noMatch _ _ =>
+      | .noMatch n _ =>
           if route == "fp" then pure v else do
-            say s!"  [{what}] NO MATCH on route {route}: re-running this run on fp"
-            let some portsF ← IO.lazyPure (fun _ => Judge.implPorts fpI (zeroState DI) ins)
-              | say s!"  [{what}] RESULT: REFUSED (fp refused a step)"; return 4
-            IO.lazyPure (fun _ => Judge.run J fpS (zeroState DS) portsF)
+            say s!"  [{what}] NO MATCH on route {route} ({tb - ta} ms): re-running this run on fp"
+            let w ← IO.lazyPure (fun _ => Judge.run J fpS (zeroState DS) fpI (zeroState DI) ins env)
+            match w with
+            | .noMatch m _ =>
+                if m == n then pure w else do
+                  say s!"  [{what}] RESULT: ROUTE DISAGREES: {route} gives NO MATCH at step {n}, fp at step {m}"; return 5
+            | _ => do
+                say s!"  [{what}] RESULT: ROUTE DISAGREES: {route} gives NO MATCH at step {n}, fp does not"; return 5
       | _ => pure v
     let tc ← IO.monoMsNow
-    let simMs := if ports.size == 0 then 0 else (tb - ta) / ports.size
-    say s!"  [{what}] {ports.size} steps: implementation simulated in {tb - ta} ms ({simMs} ms/step), search {tc - tb} ms"
+    let done := match v with
+      | .noMatch n _ => n + 1 | .matched s _ _ => s | .implRefused n => n | .envViolated n => n + 1
+    let rerun := if tc > tb then s!", then {tc - tb} ms on fp" else ""
+    say s!"  [{what}] {done} of {ins.size} steps searched in {tb - ta} ms on {route} ({if done == 0 then 0 else (tb - ta) / done} ms/step: D1, D0 and the comparison){rerun}"
     match v with
+    | .implRefused n =>
+        say s!"  [{what}] RESULT: REFUSED (the implementation simulator refused step {n})"; return 4
+    | .envViolated n =>
+        say s!"  [{what}] RESULT: ENVIRONMENT VIOLATED at step {n} (the random inputs broke asm)"
+        addR s!"{what}: ENVIRONMENT VIOLATED at step {n}"
+        return 3
     | .noMatch n whys =>
         say s!"  [{what}] RESULT: NO MATCH at step {n}: no stuttering alignment of the spec matches the implementation on this run"
         addR s!"{what}: NO MATCH at step {n}"

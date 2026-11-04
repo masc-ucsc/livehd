@@ -140,6 +140,10 @@ judge() { # <expect> <refmap> args...
 judge "MATCH FOUND" acc2      random:40,8
 judge "NO MATCH"    acc2b     random:40,8
 judge "NO MATCH"    acc2_r0   random:10,1
+# the same run, 2000 steps long: the search must stop at the NO MATCH, not simulate the whole run
+judge "NO MATCH"    acc2_r0   random:2000,1
+grep -qE '\] [0-9]+ of 2000 steps searched' "$OUT/judge_$N.log" && ! grep -q '\] 2000 of 2000 steps' "$OUT/judge_$N.log" \
+  || { tail -4 "$OUT/judge_$N.log"; echo "FAIL: the judge did not stop at the NO MATCH"; exit 1; }
 judge "MATCH FOUND" acc2_slot random:20,2
 grep -q 'STALL CHOICE WRONG' "$OUT/judge_$N.log" || { tail -4 "$OUT/judge_$N.log"; echo "FAIL: wrong stall choice not reported"; exit 1; }
 judge "MATCH FOUND" pv1       random:40,8

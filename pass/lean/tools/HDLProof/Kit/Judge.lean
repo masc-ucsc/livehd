@@ -4,8 +4,8 @@ matches the implementation D1. No map, no invariant, no solver: two simulators a
 observations.
 
 The contract (one `chan`, one `slot` of a `.refmap`, plus `xfer` and `maxstall`):
-- D1 runs once on the given inputs; its ports of every step are `Ports` (outputs at n, outputs at
-  n+1, inputs at n).
+- D1 runs once on the given inputs, one step ahead of the search; its ports of every step are
+  `Ports` (outputs at n, outputs at n+1, inputs at n). The search stops at the first NO MATCH.
 - A set of D0 states is kept, starting from D0's initial state. At each step every D0 state may
   - STEP on the step's spec input (`specIn` of the slot's response words, as an event of the
     refinement): kept only if the channel allows the event and D0's observed words equal D1's
@@ -125,16 +125,32 @@ inductive Verdict where
   | noMatch (step : Nat) (why : List (List String))
   /-- some alignment survives every step; the slot path's first failure, if any; the largest set -/
   | matched (steps : Nat) (slotFail : Option (Nat × String)) (maxFrontier : Nat)
+  /-- D1's simulator refused step `step` -/
+  | implRefused (step : Nat)
+  /-- the environment check `env` failed on D1's ports at step `step` -/
+  | envViolated (step : Nat)
 
-/-- The exact search over the steps `0 .. ports.size-1`. -/
-def run (J : JSpec) (simS : Sim) (s0 : StateM) (ports : Array Ports) : Verdict := Id.run do
+/-- The exact search over the steps of `ins`, D1 (`simI` from `s0I`) and D0 (`simS` from `s0`)
+together. D1 runs one step ahead of the search: step n's ports need D1's outputs at n+1 (for
+`@next` words; the last step's come from one more cycle on the last input vector). So the search
+stops at the first NO MATCH, and a NO MATCH at step n costs n+2 D1 steps and the D0 steps up to n,
+whatever the run's length. `env` is checked on D1's ports of each step before that step is
+searched: a NO MATCH at step n is reported only on a run whose environment held on steps 0..n. -/
+def run (J : JSpec) (simS : Sim) (s0 : StateM) (simI : Sim) (s0I : StateM)
+    (ins : Array RuntimeInput) (env : Ports → Bool := fun _ => true) : Verdict := Id.run do
+  if ins.isEmpty then return .matched 0 none 1
+  let some r0 := simI ins[0]! s0I | return .implRefused 0
+  let mut cur := r0
   let mut F : Frontier := Frontier.insert {} { st := normState s0, holds := 0 }
   let mut maxF := 1
   -- the slot's own stall choice, followed alone
   let mut slotC : Option Cand := some { st := normState s0, holds := 0 }
   let mut slotFail : Option (Nat × String) := none
-  for n in [0:ports.size] do
-    let C := ports[n]!
+  for n in [0:ins.size] do
+    let some rN := simI (ins.getD (n + 1) ins.back!) cur.nextState | return .implRefused (n + 1)
+    let C : Ports := { outs := cur.outputs, outsNext := rN.outputs, ins := ins[n]! }
+    cur := rN
+    unless env C do return .envViolated n
     let mut G : Frontier := {}
     let mut whys : List (List String) := []
     -- each distinct D0 state is stepped once per step; the slot path reuses that step
@@ -161,22 +177,6 @@ def run (J : JSpec) (simS : Sim) (s0 : StateM) (ports : Array Ports) : Verdict :
         match r with
         | .ok c' => slotC := some c'
         | .error w => slotFail := some (n, w.show J); slotC := none
-  return .matched ports.size slotFail maxF
-
-/-- D1's ports for every step of `ins`: outputs at n, outputs at n+1, inputs at n. The last step's
-next outputs come from one more cycle on the last input vector (they matter only to `@next`
-words). `none` when the simulator refuses. -/
-def implPorts (simI : Sim) (s0 : StateM) (ins : Array RuntimeInput) : Option (Array Ports) := do
-  if ins.isEmpty then return #[]
-  let mut st := s0
-  let mut outs : Array (Array BV) := #[]
-  for i in ins.push ins.back! do
-    let r ← simI i st
-    outs := outs.push r.outputs
-    st := r.nextState
-  let mut ps : Array Ports := #[]
-  for n in [0:ins.size] do
-    ps := ps.push { outs := outs[n]!, outsNext := outs[n + 1]!, ins := ins[n]! }
-  return ps
+  return .matched ins.size slotFail maxF
 
 end HDLProof.Kit.Judge
