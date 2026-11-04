@@ -291,6 +291,9 @@ TEST(LegacyModel, LargeCertificateUsesLookupTrees) {
   EXPECT_EQ(text.find("nodes_of_list"), std::string::npos);
   EXPECT_EQ(text.find("if n = "), std::string::npos);
   EXPECT_NE(text.find("set_option compiler.extract_closed false in\ndef big_nodesTree"), std::string::npos);
+  // No bridge proofs and no memory values: nothing else imports `OpBridge.BT`.
+  EXPECT_NE(text.find("import LeanSemanticPrimitives.Translation.LookupTree\n"), std::string::npos);
+  EXPECT_NE(text.find("open OpBridge"), std::string::npos);
   size_t longest = 0;
   for (size_t at = 0, end; at < text.size(); at = end + 1) {
     end     = text.find('\n', at);
@@ -308,6 +311,7 @@ TEST(LegacyModel, LargeCertificateUsesLookupTrees) {
   EXPECT_NE(small.str().find("nodes := nodes_of_list big_nodeCerts"), std::string::npos);
   EXPECT_NE(small.str().find("if n = "), std::string::npos);
   EXPECT_EQ(small.str().find("extract_closed"), std::string::npos);
+  EXPECT_EQ(small.str().find("LookupTree"), std::string::npos);
 }
 TEST(LegacyModel, UnreadMemoryHoldsItsField) {
   DesignScan d;

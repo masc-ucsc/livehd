@@ -43,11 +43,13 @@ static std::string tree_lines(std::string literal) {
   return out;
 }
 
+bool legacy_cert_large(const CertificateIR& c) { return c.sources.size() > kLegacyTreeAbove || c.nodes.size() > kLegacyTreeAbove; }
+
 void emit_legacy_graph_cert(const DesignScan& d, const CertificateIR& c, const LegacyNames& n, bool bridge, std::ostream& os) {
   const auto&           b     = n.base;
   const auto            val   = n.memory_values ? "CertVal" : "BV";
   const auto            args  = n.arguments();
-  const bool            large = c.sources.size() > kLegacyTreeAbove || c.nodes.size() > kLegacyTreeAbove;
+  const bool            large = legacy_cert_large(c);
   const bool            tree  = bridge || large;
   const std::string     no_extract = large ? "set_option compiler.extract_closed false in\n" : "";
   auto                  lines      = [&](std::string literal) { return large ? tree_lines(std::move(literal)) : literal; };
