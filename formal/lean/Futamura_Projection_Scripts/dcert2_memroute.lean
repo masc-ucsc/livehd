@@ -571,11 +571,31 @@ structure Cfg where
   So `zero edges:all stim:<f> outputs` here matches
   `cert_trace <cert> <n> <f> edges:third`. -/
   outputs : Bool := false
+  /-- `auto` in place of the step budget: size it from the certificate,
+  `autoStepFuel D`. -/
+  autoStep : Bool := false
+  /-- `auto` in place of the work budget: `autoWorkFuel`. -/
+  autoWork : Bool := false
+
+/-- The step budget bounds how deep the specializer recurses, and the depth grows
+with the design: the smallest budget that worked on the four largest rows was
+1.70 to 1.82 x (nodes + sources) (Vortex top 200,118 for 118,058; nyuzi 172,788
+for 99,564; core 112,271 for 66,118; VX_fpu_dsp 66,396 for 36,422). `auto` takes
+4 x, with 20,000 (the old fixed default) as the floor for small designs. A budget
+is only an upper bound: an unused step costs nothing. -/
+def autoStepFuel (D : DesignCert) : Nat := max 20000 (4 * (D.nodes.size + D.sources.size))
+
+/-- The work budget (worklist rounds) never decided a measured row: ten times more
+work fuel changed nothing where ten times more step fuel did. 2,000 is ten times
+the old default of 200. -/
+def autoWorkFuel : Nat := 2000
 
 def say (s : String) : IO Unit := IO.println s
 
 def runRoute (label : String) (certHash : String) (D : DesignCert) (cfg : Cfg)
     (st0 : StateM) (stateProv : String) : IO UInt32 := do
+  let cfg := { cfg with stepFuel := if cfg.autoStep then autoStepFuel D else cfg.stepFuel,
+                        workFuel := if cfg.autoWork then autoWorkFuel else cfg.workFuel }
   let t0 ← IO.monoMsNow
   say s!"{label}"
   say s!"  certificate fnv1a {certHash}"
@@ -632,21 +652,35 @@ admitsB {HwMem.admitsB D}, admitsWB {admW}"
   say s!"  specializing {if cfg.route == "plain" then "hwMemAP" else if cfg.route == "var"
       then "hwMemAPVar (env0 inlined; MemVariant)" else "hwMemAPF (fold fused; MemFused)"} \
 (division [.stat,.dyn,.dyn,.dyn]: design static; edges, input, state dynamic) at fuel \
-{cfg.stepFuel}/{cfg.workFuel}"
+{cfg.stepFuel}/{cfg.workFuel}{if cfg.autoStep || cfg.autoWork then " (auto: sized from the certificate)" else ""}"
   (← IO.getStdout).flush
   let t2 ← IO.monoMsNow
   -- the bundle is honest by `mkMemSimOf(W)_wfF` / `_wfV` / `_wf` and runs
   -- correctly by `runMemSim(W)F_correct` / `V_correct` / `_correct` (fused / var /
   -- plain). `runMemSim`, `mkMemSimOf(W)` and `checkResidual` are the same
   -- functions on all three.
-  let res ← IO.lazyPure (fun _ =>
-    if cfg.route == "plain" then projectMemDesignAt cfg.stepFuel cfg.workFuel D
-    else if cfg.route == "var" then MemVariant.projectMemVarDesignAt cfg.stepFuel cfg.workFuel D
-    else MemFused.projectMemFDesignAt cfg.stepFuel cfg.workFuel D)
+  let specialize (sf wf : Nat) := IO.lazyPure (fun _ =>
+    if cfg.route == "plain" then projectMemDesignAt sf wf D
+    else if cfg.route == "var" then MemVariant.projectMemVarDesignAt sf wf D
+    else MemFused.projectMemFDesignAt sf wf D)
+  let mut sf := cfg.stepFuel
+  let mut wf := cfg.workFuel
+  let mut res ← specialize sf wf
+  -- `auto` fuel gets ONE retry at ten times both budgets: the size rule is a
+  -- measured bound, not a proof, so a design that needs more is not refused at
+  -- the first budget. The retry is printed; an explicit budget is never retried.
+  if cfg.autoStep || cfg.autoWork then
+    if let .error .outOfFuel := res then
+      say s!"  specialization OUT OF FUEL at the auto budget {sf}/{wf}; retrying once at \
+{10 * sf}/{10 * wf}"
+      (← IO.getStdout).flush
+      sf := 10 * sf
+      wf := 10 * wf
+      res ← specialize sf wf
   match res with
   | .error .outOfFuel =>
       let t3 ← IO.monoMsNow
-      IO.eprintln s!"  specialization OUT OF FUEL at {cfg.stepFuel}/{cfg.workFuel} \
+      IO.eprintln s!"  specialization OUT OF FUEL at {sf}/{wf} \
 -- a failure AT THIS BUDGET, not a semantic refusal"
       say s!"  ms: support {t1 - t0}  specialize {t3 - t2}"
       say "  RESULT: MEMROUTE SPECIALIZATION OUT OF FUEL"
@@ -873,15 +907,23 @@ def buildState (D : DesignCert) (im : InitMode) : IO (Except String (StateM × S
               s!"supplied file {path}, {bytes.size} bytes, fnv1a {fnv1a bytes}{note}"))
 
 def usage : String :=
-  "usage: dcert2_memroute (<cert.dcert>|--fixture <name>|--selftest) <stepFuel> \
-<workFuel> [cycles] [init] [nocompare] [trace] [outputs] [no-plain-write] [route:fused|var|plain]\n  fixtures: full mixed twomem lane\n\
+  "usage: dcert2_memroute (<cert.dcert>|--fixture <name>|--selftest) <stepFuel|auto> \
+<workFuel|auto> [cycles] [init] [nocompare] [trace] [outputs] [no-plain-write] [route:fused|var|plain]\n  \
+auto: step = max 20000 (4 x (nodes + sources)), work = 2000, one retry at 10x after an out-of-fuel\n  \
+fixtures: full mixed twomem lane\n\
   fixtures (negative): romwrite\n  init: zero | ramp | narrow | file:<path>"
 
 def parseCfg (rest : List String) : Except String Cfg := do
   match rest with
   | a :: b :: more =>
-    let some sf := a.toNat? | .error s!"stepFuel {repr a} is not a natural number"
-    let some wf := b.toNat? | .error s!"workFuel {repr b} is not a natural number"
+    -- `auto` sizes the budget from the certificate (`autoStepFuel`,
+    -- `autoWorkFuel`); runRoute fills it in once the certificate is loaded.
+    let autoStep := a == "auto"
+    let autoWork := b == "auto"
+    let some sf := (if autoStep then some 1 else a.toNat?)
+      | .error s!"stepFuel {repr a} is not a natural number or `auto`"
+    let some wf := (if autoWork then some 1 else b.toNat?)
+      | .error s!"workFuel {repr b} is not a natural number or `auto`"
     if sf == 0 || wf == 0 then .error s!"fuel must be positive, got {sf}/{wf}"
     let cycArg := more.head?.getD "8"
     let some cyc := cycArg.toNat? | .error s!"cycles {repr cycArg} is not a natural number"
@@ -910,7 +952,7 @@ contents or use init=zero, which is a legal-state witness only."
     let route := (tl.findSome? (fun t => (t.dropPrefix? "route:").map (·.toString))).getD "fused"
     unless ["fused", "var", "plain"].contains route do
       .error s!"route:{route} is not one of fused | var | plain"
-    .ok ⟨sf, wf, cyc, im, cmp, none, [], [], prov, sup, tr, pw, em, route, op⟩
+    .ok ⟨sf, wf, cyc, im, cmp, none, [], [], prov, sup, tr, pw, em, route, op, autoStep, autoWork⟩
   | _ => .error usage
 
 /-! ## Comparison self-test
