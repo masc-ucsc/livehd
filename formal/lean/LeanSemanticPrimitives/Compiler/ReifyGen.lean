@@ -65,6 +65,20 @@ register_option d3.segment : Nat := {
 
 namespace Compiler
 
+/-- A flop's old value, `st.flops[j]?`, as ONE function (finding AL). The
+generated models read every flop's old value; written as `st.flops[j]?`, each
+read is its own `GetElem?` instance problem, 100 to 500 ms each with the D3
+imports and growing with their number (500 reads: 97 s of instance search;
+l2_cache_tag_stage's 2,087 flops: the model did not finish in 3 h). A call to
+this function needs no instance search where it is used. Reducible, so a proof
+sees `st.flops[j]?` through it. -/
+@[reducible] def flopAt (st : RuntimeState) (j : Nat) : Option BV := st.flops[j]?
+
+/-- A memory's held image, `(st.mems[k]?).getD (fun _ => mk_bv 0 0)`, as one
+function, for the same reason. -/
+@[reducible] def memAt (st : RuntimeState) (k : Nat) : Int → BV :=
+  (st.mems[k]?).getD (fun _ => mk_bv 0 0)
+
 /-- Append one timestamped progress line, if `d3.proofPhase` names a file.
 Written by the elaborator itself and closed immediately, so it survives the
 SIGKILL that leaves the probe's own log empty. -/
@@ -327,7 +341,7 @@ def elabReifyDesignNamed : CommandElab := fun stx => do
         -- `Bool -> Bool -> BV` where `BV` is required.
         let aRl := if fu.asyncReset then mkIdent ``true else mkIdent ``false
         `(Compiler.flopNextV $(quote fu.width) $din $en $rp $rvq $ral
-            (($stId).flops[$(quote j)]?)
+            ($(mkIdent ``Compiler.flopAt) $stId $(quote j))
             (Compiler.fires $eId $(quote fu.clock)) $aRl)
     -- A memory next-image is just the value at the update's `nextImg` slot, and
     -- that slot's named value already has type `Int → BV` because the binding
@@ -341,7 +355,7 @@ def elabReifyDesignNamed : CommandElab := fun stx => do
       let t ← liftTermElabM (NamedModel.valRefAtTyped base nsrc true mu.nextImg envT)
       let held ← match mu.asyncImg with
         | some a => liftTermElabM (NamedModel.valRefAtTyped base nsrc true a envT)
-        | none   => `((($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
+        | none   => `($(mkIdent ``Compiler.memAt) $stId $(quote k))
       if mu.commits.isEmpty then
         liftTermElabM `(if Compiler.fires $eId $(quote mu.clock) then $t else $held)
       else
@@ -445,13 +459,13 @@ def emitChunkedModel (R : ResidualProgram) (d f : Ident) (csize : Nat) :
       let ral := if fu.resetActiveLow then mkIdent ``true else mkIdent ``false
       let aRl := if fu.asyncReset then mkIdent ``true else mkIdent ``false
       `(Compiler.flopNextV $(quote fu.width) $din $en $rp $rvq $ral
-          (($stId).flops[$(quote j)]?)
+          ($(mkIdent ``Compiler.flopAt) $stId $(quote j))
           (Compiler.fires $eId $(quote fu.clock)) $aRl)
   let mems : Array Term ← R.memoryUpdates.mapIdxM fun k mu => do
     let t ← liftTermElabM (rootRef true mu.nextImg)
     let held ← match mu.asyncImg with
       | some a => liftTermElabM (rootRef true a)
-      | none   => `((($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
+      | none   => `($(mkIdent ``Compiler.memAt) $stId $(quote k))
     if mu.commits.isEmpty then
       liftTermElabM `(if Compiler.fires $eId $(quote mu.clock) then $t else $held)
     else
@@ -645,13 +659,13 @@ def elabReifyDesignShared : CommandElab := fun stx => do
         -- `Bool -> Bool -> BV` where `BV` is required.
         let aRl := if fu.asyncReset then mkIdent ``true else mkIdent ``false
         `(Compiler.flopNextV $(quote fu.width) $din $en $rp $rvq $ral
-            (($stId).flops[$(quote j)]?)
+            ($(mkIdent ``Compiler.flopAt) $stId $(quote j))
             (Compiler.fires $eId $(quote fu.clock)) $aRl)
     let mems : Array Term ← R.memoryUpdates.mapIdxM fun k mu => do
       let t ← liftTermElabM (rootRef true mu.nextImg)
       let held ← match mu.asyncImg with
         | some a => liftTermElabM (rootRef true a)
-        | none   => `((($stId).mems[$(quote k)]?).getD (fun _ => $(mkIdent ``mk_bv) 0 0))
+        | none   => `($(mkIdent ``Compiler.memAt) $stId $(quote k))
       if mu.commits.isEmpty then
         liftTermElabM `(if Compiler.fires $eId $(quote mu.clock) then $t else $held)
       else
@@ -702,7 +716,7 @@ def elabReifyDesign : CommandElab := fun stx => do
         -- the held image: the async reset's (decision #2), else the stored one
         let held ← match m.asyncImg with
           | some a => pure (slotIdent nsrc a)
-          | none   => `((st.mems[$(quote k)]?).getD (fun _ => mk_bv 0 0))
+          | none   => `($(mkIdent ``Compiler.memAt) st $(quote k))
         if m.commits.isEmpty then
           `(if Compiler.fires e $(quote m.clock) then $(slotIdent nsrc m.nextImg) else $held)
         else
@@ -727,7 +741,7 @@ def elabReifyDesign : CommandElab := fun stx => do
         let ral := if fu.resetActiveLow then mkIdent ``true else mkIdent ``false
         let aRl := if fu.asyncReset then mkIdent ``true else mkIdent ``false
         `(Compiler.flopNextV $(quote fu.width) (bv_resize $(quote fu.width) $din)
-            $en $rp $rvq $ral (st.flops[$(quote idx)]?)
+            $en $rp $rvq $ral ($(mkIdent ``Compiler.flopAt) st $(quote idx))
             (Compiler.fires e $(quote fu.clock)) $aRl)
       let mut res ← `({ outputs := #[$outs,*],
                         nextState := { flops := #[$flops,*], mems := #[$mems,*] } })

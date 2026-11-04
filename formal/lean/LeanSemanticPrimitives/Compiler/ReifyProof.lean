@@ -767,21 +767,39 @@ def elabProveReifiedChunked : CommandElab := fun stx => do
           theorem $(preLNm j) : ($(preNm (j+1))).toList = ($(preNm j)).toList ++ $(segNm j) := by
             delta $(preNm (j+1)):ident $(segNm j):ident
             simp only [Array.toList_push, List.append_assoc, List.cons_append, List.nil_append]))
-    let mut srules : Array (TSyntax `Lean.Parser.Tactic.rwRule) :=
-      #[← `(Lean.Parser.Tactic.rwRule| $rbNm:ident)]
-    for j' in [0 : nseg] do
+    -- `segs_eq` by ONE small lemma per chunk, from the last chunk back:
+    -- `tailEq{j} : R.bindings.toList = pre{j}.toList ++ tail{j}`, with
+    -- `tail{j} := seg{j} ++ tail{j+1}`.  Each lemma is one `preL` rewrite and one
+    -- `List.append_assoc`, so the whole chain is linear in the chunk count.
+    -- The earlier form rewrote everything into a left-nested append and
+    -- re-associated it with ONE `simp only [List.append_assoc]`: about
+    -- chunks^2 / 2 rewrites, past the 4,000,000-step budget at 2,071 chunks
+    -- (VX_socket_wrap: the proof stopped after 2.5 h with sorryAx; a stand-alone
+    -- repro of the same statement fails after 796 s at 2,071 chunks, and this
+    -- form proves it in 13 s).
+    let tailNm : Nat → Ident := fun j => mkIdent (base ++ Name.mkSimple s!"tail{j}")
+    let tlNm : Nat → Ident := fun j => mkIdent (base ++ Name.mkSimple s!"tailEq{j}")
+    elabCommand (← `(command|
+      def $(tailNm (nseg - 1)) : List Compiler.ResidualBinding := $(segNm (nseg - 1))))
+    for j' in [1 : nseg] do
       let j := nseg - 1 - j'
-      srules := srules.push (← `(Lean.Parser.Tactic.rwRule| $(preLNm j):ident))
+      elabCommand (← `(command|
+        def $(tailNm j) : List Compiler.ResidualBinding := $(segNm j) ++ $(tailNm (j + 1))))
+    elabCommand (← `(command|
+      theorem $(tlNm (nseg - 1)) :
+          ($rNm).bindings.toList = ($(preNm (nseg - 1))).toList ++ $(tailNm (nseg - 1)) := by
+        rw [$rbNm:ident, $(preLNm (nseg - 1)):ident]
+        all_goals rfl))
+    for j' in [1 : nseg] do
+      let j := nseg - 1 - j'
+      elabCommand (← `(command|
+        theorem $(tlNm j) : ($rNm).bindings.toList = ($(preNm j)).toList ++ $(tailNm j) := by
+          rw [$(tlNm (j + 1)):ident, $(preLNm j):ident, List.append_assoc]
+          all_goals rfl))
     elabCommand (← `(command|
       theorem $segsEq : ($rNm).bindings.toList = $appTerm := by
-        rw [$srules,*]
-        all_goals rw [show ($(preNm 0)).toList = [] from rfl, List.nil_append]
-        -- Re-associating a left-nested append of one segment per chunk takes
-        -- about chunks^2 / 2 rewrites: past roughly 150 chunks that is over
-        -- simp's default 100,000 steps (int_execute_stage, 282 chunks: this
-        -- theorem was the only one left with sorryAx). The explicit budget of
-        -- `prove_reified` (see there).
-        all_goals simp (maxSteps := 4000000) only [List.append_assoc]))
+        rw [$(tlNm 0):ident, show ($(preNm 0)).toList = [] from rfl, List.nil_append]
+        all_goals rfl))
     markPhase "segs_eq"
     -- 3. compose the chunks into ONE environment equality
     let srcEnv ← liftTermElabM `(Compiler.sourceEnvArr ($d).sources $iId $stId)
