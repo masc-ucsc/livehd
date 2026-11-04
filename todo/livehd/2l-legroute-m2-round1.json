@@ -1,0 +1,457 @@
+{
+  "schema": 1,
+  "date": "2026-11-04",
+  "status": "Prerequisite work unit measured; milestone 2 calibration round remains incomplete.",
+  "source_head": "4580e563f93d3b3a8ff283b5729b467c9a52a049",
+  "artifact_root": "/lscratch/renau/legroute_runs/20261104-m2-round1/implementation",
+  "hypothesis": "A complete-box calibration label must reject mere external attachments and enforce every explicitly offered layer menu.",
+  "rows": [
+    {
+      "design": "lfsr",
+      "scope": "legacy routing scope; not shared ordinary-terminal scope",
+      "baseline_phase": "full Final",
+      "cells": 93,
+      "boxes": 17,
+      "coarse_class_count": 7,
+      "global_unrouted": 0,
+      "global_overflow_tracks": 0,
+      "sat_regions": 1,
+      "allowance_short_tiles": 0,
+      "unassigned_segments": 6,
+      "final_connected_nets": 95,
+      "final_required_nets": 96,
+      "reported_seconds": 14.479,
+      "process_seconds": 14.501,
+      "sample_boxes": 17,
+      "internal_jobs_connected": 59,
+      "internal_jobs_attempted": 59,
+      "external_attachment_jobs_ok": 108,
+      "external_attachment_jobs_attempted": 133,
+      "probe_max_seconds": 1.217,
+      "probe_process_timeouts": 0,
+      "eligible_calibration_labels": 0,
+      "report": "/lscratch/renau/legroute_runs/20261104-m2-round1/implementation/lfsr_uniform_complete/legroute.json",
+      "report_sha256": "cc2c0cfa0a741da604e1650597e61ef9377ab87e345953dd02be076716796097"
+    },
+    {
+      "design": "sha3",
+      "scope": "legacy routing scope; not shared ordinary-terminal scope",
+      "baseline_phase": "through F1; Final not attempted",
+      "cells": 17677,
+      "boxes": 2356,
+      "coarse_class_count": 18,
+      "global_unrouted": 0,
+      "global_overflow_tracks": 0,
+      "sat_regions": 26,
+      "allowance_short_tiles": 0,
+      "unassigned_segments": 40224,
+      "final_connected_nets": null,
+      "final_required_nets": null,
+      "reported_seconds": 19.409,
+      "process_seconds": 20.865,
+      "sample_boxes": 32,
+      "internal_jobs_connected": 74,
+      "internal_jobs_attempted": 76,
+      "external_attachment_jobs_ok": 198,
+      "external_attachment_jobs_attempted": 378,
+      "probe_max_seconds": 4.225,
+      "probe_process_timeouts": 0,
+      "eligible_calibration_labels": 0,
+      "report": "/lscratch/renau/legroute_runs/20261104-m2-round1/implementation/sha3_uniform/legroute.json",
+      "report_sha256": "b984692e29b35452f38ce7648f3a41f9f0ba50372bb9f8e76009177aebbe448f"
+    }
+  ],
+  "class_key": [
+    "member_count",
+    "internal_nets",
+    "external_nets"
+  ],
+  "class_bucket_upper_bounds": [
+    0,
+    2,
+    4,
+    8
+  ],
+  "class_counts": [
+    {
+      "design": "lfsr",
+      "class": "2/2/4",
+      "cohort_boxes": 1,
+      "train_boxes": 1,
+      "heldout_boxes": 0,
+      "sampled_boxes": 1,
+      "sampled_train": 1,
+      "sampled_heldout": 0,
+      "eligible_labels": 0
+    },
+    {
+      "design": "lfsr",
+      "class": "4/2/8",
+      "cohort_boxes": 1,
+      "train_boxes": 1,
+      "heldout_boxes": 0,
+      "sampled_boxes": 1,
+      "sampled_train": 1,
+      "sampled_heldout": 0,
+      "eligible_labels": 0
+    },
+    {
+      "design": "lfsr",
+      "class": "4/4/8",
+      "cohort_boxes": 3,
+      "train_boxes": 2,
+      "heldout_boxes": 1,
+      "sampled_boxes": 3,
+      "sampled_train": 2,
+      "sampled_heldout": 1,
+      "eligible_labels": 0
+    },
+    {
+      "design": "lfsr",
+      "class": "8/4/4",
+      "cohort_boxes": 1,
+      "train_boxes": 1,
+      "heldout_boxes": 0,
+      "sampled_boxes": 1,
+      "sampled_train": 1,
+      "sampled_heldout": 0,
+      "eligible_labels": 0
+    },
+    {
+      "design": "lfsr",
+      "class": "8/4/8",
+      "cohort_boxes": 5,
+      "train_boxes": 2,
+      "heldout_boxes": 3,
+      "sampled_boxes": 5,
+      "sampled_train": 2,
+      "sampled_heldout": 3,
+      "eligible_labels": 0
+    },
+    {
+      "design": "lfsr",
+      "class": "8/4/9+",
+      "cohort_boxes": 2,
+      "train_boxes": 2,
+      "heldout_boxes": 0,
+      "sampled_boxes": 2,
+      "sampled_train": 2,
+      "sampled_heldout": 0,
+      "eligible_labels": 0
+    },
+    {
+      "design": "lfsr",
+      "class": "8/8/8",
+      "cohort_boxes": 4,
+      "train_boxes": 3,
+      "heldout_boxes": 1,
+      "sampled_boxes": 4,
+      "sampled_train": 3,
+      "sampled_heldout": 1,
+      "eligible_labels": 0
+    },
+    {
+      "design": "sha3",
+      "class": "4/0/8",
+      "cohort_boxes": 1,
+      "train_boxes": 1,
+      "heldout_boxes": 0,
+      "sampled_boxes": 1,
+      "sampled_train": 1,
+      "sampled_heldout": 0,
+      "eligible_labels": 0
+    },
+    {
+      "design": "sha3",
+      "class": "4/0/9+",
+      "cohort_boxes": 17,
+      "train_boxes": 16,
+      "heldout_boxes": 1,
+      "sampled_boxes": 3,
+      "sampled_train": 2,
+      "sampled_heldout": 1,
+      "eligible_labels": 0
+    },
+    {
+      "design": "sha3",
+      "class": "4/2/8",
+      "cohort_boxes": 11,
+      "train_boxes": 8,
+      "heldout_boxes": 3,
+      "sampled_boxes": 3,
+      "sampled_train": 2,
+      "sampled_heldout": 1,
+      "eligible_labels": 0
+    },
+    {
+      "design": "sha3",
+      "class": "4/2/9+",
+      "cohort_boxes": 9,
+      "train_boxes": 7,
+      "heldout_boxes": 2,
+      "sampled_boxes": 3,
+      "sampled_train": 2,
+      "sampled_heldout": 1,
+      "eligible_labels": 0
+    },
+    {
+      "design": "sha3",
+      "class": "4/4/8",
+      "cohort_boxes": 44,
+      "train_boxes": 35,
+      "heldout_boxes": 9,
+      "sampled_boxes": 3,
+      "sampled_train": 2,
+      "sampled_heldout": 1,
+      "eligible_labels": 0
+    },
+    {
+      "design": "sha3",
+      "class": "4/4/9+",
+      "cohort_boxes": 2,
+      "train_boxes": 2,
+      "heldout_boxes": 0,
+      "sampled_boxes": 2,
+      "sampled_train": 2,
+      "sampled_heldout": 0,
+      "eligible_labels": 0
+    },
+    {
+      "design": "sha3",
+      "class": "8/0/9+",
+      "cohort_boxes": 43,
+      "train_boxes": 37,
+      "heldout_boxes": 6,
+      "sampled_boxes": 3,
+      "sampled_train": 2,
+      "sampled_heldout": 1,
+      "eligible_labels": 0
+    },
+    {
+      "design": "sha3",
+      "class": "8/2/8",
+      "cohort_boxes": 2,
+      "train_boxes": 2,
+      "heldout_boxes": 0,
+      "sampled_boxes": 1,
+      "sampled_train": 1,
+      "sampled_heldout": 0,
+      "eligible_labels": 0
+    },
+    {
+      "design": "sha3",
+      "class": "8/2/9+",
+      "cohort_boxes": 138,
+      "train_boxes": 108,
+      "heldout_boxes": 30,
+      "sampled_boxes": 2,
+      "sampled_train": 1,
+      "sampled_heldout": 1,
+      "eligible_labels": 0
+    },
+    {
+      "design": "sha3",
+      "class": "8/4/8",
+      "cohort_boxes": 109,
+      "train_boxes": 86,
+      "heldout_boxes": 23,
+      "sampled_boxes": 2,
+      "sampled_train": 1,
+      "sampled_heldout": 1,
+      "eligible_labels": 0
+    },
+    {
+      "design": "sha3",
+      "class": "8/4/9+",
+      "cohort_boxes": 577,
+      "train_boxes": 485,
+      "heldout_boxes": 92,
+      "sampled_boxes": 2,
+      "sampled_train": 1,
+      "sampled_heldout": 1,
+      "eligible_labels": 0
+    },
+    {
+      "design": "sha3",
+      "class": "8/8/8",
+      "cohort_boxes": 111,
+      "train_boxes": 89,
+      "heldout_boxes": 22,
+      "sampled_boxes": 1,
+      "sampled_train": 1,
+      "sampled_heldout": 0,
+      "eligible_labels": 0
+    },
+    {
+      "design": "sha3",
+      "class": "8/8/9+",
+      "cohort_boxes": 622,
+      "train_boxes": 492,
+      "heldout_boxes": 130,
+      "sampled_boxes": 1,
+      "sampled_train": 1,
+      "sampled_heldout": 0,
+      "eligible_labels": 0
+    },
+    {
+      "design": "sha3",
+      "class": "9+/0/9+",
+      "cohort_boxes": 2,
+      "train_boxes": 1,
+      "heldout_boxes": 1,
+      "sampled_boxes": 1,
+      "sampled_train": 1,
+      "sampled_heldout": 0,
+      "eligible_labels": 0
+    },
+    {
+      "design": "sha3",
+      "class": "9+/2/9+",
+      "cohort_boxes": 11,
+      "train_boxes": 9,
+      "heldout_boxes": 2,
+      "sampled_boxes": 1,
+      "sampled_train": 1,
+      "sampled_heldout": 0,
+      "eligible_labels": 0
+    },
+    {
+      "design": "sha3",
+      "class": "9+/4/9+",
+      "cohort_boxes": 70,
+      "train_boxes": 56,
+      "heldout_boxes": 14,
+      "sampled_boxes": 1,
+      "sampled_train": 1,
+      "sampled_heldout": 0,
+      "eligible_labels": 0
+    },
+    {
+      "design": "sha3",
+      "class": "9+/8/9+",
+      "cohort_boxes": 552,
+      "train_boxes": 445,
+      "heldout_boxes": 107,
+      "sampled_boxes": 1,
+      "sampled_train": 1,
+      "sampled_heldout": 0,
+      "eligible_labels": 0
+    },
+    {
+      "design": "sha3",
+      "class": "9+/9+/9+",
+      "cohort_boxes": 35,
+      "train_boxes": 32,
+      "heldout_boxes": 3,
+      "sampled_boxes": 1,
+      "sampled_train": 1,
+      "sampled_heldout": 0,
+      "eligible_labels": 0
+    }
+  ],
+  "acceptance_regressions": [
+    {
+      "variant": "forbidden_upper_route",
+      "binary": "before",
+      "returncode": 0,
+      "all_ok": true,
+      "signal_jobs_ok": true,
+      "certificate_status": null,
+      "calibration_eligible": null,
+      "first_failure": ""
+    },
+    {
+      "variant": "forbidden_upper_route",
+      "binary": "after",
+      "returncode": 1,
+      "all_ok": false,
+      "signal_jobs_ok": false,
+      "certificate_status": "incomplete",
+      "calibration_eligible": false,
+      "first_failure": "n: maze exhausted"
+    },
+    {
+      "variant": "disconnected_external_anchors",
+      "binary": "before",
+      "returncode": 0,
+      "all_ok": true,
+      "signal_jobs_ok": true,
+      "certificate_status": null,
+      "calibration_eligible": null,
+      "first_failure": ""
+    },
+    {
+      "variant": "disconnected_external_anchors",
+      "binary": "after",
+      "returncode": 1,
+      "all_ok": false,
+      "signal_jobs_ok": true,
+      "certificate_status": "incomplete",
+      "calibration_eligible": false,
+      "first_failure": ""
+    }
+  ],
+  "not_measured": [
+    "per-class first-attempt complete-box rate",
+    "repaired complete-box rate",
+    "minimum or quantile reservation",
+    "orientation on/off comparison",
+    "reserved versus usable physical capacity",
+    "held-out 99% success",
+    "full SHA3 Final rerun"
+  ],
+  "limitations": [
+    "LFSR reference is a native pose independently routed by OpenROAD, not its post-CTS final checkpoint.",
+    "SHA3 operational source is pre-CTS OpenROAD placement, not a fully routed final checkpoint.",
+    "Clock/reset omission is not yet a shared terminal-level contract. Diagnostic jobs retain legacy scope.",
+    "These probes hold cell poses fixed and do not certify placement legality.",
+    "External pin-to-anchor attachments do not establish required port topology or owned joins.",
+    "Foreign via alternatives are conservative proxy occupancy; retained-plus-pending physical-union checks remain uncertified.",
+    "Offered menu coordinates are raw preferred-direction tracks, not usable or minimum reservations.",
+    "Strict own-track overlap reuse remains a legacy approximation.",
+    "Identical member sets share folds; overlapping regroupings and shared cells may cross folds. No held-out-design or 99% claim.",
+    "Initial launch/configuration failures are preserved separately and excluded from routing results.",
+    "Inventory validates exact box content/source ID only and explicitly marks DEF/LEF/config/binary execution context unverified; frozen wrappers preserve those hashes for audit."
+  ],
+  "next_prerequisites": [
+    "Export exact box-edge ports with source-piece identity, required pin-port connectivity relation, and owned joins from actual materialized local topology.",
+    "Make clock/reset scope terminal-level and shared by all passes, preserving mixed-use obligations.",
+    "Check legal cell poses, exact selected foreign vias, strict owned-geometry coverage and physical unions before enabling calibration labels.",
+    "Separate L5 missing or conflicting geometry from reservation shortfalls; zero allowance shortfall is necessary but not sufficient."
+  ],
+  "validation": {
+    "command": [
+      "bazel",
+      "test",
+      "--config=backend",
+      "-c",
+      "opt",
+      "//tools:legroute_box_probe_smoke",
+      "//tools:legroute_calibrate_test",
+      "//pass/place:legroute_final_test",
+      "//inou/lefdef:routing_connectivity_test"
+    ],
+    "targets_passed": 4,
+    "result": "/lscratch/renau/legroute_runs/20261104-m2-round1/implementation/build_final/result.json",
+    "notes": "Probe smoke0.2s; inventory6 tests0.3s; Final/connectivity targets cached from the focused build. This is focused validation, not a whole backend regression."
+  },
+  "source_identity": {
+    "source_head": "4580e563f93d3b3a8ff283b5729b467c9a52a049",
+    "source_files": {
+      "tools/legroute_box_probe.cpp": "1c190a7febebe17ea5c9b1ad00c21c2f8245e8cf14a10e15c7a48a90f13bfd63",
+      "tools/legroute_box_probe_smoke.py": "269dc512bcee87efce60b454ba0c12b97a814ffb717c71fc4c82252da324e82d",
+      "tools/legroute_calibrate.py": "8e0b61c56f7c324d853cc7fa1197e42e3c668b89619722db10812740a1cbdd1f",
+      "tools/legroute_calibrate_test.py": "4d7785d603dc853a64be5cb2a60c02831bd71647a4a5aa99e768e316002d0ebc",
+      "tools/BUILD": "774458f3d7879f1d29f104a76f829e915e6c4cb79c82f9304221f2d671da7e34"
+    },
+    "probe_binary": {
+      "path": "/lscratch/renau/legroute_runs/20261104-m2-round1/implementation/runtime/legroute_box_probe",
+      "sha256": "d3870bd135f5f67b43a919fefcc977d2ee5d3109dd09328e3d8ec22d596b5ba8"
+    },
+    "replay_binary": {
+      "path": "/lscratch/renau/legroute_runs/20261104-m2-round1/implementation/runtime/baseline_legroute_replay",
+      "sha256": "bc11f55bca0026335933199aaed42a6d63a8b922f1a4c93b48d325c1d9c9d9bf"
+    }
+  },
+  "production_routing_policy_changed": false
+}

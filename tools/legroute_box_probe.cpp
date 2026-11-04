@@ -1,17 +1,17 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
-// Joint in-box routing probe for one exported cellbox (legroute final_box_dump), under a finite M2/M3 track menu.
+// Joint in-box routing probe for one exported cellbox (legroute final_box_dump), under finite layer track menus.
 //
 // Input (JSON config): lefs, def (box_dump/post_f1.def, possibly with cell poses rewritten by the caller), box
-// (box_c<col>_r<row>.json), menu {"M2":[y...],"M3":[x...]} (a missing layer keeps every DEF track), halo_tiles
-// (maze bounds around the tile, default 1), net_ms (per net), out (result JSON).
+// (box_c<col>_r<row>.json), menu {"M2":[y...],"M3":[x...],...} (a missing layer keeps every DEF track), halo_tiles
+// (maze bounds around the tile, default 0), net_ms (per net), out (result JSON).
 //
 // The occupancy is the DEF's (PG, every pin and obstruction) plus the exported L5 metal of other nets over the tile
 // and its halo (checked/prescribed only, held fixed; fallback proposals are not metal). Each incident signal net is
 // routed inside the scratch die: a net with every pin in the box is routed whole; a net that leaves the box taps
 // each in-box pin to its own exported metal at the tile (its node riser, its checked segments), which also enters
 // the occupancy as that net's metal. Accepted routes are committed one net at a time, so the answer is joint. Box
-// M2/M3 tracks outside the menu are blocked inside the tile. The result is a witness or a bounded-search failure,
-// never a proof of infeasibility.
+// Tracks outside an explicit menu are blocked inside the tile. External attachments are not box completion:
+// current dumps lack required boundary-port connectivity groups. Search failures never prove infeasibility.
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -307,7 +307,7 @@ int main(int argc, char** argv) {
       ph::Shape         s{
           layer,
           h ? ph::Rect{double(tile_x(lo)),   double(c - half), double(tile_x(hi) + tw),        double(c + half)}
-            : ph::Rect{  double(c - half), double(tile_y(lo)),        double(c + half), double(tile_y(hi) + th)}
+                    : ph::Rect{  double(c - half), double(tile_y(lo)),        double(c + half), double(tile_y(hi) + th)}
       };
       const int         net  = m["net"].GetInt();
       const bool        own  = m["incident"].GetInt() != 0;
@@ -346,18 +346,44 @@ int main(int argc, char** argv) {
         add.push_back({s, n["name"].GetString(), true});
       }
     }
-    // the menu: box M2/M3 tracks not offered are blocked inside the tile
+    // Explicit menus apply to every named routing layer. M2/M3 retain their legacy unrestricted default.
+    // Unknown layers and off-grid coordinates fail closed instead of silently weakening an upper-layer budget.
     std::map<std::string, std::set<int64_t>> menu;
     std::map<std::string, size_t>            blocked_tracks;
-    for (const std::string layer : {"M2", "M3"}) {
-      const bool h      = layer == "M2";
+    std::set<std::string>                    menu_layers{"M2", "M3"};
+    if (config.HasMember("menu")) {
+      if (!config["menu"].IsObject()) {
+        throw std::invalid_argument("menu must be an object of routing-layer coordinate arrays");
+      }
+      std::set<std::string> explicit_layers;
+      for (const auto& entry : config["menu"].GetObject()) {
+        const std::string layer = entry.name.GetString();
+        if (!explicit_layers.insert(layer).second) {
+          throw std::invalid_argument("duplicate routing layer menu: " + layer);
+        }
+        const auto it = tech.layers.find(layer);
+        if (it == tech.layers.end() || (it->second.direction != "HORIZONTAL" && it->second.direction != "VERTICAL")
+            || !entry.value.IsArray()) {
+          throw std::invalid_argument("invalid routing layer menu: " + layer);
+        }
+        menu_layers.insert(layer);
+      }
+    }
+    for (const auto& layer : menu_layers) {
+      menu.try_emplace(layer);  // An explicit empty menu forbids the layer even when no DEF tracks cross the box.
+      const bool h      = tech.layers.at(layer).direction == "HORIZONTAL";
       const auto coords = track_coords(fp, layer, h, h ? yl : xl, h ? yh : xh);
       if (!config.HasMember("menu") || !config["menu"].HasMember(layer.c_str())) {
         menu[layer].insert(coords.begin(), coords.end());
         continue;
       }
       for (const auto& v : config["menu"][layer.c_str()].GetArray()) {
-        menu[layer].insert(v.GetInt64());
+        if (!v.IsInt64() || !std::ranges::binary_search(coords, v.GetInt64())) {
+          throw std::invalid_argument("menu coordinate is not a DEF track inside the box on " + layer);
+        }
+        if (!menu[layer].insert(v.GetInt64()).second) {
+          throw std::invalid_argument("duplicate menu coordinate on " + layer);
+        }
       }
       const int64_t half = layer_width(layer) / 2;
       for (const int64_t c : coords) {
@@ -400,7 +426,8 @@ int main(int argc, char** argv) {
       bool        leaves = false;
     };
     std::vector<Job>         jobs;
-    std::vector<std::string> unfulfilled;  // box obligations this probe does not route (clock attachments)
+    std::vector<std::string> unfulfilled;      // box obligations this probe does not route (clock attachments)
+    std::vector<std::string> skipped_routed0;  // Ordinary dump obligations without a routing classification.
     for (const auto& n : box["nets"].GetArray()) {
       if (n["power"].GetInt()) {
         continue;
@@ -415,6 +442,7 @@ int main(int argc, char** argv) {
         }
       }
       if (!clock && !n["routed"].GetInt()) {
+        skipped_routed0.emplace_back(n["name"].GetString());
         continue;
       }
       Job job;
@@ -437,13 +465,15 @@ int main(int argc, char** argv) {
     rapidjson::Writer<rapidjson::StringBuffer> w(buffer);
     std::map<std::string, std::set<int64_t>>   used, owned_used;
     size_t                                     routed = 0, off_menu = 0, outside_box = 0;
-    std::map<std::string, std::set<int64_t>>   excluded;              // layer -> track centres new metal excludes (rule-expanded)
-    std::map<std::string, std::set<int64_t>>   excluded_incremental;  // ... beyond the net's owned metal on that track
-    std::string                                focus_report;          // the focus net's fixed-context comparison (never committed)
-    std::vector<ph::Route_path>                focus_paths;
-    ph::Route_width_rules                      focus_rules;  // the witness's own width rules (decoding only)
-    std::map<std::string, std::set<int64_t>>   focus_excluded;
-    std::string                                first_failure;
+    size_t                                     internal_checked = 0, internal_connected = 0;
+    const size_t                             external_jobs = std::ranges::count_if(jobs, [](const Job& job) { return job.leaves; });
+    std::map<std::string, std::set<int64_t>> excluded;              // layer -> track centres new metal excludes (rule-expanded)
+    std::map<std::string, std::set<int64_t>> excluded_incremental;  // ... beyond the net's owned metal on that track
+    std::string                              focus_report;          // the focus net's fixed-context comparison (never committed)
+    std::vector<ph::Route_path>              focus_paths;
+    ph::Route_width_rules                    focus_rules;  // the witness's own width rules (decoding only)
+    std::map<std::string, std::set<int64_t>> focus_excluded;
+    std::string                              first_failure;
     w.StartObject();
     w.Key("nets");
     w.StartArray();
@@ -451,6 +481,7 @@ int main(int argc, char** argv) {
       std::vector<ph::Route_path>        paths;
       std::string                        why;
       std::string                        retry;  // "", "recovered" or the retry's own failure reason
+      bool                               connectivity_checked = false, connectivity_connected = false;
       auto&                              own          = anchors[job.name];
       // One pending transaction per net: its cut state (every accepted piece's vias, exact reuse allowed, distinct vias
       // spaced), its width rules (staged; restored if the net fails) and its paths. Nothing is shared until commit.
@@ -478,8 +509,8 @@ int main(int argc, char** argv) {
         l.access_candidates = job_patterns ? size_t(job_access_left) : 2048;
         l.patterns          = job_patterns ? size_t(job_left) : patterns;
         l.maze_labels       = labels ? labels : maze_labels;
-        l.deadline = job_patterns ? job_deadline
-                                  : std::min(box_deadline, std::chrono::steady_clock::now() + std::chrono::milliseconds(net_ms));
+        l.deadline          = job_patterns ? job_deadline
+                                           : std::min(box_deadline, std::chrono::steady_clock::now() + std::chrono::milliseconds(net_ms));
         return l;
       };
       const auto charge = [&](size_t work, size_t access = 0) {
@@ -514,17 +545,17 @@ int main(int argc, char** argv) {
           if (!tech.layers.contains(sh.layer)) {
             continue;
           }
-          const bool hz  = tech.layers.at(sh.layer).direction == "HORIZONTAL";
-          const auto c   = std::llround(hz ? (sh.rect.yl + sh.rect.yh) / 2 : (sh.rect.xl + sh.rect.xh) / 2);
-          job_off_menu  += (sh.layer == "M2" || sh.layer == "M3") && !menu[sh.layer].contains(c) && !on_own_track(sh);
-          job_outside   += sh.rect.xl < double(xl) || sh.rect.xh > double(xh) || sh.rect.yl < double(yl) || sh.rect.yh > double(yh);
+          const bool hz = tech.layers.at(sh.layer).direction == "HORIZONTAL";
+          const auto c  = std::llround(hz ? (sh.rect.yl + sh.rect.yh) / 2 : (sh.rect.xl + sh.rect.xh) / 2);
+          job_off_menu += menu.contains(sh.layer) && !menu.at(sh.layer).contains(c) && !on_own_track(sh);
+          job_outside += sh.rect.xl < double(xl) || sh.rect.xh > double(xh) || sh.rect.yl < double(yl) || sh.rect.yh > double(yh);
         }
         if (strict && (job_off_menu || job_outside)) {
           why = std::format("strict: {} off-menu and {} outside-box shapes", job_off_menu, job_outside);
           return;
         }
         const auto deadline = job_patterns ? job_deadline : box_deadline;
-        auto       esc      = escapes.check(shapes, job.name, [&] { return std::chrono::steady_clock::now() >= deadline; });
+        auto       esc = escapes.check(shapes, job.name, [&] { return std::chrono::steady_clock::now() >= deadline; });
         if (!esc.legal) {
           why = "escape: " + esc.reason;
           return;
@@ -723,6 +754,23 @@ int main(int argc, char** argv) {
       if (why.empty() && !accepted) {  // an internal net's acceptance (external nets were accepted per attempt)
         accept();
       }
+      if (why.empty() && !job.leaves) {
+        // The router's candidate status is not a connectivity certificate. Check the complete proposed internal
+        // net independently before occupancy or escape choices are committed; disconnected islands fail here.
+        auto trial  = job.inside;
+        trial.wires = {
+            {"ROUTED", paths}
+        };
+        connectivity_checked = true;
+        ++internal_checked;
+        const auto connectivity = ph::check_route_connectivity(tech, fp, trial);
+        connectivity_connected  = connectivity.connected;
+        if (!connectivity.connected) {
+          why = "internal connectivity: " + connectivity.reason;
+        } else {
+          ++internal_connected;
+        }
+      }
       if (why.empty()) {  // commit the metal: the next nets route around this one
         std::vector<ph::Occupied_shape> mine;
         for (const auto& sh : shapes) {
@@ -747,6 +795,10 @@ int main(int argc, char** argv) {
       w.Uint(unsigned(job.inside.connections.size()));
       w.Key("leaves_box");
       w.Bool(job.leaves);
+      w.Key("connectivity_checked");
+      w.Bool(connectivity_checked);
+      w.Key("connectivity_connected");
+      w.Bool(connectivity_connected);
       w.Key("ok");
       w.Bool(why.empty());
       w.Key("reason");
@@ -871,11 +923,57 @@ int main(int argc, char** argv) {
       w.EndObject();
     }
     w.EndArray();
-    // a full-box witness needs every obligation (clocks included) and both validations clean
-    // with exact geometry the planned joins are not realized here, so anchors may be disconnected islands: until they
-    // are, a routed box is an attachment-only result (signal_jobs_ok), never a full-box witness
-    const bool all_ok = routed == jobs.size() && unfulfilled.empty() && off_menu == 0 && outside_box == 0 && joins_unrealized == 0
-                        && foreign_join_unresolved == 0;
+    // Legacy all_ok is limited to complete internal-job connectivity. External jobs lack the required boundary
+    // relation, and their same-net anchors may be disconnected islands even when every attachment succeeds.
+    // Neither flag certifies placement, terminal scope or the retained-plus-pending physical union.
+    const bool all_ok = !jobs.empty() && external_jobs == 0 && routed == jobs.size() && internal_connected == jobs.size()
+                        && unfulfilled.empty() && skipped_routed0.empty() && off_menu == 0 && outside_box == 0
+                        && joins_unrealized == 0 && foreign_join_unresolved == 0;
+    w.Key("measurement_schema");
+    w.Uint(1);
+    w.Key("measurement_kind");
+    w.String("fixed_pose_internal_connectivity_and_external_attachments");
+    w.Key("certificate_status");
+    w.String(all_ok ? "internal_routing_connected" : "incomplete");
+    w.Key("calibration_eligible");
+    // Until the exported scope and placement legality are certified, even an internal routing success is not
+    // a first-attempt Final label. Keeping this explicit prevents fitting a class table from attachment rates.
+    w.Bool(false);
+    w.Key("unverified_obligations");
+    w.StartArray();
+    w.String("shared_terminal_scope_manifest");
+    w.String("cell_placement_legality");
+    w.String("complete_same_net_physical_union");
+    if (!skipped_routed0.empty()) {
+      w.String("unclassified_ordinary_connections");
+    }
+    if (external_jobs) {
+      w.String("required_boundary_port_connectivity_groups");
+    }
+    if (joins_unrealized) {
+      w.String("planned_join_realization");
+    }
+    if (!unfulfilled.empty()) {
+      w.String("clock_connections");
+    }
+    if (foreign_joins) {
+      w.String("selected_foreign_via_geometry");
+    }
+    w.EndArray();
+    w.Key("skipped_ordinary_routed0");
+    w.StartArray();
+    for (const auto& name : skipped_routed0) {
+      w.String(name.c_str());
+    }
+    w.EndArray();
+    w.Key("internal_jobs");
+    w.Uint(unsigned(jobs.size() - external_jobs));
+    w.Key("internal_connectivity_checked");
+    w.Uint(unsigned(internal_checked));
+    w.Key("internal_connectivity_connected");
+    w.Uint(unsigned(internal_connected));
+    w.Key("external_attachment_jobs");
+    w.Uint(unsigned(external_jobs));
     w.Key("all_ok");
     w.Bool(all_ok);
     w.Key("signal_jobs_ok");
@@ -941,6 +1039,17 @@ int main(int argc, char** argv) {
     w.Uint(retry_labels);
     w.Key("strict");
     w.Bool(strict);
+    w.Key("menu_coordinates");
+    w.StartObject();
+    for (const auto& [layer, coords] : menu) {
+      w.Key(layer.c_str());
+      w.StartArray();
+      for (const auto c : coords) {
+        w.Int64(c);
+      }
+      w.EndArray();
+    }
+    w.EndObject();
     w.Key("alt_flat");
     w.Bool(alt_flat);
     w.Key("job_patterns");
