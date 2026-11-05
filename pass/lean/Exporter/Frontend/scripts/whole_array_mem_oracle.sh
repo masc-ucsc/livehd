@@ -14,7 +14,7 @@ set -euo pipefail
 # (inou/prp/tests/equiv/<row>.prp with its <row>.v golden). For each row:
 #   export   lhd compile -> single_edge -> the verified_compiler certificate,
 #            which must contain Op_MemLoad or Op_MemToBus;
-#   IR, TV   cert_trace (interpretDesign; route:tv the compiled program) equals
+#   IR, VC   cert_trace (interpretDesign; route:vc the compiled program) equals
 #            iverilog on the golden at every cycle, on a seeded random stimulus.
 #            A reset input named `reset` is held high for two cycles and then
 #            low; any other input (including a memory's own reset pin) is
@@ -37,7 +37,7 @@ set -euo pipefail
 # An ASYNCHRONOUS whole-array reset (DCERT3 `asyncImg`, decision #2 stage 3):
 #   reads see the image with the reset applied, and a memory whose clock does
 #   not fire keeps that image, so an asserted reset lands with no edge. The
-#   golden's `always @(posedge clk or negedge rstn)` checks the reads (IR, TV,
+#   golden's `always @(posedge clk or negedge rstn)` checks the reads (IR, VC,
 #   legacy, at every cycle). The HOLD needs a quiet step, which only FP's
 #   schedule and cert_trace's `edges:third` have, so its control is: the
 #   certificate with `asyncImg` removed (`0 0`), under `edges:third`, must differ
@@ -227,12 +227,12 @@ for row in $ROWS; do
   [[ $(wc -l < "$R/rtl.txt") -eq $CYCLES ]] || { echo "FAIL: $row: the golden run did not produce $CYCLES steps"; exit 1; }
   grep -q 'x' "$R/rtl.txt" && { grep -m2 x "$R/rtl.txt"; echo "FAIL: $row: the golden produced x"; exit 1; }
   ct "$D" "$R/stim.txt" "$R/ir.txt" edges:all
-  ct "$D" "$R/stim.txt" "$R/tv.txt" edges:all route:tv
-  for n in ir tv; do
+  ct "$D" "$R/stim.txt" "$R/vc.txt" edges:all route:vc
+  for n in ir vc; do
     diff "$R/rtl.txt" "$R/$n.txt" > "$R/diff_$n.txt" \
       || { head -4 "$R/diff_$n.txt"; echo "FAIL: $row: $n differs from the golden"; exit 1; }
   done
-  echo "ok: $row ($nload MemLoad, $nbus MemToBus): IR and TV equal iverilog at all $CYCLES cycles"
+  echo "ok: $row ($nload MemLoad, $nbus MemToBus): IR and VC equal iverilog at all $CYCLES cycles"
   # legacy: the model with its proof bridge
   L="$R/legacy"; mod="LegacyWa$(echo "$row" | tr -cd 'a-z0-9')"
   mkdir -p "$L/lroot/$mod" "$L/olean/$mod"

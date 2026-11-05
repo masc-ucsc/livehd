@@ -22,7 +22,7 @@ set -euo pipefail
 #   golden bit x       -> the 0-run bit is 0 and the 1-run bit is 1 (the bit
 #                         comes from the free input, and only from it);
 #   golden bit 0 or 1  -> both runs equal it (a defined bit never moves).
-# Routes: IR and TV (cert_trace), legacy (with its proof bridge), FP (equal to
+# Routes: IR and VC (cert_trace), legacy (with its proof bridge), FP (equal to
 # IR under FP's schedule), D3 (every gate, the proof included).
 # Control: the free inputs never reaching the read (the certificate with each
 # free-input source turned into a constant 0) leaves the 1-run's x bits at 0.
@@ -192,8 +192,8 @@ for row in $ROWS; do
   iverilog -g2012 -o "$R/rtl.vvp" "$EQ/$row.v" "$R/tb.v" > "$R/iverilog.log" 2>&1 \
     || { cat "$R/iverilog.log"; echo "FAIL: $row iverilog"; exit 1; }
   vvp "$R/rtl.vvp" | grep '^STEP' > "$R/rtl.txt"
-  for route in ir tv; do
-    opts=(edges:all); [[ $route == tv ]] && opts+=(route:tv)
+  for route in ir vc; do
+    opts=(edges:all); [[ $route == vc ]] && opts+=(route:vc)
     for t in zero ones; do ct "$D" "$R/stim_$t.txt" "$R/${route}_$t.txt" "${opts[@]}"; done
     py compare "$R" "$R/${route}_zero.txt" "$R/${route}_ones.txt" "$row $route"
   done

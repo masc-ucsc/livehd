@@ -16,7 +16,7 @@ set -euo pipefail
 #
 # Compared step by step against iverilog on the ORIGINAL RTL:
 #   IR      cert_trace (interpretDesign), every clock firing
-#   TV      cert_trace route:tv (compileDesign)
+#   VC      cert_trace route:vc (compileDesign)
 #   legacy  the legacy fast model (make_legacy_sim.py --stim), compiled with
 #           `lean -R` into this run's directory
 #   FP      dcert2_memroute `outputs`; FP's `edges:all` leaves every third step
@@ -137,8 +137,8 @@ same() { # <a> <b> <label>
 }
 ct ir edges:all
 same rtl ir "IR == RTL, $CYCLES steps (the first active arm)"
-ct tv edges:all route:tv
-same rtl tv "TV == RTL"
+ct vc edges:all route:vc
+same rtl vc "VC == RTL"
 
 # legacy, compiled outside the shared lake workspace
 LR="$OUT/lroot"; OL="$OUT/olean"

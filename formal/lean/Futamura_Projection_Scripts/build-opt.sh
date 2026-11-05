@@ -68,8 +68,8 @@ MODULES=(
   Projection/Proto/RunnerSupport
   # the memory entry with env0 inlined (projectMemVarDesignAt)
   Projection/MemVariant Projection/MemVariantSim Projection/MemFused
-  # The IR/TV trace driver (cert_trace, and its route:tv): the direct simulator
-  # and the translation-validation compiler's executable half, all Mathlib-free.
+  # The IR/VC trace driver (cert_trace, and its route:vc): the direct simulator
+  # and the verified compiler's executable half, all Mathlib-free.
   Compiler/DirectSemantics Compiler/ResidualIR Compiler/ResidualSemantics
   Compiler/CompileOpDefs Compiler/CompileGraphDefs Compiler/CompileDesignDefs
 )

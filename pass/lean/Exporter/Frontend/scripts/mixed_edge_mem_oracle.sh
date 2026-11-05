@@ -14,7 +14,7 @@ set -euo pipefail
 #   cgen     the Verilog lhd emits from that graph equals iverilog on the source
 #            at EVERY step (before and after each rise), so the reader kept
 #            each port's edge.
-#   IR, TV   the certificate built after single_edge equals iverilog on the
+#   IR, VC   the certificate built after single_edge equals iverilog on the
 #            source at every period boundary (what single_edge promises).
 #   control  the same design with every port on the rising edge differs.
 #   legacy   the legacy model, with its proof bridge (`_next_refines_fast`,
@@ -26,7 +26,7 @@ set -euo pipefail
 #            third step quiet; FP has no every-step mode).
 #   D3       translation validation (d3_sweep.py, its default generator) passes
 #            every gate, the proof included, and rejects a memory mutation.
-# So all five Lean simulators (IR, TV, legacy, FP, D3) agree with each other and
+# So all five Lean simulators (IR, VC, legacy, FP, D3) agree with each other and
 # with the source on the same certificate and the same stimulus.
 #
 # Lean step 2p is the RISE sub-step of source period p and step 2p+1 its FALL
@@ -160,7 +160,7 @@ ct() { # <dir> <name> <cert_trace options...>
     || { cat "$d/$n.err"; echo "FAIL: cert_trace $n"; exit 1; }
 }
 
-# legacy, FP and D3 on the certificate of <dir>, the same one IR and TV ran.
+# legacy, FP and D3 on the certificate of <dir>, the same one IR and VC ran.
 others() { # <dir> <legacy module prefix>
   local R=$1 mod=$2 L="$1/legacy"
   mkdir -p "$L"
@@ -247,15 +247,15 @@ for d in "${DESIGNS[@]}"; do
       || { head -4 "$R/diff_cgen.txt"; echo "FAIL: $top ($reader): lhd's emitted Verilog differs from the source"; exit 1; }
     nx=$(grep -c x "$R/rtl0.txt" || true)
     echo "ok: $top ($reader) lhd's emitted Verilog == source at all $STEPS steps ($nx steps still show x)"
-    for route in ir tv; do
-      opts=(edges:all); [[ $route == tv ]] && opts+=(route:tv)
+    for route in ir vc; do
+      opts=(edges:all); [[ $route == vc ]] && opts+=(route:vc)
       ct "$R" "$route" "${opts[@]}"
       diff <(even "$R/rtl.txt") <(even "$R/$route.txt") > "$R/diff_$route.txt" \
         || { head -4 "$R/diff_$route.txt"; echo "FAIL: $top ($reader) $route differs from the source at a period boundary"; exit 1; }
       mid=$(diff "$R/rtl.txt" "$R/$route.txt" | grep -c '^<' || true)
       echo "ok: $top ($reader) $route == source at all $PERIODS period boundaries ($mid of $PERIODS mid-period steps differ)"
     done
-    cmp -s "$R/ir.txt" "$R/tv.txt" || { echo "FAIL: $top ($reader) TV != IR"; exit 1; }
+    cmp -s "$R/ir.txt" "$R/vc.txt" || { echo "FAIL: $top ($reader) VC != IR"; exit 1; }
     sim "$R" ctl tb.v "$OUT/$ctl"
     nb=$(diff <(even "$R/ctl.txt") <(even "$R/ir.txt") | grep -c '^<' || true)
     [[ $nb -gt 0 ]] || { echo "FAIL: $top ($reader): the all-rising control agreed at every period boundary"; exit 1; }
