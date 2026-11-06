@@ -73,7 +73,8 @@ def cpp_class_name(simdir, top):
     h = (simdir / f"{top}.hpp").read_text()
     # Skip the generated runtime helpers (`struct __lhd_tune_support {` precedes
     # the module struct in every header).
-    m = re.search(r"(?:class|struct)\s+((?!__lhd_)[A-Za-z_]\w*)\s*\{", h)
+    # The module struct may carry base classes (its native frame helpers).
+    m = re.search(r"(?:class|struct)\s+((?!__lhd_)[A-Za-z_]\w*)\s*(?::[^{;]*)?\{", h)
     if not m:
         raise RuntimeError(f"could not find generated C++ class in {top}.hpp")
     return m.group(1)

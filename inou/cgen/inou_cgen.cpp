@@ -2,12 +2,15 @@
 
 #include "inou_cgen.hpp"
 
+#include <array>
 #include <bit>
 #include <charconv>
+#include <fstream>
 #include <limits>
 #include <map>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 
 #include "cgen_sim.hpp"
@@ -255,7 +258,10 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   // Whatever was left `auto` takes the built-in default. The fence default
   // FOLLOWS dirty (none with it off -- fences only serve dirty-bit gating, and
   // without it they are pure boundary cost -- the built-in ratio with it on).
-  const auto         tune = livehd::sim::resolve_tune_defaults(dirty_knob, fence_knob, live_words_knob, backend_knob);
+  auto               tune = livehd::sim::resolve_tune_defaults(dirty_knob, fence_knob, live_words_knob, backend_knob);
+  // Neither dirty nor fence pinned: under LLVM the pair comes from the design's
+  // dirty partition (below, before any generation key is computed).
+  const bool         partition_auto = !dirty_knob && !fence_knob && tune.llvm;
   const bool         llvm = tune.llvm;
   // Simulator lowering still performs backend-specific structural rewrites
   // (the clock-gate-cell fold and compact-loop realization -- `sim.flatten` is
@@ -334,7 +340,9 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   // BEFORE Color_plan retains occurrence handles. The rewrites delete nodes
   // and rewire edges, so planning first would retain stale class indices.
   {
-    Cgen_sim prep(dir, vcd_out, top, fakedelay);
+    // The backend matters here: LLVM materializes clock gates as Clock_cells
+    // (prepare_graph) where the Slop emitter inlines them.
+    Cgen_sim prep(dir, vcd_out, top, fakedelay, nullptr, false, false, true, true, false, false, false, llvm);
     prep.set_unroll_sites(unroll_sites);
     for (const auto& g : sim_graphs) {
       // A body that cannot be prepared cannot be emitted correctly (the
@@ -430,6 +438,7 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
   // library, so no body changes shape while the memo is alive.
   absl::flat_hash_map<hhds::Gid, uint64_t> digest_memo;
   Cgen_sim::Generation_index               gen_index;  // one gen_digests.json read/write + odir listing per run
+  gen_index.compact_defs = compact_kernel_defs;
   // Record definition-local loop bindings before generation-cache probes. The
   // domain is supplied at runtime; incompatible bindings retain the scheduler.
   for (const auto& graph : sim_graphs) {
@@ -525,6 +534,110 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
                     static_cast<unsigned>(std::max(0, std::atoi(std::string(var.get("jobs")).c_str()))));
   };
   const auto probe_for = [&](const std::shared_ptr<hhds::Graph>& g) { return cgen_for(g, /*plan=*/nullptr); };
+  const auto plan_root = [&](const std::shared_ptr<hhds::Graph>& g) {
+    const auto [full, entity] = split_entity(g->get_name());
+    return (entity.empty() || entity.front() != '%') && is_selected_root(full, entity);
+  };
+  const auto discover_root = [&](const std::shared_ptr<hhds::Graph>& g) {
+    const auto [full, entity] = split_entity(g->get_name());
+    return livehd::sim::Color_plan::discover(
+        g.get(),
+        observe_on || !vcd_out.empty(),
+        llvm,
+        tune.live_words,
+        tune.fence,
+        gen_index.incremental ? absl::StrCat(dir, "/", livehd::unit_file_stem(full), ".color-cuts.txt") : "");
+  };
+
+  // AUTO DIRTY (sim.tune.dirty and sim.tune.fence both unpinned, LLVM, no
+  // tuner). Dirty gating costs a change check per boundary slot and saves the
+  // sites of a color that sits idle. Build the dirty partition (dirty on, the
+  // default fence) and keep it when the design is large (>= kAutoDirtyLargeGe:
+  // large designs carry big idle blocks) or when its colors are cheap to check
+  // for the work they hold (>= kAutoDirtySitesPerSlot version sites per
+  // boundary slot); otherwise merge (dirty off, no fences). Measured
+  // 2026-11-05 on 23 designs: every small design has <= 16 sites/slot and runs
+  // 1.3x-8x faster merged (ibex 4.0, the br_cdc_fifo_flops 15.7), xs_alu (two
+  // ALU halves behind a 27-slot interface, 51 sites/slot) and the large designs
+  // (minion 770k GE, xs_renametable 1M GE) win with dirty. Per-color GE is not
+  // used: a flop-array memory inflates it far beyond the work its color does.
+  // The verdict is cached in the emit dir under the root's generation key, so a
+  // warm run plans nothing extra; a dirty-on verdict reuses its partition.
+  std::map<const hhds::Graph*, livehd::sim::Color_plan> auto_plans;
+  if (partition_auto) {
+    constexpr uint64_t kAutoDirtyLargeGe      = 100'000;
+    constexpr uint64_t kAutoDirtySitesPerSlot = 32;
+    const std::string  cache_path             = dir.empty() ? std::string{} : absl::StrCat(dir, "/tune-auto.txt");
+    absl::flat_hash_map<std::string, std::array<uint64_t, 3>> cache;  // root key -> {on, ge, sites/slot}
+    if (!cache_path.empty()) {
+      std::ifstream in(cache_path);
+      std::string   key, verdict;
+      uint64_t      ge = 0, ratio = 0;
+      while (in >> key >> verdict >> ge >> ratio) {
+        cache[key] = {verdict == "on" ? 1u : 0u, ge, ratio};
+      }
+    }
+    std::vector<std::pair<std::shared_ptr<hhds::Graph>, std::string>> roots;
+    for (const auto& g : sim_graphs) {
+      if (g && plan_root(g)) {
+        auto probe = probe_for(g);  // tune is still the dirty-on default here
+        probe.share_digest_memo(&digest_memo);
+        probe.share_generation_index(&gen_index);
+        roots.emplace_back(g, probe.root_generation_key(g.get()));
+      }
+    }
+    // One verdict for the whole run (the driver has one dirty mode): the
+    // largest root decides, as it holds most of the work.
+    uint64_t ge = 0, ratio = 0;
+    bool     cached = !roots.empty();
+    for (const auto& [g, key] : roots) {
+      const auto it = cache.find(key);
+      if (it == cache.end()) {
+        cached = false;
+        break;
+      }
+      if (it->second[1] >= ge) {
+        ge    = it->second[1];
+        ratio = it->second[2];
+      }
+    }
+    if (!cached) {
+      ge    = 0;
+      ratio = 0;
+      std::vector<std::tuple<std::string, uint64_t, uint64_t>> measured;  // root key, GE, sites/slot
+      for (const auto& [g, key] : roots) {
+        auto           plan = discover_root(g);
+        const uint64_t g_ge = plan.support().total_ge;
+        const uint64_t g_r  = plan.summary().version_sites / std::max<uint64_t>(1, plan.summary().boundary_slots);
+        if (g_ge >= ge) {
+          ge    = g_ge;
+          ratio = g_r;
+        }
+        measured.emplace_back(key, g_ge, g_r);
+        auto_plans.emplace(g.get(), std::move(plan));
+      }
+      if (!cache_path.empty()) {
+        const bool    on = ge >= kAutoDirtyLargeGe || ratio >= kAutoDirtySitesPerSlot;
+        std::ofstream out(cache_path);
+        for (const auto& [key, g_ge, g_r] : measured) {
+          out << key << ' ' << (on ? "on" : "off") << ' ' << g_ge << ' ' << g_r << '\n';
+        }
+      }
+    }
+    const bool on = ge >= kAutoDirtyLargeGe || ratio >= kAutoDirtySitesPerSlot;
+    if (!on) {
+      tune.dirty = false;
+      tune.fence = livehd::sim::kTuneNoFences;
+      auto_plans.clear();  // measured under the dirty partition
+    }
+    livehd::diag::info("inou.cgen.sim", "auto-dirty", "progress")
+        .msg("sim.tune.dirty=auto: {} GE, {} version site(s) per boundary slot in the dirty partition -> dirty {}{}",
+             ge,
+             ratio,
+             on ? "on" : "off (merged colors, no fences)",
+             cached ? " (cached)" : "")
+        .emit();
+  }
   // Which modules are already generated. Asked BEFORE the color plan, because
   // on a large design discovery dominates the emitter — measured on XiangShan
   // `Rob`, ~25 s of a ~32 s warm codegen against ~4 s of actual C++ emission.
@@ -585,13 +698,12 @@ void Inou_cgen::to_cgen_sim(Eprp_var& var) {
       wrote_plan = true;  // the previous run's plan is still the current one
       continue;
     }
-    auto plan = livehd::sim::Color_plan::discover(
-        g.get(),
-        observe_on || !vcd_out.empty(),
-        llvm,
-        tune.live_words,
-        tune.fence,
-        gen_index.incremental ? absl::StrCat(dir, "/", livehd::unit_file_stem(full), ".color-cuts.txt") : "");
+    auto plan = [&] {
+      if (auto it = auto_plans.find(g.get()); it != auto_plans.end()) {
+        return std::move(it->second);  // the auto-dirty partition, kept
+      }
+      return discover_root(g);
+    }();
     plan.write_report(absl::StrCat(dir, "/", livehd::unit_file_stem(full), ".color-plan.txt"));
     if (!plan.complete()) {
       livehd::diag::err("inou.cgen.sim", "color-plan-incomplete", "unsupported")

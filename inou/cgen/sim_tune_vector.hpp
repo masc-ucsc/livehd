@@ -33,13 +33,13 @@ inline constexpr bool     kTuneDefaultDirty      = true;
 // `auto` is slop unless sim.tune.file pins one.
 inline constexpr bool     kTuneDefaultLlvm       = true;   // unset
 inline constexpr bool     kTuneAutoLlvm          = false;  // `auto` with no tuned decision
-inline constexpr uint64_t kTuneDefaultLiveWords  = 256;
+inline constexpr uint64_t kTuneDefaultLiveWords  = 512;  // 2026-11-04: 256 split picorv32 into colors whose boundary slots cost more than their spills (-13.5% / -21% instructions at 512)
 inline constexpr int64_t  kTuneDefaultFenceRatio = 16;
 inline constexpr int64_t  kTuneNoFences          = std::numeric_limits<int64_t>::max();
 inline constexpr uint64_t kTuneMaxNumber         = uint64_t{1} << 20;
 
 // Default-constructed == the built-in default vector (what a run with no knob
-// pinned anywhere builds): tv1:d=on;f=16;lw=256;be=llvm.
+// pinned anywhere builds): tv1:d=on;f=16;lw=512;be=llvm.
 struct Tune_vector {
   bool     dirty      = kTuneDefaultDirty;       // sim.tune.dirty
   int64_t  fence      = kTuneDefaultFenceRatio;  // sim.tune.fence: kTuneNoFences == "none", else a ratio in [0, 2^20]
@@ -53,7 +53,7 @@ struct Tune_vector {
   [[nodiscard]] std::string live_words_str() const { return std::to_string(live_words); }
   [[nodiscard]] std::string backend_str() const { return llvm ? "llvm" : "slop"; }
 
-  // Canonical text: "tv1:d=on;f=16;lw=256;be=llvm". Byte-stable: it is a
+  // Canonical text: "tv1:d=on;f=16;lw=512;be=llvm". Byte-stable: it is a
   // generation-key input and the tune store's vector identity.
   [[nodiscard]] std::string tv1() const {
     return "tv1:d=" + dirty_str() + ";f=" + fence_str() + ";lw=" + live_words_str() + ";be=" + backend_str();

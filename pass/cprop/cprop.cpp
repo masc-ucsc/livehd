@@ -3454,6 +3454,508 @@ bool Cprop::vectorize_bit_reductions() {
   return changed;
 }
 
+// ---- bit-slice lanes ---------------------------------------------------------
+//
+// A bit matrix updated one bit at a time (bedrock's br_lru_state_internal,
+// `next[i][j] = grant[i] ? 0 : grant[j] ? 1 : state[i][j]` in a generate loop)
+// reaches here as a Set_mask chain of 1-bit writes over the register word,
+// each lane its own small tree:
+//
+//   q' = Set_mask(..Set_mask(q, k, k+1, f(q[k], g_j, g_i, upd, rst))..)
+//
+// A run of lanes at CONSECUTIVE positions d..d+n-1 whose trees have the same
+// shape is one n-bit word expression, lane t at bit t. Each leaf of the shape
+// is, across the run,
+//
+//   stride     x[p + t]              ->  x[p +: n]
+//   broadcast  the same value        ->  a 1-bit scalar (a whole uniform subtree too)
+//   gather     any other 1-bit pins  ->  their Concat, lane t at bit t; a later
+//                                        run reads a window of an earlier gather
+//                                        (row i+1 reads g_{i+2..} of row i's g_{i+1..})
+//
+// and the operators map bitwise:
+//
+//   ~a                          ->  A ^ ones
+//   a & b / a | b / a ^ b       ->  word op; a scalar s joins as Mux(s, 0, W) (&),
+//                                   Mux(s, W, ones) (|) or Mux(s, W, W ^ ones) (^)
+//   s ? t : f, scalar s         ->  Mux(s, F, T)
+//   s ? t : f, per-lane s       ->  (S & T) | (~S & F)
+//
+// A lane uses only bit 0 of its value (a 1-bit window), and bit 0 of
+// And/Or/Xor and of a Mux's arms is the op on the operands' bit 0, so only a
+// Mux select and the operand of EQ(x, 0) need a 0/1 proof (one_bit). The run
+// becomes ONE write Set_mask(.., d, d+n, F). Writes in the chain must be
+// pairwise disjoint (their order is then irrelevant); each run keeps its LAST
+// link, so the chain head is never bypassed. A run needs a stride leaf: a pure
+// gather would only move the lanes into a Concat. Only for the `sim` cost
+// profile: a word op is one host instruction where the lanes were n trees and
+// n boundary slots; for hardware it is the same gates.
+bool Cprop::vectorize_bit_lanes() {
+  livehd::cprop_profile::Timer timer(livehd::cprop_profile::vectorize);
+  constexpr int                kMinLanes  = 4;
+  constexpr size_t             kMaxLeaves = 16;
+  constexpr size_t             kMaxShape  = 1024;
+  constexpr int                kMaxDepth  = 16;
+  const bool                   trace      = livehd::debug::env<"LHD_DBG_BITLANES">();
+
+  struct Leaf {
+    hhds::Pin_class pin;  // the lane's 1-bit operand
+    hhds::Pin_class src;  // a single-bit read src[pos]; invalid for an opaque operand
+    int             pos{0};
+  };
+  struct Term {
+    std::string       shape;   // names read sources, never positions or opaque pins
+    std::vector<Leaf> leaves;  // depth-first, in the order build() visits them
+  };
+  const auto bit_read = [](const hhds::Pin_class& p) -> std::optional<std::pair<hhds::Pin_class, int>> {
+    if (p.is_invalid() || p.is_const() || is_graph_input_pin(p)) {
+      return std::nullopt;
+    }
+    auto m = p.get_master_node();
+    if (m.is_invalid() || type_op_of(m) != Ntype_op::Get_mask) {
+      return std::nullopt;
+    }
+    const auto r = const_mask_range(m);
+    auto       x = drv_at(m, 0);
+    if (r.first < 0 || r.second != r.first + 1 || x.is_invalid()) {
+      return std::nullopt;
+    }
+    return std::pair{x, r.first};
+  };
+  const auto const_bit = [](const hhds::Pin_class& p) -> std::optional<int> {
+    if (p.is_invalid() || !p.is_const()) {
+      return std::nullopt;
+    }
+    const auto& c = const_of(p);
+    if (c.has_unknowns() || !c.is_just_i64() || (c.to_just_i64() != 0 && c.to_just_i64() != 1)) {
+      return std::nullopt;
+    }
+    return static_cast<int>(c.to_just_i64());
+  };
+  // Provably 0/1, structurally (bitwidth has not run yet).
+  absl::flat_hash_map<hhds::Class_index, bool>     one_bit_memo;
+  std::function<bool(const hhds::Pin_class&, int)> one_bit = [&](const hhds::Pin_class& p, int depth) -> bool {
+    if (p.is_invalid()) {
+      return false;
+    }
+    if (is_bool01(p)) {
+      return true;
+    }
+    if (p.is_const()) {
+      return false;
+    }
+    if (is_graph_input_pin(p)) {
+      return livehd::graph_util::bits_of(p) == 1 && livehd::graph_util::is_unsign(p);
+    }
+    if (auto it = one_bit_memo.find(p.get_class_index()); it != one_bit_memo.end()) {
+      return it->second;
+    }
+    bool       r    = false;
+    auto       node = p.get_master_node();
+    const auto op   = type_op_of(node);
+    if (depth <= kMaxDepth) {
+      if (op == Ntype_op::And) {  // one 0/1 operand bounds the result to {0, 1}
+        for (auto sink : node.inp_sorted_pins()) {
+          r = r || one_bit(sink.get_driver_pin(), depth + 1);
+        }
+      } else if (op == Ntype_op::Or || op == Ntype_op::Xor) {
+        r = true;
+        for (auto sink : node.inp_sorted_pins()) {
+          r = r && one_bit(sink.get_driver_pin(), depth + 1);
+        }
+      } else if (op == Ntype_op::Mux && is_two_arm_mux(ordered_inp_edges(node))) {
+        r = one_bit(drv_at(node, 1), depth + 1) && one_bit(drv_at(node, 2), depth + 1);
+      }
+    }
+    one_bit_memo.emplace(p.get_class_index(), r);
+    return r;
+  };
+  const auto negated_operand = [&](const hhds::Node_class& node) -> hhds::Pin_class {
+    if (type_op_of(node) == Ntype_op::EQ) {
+      auto x = eq_against_const(node, 0);
+      return !x.is_invalid() && !x.is_const() && one_bit(x, 0) ? x : hhds::Pin_class{};
+    }
+    return {};
+  };
+  const auto is_lane_mux = [&](const hhds::Node_class& node) {
+    return type_op_of(node) == Ntype_op::Mux && is_two_arm_mux(ordered_inp_edges(node)) && one_bit(drv_at(node, 0), 0);
+  };
+
+  absl::flat_hash_map<hhds::Class_index, Term>                    memo;
+  std::function<std::optional<Term>(const hhds::Pin_class&, int)> describe;
+  // The operands of a composite in describe/build order: commutative ops sort
+  // by shape (stable, so equal shapes keep pin order in every lane alike).
+  const auto                                                      operands
+      = [&](const hhds::Node_class& node, int depth) -> std::optional<std::vector<std::pair<hhds::Pin_class, Term>>> {
+    std::vector<std::pair<hhds::Pin_class, Term>> kids;
+    for (auto sink : node.inp_sorted_pins()) {
+      auto driver = sink.get_driver_pin();
+      auto t      = describe(driver, depth + 1);
+      if (!t) {
+        return std::nullopt;
+      }
+      kids.emplace_back(driver, std::move(*t));
+    }
+    if (type_op_of(node) != Ntype_op::Mux) {
+      std::ranges::stable_sort(kids, [](const auto& x, const auto& y) { return x.second.shape < y.second.shape; });
+    }
+    return kids;
+  };
+  describe = [&](const hhds::Pin_class& p, int depth) -> std::optional<Term> {
+    if (const auto c = const_bit(p)) {
+      return Term{*c ? "1" : "0", {}};
+    }
+    if (p.is_invalid() || p.is_const()) {
+      return std::nullopt;
+    }
+    if (auto it = memo.find(p.get_class_index()); it != memo.end()) {
+      return it->second;
+    }
+    if (auto read = bit_read(p)) {
+      Term t{absl::StrCat("L", read->first.get_class_index().value), {Leaf{p, read->first, read->second}}};
+      memo.emplace(p.get_class_index(), t);
+      return t;
+    }
+    const Term opaque{"S", {Leaf{p, {}, 0}}};
+    Term       t    = opaque;
+    auto       node = p.get_master_node();
+    const auto op   = is_graph_input_pin(p) ? Ntype_op::Invalid : type_op_of(node);
+    if (depth > kMaxDepth || op == Ntype_op::Invalid) {
+      // memoized: build() re-reads the memo, so the cut is the same there
+    } else if (auto x = negated_operand(node); !x.is_invalid()) {
+      if (auto inner = describe(x, depth + 1)) {
+        t = Term{absl::StrCat("N(", inner->shape, ")"), inner->leaves};
+      }
+    } else if (op == Ntype_op::And || op == Ntype_op::Or || op == Ntype_op::Xor || (op == Ntype_op::Mux && is_lane_mux(node))) {
+      if (auto kids = operands(node, depth); kids && kids->size() >= 2) {
+        t.shape = op == Ntype_op::And ? "A(" : op == Ntype_op::Or ? "O(" : op == Ntype_op::Xor ? "X(" : "M(";
+        t.leaves.clear();
+        for (const auto& [_, kid] : *kids) {
+          absl::StrAppend(&t.shape, kid.shape, ",");
+          t.leaves.insert(t.leaves.end(), kid.leaves.begin(), kid.leaves.end());
+        }
+        t.shape += ")";
+      }
+    }
+    if (t.leaves.size() > kMaxLeaves || t.shape.size() > kMaxShape) {
+      t = opaque;
+    }
+    memo.emplace(p.get_class_index(), t);
+    return t;
+  };
+
+  enum class Kind : uint8_t { stride, broadcast, gather };
+  struct Link {
+    hhds::Node_class node;
+    int              lo{0};
+    int              hi{0};
+  };
+  struct Lane {
+    size_t link;
+    Term   term;
+  };
+  struct Run {
+    size_t            first{0};  // index into the position-sorted lanes
+    int               n{0};
+    std::vector<Kind> kind;  // per leaf
+  };
+  // A gathered lane pin -> (its gather word, bit, word width): later runs read windows.
+  struct Gathered {
+    hhds::Pin_class word;
+    int             bit{0};
+    int             width{0};
+  };
+  absl::flat_hash_map<hhds::Class_index, Gathered> gathered;
+
+  bool                                   changed = false;
+  absl::flat_hash_set<hhds::Class_index> seen;
+  const auto                             nodes = stable_nodes(current_graph);
+  for (auto it = nodes.rbegin(); it != nodes.rend(); ++it) {
+    auto head = *it;
+    if (head.is_invalid() || type_op_of(head) != Ntype_op::Set_mask || !head.has_out_edges()
+        || seen.contains(head.get_class_index())) {
+      continue;
+    }
+    if (has_single_consumer(head)) {  // an inner link: its chain is walked from the real head
+      auto consumer = (*head.out_edges().begin()).sink.get_master_node();
+      if (type_op_of(consumer) == Ntype_op::Set_mask
+          && same_pin(livehd::graph_util::get_driver_of_sink_name(consumer, "a"), head.get_driver_pin(0))) {
+        continue;
+      }
+    }
+    // Walk to the base: every inner link feeds only the next link's base.
+    std::vector<Link> links;
+    hhds::Pin_class   base;
+    for (auto cur = head;;) {
+      seen.insert(cur.get_class_index());
+      const auto range = livehd::graph_util::bit_range(cur);
+      if (!range) {
+        links.clear();
+        break;
+      }
+      links.push_back(Link{cur, range->first, range->second});
+      base      = livehd::graph_util::get_driver_of_sink_name(cur, "a");
+      auto prev = base.is_invalid() || base.is_const() ? hhds::Node_class{} : base.get_master_node();
+      if (prev.is_invalid() || type_op_of(prev) != Ntype_op::Set_mask || !has_single_consumer(prev)
+          || seen.contains(prev.get_class_index())) {
+        break;
+      }
+      cur = prev;
+    }
+    if (links.size() < static_cast<size_t>(kMinLanes) || base.is_invalid()) {
+      continue;
+    }
+    std::ranges::reverse(links);  // base first: application order
+
+    std::vector<size_t> by_pos(links.size());
+    for (size_t i = 0; i < links.size(); ++i) {
+      by_pos[i] = i;
+    }
+    std::ranges::stable_sort(by_pos, [&](size_t x, size_t y) { return links[x].lo < links[y].lo; });
+    bool disjoint = true;
+    for (size_t i = 1; i < by_pos.size(); ++i) {
+      disjoint = disjoint && links[by_pos[i]].lo >= links[by_pos[i - 1]].hi;
+    }
+    if (!disjoint) {
+      continue;
+    }
+    std::vector<Lane> lanes;  // the 1-bit writes, in position order
+    for (auto i : by_pos) {
+      if (links[i].hi != links[i].lo + 1) {
+        continue;
+      }
+      if (auto t = describe(livehd::graph_util::get_driver_of_sink_name(links[i].node, "value"), 0)) {
+        lanes.push_back(Lane{i, std::move(*t)});
+      }
+    }
+    // Candidates: maximal runs of consecutive positions with one shape.
+    std::vector<Run> runs;
+    for (size_t s = 0; s < lanes.size();) {
+      size_t e = s + 1;
+      while (e < lanes.size() && links[lanes[e].link].lo == links[lanes[e - 1].link].lo + 1
+             && lanes[e].term.shape == lanes[s].term.shape) {
+        ++e;
+      }
+      const int n = static_cast<int>(e - s);
+      if (n >= kMinLanes) {
+        Run run{s, n, {}};
+        for (size_t l = 0; l < lanes[s].term.leaves.size(); ++l) {
+          const auto& l0     = lanes[s].term.leaves[l];
+          bool        same   = true;
+          bool        stride = !l0.src.is_invalid();
+          for (int t = 1; t < n; ++t) {
+            const auto& lt = lanes[s + t].term.leaves[l];
+            same           = same && same_pin(lt.pin, l0.pin);
+            stride         = stride && !lt.src.is_invalid() && same_pin(lt.src, l0.src) && lt.pos == l0.pos + t;
+          }
+          run.kind.push_back(same ? Kind::broadcast : stride ? Kind::stride : Kind::gather);
+        }
+        if (std::ranges::find(run.kind, Kind::stride) != run.kind.end()) {
+          runs.push_back(std::move(run));
+        }
+      }
+      s = e;
+    }
+    if (trace) {
+      std::fprintf(stderr,
+                   "bitlanes: chain %s links=%zu lanes=%zu runs=%zu\n",
+                   debug_name(head).c_str(),
+                   links.size(),
+                   lanes.size(),
+                   runs.size());
+      for (const auto& run : runs) {
+        std::fprintf(stderr,
+                     "  run @%d n=%d %s kinds=",
+                     links[lanes[run.first].link].lo,
+                     run.n,
+                     lanes[run.first].term.shape.c_str());
+        for (auto k : run.kind) {
+          std::fprintf(stderr, "%c", k == Kind::stride ? 's' : k == Kind::broadcast ? 'b' : 'g');
+        }
+        std::fprintf(stderr, "\n");
+      }
+    }
+    if (runs.empty()) {
+      continue;
+    }
+
+    struct Built {
+      bool            scalar{false};
+      hhds::Pin_class pin;
+    };
+    absl::flat_hash_map<size_t, std::pair<size_t, hhds::Pin_class>> rewrite;  // kept link -> (run, word)
+    absl::flat_hash_set<size_t>                                     bypass;
+    for (size_t r = 0; r < runs.size(); ++r) {
+      const auto& run  = runs[r];
+      const int   n    = run.n;
+      const Dlop  ones = *Dlop::create_integer(1)->shl_op(*Dlop::create_integer(n))->sub_op(*Dlop::create_integer(1));
+      const auto  word = [&](Ntype_op op, const std::vector<hhds::Pin_class>& in) {
+        auto w = make_node(*current_graph, op);
+        if (op == Ntype_op::Mux) {
+          for (size_t k = 0; k < in.size(); ++k) {
+            livehd::graph_util::setup_sink_pid(w, static_cast<hhds::Port_id>(k)).connect_driver(in[k]);
+          }
+        } else {
+          for (const auto& x : in) {
+            livehd::graph_util::append_sink_operand(w, op, 0).connect_driver(x);
+          }
+        }
+        auto out = w.create_driver_pin(0);
+        livehd::graph_util::set_ubits(out, n);
+        return out;
+      };
+      const auto ones_pin = [&] { return create_const(*current_graph, ones); };
+      const auto zero_pin = [&] { return create_const(*current_graph, *Dlop::create_integer(0)); };
+      const auto window   = [&](const hhds::Pin_class& x, int lo, int width) {
+        auto get = livehd::cprop_value::make_get_mask(*current_graph, x, lo, lo + width);
+        auto out = get.create_driver_pin(0);
+        livehd::graph_util::set_ubits(out, width);
+        return out;
+      };
+      // A scalar in a lane is its bit 0; a select was proven 0/1.
+      const auto bit0 = [&](const hhds::Pin_class& x) { return one_bit(x, 0) ? x : window(x, 0, 1); };
+      const auto spread
+          = [&](const Built& b) { return b.scalar ? word(Ntype_op::Mux, {bit0(b.pin), zero_pin(), ones_pin()}) : b.pin; };
+      const auto gather = [&](size_t leaf) {
+        std::vector<hhds::Pin_class> pins;
+        for (int t = 0; t < n; ++t) {
+          pins.push_back(lanes[run.first + t].term.leaves[leaf].pin);
+        }
+        if (auto g = gathered.find(pins[0].get_class_index()); g != gathered.end() && g->second.bit + n <= g->second.width) {
+          const auto from  = g->second;
+          bool       reuse = true;
+          for (int t = 1; t < n && reuse; ++t) {
+            auto gt = gathered.find(pins[t].get_class_index());
+            reuse   = gt != gathered.end() && same_pin(gt->second.word, from.word) && gt->second.bit == from.bit + t;
+          }
+          if (reuse) {
+            return from.bit == 0 && from.width == n ? from.word : window(from.word, from.bit, n);
+          }
+        }
+        std::vector<Pack_lane> tiled;  // LSB first: lane t at bit t
+        for (int t = 0; t < n; ++t) {
+          tiled.push_back(Pack_lane{pins[t], t, t + 1});
+        }
+        auto cat = make_node(*current_graph, Ntype_op::Concat);
+        emit_concat(*current_graph, cat, tiled);
+        auto out = cat.create_driver_pin(0);
+        livehd::graph_util::set_ubits(out, n);
+        for (int t = 0; t < n; ++t) {
+          gathered.try_emplace(pins[t].get_class_index(), Gathered{out, t, n});
+        }
+        return out;
+      };
+      size_t                                       next  = 0;  // leaf cursor, depth-first like describe()
+      std::function<Built(const hhds::Pin_class&)> build = [&](const hhds::Pin_class& p) -> Built {
+        const auto t       = describe(p, 0);
+        I(t.has_value());  // lanes and operands() only hold pins describe() accepted
+        const auto first   = next;
+        const auto count   = t ? t->leaves.size() : 0;
+        bool       uniform = true;
+        for (size_t l = first; l < first + count; ++l) {
+          uniform = uniform && run.kind[l] == Kind::broadcast;
+        }
+        if (uniform) {
+          next += count;
+          return Built{true, p};
+        }
+        if (t->shape == "S" || bit_read(p)) {  // a leaf
+          const auto& leaf = lanes[run.first].term.leaves[next];
+          const auto  kind = run.kind[next++];
+          return Built{false, kind == Kind::stride ? window(leaf.src, leaf.pos, n) : gather(next - 1)};
+        }
+        auto node = p.get_master_node();
+        if (auto x = negated_operand(node); !x.is_invalid()) {
+          return Built{false, word(Ntype_op::Xor, {spread(build(x)), ones_pin()})};
+        }
+        const auto op   = type_op_of(node);
+        auto       kids = operands(node, 0);
+        I(kids.has_value());
+        std::vector<Built> in;
+        for (const auto& [driver, _] : *kids) {
+          in.push_back(build(driver));
+        }
+        if (op == Ntype_op::Mux) {
+          const auto f  = spread(in[1]);
+          const auto tt = spread(in[2]);
+          if (in[0].scalar) {
+            return Built{false, word(Ntype_op::Mux, {in[0].pin, f, tt})};
+          }
+          const auto sel  = in[0].pin;  // per-lane select: (S & T) | (~S & F)
+          const auto nsel = word(Ntype_op::Xor, {sel, ones_pin()});
+          return Built{false, word(Ntype_op::Or, {word(Ntype_op::And, {sel, tt}), word(Ntype_op::And, {nsel, f})})};
+        }
+        std::vector<hhds::Pin_class> words, scalars;
+        for (const auto& b : in) {
+          // The identity constant (1 under And, 0 under Or/Xor) drops out.
+          if (const auto c = const_bit(b.pin); b.scalar && c && *c == (op == Ntype_op::And ? 1 : 0)) {
+            continue;
+          }
+          (b.scalar ? scalars : words).push_back(b.pin);
+        }
+        I(!words.empty());
+        auto w = words.size() == 1 ? words.front() : word(op, words);
+        if (scalars.empty()) {
+          return Built{false, w};
+        }
+        hhds::Pin_class s = bit0(scalars.front());
+        if (scalars.size() > 1) {
+          auto sn = make_node(*current_graph, op);
+          for (const auto& x : scalars) {
+            livehd::graph_util::append_sink_operand(sn, op, 0).connect_driver(bit0(x));
+          }
+          s = sn.create_driver_pin(0);
+          livehd::graph_util::set_ubits(s, 1);
+        }
+        if (op == Ntype_op::And) {
+          return Built{false, word(Ntype_op::Mux, {s, zero_pin(), w})};
+        }
+        if (op == Ntype_op::Or) {
+          return Built{false, word(Ntype_op::Mux, {s, w, ones_pin()})};
+        }
+        return Built{false, word(Ntype_op::Mux, {s, w, word(Ntype_op::Xor, {w, ones_pin()})})};
+      };
+      const auto value = livehd::graph_util::get_driver_of_sink_name(links[lanes[run.first].link].node, "value");
+      const auto built = build(value);
+      I(next == lanes[run.first].term.leaves.size() && !built.scalar);
+      size_t keep = lanes[run.first].link;
+      for (int k = 1; k < n; ++k) {
+        keep = std::max(keep, lanes[run.first + k].link);
+      }
+      for (int k = 0; k < n; ++k) {
+        if (lanes[run.first + k].link != keep) {
+          bypass.insert(lanes[run.first + k].link);
+        }
+      }
+      rewrite.emplace(keep, std::pair{r, built.pin});
+      ++bit_lane_runs_;
+      bit_lane_lanes_ += static_cast<size_t>(n);
+    }
+
+    // Re-thread the kept links in application order.
+    hhds::Pin_class prev = base;
+    for (size_t i = 0; i < links.size(); ++i) {
+      if (bypass.contains(i)) {
+        continue;
+      }
+      auto& link = links[i].node;
+      if (auto rw = rewrite.find(i); rw != rewrite.end()) {
+        const auto& run = runs[rw->second.first];
+        const int   lo  = links[lanes[run.first].link].lo;
+        clear_all_sinks(link);
+        livehd::graph_util::connect_mask_operands(link, prev, lo, lo + run.n, rw->second.second);
+      } else if (!same_pin(livehd::graph_util::get_driver_of_sink_name(link, "a"), prev)) {
+        auto sink = livehd::graph_util::setup_sink_by_name(link, "a");
+        sink.del_sink();
+        sink.connect_driver(prev);
+      }
+      prev = link.get_driver_pin(0);
+    }
+    changed = true;
+  }
+  return changed;
+}
+
 // Concat lanes that are CONTIGUOUS slices of one source, in order, are one
 // wider slice: {x[b +: w2], x[a +: w1]} with b == a + w1 is x[a +: w1 + w2].
 // This is what re-packs a vectorized bit row (`out = {m63, ..., m0}` becomes
@@ -4305,6 +4807,9 @@ void Cprop::region_passes() {
     canonicalize_concat_pack(current_graph, *it);
   }
   vectorize_bit_muxes();
+  if (bit_lanes_) {
+    vectorize_bit_lanes();
+  }
   livehd::muxctx::prune(*current_graph, decode_bool_condition, is_bool01);
   mux_op_share_pass();
   mux_share_pass();

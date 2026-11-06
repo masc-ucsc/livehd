@@ -1,6 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
+#include <cstdlib>
+
 namespace livehd::sim {
 class Compile_workers;
 }
@@ -18,6 +20,7 @@ class Compile_workers;
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/node_hash_map.h"
 #include "cgen_llvm.hpp"
+#include "debug_env.hpp"
 #include "file_output.hpp"
 #include "hhds/graph.hpp"
 #include "hhds/index.hpp"
@@ -188,6 +191,9 @@ public:
     std::vector<hhds::Port_id>             output_ports;  // body.outputs[i]'s declared port
   };
   struct Generation_index {
+    // Compact-loop definitions and their descendants: they keep Slop members
+    // (no native frame), and a framed parent must not give them a slice.
+    absl::flat_hash_set<const hhds::Graph*>                             compact_defs;
     absl::flat_hash_map<const hhds::Graph*, std::optional<Native_loop>> native_loops;
     absl::flat_hash_map<const hhds::Graph*, Native_loop_ir>             native_loop_ir;
     bool                                          incremental = true;  // forwarded from the single lhd.incremental switch
@@ -372,6 +378,9 @@ public:
   // The graph must already be prepare_graph()'d — the key is over the body AS
   // EMITTED, and prepare_graph rewrites it.
   [[nodiscard]] bool generation_current(hhds::Graph* g, bool color_root);
+  // The key generation_current() compares for a color root, without touching
+  // the index (the auto-dirty decision cache keys on it).
+  [[nodiscard]] std::string root_generation_key(hhds::Graph* g) { return generation_key(g, /*color_root=*/true); }
 
   // Share ONE hierarchical-digest memo across every Cgen_sim of a run. Without
   // it each instance re-walks its own cone, so a hierarchy costs
@@ -430,6 +439,42 @@ private:
   bool                           compact_kernel_ = false;    // definition still called by a native compact-loop wrapper
   unsigned                       object_jobs_    = 0;
   bool                           llvm_backend_   = false;  // direct native object lowering requested for supported colors
+  // LLVM backend: registers and color boundary slots are __lhd_nat (natural
+  // width, no Slop tag). LHD_SIM_SLOP_STATE=1 keeps Slop storage (A/B).
+  // Not inside a compact-loop definition: those bodies (and the fused-loop
+  // wrappers reading their state) stay generated C++ over Slop members.
+  [[nodiscard]] bool native_state() const {
+    return llvm_backend_ && !compact_kernel_ && livehd::debug::env<"LHD_SIM_SLOP_STATE">() == nullptr;
+  }
+  // Native frame (LLVM backend): a framed definition's state is one flat byte
+  // region at fixed offsets -- its own registers (Q and `_din`, by alignment
+  // then name), then each framed sub-instance's region. A standalone class
+  // allocates its region (plus the top root's extras); a parent hands each
+  // child `base + child_offset`. Kernels address everything from ONE base.
+  struct Frame_field {
+    std::string name;
+    uint32_t    bits      = 0;
+    bool        canonical = false;
+    size_t      offset    = 0;
+  };
+  struct Frame_layout {
+    std::vector<Frame_field>                            fields;
+    absl::flat_hash_map<std::string, size_t>            field_index;
+    absl::flat_hash_map<hhds::Class_index, std::string> member;        // flop/latch/memory/sub member names
+    absl::flat_hash_map<hhds::Class_index, size_t>      child_offset;  // framed sub-instances
+    size_t                                              bytes = 0;
+  };
+  const Frame_layout&                                   frame_layout(const hhds::Graph* def);
+  absl::flat_hash_map<const hhds::Graph*, Frame_layout> frame_layout_cache_;
+  // The color root's own in-place flops have no `_din` (in_place_local_state).
+  const hhds::Graph*                                    frame_root_ = nullptr;
+  absl::flat_hash_set<hhds::Class_index>                frame_root_in_place_;
+  // Whether definition `g`'s class has a native frame slice (native_state()
+  // as that definition's own emitter decides it).
+  [[nodiscard]] bool framed_definition(const hhds::Graph* g) const {
+    return llvm_backend_ && livehd::debug::env<"LHD_SIM_SLOP_STATE">() == nullptr
+           && (shared_gen_ == nullptr || !shared_gen_->compact_defs.contains(g));
+  }
   // sim.slop_u — materialize every value whose LGraph driver pin is proven
   // unsigned in the CANONICAL-unsigned Slop_u<n> (one mask at the write),
   // instead of the lazily-masked Slop<n> (one mask at every read).
@@ -462,7 +507,7 @@ private:
   // ---- sim.tune codegen knobs (sim_profile.md §3; sim.tune.dirty / fence /
   // live_words / backend). `tune_` is the CANONICAL vector of the constructor
   // arguments -- normalized the way Color_plan::discover consumes them (fence
-  // -1 == 16, live_words 0 == 256), so spellings that build the same plan key
+  // -1 == 16, live_words 0 == 512), so spellings that build the same plan key
   // the same. Every knob in it is ROOT-ONLY: only a color root's emission reads
   // it, so `tune_vector_` (its tv1 text) is folded into the COLOR ROOT's
   // generation key alone, and a tune flip regenerates exactly the root.

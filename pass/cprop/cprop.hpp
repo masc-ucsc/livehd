@@ -120,6 +120,10 @@ protected:
   // And/Or whose operands are one 1-bit expression over single-bit slices at
   // shifted positions -> one word expression tested under a mask. true = changed.
   bool vectorize_bit_reductions();
+  // Runs of 1-bit Set_mask writes at consecutive positions whose values are
+  // one bitwise expression over stride-1 slices and broadcast scalars -> one
+  // word write. Only with bit_lanes_ (the `sim` cost profile). true = changed.
+  bool               vectorize_bit_lanes();
   // Merge adjacent Concat lanes that are contiguous slices of one source.
   // true = node rewritten (it may have been forwarded and deleted).
   bool merge_concat_slices(hhds::Node_class& node);
@@ -134,6 +138,11 @@ protected:
   bool low_lanes_ = false;
   // mux_share_pass: also flatten Mux trees into a Hotmux over path conjunctions (see share_mux_regions).
   bool hotmux_trees_ = true;
+  // region_passes: also vectorize_bit_lanes (the simulator target).
+  bool               bit_lanes_      = false;
+  // vectorize_bit_lanes census over this Cprop's lifetime: word writes made, 1-bit lanes they replaced.
+  size_t             bit_lane_runs_  = 0;
+  size_t             bit_lane_lanes_ = 0;
   // The constructor's `low_lanes` opt-in doubles as "bitwidth runs after this
   // sweep": rewrites that mint cells with no width stamp (low-lane narrowing,
   // the accumulation guard in scalar_mux) run only then. Bitwidth_rewrite
@@ -159,6 +168,10 @@ public:
   // Off for a simulation target: the Hotmux-over-path-conjunctions flattening of mux_share costs more host
   // instructions than the Mux tree it replaces (dino -4%, picorv32 -5% kernel instructions without it).
   void set_hotmux_trees(bool on) { hotmux_trees_ = on; }
+  // On for a simulation target: a bit-sliced Set_mask row becomes one word write (br_lru_state_internal's
+  // 120 one-bit lane trees -> one word expression per row). Hardware gets the same gates either way.
+  void                                    set_bit_lanes(bool on) { bit_lanes_ = on; }
+  [[nodiscard]] std::pair<size_t, size_t> bit_lane_counts() const { return {bit_lane_runs_, bit_lane_lanes_}; }
   // The accumulation-guard rewrite in scalar_mux (`mux(s, a, a OP x)` ->
   // `a OP mux(s, id, x)`) is a ROLLED-LOOP rule: it turns a loop body's
   // guarded update into an associative reduction of its carry, which is what

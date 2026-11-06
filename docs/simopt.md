@@ -679,9 +679,9 @@ result, and an explicit `--set` always wins.
 | key | values | default | what it controls |
 |---|---|---|---|
 | `sim.tune.profile` | `auto`\|`on`\|`off` | `auto` | the learning switch (§13.2) |
-| `sim.tune.dirty` | `auto`\|`on`\|`off` | `auto` = on | the cross-cycle color activation cache: a color runs only when an input changed, a flop commit compares before it writes, and a fully quiescent period exits early. `true`/`false`/`1`/`0` are accepted aliases |
+| `sim.tune.dirty` | `auto`\|`on`\|`off` | `auto` = on, except the auto-dirty rule below | the cross-cycle color activation cache: a color runs only when an input changed, a flop commit compares before it writes, and a fully quiescent period exits early. `true`/`false`/`1`/`0` are accepted aliases |
 | `sim.tune.fence` | `auto`\|`none`\|N (0..2^20) | `auto` = `none` with dirty off, 16 with it on | fence a module used once into its own colors when it has at least N sites per interface word; `0` fences every such module. A fence pays only when dirty gating can skip what it isolates |
-| `sim.tune.live_words` | `auto`\|N (1..2^20) | `auto` = 256 | per-color live-value budget, in 64-bit words |
+| `sim.tune.live_words` | `auto`\|N (1..2^20) | `auto` = 512 | per-color live-value budget, in 64-bit words |
 | `sim.tune.backend` | `llvm`\|`slop`\|`auto` | `llvm` | color-kernel backend. `llvm` emits native color objects (a color it cannot lower fails setup rather than falling back); `slop` emits the reference C++ kernels; an explicit `auto` keeps its old meaning, the tuned decision, else slop (the tuner never trials the backend, so `auto` is slop unless a tune file pins one) |
 | positional `FILE.json` | path | none | apply the `livehd.sim.tuning` record written by `sim.tune.export` (§13.6) |
 | `sim.tune.export` | PATH | "" | write the applied vector, with its provenance, to PATH |
@@ -689,7 +689,7 @@ result, and an explicit `--set` always wins.
 | `sim.tune.profile_stride` | N (0..2^20) | 0 = auto | drv.bin only, for tests: a fixed sampling stride with no jitter |
 
 `dirty`, `fence`, `live_words` and `backend` form the **tune vector**, printed
-canonically as `tv1:d=on;f=16;lw=256;be=llvm` (that string IS the
+canonically as `tv1:d=on;f=16;lw=512;be=llvm` (that string IS the
 default: dirty gating on, because the large designs it exists for win with it,
 and small always-toggling DUTs such as lhdtrack's pin `sim.tune.dirty=off` or
 let the ladder take them to L0; and the native LLVM color backend, ruling
@@ -708,6 +708,22 @@ code before coloring, which is what a Verilog generate loop already is. It is
 off by ruling -- the compact form's O(1) code footprint is what the large
 benchmarks depend on -- and exists to measure what the rolled protocol costs
 (lhdtrack: br_mux_onehot 2.5x, br_arb_lru 5.6x cycles/s flat).
+
+**Auto-dirty rule (LLVM).** When neither `sim.tune.dirty` nor `sim.tune.fence`
+is pinned by any source and no tuner drives the setup (no `--workdir`,
+`sim.tune.profile=off`, `lhd.incremental=false`, or an observation run),
+`inou.cgen.sim` builds the dirty partition (dirty on, fence 16) and keeps it
+when the design is large (at least 100k GE) or its colors hold at least 32
+version sites per boundary slot; otherwise it merges the design (dirty off, no
+fences). Dirty gating costs a change check per boundary slot and saves the
+sites of a color that sits idle. On 2026-11-05 every small design measured had
+at most 16 sites per slot and ran 1.3x to 8x faster merged (ibex 4.0,
+br_cdc_fifo_flops 15.7); xs_alu (two ALU halves behind a 27-slot interface, 51)
+and the large designs (minion, xs_renametable) win with dirty. The verdict is
+cached in `<simdir>/tune-auto.txt` under the root's generation key, the setup
+prints it (`auto-dirty` info diagnostic), and the result's `sim_tune.applied`
+reports the pair actually built. A running tuner keeps owning the pair: its
+ladder starts from the built-in vector as before.
 
 ### 13.2 Modes
 
@@ -930,7 +946,7 @@ user set it, or the implicit zero fill of a profiling run). The pretty output
 prints one line such as:
 
 ```
-sim.tune: applied d=on f=16 lw=256 be=llvm (default) | I_s=0.12 q=0.00 pairs=812 | next setup: TRIAL d=off f=none
+sim.tune: applied d=on f=16 lw=512 be=llvm (default) | I_s=0.12 q=0.00 pairs=812 | next setup: TRIAL d=off f=none
 ```
 
 A generated simulator identifies itself: `<stem>.tune-id.cpp` bakes the
@@ -952,8 +968,8 @@ lhd sim DUT TB --workdir W --set sim.tune.profile=off design.simtune.json
 ```
 
 ```json
-[{"class":"livehd.sim.tuning","id":"selection","schema":"lhd-sim-tune-file-1","vector":"tv1:d=on;f=0;lw=256;be=llvm",
- "knobs":{"dirty":"on","fence":"0","live_words":"256","backend":"llvm"},
+[{"class":"livehd.sim.tuning","id":"selection","schema":"lhd-sim-tune-file-1","vector":"tv1:d=on;f=0;lw=512;be=llvm",
+ "knobs":{"dirty":"on","fence":"0","live_words":"512","backend":"llvm"},
  "provenance":{"structure":"...","converged":true,
                "stats":{"I_s":0.93,"I":0.91,"q":0.00,"pairs":812},"created":"..."}}]
 ```

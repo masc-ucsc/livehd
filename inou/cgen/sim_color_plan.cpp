@@ -1465,8 +1465,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       }
     }
     for (const auto& decl : body_io->get_output_pin_decls()) {
-      const auto  output    = body.graph->get_output_pin(decl.name);
-      Plan_id     driver_id = Id_hash("unbound").finish();
+      const auto output    = body.graph->get_output_pin(decl.name);
+      Plan_id    driver_id = Id_hash("unbound").finish();
       if (body.graph == root && body.path.steps().empty()) {
         // Root GraphIO may be driven directly by a submodule output. Resolve
         // through that boundary to the executable leaf occurrence; the local
@@ -1641,7 +1641,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     std::vector<size_t>                           candidates;
     for (size_t i = 0; i < plan.sites_.size(); ++i) {
       const auto& site = plan.sites_[i];
-      if (site.live && site.kind == Site_kind::loop_control && pure_loop_body(site.node.base_node().get_subnode_graph(), pure_memo)) {
+      if (site.live && site.kind == Site_kind::loop_control
+          && pure_loop_body(site.node.base_node().get_subnode_graph(), pure_memo)) {
         candidates.push_back(i);
       }
     }
@@ -1876,11 +1877,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   // Two-phase pairs share one reset between both legs, which makes the second
   // condition follow from the first. A reset that cannot be expressed as a
   // bounded formula stays opaque and only loses the proof.
-  std::vector<Gate_formula> latch_open_terms(plan.sites_.size());
-  std::vector<Gate_formula> latch_demand_terms(plan.sites_.size());
+  std::vector<Gate_formula>        latch_open_terms(plan.sites_.size());
+  std::vector<Gate_formula>        latch_demand_terms(plan.sites_.size());
   std::vector<const Gate_formula*> latch_enable_demand_terms(plan.sites_.size(), &gate_true);
-  std::vector<Gate_formula> latch_reset_terms(plan.sites_.size());
-  std::vector<bool>         latch_has_reset(plan.sites_.size(), false);
+  std::vector<Gate_formula>        latch_reset_terms(plan.sites_.size());
+  std::vector<bool>                latch_has_reset(plan.sites_.size(), false);
   for (size_t base = 0; base < plan.sites_.size(); ++base) {
     if (gu::type_op_of(plan.sites_[base].node) != Ntype_op::Latch) {
       continue;
@@ -1893,9 +1894,9 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     latch_demand_terms[base] = latch_open_terms[base];
     const auto reset         = lc::sink_driver_hier(node, "reset_pin");
     if (!reset.is_invalid()) {
-      latch_has_reset[base]   = true;
-      const bool negreset     = lc::sink_driver_hier(node, "negreset").is_known_true();
-      latch_reset_terms[base] = gate_formula(reset, !negreset, 0);
+      latch_has_reset[base]           = true;
+      const bool negreset             = lc::sink_driver_hier(node, "negreset").is_known_true();
+      latch_reset_terms[base]         = gate_formula(reset, !negreset, 0);
       // Enable matters whenever reset is inactive, whether or not the latch
       // opens. Its own value must not be assumed while analyzing that cone.
       latch_enable_demand_terms[base] = &gate_formula(reset, negreset, 0);
@@ -2009,7 +2010,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
                                                    : Execution_slot::post_fall_publish;
     }
     if (role == Version_role::state_read && gu::type_op_of(plan.sites_[base].node) == Ntype_op::Latch) {
-      const auto enable = lc::sink_driver_hier(plan.sites_[base].node, "enable");
+      const auto enable       = lc::sink_driver_hier(plan.sites_[base].node, "enable");
       const auto gate         = lc::control_root(enable, /*stop_at_clock_cell=*/true);
       // With multiple input clocks the slot alone does not determine this
       // net's level; its secondary-clock protocol must retain the held read.
@@ -2023,8 +2024,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         return clocks.n_clock_inputs() == 0 ? name == "clock" : clocks.is_flop_clock_input(name);
       };
       if (!held_read && clocks.n_clock_inputs() <= 1 && !gate.net.is_invalid() && gu::is_graph_input_pin(gate.net)
-          && driven_clock(gate.net)
-          && clocks.is_clock(gate.net) && gate.inverted == (version != State_version::post_rise)) {
+          && driven_clock(gate.net) && clocks.is_clock(gate.net) && gate.inverted == (version != State_version::post_rise)) {
         role = Version_role::data;
       }
     }
@@ -2040,11 +2040,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     site.latch_settle   = latch_settle[base] && role == Version_role::state_update;
     site.slot           = slot;
     site.structural_id  = Id_hash("version")
-                             .id(plan.sites_[base].structural_id)
-                             .u(static_cast<uint64_t>(version))
-                             .u(static_cast<uint64_t>(role))
-                             .u(output_port)
-                             .finish();
+                              .id(plan.sites_[base].structural_id)
+                              .u(static_cast<uint64_t>(version))
+                              .u(static_cast<uint64_t>(role))
+                              .u(output_port)
+                              .finish();
     const size_t result = plan.version_sites_.size();
     plan.version_sites_.push_back(std::move(site));
     version_index.emplace(key, result);
@@ -2174,7 +2174,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     uint32_t      width         = 1;
     bool          unsign        = false;
     std::string   literal;
-    bool          effect        = false;  // an lgundef marker's cond (Boundary_kind::effect_input)
+    bool          effect = false;  // an lgundef marker's cond (Boundary_kind::effect_input)
   };
   std::vector<Output_use> output_uses;
   struct Input_use {
@@ -3576,8 +3576,16 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     for (const auto& sink : marker.node.inp_sorted_pins()) {
       for (const auto& driver : sink.get_driver_pins()) {
         for (const auto version : samples) {
-          Output_use use{static_cast<hhds::Port_id>(sink.get_port_id()), i, false, Color_plan::invalid_index, driver.get_port_id(),
-                         version, 1, true, {}, true};
+          Output_use use{static_cast<hhds::Port_id>(sink.get_port_id()),
+                         i,
+                         false,
+                         Color_plan::invalid_index,
+                         driver.get_port_id(),
+                         version,
+                         1,
+                         true,
+                         {},
+                         true};
           if (driver.is_const()) {
             use.literal = gu::const_of(driver).to_pyrope();
           } else if (const auto found = index.find(driver.get_master_node().get_occurrence_index());
@@ -4004,7 +4012,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           if (const auto existing = specialized_versions.find(key); existing != specialized_versions.end()) {
             result = existing->second;
           } else {
-            auto        clone     = version;
+            auto    clone = version;
             Id_hash signature("latch-input");
             signature.id(version.structural_id);
             for (const auto& use : uses) {
@@ -4034,7 +4042,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       // iterator nor a reference across the recursive call.
       const auto target_inputs = incoming_uses[target];
       for (const size_t use_index : target_inputs) {
-        const auto use = plan.value_uses_[use_index];
+        const auto use          = plan.value_uses_[use_index];
         const bool data_input   = use.consumer_port == Ntype::get_sink_pid(Ntype_op::Latch, "din");
         const bool enable_input = use.consumer_port == Ntype::get_sink_pid(Ntype_op::Latch, "enable");
         if ((!data_input && !enable_input) || use.top_input || use.producer_version == Color_plan::invalid_index
@@ -4049,8 +4057,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         const auto& demand
             = data_input ? latch_demand_terms[target_site.base_site] : *latch_enable_demand_terms[target_site.base_site];
         const size_t replacement                      = specialize(use.producer_version, demand, 0);
-        specialized_inputs       |= replacement != use.producer_version;
-        plan.value_uses_[use_index].producer_version = replacement;
+        specialized_inputs                           |= replacement != use.producer_version;
+        plan.value_uses_[use_index].producer_version  = replacement;
       }
       incoming_uses.resize(plan.version_sites_.size());
     }
@@ -4253,7 +4261,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   // emitter reads the cell's activation slot when it decides to run the color). Slop coarsening keeps owners separate; native
   // updates carry the sampled activation as an operand and can share a color (below).
   {
-    const size_t nversions = plan.version_sites_.size();
+    const size_t                     nversions = plan.version_sites_.size();
     std::vector<std::vector<size_t>> consumers(nversions), producers(nversions);
     std::vector<std::vector<size_t>> clock_uses(nversions);  // value uses arriving on a flop's clock pin
     std::vector<char>                pinned(nversions, 0);
@@ -4284,7 +4292,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       const auto invert = gu::get_driver_of_sink_name(base, "invert");
       const auto divide = gu::get_driver_of_sink_name(base, "div");
       return (invert.is_invalid() || invert.is_known_false())
-             && (divide.is_invalid() || (divide.is_const() && gu::const_of(divide).is_just_i64() && gu::const_of(divide).to_just_i64() == 1));
+             && (divide.is_invalid()
+                 || (divide.is_const() && gu::const_of(divide).is_just_i64() && gu::const_of(divide).to_just_i64() == 1));
     };
     const auto is_rise_only = [](const Version_site& ver) {
       return ver.slot == Execution_slot::pre_rise_eval && ver.version == State_version::pre_rise;
@@ -4308,10 +4317,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
           || !plain_cell(plan.sites_[plan.version_sites_[cell].base_site].node)) {
         continue;
       }
-      // An asynchronous reset lands whether or not the gate lets an edge through; a negative edge or a divided clock has other timing.
-      const auto base     = site.node.base_node();
-      const auto async    = gu::get_driver_of_sink_name(base, "async");
-      const auto posclk   = gu::get_driver_of_sink_name(base, "posclk");
+      // An asynchronous reset lands whether or not the gate lets an edge through; a negative edge or a divided clock has other
+      // timing.
+      const auto base   = site.node.base_node();
+      const auto async  = gu::get_driver_of_sink_name(base, "async");
+      const auto posclk = gu::get_driver_of_sink_name(base, "posclk");
       if ((!async.is_invalid() && !async.is_known_false()) || (!posclk.is_invalid() && !posclk.is_known_true())) {
         continue;
       }
@@ -4321,8 +4331,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     while (!work.empty()) {
       const size_t v = work.back();
       work.pop_back();
-      auto&        version = plan.version_sites_[v];
-      const auto&  site    = plan.sites_[version.base_site];
+      auto&       version = plan.version_sites_[v];
+      const auto& site    = plan.sites_[version.base_site];
       if (version.gate_owner == Color_plan::invalid_index && version.role == Version_role::data && site.kind == Site_kind::data
           && is_rise_only(version) && !version.latch_settle && !version.latch_input && !pinned[v] && !consumers[v].empty()) {
         const auto op = gu::type_op_of(site.node);
@@ -4484,8 +4494,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   // (one more color to dispatch and dirty-track), charged as one extra
   // interface word: br_enc_gray2bin's 32 reductions over a 2-word interface,
   // or br_flow_join's 53 operations over 4 words, run 1.5x slower fenced.
-  constexpr size_t kLargeBodyFenceSites = 1024;
-  const int64_t    body_ratio = fence_ratio >= 0 ? fence_ratio : kDefaultFenceRatio;
+  constexpr size_t               kLargeBodyFenceSites = 1024;
+  const int64_t                  body_ratio           = fence_ratio >= 0 ? fence_ratio : kDefaultFenceRatio;
   std::vector<Control_trie_node> module_trie(1);
   for (const auto& body : bodies) {
     if (body.path.steps().empty() || body.graph == nullptr) {
@@ -4557,8 +4567,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   // live-word pressure the coarsener below cuts on -- followed hash luck:
   // matched_filter's evaluator split into 3 colors (1.66x slower) under one
   // id encoding and fused into 2 under another.
-  uint64_t            order = 0;
-  std::vector<size_t> cone_stack;
+  uint64_t                                 order = 0;
+  std::vector<size_t>                      cone_stack;
   std::vector<std::pair<size_t, uint64_t>> newly_ready;
   while (!cone_stack.empty() || !ready.empty()) {
     size_t current;
@@ -4584,8 +4594,8 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       // changes, so the depth-first walk may cross ordinary instance
       // boundaries -- matched_filter's tap cells -- but must not interleave
       // two fenced modules (minion: 2.3 s vs 3.7 s when it does).
-      const bool same_surface = current_site.slot == successor_site.slot
-                                && site_module_owner[current_site.base_site] == site_module_owner[successor_site.base_site];
+      const bool  same_surface   = current_site.slot == successor_site.slot
+                                   && site_module_owner[current_site.base_site] == site_module_owner[successor_site.base_site];
       if (!same_surface) {
         ready.push(entry.first);
       }
@@ -4895,6 +4905,16 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   // because it contains one loop cost the Pyrope leg of lhdtrack, whose `for`
   // loops stay rolled, 5-17% against the same design read from Verilog
   // (br_flow_burst_mux_rr_stable, br_fifo_shared_dynamic_ctrl, br_csr_demux).
+  // Staged flops the version-order proof rejected only because an old-value
+  // reader is scheduled after the update. When coarsening puts every such
+  // reader in the update's own color (or an earlier one), sinking the update
+  // to the end of its color makes it destructive after all: see below.
+  struct Color_in_place_candidate {
+    size_t              base       = 0;
+    size_t              clock_cell = invalid_index;  // site of the Clock_cell clocking it, which must be native
+    std::vector<size_t> users;
+  };
+  std::vector<Color_in_place_candidate> color_in_place_candidates;
   if (!include_observations && plan.summary_.version_dag_acyclic && rise_only && clocks.n_clock_inputs() <= 1
       && (plan.summary_.compact_loops == 0 || separate_runtime_calls) && plan.summary_.conditional_regions == 0) {
     std::vector<std::vector<size_t>> old_users(plan.sites_.size());
@@ -4933,10 +4953,10 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         const auto name = Ntype::get_sink_name(op, sink.get_port_id());
         for (const auto& driver : sink.get_driver_pins()) {
           if (name.ends_with("clock_pin")) {
-            plain_clock = gu::is_graph_input_pin(driver)
-                          && (clocks.n_clock_inputs() == 0 ? gu::pin_name_of(driver) == "clock"
-                                                           : clocks.is_flop_clock_input(gu::pin_name_of(driver)));
-            eligible &= plain_clock;
+            plain_clock  = gu::is_graph_input_pin(driver)
+                           && (clocks.n_clock_inputs() == 0 ? gu::pin_name_of(driver) == "clock"
+                                                            : clocks.is_flop_clock_input(gu::pin_name_of(driver)));
+            eligible    &= plain_clock;
           } else if (op == Ntype_op::Flop && name == "pipe_min") {
             eligible &= driver.is_const() && gu::const_of(driver).is_just_i64() && gu::const_of(driver).to_just_i64() == 1;
           } else if (op == Ntype_op::Flop && name == "async") {
@@ -4960,11 +4980,11 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     // would fall back to a staged copy. A flop's update has no consumer in
     // its own slot, so it can sink to just after its last old-value reader
     // without breaking any dependency: renumber once, then prove as before.
+    // A consumer in a LATER slot (the post-fall publish of the new value)
+    // runs after this whole slot anyway.
+    std::vector<bool> produces(plan.version_sites_.size(), false);
     {
-      // A consumer in a LATER slot (the post-fall publish of the new value)
-      // runs after this whole slot anyway.
-      std::vector<bool> produces(plan.version_sites_.size(), false);
-      const auto        same_slot_use = [&](size_t producer, size_t consumer) {
+      const auto same_slot_use = [&](size_t producer, size_t consumer) {
         if (producer != invalid_index && consumer != invalid_index
             && plan.version_sites_[producer].slot == plan.version_sites_[consumer].slot) {
           produces[producer] = true;
@@ -4976,10 +4996,12 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
       for (const auto& use : plan.value_uses_) {
         same_slot_use(use.producer_version, use.consumer_version);
       }
+    }
+    {
       std::vector<uint64_t> key(plan.version_sites_.size());
       std::vector<size_t>   at_order(plan.version_sites_.size());
       for (size_t v = 0; v < key.size(); ++v) {
-        key[v]                                         = static_cast<uint64_t>(plan.version_sites_[v].execution_order) * 2;
+        key[v]                                           = static_cast<uint64_t>(plan.version_sites_[v].execution_order) * 2;
         at_order[plan.version_sites_[v].execution_order] = v;
       }
       // Never sink across a fence region: the coarsener cuts a color where the
@@ -5027,7 +5049,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
             continue;
           }
           stable &= plan.version_sites_[user].slot == upd.slot;
-          last = std::max<uint64_t>(last, plan.version_sites_[user].execution_order);
+          last    = std::max<uint64_t>(last, plan.version_sites_[user].execution_order);
         }
         const auto at = upd.execution_order;
         if (stable && last != at && region_end[at] >= last && region_end[at] - region_start[at] < kSinkRegionVersions) {
@@ -5062,6 +5084,66 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         }
       }
     }
+    if (livehd::debug::env<"LHD_SIM_NO_COLOR_IN_PLACE">() == nullptr) {
+      // A flop clocked through a Clock_cell is eligible too when the LLVM
+      // backend evaluates that cell inline (native_clock_cell, known only
+      // after coarsening): its kernel guards the register's store with the
+      // cell's activation, so a closed gate leaves the register untouched.
+      std::vector<size_t> clock_cell_of(plan.version_sites_.size(), invalid_index);
+      if (separate_runtime_calls) {
+        const auto flop_clock_sink = Ntype::get_sink_pid(Ntype_op::Flop, "clock_pin");
+        for (const auto& use : plan.value_uses_) {
+          if (use.top_input || use.producer_version == invalid_index || use.consumer_version == invalid_index
+              || use.consumer_port != flop_clock_sink) {
+            continue;
+          }
+          const auto cell = plan.version_sites_[use.producer_version].base_site;
+          auto&      slot = clock_cell_of[use.consumer_version];
+          slot            = gu::type_op_of(plan.sites_[cell].node) == Ntype_op::Clock_cell && (slot == invalid_index || slot == cell)
+                                ? cell
+                                : invalid_index - 1;  // two drivers, or not a cell: not a candidate
+        }
+      }
+      const auto gated_eligible = [&](size_t base) {
+        const auto update = state_updates[base];
+        if (update == invalid_index || under_compact_loop(plan.sites_[base]) || clock_cell_of[update] >= invalid_index - 1) {
+          return false;
+        }
+        const auto& node = plan.sites_[base].node;
+        for (const auto& sink : node.inp_sorted_pins()) {
+          const auto name = Ntype::get_sink_name(Ntype_op::Flop, sink.get_port_id());
+          for (const auto& driver : sink.get_driver_pins()) {
+            if (name == "pipe_min") {
+              if (!driver.is_const() || !gu::const_of(driver).is_just_i64() || gu::const_of(driver).to_just_i64() != 1) {
+                return false;
+              }
+            } else if (name == "async" && !driver.is_known_false()) {
+              return false;
+            } else if (name == "posclk" && !driver.is_known_true()) {
+              return false;
+            }
+          }
+        }
+        return true;
+      };
+      for (size_t base = 0; base < plan.sites_.size(); ++base) {
+        if (plan.sites_[base].in_place || gu::type_op_of(plan.sites_[base].node) != Ntype_op::Flop
+            || state_updates[base] == invalid_index || produces[state_updates[base]]) {
+          continue;
+        }
+        size_t cell = invalid_index;
+        if (!storage_eligible(base)) {
+          if (!gated_eligible(base)) {
+            continue;
+          }
+          cell = clock_cell_of[state_updates[base]];
+        }
+        const auto& update = plan.version_sites_[state_updates[base]];
+        if (std::ranges::all_of(old_users[base], [&](size_t user) { return plan.version_sites_[user].slot == update.slot; })) {
+          color_in_place_candidates.push_back({base, cell, old_users[base]});
+        }
+      }
+    }
   }
   // Transport fixed slices of one machine word together. A bit-level imported
   // netlist otherwise spends a whole ABI word (and dirty comparison) per bit.
@@ -5071,8 +5153,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   std::map<Lane_key, std::vector<size_t>> word_lanes;
   for (size_t i = 0; i < plan.value_uses_.size(); ++i) {
     const auto& use = plan.value_uses_[i];
-    if (!use.preextracted || !use.literal.empty() || use.producer_shift != 0
-        || use.producer_extract_hi <= use.producer_extract_lo
+    if (!use.preextracted || !use.literal.empty() || use.producer_shift != 0 || use.producer_extract_hi <= use.producer_extract_lo
         || use.producer_extract_lo / 64 != (use.producer_extract_hi - 1) / 64) {
       continue;
     }
@@ -5177,7 +5258,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     return node;
   };
 
-  constexpr uint64_t kSoftColorGe  = 50'000;
+  constexpr uint64_t kSoftColorGe = 50'000;
   std::vector<bool>  computed_wide_input(plan.sites_.size());
   for (const auto& dep : plan.dependencies_) {
     const auto& producer = plan.sites_[dep.producer];
@@ -5222,11 +5303,91 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     }
     // Large decoded write banks are cheaper alongside their enable logic:
     // exporting every row's predicate costs more than conservative activation.
-    separate_memory_update[i] = dynamic_enable && interface_words <= 16;
+    // LLVM keeps every write inside its color as a conditional store: a
+    // separate write color splits the surrounding cone in two (the producers
+    // of the write before it, the in-place updates it reads after it), and
+    // those boundary slots cost more than skipping an idle write saves
+    // (picorv32 -13% dirty off / -24% on; lhdtrack AXI and fifo designs
+    // -19..-44%). LHD_SIM_MEM_SPLIT=1 restores the split for A/B.
+    separate_memory_update[i] = dynamic_enable && interface_words <= 16
+                                && (!separate_runtime_calls || livehd::debug::env<"LHD_SIM_MEM_SPLIT">() != nullptr);
   }
-  const auto         runtime_owner = [&](size_t version) {
-    const auto& site         = plan.sites_[plan.version_sites_[version].base_site];
-    const auto  op           = gu::type_op_of(site.node);
+  // Clock_cells the LLVM backend evaluates inline (native_clock_cell): no own
+  // color, so a small gate does not split the schedule around it.
+  plan.native_clock_cells_.assign(plan.sites_.size(), 0);
+  if (separate_runtime_calls && livehd::debug::env<"LHD_SIM_NO_NATIVE_CLOCK_CELL">() == nullptr) {
+    std::vector<char> cell_rise_only(plan.sites_.size(), 1);
+    for (const auto& version : plan.version_sites_) {
+      if (version.slot != Execution_slot::pre_rise_eval || version.version != State_version::pre_rise) {
+        cell_rise_only[version.base_site] = 0;
+      }
+    }
+    for (size_t cell_site = 0; cell_site < plan.sites_.size(); ++cell_site) {
+      const auto& node = plan.sites_[cell_site].node;
+      if (gu::type_op_of(node) != Ntype_op::Clock_cell) {
+        continue;
+      }
+      if (livehd::debug::env<"LHD_SIM_CLK_DEBUG">() != nullptr) {
+        const auto ref  = gu::get_driver_of_sink_name(node.base_node(), "clk_ref");
+        const auto cone = lc::clock_cell_cone(node.base_node(), clocks);
+        std::fprintf(stderr,
+                     "[native-cell] site %zu rise_only=%d ref_input=%d cone=%d inverted=%d\n",
+                     cell_site,
+                     cell_rise_only[cell_site] ? 1 : 0,
+                     !ref.is_invalid() && gu::is_graph_input_pin(ref) ? 1 : 0,
+                     cone ? 1 : 0,
+                     cone && cone->clock_inverted ? 1 : 0);
+      }
+      if (!cell_rise_only[cell_site]) {
+        continue;
+      }
+      const auto base   = node.base_node();
+      const auto invert = gu::get_driver_of_sink_name(base, "invert");
+      const auto divide = gu::get_driver_of_sink_name(base, "div");
+      const auto ref    = gu::get_driver_of_sink_name(base, "clk_ref");
+      const auto cone   = lc::clock_cell_cone(base, clocks);
+      if (!(invert.is_invalid() || invert.is_known_false())
+          || !(divide.is_invalid()
+               || (divide.is_const() && gu::const_of(divide).is_just_i64() && gu::const_of(divide).to_just_i64() == 1))
+          || !cone || cone->clock_inverted || ref.is_invalid() || !gu::is_graph_input_pin(ref)) {
+        continue;
+      }
+      plan.native_clock_cells_[cell_site] = 1;  // until a data reader shows up (below)
+    }
+    // Readers through hierarchy: the resolved value uses. A reader that is not
+    // a register/memory clock pin sees the gated clock LEVEL; a chained cell
+    // reads the activation of its reference. Neither is lowered natively.
+    for (const auto& use : plan.value_uses_) {
+      if (use.top_input || use.producer_version >= plan.version_sites_.size()
+          || use.consumer_version >= plan.version_sites_.size()) {
+        continue;
+      }
+      const size_t producer_site = plan.version_sites_[use.producer_version].base_site;
+      if (plan.native_clock_cells_[producer_site] == 0) {
+        continue;
+      }
+      const auto& consumer = plan.sites_[plan.version_sites_[use.consumer_version].base_site].node;
+      const auto  op       = gu::type_op_of(consumer);
+      // A chained cell reads its reference's activation (clk_ref) as an operand.
+      const bool  clock_pin
+          = ((op == Ntype_op::Flop || op == Ntype_op::Fflop || op == Ntype_op::Latch || op == Ntype_op::Memory)
+             && Ntype::get_sink_name(op, static_cast<int>(use.consumer_port)).ends_with("clock_pin"))
+            || (op == Ntype_op::Clock_cell && use.consumer_port == Ntype::get_sink_pid(Ntype_op::Clock_cell, "clk_ref"));
+      if (!clock_pin) {
+        if (livehd::debug::env<"LHD_SIM_CLK_DEBUG">() != nullptr) {
+          std::fprintf(stderr,
+                       "[native-cell] site %zu data reader op=%s port=%d\n",
+                       producer_site,
+                       std::string{Ntype::get_name(op)}.c_str(),
+                       static_cast<int>(use.consumer_port));
+        }
+        plan.native_clock_cells_[producer_site] = 0;
+      }
+    }
+  }
+  const auto runtime_owner = [&](size_t version) {
+    const auto& site = plan.sites_[plan.version_sites_[version].base_site];
+    const auto  op   = gu::type_op_of(site.node);
     // Keep write enables visible to activation scheduling. Folding their
     // producers into the store color would require per-access write records
     // or unconditional reader invalidation, which repeatedly wakes idle arrays.
@@ -5246,9 +5407,10 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     if (!separate_runtime_calls && narrow_loop[plan.version_sites_[version].base_site]) {
       return Color_plan::invalid_index - 1;
     }
-    const bool  separate_sub = op == Ntype_op::Sub && site.kind != Site_kind::loop_control;
-    return (separate_sub || (separate_runtime_calls && op == Ntype_op::Clock_cell)) ? plan.version_sites_[version].base_site
-                                                                                    : Color_plan::invalid_index;
+    const bool separate_sub = op == Ntype_op::Sub && site.kind != Site_kind::loop_control;
+    const bool runtime_cell = separate_runtime_calls && op == Ntype_op::Clock_cell
+                              && plan.native_clock_cells_[plan.version_sites_[version].base_site] == 0;
+    return (separate_sub || runtime_cell) ? plan.version_sites_[version].base_site : Color_plan::invalid_index;
   };
   const auto crosses_control_boundary = [&](size_t lhs, size_t rhs) {
     const auto lhs_version = members[lhs].front();
@@ -5455,6 +5617,85 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     }
   }
 
+  // Color-level destructive updates. A color is a contiguous interval of the
+  // execution order, so a reader in a different color with a smaller order
+  // runs (whole color) before the update's color. A reader in the update's own
+  // color only needs the update sunk past it: the update has no consumer in
+  // its slot (`produces`), so moving it to just after its color's last old-value
+  // reader breaks no dependency, and the color stays the same interval. Then
+  // the register needs no pending copy and no commit (picorv32: 95 staged
+  // copies per cycle, the decoded-instruction flags read beside their update).
+  // A color's terminal anchors its incremental cut and storage identity. The
+  // sink below may move an update to a color's end; the anchor stays the
+  // version coarsening ended the interval at.
+  absl::flat_hash_map<size_t, size_t> coarsened_terminal;
+  // Successors of each candidate update, including the anti-dependencies the
+  // version-order proof and earlier promotions add (`a <= b; b <= a`: once `a`
+  // is destructive, `b`'s update must stay before it).
+  absl::flat_hash_map<size_t, std::vector<size_t>> update_successors;
+  if (!color_in_place_candidates.empty()) {
+    for (const auto& candidate : color_in_place_candidates) {
+      update_successors[state_updates[candidate.base]];
+    }
+    for (const auto& edge : plan.version_dependencies_) {
+      if (auto it = update_successors.find(edge.producer); it != update_successors.end()) {
+        it->second.push_back(edge.consumer);
+      }
+    }
+  }
+  for (const auto& candidate : color_in_place_candidates) {
+    const size_t update = state_updates[candidate.base];
+    const size_t owner  = root_of(update);
+    const auto   at     = plan.version_sites_[update].execution_order;
+    uint64_t     last   = at;
+    bool         legal  = candidate.clock_cell == invalid_index || plan.native_clock_cell(candidate.clock_cell);
+    for (const size_t user : candidate.users) {
+      if (!legal) {
+        break;
+      }
+      if (user == update) {
+        continue;
+      }
+      const auto user_order = plan.version_sites_[user].execution_order;
+      if (root_of(user) == owner) {
+        last = std::max<uint64_t>(last, user_order);
+      } else if (user_order > at) {
+        legal = false;  // a later color reads the old value
+        break;
+      }
+    }
+    for (const size_t next : update_successors[update]) {
+      // Successors run after the update; it may not sink past any of them.
+      legal &= plan.version_sites_[next].execution_order > last;
+    }
+    if (!legal) {
+      continue;
+    }
+    if (last != at) {
+      // Rotate the update to `last`, inside this color's interval only.
+      auto& color_members = members[owner];
+      std::ranges::sort(color_members, {}, [&](size_t v) { return plan.version_sites_[v].execution_order; });
+      coarsened_terminal.try_emplace(owner, color_members.back());
+      for (const size_t v : color_members) {
+        auto& rank = plan.version_sites_[v].execution_order;
+        if (rank > at && rank <= last) {
+          --rank;
+        }
+      }
+      plan.version_sites_[update].execution_order = last;
+      std::ranges::sort(color_members, {}, [&](size_t v) { return plan.version_sites_[v].execution_order; });
+    }
+    plan.sites_[candidate.base].in_place = true;
+    ++plan.summary_.color_in_place;
+    for (const size_t user : candidate.users) {
+      if (user != update) {
+        add_version_edge(user, update, 0);
+        if (auto it = update_successors.find(user); it != update_successors.end()) {
+          it->second.push_back(update);
+        }
+      }
+    }
+  }
   std::vector<size_t> roots;
   for (size_t i = 0; i < nversions; ++i) {
     if (parent[i] == i && !members[i].empty()) {
@@ -5487,18 +5728,19 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     // its whole implementation. An internal cone edit must not move the dirty
     // bit marked by unchanged state commits. Semantic membership above still
     // controls all kernel reuse. Terminal versions belong to only one color.
-    plan.partition_cuts_.push_back(cut_identity(color_members.back()));
-    const auto&   terminal          = plan.version_sites_[color_members.back()];
+    const auto    anchor   = coarsened_terminal.contains(root_index) ? coarsened_terminal.at(root_index) : color_members.back();
+    plan.partition_cuts_.push_back(cut_identity(anchor));
+    const auto&   terminal = plan.version_sites_[anchor];
     Pending_color pending_color;
     pending_color.color.storage_id       = Id_hash("color-storage")
-                                         .u(static_cast<uint64_t>(terminal.slot))
-                                         .id(plan.sites_[terminal.base_site].storage_id)
-                                         .u(static_cast<uint64_t>(terminal.version))
-                                         .u(static_cast<uint64_t>(terminal.role))
-                                         .u(terminal.output_port)
-                                         .u(terminal.latch_input ? 1 : 0)
-                                         .id(terminal.latch_input ? terminal.structural_id : Plan_id{})
-                                         .finish();
+                                               .u(static_cast<uint64_t>(terminal.slot))
+                                               .id(plan.sites_[terminal.base_site].storage_id)
+                                               .u(static_cast<uint64_t>(terminal.version))
+                                               .u(static_cast<uint64_t>(terminal.role))
+                                               .u(terminal.output_port)
+                                               .u(terminal.latch_input ? 1 : 0)
+                                               .id(terminal.latch_input ? terminal.structural_id : Plan_id{})
+                                               .finish();
     pending_color.root                   = root_index;
     pending_color.color.structural_id    = signature.finish();
     pending_color.color.slot             = plan.version_sites_[color_members.front()].slot;
@@ -5543,20 +5785,19 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   };
   // A state's natural current-value slot: spelled once, because the state's
   // own publication and every natural-view reader must name the same slot.
-  const auto current_slot_id = [](const Plan_id& storage, uint64_t port) {
-    return Id_hash("current").id(storage).u(port).finish();
-  };
+  const auto current_slot_id
+      = [](const Plan_id& storage, uint64_t port) { return Id_hash("current").id(storage).u(port).finish(); };
   absl::flat_hash_map<Plan_id, size_t> slot_index;
   const auto                           ensure_slot = [&](const Plan_id& signature,
-                                                  Boundary_kind kind,
-                                                  State_version version,
-                                                  size_t        owner_site,
-                                                  size_t        producer_version_index,
-                                                  size_t        producer_color,
-                                                  hhds::Port_id producer_port,
-                                                  hhds::Port_id public_port,
-                                                  uint32_t      width,
-                                                  bool          unsign) {
+                                                         Boundary_kind  kind,
+                                                         State_version  version,
+                                                         size_t         owner_site,
+                                                         size_t         producer_version_index,
+                                                         size_t         producer_color,
+                                                         hhds::Port_id  producer_port,
+                                                         hhds::Port_id  public_port,
+                                                         uint32_t       width,
+                                                         bool           unsign) {
     if (const auto it = slot_index.find(signature); it != slot_index.end()) {
       auto& slot = plan.boundary_slots_[it->second];
       // Every field a signature encodes is compared, so a 128-bit id collision
@@ -5614,12 +5855,12 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   using Consumer_key = std::tuple<size_t, size_t, size_t, hhds::Port_id, uint32_t, uint32_t, bool, uint32_t>;
   absl::flat_hash_set<Consumer_key> consumer_seen;
   const auto                        add_consumer = [&](size_t        slot_index_value,
-                                size_t        version,
-                                hhds::Port_id port,
-                                uint32_t      input,
-                                uint32_t      consumer_width,
-                                bool          preextracted,
-                                uint32_t      lane_offset = 0) {
+                                                       size_t        version,
+                                                       hhds::Port_id port,
+                                                       uint32_t      input,
+                                                       uint32_t      consumer_width,
+                                                       bool          preextracted,
+                                                       uint32_t      lane_offset = 0) {
     auto&                   slot = plan.boundary_slots_[slot_index_value];
     const Boundary_consumer consumer{version, color_of_version(version), port, input, consumer_width, preextracted, lane_offset};
     if (consumer_seen
@@ -5688,13 +5929,13 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
         if (plan.version_sites_[pending_update].role != Version_role::state_update) {
           continue;
         }
-        const auto pending_signature
-            = latch_settle[base] ? Id_hash("pending-version")
-                                       .id(plan.sites_[base].storage_id)
-                                       .u(static_cast<uint64_t>(plan.version_sites_[pending_update].version))
-                                       .u(output.get_port_id())
-                                       .finish()
-                                 : Id_hash("pending").id(plan.sites_[base].storage_id).u(output.get_port_id()).finish();
+        const auto pending_signature = latch_settle[base]
+                                           ? Id_hash("pending-version")
+                                                 .id(plan.sites_[base].storage_id)
+                                                 .u(static_cast<uint64_t>(plan.version_sites_[pending_update].version))
+                                                 .u(output.get_port_id())
+                                                 .finish()
+                                           : Id_hash("pending").id(plan.sites_[base].storage_id).u(output.get_port_id()).finish();
         (void)ensure_slot(pending_signature,
                           Boundary_kind::state_pending,
                           plan.version_sites_[pending_update].version,
@@ -5715,17 +5956,17 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
     size_t       producer_color = Color_plan::invalid_index;
     if (!use.literal.empty()) {
       const auto signature = Id_hash("literal-slot").text(use.literal).u(use.width).u(use.unsign ? 1 : 0).finish();
-      source_slot                               = ensure_slot(signature,
-                                                              Boundary_kind::color_value,
-                                                              State_version::pre_rise,
-                                                              Color_plan::invalid_index,
-                                                              Color_plan::invalid_index,
-                                                              Color_plan::invalid_index,
-                                                              0,
-                                                              0,
-                                                              use.width,
-                                                              use.unsign);
-      auto& literal_slot = plan.boundary_slots_[source_slot];
+      source_slot          = ensure_slot(signature,
+                                         Boundary_kind::color_value,
+                                         State_version::pre_rise,
+                                         Color_plan::invalid_index,
+                                         Color_plan::invalid_index,
+                                         Color_plan::invalid_index,
+                                         0,
+                                         0,
+                                         use.width,
+                                         use.unsign);
+      auto& literal_slot   = plan.boundary_slots_[source_slot];
       if (!literal_slot.literal.empty() && literal_slot.literal != use.literal) {
         plan.summary_.boundary_one_writer = false;
         plan.summary_.versioning_complete = false;
@@ -5765,14 +6006,14 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
             = !use.preextracted && use.producer_shift == 0 && use.width == physical_width && use.unsign == physical_unsign;
         const auto   signature = natural_view ? current_slot_id(producer_base.storage_id, use.producer_port)
                                               : Id_hash("current-view")
-                                                  .id(producer_base.storage_id)
-                                                  .u(use.producer_port)
-                                                  .u(use.producer_shift)
-                                                  .u(use.width)
-                                                  .u(use.unsign ? 1 : 0)
-                                                  .u(use.producer_extract_lo)
-                                                  .u(use.producer_extract_hi)
-                                                  .finish();
+                                                    .id(producer_base.storage_id)
+                                                    .u(use.producer_port)
+                                                    .u(use.producer_shift)
+                                                    .u(use.width)
+                                                    .u(use.unsign ? 1 : 0)
+                                                    .u(use.producer_extract_lo)
+                                                    .u(use.producer_extract_hi)
+                                                    .finish();
         const size_t update    = state_updates[producer_site.base_site];
         source_slot            = ensure_slot(signature,
                                              Boundary_kind::state_current,
@@ -5875,10 +6116,10 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
   }
   for (const auto& input : input_uses) {
     const auto   signature = Id_hash("observation-input")
-                                   .id(plan.sites_[input.body_anchor].storage_id)
-                                   .u(input.public_port)
-                                   .u(static_cast<uint64_t>(input.version))
-                                   .finish();
+                                 .id(plan.sites_[input.body_anchor].storage_id)
+                                 .u(input.public_port)
+                                 .u(static_cast<uint64_t>(input.version))
+                                 .finish();
     const size_t slot      = ensure_slot(signature,
                                          Boundary_kind::observation_input,
                                          input.version,
@@ -6073,7 +6314,7 @@ Color_plan Color_plan::discover(hhds::Graph* root, bool include_observations, bo
                                          version.output_port,
                                          execution_slot_name(version.slot));
       seeds[i]            += version.control_owner == Color_plan::invalid_index ? "|control:unconditional" : "|control:conditional";
-      seeds[i]             += base.in_place ? "|state:in-place" : "|state:staged";
+      seeds[i]            += base.in_place ? "|state:in-place" : "|state:staged";
       auto abi_roles       = abi_roles_by_version[color.members[i]];
       std::ranges::sort(abi_roles);
       for (const auto& role : abi_roles) {
@@ -6788,9 +7029,52 @@ std::string Color_plan::report() const {
   result += std::format("boundary-dominance {}\n", summary_.boundary_dominance ? "true" : "false");
   result += std::format("runtime-random {}\n", summary_.runtime_random ? "true" : "false");
   result += std::format(
-      "in-place-state registers={} memories={}\n",
+      "in-place-state registers={} memories={} color-level={}\n",
       std::ranges::count_if(sites_, [](const Site& s) { return s.in_place && gu::type_op_of(s.node) == Ntype_op::Flop; }),
-      std::ranges::count_if(sites_, [](const Site& s) { return s.in_place && gu::type_op_of(s.node) == Ntype_op::Memory; }));
+      std::ranges::count_if(sites_, [](const Site& s) { return s.in_place && gu::type_op_of(s.node) == Ntype_op::Memory; }),
+      summary_.color_in_place);
+  {
+    // Clock-gated cones (Version_site::gate_owner): how much of the design a
+    // closed gate can skip -- the owned flops and the data versions feeding only them.
+    std::set<size_t> cells;
+    size_t           owned_state = 0;
+    size_t           owned_data  = 0;
+    for (const auto& version : version_sites_) {
+      if (version.gate_owner == invalid_index) {
+        continue;
+      }
+      cells.insert(version.gate_owner);
+      (version.role == Version_role::state_update ? owned_state : owned_data) += 1;
+    }
+    // Owned values whose consumer runs in ANOTHER color cross a boundary slot:
+    // a kernel then stores them, and its branch over the gate cannot skip them.
+    std::vector<size_t> color_of(version_sites_.size(), invalid_index);
+    for (size_t c = 0; c < colors_.size(); ++c) {
+      for (const size_t m : colors_[c].members) {
+        color_of[m] = c;
+      }
+    }
+    std::set<size_t> crossing;
+    std::set<size_t> owned_colors;
+    for (size_t v = 0; v < version_sites_.size(); ++v) {
+      if (version_sites_[v].gate_owner != invalid_index) {
+        owned_colors.insert(color_of[v]);
+      }
+    }
+    for (const auto& use : value_uses_) {
+      if (use.producer_version < version_sites_.size() && use.consumer_version < version_sites_.size()
+          && version_sites_[use.producer_version].gate_owner != invalid_index
+          && color_of[use.producer_version] != color_of[use.consumer_version]) {
+        crossing.insert(use.producer_version);
+      }
+    }
+    result += std::format("clock-gates cells={} owned-state={} owned-data={} owned-crossing-colors={} colors-with-owned={}\n",
+                          cells.size(),
+                          owned_state,
+                          owned_data,
+                          crossing.size(),
+                          owned_colors.size());
+  }
   // sim.tune support (name-free, like everything above the observation map).
   if (support_.available) {
     result += std::format(
@@ -6987,13 +7271,11 @@ std::string Color_plan::report() const {
 
     for (const auto& slot : boundary_slots_) {
       const auto owner = slot.owner_site == invalid_index ? std::string("-") : sites_[slot.owner_site].structural_id.str();
-      const auto producer_version  = slot.producer_version == invalid_index
-                                         ? std::string("-")
-                                         : version_sites_[slot.producer_version].structural_id.str();
-      const auto producer_color    = slot.producer_color == invalid_index
-                                         ? std::string("-")
-                                         : colors_[slot.producer_color].structural_id.str();
-      result                      += std::format(
+      const auto producer_version
+          = slot.producer_version == invalid_index ? std::string("-") : version_sites_[slot.producer_version].structural_id.str();
+      const auto producer_color
+          = slot.producer_color == invalid_index ? std::string("-") : colors_[slot.producer_color].structural_id.str();
+      result += std::format(
           "boundary-slot {} kind={} version={} owner={} writer-version={} writer-color={} "
           "producer-port={} producer-shift={} producer-extract=[{},{}) public-port={} bits={} unsign={} consumers=",
           slot.structural_id,

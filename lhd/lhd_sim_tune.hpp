@@ -438,7 +438,7 @@ struct Envelope {
   bool                       converged = false;
   std::vector<std::string>   notes;
 };
-[[nodiscard]] std::string short_vector(const Tune_vector& v);  // "d=off f=none lw=256 be=slop"
+[[nodiscard]] std::string short_vector(const Tune_vector& v);  // "d=off f=none lw=512 be=slop"
 [[nodiscard]] std::string reproduce(const Tune_vector& v, std::string_view fill);
 [[nodiscard]] std::string envelope_note(const Envelope& e);
 [[nodiscard]] std::string envelope_json(const Envelope& e);

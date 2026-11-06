@@ -39,9 +39,9 @@ using livehd::sim::kTuneNoFences;
 using livehd::sim::kTuneDefaultLlvm;
 
 // The ladder's rungs on the built-in backend (an unset sim.tune.backend = llvm).
-const Tune_vector kL0{false, kTuneNoFences, 256, kTuneDefaultLlvm};
-const Tune_vector kL1{true, kTuneDefaultFenceRatio, 256, kTuneDefaultLlvm};
-const Tune_vector kL2{true, 0, 256, kTuneDefaultLlvm};
+const Tune_vector kL0{false, kTuneNoFences, livehd::sim::kTuneDefaultLiveWords, kTuneDefaultLlvm};
+const Tune_vector kL1{true, kTuneDefaultFenceRatio, livehd::sim::kTuneDefaultLiveWords, kTuneDefaultLlvm};
+const Tune_vector kL2{true, 0, livehd::sim::kTuneDefaultLiveWords, kTuneDefaultLlvm};
 
 // ---- a synthetic drv.bin raw run file (DESIGN §6.8) ------------------------------------
 
@@ -243,7 +243,7 @@ std::string tmp_dir(std::string_view tag) {
 TEST(SimTuneResolve, DefaultsAreTheCanonicalL1) {
   const auto r = resolve({}, {}, std::nullopt);
   EXPECT_EQ(r.v, kL1);
-  EXPECT_EQ(r.v.tv1(), "tv1:d=on;f=16;lw=256;be=llvm");
+  EXPECT_EQ(r.v.tv1(), "tv1:d=on;f=16;lw=512;be=llvm");
   EXPECT_EQ(r.v, Tune_vector{});  // default-constructed IS the default vector
   EXPECT_EQ(r.dirty, Source::dflt);
   EXPECT_EQ(r.fence, Source::dflt);
@@ -1694,7 +1694,7 @@ TEST(SimTuneFile, ExportImportRoundTrip) {
   std::string err;
   const auto  f = parse_tune_file(text, err);
   ASSERT_TRUE(f.has_value()) << err;
-  EXPECT_EQ(f->pins, (Pins{true, 0, 256, kTuneDefaultLlvm}));
+  EXPECT_EQ(f->pins, (Pins{true, 0, livehd::sim::kTuneDefaultLiveWords, kTuneDefaultLlvm}));
   EXPECT_EQ(f->structure, "S1");
   EXPECT_TRUE(f->converged);
   // file-sourced knobs resolve as "file"
@@ -1758,7 +1758,7 @@ TEST(SimTuneEnvelope, JsonAndNote) {
   e.stats         = s;
   e.pending       = kL0.tv1();
   const auto note = envelope_note(e);
-  EXPECT_EQ(note, "applied d=on f=16 lw=256 be=llvm (default) | I_s=0.12 q=0.00 pairs=812 | next setup: TRIAL d=off f=none");
+  EXPECT_EQ(note, "applied d=on f=16 lw=512 be=llvm (default) | I_s=0.12 q=0.00 pairs=812 | next setup: TRIAL d=off f=none");
 
   rapidjson::Document d;
   const auto          j = envelope_json(e);
@@ -1766,14 +1766,14 @@ TEST(SimTuneEnvelope, JsonAndNote) {
   ASSERT_FALSE(d.HasParseError()) << j;
   EXPECT_EQ(d["schema_version"].GetInt(), 1);
   EXPECT_STREQ(d["mode"].GetString(), "auto");
-  EXPECT_STREQ(d["applied"]["vector"].GetString(), "tv1:d=on;f=16;lw=256;be=llvm");
-  EXPECT_EQ(d["applied"]["live_words"].GetUint64(), 256u);
+  EXPECT_STREQ(d["applied"]["vector"].GetString(), "tv1:d=on;f=16;lw=512;be=llvm");
+  EXPECT_EQ(d["applied"]["live_words"].GetUint64(), 512u);
   EXPECT_STREQ(d["source"]["fence"].GetString(), "default");
   EXPECT_TRUE(d["trial"].IsNull());
   EXPECT_TRUE(d["verdict"].IsNull());
-  EXPECT_STREQ(d["pending"].GetString(), "tv1:d=off;f=none;lw=256;be=llvm");
+  EXPECT_STREQ(d["pending"].GetString(), "tv1:d=off;f=none;lw=512;be=llvm");
   EXPECT_STREQ(d["reproduce"].GetString(),
-               "--set sim.tune.dirty=on --set sim.tune.fence=16 --set sim.tune.live_words=256 --set sim.tune.backend=llvm "
+               "--set sim.tune.dirty=on --set sim.tune.fence=16 --set sim.tune.live_words=512 --set sim.tune.backend=llvm "
                "--set sim.unknown_zero=true");
   EXPECT_STREQ(d["note"].GetString(), note.c_str());
 
@@ -1787,7 +1787,7 @@ TEST(SimTuneEnvelope, JsonAndNote) {
   off.enabled = false;
   off.reason  = "no-workdir";
   off.applied = resolve({}, {}, std::nullopt);
-  EXPECT_EQ(envelope_note(off), "applied d=on f=16 lw=256 be=llvm (default) | tuner off (no-workdir)");
+  EXPECT_EQ(envelope_note(off), "applied d=on f=16 lw=512 be=llvm (default) | tuner off (no-workdir)");
 }
 
 }  // namespace

@@ -327,6 +327,14 @@ Measured on `../lhdsuite` dino and picorv32 (`lhd synth` / `lhd sim`, sky130, `-
   select tree always runs. `aegraph+classic` is a measurement engine: its classic slot still flattens.
   `lhd sim` with `compile.cprop.engine=aegraph compile.aegraph.cost=sim`: dino kernel 2869 (classic 2983), picorv32 4155 (classic
   4502), +4% and +7% cycles/s.
+* `compile.aegraph.cost=sim` also runs `Cprop::vectorize_bit_lanes` in the post steps (2026-11-03): a Set_mask chain of 1-bit
+  writes at consecutive positions whose values are one bitwise tree (And/Or/Xor, `EQ(x, 0)`, a 1-bit Mux) becomes one word
+  write. Each leaf is a stride slice `x[p + t]`, a broadcast (the same value in every lane, a uniform subtree included), or a
+  GATHER of different 1-bit pins into a Concat (a later row reads a window of an earlier gather). A per-lane-select Mux
+  `s[t] ? a[t] : b[t]` becomes `(S & A) | (~S & B)`. bedrock's br_lru_state_internal (the 16x16 LRU matrix of br_arb_lru,
+  `next[i][j] = grant[i] ? 0 : grant[j] ? 1 : state[i][j]`) goes from 120 lane trees to 12 row words: lhdtrack br_arb_lru
+  987 -> 477 simulator sites, 297 -> 41 boundary slots, 1.42 s -> 0.59 s (Verilator 0.76 s). `lhd.stats` reports
+  `aegraph-bit-lanes runs=N lanes=M`; `LHD_DBG_BITLANES=1` traces each chain. Fixture `aeg_bit_lane_rows`.
 * Measured and dropped: `Mux(s, a, ?) = a` and the same for a Hotmux whose arms are `?` (picorv32 has about 1970 such arms): the
   upper bound is -2.7% area and -1.1% kernel instructions, and a faithful version needs un-interned `?` constants in hhds.
   Skipping `vectorize_bit_muxes`, `muxctx::prune`, `mux_op_share` or `vectorize_bit_reductions` changes nothing on dino/picorv32.

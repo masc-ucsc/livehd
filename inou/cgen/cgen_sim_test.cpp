@@ -679,11 +679,11 @@ Tune_hierarchy make_tune_hierarchy(const std::string& tag) {
   return {child, root};
 }
 
-// The RESOLVED knob values lhd hands inou.cgen.sim (default = tv1:d=off;f=none;lw=256;be=slop).
+// The RESOLVED knob values lhd hands inou.cgen.sim (default = tv1:d=off;f=none;lw=512;be=slop).
 struct Tune_knobs {
   bool     dirty           = false;
   int64_t  fence           = livehd::sim::kTuneNoFences;
-  uint32_t live_words      = 256;
+  uint32_t live_words      = 512;
   bool     runtime_support = true;
 };
 
@@ -882,7 +882,7 @@ TEST(CgenSim, TuneVectorKeysOnlyTheRoot) {
   EXPECT_NE(dirty_on.first, base.first);
   EXPECT_NE(fence0.first, base.first);
   EXPECT_NE(lw20.first, base.first);
-  EXPECT_EQ(lw_auto.first, base.first) << "live_words 0 (auto) and 256 build the same plan";
+  EXPECT_EQ(lw_auto.first, base.first) << "live_words 0 (auto) and 512 build the same plan";
   EXPECT_EQ(dirty_16.first, dirty_on.first) << "fence -1 and 16 build the same plan";
 
   // In ONE directory: a flip regenerates only the root; flipping back returns
@@ -1072,7 +1072,7 @@ TEST(CgenSim, TuneIdOnlyForExecutableRoots) {
   };
   emit_hierarchy(h, tag + "_default", {});
   const auto tid_default = slurp(std::filesystem::path(tag + "_default") / "tune_id_top.tune-id.cpp");
-  EXPECT_NE(tid_default.find("\"tv1:d=off;f=none;lw=256;be=slop\""), std::string::npos) << tid_default;
+  EXPECT_NE(tid_default.find("\"tv1:d=off;f=none;lw=512;be=slop\""), std::string::npos) << tid_default;
   EXPECT_FALSE(structure_of(tid).empty());
   EXPECT_EQ(structure_of(tid_default), structure_of(tid));
 

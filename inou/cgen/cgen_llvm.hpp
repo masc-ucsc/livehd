@@ -44,6 +44,24 @@ public:
     ge,
   };
 
+  // Where one value sits in a packed ABI buffer (inputs, outputs, and the
+  // transport buffers of inlined bodies and native loops): bits [bit, bit +
+  // width) of word `word`, or whole words from `word` for a value wider than
+  // 64 bits. `alone` = no other value shares any of its words, so the words
+  // may be loaded and stored whole.
+  struct Packed_field {
+    size_t   word  = 0;
+    uint32_t bit   = 0;
+    bool     alone = true;
+  };
+  // The ONE layout rule, shared by the kernel and its C++ adapter: values of
+  // at most 64 bits pack first-fit into the current word (a value that does
+  // not fit the remaining bits starts the next word); a wider value starts a
+  // fresh word and owns whole words. So 64 one-bit outputs cross as one word,
+  // not 64. `words` receives the buffer length. LHD_SIM_LLVM_WORD_ABI=1 (a
+  // debug A/B switch) gives every value its own word(s), the old layout.
+  [[nodiscard]] static std::vector<Packed_field> packed_layout(const std::vector<uint32_t>& widths, size_t* words = nullptr);
+
   // Packed ABI: inputs, outputs, and changed are disjoint buffers and do not
   // overlap resource storage. Generated callers guarantee this for LLVM noalias.
   // Values (and boundary casts) load lazily at their first arithmetic use.
@@ -123,24 +141,86 @@ public:
     size_t   warn_site          = no_site;
   };
   static constexpr size_t no_site = ~size_t{0};
-  void                bind_memory(std::string_view symbol, const Memory& memory);
-  [[nodiscard]] Value memory_read(std::string_view symbol, Value address, uint32_t result_width, bool result_unsign);
-  [[nodiscard]] Value memory_read_all(std::string_view symbol, uint32_t result_width, bool result_unsign);
-  bool                memory_apply(std::string_view symbol, Value data);
-  bool                memory_clear(std::string_view symbol);
-  bool                memory_stage_whole(std::string_view symbol, Value enable, Value force, Value data);
-  bool                memory_stage_write(std::string_view symbol, Value enable, Value address, Value data);
+  void                    bind_memory(std::string_view symbol, const Memory& memory);
+  [[nodiscard]] Value     memory_read(std::string_view symbol, Value address, uint32_t result_width, bool result_unsign);
+  [[nodiscard]] Value     memory_read_all(std::string_view symbol, uint32_t result_width, bool result_unsign);
+  bool                    memory_apply(std::string_view symbol, Value data);
+  bool                    memory_clear(std::string_view symbol);
+  bool                    memory_stage_whole(std::string_view symbol, Value enable, Value force, Value data);
+  bool                    memory_stage_write(std::string_view symbol, Value enable, Value address, Value data);
   // Phase-barrier entry writes, emitted into a native commit object.
-  bool                memory_commit(std::string_view symbol);
+  bool                    memory_commit(std::string_view symbol);
   // sim.warn_undefined: on a cold branch taken when `condition` is non-zero,
   // set the `hit` flag of resource `site` (a __lhd_undef_site*); the caller
   // polls it after the call and reports the first hit of each site.
-  bool                undefined_if(Value condition, size_t site);
+  bool                    undefined_if(Value condition, size_t site);
 
   // Values cross the ABI as packed little-endian 64-bit words. `index` is the
   // logical output number; physical word offsets are derived from the exact
   // output widths when the object is finalized.
   bool add_output(size_t index, Value value, std::string& error);
+
+  // Direct storage (packed ABI only): a simulator Slop object reached through
+  // resource `resource` of the owner table. Its layout is an int64 type tag
+  // (0 = Integer) followed by the value words: a Slop_u<width> (`canonical`)
+  // keeps them zero-extended over its width+1-bit carrier, a Slop<width>
+  // sign-extended from bit width-1. A storage-bound input loads straight from
+  // the object, and a storage output compares and stores there, so neither
+  // takes space in the packed buffers (packed_layout runs over the others).
+  // `element` indexes an array of such objects at the resource (a color slot
+  // array): the object sits element * sizeof(object) bytes past it, sizeof
+  // being 8 * (1 + value words). One table entry then serves a whole array.
+  struct Storage {
+    size_t   resource  = 0;
+    uint32_t width     = 0;
+    bool     canonical = false;
+    size_t   element   = 0;
+    // Native state (no tag): the value alone at its natural width -- 1, 2, 4
+    // or 8 bytes, or whole words past 64 bits -- zero-extended when
+    // `canonical`, else sign-extended from bit width-1.
+    bool     native    = false;
+    // Bytes past the resource (plus `element`): a field of an instance's
+    // native register run, or a slot array inside the runtime's slot block.
+    size_t   offset    = 0;
+  };
+  // Read input `index` from `storage` instead of the packed input buffer.
+  // Bind before the input's first use.
+  bool bind_storage_input(size_t index, const Storage& storage, std::string& error);
+  // Output `index` is stored into `dest` (its words and the Integer tag), and
+  // its `changed` bit says whether its words differ from `compare`'s (dest
+  // itself when absent). Unlike Slop::identical a non-Integer old tag alone
+  // is not a change: the bits a consumer reads did not move. The bit is always produced. An object this
+  // kernel also reads through a storage input is loaded before the store, so
+  // every read of it sees the old value.
+  // `report_changed` false: no compare and no changed bit (the caller has no
+  // dirty tracking to feed), just the store.
+  // What a changed output does to the simulator's scheduling state, done by
+  // the kernel instead of its caller: OR `mask` into the uint64 word at
+  // resource `resource`, or (`flag`) set the bool there. Effects on one
+  // target accumulate in registers and reach it once, when the kernel ends.
+  // `offset`: bytes past the resource (an element of a word or bool array).
+  struct Change_effect {
+    size_t   resource = 0;
+    uint64_t mask     = 0;
+    bool     flag     = false;
+    size_t   offset   = 0;
+  };
+  // `guard` (1 bit): publish only while it is set -- no compare, store,
+  // changed bit or effect otherwise (a clock-gated register whose gate is
+  // closed keeps its value). The caller guarantees the skipped store is a
+  // no-op: the object already holds the value its reader expects.
+  bool add_storage_output(size_t index, Value value, const Storage& dest, const std::optional<Storage>& compare, std::string& error,
+                          bool report_changed = true, const std::vector<Change_effect>& effects = {},
+                          std::optional<Value> guard = std::nullopt);
+  // Reset-free fast path: `value` (an input, possibly through a widening
+  // resize) is a reset net expected to hold `inactive`. The native object then
+  // checks every such input on entry: all inactive runs a copy of the kernel
+  // with them folded to constants (no reset muxes, no reset-dependent logic);
+  // any other value runs the kernel as built. False when `value` is not an
+  // input this can specialize (the kernel is unchanged then).
+  bool speculate_input(Value value, uint64_t inactive);
+  // Whether input `index` is storage-bound (it then has no packed field).
+  [[nodiscard]] bool is_storage_input(size_t index) const;
   // Compare against `previous_word` (the current-state bank for a pending
   // register), store into `word`, and OR dirty masks when the value changes.
   bool add_state_output(size_t word, size_t previous_word, Value value, const std::vector<Dirty_mask>& dirty, std::string& error);

@@ -1,8 +1,8 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 
-#include <cstddef>
 #include <compare>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <format>
@@ -155,9 +155,10 @@ public:
     // Coarsening may never cross this boundary: doing so would erase the
     // activation contract and force an otherwise idle region to execute.
     size_t         control_owner   = invalid_index;
-    // The Clock_cell VERSION whose closed gate makes this work dead: the version feeds only (through value uses) flops clocked by that
-    // plain cell, so while the cell's sampled enable is low none of it is observed. Coarsening never merges versions with different
-    // owners, so a color is either wholly skippable under one gate or not at all; the cell's version precedes every owned one.
+    // The Clock_cell VERSION whose closed gate makes this work dead: the version feeds only (through value uses) flops clocked by
+    // that plain cell, so while the cell's sampled enable is low none of it is observed. Coarsening never merges versions with
+    // different owners, so a color is either wholly skippable under one gate or not at all; the cell's version precedes every owned
+    // one.
     size_t         gate_owner      = invalid_index;
     hhds::Port_id  output_port     = 0;  // data versions may split a multi-output node by protocol port
     State_version  version         = State_version::pre_rise;
@@ -201,7 +202,7 @@ public:
     bool          top_input           = false;
     bool          preextracted        = false;  // consumer Get_mask is the identity on this lane
     std::string   literal;                      // fixed packed lane selected at an occurrence boundary
-    uint32_t      lane_offset = 0;               // selected lane within a shared ABI word
+    uint32_t      lane_offset = 0;              // selected lane within a shared ABI word
   };
 
   struct Boundary_consumer {
@@ -266,6 +267,7 @@ public:
     uint64_t live_sites                = 0;
     uint64_t physical_occurrence_sites = 0;
     uint64_t compact_loops             = 0;
+    uint64_t color_in_place            = 0;  // flops made destructive after coarsening
     uint64_t conditional_regions       = 0;
     uint64_t carry_edges_cut           = 0;
     // Version edges dropped because producer == consumer. A precedence edge from
@@ -422,14 +424,21 @@ public:
   // and sim.tune.fence was not set explicitly.
   static constexpr int64_t  kNoFences          = livehd::sim::kTuneNoFences;
 
-  [[nodiscard]] const std::vector<Site>&                sites() const noexcept { return sites_; }
-  [[nodiscard]] const std::vector<Dependency>&          dependencies() const noexcept { return dependencies_; }
-  [[nodiscard]] const std::vector<Observation>&         observations() const noexcept { return observations_; }
-  [[nodiscard]] const std::vector<Version_site>&        version_sites() const noexcept { return version_sites_; }
-  [[nodiscard]] const std::vector<Version_dependency>&  version_dependencies() const noexcept { return version_dependencies_; }
-  [[nodiscard]] const std::vector<Value_use>&           value_uses() const noexcept { return value_uses_; }
-  [[nodiscard]] const std::vector<Boundary_slot>&       boundary_slots() const noexcept { return boundary_slots_; }
-  [[nodiscard]] const std::vector<Color>&               colors() const noexcept { return colors_; }
+  [[nodiscard]] const std::vector<Site>&               sites() const noexcept { return sites_; }
+  [[nodiscard]] const std::vector<Dependency>&         dependencies() const noexcept { return dependencies_; }
+  [[nodiscard]] const std::vector<Observation>&        observations() const noexcept { return observations_; }
+  [[nodiscard]] const std::vector<Version_site>&       version_sites() const noexcept { return version_sites_; }
+  [[nodiscard]] const std::vector<Version_dependency>& version_dependencies() const noexcept { return version_dependencies_; }
+  [[nodiscard]] const std::vector<Value_use>&          value_uses() const noexcept { return value_uses_; }
+  [[nodiscard]] const std::vector<Boundary_slot>&      boundary_slots() const noexcept { return boundary_slots_; }
+  [[nodiscard]] const std::vector<Color>&              colors() const noexcept { return colors_; }
+  // A Clock_cell site the LLVM backend evaluates inline (its activation, AND of
+  // its enable, is an ordinary 1-bit value of whatever color holds it): a plain
+  // single gate on a graph-input clock, rise-only, read only as a commit
+  // activation. Other cells keep their own runtime color.
+  [[nodiscard]] bool                                   native_clock_cell(size_t site) const noexcept {
+    return site < native_clock_cells_.size() && native_clock_cells_[site] != 0;
+  }
   // Color indices in EXECUTION ORDER. `Color::execution_order` is already a
   // DENSE rank (assign_color_order stamps 0..N-1), so this is an O(n)
   // placement, not a sort -- and it is computed once instead of at each of the
@@ -484,30 +493,31 @@ private:
   // Cache for colors_in_execution_order(); built on first use.
   mutable std::vector<size_t> colors_in_execution_order_;
 
-  std::vector<hhds::Occurrence_node> outer_nodes_;
-  std::vector<Site>                  sites_;
-  std::vector<Dependency>            dependencies_;
-  std::vector<Observation>           observations_;
-  std::vector<Version_site>          version_sites_;
-  std::vector<Version_dependency>    version_dependencies_;
-  std::vector<Value_use>             value_uses_;
-  std::vector<Boundary_slot>         boundary_slots_;
-  std::vector<Color>                 colors_;
-  std::string                        partition_header_;
-  std::vector<Plan_id>               partition_cuts_;
-  std::vector<Color_dependency>      color_dependencies_;
-  std::vector<Kernel_class>          kernel_classes_;
-  std::vector<std::vector<size_t>>   canonical_members_;
-  Summary                            summary_;
-  std::vector<std::string>           errors_;
-  std::vector<Occurrence>            occurrences_;
-  Support                            support_;
+  std::vector<hhds::Occurrence_node>                                     outer_nodes_;
+  std::vector<Site>                                                      sites_;
+  std::vector<Dependency>                                                dependencies_;
+  std::vector<Observation>                                               observations_;
+  std::vector<Version_site>                                              version_sites_;
+  std::vector<Version_dependency>                                        version_dependencies_;
+  std::vector<Value_use>                                                 value_uses_;
+  std::vector<Boundary_slot>                                             boundary_slots_;
+  std::vector<Color>                                                     colors_;
+  std::vector<char>                                                      native_clock_cells_;  // by site, see native_clock_cell()
+  std::string                                                            partition_header_;
+  std::vector<Plan_id>                                                   partition_cuts_;
+  std::vector<Color_dependency>                                          color_dependencies_;
+  std::vector<Kernel_class>                                              kernel_classes_;
+  std::vector<std::vector<size_t>>                                       canonical_members_;
+  Summary                                                                summary_;
+  std::vector<std::string>                                               errors_;
+  std::vector<Occurrence>                                                occurrences_;
+  Support                                                                support_;
   std::map<std::pair<size_t, hhds::Port_id>, std::vector<hhds::Port_id>> split_loop_support_;
   // Live machine words this plan's coarsener was allowed to keep alive across
   // one color's members. Per-PLAN, not a global: report() prints the budget the
   // colors below were actually built at, so a later discover() at a different
   // budget cannot desynchronize this plan's report from this plan.
-  uint64_t                           live_word_budget_ = kDefaultLiveWords;
+  uint64_t                                                               live_word_budget_ = kDefaultLiveWords;
 };
 
 }  // namespace livehd::sim

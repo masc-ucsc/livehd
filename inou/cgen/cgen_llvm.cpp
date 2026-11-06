@@ -7,13 +7,18 @@
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <map>
+#include <mutex>
 #include <optional>
+#include <set>
+#include <sstream>
 #include <string_view>
 #include <system_error>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 
 #include "cgen_salt.hpp"
@@ -29,6 +34,8 @@
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
+#include "llvm/IR/CFG.h"
+#include "llvm/IR/Dominators.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -50,6 +57,7 @@
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Pass.h"
 #include "llvm/Passes/PassBuilder.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/KnownBits.h"
 #include "llvm/Support/MemoryBuffer.h"
@@ -58,9 +66,11 @@
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/TargetParser/Host.h"
+#include "llvm/Transforms/Scalar/Sink.h"
 #include "llvm/Transforms/IPO/AlwaysInliner.h"
 #include "llvm/Transforms/IPO/GlobalDCE.h"
 #include "llvm/Transforms/InstCombine/InstCombine.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/LowerMemIntrinsics.h"
 #include "sim_llvm_target.hpp"
@@ -89,8 +99,8 @@ public:
       llvm::TimePassesIsEnabled = true;
       llvm::EnableStatistics();
       if (const char* directory = livehd::debug::env<"LHD_LLVM_TIME_PASSES_DIR">()) {
-        const auto filename = std::filesystem::path(directory)
-                              / (std::filesystem::path(path).filename().string() + "." + std::string(stage) + ".log");
+        const auto      filename = std::filesystem::path(directory)
+                                   / (std::filesystem::path(path).filename().string() + "." + std::string(stage) + ".log");
         std::error_code ec;
         report_ = std::make_unique<llvm::raw_fd_ostream>(filename.string(), ec);
         if (ec) {
@@ -175,6 +185,16 @@ Integer_slice integer_slice(llvm::Value* source, uint32_t width) {
 
 constexpr size_t word_count(uint32_t width) { return (static_cast<size_t>(width) + 63) / 64; }
 
+std::vector<uint32_t> widths_of(const std::vector<std::pair<uint32_t, bool>>& types) {
+  std::vector<uint32_t> widths;
+  widths.reserve(types.size());
+  for (const auto& [width, unsign] : types) {
+    (void)unsign;
+    widths.push_back(width);
+  }
+  return widths;
+}
+
 // Native full unroll of an embedded rolled loop (Cgen_llvm::inline_loop).
 // Rolled, a per-bit loop pays a variable shift, mask and insert per lane every
 // cycle (br_flow_arb_rr: ~900 native instructions/cycle against ~400 for the
@@ -186,16 +206,16 @@ constexpr size_t word_count(uint32_t width) { return (static_cast<size_t>(width)
 // the replicated body stays within this many compute instructions (see
 // unroll_cost; lhdtrack br_arb_lru's 16x16 nest needs ~15k and runs 3x faster
 // unrolled, larger loops such as XiangShan's 520-lane ones stay rolled).
-constexpr uint64_t kUnrollBudget   = 16384;
-constexpr uint64_t kUnrollMaxTrips = 256;
+constexpr uint64_t            kUnrollBudget       = 16384;
+constexpr uint64_t            kUnrollMaxTrips     = 256;
 // All unrolls of one kernel together add at most this many compute
 // instructions, so a color holding many loop sites cannot grow into one
 // enormous function.
-constexpr uint64_t kUnrollKernelBudget = 32768;
+constexpr uint64_t            kUnrollKernelBudget = 32768;
 // Instructions that the full unrolls pending in a function still add: a
 // sealed body carries it in its bitcode, so an enclosing loop sizes its own
 // unroll with the inner loops already expanded.
-constexpr llvm::StringLiteral kUnrolledExtra = "lhd-unrolled-extra";
+constexpr llvm::StringLiteral kUnrolledExtra      = "lhd-unrolled-extra";
 
 // The instructions a trip of `function` costs once inlined into a loop: its
 // arithmetic, compares, selects and control. Loads, stores and address
@@ -243,6 +263,792 @@ llvm::Value* cast_integer(llvm::IRBuilder<>& builder, llvm::Value* value, unsign
     value = builder.CreateFreeze(value);
   }
   return source_unsigned ? builder.CreateZExt(value, type) : builder.CreateSExt(value, type);
+}
+
+// Conditional regions (README "Conditional regions in LLVM kernels"). A color
+// kernel is fully if-converted: every Mux is a `select`, so both arms of every
+// `if`/`case` in the design are computed every cycle (picorv32's largest
+// kernel: 841 selects, no branch; Verilator runs only the taken path). This
+// rebuilds the branches after optimization:
+//
+//  * an instruction belongs to arm (group, side) when every user is a select
+//    of that group with the instruction on that side, or another instruction
+//    of the same arm -- its whole value is dead when the other side is taken;
+//  * a group is selects on the SAME condition value (GVN already merged
+//    equal conditions), so several outputs updated under one `if` share ONE
+//    branch (fusion), as long as no user of an earlier select of the group
+//    precedes its last select;
+//  * a group whose arms hold at least `min_cost` instructions of real work
+//    (selects, casts and freezes are free) becomes if/else blocks holding
+//    the arms, and its selects become phis.
+//
+// Only side-effect-free, non-memory instructions move: a load or call stays
+// where it is (sinking a load past a store could change the value it reads).
+// The new blocks are processed again, so an `elif` chain becomes nested
+// branches. Returns the number of regions made.
+// Opt-in (LHD_SIM_LLVM_SHRINK=1): measured neutral on AArch64, whose Hybrid
+// DAG scheduler and pressure-tracking machine scheduler reorder each block
+// anyway (picorv32: 2160 vs 2156 spill accesses, same time).
+// Rematerialization distance (instructions); 0 disables. Opt-in:
+// LHD_SIM_LLVM_REMAT_DIST=<n> (32 is a good value). Measured neutral on
+// picorv32: it traded spill reloads (928 -> 569) for owner-table reloads
+// (97 -> 454) at the same time.
+unsigned remat_distance() {
+  const char* dist = livehd::debug::env<"LHD_SIM_LLVM_REMAT_DIST">();
+  return dist == nullptr ? 0u : static_cast<unsigned>(std::strtoul(dist, nullptr, 0));
+}
+
+// Rematerialize instead of spill (README "Live ranges in LLVM kernels"). A
+// value computed only from invariant loads (an object this kernel never
+// writes, the owner table, the packed inputs) through a few cheap operations
+// can be recomputed anywhere; keeping one copy live across a large kernel is
+// what spilled (picorv32: 306 stack slots). A use more than `distance`
+// instructions after the definition (or in another block) gets its own copy
+// of the chain right before it; nearby uses share that copy.
+unsigned rematerialize_invariant(llvm::Function& function, unsigned distance) {
+  constexpr unsigned                               kMaxChain = 8;
+  std::unordered_map<const llvm::Value*, unsigned> chain;  // instructions to rebuild; absent = not rematerializable
+  const auto                                       cheap = [](const llvm::Instruction& inst) {
+    if (llvm::isa<llvm::CastInst>(inst) || llvm::isa<llvm::GetElementPtrInst>(inst) || llvm::isa<llvm::FreezeInst>(inst)) {
+      return true;
+    }
+    if (const auto* bin = llvm::dyn_cast<llvm::BinaryOperator>(&inst)) {
+      switch (bin->getOpcode()) {
+        case llvm::Instruction::And :
+        case llvm::Instruction::Or  :
+        case llvm::Instruction::Xor :
+        case llvm::Instruction::Shl :
+        case llvm::Instruction::LShr:
+        case llvm::Instruction::AShr:
+        case llvm::Instruction::Add :
+        case llvm::Instruction::Sub : return true;
+        default                     : return false;
+      }
+    }
+    return llvm::isa<llvm::ICmpInst>(inst);
+  };
+  const auto remat_cost = [&](const llvm::Value* value) -> std::optional<unsigned> {
+    if (llvm::isa<llvm::Constant>(value) || llvm::isa<llvm::Argument>(value)) {
+      return 0u;
+    }
+    const auto it = chain.find(value);
+    return it == chain.end() ? std::nullopt : std::optional<unsigned>(it->second);
+  };
+  // Classify in program order (definitions precede uses within a block, and
+  // blocks are visited in layout order, which dominance follows here).
+  for (auto& block : function) {
+    for (auto& inst : block) {
+      const auto* load = llvm::dyn_cast<llvm::LoadInst>(&inst);
+      const bool  root = load != nullptr && load->hasMetadata(llvm::LLVMContext::MD_invariant_load) && !load->isVolatile();
+      if (!root && !cheap(inst)) {
+        continue;
+      }
+      unsigned total = 1;
+      bool     ok    = true;
+      for (const auto& operand : inst.operands()) {
+        const auto cost  = remat_cost(operand.get());
+        ok               = ok && cost.has_value();
+        total           += cost.value_or(0);
+      }
+      if (ok && total <= kMaxChain) {
+        chain[&inst] = total;
+      }
+    }
+  }
+  unsigned cloned = 0;
+  for (auto& block : function) {
+    std::unordered_map<const llvm::Instruction*, size_t> position;
+    size_t                                               pos = 0;
+    for (auto& inst : block) {
+      position[&inst] = pos++;
+    }
+    // Per original value: the latest copy made in this block, and where.
+    std::unordered_map<const llvm::Value*, std::pair<llvm::Value*, size_t>> copies;
+    std::function<llvm::Value*(llvm::Value*, llvm::Instruction*, size_t)>   rebuild
+        = [&](llvm::Value* value, llvm::Instruction* before, size_t at) -> llvm::Value* {
+      auto* inst = llvm::dyn_cast<llvm::Instruction>(value);
+      if (inst == nullptr || !chain.contains(inst)) {
+        return value;
+      }
+      if (inst->getParent() == &block && at >= position[inst] && at - position[inst] <= distance) {
+        return value;  // the original is close enough
+      }
+      if (const auto it = copies.find(inst); it != copies.end() && at - it->second.second <= distance) {
+        return it->second.first;
+      }
+      auto* copy = inst->clone();
+      for (unsigned i = 0; i < copy->getNumOperands(); ++i) {
+        copy->setOperand(i, rebuild(copy->getOperand(i), before, at));
+      }
+      copy->insertBefore(before->getIterator());
+      copies[inst] = {copy, at};
+      ++cloned;
+      return copy;
+    };
+    std::vector<llvm::Instruction*> users;
+    for (auto& inst : block) {
+      users.push_back(&inst);
+    }
+    for (auto* user : users) {
+      if (llvm::isa<llvm::PHINode>(user)) {
+        continue;
+      }
+      const size_t at = position[user];
+      for (unsigned i = 0; i < user->getNumOperands(); ++i) {
+        auto* operand = llvm::dyn_cast<llvm::Instruction>(user->getOperand(i));
+        if (operand == nullptr || !chain.contains(operand) || chain.contains(user)) {
+          continue;  // rebuild chains at their consumers, not inside other chains
+        }
+        if (operand->getParent() == &block && at - position[operand] <= distance) {
+          continue;
+        }
+        user->setOperand(i, rebuild(operand, user, at));
+      }
+    }
+  }
+  // Originals whose every use moved to a copy.
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (auto& block : function) {
+      for (auto it = block.begin(); it != block.end();) {
+        auto& inst = *it++;
+        if (chain.contains(&inst) && inst.use_empty() && !inst.isVolatile()) {
+          chain.erase(&inst);
+          inst.eraseFromParent();
+          changed = true;
+        }
+      }
+    }
+  }
+  return cloned;
+}
+
+bool shrink_enabled() { return livehd::debug::env<"LHD_SIM_LLVM_SHRINK">() != nullptr; }
+
+// Debug only: LHD_SIM_LLVM_ARGS="-opt1 -opt2" reaches LLVM's command-line
+// options once per process (scheduler/register-allocation experiments).
+std::string llvm_debug_args() {
+  const char*           args = livehd::debug::env<"LHD_SIM_LLVM_ARGS">();
+  static std::once_flag once;
+  std::call_once(once, [args] {
+    if (args == nullptr) {
+      return;
+    }
+    std::vector<std::string> words{"lhd"};
+    std::istringstream       in(args);
+    for (std::string word; in >> word;) {
+      words.push_back(word);
+    }
+    std::vector<const char*> argv;
+    for (const auto& word : words) {
+      argv.push_back(word.c_str());
+    }
+    llvm::cl::ParseCommandLineOptions(static_cast<int>(argv.size()), argv.data(), "lhd sim LLVM debug options\n");
+  });
+  return args == nullptr ? std::string{} : std::string{args};
+}
+
+// 0 = disabled.
+unsigned branch_min_cost() {
+  if (livehd::debug::env<"LHD_SIM_LLVM_NO_BRANCH">() != nullptr) {
+    return 0;
+  }
+  const char* min = livehd::debug::env<"LHD_SIM_LLVM_BRANCH_MIN">();
+  return min == nullptr ? 4u : static_cast<unsigned>(std::strtoul(min, nullptr, 0));
+}
+
+// `select c, load A, load B` (each load used only here, same type) reads both
+// objects to keep one. Select the address instead: one load, no branch, no
+// merge (a branch around each load left a PHI whose extension no longer folds
+// into the load: matched_filter +18%). Each load may move down to the select
+// only if nothing between may write its object (alias scope per object).
+unsigned select_load_addresses(llvm::Function& function) {
+  unsigned merged = 0;
+  for (auto& block : function) {
+    std::vector<llvm::SelectInst*> selects;
+    for (auto& inst : block) {
+      if (auto* select = llvm::dyn_cast<llvm::SelectInst>(&inst); select != nullptr && select->getCondition()->getType()->isIntegerTy(1)) {
+        selects.push_back(select);
+      }
+    }
+    for (auto* select : selects) {
+      auto* a = llvm::dyn_cast<llvm::LoadInst>(select->getTrueValue());
+      auto* b = llvm::dyn_cast<llvm::LoadInst>(select->getFalseValue());
+      if (a == nullptr || b == nullptr || a == b || !a->isSimple() || !b->isSimple() || !a->hasOneUse() || !b->hasOneUse()
+          || a->getParent() != &block || b->getParent() != &block || a->getType() != b->getType()
+          || a->getPointerOperandType() != b->getPointerOperandType()) {
+        continue;
+      }
+      const auto safe_to_select = [&](llvm::LoadInst* load) {
+        const auto* scope = load->getMetadata(llvm::LLVMContext::MD_alias_scope);
+        for (auto it = std::next(load->getIterator()); &*it != select; ++it) {
+          if (!it->mayWriteToMemory()) {
+            continue;
+          }
+          const auto* other = it->getMetadata(llvm::LLVMContext::MD_alias_scope);
+          if (!llvm::isa<llvm::StoreInst>(&*it) || scope == nullptr || other == nullptr || other == scope) {
+            return false;
+          }
+        }
+        return true;
+      };
+      if (!safe_to_select(a) || !safe_to_select(b)) {
+        continue;
+      }
+      llvm::IRBuilder<> builder(select);
+      auto* address = builder.CreateSelect(select->getCondition(), a->getPointerOperand(), b->getPointerOperand(), "addr.sel");
+      auto* load    = builder.CreateAlignedLoad(a->getType(), address, std::min(a->getAlign(), b->getAlign()), "load.sel");
+      // Either object: keep only what holds for both (a range union).
+      if (const auto* ra = a->getMetadata(llvm::LLVMContext::MD_range)) {
+        if (const auto* rb = b->getMetadata(llvm::LLVMContext::MD_range)) {
+          load->setMetadata(llvm::LLVMContext::MD_range, llvm::MDNode::getMostGenericRange(const_cast<llvm::MDNode*>(ra), const_cast<llvm::MDNode*>(rb)));
+        }
+      }
+      select->replaceAllUsesWith(load);
+      select->eraseFromParent();
+      a->eraseFromParent();
+      b->eraseFromParent();
+      ++merged;
+    }
+  }
+  return merged;
+}
+
+// Scope-aware sinking after region formation. Splitting a block (an if/else
+// region) strands values defined above the branch whose every use is below
+// it: a load and its extension then sit in different blocks, so instruction
+// selection (per block) cannot fold them, and the value stays live across the
+// arms. Move such an instruction to just before its first use when all its uses
+// are in one block it dominates. A load moves only if no write that may alias
+// it (a call, an unscoped write, or a store of its !alias.scope) lies on any
+// path between; LLVM's Sink refuses any load followed by any store.
+unsigned sink_into_use_blocks(llvm::Function& function) {
+  llvm::DominatorTree dom(function);
+  unsigned            moved = 0;
+  const auto          writes_scope = [](const llvm::Instruction& inst, const llvm::MDNode* scope) {
+    if (!inst.mayWriteToMemory()) {
+      return false;
+    }
+    const auto* other = inst.getMetadata(llvm::LLVMContext::MD_alias_scope);
+    return !llvm::isa<llvm::StoreInst>(&inst) || scope == nullptr || other == nullptr || other == scope;
+  };
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (auto& block : function) {
+      for (auto it = block.rbegin(); it != block.rend();) {
+        auto& inst = *it++;
+        if (inst.isTerminator() || llvm::isa<llvm::PHINode>(inst) || inst.use_empty() || inst.mayHaveSideEffects()) {
+          continue;
+        }
+        const auto* load = llvm::dyn_cast<llvm::LoadInst>(&inst);
+        if (inst.mayReadOrWriteMemory() && (load == nullptr || !load->isSimple())) {
+          continue;
+        }
+        llvm::BasicBlock* target = nullptr;
+        bool              ok     = true;
+        for (const auto* user : inst.users()) {
+          const auto* user_inst = llvm::dyn_cast<llvm::Instruction>(user);
+          if (user_inst == nullptr || llvm::isa<llvm::PHINode>(user_inst)) {
+            ok = false;
+            break;
+          }
+          auto* ub = const_cast<llvm::BasicBlock*>(user_inst->getParent());
+          if (target != nullptr && target != ub) {
+            ok = false;
+            break;
+          }
+          target = ub;
+        }
+        if (!ok || target == nullptr || target == &block || !dom.dominates(&block, target)) {
+          continue;
+        }
+        if (load != nullptr) {
+          const auto* scope = load->getMetadata(llvm::LLVMContext::MD_alias_scope);
+          for (auto rest = std::next(inst.getIterator()); rest != block.end() && ok; ++rest) {
+            ok = !writes_scope(*rest, scope);
+          }
+          // Every block on a path from `block` to `target` (exclusive).
+          std::vector<llvm::BasicBlock*>           work(llvm::succ_begin(&block), llvm::succ_end(&block));
+          std::unordered_set<const llvm::BasicBlock*> seen;
+          while (ok && !work.empty()) {
+            auto* bb = work.back();
+            work.pop_back();
+            if (bb == target || !seen.insert(bb).second) {
+              continue;
+            }
+            if (!dom.dominates(&block, bb)) {
+              ok = false;  // a path escapes the region: keep it simple
+              break;
+            }
+            for (const auto& other : *bb) {
+              if (writes_scope(other, scope)) {
+                ok = false;
+                break;
+              }
+            }
+            work.insert(work.end(), llvm::succ_begin(bb), llvm::succ_end(bb));
+          }
+          // The target's own prefix up to the first use.
+          for (auto& other : *target) {
+            if (!ok) {
+              break;
+            }
+            if (std::ranges::any_of(inst.users(), [&](const llvm::User* u) { return u == &other; })) {
+              break;
+            }
+            ok = !writes_scope(other, scope);
+          }
+          if (!ok) {
+            continue;
+          }
+        }
+        llvm::Instruction* first = nullptr;
+        for (auto& other : *target) {
+          if (std::ranges::any_of(inst.users(), [&](const llvm::User* u) { return u == &other; })) {
+            first = &other;
+            break;
+          }
+        }
+        if (first == nullptr) {
+          continue;
+        }
+        inst.moveBefore(first->getIterator());
+        ++moved;
+        changed = true;
+      }
+    }
+  }
+  return moved;
+}
+
+unsigned conditionalize_selects(llvm::Function& function, unsigned min_cost) {
+  unsigned                       regions = 0;
+  if (livehd::debug::env<"LHD_SIM_LLVM_NO_ADDR_SELECT">() == nullptr) {
+    select_load_addresses(function);
+  }
+  std::vector<llvm::BasicBlock*> work;
+  for (auto& block : function) {
+    work.push_back(&block);
+  }
+  // A simple load is a candidate too: it moves into its arm (later in the
+  // block) only if no store or call that may write its object lies between it
+  // and the branch (next_write, checked per region below). Kernel storage
+  // carries one !alias.scope per object, so a store to another object does
+  // not block it.
+  static const bool arm_loads = livehd::debug::env<"LHD_SIM_LLVM_NO_ARM_LOADS">() == nullptr;
+  const auto        movable   = [](const llvm::Instruction& inst) {
+    if (const auto* load = llvm::dyn_cast<llvm::LoadInst>(&inst)) {
+      return arm_loads && load->isSimple();
+    }
+    return !inst.isTerminator() && !llvm::isa<llvm::PHINode>(inst) && !llvm::isa<llvm::AllocaInst>(inst)
+           && !inst.mayHaveSideEffects() && !inst.mayReadOrWriteMemory();
+  };
+  const auto scope_of = [](const llvm::Instruction* inst) { return inst->getMetadata(llvm::LLVMContext::MD_alias_scope); };
+  const auto scalar_select = [](const llvm::Instruction* inst) -> const llvm::SelectInst* {
+    const auto* select = llvm::dyn_cast<llvm::SelectInst>(inst);
+    return select != nullptr && select->getCondition()->getType()->isIntegerTy(1) ? select : nullptr;
+  };
+  while (!work.empty()) {
+    auto* block = work.back();
+    work.pop_back();
+    std::vector<llvm::Instruction*>                      order;
+    std::unordered_map<const llvm::Instruction*, size_t> position;
+    for (auto& inst : *block) {
+      position[&inst] = order.size();
+      order.push_back(&inst);
+    }
+    // Per load: the block position of the first later instruction that may
+    // write its object (a call, an unscoped write, or a store of its scope).
+    std::unordered_map<const llvm::Instruction*, size_t> next_write;
+    {
+      std::unordered_map<const llvm::MDNode*, size_t> next_store_of_scope;
+      size_t next_barrier = std::numeric_limits<size_t>::max();
+      for (size_t k = order.size(); k-- > 0;) {
+        auto* inst = order[k];
+        if (llvm::isa<llvm::LoadInst>(inst)) {
+          const auto* scope = scope_of(inst);
+          size_t      limit = next_barrier;
+          if (scope == nullptr) {
+            for (const auto& [other, at] : next_store_of_scope) {
+              limit = std::min(limit, at);
+            }
+          } else if (const auto it = next_store_of_scope.find(scope); it != next_store_of_scope.end()) {
+            limit = std::min(limit, it->second);
+          }
+          next_write[inst] = limit;
+        } else if (inst->mayWriteToMemory()) {
+          const auto* scope = scope_of(inst);
+          if (llvm::isa<llvm::StoreInst>(inst) && scope != nullptr) {
+            next_store_of_scope[scope] = k;
+          } else {
+            next_barrier = k;
+          }
+        }
+      }
+    }
+    // 1. Which instructions already sit inside another condition's arm (an
+    //    inner select of an elif chain): those are handled after the outer
+    //    region moves them into its block.
+    using Arm = std::pair<const llvm::Value*, bool>;  // condition, side (true arm)
+    std::unordered_map<const llvm::Instruction*, Arm> arm_of_condition;
+    const auto                                        user_arm
+        = [&](const llvm::Instruction* inst, const llvm::User* user, const auto& arms, const auto& key_of) -> std::optional<Arm> {
+      const auto* inst_user = llvm::dyn_cast<llvm::Instruction>(user);
+      if (inst_user == nullptr || inst_user->getParent() != block) {
+        return std::nullopt;
+      }
+      if (const auto* select = scalar_select(inst_user); select != nullptr && key_of(select).first != nullptr) {
+        const bool on_true  = select->getTrueValue() == inst;
+        const bool on_false = select->getFalseValue() == inst;
+        if (select->getCondition() == inst || on_true == on_false) {
+          return std::nullopt;
+        }
+        return Arm{key_of(select).first, on_true};
+      }
+      const auto it = arms.find(inst_user);
+      return it == arms.end() ? std::nullopt : std::optional<Arm>(it->second);
+    };
+    const auto propagate = [&](std::unordered_map<const llvm::Instruction*, Arm>& arms, const auto& key_of) {
+      for (auto it = order.rbegin(); it != order.rend(); ++it) {
+        auto* inst = *it;
+        if (!movable(*inst) || inst->use_empty()) {
+          continue;
+        }
+        std::optional<Arm> agreed;
+        bool               ok = true;
+        for (const auto* user : inst->users()) {
+          const auto arm = user_arm(inst, user, arms, key_of);
+          if (!arm || (agreed && *agreed != *arm)) {
+            ok = false;
+            break;
+          }
+          agreed = arm;
+        }
+        if (ok && agreed) {
+          arms[inst] = *agreed;
+        }
+      }
+    };
+    propagate(arm_of_condition, [](const llvm::SelectInst* select) { return Arm{select->getCondition(), true}; });
+    // 2. Groups: top-level selects on one condition, in order, cut where a
+    //    user of an earlier member would precede the group's last member.
+    struct Group {
+      std::vector<llvm::SelectInst*> selects;
+      size_t                         first_user = std::numeric_limits<size_t>::max();
+    };
+    std::vector<Group>                                  groups;
+    std::unordered_map<const llvm::Value*, size_t>      open_group;
+    std::unordered_map<const llvm::SelectInst*, size_t> group_of;
+    for (auto* inst : order) {
+      auto* select = llvm::dyn_cast<llvm::SelectInst>(inst);
+      if (select == nullptr || scalar_select(select) == nullptr || arm_of_condition.contains(select)) {
+        continue;
+      }
+      size_t first_user = std::numeric_limits<size_t>::max();
+      for (const auto* user : select->users()) {
+        const auto* user_inst = llvm::dyn_cast<llvm::Instruction>(user);
+        if (user_inst != nullptr && user_inst->getParent() == block) {
+          first_user = std::min(first_user, position[user_inst]);
+        }
+      }
+      auto it = open_group.find(select->getCondition());
+      if (it == open_group.end() || groups[it->second].first_user <= position[select]) {
+        open_group[select->getCondition()] = groups.size();
+        groups.push_back({});
+        it = open_group.find(select->getCondition());
+      }
+      auto& group      = groups[it->second];
+      group.first_user = std::min(group.first_user, first_user);
+      group.selects.push_back(select);
+      group_of[select] = it->second;
+    }
+    // 3. Arms per group (an instruction feeding two groups of one condition
+    //    stays outside both). The arm key is the group index.
+    std::unordered_map<const llvm::Instruction*, Arm> arm_of_group;
+    std::vector<const llvm::Value*>                   group_key(groups.size());
+    for (size_t g = 0; g < groups.size(); ++g) {
+      group_key[g] = groups[g].selects.front();  // a unique, stable identity per group
+    }
+    propagate(arm_of_group, [&](const llvm::SelectInst* select) {
+      const auto it = group_of.find(select);
+      return it == group_of.end() ? Arm{nullptr, true} : Arm{group_key[it->second], true};
+    });
+    // 4. Make the first profitable group a region; its blocks are revisited.
+    for (size_t g = 0; g < groups.size(); ++g) {
+      std::vector<llvm::Instruction*> then_arm, else_arm;
+      // A load may join the arm only if nothing writes its object before the
+      // branch; whatever then feeds an instruction left outside stays too.
+      const size_t                                at = position[groups[g].selects.back()];
+      std::unordered_set<const llvm::Instruction*> in_arm;
+      for (auto* inst : order) {
+        const auto it = arm_of_group.find(inst);
+        if (it != arm_of_group.end() && it->second.first == group_key[g]) {
+          const auto nw = next_write.find(inst);
+          if (nw == next_write.end() || nw->second > at) {
+            in_arm.insert(inst);
+          }
+        }
+      }
+      for (bool changed = true; changed;) {
+        changed = false;
+        for (auto it = order.rbegin(); it != order.rend(); ++it) {
+          auto* inst = *it;
+          if (!in_arm.contains(inst)) {
+            continue;
+          }
+          const bool fed_outside = std::ranges::any_of(inst->users(), [&](const llvm::User* user) {
+            const auto* user_inst = llvm::dyn_cast<llvm::Instruction>(user);
+            if (user_inst == nullptr || in_arm.contains(user_inst)) {
+              return false;
+            }
+            const auto* select = llvm::dyn_cast<llvm::SelectInst>(user_inst);
+            return select == nullptr || !group_of.contains(select) || group_of.at(select) != g;
+          });
+          if (fed_outside) {
+            in_arm.erase(inst);
+            changed = true;
+          }
+        }
+      }
+      for (auto* inst : order) {
+        if (in_arm.contains(inst)) {
+          (arm_of_group.at(inst).second ? then_arm : else_arm).push_back(inst);
+        }
+      }
+      // Cost = real work in the arms. Selects (a mux tree only routes values),
+      // casts and freezes are free: branching over pure routing buys nothing
+      // and costs a branch.
+      const auto work_in = [](const std::vector<llvm::Instruction*>& arm) {
+        return std::ranges::count_if(arm, [](const llvm::Instruction* inst) {
+          return !llvm::isa<llvm::SelectInst>(inst) && !llvm::isa<llvm::CastInst>(inst) && !llvm::isa<llvm::FreezeInst>(inst);
+        });
+      };
+      // A region pays when its arms hold at least `min_cost` real operations
+      // (a load counts as one; a lone load pair became one load above).
+      if (static_cast<size_t>(work_in(then_arm) + work_in(else_arm)) < min_cost) {
+        continue;
+      }
+      // Splitting the block costs: every value defined above the branch and
+      // used below it crosses blocks (instruction selection is per block: a
+      // load no longer folds its extension, and the value stays live across
+      // the arms). Count them.
+      size_t crossing = 0;
+      {
+        const size_t split = position[groups[g].selects.back()];
+        for (size_t k = 0; k < split; ++k) {
+          auto* inst = order[k];
+          if (in_arm.contains(inst) || inst->getType()->isVoidTy()) {
+            continue;
+          }
+          crossing += std::ranges::any_of(inst->users(), [&](const llvm::User* user) {
+            const auto* ui = llvm::dyn_cast<llvm::Instruction>(user);
+            return ui != nullptr && ui->getParent() == block && position[ui] > split && !in_arm.contains(ui);
+          });
+        }
+      }
+      // One operation of required work per `cross_per_op` crossing values
+      // (matched_filter: a 4-op region crossing 254 values cost +12%).
+      static const size_t cross_per_op = [] {
+        const char* v = livehd::debug::env<"LHD_SIM_LLVM_BRANCH_CROSS">();
+        return v == nullptr ? size_t{8} : std::max<size_t>(1, std::strtoul(v, nullptr, 0));
+      }();
+      const auto arm_work = static_cast<size_t>(work_in(then_arm) + work_in(else_arm));
+      if (livehd::debug::env<"LHD_SIM_LLVM_BRANCH_DEBUG">() != nullptr) {
+        std::fprintf(stderr, "[region] work=%zu crossing=%zu block=%zu\n", arm_work, crossing, order.size());
+      }
+      if (arm_work < min_cost + crossing / cross_per_op) {
+        continue;
+      }
+      auto&              group     = groups[g];
+      llvm::Instruction* last      = group.selects.back();
+      llvm::Instruction* then_term = nullptr;
+      llvm::Instruction* else_term = nullptr;
+      llvm::SplitBlockAndInsertIfThenElse(group.selects.front()->getCondition(), last->getIterator(), &then_term, &else_term);
+      for (auto* inst : then_arm) {
+        inst->moveBefore(then_term->getIterator());
+      }
+      for (auto* inst : else_arm) {
+        inst->moveBefore(else_term->getIterator());
+      }
+      auto*             tail = last->getParent();
+      llvm::IRBuilder<> phis(tail, tail->begin());
+      for (auto* select : group.selects) {
+        // A narrow value whose only use extends it: extend in each arm and
+        // merge the wide value, so the extension still folds into a load
+        // (a PHI of i8 then sxtb in the join block cost matched_filter +18%).
+        auto* ext = select->hasOneUse() ? llvm::dyn_cast<llvm::CastInst>(*select->user_begin()) : nullptr;
+        if (ext != nullptr && (llvm::isa<llvm::SExtInst>(ext) || llvm::isa<llvm::ZExtInst>(ext))) {
+          llvm::IRBuilder<> on_true(then_term);
+          llvm::IRBuilder<> on_false(else_term);
+          auto*             t   = on_true.CreateCast(ext->getOpcode(), select->getTrueValue(), ext->getType());
+          auto*             f   = on_false.CreateCast(ext->getOpcode(), select->getFalseValue(), ext->getType());
+          auto*             phi = phis.CreatePHI(ext->getType(), 2, select->getName() + ".arm");
+          phi->addIncoming(t, then_term->getParent());
+          phi->addIncoming(f, else_term->getParent());
+          ext->replaceAllUsesWith(phi);
+          ext->eraseFromParent();
+          select->eraseFromParent();
+          continue;
+        }
+        auto* phi = phis.CreatePHI(select->getType(), 2, select->getName() + ".arm");
+        phi->addIncoming(select->getTrueValue(), then_term->getParent());
+        phi->addIncoming(select->getFalseValue(), else_term->getParent());
+        select->replaceAllUsesWith(phi);
+        select->eraseFromParent();
+      }
+      ++regions;
+      work.push_back(block);
+      work.push_back(then_term->getParent());
+      work.push_back(else_term->getParent());
+      work.push_back(tail);
+      break;
+    }
+  }
+  return regions;
+}
+
+// Register-pressure-aware reordering of each block (README "Live ranges in
+// LLVM kernels"). A kernel's IR follows the color plan's topological member
+// order, which defines many values long before their first use; AArch64's
+// DAG/machine schedulers mostly keep the order they are given, and LLVM's
+// LiveRangeShrink is an X86-only pass that only hoists an instruction to its
+// operands. This list-schedules a block bottom-up to shorten live ranges (the
+// sum of live interval lengths, Shobaki et al.'s SLIL cost, greedily): among
+// the ready instructions -- every user already placed -- take the one that
+// makes the fewest new values live, crediting the value its result stops
+// keeping live; ties keep the original order, so a definition sinks to just
+// before its first use. Dependences: data uses, and memory order (a load
+// stays after the previous store/call, a store/call after every earlier
+// memory access). PHIs, allocas and the terminator stay put.
+unsigned shrink_live_ranges(llvm::Function& function) {
+  unsigned moved = 0;
+  for (auto& block : function) {
+    std::vector<llvm::Instruction*> body;
+    for (auto& inst : block) {
+      if (!llvm::isa<llvm::PHINode>(inst) && !llvm::isa<llvm::AllocaInst>(inst) && !inst.isTerminator()) {
+        body.push_back(&inst);
+      }
+    }
+    if (body.size() < 8) {
+      continue;
+    }
+    const size_t                                         n = body.size();
+    std::unordered_map<const llvm::Instruction*, size_t> index;
+    for (size_t i = 0; i < n; ++i) {
+      index[body[i]] = i;
+    }
+    // successors[i]: instructions that must stay AFTER i.
+    std::vector<std::vector<size_t>> successors(n);
+    std::vector<size_t>              pending(n, 0);  // successors not yet placed (bottom-up readiness)
+    const auto                       edge = [&](size_t before, size_t after) {
+      successors[before].push_back(after);
+      ++pending[before];
+    };
+    size_t              last_write = n;  // n: none
+    std::vector<size_t> reads_since_write;
+    for (size_t i = 0; i < n; ++i) {
+      auto* inst = body[i];
+      for (const auto& operand : inst->operands()) {
+        if (const auto* def = llvm::dyn_cast<llvm::Instruction>(operand.get()); def != nullptr && def->getParent() == &block) {
+          if (const auto it = index.find(def); it != index.end()) {
+            edge(it->second, i);
+          }
+        }
+      }
+      const bool writes = inst->mayWriteToMemory() || inst->mayHaveSideEffects();
+      const bool reads  = inst->mayReadFromMemory();
+      if (writes) {
+        if (last_write != n) {
+          edge(last_write, i);
+        }
+        for (const size_t read : reads_since_write) {
+          edge(read, i);
+        }
+        reads_since_write.clear();
+        last_write = i;
+      } else if (reads) {
+        if (last_write != n) {
+          edge(last_write, i);
+        }
+        reads_since_write.push_back(i);
+      }
+    }
+    // Values live below the block's body: used by the terminator, a PHI, or
+    // another block.
+    std::vector<bool> live(n, false);
+    std::vector<int>  users_left(n, 0);  // in-body users not yet placed
+    for (size_t i = 0; i < n; ++i) {
+      for (const auto* user : body[i]->users()) {
+        const auto* user_inst = llvm::dyn_cast<llvm::Instruction>(user);
+        const auto  it        = user_inst == nullptr ? index.end() : index.find(user_inst);
+        if (it == index.end()) {
+          live[i] = true;
+        } else {
+          ++users_left[i];
+        }
+      }
+    }
+    std::vector<size_t> ready;
+    for (size_t i = 0; i < n; ++i) {
+      if (pending[i] == 0) {
+        ready.push_back(i);
+      }
+    }
+    std::vector<std::vector<size_t>> predecessors(n);
+    for (size_t i = 0; i < n; ++i) {
+      for (const size_t after : successors[i]) {
+        predecessors[after].push_back(i);
+      }
+    }
+    std::vector<size_t> bottom_up;
+    bottom_up.reserve(n);
+    while (!ready.empty()) {
+      size_t best       = 0;
+      int    best_score = std::numeric_limits<int>::max();
+      for (size_t r = 0; r < ready.size(); ++r) {
+        const size_t i     = ready[r];
+        int          score = live[i] ? -1 : 0;  // placing its definition ends its live range above
+        for (const auto& operand : body[i]->operands()) {
+          const auto* def = llvm::dyn_cast<llvm::Instruction>(operand.get());
+          const auto  it  = def == nullptr ? index.end() : index.find(def);
+          if (it != index.end() && !live[it->second]) {
+            ++score;  // a new value becomes live from its definition down to here
+          }
+        }
+        if (score < best_score || (score == best_score && i > ready[best])) {
+          best       = r;
+          best_score = score;
+        }
+      }
+      const size_t i = ready[best];
+      ready[best]    = ready.back();
+      ready.pop_back();
+      bottom_up.push_back(i);
+      live[i] = false;
+      for (const auto& operand : body[i]->operands()) {
+        const auto* def = llvm::dyn_cast<llvm::Instruction>(operand.get());
+        if (const auto it = def == nullptr ? index.end() : index.find(def); it != index.end()) {
+          live[it->second] = true;
+        }
+      }
+      for (const size_t before : predecessors[i]) {
+        if (--pending[before] == 0) {
+          ready.push_back(before);
+        }
+      }
+    }
+    if (bottom_up.size() != n) {
+      continue;  // not a DAG (cannot happen for SSA in one block); keep the order
+    }
+    auto* anchor = block.getTerminator();
+    for (auto it = bottom_up.rbegin(); it != bottom_up.rend(); ++it) {
+      body[*it]->moveBefore(anchor->getIterator());  // appended in schedule order, top to bottom
+    }
+    for (size_t pos = 0; pos < n; ++pos) {
+      moved += bottom_up[n - 1 - pos] != pos;
+    }
+  }
+  return moved;
 }
 
 // Preserve short-circuit evaluation for absorbing Boolean loop carries. After
@@ -331,9 +1137,15 @@ void short_circuit_loop_carries(llvm::Function& function) {
 class Cgen_llvm::Impl {
 public:
   struct Output {
-    size_t index = 0;
-    Value  value;
-    llvm::Instruction* anchor = nullptr;
+    size_t                     index = 0;
+    Value                      value;
+    llvm::Instruction*         anchor = nullptr;
+    // A direct-storage output (add_storage_output): no packed field.
+    std::optional<Storage>     dest;
+    std::optional<Storage>     compare;
+    bool                       report_changed = true;
+    std::vector<Change_effect> effects;
+    std::optional<Value>       guard;  // publish only while set (add_storage_output)
   };
   struct State_output {
     size_t                  word;
@@ -342,33 +1154,45 @@ public:
     std::vector<Dirty_mask> dirty;
   };
 
-  llvm::LLVMContext                       context;
-  std::unique_ptr<llvm::Module>           module;
-  llvm::IRBuilder<>                       builder;
-  llvm::Function*                         function      = nullptr;
-  llvm::Function*                         loop_function = nullptr;
-  llvm::Value*                            inputs        = nullptr;
-  llvm::Value*                            outputs       = nullptr;
-  llvm::Value*                            changed       = nullptr;
-  llvm::Value*                            owner         = nullptr;
-  std::vector<llvm::Value*>               values;
+  llvm::LLVMContext                                                                               context;
+  std::unique_ptr<llvm::Module>                                                                   module;
+  llvm::IRBuilder<>                                                                               builder;
+  llvm::Function*                                                                                 function      = nullptr;
+  llvm::Function*                                                                                 loop_function = nullptr;
+  llvm::Value*                                                                                    inputs        = nullptr;
+  llvm::Value*                                                                                    outputs       = nullptr;
+  llvm::Value*                                                                                    changed       = nullptr;
+  llvm::Value*                                                                                    owner         = nullptr;
+  std::vector<llvm::Value*>                                                                       values;
   // Values are shared only within the current block: cached selections must
   // dominate every extracted lane, including kernels that contain loop blocks.
   std::map<std::tuple<llvm::BasicBlock*, llvm::Value*, llvm::Value*, llvm::Value*>, llvm::Value*> word_muxes;
   std::map<std::tuple<llvm::BasicBlock*, llvm::Value*, uint32_t, uint32_t>, llvm::Value*>         mux_words;
   std::map<std::tuple<llvm::BasicBlock*, llvm::Value*, uint32_t>, llvm::Value*>                   mux_rotations;
-  std::vector<size_t>                     input_word_offsets;
-  std::vector<uint32_t>                   input_bits;
-  std::vector<std::optional<Value>>       deferred_casts;
+  std::vector<size_t>                                                                             input_word_offsets;
+  std::vector<uint32_t>                                                                           input_bits;
+  // The packed ABI layout of the inputs (Cgen_llvm::packed_layout); empty for the state ABI.
+  std::vector<Packed_field>                                                                       input_fields;
+  size_t                                                                                          input_words = 0;
+  // Storage-bound inputs (bind_storage_input) have no packed field: the packed
+  // layout is computed over the others on first use, after every binding.
+  std::vector<std::optional<Storage>>                                                             input_storage;
+  bool                                                                                            input_layout_ready = false;
+  // Every load/store of a storage object, by owner-table resource: seal()
+  // gives each object its own alias scope, noalias against every other one.
+  std::vector<std::pair<llvm::Instruction*, std::pair<size_t, size_t>>>                           storage_accesses;
+  std::vector<std::optional<Value>>                                                               deferred_casts;
+  std::map<size_t, uint64_t>              speculations;   // input id -> inactive value (speculate_input)
+  std::map<size_t, llvm::WeakTrackingVH>  input_handles;  // materialized inputs (null once erased)
   std::vector<std::pair<uint32_t, bool>>  input_types;
   std::vector<Output>                     output_values;
   std::string                             error;
   std::string                             cache_path;
   bool*                                   cache_reused = nullptr;
   std::optional<bool>                     sealed_changed;
-  bool                                    scalar_abi  = false;
-  bool                                    state_abi   = false;
-  size_t                                  state_words = 0;
+  bool                                    scalar_abi   = false;
+  bool                                    state_abi    = false;
+  size_t                                  state_words  = 0;
   uint64_t                                unroll_extra = 0;  // see kUnrolledExtra
   std::vector<State_output>               state_outputs;
   std::unordered_map<std::string, Memory> memories;
@@ -417,7 +1241,7 @@ public:
 
     values.reserve(input_types.size());
     deferred_casts.resize(input_types.size());
-    size_t word_offset = 0;
+    input_storage.resize(input_types.size());
     for (size_t i = 0; i < input_types.size(); ++i) {
       const auto [width, unused_unsigned] = input_types[i];
       (void)unused_unsigned;
@@ -425,7 +1249,9 @@ public:
         error = "LLVM color inputs must have a non-zero width";
         return;
       }
-      const auto offset = layout == nullptr ? word_offset : layout->inputs[i].word;
+      // The packed ABI's offsets come later (ensure_input_layout), once the
+      // storage bindings are known; the state ABI's are fixed here.
+      const auto offset = layout == nullptr ? 0 : layout->inputs[i].word;
       const auto bit    = layout == nullptr ? 0u : layout->inputs[i].bit;
       if (state_abi
           && (bit >= 64 || width > std::numeric_limits<uint32_t>::max() - bit || offset > state_words
@@ -442,7 +1268,6 @@ public:
       } else {
         values.push_back(nullptr);  // Materialize at first use, not at kernel entry.
       }
-      word_offset += word_count(width);
     }
     owner = &*argument;
     owner->setName("owner");
@@ -463,7 +1288,7 @@ public:
         // (A whole-byte width has no padding bits, so it keeps its exact load.)
         auto*      ptr   = builder.CreateConstInBoundsGEP1_64(builder.getInt64Ty(), base, offset);
         const auto words = width % 8 == 0 ? width : static_cast<unsigned>(word_count(width) * 64);
-        auto*      whole = builder.CreateAlignedLoad(builder.getIntNTy(words), ptr, llvm::Align(alignof(uint64_t)), name + ".words");
+        auto* whole = builder.CreateAlignedLoad(builder.getIntNTy(words), ptr, llvm::Align(alignof(uint64_t)), name + ".words");
         return words == width ? whole : builder.CreateTrunc(whole, builder.getIntNTy(width), name + ".bits");
       }
     }
@@ -504,6 +1329,326 @@ public:
     }
   }
 
+  // The packed input layout over the inputs that are not storage-bound. Fixed
+  // at the first packed access; bind_storage_input refuses after that.
+  void ensure_input_layout() {
+    if (input_layout_ready || state_abi) {
+      input_layout_ready = true;
+      return;
+    }
+    input_layout_ready = true;
+    std::vector<uint32_t> widths;
+    for (size_t i = 0; i < input_types.size(); ++i) {
+      if (!input_storage[i]) {
+        widths.push_back(input_types[i].first);
+      }
+    }
+    const auto packed = packed_layout(widths, &input_words);
+    input_fields.assign(input_types.size(), Packed_field{});
+    size_t next = 0;
+    for (size_t i = 0; i < input_types.size(); ++i) {
+      if (!input_storage[i]) {
+        input_fields[i]       = packed[next++];
+        input_word_offsets[i] = input_fields[i].word;
+        input_bits[i]         = input_fields[i].bit;
+      }
+    }
+  }
+  // Direct storage (Cgen_llvm::Storage): tag word, then value words; native
+  // storage is the value alone at its natural width.
+  static size_t storage_words(const Storage& s) { return word_count(s.canonical ? s.width + 1 : s.width); }
+  static unsigned native_bits(const Storage& s) {
+    return s.width <= 8 ? 8 : s.width <= 16 ? 16 : s.width <= 32 ? 32 : static_cast<unsigned>(64 * word_count(s.width));
+  }
+  static size_t storage_bytes(const Storage& s) { return s.native ? native_bits(s) / 8 : 8 * (1 + storage_words(s)); }
+  // The integer image a load or store moves.
+  static unsigned image_bits(const Storage& s) { return s.native ? native_bits(s) : static_cast<unsigned>(storage_words(s) * 64); }
+  static uint64_t image_align(const Storage& s) { return s.native ? std::min<uint64_t>(8, native_bits(s) / 8) : 8; }
+  // Accesses are keyed by (resource, byte offset): one object, or one array element.
+  static std::pair<size_t, size_t> storage_key(const Storage& s) { return {s.resource, s.offset + s.element * storage_bytes(s)}; }
+  llvm::Value*                     storage_base(const Storage& s) {
+    auto* slot = builder.CreateConstInBoundsGEP1_64(builder.getPtrTy(), owner, s.resource);
+    auto* load = builder.CreateLoad(builder.getPtrTy(), slot, "storage");
+    // No !invariant.load: it let LLVM hoist every table load to the entry,
+    // and hundreds of live object pointers spilled (picorv32: 4 KB frame).
+    // Reloading a pointer next to its use is one L1 hit.
+    load->setMetadata(llvm::LLVMContext::MD_nonnull, llvm::MDNode::get(context, {}));
+    const size_t bytes = s.offset + s.element * storage_bytes(s);
+    if (bytes == 0) {
+      return load;
+    }
+    return builder.CreateConstInBoundsGEP1_64(builder.getInt8Ty(), load, bytes);
+  }
+  llvm::Value* storage_words_ptr(llvm::Value* base) { return builder.CreateConstInBoundsGEP1_64(builder.getInt64Ty(), base, 1); }
+  llvm::Value* storage_value_ptr(const Storage& s, llvm::Value* base) { return s.native ? base : storage_words_ptr(base); }
+  llvm::Value* load_storage(const Storage& s, uint32_t width, llvm::StringRef name) {
+    // The whole word image (always in bounds), then the low `width` bits.
+    auto* image = builder.CreateAlignedLoad(builder.getIntNTy(image_bits(s)),
+                                            storage_value_ptr(s, storage_base(s)),
+                                            llvm::Align(image_align(s)),
+                                            name);
+    storage_accesses.emplace_back(image, storage_key(s));
+    // A native value is stored extended from its width (zero when canonical,
+    // else sign): say so, so a 1-bit flag held in a byte needs no mask or test
+    // beyond the byte itself.
+    if (s.native && s.width < image_bits(s) && s.width < 64) {
+      const auto bits = image_bits(s);
+      llvm::APInt lo  = s.canonical ? llvm::APInt(bits, 0) : llvm::APInt::getSignedMinValue(s.width).sext(bits);
+      llvm::APInt hi  = s.canonical ? llvm::APInt::getOneBitSet(bits, s.width) : llvm::APInt::getSignedMaxValue(s.width).sext(bits) + 1;
+      llvm::MDBuilder md(context);
+      image->setMetadata(llvm::LLVMContext::MD_range, md.createRange(lo, hi));
+    }
+    return cast_integer(builder, image, width, true);
+  }
+  // The whole word image a store of `value` leaves (and identical() compares).
+  llvm::Value* storage_image(const Storage& s, llvm::Value* value) {
+    const auto bits = image_bits(s);
+    auto*      v    = cast_integer(builder, value, s.width, true);
+    return s.canonical ? builder.CreateZExt(v, builder.getIntNTy(bits)) : builder.CreateSExt(v, builder.getIntNTy(bits));
+  }
+  // Whether the stored words differ from `value`'s image. Slop::identical
+  // would also call a non-Integer tag different; that only re-settles a
+  // value whose bits did not move (every consumer reads the bits), and the
+  // store below makes the tag Integer, so the tag is not loaded here.
+  llvm::Value* storage_differs(const Storage& s, llvm::Value* value) {
+    auto* base = storage_base(s);
+    auto* old  = builder.CreateAlignedLoad(builder.getIntNTy(image_bits(s)),
+                                           storage_value_ptr(s, base),
+                                           llvm::Align(image_align(s)),
+                                           "storage.old");
+    storage_accesses.emplace_back(llvm::cast<llvm::Instruction>(old), storage_key(s));
+    return builder.CreateICmpNE(old, storage_image(s, value));
+  }
+  void store_storage(const Storage& s, llvm::Value* value) {
+    auto* base  = storage_base(s);
+    auto* store = builder.CreateStore(storage_image(s, value), storage_value_ptr(s, base));
+    store->setAlignment(llvm::Align(image_align(s)));
+    storage_accesses.emplace_back(store, storage_key(s));
+    if (!s.native) {
+      auto* tag = builder.CreateStore(builder.getInt64(0), base);  // Type::Integer
+      storage_accesses.emplace_back(tag, storage_key(s));
+    }
+  }
+  // Distinct storage objects never overlap (each resource is one Slop
+  // object), so their accesses may be reordered freely: without this every
+  // input load stayed above every earlier output store and its value lived
+  // in a register (and spilled) until its use. One object's load and store
+  // share a scope, so an in-place register keeps its order.
+  void scope_storage() {
+    if (storage_accesses.empty()) {
+      return;
+    }
+    llvm::MDBuilder                                    md(context);
+    auto*                                              domain = md.createAnonymousAliasScopeDomain("lhd.storage");
+    std::map<std::pair<size_t, size_t>, llvm::MDNode*> scopes;
+    for (const auto& [instruction, resource] : storage_accesses) {
+      if (!scopes.contains(resource)) {
+        scopes[resource] = md.createAnonymousAliasScope(domain, "object");
+      }
+    }
+    std::map<std::pair<size_t, size_t>, llvm::MDNode*> others;
+    for (const auto& [resource, scope] : scopes) {
+      llvm::SmallVector<llvm::Metadata*> list;
+      for (const auto& [other, other_scope] : scopes) {
+        if (other != resource) {
+          list.push_back(other_scope);
+        }
+      }
+      others[resource] = llvm::MDNode::get(context, list);
+    }
+    for (const auto& [instruction, resource] : storage_accesses) {
+      instruction->setMetadata(llvm::LLVMContext::MD_alias_scope, llvm::MDNode::get(context, {scopes[resource]}));
+      instruction->setMetadata(llvm::LLVMContext::MD_noalias, others[resource]);
+    }
+  }
+  // Loads that read one value for the whole call -- an object this kernel
+  // never writes, the owner table, the packed inputs -- become
+  // `!invariant.load` so rematerialize_invariant may repeat them near each
+  // use. Only at write_module, on this kernel's own function: a native loop
+  // or an inlined body has already copied the body by then, and there the
+  // transport buffer it reads changes every iteration.
+  void mark_invariant_loads() {
+    // A body still called from another function (a loop, an inlined
+    // caller) runs more than once per call of that function: keep it plain.
+    if (remat_distance() == 0 || state_abi || function == nullptr || !function->use_empty()) {
+      return;
+    }
+    std::set<std::pair<size_t, size_t>> written;
+    for (const auto& [instruction, resource] : storage_accesses) {
+      if (llvm::isa<llvm::StoreInst>(instruction)) {
+        written.insert(resource);
+      }
+    }
+    for (const auto& [instruction, resource] : storage_accesses) {
+      if (llvm::isa<llvm::LoadInst>(instruction) && instruction->getFunction() == function && !written.contains(resource)) {
+        instruction->setMetadata(llvm::LLVMContext::MD_invariant_load, llvm::MDNode::get(context, {}));
+      }
+    }
+    for (auto& block : *function) {
+      for (auto& inst : block) {
+        auto* load = llvm::dyn_cast<llvm::LoadInst>(&inst);
+        if (load == nullptr) {
+          continue;
+        }
+        const auto* base = llvm::getUnderlyingObject(load->getPointerOperand());
+        if ((inputs != nullptr && base == inputs) || (owner != nullptr && base == owner)) {
+          load->setMetadata(llvm::LLVMContext::MD_invariant_load, llvm::MDNode::get(context, {}));
+        }
+      }
+    }
+  }
+
+  // Reset-free fast path (speculate_input): the exported function becomes a
+  // dispatcher that reads the speculated inputs and calls `<name>.fast`, a copy
+  // with them folded to their inactive constants, when all of them hold it, and
+  // `<name>.slow` (the kernel as built) otherwise. Returns the bodies.
+  std::vector<llvm::Function*> split_speculation() {
+    if (speculations.empty() || state_abi || scalar_abi || loop_function != nullptr || function == nullptr || !function->use_empty()
+        || livehd::debug::env<"LHD_SIM_LLVM_NO_RESET_SPLIT">() != nullptr) {
+      return {function};
+    }
+    // A speculated value must be computable on entry: loads, casts and
+    // arithmetic over the arguments only (the kernel stores nothing before).
+    std::function<bool(const llvm::Value*, unsigned)> entry_computable = [&](const llvm::Value* v, unsigned depth) {
+      if (llvm::isa<llvm::Argument>(v) || llvm::isa<llvm::Constant>(v)) {
+        return true;
+      }
+      const auto* inst = llvm::dyn_cast<llvm::Instruction>(v);
+      if (inst == nullptr || depth > 16 || llvm::isa<llvm::PHINode>(inst) || llvm::isa<llvm::CallBase>(inst)
+          || (inst->mayHaveSideEffects() && !llvm::isa<llvm::LoadInst>(inst))) {
+        return false;
+      }
+      return std::ranges::all_of(inst->operands(), [&](const llvm::Use& op) { return entry_computable(op.get(), depth + 1); });
+    };
+    std::vector<std::pair<llvm::Instruction*, uint64_t>> specs;
+    for (const auto& [id, inactive] : speculations) {
+      const auto handle = input_handles.find(id);
+      auto*      inst   = handle == input_handles.end() ? nullptr : llvm::dyn_cast_or_null<llvm::Instruction>(handle->second);
+      if (inst != nullptr && inst->getFunction() == function && inst->getType()->isIntegerTy() && entry_computable(inst, 0)) {
+        specs.emplace_back(inst, inactive);
+      }
+    }
+    if (specs.empty()) {
+      return {function};
+    }
+    const std::string       name = function->getName().str();
+    llvm::ValueToValueMapTy fast_map;
+    auto*                   fast = llvm::CloneFunction(function, fast_map);
+    auto*                   slow = function;
+    slow->setName(name + ".slow");
+    fast->setName(name + ".fast");
+    // Inlined into the dispatcher by O2 (one function, two regions, no call on
+    // the hot path). LHD_SIM_LLVM_RESET_CALLS=1 keeps them calls (debug).
+    const bool calls = livehd::debug::env<"LHD_SIM_LLVM_RESET_CALLS">() != nullptr;
+    for (auto* body : {slow, fast}) {
+      body->setLinkage(llvm::GlobalValue::InternalLinkage);
+      body->removeFnAttr(calls ? llvm::Attribute::AlwaysInline : llvm::Attribute::NoInline);
+      body->addFnAttr(calls ? llvm::Attribute::NoInline : llvm::Attribute::AlwaysInline);
+    }
+    for (const auto& [inst, inactive] : specs) {
+      auto* copy = llvm::cast<llvm::Instruction>(fast_map[inst]);
+      copy->replaceAllUsesWith(llvm::ConstantInt::get(copy->getType(), inactive));
+    }
+    auto* dispatch = llvm::Function::Create(slow->getFunctionType(), llvm::GlobalValue::ExternalLinkage, name, *module);
+    dispatch->setAttributes(slow->getAttributes());
+    dispatch->removeFnAttr(llvm::Attribute::NoInline);
+    dispatch->addFnAttr(llvm::Attribute::AlwaysInline);  // as the kernel it replaces
+    auto*                   entry = llvm::BasicBlock::Create(context, "entry", dispatch);
+    llvm::IRBuilder<>       at(entry);
+    llvm::ValueToValueMapTy entry_map;
+    for (auto [from, to] = std::pair{slow->arg_begin(), dispatch->arg_begin()}; from != slow->arg_end(); ++from, ++to) {
+      to->setName(from->getName());
+      entry_map[&*from] = &*to;
+    }
+    std::function<llvm::Value*(llvm::Value*)> copy_to_entry = [&](llvm::Value* v) -> llvm::Value* {
+      if (llvm::isa<llvm::Constant>(v)) {
+        return v;
+      }
+      if (auto it = entry_map.find(v); it != entry_map.end()) {
+        return it->second;
+      }
+      auto* inst  = llvm::cast<llvm::Instruction>(v);
+      auto* clone = inst->clone();
+      for (auto& op : clone->operands()) {
+        op.set(copy_to_entry(op.get()));
+      }
+      at.Insert(clone);
+      entry_map[v] = clone;
+      return clone;
+    };
+    llvm::Value* quiet = at.getTrue();
+    for (const auto& [inst, inactive] : specs) {
+      auto* value = copy_to_entry(inst);
+      quiet       = at.CreateAnd(quiet, at.CreateICmpEQ(value, llvm::ConstantInt::get(value->getType(), inactive)));
+    }
+    auto* fast_block = llvm::BasicBlock::Create(context, "reset.free", dispatch);
+    auto* slow_block = llvm::BasicBlock::Create(context, "reset", dispatch);
+    at.CreateCondBr(quiet, fast_block, slow_block, llvm::MDBuilder(context).createLikelyBranchWeights());
+    std::vector<llvm::Value*> args;
+    for (auto& arg : dispatch->args()) {
+      args.push_back(&arg);
+    }
+    for (auto [block, callee] : {
+             std::pair{fast_block, fast},
+             std::pair{slow_block, slow}
+    }) {
+      llvm::IRBuilder<> call_at(block);
+      auto*             call = call_at.CreateCall(callee, args);
+      call->setTailCallKind(llvm::CallInst::TCK_Tail);
+      call_at.CreateRetVoid();
+    }
+    function = dispatch;
+    return {fast, slow};
+  }
+
+  // One value of a packed buffer (Cgen_llvm::packed_layout).
+  llvm::Value* load_field(llvm::Value* base, const Packed_field& field, uint32_t width, llvm::StringRef name) {
+    if (field.bit == 0) {
+      return load_packed(base, field.word, width, name);
+    }
+    auto* raw = load_packed(base, field.word, width + field.bit, name);
+    return cast_integer(builder, builder.CreateLShr(raw, field.bit), width, true);
+  }
+  // A shared word is read-modify-written: its other bits belong to other
+  // values. Transport buffers holding shared words are zeroed before use.
+  void store_field(llvm::Value* value, llvm::Value* base, const Packed_field& field, uint32_t width) {
+    if (field.alone) {
+      store_packed(value, base, field.word, width);
+      return;
+    }
+    auto*          i64  = builder.getInt64Ty();
+    auto*          ptr  = builder.CreateConstInBoundsGEP1_64(i64, base, field.word);
+    const uint64_t mask = (width >= 64 ? ~uint64_t{0} : (uint64_t{1} << width) - 1) << field.bit;
+    auto*          bits = builder.CreateShl(cast_integer(builder, value, 64, true), field.bit);
+    auto*          old  = builder.CreateLoad(i64, ptr, "field.word");
+    builder.CreateStore(
+        builder.CreateOr(builder.CreateAnd(old, builder.getInt64(~mask)), builder.CreateAnd(bits, builder.getInt64(mask))),
+        ptr);
+  }
+  void zero_words(llvm::Value* base, size_t words) {
+    for (size_t i = 0; i < words; ++i) {
+      builder.CreateStore(builder.getInt64(0), builder.CreateConstInBoundsGEP1_64(builder.getInt64Ty(), base, i));
+    }
+  }
+  // Over output_values in index order; a storage output gets an unused field.
+  std::vector<Packed_field> output_fields(size_t* words) const {
+    std::vector<uint32_t> widths;
+    for (const auto& output : output_values) {
+      if (!output.dest) {
+        widths.push_back(output.value.width);
+      }
+    }
+    const auto                packed = packed_layout(widths, words);
+    std::vector<Packed_field> fields(output_values.size());
+    size_t                    next = 0;
+    for (size_t i = 0; i < output_values.size(); ++i) {
+      if (!output_values[i].dest) {
+        fields[i] = packed[next++];
+      }
+    }
+    return fields;
+  }
+
   llvm::Value* resource(size_t index) {
     auto* slot = builder.CreateConstInBoundsGEP1_64(builder.getPtrTy(), owner, index);
     return builder.CreateLoad(builder.getPtrTy(), slot, "resource");
@@ -529,7 +1674,8 @@ public:
     auto* done = llvm::BasicBlock::Create(context, "undefined.done", function);
     builder.CreateCondBr(hit, yes, done, llvm::MDBuilder(context).createUnlikelyBranchWeights());
     builder.SetInsertPoint(yes);
-    builder.CreateStore(builder.getInt8(1), builder.CreateConstInBoundsGEP1_64(builder.getInt8Ty(), resource(site), 2 * sizeof(void*)));
+    builder.CreateStore(builder.getInt8(1),
+                        builder.CreateConstInBoundsGEP1_64(builder.getInt8Ty(), resource(site), 2 * sizeof(void*)));
     builder.CreateBr(done);
     builder.SetInsertPoint(done);
   }
@@ -568,8 +1714,8 @@ public:
       when(active, [&] {
         auto* address = builder.CreateLoad(builder.getInt64Ty(), word_ptr(pending, 3 * word_count(m.bits)));
         auto* ptr     = builder.CreateInBoundsGEP(builder.getInt64Ty(),
-                                              resource(m.data),
-                                              builder.CreateMul(address, builder.getInt64(word_count(m.bits))));
+                                                  resource(m.data),
+                                                  builder.CreateMul(address, builder.getInt64(word_count(m.bits))));
         auto* old     = load_packed(ptr, 0, m.bits, "memory.old");
         auto* data    = load_packed(pending, 0, m.bits, "memory.new");
         auto* mask    = load_packed(pending, word_count(m.bits), m.bits, "memory.mask");
@@ -616,14 +1762,22 @@ public:
   }
 
   llvm::Value* get(Value value) {
+    if (value.id < input_types.size() && value.id < values.size() && values[value.id] == nullptr && value.width != 0 && !state_abi
+        && input_storage[value.id]) {
+      const auto width        = input_types[value.id].first;
+      values[value.id]        = cast_integer(builder, load_storage(*input_storage[value.id], width, "in.storage"), width, true);
+      input_handles[value.id] = values[value.id];
+    }
     if (value.id < input_types.size() && value.id < values.size() && values[value.id] == nullptr && value.width != 0) {
+      ensure_input_layout();
       const auto width  = input_types[value.id].first;
       const auto bit    = input_bits[value.id];
       auto*      loaded = load_packed(inputs, input_word_offsets[value.id], width + bit, "in");
       if (bit != 0) {
         loaded = builder.CreateLShr(loaded, bit);
       }
-      values[value.id] = cast_integer(builder, loaded, width, true);
+      values[value.id]        = cast_integer(builder, loaded, width, true);
+      input_handles[value.id] = values[value.id];
     }
     if (value.id < values.size() && values[value.id] == nullptr && deferred_casts[value.id]) {
       const auto source  = *deferred_casts[value.id];
@@ -668,6 +1822,44 @@ Cgen_llvm::~Cgen_llvm()                               = default;
 Cgen_llvm::Cgen_llvm(Cgen_llvm&&) noexcept            = default;
 Cgen_llvm& Cgen_llvm::operator=(Cgen_llvm&&) noexcept = default;
 
+std::vector<Cgen_llvm::Packed_field> Cgen_llvm::packed_layout(const std::vector<uint32_t>& widths, size_t* words) {
+  const bool                word_abi = livehd::debug::env<"LHD_SIM_LLVM_WORD_ABI">();
+  std::vector<Packed_field> fields;
+  fields.reserve(widths.size());
+  std::vector<uint32_t> users;  // narrow values per word
+  size_t                word = 0;
+  uint32_t              bit  = 0;
+  for (const auto width : widths) {
+    if (width > 64 || word_abi) {
+      if (bit != 0) {
+        ++word;
+        bit = 0;
+      }
+      fields.push_back(Packed_field{word, 0, true});
+      word += std::max<size_t>(1, word_count(width));
+      continue;
+    }
+    if (bit + width > 64) {
+      ++word;
+      bit = 0;
+    }
+    fields.push_back(Packed_field{word, bit, true});
+    users.resize(word + 1, 0);
+    ++users[word];
+    bit += width;
+  }
+  const size_t total = word + (bit != 0 ? 1 : 0);
+  for (size_t i = 0; i < fields.size(); ++i) {
+    if (widths[i] <= 64 && !word_abi && fields[i].word < users.size()) {
+      fields[i].alone = users[fields[i].word] == 1;
+    }
+  }
+  if (words != nullptr) {
+    *words = total;
+  }
+  return fields;
+}
+
 Cgen_llvm::Value Cgen_llvm::input(size_t index) const {
   if (index >= impl_->input_types.size()) {
     return {};
@@ -699,7 +1891,7 @@ Cgen_llvm::Value Cgen_llvm::resize(Value value, uint32_t result_width, bool resu
 
 Cgen_llvm::Value Cgen_llvm::concat(const std::vector<Value>& lanes) {
   std::vector<Integer_slice> slices;
-  uint64_t           total = 0;
+  uint64_t                   total = 0;
   for (const auto lane : lanes) {
     auto* source = impl_->get(lane);
     if (source == nullptr || lane.width == 0) {
@@ -820,7 +2012,8 @@ Cgen_llvm::Value Cgen_llvm::dynamic_extract(Value source, Value count, uint32_t 
   llvm::Value* base   = nullptr;
   size_t       offset = 0;
   if (impl_->inputs != nullptr && source.id < impl_->input_types.size() && impl_->input_types[source.id].first == source.width
-      && impl_->input_bits[source.id] == 0) {
+      && (impl_->ensure_input_layout(), true) && !impl_->input_storage[source.id] && impl_->input_bits[source.id] == 0
+      && (impl_->input_fields.empty() || impl_->input_fields[source.id].alone)) {
     base   = impl_->inputs;  // a kernel input: its packed words are already in the input buffer
     offset = impl_->input_word_offsets[source.id];
   } else {
@@ -973,8 +2166,8 @@ Cgen_llvm::Value Cgen_llvm::binary(Binary_op op, Value lhs, Value rhs, uint32_t 
     return impl_->remember(cast_integer(impl_->builder, selected, result_width, true), result_width, result_unsign);
   }
 
-  const bool comparison = op == Binary_op::eq || op == Binary_op::ne || op == Binary_op::lt || op == Binary_op::le
-                          || op == Binary_op::gt || op == Binary_op::ge;
+  const bool comparison      = op == Binary_op::eq || op == Binary_op::ne || op == Binary_op::lt || op == Binary_op::le
+                               || op == Binary_op::gt || op == Binary_op::ge;
   const bool ordered         = op == Binary_op::lt || op == Binary_op::le || op == Binary_op::gt || op == Binary_op::ge;
   // An ORDERED compare is sign-aware and a mixed-sign pair has no common
   // interpretation at max(width): the unsigned side's top bit would be read as
@@ -1287,9 +2480,9 @@ Cgen_llvm::Value Cgen_llvm::memory_read(std::string_view symbol, Value address, 
   if (m.warn_site != no_site) {
     impl_->undefined_if(b.CreateNot(valid), m.warn_site);
   }
-  auto*       index = cast_integer(b, impl_->get(address), 64, address.unsign);
-  auto*       safe  = b.CreateSelect(valid, index, b.getInt64(0));
-  auto*       ptr = b.CreateInBoundsGEP(b.getInt64Ty(), impl_->resource(m.data), b.CreateMul(safe, b.getInt64(word_count(m.bits))));
+  auto* index = cast_integer(b, impl_->get(address), 64, address.unsign);
+  auto* safe  = b.CreateSelect(valid, index, b.getInt64(0));
+  auto* ptr   = b.CreateInBoundsGEP(b.getInt64Ty(), impl_->resource(m.data), b.CreateMul(safe, b.getInt64(word_count(m.bits))));
   llvm::Value* value = impl_->load_packed(ptr, 0, m.bits, "memory.read");
   for (uint32_t port = 0; port < std::max(m.forward, m.undefined); ++port) {
     auto* pending = impl_->pending_ptr(m, port);
@@ -1437,7 +2630,7 @@ bool Cgen_llvm::memory_stage_write(std::string_view symbol, Value enable, Value 
       active = b.CreateTrunc(b.CreateLShr(wen, llvm::ConstantInt::get(wen->getType(), lane)), b.getInt1Ty());
     }
     auto lane_mask = llvm::APInt::getBitsSet(m.bits, lane * (m.bits / m.lanes), (lane + 1) * (m.bits / m.lanes));
-    mask           = b.CreateOr(mask,
+    mask = b.CreateOr(mask,
                       b.CreateSelect(active, llvm::ConstantInt::get(mask_type, lane_mask), llvm::ConstantInt::get(mask_type, 0)));
   }
   auto* in_range = impl_->valid_address(address, m.size);
@@ -1503,6 +2696,89 @@ bool Cgen_llvm::add_output(size_t index, Value value, std::string& error) {
   // This marker is removed by seal, before verification or optimization.
   auto* anchor = new llvm::FreezeInst(impl_->get(value), "output.anchor", impl_->builder.GetInsertBlock());
   impl_->output_values.push_back({index, value, anchor});
+  return true;
+}
+
+bool Cgen_llvm::bind_storage_input(size_t index, const Storage& storage, std::string& error) {
+  if (impl_->state_abi || impl_->scalar_abi || index >= impl_->input_types.size() || storage.width == 0
+      || storage.width != impl_->input_types[index].first) {
+    error = "invalid LLVM storage input";
+    return false;
+  }
+  if (impl_->input_layout_ready || impl_->values[index] != nullptr) {
+    error = "LLVM storage inputs must be bound before any input is used";
+    return false;
+  }
+  impl_->input_storage[index] = storage;
+  return true;
+}
+
+bool Cgen_llvm::is_storage_input(size_t index) const {
+  return index < impl_->input_storage.size() && impl_->input_storage[index].has_value();
+}
+
+bool Cgen_llvm::add_storage_output(size_t index, Value value, const Storage& dest, const std::optional<Storage>& compare,
+                                   std::string& error, bool report_changed, const std::vector<Change_effect>& effects,
+                                   std::optional<Value> guard) {
+  if (guard && (guard->width != 1 || impl_->get(*guard) == nullptr)) {
+    error = "invalid LLVM storage output guard";
+    return false;
+  }
+  if (impl_->state_abi || impl_->scalar_abi || dest.width == 0 || (compare && compare->width != dest.width)) {
+    error = "invalid LLVM storage output";
+    return false;
+  }
+  if (value.width == 0 || impl_->get(value) == nullptr) {
+    error = impl_->error.empty() ? "invalid LLVM color output" : impl_->error;
+    return false;
+  }
+  // An object this kernel also reads (an in-place register's Q): load the
+  // old value now, so every read of it -- earlier or later -- sees the value
+  // before this store. The store then publishes here like any output instead
+  // of waiting for the end, which kept every in-place next-state live across
+  // the whole kernel (picorv32: 57 registers, a 4 KB spill frame).
+  // The same OBJECT, not merely the same table entry: one native frame base
+  // serves every register and slot (Storage::offset), and matching on the
+  // resource alone loaded every input before the first store (picorv32: all
+  // loads at the kernel entry, +250 spills).
+  const auto bytes_of = [&](const Storage& st) {
+    const size_t begin = st.offset + st.element * Impl::storage_bytes(st);
+    return std::pair{begin, begin + Impl::storage_bytes(st)};
+  };
+  const auto [dest_begin, dest_end] = bytes_of(dest);
+  for (size_t input = 0; input < impl_->input_storage.size(); ++input) {
+    const auto& in = impl_->input_storage[input];
+    if (!in || in->resource != dest.resource) {
+      continue;
+    }
+    const auto [in_begin, in_end] = bytes_of(*in);
+    if (in_begin < dest_end && dest_begin < in_end) {
+      (void)impl_->get(this->input(input));
+    }
+  }
+  auto* anchor = new llvm::FreezeInst(impl_->get(value), "output.anchor", impl_->builder.GetInsertBlock());
+  impl_->output_values.push_back({index, value, anchor, dest, compare, report_changed || !effects.empty(), effects, guard});
+  return true;
+}
+
+bool Cgen_llvm::speculate_input(Value value, uint64_t inactive) {
+  // Look through widening resizes: the input then holds the same value.
+  while (value.id < impl_->deferred_casts.size() && impl_->deferred_casts[value.id] && value.id >= impl_->input_types.size()) {
+    const auto source = *impl_->deferred_casts[value.id];
+    if (source.width > value.width) {
+      return false;  // a narrowing view does not pin the whole input
+    }
+    value = source;
+  }
+  if (value.id >= impl_->input_types.size() || value.width == 0 || value.width > 64 || impl_->state_abi || impl_->scalar_abi
+      || (value.width < 64 && (inactive >> value.width) != 0)) {
+    return false;
+  }
+  const auto [it, inserted] = impl_->speculations.try_emplace(value.id, inactive);
+  if (!inserted && it->second != inactive) {
+    impl_->speculations.erase(it);  // two readings of one net disagree: leave it dynamic
+    return false;
+  }
   return true;
 }
 
@@ -1596,11 +2872,11 @@ bool Cgen_llvm::write_state_object(std::string_view path, std::string_view descr
   if (!words.empty()) {
     auto* values = llvm::ConstantArray::get(llvm::ArrayType::get(word_type, words.size()), words);
     auto* table  = new llvm::GlobalVariable(*impl_->module,
-                                           values->getType(),
-                                           true,
-                                           llvm::GlobalValue::PrivateLinkage,
-                                           values,
-                                           "state.defaults");
+                                            values->getType(),
+                                            true,
+                                            llvm::GlobalValue::PrivateLinkage,
+                                            values,
+                                            "state.defaults");
     table->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
     defaults = table;
   }
@@ -1683,6 +2959,10 @@ bool Cgen_llvm::seal(std::string& error, bool track_changed) {
     uint32_t     total_bits = 0;
     llvm::Value* result     = impl_->builder.getInt64(0);
     for (const auto& output : impl_->output_values) {
+      if (output.dest) {
+        error = "scalar LLVM ABI cannot publish into direct storage";
+        return false;
+      }
       if (output.value.width > 64 - total_bits) {
         error = "scalar LLVM ABI outputs exceed 64 packed bits";
         return false;
@@ -1699,49 +2979,167 @@ bool Cgen_llvm::seal(std::string& error, bool track_changed) {
   } else {
     auto*        i64           = impl_->builder.getInt64Ty();
     const size_t changed_words = (impl_->output_values.size() + 63) / 64;
-    const auto   end           = impl_->builder.saveIP();
-    const bool   publish_early = impl_->output_values.size() > 1;
-    if (track_changed) {
-      if (publish_early) {
-        auto& entry = impl_->function->getEntryBlock();
+    // The return exists first: a guarded output splits blocks, and the tail
+    // code below goes right before the return wherever it ends up.
+    auto*        ret           = impl_->builder.CreateRetVoid();
+    impl_->builder.SetInsertPoint(ret);
+    const bool publish_early = impl_->output_values.size() > 1;
+    // Words shared by several narrow outputs (packed_layout) are zeroed up
+    // front, after their previous values are read for the changed bits, and
+    // every output ORs its field in where it is published.
+    const auto fields        = impl_->output_fields(nullptr);
+    const bool any_storage   = std::ranges::any_of(impl_->output_values, [](const auto& o) { return o.dest.has_value(); });
+    std::map<size_t, llvm::Value*> old_words;  // shared word -> its value on entry
+    {
+      auto& entry = impl_->function->getEntryBlock();
+      if (publish_early || track_changed) {
         impl_->builder.SetInsertPoint(&entry, entry.getFirstInsertionPt());
       }
-      for (size_t word = 0; word < changed_words; ++word) {
-        auto* ptr = impl_->builder.CreateConstInBoundsGEP1_64(i64, impl_->changed, word);
-        impl_->builder.CreateStore(llvm::ConstantInt::get(i64, 0), ptr);
+      for (const auto& field : fields) {
+        if (!field.alone && !old_words.contains(field.word)) {
+          old_words[field.word] = track_changed
+                                      ? impl_->builder.CreateLoad(i64, impl_->word_ptr(impl_->outputs, field.word), "out.old.word")
+                                      : nullptr;
+        }
+      }
+      for (const auto& [word, unused] : old_words) {
+        (void)unused;
+        impl_->builder.CreateStore(llvm::ConstantInt::get(i64, 0), impl_->word_ptr(impl_->outputs, word));
+      }
+      // A storage output always reports its changed bit (the adapter's dirty
+      // and commit logic reads it), whatever track_changed says. The bits are
+      // accumulated locally and every word is written at the end (below).
+      if (!publish_early) {
+        impl_->builder.SetInsertPoint(ret);
       }
     }
-    size_t output_word_offset = 0;
-    std::vector<size_t> offsets;
-    for (const auto& output : impl_->output_values) {
-      offsets.push_back(output_word_offset);
-      output_word_offset += word_count(output.value.width);
+    // Changed bits accumulate in a local array SROA keeps in registers, and
+    // reach the caller's buffer once, at the end: a load/or/store on the
+    // caller's word per output was a third of a large kernel's memory traffic.
+    llvm::Value* changed_acc = nullptr;
+    if (any_storage || track_changed) {
+      changed_acc             = impl_->local_words(changed_words, "changed.acc");
+      auto&             entry = impl_->function->getEntryBlock();
+      llvm::IRBuilder<> init(&entry, std::next(llvm::cast<llvm::Instruction>(changed_acc)->getIterator()));
+      for (size_t word = 0; word < changed_words; ++word) {
+        init.CreateStore(llvm::ConstantInt::get(i64, 0), init.CreateConstInBoundsGEP1_64(i64, changed_acc, word));
+      }
     }
+    const auto set_changed = [&](size_t index, llvm::Value* diff) {
+      auto*        ptr  = impl_->builder.CreateConstInBoundsGEP1_64(i64, changed_acc, index / 64);
+      llvm::Value* bits = impl_->builder.CreateLoad(i64, ptr, "changed.old");
+      auto*        flag = llvm::ConstantInt::get(i64, uint64_t{1} << (index % 64));
+      bits              = impl_->builder.CreateOr(bits, impl_->builder.CreateSelect(diff, flag, llvm::ConstantInt::get(i64, 0)));
+      impl_->builder.CreateStore(bits, ptr);
+    };
+    // Change effects accumulate per target (an OR mask, or a flag) in SSA
+    // and reach memory once, at the end (below).
+    using Effect_key = std::tuple<size_t, size_t, bool>;  // resource, byte offset, flag
+    std::map<Effect_key, llvm::Value*> effect_acc;
+    // A target only one output marks (a staged flop's commit flag) is updated
+    // at that output: accumulating one value per such flag kept ~150 live
+    // registers across picorv32's largest kernel. Shared targets (dirty
+    // words) accumulate.
+    std::map<Effect_key, size_t>       effect_users;
+    for (const auto& output : impl_->output_values) {
+      for (const auto& effect : output.effects) {
+        ++effect_users[{effect.resource, effect.offset, effect.flag}];
+      }
+    }
+    const auto apply_effect = [&](const Effect_key& key, llvm::Value* bits) {
+      const auto [index, offset, flag] = key;
+      const std::pair<size_t, size_t> resource{index, offset};
+      auto* slot = impl_->builder.CreateConstInBoundsGEP1_64(impl_->builder.getPtrTy(), impl_->owner, index);
+      auto* base = impl_->builder.CreateLoad(impl_->builder.getPtrTy(), slot, "effect");
+      auto* ptr  = offset == 0 ? base : impl_->builder.CreateConstInBoundsGEP1_64(impl_->builder.getInt8Ty(), base, offset);
+      if (flag) {  // a C++ bool: one byte, 0 or 1
+        auto* old = impl_->builder.CreateLoad(impl_->builder.getInt8Ty(), ptr, "effect.flag");
+        auto* set = impl_->builder.CreateOr(old, impl_->builder.CreateZExt(bits, impl_->builder.getInt8Ty()));
+        impl_->storage_accesses.emplace_back(old, resource);
+        impl_->storage_accesses.emplace_back(impl_->builder.CreateStore(set, ptr), resource);
+      } else {
+        auto* old = impl_->builder.CreateLoad(i64, ptr, "effect.word");
+        impl_->storage_accesses.emplace_back(old, resource);
+        impl_->storage_accesses.emplace_back(impl_->builder.CreateStore(impl_->builder.CreateOr(old, bits), ptr), resource);
+      }
+    };
+    // Compare (against the old object, or `compare`), report, then store.
+    // A guarded output does all of it inside `if (guard)`; its shared effects
+    // are applied there too (an SSA accumulator would not dominate the end).
+    const auto publish_storage = [&](const Impl::Output& output) {
+      auto* value = impl_->get(output.value);
+      if (output.guard) {
+        auto* cond = impl_->get(*output.guard);
+        if (cond->getType() != impl_->builder.getInt1Ty()) {
+          cond = impl_->builder.CreateTrunc(cond, impl_->builder.getInt1Ty());
+        }
+        auto* then_term = llvm::SplitBlockAndInsertIfThen(cond, impl_->builder.GetInsertPoint(), false);
+        impl_->builder.SetInsertPoint(then_term);
+      }
+      if (output.report_changed) {
+        auto* diff = impl_->storage_differs(output.compare.value_or(*output.dest), value);
+        set_changed(output.index, diff);
+        for (const auto& effect : output.effects) {
+          auto* term = effect.flag
+                           ? diff
+                           : impl_->builder.CreateSelect(diff, impl_->builder.getInt64(effect.mask), impl_->builder.getInt64(0));
+          const Effect_key key{effect.resource, effect.offset, effect.flag};
+          if (effect_users[key] == 1 || output.guard) {
+            apply_effect(key, term);
+            continue;
+          }
+          auto [it, inserted] = effect_acc.try_emplace(key, term);
+          if (!inserted) {
+            it->second = impl_->builder.CreateOr(it->second, term);
+          }
+        }
+      }
+      impl_->store_storage(*output.dest, value);
+      if (output.guard) {
+        impl_->builder.SetInsertPoint(impl_->builder.GetInsertBlock()->getSingleSuccessor()->getFirstNonPHIIt());
+      }
+    };
+    // An object this kernel also reads was loaded before its output's anchor
+    // (add_storage_output), so every storage output publishes in place.
     for (const auto& output : publication_order) {
       if (publish_early) {
         impl_->builder.SetInsertPoint(output.anchor);
       }
-      output_word_offset = offsets[output.index];
-      auto* value = impl_->get(output.value);
-      if (track_changed) {
-        auto*        old  = impl_->load_packed(impl_->outputs, output_word_offset, output.value.width, "out.old");
-        auto*        diff = impl_->builder.CreateICmpNE(old, value);
-        auto*        ptr  = impl_->builder.CreateConstInBoundsGEP1_64(i64, impl_->changed, output.index / 64);
-        llvm::Value* bits = impl_->builder.CreateLoad(i64, ptr, "changed.old");
-        auto*        flag = llvm::ConstantInt::get(i64, uint64_t{1} << (output.index % 64));
-        bits              = impl_->builder.CreateOr(bits, impl_->builder.CreateSelect(diff, flag, llvm::ConstantInt::get(i64, 0)));
-        impl_->builder.CreateStore(bits, ptr);
+      if (output.dest) {
+        publish_storage(output);
+        continue;
       }
-      impl_->store_packed(value, impl_->outputs, output_word_offset, output.value.width);
+      const auto& field = fields[output.index];
+      auto*       value = impl_->get(output.value);
+      if (track_changed) {
+        llvm::Value* old = nullptr;
+        if (field.alone) {
+          old = impl_->load_packed(impl_->outputs, field.word, output.value.width, "out.old");
+        } else {
+          old = cast_integer(impl_->builder, impl_->builder.CreateLShr(old_words[field.word], field.bit), output.value.width, true);
+        }
+        set_changed(output.index, impl_->builder.CreateICmpNE(old, value));
+      }
+      impl_->store_field(value, impl_->outputs, field, output.value.width);
     }
-    impl_->builder.restoreIP(end);
-    impl_->builder.CreateRetVoid();
+    impl_->builder.SetInsertPoint(ret);
+    for (const auto& [key, bits] : effect_acc) {
+      apply_effect(key, bits);
+    }
+    if (changed_acc != nullptr) {
+      for (size_t word = 0; word < changed_words; ++word) {
+        auto* bits
+            = impl_->builder.CreateLoad(i64, impl_->builder.CreateConstInBoundsGEP1_64(i64, changed_acc, word), "changed.bits");
+        impl_->builder.CreateStore(bits, impl_->builder.CreateConstInBoundsGEP1_64(i64, impl_->changed, word));
+      }
+    }
   }
 
   for (auto& output : impl_->output_values) {
     output.anchor->eraseFromParent();
     output.anchor = nullptr;
   }
+  impl_->scope_storage();
 
   if (llvm::verifyModule(*impl_->module, &llvm::errs())) {
     error = "LLVM rejected the generated simulator module";
@@ -1791,26 +3189,21 @@ bool Cgen_llvm::inline_body(const Inline_body& body, const std::vector<Value>& i
   auto*                           ptr = llvm::PointerType::getUnqual(impl_->context);
   llvm::SmallVector<llvm::Value*> args;
   size_t                          input_words = 0, output_words = 0;
-  for (const auto& [width, unsign] : body.inputs) {
-    (void)unsign;
-    input_words += word_count(width);
+  const auto                      in_fields  = packed_layout(widths_of(body.inputs), &input_words);
+  const auto                      out_fields = packed_layout(widths_of(body.outputs), &output_words);
+  auto*                           packed_in  = impl_->local_words(input_words, "inline.inputs");
+  auto*                           packed_out = impl_->local_words(output_words, "inline.outputs");
+  auto* changed = impl_->local_words(word_count(static_cast<uint32_t>(body.outputs.size())), "inline.changed");
+  if (!body.scalar) {
+    impl_->zero_words(packed_in, input_words);
   }
-  for (const auto& [width, unsign] : body.outputs) {
-    (void)unsign;
-    output_words += word_count(width);
-  }
-  auto*  packed_in  = impl_->local_words(input_words, "inline.inputs");
-  auto*  packed_out = impl_->local_words(output_words, "inline.outputs");
-  auto*  changed    = impl_->local_words(word_count(static_cast<uint32_t>(body.outputs.size())), "inline.changed");
-  size_t offset     = 0;
   for (size_t i = 0; i < inputs.size(); ++i) {
     auto* value = impl_->get(resize(inputs[i], body.inputs[i].first, body.inputs[i].second));
     if (body.scalar) {
       args.push_back(cast_integer(b, value, 64, true));
     } else {
-      impl_->store_packed(value, packed_in, offset, body.inputs[i].first);
+      impl_->store_field(value, packed_in, in_fields[i], body.inputs[i].first);
     }
-    offset += word_count(body.inputs[i].first);
   }
   // Changed tracking is dead after inlining, but its old-output reads must
   // still have defined values before dead-code elimination.
@@ -1821,18 +3214,17 @@ bool Cgen_llvm::inline_body(const Inline_body& body, const std::vector<Value>& i
     args = {packed_in, packed_out, changed};
   }
   args.push_back(llvm::ConstantPointerNull::get(ptr));
-  auto* call   = b.CreateCall(callee, args);
-  offset       = 0;
-  uint32_t bit = 0;
+  auto*    call = b.CreateCall(callee, args);
+  uint32_t bit  = 0;
   outputs.clear();
-  for (const auto& [width, unsign] : body.outputs) {
-    auto* value = body.scalar ? cast_integer(b, b.CreateLShr(call, bit), width, true)
-                              : impl_->load_packed(packed_out, offset, width, "inline.result");
+  for (size_t i = 0; i < body.outputs.size(); ++i) {
+    const auto [width, unsign] = body.outputs[i];
+    auto* value                = body.scalar ? cast_integer(b, b.CreateLShr(call, bit), width, true)
+                                             : impl_->load_field(packed_out, out_fields[i], width, "inline.result");
     // Inlining replaces and deletes a scalar call. Keep an instruction user
     // whose operand is rewritten, rather than remembering the deleted call.
     outputs.push_back(impl_->remember(b.CreateFreeze(value), width, unsign));
-    offset += word_count(width);
-    bit    += width;
+    bit += width;
   }
   auto*                    continuation = b.CreateUnreachable();
   llvm::InlineFunctionInfo info;
@@ -1908,7 +3300,7 @@ bool Cgen_llvm::inline_loop(const Inline_body& body, const Loop_layout& layout, 
   const uint64_t body_extra = unrolled_extra(*callee);
   const uint64_t trip_cost  = unroll_cost(*callee) + body_extra;
   const bool     unroll     = count <= kUnrollMaxTrips && trip_cost <= kUnrollBudget && count * trip_cost <= kUnrollBudget
-                     && impl_->unroll_extra + count * trip_cost <= kUnrollKernelBudget;
+                              && impl_->unroll_extra + count * trip_cost <= kUnrollKernelBudget;
   impl_->add_unroll_extra(body_extra + (unroll && count > 0 ? (count - 1) * trip_cost : 0));
 
   auto& b       = impl_->builder;
@@ -1926,27 +3318,19 @@ bool Cgen_llvm::inline_loop(const Inline_body& body, const Loop_layout& layout, 
       return false;
     }
   }
-  size_t input_words = 0, output_words = 0;
-  std::vector<size_t> input_offsets, output_offsets;
-  for (const auto& [width, unsign] : body.inputs) {
-    (void)unsign;
-    input_offsets.push_back(input_words);
-    input_words += word_count(width);
-  }
-  for (const auto& [width, unsign] : body.outputs) {
-    (void)unsign;
-    output_offsets.push_back(output_words);
-    output_words += word_count(width);
-  }
-  auto* packed_in  = impl_->local_words(input_words, "loop.inputs");
-  auto* packed_out = impl_->local_words(output_words, "loop.outputs");
-  auto* changed    = impl_->local_words(word_count(static_cast<uint32_t>(body.outputs.size())), "loop.changed");
+  size_t     input_words = 0, output_words = 0;
+  const auto in_fields  = packed_layout(widths_of(body.inputs), &input_words);
+  const auto out_fields = packed_layout(widths_of(body.outputs), &output_words);
+  auto*      packed_in  = impl_->local_words(input_words, "loop.inputs");
+  auto*      packed_out = impl_->local_words(output_words, "loop.outputs");
+  auto*      changed    = impl_->local_words(word_count(static_cast<uint32_t>(body.outputs.size())), "loop.changed");
+  impl_->zero_words(packed_in, input_words);
   for (size_t i = 0; i < output_words; ++i) {
     b.CreateStore(b.getInt64(0), b.CreateConstInBoundsGEP1_64(i64, packed_out, i));
   }
   for (const auto& [input, output] : layout.carries) {
     const auto width = body.outputs[output].first;
-    impl_->store_packed(cast_integer(b, initial[input], width, layout.inputs[input].second), packed_out, output_offsets[output], width);
+    impl_->store_field(cast_integer(b, initial[input], width, layout.inputs[input].second), packed_out, out_fields[output], width);
   }
   const auto bound = [&](size_t i, llvm::Value* value) {
     const auto& binding = layout.bindings[i];
@@ -1959,7 +3343,7 @@ bool Cgen_llvm::inline_loop(const Inline_body& body, const Loop_layout& layout, 
   for (size_t i = 0; i < layout.bindings.size(); ++i) {
     const auto input = layout.bindings[i].input;
     if (!carry_inputs[input] && layout.index != input && layout.activation != input) {
-      impl_->store_packed(bound(i, initial[input]), packed_in, input_offsets[i], body.inputs[i].first);
+      impl_->store_field(bound(i, initial[input]), packed_in, in_fields[i], body.inputs[i].first);
     }
   }
   auto* start  = b.GetInsertBlock();
@@ -1988,7 +3372,8 @@ bool Cgen_llvm::inline_loop(const Inline_body& body, const Loop_layout& layout, 
   b.CreateCondBr(b.CreateICmpULT(ordinal, b.getInt64(count)), bodyb, done);
   b.SetInsertPoint(bodyb);
   if (layout.index) {
-    auto* index = b.CreateAdd(b.getInt64(static_cast<uint64_t>(first)), b.CreateMul(ordinal, b.getInt64(static_cast<uint64_t>(step))));
+    auto* index
+        = b.CreateAdd(b.getInt64(static_cast<uint64_t>(first)), b.CreateMul(ordinal, b.getInt64(static_cast<uint64_t>(step))));
     if (layout.index_bits) {
       index = cast_integer(b, index, layout.index_bits, true);
     }
@@ -1997,13 +3382,13 @@ bool Cgen_llvm::inline_loop(const Inline_body& body, const Loop_layout& layout, 
   for (size_t i = 0; i < layout.bindings.size(); ++i) {
     const auto input = layout.bindings[i].input;
     if (carry_inputs[input] || layout.index == input || layout.activation == input) {
-      impl_->store_packed(bound(i, values[input]), packed_in, input_offsets[i], body.inputs[i].first);
+      impl_->store_field(bound(i, values[input]), packed_in, in_fields[i], body.inputs[i].first);
     }
   }
   llvm::SmallVector<llvm::Value*> args;
   if (body.scalar) {
     for (size_t i = 0; i < layout.bindings.size(); ++i) {
-      args.push_back(cast_integer(b, impl_->load_packed(packed_in, input_offsets[i], body.inputs[i].first, "arg"), 64, true));
+      args.push_back(cast_integer(b, impl_->load_field(packed_in, in_fields[i], body.inputs[i].first, "arg"), 64, true));
     }
     args.push_back(llvm::ConstantPointerNull::get(ptr));
   } else {
@@ -2014,7 +3399,7 @@ bool Cgen_llvm::inline_loop(const Inline_body& body, const Loop_layout& layout, 
     uint32_t bit = 0;
     for (size_t i = 0; i < body.outputs.size(); ++i) {
       const auto width = body.outputs[i].first;
-      impl_->store_packed(cast_integer(b, b.CreateLShr(call, bit), width, true), packed_out, output_offsets[i], width);
+      impl_->store_field(cast_integer(b, b.CreateLShr(call, bit), width, true), packed_out, out_fields[i], width);
       bit += width;
     }
   }
@@ -2022,24 +3407,28 @@ bool Cgen_llvm::inline_loop(const Inline_body& body, const Loop_layout& layout, 
   std::vector<llvm::Value*> next_carries;
   for (size_t i = 0; i < layout.carries.size(); ++i) {
     const auto [input, output] = layout.carries[i];
-    const auto  width          = body.outputs[output].first;
-    auto*       next = cast_integer(b, impl_->load_packed(packed_out, output_offsets[output], width, "next.carry"),
-                                    layout.inputs[input].first, body.outputs[output].second);
+    const auto width           = body.outputs[output].first;
+    auto*      next            = cast_integer(b,
+                                              impl_->load_field(packed_out, out_fields[output], width, "next.carry"),
+                                              layout.inputs[input].first,
+                                              body.outputs[output].second);
     next_carries.push_back(b.CreateSelect(is_active, next, carries[i]));
   }
   llvm::Value* next_active = active;
   if (layout.next_active) {
     const auto output = *layout.next_active;
     const auto width  = body.outputs[output].first;
-    next_active       = cast_integer(b, impl_->load_packed(packed_out, output_offsets[output], width, "next.active"),
-                               layout.inputs[*layout.activation].first, body.outputs[output].second);
+    next_active       = cast_integer(b,
+                                     impl_->load_field(packed_out, out_fields[output], width, "next.active"),
+                                     layout.inputs[*layout.activation].first,
+                                     body.outputs[output].second);
     next_active       = b.CreateSelect(is_active, next_active, llvm::ConstantInt::get(active->getType(), 0));
   }
   // Carry outputs publish the retained carry, including inactive/zero trips.
   for (size_t i = 0; i < layout.carries.size(); ++i) {
     const auto [input, output] = layout.carries[i];
     const auto width           = body.outputs[output].first;
-    impl_->store_packed(cast_integer(b, next_carries[i], width, layout.inputs[input].second), packed_out, output_offsets[output], width);
+    impl_->store_field(cast_integer(b, next_carries[i], width, layout.inputs[input].second), packed_out, out_fields[output], width);
   }
   auto* next_ordinal = b.CreateAdd(ordinal, b.getInt64(1));
   auto* latch        = b.GetInsertBlock();
@@ -2053,15 +3442,16 @@ bool Cgen_llvm::inline_loop(const Inline_body& body, const Loop_layout& layout, 
   auto* backedge = b.CreateBr(header);
   // The pipeline runs LoopFullUnrollPass only when forced (PipelineTuningOptions
   // LoopUnrolling is off), so this metadata alone decides, per loop.
-  auto* policy   = llvm::MDNode::get(context, {llvm::MDString::get(context, unroll ? "llvm.loop.unroll.full" : "llvm.loop.unroll.disable")});
-  auto* loop_id  = llvm::MDNode::getDistinct(context, {nullptr, policy});
+  auto* policy
+      = llvm::MDNode::get(context, {llvm::MDString::get(context, unroll ? "llvm.loop.unroll.full" : "llvm.loop.unroll.disable")});
+  auto* loop_id = llvm::MDNode::getDistinct(context, {nullptr, policy});
   loop_id->replaceOperandWith(0, loop_id);
   backedge->setMetadata(llvm::LLVMContext::MD_loop, loop_id);
   b.SetInsertPoint(done);
   outputs.clear();
   for (size_t i = 0; i < body.outputs.size(); ++i) {
     const auto [width, unsign] = body.outputs[i];
-    outputs.push_back(impl_->remember(impl_->load_packed(packed_out, output_offsets[i], width, "loop.result"), width, unsign));
+    outputs.push_back(impl_->remember(impl_->load_field(packed_out, out_fields[i], width, "loop.result"), width, unsign));
   }
   // Inline explicitly: a large body still stays ONE copy inside the rolled loop.
   llvm::InlineFunctionInfo info;
@@ -2075,7 +3465,10 @@ bool Cgen_llvm::inline_loop(const Inline_body& body, const Loop_layout& layout, 
 }
 
 bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std::string& error, bool track_changed) {
-  if (impl_->state_abi || impl_->loop_function || !impl_->memories.empty() || layout.bindings.size() != impl_->input_types.size()) {
+  const bool storage = std::ranges::any_of(impl_->input_storage, [](const auto& s) { return s.has_value(); })
+                       || std::ranges::any_of(impl_->output_values, [](const auto& o) { return o.dest.has_value(); });
+  if (impl_->state_abi || impl_->loop_function || !impl_->memories.empty() || storage
+      || layout.bindings.size() != impl_->input_types.size()) {
     error = "native loop requires a stateless body and a complete input binding";
     return false;
   }
@@ -2141,28 +3534,22 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
     initial.push_back(impl_->load_packed(inputs, offset, width, "initial"));
     offset += word_count(width);
   }
-  size_t input_words = 0, output_words = 0;
-  for (const auto& [width, unsign] : impl_->input_types) {
-    (void)unsign;
-    input_words += word_count(width);
-  }
-  std::vector<size_t> output_offsets;
-  for (const auto& out : impl_->output_values) {
-    output_offsets.push_back(output_words);
-    output_words += word_count(out.value.width);
-  }
-  auto* packed_in  = impl_->local_words(input_words, "body.inputs");
-  auto* packed_out = impl_->local_words(output_words, "body.outputs");
-  auto* changed    = impl_->local_words(word_count(static_cast<uint32_t>(impl_->output_values.size())), "body.changed");
+  // The body's transport buffers use its own packed layout; the loop entry's
+  // `outputs` keep one word run per value (the C++ loop adapter's layout).
+  size_t     output_words = 0;
+  const auto out_fields   = impl_->output_fields(&output_words);
+  impl_->ensure_input_layout();
+  const auto& in_fields  = impl_->input_fields;
+  auto*       packed_in  = impl_->local_words(impl_->input_words, "body.inputs");
+  auto*       packed_out = impl_->local_words(output_words, "body.outputs");
+  auto*       changed    = impl_->local_words(word_count(static_cast<uint32_t>(impl_->output_values.size())), "body.changed");
+  impl_->zero_words(packed_in, impl_->input_words);
   for (size_t i = 0; i < output_words; ++i) {
     b.CreateStore(b.getInt64(0), b.CreateConstInBoundsGEP1_64(i64, packed_out, i));
   }
   for (const auto& [input, output] : layout.carries) {
     const auto width = impl_->output_values[output].value.width;
-    impl_->store_packed(cast_integer(b, initial[input], width, layout.inputs[input].second),
-                        packed_out,
-                        output_offsets[output],
-                        width);
+    impl_->store_field(cast_integer(b, initial[input], width, layout.inputs[input].second), packed_out, out_fields[output], width);
   }
   // Pack invariant ports once. Mutable ports are SSA values across iterations.
   const auto bound = [&](size_t i, llvm::Value* value) {
@@ -2175,7 +3562,7 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
   for (size_t i = 0; i < layout.bindings.size(); ++i) {
     const auto input = layout.bindings[i].input;
     if (!carry_inputs[input] && layout.index != input && layout.activation != input) {
-      impl_->store_packed(bound(i, initial[input]), packed_in, impl_->input_word_offsets[i], impl_->input_types[i].first);
+      impl_->store_field(bound(i, initial[input]), packed_in, in_fields[i], impl_->input_types[i].first);
     }
   }
   b.CreateBr(header);
@@ -2209,16 +3596,13 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
   for (size_t i = 0; i < layout.bindings.size(); ++i) {
     const auto input = layout.bindings[i].input;
     if (carry_inputs[input] || layout.index == input || layout.activation == input) {
-      impl_->store_packed(bound(i, values[input]), packed_in, impl_->input_word_offsets[i], impl_->input_types[i].first);
+      impl_->store_field(bound(i, values[input]), packed_in, in_fields[i], impl_->input_types[i].first);
     }
   }
   llvm::SmallVector<llvm::Value*> args;
   if (impl_->scalar_abi) {
     for (size_t i = 0; i < layout.bindings.size(); ++i) {
-      args.push_back(cast_integer(b,
-                                  impl_->load_packed(packed_in, impl_->input_word_offsets[i], impl_->input_types[i].first, "arg"),
-                                  64,
-                                  true));
+      args.push_back(cast_integer(b, impl_->load_field(packed_in, in_fields[i], impl_->input_types[i].first, "arg"), 64, true));
     }
     args.push_back(llvm::ConstantPointerNull::get(ptr));
   } else {
@@ -2230,7 +3614,7 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
     for (size_t i = 0; i < impl_->output_values.size(); ++i) {
       const auto width = impl_->output_values[i].value.width;
       auto*      value = cast_integer(b, b.CreateLShr(call, bit), width, true);
-      impl_->store_packed(value, packed_out, output_offsets[i], width);
+      impl_->store_field(value, packed_out, out_fields[i], width);
       bit += width;
     }
   }
@@ -2240,9 +3624,9 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
     const auto [input, output] = layout.carries[i];
     const auto& out            = impl_->output_values[output].value;
     auto*       next           = cast_integer(b,
-                              impl_->load_packed(packed_out, output_offsets[output], out.width, "next.carry"),
-                              layout.inputs[input].first,
-                              out.unsign);
+                                              impl_->load_field(packed_out, out_fields[output], out.width, "next.carry"),
+                                              layout.inputs[input].first,
+                                              out.unsign);
     next                       = b.CreateSelect(is_active, next, carries[i]);
     next_carries.push_back(next);
   }
@@ -2251,19 +3635,16 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
     const auto  output = *layout.next_active;
     const auto& out    = impl_->output_values[output].value;
     next_active        = cast_integer(b,
-                               impl_->load_packed(packed_out, output_offsets[output], out.width, "next.active"),
-                               layout.inputs[*layout.activation].first,
-                               out.unsign);
+                                      impl_->load_field(packed_out, out_fields[output], out.width, "next.active"),
+                                      layout.inputs[*layout.activation].first,
+                                      out.unsign);
     next_active        = b.CreateSelect(is_active, next_active, llvm::ConstantInt::get(active->getType(), 0));
   }
   // Carry outputs publish the retained carry, including inactive/zero trips.
   for (size_t i = 0; i < layout.carries.size(); ++i) {
     const auto [input, output] = layout.carries[i];
     const auto width           = impl_->output_values[output].value.width;
-    impl_->store_packed(cast_integer(b, next_carries[i], width, layout.inputs[input].second),
-                        packed_out,
-                        output_offsets[output],
-                        width);
+    impl_->store_field(cast_integer(b, next_carries[i], width, layout.inputs[input].second), packed_out, out_fields[output], width);
   }
   auto* next_ordinal = b.CreateAdd(ordinal, b.getInt64(1));
   auto* latch        = b.GetInsertBlock();
@@ -2280,9 +3661,11 @@ bool Cgen_llvm::add_loop(std::string_view entry, const Loop_layout& layout, std:
   loop_id->replaceOperandWith(0, loop_id);
   backedge->setMetadata(llvm::LLVMContext::MD_loop, loop_id);
   b.SetInsertPoint(done);
+  size_t entry_word = 0;
   for (size_t i = 0; i < impl_->output_values.size(); ++i) {
     const auto width = impl_->output_values[i].value.width;
-    impl_->store_packed(impl_->load_packed(packed_out, output_offsets[i], width, "result"), outputs, output_offsets[i], width);
+    impl_->store_packed(impl_->load_field(packed_out, out_fields[i], width, "result"), outputs, entry_word, width);
+    entry_word += word_count(width);
   }
   b.CreateRetVoid();
   // Inline explicitly before optimization: even a large body remains one copy
@@ -2314,6 +3697,9 @@ std::string Cgen_llvm::sharing_key(std::string& error, bool track_changed) {
   llvm::SmallVector<char, 0> bytes;
   llvm::raw_svector_ostream  stream(bytes);
   llvm::WriteBitcodeToFile(*impl_->module, stream);
+  for (const auto& [input, inactive] : impl_->speculations) {  // write_module splits on these
+    stream << "|speculate:" << input << '=' << inactive;
+  }
   impl_->function->setName(name);
   if (impl_->loop_function) {
     impl_->loop_function->setName(loop_name);
@@ -2322,6 +3708,7 @@ std::string Cgen_llvm::sharing_key(std::string& error, bool track_changed) {
 }
 
 bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool track_changed, bool native) {
+  (void)llvm_debug_args();
   Llvm_pass_profile profile("kernel", path);
   if (!seal(error, track_changed)) {
     return false;
@@ -2352,6 +3739,11 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
   impl_->module->setDataLayout(machine->createDataLayout());
   profile.mark("target-setup");
 
+  // Reset-free fast path (speculate_input); the bitcode digest below sees it.
+  auto body_names = std::vector<std::string>{};
+  for (auto* body : impl_->split_speculation()) {
+    body_names.push_back(body->getName().str());
+  }
   const auto digest = [](llvm::StringRef bytes) {
     llvm::SHA256 hash;
     hash.update(bytes);
@@ -2366,6 +3758,10 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
     llvm::SHA256 hash;
     hash.update(llvm::StringRef(bitcode.data(), bitcode.size()));
     hash.update(std::to_string(livehd::kCgenSrcSalt));
+    hash.update(std::to_string(branch_min_cost()));  // debug knobs that change the object
+    hash.update(shrink_enabled() ? "shrink" : "keep");
+    hash.update(llvm_debug_args());
+    hash.update(std::to_string(remat_distance()));
     const auto key = hash.final();
     input_digest.assign(reinterpret_cast<const char*>(key.data()), key.size());
     const auto cached = llvm::MemoryBuffer::getFile(impl_->cache_path);
@@ -2396,6 +3792,14 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
   pass_builder.registerFunctionAnalyses(function_analyses);
   pass_builder.registerLoopAnalyses(loop_analyses);
   pass_builder.crossRegisterProxies(loop_analyses, function_analyses, cgscc_analyses, module_analyses);
+  impl_->mark_invariant_loads();
+  if (livehd::debug::env<"LHD_SIM_LLVM_DUMP_IR">() != nullptr) {  // also the module as built, before O2 (.pre.ll)
+    std::error_code      ec;
+    llvm::raw_fd_ostream ir(std::string(path) + ".pre.ll", ec);
+    if (!ec) {
+      impl_->module->print(ir, nullptr);
+    }
+  }
   auto pipeline = pass_builder.buildPerModuleDefaultPipeline(llvm::OptimizationLevel::O2);
   pipeline.run(*impl_->module, module_analyses);
   if (impl_->loop_function != nullptr) {
@@ -2406,6 +3810,47 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
     loop_cleanup.run(*impl_->loop_function, function_analyses);
     short_circuit_loop_carries(*impl_->loop_function);
     function_analyses.invalidate(*impl_->loop_function, llvm::PreservedAnalyses::none());
+  }
+  // Conditional regions: branch over expensive select arms (see
+  // conditionalize_selects). Debug: LHD_SIM_LLVM_NO_BRANCH=1 disables it,
+  // LHD_SIM_LLVM_BRANCH_MIN=<n> sets the arm-size threshold (default 4).
+  // By name: interprocedural passes (dead-argument elimination) may have
+  // replaced an internal body of the reset split with a new function, and the
+  // inliner folds both into the dispatcher (impl_->function) by default.
+  std::vector<llvm::Function*> post_bodies;
+  for (const auto& body_name : body_names) {
+    if (auto* body = impl_->module->getFunction(body_name); body != nullptr && !body->isDeclaration()) {
+      post_bodies.push_back(body);
+    }
+  }
+  if (post_bodies.empty() && impl_->function != nullptr) {
+    post_bodies.push_back(impl_->function);
+  }
+  for (auto* body : post_bodies) {
+    if (const auto min_cost = branch_min_cost(); min_cost != 0) {
+      if (conditionalize_selects(*body, min_cost) != 0 && livehd::debug::env<"LHD_SIM_LLVM_NO_SCOPE_SINK">() == nullptr) {
+        sink_into_use_blocks(*body);
+        function_analyses.invalidate(*body, llvm::PreservedAnalyses::none());
+      }
+    }
+    // conditionalize_selects never moves memory reads: a load only one arm
+    // uses still runs before the branch, on every call. LLVM's Sink pass moves
+    // an instruction (a load when no store in between may alias it) into the
+    // single successor block that uses it.
+    if (livehd::debug::env<"LHD_SIM_LLVM_NO_SINK">() == nullptr) {
+      llvm::FunctionPassManager sink;
+      sink.addPass(llvm::SinkingPass());
+      sink.run(*body, function_analyses);
+    }
+    // Recompute far-used invariant values near their uses instead of keeping
+    // them live (rematerialize_invariant).
+    if (const auto distance = remat_distance(); distance != 0 && rematerialize_invariant(*body, distance) != 0) {
+      function_analyses.invalidate(*body, llvm::PreservedAnalyses::none());
+    }
+    // Then shorten live ranges (shrink_live_ranges), opt-in: LHD_SIM_LLVM_SHRINK=1.
+    if (shrink_enabled() && shrink_live_ranges(*body) != 0) {
+      function_analyses.invalidate(*body, llvm::PreservedAnalyses::none());
+    }
   }
   profile.mark("ir-optimization");
 
@@ -2475,6 +3920,14 @@ bool Cgen_llvm::write_module(std::string_view path, std::string& error, bool tra
         return false;
       }
       memory->eraseFromParent();
+    }
+    // Debug only: the optimized IR next to the object (`<object>.opt.ll`).
+    if (livehd::debug::env<"LHD_SIM_LLVM_DUMP_IR">() != nullptr) {
+      std::error_code      ec;
+      llvm::raw_fd_ostream ir(std::string(path) + ".opt.ll", ec);
+      if (!ec) {
+        impl_->module->print(ir, nullptr);
+      }
     }
     llvm::legacy::PassManager emit;
     if (machine->addPassesToEmitFile(emit, object, nullptr, llvm::CodeGenFileType::ObjectFile)) {

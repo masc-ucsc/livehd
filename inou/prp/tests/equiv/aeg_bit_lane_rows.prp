@@ -1,0 +1,62 @@
+/*
+:name: aeg_bit_lane_rows
+:set: compile.cprop.engine=classic compile.unroll=true
+:type: lec
+*/
+// PYROPE-vs-PYROPE group, the fixture of Cprop::vectorize_bit_lanes (pass/cprop/cprop.cpp, the `sim` cost profile's
+// region pass): a bit matrix updated one bit at a time, the shape of bedrock's br_lru_state_internal
+// (`next[i][j] = grant[i] ? 0 : grant[j] ? 1 : state[i][j]` for i < j), and a bit-sliced Mux whose select changes per
+// lane (`m[j] = sel[j] ? a[j] : b[j]`, which becomes `(S & A) | (~S & B)`). The second matrix reads its grant bits
+// as prefix-OR reductions, a different opaque pin per lane: each row GATHERS them into one word, and a later row reads
+// a window of the first row's gather. Each row of consecutive 1-bit writes becomes one word write. REFERENCE = classic engine; `_1` = e-graph engine under `sim`, where the rows vectorize.
+pub mod top(grant:U8, upd:Bool, sel:U8, a:U8, b:U8, c:U8) -> (state:U64@[0], state2:U64@[0], m:U8@[0]) {
+  reg st:U64 = 0
+  mut nx:U64 = st
+  for i in 0..<8 {
+    for j in 0..<8 {
+      if i < j {
+        if grant#[i] == 1 {
+          nx#[(i * 8) + j] = 0
+        } elif grant#[j] == 1 {
+          nx#[(i * 8) + j] = 1
+        } else {
+          nx#[(i * 8) + j] = st#[(i * 8) + j]
+        }
+      }
+    }
+  }
+  if upd {
+    st = nx
+  }
+  state = st
+
+  reg st2:U64 = 0
+  mut nx2:U64 = st2
+  for i in 0..<8 {
+    for j in 0..<8 {
+      if i < j {
+        if a#|[0..=i] == 1 {
+          nx2#[(i * 8) + j] = 0
+        } elif a#|[0..=j] == 1 {
+          nx2#[(i * 8) + j] = 1
+        } else {
+          nx2#[(i * 8) + j] = st2#[(i * 8) + j]
+        }
+      }
+    }
+  }
+  if upd {
+    st2 = nx2
+  }
+  state2 = st2
+
+  mut w:U8 = c
+  for j in 0..<8 {
+    if sel#[j] == 1 {
+      w#[j] = a#[j]
+    } else {
+      w#[j] = b#[j]
+    }
+  }
+  m = w
+}
