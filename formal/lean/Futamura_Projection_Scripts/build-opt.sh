@@ -79,7 +79,8 @@ TOOL_MODULES=(
   # verified symbolic interpretation and k-induction (sym_verify, sym_refine)
   HDLProof/Sym/Kit HDLProof/Sym/Bridge HDLProof/Sym/Val HDLProof/Sym/Prim
   HDLProof/Sym/Mem HDLProof/Sym/Dispatch HDLProof/Sym/Wire HDLProof/Sym/Eval HDLProof/Sym/Asg
-  HDLProof/Sym/Sat HDLProof/Sym/Layout HDLProof/Sym/Step HDLProof/Sym/Trace
+  HDLProof/Sym/Sat HDLProof/Sym/Layout HDLProof/Sym/Step
+  HDLProof/Sym/NativeOps HDLProof/Sym/Native HDLProof/Sym/NativeSound HDLProof/Sym/Trace
   HDLProof/Sym/Shape HDLProof/Sym/Unroll HDLProof/Sym/Oblig HDLProof/Sym/KInd HDLProof/Sym/Conj HDLProof/Sym/ConjT
   HDLProof/Sym/Refine
   # refinement maps (sym_refmap): theory, kit, checker, spec facts, composition
