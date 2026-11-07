@@ -1,6 +1,7 @@
 // This file is distributed under the BSD 3-Clause License. See LICENSE for details.
 #pragma once
 #include <functional>
+#include <span>
 
 #include "physical.hpp"
 
@@ -18,6 +19,13 @@ void               visit_route_geometry(const Technology&, const Floorplan&, con
                                         bool special = false, const Route_width_rules* trial_rules = nullptr);
 std::vector<Shape> route_geometry(const Technology& tech, const Floorplan& fp, const Net& net, bool special = false,
                                   const Route_width_rules* trial_rules = nullptr);
+// Opt-in exact set union for one net/ownership group; does not change route decoding.
+// On known H/V routing layers, merge only equal transverse intervals whose
+// preferred-axis intervals overlap or touch. No tolerance, widening or gap filling.
+// Cuts and unknown/undirected layers remain separate, including duplicate shapes.
+// Output is maximal under this merge rule and sorted by (layer, xl, yl, xh, yh).
+// Nonfinite, empty or inverted rectangles throw; this is not a DRC verdict.
+std::vector<Shape> coalesce_route_metal(const Technology&, std::span<const Shape>);
 // Ordinary-net path inverses of route_geometry: a flush (zero-extension) wire on
 // the centerline of an integral rectangle, and one via placed from a lower layer.
 Route_path         flush_wire_path(const Shape& metal, bool horizontal, std::string taper_rule = {});

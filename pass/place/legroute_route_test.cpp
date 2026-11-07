@@ -169,6 +169,40 @@ struct Track_fixture {
     }
   }
 
+  void enable_critical_repair() {
+    options.cellbox_full_flow  = true;
+    options.l5_repair_ms       = 1000;
+    options.l5_fallback_shadow = true;
+    grid.critical_reserved_h.resize(grid.size());
+    grid.critical_reserved_v.resize(grid.size());
+    for (int layer = 0; layer < int(grid.layers.size()); ++layer) {
+      const auto&          metal = grid.layers[layer];
+      Track_resource_layer resource;
+      resource.name       = metal.name;
+      resource.horizontal = metal.horizontal;
+      resource.grid_layer = layer;
+      resource.bands.resize(metal.horizontal ? grid.rows : grid.cols);
+      for (int band = 0; band < int(resource.bands.size()); ++band) {
+        const auto [first, last] = grid.tracks(layer, band);
+        for (auto track = first; track <= last; ++track) {
+          resource.bands[band].push_back(grid.track_coord(layer, track));
+        }
+      }
+      resource.tiles.resize(grid.size());
+      for (size_t tile = 0; tile < grid.size(); ++tile) {
+        resource.tiles[tile].band = metal.horizontal ? grid.row(int(tile)) : grid.col(int(tile));
+      }
+      grid.resources.layers.push_back(std::move(resource));
+      fp.tracks.push_back({metal.horizontal ? "Y" : "X", metal.name, metal.offset, 50, metal.pitch});
+    }
+    for (size_t net = 0; net < design.nets.size(); ++net) {
+      physical::Net source;
+      source.name = "n" + std::to_string(net);
+      fp.nets.push_back(source);
+      design.nets[net].frame = int(net);
+    }
+  }
+
   void build_stable_horizontal_row(bool near_ends = false) {
     grid.cols   = 2;
     grid.rows   = 1;
@@ -213,6 +247,202 @@ struct Track_fixture {
   }
 };
 }  // namespace
+
+TEST(LegrouteRoute, CriticalGlobalEndpointTilesConsumeLayerCapacityOncePerNet) {
+  for (bool full_flow : {false, true}) {
+    Track_fixture f(false);
+    f.options.cellbox_full_flow = full_flow;
+    f.add_upper_layers();
+    f.routes.segments.clear();
+    f.grid.cap.assign(f.grid.layers.size(), std::vector<int16_t>(f.grid.size(), 1));
+    f.routes.layer_dem.assign(f.grid.layers.size(), std::vector<int32_t>(f.grid.size(), 0));
+    for (int net : {0, 1, 0}) {
+      Conn c;
+      c.net  = net;
+      c.a    = 0;
+      c.b    = 1;
+      c.poly = {
+          {0, 0},
+          {0, 1}
+      };
+      f.routes.conns.push_back(c);
+    }
+    assign_layers(f.design, f.grid, f.routes);
+    ASSERT_EQ(f.routes.segments.size(), 3u);
+    EXPECT_EQ(f.routes.layer_overflow_segments, 0u);
+    EXPECT_EQ(f.routes.segments[0].layer, 2);
+    EXPECT_EQ(f.routes.segments[1].layer, full_flow ? 0 : 2);
+    EXPECT_EQ(f.routes.segments[2].layer, 2);  // same net pays once, so it reuses its preferred layer
+    for (int tile : {0, 1}) {
+      EXPECT_EQ(f.routes.layer_dem[2][tile], full_flow ? 1 : 0);
+      EXPECT_EQ(f.routes.layer_dem[0][tile], full_flow ? 1 : 0);
+    }
+  }
+}
+
+TEST(LegrouteRoute, CriticalTracksUseNativeEndRulesWithoutWideWireEnvelopeFalseRejection) {
+  for (bool full_flow : {false, true}) {
+    for (bool illegal_ends : {false, true}) {
+      Track_fixture f(false);
+      f.tech.layers["M3"].rules.parallel = {
+          {{0, .1}, {0}, {{.01}, {.25}}}
+      };
+      f.tech.layers["M3"].rules.properties["LEF58_EOLKEEPOUT"]
+          = {illegal_ends ? "EOLKEEPOUT .020 EXTENSION .020 .100 .020 CORNERONLY ;"
+                          : "EOLKEEPOUT .020 EXTENSION .020 .020 .020 CORNERONLY ;"};
+      f.build_reservation_grid();
+      f.options.cellbox_full_flow = full_flow;
+      f.grid.critical_reserved_h.resize(f.grid.size());
+      f.grid.critical_reserved_v.resize(f.grid.size());
+      f.routes.segments[1].lo = f.routes.segments[0].lo;
+      f.routes.segments[1].hi = f.routes.segments[0].hi;
+      const physical::Signal_metal_rules rules(f.tech, f.fp);
+      ASSERT_EQ(rules.clearance("M3"), 250);
+      EXPECT_EQ(rules
+                    .spacing(
+                        {
+                            "M3",
+                            {145, 90, 155, 310}
+      },
+                        {"M3", {245, 90, 255, 310}})
+                    .legal,
+                !illegal_ends);
+      assign_tracks(f.design, f.grid, f.routes, 1);
+      if (full_flow && !illegal_ends) {
+        EXPECT_EQ(f.routes.unassigned, 0u);
+        EXPECT_NE(f.routes.segments[0].track, f.routes.segments[1].track);
+      } else {
+        EXPECT_GT(f.routes.unassigned, 0u);
+      }
+    }
+  }
+}
+
+TEST(LegrouteRoute, CriticalVerticalLeafSpansReuseTracksBeyondTheirActualEndpoints) {
+  for (bool direct : {false, true}) {
+    Track_fixture f(false);
+    f.options.reserved_tracks = 1;  // one of the two native V tracks is unavailable
+    f.tech.layers["M1"]       = f.tech.layers.at("M3");
+    f.tech.layers["M2"]       = f.tech.layers.at("M4");
+    f.tech.routing_layers     = {"M1", "M2", "M3", "M4"};
+    f.tech.sites["site"]      = {.05, .1, true};
+    for (int row = 0; row < 8; ++row) {
+      f.fp.rows.push_back({"r" + std::to_string(row), "site", 100, 100 + row * 100, 4, 50, physical::Orientation::N});
+    }
+    f.fp.tracks = {
+        {"X", "M3", 50, 10, 100},
+        {"Y", "M4", 50, 10, 100}
+    };
+    f.design.widest = 200;
+    f.grid          = build_grid(f.design, {});
+    ASSERT_EQ(f.grid.rows, 4);
+    ASSERT_EQ(f.grid.tile_h, 200);
+    f.options.cellbox_full_flow = true;
+    f.grid.critical_reserved_h.resize(f.grid.size());
+    f.grid.critical_reserved_v.resize(f.grid.size());
+    f.routes.segments.clear();
+    for (int net = 0; net < 2; ++net) {
+      auto& nodes = f.routes.trees[net].nodes;
+      nodes.resize(2);
+      nodes[0].tile               = net * 2;
+      nodes[1].tile               = net * 2 + 1;
+      nodes[0].direct_carrier_tap = nodes[1].direct_carrier_tap = direct;
+      Segment v;
+      v.net     = net;
+      v.layer   = 0;
+      v.lo      = net * 2;
+      v.hi      = net * 2 + 1;
+      v.node_lo = 0;
+      v.node_hi = 1;
+      f.routes.segments.push_back(v);
+    }
+    // Actual leaf carriers are [200,400] and [600,800]. Whole-end-tile envelopes [100,500] and
+    // [500,900] collide unnecessarily. The gap between the real wires exceeds native end spacing.
+    assign_tracks(f.design, f.grid, f.routes, 1);
+    EXPECT_EQ(f.routes.unassigned, direct ? 0u : 1u);
+    if (direct) {
+      EXPECT_EQ(f.routes.segments[0].track, f.routes.segments[1].track);
+      EXPECT_EQ(f.routes.segments[0].track_state, uint8_t(Track_state::checked));
+      EXPECT_EQ(f.routes.segments[1].track_state, uint8_t(Track_state::checked));
+    }
+  }
+}
+
+TEST(LegrouteRoute, CriticalHorizontalLeafNeedsNoGlobalVerticalRiser) {
+  Track_fixture f(false);
+  f.tech.layers["M1"]   = f.tech.layers.at("M3");
+  f.tech.layers["M2"]   = f.tech.layers.at("M4");
+  f.tech.routing_layers = {"M1", "M2", "M3", "M4"};
+  f.tech.sites["site"]  = {.05, .05, true};
+  for (int row = 0; row < 4; ++row) {
+    f.fp.rows.push_back({"r" + std::to_string(row), "site", 100, 100 + row * 50, 8, 50, physical::Orientation::N});
+  }
+  f.fp.tracks = {
+      {"X", "M3", 50, 10, 100},
+      {"Y", "M4", 50, 10, 100}
+  };
+  f.design.widest = 200;
+  f.grid          = build_grid(f.design, {});
+  ASSERT_EQ(f.grid.cols, 2);
+  f.options.cellbox_full_flow = true;
+  f.grid.critical_reserved_h.resize(f.grid.size());
+  f.grid.critical_reserved_v.resize(f.grid.size());
+  f.routes.segments.clear();
+  auto& nodes = f.routes.trees[0].nodes;
+  nodes.resize(2);
+  for (int i = 0; i < 2; ++i) {
+    nodes[i].tile               = i;
+    nodes[i].direct_carrier_tap = true;
+  }
+  Segment h;
+  h.net     = 0;
+  h.layer   = 1;
+  h.hi      = 1;
+  h.node_lo = 0;
+  h.node_hi = 1;
+  f.routes.segments.push_back(h);
+  assign_tracks(f.design, f.grid, f.routes, 1);
+  EXPECT_EQ(f.routes.unassigned, 0u);
+  EXPECT_EQ(f.routes.segments[0].track_state, uint8_t(Track_state::checked));
+  for (const auto& node : nodes) {
+    EXPECT_LT(node.riser_track, 0);
+    EXPECT_EQ(node.riser_state, uint8_t(Track_state::none));
+  }
+}
+
+TEST(LegrouteRoute, CriticalEndSpacingUsesTheEmittedHalfWidthCaps) {
+  for (int backward : {5, 15}) {
+    Track_fixture f(false);
+    f.tech.layers["M3"].rules.properties["LEF58_EOLKEEPOUT"]
+        = {backward == 5 ? "EOLKEEPOUT .020 EXTENSION .005 .100 .005 CORNERONLY ;"
+                         : "EOLKEEPOUT .020 EXTENSION .015 .100 .015 CORNERONLY ;"};
+    f.build_reservation_grid();
+    f.options.cellbox_full_flow = true;
+    f.grid.critical_reserved_h.resize(f.grid.size());
+    f.grid.critical_reserved_v.resize(f.grid.size());
+    for (auto& tree : f.routes.trees) {
+      for (auto& node : tree.nodes) {
+        node.direct_carrier_tap = true;
+      }
+    }
+    const physical::Signal_metal_rules rules(f.tech, f.fp);
+    const auto                         geometry = planned_wire_geometry(f.tech, f.grid.dbu, f.grid.die, "M3");
+    const auto                         first    = planned_wire_shape(geometry, false, 150, 250, 150);
+    const auto                         second   = planned_wire_shape(geometry, false, 250, 350, 250);
+    EXPECT_EQ(rules.spacing(first, second).legal, backward == 5);
+    // Doubled caps hide the 15-DBU native endpoint keepout by moving the corners too far apart.
+    ASSERT_TRUE(rules
+                    .spacing(
+                        {
+                            "M3",
+                            {145, 140, 155, 260}
+    },
+                        {"M3", {245, 240, 255, 360}})
+                    .legal);
+    assign_tracks(f.design, f.grid, f.routes, 1);
+    EXPECT_EQ(f.routes.unassigned, backward == 5 ? 0u : 1u);
+  }
+}
 
 TEST(LegrouteRoute, AdjacentBranchesOfTheSameNetShareTheirTrack) {
   Track_fixture f(true);
@@ -783,6 +1013,345 @@ TEST(LegrouteRoute, BoundedHorizontalRepairMovesACheckedWireToRecoverAGreedyFail
     EXPECT_EQ(f.routes.l5_repair_successes, repair ? 1u : 0u);
     EXPECT_EQ(f.routes.l5_repair_unknown, 0u);
     EXPECT_EQ(f.routes.l5_repair_unsat, 0u);
+    EXPECT_EQ(f.routes.track_fallback_shadow["ledger:mismatched"], 0u);
+  }
+}
+
+TEST(LegrouteRoute, CriticalSameTrackUsesNativeRulesAndKeepsHardAndUnsupportedRules) {
+  for (int mode = 0; mode < 4; ++mode) {
+    SCOPED_TRACE(mode);
+    Track_fixture f(false);
+    f.grid.cols             = 12;
+    f.grid.rows             = 1;
+    f.grid.tile_w           = 56;
+    f.grid.tile_h           = 48;
+    f.grid.layers[1].pitch  = 48;
+    f.grid.layers[1].offset = 12;
+    f.grid.layers[1].width  = 24;
+    f.grid.obstacle_band[0].resize(12);
+    f.grid.obstacle_band[1].resize(1);
+    auto& layer   = f.tech.layers["M4"];
+    layer.width   = .024;
+    layer.pitch_x = layer.pitch_y = .048;
+    layer.rules.area              = .002;
+    layer.rules.spacing           = {
+        {.024, {}, {}}
+    };
+    layer.rules.parallel = {
+        {{0., .025}, {0.}, {{.024}, {.072}}}
+    };
+    layer.rules.properties["LEF58_SPACING"]            = {"SPACING .024 ENDOFLINE .025 WITHIN .04 ENDTOEND .04 ;"};
+    layer.rules.properties["LEF58_EOLKEEPOUT"]         = {"EOLKEEPOUT .025 EXTENSION .048 .02425 .048 CORNERONLY ;"};
+    layer.rules.properties["LEF58_CORNERSPACING"]      = {"CORNERSPACING CONVEXCORNER CORNERONLY .048 WIDTH 0.0 SPACING .04 ;"};
+    layer.rules.properties["LEF58_WIDTHTABLE"]         = {"WIDTHTABLE .024 .12 .216 .312 .408 ;"};
+    layer.rules.properties["LEF58_RIGHTWAYONGRIDONLY"] = {"RIGHTWAYONGRIDONLY ;"};
+    if (mode == 3) {
+      layer.rules.properties["LEF58_UNKNOWN"] = {"UNKNOWN ;"};
+    }
+    for (int net = 0; net < 2; ++net) {
+      auto& segment   = f.routes.segments[net];
+      segment.layer   = 1;
+      segment.band    = 0;
+      segment.lo      = net == 0 ? 0 : mode == 1 ? 5 : 7;
+      segment.hi      = segment.lo + 4;
+      segment.node_lo = 0;
+      segment.node_hi = 1;
+      auto& nodes     = f.routes.trees[net].nodes;
+      nodes.resize(2);
+      nodes[0].tile               = segment.lo;
+      nodes[1].tile               = segment.hi;
+      nodes[0].direct_carrier_tap = nodes[1].direct_carrier_tap = true;
+    }
+    f.enable_critical_repair();
+    f.options.l5_repair_ms = 0;
+    if (mode == 2) {
+      f.block_layer(1, {480, 96, 490, 120});  // Remains hard even though signal-only spacing is now exact.
+    }
+    const auto                         geometry = planned_wire_geometry(f.tech, f.grid.dbu, f.grid.die, "M4");
+    const physical::Signal_metal_rules rules(f.tech, f.fp);
+    const auto                         a = planned_wire_shape(geometry, true, f.grid.cx(0), f.grid.cx(4), 108);
+    const auto b = planned_wire_shape(geometry, true, f.grid.cx(mode == 1 ? 5 : 7), f.grid.cx(mode == 1 ? 9 : 11), 108);
+    if (mode != 3) {
+      EXPECT_EQ(*rules.clearance("M4"), 146);
+      EXPECT_EQ(b.rect.xl - a.rect.xh, mode == 1 ? 32 : 144);
+      EXPECT_EQ(rules.spacing(a, b).legal, mode != 1);
+    }
+    assign_tracks(f.design, f.grid, f.routes, 1);
+    EXPECT_EQ(f.routes.unassigned == 0, mode == 0);
+    if (mode == 0) {
+      EXPECT_EQ(f.routes.segments[0].track, f.routes.segments[1].track);
+    }
+    EXPECT_EQ(f.routes.track_fallback_shadow["ledger:mismatched"], 0u);
+  }
+}
+
+TEST(LegrouteRoute, CriticalNeighborBandsUseFiniteNativeRulesWithDeterministicPhases) {
+  for (int mode = 0; mode < 4; ++mode) {
+    SCOPED_TRACE(mode);
+    std::vector<std::pair<int64_t, uint8_t>> serial;
+    for (int threads : {1, 4}) {
+      Track_fixture f(false);
+      f.grid.cols             = 7;
+      f.grid.rows             = 3;
+      f.grid.tile_w           = 48;
+      f.grid.layers[0].pitch  = 48;
+      f.grid.layers[0].offset = 12;
+      f.grid.layers[0].width  = 24;
+      f.grid.obstacle_band[0].resize(7);
+      auto& layer   = f.tech.layers["M3"];
+      layer.width   = .024;
+      layer.pitch_x = layer.pitch_y = .048;
+      layer.rules.spacing           = {
+          {.024, {}, {}}
+      };
+      layer.rules.properties["LEF58_EOLKEEPOUT"] = {mode < 2 ? "EOLKEEPOUT .025 EXTENSION .048 .02425 .048 CORNERONLY ;"
+                                                             : "EOLKEEPOUT .025 EXTENSION .048 .200 .048 CORNERONLY ;"};
+      const int other_band                       = mode == 0 ? 1 : mode == 1 ? 2 : mode == 2 ? 3 : 6;
+      for (int net = 0; net < 2; ++net) {
+        auto& segment   = f.routes.segments[net];
+        segment.band    = net ? other_band : 0;
+        segment.lo      = 0;
+        segment.hi      = 2;
+        segment.node_lo = 0;
+        segment.node_hi = 1;
+        auto& nodes     = f.routes.trees[net].nodes;
+        nodes.resize(2);
+        nodes[0].tile               = f.grid.tile(segment.band, 0);
+        nodes[1].tile               = f.grid.tile(segment.band, 2);
+        nodes[0].direct_carrier_tap = nodes[1].direct_carrier_tap = true;
+      }
+      f.enable_critical_repair();
+      f.options.l5_repair_ms                     = 0;
+      const auto                         profile = planned_wire_geometry(f.tech, f.grid.dbu, f.grid.die, "M3");
+      const auto                         a       = planned_wire_shape(profile, false, 150, 350, 108);
+      const auto                         b       = planned_wire_shape(profile, false, 150, 350, 108 + 48 * other_band);
+      const physical::Signal_metal_rules rules(f.tech, f.fp);
+      const bool                         legal = mode == 1 || mode == 3;
+      ASSERT_EQ(rules.spacing(a, b).legal, legal);
+      assign_tracks(f.design, f.grid, f.routes, threads);
+      EXPECT_EQ(f.routes.unassigned, legal ? 0u : 1u);
+      EXPECT_EQ(f.routes.segments[0].track_state, uint8_t(Track_state::checked));
+      EXPECT_EQ(f.routes.segments[1].track_state, track_state(legal));
+      EXPECT_EQ(f.routes.track_fallback_shadow["ledger:mismatched"], 0u);
+      std::vector<std::pair<int64_t, uint8_t>> actual;
+      for (const auto& segment : f.routes.segments) {
+        actual.emplace_back(segment.track, segment.track_state);
+      }
+      if (threads == 1) {
+        serial = actual;
+      } else {
+        EXPECT_EQ(actual, serial);
+      }
+    }
+  }
+}
+
+TEST(LegrouteRoute, CriticalZeroEdgeIoBuildsCheckedCarrierWithoutInventingForestSegments) {
+  for (int terminals : {1, 2}) {
+    SCOPED_TRACE(terminals);
+    Track_fixture f(true);
+    f.grid.cols = f.grid.rows = 1;
+    f.grid.tile_w             = 500;
+    f.grid.tile_h             = 200;
+    f.grid.obstacle_band[1].resize(1);
+    f.routes.segments.clear();
+    f.routes.trees[0].nodes.resize(1);
+    auto& node = f.routes.trees[0].nodes[0];
+    node.tile = node.box = node.term = 0;
+    f.fp.terminals.reserve(2);
+    for (int i = 0; i < terminals; ++i) {
+      physical::Terminal terminal;
+      terminal.name   = "source_io" + std::to_string(i);
+      terminal.net    = "n0";
+      terminal.x      = 250 + 200 * i;
+      terminal.y      = 150;
+      terminal.shapes = {
+          {"M4", {-10, -5, 10, 5}}
+      };
+      f.fp.terminals.push_back(terminal);
+      f.design.nets[0].pins.push_back({.term = i, .name = f.fp.terminals.back().name});
+      node.pins.push_back(i);
+    }
+    auto& master = f.tech.macros["cell"];
+    master.width = master.height = .05;
+    master.pins["A"].shapes      = {
+        {"M1", {.01, .01, .02, .02}}
+    };
+    physical::Component cell;
+    cell.name    = "c0";
+    cell.macro   = "cell";
+    cell.place.x = cell.place.y = 100;
+    f.fp.components.push_back(cell);
+    f.design.cell  = {0};
+    f.design.macro = {&master};
+    f.design.nets[0].pins.push_back({.comp = 0, .lef = &master.pins["A"], .name = "A"});
+    node.pins.push_back(terminals);
+    f.enable_critical_repair();
+    f.options.l5_repair_ms = 0;
+    for (int i = 0; i < terminals; ++i) {
+      f.fp.nets[0].connections.push_back({"PIN", f.fp.terminals[i].name});
+    }
+    f.fp.nets[0].connections.push_back({"c0", "A"});
+    const auto source = f.fp.nets[0].connections;
+    assign_tracks(f.design, f.grid, f.routes, 4);
+    EXPECT_TRUE(f.routes.segments.empty());
+    EXPECT_EQ(f.routes.unassigned, 0u);
+    EXPECT_EQ(node.riser_state, uint8_t(Track_state::checked));
+    EXPECT_EQ(node.stub_state, uint8_t(Track_state::checked));
+    EXPECT_EQ(node.stub_access_state, uint8_t(Track_state::checked));
+    EXPECT_EQ(node.pins.size(), size_t(terminals + 1));
+    EXPECT_EQ(f.fp.nets[0].connections, source);
+    const auto geometry = final_planned_geometry(f.design, f.grid, {}, f.routes);
+    EXPECT_FALSE(geometry.paths[0].empty());
+    EXPECT_TRUE(geometry.io_stub_failure[0].empty());
+    EXPECT_EQ(geometry.path_state[0].size(), geometry.paths[0].size());
+    EXPECT_TRUE(std::ranges::all_of(geometry.path_state[0], [](auto state) { return state == uint8_t(Track_state::checked); }));
+  }
+}
+
+TEST(LegrouteRoute, CriticalSameTrackMinimumAreaCannotMissHardOrSameOwnerOverhangs) {
+  for (bool same_owner_overhang : {false, true}) {
+    SCOPED_TRACE(same_owner_overhang);
+    Track_fixture f(false);
+    f.grid.cols   = 110;
+    f.grid.rows   = 1;
+    f.grid.tile_w = 20;
+    f.grid.tile_h = 100;
+    f.grid.die = f.fp.die = {0, 0, 4000, 1000};
+    f.grid.obstacle_band[0].resize(110);
+    f.grid.obstacle_band[1].resize(1);
+    f.tech.layers["M4"].rules.area = .005;  // Width10 needs500DBU of finite metal, far beyond the old margin.
+    f.routes.segments.clear();
+    f.routes.trees.resize(same_owner_overhang ? 2 : 1);
+    f.design.nets.resize(f.routes.trees.size());
+    const auto add = [&](int owner, int lo, int hi, bool prescribed) {
+      auto&     nodes = f.routes.trees[owner].nodes;
+      const int first = int(nodes.size());
+      nodes.resize(nodes.size() + 2);
+      nodes[first].tile               = lo;
+      nodes[first + 1].tile           = hi;
+      nodes[first].direct_carrier_tap = nodes[first + 1].direct_carrier_tap = true;
+      Segment segment;
+      segment.net     = owner;
+      segment.layer   = 1;
+      segment.lo      = lo;
+      segment.hi      = hi;
+      segment.node_lo = first;
+      segment.node_hi = first + 1;
+      segment.track   = prescribed ? 1 : -1;
+      f.routes.segments.push_back(segment);
+    };
+    for (auto& tree : f.routes.trees) {
+      tree.nodes.clear();
+    }
+    if (same_owner_overhang) {
+      add(0, 70, 100, true);
+      add(0, 70, 71, true);  // Its finite left overhang must survive merging with the long same-owner span.
+      add(1, 20, 60, false);
+    } else {
+      add(0, 0, 1, false);
+      f.block_layer(1, {400, 145, 420, 155});  // Outside [lo-margin,hi+margin], inside canonical minimum-area growth.
+    }
+    f.enable_critical_repair();
+    f.options.l5_repair_ms = 0;
+    assign_tracks(f.design, f.grid, f.routes, 1);
+    EXPECT_GT(f.routes.unassigned, 0u);
+    EXPECT_NE(f.routes.segments.back().track_state, uint8_t(Track_state::checked));
+    EXPECT_EQ(f.routes.track_fallback_shadow["ledger:mismatched"], 0u);
+  }
+}
+
+TEST(LegrouteRoute, CriticalSatRepairValidatesNativeOwnersBeforePublishingMoves) {
+  for (bool hidden_native_blocker : {false, true}) {
+    Track_fixture f(false);
+    f.build_repair_row();
+    f.enable_critical_repair();
+    for (int net = 0; net < 2; ++net) {
+      auto& nodes = f.routes.trees[net].nodes;
+      nodes.resize(2);
+      nodes[0].tile               = net == 0 ? 0 : 4;
+      nodes[1].tile               = net == 0 ? 4 : 7;
+      nodes[0].direct_carrier_tap = nodes[1].direct_carrier_tap = true;
+      f.routes.segments[net].node_lo                            = 0;
+      f.routes.segments[net].node_hi                            = 1;
+    }
+    if (hidden_native_blocker) {
+      // Not represented by this fixture's conservative band occupancy: only complete native validation sees it.
+      physical::Net power;
+      power.name = "VDD";
+      power.use  = "POWER";
+      power.wires.push_back(
+          {"FIXED", {{"M4", 10, {}, {physical::Route_point{400, 250, {}}, physical::Route_point{450, 250, {}}}, {}}}});
+      f.fp.special_nets.push_back(std::move(power));
+    }
+    const auto source_before = f.fp.nets;
+    assign_tracks(f.design, f.grid, f.routes, 1);
+    EXPECT_GT(f.routes.l5_repair_sat_calls, 0u);
+    EXPECT_GT(f.routes.l5_repair_sat_variables, 0u);
+    EXPECT_EQ(f.routes.l5_repair_successes, hidden_native_blocker ? 0u : 1u);
+    EXPECT_EQ(f.routes.unassigned, hidden_native_blocker ? 1u : 0u);
+    EXPECT_EQ(f.routes.segments[0].track, hidden_native_blocker ? 1 : 2);
+    EXPECT_EQ(f.routes.segments[1].track_state, track_state(!hidden_native_blocker));
+    EXPECT_EQ(f.fp.nets, source_before);
+    EXPECT_EQ(f.routes.track_fallback_shadow["ledger:mismatched"], 0u);
+    if (hidden_native_blocker) {
+      EXPECT_GT(f.routes.track_fallback_shadow["repair:unknown:native_owner_validation"], 0u);
+      EXPECT_EQ(f.routes.track_fallback_shadow["repair:native_reject:spacing"], 1u);
+      EXPECT_TRUE(std::ranges::any_of(f.routes.track_failure_samples, [](const auto& text) {
+        return text.find("Local SAT native rejection spacing") != std::string::npos && text.find("VDD") != std::string::npos
+               && text.find("choices") != std::string::npos;
+      }));
+    }
+  }
+}
+
+TEST(LegrouteRoute, CriticalSatRepairMovesTheActualBlockerInsteadOfNearerUnrelatedWires) {
+  for (bool repair : {false, true}) {
+    Track_fixture f(false);
+    f.build_repair_row();
+    f.grid.cols = 18;
+    f.grid.obstacles[1].clear();
+    f.grid.obstacle_band[1][0].clear();
+    f.add_upper_layers();
+    f.grid.layers[3].pitch      = 20;
+    f.grid.layers[3].offset     = 10;
+    f.tech.layers["M6"].pitch_x = f.tech.layers["M6"].pitch_y = .02;
+    f.tech.layers["M6"].offset_x = f.tech.layers["M6"].offset_y = .01;
+    f.fp.tracks.clear();
+    f.block_layer(1, {1800, 245, 1900, 255});
+    f.block_layer(3, {100, 100, 200, 300});  // The long blocker cannot escape to M6 either.
+    f.block_layer(3, {1800, 100, 1900, 300});
+    f.routes.trees.resize(8);
+    f.design.nets.resize(8);
+    f.routes.segments.resize(8);
+    for (int net = 0; net < 8; ++net) {
+      auto& segment   = f.routes.segments[net];
+      segment.net     = net;
+      segment.layer   = net < 2 ? 1 : 3;
+      segment.lo      = net == 0 ? 0 : net == 1 ? 14 : 13;
+      segment.hi      = net == 0 ? 14 : net == 1 ? 17 : 16;
+      segment.node_lo = 0;
+      segment.node_hi = 1;
+      auto& nodes     = f.routes.trees[net].nodes;
+      nodes.resize(2);
+      nodes[0].tile               = segment.lo;
+      nodes[1].tile               = segment.hi;
+      nodes[0].direct_carrier_tap = nodes[1].direct_carrier_tap = true;
+    }
+    f.enable_critical_repair();
+    f.options.l5_repair_ms = repair ? 1000 : 0;
+    // Six M6 wires have closer interval centers than the long M4 blocker. Moving any of them cannot
+    // release the target's only usable M4 track; the upper M4 lane and every M6 lane hit fixed background.
+    assign_tracks(f.design, f.grid, f.routes, 1);
+    EXPECT_EQ(f.routes.unassigned, repair ? 0u : 1u);
+    EXPECT_EQ(f.routes.segments[0].track, repair ? 2 : 1);
+    EXPECT_EQ(f.routes.segments[1].track_state, track_state(repair));
+    EXPECT_EQ(f.routes.l5_repair_successes, repair ? 1u : 0u);
+    EXPECT_EQ(f.routes.track_fallback_shadow["repair:window:blockers"], repair ? 1u : 0u);
+    for (int net = 2; net < 8; ++net) {
+      EXPECT_EQ(f.routes.segments[net].layer, 3);
+      EXPECT_EQ(f.routes.segments[net].track_state, uint8_t(Track_state::checked));
+    }
     EXPECT_EQ(f.routes.track_fallback_shadow["ledger:mismatched"], 0u);
   }
 }

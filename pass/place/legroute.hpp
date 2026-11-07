@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -12,6 +13,9 @@
 #include "inou/lefdef/tech_profile.hpp"
 
 namespace livehd::placement {
+namespace lr {
+struct Critical_cellbox_handoff;
+}
 // legroute: route-aware legalization (todo/livehd/2l-legroute.html). legroute.plan improves coarse routability
 // while cells remain movable, then selects connected regions and their crossings. Optional legroute.global
 // reserves routed pieces before legroute.local jointly places cell-boxes and routes them with regional SAT.
@@ -20,22 +24,27 @@ namespace livehd::placement {
 // closure; legal_boxes and plan.handoff provide separate legalized witness modes.
 struct Legroute_options {
   // Opt-in Plan admission. Physical widths, endpoints and the core stay fixed.
-  bool                     critical_cellboxes = false;
-  unsigned                 cellbox_sites = 22, cellbox_rows = 4;
-  unsigned                 cellbox_external_pins = 28, cellbox_connections = 10;
-  unsigned                 cellbox_critical_choices = 4, cellbox_other_choices = 8;
-  bool                     cellbox_wide_exceptions = true;
-  bool                     cellbox_far_fallback    = false;
+  bool                                                critical_cellboxes = false;
+  unsigned                                            cellbox_sites = 22, cellbox_rows = 4;
+  unsigned                                            cellbox_external_pins = 28, cellbox_connections = 10;
+  unsigned                                            cellbox_critical_choices = 4, cellbox_other_choices = 8;
+  bool                                                cellbox_wide_exceptions  = true;
+  bool                                                cellbox_far_fallback     = false;
+  // Explicit native Plan -> fixed-cellbox Local -> physical Final pipeline.
+  bool                                                cellbox_full_flow        = false;
+  // Diagnose eligible Local nets in a conditional scene; never emit final signal wires or certify closure.
+  bool                                                cellbox_diagnostic_final = false;
+  std::shared_ptr<const lr::Critical_cellbox_handoff> cellbox_handoff;
   // Runtime retry-controller signal only: never inferred by fixed replay.
-  bool                     cellbox_final_retry     = false;
+  bool                                                cellbox_final_retry = false;
   // Runtime native pre-CTS trace in the exact measured Floorplan::nets order.
   // Derived from control_ports/Liberty roles, never inferred from missing STA.
-  std::vector<bool>        cellbox_ignored_nets;
+  std::vector<bool>                                   cellbox_ignored_nets;
   // L2 cell-boxes (variant c1_T20_pa_cd4 of the prototype)
-  double      box_fill         = 1;    // fill cap of each box row (the measured fill lands near 0.8)
-  unsigned    box_net_max      = 10;   // nets with more pins never drive a merge
-  double      merge_cost       = 20;   // no merge above this cost
-  double      crit_fraction    = .2;   // top slack-rank fraction that counts as critical
+  double                                              box_fill = 1;  // fill cap of each box row (the measured fill lands near 0.8)
+  unsigned                                            box_net_max   = 10;      // nets with more pins never drive a merge
+  double                                              merge_cost    = 20;      // no merge above this cost
+  double                                              crit_fraction = .2;      // top slack-rank fraction that counts as critical
   double      crit_window_ps   = 200;  // nets this close to WNS get timing weight (1 + 8 crit^2)
   // legroute.local: the SAT placement per region (CaDiCaL) and the tracks it routes on
   unsigned    sat_conflicts    = 10000000;  // per solver call
@@ -329,6 +338,7 @@ struct Legroute_step {
 struct Legroute_report {
   size_t  box_route_seed_attempts = 0, box_route_seed_successes = 0;
   int64_t tile_w = 0, tile_h = 0;
+  int64_t dbu_per_micron = 1000;
   size_t  cols = 0, rows = 0, regions = 0, tiles_free = 0;
   size_t  cells = 0, boxes = 0, internal_nets = 0, external_nets = 0, max_cells_per_box = 0;
   double  fill = 0, mean_cells_per_box = 0, displacement_um = 0, max_displacement_um = 0;
@@ -350,6 +360,10 @@ struct Legroute_report {
     return local_metal_rejected() || (local_join_probe_attempted && !local_join_probe_complete);
   }
   size_t                        l5_repair_attempts = 0, l5_repair_successes = 0, l5_repair_unknown = 0, l5_repair_unsat = 0;
+  size_t                        l5_repair_sat_calls = 0, l5_repair_sat = 0, l5_repair_sat_unsat = 0, l5_repair_sat_unknown = 0;
+  size_t                        l5_repair_sat_variables = 0, l5_repair_sat_clauses = 0;
+  double                        l5_repair_sat_build_seconds = 0, l5_repair_sat_solve_seconds = 0;
+  double                        l5_repair_candidate_seconds = 0, l5_repair_native_validation_seconds = 0, l5_repair_seconds = 0;
   std::map<std::string, size_t> track_failures;         // assignment failures by wire/attachment kind
   std::map<std::string, size_t> track_pick_rejections;  // L5 failed pick attempts by LAYER:filter stage
   std::map<std::string, size_t> track_fallback_shadow;  // l5_fallback_shadow: LAYER:kind:{failed,shadow_free} counts
@@ -476,6 +490,11 @@ struct Legroute_report {
   // passes. Search avoidance is distinct from the two transactional backstops.
   size_t                   final_prior_cut_rejections = 0, final_pending_cut_rejections = 0, final_union_cut_rejections = 0;
   size_t                   final_precommit_disconnected = 0;
+  size_t                   final_domain_rejections = 0, final_required_pins = 0, final_connected_pins = 0;
+  bool                     final_diagnostic_only     = false;
+  size_t                   final_local_rejected_nets = 0, final_local_rejected_pins = 0;
+  size_t                   final_detail_failed_nets = 0, final_detail_failed_pins = 0, final_detail_unattempted_pins = 0;
+  double                   final_piece_seconds = 0;
   size_t                   final_skipped_nets
       = 0;  // final_skip_clock / final_skip_nets diagnostic  // opt-in final_precommit_connectivity rejections
   size_t                        disconnected_nets = 0;
@@ -547,7 +566,8 @@ void            write_legroute_report(const Legroute_report&, const std::string&
 // these endpoints with matched provisional box tiles. endpoint_basis reports
 // this distinction; none of these modes certifies detailed routability.
 struct Legroute_plan_report {
-  bool box_route_seed_attempted = false, box_route_seed_accepted = false;
+  std::shared_ptr<const lr::Critical_cellbox_handoff> cellbox_handoff;
+  bool                                                box_route_seed_attempted = false, box_route_seed_accepted = false;
   enum class Route_skip_reason { none, physical_density, window_density, paired_pin_supply, paired_pin_grouping };
   Legroute_gate_report gates;
   std::string          endpoint_basis    = "physical_pins";

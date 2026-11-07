@@ -27,24 +27,84 @@ void apply_signal_route_rules(ph::Floorplan& frame, const Signal_route_geometry&
   frame.nondefault_rules.insert(geometry.nondefault_rules.begin(), geometry.nondefault_rules.end());
 }
 Signal_router::Signal_router(const ph::Technology& tech, const ph::Floorplan& frame, const ph::Routing_occupancy& occupancy,
-                             Signal_route_profile profile, const Pin_escape_guard* pin_escapes)
+                             Signal_route_profile profile, const Pin_escape_guard* pin_escapes,
+                             std::shared_ptr<const Signal_route_domain> domain, std::span<const ph::Route_path> retained,
+                             const ph::Route_width_rules* retained_rules)
     : tech_(tech)
     , profile_(std::move(profile))
     , frame_(frame)
     , occupancy_(occupancy)
     , owned_rules_(std::make_unique<ph::Signal_metal_rules>(tech, frame))
     , rules_(*owned_rules_)
-    , components_(frame)
-    , pin_escapes_(pin_escapes) {}
+    , components_(std::make_shared<ph::Route_components>(frame))
+    , pin_escapes_(pin_escapes)
+    , domain_(std::move(domain))
+    , retained_paths_(retained)
+    , retained_rules_(retained_rules) {}
 Signal_router::Signal_router(const ph::Technology& tech, const ph::Floorplan& frame, const ph::Routing_occupancy& occupancy,
-                             const ph::Signal_metal_rules& rules, Signal_route_profile profile, const Pin_escape_guard* pin_escapes)
+                             const ph::Signal_metal_rules& rules, Signal_route_profile profile, const Pin_escape_guard* pin_escapes,
+                             std::shared_ptr<const Signal_route_domain> domain, std::span<const ph::Route_path> retained,
+                             const ph::Route_width_rules* retained_rules)
     : tech_(tech)
     , profile_(std::move(profile))
     , frame_(frame)
     , occupancy_(occupancy)
     , rules_(rules)
-    , components_(frame)
-    , pin_escapes_(pin_escapes) {}
+    , components_(std::make_shared<ph::Route_components>(frame))
+    , pin_escapes_(pin_escapes)
+    , domain_(std::move(domain))
+    , retained_paths_(retained)
+    , retained_rules_(retained_rules) {}
+Signal_router::Signal_router(const Signal_router& other, std::shared_ptr<const Signal_route_domain> domain,
+                             std::span<const ph::Route_path> retained, const ph::Route_width_rules* retained_rules)
+    : tech_(other.tech_)
+    , profile_(other.profile_)
+    , frame_(other.frame_)
+    , occupancy_(other.occupancy_)
+    , rules_(other.rules_)
+    , components_(other.components_)
+    , pin_escapes_(other.pin_escapes_)
+    , domain_(std::move(domain))
+    , retained_paths_(retained)
+    , retained_rules_(retained_rules) {}
+std::string Signal_router::check_domain(const ph::Net& net, const Signal_route_geometry& geometry,
+                                        std::span<const Signal_route_via> prior) const {
+  if (!domain_) {
+    return {};
+  }
+  std::vector<ph::Route_path> retained;
+  for (const auto& v : prior) {
+    const auto shapes = ph::via_geometry(tech_, frame_, v.via);
+    const auto layer  = std::ranges::find_if(shapes, [&](const auto& s) { return tech_.layers.contains(s.layer); });
+    if (layer == shapes.end()) {
+      return "domain prior via has no metal";
+    }
+    auto p                                  = ph::via_path(layer->layer, v.x, v.y, v.via.name);
+    std::get<ph::Route_via>(p.steps.back()) = v.via;
+    retained.push_back(std::move(p));
+  }
+  ph::Route_width_rules combined_rules;
+  const auto*           trial_rules = &geometry.nondefault_rules;
+  if (retained_rules_ && !retained_rules_->empty()) {
+    combined_rules = *retained_rules_;
+    for (const auto& [name, widths] : geometry.nondefault_rules) {
+      const auto [it, inserted] = combined_rules.emplace(name, widths);
+      if (!inserted && it->second != widths) {
+        return "conflicting retained domain width rule";
+      }
+    }
+    trial_rules = &combined_rules;
+  }
+  return validate_signal_route_domain(tech_,
+                                      frame_,
+                                      net,
+                                      geometry.paths,
+                                      *domain_,
+                                      trial_rules,
+                                      components_.get(),
+                                      retained_paths_,
+                                      retained);
+}
 ph::Pin_access_result Signal_router::endpoint_access(const ph::Component& cell, const std::string& pin, const ph::Net& net,
                                                      const Signal_route_limits& limits, Signal_route_trial& trial) const {
   auto result            = ph::enumerate_pin_access(tech_,
@@ -57,6 +117,15 @@ ph::Pin_access_result Signal_router::endpoint_access(const ph::Component& cell, 
                                                     net.name,
                                                     profile_.access);
   trial.access_examined += result.examined;
+  if (domain_) {
+    std::erase_if(result.points, [&](const auto& p) {
+      const bool forbidden = net.name != domain_->owner || !signal_domain_wire(*domain_, tech_, frame_, p.escape);
+      if (forbidden) {
+        ++result.rejected["outside reserved/carrier domain"];
+      }
+      return forbidden;
+    });
+  }
   return result;
 }
 std::vector<ph::Shape> Signal_router::proposal_shapes(const ph::Net& net, const std::vector<ph::Route_path>& paths,
@@ -70,7 +139,7 @@ ph::Route_connectivity Signal_router::connectivity(const ph::Net& net, const std
                                                    const ph::Route_width_rules* rules) const {
   auto routed = net;
   routed.wires.push_back({"FIXED", paths});
-  return ph::check_route_connectivity(tech_, frame_, routed, &components_, rules);
+  return ph::check_route_connectivity(tech_, frame_, routed, components_.get(), rules);
 }
 void Signal_router::add_wire(Signal_route_geometry& geometry, const ph::Shape& metal, std::string taper_rule) const {
   const bool  horizontal = tech_.layers.at(metal.layer).direction == "HORIZONTAL";
@@ -154,6 +223,22 @@ std::string Signal_router::check_prior_cuts(Signal_route_geometry& geometry, std
 }
 Signal_route_proposals Signal_router::try_route(const ph::Net& net, const Signal_route_request& request) const {
   Signal_route_proposals result;
+  if ((request.domain && request.domain != domain_) || !request.retained_paths.empty() || request.retained_rules) {
+    if (domain_ && request.domain && request.domain != domain_) {
+      result.reason = "cannot replace constructor-bound route domain";
+      return result;
+    }
+    Signal_router constrained(*this, request.domain ? request.domain : domain_, request.retained_paths, request.retained_rules);
+    auto          nested = request;
+    nested.domain.reset();
+    nested.retained_paths = {};
+    nested.retained_rules = nullptr;
+    return constrained.try_route(net, nested);
+  }
+  if (domain_ && net.name != domain_->owner) {
+    result.reason = "route domain owner mismatch";
+    return result;
+  }
   if (!std::isfinite(request.max_parallel_exposure) || request.max_parallel_exposure < 0) {
     result.reason = "invalid parallel exposure limit";
     return result;
@@ -263,6 +348,10 @@ Signal_route_proposals Signal_router::try_route(const ph::Net& net, const Signal
       result.timed_out            |= expired();
       result.prior_cut_rejections += !result.timed_out;
       access_rejection             = std::move(error);
+      return true;
+    }
+    if (auto error = check_domain(net, candidate, request.prior_vias); !error.empty()) {
+      access_rejection = std::move(error);
       return true;
     }
     const auto shapes = proposal_shapes(net, candidate.paths, &candidate.nondefault_rules);
@@ -618,6 +707,9 @@ Signal_route_trial Signal_router::propose_aligned_layer(const ph::Net& net, cons
     return out;
   }
   trial.vias   = vias.size();
+  if (auto error = check_domain(net, trial); !error.empty()) {
+    return stage.fail(std::move(error));
+  }
   out.geometry = std::move(trial);
   return out;
 }
@@ -630,6 +722,9 @@ Signal_route_trial Signal_router::propose_straight(const ph::Net& net, const ph:
   }
   if (!limits.patterns) {
     return stage.fail("pattern budget");
+  }
+  if (domain_ && !signal_domain_wire(*domain_, tech_, frame_, corridor)) {
+    return stage.fail("straight corridor outside route domain");
   }
   if (!ph::unrouted_signal(net) || net.connections.size() != 2) {
     return stage.fail("straight route requires an unwired two-pin signal net");
@@ -690,8 +785,8 @@ Signal_route_trial Signal_router::propose_straight(const ph::Net& net, const ph:
       {{x1, y1}, {x2, y2}}
   };
   for (const auto& pin : net.connections) {
-    const auto cell = components_.find(pin.instance);
-    if (pin.instance == "PIN" || cell == components_.end()) {
+    const auto cell = components_->find(pin.instance);
+    if (pin.instance == "PIN" || cell == components_->end()) {
       return stage.fail("non-cell straight-route endpoint");
     }
     const auto& c     = *cell->second;
@@ -730,6 +825,9 @@ Signal_route_trial Signal_router::propose_straight(const ph::Net& net, const ph:
   }
   geometry.wire_length_um                       = (x2 - x1 + y2 - y1) / frame_.dbu;
   geometry.layer_wire_length_um[corridor.layer] = geometry.wire_length_um;
+  if (auto error = check_domain(net, geometry); !error.empty()) {
+    return stage.fail(std::move(error));
+  }
   out.geometry                                  = std::move(geometry);
   return out;
 }
@@ -778,8 +876,8 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
     if (stage.expired()) {
       return out;
     }
-    const auto cell = components_.find(connection.instance);
-    if (cell == components_.end() || !pins.emplace(connection.instance, connection.pin).second) {
+    const auto cell = components_->find(connection.instance);
+    if (cell == components_->end() || !pins.emplace(connection.instance, connection.pin).second) {
       return stage.fail("non-cell or duplicate endpoint");
     }
     if (out.access_examined >= limits.access_candidates) {
@@ -865,7 +963,8 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
           }
         }
       }
-      bool legal = rules_.rectangle({profile_.access.escape, span}).legal;
+      bool legal = rules_.rectangle({profile_.access.escape, span}).legal
+                   && (!domain_ || signal_domain_wire(*domain_, tech_, frame_, {profile_.access.escape, span}));
       if (legal) {
         for (auto id : occupancy_.query(profile_.access.escape, span, *clearance, net.name)) {
           if (stage.expired()) {
@@ -907,9 +1006,13 @@ Signal_route_trial Signal_router::propose_span_impl(const ph::Net& net, const Si
           return out;
         }
         bool preserves_access = true;
+        if (auto error = check_domain(net, trial); !error.empty()) {
+          out.reason       = std::move(error);
+          preserves_access = false;
+        }
         if (escapes) {
           const auto access = escapes->check(proposal_shapes(net, trial.paths), net.name, [&] { return stage.expired(); });
-          preserves_access  = access.legal;
+          preserves_access  &= access.legal;
           if (!preserves_access) {
             out.reason = access.reason;
           }
@@ -985,8 +1088,8 @@ Signal_route_trial Signal_router::propose_pattern_impl(const ph::Net& net, const
   }
   std::vector<ph::Pin_access_result> accesses(net.connections.size());
   for (size_t i = 0; i < accesses.size(); ++i) {
-    const auto cell = components_.find(net.connections[i].instance);
-    if (cell == components_.end()) {
+    const auto cell = components_->find(net.connections[i].instance);
+    if (cell == components_->end()) {
       return stage.fail("non-cell endpoint");
     }
     if (out.access_examined >= limits.access_candidates) {
@@ -1047,6 +1150,9 @@ Signal_route_trial Signal_router::propose_pattern_impl(const ph::Net& net, const
   }
   const auto escape_width = ph::wire_width_dbu(tech_.layers.at(profile_.access.escape), frame_.dbu);
   const auto branch_width = ph::wire_width_dbu(tech_.layers.at(profile_.branch_layer), frame_.dbu);
+  if (domain_) {
+    std::erase_if(xs, [&](auto x) { return !signal_domain_track(*domain_, tech_, profile_.branch_layer, x); });
+  }
   if (!escape_width || !branch_width) {
     return stage.fail("unsupported signal width");
   }
@@ -1114,6 +1220,9 @@ Signal_route_trial Signal_router::propose_pattern_impl(const ph::Net& net, const
               profile_.branch_layer,
               {x - width3 / 2, branches.begin()->first + m3->rect.yl, x + width3 / 2, branches.rbegin()->first + m3->rect.yh}
           };
+          if (domain_ && !signal_domain_wire(*domain_, tech_, frame_, trunk)) {
+            continue;
+          }
           bool legal = true;
           for (auto& [y, landing] : landings) {
             if (stage.expired()) {
@@ -1121,6 +1230,10 @@ Signal_route_trial Signal_router::propose_pattern_impl(const ph::Net& net, const
             }
             landing.rect.xl = std::min(landing.rect.xl, x + m2->rect.xl);
             landing.rect.xh = std::max(landing.rect.xh, x + m2->rect.xh);
+            if (domain_ && !signal_domain_wire(*domain_, tech_, frame_, landing)) {
+              legal = false;
+              break;
+            }
             const std::array<double, 10> key{double(x),
                                              double(y),
                                              landing.rect.xl,
@@ -1189,6 +1302,10 @@ Signal_route_trial Signal_router::propose_pattern_impl(const ph::Net& net, const
             return out;
           }
           if (connected.connected) {
+            if (auto error = check_domain(net, trial); !error.empty()) {
+              out.reason = std::move(error);
+              continue;
+            }
             out.geometry = std::move(trial);
             return out;
           }

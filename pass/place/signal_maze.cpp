@@ -125,6 +125,11 @@ Signal_route_trial Signal_router::propose_maze_impl(const ph::Net& net, const Si
   if (stage.expired()) {
     return out;
   }
+  if (domain_) {
+    if (auto error = check_domain(net, {}); !error.empty()) {
+      return fail(std::move(error));
+    }
+  }
   if (sources) {
     if (sources->empty() || !anchors || anchors->empty() || !net.connections.empty() || !net.wires.empty()) {
       return fail("join requires its net's source and anchor metal and no pins");
@@ -246,8 +251,8 @@ Signal_route_trial Signal_router::propose_maze_impl(const ph::Net& net, const Si
   std::vector<ph::Pin_access_result> access(net.connections.size());
   double                             xmin = frame_.die.xh, xmax = frame_.die.xl, ymin = frame_.die.yh, ymax = frame_.die.yl;
   for (size_t i = 0; i < access.size(); ++i) {
-    const auto cell = components_.find(net.connections[i].instance);
-    if (cell == components_.end()) {
+    const auto cell = components_->find(net.connections[i].instance);
+    if (cell == components_->end()) {
       return fail("non-cell endpoint");
     }
     if (out.access_examined >= limits.access_candidates) {
@@ -395,6 +400,20 @@ Signal_route_trial Signal_router::propose_maze_impl(const ph::Net& net, const Si
   xmax                = std::min(frame_.die.xh, xmax + margin);
   ymin                = std::max(frame_.die.yl, ymin - margin);
   ymax                = std::min(frame_.die.yh, ymax + margin);
+  if (domain_ && anchors && !sources) {
+    if (const auto bounds = signal_domain_tap_window(*domain_)) {
+      // Restrict search centers, never the retained geometry or occupancy.
+      // Every admitted start/edge/turn has a centered finite pad accepted by
+      // signal_domain_wire, hence lies inside this conservative local hull.
+      xmin = std::max(xmin, bounds->xl);
+      xmax = std::min(xmax, bounds->xh);
+      ymin = std::max(ymin, bounds->yl);
+      ymax = std::min(ymax, bounds->yh);
+      if (xmin > xmax || ymin > ymax) {
+        return fail("no tap inside the reserved-domain maze window");
+      }
+    }
+  }
   trace.xmin          = xmin;
   trace.xmax          = xmax;
   trace.ymin          = ymin;
@@ -416,7 +435,11 @@ Signal_route_trial Signal_router::propose_maze_impl(const ph::Net& net, const Si
       if (stage.expired()) {
         return out;
       }
-      coords.insert(t.start + n * t.step);
+      const auto c = t.start + n * t.step;
+      if (domain_ && !signal_domain_track(*domain_, tech_, t.layer, c)) {
+        continue;
+      }
+      coords.insert(c);
       if (coords.size() > limits.patterns) {
         trace.budget = "coordinates";
         return fail("maze coordinate budget");
@@ -436,6 +459,9 @@ Signal_route_trial Signal_router::propose_maze_impl(const ph::Net& net, const Si
       if (horizontal[l] ? c < ymin || c > ymax : c < xmin || c > xmax) {
         continue;
       }
+      if (domain_ && !signal_domain_track(*domain_, tech_, layers[l], c)) {
+        continue;
+      }
       tracks[l].insert(c);
       (horizontal[l] ? ycoords : xcoords).insert(c);
       const auto along = std::llround(horizontal[l] ? std::clamp(ref_x, r.xl + half[l], std::max(r.xl + half[l], r.xh - half[l]))
@@ -446,7 +472,7 @@ Signal_route_trial Signal_router::propose_maze_impl(const ph::Net& net, const Si
       }
     }
   }
-  if (tracks[0].empty() || tracks[1].empty()) {
+  if (!domain_ && (tracks[0].empty() || tracks[1].empty())) {
     return fail("missing maze tracks");
   }
   for (const auto& a : access) {
@@ -473,6 +499,9 @@ Signal_route_trial Signal_router::propose_maze_impl(const ph::Net& net, const Si
     };
   };
   const auto legal = [&](const ph::Shape& s) {
+    if (domain_ && !signal_domain_wire(*domain_, tech_, frame_, s, true)) {
+      return false;
+    }
     if (!rules_.rectangle(s).legal || !frame_.die.contains(s.rect)) {
       return false;
     }
@@ -593,6 +622,11 @@ Signal_route_trial Signal_router::propose_maze_impl(const ph::Net& net, const Si
         }
         for (auto& shape : candidate) {
           shape.rect = shape.rect.translated(xs[ix], ys[iy]);
+        }
+        if (domain_
+            && (!signal_domain_wire(*domain_, tech_, frame_, candidate[0], true)
+                || !signal_domain_wire(*domain_, tech_, frame_, candidate[1], true))) {
+          continue;
         }
         // Intrinsic validity is not site legality: retain the complete positioned
         // check, including DEF shadowing, tracks, die, cuts and foreign metal.
@@ -993,7 +1027,7 @@ Signal_route_trial Signal_router::propose_maze_impl(const ph::Net& net, const Si
     std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> queue;
     for (size_t i = 0; i < branch.sources.size(); ++i) {
       const auto k = branch.sources[i];
-      if (std::get<1>(k) >= ys.size() || !legal(pad(k))) {
+      if (std::get<0>(k) >= xs.size() || std::get<1>(k) >= ys.size() || !legal(pad(k))) {
         continue;
       }
       if (reached.size() >= limits.patterns) {
@@ -1116,6 +1150,22 @@ Signal_route_trial Signal_router::propose_maze_impl(const ph::Net& net, const Si
         }
         if (turn ? !turn_legal(k, next) : !legal(segment(k, next))) {
           continue;
+        }
+        if (domain_ && !turn) {
+          // The final emitter merges a consecutive same-layer run. Individual
+          // short edges may fit an intermediate stack window while their union
+          // exceeds its finite bound. Reject that prefix before it wins the
+          // maze; extending a fixed-width interval cannot restore containment.
+          auto whole = segment(k, next);
+          for (auto previous = labels[label].parent; previous; previous = labels[*previous].parent) {
+            if (std::get<2>(labels[*previous].key) != l) {
+              break;
+            }
+            whole.rect = whole.rect.hull(pad(labels[*previous].key).rect);
+          }
+          if (!signal_domain_wire(*domain_, tech_, frame_, whole, true)) {
+            continue;
+          }
         }
         auto                   prefix = labels[label].cuts;
         std::optional<Via_key> new_via;
@@ -1268,6 +1318,9 @@ Signal_route_trial Signal_router::propose_maze_impl(const ph::Net& net, const Si
         // the text before " (")
         const auto  box = [](const ph::Rect& r) { return std::format("[{} {} {} {}]", r.xl, r.yl, r.xh, r.yh); };
         std::string why;
+        if (domain_ && !signal_domain_wire(*domain_, tech_, frame_, s, true)) {
+          return fail(std::format("maze merged metal outside route domain ({} {})", s.layer, box(s.rect)));
+        }
         if (const auto own = rules_.rectangle(s); !own.legal) {
           why = "shape: " + own.reason;
         } else if (!frame_.die.contains(s.rect)) {
@@ -1357,6 +1410,9 @@ Signal_route_trial Signal_router::propose_maze_impl(const ph::Net& net, const Si
     }
   }
   trial.vias = vias.size();
+  if (auto error = check_domain(net, trial, prior); !error.empty()) {
+    return fail(std::move(error));
+  }
   if (anchors) {  // a partial net: the caller checks it once every pin is tapped
     if (auto error = check_prior_cuts(trial, prior, limits.deadline); !error.empty()) {
       return stage.expired() ? out : fail(std::move(error));

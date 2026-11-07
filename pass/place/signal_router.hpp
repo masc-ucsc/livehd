@@ -10,6 +10,7 @@
 #include "inou/lefdef/pin_access.hpp"
 #include "inou/lefdef/routing_connectivity.hpp"
 #include "inou/lefdef/routing_occupancy.hpp"
+#include "signal_route_domain.hpp"
 #include "signal_route_profile.hpp"
 
 namespace livehd::placement {
@@ -82,6 +83,12 @@ struct Signal_route_request {
   // vias and is connected only together with the caller's retained geometry.
   // Context never grants clearance against foreign metal or relaxes cut rules.
   std::vector<Signal_route_via>  prior_vias;
+  // Immutable per-net resource ownership. Null preserves the legacy router.
+  std::shared_ptr<const Signal_route_domain> domain;
+  // Already accepted same-net context, borrowed only for this synchronous call.
+  // This does not expand the immutable carrier/reservation domain.
+  std::span<const physical::Route_path>      retained_paths;
+  const physical::Route_width_rules*         retained_rules = nullptr;
 };
 struct Signal_route_proposals {
   std::vector<Signal_route_geometry> candidates;  // baseline first; not timing-ranked
@@ -115,8 +122,15 @@ class Signal_router {
   const physical::Routing_occupancy&            occupancy_;
   std::unique_ptr<physical::Signal_metal_rules> owned_rules_;
   const physical::Signal_metal_rules&           rules_;
-  physical::Route_components                    components_;
+  std::shared_ptr<const physical::Route_components> components_;
   const Pin_escape_guard*                       pin_escapes_ = nullptr;
+  std::shared_ptr<const Signal_route_domain>        domain_;
+  std::span<const physical::Route_path>             retained_paths_;
+  const physical::Route_width_rules*                retained_rules_ = nullptr;
+
+  Signal_router(const Signal_router&, std::shared_ptr<const Signal_route_domain>, std::span<const physical::Route_path>,
+                const physical::Route_width_rules*);
+  std::string check_domain(const physical::Net&, const Signal_route_geometry&, std::span<const Signal_route_via> prior = {}) const;
 
   Signal_route_trial propose_simple(const physical::Net&, const Signal_route_limits&) const;
   Signal_route_trial propose_pattern_impl(const physical::Net&, const Signal_route_limits&, bool simple) const;
@@ -155,10 +169,14 @@ public:
   // Repeated routing should borrow the host's current escape guard. Without one,
   // try_route builds a temporary guard against current occupancy within its budget.
   Signal_router(const physical::Technology&, const physical::Floorplan&, const physical::Routing_occupancy&, Signal_route_profile,
-                const Pin_escape_guard* = nullptr);
+                const Pin_escape_guard* = nullptr, std::shared_ptr<const Signal_route_domain> = {},
+                std::span<const physical::Route_path> retained_paths = {},
+                const physical::Route_width_rules*    retained_rules = nullptr);
   // Borrow a compiled oracle for repeated candidate checks; it must outlive this router.
   Signal_router(const physical::Technology&, const physical::Floorplan&, const physical::Routing_occupancy&,
-                const physical::Signal_metal_rules&, Signal_route_profile, const Pin_escape_guard* = nullptr);
+                const physical::Signal_metal_rules&, Signal_route_profile, const Pin_escape_guard* = nullptr,
+                std::shared_ptr<const Signal_route_domain> = {}, std::span<const physical::Route_path> retained_paths = {},
+                const physical::Route_width_rules* retained_rules = nullptr);
   Signal_route_proposals try_route(const physical::Net&, const Signal_route_request&) const;
   // Returns a witness using the requested layer alternatives, without timing ranking.
   Signal_route_probe     probe_route(const physical::Net&, const Signal_route_request&) const;

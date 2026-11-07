@@ -12,7 +12,7 @@ std::vector<Global_net> all_signal_requests(const Design& d, const Grid& g, cons
   std::vector<Global_net> nets;
   for (size_t n = 0; n < d.nets.size(); ++n) {
     const auto& net = d.nets[n];
-    if (!net.routed || net.clock) {
+    if (!net.routed || (!d.opt.cellbox_full_flow && net.clock)) {
       continue;
     }
     Global_net gn;
@@ -24,7 +24,7 @@ std::vector<Global_net> all_signal_requests(const Design& d, const Grid& g, cons
       const int box = p.comp >= 0 && d.cell[size_t(p.comp)] >= 0 ? boxes.box_of[size_t(d.cell[size_t(p.comp)])] : -1;
       if (box >= 0) {
         const auto& b = boxes.boxes[size_t(box)];
-        t             = g.tile_of(b.cx, b.cy);
+        t             = d.opt.cellbox_full_flow ? b.tile : g.tile_of(b.cx, b.cy);
       } else {
         t = physical_pin_access(d, g, p).tile;
       }

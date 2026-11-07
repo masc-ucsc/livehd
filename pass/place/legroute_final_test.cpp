@@ -346,6 +346,37 @@ TEST(LegrouteFinal, KeepsTheExactPlacementOfAnUnmovedLegalBox) {
   EXPECT_EQ(f.fp.components, before);
 }
 
+TEST(LegrouteFinal, CriticalFourRowWideBoxKeepsEveryAdmittedPose) {
+  Final_placement f;
+  f.options.cellbox_full_flow = true;
+  f.grid.rows_per_tile        = 4;
+  f.grid.tile_h               = 1000;
+  f.grid.keys                 = {
+      {{0, 0, 16}, {1, 0, 16}, {2, 0, 16}, {3, 0, 16}}
+  };
+  auto& box          = f.boxes.boxes[0];
+  box.critical_fixed = box.fixed = true;
+  box.span_columns               = 2;
+  box.cx                         = 800;  // The footprint center lies in its second tile.
+  box.cy                         = 500;
+  f.fp.components[1].place.x     = 1100;
+  f.fp.components[1].place.y     = 750;
+  const auto before              = f.fp.components;
+  final_place(f.design, f.grid, f.boxes, f.routes, 2);
+  EXPECT_EQ(f.fp.components, before);
+}
+
+TEST(LegrouteFinal, CriticalFinalRejectsAStaleFootprintWithoutMovingCells) {
+  Final_placement f;
+  f.options.cellbox_full_flow = true;
+  auto& box                   = f.boxes.boxes[0];
+  box.critical_fixed = box.fixed = true;
+  f.fp.components[1].place.x     = f.grid.tile_w;
+  const auto before              = f.fp.components;
+  EXPECT_THROW(final_place(f.design, f.grid, f.boxes, f.routes, 2), std::logic_error);
+  EXPECT_EQ(f.fp.components, before);
+}
+
 TEST(LegrouteFinal, StillOptimizesABoxThatWasMovedToAnotherTile) {
   Final_placement f;
   f.boxes.boxes[0].tile = 1;
@@ -496,6 +527,354 @@ TEST(LegrouteFinal, PrecommitConnectivityKeepsTheConnectedTree) {
   ASSERT_TRUE(report.wires_emitted);
   EXPECT_EQ(report.clock_connected_nets, 1u);
   EXPECT_EQ(report.final_precommit_disconnected, 0u);
+}
+
+TEST(LegrouteFinal, CriticalInternalNetRoutesOnlyOnItsReservedTracks) {
+  // Diagnostic runs must retain rejected Local owners in the denominator,
+  // route eligible internal nets, and never publish even an all-eligible scene.
+  for (const int mode : {0, 1, 2}) {
+    Final_io f(0, 0);
+    f.options.cellbox_full_flow        = true;
+    f.options.cellbox_diagnostic_final = mode != 0;
+    f.grid.sites                       = 16;
+    f.grid.site                        = 50;
+    f.grid.row_h                       = 250;
+    const auto terminals               = f.fp.terminals;
+    const auto global_source           = f.fp.nets.front();
+    const auto global_net              = f.design.nets.front();
+    const auto global_tree             = f.routes.trees.front();
+    const auto global_segment          = f.routes.segments.front();
+    f.fp.terminals.clear();
+    f.fp.nets.clear();
+    auto& master     = f.tech.macros["gate"];
+    master.klass     = "CORE";
+    master.width     = .2;
+    master.height    = .25;
+    master.pins["A"] = {"INPUT", "SIGNAL", {{"M1", {.015, .015, .035, .235}}}};
+    for (int i = 0; i < 2; ++i) {
+      Ann_place pose(i ? 500 : 200, 0, 200, 250);
+      pose.status = physical::Status::PLACED;
+      f.fp.components.push_back({"c" + std::to_string(i), "gate", pose});
+    }
+    f.fp.nets.push_back({
+        "internal",
+        {{"c0", "A"}, {"c1", "A"}},
+        {},
+        "SIGNAL"
+    });
+    f.design.cell    = {0, 1};
+    f.design.movable = {0, 1};
+    f.design.width   = {200, 200};
+    f.design.tall    = {false, false};
+    auto& net        = f.design.nets[0];
+    net              = {};
+    net.frame        = 0;
+    net.pins         = {
+        {.comp = 0, .lef = &master.pins.at("A"), .name = "A"},
+        {.comp = 1, .lef = &master.pins.at("A"), .name = "A"}
+    };
+    f.routes = {};
+    f.routes.trees.resize(1);
+    f.routes.local = {1};
+    if (mode != 0) {
+      f.routes.final_local_rejected = {""};
+    }
+    if (mode == 2) {
+      f.fp.terminals = terminals;
+      f.fp.nets.push_back(global_source);
+      f.fp.nets.back().use = "SIGNAL";
+      f.design.nets.push_back(global_net);
+      auto& rejected = f.design.nets.back();
+      rejected.frame = 1;
+      rejected.clock = false;
+      for (auto& pin : rejected.pins) {
+        pin.name = f.fp.terminals[pin.term].name;
+      }
+      f.routes.trees.push_back(global_tree);
+      f.routes.segments.push_back(global_segment);
+      f.routes.segments.back().net   = 1;
+      f.routes.segments.back().track = -1;
+      f.routes.local.push_back(0);
+      f.routes.final_local_rejected.push_back("unassigned Local segment");
+    }
+    Boxes boxes;
+    boxes.box_of = {0, 0};
+    Box box;
+    box.cells  = {0, 1};
+    box.sites  = 8;
+    box.tile   = 0;
+    box.placed = box.fixed = box.critical_fixed = true;
+    box.reserved_h                              = {125, 225};
+    box.reserved_v                              = {225, 525};
+    boxes.boxes.push_back(box);
+    Legroute_report report;
+    final_wires(f.design, f.grid, boxes, f.routes, {}, report);
+    std::string reasons;
+    for (const auto& why : report.failure_sample) {
+      reasons += why + " | ";
+    }
+    EXPECT_EQ(report.wires_emitted, mode == 0) << reasons;
+    EXPECT_EQ(report.final_diagnostic_only, mode != 0);
+    EXPECT_EQ(report.routed_nets, mode == 2 ? 2u : 1u);
+    EXPECT_EQ(report.connected_nets, 1u);
+    EXPECT_EQ(report.final_required_pins, mode == 2 ? 4u : 2u);
+    EXPECT_EQ(report.final_connected_pins, 2u);
+    EXPECT_EQ(report.final_local_rejected_nets, mode == 2 ? 1u : 0u);
+    EXPECT_EQ(report.final_local_rejected_pins, mode == 2 ? 2u : 0u);
+    EXPECT_EQ(report.failed_nets, mode == 2 ? 1u : 0u);
+    EXPECT_EQ(report.final_detail_failed_nets, 0u) << reasons;
+    EXPECT_EQ(report.final_detail_failed_pins, 0u);
+    EXPECT_EQ(report.unchecked_nets, 0u);
+    EXPECT_EQ(report.final_detail_unattempted_pins, 0u);
+    EXPECT_EQ(report.final_domain_rejections, 0u);
+    if (mode == 2) {
+      EXPECT_EQ(report.failure_reasons.at("Local rejected before Final"), 1u);
+      EXPECT_FALSE(report.failure_reasons.contains("Local rejected before Final: unassigned Local segment"));
+    }
+    if (mode != 0) {
+      for (const auto& source : f.fp.nets) {
+        EXPECT_TRUE(source.wires.empty());
+      }
+    }
+    for (const auto& shape : physical::route_geometry(f.tech, f.fp, f.fp.nets[0])) {
+      if (shape.layer == "M2" && shape.rect.xh - shape.rect.xl > shape.rect.yh - shape.rect.yl) {
+        const auto y = (shape.rect.yl + shape.rect.yh) / 2;
+        EXPECT_TRUE(y == 125 || y == 225) << y;
+      }
+    }
+  }
+}
+
+TEST(LegrouteFinal, DiagnosticFinalRequiresCompleteLocalAdmissionRecords) {
+  Final_io f(0, 0);
+  f.options.cellbox_full_flow        = true;
+  f.options.cellbox_diagnostic_final = true;
+  Legroute_report report;
+  EXPECT_THROW(final_wires(f.design, f.grid, {}, f.routes, {}, report), std::invalid_argument);
+  EXPECT_TRUE(f.fp.nets[0].wires.empty());
+}
+
+TEST(LegrouteFinal, CriticalLeafCarriersEndAtBoxCentersWithoutAuxiliaryRisers) {
+  for (const bool horizontal : {false, true}) {
+    Final_io f(0, 0);
+    f.options.cellbox_full_flow = true;
+    f.fp.terminals.clear();
+    f.design.nets[0].pins.clear();
+    f.design.nets[0].clock = false;
+    f.routes.trees[0].nodes.clear();
+    for (int i = 0; i < 2; ++i) {
+      Node node;
+      node.tile               = i ? (horizontal ? 1 : 2) : 0;
+      node.box                = i;
+      node.riser_layer        = 0;
+      node.riser_track        = 4;
+      node.direct_carrier_tap = true;
+      f.routes.trees[0].nodes.push_back(node);
+    }
+    f.routes.segments = {
+        {.net = 0, .layer = horizontal ? 1 : 0, .band = 0, .lo = 0, .hi = 1, .node_lo = 0, .node_hi = 1, .track = 4}
+    };
+    const auto geometry = final_planned_geometry(f.design, f.grid, {}, f.routes);
+    ASSERT_EQ(geometry.paths.size(), 1u);
+    ASSERT_EQ(geometry.paths[0].size(), 1u);
+    EXPECT_TRUE(geometry.joins[0].empty());
+    physical::Net emitted;
+    emitted.name = "leaf_carrier";
+    emitted.wires.push_back({"ROUTED", geometry.paths[0]});
+    const auto metal = physical::route_geometry(f.tech, f.fp, emitted);
+    ASSERT_EQ(metal.size(), 1u);
+    EXPECT_EQ(metal[0].layer, horizontal ? "M4" : "M3");
+    // Native width is 20 DBU: center endpoints plus 10 DBU at each end.
+    EXPECT_DOUBLE_EQ(horizontal ? metal[0].rect.xl : metal[0].rect.yl, horizontal ? 390 : 240);
+    EXPECT_DOUBLE_EQ(horizontal ? metal[0].rect.xh : metal[0].rect.yh, horizontal ? 1210 : 760);
+  }
+}
+
+TEST(LegrouteFinal, CachedEmitterUsesCurrentTracksAndRejectsTopologyChanges) {
+  Final_io               f(0, 0);
+  const Boxes            boxes;
+  Final_geometry_emitter emitter(f.design, f.grid, boxes, f.routes);
+  const auto             before = emitter.emit(0);
+  ASSERT_FALSE(before.paths.empty());
+  ASSERT_EQ(before.paths[0].layer, "M4");
+  ASSERT_TRUE(std::holds_alternative<physical::Route_point>(before.paths[0].steps[0]));
+  EXPECT_EQ(std::get<physical::Route_point>(before.paths[0].steps[0]).y, 775);
+  f.routes.segments[0].track = 16;
+  const auto after           = emitter.emit(0);
+  ASSERT_FALSE(after.paths.empty());
+  EXPECT_EQ(std::get<physical::Route_point>(after.paths[0].steps[0]).y, 825);
+  EXPECT_EQ(std::get<physical::Route_point>(before.paths[0].steps[0]).y, 775);
+  const auto fresh = final_planned_geometry(f.design, f.grid, boxes, f.routes);
+  EXPECT_EQ(after.joins, fresh.joins[0]);
+  EXPECT_EQ(after.path_state, fresh.path_state[0]);
+  EXPECT_EQ(after.io_stub_failure, fresh.io_stub_failure[0]);
+  f.routes.trees[0].nodes[0].riser_track = 5;
+  const auto moved_riser                 = emitter.emit(0);
+  const auto rebuilt                     = final_planned_geometry(f.design, f.grid, boxes, f.routes);
+  const auto rectangles                  = [&](const std::vector<physical::Route_path>& paths) {
+    physical::Net net;
+    net.name = "cached_emission";
+    net.wires.push_back({"ROUTED", paths});
+    std::vector<std::tuple<std::string, double, double, double, double>> result;
+    for (const auto& shape : physical::route_geometry(f.tech, f.fp, net)) {
+      result.emplace_back(shape.layer, shape.rect.xl, shape.rect.yl, shape.rect.xh, shape.rect.yh);
+    }
+    return result;
+  };
+  EXPECT_EQ(rectangles(moved_riser.paths), rectangles(rebuilt.paths[0]));
+  EXPECT_NE(rectangles(moved_riser.paths), rectangles(after.paths));
+  EXPECT_EQ(moved_riser.joins, rebuilt.joins[0]);
+  EXPECT_THROW(emitter.emit(1), std::out_of_range);
+  f.routes.segments.push_back(f.routes.segments.front());
+  EXPECT_THROW(emitter.emit(0), std::logic_error);
+}
+
+TEST(LegrouteFinal, CachedEmitterClearsPartialMetalOnInvalidIoAccess) {
+  Final_io f(0, 0);
+  std::erase_if(f.fp.tracks, [](const auto& track) { return track.layer == "M4"; });
+  const Boxes            boxes;
+  Final_geometry_emitter emitter(f.design, f.grid, boxes, f.routes);
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    const auto geometry = emitter.emit(0);
+    EXPECT_FALSE(geometry.io_stub_failure.empty());
+    EXPECT_TRUE(geometry.paths.empty());
+    EXPECT_TRUE(geometry.joins.empty());
+    EXPECT_TRUE(geometry.path_state.empty());
+  }
+}
+
+TEST(LegrouteFinal, CriticalAdjacentJoinLandingsAreExplicitProducerMetal) {
+  Final_io   f(0, 0);
+  const auto original_terminals = f.fp.terminals;
+  const auto old                = final_planned_geometry(f.design, f.grid, {}, f.routes);
+  EXPECT_TRUE(old.adjacent_join_vias[0].empty());
+  f.options.cellbox_full_flow = true;
+  const auto grown            = final_planned_geometry(f.design, f.grid, {}, f.routes);
+  ASSERT_EQ(grown.paths[0].size(), old.paths[0].size());
+  EXPECT_EQ(grown.path_state, old.path_state);
+  EXPECT_EQ(grown.joins, old.joins);
+  ASSERT_FALSE(grown.adjacent_join_vias[0].empty());
+  const auto decode = [&](const auto& paths) {
+    physical::Net net;
+    net.name = "clk";
+    net.wires.push_back({"ROUTED", paths});
+    return physical::route_geometry(f.tech, f.fp, net);
+  };
+  const auto before = decode(old.paths[0]), after = decode(grown.paths[0]);
+  ASSERT_EQ(before.size(), after.size());
+  size_t extensions = 0;
+  for (size_t k = 0; k < after.size(); ++k) {
+    EXPECT_EQ(before[k].layer, after[k].layer);
+    EXPECT_TRUE(after[k].rect.contains(before[k].rect));
+    const bool h = f.tech.layers.at(after[k].layer).direction == "HORIZONTAL";
+    EXPECT_DOUBLE_EQ(h ? before[k].rect.yl : before[k].rect.xl, h ? after[k].rect.yl : after[k].rect.xl);
+    EXPECT_DOUBLE_EQ(h ? before[k].rect.yh : before[k].rect.xh, h ? after[k].rect.yh : after[k].rect.xh);
+    extensions += before[k].rect != after[k].rect;
+  }
+  EXPECT_GT(extensions, 0u);
+  auto frozen_coverage = after;
+  for (const auto& terminal : f.fp.terminals) {
+    for (const auto& shape : terminal.shapes) {
+      frozen_coverage.push_back(
+          {shape.layer, physical::orient_rect(shape.rect, 0, 0, terminal.orientation).translated(terminal.x, terminal.y)});
+    }
+  }
+  for (const auto& path : grown.adjacent_join_vias[0]) {
+    ASSERT_EQ(path.steps.size(), 2u);
+    const auto& at  = std::get<physical::Route_point>(path.steps[0]);
+    const auto& via = std::get<physical::Route_via>(path.steps[1]);
+    EXPECT_TRUE(f.tech.vias.at(via.name).is_default);
+    for (auto plate : physical::via_geometry(f.tech, f.fp, via)) {
+      if (!f.tech.layers.contains(plate.layer)) {
+        continue;
+      }
+      plate.rect = plate.rect.translated(at.x, at.y);
+      EXPECT_TRUE(std::ranges::any_of(frozen_coverage, [&](const auto& shape) {
+        return shape.layer == plate.layer && shape.rect.contains(plate.rect);
+      }));
+    }
+  }
+  // No suitable DEFAULT definition: do not silently authorize alternative
+  // wider landings or extra upper-layer geometry.
+  f.tech.vias["V3_DEF"].is_default = false;
+  const auto unsupported           = final_planned_geometry(f.design, f.grid, {}, f.routes);
+  EXPECT_TRUE(unsupported.adjacent_join_vias[0].empty());
+  EXPECT_EQ(decode(unsupported.paths[0]), before);
+  EXPECT_EQ(f.fp.terminals, original_terminals);
+}
+
+TEST(LegrouteFinal, CriticalAdjacentViaUsesFrozenCoverageAndRejectsNativeCapConflict) {
+  for (const bool obstruct : {false, true}) {
+    Final_io f(0, 0);
+    f.options.cellbox_full_flow = true;
+    if (obstruct) {
+      // The main M4 starts at x225: old width cap215, selected native
+      // plate cap205. A foreign terminal ending190 is legal25DBU from the
+      // old cap but too close15DBU to the new cap (native spacing20).
+      const physical::Shape obstacle{
+          "M4",
+          {170, 765, 190, 785}
+      };
+      const physical::Signal_metal_rules rules(f.tech, f.fp);
+      EXPECT_TRUE(rules
+                      .spacing(
+                          {
+                              "M4",
+                              {215, 765, 1235, 785}
+      },
+                          obstacle)
+                      .legal);
+      EXPECT_FALSE(rules
+                       .spacing(
+                           {
+                               "M4",
+                               {205, 765, 1245, 785}
+      },
+                           obstacle)
+                       .legal);
+      f.fp.terminals.push_back(
+          {"blocker", "foreign", "INPUT", 0, 0, physical::Orientation::N, physical::Status::FIXED, {obstacle}});
+    }
+    for (auto& pin : f.design.nets[0].pins) {
+      pin.name = f.fp.terminals[pin.term].name;
+    }
+    Legroute_report report;
+    final_wires(f.design, f.grid, {}, f.routes, {}, report);
+    std::string reasons;
+    for (const auto& reason : report.failure_sample) {
+      reasons += reason + " | ";
+    }
+    EXPECT_EQ(report.wires_emitted, !obstruct) << reasons;
+    EXPECT_EQ(report.connected_nets, obstruct ? 0u : 1u) << reasons;
+    EXPECT_EQ(report.global_conflict_nets, obstruct ? 1u : 0u) << reasons;
+    if (obstruct) {
+      EXPECT_TRUE(f.fp.nets[0].wires.empty());
+    } else {
+      EXPECT_TRUE(physical::check_route_connectivity(f.tech, f.fp, f.fp.nets[0]).connected);
+      EXPECT_EQ(report.final_domain_rejections, 0u);
+    }
+  }
+}
+
+TEST(LegrouteFinal, CriticalDirectJoinCannotBypassPendingCutsOrSuppressNormalSearch) {
+  Final_io f(0, 0);
+  f.options.cellbox_full_flow     = true;
+  f.tech.cut_layers["V3"].spacing = {.09};
+  for (auto& pin : f.design.nets[0].pins) {
+    pin.name = f.fp.terminals[pin.term].name;
+  }
+  Legroute_report report;
+  final_wires(f.design, f.grid, {}, f.routes, {}, report);
+  // The direct shortcut must test the prior cut set before selecting its
+  // candidate. A conflict returns to bounded normal search, not late commit.
+  EXPECT_EQ(report.final_pending_cut_rejections, 0u);
+  EXPECT_EQ(report.final_union_cut_rejections, 0u);
+  EXPECT_GT(report.final_prior_cut_rejections, 0u);
+  if (report.wires_emitted) {
+    EXPECT_TRUE(physical::check_route_connectivity(f.tech, f.fp, f.fp.nets[0]).connected);
+  } else {
+    EXPECT_TRUE(f.fp.nets[0].wires.empty());
+  }
 }
 }  // namespace livehd::placement::lr
 

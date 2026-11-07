@@ -227,11 +227,11 @@ struct Options {
   // a store-derived value must move neither. `lhd compile --emit-dir sim:`
   // leaves it unresolved and resolves explicit + positional simulation tuning itself.
   struct Sim_tune {
-    bool     resolved   = false;
-    bool     dirty      = true;  // the built-in L1 vector (sim_tune_vector.hpp kTuneDefault*)
-    int64_t  fence      = 16;    // std::numeric_limits<int64_t>::max() = no fences ("none")
-    uint64_t live_words = 512;  // kTuneDefaultLiveWords
-    bool     llvm       = true;  // an unset sim.tune.backend is llvm (kTuneDefaultLlvm)
+    bool     resolved       = false;
+    bool     dirty          = true;  // the built-in L1 vector (sim_tune_vector.hpp kTuneDefault*)
+    int64_t  fence          = 16;    // std::numeric_limits<int64_t>::max() = no fences ("none")
+    uint64_t live_words     = 512;   // kTuneDefaultLiveWords
+    bool     llvm           = true;  // an unset sim.tune.backend is llvm (kTuneDefaultLlvm)
     // Neither dirty nor fence is pinned by any source: inou.cgen.sim receives
     // `auto` and picks the pair from the design's dirty partition (LLVM only,
     // Cgen auto-dirty rule); `dirty`/`fence` above then name the request.
@@ -1837,6 +1837,15 @@ inline constexpr Synth_set_option kSynthSetOptions[] = {
      "true",
      Synth_set_option::Kind::boolean,
      "with critical_cellboxes: permit explicitly reported exceptions for cells wider than one cellbox row"},
+    {"place.legroute.cellbox_full_flow",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "opt-in selected critical Plan handoff through fixed four-row Local and constrained physical Final"},
+    {"place.legroute.cellbox_diagnostic_final",
+     "false",
+     Synth_set_option::Kind::boolean,
+     "with cellbox_full_flow and final: diagnose Local-eligible nets in a conditional scene; never emit routed wires or certify "
+     "closure"},
     {"place.legroute.cellbox_far_fallback",
      "false",
      Synth_set_option::Kind::boolean,

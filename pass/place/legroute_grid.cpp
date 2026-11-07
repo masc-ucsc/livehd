@@ -104,7 +104,7 @@ std::pair<int64_t, int64_t> Grid::tracks(int l, int band) const {
 
 Design build_design(const ph::Technology& tech, ph::Floorplan& fp, const timing::Feedback& timing, const Legroute_options& opt,
                     const ph::Tech_profile* profile) {
-  Design                                    d{tech, fp, opt, profile};
+  Design d{tech, fp, opt, profile};
   if (opt.critical_cellboxes && !opt.cellbox_ignored_nets.empty() && opt.cellbox_ignored_nets.size() != fp.nets.size()) {
     throw std::invalid_argument("critical cellbox control scope does not match the measured frame net identities");
   }
@@ -148,15 +148,18 @@ Design build_design(const ph::Technology& tech, ph::Floorplan& fp, const timing:
   for (size_t n = 0; n < fp.nets.size(); ++n) {
     const auto& fn = fp.nets[n];
     Net         net;
-    net.frame = n;
+    net.frame         = n;
     net.control_scope = opt.critical_cellboxes && !opt.cellbox_ignored_nets.empty() && opt.cellbox_ignored_nets[n];
-    net.clock = fn.use == "CLOCK";
-    net.power = power_use(fn.use);
+    net.clock         = fn.use == "CLOCK";
+    net.power         = power_use(fn.use);
     for (const auto& c : fn.connections) {
       Pin p;
       if (c.instance == "PIN") {
         const auto t = term_of.find(c.pin);
         if (t == term_of.end()) {
+          if (opt.cellbox_full_flow) {
+            throw std::invalid_argument("full cellbox source references missing terminal: " + c.pin);
+          }
           continue;
         }
         p.term     = t->second;
@@ -166,12 +169,18 @@ Design build_design(const ph::Technology& tech, ph::Floorplan& fp, const timing:
       } else {
         const auto ci = comp_of.find(c.instance);
         if (ci == comp_of.end()) {
+          if (opt.cellbox_full_flow) {
+            throw std::invalid_argument("full cellbox source references missing component: " + c.instance);
+          }
           continue;
         }
         p.comp         = ci->second;
         const auto& m  = *d.macro[ci->second];
         const auto  lp = m.pins.find(c.pin);
         if (lp == m.pins.end()) {
+          if (opt.cellbox_full_flow) {
+            throw std::invalid_argument("full cellbox source references missing LEF pin: " + c.instance + "/" + c.pin);
+          }
           continue;
         }
         p.lef      = &lp->second;
@@ -190,7 +199,7 @@ Design build_design(const ph::Technology& tech, ph::Floorplan& fp, const timing:
     if (net.driver < 0 && !net.pins.empty()) {
       net.driver = 0;
     }
-    net.routed = !net.clock && !net.power && !net.control_scope && net.pins.size() >= 2;
+    net.routed = (opt.cellbox_full_flow || !net.clock) && !net.power && !net.control_scope && net.pins.size() >= 2;
     if (net.routed && !net.reset) {
       for (const auto& p : net.pins) {
         // full or ranking-only feedback alike
@@ -670,8 +679,8 @@ Grid build_grid(const Design& d, const Legroute_regions& regions) {
       const auto [a, b] = g.tracks(int(l), band);
       int count         = 0;
       for (auto k = a; k <= b; ++k) {
-        const auto coordinate  = g.track_coord(int(l), k);
-        const bool reserved    = reservations.selected(layer.name, coordinate, coordinate - layer.pitch, k - a);
+        const auto coordinate = g.track_coord(int(l), k);
+        const bool reserved   = reservations.selected(layer.name, coordinate, coordinate - layer.pitch, k - a);
         const bool missing_def
             = (d.opt.paired_pin_reserve || d.opt.critical_cellboxes) && std::ranges::none_of(fp.tracks, [&](const auto& track) {
                 if (track.layer != layer.name || !track.supported() || track.axis != (layer.horizontal ? "Y" : "X")) {

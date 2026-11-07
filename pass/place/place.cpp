@@ -844,7 +844,7 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
     h             = hash_text(std::format("legroute-fit:{}:{}:{}", l.fit_density, l.fit_window, l.fit_first), h);
     h             = hash_text(std::format("legroute-ceiling:{}", l.density_ceiling), h);
     h             = hash_text(std::format("legroute-box-reserve:{}", l.box_reserve), h);
-    h             = hash_text(std::format("critical-cellboxes:{}:{}:{}:{}:{}:{}:{}:{}:{}",
+    h             = hash_text(std::format("critical-cellboxes:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}:{}",
                                           l.critical_cellboxes,
                                           l.cellbox_sites,
                                           l.cellbox_rows,
@@ -853,7 +853,9 @@ std::string environment_key(const Options& o, const ph::Technology& tech) {
                                           l.cellbox_critical_choices,
                                           l.cellbox_other_choices,
                                           l.cellbox_wide_exceptions,
-                                          l.cellbox_far_fallback),
+                                          l.cellbox_far_fallback,
+                                          l.cellbox_full_flow,
+                                          l.cellbox_diagnostic_final),
                               h);
     h             = hash_text(std::format("legroute-reservations:{}:{}", l.reserved_tracks_per_um, l.reserved_layers), h);
     h             = hash_text(std::format("legroute-partition:{}:{}:{}:{}:{}:{}",
@@ -1573,23 +1575,23 @@ struct View {
     double  hpwl = 0, overflow = 0, density_weight = 0;
     int64_t dead_area = -1, macro_displacement = 0, moved_macros = 0;
   };
-  std::vector<Refine_round>                     refine_rounds;
-  std::map<Endpoint, Bus_bit>                   bus_names;
-  ph::Floorplan                                 fp;
+  std::vector<Refine_round>                 refine_rounds;
+  std::map<Endpoint, Bus_bit>               bus_names;
+  ph::Floorplan                             fp;
   // Solver rows span a rectangle; exports retain the imported row segments.
-  std::shared_ptr<const ph::Floorplan>          original_row_frame;
-  std::vector<std::string>                      io_buses;
-  std::vector<int>                              io_bits;
-  std::vector<Cell>                             cells;
-  size_t                                        terminal_begin = 0;  // after cells and placement-only mask geometry
-  std::set<std::string>                         constant_masters;
-  std::vector<Endpoint>                         pins;
-  std::vector<Endpoint>                         drivers;
-  std::map<Endpoint, std::vector<Endpoint>>     nets;
-  std::map<std::string, size_t>                 terminal;
-  std::map<std::string, size_t>                 cell;
-  std::map<std::string, double>                 weights;
-  std::map<std::string, std::string>            cohesion_owners;
+  std::shared_ptr<const ph::Floorplan>      original_row_frame;
+  std::vector<std::string>                  io_buses;
+  std::vector<int>                          io_bits;
+  std::vector<Cell>                         cells;
+  size_t                                    terminal_begin = 0;  // after cells and placement-only mask geometry
+  std::set<std::string>                     constant_masters;
+  std::vector<Endpoint>                     pins;
+  std::vector<Endpoint>                     drivers;
+  std::map<Endpoint, std::vector<Endpoint>> nets;
+  std::map<std::string, size_t>             terminal;
+  std::map<std::string, size_t>             cell;
+  std::map<std::string, double>             weights;
+  std::map<std::string, std::string>        cohesion_owners;
 };
 // A timing checkpoint borrows connectivity and solver geometry. Ordinary GP
 // retains fractional pin positions. Legal checkpoints round positions and apply
@@ -1612,6 +1614,66 @@ struct Geometry_view {
 };
 using CentroidSample = dp::CentroidSample;
 auto summarize_centroids(const dp::Design& d) { return dp::detail::centroid_summary(d); }
+// Full native cellbox flow preserves complete imported connectivity, including
+// intrinsic single-pin outputs absent from the placement graph's edge view.
+void restore_critical_source_nets(ph::Floorplan& frame, const ph::Floorplan& source) {
+  using Endpoints      = std::vector<std::pair<std::string, std::string>>;
+  const auto endpoints = [](const ph::Net& n) {
+    Endpoints out;
+    for (const auto& p : n.connections) {
+      out.emplace_back(p.instance, p.pin);
+    }
+    std::ranges::sort(out);
+    return out;
+  };
+  std::map<Endpoints, size_t> source_ids;
+  for (size_t n = 0; n < source.nets.size(); ++n) {
+    if (source.nets[n].connections.empty()) {
+      continue;
+    }
+    if (!source_ids.emplace(endpoints(source.nets[n]), n).second) {
+      throw std::invalid_argument("complete source has duplicate endpoint partitions");
+    }
+  }
+  auto              nets = source.nets;
+  std::vector<bool> found(nets.size(), false);
+  for (auto& n : nets) {
+    n.wires.clear();
+  }
+  for (const auto& n : frame.nets) {
+    if (n.connections.empty()) {
+      continue;
+    }
+    auto it = source_ids.find(endpoints(n));
+    if (it == source_ids.end() || found[it->second]) {
+      throw std::invalid_argument("full cellbox source connectivity changed before handoff");
+    }
+    found[it->second]      = true;
+    nets[it->second].wires = n.wires;
+  }
+  for (size_t n = 0; n < nets.size(); ++n) {
+    if (!found[n] && nets[n].connections.size() > 1) {
+      throw std::invalid_argument("full cellbox source lost a multi-pin net");
+    }
+  }
+  std::map<std::string, std::string> terminal_net;
+  for (const auto& n : nets) {
+    for (const auto& pin : n.connections) {
+      if (pin.instance == "PIN") {
+        if (!terminal_net.emplace(pin.pin, n.name).second) {
+          throw std::invalid_argument("full cellbox source port belongs to multiple nets");
+        }
+      }
+    }
+  }
+  for (auto& t : frame.terminals) {
+    if (auto it = terminal_net.find(t.name); it != terminal_net.end()) {
+      t.net = it->second;
+    }
+  }
+  frame.nets = std::move(nets);
+}
+
 void restore_imported_rows(ph::Floorplan& frame, const View& v) {
   if (v.original_row_frame) {
     frame.rows      = v.original_row_frame->rows;
@@ -5119,8 +5181,8 @@ void check_critical_plan_frame(const ph::Technology& tech, const ph::Floorplan& 
 void check_legality(const ph::Technology& tech, const ph::Floorplan& fp, const Options& requested) {
   const auto options = resolve_macro_halo(requested, fp.rows.empty() ? 0 : tech.sites.at(fp.rows.front().site).height);
   check_macro_halo(tech, fp, options);
-  const auto [x, y]              = effective_halo(options);
-  const auto [cx, cy]            = macro_channel(tech, component_masters(fp), requested);
+  const auto [x, y]    = effective_halo(options);
+  const auto [cx, cy]  = macro_channel(tech, component_masters(fp), requested);
   const auto channel_x = double(cx) / tech.dbu, channel_y = double(cy) / tech.dbu;
   const auto tap_master          = requested.handoff_taps ? placement_tech_profile(tech, requested).tap_master : std::string{};
   const auto physical_only_fixed = [&](const auto& c) {
@@ -5876,8 +5938,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       area            += (sinks.size() - 1) * double(cell->place.width) * cell->place.height;
     }
   }
-  v.halo_x              = macro_halo(cell_halo_x, tech.dbu, sw);
-  v.halo_y              = macro_halo(cell_halo_y, tech.dbu, rh);
+  v.halo_x = macro_halo(cell_halo_x, tech.dbu, sw);
+  v.halo_y = macro_halo(cell_halo_y, tech.dbu, rh);
   {
     std::set<std::string> masters;
     for (const auto& c : v.cells) {
@@ -5894,7 +5956,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
   // Padded macro occupancy: each side reserves the halo, or half the channel when that is larger.
   const auto pad_x          = std::max(v.halo_x, (v.channel_x + 1) / 2);
   const auto pad_y          = std::max(v.halo_y, (v.channel_y + 1) / 2);
-  double occupancy_area = area;
+  double     occupancy_area = area;
   for (const auto& c : v.cells) {
     if (ph::hard_macro(tech.macros.at(c.macro))) {
       max_width       = std::max(max_width, c.place.width + 2 * pad_x);
@@ -8700,6 +8762,12 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       // DEF PINS and NETS must name the same connection. In particular, a
       // renamed clock net must not leave its top-level terminal on an empty net.
       snapshot_nets(frame, view);
+      if (options.legroute_options.cellbox_full_flow) {
+        if (!imported_frame) {
+          throw std::invalid_argument("full cellbox flow requires complete imported source");
+        }
+        restore_critical_source_nets(frame, *imported_frame);
+      }
       return frame;
     };
     auto sat_install = [&](dp::Design& physical, const ph::Floorplan& frame) {
@@ -9871,13 +9939,14 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       return terminal_config;
     };
     struct Planned_handoff {
-      dp::Design                                 design;
-      ph::Floorplan                              frame;
-      Legroute_regions                           resources;
-      const ph::Tech_profile*                    profile = nullptr;
-      std::optional<Terminal_legalize_report>    report;
-      timing::Feedback                           timing;
-      std::optional<Placement_session::Snapshot> optimizer;
+      std::shared_ptr<const lr::Critical_cellbox_handoff> critical;
+      dp::Design                                          design;
+      ph::Floorplan                                       frame;
+      Legroute_regions                                    resources;
+      const ph::Tech_profile*                             profile = nullptr;
+      std::optional<Terminal_legalize_report>             report;
+      timing::Feedback                                    timing;
+      std::optional<Placement_session::Snapshot>          optimizer;
     };
     struct Plan_snapshot {
       dp::Design                                 design;
@@ -10118,7 +10187,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           live_session->synchronize(design, control, session_identities(), "plan_measure");
         }
         if (capture_handoff) {
-          measured_handoff.emplace(Planned_handoff{design,
+          measured_handoff.emplace(Planned_handoff{{},
+                                                   design,
                                                    frame,
                                                    regions,
                                                    profile,
@@ -10127,13 +10197,16 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
                                                    live_session ? std::optional{live_session->snapshot()} : std::nullopt});
         }
       }
-      auto lopt              = options.legroute_options;
+      auto lopt = options.legroute_options;
       if (lopt.critical_cellboxes) {
         lopt.cellbox_ignored_nets = prects_networks(tech, frame, v.prects, final_gp_timing).ignored;
         lopt.cellbox_final_retry  = planning && round == 3 && round == feedback_rounds;
       }
       lopt.region_cell_limit = options.region.max_cells;
       lopt.final             = false;
+      // This copy measures Plan/probe feedback only. The selected Local/Final
+      // entry below derives a fresh copy and retains its diagnostic policy.
+      lopt.cellbox_diagnostic_final = false;
       if (!planning) {
         lopt.legal_boxes = false;  // the probe judges the GP placement's regions with the SAT placement (nothing is legal yet)
       }
@@ -10297,6 +10370,9 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         const double utilization = options.utilization * options.area_step;
         std::fprintf(stderr, "legroute probe: %s; placement restarts at utilization %.3f\n", e.what(), utilization);
         throw Placement_area_restart(utilization, utilization + .05);
+      }
+      if (planning && measured_handoff) {
+        measured_handoff->critical = plan.cellbox_handoff;
       }
       if (planning && options.legroute_plan.export_coarse) {
         const int nx = route_grid_bins(control.auxiliary_bins, metrics.bins_x ? metrics.bins_x : options.bins);
@@ -11566,7 +11642,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     if (live_session && !options.output_dir.empty()) {
       live_session->write(options.output_dir + "/placement_session.json");
     }
-    if (terminal_active && !options.legroute_options.critical_cellboxes) {
+    if (terminal_active && (!options.legroute_options.critical_cellboxes || options.legroute_options.cellbox_full_flow)) {
       if (options.snapshots && control.max_iterations == 0 && !zero_gp_snapshot_emitted && control.observer) {
         control.observer(v.design, dp::PlacementStage::global_placement, 0);
         zero_gp_snapshot_emitted = true;
@@ -11628,7 +11704,14 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         }
       }
       if (options.legroute) {
-        auto lopt              = options.legroute_options;
+        auto lopt = options.legroute_options;
+        if (lopt.cellbox_full_flow) {
+          if (!chosen_handoff || !chosen_handoff->critical) {
+            throw std::invalid_argument("full cellbox flow has no passing selected Plan handoff");
+          }
+          lopt.cellbox_handoff      = chosen_handoff->critical;
+          lopt.cellbox_ignored_nets = prects_networks(tech, frame, v.prects, final_gp_timing).ignored;
+        }
         lopt.region_cell_limit = options.region.max_cells;
         if (options.legroute_probe.enabled) {  // the second pass: the fixed trees avoid the congestion
           lopt.tree_congestion = std::max(lopt.tree_congestion, options.legroute_probe.tree_congestion);
@@ -11675,7 +11758,12 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
           // Reuse the exact measured grid rather than append a second grid or
           // legalize its IOs again after timing selection.
           auto& saved = chosen_handoff->resources;
-          regions.obstacles.insert(regions.obstacles.end(), saved.obstacles.begin(), saved.obstacles.end());
+          if (lopt.cellbox_full_flow) {
+            regions = saved;
+          }
+          if (!lopt.cellbox_full_flow) {
+            regions.obstacles.insert(regions.obstacles.end(), saved.obstacles.begin(), saved.obstacles.end());
+          }
           regions.power_nets = std::move(saved.power_nets);
           regions.power_vias = std::move(saved.power_vias);
           profile            = chosen_handoff->profile;
@@ -11826,7 +11914,17 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
         }
         for (const auto& n : frame.nets) {
           if (!n.wires.empty() && !n.connections.empty()) {
-            legroute_wires[{n.connections.front().instance, n.connections.front().pin}] = {n.connections, n.wires};
+            auto key = std::pair{n.connections.front().instance, n.connections.front().pin};
+            if (lopt.cellbox_full_flow) {
+              const auto driver = std::ranges::find_if(n.connections, [&](const auto& pin) {
+                return v.nets.contains(Endpoint{pin.instance, pin.pin, -1});
+              });
+              if (driver == n.connections.end()) {
+                throw std::invalid_argument("routed source net has no placement-graph driver");
+              }
+              key = {driver->instance, driver->pin};
+            }
+            legroute_wires[key] = {n.connections, n.wires};
           }
         }
         for (const auto& c : frame.components) {
@@ -12092,11 +12190,17 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       control.checkpoint(v.design, control.max_iterations);
       legal_timing_snapshot = false;
     }
-    capture(v, tech, options.full && !defer_cells && !options.legroute_options.critical_cellboxes);
+    capture(v,
+            tech,
+            options.full && !defer_cells
+                && (!options.legroute_options.critical_cellboxes || options.legroute_options.cellbox_full_flow));
   } else {
     metrics.legal     = native_legal(v, tech, v.design);
     metrics.converged = false;
-    capture(v, tech, options.full && !defer_cells && !options.legroute_options.critical_cellboxes);
+    capture(v,
+            tech,
+            options.full && !defer_cells
+                && (!options.legroute_options.critical_cellboxes || options.legroute_options.cellbox_full_flow));
   }
   if (options.full && !options.timing_seed && !options.retain_placement && !options.analyze_colors_only && !terminal_active) {
     align_macro_geometry(v, tech, v.design, false, true);
@@ -12889,6 +12993,12 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
       v.fp.nets.push_back({t.net, {{"PIN", t.name}}});
     }
   }
+  if (options.legroute_options.cellbox_full_flow) {
+    if (!imported_frame) {
+      throw std::logic_error("full cellbox source snapshot unavailable at final export");
+    }
+    restore_critical_source_nets(v.fp, *imported_frame);
+  }
   // A macro-to-cell handoff freezes coordinates only for that solve. Do not
   // persist it as a user constraint into saved DEFs, graphs or cache frames.
   for (auto& terminal : v.fp.terminals) {
@@ -12949,7 +13059,8 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     v.fp.rows = handoff_rows;
   }
   if (options.full && !options.timing_seed && !options.retain_placement) {
-    if (options.legroute_options.critical_cellboxes && options.legroute_plan.enabled) {
+    if (options.legroute_options.critical_cellboxes && options.legroute_plan.enabled
+        && !options.legroute_options.cellbox_full_flow) {
       check_critical_plan_frame(tech, v.fp, options);
     } else if (defer_cells) {
       check_fixed_and_macro_legality(tech, v.fp, options);
@@ -12966,7 +13077,7 @@ static Result place_single_frame(hhds::Graph& source, hhds::GraphLibrary& librar
     result.parasitics = estimate_rc(v, tech, options, &result.pin_locations);
   }
   if (native_session && options.native_gp_timing->legal_output_guard && !defer_legroute_cells
-      && !options.legroute_options.critical_cellboxes) {
+      && (!options.legroute_options.critical_cellboxes || options.legroute_options.cellbox_full_flow)) {
     // This follows actual final-frame legality and fresh final RC construction.
     // The independently frozen legal baseline is never replaced by GP timing.
     const auto acceptance = native_session->check_legal_output(*result.parasitics, true);
@@ -14231,6 +14342,15 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
   if (area_fit_applies(requested)) {  // place.area=auto: the smallest routable region of the imported core
     return place_area_fit(source, library, requested, release_source);
   }
+  if (requested.legroute_options.cellbox_full_flow
+      && (!requested.legroute_options.critical_cellboxes || !requested.legroute || !requested.legroute_plan.enabled
+          || !requested.legroute_options.final || requested.floorplan.empty())) {
+    throw std::invalid_argument("cellbox_full_flow requires complete source floorplan, critical Plan and physical Final");
+  }
+  if (requested.legroute_options.cellbox_diagnostic_final
+      && (!requested.legroute_options.cellbox_full_flow || !requested.legroute_options.final)) {
+    throw std::invalid_argument("cellbox_diagnostic_final requires cellbox_full_flow and physical Final");
+  }
   if (requested.legroute_options.cellbox_far_fallback
       && (!requested.legroute_options.critical_cellboxes || !requested.legroute_plan.enabled
           || requested.legroute_plan.rounds != 3)) {
@@ -14302,7 +14422,7 @@ Result place(hhds::Graph& source, hhds::GraphLibrary& library, const Options& re
   (void)requested.technology();
   std::optional<Options> resolved_options;
   if (requested.legroute_options.critical_cellboxes) {
-    resolved_options = requested;
+    resolved_options                      = requested;
     resolved_options->allow_increase_area = false;
   }
   if (requested.cell_halo || requested.boundarypins.align) {

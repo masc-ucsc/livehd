@@ -11,6 +11,54 @@
 <main>
 <h1><strong class="item-id">2l-legroute</strong> Native routing closure in two steps</h1>
 
+<!-- native-full-flow:start -->
+<section id="native-full-flow"><h2>Native Plan, Local and Final: measured incomplete flow</h2>
+<p>The initial integration was published as <code>5021ff47e</code>, with DREAMPlace pinned to
+<code>1a48a4ebb</code>. The subsequent native-v9 evaluation exercises all three stages on the same
+fixed frames, but <strong>none of the designs achieves complete native routing</strong>. Diagnostic Final
+uses only Local backbones with admitted metal, while retaining every original required ordinary net in
+the denominator. It always publishes no signal wires. These results are distinct from the completed
+Plan-plus-OpenROAD CTS/routing experiments below.</p>
+<table><thead><tr><th>Design</th><th>Body / core density</th><th>Required ordinary nets</th><th>Local rejected</th><th>Final failed</th><th>Connected in diagnostic scene</th><th>Endpoints on connected nets / required</th></tr></thead><tbody>
+<tr><td>SHA3</td><td>72.68%</td><td>17,764</td><td>4,315</td><td>3,679</td><td>9,770</td><td>22,210 / 59,579</td></tr>
+<tr><td>Minimax</td><td>66.52%</td><td>16,738</td><td>1,756</td><td>4,071</td><td>10,911</td><td>24,737 / 56,590</td></tr>
+<tr><td>Ternip</td><td>71.48%</td><td>19,642</td><td>1,588</td><td>5,706</td><td>12,348</td><td>28,836 / 63,767</td></tr>
+</tbody></table>
+<p>No required net is unaccounted for. Endpoint totals classify every physical endpoint by its whole net's
+outcome; they do not count individually isolated pins. Source connectivity and area match the previous
+experiments. Exact traced clock/reset networks remain in the source but are excluded from the ordinary
+routing obligations. A successful diagnostic connection does not certify routing in the complete scene.</p>
+<table><thead><tr><th>Design</th><th>Occupied boxes</th><th>Mean in-box piece cost</th><th>Final elapsed / box</th><th>Total Final elapsed</th><th>Closed nets: v7 → v9</th></tr></thead><tbody>
+<tr><td>SHA3</td><td>2,468</td><td>59.113 ms</td><td>61.259 ms</td><td>151.188 s</td><td>8,017 → 9,770</td></tr>
+<tr><td>Minimax</td><td>2,309</td><td>66.156 ms</td><td>68.636 ms</td><td>158.481 s</td><td>8,806 → 10,911</td></tr>
+<tr><td>Ternip</td><td>2,532</td><td>75.125 ms</td><td>77.973 ms</td><td>197.428 s</td><td>9,628 → 12,348</td></tr>
+</tbody></table>
+<p>Timing includes failed effort and divides by every occupied box; it is aggregate cost, not independent
+per-box closure latency. Final elapsed includes orchestration and shared pieces, so it must not be added
+to piece time. This Final implementation is a sequential native router restricted to the reserved domain;
+it makes zero SAT calls. Local's bounded SAT repair is measured separately. Minimax's wide exception is
+one box occupying two base tiles; density includes all allocated tiles and empty space.</p>
+<p>The v8 fixes check adjacent tracks across tile bands, construct physical carriers for same-tile IO nets
+with zero Plan edges, and include exact native via landing caps in Local geometry before Final admission.
+They improve complete-net connectivity over v7, while performing more routing work. Remaining failures
+include Local assignment and physical conflicts, bounded maze exhaustion, pin access and strict reserved-domain
+constraints. These results do not prove insufficient area. Incomplete backbone length is not compared with
+completed detailed-route wirelength.</p>
+<p>The v9 experiment restricts tap maze search centers to a conservative hull of the
+existing owned routing domain. It does not clip physical geometry, grant extra resources, or change
+the native acceptance checks. The comparison below is one measured run per design; small differences
+do not establish a substantial speedup. Per-design audits check exact Local input geometry as well as
+Plan and source equality before attributing Final changes.</p>
+<table><thead><tr><th>Design</th><th>v8 Final elapsed / box</th><th>v9 Final elapsed / box</th><th>Elapsed change</th></tr></thead><tbody>
+<tr><td>SHA3</td><td>61.937 ms</td><td>61.259 ms</td><td>-1.09%</td></tr>
+<tr><td>Minimax</td><td>68.516 ms</td><td>68.636 ms</td><td>+0.17%</td></tr>
+<tr><td>Ternip</td><td>78.601 ms</td><td>77.973 ms</td><td>-0.80%</td></tr></tbody></table>
+<p><a href="../../../legroute_runs/20261107-native-full-flow/summary/index.html">Native comparison and ordinary-signal OpenROAD references</a> ·
+<a href="../../../legroute_runs/20261107-native-full-flow/audit/native_v9_comparison.json">Independent accounting audit</a> ·
+<a href="../../../legroute_runs/20261107-native-full-flow/validation/round18/status.json">Focused validation for v9</a>.</p>
+</section>
+<!-- native-full-flow:end -->
+
 <!-- no-cellbox-comparison:start -->
 <section id="no-cellbox-comparison"><h2>LiveHD individual-cell placement versus cellboxes and OpenROAD</h2>
 <p>Three approaches on identical pre-CTS masters/connectivity, core/die/rows, fixed I/O/PG geometry, libraries and SDC. The new arm runs native LiveHD individual-cell placement and legalization with cellboxes, P/C admission limits, reserved tracks and permanent placement-time netlist repairs disabled. An explicit OpenROAD FastRoute check gates the same CTS/routing backend. Native RSMT congestion feedback is a separate estimate.</p>

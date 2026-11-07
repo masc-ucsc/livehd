@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include <tuple>
 
 namespace livehd::physical {
 namespace {
@@ -213,6 +214,44 @@ std::vector<Shape> route_geometry(const Technology& tech, const Floorplan& fp, c
   std::vector<Shape> shapes;
   visit_route_geometry(tech, fp, net, [&](const Shape& shape) { shapes.push_back(shape); }, special, trial_rules);
   return shapes;
+}
+std::vector<Shape> coalesce_route_metal(const Technology& tech, std::span<const Shape> shapes) {
+  // A transverse interval is part of the key: even a contained narrower plate
+  // must not turn an L/T-shaped union into its enclosing rectangle.
+  using Key = std::tuple<std::string, bool, double, double>;
+  std::map<Key, std::vector<std::pair<double, double>>> intervals;
+  std::vector<Shape>                                    result;
+  result.reserve(shapes.size());
+  for (const auto& shape : shapes) {
+    const auto& r = shape.rect;
+    if (!std::isfinite(r.xl) || !std::isfinite(r.yl) || !std::isfinite(r.xh) || !std::isfinite(r.yh) || r.empty()) {
+      throw std::invalid_argument("cannot coalesce nonfinite or empty routing rectangle on " + shape.layer);
+    }
+    const auto layer = tech.layers.find(shape.layer);
+    if (tech.cut_layers.contains(shape.layer) || layer == tech.layers.end()
+        || (layer->second.direction != "HORIZONTAL" && layer->second.direction != "VERTICAL")) {
+      result.push_back(shape);
+      continue;
+    }
+    const bool horizontal = layer->second.direction == "HORIZONTAL";
+    intervals[{shape.layer, horizontal, horizontal ? r.yl : r.xl, horizontal ? r.yh : r.xh}].emplace_back(horizontal ? r.xl : r.yl,
+                                                                                                          horizontal ? r.xh : r.yh);
+  }
+  for (auto& [key, spans] : intervals) {
+    const auto& [layer, horizontal, low, high] = key;
+    for (const auto& [begin, end] : merge_intervals(std::move(spans))) {
+      result.push_back({
+          layer,
+          horizontal ? Rect{begin,   low,  end, high}
+            : Rect{  low, begin, high,  end}
+      });
+    }
+  }
+  std::ranges::sort(result, [](const Shape& a, const Shape& b) {
+    return std::tie(a.layer, a.rect.xl, a.rect.yl, a.rect.xh, a.rect.yh)
+           < std::tie(b.layer, b.rect.xl, b.rect.yl, b.rect.xh, b.rect.yh);
+  });
+  return result;
 }
 Route_path flush_wire_path(const Shape& metal, bool horizontal, std::string taper_rule) {
   const auto& r      = metal.rect;

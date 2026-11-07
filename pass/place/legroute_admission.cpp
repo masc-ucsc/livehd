@@ -13,7 +13,9 @@
 
 namespace livehd::placement::lr {
 namespace {
-bool ordinary(const Net& n) { return !n.clock && !n.power && !n.reset && !n.control_scope; }
+bool ordinary(const Design& d, const Net& n) {
+  return !n.power && !n.control_scope && (d.opt.cellbox_full_flow || (!n.clock && !n.reset));
+}
 
 std::vector<int> nearest(const Grid& g, double x, double y, unsigned count, int span) {
   using Entry = std::pair<double, int>;
@@ -102,7 +104,7 @@ void counts(const Design& d, Cellbox_slot& box) {
   for (int m : box.cells) {
     const int component = d.movable.at(size_t(m));
     for (int n : d.nets_of.at(size_t(m))) {
-      if (!ordinary(d.nets[size_t(n)])) {
+      if (!ordinary(d, d.nets[size_t(n)])) {
         continue;
       }
       for (const auto& p : d.nets[size_t(n)].pins) {
@@ -220,7 +222,7 @@ void write_admission(const Design& d, const Grid& g, const Cellbox_admission& a,
     body += d.macro[size_t(c)]->width * d.macro[size_t(c)]->height * d.fp.dbu * d.fp.dbu;
   }
   for (const auto& n : d.nets) {
-    if (ordinary(n)) {
+    if (ordinary(d, n)) {
       for (const auto& p : n.pins) {
         ordinary_pins += p.comp >= 0 && d.cell[size_t(p.comp)] >= 0;
       }
@@ -304,7 +306,7 @@ void write_admission(const Design& d, const Grid& g, const Cellbox_admission& a,
   out << "],\"source_frame\":\"input.def\",\"timing_snapshot\":\"timing_snapshot.json\",\"excluded_controls\":[";
   bool first_control = true;
   for (const auto& n : d.nets) {
-    if (!ordinary(n)) {
+    if (!ordinary(d, n)) {
       out << (first_control ? "" : ",") << "{\"source_net\":" << n.frame << ",\"name\":\""
           << json_util::escape(d.fp.nets[n.frame].name) << "\",\"native_prects_trace\":" << n.control_scope << '}';
       first_control = false;
@@ -403,7 +405,7 @@ Cellbox_admission admit_critical_cellboxes(const Design& d, const Grid& g, const
   out.critical.assign(d.movable.size(), false);
   std::vector<bool> ignored(d.fp.nets.size(), true);
   for (const auto& net : d.nets) {
-    if (ordinary(net)) {
+    if (ordinary(d, net)) {
       ignored[net.frame] = false;
     }
   }
@@ -415,7 +417,7 @@ Cellbox_admission admit_critical_cellboxes(const Design& d, const Grid& g, const
     }
     out.unknown[m] = !timing_cells.fully_timed(c);
     for (int n : d.nets_of[m]) {
-      if (ordinary(d.nets[size_t(n)])) {
+      if (ordinary(d, d.nets[size_t(n)])) {
         out.critical[m] |= d.nets[size_t(n)].critical;
       }
     }
@@ -598,21 +600,23 @@ Legroute_plan_report critical_cellbox_plan(const Design& d, const Grid& g, const
     *congestion = {};
   }
   for (const auto& n : d.nets) {
-    if (ordinary(n) && n.routed) {
+    if (ordinary(d, n) && n.routed) {
       ++out.signals;
       out.timed_signals += std::isfinite(n.slack);
     }
   }
+  std::vector<Global_net> nets;
+  Global_routes           routes;
   if (!admission.unassigned.empty()) {
     out.route_skip_reason        = Legroute_plan_report::Route_skip_reason::window_density;
     out.unchecked_signals        = out.signals;
     out.gates.cell_dense_regions = admission.unassigned.size();
     out.gates.unfittable_boxes   = admission.unassigned.size();
   } else {
-    auto nets = all_signal_requests(d, g, admission.boxes);
-    std::erase_if(nets, [&](const auto& n) { return !ordinary(d.nets[size_t(n.net)]); });
+    nets = all_signal_requests(d, g, admission.boxes);
+    std::erase_if(nets, [&](const auto& n) { return !ordinary(d, d.nets[size_t(n.net)]); });
     auto [cap_h, cap_v] = transit_capacity(g);
-    const auto routes   = global_route(g,
+    routes              = global_route(g,
                                        cap_h,
                                        cap_v,
                                        admission_share(d.opt),
@@ -728,6 +732,18 @@ Legroute_plan_report critical_cellbox_plan(const Design& d, const Grid& g, const
   out.hot_tiles = hot.size();
   out.seconds   = seconds_since(start);
   write_admission(d, g, admission, out, timing);
+  if (d.opt.cellbox_full_flow && admission.unassigned.empty() && out.route_attempted && !out.gates.requires_replan()
+      && std::ranges::none_of(out.component_pressure, [](double p) { return p > 1; })) {
+    auto handoff          = std::make_shared<Critical_cellbox_handoff>();
+    handoff->source_frame = d.fp;
+    handoff->options      = d.opt;
+    handoff->options.cellbox_handoff.reset();
+    handoff->grid       = g;
+    handoff->admission  = std::move(admission);
+    handoff->requests   = std::move(nets);
+    handoff->routes     = std::move(routes);
+    out.cellbox_handoff = std::move(handoff);
+  }
   return out;
 }
 }  // namespace livehd::placement::lr

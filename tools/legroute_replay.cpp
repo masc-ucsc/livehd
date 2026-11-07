@@ -151,6 +151,14 @@ int main(int argc, char** argv) {
     integer("cellbox_other_choices", options.cellbox_other_choices);
     boolean("cellbox_wide_exceptions", options.cellbox_wide_exceptions);
     boolean("cellbox_far_fallback", options.cellbox_far_fallback);
+    boolean("cellbox_full_flow", options.cellbox_full_flow);
+    boolean("cellbox_diagnostic_final", options.cellbox_diagnostic_final);
+    if (options.cellbox_diagnostic_final) {
+      throw std::invalid_argument("cellbox_diagnostic_final requires native cellbox_full_flow; fixed replay cannot activate it");
+    }
+    if (options.cellbox_full_flow) {
+      throw std::invalid_argument("cellbox_full_flow requires a native selected Plan snapshot; fixed replay cannot import one");
+    }
     if (config.HasMember("cellbox_final_retry")) {
       throw std::invalid_argument("cellbox_final_retry is runtime-only and cannot be configured");
     }
@@ -250,7 +258,7 @@ int main(int argc, char** argv) {
     // the opt-in preset normalizes the reservation independently of its input spelling.
     std::ofstream effective(output + "/cellbox_options.json");
     effective << std::format(
-        R"({{"critical_cellboxes":{},"cellbox_sites":{},"cellbox_rows":{},"cellbox_external_pins":{},"cellbox_connections":{},"cellbox_critical_choices":{},"cellbox_other_choices":{},"cellbox_wide_exceptions":{},"cellbox_far_fallback":{},"reserved_tracks":{},"reserved_tracks_per_um":{}}})",
+        R"({{"critical_cellboxes":{},"cellbox_sites":{},"cellbox_rows":{},"cellbox_external_pins":{},"cellbox_connections":{},"cellbox_critical_choices":{},"cellbox_other_choices":{},"cellbox_wide_exceptions":{},"cellbox_far_fallback":{},"cellbox_full_flow":{},"cellbox_diagnostic_final":{},"reserved_tracks":{},"reserved_tracks_per_um":{}}})",
         options.critical_cellboxes,
         options.cellbox_sites,
         options.cellbox_rows,
@@ -260,6 +268,8 @@ int main(int argc, char** argv) {
         options.cellbox_other_choices,
         options.cellbox_wide_exceptions,
         options.cellbox_far_fallback,
+        options.cellbox_full_flow,
+        options.cellbox_diagnostic_final,
         options.reserved_tracks,
         options.reserved_tracks_per_um)
               << '\n';

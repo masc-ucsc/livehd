@@ -617,6 +617,7 @@ TEST(LhdOptions, CriticalCellboxOptionsAreTypedAndOptIn) {
            {   "cellbox_other_choices",     "8"},
            { "cellbox_wide_exceptions",  "true"},
            {    "cellbox_far_fallback", "false"},
+           {       "cellbox_full_flow", "false"},
   }) {
     const auto key = "synth.place.legroute." + suffix;
     SCOPED_TRACE(key);
@@ -627,7 +628,8 @@ TEST(LhdOptions, CriticalCellboxOptionsAreTypedAndOptIn) {
         {key, value}
     };
     EXPECT_NO_THROW(lhd::check_known_set_passes(opts));
-    const bool boolean = suffix == "critical_cellboxes" || suffix == "cellbox_wide_exceptions" || suffix == "cellbox_far_fallback";
+    const bool boolean = suffix == "critical_cellboxes" || suffix == "cellbox_wide_exceptions" || suffix == "cellbox_far_fallback"
+                         || suffix == "cellbox_full_flow";
     for (const auto* bad : {"-1", "1.5", "invalid"}) {
       opts.sets = {
           {key, bad}

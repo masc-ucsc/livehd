@@ -34,6 +34,7 @@
 #include "inou/lefdef/signal_via.hpp"
 #include "legroute_internal.hpp"
 #include "pin_escape_guard.hpp"
+#include "signal_route_domain.hpp"
 #include "signal_router.hpp"
 #include "steiner_topology.hpp"
 
@@ -116,11 +117,55 @@ struct Stack {
   std::vector<std::string>                     metals;
   std::map<std::string, int>                   index;
   std::map<std::string, Planned_wire_geometry> geometry;
-  Stack(const ph::Technology& tech, int64_t dbu, const ph::Rect& die) {
+  struct Adjacent_via {
+    std::string              name;
+    std::array<ph::Shape, 2> plates;
+  };
+  std::map<std::pair<int, int>, std::vector<Adjacent_via>> adjacent;
+  Stack(const ph::Technology& tech, const ph::Floorplan& frame, bool prepare_adjacent) {
     metals = tech.routing_layers;
     for (size_t k = 0; k < metals.size(); ++k) {
       index[metals[k]] = int(k);
-      geometry.emplace(metals[k], planned_wire_geometry(tech, dbu, die, metals[k]));
+      geometry.emplace(metals[k], planned_wire_geometry(tech, frame.dbu, frame.die, metals[k]));
+    }
+    if (!prepare_adjacent) {
+      return;
+    }
+    std::vector<std::string> names;
+    for (const auto& [name, via] : tech.vias) {
+      if (via.is_default && via.unsupported.empty()) {
+        names.push_back(name);
+      }
+    }
+    std::ranges::sort(names);
+    for (const auto& name : names) {
+      std::vector<ph::Shape> plates;
+      size_t                 cuts = 0;
+      try {
+        for (const auto& shape : ph::via_geometry(tech, frame, {name})) {
+          if (tech.cut_layers.contains(shape.layer)) {
+            ++cuts;
+          } else if (index.contains(shape.layer)) {
+            plates.push_back(shape);
+          } else {
+            plates.clear();
+            break;
+          }
+        }
+      } catch (const std::exception&) {
+        continue;
+      }
+      if (cuts != 1 || plates.size() != 2) {
+        continue;
+      }
+      const int a = index.at(plates[0].layer), b = index.at(plates[1].layer);
+      if (std::abs(a - b) == 1) {
+        adjacent[{
+                     std::min(a, b),
+                     std::max(a, b)
+        }]
+            .push_back({name, {plates[0], plates[1]}});
+      }
     }
   }
 };
@@ -128,6 +173,8 @@ struct Stack {
 struct Geo {
   const Stack&                st;
   std::vector<ph::Route_path> paths;
+  std::vector<ph::Shape>      wire_shapes;
+  std::vector<ph::Route_path> adjacent_join_vias;
   // Track_state of the L5 track each path was drawn on (the caller sets `state` before wire_on)
   uint8_t                     state = 0;
   std::vector<uint8_t>        path_state;
@@ -136,6 +183,7 @@ struct Geo {
   void wire_on(const std::string& layer, bool horizontal, int64_t a, int64_t b, int64_t at) {
     const auto shape = planned_wire_shape(st.geometry.at(layer), horizontal, a, b, at);
     paths.push_back(ph::flush_wire_path(shape, horizontal));
+    wire_shapes.push_back(shape);
     path_state.push_back(state);
   }
   // a connection between two layers at (x, y): the shared router makes it (vias checked against everything placed)
@@ -147,6 +195,85 @@ struct Geo {
   }
   void stack(const std::string& a, const std::string& b, int64_t x, int64_t y) { stack(st.index.at(a), st.index.at(b), x, y); }
 };
+
+// Only the producer may enlarge a frozen backbone. Cover the exact plates of
+// one deterministic DEFAULT adjacent via by axial growth of existing wires.
+// No new track, transverse widening, or intermediate-layer routing is created.
+// These are proposals: Local's complete-owner audit sees the augmented shapes
+// before they become immutable seeds; Final independently checks the via site.
+void adjacent_join_landings(const ph::Technology& tech, const ph::Floorplan& frame, Geo& geo,
+                            std::span<const ph::Shape> original_io) {
+  for (const auto& [from, to, x, y] : geo.joins) {
+    const int a = geo.st.index.at(from), b = geo.st.index.at(to);
+    if (std::abs(a - b) != 1) {
+      continue;
+    }
+    const std::string& lower = geo.st.metals[size_t(std::min(a, b))];
+    const auto         found = geo.st.adjacent.find({std::min(a, b), std::max(a, b)});
+    if (found == geo.st.adjacent.end()) {
+      continue;
+    }
+    for (const auto& candidate : found->second) {
+      auto plates = candidate.plates;
+      for (auto& plate : plates) {
+        plate.rect = plate.rect.translated(x, y);
+      }
+      std::array<std::optional<size_t>, 2> indices;
+      std::array<ph::Shape, 2>             grown;
+      bool                                 complete = true;
+      for (size_t side = 0; side < 2; ++side) {
+        const auto&           p = plates[side];
+        const bool            h = tech.layers.at(p.layer).direction == "HORIZONTAL";
+        std::optional<size_t> best;
+        double                best_growth = std::numeric_limits<double>::infinity();
+        for (size_t k = 0; k < geo.wire_shapes.size(); ++k) {
+          const auto& old = geo.wire_shapes[k];
+          if (old.layer != p.layer || x < old.rect.xl || x > old.rect.xh || y < old.rect.yl || y > old.rect.yh) {
+            continue;
+          }
+          if (h ? old.rect.yl > p.rect.yl || old.rect.yh < p.rect.yh : old.rect.xl > p.rect.xl || old.rect.xh < p.rect.xh) {
+            continue;
+          }
+          const auto r = old.rect.hull(p.rect);
+          if (!frame.die.contains(r)) {
+            continue;
+          }
+          const double growth = h ? r.xh - r.xl - (old.rect.xh - old.rect.xl) : r.yh - r.yl - (old.rect.yh - old.rect.yl);
+          if (growth < best_growth) {
+            best        = k;
+            best_growth = growth;
+            grown[side] = {old.layer, r};
+          }
+        }
+        if (!best) {
+          // An unchanged original same-net IO pin can provide one landing.
+          // It is never extended or emitted again, and cannot confer rights
+          // on a foreign pin or an absent conductor on the other layer.
+          if (!std::ranges::any_of(original_io,
+                                   [&](const auto& pin) { return pin.layer == p.layer && pin.rect.contains(p.rect); })) {
+            complete = false;
+            break;
+          }
+        }
+        indices[side] = best;
+      }
+      if (!complete) {
+        continue;
+      }
+      // Publish both landing proposals together; preserve original path states.
+      for (size_t side = 0; side < 2; ++side) {
+        if (!indices[side]) {
+          continue;
+        }
+        const auto k       = *indices[side];
+        geo.wire_shapes[k] = grown[side];
+        geo.paths[k]       = ph::flush_wire_path(grown[side], tech.layers.at(grown[side].layer).direction == "HORIZONTAL");
+      }
+      geo.adjacent_join_vias.push_back(ph::via_path(lower, x, y, candidate.name));
+      break;
+    }
+  }
+}
 
 int64_t snap(int64_t v, int64_t grid) { return grid > 1 ? (v + grid / 2) / grid * grid : v; }
 
@@ -402,6 +529,37 @@ bool write_local_join_probe(const Design& d, const Grid& g, const Final_planned_
 }
 
 void final_place(const Design& d, const Grid& g, const Boxes& boxes, const Routing& R, unsigned threads) {
+  if (d.opt.cellbox_full_flow) {
+    if (boxes.box_of.size() != d.movable.size() || g.site <= 0 || g.row_h <= 0) {
+      throw std::logic_error("critical Final: incomplete frozen cellbox membership");
+    }
+    std::vector<bool> seen(d.movable.size(), false);
+    for (size_t bi = 0; bi < boxes.boxes.size(); ++bi) {
+      const auto& b = boxes.boxes[bi];
+      if (!b.critical_fixed || !b.fixed || !b.placed || b.tile < 0 || size_t(b.tile) >= g.size() || b.span_columns < 1
+          || g.col(b.tile) + b.span_columns > g.cols) {
+        throw std::logic_error("critical Final: invalid frozen cellbox footprint");
+      }
+      const auto xl = g.left(g.col(b.tile)), yl = g.bottom(g.row(b.tile));
+      const auto xh = xl + int64_t(b.span_columns) * g.tile_w, yh = yl + g.tile_h;
+      for (const int m : b.cells) {
+        if (m < 0 || size_t(m) >= d.movable.size() || seen[size_t(m)] || boxes.box_of[size_t(m)] != int(bi)) {
+          throw std::logic_error("critical Final: duplicate or stale cellbox membership");
+        }
+        seen[size_t(m)]    = true;
+        const auto& cell   = d.fp.components[size_t(d.movable[size_t(m)])];
+        const auto  height = d.tall[size_t(m)] ? 2 * g.row_h : g.row_h;
+        if (cell.place.x < xl || cell.place.x + d.width[size_t(m)] > xh || cell.place.y < yl || cell.place.y + height > yh
+            || (cell.place.x - xl) % g.site || (cell.place.y - yl) % g.row_h) {
+          throw std::logic_error("critical Final: cell left its admitted row/site footprint: " + cell.name);
+        }
+      }
+    }
+    if (std::ranges::any_of(seen, [](bool present) { return !present; })) {
+      throw std::logic_error("critical Final: movable cell missing from frozen boxes");
+    }
+    return;
+  }
   const auto risers = box_risers(g, boxes, R);
   parallel(boxes.boxes.size(), threads, [&](size_t bi) {
     const auto& b = boxes.boxes[bi];
@@ -621,275 +779,391 @@ std::optional<Planned_terminal_access> planned_terminal_access(const Design& d, 
   return {};
 }
 
-Final_planned_geometry final_planned_geometry(const Design& d, const Grid& g, const Boxes& boxes, const Routing& R) {
-  (void)boxes;
-  const Stack st(d.tech, d.fp.dbu, d.fp.die);
-  const int   low_h = [&] {
+struct Final_geometry_emitter::State {
+  const Design&                      d;
+  const Grid&                        g;
+  const Boxes&                       boxes;
+  const Routing&                     routes;
+  Stack                              stack;
+  int                                low_h = 0;
+  size_t                             segment_count, spine_count, tree_count;
+  std::map<int, std::vector<size_t>> spines_of;
+  std::vector<std::vector<int>>      segs_of;
+
+  State(const Design& design, const Grid& grid, const Boxes& cellboxes, const Routing& routing)
+      : d(design)
+      , g(grid)
+      , boxes(cellboxes)
+      , routes(routing)
+      , stack(d.tech, d.fp, d.opt.cellbox_full_flow)
+      , segment_count(routes.segments.size())
+      , spine_count(routes.spines.size())
+      , tree_count(routes.trees.size())
+      , segs_of(d.nets.size()) {
     for (int l = 0; l < int(g.layers.size()); ++l) {
       if (g.layers[l].horizontal) {
-        return l;
+        low_h = l;
+        break;
       }
     }
-    return 0;
-  }();
-  const auto       coord = [&](const Segment& s) { return g.track_coord(s.layer, s.track); };
-  const auto       lname = [&](int l) -> const std::string& { return g.layers[l].name; };
-  std::vector<Geo> net_geo;
-  net_geo.reserve(d.nets.size());
-  for (size_t n = 0; n < d.nets.size(); ++n) {
-    net_geo.emplace_back(st);
-  }
-  // per (net, node): the y values its riser must reach
-  std::vector<std::map<int, std::vector<int64_t>>> reach(d.nets.size());
-  // ---- clock spines: trunk, ribs, taps and their joints
-  std::map<int, std::vector<const Spine*>>         spines_of;
-  for (const auto& sp : R.spines) {
-    spines_of[sp.net].push_back(&sp);
-  }
-  // ---- per net: segments with their bends and node ends, node risers, terminals and fixed pins
-  std::vector<std::vector<int>> segs_of(d.nets.size());
-  for (int si = 0; si < int(R.segments.size()); ++si) {
-    if (!R.segments[si].clock || R.segments[si].conn >= 0 || R.segments[si].node_lo >= 0 || R.segments[si].node_hi >= 0) {
-      segs_of[R.segments[si].net].push_back(si);
+    for (size_t i = 0; i < routes.spines.size(); ++i) {
+      spines_of[routes.spines[i].net].push_back(i);
     }
-  }
-  std::vector<std::map<int, std::vector<int64_t>>> reach_local = std::move(reach);
-  std::vector<std::string>                         io_stub_failure(d.nets.size());
-  parallel(d.nets.size(), d.opt.threads, [&](size_t n) {
-    const auto& T   = R.trees[n];
-    auto&       geo = net_geo[n];
-    auto&       rch = reach_local[n];
-    if (T.nodes.empty() && !spines_of.contains(int(n))) {
-      return;
-    }
-    const auto riser_x   = [&](int node) { return g.track_coord(T.nodes[node].riser_layer, T.nodes[node].riser_track); };
-    const auto has_riser = [&](int node) { return node >= 0 && T.nodes[node].riser_track >= 0; };
-    // bend partner coordinate of a segment end inside a conn
-    const auto partner   = [&](const Segment& s, int si, int k) -> std::optional<int64_t> {
-      if (s.conn < 0) {
-        return {};
+    for (int si = 0; si < int(routes.segments.size()); ++si) {
+      const auto& segment = routes.segments[si];
+      if (!segment.clock || segment.conn >= 0 || segment.node_lo >= 0 || segment.node_hi >= 0) {
+        segs_of.at(size_t(segment.net)).push_back(si);
       }
-      for (int o : R.conns[s.conn].segs) {
-        const auto& p = R.segments[o];
-        if (o != si && p.band == k && g.layers[p.layer].horizontal != g.layers[s.layer].horizontal && p.track >= 0) {
-          // the partner's band is this end's tile index, and this segment's band lies in the partner's range
-          if (s.band >= p.lo && s.band <= p.hi) {
-            return coord(p);
-          }
+    }
+  }
+};
+
+Final_geometry_emitter::Final_geometry_emitter(const Design& d, const Grid& g, const Boxes& boxes, const Routing& routes)
+    : state_(std::make_unique<State>(d, g, boxes, routes)) {}
+Final_geometry_emitter::~Final_geometry_emitter() = default;
+
+Final_net_geometry Final_geometry_emitter::emit(size_t n) const {
+  const auto& state     = *state_;
+  const auto& d         = state.d;
+  const auto& g         = state.g;
+  const auto& boxes     = state.boxes;
+  const auto& R         = state.routes;
+  const auto& segs_of   = state.segs_of;
+  const auto& spines_of = state.spines_of;
+  const int   low_h     = state.low_h;
+  if (R.segments.size() != state.segment_count || R.spines.size() != state.spine_count || R.trees.size() != state.tree_count
+      || d.nets.size() != segs_of.size()) {
+    throw std::logic_error("Final geometry emitter: routing topology changed during cached emission");
+  }
+  if (n >= d.nets.size() || n >= R.trees.size()) {
+    throw std::out_of_range("Final geometry emitter: invalid net index");
+  }
+  const auto                          coord = [&](const Segment& segment) { return g.track_coord(segment.layer, segment.track); };
+  const auto                          lname = [&](int layer) -> const std::string& { return g.layers[layer].name; };
+  Geo                                 geo(state.stack);
+  std::map<int, std::vector<int64_t>> rch;
+  std::string                         io_stub_failure;
+  const auto                          finish = [&] {
+    if (d.opt.cellbox_full_flow && io_stub_failure.empty()) {
+      std::vector<ph::Shape> original_io;
+      for (const auto& pin : d.nets.at(n).pins) {
+        if (pin.term < 0) {
+          continue;
+        }
+        const auto& terminal = d.fp.terminals.at(size_t(pin.term));
+        for (const auto& shape : terminal.shapes) {
+          original_io.push_back(
+              {shape.layer, ph::orient_rect(shape.rect, 0, 0, terminal.orientation).translated(terminal.x, terminal.y)});
         }
       }
+      adjacent_join_landings(d.tech, d.fp, geo, original_io);
+    }
+    return Final_net_geometry{std::move(geo.paths),
+                              std::move(geo.joins),
+                              std::move(geo.path_state),
+                              std::move(io_stub_failure),
+                              std::move(geo.adjacent_join_vias)};
+  };
+  const auto& T = R.trees[n];
+  if (T.nodes.empty() && !spines_of.contains(int(n))) {
+    return finish();
+  }
+  const auto riser_x   = [&](int node) { return g.track_coord(T.nodes[node].riser_layer, T.nodes[node].riser_track); };
+  const auto has_riser = [&](int node) {
+    return node >= 0 && T.nodes[node].riser_track >= 0 && !(d.opt.cellbox_full_flow && T.nodes[node].direct_carrier_tap);
+  };
+  // bend partner coordinate of a segment end inside a conn
+  const auto partner = [&](const Segment& s, int si, int k) -> std::optional<int64_t> {
+    if (s.conn < 0) {
       return {};
-    };
-    for (int si : segs_of[n]) {
-      const auto& s = R.segments[si];
-      if (s.track < 0) {
-        continue;
+    }
+    for (int o : R.conns[s.conn].segs) {
+      const auto& p = R.segments[o];
+      if (o != si && p.band == k && g.layers[p.layer].horizontal != g.layers[s.layer].horizontal && p.track >= 0) {
+        // the partner's band is this end's tile index, and this segment's band lies in the partner's range
+        if (s.band >= p.lo && s.band <= p.hi) {
+          return coord(p);
+        }
       }
-      const bool    h  = g.layers[s.layer].horizontal;
-      const int64_t at = coord(s);
-      int64_t       ends[2];
-      for (int e = 0; e < 2; ++e) {
-        const int k    = e ? s.hi : s.lo;
-        const int node = e ? s.node_hi : s.node_lo;
-        const int tile = h ? g.tile(k, s.band) : g.tile(s.band, k);
-        if (node >= 0 && has_riser(node)) {
-          if (h) {
-            ends[e] = riser_x(node);
-            geo.stack(lname(s.layer), lname(T.nodes[node].riser_layer), ends[e], at);
-            rch[node].push_back(at);
-          } else if (T.nodes[node].riser_layer == s.layer && T.nodes[node].riser_track == s.track) {
-            ends[e] = g.cy(g.row(tile));  // the riser itself: it spans the node tile
-            rch[node].push_back(ends[e]);
-          } else {
-            // The jog uses the horizontal layer L7 selected; old fixtures omit it and retain the lowest-H interpretation.
-            const auto jt = e ? s.jog_hi : s.jog_lo;
-            const int  jl = (e ? s.jog_hi_layer : s.jog_lo_layer) >= 0 ? (e ? s.jog_hi_layer : s.jog_lo_layer) : low_h;
-            const auto yj = g.track_coord(jl, jt >= 0 ? jt : g.tracks(jl, g.row(tile)).first);
-            ends[e]       = yj;
-            // the recorded provenance, also when the pick failed (track -1, fallback): the default track drawn here is not checked
-            geo.state = (e ? s.jog_hi_state : s.jog_lo_state) != uint8_t(Track_state::none) ? (e ? s.jog_hi_state : s.jog_lo_state)
-                                                                                            : uint8_t(Track_state::none);
-            geo.wire_on(lname(jl), true, at, riser_x(node), yj);
-            geo.stack(lname(s.layer), lname(jl), at, yj);
-            geo.stack(lname(jl), lname(T.nodes[node].riser_layer), riser_x(node), yj);
-            rch[node].push_back(yj);
-          }
-        } else if (const auto p = partner(s, si, k)) {
-          ends[e] = *p;
-          if (h) {  // one via stack per bend, from the horizontal side
-            for (int o : R.conns[s.conn].segs) {
-              const auto& q = R.segments[o];
-              if (o != si && q.band == k && !g.layers[q.layer].horizontal && q.track >= 0 && s.band >= q.lo && s.band <= q.hi) {
-                geo.stack(lname(s.layer), lname(q.layer), *p, at);
-                break;
-              }
+    }
+    return {};
+  };
+  for (int si : segs_of[n]) {
+    const auto& s = R.segments[si];
+    if (s.track < 0) {
+      continue;
+    }
+    const bool    h  = g.layers[s.layer].horizontal;
+    const int64_t at = coord(s);
+    int64_t       ends[2];
+    for (int e = 0; e < 2; ++e) {
+      const int k    = e ? s.hi : s.lo;
+      const int node = e ? s.node_hi : s.node_lo;
+      const int tile = h ? g.tile(k, s.band) : g.tile(s.band, k);
+      if (node >= 0 && has_riser(node)) {
+        if (h) {
+          ends[e] = riser_x(node);
+          geo.stack(lname(s.layer), lname(T.nodes[node].riser_layer), ends[e], at);
+          rch[node].push_back(at);
+        } else if (T.nodes[node].riser_layer == s.layer && T.nodes[node].riser_track == s.track) {
+          ends[e] = g.cy(g.row(tile));  // the riser itself: it spans the node tile
+          rch[node].push_back(ends[e]);
+        } else {
+          // The jog uses the horizontal layer L7 selected; old fixtures omit it and retain the lowest-H interpretation.
+          const auto jt = e ? s.jog_hi : s.jog_lo;
+          const int  jl = (e ? s.jog_hi_layer : s.jog_lo_layer) >= 0 ? (e ? s.jog_hi_layer : s.jog_lo_layer) : low_h;
+          const auto yj = g.track_coord(jl, jt >= 0 ? jt : g.tracks(jl, g.row(tile)).first);
+          ends[e]       = yj;
+          // the recorded provenance, also when the pick failed (track -1, fallback): the default track drawn here is not checked
+          geo.state = (e ? s.jog_hi_state : s.jog_lo_state) != uint8_t(Track_state::none) ? (e ? s.jog_hi_state : s.jog_lo_state)
+                                                                                          : uint8_t(Track_state::none);
+          geo.wire_on(lname(jl), true, at, riser_x(node), yj);
+          geo.stack(lname(s.layer), lname(jl), at, yj);
+          geo.stack(lname(jl), lname(T.nodes[node].riser_layer), riser_x(node), yj);
+          rch[node].push_back(yj);
+        }
+      } else if (const auto p = partner(s, si, k)) {
+        ends[e] = *p;
+        if (h) {  // one via stack per bend, from the horizontal side
+          for (int o : R.conns[s.conn].segs) {
+            const auto& q = R.segments[o];
+            if (o != si && q.band == k && !g.layers[q.layer].horizontal && q.track >= 0 && s.band >= q.lo && s.band <= q.hi) {
+              geo.stack(lname(s.layer), lname(q.layer), *p, at);
+              break;
             }
           }
-        } else {
-          ends[e] = h ? g.cx(k) : g.cy(k);
         }
+      } else {
+        ends[e] = h ? g.cx(k) : g.cy(k);
       }
-      geo.state = s.track_state;
-      geo.wire_on(lname(s.layer), h, ends[0], ends[1], at);
     }
-    // die IO terminals: a stub joins the node riser (cell pins, boxed or fixed, tap with the router)
-    for (int k = 0; k < int(T.nodes.size()); ++k) {
-      const auto& node = T.nodes[k];
-      if (!has_riser(k)) {
+    geo.state = s.track_state;
+    geo.wire_on(lname(s.layer), h, ends[0], ends[1], at);
+  }
+  // die IO terminals: a stub joins the node riser (cell pins, boxed or fixed, tap with the router)
+  for (int k = 0; k < int(T.nodes.size()); ++k) {
+    const auto& node = T.nodes[k];
+    if (!has_riser(k)) {
+      continue;
+    }
+    for (int pi : node.pins) {
+      const auto& p = d.nets[n].pins[pi];
+      if (p.comp >= 0) {
         continue;
       }
-      for (int pi : node.pins) {
-        const auto& p = d.nets[n].pins[pi];
-        if (p.comp >= 0) {
-          continue;
-        }
-        const auto access = p.term >= 0 ? planned_terminal_access(d, g, d.fp.terminals[p.term]) : std::nullopt;
-        if (!access) {
-          // No partial stub may enter occupancy. The ordinary whole-net router
-          // can try a different access topology, with the original pin intact.
-          io_stub_failure[n] = "die IO stub: no explicit preferred track inside the pin";
-          geo.paths.clear();
-          geo.joins.clear();
-          geo.path_state.clear();
-          return;
-        }
-        const auto& s  = access->shape;
-        const auto  px = access->x, py = access->y;
-        const auto  rx = riser_x(k);
-        // pin -> selected vertical access layer -> up or down to the stub track (L7) -> across on the selected horizontal layer
-        // -> the riser
-        const int   sl = node.stub_layer >= 0 ? node.stub_layer : low_h;
-        const auto  ys = node.stub_track >= 0 ? g.track_coord(sl, node.stub_track) : py;
-        const auto& hl = lname(sl);
-        const auto& vl = access->access_layer;
-        if (node.stub_state == uint8_t(Track_state::fallback)
-            || (ys != py && node.stub_access_state == uint8_t(Track_state::fallback))) {
-          io_stub_failure[n] = "die IO stub: H stub or V pin access remains an unchecked fallback";
-        }
-        if (ys != py) {
-          geo.stack(s.layer, vl, px, py);
-          geo.state = node.stub_access_state;  // Local admits all pin-to-stub vertical pieces together with the H stub.
-          geo.wire_on(vl, false, py, ys, px);
-          geo.stack(vl, hl, px, ys);
-        } else {
-          geo.stack(s.layer, hl, px, ys);  // no vertical piece: the pin joins the stub directly (none if same layer)
-        }
-        geo.state = node.stub_state;
-        geo.wire_on(hl, true, px, rx, ys);
-        geo.stack(hl, lname(node.riser_layer), rx, ys);
-        rch[k].push_back(ys);
+      const auto access = p.term >= 0 ? planned_terminal_access(d, g, d.fp.terminals[p.term]) : std::nullopt;
+      if (!access) {
+        // No partial stub may enter occupancy. The ordinary whole-net router
+        // can try a different access topology, with the original pin intact.
+        io_stub_failure = "die IO stub: no explicit preferred track inside the pin";
+        geo.paths.clear();
+        geo.joins.clear();
+        geo.path_state.clear();
+        geo.path_state.clear();
+        return finish();
       }
+      const auto& s  = access->shape;
+      const auto  px = access->x, py = access->y;
+      const auto  rx = riser_x(k);
+      // pin -> selected vertical access layer -> up or down to the stub track (L7) -> across on the selected horizontal layer
+      // -> the riser
+      const int   sl = node.stub_layer >= 0 ? node.stub_layer : low_h;
+      const auto  ys = node.stub_track >= 0 ? g.track_coord(sl, node.stub_track) : py;
+      const auto& hl = lname(sl);
+      const auto& vl = access->access_layer;
+      if (node.stub_state == uint8_t(Track_state::fallback)
+          || (ys != py && node.stub_access_state == uint8_t(Track_state::fallback))) {
+        io_stub_failure = "die IO stub: H stub or V pin access remains an unchecked fallback";
+      }
+      if (ys != py) {
+        geo.stack(s.layer, vl, px, py);
+        geo.state = node.stub_access_state;  // Local admits all pin-to-stub vertical pieces together with the H stub.
+        geo.wire_on(vl, false, py, ys, px);
+        geo.stack(vl, hl, px, ys);
+      } else {
+        geo.stack(s.layer, hl, px, ys);  // no vertical piece: the pin joins the stub directly (none if same layer)
+      }
+      geo.state = node.stub_state;
+      geo.wire_on(hl, true, px, rx, ys);
+      geo.stack(hl, lname(node.riser_layer), rx, ys);
+      rch[k].push_back(ys);
     }
-    // risers: from the lowest to the highest y any attachment needs, at the riser track
-    for (const auto& [node, ys] : rch) {
-      if (!has_riser(node) || ys.empty()) {
+  }
+  // risers: from the lowest to the highest y any attachment needs, at the riser track
+  for (const auto& [node, ys] : rch) {
+    if (!has_riser(node) || ys.empty()) {
+      continue;
+    }
+    const auto [lo, hi] = std::minmax_element(ys.begin(), ys.end());
+    const int  tile     = T.nodes[node].tile;
+    const auto ylo      = std::min(*lo, g.bottom(g.row(tile)) + g.tile_h / 4),
+               yhi      = std::max(*hi, g.bottom(g.row(tile)) + 3 * g.tile_h / 4);
+    geo.state           = T.nodes[node].riser_state;
+    geo.wire_on(lname(T.nodes[node].riser_layer), false, ylo, yhi, riser_x(node));
+  }
+  // clock spines of this net
+  if (const auto it = spines_of.find(int(n)); it != spines_of.end()) {
+    for (const auto spine_index : it->second) {
+      const auto* sp    = &R.spines[spine_index];
+      const auto& trunk = R.segments[sp->trunk];
+      if (trunk.track < 0) {
         continue;
       }
-      const auto [lo, hi] = std::minmax_element(ys.begin(), ys.end());
-      const int  tile     = T.nodes[node].tile;
-      const auto ylo      = std::min(*lo, g.bottom(g.row(tile)) + g.tile_h / 4),
-                 yhi      = std::max(*hi, g.bottom(g.row(tile)) + 3 * g.tile_h / 4);
-      geo.state           = T.nodes[node].riser_state;
-      geo.wire_on(lname(T.nodes[node].riser_layer), false, ylo, yhi, riser_x(node));
-    }
-    // clock spines of this net
-    if (const auto it = spines_of.find(int(n)); it != spines_of.end()) {
-      for (const auto* sp : it->second) {
-        const auto& trunk = R.segments[sp->trunk];
-        if (trunk.track < 0) {
+      const auto                           tx  = coord(trunk);
+      int64_t                              ylo = INT64_MAX, yhi = INT64_MIN;
+      std::vector<std::pair<int, int64_t>> trunk_joins;  // (rib layer, rib y): made only if the trunk wire exists
+      for (int ri : sp->ribs) {
+        const auto& rib = R.segments[ri];
+        if (rib.track < 0) {
           continue;
         }
-        const auto                           tx  = coord(trunk);
-        int64_t                              ylo = INT64_MAX, yhi = INT64_MIN;
-        std::vector<std::pair<int, int64_t>> trunk_joins;  // (rib layer, rib y): made only if the trunk wire exists
-        for (int ri : sp->ribs) {
-          const auto& rib = R.segments[ri];
-          if (rib.track < 0) {
-            continue;
-          }
-          const auto ry = coord(rib);
-          ylo           = std::min(ylo, ry);
-          yhi           = std::max(yhi, ry);
-          int64_t xlo = tx, xhi = tx;
-          for (const auto& [b, ts] : sp->taps) {
-            const auto& tap = R.segments[ts];
-            if (tap.track < 0 || (tap.lo != rib.band && tap.hi != rib.band)) {
-              continue;
-            }
-            const auto x = coord(tap);
-            xlo          = std::min(xlo, x);
-            xhi          = std::max(xhi, x);
-            geo.stack(lname(tap.layer), lname(rib.layer), x, ry);
-          }
-          // the clock tree enters on the middle rib through the entry node's riser
-          if (sp->node >= 0 && has_riser(sp->node) && g.row(T.nodes[sp->node].tile) == rib.band) {
-            const auto rx = riser_x(sp->node);
-            xlo           = std::min(xlo, rx);
-            xhi           = std::max(xhi, rx);
-            geo.stack(lname(T.nodes[sp->node].riser_layer), lname(rib.layer), rx, ry);
-            geo.state = T.nodes[sp->node].riser_state;
-            geo.wire_on(lname(T.nodes[sp->node].riser_layer),
-                        false,
-                        std::min(ry, g.cy(trunk.band >= 0 ? rib.band : 0)),
-                        std::max(ry, g.cy(rib.band)),
-                        rx);
-          }
-          geo.state = rib.track_state;
-          geo.wire_on(lname(rib.layer), true, xlo, xhi, ry);
-          trunk_joins.emplace_back(rib.layer, ry);
-        }
-        // A spine with a single drawn rib has no trunk wire (nothing to connect): a rib->trunk join there would name
-        // trunk metal that does not exist.
-        if (yhi > ylo) {
-          geo.state = trunk.track_state;
-          geo.wire_on(lname(trunk.layer), false, ylo, yhi, tx);
-          for (const auto& [layer, ry] : trunk_joins) {
-            geo.stack(lname(layer), lname(trunk.layer), tx, ry);
-          }
-        }
-        // taps: from the box's tap point (in-box route) up to the rib
+        const auto ry = coord(rib);
+        ylo           = std::min(ylo, ry);
+        yhi           = std::max(yhi, ry);
+        int64_t xlo = tx, xhi = tx;
         for (const auto& [b, ts] : sp->taps) {
           const auto& tap = R.segments[ts];
-          if (tap.track < 0) {
+          if (tap.track < 0 || (tap.lo != rib.band && tap.hi != rib.band)) {
             continue;
           }
-          const int rib_row = tap.lo == g.row(boxes.boxes[b].tile) ? tap.hi : tap.lo;
-          int64_t   ry      = g.cy(rib_row);
-          for (int ri : sp->ribs) {
-            if (R.segments[ri].band == rib_row && R.segments[ri].track >= 0) {
-              ry = coord(R.segments[ri]);
-            }
-          }
-          // over the whole box tile (the in-box route taps it on any box-layer track) and up to the rib
-          const int64_t box_lo = g.bottom(g.row(boxes.boxes[b].tile)), box_hi = box_lo + g.tile_h;
-          geo.state = tap.track_state;
-          geo.wire_on(lname(tap.layer), false, std::min(ry, box_lo), std::max(ry, box_hi), coord(tap));
+          const auto x = coord(tap);
+          xlo          = std::min(xlo, x);
+          xhi          = std::max(xhi, x);
+          geo.stack(lname(tap.layer), lname(rib.layer), x, ry);
+        }
+        // the clock tree enters on the middle rib through the entry node's riser
+        if (sp->node >= 0 && has_riser(sp->node) && g.row(T.nodes[sp->node].tile) == rib.band) {
+          const auto rx = riser_x(sp->node);
+          xlo           = std::min(xlo, rx);
+          xhi           = std::max(xhi, rx);
+          geo.stack(lname(T.nodes[sp->node].riser_layer), lname(rib.layer), rx, ry);
+          geo.state = T.nodes[sp->node].riser_state;
+          geo.wire_on(lname(T.nodes[sp->node].riser_layer),
+                      false,
+                      std::min(ry, g.cy(trunk.band >= 0 ? rib.band : 0)),
+                      std::max(ry, g.cy(rib.band)),
+                      rx);
+        }
+        geo.state = rib.track_state;
+        geo.wire_on(lname(rib.layer), true, xlo, xhi, ry);
+        trunk_joins.emplace_back(rib.layer, ry);
+      }
+      // A spine with a single drawn rib has no trunk wire (nothing to connect): a rib->trunk join there would name
+      // trunk metal that does not exist.
+      if (yhi > ylo) {
+        geo.state = trunk.track_state;
+        geo.wire_on(lname(trunk.layer), false, ylo, yhi, tx);
+        for (const auto& [layer, ry] : trunk_joins) {
+          geo.stack(lname(layer), lname(trunk.layer), tx, ry);
         }
       }
+      // taps: from the box's tap point (in-box route) up to the rib
+      for (const auto& [b, ts] : sp->taps) {
+        const auto& tap = R.segments[ts];
+        if (tap.track < 0) {
+          continue;
+        }
+        const int rib_row = tap.lo == g.row(boxes.boxes[b].tile) ? tap.hi : tap.lo;
+        int64_t   ry      = g.cy(rib_row);
+        for (int ri : sp->ribs) {
+          if (R.segments[ri].band == rib_row && R.segments[ri].track >= 0) {
+            ry = coord(R.segments[ri]);
+          }
+        }
+        // over the whole box tile (the in-box route taps it on any box-layer track) and up to the rib
+        const int64_t box_lo = g.bottom(g.row(boxes.boxes[b].tile)), box_hi = box_lo + g.tile_h;
+        geo.state = tap.track_state;
+        geo.wire_on(lname(tap.layer), false, std::min(ry, box_lo), std::max(ry, box_hi), coord(tap));
+      }
     }
-  });
+  }
+  return finish();
+}
+
+namespace {
+Final_planned_geometry selected_planned_geometry(const Design& d, const Grid& g, const Boxes& boxes, const Routing& routes,
+                                                 std::span<const std::string> rejected) {
+  Final_geometry_emitter emitter(d, g, boxes, routes);
   Final_planned_geometry out;
   out.paths.resize(d.nets.size());
   out.joins.resize(d.nets.size());
   out.path_state.resize(d.nets.size());
-  for (size_t n = 0; n < d.nets.size(); ++n) {
-    out.path_state[n] = std::move(net_geo[n].path_state);
-    out.paths[n]      = std::move(net_geo[n].paths);
-    out.joins[n]      = std::move(net_geo[n].joins);
-  }
-  out.io_stub_failure = std::move(io_stub_failure);
+  out.io_stub_failure.resize(d.nets.size());
+  out.adjacent_join_vias.resize(d.nets.size());
+  parallel(d.nets.size(), d.opt.threads, [&](size_t n) {
+    if (!rejected.empty() && !rejected[n].empty()) {
+      return;  // Rejected Local owners contribute neither metal nor join anchors.
+    }
+    auto net                  = emitter.emit(n);
+    out.paths[n]              = std::move(net.paths);
+    out.joins[n]              = std::move(net.joins);
+    out.path_state[n]         = std::move(net.path_state);
+    out.adjacent_join_vias[n] = std::move(net.adjacent_join_vias);
+    out.io_stub_failure[n]    = std::move(net.io_stub_failure);
+  });
   return out;
+}
+}  // namespace
+
+Final_planned_geometry final_planned_geometry(const Design& d, const Grid& g, const Boxes& boxes, const Routing& routes) {
+  return selected_planned_geometry(d, g, boxes, routes, {});
 }
 
 Final_net_scope final_net_scope(const Design& d) {
   Final_net_scope scope;
   scope.required.resize(d.nets.size());
+  std::vector<bool> source_seen;
+  if (d.opt.cellbox_full_flow) {
+    if (d.nets.size() != d.fp.nets.size()) {
+      throw std::invalid_argument("critical Final: source net inventory changed");
+    }
+    source_seen.resize(d.fp.nets.size(), false);
+  }
   std::optional<std::regex> skip_re;
-  if (!d.opt.final_skip_nets.empty()) {
+  if (!d.opt.cellbox_full_flow && !d.opt.final_skip_nets.empty()) {
     skip_re.emplace(d.opt.final_skip_nets, std::regex::ECMAScript | std::regex::icase);
   }
   for (size_t n = 0; n < d.nets.size(); ++n) {
     const auto& net = d.nets[n];
+    if (d.opt.cellbox_full_flow) {
+      if (net.frame >= source_seen.size() || source_seen[net.frame]) {
+        throw std::invalid_argument("critical Final: duplicate or missing source net identity");
+      }
+      source_seen[net.frame] = true;
+      if (net.power) {
+        continue;
+      }
+      if (net.control_scope) {
+        scope.skipped += d.fp.nets[net.frame].connections.size() >= 2;
+        continue;
+      }
+      if (net.pins.size() != d.fp.nets[net.frame].connections.size()) {
+        throw std::invalid_argument("critical Final: unresolved original physical endpoint on " + d.fp.nets[net.frame].name);
+      }
+      std::vector<std::pair<std::string_view, std::string_view>> expected, actual;
+      expected.reserve(net.pins.size());
+      actual.reserve(net.pins.size());
+      for (const auto& connection : d.fp.nets[net.frame].connections) {
+        expected.emplace_back(connection.instance, connection.pin);
+      }
+      for (const auto& pin : net.pins) {
+        if (pin.comp >= 0 && pin.term < 0 && size_t(pin.comp) < d.fp.components.size()) {
+          actual.emplace_back(d.fp.components[size_t(pin.comp)].name, pin.name);
+        } else if (pin.comp < 0 && pin.term >= 0 && size_t(pin.term) < d.fp.terminals.size()
+                   && pin.name == d.fp.terminals[size_t(pin.term)].name) {
+          actual.emplace_back("PIN", pin.name);
+        } else {
+          throw std::invalid_argument("critical Final: invalid original physical endpoint on " + d.fp.nets[net.frame].name);
+        }
+      }
+      std::ranges::sort(expected);
+      std::ranges::sort(actual);
+      if (actual != expected) {
+        throw std::invalid_argument("critical Final: original physical endpoint identity changed on " + d.fp.nets[net.frame].name);
+      }
+      scope.required[n] = net.pins.size() >= 2;
+      continue;
+    }
     if (!net.requires_final_route()) {
       continue;
     }
@@ -904,10 +1178,18 @@ Final_net_scope final_net_scope(const Design& d) {
 
 void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routing& R, const Legroute_regions& regions,
                  Legroute_report& rep) {
+  const auto final_start = Clock::now();
+  const bool diagnostic  = d.opt.cellbox_diagnostic_final;
+  if (diagnostic && (!d.opt.cellbox_full_flow || R.final_local_rejected.size() != d.nets.size())) {
+    throw std::invalid_argument("diagnostic Final requires complete per-net Local admission records");
+  }
+  const std::span<const std::string> local_rejections
+      = diagnostic ? std::span<const std::string>(R.final_local_rejected) : std::span<const std::string>{};
+  const auto local_rejected = [&](size_t n) { return diagnostic && !local_rejections[n].empty(); };
   // Steiner topologies need the FLUTE tables: a missing runtime file is an experiment/packaging failure, never
   // thousands of per-net routing failures. Fail the whole stage up front.
   initialize_flute_tables();
-  const Stack st(d.tech, d.fp.dbu, d.fp.die);
+  const Stack st(d.tech, d.fp, d.opt.cellbox_full_flow);
   const int   low_v = [&] {
     for (int l = 0; l < int(g.layers.size()); ++l) {
       if (!g.layers[l].horizontal) {
@@ -918,7 +1200,7 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
   }();
   const auto       lname   = [&](int l) -> const std::string& { return g.layers[l].name; };
   // the planned global metal (segments, bends, risers, jogs, stubs, clock spines) and its layer joins
-  auto             planned = final_planned_geometry(d, g, boxes, R);
+  auto             planned = selected_planned_geometry(d, g, boxes, R, local_rejections);
   std::vector<Geo> net_geo;
   net_geo.reserve(d.nets.size());
   size_t dropped_fallback = 0;
@@ -941,6 +1223,7 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
     }
     net_geo[n].paths = std::move(planned.paths[n]);
     net_geo[n].joins = std::move(planned.joins[n]);
+    net_geo[n].adjacent_join_vias = std::move(planned.adjacent_join_vias[n]);
   }
   if (d.opt.final_drop_fallback_planned) {
     std::fprintf(stderr,
@@ -963,7 +1246,7 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
   for (size_t n = 0; n < d.nets.size(); ++n) {
     const auto& N = d.nets[n];
     // Coarse signal planning excludes clocks; final physical closure must include them, even with spines disabled.
-    if (N.requires_final_route()) {
+    if (d.opt.cellbox_full_flow ? !N.power && N.pins.size() >= 2 : N.requires_final_route()) {
       d.fp.nets[N.frame].wires.clear();
       if (!job[n]) {
         std::fprintf(stderr,
@@ -974,10 +1257,18 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
     }
   }
   rep.final_skipped_nets = scope.skipped;
+  rep.final_required_pins       = 0;
+  rep.final_diagnostic_only     = diagnostic;
+  rep.final_local_rejected_nets = rep.final_local_rejected_pins = 0;
   for (size_t n = 0; n < d.nets.size(); ++n) {
     rep.routed_nets         += job[n];
     rep.clock_required_nets += job[n] && d.nets[n].clock;
     rep.local_nets          += job[n] && is_local(n);
+    rep.final_required_pins += job[n] ? d.nets[n].pins.size() : 0;
+    if (job[n] && local_rejected(n)) {
+      ++rep.final_local_rejected_nets;
+      rep.final_local_rejected_pins += d.nets[n].pins.size();
+    }
   }
   // Passes: the router has no rip-up, so a pass that leaves nets open routes again from scratch with those nets
   // first (each pass moves the nets that failed in it ahead). The pass with the fewest open nets is kept.
@@ -1019,17 +1310,23 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
                                 // metal of a tree that fell back to a whole route (still occupancy, no longer the net's path)
     ph::Rect    rect;           // clipped to the box's tile
   };
-  const bool             box_report = d.opt.final_box_report && !d.opt.output_dir.empty();
+  const bool             box_report = (d.opt.final_box_report || d.opt.cellbox_full_flow) && !d.opt.output_dir.empty();
   std::vector<Box_event> box_ev, best_box_ev;
   std::vector<Box_usage> box_use, best_box_use;
   std::vector<int>       box_in_tile(size_t(g.cols * g.rows), -1);
   for (size_t b = 0; b < boxes.boxes.size(); ++b) {
     if (boxes.boxes[b].tile >= 0 && size_t(boxes.boxes[b].tile) < box_in_tile.size()) {
-      box_in_tile[size_t(boxes.boxes[b].tile)] = int(b);
+      const auto& box = boxes.boxes[b];
+      for (int k = 0; k < box.span_columns; ++k) {
+        if (g.col(box.tile) + k >= g.cols || size_t(box.tile + k) >= box_in_tile.size()) {
+          throw std::logic_error("Final: cellbox footprint leaves its grid row");
+        }
+        box_in_tile[size_t(box.tile + k)] = int(b);
+      }
     }
   }
   const auto pin_box = [&](const Pin& p) { return p.comp >= 0 && d.cell[p.comp] >= 0 ? boxes.box_of[d.cell[p.comp]] : -1; };
-  std::vector<std::set<int>> net_boxes(box_report ? d.nets.size() : 0);  // boxes holding a cell pin of each net
+  std::vector<std::set<int>> net_boxes(box_report || d.opt.cellbox_full_flow ? d.nets.size() : 0);
   for (size_t n = 0; n < net_boxes.size(); ++n) {
     for (const auto& p : d.nets[n].pins) {
       if (const int b = pin_box(p); b >= 0) {
@@ -1063,6 +1360,23 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
       }
     }
   };
+  // Fixed terminal geometry is shared by every detail pass and domain check.
+  std::vector<std::vector<std::vector<ph::Shape>>> term_metal(d.nets.size());
+  for (size_t n = 0; n < d.nets.size(); ++n) {
+    for (const auto& p : d.nets[n].pins) {
+      if (p.term >= 0) {
+        const auto& t = d.fp.terminals[size_t(p.term)];
+        auto&       v = term_metal[n].emplace_back();
+        for (const auto& sh : t.shapes) {
+          v.push_back({sh.layer, ph::orient_rect(sh.rect, 0, 0, t.orientation).translated(t.x, t.y)});
+        }
+      }
+    }
+  }
+  std::vector<double> box_piece_seconds(boxes.boxes.size(), 0);
+  std::vector<size_t> box_piece_attempts(boxes.boxes.size(), 0), box_piece_found(boxes.boxes.size(), 0);
+  double              shared_piece_seconds = 0;
+  size_t              domain_rejections    = 0;
   for (unsigned pass = 0; pass < std::max(1u, d.opt.route_passes); ++pass) {
     box_ev.clear();
     box_use.clear();
@@ -1070,8 +1384,8 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
     rep.route_passes      = pass + 1;
     d.fp.nondefault_rules = saved_rules;
     for (size_t n = 0; n < d.nets.size(); ++n) {
-      entry[n]         = {};
-      why[n]           = {};
+      entry[n]         = job[n] && local_rejected(n) ? "local_rejected" : "";
+      why[n]           = job[n] && local_rejected(n) ? "Local rejected before Final: " + local_rejections[n] : "";
       net_geo[n].paths = base_paths[n];
       net_geo[n].joins = base_joins[n];
       net_geo[n].vias  = 0;
@@ -1144,6 +1458,11 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
       global.name = d.fp.nets[d.nets[n].frame].name;
       global.wires.push_back({"ROUTED", net_geo[n].paths});
       metal[n] = ph::route_geometry(d.tech, work, global);
+      if (d.opt.cellbox_full_flow) {
+        // Collinear same-net overlaps are one physical wire. Their internal
+        // decomposition seams must not create fictitious line-end keepouts.
+        metal[n] = ph::coalesce_route_metal(d.tech, metal[n]);
+      }
       for (const auto& s : metal[n]) {
         if (auto w = conflict(s, global.name); !w.empty()) {
           why[n] = std::move(w);
@@ -1169,7 +1488,14 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
     std::vector<char> whole(d.nets.size(), 0);
     for (size_t n = 0; n < d.nets.size(); ++n) {
       if (job[n] && !is_local(n) && metal[n].empty()) {
+        if (local_rejected(n)) {
+          continue;  // Preserve the Local verdict; do not turn it into a detail fallback.
+        }
         entry[n] = "no_planned_metal";
+        if (d.opt.cellbox_full_flow) {
+          why[n] = "Local supplied no physical backbone for an interbox net";
+          continue;
+        }
         whole[n] = 1;
         ++rep.tree_fallbacks;
         if (!io_stub_failure[n].empty() && rep.failure_sample.size() < 5) {
@@ -1200,7 +1526,12 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
                           why[n]));
         }
         if (rep.failure_sample.size() < 5) {
-          rep.failure_sample.push_back(name + ": rerouted whole, " + why[n]);
+          rep.failure_sample.push_back(name + (d.opt.cellbox_full_flow ? ": frozen backbone rejected, " : ": rerouted whole, ")
+                                       + why[n]);
+        }
+        if (d.opt.cellbox_full_flow) {
+          metal[n].clear();
+          continue;
         }
         why[n].clear();
         whole[n] = 1;
@@ -1216,6 +1547,79 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
       }
       occ.insert_many(add);
     }
+    // Only admitted Local metal and original IO geometry may authorize a
+    // carrier. Later pin taps never create new nonreserved routing rights.
+    const auto carrier_metal = d.opt.cellbox_full_flow ? metal : std::vector<std::vector<ph::Shape>>{};
+    std::map<std::pair<size_t, int>, std::shared_ptr<const Signal_route_domain>> domains;
+    const auto domain_for = [&](size_t n, int owner_box) -> std::shared_ptr<const Signal_route_domain> {
+      if (!d.opt.cellbox_full_flow) {
+        return {};
+      }
+      const auto key = std::pair{n, owner_box};
+      if (const auto found = domains.find(key); found != domains.end()) {
+        return found->second;
+      }
+      auto domain          = std::make_shared<Signal_route_domain>();
+      domain->owner        = d.fp.nets[d.nets[n].frame].name;
+      domain->pin_layer    = d.profile ? d.profile->route.access.pin : std::string{};
+      domain->local_layers = {g.box_layer, lname(low_v)};
+      for (const auto& layer : g.layers) {
+        domain->max_stack_bridge_dbu = std::max(domain->max_stack_bridge_dbu, layer.pitch);
+      }
+      const auto add_box = [&](int bi) {
+        if (bi < 0 || size_t(bi) >= boxes.boxes.size() || !net_boxes[n].contains(bi)) {
+          throw std::logic_error("critical Final: routing request borrowed another box's private tracks");
+        }
+        const auto&         b = boxes.boxes[size_t(bi)];
+        Signal_route_region region;
+        region.bounds               = {double(g.left(g.col(b.tile))),
+                                       double(g.bottom(g.row(b.tile))),
+                                       double(g.left(g.col(b.tile)) + int64_t(b.span_columns) * g.tile_w),
+                                       double(g.bottom(g.row(b.tile)) + g.tile_h)};
+        region.tracks[g.box_layer]  = b.reserved_h;
+        region.tracks[lname(low_v)] = b.reserved_v;
+        domain->regions.push_back(std::move(region));
+      };
+      if (owner_box >= 0) {
+        add_box(owner_box);
+      } else if (owner_box == -2) {  // Complete-net acceptance covers all of its endpoint-owned boxes.
+        for (const int bi : net_boxes[n]) {
+          add_box(bi);
+        }
+      }
+      const auto add_seed = [&](const ph::Shape& seed, const std::string& id) {
+        const auto layer = d.tech.layers.find(seed.layer);
+        if (layer == d.tech.layers.end()) {
+          return;
+        }
+        if (owner_box < 0) {
+          domain->carriers.push_back({domain->owner, id, seed, seed.rect});
+        }
+        for (const auto& region : domain->regions) {
+          const auto& b = region.bounds;
+          if (seed.rect.xl >= b.xh || seed.rect.xh <= b.xl || seed.rect.yl >= b.yh || seed.rect.yh <= b.yl) {
+            continue;
+          }
+          const bool horizontal = layer->second.direction == "HORIZONTAL";
+          if (!horizontal && layer->second.direction != "VERTICAL") {
+            continue;
+          }
+          const ph::Rect extension
+              = horizontal ? ph::Rect{b.xl, seed.rect.yl, b.xh, seed.rect.yh} : ph::Rect{seed.rect.xl, b.yl, seed.rect.xh, b.yh};
+          domain->carriers.push_back({domain->owner, id, seed, extension});
+        }
+      };
+      for (size_t k = 0; k < carrier_metal[n].size(); ++k) {
+        add_seed(carrier_metal[n][k], "local:" + std::to_string(k));
+      }
+      for (size_t p = 0; p < term_metal[n].size(); ++p) {
+        for (size_t k = 0; k < term_metal[n][p].size(); ++k) {
+          add_seed(term_metal[n][p][k], std::format("io:{}:{}", p, k));
+        }
+      }
+      domains.emplace(key, domain);
+      return domain;
+    };
     std::unique_ptr<Pin_escape_guard> escapes;
     std::unique_ptr<Signal_router>    router;
     if (d.profile) {
@@ -1234,18 +1638,43 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
     struct Pending {
       std::vector<ph::Shape>           shapes;
       std::vector<ph::Route_path>      paths;
+      std::vector<ph::Route_path>      retained;
       ph::Route_width_rules            rules;
       size_t                           vias = 0;
       std::unique_ptr<Final_cut_state> cuts;
     };
-    const auto piece = [&](size_t n, const ph::Net& q, Signal_route_request req, Pending& pend) -> std::string {
+    const auto piece = [&](size_t                n,
+                           const ph::Net&        q,
+                           Signal_route_request  req,
+                           Pending&              pend,
+                           int                   owner_box     = -1,
+                           const ph::Route_path* selected_join = nullptr) -> std::string {
+      const auto piece_start = Clock::now();
+      const auto done        = [&](std::string reason) {
+        const double elapsed = seconds_since(piece_start);
+        if (owner_box >= 0) {
+          box_piece_seconds[size_t(owner_box)] += elapsed;
+          ++box_piece_attempts[size_t(owner_box)];
+          box_piece_found[size_t(owner_box)] += reason.empty();
+        } else {
+          shared_piece_seconds += elapsed;
+        }
+        return reason;
+      };
+      req.domain          = domain_for(n, owner_box);
+      req.search_detours |= d.opt.cellbox_full_flow;
       if (!pend.cuts) {
         auto cuts = std::make_unique<Final_cut_state>(d.tech, work);
         if (auto cut_error = cuts->add(net_geo[n].paths); !cut_error.empty()) {
-          return cut_error;
+          return done(cut_error);
         }
         pend.cuts = std::move(cuts);
+        if (d.opt.cellbox_full_flow) {
+          pend.retained = net_geo[n].paths;
+        }
       }
+      req.retained_paths    = pend.retained;
+      req.retained_rules    = &pend.rules;
       req.prior_vias        = pend.cuts->vias();
       // route_access is the per-call cap. Opt-in experiment (route_access_per_pin > 0): a high-fanout request gets at least
       // that many access trials per pin, since every accepted pin needs one; off by default, so the cap is unchanged.
@@ -1257,7 +1686,79 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
       const unsigned patterns
           = d.nets[n].clock && d.opt.final_clock_route_patterns ? d.opt.final_clock_route_patterns : d.opt.route_patterns;
       req.limits            = {access, patterns, Clock::now() + std::chrono::milliseconds(ms)};
-      auto proposals        = router->try_route(q, req);
+      Signal_route_proposals proposals;
+      if (selected_join && req.domain && selected_join->steps.size() == 2) {
+        const auto* at  = std::get_if<ph::Route_point>(&selected_join->steps[0]);
+        const auto* via = std::get_if<ph::Route_via>(&selected_join->steps[1]);
+        if (at && via) {
+          std::vector<ph::Shape> plates;
+          for (auto shape : ph::via_geometry(d.tech, work, *via)) {
+            if (d.tech.layers.contains(shape.layer)) {
+              shape.rect = shape.rect.translated(at->x, at->y);
+              plates.push_back(std::move(shape));
+            }
+          }
+          std::array<ph::Shape, 2> landings;
+          bool                     covered = plates.size() == 2;
+          for (size_t side = 0; covered && side < 2; ++side) {
+            const auto& plate = plates[side];
+            const auto  found = std::ranges::find_if(carrier_metal[n], [&](const auto& carrier_shape) {
+              return carrier_shape.layer == plate.layer && carrier_shape.rect.contains(plate.rect);
+            });
+            covered           = found != carrier_metal[n].end();
+            if (covered) {
+              landings[side] = *found;
+            } else {
+              for (const auto& terminal : term_metal[n]) {
+                const auto pin = std::ranges::find_if(terminal, [&](const auto& shape) {
+                  return shape.layer == plate.layer && shape.rect.contains(plate.rect);
+                });
+                if (pin != terminal.end()) {
+                  landings[side] = *pin;
+                  covered        = true;
+                  break;
+                }
+              }
+            }
+          }
+          // Retained long conductors already satisfy minimum area. Do not
+          // invent centered isolated landing pads or grant new carrier rights.
+          if (covered && ph::check_signal_via(d.tech, work, rules, occ, *via, at->x, at->y, landings, q.name).legal) {
+            Signal_route_geometry direct;
+            direct.paths.push_back(*selected_join);
+            direct.vias = 1;
+            ph::Signal_cut_set prior(d.tech, work);
+            bool               cut_legal = true, reused = false;
+            for (const auto& old : req.prior_vias) {
+              cut_legal &= prior.add(old.via, old.x, old.y);
+              reused    |= old.via.name == via->name && old.via.orientation == via->orientation && old.x == at->x && old.y == at->y;
+            }
+            cut_legal            &= reused || prior.add(*via, at->x, at->y);
+            prior_cut_rejections += !cut_legal;
+            // A failed shortcut must leave the normal bounded router available,
+            // including its prior-cut detours. Never mutate pending cuts here.
+            if (cut_legal
+                && validate_signal_route_domain(d.tech,
+                                                work,
+                                                d.fp.nets[d.nets[n].frame],
+                                                direct.paths,
+                                                *req.domain,
+                                                &pend.rules,
+                                                &work_comps,
+                                                pend.retained)
+                       .empty()) {
+              if (reused) {
+                direct.paths.clear();
+                direct.vias = 0;
+              }
+              proposals.candidates.push_back(std::move(direct));
+            }
+          }
+        }
+      }
+      if (proposals.candidates.empty()) {
+        proposals = router->try_route(q, req);
+      }
       prior_cut_rejections += proposals.prior_cut_rejections;
       if (proposals.candidates.empty() && !req.try_hard) {  // routable first: a critical net drops the coupling screen
         req.try_hard          = true;
@@ -1265,7 +1766,7 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
         proposals             = router->try_route(q, req);
         prior_cut_rejections += proposals.prior_cut_rejections;
       }
-      if (proposals.candidates.empty() && q.connections.size() >= 2 && req.anchors.empty()) {
+      if (!d.opt.cellbox_full_flow && proposals.candidates.empty() && q.connections.size() >= 2 && req.anchors.empty()) {
         // a quick span or pattern answer the checks rejected ends try_route; the maze searches around them
         auto maze = router->propose_maze(
             q,
@@ -1279,10 +1780,39 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
         }
       }
       if (proposals.candidates.empty()) {
-        return proposals.reason.empty() ? "no route" : proposals.reason;
+        return done(proposals.reason.empty() ? "no route" : proposals.reason);
       }
       std::string cut_failure;
       for (const auto& c : proposals.candidates) {
+        if (req.domain) {
+          auto trial_rules   = pend.rules;
+          bool rule_conflict = false;
+          for (const auto& [name, widths] : c.nondefault_rules) {
+            if (const auto found = trial_rules.find(name); found != trial_rules.end() && found->second != widths) {
+              rule_conflict = true;
+              break;
+            }
+            trial_rules.insert_or_assign(name, widths);
+          }
+          if (rule_conflict) {
+            ++domain_rejections;
+            cut_failure = "cellbox domain: conflicting pending width rule";
+            continue;
+          }
+          if (auto reason = validate_signal_route_domain(d.tech,
+                                                         work,
+                                                         d.fp.nets[d.nets[n].frame],
+                                                         c.paths,
+                                                         *req.domain,
+                                                         &trial_rules,
+                                                         &work_comps,
+                                                         pend.retained);
+              !reason.empty()) {
+            ++domain_rejections;
+            cut_failure = "cellbox domain: " + reason;
+            continue;
+          }
+        }
         ph::Net trial;
         trial.name = q.name;
         trial.wires.push_back({"ROUTED", c.paths});
@@ -1295,11 +1825,14 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
         metal[n].insert(metal[n].end(), shapes.begin(), shapes.end());  // the next pieces may end on it
         pend.shapes.insert(pend.shapes.end(), shapes.begin(), shapes.end());
         pend.paths.insert(pend.paths.end(), c.paths.begin(), c.paths.end());
+        if (d.opt.cellbox_full_flow) {
+          pend.retained.insert(pend.retained.end(), c.paths.begin(), c.paths.end());
+        }
         pend.rules.insert(c.nondefault_rules.begin(), c.nondefault_rules.end());
         pend.vias += c.vias;
-        return {};
+        return done({});
       }
-      return cut_failure;
+      return done(cut_failure);
     };
     const auto finalize = [&](size_t n, const Pending& pend) -> std::string {
       // Reconstruct the complete union independently of the incremental state
@@ -1314,7 +1847,22 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
         return cut_error;
       }
       const auto& name = d.fp.nets[d.nets[n].frame].name;
-      if (d.opt.final_precommit_connectivity) {
+      if (d.opt.cellbox_full_flow) {
+        const auto domain = domain_for(n, -2);
+        if (auto reason = validate_signal_route_domain(d.tech,
+                                                       work,
+                                                       d.fp.nets[d.nets[n].frame],
+                                                       pend.paths,
+                                                       *domain,
+                                                       &pend.rules,
+                                                       &work_comps,
+                                                       net_geo[n].paths);
+            !reason.empty()) {
+          ++domain_rejections;
+          return "cellbox union domain: " + reason;
+        }
+      }
+      if (d.opt.final_precommit_connectivity || d.opt.cellbox_full_flow) {
         // Opt-in: the complete net (retained global metal plus every pending piece) must connect all of its pins before
         // its pending detail is committed, so a disconnected tree commits no new metal and counts as failed for best-pass
         // ranking (its already admitted global metal stays, as for any failed net). The
@@ -1385,19 +1933,6 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
         {lname(low_v), 2}
     };
     const auto                                       cell_pin = [&](const Pin& p) { return p.comp >= 0 && p.lef; };
-    // die IO pin metal, per net and pin: a join may start on it
-    std::vector<std::vector<std::vector<ph::Shape>>> term_metal(d.nets.size());
-    for (size_t n = 0; n < d.nets.size(); ++n) {
-      for (const auto& p : d.nets[n].pins) {
-        if (p.term >= 0) {
-          const auto& t = d.fp.terminals[p.term];
-          auto&       v = term_metal[n].emplace_back();
-          for (const auto& sh : t.shapes) {
-            v.push_back({sh.layer, ph::orient_rect(sh.rect, 0, 0, t.orientation).translated(t.x, t.y)});
-          }
-        }
-      }
-    }
     // the global tree: every layer change of its metal (a join), then every cell pin taps onto the net's metal nearby
     const auto route_tree = [&](size_t n, Pending& pend) -> std::string {
       const auto& N     = d.nets[n];
@@ -1461,7 +1996,33 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
         req.sources  = std::move(from);
         req.anchors  = std::move(to);
         req.try_hard = !N.critical;
-        if (auto w = piece(n, {fn.name, {}, {}, "SIGNAL"}, req, pend); !w.empty()) {
+        const int join_box
+            = d.opt.cellbox_full_flow && net_boxes[n].contains(xy_box(double(x), double(y))) ? xy_box(double(x), double(y)) : -1;
+        const ph::Route_path* selected_join = nullptr;
+        for (const auto& path : net_geo[n].adjacent_join_vias) {
+          if (path.steps.size() != 2 || (path.layer != la && path.layer != lb)) {
+            continue;
+          }
+          const auto* join_point = std::get_if<ph::Route_point>(&path.steps[0]);
+          if (join_point && join_point->x == x && join_point->y == y) {
+            // The producer selected one adjacent layer pair. Confirm its two
+            // actual plates match this join, not another crossing at this site.
+            const auto*           via = std::get_if<ph::Route_via>(&path.steps[1]);
+            std::set<std::string> layers;
+            if (via) {
+              for (const auto& shape : ph::via_geometry(d.tech, work, *via)) {
+                if (d.tech.layers.contains(shape.layer)) {
+                  layers.insert(shape.layer);
+                }
+              }
+            }
+            if (layers == std::set<std::string>{la, lb}) {
+              selected_join = &path;
+              break;
+            }
+          }
+        }
+        if (auto w = piece(n, {fn.name, {}, {}, "SIGNAL"}, req, pend, join_box, selected_join); !w.empty()) {
           ++rep.join_failures;
           join_event("failed", w);
           rest_unattempted();
@@ -1488,12 +2049,22 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
         ++rep.taps;
         // the net's metal over the pin's tile (its box's tile) and its neighbors
         const int  tile = d.cell[p.comp] >= 0 ? boxes.boxes[boxes.box_of[d.cell[p.comp]]].tile : physical_pin_access(d, g, p).tile;
-        const auto xl = double(g.left(g.col(tile)) - g.tile_w), yl = double(g.bottom(g.row(tile)) - g.tile_h);
-        const auto xh = xl + 3.0 * double(g.tile_w), yh = yl + 3.0 * double(g.tile_h);
+        const int  owner_box = d.opt.cellbox_full_flow ? pin_box(p) : -1;
+        const auto xl        = double(g.left(g.col(tile)) - (owner_box >= 0 ? 0 : g.tile_w));
+        const auto yl        = double(g.bottom(g.row(tile)) - (owner_box >= 0 ? 0 : g.tile_h));
+        const auto xh        = xl + double(g.tile_w) * (owner_box >= 0 ? boxes.boxes[size_t(owner_box)].span_columns : 3);
+        const auto yh        = yl + double(g.tile_h) * (owner_box >= 0 ? 1 : 3);
         std::vector<ph::Shape> anchors;
         for (const auto& sh : metal[n]) {
           if (d.tech.layers.contains(sh.layer) && sh.rect.xl < xh && sh.rect.xh > xl && sh.rect.yl < yh && sh.rect.yh > yl) {
-            anchors.push_back(sh);
+            if (owner_box >= 0) {
+              anchors.push_back({
+                  sh.layer,
+                  {std::max(sh.rect.xl, xl), std::max(sh.rect.yl, yl), std::min(sh.rect.xh, xh), std::min(sh.rect.yh, yh)}
+              });
+            } else {
+              anchors.push_back(sh);
+            }
           }
         }
         if (anchors.empty()) {
@@ -1508,7 +2079,7 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
         req.layer_cost        = tap_cost;
         req.try_hard          = !N.critical;
         const size_t tap_from = pend.paths.size();
-        if (auto w = piece(n, {fn.name, {{d.fp.components[p.comp].name, std::string(p.name)}}, {}, "SIGNAL"}, req, pend);
+        if (auto w = piece(n, {fn.name, {{d.fp.components[p.comp].name, std::string(p.name)}}, {}, "SIGNAL"}, req, pend, owner_box);
             !w.empty()) {
           ++rep.tap_failures;
           tap_event("failed", w);
@@ -1541,11 +2112,12 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
         }
       }
       size_t joined = 0;  // die IO pins already on the route
+      const int owner_box = d.opt.cellbox_full_flow && net_boxes[n].size() == 1 ? *net_boxes[n].begin() : -1;
       if (q.connections.size() >= 2) {
         Signal_route_request req;
         req.search_detours = true;
         req.try_hard       = !N.critical;
-        if (auto w = piece(n, q, req, pend); !w.empty()) {
+        if (auto w = piece(n, q, req, pend, owner_box); !w.empty()) {
           return w;
         }
       } else if (q.connections.size() == 1 && !term_metal[n].empty()) {
@@ -1553,7 +2125,7 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
         req.anchors    = term_metal[n].front();
         req.layer_cost = tap_cost;
         req.try_hard   = !N.critical;
-        if (auto w = piece(n, q, req, pend); !w.empty()) {
+        if (auto w = piece(n, q, req, pend, owner_box); !w.empty()) {
           return "die IO pin: " + w;
         }
         joined = 1;
@@ -1565,7 +2137,7 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
         req.sources  = term_metal[n][k];
         req.anchors  = pend.shapes;
         req.try_hard = !N.critical;
-        if (auto w = piece(n, {fn.name, {}, {}, "SIGNAL"}, req, pend); !w.empty()) {
+        if (auto w = piece(n, {fn.name, {}, {}, "SIGNAL"}, req, pend, owner_box); !w.empty()) {
           return "die IO pin: " + w;
         }
       }
@@ -1574,6 +2146,11 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
     const auto        route_start = Clock::now();
     size_t            completed = 0, failed_so_far = 0;
     std::vector<char> checked(d.nets.size(), 0);
+    if (d.opt.cellbox_full_flow) {
+      for (size_t n = 0; n < d.nets.size(); ++n) {
+        checked[n] = job[n] && !why[n].empty();  // A rejected Local backbone is an attempted failure.
+      }
+    }
     double            next_progress = 30;
     for (const size_t n : order) {
       if (d.opt.final_net_limit && completed >= d.opt.final_net_limit) {
@@ -1594,14 +2171,18 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
         if (!w.empty()) {  // the tree did not close: the router takes the whole net (the global metal is not written)
           close_events("rolled_back", "tree failed: " + w);
           entry[n] = "planned_tree_failed: " + w.substr(0, w.find(" ("));
-          ++rep.tree_fallbacks;
-          if (rep.failure_sample.size() < 8) {
+          if (!d.opt.cellbox_full_flow) {
+            ++rep.tree_fallbacks;
+          }
+          if (!d.opt.cellbox_full_flow && rep.failure_sample.size() < 8) {
             rep.failure_sample.push_back(d.fp.nets[d.nets[n].frame].name + ": rerouted whole, " + w);
           }
           pend = {};
           metal[n].resize(global);
-          net_geo[n].paths.clear();
-          whole[n] = 1;
+          if (!d.opt.cellbox_full_flow) {
+            net_geo[n].paths.clear();
+            whole[n] = 1;
+          }
         }
       }
       if (entry[n].empty()) {
@@ -1716,6 +2297,8 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
   rep.final_pending_cut_rejections = pending_cut_rejections;
   rep.final_union_cut_rejections   = union_cut_rejections;
   rep.final_precommit_disconnected = precommit_disconnected;
+  rep.final_domain_rejections      += domain_rejections;
+  rep.final_piece_seconds = shared_piece_seconds + std::accumulate(box_piece_seconds.begin(), box_piece_seconds.end(), 0.0);
   why                              = std::move(best_why);
   d.fp.nondefault_rules            = std::move(best_rules);
   for (size_t n = 0; n < d.nets.size(); ++n) {
@@ -1750,20 +2333,30 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
   });
   rep.connected_nets       = connected;
   rep.clock_connected_nets = connected_clocks;
+  rep.final_connected_pins     = 0;
+  rep.final_detail_failed_nets = rep.final_detail_failed_pins = rep.final_detail_unattempted_pins = 0;
   rep.unchecked_nets       = 0;
   rep.clock_unchecked_nets = 0;
   for (size_t n = 0; n < d.nets.size(); ++n) {
+    if (job[n] && best_checked[n] && why[n].empty()) {
+      rep.final_connected_pins += d.nets[n].pins.size();
+    }
     if (job[n] && !best_checked[n]) {
       ++rep.unchecked_nets;
       rep.clock_unchecked_nets += d.nets[n].clock;
+      rep.final_detail_unattempted_pins += d.nets[n].pins.size();
     }
     if (!job[n] || !best_checked[n] || why[n].empty()) {
       continue;
     }
     ++rep.failed_nets;
+    if (!local_rejected(n)) {
+      ++rep.final_detail_failed_nets;
+      rep.final_detail_failed_pins += d.nets[n].pins.size();
+    }
     rep.clock_failed_nets += d.nets[n].clock;
     rep.disconnected_nets += why[n].starts_with("disconnected");
-    ++rep.failure_reasons[why[n].substr(0, why[n].find(" ("))];
+    ++rep.failure_reasons[local_rejected(n) ? "Local rejected before Final" : why[n].substr(0, why[n].find(" ("))];
     if (rep.failure_sample.size() < 10) {
       rep.failure_sample.push_back(d.fp.nets[d.nets[n].frame].name + ": " + why[n]);
     }
@@ -1868,27 +2461,28 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
     }
   }
   if (d.opt.final_net_limit && !d.opt.output_dir.empty()) {
-    std::ofstream diagnostic(d.opt.output_dir + "/final_diagnostic.tsv");
-    diagnostic << "net_index\tnet\tlocal\tpins\tcritical\tclock\treason\tendpoints\n";
+    std::ofstream diagnostic_out(d.opt.output_dir + "/final_diagnostic.tsv");
+    diagnostic_out << "net_index\tnet\tlocal\tpins\tcritical\tclock\treason\tendpoints\n";
     for (size_t n = 0; n < d.nets.size(); ++n) {
       if (!job[n] || !best_checked[n]) {
         continue;
       }
       const auto& net = d.nets[n];
-      diagnostic << n << '\t' << std::quoted(d.fp.nets[net.frame].name) << '\t' << is_local(n) << '\t' << net.pins.size() << '\t'
-                 << net.critical << '\t' << net.clock << '\t' << std::quoted(why[n]);
+      diagnostic_out << n << '\t' << std::quoted(d.fp.nets[net.frame].name) << '\t' << is_local(n) << '\t' << net.pins.size()
+                     << '\t' << net.critical << '\t' << net.clock << '\t' << std::quoted(why[n]);
       for (const auto& pin : net.pins) {
-        diagnostic << '\t'
-                   << std::quoted(pin.comp >= 0 ? d.fp.components[pin.comp].name + "/" + std::string(pin.name)
-                                                : "PIN/" + std::string(pin.name));
+        diagnostic_out << '\t'
+                       << std::quoted(pin.comp >= 0 ? d.fp.components[pin.comp].name + "/" + std::string(pin.name)
+                                                    : "PIN/" + std::string(pin.name));
       }
-      diagnostic << '\n';
+      diagnostic_out << '\n';
     }
-    if (!diagnostic) {
+    if (!diagnostic_out) {
       throw std::runtime_error("legroute: cannot write final diagnostic");
     }
   }
-  rep.wires_emitted = rep.failed_nets == 0 && rep.unchecked_nets == 0 && d.profile != nullptr;
+  rep.wires_emitted = !diagnostic && rep.failed_nets == 0 && rep.unchecked_nets == 0 && rep.connected_nets == rep.routed_nets
+                      && d.profile != nullptr;
   for (size_t n = 0; n < d.nets.size(); ++n) {
     if (job[n] && !d.fp.nets[d.nets[n].frame].wires.empty()) {
       if (rep.wires_emitted) {
@@ -1905,7 +2499,7 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
   std::vector<size_t> internal(boxes.boxes.size(), 0), external(boxes.boxes.size(), 0), failing(boxes.boxes.size(), 0);
   for (size_t n = 0; n < d.nets.size(); ++n) {
     const auto& N = d.nets[n];
-    if (N.power || N.clock) {
+    if (N.power || (d.opt.cellbox_full_flow ? N.control_scope : N.clock)) {
       continue;
     }
     std::map<int, size_t> in_box;
@@ -1936,7 +2530,7 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
   const auto                     pin_bucket = [](size_t k) -> size_t { return k < 16 ? k / 4 : k < 24 ? 4 : 5; };
   for (size_t b = 0; b < boxes.boxes.size(); ++b) {
     const auto&  B    = boxes.boxes[b];
-    const double fill = double(B.sites) / (2.0 * g.sites);
+    const double fill = double(B.sites) / (double(g.rows_per_tile) * g.sites * B.span_columns);
     const bool   fail = failing[b] > 0;
     bucket(rep.fill_pattern, fill_names, fill < .5 ? 0 : std::min<size_t>(5, size_t((fill - .4) * 10)), fail);
     bucket(rep.internal_pattern, pin_names, pin_bucket(internal[b]), fail);
@@ -1958,6 +2552,36 @@ void final_wires(const Design& d, const Grid& g, const Boxes& boxes, const Routi
   std::ranges::stable_sort(rep.failure_boxes, [](const auto& a, const auto& b) { return a.failed_nets > b.failed_nets; });
   if (rep.failure_boxes.size() > 20) {
     rep.failure_boxes.resize(20);
+  }
+  if (d.opt.cellbox_full_flow && !d.opt.output_dir.empty()) {
+    const double  box_seconds = std::accumulate(box_piece_seconds.begin(), box_piece_seconds.end(), 0.0);
+    const double  elapsed     = seconds_since(final_start);
+    std::ofstream times(d.opt.output_dir + "/final_box_times.tsv");
+    times << "box\tattempted_pieces\tfound_piece_proposals\tpiece_seconds_all_passes\n";
+    for (size_t bi = 0; bi < boxes.boxes.size(); ++bi) {
+      times << bi << '\t' << box_piece_attempts[bi] << '\t' << box_piece_found[bi] << '\t' << std::setprecision(12)
+            << box_piece_seconds[bi] << '\n';
+    }
+    std::ofstream summary(d.opt.output_dir + "/final_runtime.json");
+    summary << std::setprecision(12) << "{\"scene\":\""
+            << (diagnostic ? "Local_metal_admitted_subset_diagnostic" : "full_required_routing")
+            << "\",\"solver\":\"native_sequential_reserved_domain\",\"SAT_calls\":0,\"SAT_seconds\":null,\"box_count\":"
+            << boxes.boxes.size() << ",\"box_piece_seconds_all_passes\":" << box_seconds
+            << ",\"shared_piece_seconds_all_passes\":" << shared_piece_seconds
+            << ",\"mean_box_piece_seconds\":" << (boxes.boxes.empty() ? 0.0 : box_seconds / double(boxes.boxes.size()))
+            << ",\"final_elapsed_seconds\":" << elapsed
+            << ",\"amortized_final_seconds_per_box\":" << (boxes.boxes.empty() ? 0.0 : elapsed / double(boxes.boxes.size()))
+            << ",\"required_physical_pins\":" << rep.final_required_pins
+            << ",\"connected_physical_pins\":" << rep.final_connected_pins
+            << ",\"local_rejected_nets\":" << rep.final_local_rejected_nets
+            << ",\"local_rejected_pins\":" << rep.final_local_rejected_pins
+            << ",\"detail_failed_nets\":" << rep.final_detail_failed_nets
+            << ",\"detail_failed_pins\":" << rep.final_detail_failed_pins << ",\"detail_unattempted_nets\":" << rep.unchecked_nets
+            << ",\"detail_unattempted_pins\":" << rep.final_detail_unattempted_pins
+            << ",\"domain_rejections\":" << rep.final_domain_rejections << "}\n";
+    if (!times || !summary) {
+      throw std::runtime_error("cannot write critical Final timing reports");
+    }
   }
 }
 }  // namespace livehd::placement::lr

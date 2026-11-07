@@ -1,8 +1,10 @@
 #include "routing_geometry.hpp"
 
 #include <algorithm>
+#include <limits>
 
 #include "gtest/gtest.h"
+#include "routing_rules.hpp"
 
 namespace livehd::physical {
 namespace {
@@ -316,5 +318,141 @@ TEST(RoutingGeometry, SpecialStripeEndpointsAreFlushByDefault) {
             (std::vector<Shape>{
                 {"M2", {2700, 3453, 15552, 3741}}
   }));
+}
+TEST(RoutingGeometry, CoalesceMetalIsMaximalExactAndDeterministic) {
+  auto tech                   = technology();
+  tech.layers["M2"].direction = "HORIZONTAL";
+  tech.layers["M3"].direction = "VERTICAL";
+  std::vector<Shape> fragments{
+      {"M2",   {20, 0, 30, 2}},
+      {"M2",    {0, 0, 10, 2}},
+      {"M2",    {8, 0, 20, 2}},
+      {"M2",     {2, 0, 4, 2}},
+      {"M2",   {31, 0, 40, 2}},
+      {"M2",    {0, 2, 10, 4}},
+      {"M2",    {0, 0, 10, 3}},
+      {"M3", {50, 10, 52, 20}},
+      {"M3",  {50, 0, 52, 10}}
+  };
+  const std::vector<Shape> expected{
+      {"M2",   {0, 0, 10, 3}},
+      {"M2",   {0, 0, 30, 2}},
+      {"M2",   {0, 2, 10, 4}},
+      {"M2",  {31, 0, 40, 2}},
+      {"M3", {50, 0, 52, 20}}
+  };
+  EXPECT_EQ(coalesce_route_metal(tech, fragments), expected);
+  EXPECT_EQ(coalesce_route_metal(tech, expected), expected);
+  const auto original = fragments;
+  for (size_t i = 0; i < fragments.size(); ++i) {
+    std::rotate(fragments.begin(), fragments.begin() + 1, fragments.end());
+    EXPECT_EQ(coalesce_route_metal(tech, fragments), expected);
+  }
+  std::reverse(fragments.begin(), fragments.end());
+  EXPECT_EQ(coalesce_route_metal(tech, fragments), expected);
+  // Independent point-set census includes every edge and each half-DBU cell
+  // interior. In particular, the 30..31 gap and unequal-width shoulders survive.
+  const auto covers = [](const auto& shapes, const std::string& layer, double x, double y) {
+    return std::ranges::any_of(shapes, [&](const Shape& s) {
+      return s.layer == layer && s.rect.xl <= x && x <= s.rect.xh && s.rect.yl <= y && y <= s.rect.yh;
+    });
+  };
+  for (const std::string layer : {"M2", "M3"}) {
+    for (int x = -1; x <= 105; ++x) {
+      for (int y = -1; y <= 41; ++y) {
+        ASSERT_EQ(covers(original, layer, x / 2., y / 2.), covers(expected, layer, x / 2., y / 2.));
+      }
+    }
+  }
+}
+
+TEST(RoutingGeometry, CoalesceNeverMergesCutsUnknownLayersOrNearCoordinates) {
+  auto tech                   = technology();
+  tech.layers["M2"].direction = "HORIZONTAL";
+  // Even a malformed technology listing a cut as routing metal must not merge it.
+  tech.layers["V1"].direction = "HORIZONTAL";
+  const std::vector<Shape> shapes{
+      {     "M2",            {0, 0, 10, 2}},
+      {     "M2", {10.000000001, 0, 20, 2}},
+      {     "M2",  {0, 0, 10, 2.000000001}},
+      {     "M1",            {0, 0, 10, 2}},
+      {     "M1",           {10, 0, 20, 2}},
+      {"unknown",            {0, 0, 10, 2}},
+      {"unknown",           {10, 0, 20, 2}},
+      {     "V1",             {0, 0, 2, 2}},
+      {     "V1",             {0, 0, 2, 2}},
+      {     "V1",             {2, 0, 4, 2}}
+  };
+  const auto merged = coalesce_route_metal(tech, shapes);
+  EXPECT_EQ(merged.size(), shapes.size());
+  EXPECT_TRUE(std::is_permutation(shapes.begin(), shapes.end(), merged.begin(), merged.end()));
+  EXPECT_EQ(coalesce_route_metal(tech, std::span<const Shape>{}), std::vector<Shape>{});
+}
+
+TEST(RoutingGeometry, CoalesceRejectsInvalidRectanglesInsteadOfDroppingThem) {
+  const auto tech = technology();
+  for (const Rect r : {
+           Rect{0,                                        0,                                       0, 1},
+           Rect{2,                                        0,                                       1, 1},
+           Rect{0,                                        0, std::numeric_limits<double>::infinity(), 1},
+           Rect{0, std::numeric_limits<double>::quiet_NaN(),                                       1, 2}
+  }) {
+    const std::vector<Shape> shapes{
+        {"M2", r}
+    };
+    EXPECT_THROW(coalesce_route_metal(tech, shapes), std::invalid_argument);
+  }
+}
+
+TEST(RoutingGeometry, CoalescingRemovesOnlyInternalFragmentEolNotRealOuterEol) {
+  Technology tech;
+  auto&      layer    = tech.layers["M5"];
+  layer.direction     = "VERTICAL";
+  layer.width         = .024;
+  layer.rules.loaded  = true;
+  layer.rules.spacing = {
+      {.024, {}, {}}
+  };
+  layer.rules.properties = {
+      {   "LEF58_EOLKEEPOUT", {"EOLKEEPOUT .025 EXTENSION .048 .02425 .048 CORNERONLY ;"}},
+      {"LEF58_CORNERSPACING",        {"CORNERSPACING CONVEXCORNER WIDTH 0 SPACING .04 ;"}},
+      {      "LEF58_SPACING",   {"SPACING .024 ENDOFLINE .025 WITHIN .04 ENDTOEND .04 ;"}}
+  };
+  const Floorplan          fp;
+  const Signal_metal_rules rules(tech, fp);
+  const std::vector<Shape> owner_a{
+      {"M5", {9744, 53448, 9768, 55632}},
+      {"M5", {9744, 55608, 9768, 56712}},
+      {"M5", {9744, 53178, 9768, 53742}},
+      {"M5", {9744, 55338, 9768, 55902}},
+      {"M5", {9744, 56324, 9768, 56982}}
+  };
+  const std::vector<Shape> owner_b{
+      {"M5", {9792, 52368, 9816, 53472}},
+      {"M5", {9792, 52032, 9816, 52662}}
+  };
+  EXPECT_FALSE(rules.spacing(owner_a.front(), owner_b.front()).legal);
+  const auto a = coalesce_route_metal(tech, owner_a), b = coalesce_route_metal(tech, owner_b);
+  ASSERT_EQ(a.size(), 1);
+  ASSERT_EQ(b.size(), 1);
+  EXPECT_EQ(a.front(),
+            (Shape{
+                "M5",
+                {9744, 53178, 9768, 56982}
+  }));
+  EXPECT_EQ(b.front(),
+            (Shape{
+                "M5",
+                {9792, 52032, 9816, 53472}
+  }));
+  EXPECT_TRUE(rules.spacing(a.front(), b.front()).legal);
+  // Coalesce owners separately. Removing A's lower extension exposes a real
+  // outer end: B's corner still violates its finite native EOL keepout.
+  auto shortened = owner_a;
+  shortened.erase(shortened.begin() + 2);
+  const auto outer = coalesce_route_metal(tech, shortened);
+  ASSERT_EQ(outer.size(), 1);
+  EXPECT_EQ(outer.front().rect.yl, 53448);
+  EXPECT_FALSE(rules.spacing(outer.front(), b.front()).legal);
 }
 }  // namespace livehd::physical

@@ -436,6 +436,13 @@ int main(int argc, char** argv) {
     number_option("legroute_box_fill", options.legroute_options.box_fill);
     number_option("legroute_merge_cost", options.legroute_options.merge_cost);
     auto& lr = options.legroute_options;
+    unsigned_option("legroute_route_ms", lr.route_ms);
+    unsigned_option("legroute_route_access", lr.route_access);
+    unsigned_option("legroute_route_patterns", lr.route_patterns);
+    unsigned_option("legroute_route_passes", lr.route_passes);
+    boolean_option("legroute_final_box_report", lr.final_box_report);
+    boolean_option("legroute_l5_fallback_shadow", lr.l5_fallback_shadow);
+    unsigned_option("legroute_l5_repair_ms", lr.l5_repair_ms);
     boolean_option("critical_cellboxes", lr.critical_cellboxes);
     unsigned_option("cellbox_sites", lr.cellbox_sites);
     unsigned_option("cellbox_rows", lr.cellbox_rows);
@@ -445,6 +452,8 @@ int main(int argc, char** argv) {
     unsigned_option("cellbox_other_choices", lr.cellbox_other_choices);
     boolean_option("cellbox_wide_exceptions", lr.cellbox_wide_exceptions);
     boolean_option("cellbox_far_fallback", lr.cellbox_far_fallback);
+    boolean_option("cellbox_full_flow", lr.cellbox_full_flow);
+    boolean_option("cellbox_diagnostic_final", lr.cellbox_diagnostic_final);
     if (config.HasMember("cellbox_final_retry")) {
       throw std::invalid_argument("cellbox_final_retry is runtime-only and cannot be configured");
     }
@@ -493,6 +502,12 @@ int main(int argc, char** argv) {
             "region_pins=false and partition_cells > 0 outside critical_cellboxes");
       }
       options.placement_session = std::make_shared<pl::Placement_session>();
+    }
+    if (lr.cellbox_full_flow && (!lr.critical_cellboxes || !plan.enabled || !options.legroute || !lr.final)) {
+      throw std::invalid_argument("cellbox_full_flow requires critical_cellboxes, legroute_plan and legroute_final");
+    }
+    if (lr.cellbox_diagnostic_final && (!lr.cellbox_full_flow || !lr.final)) {
+      throw std::invalid_argument("cellbox_diagnostic_final requires cellbox_full_flow and legroute_final");
     }
     if (lr.cellbox_far_fallback && (!lr.critical_cellboxes || !plan.enabled || plan.rounds != 3)) {
       throw std::invalid_argument("cellbox_far_fallback requires critical_cellboxes and legroute_plan with exactly three rounds");
@@ -556,8 +571,17 @@ int main(int argc, char** argv) {
       emit_uint("cellbox_other_choices", lr.cellbox_other_choices);
       emit_bool("cellbox_wide_exceptions", lr.cellbox_wide_exceptions);
       emit_bool("cellbox_far_fallback", lr.cellbox_far_fallback);
+      emit_bool("cellbox_full_flow", lr.cellbox_full_flow);
+      emit_bool("cellbox_diagnostic_final", lr.cellbox_diagnostic_final);
       emit_bool("legroute", options.legroute);
       emit_bool("legroute_final", lr.final);
+      emit_uint("legroute_route_ms", lr.route_ms);
+      emit_uint("legroute_route_access", lr.route_access);
+      emit_uint("legroute_route_patterns", lr.route_patterns);
+      emit_uint("legroute_route_passes", lr.route_passes);
+      emit_bool("legroute_final_box_report", lr.final_box_report);
+      emit_bool("legroute_l5_fallback_shadow", lr.l5_fallback_shadow);
+      emit_uint("legroute_l5_repair_ms", lr.l5_repair_ms);
       emit_bool("legroute_clock_spine", lr.clock_spine);
       emit_bool("legroute_global_route", lr.global_route);
       emit_bool("legroute_global_all", lr.global_all);

@@ -290,13 +290,20 @@ cc_test(
 
 cc_library(
     name = "signal_router",
-    srcs = ["signal_router.cpp", "signal_maze.cpp", "signal_route_profile.cpp", "pin_escape_guard.cpp"],
-    hdrs = ["signal_router.hpp", "signal_route_profile.hpp", "pin_escape_guard.hpp"],
+    srcs = ["signal_router.cpp", "signal_maze.cpp", "signal_route_profile.cpp", "signal_route_domain.cpp", "pin_escape_guard.cpp"],
+    hdrs = ["signal_router.hpp", "signal_route_profile.hpp", "signal_route_domain.hpp", "pin_escape_guard.hpp"],
     copts = COPTS,
     visibility = ["//visibility:public"],
     deps = [":steiner_topology", "//inou/lefdef:inou_lefdef"],
 )
 
+cc_test(
+    name = "signal_route_domain_test",
+    size = "small",
+    srcs = ["signal_route_domain_test.cpp"],
+    copts = COPTS,
+    deps = [":signal_router", "@googletest//:gtest_main"],
+)
 cc_test(
     name = "signal_router_test",
     srcs = ["signal_router_test.cpp"],
@@ -492,6 +499,7 @@ filegroup(
         "legroute.hpp",
         "legroute_boxes.cpp",
         "legroute_admission.cpp",
+        "legroute_cellbox_flow.cpp",
         "legroute_box_domains.cpp",
         "legroute_box_seed.cpp",
         "legroute_coalesce.cpp",
@@ -511,6 +519,8 @@ filegroup(
         "legroute_plan.cpp",
         "legroute_congestion.cpp",
         "legroute_route.cpp",
+        "legroute_track_repair.cpp",
+        "legroute_track_repair.hpp",
         "legroute_sat.cpp",
         "resynthesize.cpp",
         "steiner_repair.cpp",
@@ -1030,10 +1040,25 @@ cc_library(
 )
 # legroute: route-aware legalization with 2x2 cell-boxes on a tile grid (todo/livehd/2l-legroute.html)
 cc_library(
+    name = "legroute_track_repair",
+    srcs = ["legroute_track_repair.cpp"],
+    hdrs = ["legroute_track_repair.hpp"],
+    copts = COPTS,
+    deps = [":sat_solver"],
+)
+cc_test(
+    name = "legroute_track_repair_test",
+    size = "small",
+    srcs = ["legroute_track_repair_test.cpp"],
+    copts = COPTS,
+    deps = [":legroute_track_repair", "@googletest//:gtest_main"],
+)
+cc_library(
     name = "legroute",
     srcs = [
         "legroute.cpp",
         "legroute_admission.cpp",
+        "legroute_cellbox_flow.cpp",
         "legroute_boxes.cpp",
         "legroute_box_domains.cpp",
         "legroute_box_seed.cpp",
@@ -1060,6 +1085,7 @@ cc_library(
         ":cell_criticality",
         ":fast_route_pattern",
         ":row_occupancy",
+        ":legroute_track_repair",
         ":sat_solver",
         ":signal_router",
         ":steiner_topology",
@@ -1122,6 +1148,13 @@ cc_test(
     name = "legroute_boxes_test",
     size = "small",
     srcs = ["legroute_boxes_test.cpp", "legroute_internal.hpp"],
+    copts = COPTS,
+    deps = [":legroute", "@googletest//:gtest_main"],
+)
+cc_test(
+    name = "legroute_cellbox_flow_test",
+    size = "small",
+    srcs = ["legroute_cellbox_flow_test.cpp", "legroute_internal.hpp"],
     copts = COPTS,
     deps = [":legroute", "@googletest//:gtest_main"],
 )

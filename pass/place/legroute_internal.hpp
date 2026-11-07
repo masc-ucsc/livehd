@@ -72,13 +72,13 @@ struct Net {
   int              driver = -1;
   bool             clock = false, power = false, reset = false;
   bool             control_scope = false;  // explicit native pre-CTS trace for critical admission
-  bool             routed   = false;  // signal net between two or more places: the router's job
-  double           slack    = std::numeric_limits<double>::infinity();
-  double           crit     = 0;      // window criticality: 1 at WNS, 0 at WNS + crit_window
-  double           rank     = 1;      // slack rank fraction among timed nets (0 = worst)
-  double           ramp     = 0;      // max(0, 1 - rank / crit_fraction)
-  bool             critical = false;  // in the top crit_fraction
-  unsigned         weight   = 1;      // 1 + round(8 crit^2)
+  bool             routed        = false;  // signal net between two or more places: the router's job
+  double           slack         = std::numeric_limits<double>::infinity();
+  double           crit          = 0;      // window criticality: 1 at WNS, 0 at WNS + crit_window
+  double           rank          = 1;      // slack rank fraction among timed nets (0 = worst)
+  double           ramp          = 0;      // max(0, 1 - rank / crit_fraction)
+  bool             critical      = false;  // in the top crit_fraction
+  unsigned         weight        = 1;      // 1 + round(8 crit^2)
   bool             requires_final_route() const { return routed || (!power && clock && pins.size() >= 2); }
 };
 struct Design {
@@ -174,6 +174,8 @@ struct Grid {
   std::vector<std::vector<int16_t>>          cap;
   std::vector<int16_t>                       box_cap;    // per tile: usable box-layer tracks (in-box routes and local nets only)
   Track_resource_catalog                     resources;  // physical identities underlying coarse counts; not a DRC certificate
+  std::vector<int>                           critical_box_of_tile;
+  std::vector<std::vector<int64_t>>          critical_reserved_h, critical_reserved_v;
   std::vector<Paired_pin_box_reservation>    paired_pin_reservations;
   std::vector<int>                           paired_pin_reservation_of_tile;  // -1 for an unoccupied tile
   std::vector<std::vector<physical::Rect>>   obstacles;                       // per layer: power metal and macro bodies (DBU)
@@ -216,16 +218,19 @@ std::vector<int> pack_segments(const std::vector<int>& widths, const std::vector
 
 // ---------------------------------------------------------------- L2 cell-boxes
 struct Box {
-  std::vector<int> cells;  // movable ids
-  int              region = 0, tile = -1;
-  double           cx = 0, cy = 0;  // width-weighted cell centroid (DBU)
-  double           crit     = 0;    // max window criticality of its nets
-  double           ramp     = 0;    // max rank ramp of its nets
-  bool             critical = false, clock = false, fixed = false;
-  int              external = 0, internal = 0;
-  int              sites  = 0;      // total cell width in sites
-  int              window = -1;     // alternatives: this box moves at most this many tiles from its home (-1: window_tiles)
-  bool             placed = false;  // legal_boxes: its cells sit legally on its home tile (cx, cy): that tile fits by construction
+  bool                 critical_fixed = false;
+  int                  span_columns   = 1;
+  std::vector<int64_t> reserved_h, reserved_v;
+  std::vector<int>     cells;  // movable ids
+  int                  region = 0, tile = -1;
+  double               cx = 0, cy = 0;  // width-weighted cell centroid (DBU)
+  double               crit     = 0;    // max window criticality of its nets
+  double               ramp     = 0;    // max rank ramp of its nets
+  bool                 critical = false, clock = false, fixed = false;
+  int                  external = 0, internal = 0;
+  int                  sites  = 0;   // total cell width in sites
+  int                  window = -1;  // alternatives: this box moves at most this many tiles from its home (-1: window_tiles)
+  bool placed = false;               // legal_boxes: its cells sit legally on its home tile (cx, cy): that tile fits by construction
 };
 struct Boxes {
   std::vector<Box> boxes;
@@ -351,6 +356,17 @@ struct Global_routes {
   size_t                           pattern_work = 0, pattern_work_limited = 0;
   double                           seconds = 0;
 };
+// Frozen selected Plan state. Installation validates everything before mutating cells.
+struct Critical_cellbox_handoff {
+  physical::Floorplan     source_frame;
+  Legroute_options        options;
+  Grid                    grid;
+  Cellbox_admission       admission;
+  std::vector<Global_net> requests;
+  Global_routes           routes;
+};
+void install_critical_handoff(const Design&, Grid&, Boxes&);
+void validate_critical_boxes(const Design&, const Grid&, const Boxes&);
 struct Box_route_seed_result {
   bool          accepted = false;
   // Separate endpoint view: the original Boxes still define placement domains and physical cell membership.
@@ -491,8 +507,10 @@ struct Node {
   int64_t          riser_track = -1;
   int64_t          stub_track  = -1;                 // L7: horizontal track from a die IO or fixed-cell pin to the riser
   uint8_t          riser_state = 0, stub_state = 0;  // Track_state
-  uint8_t          stub_access_state = 0;            // Track_state of jointly checked IO pin-to-stub vertical pieces
-  int              stub_layer        = -1;  // Grid::layers index; -1 with an existing track means legacy lowest horizontal layer
+  uint8_t          stub_access_state  = 0;           // Track_state of jointly checked IO pin-to-stub vertical pieces
+  int              stub_layer         = -1;  // Grid::layers index; -1 with an existing track means legacy lowest horizontal layer
+  // Critical ordinary leaf/collinear cell pins tap the carrier directly; they need no global auxiliary riser.
+  bool             direct_carrier_tap = false;
 };
 struct Conn {
   int                              net = -1, a = -1, b = -1;  // node ids of the net's tree
@@ -540,6 +558,9 @@ struct Routing {
   // per net: all its pins sit in boxes within one 2x2 tile window; legroute.final routes it whole on the low
   // layers, the global router never sees it
   std::vector<char>                 local;
+  // Diagnostic Final only, Design::nets order. Empty required entry means all Local eligibility checks completed;
+  // a nonempty reason rejects the net without changing the original required-net/pin denominator.
+  std::vector<std::string>          final_local_rejected;
   // per tile: in-box demand of its box on the box layer (H) and the lowest vertical layer, in tracks
   std::vector<double>               box_dem_h, box_dem_v;
   size_t overflow = 0, critical_conns = 0, pin_edge_moves = 0, vpin_overflow = 0, clock_domains = 0, clock_ribs = 0, unassigned = 0;
@@ -552,7 +573,12 @@ struct Routing {
   size_t layer_overflow_segments = 0, layer_overflow_tiles = 0;  // assign_layers: segments placed on an overfull layer
   size_t paired_allowance_short_tiles = 0, paired_allowance_short_tracks = 0;
   size_t l5_repair_attempts = 0, l5_repair_successes = 0, l5_repair_unknown = 0, l5_repair_unsat = 0;
+  size_t l5_repair_sat_calls = 0, l5_repair_sat = 0, l5_repair_sat_unsat = 0, l5_repair_sat_unknown = 0;
+  size_t l5_repair_sat_variables = 0, l5_repair_sat_clauses = 0;
+  double l5_repair_sat_build_seconds = 0, l5_repair_sat_solve_seconds = 0;
+  double l5_repair_candidate_seconds = 0, l5_repair_native_validation_seconds = 0, l5_repair_seconds = 0;
 };
+void                  critical_local_routes(const Design&, const Grid&, const Boxes&, Routing&, Legroute_report&);
 // In-box demand: local nets and pin taps per box, charged to the box layer first; the excess and the vertical part
 // take tracks of the lowest routed layers over the box's tile. Marks the local nets.
 void                  box_demand(const Design&, const Grid&, const Boxes&, Routing&);
@@ -592,8 +618,36 @@ struct Final_planned_geometry {
   std::vector<std::vector<std::tuple<std::string, std::string, int64_t, int64_t>>> joins;
   std::vector<std::string>                                                         io_stub_failure;
   std::vector<std::vector<uint8_t>> path_state;  // per path: Track_state of the L5 track it was drawn on
+  // Selected DEFAULT adjacent via geometry, not a via/spacing certificate.
+  // Its exact plates are covered by the emitted Local wire landings. Final
+  // must still check native occupancy/cuts and the full connected net.
+  std::vector<std::vector<physical::Route_path>> adjacent_join_vias;
+};
+struct Final_net_geometry {
+  std::vector<physical::Route_path>                                   paths;
+  std::vector<std::tuple<std::string, std::string, int64_t, int64_t>> joins;
+  std::vector<uint8_t>                                                path_state;
+  std::string                                                         io_stub_failure;
+  std::vector<physical::Route_path>                                   adjacent_join_vias;
+};
+// Technology, DBU/die/grid, owners, topology, container order and referenced object lifetimes stay fixed.
+// Layer/track/riser choices may change between serial emits. Concurrent emits require immutable Routing;
+// no Routing writer may overlap emission. Each call reads live choices for transactional Local trials.
+class Final_geometry_emitter {
+  struct State;
+  std::unique_ptr<State> state_;
+
+public:
+  Final_geometry_emitter(const Design&, const Grid&, const Boxes&, const Routing&);
+  ~Final_geometry_emitter();
+  Final_net_geometry emit(size_t net) const;
 };
 Final_planned_geometry final_planned_geometry(const Design&, const Grid&, const Boxes&, const Routing&);
+size_t                   critical_backbone_conflicts(const Design&, const Grid&, const Final_planned_geometry&,
+                                                     std::vector<std::string>* rejected = nullptr);
+// Structural precheck only. Empty reasons still require the complete native same-net union metal audit.
+std::vector<std::string> local_backbone_rejections(const Design&, const Grid&, const Boxes&, const Routing&,
+                                                   const Final_planned_geometry&);
 void                   assign_layers(const Design&, const Grid&, Routing&);                    // L5 layers
 void                   assign_tracks(const Design&, const Grid&, Routing&, unsigned threads);  // L5 tracks
 double                 wire_um(const Grid&, const Conn&);
