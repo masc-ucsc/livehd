@@ -401,7 +401,7 @@ theorem eval_advLit (σ : Asg) (c : BVExpr 1) : (advLit c).eval σ = bitOf (c.ev
     · right; exact BitVec.eq_of_toNat_eq (by simp [h])
   rcases this x with h | h <;> subst h <;> decide
 
-def punroll (DI DS : DesignCert) (RI RS : Program) (sp : RefSpec) :
+def punroll (DI DS : DesignCert) (RI RS : Stepper) (sp : RefSpec) :
     Nat → Nat → SVal → SVal → SymSt → Except String (List PStep × SymSt)
   | 0, _, _, _, st => .ok ([], st)
   | j + 1, inB, sI, sS, st =>
@@ -436,7 +436,7 @@ def punroll (DI DS : DesignCert) (RI RS : Program) (sp : RefSpec) :
     | .error m => .error m
     | .ok (rest, st3) => .ok ((.gate .and (.gate .or (.not (advLit c)) peq) se, asm, nI, sS') :: rest, st3)
 
-theorem punroll_extends {DI DS : DesignCert} {RI RS : Program} {sp : RefSpec} :
+theorem punroll_extends {DI DS : DesignCert} {RI RS : Stepper} {sp : RefSpec} :
     ∀ (k inB : Nat) (sI sS : SVal) (st : SymSt) (steps : List PStep) (st' : SymSt),
       punroll DI DS RI RS sp k inB sI sS st = .ok (steps, st') → st.Extends st' ∧ steps.length = k
   | 0, _, _, _, st, steps, st', h => by
@@ -481,7 +481,7 @@ def PRt (sy : RefSys) (ins : Nat → RuntimeInput) (n : Nat) : Prop :=
   runtimeFullOKB sy.DI (ins n) (traceM sy.DI sy.sI0 ins n) (edgesAll sy.DI) = true
     ∧ runtimeFullOKB sy.DS (mapInputs (ins n) sy.inMap) (stutM sy ins n) (edgesAll sy.DS) = true
 
-theorem punroll_sound {sy : RefSys} {RI RS : Program} {sp : RefSpec}
+theorem punroll_sound {sy : RefSys} {RI RS : Stepper} {sp : RefSpec}
     (hrI : MemResidual sy.DI RI) (hAI : admitsWB sy.DI = true)
     (hrS : MemResidual sy.DS RS) (hAS : admitsWB sy.DS = true)
     (hadv : sp.adv = sy.adv) (hmapEq : sp.inMap = sy.inMap)
@@ -589,21 +589,21 @@ def refSideOK (sy : RefSys) (sp : RefSpec) : Bool :=
     && inAsmRangeOK sp.inW sp.asmIn && sp.inMap.all (· < sp.inW.length)
     && decide (sp.adv = sy.adv) && decide (sp.inMap = sy.inMap)
 
-def refBaseRun (sy : RefSys) (RI RS : Program) (sp : RefSpec) : Except String (List PStep × SymSt) :=
+def refBaseRun (sy : RefSys) (RI RS : Stepper) (sp : RefSpec) : Except String (List PStep × SymSt) :=
   punroll sy.DI sy.DS RI RS sp sp.k 0 (.conc (StateM.encStateM sy.sI0)) (.conc (StateM.encStateM sy.sS0))
     ⟨sp.k * sp.inW.length, #[]⟩
 
-def refStepRun (sy : RefSys) (RI RS : Program) (sp : RefSpec) : Except String (List PStep × SymSt) :=
+def refStepRun (sy : RefSys) (RI RS : Stepper) (sp : RefSpec) : Except String (List PStep × SymSt) :=
   punroll sy.DI sy.DS RI RS sp (sp.k + 1) (layoutSize sp.LI + layoutSize sp.LS) (stateVar sp.LI 0)
     (stateVar sp.LS (layoutSize sp.LI))
     ⟨layoutSize sp.LI + layoutSize sp.LS + (sp.k + 1) * sp.inW.length, #[]⟩
 
-def refBaseObl (sy : RefSys) (RI RS : Program) (sp : RefSpec) : Option BVLogicalExpr :=
+def refBaseObl (sy : RefSys) (RI RS : Stepper) (sp : RefSpec) : Option BVLogicalExpr :=
   match refBaseRun sy RI RS sp with
   | .ok (steps, st) => if scopedB st then some (.gate .and (defsE st) (baseBad (toSteps steps))) else none
   | .error _ => none
 
-def refStepObl (sy : RefSys) (RI RS : Program) (sp : RefSpec) : Option BVLogicalExpr :=
+def refStepObl (sy : RefSys) (RI RS : Stepper) (sp : RefSpec) : Option BVLogicalExpr :=
   match refStepRun sy RI RS sp with
   | .ok (s :: steps, st) =>
       if scopedB st && decide (stateShapeOf s.2.2.1 = some sp.LI) && decide (stateShapeOf s.2.2.2 = some sp.LS)
@@ -611,13 +611,13 @@ def refStepObl (sy : RefSys) (RI RS : Program) (sp : RefSpec) : Option BVLogical
       else none
   | _ => none
 
-def runRefKOf (sy : RefSys) (RI RS : Program) (sp : RefSpec) (pfB pfS : ByteArray) : Bool :=
+def runRefKOf (sy : RefSys) (RI RS : Stepper) (sp : RefSpec) (pfB pfS : ByteArray) : Bool :=
   refSideOK sy sp
     && (match refBaseObl sy RI RS sp with | some φ => checkUnsat φ pfB | none => false)
     && (match refStepObl sy RI RS sp with | some φ => checkUnsat φ pfS | none => false)
 
 /-- `runRefKOf` from obligations ALREADY BUILT (see `runInvKOf_of_obls`). -/
-theorem runRefKOf_of_obls {sy : RefSys} {RI RS : Program} {sp : RefSpec} {pfB pfS : ByteArray}
+theorem runRefKOf_of_obls {sy : RefSys} {RI RS : Stepper} {sp : RefSpec} {pfB pfS : ByteArray}
     {φB φS : BVLogicalExpr} (hs : refSideOK sy sp = true) (hB : refBaseObl sy RI RS sp = some φB)
     (hS : refStepObl sy RI RS sp = some φS) (cB : checkUnsat φB pfB = true)
     (cS : checkUnsat φS pfS = true) : runRefKOf sy RI RS sp pfB pfS = true := by
@@ -626,7 +626,7 @@ theorem runRefKOf_of_obls {sy : RefSys} {RI RS : Program} {sp : RefSpec} {pfB pf
 /-! ## Soundness -/
 
 section
-variable {sf wf : Nat} {sy : RefSys} {RI RS : Program} {sp : RefSpec} {pfB pfS : ByteArray}
+variable {sf wf : Nat} {sy : RefSys} {RI RS : Stepper} {sp : RefSpec} {pfB pfS : ByteArray}
   {ins : Nat → RuntimeInput}
 
 theorem refSideOK_parts (h : refSideOK sy sp = true) :
@@ -711,7 +711,7 @@ theorem prt_of_inv (hside : refSideOK sy sp = true) (hins : ∀ n, (ins n).toLis
 end
 
 section
-variable {sf wf : Nat} {sy : RefSys} {RI RS : Program} {sp : RefSpec} {pfB pfS : ByteArray}
+variable {sf wf : Nat} {sy : RefSys} {RI RS : Stepper} {sp : RefSpec} {pfB pfS : ByteArray}
   {ins : Nat → RuntimeInput}
 
 theorem prun_base {steps : List PStep} {st st0 : SymSt} {k inB : Nat} {sI sS : SVal}
@@ -849,7 +849,7 @@ def refOutS (sy : RefSys) (ins : Nat → RuntimeInput) (n : Nat) : Array BV :=
   (interpretDesign sy.DS (edgesAll sy.DS) (mapInputs (ins n) sy.inMap) (refStut sy ins n)).outputs
 
 section
-variable {sf wf : Nat} {sy : RefSys} {RI RS : Program} {sp : RefSpec} {pfB pfS : ByteArray}
+variable {sf wf : Nat} {sy : RefSys} {RI RS : Stepper} {sp : RefSpec} {pfB pfS : ByteArray}
   {ins : Nat → RuntimeInput}
 
 /-- While both machines' steps are admissible, the stuttered specification

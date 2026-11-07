@@ -483,7 +483,7 @@ theorem tmplOf_holds {sp : ConjTSpec} {cas : Case} {st : StateM} {outs : Array B
 
 /-! ## Runs and obligations -/
 
-def stepRunT (D : DesignCert) (R : Program) (sp : ConjTSpec) (cas : Case) :
+def stepRunT (D : DesignCert) (R : Stepper) (sp : ConjTSpec) (cas : Case) :
     Except String (List StepO × SymSt) :=
   unrollO D R sp.fuel sp.asmOut sp.asmIn sp.inW 2 (layoutSize sp.L) (stateVarT sp.L (sp.tmplOf cas) 0)
     ⟨layoutSize sp.L + 2 * sp.inW.length, #[]⟩
@@ -539,7 +539,7 @@ def checkT (sp : ConjTSpec) (s0 : StateM) (rb r0 : Except String (List StepO × 
                | none => false)
          | _ => false
 
-def runConjTOf (D : DesignCert) (R : Program) (sp : ConjTSpec) (s0 : StateM) (pfB : ByteArray)
+def runConjTOf (D : DesignCert) (R : Stepper) (sp : ConjTSpec) (s0 : StateM) (pfB : ByteArray)
     (pfS : List (List ByteArray)) : Bool :=
   sideOKC D sp.plain s0
     && checkT sp s0 (baseRunC D R sp.plain s0) (stepRunC D R sp.plain)
@@ -548,7 +548,7 @@ def runConjTOf (D : DesignCert) (R : Program) (sp : ConjTSpec) (s0 : StateM) (pf
 /-! ## Soundness -/
 
 section
-variable {D : DesignCert} {R : Program} {sp : ConjTSpec} {s0 : StateM} {pfB : ByteArray}
+variable {D : DesignCert} {R : Stepper} {sp : ConjTSpec} {s0 : StateM} {pfB : ByteArray}
   {pfS : List (List ByteArray)} {ins : Nat → RuntimeInput}
 
 theorem conjT_parts (h : runConjTOf D R sp s0 pfB pfS = true) :
@@ -754,7 +754,7 @@ end
 /-- **In the shared reference semantics**: at every cycle whose assumptions up
 to it all held, every conjunct holds of `interpretDesign`'s flops (at the
 cycle's start) and outputs. -/
-theorem runConjTOf_sound_ref {D : DesignCert} {R : Program} {sp : ConjTSpec}
+theorem runConjTOf_sound_ref {D : DesignCert} {R : Stepper} {sp : ConjTSpec}
     {s0 : StateM} {pfB : ByteArray} {pfS : List (List ByteArray)} (hres : MemResidual D R)
     (hA : admitsWB D = true) (hr : runConjTOf D R sp s0 pfB pfS = true)
     (ins : Nat → RuntimeInput) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :

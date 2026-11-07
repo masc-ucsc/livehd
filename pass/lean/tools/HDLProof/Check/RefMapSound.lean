@@ -369,7 +369,7 @@ theorem specIn0S_rel (σ : Asg) (inW : List Nat) (ch : ChanS) :
   exact h2
 
 /-- Per channel, the spec's outputs at the map's state with zero responses (ranked ones only). -/
-def en0S (DS : DesignCert) (RS : Program) (sp : RefMapSpec) (σ0 : SVal) :
+def en0S (DS : DesignCert) (RS : Stepper) (sp : RefMapSpec) (σ0 : SVal) :
     SymSt → List ChanS → Except String (List (Option SVal) × SymSt)
   | st, [] => .ok ([], st)
   | st, ch :: chs =>
@@ -388,7 +388,7 @@ def en0S (DS : DesignCert) (RS : Program) (sp : RefMapSpec) (σ0 : SVal) :
         | .error m => .error m
         | .ok (rest, st2) => .ok (none :: rest, st2)
 
-theorem en0S_extends {DS : DesignCert} {RS : Program} {sp : RefMapSpec} {σ0 : SVal} :
+theorem en0S_extends {DS : DesignCert} {RS : Stepper} {sp : RefMapSpec} {σ0 : SVal} :
     ∀ (chs : List ChanS) (st : SymSt) (ens : List (Option SVal)) (st' : SymSt),
       en0S DS RS sp σ0 st chs = .ok (ens, st') → st.Extends st'
   | [], st, ens, st', h => by
@@ -414,7 +414,7 @@ theorem en0S_extends {DS : DesignCert} {RS : Program} {sp : RefMapSpec} {σ0 : S
           obtain ⟨-, rfl⟩ := h
           exact en0S_extends chs _ _ _ h2
 
-theorem en0S_sound {DS : DesignCert} {RS : Program} {sp : RefMapSpec} {σ0 : SVal}
+theorem en0S_sound {DS : DesignCert} {RS : Stepper} {sp : RefMapSpec} {σ0 : SVal}
     (hrS : MemResidual DS RS) (hAS : admitsWB DS = true) (hside : specSideOK DS sp = true)
     {σ : Asg} {stF : SymSt} (hc : stF.Consistent σ) {σC : StateM} (hσ : SpecSt sp σC)
     (hS : SRel σ σ0 (StateM.encStateM σC)) :
@@ -498,7 +498,7 @@ structure RunRM where
 def portsS (sp : RefMapSpec) (a b : StepO) : SPorts :=
   ⟨a.2.1, b.2.1, inputVar sp.inv.inW (layoutSize sp.inv.L)⟩
 
-def rmRun (DI DS : DesignCert) (RI RS : Program) (sp : RefMapSpec) (cas : Case) :
+def rmRun (DI DS : DesignCert) (RI RS : Stepper) (sp : RefMapSpec) (cas : Case) :
     Except String RunRM :=
   match stepRunT DI RI sp.inv cas with
   | .ok ([a, b], st) =>
@@ -587,7 +587,7 @@ def oblRM (sp : RefMapSpec) (cas : Case) (R : RunRM) (ti : Nat) (t : RTarget) :
 /-! ## The base -/
 
 /-- `R0 + 1` steps from the initial state. -/
-def baseRunRM (DI : DesignCert) (RI : Program) (sp : RefMapSpec) (s0 : StateM) :
+def baseRunRM (DI : DesignCert) (RI : Stepper) (sp : RefMapSpec) (s0 : StateM) :
     Except String (List StepO × SymSt) :=
   unrollO DI RI sp.inv.fuel sp.inv.asmOut sp.inv.asmIn sp.inv.inW (sp.R0 + 1) 0
     (.conc (StateM.encStateM s0)) ⟨(sp.R0 + 1) * sp.inv.inW.length, #[]⟩
@@ -654,7 +654,7 @@ def checkRM (sp : RefMapSpec) (rb : Except String (List StepO × SymSt))
 
 /-- **The refinement-map check.** `pfIB`/`pfIS` are the invariant's proofs, `pfB` the base's,
 `pfS[t][m]` target `t`'s in case `m`. -/
-def runRefMapOf (DI DS : DesignCert) (RI RS : Program) (sp : RefMapSpec) (s0 : StateM)
+def runRefMapOf (DI DS : DesignCert) (RI RS : Stepper) (sp : RefMapSpec) (s0 : StateM)
     (pfIB : ByteArray) (pfIS : List (List ByteArray)) (pfB : ByteArray)
     (pfS : List (List ByteArray)) : Bool :=
   runConjTOf DI RI sp.inv s0 pfIB pfIS && sideRM DS sp
@@ -664,7 +664,7 @@ def runRefMapOf (DI DS : DesignCert) (RI RS : Program) (sp : RefMapSpec) (s0 : S
 /-! ## Taking the check apart -/
 
 section
-variable {DI DS : DesignCert} {RI RS : Program} {sp : RefMapSpec} {s0 : StateM}
+variable {DI DS : DesignCert} {RI RS : Stepper} {sp : RefMapSpec} {s0 : StateM}
   {pfIB pfB : ByteArray} {pfIS pfS : List (List ByteArray)}
 
 theorem rm_parts (h : runRefMapOf DI DS RI RS sp s0 pfIB pfIS pfB pfS = true) :
@@ -971,7 +971,7 @@ theorem initLits_sound {σ : Asg} {σR o0 : SVal} {st : StateM} {outs0 : Array B
         | free => trivial
 
 section
-variable {DI DS : DesignCert} {RI RS : Program} {sp : RefMapSpec} {s0 : StateM}
+variable {DI DS : DesignCert} {RI RS : Stepper} {sp : RefMapSpec} {s0 : StateM}
   {pfIB : ByteArray} {pfIS : List (List ByteArray)} {ins : Nat → RuntimeInput}
 
 theorem rm_base (hrI : MemResidual DI RI) (hAI : admitsWB DI = true)
@@ -1089,7 +1089,7 @@ theorem bit_of_advLit_false {σ : Asg} {k : BVExpr 1} {rest : List BVLogicalExpr
   exact h
 
 section
-variable {DI DS : DesignCert} {RI RS : Program} {sp : RefMapSpec} {s0 : StateM}
+variable {DI DS : DesignCert} {RI RS : Stepper} {sp : RefMapSpec} {s0 : StateM}
   {pfIB pfB : ByteArray} {pfIS pfS : List (List ByteArray)} {ins : Nat → RuntimeInput}
 
 theorem rm_step (hrI : MemResidual DI RI) (hAI : admitsWB DI = true)
@@ -1318,7 +1318,7 @@ end
 /-- **The refinement-map check is sound.** On every run of the implementation from `s0`, the
 base holds at `R0` and every cycle from `R0` on satisfies `CycleOK`, the active output and the
 rank obligations. -/
-theorem runRefMapOf_sound {DI DS : DesignCert} {RI RS : Program} {sp : RefMapSpec} {s0 : StateM}
+theorem runRefMapOf_sound {DI DS : DesignCert} {RI RS : Stepper} {sp : RefMapSpec} {s0 : StateM}
     {pfIB pfB : ByteArray} {pfIS pfS : List (List ByteArray)} (hrI : MemResidual DI RI)
     (hAI : admitsWB DI = true) (hrS : MemResidual DS RS) (hAS : admitsWB DS = true)
     (hchk : runRefMapOf DI DS RI RS sp s0 pfIB pfIS pfB pfS = true)

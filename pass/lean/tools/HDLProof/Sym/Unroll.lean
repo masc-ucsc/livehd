@@ -115,7 +115,7 @@ def asmOf (so : SVal) (asmOut : Option PropSpec) (inW : List Nat) (inB : Nat) (a
 /-- One unrolled step: the property output, the assumption, the next state. -/
 abbrev StepS := BVLogicalExpr × BVLogicalExpr × SVal
 
-def unroll (D : DesignCert) (R : Program) (fuel : Nat) (prop : PropSpec) (asmOut : Option PropSpec)
+def unroll (D : DesignCert) (R : Stepper) (fuel : Nat) (prop : PropSpec) (asmOut : Option PropSpec)
     (asmIn : List (Nat × Int)) (inW : List Nat) :
     Nat → Nat → SVal → SymSt → Except String (List StepS × SymSt)
   | 0, _, _, st => .ok ([], st)
@@ -136,7 +136,7 @@ def unroll (D : DesignCert) (R : Program) (fuel : Nat) (prop : PropSpec) (asmOut
             | .error m => .error m
             | .ok (rest, st2) => .ok ((ok, asm, sn) :: rest, st2)
 
-theorem unroll_extends {D : DesignCert} {R : Program} {fuel : Nat} {prop : PropSpec}
+theorem unroll_extends {D : DesignCert} {R : Stepper} {fuel : Nat} {prop : PropSpec}
     {asmOut : Option PropSpec} {asmIn : List (Nat × Int)} {inW : List Nat} :
     ∀ (k inB : Nat) (sS : SVal) (st : SymSt) (steps : List StepS) (st' : SymSt),
       unroll D R fuel prop asmOut asmIn inW k inB sS st = .ok (steps, st') → st.Extends st' ∧ steps.length = k
@@ -254,7 +254,7 @@ theorem asmOf_sound {σ : Asg} {so : SVal} {outs : Array BV} {asmOut : Option Pr
   | some p => exact propOf_sound hr ha'
 
 /-- **The unroll is sound.** -/
-theorem unroll_sound {D : DesignCert} {R : Program} {fuel : Nat}
+theorem unroll_sound {D : DesignCert} {R : Stepper} {fuel : Nat}
     {prop : PropSpec} {asmOut : Option PropSpec} {asmIn : List (Nat × Int)} {inW : List Nat}
     (hrange : inAsmRangeOK inW asmIn = true)
     (hres : MemResidual D R) (hA : admitsWB D = true)
@@ -294,8 +294,7 @@ theorem unroll_sound {D : DesignCert} {R : Program} {fuel : Nat}
                 have x2 := (unroll_extends k _ _ _ _ _ h2).1.trans hx
                 intro j hj hwf
                 -- the first step
-                have hev := hres hA (hwf 0 (by omega))
-                have rres := symStep_eval hev h1 hc x2 .conc
+                have rres := symStep_eval (hres hA (hwf 0 (by omega))) h1 hc x2 .conc
                   (inputVar_rel (hins (m + 0)) (by simpa using hin 0 (by omega))) hS
                 obtain ⟨rn, ro⟩ := splitResult_sound rres hsplit
                 have f0 : StepFacts σ prop asmOut asmIn (outM D s0 ins (m + 0)) (ins (m + 0))

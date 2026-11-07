@@ -70,7 +70,7 @@ theorem runSpecFactsF_parts {sf wf : Nat} {DS : DesignCert} {sp : RefMapSpec} {p
 /-! ## The checked trace is the reference trace -/
 
 section
-variable {DI DS : DesignCert} {RI RS : Program} {sp : RefMapSpec} {s0 : StateM}
+variable {DI DS : DesignCert} {RI RS : Stepper} {sp : RefMapSpec} {s0 : StateM}
   {pfIB pfB : ByteArray} {pfIS pfS : List (List ByteArray)} {ins : Nat → RuntimeInput}
 
 /-- On a checked implementation, every cycle's outputs are `interpretDesign`'s. -/

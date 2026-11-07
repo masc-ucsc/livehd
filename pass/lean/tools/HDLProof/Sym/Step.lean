@@ -1,7 +1,7 @@
 /-
 `Sym.Step` -- one clock step of a design, symbolically (M3 S3).
 
-`symStep` runs a memory-route residual's entry body on symbolic arguments.
+`symStepFP` runs a memory-route residual's entry body on symbolic arguments.
 `symStep_sound` transfers `projectMemDesignAt_correct`: for a runtime-valid
 concrete step whose arguments the symbolic ones denote, the symbolic result
 denotes `encResultM r`, where `r` is THE result -- its denotation is
@@ -17,16 +17,16 @@ namespace HDLProof.Sym
 open Std.Tactic.BVDecide Projection.MemProjection Projection.Hw Projection.HwMem Compiler
 
 /-- The residual's entry body, run on symbolic `[edges, input, state]`. -/
-def symStep (R : Program) (fuel : Nat) (st : SymSt) (sE sI sS : SVal) :
+def symStepFP (R : Program) (fuel : Nat) (st : SymSt) (sE sI sS : SVal) :
     Except String (SVal × SymSt) :=
   match R.fn R.entry with
   | some fd => if fd.arity = 3 then symEval fuel st [sE, sI, sS] fd.body
                else .error "the residual entry does not take three arguments"
   | none    => .error "the residual has no entry function"
 
-theorem symStep_extends {R : Program} {fuel : Nat} {st : SymSt} {sE sI sS s : SVal} {st' : SymSt}
-    (h : symStep R fuel st sE sI sS = .ok (s, st')) : st.Extends st' := by
-  unfold symStep at h
+theorem symStepFP_extends {R : Program} {fuel : Nat} {st : SymSt} {sE sI sS s : SVal} {st' : SymSt}
+    (h : symStepFP R fuel st sE sI sS = .ok (s, st')) : st.Extends st' := by
+  unfold symStepFP at h
   split at h
   · split at h
     · exact symEval_extends _ _ _ _ _ _ h
@@ -39,7 +39,7 @@ theorem symStep_sound {sf wf : Nat} {D : DesignCert} {R : Program}
     (hproj : projectMemDesignAt sf wf D = .ok R) (hA : admitsB D = true)
     (hR : runtimeFullOKB D i stM e = true)
     {σ : Asg} {fuel : Nat} {st0 stS stF : SymSt} {sE sI sS sres : SVal}
-    (hsym : symStep R fuel st0 sE sI sS = .ok (sres, stS))
+    (hsym : symStepFP R fuel st0 sE sI sS = .ok (sres, stS))
     (hc : stF.Consistent σ) (hx : stS.Extends stF)
     (rE : SRel σ sE (encEdges e)) (rI : SRel σ sI (encInput i))
     (rS : SRel σ sS (StateM.encStateM stM)) :
@@ -50,7 +50,7 @@ theorem symStep_sound {sf wf : Nat} {D : DesignCert} {R : Program}
   obtain ⟨r, hden, hok, hiff⟩ := projectMemDesignAt_correct hproj hA hR
   refine ⟨r, hden, hok, ?_⟩
   have hev := (hiff (StateM.encResultM r)).mpr rfl
-  unfold symStep at hsym
+  unfold symStepFP at hsym
   split at hsym
   · rename_i fd hfd
     split at hsym
@@ -64,6 +64,44 @@ theorem symStep_sound {sf wf : Nat} {D : DesignCert} {R : Program}
           (.cons rE (.cons rI (.cons rS .nil))) hb
     · cases hsym
   · cases hsym
+
+/-- A symbolic transition with monotone cut definitions. Correctness for a
+particular certificate is supplied separately by `MemResidual`. -/
+structure Stepper where
+  run : Nat → SymSt → SVal → SVal → SVal → Except String (SVal × SymSt)
+  extends_defs : ∀ {fuel st e i s r st'}, run fuel st e i s = .ok (r, st') → st.Extends st'
+
+def Stepper.ofProgram (R : Program) : Stepper where
+  run := symStepFP R
+  extends_defs := symStepFP_extends
+
+instance : Coe Program Stepper := ⟨Stepper.ofProgram⟩
+
+def symStep (R : Stepper) (fuel : Nat) (st : SymSt) (e i s : SVal) :
+    Except String (SVal × SymSt) :=
+  R.run fuel st e i s
+
+theorem symStep_extends {R : Stepper} {fuel : Nat} {st st' : SymSt} {e i s r : SVal}
+    (h : symStep R fuel st e i s = .ok (r, st')) : st.Extends st' :=
+  R.extends_defs h
+
+/-- A successful symbolic step denotes a specified concrete result under every
+consistent assignment, including assignments extended by subsequent steps. -/
+def StepDenotes (R : Stepper) (e : ClockEdges) (i : RuntimeInput) (s : StateM) (v : Val) : Prop :=
+  ∀ {σ : Asg} {fuel : Nat} {st0 stS stF : SymSt} {sE sI sS sres : SVal},
+    symStep R fuel st0 sE sI sS = .ok (sres, stS) →
+    stF.Consistent σ → stS.Extends stF →
+    SRel σ sE (encEdges e) → SRel σ sI (encInput i) →
+    SRel σ sS (StateM.encStateM s) → SRel σ sres v
+
+theorem symStep_eval {R : Stepper} {e : ClockEdges} {i : RuntimeInput} {s : StateM} {v : Val}
+    (h : StepDenotes R e i s v)
+    {σ : Asg} {fuel : Nat} {st0 stS stF : SymSt} {sE sI sS sres : SVal}
+    (hsym : symStep R fuel st0 sE sI sS = .ok (sres, stS))
+    (hc : stF.Consistent σ) (hx : stS.Extends stF)
+    (rE : SRel σ sE (encEdges e)) (rI : SRel σ sI (encInput i))
+    (rS : SRel σ sS (StateM.encStateM s)) : SRel σ sres v :=
+  h hsym hc hx rE rI rS
 
 /-! ## Taking the result apart -/
 

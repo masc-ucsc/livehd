@@ -133,24 +133,24 @@ structure InvSpec where
   /-- the state layout -/
   L      : Shape
 
-def baseRun (D : DesignCert) (R : Program) (sp : InvSpec) (s0 : StateM) :
+def baseRun (D : DesignCert) (R : Stepper) (sp : InvSpec) (s0 : StateM) :
     Except String (List StepS × SymSt) :=
   unroll D R sp.fuel sp.prop sp.asmOut sp.asmIn sp.inW sp.k 0 (.conc (StateM.encStateM s0))
     ⟨sp.k * sp.inW.length, #[]⟩
 
-def stepRun (D : DesignCert) (R : Program) (sp : InvSpec) : Except String (List StepS × SymSt) :=
+def stepRun (D : DesignCert) (R : Stepper) (sp : InvSpec) : Except String (List StepS × SymSt) :=
   unroll D R sp.fuel sp.prop sp.asmOut sp.asmIn sp.inW (sp.k + 1) (layoutSize sp.L) (stateVar sp.L 0)
     ⟨layoutSize sp.L + (sp.k + 1) * sp.inW.length, #[]⟩
 
 /-- The base obligation, when the run succeeds and its definitions are scoped. -/
-def baseObl (D : DesignCert) (R : Program) (sp : InvSpec) (s0 : StateM) : Option BVLogicalExpr :=
+def baseObl (D : DesignCert) (R : Stepper) (sp : InvSpec) (s0 : StateM) : Option BVLogicalExpr :=
   match baseRun D R sp s0 with
   | .ok (steps, st) => if scopedB st then some (.gate .and (defsE st) (baseBad steps)) else none
   | .error _ => none
 
 /-- The step obligation, when the run succeeds, its definitions are scoped and
 its first step lands in the layout again. -/
-def stepObl (D : DesignCert) (R : Program) (sp : InvSpec) : Option BVLogicalExpr :=
+def stepObl (D : DesignCert) (R : Stepper) (sp : InvSpec) : Option BVLogicalExpr :=
   match stepRun D R sp with
   | .ok (s :: steps, st) =>
       if scopedB st && decide (stateShapeOf s.2.2 = some sp.L) then
@@ -162,7 +162,7 @@ def sideOK (D : DesignCert) (sp : InvSpec) (s0 : StateM) : Bool :=
   decide (0 < sp.k) && stMatchesB sp.L s0 && stateFullOKB D s0 && inputOKB D sp.inW.length
     && flopBoundOKB D sp.L.fws.length && edgesOKB D (edgesAll D) && inAsmRangeOK sp.inW sp.asmIn
 
-def runInvKOf (D : DesignCert) (R : Program) (sp : InvSpec) (s0 : StateM) (pfB pfS : ByteArray) : Bool :=
+def runInvKOf (D : DesignCert) (R : Stepper) (sp : InvSpec) (s0 : StateM) (pfB pfS : ByteArray) : Bool :=
   sideOK D sp s0
     && (match baseObl D R sp s0 with | some φ => checkUnsat φ pfB | none => false)
     && (match stepObl D R sp with | some φ => checkUnsat φ pfS | none => false)
@@ -170,7 +170,7 @@ def runInvKOf (D : DesignCert) (R : Program) (sp : InvSpec) (s0 : StateM) (pfB p
 /-- `runInvKOf` from obligations ALREADY BUILT: a driver that computed
 `baseObl` and `stepObl` (to hand them to the solver) evaluates this unfolding
 over those values instead of re-running the symbolic evaluation. -/
-theorem runInvKOf_of_obls {D : DesignCert} {R : Program} {sp : InvSpec} {s0 : StateM}
+theorem runInvKOf_of_obls {D : DesignCert} {R : Stepper} {sp : InvSpec} {s0 : StateM}
     {pfB pfS : ByteArray} {φB φS : BVLogicalExpr}
     (hs : sideOK D sp s0 = true) (hB : baseObl D R sp s0 = some φB) (hS : stepObl D R sp = some φS)
     (cB : checkUnsat φB pfB = true) (cS : checkUnsat φS pfS = true) :
@@ -180,7 +180,7 @@ theorem runInvKOf_of_obls {D : DesignCert} {R : Program} {sp : InvSpec} {s0 : St
 /-! ## Soundness -/
 
 section
-variable {sf wf : Nat} {D : DesignCert} {R : Program} {sp : InvSpec} {s0 : StateM}
+variable {sf wf : Nat} {D : DesignCert} {R : Stepper} {sp : InvSpec} {s0 : StateM}
   {pfB pfS : ByteArray} {ins : Nat → RuntimeInput}
 
 theorem sideOK_parts (h : sideOK D sp s0 = true) :
@@ -358,7 +358,7 @@ residual `R` obtained from the specializer run. If the checker accepts, then for
 EVERY input sequence of the declared widths, at every cycle `n` whose
 assumptions up to `n` all held, the property output of `interpretDesign`
 (iterated from `denote s0`, every clock firing) is nonzero. -/
-theorem runInvKOf_sound_ref {D : DesignCert} {R : Program} {sp : InvSpec}
+theorem runInvKOf_sound_ref {D : DesignCert} {R : Stepper} {sp : InvSpec}
     {s0 : StateM} {pfB pfS : ByteArray} (hres : MemResidual D R)
     (hA : admitsWB D = true) (hr : runInvKOf D R sp s0 pfB pfS = true)
     (ins : Nat → RuntimeInput) (hins : ∀ n, (ins n).toList.map BV.width = sp.inW) :

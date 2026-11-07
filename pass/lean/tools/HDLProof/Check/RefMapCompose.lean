@@ -104,7 +104,7 @@ def ImplObeys (DI : DesignCert) (sp : RefMapSpec) (s0 : StateM) (ins : Nat → R
   ∀ n, Theory.Spec.ObeysA E (implUpTo DI sp s0 ins n)
 
 section
-variable {DI DS : DesignCert} {RI RS : Program} {sp : RefMapSpec} {s0 : StateM}
+variable {DI DS : DesignCert} {RI RS : Stepper} {sp : RefMapSpec} {s0 : StateM}
   {pfIB pfB : ByteArray} {pfIS pfS : List (List ByteArray)} {ins : Nat → RuntimeInput}
 
 /-- The facts of every cycle from `R0` on, when every cycle meets the assumptions. -/
@@ -293,7 +293,7 @@ same spec (`SameSpec`, spec facts checked once), both runs meeting their assumpt
 starting from the same map state at `R0`, each answered by the same environment from its own
 history. Then on every channel the observed and response words agree on the common prefix, at
 any two cycle counts. -/
-theorem refmap_compose {DIa DIb DS : DesignCert} {RIa RIb RS : Program} {spA spB : RefMapSpec}
+theorem refmap_compose {DIa DIb DS : DesignCert} {RIa RIb RS : Stepper} {spA spB : RefMapSpec}
     {s0A s0B : StateM} {pfIBa pfBa pfIBb pfBb : ByteArray}
     {pfISa pfSa pfISb pfSb : List (List ByteArray)} {pfF : List ByteArray}
     (hrIa : MemResidual DIa RIa) (hAIa : admitsWB DIa = true)
@@ -353,7 +353,7 @@ theorem firesChan_of_free {C : Ports} {c : Nat} :
       · simp [hk]
 
 section
-variable {DI DS : DesignCert} {RI RS : Program} {sp : RefMapSpec} {s0 : StateM}
+variable {DI DS : DesignCert} {RI RS : Stepper} {sp : RefMapSpec} {s0 : StateM}
   {pfIB pfB : ByteArray} {pfIS pfS : List (List ByteArray)} {ins : Nat → RuntimeInput}
 
 /-- A ranked channel's rank obligations hold on the run. -/

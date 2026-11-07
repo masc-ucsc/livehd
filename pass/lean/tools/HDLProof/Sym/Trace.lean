@@ -57,18 +57,18 @@ the one fact every theorem below needs of a residual, and every projection
 supplies it: `of_proj` (the memory interpreter `hwMemAP`), `of_projVar` (its
 `env0`-inlined variant, `MemVariant`) and `of_projF` (the node fold fused into
 its readers, `MemFused`). -/
-def MemResidual (D : DesignCert) (R : Program) : Prop :=
+def ProgramResidual (D : DesignCert) (R : Program) : Prop :=
   ∀ {e : ClockEdges} {i : RuntimeInput} {st : StateM},
     admitsWB D = true → runtimeFullOKB D i st e = true →
     Eval R [] (.call R.entry ([encEdges e, encInput i, StateM.encStateM st].map Term.lit))
       (StateM.encResultM (resM D e i st))
 
-theorem MemResidual.of_proj {sf wf : Nat} {D : DesignCert} {R : Program}
-    (hproj : projectMemDesignAt sf wf D = .ok R) : MemResidual D R :=
+theorem ProgramResidual.of_proj {sf wf : Nat} {D : DesignCert} {R : Program}
+    (hproj : projectMemDesignAt sf wf D = .ok R) : ProgramResidual D R :=
   fun hA hR => resM_residual hproj hA hR
 
-theorem MemResidual.of_projVar {sf wf : Nat} {D : DesignCert} {R : Program}
-    (hproj : MemVariant.projectMemVarDesignAt sf wf D = .ok R) : MemResidual D R := by
+theorem ProgramResidual.of_projVar {sf wf : Nat} {D : DesignCert} {R : Program}
+    (hproj : MemVariant.projectMemVarDesignAt sf wf D = .ok R) : ProgramResidual D R := by
   intro e i st hA hR
   have hev := (resM_spec hA hR).1
   have hR0 : runtimeOKB D i st e = true := by
@@ -81,8 +81,8 @@ theorem MemResidual.of_projVar {sf wf : Nat} {D : DesignCert} {R : Program}
   exact (specializeFour_correct_of MemVariant.hwMemAPVar_entry MemVariant.hwMemAPVar_erases
     hiff hproj _).mpr rfl
 
-theorem MemResidual.of_projF {sf wf : Nat} {D : DesignCert} {R : Program}
-    (hproj : MemFused.projectMemFDesignAt sf wf D = .ok R) : MemResidual D R := by
+theorem ProgramResidual.of_projF {sf wf : Nat} {D : DesignCert} {R : Program}
+    (hproj : MemFused.projectMemFDesignAt sf wf D = .ok R) : ProgramResidual D R := by
   intro e i st hA hR
   have hev := (resM_spec hA hR).1
   have hR0 : runtimeOKB D i st e = true := by
@@ -95,15 +95,15 @@ theorem MemResidual.of_projF {sf wf : Nat} {D : DesignCert} {R : Program}
   exact (specializeFour_correct_of MemFused.hwMemAPF_entry MemFused.hwMemAPF_erases
     hiff hproj _).mpr rfl
 
-/-- `symStep` against ANY value the residual evaluates to. -/
-theorem symStep_eval {R : Program} {e : ClockEdges} {i : RuntimeInput} {stM : StateM} {v : Val}
+/-- `symStepFP` against ANY value the residual evaluates to. -/
+theorem symStepFP_eval {R : Program} {e : ClockEdges} {i : RuntimeInput} {stM : StateM} {v : Val}
     (hev : Eval R [] (.call R.entry ([encEdges e, encInput i, StateM.encStateM stM].map Term.lit)) v)
     {σ : Asg} {fuel : Nat} {st0 stS stF : SymSt} {sE sI sS sres : SVal}
-    (hsym : symStep R fuel st0 sE sI sS = .ok (sres, stS))
+    (hsym : symStepFP R fuel st0 sE sI sS = .ok (sres, stS))
     (hc : stF.Consistent σ) (hx : stS.Extends stF)
     (rE : SRel σ sE (encEdges e)) (rI : SRel σ sI (encInput i))
     (rS : SRel σ sS (StateM.encStateM stM)) : SRel σ sres v := by
-  unfold symStep at hsym
+  unfold symStepFP at hsym
   split at hsym
   · rename_i fd hfd
     split at hsym
@@ -116,6 +116,30 @@ theorem symStep_eval {R : Program} {e : ClockEdges} {i : RuntimeInput} {stM : St
         exact symEval_sound hc _ _ _ _ _ _ hsym hx _ _ (.cons rE (.cons rI (.cons rS .nil))) hb
     · cases hsym
   · cases hsym
+
+/-- Backend-independent one-step soundness on the existing admitted runtime
+fragment. The concrete trace and all checker conclusions remain unchanged. -/
+def MemResidual (D : DesignCert) (R : Stepper) : Prop :=
+  ∀ {e : ClockEdges} {i : RuntimeInput} {st : StateM},
+    admitsWB D = true → runtimeFullOKB D i st e = true →
+    StepDenotes R e i st (StateM.encResultM (resM D e i st))
+
+theorem ProgramResidual.toStepper {D : DesignCert} {R : Program}
+    (h : ProgramResidual D R) : MemResidual D R := by
+  intro e i st hA hR
+  exact symStepFP_eval (h hA hR)
+
+theorem MemResidual.of_proj {sf wf : Nat} {D : DesignCert} {R : Program}
+    (h : projectMemDesignAt sf wf D = .ok R) : MemResidual D R :=
+  ProgramResidual.toStepper (ProgramResidual.of_proj h)
+
+theorem MemResidual.of_projVar {sf wf : Nat} {D : DesignCert} {R : Program}
+    (h : MemVariant.projectMemVarDesignAt sf wf D = .ok R) : MemResidual D R :=
+  ProgramResidual.toStepper (ProgramResidual.of_projVar h)
+
+theorem MemResidual.of_projF {sf wf : Nat} {D : DesignCert} {R : Program}
+    (h : MemFused.projectMemFDesignAt sf wf D = .ok R) : MemResidual D R :=
+  ProgramResidual.toStepper (ProgramResidual.of_projF h)
 
 /-! ## The trace -/
 
